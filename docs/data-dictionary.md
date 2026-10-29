@@ -790,8 +790,9 @@ F1 labels, **append-only**, joined to `deck_impressions` by `impression_id` (sof
 | `detail_expanded` | int | 0/1/NULL — opened player menu / swap sheet / keep-side on the card |
 | `calc_opened` | int | 0/1/NULL — edit-in-calculator (#190) from the card |
 | `acted_at` | str | ISO UTC (server clock) |
+| `user_id` | str, nullable | **G3-e (legal R28.22, 2026-10-29):** the acting session user, written by `save_deck_outcome` from `acting_user_id`; the insert's owner check makes it the impression's owner. Account deletion and export match on it **as well as** on the user's rows and packs, so an outcome stays reachable however its deck's evidence is stored or pruned (deletion counts what only this column reached as `deck_outcomes_by_owner_deleted`). NULL on rows written before it: additive via `_migrate_db`, **no backfill** (those are reached through rows and packs) |
 
-Indexes: `ix_deck_outcomes_impression` on `impression_id`.
+Indexes: `ix_deck_outcomes_impression` on `impression_id`; `ix_deck_outcomes_user` on `user_id` (G3-e). A fresh DB gets it from the declaration; on an existing table it is built **off the boot path** by `scripts/create_outcome_owner_index.py` (Postgres: `CREATE INDEX CONCURRENTLY`, 5 s `lock_timeout`, autocommit; an INVALID leftover is dropped and rebuilt), never in `init_db`: a plain `CREATE INDEX` holds a SHARE lock that blocks every outcome write for its scan. Until it exists, deletion and export find the rows by a scan.
 
 ---
 

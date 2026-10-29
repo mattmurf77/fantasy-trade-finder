@@ -70,6 +70,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Independent offline model scorecard](#independent-offline-model-scorecard)
 - [Local dev](#local-dev)
 - [Deploy (Render)](#deploy-render)
+- [DB connections and background threads across fork](#db-connections-and-background-threads-across-fork)
 - [Pre-ship simulator gate (2026-08-08)](#pre-ship-simulator-gate-2026-08-08)
   - [Risk-tier matrix (operator-owned; deviations are decisions, recorded in the feature's scope block)](#risk-tier-matrix-operator-owned-deviations-are-decisions-recorded-in-the-features-scope-block)
   - [Evidence](#evidence)
@@ -219,6 +220,39 @@ now remain terminal instead of allowing a late worker to revive the job. Ordinar
 identical requests join; input changes/force can revoke old work. No database
 cleanup, arm adjustment or new TestFlight binary is required for this compatible
 backend increment. Physical-device checks and the three-second KPI remain separate.
+
+---
+
+## DB connections and background threads across fork
+
+**Root cause** (found in release-lead's 2026-10-26 deploy watch):
+- Render's default for Python services is `GUNICORN_CMD_ARGS="--preload --access-logfile - --bind=0.0.0.0:10000"`. It does not appear in the service's env list.
+- With `--preload`, gunicorn imports the app in the **master** and then forks the worker. Every boot logs "Database initialised" before "Booting worker".
+- So prod has **always** preloaded, and the import-time background work has probably never run in the serving process. The gunicorn version is not the cause: 26.2.0 still loads in the master only with `preload_app`.
+- **Inherited connections:** pooled DB connections opened during import (init_db, player sync) were inherited by the worker. Master and worker then shared the same SSL sockets, which gave "decryption failed or bad record mac", for example in `load_pending_matches_older_than` inside `cron_realtime_tick`.
+- **Threads that never ran in the worker:** threads do not survive fork.
+  - The import-time `_cleanup_loop` ran **only in the master**. The serving worker never swept its own sessions or trade jobs, while the master's loop issued its DB purges over the shared connections.
+  - The import-time Win Now resume (`start_worker_on_startup`) started `win-now-worker` in the master. The worker inherited `_worker_running=True` with no thread, so `wake_worker` was a no-op until a restart.
+- **Idle drops:** "SSL SYSCALL EOF" on later idle passes was the server dropping idle connections.
+
+**Fix.** It does not depend on the gunicorn version, and uses no gunicorn hooks or conf file.
+- `backend/database.py`:
+  - `os.register_at_fork(after_in_child=_reset_pools_after_fork)` calls `dispose(close=False)` on `engine`, `ingest_engine` and `ro_engine`. A forked child starts with empty pools, and the parent keeps its sockets.
+  - Postgres engines get `pool_recycle=280` and libpq TCP keepalives (`keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=5`) via `_pg_engine_kwargs`. `ro_engine` keeps its read-only `options`.
+  - No `pool_pre_ping`.
+- `backend/server.py`: `_ensure_background_threads()` runs once per pid from a `before_request` hook, so it runs in whichever process serves requests (the gunicorn worker, or `python run.py` on its first request). It:
+  - starts `_cleanup_loop`, unless `FTF_DISABLE_CLEANUP_LOOP=1` (tests);
+  - then starts a short-lived `win-now-resume` thread that resumes queued Win Now work. That always runs, but the function keeps its own `FTF_TEST_MODE` / `FTF_BUILD_MODE` guard. It runs off the request path: inline it held `_bg_threads_lock` for ~49 ms while concurrent first requests waited.
+- `backend/server.py` `_cleanup_loop`: each step (including the in-memory session sweep, `_prune_deck_evidence`, the trade-job sweep, `_evict_trade_page_store` and `_drop_stale_deck_evidence`) has its own `try/except` + `log.exception`, so one failure cannot end that worker's loop.
+- `requirements.txt` pins `gunicorn==26.2.0` to match what Render installs. The pin is harmless and is not the cause (see `living-memory/DEPENDENCIES.md` 2026-10-26).
+
+**What to watch after the deploy:**
+- **No** "decryption failed or bad record mac" and **no** "SSL SYSCALL EOF" for 24 h.
+- "Cleaned up N stale session(s)" and "Trade jobs swept: … evicted" now appear with the **worker's** pid, starting about 5 min after the first request. Before this fix they could only come from the master, where the session and job maps are empty.
+- In-process trade jobs older than `_JOB_RETENTION` (4 h) are now evicted in prod for the first time. A tap after that rebuilds the deck instead of reusing a long-finished job.
+- `_JOB_HARD_TIMEOUT` also applies in prod for the first time. It is 300 s, measured from `started_at` (or a prepared job's last durable adoption progress): a stuck-job backstop, not a latency target (prod pre-gens reach their first owner batch at 60-75 s). Each timed-out job logs one WARNING, `trade-job <id> timed out: <N>s since start, <M> cards published`, next to the "Trade jobs swept" summary.
+- Worker memory should flatten instead of growing with every session since the last restart.
+- Win Now jobs queued before a deploy now resume in the worker after its first request. Previously a job stayed queued until something triggered a restart.
 
 ---
 

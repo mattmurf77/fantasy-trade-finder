@@ -72,6 +72,37 @@ Gates: head-eng's ruling on the c3 list (2026-10-29): `receipts_grades`, `gradin
   - the side-step isolation includes grading.
 - **Sabotages:** 5/5 red (contract-id grades kept, row grades kept, grading skipped, no cutoff, cards kept). T-10 is red on an aliased delete and on a tuple-alias update outside `_delete_deck`.
 
+## 2026-10-29 — G3-e: `deck_outcomes.user_id`; account deletion and export also match an outcome by its owner
+
+Gates: full (an additive schema change). Scope block: `docs/plans/trade-time-to-suggestion/scope-outcome-owner.md`. head-eng's R28.22 routing, item G3-e. Docs: `data-dictionary.md` § `deck_outcomes`, and `api-reference.md`'s `DELETE /api/account` and `GET /api/account/export` rows. No flag, event or client change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The change:** `deck_outcomes.user_id` (nullable) plus `ix_deck_outcomes_user`.
+  - Written by `save_deck_outcome` from `acting_user_id`.
+  - Deletion deletes by it after today's row path, under its own count, `deck_outcomes_by_owner_deleted`. Export adds by it, deduped and in id order.
+  - `scripts/purge_entry_users.py`'s `DELETION_ONLY_KEYS` gains the column.
+  - The index is **never built at boot** (revised after release-lead's question, same day). A plain `CREATE INDEX` blocks every outcome write for its scan. A fresh DB gets it from the declaration. On prod it's built by `scripts/create_outcome_owner_index.py` (`CONCURRENTLY`, 5 s `lock_timeout`, autocommit, an INVALID leftover rebuilt), run once after the deploy on the operator's word. Until then deletion and export scan. No backfill.
+- **Code walk (the gap is latent, not live):** `save_deck_outcome` is the only outcome writer, and its insert requires an owned `deck_impressions` row (`owner.exists()`). So a #535 deck (no rows, no pack) gets no outcome today: the write is dropped as an `unknown` reject. The column makes the owner a property of the outcome itself, whatever later prunes or never wrote its row.
+- **Tests:** `backend/tests/test_deck_outcome_owner.py`, 7:
+  - the write and the session path stamp the owner;
+  - deletion reaches a column-only outcome (an alias's too), with the right counts and the others kept;
+  - export has each row once, in id order;
+  - boot on the old table adds the column and never the index, idempotent, no backfill; a fresh DB gets the index;
+  - the script builds it on an existing table, `--check` writes nothing, idempotent;
+  - the script's Postgres build pinned (`CONCURRENTLY`, autocommit, `lock_timeout`, INVALID dropped).
+- **Sabotages, 16/16 red** (the new file, `test_purge_entry_users.py`, `test_account_deletion_coverage.py`):
+  - a NULL owner;
+  - the deletion: no owner delete; owner delete moved first;
+  - the export: no owner match; no dedupe; no sort;
+  - the migration: no column; the index built at boot; no metadata index;
+  - the script: not `CONCURRENTLY`; not autocommit; no `lock_timeout`; INVALID not dropped; `--check` builds; the wrong column;
+  - the purge key missing.
+- **Suites:** the full backend suite on the first version: 9831 passed, 2 skipped. On the revision: 9832 passed, 2 skipped.
+- **The #523 resync (2026-10-29, after #523 merged as `f7b6ec4d`):**
+  - The export block keeps all three paths: #523's rows plus pack contract ids (chunked), then G3-e's owner select, deduped by id, sorted once.
+  - Added QA's `test_three_paths_one_run` (onboarding-eng's ask): one outcome reachable only by its row, one only by a pack contract id, one only by `user_id`. Each is exported once, all are deleted in one run, and another user's outcome past the pack's `card_count` stays.
+  - 4/4 sabotages fail it: either path dropped from export or from deletion.
+  - The 39 test files touching `deck_outcomes`, retention, purge and deletion coverage: 1555 passed.
+
 ## 2026-10-29 — The model-store hook hardened (#542 QA P3s)
 
 Gates: eval code only (`backend/eval/redaction.py`) plus the runbook. No route, schema, event, flag, knob or engine-module change. The hook stays dark until trades-eng's scrub calls it.
