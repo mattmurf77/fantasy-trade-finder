@@ -316,7 +316,7 @@ Prereq: `brew install pngquant` (the runner falls back to `sips` downscale with 
 A background DELETE in the cleanup loop. It runs once per process, on the first tick, 5 minutes after boot (`server._sweep_orphaned_overhauls_once` → `accounts.delete_orphaned_overhauls`).
 - **What it removes:** team overhauls whose owner account no longer exists, with their offers, roadmaps, attempts and reservations, and child rows whose overhaul is already gone. These are accounts deleted, or entry users purged, before account deletion covered overhauls (#540).
   - An owner is **live** while a `users` row, a durable `sessions` row, or an `accounts` row (as the `acct_` alias or the bound Sleeper id) names their `account_user_id`.
-  - An overhaul is also swept when its owner's `users` row was created more than an hour after it: a new account under a reused id.
+  - An overhaul is also swept when its owner's `users` row was created more than an hour after it, which means a new account under a reused id. The exception is an owner with a durable session or `accounts` row no newer than the overhaul: they were live when they made it, and their `users` row only landed late.
 - **Logs:** a success logs `Deleted N overhaul(s) whose owner account no longer exists, and M row(s) under them`, and logs nothing when there's nothing to do. A failure logs `orphaned-overhaul sweep failed (<ErrorClass>); retried next tick` and tries again next tick. Neither ever carries ids: the failure line logs the class only, because a DB error's text holds the statement's parameters.
 - **If it misbehaves:** set `FTF_DISABLE_CLEANUP_LOOP=1` to stop the whole loop (tests do), or revert #540. Rows already swept are gone. They're data the owner asked to delete, so there's nothing to restore.
 

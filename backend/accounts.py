@@ -745,7 +745,11 @@ def delete_orphaned_overhauls() -> dict[str, int]:
     migrate_board_data deletes the from-id's users row on a bind). Deletion
     removes all of them. An overhaul is also orphaned when its owner's users row
     was created more than _OVERHAUL_RESIGNUP_MARGIN after it (release-lead #540
-    QA P2-2). Returns counts only; callers log only those."""
+    QA P2-2), unless a durable session or accounts row for that owner is no
+    newer than the overhaul: that owner was live when they made it (a users
+    row can land late when its best-effort writes fail; QA re-QA P3). Deletion
+    removes both, so a real re-signup never has one older than its old plans.
+    Returns counts only; callers log only those."""
     ovh, users, sessions, accts = (db.overhauls_table, db.users_table, db.sessions_table,
                                    db.accounts_table)
     counts = {"overhauls": 0, "child_rows": 0}
@@ -756,15 +760,21 @@ def delete_orphaned_overhauls() -> dict[str, int]:
             ~ovh.c.account_user_id.in_(select(ACCOUNT_USER_PREFIX + accts.c.account_id)),
             ~ovh.c.account_user_id.in_(select(accts.c.sleeper_user_id).where(
                 accts.c.sleeper_user_id.isnot(None))))).scalars())
-        for oid, made, joined in conn.execute(
-                select(ovh.c.overhaul_id, ovh.c.created_at, users.c.created_at)
+        for oid, owner, made, joined in conn.execute(
+                select(ovh.c.overhaul_id, ovh.c.account_user_id, ovh.c.created_at, users.c.created_at)
                 .join(users, users.c.sleeper_user_id == ovh.c.account_user_id)
                 .where(users.c.created_at.isnot(None))).all():
-            try:
-                if datetime.fromisoformat(joined) - datetime.fromisoformat(made) > _OVERHAUL_RESIGNUP_MARGIN:
-                    ids.add(oid)
-            except (TypeError, ValueError):
+            made_at, joined_at = _parse_utc(made), _parse_utc(joined)
+            if made_at is None or joined_at is None or joined_at - made_at <= _OVERHAUL_RESIGNUP_MARGIN:
                 continue
+            anchors = list(conn.execute(select(sessions.c.created_at).where(
+                sessions.c.user_id == owner)).scalars()) + list(conn.execute(
+                select(accts.c.created_at).where(
+                    (ACCOUNT_USER_PREFIX + accts.c.account_id == owner)
+                    | (accts.c.sleeper_user_id == owner))).scalars())
+            if any(t is not None and t <= made_at for t in map(_parse_utc, anchors)):
+                continue
+            ids.add(oid)
         ids = sorted(ids)
         for i in range(0, len(ids), 500):
             chunk = ids[i:i + 500]
@@ -779,6 +789,16 @@ def delete_orphaned_overhauls() -> dict[str, int]:
             counts["child_rows"] += conn.execute(delete(tbl).where(
                 ~tbl.c.overhaul_id.in_(select(ovh.c.overhaul_id)))).rowcount or 0
     return counts
+
+
+def _parse_utc(raw):
+    """An ISO timestamp as an aware UTC datetime (a bare date or naive time is
+    UTC); None when it doesn't parse."""
+    try:
+        value = datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def _loads_dict(raw):

@@ -591,6 +591,8 @@ def test_overhauls_deleted_and_offers_naming_the_owner_scrubbed(engine):
         blocked = {"code": "counterparty_asset_not_owned", "offer_id": "of-sleeper", "assets": ["p2"],
                    "message": f"Player Two is no longer on {OWNER_NAME}’s roster, so nothing was sent. "
                               "Find a new trade."}
+        own_side = {"code": "asset_not_owned", "offer_id": "of-sleeper", "assets": ["p1"],
+                    "message": "Player One is no longer on your roster, so nothing was sent. Find a new trade."}
         other_team = {"code": "counterparty_asset_not_owned", "offer_id": "of-unrelated", "assets": ["p9"],
                       "message": "Player Nine is no longer on Another Team’s roster, so nothing was sent. "
                                  "Find a new trade."}
@@ -598,7 +600,7 @@ def test_overhauls_deleted_and_offers_naming_the_owner_scrubbed(engine):
             db.overhaul_roadmaps_table.c.overhaul_id == "ovh-other").values(
             summary_json=json.dumps({"counterparties": [UID, "unrelated", ALIAS, neighbour],
                                      "score": 3}),
-            compat_json=json.dumps({"blockers": [blocked, other_team]})))
+            compat_json=json.dumps({"blockers": [blocked, own_side, other_team]})))
     before = {r["offer_id"]: dict(r) for r in rows(engine, db.overhaul_offers_table)}
     counts = accounts.delete_user_data(UID)
 
@@ -639,12 +641,12 @@ def test_overhauls_deleted_and_offers_naming_the_owner_scrubbed(engine):
     roadmap = rows(engine, db.overhaul_roadmaps_table)[0]
     assert json.loads(roadmap["summary_json"]) == {
         "counterparties": [PLACEHOLDER, "unrelated", PLACEHOLDER, neighbour], "score": 3}
-    # The scrubbed offer's ownership blocker no longer names the team (QA P2-1);
-    # another offer's is untouched.
+    # The scrubbed offer's counterparty-side blocker no longer names the team
+    # (QA P2-1); its own-side blocker and another offer's are untouched.
     assert json.loads(roadmap["compat_json"]) == {"blockers": [
         dict(blocked, message="A player in this trade is no longer on the other manager’s roster, "
                               "so nothing was sent. Find a new trade."),
-        other_team]}
+        own_side, other_team]}
     assert counts["overhaul_roadmaps_counterparty_anonymized"] == 1
     # Nothing that names the owner is left in any overhaul table (the
     # neighbour's own id aside).
@@ -797,12 +799,27 @@ def test_orphaned_overhauls_are_deleted_and_live_owners_kept(engine, caplog):
         conn.execute(insert(db.users_table).values(sleeper_user_id="fresh-user",
                                                    created_at="2026-09-10T00:10:00+00:00"))
         owned("ovh-fresh", "fresh-user", "fresh-user", made)           # the background users-row write
+        # Live although their users row landed late (its best-effort writes
+        # failed): an older durable session, or an older account (QA case 994).
+        late = "2026-10-20T00:00:00+00:00"
+        conn.execute(insert(db.users_table).values(sleeper_user_id="late-row", created_at=late))
+        seed(conn, db.sessions_table, "late-row", user_id="late-row", created_at="2026-09-01T00:00:00+00:00")
+        owned("ovh-late-session", "late-row", "late-row", made)
+        conn.execute(insert(db.accounts_table).values(account_id="early", created_at="2026-09-01"))
+        conn.execute(insert(db.users_table).values(sleeper_user_id=accounts.account_user_id("early"),
+                                                   created_at=late))
+        owned("ovh-late-acct", accounts.account_user_id("early"), accounts.account_user_id("early"), made)
+        # A newer session doesn't vouch for an old plan: a real re-signup.
+        conn.execute(insert(db.users_table).values(sleeper_user_id="resigned-2", created_at=late))
+        seed(conn, db.sessions_table, "resigned-2", user_id="resigned-2", created_at=late)
+        owned("ovh-resigned-2", "resigned-2", "resigned-2", made)
         # Child rows whose overhaul is already gone.
         _children(conn, "ovh-ghost")
-    kept = {"ovh-live", "ovh-live-coowner", "ovh-session-only", "ovh-acct", "ovh-bound", "ovh-fresh"}
+    kept = {"ovh-live", "ovh-live-coowner", "ovh-session-only", "ovh-acct", "ovh-bound", "ovh-fresh",
+            "ovh-late-session", "ovh-late-acct"}
     with caplog.at_level("DEBUG"):
         counts = accounts.delete_orphaned_overhauls()
-    assert counts == {"overhauls": 4, "child_rows": 4 * 4 + 4}
+    assert counts == {"overhauls": 5, "child_rows": 5 * 4 + 4}
     assert {r["overhaul_id"] for r in rows(engine, db.overhauls_table)} == kept
     for tbl in OVERHAUL_CHILDREN:
         assert {r["overhaul_id"] for r in rows(engine, tbl)} == kept, tbl.name
