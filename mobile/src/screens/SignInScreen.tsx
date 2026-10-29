@@ -45,7 +45,7 @@ const TEST_APPLE_SUB = testLaunchArg('FTFTestAppleSub');
 /** Landing platform options (`landing.platform_options`): the entry chip a
  *  non-Sleeper manager selected. Since D-164 the chip's own panel carries the
  *  sessionless entry flow, so this type survives for the ONE remaining Apple
- *  path — the quiet "Already have an account?" re-entry link, whose callbacks
+ *  path — the landing's Continue with Apple button (B1), whose callbacks
  *  carry it so RootNav can land LeaguePicker with the matching link sheet
  *  auto-opened (#130 `espnLink` / its `mflLink` twin). */
 export type EntryPlatformIntent = 'espn' | 'mfl';
@@ -95,8 +95,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   const tryDemoEnabled    = useFlag('landing.try_before_sync');
   const accountsEnabled   = useFlag('auth.accounts');
   // Username-first landing (onboarding plan item 5, ADR-006 account-later):
-  // when on, the Sleeper username field is the primary surface and Apple
-  // demotes to a quiet re-entry link. Flags-off renders the P2.6 layout
+  // when on, the Sleeper username field is the primary surface and Apple is
+  // Apple's own Continue button under the chips (B1). Flags-off renders the P2.6 layout
   // unchanged. NOTE: the demo affordances below still require
   // landing.try_before_sync (the backend demo endpoint 404s without it) —
   // the operator flips that flag together with onboarding.landing.
@@ -422,7 +422,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
     override?: string,
     method: 'sleeper' | 'last_user' = 'sleeper',
   ) {
-    if (busy) return;
+    if (busy || appleBusy) return;
     const rawInput = (override ?? username).trim();
     if (!rawInput) {
       setError('Enter your Sleeper username');
@@ -615,8 +615,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
             ) : null}
             {/* P0-3 — the invited banner. INSIDE styles.form, beside the
                 reauth notice, so it renders in BOTH `landingOn` variants:
-                with onboarding.landing on, the Apple entry demotes to a text
-                link and everything above this changes, so a banner attached
+                with onboarding.landing on, the Apple entry is the Continue
+                button under the chips and everything above this changes, so a banner attached
                 to the Apple block would vanish for exactly the cohort P0-9
                 is testing. */}
             {inviteHeadline ? (
@@ -664,16 +664,18 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                     and Apple's sign-in HIG): once ESPN/MFL sign-in mints
                     accounts, Sign in with Apple must be an equivalent, equally
                     prominent option. So the landing shows Apple's own button
-                    (CONTINUE, white outline on the dark landing), the platform
-                    chips' height, right under them, in place of the old
-                    "Already have an account?" text link. The username field
-                    below stays the primary door. ADR-006 (amended by ux-lead).
+                    (CONTINUE, WHITE: Apple's style for dark backgrounds, a
+                    solid white button), the height of the landing's other
+                    sign-in buttons (44, styles.button), right under the chips,
+                    in place of the old "Already have an account?" text link.
+                    The username field below stays the primary door. ADR-006
+                    (amended by ux-lead).
                     An ESPN/MFL chip selection still rides this flow
                     (handleAppleSignIn's platformIntent). */}
                 <AppleAuthentication.AppleAuthenticationButton
                   testID="signin.apple-continue-btn"
                   buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
                   cornerRadius={radii.sm}
                   style={styles.appleContinueButton}
                   onPress={handleAppleSignIn}
@@ -1068,11 +1070,12 @@ const styles = StyleSheet.create({
   appleBusy: {
     marginBottom: space.md,
   },
-  // B1: the landing's Apple button matches the platform chips' height
-  // (platformChip.minHeight) so it reads as an equal option, not a footnote.
+  // B1: the landing's Apple button is as tall as its other sign-in buttons
+  // (styles.button, 44: Apple's HIG says no smaller than the other sign-in
+  // options, and 44 is the tap minimum).
   appleContinueButton: {
     alignSelf: 'stretch',
-    height: 36,
+    height: 44,
     marginBottom: space.md,
   },
   orDivider: {

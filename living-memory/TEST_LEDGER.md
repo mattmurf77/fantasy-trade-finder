@@ -3,11 +3,12 @@
 Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b1-apple-continue.md`). Mobile only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
 
 - **The change:** the landing's "Already have an account? Sign in with Apple" text link becomes Apple's own button.
-  - CONTINUE, WHITE_OUTLINE, `signin.apple-continue-btn`;
-  - directly under the chip row, at the chips' height;
+  - CONTINUE, WHITE (solid white, Apple's dark-background style; release-lead #507 QA P2-b), `signin.apple-continue-btn`;
+  - directly under the chip row, 44pt like the other sign-in buttons (P2-a);
   - the same `handleAppleSignIn`.
   - The flags-off SIGN_IN button is unchanged.
-- **New guard `check-signin-apple-parity.js`** (6 AST pins). **Sabotage 10/10 red,** restored byte-identical. A comment-only rename, which isn't a real mutation, correctly stays green.
+  - `handleSubmit` returns while an Apple sign-in is in flight (QA P3).
+- **New guard `check-signin-apple-parity.js`** (7 AST pins, hardened after QA: every condition above the button, `appleShown` and the availability effect pinned, height against `styles.button.height`, rendered-text check). **Sabotage 19/19 red** (10 in round 1, 9 after QA, incl. QA's six escapes), restored byte-identical. A comment-only rename, which isn't a real mutation, correctly stays green.
 - **Runs:** see the PR (tsc, the full `check-*.js` loop, testid-lint).
 - **App Review notes:** legal's R28.16 row 7 paragraph covers the four doors, and release-lead owns the submission text.
 

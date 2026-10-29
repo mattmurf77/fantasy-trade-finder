@@ -13,8 +13,9 @@
 **Why.** At launch, ESPN and MFL sign-in create accounts. That makes them third-party login services under App Store guideline 4.8, which asks for Sign in with Apple as an equivalent option. Apple's sign-in guidelines also ask for Apple's own button, at least as prominent as the other options. With `onboarding.landing` on (the launched layout, now baked into first paint by B2), Apple appeared only as the text link "Already have an account? Sign in with Apple". The risk is a rejection at the 11-10 submission.
 
 **What changes** (`mobile/src/screens/SignInScreen.tsx`, the landing layout only):
-- The text link is replaced by Apple's own `AppleAuthenticationButton`: type CONTINUE, style WHITE_OUTLINE on the dark landing, testID `signin.apple-continue-btn`.
-- It's full width, at the platform chips' height (36), directly under the chip row.
+- The text link is replaced by Apple's own `AppleAuthenticationButton`: type CONTINUE, style WHITE (Apple's style for dark backgrounds, a solid white button; release-lead #507 QA P2-b), testID `signin.apple-continue-btn`.
+- It's full width, 44pt tall like the landing's other sign-in buttons (`styles.button`; P2-a; the 36pt chips were too short for the HIG minimum), directly under the chip row.
+- While an Apple sign-in is in flight, the username Continue does nothing (`handleSubmit` returns on `busy || appleBusy`; QA P3).
 - The username field and its Continue button below stay the primary door.
 - The same `handleAppleSignIn`, so an ESPN/MFL chip selection still rides the Apple flow (`platformIntent`), and the busy guard is unchanged.
 - The flags-off layout's own SIGN_IN / WHITE button is untouched.
@@ -27,16 +28,19 @@
 
 ## 3. Evidence scope
 - [x] **Structural guard:** `mobile/tests/check-signin-apple-parity.js` (`npm run test:signin-apple-parity`), via the AST:
-  1. exactly one landing Apple button, CONTINUE / WHITE_OUTLINE, onPress `handleAppleSignIn`;
+  1. exactly one landing Apple button, CONTINUE / WHITE, onPress `handleAppleSignIn`, and every condition above it (not just the nearest) is exactly `landingOn && appleShown`;
   2. right under the chip row with nothing in between, and above the username field;
-  3. its height equals the chips' `minHeight`;
-  4. the old text and testID are gone (comment-stripped);
+  3. its height equals `styles.button.height` (at least 44), and its style carries only alignSelf / height / marginBottom (no margin, position or transform push);
+  4. the old text and testID are gone: no element's rendered text says "Already have an account" (JSX text and string children, joined), and no `signin.apple-link` (comment-stripped);
   5. the flags-off SIGN_IN / WHITE button stays, and there are exactly 2 Apple buttons in the screen;
-  6. `handleAppleSignIn` returns while busy.
+  6. `handleAppleSignIn` returns while busy, and `handleSubmit` returns while an Apple sign-in is in flight;
+  7. nothing else can hide it: `appleShown` is exactly `appleAvailable || TEST_APPLE_SUB !== null`, and the availability effect's early return is exactly `!accountsEnabled || Platform.OS !== 'ios'`.
 
-  **Sabotage 10/10 red,** restored byte-identical:
+  **Sabotage 19/19 red,** restored byte-identical.
+
+  Round 1 (10):
   - SIGN_IN type;
-  - solid white;
+  - solid white (since reversed: WHITE is now the pinned style);
   - a no-op press;
   - an element in between;
   - 30pt;
@@ -44,7 +48,18 @@
   - the flags-off button turned CONTINUE;
   - the busy guard dropped;
   - shown in both layouts;
-  - moved below the username field;
+  - moved below the username field.
+
+  Round 2, after release-lead's #507 QA (9): QA's six escapes, plus the reversions:
+  - an outer flag wrapper around the button;
+  - `appleShown` and-ed with a flag;
+  - a flag in the availability effect's early return;
+  - the text link restored with its copy split across JSX children;
+  - shrunk below the other buttons;
+  - back to the chips' 36;
+  - a `marginTop` push;
+  - WHITE_OUTLINE back;
+  - `handleSubmit` ignoring an Apple sign-in in flight.
 
   A comment-only rename, which isn't a real mutation, correctly stays green.
 - [x] **Code-walk:** with `onboarding.landing` and `landing.platform_options` on, the form renders:
@@ -55,11 +70,12 @@
   5. "Just looking?";
   6. the legal line.
 - [x] **Manual TestFlight checklist (operator, 11-06 build, iPhone signed in to an Apple ID):**
-  1. Fresh install: under the Sleeper · ESPN · MFL chips is a white-outlined "Continue with Apple" button, the same height as the chips, then the username field.
+  1. Fresh install: under the Sleeper · ESPN · MFL chips is a solid white "Continue with Apple" button, the same height as the username Continue button below it, then the username field.
   2. Tap it: Apple's sheet appears, and sign-in completes.
   3. Select the ESPN chip, then tap Continue with Apple: after sign-in, the ESPN link sheet opens.
   4. With VoiceOver on, it reads "Continue with Apple, button".
   5. The text "Already have an account? Sign in with Apple" appears nowhere.
+  6. Tap Continue with Apple, then (while Apple's sheet is up or the sign-in is finishing) tap the username Continue: nothing happens, and only the Apple sign-in completes.
 - `testID`s: `signin.apple-continue-btn` added; `signin.apple-link` removed (only `SignInScreen.tsx` referenced it).
 
 ## 3b. App Review notes (the four sign-in doors)
