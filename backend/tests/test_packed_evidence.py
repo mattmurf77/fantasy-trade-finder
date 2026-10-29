@@ -933,6 +933,36 @@ def test_p2_1_the_first_delivery_wins_and_ghosts_stay_null(deferred, prepared_ok
     assert all(r["delivered_at"] is None for r in rows(engine) if r["is_ghost"])
 
 
+def test_the_live_stamp_reports_a_deck_with_no_evidence(deferred, prepared_ok):
+    """A delivery of a deck with no row at all (and so, on this path, no pack)
+    says so; one with rows, or one delivering nothing, doesn't."""
+    client, engine, _ = deferred
+    job_id, _ids = live_deck(60)
+    status(client, job_id, 0)
+    sent = [r["impression_id"] for r in rows(engine) if not r["is_ghost"]][:3]
+    at = "2026-10-27T00:00:00+00:00"
+    assert db_module.stamp_live_deliveries(job_id, UID, LEAGUE, sent, at) is True
+    assert db_module.stamp_live_deliveries("no-such-deck", UID, LEAGUE, ["no-such-deck:0"], at) is False
+    assert db_module.stamp_live_deliveries("no-such-deck", UID, LEAGUE, [], at) is True
+
+
+@pytest.mark.parametrize("has_rows", [True, False])
+def test_a_live_stamp_on_a_deck_with_no_evidence_is_logged(monkeypatch, caplog, has_rows):
+    """The count for the read: an ERROR line per such delivery, with the
+    card count and no user id."""
+    monkeypatch.setattr(db_module, "stamp_live_deliveries", lambda *a, **k: has_rows)
+    with caplog.at_level("ERROR"):
+        server._deck_live_stamp("deck-x", "u-secret", "lg", {"deck-x:0", "deck-x:1"}, {},
+                                "2026-10-27T00:00:00+00:00")
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    if has_rows:
+        assert not errors
+    else:
+        assert errors == ["deck-evidence deck-x: 2 delivered cards of a deck with no evidence "
+                          "(no rows, no pack); eval can't see them"]
+        assert "u-secret" not in errors[0]
+
+
 def test_p2_1_v5_reads_a_live_decks_delivered_positions_from_its_stamps(deferred, prepared_ok):
     """Under eval v5 (#417): the delivered positions are the pages sent, the
     W0 card removed."""
