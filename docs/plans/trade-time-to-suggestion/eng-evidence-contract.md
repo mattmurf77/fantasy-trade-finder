@@ -29,13 +29,13 @@
 | `FROZEN_PROVENANCE_KEYS` | `taste_attrs` | Frozen with the block but read by no scorer: the source of the frozen taste matches |
 | `FROZEN_INPUT_KEYS` | `COMPACT_KEYS` ∪ `INJECTED_CARD_INPUTS` ∪ `FROZEN_PROVENANCE_KEYS` (18 keys) | What a narrow or packed card's frozen block must hold |
 | `IDENTITY_KEYS` | `impression_id`, `deck_job_id`, `user_id`, `league_id`, `trade_hash`, `archetype`, `shape_bucket`, `served_at` | Logged columns `card_dict` always merges in. Any scorer may read them |
-| `LOGGED_POLICY_KEYS` | `card_index`, `propensity`, `base_score`, `final_score` | Encode the logged policy. Readable only where `PERMITTED_LOGGED` grants them |
+| `LOGGED_POLICY_KEYS` | `card_index`, `position`, `propensity`, `base_score`, `final_score` | Encode the logged policy. Readable only where `PERMITTED_LOGGED` grants them |
 
 `PERMITTED_LOGGED`, per registered scorer:
 
 | Scorer | Logged columns it may read |
 |---|---|
-| `logged` | `card_index` |
+| `logged` | `position` (the displayed position, models-lead F2; the reader rebuilds it, so the pack never carries it) |
 | `production` | `final_score`, `base_score` |
 | `base_score` | `base_score` |
 | `random` | none |
@@ -276,7 +276,7 @@ Condition R2.2 (c), in `backend/eval/evidence_pack.py`:
   - **`served_before = 0`** (W0, never delivered): the card is **removed from the deck for eval**. When present, as a packed card (the blob holds every built card) or a `first30` row with `delivered_at` NULL, it is dropped; it is never scored, never counted in exposure and never ranked. Its index **explains the gap** there. Withdrawal is policy-independent (ownership facts at serve time), so any policy would have faced it and removing it is unbiased. `LoggedDeck.withdrawn_removed` counts them, and `EvalRun.withdrawn_removed_cards` sums them over the decks replay includes; it is in the report and the run record, never an exclusion and never silent. **By reason** (B1 follow-up, B4): `LoggedDeck.withdrawn_removed_by_reason` splits the same removals by `reason`, as a sorted dict, and `EvalRun.withdrawn_removed_by_reason` sums it over the same decks (those replay includes). `withdrawn_removed_cards` stays the total. Both are in the report and the run record.
   - **`served_before = 1`** (delivered, then withdrawn): no effect. The card keeps its position and outcomes. With no card at its index, the gap is unexplained (`incomplete_deck`).
   - **Ghost rows** are ignored by every withdrawal rule: a ghost's `card_index` is a would-have-been rank that can equal a served index.
-  - **Displayed position:** `LoggedCard.position` is the card's dense rank among the deck's kept non-ghost cards in `card_index` order, i.e. `card_index` minus the W0 indexes below it; with no withdrawals it is `card_index`. e(k) (`replay.exposure_curve`), the logged-position term of the IPS weight and value_model's training-only `position` feature read it: the user saw the displayed slot, and e(k) models P(viewed | the slot shown). Candidate ranks are computed over the reduced deck. `card_dict` doesn't carry it (scorers must not read served position). `deliveries` boundaries stay in build-index space.
+  - **Displayed position:** `LoggedCard.position` is the card's dense rank among the deck's kept non-ghost cards in `card_index` order, i.e. `card_index` minus the W0 indexes below it; with no withdrawals it is `card_index`. e(k) (`replay.exposure_curve`), the logged-position term of the IPS weight and value_model's training-only `position` feature read it: the user saw the displayed slot, and e(k) models P(viewed | the slot shown). Candidate ranks are computed over the reduced deck. `card_dict` carries it as the logged key `position`, which only the `logged` scorer may read (`PERMITTED_LOGGED`, models-lead F2); no candidate scorer may read served position. `deliveries` boundaries stay in build-index space.
   - **The equivalence** (models-lead's test): a deck with recorded withdrawals replays exactly as if the withdrawn, never-delivered cards had never been generated. That covers the estimates, `exposure_curve`, calibration and training rows, for row and packed decks, with the withdrawn cards absent or present.
 - **Upgrade misses, cause-coded** (models-lead U4-R2): a pack's run metadata may carry `upgrade_misses`, the writer's count of viewed cards that never got a full row, as a dict of cause → int.
   - **`other` is the only cause that must be 0.** Every other key is a named cause: `restart_split` and `evicted_split` (U4-R1 as reworded in addendum C (c4), quoted under U4 above). The reader takes whatever keys appear.
