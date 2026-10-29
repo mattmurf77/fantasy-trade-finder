@@ -22,7 +22,8 @@
 //       CTA, as design-lead's numbered list (2026-10-28): a TickLabel
 //       "IN SLEEPER"; an always-rendered league row (leagueName, else the
 //       fallback); search (row.name); add; a drop row (the selected drop,
-//       else "pick a player above", only for a pick or openSlots === 0); a
+//       else "pick a player above", or "Drop a player to make room" when
+//       candidates.length === 0; only for a pick or openSlots === 0); a
 //       bid row gated on faab and a bid; rows numbered with no gap; then
 //       the copy disclosure as the last line. The CTA passes
 //       clipboardText: row.name                                            [AST]
@@ -399,7 +400,8 @@ for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
       JSON.stringify(renderedIn(row.search)));
   }
   // 4. Drop: the selected drop's name; "pick a player above" when the
-  //    roster is full and none is picked.
+  //    roster is full and none is picked; "Drop a player to make room" when
+  //    the drop list is empty too (design-lead, 2026-10-28: nothing above).
   if (row.drop) {
     // The drop name, inline or through a const that looks dropId up in candidates.
     const dropConsts = Object.keys(decl).filter((k) =>
@@ -411,11 +413,41 @@ for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
       'S8 the drop row renders the selected drop (dropId looked up in candidates)',
       `drop consts: ${dropConsts.join(', ') || 'none'}; rendered: ${JSON.stringify(rendered)}`,
     );
-    const pick = conditionals(row.drop).find((c) => isDrop(c.condition.getText(sf)) && /pick a player above/.test(strLit(c.whenFalse) || ''));
+    // The no-pick branch is a string, or a conditional whose leaves are strings.
+    const PICK_ABOVE = /pick a player above/;
+    const MAKE_ROOM = 'Drop a player to make room';
+    const leaves = (n) => {
+      n = unparen(n);
+      return ts.isConditionalExpression(n) ? [...leaves(n.whenTrue), ...leaves(n.whenFalse)] : [strLit(n)];
+    };
+    const pick = conditionals(row.drop).find((c) => isDrop(c.condition.getText(sf)) && leaves(c.whenFalse).some((s) => PICK_ABOVE.test(s || '')));
     assert(
       !!pick && /\bopenSlots\s*===\s*0\b/.test(gateOf(row.drop, block).expanded),
       'S8 the drop row shows "pick a player above" when no drop is picked, and renders only for a pick or openSlots === 0',
       `gate: ${gateOf(row.drop, block).expanded}`,
+    );
+    const literals = [];
+    walk(row.drop, (n) => { if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) literals.push(n.text); });
+    assert(literals.filter((s) => s === MAKE_ROOM).length === 1, `S8 the drop row carries "${MAKE_ROOM}" once`,
+      JSON.stringify(literals));
+    // The empty-list split: `candidates.length === 0` (or an equivalent,
+    // inline or one const deep) picks MAKE_ROOM; the other branch keeps
+    // "pick a player above".
+    const EMPTY = /^(candidates\.length(===|==)0|0(===|==)candidates\.length|!candidates\.length|candidates\.length<1)$/;
+    const NON_EMPTY = /^(candidates\.length(!==|!=|>)0|candidates\.length>=1|!!candidates\.length|candidates\.length)$/;
+    const split = pick ? unparen(pick.whenFalse) : null;
+    let whenEmpty = null;
+    let otherwise = null;
+    if (split && ts.isConditionalExpression(split)) {
+      const t = squash(unparen(split.condition).getText(sf));
+      const c = Object.prototype.hasOwnProperty.call(decl, t) ? squash(decl[t]) : t;
+      if (EMPTY.test(c)) [whenEmpty, otherwise] = [split.whenTrue, split.whenFalse];
+      else if (NON_EMPTY.test(c)) [whenEmpty, otherwise] = [split.whenFalse, split.whenTrue];
+    }
+    assert(
+      !!whenEmpty && strLit(whenEmpty) === MAKE_ROOM && PICK_ABOVE.test(strLit(otherwise) || ''),
+      `S8 with no drop picked, the drop row shows "${MAKE_ROOM}" when candidates.length === 0, else "pick a player above"`,
+      split ? split.getText(sf).slice(0, 240) : 'no conditional on the drop in the row',
     );
   }
   // 5. Bid: FAAB leagues, once a bid is entered.

@@ -358,6 +358,10 @@ export default function ClaimSheet({
                         {'Drop '}
                         <ChalkText style={sheetStyles.stepsEm}>{dropName}</ChalkText>
                       </>
+                    ) : candidates.length === 0 ? (
+                      // Full roster, nothing listed above (design-lead, 2026-10-28).
+                      // COPY: empty-drop-list fallback, pending marketing.
+                      'Drop a player to make room'
                     ) : (
                       'Drop: pick a player above'
                     )}
