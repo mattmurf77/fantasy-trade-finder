@@ -82,9 +82,14 @@ Whether the cap covers them is head-eng's call before the flip. Legal: "if eng l
 - Then pack-less decks through `ix_deck_impressions_served`, read in index order with a bounded LIMIT, never a DISTINCT over the backlog.
 - A packed deck is only ever taken through its pack, so it always goes whole.
 
+**Account rights (#523 QA P1-1, flip-blocking, fixed here):**
+- Account export and deletion (`accounts.py`, onboarding-eng's area) found a user's `deck_outcomes` only through their `deck_impressions` rows.
+- Once the full-row bound deletes a packed deck's rows, its outcomes (kept by contract id until the cap) would be exported never and deleted never.
+- Both, and the `suggestion_trade_links` unlinking, now also match the user's packs' contract ids (`database.deck_pack_contract_ids`). That also covers a packed card's outcome that never had a row (E-b4). onboarding-eng was told.
+
 ## 3. Evidence scope
 
-- [x] **Unit tests:** `backend/tests/test_deck_evidence_retention.py`, 29 tests.
+- [x] **Unit tests:** `backend/tests/test_deck_evidence_retention.py`, 41 tests (29 before #523 QA).
   - **What never deletes:** off at 0, full rows included; both 56-day floors, refused and logged.
   - **The cap:**
     - every store of a packed and of a pack-less deck goes at once, including a like and a pass reason on a packed card with no row;
@@ -103,7 +108,7 @@ Whether the cap covers them is head-eng's call before the flip. Legal: "if eng l
   - **The loop step:** reads both knobs, its defaults match `model_config`'s, never raises, and is wired into `_cleanup_loop`.
   - **The index:** pack-less decks wait for it (logged once); it's declared and never built by `init_db`.
   - **The script:** builds the index, is idempotent, and `--check` writes nothing.
-- [x] **Sabotages:** all 24 mutations turn the suite red (TEST_LEDGER).
+- [x] **Sabotages:** all 43 mutations turn the suite red: QA's 40 (my 24, their X1–X5, re-expressed where the code moved) and 3 on the account paths (TEST_LEDGER).
 - [x] **WAIVED, the structural guard, code-walk and TestFlight checklist:** backend-only, no user-visible surface, and dark by default.
 - `testID`s: none.
 

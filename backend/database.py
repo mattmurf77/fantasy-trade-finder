@@ -7136,8 +7136,11 @@ def load_deck_diagnostics(impression_id: str, user_id: str) -> dict | None:
 DECK_EVIDENCE_RETENTION_FLOOR_DAYS = 56
 _EVIDENCE_PRUNE_ROWS_PER_DECK = 150   # rows read per wanted deck (a deck has ~35-130)
 _FULL_ROW_PRUNE_PACKS = 500            # packs whose full rows go in one statement
-_served_index_ready = False            # ix_deck_impressions_served seen (then never re-read)
+_served_index_ready = False            # ix_deck_impressions_served seen at the last check
+_served_index_checked = 0.0            # monotonic time of that check
+_SERVED_INDEX_RECHECK_S = 3600.0       # a seen index is checked again hourly (#523 QA P3-5)
 _served_index_warned = False
+_bound_warned: set = set()             # (knob, value) pairs already warned about
 # The full-row pass's place in the packs' (served_at, run_id) order: every
 # pack at or before it, inside the 365-day cap, has had its full rows deleted.
 # In memory only: a restart walks again from the cap, in bounded chunks.
@@ -7146,29 +7149,43 @@ _full_row_cursor: tuple[str, str] | None = None
 
 def _deck_impressions_served_index_ready() -> bool:
     """Whether ix_deck_impressions_served exists: without it the pack-less
-    scan would read the whole table, so the prune skips it (logged once)."""
-    global _served_index_ready, _served_index_warned
-    if not _served_index_ready:
+    scan would read the whole table, so the prune skips it (logged once, and
+    again if a seen index goes missing). Missing, it's looked for every call;
+    seen, it's checked again hourly, so a dropped index stops the scan."""
+    global _served_index_ready, _served_index_checked, _served_index_warned
+    now = time.monotonic()
+    if not _served_index_ready or now - _served_index_checked >= _SERVED_INDEX_RECHECK_S:
         from sqlalchemy import inspect as _inspect
         names = {ix.get("name") for ix in _inspect(engine).get_indexes("deck_impressions")}
-        _served_index_ready = "ix_deck_impressions_served" in names
-        if not _served_index_ready and not _served_index_warned:
+        ready = "ix_deck_impressions_served" in names
+        if not ready and (_served_index_ready or not _served_index_warned):
             _served_index_warned = True
             log.warning("deck-evidence retention: pack-less decks wait for "
                         "ix_deck_impressions_served (scripts/create_evidence_retention_index.py)")
+        _served_index_ready, _served_index_checked = ready, now
     return _served_index_ready
 
 
+DECK_EVIDENCE_RETENTION_MAX_DAYS = 36500   # past this a bound is a typo, not a policy
+
+
 def _bound_ok(name: str, days) -> bool:
-    """A retention bound in force: set (> 0) and not under the floor (refused,
-    logged)."""
+    """A retention bound in force: set (> 0), finite, at most
+    DECK_EVIDENCE_RETENTION_MAX_DAYS and not under the floor. A refused value
+    is logged once per value, not every tick (#523 QA P3-3)."""
     if not days or days <= 0:
         return False
-    if days < DECK_EVIDENCE_RETENTION_FLOOR_DAYS:
-        log.warning("deck-evidence retention: %s %s days is under the %d-day floor; "
-                    "nothing deleted under it", name, days, DECK_EVIDENCE_RETENTION_FLOOR_DAYS)
-        return False
-    return True
+    if not math.isfinite(days) or days > DECK_EVIDENCE_RETENTION_MAX_DAYS:
+        why = f"isn't a finite count of days up to {DECK_EVIDENCE_RETENTION_MAX_DAYS}"
+    elif days < DECK_EVIDENCE_RETENTION_FLOOR_DAYS:
+        why = f"is under the {DECK_EVIDENCE_RETENTION_FLOOR_DAYS}-day floor"
+    else:
+        return True
+    if (name, repr(days)) not in _bound_warned:
+        _bound_warned.add((name, repr(days)))
+        log.warning("deck-evidence retention: %s %s days %s; nothing deleted under it",
+                    name, days, why)
+    return False
 
 
 def _expired_decks(cutoff: str, limit: int) -> dict[str, tuple[str, str, int]]:
@@ -7198,6 +7215,18 @@ def _expired_decks(cutoff: str, limit: int) -> dict[str, tuple[str, str, int]]:
                     if job not in packed and len(decks) < limit:
                         decks[job] = owner
     return decks
+
+
+def deck_pack_contract_ids(conn, user_ids) -> list[str]:
+    """Every contract id ("<deck_job_id>:<k>", k < card_count; R4.2 U2) of the
+    users' packed decks, on the caller's connection. A packed card's outcomes
+    are keyed by it whether or not the card has a row, and the evidence
+    prune's full-row bound deletes the rows long before the pack, so account
+    export and deletion find outcomes through these too (#523 QA P1-1)."""
+    p = deck_evidence_packs_table
+    return [f"{run_id}:{k}" for run_id, n in conn.execute(
+        select(p.c.run_id, p.c.card_count).where(p.c.user_id.in_(list(user_ids))))
+        for k in range(n or 0)]
 
 
 def _delete_deck(conn, deck_job_id: str, user_id: str, league_id: str,
@@ -7235,12 +7264,18 @@ def _delete_deck(conn, deck_job_id: str, user_id: str, league_id: str,
 
 def _delete_old_trade_impressions(cutoff: str, limit: int) -> int:
     """Legacy trade_impressions (still written beside deck_impressions) past
-    the cap: the oldest `limit` ids, as rows are inserted in shown_at order,
-    so no index on shown_at is needed."""
+    the cap, among the oldest `limit` ids: rows are inserted in shown_at order,
+    so no index on shown_at is needed. An id bound, a primary-key range scan;
+    an IN over a LIMIT subquery planned as a semi join over the whole table on
+    Postgres every tick (#523 QA P2-1)."""
     t = trade_impressions_table
     with engine.begin() as conn:
-        oldest = select(t.c.id).order_by(t.c.id).limit(limit).scalar_subquery()
-        return conn.execute(delete(t).where(t.c.id.in_(oldest), t.c.shown_at < cutoff)
+        upper = conn.execute(select(t.c.id).order_by(t.c.id).offset(limit - 1).limit(1)).scalar()
+        if upper is None:                     # fewer rows than the batch: all of them
+            upper = conn.execute(select(func.max(t.c.id))).scalar()
+        if upper is None:
+            return 0
+        return conn.execute(delete(t).where(t.c.id <= upper, t.c.shown_at < cutoff)
                             ).rowcount or 0
 
 
@@ -7317,17 +7352,20 @@ def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks:
     limit = max(1, min(batch_decks, 1000))
     decks = _expired_decks(cap, limit)
     counts: dict[str, int] = {}
+    done = 0
     for deck_job_id, (user_id, league_id, card_count) in decks.items():
         try:
             with engine.begin() as conn:
-                for name, n in _delete_deck(conn, deck_job_id, user_id, league_id,
-                                            card_count).items():
-                    counts[name] = counts.get(name, 0) + n
+                deleted = _delete_deck(conn, deck_job_id, user_id, league_id, card_count)
         except Exception:
             log.warning("deck-evidence retention: deck %s not deleted; retried next tick",
                         deck_job_id, exc_info=True)
-    if decks:
-        counts["decks"] = len(decks)
+            continue
+        done += 1
+        for name, n in deleted.items():
+            counts[name] = counts.get(name, 0) + n
+    if done:
+        counts["decks"] = done
     for name, step, batch in (
             ("trade_impressions", _delete_old_trade_impressions,
              limit * _EVIDENCE_PRUNE_ROWS_PER_DECK),
@@ -7340,8 +7378,8 @@ def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks:
                         exc_info=True)
         if n:
             counts[name] = n
-    if full_row_days and full_row_days < days and _bound_ok("deck_evidence_full_row_days",
-                                                            full_row_days):
+    if full_row_days and _bound_ok("deck_evidence_full_row_days",
+                                   full_row_days) and full_row_days < days:
         rows = _delete_packed_full_rows((now - timedelta(days=full_row_days)).isoformat(),
                                         cap, full_row_chunks)
         if rows:

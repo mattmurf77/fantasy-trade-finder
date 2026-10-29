@@ -1,3 +1,29 @@
+## 2026-10-29 — #523 QA: account rights reach pruned decks' outcomes; id-bounded legacy delete; P3s
+
+Gates: release-lead's #523 QA (GO-with-notes to merge dark; "fix two things in this PR"). Same PR, still dark (cap 0). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P1-1, flip-blocking:** account export and deletion found a user's `deck_outcomes` only through their `deck_impressions` rows. After the full-row bound deletes a packed deck's rows, its outcomes (kept by contract id) were exported never (0 of 24) and deleted never (24 left forever).
+  - Now `accounts` also matches the user's packs' contract ids (`database.deck_pack_contract_ids`, in 500-id chunks), for outcomes, the export and the `suggestion_trade_links` unlinking.
+  - This also closes E-b4: a packed card's outcome that never had a row.
+- **P2-1:** `_delete_old_trade_impressions` used an IN over a LIMIT subquery, a Postgres semi join over the whole table every tick (2.9 s cold at 2M rows). It now takes an id bound, `id <= the limit-th id (else max) AND shown_at < cap`, a primary-key range.
+- **P3s:**
+  - tests for exact ids (decks `abc`, `abc:1`, `abcd`) and for the first-delivery clock (re-served rows), packed and pack-less;
+  - `counts["decks"]` counts only decks deleted;
+  - a non-finite or over-36,500 bound is refused, and every refusal is logged once per value, not every tick (NaN, inf and 1e9 raised a traceback each tick);
+  - the served index is checked again hourly, so a dropped index stops the pack-less scan.
+  - A full-row knob is validated before it's compared with the cap.
+- **Tests:** `test_deck_evidence_retention.py` 41 (was 29):
+  - export and deletion with and without a full-row prune;
+  - `deck_pack_contract_ids`;
+  - exact ids; the clock ×2; the id-bounded batches;
+  - refused bounds ×4; the index recheck.
+- **Sabotages, 43/43 red:**
+  - QA's list: my 24 and their X1a/b, X2a/b/c, X3a/b, X4, X5; T01, T15, T16 and X4 re-expressed where the code moved;
+  - 7 on the fixes;
+  - 3 on `accounts.py`: deletion, links and export by rows only.
+- **QA's files on SQLite:** `test_qa523_rights` documented the gap, and its "pruned" asserts now flip. `test_qa523_correct` passes 13/14; the one red asserts the old "decks counts attempts", which P3-2 changed.
+- **Suites:** retention, the four account suites, model_config log, packed and deferred evidence, digest, eval pack reader: 406 passed.
+
 ## 2026-10-28 — Deck-evidence retention prune, legal R28.20 (iii) final, dark until the cap is set
 
 **Gates:**

@@ -47,6 +47,10 @@ def db(monkeypatch):
     metadata.create_all(engine)
     monkeypatch.setattr(db_module, "engine", engine)
     monkeypatch.setattr(db_module, "_full_row_cursor", None)
+    monkeypatch.setattr(db_module, "_bound_warned", set())
+    monkeypatch.setattr(db_module, "_served_index_ready", False)
+    monkeypatch.setattr(db_module, "_served_index_checked", 0.0)
+    monkeypatch.setattr(db_module, "_served_index_warned", False)
     return engine
 
 
@@ -284,7 +288,7 @@ def test_a_deck_whose_delete_fails_is_left_whole_for_the_next_tick(db, monkeypat
     monkeypatch.setattr(db, "begin", begin)
     with caplog.at_level("WARNING"):
         got = purge(full_row_days=0)
-    assert got["decks"] == 2 and got["deck_impressions"] == 4
+    assert got["decks"] == 1 and got["deck_impressions"] == 4   # only the deck that went
     assert sorted([counts(db, "bad"), counts(db, "good")], key=lambda c: c["imp"]) == [GONE, WHOLE]
     assert any("not deleted; retried next tick" in r.getMessage() for r in caplog.records)
 
@@ -454,3 +458,113 @@ def test_the_script_builds_it_on_an_existing_table_and_check_writes_nothing(tmp_
     assert script.main(["--check"]) == 0 and script.state(engine) == "missing"
     assert script.main([]) == 0 and script.state(engine) == "valid"
     assert script.build(engine) == "valid"                # idempotent
+
+
+# ── #523 QA P1-1: account rights reach outcomes whose rows the prune deleted ──
+
+@pytest.mark.parametrize("pruned", [False, True])
+def test_export_and_deletion_reach_a_packed_decks_outcomes_after_its_rows_go(db, pruned):
+    """The full-row bound deletes a packed deck's rows and keeps its outcomes
+    by contract id. The viewer's export still carries every one of them, and
+    deleting the account removes them and unlinks the executed-trade links
+    (accounts, through deck_pack_contract_ids), so none is kept forever."""
+    import backend.accounts as accounts
+    from backend.database import suggestion_trade_links_table as links
+    deck(db, "mine", 120)                      # outcomes: a viewed (row) and a like (row-less)
+    deck(db, "theirs", 120, user="u2")
+    with db.begin() as conn:
+        conn.execute(insert(links).values(transaction_id="t1", league_id="lg", was_recommended=1,
+                                          matched_impression_id="mine:5",
+                                          computed_at=iso(0)))
+    if pruned:
+        assert purge()["full_rows"] == 8
+        assert counts(db, "mine") == ROWS_GONE
+    o = deck_outcomes_table.c.impression_id
+    exported = accounts.export_user_data("u1")["tables"]["deck_outcomes"]
+    assert sorted(r["impression_id"] for r in exported) == ["mine:0", "mine:5"]
+    accounts._delete_user_data("u1")
+    with db.connect() as conn:
+        left = sorted(conn.execute(select(o)).scalars())
+        link = conn.execute(select(links.c.matched_impression_id)).scalar()
+    assert left == ["theirs:0", "theirs:5"] and link is None
+
+
+def test_deck_pack_contract_ids_lists_every_card_of_the_users_packs(db):
+    deck(db, "a", 120)
+    deck(db, "b", 120, packed=False)
+    deck(db, "c", 120, user="u2")
+    with db.connect() as conn:
+        got = db_module.deck_pack_contract_ids(conn, {"u1"})
+    assert got == [f"a:{k}" for k in range(6)]          # card_count = n + 3
+
+
+# ── #523 QA P2/P3s ────────────────────────────────────────────────────────────
+
+def test_exact_contract_ids_never_reach_a_deck_whose_id_extends_this_ones(db):
+    """Deck "abc"'s card 1 is "abc:1", which is also deck "abc:1"'s prefix: a
+    LIKE or a string range would take "abc:1:0" too. Exact ids never do."""
+    deck(db, "abc", 400)
+    deck(db, "abc:1", 30)
+    deck(db, "abcd", 30)
+    o, r = deck_outcomes_table.c.impression_id, trade_pass_reasons_table.c.impression_id
+
+    def left(col, table):
+        with db.connect() as conn:
+            return sorted(conn.execute(select(col).select_from(table)).scalars())
+    purge(full_row_days=0)
+    assert left(o, deck_outcomes_table) == left(r, trade_pass_reasons_table) == [
+        "abc:1:0", "abc:1:5", "abcd:0", "abcd:5"]
+
+
+@pytest.mark.parametrize("packed", [True, False])
+def test_the_cap_is_the_first_delivery_not_the_last(db, packed):
+    """A deck first delivered 400 days ago and served again 30 days ago goes
+    at the 365-day cap: the clock is its first delivery."""
+    deck(db, "old", 400, packed=packed)
+    with db.begin() as conn:
+        conn.execute(deck_impressions_table.update()
+                     .where(deck_impressions_table.c.deck_job_id == "old")
+                     .values(delivered_at=iso(30)))
+    purge(full_row_days=0)
+    assert counts(db, "old") == GONE
+
+
+def test_legacy_trade_impressions_go_by_an_id_bound_in_batches(db):
+    """Only past the cap, and among the oldest `limit` ids; a table smaller
+    than the batch is read whole."""
+    with db.begin() as conn:
+        conn.execute(insert(trade_impressions_table), [
+            {"user_id": "u1", "league_id": "lg", "give_player_ids": "[]",
+             "receive_player_ids": "[]", "shown_at": iso(d)} for d in (500, 450, 400, 30, 380)])
+    assert db_module._delete_old_trade_impressions(iso(365), 2) == 2    # ids 1, 2
+    assert db_module._delete_old_trade_impressions(iso(365), 2) == 1    # id 3 (4 is recent)
+    assert db_module._delete_old_trade_impressions(iso(365), 100) == 1  # id 5 (380 days)
+    with db.connect() as conn:
+        assert list(conn.execute(select(trade_impressions_table.c.shown_at)).scalars()) == [iso(30)]
+    assert db_module._delete_old_trade_impressions(iso(365), 100) == 0
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), 1e9, 30.0])
+def test_a_refused_bound_is_logged_once_and_never_raises(db, caplog, bad):
+    deck(db, "old", 400)
+    with caplog.at_level("WARNING"):
+        for _ in range(3):
+            assert purge(days=bad) == {}
+            purge(full_row_days=bad)                      # the cap still runs
+    assert counts(db, "old") == GONE
+    refusals = [r.getMessage() for r in caplog.records if "nothing deleted under it" in r.getMessage()]
+    assert len(refusals) == 2                             # once per knob, not every tick
+    assert all(r.levelname == "WARNING" for r in caplog.records)
+
+
+def test_a_dropped_index_is_noticed_at_the_next_check(db, monkeypatch, caplog):
+    """A seen index is checked again after _SERVED_INDEX_RECHECK_S: dropped,
+    the pack-less scan stops (and says so)."""
+    assert db_module._deck_impressions_served_index_ready() is True
+    with db.begin() as conn:
+        conn.execute(text("DROP INDEX ix_deck_impressions_served"))
+    assert db_module._deck_impressions_served_index_ready() is True        # cached within the hour
+    monkeypatch.setattr(db_module, "_served_index_checked", -db_module._SERVED_INDEX_RECHECK_S)
+    with caplog.at_level("WARNING"):
+        assert db_module._deck_impressions_served_index_ready() is False
+    assert any("wait for ix_deck_impressions_served" in r.getMessage() for r in caplog.records)
