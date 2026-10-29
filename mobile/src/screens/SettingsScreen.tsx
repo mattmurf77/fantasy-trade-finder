@@ -49,7 +49,8 @@ import { track } from '../api/events';
 import SteerSlider from '../components/SteerSlider';
 import { useSession, type RankMethodPref } from '../state/useSession';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
-import SubscriptionSection, { openAppleSubscriptions } from '../components/SubscriptionSection';
+import SubscriptionSection from '../components/SubscriptionSection';
+import { openAppleSubscriptions } from '../components/SubscriptionSection';
 import { DELETE_ACCOUNT_BODY, DELETE_ACCOUNT_SUB_NOTE } from '../copy/deleteAccount';
 import { MON } from '../copy/monetization';
 import { useTipsOffered } from '../state/useTipsOffered';
@@ -606,7 +607,7 @@ export default function SettingsScreen({ navigation }: any) {
       DELETE_ACCOUNT_BODY + '\n\n' + DELETE_ACCOUNT_SUB_NOTE,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: MON['mon.pay.manage'], onPress: () => openAppleSubscriptions() },
+        ...(paywallEnabled ? [{ text: MON['mon.pay.manage'], onPress: openAppleSubscriptions }] : []),
         {
           text: 'Continue',
           style: 'destructive',
