@@ -8,6 +8,13 @@ import { useFlag } from '../state/useFeatureFlags';
 import { getEspnLinkStatus, proposeTradeToEspn } from '../api/sendInEspn';
 import { validateTradeSend } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
+import { isSendOutcomeUnknown } from '../api/sendOutcome';
+import {
+  SEND_NOT_SENT_TITLE,
+  SEND_OUTCOME_UNKNOWN_TITLE,
+  sendNotSentFallback,
+  sendOutcomeUnknownBody,
+} from '../utils/sendOutcomeCopy';
 import type { SendSurface } from '../utils/tradeText';
 
 // "Send in ESPN" — the ESPN twin of SendInSleeperButton/SendInMflButton,
@@ -166,7 +173,14 @@ export default function SendInEspnButton({
       const code: string | undefined = body?.error;
       const detail: string | undefined = body?.detail || body?.message;
 
-      if (code === 'espn_not_connected' || code === 'espn_auth_expired') {
+      if (isSendOutcomeUnknown(err)) {
+        // Timed out, no answer, or the server's espn_outcome_unknown: the
+        // trade may be in ESPN. No Retry or Send-again here (api/sendOutcome.ts).
+        Alert.alert(SEND_OUTCOME_UNKNOWN_TITLE, sendOutcomeUnknownBody('ESPN', code, detail), [
+          { text: 'OK', style: 'cancel' },
+          { text: 'Open ESPN', onPress: openEspn },
+        ]);
+      } else if (code === 'espn_not_connected' || code === 'espn_auth_expired') {
         // Credential vanished/expired between the status check and the send
         // (the server drops a dead pair on a rejected pre-flight) — send
         // them to the in-flow sign-in; the focus handler reports the result
@@ -208,10 +222,8 @@ export default function SendInEspnButton({
         Alert.alert('Send in ESPN', 'Sending isn’t available right now.');
       } else if (code === 'espn_write_failed') {
         Alert.alert(
-          'ESPN wouldn’t accept the send',
-          detail
-            ? `ESPN rejected the request:\n\n${detail}`
-            : 'ESPN rejected the request. You can still propose it on the ESPN site.',
+          SEND_NOT_SENT_TITLE,
+          detail || sendNotSentFallback('ESPN'),
           [
             { text: 'OK', style: 'cancel' },
             { text: 'Open ESPN', onPress: openEspn },

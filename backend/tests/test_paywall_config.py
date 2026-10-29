@@ -11,6 +11,14 @@ Covers:
       the ids have to match the RevenueCat offering the client purchases)
   (d) session auth — no token → 401 (same layer as /api/me/entitlements)
   (e) ?platform=ios|web|extension accepted; unknown value degrades to ios
+  (f) tip jar — `tips: []` at launch (the SKUs are not submitted to App
+      Store Connect); the restorable list still holds only tip products
+  (g) fallback prices (#393, operator 2026-10-25): $4.99 / $24.99 before
+      _PAYWALL_PRICE_RISE_AT (2027-01-02 04:00 UTC, App Store Connect's
+      US start for a change scheduled for 2027-01-02: an instant, not a
+      date), $6.99 / $34.99 from it on,
+      through an injected clock; no `trial_days` key on either side (an
+      older client renders "N days free" only when trial_days > 0)
 
 Flask client + injected session, flags forced via a patched
 server.is_enabled — the two harness patterns from backend/tests/CLAUDE.md.
@@ -18,6 +26,8 @@ No DB rows are needed: the route is static config and touches no table.
 """
 
 import pathlib
+from datetime import datetime, timedelta, timezone
+from decimal import ROUND_CEILING, Decimal
 
 import pytest
 
@@ -32,6 +42,17 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 # against that file below.
 MONTHLY = "ftf_pro_monthly"
 ANNUAL = "ftf_pro_annual"
+
+UTC = timezone.utc
+# The rise is 2027-01-02 04:00 UTC (11 pm ET / 8 pm PT on Jan 1): App Store
+# Connect's US start time for a price change scheduled for 2027-01-02.
+BEFORE = datetime(2027, 1, 2, 3, 59, 59, tzinfo=UTC)      # last second of old prices
+AT = datetime(2027, 1, 2, 4, 0, 0, tzinfo=UTC)            # the rise itself
+UTC_MIDNIGHT = datetime(2027, 1, 1, 0, 0, 0, tzinfo=UTC)  # still Dec 31 in the US
+ASC_JAN_1 = datetime(2027, 1, 1, 4, 0, 0, tzinfo=UTC)     # a Jan-1 schedule's US start (11 pm ET Dec 31)
+LA_MIDNIGHT = datetime(2027, 1, 1, 8, 0, 0, tzinfo=UTC)   # the previous instant
+AFTER = datetime(2027, 6, 1, 12, 0, 0, tzinfo=UTC)
+TODAY = datetime(2026, 10, 27, 12, 0, 0, tzinfo=UTC)
 
 
 @pytest.fixture()
@@ -49,6 +70,14 @@ def client():
 
 def _flags(monkeypatch, *on):
     monkeypatch.setattr(server, "is_enabled", lambda k: k in on)
+
+
+def _freeze(monkeypatch, now):
+    monkeypatch.setattr(server, "_paywall_now", lambda: now)
+
+
+def _products(client):
+    return {p["product_id"]: p for p in _get(client).get_json()["products"]}
 
 
 def _get(client, query=""):
@@ -97,20 +126,24 @@ def test_flag_on_returns_full_shape(client, monkeypatch):
 
 def test_products_shape(client, monkeypatch):
     _flags(monkeypatch, "monetize.paywall")
-    products = {p["product_id"]: p for p in _get(client).get_json()["products"]}
+    _freeze(monkeypatch, TODAY)
+    products = _products(client)
     assert list(products) == [MONTHLY, ANNUAL]
 
     assert products[MONTHLY]["period"] == "monthly"
     assert products[MONTHLY]["display_price"] == "$4.99"
-    assert products[MONTHLY]["trial_days"] == 14
     assert products[MONTHLY]["hero"] is False
+    assert set(products[MONTHLY]) == {
+        "product_id", "period", "display_price", "hero"}
 
     assert products[ANNUAL]["period"] == "annual"
-    assert products[ANNUAL]["display_price"] == "$34.99"
-    assert products[ANNUAL]["per_month_equiv"] == "$2.92"
-    assert products[ANNUAL]["trial_days"] == 30
+    assert products[ANNUAL]["display_price"] == "$24.99"
+    assert products[ANNUAL]["per_month_equiv"] == "$2.09"
     assert products[ANNUAL]["hero"] is True
     assert products[ANNUAL]["badge"] == "best_value"
+    assert set(products[ANNUAL]) == {
+        "product_id", "period", "display_price", "per_month_equiv", "hero",
+        "badge"}
     # exactly one hero — two would give the client no default selection
     assert sum(1 for p in products.values() if p["hero"]) == 1
 
@@ -168,25 +201,149 @@ def test_unknown_platform_degrades_to_ios(client, monkeypatch):
 
 # ── (f) tip jar ────────────────────────────────────────────────────────────
 
-def test_tips_served_when_on(client, monkeypatch):
+def test_tips_empty_at_launch(client, monkeypatch):
+    """The tip SKUs are not submitted to App Store Connect, so the config
+    serves `tips: []` (as #465 does) and no tip id or price leaks."""
     _flags(monkeypatch, "monetize.paywall")
-    tips = _get(client).get_json()["tips"]
-    assert [t["product_id"] for t in tips] == [
-        "ftf_tip_199", "ftf_tip_499", "ftf_tip_999"]
-    assert all(t["display_price"].startswith("$") for t in tips)
-    # tips never claim entitlement fields — they buy nothing
-    assert all("trial_days" not in t and "period" not in t for t in tips)
+    r = _get(client)
+    assert r.get_json()["tips"] == []
+    assert "ftf_tip" not in r.get_data(as_text=True)
 
 
-def test_tip_skus_are_tip_products(client, monkeypatch):
-    """Every served tip SKU must hit the projector's no-entitlement guard —
-    a tip id drifting out of the ftf_tip_ prefix would grant Pro."""
+def test_restorable_tip_skus_are_tip_products():
+    """`_PAYWALL_TIPS` is the list to restore if tips come back. Every SKU in
+    it must hit the projector's no-entitlement guard — a tip id drifting out
+    of the ftf_tip_ prefix would grant Pro — and none claims entitlement
+    fields: a tip buys nothing."""
     from backend import entitlements as entl
-    _flags(monkeypatch, "monetize.paywall")
-    for t in _get(client).get_json()["tips"]:
+    assert [t["product_id"] for t in server._PAYWALL_TIPS] == [
+        "ftf_tip_199", "ftf_tip_499", "ftf_tip_999"]
+    for t in server._PAYWALL_TIPS:
         assert entl.is_tip_product(t["product_id"])
+        assert "trial_days" not in t and "period" not in t
 
 
 def test_flag_off_leaks_no_tips(client, monkeypatch):
     _flags(monkeypatch)
     assert "ftf_tip" not in _get(client).get_data(as_text=True)
+
+
+# ── (g) fallback prices: the rise instant, no trial_days ─────────────────
+
+@pytest.mark.parametrize("now, monthly, annual, per_month", [
+    (TODAY, "$4.99", "$24.99", "$2.09"),
+    (UTC_MIDNIGHT, "$4.99", "$24.99", "$2.09"),  # 4 pm Dec 31 in LA: old prices
+    (ASC_JAN_1, "$4.99", "$24.99", "$2.09"),  # 11 pm ET Dec 31: still the Founder price
+    (LA_MIDNIGHT, "$4.99", "$24.99", "$2.09"),  # the old 01-01 08:00Z instant: no longer the switch
+    (BEFORE, "$4.99", "$24.99", "$2.09"),     # 01-02 03:59:59Z, last second before the rise
+    (AT, "$6.99", "$34.99", "$2.92"),         # 01-02 04:00:00Z, the rise itself: new prices
+    (AFTER, "$6.99", "$34.99", "$2.92"),
+])
+def test_route_prices_switch_at_rise_instant(client, monkeypatch, now, monthly,
+                                             annual, per_month):
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
+    products = _products(client)
+    assert products[MONTHLY]["display_price"] == monthly
+    assert products[ANNUAL]["display_price"] == annual
+    assert products[ANNUAL]["per_month_equiv"] == per_month
+    assert "per_month_equiv" not in products[MONTHLY]
+
+
+@pytest.mark.parametrize("now", [TODAY, UTC_MIDNIGHT, ASC_JAN_1, LA_MIDNIGHT, BEFORE, AT, AFTER])
+def test_no_trial_days_anywhere(client, monkeypatch, now):
+    """An older client renders `${trial_days} days free, then …` whenever
+    trial_days > 0. The trial is Apple's 1-month intro offer, never a day
+    count, so the key must be absent from the whole response on both sides
+    of the rise."""
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
+    r = _get(client)
+    assert "trial_days" not in r.get_data(as_text=True)
+    for p in r.get_json()["products"]:
+        assert "trial_days" not in p
+
+
+def test_rise_is_app_store_us_start_for_2027_01_02():
+    """The rise matches App Store Connect's US start time for a price change
+    scheduled for 2027-01-02: 04:00 UTC, i.e. 11 pm on Jan 1 in New York
+    and 8 pm in Los Angeles, held as an aware UTC instant. Terms §14.8 (the
+    Founder price "by December 31, 2026") then holds everywhere in the US."""
+    rise = server._PAYWALL_PRICE_RISE_AT
+    assert rise == datetime(2027, 1, 2, 4, 0, 0, tzinfo=UTC)
+    assert rise.utcoffset() == timedelta(0)
+    try:
+        from zoneinfo import ZoneInfo
+        ny = ZoneInfo("America/New_York")
+        la = ZoneInfo("America/Los_Angeles")
+        hnl = ZoneInfo("Pacific/Honolulu")
+    except Exception:   # no tz database on this host; the UTC pin stands
+        return
+    assert rise == datetime(2027, 1, 1, 23, 0, 0, tzinfo=ny)
+    assert rise == datetime(2027, 1, 1, 20, 0, 0, tzinfo=la)
+    # The last second of Dec 31 in Hawaii, the latest US zone, is before it.
+    assert datetime(2026, 12, 31, 23, 59, 59, tzinfo=hnl) < rise
+
+
+ET = timezone(timedelta(hours=-5))
+PT = timezone(timedelta(hours=-8))
+
+
+@pytest.mark.parametrize("now, risen", [
+    # 20:00 on Dec 31 in New York is 01:00 UTC on Jan 1, but still Dec 31
+    # for the subscriber: old prices (a UTC date flipped here).
+    (datetime(2026, 12, 31, 20, 0, tzinfo=ET), False),
+    # 23:00 on Dec 31 in New York (a Jan-1 schedule's US start): old prices.
+    (datetime(2026, 12, 31, 23, 0, 0, tzinfo=ET), False),
+    # The last second of Dec 31 in LA, and midnight in LA: old prices.
+    (datetime(2026, 12, 31, 23, 59, 59, tzinfo=PT), False),
+    (datetime(2027, 1, 1, 0, 0, 0, tzinfo=PT), False),
+    # 22:59:59 on Jan 1 in New York, one second before the rise: old prices.
+    (datetime(2027, 1, 1, 22, 59, 59, tzinfo=ET), False),
+    # 23:00 on Jan 1 in New York is the rise: new prices.
+    (datetime(2027, 1, 1, 23, 0, 0, tzinfo=ET), True),
+    # 20:00 on Jan 1 in LA is the same instant: new prices.
+    (datetime(2027, 1, 1, 20, 0, 0, tzinfo=PT), True),
+    # 00:30 on Jan 1 in Paris is 23:30 UTC on Dec 31: old prices.
+    (datetime(2027, 1, 1, 0, 30, tzinfo=timezone(timedelta(hours=1))), False),
+])
+def test_switch_is_an_instant_not_a_date(now, risen):
+    annual = {p["product_id"]: p for p in server._paywall_products(now)}[ANNUAL]
+    assert annual["display_price"] == ("$34.99" if risen else "$24.99")
+
+
+def test_naive_now_raises():
+    """A naive datetime names no instant; comparing it must fail loudly
+    rather than silently pick a timezone."""
+    with pytest.raises(TypeError):
+        server._paywall_products(datetime(2027, 1, 1, 12, 0))
+
+
+def test_paywall_products_is_pure():
+    """Same `now`, same answer, and the module-level tables are untouched
+    (the route must not mutate shared config per request)."""
+    before_tables = repr((server._PAYWALL_PRODUCTS, server._PAYWALL_PRICES))
+    assert server._paywall_products(BEFORE) == server._paywall_products(BEFORE)
+    assert server._paywall_products(AFTER) == server._paywall_products(AFTER)
+    assert server._paywall_products(BEFORE) != server._paywall_products(AFTER)
+    assert repr((server._PAYWALL_PRODUCTS, server._PAYWALL_PRICES)) == before_tables
+    assert all("display_price" not in p for p in server._PAYWALL_PRODUCTS)
+
+
+@pytest.mark.parametrize("now", [BEFORE, AFTER])
+def test_per_month_equiv_is_annual_over_12_rounded_up(now):
+    """Rounded UP to the cent: 24.99 / 12 = 2.0825 → $2.09 (legal's #393
+    R28.8 #2 copy); 34.99 / 12 = 2.9158 → $2.92. Rounding down would
+    understate what a year costs."""
+    annual = {p["product_id"]: p for p in server._paywall_products(now)}[ANNUAL]
+    ceil = (Decimal(annual["display_price"].lstrip("$")) / 12).quantize(
+        Decimal("0.01"), rounding=ROUND_CEILING)
+    assert annual["per_month_equiv"] == f"${ceil}"
+
+
+def test_route_reads_the_real_clock_by_default():
+    """Unfrozen, the clock is the real UTC now (aware), so the switch fires
+    on the day without a deploy."""
+    now = server._paywall_now()
+    assert now.tzinfo is not None
+    assert abs((now - datetime.now(timezone.utc)).total_seconds()) < 5

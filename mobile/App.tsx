@@ -25,6 +25,8 @@ import {
   IBMPlexMono_600SemiBold,
 } from '@expo-google-fonts/ibm-plex-mono';
 import RootNav, { navigationRef } from './src/navigation/RootNav';
+import UpdateGateScreen, { APP_VERSION_INT } from './src/screens/UpdateGateScreen';
+import { shouldBlockForUpdate } from './src/utils/appVersion';
 import { useSession } from './src/state/useSession';
 import { useFeatureFlags } from './src/state/useFeatureFlags';
 import {
@@ -85,6 +87,12 @@ function App() {
   const bootstrap = useSession((s) => s.bootstrap);
   const loadCachedFlags = useFeatureFlags((s) => s.loadCachedFlags);
   const revalidateFlags = useFeatureFlags((s) => s.revalidateFlags);
+  // B8 minimum-version gate. appMinVersion is 0 until a flag fetch RESOLVES
+  // (never cached), and shouldBlockForUpdate fails open on 0, garbage or an
+  // unparseable app version — so only a resolved, positive min above this
+  // build blocks. A later fetch returning a lower or zero min lifts it.
+  const appMinVersion = useFeatureFlags((s) => s.appMinVersion);
+  const updateRequired = shouldBlockForUpdate(appMinVersion, APP_VERSION_INT);
 
   useEffect(() => {
     // INIT-01 — gate the splash on LOCAL-state legs only.
@@ -217,7 +225,15 @@ function App() {
         // Analytics §4.6b — throttled (≥30 min) config refetch: the client
         // bound the analytics kill-switch + experiment pause ride on
         // (FR-19/FR-38). No-op inside the throttle window.
-        void useFeatureFlags.getState().maybeRevalidateFlags();
+        // B8: while the update gate is up, refetch on EVERY foreground
+        // instead, so a lifted (lowered / zeroed) min is seen at once rather
+        // than up to 30 min later.
+        const ff = useFeatureFlags.getState();
+        if (shouldBlockForUpdate(ff.appMinVersion, APP_VERSION_INT)) {
+          void ff.revalidateFlags();
+        } else {
+          void ff.maybeRevalidateFlags();
+        }
         // Entitlements on resume (LLD §4): a subscription can start, lapse,
         // renew or be refunded while the app is backgrounded, and the webhook
         // that recorded it landed server-side. Re-reading here is what makes
@@ -274,8 +290,14 @@ function App() {
           }}
         >
           {/* booted logic is unchanged; the render gate just ANDs in font
-              readiness so first paint uses the Chalkline families. */}
-          <RootNav booted={booted && fontsSettled} />
+              readiness so first paint uses the Chalkline families.
+              B8: the update gate REPLACES RootNav (nothing beneath it is
+              mounted, so no screen or modal can be reached around it). */}
+          {updateRequired && fontsSettled ? (
+            <UpdateGateScreen minVersion={appMinVersion} appVersionInt={APP_VERSION_INT as number} />
+          ) : (
+            <RootNav booted={booted && fontsSettled} />
+          )}
           <StatusBar style="light" />
         </PersistQueryClientProvider>
       </SafeAreaProvider>
