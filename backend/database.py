@@ -3603,15 +3603,149 @@ def _evict_prerelease_espn_verified_stamps() -> int:
         return res.rowcount or 0
 
 
+# ── Migration DDL lock safety (docs/runbook.md § "Migration DDL never blocks
+# boot"). On Postgres, `ALTER TABLE … ADD COLUMN` takes ACCESS EXCLUSIVE before
+# it checks whether the column exists, and CREATE INDEX IF NOT EXISTS takes
+# SHARE before its check. Running every listed DDL on every boot therefore
+# queued exclusive locks behind the still-serving old instance (#416: ~90 s in
+# init_db). `_migrate_db` now inspects the schema (each catalog read under a
+# 3 s lock_timeout) and issues only the DDL that is actually missing. Missing
+# DDL runs under a short lock_timeout, and if the table stays busy the boot
+# FAILS (head-eng ruling on #427): readers name every metadata column, so
+# serving without it is worse.
+_DDL_LOCK_TIMEOUT = "3s"
+_DDL_STATEMENT_TIMEOUT = "30s"      # ADD COLUMN only; an index build is never cancelled
+_DDL_ATTEMPTS = 10          # 10 × (3 s lock wait + ~1 s sleep) ≈ 40 s at most
+_DDL_RETRY_SLEEP_S = 1.0
+_PG_LOCK_BUSY_CODES = frozenset({"55P03", "57014"})   # lock_not_available, query_canceled
+
+
+def _pg_lock_busy(exc) -> bool:
+    return getattr(getattr(exc, "orig", None), "pgcode", None) in _PG_LOCK_BUSY_CODES
+
+
+def _fail_lock_busy(label: str, what: str, exc) -> None:
+    log.error("MIGRATION_LOCK_BUSY %s: %s; failing the boot", label, what)
+    raise RuntimeError(f"MIGRATION_LOCK_BUSY {label}") from exc
+
+
+class _SchemaSnapshot:
+    """Per-table cached column and index-name sets for one `_migrate_db` call.
+    Each table is read once, through an inspector on its own short-lived
+    connection; on Postgres that connection first runs `SET lock_timeout`, so
+    a catalog read can never hang behind an ACCESS EXCLUSIVE holder, and it is
+    closed before any DDL runs. A lock-busy read fails the boot
+    (MIGRATION_LOCK_BUSY <table>). A table that does not exist reads as None
+    (any ALTER on it would fail anyway); any other inspection error reads as
+    an empty set, so the DDL simply runs as it did before."""
+
+    def __init__(self):
+        self._cols: dict = {}
+        self._idx: dict = {}
+
+    def _load(self, cache, table, kind):
+        if table not in cache:
+            from sqlalchemy import inspect as sa_inspect
+            from sqlalchemy.exc import NoSuchTableError
+            try:
+                with engine.connect() as conn:
+                    if _ddl_is_postgres():
+                        _execute_ddl(conn, f"SET lock_timeout = '{_DDL_LOCK_TIMEOUT}'")
+                    read = getattr(sa_inspect(conn), kind)
+                    cache[table] = {item["name"] for item in read(table)}
+            except NoSuchTableError:
+                cache[table] = None
+            except Exception as exc:
+                if _ddl_is_postgres() and _pg_lock_busy(exc):
+                    _fail_lock_busy(table, "catalog read lock-busy", exc)
+                cache[table] = set()
+        return cache[table]
+
+    def columns(self, table):
+        return self._load(self._cols, table, "get_columns")
+
+    def has_index(self, table, name) -> bool:
+        return name in (self._load(self._idx, table, "get_indexes") or ())
+
+    @staticmethod
+    def parse_create_index(ddl: str):
+        """(index, table) for `CREATE [UNIQUE] INDEX IF NOT EXISTS <i> ON <t>`, else None."""
+        import re
+        m = re.match(r"\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+(\w+)",
+                     ddl, re.I)
+        return (m.group(1), m.group(2)) if m else None
+
+
+def _ddl_is_postgres() -> bool:
+    return engine.dialect.name == "postgresql"
+
+
+def _execute_ddl(conn, sql: str) -> None:
+    conn.execute(text(sql))
+
+
+def _run_guarded_ddl(ddl: str, label: str, *, statement_timeout: bool) -> bool:
+    """One DDL statement in its own transaction. Postgres: under SET LOCAL
+    lock_timeout (plus statement_timeout when asked), retried on a lock or
+    statement timeout up to _DDL_ATTEMPTS times; if still busy, logs
+    MIGRATION_LOCK_BUSY at ERROR and RAISES, so init_db and the boot fail.
+    Any other error is swallowed as before (e.g. the "already exists" race).
+    Returns True when the statement ran."""
+    pg = _ddl_is_postgres()
+    for attempt in range(1, _DDL_ATTEMPTS + 1):
+        try:
+            with engine.begin() as conn:
+                if pg:
+                    _execute_ddl(conn, f"SET LOCAL lock_timeout = '{_DDL_LOCK_TIMEOUT}'")
+                    if statement_timeout:
+                        _execute_ddl(conn, f"SET LOCAL statement_timeout = '{_DDL_STATEMENT_TIMEOUT}'")
+                _execute_ddl(conn, ddl)
+            return True
+        except Exception as exc:
+            if not (pg and _pg_lock_busy(exc)):
+                return False
+            if attempt == _DDL_ATTEMPTS:
+                _fail_lock_busy(label, f"still locked after {_DDL_ATTEMPTS} attempts", exc)
+            time.sleep(_DDL_RETRY_SLEEP_S)
+    return False
+
+
+def _add_column_guarded(table: str, col: str, col_type: str) -> bool:
+    """ADD COLUMN under the guard, with a statement_timeout (metadata-only)."""
+    return _run_guarded_ddl(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}",
+                            f"{table}.{col}", statement_timeout=True)
+
+
+def _create_index_guarded(ddl: str, index: str) -> bool:
+    """A genuinely missing CREATE INDEX under the guard: lock_timeout only, so
+    a build that got its lock is never cancelled. A large table's index is
+    still built CONCURRENTLY off the boot path (the C8 retention note
+    beside deck_impressions' indexes); this only bounds the lock wait."""
+    return _run_guarded_ddl(ddl, index, statement_timeout=False)
+
+
 def _migrate_db() -> None:
     """
     Add columns that may be missing from older DB schemas.
-    Each ALTER TABLE is wrapped in try/except so it's idempotent — safe to
-    call on a fresh DB or one that already has all columns.
+    The schema is inspected once per call; only a column (or index) that is
+    actually missing gets DDL, each in its own transaction, so a normal boot
+    issues no ADD COLUMN at all. See `_add_column_guarded` for the Postgres
+    lock guard: a column whose table stays locked raises MIGRATION_LOCK_BUSY,
+    which fails init_db and the boot.
 
     Also seeds model_config with default values (INSERT OR IGNORE so that
     any manually-tuned rows survive re-deploys).
     """
+    schema = _SchemaSnapshot()
+
+    def _add_missing_columns(cols) -> None:
+        for table, col, col_type in cols:
+            present = schema.columns(table)
+            if present is None or col in present:
+                continue
+            if _add_column_guarded(table, col, col_type):
+                present.add(col)
+
     migration_cols = [
         # Email capture (2026-07-17 spec) — dark behind auth.email_capture
         ("accounts",           "email",                 "VARCHAR"),
@@ -3802,15 +3936,10 @@ def _migrate_db() -> None:
         # report a status word without a transaction id.
         ("overhaul_attempts",  "provider_status",           "VARCHAR"),
     ]
-    # Each ALTER TABLE gets its own transaction so a "column already exists"
+    # Only missing columns get an ALTER, each in its own transaction so a
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
     # entire transaction as aborted on any error — even if Python catches it.
-    for table, col, col_type in migration_cols:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-        except Exception:
-            pass   # column already exists — safe to ignore
+    _add_missing_columns(migration_cols)
 
     # Backfill: tag existing rows with '1qb_ppr' format since that was the only one
     _backfill_dual_format()
@@ -3852,12 +3981,7 @@ def _migrate_db() -> None:
     _agent1_skip_migrations = [
         # (table, column, type) — currently none; placeholder for future work
     ]
-    for table, col, col_type in _agent1_skip_migrations:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-        except Exception:
-            pass
+    _add_missing_columns(_agent1_skip_migrations)
 
     # ── app_feedback migrations ────────────────────────────────────────────
     # The table itself is created by metadata.create_all(); this block is
@@ -3868,12 +3992,7 @@ def _migrate_db() -> None:
         # #360 QA P2-1: hash of the unverified session that sent the note.
         ("app_feedback", "session_key", "TEXT"),
     ]
-    for table, col, col_type in _app_feedback_migrations:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-        except Exception:
-            pass
+    _add_missing_columns(_app_feedback_migrations)
 
     # ── user_events / identity_links analytics indexes ────────────────────
     # Tracking plan v2 §S1/S2 + analytics-platform LLD §3.1/§3.2. All
@@ -3895,11 +4014,15 @@ def _migrate_db() -> None:
         "DROP INDEX IF EXISTS ix_identity_links_device",
     ]
     for ddl in _user_events_env_indexes:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(ddl))
-        except Exception:
-            pass
+        create = schema.parse_create_index(ddl)
+        if create is None:                       # DROP INDEX IF EXISTS: no lock when absent
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+            except Exception:
+                pass
+        elif not schema.has_index(create[1], create[0]):
+            _create_index_guarded(ddl, create[0])   # present: skipped (no SHARE lock)
 
     # ── Analytics P0 — wrapped_events cutover timestamp (LLD §6.4, FR-4) ──
     # Set ONCE (INSERT-or-ignore) at the first boot of the deploy that flips
@@ -3936,13 +4059,9 @@ def _migrate_db() -> None:
         ("idx_app_feedback_user_id",    "app_feedback", "user_id"),
     ]
     for idx_name, tbl, cols in _app_feedback_indexes:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(
-                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})"
-                ))
-        except Exception:
-            pass
+        if not schema.has_index(tbl, idx_name):
+            _create_index_guarded(
+                f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})", idx_name)
 
     # ── Multi-league refactor: composite indexes on trade_matches ─────────
     # Existing tables won't have the indexes declared on trade_matches_table
@@ -3964,13 +4083,9 @@ def _migrate_db() -> None:
         ("ix_draft_picks_league_source",  "draft_picks",   "league_id, source"),
     ]
     for idx_name, tbl, cols in _trade_match_indexes:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(
-                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})"
-                ))
-        except Exception:
-            pass
+        if not schema.has_index(tbl, idx_name):
+            _create_index_guarded(
+                f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})", idx_name)
 
     # ── Hot-cold-start indexes (review #B1) ────────────────────────────────
     # These tables were declared with no composite indexes and full-scan on
@@ -4008,13 +4123,9 @@ def _migrate_db() -> None:
          "scoring_format, snapshot_date"),
     ]
     for idx_name, tbl, cols in _hot_path_indexes:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(
-                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})"
-                ))
-        except Exception:
-            pass
+        if not schema.has_index(tbl, idx_name):
+            _create_index_guarded(
+                f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})", idx_name)
 
     # ── trade_matches.status: 'active' → 'pending' (review P0) ─────────────
     # Earlier code wrote status='active' on insert; every cron reader filters

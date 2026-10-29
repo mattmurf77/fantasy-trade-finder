@@ -900,6 +900,15 @@ The Home hub (D-202, [scope](../docs/plans/home-engagement/scope.md)) sets two c
 
 **Merge rule (`mobile/src/utils/tradePages.ts` `mergeDeckPage`):** the fronted card and everything before it never move, change or disappear. An append page goes behind everything held, deduped by `trade_hash`. Only a **whole-deck** response (`replace: true`, or a rebased page spanning a finished deck) may replace what's behind the front, and a fronted card it lacks is **withdrawn in place** (it keeps its slot, says why, and loses Like/Pass). Pinned by `check-trade-pages.js` and `check-withdraw-in-place.js`.
 
+**The automatic re-search on `inputs_changed` (analytics-lead's option (a), 2026-10-28; release-lead's #470 QA P2-1):** a deck the server revoked for an input change re-searches once, by itself, when the user has no card left to see, instead of showing "Couldn't load more trades."
+- **Not a tap:** no R1 and no new `source`.
+- **No new search_id** (`dispatchGenerate`'s `research`): the search's own while its trace is open, so R2 fires once on the rebuilt deck, timed from the original tap; otherwise none.
+- **Not a failure:** no deckFailure, so no R2b.
+- **At most once per search** (`AutoResearchState` in `utils/tradePages.ts`). Only a new search's *answer* resets it (`autoResearchAfterAnswer` in `onSuccess`), never a dispatch, so a failed Try again keeps the error card instead of an endless empty slot (#525 QA P1-1). A second `inputs_changed`, or a failed re-search, shows today's error card, whose Try again is a real tap. The re-search is paged like every dispatch (page 1, no search_id once its trace settled) and carries `research: true` on the mutation's variables; the error is hidden only while that re-search is in flight, and the Offline card shows instead when offline.
+- **Rendering:** the error card is hidden at render while the re-search is pending or in flight (`autoResearchHidesError`), so it never flashes.
+- **Census:** it is dispatch site 8 in TradesScreen's census.
+- Pinned by `check-trade-first-card-events.js` §11 (ahead of #488's §10).
+
 **Device page (piece C, `utils/devicePage.ts` + `state/devicePageStore.ts`):**
 - Keyed per account, league and format. It holds the next unseen cards and is updated as the user swipes.
 - Refreshed only in the background (Trades focus and foreground, ≤ 1 per 60 s per key, no `search_id`, never offline).
