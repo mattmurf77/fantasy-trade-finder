@@ -122,6 +122,30 @@ Gates: release-lead's #519 QA (GO-with-notes at `8af4189a`), P3-1 to P3-3. Follo
   - the exit drain's docstring now says the guard is defensive;
   - LLD's `deck_i1_check` line names the exit drain's restart and the refusal path;
   - #519's PR body is fixed (44 tests, the guard commit).
+## 2026-10-27 — ESPN/MFL send failures: plain copy, raw provider bodies to logs only, outcome-unknown on post-send timeouts (C10)
+
+Full gates, platforms-eng lead (head-eng pre-launch triage C10, "the only C item that prevents a real-money-adjacent harm"). Server only. API surface: new 502 `espn_outcome_unknown` / `mfl_outcome_unknown`, and `detail`/`message` are now plain placeholder copy on propose-espn, propose-mfl and respond-mfl; no schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/espn-mfl-send-failures`.
+
+- **Scope:** [docs/plans/c10-send-failures/scope.md](../docs/plans/c10-send-failures/scope.md) covers the problem, behavior, the before/after-send rule, the analytics (b) answer, the docs table and the mobile follow-ups. Copy is a placeholder, pending marketing via head-eng.
+- **Tests (`backend/tests/test_c10_send_failures.py`, 70 new):**
+  - Adapters, through the real `propose_trade` with an injected opener: 4 before-send cases → `network`; 13 after-send cases (read/socket timeout, reset, `RemoteDisconnected`, `BadStatusLine`, body-read timeout, `IncompleteRead`, `URLError` timeout/reset, HTTP 500/502/503/504) → `outcome_unknown`, for each platform; unreadable 2xx/200 → `outcome_unknown`; ESPN 4xx and MFL `<error>`/4xx → `error`; MFL 429 → `network`.
+  - Propose routes: an HTML and a JSON ESPN rejection, an HTML 400 and an `<error>` 200 MFL rejection → code unchanged, marker absent from the response, logged once, truncated, SWID and cookie masked. A timeout/reset/5xx/`IncompleteRead` after send → `*_outcome_unknown` with the copy; DNS / refused before send → `*_write_failed` with the rejection copy. Unknown fires no `trade_sent`. Auth rejections (ESPN 401, MFL 403) return no raw body.
+  - respond-mfl (review follow-up): an HTML 400 and an `<error>` 200 rejection → `mfl_write_failed` with the "this response … nothing changed" copy, never returned, logged once and masked; timeout / reset / 504 → `mfl_outcome_unknown`; refused → `mfl_write_failed` (`network`); the auth body is not returned.
+  - Overhaul, through the real cores: ESPN tie A times out → two `outcome_unknown` attempts with the copy, A still reserved; B rejected → `send_failed` with the plain copy, released; C/D proposed; `GET /api/overhauls/{id}` shows the same. MFL reset on every offer → 5 `outcome_unknown`, all reserved.
+- **Sabotage, each red then restored byte-identical (5):**
+  - raw `detail` returned again (propose ESPN + MFL, respond-mfl) → 24 red;
+  - the adapters' after-send branch classified `network` → 13 red;
+  - every `URLError` treated as not sent → 4 red;
+  - the routes ignoring `outcome_unknown` → 13 red;
+  - overhaul recording the codes as `send_failed` → 2 red.
+- **Targeted (after merging `origin/main` @ `052c9746`):** 530 passed in 22 files. They are the C10 file, `test_espn_propose_route`, `test_mfl_propose_route`, `test_espn_write`, `test_mfl_write`, `test_i2_espn_ownership`, `test_i2_mfl_ownership`, `test_i2_overhaul`, `test_i2_sleeper_ownership`, `test_overhaul_api`, `test_overhaul_service`, `test_overhaul_store`, `test_bilateral_overhaul`, `test_mfl_trade_lifecycle` (respond-mfl), `test_api_observability` and `test_sleeper_write_route`, plus six other suites that import the changed modules. The same 22 files were 523/523 before the respond-mfl follow-up. On the base commit before C10, the 10 propose / write / I-2 / overhaul-api / lifecycle files ran 235 passed.
+- **Not run:** the full backend suite (CI runs it; the local machine is overloaded); live ESPN/MFL writes (all mocked); `tsc` and testid-lint (no mobile change).
+- **2026-10-28, final copy (marketing addendum 10, 8a–8h + the optional ESPN auth line):**
+  - The placeholders are replaced word for word, with straight apostrophes.
+  - `_send_write_failed` now picks the `*_write_failed` line by `kind`: `network` → 8c/8d ("Couldn't reach … Try again in a moment.", including MFL's 429); `error` / `input` → 8a/8b. respond-mfl uses 8g for its `network` case too, since addendum 10 has no separate line for it.
+  - The C10 file is 89 tests (19 new): pins for each string, a banned-word sweep of every C10 copy constant, the kind split, and MFL 429 → 8d. The overhaul unknown attempts carry 8e/8f.
+  - New sabotages, each red then restored: `network` falls back to the rejected line → 7 red; a curly apostrophe → 10; "failed" in a constant → 14. The earlier five re-run at 25 / 13 / 4 / 15 / 2.
+  - Targeted rerun, on the same 22 files at `1a92a7ab` plus this change: 549 passed (530 + the 19 new).
 
 ## 2026-10-28 — QA P3 follow-ups: #489 (docs claim, LLD guard counts, deadlock-safe lock test), #487 (read pins, docstring), #485 (exit-drain restart, after-write flush)
 
