@@ -265,7 +265,7 @@ interface SessionState {
  *  demo session gets NOTHING: no configure, no logIn, no anonymous id. Run
  *  wherever the user or the verification changes, after the state is current;
  *  fire-and-forget and fully no-op without an SDK key (api/purchases.ts). */
-function syncPurchasesIdentity(s: SessionState): void {
+export function syncPurchasesIdentity(s: SessionState): void {
   const id = purchasesIdentityTarget(s);
   if (id) void initPurchases(id);
 }

@@ -21,7 +21,6 @@ import {
   currentIdentityUserId,
   getOfferings,
   hasProEntitlement,
-  initPurchases,
   isIdentityReady,
   isPaymentPending,
   isUserCancelled,
@@ -34,7 +33,7 @@ import {
 } from '../api/purchases';
 import { useEntitlements } from '../state/useEntitlements';
 import { useFlag } from '../state/useFeatureFlags';
-import { useSession } from '../state/useSession';
+import { syncPurchasesIdentity, useSession } from '../state/useSession';
 import { customerInfoApplies } from '../state/subscriptionSession';
 import { isUnverifiedSession, openVerify } from '../state/usePaywallGate';
 import { track } from '../api/events';
@@ -249,8 +248,10 @@ export default function PaywallScreen({ navigation, route }: any) {
   useEffect(() => {
     setIdReady(isIdentityReady(userId));
     const unsub = onIdentityChange(() => setIdReady(isIdentityReady(userId)));
-    // A logIn that failed earlier gets another go; the bridge never throws.
-    if (userId && purchasesReady() && !isIdentityReady(userId)) void initPurchases(userId);
+    // A logIn that failed earlier gets another go, through useSession's
+    // bridge: only a verified session may identify RevenueCat (demo and
+    // unverified never). The bridge never throws.
+    if (userId && purchasesReady() && !isIdentityReady(userId)) syncPurchasesIdentity(useSession.getState());
     return unsub;
   }, [userId]);
   const identityPending = purchasesReady() && !idReady;

@@ -1137,7 +1137,9 @@ check('10j. the CustomerInfo listener believes a push ONLY for a verified sessio
 
 // screens/PaywallScreen — mounted under a fake React (hooks as plain calls,
 // JSX as element objects), its Restore pressed for real.
-function mountPaywall({ state, rcId }) {
+function mountPaywall({ state, rcId, ready = false }) {
+  const inits = [];
+  const syncs = [];
   const effects = [];
   const sets = [];
   const React = {
@@ -1183,14 +1185,14 @@ function mountPaywall({ state, rcId }) {
     '../api/purchases': {
       checkIntroEligibility: async () => ({}), currentIdentityUserId: () => rcId, getOfferings: async () => null,
       hasProEntitlement: (info) => !!(info && info.entitlements && info.entitlements.active.pro),
-      initPurchases: async () => {}, isIdentityReady: () => false, isPaymentPending: () => false,
+      initPurchases: async (id) => { inits.push(id); }, isIdentityReady: () => false, isPaymentPending: () => false,
       isUserCancelled: () => false, onIdentityChange: () => () => {}, purchasePackage: async () => null,
-      purchasesReady: () => false,
+      purchasesReady: () => ready,
       restorePurchases: async (id) => { restores.push(id); return { entitlements: { active: { pro: {} } } }; },
     },
     '../state/useEntitlements': { useEntitlements: (sel) => sel({ refresh: async () => {}, noteCustomerInfo: () => {} }) },
     '../state/useFeatureFlags': { useFlag: () => true },
-    '../state/useSession': { useSession: hook },
+    '../state/useSession': { useSession: hook, syncPurchasesIdentity: (s) => { syncs.push(s); } },
     '../state/subscriptionSession': subSession,
     '../state/usePaywallGate': { isUnverifiedSession: gate.isUnverifiedSession, openVerify: () => { verifies.push(1); } },
     '../api/events': { track: () => {} },
@@ -1214,7 +1216,7 @@ function mountPaywall({ state, rcId }) {
     if (node.props && node.props.testID === id) return node;
     return node.props ? find(node.props.children, id) : null;
   };
-  return { tree, find: (id) => find(tree, id), effects, sets, restores, verifies, nav, timers };
+  return { tree, find: (id) => find(tree, id), effects, sets, restores, verifies, nav, timers, inits, syncs };
 }
 check('10k. PaywallScreen Restore runs ONLY when customerInfoApplies; otherwise the identity-not-confirmed path (status "error", no new copy)', async () => {
   const ver = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
@@ -1262,6 +1264,29 @@ check('10l. demo shows no purchase flow: isUnverifiedSession() is true in demo, 
   } finally {
     Object.assign(session, saved);
   }
+});
+
+check('10m. the paywall\'s identity retry goes through useSession\'s bridge, never initPurchases directly; app-wide, initPurchases( is called ONLY by that bridge', () => {
+  const states = [
+    ['unknown', { user: sleeperUser('111'), isDemo: false, verification: null }],
+    ['unverified', { user: sleeperUser('111'), isDemo: false, verification: V(false) }],
+    ['demo', { user: { user_id: 'demo_user_ab12' }, isDemo: true, verification: V(true) }],
+    ['verified', { user: sleeperUser('111'), isDemo: false, verification: V(true) }],
+  ];
+  for (const [name, state] of states) {
+    const m = mountPaywall({ state, rcId: 'someone_else', ready: true });
+    for (const fn of m.effects) fn();
+    eq(m.inits.length, 0, `${name}: the paywall called initPurchases itself`);
+    eq(m.syncs.length, 1, `${name}: the retry runs the bridge`);
+    assert(m.syncs[0] === state, `${name}: the bridge gets the current session`);
+  }
+  const callers = {};
+  for (const file of walk(SRC)) {
+    const n = (strip(fs.readFileSync(file, 'utf8')).match(/\binitPurchases\(/g) || []).length;
+    if (n) callers[path.relative(SRC, file)] = n;
+  }
+  eq(JSON.stringify(callers), JSON.stringify({ 'api/purchases.ts': 1, 'state/useSession.ts': 1 }),
+    'initPurchases( outside its definition and the bridge');
 });
 
 function walk(dir, out = []) {
