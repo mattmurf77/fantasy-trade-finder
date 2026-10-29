@@ -91,6 +91,7 @@
     "test:receipts": "node tests/check-receipts.js",
     "test:s51-regen-diff": "node tests/check-s51-regen-diff.js",
     "test:send-button-platform": "node tests/check-send-button-platform.js",
+    "test:session-init-invite-id": "node tests/check-session-init-invite-id.js",
     "test:session-rerank": "node tests/check-session-rerank.js",
     "test:session-seed": "node tests/check-session-seed.js",
     "test:sleeper-ownership": "node tests/check-sleeper-ownership.js",
