@@ -7,7 +7,7 @@ import FeedbackFAB from '../components/FeedbackFAB';
 import { useSession, loadSeasonProjections } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { searchWinNow, getWinNowJob, evaluateWinNow, decideWinNow } from '../api/winNow';
-import { ApiError } from '../api/client';
+import { gateSignalFor } from '../api/client';
 import { useEntitlements } from '../state/useEntitlements';
 import { isUnverifiedSession, openPaywall, openVerify } from '../state/usePaywallGate';
 import type { SeasonProjection, SeasonTeam, WinNowAsset, WinNowScenario, WinNowObjective, WinNowEvaluation, SeasonMeta } from '../shared/types';
@@ -53,9 +53,11 @@ function errorCopy(error: unknown): string {
 }
 // #393 M2 (D16 (c)): a Win Now action's 402, or its verify 403, already
 // opened the paywall or the VerifySheet (api/client's gate): no line here,
-// never the raw "HTTP 402" errorCopy would fall back to.
+// never the raw "HTTP 402" errorCopy would fall back to. Derived from
+// gateSignalFor (every /api/win-now/ route is gated alike), so while the
+// gate is off (monetize.paywall) it's null and the line is today's.
 function actionErrorCopy(error: unknown): string {
-  return error instanceof ApiError && (error.isProRequired || error.isVerificationRequired) ? '' : errorCopy(error);
+  return gateSignalFor(error, '/api/win-now/search') ? '' : errorCopy(error);
 }
 
 export default function WinNowScreen() {

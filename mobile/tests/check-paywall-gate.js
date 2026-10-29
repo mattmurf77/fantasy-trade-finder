@@ -1256,7 +1256,7 @@ check('8j. D16 GRANTED [shape]: the pre-check runs first on every Send tap — t
 
 check('8k. D16 (c) [executed]: Win Now maps a 402 / verify 403 to no line (the gate opened the paywall or the sheet), never "HTTP 402"; other errors keep their copy', () => {
   const errorCopy = extractFn('screens/WinNowScreen.tsx', 'errorCopy', {});
-  const actionErrorCopy = extractFn('screens/WinNowScreen.tsx', 'actionErrorCopy', { ApiError: client.ApiError, errorCopy });
+  const actionErrorCopy = extractFn('screens/WinNowScreen.tsx', 'actionErrorCopy', { gateSignalFor: client.gateSignalFor, errorCopy });
   const E = (status, body) => new client.ApiError(status, body);
   eq(errorCopy(E(402, { error: 'pro_required', gate: 'lapsed' })), 'HTTP 402', '(why: the raw fallback)');
   eq(actionErrorCopy(E(402, { error: 'pro_required', gate: 'lapsed' })), '', '402');
@@ -1355,6 +1355,29 @@ check('8o. trades-eng P3 [executed]: the gate listener settles R2b only for a SE
   } finally {
     client.setOnProRequired((s) => { signals.push(s); return handlerReturn(s); });
   }
+});
+
+check('8p. QA P1-1 [executed + shape]: flags off, the deck / landing / Win Now / R2b gate paths are today\'s — each derives the gate from gateSignalFor (null while off)', () => {
+  const V403 = { error: 'verification_required' };
+  const off = (status, body, p) => client0.gateSignalFor(new client0.ApiError(status, body), p);
+  eq(off(403, V403, '/api/trades/status'), null, 'noteDeckGateEnd: a 403 is no end (today\'s page failure path)');
+  eq(off(403, V403, '/api/trades/generate'), null, 'the landing fork: a 403 pushes as today');
+  const pure = load('utils/firstCardEvent.ts', {});
+  eq(pure.gateFailureReason(off(403, V403, '/api/trades/generate')), 'error', 'R2b: today\'s error');
+  const errorCopy = extractFn('screens/WinNowScreen.tsx', 'errorCopy', {});
+  const offCopy = extractFn('screens/WinNowScreen.tsx', 'actionErrorCopy', { gateSignalFor: client0.gateSignalFor, errorCopy });
+  const e403 = new client0.ApiError(403, V403, 'verification_required');
+  eq(offCopy(e403), errorCopy(e403), 'Win Now, off: today\'s error line for a 403');
+  assert(offCopy(e403) !== '', 'Win Now, off: not blanked');
+  const onCopy = extractFn('screens/WinNowScreen.tsx', 'actionErrorCopy', { gateSignalFor: client.gateSignalFor, errorCopy });
+  eq(onCopy(new client.ApiError(403, V403, 'verification_required')), '', 'Win Now, on: no line (the sheet opened)');
+  const code = strip(read(TRADES));
+  const fnText = (name) => { const at = code.indexOf(`function ${name}(`); return code.slice(at, code.indexOf('\n  }\n', at)); };
+  assert(/const signal = gateSignalFor\(e, '\/api\/trades\/status'\);/.test(fnText('noteDeckGateEnd')), 'noteDeckGateEnd reads gateSignalFor');
+  assert(/\.catch\(\(e\) => \{\s*const gate = gateSignalFor\(e, '\/api\/trades\/generate'\);/.test(code), 'the landing fork reads gateSignalFor');
+  eq((code.match(/\.isVerificationRequired\b/g) || []).length, 1, 'TradesScreen: only main\'s swipe-toast copy reads isVerificationRequired');
+  const win = strip(read('screens/WinNowScreen.tsx'));
+  assert(!/isVerificationRequired|isProRequired/.test(win), 'WinNowScreen reads no gate field directly');
 });
 
 function walk(dir, out = []) {
