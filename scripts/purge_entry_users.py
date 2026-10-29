@@ -104,6 +104,9 @@ DELETION_ONLY_KEYS = (
     ("draft_picks_table", "original_user_id"),
     ("recorded_picks_table", "picking_team_id"),
     ("prepared_trade_participants_table", "participant_user_id"),
+    # Other users' overhaul offers naming the deleted user (overhauls'
+    # account_user_id comes from the export manifest).
+    ("overhaul_offers_table", "counterparty_user_id"),
 )
 # Reported as info counts, never a failure (onboarding-eng, 2026-10-26).
 # user_events.props: OTHER users' events can name an entry id (e.g.
@@ -112,10 +115,6 @@ DELETION_ONLY_KEYS = (
 JSON_MENTIONS = (("standing_offers_table", "team_user_ids"),
                  ("leagues_table", "opponent_data"),
                  ("user_events_table", "props"))
-OVERHAUL_REFS = (("overhauls_table", "account_user_id"),
-                 ("overhauls_table", "league_user_id"),
-                 ("overhaul_offers_table", "counterparty_user_id"),
-                 ("overhaul_reservations_table", "seller_user_id"))
 CREDENTIAL_TABLES = ("espn_credentials_table", "mfl_credentials_table")
 
 
@@ -318,13 +317,10 @@ def _users_count(found) -> int | None:
 
 def _info(found) -> list[str]:
     json_counts = _count_like(JSON_MENTIONS, found["existing"], "%" + ENTRY_PREFIX + "%")
-    overhaul = _count_like(OVERHAUL_REFS, found["existing"], ENTRY_PREFIX + "%")
     return [
         "info (never a failure):",
         "  rows whose JSON mentions an entry: id: "
         + ", ".join(f"{k} {v}" for k, v in json_counts.items()),
-        "  overhaul rows naming an entry: id (known general deletion gap, privacy §6 'not yet'): "
-        + ", ".join(f"{k} {v}" for k, v in overhaul.items()),
     ]
 
 

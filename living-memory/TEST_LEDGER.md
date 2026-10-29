@@ -1,3 +1,16 @@
+## 2026-10-29 — Team overhaul in account deletion and export (head-eng's ask; trades-eng found the gap)
+
+Full gates (scope `docs/plans/team-overhaul/scope-account-deletion.md`). Server only, no schema, not flag-gated. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change (`backend/accounts.py`):**
+  - deletion removes the user's own `overhauls` (by `account_user_id`) and every offer, roadmap, attempt and reservation under them;
+  - in OTHER users' overhauls, an offer naming them (or their league member id) gets the placeholder for the counterparty and card target id and name, loses the counterparty's Fleeced-derived card fields, gets `evidence_json` NULL, and, if undecided, a re-minted `package_hash`; their roadmap summaries list the placeholder;
+  - the export carries the user's own overhaul rows, without offers' `evidence_json` and with the counterparty's card fields removed;
+  - the one-time purge discovers `overhaul_offers.counterparty_user_id`.
+- **Tests:** three new in `test_account_deletion_coverage.py` (deletion and scrub with a no-residue check; export; a schema scan that fails on main's `accounts.py` with exactly the three overhaul tables), plus the purge discovery and info tests updated.
+- **Sabotage 19/19 red** (13 deletion, 4 export, 1 scan, 1 purge), restored byte-identical; a probe table also fails the scan.
+- **Runs:** see the PR.
+
 ## 2026-10-28 — Paywall price rise moves to 2027-01-02 04:00 UTC (App Store Connect's US start for a Jan-2 schedule; follow-up to #494)
 
 Gates: a value change to the merged #494 (`bef9f5db`), as its own PR off main (`fix/paywall-rise-jan2`), requested by monetization-pm (head-product authorized; the operator approved scheduling both App Store price changes for 2027-01-02 on 2026-10-28). release-lead delta-QAs it. Still dark (`monetize.paywall`). D-056: `FTF_SKIP_SIM_GATE=1` posture.

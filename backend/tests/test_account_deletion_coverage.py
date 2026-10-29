@@ -1,5 +1,9 @@
 """Synthetic-only regression coverage for the current account-deletion schema."""
+import inspect
+import io
 import json
+import re
+import tokenize
 
 import pytest
 from cryptography.fernet import Fernet
@@ -525,3 +529,135 @@ def test_pick_assignment_order_keeps_a_public_sleeper_id_and_anonymizes_the_alia
     counts = accounts.delete_user_data(UID)
     assert json.loads(_orders(engine)["lg"])["order"] == [UID, accounts.DELETED_USER_PLACEHOLDER, OTHER]
     assert counts["pick_assignment_order_anonymized"] == 1
+
+
+# ── Team overhaul (keys the owner as account_user_id, the rest by overhaul_id) ──
+
+OVERHAUL_CHILDREN = (db.overhaul_offers_table, db.overhaul_roadmaps_table,
+                     db.overhaul_attempts_table, db.overhaul_reservations_table)
+OWNER_ESPN_MEMBER = "espn:{0WNE0000-AAAA-BBBB-CCCC-DDDDEEEEFFFF}"   # the owner's own ESPN member id
+OWNER_NAME = "owner-display-name"
+PLACEHOLDER = accounts.DELETED_USER_PLACEHOLDER
+
+
+def _overhaul(conn, overhaul_id, account_user_id, league_user_id):
+    seed(conn, db.overhauls_table, overhaul_id, overhaul_id=overhaul_id,
+         account_user_id=account_user_id, league_user_id=league_user_id)
+
+
+def _children(conn, overhaul_id, *, offer_id=None):
+    seed(conn, db.overhaul_offers_table, overhaul_id, overhaul_id=overhaul_id,
+         offer_id=offer_id or "of-" + overhaul_id, package_hash="h-" + overhaul_id)
+    seed(conn, db.overhaul_roadmaps_table, overhaul_id, overhaul_id=overhaul_id)
+    seed(conn, db.overhaul_attempts_table, overhaul_id, overhaul_id=overhaul_id,
+         attempt_id="at-" + overhaul_id, batch_id="b-" + overhaul_id)
+    seed(conn, db.overhaul_reservations_table, overhaul_id, overhaul_id=overhaul_id)
+
+
+def _named_offer(conn, offer_id, counterparty, decision):
+    """An offer in OTHER's overhaul, built on the owner's private data."""
+    card = {"offer_id": offer_id, "target_user_id": counterparty, "target_username": OWNER_NAME,
+            "give": [{"id": "p1"}], "receive": [{"id": "p2"}], "fairness_score": 0.9,
+            "model_arm": "owner_v2_bilateral", "selection_coverage": "full", "basis": "divergence",
+            "reasons": ["Other manager’s preferences are unknown; fit uses market and team context."],
+            "likes_you": True,
+            "match_context": {"owner_benefits": ["outlook"], "counterparty_benefits": ["need"],
+                              "counterparty_preference_evidence": "known",
+                              "support_kind": "interpretable_support_not_probability"}}
+    evidence = {"viewer": {"benefits": ["outlook"]}, "counterparty": {"outgoing_personal": 1234},
+                "assets": [{"id": "p2", "counterparty_personal": 1500}], "preference_priority": 2}
+    seed(conn, db.overhaul_offers_table, offer_id, overhaul_id="ovh-other", offer_id=offer_id,
+         package_hash="sha1-" + offer_id, counterparty_user_id=counterparty,
+         counterparty_username=OWNER_NAME, card_json=json.dumps(card),
+         evidence_json=json.dumps(evidence), decision=decision)
+
+
+def test_overhauls_deleted_and_offers_naming_the_owner_scrubbed(engine):
+    with engine.begin() as conn:
+        _overhaul(conn, "ovh-own", UID, UID)
+        _overhaul(conn, "ovh-alias", ALIAS, OWNER_ESPN_MEMBER)
+        _overhaul(conn, "ovh-other", OTHER, OTHER)
+        for oid in ("ovh-own", "ovh-alias"):
+            _children(conn, oid)
+        _children(conn, "ovh-other", offer_id="of-unrelated")
+        _named_offer(conn, "of-sleeper", UID, "pass")
+        _named_offer(conn, "of-espn", OWNER_ESPN_MEMBER, "undecided")
+        seed(conn, db.overhaul_attempts_table, "sent", overhaul_id="ovh-other",
+             attempt_id="at-sent", batch_id="b-sent", offer_id="of-sleeper")
+        conn.execute(db.overhaul_roadmaps_table.update().where(
+            db.overhaul_roadmaps_table.c.overhaul_id == "ovh-other").values(
+            summary_json=json.dumps({"counterparties": [UID, "unrelated", OWNER_ESPN_MEMBER],
+                                     "score": 3})))
+    before = {r["offer_id"]: dict(r) for r in rows(engine, db.overhaul_offers_table)}
+    counts = accounts.delete_user_data(UID)
+
+    assert [r["overhaul_id"] for r in rows(engine, db.overhauls_table)] == ["ovh-other"]
+    for tbl in OVERHAUL_CHILDREN:
+        assert {r["overhaul_id"] for r in rows(engine, tbl)} == {"ovh-other"}, tbl.name
+    assert counts["overhauls_deleted"] == 2
+    assert counts["overhaul_offers_counterparty_anonymized"] == 2
+    offers = {r["offer_id"]: dict(r) for r in rows(engine, db.overhaul_offers_table)}
+    assert offers["of-unrelated"] == before["of-unrelated"]
+    for oid in ("of-sleeper", "of-espn"):
+        offer = offers[oid]
+        assert offer["counterparty_user_id"] == PLACEHOLDER
+        assert offer["counterparty_username"] == PLACEHOLDER
+        assert offer["evidence_json"] is None
+        assert offer["decision"] == before[oid]["decision"]
+        assert json.loads(offer["card_json"]) == {
+            "offer_id": oid, "target_user_id": PLACEHOLDER, "target_username": PLACEHOLDER,
+            "give": [{"id": "p1"}], "receive": [{"id": "p2"}], "fairness_score": 0.9,
+            "model_arm": "owner_v2_bilateral", "selection_coverage": "full", "basis": "divergence",
+            "match_context": {"owner_benefits": ["outlook"],
+                              "support_kind": "interpretable_support_not_probability"}}
+    # A passed offer keeps the hash that stops it coming back; an undecided one
+    # gets a fresh one, so regeneration can't revive the scrubbed row.
+    assert offers["of-sleeper"]["package_hash"] == "sha1-of-sleeper"
+    assert offers["of-espn"]["package_hash"].startswith("redacted_")
+    assert {r["attempt_id"] for r in rows(engine, db.overhaul_attempts_table)} == {"at-ovh-other", "at-sent"}
+    summary = json.loads(rows(engine, db.overhaul_roadmaps_table)[0]["summary_json"])
+    assert summary == {"counterparties": [PLACEHOLDER, "unrelated", PLACEHOLDER], "score": 3}
+    assert counts["overhaul_roadmaps_counterparty_anonymized"] == 1
+    # Nothing that names the owner is left in any overhaul table.
+    residue = json.dumps([dict(r) for t in (db.overhauls_table, *OVERHAUL_CHILDREN)
+                          for r in rows(engine, t)], default=str)
+    for marker in (UID, ALIAS, OWNER_ESPN_MEMBER, OWNER_NAME, "sha1-of-espn", "1234", "1500"):
+        assert marker not in residue, marker
+
+
+def test_export_carries_own_overhauls_without_private_evidence(engine):
+    with engine.begin() as conn:
+        _overhaul(conn, "ovh-own", UID, UID)
+        _overhaul(conn, "ovh-other", OTHER, OTHER)
+        _children(conn, "ovh-other")
+        _children(conn, "ovh-own")
+        conn.execute(db.overhaul_offers_table.update().where(
+            db.overhaul_offers_table.c.overhaul_id == "ovh-own").values(
+            counterparty_user_id=OTHER, evidence_json=json.dumps({"counterparty": {"x": 1}}),
+            card_json=json.dumps({"target_user_id": OTHER, "reasons": ["r"],
+                                  "match_context": {"owner_benefits": ["a"],
+                                                    "counterparty_benefits": ["b"]}})))
+    tables = accounts.export_user_data(UID)["tables"]
+    assert [r["overhaul_id"] for r in tables["overhauls"]] == ["ovh-own"]
+    for tbl in OVERHAUL_CHILDREN:
+        assert [r["overhaul_id"] for r in tables[tbl.name]] == ["ovh-own"], tbl.name
+    offer = tables["overhaul_offers"][0]
+    assert "evidence_json" not in offer
+    assert json.loads(offer["card_json"]) == {"target_user_id": OTHER,
+                                              "match_context": {"owner_benefits": ["a"]}}
+
+
+def _code_without_comments(source):
+    return " ".join(t.string for t in tokenize.generate_tokens(io.StringIO(source).readline)
+                    if t.type != tokenize.COMMENT)
+
+
+def test_every_table_with_a_user_id_column_is_handled_in_accounts():
+    """The overhaul gap: a table keyed by any *user_id* column that accounts.py
+    never names in code (comments stripped) escapes deletion and export alike.
+    Name it there: delete it, anonymize it, or keep it with a reason."""
+    code = _code_without_comments(inspect.getsource(accounts))
+    unnamed = [t.name for t in db.metadata.sorted_tables
+               if any("user_id" in c.name for c in t.columns)
+               and not re.search(rf"\b{t.name}_table\b|[\"']{t.name}[\"']", code)]
+    assert unnamed == []

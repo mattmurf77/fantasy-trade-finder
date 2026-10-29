@@ -438,9 +438,6 @@ def test_info_counts_never_fail_verify(engine, capsys):
     with engine.begin() as conn:
         seed(conn, db.standing_offers_table, "so", user_id=SLEEPER, league_id="61408",
              player_id="p1", round=1, team_user_ids=f'["{LATE}"]')
-        seed(conn, db.overhaul_offers_table, "ovh", offer_id="ovh_1", overhaul_id="ovh_x", revision=1,
-             package_hash="h", counterparty_user_id=VERIFIED, give_ids_json="[]",
-             receive_ids_json="[]", card_json="{}", created_at=BEFORE)
         # Another user's event naming an entry id (pick_assignment_changed.new_owner).
         seed(conn, db.user_events_table, "ev", user_id=SLEEPER, event_type="pick_assignment_changed",
              props=f'{{"actor": "{SLEEPER}", "new_owner": "{LATE}"}}')
@@ -448,8 +445,8 @@ def test_info_counts_never_fail_verify(engine, capsys):
     assert code == 0, out
     assert "standing_offers.team_user_ids 1" in out
     assert "user_events.props 1" in out
-    assert "known general deletion gap, privacy §6 'not yet'): " in out
-    assert "overhaul_offers.counterparty_user_id 1" in out
+    # Overhaul rows are no longer a deletion gap, so the info has no line for them.
+    assert "overhaul" not in out
 
 
 def test_no_id_reaches_stdout_or_the_log(engine, capsys, caplog):
@@ -680,6 +677,9 @@ NOT_USER_KEYS = {
     ("suggestion_trade_links", "ghost_impression_id"),
     ("rank_set_entries", "rank_set_id"), ("rank_set_adoptions", "rank_set_id"),
     ("rank_sets", "id"), ("prepared_trade_manifests_v2", "inventory_id"),
+    # the rows under an overhaul, reached through overhauls.account_user_id.
+    ("overhaul_offers", "overhaul_id"), ("overhaul_roadmaps", "overhaul_id"),
+    ("overhaul_attempts", "overhaul_id"), ("overhaul_reservations", "overhaul_id"),
     # = comparisons against fixed enum values, not ids.
     ("rank_sets", "visibility"), ("league_roster_history", "team_key_quality"),
     ("prepared_trade_participants", "subject_kind"),

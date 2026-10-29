@@ -640,6 +640,15 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #            leagues.pick_assignment_settings.order (any row, incl. other
 #            importers'): a deleted Fleeced-minted id → the placeholder in
 #            place, so other owners' slot positions don't shift.
+#            Team overhaul: own overhauls (account_user_id) are deleted with
+#            their offers, roadmaps, attempts and reservations. In OTHER
+#            users' overhauls an offer naming this user (or their league
+#            member id) keeps its package and history; its counterparty id and
+#            name, and the card's target id and name, → the placeholder; the
+#            card loses the counterparty's Fleeced-derived fields; its
+#            evidence_json → NULL; an undecided one's package_hash is
+#            re-minted. Those overhauls' roadmap summaries list the
+#            placeholder instead.
 #   KEEP     player_value_history + model_config (not user-keyed),
 #            draft_picks on Sleeper grids (and legacy rows with no platform),
 #            ids and usernames alike, and recorded_picks.picking_team_id
@@ -678,6 +687,36 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "grading_sessions", "grading_cards", "trade_page_store", "trade_deck_lineage",
     "deck_card_withdrawals", "deck_evidence_packs",
 )
+
+# Team overhaul (BUILD-CONTRACT §4) keys its owner as `account_user_id`, and
+# the rest by `overhaul_id`, so none of it fits the user_id loop above.
+_OVERHAUL_CHILD_TABLES = ("overhaul_offers", "overhaul_roadmaps", "overhaul_attempts",
+                          "overhaul_reservations")
+# Public-card fields drawn from the counterparty's own Fleeced account (legal
+# R28.20 c2; trade_card_to_dict): the generators' reasons (the bilateral arm's
+# says whether the other manager has preferences), and the deck-card fields
+# the shared serializer can carry.
+_OVERHAUL_CARD_PARTNER_KEYS = ("reasons", "likes_you", "standing_offer_reason", "breaker",
+                               "fit", "roster_evaluation", "rationale", "narrative")
+
+
+def _overhaul_card_without_partner_fields(card: dict) -> dict:
+    """An overhaul offer's public card minus the counterparty's Fleeced-derived
+    fields: the keys above, and every `counterparty*` key of match_context
+    (their benefits and preference evidence)."""
+    out = {k: v for k, v in card.items() if k not in _OVERHAUL_CARD_PARTNER_KEYS}
+    if isinstance(out.get("match_context"), dict):
+        out["match_context"] = {k: v for k, v in out["match_context"].items()
+                                if not k.startswith("counterparty")}
+    return out
+
+
+def _loads_dict(raw):
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 @contextmanager
@@ -810,6 +849,61 @@ def _delete_user_data(sleeper_user_id: str,
             proposals.c.target_user_id.in_(user_ids)).values(
                 target_user_id=None, valuation_json=None))
         counts["trade_proposals_counterparty_anonymized"] = res.rowcount or 0
+
+        # Team overhaul: the user's own overhauls go with every row under them.
+        # In OTHER users' overhauls, an offer naming them as the counterparty
+        # keeps its package, decision and send history, but the id and name
+        # become the placeholder, the card loses the counterparty's
+        # Fleeced-derived fields, and the frozen evidence (both sides' private
+        # boards) goes, as trade_proposals.valuation_json above. An undecided
+        # offer gets a fresh package_hash, so regeneration can't re-surface the
+        # scrubbed row as a live offer; a liked or passed one keeps its hash,
+        # which is what stops a passed package coming back. Their league member
+        # ids (ESPN/MFL ids differ from user_ids) are read before their
+        # overhauls are deleted.
+        ovh = db.overhauls_table
+        own = select(ovh.c.overhaul_id).where(ovh.c.account_user_id.in_(user_ids))
+        named_ids = user_ids | set(conn.execute(select(ovh.c.league_user_id).where(
+            ovh.c.account_user_id.in_(user_ids))).scalars())
+        for name in _OVERHAUL_CHILD_TABLES:
+            tbl = getattr(db, name + "_table")
+            res = conn.execute(delete(tbl).where(tbl.c.overhaul_id.in_(own)))
+            counts[name + "_deleted"] = res.rowcount or 0
+        res = conn.execute(delete(ovh).where(ovh.c.account_user_id.in_(user_ids)))
+        counts["overhauls_deleted"] = res.rowcount or 0
+        offers = db.overhaul_offers_table
+        named = conn.execute(select(offers.c.id, offers.c.overhaul_id, offers.c.card_json,
+                                    offers.c.decision).where(
+            offers.c.counterparty_user_id.in_(named_ids))).all()
+        for row in named:
+            card = _loads_dict(row.card_json)
+            values = dict(
+                counterparty_user_id=DELETED_USER_PLACEHOLDER,
+                counterparty_username=DELETED_USER_PLACEHOLDER,
+                card_json=json.dumps(dict(_overhaul_card_without_partner_fields(card),
+                                          target_user_id=DELETED_USER_PLACEHOLDER,
+                                          target_username=DELETED_USER_PLACEHOLDER)
+                                     if card is not None else {}),
+                evidence_json=None)
+            if row.decision == "undecided":
+                values["package_hash"] = "redacted_" + secrets.token_hex(16)
+            conn.execute(update(offers).where(offers.c.id == row.id).values(**values))
+        counts["overhaul_offers_counterparty_anonymized"] = len(named)
+        # Their roadmaps also list each package's counterparty id.
+        roadmaps = db.overhaul_roadmaps_table
+        touched = 0
+        for row in conn.execute(select(roadmaps.c.id, roadmaps.c.summary_json).where(
+                roadmaps.c.overhaul_id.in_({r.overhaul_id for r in named}))).all():
+            summary = _loads_dict(row.summary_json)
+            cps = summary.get("counterparties") if summary is not None else None
+            if not isinstance(cps, list) or not {str(c) for c in cps} & named_ids:
+                continue
+            summary["counterparties"] = [DELETED_USER_PLACEHOLDER if str(c) in named_ids else c
+                                         for c in cps]
+            conn.execute(update(roadmaps).where(roadmaps.c.id == row.id)
+                         .values(summary_json=json.dumps(summary)))
+            touched += 1
+        counts["overhaul_roadmaps_counterparty_anonymized"] = touched
 
         # Preserve published ranking snapshots and other users' adoptions;
         # remove attribution and freeform author metadata. Private sets have
@@ -1121,6 +1215,7 @@ _EXPORT_TABLES: tuple = (
     ("prepared_trade_targets", "prepared_trade_targets_table", "user_id",
      ("lease_token", "payload_json")),
     ("prepared_trade_participants", "prepared_trade_participants_table", "user_id", ()),
+    ("overhauls", "overhauls_table", "account_user_id", ()),
 )
 
 _EXPORT_TABLES += tuple(
@@ -1247,6 +1342,20 @@ def export_user_data(sleeper_user_id: str,
         tables["rank_set_entries"] = _rows_as_dicts(conn.execute(
             select(db.rank_set_entries_table).where(
                 db.rank_set_entries_table.c.rank_set_id.in_(rank_set_ids))).fetchall())
+        # The rows under the user's own overhauls. An offer's evidence_json
+        # (both sides' private boards, "never on the wire") stays in, and its
+        # card goes out without the counterparty's Fleeced-derived fields
+        # (R28.20 c2), the same fields deletion scrubs.
+        overhaul_ids = [r["overhaul_id"] for r in tables["overhauls"]]
+        for name in _OVERHAUL_CHILD_TABLES:
+            tbl = getattr(db, name + "_table")
+            tables[name] = _rows_as_dicts(conn.execute(
+                select(tbl).where(tbl.c.overhaul_id.in_(overhaul_ids)).order_by(tbl.c.id)).fetchall(),
+                ("evidence_json",) if name == "overhaul_offers" else ())
+        for row in tables["overhaul_offers"]:
+            card = _loads_dict(row["card_json"])
+            row["card_json"] = (json.dumps(_overhaul_card_without_partner_fields(card))
+                                if card is not None else None)
 
     return out
 
