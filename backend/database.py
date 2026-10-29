@@ -1157,6 +1157,14 @@ Index(
     "ix_deck_impressions_job",
     deck_impressions_table.c.deck_job_id,
 )
+# The evidence retention prune finds pack-less decks past the bound by their
+# first delivery (purge_deck_evidence). On prod it is built off the boot path
+# (scripts/create_evidence_retention_index.py, CONCURRENTLY), never in init_db:
+# a plain CREATE INDEX on prod's deck_impressions blocks writes for a full scan.
+Index(
+    "ix_deck_impressions_served",
+    deck_impressions_table.c.served_at,
+)
 # C8 retention (ADR-025) has no index yet: the archive partial index arrives
 # with stage-2 packing, which restores the purge (models-lead R2.6 S2). Build it
 # then with CREATE INDEX CONCURRENTLY off the boot path (an operator one-off or
@@ -3200,6 +3208,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_i1_mode", 1.0, "S0 live-path switch, read per request (default 1 until C-b, models-lead option B): 2 = strict (I-1 drops cards with moved assets; the no-card gate misses follow trade_gate_miss_mode); 1 = lenient (check and log, serve every card, never withhold); 0 = off (the pre-S0 path: no I-1, no fingerprint read or compare, no withhold, no floor kick). NaN or any other value reads as 1. Deploy-free"),
     ("trade_roster_change_revoke", 1.0, "S0 kill for the on_roster_change handler alone, read per call: 0 = the handler does nothing: no revoke, no re-stamp, no move recorded (the rest of S0 follows trade_i1_mode); 1 = it revokes a league job built on an older Sleeper read than the refreshed rows, only for a user whose session already holds the newer read (#470 QA), re-stamps a job whose rosters (its read's members, the picks then stored) hash to the new stamp, and records the move (#481 QA, #484 QA). NaN or any other value reads as 1. Deploy-free"),
     ("trade_gate_miss_mode", 0.0, "S0's no-card gate misses: 1 = serve them (roster_check_unavailable when the roster check can't run; the §3b withhold with wait_reason 'roster_check'); 0 = hold them for binaries before 1.22.0, which show them as 'Search failed' (a check that can't run serves the cards unchecked, loudly logged; a past-bound stale roster serves its I-1-filtered cards, logged roster_gate_miss_held). Flip to 1 once 1.22.0 is distributed. NaN or any other value reads as 0. Deploy-free"),
+    # ── Deck-evidence retention (head-eng 2026-10-28; dark until a bound is set) ──
+    ("deck_evidence_retention_days", 0.0, "Deck-evidence retention cap (legal R28.20 (iii): 365). The cleanup loop deletes, a bounded batch per tick, every store of a deck first delivered more than this many days ago, all at once: its outcomes, pass reasons, deck_impressions rows, withdrawals, candidate set, bakeoff_runs row, policy shadow rows and pack; and legacy trade_impressions and trade_page_store rows past it. 0 = off: the whole prune, full rows included, stays dark. A value under 56 (receipts' window) is refused: nothing is deleted and a warning is logged. Deploy-free"),
+    ("deck_evidence_full_row_days", 90.0, "Deck-evidence retention, full rows (legal R28.20 (iii): 90): a PACKED deck's deck_impressions rows (full and ghost) are deleted this many days after its first delivery; the pack keeps every card until deck_evidence_retention_days. A deck with no pack keeps its rows until the cap. Acts only while deck_evidence_retention_days is on; 0 or a value at or past the cap = rows go with the deck at the cap; under 56 = refused and logged. Deploy-free"),
     ("trade_roster_bound_s", 300.0, "S0 §3b: a Sleeper roster whose last refresh is older than this many seconds is past the bound. Past the bound, the serve kicks one background roster refresh (P41); past it with the last attempt failed (league_roster_state 'stale'), cached cards are withheld (wait_reason 'roster_check'). Deploy-free"),
     ("trade_import_roster_fresh_s", 86400.0, "S0 §3: an ESPN/MFL/Fleaflicker league's stored rosters read 'fresh' while their newest league_members.updated_at is younger than this many seconds, else 'stale'. Logged only: never withholds, never rebuilds (ruling 29). Deploy-free"),
     # ── First-page store (P1, flag trade.first_page_store; read only while it is on) ──
@@ -3554,6 +3565,19 @@ _MODEL_CONFIG_DEFAULTS = [
     ("vc_standings_weight",       0.30, "value core windows: full weight of the points-for index; ramps linearly from week 0 to week 8"),
     ("vc_throwin_min_ratio",      2.0,  "value core: a piece too small for the junk rules may ride along only if its recipient's board values it at >= this x consensus market (and >= the asset floor)"),
     ("vc_testers_only",           1.0,  "value core rollout: 1 = serve only the tester allowlist while trade.value_core is on; 0 = everyone"),
+    # ── Minimum-version gate (B8, head-eng ruling 35) ────────────────────
+    # Served as the top-level int `app_min_version` on GET /api/feature-flags
+    # (server._app_min_version). Encoding major*10000 + minor*100 + patch
+    # (1.22.0 = 12200); 0 = OFF. Seeded 0 and insert-if-absent like every
+    # row here, so a deploy never gates anyone and never resets a raised
+    # value. release-lead's deploy-free kill switch:
+    # PUT /api/admin/config/app_min_version (docs/config-reference.md).
+    ("app_min_version",           0,    "min-version gate: builds whose version int (major*10000+minor*100+patch) is below this get a blocking Update required screen; 0 = off. Served on GET /api/feature-flags; a missing, non-integral, NaN or negative value serves 0. Writes are checked by backend/app_version_policy.py"),
+    # Where the gate's Update button goes: 1 = App Store, 0 = TestFlight,
+    # -1 = unset (the client's compiled UTC instant decides). Served as the
+    # top-level int `app_store_live` on GET /api/feature-flags; anything but
+    # exactly 0 or 1 serves -1.
+    ("app_store_live",           -1,    "min-version gate Update target: 1 = App Store, 0 = TestFlight, -1 = unset (the app's compiled fallback, App Store from 2026-11-18T08:00:00Z). Served on GET /api/feature-flags; anything but 0/1 serves -1"),
 ]
 
 
@@ -7145,6 +7169,266 @@ def load_deck_diagnostics(impression_id: str, user_id: str) -> dict | None:
     return expand_features(features, snapshots)
 
 
+# Deck-evidence retention, legal R28.20 (iii) final, with models-lead's
+# addendum E: every deck-evidence store expires 365 days after a deck's first
+# delivery, deck-atomic (E-a1); a packed deck's full rows (ghost rows
+# included, E-c2) after 90 (E-c1); a deck with no pack keeps its rows under
+# the 365-day cap (E-a3: they are its only replay record). Receipts read up to
+# 56 days back: the shortest bound either knob accepts.
+DECK_EVIDENCE_RETENTION_FLOOR_DAYS = 56
+_EVIDENCE_PRUNE_ROWS_PER_DECK = 150   # rows read per wanted deck (a deck has ~35-130)
+_FULL_ROW_PRUNE_PACKS = 500            # packs whose full rows go in one statement
+_served_index_ready = False            # ix_deck_impressions_served seen at the last check
+_served_index_checked = 0.0            # monotonic time of that check
+_SERVED_INDEX_RECHECK_S = 3600.0       # a seen index is checked again hourly (#523 QA P3-5)
+_served_index_warned = False
+_bound_warned: set = set()             # (knob, value) pairs already warned about
+# The full-row pass's place in the packs' (served_at, run_id) order: every
+# pack at or before it, inside the 365-day cap, has had its full rows deleted.
+# In memory only: a restart walks again from the cap, in bounded chunks.
+_full_row_cursor: tuple[str, str] | None = None
+
+
+def _deck_impressions_served_index_ready() -> bool:
+    """Whether ix_deck_impressions_served exists: without it the pack-less
+    scan would read the whole table, so the prune skips it (logged once, and
+    again if a seen index goes missing). Missing, it's looked for every call;
+    seen, it's checked again hourly, so a dropped index stops the scan."""
+    global _served_index_ready, _served_index_checked, _served_index_warned
+    now = time.monotonic()
+    if not _served_index_ready or now - _served_index_checked >= _SERVED_INDEX_RECHECK_S:
+        from sqlalchemy import inspect as _inspect
+        names = {ix.get("name") for ix in _inspect(engine).get_indexes("deck_impressions")}
+        ready = "ix_deck_impressions_served" in names
+        if not ready and (_served_index_ready or not _served_index_warned):
+            _served_index_warned = True
+            log.warning("deck-evidence retention: pack-less decks wait for "
+                        "ix_deck_impressions_served (scripts/create_evidence_retention_index.py)")
+        _served_index_ready, _served_index_checked = ready, now
+    return _served_index_ready
+
+
+DECK_EVIDENCE_RETENTION_MAX_DAYS = 36500   # past this a bound is a typo, not a policy
+
+
+def _bound_ok(name: str, days) -> bool:
+    """A retention bound in force: set (> 0), finite, at most
+    DECK_EVIDENCE_RETENTION_MAX_DAYS and not under the floor. A refused value
+    is logged once per value, not every tick (#523 QA P3-3)."""
+    if not days or days <= 0:
+        return False
+    if not math.isfinite(days) or days > DECK_EVIDENCE_RETENTION_MAX_DAYS:
+        why = f"isn't a finite count of days up to {DECK_EVIDENCE_RETENTION_MAX_DAYS}"
+    elif days < DECK_EVIDENCE_RETENTION_FLOOR_DAYS:
+        why = f"is under the {DECK_EVIDENCE_RETENTION_FLOOR_DAYS}-day floor"
+    else:
+        return True
+    if (name, repr(days)) not in _bound_warned:
+        _bound_warned.add((name, repr(days)))
+        log.warning("deck-evidence retention: %s %s days %s; nothing deleted under it",
+                    name, days, why)
+    return False
+
+
+def _expired_decks(cutoff: str, limit: int) -> dict[str, tuple[str, str, int]]:
+    """Up to `limit` decks first delivered before `cutoff`, oldest first, as
+    {deck_job_id: (user_id, league_id, card_count)}: packed decks by their
+    pack's served_at (card_count, the pack's); then, once
+    ix_deck_impressions_served exists, pack-less decks by their rows'
+    (bounded, in index order, never a DISTINCT over the backlog; card_count
+    0). A packed deck is only ever found through its pack, so it goes whole."""
+    p, i = deck_evidence_packs_table, deck_impressions_table
+    with engine.connect() as conn:
+        decks = {r.run_id: (r.user_id, r.league_id, r.card_count or 0) for r in conn.execute(
+            select(p.c.run_id, p.c.user_id, p.c.league_id, p.c.card_count)
+            .where(p.c.served_at < cutoff).order_by(p.c.served_at, p.c.run_id).limit(limit))}
+        if len(decks) < limit and _deck_impressions_served_index_ready():
+            found: dict[str, tuple[str, str, int]] = {}
+            for r in conn.execute(
+                    select(i.c.deck_job_id, i.c.user_id, i.c.league_id)
+                    .where(i.c.served_at < cutoff).order_by(i.c.served_at)
+                    .limit((limit - len(decks)) * _EVIDENCE_PRUNE_ROWS_PER_DECK)):
+                if r.deck_job_id not in decks:
+                    found.setdefault(r.deck_job_id, (r.user_id, r.league_id, 0))
+            if found:
+                packed = set(conn.execute(select(p.c.run_id).where(
+                    p.c.run_id.in_(list(found)))).scalars())
+                for job, owner in found.items():
+                    if job not in packed and len(decks) < limit:
+                        decks[job] = owner
+    return decks
+
+
+def deck_pack_contract_ids(conn, user_ids) -> list[str]:
+    """Every contract id ("<deck_job_id>:<k>", k < card_count; R4.2 U2) of the
+    users' packed decks, on the caller's connection. A packed card's outcomes
+    are keyed by it whether or not the card has a row, and the evidence
+    prune's full-row bound deletes the rows long before the pack, so account
+    export and deletion find outcomes through these too (#523 QA P1-1)."""
+    p = deck_evidence_packs_table
+    return [f"{run_id}:{k}" for run_id, n in conn.execute(
+        select(p.c.run_id, p.c.card_count).where(p.c.user_id.in_(list(user_ids))))
+        for k in range(n or 0)]
+
+
+def _delete_deck(conn, deck_job_id: str, user_id: str, league_id: str,
+                 card_count: int) -> dict[str, int]:
+    """Every store of one deck (E-a1). The per-card ones first, outcomes and
+    pass reasons: a packed card's by its contract id ("<deck_job_id>:<k>" for
+    each of the pack's `card_count` cards, R4.2 U2), whether or not it has a
+    row, and a row's by the row's impression_id. Exact ids, never a LIKE or a
+    string range: under prod's collation neither is a plain index range."""
+    i, o, p = deck_impressions_table, deck_outcomes_table, deck_evidence_packs_table
+    w, c, b = deck_card_withdrawals_table, deck_candidate_sets_table, bakeoff_runs_table
+    r, sh = trade_pass_reasons_table, trade_policy_shadow_table
+    contract_ids = [f"{deck_job_id}:{k}" for k in range(card_count)]
+    row_ids = select(i.c.impression_id).where(i.c.deck_job_id == deck_job_id)
+    counts: dict[str, int] = {}
+    for name, stmt in (
+            *((name, delete(t).where(t.c.impression_id.in_(contract_ids[k:k + 500])))
+              for name, t in (("deck_outcomes", o), ("trade_pass_reasons", r))
+              for k in range(0, len(contract_ids), 500)),
+            ("deck_outcomes", delete(o).where(o.c.impression_id.in_(row_ids))),
+            ("trade_pass_reasons", delete(r).where(r.c.impression_id.in_(row_ids))),
+            ("deck_impressions", delete(i).where(i.c.deck_job_id == deck_job_id)),
+            ("deck_card_withdrawals", delete(w).where(w.c.deck_job_id == deck_job_id)),
+            ("deck_candidate_sets", delete(c).where(
+                c.c.user_id == user_id, c.c.league_id == league_id,
+                c.c.deck_job_id == deck_job_id)),
+            ("bakeoff_runs", delete(b).where(b.c.deck_job_id == deck_job_id)),
+            ("trade_policy_shadow", delete(sh).where(sh.c.deck_job_id == deck_job_id)),
+            ("deck_evidence_packs", delete(p).where(p.c.run_id == deck_job_id))):
+        n = conn.execute(stmt).rowcount or 0
+        if n:
+            counts[name] = counts.get(name, 0) + n
+    return counts
+
+
+def _delete_old_trade_impressions(cutoff: str, limit: int) -> int:
+    """Legacy trade_impressions (still written beside deck_impressions) past
+    the cap, among the oldest `limit` ids: rows are inserted in shown_at order,
+    so no index on shown_at is needed. An id bound, a primary-key range scan;
+    an IN over a LIMIT subquery planned as a semi join over the whole table on
+    Postgres every tick (#523 QA P2-1)."""
+    t = trade_impressions_table
+    with engine.begin() as conn:
+        upper = conn.execute(select(t.c.id).order_by(t.c.id).offset(limit - 1).limit(1)).scalar()
+        if upper is None:                     # fewer rows than the batch: all of them
+            upper = conn.execute(select(func.max(t.c.id))).scalar()
+        if upper is None:
+            return 0
+        return conn.execute(delete(t).where(t.c.id <= upper, t.c.shown_at < cutoff)
+                            ).rowcount or 0
+
+
+def _delete_old_page_store(cutoff: str, limit: int) -> int:
+    """trade_page_store rows built before the cap: a backstop for the store's
+    own eviction (trade_page_store_evict_days, 30 by default), which runs only
+    while the store is on and could be set past the cap. One row per scope,
+    so the table stays small and a scan is cheap."""
+    t = trade_page_store_table
+    with engine.begin() as conn:
+        ids = select(t.c.id).where(t.c.built_at < cutoff).order_by(t.c.id).limit(limit)
+        return conn.execute(delete(t).where(t.c.id.in_(ids.scalar_subquery()))).rowcount or 0
+
+
+def _delete_packed_full_rows(cutoff: str, floor: str, chunks: int) -> int:
+    """The full-row bound (E-c1): the deck_impressions rows of packed decks
+    first delivered before `cutoff` (and not before `floor`, the cap, whose
+    decks go whole), `_FULL_ROW_PRUNE_PACKS` packs a statement, at most
+    `chunks` statements a call, resuming from `_full_row_cursor`. The pack,
+    its outcomes and the rest stay until the cap. A failed chunk keeps the
+    cursor, so it is retried next tick."""
+    global _full_row_cursor
+    p, i = deck_evidence_packs_table, deck_impressions_table
+    deleted = 0
+    for _ in range(max(1, chunks)):
+        q = select(p.c.served_at, p.c.run_id).where(p.c.served_at < cutoff,
+                                                    p.c.served_at >= floor)
+        if _full_row_cursor is not None:
+            at, run = _full_row_cursor
+            q = q.where(or_(p.c.served_at > at, and_(p.c.served_at == at, p.c.run_id > run)))
+        try:
+            with engine.begin() as conn:
+                packs = conn.execute(q.order_by(p.c.served_at, p.c.run_id)
+                                     .limit(_FULL_ROW_PRUNE_PACKS)).all()
+                if packs:
+                    deleted += conn.execute(delete(i).where(
+                        i.c.deck_job_id.in_([r.run_id for r in packs]))).rowcount or 0
+        except Exception:
+            log.warning("deck-evidence retention: full rows not deleted; retried next tick",
+                        exc_info=True)
+            break
+        if not packs:
+            break
+        _full_row_cursor = (packs[-1].served_at, packs[-1].run_id)
+        if len(packs) < _FULL_ROW_PRUNE_PACKS:
+            break
+    return deleted
+
+
+def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks: int = 200,
+                        full_row_chunks: int = 20, now: datetime | None = None) -> dict[str, int]:
+    """Deck-evidence retention (legal R28.20 (iii), final; models-lead
+    addendum E), one bounded pass per cleanup tick, measured from a deck's
+    first delivery (`served_at`):
+    - `days` (the cap, 365): up to `batch_decks` decks past it, each in its
+      own transaction, lose every store at once (E-a1): outcomes (every kind)
+      and pass reasons, deck_impressions rows, withdrawals, the candidate set,
+      the bakeoff_runs row, the trade_policy_shadow rows and the pack; and
+      legacy trade_impressions and trade_page_store rows past it go too (the
+      page store's own eviction runs only while the store is on);
+    - `full_row_days` (90): a packed deck's deck_impressions rows (full and
+      ghost) past it go, and the pack keeps every card until the cap. A deck
+      with no pack keeps its rows until the cap (E-a3, E-c1).
+    `days` 0 means off, and nothing runs. A bound under
+    DECK_EVIDENCE_RETENTION_FLOOR_DAYS is refused and logged; so is the
+    full-row one, which is also unused at or past the cap. Pack-less decks are
+    found through ix_deck_impressions_served only once it exists (built off
+    the boot path; until then they wait, logged once). Returns rows deleted
+    per table, plus "decks" ({} when nothing was deleted)."""
+    if not _bound_ok("deck_evidence_retention_days", days):
+        return {}
+    now = now or datetime.now(timezone.utc)
+    cap = (now - timedelta(days=days)).isoformat()
+    limit = max(1, min(batch_decks, 1000))
+    decks = _expired_decks(cap, limit)
+    counts: dict[str, int] = {}
+    done = 0
+    for deck_job_id, (user_id, league_id, card_count) in decks.items():
+        try:
+            with engine.begin() as conn:
+                deleted = _delete_deck(conn, deck_job_id, user_id, league_id, card_count)
+        except Exception:
+            log.warning("deck-evidence retention: deck %s not deleted; retried next tick",
+                        deck_job_id, exc_info=True)
+            continue
+        done += 1
+        for name, n in deleted.items():
+            counts[name] = counts.get(name, 0) + n
+    if done:
+        counts["decks"] = done
+    for name, step, batch in (
+            ("trade_impressions", _delete_old_trade_impressions,
+             limit * _EVIDENCE_PRUNE_ROWS_PER_DECK),
+            ("trade_page_store", _delete_old_page_store, limit)):
+        try:
+            n = step(cap, batch)
+        except Exception:
+            n = 0
+            log.warning("deck-evidence retention: %s not deleted; retried next tick", name,
+                        exc_info=True)
+        if n:
+            counts[name] = n
+    if full_row_days and _bound_ok("deck_evidence_full_row_days",
+                                   full_row_days) and full_row_days < days:
+        rows = _delete_packed_full_rows((now - timedelta(days=full_row_days)).isoformat(),
+                                        cap, full_row_chunks)
+        if rows:
+            counts["full_rows"] = rows
+    return counts
+
+
 def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
     """Expire one bounded batch of debug nodes, never cards/valuations/outcomes."""
     if days <= 0:
@@ -7548,7 +7832,7 @@ def record_deck_withdrawals(rows: list[dict]) -> int:
 
 
 def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delivered_ids,
-                          at: str, withdrawn=None) -> None:
+                          at: str, withdrawn=None) -> bool:
     """#417 cross-check P2-1 / P3-5: a live-mode page-scoped deck's delivery
     (the value core, prepared adoption), one transaction. Its rows were
     written at build (tier NULL, the page_store marker), so the delivery
@@ -7557,7 +7841,9 @@ def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delive
     first delivery wins) and never a ghost's. The serve's withdrawals land in
     the same transaction, each card_index from its row and served_before from
     its delivered_at before this stamp: both are recorded or neither.
-    `withdrawn`: {impression_id: reason} ("i1_dropped", "disposition_cut")."""
+    `withdrawn`: {impression_id: reason} ("i1_dropped", "disposition_cut").
+    Returns False when it delivered cards of a deck with no row at all: their
+    evidence is nowhere (no rows, no pack), so eval can't see them."""
     i = deck_impressions_table
     withdrawn = dict(withdrawn or {})
     delivered_ids = [x for x in delivered_ids if isinstance(x, str)]
@@ -7577,6 +7863,8 @@ def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delive
              "impression_id": iid,
              "served_before": 1 if found[iid].delivered_at is not None else 0}   # exactly 0 or 1
             for iid in withdrawn_ids if iid in found])
+        return not delivered_ids or conn.execute(
+            select(literal(1)).where(i.c.deck_job_id == deck_job_id).limit(1)).first() is not None
 
 
 def load_delivered_impression_ids(impression_ids) -> set:

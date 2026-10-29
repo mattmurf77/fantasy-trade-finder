@@ -45,6 +45,7 @@ is a full-session credential: never logged, never an event property.
 
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import time
@@ -54,6 +55,7 @@ import urllib.request
 from dataclasses import dataclass, field
 
 from backend.mfl_service import MFL_USER_AGENT
+from backend.write_outcome import OUTCOME_UNKNOWN, request_never_sent
 
 _HTTP_TIMEOUT = 15
 
@@ -76,9 +78,17 @@ DEFAULT_EXPIRES_SECONDS = 7 * 24 * 3600
 class MflWriteError(Exception):
     """A write to MFL failed. `kind` steers the caller's handling:
       'auth'    → cookie missing/expired/rejected → prompt MFL re-sign-in
-      'network' → transport problem → retry / fallback
+      'network' → nothing sent: a transport failure BEFORE the request went
+                  out (DNS, connect refused, no route) or an HTTP 429
+                  throttle → retry / fallback
       'error'   → MFL refused the import (bad asset, trades disabled, …)
       'input'   → caller-side validation failure (never sent)
+      'outcome_unknown' → the import may have reached MFL with no definitive
+                  answer (read timeout, reset after send, 5xx, an empty or
+                  unrecognized 200 body). The trade may exist: check MFL, never
+                  auto-retry (backend/write_outcome.py has the rules)
+    `detail` is the raw provider body or transport text: for logs only, never
+    a response field (C10).
     """
 
     def __init__(self, message: str, *, kind: str = "error", detail: str | None = None):
@@ -244,7 +254,9 @@ def _parse_import_response(raw: str) -> dict:
     """
     text = (raw or "").strip()
     if not text:
-        raise MflWriteError("empty response from MFL import", detail="")
+        # C10: MFL answered 200 but said nothing FTF can read. Not a refusal.
+        raise MflWriteError("empty response from MFL import", kind=OUTCOME_UNKNOWN,
+                            detail="")
 
     # JSON first (JSON=1 requested).
     try:
@@ -259,7 +271,7 @@ def _parse_import_response(raw: str) -> dict:
         if status.upper().startswith("OK"):
             return {"status": "OK", "raw": text[:500]}
         raise MflWriteError("unrecognized MFL import response",
-                            detail=text[:500])
+                            kind=OUTCOME_UNKNOWN, detail=text[:500])
 
     # XML fallback.
     m = _XML_ERROR_RE.search(text)
@@ -268,7 +280,9 @@ def _parse_import_response(raw: str) -> dict:
     m = _XML_STATUS_RE.search(text)
     if m and m.group(1).strip().upper().startswith("OK"):
         return {"status": "OK", "raw": text[:500]}
-    raise MflWriteError("unrecognized MFL import response", detail=text[:500])
+    # C10: neither success nor an <error> — the import may have landed.
+    raise MflWriteError("unrecognized MFL import response", kind=OUTCOME_UNKNOWN,
+                        detail=text[:500])
 
 
 def _raise_import_error(message: str):
@@ -323,10 +337,24 @@ def _issue_import(op: str, cookie: str, url: str, *, league_id: str,
             if e.code == 429:
                 raise MflWriteError("MFL throttled the request (HTTP 429)",
                                     kind="network", detail=body[:500])
+            if e.code >= 500:
+                # C10: a 5xx came back after the import was sent; it may
+                # have landed.
+                raise MflWriteError(f"MFL returned HTTP {e.code}",
+                                    kind=OUTCOME_UNKNOWN, detail=body[:500])
             raise MflWriteError(f"MFL returned HTTP {e.code}", detail=body[:500])
         except urllib.error.URLError as e:
-            raise MflWriteError("network error contacting MFL", kind="network",
+            if request_never_sent(e):
+                raise MflWriteError("network error contacting MFL", kind="network",
+                                    detail=str(e))
+            # C10: a timeout or reset urllib can't place before the send.
+            raise MflWriteError("no definitive answer from MFL", kind=OUTCOME_UNKNOWN,
                                 detail=str(e))
+        except (OSError, http.client.HTTPException) as e:
+            # C10: raised by getresponse() / read(), so the whole import was
+            # sent (read timeout, reset, RemoteDisconnected, IncompleteRead).
+            raise MflWriteError("no definitive answer from MFL", kind=OUTCOME_UNKNOWN,
+                                detail=f"{type(e).__name__}: {e}")
 
         result = _parse_import_response(raw)
         _ob.ok(status=200, response_bytes=len(raw))
@@ -339,8 +367,9 @@ def propose_trade(cookie: str, host: str, year: int, req: ProposeTradeRequest,
 
     Returns {"status": "OK", "raw": <trimmed body>} on success. Raises
     MflWriteAuthError on a dead/rejected cookie, MflWriteError otherwise
-    (kind 'input' = never sent; 'network' = transport/throttle; 'error' =
-    MFL refused the import — e.g. trades disabled, bad asset id)."""
+    (kind 'input' = never sent; 'network' = not sent: pre-send transport
+    failure or throttle; 'error' = MFL refused the import — e.g. trades
+    disabled, bad asset id; 'outcome_unknown' = it may have landed)."""
     params = build_import_params(req)
     url = import_url(host, year, params)
     return _issue_import("tradeProposal", cookie, url,

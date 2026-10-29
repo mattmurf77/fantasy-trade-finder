@@ -527,10 +527,13 @@ def loop_pass(monkeypatch):
     return run
 
 
-@pytest.mark.parametrize("failing", ["trade-job sweep", "_evict_trade_page_store",
-                                     "_drop_stale_deck_evidence"])
+@pytest.mark.parametrize("failing", ["session sweep", "_prune_deck_evidence", "trade-job sweep",
+                                     "_evict_trade_page_store", "_drop_stale_deck_evidence"])
 def test_a_failing_cleanup_step_does_not_end_the_loop(monkeypatch, loop_pass, failing):
     ran = []
+    # QA's repro: a session with last_active=None makes the sweep's `<` raise TypeError.
+    monkeypatch.setattr(server, "_sessions",
+                        {"t": {"last_active": None}} if failing == "session sweep" else {})
 
     def step(name):
         def run(*_args, **_kwargs):
@@ -540,13 +543,14 @@ def test_a_failing_cleanup_step_does_not_end_the_loop(monkeypatch, loop_pass, fa
         return run
     monkeypatch.setattr(server, "_trade_jobs", {"j": {"status": "running",
                                                       "started_at": time.monotonic()}})
+    monkeypatch.setattr(server, "_prune_deck_evidence", step("_prune_deck_evidence"))
     monkeypatch.setattr(server, "_trade_job_stalled", step("trade-job sweep"))
     monkeypatch.setattr(server, "_evict_trade_page_store", step("_evict_trade_page_store"))
     monkeypatch.setattr(server, "_drop_stale_deck_evidence", step("_drop_stale_deck_evidence"))
     monkeypatch.setattr(prepared_trade_runtime, "tick", step("tick"))
     assert loop_pass() == 2
-    assert ran == ["trade-job sweep", "_evict_trade_page_store", "_drop_stale_deck_evidence",
-                   "tick"]
+    assert ran == ["_prune_deck_evidence", "trade-job sweep", "_evict_trade_page_store",
+                   "_drop_stale_deck_evidence", "tick"]
 
 
 def test_a_timed_out_job_is_logged_with_its_cards(monkeypatch, loop_pass, caplog):
