@@ -499,6 +499,17 @@ Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b7-d13-
   1. a fresh install, after sign-in: no tip;
   2. an install over a signed-in previous build: the tip shows once;
   3. signed out, then signed in again: no tip.
+- **2026-10-28, release-lead QA @ `d6e3cfa1`: GO-with-notes. P2-1 fixed:** `check-whats-new.js` pin 9 checks B7's legal premise.
+  - The sign-in screen's "By signing in you agree to the Terms & Privacy Policy" line renders unconditionally in `SignInScreen`'s own JSX (no `{…}`, ternary or `&&` above it).
+  - It carries the "Terms" link to `/terms` and the "Privacy Policy" link to `/privacy`.
+  - **Sabotage 6/6 red,** restored byte-identical:
+    - the line removed;
+    - wrapped in `{landingOn ? (…) : null}`;
+    - wrapped in `{!isDemo && (…)}`;
+    - the Terms link pointed elsewhere;
+    - the Privacy label changed;
+    - the agreement text softened.
+  - Two malformed first-try mutations were re-run as valid JSX.
 
 ## 2026-10-15 — #326 value core v4, #328 live-deck filters, #327 Calibration Yes/No
 

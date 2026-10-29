@@ -33,6 +33,12 @@
 //      `bootSignedIn === false`, hides the entry and stores it seen, and
 //      SEEN_KEY is written nowhere else but dismiss. Anything wider would
 //      silence the notice for signed-in upgraders (no silent expiry, 6).
+//   9. B7's legal premise is on the screen (release-lead #380 QA P2-1): the
+//      sign-in screen's "By signing in you agree to the Terms & Privacy
+//      Policy" line renders UNCONDITIONALLY in SignInScreen's own JSX (no
+//      {…} expression, ternary or && above it), with both links: "Terms" to
+//      /terms and "Privacy Policy" to /privacy. Without it, a signed-out boot
+//      would skip the notice for someone who was never shown the policies.
 //
 // FTF_MOBILE_TEST_ROOT can point at a copy of mobile/ (sabotage runs).
 // Run: node tests/check-whats-new.js
@@ -54,6 +60,7 @@ const ROOT = process.env.FTF_MOBILE_TEST_ROOT || path.resolve(__dirname, '..');
 const F = {
   hook:    'src/hooks/useWhatsNew.ts',
   session: 'src/state/useSession.ts',
+  signIn:  'src/screens/SignInScreen.tsx',
   league:  'src/screens/LeagueScreen.tsx',
   rootNav: 'src/navigation/RootNav.tsx',
   coach:   'src/components/CoachMark.tsx',
@@ -327,6 +334,41 @@ check('8. only a launch that booted signed out counts the release as seen (B7)',
   const firstStmt = eff.arguments[0].body.statements[0].getText(hook).replace(/\s+/g, ' ');
   expect(firstStmt === 'if (!enabled || !agreedThisLaunch || !APP_VERSION) return;',
     `the B7 effect's guard is: ${firstStmt}`);
+});
+
+// ── 9. B7's premise: the "you agree" line, unconditional, both links ────────
+check('9. the sign-in screen always shows "By signing in you agree to the Terms & Privacy Policy" (B7)', () => {
+  const sf = parse(F.signIn);
+  const lines = findAll(sf, (n) => ts.isJsxElement(n)
+    && n.openingElement.tagName.getText(sf) === 'Text'
+    && n.openingElement.attributes.properties.some((a) => ts.isJsxAttribute(a)
+      && a.name.getText(sf) === 'style' && a.initializer && a.initializer.getText(sf) === '{styles.legalLine}'));
+  expect(lines.length === 1, `${lines.length} <Text style={styles.legalLine}> in SignInScreen, want 1`);
+  const line = lines[0];
+  const lead = line.children.filter(ts.isJsxText).map((t) => t.getText(sf)).join(' ').replace(/\s+/g, ' ');
+  expect(/^\s*By signing in you agree to the\b/.test(lead), `the line reads: ${JSON.stringify(lead.trim())}`);
+  const links = line.children.filter((c) => ts.isJsxElement(c) && c.openingElement.tagName.getText(sf) === 'Text');
+  const target = (el) => {
+    const onPress = el.openingElement.attributes.properties.find((a) => ts.isJsxAttribute(a) && a.name.getText(sf) === 'onPress');
+    const call = onPress && findAll(onPress, (n) => ts.isCallExpression(n) && n.expression.getText(sf) === 'Linking.openURL')[0];
+    return call && call.arguments[0] && ts.isStringLiteral(call.arguments[0]) ? call.arguments[0].text : null;
+  };
+  const label = (el) => el.children.map((c) => c.getText(sf)).join('').trim();
+  const terms = links.find((l) => label(l) === 'Terms');
+  const privacy = links.find((l) => label(l) === 'Privacy Policy');
+  expect(terms && /\/terms$/.test(target(terms) || ''), `the Terms link opens ${terms ? target(terms) : 'nothing'}`);
+  expect(privacy && /\/privacy$/.test(target(privacy) || ''), `the Privacy Policy link opens ${privacy ? target(privacy) : 'nothing'}`);
+  let fn = null;
+  for (let p = line.parent; p; p = p.parent) {
+    if (ts.isJsxExpression(p) || ts.isConditionalExpression(p)
+      || (ts.isBinaryExpression(p) && [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken,
+        ts.SyntaxKind.QuestionQuestionToken].includes(p.operatorToken.kind))) {
+      throw new Error(`the line renders inside a condition: ${p.getText(sf).slice(0, 80).replace(/\s+/g, ' ')}…`);
+    }
+    if (ts.isFunctionDeclaration(p) || ts.isArrowFunction(p) || ts.isFunctionExpression(p)) { fn = p; break; }
+  }
+  expect(fn && ts.isFunctionDeclaration(fn) && fn.name && fn.name.text === 'SignInScreen',
+    `the line renders in ${fn && fn.name ? fn.name.text : 'a nested function'}, not SignInScreen's own JSX`);
 });
 
 console.log(failures === 0
