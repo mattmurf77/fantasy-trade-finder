@@ -81,7 +81,7 @@ def test_g1_counts_unreadable_packs_among_every_pack(tamper):
     text = render(r)
     if tamper:
         assert r.g1["ids"] == ["bad"] and r.overall == FAIL
-        assert "| G1 | pack_integrity decks / decks with a pack row | 1 / 3 | 0 | FAIL |" in text
+        assert "| G1 | pack_integrity decks (+ malformed display moves) / decks with a pack row | 1 (+ 0) / 3 | 0 | FAIL |" in text
         assert "models-lead recommends the kill" in text
 
 
@@ -606,7 +606,7 @@ def test_the_cli_reads_a_sqlite_file_read_only_and_never_writes(tmp_path, capsys
     args = ["--db", str(path), "--since", "2026-10-23T00:00:00Z", "--as-of", _after(20)]
     assert main(args) == 3                                         # INSUFFICIENT: not a pass
     out = capsys.readouterr().out
-    assert "| G1 | pack_integrity decks / decks with a pack row | 0 / 2 | 0 | PASS |" in out
+    assert "| G1 | pack_integrity decks (+ malformed display moves) / decks with a pack row | 0 (+ 0) / 2 | 0 | PASS |" in out
     assert ("| G2 | incomplete_deck / Trades decks read (final packed + every pack-less) "
             "| 0 / 3 (1 final packed + 2 pack-less) | 0; INSUFFICIENT below 10 final packed "
             "| PASS |") in out

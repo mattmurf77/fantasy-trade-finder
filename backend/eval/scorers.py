@@ -21,10 +21,12 @@ Contract (the stub interface F6 implements):
 Register with @register or register_factory(name, callable). Factories
 return a FRESH instance per run so fit() state never leaks across runs.
 
-Honesty rule: candidate scorers must not read `card_index`, `final_score`,
-or `propensity` from the card dict — those encode the logged policy and
-would let a "candidate" trivially copy production. The two baselines below
-are the sanctioned exceptions.
+Honesty rule: candidate scorers must not read the logged-policy keys
+(contract.LOGGED_POLICY_KEYS: `card_index`, `position`, `propensity`,
+`base_score`, `final_score`) from the card dict. Those encode the logged
+policy and would let a "candidate" trivially copy production. The
+baselines below are the sanctioned exceptions, each reading only what
+contract.PERMITTED_LOGGED grants it (`logged`: `position`).
 """
 
 from __future__ import annotations
@@ -77,13 +79,14 @@ def registered_names() -> list[str]:
 
 @register
 class LoggedOrderScorer:
-    """The logged policy itself: reproduces the exact served order
-    (score = -card_index). This is the --self-check scorer — replaying it
-    must reproduce observed rates within CI."""
+    """The logged policy itself: reproduces the exact displayed order
+    (score = -position, the loader's displayed position: withdrawals and
+    serve-time display moves included, models-lead F2). This is the
+    --self-check scorer — replaying it must reproduce observed rates within CI."""
     name = "logged"
 
     def score(self, card: dict) -> float:
-        return -float(card.get("card_index", 0))
+        return -float(card.get("position", 0))
 
 
 @register
