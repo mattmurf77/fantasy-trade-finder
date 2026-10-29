@@ -1087,6 +1087,11 @@ After `trade.packed_evidence` and `trade.first_page_store` go on together, model
 
   1–2 character pieces aren't redacted, and harmless words in the URL (a username like `postgres`) are redacted along the way. A SQLite path isn't redacted. Percent-encode the password in `DATABASE_URL_PROD` anyway. Tests that build Render-shaped URLs use `.invalid` hosts: Render's wildcard DNS resolves made-up `*.render.com` names.
 - **Stop rule (B3 (f4)):** if G1 fails or G3 has orphans (outcomes joining no card), that window's evidence is being lost. models-lead recommends the kill (`first_page_store_enabled` 0) at once, and the operator decides via release-lead. Any other failure goes to models-lead, an outcome on a ghost row included: that is a serve bug (a ghost reached a client), not lost data.
+- **#535's decks in G3 (models-lead addendum G3):** release-lead copies every `deck-evidence <deck_job_id>: n delivered cards of a deck with no evidence` line in the read's window into the read (G3-a). Pass that file as `--no-evidence-log <file>` (bdk_audit takes the same file for its no-evidence bucket).
+  - **What explains an orphan (G3-b):** its impression id's run is a captured `deck_job_id`, and its index is below that deck's delivered count (its lines summed). Such orphans are reported as `explained: no-evidence deck` and don't FAIL.
+  - **What still FAILs and recommends the kill:** any other orphan (G3-c), or explained outcomes above 1% of the window's outcomes on packed-admitted decks (G3-d).
+  - **Without the file**, G3 says `none given` and no orphan can be explained.
+  - **Any #535 deck in the lines** prints that trades-eng closes the path before the launch-week freeze, and mode 2 waits for that fix (G3-d).
 - **Weekly:** the `--weekly` lines (U4-R4 named upgrade misses ≤ 1% of viewed cards, B4 disposition cuts ≤ 5% of delivered-range positions) ride the BL-001 monitor through head-bizops for the first 4 weeks. An OVER goes to models-lead.
 
 ## B-DK-4..7 production audit (2026-10-26)

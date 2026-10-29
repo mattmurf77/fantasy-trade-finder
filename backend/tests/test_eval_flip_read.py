@@ -228,7 +228,9 @@ def _joins_db() -> DB:
 def test_g3_passes_when_every_outcome_joins():
     r = flip_read(_joins_db().eng, since=SINCE, as_of=LATE)
     assert r.g3 == {"outcomes": 4, "joined": 2, "joined_outside_window": 2, "on_ghost": 0,
-                    "ghost_ids": [], "orphans": 0, "ids": [], "status": PASS}
+                    "ghost_ids": [], "orphans": 0, "ids": [], "explained_orphans": 0,
+                    "no_evidence_decks_explained": 0, "packed_admitted_outcomes": 2,
+                    "explained_over_limit": False, "no_evidence_decks": None, "status": PASS}
 
 
 @pytest.mark.parametrize("impression_id", [
@@ -1017,3 +1019,71 @@ def test_importing_flip_read_never_imports_the_server():
     out = subprocess.run([sys.executable, "-c", code], cwd=REPO, capture_output=True,
                          text=True, check=True)
     assert out.stdout.strip() == "False"
+
+
+# ---------------------------------------------------------------------------
+# models-lead addendum G3: #535's no-evidence decks (G3-a to G3-d)
+# ---------------------------------------------------------------------------
+
+LINE = "ERROR deck-evidence {run}: {n} delivered cards of a deck with no evidence (no rows, no pack)"
+
+
+def _with_outcomes_on_j(db, n):
+    """n more outcomes joining j's loaded cards (a packed deck: packed-admitted)."""
+    for i in range(n):
+        _post(db, f"j:{i % 10}", action="viewed", at=SERVED)
+
+
+@pytest.mark.parametrize("orphan, lines, explained", [
+    ("gone:2", {"gone": 3}, True),           # its run captured, its index below the count
+    ("gone:3", {"gone": 3}, False),          # at the count: not a card that deck delivered
+    ("other:0", {"gone": 3}, False),         # not a captured run
+], ids=["explained", "past_the_count", "not_captured"])
+def test_g3_b_explains_an_orphan_only_on_a_captured_deck_below_its_count(orphan, lines, explained):
+    db = _joins_db()
+    _with_outcomes_on_j(db, 200)
+    _post(db, orphan)
+    r = flip_read(db.eng, since=SINCE, as_of=LATE, no_evidence=lines)
+    g3 = r.g3
+    assert (g3["explained_orphans"], g3["orphans"]) == ((1, 0) if explained else (0, 1))
+    assert g3["status"] == (PASS if explained else FAIL)
+    kill = "G1 failed or G3 has orphans: models-lead recommends the kill"
+    assert (kill in render(r)) is not explained
+    if explained:
+        assert ("G3 explained: no-evidence deck (models-lead G3-b): 1 outcomes on 1 decks, of "
+                "203 outcomes on packed-admitted decks.") in render(r)
+
+
+def test_g3_d_explained_outcomes_above_1_percent_fail_and_recommend_the_kill():
+    """Two explained outcomes against 2 joined on packed-admitted decks: not rare."""
+    db = _joins_db()
+    _post(db, "gone:0")
+    _post(db, "gone:1")
+    r = flip_read(db.eng, since=SINCE, as_of=LATE, no_evidence={"gone": 2})
+    assert (r.g3["explained_orphans"], r.g3["orphans"], r.g3["explained_over_limit"]) == (
+        2, 0, True)
+    assert r.g3["status"] == FAIL
+    out = render(r)
+    assert "(above 1%: G3 FAILs, G3-d)" in out
+    assert "G1 failed or G3 has orphans: models-lead recommends the kill" in out
+
+
+def test_g3_d_any_535_deck_closes_the_path_before_the_freeze():
+    db = _joins_db()
+    r = flip_read(db.eng, since=SINCE, as_of=LATE, no_evidence={"gone": 4})
+    assert (r.g3["no_evidence_decks"], r.g3["status"]) == (1, PASS)
+    assert ("#535: 1 delivered decks with no rows and no pack in the lines: trades-eng closes "
+            "the path before the launch-week freeze, and mode 2 waits for that fix") in render(r)
+    assert "G3 #535 lines: none given" in render(flip_read(db.eng, since=SINCE, as_of=LATE))
+
+
+def test_the_cli_reads_the_captured_535_lines(tmp_path, capsys):
+    path, log = tmp_path / "read.db", tmp_path / "535.log"
+    db = _file_db(path)
+    db.eng.dispose()
+    log.write_text(LINE.format(run="gone", n=2) + "\nnoise\n" + LINE.format(run="gone", n=1),
+                   encoding="utf-8")
+    main(["--db", str(path), "--since", SINCE, "--as-of", LATE, "--json",
+          "--no-evidence-log", str(log)])
+    assert json.loads(capsys.readouterr().out)["g3"]["no_evidence_decks"] == 1
+    assert fr.parse_no_evidence_log(log.read_text(encoding="utf-8")) == {"gone": 3}
