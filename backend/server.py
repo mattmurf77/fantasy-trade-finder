@@ -24058,23 +24058,33 @@ def _roster_read_failed_copy(platform: str) -> str:
 
 
 # C10 (head-eng pre-launch triage): plain copy for an ESPN/MFL trade-send
-# write that failed. PLACEHOLDER copy, pending marketing via head-eng; a swap
-# is a change here and nowhere else. The provider's raw body goes to the log
-# (`_provider_body_for_log`), never into `detail` / `message`.
-_SEND_REJECTED_COPY = ("{platform} didn’t accept this trade, so nothing was sent. "
-                       "Check the trade on {platform} and try again.")
-_SEND_OUTCOME_UNKNOWN_COPY = ("Couldn’t confirm whether this trade reached {platform}. "
-                              "Check {platform} before sending it again.")
+# write that failed. Final copy: marketing-lead-copy.md §6 addendum 10, items
+# 8a–8h (2026-10-28), straight apostrophes as approved; a swap is a change
+# here and nowhere else. Never "failed", "error" or provider text, and never
+# "nothing was sent" where the outcome is unknown. The provider's raw body
+# goes to the log (`_provider_body_for_log`), never into `detail` / `message`.
+_SEND_REJECTED_COPY = ("{platform} didn't accept this trade, so nothing was sent. "
+                       "You can still propose it on {platform}.")                      # 8a / 8b
+_SEND_NOT_SENT_COPY = ("Couldn't reach {platform} right now, so nothing was sent. "
+                       "Try again in a moment.")                                      # 8c / 8d
+_SEND_OUTCOME_UNKNOWN_COPY = ("Couldn't confirm whether this trade reached {platform}. "
+                              "Check your league's pending trades on {platform} "
+                              "before you send it again.")                            # 8e / 8f
 # POST /api/trades/respond-mfl answers an existing trade (accept / reject /
-# revoke), so "this trade … nothing was sent" would be wrong there.
-_RESPOND_REJECTED_COPY = ("{platform} didn’t accept this response, so nothing changed. "
-                          "Check the trade on {platform} and try again.")
-_RESPOND_OUTCOME_UNKNOWN_COPY = ("Couldn’t confirm whether this response reached {platform}. "
-                                 "Check the trade on {platform} before trying again.")
+# revoke), so "this trade … nothing was sent" would be wrong there. 8g also
+# covers its not-sent (network) case: addendum 10 has no separate line.
+_RESPOND_REJECTED_COPY = ("{platform} didn't accept your response, so nothing changed. "
+                          "Check the trade on {platform}.")                           # 8g
+_RESPOND_OUTCOME_UNKNOWN_COPY = ("Couldn't confirm whether your response reached {platform}. "
+                                 "Check the trade on {platform} before you respond again.")  # 8h
+# The write-side 401/403 on POST /api/trades/propose-espn (addendum 10's
+# optional line, §6 "Not touched").
+_ESPN_WRITE_AUTH_EXPIRED_COPY = "Your ESPN sign-in has expired. Connect ESPN again to send."
 
 
 def _send_write_failed(code_prefix: str, platform: str, kind, *,
                        rejected_copy: str = _SEND_REJECTED_COPY,
+                       network_copy: str = _SEND_NOT_SENT_COPY,
                        unknown_copy: str = _SEND_OUTCOME_UNKNOWN_COPY) -> tuple[dict, int]:
     """C10: a propose (or respond) route's response for a failed, non-auth
     provider write.
@@ -24082,13 +24092,16 @@ def _send_write_failed(code_prefix: str, platform: str, kind, *,
     `kind` 'outcome_unknown' (the provider may have the write, see
     backend/write_outcome.py) → 502 `{code_prefix}_outcome_unknown`, so the
     client never invites a blind retry that could send it twice. Every other
-    kind keeps 502 `{code_prefix}_write_failed`. Both carry `kind` and
+    kind keeps 502 `{code_prefix}_write_failed`; its line is chosen by kind:
+    'network' (nothing was processed: DNS, refused, no route, or MFL's 429
+    throttle) gets the "couldn't reach … try again" line, anything else
+    ('error', 'input') the "didn't accept" line. All carry `kind` and
     `detail` == `message` == plain copy, never provider text."""
     if kind == _write_outcome.OUTCOME_UNKNOWN:
         msg = unknown_copy.format(platform=platform)
         return {"error": f"{code_prefix}_outcome_unknown", "kind": kind,
                 "detail": msg, "message": msg}, 502
-    msg = rejected_copy.format(platform=platform)
+    msg = (network_copy if kind == "network" else rejected_copy).format(platform=platform)
     return {"error": f"{code_prefix}_write_failed", "kind": kind,
             "detail": msg, "message": msg}, 502
 
@@ -38096,7 +38109,7 @@ def respond_trade_in_mfl():
                     _provider_body_for_log(getattr(e, "detail", None)))
         payload, status = _send_write_failed(
             "mfl", "MFL", e.kind, rejected_copy=_RESPOND_REJECTED_COPY,
-            unknown_copy=_RESPOND_OUTCOME_UNKNOWN_COPY)
+            network_copy=_RESPOND_REJECTED_COPY, unknown_copy=_RESPOND_OUTCOME_UNKNOWN_COPY)
         return jsonify(payload), status
 
     # trade_responded (server-fired, taxonomy 2026-08-11) — confirmed-success
@@ -38542,7 +38555,7 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
             delete_espn_credential(user_id)
         except Exception:
             log.exception("espn propose: credential delete failed")
-        _msg = "ESPN rejected the sign-in — connect ESPN again."
+        _msg = _ESPN_WRITE_AUTH_EXPIRED_COPY
         return {"error": "espn_auth_expired", "message": _msg, "detail": _msg}, 409
     except _espn_write.EspnWriteError as e:
         # C10: ESPN's raw body is for this log line only. A timeout or reset

@@ -19,7 +19,9 @@ head-eng's pre-launch triage, C10. Covered here:
     is `send_failed` with the plain copy.
 
 No network: the real adapters run with an injected `_opener`, or the
-adapter is a mock. Placeholder copy, pending marketing via head-eng.
+adapter is a mock. Copy: marketing's final lines, addendum 10 items 8a–8h
+(`docs/plans/org-bringup/leads/marketing-lead-copy.md` §6, 2026-10-28), pinned
+word for word below with straight apostrophes.
 """
 import errno
 import http.client
@@ -33,6 +35,7 @@ import pytest
 
 import backend.espn_write as espn_write
 import backend.mfl_write as mfl_write
+import backend.server as server
 from backend import overhaul_store as store
 from backend.tests import test_espn_propose_route as espn_t
 from backend.tests import test_i2_espn_ownership as i2_espn
@@ -41,14 +44,19 @@ from backend.tests import test_mfl_propose_route as mfl_t
 from backend.tests import test_mfl_trade_lifecycle as mfl_life_t
 from backend.tests import test_overhaul_api as ovh_t
 
-ESPN_REJECTED = ("ESPN didn’t accept this trade, so nothing was sent. "
-                 "Check the trade on ESPN and try again.")
-MFL_REJECTED = ("MFL didn’t accept this trade, so nothing was sent. "
-                "Check the trade on MFL and try again.")
-ESPN_UNKNOWN = ("Couldn’t confirm whether this trade reached ESPN. "
-                "Check ESPN before sending it again.")
-MFL_UNKNOWN = ("Couldn’t confirm whether this trade reached MFL. "
-               "Check MFL before sending it again.")
+# Addendum 10, word for word, straight apostrophes.
+ESPN_REJECTED = "ESPN didn't accept this trade, so nothing was sent. You can still propose it on ESPN."  # 8a
+MFL_REJECTED = "MFL didn't accept this trade, so nothing was sent. You can still propose it on MFL."     # 8b
+ESPN_NOT_SENT = "Couldn't reach ESPN right now, so nothing was sent. Try again in a moment."            # 8c
+MFL_NOT_SENT = "Couldn't reach MFL right now, so nothing was sent. Try again in a moment."              # 8d
+ESPN_UNKNOWN = ("Couldn't confirm whether this trade reached ESPN. "
+                "Check your league's pending trades on ESPN before you send it again.")              # 8e
+MFL_UNKNOWN = ("Couldn't confirm whether this trade reached MFL. "
+               "Check your league's pending trades on MFL before you send it again.")                # 8f
+RESPOND_REJECTED = "MFL didn't accept your response, so nothing changed. Check the trade on MFL."      # 8g
+RESPOND_UNKNOWN = ("Couldn't confirm whether your response reached MFL. "
+                   "Check the trade on MFL before you respond again.")                               # 8h
+ESPN_AUTH_EXPIRED = "Your ESPN sign-in has expired. Connect ESPN again to send."                       # optional line
 
 MARKER = "C10RAWPROVIDERMARKER"
 SWID_ECHO = "{AAAA1111-0000-0000-0000-000000000001}"
@@ -305,7 +313,7 @@ def test_espn_connect_failure_before_send_is_an_ordinary_failure(espn_client, mo
     r = _post_espn(espn_client, monkeypatch, NOT_SENT[case])
     assert r.status_code == 502
     assert r.get_json() == {"error": "espn_write_failed", "kind": "network",
-                            "detail": ESPN_REJECTED, "message": ESPN_REJECTED}
+                            "detail": ESPN_NOT_SENT, "message": ESPN_NOT_SENT}
 
 
 @pytest.mark.parametrize("case", ["read_timeout", "remote_disconnected", "http_502"])
@@ -321,7 +329,16 @@ def test_mfl_connect_failure_before_send_is_an_ordinary_failure(mfl_client, monk
     r = _post_mfl(mfl_client, monkeypatch, NOT_SENT[case])
     assert r.status_code == 502
     assert r.get_json() == {"error": "mfl_write_failed", "kind": "network",
-                            "detail": MFL_REJECTED, "message": MFL_REJECTED}
+                            "detail": MFL_NOT_SENT, "message": MFL_NOT_SENT}
+
+
+def test_mfl_429_throttle_gets_the_not_sent_line(mfl_client, monkeypatch):
+    """MFL's 429 carries kind `network` (a throttle is processed by nothing),
+    so it reads 8d, "try again in a moment", not 8b."""
+    r = _post_mfl(mfl_client, monkeypatch, _http_error(429, "<html>slow down</html>"))
+    assert r.status_code == 502
+    assert r.get_json() == {"error": "mfl_write_failed", "kind": "network",
+                            "detail": MFL_NOT_SENT, "message": MFL_NOT_SENT}
 
 
 def test_outcome_unknown_fires_no_trade_sent(espn_client, monkeypatch):
@@ -336,7 +353,7 @@ def test_espn_auth_rejection_body_is_not_returned(espn_client, monkeypatch, capl
     r = _post_espn(espn_client, monkeypatch, _http_error(401, RAW_HTML))
     assert r.status_code == 409 and r.get_json()["error"] == "espn_auth_expired"
     assert MARKER not in r.get_data(as_text=True)
-    assert r.get_json()["detail"] == r.get_json()["message"]
+    assert r.get_json()["detail"] == r.get_json()["message"] == ESPN_AUTH_EXPIRED
     _assert_logged_masked_and_truncated(caplog, "espn propose auth-rejected")
 
 
@@ -350,13 +367,72 @@ def test_mfl_auth_rejection_body_is_not_returned(mfl_client, monkeypatch, caplog
 
 
 # ---------------------------------------------------------------------------
+# The copy: pinned word for word, swept for banned words, chosen by kind
+# ---------------------------------------------------------------------------
+
+# Every C10 copy constant in backend/server.py, with the outcome it speaks for.
+C10_CONSTANTS = {
+    "_SEND_REJECTED_COPY": "rejected",
+    "_SEND_NOT_SENT_COPY": "not_sent",
+    "_SEND_OUTCOME_UNKNOWN_COPY": "unknown",
+    "_RESPOND_REJECTED_COPY": "rejected",
+    "_RESPOND_OUTCOME_UNKNOWN_COPY": "unknown",
+    "_ESPN_WRITE_AUTH_EXPIRED_COPY": "auth",
+}
+
+
+@pytest.mark.parametrize("const,platform,expected", [
+    ("_SEND_REJECTED_COPY", "ESPN", ESPN_REJECTED),
+    ("_SEND_REJECTED_COPY", "MFL", MFL_REJECTED),
+    ("_SEND_NOT_SENT_COPY", "ESPN", ESPN_NOT_SENT),
+    ("_SEND_NOT_SENT_COPY", "MFL", MFL_NOT_SENT),
+    ("_SEND_OUTCOME_UNKNOWN_COPY", "ESPN", ESPN_UNKNOWN),
+    ("_SEND_OUTCOME_UNKNOWN_COPY", "MFL", MFL_UNKNOWN),
+    ("_RESPOND_REJECTED_COPY", "MFL", RESPOND_REJECTED),
+    ("_RESPOND_OUTCOME_UNKNOWN_COPY", "MFL", RESPOND_UNKNOWN),
+    ("_ESPN_WRITE_AUTH_EXPIRED_COPY", "ESPN", ESPN_AUTH_EXPIRED),
+], ids=["8a", "8b", "8c", "8d", "8e", "8f", "8g", "8h", "auth"])
+def test_copy_is_addendum_10_word_for_word(const, platform, expected):
+    assert getattr(server, const).format(platform=platform) == expected
+    assert "\u2019" not in expected and "\u2018" not in expected      # straight apostrophes only
+
+
+@pytest.mark.parametrize("const", sorted(C10_CONSTANTS))
+def test_copy_never_says_failed_error_or_nothing_sent_when_unknown(const):
+    text = getattr(server, const)
+    low = text.lower()
+    assert "fail" not in low and "error" not in low, text
+    assert "\u2019" not in text and "\u2018" not in text, text
+    if C10_CONSTANTS[const] == "unknown":
+        assert "nothing was sent" not in low and "nothing changed" not in low, text
+
+
+def test_every_c10_copy_constant_is_swept():
+    """A new `_SEND_*_COPY` / `_RESPOND_*_COPY` constant joins the sweep."""
+    found = {n for n in vars(server) if n.endswith("_COPY")
+             and (n.startswith("_SEND_") or n.startswith("_RESPOND_"))}
+    assert found <= set(C10_CONSTANTS), found - set(C10_CONSTANTS)
+
+
+@pytest.mark.parametrize("prefix,platform,rejected,not_sent,unknown", [
+    ("espn", "ESPN", ESPN_REJECTED, ESPN_NOT_SENT, ESPN_UNKNOWN),
+    ("mfl", "MFL", MFL_REJECTED, MFL_NOT_SENT, MFL_UNKNOWN),
+], ids=["espn", "mfl"])
+def test_line_is_chosen_by_kind_and_both_not_sent_kinds_keep_write_failed(
+        prefix, platform, rejected, not_sent, unknown):
+    for kind, line in (("network", not_sent), ("error", rejected), ("input", rejected)):
+        payload, status = server._send_write_failed(prefix, platform, kind)
+        assert status == 502
+        assert payload == {"error": f"{prefix}_write_failed", "kind": kind,
+                           "detail": line, "message": line}
+    payload, status = server._send_write_failed(prefix, platform, "outcome_unknown")
+    assert (status, payload["error"], payload["detail"]) == (502, f"{prefix}_outcome_unknown", unknown)
+
+
+# ---------------------------------------------------------------------------
 # POST /api/trades/respond-mfl: the same adapter, the same rule
 # ---------------------------------------------------------------------------
 
-RESPOND_REJECTED = ("MFL didn’t accept this response, so nothing changed. "
-                    "Check the trade on MFL and try again.")
-RESPOND_UNKNOWN = ("Couldn’t confirm whether this response reached MFL. "
-                   "Check the trade on MFL before trying again.")
 RAW_MFL_ERROR = (f"<error>{MARKER} Trades are disabled for member {SWID_ECHO} "
                  f"MFL_USER_ID={COOKIE_SECRET} {'x ' * 250}</error>")
 REAL_MFL_RESPOND = mfl_write.respond_trade
@@ -399,6 +475,7 @@ def test_respond_mfl_timeout_after_send_is_outcome_unknown(respond_client, monke
 
 
 def test_respond_mfl_refused_connection_is_an_ordinary_failure(respond_client, monkeypatch):
+    """Addendum 10 has no not-sent line for a response, so 8g covers it too."""
     r = _post_respond(respond_client, monkeypatch, NOT_SENT["refused"])
     assert r.status_code == 502
     assert r.get_json() == {"error": "mfl_write_failed", "kind": "network",

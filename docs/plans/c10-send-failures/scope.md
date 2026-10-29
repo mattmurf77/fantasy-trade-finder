@@ -10,7 +10,10 @@ delta and simulator-gate tier (D-056) are left out on purpose.
 **Builder:** C10 backend worker (platforms-eng), branch `fix/espn-mfl-send-failures`
 **Operator sign-off on waivers:** not needed. The waivers below (structural guard, TestFlight checklist) carry their reasons: the change is server-only and mobile is untouched.
 
-**Copy status:** every user-facing string below is a **placeholder**, pending marketing via head-eng. A swap is a change to the constants in `backend/server.py` (`_SEND_REJECTED_COPY`, `_SEND_OUTCOME_UNKNOWN_COPY`, `_RESPOND_REJECTED_COPY`, `_RESPOND_OUTCOME_UNKNOWN_COPY`) and the matching test strings.
+**Copy status: final.**
+- **Source:** marketing's addendum 10, items 8a–8h (`docs/plans/org-bringup/leads/marketing-lead-copy.md` §6, approved 2026-10-28, no legal stamp needed), plus its optional ESPN auth-expired line. Built with straight apostrophes, as approved.
+- **Where it lives:** the constants in `backend/server.py`: `_SEND_REJECTED_COPY` (8a/8b), `_SEND_NOT_SENT_COPY` (8c/8d), `_SEND_OUTCOME_UNKNOWN_COPY` (8e/8f), `_RESPOND_REJECTED_COPY` (8g), `_RESPOND_OUTCOME_UNKNOWN_COPY` (8h) and `_ESPN_WRITE_AUTH_EXPIRED_COPY`. `test_c10_send_failures.py` pins each word for word.
+- **The batch's "never" rule is enforced by a test:** no "failed", no "error", no raw provider text, and no "nothing was sent" where the outcome is unknown.
 
 ## 0. Problem and behavior
 
@@ -24,13 +27,15 @@ delta and simulator-gate tier (D-056) are left out on purpose.
 
 | Outcome | Code (status) | `detail` == `message` |
 |---|---|---|
-| Provider refused, or nothing was sent (DNS / refused / no route, MFL 429, input) — propose | `espn_write_failed` / `mfl_write_failed` (502, **unchanged**) | "{ESPN\|MFL} didn’t accept this trade, so nothing was sent. Check the trade on {ESPN\|MFL} and try again." |
-| May have reached the provider, no definitive answer — propose | **new** `espn_outcome_unknown` / `mfl_outcome_unknown` (502) | "Couldn’t confirm whether this trade reached {ESPN\|MFL}. Check {ESPN\|MFL} before sending it again." |
-| Refused / not sent — respond-mfl | `mfl_write_failed` (502, unchanged) | "MFL didn’t accept this response, so nothing changed. Check the trade on MFL and try again." |
-| May have landed — respond-mfl | **new** `mfl_outcome_unknown` (502) | "Couldn’t confirm whether this response reached MFL. Check the trade on MFL before trying again." |
-| Auth rejected on the write (all three routes) | `espn_auth_expired` / `mfl_auth_expired` (409, unchanged) | the existing message; the raw body is no longer returned |
+| Provider refused (`kind: "error"`; also `"input"`) — propose | `espn_write_failed` / `mfl_write_failed` (502, **unchanged**) | 8a / 8b: "{ESPN\|MFL} didn't accept this trade, so nothing was sent. You can still propose it on {ESPN\|MFL}." |
+| Not sent: DNS / refused / no route, and MFL's 429 throttle (`kind: "network"`) — propose | `espn_write_failed` / `mfl_write_failed` (502, **unchanged**) | 8c / 8d: "Couldn't reach {ESPN\|MFL} right now, so nothing was sent. Try again in a moment." |
+| May have reached the provider, no definitive answer — propose | **new** `espn_outcome_unknown` / `mfl_outcome_unknown` (502) | 8e / 8f: "Couldn't confirm whether this trade reached {ESPN\|MFL}. Check your league's pending trades on {ESPN\|MFL} before you send it again." |
+| Refused or not sent (`error`, `input` and `network` alike) — respond-mfl | `mfl_write_failed` (502, unchanged) | 8g: "MFL didn't accept your response, so nothing changed. Check the trade on MFL." Addendum 10 has no separate not-sent line for a response, so 8g covers `network` too |
+| May have landed — respond-mfl | **new** `mfl_outcome_unknown` (502) | 8h: "Couldn't confirm whether your response reached MFL. Check the trade on MFL before you respond again." |
+| Auth rejected on the write — propose-espn | `espn_auth_expired` (409, unchanged) | "Your ESPN sign-in has expired. Connect ESPN again to send." (addendum 10's optional line); the raw body is no longer returned |
+| Auth rejected on the write — propose-mfl, respond-mfl | `mfl_auth_expired` (409, unchanged) | the existing "Your MFL sign-in expired — sign in again."; the raw body is no longer returned |
 
-- Every outcome carries `kind`.
+- Every outcome carries `kind`. The line inside `*_write_failed` is chosen by `kind` in `_send_write_failed`, and the code stays `*_write_failed` for both kinds.
 - **Logging:** the provider's raw body goes to one `WARNING` line on the `trade_finder` logger via `_provider_body_for_log`. The helper flattens whitespace, masks SWID-shaped GUIDs, `espn_s2` / `SWID` / `MFL_USER_ID` values and long opaque blobs, then caps the line at 300 characters.
 - **No retries:** nothing retries automatically.
 - **Unknown is not a send:** an outcome-unknown result fires no `trade_sent` / `trade_responded` and writes no `trade_proposals` row.
@@ -53,7 +58,7 @@ delta and simulator-gate tier (D-056) are left out on purpose.
 - Rejections stay `send_failed` with the plain copy.
 - No new attempt state, so the trades-eng contract is unchanged.
 
-**Out of scope, owner mobile (server-only PR):**
+**Out of scope, owner mobile (server-only PR).** Marketing's addendum 10 item 8i specs the client side for the 11-06 binary: `*_write_failed` gets title "Not sent" with body = `detail` alone, and `*_outcome_unknown` gets title "Check before resending" with only the Open ESPN/MFL action, no Retry. The defects it answers:
 - **`*_write_failed` reads twice:** both buttons prefix it with "ESPN/MFL rejected the request:", so the plain sentence reads as a repeat.
 - **Unknown title:** `*_outcome_unknown` reaches each button's catch-all, which shows `detail` but is titled "Couldn’t send".
 - **Overhaul plan screen:** `OverhaulPlanScreen` shows `error.message` only for `send_failed`, so an unknown attempt shows just its "Send status unknown" pill.
@@ -79,7 +84,7 @@ delta and simulator-gate tier (D-056) are left out on purpose.
 ## 3. Evidence scope
 
 - [ ] **Structural guard:** WAIVED, because mobile is unchanged (server-only).
-- [x] **Unit tests:** `backend/tests/test_c10_send_failures.py`, 70 tests.
+- [x] **Unit tests:** `backend/tests/test_c10_send_failures.py`, 89 tests.
   - **Adapters**, through the real `propose_trade` with an injected opener:
     - 4 not-sent cases → `network`;
     - 13 after-send cases → `outcome_unknown`, per platform;
@@ -97,18 +102,27 @@ delta and simulator-gate tier (D-056) are left out on purpose.
     - timeout / reset / 504 → `mfl_outcome_unknown`;
     - refused → `mfl_write_failed`;
     - the auth body is not returned.
-  - **Overhaul**, through the real cores:
+  - **Copy (addendum 10):**
+    - each of 8a–8h and the auth line pinned word for word, straight apostrophes;
+    - every C10 copy constant swept for "fail" / "error" / curly apostrophes, and the unknown lines for "nothing was sent" / "nothing changed";
+    - a guard that any new `_SEND_*_COPY` / `_RESPOND_*_COPY` constant joins the sweep;
+    - the kind split: `network` → 8c/8d, `error` / `input` → 8a/8b, both `*_write_failed`;
+    - MFL 429 → 8d at the route.
+  - **Overhaul**, through the real cores (the `outcome_unknown` attempts carry 8e / 8f):
     - ESPN mixed batch: a tie that times out → 2 × `outcome_unknown`, still reserved; a rejection → `send_failed` with the copy, released; 2 × `proposed`; `GET /api/overhauls/{id}` shows the same;
     - MFL batch with every offer reset → 5 × `outcome_unknown`, all reserved.
 - **Sabotage**, each red, then restored byte-identical:
 
   | Sabotage | Red |
   |---|---|
-  | Raw `detail` returned again (propose ESPN + MFL, respond-mfl) | 24 |
+  | Raw `detail` returned again (propose ESPN + MFL, respond-mfl) | 25 |
   | Adapters' after-send branch classified `network` | 13 |
   | Every `URLError` treated as not sent | 4 |
-  | Routes ignore `outcome_unknown` (`_send_write_failed`) | 13 |
+  | Routes ignore `outcome_unknown` (`_send_write_failed`) | 15 |
   | Overhaul records the codes as `send_failed` | 2 |
+  | The `network` kind falls back to the rejected line (8a/8b) | 7 |
+  | A curly apostrophe in `_SEND_NOT_SENT_COPY` | 10 |
+  | "failed" added to `_SEND_OUTCOME_UNKNOWN_COPY` | 14 |
 
 - [x] **Code-walk proof:**
   - `backend/espn_write.py` `_post_transaction` and `backend/mfl_write.py` `_issue_import` / `_parse_import_response` classify each failure.

@@ -16,6 +16,12 @@ Full gates, platforms-eng lead (head-eng pre-launch triage C10, "the only C item
   - overhaul recording the codes as `send_failed` → 2 red.
 - **Targeted (after merging `origin/main` @ `052c9746`):** 530 passed in 22 files. They are the C10 file, `test_espn_propose_route`, `test_mfl_propose_route`, `test_espn_write`, `test_mfl_write`, `test_i2_espn_ownership`, `test_i2_mfl_ownership`, `test_i2_overhaul`, `test_i2_sleeper_ownership`, `test_overhaul_api`, `test_overhaul_service`, `test_overhaul_store`, `test_bilateral_overhaul`, `test_mfl_trade_lifecycle` (respond-mfl), `test_api_observability` and `test_sleeper_write_route`, plus six other suites that import the changed modules. The same 22 files were 523/523 before the respond-mfl follow-up. On the base commit before C10, the 10 propose / write / I-2 / overhaul-api / lifecycle files ran 235 passed.
 - **Not run:** the full backend suite (CI runs it; the local machine is overloaded); live ESPN/MFL writes (all mocked); `tsc` and testid-lint (no mobile change).
+- **2026-10-28, final copy (marketing addendum 10, 8a–8h + the optional ESPN auth line):**
+  - The placeholders are replaced word for word, with straight apostrophes.
+  - `_send_write_failed` now picks the `*_write_failed` line by `kind`: `network` → 8c/8d ("Couldn't reach … Try again in a moment.", including MFL's 429); `error` / `input` → 8a/8b. respond-mfl uses 8g for its `network` case too, since addendum 10 has no separate line for it.
+  - The C10 file is 89 tests (19 new): pins for each string, a banned-word sweep of every C10 copy constant, the kind split, and MFL 429 → 8d. The overhaul unknown attempts carry 8e/8f.
+  - New sabotages, each red then restored: `network` falls back to the rejected line → 7 red; a curly apostrophe → 10; "failed" in a constant → 14. The earlier five re-run at 25 / 13 / 4 / 15 / 2.
+  - Targeted rerun, on the same 22 files at `1a92a7ab` plus this change: 549 passed (530 + the 19 new).
 
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 
