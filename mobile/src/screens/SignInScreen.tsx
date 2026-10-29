@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { TickLabel, Text as ChalkText } from '../components/chalkline';
-import { appleSignIn, resolveSmartStart, signIn } from '../api/auth';
+import { appleSignIn, refreshVerification, resolveSmartStart, signIn } from '../api/auth';
 import { track } from '../api/events';
 import { consumeAppleReauthHint, NO_LEAGUE_ID, useSession } from '../state/useSession';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
@@ -404,6 +404,10 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
           league_id:   res.league_id || NO_LEAGUE_ID,
           league_name: res.league_name || 'No league linked',
         });
+        // No session init follows for this session, so ask the server for
+        // its verification now (head-eng 2026-10-28). Not awaited: the
+        // navigation below doesn't wait on it.
+        void refreshVerification();
         track('signin_succeeded', { method: 'apple' }, 'SignIn');
         (onAccountSignedIn ?? onSignedIn)(platformIntent);
       } else {

@@ -1565,7 +1565,7 @@ export default function InLeagueCalculator({
                 (id) => playerById[id]?.pos === 'PICK',
               )}
               fallbackText={[
-                `Trade idea vs @${opponent?.username ?? 'them'} (Dynasty Trade Finder · ${FORMAT_LABEL[format]})`,
+                `Trade idea vs @${opponent?.username ?? 'them'} (Fleeced · ${FORMAT_LABEL[format]})`,
                 `I send: ${giveIds.map((id) => playerById[id]?.name ?? id).join(', ')}`,
                 `I get: ${receiveIds.map((id) => playerById[id]?.name ?? id).join(', ')}`,
                 `Consensus: ${Math.round(ev.give_value).toLocaleString()} vs ${Math.round(ev.receive_value).toLocaleString()}`,
