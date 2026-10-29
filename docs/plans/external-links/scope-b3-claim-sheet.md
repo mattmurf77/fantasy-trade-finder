@@ -115,7 +115,7 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
 
   **C. Non-Sleeper invariance.** `ClaimSheet.tsx` `resolveAddPlatform`, `NO_ADD_REASON` and `explainNoAdd` (`:59-104`): no content change (S9). Free Agents' `onAdd` and Usage Trends' `doAdd` are unchanged.
 
-- [x] **Manual TestFlight checklist** (for the operator, on the build that carries this branch; adapted from #351 PRD rows 13, 14 and 16). Run the commit-1 variant if commits 2 and 3 are dropped, the steps variant if they ship. Rows 6–9 are the steps variant at commit 3 (numbered rows; adapted from PRD rows 13/14); row 10 is new at commit 4.
+- [x] **Manual TestFlight checklist** (for the operator, on the build that carries this branch; adapted from #351 PRD rows 13, 14 and 16). Run the commit-1 variant if commits 2 and 3 are dropped, the steps variant if they ship. Rows 6–9 are the steps variant at commit 3 (numbered rows; adapted from PRD rows 13/14); row 10 is new at commit 4. Rows 6 and 7 gained a step each from ux-lead's flow re-check (2026-10-28, via head-eng).
 
   | # | Sleeper app | Steps | Expected |
   |---|---|---|---|
@@ -124,8 +124,8 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
   | 3 | **not installed** (Settings → General → iPhone Storage → Sleeper → Offload App) | Free agents → Add → CTA | Alert "Sleeper isn’t installed" with **Cancel** / **Get Sleeper**. **Get Sleeper** opens the **App Store app** on Sleeper's listing, with no Safari. **Cancel** returns to the sheet and opens nothing. Never a silent no-op. |
   | 4 | installed | Free agents → Add → **double-tap** the CTA fast | Exactly one app switch. |
   | 5 | — | An ESPN or MFL league → Free agents → **Add** | Unchanged: the "Can't add in ESPN leagues yet" / "Can't add in MFL leagues yet" alert. No sheet, no link. |
-  | 6 | installed, signed in | **Steps variant.** As 1, on a league with open slots (a priority-waiver league, or FAAB with the bid left empty) | Before the CTA, under an **IN SLEEPER** heading, the sheet shows exactly three numbered rows: "1 Open **{L's name}**", "2 Players, then search **{player}**", "3 Add"; then "We'll copy {player} so you can paste it into search." directly above the CTA. No drop row, no bid row. After the CTA: switch to L in Sleeper if it opened M → Players → long-press the search field → **Paste** gives the player's name. |
-  | 7 | installed, **full roster** | **Steps variant.** Free agents → Add → look at the steps before tapping a drop; then tap a drop, tap a different drop, then tap it again to clear it | Before any tap, row 4 reads "Drop: pick a player above" in the same dim grey as the other rows (not amber, not red). After the first tap it reads "4 Drop **{first drop}**", then switches to the second drop's name, and returns to "Drop: pick a player above" when cleared. Rows 1–3 and the copy line don't move. |
+  | 6 | installed, signed in | **Steps variant.** As 1, on a league with open slots (a priority-waiver league, or FAAB with the bid left empty) | Before the CTA, under an **IN SLEEPER** heading, the sheet shows exactly three numbered rows: "1 Open **{L's name}**", "2 Players, then search **{player}**", "3 Add"; then "We'll copy {player} so you can paste it into search." directly above the CTA. No drop row, no bid row. After the CTA: switch to L in Sleeper if it opened M → Players → long-press the search field → **Paste** gives the player's name. Then switch back to FTF: the claim sheet is still open, with the same rows (on a full roster or in a FAAB league, the same drop and bid as before the CTA). |
+  | 7 | installed, **full roster** | **Steps variant.** Free agents → Add → look at the steps before tapping a drop; then tap a drop, tap a different drop, then tap it again to clear it | Before any tap, row 4 reads "Drop: pick a player above" in the same dim grey as the other rows (not amber, not red). After the first tap it reads "4 Drop **{first drop}**", then switches to the second drop's name, and returns to "Drop: pick a player above" when cleared. Rows 1–3 and the copy line don't move. With no drop picked, the CTA is still **enabled**; tap it, and Sleeper opens and asks for the drop in its own claim flow. |
   | 8 | installed | **Steps variant.** As 2 (Usage Trends, a non-focused league) | Row 1 names **the league the Add targeted** (the one FTF switched to), not the previously focused league. |
   | 9 | installed, a **FAAB** league | **Steps variant.** Free agents → Add → type a bid of 5, then clear it; repeat on a full roster with a drop picked | With room: a 4th row "4 Bid **$5**" appears as you type and disappears when the bid is cleared. Full roster with a drop picked: "4 Drop **{drop}**" then "5 Bid **$5**". The numbers never skip. |
   | 10 | installed, **full roster**, an **empty drop list**: mark every rostered player untouchable in FTF (untouchables are left out of the drop list) | **Steps variant.** Free agents → Add → look at the drop section and the steps | The drop section says "No droppable players found on your roster." and the untouchables note. Row 4 still renders and reads "4 Drop a player to make room", in the same dim grey as the other rows (not amber, not red), never "pick a player above". Rows 1–3 and the copy line don't change. In a FAAB league, a bid adds "5 Bid **$…**". |
@@ -191,7 +191,7 @@ Commits 3 and 4. Every string is a draft for the `bare` rung, pending **marketin
 | 3 | always | Add |
 | 4 | a drop is picked | Drop **{Drop}** |
 | 4 | full roster (`openSlots === 0`), nothing picked, a drop list to pick from | Drop: pick a player above |
-| 4 | full roster, nothing picked, an empty drop list (`candidates.length === 0`; commit 4) | Drop a player to make room |
+| 4 | full roster, nothing picked, an empty drop list (`candidates.length === 0`; commit 4) | Drop a player to make room (as built). Alternative for marketing: Drop: choose a player in Sleeper |
 | 4 or 5 | FAAB league, a bid entered (5 after a drop row, else 4) | Bid **${bid}** |
 | copy line | always, last, above the CTA | We'll copy {Name} so you can paste it into search. |
 
@@ -209,7 +209,7 @@ Every case ends with the copy line. The bid renders with the budget line's `toLo
 Still open:
 - "Add" (and "Players", "search") must match Sleeper's real labels, from the #351 device label capture (§7.3).
 - Closed by commit 3: the missing-league degrade (now the fallback row), the bid (now a row), and VoiceOver reading "→" as "right arrow" (no arrows left; each row reads as one element).
-- Closed by commit 4: a full roster whose drop list is empty (every player untouchable, or none droppable) said "Drop: pick a player above" with no one listed above. design-lead's ruling (review 2026-10-28, a SHOULD): keep the drop row, since the user still has to drop someone in Sleeper, and change only the words, to "Drop a player to make room". Chalk-dim like every row; no new style, no warn colour. The words still wait on marketing.
+- Closed by commit 4: a full roster whose drop list is empty (every player untouchable, or none droppable) said "Drop: pick a player above" with no one listed above. design-lead's ruling (review 2026-10-28, a SHOULD): keep the drop row, since the user still has to drop someone in Sleeper, and change only the words, to "Drop a player to make room". Chalk-dim like every row; no new style, no warn colour. The words still wait on marketing, who pick between "Drop a player to make room" and "Drop: choose a player in Sleeper" (head-eng, 2026-10-28).
 
 ## Known risk
 
