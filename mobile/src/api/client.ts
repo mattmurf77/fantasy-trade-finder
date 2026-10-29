@@ -289,6 +289,29 @@ export function setOnProRequired(
   _onProRequired = fn;
 }
 
+// ── the gate's on switch (release-lead QA P1-1: dark at ship) ──────────────
+// While `monetize.paywall` is off, or unknown before the flags load, every
+// gate path is today's `origin/main`: gateSignalFor answers null, so nothing
+// opens, nothing is held or re-sent, and every caller gets today's ApiError
+// and today's error UI (the live 403 verification_required included). The
+// reader is set at app start by state/usePaywallGate.installPaywallGate,
+// not imported here: the flags store imports api/flags, which imports this
+// file, so an import would be a cycle. Default: off.
+// The 402 branches (`isProRequired`) need no reader of their own: a 402
+// only comes from a server that enforces, and the flip turns
+// `monetize.paywall` on first.
+let _gateOn: () => boolean = () => false;
+export function setPaywallGateOn(fn: () => boolean): void {
+  _gateOn = fn;
+}
+function _gateIsOn(): boolean {
+  try {
+    return _gateOn() === true;
+  } catch {
+    return false;
+  }
+}
+
 function _pathname(path: string): string {
   return path.replace(/^https?:\/\/[^/]+/, '').split(/[?#]/)[0];
 }
@@ -325,8 +348,15 @@ function _isGatedPath(path: string): boolean {
     || /^\/api\/win-now\//.test(p);
 }
 
-/** Pure: what a failed call means for the gate. Null = not a gate answer. */
+/** What a failed call means for the gate. Null = not a gate answer, and
+ *  ALWAYS null while the gate is off (`setPaywallGateOn`): every consumer
+ *  then falls back to today's path. */
 export function gateSignalFor(err: unknown, path: string): GateSignal | null {
+  return _gateIsOn() ? _classifyGate(err, path) : null;
+}
+
+/** Pure classification, regardless of the switch. Callers check it first. */
+function _classifyGate(err: unknown, path: string): GateSignal | null {
   if (!(err instanceof ApiError)) return null;
   const kind = gateKindForPath(path);
   if (err.isProRequired) {
@@ -357,7 +387,9 @@ export function gateSignalFor(err: unknown, path: string): GateSignal | null {
 // apiRequest's catch, outside the request deadline.
 const _gateRetries = new WeakSet<RequestOptions>();
 async function _afterGateFailure<T>(err: unknown, path: string, opts: RequestOptions): Promise<T> {
-  const signal = opts.background ? null : gateSignalFor(err, path);
+  // Gate off: thrown exactly as today, before any dispatch, hold or re-send.
+  if (opts.background || !_gateIsOn()) throw err;
+  const signal = _classifyGate(err, path);
   const revision = (err as ApiError | null)?.requestRevision;
   if (!signal || !_onProRequired || revision !== getSessionRevision()) throw err;
   let outcome: Promise<GateOutcome> | void;

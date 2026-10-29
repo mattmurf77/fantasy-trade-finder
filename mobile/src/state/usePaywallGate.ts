@@ -2,11 +2,13 @@ import { create } from 'zustand';
 
 import {
   setOnProRequired,
+  setPaywallGateOn,
   type GateKind,
   type GateOutcome,
   type GateSignal,
 } from '../api/client';
 import type { PaywallSource, VerifyPath } from '../copy/monetization';
+import { useFeatureFlags } from './useFeatureFlags';
 import { useSession, type SavedUser } from './useSession';
 
 // The paywall router (#393 M1; D1, D3, D9, D15–D18).
@@ -143,6 +145,8 @@ export function openPaywall(params: PaywallParams): Promise<GateOutcome> | void 
 
 /** The client.ts seam handler. Exported for the structural check. */
 export function handleGateSignal(signal: GateSignal): Promise<GateOutcome> | void {
+  // Belt and braces: the client already sends nothing while the gate is off.
+  if (!paywallGateOn()) return;
   if (signal.action === 'paywall') {
     return openPaywall({ source: 'gate', gate: signal.gate ?? undefined, kind: signal.kind });
   }
@@ -152,7 +156,15 @@ export function handleGateSignal(signal: GateSignal): Promise<GateOutcome> | voi
 }
 
 /** App start (App.tsx): wire the client seam to this router. */
+/** The gate's on switch: `monetize.paywall`, read synchronously from the
+ *  flags store the way useFlag does. Unknown (not loaded, or absent) is off:
+ *  while it's off every gate path is today's (api/client's setPaywallGateOn). */
+export function paywallGateOn(): boolean {
+  return useFeatureFlags.getState().flags['monetize.paywall'] === true;
+}
+
 export function installPaywallGate(nav: GateNavigator): void {
   _nav = nav;
+  setPaywallGateOn(paywallGateOn);
   setOnProRequired(handleGateSignal);
 }
