@@ -3180,7 +3180,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_roster_change_revoke", 1.0, "S0 kill for the on_roster_change handler alone, read per call: 0 = the handler does nothing: no revoke, no re-stamp, no move recorded (the rest of S0 follows trade_i1_mode); 1 = it revokes a league job built on an older Sleeper read than the refreshed rows, only for a user whose session already holds the newer read (#470 QA), re-stamps a job whose rosters (its read's members, the picks then stored) hash to the new stamp, and records the move (#481 QA, #484 QA). NaN or any other value reads as 1. Deploy-free"),
     ("trade_gate_miss_mode", 0.0, "S0's no-card gate misses: 1 = serve them (roster_check_unavailable when the roster check can't run; the §3b withhold with wait_reason 'roster_check'); 0 = hold them for binaries before 1.22.0, which show them as 'Search failed' (a check that can't run serves the cards unchecked, loudly logged; a past-bound stale roster serves its I-1-filtered cards, logged roster_gate_miss_held). Flip to 1 once 1.22.0 is distributed. NaN or any other value reads as 0. Deploy-free"),
     # ── Deck-evidence retention (head-eng 2026-10-28; dark until a bound is set) ──
-    ("deck_evidence_retention_days", 0.0, "Deck-evidence retention cap (legal R28.20 (iii): 365). The cleanup loop deletes, a bounded batch per tick, every store of a deck first delivered more than this many days ago, all at once: its outcomes, deck_impressions rows, withdrawals, candidate set, bakeoff_runs row and pack; and legacy trade_impressions past it. 0 = off: the whole prune, full rows included, stays dark. A value under 56 (receipts' window) is refused: nothing is deleted and a warning is logged. Deploy-free"),
+    ("deck_evidence_retention_days", 0.0, "Deck-evidence retention cap (legal R28.20 (iii): 365). The cleanup loop deletes, a bounded batch per tick, every store of a deck first delivered more than this many days ago, all at once: its outcomes, pass reasons, deck_impressions rows, withdrawals, candidate set, bakeoff_runs row, policy shadow rows and pack; and legacy trade_impressions past it. 0 = off: the whole prune, full rows included, stays dark. A value under 56 (receipts' window) is refused: nothing is deleted and a warning is logged. Deploy-free"),
     ("deck_evidence_full_row_days", 90.0, "Deck-evidence retention, full rows (legal R28.20 (iii): 90): a PACKED deck's deck_impressions rows (full and ghost) are deleted this many days after its first delivery; the pack keeps every card until deck_evidence_retention_days. A deck with no pack keeps its rows until the cap. Acts only while deck_evidence_retention_days is on; 0 or a value at or past the cap = rows go with the deck at the cap; under 56 = refused and logged. Deploy-free"),
     ("trade_roster_bound_s", 300.0, "S0 §3b: a Sleeper roster whose last refresh is older than this many seconds is past the bound. Past the bound, the serve kicks one background roster refresh (P41); past it with the last attempt failed (league_roster_state 'stale'), cached cards are withheld (wait_reason 'roster_check'). Deploy-free"),
     ("trade_import_roster_fresh_s", 86400.0, "S0 §3: an ESPN/MFL/Fleaflicker league's stored rosters read 'fresh' while their newest league_members.updated_at is younger than this many seconds, else 'stale'. Logged only: never withholds, never rebuilds (ruling 29). Deploy-free"),
@@ -7202,26 +7202,30 @@ def _expired_decks(cutoff: str, limit: int) -> dict[str, tuple[str, str, int]]:
 
 def _delete_deck(conn, deck_job_id: str, user_id: str, league_id: str,
                  card_count: int) -> dict[str, int]:
-    """Every store of one deck (E-a1), outcomes first: a packed card's by its
-    contract id ("<deck_job_id>:<card_index>" for each of the pack's
-    `card_count` cards, R4.2 U2), whether or not it has a row, and a row's by
-    the row's impression_id. Exact ids, never a LIKE or a string range: under
-    prod's collation neither is a plain index range."""
+    """Every store of one deck (E-a1). The per-card ones first, outcomes and
+    pass reasons: a packed card's by its contract id ("<deck_job_id>:<k>" for
+    each of the pack's `card_count` cards, R4.2 U2), whether or not it has a
+    row, and a row's by the row's impression_id. Exact ids, never a LIKE or a
+    string range: under prod's collation neither is a plain index range."""
     i, o, p = deck_impressions_table, deck_outcomes_table, deck_evidence_packs_table
     w, c, b = deck_card_withdrawals_table, deck_candidate_sets_table, bakeoff_runs_table
+    r, sh = trade_pass_reasons_table, trade_policy_shadow_table
     contract_ids = [f"{deck_job_id}:{k}" for k in range(card_count)]
+    row_ids = select(i.c.impression_id).where(i.c.deck_job_id == deck_job_id)
     counts: dict[str, int] = {}
     for name, stmt in (
-            *(("deck_outcomes", delete(o).where(o.c.impression_id.in_(contract_ids[k:k + 500])))
+            *((name, delete(t).where(t.c.impression_id.in_(contract_ids[k:k + 500])))
+              for name, t in (("deck_outcomes", o), ("trade_pass_reasons", r))
               for k in range(0, len(contract_ids), 500)),
-            ("deck_outcomes", delete(o).where(o.c.impression_id.in_(
-                select(i.c.impression_id).where(i.c.deck_job_id == deck_job_id)))),
+            ("deck_outcomes", delete(o).where(o.c.impression_id.in_(row_ids))),
+            ("trade_pass_reasons", delete(r).where(r.c.impression_id.in_(row_ids))),
             ("deck_impressions", delete(i).where(i.c.deck_job_id == deck_job_id)),
             ("deck_card_withdrawals", delete(w).where(w.c.deck_job_id == deck_job_id)),
             ("deck_candidate_sets", delete(c).where(
                 c.c.user_id == user_id, c.c.league_id == league_id,
                 c.c.deck_job_id == deck_job_id)),
             ("bakeoff_runs", delete(b).where(b.c.deck_job_id == deck_job_id)),
+            ("trade_policy_shadow", delete(sh).where(sh.c.deck_job_id == deck_job_id)),
             ("deck_evidence_packs", delete(p).where(p.c.run_id == deck_job_id))):
         n = conn.execute(stmt).rowcount or 0
         if n:
@@ -7281,9 +7285,10 @@ def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks:
     addendum E), one bounded pass per cleanup tick, measured from a deck's
     first delivery (`served_at`):
     - `days` (the cap, 365): up to `batch_decks` decks past it, each in its
-      own transaction, lose every store at once (E-a1): outcomes (every kind),
-      deck_impressions rows, withdrawals, the candidate set, the bakeoff_runs
-      row and the pack; and legacy trade_impressions past it go too;
+      own transaction, lose every store at once (E-a1): outcomes (every kind)
+      and pass reasons, deck_impressions rows, withdrawals, the candidate set,
+      the bakeoff_runs row, the trade_policy_shadow rows and the pack; and
+      legacy trade_impressions past it go too;
     - `full_row_days` (90): a packed deck's deck_impressions rows (full and
       ghost) past it go, and the pack keeps every card until the cap. A deck
       with no pack keeps its rows until the cap (E-a3, E-c1).

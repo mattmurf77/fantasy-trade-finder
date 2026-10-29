@@ -52,11 +52,12 @@
 
 **What goes, measured from first delivery:**
 - **At the cap,** up to 200 decks per tick. Each deck is deleted in one transaction, so a failure leaves it whole for the next tick. A deck loses:
-  - its `deck_outcomes`, every kind. A packed card's outcomes are matched by its exact contract ids (`<deck_job_id>:<k>` for the pack's `card_count` cards, with or without a row); a row's by its `impression_id`;
+  - its `deck_outcomes`, every kind, and its `trade_pass_reasons` (the user's pass reasons, free text included). A packed card's are matched by its exact contract ids (`<deck_job_id>:<k>` for the pack's `card_count` cards, with or without a row); a row's by its `impression_id`;
   - its `deck_impressions` rows;
   - its `deck_card_withdrawals`;
   - its `deck_candidate_sets` row;
   - its `bakeoff_runs` row;
+  - its `trade_policy_shadow` rows (the treatment's rejected candidates, `ix_trade_policy_shadow_job`);
   - its `deck_evidence_packs` row.
 - **Also at the cap:** legacy `trade_impressions` rows past it, taken by oldest id.
 - **At the full-row bound:** a packed deck's `deck_impressions` rows, full and ghost. The pack, its outcomes and the rest stay until the cap.
@@ -84,7 +85,7 @@ Whether the cap covers them is head-eng's call before the flip. Legal: "if eng l
 - [x] **Unit tests:** `backend/tests/test_deck_evidence_retention.py`, 27 tests.
   - **What never deletes:** off at 0, full rows included; both 56-day floors, refused and logged.
   - **The cap:**
-    - every store of a packed and of a pack-less deck goes at once, including a like on a packed card with no row;
+    - every store of a packed and of a pack-less deck goes at once, including a like and a pass reason on a packed card with no row;
     - no other deck's outcomes go (`d1` against `d10`);
     - a pack with 1,200 cards loses every outcome (chunked IN lists);
     - a pack-less scan never takes a deck whose pack is inside the cap.
@@ -100,7 +101,7 @@ Whether the cap covers them is head-eng's call before the flip. Legal: "if eng l
   - **The loop step:** reads both knobs, its defaults match `model_config`'s, never raises, and is wired into `_cleanup_loop`.
   - **The index:** pack-less decks wait for it (logged once); it's declared and never built by `init_db`.
   - **The script:** builds the index, is idempotent, and `--check` writes nothing.
-- [x] **Sabotages:** all 17 mutations turn the suite red (TEST_LEDGER).
+- [x] **Sabotages:** all 21 mutations turn the suite red (TEST_LEDGER).
 - [x] **WAIVED, the structural guard, code-walk and TestFlight checklist:** backend-only, no user-visible surface, and dark by default.
 - `testID`s: none.
 

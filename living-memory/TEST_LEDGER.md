@@ -7,7 +7,7 @@
 - **Evidence:** backend only. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
 
 **The prune:** `database.purge_deck_evidence`, run by the cleanup loop's `_prune_deck_evidence` once per five-minute tick, measured from first delivery.
-- **The cap (`deck_evidence_retention_days`, 365):** up to 200 decks per tick, each in one transaction. Every store goes at once: outcomes (a packed card's by exact contract ids from the pack's `card_count`, a row's by its id), rows, withdrawals, the candidate set, `bakeoff_runs` and the pack. Legacy `trade_impressions` past the cap go too.
+- **The cap (`deck_evidence_retention_days`, 365):** up to 200 decks per tick, each in one transaction. Every store goes at once: outcomes and pass reasons (a packed card's by exact contract ids from the pack's `card_count`, a row's by its id), rows, withdrawals, the candidate set, `bakeoff_runs`, `trade_policy_shadow` and the pack. Legacy `trade_impressions` past the cap go too.
 - **Full rows (`deck_evidence_full_row_days`, 90):** a packed deck's rows go, in 500-pack chunks resumed from an in-memory cursor. Pack-less decks keep their rows until the cap.
 - **Off at a cap of 0** (the default). Either bound under 56 days is refused and logged.
 - **Replaced from the first cut:** the 2027-01-01 date floor is gone (with 90/365 final it never binds). Outcomes and `bakeoff_runs` used to be kept; they now go with the deck.
@@ -20,7 +20,7 @@
 **Backend:** `test_deck_evidence_retention.py`, 27 tests:
 - **Off:** off at 0, full rows included; both 56-day floors.
 - **The cap:**
-  - every store of a packed and of a pack-less deck goes at once, including a like on a packed card with no row;
+  - every store of a packed and of a pack-less deck goes at once, including a like and a pass reason on a packed card with no row;
   - no other deck's outcomes go;
   - a 1,200-card pack loses every outcome;
   - the pack-less scan never takes a deck whose pack is inside the cap.
@@ -34,9 +34,9 @@
 - **The loop step:** reads both knobs, its defaults match `model_config`'s, never raises, and the loop runs it.
 - **The index and script:** pack-less decks wait for the index (logged once); the index is never built by `init_db`; the script builds it, is idempotent, and `--check` writes nothing.
 
-**Sabotages:** 17 of 17 mutations turn the suite red:
+**Sabotages:** 21 of 21 mutations turn the suite red:
 - the floor;
-- each store kept: contract outcomes, row outcomes, `bakeoff_runs`, withdrawals, candidate sets;
+- each store kept: contract outcomes, row outcomes, contract pass reasons, row pass reasons, `bakeoff_runs`, `trade_policy_shadow`, withdrawals, candidate sets;
 - only the first 500 contract ids;
 - the pack-less scan taking a packed deck;
 - full rows deleted for any deck;

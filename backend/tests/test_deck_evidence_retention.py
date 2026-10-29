@@ -30,7 +30,7 @@ import backend.server as server
 from backend.database import (
     bakeoff_runs_table, deck_candidate_sets_table, deck_card_withdrawals_table,
     deck_evidence_packs_table, deck_impressions_table, deck_outcomes_table, metadata,
-    trade_impressions_table)
+    trade_impressions_table, trade_pass_reasons_table, trade_policy_shadow_table)
 from backend.tests.test_eval_pack_reader import _card, _row
 
 NOW = datetime(2028, 3, 1, tzinfo=timezone.utc)
@@ -51,10 +51,11 @@ def db(monkeypatch):
 
 def deck(engine, job, days_ago, *, packed=True, n=3, user="u1", league="lg", pack_days=None):
     """A deck first delivered `days_ago` days before NOW: n full rows and a
-    ghost row, a withdrawal, a candidate set, a bakeoff_runs row, a viewed
-    outcome on its first row and (packed) a pack, plus a like on a packed card
-    with no row (its contract id). A pack-less deck's rows have uuid ids, as
-    pre-flip and live-mode rows do."""
+    ghost row, a withdrawal, a candidate set, a bakeoff_runs row, a policy
+    shadow row, a viewed outcome and a pass reason on its first row and
+    (packed) a pack, plus a like and a pass reason on a packed card with no
+    row (its contract id). A pack-less deck's rows have uuid ids, as pre-flip
+    and live-mode rows do."""
     served = iso(days_ago)
     rows = [_row({**_card(job, i, served_at=served, user=user), "league_id": league})
             for i in range(n)]
@@ -75,11 +76,19 @@ def deck(engine, job, days_ago, *, packed=True, n=3, user="u1", league="lg", pac
         conn.execute(insert(bakeoff_runs_table).values(
             run_id=f"bo-{job}", deck_job_id=job, user_id=user, league_id=league,
             arm_order="[]", deck_size=n, arms_json="{}", created_at=served))
+        conn.execute(insert(trade_policy_shadow_table).values(
+            deck_job_id=job, user_id=user, league_id=league, created_at=served))
         conn.execute(insert(deck_outcomes_table).values(
             impression_id=rows[0]["impression_id"], action="viewed", acted_at=served))
+        conn.execute(insert(trade_pass_reasons_table).values(
+            impression_id=rows[0]["impression_id"], user_id=user, league_id=league,
+            reason="value", created_at=served, updated_at=served))
         if packed:
             conn.execute(insert(deck_outcomes_table).values(
                 impression_id=f"{job}:{n + 2}", action="like", acted_at=served))
+            conn.execute(insert(trade_pass_reasons_table).values(
+                impression_id=f"{job}:{n + 2}", user_id=user, league_id=league,
+                reason="fit", created_at=served, updated_at=served))
             conn.execute(insert(deck_evidence_packs_table).values(
                 run_id=job, user_id=user, league_id=league,
                 served_at=served if pack_days is None else iso(pack_days), pack_version=1,
@@ -94,12 +103,18 @@ def _count(conn, table, where):
 def counts(engine, job):
     """What's left of one deck, in every store."""
     o = deck_outcomes_table.c.impression_id
+    r = trade_pass_reasons_table.c.impression_id
     with engine.connect() as conn:
         ids = list(conn.execute(select(deck_impressions_table.c.impression_id).where(
             deck_impressions_table.c.deck_job_id == job)).scalars())
+        # A pack-less deck's outcomes are found through its rows: the tests
+        # that delete those rows check "out"/"pr" before or through `outcomes`.
         return {
             "imp": len(ids),
             "out": _count(conn, deck_outcomes_table, o.like(f"{job}:%") | o.in_(ids or [""])),
+            "pr": _count(conn, trade_pass_reasons_table, r.like(f"{job}:%") | r.in_(ids or [""])),
+            "sh": _count(conn, trade_policy_shadow_table,
+                         trade_policy_shadow_table.c.deck_job_id == job),
             "wd": _count(conn, deck_card_withdrawals_table,
                          deck_card_withdrawals_table.c.deck_job_id == job),
             "cs": _count(conn, deck_candidate_sets_table,
@@ -115,9 +130,9 @@ def outcomes(engine):
         return conn.execute(select(func.count()).select_from(deck_outcomes_table)).scalar()
 
 
-GONE = {"imp": 0, "out": 0, "wd": 0, "cs": 0, "bo": 0, "pack": 0}
-WHOLE = {"imp": 4, "out": 2, "wd": 1, "cs": 1, "bo": 1, "pack": 1}
-WHOLE_PACKLESS = {**WHOLE, "out": 1, "pack": 0}
+GONE = {"imp": 0, "out": 0, "pr": 0, "sh": 0, "wd": 0, "cs": 0, "bo": 0, "pack": 0}
+WHOLE = {"imp": 4, "out": 2, "pr": 2, "sh": 1, "wd": 1, "cs": 1, "bo": 1, "pack": 1}
+WHOLE_PACKLESS = {**WHOLE, "out": 1, "pr": 1, "pack": 0}
 ROWS_GONE = {**WHOLE, "imp": 0}   # the pack keeps its outcomes (contract ids) and the rest
 
 
@@ -153,18 +168,23 @@ def test_a_full_row_bound_under_the_floor_is_refused_and_the_cap_still_runs(db, 
 
 
 def test_the_cap_takes_every_store_of_a_deck_at_once(db):
-    """E-a1: outcomes of every kind (the like on a packed card with no row
-    included), rows, withdrawals, candidate set, bakeoff_runs row, pack; for a
-    pack-less deck the outcomes go through its rows."""
+    """E-a1: outcomes of every kind and pass reasons (on a packed card with no
+    row included), rows, withdrawals, candidate set, bakeoff_runs row, policy
+    shadow rows, pack; for a pack-less deck the per-card ones go through its
+    rows (checked by table totals, as its rows are gone)."""
     deck(db, "packed", 400)
     deck(db, "rows-only", 380, packed=False)
     deck(db, "recent", 30)
     got = purge()
     assert counts(db, "packed") == counts(db, "rows-only") == GONE
     assert counts(db, "recent") == WHOLE
-    assert got == {"deck_outcomes": 3, "deck_impressions": 8, "deck_card_withdrawals": 2,
-                   "deck_candidate_sets": 2, "bakeoff_runs": 2, "deck_evidence_packs": 1,
-                   "decks": 2}
+    assert got == {"deck_outcomes": 3, "trade_pass_reasons": 3, "deck_impressions": 8,
+                   "deck_card_withdrawals": 2, "deck_candidate_sets": 2, "bakeoff_runs": 2,
+                   "trade_policy_shadow": 2, "deck_evidence_packs": 1, "decks": 2}
+    with db.connect() as conn:              # only the recent deck's per-card rows are left
+        assert conn.execute(select(func.count()).select_from(deck_outcomes_table)).scalar() == 2
+        assert conn.execute(select(func.count()).select_from(
+            trade_pass_reasons_table)).scalar() == 2
 
 
 def test_no_other_decks_outcomes_go(db):
@@ -184,7 +204,7 @@ def test_a_big_packs_outcomes_all_go(db):
         conn.execute(insert(deck_outcomes_table), [
             {"impression_id": f"big:{k}", "action": "pass", "acted_at": iso(400)}
             for k in (499, 500, 1001, 1199)])
-    assert purge()["deck_outcomes"] == 6
+    assert purge()["deck_outcomes"] == 6 and counts(db, "big") == GONE
     assert counts(db, "big") == GONE
 
 
