@@ -1,11 +1,13 @@
 """backend.eval.redaction: the deletion scrub's hook for the value-model
-store (models-lead E-b3). Every record's partner_rates keys naming a deleted
-user, as viewer or partner, take that user's token; rates, other keys and
-unparseable lines are kept; the rewrite is atomic and idempotent, and the
-serve-time cache reloads it."""
+store (models-lead E-b3, legal R28.22). In every record's partner_rates, a
+key whose viewer is a deleted user is deleted and a key whose partner is one
+takes that user's token; rates and other keys are kept, and so are
+unparseable lines that can't hold a deleted id. The rewrite is atomic and
+idempotent, keeps the store's mode, and the serve-time cache reloads it."""
 
 import json
 import os
+import stat
 
 import pytest
 
@@ -43,14 +45,30 @@ def _rates(path):
     return out
 
 
-def test_every_key_naming_the_deleted_user_takes_the_token(store):
+def test_the_deleted_user_s_own_keys_go_and_their_partner_keys_take_the_token(store):
+    """R28.22 (f, c3 #14): "gone|p1" is the deleted user's own rate, deleted;
+    "u1|gone" and "u2|gone" are other viewers' rates with them, re-keyed."""
     assert redaction.redact_model_store({"gone": TOKEN}) == 3
     assert _rates(store) == [
-        {f"{TOKEN}|p1": 0.7, f"u1|{TOKEN}": 0.4, "u1|p2": 0.5},
+        {f"u1|{TOKEN}": 0.4, "u1|p2": 0.5},
         "{torn",
         {f"u2|{TOKEN}": 0.6, "u2|p3": 0.2},
     ]
     assert "gone" not in open(store, encoding="utf-8").read()
+
+
+def test_a_pair_already_under_the_token_keeps_its_rate():
+    """#529 QA P3: re-keying "u1|gone" onto an existing "u1|<token>" keeps
+    the token's rate, whichever order the keys come in."""
+    for rates in ({"u1|gone": 0.4, f"u1|{TOKEN}": 0.9}, {f"u1|{TOKEN}": 0.9, "u1|gone": 0.4}):
+        assert redaction.redact_partner_rates(rates, {"gone": TOKEN}) == ({f"u1|{TOKEN}": 0.9}, 1)
+
+
+def test_the_rewrite_keeps_the_store_s_mode(store):
+    """#529 QA P3: mkstemp's 0600 isn't the store's mode."""
+    os.chmod(store, 0o644)
+    redaction.redact_model_store({"gone": TOKEN})
+    assert stat.S_IMODE(os.stat(store).st_mode) == 0o644
 
 
 def test_a_re_run_changes_nothing_and_no_temp_file_is_left(store):
@@ -95,7 +113,7 @@ def test_a_torn_line_that_may_hold_a_deleted_id_is_dropped(store, torn, dropped)
     off mid-id, must not survive. It counts as one change; others are kept."""
     with open(store, "a", encoding="utf-8") as fh:
         fh.write(torn + "\n")
-    served = vm.load_latest_model(use_cache=False).partner_rates
+    served = vm.load_latest_model(use_cache=False).partner_rates   # partner-side keys only
     assert redaction.redact_model_store({"gone": TOKEN}) == 3 + dropped
     text = open(store, encoding="utf-8").read()
     assert (torn in text) is not dropped and "{torn" in text
