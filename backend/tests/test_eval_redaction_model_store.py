@@ -128,3 +128,119 @@ def test_a_store_whose_only_change_is_a_torn_line_is_rewritten(tmp_path):
     path.write_text('{"model": {"partner_rates": {"gone|\n', encoding="utf-8")
     assert redaction.redact_model_store({"gone": TOKEN}, path=str(path)) == 1
     assert path.read_text(encoding="utf-8") == ""
+
+
+# ---------------------------------------------------------------------------
+# #542 QA P3s: the token map, a symlinked store, and QA's four store cases
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tokens", [
+    {"gone": "u70"},                                   # a live id as the "token"
+    {"gone": "plain-token"},                           # not a redaction token
+    {"gone": TOKEN, TOKEN: f"{REDACTED_PARTNER_PREFIX}x"},   # a token that's also a key
+], ids=["live_id", "no_prefix", "token_is_a_key"])
+def test_a_mis_built_map_is_refused_and_the_store_untouched(store, tokens):
+    before = open(store, encoding="utf-8").read()
+    with pytest.raises(ValueError) as err:
+        redaction.redact_model_store(tokens)
+    assert "gone" not in str(err.value) and "u70" not in str(err.value)
+    assert open(store, encoding="utf-8").read() == before
+    with pytest.raises(ValueError):
+        redaction.redact_partner_rates({"a|gone": 0.4}, tokens)
+
+
+def test_a_symlinked_store_rewrites_its_target_and_keeps_the_link(store, tmp_path):
+    target = tmp_path / "real" / "models.jsonl"
+    target.parent.mkdir()
+    os.rename(store, target)
+    os.symlink(target, store)
+    assert redaction.redact_model_store({"gone": TOKEN}) == 3
+    assert os.path.islink(store) and "gone" not in target.read_text(encoding="utf-8")
+
+
+def test_prefix_sharing_ids_are_left_alone(tmp_path, monkeypatch):
+    """Deleting u7 or acct_1 never touches u70, u700 or acct_12 (whole ids only)."""
+    monkeypatch.setenv("VALUE_MODEL_DIR", str(tmp_path))
+    rates = {"u7|x": 0.1, "x|u7": 0.2, "u70|x": 0.3, "x|u70": 0.4, "u700|u7": 0.5,
+             "acct_1|acct_12": 0.6, "acct_12|acct_1": 0.7}
+    vm.append_model(_model(rates))
+    tokens = {"u7": TOKEN, "acct_1": f"{REDACTED_PARTNER_PREFIX}a1"}
+    assert redaction.redact_model_store(tokens) == 5
+    assert _rates(vm.models_path()) == [{
+        f"x|{TOKEN}": 0.2, "u70|x": 0.3, "x|u70": 0.4, f"u700|{TOKEN}": 0.5,
+        f"acct_12|{REDACTED_PARTNER_PREFIX}a1": 0.7}]
+
+
+@pytest.mark.parametrize("mode", [0o600, 0o640, 0o664])
+def test_any_store_mode_is_kept(store, mode):
+    os.chmod(store, mode)
+    redaction.redact_model_store({"gone": TOKEN})
+    assert stat.S_IMODE(os.stat(store).st_mode) == mode
+
+
+@pytest.mark.parametrize("where", ["replace_oserror", "replace_interrupt", "fsync", "fchmod",
+                                   "mkstemp"])
+def test_a_failure_leaves_the_store_untouched_and_no_temp_file(store, monkeypatch, where):
+    """...and no file descriptor open (QA P3-5: fchmod failing leaked one)."""
+    os.chmod(store, 0o644)
+    raw, st = open(store, "rb").read(), os.stat(store)
+    fds = len(os.listdir("/dev/fd"))
+
+    def boom(*_a, **_k):
+        raise KeyboardInterrupt() if where == "replace_interrupt" else OSError("boom")
+
+    if where.startswith("replace"):
+        monkeypatch.setattr(redaction.os, "replace", boom)
+    elif where == "fchmod":
+        monkeypatch.setattr(redaction.os, "fchmod", boom)
+    elif where == "mkstemp":
+        monkeypatch.setattr(redaction.tempfile, "mkstemp", boom)
+    else:
+        monkeypatch.setattr(redaction.os, "fsync", boom)     # after the write, before replace
+    with pytest.raises((OSError, KeyboardInterrupt)) as err:
+        redaction.redact_model_store({"gone": TOKEN})
+    assert "gone" not in str(err.value)
+    assert open(store, "rb").read() == raw
+    st2 = os.stat(store)
+    assert (st2.st_ino, st2.st_mtime_ns, stat.S_IMODE(st2.st_mode)) == (
+        st.st_ino, st.st_mtime_ns, 0o644)
+    assert os.listdir(os.path.dirname(store)) == ["models.jsonl"]
+    assert len(os.listdir("/dev/fd")) == fds
+
+
+def test_a_concurrent_reader_only_ever_sees_a_whole_store(tmp_path, monkeypatch):
+    """Atomicity: a reader beside the rewrites sees only whole states (every
+    line complete, a line count some whole state had); the rewrites replace
+    the file, never write it in place. A held fd pins the original inode, so
+    its number can't be reused (ext4 and overlayfs reuse freed ones) and it
+    still reads the original bytes."""
+    import threading
+    monkeypatch.setenv("VALUE_MODEL_DIR", str(tmp_path))
+    ids = [f"p{i}" for i in range(8)]
+    for r in range(20):
+        vm.append_model(_model({f"{a}|{b}": 0.1 for a in ids for b in ids if a != b}))
+    path = vm.models_path()
+    original = open(path, "rb").read()
+    states, held = {original.count(b"\n")}, open(path, "rb")   # pins the original inode
+    seen, stop = [], threading.Event()
+
+    def reader():
+        while not stop.is_set():
+            raw = open(path, "rb").read()
+            seen.append((raw.count(b"\n"), raw.endswith(b"\n")))
+
+    thread = threading.Thread(target=reader)
+    thread.start()
+    try:
+        for i, pid in enumerate(ids):
+            assert redaction.redact_model_store({pid: f"{REDACTED_PARTNER_PREFIX}{i}"}) > 0
+            states.add(open(path, "rb").read().count(b"\n"))
+    finally:
+        stop.set()
+        thread.join()
+    try:
+        assert seen and all(n in states and whole for n, whole in seen)
+        assert os.fstat(held.fileno()).st_ino != os.stat(path).st_ino
+        assert held.read() == original
+    finally:
+        held.close()
