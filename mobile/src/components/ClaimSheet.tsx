@@ -330,7 +330,7 @@ export default function ClaimSheet({
                 and bare reopens Sleeper's last-viewed league, so step 1 always
                 names the league, generically when the host doesn't know it. */}
             <View style={sheetStyles.section} testID="fa-claim.steps">
-              {/* COPY: draft, pending marketing + Sleeper label capture (#351 §7.3) */}
+              {/* COPY: final per marketing addendum 12; verbs pending #351 §7.3 */}
               <TickLabel>IN SLEEPER</TickLabel>
               <View style={sheetStyles.stepList}>
                 <ClaimStep n={1} testID="fa-claim.step.league">
@@ -340,12 +340,12 @@ export default function ClaimSheet({
                       <ChalkText style={sheetStyles.stepsEm}>{leagueName}</ChalkText>
                     </>
                   ) : (
-                    // COPY: null-league fallback, pending marketing.
+                    // COPY: null-league fallback, final per marketing addendum 12.
                     "Open the league you're claiming in"
                   )}
                 </ClaimStep>
                 <ClaimStep n={2} testID="fa-claim.step.search">
-                  {'Players, then search '}
+                  {'Go to Players, then search '}
                   <ChalkText style={sheetStyles.stepsEm}>{row.name}</ChalkText>
                 </ClaimStep>
                 <ClaimStep n={3} testID="fa-claim.step.add">
@@ -360,7 +360,7 @@ export default function ClaimSheet({
                       </>
                     ) : candidates.length === 0 ? (
                       // Full roster, nothing listed above (design-lead, 2026-10-28).
-                      // COPY: empty-drop-list fallback, pending marketing.
+                      // COPY: empty-drop-list fallback, final per marketing addendum 12.
                       'Drop a player to make room'
                     ) : (
                       'Drop: pick a player above'
@@ -379,7 +379,7 @@ export default function ClaimSheet({
                 ) : null}
               </View>
               <ChalkText style={sheetStyles.sectionHint}>
-                {`We'll copy ${row.name} so you can paste it into search.`}
+                {`Opening Sleeper copies ${row.name}, so you can paste it into search.`}
               </ChalkText>
             </View>
 
