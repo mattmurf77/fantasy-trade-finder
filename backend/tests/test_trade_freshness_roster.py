@@ -1073,3 +1073,120 @@ def test_a_read_that_fails_twice_forfeits_the_owner_arm(live, monkeypatch, read)
     calls = _blip_in_worker(monkeypatch, read, fails=2)
     _kick_sync()
     assert outcomes == ["RuntimeError"] and len(calls) == 2
+
+
+# ── #521 QA P3s ──────────────────────────────────────────────────────────────
+
+def _drafted_league(engine):
+    """A league row that says drafted (2026, high confidence) and its picks
+    the user's own: the draft context is no longer {} either way."""
+    with engine.begin() as conn:
+        conn.execute(insert(db_module.leagues_table).values(
+            sleeper_league_id=LEAGUE, user_id=UID, season="2026", draft_status="drafted",
+            draft_status_confidence="high"))
+        conn.execute(update(draft_picks_table).values(original_user_id=UID))
+
+
+def test_a_draft_read_retried_once_keeps_the_drafted_context(live, monkeypatch):
+    """P3-1: the retry's own result is what the job memoizes. With a drafted
+    league, a dropped retry result would read as undrafted: the owner context
+    must see "drafted" and the next draft year, and the stamp stays."""
+    client, engine = live
+    _drafted_league(engine)
+    _owner_on_and_spied(monkeypatch)
+    seen = []
+    real_ctx = server._owner_generation_context
+
+    def ctx_spy(**kw):
+        ctx = real_ctx(**kw)
+        prefs = ctx["manager_preferences"][UID]
+        seen.append(((kw["job_draft_context"]() or {}).get("status"),
+                     prefs.get("next_draft_year")))
+        return ctx
+    monkeypatch.setattr(server, "_owner_generation_context", ctx_spy)
+    calls = _blip_in_worker(monkeypatch, "get_league_draft_context", fails=1)
+    _kick_sync()
+    assert len(calls) == 2 and seen == [("drafted", 2027)]
+    with server._trade_jobs_lock:
+        job = server._trade_jobs[server._trade_jobs_by_key[server._trade_job_key(UID, LEAGUE,
+                                                                                  "1qb_ppr")]]
+    assert job["roster_fp"] is not None
+
+
+class _OwnedLock:
+    """A lock proxy that knows which thread holds it (RLock-safe)."""
+
+    def __init__(self, inner):
+        self._inner, self._owner, self._depth = inner, None, 0
+
+    def acquire(self, blocking=True, timeout=-1):
+        ok = self._inner.acquire(blocking, timeout)
+        if ok:
+            self._owner, self._depth = __import__("threading").get_ident(), self._depth + 1
+        return ok
+
+    def release(self):
+        self._depth -= 1
+        if self._depth == 0:
+            self._owner = None
+        self._inner.release()
+
+    __enter__ = acquire
+
+    def __exit__(self, *exc):
+        self.release()
+
+    def held_by_me(self):
+        return self._owner == __import__("threading").get_ident()
+
+
+@pytest.mark.parametrize("read", ["load_draft_picks", "get_league_draft_context"])
+def test_the_retry_runs_with_no_registry_lock_held(live, monkeypatch, read):
+    """P3-2: both attempts run outside _trade_jobs_lock and _sessions_lock."""
+    _owner_on_and_spied(monkeypatch)
+    jobs_lock, sessions_lock = (_OwnedLock(server._trade_jobs_lock),
+                                _OwnedLock(server._sessions_lock))
+    monkeypatch.setattr(server, "_trade_jobs_lock", jobs_lock)
+    monkeypatch.setattr(server, "_sessions_lock", sessions_lock)
+    held = []
+    real_fn, real_run = getattr(server, read), server._run_trade_job
+
+    def flaky(*a, **k):
+        held.append(jobs_lock.held_by_me() or sessions_lock.held_by_me())
+        if len(held) == 1:
+            raise RuntimeError("db blip")
+        return real_fn(*a, **k)
+
+    def run(*a, **k):
+        monkeypatch.setattr(server, read, flaky)
+        try:
+            return real_run(*a, **k)
+        finally:
+            monkeypatch.setattr(server, read, real_fn)
+    monkeypatch.setattr(server, "_run_trade_job", run)
+    _kick_sync()
+    assert held == [False, False]
+
+
+@pytest.mark.parametrize("read", ["load_draft_picks", "get_league_draft_context"])
+def test_a_pool_timeout_is_not_retried(live, monkeypatch, read):
+    """P3-3: an exhausted pool isn't asked again at once. One call, and the
+    read fails as before v7 (the owner arm forfeits)."""
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+    outcomes = _owner_on_and_spied(monkeypatch)
+    real_fn, real_run = getattr(server, read), server._run_trade_job
+    calls = []
+
+    def exhausted(*a, **k):
+        calls.append(1)
+        raise PoolTimeout("QueuePool limit reached")
+
+    def run(*a, **k):
+        monkeypatch.setattr(server, read, exhausted)
+        try:
+            return real_run(*a, **k)
+        finally:
+            monkeypatch.setattr(server, read, real_fn)
+    monkeypatch.setattr(server, "_run_trade_job", run)
+    _kick_sync()
+    assert len(calls) == 1 and outcomes == ["TimeoutError"]
