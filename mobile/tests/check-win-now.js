@@ -60,7 +60,7 @@ check('mobile probability and pp formatting preserves zero and rejects missing d
   const u = utility.exports;
   assert.equal(u.probability(0), '0.0%'); assert.equal(u.probability(null), '—'); assert.equal(u.probability(1.1), '—');
   assert.equal(u.impact(.2, .25, true), '+5.0 pp'); assert.equal(u.impact(.25, .2, true), '-5.0 pp'); assert.equal(u.impact(undefined, .2, true), '—');
-  assert.match(u.sourceReceipt({calibrated: false}), /Uncalibrated beta/);
+  assert.match(u.sourceReceipt({calibrated: false}), /Uncalibrated estimate/);
   assert.match(u.sourceReceipt({calibrated: false}), /projection\/model uncertainty is excluded/);
   assert.equal(u.nextThree({weekly_win_probabilities: {'1': .9}}), undefined);
 });
@@ -131,7 +131,7 @@ const trade = name => ({scenario_id: name, partner_roster_id: 2, partner_usernam
   check('web standings use average finish in sorted order and mark beta', () => {
     const output = text('win-now-controls'); assert.match(output, /Avg finish \/ team/); assert.match(output, /1.12 Earlier finish/);
     assert.ok(output.indexOf('Earlier finish') < output.indexOf('Buyer'));
-    assert.match(output, /Uncalibrated beta/); assert.match(output, /projection\/model uncertainty is excluded/);
+    assert.match(output, /Uncalibrated estimate/); assert.match(output, /projection\/model uncertainty is excluded/);
   });
   check('validated title unavailable despite estimates', () => assert.equal(all().filter(n => n.tag === 'button' && n.textContent === 'Championship').length, 0));
   for (const [id, invalid, valid] of [['win-now-budget', '11', '3'], ['win-now-fairness', '70', '90']]) {

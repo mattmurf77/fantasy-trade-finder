@@ -592,6 +592,24 @@ export default function RankScreen() {
             position={position}
             flush
           />
+        ) : trioQuery.isError ? (
+          /* B6 — the error branch must come BEFORE the skeleton: a failed
+             /api/trio leaves `trio` undefined, so `isLoading || !trio` used to
+             catch it first and show the skeleton forever, with no Retry.
+             Plain isError, with no `!trio` (P2-1): every Trios refetch replaces
+             the trio, so a failed one after a submit must not hand back the
+             just-ranked trio as rankable (a re-rank double-counts on the
+             server). While a refetch is pending the held trio stays disabled
+             (isRefetchingTrio). Fixed copy, never the raw error text. */
+          <View style={styles.centered}>
+            <Text style={styles.errorText}>Could not load next trio</Text>
+            <Button
+              variant="ghost"
+              compact
+              label="Try again"
+              onPress={() => trioQuery.refetch()}
+            />
+          </View>
         ) : trioQuery.isLoading || !trio ? (
           // Three skeleton cards keep the page shape stable during the
           // /api/trio round-trip (Mobile #M1). Mirrors the static-fill
@@ -605,20 +623,6 @@ export default function RankScreen() {
                 <View style={styles.skeletonMeta} />
               </View>
             ))}
-          </View>
-        ) : trioQuery.isError ? (
-          <View style={styles.centered}>
-            <Text style={styles.errorText}>
-              {trioQuery.error instanceof Error
-                ? trioQuery.error.message
-                : 'Could not load next trio'}
-            </Text>
-            <Button
-              variant="ghost"
-              compact
-              label="Try again"
-              onPress={() => trioQuery.refetch()}
-            />
           </View>
         ) : (
           <View style={styles.cards}>
