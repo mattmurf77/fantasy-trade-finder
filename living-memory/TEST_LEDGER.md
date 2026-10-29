@@ -122,6 +122,25 @@ Gates: release-lead's #519 QA (GO-with-notes at `8af4189a`), P3-1 to P3-3. Follo
   - the exit drain's docstring now says the guard is defensive;
   - LLD's `deck_i1_check` line names the exit drain's restart and the refusal path;
   - #519's PR body is fixed (44 tests, the guard commit).
+
+## 2026-10-28 — Send pre-flight budget: no ESPN/MFL write starts after 30 s (release-lead QA P1-A on #527)
+
+Full gates, platforms-eng (release-lead's P1-A, due before the 11-06 iOS binary). Server only, branch `fix/send-preflight-budget`, stacked on `fix/espn-mfl-send-failures` (#513). No new code, copy, schema, flag or event. An existing 502 gains one more cause. D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest.
+- **Change:**
+  - `_SEND_PREFLIGHT_BUDGET_S = 30`, with an injectable `_send_clock`.
+  - `_mfl_propose_core` / `_espn_propose_core` take `t0` at entry. Immediately before the write, a core past the budget skips it and answers its existing R3 502 (`mfl_unavailable` / `espn_unavailable`, `kind: "network"`, I-2's copy). It also logs one WARNING line.
+  - Scope: [docs/plans/c10-send-failures/scope.md](../docs/plans/c10-send-failures/scope.md) § Pre-flight budget.
+- **Tests (`backend/tests/test_send_preflight_budget.py`, 6 new):**
+  - A pin: budget + write timeout + MFL spacing < 60, for both platforms.
+  - MFL and ESPN: the mocked live read advances the injected clock. At budget + 0.01 s, the response is the unavailable code with the R3 copy word for word and `detail` == `message`. The write mock is never called, there is no `trade_sent` row, and one budget WARNING line is logged. At budget − 0.01 s, the write runs (200).
+  - Overhaul through the real MFL core: every offer past its budget becomes 5 `send_failed` attempts (never `outcome_unknown`) with `mfl_unavailable` and the R3 copy. Reservations are released and nothing is written.
+- **Sabotage, each red then restored byte-identical (`cmp`, run with `python3 -B` per G-060):**
+  - MFL guard removed → 2 red;
+  - both guards moved after the write → 3 red;
+  - budget raised to 50 → 1 red (the pin).
+- **Targeted:** 366 passed in 15 files. They are the new file, `test_c10_send_failures`, `test_espn_propose_route`, `test_mfl_propose_route`, `test_espn_write`, `test_mfl_write`, `test_i2_espn_ownership`, `test_i2_mfl_ownership`, `test_i2_overhaul`, `test_i2_sleeper_ownership`, `test_overhaul_api`, `test_overhaul_service`, `test_overhaul_store`, `test_bilateral_overhaul` and `test_mfl_trade_lifecycle`.
+- **Not run:** the full backend suite (CI runs it); live ESPN/MFL (all mocked); `tsc` / testid-lint (no mobile change). The 60 s iOS timeout is static evidence. Release-lead's TestFlight step confirms it: Network Link Conditioner, a custom 100% loss profile, then read the alert time (~60 s confirms, ~91 s refutes).
+
 ## 2026-10-27 — ESPN/MFL send failures: plain copy, raw provider bodies to logs only, outcome-unknown on post-send timeouts (C10)
 
 Full gates, platforms-eng lead (head-eng pre-launch triage C10, "the only C item that prevents a real-money-adjacent harm"). Server only. API surface: new 502 `espn_outcome_unknown` / `mfl_outcome_unknown`, and `detail`/`message` are now plain placeholder copy on propose-espn, propose-mfl and respond-mfl; no schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/espn-mfl-send-failures`.
@@ -268,6 +287,26 @@ Full gates (scope `docs/plans/prelaunch-onboarding/scope-account-only-verificati
   - **Sabotage 11/11 red:** QA's P1 reverted, demo looked up, an extra top-level key, an extra key in the unverified answer, the query user_id answered, X-User-Id looked up, a 401-path probe, plus round 1's 4 re-run.
 - **Mobile:** `check-account-only-verification.js`, 5 AST pins (pin 3 is now unawaited; pin 5 is the `setUser` reset). **Sabotage:** 7/7 red in round 1, and 5/5 on the new and changed pins. tsc clean; `check-win-now-recovery` passes.
 - **Runs:** see the PR (the full `check-*.js` loop, testid-lint, backend suites).
+## 2026-10-28 — Settings tip row: hidden unless the cached paywall config offers tips (B8 gate, off main)
+
+Gates: head-eng's extraction of #495's B8 tip-row gate after release-lead's #494 QA (with `monetize.paywall` on, a binary without the gate shows "Support Fleeced · Tip jar", which opens an empty sheet now that the server serves `tips: []`). Branch `fix/settings-tip-row-gate`. User-visible (a row hides); no route, schema, flag or analytics change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is the structural suite, an executed check, a sabotage pass, tsc, testid-lint and a code walk.
+
+- **The change:** new `mobile/src/state/useTipsOffered.ts`, byte-identical to the brief and to the file the paywall stack (#495) carries. `tipsOffered(config)` is true only for a non-empty `tips` array. `useTipsOffered()` subscribes to `['paywall-config','ios']` with `enabled: false`, so it never fetches. Both settings surfaces call it at the top level and render `settings-tip-row` only when the flag is on AND tips are offered. The "Fleeced Pro" row and the TipJar route are unchanged.
+- **Code walk:**
+  - Flag on, `tips: []` (`backend/server.py:36105`): `useTipsOffered.ts:14` → false, so the hub's `{tipsOffered ? (` (`SettingsHubScreen.tsx:320`) and the flat screen's (`SettingsScreen.tsx:1075`) render null. The Pro row still renders.
+  - Flag on, cached config with tips: the same lines are true, and the row renders at `SettingsHubScreen.tsx:322` / `SettingsScreen.tsx:1077`. Only `PaywallScreen.tsx:132` fills that cache on this binary, so the row comes back after the paywall config has been fetched this launch.
+  - Flag off: `paywallOn ? (` (`SettingsHubScreen.tsx:307`) and `paywallEnabled ? (` (`SettingsScreen.tsx:1051`) render null, as before.
+- **`check-tipjar.js` now has 11 assertions (was 9):**
+  - §8 pins the row inside the flag gate AND the `tipsOffered` gate on both surfaces, with the hook imported and called at the top level.
+  - §8b executes `tipsOffered` on the hook file, transpiled with stubs: undefined, null, `{}` and `{tips: []}` give false; `{tips: [tip]}` gives true.
+  - §8c executes `useTipsOffered` with a stubbed `useQuery`: key `['paywall-config','ios']`, `enabled: false`.
+- **Sabotage (5), each red and then restored byte-identical:** the hub's tips gate removed (§8 red), the flat screen's tips gate removed (§8 red), the hub hook called conditionally (§8 red), `length >= 0` (§8b red), `enabled: true` (§8c red). After the restore: 11/11.
+- **Results:**
+  - `check-tipjar` 11/11, `check-paywall` 11/11, and green on `check-settings-ia`, `check-settings-testids`, `check-settings-nav`, `check-feedback-public`, `check-mascot-ram` and `check-signin-identity-labels` (every check that names a Settings screen).
+  - All 120 `mobile/tests/check-*.js`: 0 red.
+  - `tsc --noEmit`: exit 0, clean.
+  - `testid-lint OK`.
+- **TestFlight (operator):** with `monetize.paywall` on and the server serving `tips: []`, open Settings. Neither the hub (`account.settings_hub` on) nor the flat Settings (off) shows a "Support Fleeced" row, and "Fleeced Pro" still shows on both. Older installed builds without this gate still show the empty sheet (accepted by head-eng).
 
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 
