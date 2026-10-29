@@ -7,6 +7,7 @@ import { Icon, TickLabel } from './chalkline';
 import { chalk, flare, ink, radii, space } from '../theme/chalkline';
 import type { PaywallConfig } from '../api/billing';
 import {
+  currentIdentityUserId,
   getActivePro,
   hasProEntitlement,
   isIdentityReady,
@@ -17,7 +18,8 @@ import { track } from '../api/events';
 import { useEntitlements } from '../state/useEntitlements';
 import { useFlag } from '../state/useFeatureFlags';
 import { openPaywall, openVerify } from '../state/usePaywallGate';
-import { useSession, type SavedUser, type SessionVerification } from '../state/useSession';
+import { useSession } from '../state/useSession';
+import { customerInfoApplies, subscriptionSessionState } from '../state/subscriptionSession';
 import {
   FOUNDER_PRICE,
   FOUNDER_TAG,
@@ -43,14 +45,17 @@ import {
 // `enforcing` gates the LOCK UI only (D7), never this section.
 //
 // WHAT IT SHOWS, decided by the SESSION first (legal R28.9, D15, D16 a; head-
-// eng's 2026-10-28 ruling), through ONE predicate, subscriptionSessionState:
+// eng's 2026-10-28 ruling), through ONE predicate, subscriptionSessionState
+// (state/subscriptionSession, shared with RevenueCat's identity rule and the
+// paywall; head-eng 2026-10-29):
 //   - unknown (verification still null after a cold start, and not a session
 //     that proves itself): NOTHING, not even the banner. Never a guess.
-//   - unverified: ONE row, "Verify this session first" (mon.verify.title),
+//   - unverified, or a DEMO (demo is strict, head-eng 2026-10-29: no
+//     RevenueCat, no purchase flow): ONE row, "Verify this session first" (mon.verify.title),
 //     opening the VerifySheet. No See plans, no Restore, no status, the same
 //     for every unverified session. That branch is a separate component that
 //     reads no subscription field, so it can't vary by what the account has.
-//   - verified (a demo; session_verified === true; or an Apple/Google-first
+//   - verified (session_verified === true; or an Apple/Google-first
 //     account-only session, proven by its own fields): the rows below.
 //     Restore shows only once RevenueCat's identity is this user.
 //   - verified member: Manage subscription (Apple's page) and Restore. The
@@ -84,34 +89,6 @@ export function openAppleSubscriptions(): void {
  *  doesn't render and getActivePro (RevenueCat) is never called. */
 export const STATUS_ROWS_AT_LAUNCH: boolean = false;
 
-/** Where the session stands for this section. ONE predicate, read by the
- *  render and by Restore's tap (head-eng, 2026-10-28):
- *   - 'verified': a demo; or the server said `session_verified === true`; or
- *     an Apple/Google-first account with no Sleeper source, recognised from
- *     the session's OWN user fields: `account_only` AND the `acct_` working
- *     key. That key is minted only by a provider (Apple/Google) sign-in, which
- *     the server verifies at mint (backend accounts.ACCOUNT_USER_PREFIX;
- *     server.py's account-only mint sets verified_via = provider). An ESPN /
- *     MFL entry session is also `account_only` but keyed `entry:…`, so it
- *     does NOT qualify. Correct with or without session-init ever filling
- *     `verification` for these accounts.
- *   - 'unverified': the server said `session_verified === false` (wins over
- *     the account-only rule).
- *   - 'unknown': anything else, notably `verification` still null right after
- *     a cold start. The section renders NOTHING then. */
-export type SubscriptionSessionState = 'verified' | 'unverified' | 'unknown';
-export function subscriptionSessionState(s: {
-  isDemo: boolean;
-  verification: Pick<SessionVerification, 'session_verified'> | null;
-  user: Pick<SavedUser, 'user_id' | 'account_only'> | null;
-}): SubscriptionSessionState {
-  if (s.isDemo) return 'verified';
-  if (s.verification?.session_verified === true) return 'verified';
-  if (s.verification?.session_verified === false) return 'unverified';
-  if (s.user?.account_only === true && s.user.user_id.startsWith('acct_')) return 'verified';
-  return 'unknown';
-}
-
 export default function SubscriptionSection() {
   const paywallOn = useFlag('monetize.paywall');
   const state = useSession(subscriptionSessionState);
@@ -122,7 +99,7 @@ export default function SubscriptionSection() {
       <View style={styles.banner}>
         <TickLabel>Subscription</TickLabel>
       </View>
-      {state === 'unverified' ? <UnverifiedRow /> : <VerifiedRows />}
+      {state === 'unverified' || state === 'demo' ? <UnverifiedRow /> : <VerifiedRows />}
     </View>
   );
 }
@@ -177,7 +154,14 @@ function VerifiedRows() {
     // this covers a session that changed since.)
     const state = subscriptionSessionState(useSession.getState());
     if (state !== 'verified') {
-      if (state === 'unverified') void openVerify();
+      if (state === 'unverified' || state === 'demo') void openVerify();
+      return;
+    }
+    // RevenueCat's CustomerInfo only for THIS user (head-eng 2026-10-29):
+    // a verified session whose RevenueCat identity isn't it yet gets the
+    // existing error line, never another account's restore.
+    if (!customerInfoApplies(useSession.getState(), currentIdentityUserId())) {
+      setRestoreLine(MON['mon.pay.error']);
       return;
     }
     if (busy || !userId) return;

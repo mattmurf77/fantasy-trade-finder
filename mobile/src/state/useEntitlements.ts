@@ -2,10 +2,12 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getEntitlements } from '../api/billing';
 import {
+  currentIdentityUserId,
   hasProEntitlement,
   onCustomerInfoChange,
   setOnPurchasesReady,
 } from '../api/purchases';
+import { customerInfoApplies } from './subscriptionSession';
 import { useSession } from './useSession';
 
 // useEntitlements — the client's cached view of Pro (pro-subscription LLD §4,
@@ -193,7 +195,12 @@ export function initEntitlements(): void {
     if (_listenerBound) return;
     _listenerBound = true;
     onCustomerInfoChange((info) => {
-      useEntitlements.getState().noteCustomerInfo(hasProEntitlement(info));
+      // Believe the push only while this session is verified AND RevenueCat's
+      // identity is this session's user (subscriptionSession): a device last
+      // logged in as A never shows A's state to a session for B.
+      if (customerInfoApplies(useSession.getState(), currentIdentityUserId())) {
+        useEntitlements.getState().noteCustomerInfo(hasProEntitlement(info));
+      }
       // Ask the server too — the push is the hint, the fetch is the answer.
       void useEntitlements.getState().refresh();
     });

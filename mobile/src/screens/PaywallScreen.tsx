@@ -19,22 +19,25 @@ import { getPaywallConfig, type PaywallConfig, type PaywallProduct } from '../ap
 import {
   activeProFrom,
   checkIntroEligibility,
+  currentIdentityUserId,
   getOfferings,
   hasProEntitlement,
-  initPurchases,
   isIdentityReady,
   isPaymentPending,
   isUserCancelled,
   onIdentityChange,
   purchasePackage,
+  PurchaseIdentityError,
   purchasesReady,
   restorePurchases,
+  whenIdentityReady,
   type PurchasesPackage,
   type PurchasesStoreProduct,
 } from '../api/purchases';
 import { useEntitlements } from '../state/useEntitlements';
 import { useFlag } from '../state/useFeatureFlags';
-import { useSession } from '../state/useSession';
+import { syncPurchasesIdentity, useSession } from '../state/useSession';
+import { customerInfoApplies, purchasesIdentityTarget } from '../state/subscriptionSession';
 import { isUnverifiedSession, verifyThenReturn } from '../state/usePaywallGate';
 import { track } from '../api/events';
 import { claimFounderWelcome, clubWindowOpen } from './FounderWelcomeScreen';
@@ -132,6 +135,23 @@ interface Plan {
   price: string;
 }
 
+/** May this session buy or restore NOW (state/subscriptionSession,
+ *  customerInfoApplies)? A verified session whose own RevenueCat logIn is
+ *  still landing waits for it (whenIdentityReady's 15 s), the wait
+ *  `_assertIdentity` always gave; an unverified, unknown or demo session is
+ *  refused at once. Re-reads the session after the wait. */
+async function customerInfoAppliesNow(): Promise<boolean> {
+  const target = purchasesIdentityTarget(useSession.getState());
+  if (target && purchasesReady() && currentIdentityUserId() !== target) {
+    try {
+      await whenIdentityReady(target);
+    } catch {
+      /* timed out: refused below */
+    }
+  }
+  return customerInfoApplies(useSession.getState(), currentIdentityUserId());
+}
+
 export default function PaywallScreen({ navigation, route }: any) {
   const source: string = route?.params?.source ?? 'unknown';
   const gate: string | undefined = route?.params?.gate || undefined;
@@ -141,7 +161,9 @@ export default function PaywallScreen({ navigation, route }: any) {
   const refreshEntitlements = useEntitlements((s) => s.refresh);
   const noteCustomerInfo = useEntitlements((s) => s.noteCustomerInfo);
   const userId = useSession((s) => s.user?.user_id ?? null);
-  const unverified = useSession((s) => !s.isDemo && s.verification?.session_verified === false);
+  // The router's predicate: server-reported unverified, or a demo (demo shows
+  // no purchase flow, head-eng 2026-10-29).
+  const unverified = useSession((s) => isUnverifiedSession(s));
   const planParam: string | undefined = route?.params?.plan || undefined;
   // Read-only: the invite intent as the session holds it (useSession P0-3).
   const invitedBy = useSession((s) => s.invitedBy);
@@ -289,8 +311,10 @@ export default function PaywallScreen({ navigation, route }: any) {
   useEffect(() => {
     setIdReady(isIdentityReady(userId));
     const unsub = onIdentityChange(() => setIdReady(isIdentityReady(userId)));
-    // A logIn that failed earlier gets another go; the bridge never throws.
-    if (userId && purchasesReady() && !isIdentityReady(userId)) void initPurchases(userId);
+    // A logIn that failed earlier gets another go, through useSession's
+    // bridge: only a verified session may identify RevenueCat (demo and
+    // unverified never). The bridge never throws.
+    if (userId && purchasesReady() && !isIdentityReady(userId)) syncPurchasesIdentity(useSession.getState());
     return unsub;
   }, [userId]);
   const identityPending = purchasesReady() && !idReady;
@@ -328,6 +352,10 @@ export default function PaywallScreen({ navigation, route }: any) {
     }
     setBusy(true);
     try {
+      // A purchase returns CustomerInfo, so it runs only while this session is
+      // verified AND RevenueCat is this user, even one that verified earlier
+      // and has since lost it. A refusal is the identity-not-ready path.
+      if (!(await customerInfoAppliesNow())) throw new PurchaseIdentityError();
       const result = await purchasePackage(selected.pkg, userId);
       if (!result) {
         setStatus('unavailable');
@@ -375,6 +403,14 @@ export default function PaywallScreen({ navigation, route }: any) {
     setBusy(true);
     setStatus(null);
     try {
+      // Restore reads CustomerInfo and moves this Apple ID's purchases onto
+      // RevenueCat's identity, so it runs only while this session is verified
+      // AND RevenueCat is this user (state/subscriptionSession). Otherwise it
+      // takes the identity-not-confirmed path, the same as the catch below.
+      if (!(await customerInfoAppliesNow())) {
+        setStatus('error');
+        return;
+      }
       const info = await restorePurchases(userId);
       const restored = hasProEntitlement(info);
       track('paywall_restore', { restored });

@@ -45,7 +45,11 @@
 //   - api/purchases.ts against a fake RevenueCat SDK: the identity-ready
 //     gate and StoreKit intro eligibility;
 //   - copy/monetization.ts: the verbatim strings and the R28.8 #2 math;
-//   - api/trades.ts: the `background` passthrough.
+//   - api/trades.ts: the `background` passthrough;
+//   - state/subscriptionSession.ts, state/useSession.ts (its purchases
+//     identity bridge), state/useEntitlements.ts (the CustomerInfo listener)
+//     and screens/PaywallScreen.tsx (its Restore, under a fake React): §10,
+//     RevenueCat identifies ONLY verified sessions, and demo gets none.
 // What it can only READ (the screens' JSX) it pins structurally, and says so
 // in the assertion name ("[shape]").
 //
@@ -102,6 +106,10 @@ function load(rel, stubs, globals = {}) {
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
+
+// The ONE subscription-session predicate (§10). Loaded with NO stubs: a
+// runtime import in it is a loud failure here.
+const subSession = load('state/subscriptionSession.ts', {});
 
 // ═══ 1. api/client.ts — the 402 / 403 routing, executed ═══════════════════
 const responses = []; // queue of {status, body}
@@ -168,6 +176,7 @@ const gate0 = load('state/usePaywallGate.ts', {
   '../utils/firstCardEvent': load('utils/firstCardEvent.ts', {}),
   '../api/client': client0,
   './useFeatureFlags': { useFeatureFlags: { getState: () => ({ flags: flags0 }) } },
+  './subscriptionSession': subSession,
   './useSession': { useSession: { getState: () => session0 } },
 });
 gate0.installPaywallGate({
@@ -246,6 +255,25 @@ check('0d. flags off: the router itself opens nothing for any signal (belt and b
   eq(trace0.length, 0, 'no R2b settle');
   eq(nav0.length, 0, 'navigated');
   eq(gate0.usePaywallGate.getState().verifySeq, before, 'opened the sheet');
+});
+check('0e. a THROWING gate reader is off [executed] (release-lead QA P3): gateSignalFor is null, and a gated 402 / 403 is sent once, opens nothing and rejects with the ApiError', async () => {
+  const thrower = load('api/client.ts', CLIENT_STUBS, { fetch: fakeFetch });
+  thrower.setPaywallGateOn(() => { throw new Error('x'); });
+  const dispatched = [];
+  // A dispatched signal would HOLD the call on this never-settling promise.
+  thrower.setOnProRequired((sig) => { dispatched.push(sig); return new Promise(() => {}); });
+  for (const [name, p, status, body] of DARK.slice(0, 3)) {
+    eq(thrower.gateSignalFor(new thrower.ApiError(status, body), p), null, `${name}: gateSignalFor`);
+    responses.length = 0; sent.length = 0;
+    responses.push({ status, body });
+    const call = thrower.api.post(p, {});
+    eq(await heldFor(call, 50), 'settled', `${name}: not held`);
+    const e = await rejects(call);
+    eq(sent.length, 1, `${name}: sent once`);
+    assert(e instanceof thrower.ApiError && e.status === status && JSON.stringify(e.body) === JSON.stringify(body),
+      `${name}: not the ApiError`);
+  }
+  eq(dispatched.length, 0, 'a signal was dispatched to the router (something would open)');
 });
 
 check('1a. a user-initiated 402 opens the paywall: {action:paywall, gate, kind:find}', async () => {
@@ -393,6 +421,7 @@ check('2a. [shape] the gate routing, router and sheet read no entitlement field'
   const files = {
     'client.ts gate code': gateBlock,
     'state/usePaywallGate.ts': strip(read('state/usePaywallGate.ts')),
+    'state/subscriptionSession.ts': strip(read('state/subscriptionSession.ts')),
     'components/VerifySheet.tsx': strip(read('components/VerifySheet.tsx')),
   };
   for (const [name, s] of Object.entries(files)) {
@@ -443,6 +472,7 @@ const gateMod = load('state/usePaywallGate.ts', {
   zustand: { create: makeZustandCreate() },
   '../api/client': { setOnProRequired: (fn) => { seamHandler = fn; }, setPaywallGateOn: (fn) => { gateReader = fn; } },
   './useFeatureFlags': { useFeatureFlags: { getState: () => ({ flags: { 'monetize.paywall': true } }) } },
+  './subscriptionSession': subSession,
   './useSession': { useSession: { getState: () => session } },
 });
 const navCalls = [];
@@ -785,21 +815,31 @@ check('5e. [shape] the paywall passes the session user to purchase/restore and s
   const p = strip(read('api/purchases.ts'));
   assert(!/\.logOut\(/.test(p), 'logOut in purchases.ts');
 });
-check('5f. [shape] every user-setting path calls initPurchases (setUser, bootstrap, startDemoSession)', () => {
+check('5f. [shape] every user- and verification-setting path runs the identity bridge (setUser, bootstrap, startDemoSession, setVerification), and initPurchases is reached ONLY through it', () => {
   const s = strip(read('state/useSession.ts'));
-  const body = (name) => {
-    const i = s.indexOf(`${name}: async`);
+  const body = (name, head = `${name}: async`) => {
+    const i = s.indexOf(head);
     const j = s.indexOf('\n  },', i);
     return i > 0 && j > i ? s.slice(i, j) : '';
   };
-  assert(/if \(u\?\.user_id\) void initPurchases\(u\.user_id\);/.test(body('setUser')), 'setUser');
-  assert(/if \(user\?\.user_id\) void initPurchases\(user\.user_id\);/.test(body('bootstrap')), 'bootstrap (hydrate)');
+  eq((s.match(/\binitPurchases\(/g) || []).length, 1, 'initPurchases( call sites in useSession (only the helper)');
+  assert(/function syncPurchasesIdentity\(s: SessionState\): void \{\s*const id = purchasesIdentityTarget\(s\);\s*if \(id\) void initPurchases\(id\);\s*\}/.test(s),
+    'the helper: initPurchases only with purchasesIdentityTarget\'s id');
+  const user = body('setUser');
+  const guardAt = user.indexOf('if (generation !== leagueSessions.currentGeneration() || get().user !== u) return;');
+  const syncAt = user.indexOf('syncPurchasesIdentity(get());');
+  assert(guardAt > 0 && syncAt > guardAt, 'setUser: the bridge runs after the generation / user-changed guard');
+  assert(body('bootstrap').includes('syncPurchasesIdentity(get());'), 'bootstrap (hydrate)');
+  const verif = body('setVerification', 'setVerification: (v) => {');
+  assert(verif.indexOf('set({ verification: v });') >= 0
+    && verif.indexOf('syncPurchasesIdentity(get());') > verif.indexOf('set({ verification: v });'),
+  'setVerification: the bridge runs after the verification is stored');
   const demo = body('startDemoSession');
   const setAt = demo.indexOf('set({');
   const sentryAt = demo.indexOf('sentrySetUser({ id: demoUser.user_id });');
-  const initAt = demo.indexOf('void initPurchases(demoUser.user_id);');
+  const initAt = demo.indexOf('syncPurchasesIdentity(get());');
   assert(setAt > 0 && sentryAt > setAt && initAt > sentryAt,
-    'startDemoSession: initPurchases(demoUser.user_id) must come right after sentrySetUser, after set({');
+    'startDemoSession: the bridge must come right after sentrySetUser, after set({');
   assert(!/\.logOut\(/.test(s), 'logOut in useSession');
 });
 
@@ -837,7 +877,7 @@ check('6c. [shape] testIDs kept + the scope\'s added; paywall_viewed carries gat
 });
 check('6d. [shape] an unverified session never sees the paywall (backstop → the sheet, through M3\'s one D9 route)', () => {
   const s = strip(read('screens/PaywallScreen.tsx'));
-  assert(/!s\.isDemo && s\.verification\?\.session_verified === false/.test(s), 'unverified read');
+  assert(/const unverified = useSession\(\(s\) => isUnverifiedSession\(s\)\);/.test(s), 'unverified read (the router\'s predicate, demo included)');
   assert(/if \(!paywallOn \|\| unverified\) return null;/.test(s), 'renders nothing while unverified');
   assert(/useEffect\(\(\) => \{\s*if \(!paywallOn \|\| !unverified\) return;\s*verifyFirst\(\);\s*\}, \[paywallOn, unverified, verifyFirst\]\);/.test(s),
     'the backstop opens the VerifySheet through verifyFirst (§9b)');
@@ -859,7 +899,8 @@ check('6g. release-lead QA P3 [executed]: a user change resets useEntitlements (
       getItem: async () => null, setItem: async () => {}, removeItem: async (k) => { removed.push(k); },
     } },
     '../api/billing': { getEntitlements: async () => { fetches += 1; return { pro: false, enforcing: false }; } },
-    '../api/purchases': { hasProEntitlement: () => false, onCustomerInfoChange: () => () => {}, setOnPurchasesReady: () => {} },
+    '../api/purchases': { currentIdentityUserId: () => null, hasProEntitlement: () => false, onCustomerInfoChange: () => () => {}, setOnPurchasesReady: () => {} },
+    './subscriptionSession': subSession,
     './useSession': { useSession: sessionStore },
   });
   ent.initEntitlements();
@@ -976,8 +1017,8 @@ const BACKGROUND_SET = [
   ['state/devicePageStore.ts', /res = await generateTrades\(target\.request, \{\}, \{ background: true \}\);/, 'refreshDevicePage'],
   ['hooks/usePresentationDeck.ts', /void run\(\{ background: true \}\);/, "usePresentationDeck's mount effect"],
   ['hooks/usePresentationDeck.ts', /await getTradeStatus\(job\.job_id, undefined, \{ background: true \}\)/, "usePresentationDeck's poll"],
-  [TRADES, /if \(vars\.auto\) \{\s*return generateTrades\(request, vars\.searchId \? \{ searchId: vars\.searchId \} : undefined, \{ background: true \}\);\s*\}/,
-    'the first-run auto-start and its silent retry'],
+  [TRADES, /if \(vars\.auto \|\| vars\.research\) \{\s*return generateTrades\(request, \{ searchId: vars\.searchId \}, \{ background: true \}\);\s*\}/,
+    'the first-run auto-start, its silent retry and the automatic re-search (#525)'],
   [TRADES, /await getTradeStatus\(job\.job_id, undefined, \{ background: true \}\)/, "the deck's legacy status poll"],
   ['components/StandingOfferSheet.tsx', /\.\.\.\(sourceTradeId \? \{ source_trade_id: sourceTradeId \} : \{\}\),\s*\}, \{ background: true \}\);/,
     "the standing-offer post (QA P2-3: nothing may present over the sheet's RN Modal)"],
@@ -998,7 +1039,7 @@ check('8b. D2 [shape]: the pinned background set; nothing else in mobile/src is 
   const code = strip(read(TRADES));
   assert(/await getTradeStatus\(snap\.job_id, \{ deck: snap\.deck_id, cursor: requested \}\)/.test(code),
     'the prefetch is a paged getTradeStatus call (the default makes it background)');
-  assert(/return generateTrades\(request, vars\.searchId \? \{ searchId: vars\.searchId \} : undefined\);/.test(code),
+  assert(/return generateTrades\(request, \{ searchId: vars\.searchId \}\);/.test(code),
     "a tap's generate stays user-initiated");
   const shopCallers = walk(SRC).filter((f) => /swipeTrade\([^;]*'shop'\)/.test(strip(fs.readFileSync(f, 'utf8'))));
   eq(shopCallers.map((f) => path.basename(f)).join(','), 'ShopOffersBody.tsx', "the only 'shop' pass caller");
@@ -1097,7 +1138,7 @@ check('8e. D4 [shape]: first_opinion fires only on the swipe mutation\'s SERVER 
   assert(/navigation\.addListener\('beforeRemove', \(e: any\) => \{\s*const type = e\?\.data\?\.action\?\.type;\s*if \(type !== 'RESET' && type !== 'REPLACE'\) setTimeout\(\(\) => presentPaywallOffer\('left_deck'\), 0\);/.test(code),
     'left_deck on Back, after the Back applies (never a reset / replace)');
   eq((code.match(/if \(source === 'left_deck' && !offerCardSeenRef\.current\) return/g) || []).length, 2, 'left_deck only after a card showed');
-  assert(/const sessionUnverified = !isDemo && verification\?\.session_verified === false;/.test(code)
+  assert(/const sessionUnverified = useSession\(\(s\) => isUnverifiedSession\(s\)\);/.test(code)
     && /const offerEligible = paywallOn && payEnforcing && !payEntitled && !sessionUnverified;/.test(code), 'eligibility');
   assert(/if \(!slot\.claim\('paywall_offer'\)\) return false;\s*const closed = openOfferTrigger\(source, uid\);/.test(code), 'claims the slot, then opens');
   assert(/void closed\.then\(\(\) => useInterruptCoordinator\.getState\(\)\.release\('paywall_offer'\)\);/.test(code), 'holds it until the paywall is gone');
@@ -1185,6 +1226,22 @@ check('8g. D16 (a) [executed + shape]: the end card\'s Continue → the VerifySh
   for (const [name, s] of [['handleDeckGateEndPress', press], ['noteDeckGateEnd', fnText('noteDeckGateEnd')]]) {
     assert(!/payEntitled|payEnforcing|useEntitlements|entitle|\.pro\b/.test(s), `${name} reads an entitlement`);
   }
+});
+
+check('8q. D19 + #525 [shape]: the automatic re-search\'s 402 ends the deck in the preview end card (never DeckMoreErrorCard); resume runs the re-search again', () => {
+  const code = strip(read(TRADES));
+  const from = code.search(/if \(e instanceof ApiError && e\.isProRequired\) \{\s*failDeckSearch\(gateFailureReason\(gateSignalFor\(e, '\/api\/trades\/generate'\)\)\);/);
+  assert(from > -1, 'the generate 402 branch');
+  const branch = code.slice(from, code.indexOf('\n        return;\n      }', from));
+  assert(/if \(vars\?\.research\) \{\s*setGateEnd\(\{\s*verify: gateSignalFor\(e, '\/api\/trades\/generate'\)\?\.action === 'verify',\s*revalidation: false,\s*research: true,\s*\}\);\s*\}/.test(branch),
+    'the 402 branch records the re-search\'s end (verify from the server\'s answer)');
+  const at = code.indexOf('function resumeDeckPages(');
+  const resume = code.slice(at, code.indexOf('\n  }\n', at));
+  assert(/if \(end\.research\) \{\s*dispatchGenerate\(\{ repeat: true \}, undefined,\s*\{ searchId: autoResearchSearchId\(deckSearchRef\.current\?\.id, isSearchOpen\) \}\);\s*\} else if \(end\.revalidation\) revalidateDevicePage\(\);/.test(resume),
+    'resume re-runs the re-search (no R1, the open trace or none)');
+  const gateAt = code.indexOf(') : pagedWithCards && deckGateEnd && (!rawTopCard || showDeckEndCard) ? (');
+  const errAt = code.indexOf('<DeckMoreErrorCard');
+  assert(gateAt > -1 && errAt > gateAt, 'the preview end card outranks DeckMoreErrorCard');
 });
 
 check('8h. D19 [shape]: a 402 never reaches a deck error variant or the swipe toast — each failure path checks the gate before its error write', () => {
@@ -1547,8 +1604,8 @@ check('9e. design §5 / R28.9 3f [shape + executed]: Settings › Subscription �
   assert(/const paywallOn = useFlag\('monetize\.paywall'\);/.test(main) && /if \(!paywallOn \|\| state === 'unknown'\) return null;/.test(main), 'self-gated on monetize.paywall; unknown renders nothing');
   assert(!/enforcing/.test(sub), 'never gated on enforcing (Restore stays reachable once the flag is on)');
   assert(/const state = useSession\(subscriptionSessionState\);/.test(main), 'the session decides, through the one predicate');
-  assert(/<View testID="settings-subscription-row">[\s\S]*\{state === 'unverified' \? <UnverifiedRow \/> : <VerifiedRows \/>\}/.test(main), 'the container, then the branch');
-  for (const [name, t] of [['SubscriptionSection', main], ['UnverifiedRow', fnText(SUBS, 'UnverifiedRow')], ['subscriptionSessionState', fnText(SUBS, 'subscriptionSessionState')]]) {
+  assert(/<View testID="settings-subscription-row">[\s\S]*\{state === 'unverified' \|\| state === 'demo' \? <UnverifiedRow \/> : <VerifiedRows \/>\}/.test(main), 'the container, then the branch');
+  for (const [name, t] of [['SubscriptionSection', main], ['UnverifiedRow', fnText(SUBS, 'UnverifiedRow')], ['subscriptionSessionState', fnText('state/subscriptionSession.ts', 'subscriptionSessionState')]]) {
     assert(!NO_ENTITLEMENT.test(t), `${name} reads a subscription field`);
   }
   const un = fnText(SUBS, 'UnverifiedRow');
@@ -1571,7 +1628,7 @@ check('9e. design §5 / R28.9 3f [shape + executed]: Settings › Subscription �
   assert(/testID = 'settings-subscription-manage'/.test(sub) && /'https:\/\/apps\.apple\.com\/account\/subscriptions'/.test(sub), 'Manage subscription → Apple\'s page');
   assert(/testID="settings-subscription-restore"/.test(sub), 'Restore');
   const restore = ver.slice(ver.indexOf('const onRestore'), ver.indexOf('const restoreRows'));
-  assert(/const state = subscriptionSessionState\(useSession\.getState\(\)\);\s*if \(state !== 'verified'\) \{\s*if \(state === 'unverified'\) void openVerify\(\);\s*return;\s*\}/.test(restore)
+  assert(/const state = subscriptionSessionState\(useSession\.getState\(\)\);\s*if \(state !== 'verified'\) \{\s*if \(state === 'unverified' \|\| state === 'demo'\) void openVerify\(\);\s*return;\s*\}/.test(restore)
     && restore.indexOf('subscriptionSessionState') < restore.indexOf('restorePurchases('),
     'Restore checks the session (the render\'s own predicate) before restoring');
   assert(/track\('paywall_restore', \{ restored \}\)/.test(restore), 'Restore tracks the registered event');
@@ -1811,7 +1868,9 @@ check('9j. B8 [shape]: the 11-06 binary ships Settings › Subscription WITHOUT 
 });
 
 check('9k. head-eng 2026-10-28 [executed + shape]: unknown verification renders NOTHING (no Restore, ever); session_verified false → only the Verify row; an Apple/Google-first account-only session proves itself from its own fields; Restore only once RevenueCat\'s identity is this verified user', () => {
-  const st = extractFn(SUBS, 'subscriptionSessionState', {});
+  // The ONE predicate now lives in state/subscriptionSession (#474, head-eng
+  // 2026-10-29), shared with RevenueCat's identity rule and the paywall.
+  const st = load('state/subscriptionSession.ts', {}).subscriptionSessionState;
   const S = (verification, user, isDemo = false) => st({ isDemo, verification, user });
   // a cold start: verification null, a username session → nothing
   eq(S(null, { user_id: '123456789' }), 'unknown', 'cold-start username session → unknown');
@@ -1825,16 +1884,23 @@ check('9k. head-eng 2026-10-28 [executed + shape]: unknown verification renders 
   eq(S({ session_verified: true }, { user_id: '123' }), 'verified', 'session_verified true → verified');
   // proven by its own fields
   eq(S(null, { user_id: 'acct_9', account_only: true }), 'verified', 'Apple-first, no league, verification null → verified');
-  eq(S(null, { user_id: 'demo_user_ab12' }, true), 'verified', 'a demo → verified');
+  eq(S(null, { user_id: 'demo_user_ab12' }, true), 'demo', 'a demo → demo (strict: the Verify row, no RevenueCat)');
   const main = fnText(SUBS, 'SubscriptionSection');
   assert(/if \(!paywallOn \|\| state === 'unknown'\) return null;\s*return \(\s*<View testID="settings-subscription-row">/.test(main), 'unknown → NOTHING (no banner, no rows): the return precedes the container');
-  assert(/\{state === 'unverified' \? <UnverifiedRow \/> : <VerifiedRows \/>\}/.test(main), "'unverified' → only the Verify row; 'verified' → the verified rows");
+  assert(/\{state === 'unverified' \|\| state === 'demo' \? <UnverifiedRow \/> : <VerifiedRows \/>\}/.test(main), "'unverified' or 'demo' → only the Verify row; 'verified' → the verified rows");
   const ver = fnText(SUBS, 'VerifiedRows');
   assert(/const restoreRows = idReady \? \(\s*<>\s*<LinkRow\s*testID="settings-subscription-restore"/.test(ver) && /\) : null;\s*if \(!loaded\) return restoreRows;/.test(ver),
     'Restore renders only once identity is ready (no row before that)');
   assert(/const \[idReady, setIdReady\] = useState\(\(\) => isIdentityReady\(userId\)\);/.test(ver) && /return onIdentityChange\(\(\) => setIdReady\(isIdentityReady\(userId\)\)\);/.test(ver),
     'idReady tracks RevenueCat\'s identity for THIS user');
-  eq((strip(read(SUBS)).match(/subscriptionSessionState\(/g) || []).length, 2, 'one predicate, used by the render (via useSession) and by the tap');
+  const subsSrc = strip(read(SUBS));
+  eq((subsSrc.match(/subscriptionSessionState\(/g) || []).length, 1, 'the shared predicate, read by the tap (and by the render via useSession)');
+  assert(/import \{ customerInfoApplies, subscriptionSessionState \} from '\.\.\/state\/subscriptionSession';/.test(subsSrc)
+    && !/function subscriptionSessionState/.test(subsSrc), 'imported from state/subscriptionSession, no local copy');
+  const tap = subsSrc.slice(subsSrc.indexOf('const onRestore = async'), subsSrc.indexOf('restorePurchases(userId)'));
+  assert(/if \(state === 'unverified' \|\| state === 'demo'\) void openVerify\(\);\s*return;/.test(tap)
+    && /if \(!customerInfoApplies\(useSession\.getState\(\), currentIdentityUserId\(\)\)\) \{\s*setRestoreLine\(MON\['mon\.pay\.error'\]\);\s*return;\s*\}/.test(tap),
+    'Restore: unverified or demo → the sheet; RevenueCat not this user → the error line, before restorePurchases');
   assert(!/isUnverifiedSession|session_verified/.test(main + ver), 'no second copy of the rule in the render or the tap');
 });
 
@@ -1895,6 +1961,527 @@ check('8r. QA P2-3 [executed + shape]: the standing-offer post\'s gate answer sh
   // Flags off: no gate answer at all, so the catch takes today's path.
   eq(client0.gateSignalFor(new client0.ApiError(402, { error: 'pro_required', gate: 'lapsed' }), '/api/trades/standing-offer'), null, 'off: 402');
   eq(client0.gateSignalFor(new client0.ApiError(403, { error: 'verification_required' }), '/api/trades/standing-offer'), null, 'off: 403');
+});
+
+// ═══ 10. RC identity — RevenueCat identifies ONLY verified sessions ═══════
+// head-eng 2026-10-29 (release-lead QA P2-5): a typed, unverified Sleeper id
+// that reached `Purchases.logIn` would let this device read that account's
+// CustomerInfo (R28.9-class) and a Restore would move the Apple ID's
+// purchases onto it. Demo is STRICT: no configure, no logIn, no CustomerInfo,
+// no purchase, no Restore, and it counts as unverified on every subscription
+// surface. Everything below is EXECUTED except where labelled [shape].
+const V = (session_verified) => ({ session_verified });
+const sleeperUser = (id) => ({ user_id: id, username: 'typed', display_name: 'Typed', avatar_id: null });
+const acctUser = (id) => ({ user_id: id, username: '', display_name: 'Manager', avatar_id: null, account_only: true });
+
+check('10a. subscriptionSessionState: demo, then the server\'s answer, then the account-only acct_ key; else unknown', () => {
+  const st = subSession.subscriptionSessionState;
+  const rows = [
+    [{ isDemo: true, verification: V(true), user: acctUser('acct_1') }, 'demo', 'demo beats a verified answer'],
+    [{ isDemo: true, verification: null, user: { user_id: 'demo_user_ab12' } }, 'demo', 'demo, unknown'],
+    [{ isDemo: false, verification: V(true), user: sleeperUser('111') }, 'verified', 'session_verified true'],
+    [{ isDemo: false, verification: V(false), user: sleeperUser('111') }, 'unverified', 'session_verified false'],
+    [{ isDemo: false, verification: V(false), user: acctUser('acct_1') }, 'unverified', 'the server\'s false beats the acct_ key'],
+    [{ isDemo: false, verification: null, user: acctUser('acct_1') }, 'verified', 'account_only + acct_ (verified by construction)'],
+    [{ isDemo: false, verification: null, user: { user_id: '111', account_only: true } }, 'unknown', 'account_only WITHOUT the acct_ prefix'],
+    [{ isDemo: false, verification: null, user: { user_id: 'acct_1' } }, 'unknown', 'an acct_ key without account_only'],
+    [{ isDemo: false, verification: V(null), user: sleeperUser('111') }, 'unknown', 'session_verified null'],
+    [{ isDemo: false, verification: null, user: sleeperUser('111') }, 'unknown', 'verification null'],
+    [{ isDemo: false, verification: undefined, user: null }, 'unknown', 'no user, no answer'],
+  ];
+  for (const [input, want, name] of rows) eq(st(input), want, name);
+});
+check('10b. purchasesIdentityTarget: the user id for EXACTLY verified; null for unverified, unknown and demo', () => {
+  const t = subSession.purchasesIdentityTarget;
+  eq(t({ isDemo: false, verification: V(true), user: sleeperUser('111') }), '111', 'verified');
+  eq(t({ isDemo: false, verification: null, user: acctUser('acct_1') }), 'acct_1', 'account-only acct_');
+  eq(t({ isDemo: false, verification: V(false), user: sleeperUser('111') }), null, 'unverified');
+  eq(t({ isDemo: false, verification: null, user: sleeperUser('111') }), null, 'unknown');
+  eq(t({ isDemo: false, verification: V(null), user: sleeperUser('111') }), null, 'session_verified null');
+  eq(t({ isDemo: false, verification: null, user: { user_id: '111', account_only: true } }), null, 'account_only without acct_');
+  eq(t({ isDemo: true, verification: V(true), user: { user_id: 'demo_user_ab12' } }), null, 'demo (strict), even with a verified answer');
+  eq(t({ isDemo: true, verification: null, user: acctUser('acct_1') }), null, 'demo over an acct_ key');
+  eq(t({ isDemo: false, verification: V(true), user: null }), null, 'no user');
+});
+check('10c. customerInfoApplies: verified AND RevenueCat\'s completed identity is the session user', () => {
+  const a = subSession.customerInfoApplies;
+  const ver = { isDemo: false, verification: V(true), user: sleeperUser('111') };
+  eq(a(ver, '111'), true, 'verified, matching identity');
+  eq(a(ver, '222'), false, 'verified, MISMATCHED identity (a device last logged in as someone else)');
+  eq(a(ver, null), false, 'verified, no completed identity (unconfigured / logIn in flight)');
+  eq(a({ ...ver, verification: V(false) }, '111'), false, 'unverified, matching identity');
+  eq(a({ ...ver, verification: null }, '111'), false, 'unknown, matching identity');
+  eq(a({ isDemo: true, verification: V(true), user: { user_id: 'demo_user_ab12' } }, 'demo_user_ab12'), false, 'demo, matching identity');
+  eq(a({ isDemo: false, verification: null, user: acctUser('acct_1') }, 'acct_1'), true, 'account-only acct_, matching');
+});
+check('10d. [shape] the demo exclusion is the ONE `=== \'verified\'` comparison in purchasesIdentityTarget; no runtime import', () => {
+  const s = strip(read('state/subscriptionSession.ts'));
+  assert(!/^\s*import\s+(?!type\b)/m.test(s) && !/\brequire\(/.test(s), 'a runtime import in subscriptionSession.ts');
+  const i = s.indexOf('export function purchasesIdentityTarget');
+  const fn = s.slice(i, s.indexOf('\n}', i));
+  eq((fn.match(/=== 'verified'/g) || []).length, 1, 'the target\'s verified comparison');
+  assert(!/demo/.test(fn), 'the target names demo itself (the exclusion must be the one comparison)');
+});
+
+// useSession, loaded for real: its identity bridge against the REAL
+// api/purchases.ts on a fake RevenueCat SDK, with a spy on initPurchases.
+function makeRcSdk() {
+  return {
+    calls: [],
+    appUserId: null,
+    configure({ appUserID }) { this.calls.push(['configure', appUserID]); this.appUserId = appUserID; },
+    async logIn(id) { this.calls.push(['logIn', id]); this.appUserId = id; return {}; },
+    logOut() { throw new Error('logOut must never be called'); },
+    async getAppUserID() { return this.appUserId; },
+  };
+}
+function rcHarness({ stored = null } = {}) {
+  const sdk10 = makeRcSdk();
+  process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY = 'appl_test';
+  const realP = load('api/purchases.ts', { 'react-native-purchases': { default: sdk10 } });
+  delete process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY;
+  const initCalls = [];
+  const P = { ...realP, initPurchases: (id) => { initCalls.push(id); return realP.initPurchases(id); } };
+  const storage = new Map(stored ? [['sleeper_user', JSON.stringify(stored)]] : []);
+  const store = load('state/useSession.ts', {
+    zustand: { create: makeZustandCreate() },
+    '@react-native-async-storage/async-storage': { default: {
+      getItem: async (k) => (storage.has(k) ? storage.get(k) : null),
+      setItem: async (k, v) => { storage.set(k, v); },
+      removeItem: async (k) => { storage.delete(k); },
+    } },
+    '../api/client': {
+      api: { post: async () => ({}) }, ApiError: class ApiError extends Error {},
+      clearSessionToken: async () => {}, getSessionRevision: () => 0, getSessionToken: async () => 'tok',
+      isCurrentSessionExpiry: () => false, requestAborted: () => new Error('aborted'), runWithDeadline: (fn) => fn(),
+      setOnSessionExpired: () => {}, setOnVerificationRequired: () => {},
+    },
+    '../api/auth': {
+      initLeagueSession: async () => {}, refreshVerification: async () => {},
+      startDemoSession: async () => ({ user_id: 'demo_user_ab12', league_id: 'demo_league', display_name: 'Demo User', league_name: 'The Demo League' }),
+    },
+    '../api/winNow': { getSeasonProjections: async () => ({}) },
+    './leagueSession': {
+      LEAGUE_ATTEMPT_MS: 1000,
+      createLeagueSessionLifecycle: () => ({
+        invalidate() {}, currentGeneration: () => 0, capture: async () => ({}), ensure: async () => {},
+        onSuperseded: () => () => {}, reserveSelectionAuthorization: () => 0,
+      }),
+    },
+    '../api/league': { connectLeague: async () => ({}) },
+    '../api/sleeper': { getLeagues: async () => [] },
+    '../api/purchases': P,
+    './subscriptionSession': subSession,
+    '../observability/sentry': { setUser: () => {} },
+    './queryClient': { queryClient: { invalidateQueries() {} }, seedLeagueSessionCaches() {} },
+    './devicePageStore': { clearDevicePages: async () => {} },
+    '../api/rankings': { getActiveScoringFormat: async () => null },
+  });
+  const S = store.useSession;
+  const rc = (kind) => sdk10.calls.filter((c) => c[0] === kind);
+  const settle = async () => { for (let i = 0; i < 6; i += 1) await tick(); };
+  return { S, sdk: sdk10, P: realP, initCalls, rc, settle };
+}
+const VERIFIED = { session_verified: true, user_verified: true, enforced: false };
+const UNVERIFIED = { session_verified: false, user_verified: true, enforced: false };
+
+check('10e. a typed, UNVERIFIED Sleeper sign-in never reaches configure or logIn (and unknown never does either)', async () => {
+  const h = rcHarness();
+  await h.S.getState().setUser(sleeperUser('111'));
+  await h.settle();
+  eq(h.S.getState().verification, null, 'a new user starts unknown');
+  h.S.getState().setVerification(UNVERIFIED);
+  h.S.getState().setVerification(null);
+  await h.settle();
+  eq(h.initCalls.length, 0, 'initPurchases calls');
+  eq(h.rc('configure').length + h.rc('logIn').length, 0, 'RevenueCat configure/logIn');
+  eq(h.P.currentIdentityUserId(), null, 'RevenueCat identity');
+  // account_only WITHOUT the acct_ prefix stays unknown too.
+  await h.S.getState().setUser({ user_id: '333', username: '', display_name: 'X', avatar_id: null, account_only: true });
+  await h.settle();
+  eq(h.rc('configure').length + h.rc('logIn').length, 0, 'account_only without acct_');
+});
+check('10f. a restored session at boot: a Sleeper key waits for verification (then configures once); an acct_ key configures now', async () => {
+  const h = rcHarness({ stored: sleeperUser('111') });
+  await h.S.getState().bootstrap();
+  await h.settle();
+  eq(h.S.getState().user.user_id, '111', 'restored');
+  eq(h.rc('configure').length, 0, 'configure before session_init answers');
+  h.S.getState().setVerification(VERIFIED);
+  await h.settle();
+  eq(JSON.stringify(h.rc('configure')), JSON.stringify([['configure', '111']]), 'configure once verified');
+  eq(h.P.currentIdentityUserId(), '111', 'identity');
+  const h2 = rcHarness({ stored: acctUser('acct_9') });
+  await h2.S.getState().bootstrap();
+  await h2.settle();
+  eq(JSON.stringify(h2.rc('configure')), JSON.stringify([['configure', 'acct_9']]), 'acct_ configures at boot');
+});
+check('10g. an Apple-first sign-in logs in at once; unknown → setVerification(true) logs in ONCE, then; repeats add nothing', async () => {
+  const h = rcHarness({ stored: acctUser('acct_9') });
+  await h.S.getState().bootstrap();
+  await h.settle();
+  await h.S.getState().setUser(acctUser('acct_7'));
+  await h.settle();
+  eq(JSON.stringify(h.rc('logIn')), JSON.stringify([['logIn', 'acct_7']]), 'Apple-first: logIn once');
+  await h.S.getState().setUser(sleeperUser('222'));
+  await h.settle();
+  eq(h.rc('logIn').length, 1, 'a typed sign-in adds no logIn while unknown');
+  eq(h.P.currentIdentityUserId(), 'acct_7', 'RevenueCat stays the previous verified user');
+  h.S.getState().setVerification(VERIFIED);
+  await h.settle();
+  h.S.getState().setVerification(VERIFIED);
+  await h.settle();
+  eq(JSON.stringify(h.rc('logIn')), JSON.stringify([['logIn', 'acct_7'], ['logIn', '222']]), 'logIn for 222 once, when it verified');
+  eq(h.P.currentIdentityUserId(), '222', 'identity');
+  eq(h.rc('configure').length, 1, 'configured once per launch');
+});
+check('10h. demo (strict): no configure on a fresh SDK, even with a verified answer', async () => {
+  const h = rcHarness();
+  await h.S.getState().startDemoSession();
+  h.S.getState().setVerification(VERIFIED);
+  await h.settle();
+  eq(h.S.getState().isDemo, true, 'demo');
+  eq(h.rc('configure').length, 0, 'demo configured RevenueCat');
+  eq(h.initCalls.length, 0, 'demo reached initPurchases');
+});
+check('10h2. demo (strict): no logIn over a verified user, even with a verified answer; no CustomerInfo', async () => {
+  const h2 = rcHarness({ stored: acctUser('acct_9') });
+  await h2.S.getState().bootstrap();
+  await h2.settle();
+  await h2.S.getState().startDemoSession();
+  h2.S.getState().setVerification(VERIFIED);
+  await h2.settle();
+  eq(h2.rc('logIn').length, 0, 'demo logged RevenueCat in');
+  eq(h2.P.currentIdentityUserId(), 'acct_9', 'RevenueCat stays the verified user');
+  eq(subSession.customerInfoApplies(h2.S.getState(), h2.P.currentIdentityUserId()), false, 'demo reads no CustomerInfo');
+});
+check('10i. verified A → unverified B on one device: RevenueCat stays A and B may not read it', async () => {
+  const h = rcHarness({ stored: sleeperUser('A1') });
+  await h.S.getState().bootstrap();
+  h.S.getState().setVerification(VERIFIED);
+  await h.settle();
+  eq(h.P.currentIdentityUserId(), 'A1', 'A is RevenueCat');
+  await h.S.getState().setUser(sleeperUser('B2'));
+  h.S.getState().setVerification(UNVERIFIED);
+  await h.settle();
+  eq(h.rc('logIn').length, 0, 'B logged RevenueCat in');
+  eq(h.sdk.appUserId, 'A1', 'SDK identity');
+  eq(subSession.customerInfoApplies(h.S.getState(), h.P.currentIdentityUserId()), false, 'B reads A\'s CustomerInfo');
+  assert(!h.P.isIdentityReady('B2'), 'B\'s purchase identity is never ready');
+});
+
+// state/useEntitlements — the CustomerInfo listener, loaded for real.
+check('10j. the CustomerInfo listener believes a push ONLY for a verified session whose RevenueCat identity is its user; refresh() runs either way', async () => {
+  const sess = makeZustandCreate()(() => ({ user: sleeperUser('111'), isDemo: false, verification: V(true), hasToken: true }));
+  let rcId = '111';
+  let fetches = 0;
+  let onReady = null;
+  let push = null;
+  const ent = load('state/useEntitlements.ts', {
+    zustand: { create: makeZustandCreate() },
+    '@react-native-async-storage/async-storage': { default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} } },
+    '../api/billing': { getEntitlements: () => { fetches += 1; return new Promise(() => {}); } },
+    '../api/purchases': {
+      currentIdentityUserId: () => rcId,
+      hasProEntitlement: (info) => !!(info && info.entitlements && info.entitlements.active.pro),
+      onCustomerInfoChange: (cb) => { push = cb; return () => {}; },
+      setOnPurchasesReady: (fn) => { onReady = fn; },
+    },
+    './subscriptionSession': subSession,
+    './useSession': { useSession: sess },
+  });
+  ent.initEntitlements();
+  await tick();
+  assert(onReady, 'the listener rides setOnPurchasesReady');
+  onReady();
+  assert(push, 'onCustomerInfoChange bound');
+  const PRO = { entitlements: { active: { pro: {} } } };
+  const cases = [
+    ['verified, identity = the session user', { verification: V(true) }, '111', true],
+    ['verified, identity = ANOTHER user', { verification: V(true) }, '999', false],
+    ['verified, no completed identity', { verification: V(true) }, null, false],
+    ['unverified, identity = the session user', { verification: V(false) }, '111', false],
+    ['unknown, identity = the session user', { verification: null }, '111', false],
+    ['demo, identity = the demo user', { isDemo: true, verification: V(true), user: { user_id: 'demo_user_ab12' } }, 'demo_user_ab12', false],
+  ];
+  for (const [name, patch, id, believed] of cases) {
+    sess.setState({ user: sleeperUser('111'), isDemo: false, verification: V(true), ...patch });
+    ent.useEntitlements.setState({ pro: false, optimistic: false });
+    rcId = id;
+    const f0 = fetches;
+    push(PRO);
+    eq(ent.useEntitlements.getState().pro, believed, `${name}: pro`);
+    eq(fetches, f0 + 1, `${name}: the server is still asked`);
+  }
+});
+
+// screens/PaywallScreen — mounted under a fake React (hooks as plain calls,
+// JSX as element objects), its Restore pressed for real.
+// `ctl` stays live after the mount: a test may move RevenueCat's identity
+// (`rcId`) or settle `whenIdentityReady` mid-handler. `plan: true` gives the
+// screen one selected Annual plan with a StoreKit package, so Purchase runs.
+function mountPaywall({ state, rcId, ready = false, ctl = { rcId, ready }, plan = false }) {
+  const inits = [];
+  const syncs = [];
+  const effects = [];
+  const sets = [];
+  const waits = [];
+  const buys = [];
+  const events = [];
+  let stateIdx = 0;
+  const React = {
+    createElement: (type, props, ...children) => ({ type, props: { ...(props || {}), children } }),
+    Fragment: 'Fragment',
+    // useState #0 is the selected plan id.
+    useState: (init) => {
+      const i = stateIdx++;
+      const v = plan && i === 0 ? 'ftf_pro_annual' : typeof init === 'function' ? init() : init;
+      return [v, (x) => sets.push(x)];
+    },
+    useRef: (current) => ({ current }),
+    useEffect: (fn) => { effects.push(fn); },
+    useCallback: (fn) => fn,
+    useMemo: (fn) => fn(),
+  };
+  const restores = [];
+  const verifies = [];
+  const nav = { back: 0, canGoBack: () => true, goBack() { this.back += 1; }, navigate() {}, setOptions() {} };
+  const timers = [];
+  const hook = (sel) => sel(state);
+  hook.getState = () => state;
+  const gate = load('state/usePaywallGate.ts', {
+    zustand: { create: makeZustandCreate() },
+    // #488's router imports (the offer memory, R2b): inert here.
+    '@react-native-async-storage/async-storage': { default: { getItem: async () => null, setItem: async () => {} } },
+    './tradeSearchTrace': { openSearchId: () => null, failFirstCard: () => {} },
+    '../utils/firstCardEvent': load('utils/firstCardEvent.ts', {}),
+    '../api/client': { setOnProRequired: () => {}, setPaywallGateOn: () => {} },
+    './useFeatureFlags': { useFeatureFlags: { getState: () => ({ flags: { 'monetize.paywall': true } }) } },
+    './subscriptionSession': subSession,
+    './useSession': { useSession: hook },
+  });
+  const tokens = new Proxy({}, { get: () => 1 });
+  const js = ts.transpileModule(read('screens/PaywallScreen.tsx'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019, jsx: ts.JsxEmit.React },
+    fileName: 'PaywallScreen.tsx',
+  }).outputText;
+  const stubs = {
+    react: { __esModule: true, default: React, ...React },
+    'react-native': {
+      ActivityIndicator: 'ActivityIndicator', Linking: { openURL() {} }, Pressable: 'Pressable', ScrollView: 'ScrollView',
+      StyleSheet: { create: (x) => x }, useWindowDimensions: () => ({ height: 800, width: 400 }), View: 'View',
+    },
+    'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
+    '@tanstack/react-query': { useQuery: ({ queryKey }) => ({ isLoading: false, data: !plan ? undefined
+      : queryKey[0] === 'paywall-config' ? { products: [{ product_id: 'ftf_pro_annual', period: 'annual', display_price: '$24.99' }] }
+        : queryKey[0] === 'paywall-offerings' ? { current: { availablePackages: [{ identifier: '$rc_annual', product: { identifier: 'ftf_pro_annual', priceString: '$24.99' } }] } }
+          : {} }) },
+    '../components/chalkline/Text': { __esModule: true, default: 'ChalkText' },
+    '../components/chalkline': { Button: 'Button', Icon: 'Icon' },
+    '../theme/chalkline': { chalk: tokens, flare: tokens, ice: tokens, ink: tokens, radii: tokens, space: tokens },
+    '../api/client': { getBaseUrl: () => 'https://api.test' },
+    '../api/billing': { getPaywallConfig: async () => ({}) },
+    '../api/purchases': {
+      checkIntroEligibility: async () => ({}), currentIdentityUserId: () => ctl.rcId, getOfferings: async () => null,
+      hasProEntitlement: (info) => !!(info && info.entitlements && info.entitlements.active.pro),
+      initPurchases: async (id) => { inits.push(id); }, isIdentityReady: () => false, isPaymentPending: () => false,
+      isUserCancelled: () => false, onIdentityChange: () => () => {},
+      purchasePackage: async (pkg, id) => { buys.push([pkg.product.identifier, id]); return { customerInfo: { entitlements: { active: {} } } }; },
+      PurchaseIdentityError: class PurchaseIdentityError extends Error {},
+      purchasesReady: () => ctl.ready,
+      whenIdentityReady: (id) => { waits.push(id); return ctl.whenIdentityReady ? ctl.whenIdentityReady(id) : Promise.reject(new Error('timeout')); },
+      restorePurchases: async (id) => { restores.push(id); return { entitlements: { active: { pro: {} } } }; },
+    },
+    '../state/useEntitlements': { useEntitlements: (sel) => sel({ refresh: async () => {}, noteCustomerInfo: () => {} }) },
+    '../state/useFeatureFlags': { useFlag: () => true },
+    '../state/useSession': { useSession: hook, syncPurchasesIdentity: (s) => { syncs.push(s); } },
+    '../state/subscriptionSession': subSession,
+    // #495 M3 (D9): the hand-off is verifyThenReturn (the sheet, then this
+    // paywall again); either one counts as the VerifySheet here.
+    '../state/usePaywallGate': {
+      isUnverifiedSession: gate.isUnverifiedSession,
+      openVerify: () => { verifies.push(1); },
+      verifyThenReturn: () => { verifies.push(1); },
+    },
+    // #495 M3: the Founding GMs welcome, never reached from these cases.
+    './FounderWelcomeScreen': { claimFounderWelcome: async () => false, clubWindowOpen: () => false },
+    '../api/events': { track: (name, props) => { events.push([name, props]); } },
+    '../copy/monetization': copy,
+  };
+  const mod = { exports: {} };
+  const req = (name) => {
+    if (Object.prototype.hasOwnProperty.call(stubs, name)) return stubs[name];
+    throw new Error(`PaywallScreen.tsx gained an unexpected runtime import ("${name}") — stub it here deliberately.`);
+  };
+  // eslint-disable-next-line no-new-func
+  new Function('module', 'exports', 'require', 'setTimeout', 'clearTimeout', js)(
+    mod, mod.exports, req, (fn) => { timers.push(fn); return timers.length; }, () => {});
+  const tree = mod.exports.default({ navigation: nav, route: { params: { source: 'settings' } } });
+  const find = (node, id) => {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) {
+      for (const n of node) { const f = find(n, id); if (f) return f; }
+      return null;
+    }
+    if (node.props && node.props.testID === id) return node;
+    return node.props ? find(node.props.children, id) : null;
+  };
+  return { tree, find: (id) => find(tree, id), effects, sets, restores, verifies, nav, timers, inits, syncs, waits, buys, events };
+}
+check('10k. PaywallScreen Restore runs ONLY when customerInfoApplies; otherwise the identity-not-confirmed path (status "error", no new copy)', async () => {
+  const ver = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
+  const cases = [
+    ['verified, identity = the session user', ver, '111', true],
+    ['verified, identity = ANOTHER user', ver, '999', false],
+    ['verified, no completed identity', ver, null, false],
+    ['unknown, identity = the session user', { ...ver, verification: null }, '111', false],
+  ];
+  for (const [name, state, rcId, runs] of cases) {
+    const m = mountPaywall({ state, rcId });
+    const btn = m.find('paywall-restore');
+    assert(btn, `${name}: Restore rendered`);
+    await btn.props.onPress();
+    await tick(); await tick();
+    eq(m.restores.length, runs ? 1 : 0, `${name}: restorePurchases calls`);
+    if (runs) eq(m.restores[0], '111', `${name}: restore for the session user`);
+    else {
+      assert(m.sets.includes('error') && !m.sets.includes('restore_none') && !m.sets.includes('restore_ok'),
+        `${name}: the refusal is the existing error status`);
+    }
+  }
+});
+check('10l. demo shows no purchase flow: isUnverifiedSession() is true in demo, the paywall renders nothing and hands off to the VerifySheet, and openPaywall opens the sheet', async () => {
+  const demoState = { user: { user_id: 'demo_user_ab12' }, isDemo: true, verification: null };
+  const m = mountPaywall({ state: demoState, rcId: 'demo_user_ab12' });
+  eq(m.tree, null, 'the paywall rendered in demo');
+  for (const fn of m.effects) fn();
+  for (const fn of m.timers) fn();
+  assert(m.nav.back >= 1, 'the paywall did not dismiss in demo');
+  assert(m.verifies.length >= 1, 'the paywall did not open the VerifySheet in demo');
+  // The router, executed (§3's instance): demo → the sheet, never the paywall.
+  const saved = { ...session };
+  try {
+    Object.assign(session, { user: { user_id: 'demo_user_ab12' }, isDemo: true, verification: V(true) });
+    eq(gateMod.isUnverifiedSession(), true, 'isUnverifiedSession() in demo');
+    navCalls.length = 0;
+    const r = gateMod.openPaywall({ source: 'settings' });
+    eq(navCalls.length, 0, 'openPaywall navigated to the paywall in demo');
+    eq(gateMod.usePaywallGate.getState().verifyOpen, true, 'openPaywall in demo: the sheet');
+    gateMod.settleVerify('dismissed');
+    eq(await r, 'dismissed', 'outcome');
+    Object.assign(session, { isDemo: false, verification: null });
+    eq(gateMod.isUnverifiedSession(), false, 'unknown is not unverified');
+  } finally {
+    Object.assign(session, saved);
+  }
+});
+
+check('10m. the paywall\'s identity retry goes through useSession\'s bridge, never initPurchases directly; app-wide, initPurchases( is called ONLY by that bridge', () => {
+  const states = [
+    ['unknown', { user: sleeperUser('111'), isDemo: false, verification: null }],
+    ['unverified', { user: sleeperUser('111'), isDemo: false, verification: V(false) }],
+    ['demo', { user: { user_id: 'demo_user_ab12' }, isDemo: true, verification: V(true) }],
+    ['verified', { user: sleeperUser('111'), isDemo: false, verification: V(true) }],
+  ];
+  for (const [name, state] of states) {
+    const m = mountPaywall({ state, rcId: 'someone_else', ready: true });
+    for (const fn of m.effects) fn();
+    eq(m.inits.length, 0, `${name}: the paywall called initPurchases itself`);
+    eq(m.syncs.length, 1, `${name}: the retry runs the bridge`);
+    assert(m.syncs[0] === state, `${name}: the bridge gets the current session`);
+  }
+  const callers = {};
+  for (const file of walk(SRC)) {
+    const n = (strip(fs.readFileSync(file, 'utf8')).match(/\binitPurchases\(/g) || []).length;
+    if (n) callers[path.relative(SRC, file)] = n;
+  }
+  eq(JSON.stringify(callers), JSON.stringify({ 'api/purchases.ts': 1, 'state/useSession.ts': 1 }),
+    'initPurchases( outside its definition and the bridge');
+});
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+check('10n. PaywallScreen Purchase runs ONLY when customerInfoApplies, even for a session that verified and then lost it; a refusal is the identity-not-ready path (purchase_failed, status "error")', async () => {
+  // Positive control: verified, RevenueCat is this user → the purchase runs.
+  const ok = mountPaywall({ state: { user: sleeperUser('111'), isDemo: false, verification: V(true) }, rcId: '111', ready: true, plan: true });
+  const cta = ok.find('paywall-purchase-cta');
+  assert(cta, 'the purchase CTA rendered');
+  cta.props.onPress();
+  for (let i = 0; i < 6; i += 1) await tick();
+  eq(JSON.stringify(ok.buys), JSON.stringify([['ftf_pro_annual', '111']]), 'verified + matching identity: purchasePackage');
+  // Verified, but RevenueCat is ANOTHER user (no logIn lands): the identity
+  // guard refuses with the existing error status.
+  {
+    const name = 'verified, RevenueCat is ANOTHER user (no logIn lands)';
+    const state = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
+    const m = mountPaywall({ state, rcId: '999', ready: true, plan: true });
+    m.find('paywall-purchase-cta').props.onPress();
+    for (let i = 0; i < 6; i += 1) await tick();
+    eq(m.buys.length, 0, `${name}: purchasePackage calls`);
+    assert(m.sets.includes('error'), `${name}: the refusal is the existing error status`);
+    assert(m.events.some(([n, p]) => n === 'paywall_purchase_failed' && p.user_cancelled === false),
+      `${name}: tracked as an identity-not-ready failure`);
+  }
+  // Verified, then UNVERIFIED (same user, RevenueCat still that user): #495's
+  // D9 runs first, so the tap goes to the verify route (the VerifySheet, then
+  // this paywall again), never Apple's sheet. Still no purchase.
+  {
+    const name = 'verified, then UNVERIFIED (same user, RevenueCat still that user)';
+    const state = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
+    const m = mountPaywall({ state, rcId: '111', ready: true, plan: true });
+    state.verification = V(false);
+    m.find('paywall-purchase-cta').props.onPress();
+    for (let i = 0; i < 6; i += 1) await tick();
+    for (const fn of m.timers) fn();
+    eq(m.buys.length, 0, `${name}: purchasePackage calls`);
+    assert(m.verifies.length >= 1, `${name}: the D9 verify route`);
+  }
+});
+check('10o. Restore WAITS for a verified session\'s in-flight logIn (whenIdentityReady), then re-checks; unverified / unknown are refused at once, with no wait', async () => {
+  // Verified, logIn in flight: waits, then proceeds once RevenueCat is this user.
+  const landing = deferred();
+  const ctl = { rcId: null, ready: true, whenIdentityReady: () => landing.promise };
+  const m = mountPaywall({ state: { user: sleeperUser('111'), isDemo: false, verification: V(true) }, ctl });
+  // onPress is `() => void onRestore()`: it returns nothing to await, so settle.
+  const settle = async () => { for (let i = 0; i < 6; i += 1) await tick(); };
+  m.find('paywall-restore').props.onPress();
+  await settle();
+  eq(JSON.stringify(m.waits), JSON.stringify(['111']), 'it waits on the session user\'s identity');
+  eq(m.restores.length, 0, 'no restore before the logIn lands');
+  assert(!m.sets.includes('error'), 'refused while the verified session\'s logIn was still landing');
+  ctl.rcId = '111';
+  landing.resolve();
+  await settle();
+  eq(JSON.stringify(m.restores), JSON.stringify(['111']), 'the restore ran once the identity landed');
+  // Verified, the logIn never lands (whenIdentityReady times out): refused.
+  const ctl2 = { rcId: null, ready: true, whenIdentityReady: () => Promise.reject(new Error('timeout')) };
+  const m2 = mountPaywall({ state: { user: sleeperUser('111'), isDemo: false, verification: V(true) }, ctl: ctl2 });
+  m2.find('paywall-restore').props.onPress();
+  await settle();
+  eq(JSON.stringify(m2.waits), JSON.stringify(['111']), 'timed out: it did wait');
+  eq(m2.restores.length, 0, 'timed out: no restore');
+  assert(m2.sets.includes('error'), 'timed out: the error status');
+  // Unknown, and verified-then-unverified: never waiting, never restoring.
+  // Unknown is refused with the error status; unverified takes #495's D9
+  // verify route first (the VerifySheet, then this paywall again).
+  const unknown = { user: sleeperUser('111'), isDemo: false, verification: null };
+  const flipped = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
+  for (const [name, state, after] of [['unknown', unknown, () => {}], ['unverified', flipped, (st) => { st.verification = V(false); }]]) {
+    const c = { rcId: null, ready: true, whenIdentityReady: () => new Promise(() => {}) };
+    const mm = mountPaywall({ state, ctl: c });
+    after(state);
+    mm.find('paywall-restore').props.onPress();
+    await settle();
+    for (const fn of mm.timers) fn();
+    eq(mm.waits.length, 0, `${name}: waited for an identity`);
+    eq(mm.restores.length, 0, `${name}: restorePurchases calls`);
+    if (name === 'unknown') assert(mm.sets.includes('error'), `${name}: refused with the error status`);
+    else assert(mm.verifies.length >= 1, `${name}: the D9 verify route`);
+  }
 });
 
 function walk(dir, out = []) {

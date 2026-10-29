@@ -238,8 +238,8 @@ console.log('check-inline-home:');
   // lifecycle rides every dispatch (check-canvas-results §12 census). The
   // no-new-site invariant is unchanged — it just counts the helper's calls.
   assert(count(tradesCode, /generateMutation\.mutate\(/g) === 1
-    && count(tradesCode, /dispatchGenerate\(/g) === 8,
-    '7f. no new generate dispatch site was added (1 raw mutate in the helper; 7 routed sites + definition)',
+    && count(tradesCode, /dispatchGenerate\(/g) === 10,
+    '7f. no new generate dispatch site was added (1 raw mutate in the helper; 9 routed sites + definition, the 8th the automatic re-search, the 9th its preview end resumed)',
     'a second site is a second search per tap waiting to happen');
   assert(/\}, \[finderMode, scopedOpponent, autoRunSeq, canvasRunSeq, fairnessReady\]\);/.test(trades),
     '7g. the choke point lists the inline trigger and fairness hydration as deps');

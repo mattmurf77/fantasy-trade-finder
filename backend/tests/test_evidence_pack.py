@@ -41,6 +41,8 @@ LOGGED = ("impression_id", "deck_job_id", "user_id", "league_id", "card_index",
           "trade_hash", "propensity", "base_score", "final_score", "archetype",
           "shape_bucket", "served_at")
 INJECTED = {vm.K_PREF_LONG, vm.K_PREF_SHORT, vm.K_PARTNER_RATE, vm.K_POSITION}
+# Keys the pack reader rebuilds, never carried by the codec (PACK_VERSION 1 is frozen).
+REBUILT = frozenset({"impression_id", "position"})
 FIXED_NOW = datetime(2026, 10, 20, tzinfo=timezone.utc)
 
 
@@ -223,10 +225,14 @@ def assert_golden(orig, rt, model):
         u_bare = {k: v for k, v in u.items() if k != "taste_attrs"}
         o_bare = {k: v for k, v in o.items() if k != "taste_attrs"}
         assert attrs_from_features(u_bare) == attrs_from_features(o_bare)
+    # The loader rebuilds `position` (displayed order), as it does impression_id.
+    rt_loaded = [{**u, **({"position": o["position"]} if "position" in o else {})}
+                 for o, u in zip(orig, rt)]
     for name in registered_names():                                         # (c)
         with patch.object(vm, "load_latest_model", lambda: model):
             s_o, s_u = get_scorer(name, seed=5), get_scorer(name, seed=5)
-            assert _bits(s_o.score(c) for c in orig) == _bits(s_u.score(c) for c in rt), name
+            assert (_bits(s_o.score(c) for c in orig)
+                    == _bits(s_u.score(c) for c in rt_loaded)), name
     for o, u in zip(orig, rt):
         proj = {k: v for k, v in o.items() if k in ep.CONTRACT_KEYS}
         assert u == proj                                                    # (d)
@@ -318,18 +324,20 @@ def test_contract_covers_every_key_the_scorers_read(writer, trained):
             for name in ("logged", "production", "base_score", "random"):
                 get_scorer(name).score(card)
     assert {"shape_bucket", "archetype", "partner_user_id", "taste_attrs"} <= Recorder.read
-    assert Recorder.read - INJECTED <= ep.CONTRACT_KEYS
+    assert Recorder.read - INJECTED - REBUILT <= ep.CONTRACT_KEYS
 
 
 def test_codec_carries_every_key_the_contract_names():
     """C7 (iii) <-> the codec: every key backend/eval/contract.py lets a
     scorer read (the frozen inputs, the identity keys, every PERMITTED_LOGGED
     column) and every logged-policy column replay reads (propensity) is
-    carried by the pack. impression_id alone is synthesized by the reader.
-    A contract key the codec doesn't carry fails here."""
+    carried by the pack, but the keys the reader rebuilds (REBUILT):
+    impression_id, and the logged `position` (models-lead F2), from the
+    deck's card_index, withdrawals and display moves. A contract key the
+    codec doesn't carry fails here."""
     required = (C.FROZEN_INPUT_KEYS | C.IDENTITY_KEYS | C.LOGGED_POLICY_KEYS
                 | frozenset().union(*C.PERMITTED_LOGGED.values()))
-    missing = required - {"impression_id"} - ep.CONTRACT_KEYS
+    missing = required - REBUILT - ep.CONTRACT_KEYS
     assert not missing, sorted(missing)
 
 
