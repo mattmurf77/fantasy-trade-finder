@@ -166,7 +166,7 @@ Release-lead's QA of #527 (P1-A, must land before the 11-06 iOS binary reaches u
 **The invariant.** A provider write never starts so late that it can finish after the client gave up.
 
 **Behavior.**
-- `_SEND_PREFLIGHT_BUDGET_S = 30` in `backend/server.py`. The 30 s is 60 s, minus the 15 s write timeout, minus MFL's 1 s spacing, minus about 14 s of margin. A write that starts inside the budget ends by ~46 s.
+- `_SEND_PREFLIGHT_BUDGET_S = 30` in `backend/server.py`. The 30 s is 60 s, minus the 15 s write timeout, minus MFL's 1 s spacing, minus about 14 s of margin. A write that starts inside the budget ends by ~46 s **if it stalls at most once.** urllib's 15 s timeout is per socket operation: DNS is unbounded, and connect and TLS take up to 15 s each, per resolved address. So several stalls after a pre-flight near 30 s can still put the request on the wire at ~61 s or later (+15 s per dead address). The budget bounds when the write **starts**, not when it lands. #527's "Check before resending" covers that residual (release-lead QA P2-1; a lower budget or a connect deadline from the remaining budget is a follow-up with head-eng).
 - `_mfl_propose_core` and `_espn_propose_core` read `_send_clock` (`time.monotonic`, injectable) at entry.
 - Immediately before the write (for MFL, before the adapter's spacing sleep), a core past the budget skips the write. It answers its existing R3 read-failure 502 with the same copy: `mfl_unavailable` / `espn_unavailable`, `kind: "network"`, and "Couldn’t confirm rosters with {MFL|ESPN} right now, so nothing was sent. Try again in a moment."
 - One WARNING line logs the elapsed seconds. No new copy, code or client branch.
@@ -174,6 +174,12 @@ Release-lead's QA of #527 (P1-A, must land before the 11-06 iOS binary reaches u
 - **Team overhaul:** each offer's core call has its own budget. A refused offer is `send_failed` with that code and copy, and its reservation is released. That is correct, since nothing was sent. The overhaul loop is unchanged.
 - **respond-mfl** has no ownership pre-flight, only `resolve_host` when the host isn't stored. Its worst case is ~31 s, so it is left alone.
 
-**TestFlight confirmation step (release-lead).** On a device with Network Link Conditioner, use a custom profile with 100% loss. Send a trade and read the time until the alert appears. ~60 s confirms the 60 s idle timeout; ~91 s refutes it.
+**TestFlight confirmation step (release-lead; revised per QA P3-6).** It measures the iOS idle timeout; **it never exercises a budget trip** (that needs a slow provider, not a slow client network). It sends a real trade, so it needs the operator's go at the time, and it can turn into a real send: the propose can ride the validate call's warm keep-alive connection, sit in the kernel's send buffer, and reach MFL/ESPN when the conditioner is switched off.
+1. **Sandbox league with a test counterparty only.** Never a league with real managers.
+2. Network Link Conditioner on, with a custom profile at 100% loss.
+3. Open the trade, tap Send in MFL (the app's `validateTradeSend` runs first, with its own 15 s), and **start the stopwatch at the confirm sheet's Send**.
+4. Read the time until the "Check before resending" alert: **~60 s confirms** the iOS idle timeout; **~91 s refutes** it (record which in TEST_LEDGER).
+5. **Keep the conditioner on for at least 5 minutes after the alert**, then turn it off.
+6. Check the league's pending trades on MFL (and ESPN, if you ran it there): **revoke any pending trade** the test created.
 
 **Evidence:** `backend/tests/test_send_preflight_budget.py` and the sabotage results, recorded in `living-memory/TEST_LEDGER.md` (2026-10-28, pre-flight budget entry).

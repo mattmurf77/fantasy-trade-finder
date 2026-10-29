@@ -24217,7 +24217,11 @@ def _send_write_failed(code_prefix: str, platform: str, kind, *,
 # and backend/espn_write.py:82) − MFL's 1 s write spacing
 # (backend/mfl_write.py:65, slept inside `_issue_import`) − ~14 s margin for
 # time before the handler runs; a write that starts inside the budget ends by
-# ~46 s. Past it, `_mfl_propose_core` / `_espn_propose_core` skip the write
+# ~46 s if it stalls at most once. urllib's 15 s timeout is per socket
+# operation (DNS is unbounded; connect and TLS are 15 s each, per resolved
+# address), so several stalls after a pre-flight near 30 s can still put the
+# request on the wire past ~60 s: the budget bounds when the write STARTS, and
+# #527's "Check before resending" covers that residual. Past it, `_mfl_propose_core` / `_espn_propose_core` skip the write
 # and answer their own "nothing was sent" read-failure response.
 _SEND_PREFLIGHT_BUDGET_S = 30
 _send_clock = time.monotonic        # tests inject a fake clock
