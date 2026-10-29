@@ -646,9 +646,11 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #            member id) keeps its package and history; its counterparty id and
 #            name, and the card's target id and name, → the placeholder; the
 #            card loses the counterparty's Fleeced-derived fields; its
-#            evidence_json → NULL; an undecided one's package_hash is
-#            re-minted. Those overhauls' roadmap summaries list the
-#            placeholder instead.
+#            evidence_json → NULL; a liked or undecided one goes stale, and
+#            an undecided one's package_hash is re-minted. Those overhauls'
+#            roadmap summaries list the placeholder instead, and a
+#            Fleeced-minted id (entry:*, acct_*) keying their snapshot
+#            rosters or holding their recovery pick → the placeholder.
 #   KEEP     player_value_history + model_config (not user-keyed),
 #            draft_picks on Sleeper grids (and legacy rows with no platform),
 #            ids and usernames alike, and recorded_picks.picking_team_id
@@ -702,12 +704,13 @@ _OVERHAUL_CARD_PARTNER_KEYS = ("reasons", "likes_you", "standing_offer_reason", 
 
 def _overhaul_card_without_partner_fields(card: dict) -> dict:
     """An overhaul offer's public card minus the counterparty's Fleeced-derived
-    fields: the keys above, and every `counterparty*` key of match_context
-    (their benefits and preference evidence)."""
+    fields: the keys above, and match_context's `counterparty*` keys (the owner
+    arms' benefits and preference evidence) and `opponent_outlook` (the
+    narrative arms', which can be the partner's declared outlook)."""
     out = {k: v for k, v in card.items() if k not in _OVERHAUL_CARD_PARTNER_KEYS}
     if isinstance(out.get("match_context"), dict):
         out["match_context"] = {k: v for k, v in out["match_context"].items()
-                                if not k.startswith("counterparty")}
+                                if not k.startswith("counterparty") and k != "opponent_outlook"}
     return out
 
 
@@ -855,12 +858,14 @@ def _delete_user_data(sleeper_user_id: str,
         # keeps its package, decision and send history, but the id and name
         # become the placeholder, the card loses the counterparty's
         # Fleeced-derived fields, and the frozen evidence (both sides' private
-        # boards) goes, as trade_proposals.valuation_json above. An undecided
-        # offer gets a fresh package_hash, so regeneration can't re-surface the
-        # scrubbed row as a live offer; a liked or passed one keeps its hash,
-        # which is what stops a passed package coming back. Their league member
-        # ids (ESPN/MFL ids differ from user_ids) are read before their
-        # overhauls are deleted.
+        # boards) goes, as trade_proposals.valuation_json above. A liked or
+        # undecided offer goes stale, the native retirement: a stale offer is
+        # never sent (the placeholder resolves to no roster) and a refresh
+        # rebuilds against current rosters. An undecided one also gets a fresh
+        # package_hash, so regeneration can't revive the scrubbed row by hash;
+        # a liked or passed one keeps its hash, which is what stops a passed
+        # package coming back. Their league member ids (ESPN/MFL ids differ
+        # from user_ids) are read before their overhauls are deleted.
         ovh = db.overhauls_table
         own = select(ovh.c.overhaul_id).where(ovh.c.account_user_id.in_(user_ids))
         named_ids = user_ids | set(conn.execute(select(ovh.c.league_user_id).where(
@@ -885,6 +890,8 @@ def _delete_user_data(sleeper_user_id: str,
                                           target_username=DELETED_USER_PLACEHOLDER)
                                      if card is not None else {}),
                 evidence_json=None)
+            if row.decision != "pass":
+                values["availability"] = "stale"
             if row.decision == "undecided":
                 values["package_hash"] = "redacted_" + secrets.token_hex(16)
             conn.execute(update(offers).where(offers.c.id == row.id).values(**values))
@@ -904,6 +911,35 @@ def _delete_user_data(sleeper_user_id: str,
                          .values(summary_json=json.dumps(summary)))
             touched += 1
         counts["overhaul_roadmaps_counterparty_anonymized"] = touched
+        # Their snapshots key `rosters` by league member id and pick owner, and
+        # their recovery names a pick's holder. On ESPN/MFL grids those can be
+        # this user's Fleeced-minted id (entry:*, acct_*; the same rule as
+        # recorded_picks below), which then becomes the placeholder. Platform
+        # ids stay.
+        minted = {u for u in user_ids if u.startswith("entry:") or is_account_user_id(u)}
+        snapshots = 0
+        if minted:
+            for row in conn.execute(select(ovh.c.id, ovh.c.snapshot_json, ovh.c.recovery_json).where(
+                    or_(*[col.contains(m, autoescape=True) for m in minted
+                          for col in (ovh.c.snapshot_json, ovh.c.recovery_json)]))).all():
+                values = {}
+                snapshot = _loads_dict(row.snapshot_json)
+                rosters = snapshot.get("rosters") if snapshot is not None else None
+                if isinstance(rosters, dict) and set(rosters) & minted:
+                    kept = {k: v for k, v in rosters.items() if k not in minted}
+                    kept[DELETED_USER_PLACEHOLDER] = list(kept.get(DELETED_USER_PLACEHOLDER) or []) + [
+                        a for k in sorted(set(rosters) & minted) for a in rosters[k] or []]
+                    snapshot["rosters"] = kept
+                    values["snapshot_json"] = json.dumps(snapshot)
+                recovery = _loads_dict(row.recovery_json)
+                if recovery is not None and recovery.get("holder_user_id") in minted:
+                    recovery.update(holder_user_id=DELETED_USER_PLACEHOLDER,
+                                    holder_username=DELETED_USER_PLACEHOLDER)
+                    values["recovery_json"] = json.dumps(recovery)
+                if values:
+                    conn.execute(update(ovh).where(ovh.c.id == row.id).values(**values))
+                    snapshots += 1
+        counts["overhaul_snapshots_anonymized"] = snapshots
 
         # Preserve published ranking snapshots and other users' adoptions;
         # remove attribution and freeform author metadata. Private sets have
@@ -1343,8 +1379,8 @@ def export_user_data(sleeper_user_id: str,
             select(db.rank_set_entries_table).where(
                 db.rank_set_entries_table.c.rank_set_id.in_(rank_set_ids))).fetchall())
         # The rows under the user's own overhauls. An offer's evidence_json
-        # (both sides' private boards, "never on the wire") stays in, and its
-        # card goes out without the counterparty's Fleeced-derived fields
+        # (both sides' private boards, "never on the wire") is left out, and
+        # its card goes out without the counterparty's Fleeced-derived fields
         # (R28.20 c2), the same fields deletion scrubs.
         overhaul_ids = [r["overhaul_id"] for r in tables["overhauls"]]
         for name in _OVERHAUL_CHILD_TABLES:

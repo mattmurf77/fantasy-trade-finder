@@ -4,11 +4,11 @@ Full gates (scope `docs/plans/team-overhaul/scope-account-deletion.md`). Server 
 
 - **The change (`backend/accounts.py`):**
   - deletion removes the user's own `overhauls` (by `account_user_id`) and every offer, roadmap, attempt and reservation under them;
-  - in OTHER users' overhauls, an offer naming them (or their league member id) gets the placeholder for the counterparty and card target id and name, loses the counterparty's Fleeced-derived card fields, gets `evidence_json` NULL, and, if undecided, a re-minted `package_hash`; their roadmap summaries list the placeholder;
+  - in OTHER users' overhauls, an offer naming them (or their league member id) gets the placeholder for the counterparty and card target id and name, loses the counterparty's Fleeced-derived card fields, gets `evidence_json` NULL, goes stale if liked or undecided, and, if undecided, gets a re-minted `package_hash`; their roadmap summaries list the placeholder, and a Fleeced-minted id keying their snapshot rosters or holding their recovery pick becomes the placeholder (trades-eng's review);
   - the export carries the user's own overhaul rows, without offers' `evidence_json` and with the counterparty's card fields removed;
   - the one-time purge discovers `overhaul_offers.counterparty_user_id`.
-- **Tests:** three new in `test_account_deletion_coverage.py` (deletion and scrub with a no-residue check; export; a schema scan that fails on main's `accounts.py` with exactly the three overhaul tables), plus the purge discovery and info tests updated.
-- **Sabotage 19/19 red** (13 deletion, 4 export, 1 scan, 1 purge), restored byte-identical; a probe table also fails the scan.
+- **Tests:** four new in `test_account_deletion_coverage.py` (deletion and scrub with a no-residue check; minted ids in snapshots and recovery; export; a schema scan that fails on main's `accounts.py` with exactly the three overhaul tables), plus the purge discovery and info tests updated.
+- **Sabotage 27/27 red** (13 deletion, 8 after trades-eng's review, 4 export, 1 scan, 1 purge), restored byte-identical; a probe table also fails the scan.
 - **Runs:** see the PR.
 
 ## 2026-10-28 — Paywall price rise moves to 2027-01-02 04:00 UTC (App Store Connect's US start for a Jan-2 schedule; follow-up to #494)

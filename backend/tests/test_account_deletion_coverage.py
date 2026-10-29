@@ -563,6 +563,7 @@ def _named_offer(conn, offer_id, counterparty, decision):
             "likes_you": True,
             "match_context": {"owner_benefits": ["outlook"], "counterparty_benefits": ["need"],
                               "counterparty_preference_evidence": "known",
+                              "opponent_outlook": "rebuilder",
                               "support_kind": "interpretable_support_not_probability"}}
     evidence = {"viewer": {"benefits": ["outlook"]}, "counterparty": {"outgoing_personal": 1234},
                 "assets": [{"id": "p2", "counterparty_personal": 1500}], "preference_priority": 2}
@@ -582,6 +583,7 @@ def test_overhauls_deleted_and_offers_naming_the_owner_scrubbed(engine):
         _children(conn, "ovh-other", offer_id="of-unrelated")
         _named_offer(conn, "of-sleeper", UID, "pass")
         _named_offer(conn, "of-espn", OWNER_ESPN_MEMBER, "undecided")
+        _named_offer(conn, "of-liked", UID, "like")
         seed(conn, db.overhaul_attempts_table, "sent", overhaul_id="ovh-other",
              attempt_id="at-sent", batch_id="b-sent", offer_id="of-sleeper")
         conn.execute(db.overhaul_roadmaps_table.update().where(
@@ -595,10 +597,10 @@ def test_overhauls_deleted_and_offers_naming_the_owner_scrubbed(engine):
     for tbl in OVERHAUL_CHILDREN:
         assert {r["overhaul_id"] for r in rows(engine, tbl)} == {"ovh-other"}, tbl.name
     assert counts["overhauls_deleted"] == 2
-    assert counts["overhaul_offers_counterparty_anonymized"] == 2
+    assert counts["overhaul_offers_counterparty_anonymized"] == 3
     offers = {r["offer_id"]: dict(r) for r in rows(engine, db.overhaul_offers_table)}
     assert offers["of-unrelated"] == before["of-unrelated"]
-    for oid in ("of-sleeper", "of-espn"):
+    for oid in ("of-sleeper", "of-espn", "of-liked"):
         offer = offers[oid]
         assert offer["counterparty_user_id"] == PLACEHOLDER
         assert offer["counterparty_username"] == PLACEHOLDER
@@ -613,7 +615,12 @@ def test_overhauls_deleted_and_offers_naming_the_owner_scrubbed(engine):
     # A passed offer keeps the hash that stops it coming back; an undecided one
     # gets a fresh one, so regeneration can't revive the scrubbed row.
     assert offers["of-sleeper"]["package_hash"] == "sha1-of-sleeper"
+    assert offers["of-liked"]["package_hash"] == "sha1-of-liked"
     assert offers["of-espn"]["package_hash"].startswith("redacted_")
+    # A liked or undecided offer is retired the native way: stale is never sent
+    # (the placeholder resolves to no roster), and a refresh rebuilds it.
+    assert {oid: offers[oid]["availability"] for oid in ("of-sleeper", "of-espn", "of-liked")} == {
+        "of-sleeper": "fresh", "of-espn": "stale", "of-liked": "stale"}
     assert {r["attempt_id"] for r in rows(engine, db.overhaul_attempts_table)} == {"at-ovh-other", "at-sent"}
     summary = json.loads(rows(engine, db.overhaul_roadmaps_table)[0]["summary_json"])
     assert summary == {"counterparties": [PLACEHOLDER, "unrelated", PLACEHOLDER], "score": 3}
@@ -623,6 +630,42 @@ def test_overhauls_deleted_and_offers_naming_the_owner_scrubbed(engine):
                           for r in rows(engine, t)], default=str)
     for marker in (UID, ALIAS, OWNER_ESPN_MEMBER, OWNER_NAME, "sha1-of-espn", "1234", "1500"):
         assert marker not in residue, marker
+
+
+def test_a_minted_id_in_other_overhauls_snapshots_and_recovery_becomes_the_placeholder(engine):
+    """ESPN/MFL grids can key a snapshot's rosters, and name a recovery pick's
+    holder, by the importer's Fleeced-minted id: that names the person, so it
+    goes (as in draft_picks). Platform ids stay."""
+    deleted = "entry:espn:{5EED0000-AAAA-BBBB-CCCC-DDDDEEEEFFFF}"
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id=deleted))
+        _overhaul(conn, "ovh-espn", OTHER, OTHER)
+        _overhaul(conn, "ovh-sleeper", OTHER, OTHER)
+        ovh = db.overhauls_table
+        conn.execute(ovh.update().where(ovh.c.overhaul_id == "ovh-espn").values(
+            snapshot_json=json.dumps({"season": 2026, "my_roster_id": 3,
+                                      "rosters": {OTHER: ["p1"], deleted: ["p2", "pk_1"], UID: ["p3"]}}),
+            recovery_json=json.dumps({"state": "missing_with_known_holder", "pick_id": "pk_1",
+                                      "holder_user_id": deleted, "holder_username": "Their Team"})))
+        conn.execute(ovh.update().where(ovh.c.overhaul_id == "ovh-sleeper").values(
+            snapshot_json=json.dumps({"rosters": {OTHER: ["p1"], UID: ["p3"]}}),
+            recovery_json=json.dumps({"holder_user_id": UID, "holder_username": "pub"})))
+    before = {r["overhaul_id"]: dict(r) for r in rows(engine, db.overhauls_table)}
+    counts = accounts.delete_user_data(deleted)
+    after = {r["overhaul_id"]: dict(r) for r in rows(engine, db.overhauls_table)}
+    assert json.loads(after["ovh-espn"]["snapshot_json"]) == {
+        "season": 2026, "my_roster_id": 3,
+        "rosters": {OTHER: ["p1"], UID: ["p3"], PLACEHOLDER: ["p2", "pk_1"]}}
+    assert json.loads(after["ovh-espn"]["recovery_json"]) == {
+        "state": "missing_with_known_holder", "pick_id": "pk_1",
+        "holder_user_id": PLACEHOLDER, "holder_username": PLACEHOLDER}
+    assert after["ovh-sleeper"] == before["ovh-sleeper"]
+    assert counts["overhaul_snapshots_anonymized"] == 1
+    # Deleting the Sleeper-keyed user leaves their public Sleeper id in others'
+    # snapshots (platform data, as on Sleeper pick grids).
+    assert accounts.delete_user_data(UID)["overhaul_snapshots_anonymized"] == 0
+    assert {r["overhaul_id"]: dict(r) for r in rows(engine, db.overhauls_table)}["ovh-sleeper"] \
+        == before["ovh-sleeper"]
 
 
 def test_export_carries_own_overhauls_without_private_evidence(engine):

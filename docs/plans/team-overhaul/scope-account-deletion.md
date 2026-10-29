@@ -14,20 +14,22 @@
 - **Deletion, own rows:** `overhauls` where `account_user_id` is in the user's id scope go, with every `overhaul_offers` / `overhaul_roadmaps` / `overhaul_attempts` / `overhaul_reservations` row under them. Their `league_user_id`s (ESPN/MFL member ids aren't in the id scope) are read first and join the ids scrubbed below.
 - **Deletion, other users' offers naming them** (the `trade_proposals` precedent):
   - `counterparty_user_id` / `counterparty_username`, and the card's `target_user_id` / `target_username` → `DELETED_USER_PLACEHOLDER`;
-  - the card loses the counterparty's Fleeced-derived fields (R28.20 c2): `match_context`'s `counterparty*` keys (benefits, preference evidence), `reasons` (the bilateral arm's says whether the other manager has preferences), and the deck-card partner fields the shared serializer can carry (`likes_you`, `standing_offer_reason`, `breaker`, `fit`, `roster_evaluation`, `rationale`, `narrative`);
+  - the card loses the counterparty's Fleeced-derived fields (R28.20 c2): `match_context`'s `counterparty*` keys (benefits, preference evidence) and `opponent_outlook` (the narrative arms', which can be the partner's declared outlook; trades-eng), `reasons` (the bilateral arm's says whether the other manager has preferences), and the deck-card partner fields the shared serializer can carry (`likes_you`, `standing_offer_reason`, `breaker`, `fit`, `roster_evaluation`, `rationale`, `narrative`);
   - `evidence_json` → NULL (both sides' private boards; it has no reader);
+  - a liked or undecided offer → `availability = "stale"` (trades-eng's review): `sendable` is `like` + `fresh` (`overhaul_service.py:367`), so a scrubbed liked offer would otherwise read as sendable and then fail at `overhaul_api.py:1036`. Stale is the native retirement: the UI shows it as stale, it's never sent (`:773`), and a refresh rebuilds against current rosters;
   - an **undecided** offer's `package_hash` → `redacted_` + 32 hex, so regeneration's cache can't re-surface the scrubbed row as a live offer. A liked or passed offer keeps its hash, which is what stops a passed package coming back (data-dictionary). The hash stays under legal's (viii).
   - The package, decision, availability and send history (attempts) stay.
 - **Deletion, other users' roadmaps:** `summary_json.counterparties` entries naming them → the placeholder.
+- **Deletion, other users' snapshots and recovery** (trades-eng's review): `capture_snapshot` keys `rosters` by league member id and by `draft_picks.owner_user_id`, and `recovery_json.holder_user_id` / `holder_username` come from the same pick owners. On ESPN/MFL grids those can be the deleted user's Fleeced-minted id (`entry:*`, `acct_*`), the class deletion already anonymizes in `draft_picks` and `pick_assignment_settings.order`. That id → the placeholder (a roster key's assets merge under it). Public platform ids stay.
 - **Export:** `overhauls` joins `_EXPORT_TABLES` (by `account_user_id`); the four child tables follow by `overhaul_id`. An offer's `evidence_json` is omitted, and its `card_json` goes out without the counterparty's c2 fields (the R28.20 (iv) direction).
 - **Counts** (the DELETE response): `overhauls_deleted`, `overhaul_{offers,roadmaps,attempts,reservations}_deleted`, `overhaul_offers_counterparty_anonymized`, `overhaul_roadmaps_counterparty_anonymized`.
 - **The one-time purge** (`scripts/purge_entry_users.py`) discovers `overhaul_offers.counterparty_user_id`, so its verify (a) covers it, and its "known general deletion gap" info line is gone.
 
 **Left as is (for head-eng / trades-eng / legal):**
-- Other users' `overhauls.snapshot_json.rosters` keys and `recovery_json.holder_user_id` are platform roster and pick-ownership snapshots keyed by league member ids. That's the same class as the Sleeper pick grids that deletion KEEPS. Not scrubbed here.
+- Public platform ids (Sleeper user ids, platform owner ids) in other users' snapshots and recovery stay, as on the Sleeper pick grids deletion KEEPS. Only Fleeced-minted ids go (above).
 - `overhaul_attempts.error_json` is the provider's error text, capped at 200 chars. Not traced for names.
 - Blended scalars on the card (`mismatch_score`, `composite_score`, `basis`) stay, as trades-eng recommends for decks. That's legal's call.
-- A scrubbed offer can't be sent: the placeholder resolves to no roster. A regenerated card for the same package (from consensus, the board being gone) is a new offer.
+- A regenerated card for the same package, built from consensus with the board gone, is a new offer. The person may reappear there as a platform leaguemate, which legal's §6 "What may remain" allows.
 
 ## 1. Analytics scope
 - [x] **(c) WAIVED:** deletion and export fire no events, and none are added.
@@ -38,12 +40,14 @@
 
 ## 3. Evidence scope
 - [x] **Unit tests** (`backend/tests/test_account_deletion_coverage.py`, synthetic only):
-  1. `test_overhauls_deleted_and_offers_naming_the_owner_scrubbed`: own overhauls under the Sleeper id and the `acct_` alias go with all four child tables. Two offers in another user's overhaul name the owner, by Sleeper id (passed) and by the owner's ESPN member id (undecided). Each is scrubbed to an exact expected card, with evidence NULL and the decision kept. The passed offer keeps its hash and the undecided one is re-minted. An unrelated offer is byte-identical. A send attempt on the scrubbed offer stays. The roadmap's counterparties become the placeholder. No overhaul table holds any marker of the owner afterwards: ids, the name, the old undecided hash, or the evidence values.
-  2. `test_export_carries_own_overhauls_without_private_evidence`: own rows in all five tables and none of another user's; no `evidence_json`; the card without `counterparty*` / `reasons`, keeping the target id.
-  3. `test_every_table_with_a_user_id_column_is_handled_in_accounts`: a schema scan. Every table with a `*user_id*` column must be named in `accounts.py` code, comments stripped. On main's `accounts.py` it fails on exactly `overhauls`, `overhaul_offers`, `overhaul_reservations` (the gap). It also fails on a probe table added to `database.py`.
+  1. `test_overhauls_deleted_and_offers_naming_the_owner_scrubbed`: own overhauls under the Sleeper id and the `acct_` alias go with all four child tables. Three offers in another user's overhaul name the owner: by Sleeper id (passed, and liked) and by the owner's ESPN member id (undecided). Each is scrubbed to an exact expected card (`opponent_outlook` dropped too), with evidence NULL and the decision kept. The passed and liked offers keep their hashes, and the undecided one is re-minted. The liked and undecided offers go stale; the passed one stays fresh. An unrelated offer is byte-identical. A send attempt on the scrubbed offer stays. The roadmap's counterparties become the placeholder. No overhaul table holds any marker of the owner afterwards: ids, the name, the old undecided hash, or the evidence values.
+  2. `test_a_minted_id_in_other_overhauls_snapshots_and_recovery_becomes_the_placeholder`: an `entry:espn:` id keying another user's snapshot rosters, and holding its recovery pick, becomes the placeholder (assets merged under it; the holder's name too). Another overhaul naming a public Sleeper id is byte-identical, and stays so when that Sleeper user is deleted.
+  3. `test_export_carries_own_overhauls_without_private_evidence`: own rows in all five tables and none of another user's; no `evidence_json`; the card without `counterparty*` / `reasons`, keeping the target id.
+  4. `test_every_table_with_a_user_id_column_is_handled_in_accounts`: a schema scan. Every table with a `*user_id*` column must be named in `accounts.py` code, comments stripped. On main's `accounts.py` it fails on exactly `overhauls`, `overhaul_offers`, `overhaul_reservations` (the gap). It also fails on a probe table added to `database.py`.
   - `test_purge_entry_users.py`: the discovery test (which captures `delete_user_data`'s SQL) knows the overhaul key columns. The info test asserts no overhaul line.
-- [x] **Sabotage 19/19 red,** restored byte-identical:
+- [x] **Sabotage 27/27 red,** restored byte-identical:
   - deletion (13): children kept; own matched by `league_user_id`; member ids not named; evidence kept; an undecided hash kept; a passed hash re-minted; the count zeroed; card ids kept; the username kept; `counterparty*` match context kept; `reasons` kept; `likes_you` kept; roadmaps not scrubbed;
+  - after trades-eng's review (8): no stale; stale only for undecided; a passed offer stale too; `opponent_outlook` kept; rosters not scrubbed; recovery not scrubbed; recovery name kept; public Sleeper ids scrubbed too;
   - export (4): evidence leaves; the card unredacted; no child rows; `overhauls` dropped from the manifest;
   - scan (1): main's `accounts.py`;
   - purge (1): the counterparty column not discovered.
