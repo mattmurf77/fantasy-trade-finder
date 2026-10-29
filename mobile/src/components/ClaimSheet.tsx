@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Pressable,
   Alert,
-  Linking,
   Modal,
   ScrollView,
   TextInput,
@@ -19,11 +18,12 @@ import {
   semantic,
   space,
   radii,
+  fonts,
   scrim,
   shadowSheet,
   type,
 } from '../theme/chalkline';
-import { Button, TickLabel } from './chalkline';
+import { Button, TickLabel, Text as ChalkText } from './chalkline';
 import PositionChip from './PositionChip';
 import TierBadge from './TierBadge';
 import type {
@@ -34,6 +34,8 @@ import type {
 } from '../api/league';
 import { isEspnLeague } from '../api/espn';
 import { isMflLeague, isFleaflickerLeague } from '../api/platformLink';
+import { openInSleeperApp } from '../utils/sleeperHandoff';
+import type { ExternalSurface } from '../utils/openExternal';
 
 // #179 claim sheet + the "where can an Add happen" resolver, shared by the
 // Free Agents finder and Usage Trends (moved out of FreeAgentsScreen
@@ -47,8 +49,7 @@ export type ClaimTarget = Pick<FreeAgentRow, 'player_id' | 'name' | 'position' |
 // #179 — where an "Add" can actually be executed. Sleeper publishes no
 // write API for roster moves, so the honest Sleeper flow is the claim-
 // preparation sheet (ClaimSheet below): FAAB bid + budget, drop selection,
-// then a deep-link into the league's players page in the Sleeper app/site
-// (same pragmatic pattern as the trade-propose deep-link in TradesScreen).
+// then a hand-off to the Sleeper app (utils/sleeperHandoff, #351).
 // Platform-linked leagues (ESPN / MFL / Fleaflicker) are read-only imports
 // today — no write path, so the Add affordance renders dimmed and explains
 // why on tap. 'local' covers demo/local leagues that exist nowhere outside
@@ -106,11 +107,13 @@ export function explainNoAdd(addPlatform: Exclude<AddPlatform, 'sleeper'>) {
 // limits). Sleeper publishes NO write API, so FTF PREPARES the claim —
 // FAAB bid sizing against the caller's live budget, drop selection from
 // the value-ascending candidate list when the roster is full — and the CTA
-// hands off to Sleeper's players page (same deep-link target as the old
-// alert flow) where the user executes it.
+// hands off to the Sleeper app (utils/sleeperHandoff) where the user
+// executes it.
 export default function ClaimSheet({
   row,
   leagueId,
+  leagueName,
+  surface = 'unspecified',
   capacity,
   waivers,
   dropCandidates,
@@ -118,6 +121,10 @@ export default function ClaimSheet({
 }: {
   row: ClaimTarget;
   leagueId: string;
+  /** The claim league's name; step 1 of the steps block names it (#351 PRD §4.2). Null/absent: step 1 reads a generic fallback. */
+  leagueName?: string | null;
+  /** Which host opened the sheet, for the hand-off's ExternalTarget.surface. */
+  surface?: ExternalSurface;
   capacity: FreeAgentRosterCapacity | null | undefined;
   waivers: FreeAgentWaivers | null | undefined;
   dropCandidates: FreeAgentDropCandidates | null | undefined;
@@ -137,11 +144,24 @@ export default function ClaimSheet({
   // Open slots known and > 0 ⇒ no drop needed; 0 (or unknown, when we have
   // candidates) ⇒ show the least-valuable-first drop list.
   const showDropList = openSlots !== null ? openSlots === 0 : candidates.length > 0;
+  const dropName = candidates.find((c) => c.id === dropId)?.name ?? null;
+  // Steps block: a drop step when a drop is picked, or when the roster is
+  // full and one still has to be; none when the roster has room.
+  const dropStep = dropName != null || openSlots === 0;
 
   const openSleeper = () => {
-    // Lands on the league's Players (available players) surface — Sleeper
-    // has no public write API, so the claim itself happens in Sleeper.
-    Linking.openURL(`https://sleeper.com/leagues/${leagueId}/players`).catch(() => {});
+    // Copies the player's name (the steps block says so), then opens the
+    // Sleeper app (`sleeper://`, the deepest proven rung; today `bare`, so
+    // Sleeper's last-viewed screen). Not installed → the Get Sleeper alert,
+    // never silent. Sleeper has no public write API, so the claim itself
+    // happens in Sleeper.
+    void openInSleeperApp({
+      target: 'add',
+      leagueId,
+      playerId: row.player_id,
+      clipboardText: row.name,
+      surface,
+    });
   };
 
   return (
@@ -304,6 +324,65 @@ export default function ClaimSheet({
               )}
             </View>
 
+            {/* #351 PRD §4.2 steps: what to do once Sleeper opens, as a
+                numbered list (design-lead review 2026-10-28). Re-renders with
+                the drop selection and the bid. Only the `bare` rung is proven,
+                and bare reopens Sleeper's last-viewed league, so step 1 always
+                names the league, generically when the host doesn't know it. */}
+            <View style={sheetStyles.section} testID="fa-claim.steps">
+              {/* COPY: final per marketing addendum 12; verbs pending #351 §7.3 */}
+              <TickLabel>IN SLEEPER</TickLabel>
+              <View style={sheetStyles.stepList}>
+                <ClaimStep n={1} testID="fa-claim.step.league">
+                  {leagueName ? (
+                    <>
+                      {'Open '}
+                      <ChalkText style={sheetStyles.stepsEm}>{leagueName}</ChalkText>
+                    </>
+                  ) : (
+                    // COPY: null-league fallback, final per marketing addendum 12.
+                    "Open the league you're claiming in"
+                  )}
+                </ClaimStep>
+                <ClaimStep n={2} testID="fa-claim.step.search">
+                  {'Go to Players, then search '}
+                  <ChalkText style={sheetStyles.stepsEm}>{row.name}</ChalkText>
+                </ClaimStep>
+                <ClaimStep n={3} testID="fa-claim.step.add">
+                  Add
+                </ClaimStep>
+                {dropStep ? (
+                  <ClaimStep n={4} testID="fa-claim.step.drop">
+                    {dropName ? (
+                      <>
+                        {'Drop '}
+                        <ChalkText style={sheetStyles.stepsEm}>{dropName}</ChalkText>
+                      </>
+                    ) : candidates.length === 0 ? (
+                      // Full roster, nothing listed above (design-lead, 2026-10-28).
+                      // COPY: empty-drop-list fallback, final per marketing addendum 12.
+                      'Drop a player to make room'
+                    ) : (
+                      'Drop: pick a player above'
+                    )}
+                  </ClaimStep>
+                ) : null}
+                {/* The bid doesn't carry over to Sleeper, so FAAB leagues
+                    restate it once one is entered. */}
+                {faab && bidNum != null ? (
+                  <ClaimStep n={dropStep ? 5 : 4} testID="fa-claim.step.bid">
+                    {'Bid '}
+                    <ChalkText style={sheetStyles.stepsEm}>
+                      ${bidNum.toLocaleString('en-US')}
+                    </ChalkText>
+                  </ClaimStep>
+                ) : null}
+              </View>
+              <ChalkText style={sheetStyles.sectionHint}>
+                {`Opening Sleeper copies ${row.name}, so you can paste it into search.`}
+              </ChalkText>
+            </View>
+
             <Button
               testID="fa-claim.open-sleeper"
               label="Open in Sleeper to claim"
@@ -318,6 +397,26 @@ export default function ClaimSheet({
         </SafeAreaView>
       </View>
     </Modal>
+  );
+}
+
+// One numbered row of the steps block: the step number in `data` (Plex Mono)
+// chalk-dim, then `body-sm` chalk-dim text. `accessible` makes VoiceOver read
+// the number and the text as one step.
+function ClaimStep({
+  n,
+  testID,
+  children,
+}: {
+  n: number;
+  testID: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={sheetStyles.stepRow} testID={testID} accessible>
+      <ChalkText style={sheetStyles.stepNum}>{n}</ChalkText>
+      <ChalkText style={sheetStyles.stepText}>{children}</ChalkText>
+    </View>
   );
 }
 
@@ -370,6 +469,14 @@ const sheetStyles = StyleSheet.create({
 
   section: { gap: space.sm },
   sectionHint: { ...type.bodySm, color: chalk.dim },
+  // Steps block emphasis (league / player / drop / bid): the `title` weight
+  // at the surrounding body-sm size.
+  stepsEm: { fontFamily: fonts.uiSemi, color: chalk.base },
+  // Steps block rows: space.xs apart, no hairlines, no card.
+  stepList: { gap: space.xs },
+  stepRow: { flexDirection: 'row', gap: space.sm },
+  stepNum: { ...type.data, color: chalk.dim },
+  stepText: { ...type.bodySm, color: chalk.dim, flex: 1 },
 
   bidRow: {
     flexDirection: 'row',
