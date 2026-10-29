@@ -160,7 +160,8 @@ PASS, FAIL, INSUFFICIENT, REPORT = "PASS", "FAIL", "INSUFFICIENT", "REPORT"
 _PACK_ROWS = table(PACK_TABLE, column("run_id", String), column("served_at", String),
                    column("header_json", Text), column("card_count", Integer))
 _WITHDRAWAL_ROWS = table(WITHDRAWALS_TABLE, column("reason", String),
-                         column("first_withdrawn_at", String))
+                         column("first_withdrawn_at", String), column("deck_job_id", String),
+                         column("card_index", Integer), column("served_before", Integer))
 
 
 class ReadOnlyViolation(RuntimeError):
@@ -254,9 +255,10 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
         packs = _pack_rows(conn, since, until, as_of)
         g3 = _g3(conn, decks, _outcome_ids(conn, since, until, as_of))
         withdrawals = _withdrawals_by_reason(conn, since, until, as_of)
+        w0 = _w0_indexes(conn, list(packs))
 
     pack_integrity = [d for d in decks if d.exclusion == PACK_INTEGRITY]
-    malformed = _malformed_moves(packs, skip={d.deck_job_id for d in pack_integrity})
+    malformed = _malformed_moves(packs, skip={d.deck_job_id for d in pack_integrity}, w0=w0)
     g1 = {"pack_decks": len(packs), "pack_integrity": len(pack_integrity),
           "display_moves_malformed": len(malformed),
           "ids": ([d.deck_job_id for d in pack_integrity] + malformed)[:LIST_CAP],
@@ -445,10 +447,11 @@ def _pack_rows(conn, since, until, as_of) -> dict[str, tuple[str, str]]:
     return {r.run_id: (r.served_at, r.header_json) for r in conn.execute(q)}
 
 
-def _malformed_moves(packs: dict, skip=()) -> list[str]:
+def _malformed_moves(packs: dict, skip=(), w0=None) -> list[str]:
     """G1 (F1): the run_ids, sorted, whose pack header's whole
     run["display_moves"] breaks the writer's contract, past as_of included
-    (data.display_moves_problem). A pack in `skip` (already pack_integrity)
+    (data.display_moves_problem; `w0`: run_id -> its served_before=0
+    indexes, from _w0_indexes). A pack in `skip` (already pack_integrity)
     or with an unreadable header or deliveries is the loader's."""
     out = []
     for run_id, (_served_at, header) in packs.items():
@@ -460,9 +463,22 @@ def _malformed_moves(packs: dict, skip=()) -> list[str]:
             evidence_pack.check_deliveries(run, card_count)
         except evidence_pack.PackIntegrityError:
             continue
-        if data.display_moves_problem(run, card_count):
+        if data.display_moves_problem(run, card_count, (w0 or {}).get(run_id, frozenset())):
             out.append(run_id)
     return sorted(out)
+
+
+def _w0_indexes(conn, run_ids: list[str]) -> dict[str, set[int]]:
+    """run_id -> the card_indexes of its served_before=0 withdrawals, every
+    one recorded (G1 checks the whole header, past as_of too)."""
+    if not run_ids or not inspect(conn).has_table(WITHDRAWALS_TABLE):
+        return {}
+    w, out = _WITHDRAWAL_ROWS, {}
+    for chunk in _chunks(sorted(run_ids)):
+        for run_id, index in conn.execute(select(w.c.deck_job_id, w.c.card_index).where(
+                w.c.deck_job_id.in_(chunk), w.c.served_before == 0)):
+            out.setdefault(run_id, set()).add(index)
+    return out
 
 
 def _outcome_ids(conn, since, until, as_of) -> list[str]:
