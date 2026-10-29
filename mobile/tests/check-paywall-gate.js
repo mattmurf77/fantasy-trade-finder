@@ -361,8 +361,8 @@ check('2a. [shape] the gate routing, router and sheet read no entitlement field'
   const clientSrc = strip(read('api/client.ts'));
   const gateBlock = clientSrc.slice(clientSrc.indexOf('export type GateKind'), clientSrc.indexOf('const DEFAULT_TIMEOUT_MS'));
   assert(gateBlock.length > 500 && gateBlock.includes('async function _afterGateFailure'), 'gate block not found in client.ts');
-  assert(/_reportApiFailure\([\s\S]{0,200}\);\s*return _afterGateFailure<T>\(err, path, opts\);\s*\} finally \{/.test(clientSrc),
-    "apiRequest's catch no longer hands the failure to the gate");
+  assert(/_reportApiFailure\([\s\S]{0,200}\);\s*if \(opts\.background \|\| !_gateIsOn\(\)\) throw err;\s*return _afterGateFailure<T>\(err, path, opts\);\s*\} finally \{/.test(clientSrc),
+    "apiRequest's catch no longer hands the failure to the gate (gate off or background: thrown in place, no async hop)");
   const files = {
     'client.ts gate code': gateBlock,
     'state/usePaywallGate.ts': strip(read('state/usePaywallGate.ts')),
