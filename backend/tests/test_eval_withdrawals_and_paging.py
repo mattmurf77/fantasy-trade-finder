@@ -283,7 +283,9 @@ def test_withdrawn_never_delivered_cards_replay_as_if_never_generated(monkeypatc
         run_a = evaluate(get_scorer(name, seed=3), a, ess_min=1, bootstrap=200, seed=7)
         run_b = evaluate(get_scorer(name, seed=3), b, ess_min=1, bootstrap=200, seed=7)
         assert run_a.withdrawn_removed_cards == removed and run_b.withdrawn_removed_cards == 0
-        assert replace(run_a, withdrawn_removed_cards=0) == run_b, name
+        assert run_a.withdrawn_removed_by_reason == {"owner_changed": removed}
+        assert run_b.withdrawn_removed_by_reason == {}
+        assert replace(run_a, withdrawn_removed_cards=0, withdrawn_removed_by_reason={}) == run_b, name
         like = run_a.metrics["like"]
         assert like.n > 10 and like.ci_low is not None and like.ips_ci_low is not None, name
 
@@ -294,7 +296,7 @@ def test_withdrawn_never_delivered_cards_replay_as_if_never_generated(monkeypatc
     assert vm.build_training_rows(a) == vm.build_training_rows(b)
 
 
-def test_removed_cards_are_reported_and_recorded_and_the_version_is_5():
+def test_removed_cards_are_reported_and_recorded_and_the_version_is_6():
     db_a, _db_b = _equivalent_dbs("rows")
     run = evaluate(_Spy(), load_decks(engine=db_a.eng), ess_min=1, bootstrap=0, seed=0)
     removed = sum(len(w0) for _job, _n, w0 in EQUIV_DECKS)
@@ -302,10 +304,10 @@ def test_removed_cards_are_reported_and_recorded_and_the_version_is_5():
     assert sum(run.excluded.values()) + run.n_included == run.n_total   # not an exclusion
     text = render_report([run], run)
     assert f"withdrawn_removed_cards={removed}" in text and "WARNING" not in text
-    assert "Exclusion rules: version 5." in text
+    assert "Exclusion rules: version 6." in text
     record = run_record(run, run)
     assert record["withdrawn_removed_cards"] == removed
-    assert EXCLUSION_RULE_VERSION == 5 == run.exclusion_rule_version == record[
+    assert EXCLUSION_RULE_VERSION == 6 == run.exclusion_rule_version == record[
         "exclusion_rule_version"]
 
 
@@ -944,3 +946,108 @@ def test_a_partial_run_is_never_required_to_have_a_pack(monkeypatch):
     assert set(exposure_curve([got["partial"]])) == {0, 1, 2, 3}
     _pairs, excluded = calibration_pairs(_Spy(), list(got.values()))
     assert excluded["partial_run"] == 8
+
+
+# ---------------------------------------------------------------------------
+# Follow-ups (models-lead addendum B, B1 / B4; addendum A, U4-R2): removals
+# counted by reason, and the packs' cause-coded upgrade misses
+# ---------------------------------------------------------------------------
+
+def test_removals_are_counted_by_reason_and_reported_and_recorded():
+    """B4: the W0 removals split by deck_card_withdrawals.reason, never gated
+    on. A delivered (W1) withdrawal is not a removal; EvalRun sums the decks
+    replay includes, as withdrawn_removed_cards does."""
+    db = make_db(live=PAGING_COLUMNS)
+    put_deck(db, "a", 10, rows=[i for i in range(10) if i not in (2, 5, 7)], viewed=[0, 4])
+    for index, reason in ((2, "disposition_cut"), (5, "disposition_cut"), (7, "i1_dropped")):
+        withdraw(db, "a", index, 0, reason=reason)
+    withdraw(db, "a", 4, 1, reason="disposition_cut")              # delivered: kept, not removed
+    put_deck(db, "b", 8, rows=[i for i in range(8) if i != 1], viewed=[0])
+    withdraw(db, "b", 1, 0, reason="i1_dropped")
+    put_deck(db, "gap", 10, rows={*range(10)} - {3, 6})            # incomplete: not included
+    withdraw(db, "gap", 3, 0, reason="disposition_cut")
+    put_deck(db, "bad", 8, rows=range(8), delivered=[3])           # a conflict: nothing removed
+    withdraw(db, "bad", 3, 0, reason="disposition_cut")
+    by_job = _by_job(load_decks(engine=db.eng))
+    assert by_job["a"].withdrawn_removed == 3
+    assert by_job["a"].withdrawn_removed_by_reason == {"disposition_cut": 2, "i1_dropped": 1}
+    assert list(by_job["a"].withdrawn_removed_by_reason) == ["disposition_cut", "i1_dropped"]
+    assert by_job["b"].withdrawn_removed_by_reason == {"i1_dropped": 1}
+    assert by_job["gap"].exclusion == INCOMPLETE_DECK
+    assert by_job["gap"].withdrawn_removed_by_reason == {"disposition_cut": 1}
+    assert by_job["bad"].exclusion == WITHDRAWAL_CONFLICT
+    assert by_job["bad"].withdrawn_removed_by_reason == {}
+
+    run = evaluate(_Spy(), list(by_job.values()), ess_min=1, bootstrap=0, seed=0)
+    assert run.withdrawn_removed_cards == 4                        # still the total
+    assert run.withdrawn_removed_by_reason == {"disposition_cut": 2, "i1_dropped": 2}
+    text = render_report([run], run)
+    assert 'withdrawn_removed_by_reason={"disposition_cut": 2, "i1_dropped": 2}' in text
+    record = run_record(run, run)
+    assert record["withdrawn_removed_cards"] == 4
+    assert record["withdrawn_removed_by_reason"] == {"disposition_cut": 2, "i1_dropped": 2}
+    assert list(record["withdrawn_removed_by_reason"]) == ["disposition_cut", "i1_dropped"]
+
+
+@pytest.mark.parametrize("misses, expected", [
+    (None, {}),                                                    # missing: none recorded
+    ({"restart_split": 2, "evicted_split": 1, "other": 0},
+     {"evicted_split": 1, "other": 0, "restart_split": 2}),        # every cause, sorted
+    ({"other": 1}, {"other": 1}),
+    (3, {"other": 3}),                                             # a legacy int is all other
+    (0, {"other": 0}),
+], ids=["missing", "named_causes", "other", "legacy_int", "legacy_zero"])
+def test_a_packs_upgrade_misses_are_read_by_cause(misses, expected):
+    """U4-R2: run["upgrade_misses"] is cause -> count; `other` is the one
+    cause that must be 0, so a legacy int (cause unknown) reads as other."""
+    db = make_db()
+    put_deck(db, "j", 10, rows=range(5))
+    run = {} if misses is None else {"upgrade_misses": misses}
+    put_pack(db, "j", _deck_cards("j", 10)[5:], card_count=10, deliveries=[[9, SERVED]], **run)
+    put_deck(db, "rows", 6)                                        # no pack: nothing to read
+    write_deck(db.eng, db.packs, _deck_cards("bad", 10), full=range(5), packed=range(5, 10),
+               edit=lambda p: replace(p, checksum="0" * 64))       # unreadable: nothing to read
+    by_job = _by_job(load_decks(engine=db.eng))
+    assert by_job["j"].exclusion is None
+    assert by_job["j"].upgrade_misses == expected and list(by_job["j"].upgrade_misses) == sorted(
+        expected)
+    assert by_job["rows"].upgrade_misses == {}
+    assert by_job["bad"].exclusion == PACK_INTEGRITY and by_job["bad"].upgrade_misses == {}
+
+
+def test_eval_run_sums_upgrade_misses_over_every_loaded_deck_and_flags_other():
+    """U4-R2 on EvalRun: summed per cause over every deck loaded, included or
+    not, on both sides of a split (a data-quality count); render_report prints
+    an ERROR U4-R2 line iff other > 0. Reporting only: the rule version stays 5."""
+    db = make_db()
+    for job, run, cards in (
+            ("ok", {"upgrade_misses": {"restart_split": 2, "evicted_split": 1, "other": 0}}, 10),
+            ("live", {"upgrade_misses": {"restart_split": 1}, "retired": False}, 10),
+            ("gap", {"upgrade_misses": 0}, 9)):                    # its pack lost card 9
+        put_deck(db, job, 10, rows=range(5), viewed=[0])
+        put_pack(db, job, _deck_cards(job, 10)[5:cards], card_count=10,
+                 deliveries=[[cards - 1, SERVED]], **run)
+    decks = load_decks(engine=db.eng, as_of=_after(2))
+    assert {d.deck_job_id: d.exclusion for d in decks} == {
+        "ok": None, "live": IN_FLIGHT, "gap": INCOMPLETE_DECK}
+    expected = {"evicted_split": 1, "other": 0, "restart_split": 3}
+    run = evaluate(_Spy(), decks, ess_min=1, bootstrap=0, seed=0)
+    assert run.upgrade_misses == expected and list(run.upgrade_misses) == sorted(expected)
+    split = evaluate(_Spy(), decks, eval_start=_after(1), ess_min=1, bootstrap=0, seed=0)
+    assert split.n_total == 0 and split.upgrade_misses == expected   # train side counted too
+    text = render_report([run], run)
+    assert 'upgrade_misses={"evicted_split": 1, "other": 0, "restart_split": 3}' in text
+    assert "ERROR U4-R2" not in text
+    record = run_record(run, run)
+    assert record["upgrade_misses"] == expected and list(record["upgrade_misses"]) == sorted(expected)
+    assert record["exclusion_rule_version"] == EXCLUSION_RULE_VERSION == 6
+
+    put_deck(db, "lost_row", 10, rows=range(5))
+    put_pack(db, "lost_row", _deck_cards("lost_row", 10)[5:], card_count=10,
+             deliveries=[[9, SERVED]], upgrade_misses={"other": 1})
+    flagged = evaluate(_Spy(), load_decks(engine=db.eng, as_of=_after(2)), ess_min=1,
+                       bootstrap=0, seed=0)
+    assert flagged.upgrade_misses["other"] == 1
+    errors = [line for line in render_report([flagged], flagged).splitlines()
+              if line.startswith("ERROR U4-R2:")]
+    assert len(errors) == 1 and "other must be 0" in errors[0]

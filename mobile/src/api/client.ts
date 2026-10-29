@@ -352,6 +352,10 @@ export function runWithDeadline<T>(
 function timeoutForRequest(path: string, method: string): number {
   const pathname = path.replace(/^https?:\/\/[^/]+/, '').split(/[?#]/)[0];
   if (method === 'GET' && pathname === '/api/league/season-projections') return SLOW_TIMEOUT_MS;
+  // LEG-S6 (#446): the server may spend up to 2 x APPLE_HTTP_TIMEOUT_S on the
+  // Sign in with Apple revoke before it deletes; the slow cap keeps a slow
+  // Apple from showing "took too long" while the deletion still completes.
+  if (method === 'DELETE' && pathname === '/api/account') return SLOW_TIMEOUT_MS;
   if (method === 'POST' && SLOW_POST_PATHS.some((p) => path.includes(p))) {
     return SLOW_TIMEOUT_MS;
   }
@@ -368,6 +372,10 @@ export interface RequestOptions {
   signal?: AbortSignal;
   // A caller's whole-operation cap; never extends the route's own allowance.
   deadlineAt?: number;
+  // Per-call request timeout (ms) in place of timeoutForRequest's value, for a
+  // call whose server worst case is longer (api/sendOutcome.ts). Omitted =
+  // unchanged behaviour.
+  timeoutMs?: number;
   // State-owned identity fence. No store import belongs in this layer.
   beforeDispatch?: () => void;
 }
@@ -471,7 +479,7 @@ export async function apiRequest<T = unknown>(
 ): Promise<T> {
   const startedAt = _clockMs();
   const foregroundEpoch = _leftForegroundCount;
-  const deadlineAt = Math.min(opts.deadlineAt ?? Infinity, Date.now() + timeoutForRequest(path, opts.method || 'GET'));
+  const deadlineAt = Math.min(opts.deadlineAt ?? Infinity, Date.now() + (opts.timeoutMs ?? timeoutForRequest(path, opts.method || 'GET')));
   _noteWrite(path, opts.method || 'GET');
   try {
     return await runWithDeadline(signal => _apiRequestInner<T>(path, {...opts, signal, deadlineAt}), deadlineAt, opts.signal);
@@ -523,7 +531,7 @@ async function _apiRequestInner<T = unknown>(
   const timer = setTimeout(() => {
     timedOut = true;
     timeoutController.abort();
-  }, timeoutForRequest(path, method));
+  }, opts.timeoutMs ?? timeoutForRequest(path, method));
 
   const callerSignal = opts.signal;
   const onCallerAbort = () => timeoutController.abort();

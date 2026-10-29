@@ -1063,7 +1063,8 @@ export default function ShopOffersBody({
                       <View style={styles.likeWrap}>
                         <Button
                           testID="shop.like-btn"
-                          label="Send this offer"
+                          label={`Show it to @${item.counterparty_username}`}
+                          accessibilityLabel={`Show this offer to @${item.counterparty_username} in their Fleeced deck`}
                           icon="check"
                           variant="primary"
                           compact

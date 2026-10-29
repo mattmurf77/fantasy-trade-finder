@@ -1128,6 +1128,14 @@ Index(
     "ix_deck_impressions_job",
     deck_impressions_table.c.deck_job_id,
 )
+# The evidence retention prune finds pack-less decks past the bound by their
+# first delivery (purge_deck_evidence). On prod it is built off the boot path
+# (scripts/create_evidence_retention_index.py, CONCURRENTLY), never in init_db:
+# a plain CREATE INDEX on prod's deck_impressions blocks writes for a full scan.
+Index(
+    "ix_deck_impressions_served",
+    deck_impressions_table.c.served_at,
+)
 # C8 retention (ADR-025) has no index yet: the archive partial index arrives
 # with stage-2 packing, which restores the purge (models-lead R2.6 S2). Build it
 # then with CREATE INDEX CONCURRENTLY off the boot path (an operator one-off or
@@ -1295,7 +1303,7 @@ deck_card_withdrawals_table = Table("deck_card_withdrawals", metadata,
     Column("card_index",         Integer, nullable=False),   # the build index
     Column("user_id",            String,  nullable=False),
     Column("league_id",          String,  nullable=False),
-    Column("reason",             String,  nullable=False),   # 'i1_dropped'
+    Column("reason",             String,  nullable=False),   # 'i1_dropped' | 'disposition_cut'
     Column("first_withdrawn_at", String,  nullable=False),   # ISO UTC
     Column("served_before",      Integer, nullable=False),   # 0/1
     Column("impression_id",      String),                    # contract.card_impression_id
@@ -1335,7 +1343,8 @@ Index("ix_deck_evidence_packs_user_league",
 # One row per captured sleeper_trades transaction examined by the matcher
 # (suggestion_telemetry.match_league_trades, hooked after every
 # sync_league_trades pass). was_recommended = 1 iff the trade matched a
-# NON-ghost (actually rendered) logged suggestion under the D-scope-5
+# NON-ghost shown logged suggestion (viewed or first 30; R-U6a,
+# _evidence_shown) under the D-scope-5
 # similarity rule; the best GHOST match is linked separately — the
 # ghost_* columns are the incrementality read (did a withheld suggestion
 # execute anyway?). Multi-team / unresolvable trades get a row with
@@ -1916,6 +1925,12 @@ app_feedback_table = Table("app_feedback", metadata,
     # POST /api/feedback contract byte-identical — see save_feedback).
     Column("status",            String),                  # see FEEDBACK_STATUSES
     Column("status_updated_at", String),                  # ISO, set on status change
+    # #360 QA P2-1 (head-eng): sha256 hex of the X-Session-Token of the
+    # UNVERIFIED session that sent the note (never the raw token). When that
+    # same session verifies in place, attach_session_feedback moves the note
+    # to the now-proven user and clears this. NULL for verified-at-post,
+    # no-token and unknown-token notes, and after attach.
+    Column("session_key",       Text),
     Index("idx_app_feedback_created_at", "created_at"),
     Index("idx_app_feedback_user_id",    "user_id"),
 )
@@ -3162,7 +3177,11 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_paged_responses", 1.0, "Kill switch for opt-in paging (E2): 1 = honor `page`/`cursor`; 0 = ignore them and serve the legacy cumulative body, which the #363 app handles as its pre-paging deck path. Deploy-free"),
     # ── S0 serve rules (roster fingerprint contract v0.4 §3, §3b) ────────
     ("trade_i1_mode", 1.0, "S0 live-path switch, read per request (default 1 until C-b, models-lead option B): 2 = strict (I-1 drops cards with moved assets; the no-card gate misses follow trade_gate_miss_mode); 1 = lenient (check and log, serve every card, never withhold); 0 = off (the pre-S0 path: no I-1, no fingerprint read or compare, no withhold, no floor kick). NaN or any other value reads as 1. Deploy-free"),
+    ("trade_roster_change_revoke", 1.0, "S0 kill for the on_roster_change handler alone, read per call: 0 = the handler does nothing: no revoke, no re-stamp, no move recorded (the rest of S0 follows trade_i1_mode); 1 = it revokes a league job built on an older Sleeper read than the refreshed rows, only for a user whose session already holds the newer read (#470 QA), re-stamps a job whose rosters (its read's members, the picks then stored) hash to the new stamp, and records the move (#481 QA, #484 QA). NaN or any other value reads as 1. Deploy-free"),
     ("trade_gate_miss_mode", 0.0, "S0's no-card gate misses: 1 = serve them (roster_check_unavailable when the roster check can't run; the §3b withhold with wait_reason 'roster_check'); 0 = hold them for binaries before 1.22.0, which show them as 'Search failed' (a check that can't run serves the cards unchecked, loudly logged; a past-bound stale roster serves its I-1-filtered cards, logged roster_gate_miss_held). Flip to 1 once 1.22.0 is distributed. NaN or any other value reads as 0. Deploy-free"),
+    # ── Deck-evidence retention (head-eng 2026-10-28; dark until a bound is set) ──
+    ("deck_evidence_retention_days", 0.0, "Deck-evidence retention cap (legal R28.20 (iii): 365). The cleanup loop deletes, a bounded batch per tick, every store of a deck first delivered more than this many days ago, all at once: its outcomes, pass reasons, deck_impressions rows, withdrawals, candidate set, bakeoff_runs row, policy shadow rows and pack; and legacy trade_impressions and trade_page_store rows past it. 0 = off: the whole prune, full rows included, stays dark. A value under 56 (receipts' window) is refused: nothing is deleted and a warning is logged. Deploy-free"),
+    ("deck_evidence_full_row_days", 90.0, "Deck-evidence retention, full rows (legal R28.20 (iii): 90): a PACKED deck's deck_impressions rows (full and ghost) are deleted this many days after its first delivery; the pack keeps every card until deck_evidence_retention_days. A deck with no pack keeps its rows until the cap. Acts only while deck_evidence_retention_days is on; 0 or a value at or past the cap = rows go with the deck at the cap; under 56 = refused and logged. Deploy-free"),
     ("trade_roster_bound_s", 300.0, "S0 §3b: a Sleeper roster whose last refresh is older than this many seconds is past the bound. Past the bound, the serve kicks one background roster refresh (P41); past it with the last attempt failed (league_roster_state 'stale'), cached cards are withheld (wait_reason 'roster_check'). Deploy-free"),
     ("trade_import_roster_fresh_s", 86400.0, "S0 §3: an ESPN/MFL/Fleaflicker league's stored rosters read 'fresh' while their newest league_members.updated_at is younger than this many seconds, else 'stale'. Logged only: never withholds, never rebuilds (ruling 29). Deploy-free"),
     # ── First-page store (P1, flag trade.first_page_store; read only while it is on) ──
@@ -3517,6 +3536,19 @@ _MODEL_CONFIG_DEFAULTS = [
     ("vc_standings_weight",       0.30, "value core windows: full weight of the points-for index; ramps linearly from week 0 to week 8"),
     ("vc_throwin_min_ratio",      2.0,  "value core: a piece too small for the junk rules may ride along only if its recipient's board values it at >= this x consensus market (and >= the asset floor)"),
     ("vc_testers_only",           1.0,  "value core rollout: 1 = serve only the tester allowlist while trade.value_core is on; 0 = everyone"),
+    # ── Minimum-version gate (B8, head-eng ruling 35) ────────────────────
+    # Served as the top-level int `app_min_version` on GET /api/feature-flags
+    # (server._app_min_version). Encoding major*10000 + minor*100 + patch
+    # (1.22.0 = 12200); 0 = OFF. Seeded 0 and insert-if-absent like every
+    # row here, so a deploy never gates anyone and never resets a raised
+    # value. release-lead's deploy-free kill switch:
+    # PUT /api/admin/config/app_min_version (docs/config-reference.md).
+    ("app_min_version",           0,    "min-version gate: builds whose version int (major*10000+minor*100+patch) is below this get a blocking Update required screen; 0 = off. Served on GET /api/feature-flags; a missing, non-integral, NaN or negative value serves 0. Writes are checked by backend/app_version_policy.py"),
+    # Where the gate's Update button goes: 1 = App Store, 0 = TestFlight,
+    # -1 = unset (the client's compiled UTC instant decides). Served as the
+    # top-level int `app_store_live` on GET /api/feature-flags; anything but
+    # exactly 0 or 1 serves -1.
+    ("app_store_live",           -1,    "min-version gate Update target: 1 = App Store, 0 = TestFlight, -1 = unset (the app's compiled fallback, App Store from 2026-11-18T08:00:00Z). Served on GET /api/feature-flags; anything but 0/1 serves -1"),
 ]
 
 
@@ -3954,7 +3986,9 @@ def _migrate_db() -> None:
     # for any future additive ALTERs. Indexes are declared on the Table
     # definition so create_all() handles them on fresh DBs.
     _app_feedback_migrations: list[tuple[str, str, str]] = [
-        # (table, column, type) — currently none; placeholder for future work
+        # (table, column, type)
+        # #360 QA P2-1: hash of the unverified session that sent the note.
+        ("app_feedback", "session_key", "TEXT"),
     ]
     _add_missing_columns(_app_feedback_migrations)
 
@@ -7217,6 +7251,266 @@ def load_deck_diagnostics(impression_id: str, user_id: str) -> dict | None:
     return expand_features(features, snapshots)
 
 
+# Deck-evidence retention, legal R28.20 (iii) final, with models-lead's
+# addendum E: every deck-evidence store expires 365 days after a deck's first
+# delivery, deck-atomic (E-a1); a packed deck's full rows (ghost rows
+# included, E-c2) after 90 (E-c1); a deck with no pack keeps its rows under
+# the 365-day cap (E-a3: they are its only replay record). Receipts read up to
+# 56 days back: the shortest bound either knob accepts.
+DECK_EVIDENCE_RETENTION_FLOOR_DAYS = 56
+_EVIDENCE_PRUNE_ROWS_PER_DECK = 150   # rows read per wanted deck (a deck has ~35-130)
+_FULL_ROW_PRUNE_PACKS = 500            # packs whose full rows go in one statement
+_served_index_ready = False            # ix_deck_impressions_served seen at the last check
+_served_index_checked = 0.0            # monotonic time of that check
+_SERVED_INDEX_RECHECK_S = 3600.0       # a seen index is checked again hourly (#523 QA P3-5)
+_served_index_warned = False
+_bound_warned: set = set()             # (knob, value) pairs already warned about
+# The full-row pass's place in the packs' (served_at, run_id) order: every
+# pack at or before it, inside the 365-day cap, has had its full rows deleted.
+# In memory only: a restart walks again from the cap, in bounded chunks.
+_full_row_cursor: tuple[str, str] | None = None
+
+
+def _deck_impressions_served_index_ready() -> bool:
+    """Whether ix_deck_impressions_served exists: without it the pack-less
+    scan would read the whole table, so the prune skips it (logged once, and
+    again if a seen index goes missing). Missing, it's looked for every call;
+    seen, it's checked again hourly, so a dropped index stops the scan."""
+    global _served_index_ready, _served_index_checked, _served_index_warned
+    now = time.monotonic()
+    if not _served_index_ready or now - _served_index_checked >= _SERVED_INDEX_RECHECK_S:
+        from sqlalchemy import inspect as _inspect
+        names = {ix.get("name") for ix in _inspect(engine).get_indexes("deck_impressions")}
+        ready = "ix_deck_impressions_served" in names
+        if not ready and (_served_index_ready or not _served_index_warned):
+            _served_index_warned = True
+            log.warning("deck-evidence retention: pack-less decks wait for "
+                        "ix_deck_impressions_served (scripts/create_evidence_retention_index.py)")
+        _served_index_ready, _served_index_checked = ready, now
+    return _served_index_ready
+
+
+DECK_EVIDENCE_RETENTION_MAX_DAYS = 36500   # past this a bound is a typo, not a policy
+
+
+def _bound_ok(name: str, days) -> bool:
+    """A retention bound in force: set (> 0), finite, at most
+    DECK_EVIDENCE_RETENTION_MAX_DAYS and not under the floor. A refused value
+    is logged once per value, not every tick (#523 QA P3-3)."""
+    if not days or days <= 0:
+        return False
+    if not math.isfinite(days) or days > DECK_EVIDENCE_RETENTION_MAX_DAYS:
+        why = f"isn't a finite count of days up to {DECK_EVIDENCE_RETENTION_MAX_DAYS}"
+    elif days < DECK_EVIDENCE_RETENTION_FLOOR_DAYS:
+        why = f"is under the {DECK_EVIDENCE_RETENTION_FLOOR_DAYS}-day floor"
+    else:
+        return True
+    if (name, repr(days)) not in _bound_warned:
+        _bound_warned.add((name, repr(days)))
+        log.warning("deck-evidence retention: %s %s days %s; nothing deleted under it",
+                    name, days, why)
+    return False
+
+
+def _expired_decks(cutoff: str, limit: int) -> dict[str, tuple[str, str, int]]:
+    """Up to `limit` decks first delivered before `cutoff`, oldest first, as
+    {deck_job_id: (user_id, league_id, card_count)}: packed decks by their
+    pack's served_at (card_count, the pack's); then, once
+    ix_deck_impressions_served exists, pack-less decks by their rows'
+    (bounded, in index order, never a DISTINCT over the backlog; card_count
+    0). A packed deck is only ever found through its pack, so it goes whole."""
+    p, i = deck_evidence_packs_table, deck_impressions_table
+    with engine.connect() as conn:
+        decks = {r.run_id: (r.user_id, r.league_id, r.card_count or 0) for r in conn.execute(
+            select(p.c.run_id, p.c.user_id, p.c.league_id, p.c.card_count)
+            .where(p.c.served_at < cutoff).order_by(p.c.served_at, p.c.run_id).limit(limit))}
+        if len(decks) < limit and _deck_impressions_served_index_ready():
+            found: dict[str, tuple[str, str, int]] = {}
+            for r in conn.execute(
+                    select(i.c.deck_job_id, i.c.user_id, i.c.league_id)
+                    .where(i.c.served_at < cutoff).order_by(i.c.served_at)
+                    .limit((limit - len(decks)) * _EVIDENCE_PRUNE_ROWS_PER_DECK)):
+                if r.deck_job_id not in decks:
+                    found.setdefault(r.deck_job_id, (r.user_id, r.league_id, 0))
+            if found:
+                packed = set(conn.execute(select(p.c.run_id).where(
+                    p.c.run_id.in_(list(found)))).scalars())
+                for job, owner in found.items():
+                    if job not in packed and len(decks) < limit:
+                        decks[job] = owner
+    return decks
+
+
+def deck_pack_contract_ids(conn, user_ids) -> list[str]:
+    """Every contract id ("<deck_job_id>:<k>", k < card_count; R4.2 U2) of the
+    users' packed decks, on the caller's connection. A packed card's outcomes
+    are keyed by it whether or not the card has a row, and the evidence
+    prune's full-row bound deletes the rows long before the pack, so account
+    export and deletion find outcomes through these too (#523 QA P1-1)."""
+    p = deck_evidence_packs_table
+    return [f"{run_id}:{k}" for run_id, n in conn.execute(
+        select(p.c.run_id, p.c.card_count).where(p.c.user_id.in_(list(user_ids))))
+        for k in range(n or 0)]
+
+
+def _delete_deck(conn, deck_job_id: str, user_id: str, league_id: str,
+                 card_count: int) -> dict[str, int]:
+    """Every store of one deck (E-a1). The per-card ones first, outcomes and
+    pass reasons: a packed card's by its contract id ("<deck_job_id>:<k>" for
+    each of the pack's `card_count` cards, R4.2 U2), whether or not it has a
+    row, and a row's by the row's impression_id. Exact ids, never a LIKE or a
+    string range: under prod's collation neither is a plain index range."""
+    i, o, p = deck_impressions_table, deck_outcomes_table, deck_evidence_packs_table
+    w, c, b = deck_card_withdrawals_table, deck_candidate_sets_table, bakeoff_runs_table
+    r, sh = trade_pass_reasons_table, trade_policy_shadow_table
+    contract_ids = [f"{deck_job_id}:{k}" for k in range(card_count)]
+    row_ids = select(i.c.impression_id).where(i.c.deck_job_id == deck_job_id)
+    counts: dict[str, int] = {}
+    for name, stmt in (
+            *((name, delete(t).where(t.c.impression_id.in_(contract_ids[k:k + 500])))
+              for name, t in (("deck_outcomes", o), ("trade_pass_reasons", r))
+              for k in range(0, len(contract_ids), 500)),
+            ("deck_outcomes", delete(o).where(o.c.impression_id.in_(row_ids))),
+            ("trade_pass_reasons", delete(r).where(r.c.impression_id.in_(row_ids))),
+            ("deck_impressions", delete(i).where(i.c.deck_job_id == deck_job_id)),
+            ("deck_card_withdrawals", delete(w).where(w.c.deck_job_id == deck_job_id)),
+            ("deck_candidate_sets", delete(c).where(
+                c.c.user_id == user_id, c.c.league_id == league_id,
+                c.c.deck_job_id == deck_job_id)),
+            ("bakeoff_runs", delete(b).where(b.c.deck_job_id == deck_job_id)),
+            ("trade_policy_shadow", delete(sh).where(sh.c.deck_job_id == deck_job_id)),
+            ("deck_evidence_packs", delete(p).where(p.c.run_id == deck_job_id))):
+        n = conn.execute(stmt).rowcount or 0
+        if n:
+            counts[name] = counts.get(name, 0) + n
+    return counts
+
+
+def _delete_old_trade_impressions(cutoff: str, limit: int) -> int:
+    """Legacy trade_impressions (still written beside deck_impressions) past
+    the cap, among the oldest `limit` ids: rows are inserted in shown_at order,
+    so no index on shown_at is needed. An id bound, a primary-key range scan;
+    an IN over a LIMIT subquery planned as a semi join over the whole table on
+    Postgres every tick (#523 QA P2-1)."""
+    t = trade_impressions_table
+    with engine.begin() as conn:
+        upper = conn.execute(select(t.c.id).order_by(t.c.id).offset(limit - 1).limit(1)).scalar()
+        if upper is None:                     # fewer rows than the batch: all of them
+            upper = conn.execute(select(func.max(t.c.id))).scalar()
+        if upper is None:
+            return 0
+        return conn.execute(delete(t).where(t.c.id <= upper, t.c.shown_at < cutoff)
+                            ).rowcount or 0
+
+
+def _delete_old_page_store(cutoff: str, limit: int) -> int:
+    """trade_page_store rows built before the cap: a backstop for the store's
+    own eviction (trade_page_store_evict_days, 30 by default), which runs only
+    while the store is on and could be set past the cap. One row per scope,
+    so the table stays small and a scan is cheap."""
+    t = trade_page_store_table
+    with engine.begin() as conn:
+        ids = select(t.c.id).where(t.c.built_at < cutoff).order_by(t.c.id).limit(limit)
+        return conn.execute(delete(t).where(t.c.id.in_(ids.scalar_subquery()))).rowcount or 0
+
+
+def _delete_packed_full_rows(cutoff: str, floor: str, chunks: int) -> int:
+    """The full-row bound (E-c1): the deck_impressions rows of packed decks
+    first delivered before `cutoff` (and not before `floor`, the cap, whose
+    decks go whole), `_FULL_ROW_PRUNE_PACKS` packs a statement, at most
+    `chunks` statements a call, resuming from `_full_row_cursor`. The pack,
+    its outcomes and the rest stay until the cap. A failed chunk keeps the
+    cursor, so it is retried next tick."""
+    global _full_row_cursor
+    p, i = deck_evidence_packs_table, deck_impressions_table
+    deleted = 0
+    for _ in range(max(1, chunks)):
+        q = select(p.c.served_at, p.c.run_id).where(p.c.served_at < cutoff,
+                                                    p.c.served_at >= floor)
+        if _full_row_cursor is not None:
+            at, run = _full_row_cursor
+            q = q.where(or_(p.c.served_at > at, and_(p.c.served_at == at, p.c.run_id > run)))
+        try:
+            with engine.begin() as conn:
+                packs = conn.execute(q.order_by(p.c.served_at, p.c.run_id)
+                                     .limit(_FULL_ROW_PRUNE_PACKS)).all()
+                if packs:
+                    deleted += conn.execute(delete(i).where(
+                        i.c.deck_job_id.in_([r.run_id for r in packs]))).rowcount or 0
+        except Exception:
+            log.warning("deck-evidence retention: full rows not deleted; retried next tick",
+                        exc_info=True)
+            break
+        if not packs:
+            break
+        _full_row_cursor = (packs[-1].served_at, packs[-1].run_id)
+        if len(packs) < _FULL_ROW_PRUNE_PACKS:
+            break
+    return deleted
+
+
+def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks: int = 200,
+                        full_row_chunks: int = 20, now: datetime | None = None) -> dict[str, int]:
+    """Deck-evidence retention (legal R28.20 (iii), final; models-lead
+    addendum E), one bounded pass per cleanup tick, measured from a deck's
+    first delivery (`served_at`):
+    - `days` (the cap, 365): up to `batch_decks` decks past it, each in its
+      own transaction, lose every store at once (E-a1): outcomes (every kind)
+      and pass reasons, deck_impressions rows, withdrawals, the candidate set,
+      the bakeoff_runs row, the trade_policy_shadow rows and the pack; and
+      legacy trade_impressions and trade_page_store rows past it go too (the
+      page store's own eviction runs only while the store is on);
+    - `full_row_days` (90): a packed deck's deck_impressions rows (full and
+      ghost) past it go, and the pack keeps every card until the cap. A deck
+      with no pack keeps its rows until the cap (E-a3, E-c1).
+    `days` 0 means off, and nothing runs. A bound under
+    DECK_EVIDENCE_RETENTION_FLOOR_DAYS is refused and logged; so is the
+    full-row one, which is also unused at or past the cap. Pack-less decks are
+    found through ix_deck_impressions_served only once it exists (built off
+    the boot path; until then they wait, logged once). Returns rows deleted
+    per table, plus "decks" ({} when nothing was deleted)."""
+    if not _bound_ok("deck_evidence_retention_days", days):
+        return {}
+    now = now or datetime.now(timezone.utc)
+    cap = (now - timedelta(days=days)).isoformat()
+    limit = max(1, min(batch_decks, 1000))
+    decks = _expired_decks(cap, limit)
+    counts: dict[str, int] = {}
+    done = 0
+    for deck_job_id, (user_id, league_id, card_count) in decks.items():
+        try:
+            with engine.begin() as conn:
+                deleted = _delete_deck(conn, deck_job_id, user_id, league_id, card_count)
+        except Exception:
+            log.warning("deck-evidence retention: deck %s not deleted; retried next tick",
+                        deck_job_id, exc_info=True)
+            continue
+        done += 1
+        for name, n in deleted.items():
+            counts[name] = counts.get(name, 0) + n
+    if done:
+        counts["decks"] = done
+    for name, step, batch in (
+            ("trade_impressions", _delete_old_trade_impressions,
+             limit * _EVIDENCE_PRUNE_ROWS_PER_DECK),
+            ("trade_page_store", _delete_old_page_store, limit)):
+        try:
+            n = step(cap, batch)
+        except Exception:
+            n = 0
+            log.warning("deck-evidence retention: %s not deleted; retried next tick", name,
+                        exc_info=True)
+        if n:
+            counts[name] = n
+    if full_row_days and _bound_ok("deck_evidence_full_row_days",
+                                   full_row_days) and full_row_days < days:
+        rows = _delete_packed_full_rows((now - timedelta(days=full_row_days)).isoformat(),
+                                        cap, full_row_chunks)
+        if rows:
+            counts["full_rows"] = rows
+    return counts
+
+
 def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
     """Expire one bounded batch of debug nodes, never cards/valuations/outcomes."""
     if days <= 0:
@@ -7239,15 +7533,117 @@ _EVIDENCE_TIERS_BELOW_VIEWED = ("full_interim", "archive", "delivered")
 # a build-time row, tier NULL, only a live-mode page-scoped deck's, through
 # _stamp_delivered's build_rows: #417 cross-check P2-1).
 _EVIDENCE_TIERS_DELIVERABLE = ("first30", "delivered", "full_interim", "archive", "viewed")
-# R4.2 U6: rows of cards never shown as such (a C8 archive deck's extras, stage
-# 1's full_interim remainder) are not recommendations: receipts and the matcher
-# skip them, so they read viewed cards, the first 30 and pre-change rows.
-_EVIDENCE_TIERS_NOT_SHOWN = ("archive", "full_interim")
+# R-U6a and models-lead's R3 (2026-10-26; ADR-025 C3, R4.2 U6): which rows
+# receipts and the executed-trade matcher read as recommendations. A row
+# written at build (tier NULL: legacy and flag-off rows) as before; a deferred
+# or packed deck's card only when it's in the first 30 or the user acted on it:
+# a first outcome of any kind, joined by impression_id (U2's contract ids). R3:
+# "viewed" comes from that outcome, never from the tier or from whether a full
+# row exists. So 'delivered' (sent, not seen), 'archive', 'full_interim' and
+# 'partial_run' rows count only once acted on. Ghost rows pass as before: never
+# a recommendation, each reader handles them by is_ghost (receipts skip them;
+# the matcher links them as its incrementality read).
+_DECK_FIRST_OUTCOMES = ("viewed", "like", "pass", "propose", "undo", "not_interested")
+
+
+def _deck_card_acted():
+    """EXISTS a first outcome of the row's card, joined by impression_id. It
+    never runs for a NULL-tier row (the OR short-circuits). SQLite probes
+    ix_deck_outcomes_impression per row; Postgres may plan it as a hashed
+    SubPlan instead (one scan of deck_outcomes per query, ~28 ms at 200k rows,
+    #424 QA): fine for the receipts queue and the matcher's league pass."""
+    i, o = deck_impressions_table, deck_outcomes_table
+    return (select(literal(1))
+            .where(o.c.impression_id == i.c.impression_id, o.c.action.in_(_DECK_FIRST_OUTCOMES))
+            .exists())
+
+
+# The packed-evidence flip (analytics-lead 2026-10-26): the UTC day ("YYYY-MM-DD")
+# trade.first_page_store and trade.packed_evidence went on together. From it,
+# _evidence_shown narrows a packed deck's rows to viewed-or-first-30 (R-U6a), so
+# receipts' graded volume and the endorsement ratio's `recommended` both change
+# meaning. None until the flip: the scribe sets this one value on flip day, and
+# both series' `series_break` caveats read it (receipts_service.admin_metrics,
+# server.suggestion_telemetry_ratio_route), so the two can't drift.
+PACKED_EVIDENCE_FLIP_DAY: str | None = None
+# The caveat code every series-break entry carries (analytics_queries,
+# receipts_service, the ratio route), so a reader can match on one value.
+SERIES_BREAK_CAVEAT = "series_break"
+_flip_day_warned = False
+
+
+def packed_evidence_flip_day() -> str | None:
+    """PACKED_EVIDENCE_FLIP_DAY as both caveats read it (#448 QA): a
+    "YYYY-MM-DD" str that round-trips through date.fromisoformat, else None,
+    with a WARNING once per process for any other value, so a malformed day is
+    never a 500 on either admin route nor a silent miss."""
+    global _flip_day_warned
+    from datetime import date
+    day = PACKED_EVIDENCE_FLIP_DAY
+    if day is None:
+        return None
+    try:
+        if isinstance(day, str) and date.fromisoformat(day).isoformat() == day:
+            return day
+    except ValueError:
+        pass
+    if not _flip_day_warned:
+        _flip_day_warned = True
+        log.warning("PACKED_EVIDENCE_FLIP_DAY %r is not a YYYY-MM-DD day: no series_break "
+                    "caveat on receipts or the endorsement ratio until it is", day)
+    return None
 
 
 def _evidence_shown():
+    """The one eligibility predicate receipts and the matcher share (R-U6a)."""
     i = deck_impressions_table
-    return or_(i.c.evidence_tier.is_(None), i.c.evidence_tier.notin_(_EVIDENCE_TIERS_NOT_SHOWN))
+    return or_(i.c.evidence_tier.is_(None), i.c.evidence_tier == "first30",
+               i.c.is_ghost == 1, _deck_card_acted())
+
+
+# R3: a card the user acted on whose row isn't a full row (no assets): neither
+# reader can grade or match it, so each reports it instead of dropping it
+# silently, by cause. The cause is the writer's own classification, read from
+# the card's run: its pack's run metadata `upgrade_miss_cards`
+# ({"<card_index>": cause}, U4-R2). No pack, or no entry for the card: other.
+VIEWED_WITHOUT_FULL_ROW_CAUSES = ("restart_split", "evicted_split", "other")
+
+
+def load_viewed_without_full_row(*, league_id: str | None = None, since_iso: str | None = None,
+                                 until_iso: str | None = None) -> dict[str, dict[str, int]]:
+    """Per run (deck_job_id), R3's acted-on cards with no full row, by cause:
+    {run_id: {"restart_split": n, "evicted_split": n, "other": n}}. Non-ghost
+    rows of a deferred or packed deck (tier set: a pre-telemetry row has no
+    assets either and isn't counted), optionally in one league and a
+    served_at window. The runs' pack headers are read in one query per 500
+    runs; a cause outside the three reads as other."""
+    i, p = deck_impressions_table, deck_evidence_packs_table
+    where = [or_(i.c.is_ghost.is_(None), i.c.is_ghost == 0), i.c.evidence_tier.isnot(None),
+             i.c.assets_json.is_(None), _deck_card_acted()]
+    if league_id is not None:
+        where.append(i.c.league_id == league_id)
+    if since_iso is not None:
+        where.append(i.c.served_at >= since_iso)
+    if until_iso is not None:
+        where.append(i.c.served_at <= until_iso)
+    with engine.connect() as conn:
+        rows = conn.execute(select(i.c.deck_job_id, i.c.card_index).where(and_(*where))).all()
+        run_ids = sorted({r.deck_job_id for r in rows})
+        miss_cards: dict[str, dict] = {}
+        for start in range(0, len(run_ids), 500):
+            for h in conn.execute(select(p.c.run_id, p.c.header_json).where(
+                    p.c.run_id.in_(run_ids[start:start + 500]))):
+                try:
+                    cards = json.loads(h.header_json)["run"].get("upgrade_miss_cards")
+                except (TypeError, ValueError, KeyError, AttributeError):
+                    cards = None
+                miss_cards[h.run_id] = cards if isinstance(cards, dict) else {}
+    runs: dict[str, dict[str, int]] = {}
+    for r in rows:
+        cause = miss_cards.get(r.deck_job_id, {}).get(str(r.card_index), "other")
+        counts = runs.setdefault(r.deck_job_id, dict.fromkeys(VIEWED_WITHOUT_FULL_ROW_CAUSES, 0))
+        counts[cause if cause in counts else "other"] += 1
+    return runs
 
 
 def _stamp_delivered(conn, deck_job_id: str, delivered: dict, raise_to: str | None, *,
@@ -7338,17 +7734,20 @@ def mark_deck_impression_viewed(impression_id: str) -> bool:
 def save_deck_evidence_pack(row: dict, withdrawals=()) -> bool:
     """Insert a deck's pack row (insert-or-ignore on run_id: written once, at
     the deck's first delivery), with that serve's withdrawals in the same
-    transaction (#417 cross-check P3-5). True when the pack was inserted."""
+    transaction (#417 cross-check P3-5). True when the pack was inserted;
+    False (nothing written) when another writer's pack is there: the caller
+    merges into its header, withdrawals included."""
     t = deck_evidence_packs_table
     with engine.begin() as conn:
         if conn.dialect.name == "postgresql":
             from sqlalchemy.dialects.postgresql import insert as dialect_insert
         else:
             from sqlalchemy.dialects.sqlite import insert as dialect_insert
-        inserted = bool(conn.execute(dialect_insert(t).values(**row).on_conflict_do_nothing(
-            index_elements=[t.c.run_id])).rowcount)
+        if not conn.execute(dialect_insert(t).values(**row).on_conflict_do_nothing(
+                index_elements=[t.c.run_id])).rowcount:
+            return False
         _insert_withdrawals(conn, list(withdrawals))
-        return inserted
+        return True
 
 
 def update_deck_evidence_pack_header(run_id: str, header_json: str, checksum: str,
@@ -7465,6 +7864,18 @@ def load_trade_page(user_id: str, league_id: str, scoring_format: str,
     return dict(row) if row is not None else None
 
 
+def load_trade_page_deck_job_id(user_id: str, league_id: str, scoring_format: str,
+                                request_scope: str) -> str | None:
+    """The deck_job_id whose page row holds one key now (the unique-index read,
+    one column, no blobs), or None when the key has no row."""
+    t = trade_page_store_table
+    with engine.connect() as conn:
+        return conn.execute(select(t.c.deck_job_id).where(
+            t.c.user_id == user_id, t.c.league_id == league_id,
+            t.c.scoring_format == scoring_format,
+            t.c.request_scope == request_scope)).scalar()
+
+
 def load_trade_page_for_job(user_id: str, deck_job_id: str, *,
                             evidence: bool = False) -> dict | None:
     """The viewer's page row built by `deck_job_id`, or None. `evidence`:
@@ -7503,7 +7914,7 @@ def record_deck_withdrawals(rows: list[dict]) -> int:
 
 
 def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delivered_ids,
-                          at: str, withdrawn_ids=()) -> None:
+                          at: str, withdrawn=None) -> bool:
     """#417 cross-check P2-1 / P3-5: a live-mode page-scoped deck's delivery
     (the value core, prepared adoption), one transaction. Its rows were
     written at build (tier NULL, the page_store marker), so the delivery
@@ -7511,10 +7922,14 @@ def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delive
     (by impression_id): _stamp_delivered with build_rows, so once each (the
     first delivery wins) and never a ghost's. The serve's withdrawals land in
     the same transaction, each card_index from its row and served_before from
-    its delivered_at before this stamp: both are recorded or neither."""
+    its delivered_at before this stamp: both are recorded or neither.
+    `withdrawn`: {impression_id: reason} ("i1_dropped", "disposition_cut").
+    Returns False when it delivered cards of a deck with no row at all: their
+    evidence is nowhere (no rows, no pack), so eval can't see them."""
     i = deck_impressions_table
+    withdrawn = dict(withdrawn or {})
     delivered_ids = [x for x in delivered_ids if isinstance(x, str)]
-    withdrawn_ids = [x for x in withdrawn_ids if isinstance(x, str)]
+    withdrawn_ids = sorted(x for x in withdrawn if isinstance(x, str))
     with engine.begin() as conn:
         found = {}
         if withdrawn_ids:
@@ -7526,10 +7941,12 @@ def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delive
                          build_rows=True)
         _insert_withdrawals(conn, [
             {"deck_job_id": deck_job_id, "card_index": found[iid].card_index, "user_id": user_id,
-             "league_id": league_id, "reason": "i1_dropped", "first_withdrawn_at": at,
+             "league_id": league_id, "reason": withdrawn[iid], "first_withdrawn_at": at,
              "impression_id": iid,
              "served_before": 1 if found[iid].delivered_at is not None else 0}   # exactly 0 or 1
             for iid in withdrawn_ids if iid in found])
+        return not delivered_ids or conn.execute(
+            select(literal(1)).where(i.c.deck_job_id == deck_job_id).limit(1)).first() is not None
 
 
 def load_delivered_impression_ids(impression_ids) -> set:
@@ -8212,8 +8629,9 @@ def save_suggestion_trade_links(rows: list[dict]) -> int:
 
 def suggestion_ratio_by_league(league_id: str | None = None) -> list[dict]:
     """The always-on endorsement dashboard: per league, executed trades
-    examined, how many matched a rendered suggestion (was_recommended), the
-    ratio, and how many matched a withheld ghost (the incrementality read)."""
+    examined, how many matched a shown suggestion, viewed or first 30
+    (was_recommended; R-U6a, _evidence_shown), the ratio, and how many matched
+    a withheld ghost (the incrementality read)."""
     q = select(
         suggestion_trade_links_table.c.league_id,
         func.count(suggestion_trade_links_table.c.id).label("executed"),
@@ -8236,6 +8654,25 @@ def suggestion_ratio_by_league(league_id: str | None = None) -> list[dict]:
             "ghost_matches": int(r.ghost_matches or 0),
         })
     return out
+
+
+def suggestion_link_day_span(league_id: str | None = None) -> tuple[str | None, str | None]:
+    """The first and last UTC day of the links' trades, optionally in one
+    league: (None, None) with no links. A trade's day is the one the matcher
+    reads (traded_at, else its sleeper_trades row's synced_at), else the link's
+    computed_at. The ratio route's series-break caveat reads it."""
+    t, s = suggestion_trade_links_table, sleeper_trades_table
+    day = func.substr(func.coalesce(t.c.traded_at, s.c.synced_at, t.c.computed_at), 1, 10)
+    # The league in the ON clause too (#448 QA): the same rows, and Postgres
+    # plans it on the league (23 ms → 1.3 ms).
+    q = select(func.min(day), func.max(day)).select_from(
+        t.outerjoin(s, (s.c.transaction_id == t.c.transaction_id)
+                    & (s.c.league_id == t.c.league_id)))
+    if league_id:
+        q = q.where(t.c.league_id == league_id)
+    with engine.connect() as conn:
+        first, last = conn.execute(q).one()
+    return first, last
 
 
 def load_board_state(
@@ -9268,6 +9705,22 @@ def mark_league_roster_failed(league_id: str, error_code: str) -> str:
                   "updated_at": stmt.excluded.updated_at})
         conn.execute(stmt)
     return status
+
+
+def cas_league_roster_fp(league_id: str, old_fp: str | None, new_fp: str) -> bool:
+    """S0 PR-B: set `roster_fp` to `new_fp` only while it still equals `old_fp`.
+
+    One UPDATE … WHERE (`IS NULL` when `old_fp` is None, a league's first
+    stamp), committed before it returns. True when this call won; False when
+    another refresh stamped first, or the league has no row. Touches no
+    other column.
+    """
+    t = league_roster_state_table
+    same = t.c.roster_fp.is_(None) if old_fp is None else t.c.roster_fp == old_fp
+    with engine.begin() as conn:
+        result = conn.execute(update(t).where(t.c.league_id == str(league_id), same)
+                              .values(roster_fp=new_fp))
+    return result.rowcount == 1
 
 
 def replace_league_members_snapshot(league_id: str, members: list[dict]) -> bool:
@@ -12457,6 +12910,25 @@ def load_draft_picks(
     return out
 
 
+def load_draft_pick_seasons(league_id: str,
+                            source: str = PICK_SOURCE_PLATFORM) -> set[int]:
+    """The distinct seasons of one league's PLATFORM draft-pick rows, from one
+    `SELECT DISTINCT season` (no full rows). Same predicate as
+    `load_draft_picks`'s default. Platform only: the contested/orphaned
+    exclusion for user rows is a row filter a season set can't carry, so any
+    other `source` raises. Read by `server._sleeper_prior_grid_excludes`
+    (#470 QA P3-2)."""
+    if source != PICK_SOURCE_PLATFORM:
+        raise ValueError(f"load_draft_pick_seasons reads platform rows only, not {source!r}")
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(draft_picks_table.c.season).distinct()
+            .where(draft_picks_table.c.league_id == league_id)
+            .where(_pick_source_predicate(source))
+        ).fetchall()
+    return {int(r[0]) for r in rows}
+
+
 def seed_pick_grid(
     league_id: str,
     member_user_ids: list[str],
@@ -15141,9 +15613,14 @@ def save_feedback(
     device_type: str | None = None,
     os_version: str | None = None,
     client_created_at: str | None = None,
+    session_key: str | None = None,
 ) -> dict:
     """Insert (idempotently on client_id) a feedback row and return
     {server_id, created_at, duplicate}.
+
+    `session_key` is the sha256 hex of an UNVERIFIED session's token (#360
+    QA P2-1), so attach_session_feedback can hand the note to that session's
+    user once it verifies in place. Callers pass None otherwise.
 
     Retries with the same client_id are dropped: we look up the existing
     row and return its ids so the mobile client can move on. SQLite uses
@@ -15161,11 +15638,11 @@ def save_feedback(
                     INSERT INTO app_feedback
                         (client_id, user_id, username, screen, severity, text,
                          app_version, platform, device_type, os_version,
-                         client_created_at, created_at)
+                         client_created_at, created_at, session_key)
                     VALUES
                         (:client_id, :user_id, :username, :screen, :severity, :text,
                          :app_version, :platform, :device_type, :os_version,
-                         :client_created_at, :created_at)
+                         :client_created_at, :created_at, :session_key)
                     ON CONFLICT (client_id) DO NOTHING
                     RETURNING id
                     """
@@ -15183,6 +15660,7 @@ def save_feedback(
                     "os_version": os_version,
                     "client_created_at": client_created_at,
                     "created_at": now_iso,
+                    "session_key": session_key,
                 },
             ).fetchone()
             if res:
@@ -15198,11 +15676,11 @@ def save_feedback(
                     INSERT OR IGNORE INTO app_feedback
                         (client_id, user_id, username, screen, severity, text,
                          app_version, platform, device_type, os_version,
-                         client_created_at, created_at)
+                         client_created_at, created_at, session_key)
                     VALUES
                         (:client_id, :user_id, :username, :screen, :severity, :text,
                          :app_version, :platform, :device_type, :os_version,
-                         :client_created_at, :created_at)
+                         :client_created_at, :created_at, :session_key)
                     """
                 ),
                 {
@@ -15218,6 +15696,7 @@ def save_feedback(
                     "os_version": os_version,
                     "client_created_at": client_created_at,
                     "created_at": now_iso,
+                    "session_key": session_key,
                 },
             )
             if cur.rowcount == 1 and cur.lastrowid:
@@ -15239,6 +15718,59 @@ def save_feedback(
         # Shouldn't happen — either we just inserted (handled above) or a
         # duplicate exists. Defensive fallback.
         return {"server_id": 0, "created_at": now_iso, "duplicate": True}
+
+
+def find_feedback_by_client_id(client_id: str) -> dict | None:
+    """{server_id, created_at} of the note with this client_id, or None.
+    POST /api/feedback uses it on the throttled path only, so an idempotent
+    retry of a note already held still gets its 200 `duplicate` (#360 QA
+    P2-2: duplicates never count against the throttle)."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(app_feedback_table.c.id, app_feedback_table.c.created_at)
+            .where(app_feedback_table.c.client_id == client_id)
+        ).fetchone()
+    return {"server_id": int(row[0]), "created_at": row[1]} if row else None
+
+
+def attach_session_feedback(session_key: str, user_id: str,
+                            username: str | None) -> int:
+    """Hand an unverified session's notes to its user once it verifies in
+    place (#360 QA P2-1, head-eng's ruling). Returns how many rows moved.
+
+    The proof is `session_key`: the sha256 of the bearer token that sent the
+    notes, matched against the token now verifying. Never by username. Only
+    still-anonymous rows (user_id IS NULL) move, and the key is cleared, so a
+    second call for the same session is a no-op.
+    """
+    if not session_key or not user_id:
+        return 0
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(app_feedback_table)
+            .where(app_feedback_table.c.session_key == session_key)
+            .where(app_feedback_table.c.user_id.is_(None))
+            .values(user_id=user_id, username=username, session_key=None)
+        )
+        return res.rowcount or 0
+
+
+def detach_session_feedback(session_key: str) -> int:
+    """Drop the session_key from a token's still-anonymous notes, so they can
+    never attach (release-lead delta QA E). Called when /api/session/init
+    re-points that token at a DIFFERENT user: the notes were sent as the old
+    identity and must not follow the token to the new one. The rows stay,
+    anonymous. Returns how many rows changed."""
+    if not session_key:
+        return 0
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(app_feedback_table)
+            .where(app_feedback_table.c.session_key == session_key)
+            .where(app_feedback_table.c.user_id.is_(None))
+            .values(session_key=None)
+        )
+        return res.rowcount or 0
 
 
 def list_feedback(*, since_id: int = 0, limit: int = 100) -> list[dict]:
