@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { useFlag } from '../state/useFeatureFlags';
-import { useSession } from '../state/useSession';
 
 // What's-new surface (teardown S7 PRD-04 item 5, flag `ux.whats_new`).
 //
@@ -55,25 +54,15 @@ const APP_VERSION: string | null = Constants.expoConfig?.version ?? null;
  */
 export function useWhatsNew(): { entry: WhatsNewEntry | null; dismiss: () => void } {
   const enabled = useFlag('ux.whats_new');
-  // B7 (Product's pre-launch review, 2026-10-27): no "we've updated" notice
-  // for someone who just agreed. When this launch's bootstrap restored NO
-  // signed-in user (a fresh install, a reinstall, a signed-out user), the
-  // sign-in screen came first, with "By signing in you agree to the Terms of
-  // Use and Privacy Policy", so the release's entry counts as seen, and is
-  // stored as seen. A signed-in user upgrading still sees it once.
+  // Legal R28.22 P2-2 (MUST, 11-06; replaces B7): both policy pages promise
+  // to announce material changes in the app, so nothing marks the notice
+  // seen at sign-in or boot. Every signed-in user, a fresh sign-in included
+  // (any session start, the username Continue too), gets the tip, and only
+  // the tip's own tap (`dismiss`, after it has shown) stores it as seen.
   // tests/check-whats-new.js 8.
-  const agreedThisLaunch = useSession((s) => s.bootSignedIn === false);
   // undefined = AsyncStorage not hydrated yet — render nothing until the
   // read lands so an already-seen tip never flashes on mount.
   const [seenVersion, setSeenVersion] = useState<string | null | undefined>(undefined);
-
-  useEffect(() => {
-    if (!enabled || !agreedThisLaunch || !APP_VERSION) return;
-    setSeenVersion(APP_VERSION);
-    AsyncStorage.setItem(SEEN_KEY, APP_VERSION).catch(() => {
-      /* best-effort: in-memory state hides it this launch */
-    });
-  }, [enabled, agreedThisLaunch]);
 
   useEffect(() => {
     if (!enabled) return; // flag off — skip the storage read entirely
@@ -103,8 +92,7 @@ export function useWhatsNew(): { entry: WhatsNewEntry | null; dismiss: () => voi
     enabled &&
     APP_VERSION != null &&
     seenVersion !== undefined &&
-    seenVersion !== APP_VERSION &&
-    !agreedThisLaunch
+    seenVersion !== APP_VERSION
       ? WHATS_NEW[APP_VERSION] ?? null
       : null;
 

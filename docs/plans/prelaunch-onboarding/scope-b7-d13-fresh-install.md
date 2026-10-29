@@ -1,5 +1,45 @@
 # Feature Scope — B7: no D-13 policy notice right after agreeing
 
+> **SUPERSEDED 2026-10-29 by legal R28.22 P2-2 (MUST, 11-06), with Product's agreement (head-eng's routing).** Both policy pages promise to announce material changes in the app, so a sign-in can't count as seeing the notice. B7 is **removed**. The section below replaces it; everything after it is B7's history.
+
+## P2-2 (replaces B7)
+
+**The rule** (legal's minimum; head-eng and head-product):
+- don't mark the notice seen at the sign-in screen;
+- show the approved D-13 tip after sign-in, as for any signed-in user. "Sign-in" means any session start, the username Continue included;
+- mark it seen only after the tip has actually shown;
+- no new copy, and the pinned sign-in line with both links stays.
+
+**The change:**
+- `useWhatsNew` drops B7's boot-fact read, its seen-write effect, and the `!agreedThisLaunch` term in the entry's condition. `useSession` drops `bootSignedIn` and is back to the branch base.
+- The only seen-mark left is `dismiss`, the tip's own tap on League home. It persists `SEEN_KEY` and marks the version seen in memory, and it can only run after the tip has rendered. Nothing changes copy.
+- Pin 9 (the sign-in line, unconditional, both links) is kept as is.
+
+**Evidence:**
+- [x] **Structural guard** `check-whats-new.js` pin 8, rewritten. It checks that:
+  - `SEEN_KEY` is written exactly once, inside `dismiss`, and no other `src/` file holds the key;
+  - `setSeenVersion(APP_VERSION)` is called only in `dismiss`;
+  - the hook reads no session state (no `useSession`), and `bootSignedIn` is gone from `src/`;
+  - the entry's condition is exactly `enabled && APP_VERSION != null && seenVersion !== undefined && seenVersion !== APP_VERSION`.
+
+  Pins 1–7 and 9 are unchanged and pass. **Sabotage 7/7 red,** restored byte-identical: B7's boot write back; an in-memory mark at mount; the entry gated on sign-in state (`useSession` back); an extra term in the entry's condition; `dismiss` storing nothing; `bootSignedIn` back in `useSession`; another file holding the seen key. A comment-only control stays green.
+- [x] **Code-walk:**
+  - The tip renders only on League (`LeagueScreen.tsx`), which needs a signed-in user. Every path into Main (the username Continue, the hint row, Apple, an ESPN/MFL entry, a restored session) is a session start, and afterwards League shows the tip while `ux.whats_new` is on and the version is unseen.
+  - Seen is stored only by the tap. A user who never taps sees it on each visit to League (no silent expiry, pin 6), which is D-13's existing contract.
+- [x] **Manual TestFlight checklist (operator, 11-06 build, `ux.whats_new` on):**
+  1. Delete the app, reinstall, sign in with a Sleeper username (the username Continue) and open League: the "We've updated our Privacy Policy and Terms of Use…" tip shows.
+  2. Tap it: Help & about opens. Go back to League: the tip is gone. Quit, relaunch, open League: still gone.
+  3. Reinstall again and sign in with Continue with Apple, then open League: the tip shows again (the seen-mark is per device and was wiped with the app).
+  4. On a device signed in on the previous build, install the 11-06 build over it and open League: the tip shows once; tapping it opens Help & about.
+  5. Sign out on a device that has tapped the tip, sign in again and open League: no tip (already seen for 1.22.0 on this device).
+  6. On the sign-in screen, "By signing in you agree to the Terms & Privacy Policy" shows, and both links open.
+
+**Next (P2-3, before the first 1.22.x patch, separate PR):** key the notice to a "last material change" version, not the app version. It's served by the server and stored per account (Product), with the 1.22.0 device ack carried up. The first patch must not ship the app-version key.
+
+---
+
+## B7 (history, superseded)
+
 **Date:** 2026-10-27
 **Entry point:** direct ask (head-eng → onboarding-eng 2026-10-27, from Product's pre-launch review B7; onboarding-pm §3, "a gap in my D-13 spec"). It amends #380 (D-13; spec `plans/launch-support-policy/scope-d13-policy-notice.md` on the launch-support-policy plan branch). Due in release-lead's queue by 11-03.
 **Builder:** onboarding-eng

@@ -181,11 +181,6 @@ interface SessionState {
    *  so the quiet reminder returns on the next launch, never nags twice
    *  in one. */
   verifyBannerDismissed: boolean;
-  /** B7: did THIS launch's bootstrap restore a signed-in user? null until
-   *  bootstrap runs. A boot fact: sign-out doesn't reset it. false means the
-   *  sign-in screen (and its "you agree" line) came first, so useWhatsNew
-   *  treats the release's policy notice as seen. */
-  bootSignedIn: boolean | null;
 
   bootstrap: () => Promise<void>;
   /** Persist the preferred ranking flow (see rankingMethodPref). */
@@ -273,7 +268,6 @@ export const useSession = create<SessionState>((set, get) => ({
   rankingMethodPref: null,
   verification: null,
   verifyBannerDismissed: false,
-  bootSignedIn: null,
 
   bootstrap: async () => {
     const [userRaw, leagueRaw, leaguesRaw, tok, fmt, prefRaw, inviteRaw] = await Promise.all([
@@ -324,7 +318,6 @@ export const useSession = create<SessionState>((set, get) => ({
 
     set({
       user,
-      bootSignedIn: !!user,
       league,
       leagues,
       hasToken: !!tok,

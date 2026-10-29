@@ -25,20 +25,19 @@
 //   7. The VoiceOver hint tells the truth: CoachMark's default hint is still
 //      "Tap to dismiss" (every other caller), and the what's-new tip, whose tap
 //      also opens Help & about, passes its own hint that doesn't say dismiss.
-//   8. B7 (pre-launch review, 2026-10-27): a launch whose bootstrap restored
-//      no signed-in user counts the release as seen, because the sign-in
-//      screen's "you agree" line came first. useSession records the boot fact
-//      `bootSignedIn` (null initially, set ONLY by bootstrap to `!!user` after
-//      the user is restored; sign-out doesn't reset it). useWhatsNew reads
-//      `bootSignedIn === false`, hides the entry and stores it seen, and
-//      SEEN_KEY is written nowhere else but dismiss. Anything wider would
-//      silence the notice for signed-in upgraders (no silent expiry, 6).
-//   9. B7's legal premise is on the screen (release-lead #380 QA P2-1): the
-//      sign-in screen's "By signing in you agree to the Terms & Privacy
-//      Policy" line renders UNCONDITIONALLY in SignInScreen's own JSX (no
-//      {…} expression, ternary or && above it), with both links: "Terms" to
-//      /terms and "Privacy Policy" to /privacy. Without it, a signed-out boot
-//      would skip the notice for someone who was never shown the policies.
+//   8. Legal R28.22 P2-2 (MUST, 11-06; replaces B7, which counted a
+//      signed-out boot as seen): nothing marks the notice seen at sign-in or
+//      boot. SEEN_KEY is written exactly once, inside `dismiss` (the tip's own
+//      tap, after it has shown), and no other src file writes the key; the
+//      hook marks APP_VERSION seen in memory only there; it reads no session
+//      state (no useSession, and B7's `bootSignedIn` is gone from src); and
+//      the entry's condition is exactly flag && version && hydrated && unseen.
+//      So every signed-in user, a fresh sign-in included, gets the tip.
+//   9. The pinned sign-in line stays (legal R28.22 P2-2; first pinned for B7,
+//      release-lead #380 QA P2-1): the sign-in screen's "By signing in you
+//      agree to the Terms & Privacy Policy" line renders UNCONDITIONALLY in
+//      SignInScreen's own JSX (no {…} expression, ternary or && above it),
+//      with both links: "Terms" to /terms and "Privacy Policy" to /privacy.
 //
 // FTF_MOBILE_TEST_ROOT can point at a copy of mobile/ (sabotage runs).
 // Run: node tests/check-whats-new.js
@@ -59,7 +58,6 @@ try {
 const ROOT = process.env.FTF_MOBILE_TEST_ROOT || path.resolve(__dirname, '..');
 const F = {
   hook:    'src/hooks/useWhatsNew.ts',
-  session: 'src/state/useSession.ts',
   signIn:  'src/screens/SignInScreen.tsx',
   league:  'src/screens/LeagueScreen.tsx',
   rootNav: 'src/navigation/RootNav.tsx',
@@ -283,24 +281,30 @@ check('7. CoachMark keeps its "Tap to dismiss" default; the what\'s-new tip pass
     `the what's-new tip's hint says dismiss: ${JSON.stringify(hint.initializer.text)}`);
 });
 
-// ── 8. B7: a signed-out boot counts the release as seen ────────────────────
-check('8. only a launch that booted signed out counts the release as seen (B7)', () => {
-  const sf = parse(F.session);
-  const assigns = findAll(sf, (n) => ts.isPropertyAssignment(n) && propName(n) === 'bootSignedIn');
-  expect(assigns.length === 2, `bootSignedIn is assigned ${assigns.length} times in useSession.ts, want 2`);
-  const boot = findAll(sf, (n) => ts.isPropertyAssignment(n) && propName(n) === 'bootstrap')[0];
-  expect(boot, 'useSession has no bootstrap');
-  const inBoot = assigns.filter((a) => a.pos >= boot.pos && a.end <= boot.end);
-  const outside = assigns.filter((a) => !(a.pos >= boot.pos && a.end <= boot.end));
-  expect(inBoot.length === 1 && inBoot[0].initializer.getText(sf).replace(/\s+/g, '') === '!!user',
-    `bootstrap sets bootSignedIn to ${inBoot.map((a) => a.initializer.getText(sf))}, want !!user`);
-  expect(outside.length === 1 && outside[0].initializer.kind === ts.SyntaxKind.NullKeyword,
-    `outside bootstrap, bootSignedIn is ${outside.map((a) => a.initializer.getText(sf))}, want the initial null only`);
-  const restore = findAll(boot, (n) => ts.isBinaryExpression(n)
-    && n.left.getText(sf) === 'user' && n.operatorToken.kind === ts.SyntaxKind.EqualsToken
-    && /JSON\.parse\(\s*userRaw\s*\)/.test(n.right.getText(sf)));
-  expect(restore.length === 1 && inBoot[0].pos > restore[0].pos,
-    'bootSignedIn is set before `user = JSON.parse(userRaw)` restores the signed-in user');
+// ── 8. P2-2: only the tip's own tap marks it seen ──────────────────────────
+check('8. nothing marks the notice seen but the tip\'s own tap (legal R28.22 P2-2)', () => {
+  const hook = parse(F.hook);
+  const hookText = read(F.hook);
+  const dismissFn = findAll(hook, (n) => ts.isVariableDeclaration(n) && n.name.getText(hook) === 'dismiss')[0];
+  expect(dismissFn, 'useWhatsNew has no dismiss');
+  const inDismiss = (n) => n.pos >= dismissFn.pos && n.end <= dismissFn.end;
+  const writes = findAll(hook, (n) => ts.isCallExpression(n)
+    && n.expression.getText(hook) === 'AsyncStorage.setItem'
+    && n.arguments[0] && n.arguments[0].getText(hook) === 'SEEN_KEY');
+  expect(writes.length === 1 && inDismiss(writes[0]),
+    `SEEN_KEY is written ${writes.length} time(s), ${writes.filter((w) => !inDismiss(w)).length} outside dismiss; want once, in dismiss`);
+  const marks = findAll(hook, (n) => ts.isCallExpression(n) && n.expression.getText(hook) === 'setSeenVersion'
+    && n.arguments[0] && n.arguments[0].getText(hook) === 'APP_VERSION');
+  expect(marks.length === 1 && inDismiss(marks[0]),
+    `setSeenVersion(APP_VERSION) is called ${marks.length} time(s); want once, in dismiss`);
+  expect(!/useSession/.test(hookText), 'useWhatsNew reads session state (useSession)');
+  const entryDecl = findAll(hook, (n) => ts.isVariableDeclaration(n) && n.name.getText(hook) === 'entry')[0];
+  const cond = entryDecl && ts.isConditionalExpression(entryDecl.initializer)
+    ? entryDecl.initializer.condition.getText(hook).replace(/\s+/g, ' ') : null;
+  expect(cond === 'enabled && APP_VERSION != null && seenVersion !== undefined && seenVersion !== APP_VERSION',
+    `the entry's condition is: ${cond}`);
+  const keyLit = /const SEEN_KEY = '([^']+)'/.exec(hookText);
+  expect(keyLit, 'SEEN_KEY literal not found');
   const elsewhere = [];
   (function walk(dir) {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -308,36 +312,17 @@ check('8. only a launch that booted signed out counts the release as seen (B7)',
       if (ent.isDirectory()) walk(abs);
       else if (/\.tsx?$/.test(ent.name)) {
         const rel = path.relative(ROOT, abs).split(path.sep).join('/');
-        if (rel !== F.session && /bootSignedIn\s*:/.test(fs.readFileSync(abs, 'utf8'))) elsewhere.push(rel);
+        const text = fs.readFileSync(abs, 'utf8');
+        if (/bootSignedIn/.test(text)) elsewhere.push(rel + ' (bootSignedIn)');
+        if (rel !== F.hook && text.includes(keyLit[1])) elsewhere.push(rel + ' (the seen key)');
       }
     }
   })(path.join(ROOT, 'src'));
-  expect(elsewhere.length === 0, `bootSignedIn is set outside useSession.ts: ${JSON.stringify(elsewhere)}`);
-
-  const hook = parse(F.hook);
-  const read = findAll(hook, (n) => ts.isVariableDeclaration(n) && n.name.getText(hook) === 'agreedThisLaunch')[0];
-  expect(read && read.initializer.getText(hook).replace(/\s+/g, '') === 'useSession((s)=>s.bootSignedIn===false)',
-    `agreedThisLaunch is ${read ? read.initializer.getText(hook) : 'missing'}`);
-  const entryDecl = findAll(hook, (n) => ts.isVariableDeclaration(n) && n.name.getText(hook) === 'entry')[0];
-  expect(entryDecl && /!agreedThisLaunch\b/.test(entryDecl.initializer.getText(hook)),
-    'the entry does not require !agreedThisLaunch');
-  const writes = findAll(hook, (n) => ts.isCallExpression(n)
-    && n.expression.getText(hook) === 'AsyncStorage.setItem'
-    && n.arguments[0] && n.arguments[0].getText(hook) === 'SEEN_KEY');
-  expect(writes.length === 2, `SEEN_KEY is written ${writes.length} times in useWhatsNew.ts, want 2 (dismiss + B7)`);
-  const dismissFn = findAll(hook, (n) => ts.isVariableDeclaration(n) && n.name.getText(hook) === 'dismiss')[0];
-  const b7 = writes.filter((w) => !(dismissFn && w.pos >= dismissFn.pos && w.end <= dismissFn.end));
-  expect(b7.length === 1, 'the B7 write is missing, or a second write sits outside dismiss');
-  let eff = b7[0].parent;
-  while (eff && !(ts.isCallExpression(eff) && eff.expression.getText(hook) === 'useEffect')) eff = eff.parent;
-  expect(eff, 'the B7 write is not inside a useEffect');
-  const firstStmt = eff.arguments[0].body.statements[0].getText(hook).replace(/\s+/g, ' ');
-  expect(firstStmt === 'if (!enabled || !agreedThisLaunch || !APP_VERSION) return;',
-    `the B7 effect's guard is: ${firstStmt}`);
+  expect(elsewhere.length === 0, `seen-marking outside the tip: ${JSON.stringify(elsewhere)}`);
 });
 
-// ── 9. B7's premise: the "you agree" line, unconditional, both links ────────
-check('9. the sign-in screen always shows "By signing in you agree to the Terms & Privacy Policy" (B7)', () => {
+// ── 9. The pinned sign-in line: unconditional, both links ──────────────────
+check('9. the sign-in screen always shows "By signing in you agree to the Terms & Privacy Policy" (P2-2 keeps it)', () => {
   const sf = parse(F.signIn);
   const lines = findAll(sf, (n) => ts.isJsxElement(n)
     && n.openingElement.tagName.getText(sf) === 'Text'
