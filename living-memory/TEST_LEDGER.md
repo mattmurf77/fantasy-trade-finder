@@ -1,3 +1,28 @@
+## 2026-10-28 — B5 launch copy, trades-eng's items 1, 3, 4 (marketing-lead addendum 10)
+
+**Gates:**
+- **Full gates.** The scope block is `docs/plans/launch-copy-b5-trades-2026-10-28.md`.
+- **What changes:** copy plus one navigation link; no route, schema, flag or event change.
+- **D-056:** `FTF_SKIP_SIM_GATE=1` posture. The evidence is the structural suite, tsc, and the TestFlight checklist in the scope block.
+
+**The changes:**
+- **Item 1:** Win Now's uncalibrated receipt says `Uncalibrated estimate` (mobile `utils/winNow.ts`, web `js/win-now.js`).
+- **Item 3:** the calculator's ESPN note.
+  - It reads `No draft picks are set up for this ESPN league yet.` and links `Set up picks →` to PickAssignment on the root stack.
+  - It shows only on `!picksSupported && picks.assign_tradeable`, because with that flag on `picks_supported` is the server's data test (`has_assigned_picks`).
+  - The link also needs `picks.assign`.
+- **Item 4:**
+  - the shop button reads `Show it to @{name}`, with VoiceOver `Show this offer to @{name} in their Fleeced deck`;
+  - the queue toasts read `It's waiting in @{name}'s Fleeced deck.` and `It's already in @{name}'s Fleeced deck.`, for both of `queueCalcTrade`'s hosts.
+
+**Mobile:** `check-b5-copy.js`, 7 checks:
+- every string pinned word for word, with the old ones gone;
+- item 3's gates, including the server line;
+- item 4's `testID`;
+- no banned words.
+
+**Sabotages:** 10 of 10 red. `check-win-now.js`'s two pins were updated, and its executable web test renders the new label. The 23 suites that read the edited files all pass, and `tsc --noEmit` is clean.
+
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 
 Gates: head-eng's two additions to #494 (`fix/paywall-fallback-prices`), values confirmed by monetization-pm. Same route, still dark (`monetize.paywall`). No route, schema, event, flag or knob change. Server and docs only; mobile untouched. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest, a sabotage pass and a code walk of TipJarScreen. Full suite not re-run (CI runs it).

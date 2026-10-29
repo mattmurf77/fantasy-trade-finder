@@ -120,6 +120,7 @@
     "test:trade-inplace-reveal": "node tests/check-trade-inplace-reveal.js",
     "test:no-finding-more": "node tests/check-no-finding-more.js",
     "test:withdraw-in-place": "node tests/check-withdraw-in-place.js",
+    "test:b5-copy": "node tests/check-b5-copy.js",
     "test:trade-first-card-events": "node tests/check-trade-first-card-events.js",
     "test:timing-readout": "node tests/check-timing-readout.js",
     "test:vault-subsumes-legacy": "node tests/check-vault-subsumes-legacy.js",

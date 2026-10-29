@@ -36,6 +36,7 @@ import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { navigationRef } from '../navigation/RootNav';
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { posColor, type Position } from '../theme/colors';
@@ -537,6 +538,13 @@ export default function InLeagueCalculator({
     return m;
   }, [picksQ.data, pickById]);
   const picksSupported = picksQ.data?.picks_supported ?? true;
+  // B5 item 3: while `picks.assign_tradeable` is on, `picks_supported` is
+  // the server's DATA test (get_league_picks: false only for an ESPN league
+  // with no assigned picks), so "none set up" is never claimed after setup.
+  // Flag off, it's false for every ESPN league and nothing can be checked:
+  // no note. The link needs the grid itself (`picks.assign`).
+  const picksTradeable = useFlag('picks.assign_tradeable');
+  const picksAssign = useFlag('picks.assign');
 
   const board = useMemo<Record<string, number>>(
     () => ({
@@ -1197,8 +1205,24 @@ export default function InLeagueCalculator({
       ) : null}
         </>
       ) : null}
-      {!picksSupported ? (
-        <Text style={styles.note}>Draft picks aren't available for ESPN leagues.</Text>
+      {!picksSupported && picksTradeable ? (
+        <View style={styles.picksNote}>
+          <Text style={styles.note}>No draft picks are set up for this ESPN league yet.</Text>
+          {picksAssign && leagueId ? (
+            <Pressable
+              testID="calc.picks-setup-link"
+              accessibilityRole="link"
+              hitSlop={6}
+              onPress={() => {
+                // The root stack, as MemberEnteredMarker's correction link:
+                // the calculator also renders inside Trades' canvas and card.
+                if (navigationRef.isReady()) navigationRef.navigate('PickAssignment', { leagueId });
+              }}
+            >
+              <Text style={styles.noteLink}>Set up picks →</Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
 
       {/* #384 — the two rosters stand as two vertical columns rather than
@@ -2194,6 +2218,8 @@ const styles = StyleSheet.create({
     color: chalk.dim,
   },
   note: { ...type.bodySm },
+  picksNote: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: space.sm },
+  noteLink: { ...type.bodySm, color: ice.base },
   // #202 — collapsed partner row ("Trading with @x · Change").
   partnerCollapsed: {
     flexDirection: 'row',
