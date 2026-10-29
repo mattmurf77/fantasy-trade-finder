@@ -5,6 +5,21 @@ Gates: a value change to the merged #494 (`bef9f5db`), as its own PR off main (`
 - **Change:** `_PAYWALL_PRICE_RISE_AT` = `datetime(2027, 1, 2, 4, 0, tzinfo=utc)` (was 2027-01-01 08:00Z, LA midnight). Per monetization-pm, citing Apple's start-times table, a change scheduled for 2027-01-01 starts in the US at 2027-01-01 04:00Z (11 pm ET on Dec 31), which breaks Terms §14.8; a 2027-01-02 schedule starts at 2027-01-02 04:00Z (11 pm ET / 8 pm PT on Jan 1). Apple's table renders its times client-side, so the 04:00Z figure is not independently checked here; monetization-pm's setup §3d records the time App Store Connect shows, and the constant moves if it differs. The comment block, api-reference row and cross-client-invariants SKU rows + fallback bullet say the same.
 - **Tests (`test_paywall_config.py`, 43):** both sides of the new instant (`2027-01-02T03:59:59Z` old, `04:00:00Z` new); the Jan-1 schedule's US start (`2027-01-01T04:00Z`) and the previous LA-midnight instant (`2027-01-01T08:00Z`) now serve the old prices; the constant equals 23:00 Jan 1 New York and 20:00 Jan 1 Los Angeles via `zoneinfo`, and the last second of Dec 31 in Honolulu is before it; time-zone instants (NY 23:00 Dec 31 old, LA midnight Jan 1 old, NY 22:59:59 Jan 1 old, NY 23:00 Jan 1 new, LA 20:00 Jan 1 new, Paris 00:30 Jan 1 old). 43 passed.
 - **Sabotage, each red then restored:** the old 2027-01-01 08:00Z instant → 6 red; a Jan-1 schedule's 2027-01-01 04:00Z → 9 red.
+## 2026-10-29 — #521 QA P3s: the drafted-league retry, the retry lock-free, no retry on a pool timeout; deck pipeline v8
+
+Gates: release-lead's #521 QA (GO-with-notes), P3-1 to P3-3. Follows #521. P3-4 (the PR body) is fixed on #521 itself. No route, schema, flag or event change. Deck pipeline v8, digest `f7ed33e6ab94af03`; models-eng classifies. Only stored pages carry the version, and `trade.first_page_store` is off in prod, so nothing is invalidated there. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P3-1:** `test_a_draft_read_retried_once_keeps_the_drafted_context`. With a drafted leagues row (2026, high), a draft read that fails once leaves the owner context `drafted` with next draft year 2027, and the stamp is kept. Before, the fixture had no leagues row, so `{}` read the same either way.
+- **P3-2:** `test_the_retry_runs_with_no_registry_lock_held`, for both reads. Owner-tracking proxies on `_trade_jobs_lock` and `_sessions_lock` show neither attempt holds either lock.
+- **P3-3, code:** a pool checkout timeout (`sqlalchemy.exc.TimeoutError`, `_is_pool_timeout`) is never retried at once. The pool is exhausted, and a retry would only wait again and add to it. The read fails as before v7.
+  - `_is_pool_timeout` is classified in `DECK_PIPELINE_FUNCTIONS`, since it decides whether the owner arm forfeits.
+  - Pipeline v8.
+  - **Test:** `test_a_pool_timeout_is_not_retried` (one call; the owner arm forfeits).
+- **Sabotages, 7/7 red:**
+  - QA's Q3d (the draft retry's result dropped), Q3b (the failure from the failed attempt kept), Q1a and Q1b (a retry under either lock);
+  - the timeout retried (draft / picks);
+  - `_is_pool_timeout` always False.
+- **Suites:** freshness-roster, digest, page store, p2, filter inputs, deferred evidence: 437 passed.
 
 ## 2026-10-28 — A live stamp on a deck with no evidence is logged (#517 QA P3-2, models-eng)
 
