@@ -136,8 +136,9 @@ def _canonical_rows(engine):
 
 
 def run_capture(extra_patches=(), seed_like=True, trade_intent=None,
-                prefs_preload=None, scoring_format="1qb_ppr"):
-    """Run one full trade job and return the canonical capture dict."""
+                prefs_preload=None, scoring_format="1qb_ppr", job_source=None):
+    """Run one full trade job and return the canonical capture dict.
+    `job_source`: the job's provenance marker (e.g. "grading_refresh")."""
     engine = create_engine("sqlite:///:memory:",
                            connect_args={"check_same_thread": False})
     metadata.create_all(engine)
@@ -178,6 +179,8 @@ def run_capture(extra_patches=(), seed_like=True, trade_intent=None,
         "error": None, "fairness_threshold": 0.75,
         "outlook_value": None, "is_pinned": False,
     }
+    if job_source:
+        job["source"] = job_source
 
     patches = _flag_patches() + list(extra_patches)
     with patch.object(db_module, "engine", engine):

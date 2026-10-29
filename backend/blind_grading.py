@@ -553,7 +553,8 @@ def run_value_core(inputs: Mapping, *, seat: str, server: ServerInputs,
                    engine: Callable | None = None) -> tuple[list[ArmCard], dict]:
     """The value-core arm: the bench's league_record/snapshot_for_seat with the serving
     path's league facts from ServerInputs, run through pipeline.run with the default
-    CoreConfig/RankConfig (D8). Any exception ⇒ value_core_failed 503; fewer than
+    CoreConfig/RankConfig (D8). Any exception ⇒ value_core_failed 503; a run that hit the
+    core's safety ceiling (a partial pool) ⇒ value_core_failed 503 too; fewer than
     MIN_PER_ARM usable cards ⇒ value_core_too_few 409."""
     from backend.eval import value_core_bench as bench
     from backend.value_core import pipeline
@@ -577,6 +578,10 @@ def run_value_core(inputs: Mapping, *, seat: str, server: ServerInputs,
         log.exception("blind-grading: value core failed league=%s", inputs["league_row"]
                       .get("sleeper_league_id"))
         raise GradingError("value_core_failed", 503) from None
+    if result.core.safety_ceiling_hit:   # a partial pool never becomes a Calibration session
+        log.error("blind-grading: value core hit its safety ceiling league=%s; no session built",
+                  inputs["league_row"].get("sleeper_league_id"))
+        raise GradingError("value_core_failed", 503)
     if len(cards) < MIN_PER_ARM:
         raise GradingError("value_core_too_few", 409, usable=len(cards), min_cards=MIN_PER_ARM)
     meta = {"engine_version": ENGINE_VERSION,

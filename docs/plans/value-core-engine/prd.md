@@ -98,7 +98,7 @@ The bench also reports, without gating on them, repeat acquisitions (the same he
 - For each, give the engine the two rosters from the week before and measure top-10 recall (exact or close trade).
 - Also report the share of real trades inside the fairness band, and the band that would cover 80% of them. That is the calibration input for `vc_band`.
 
-**Latency.** Value-core generation (core, ranking and deck) for a 14-team league must be **p95 < 8 s** on Render, well inside the current interactive 18–75 s (`docs/plans/trade-search-latency/README.md:13`). The core has an 8 s time budget and deterministic work caps ([lld.md §4.6](lld.md#46-complexity-caps-and-pruning)).
+**Latency.** Value-core generation (core, ranking and deck) for a 14-team league must be **p95 < 8 s** on Render, well inside the current interactive 18–75 s (`docs/plans/trade-search-latency/README.md:13`). The core is bounded by deterministic work caps, never by the clock, so the deck does not depend on machine load; a 30 s safety ceiling marks pathology only ([lld.md §4.6](lld.md#46-complexity-caps-and-pruning)).
 
 **After graduation.** Track like rate, the "giving up too much" pass share (target < 25%), sends and accepted proposals, joined through `deck_impressions.valuation_json`.
 

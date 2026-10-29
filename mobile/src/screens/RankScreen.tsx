@@ -733,7 +733,7 @@ export default function RankScreen() {
                   payoff is board-priced trades. */}
               {unlockCopyOn
                 ? 'Your board now prices your trades — see the Acquire tab'
-                : 'Trade Finder unlocked — check the Acquire tab'}
+                : 'Your board now prices your trades — see the Acquire tab'}
             </Text>
           </View>
         )}
