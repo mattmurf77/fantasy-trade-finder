@@ -61,8 +61,21 @@ if DATABASE_URL.startswith("postgres://"):
 # below — analytics-platform LLD §3.3, NFR-2.)
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
+
+def _pg_engine_kwargs(**connect_args) -> dict:
+    """Postgres-only engine options (docs/runbook.md § "DB connections and
+    background threads across fork"): recycle a pooled connection before the
+    server side drops it idle, and turn on libpq TCP keepalives so a dead peer
+    is noticed. `connect_args` (e.g. ro_engine's `options`) are kept. These
+    are libpq conninfo keys, accepted by psycopg2 (shipped, G-073) and psycopg 3."""
+    return {"pool_recycle": 280,
+            "connect_args": {**connect_args, "keepalives": 1, "keepalives_idle": 30,
+                             "keepalives_interval": 10, "keepalives_count": 5}}
+
+
 engine   = create_engine(DATABASE_URL, echo=False, future=True,
-                         connect_args=_connect_args)
+                         **({"connect_args": _connect_args} if DATABASE_URL.startswith("sqlite")
+                            else _pg_engine_kwargs()))
 metadata = MetaData()
 
 # Silent prepared offers are private artifacts, not shown impressions. The
@@ -351,6 +364,8 @@ overhaul_reservations_table = Table("overhaul_reservations", metadata,
 #   ro_engine     — read-only report queries (P2 consumers); mode=ro URI on
 #                   SQLite, default_transaction_read_only on Postgres
 
+_PG_RO_OPTIONS = "-c default_transaction_read_only=on -c statement_timeout=5s"
+
 if engine.dialect.name == "sqlite":
     @sa_event.listens_for(engine, "connect")
     def _sqlite_on_connect(dbapi_conn, _rec):
@@ -399,8 +414,22 @@ else:
                              # sqlite-only)
     ro_engine = create_engine(
         DATABASE_URL, future=True, pool_size=2, max_overflow=1,
-        connect_args={"options": "-c default_transaction_read_only=on "
-                                 "-c statement_timeout=5s"})
+        **_pg_engine_kwargs(options=_PG_RO_OPTIONS))
+
+
+def _reset_pools_after_fork() -> None:
+    """os.register_at_fork child hook. Under gunicorn --preload (Render's
+    default GUNICORN_CMD_ARGS) the app is imported in the MASTER before the
+    fork, so a worker inherits pooled DB connections whose
+    sockets (and SSL state) the master still holds. Drop them from the child's
+    pools WITHOUT closing (close=False): the parent keeps its sockets, and the
+    child opens fresh ones on first use. Engines are read at call time."""
+    for eng in {id(e): e for e in (engine, ingest_engine, ro_engine)}.values():
+        eng.dispose(close=False)
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_pools_after_fork)
 
 
 def analytics_boot_status() -> dict:
@@ -3491,7 +3520,7 @@ _MODEL_CONFIG_DEFAULTS = [
     # `max_per_opponent` change a no-op on the served deck. Value MATCHES
     # trade_service._DEFAULT_CFG exactly; seeding is behavior-neutral.
     ("exploration_base_per_opp", 5.0, "full sweep: served cards kept per opponent — the base exploration_overgen adds to, and the width _split_exploration_pool trims back to. 5.0 reproduces the pre-knob hardcoded constant exactly"),
-    ("full_sweep_budget_s",     30.0, "full sweep: wall-clock seconds of opponent sweep before generation stops starting new pairs, checked BETWEEN opponents. Read only while trade.full_sweep is ON — it replaces the global_target card count as the job's ceiling, because trade_optimizer.generate_pair_trades_v3 carries no deadline of its own. <=0 disables the rail (job then bounded only by _JOB_HARD_TIMEOUT, 60s)"),
+    ("full_sweep_budget_s",     30.0, "full sweep: wall-clock seconds of opponent sweep before generation stops starting new pairs, checked BETWEEN opponents. Read only while trade.full_sweep is ON — it replaces the global_target card count as the job's ceiling, because trade_optimizer.generate_pair_trades_v3 carries no deadline of its own. <=0 disables the rail (job then bounded only by _JOB_HARD_TIMEOUT)"),
     # ── Personal-market policy (backend/trade_policy.py; scope block
     # docs/plans/personal-market-policy/scope.md). Every value here is an
     # EXPERIMENT SETTING, not a permanent product truth — which is exactly why
