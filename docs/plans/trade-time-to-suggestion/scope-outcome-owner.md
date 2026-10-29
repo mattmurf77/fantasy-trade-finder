@@ -15,7 +15,7 @@
 - Today an outcome reaches deletion and export only through its impression: deletion via `impression_id IN (the user's deck_impressions)` (`backend/accounts.py:793`), and export the same (`:1249`).
 - So an outcome whose impression has neither a row nor a pack card is unreachable, and it would outlive deletion. That is the shape #535 logs: a deck with no rows and no pack (`backend/server.py:6638`).
 - **The gap is latent on today's code, not live.** Every outcome write requires an owned `deck_impressions` row at write time:
-  - `save_deck_outcome`'s insert selects `WHERE owner.exists()`, where `owner` is a `deck_impressions` row of that impression whose `user_id` is the acting user (`backend/database.py:7823`, `:7837`).
+  - `save_deck_outcome`'s insert selects `WHERE owner.exists()`, where `owner` is a `deck_impressions` row of that impression whose `user_id` is the acting user (`backend/database.py:7812`, `:7826`).
   - `_save_deck_outcome_safe` drops an id with no row and no pack upgrade as `unknown` (`backend/server.py:9973-9975`).
   - So a #535 deck's cards get no outcome today: the disposition is dropped and counted as an `unknown` reject.
 - The column makes reachability a property of the outcome row itself. It no longer depends on how the deck's evidence was stored, or on what later prunes it. That covers:
@@ -97,4 +97,10 @@
 - **TestFlight verification:** none (backend-only).
 - **Express lane:** no; full gates (an additive schema change).
 - **Before the flip** (head-eng's target), so every post-flip outcome carries its owner.
+- **Merge order (release-lead's QA P2-1):** after #427, or in the same deploy.
+  - Without #427, every boot re-issues the `ALTER` (a DuplicateColumn error, but only after taking ACCESS EXCLUSIVE). It then waits, unbounded, behind any open transaction on `deck_outcomes`; QA measured a 17.9 s stall on outcome writes.
+  - #427 skips an `ALTER` once the column exists, and fails a boot whose lock is busy while the old instance serves.
+- **Known edges (QA P3s, accepted):**
+  - Outcomes the old instance writes between `build.sh`'s `ALTER` and the traffic switch get a NULL `user_id`. They're reached through rows and packs, like every pre-G3-e row.
+  - The script's Postgres path is pinned only in source (CI has no Postgres). QA ran it on PG 18: `CONCURRENTLY`, the 5 s timeout, and an INVALID index rebuilt.
 - **After the deploy (release-lead, on the operator's word: a prod write):** run `python3 scripts/create_outcome_owner_index.py --check`, then `python3 scripts/create_outcome_owner_index.py` (expect `ix_deck_outcomes_user: valid`). It isn't a correctness gate, since deletion and export work by a scan until then.
