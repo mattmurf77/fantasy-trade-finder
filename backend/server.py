@@ -7328,10 +7328,12 @@ def _trade_rebase_job_current(sess: Mapping, job: dict, fairness_threshold, inpu
     fingerprint compare is skipped: the job's own stamp stands in for the
     read, and every other check P1's backing makes still runs (the policy, the
     TTL, the request signature, the session's read). A None stamp (a failed
-    kickoff read, or a worker whose reads disagreed) is never followed then,
-    as P1's own check would reject it on any read (#520 QA P3-1). The page
-    view's checks (revocation, policy, S0's serve rules, which gate-miss a
-    missing read) still decide what it sends."""
+    kickoff read, or a worker whose reads disagreed) is never followed then
+    (#520 QA P3-1): stricter than P1, whose `_trade_fingerprints_match` keeps
+    a running None-stamp job on a failed read, and at trade_i1_mode 0. Here it
+    kicks a rebuild instead (#530 QA). The page view's checks (revocation,
+    policy, S0's serve rules, which gate-miss a missing read) still decide
+    what it sends."""
     if any(token.revoked for token in inputs["input_epochs"]):
         return False
     if current is None or current[0].status == "missing":

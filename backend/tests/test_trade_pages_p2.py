@@ -369,8 +369,15 @@ def test_the_rebase_check_passes_the_session_read(p1, spawned, monkeypatch):
 
 # ── #520 QA P3-1/P3-3: on a failed read only the fingerprint compare is skipped ──
 
-def _failed_read(monkeypatch):
-    monkeypatch.setattr(server, "_trade_current_snapshot", lambda *a, **k: None)
+def _failed_read(monkeypatch, engine=None, read="failed"):
+    """The two reads that can't prove a job stale (A2): a failed one (no
+    snapshot) and one with no stored rows (status "missing", the league's
+    member rows gone)."""
+    if read == "failed":
+        monkeypatch.setattr(server, "_trade_current_snapshot", lambda *a, **k: None)
+    else:
+        with engine.begin() as conn:
+            conn.execute(delete(league_members_table))
 
 
 def _kicks(monkeypatch):
@@ -381,25 +388,29 @@ def _kicks(monkeypatch):
     return kicks
 
 
+@pytest.mark.parametrize("read", ["failed", "missing"])
 @pytest.mark.parametrize("status", ["complete", "running"])
-def test_a_failed_read_still_follows_a_current_newer_job(p1, spawned, monkeypatch, status):
-    """A2: a failed read can't prove the newer job stale, so it is followed,
-    complete or running, with no kick."""
+def test_a_failed_read_still_follows_a_current_newer_job(p1, spawned, monkeypatch, status, read):
+    """A2: a failed or a "missing" read can't prove the newer job stale, so it
+    is followed, complete or running, with no kick."""
     client, engine, _ = p1
     deck, job_id = revoked_deck_newer_job(engine)
     if status == "running":
         with server._trade_jobs_lock:
             server._trade_jobs[job_id].update(status="running", finished_at=None)
-    _failed_read(monkeypatch)
+    _failed_read(monkeypatch, engine, read)
+    if read == "missing":         # the read really is "missing", not failed
+        assert server._trade_current_snapshot(LEAGUE, "1qb_ppr")[0].status == "missing"
     kicks = _kicks(monkeypatch)
     body = deck_status(client, deck, 0).get_json()
     assert body["rebased"] is True and body["deck_id"] == job_id and not kicks
 
 
-def test_a_failed_read_never_follows_once_an_input_changed(p1, spawned, monkeypatch):
+@pytest.mark.parametrize("read", ["failed", "missing"])
+def test_a_failed_read_never_follows_once_an_input_changed(p1, spawned, monkeypatch, read):
     client, engine, _ = p1
     deck, job_id = revoked_deck_newer_job(engine)
-    _failed_read(monkeypatch)
+    _failed_read(monkeypatch, engine, read)
     real = server._trade_page_request_inputs
 
     def changed(*a, **k):
@@ -410,17 +421,24 @@ def test_a_failed_read_never_follows_once_an_input_changed(p1, spawned, monkeypa
     assert deck_status(client, deck, 0).get_json()["deck_id"] != job_id
 
 
-@pytest.mark.parametrize("why", ["none_stamp", "past_ttl", "superseded_read"])
-def test_a_failed_read_still_runs_every_other_check(p1, spawned, monkeypatch, why):
-    """#520 QA P3-1: only the fingerprint compare is skipped. A None stamp, a
-    job past the reuse TTL, or one built on a read the session has replaced
-    is never followed, as P1's own check rejects them."""
+@pytest.mark.parametrize("read", ["failed", "missing"])
+@pytest.mark.parametrize("why", ["none_stamp", "running_none_stamp", "past_ttl", "superseded_read",
+                                 "signature_moved", "running_signature_moved"])
+def test_a_failed_read_still_runs_every_other_check(p1, spawned, monkeypatch, why, read):
+    """#520 QA P3-1: only the fingerprint compare is skipped. A None stamp
+    (complete or running), a job past the reuse TTL, one built on a read the
+    session has replaced, or one for another request signature (complete or
+    running) is never followed, on a failed or a "missing" read (#530 QA)."""
     client, engine, _ = p1
     deck, job_id = revoked_deck_newer_job(engine)
     with server._trade_jobs_lock:
         job = server._trade_jobs[job_id]
-        if why == "none_stamp":
+        if why.startswith("running_"):
+            job.update(status="running", finished_at=None)
+        if why.endswith("none_stamp"):
             job["roster_fp"] = None
+        elif why.endswith("signature_moved"):
+            job["request_signature"] = "another-request-signature"
         elif why == "past_ttl":
             job["finished_at"] = __import__("time").monotonic() - server._PREGEN_TTL_SECONDS - 60
         else:
@@ -429,8 +447,13 @@ def test_a_failed_read_still_runs_every_other_check(p1, spawned, monkeypatch, wh
         with server._sessions_lock:
             server._sessions[TOKEN]["roster_fetch_started_at"] = "2026-10-28T11:00:00.000000+00:00"
         monkeypatch.setattr(server, "_job_read_predates_move", lambda job: True)
-    _failed_read(monkeypatch)
-    assert deck_status(client, deck, 0).get_json()["deck_id"] != job_id
+    _failed_read(monkeypatch, engine, read)
+    kicks = _kicks(monkeypatch)
+    body = deck_status(client, deck, 0).get_json()
+    # Refused means kicked, as a fresh tap. A running job's kick may join that
+    # same job (the key's dedupe), so its deck_id alone proves nothing.
+    assert kicks, body
+    assert why.startswith("running_") or body["deck_id"] != job_id
 
 
 @pytest.mark.parametrize("mode", [0.0, 1.0])
