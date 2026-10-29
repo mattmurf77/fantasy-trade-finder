@@ -151,3 +151,29 @@ delta and simulator-gate tier (D-056) are left out on purpose.
 - **Evidence recorded:** `living-memory/TEST_LEDGER.md`, 2026-10-27 C10 entry.
 - **TestFlight verification:** none written (§3 waiver).
 - Express lane declared by the operator? No. Full gates. `FTF_SKIP_SIM_GATE=1` is the D-056 standing posture.
+
+## Pre-flight budget (release-lead P1-A, 2026-10-28)
+
+Release-lead's QA of #527 (P1-A, must land before the 11-06 iOS binary reaches users). Server only, branch `fix/send-preflight-budget`, stacked on this PR.
+
+**Evidence (static, release-lead).**
+- iOS most likely times out a request at ~60 s idle. RN 0.81.5's fetch leaves the XHR timeout at 0. `RCTNetworking.mm:326` then sets `timeoutInterval` 0 on a default-config session, which falls back to NSURLSession's 60 s default.
+- The propose routes send no bytes until the write ends.
+- MFL's worst case in `_mfl_propose_core` is ~76 s: crosswalk 15 + `resolve_host` 15 + I-2 rosters 15 + I-2 picks 15 + write spacing 1 + write 15.
+- The harm: the client gives up and, with #527, correctly shows "Check before resending". Meanwhile the server is still in its pre-flight and **still writes** afterwards. A user who checks MFL at once sees nothing yet and resends, which is a double send.
+- ESPN's worst case is ~45 s (crosswalk 15 + `fetch_league` 15 + write 15), under 60 s.
+
+**The invariant.** A provider write never starts so late that it can finish after the client gave up.
+
+**Behavior.**
+- `_SEND_PREFLIGHT_BUDGET_S = 30` in `backend/server.py`. The 30 s is 60 s, minus the 15 s write timeout, minus MFL's 1 s spacing, minus about 14 s of margin. A write that starts inside the budget ends by ~46 s.
+- `_mfl_propose_core` and `_espn_propose_core` read `_send_clock` (`time.monotonic`, injectable) at entry.
+- Immediately before the write (for MFL, before the adapter's spacing sleep), a core past the budget skips the write. It answers its existing R3 read-failure 502 with the same copy: `mfl_unavailable` / `espn_unavailable`, `kind: "network"`, and "Couldn’t confirm rosters with {MFL|ESPN} right now, so nothing was sent. Try again in a moment."
+- One WARNING line logs the elapsed seconds. No new copy, code or client branch.
+- **ESPN** is under the budget today. The guard keeps the invariant if a pre-flight read is added later.
+- **Team overhaul:** each offer's core call has its own budget. A refused offer is `send_failed` with that code and copy, and its reservation is released. That is correct, since nothing was sent. The overhaul loop is unchanged.
+- **respond-mfl** has no ownership pre-flight, only `resolve_host` when the host isn't stored. Its worst case is ~31 s, so it is left alone.
+
+**TestFlight confirmation step (release-lead).** On a device with Network Link Conditioner, use a custom profile with 100% loss. Send a trade and read the time until the alert appears. ~60 s confirms the 60 s idle timeout; ~91 s refutes it.
+
+**Evidence:** `backend/tests/test_send_preflight_budget.py` and the sabotage results, recorded in `living-memory/TEST_LEDGER.md` (2026-10-28, pre-flight budget entry).

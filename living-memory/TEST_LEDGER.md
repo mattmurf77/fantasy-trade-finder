@@ -1,3 +1,21 @@
+## 2026-10-28 — Send pre-flight budget: no ESPN/MFL write starts after 30 s (release-lead QA P1-A on #527)
+
+Full gates, platforms-eng (release-lead's P1-A, due before the 11-06 iOS binary). Server only, branch `fix/send-preflight-budget`, stacked on `fix/espn-mfl-send-failures` (#513). No new code, copy, schema, flag or event. An existing 502 gains one more cause. D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest.
+- **Change:**
+  - `_SEND_PREFLIGHT_BUDGET_S = 30`, with an injectable `_send_clock`.
+  - `_mfl_propose_core` / `_espn_propose_core` take `t0` at entry. Immediately before the write, a core past the budget skips it and answers its existing R3 502 (`mfl_unavailable` / `espn_unavailable`, `kind: "network"`, I-2's copy). It also logs one WARNING line.
+  - Scope: [docs/plans/c10-send-failures/scope.md](../docs/plans/c10-send-failures/scope.md) § Pre-flight budget.
+- **Tests (`backend/tests/test_send_preflight_budget.py`, 6 new):**
+  - A pin: budget + write timeout + MFL spacing < 60, for both platforms.
+  - MFL and ESPN: the mocked live read advances the injected clock. At budget + 0.01 s, the response is the unavailable code with the R3 copy word for word and `detail` == `message`. The write mock is never called, there is no `trade_sent` row, and one budget WARNING line is logged. At budget − 0.01 s, the write runs (200).
+  - Overhaul through the real MFL core: every offer past its budget becomes 5 `send_failed` attempts (never `outcome_unknown`) with `mfl_unavailable` and the R3 copy. Reservations are released and nothing is written.
+- **Sabotage, each red then restored byte-identical (`cmp`, run with `python3 -B` per G-060):**
+  - MFL guard removed → 2 red;
+  - both guards moved after the write → 3 red;
+  - budget raised to 50 → 1 red (the pin).
+- **Targeted:** 366 passed in 15 files. They are the new file, `test_c10_send_failures`, `test_espn_propose_route`, `test_mfl_propose_route`, `test_espn_write`, `test_mfl_write`, `test_i2_espn_ownership`, `test_i2_mfl_ownership`, `test_i2_overhaul`, `test_i2_sleeper_ownership`, `test_overhaul_api`, `test_overhaul_service`, `test_overhaul_store`, `test_bilateral_overhaul` and `test_mfl_trade_lifecycle`.
+- **Not run:** the full backend suite (CI runs it); live ESPN/MFL (all mocked); `tsc` / testid-lint (no mobile change). The 60 s iOS timeout is static evidence. Release-lead's TestFlight step confirms it: Network Link Conditioner, a custom 100% loss profile, then read the alert time (~60 s confirms, ~91 s refutes).
+
 ## 2026-10-27 — ESPN/MFL send failures: plain copy, raw provider bodies to logs only, outcome-unknown on post-send timeouts (C10)
 
 Full gates, platforms-eng lead (head-eng pre-launch triage C10, "the only C item that prevents a real-money-adjacent harm"). Server only. API surface: new 502 `espn_outcome_unknown` / `mfl_outcome_unknown`, and `detail`/`message` are now plain placeholder copy on propose-espn, propose-mfl and respond-mfl; no schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/espn-mfl-send-failures`.
