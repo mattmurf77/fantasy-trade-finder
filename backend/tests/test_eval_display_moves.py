@@ -13,7 +13,9 @@ import pytest
 
 import backend.deck_quality as dq
 from backend.eval.bdk_audit import audit
-from backend.eval.data import PACK_INTEGRITY, WITHDRAWAL_CONFLICT, load_decks
+from backend.eval.data import PACK_INTEGRITY, WITHDRAWAL_CONFLICT, card_dict, load_decks
+from backend.eval.flip_read import flip_read
+from backend.eval.scorers import get_scorer
 from backend.tests.test_eval_bdk_audit import AS_OF as BDK_AS_OF, SINCE, deck, with_x
 from backend.tests.test_eval_pack_reader import SERVED, _deck_cards, write_deck
 from backend.tests.test_eval_withdrawals_and_paging import (
@@ -107,11 +109,10 @@ def test_a_move_counts_once_its_response_is_delivered_as_of_the_read():
     ({"2": 2}, None, ()),                   # anchored to itself
     ({"2": 4, "4": 6}, None, ()),           # the anchor is itself moved
     ({"2": 12}, None, ()),                  # an anchor outside the deck
-    ({"12": 4}, None, ()),                  # a moved card outside the deck
+    ({"4": 2}, None, ()),                   # an anchor before its card (#501 QA P3-6)
     ({"2": 4}, None, (2,)),                 # the moved card is a W0
     ({"2": 4}, None, (4,)),                 # the anchor is a W0
     ({"3": 6}, [[4, SERVED], [9, LATER]], ()),   # card and anchor in different responses
-    ({"6": 8}, [[4, SERVED]], ()),          # a move in no delivery at all
 ], ids=lambda v: repr(v))
 def test_a_move_record_breaking_the_writers_contract_is_pack_integrity(moves, deliveries, w0):
     db = make_db()
@@ -157,3 +158,95 @@ def test_b_dk_7_reads_the_displayed_window_after_a_serve_time_move(moved, violat
     withdraw(db, "w", 2, 0, reason="disposition_cut")
     t = audit(db.eng, since=SINCE, as_of=BDK_AS_OF).rules["repeat"]
     assert (t["violations"], t["audited"]) == (violations, W)
+
+
+# ---------------------------------------------------------------------------
+# models-lead F1: the loader checks only delivered moves; G1 checks the whole
+# header. #501 QA P3s: ghosts, null, the logged scorer, G7.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("moves, deliveries", [
+    ({"12": 4}, [[9, SERVED]]),             # a card outside the deck, never delivered
+    ({"6": 8}, [[4, SERVED]]),              # a move in no delivery at all
+], ids=["outside", "undelivered"])
+def test_an_undelivered_malformed_move_is_g1s_not_the_loaders(moves, deliveries):
+    """F1: the loader reads only moves delivered as of the read, so it leaves
+    these alone; G1's whole-header check FAILs them at once."""
+    db = make_db()
+    _packed_deck(db, moves=moves, deliveries=deliveries)
+    (deck,) = load_decks(engine=db.eng)
+    assert deck.exclusion is None and _positions(deck) == {i: i for i in range(10)}
+    g1 = flip_read(db.eng, since=SERVED, as_of=_after(2)).g1
+    assert (g1["pack_integrity"], g1["display_moves_malformed"], g1["status"]) == (0, 1, "FAIL")
+    assert g1["ids"] == ["j"]
+
+
+def test_a_malformed_move_recorded_after_as_of_keeps_a_re_read_stable():
+    """F1: the header later records a malformed move for a response delivered
+    after as_of. A re-read at the same as_of is the same deck; a read past
+    that delivery is pack_integrity; G1 flags it at once."""
+    db = make_db()
+    as_of = _after(26)
+    cards = _packed_deck(db, deliveries=[[4, SERVED]], retired=False)
+    (first,) = load_decks(engine=db.eng, as_of=as_of)
+    update_pack(db, "j", cards, card_count=10, retired=True, retired_at=_after(27),
+                deliveries=[[4, SERVED], [9, _after(26.5)]], display_moves={"6": 6})
+    (again,) = load_decks(engine=db.eng, as_of=as_of)
+    (later,) = load_decks(engine=db.eng, as_of=_after(28))
+    assert first.exclusion is None and first == again
+    assert later.exclusion == PACK_INTEGRITY
+    assert flip_read(db.eng, since=SERVED, as_of=as_of).g1["status"] == "FAIL"
+
+
+@pytest.mark.parametrize("moves, expected", [
+    ({"2": 5}, {0: 0, 1: 1, 3: 2, 4: 3, 5: 4, 2: 5, 6: 6, 7: 7, 8: 8, 9: 9}),
+    ({"3": 6}, {0: 0, 1: 1, 2: 2, 4: 3, 5: 4, 6: 5, 3: 6, 7: 7, 8: 8, 9: 9}),
+], ids=["ghosts_between", "ghost_neighbours_of_moved_and_anchor"])
+def test_ghost_rows_are_never_moved_or_counted_as_kept(moves, expected):
+    """#501 QA P3-4 (QA's probes): ghost rows at 3, 4 and 7 share the
+    indexes of real cards; only the non-ghost cards take displayed slots, and
+    each ghost's position is what it is with no record."""
+    def ghosts(db, record):
+        cards = _deck_cards("j", 10)
+        write_deck(db.eng, db.packs, cards, full=range(5), ghosts=(3, 4, 7))
+        put_pack(db, "j", cards, card_count=10, deliveries=[[9, SERVED]],
+                 **({"display_moves": record} if record is not None else {}))
+        (deck,) = load_decks(engine=db.eng)
+        return deck
+    moved, plain = ghosts(make_db(), moves), ghosts(make_db(), None)
+    assert moved.exclusion is None and _positions(moved) == expected
+    ghost_pos = lambda d: sorted((c.card_index, c.position) for c in d.cards if c.is_ghost)
+    assert ghost_pos(moved) == ghost_pos(plain) and len(ghost_pos(moved)) == 3
+
+
+def test_a_null_display_moves_reads_as_no_moves():
+    """#501 QA P3-4: JSON null is the field absent, never malformed."""
+    db = make_db()
+    cards = _deck_cards("j", 10)
+    write_deck(db.eng, db.packs, cards, full=range(5))
+    put_pack(db, "j", cards, card_count=10, deliveries=[[9, SERVED]], display_moves=None)
+    (deck,) = load_decks(engine=db.eng)
+    assert deck.exclusion is None and _positions(deck) == {i: i for i in range(10)}
+
+
+def test_the_logged_scorer_ranks_by_displayed_position():
+    """F2 / #501 QA P3-2: the self-check scorer reproduces a moved deck's
+    displayed order, not its build order."""
+    db = make_db()
+    _packed_deck(db, moves={"2": 4})
+    (deck,) = load_decks(engine=db.eng)
+    logged = get_scorer("logged")
+    ranked = sorted(deck.cards, key=lambda c: -logged.score(card_dict(c)))
+    assert [c.card_index for c in ranked] == [0, 1, 3, 4, 2, 5, 6, 7, 8, 9]
+    assert [c.position for c in ranked] == list(range(10))
+
+
+def test_g7_leaves_a_pack_integrity_decks_upgrade_misses_to_g1():
+    """#501 QA P3-5: a deck failing its move record is G1's: G7 counts
+    neither its upgrade misses nor its row-gone misses."""
+    db = make_db()
+    _packed_deck(db, moves={"2": 2}, upgrade_misses={"other": 2})
+    _packed_deck(db, job="k", upgrade_misses={"restart_split": 1})
+    read = flip_read(db.eng, since=SERVED, as_of=_after(2))
+    assert read.g1["pack_integrity"] == 1
+    assert read.g7["upgrade_misses"] == {"restart_split": 1}
