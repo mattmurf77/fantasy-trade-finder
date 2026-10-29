@@ -137,14 +137,14 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // files); a server `false` still kill-switches on the next revalidate.
   'onboarding.v2': true,
   'onboarding.landing': true,
-  // The landing's Sleeper · ESPN · MFL chips. While the server says false
-  // (the 11-0x entry purge window), a fresh install shows them only until
-  // the first revalidate; the server's entry route 404s meanwhile.
-  'landing.platform_options': true,
   'mfl.link': true,
   'account.settings_hub': true,
-  // `espn.signin` is baked in only once ask 15 passes and
-  // config/features.json carries it true; the guard holds the two together.
+  // NOT baked, on purpose (release-lead #502 QA P1-1): the landing's
+  // platform-chip flag. While the server holds it off (the entry-purge
+  // window) a baked `true` would paint chips whose entry sheet dead-ends
+  // (the entry route 404s). It's baked in the PR that turns the proof-based
+  // ESPN/MFL sign-in on, in both files. The ESPN sign-in flag likewise waits
+  // for ask 15. The guard holds both out until then.
 };
 
 export const useFeatureFlags = create<FlagState>((set, get) => ({

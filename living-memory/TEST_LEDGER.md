@@ -137,6 +137,15 @@ Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b2-flag
   1. a fresh install opened offline paints the username landing with the platform chips;
   2. after going back online, the same landing shows;
   3. Settings is the hub.
+- **2026-10-28, release-lead QA @ `6b0c3b8f`: NO-GO on P1-1 → fixed:**
+  - **P1-1:** `landing.platform_options` is no longer baked. A baked `true` painted chips that dead-end while the server holds the flag off (the purge window). It's baked with ask 16. Guard pin 4 keeps it out.
+  - **P2-1:** the defaults' comment no longer contains the ESPN sign-in flag's literal, which had turned #443's `check-espn-signin-flag` pins 4/6 red.
+  - **P3-1:** pin 5, "a server or cached false wins": the store starts from the defaults, a cached map spreads over them, and a fetch replaces the whole map. **Sabotage 4/4 red**, covering QA's three surviving wiring cases plus the chips flag baked again.
+  - **P3-4:** the TestFlight checklist is rewritten to 6 steps: online, offline, warm, server-false, Settings, kill switch. The offline step now expects **no** chips.
+  - **Not taken:**
+    - P3-2: the s0.1 guide intro is latent until `onboarding.guided_avatar` goes on;
+    - P3-3: the entry sheet should close when the chips flag is withdrawn.
+    - Both are in `SignInScreen.tsx`, which #443 and #507 are changing, so they're logged for that stack.
 
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 

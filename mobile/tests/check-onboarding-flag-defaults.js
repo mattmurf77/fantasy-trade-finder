@@ -14,6 +14,13 @@
 //      paints; flipping one means editing both);
 //   3. `espn.signin` is baked only when config/features.json carries it true
 //      (ask 15), and then with the same value.
+//   4. `landing.platform_options` is NOT baked (release-lead #502 QA P1-1):
+//      while the server holds it off, a baked `true` paints chips whose entry
+//      sheet dead-ends. The PR that turns the proof-based sign-in on bakes
+//      it, and updates this pin.
+//   5. A server or cached `false` still wins (release-lead #502 QA P3-1): the
+//      store starts from the defaults, a cached map spreads OVER them, and a
+//      successful fetch replaces the whole map with nothing merged under it.
 // Dependency-free: plain node, comment-stripped source.
 //
 // Run: node tests/check-onboarding-flag-defaults.js
@@ -49,7 +56,6 @@ const features = JSON.parse(fs.readFileSync(path.join(ROOT, '..', 'config', 'fea
 const LAUNCHED_ONBOARDING = [
   'onboarding.v2',
   'onboarding.landing',
-  'landing.platform_options',
   'mfl.link',
   'account.settings_hub',
 ];
@@ -67,6 +73,23 @@ if ('espn.signin' in baked) {
 } else {
   check(true, '3. espn.signin is not baked (ask 15 not passed, or not launched)');
 }
+
+check(!('landing.platform_options' in baked),
+  '4. landing.platform_options is not baked until the proof-based sign-in is live',
+  'it is baked; while the server holds it off, its chips dead-end (release-lead #502 QA P1-1)');
+
+const body = (name) => {
+  const m = src.match(new RegExp(`\\n  ${name}: async \\(\\) => \\{([\\s\\S]*?)\\n  \\},`));
+  return m ? m[1] : '';
+};
+check(/\n  flags: \{ \.\.\.LAUNCHED_FLAG_DEFAULTS \},/.test(src),
+  '5a. the store starts from the baked defaults');
+check(/set\(\{ flags: \{ \.\.\.LAUNCHED_FLAG_DEFAULTS, \.\.\.\(parsed as FlagMap\) \} \}\)/.test(body('loadCachedFlags')),
+  '5b. a cached map spreads OVER the defaults (a cached false wins)');
+const reval = body('revalidateFlags');
+check(/const flags = await loadFeatureFlags\(/.test(reval) && /set\(\{ flags, loaded: true \}\)/.test(reval)
+  && !/LAUNCHED_FLAG_DEFAULTS/.test(reval),
+  '5c. a successful fetch replaces the whole map, with no defaults merged under it (a server false wins)');
 
 if (failures) {
   console.error(`\n${failures} onboarding-flag-defaults check(s) failed.`);
