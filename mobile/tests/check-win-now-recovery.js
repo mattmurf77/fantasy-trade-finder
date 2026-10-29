@@ -120,6 +120,8 @@ function sessionHarness() {
     '../api/client': h.client, '../api/auth': auth, '../api/winNow': winNow,
     '../api/league': {connectLeague: (...args) => providers.connect(...args)},
     '../api/sleeper': sleeper, '../api/purchases': {initPurchases: async () => {}},
+    // useSession's purchases identity bridge reads the pure predicate module.
+    './subscriptionSession': load('src/state/subscriptionSession.ts', name => { throw Error(`unexpected subscriptionSession import ${name}`); }, h.time),
     '../observability/sentry': {setUser: () => {}},
     './queryClient': {seedLeagueSessionCaches: (id, seed) => seeds.push({id, seed}), queryClient: {invalidateQueries: input => invalidations.push(input)}},
     '../api/rankings': {getActiveScoringFormat: async () => '1qb_ppr'},
