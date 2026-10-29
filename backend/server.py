@@ -36373,17 +36373,20 @@ _PAYWALL_PRODUCTS = [
 # (24.99 / 12 = 2.0825; 34.99 / 12 = 2.9158): rounding down would
 # understate the annual price.
 #
-# The rise is an INSTANT, not a UTC date: 2027-01-01 00:00
-# America/Los_Angeles (PST, UTC-8) = 08:00 UTC. Terms §14.8 promises the
-# Founder price to anyone subscribing "by December 31, 2026", and a UTC
-# date flipped at 7 pm ET on Dec 31. LA midnight keeps the founder price
-# through the whole of Dec 31 in every contiguous-US time zone (Alaska and
-# Hawaii end Dec 31 one and two hours later still).
+# The rise is an INSTANT: 2027-01-02 04:00 UTC (11 pm ET / 8 pm PT on
+# Jan 1). That is App Store Connect's US start time for a price change
+# scheduled for 2027-01-02 (Apple's start-times-by-country table), and the
+# operator approved scheduling both changes for Jan 2 (2026-10-28,
+# monetization-pm). A change scheduled for 2027-01-01 would start in the US
+# at 2027-01-01 04:00 UTC, 11 pm ET on Dec 31, which breaks Terms §14.8
+# (the Founder price for anyone subscribing "by December 31, 2026"). So the
+# Founder price holds through all of Dec 31 in every US time zone, and
+# through most of Jan 1.
 # FALLBACK ONLY: StoreKit's localized price is authoritative, and this
 # instant only decides which strings the server shows when StoreKit is
-# unavailable. monetization-pm checks it against the App Store Connect
-# scheduled price change; if the two differ, move this constant to match.
-_PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 1, 8, 0, tzinfo=timezone.utc)
+# unavailable. monetization-pm records the start time App Store Connect
+# shows (setup §3d); if the two differ, move this constant to match.
+_PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 2, 4, 0, tzinfo=timezone.utc)
 _PAYWALL_PRICES = {
     "ftf_pro_monthly": ({"display_price": "$4.99"},
                         {"display_price": "$6.99"}),
