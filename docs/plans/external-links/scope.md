@@ -3,7 +3,7 @@
 **Date:** 2026-10-20
 **Entry point:** direct ask. head-eng's external-links inventory (`1eaa9d8a:docs/plans/sleeper-fa-deeplink/eng-external-links.md` §4, recommendation B), Phase 2 for platforms-eng, plus #351's PRD (`origin/plan/sleeper-fa-deeplink:docs/plans/sleeper-fa-deeplink/prd.md` §3.2, §4.4, §7.1) and the operator's D2 call ("In app message", 2026-10-20).
 **Builder:** eng-mobile worker for platforms-eng, branch `build/open-external-helper` (base `678834ab`)
-**Operator sign-off on waivers:** pending. Waivers to surface: §1 analytics (waived until analytics-lead grants an event); §4 LLD / DECISIONS rows (handed to the coordinator, shared living-memory docs).
+**Operator sign-off on waivers:** pending. Waivers to surface: §4 LLD / DECISIONS rows (handed to the coordinator, shared living-memory docs). §1 analytics is no longer waived: analytics-lead granted `sleeper_handoff_resolved`, and it lands on the stacked `feat/sleeper-handoff-resolved` (§1).
 
 ## Contents
 
@@ -29,13 +29,32 @@
 | Stale comments | `SendInSleeperButton.tsx:41-43`, `:463-465`; `SendInEspnButton.tsx:22-23` | They said `espn.send` is OFF and absent from config. It graduated ON on 2026-08-12 (`7315d8c6`, `config/features.json:115`). |
 | Guards | `mobile/tests/check-external-links.js`, `mobile/tests/check-sleeper-handoff.js` | See §3. |
 
-No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag, no route, no event.
+No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag, no route. No event on #379 itself: `sleeper_handoff_resolved` lands on the stacked `feat/sleeper-handoff-resolved` (§1).
 
 ## 1. Analytics scope
 
-- [ ] **(a) New events specced:** none in this build.
-- [x] **(b) Existing events cover part of it:** `sleeper_send_attempted {has_target:false}` still fires in `SendInSleeperButton.onPress` before the hand-off (unchanged). It counts hand-off attempts. It can't say whether the app opened or the D2 alert showed.
-- [x] **(c) WAIVED, pending analytics-lead's grant.** The proposed `external_link_opened {platform, surface, form, outcome}` (eng-external-links §4.7), or #351's `sleeper_handoff_resolved`, needs analytics-lead to register it in `backend/analytics_taxonomy.py` and classify it in `analytics_queries.NON_INTENT_EVENTS` in the same commit as the emitter. Not granted yet, so nothing fires. `ExternalTarget.surface` is carried (`send_button` | `free_agents` | `usage_trends` | `trade_queue` | `unspecified`). When the grant lands, the emitter goes inside `openPlatform` with no call-site change.
+- [x] **(a) New event: `sleeper_handoff_resolved`, granted, INTENT.** analytics-lead granted it on 2026-10-20 (G1–G7, widened @ `8b63ef10`). It is emitted on the stacked branch `feat/sleeper-handoff-resolved`, not on #379 itself; this section was updated there. Addendum: [`docs/business/analytics/2026-10-28-sleeper-handoff-events.md`](../../business/analytics/2026-10-28-sleeper-handoff-events.md).
+  - **Props, exact:**
+    - `surface` ∈ `free_agents` | `usage_trends` | `send_button` | `trade_queue`;
+    - `target` ∈ `add` | `trade`;
+    - `rung` ∈ `add` | `player` | `players_tab` | `league` | `bare` | `trade` | `trades_tab`, the rung actually opened;
+    - `outcome` ∈ `app` | `not_installed`, where `not_installed` means `openURL` rejected (G4);
+    - `has_drop` (bool) only on a `target=add` row off `send_button`; omitted, never `null`, on `send_button` and every `target=trade` row (G2).
+    - No player id, name or league id (G5).
+  - **INTENT.** Registered in `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS` (`backend/analytics_taxonomy.py`) in the same commit as the emitter, with **no** `analytics_queries.NON_INTENT_EVENTS` row. Not a WAT event.
+  - **Where it fires:** inside the helper, so no call site changes.
+    - `openPlatform` gains an optional `onSchemeSettled(opened)` callback. It runs synchronously when the scheme open settles, before any fallback (`openExternal.ts:92-98`).
+    - `openInSleeperApp` passes one that calls `trackHandoff` (`sleeperHandoff.ts:119`, `:132-149`).
+    - So it fires once per hand-off, before the D2 alert, with no further `await` (G3). A re-tap while the open is in flight adds nothing.
+    - ESPN, MFL, `surface: 'unspecified'` and `target: 'league'` (outside the granted `target` set) emit nothing.
+  - **`openInSleeperApp` gains `hasDrop?: boolean`.** It reaches the event only on an add hand-off off `send_button`. The claim sheet passes it (league-eng, #509).
+  - **`external_link_opened` is not granted** and isn't built.
+  - **Evidence:**
+    - `mobile/tests/check-sleeper-handoff-event.js` (E1–E11; `npm run test:sleeper-handoff-event`) executes the helper with stubbed `Linking` and `track`;
+    - `backend/tests/test_analytics_taxonomy_sleeper_handoff.py` covers the allowlist, the exact prop row, the INTENT split and an ingest round trip;
+    - results and sabotage counts are in `living-memory/TEST_LEDGER.md` (2026-10-28).
+- [x] **(b) Existing events cover part of it:** `sleeper_send_attempted {has_target:false}` still fires in `SendInSleeperButton.onPress` before the hand-off (unchanged). It counts hand-off attempts. It can't say whether the app opened or the D2 alert showed; `sleeper_handoff_resolved.outcome` now does.
+- [x] **(c) Superseded.** This section first waived the event pending analytics-lead's grant, and assumed a `NON_INTENT_EVENTS` row. Both were stale: the grant (2026-10-20) is INTENT, with no `NON_INTENT_EVENTS` row. See (a).
 
 ## 2. Schema & flag scope
 
@@ -163,8 +182,8 @@ No existing visible copy changed; "Send in Sleeper" is still true. New copy, to 
 
 | PRD check / work | Owner | Why not here |
 |---|---|---|
-| S1, S2 (ClaimSheet half), S8, S9; `ClaimSheet` → `openInSleeperApp({ target: 'add', … })`, the steps block, `leagueName` from Free Agents | league-eng | `ClaimSheet.tsx`, `FreeAgentsScreen.tsx` not ours |
-| S1 for `UsageTrendsScreen.tsx`; its `leagueName` prop | rankings-eng | not ours |
+| S1, S2 (ClaimSheet half), S8, S9; `ClaimSheet` → `openInSleeperApp({ target: 'add', … })`, the steps block, `leagueName` from Free Agents | league-eng | `ClaimSheet.tsx`, `FreeAgentsScreen.tsx` not ours. **Built in #509 (B3), stacked on this PR** (adds H1/H2 for the hosts) |
+| S1 for `UsageTrendsScreen.tsx`; its `leagueName` prop | rankings-eng | not ours. **Built in #509 (B3), stacked on this PR** |
 | S11, S12, S15; `useTradeQueue.sendAll` one hand-off; `buildSleeperUrl` removal | trades-eng | `TradesScreen.tsx`, `useTradeQueue.ts` not ours |
 | S14 / AC-16; the steps confirm + `clipboardText: formatTradeForClipboard(…)` on `openInSleeper` | platforms-eng follow-up | needs design-lead / ux-lead copy first; silent copying without the disclosure is out |
 | `DraftRoomScreen.tsx:827` → `openPlatform` | draft-eng | not ours |

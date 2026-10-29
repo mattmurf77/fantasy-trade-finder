@@ -147,6 +147,8 @@ function env(behave) {
   const handoff = { exports: {} };
   new Function('module', 'exports', 'require', handoffJs)(handoff, handoff.exports, (name) => {
     if (name === './openExternal') return helper.exports;
+    // The granted sleeper_handoff_resolved; check-sleeper-handoff-event.js pins it.
+    if (name === '../api/events') return { track: () => {} };
     throw new Error(
       `sleeperHandoff.ts gained an unexpected runtime import ("${name}") — it must ` +
         'open through ./openExternal only.',
