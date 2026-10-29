@@ -17,6 +17,7 @@
 - [Copy for design-lead](#copy-for-design-lead)
 - [2026-11-01 — pinned CTA footer](#2026-11-01--pinned-cta-footer)
 - [Known risk](#known-risk)
+- [2026-10-29 — S9 re-baseline to #385 (LEG-M10)](#2026-10-29--s9-re-baseline-to-385-leg-m10)
 
 ---
 
@@ -62,7 +63,7 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
   - `check-sleeper-handoff.js`, new checks. All are AST checks that prove wirings, not behavior (G-035); no claim-sheet code is executed.
     - **S1:** `ClaimSheet.tsx`, `FreeAgentsScreen.tsx` and `UsageTrendsScreen.tsx` hold no `sleeper.com/leagues` string or template literal, and no `Linking.openURL` whose argument mentions Sleeper.
     - **S2 (ClaimSheet half):** `ClaimSheet.tsx` imports `openInSleeperApp` from `../utils/sleeperHandoff`. There is exactly one `fa-claim.open-sleeper` Button, its label is still "Open in Sleeper to claim", and its `onPress` is `openSleeper`. `openSleeper` calls `openInSleeperApp({ target: 'add', … })` with `leagueId`, `playerId: row.player_id` and `surface`.
-    - **S9:** the eight `NO_ADD_REASON` strings, evaluated from the AST, equal the `04eae95b` strings copied into the guard. `explainNoAdd` and `resolveAddPlatform` are byte-identical to `04eae95b`.
+    - **S9:** the eight `NO_ADD_REASON` strings, evaluated from the AST, equal the strings copied into the guard. `explainNoAdd` and `resolveAddPlatform` are byte-identical to `04eae95b`. The four titles and `local`'s body are `04eae95b`'s. From the 2026-10-29 re-baseline on, the espn / mfl / fleaflicker bodies are #385's (LEG-M10): see [2026-10-29 — S9 re-baseline to #385 (LEG-M10)](#2026-10-29--s9-re-baseline-to-385-leg-m10).
     - **H1** (the b3 brief's, not a PRD id): Free Agents mounts `ClaimSheet` with `surface="free_agents"` and `leagueName={leagueName}`, where `leagueId` and `leagueName` both read `useSession` → `s.league`. Usage Trends mounts it with `surface="usage_trends"` and the exact `leagueName` expression above, so the session name is used only when the claim league is the session league.
     - **H2** (the b3 brief's): in `FreeAgentsScreen`, the `query.isLoading` conditional sits inside the `query.isError` conditional's false branch.
     - *(Removed 2026-11-01 with the steps; S2's continued block now guards their absence.)* **S8** (commit 2): `ClaimSheet.tsx` renders exactly one `fa-claim.steps` element, after the drop section and before the CTA. It **renders** (as `{…}` children, so a mention inside a condition doesn't count) `row.name`, the selected drop (a const that looks `dropId` up in `candidates`) and `leagueName`, and carries the "…so you can paste it into search." disclosure. `openSleeper` passes `clipboardText: row.name`.
@@ -117,7 +118,7 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
   3. Mount `:679-692`: `leagueId={claim.leagueId}`; `:684` `leagueName` = the claim league's own name from `leagueMeta` (`:151`, the session's league list), else the session `league_name` (`:95`) only when `claim.leagueId === leagueId` (`:94`), else `null`; `:685` `surface="usage_trends"`. `faQuery` (`:135-141`) loads that league's capacity, waivers and drop candidates.
   4. Then A4–A11, with `surface: 'usage_trends'`. The steps block names the claim league, which for a non-focused league is the one FTF just switched to.
 
-  **C. Non-Sleeper invariance.** `ClaimSheet.tsx` `resolveAddPlatform`, `NO_ADD_REASON` and `explainNoAdd` (`:59-104`): no content change (S9). Free Agents' `onAdd` and Usage Trends' `doAdd` are unchanged.
+  **C. Non-Sleeper invariance.** `ClaimSheet.tsx` `resolveAddPlatform`, `NO_ADD_REASON` and `explainNoAdd` (`:59-104`): #509 makes no content change (S9). With #385 merged, the three platform bodies are #385's LEG-M10 strings, which reach #509 through main, not through this PR. Free Agents' `onAdd` and Usage Trends' `doAdd` are unchanged.
 
 - [x] **Manual TestFlight checklist** (for the operator, on the build that carries this branch; adapted from #351 PRD rows 13, 14 and 16). Run the commit-1 variant if commits 2 and 3 are dropped, the steps variant if they ship. Rows 6–9 are the steps variant at commit 3 (numbered rows; adapted from PRD rows 13/14); row 10 is new at commit 4. Rows 6 and 7 gained a step each from ux-lead's flow re-check (2026-10-28, via head-eng).
 
@@ -315,3 +316,39 @@ Sabotage:
 ## Known risk
 
 At the `bare` rung Sleeper reopens its **last-viewed league** (PRD C2), not the claim league. A user with several Sleeper leagues can land in the wrong one and add the player there. The old https link had the same end state on iPhone (Safari → Sleeper's home, #351 F3), so this is not a regression, but it is not fixed either. **Without commits 2 and 3, nothing on the sheet tells the user which league to pick.** The steps block's row 1 names the league, or tells the user to open the league they're claiming in when the name is unknown. A deeper rung (`players_tab` or `league`) fixes it only once a device test proves Sleeper honours the league path.
+
+## 2026-10-29 — S9 re-baseline to #385 (LEG-M10)
+
+**Why.** #385 (LEG-M10, an 11-06 MUST, QA passed; release-lead) replaces the espn / mfl / fleaflicker `body` strings in `ClaimSheet.tsx`'s `NO_ADD_REASON`. The old `04eae95b` bodies ("…with read-only access, so Fantasy Trade Finder can’t make roster moves there…") are false copy and must not return. S9 pinned them, so main + #385 + #509 failed exactly three checks: `S9 NO_ADD_REASON.espn.body` / `.mfl.body` / `.fleaflicker.body verbatim` (reproduced on `build/b3-s9-385` @ `46083d12`, guard exit 1, 3 FAIL).
+
+**What changes.** Only `check-sleeper-handoff.js` S9: the three platform bodies in `EXPECTED_REASONS` become #385's strings, byte for byte, with straight apostrophes:
+- espn: "Roster moves for this ESPN league can't be made from Fleeced. Open the ESPN Fantasy app to add this player."
+- mfl: "Roster moves for this MFL league can't be made from Fleeced. Open MFL to add this player."
+- fleaflicker: "Roster moves for this Fleaflicker league can't be made from Fleeced. Open Fleaflicker to add this player."
+
+The titles, `local`, `explainNoAdd` and `resolveAddPlatform` stay pinned to `04eae95b`. `ClaimSheet.tsx` doesn't change: #509 still makes no content change to the non-Sleeper paths. The bodies come from #385, through main.
+
+**Why it's on its own branch.** #509's base is #379, which doesn't have #385. Re-baselining S9 on #509 now would turn #509 red against its own base. Merging #385 into #509 isn't an option either: #385's head carries a full main merge (`b1a16282`), which would pull most of main into #509's diff. `build/b3-s9-385` is #509 @ `91f60d23` plus a merge of #385 @ `b1a16282` (`46083d12`), the combination that was red, with the re-baseline as one commit on top.
+
+**How it ships.** As the one commit, never the merge, together with `2eb1bf83` (hasDrop), when #509 takes main after #385, #379 and #528 have landed: merge main into #509 (S9 then goes red until this lands), cherry-pick this commit, then cherry-pick `2eb1bf83`. Each touches separate hunks of the guard and of this file.
+
+**Sabotage** (on `ClaimSheet.tsx`, applied, guard run, restored byte for byte):
+
+| # | Sabotage | Red |
+|---|---|---|
+| 28 | espn's body back to the `04eae95b` text ("…with read-only access…") | S9 espn.body (only) |
+| 29 | mfl's `can't` → curly `can’t` | S9 mfl.body (only) |
+| 30 | fleaflicker's body without its final `.` | S9 fleaflicker.body (only) |
+| 31 | espn's title, one character changed (`ESPN` → `ESPM`) | S9 espn.title (only) |
+
+**Commands run** (from `mobile/`, with `NODE_PATH` at another checkout's `node_modules`, same `package-lock.json`, G-022):
+
+| Command | Result |
+|---|---|
+| `node tests/check-sleeper-handoff.js`, before the re-baseline | exit 1: 84 PASS, 3 FAIL (the three S9 bodies) |
+| `node tests/check-sleeper-handoff.js`, after | 87 PASS, 0 FAIL |
+| `node tests/check-external-links.js` | 48 PASS, 0 FAIL |
+| `node tests/check-usage-trends.js` | 76 PASS, 0 FAIL |
+| `node tests/check-send-button-platform.js` | 32 PASS, 0 FAIL |
+| `bash scripts/testid-lint.sh` | `testid-lint OK` |
+| `tsc --noEmit`, a scratch copy of `mobile/` with a borrowed `node_modules` | exit 0 |
