@@ -2570,7 +2570,9 @@ export default function TradesScreen({ navigation, route }: any) {
     setDeckFailure(isRosterCheckError(job.error)
       ? { kind: 'roster_check', message: GATE_ROSTER_CHECK_FAILED_LINE }
       : { kind: 'job_error', message: jobErrorCopy(job.error) });
-  }, [job?.status, job?.error]);
+    // job_id too: a new search whose own answer is the same error (an
+    // inputs_changed again) must be read afresh (#525 QA P1-1r).
+  }, [job?.job_id, job?.status, job?.error]);
 
   // #330 R-6 — scoped-empty derivation, at COMPLETION time. Both zero-card
   // paths funnel through `job` (instant cache-hit onSuccess and the polled
@@ -4835,7 +4837,7 @@ export default function TradesScreen({ navigation, route }: any) {
     dispatchGenerate({ repeat: true }, undefined,
       { searchId: autoResearchSearchId(deckSearchRef.current?.id, isSearchOpen) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawTopCard?.trade_id, job?.status, job?.error]);
+  }, [rawTopCard?.trade_id, job?.job_id, job?.status, job?.error]);   // job_id: P1-1r
   useEffect(() => {
     if (deckEnd === 'end') setEndLatched(true);
   }, [deckEnd]);

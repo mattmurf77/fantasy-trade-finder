@@ -487,6 +487,31 @@ function freshTraceWithTimers() {
         && pages.autoResearchAfterAnswer('pending', false) === 'idle');
   }
 
+  // (N3/N3b) #525 QA P1-1r: a Try again (or a tap while a re-search is
+  // pending) whose OWN answer is inputs_changed again, on a deck already
+  // holding a revoked job. Its answer resets the budget; the effects must
+  // read the new job (its job_id changed, status/error didn't), so the new
+  // search gets its one re-search and then the error card, never an endless
+  // empty slot.
+  {
+    for (const before of ['used', 'pending']) {
+      let state = pages.autoResearchAfterAnswer(before, false);            // the tap's answer lands
+      const newJobRead = pages.autoResearchOnJobError(state, 'inputs_changed');
+      state = newJobRead === 'pending' ? 'pending' : state;               // the mirror, re-run by job_id
+      const hiddenWhilePending = pages.autoResearchHidesError(state, 'inputs_changed', false);
+      state = 'used';                                                       // the auto effect, re-run by job_id
+      const secondError = pages.autoResearchOnJobError(state, 'inputs_changed');
+      const shownAfter = !pages.autoResearchHidesError(state, 'inputs_changed', false);
+      check(`11p. EXECUTED (N3, from '${before}'): a new search answered with inputs_changed gets one re-search, then the error card`,
+        newJobRead === 'pending' && hiddenWhilePending && secondError === 'fail' && shownAfter);
+    }
+  }
+  check('11q. both effects re-run on a new job_id, not only on status/error (P1-1r)',
+    /\}, \[job\?\.job_id, job\?\.status, job\?\.error\]\);/.test(trades)
+      && /\}, \[rawTopCard\?\.trade_id, job\?\.job_id, job\?\.status, job\?\.error\]\);/.test(trades)
+      && trades.indexOf("if (autoResearchOnJobError(autoResearchRef.current, job.error) === 'pending')")
+        < trades.indexOf('}, [job?.job_id, job?.status, job?.error]);'));
+
   // The screen calls them where the rules say (by shape).
   const effect = trades.slice(trades.indexOf("if (job?.status !== 'error') return;"), trades.indexOf("if (job?.status !== 'error') return;") + 600);
   check('11g. the job-error mirror returns before deckFailure when the inputs_changed is recovered (no R2b)',

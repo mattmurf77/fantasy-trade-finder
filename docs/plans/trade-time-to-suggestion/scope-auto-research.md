@@ -9,7 +9,7 @@
 
 ## 1. Analytics scope
 
-- [x] **(b) Existing events cover it.** Per analytics-lead's grant, no event, value or taxonomy row is added. Their conditions are pinned in `mobile/tests/check-trade-first-card-events.js` §10:
+- [x] **(b) Existing events cover it.** Per analytics-lead's grant, no event, value or taxonomy row is added. Their conditions are pinned in `mobile/tests/check-trade-first-card-events.js` §11:
   - **no R1** (`find_trades_tapped`): the re-search is not a tap;
   - **no new search_id:** the open trace's while the first card hasn't shown (R2 then fires once, on the rebuilt deck's first card, timed from the original tap); otherwise none, so there's no orphan R2 or R2b;
   - **no R2b `error`:** a recovered `inputs_changed` never sets deckFailure;
@@ -25,7 +25,7 @@
 
 ## 3. Evidence scope
 
-- [x] **Structural guard:** `mobile/tests/check-trade-first-card-events.js` §10 (10a–10k).
+- [x] **Structural guard:** `mobile/tests/check-trade-first-card-events.js` §11 (11a–11q; §11 runs ahead of #488's §10).
   - **Executed** against `utils/tradePages.ts`'s rules and the real `state/tradeSearchTrace.ts`, analytics-lead's four cases:
     - (i) after R2: no R1/R2/R2b, no search_id;
     - (ii) before the first card: the open id, one R2, no R2b;
@@ -51,13 +51,14 @@
     - the ranking edit changes only the operator's own FTF board, so put the player back afterwards (or use a test account);
     - never tap Send or Propose;
     - don't use a Sleeper roster move: it changes a real league, and since #481 it revokes only the refresher's own deck.
-  - **Which decks:** after the page-store flip, only pinned, Specific Team and intent decks pass the error through. So use a pinned-player search.
+  - **Which decks:** after the page-store flip, only pinned, Specific Team and intent decks pass the error through. Pinning a give-side player on the Trades landing runs the fair-packages sweep instead (one request, no job, no pages), which can never see `inputs_changed`. So use a player on the **GET side only** (a pinned-receive model search: no cache, not organic), or Specific Team with an empty canvas.
+  - **Prefer Pass over Like** throughout: a Like may show your trade to a real leaguemate.
   - **How the path triggers:** device A requests pages only while fewer than 50 cards are unseen, so a deck is fully paged within seconds of its first card. The input change must therefore land while A's deck is still building.
-  1. Device A: Trades → pin a player (the give side) → Find a Trade, on a cold search (one not run recently). As soon as the first card shows, go to step 2.
+  1. Device A: Trades → put one player on the **GET side only** (or choose Specific Team with an empty canvas) → Find a Trade, on a cold search (one not run recently). As soon as the first card shows, go to step 2.
   2. Device B, right away: Rankings → move one player, so the input change revokes A's deck while it's still building.
-  3. Device A: swipe to the last held card. **Expect:** no "Couldn't load more trades." card. A fresh deck appears in place within a few seconds, and Like/Pass work on its first card. The readout shows **no new tap** (its last tap is still step 1's). **If you see the end card ("That's every trade…"), the change landed after the deck was complete and it didn't trigger: redo from step 1.**
+  3. Device A: swipe to the last held card. **Expect:** no "Couldn't load more trades." card. A fresh deck appears in place within a few seconds, and Pass works on its first card. The readout shows **no new tap** (its last tap is still step 1's). **If you see the end card ("You've seen every trade for now."), the change landed after the deck was complete and it didn't trigger: redo from step 1.**
   4. Repeat steps 1–2, then on device B make a second ranking move while A swipes the rebuilt deck. **Expect:** at its end, "Couldn't load more trades." shows (one automatic re-search per search). Its Try again starts a new search (a new tap in the readout), and the rebuilt deck pages normally (more cards load as you swipe).
-  5. Device A: Find a Trade (pinned, cold), then **immediately**, before the first card, do step 2. **Expect:** the first card still appears with no error card, and the readout's time for that search covers the whole wait from the tap.
+  5. Device A: Find a Trade (GET-side player, a cold search with a visible wait; a warm one answers too fast), then **immediately**, before the first card, do step 2. **Expect:** the first card still appears with no error card, and the readout's time for that search covers the whole wait from the tap.
   6. Device A: as in steps 1–2, but turn on airplane mode just before the last held card. **Expect:** the Offline card (never "Couldn't load more trades.") while offline. Back online, the fresh deck appears, or the error card shows if the re-search fails.
   7. Put the moved players back on device B (the safety note above).
 - `testID`s: none added (testid-lint OK).
