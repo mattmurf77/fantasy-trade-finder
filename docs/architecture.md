@@ -280,9 +280,10 @@ inputs beyond the one throw-in check noted below:
    piece the viewer receives and on the partner's published board
    (`snapshot.partner_boards`) for a piece the partner receives. Apart from that
    check the core sees market values, rosters, roster rules, untouchables and
-   pins only: no personal board and no windows. It is bounded by an 8 s time
-   budget, 40,000 checks per partner and `vc_max_per_partner` kept trades per
-   partner.
+   pins only: no personal board and no windows. It is bounded by its check and
+   keep caps only (40,000 checks per partner and `vc_max_per_partner` kept
+   trades per partner), never by the clock, so machine load cannot change a
+   deck. A 30 s safety ceiling (`core.SAFETY_CEILING_S`) marks pathology only.
 2. **Ranking (`windows.py`, `ranking.py`, `deck.py`), order plus variety.** Each fair
    trade gets three scores in [0, 1]. **Value** is the size of the return and
    whether a real piece comes back. **Outlook** is the fit with both teams'
@@ -415,7 +416,9 @@ the same seat, built from the same DB reads the bench uses —
 app's own engine; the one place server-path code imports from `backend/eval/`)
 → `league_record` → `snapshot_for_seat` — with standings, lineup slots and
 roster limit overridden from `ServerInputs`. Fewer than 10 ⇒ `failed` with
-`value_core_too_few`; an exception ⇒ logged, `failed` with `value_core_failed`.
+`value_core_too_few`; an exception ⇒ logged, `failed` with `value_core_failed`;
+a run that hit the core's safety ceiling (a partial pool) ⇒ ERROR log, `failed`
+with `value_core_failed`, no cards.
 
 **Blinding, by construction.** Cards from both arms are merged by
 (partner, give set, receive set) — a trade both engines produced is one card
@@ -573,6 +576,21 @@ Contested and orphaned slots are withheld from priced reads by a **row filter** 
 
 **M-C (flag `picks.assign_tradeable`, 2026-08-08 — [build-w3-mc.md](plans/draft-extensions/build-w3-mc.md))** opts all seven read sites in at once through one helper, `server._pick_read_source()`, and collapses the two duplicated **three-clause** engine literals into `server._owned_picks_available()` — whose ESPN clause is now a DATA test (`has_assigned_picks`) rather than a platform test. `picks_supported` follows the same rule. Every payload that prices a pick carries `source: "platform" | "user"` (+ `season`); the flag off restores the platform-only default and removes the fields, byte for byte.
 
+
+**Roster refresh and fingerprint stamp (S0, [scope](plans/trade-time-to-suggestion/scope-eng-s0-fetch.md) §B.3).** Session init's authoritative Sleeper read (rosters, users, league meta; `session_input.resolve_session_input`) is the league's roster refresh. Its rosters and meta are handed to the background daemon (no second read), and the meta seeds `_FA_LEAGUE_META_CACHE`. The daemon replace-syncs Sleeper `league_members`, syncs owned picks and draft state, then `roster_refresh.record_outcome` writes `league_roster_state` (`fresh`). A failed read writes `stale` + `last_error_code` and never touches the rows. `roster_refresh.maybe_refresh_async` re-runs the same Sleeper segment as a single-flight background kick when a league is past the roster bound (P41). Every server-side Sleeper read passes one per-process 429 circuit (`backend/sleeper_http.py`). **After a `fresh` write, both refreshes stamp the fingerprint on their own background thread** (PR-B, `roster_refresh.stamp`):
+
+```
+rows committed -> record_outcome: mark_league_roster_fresh
+  -> stamp: old = league_roster_state.roster_fp
+            new = roster_snapshot(conn, league, pick_source=server._pick_read_source()).fp   (trades-eng's rfp1)
+            new == old                    -> done (no write, no hook)
+            cas_league_roster_fp(old,new) -> UPDATE ... WHERE roster_fp = old (IS NULL on the first stamp)
+            lost (another refresh won)    -> done (no hook)
+  -> after commit, no lock held: roster_snapshot.on_roster_change(league, old, new)
+       -> trades-eng's handler (server._invalidate_league_trade_jobs_on_roster_change)
+```
+
+The stamp never raises and never changes the recorded outcome. A fingerprint error leaves `roster_fp` as stored. ESPN/MFL/Fleaflicker leagues are not refreshed here, so they are never stamped. Their imports, the user pick-assignment routes and `_refresh_sleeper_members` write fingerprint inputs without firing the hook, and the serve recomputes `rfp1` from rows either way (scope §B.6).
 
 ## Components
 
@@ -800,8 +818,10 @@ available to pending/swipe routes and suppression sees live decisions. Ranking
 services retain execution-time reads; player objects, other request service
 mutations, DB preferences and feature/config reads are not immutable snapshots.
 This is a limited in-process prerequisite, **not** stateless request handling,
-durable jobs, full thread safety, or a separate worker. One Gunicorn worker and
-all generation/timing policies remain unchanged. See the [implementation record](plans/budget-scalability/implementation.md).
+durable jobs, or a separate worker. Thread safety for the single worker's four
+`gthread` threads comes from E1's locks (`RankingService`, single-flight session
+init, the shared dicts and job safety; [E1](plans/e1-concurrency/scope.md)). One
+Gunicorn worker and all generation/timing policies remain unchanged. See the [implementation record](plans/budget-scalability/implementation.md).
 
 Trade-job revocation epochs are captured before input reads and retained through
 admission, worker publication and copied public responses. Kickoff adds the
