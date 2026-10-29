@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { loadFeatureFlags, flagProvenance } from '../api/flags';
+import {
+  loadFeatureFlags,
+  flagProvenance,
+  fetchedAppMinVersion,
+  fetchedAppStoreLive,
+} from '../api/flags';
 import { track } from '../api/events';
 import type { FlagMap } from '../shared/types';
 
@@ -14,6 +19,16 @@ const FF_KEY = 'feature_flags_v1';
 interface FlagState {
   flags: FlagMap;
   loaded: boolean;
+  /** B8 minimum-version gate: `app_min_version` (0 = off) from the last
+   *  RESOLVED flag fetch. Starts 0, is set only on a successful revalidate,
+   *  and is never persisted or hydrated from cache, so a boot whose fetch
+   *  fails or times out never gates (fails open). A failed refetch leaves the
+   *  last resolved value in place. App.tsx feeds it to shouldBlockForUpdate. */
+  appMinVersion: number;
+  /** B8 Update target: served `app_store_live` (1 App Store, 0 TestFlight,
+   *  -1 unset → the gate's compiled UTC fallback). Same rule as
+   *  appMinVersion: set only by a resolved revalidate, never persisted. */
+  appStoreLive: number;
   /** Local-only AsyncStorage hydrate. Awaited by the boot gate so flag-
    *  gated UI settles to cached values before the first screen renders.
    *  Never touches the network — safe inside the splash-gating set. */
@@ -128,11 +143,30 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // the #115 paint-flip this list exists to prevent. A server `false`
   // still kill-switches on the next successful revalidate.
   'calc.results_push': true,
+  // ── The launched onboarding (Product's pre-launch review B2, 2026-10-27) ──
+  // These decide the FIRST screen a fresh install paints. Absent here, a
+  // first-ever boot (no cached map) and an offline first open painted the
+  // old Apple-first sign-in and settings, and stayed there until a
+  // revalidate. Each carries config/features.json's value (pinned by
+  // mobile/tests/check-onboarding-flag-defaults.js, which compares the two
+  // files); a server `false` still kill-switches on the next revalidate.
+  'onboarding.v2': true,
+  'onboarding.landing': true,
+  'mfl.link': true,
+  'account.settings_hub': true,
+  // NOT baked, on purpose (release-lead #502 QA P1-1): the landing's
+  // platform-chip flag. While the server holds it off (the entry-purge
+  // window) a baked `true` would paint chips whose entry sheet dead-ends
+  // (the entry route 404s). It's baked in the PR that turns the proof-based
+  // ESPN/MFL sign-in on, in both files. The ESPN sign-in flag likewise waits
+  // for ask 15. The guard holds both out until then.
 };
 
 export const useFeatureFlags = create<FlagState>((set, get) => ({
   flags: { ...LAUNCHED_FLAG_DEFAULTS },
   loaded: false,
+  appMinVersion: 0,
+  appStoreLive: -1,
   loadCachedFlags: async () => {
     // Optimistically hydrate from AsyncStorage before the network fetch
     // so users get cached flags during a cold-start wait. First-ever
@@ -159,7 +193,15 @@ export const useFeatureFlags = create<FlagState>((set, get) => ({
     try {
       const flags = await loadFeatureFlags({ throwOnError: true });
       _lastFlagFetchTs = Date.now();
-      set({ flags, loaded: true });
+      // One set: the update gate (App.tsx) mounts with the fetched flags
+      // already in place, so its `update_gate_shown` track() reads the
+      // fetched `analytics.client_events`, not the baked defaults.
+      set({
+        flags,
+        loaded: true,
+        appMinVersion: fetchedAppMinVersion(),
+        appStoreLive: fetchedAppStoreLive(),
+      });
       try {
         await AsyncStorage.setItem(FF_KEY, JSON.stringify(flags));
       } catch {

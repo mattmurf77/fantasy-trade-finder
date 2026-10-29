@@ -484,12 +484,40 @@ scope block §"v1 limitations").
 
 ### Error modes
 
-`MflWriteError` (`kind`: `'auth' | 'network' | 'error' | 'input'`) +
-`MflWriteAuthError`. Route mapping (`POST /api/trades/propose-mfl`): full
-table in [docs/api-reference.md](../api-reference.md) § Send in MFL —
-notably 422 `mfl_asset_unmapped` (crosswalk hard block, `unmapped[]` listed),
-409 `mfl_auth_expired` (credential dropped), 502 `mfl_write_failed`
-(carries `kind`/`detail`; HTTP 429 throttling surfaces as `kind: "network"`).
+`MflWriteError` (`kind`: `'auth' | 'network' | 'error' | 'input' |
+'outcome_unknown'`) + `MflWriteAuthError`. Route mapping
+(`POST /api/trades/propose-mfl`): full table in
+[docs/api-reference.md](../api-reference.md) § Send in MFL — notably 422
+`mfl_asset_unmapped` (crosswalk hard block, `unmapped[]` listed), 409
+`mfl_auth_expired` (credential dropped), 502 `mfl_write_failed` (nothing sent;
+carries `kind`; HTTP 429 throttling surfaces as `kind: "network"`) and 502
+`mfl_outcome_unknown` (C10, below).
+
+**Before vs. after the send (C10, 2026-10-27; `backend/write_outcome.py`).**
+The import is a GET, and urllib wraps only the connect and the request write
+in `URLError`. A `URLError` whose reason is a DNS failure, a refused
+connection or no route is **not sent** → `kind: "network"` →
+`mfl_write_failed`. Anything raised after the request went out (read timeout,
+reset, `RemoteDisconnected`, `IncompleteRead`), any 5xx, a `URLError` timeout
+or reset (conservative: urllib can't say whether it was the connect or the
+write), or a 200 body that is empty or neither success nor `<error>` (the
+body shape is still TODO(live-verify)) is `kind: "outcome_unknown"` →
+`mfl_outcome_unknown`: the import may have landed, so the user is told to
+check MFL and nothing retries. `POST /api/trades/respond-mfl` shares the
+adapter and the same mapping (`mfl_write_failed` / `mfl_outcome_unknown`),
+with "this response … nothing changed" copy instead of "this trade … nothing
+was sent".
+
+**Logging (C10).** MFL's raw body (`MflWriteError.detail`, ≤500 chars) is
+written to ONE `WARNING` line on the `trade_finder` logger
+(`mfl propose|respond write-failed [<kind>] <message>: <body>` or
+`mfl propose|respond auth-rejected: <body>`) after `_provider_body_for_log` flattens
+whitespace, masks `MFL_USER_ID=` values, SWID-shaped GUIDs and long opaque
+blobs, and truncates to 300 characters. It is never a response field on the
+propose or respond route: `detail` and `message` are plain copy. This is the one place
+the §6 "no raw bodies in a persistent sink" caution is relaxed, deliberately:
+an error body is the only evidence of why MFL refused a send, and it is
+masked and capped first.
 
 ### Rate limits / hygiene
 

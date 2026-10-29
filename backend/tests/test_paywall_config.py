@@ -14,8 +14,9 @@ Covers:
   (f) tip jar — `tips: []` at launch (the SKUs are not submitted to App
       Store Connect); the restorable list still holds only tip products
   (g) fallback prices (#393, operator 2026-10-25): $4.99 / $24.99 before
-      _PAYWALL_PRICE_RISE_AT (2027-01-01 00:00 America/Los_Angeles =
-      08:00 UTC, an instant, not a UTC date), $6.99 / $34.99 from it on,
+      _PAYWALL_PRICE_RISE_AT (2027-01-02 04:00 UTC, App Store Connect's
+      US start for a change scheduled for 2027-01-02: an instant, not a
+      date), $6.99 / $34.99 from it on,
       through an injected clock; no `trial_days` key on either side (an
       older client renders "N days free" only when trial_days > 0)
 
@@ -43,10 +44,13 @@ MONTHLY = "ftf_pro_monthly"
 ANNUAL = "ftf_pro_annual"
 
 UTC = timezone.utc
-# The rise is 2027-01-01 00:00 America/Los_Angeles (PST, UTC-8) = 08:00 UTC.
-BEFORE = datetime(2027, 1, 1, 7, 59, 59, tzinfo=UTC)      # last second of old prices
-AT = datetime(2027, 1, 1, 8, 0, 0, tzinfo=UTC)            # the rise itself
+# The rise is 2027-01-02 04:00 UTC (11 pm ET / 8 pm PT on Jan 1): App Store
+# Connect's US start time for a price change scheduled for 2027-01-02.
+BEFORE = datetime(2027, 1, 2, 3, 59, 59, tzinfo=UTC)      # last second of old prices
+AT = datetime(2027, 1, 2, 4, 0, 0, tzinfo=UTC)            # the rise itself
 UTC_MIDNIGHT = datetime(2027, 1, 1, 0, 0, 0, tzinfo=UTC)  # still Dec 31 in the US
+ASC_JAN_1 = datetime(2027, 1, 1, 4, 0, 0, tzinfo=UTC)     # a Jan-1 schedule's US start (11 pm ET Dec 31)
+LA_MIDNIGHT = datetime(2027, 1, 1, 8, 0, 0, tzinfo=UTC)   # the previous instant
 AFTER = datetime(2027, 6, 1, 12, 0, 0, tzinfo=UTC)
 TODAY = datetime(2026, 10, 27, 12, 0, 0, tzinfo=UTC)
 
@@ -229,8 +233,10 @@ def test_flag_off_leaks_no_tips(client, monkeypatch):
 @pytest.mark.parametrize("now, monthly, annual, per_month", [
     (TODAY, "$4.99", "$24.99", "$2.09"),
     (UTC_MIDNIGHT, "$4.99", "$24.99", "$2.09"),  # 4 pm Dec 31 in LA: old prices
-    (BEFORE, "$4.99", "$24.99", "$2.09"),     # 07:59:59Z, last second before the rise
-    (AT, "$6.99", "$34.99", "$2.92"),         # 08:00:00Z, the rise itself: new prices
+    (ASC_JAN_1, "$4.99", "$24.99", "$2.09"),  # 11 pm ET Dec 31: still the Founder price
+    (LA_MIDNIGHT, "$4.99", "$24.99", "$2.09"),  # the old 01-01 08:00Z instant: no longer the switch
+    (BEFORE, "$4.99", "$24.99", "$2.09"),     # 01-02 03:59:59Z, last second before the rise
+    (AT, "$6.99", "$34.99", "$2.92"),         # 01-02 04:00:00Z, the rise itself: new prices
     (AFTER, "$6.99", "$34.99", "$2.92"),
 ])
 def test_route_prices_switch_at_rise_instant(client, monkeypatch, now, monthly,
@@ -244,7 +250,7 @@ def test_route_prices_switch_at_rise_instant(client, monkeypatch, now, monthly,
     assert "per_month_equiv" not in products[MONTHLY]
 
 
-@pytest.mark.parametrize("now", [TODAY, UTC_MIDNIGHT, BEFORE, AT, AFTER])
+@pytest.mark.parametrize("now", [TODAY, UTC_MIDNIGHT, ASC_JAN_1, LA_MIDNIGHT, BEFORE, AT, AFTER])
 def test_no_trial_days_anywhere(client, monkeypatch, now):
     """An older client renders `${trial_days} days free, then …` whenever
     trial_days > 0. The trial is Apple's 1-month intro offer, never a day
@@ -258,18 +264,25 @@ def test_no_trial_days_anywhere(client, monkeypatch, now):
         assert "trial_days" not in p
 
 
-def test_rise_is_la_midnight_2027_01_01():
-    """Terms §14.8: the Founder price for anyone subscribing "by December 31,
-    2026". The rise is LA midnight, held as an aware UTC instant."""
+def test_rise_is_app_store_us_start_for_2027_01_02():
+    """The rise matches App Store Connect's US start time for a price change
+    scheduled for 2027-01-02: 04:00 UTC, i.e. 11 pm on Jan 1 in New York
+    and 8 pm in Los Angeles, held as an aware UTC instant. Terms §14.8 (the
+    Founder price "by December 31, 2026") then holds everywhere in the US."""
     rise = server._PAYWALL_PRICE_RISE_AT
-    assert rise == datetime(2027, 1, 1, 8, 0, 0, tzinfo=UTC)
+    assert rise == datetime(2027, 1, 2, 4, 0, 0, tzinfo=UTC)
     assert rise.utcoffset() == timedelta(0)
     try:
         from zoneinfo import ZoneInfo
+        ny = ZoneInfo("America/New_York")
         la = ZoneInfo("America/Los_Angeles")
+        hnl = ZoneInfo("Pacific/Honolulu")
     except Exception:   # no tz database on this host; the UTC pin stands
         return
-    assert rise == datetime(2027, 1, 1, 0, 0, 0, tzinfo=la)
+    assert rise == datetime(2027, 1, 1, 23, 0, 0, tzinfo=ny)
+    assert rise == datetime(2027, 1, 1, 20, 0, 0, tzinfo=la)
+    # The last second of Dec 31 in Hawaii, the latest US zone, is before it.
+    assert datetime(2026, 12, 31, 23, 59, 59, tzinfo=hnl) < rise
 
 
 ET = timezone(timedelta(hours=-5))
@@ -280,12 +293,17 @@ PT = timezone(timedelta(hours=-8))
     # 20:00 on Dec 31 in New York is 01:00 UTC on Jan 1, but still Dec 31
     # for the subscriber: old prices (a UTC date flipped here).
     (datetime(2026, 12, 31, 20, 0, tzinfo=ET), False),
-    # The last second of Dec 31 in LA: old prices.
+    # 23:00 on Dec 31 in New York (a Jan-1 schedule's US start): old prices.
+    (datetime(2026, 12, 31, 23, 0, 0, tzinfo=ET), False),
+    # The last second of Dec 31 in LA, and midnight in LA: old prices.
     (datetime(2026, 12, 31, 23, 59, 59, tzinfo=PT), False),
-    # Midnight in LA: new prices.
-    (datetime(2027, 1, 1, 0, 0, 0, tzinfo=PT), True),
-    # 03:00 on Jan 1 in New York is the same instant: new prices.
-    (datetime(2027, 1, 1, 3, 0, 0, tzinfo=ET), True),
+    (datetime(2027, 1, 1, 0, 0, 0, tzinfo=PT), False),
+    # 22:59:59 on Jan 1 in New York, one second before the rise: old prices.
+    (datetime(2027, 1, 1, 22, 59, 59, tzinfo=ET), False),
+    # 23:00 on Jan 1 in New York is the rise: new prices.
+    (datetime(2027, 1, 1, 23, 0, 0, tzinfo=ET), True),
+    # 20:00 on Jan 1 in LA is the same instant: new prices.
+    (datetime(2027, 1, 1, 20, 0, 0, tzinfo=PT), True),
     # 00:30 on Jan 1 in Paris is 23:30 UTC on Dec 31: old prices.
     (datetime(2027, 1, 1, 0, 30, tzinfo=timezone(timedelta(hours=1))), False),
 ])
