@@ -18,6 +18,7 @@ import { getBaseUrl } from '../api/client';
 import { getPaywallConfig, type PaywallConfig, type PaywallProduct } from '../api/billing';
 import {
   checkIntroEligibility,
+  currentIdentityUserId,
   getOfferings,
   hasProEntitlement,
   initPurchases,
@@ -34,7 +35,8 @@ import {
 import { useEntitlements } from '../state/useEntitlements';
 import { useFlag } from '../state/useFeatureFlags';
 import { useSession } from '../state/useSession';
-import { openVerify } from '../state/usePaywallGate';
+import { customerInfoApplies } from '../state/subscriptionSession';
+import { isUnverifiedSession, openVerify } from '../state/usePaywallGate';
 import { track } from '../api/events';
 import {
   FOUNDER_TAG,
@@ -122,7 +124,9 @@ export default function PaywallScreen({ navigation, route }: any) {
   const refreshEntitlements = useEntitlements((s) => s.refresh);
   const noteCustomerInfo = useEntitlements((s) => s.noteCustomerInfo);
   const userId = useSession((s) => s.user?.user_id ?? null);
-  const unverified = useSession((s) => !s.isDemo && s.verification?.session_verified === false);
+  // The router's predicate: server-reported unverified, or a demo (demo shows
+  // no purchase flow, head-eng 2026-10-29).
+  const unverified = useSession((s) => isUnverifiedSession(s));
   const { height: windowHeight } = useWindowDimensions();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -312,6 +316,14 @@ export default function PaywallScreen({ navigation, route }: any) {
     setBusy(true);
     setStatus(null);
     try {
+      // Restore reads CustomerInfo and moves this Apple ID's purchases onto
+      // RevenueCat's identity, so it runs only while this session is verified
+      // AND RevenueCat is this user (state/subscriptionSession). Otherwise it
+      // takes the identity-not-confirmed path, the same as the catch below.
+      if (!customerInfoApplies(useSession.getState(), currentIdentityUserId())) {
+        setStatus('error');
+        return;
+      }
       const info = await restorePurchases(userId);
       const restored = hasProEntitlement(info);
       track('paywall_restore', { restored });
