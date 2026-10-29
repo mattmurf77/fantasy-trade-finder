@@ -26,15 +26,18 @@
 - [x] **Code-walk:**
   - The tip renders only on League (`LeagueScreen.tsx`), which needs a signed-in user. Every path into Main (the username Continue, the hint row, Apple, an ESPN/MFL entry, a restored session) is a session start, and afterwards League shows the tip while `ux.whats_new` is on and the version is unseen.
   - Seen is stored only by the tap. A user who never taps sees it on each visit to League (no silent expiry, pin 6), which is D-13's existing contract.
-- [x] **Manual TestFlight checklist (operator, 11-06 build, `ux.whats_new` on):**
-  1. Delete the app, reinstall, sign in with a Sleeper username (the username Continue) and open League: the "We've updated our Privacy Policy and Terms of Use…" tip shows.
-  2. Tap it: Help & about opens. Go back to League: the tip is gone. Quit, relaunch, open League: still gone.
-  3. Reinstall again and sign in with Continue with Apple, then open League: the tip shows again (the seen-mark is per device and was wiped with the app).
-  4. On a device signed in on the previous build, install the 11-06 build over it and open League: the tip shows once; tapping it opens Help & about.
-  5. Sign out on a device that has tapped the tip, sign in again and open League: no tip (already seen for 1.22.0 on this device).
+- [x] **Manual TestFlight checklist (operator, 11-06 build, `ux.whats_new` on).** The tip lives on **League home**: open the League tab (which opens on the rankings), then League home (`LeagueScreen` is the LeagueHome sub-route, `TabNav.tsx:586-597`).
+  1. Delete the app, reinstall, sign in with a Sleeper username (the username Continue), then open the League tab, then League home: the "We've updated our Privacy Policy and Terms of Use…" tip shows.
+  2. Tap it: Help & about opens. Go back to League home: the tip is gone. Quit, relaunch, open the League tab, then League home: still gone.
+  3. Reinstall again and sign in with Apple, then open the League tab, then League home: the tip shows again (the seen-mark is per device, and it was wiped with the app). Use the solid white "Continue with Apple" button if #507 ships in the 11-06 build; otherwise use the "Already have an account? Sign in with Apple" link.
+  4. On a device that was signed in on a build before 1.22.0 and **has never run a 1.22.0 build**, install the 11-06 build over it, then open the League tab, then League home: the tip shows once, and tapping it opens Help & about.
+  5. Sign out on a device that has tapped the tip, sign in again, then open the League tab, then League home: no tip (already seen for 1.22.0 on this device).
   6. On the sign-in screen, "By signing in you agree to the Terms & Privacy Policy" shows, and both links open.
 
 **Next (P2-3, before the first 1.22.x patch, separate PR):** key the notice to a "last material change" version, not the app version. It's served by the server and stored per account (Product), with the 1.22.0 device ack carried up. The first patch must not ship the app-version key.
+- **From release-lead's delta QA (GO-with-notes @ `d318d180`), for P2-3:**
+  - 1.22.0's device key doesn't record who tapped, so the device ack must NOT be credited to whoever is signed in at the patch's first launch.
+  - Harden pin 8 against indirect writes: walk `App.tsx` too (outside the `src/` walk), count every AsyncStorage call that takes `SEEN_KEY` (including `multiSet`, an alias, a key built from pieces, and `setSeenVersion(v ?? APP_VERSION)`), and pin LeagueScreen's `{whatsNew ? (` gate.
 
 ---
 
