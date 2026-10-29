@@ -907,12 +907,20 @@ def test_every_picks_read_in_the_worker_is_noted(live, monkeypatch):
     assert drafts == [LEAGUE]             # handed to the owner path, never re-read
 
 
-def test_the_kickoff_reads_picks_only_for_the_stamp_and_the_preferences(live):
+@pytest.mark.parametrize("in_flight", [False, True])
+def test_the_kickoff_reads_picks_only_for_the_stamp_and_the_preferences(live, in_flight):
     """#487 QA P3-1: every draft_picks or leagues statement a kickoff issues is
     the one fingerprint read's (snapshot_ids: one picks read, one drafted
     read) or the preferences' pick share. An expected fp taken from a
-    separate read fails here, not only the snapshot_ids count."""
+    separate read fails here, not only the snapshot_ids count. In flight (the
+    session's roster refresh running) is the only path where the kickoff
+    takes an expected fp, so that case must really take one (#519 QA P3-1,
+    release-lead's variant)."""
     client, engine = live
+    if in_flight:
+        with server._sessions_lock:
+            server._sessions[TOKEN].update(roster_fetch_started_at=READ_NOW,
+                                           roster_read_rows=MEMBERS_NOW)
     sites = []
 
     def before(conn, cursor, statement, *_):
@@ -924,10 +932,13 @@ def test_the_kickoff_reads_picks_only_for_the_stamp_and_the_preferences(live):
     event.listen(engine, "before_cursor_execute", before)
     try:
         with patch.object(server, "_start_trade_job_thread", MagicMock()):
-            server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
-                                      scoring_format="1qb_ppr", opponents_total=1)
+            job_id = server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
+                                               scoring_format="1qb_ppr", opponents_total=1)
+        with server._trade_jobs_lock:
+            job = dict(server._trade_jobs.get(job_id) or {})
     finally:
         event.remove(engine, "before_cursor_execute", before)
+    assert bool(job.get("roster_fp_expected")) == in_flight, sorted(job)
     assert sorted(s for s in sites if s[0] == "snapshot_ids") == [
         ("snapshot_ids", "draft_picks"), ("snapshot_ids", "leagues")]
     assert not [s for s in sites if s[0] == "other"], sites
@@ -989,6 +1000,28 @@ def _fail_in_worker(monkeypatch, name):
     monkeypatch.setattr(server, "_run_trade_job", run)
 
 
+def _blip_in_worker(monkeypatch, name, fails=1):
+    """`server.<name>` raises its first `fails` calls in the worker, then reads
+    for real: a transient DB error. Returns the worker's call count."""
+    real_fn, real_run = getattr(server, name), server._run_trade_job
+    calls = []
+
+    def flaky(*a, **k):
+        calls.append(1)
+        if len(calls) <= fails:
+            raise RuntimeError("db blip")
+        return real_fn(*a, **k)
+
+    def run(*a, **k):
+        monkeypatch.setattr(server, name, flaky)
+        try:
+            return real_run(*a, **k)
+        finally:
+            monkeypatch.setattr(server, name, real_fn)
+    monkeypatch.setattr(server, "_run_trade_job", run)
+    return calls
+
+
 def _kick_sync():
     server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
                               scoring_format="1qb_ppr", opponents_total=1, synchronous=True)
@@ -1011,3 +1044,149 @@ def test_a_failed_read_still_forfeits_the_owner_arm(live, monkeypatch, read):
     _fail_in_worker(monkeypatch, read)
     _kick_sync()
     assert outcomes == ["RuntimeError"]
+
+
+@pytest.mark.parametrize("read", ["load_draft_picks", "get_league_draft_context"])
+def test_a_transient_read_failure_is_retried_once_and_the_owner_arm_builds(live, monkeypatch,
+                                                                          read):
+    """models-eng (v7): a read that fails once and then succeeds is retried at
+    once inside its memo, so the owner context builds as main's would. It's
+    still one memoized read: two calls in all, one note, and the stamp kept."""
+    outcomes = _owner_on_and_spied(monkeypatch)
+    calls = _blip_in_worker(monkeypatch, read, fails=1)
+    notes = []
+    real_note = server._note_job_picks_read
+    monkeypatch.setattr(server, "_note_job_picks_read",
+                        lambda *a, **k: (notes.append(a[0]), real_note(*a, **k)))
+    _kick_sync()
+    assert outcomes == ["built"] and len(calls) == 2 and len(notes) == 1
+    with server._trade_jobs_lock:
+        job = server._trade_jobs[server._trade_jobs_by_key[server._trade_job_key(UID, LEAGUE,
+                                                                                  "1qb_ppr")]]
+    assert job["roster_fp"] is not None
+
+
+@pytest.mark.parametrize("read", ["load_draft_picks", "get_league_draft_context"])
+def test_a_read_that_fails_twice_forfeits_the_owner_arm(live, monkeypatch, read):
+    """Both attempts raise: the memo marks the read failed, as before v7."""
+    outcomes = _owner_on_and_spied(monkeypatch)
+    calls = _blip_in_worker(monkeypatch, read, fails=2)
+    _kick_sync()
+    assert outcomes == ["RuntimeError"] and len(calls) == 2
+
+
+# ── #521 QA P3s ──────────────────────────────────────────────────────────────
+
+def _drafted_league(engine):
+    """A league row that says drafted (2026, high confidence) and its picks
+    the user's own: the draft context is no longer {} either way."""
+    with engine.begin() as conn:
+        conn.execute(insert(db_module.leagues_table).values(
+            sleeper_league_id=LEAGUE, user_id=UID, season="2026", draft_status="drafted",
+            draft_status_confidence="high"))
+        conn.execute(update(draft_picks_table).values(original_user_id=UID))
+
+
+def test_a_draft_read_retried_once_keeps_the_drafted_context(live, monkeypatch):
+    """P3-1: the retry's own result is what the job memoizes. With a drafted
+    league, a dropped retry result would read as undrafted: the owner context
+    must see "drafted" and the next draft year, and the stamp stays."""
+    client, engine = live
+    _drafted_league(engine)
+    _owner_on_and_spied(monkeypatch)
+    seen = []
+    real_ctx = server._owner_generation_context
+
+    def ctx_spy(**kw):
+        ctx = real_ctx(**kw)
+        prefs = ctx["manager_preferences"][UID]
+        seen.append(((kw["job_draft_context"]() or {}).get("status"),
+                     prefs.get("next_draft_year")))
+        return ctx
+    monkeypatch.setattr(server, "_owner_generation_context", ctx_spy)
+    calls = _blip_in_worker(monkeypatch, "get_league_draft_context", fails=1)
+    _kick_sync()
+    assert len(calls) == 2 and seen == [("drafted", 2027)]
+    with server._trade_jobs_lock:
+        job = server._trade_jobs[server._trade_jobs_by_key[server._trade_job_key(UID, LEAGUE,
+                                                                                  "1qb_ppr")]]
+    assert job["roster_fp"] is not None
+
+
+class _OwnedLock:
+    """A lock proxy that knows which thread holds it (RLock-safe)."""
+
+    def __init__(self, inner):
+        self._inner, self._owner, self._depth = inner, None, 0
+
+    def acquire(self, blocking=True, timeout=-1):
+        ok = self._inner.acquire(blocking, timeout)
+        if ok:
+            self._owner, self._depth = __import__("threading").get_ident(), self._depth + 1
+        return ok
+
+    def release(self):
+        self._depth -= 1
+        if self._depth == 0:
+            self._owner = None
+        self._inner.release()
+
+    __enter__ = acquire
+
+    def __exit__(self, *exc):
+        self.release()
+
+    def held_by_me(self):
+        return self._owner == __import__("threading").get_ident()
+
+
+@pytest.mark.parametrize("read", ["load_draft_picks", "get_league_draft_context"])
+def test_the_retry_runs_with_no_registry_lock_held(live, monkeypatch, read):
+    """P3-2: both attempts run outside _trade_jobs_lock and _sessions_lock."""
+    _owner_on_and_spied(monkeypatch)
+    jobs_lock, sessions_lock = (_OwnedLock(server._trade_jobs_lock),
+                                _OwnedLock(server._sessions_lock))
+    monkeypatch.setattr(server, "_trade_jobs_lock", jobs_lock)
+    monkeypatch.setattr(server, "_sessions_lock", sessions_lock)
+    held = []
+    real_fn, real_run = getattr(server, read), server._run_trade_job
+
+    def flaky(*a, **k):
+        held.append(jobs_lock.held_by_me() or sessions_lock.held_by_me())
+        if len(held) == 1:
+            raise RuntimeError("db blip")
+        return real_fn(*a, **k)
+
+    def run(*a, **k):
+        monkeypatch.setattr(server, read, flaky)
+        try:
+            return real_run(*a, **k)
+        finally:
+            monkeypatch.setattr(server, read, real_fn)
+    monkeypatch.setattr(server, "_run_trade_job", run)
+    _kick_sync()
+    assert held == [False, False]
+
+
+@pytest.mark.parametrize("read", ["load_draft_picks", "get_league_draft_context"])
+def test_a_pool_timeout_is_not_retried(live, monkeypatch, read):
+    """P3-3: an exhausted pool isn't asked again at once. One call, and the
+    read fails as before v7 (the owner arm forfeits)."""
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+    outcomes = _owner_on_and_spied(monkeypatch)
+    real_fn, real_run = getattr(server, read), server._run_trade_job
+    calls = []
+
+    def exhausted(*a, **k):
+        calls.append(1)
+        raise PoolTimeout("QueuePool limit reached")
+
+    def run(*a, **k):
+        monkeypatch.setattr(server, read, exhausted)
+        try:
+            return real_run(*a, **k)
+        finally:
+            monkeypatch.setattr(server, read, real_fn)
+    monkeypatch.setattr(server, "_run_trade_job", run)
+    _kick_sync()
+    assert len(calls) == 1 and outcomes == ["TimeoutError"]
