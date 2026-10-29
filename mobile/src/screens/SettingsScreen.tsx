@@ -24,6 +24,7 @@ import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/c
 import { TickLabel, Button, Card, Icon } from '../components/chalkline';
 import Toast from '../components/Toast';
 import FeedbackFAB from '../components/FeedbackFAB';
+import AboutSection from './settings/sections/AboutSection';
 import { getNotifPrefs, updateNotifPrefs } from '../api/notifications';
 import { appleSignIn, deleteAccount, getAccount } from '../api/auth';
 // P0-5 / S-20 — the Sleeper-identity link form now has one owner, shared
@@ -31,6 +32,7 @@ import { appleSignIn, deleteAccount, getAccount } from '../api/auth';
 // (its surface is this inline card, not a modal); the picker mounts the
 // sheet. The 409 two-boards Alert lives in that component.
 import { LinkSleeperForm } from '../components/LinkSleeperSheet';
+import { identityLabel } from './settings/identityLabels';
 import { ApiError } from '../api/client';
 import { setRankingMethod } from '../api/rankings';
 import { getSleeperLinkStatus, unlinkSleeper } from '../api/sendInSleeper';
@@ -80,8 +82,6 @@ const RANK_PREF_ROUTE: Record<RankMethodPref, string> = {
   manual:   'ManualRanks',
 };
 
-const WEB_ORIGIN = 'https://fantasy-trade-finder.onrender.com';
-
 export default function SettingsScreen({ navigation }: any) {
   const queryClient = useQueryClient();
   const signOut = useSession((s) => s.signOut);
@@ -103,7 +103,6 @@ export default function SettingsScreen({ navigation }: any) {
   const sleeperDisconnectEnabled = useFlag('account.sleeper_disconnect');
   const profileToggleEnabled    = useFlag('profiles.user_toggle');
   const denialRecoveryEnabled   = useFlag('notif.denial_recovery');
-  const helpSurfaceEnabled      = useFlag('ux.help_surface');
   // Monetization (iap-enablement, flag `monetize.paywall`, dark). This screen
   // is the flag-OFF twin of SettingsHubScreen; the row is carried in BOTH so
   // the paywall stays reachable whichever `account.settings_hub` state the
@@ -818,7 +817,7 @@ export default function SettingsScreen({ navigation }: any) {
           <View style={{ flex: 1 }}>
             <Text style={styles.rowKey}>Link an ESPN league</Text>
             <Text style={styles.rowSub}>
-              Read-only import: rankings, tiers, and trios work today.
+              Import a league to rank and find trades. Sending a trade needs that platform's sign-in.
             </Text>
           </View>
           <Icon name="chevron-right" color={chalk.dim} size={16} />
@@ -843,7 +842,7 @@ export default function SettingsScreen({ navigation }: any) {
                   : 'Link a Fleaflicker league'}
             </Text>
             <Text style={styles.rowSub}>
-              Read-only import: rankings, tiers, and trios work today.
+              Import a league to rank and find trades. Sending a trade needs that platform's sign-in.
             </Text>
           </View>
           <Icon name="chevron-right" color={chalk.dim} size={16} />
@@ -1015,42 +1014,30 @@ export default function SettingsScreen({ navigation }: any) {
     </>
   );
 
-  const testingSection = (
+  // The banner shares its only row's gate (#360 QA P3): with "Test stages"
+  // off there is nothing under "Testing", so neither renders. The legacy
+  // layout mounts this unconditionally and used to show an empty banner.
+  const testingSection = stageUsersEnabled ? (
     <>
       <View style={styles.section}>
         <TickLabel>Testing</TickLabel>
       </View>
       <Pressable
+        testID="settings.test-stages"
         accessibilityRole="button"
-        onPress={() => navigateFromSettings('FeedbackInbox')}
+        onPress={() => navigation.navigate?.('TestStages')}
         style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
       >
         <View style={{ flex: 1 }}>
-          <Text style={styles.rowKey}>Test feedback</Text>
+          <Text style={styles.rowKey}>Test stages</Text>
           <Text style={styles.rowSub}>
-            Review and share notes you captured with the floating button.
+            Spawn a synthetic user at any adoption stage (operator QA).
           </Text>
         </View>
         <Icon name="chevron-right" color={chalk.dim} size={16} />
       </Pressable>
-      {stageUsersEnabled ? (
-        <Pressable
-          testID="settings.test-stages"
-          accessibilityRole="button"
-          onPress={() => navigation.navigate?.('TestStages')}
-          style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={styles.rowKey}>Test stages</Text>
-            <Text style={styles.rowSub}>
-              Spawn a synthetic user at any adoption stage (operator QA).
-            </Text>
-          </View>
-          <Icon name="chevron-right" color={chalk.dim} size={16} />
-        </Pressable>
-      ) : null}
     </>
-  );
+  ) : null;
 
   // Subscription entry point (iap-enablement, flag `monetize.paywall`). One
   // row, one destination — the flag gates the row, never the Paywall route.
@@ -1240,16 +1227,20 @@ export default function SettingsScreen({ navigation }: any) {
       ) : null}
       {accountsEnabled && !isDemo ? (
         <>
-          {identities.map((ident) => (
-            <View key={ident.provider} style={styles.kvRow}>
-              <Text style={styles.rowKey}>
-                {ident.provider === 'apple' ? 'Signed in with Apple' : 'Signed in with Google'}
-              </Text>
-              <Text style={styles.kvValue}>
-                {ident.linked_at ? new Date(ident.linked_at).toLocaleDateString() : 'Linked'}
-              </Text>
-            </View>
-          ))}
+          {identities.map((ident) => {
+            // Shared label map (./settings/identityLabels). An unknown provider gets
+            // no row: a wrong label is worse than none.
+            const label = identityLabel(ident.provider);
+            if (!label) return null;
+            return (
+              <View key={ident.provider} style={styles.kvRow}>
+                <Text style={styles.rowKey}>{label}</Text>
+                <Text style={styles.kvValue}>
+                  {ident.linked_at ? new Date(ident.linked_at).toLocaleDateString() : 'Linked'}
+                </Text>
+              </View>
+            );
+          })}
           {/* Link Apple — shown for any session with no Apple identity
               (Sleeper sessions included). Official HIG component, white
               variant on dark, same construction as SignInScreen. Gated on
@@ -1388,50 +1379,10 @@ export default function SettingsScreen({ navigation }: any) {
     </>
   );
 
-  const aboutSection = (
-    <>
-      <View style={styles.section}>
-        <TickLabel>About</TickLabel>
-      </View>
-      {/* In-app help surface (teardown 04-01, flag `ux.help_surface`) —
-          the web FAQ is the canonical "how does this work" doc. */}
-      {helpSurfaceEnabled ? (
-        <Pressable
-          testID="settings.help-faq"
-          accessibilityRole="link"
-          accessibilityHint="Opens in your browser"
-          onPress={() => Linking.openURL(`${WEB_ORIGIN}/faq.html`)}
-          style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={styles.rowKey}>Help & FAQ</Text>
-            <Text style={styles.rowSub}>
-              How rankings, matches, and trade values work.
-            </Text>
-          </View>
-          <Icon name="chevron-right" color={chalk.dim} size={16} />
-        </Pressable>
-      ) : null}
-      <Pressable
-        accessibilityRole="link"
-        accessibilityHint="Opens in your browser"
-        onPress={() => Linking.openURL(`${WEB_ORIGIN}/privacy`)}
-        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-      >
-        <Text style={[styles.rowKey, { flex: 1 }]}>Privacy Policy</Text>
-        <Icon name="chevron-right" color={chalk.dim} size={16} />
-      </Pressable>
-      <Pressable
-        accessibilityRole="link"
-        accessibilityHint="Opens in your browser"
-        onPress={() => Linking.openURL(`${WEB_ORIGIN}/terms`)}
-        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-      >
-        <Text style={[styles.rowKey, { flex: 1 }]}>Terms of Use</Text>
-        <Icon name="chevron-right" color={chalk.dim} size={16} />
-      </Pressable>
-    </>
-  );
+  // The About rows come from the same section module the hub's Help & about
+  // page renders (#354 BL-10: one row order, the feedback row and the Credits
+  // block in one place), so this hub-off rollback list cannot drift from it.
+  const aboutSection = <AboutSection navigate={navigateFromSettings} />;
 
   const signOutBlock = (
     <>

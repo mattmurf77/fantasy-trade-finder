@@ -138,6 +138,7 @@
   "league.player_trade_handoff": true,
   "rankings.cross_format_derive": true,
   "testing.stage_users": false,
+  "testing.timing_readout": false,
   "deck.signal_v2": true,
   "deck.thompson_v2": true,
   "deck.fatigue": true,

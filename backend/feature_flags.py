@@ -449,6 +449,8 @@ FLAG_KEYS: tuple[str, ...] = (
     # so the flag being on never exposes the surface to real users.
     "testing.stage_users",   # POST/DELETE /api/test-users — synthetic stage-user
                              # spawner for onboarding QA (backend/test_users.py)
+    "testing.timing_readout",  # client-only: the Settings > Testing tap-to-card
+                               # readout (mobile TimingReadoutRow, ruling 11)
     # ── #158/#170/#171 — owned draft picks in calculator + suggestions ──
     # picks.owned_sync: revive sync_draft_picks on the league-sync path
     # (session_init daemon for Sleeper; link/import for MFL) + normalize MFL
@@ -1006,6 +1008,8 @@ FLAG_KEYS: tuple[str, ...] = (
     # bakeoff_runs row, swipe K factors untouched — byte-identical serving.
     "trade.bakeoff",
     "trade.prepared_inventory",  # capability; default-dark audited numeric rollout
+    "trade.first_page_store",    # P1 200 ms path: server-held first pages (scope-eng-200ms §2); OFF = today
+    "trade.packed_evidence",     # ADR-025 stage 2: packed deck evidence (S8); turned on BEFORE the store (R2.4 §3)
     # ── Trade-suggestion presentation v2 (docs/plans/trade-presentation-v2/) ──
     # CLIENT-ONLY. No route reads this key; it is registered here so the
     # features-json-keys-known guard accepts it and so /api/flags serves it

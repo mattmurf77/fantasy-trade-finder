@@ -19,6 +19,9 @@ interface Props {
   loading?: boolean;
   style?: ViewStyle;
   testID?: string;   // UI-test harness id (registry: mobile/src/components/CLAUDE.md)
+  /** Spoken label when the visible one is ambiguous out of context
+   *  ("Retry" → "Retry refreshing trades"). Unset = the visible label. */
+  accessibilityLabel?: string;
 }
 
 // Chalkline button set (docs/design/components.md → Buttons).
@@ -33,6 +36,7 @@ export default function Button({
   loading = false,
   style,
   testID,
+  accessibilityLabel,
 }: Props) {
   // a11y.text_scaling (S2 PRD-01): fixed height → minHeight + padding so the
   // label can wrap/grow at large OS text sizes. Flag off = fixed height,
@@ -54,6 +58,7 @@ export default function Button({
       disabled={inactive}
       testID={testID}
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled: inactive, busy: loading }}
       hitSlop={compact && touchPolish ? { top: 4, bottom: 4 } : undefined}
       style={({ pressed }) => [
