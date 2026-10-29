@@ -425,17 +425,30 @@ function freshTraceWithTimers() {
     const h = freshTraceWithTimers();
     const id = begin(h);
     h.mod.claimPendingSearch();
+    // the revoked deck's first response, then an ordinary later one (first wins)
+    h.mod.noteFirstResponse(id, { serve_source: 'page', freshness_state: 'fresh', status: 'complete', cardCount: 30, job_id: 'revoked' });
+    h.mod.noteFirstResponse(id, { serve_source: 'fresh', freshness_state: 'updating', status: 'running', cardCount: 0, job_id: 'other' });
+    const keptFirst = h.mod.traceFor(id).jobId === 'revoked' && h.mod.traceFor(id).serveSource === 'page';
     const state = pages.autoResearchOnJobError('idle', 'inputs_changed');
     const sent = pages.autoResearchSearchId(id, h.mod.isSearchOpen);
     h.tick(1500);                                     // the rebuild
+    // the re-search's answer replaces it while the trace is open (analytics-lead)
+    h.mod.noteFirstResponse(sent, { serve_source: 'fresh', freshness_state: 'fresh', status: 'running', cardCount: 0, job_id: 'rebuilt' }, { replace: true });
     h.mod.reportFirstCardShown(sent, { cardIndex: 0 });  // the rebuilt deck's first card
     const r2 = R(h.events, 'trade_first_card_shown');
+    // a settled trace never changes, replace or not
+    h.mod.noteFirstResponse(id, { serve_source: 'page', freshness_state: 'stale', status: 'complete', cardCount: 1, job_id: 'late' }, { replace: true });
     check('11c. EXECUTED (ii): before the first card, the re-search reuses the open search_id',
       state === 'pending' && sent === id);
     check('11d. EXECUTED (ii): no R2b, and exactly one R2 with the original search_id, timed from the original tap',
       R(h.events, 'trade_first_card_failed').length === 0 && r2.length === 1
         && r2[0].props.search_id === id && r2[0].props.ms_from_tap >= 1500
         && R(h.events, 'find_trades_tapped').length === 1);
+    check('11m. EXECUTED (ii): R2 names the re-search\'s response (job_id, serve_source, freshness_state), not the revoked one',
+      r2.length === 1 && r2[0].props.job_id === 'rebuilt' && r2[0].props.serve_source === 'fresh'
+        && r2[0].props.freshness_state === 'fresh');
+    check('11n. EXECUTED: an ordinary later response never overwrites the first, and a settled trace never changes',
+      keptFirst && h.mod.traceFor(id).jobId === 'rebuilt' && h.mod.traceFor(id).freshnessState === 'fresh');
   }
 
   // (iii) a failed re-search: the error card, then Try again (a real tap) is one R1.
@@ -491,6 +504,9 @@ function freshTraceWithTimers() {
       && /setJob\(null\);[\s\S]{0,600}autoResearchRef\.current = 'idle';\s*let claimedFair = claimPendingSearch\(\);/.test(trades));   // the sweep clears the job as it resets
   check('11j. the deck end hides the error card only while the RE-SEARCH is in flight (decided at render); offline it shows the Offline card',
     /const deckEnd = deckEndRaw === 'error' && autoResearchHidesError\(\s*autoResearchRef\.current, job\?\.error,\s*generateMutation\.isPending && !!generateMutation\.variables\?\.research\)\s*\? \(online \? 'pending' : 'offline'\)\s*: deckEndRaw;/.test(trades));
+  check('11o. only the re-search\'s answer replaces the trace\'s first response',
+    /noteFirstResponse\(ds\.id, \{[\s\S]{0,260}?job_id: snapshot\.job_id,\s*\}, \{ replace: !!vars\.research \}\);/.test(trades)
+      && (trades.match(/\{ replace: /g) || []).length === 1);
   check('11k. Try again stays a real tap: R1 deck_error_retry through handleFindTrades',
     /if \(jobRef\.current\?\.status === 'error'\) \{\s*handleFindTrades\('deck_error_retry'\);/.test(trades));
 }

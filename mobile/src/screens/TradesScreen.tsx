@@ -2328,7 +2328,7 @@ export default function TradesScreen({ navigation, route }: any) {
           status: snapshot.status,
           cardCount: snapshot.cards.length,
           job_id: snapshot.job_id,
-        });
+        }, { replace: !!vars.research });   // the re-search's answer: R2 names its job
         noteSearchCards(snapshot.job_id, snapshot.cards);
         if (snapshot.status === 'complete' && snapshot.cards.length === 0) failFirstCard(ds.id, 'empty');
       }

@@ -43,7 +43,7 @@
      - sets `deckSearchRef` to that id or null;
      - mutates with `searchId: research.searchId ?? undefined, research: true`. `generateTrades(request, { searchId })` always sends `page: 1`, plus `search_id` only when there is one, so the rebuilt deck is paged (#525 QA P2-1).
      - **The budget resets only when a non-research dispatch's answer lands** (`onSuccess`: `autoResearchAfterAnswer`). A Try again whose request fails leaves the revoked job and `'used'`, so the error card stays: no endless empty slot (#525 QA P1-1).
-  5. The new job's first card: `checkFirstCardShown` reports R2 for `deckSearchRef.current?.id`. That's the open id (one R2), or nothing when the trace had settled.
+  5. The new job's first card: `checkFirstCardShown` reports R2 for `deckSearchRef.current?.id`. That's the open id (one R2), or nothing when the trace had settled. While the trace is open, the re-search's answer replaces the first response (`noteFirstResponse(..., { replace: !!vars.research })`), so R2's `job_id`, `serve_source` and `freshness_state` name the rebuilt deck, not the revoked one (analytics-lead). Every other response stays first-wins, and a settled trace never changes.
   6. If the re-search's POST fails, `onError` sets deckFailure as today. If its job errors again, the mirror reads `'fail'` (state `'used'`) and sets deckFailure, so the error card and its Try again (a real tap, R1 `deck_error_retry`) return.
 - [x] **Manual TestFlight checklist** (two devices on one account, or one device plus web).
   - **Setup:** the timing readout needs `testing.timing_readout`, which ships dark, so ask release-lead to enable it for the test account.
