@@ -2,7 +2,32 @@
 
 Gates: models-lead's ruling D3 (a disposition cut that pulls a deferred card into the displayed first 30 counts as a B-DK-7 violation; the fix is to re-apply the cap after serve-time withdrawals, cuts and I-1 at mode 2), via head-eng ("build it now", after #489 and #492). Not flip-gating; due before the launch-week freeze. It adds one optional run key to the pack header, `display_moves`, agreed with models-eng. models-eng's #501 is the reader, and either PR can merge first. No route, schema, flag, knob or event change. No pipeline bump: it is a serve-time order, `deck_quality.py` is untouched, and the digest test passes unchanged. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
 
-- **Backend:** `test_served_repeat_cap.py`, 74 tests.
+- **#517 QA (release-lead, NO-GO at `f5ddc026`), fixed:**
+  - **P1-1:** after the job left, the window's prior was the earlier cards less every withdrawal. Eval keeps a delivered-then-withdrawn card (W1) in place, so the window reached further than eval's and X landed 4× in its first 30. The after-left path now reads what `_served_cap` reads, from the pack:
+    - the delivered cards (`_deck_stored_delivered`: at or under the last delivery boundary, less the `served_before` 0 withdrawals);
+    - the recorded moves;
+    - this response's delivered cards it no longer sends.
+  - **P2-1:** `_deck_note_moves` takes `first(index)` and refuses (logs) a move for a card an earlier response delivered: in process, a card not new to this delivery; stored, a card under the last boundary.
+  - **P3-1:** the off-scope test (filters off, unpacked, no withdrawal) runs on the job view and both stored paths, in process and after the job left.
+  - **New tests (9 cases):**
+    - the W1-then-page-2 repro, in process and after the job left;
+    - a re-serve after the job left records no move for an earlier delivery's card, and eval's order is the client's;
+    - no W0 means no move after the job left;
+    - recorded moves are re-applied after the job left;
+    - a card delivered unmoved holds its place at a later serve, in process and after left;
+    - both writers refuse a stale move (the cap stubbed);
+    - `_deck_note_moves`'s refusal.
+  - **Sabotages, 9 of 9 red:**
+    - the old after-left path;
+    - every withdrawal read as W0;
+    - no `delivered` (after left / in process);
+    - no recorded moves;
+    - an unpacked deck capped after left;
+    - the refusal dropped;
+    - each writer's `first` forced true.
+  - **QA's probes:** 18 of 20 green. The two red ones are P3-2's (a deck first delivered after its job left never gets a pack), pre-existing and raised with models-eng.
+  - **P1-2:** raised with models-eng and models-lead.
+- **Backend:** `test_served_repeat_cap.py`, 90 tests (74 before QA).
   - **`_served_repeat_cap`, pure:**
     - a pulled card moves behind the next clean one;
     - a later page counts the cards earlier responses displayed;

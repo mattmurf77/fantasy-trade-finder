@@ -6196,8 +6196,8 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
                     log.warning("deck-evidence %s: display moves on an unpacked deck, "
                                 "not recorded", deck_job_id)
                 elif moves:
-                    with ev.lock:
-                        _deck_note_moves(ev, moves)
+                    with ev.lock:            # an earlier response delivered up to `last`
+                        _deck_note_moves(ev, moves, lambda index: index > last)
                 ev.withdrawn = set(withdrawn) - ev.delivered
                 ev.delivered_at.update(dict.fromkeys(ids, delivered_at))
                 ev.served_at = ev.served_at or delivered_at
@@ -6281,7 +6281,8 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
                                         for i in ev.by_hash.get(h, ())}
         ev.delivered |= ids
         ev.delivered_hashes |= hashes
-        _deck_note_moves(ev, moves)
+        _deck_note_moves(ev, moves,
+                         lambda index: _evidence_contract.card_impression_id(ev.job_id, index) in fresh)
         _deck_evidence_cover(ev, fresh, now)
         go = (new or bool(withdrawals)) and ev.complete
     if go:
@@ -6356,13 +6357,22 @@ def _deck_sticky(deck_job_id: str, user_id: str, *, loaded_only: bool = False) -
     return ids
 
 
-def _deck_note_moves(ev: _DeckEvidence, moves) -> None:
+def _deck_note_moves(ev: _DeckEvidence, moves, first) -> None:
     """Under `ev.lock`: a serve's D3 display moves, a card's first delivery
-    winning; a new one dirties the pack header."""
+    winning; a new one dirties the pack header. `first(index)`: whether this
+    response is the card's first delivery. A move for a card an earlier
+    response delivered unmoved is refused (logged): eval would place it away
+    from where the user first saw it (#517 QA P2-1)."""
+    refused = 0
     for index, anchor in (moves or {}).items():
-        if index not in ev.display_moves:
+        if not first(index):
+            refused += 1
+        elif index not in ev.display_moves:
             ev.display_moves[index] = anchor
             ev.pack_dirty = True
+    if refused:
+        log.warning("deck-evidence %s: %d display move%s for an earlier delivery's cards, "
+                    "not recorded", ev.job_id, refused, "" if refused == 1 else "s")
 
 
 # Served-card keys that mark deck_quality's protected cards (PROTECTED_ATTRS as
@@ -6473,9 +6483,11 @@ def _served_cap(job: dict, cards: list, earlier=None, before=()) -> tuple[list, 
 def _served_cap_stored(row: dict, cards: list, earlier: list, sticky: set,
                        before=()) -> tuple[list, dict]:
     """D3 on a stored page's serve (_trade_page_view): through the deck's job
-    while it is in this process; after it left, on a deck with a pack (read
-    only when a card would move), its earlier pages' cards less the withdrawn
-    ones (`sticky`) filling the window first."""
+    while it is in this process; after it left, on a deck with a pack, with
+    what _served_cap reads from the evidence read from the pack instead
+    (#517 QA P1-1): the delivered cards (_deck_stored_delivered), the moves
+    already recorded, and this response's delivered cards it no longer sends.
+    A deck with no pack serves in build order: nothing would record a move."""
     with _trade_jobs_lock:
         job = _trade_jobs.get(row["deck_job_id"])
         if job is not None and job["key"][0] == row["user_id"]:
@@ -6486,11 +6498,47 @@ def _served_cap_stored(row: dict, cards: list, earlier: list, sticky: set,
         return _served_cap(job, cards, earlier, before)
     if not cards or not _deck_quality_filters_enabled():
         return cards, {}
-    prior = [c for c in earlier if c.get("impression_id") not in sticky]
-    out, moves = _served_repeat_cap(cards, row["deck_job_id"], prior=prior)
-    if moves and _deck_pack_state(row["deck_job_id"], row["user_id"]) is None:
+    state = _deck_pack_state(row["deck_job_id"], row["user_id"])
+    if state is None:
         return cards, {}
-    return out, moves
+    delivered = _deck_stored_delivered(row["deck_job_id"], row["user_id"], state,
+                                       [*earlier, *before], sticky)
+    recorded = {int(k): v for k, v in (state.run.get("display_moves") or {}).items()}
+    prior = [c for c in earlier if c.get("impression_id") in delivered]
+    sending = {c.get("impression_id") for c in cards}
+    withheld = [c for c in before if c.get("impression_id") in delivered - sending]
+    return _served_repeat_cap(cards, row["deck_job_id"], prior=prior, delivered=delivered,
+                              recorded=recorded, withheld=withheld)
+
+
+def _deck_stored_delivered(deck_job_id: str, user_id: str, state, cards: list,
+                           sticky: set) -> set:
+    """After a deck's job left the process: the impression ids among `cards`
+    that an earlier response delivered, as eval reads them. That's every card
+    at or under the pack's last delivery boundary, less those withdrawn before
+    any delivery (served_before 0, W0). A withdrawal not yet readable counts
+    as W0, as before. The withdrawals are read only when the deck has one."""
+    boundaries = [d[0] for d in state.run.get("deliveries") or [] if d]
+    last = max(boundaries, default=-1)
+    served_then_withdrawn = set()
+    if sticky:
+        from . import database as _db
+        try:
+            served_then_withdrawn = {r["impression_id"] for r in _db.load_deck_withdrawals(deck_job_id)
+                                     if r["user_id"] == user_id and r["served_before"]}
+        except Exception:
+            log.warning("deck-withdrawals %s: unreadable; D3 reads every withdrawal as W0",
+                        deck_job_id, exc_info=True)
+    out = set()
+    for card in cards:
+        iid = card.get("impression_id")
+        index = _deck_card_index(deck_job_id, iid)
+        if index is None or index > last:
+            continue
+        if iid in sticky and iid not in served_then_withdrawn:
+            continue
+        out.add(iid)
+    return out
 
 
 def _disposition_cut(before: list, after: list) -> list:

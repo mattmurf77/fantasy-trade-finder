@@ -275,15 +275,20 @@ def test_a_replace_serve_after_a_never_delivered_withdrawal_moves_it(x_deck, how
     assert_moved(engine, job_id)
 
 
+@pytest.mark.parametrize("path", ["job_view", "stored_in_process", "stored_after_left"])
 @pytest.mark.parametrize("off", ["flag_off", "unpacked", "no_withdrawal"])
-def test_nothing_moves_when_it_cannot_be_recorded_or_nothing_was_pulled(x_deck, monkeypatch, off):
+def test_nothing_moves_when_it_cannot_be_recorded_or_nothing_was_pulled(x_deck, monkeypatch, off,
+                                                                         path):
+    """On every serve path, the stored ones after the job left included (#517 QA P3-1)."""
     client, engine, _ = x_deck
     if off == "flag_off":
         monkeypatch.setattr(server, "_deck_quality_filters_enabled", lambda: False)
-    job_id, *_ = de.deferred_deck(120, packed=off != "unpacked", store=False)
+    job_id, *_ = de.deferred_deck(120, packed=off != "unpacked", store=path != "job_view")
     if off != "no_withdrawal":
         withdraw_5(engine, "cut")
     status(client, job_id, 0)
+    if path == "stored_after_left":
+        restart()
     page = deck_ids(status(client, job_id, 30).get_json())
     assert page == ids(job_id, *range(30, 60))
     if off != "unpacked":
@@ -298,3 +303,137 @@ def test_the_header_keeps_a_cards_first_move():
     assert merged["display_moves"] == {"30": 32, "31": 33}
     assert "display_moves" not in server._merge_pack_runs({"deliveries": []}, {"deliveries": []},
                                                           None)
+
+
+# ── #517 QA: after the job left, the window and the moves are eval's ─────────
+
+def served(job_id, body):
+    return [int(i.split(":")[1]) for i in deck_ids(body)]
+
+
+def first_seen(responses):
+    """The client's order: each card where its first response put it."""
+    seen, order = set(), []
+    for r in responses:
+        for i in r:
+            if i not in seen:
+                seen.add(i)
+                order.append(i)
+    return order
+
+
+@pytest.mark.parametrize("w1_serve", ["in_process", "after_left"])
+def test_a_page_after_the_job_left_counts_a_delivered_then_withdrawn_card(x_deck, w1_serve):
+    """P1-1 (release-lead's repro): card 5 is cut before page 1 (W0). Card 1,
+    carrying X, is delivered, then cut at a re-serve of page 1 (W1), and eval
+    keeps it in place. Page 2 is served after the job left. Its window holds
+    one card, and X is at 3 already (0, 1, 2), so card 30 must not land at
+    displayed position 29."""
+    client, engine, _ = x_deck
+    job_id, *_ = de.deferred_deck(120, packed=True, store=True)
+    withdraw_5(engine, "cut")
+    status(client, job_id, 0)
+    pass_elsewhere(engine, 1, give=["mine0"], receive=["theirs1"])
+    if w1_serve == "after_left":
+        restart()
+    status(client, job_id, 0)                             # page 1 again: card 1 cut, W1
+    if w1_serve == "in_process":
+        restart()
+    status(client, job_id, 30)
+    assert {i: r["served_before"] for i, r in withdrawals(engine).items()} == {5: 0, 1: 1}
+    shown = displayed(engine, job_id)
+    assert 1 in shown[:W] and 5 not in shown              # W1 kept in place, W0 removed
+    assert sum(1 for i in shown[:W] if i in X_AT) <= CAP, shown[:31]
+
+
+def test_a_re_serve_after_the_job_left_moves_no_card_delivered_before(x_deck):
+    """P2-1: pages 1 and 2 are delivered in process, unmoved. Card 3 is cut and
+    the job leaves. Re-serving pages 1 and 2 records no move for their cards
+    (a card's first delivery wins), and eval's order is the client's."""
+    client, engine, _ = x_deck
+    job_id, *_ = de.deferred_deck(120, packed=True, store=True)
+    responses = [served(job_id, status(client, job_id, 0).get_json()),
+                 served(job_id, status(client, job_id, 30).get_json())]
+    pass_elsewhere(engine, 3, give=["mine3"], receive=["theirs3"])
+    restart()
+    responses += [served(job_id, status(client, job_id, 0).get_json()),
+                  served(job_id, status(client, job_id, 30).get_json())]
+    assert header_moves(engine, job_id) is None
+    assert displayed(engine, job_id)[:60] == first_seen(responses)[:60]
+
+
+def test_no_never_delivered_withdrawal_means_no_move_after_the_job_left(x_deck):
+    """P2-1: with no W0, nothing is pulled into the window. A W1 at a page-1
+    re-serve after the job left, then page 2's first serve: build order."""
+    client, engine, _ = x_deck
+    job_id, *_ = de.deferred_deck(120, packed=True, store=True)
+    status(client, job_id, 0)
+    pass_elsewhere(engine, 3, give=["mine3"], receive=["theirs3"])
+    restart()
+    status(client, job_id, 0)
+    assert served(job_id, status(client, job_id, 30).get_json())[:3] == [30, 31, 32]
+    assert header_moves(engine, job_id) is None
+
+
+def test_a_move_for_an_earlier_deliverys_card_is_refused(caplog):
+    """P2-1: _deck_note_moves records a move only for a card this response
+    delivers first."""
+    ev = server._DeckEvidence("d", "u1")
+    with caplog.at_level("WARNING"):
+        server._deck_note_moves(ev, {30: 32, 31: 32}, lambda index: index == 31)
+    assert ev.display_moves == {31: 32} and ev.pack_dirty
+    assert any("1 display move for an earlier delivery's cards, not recorded" in r.getMessage()
+               for r in caplog.records)
+
+
+def test_a_re_serve_after_the_job_left_keeps_the_moves_it_first_served(x_deck):
+    """The recorded moves are re-applied after the job left: page 2, first
+    served [32, 30, 31, ...] in process, comes back in that order."""
+    client, engine, _ = x_deck
+    job_id, *_ = de.deferred_deck(120, packed=True, store=True)
+    withdraw_5(engine, "cut")
+    status(client, job_id, 0)
+    first = served(job_id, status(client, job_id, 30).get_json())
+    assert first[:3] == [32, 30, 31]
+    restart()
+    assert served(job_id, status(client, job_id, 30).get_json()) == first
+    assert_moved(engine, job_id)
+
+
+@pytest.mark.parametrize("left", [False, True])
+def test_a_card_delivered_unmoved_holds_its_place_at_a_later_serve(x_deck, monkeypatch, left):
+    """P2-1: page 2 was first delivered in build order (the filters were off
+    then). Re-served once they're on, in process or after the job left, its
+    delivered cards hold their places: no visible reorder, and no move."""
+    client, engine, _ = x_deck
+    job_id, *_ = de.deferred_deck(120, packed=True, store=True)
+    withdraw_5(engine, "cut")
+    monkeypatch.setattr(server, "_deck_quality_filters_enabled", lambda: False)
+    status(client, job_id, 0)
+    first = served(job_id, status(client, job_id, 30).get_json())
+    assert first[:3] == [30, 31, 32]
+    monkeypatch.setattr(server, "_deck_quality_filters_enabled", lambda: True)
+    if left:
+        restart()
+    assert served(job_id, status(client, job_id, 30).get_json()) == first
+    assert header_moves(engine, job_id) is None
+
+
+@pytest.mark.parametrize("left", [False, True])
+def test_the_evidence_refuses_a_move_for_a_card_delivered_before(x_deck, monkeypatch, caplog, left):
+    """P2-1, both writers: should the cap ever report a move for a card an
+    earlier response delivered, the move is not recorded (in process: the
+    card isn't new to this delivery; stored: it's under the last boundary)."""
+    client, engine, _ = x_deck
+    job_id, *_ = de.deferred_deck(120, packed=True, store=True)
+    status(client, job_id, 0)
+    status(client, job_id, 30)                            # 30-59 delivered, unmoved
+    if left:
+        restart()
+    monkeypatch.setattr(server, "_served_repeat_cap", lambda cards, *a, **k: (cards, {30: 32}))
+    with caplog.at_level("WARNING"):
+        status(client, job_id, 30)
+        server._deck_evidence_drain(5)
+    assert header_moves(engine, job_id) is None
+    assert any("display move for an earlier delivery's cards, not recorded" in r.getMessage()
+               for r in caplog.records)
