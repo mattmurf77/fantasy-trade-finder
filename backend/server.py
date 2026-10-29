@@ -4116,7 +4116,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 6
+DECK_PIPELINE_VERSION = 7
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4244,6 +4244,7 @@ DECK_PIPELINE_PINS = {
     4: "864cf30974da20ea",   # #486 QA P3s: one draft-context read per job, noted with the picks; both threaded into _owner_generation_context, a failed read still forfeiting the owner arm (same values; no shape change)
     5: "99d62fcaf7ad01ef",   # models-lead addendum D2: the quality filter's inputs recorded per run (_quality_filter_inputs; the same callables; no shape change)
     6: "d5176ae18c66d208",   # #492 QA P3-1: the record only for a deck with deferred evidence; repeat_head (models-eng #503) from the filter's counts; no shape change
+    7: "facf9a9f34b7529a",   # #487 QA P3-3 (models-eng): one immediate retry inside the picks and draft-context memos; a transient failure no longer forfeits the owner arm
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -12098,7 +12099,13 @@ def _run_trade_job(
             if not _draft_loaded:
                 _draft_loaded = True
                 try:
-                    _draft_memo = get_league_draft_context(league_id) or {}
+                    try:
+                        _draft_memo = get_league_draft_context(league_id) or {}
+                    except Exception as first_err:
+                        # One immediate retry (models-eng, v7): a DB blip must not
+                        # forfeit the owner arm. Failed only when both raise.
+                        log.info("trade-job: draft context read failed, retrying: %s", first_err)
+                        _draft_memo = get_league_draft_context(league_id) or {}
                 except Exception as draft_err:
                     log.warning("trade-job: draft context read failed: %s", draft_err)
                     _draft_memo, _draft_failure = {}, draft_err
@@ -12109,8 +12116,14 @@ def _run_trade_job(
             if not _picks_loaded:
                 _picks_loaded = True
                 try:
-                    _picks_memo = load_draft_picks(league_id=league_id,
-                                                   source=_pick_read_source())
+                    try:
+                        _picks_memo = load_draft_picks(league_id=league_id,
+                                                       source=_pick_read_source())
+                    except Exception as first_err:
+                        # One immediate retry, as the draft context's (v7).
+                        log.info("trade-job: draft picks read failed, retrying: %s", first_err)
+                        _picks_memo = load_draft_picks(league_id=league_id,
+                                                       source=_pick_read_source())
                 except Exception as picks_err:
                     log.warning("trade-job: draft picks read failed: %s", picks_err)
                     _picks_memo, _picks_failure = [], picks_err
@@ -12118,9 +12131,10 @@ def _run_trade_job(
                                      _job_draft_context().get("status") == "drafted")
             return _picks_memo
 
-        # The owner path's view of the same two reads: a failed read raises, so
-        # its context capture fails and the owner arm forfeits, as when it read
-        # them itself. Every other reader keeps the degrade-to-empty above.
+        # The owner path's view of the same two reads: a failed read (both
+        # attempts raised) raises, so its context capture fails and the owner
+        # arm forfeits, as when it read them itself. Every other reader keeps
+        # the degrade-to-empty above.
         def _owner_job_draft_picks() -> list:
             picks = _job_draft_picks()
             if _picks_failure is not None:
@@ -28374,17 +28388,53 @@ def session_init():
 # Session Ping — lightweight liveness check
 # ---------------------------------------------------------------------------
 
+def _session_verification(sess: dict) -> dict:
+    """The additive `verification` object, as session/init returns it (same
+    four fields, same sources): this session's own `verified` stamp, and the
+    user_id's stored verified_via.
+
+    An unverified or demo session (the ones session/init refuses, 403) gets
+    the constant unverified answer before any lookup. Reading the claimed
+    user_id's verified_via for it would tell anyone who can name a user_id
+    whether that account exists and which provider proved it (legal R28.9
+    row 4 / R28.14; release-lead #524 QA P1)."""
+    if not sess.get("verified") or sess.get("is_demo"):
+        return {
+            "session_verified": False,
+            "user_verified":    False,
+            "verified_via":     None,
+            "enforced":         is_enabled("auth.enforce_verified_writes"),
+        }
+    verified_via = None
+    try:
+        from . import accounts as _accounts
+        verified_via = _accounts.get_user_verified_via(sess.get("user_id"))
+    except Exception as verif_err:
+        log.warning("session/ping: verified_via lookup failed: %s", verif_err)
+    return {
+        "session_verified": bool(sess.get("verified")),
+        "user_verified":    bool(verified_via),
+        "verified_via":     verified_via,
+        "enforced":         is_enabled("auth.enforce_verified_writes"),
+    }
+
+
 @app.route("/api/session/ping", methods=["GET"])
 def session_ping():
-    """GET /api/session/ping — check whether the current session is alive."""
+    """GET /api/session/ping — check whether the current session is alive.
+
+    Also returns `verification` (head-eng 2026-10-28): an account-only
+    session (Apple-first, no league) never reaches session/init, the other
+    source of that field, so its client asks here instead."""
     sess = _get_session(request.headers.get("X-Session-Token", ""))
     if not sess:
         return jsonify({"ok": False}), 401
     sess["last_active"] = time.time()
     return jsonify({
-        "ok":      True,
-        "user_id": sess["user_id"],
-        "league":  sess.get("league", {}).name if sess.get("league") else "",
+        "ok":           True,
+        "user_id":      sess["user_id"],
+        "league":       sess.get("league", {}).name if sess.get("league") else "",
+        "verification": _session_verification(sess),
     })
 
 
@@ -36359,17 +36409,20 @@ _PAYWALL_PRODUCTS = [
 # (24.99 / 12 = 2.0825; 34.99 / 12 = 2.9158): rounding down would
 # understate the annual price.
 #
-# The rise is an INSTANT, not a UTC date: 2027-01-01 00:00
-# America/Los_Angeles (PST, UTC-8) = 08:00 UTC. Terms §14.8 promises the
-# Founder price to anyone subscribing "by December 31, 2026", and a UTC
-# date flipped at 7 pm ET on Dec 31. LA midnight keeps the founder price
-# through the whole of Dec 31 in every contiguous-US time zone (Alaska and
-# Hawaii end Dec 31 one and two hours later still).
+# The rise is an INSTANT: 2027-01-02 04:00 UTC (11 pm ET / 8 pm PT on
+# Jan 1). That is App Store Connect's US start time for a price change
+# scheduled for 2027-01-02 (Apple's start-times-by-country table), and the
+# operator approved scheduling both changes for Jan 2 (2026-10-28,
+# monetization-pm). A change scheduled for 2027-01-01 would start in the US
+# at 2027-01-01 04:00 UTC, 11 pm ET on Dec 31, which breaks Terms §14.8
+# (the Founder price for anyone subscribing "by December 31, 2026"). So the
+# Founder price holds through all of Dec 31 in every US time zone, and
+# through most of Jan 1.
 # FALLBACK ONLY: StoreKit's localized price is authoritative, and this
 # instant only decides which strings the server shows when StoreKit is
-# unavailable. monetization-pm checks it against the App Store Connect
-# scheduled price change; if the two differ, move this constant to match.
-_PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 1, 8, 0, tzinfo=timezone.utc)
+# unavailable. monetization-pm records the start time App Store Connect
+# shows (setup §3d); if the two differ, move this constant to match.
+_PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 2, 4, 0, tzinfo=timezone.utc)
 _PAYWALL_PRICES = {
     "ftf_pro_monthly": ({"display_price": "$4.99"},
                         {"display_price": "$6.99"}),
