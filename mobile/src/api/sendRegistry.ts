@@ -84,7 +84,7 @@ export function subscribeSends(listener: () => void): () => void {
 function put(key: string, state: SendState): void {
   records.delete(key); // re-inserted as the newest
   records.set(key, { state, at: Date.now() });
-  evict();
+  evict(key);
   emit();
 }
 
@@ -92,11 +92,14 @@ function put(key: string, state: SendState): void {
 // goes back to an idle Send), then an unknown outcome (its reminder is lost),
 // oldest first in each. Never a send in flight: forgetting one would let a
 // remount send it again, so if every entry is in flight the map stays over.
-function evict(): void {
+// Never the entry just written either: with the map over the cap because
+// everything else is in flight, a send that just settled would otherwise be
+// forgotten at once.
+function evict(written: string): void {
   for (const state of ['sent', 'unknown'] as const) {
     for (const [key, record] of records) {
       if (records.size <= SEND_REGISTRY_CAP) return;
-      if (record.state === state) records.delete(key);
+      if (record.state === state && key !== written) records.delete(key);
     }
   }
 }

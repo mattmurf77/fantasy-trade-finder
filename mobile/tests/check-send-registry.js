@@ -426,13 +426,15 @@ function arrow(sf, name) {
       expect(last[0] === 'Heads up before sending' && last[1] === `${REMINDER[p]}\n\n• Roster limit.`, `reopened warnings dialog: ${last[0]} ${JSON.stringify(last[1])}`);
     });
 
-    await check(`R2e. ${name}: both dialogs' Send is \`send\`, which calls doPropose only when \`now === shown\` (shown = the state when the dialog was built)`, () => {
+    await check(`R2e. ${name}: both dialogs' Send is \`send\`, which calls doPropose only when \`now === shown\`, both the registry RECORD (the object, not its state)`, () => {
       const sf = parse(spec.file);
       const fn = arrow(sf, 'confirmSend');
       const shown = findAll(fn, (n) => ts.isVariableDeclaration(n) && n.name.getText(sf) === 'shown')[0];
-      expect(shown && shown.initializer.getText(sf) === 'getSendRecord(sendKey)?.state', `shown = ${shown && shown.initializer.getText(sf)}`);
+      expect(shown && shown.initializer.getText(sf) === 'getSendRecord(sendKey)', `shown = ${shown && shown.initializer.getText(sf)}`);
       const send = findAll(fn, (n) => ts.isVariableDeclaration(n) && n.name.getText(sf) === 'send')[0];
       expect(send, 'no const send in confirmSend');
+      const now = findAll(send, (n) => ts.isVariableDeclaration(n) && n.name.getText(sf) === 'now')[0];
+      expect(now && now.initializer.getText(sf) === 'getSendRecord(sendKey)', `now = ${now && now.initializer.getText(sf)}`);
       const ifs = findAll(send, (n) => ts.isIfStatement(n));
       const guard = ifs.find((i) => findAll(i.thenStatement, (c) => ts.isIdentifier(c) && c.text === 'doPropose').length);
       expect(guard && guard.expression.getText(sf) === 'now === shown', `doPropose is not guarded by \`now === shown\` (${guard ? guard.expression.getText(sf) : 'no if around it'})`);
@@ -440,6 +442,37 @@ function arrow(sf, name) {
       expect(!outside.length, 'doPropose is reachable outside the `now === shown` branch');
       const presses = findAll(fn, (n) => ts.isPropertyAssignment(n) && n.name.getText(sf) === 'onPress').map((n) => n.initializer.getText(sf));
       expect(JSON.stringify(presses) === '["send","send"]', `dialog onPress handlers: ${presses.join(', ')}`);
+    });
+
+    await check(`R2f. ${name}: ABA (#539 delta QA): already unknown; double tap → two dialogs with the reminder; Send on the first times out (unknown again); Send on the second sends nothing and reopens with the reminder`, async () => {
+      const w = appRun();
+      const inst = w.mount(p);
+      await startSend(w, p, inst);
+      await flush();
+      ANSWERS(w).timeout(p); // the trade is unknown before the double tap
+      await flush();
+      btn(w, p, inst).props.onPress();
+      btn(w, p, inst).props.onPress(); // same frame
+      await flush();
+      const dialogs = w.alerts.filter((x) => x[0] === 'Send this trade?').slice(-2);
+      expect(dialogs.length === 2 && dialogs.every((d) => d[1] === `${REMINDER[p]}\n\n${spec.body}`), 'the double tap did not queue two dialogs with the reminder');
+      const [d1, d2] = dialogs;
+      pressAction(d1, 'Send'); // sent knowingly, after the reminder
+      await flush();
+      expect(w.posts.length === 2, `Send on the first dialog: ${w.posts.length} POSTs, want 2`);
+      ANSWERS(w).timeout(p); // unknown again: the same state, a new record
+      await flush();
+      expect(w.registry.getSendRecord(keyOf(w, p)).state === 'unknown', 'not unknown after the second timeout');
+      const before = w.alerts.length;
+      pressAction(d2, 'Send'); // the stale dialog, built on the first unknown
+      await flush();
+      expect(w.posts.length === 2, `the stale dialog sent a 3rd POST (${w.posts.length} POSTs)`);
+      const reopened = w.alerts.slice(before);
+      expect(reopened.length === 1 && reopened[0][0] === 'Send this trade?', `after the stale press: ${reopened.map((a) => a[0]).join(' | ') || 'no dialog'}`);
+      expect(reopened[0][1] === `${REMINDER[p]}\n\n${spec.body}`, `reopened body: ${JSON.stringify(reopened[0][1])}`);
+      pressAction(reopened[0], 'Send');
+      await flush();
+      expect(w.posts.length === 3, `the reopened dialog's Send: ${w.posts.length} POSTs, want 3`);
     });
 
     // ════ R3. A remount reads the registry ════════════════════════════════
@@ -582,7 +615,7 @@ function arrow(sf, name) {
       expect(ok.length === 1, `${ok.length} settleSend(sendKey, 'sent') in the try block`);
       const reminder = findAll(arrow(sf, 'confirmSend'), (n) => ts.isVariableDeclaration(n) && n.name.getText(sf) === 'reminder')[0];
       expect(reminder, 'confirmSend has no const reminder');
-      expect(reminder.initializer.getText(sf) === `shown === 'unknown' ? \`\${sendOutcomeUnknownMessage('${p}')}\\n\\n\` : ''`,
+      expect(reminder.initializer.getText(sf) === `shown?.state === 'unknown' ? \`\${sendOutcomeUnknownMessage('${p}')}\\n\\n\` : ''`,
         `reminder = ${reminder.initializer.getText(sf)}`);
     });
 
@@ -600,7 +633,7 @@ function arrow(sf, name) {
   }
 
   // ════ R6. Bounded, in memory, no imports ═════════════════════════════════
-  await check('R6a. bounded (#539 QA P3-3): over SEND_REGISTRY_CAP, sent entries go first, then unknown, oldest first in each; in_flight never, even past the cap', () => {
+  await check('R6a. bounded (#539 QA P3-3): over SEND_REGISTRY_CAP, sent entries go first, then unknown, oldest first in each; in_flight never, even past the cap; never the entry just written', () => {
     const {registry: R} = appRun();
     const cap = R.SEND_REGISTRY_CAP;
     expect(Number.isInteger(cap) && cap >= 10 && cap <= 200, `SEND_REGISTRY_CAP = ${cap}`);
@@ -635,10 +668,14 @@ function arrow(sf, name) {
     add(); // every entry is in flight now
     if (size() !== cap + 1) bad.push(`all in flight: ${size()} entries, want cap + 1 (never evict in_flight)`);
     if (flying.some((i) => state(i) !== 'in_flight')) bad.push('an in_flight entry was evicted past the cap');
-    R.settleSend(key(flying[0]), 'sent');
+    R.settleSend(key(flying[0]), 'sent'); // settles while the map is over the cap
+    if (state(flying[0]) !== 'sent') bad.push('over the cap, a just-settled sent entry was evicted at once');
+    if (size() !== cap + 1) bad.push(`after a settle over the cap: ${size()}, want cap + 1`);
     add();
-    if (state(flying[0]) !== undefined) bad.push('over the cap, the only sent entry was kept');
+    if (state(flying[0]) !== undefined) bad.push('over the cap, the only sent entry was kept once it was no longer the one just written');
     if (size() !== cap + 1) bad.push(`after evicting the one sent entry: ${size()}, want cap + 1`);
+    R.settleSend(key(flying[1]), 'unknown');
+    if (state(flying[1]) !== 'unknown') bad.push('over the cap, a just-settled unknown entry was evicted at once');
     expect(!bad.length, bad.join('; '));
   });
 

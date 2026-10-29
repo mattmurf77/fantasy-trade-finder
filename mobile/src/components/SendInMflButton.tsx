@@ -216,23 +216,25 @@ export default function SendInMflButton({
     });
     setState('idle');
 
-    // Each dialog captures this trade's registry state when it is built. A
+    // Each dialog captures this trade's registry record when it is built. A
     // queued second dialog (a same-frame double tap) can be pressed long
-    // after the first send went out, so its Send only sends if the state is
-    // unchanged. If the trade has since gone in flight or been sent, it does
-    // nothing (the button already says so). Otherwise (now unknown, or
-    // cleared) the dialog opens again, current.
+    // after the first send went out, so its Send only sends if the record is
+    // the same object. Every write makes a new one, so this also catches
+    // unknown → another send → unknown again, which a state comparison would
+    // miss. If the trade has since gone in flight or been sent, it does
+    // nothing (the button already says so). Otherwise (unknown, or cleared)
+    // the dialog opens again, current.
     function showConfirm(): void {
-      const shown = getSendRecord(sendKey)?.state;
+      const shown = getSendRecord(sendKey);
       const send = () => {
-        const now = getSendRecord(sendKey)?.state;
+        const now = getSendRecord(sendKey);
         if (now === shown) void doPropose();
-        else if (now !== 'in_flight' && now !== 'sent') showConfirm();
+        else if (now?.state !== 'in_flight' && now?.state !== 'sent') showConfirm();
       };
       // After an unknown outcome on this trade, the dialog that gates the
       // send starts with marketing's 8f line (utils/sendOutcomeCopy.ts, no
       // new copy).
-      const reminder = shown === 'unknown' ? `${sendOutcomeUnknownMessage('MFL')}\n\n` : '';
+      const reminder = shown?.state === 'unknown' ? `${sendOutcomeUnknownMessage('MFL')}\n\n` : '';
 
       if (warnings.length > 0) {
         const blocking = warnings.some((w) => w.severity === 'blocking');
