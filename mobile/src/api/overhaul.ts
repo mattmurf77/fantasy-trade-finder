@@ -12,6 +12,7 @@
 // learning. Likes here are assembly input, not Elo signal.
 
 import { apiRequest, gateSignalFor } from './client';
+import { overhaulSendTimeoutMs } from './sendOutcome';
 import { normalizeTradeCard } from './trades';
 import type { TradeCard } from '../shared/types';
 
@@ -437,11 +438,18 @@ export async function prepareSend(
   });
 }
 
+// One request sends the whole batch, offer by offer, server-side, so the
+// timeout scales with the batch's offer count (api/sendOutcome.ts).
 export async function sendBatch(
   overhaulId: string,
   body: { prepare_token: string; summary_hash: string; version: number; idempotency_key: string },
+  offerCount: number,
 ): Promise<SendResult> {
-  return apiRequest(`${BASE}/${enc(overhaulId)}/send`, { method: 'POST', body });
+  return apiRequest(`${BASE}/${enc(overhaulId)}/send`, {
+    method: 'POST',
+    body,
+    timeoutMs: overhaulSendTimeoutMs(offerCount),
+  });
 }
 
 // Throttled server-side to one call per 15 s per overhaul: a second call inside the window is 429 `rate_limited`.

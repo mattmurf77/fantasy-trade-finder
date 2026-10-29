@@ -115,15 +115,25 @@ export default function SettingsHubScreen({ navigation }: any) {
   // How they are signed in. Only stated when something we hold actually
   // says so: a linked identity from the ['account'] cache, or a verified_via
   // the session store already reported.
+  // ESPN/MFL (platforms-eng's frozen values, 2026-10-26): the identity
+  // provider is `espn` / `mfl`, and the session's verified_via is `espn` /
+  // `mfl_login`. `mfl_login` is ALSO written for a Sleeper user who connects
+  // MFL by password (/api/mfl/auth-link), so it means an MFL sign-in only on
+  // an account-only session; a Sleeper user stays "Sleeper" (release-lead QA
+  // P2). Only the proof-based sign-in writes `espn`, so it stays unguarded.
   const verifiedVia = verification?.verified_via;
-  const provider: 'apple' | 'google' | null =
+  const provider: 'apple' | 'google' | 'espn' | 'mfl' | null =
     account?.account?.identities?.[0]?.provider
-    ?? (verifiedVia === 'apple' || verifiedVia === 'google' ? verifiedVia : null);
+    ?? (verifiedVia === 'apple' || verifiedVia === 'google' || verifiedVia === 'espn' ? verifiedVia
+      : verifiedVia === 'mfl_login' && user?.account_only ? 'mfl'
+      : null);
 
   const signInLabel =
     isDemo ? 'Demo session'
     : provider === 'apple' ? 'Apple'
     : provider === 'google' ? 'Google'
+    : provider === 'espn' ? 'ESPN'
+    : provider === 'mfl' ? 'MFL'
     // A non-account_only session is keyed to a real Sleeper user by
     // construction (useSession.SavedUser) — that is a fact, not a guess.
     : user && !user.account_only ? 'Sleeper'

@@ -42,6 +42,7 @@ const ROOTNAV = path.join(ROOT, 'src/navigation/RootNav.tsx');
 const TABNAV = path.join(ROOT, 'src/navigation/TabNav.tsx');
 const HUB = path.join(ROOT, 'src/screens/settings/SettingsHubScreen.tsx');
 const FLAT = path.join(ROOT, 'src/screens/SettingsScreen.tsx');
+const TIPS_HOOK = path.join(ROOT, 'src/state/useTipsOffered.ts');
 const BE_ENTL = path.join(REPO, 'backend/entitlements.py');
 const BE_SERVER = path.join(REPO, 'backend/server.py');
 
@@ -150,8 +151,8 @@ const beServer = read(BE_SERVER);
 
 // 8 — the settings entry, DATA-DRIVEN on both surfaces (B8 #1): the paywall
 //     flag AND the server offering tips. The hook subscribes to the cached
-//     config and never fetches; `tipsOffered` (pure) is executed in
-//     check-paywall-gate §9i.
+//     config and never fetches; `tipsOffered` (pure) is executed in 8b/8c
+//     below and in check-paywall-gate §9i.
 {
   const subs = strip(read(path.join(ROOT, 'src/state/useTipsOffered.ts')));
   const hook = /export function useTipsOffered\(\): boolean \{\s*const \{ data \} = useQuery<PaywallConfig>\(\{\s*queryKey: \['paywall-config', 'ios'\],\s*queryFn: \(\) => getPaywallConfig\('ios'\),\s*enabled: false,\s*\}\);\s*return tipsOffered\(data\);/.test(subs)
@@ -169,6 +170,60 @@ const beServer = read(BE_SERVER);
   } else {
     bad('8. settings-tip-row on both surfaces only with the flag AND the server offering tips (never-fetching cache read)',
       `hook=${hook} hub=${inHub} flat=${inFlat} navs=${navs.length}`);
+  }
+}
+
+// 8b/8c — tipsOffered EXECUTED; useTipsOffered subscribes with enabled:false
+{
+  let ts = null;
+  try { ts = require('typescript'); } catch { /* reported below */ }
+  const src = read(TIPS_HOOK);
+  if (!ts || !src) {
+    bad('8b. tipsOffered executed', ts ? 'missing state/useTipsOffered.ts'
+      : 'typescript not resolvable — run `npm install` in mobile/ first');
+  } else {
+    const js = ts.transpileModule(src, { compilerOptions: {
+      module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019,
+    } }).outputText;
+    let seen = null;      // the options useTipsOffered hands to useQuery
+    let cached;           // what the stubbed cache "holds"
+    const stubs = {
+      '@tanstack/react-query': {
+        useQuery: (opts) => { seen = opts; return { data: cached }; },
+      },
+      '../api/billing': {
+        getPaywallConfig: () => { throw new Error('useTipsOffered fetched'); },
+      },
+    };
+    const mod = { exports: {} };
+    new Function('module', 'exports', 'require', js)(mod, mod.exports, (name) => {
+      if (name in stubs) return stubs[name];
+      throw new Error(`state/useTipsOffered.ts gained a runtime import ("${name}")`);
+    });
+    const { tipsOffered, useTipsOffered } = mod.exports;
+    const tip = { product_id: 'ftf_tip_199', display_price: '$1.99' };
+    const cases = [
+      [undefined, false], [null, false], [{}, false], [{ tips: [] }, false],
+      [{ tips: [tip] }, true],
+    ];
+    const wrong = cases.filter(([cfg, want]) => tipsOffered(cfg) !== want)
+      .map(([cfg, want]) => `${JSON.stringify(cfg)} → ${!want}`);
+    if (wrong.length === 0) {
+      ok('8b. tipsOffered: undefined/null/{}/{tips:[]} → false; {tips:[tip]} → true');
+    } else {
+      bad('8b. tipsOffered: undefined/null/{}/{tips:[]} → false; {tips:[tip]} → true',
+        `wrong: ${wrong.join('; ')}`);
+    }
+    cached = { enabled: true, tips: [tip] };
+    const shown = useTipsOffered();
+    const shape = seen && seen.enabled === false
+      && JSON.stringify(seen.queryKey) === JSON.stringify(['paywall-config', 'ios']);
+    if (shape && shown === true) {
+      ok("8c. useTipsOffered subscribes to ['paywall-config','ios'] with enabled: false (never fetches)");
+    } else {
+      bad("8c. useTipsOffered subscribes to ['paywall-config','ios'] with enabled: false (never fetches)",
+        `options=${JSON.stringify(seen && { queryKey: seen.queryKey, enabled: seen.enabled })} shown=${shown}`);
+    }
   }
 }
 
