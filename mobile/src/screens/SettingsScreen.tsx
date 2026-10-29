@@ -51,6 +51,9 @@ import SteerSlider from '../components/SteerSlider';
 import { useSession, type RankMethodPref } from '../state/useSession';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
 import SubscriptionSection from '../components/SubscriptionSection';
+import { openAppleSubscriptions } from '../components/SubscriptionSection';
+import { DELETE_ACCOUNT_BODY, DELETE_ACCOUNT_SUB_NOTE } from '../copy/deleteAccount';
+import { MON } from '../copy/monetization';
 import { useTipsOffered } from '../state/useTipsOffered';
 import { guideToggleTitle, guideToggleDescriptionOff } from '../utils/mascotCopy';
 import { useOnboardingState } from '../state/useOnboardingState';
@@ -602,12 +605,10 @@ export default function SettingsScreen({ navigation }: any) {
   function confirmDeleteAccount() {
     Alert.alert(
       'Delete account?',
-      'This permanently deletes your rankings, comparison history, trade activity, ' +
-        'notifications, push tokens, and any stored Sleeper connection from our ' +
-        'servers. Trade matches shared with leaguemates are anonymized on your side. ' +
-        'This cannot be undone.',
+      DELETE_ACCOUNT_BODY + '\n\n' + DELETE_ACCOUNT_SUB_NOTE,
       [
         { text: 'Cancel', style: 'cancel' },
+        ...(paywallEnabled ? [{ text: MON['mon.pay.manage'], onPress: openAppleSubscriptions }] : []),
         {
           text: 'Continue',
           style: 'destructive',

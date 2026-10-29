@@ -1450,19 +1450,88 @@ check('9e. design §5 / R28.9 3f [shape + executed]: Settings › Subscription �
   sdk.products = {};
 });
 
-check('9f. legal privacy §6 [shape]: the Delete line verbatim, body-sm chalk-dim, ABOVE the Delete account row; Manage subscription beside it; nothing else in AccountDataSection', () => {
-  const a = read(ACCOUNT_DATA);
-  eq(a.split(DELETE_LINE).length - 1, 1, 'the line, verbatim, once');
-  const lineAt = a.indexOf(DELETE_LINE);
-  const deleteAt = a.indexOf('accessibilityLabel="Delete account"');
-  assert(lineAt > a.indexOf('{exportRow}') && lineAt < deleteAt, 'directly above the Delete account row (after Download my data)');
-  assert(/<Text style=\{styles\.rowSub\} testID="settings\.delete-subscription-note">\s*\{"Deleting your account/.test(a), 'in the body-sm row-sub style');
-  assert(/rowSub: \{\s*\.\.\.type\.bodySm,/.test(read('screens/settings/styles.ts')) && /bodySm: \{[^}]*color: chalk\.dim,/.test(read('theme/chalkline.ts')), 'row-sub is body-sm chalk-dim');
-  const manageAt = a.indexOf('<ManageSubscriptionLink testID="settings.delete-manage-subscription" />');
-  assert(manageAt > lineAt && manageAt < deleteAt, 'Manage subscription between the line and Delete account');
-  const m = fnText(SUBS, 'ManageSubscriptionLink');
-  assert(/const paywallOn = useFlag\('monetize\.paywall'\);\s*if \(!paywallOn\) return null;/.test(m) && !NO_ENTITLEMENT.test(m), 'the link self-gates on the flag and is the same for every session');
-  eq((a.match(/SubscriptionSection|ManageSubscriptionLink|#393/g) || []).length, 4, 'the M3 hunk in AccountDataSection is the import, the comment and the mount');
+check('9f. legal R28.21 5a–5d + ux-lead 2026-10-29 [executed + shape]: the delete-account dialog in BOTH Settings screens — legal\'s body + sub-note from ONE module for EVERYONE (no flag on the message); flag off → [Cancel, Continue], flag on → [Cancel, Manage subscription (Apple\'s page, nothing else), Continue (the unchanged confirm)], the button keyed on the flag alone; no subscription, demo or verification read; the old section line is gone', () => {
+  const BODY = 'This permanently deletes your rankings, comparison history, trade activity, notifications, push tokens, and any stored Sleeper, ESPN or MFL sign-in or connection from our servers. Trade matches shared with leaguemates are anonymized on your side. This cannot be undone.';
+  const del = load('copy/deleteAccount.ts', {});
+  eq(del.DELETE_ACCOUNT_BODY, BODY, 'the body, verbatim');
+  eq(del.DELETE_ACCOUNT_SUB_NOTE, DELETE_LINE, 'the sub-note (legal\'s mz.delete.sub_note), verbatim');
+  assert(!/\b(import|require)\b/.test(strip(read('copy/deleteAccount.ts'))), 'the copy module has zero imports');
+  for (const [rel, flag] of [[ACCOUNT_DATA, 'paywallOn'], ['screens/SettingsScreen.tsx', 'paywallEnabled']]) {
+    const { sf } = astOf(rel);
+    const fn = findNodes(sf, (n) => ts.isFunctionDeclaration(n) && n.name?.text === 'confirmDeleteAccount')[0];
+    assert(fn, `${rel}: confirmDeleteAccount`);
+    const call = findNodes(fn, (n) => ts.isCallExpression(n) && n.expression.getText(sf) === 'Alert.alert')[0];
+    const [title, message, buttons] = call.arguments;
+    eq(title.getText(sf), "'Delete account?'", `${rel}: the title, a literal`);
+    eq(message.getText(sf), "DELETE_ACCOUNT_BODY + '\\n\\n' + DELETE_ACCOUNT_SUB_NOTE", `${rel}: body, a blank line, the sub-note`);
+    assert(ts.isArrayLiteralExpression(buttons) && buttons.elements.length === 3, `${rel}: Cancel, the flag-keyed Manage slot, Continue`);
+    const [cancel, manage, cont] = buttons.elements.map((e) => strip(e.getText(sf)).replace(/\s+/g, ' ').trim());
+    eq(cancel, "{ text: 'Cancel', style: 'cancel' }", `${rel}: 1. Cancel`);
+    eq(manage, `...(${flag} ? [{ text: MON['mon.pay.manage'], onPress: openAppleSubscriptions }] : [])`,
+      `${rel}: 2. Manage subscription (default style; only Apple\'s page), present only while the flag is on`);
+    assert(/^\{ text: 'Continue', style: 'destructive', onPress: \(\) => Alert\.alert\( 'Are you absolutely sure\?',/.test(cont)
+      && /text: 'Delete everything', style: 'destructive', onPress: \(\) => void performDeleteAccount\(\)/.test(cont),
+    `${rel}: 3. Continue (destructive) → the unchanged "Are you absolutely sure?" confirm`);
+    // The flag is read ONCE, at the component's top level (rules of hooks).
+    const flagReads = findNodes(sf, (n) => ts.isVariableDeclaration(n) && n.name.getText(sf) === flag);
+    assert(flagReads.length === 1 && /^useFlag\('monetize\.paywall'\)$/.test(flagReads[0].initializer.getText(sf)), `${rel}: ${flag} = useFlag('monetize.paywall')`);
+    // EXECUTED: the real function text, with Alert stubbed, flag off and on.
+    const shown = [];
+    const opened = [];
+    const runWith = (on) => {
+      const confirm = extractFn(rel, 'confirmDeleteAccount', {
+        Alert: { alert: (...a) => shown.push(a) },
+        DELETE_ACCOUNT_BODY: del.DELETE_ACCOUNT_BODY,
+        DELETE_ACCOUNT_SUB_NOTE: del.DELETE_ACCOUNT_SUB_NOTE,
+        MON: copy.MON,
+        openAppleSubscriptions: () => opened.push('apple'),
+        performDeleteAccount: () => { throw new Error('deleted from the first alert'); },
+        [flag]: on,
+      });
+      shown.length = 0;
+      confirm();
+      return shown[0];
+    };
+    const off = runWith(false);
+    eq(off[0], 'Delete account?', `${rel}: title`);
+    eq(off[1], `${BODY}\n\n${DELETE_LINE}`, `${rel}: flag off, the message still carries the sub-note`);
+    eq(JSON.stringify(off[2].map((b) => [b.text, b.style || 'default'])), JSON.stringify([['Cancel', 'cancel'], ['Continue', 'destructive']]),
+      `${rel}: flag off → exactly [Cancel, Continue]`);
+    const on = runWith(true);
+    eq(on[1], off[1], `${rel}: flag on, the same message (no flag condition on it)`);
+    eq(JSON.stringify(on[2].map((b) => [b.text, b.style || 'default'])),
+      JSON.stringify([['Cancel', 'cancel'], ['Manage subscription', 'default'], ['Continue', 'destructive']]),
+      `${rel}: flag on → [Cancel, Manage subscription, Continue]`);
+    on[2][1].onPress();
+    eq(JSON.stringify(opened), JSON.stringify(['apple']), `${rel}: Manage subscription opens Apple's page, nothing else`);
+    eq(shown.length, 1, `${rel}: Manage subscription opens no second alert`);
+    on[2][2].onPress();
+    eq(shown[1] && shown[1][0], 'Are you absolutely sure?', `${rel}: Continue opens the unchanged confirm, with no subscription check`);
+    const body = strip(fn.getText(sf));
+    const hit = body.match(/useFlag|useEntitlements|entitlement|getActivePro|purchases|restorePurchases|paywall-config|isDemo|verification|isUnverified|\.pro\b|founder/i);
+    assert(!hit, `${rel}: confirmDeleteAccount reads "${hit && hit[0]}" (the button keys on the flag alone; legal 5c)`);
+    eq((body.match(new RegExp(`\\b${flag}\\b`, 'g')) || []).length, 1, `${rel}: the flag is used once, for the Manage button only`);
+    const t = strip(read(rel));
+    assert(/import \{ DELETE_ACCOUNT_BODY, DELETE_ACCOUNT_SUB_NOTE \} from '(\.\.\/)+copy\/deleteAccount';/.test(t), `${rel}: the strings come from copy/deleteAccount`);
+    assert(/import \{ openAppleSubscriptions \} from '(\.\.\/)+components\/SubscriptionSection';/.test(t), `${rel}: the one opener`);
+    assert(!t.includes(DELETE_LINE) && !t.includes('any stored Sleeper connection'), `${rel}: no inline copy of the line, no old body`);
+  }
+  eq(copy.MON['mon.pay.manage'], 'Manage subscription', 'the button label');
+  const a = strip(read(ACCOUNT_DATA));
+  assert(!/settings\.delete-subscription-note|ManageSubscriptionLink|settings\.delete-manage-subscription/.test(a), 'the section-level note and link are gone (the dialog replaces them)');
+  eq((a.match(/SubscriptionSection|openAppleSubscriptions|deleteAccount'|monetize\.paywall/g) || []).length, 5, 'the M3 hunk in AccountDataSection: the opener\'s import (2), the copy import, the flag read and the dialog\'s one opener');
+  // the opener: executed, and the Settings row uses it
+  const url = (read(SUBS).match(/const APPLE_SUBSCRIPTIONS_URL = '([^']+)';/) || [])[1];
+  eq(url, 'https://apps.apple.com/account/subscriptions', "Apple's subscription page");
+  const opened = [];
+  const open = extractFn(SUBS, 'openAppleSubscriptions', {
+    Linking: { openURL: (u) => { opened.push(u); return Promise.resolve(); } },
+    APPLE_SUBSCRIPTIONS_URL: url,
+  });
+  open();
+  eq(JSON.stringify(opened), JSON.stringify([url]), 'openAppleSubscriptions opens that page, once, and nothing else');
+  assert(/onPress=\{openAppleSubscriptions\}/.test(fnText(SUBS, 'ManageSubscriptionLink')), 'ManageSubscriptionLink uses the same opener');
+  eq((strip(read(SUBS)).match(/Linking\.openURL\(/g) || []).length, 1, 'one place opens Apple\'s page');
 });
 
 check('9g. copy §9.6 [executed + shape]: the invitee eyebrow and board line — trigger variant only, only with BOTH values; never a raw {inviter} / {league}', () => {

@@ -29,6 +29,11 @@
 //     identities) is asked for a fresh Apple credential right before the
 //     verified DELETE, so the server can revoke Sign in with Apple (App Store
 //     5.1.1(v)). Cancel or failure sends no code, and the deletion proceeds.
+//   • #393 M3 (legal R28.21 5a–5d; ux-lead 2026-10-29). The first confirm's
+//     message is legal's body + the subscription sub-note (copy/deleteAccount),
+//     for everyone; a Manage subscription button (Apple's page, never a
+//     required step) sits between Cancel and Continue while `monetize.paywall`
+//     is on, keyed on the flag alone.
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator, Alert, Share, Platform } from 'react-native';
@@ -43,7 +48,9 @@ import { deleteAccount, getAccount } from '../../../api/auth';
 import { exportAccountData, getProfileVisibility, setProfileVisibility } from '../../../api/accountPrefs';
 import { useSession } from '../../../state/useSession';
 import { useFlag } from '../../../state/useFeatureFlags';
-import { ManageSubscriptionLink } from '../../../components/SubscriptionSection';
+import { openAppleSubscriptions } from '../../../components/SubscriptionSection';
+import { DELETE_ACCOUNT_BODY, DELETE_ACCOUNT_SUB_NOTE } from '../../../copy/deleteAccount';
+import { MON } from '../../../copy/monetization';
 import { styles } from '../styles';
 import Row from '../Row';
 import type { SettingsSectionProps } from './types';
@@ -65,6 +72,8 @@ export default function AccountDataSection({
   const queryClient = useQueryClient();
 
   const dataExportEnabled    = useFlag('account.data_export');
+  // #393 M3: the delete confirm's Manage subscription button (flag alone).
+  const paywallOn            = useFlag('monetize.paywall');
   const profileToggleEnabled = useFlag('profiles.user_toggle');
   const accountsEnabled      = useFlag('auth.accounts');
 
@@ -202,12 +211,10 @@ export default function AccountDataSection({
   function confirmDeleteAccount() {
     Alert.alert(
       'Delete account?',
-      'This permanently deletes your rankings, comparison history, trade activity, ' +
-        'notifications, push tokens, and any stored Sleeper connection from our ' +
-        'servers. Trade matches shared with leaguemates are anonymized on your side. ' +
-        'This cannot be undone.',
+      DELETE_ACCOUNT_BODY + '\n\n' + DELETE_ACCOUNT_SUB_NOTE,
       [
         { text: 'Cancel', style: 'cancel' },
+        ...(paywallOn ? [{ text: MON['mon.pay.manage'], onPress: openAppleSubscriptions }] : []),
         {
           text: 'Continue',
           style: 'destructive',
@@ -274,12 +281,6 @@ export default function AccountDataSection({
     <>
       {publicProfileRow}
       {exportRow}
-      {/* #393 M3 — legal privacy §6, verbatim, above the delete confirm; then
-          Manage subscription (self-gated on monetize.paywall). */}
-      <Text style={styles.rowSub} testID="settings.delete-subscription-note">
-        {"Deleting your account doesn't cancel an active subscription. To stop future charges, cancel it in your Apple ID settings first."}
-      </Text>
-      <ManageSubscriptionLink testID="settings.delete-manage-subscription" />
       <Pressable
         // S8 PRD-02 acceptance: Delete account announces as a button
         // with a clear destructive label (was a plain text group).
