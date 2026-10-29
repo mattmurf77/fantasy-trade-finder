@@ -229,6 +229,25 @@ check('0d. flags off: the router itself opens nothing for any signal (belt and b
   eq(nav0.length, 0, 'navigated');
   eq(gate0.usePaywallGate.getState().verifySeq, before, 'opened the sheet');
 });
+check('0e. a THROWING gate reader is off [executed] (release-lead QA P3): gateSignalFor is null, and a gated 402 / 403 is sent once, opens nothing and rejects with the ApiError', async () => {
+  const thrower = load('api/client.ts', CLIENT_STUBS, { fetch: fakeFetch });
+  thrower.setPaywallGateOn(() => { throw new Error('x'); });
+  const dispatched = [];
+  // A dispatched signal would HOLD the call on this never-settling promise.
+  thrower.setOnProRequired((sig) => { dispatched.push(sig); return new Promise(() => {}); });
+  for (const [name, p, status, body] of DARK.slice(0, 3)) {
+    eq(thrower.gateSignalFor(new thrower.ApiError(status, body), p), null, `${name}: gateSignalFor`);
+    responses.length = 0; sent.length = 0;
+    responses.push({ status, body });
+    const call = thrower.api.post(p, {});
+    eq(await heldFor(call, 50), 'settled', `${name}: not held`);
+    const e = await rejects(call);
+    eq(sent.length, 1, `${name}: sent once`);
+    assert(e instanceof thrower.ApiError && e.status === status && JSON.stringify(e.body) === JSON.stringify(body),
+      `${name}: not the ApiError`);
+  }
+  eq(dispatched.length, 0, 'a signal was dispatched to the router (something would open)');
+});
 
 check('1a. a user-initiated 402 opens the paywall: {action:paywall, gate, kind:find}', async () => {
   reset();
@@ -1137,15 +1156,27 @@ check('10j. the CustomerInfo listener believes a push ONLY for a verified sessio
 
 // screens/PaywallScreen — mounted under a fake React (hooks as plain calls,
 // JSX as element objects), its Restore pressed for real.
-function mountPaywall({ state, rcId, ready = false }) {
+// `ctl` stays live after the mount: a test may move RevenueCat's identity
+// (`rcId`) or settle `whenIdentityReady` mid-handler. `plan: true` gives the
+// screen one selected Annual plan with a StoreKit package, so Purchase runs.
+function mountPaywall({ state, rcId, ready = false, ctl = { rcId, ready }, plan = false }) {
   const inits = [];
   const syncs = [];
   const effects = [];
   const sets = [];
+  const waits = [];
+  const buys = [];
+  const events = [];
+  let stateIdx = 0;
   const React = {
     createElement: (type, props, ...children) => ({ type, props: { ...(props || {}), children } }),
     Fragment: 'Fragment',
-    useState: (init) => [typeof init === 'function' ? init() : init, (v) => sets.push(v)],
+    // useState #0 is the selected plan id.
+    useState: (init) => {
+      const i = stateIdx++;
+      const v = plan && i === 0 ? 'ftf_pro_annual' : typeof init === 'function' ? init() : init;
+      return [v, (x) => sets.push(x)];
+    },
     useRef: (current) => ({ current }),
     useEffect: (fn) => { effects.push(fn); },
     useCallback: (fn) => fn,
@@ -1176,18 +1207,24 @@ function mountPaywall({ state, rcId, ready = false }) {
       StyleSheet: { create: (x) => x }, useWindowDimensions: () => ({ height: 800, width: 400 }), View: 'View',
     },
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
-    '@tanstack/react-query': { useQuery: () => ({ data: undefined, isLoading: false }) },
+    '@tanstack/react-query': { useQuery: ({ queryKey }) => ({ isLoading: false, data: !plan ? undefined
+      : queryKey[0] === 'paywall-config' ? { products: [{ product_id: 'ftf_pro_annual', period: 'annual', display_price: '$24.99' }] }
+        : queryKey[0] === 'paywall-offerings' ? { current: { availablePackages: [{ identifier: '$rc_annual', product: { identifier: 'ftf_pro_annual', priceString: '$24.99' } }] } }
+          : {} }) },
     '../components/chalkline/Text': { __esModule: true, default: 'ChalkText' },
     '../components/chalkline': { Button: 'Button', Icon: 'Icon' },
     '../theme/chalkline': { chalk: tokens, flare: tokens, ice: tokens, ink: tokens, radii: tokens, space: tokens },
     '../api/client': { getBaseUrl: () => 'https://api.test' },
     '../api/billing': { getPaywallConfig: async () => ({}) },
     '../api/purchases': {
-      checkIntroEligibility: async () => ({}), currentIdentityUserId: () => rcId, getOfferings: async () => null,
+      checkIntroEligibility: async () => ({}), currentIdentityUserId: () => ctl.rcId, getOfferings: async () => null,
       hasProEntitlement: (info) => !!(info && info.entitlements && info.entitlements.active.pro),
       initPurchases: async (id) => { inits.push(id); }, isIdentityReady: () => false, isPaymentPending: () => false,
-      isUserCancelled: () => false, onIdentityChange: () => () => {}, purchasePackage: async () => null,
-      purchasesReady: () => ready,
+      isUserCancelled: () => false, onIdentityChange: () => () => {},
+      purchasePackage: async (pkg, id) => { buys.push([pkg.product.identifier, id]); return { customerInfo: { entitlements: { active: {} } } }; },
+      PurchaseIdentityError: class PurchaseIdentityError extends Error {},
+      purchasesReady: () => ctl.ready,
+      whenIdentityReady: (id) => { waits.push(id); return ctl.whenIdentityReady ? ctl.whenIdentityReady(id) : Promise.reject(new Error('timeout')); },
       restorePurchases: async (id) => { restores.push(id); return { entitlements: { active: { pro: {} } } }; },
     },
     '../state/useEntitlements': { useEntitlements: (sel) => sel({ refresh: async () => {}, noteCustomerInfo: () => {} }) },
@@ -1195,7 +1232,7 @@ function mountPaywall({ state, rcId, ready = false }) {
     '../state/useSession': { useSession: hook, syncPurchasesIdentity: (s) => { syncs.push(s); } },
     '../state/subscriptionSession': subSession,
     '../state/usePaywallGate': { isUnverifiedSession: gate.isUnverifiedSession, openVerify: () => { verifies.push(1); } },
-    '../api/events': { track: () => {} },
+    '../api/events': { track: (name, props) => { events.push([name, props]); } },
     '../copy/monetization': copy,
   };
   const mod = { exports: {} };
@@ -1216,7 +1253,7 @@ function mountPaywall({ state, rcId, ready = false }) {
     if (node.props && node.props.testID === id) return node;
     return node.props ? find(node.props.children, id) : null;
   };
-  return { tree, find: (id) => find(tree, id), effects, sets, restores, verifies, nav, timers, inits, syncs };
+  return { tree, find: (id) => find(tree, id), effects, sets, restores, verifies, nav, timers, inits, syncs, waits, buys, events };
 }
 check('10k. PaywallScreen Restore runs ONLY when customerInfoApplies; otherwise the identity-not-confirmed path (status "error", no new copy)', async () => {
   const ver = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
@@ -1287,6 +1324,75 @@ check('10m. the paywall\'s identity retry goes through useSession\'s bridge, nev
   }
   eq(JSON.stringify(callers), JSON.stringify({ 'api/purchases.ts': 1, 'state/useSession.ts': 1 }),
     'initPurchases( outside its definition and the bridge');
+});
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+check('10n. PaywallScreen Purchase runs ONLY when customerInfoApplies, even for a session that verified and then lost it; a refusal is the identity-not-ready path (purchase_failed, status "error")', async () => {
+  // Positive control: verified, RevenueCat is this user → the purchase runs.
+  const ok = mountPaywall({ state: { user: sleeperUser('111'), isDemo: false, verification: V(true) }, rcId: '111', ready: true, plan: true });
+  const cta = ok.find('paywall-purchase-cta');
+  assert(cta, 'the purchase CTA rendered');
+  cta.props.onPress();
+  for (let i = 0; i < 6; i += 1) await tick();
+  eq(JSON.stringify(ok.buys), JSON.stringify([['ftf_pro_annual', '111']]), 'verified + matching identity: purchasePackage');
+  const cases = [
+    ['verified, then UNVERIFIED (same user, RevenueCat still that user)', (st) => { st.verification = V(false); }, '111'],
+    ['verified, RevenueCat is ANOTHER user (no logIn lands)', () => {}, '999'],
+  ];
+  for (const [name, after, rcId] of cases) {
+    const state = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
+    const m = mountPaywall({ state, rcId, ready: true, plan: true });
+    after(state);
+    m.find('paywall-purchase-cta').props.onPress();
+    for (let i = 0; i < 6; i += 1) await tick();
+    eq(m.buys.length, 0, `${name}: purchasePackage calls`);
+    assert(m.sets.includes('error'), `${name}: the refusal is the existing error status`);
+    assert(m.events.some(([n, p]) => n === 'paywall_purchase_failed' && p.user_cancelled === false),
+      `${name}: tracked as an identity-not-ready failure`);
+  }
+});
+check('10o. Restore WAITS for a verified session\'s in-flight logIn (whenIdentityReady), then re-checks; unverified / unknown are refused at once, with no wait', async () => {
+  // Verified, logIn in flight: waits, then proceeds once RevenueCat is this user.
+  const landing = deferred();
+  const ctl = { rcId: null, ready: true, whenIdentityReady: () => landing.promise };
+  const m = mountPaywall({ state: { user: sleeperUser('111'), isDemo: false, verification: V(true) }, ctl });
+  // onPress is `() => void onRestore()`: it returns nothing to await, so settle.
+  const settle = async () => { for (let i = 0; i < 6; i += 1) await tick(); };
+  m.find('paywall-restore').props.onPress();
+  await settle();
+  eq(JSON.stringify(m.waits), JSON.stringify(['111']), 'it waits on the session user\'s identity');
+  eq(m.restores.length, 0, 'no restore before the logIn lands');
+  assert(!m.sets.includes('error'), 'refused while the verified session\'s logIn was still landing');
+  ctl.rcId = '111';
+  landing.resolve();
+  await settle();
+  eq(JSON.stringify(m.restores), JSON.stringify(['111']), 'the restore ran once the identity landed');
+  // Verified, the logIn never lands (whenIdentityReady times out): refused.
+  const ctl2 = { rcId: null, ready: true, whenIdentityReady: () => Promise.reject(new Error('timeout')) };
+  const m2 = mountPaywall({ state: { user: sleeperUser('111'), isDemo: false, verification: V(true) }, ctl: ctl2 });
+  m2.find('paywall-restore').props.onPress();
+  await settle();
+  eq(JSON.stringify(m2.waits), JSON.stringify(['111']), 'timed out: it did wait');
+  eq(m2.restores.length, 0, 'timed out: no restore');
+  assert(m2.sets.includes('error'), 'timed out: the error status');
+  // Unknown, and verified-then-unverified: refused at once, never waiting.
+  const unknown = { user: sleeperUser('111'), isDemo: false, verification: null };
+  const flipped = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
+  for (const [name, state, after] of [['unknown', unknown, () => {}], ['unverified', flipped, (st) => { st.verification = V(false); }]]) {
+    const c = { rcId: null, ready: true, whenIdentityReady: () => new Promise(() => {}) };
+    const mm = mountPaywall({ state, ctl: c });
+    after(state);
+    mm.find('paywall-restore').props.onPress();
+    await settle();
+    eq(mm.waits.length, 0, `${name}: waited for an identity`);
+    eq(mm.restores.length, 0, `${name}: restorePurchases calls`);
+    assert(mm.sets.includes('error'), `${name}: refused with the error status`);
+  }
 });
 
 function walk(dir, out = []) {

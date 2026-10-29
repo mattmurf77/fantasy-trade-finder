@@ -26,15 +26,17 @@ import {
   isUserCancelled,
   onIdentityChange,
   purchasePackage,
+  PurchaseIdentityError,
   purchasesReady,
   restorePurchases,
+  whenIdentityReady,
   type PurchasesPackage,
   type PurchasesStoreProduct,
 } from '../api/purchases';
 import { useEntitlements } from '../state/useEntitlements';
 import { useFlag } from '../state/useFeatureFlags';
 import { syncPurchasesIdentity, useSession } from '../state/useSession';
-import { customerInfoApplies } from '../state/subscriptionSession';
+import { customerInfoApplies, purchasesIdentityTarget } from '../state/subscriptionSession';
 import { isUnverifiedSession, openVerify } from '../state/usePaywallGate';
 import { track } from '../api/events';
 import {
@@ -112,6 +114,23 @@ interface Plan {
   pkg: PurchasesPackage | null;
   /** StoreKit's localized price when offerings loaded, else the server's. */
   price: string;
+}
+
+/** May this session buy or restore NOW (state/subscriptionSession,
+ *  customerInfoApplies)? A verified session whose own RevenueCat logIn is
+ *  still landing waits for it (whenIdentityReady's 15 s), the wait
+ *  `_assertIdentity` always gave; an unverified, unknown or demo session is
+ *  refused at once. Re-reads the session after the wait. */
+async function customerInfoAppliesNow(): Promise<boolean> {
+  const target = purchasesIdentityTarget(useSession.getState());
+  if (target && purchasesReady() && currentIdentityUserId() !== target) {
+    try {
+      await whenIdentityReady(target);
+    } catch {
+      /* timed out: refused below */
+    }
+  }
+  return customerInfoApplies(useSession.getState(), currentIdentityUserId());
 }
 
 export default function PaywallScreen({ navigation, route }: any) {
@@ -284,6 +303,10 @@ export default function PaywallScreen({ navigation, route }: any) {
     }
     setBusy(true);
     try {
+      // A purchase returns CustomerInfo, so it runs only while this session is
+      // verified AND RevenueCat is this user, even one that verified earlier
+      // and has since lost it. A refusal is the identity-not-ready path.
+      if (!(await customerInfoAppliesNow())) throw new PurchaseIdentityError();
       const result = await purchasePackage(selected.pkg, userId);
       if (!result) {
         setStatus('unavailable');
@@ -321,7 +344,7 @@ export default function PaywallScreen({ navigation, route }: any) {
       // RevenueCat's identity, so it runs only while this session is verified
       // AND RevenueCat is this user (state/subscriptionSession). Otherwise it
       // takes the identity-not-confirmed path, the same as the catch below.
-      if (!customerInfoApplies(useSession.getState(), currentIdentityUserId())) {
+      if (!(await customerInfoAppliesNow())) {
         setStatus('error');
         return;
       }
