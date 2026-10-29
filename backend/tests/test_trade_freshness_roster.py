@@ -7,11 +7,12 @@ and compare. A display-name change must not miss. Also pins the trades-side
 in-memory SQLite + live session.
 """
 import json
+import traceback
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlalchemy import create_engine, insert, text, update
+from sqlalchemy import create_engine, event, insert, text, update
 
 import backend.database as db_module
 import backend.server as server
@@ -892,9 +893,44 @@ def test_every_picks_read_in_the_worker_is_noted(live, monkeypatch):
     real_note = server._note_job_picks_read
     monkeypatch.setattr(server, "_note_job_picks_read",
                         lambda *a, **k: (notes.append(a[0]), real_note(*a, **k)))
+    drafts = []                           # #487 QA P3-2: one draft read per job
+    real_draft = server.get_league_draft_context
+
+    def draft(*a, **k):
+        if in_worker:
+            drafts.append(a[0] if a else k.get("league_id"))
+        return real_draft(*a, **k)
+    monkeypatch.setattr(server, "get_league_draft_context", draft)
     server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
                               scoring_format="1qb_ppr", opponents_total=1, synchronous=True)
     assert reads and len(reads) == len(notes) == 1
+    assert drafts == [LEAGUE]             # handed to the owner path, never re-read
+
+
+def test_the_kickoff_reads_picks_only_for_the_stamp_and_the_preferences(live):
+    """#487 QA P3-1: every draft_picks or leagues statement a kickoff issues is
+    the one fingerprint read's (snapshot_ids: one picks read, one drafted
+    read) or the preferences' pick share. An expected fp taken from a
+    separate read fails here, not only the snapshot_ids count."""
+    client, engine = live
+    sites = []
+
+    def before(conn, cursor, statement, *_):
+        if "draft_picks" in statement or "FROM leagues" in statement:
+            names = {f.name for f in traceback.extract_stack()}
+            sites.append(("snapshot_ids" if "snapshot_ids" in names
+                          else "preferences" if "_trade_job_preferences" in names else "other",
+                          "leagues" if "FROM leagues" in statement else "draft_picks"))
+    event.listen(engine, "before_cursor_execute", before)
+    try:
+        with patch.object(server, "_start_trade_job_thread", MagicMock()):
+            server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
+                                      scoring_format="1qb_ppr", opponents_total=1)
+    finally:
+        event.remove(engine, "before_cursor_execute", before)
+    assert sorted(s for s in sites if s[0] == "snapshot_ids") == [
+        ("snapshot_ids", "draft_picks"), ("snapshot_ids", "leagues")]
+    assert not [s for s in sites if s[0] == "other"], sites
 
 
 def test_the_owner_context_uses_the_job_s_reads(live, monkeypatch):
