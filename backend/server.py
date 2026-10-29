@@ -3699,10 +3699,11 @@ def _i1_event_exit_drain() -> None:
     """atexit (gunicorn exits its worker normally on SIGTERM): let the queued
     writes land, bounded, then log the drops not yet warned (#468 QA P3-3). A
     worker that died with writes queued behind it is started again first, or
-    those writes would be lost (#485 QA P3). An interpreter that refuses a new
-    thread at shutdown (CPython 3.12 may: "can't create new thread at
-    interpreter shutdown") loses them, logged with the count, and the drain
-    doesn't wait on a queue nothing serves (#519 QA): exit never raises."""
+    those writes would be lost (#485 QA P3). Defensive: should an interpreter
+    ever refuse a new thread at shutdown ("can't create new thread at
+    interpreter shutdown"; #519 QA saw the restart work on 3.12.3, 3.12.15 and
+    3.14), the writes are lost, logged once with the count, and the drain
+    doesn't wait on a queue nothing serves: exit never raises."""
     q = _i1_event_queue
     if q.unfinished_tasks:
         try:
