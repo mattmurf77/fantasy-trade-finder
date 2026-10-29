@@ -1476,6 +1476,11 @@ Index(
 # gesture, so a second pass while `deck_pass_outcome_recorded` is True is
 # skipped by `server._save_deck_outcome_safe` (counted as `dup_pass` on the
 # analytics-health rejects). An undone pass may be passed again.
+# `user_id` (G3-e, legal R28.22): the session user who wrote the outcome, which
+# the insert's owner check makes the impression's owner. Account deletion and
+# export match on it as well as on the user's rows and packs, so an outcome
+# stays reachable however its deck's evidence is stored or pruned. NULL on rows
+# written before it (no backfill: those are reached through rows and packs).
 deck_outcomes_table = Table("deck_outcomes", metadata,
     Column("id",              Integer, primary_key=True, autoincrement=True),
     Column("impression_id",   String,  nullable=False),  # deck_impressions.impression_id
@@ -1484,11 +1489,20 @@ deck_outcomes_table = Table("deck_outcomes", metadata,
     Column("detail_expanded", Integer),                  # 0|1|NULL — opened menu/swap/keep-side
     Column("calc_opened",     Integer),                  # 0|1|NULL — edit-in-calculator (#190)
     Column("acted_at",        String,  nullable=False),  # ISO UTC (server clock)
+    Column("user_id",         String),                   # the acting user (G3-e); NULL before it
 )
 
 Index(
     "ix_deck_outcomes_impression",
     deck_outcomes_table.c.impression_id,
+)
+# G3-e. A fresh DB gets it from this declaration. On an existing table it is
+# built off the boot path (scripts/create_outcome_owner_index.py, CONCURRENTLY),
+# never in init_db: a plain CREATE INDEX holds a SHARE lock that blocks every
+# outcome write for its whole scan. Deletion and export work without it (a scan).
+Index(
+    "ix_deck_outcomes_user",
+    deck_outcomes_table.c.user_id,
 )
 
 # ── TikTok-discovery F3 (flag deck.fatigue) — durable decline suppression ───
@@ -3962,6 +3976,8 @@ def _migrate_db() -> None:
         # ── team overhaul, all-platform sends (2026-09-07): MFL/ESPN cores
         # report a status word without a transaction id.
         ("overhaul_attempts",  "provider_status",           "VARCHAR"),
+        # ── G3-e (legal R28.22): an outcome's owner, for deletion and export.
+        ("deck_outcomes",      "user_id",                   "VARCHAR"),
     ]
     # Only missing columns get an ALTER, each in its own transaction so a
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -8191,6 +8207,8 @@ def save_deck_outcome(
     A view is recorded once. Other actions can repeat after undo, with at
     most 32 of each action per impression. The owner row serializes these
     bounds on Postgres; SQLite's single insert/select checks them atomically.
+    The row carries `acting_user_id` as its `user_id` (G3-e), which the owner
+    check makes the impression's owner.
     """
     if action not in ("viewed", "like", "pass", "not_interested", "propose", "undo"):
         raise ValueError(f"unknown deck outcome action: {action!r}")
@@ -8215,10 +8233,11 @@ def save_deck_outcome(
             literal(impression_id), literal(action), literal(dwell_ms),
             literal(None if detail_expanded is None else int(detail_expanded)),
             literal(None if calc_opened is None else int(calc_opened)),
-            literal(datetime.now(timezone.utc).isoformat()),
+            literal(datetime.now(timezone.utc).isoformat()), literal(acting_user_id),
         ).where(owner.exists(), count < (1 if action == "viewed" else 32))
         result = conn.execute(insert(deck_outcomes_table).from_select(
-            ["impression_id", "action", "dwell_ms", "detail_expanded", "calc_opened", "acted_at"],
+            ["impression_id", "action", "dwell_ms", "detail_expanded", "calc_opened", "acted_at",
+             "user_id"],
             values))
         return result.rowcount == 1
 
