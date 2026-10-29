@@ -39,7 +39,7 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
     - `target` ∈ `add` | `trade`;
     - `rung` ∈ `add` | `player` | `players_tab` | `league` | `bare` | `trade` | `trades_tab`, the rung actually opened;
     - `outcome` ∈ `app` | `not_installed`, where `not_installed` means `openURL` rejected (G4);
-    - `has_drop` (bool) only on a `target=add` row off `send_button`; omitted, never `null`, on `send_button` and every `target=trade` row (G2).
+    - `has_drop` (bool) only on a `target=add` row on any surface but `send_button`; omitted, never `null`, on `send_button` and every `target=trade` row (G2).
     - No player id, name or league id (G5).
   - **INTENT.** Registered in `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS` (`backend/analytics_taxonomy.py`) in the same commit as the emitter, with **no** `analytics_queries.NON_INTENT_EVENTS` row. Not a WAT event.
   - **Where it fires:** inside the helper, so no call site changes.
@@ -47,7 +47,7 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
     - `openInSleeperApp` passes one that calls `trackHandoff` (`sleeperHandoff.ts:119`, `:132-149`).
     - So it fires once per hand-off, before the D2 alert, with no further `await` (G3). A re-tap while the open is in flight adds nothing.
     - ESPN, MFL, `surface: 'unspecified'` and `target: 'league'` (outside the granted `target` set) emit nothing.
-  - **`openInSleeperApp` gains `hasDrop?: boolean`.** It reaches the event only on an add hand-off off `send_button`. The claim sheet passes it (league-eng, #509).
+  - **`openInSleeperApp` gains `hasDrop?: boolean`.** It reaches the event only on an add hand-off on any surface but `send_button`. The `free_agents` and `usage_trends` rows carry no `has_drop` until league-eng's #509 passes `hasDrop`.
   - **`external_link_opened` is not granted** and isn't built.
   - **Evidence:**
     - `mobile/tests/check-sleeper-handoff-event.js` (E1–E11; `npm run test:sleeper-handoff-event`) executes the helper with stubbed `Linking` and `track`;

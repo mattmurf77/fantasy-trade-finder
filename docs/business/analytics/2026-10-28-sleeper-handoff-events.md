@@ -20,7 +20,7 @@ Source: #351's PRD §3.2 (`origin/plan/sleeper-fa-deeplink:docs/plans/sleeper-fa
 
 Every value set is closed. `CLIENT_EVENT_PROPS` constrains keys only, so the enums live in its comment, in this addendum, and in `mobile/tests/check-sleeper-handoff-event.js`, which fails on a value outside them.
 
-- **`has_drop`** rides only on a `target=add` row off `send_button`, and only when the caller passes it. The claim sheet passes it (league-eng, #509). It is **omitted, never `null`,** on `send_button` and on every `target=trade` row (G2): an absent key is the house pattern, and a `null` prop is ambiguous.
+- **`has_drop`** rides only on a `target=add` row on any surface but `send_button`, and only when the caller passes it. **The `free_agents` and `usage_trends` rows carry no `has_drop` until league-eng's #509 passes `hasDrop`** (the build is named here once it's known). It is **omitted, never `null`,** on `send_button` and on every `target=trade` row (G2): an absent key is the house pattern, and a `null` prop is ambiguous.
 - **One per hand-off.** A Send All of N queued trades is one hand-off, so it is one event (`trade_queue`). A re-tap while an open is in flight gets the in-flight promise back and adds no open and no event.
 - **Emits nothing:**
   - ESPN and MFL opens (they never reach `openInSleeperApp`);

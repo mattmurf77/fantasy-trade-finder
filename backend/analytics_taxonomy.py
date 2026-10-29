@@ -1808,8 +1808,9 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #              trades_tab — the rung actually opened (#351 PRD §4.1)
     #   outcome  ∈ app | not_installed. not_installed means `openURL`
     #              REJECTED; the client never calls canOpenURL (G4)
-    #   has_drop   bool, only on a target=add row off send_button. ABSENT,
-    #              never null, on send_button and every target=trade row (G2)
+    #   has_drop   bool, only on a target=add row on any surface but
+    #              send_button. ABSENT, never null, on send_button and every
+    #              target=trade row (G2)
     # One row per hand-off: a Send All of N queued trades is one. No player
     # id, name or league id (G5). No device `platform`: that is a
     # user_events COLUMN, never a prop.

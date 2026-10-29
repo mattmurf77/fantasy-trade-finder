@@ -104,7 +104,7 @@ function resolveRung(
 // Copy (optional) → open the scheme → sleeper_handoff_resolved → on
 // rejection, the D2 alert. 'not_installed' means the alert is showing;
 // nothing failed silently. `hasDrop` is the claim sheet's "picked a drop";
-// it reaches the event only on an add hand-off off send_button.
+// it reaches the event only on an add hand-off on any surface but send_button.
 export async function openInSleeperApp(
   t: SleeperLink & { clipboardText?: string; surface?: ExternalSurface; hasDrop?: boolean },
 ): Promise<'app' | 'not_installed'> {
@@ -126,7 +126,7 @@ export async function openInSleeperApp(
 // handoff-events.md). One per hand-off, fired synchronously from openPlatform's
 // settle seam before the D2 alert (G3). `not_installed` = openURL rejected; the
 // code never asks canOpenURL (G4). `has_drop` rides only on a target=add row
-// off send_button, and only when the caller passed it: an absent key, never
+// on any surface but send_button, and only when the caller passed it: an absent key, never
 // null (G2). No player id, name or league id (G5). A surface of 'unspecified'
 // emits nothing, and so does target 'league' (not in the granted `target` set).
 function trackHandoff(
