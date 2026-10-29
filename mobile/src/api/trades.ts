@@ -995,8 +995,8 @@ export async function createStandingOffer(body: {
   seasons: number[];
   team_user_ids: string[];
   source_trade_id?: string;
-}): Promise<{ status: string; offer: StandingOffer }> {
-  const res = await api.post<any>('/api/trades/standing-offer', body);
+}, request?: { background?: boolean }): Promise<{ status: string; offer: StandingOffer }> {
+  const res = await api.post<any>('/api/trades/standing-offer', body, request);
   return {
     status: String(res?.status ?? 'ok'),
     offer: normalizeStandingOffer(res?.offer),

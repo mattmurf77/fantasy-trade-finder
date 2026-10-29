@@ -960,6 +960,8 @@ const BACKGROUND_SET = [
   [TRADES, /if \(vars\.auto\) \{\s*return generateTrades\(request, vars\.searchId \? \{ searchId: vars\.searchId \} : undefined, \{ background: true \}\);\s*\}/,
     'the first-run auto-start and its silent retry'],
   [TRADES, /await getTradeStatus\(job\.job_id, undefined, \{ background: true \}\)/, "the deck's legacy status poll"],
+  ['components/StandingOfferSheet.tsx', /\.\.\.\(sourceTradeId \? \{ source_trade_id: sourceTradeId \} : \{\}\),\s*\}, \{ background: true \}\);/,
+    "the standing-offer post (QA P2-3: nothing may present over the sheet's RN Modal)"],
   ['api/overhaul.ts', /request: \{ background\?: boolean \} = \{ background: true \},/,
     "the active-overhaul probe (TradesScreen's getActiveOverhaul query, every mount)"],
 ];
@@ -1378,6 +1380,42 @@ check('8p. QA P1-1 [executed + shape]: flags off, the deck / landing / Win Now /
   eq((code.match(/\.isVerificationRequired\b/g) || []).length, 1, 'TradesScreen: only main\'s swipe-toast copy reads isVerificationRequired');
   const win = strip(read('screens/WinNowScreen.tsx'));
   assert(!/isVerificationRequired|isProRequired/.test(win), 'WinNowScreen reads no gate field directly');
+});
+
+check('8r. QA P2-3 [executed + shape]: the standing-offer post\'s gate answer shows no raw text, hides the sheet, and opens the paywall / VerifySheet only after the Modal is gone (then onClose, nothing recorded); flags off, today\'s catch', async () => {
+  const SHEET = 'components/StandingOfferSheet.tsx';
+  const code = strip(read(SHEET));
+  const at = code.indexOf('async function handleConfirm(');
+  const confirm = code.slice(at, code.indexOf('\n  }\n', at));
+  const gateBranch = confirm.slice(confirm.indexOf("const signal = gateSignalFor(e, '/api/trades/standing-offer');"), confirm.indexOf('return;\n      }') + 7);
+  assert(/const signal = gateSignalFor\(e, '\/api\/trades\/standing-offer'\);\s*if \(signal && signal\.action !== 'verify_mismatch'\) \{\s*setSubmitting\(false\);\s*pendingGateRef\.current = signal;\s*setGateClosing\(true\);\s*setTimeout\(openGateAfterDismiss, 1000\);\s*return;\s*\}/.test(confirm),
+    'the gate branch: submitting reset, the sheet hidden, the open deferred');
+  assert(!/setError|openPaywall|openVerify|onSkip|onPosted|track\(/.test(gateBranch), 'the gate branch shows no text, opens nothing yet, records nothing');
+  assert(/return;\s*\}\s*setError\(e\?\.message \|\| 'Could not post that standing offer'\);\s*setSubmitting\(false\);\s*\}/.test(confirm),
+    "flags off (gateSignalFor null): today's catch, byte-identical");
+  assert(/<Modal\s+visible=\{visible && !gateClosing\}\s+transparent\s+animationType="slide"\s+onRequestClose=\{onSkip\}\s+onDismiss=\{openGateAfterDismiss\}\s*>/.test(code),
+    'the Modal hides on the gate and its onDismiss runs the open');
+  eq((code.match(/\bopenPaywall\(|\bopenVerify\(/g) || []).length, 2, 'the only opens are in openGateAfterDismiss');
+  assert(/onClose=\{\(\) => setStandingOfferPrompt\(null\)\}/.test(strip(read(TRADES))), 'TradesScreen: onClose only clears the prompt');
+  // EXECUTED: the after-dismiss open, once, in order: onClose, then the gate.
+  const calls = [];
+  const pendingGateRef = { current: { action: 'paywall', gate: 'lapsed', kind: 'send' } };
+  const open = extractFn(SHEET, 'openGateAfterDismiss', {
+    pendingGateRef,
+    onClose: () => calls.push('onClose'),
+    openPaywall: (p) => calls.push(`paywall:${JSON.stringify(p)}`),
+    openVerify: () => calls.push('verify'),
+  });
+  open();
+  open();
+  eq(calls.join(' | '), `onClose | paywall:${JSON.stringify({ source: 'gate', gate: 'lapsed', kind: 'send' })}`, 'onDismiss then the backup timer: one close, one paywall');
+  calls.length = 0;
+  pendingGateRef.current = { action: 'verify', gate: null, kind: 'send' };
+  open();
+  eq(calls.join(' | '), 'onClose | verify', 'a verify answer opens the VerifySheet');
+  // Flags off: no gate answer at all, so the catch takes today's path.
+  eq(client0.gateSignalFor(new client0.ApiError(402, { error: 'pro_required', gate: 'lapsed' }), '/api/trades/standing-offer'), null, 'off: 402');
+  eq(client0.gateSignalFor(new client0.ApiError(403, { error: 'verification_required' }), '/api/trades/standing-offer'), null, 'off: 403');
 });
 
 function walk(dir, out = []) {

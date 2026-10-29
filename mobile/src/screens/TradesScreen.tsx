@@ -10739,6 +10739,9 @@ export default function TradesScreen({ navigation, route }: any) {
           members={standingOfferMembers}
           memberFirstsBySeason={standingOfferFirstsByOwner}
           onSkip={skipStandingOfferPrompt}
+          // #393 (release-lead QA P2-3): the gate stopped the post. Close with
+          // nothing recorded: no skip event, no snooze, no toast.
+          onClose={() => setStandingOfferPrompt(null)}
           onPosted={(offer) => {
             setStandingOfferPrompt(null);
             queryClient.invalidateQueries({ queryKey: ['standing-offers', leagueId] });
