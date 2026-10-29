@@ -181,6 +181,30 @@ def test_an_undelivered_malformed_move_is_g1s_not_the_loaders(moves, deliveries)
     assert g1["ids"] == ["j"]
 
 
+@pytest.mark.parametrize("w0, malformed", [((6,), 1), ((), 0)], ids=["w0_moved", "no_w0"])
+def test_g1_sees_a_later_move_that_names_a_never_delivered_card(w0, malformed):
+    """#529 QA P3: the loader rejects a delivered move naming a W0 index; G1's
+    whole-header check reads the deck's W0s too, so it sees a later one."""
+    db = make_db()
+    _packed_deck(db, moves={"6": 8}, w0=w0, retired=False,
+                 deliveries=[[4, SERVED], [9, _after(5)]])
+    (deck,) = load_decks(engine=db.eng, as_of=_after(2))
+    assert deck.exclusion != PACK_INTEGRITY            # the move isn't delivered yet
+    g1 = flip_read(db.eng, since=SERVED, as_of=_after(2)).g1
+    assert (g1["display_moves_malformed"], g1["status"]) == (malformed,
+                                                            "FAIL" if malformed else "PASS")
+
+
+@pytest.mark.parametrize("moves, malformed", [({"1": 3}, 1), (None, 0)],
+                         ids=["a_move", "no_moves"])
+def test_g1_on_a_pack_with_no_deliveries(moves, malformed):
+    """#529 QA P3: with no deliveries, no move can share one with its anchor."""
+    db = make_db()
+    _packed_deck(db, moves=moves, deliveries=[], retired=False)
+    g1 = flip_read(db.eng, since=SERVED, as_of=_after(2)).g1
+    assert (g1["pack_integrity"], g1["display_moves_malformed"]) == (0, malformed)
+
+
 def test_a_malformed_move_recorded_after_as_of_keeps_a_re_read_stable():
     """F1: the header later records a malformed move for a response delivered
     after as_of. A re-read at the same as_of is the same deck; a read past
