@@ -114,6 +114,7 @@ reference material), not the file's last-edit date.
 
 | Doc | Status | Notes |
 |---|---|---|
+| [launch-copy-b5-trades-2026-10-28.md](launch-copy-b5-trades-2026-10-28.md) | **active** | B5 launch copy, trades-eng's items 1, 3 and 4 (marketing-lead addendum 10): the Win Now "Uncalibrated estimate" label, the ESPN calculator picks note and its `Set up picks →` link, and the Shop button and queue toasts. Scope block with the TestFlight checklist. |
 | [device-side-platform-auth-prd-2026-08-12.md](device-side-platform-auth-prd-2026-08-12.md) | **active** | Device-held platform credentials. Dual-agent final, 4 rounds. Operator defaults ratified as [D-047]; ADR-011 on `main`. |
 | [device-side-platform-auth-hld-decisions-2026-08-13.md](device-side-platform-auth-hld-decisions-2026-08-13.md) | **active** | The HLD decision set for the above. Binding on `connected-rankings/`, which conforms rather than re-litigates. |
 | [pending-trades-inbox-plan-2026-08-12.md](pending-trades-inbox-plan-2026-08-12.md) | **not built** | Cross-platform pending-offer inbox (Sleeper/ESPN/MFL) as a third Matches tab. No flag exists. |
