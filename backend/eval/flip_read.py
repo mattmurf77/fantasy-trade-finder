@@ -500,6 +500,23 @@ def _sum_counts(dicts) -> dict[str, int]:
     return dict(sorted(total.items()))
 
 
+# #535's line (server._deck_live_stamp, at ERROR): a delivered deck with no
+# rows and no pack, which eval can't see. release-lead copies every one in a
+# read's window into the read (models-lead G3-a); the B-DK audit counts those
+# decks (G-b4) and G3 attributes their orphans (G3-b).
+_NO_EVIDENCE_LINE = re.compile(
+    r"deck-evidence (\S+): (\d+) delivered cards? of a deck with no evidence")
+
+
+def parse_no_evidence_log(text: str) -> dict[str, int]:
+    """deck_job_id -> its delivered cards, summed over its #535 lines in
+    `text` (a deck logs one line per delivery; other text is ignored)."""
+    out: dict[str, int] = {}
+    for run_id, n in _NO_EVIDENCE_LINE.findall(text):
+        out[run_id] = out.get(run_id, 0) + int(n)
+    return out
+
+
 def _chunks(items: list, size: int = 500):
     for i in range(0, len(items), size):
         yield items[i:i + size]
