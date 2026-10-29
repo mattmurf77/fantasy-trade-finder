@@ -78,6 +78,8 @@ const api = load(API, (name) => {
   // api/overhaul.ts only uses these inside fetchers; the predicate needs neither.
   if (name === './client') return { apiRequest: () => { throw new Error('not under test'); } };
   if (name === './trades') return { normalizeTradeCard: (c) => c };
+  // #527 (client send timeout): sendBatch's per-call timeout; not used by the predicate.
+  if (name === './sendOutcome') return { overhaulSendTimeoutMs: () => 135_000 };
   throw new Error(
     `api/overhaul.ts gained an unexpected runtime import ("${name}") — ` +
       'extend this shim deliberately, do not let it pass silently.',
