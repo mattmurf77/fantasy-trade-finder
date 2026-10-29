@@ -1,15 +1,17 @@
-"""Account deletion's model-artifact hook (legal R28.20; models-lead E-b1,
-E-b3).
+"""Account deletion's model-artifact hook (legal R28.20 and R28.22;
+models-lead E-b1, E-b3).
 
 A fitted value model keeps `partner_rates` keyed "<viewer>|<partner>"
 (value_model._partner_key), so a deleted user's platform id survives in its
 keys, as the viewer or as the partner. The deletion scrub (trades-eng) calls
-redact_model_store once per run with that run's {platform id: token} map,
-and every persisted record's keys take the same token as the scrub's other
-stores. Fit and score stay consistent: partner rates need only equality,
-never the id's value (E2), so the rates keep their values under the token.
-Dropping the keys would change live scores, since those pairs would fall
-back to the global rate.
+redact_model_store once per run with that run's {platform id: token} map.
+Under legal R28.22 (f, c3 #14), every persisted record's keys whose viewer
+is a deleted user (their own rates) are deleted, and its keys whose partner
+is one take that user's token, the same token as the scrub's other stores.
+Partner rates need only equality, never the id's value (E2), so a re-keyed
+rate keeps its value. Dropping those keys instead would change replay
+scores of the redacted cards, whose partner is the token (models-lead
+addendum G's E-b3 wording).
 
 Here, not in value_model.py: that module is in the engine code hash
 (server._ENGINE_CODE_MODULES), and editing it would cold every stored page.
@@ -28,6 +30,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import tempfile
 from collections.abc import Mapping
 
@@ -53,24 +56,33 @@ def _may_hold(line: str, tokens: Mapping[str, str]) -> bool:
 
 
 def redact_partner_rates(rates: Mapping, tokens: Mapping[str, str]) -> tuple[dict, int]:
-    """(`rates` with every key's viewer and partner that `tokens` maps
-    replaced by its token, the number of keys changed). Values are kept."""
-    out, changed = {}, 0
+    """(`rates` without the keys whose viewer `tokens` maps, and with the
+    keys whose partner it maps re-keyed to that token, the number of keys
+    deleted or re-keyed). Values are kept. A re-keyed pair already present
+    under the token keeps the rate it has."""
+    out, rekeyed, changed = {}, [], 0
     for key, rate in rates.items():
         viewer, sep, partner = str(key).partition("|")
-        new = f"{tokens.get(viewer, viewer)}|{tokens.get(partner, partner)}" if sep else key
-        changed += new != key
-        out[new] = rate
+        if sep and viewer in tokens:          # the deleted user's own rates (R28.22)
+            changed += 1
+        elif sep and partner in tokens:
+            rekeyed.append((f"{viewer}|{tokens[partner]}", rate))
+            changed += 1
+        else:
+            out[key] = rate
+    for key, rate in rekeyed:
+        out.setdefault(key, rate)
     return out, changed
 
 
 def redact_model_store(tokens: Mapping[str, str], path: str | None = None) -> int:
     """Rewrite the value-model store (value_model.models_path() unless
     `path`) so no record's partner_rates key names a platform id in
-    `tokens`; returns the number of changes, keys re-keyed plus unparseable
-    lines dropped (0 when there's nothing to do). The file is replaced
-    atomically (a temp file in the same directory, then os.replace), which
-    changes its mtime, so the serve-time cache reloads. An unparseable line
+    `tokens` (redact_partner_rates); returns the number of changes, keys
+    deleted or re-keyed plus unparseable lines dropped (0 when there's
+    nothing to do). The file is replaced atomically (a temp file in the same
+    directory, with the store's mode, then os.replace), which changes its
+    mtime, so the serve-time cache reloads. An unparseable line
     (a torn write) that may hold a mapped id is dropped (_may_hold): the
     loader skips such lines, so serving is unchanged (head-eng's #529 check,
     (a)); others are kept as they are. Idempotent: a re-run with the same map
@@ -108,8 +120,10 @@ def redact_model_store(tokens: Mapping[str, str], path: str | None = None) -> in
             return 0
         if _signature(path) != before:
             continue                       # appended to meanwhile: read it again
+        mode = stat.S_IMODE(os.stat(path).st_mode)
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", suffix=".redact")
         try:
+            os.fchmod(fd, mode)                # mkstemp's is 0600
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write("".join(f"{line}\n" for line in out))
             os.replace(tmp, path)
