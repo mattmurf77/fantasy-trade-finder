@@ -1,10 +1,11 @@
 # Feature Scope addendum — ESPN/MFL send registry (P2-A)
 
 **Date:** 2026-10-29
-**Entry point:** release-lead's QA of #527, finding P2-A (and P3-5, the same-frame double tap). head-eng YES for the 11-06 iOS binary, if it is in release-lead's queue by 11-03.
+**Entry point:** release-lead's QA of #527, finding P2-A (and #527's P3-5, the same-frame double tap). head-eng YES for the 11-06 iOS binary, if it is in release-lead's queue by 11-03.
 **Builder:** platforms-eng worker, branch `fix/send-registry`, cut from `fix/espn-mfl-client-send-timeout` (#527, head `3ad01072`, which is unchanged).
 **Addendum to:** [scope.md](scope.md). Everything there still holds; this covers only the registry.
 **Operator sign-off on waivers:** not needed. The one waiver is analytics (c), no new event.
+**Revised 2026-10-29** after release-lead's QA of #539 (passed). Four of its P3s ride on this branch: P3-1 (a stale queued dialog), P3-3 (eviction order), P3-5 (#379 compatibility) and P3-6 (TestFlight wording).
 
 ---
 
@@ -26,12 +27,19 @@ A send's state lived only in the button's `useState`, and the ESPN/MFL propose r
      - A definitive not-sent answer (`*_write_failed`, `*_unavailable`, auth, unmapped assets, `feature_disabled`, …) clears the entry: `settleSend(key, 'not_sent')`.
    - **Why `sent` is recorded:** the button's local `'sent'` state is gone, so the registry has to carry "Proposal sent" for the button that sent the trade. As a result, a remount shows it too, and nothing offers an idle Send for a trade that was just confirmed. `beginSend` refuses `sent` as well as `in_flight`, but only a stale second confirm dialog can reach a refusal: the button itself is disabled in both states.
    - **Lifetime:** in memory, per app run. It survives a remount, **not an app restart**.
-   - **Bounded:** at most `SEND_REGISTRY_CAP` = 50 trades. The oldest is dropped first, and a re-recorded trade becomes the newest.
+   - **Bounded (P3-3):** over `SEND_REGISTRY_CAP` = 50 trades, `evict()` (`sendRegistry.ts:95`) drops `sent` entries first, then `unknown` ones, oldest first in each. A re-recorded trade counts as the newest.
+     - It never drops an `in_flight` entry: forgetting one would let a remount send that trade again.
+     - If every entry is in flight, the map stays over the cap.
 2. **The buttons** (`SendInEspnButton.tsx`, `SendInMflButton.tsx`, same change in each):
    - **Remount:** the label and `disabled` come from `useSyncExternalStore(subscribeSends, () => getSendRecord(sendKey)?.state)` (ESPN `:97-98`, MFL `:95-96`), so a remount, or the same button showing a different trade, reads that trade's state. "Sending…" and "Proposal sent" are the existing labels. The local state keeps only `'idle' | 'checking'`, for the link-status and validate checks.
-   - **Double tap (P3-5):** `doPropose`'s first statement is `if (!beginSend(sendKey)) return;` (ESPN `:159`, MFL `:118`), before any await. A same-frame double tap, a second queued confirm dialog, or a second mount sends no second request.
+   - **Double tap (#527 QA P3-5):** `doPropose`'s first statement is `if (!beginSend(sendKey)) return;` (ESPN `:159`, MFL `:118`), before any await. A same-frame double tap, a second queued confirm dialog, or a second mount sends no second request.
    - **Settle:** the try block calls `settleSend(sendKey, 'sent')` (ESPN `:168`, MFL `:127`). The catch starts with `settleSend(sendKey, isSendOutcomeUnknown(err) ? 'unknown' : 'not_sent')` (ESPN `:182`, MFL `:141`), ahead of #527's unchanged alert ladder.
-   - **Reminder:** when this trade's entry is `unknown`, the dialog that gates the send begins with marketing's approved 8e/8f line, `sendOutcomeUnknownMessage(platform)`, then a blank line, then the dialog's existing text (ESPN `:267`, MFL `:220`). This applies to both "Send this trade?" and the warnings dialog ("Send anyway"). The buttons are unchanged. **No new copy.**
+   - **Reminder:** when this trade's entry is `unknown`, the dialog that gates the send begins with marketing's approved 8e/8f line, `sendOutcomeUnknownMessage(platform)`, then a blank line, then the dialog's existing text (ESPN `:282`, MFL `:235`). This applies to both "Send this trade?" and the warnings dialog ("Send anyway"). The buttons are unchanged. **No new copy.**
+   - **A stale dialog doesn't send (P3-1):** `confirmSend` builds its dialog in `showConfirm()` (ESPN `:272`, MFL `:225`).
+     - `showConfirm()` captures the trade's registry state as `shown` when the dialog is built. The dialog's Send (and Send anyway) calls `doPropose` only if the state still equals `shown` (ESPN `:276`, MFL `:229`).
+     - **The case it fixes:** a same-frame double tap queues two dialogs. Send on the first goes out, and the second stays open through the 60–91 s wait. After "Check before resending", Send on that second dialog used to send a second POST of an unknown trade, with no reminder.
+     - **In flight or sent since the dialog was built:** nothing happens. The button already shows Sending… / Proposal sent.
+     - **Unknown since** (or cleared by a later definitive refusal): the dialog opens again, current. After an unknown outcome it carries the reminder, and Send on it sends, knowingly.
 3. **Exactly one result alert after a remount.**
    - The `doPropose` call that sent the trade owns the alert.
    - RN's `Alert.alert` is a global native dialog, not part of the component tree. It shows even when the button that started the send has unmounted, and unmounting doesn't cancel the promise, so that call always reaches its alert. That rules out zero alerts.
@@ -46,12 +54,13 @@ A send's state lived only in the button's `useState`, and the ESPN/MFL propose r
 **Behaviour changes worth knowing**
 - **After a confirmed send:** reopening the trade in the same app run shows "Proposal sent", disabled, where it used to show an idle Send. The original button already did this while it stayed mounted. Re-sending the identical trade needs an app restart (or the platform itself).
 - **A reused button showing a different trade** (the deck's top card, an edited calculator trade) shows that trade's own state. Before, a sent/sending state stuck to the button instance.
-- **A stale confirm dialog** for a trade that is in flight or confirmed sent does nothing when you tap Send.
+- **A stale confirm dialog** does nothing when you tap Send if the trade has since gone in flight or been sent. If the trade's outcome has since turned unknown, the dialog opens again with the reminder instead of sending.
 
 **Known limits**
 - **In memory only.** An app restart, or iOS ending the app in the background, during the wait loses the entry. On relaunch the trade shows an idle Send and no reminder, and the lost request's alert never shows. The ESPN/MFL routes still have no server-side idempotency key. That, or a persisted registry, is a separate change.
 - **Per device.** Another device knows nothing of this device's sends.
 - **The reminder lasts until the next send of that trade settles, or a restart.** The registry can't see that the user revoked the trade on the platform.
+- **The `sent` lock blocks an identical re-send until an app restart** (P3-6). A TTL, or a "send again?" confirm, comes after 11-06; either needs copy.
 - **Pre-existing since #527, not changed here:** if the button unmounted during the wait and the late answer is an auth error, the alert's **Sign in** relies on the unmounted button. For MFL that is `setSignInVisible`; for ESPN it is the focus re-check after `EspnConnect`. So the MFL sign-in sheet does not open, and ESPN's "connected" follow-up alert does not show. **Open ESPN / Open MFL** (Linking) work.
 
 ## 1. Analytics scope
@@ -68,8 +77,9 @@ None. No table, flag, env var or route. Sends stay behind `espn.send` and `trade
 
 ## 3. Evidence scope
 
-- [x] **Structural guard:** `mobile/tests/check-send-registry.js` (`npm run test:send-registry`), **31 checks**.
+- [x] **Structural guard:** `mobile/tests/check-send-registry.js` (`npm run test:send-registry`), **35 checks**. It started at 31; P3-1 added R2d and R2e for each button, and P3-3 rewrote R6a.
   - **What it executes:** the real `api/sendRegistry.ts` and the real `SendInEspnButton` / `SendInMflButton`. They are transpiled and run under a minimal hooks shim (state kept across renders, a fresh state for a remount, `useSyncExternalStore` subscribed per mount), with a fake `Alert` and a scripted propose. It also uses the real `api/client.ts` `ApiError`, `api/sendOutcome.ts` and `utils/sendOutcomeCopy.ts`.
+  - **#379 compatibility (P3-5):** the module shim also answers `../utils/openExternal` (`openPlatform`), which the buttons import once #379 lands. Before #379 it is unused.
   - **R1, the key:**
     - It is order-insensitive.
     - It is scoped by platform, league and counterparty, and picks count.
@@ -79,6 +89,13 @@ None. No table, flag, env var or route. Sends stay behind `espn.send` and `trade
     - `doPropose` starts with the guard.
     - `in_flight` is set synchronously by the press, and the request sees it.
     - Each of these sends **one POST**: a same-frame double press, two queued confirm dialogs (pressed in flight and again after the confirmed send), and a second mount.
+    - **R2d, P3-1's exact scenario:**
+      - A double tap queues two dialogs. Send on the first, then a timeout ("Check before resending").
+      - Send on the second sends **nothing** (still one POST). Instead the dialog opens again with the 8e/8f line word for word, and buttons Cancel / Send.
+      - Send on that reopened dialog then sends (two POSTs).
+      - A stale dialog pressed while in flight, or after a confirmed send, does nothing and opens nothing.
+      - The warnings dialog behaves the same.
+    - **R2e:** both dialogs' Send is `send`, and `doPropose` is reachable only inside `if (now === shown)`, with `shown = getSendRecord(sendKey)?.state` (AST).
   - **R3, a remount:** it renders "Sending…", disabled, and a tap does nothing. The same instance shows another trade as idle, and the first trade as Sending… again.
   - **R4, one alert:** send, unmount, remount, then success / timeout / `write_failed` gives **exactly one** result alert. The remount is notified and shows "Proposal sent" / idle / idle.
   - **R5, outcomes:**
@@ -88,7 +105,7 @@ None. No table, flag, env var or route. Sends stay behind `espn.send` and `trade
     - Five definitive not-sent answers clear the entry, and the next dialog has no reminder.
     - The catch's first statement and the reminder expression are pinned (AST).
   - **R6, the module:**
-    - It is bounded.
+    - It is bounded, in P3-3's order (R6a). With the cap filled by interleaved in-flight / unknown / sent entries, each new trade evicts the oldest `sent` entry, then the oldest `unknown` one (a re-recorded one counts as newest). It never evicts an `in_flight` entry: with every entry in flight, the map goes to cap + 1.
     - The API semantics and the listeners are pinned.
     - It has no imports, and its comment states the restart limit.
     - The Sleeper button and the overhaul don't import it.
@@ -102,7 +119,21 @@ None. No table, flag, env var or route. Sends stay behind `espn.send` and `trade
   | (c) unknown not recorded (`settleSend(sendKey, 'not_sent')` always), ESPN | 3: R5a, R5b, R5d |
   | (d) the reminder altered in the button (a literal in place of `sendOutcomeUnknownMessage`), ESPN | 3: R5a, R5b, R5d |
   | (d2) the 8e/8f line altered in `sendOutcomeCopy.ts` | 4 in this suite (R5a, R5b, ESPN + MFL), plus `check-send-timeout.js` C4, C5 |
+  | P3-1: the `now === shown` comparison removed (Send always calls `doPropose`), ESPN | 2: R2d, R2e |
+  | P3-1: same, MFL | 2: R2d, R2e |
+  | P3-3: evict `in_flight` entries first | 1: R6a |
 
+  Re-run on the revised code, (a)–(d2) all stay red:
+  - (a): 5 each, with R2d joining;
+  - (b): 7;
+  - (c): 4;
+  - (d): 4;
+  - (d2): 6 in this suite (R2d joins, both platforms), plus C4 and C5.
+
+- [x] **Merge dry-run with #379** (`origin/build/open-external-helper` at `b362b4f8`; `git merge-tree` into a scratch copy, not pushed):
+  - The only conflicts are the first two import lines of each button.
+  - Resolved as release-lead would (this branch's `react` line, #379's `react-native` line without `Linking`), the merged tree passes `check-send-registry.js` 35/35, `check-send-timeout.js` 24/24, `check-send-button-platform.js`, `check-external-links.js`, and `tsc --noEmit` (exit 0).
+  - Without the `openExternal` shim, the same merged tree fails `check-send-registry.js` (23 red).
 - [x] **Regression:**
   - every `mobile/tests/check-*.js` passes, 122/122, including `check-send-timeout.js` 24/24 and `check-send-button-platform.js`;
   - `npx tsc --noEmit` exits 0;
@@ -112,12 +143,13 @@ None. No table, flag, env var or route. Sends stay behind `espn.send` and `trade
 
   **Safety (release-lead QA P3-6, scope.md §3), for every step that sends:**
   - Only use a **sandbox league with a test counterparty**, never a league with real managers. A send under 100% loss can still reach the platform when the network returns.
-  - Keep the conditioner, or airplane mode, on for **at least 5 minutes after the alert**.
+  - **Steps 1–5 use Network Link Conditioner (100% loss), not airplane mode.** Airplane mode fails the request at once, so there is no wait to back out during.
+  - Keep the conditioner on for **at least 5 minutes after the alert**.
   - Then check the league's pending trades and **revoke any the test created**.
   - Time from the confirm dialog's **Send**.
 
   1. iPhone on the 11-06 build, MFL sandbox league linked, MFL sign-in stored. Settings → Developer → Network Link Conditioner, with a 100%-loss profile ready.
-  2. Turn the profile on. Open a trade with the test counterparty, tap **Send in MFL**, then **Send**. Within about 30 s, back out of the trade and reopen it.
+  2. Turn the profile on. Open a **Matches or Awaiting card** with the test counterparty. Don't use the calculator: it loses the trade when you leave. Tap **Send in MFL**, then **Send**. Within about 30 s, back out of the card and reopen the same one.
      - Expected: the button reads **Sending…** and is disabled.
      - Tapping it does nothing.
   3. Wait for the alert (about 60–91 s).
@@ -129,13 +161,13 @@ None. No table, flag, env var or route. Sends stay behind `espn.send` and `trade
      - **Tap Cancel.**
   5. Keep the conditioner on for at least 5 minutes after the alert, then turn it off. MFL shows **at most one** pending offer for this trade. **Revoke it.**
   6. In the same app run, open the trade and tap Send. Expected: the reminder is still there, because the registry can't see the revoke. Tap Cancel. Then force-quit and relaunch, open the trade, and tap Send. Expected: no reminder (the in-memory limit). Tap Cancel.
-  7. Normal network, a sandbox trade: tap **Send in MFL** twice quickly. If two confirm dialogs appear, tap Send on the first, then on the second.
+  7. Normal network, a sandbox trade on a Matches or Awaiting card: tap **Send in MFL** twice quickly. If two confirm dialogs appear, tap Send on the first, then on the second.
      - Expected: one "Trade sent".
      - MFL shows **one** pending offer.
      - Back out and reopen the trade: it reads **Proposal sent**, disabled.
      - Revoke the offer.
   8. Repeat steps 2–5 on an ESPN sandbox league with a test counterparty (`espn.send` on). Expected: the ESPN copy and Open ESPN; ESPN shows at most one pending offer, which you then revoke.
-  9. Regression, normal network: an MFL send the platform refuses (for example, trades disabled in the sandbox league) gives **Not sent**, as in scope.md. Reopen the trade.
+  9. Regression, normal network: **use a different trade from step 7's, or force-quit first.** Step 7's trade stays at "Proposal sent" for the rest of the app run. An MFL send the platform refuses (for example, trades disabled in the sandbox league) gives **Not sent**, as in scope.md. Reopen the trade.
      - Expected: Send in MFL, enabled.
      - The confirm dialog has **no** reminder.
      - Tap Cancel.
@@ -156,6 +188,6 @@ None. No table, flag, env var or route. Sends stay behind `espn.send` and `trade
 ## 5. Ship gate declaration
 
 - **CI green:** `tsc --noEmit`, every `mobile/tests/check-*.js`, testid-lint. Mobile only; `pytest backend/tests` is untouched.
-- **Evidence recorded:** `living-memory/TEST_LEDGER.md`, 2026-10-29 entry.
+- **Evidence recorded:** `living-memory/TEST_LEDGER.md`, 2026-10-29 entry, with a line for the #539 QA P3s.
 - **TestFlight verification:** §3's checklist, run by the operator on the 11-06 build and logged in TEST_LEDGER. **Unrun.**
 - **Express lane declared by the operator?** No. Full gates.
