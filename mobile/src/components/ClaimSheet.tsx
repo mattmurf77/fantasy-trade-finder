@@ -69,23 +69,20 @@ const NO_ADD_REASON: Record<Exclude<AddPlatform, 'sleeper'>, { title: string; bo
   espn: {
     title: "Can't add in ESPN leagues yet",
     body:
-      'This league is imported from ESPN with read-only access, so ' +
-      'Fantasy Trade Finder can’t make roster moves there. Open the ' +
-      'ESPN Fantasy app to add this player.',
+      "Roster moves for this ESPN league can't be made from Fleeced. " +
+      'Open the ESPN Fantasy app to add this player.',
   },
   mfl: {
     title: "Can't add in MFL leagues yet",
     body:
-      'This league is linked to MyFantasyLeague with read-only access, so ' +
-      'Fantasy Trade Finder can’t make roster moves there. Open MFL ' +
-      'to add this player.',
+      "Roster moves for this MFL league can't be made from Fleeced. " +
+      'Open MFL to add this player.',
   },
   fleaflicker: {
     title: "Can't add in Fleaflicker leagues yet",
     body:
-      'This league is linked to Fleaflicker with read-only access, so ' +
-      'Fantasy Trade Finder can’t make roster moves there. Open ' +
-      'Fleaflicker to add this player.',
+      "Roster moves for this Fleaflicker league can't be made from " +
+      'Fleeced. Open Fleaflicker to add this player.',
   },
   local: {
     title: "Can't add in this league",

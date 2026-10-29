@@ -99,6 +99,7 @@
     "test:sleeper-ownership": "node tests/check-sleeper-ownership.js",
     "test:sleeper-handoff": "node tests/check-sleeper-handoff.js",
     "test:settings-ia": "node tests/check-settings-ia.js",
+    "test:signin-identity-labels": "node tests/check-signin-identity-labels.js",
     "test:settings-nav": "node tests/check-settings-nav.js",
     "test:settings-testids": "node tests/check-settings-testids.js",
     "test:shop-deck": "node tests/check-shop-deck.js",

@@ -14,8 +14,9 @@ What this pins:
     the daemon is handed that payload (was 2 + 2 before S0).
   • ≤ 8 Sleeper calls per init in total, GraphQL trade-block read included
   • `_sync_sleeper_owned_picks(rosters=…, meta=…)` makes neither call itself
-  • non-Sleeper league ids — including a NUMERIC MFL id (G-014/G-030) — make
-    no Sleeper call on the session-init paths S0 touches
+  • non-Sleeper league ids — including a NUMERIC MFL or ESPN id (G-014/G-030)
+    — make no Sleeper call at all on session init, executed-trade capture
+    (`transactions`) included; a Sleeper league still captures
 
 Out of scope on purpose: `_refresh_league_draft_status` is stubbed here. It
 carries its own asymmetric TTL cheap-skip (12 h once a league reads
@@ -43,6 +44,7 @@ from backend.database import metadata, record_sleeper_trades
 LEAGUE_ID = "1338231586314780672"
 NON_SLEEPER_LEAGUE = "mfl:synthetic:1"
 NUMERIC_MFL_LEAGUE = "62846"   # MFL-native ids are numeric (G-030)
+NUMERIC_ESPN_LEAGUE = "1234567"   # ESPN-native ids are numeric too
 USER_ID = "460238423161040896"
 OPP_ID = "733459678624915456"
 
@@ -166,11 +168,13 @@ def harness(monkeypatch):
     monkeypatch.setattr(server.threading, "Thread", _InlineBgThread)
 
     with engine.begin() as conn:
-        for lid in (NON_SLEEPER_LEAGUE, NUMERIC_MFL_LEAGUE):
+        for lid, platform in ((NON_SLEEPER_LEAGUE, "mfl"),
+                              (NUMERIC_MFL_LEAGUE, "mfl"),
+                              (NUMERIC_ESPN_LEAGUE, "espn")):
             conn.execute(db_module.leagues_table.insert().values(
                 sleeper_league_id=lid, user_id=USER_ID,
-                name="Imported", platform="mfl"))
-    for lid in (NON_SLEEPER_LEAGUE, NUMERIC_MFL_LEAGUE):
+                name="Imported", platform=platform))
+    for lid in (NON_SLEEPER_LEAGUE, NUMERIC_MFL_LEAGUE, NUMERIC_ESPN_LEAGUE):
         db_module.upsert_league_members(lid, [
             {"user_id": USER_ID, "username": "Me", "player_ids": ["p1"]},
             {"user_id": OPP_ID, "username": "Opp", "player_ids": ["p2"]},
@@ -239,18 +243,29 @@ def test_non_sleeper_league_makes_no_sleeper_calls(harness):
     assert calls == {}, calls
 
 
-def test_numeric_mfl_league_makes_no_sleeper_calls_on_s0_paths(harness):
-    """A numeric platform id must never reach the Sleeper refresh (G-014/G-030):
-    no membership read, no meta, no picks read, no state stamp."""
+def test_numeric_mfl_league_makes_no_sleeper_calls(harness):
+    """A numeric platform id must never reach Sleeper (G-014/G-030): no
+    membership read, no meta, no picks read, no trade-block read, no
+    executed-trade `transactions` sweep, no state stamp."""
     client, calls = harness
     assert _init(client, NUMERIC_MFL_LEAGUE).status_code == 200
-    for endpoint in ("rosters", "users", "meta", "traded_picks", "drafts", "graphql"):
-        assert endpoint not in calls, calls
-    # Known, pre-existing and outside S0: the trade-capture gate keys on a
-    # bare isdigit() (server.py, "market.trade_capture"), so a numeric MFL id
-    # still reaches the Sleeper transactions sweep — scope R8. Nothing else may.
-    assert set(calls) <= {"transactions"}, calls
+    assert calls == {}, calls
     assert db_module.get_league_roster_state(NUMERIC_MFL_LEAGUE) is None
+
+
+def test_numeric_espn_league_makes_no_sleeper_calls(harness):
+    client, calls = harness
+    assert _init(client, NUMERIC_ESPN_LEAGUE).status_code == 200
+    assert calls == {}, calls
+    assert db_module.get_league_roster_state(NUMERIC_ESPN_LEAGUE) is None
+
+
+def test_sleeper_league_still_captures_trades(harness):
+    """The guard must not switch capture off for Sleeper: a league with no
+    captured rows gets the full 1..18 `transactions` backfill."""
+    client, calls = harness
+    assert _init(client, LEAGUE_ID).status_code == 200
+    assert calls.get("transactions") == len(trades_service.WEEKS), calls
 
 
 # ---------------------------------------------------------------------------
