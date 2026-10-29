@@ -20,6 +20,21 @@ Gates: a value change to the merged #494 (`bef9f5db`), as its own PR off main (`
 - **Change:** `_PAYWALL_PRICE_RISE_AT` = `datetime(2027, 1, 2, 4, 0, tzinfo=utc)` (was 2027-01-01 08:00Z, LA midnight). Per monetization-pm, citing Apple's start-times table, a change scheduled for 2027-01-01 starts in the US at 2027-01-01 04:00Z (11 pm ET on Dec 31), which breaks Terms §14.8; a 2027-01-02 schedule starts at 2027-01-02 04:00Z (11 pm ET / 8 pm PT on Jan 1). Apple's table renders its times client-side, so the 04:00Z figure is not independently checked here; monetization-pm's setup §3d records the time App Store Connect shows, and the constant moves if it differs. The comment block, api-reference row and cross-client-invariants SKU rows + fallback bullet say the same.
 - **Tests (`test_paywall_config.py`, 43):** both sides of the new instant (`2027-01-02T03:59:59Z` old, `04:00:00Z` new); the Jan-1 schedule's US start (`2027-01-01T04:00Z`) and the previous LA-midnight instant (`2027-01-01T08:00Z`) now serve the old prices; the constant equals 23:00 Jan 1 New York and 20:00 Jan 1 Los Angeles via `zoneinfo`, and the last second of Dec 31 in Honolulu is before it; time-zone instants (NY 23:00 Dec 31 old, LA midnight Jan 1 old, NY 22:59:59 Jan 1 old, NY 23:00 Jan 1 new, LA 20:00 Jan 1 new, Paris 00:30 Jan 1 old). 43 passed.
 - **Sabotage, each red then restored:** the old 2027-01-01 08:00Z instant → 6 red; a Jan-1 schedule's 2027-01-01 04:00Z → 9 red.
+## 2026-10-29 — #521 QA P3s: the drafted-league retry, the retry lock-free, no retry on a pool timeout; deck pipeline v8
+
+Gates: release-lead's #521 QA (GO-with-notes), P3-1 to P3-3. Follows #521. P3-4 (the PR body) is fixed on #521 itself. No route, schema, flag or event change. Deck pipeline v8, digest `f7ed33e6ab94af03`; models-eng classifies. Only stored pages carry the version, and `trade.first_page_store` is off in prod, so nothing is invalidated there. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P3-1:** `test_a_draft_read_retried_once_keeps_the_drafted_context`. With a drafted leagues row (2026, high), a draft read that fails once leaves the owner context `drafted` with next draft year 2027, and the stamp is kept. Before, the fixture had no leagues row, so `{}` read the same either way.
+- **P3-2:** `test_the_retry_runs_with_no_registry_lock_held`, for both reads. Owner-tracking proxies on `_trade_jobs_lock` and `_sessions_lock` show neither attempt holds either lock.
+- **P3-3, code:** a pool checkout timeout (`sqlalchemy.exc.TimeoutError`, `_is_pool_timeout`) is never retried at once. The pool is exhausted, and a retry would only wait again and add to it. The read fails as before v7.
+  - `_is_pool_timeout` is classified in `DECK_PIPELINE_FUNCTIONS`, since it decides whether the owner arm forfeits.
+  - Pipeline v8.
+  - **Test:** `test_a_pool_timeout_is_not_retried` (one call; the owner arm forfeits).
+- **Sabotages, 7/7 red:**
+  - QA's Q3d (the draft retry's result dropped), Q3b (the failure from the failed attempt kept), Q1a and Q1b (a retry under either lock);
+  - the timeout retried (draft / picks);
+  - `_is_pool_timeout` always False.
+- **Suites:** freshness-roster, digest, page store, p2, filter inputs, deferred evidence: 437 passed.
 
 ## 2026-10-28 — A live stamp on a deck with no evidence is logged (#517 QA P3-2, models-eng)
 
@@ -122,6 +137,67 @@ Gates: release-lead's #519 QA (GO-with-notes at `8af4189a`), P3-1 to P3-3. Follo
   - the exit drain's docstring now says the guard is defensive;
   - LLD's `deck_i1_check` line names the exit drain's restart and the refusal path;
   - #519's PR body is fixed (44 tests, the guard commit).
+## 2026-10-27 — ESPN/MFL send failures: plain copy, raw provider bodies to logs only, outcome-unknown on post-send timeouts (C10)
+
+Full gates, platforms-eng lead (head-eng pre-launch triage C10, "the only C item that prevents a real-money-adjacent harm"). Server only. API surface: new 502 `espn_outcome_unknown` / `mfl_outcome_unknown`, and `detail`/`message` are now plain placeholder copy on propose-espn, propose-mfl and respond-mfl; no schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/espn-mfl-send-failures`.
+
+- **Scope:** [docs/plans/c10-send-failures/scope.md](../docs/plans/c10-send-failures/scope.md) covers the problem, behavior, the before/after-send rule, the analytics (b) answer, the docs table and the mobile follow-ups. Copy is a placeholder, pending marketing via head-eng.
+- **Tests (`backend/tests/test_c10_send_failures.py`, 70 new):**
+  - Adapters, through the real `propose_trade` with an injected opener: 4 before-send cases → `network`; 13 after-send cases (read/socket timeout, reset, `RemoteDisconnected`, `BadStatusLine`, body-read timeout, `IncompleteRead`, `URLError` timeout/reset, HTTP 500/502/503/504) → `outcome_unknown`, for each platform; unreadable 2xx/200 → `outcome_unknown`; ESPN 4xx and MFL `<error>`/4xx → `error`; MFL 429 → `network`.
+  - Propose routes: an HTML and a JSON ESPN rejection, an HTML 400 and an `<error>` 200 MFL rejection → code unchanged, marker absent from the response, logged once, truncated, SWID and cookie masked. A timeout/reset/5xx/`IncompleteRead` after send → `*_outcome_unknown` with the copy; DNS / refused before send → `*_write_failed` with the rejection copy. Unknown fires no `trade_sent`. Auth rejections (ESPN 401, MFL 403) return no raw body.
+  - respond-mfl (review follow-up): an HTML 400 and an `<error>` 200 rejection → `mfl_write_failed` with the "this response … nothing changed" copy, never returned, logged once and masked; timeout / reset / 504 → `mfl_outcome_unknown`; refused → `mfl_write_failed` (`network`); the auth body is not returned.
+  - Overhaul, through the real cores: ESPN tie A times out → two `outcome_unknown` attempts with the copy, A still reserved; B rejected → `send_failed` with the plain copy, released; C/D proposed; `GET /api/overhauls/{id}` shows the same. MFL reset on every offer → 5 `outcome_unknown`, all reserved.
+- **Sabotage, each red then restored byte-identical (5):**
+  - raw `detail` returned again (propose ESPN + MFL, respond-mfl) → 24 red;
+  - the adapters' after-send branch classified `network` → 13 red;
+  - every `URLError` treated as not sent → 4 red;
+  - the routes ignoring `outcome_unknown` → 13 red;
+  - overhaul recording the codes as `send_failed` → 2 red.
+- **Targeted (after merging `origin/main` @ `052c9746`):** 530 passed in 22 files. They are the C10 file, `test_espn_propose_route`, `test_mfl_propose_route`, `test_espn_write`, `test_mfl_write`, `test_i2_espn_ownership`, `test_i2_mfl_ownership`, `test_i2_overhaul`, `test_i2_sleeper_ownership`, `test_overhaul_api`, `test_overhaul_service`, `test_overhaul_store`, `test_bilateral_overhaul`, `test_mfl_trade_lifecycle` (respond-mfl), `test_api_observability` and `test_sleeper_write_route`, plus six other suites that import the changed modules. The same 22 files were 523/523 before the respond-mfl follow-up. On the base commit before C10, the 10 propose / write / I-2 / overhaul-api / lifecycle files ran 235 passed.
+- **Not run:** the full backend suite (CI runs it; the local machine is overloaded); live ESPN/MFL writes (all mocked); `tsc` and testid-lint (no mobile change).
+- **2026-10-28, final copy (marketing addendum 10, 8a–8h + the optional ESPN auth line):**
+  - The placeholders are replaced word for word, with straight apostrophes.
+  - `_send_write_failed` now picks the `*_write_failed` line by `kind`: `network` → 8c/8d ("Couldn't reach … Try again in a moment.", including MFL's 429); `error` / `input` → 8a/8b. respond-mfl uses 8g for its `network` case too, since addendum 10 has no separate line for it.
+  - The C10 file is 89 tests (19 new): pins for each string, a banned-word sweep of every C10 copy constant, the kind split, and MFL 429 → 8d. The overhaul unknown attempts carry 8e/8f.
+  - New sabotages, each red then restored: `network` falls back to the rejected line → 7 red; a curly apostrophe → 10; "failed" in a constant → 14. The earlier five re-run at 25 / 13 / 4 / 15 / 2.
+  - Targeted rerun, on the same 22 files at `1a92a7ab` plus this change: 549 passed (530 + the 19 new).
+## 2026-10-28 — ESPN/MFL client send timeout: wait the server's worst case, "couldn't confirm" instead of "try again" (C10 client half)
+
+Full gates, platforms-eng worker (head-eng GO 2026-10-28, for the 11-06 iOS binary). Mobile only: no route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is an executed structural suite, a code walk and a TestFlight checklist. Branch `fix/espn-mfl-client-send-timeout`, scope [docs/plans/client-send-timeout/scope.md](../docs/plans/client-send-timeout/scope.md).
+
+- **What it pins:** propose-espn / propose-mfl wait 91 s (`PLATFORM_SEND_TIMEOUT_MS`, `mobile/src/api/sendOutcome.ts`: the server's worst case for one propose, MFL 76 s = crosswalk 15 + resolve_host 15 + rosters 15 + futureDraftPicks 15 + spacing 1 + write 15, ESPN 45 s, plus a 15 s margin). The overhaul send waits (min(n × 76, 120) + 15) s: 91 s for one offer, 135 s for two or more. The cap is `GUNICORN_TIMEOUT_S` = gunicorn's `--timeout 120` (`render.yaml:16`), a review change added the same day. Every other call is unchanged. A timeout, no answer, `*_outcome_unknown`, `internal_error` or a code-less 5xx shows `Check before resending` with OK / Open ESPN-MFL only, never "try again" or a Retry; the overhaul re-reads its attempts on the plan.
+- **Final copy (review change, same day):** marketing-lead addendum 10 items 8a/8b/8e/8f/8i, word for word with straight apostrophes, in `utils/sendOutcomeCopy.ts`:
+  - outcome-unknown body: the server's `detail` for its own code, else `Couldn't confirm whether this trade reached ESPN. Check your league's pending trades on ESPN before you send it again.` (MFL likewise);
+  - `*_write_failed`: title `Not sent`, body `detail` alone with the "rejected the request:" prefix dropped, and the 8a/8b line as the no-detail fallback;
+  - the overhaul summary line is not in marketing's set: kept, marked PENDING MARKETING.
+- **`node mobile/tests/check-send-timeout.js` (new, `npm run test:send-timeout`): 24/24, exit 0** (19 at first, 20 with the cap, 24 with the final copy). It executes the real `api/client.ts`, `sendOutcome.ts`, `sendInEspn.ts`, `sendInMfl.ts`, `overhaul.ts` and `sendOutcomeCopy.ts` under a fake clock with a scripted `fetch`:
+  - the constant equals the server sum, with every term parsed from `backend/{espn,mfl}_write.py`, `mfl_service.py` and `espn_service.py`;
+  - each propose core in `server.py` makes exactly the counted provider calls on their default timeouts;
+  - `GUNICORN_TIMEOUT_S` equals the web service's `--timeout` parsed from `render.yaml`, one propose (76 s) fits under it uncapped, and `overhaulSendTimeoutMs(10)` = 135 s, the cap;
+  - each send is still waiting at 15 s and times out at its long timeout; GETs, prepare-send, refresh and a plain POST still time out at 15 s;
+  - 18 server answers are classified through the real client;
+  - every final string is pinned word for word (C4); the body takes the server's `detail` only for its own outcome-unknown code (C5, 8 cases);
+  - a sweep of the copy module (C6): no "failed" or "error" in any literal or output, and no "nothing was sent", "try again" or "retry" in the outcome-unknown copy;
+  - the AST shows both buttons and the overhaul summary branch on the unknown case first, with no resend and buttons exactly OK + Open ESPN/MFL (so "Couldn’t send" never shows for it); `*_write_failed` → `Not sent` + `detail || sendNotSentFallback(...)`, with the old prefix gone;
+  - no POST is retried on 502/503/504/network drop (a GET control is); `session_not_initialized` is the only POST replay.
+- **Sabotage, each red then restored byte-identical (file restored from a copy or checked out again, working tree diff clean), 12 runs:**
+  - (a) the long timeout removed from propose-mfl → 1 red (B propose-mfl);
+  - (b1) a timeout classified as not-unknown → 1 red (C1);
+  - (b2) the ESPN button skips the unknown branch, so a timeout falls to the generic "Please try again" → 1 red (D ESPN);
+  - (c) gateway/network auto-retry enabled for POST → 4 red (C2, C3, E1, E3);
+  - (d) server drift, `mfl_write._HTTP_TIMEOUT` 15 → 20 → 1 red (A3);
+  - (e) server drift, a second provider read in `_espn_propose_core` → 1 red (A2);
+  - (f) the overhaul cap removed, back to (n × 76 + 15) s → 1 red (A6);
+  - (g) server drift, `render.yaml` `--timeout 120` → 90 → 1 red (A5);
+  - (h) ESPN `write_failed` "ESPN rejected the request:" prefix restored → 1 red (D ESPN write_failed);
+  - (i) a Retry button (re-calling `doPropose`) added on MFL outcome-unknown → 1 red (D MFL unknown);
+  - (j) "failed" slipped into the not-sent fallback → 2 red (C4, C6);
+  - (k) the 8e/8f body back to the curly placeholder → 2 red (C4, C5).
+- **Worker class, for the record:** with `--threads 4` (#398, 2026-10-25), gunicorn runs gthread. Its `--timeout` is a heartbeat: the gthread run loop calls `notify()` every second whatever the request threads are doing; gunicorn's config doc says that for non-sync workers it "is not tied to the length of time required to handle a single request". So today the 120 s kill only applies under the sync-worker rollback. The cap stands either way, because attempts are persisted before the first provider call and the plan shows them. The scope's known limits cover both cases.
+- **All suites (after the final copy):** `for f in tests/check-*.js` → 121/121 pass, including the new one, `check-send-button-platform`, `check-team-overhaul`, `check-apple-revoke-on-delete` (its `timeoutForRequest` probe still works) and `check-win-now-recovery` (39/39).
+- **`npx tsc --noEmit` (mobile): exit 0, after the final copy.** **`mobile/scripts/testid-lint.sh`: exit 0** ("testid-lint OK"; no testIDs added).
+- **Backend:** not run, because nothing in the backend changed. The server half (`*_outcome_unknown`) is #513's `test_c10_send_failures.py`.
+- **Manual TestFlight checklist:** scope §3, nine steps (Network Link Conditioner on an MFL and an ESPN test league, airplane mode after send, normal send, regressions, and the overhaul if it is re-enabled). **Unrun.** Every real-league send needs the operator's go at action time.
 
 ## 2026-10-28 — QA P3 follow-ups: #489 (docs claim, LLD guard counts, deadlock-safe lock test), #487 (read pins, docstring), #485 (exit-drain restart, after-write flush)
 
@@ -185,6 +261,28 @@ Gates: release-lead's #487 QA P3-3 (owner-exclusive forfeits on a transient firs
   - no picks retry;
   - no draft retry;
   - a second retry (the fails-twice test catches it).
+
+## 2026-10-28 — Account-only sessions get `verification` (head-eng; for the 11-06 binary)
+
+Full gates (scope `docs/plans/prelaunch-onboarding/scope-account-only-verification.md`). Server and mobile; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change:**
+  - `GET /api/session/ping` returns session/init's additive `verification` object, via `_session_verification(sess)`.
+  - Mobile `refreshVerification()` pings and records it only for the same, still-signed-in user.
+  - It's called from `revalidateSession`'s `NO_LEAGUE_ID` branch and after the account-only Apple sign-in.
+  - The result: an Apple-first account with no league now reads `session_verified: true`.
+- **Release-lead #524 QA (NO-GO, P1), fixed:** an unverified or demo session (session/init's 403 cases) now gets the constant unverified answer, with no lookup. Before the fix, ping told anyone who could name a user_id whether that account existed and which provider proved it (legal R28.9 row 4 / R28.14).
+  - Also from QA: the sentinel ping is no longer awaited (P3-2).
+  - `setUser` resets `verification` to null on any user_id change (an expiry then another user's sign-in).
+- **Backend:** `test_session_ping_verification.py`, 24 tests:
+  - the squatter test flipped to the constant;
+  - the exact key sets for 7 session types;
+  - 0 SQL for anonymous, unknown-token and unverified pings, with a positive control;
+  - a foreign `user_id` / `X-User-Id` ignored;
+  - a verified session reads the user row, not its own stamp.
+  - **Sabotage 11/11 red:** QA's P1 reverted, demo looked up, an extra top-level key, an extra key in the unverified answer, the query user_id answered, X-User-Id looked up, a 401-path probe, plus round 1's 4 re-run.
+- **Mobile:** `check-account-only-verification.js`, 5 AST pins (pin 3 is now unawaited; pin 5 is the `setUser` reset). **Sabotage:** 7/7 red in round 1, and 5/5 on the new and changed pins. tsc clean; `check-win-now-recovery` passes.
+- **Runs:** see the PR (the full `check-*.js` loop, testid-lint, backend suites).
 
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 
@@ -472,6 +570,33 @@ Gates: eval-side only (`backend/eval/data.py`, a doc line in `bdk_audit.py`). It
   - integrity after the conflict check (1).
   - The ninth, a plain dense rank in place of the W0-adjusted slots, stays green as expected: the two are equal on every deck the loader doesn't exclude (an unexplained gap is `incomplete_deck`).
 - **Eval, value-model and evidence suites:** `test_eval_*`, `test_value_model*`, `test_packed_evidence`, `test_deferred_evidence`: 578 passed.
+
+## 2026-10-27 — B2: the launched onboarding flags in first-paint defaults (Product's pre-launch review)
+
+Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b2-flag-defaults.md`). Mobile only; no flag value changes; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change:** `LAUNCHED_FLAG_DEFAULTS` gains five flags, each `true` as in `config/features.json`:
+  - `onboarding.v2`, `onboarding.landing`, `landing.platform_options`, `mfl.link`, `account.settings_hub`.
+  - `espn.signin` waits for ask 15.
+- **New guard `check-onboarding-flag-defaults.js`** (`npm run test:onboarding-flag-defaults`), dependency-free:
+  - each key is baked, with `features.json`'s value;
+  - `espn.signin` is baked only once `features.json` carries it true.
+  - **Sabotage 6/6 red,** restored byte-identical.
+- **Runs:** see the PR (tsc, the full `check-*.js` loop, testid-lint).
+- **Operator TestFlight check** (11-06 build):
+  1. a fresh install opened offline paints the username landing with the platform chips;
+  2. after going back online, the same landing shows;
+  3. Settings is the hub.
+- **2026-10-28, release-lead QA @ `6b0c3b8f`: NO-GO on P1-1 → fixed:**
+  - **P1-1:** `landing.platform_options` is no longer baked. A baked `true` painted chips that dead-end while the server holds the flag off (the purge window). It's baked with ask 16. Guard pin 4 keeps it out.
+  - **P2-1:** the defaults' comment no longer contains the ESPN sign-in flag's literal, which had turned #443's `check-espn-signin-flag` pins 4/6 red.
+  - **P3-1:** pin 5, "a server or cached false wins": the store starts from the defaults, a cached map spreads over them, and a fetch replaces the whole map. **Sabotage 4/4 red**, covering QA's three surviving wiring cases plus the chips flag baked again.
+  - **2026-10-29, CI after merging main (#404, B8's update gate):** B8 widened the post-fetch `set({ flags, loaded: true })` to also set `appMinVersion` / `appStoreLive`, so pin 5c's exact-text match went red in `mobile-typecheck`. Pin 5c now matches a `set({ flags, loaded: true, …` that takes `flags` whole, still with no `LAUNCHED_FLAG_DEFAULTS` in the revalidate. **Sabotage 3/3 red** on the new shape (defaults merged under the fetch; the fetched map not set; defaults spread into it); a comment-only control stays green. tsc clean, 124/124, testid-lint OK.
+  - **P3-4:** the TestFlight checklist is rewritten to 6 steps: online, offline, warm, server-false, Settings, kill switch. The offline step now expects **no** chips.
+  - **Not taken:**
+    - P3-2: the s0.1 guide intro is latent until `onboarding.guided_avatar` goes on;
+    - P3-3: the entry sheet should close when the chips flag is withdrawn.
+    - Both are in `SignInScreen.tsx`, which #443 and #507 are changing, so they're logged for that stack.
 
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 
