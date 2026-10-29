@@ -405,6 +405,15 @@ NON_INTENT_EVENTS = frozenset({
     "trade_first_card_failed",
     # deck_buffer_empty (ruling 30): an AC-L4 system outcome, never a choice.
     "deck_buffer_empty",
+    # ── Minimum-version gate (B8, 2026-10-24) — added in the SAME commit as
+    # the emitters and the ALLOWED_CLIENT_EVENTS rows.
+    #   update_gate_shown — an impression the SERVER forces on an outdated
+    #     build (the `paywall_viewed` class). As intent, raising
+    #     app_min_version would mint a user-day for every blocked device.
+    #   update_gate_tapped — leaves the app for the App Store; the outcome is
+    #     the store's, and the user cannot do anything else on that screen.
+    "update_gate_shown",
+    "update_gate_tapped",
     # deck_i1_check (S0's C-a readout, 2026-10-27, added in the SAME commit as
     # its emitter): a server-fired outcome of each served page, on background
     # polls too. The serve's request already reflects the user's intent.
