@@ -98,6 +98,7 @@
     "test:session-seed": "node tests/check-session-seed.js",
     "test:sleeper-ownership": "node tests/check-sleeper-ownership.js",
     "test:sleeper-handoff": "node tests/check-sleeper-handoff.js",
+    "test:sleeper-handoff-event": "node tests/check-sleeper-handoff-event.js",
     "test:settings-ia": "node tests/check-settings-ia.js",
     "test:settings-nav": "node tests/check-settings-nav.js",
     "test:settings-testids": "node tests/check-settings-testids.js",

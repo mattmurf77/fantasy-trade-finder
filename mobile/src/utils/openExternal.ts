@@ -27,10 +27,11 @@ import { copyText } from './clipboard';
 
 export type ExternalPlatform = 'sleeper' | 'espn' | 'mfl';
 
-// Which control opened the link. Carried for the proposed
-// `external_link_opened` event; nothing fires until analytics-lead grants it.
+// Which control opened the link. sleeperHandoff.ts reports it on the granted
+// `sleeper_handoff_resolved` (Sleeper only; ESPN and MFL emit nothing).
 // 'unspecified' is for an openInSleeperApp caller that names no surface
-// (#351 PRD §3.2 keeps it optional), so it can't be mislabelled.
+// (#351 PRD §3.2 keeps it optional), so it can't be mislabelled; it emits
+// nothing. `external_link_opened` is not granted.
 export type ExternalSurface =
   | 'send_button'
   | 'free_agents'
@@ -55,6 +56,11 @@ export interface ExternalTarget {
   surface: ExternalSurface;
   /** What a rejected schemeUrl does: fall back to httpsUrl, or the D2 alert. */
   appMissing: 'https' | 'alert';
+  /** Called synchronously when the schemeUrl open settles (true = opened),
+   *  before any fallback and with no further await: the seam
+   *  sleeper_handoff_resolved fires from (analytics-lead G3). Not called for
+   *  a re-tap that gets the in-flight promise back. */
+  onSchemeSettled?: (opened: boolean) => void;
 }
 
 export const LOCK_MS = 2000;
@@ -83,7 +89,13 @@ export function openPlatform(target: ExternalTarget): Promise<OpenOutcome> {
 async function attempt(t: ExternalTarget): Promise<OpenOutcome> {
   if (t.clipboardText) copyText(t.clipboardText);
   if (t.schemeUrl) {
-    if (await opened(t.schemeUrl)) return 'app';
+    const ok = await opened(t.schemeUrl);
+    try {
+      t.onSchemeSettled?.(ok);
+    } catch {
+      // Analytics never stops the open or the D2 alert.
+    }
+    if (ok) return 'app';
     const store = APP_STORE[t.platform];
     if (t.appMissing === 'alert' && store) {
       showAppMissing(store);
