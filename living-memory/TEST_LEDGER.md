@@ -20,6 +20,98 @@ Gates: release-lead's #492 QA P3s, and models-eng's short-deck ask (`repeat_head
   - the record from the pre-filter cards;
   - another market callable.
 
+## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
+
+Gates: head-eng's two additions to #494 (`fix/paywall-fallback-prices`), values confirmed by monetization-pm. Same route, still dark (`monetize.paywall`). No route, schema, event, flag or knob change. Server and docs only; mobile untouched. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest, a sabotage pass and a code walk of TipJarScreen. Full suite not re-run (CI runs it).
+
+- **The rise is an instant, not a UTC date (`backend/server.py`):**
+  - `_PAYWALL_PRICE_RISE_DATE = date(2027, 1, 1)` compared on the UTC date, so the fallback flipped to $6.99 / $34.99 at 7 pm ET on Dec 31. Terms §14.8 promises the Founder price to anyone subscribing "by December 31, 2026".
+  - It is now `_PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 1, 8, 0, tzinfo=timezone.utc)`, which is 2027-01-01 00:00 America/Los_Angeles (PST, UTC-8). `_paywall_products` compares `now >= _PAYWALL_PRICE_RISE_AT`, and a naive `now` raises `TypeError`.
+  - The comment says it is fallback-only (StoreKit is authoritative) and that monetization-pm checks it against the App Store Connect scheduled change; if the two differ, the constant moves.
+  - The now-unused `date` import is reverted.
+- **Tips:** the route serves `tips: []`, as #465 does, because the tip SKUs are not submitted to App Store Connect. `_PAYWALL_TIPS` stays as the list to restore. A tip still grants no entitlement (`entitlements.is_tip_product`, unchanged).
+- **TipJarScreen with an empty list (code walk, `mobile/src/screens/TipJarScreen.tsx`):**
+  - `:80` gives `tips = []`;
+  - `:85` disables the StoreKit product fetch (`tips.length > 0`);
+  - `options` is empty, so `:193-195` render "Tips aren’t available right now." No crash and no purchase row.
+  - Hiding the Settings tip row is engagement-eng's client work, routed separately.
+- **Backend:** `test_paywall_config.py` is now 36 tests (was 30):
+  - both sides of the instant: `2027-01-01T07:59:59Z` old, `08:00:00Z` new; `2027-01-01T00:00Z` (4 pm Dec 31 in LA) is pinned old;
+  - the constant equals 08:00 UTC and LA midnight via `zoneinfo`;
+  - the UTC-date tests are replaced with instant tests. New York 20:00 Dec 31 now gets the **old** prices, and so does LA 23:59:59. LA 00:00 Jan 1 and New York 03:00 Jan 1 get the new ones. Paris 00:30 Jan 1 is old;
+  - a naive `now` raises;
+  - `tips == []` with no `ftf_tip` in the payload;
+  - the restorable `_PAYWALL_TIPS` SKUs are all `is_tip_product` and claim no entitlement fields.
+- **Targeted, with its own log:** `test_paywall_config.py`, `test_entitlements.py`, `test_analytics_p0.py`, `test_api_observability.py` → 136 passed, exit 0. `node mobile/tests/check-paywall.js` 11/11 and `check-tipjar.js` 9/9. check-tipjar is structural, so the empty list doesn't touch it.
+- **Sabotage, each red then restored byte-identical (5):**
+  - back to the UTC-date comparison (6 red);
+  - the rise at UTC midnight (6 red);
+  - `>` for `>=`, off by one second (3 red);
+  - tips non-empty again (1 red);
+  - `trial_days` back on annual (6 red).
+- **Docs:** `docs/api-reference.md`, the `/api/paywall/config` row (the rise instant, empty tips). `docs/cross-client-invariants.md` § Monetization SKU ids: the SKU rows, the tip row and the fallback-prices bullet.
+
+## 2026-10-27 — Paywall config fallback prices: $4.99 / $24.99 (→ $6.99 / $34.99 for new subs from 2027-01-01), no `trial_days`
+
+Gates: a values fix to `GET /api/paywall/config` (flag `monetize.paywall`, still dark) flagged by marketing-lead via head-eng. The response loses the `trial_days` key and its prices follow #393's approved plan (operator 2026-10-25). No route, schema, event, flag or knob change. Server and docs only; mobile untouched. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest, a sabotage pass and a code walk of the old client.
+
+- **The fix (`backend/server.py`):**
+  - `_PAYWALL_PRODUCTS` drops `trial_days` (was 14 monthly, 30 annual) and carries no prices.
+  - `_PAYWALL_PRICES` holds (before, from) pairs, switched by `_PAYWALL_PRICE_RISE_DATE = date(2027, 1, 1)`, judged in UTC: monthly $4.99 → $6.99, annual $24.99 / $2.09 → $34.99 / $2.92.
+  - `_paywall_products(now)` is pure; the route passes it `_paywall_now()`, the clock tests patch.
+  - `per_month_equiv` is the annual price / 12 rounded **up**: $2.09, matching legal's #393 R28.8 #2 copy, not the $2.08 a round-to-nearest gives.
+- **Old-client render (code walk, main `mobile/src/screens/PaywallScreen.tsx:172-176`):**
+  - the trial line is `trialEligible && p.trial_days > 0 ? … : null`, and `undefined > 0` is false, so it is null;
+  - with no trial line, :360 renders nothing, the CTA at :383 reads "Continue", and the a11y label at :333 adds nothing;
+  - the plans render "$4.99/month" and "$24.99/year" plus "$2.09/month, billed yearly" when StoreKit is unavailable (otherwise StoreKit's `priceString` wins).
+  - A node emulation of that logic against the new payload printed exactly that.
+- **Backend:** `test_paywall_config.py` is now 30 tests (was 15):
+  - `test_products_shape` pins the exact key sets (no `trial_days`) at a frozen 2026-10-27;
+  - the route on both sides of the rise (today, 2026-12-31T23:59:59Z, 2027-01-01T00:00:00Z, 2027-06-01);
+  - no `trial_days` anywhere in the response, at all four instants;
+  - the switch is judged in UTC (New York Dec 31 20:00 is risen; Paris Jan 1 00:30 is not);
+  - the function is pure and leaves the module tables untouched;
+  - `per_month_equiv` equals the ceil of price / 12 on both sides;
+  - the default clock is the real aware UTC now.
+- **Targeted:** `test_paywall_config.py`, `test_entitlements.py`, `test_analytics_p0.py`, `test_api_observability.py`, `test_account_deletion_coverage.py` → 166 passed. `node mobile/tests/check-paywall.js` 11/11 and `check-tipjar.js` 9/9 (mobile untouched).
+- **Full suite** on the branch's working tree (`7b085e2d` plus this diff): `pytest backend/tests -q` → 9346 passed, 2 skipped, 0 failed, exit 0 (21m46s). Its own log, with junit confirming 9348 tests, 0 failures, 0 errors. A first run was discarded: another agent's suite wrote to the same scratch log.
+- **Sabotage, each red then restored byte-identical (6):**
+  - `trial_days: 30` back on annual (5 red);
+  - the switch never fires (4 red);
+  - `>` for `>=`, off by one day (2 red);
+  - the date judged in the caller's tz, not UTC (2 red);
+  - the route ignores the clock (2 red);
+  - `per_month_equiv` rounded down to $2.08 (4 red).
+- **Docs:** `docs/api-reference.md` (the `/api/paywall/config` row; plus the `/api/me/entitlements` row's drift fix: `/api/extension/auth` never carried `pro`, intentionally, legal R28.17); `docs/cross-client-invariants.md` § Monetization SKU ids (prices, the rise date, no `trial_days`). `docs/config-reference.md` n/a: the date is a code constant, not config.
+- **Not covered:**
+  - tsc not run here (no `mobile/` change; `billing.ts` still types `trial_days: number`, harmless at runtime, and the #393 M1 branch drops it);
+  - `docs/plans/monetization/pro-subscription/lld.md` §3 JSON and `iap-enablement/sandbox-test-checklist.md` P2 still carry the old prices and trial lengths (history and ASC setup, left for the #393 owners).
+
+## 2026-10-28 — Rebase case 2 follows the scope's newer job only while it's current (#484 QA P3-2)
+
+Gates: release-lead's #484 QA P3-2, open since 10-27. It's flag-dark behind `trade.first_page_store` and must land before the ~11-04 flip. No route, schema, flag or knob change; the API reference's rebase case 3 wording is updated. No pipeline change: only serve-path code changed. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The fix:** `_trade_deck_rebase`'s case 2 (the scope's newest job in this process) now uses P1's backing check (`_trade_rebase_job_current`), the one `_serve_trade_page_for` applies.
+  - No input epoch may be revoked since the request.
+  - The job must be fresh (`_trade_job_is_fresh`) or a matching running one (`_trade_running_matches`), against the same roster snapshot and the session's read.
+  - A stale job falls through to the end or the kick, so the rebuild starts, as a fresh tap would.
+- **Unchanged cases:** with no snapshot (a failed read, or `trade_i1_mode` 0), or one with no stored rows (`status` "missing", whose fp says nothing about the job's rosters), nothing proves the job stale (A2). It's followed as before, and the page view's own checks and S0's rules still decide what it sends.
+- **One snapshot per poll is kept:** the rebase reads P1's serve snapshot once (lazily, shared by cases 1 and 2), and the job page view takes it (`_trade_job_page_view` / `_trade_job_public_view` `snap=`) for S0's serve rules. `test_each_deck_serve_reads_one_roster_snapshot` holds.
+- **One test changed by design:** the C-e deck-path test edits the stored rows after building the newer job. On the rebased-job path it now re-stamps that job to the edited rows, so it still tests the C-e serve rule.
+- **Backend:** `test_trade_pages_p2.py` (110):
+  - a newer job whose rosters moved isn't followed, and the rebuild is kicked;
+  - a matching running job is followed with no kick;
+  - an input change means no follow;
+  - both checks get the session's read.
+- **Regression:** `test_trade_pages_p2`, `test_trade_page_store`, `test_trade_freshness_roster`, `test_i1_serve_filter`, `test_deck_i1_check` and the digest: 394 passed.
+- **Sabotage, each red then restored (5):**
+  - no check;
+  - no session read;
+  - input epochs ignored;
+  - a fresh-only check, so the running job is lost;
+  - a second snapshot read, which turns the one-snapshot test red.
+  - Two of these stayed green on the first try (the session read was None; a kick joining the same running job looked like a follow); the tests were tightened.
+
 ## 2026-10-27 — The quality filter's inputs, frozen per run (models-lead addendum D2); deck pipeline v5
 
 Gates: models-lead's ruling D2 (B-DK-4..6 provenance), via head-eng. Field names agreed with models-eng (their changes: `viewer_team`; null, not absent, for an unseeded asset or a None position; coverage = the returned cards' assets plus the holdings; the optional `protected` included). It adds one per-run key to the pack's run header; no route, schema, flag or knob change. `DECK_PIPELINE_VERSION` 4 → 5 (stacked on #487's v4): `_run_trade_job` records the inputs, and `_quality_filter_inputs` is in `DECK_PIPELINE_IGNORED`. The deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -70,6 +162,32 @@ Full gates, not express (scope: platforms-eng's ESPN/MFL sign-in, the onboarding
   3. Apple and Google sign-ins are unchanged: "Signed in with Apple" / "Signed in with Google", and "Apple" / "Google" on the hub.
 - **release-lead QA fixes (`63603e47`, `d10046a0`):** the hub maps `mfl_login` → "MFL" only on an account-only session; `/api/mfl/auth-link` also writes `mfl_login` for a Sleeper user who connects MFL, who stays "Sleeper" (P2). `espn` stays unguarded. Pin 4 gains release-lead's case (a Sleeper user verified by MFL auth-link → "Sleeper"); it fails on `40da9bc0`. **Sabotage 3/3 red.** `AccountInfo.verified_via` admits `mfl_login` / `espn` (P3). Runs: tsc clean; testid-lint OK; 118/118 `check-*.js`. Operator step 4: a Sleeper user who connected MFL by password still reads "Signed in with Sleeper" on the hub.
 
+## 2026-10-27 — F5's drop is an eviction: `evicted_split`, and the `f5_past_stored` anomaly (models-lead addendum D1)
+
+Gates: models-lead's ruling, D1 (`leads/models-lead-launch.md` addendum D), via head-eng. It changes one evidence cause (`restart_split` → `evicted_split` for an F5-dropped deck) and adds one ERROR log line. No route, schema, flag or knob change. It's not flip-gating; it must land before the first weekly ceiling read. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The change:**
+  - At F5's drop, the deck goes into `_deck_evicted_at` (kept ≥ 24 h, C3 (c2)) and a new `_deck_f5_dropped` ledger. This replaces #457's removal from `_deck_held`; it isn't added to it.
+  - C3 (c1) is unchanged: below the effective stored count, a miss is `other`.
+  - The anomaly (`_f5_past_stored`): an F5-evicted miss at or past the pack-recorded stored count logs `[evidence] f5_past_stored …` at ERROR, apart. The cause stays `evicted_split`.
+- **Backend:** `test_evidence_cleanup.py`. The F5 repro is now `…_reads_evicted_split_…` (×6: both row-gone ways × F5 only, F5 then the job evicted, a real restart = `restart_split`), with the held entry kept. 3 new tests:
+  - below / past the effective stored count;
+  - `_f5_past_stored` only for an F5-evicted miss at or past the recorded count;
+  - the anomaly line logged once, with the cause kept.
+- **Run:** `test_evidence_cleanup.py` + `test_u4_ruled.py`, 52 passed. On the first cut, the evidence suites (cleanup, deferred, U4 ruled, upgrade-miss cards, pipeline digest) passed 165.
+- **#489 QA (NO-GO, P1-1), option (a), pending models-lead's reading of D1:**
+  - The P1: kept in `_deck_held`, an F5 deck read `other` (a false G7 FAIL) once its evicted entry aged out.
+  - The fix: F5's drop now also pops `_deck_held`, like any eviction, so the late view reads `restart_split`.
+  - New tests: the eviction aging out → `restart_split`; the anomaly on the kept cause; no anomaly on a real F5 row-gone miss; a bool count refused; the jobs → ledger lock order; the guard's `f5=`.
+  - Sabotage (7, each red then restored): no held pop; the anomaly on the local cause; the anomaly on the effective count; a bool count; a reverse lock on the read path; the guard dropping `f5=`; f5 trims counted as held.
+  - Docs: the contract sentence, LLD, and data-dictionary (the ERROR-line note).
+- **Sabotage, each red then restored (5):**
+  - F5 also leaving the held ledger (#457's way: superseded by option (a) above);
+  - F5 not an eviction;
+  - the anomaly on any eviction;
+  - the anomaly strictly past;
+  - the anomaly not logged.
+
 ## 2026-10-27 — Session-init trade capture skips linked-platform leagues (G-030)
 
 Full gates, platforms-eng lead (platforms-pm audit F5). Server only, no API or schema change; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/trade-capture-platform-guard`.
@@ -83,6 +201,89 @@ Full gates, platforms-eng lead (platforms-pm audit F5). Server only, no API or s
 - **Sabotage, red then restored:** the `and not _platform_linked` line removed → the MFL and ESPN tests red (`assert {'transactions': 18} == {}`); the other 5 stay green.
 - **Targeted:** `test_session_init_sleeper_calls`, `test_session_init_single_flight`, `test_market_data_readiness`, `test_co_owner_rosters`, `test_roster_refresh_state`, `test_players_refresh`, `test_account_only_harness`, `test_verified_sessions`, `test_trade_fingerprint_reads_unlocked`, `test_prepared_trade_runtime` → 162 passed.
 - **Not run:** the full suite (CI runs it); no live Sleeper calls (every fetch is mocked).
+
+## 2026-10-27 — B-DK audit reads the quality filter's own inputs (models-lead addendum D2, #492)
+
+Gates: eval-side only (`backend/eval/bdk_audit.py`, its tests, the runbook § B-DK audit and the evidence-contract lines). It's stacked on the display-moves loader PR. No route, schema, event, flag, knob or engine-module change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **What changed** (release-lead's #492 QA notes, all taken):
+  - B-DK-4..6 now read the pack's `run["filter_inputs"]` (v1), with null and NaN markets passed to the rules as the filter saw them.
+  - An asset absent from the record makes its card not auditable.
+  - Protection is the record's trade_hashes.
+  - `position_caps(lineup_slots)` None means the filter skipped B-DK-6: a pass.
+  - B-DK-6 reads the viewer's and the counterparty's (`str(partner_user_id)`) QB/TE holdings; an absent team holds nothing.
+  - `filter_ran: false` decks are skipped (`filter_not_run`).
+  - Decks without a record are counted by state (`record_failed`, `pack_without_record`, `no_pack`), and they're not auditable for 4..6.
+  - `valuation_json` is no longer read, which removes the owner-deck false FAILs (D2 (c)).
+  - B-DK-7 is unchanged except that a recorded deck's protection now comes from the record.
+- **Tests:** `test_eval_bdk_audit.py`, 69 tests:
+  - the value rules on the record;
+  - the record read, never `valuation_json`;
+  - record protection versus a row flag;
+  - row flags still protecting without a record;
+  - B-DK-6 on the viewer's and counterparty's holdings;
+  - B-DK-6 reproducing `filter_deck` on full rosters over a grid;
+  - an unknown lineup as a pass;
+  - nine record states;
+  - filter_not_run skipped;
+  - an unseen asset;
+  - a null or NaN market (the header's NaN token read);
+  - str ids.
+  - Together with `test_eval_display_moves.py`: 90 passed. Flip-read and blind-grade suites: 212 passed.
+- **Sabotage, each red then restored (8):**
+  - protection always from the row;
+  - no counterparty side;
+  - the viewer's holdings for both sides;
+  - an unknown lineup not auditable;
+  - no coverage check;
+  - filter_not_run decks audited;
+  - a bool version accepted;
+  - decks without a record audited anyway (27 red).
+- **B-DK-7 short caps (agreed with trades-eng; their v6 writes it):**
+  - The record's `repeat_head` holds the trade_hashes of the cards the cap kept, only when it kept fewer than W.
+  - A breach is explained when every unprotected over-cap card is outside it, so no rows past the window are needed.
+  - A list naming one of them is a violation, even where a re-run would explain it.
+  - Without the field, the re-run applies as before.
+  - Tests: 5 (deferred / kept / absent; protected cards in the head; the record outranks a re-run).
+  - Sabotage, 3 red: the head ignored; protected not skipped; a fall-back to the re-run.
+- **Checked on trades-eng's D3 writer packs** (`feat/trades-serve-repeat-cap` @ `1cb381b6`, `test_a_later_page_moves_the_pulled_card_and_records_it`, all 6 cut/i1 × stored/job_view/left_process cases):
+  - #501's loader order equals their `displayed()` ([29, 32, 30, 31, 33] around the move), with dense positions;
+  - their suite passes with #501's `data.py` (80).
+- **Not covered:**
+  - whether live-evidence decks' not-auditable B-DK-4..6 blocks certification is models-lead's call.
+
+## 2026-10-27 — Eval loader reads serve-time display moves (models-lead addendum D3)
+
+Gates: eval-side only (`backend/eval/data.py`, a doc line in `bdk_audit.py`). It reads the pack header field `run["display_moves"]`, agreed with trades-eng, whose serve side writes it. No route, schema, event, flag, knob or engine-module change; an absent field changes nothing, so this merges before or after the writer. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Why:**
+  - D3's fix re-applies the repeat cap at serve time.
+  - When a never-delivered withdrawal pulls a deferred card into the first 30, the server shows that card later in the same response.
+  - The loader's position was card_index less the W0s below it, so it put the card back inside the window: a false B-DK-7 FAIL and a shifted e(k).
+- **The rule:**
+  - The kept non-ghost cards' positions are handed out in display order, `(anchor, 1, card_index)` for a moved card and `(card_index, 0, card_index)` otherwise.
+  - A move counts once its response is delivered as of the read, so a re-read at the same as_of is stable.
+  - A record breaking the writer's contract makes the deck `pack_integrity` (ahead of `withdrawal_conflict`): a malformed key or value, an anchor that is itself moved, a self-anchor, a ghost, missing or W0 card, or a move spanning two responses.
+- **Tests:** `test_eval_display_moves.py`, 26 tests:
+  - no moves;
+  - one move; two behind one anchor;
+  - moves after a W0;
+  - as_of stability;
+  - 16 malformed records;
+  - a valid later-response move;
+  - precedence;
+  - B-DK-7 end to end (the moved deck passes; without the record the same deck is the false FAIL).
+- **Sabotage, 8 of 9 red then restored:**
+  - moves ignored (6 red);
+  - no as_of guard (1);
+  - moved card before its anchor (6);
+  - no same-response check (1);
+  - chained anchors allowed (1);
+  - W0 allowed (2);
+  - lenient keys (1);
+  - integrity after the conflict check (1).
+  - The ninth, a plain dense rank in place of the W0-adjusted slots, stays green as expected: the two are equal on every deck the loader doesn't exclude (an unexplained gap is `incomplete_deck`).
+- **Eval, value-model and evidence suites:** `test_eval_*`, `test_value_model*`, `test_packed_evidence`, `test_deferred_evidence`: 578 passed.
 
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 
