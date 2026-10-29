@@ -27280,6 +27280,10 @@ def admin_config_update(key: str):
 
     Operator-only (X-Cron-Secret, same as /api/cron/*): this mutates live
     ranking/trade math for every user, so it must never be world-callable.
+
+    `app_min_version` (B8) is also checked against the shared write policy
+    (backend/app_version_policy.py) and refused with 400 + the reason, since a
+    typo there locks every gate-aware build out of the app.
     """
     _require_cron_auth()
     try:
@@ -27287,6 +27291,11 @@ def admin_config_update(key: str):
         if "value" not in body:
             return jsonify({"error": "body must contain 'value'"}), 400
         new_value = float(body["value"])
+        if key == "app_min_version":
+            from .app_version_policy import validate_app_min_version
+            refusal = validate_app_min_version(new_value)
+            if refusal:
+                return jsonify({"error": refusal}), 400
         source = str(body.get("source") or "admin-api")[:64]
         result = set_config(key, new_value, source=source)
 
@@ -31678,6 +31687,9 @@ def feature_flags_route():
 
     Frontend fetches this at boot + on the ≥30-min foreground refetch
     (analytics-platform §4.6b) and stashes flags in window.FTF_FLAGS.
+
+    B8 adds one more additive top-level key, `app_min_version` (int; 0 =
+    off): the mobile minimum-version gate. See `_app_min_version`.
     """
     experiments: dict[str, str] = {}
     configs: dict[str, dict] = {}
@@ -31723,7 +31735,49 @@ def feature_flags_route():
         "flags":       flags_dict(),
         "experiments": experiments,
         "configs":     configs,
+        **_update_gate_fields(),
     })
+
+
+def _update_gate_fields() -> dict:
+    """B8: the two additive gate fields on /api/feature-flags, from ONE
+    model_config read. A read error serves both fields' off/unset values."""
+    try:
+        cfg = get_config()
+    except Exception:
+        cfg = {}
+    return {
+        "app_min_version": _app_min_version(cfg),
+        "app_store_live":  _app_store_live(cfg),
+    }
+
+
+def _app_min_version(cfg: dict) -> int:
+    """B8 minimum-version gate: the `app_min_version` model_config knob as a
+    non-negative int (major*10000 + minor*100 + patch; 0 = off).
+
+    Defensive by contract: a missing row, NaN/infinity, a fractional value or
+    a negative one all serve 0, so a bad row can only ever turn the gate OFF.
+    Writes are guarded separately (backend/app_version_policy.py).
+    """
+    try:
+        raw = float(cfg.get("app_min_version", 0))
+    except Exception:
+        return 0
+    if not math.isfinite(raw) or raw < 0 or raw != int(raw):
+        return 0
+    return int(raw)
+
+
+def _app_store_live(cfg: dict) -> int:
+    """B8 Update-button target: the `app_store_live` model_config knob as
+    1 (App Store), 0 (TestFlight) or -1 (unset: the client's compiled UTC
+    fallback decides). Anything other than exactly 0 or 1 serves -1."""
+    try:
+        raw = float(cfg.get("app_store_live", -1))
+    except Exception:
+        return -1
+    return int(raw) if raw in (0.0, 1.0) else -1
 
 
 @app.route("/api/feature-flags/reload", methods=["POST"])
