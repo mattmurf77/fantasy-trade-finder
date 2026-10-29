@@ -78,6 +78,19 @@ with no withdrawals it is card_index. The reason column ('i1_dropped',
 withdrawn_removed_by_reason splits the W0 removals by it (models-lead B4).
 No rule gates on it.
 
+Serve-time display moves (models-lead addendum D3): when a never-delivered
+withdrawal pulls a repeat-capped card into the first REPEAT_WINDOW, the
+server re-applies the cap and defers the card within its response. A pack's
+run["display_moves"], {"<card_index>": anchor card_index}, sparse, the
+card's first delivery winning, records that it was displayed right after
+the anchor; an absent key means no moves. A move counts once its response
+is delivered as of the read (the moved card is within the pack's
+deliveries), so a re-read at the same as_of is stable. The kept non-ghost
+cards' positions above are then handed out in display order,
+(anchor, 1, card_index) for a moved card and (card_index, 0, card_index)
+otherwise: several cards moved behind one anchor keep their build order,
+and with no moves nothing changes. Only packed decks move cards.
+
 Upgrade misses (models-lead U4-R2): a pack's run metadata may carry
 "upgrade_misses", the writer's count of viewed cards that never got a full
 row, as a dict of cause -> int. "other" is the only cause that must be 0;
@@ -103,7 +116,14 @@ deck whole and never sinks it; calibration excludes its cards.
   pack_integrity   unpack_run refuses the pack (unreadable, unknown version,
                    checksum mismatch, row fields disagreeing with its
                    header, malformed deliveries), or it holds another run's
-                   cards; its cards are not merged
+                   cards; its cards are not merged. Also a pack whose
+                   run["display_moves"] breaks the writer's contract: a key
+                   that isn't a card_index string or a value that isn't an
+                   int; a moved card or anchor that isn't a kept non-ghost
+                   card or is a served_before=0 index; an anchor that is
+                   itself moved, or a card anchored to itself; or a move
+                   whose card and anchor fall in different deliveries
+                   entries (the positions can't be trusted)
   withdrawal_conflict
                    the withdrawal disagrees with the evidence: a
                    served_before=0 index's card has a non-NULL
@@ -232,6 +252,8 @@ IN_FLIGHT_WINDOW = timedelta(hours=25)
 # The one upgrade-miss cause that must be 0 (U4-R2; module doc); every other
 # key of run["upgrade_misses"] is a named cause.
 UPGRADE_MISS_OTHER = "other"
+# The run metadata key of a pack's serve-time display moves (module doc, D3).
+DISPLAY_MOVES = "display_moves"
 # The LoggedCard fields a packed card takes from its unpacked dict; every other
 # unpacked key goes into its features_compact.
 _PACKED_LOGGED = (
@@ -525,6 +547,8 @@ def load_decks(
                       (datetime.fromisoformat(as_of) - IN_FLIGHT_WINDOW).isoformat())
     # run_id -> (card_count, final, last delivered card_index as of the read)
     packed: dict[str, tuple[int, bool, int]] = {}
+    # run_id -> (run["display_moves"], run["deliveries"]), checked per deck below
+    moves_raw: dict[str, tuple] = {}
     pack_only = False
     for p in packs:
         deck = decks.get(p.run_id)
@@ -549,6 +573,7 @@ def load_decks(
             refresh.add(p.run_id)
         packed[p.run_id] = (p.card_count,
                             *_pack_state(run, last_delivered, p.served_at, as_of, in_flight_from))
+        moves_raw[p.run_id] = (run.get(DISPLAY_MOVES), run["deliveries"])
         full = {c.card_index for c in deck.cards if not c.is_ghost}
         for u in cards:
             if u["card_index"] not in full:
@@ -577,6 +602,11 @@ def load_decks(
         paged = deck.deck_job_id in marked and not (
             PAGING_RELEASED_AT is not None and deck.served_at < PAGING_RELEASED_AT)
         by_index = {c.card_index: c for c in deck.cards if not c.is_ghost}
+        moves = (_display_moves(*moves_raw[deck.deck_job_id], set(by_index), removed)
+                 if pack else {})
+        if moves is None:          # display moves breaking the writer's contract
+            deck.exclusion = PACK_INTEGRITY
+            continue
 
         def shown(i: int) -> bool | None:
             """Whether the evidence says index i was delivered as of the read:
@@ -604,6 +634,17 @@ def load_decks(
         for c in deck.cards:
             if not c.is_ghost:
                 c.position = c.card_index - bisect_left(w0, c.card_index)
+        # D3: a move counts once its response is delivered as of the read; the
+        # same positions are then handed out in display order (module doc).
+        shown_moves = {i: a for i, a in moves.items() if i <= pack[2]}
+        if shown_moves:
+            kept = [c for c in deck.cards if not c.is_ghost]
+            slots = sorted(c.position for c in kept)
+            in_display_order = sorted(kept, key=lambda c: (
+                (shown_moves[c.card_index], 1, c.card_index) if c.card_index in shown_moves
+                else (c.card_index, 0, c.card_index)))
+            for slot, c in zip(slots, in_display_order):
+                c.position = slot
         if pack:
             _n, final, last_delivered = pack
             if not final:
@@ -679,6 +720,36 @@ def _upgrade_misses(run: dict) -> dict[str, int]:
     if isinstance(raw, dict):
         return {cause: int(n) for cause, n in sorted(raw.items())}
     return {UPGRADE_MISS_OTHER: int(raw)}
+
+
+def _display_moves(raw, deliveries: list, kept: set[int], w0: set[int]) -> dict[int, int] | None:
+    """A pack's run["display_moves"] as {card_index: anchor card_index} ({}
+    when absent), or None when it breaks the writer's contract (module doc,
+    pack_integrity). `deliveries` is the pack's whole, already-validated
+    list; `kept` the deck's non-ghost card indexes; `w0` its served_before=0
+    indexes."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        return None
+    moves: dict[int, int] = {}
+    for key, anchor in raw.items():
+        if not (isinstance(key, str) and key.isdecimal() and str(int(key)) == key
+                and type(anchor) is int):
+            return None
+        moves[int(key)] = anchor
+    lasts = [d[0] for d in deliveries]
+
+    def response(i: int) -> int | None:
+        """The deliveries entry that delivered index i (prefix deliveries)."""
+        k = bisect_left(lasts, i)
+        return k if k < len(lasts) else None
+
+    for i, anchor in moves.items():
+        if (i == anchor or anchor in moves or not {i, anchor} <= kept or {i, anchor} & w0
+                or response(i) is None or response(i) != response(anchor)):
+            return None
+    return moves
 
 
 def _pack_state(run: dict, last_delivered: int, served_at: str, as_of: str | None,
