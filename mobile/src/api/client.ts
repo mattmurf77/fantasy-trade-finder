@@ -372,6 +372,10 @@ export interface RequestOptions {
   signal?: AbortSignal;
   // A caller's whole-operation cap; never extends the route's own allowance.
   deadlineAt?: number;
+  // Per-call request timeout (ms) in place of timeoutForRequest's value, for a
+  // call whose server worst case is longer (api/sendOutcome.ts). Omitted =
+  // unchanged behaviour.
+  timeoutMs?: number;
   // State-owned identity fence. No store import belongs in this layer.
   beforeDispatch?: () => void;
 }
@@ -475,7 +479,7 @@ export async function apiRequest<T = unknown>(
 ): Promise<T> {
   const startedAt = _clockMs();
   const foregroundEpoch = _leftForegroundCount;
-  const deadlineAt = Math.min(opts.deadlineAt ?? Infinity, Date.now() + timeoutForRequest(path, opts.method || 'GET'));
+  const deadlineAt = Math.min(opts.deadlineAt ?? Infinity, Date.now() + (opts.timeoutMs ?? timeoutForRequest(path, opts.method || 'GET')));
   _noteWrite(path, opts.method || 'GET');
   try {
     return await runWithDeadline(signal => _apiRequestInner<T>(path, {...opts, signal, deadlineAt}), deadlineAt, opts.signal);
@@ -527,7 +531,7 @@ async function _apiRequestInner<T = unknown>(
   const timer = setTimeout(() => {
     timedOut = true;
     timeoutController.abort();
-  }, timeoutForRequest(path, method));
+  }, opts.timeoutMs ?? timeoutForRequest(path, method));
 
   const callerSignal = opts.signal;
   const onCallerAbort = () => timeoutController.abort();
