@@ -44,6 +44,7 @@ import { useEntitlements } from '../../state/useEntitlements';
 import type { AccountInfo } from '../../api/auth';
 import type { NotificationPrefs } from '../../shared/types';
 import FeedbackFAB from '../../components/FeedbackFAB';
+import { useTesterSurface } from './useTesterSurface';
 import { hubStyles, styles } from './styles';
 
 // The ranking preview names the flow the SteerSlider names. Values are the
@@ -85,13 +86,12 @@ export default function SettingsHubScreen({ navigation }: any) {
   const rankingPref = useSession((s) => s.rankingMethodPref);
   const verification = useSession((s) => s.verification);
 
-  // Flag store — free. The Testing row shows for `testing.stage_users` (as
-  // SettingsScreen.tsx:1546 does) or `testing.timing_readout` (#363 ruling
-  // 11: the operator's phone gets only that flag, and the readout lives on
-  // the Testing page); `ux.help_surface` decides whether the About page
-  // actually has an FAQ link to advertise.
-  const stageUsersEnabled = useFlag('testing.stage_users');
-  const timingReadoutEnabled = useFlag('testing.timing_readout');
+  // Flag store — free. The Testing row shows exactly when its page has
+  // something to render (useTesterSurface, #354 D-7), which includes
+  // `testing.timing_readout` (#363 ruling 11: the operator's phone gets only
+  // that flag, and the readout lives on the Testing page); `ux.help_surface`
+  // decides whether the About page actually has an FAQ link to advertise.
+  const testerSurface = useTesterSurface();
   const helpSurfaceOn = useFlag('ux.help_surface');
   // Monetization (iap-enablement, flag `monetize.paywall`, dark). The flag
   // gates this ROW, not the Paywall route — same rule as Testing above.
@@ -116,15 +116,25 @@ export default function SettingsHubScreen({ navigation }: any) {
   // How they are signed in. Only stated when something we hold actually
   // says so: a linked identity from the ['account'] cache, or a verified_via
   // the session store already reported.
+  // ESPN/MFL (platforms-eng's frozen values, 2026-10-26): the identity
+  // provider is `espn` / `mfl`, and the session's verified_via is `espn` /
+  // `mfl_login`. `mfl_login` is ALSO written for a Sleeper user who connects
+  // MFL by password (/api/mfl/auth-link), so it means an MFL sign-in only on
+  // an account-only session; a Sleeper user stays "Sleeper" (release-lead QA
+  // P2). Only the proof-based sign-in writes `espn`, so it stays unguarded.
   const verifiedVia = verification?.verified_via;
-  const provider: 'apple' | 'google' | null =
+  const provider: 'apple' | 'google' | 'espn' | 'mfl' | null =
     account?.account?.identities?.[0]?.provider
-    ?? (verifiedVia === 'apple' || verifiedVia === 'google' ? verifiedVia : null);
+    ?? (verifiedVia === 'apple' || verifiedVia === 'google' || verifiedVia === 'espn' ? verifiedVia
+      : verifiedVia === 'mfl_login' && user?.account_only ? 'mfl'
+      : null);
 
   const signInLabel =
     isDemo ? 'Demo session'
     : provider === 'apple' ? 'Apple'
     : provider === 'google' ? 'Google'
+    : provider === 'espn' ? 'ESPN'
+    : provider === 'mfl' ? 'MFL'
     // A non-account_only session is keyed to a real Sleeper user by
     // construction (useSession.SavedUser) — that is a fact, not a guess.
     : user && !user.account_only ? 'Sleeper'
@@ -211,7 +221,7 @@ export default function SettingsHubScreen({ navigation }: any) {
 
   // ── About preview ──────────────────────────────────────────────────────
   const versionLabel = appVersionLabel();
-  const aboutLinks = helpSurfaceOn ? 'FAQ, privacy, terms' : 'Privacy, terms';
+  const aboutLinks = helpSurfaceOn ? 'FAQ, feedback, privacy, terms' : 'Feedback, privacy, terms';
   const aboutPreview = versionLabel ? `${aboutLinks} · v${versionLabel}` : aboutLinks;
 
   return (
@@ -330,11 +340,12 @@ export default function SettingsHubScreen({ navigation }: any) {
           onPress={go('SettingsAbout')}
         />
 
-        {/* Dev builds and allowlisted testers only: the shipped flat list's
-            gate (SettingsScreen.tsx:1546) plus the timing-readout flag, so a
-            readout-only device can reach the readout. No banner: it is not a
-            group, it is a build-conditional escape hatch. */}
-        {__DEV__ || stageUsersEnabled || timingReadoutEnabled ? (
+        {/* Dev builds and devices with a tester flag only — the same
+            predicate the Testing page body uses (useTesterSurface, D-7: the
+            shipped flat list's `stage_users` gate plus the timing-readout
+            flag, so a readout-only device can reach the readout). No banner:
+            it is not a group, it is a build-conditional escape hatch. */}
+        {testerSurface ? (
           <NavRow
             testID="settings.hub.testing"
             title="Testing"

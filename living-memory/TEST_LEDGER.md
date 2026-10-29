@@ -1,3 +1,883 @@
+## 2026-10-28 — Paywall price rise moves to 2027-01-02 04:00 UTC (App Store Connect's US start for a Jan-2 schedule; follow-up to #494)
+
+Gates: a value change to the merged #494 (`bef9f5db`), as its own PR off main (`fix/paywall-rise-jan2`), requested by monetization-pm (head-product authorized; the operator approved scheduling both App Store price changes for 2027-01-02 on 2026-10-28). release-lead delta-QAs it. Still dark (`monetize.paywall`). D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Change:** `_PAYWALL_PRICE_RISE_AT` = `datetime(2027, 1, 2, 4, 0, tzinfo=utc)` (was 2027-01-01 08:00Z, LA midnight). Per monetization-pm, citing Apple's start-times table, a change scheduled for 2027-01-01 starts in the US at 2027-01-01 04:00Z (11 pm ET on Dec 31), which breaks Terms §14.8; a 2027-01-02 schedule starts at 2027-01-02 04:00Z (11 pm ET / 8 pm PT on Jan 1). Apple's table renders its times client-side, so the 04:00Z figure is not independently checked here; monetization-pm's setup §3d records the time App Store Connect shows, and the constant moves if it differs. The comment block, api-reference row and cross-client-invariants SKU rows + fallback bullet say the same.
+- **Tests (`test_paywall_config.py`, 43):** both sides of the new instant (`2027-01-02T03:59:59Z` old, `04:00:00Z` new); the Jan-1 schedule's US start (`2027-01-01T04:00Z`) and the previous LA-midnight instant (`2027-01-01T08:00Z`) now serve the old prices; the constant equals 23:00 Jan 1 New York and 20:00 Jan 1 Los Angeles via `zoneinfo`, and the last second of Dec 31 in Honolulu is before it; time-zone instants (NY 23:00 Dec 31 old, LA midnight Jan 1 old, NY 22:59:59 Jan 1 old, NY 23:00 Jan 1 new, LA 20:00 Jan 1 new, Paris 00:30 Jan 1 old). 43 passed.
+- **Sabotage, each red then restored:** the old 2027-01-01 08:00Z instant → 6 red; a Jan-1 schedule's 2027-01-01 04:00Z → 9 red.
+
+## 2026-10-28 — A live stamp on a deck with no evidence is logged (#517 QA P3-2, models-eng)
+
+Gates: #517 QA P3-2 and models-eng's ask for a server-side count of decks eval can't see. A diagnostic log line only; no route, schema, flag, event or behaviour change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The case:** a deferred deck whose page row was stored without its evidence blob and that has no pack. After its job leaves, its deliveries take the live-stamp path, which stamps and withdraws only rows that exist. So its cards reach eval nowhere, and an outcome on one is a G3 orphan.
+- **What the common P3-2 shape does instead:** a first delivery after the job left on a truncated stored deck is an S1b partial run (rows and withdrawals, no pack, by design). Eval sees it.
+- **The signal:**
+  - `database.stamp_live_deliveries` now returns False when it delivered cards of a deck with no row at all: one indexed `LIMIT 1` probe, and only when there are cards.
+  - `_deck_live_stamp` logs it at ERROR: `deck-evidence <deck_job_id>: n delivered cards of a deck with no evidence (no rows, no pack); eval can't see them`. It carries no user id.
+- **Tests:** in `test_packed_evidence.py`, the return value (a deck with rows, one with none, no cards) and the ERROR line (logged only with no rows, with no user id). 3 sabotages red: always True, the empty-delivery guard dropped, the check inverted. Packed, deferred and page-store suites: 349 passed.
+
+## 2026-10-28 — #530 QA P3s: the failed-read path's signature, "missing" read and running None stamp pinned; docstring
+
+Gates: release-lead's #530 QA (GO-with-notes), three P3 test gaps and a docstring nit. Follows #530. Tests and one docstring; no behaviour, route, schema, flag or knob change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **(b) the "missing" read:** the failed-read tests are parametrized over a failed read (no snapshot) and a real "missing" one (the league's member rows deleted; the test asserts that status). Before, all six used `current=None`.
+- **(a) the request signature:** a job for another request signature, complete or running, is never followed on either read.
+- **(c) a running None-stamp job:** never followed on either read. The refusal is asserted by its kick, because a running job's kick may join that same job, so its `deck_id` alone proves nothing.
+- **Docstring:** `_trade_rebase_job_current` no longer says P1 rejects a None stamp "on any read". The head is stricter than P1: `_trade_fingerprints_match` keeps a running None-stamp job on a failed read, and at mode 0. Here it kicks.
+- **Sabotages:** QA's Q1 (None guard on complete jobs only), Q5 (signature dropped on the failed path), Q6 (missing keeps the old shortcut) and Q7 (missing compared as an ok read) are now red in the suite (2, 4, 6 and 4 tests). The original four (TE1–TE4) are still red.
+- **Evidence:** `test_trade_pages_p2.py` (128), `test_trade_page_store.py`, `test_trade_freshness_roster.py` and the digest: 314 passed.
+## 2026-10-28 — The repeat cap re-applied to the displayed order at a serve (models-lead addendum D3)
+
+Gates: models-lead's ruling D3 (a disposition cut that pulls a deferred card into the displayed first 30 counts as a B-DK-7 violation; the fix is to re-apply the cap after serve-time withdrawals, cuts and I-1 at mode 2), via head-eng ("build it now", after #489 and #492). Not flip-gating; due before the launch-week freeze. It adds one optional run key to the pack header, `display_moves`, agreed with models-eng. models-eng's #501 is the reader, and either PR can merge first. No route, schema, flag, knob or event change. No pipeline bump: it is a serve-time order, `deck_quality.py` is untouched, and the digest test passes unchanged. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **#517 QA (release-lead, NO-GO at `f5ddc026`), fixed:**
+  - **P1-1:** after the job left, the window's prior was the earlier cards less every withdrawal. Eval keeps a delivered-then-withdrawn card (W1) in place, so the window reached further than eval's and X landed 4× in its first 30. The after-left path now reads what `_served_cap` reads, from the pack:
+    - the delivered cards (`_deck_stored_delivered`: at or under the last delivery boundary, less the `served_before` 0 withdrawals);
+    - the recorded moves;
+    - this response's delivered cards it no longer sends.
+  - **P2-1:** `_deck_note_moves` takes `first(index)` and refuses (logs) a move for a card an earlier response delivered: in process, a card not new to this delivery; stored, a card under the last boundary.
+  - **P3-1:** the off-scope test (filters off, unpacked, no withdrawal) runs on the job view and both stored paths, in process and after the job left.
+  - **New tests (9 cases):**
+    - the W1-then-page-2 repro, in process and after the job left;
+    - a re-serve after the job left records no move for an earlier delivery's card, and eval's order is the client's;
+    - no W0 means no move after the job left;
+    - recorded moves are re-applied after the job left;
+    - a card delivered unmoved holds its place at a later serve, in process and after left;
+    - both writers refuse a stale move (the cap stubbed);
+    - `_deck_note_moves`'s refusal.
+  - **Sabotages, 9 of 9 red:**
+    - the old after-left path;
+    - every withdrawal read as W0;
+    - no `delivered` (after left / in process);
+    - no recorded moves;
+    - an unpacked deck capped after left;
+    - the refusal dropped;
+    - each writer's `first` forced true.
+  - **QA's probes:** 18 of 20 green. The two red ones are P3-2's (a deck first delivered after its job left never gets a pack), pre-existing and raised with models-eng.
+  - **P1-2:** raised with models-eng and models-lead.
+- **Backend:** `test_served_repeat_cap.py`, 90 tests (74 before QA).
+  - **`_served_repeat_cap`, pure:**
+    - a pulled card moves behind the next clean one;
+    - a later page counts the cards earlier responses displayed;
+    - a full window moves nothing;
+    - protected and delivered cards hold, and count;
+    - a delivered card withdrawn since holds its slot, unsent;
+    - nothing moves without contract ids in build order;
+    - recorded moves are re-applied and never recorded twice;
+    - the anchor is always a card the response sends first (a delivered or withheld last card, or a recorded move, moves nothing);
+    - a response with no clean card keeps its order;
+    - 40 seeded decks order exactly as `deck_quality._repeat_cap`, and eval's display key reproduces each order.
+  - **Serve paths,** each with a disposition cut (a real pass elsewhere) and with I-1 at mode 2:
+    - a later page through the stored view, the job view, and after the job left the process;
+    - the legacy body, with a repeat poll keeping the order;
+    - a replace serve after a never-delivered withdrawal (moves);
+    - a replace serve after a delivered card's withdrawal (nothing moves).
+    - Each case asserts the served order, the pack header's `display_moves`, and that the order eval derives from the pack alone (#501's rule) puts X in exactly 3 of the first 30.
+  - **What never moves:** flag off, an unpacked deck, no withdrawal.
+  - **Header:** the CAS merge keeps a card's first move.
+- **Regression:** the serve, evidence and eval suites (`test_deck_pipeline_digest`, `test_deck_quality`, `test_eval_bdk_audit`, `test_eval_withdrawals_and_paging`, `test_i1_serve_filter`, `test_packed_evidence`, `test_trade_page_store`): 458 passed on the first version.
+- **Full suite:** `pytest backend/tests`, 9,424 passed and 2 skipped at `1cb381b6`. After resyncing onto main `66e50a35` (#489, #492, #452) the evidence suites passed again: 312 (`test_served_repeat_cap`, `test_evidence_cleanup`, both filter-inputs files, the digest, `test_packed_evidence`, `test_i1_serve_filter`).
+- **Cross-check:** models-eng ran #501's reader on this branch's real packs (all 6 cut/i1 × stored/job_view/left_process cases). `load_decks` gave the same displayed order as `displayed()`, and the suite passed with #501's `data.py` overlaid (80).
+- **Sabotage, each red then restored (11):**
+  - no cap in the job view;
+  - no cap in the stored view;
+  - moves not noted in process;
+  - moves not noted after a restart;
+  - the header flush dropping moves;
+  - the merge letting ours win;
+  - withheld cards ignored;
+  - moves on an unpacked deck;
+  - the flag ignored;
+  - prior pages ignored;
+  - no anchor guard.
+- **History:** the first version also carried the loader. models-eng took that side as #501, so it was removed here, along with its tests and sabotages, and the anchor guard was added for #501's same-delivery integrity rule. A display-key self-check in the first version was dropped: the guard makes it unreachable (its sabotage stayed green until a test reached it, and with the guard nothing does).
+
+## 2026-10-28 — #519 QA P3s: the in-flight kickoff attribution, the burst test's race, docs
+
+Gates: release-lead's #519 QA (GO-with-notes at `8af4189a`), P3-1 to P3-3. Follows #519. Tests and docs, and one docstring; no behaviour, route, schema, flag or knob change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is pytest.
+
+- **P3-1 (#487 QA P3-1 closed):** the kickoff attribution test is parametrized over the session's roster refresh: idle, and in flight (`roster_fetch_started_at=READ_NOW`, `roster_read_rows=MEMBERS_NOW`), which is the only path where the kickoff takes an expected fp. The in-flight case asserts the job really took one. This is release-lead's variant.
+  - **Sabotage T5** (a separate picks read while in flight): the in-flight case is red. The idle case stays green, as QA found.
+- **P3-2:** `test_a_burst_s_tail_is_logged_once_the_drops_stop` waits on the warning record, not on the drop counter. The worker zeroes the counter under the lock and logs after releasing it.
+  - **Shown:** with that gap widened to 150 ms, the old wait fails and the new one passes. With no warning, it's red.
+  - **Repeats:** 8 of 8 green.
+- **P3-3, docs:**
+  - #519's ledger entry is corrected in place, dated (it had said "no server code" and "3.12 may refuse");
+  - the exit drain's docstring now says the guard is defensive;
+  - LLD's `deck_i1_check` line names the exit drain's restart and the refusal path;
+  - #519's PR body is fixed (44 tests, the guard commit).
+
+## 2026-10-28 — QA P3 follow-ups: #489 (docs claim, LLD guard counts, deadlock-safe lock test), #487 (read pins, docstring), #485 (exit-drain restart, after-write flush)
+
+Gates: release-lead's #489 delta QA, P3-1 to P3-3. Tests, docs and three small server changes (a docstring, the exit drain's worker restart and its shutdown guard); no route, schema, flag or knob change. (Corrected 2026-10-28, #519 QA P3-3: this line first said "no server code".)
+- **P3-1:** #489's ledger entry said its docs included the data dictionary (the ERROR-line note). They didn't: the note from `85286cf7` already held. The entry is corrected in place, dated. Commit `7d5d0edb`'s message keeps the wrong claim; it can't be rewritten (no force-push).
+- **P3-2:** LLD's guard-count list now includes `f5=` (printed when nonzero), beside `held=` and `evicted=`.
+- **P3-3:** `test_evidence_cleanup`'s `_OrderedLock` takes a blocking lock with a 5 s timeout. A self-deadlock now fails the test with "lock not acquired" instead of hanging until the runner's timeout.
+- **Evidence:**
+  - `test_evidence_cleanup.py`: 38 passed.
+  - **Sabotage:** the F5 drop's ledger lock nested inside itself. Before: the test hung (QA's Y1, caught only by the runner's timeout). Now: it's red in 17 s, then restored.
+- **#487 QA (release-lead, 2026-10-27):**
+  - **P3-1:** a kickoff test attributes every `draft_picks` and `leagues` statement to the one fingerprint read (`snapshot_ids`: one picks read, one drafted read) or to the preferences' pick share. An expected fp taken from a separate read fails it; the old spy counted only `snapshot_ids` calls.
+  - **P3-2:** the worker spy now also asserts exactly one `get_league_draft_context` per job.
+  - **P3-5:** `_trade_fingerprints_match`'s docstring now lists every None-stamp source: a failed kickoff read, other picks, a flipped verdict, a failed picks or draft read.
+  - **P3-3, for models-eng:** owner-exclusive forfeits on a transient first picks-read failure (0 owner cards; main re-read and served). It's conservative and consistent; models-eng was told.
+  - **P3-4, accepted:** a failed draft read unstamps drafted-league jobs on non-owner paths. It needs a DB error, and serving is unaffected. The +1 leagues lookup per non-owner job is the verdict the stamp's key holds since #487.
+- **#485 QA (release-lead, 2026-10-27):**
+  - **The exit drain:** it now starts a worker first when the current one died with writes queued behind it (`_i1_event_ensure_worker`, split from the enqueue), so those writes land instead of being lost.
+  - **A test pins the after-write drop flush:** by the call on the test's own queue, since the drop counter is module-wide and another test's idle worker may log it.
+  - **The death backoff:** informational; none added. The worker dies only on a BaseException, and each restart waits for the next enqueue or the exit drain.
+  - **Shutdown guard (release-lead's #519 question):** defensive. Should an interpreter ever refuse a new thread at shutdown ("can't create new thread at interpreter shutdown", gh-104690), the exit drain logs the stranded writes with their count and returns at once. It never raises, and never waits on a queue nothing serves. (Corrected 2026-10-28, #519 QA P3-3: this said CPython 3.12 "may refuse". QA's real exits on 3.12.3, 3.12.15 and 3.14 restart the worker and the writes land.)
+    - On 3.14 (local) the restart works at exit: the stranded write lands.
+    - 3.12 isn't installed locally, so a child-interpreter test runs the real exit, normally and via a SIGTERM-to-exit handler (gunicorn's shape), on CI's 3.12. It asserts exit 0, no traceback, and the write either landed or logged.
+- **Evidence:** `test_trade_freshness_roster.py`, `test_deck_i1_check.py` (44, with the refused-thread test and the child-interpreter exit ×2), `test_evidence_cleanup.py` and the digest all passed.
+- **Sabotage, each red then restored (5):**
+  - the exit drain's start unguarded (the refused-thread test raises);
+  - a separate kickoff picks read;
+  - a second worker draft read;
+  - the exit drain without a restart;
+  - no after-write flush. Its first form, a log assertion, stayed green in the full file because another test's idle worker logged the shared counter; it's now pinned by the call on the test's own queue.
+## 2026-10-28 — Rebase case 2's failed-read path runs every other check (#520 QA P3s)
+
+Gates: release-lead's #520 QA, P3-1 to P3-3, on main after #520 merged (flag-dark behind `trade.first_page_store`). No route, schema, flag or knob change; serve path only, no pipeline change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P3-1:** `_trade_rebase_job_current` used to return True on a failed or missing snapshot before any check. Now only the fingerprint compare is skipped: the job's own stamp stands in for the read, and the policy, TTL, request signature and session-read checks P1's backing makes all still run.
+  - A None stamp is never followed on that path, since P1 rejects it on any read.
+- **P3-2, accepted, not changed:** when only the vsn read fails, `_trade_current_snapshot` returns None and the page view reads the roster again. That's 2 roster reads per poll, on that failure path only. Keeping the roster snapshot would change `_trade_current_snapshot`'s None-means-failed contract for all its callers, for a flag-dark failure path.
+- **P3-3:** `test_trade_pages_p2.py`, 6 new tests (116 in the file):
+  - a failed read follows a current newer job, complete and running, with no kick;
+  - a failed read plus a revoked input epoch: no follow;
+  - a failed read never follows a None-stamp job, one past the reuse TTL, or one built on a read the session replaced.
+- **Sabotage, each red then restored (4):**
+  - the old shortcut (3 red);
+  - a failed read kicking (2 red);
+  - no None-stamp guard;
+  - the epoch check after the shortcut (4 red; one of QA's two green probes).
+## 2026-10-28 — One retry inside the job's picks and draft-context reads (#487 QA P3-3, models-eng); deck pipeline v7
+
+Gates: release-lead's #487 QA P3-3 (owner-exclusive forfeits on a transient first picks-read failure: 0 owner cards, where main re-read and served 348), and models-eng's ruling and v7 shape. Stacked on #515 (v6). No route, schema, flag or knob change. `DECK_PIPELINE_VERSION` 6 → 7 (`facf9a9f34b7529a`): only `_run_trade_job`'s two memos changed. models-eng reviews. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The change:** inside `_job_draft_picks` and `_job_draft_context`, a raising read is retried once, immediately, with no lock held.
+  - Either attempt's success is memoized. The read is marked failed only when both raise.
+  - `_note_job_picks_read` runs after the retry, so the stamp check and the owner path see one, and the same, read.
+  - A persistent failure behaves as before: the owner arm forfeits, and other readers degrade to empty. The success path is unchanged.
+- **Backend:** `test_trade_freshness_roster.py`, 4 new tests (2 reads × 2):
+  - a read that fails once is retried (2 calls in all, 1 note, the stamp kept) and the owner context builds;
+  - a read that fails twice forfeits, as before.
+  - The existing persistent-failure tests (`test_a_failed_read_still_forfeits_the_owner_arm`) still pass.
+- **Regression:** the digest, `test_trade_freshness_roster`, both filter-inputs files and `test_bakeoff_serving`: 128 passed.
+- **Sabotage, each red then restored (3):**
+  - no picks retry;
+  - no draft retry;
+  - a second retry (the fails-twice test catches it).
+
+## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
+
+Gates: head-eng's two additions to #494 (`fix/paywall-fallback-prices`), values confirmed by monetization-pm. Same route, still dark (`monetize.paywall`). No route, schema, event, flag or knob change. Server and docs only; mobile untouched. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest, a sabotage pass and a code walk of TipJarScreen. Full suite not re-run (CI runs it).
+
+- **The rise is an instant, not a UTC date (`backend/server.py`):**
+  - `_PAYWALL_PRICE_RISE_DATE = date(2027, 1, 1)` compared on the UTC date, so the fallback flipped to $6.99 / $34.99 at 7 pm ET on Dec 31. Terms §14.8 promises the Founder price to anyone subscribing "by December 31, 2026".
+  - It is now `_PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 1, 8, 0, tzinfo=timezone.utc)`, which is 2027-01-01 00:00 America/Los_Angeles (PST, UTC-8). `_paywall_products` compares `now >= _PAYWALL_PRICE_RISE_AT`, and a naive `now` raises `TypeError`.
+  - The comment says it is fallback-only (StoreKit is authoritative) and that monetization-pm checks it against the App Store Connect scheduled change; if the two differ, the constant moves.
+  - The now-unused `date` import is reverted.
+- **Tips:** the route serves `tips: []`, as #465 does, because the tip SKUs are not submitted to App Store Connect. `_PAYWALL_TIPS` stays as the list to restore. A tip still grants no entitlement (`entitlements.is_tip_product`, unchanged).
+- **TipJarScreen with an empty list (code walk, `mobile/src/screens/TipJarScreen.tsx`):**
+  - `:80` gives `tips = []`;
+  - `:85` disables the StoreKit product fetch (`tips.length > 0`);
+  - `options` is empty, so `:193-195` render "Tips aren’t available right now." No crash and no purchase row.
+  - Hiding the Settings tip row is engagement-eng's client work, routed separately.
+- **Backend:** `test_paywall_config.py` is now 36 tests (was 30):
+  - both sides of the instant: `2027-01-01T07:59:59Z` old, `08:00:00Z` new; `2027-01-01T00:00Z` (4 pm Dec 31 in LA) is pinned old;
+  - the constant equals 08:00 UTC and LA midnight via `zoneinfo`;
+  - the UTC-date tests are replaced with instant tests. New York 20:00 Dec 31 now gets the **old** prices, and so does LA 23:59:59. LA 00:00 Jan 1 and New York 03:00 Jan 1 get the new ones. Paris 00:30 Jan 1 is old;
+  - a naive `now` raises;
+  - `tips == []` with no `ftf_tip` in the payload;
+  - the restorable `_PAYWALL_TIPS` SKUs are all `is_tip_product` and claim no entitlement fields.
+- **Targeted, with its own log:** `test_paywall_config.py`, `test_entitlements.py`, `test_analytics_p0.py`, `test_api_observability.py` → 136 passed, exit 0. `node mobile/tests/check-paywall.js` 11/11 and `check-tipjar.js` 9/9. check-tipjar is structural, so the empty list doesn't touch it.
+- **Sabotage, each red then restored byte-identical (5):**
+  - back to the UTC-date comparison (6 red);
+  - the rise at UTC midnight (6 red);
+  - `>` for `>=`, off by one second (3 red);
+  - tips non-empty again (1 red);
+  - `trial_days` back on annual (6 red).
+- **Docs:** `docs/api-reference.md`, the `/api/paywall/config` row (the rise instant, empty tips). `docs/cross-client-invariants.md` § Monetization SKU ids: the SKU rows, the tip row and the fallback-prices bullet.
+
+## 2026-10-27 — Paywall config fallback prices: $4.99 / $24.99 (→ $6.99 / $34.99 for new subs from 2027-01-01), no `trial_days`
+
+Gates: a values fix to `GET /api/paywall/config` (flag `monetize.paywall`, still dark) flagged by marketing-lead via head-eng. The response loses the `trial_days` key and its prices follow #393's approved plan (operator 2026-10-25). No route, schema, event, flag or knob change. Server and docs only; mobile untouched. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest, a sabotage pass and a code walk of the old client.
+
+- **The fix (`backend/server.py`):**
+  - `_PAYWALL_PRODUCTS` drops `trial_days` (was 14 monthly, 30 annual) and carries no prices.
+  - `_PAYWALL_PRICES` holds (before, from) pairs, switched by `_PAYWALL_PRICE_RISE_DATE = date(2027, 1, 1)`, judged in UTC: monthly $4.99 → $6.99, annual $24.99 / $2.09 → $34.99 / $2.92.
+  - `_paywall_products(now)` is pure; the route passes it `_paywall_now()`, the clock tests patch.
+  - `per_month_equiv` is the annual price / 12 rounded **up**: $2.09, matching legal's #393 R28.8 #2 copy, not the $2.08 a round-to-nearest gives.
+- **Old-client render (code walk, main `mobile/src/screens/PaywallScreen.tsx:172-176`):**
+  - the trial line is `trialEligible && p.trial_days > 0 ? … : null`, and `undefined > 0` is false, so it is null;
+  - with no trial line, :360 renders nothing, the CTA at :383 reads "Continue", and the a11y label at :333 adds nothing;
+  - the plans render "$4.99/month" and "$24.99/year" plus "$2.09/month, billed yearly" when StoreKit is unavailable (otherwise StoreKit's `priceString` wins).
+  - A node emulation of that logic against the new payload printed exactly that.
+- **Backend:** `test_paywall_config.py` is now 30 tests (was 15):
+  - `test_products_shape` pins the exact key sets (no `trial_days`) at a frozen 2026-10-27;
+  - the route on both sides of the rise (today, 2026-12-31T23:59:59Z, 2027-01-01T00:00:00Z, 2027-06-01);
+  - no `trial_days` anywhere in the response, at all four instants;
+  - the switch is judged in UTC (New York Dec 31 20:00 is risen; Paris Jan 1 00:30 is not);
+  - the function is pure and leaves the module tables untouched;
+  - `per_month_equiv` equals the ceil of price / 12 on both sides;
+  - the default clock is the real aware UTC now.
+- **Targeted:** `test_paywall_config.py`, `test_entitlements.py`, `test_analytics_p0.py`, `test_api_observability.py`, `test_account_deletion_coverage.py` → 166 passed. `node mobile/tests/check-paywall.js` 11/11 and `check-tipjar.js` 9/9 (mobile untouched).
+- **Full suite** on the branch's working tree (`7b085e2d` plus this diff): `pytest backend/tests -q` → 9346 passed, 2 skipped, 0 failed, exit 0 (21m46s). Its own log, with junit confirming 9348 tests, 0 failures, 0 errors. A first run was discarded: another agent's suite wrote to the same scratch log.
+- **Sabotage, each red then restored byte-identical (6):**
+  - `trial_days: 30` back on annual (5 red);
+  - the switch never fires (4 red);
+  - `>` for `>=`, off by one day (2 red);
+  - the date judged in the caller's tz, not UTC (2 red);
+  - the route ignores the clock (2 red);
+  - `per_month_equiv` rounded down to $2.08 (4 red).
+- **Docs:** `docs/api-reference.md` (the `/api/paywall/config` row; plus the `/api/me/entitlements` row's drift fix: `/api/extension/auth` never carried `pro`, intentionally, legal R28.17); `docs/cross-client-invariants.md` § Monetization SKU ids (prices, the rise date, no `trial_days`). `docs/config-reference.md` n/a: the date is a code constant, not config.
+- **Not covered:**
+  - tsc not run here (no `mobile/` change; `billing.ts` still types `trial_days: number`, harmless at runtime, and the #393 M1 branch drops it);
+  - `docs/plans/monetization/pro-subscription/lld.md` §3 JSON and `iap-enablement/sandbox-test-checklist.md` P2 still carry the old prices and trial lengths (history and ASC setup, left for the #393 owners).
+
+## 2026-10-28 — Rebase case 2 follows the scope's newer job only while it's current (#484 QA P3-2)
+
+Gates: release-lead's #484 QA P3-2, open since 10-27. It's flag-dark behind `trade.first_page_store` and must land before the ~11-04 flip. No route, schema, flag or knob change; the API reference's rebase case 3 wording is updated. No pipeline change: only serve-path code changed. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The fix:** `_trade_deck_rebase`'s case 2 (the scope's newest job in this process) now uses P1's backing check (`_trade_rebase_job_current`), the one `_serve_trade_page_for` applies.
+  - No input epoch may be revoked since the request.
+  - The job must be fresh (`_trade_job_is_fresh`) or a matching running one (`_trade_running_matches`), against the same roster snapshot and the session's read.
+  - A stale job falls through to the end or the kick, so the rebuild starts, as a fresh tap would.
+- **Unchanged cases:** with no snapshot (a failed read, or `trade_i1_mode` 0), or one with no stored rows (`status` "missing", whose fp says nothing about the job's rosters), nothing proves the job stale (A2). It's followed as before, and the page view's own checks and S0's rules still decide what it sends.
+- **One snapshot per poll is kept:** the rebase reads P1's serve snapshot once (lazily, shared by cases 1 and 2), and the job page view takes it (`_trade_job_page_view` / `_trade_job_public_view` `snap=`) for S0's serve rules. `test_each_deck_serve_reads_one_roster_snapshot` holds.
+- **One test changed by design:** the C-e deck-path test edits the stored rows after building the newer job. On the rebased-job path it now re-stamps that job to the edited rows, so it still tests the C-e serve rule.
+- **Backend:** `test_trade_pages_p2.py` (110):
+  - a newer job whose rosters moved isn't followed, and the rebuild is kicked;
+  - a matching running job is followed with no kick;
+  - an input change means no follow;
+  - both checks get the session's read.
+- **Regression:** `test_trade_pages_p2`, `test_trade_page_store`, `test_trade_freshness_roster`, `test_i1_serve_filter`, `test_deck_i1_check` and the digest: 394 passed.
+- **Sabotage, each red then restored (5):**
+  - no check;
+  - no session read;
+  - input epochs ignored;
+  - a fresh-only check, so the running job is lost;
+  - a second snapshot read, which turns the one-snapshot test red.
+  - Two of these stayed green on the first try (the session read was None; a kick joining the same running job looked like a follow); the tests were tightened.
+
+## 2026-10-28 — #492 QA follow-ups and `repeat_head` (models-eng #503); deck pipeline v6
+
+Gates: release-lead's #492 QA P3s, and models-eng's short-deck ask (`repeat_head`, agreed 10-28; #503 reads it). No route, schema, flag, knob or event change. `DECK_PIPELINE_VERSION` 5 → 6 (`d5176ae18c66d208`): `_run_trade_job` gates the record and passes the filter's `deferred` count. The deck's shape doesn't change; models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P3-1:** the record is built only when the job holds deferred evidence. Before, it was computed and thrown away on every other deck, at 0.1–5 ms each.
+- **P3-4:** a market value is a plain float, or null when it isn't a finite number. A bool is null and a numpy float becomes a float, so the header stays strict JSON.
+- **P3-3:** QA's probes, ported to the real-worker harness. Its markets are all unseeded, so the probe asserts identity instead: the record gets the filter's returned cards (in order), its very callables and rosters, its viewer and its `deferred` count. It also asserts coverage equality and value equality. A cap-1 variant makes the filter reorder, so a record from the pre-filter cards fails here.
+- **`repeat_head`:** the cap's kept trade_hashes when its head is shorter than 30, else null.
+- **P3-5:** the data dictionary's "absent" now also covers a run revoked or timed out before the record was set.
+- **#503 QA P2 (release-lead; agreed with models-eng):** a non-finite market's null is listed in `market_coerced` (sorted ids, absent when none), so #503's audit never reads it as an unseeded asset. A NaN first on a card had made a false filler FAIL; such a card is now not auditable for breakup and filler (models-eng's side, a follow-up after #501 and #503). A bool is now its 1.0 or 0.0, as the filter compared it. The unit tests cover both. `_quality_filter_inputs` is IGNORED, so the v6 pin is unchanged.
+- **P3-2 (size):** no code change. For U8: the header is +9 to +12 KB per deck and rewritten 5–11 times per deck, and `evidence_blob` carries the record (+4 to +5 KB against the 250 MB cap). `repeat_head` adds at most 29 hashes (under 600 B) and only on a short cap. Release-lead's option (keep the record out of `base_run`'s deepcopy) is held for U8's numbers.
+- **Backend:** `test_filter_inputs.py` (11: plus 5 `repeat_head` cases and the value coercion) and `test_filter_inputs_pack.py` (11: plus the no-deferred-evidence skip, the identity probe ×2 and `repeat_head` on the real cap ×2). 22 + the digest test passed.
+- **Regression:** `test_bakeoff_serving` (the flag-off golden that pins the job's keys), `test_deck_quality`, `test_deck_pipeline_digest`, `test_packed_evidence`, `test_deferred_evidence` and both filter-inputs files: 304 passed.
+- **Sabotage, each red then restored (7):**
+  - the record built without deferred evidence;
+  - no value coercion;
+  - NaN kept as a float;
+  - `repeat_head` always written;
+  - the worker passing no deferred count;
+  - the record from the pre-filter cards;
+  - another market callable.
+
+## 2026-10-27 — The quality filter's inputs, frozen per run (models-lead addendum D2); deck pipeline v5
+
+Gates: models-lead's ruling D2 (B-DK-4..6 provenance), via head-eng. Field names agreed with models-eng (their changes: `viewer_team`; null, not absent, for an unseeded asset or a None position; coverage = the returned cards' assets plus the holdings; the optional `protected` included). It adds one per-run key to the pack's run header; no route, schema, flag or knob change. `DECK_PIPELINE_VERSION` 4 → 5 (stacked on #487's v4): `_run_trade_job` records the inputs, and `_quality_filter_inputs` is in `DECK_PIPELINE_IGNORED`. The deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **CI fix (`backend-tests` at `c2253799`):** recording on the job broke `test_bakeoff_serving`'s flag-off golden, which pins the job's keys. The record now lives on the deck's evidence (`ev.filter_inputs`), and v5 is re-pinned in place (`99d62fcaf7ad01ef`).
+- **Backend:** `test_filter_inputs.py` (5, unit) and `test_filter_inputs_pack.py` (6, real organic jobs with deferred evidence, and a real packed job for the header):
+  - the record holds what the filter read (nulls, coverage, `qb_te` for the viewer and counterparties only, `protected`);
+  - the lineup recorded as read (null / empty / list);
+  - not a frozen input;
+  - the real worker's record reproduces the filter: every kept card passes breakup and filler on it;
+  - flag off, or a failed filter → `filter_ran` false;
+  - a failed record never unfilters the deck;
+  - the pack's run header carries it; a deck with no record has none.
+- `test_deck_pipeline_digest.py`: v5 added to FROZEN_PINS.
+- **Sabotage, each red then restored (8):**
+  - job done dropping it;
+  - the worker never setting it;
+  - recording it on the job too (the golden goes red);
+  - a record failure unfiltering the deck;
+  - an unseeded asset absent instead of null;
+  - `qb_te` for every team;
+  - no record with the flag off;
+  - no `protected`.
+- **Size:** about 8.4 KB of JSON for a synthetic 120-card, 12-team deck (190 market entries; up to 121 QB/TE holdings with random positions, about 72 with real ones). It sits in the run header, which is rewritten on every header update. U8's re-measure takes the real number.
+- **Full suite:** `pytest backend/tests`, 9,351 passed at `63638007` (merged with main at `0fa614d5`). After resyncing onto `190ce568` (#460; a ledger-only conflict), the targeted suites passed.
+
+## 2026-10-26 — Settings labels ESPN/MFL sign-in identities (the onboarding-eng side of platforms-eng's ESPN/MFL sign-in)
+
+Full gates, not express (scope: platforms-eng's ESPN/MFL sign-in, the onboarding-eng side; MUST 2 of onboarding-eng's design review). Mobile only; D-056: no simulator, `FTF_SKIP_SIM_GATE=1` posture. Frozen values (platforms-eng, 2026-10-26): identity provider `espn` / `mfl`, `verified_via` `espn` / `mfl_login`.
+
+- **Change (`87011998`):**
+  - a new shared map, `screens/settings/identityLabels.ts`: apple/google/espn/mfl → "Signed in with Apple/Google/ESPN/MFL"; `identityLabel()` returns null for any other provider;
+  - `AccountIdentitySection` and the flag-off flat `SettingsScreen` render `identityLabel(ident.provider)` and **no row** for an unknown provider. Before this, every non-Apple identity read "Signed in with Google";
+  - `SettingsHubScreen`: the provider type gains `espn` / `mfl`; the `verified_via` fallback maps `espn` and `mfl_login`; the labels are "ESPN" / "MFL". The Sleeper and demo branches are unchanged;
+  - `AccountInfo` identities' provider type gains `'espn' | 'mfl'`.
+  - Not touched: `SignInScreen.tsx`, the link sheets and `platformEntry.ts`. The `handleEntrySession` pass-through is platforms-eng's, on #443.
+- **New guard `check-signin-identity-labels.js`** (`npm run test:signin-identity-labels`), 4 pins:
+  1. the map labels `apple`, `google`, `espn` and `mfl` exactly, and an unknown provider gets null (executed);
+  2. no `: 'Signed in with …'` fallback anywhere in `mobile/src`, and no "Signed in with …" literal outside the map;
+  3. both row renderers take the label from `identityLabel()` and return null without one;
+  4. the hub's own `verifiedVia` / `provider` / `signInLabel` declarations, executed: espn/mfl identities and `verified_via` `espn` / `mfl_login` give "ESPN" / "MFL"; Apple, Google, Sleeper and demo are unchanged.
+- **Changed pin:** `check-settings-ia.js`'s identity-row marker moves from the literal `Signed in with Apple` to the `identityLabel(ident.provider)` call that renders it.
+- **Sabotage: 21/21 red,** each restored byte-identical. That includes the moved settings-ia marker and the whole change reverted to `origin/main`.
+- **Local runs:** `tsc --noEmit` clean; testid-lint OK; 118/118 `check-*.js`.
+- **Operator TestFlight check,** once a build has the ESPN/MFL sign-in (platforms-eng's #443):
+  1. Sign in with ESPN. Settings › Account shows "Signed in with ESPN", and the hub's account row reads "Signed in with ESPN" ("ESPN" in its preview).
+  2. Sign in with MFL. The same rows read "Signed in with MFL" / "MFL".
+  3. Apple and Google sign-ins are unchanged: "Signed in with Apple" / "Signed in with Google", and "Apple" / "Google" on the hub.
+- **release-lead QA fixes (`63603e47`, `d10046a0`):** the hub maps `mfl_login` → "MFL" only on an account-only session; `/api/mfl/auth-link` also writes `mfl_login` for a Sleeper user who connects MFL, who stays "Sleeper" (P2). `espn` stays unguarded. Pin 4 gains release-lead's case (a Sleeper user verified by MFL auth-link → "Sleeper"); it fails on `40da9bc0`. **Sabotage 3/3 red.** `AccountInfo.verified_via` admits `mfl_login` / `espn` (P3). Runs: tsc clean; testid-lint OK; 118/118 `check-*.js`. Operator step 4: a Sleeper user who connected MFL by password still reads "Signed in with Sleeper" on the hub.
+
+## 2026-10-27 — F5's drop is an eviction: `evicted_split`, and the `f5_past_stored` anomaly (models-lead addendum D1)
+
+Gates: models-lead's ruling, D1 (`leads/models-lead-launch.md` addendum D), via head-eng. It changes one evidence cause (`restart_split` → `evicted_split` for an F5-dropped deck) and adds one ERROR log line. No route, schema, flag or knob change. It's not flip-gating; it must land before the first weekly ceiling read. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The change:**
+  - At F5's drop, the deck goes into `_deck_evicted_at` (kept ≥ 24 h, C3 (c2)) and a new `_deck_f5_dropped` ledger. This replaces #457's removal from `_deck_held`; it isn't added to it.
+  - C3 (c1) is unchanged: below the effective stored count, a miss is `other`.
+  - The anomaly (`_f5_past_stored`): an F5-evicted miss at or past the pack-recorded stored count logs `[evidence] f5_past_stored …` at ERROR, apart. The cause stays `evicted_split`.
+- **Backend:** `test_evidence_cleanup.py`. The F5 repro is now `…_reads_evicted_split_…` (×6: both row-gone ways × F5 only, F5 then the job evicted, a real restart = `restart_split`), with the held entry kept. 3 new tests:
+  - below / past the effective stored count;
+  - `_f5_past_stored` only for an F5-evicted miss at or past the recorded count;
+  - the anomaly line logged once, with the cause kept.
+- **Run:** `test_evidence_cleanup.py` + `test_u4_ruled.py`, 52 passed. On the first cut, the evidence suites (cleanup, deferred, U4 ruled, upgrade-miss cards, pipeline digest) passed 165.
+- **#489 QA (NO-GO, P1-1), option (a), pending models-lead's reading of D1:**
+  - The P1: kept in `_deck_held`, an F5 deck read `other` (a false G7 FAIL) once its evicted entry aged out.
+  - The fix: F5's drop now also pops `_deck_held`, like any eviction, so the late view reads `restart_split`.
+  - New tests: the eviction aging out → `restart_split`; the anomaly on the kept cause; no anomaly on a real F5 row-gone miss; a bool count refused; the jobs → ledger lock order; the guard's `f5=`.
+  - Sabotage (7, each red then restored): no held pop; the anomaly on the local cause; the anomaly on the effective count; a bool count; a reverse lock on the read path; the guard dropping `f5=`; f5 trims counted as held.
+  - Docs: the contract sentence and LLD. (Corrected 2026-10-28, #489 QA P3-1: the data dictionary wasn't changed. Its ERROR-line note from `85286cf7` already held. Commit `7d5d0edb`'s message says otherwise.)
+- **Sabotage, each red then restored (5):**
+  - F5 also leaving the held ledger (#457's way: superseded by option (a) above);
+  - F5 not an eviction;
+  - the anomaly on any eviction;
+  - the anomaly strictly past;
+  - the anomaly not logged.
+
+## 2026-10-27 — Session-init trade capture skips linked-platform leagues (G-030)
+
+Full gates, platforms-eng lead (platforms-pm audit F5). Server only, no API or schema change; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/trade-capture-platform-guard`.
+
+- **Defect:** the `market.trade_capture` block in `session_init`'s background daemon gated on `str(league_id).isdigit()` alone. ESPN, MFL and Fleaflicker native ids are numeric, so every init on a linked league sent Sleeper `GET /league/<id>/transactions/<week>` reads with a platform-native id. A league with no captured rows is re-backfilled each time (`sweep_weeks` returns 1..18 until `has_sleeper_trades`), and a linked league never captures any, so that was 18 reads per init.
+- **Fix (`backend/server.py`, the `market.trade_capture` block):** added `and not _platform_linked`, the `is_linked_platform_league(league_id)` result the daemon already reads once at its top (the same guard the roster-history snapshot beside it uses). Sleeper leagues are unchanged.
+- **Tests (`test_session_init_sleeper_calls.py`, 7 tests):**
+  - The old MFL test tolerated `transactions` as a "known, pre-existing" Sleeper call. It is now `test_numeric_mfl_league_makes_no_sleeper_calls` and asserts `calls == {}`.
+  - New `test_numeric_espn_league_makes_no_sleeper_calls` (a numeric ESPN-linked league, same assertion).
+  - New `test_sleeper_league_still_captures_trades` (a Sleeper league with no captured rows makes exactly 18 `transactions` reads).
+- **Sabotage, red then restored:** the `and not _platform_linked` line removed → the MFL and ESPN tests red (`assert {'transactions': 18} == {}`); the other 5 stay green.
+- **Targeted:** `test_session_init_sleeper_calls`, `test_session_init_single_flight`, `test_market_data_readiness`, `test_co_owner_rosters`, `test_roster_refresh_state`, `test_players_refresh`, `test_account_only_harness`, `test_verified_sessions`, `test_trade_fingerprint_reads_unlocked`, `test_prepared_trade_runtime` → 162 passed.
+- **Not run:** the full suite (CI runs it); no live Sleeper calls (every fetch is mocked).
+
+## 2026-10-27 — B-DK audit reads the quality filter's own inputs (models-lead addendum D2, #492)
+
+Gates: eval-side only (`backend/eval/bdk_audit.py`, its tests, the runbook § B-DK audit and the evidence-contract lines). It's stacked on the display-moves loader PR. No route, schema, event, flag, knob or engine-module change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **What changed** (release-lead's #492 QA notes, all taken):
+  - B-DK-4..6 now read the pack's `run["filter_inputs"]` (v1), with null and NaN markets passed to the rules as the filter saw them.
+  - An asset absent from the record makes its card not auditable.
+  - Protection is the record's trade_hashes.
+  - `position_caps(lineup_slots)` None means the filter skipped B-DK-6: a pass.
+  - B-DK-6 reads the viewer's and the counterparty's (`str(partner_user_id)`) QB/TE holdings; an absent team holds nothing.
+  - `filter_ran: false` decks are skipped (`filter_not_run`).
+  - Decks without a record are counted by state (`record_failed`, `pack_without_record`, `no_pack`), and they're not auditable for 4..6.
+  - `valuation_json` is no longer read, which removes the owner-deck false FAILs (D2 (c)).
+  - B-DK-7 is unchanged except that a recorded deck's protection now comes from the record.
+- **Tests:** `test_eval_bdk_audit.py`, 69 tests:
+  - the value rules on the record;
+  - the record read, never `valuation_json`;
+  - record protection versus a row flag;
+  - row flags still protecting without a record;
+  - B-DK-6 on the viewer's and counterparty's holdings;
+  - B-DK-6 reproducing `filter_deck` on full rosters over a grid;
+  - an unknown lineup as a pass;
+  - nine record states;
+  - filter_not_run skipped;
+  - an unseen asset;
+  - a null or NaN market (the header's NaN token read);
+  - str ids.
+  - Together with `test_eval_display_moves.py`: 90 passed. Flip-read and blind-grade suites: 212 passed.
+- **Sabotage, each red then restored (8):**
+  - protection always from the row;
+  - no counterparty side;
+  - the viewer's holdings for both sides;
+  - an unknown lineup not auditable;
+  - no coverage check;
+  - filter_not_run decks audited;
+  - a bool version accepted;
+  - decks without a record audited anyway (27 red).
+- **B-DK-7 short caps (agreed with trades-eng; their v6 writes it):**
+  - The record's `repeat_head` holds the trade_hashes of the cards the cap kept, only when it kept fewer than W.
+  - A breach is explained when every unprotected over-cap card is outside it, so no rows past the window are needed.
+  - A list naming one of them is a violation, even where a re-run would explain it.
+  - Without the field, the re-run applies as before.
+  - Tests: 5 (deferred / kept / absent; protected cards in the head; the record outranks a re-run).
+  - Sabotage, 3 red: the head ignored; protected not skipped; a fall-back to the re-run.
+- **Checked on trades-eng's D3 writer packs** (`feat/trades-serve-repeat-cap` @ `1cb381b6`, `test_a_later_page_moves_the_pulled_card_and_records_it`, all 6 cut/i1 × stored/job_view/left_process cases):
+  - #501's loader order equals their `displayed()` ([29, 32, 30, 31, 33] around the move), with dense positions;
+  - their suite passes with #501's `data.py` (80).
+- **Not covered:**
+  - whether live-evidence decks' not-auditable B-DK-4..6 blocks certification is models-lead's call.
+
+## 2026-10-27 — Eval loader reads serve-time display moves (models-lead addendum D3)
+
+Gates: eval-side only (`backend/eval/data.py`, a doc line in `bdk_audit.py`). It reads the pack header field `run["display_moves"]`, agreed with trades-eng, whose serve side writes it. No route, schema, event, flag, knob or engine-module change; an absent field changes nothing, so this merges before or after the writer. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Why:**
+  - D3's fix re-applies the repeat cap at serve time.
+  - When a never-delivered withdrawal pulls a deferred card into the first 30, the server shows that card later in the same response.
+  - The loader's position was card_index less the W0s below it, so it put the card back inside the window: a false B-DK-7 FAIL and a shifted e(k).
+- **The rule:**
+  - The kept non-ghost cards' positions are handed out in display order, `(anchor, 1, card_index)` for a moved card and `(card_index, 0, card_index)` otherwise.
+  - A move counts once its response is delivered as of the read, so a re-read at the same as_of is stable.
+  - A record breaking the writer's contract makes the deck `pack_integrity` (ahead of `withdrawal_conflict`): a malformed key or value, an anchor that is itself moved, a self-anchor, a ghost, missing or W0 card, or a move spanning two responses.
+- **Tests:** `test_eval_display_moves.py`, 26 tests:
+  - no moves;
+  - one move; two behind one anchor;
+  - moves after a W0;
+  - as_of stability;
+  - 16 malformed records;
+  - a valid later-response move;
+  - precedence;
+  - B-DK-7 end to end (the moved deck passes; without the record the same deck is the false FAIL).
+- **Sabotage, 8 of 9 red then restored:**
+  - moves ignored (6 red);
+  - no as_of guard (1);
+  - moved card before its anchor (6);
+  - no same-response check (1);
+  - chained anchors allowed (1);
+  - W0 allowed (2);
+  - lenient keys (1);
+  - integrity after the conflict check (1).
+  - The ninth, a plain dense rank in place of the W0-adjusted slots, stays green as expected: the two are equal on every deck the loader doesn't exclude (an unexplained gap is `incomplete_deck`).
+- **Eval, value-model and evidence suites:** `test_eval_*`, `test_value_model*`, `test_packed_evidence`, `test_deferred_evidence`: 578 passed.
+
+## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
+
+Gates: QA follow-ups to #486 (stacked on it). No route, schema, event, flag or knob change. `DECK_PIPELINE_VERSION` 3 → 4:
+- `_run_trade_job` gains `_job_draft_context` (one memoized draft-verdict read);
+- `_job_draft_picks` notes the picks with that verdict;
+- the worker hands both reads to `_owner_generation_context` (new `job_draft_picks` / `job_draft_context` params; other entrances read their own).
+
+The values are the same, so the deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Covered:**
+  - P3-1: the owner path's second picks read is gone for trade jobs.
+  - P3-2: the match docstring states the A2 rule for None stamps.
+  - P3-3: spy tests for "one kickoff read" and "every worker picks read is noted", with the owner path on.
+  - P3-4: a key that can't be computed unstamps.
+  - P3-5: the picks key covers the draft verdict (kickoff and worker).
+- **Backend:** `test_trade_freshness_roster.py` is now 49 tests (6 new):
+  - a draft-verdict flip unstamps;
+  - an unchanged verdict keeps the stamp;
+  - a failed key unstamps;
+  - one kickoff read;
+  - every worker picks read noted;
+  - the owner context uses the job's reads.
+- `test_deck_pipeline_digest.py` (v4 in FROZEN_PINS) and `test_pick_assignment.py` pass, 44 together.
+- **Sabotage, each red then restored (10):**
+  - the owner path reading its own picks (QA's T5);
+  - the inject path reading its own (`picks=None`);
+  - the opponent shares reading their own;
+  - the owner path ignoring the job's picks, or its draft;
+  - the kickoff key without the verdict;
+  - the note without the verdict;
+  - a failed key keeping the stamp;
+  - the kickoff reading twice.
+  - Green by design: the seeded-outlook site (`_infer_user_outlook(..., _job_draft_picks())`) runs only without `prefs_preload`, which a kickoff always supplies.
+- **models-eng's review: OK on the success path, one objection, fixed.**
+  - **The objection:** the shared memos turned a failed read into an owner arm serving cards with no draft protection. Before, the owner path's own read raised, its context capture failed and the arm forfeited.
+  - **The fix:** the memos remember the failure, and the owner path gets views that re-raise it. The stamp check keeps its degrade-to-empty.
+  - **v4 is re-pinned in place** (`864cf30974da20ea`, in DECK_PIPELINE_PINS and FROZEN_PINS), since v4 was never on main.
+  - **Tests (3 new):** the owner context builds from the job's reads; a raising picks read forfeits the owner arm; a raising draft read forfeits it.
+  - **Sabotage, each red then restored (4):** the owner path given each degrading memo; each view never raising. QA's T5 is still red on the new call site.
+  - **Full suite** on `54e42967`: 9340 passed, 2 skipped, 0 failed (12m12s). An earlier run on `56d395d0` is discarded: its 15 failures were source-reading tests that saw `server.py` mid-edit, and they pass on this head.
+  - **models-eng OK at `54e42967` (2026-10-27).** The objection is resolved and the pin reproduces. Their stricter-edge note: an earlier failed read in the same job now forfeits the owner arm, where its own re-read might have succeeded. That fails closed, by design.
+
+## 2026-10-27 — Web gate: the web's ESPN/MFL chips are hard-off (before ask 16)
+
+Full gates (head-eng's ask, item 3; scope: [scope-web-gate.md](../docs/plans/landing-platform-options/scope-web-gate.md)). Web only; D-056: `FTF_SKIP_SIM_GATE=1` posture, no mobile change.
+
+- **Change:** `web/js/app.js` `const WEB_PLATFORM_ENTRY = false` replaces both reads of `landing.platform_options` (the chip reveal and `selectEntryPlatform`). It's declared above `_applyLandingFlags()`, which runs the reveal at once (no TDZ).
+- **Pin `GATE-web-espn-mfl-off[index.html]`** (`qa/web/check_web_structure.py`):
+  - no web script or page reads the flag;
+  - exactly one `const WEB_PLATFORM_ENTRY = false;`;
+  - the reveal and the handler both go through it;
+  - the row and both chips ship `hidden`.
+  - **Sabotage 8/8 red,** each restored byte-identical.
+- **Runtime (local static serve):** every flag forced on and `ftf:flags-ready` fired leaves the row and chips hidden, and `selectEntryPlatform('espn')` is a no-op. The same script on the pre-change code shows them and selects ESPN (the control). The console shows only the static server's `/api/feature-flags` 404.
+- **Runs:** `python3 qa/web/check_web_structure.py` 196/196 (CI's `web-structure` job); `node --check` OK on both changed JS files.
+- **`qa/web/check_browser_auth_runtime.cjs`** (local Playwright harness, not in CI): its ESPN-chip click now asserts the row and both chips are hidden, with no `/api/entry/platform` call.
+  - **Not run:** no Playwright install here.
+  - The replaced lines were already stale on main: they waited for an ESPN/MyFantasyLeague sentence that's gone from `web/`.
+- **Not covered:** no JS unit harness on web; the operator's optional post-deploy look (signed out, flag ON: Sleeper door only) is in the scope block.
+
+## 2026-10-27 — S0 stamp hashes the picks the worker read (#484 QA P2-1); deck pipeline v3
+
+Gates: a QA fix inside the 200 ms programme's S0 scope. No route, schema, event, flag or knob change. `DECK_PIPELINE_VERSION` 2 → 3: `_run_trade_job`'s `_job_draft_picks` now calls `_note_job_picks_read`, so the deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The bug (QA's E1b, E1c-moved, 5/5 STALE):**
+  - The stamp and `roster_fp_expected` hashed the picks stored at kickoff, but the worker reads picks later.
+  - A pick move, or an older refresh writing back (ABA), between the two reads re-stamped or kept a deck whose picks differ from its stamp.
+  - Main had the sibling with no member move.
+- **The fix:**
+  - One kickoff read gives the stamp, `roster_picks_key` (`roster_snapshot.picks_key`) and the expected fp.
+  - The worker's read checks the key. On a mismatch the stamp goes to None (never reused or stored) and the expected fp is dropped, so no later re-stamp can mark it fresh. A re-stamp that came first is undone.
+- **Backend:** `test_trade_freshness_roster.py` is now 43 tests (7 new):
+  - one kickoff read;
+  - a matching read keeps the stamp;
+  - main's sibling (P0, then P1, then back to P0) is unstamped and never reused;
+  - the pre-gen pick ABA is never re-stamped;
+  - a worker read after a re-stamp undoes it;
+  - a failed worker read is unstamped;
+  - the co-owner keying of `_session_member_rows` (QA P3).
+- `test_deck_pipeline_digest.py`: the v3 pin is added to FROZEN_PINS. 68 passed across the two files plus `test_roster_refresh_state.py`.
+- **Full suite** on `922517fb`: `pytest backend/tests -q` → 9322 passed, 2 skipped, 0 failed (11m19s).
+- **models-eng reviewed the v3 bump (OK, 2026-10-27).** An AST diff of every pinned function against main shows only the `_note_job_picks_read` line in `_job_draft_picks`. The pin reproduces, and the IGNORED classification holds: it never mutates the picks, writes only `roster_fp` and `roster_fp_expected`, and no call site holds `_trade_jobs_lock`.
+- **Sabotage, each red then restored (7):**
+  - the worker doesn't note (6 red, the digest among them);
+  - the note keeps the expected fp;
+  - the note keeps the stamp;
+  - no kickoff picks key;
+  - the expected fp from a separate read;
+  - the builder's ids not strings;
+  - the builder keeps a blank owner.
+- **Not covered:**
+  - rebase case 2's freshness (flag-dark) is still a follow-up;
+  - QA's D/B0 regressed-row re-stamp, which is informational: its content equals the stored rows.
+
+## 2026-10-27 — `deck_i1_check` worker follow-ups: restart, deletion skip, exit drain, drop tail (#468 QA P3-1…P3-5)
+
+Gates: QA follow-ups to #468 (stacked on it). No new event, prop, route or schema; the event's write path changes. One additive method, `user_data_lifecycle.Lease.deleting()`. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Backend:** `test_deck_i1_check.py` is now 39 tests (9 new):
+  - a dead worker restarted (P3-1);
+  - an `Exception` in a write leaves the same worker;
+  - a deleting user's write skipped while another user's lands at once, under a real `user_data_lifecycle.hold` (P3-2);
+  - a refusing lease writes nothing;
+  - the exit drain lands queued writes and force-logs pending drops (P3-3), and is registered with `atexit`;
+  - a burst's tail logged by the idle tick (P3-5);
+  - the fallback identity keeps the partner;
+  - the LRU evicts the least recently served job (`move_to_end`).
+- **Sabotage, each red then restored** (9): no restart; no deletion skip; no worker `except`; the lease ignored; the exit warning not forced; no idle tick; no `atexit`; the fallback without the partner; no `move_to_end`.
+- **Full suite** on `28c63587`: `pytest backend/tests -q` → 9281 passed, 2 skipped, 0 failed (12m08s).
+- **Not covered:** a deletion that starts between `deleting()` and `active()` still holds the worker for that deletion's length (a narrow race). A skipped write for a deletion that then aborts is lost (one analytics row).
+
+## 2026-10-27 — S0 roster-change follow-ups: stale rebuilds aren't shared; the init's pre-gen is re-stamped (#481 QA P3-1, P3-2, P3-3)
+
+**#484 QA round 2 (NO-GO on P1-1, fixed):**
+- **The bug:** with two refreshes in flight (ordering B), the re-stamp keyed on `refreshed_at == the job's read` and a picks key. It re-stamped dev1's M1 deck to fp(M2): `new_fp` hashes whatever members are stored at stamp time.
+- **The fix:** the re-stamp is now hash equality. At kickoff, while the session's refresh is in flight, the job takes `roster_fp_expected`: the rfp1 of the session's `roster_read_rows` (built by `_session_member_rows`, the same builder as the daemon's write) with the stored picks and draft state. The handler re-stamps only when that equals `new_fp`. The picks key is gone.
+- **Folded in:**
+  - P3-1: replenish passes its live session's read.
+  - P3-3: the kill switches stop `_job_read_predates_move` at once, and the kickoff read doesn't run at knob 0.
+  - P3-4: tests for an older-read re-stamp and for the pre-gen, page-backing and replenish `session_read` sites.
+- **Not folded in:** rebase case 2's freshness (flag-dark) is left as a follow-up.
+- **Tests:** freshness 36 and roster refresh state 17; 53 together. The new tests:
+  - ordering B (M1 deck, M2 rows, T1 stamp, no T2 hook): the deck keeps its stamp, isn't fresh, and a T2 device's `/generate` builds its own;
+  - equality vs. read time;
+  - the expected-fp window and its kill;
+  - the kill switches on recorded moves;
+  - the session's read rows hash to the daemon's write;
+  - the pre-gen, page-backing and replenish sites.
+- **Sabotage, each red then restored (15):**
+  - re-stamp by read time (3 red, ordering B among them);
+  - no re-stamp;
+  - `_job_read_predates_move` ignoring the kill;
+  - the expected fp ignoring the knob;
+  - no session read rows;
+  - the pre-gen, page-backing and replenish sites without `session_read`;
+  - the session-read rule, the store guard, the move record;
+  - S6, S7;
+  - the expected fp outside the window, and no kickoff expected fp.
+
+**Round 1 (superseded where it mentions the picks key):**
+
+Gates: QA follow-ups to #481, inside the 200 ms programme's S0 scope (`scope-eng-200ms.md` §6.1). No route, schema, event or flag change; the knob `trade_roster_change_revoke` (from #481) now also stops the re-stamp and the move record. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Backend:** `test_trade_freshness_roster.py` is now 32 tests (7 new). The P2-2 repro is parametrized: after a player move the pre-gen is re-stamped and `/generate` reuses it; after a pick move it keeps its old stamp.
+  - The new P3-1 test covers a stale session's rebuild: device 2 neither reuses nor joins it, device 1 reuses it, and the store refuses it before the eligibility check.
+  - The new P3-3 tests cover S6 (a session in another league) and S7 (two sessions, the newer read wins).
+- **Targeted, 582 passed:** the S0, session-init, page-store, deferred and packed evidence, force-supersede and deck-pipeline-digest suites.
+- **Sabotage, each red then restored** (10):
+  - the session-read rule, the store guard, the move record;
+  - the re-stamp, and a re-stamp that ignores picks;
+  - S6 (any league), S7 (oldest wins);
+  - no kickoff picks key, the key taken outside the in-flight window (the picks key is replaced in round 2);
+  - `/generate` and kickoff without `session_read`.
+  - The pre-gen and page-serve `session_read` sites are not covered by a test: code walk at `server.py` `_serve_trade_page_for` and session init's `should_kickoff`.
+- **Full suite** on `0beeb67d`: `pytest backend/tests -q` → 9267 passed, 2 skipped, 0 failed (11m50s).
+- **Full suite** on `e09327e3` (main merged in, #470 included): 9284 passed, 2 skipped, 0 failed (11m10s).
+- **Full suite, round 2** on `14828f06`: 9298 passed, 2 skipped, 0 failed (11m38s).
+- **Combined with #470** (a local merge of `0beeb67d` with `5e310b00`): #470's `test_roster_fp_stamp.py` plus the S0 files, 104 passed.
+  - A scratch end-to-end run used #470's real `stamp`, with the daemon held until the pre-gen had read its fingerprint.
+  - Player move: 1 hook; the pre-gen is kept, carries a picks key and is re-stamped to the stored fp.
+  - No change: no hook. The scratch worktree is ledgered.
+- **Not covered:**
+  - `_roster_moved_reads` is per process. One web worker today (`render.yaml`, pinned by a test); a second worker would see only its own moves.
+  - A stored page row written before a re-stamp keeps its old stamp: its serves take the moved path (the I-1-filtered page) until the next store.
+
+## 2026-10-27 — Owned-pick sync follow-ups: season-only prior-grid read; P3-3 verdict gate tried, then dropped as a recorded limitation (#482 QA nit + P3-3, #483 QA P3-1)
+
+Server only, platforms-eng lead. Stacked on `fix/owned-picks-drafts-flake` as `fix/owned-picks-drafts-flake-followups`. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest. No flag, route, schema or analytics change.
+
+- **(a) Nit:** the prior-grid check now reads one `SELECT DISTINCT season` through the new `database.load_draft_pick_seasons(league_id, source='platform')`, which uses `load_draft_picks`'s platform predicate and raises on any other source. The W3 AST guard in `test_pick_assignment.py` now enumerates both readers (`_PICK_READERS`), so `_sleeper_prior_grid_excludes` stays in `_SANCTIONED_SOURCE_CALLERS`.
+- **(b) P3-3, first attempt (`ffb5b2f1`, superseded):** the sticky rule applied only when the cached verdict was absent or `unknown`, and a cached `not_drafted` was trusted. Tests then: 3 new, the file at 42. Sabotage (gate dropped) turned the `not_drafted` test red. Targeted: 78 passed; the 59 related files: 1845 passed.
+- **(b) revised, #483 QA P3-1, option (b):** the gate undid #482 for a common shape: a completed startup draft plus a pending rookie draft. `sleeper_verdict` reads that `not_drafted`/high, while the shape-blind `completed_draft_seasons` excludes the season, so every flake flipped the fp again (QA: 6 of 7 syncs on #483, 0 on main). The gate is removed: the sticky rule again applies whenever the cached verdict isn't `drafted`, exactly as #482 shipped. P3-3 is now a recorded limitation (D-189 amendment, `docs/integrations/sleeper.md`). The sync condition's diff against main is now only the reader swap (plus comments).
+- **Tests in `test_owned_picks.py` after the revision (the file is now 43):**
+  - `test_prior_grid_season_reader_reads_platform_rows_only` (kept): a user row's season is not in the set, and `source='any'` raises;
+  - `test_always_empty_drafts_stays_excluded_after_not_drafted_known_limitation` (inverted from the `not_drafted` re-includes test): the accepted P3-3 limitation pin;
+  - `test_startup_complete_rookie_pending_flake_keeps_season_and_fp` (new): the cached verdict comes from the real `sleeper_verdict` (asserted `not_drafted`/high); live → flake → live → flake keeps 2026 excluded and one rfp1;
+  - `test_always_empty_drafts_keeps_the_exclusion_on_an_unknown_verdict` (kept);
+  - the read-error test injects into `srv.load_draft_pick_seasons` (kept).
+- **Sabotage, red then restored:** the P3-3 gate re-added → 2 red: the startup-shape test and the limitation pin (`[2026, 2027, 2028] == [2027, 2028, 2029]` each).
+- **Targeted after the revision:** 11 files → 317 passed: owned-picks, pick-assignment (+ tradeable), draft-status (+ wiring), pick-tradability, and the S0 suites (`roster_fp_stamp`, `roster_refresh_state`, `roster_refresh_async`, `trade_freshness_roster`, `roster_snapshot`).
+- **Not run:** the full suite (CI runs it), `tsc` and testid-lint (no mobile change).
+- **Docs:** `docs/integrations/sleeper.md` (the rule, the limitation and the read-cost row), `docs/data-dictionary.md` (the new reader, in the containment section), and the D-189 amendment.
+
+## 2026-10-27 — `deck_i1_check` follow-ups: each card counted once per job, one bounded worker, drained in tests (#468)
+
+Gates: #419's QA follow-ups. No new event, prop, route or schema; the event's counting and its write path change. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Backend:** `test_deck_i1_check.py`, 30 tests. Covered:
+  - exact props;
+  - side and asset splits;
+  - repeat polls, replace serves, legacy plus paged serves of one job, and page-store serves each counting a card once;
+  - a full queue dropping with a warning and never blocking;
+  - the drain;
+  - conftest's per-test drain;
+  - QA P2-1 (probe D): cards published before their impression_ids are stamped and then re-published with them count once. The identity is now the trade_id first.
+- **Targeted, 248 passed:** `deck_i1_check`, the I-1 serve filter, the page store, roster freshness, the deck pipeline digest.
+- **Sabotage:** the identity back to impression_id-first → 2 red (probe D and the order test), then restored. release-lead's QA at `568a3993` ran 16 sabotages, all red, and 1007 targeted tests passed.
+- **Not covered (follow-ups, release-lead's P3s):**
+  - the worker isn't restarted after a BaseException;
+  - head-of-line waits behind a deletion's lease;
+  - no atexit drain;
+  - a drop burst's tail count is logged only by a later drop;
+  - test gaps: the fallback identity's partner, LRU eviction of the current job, `move_to_end`, the worker's `except`, the lease.
+
+## 2026-10-27 — Owned-pick sync: an empty `/drafts` read keeps the prior current-season exclusion (#470 QA P3-2)
+
+Server only, platforms-eng lead; one commit on `fix/owned-picks-drafts-flake`. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest. No flag, schema, route or analytics change.
+
+- **The flip:** init A's live `/drafts` read excluded the current season. Init B's read flaked to `[]` while the cached #207 verdict didn't say `drafted`, so B re-populated the season and the next good read removed it again. Each flip moved `rfp1`. Fix: on an empty read without a cached `drafted`, `server._sleeper_prior_grid_excludes` reads the prior platform grid (`load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)`) before the replace. If the grid has later seasons but none for the current one, the sync keeps the season excluded and logs it at INFO.
+- **New tests in `test_owned_picks.py` (7; the file is now 38):**
+  - complete, then an empty read with no verdict: the season stays excluded;
+  - complete → flake → complete → flake: `roster_snapshot(...).fp` is the same throughout;
+  - a prior grid that carries the season keeps it on an empty read;
+  - a first sync on an empty read includes it (D-089);
+  - the live read wins both ways (complete → pre_draft re-includes → complete excludes);
+  - a season rollover (meta season 2027) ends the sticky exclusion;
+  - a cached `drafted` still excludes a season the prior grid carries.
+- **`test_pick_assignment.py`:** `_sleeper_prior_grid_excludes` was added to `_SANCTIONED_SOURCE_CALLERS`. It is a literal platform read of the sync's own provenance and never follows `picks.assign_tradeable`.
+- **Sabotage, red then restored:** with the sticky branch disabled (`elif False and …`), 2 tests went red: the row test (2026 came back) and the fp test (the fp alternated `rfp1:2adc…` / `rfp1:8c3f…`).
+- **Targeted:** the 59 files that grep `owned_pick|draft_status|pick_tradab|roster_refresh|roster_snapshot` → 1840 passed. The only red was the AST reader guard above, fixed by registering the new reader.
+- **Full suite:** `pytest backend/tests -q` → 9255 passed, 2 skipped, 0 failed (12m55s, Python 3.14 locally; CI runs 3.12).
+- **Not run:** `tsc --noEmit` and testid-lint (no mobile change).
+- **QA follow-up (#482 GO-with-notes; tests and docs only, no code change):** QA's sabotage "a prior-grid read error returns True" stayed green on the 7 tests above. New: `test_prior_grid_read_error_falls_back_to_including_the_season`. A complete read excludes 2026; then `srv.load_draft_picks` raises on an empty read with no verdict, and 2026 is included (D-089). That sabotage (`return True` in the `except`) → that 1 test red (`[2027, 2028, 2029] == [2026, 2027, 2028]`), then restored; `test_owned_picks.py` → 39 passed. The commissioner-reset cost is now named in the D-189 amendment and `docs/integrations/sleeper.md`.
+
+## 2026-10-27 — S0 PR-B: `rfp1` roster fingerprint stamp after a refresh (CAS) + `on_roster_change`
+
+Full gates (platforms-eng lead). Server only; no API, schema, flag or analytics change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest. Branch `feat/s0-roster-fp-stamp`.
+
+- **What:** `roster_refresh.record_outcome` → `stamp` after a `fresh` write, so both the session-init daemon and the P41 kick stamp. `stamp` reads the stored `roster_fp` and computes `roster_snapshot(...).fp` with `server._pick_read_source()`. It then compare-and-sets through `database.cas_league_roster_fp`, and on a won, changed stamp calls `on_roster_change(lid, old, new)` with no transaction open and no lock held.
+- **New `backend/tests/test_roster_fp_stamp.py` (17):**
+  - the first stamp is `rfp1` (equal to the serve's `_trade_roster_snapshot`) and calls the hook with `old=None`;
+  - a change calls `(old, new)`; no change makes no CAS and no call;
+  - a lost CAS (rival stamp) makes no call ×2;
+  - no state row writes nothing;
+  - a handler exception and a raising hook are swallowed and logged;
+  - a failed refresh ×2, a failed read and a failed state write, and a failed kick read don't stamp;
+  - an fp or pick-source error leaves the fp as stored, with the outcome still `fresh` ×2;
+  - a linked-platform league is never stamped;
+  - **A3** on a file-backed SQLite: `pool.checkedout()==0`, both module locks acquire non-blocking, and a second connection writes, on `roster-refresh-<id>`;
+  - session init hooks on a real `session-init-bg-writes` thread, never the request thread.
+- **Updated:** `test_roster_refresh_state.py::test_success_marks_fresh_and_never_stores_none_ids` now expects `rfp1:` (was NULL until PR-B).
+- **Sabotage, each red then restored byte-identical:**
+  - (1a) the hook inside the CAS transaction → the A3 test red (`checked_out: 1`, second-connection write `OperationalError`);
+  - (1b) the hook under `_inflight_lock` → the A3 test red;
+  - (2) the CAS `WHERE roster_fp = old` dropped → both lost-CAS cases red (rival overwritten);
+  - (3) the `new == old` early return dropped → the unchanged-roster test red (1 call).
+- **Targeted:** 15 S0 / trade-serve files → 493 passed.
+- **Full suite:** `python3 -m pytest backend/tests -q` → **9208 passed, 2 skipped, 0 failed**, exit 0, 35m37s (Python 3.14 local; the known `test_ranking_service_threads` flake didn't fire).
+- **Docs:** `docs/data-dictionary.md` (`roster_fp` row + intro), `docs/architecture.md` (new "Roster refresh and fingerprint stamp (S0)" data-flow paragraph), and the scope (§B.1 seam, §B.3 step 7 "As built", §3 evidence, §4 docs rows, §5 item 3).
+- **#470 QA P3 follow-up (branch `feat/s0-stamp-p3s`, stacked):**
+  - New `test_stamp_follows_the_platform_pick_source_when_assign_tradeable_is_off` (the file is now 18 tests). With the flag off, a platform row plus a member-asserted row: the stamp equals the serve's fp and differs from the `'any'` fp.
+  - Sabotage: `roster_refresh._pick_read_source` hard-coded to `'any'` → the new case red. The existing flag-on pin stays green, which was QA's point. Restored byte-identical.
+  - A lost-CAS lag comment in `stamp()`.
+  - Targeted: the 15 S0 files + `test_pick_assignment_tradeable` → 531 passed.
+- **Not in PR-B:** the §B.6 stamps on the other writers (ESPN/MFL imports, the MFL pick normalizer, draft-status refresh, `_refresh_sleeper_members`). The serve recomputes `rfp1` from rows, so only the proactive hook is missing there.
+
+## 2026-10-27 — S0 roster-change handler: revoke only what a fresher session would rebuild (#470 QA P2-2, P2-1, P3-1, P3-3)
+
+Gates: this is a QA fix inside the 200 ms programme's S0 scope (`scope-eng-200ms.md` §6.1). It adds one model_config kill knob (`trade_roster_change_revoke`, default 1) and changes no route, schema or event. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Backend:** `test_trade_freshness_roster.py` (25; the handler tests are rewritten for the new rule, with 7 new) and `test_roster_refresh_state.py` (15; 1 new: session init stamps `roster_fetch_started_at` on the session and on the pre-gen's session context, equal to the `refreshed_at` its daemon writes).
+- **Targeted, 312 passed:** freshness, roster refresh state, roster snapshot, module shape, I-1 serve filter, page store, floor kick, unlocked fingerprint reads, `deck_i1_check`, and session init (single flight, Sleeper calls, guard).
+- **Sabotage, each red then restored:**
+  - no session check → 1 red (the league-mate's deck);
+  - no read compare → 2 red (the P2-2 repro and the kept-read test);
+  - no stamp-key check → 1 red (P3-1);
+  - no knob → 1 red;
+  - the job's read not stamped → 1 red (the repro);
+  - the session's read not set → 1 red (session init).
+- **Full suite** on `8ad40822`: `pytest backend/tests -q` → 9260 passed, 2 skipped, 0 failed (13m10s).
+- **Combined with #470** (a local merge of `8ad40822` with `de8c2af5`): #470's `test_roster_fp_stamp.py` plus the above, 97 passed.
+  - A scratch end-to-end repro used #470's real `stamp`, with the daemon held until the pre-gen had read its fingerprint (release-lead's ordering).
+  - With a player move: 1 hook, and the pre-gen was kept. With the old handler, the same run revoked it (P2-2 reproduced).
+  - With no change: no hook.
+  - The scratch worktree is ledgered in `docs/recovery/2026-10-27-trades-eng-scratch.md`.
+- **Not covered:**
+  - A refreshing user's own deck from before their new read still ends at its next page with "Couldn't load more trades." + Try again. Revoking it is intended, since Try again rebuilds on the newer read. An automatic re-search is a mobile change (offered for the 11-06 binary).
+  - A user with two devices: a newer session on one device makes the other device's older deck revocable (the rule is per user, not per session). That is no worse than #470 as it stands.
+
+## 2026-10-26 — LEG-S6: a fresh Apple code on the verified delete, so Sign in with Apple is revoked (split from #372)
+
+Full gates, not express (scope: #354 LEG-S6; split out when #372, the M11 claim-only delete, was closed on 2026-10-26). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Change:** `deleteAccount` sends `apple_authorization_code` only when a code exists; otherwise it sends the old body-less DELETE. `AccountDataSection` asks an Apple-linked account on iOS for a fresh Apple credential right before the verified DELETE. Cancelling or any failure sends no code, and the deletion proceeds. The server half has been on main since #354 (`accounts.revoke_apple_tokens`, `DELETE /api/account` at `server.py:31916-31925`). No route change.
+- **New guard `check-apple-revoke-on-delete.js`** (`npm run test:apple-revoke-on-delete`), 5 pins, the first three executed with stubs:
+  1. the code is sent only as `apple_authorization_code`, otherwise `{method:'DELETE'}` exactly;
+  2. the prompt appears only when Apple-linked, on iOS and available, with `requestedScopes: []`;
+  3. cancel, failure, a null code, Android or not-linked return null and the DELETE still goes out once;
+  4. `setSessionToken` / `appleSignIn` are never touched on this path;
+  5. the verified delete is the only caller.
+- **Sabotage: 22/22 red,** each restored byte-identical; 1 of them reverts the whole change to `origin/main`.
+- **Local runs:** `tsc --noEmit` clean; testid-lint OK; 118/118 `check-*.js`; `pytest backend/tests/test_account_data_rights.py` 12 passed (it includes `test_delete_attempts_revocation_and_never_blocks`).
+- **Known gaps:**
+  - The flat `SettingsScreen` fallback, used only with `account.settings_hub` off, still deletes without a code. The hub is on, so this is an optional follow-up.
+  - An Apple-linked account on an unverified session would see the Apple sheet before the existing 403. Apple sign-in sessions are always verified.
+- **Operator TestFlight check, 11-10 to 11-11,** once Render has `APPLE_TEAM_ID`, `APPLE_KEY_ID` and `APPLE_PRIVATE_KEY`:
+  1. An Apple account deletes: the Apple prompt appears, then the account is deleted.
+  2. Afterwards, Fleeced is gone from iOS Settings → Apple ID → Sign in with Apple.
+  3. Cancelling the prompt still deletes.
+  4. A Sleeper-only account sees no prompt.
+- **release-lead QA fixes (`4ce9d44a`, `7964bc6d`, `13e5d445`, `c0e934ce`):**
+  - (a) each Apple HTTP call times out at 5 s (`APPLE_HTTP_TIMEOUT_S`; 2 × 5 s is under the client's 15 s). The client half isn't done: `apiRequest` has no per-call timeout (`deadlineAt` only shortens);
+  - (b) pin 6: no `console.*` on the Apple-code path;
+  - (d) the code is revoked only when its id_token `sub` is the account's linked Apple identity; a mismatch or no id_token deletes without revoking (`apple_revoked: false`);
+  - no Apple sheet on a known-unverified session;
+  - the runbook warns off rolling back `account.settings_hub`.
+  - **Sabotage: 2/2 + 3/3 + 7/7 + 5/5 red.**
+  - Runs: pytest 128 passed (account / Apple / deletion set); tsc clean; testid-lint OK; 118/118 `check-*.js`.
+  - Operator step 5: with a different Apple ID signed in on the device than the account's, delete. The account is deleted, and the account's own Fleeced entry stays under Sign in with Apple (it isn't revoked).
+
+## 2026-10-26 — Entry purge: platform pick-grid owner anonymization + `scripts/purge_entry_users.py`
+
+Full gates (legal R28.12 row 2 and R28.16; head-eng 2026-10-26; onboarding-eng's ruling of 2026-10-26, option (a) scoped, as owner of the deletion path). Backend and script only. **No prod access:** local and in-memory SQLite only. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is pytest.
+
+- **Commit 1 (`09c0c3d3`), `accounts._delete_user_data`:**
+  - on platform pick grids (`draft_picks.platform` set and not `sleeper`), `owner_user_id` / `original_user_id` naming a deleted id become `DELETED_USER_PLACEHOLDER`, in the same transaction; new count key `draft_picks_owner_anonymized`;
+  - Sleeper grids and legacy NULL-platform rows are untouched.
+  - Found while scoping the purge: an MFL import writes the importer's Fleeced id (`entry:*`, `acct_*`) as the owner of their picks, and deletion kept it.
+  - 4 new tests in `test_account_deletion_coverage.py` (40 pass); **sabotage 7/7 red,** each restored byte-identical.
+- **Commit 2 (`c200415c`), `scripts/purge_entry_users.py`:**
+  - discovery from `_EXPORT_TABLES` + `_ADDITIONAL_PRIVATE_TABLES` + an explicit deletion-only list;
+  - head-eng's cutoff/verified filter (NULL `created_at` is its own skipped count);
+  - dry run by default; `--execute --expect N` through `delete_user_data`; `--verify` (a) key columns, (b) entry credentials;
+  - info counts for JSON mentions and the overhaul gap; counts only, never an id.
+  - `test_purge_entry_users.py`: 9 pass, including a drift test that captures `delete_user_data`'s SQL. **Sabotage 14/14 red,** each restored byte-identical.
+- **Local runs:**
+  - `pytest` on the purge test plus `test_account*`, `test_deletion_session_races`, `test_user_data_lifecycle`: 116 passed;
+  - the other deletion-touching suites plus `test_owned_picks` / `test_mock_pick_ownership`: 359 passed;
+  - the script's `--help`, and a dry run and `--verify` on an empty dev DB (0 found, exit 0).
+- **Not run here:** the prod purge. It needs the operator's own word in the acting session; steps in `docs/runbook.md` § "Purge orphaned ESPN/MFL entry users".
+
+- **2026-10-27, release-lead's QA round (`16c2c3bb`..`e2a35031`):**
+  - **Deletion fixes, for every user:**
+    - **D1, shared leagues:** a `leagues` row is kept with the importer anonymized while another live Fleeced user still belongs to it; otherwise it's deleted, as before;
+    - **D2:** `recorded_picks.picking_team_id` is anonymized for Fleeced-minted ids.
+  - **Script fixes:**
+    - it prints the DB identity first and refuses local SQLite without `--allow-local` (exit 2);
+    - verify fails on any unverified entry user created after the cutoff, and the dry run stops and asks;
+    - `hide_parameters` engines plus a redacting top-level handler, so no ids reach stderr on a DB error;
+    - read-only reads;
+    - strict CLI: no abbreviations, and a tz-aware, non-future cutoff;
+    - the drift test also captures `=` filters.
+  - **Runbook order:** flag off, restart, dry run, snapshot, execute (the operator), restart, verify, record.
+  - **Runs (onboarding-eng, after the worker hit its usage limit):** deletion + account + draft + picks + purge tests, 429 passed (purge alone 36). A manual check confirmed the local refusal, the date-only cutoff and the future cutoff all exit 2, and `--exe` / `--exp` are rejected.
+
+- **2026-10-27, release-lead delta QA NO-GO @ `527031fc` → fixed (onboarding-eng; the worker was at its usage limit):**
+  - **D1 REVERTED** (`60379b82`): keeping a shared `leagues` row as `deleted_user` stranded the remaining member's linker routes, because no upsert re-adopts the row. It also kept the importer's id in `pick_assignment_settings`. Deletion is back to main's behaviour: the row is deleted, and the next member to link re-imports it.
+  - **`b1c73a98`:** deletion anonymizes Fleeced-minted ids in other users' `pick_assignment_changed` events (`old_owner` / `new_owner` / `actor`); Sleeper ids stay. 4 tests; sabotage 2/2.
+  - **`3c94114f`:** `--verify` gains (d), no removed entry id left in the pick audit trail, and (e), a non-empty `users` table. `--expect-db` refuses a different DB in every mode, and the printed execute command carries it. The per-target error is pinned to print only its type. 5 tests; sabotage 4/4.
+  - **`506c9294`, runbook:** the cutoff is the restart time; the STOP response is pre-decided; release-lead takes the snapshot and **the operator deletes it** (corrected in `630b5084`; release-lead records the due date and reminds); `--expect-db` on every command; step 7 checks identity and (d)/(e).
+  - **Runs:** deletion + account + draft + picks + pick-assignment + purge tests, 503 passed.
+
+- **2026-10-27, release-lead round 3 @ `630b5084`: GO-with-notes (no P1) → the P2 and P3s are fixed:**
+  - **P2:** deletion anonymizes a deleted Fleeced-minted id in **any** league's `pick_assignment_settings.order`, other importers' rows included, in place, so slot positions don't shift. That's the R28.16 SWID case, and it's the same on main, so it closes for every future deletion. Verify gains (f).
+  - **P3:**
+    - malformed (non-dict) audit props or settings can't abort a deletion;
+    - the runbook gives (d)/(e)/(f) FAIL responses;
+    - the cutoff help and error text name the step-2 restart;
+    - `--expect-db` is required with `--execute`;
+    - api-reference lists the new count keys.
+    - **Pinned:** (d) reads `old_owner` and `actor`, the scrub rewrites `actor`, the scrub skips other event types, and the printed execute command carries `--expect-db`.
+  - **Tests:** 3 deletion + 6 purge (9), all new (corrected 2026-10-27; this line first said 5 + 6). **Sabotage: 8/8 red.**
+  - **Runs (onboarding-eng):** deletion + account + draft + picks + pick-assignment + purge tests.
+- **2026-10-27, head-eng's pre-prod-run asks (`e844115b`, `39c31ff0`):**
+  - **Pick-grid names:** a platform-grid row anonymized by id also drops the deleted person's `owner_username` / `original_username` for "Team <slot>" (the writers' own fallback; the placeholder when no slot is known). 1 new deletion test; **sabotage 6/6 red.**
+  - **Census:** the dry run printed, counts only, the verified entry users it skips (by kind and `verified_via`), which skipped users hold an ESPN/MFL credential, and target-owned leagues with another Fleeced member. 1 new purge test; **sabotage 6/6 red.** Superseded by `ad3aa954`: analytics-lead ran the prod count, so the dry run keeps only the credential counts.
+  - **Runs (onboarding-eng):**
+    - purge, `test_account*`, deletion races, lifecycle, persistent sessions, owned picks, recorded picks, pick assignment, module shape: **311 passed** (14 files);
+    - after the main merge `8024f16a`, the same plus `deck_i1_check` and the S0 roster tests: **440 passed** (18 files).
+- **2026-10-27, legal R28.17 A1 (`ad3aa954`).** The count found 2 entry users, both the operator's test logins: 1 unverified `entry:espn` and 1 verified MFL-only `entry:mfl` with 1 `mfl_credentials` row.
+  - **The new flag.** `--delete-verified-credentials M` deletes only the verified entry users' ESPN/MFL credential rows in the same execute. M is pinned like `--expect`.
+  - **Verify (g)** is R28.16 part 1: zero entry users without `verified_via`.
+  - **Tests:** 3 new purge tests (the flag and its refusals, which keep entitlements and everything else; the CLI rule; (g)), plus the extended credential-left test (the rerun path). Purge sabotage **7/7 red**.
+  - **The pin for legal's degrade condition** is `test_purge_mfl_reconnect.py`. With the row gone:
+    - the status reads `connected: false`;
+    - the league still lists;
+    - the send is 409 `mfl_not_connected` "Sign in with MFL first.", never a 500.
+    - Sabotage on the server routes: **3/3 red.**
+  - **Runs (onboarding-eng):**
+    - purge + reconnect, 52 passed;
+    - before the push, purge, reconnect, `test_account*`, deletion races, lifecycle, MFL propose, I-2 MFL, link status, auth-link and module shape: **283 passed** (15 files).
+- **2026-10-27, release-lead round 5 @ `b2c49ec6`: NO-GO on P1-1 → fixed in `f16c5c38`:**
+  - **P1-1, the credential step fails closed:**
+    - it's skipped after a failed target;
+    - the purge summary prints first;
+    - an error shows its type only;
+    - one transaction rolls back unless exactly M rows are deleted, which also closes P2-2.
+  - **P2-1:** pinned. The flag deletes only verified entry users' rows, not an unverified entry user's or a non-entry user's.
+  - **P3s:**
+    - batched pick-grid UPDATEs;
+    - the owner of an own pick uses its own slot;
+    - the two-slot and alias-slot tests;
+    - (b) is case-sensitive on SQLite;
+    - a blank `verified_via` isn't verified.
+  - **Tests:** 6 new purge tests and 2 cases in the names test.
+  - **Sabotage, 11 red,** each restored byte-identical:
+    - **purge 7/7:**
+      - the credential step runs after a failed target;
+      - a credential-step error isn't caught;
+      - no exact-M check at the write;
+      - the delete has no filter;
+      - the delete hits every `entry:` row;
+      - (b) is case-insensitive again;
+      - a blank `verified_via` counts.
+    - **pick-grid 4/4:**
+      - the owner of an own pick uses the league slot;
+      - the two-slot rule is dropped;
+      - own slots are read from the requested id only;
+      - batches are keyed on the owner's values only.
+  - **Runs (onboarding-eng):** purge, reconnect, `test_account*`, deletion races, lifecycle, owned picks, recorded picks, pick assignment, MFL propose, I-2 MFL, link status and module shape: **405 passed** (17 files).
+- **2026-10-27, release-lead round 6 @ `18a5347e`: GO-with-notes (no P1, no P2):**
+  - **Fail closed:** the fail-closed matrix passes on SQLite and PG, and multi-chunk M = 1,500 runs in one transaction.
+  - **Prod shape:** it gives N = 1 / M = 1.
+  - **Batching:** the batched UPDATEs take 106 statements vs 603.
+  - **Sleeper and legacy rows:** byte-identical to main.
+  - **Sabotage:** 37/37 red.
+  - **Tests:** 1,660 passed on head and 1,670 on the trial merge; CI green.
+  - **Then:** a docs-only main merge (the api-reference `DELETE /api/account` row keeps both #446's text and this PR's; this ledger).
+  - **P3-1 → follow-up A:** a pick moved between the person's own two slots is named after its original slot.
+
 ## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
 
 Full gates (head-eng approved, platforms-eng lead; the enum and `kind` changes are analytics-lead's granted asks). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Two commits on `fix/validate-gate-espn`.
