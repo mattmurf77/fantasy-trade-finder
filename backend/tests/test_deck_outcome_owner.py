@@ -190,3 +190,31 @@ def test_the_scripts_postgres_build_is_concurrent():
     assert _script().LOCK_TIMEOUT == "5s"
     # And the boot path never builds it.
     assert "ix_deck_outcomes_user" not in inspect.getsource(db._migrate_db)
+
+
+def test_three_paths_one_run(store):
+    """onboarding-eng's ask for the #523/#541 resync (release-lead's QA test,
+    ported): one outcome reachable only by its row, one only by a pack
+    contract id (#523), one only by user_id (G3-e). Each is exported once,
+    all are deleted in one run, and another user's outcome on a contract id
+    past the pack's cards stays."""
+    with store.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id="t3"))
+        conn.execute(insert(db.users_table).values(sleeper_user_id="t30"))
+        conn.execute(insert(db.deck_impressions_table).values(
+            impression_id="t3-d:0", user_id="t3", league_id="lg", deck_job_id="t3-d",
+            card_index=0, propensity=1.0, served_at="2026-10-28T00:00:00+00:00"))
+        conn.execute(insert(db.deck_evidence_packs_table).values(
+            run_id="t3-p", user_id="t3", league_id="lg", served_at="2026-10-28T00:00:00+00:00",
+            pack_version=1, header_json='{"run": {}}', cards_blob=b"x", checksum="c" * 64,
+            card_count=2, created_at="2026-10-28T00:00:00+00:00"))
+        ids = {tag: _outcome(conn, iid, owner) for tag, iid, owner in (
+            ("row", "t3-d:0", None),          # the row path only (pre-G3-e)
+            ("pack", "t3-p:1", None),         # the pack path only
+            ("col", "t3-gone:5", "t3"),       # the owner column only
+            ("other", "t3-p:2", "t30"))}      # past card_count, another user's
+    exported = accounts.export_user_data("t3")["tables"]["deck_outcomes"]
+    assert [r["id"] for r in exported] == sorted(ids[t] for t in ("row", "pack", "col"))
+    counts = accounts.delete_user_data("t3")
+    assert [r["id"] for r in _outcomes(store)] == [ids["other"]]
+    assert counts["deck_outcomes_by_owner_deleted"] == 1

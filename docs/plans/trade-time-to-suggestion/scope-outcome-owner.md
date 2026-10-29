@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-29
 **Entry point:** direct ask. head-eng's routing of legal R28.22 and models-lead's addendum G (2026-10-29), item G3-e: "add a nullable, indexed `user_id` to `deck_outcomes`, written from the session user by the outcome write path (`_save_deck_outcome_safe`). Deletion and export ALSO match on it." No backfill. Target: release-lead's queue before the 200 ms flip, so every post-flip outcome carries its owner.
-**Builder:** trades-eng. onboarding-eng reviews the `accounts.py` part. It is sequenced against #540 (the overhaul deletion fix, also in `accounts.py`): the two touch different hunks and merge cleanly in either order.
+**Builder:** trades-eng. onboarding-eng reviews the `accounts.py` part. It is sequenced against #540 (the overhaul deletion fix, also in `accounts.py`): the two touch different hunks and merge cleanly in either order. #523 merged first (`f7b6ec4d`); the resync keeps its row and pack paths beside the owner column, and adds the three-path test.
 **Operator sign-off on waivers:** not needed. Analytics is answered (c) with its reason, and the evidence is answered in full.
 
 **What it does:**
@@ -56,7 +56,7 @@
 
 ## 3. Evidence scope
 
-- [x] **Unit tests:** `backend/tests/test_deck_outcome_owner.py`, 7 tests.
+- [x] **Unit tests:** `backend/tests/test_deck_outcome_owner.py`, 8 tests.
   1. The write stamps the acting user, and the unchanged owner check refuses a foreign writer.
   2. The same through `_save_deck_outcome_safe` under a verified session.
   3. Deletion: it reaches an outcome that only the column names (no row, no pack), including an account alias's. It keeps another user's outcomes and NULL legacy rows. Each count is right: `deck_outcomes_deleted` for today's path, `deck_outcomes_by_owner_deleted` for the outcomes only the column reached.
@@ -64,6 +64,7 @@
   5. Boot on a pre-G3-e table (`init_db`, twice): adds the column, **never the index**, and leaves the old row NULL (no backfill). A fresh DB gets the index from the declaration.
   6. The script on an existing table: `--check` reports `missing` and writes nothing; a run builds it on `user_id`; a second run leaves it valid.
   7. The script's Postgres build, pinned in source: `CONCURRENTLY`, autocommit, the 5 s `lock_timeout`, and the INVALID leftover dropped first. `_migrate_db` never names the index.
+  8. The three paths in one run (after #523): row-only, pack-contract-id-only and owner-only outcomes are each exported once and all deleted.
 - [x] **Existing guard:** `test_purge_entry_users.py::test_discovery_covers_every_user_column_delete_user_data_filters_on` covers the new filter column.
 - [x] **Sabotages: 16 of 16 mutations turn the suite red.** The suite is the new file plus `test_purge_entry_users.py` and `test_account_deletion_coverage.py`. The mutations:
   - a NULL owner written;
