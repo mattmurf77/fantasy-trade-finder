@@ -1144,6 +1144,8 @@ check('8n. head-eng grant (b) [executed]: the active-overhaul probe is backgroun
   const overhaul = load('api/overhaul.ts', {
     './client': { apiRequest: client.apiRequest, gateSignalFor: client.gateSignalFor },
     './trades': { normalizeTradeCard: (c) => c },
+    // #527's send timeout (main): the real module; the probe never sends.
+    './sendOutcome': load('api/sendOutcome.ts', { './client': { ApiError: client.ApiError } }),
   });
   const gated = [
     [402, { error: 'pro_required', gate: 'preview_used' }],
