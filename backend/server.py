@@ -2880,10 +2880,33 @@ def _trade_job_stalled(job, now):
     return now - last_progress > _JOB_HARD_TIMEOUT
 
 
+_orphaned_overhauls_swept = False
+
+
+def _sweep_orphaned_overhauls_once() -> None:
+    """Legal R28.22 d2: once per process, the overhauls left behind by accounts
+    deleted before deletion covered them (accounts.delete_orphaned_overhauls).
+    Logs a count only. A failure is retried on the next tick."""
+    global _orphaned_overhauls_swept
+    if _orphaned_overhauls_swept:
+        return
+    try:
+        from . import accounts as _accounts
+        n = _accounts.delete_orphaned_overhauls()
+    except Exception:
+        log.warning("orphaned-overhaul sweep failed; retried next tick", exc_info=True)
+        return
+    _orphaned_overhauls_swept = True
+    if n:
+        log.info("Deleted %d overhaul(s) whose owner account no longer exists", n)
+
+
 def _cleanup_loop() -> None:
     """Background thread: evict stale sessions + stuck/old trade jobs."""
     while True:
         time.sleep(300)  # check every 5 min
+
+        _sweep_orphaned_overhauls_once()
 
         # Sessions — 4hr inactivity. This is a MEMORY sweep only: persisted
         # (verified, flag-on) sessions keep their durable row and rebuild on

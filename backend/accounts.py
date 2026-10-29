@@ -714,6 +714,38 @@ def _overhaul_card_without_partner_fields(card: dict) -> dict:
     return out
 
 
+# A scrubbed card's id and name, and its blended scalars under legal's test
+# (R28.22 b, b2; every card of the partner alike). On the owner arms
+# `mismatch_score` (the deck's surplus_margin) and `composite_score` (its
+# base_score) are the same number, the card's presentation rank
+# (trade_gen_owner.py:649-650, trade_gen_bilateral.py:517): surplus_margin is
+# nulled, so its copy goes with it. `fit` (and fit.aggregate) is already
+# dropped above; no final_score is stored on an overhaul card.
+_OVERHAUL_REDACTED_CARD_VALUES = {"target_user_id": DELETED_USER_PLACEHOLDER,
+                                  "target_username": DELETED_USER_PLACEHOLDER,
+                                  "mismatch_score": None, "composite_score": None}
+
+
+def delete_orphaned_overhauls() -> int:
+    """Legal R28.22 d2: overhauls whose owner account no longer exists (deleted,
+    or purged as an entry user, before deletion covered overhauls) go with every
+    row under them. An owner is gone when no users row and no durable session
+    names it: session/init upserts the users row before any overhaul route can
+    run, and deletion removes both. Returns the count; callers log only that."""
+    ovh = db.overhauls_table
+    with db.engine.begin() as conn:
+        ids = list(conn.execute(select(ovh.c.overhaul_id).where(
+            ~ovh.c.account_user_id.in_(select(db.users_table.c.sleeper_user_id)),
+            ~ovh.c.account_user_id.in_(select(db.sessions_table.c.user_id)))).scalars())
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            for name in _OVERHAUL_CHILD_TABLES:
+                tbl = getattr(db, name + "_table")
+                conn.execute(delete(tbl).where(tbl.c.overhaul_id.in_(chunk)))
+            conn.execute(delete(ovh).where(ovh.c.overhaul_id.in_(chunk)))
+    return len(ids)
+
+
 def _loads_dict(raw):
     try:
         value = json.loads(raw)
@@ -886,8 +918,7 @@ def _delete_user_data(sleeper_user_id: str,
                 counterparty_user_id=DELETED_USER_PLACEHOLDER,
                 counterparty_username=DELETED_USER_PLACEHOLDER,
                 card_json=json.dumps(dict(_overhaul_card_without_partner_fields(card),
-                                          target_user_id=DELETED_USER_PLACEHOLDER,
-                                          target_username=DELETED_USER_PLACEHOLDER)
+                                          **_OVERHAUL_REDACTED_CARD_VALUES)
                                      if card is not None else {}),
                 evidence_json=None)
             if row.decision != "pass":

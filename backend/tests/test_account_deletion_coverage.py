@@ -558,6 +558,7 @@ def _named_offer(conn, offer_id, counterparty, decision):
     """An offer in OTHER's overhaul, built on the owner's private data."""
     card = {"offer_id": offer_id, "target_user_id": counterparty, "target_username": OWNER_NAME,
             "give": [{"id": "p1"}], "receive": [{"id": "p2"}], "fairness_score": 0.9,
+            "mismatch_score": 7.0, "composite_score": 7.0,
             "model_arm": "owner_v2_bilateral", "selection_coverage": "full", "basis": "divergence",
             "reasons": ["Other manager’s preferences are unknown; fit uses market and team context."],
             "likes_you": True,
@@ -609,6 +610,10 @@ def test_overhauls_deleted_and_offers_naming_the_owner_scrubbed(engine):
         assert json.loads(offer["card_json"]) == {
             "offer_id": oid, "target_user_id": PLACEHOLDER, "target_username": PLACEHOLDER,
             "give": [{"id": "p1"}], "receive": [{"id": "p2"}], "fairness_score": 0.9,
+            # legal's blended-scalar test: surplus_margin (mismatch_score) is
+            # nulled on every card of the partner, and composite_score, its
+            # copy on the owner arms, with it.
+            "mismatch_score": None, "composite_score": None,
             "model_arm": "owner_v2_bilateral", "selection_coverage": "full", "basis": "divergence",
             "match_context": {"owner_benefits": ["outlook"],
                               "support_kind": "interpretable_support_not_probability"}}
@@ -704,3 +709,46 @@ def test_every_table_with_a_user_id_column_is_handled_in_accounts():
                if any("user_id" in c.name for c in t.columns)
                and not re.search(rf"\b{t.name}_table\b|[\"']{t.name}[\"']", code)]
     assert unnamed == []
+
+
+# ── Legal R28.22 d2: overhauls whose owner account no longer exists ──────────
+
+def test_orphaned_overhauls_are_deleted_and_live_owners_kept(engine):
+    with engine.begin() as conn:
+        _overhaul(conn, "ovh-orphan", "deleted-before-the-fix", "deleted-before-the-fix")
+        _overhaul(conn, "ovh-entry-orphan", "entry:mfl:61408.f0003", "mfl:61408.f0003")
+        _overhaul(conn, "ovh-live", UID, UID)                              # a users row
+        _overhaul(conn, "ovh-session-only", "session-only", "session-only")  # a durable session
+        seed(conn, db.sessions_table, "session-only", user_id="session-only")
+        for oid in ("ovh-orphan", "ovh-entry-orphan", "ovh-live", "ovh-session-only"):
+            _children(conn, oid)
+    assert accounts.delete_orphaned_overhauls() == 2
+    kept = {"ovh-live", "ovh-session-only"}
+    assert {r["overhaul_id"] for r in rows(engine, db.overhauls_table)} == kept
+    for tbl in OVERHAUL_CHILDREN:
+        assert {r["overhaul_id"] for r in rows(engine, tbl)} == kept, tbl.name
+    assert accounts.delete_orphaned_overhauls() == 0                     # idempotent
+
+
+def test_the_orphan_sweep_runs_once_per_process_and_logs_only_a_count(monkeypatch, caplog):
+    from backend import server
+    calls = []
+    monkeypatch.setattr(server, "_orphaned_overhauls_swept", False)
+
+    def fail_then_count():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("db down")
+        return 3
+    monkeypatch.setattr(accounts, "delete_orphaned_overhauls", fail_then_count)
+    with caplog.at_level("INFO"):
+        for _ in range(3):
+            server._sweep_orphaned_overhauls_once()
+    assert len(calls) == 2                       # a failure retries; a success ends it
+    assert "Deleted 3 overhaul(s) whose owner account no longer exists" in caplog.text
+
+
+def test_the_cleanup_loop_runs_the_orphan_sweep():
+    from backend import server
+    loop = _code_without_comments(inspect.getsource(server._cleanup_loop))
+    assert "_sweep_orphaned_overhauls_once ( )" in loop
