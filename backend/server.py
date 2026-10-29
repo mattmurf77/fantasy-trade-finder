@@ -3370,13 +3370,16 @@ def _prepared_job_matches(job):
         and prepared_trade_read_guard.valid(sys.modules[__name__], guard))
 
 
-def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
+def _trade_job_public_view(job: dict, *, page_start: int | None = None, snap=None) -> dict:
     """Shape returned to the mobile app by /api/trades/generate + /status.
     Hides internal-only fields like the cache key. Call OUTSIDE the job lock
     with a copied snapshot: one current history projection owns every card.
     `page_start`: the served slice's start index for a paged serve
     (_trade_job_page_view), None for the legacy cumulative body, which
-    `deck_i1_check` counts only once the job is complete."""
+    `deck_i1_check` counts only once the job is complete. `snap`: the
+    caller's roster snapshot for S0's serve rules (_trade_current_snapshot's
+    first part), so one read feeds its freshness check and this serve; None
+    reads one."""
     out = {
         "job_id":          job["job_id"],
         "status":          job["status"],
@@ -3459,7 +3462,7 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
         checked = out["cards"]
         out["cards"], block, past_bound = _roster_serve_rules(
             out["cards"], league_id, job.get("league_user_id") or user_id, job["job_id"],
-            report=i1_report)
+            snap=snap, report=i1_report)
         if not block:
             kept = {id(c) for c in out["cards"]}
             withdrawn = [c for c in checked if id(c) not in kept]
@@ -3632,12 +3635,11 @@ def _emit_deck_i1_check(user_id: str, league_id: str, job_id: str, report: dict)
         log.warning("deck_i1_check not recorded job=%s: %s", job_id, err)
 
 
-def _i1_event_enqueue(lease, write) -> None:
-    """Queue one write for the worker (started for the current queue on first
-    use, and again if it died: #468 QA P3-1); a full queue drops it, warned at
-    most once a minute with the count."""
+def _i1_event_ensure_worker(q) -> None:
+    """A live worker for `q`: started on first use, and again if it died
+    (#468 QA P3-1). It dies only on a BaseException, so there's no backoff:
+    each restart waits for the next enqueue or the exit drain (#485 QA P3)."""
     global _i1_event_worker_for, _i1_event_worker_thread
-    q = _i1_event_queue
     with _i1_events_lock:
         thread = _i1_event_worker_thread
         if _i1_event_worker_for is not q or thread is None or not thread.is_alive():
@@ -3645,6 +3647,13 @@ def _i1_event_enqueue(lease, write) -> None:
                                       daemon=True)
             thread.start()
             _i1_event_worker_for, _i1_event_worker_thread = q, thread
+
+
+def _i1_event_enqueue(lease, write) -> None:
+    """Queue one write for the worker (_i1_event_ensure_worker); a full queue
+    drops it, warned at most once a minute with the count."""
+    q = _i1_event_queue
+    _i1_event_ensure_worker(q)
     try:
         q.put_nowait((lease, write))
     except queue.Full:
@@ -3688,9 +3697,23 @@ def _i1_event_work(q) -> None:
 
 def _i1_event_exit_drain() -> None:
     """atexit (gunicorn exits its worker normally on SIGTERM): let the queued
-    writes land, bounded, then log the drops not yet warned (#468 QA P3-3)."""
+    writes land, bounded, then log the drops not yet warned (#468 QA P3-3). A
+    worker that died with writes queued behind it is started again first, or
+    those writes would be lost (#485 QA P3). An interpreter that refuses a new
+    thread at shutdown (CPython 3.12 may: "can't create new thread at
+    interpreter shutdown") loses them, logged with the count, and the drain
+    doesn't wait on a queue nothing serves (#519 QA): exit never raises."""
+    q = _i1_event_queue
+    if q.unfinished_tasks:
+        try:
+            _i1_event_ensure_worker(q)
+        except RuntimeError as err:
+            log.warning("deck_i1_check: no worker at exit (%s); %d queued writes not "
+                        "recorded", err, q.unfinished_tasks)
+            _i1_event_drop_warning(q, force=True)
+            return
     _drain_deck_i1_checks(_I1_EVENT_EXIT_DRAIN_S)
-    _i1_event_drop_warning(_i1_event_queue, force=True)
+    _i1_event_drop_warning(q, force=True)
 
 
 def _drain_deck_i1_checks(timeout: float = 5.0) -> bool:
@@ -4007,7 +4030,7 @@ def _trade_page_size() -> int:
         return 30
 
 
-def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
+def _trade_job_page_view(job: dict, cursor: int, search_id=None, snap=None) -> dict:
     """E2 opt-in paging: `page=1` on /generate (cursor 0), `cursor` on /status.
 
     `job` is a SHALLOW snapshot taken under the job lock; call outside it. The
@@ -4037,7 +4060,8 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
     start = 0 if replace else cursor
     end = len(raw) if replace else min(len(raw), cursor + _trade_page_size())
     served = [] if job.get("status") == "error" else raw[start:end]
-    out = _trade_job_public_view({**job, "cards": copy.deepcopy(served)}, page_start=start)
+    out = _trade_job_public_view({**job, "cards": copy.deepcopy(served)}, page_start=start,
+                                 snap=snap)
     if out["status"] == "error" or "wait_reason" in out:     # S0 §3b withhold: cursor holds
         out.update(cards=[], cursor=cursor, total_ready=0, replace=False)
     else:
@@ -4084,7 +4108,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 5
+DECK_PIPELINE_VERSION = 6
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4211,6 +4235,7 @@ DECK_PIPELINE_PINS = {
     3: "97404fc8bab683f2",   # #484 QA P2-1: _job_draft_picks records the picks it read (_note_job_picks_read; no shape change)
     4: "864cf30974da20ea",   # #486 QA P3s: one draft-context read per job, noted with the picks; both threaded into _owner_generation_context, a failed read still forfeiting the owner arm (same values; no shape change)
     5: "99d62fcaf7ad01ef",   # models-lead addendum D2: the quality filter's inputs recorded per run (_quality_filter_inputs; the same callables; no shape change)
+    6: "d5176ae18c66d208",   # #492 QA P3-1: the record only for a deck with deferred evidence; repeat_head (models-eng #503) from the filter's counts; no shape change
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -7003,15 +7028,27 @@ def _trade_deck_rebase(sess: Mapping, sess_token: str, deck_id: str, cursor: int
                   and job.get("page_scope") == scope and not _trade_job_revoked(job)
                   and job.get("status") != "error" else None)
     inputs = None
+    snapshot = []                         # P1's serve read, once per rebase, shared below
+
+    def current():
+        if not snapshot:
+            snapshot.append(_trade_current_snapshot(league_id, scoring_format))
+        return snapshot[0]
     if (row is not None and row["deck_job_id"] != deck_id
             and (finished is None or (newest is not None and row["deck_job_id"] == newest["job_id"]))):
         inputs = _trade_page_request_inputs(sess, league_id)
         served = _serve_trade_page_for(
-            sess, row, _trade_current_snapshot(league_id, scoring_format), sess_token=sess_token,
+            sess, row, current(), sess_token=sess_token,
             league_id=league_id, scoring_format=scoring_format,
             fairness_threshold=fairness_threshold, rebase=True, **inputs)
         if served is not None:
             return {**served, "deck_id": served["job_id"], "rebased": True}
+    if newest is not None:
+        # #484 QA P3-2: the scope's newer job is followed (case 2) only when it
+        # would back a page serve; a stale one falls to the end or the kick.
+        inputs = inputs or _trade_page_request_inputs(sess, league_id)
+        if not _trade_rebase_job_current(sess, newest, fairness_threshold, inputs, current()):
+            newest = None
     if newest is None:
         if finished is not None:
             end = _trade_deck_end(finished, deck, row, key, league_id, scoring_format)
@@ -7044,7 +7081,33 @@ def _trade_deck_rebase(sess: Mapping, sess_token: str, deck_id: str, cursor: int
                 return {**finished, "deck_id": deck_id, "pool_exhausted": True}
             return {**base, "deck_id": deck_id}   # joined a job outside the scope: ask again
         newest = kicked
-    return {**_trade_job_page_view(newest, 0), "deck_id": newest["job_id"], "rebased": True}
+    snap = current()[0] if snapshot and snapshot[0] else None
+    return {**_trade_job_page_view(newest, 0, snap=snap), "deck_id": newest["job_id"],
+            "rebased": True}
+
+
+def _trade_rebase_job_current(sess: Mapping, job: dict, fairness_threshold, inputs: Mapping,
+                              current) -> bool:
+    """#484 QA P3-2: may a rebase follow the scope's newer job (case 2)? Only
+    when it would back a page serve (_serve_trade_page_for's check): no input
+    changed since the request's epochs, and the job is fresh, or a matching
+    running one, against the same snapshot (`current`, P1's serve read) and
+    the session's read. With no snapshot (a failed read, or trade_i1_mode 0),
+    or one with no stored rows (status "missing": its fp says nothing about the
+    job's rosters), nothing proves it stale (A2): it's followed, as before, and
+    the page view's own checks (revocation, policy, S0's serve rules, which
+    gate-miss a missing read) still decide what it sends."""
+    if any(token.revoked for token in inputs["input_epochs"]):
+        return False
+    if current is None or current[0].status == "missing":
+        return True
+    fingerprints = (current[0].fp, current[1])
+    session_read = sess.get("roster_fetch_started_at")
+    args = (job, fairness_threshold, inputs["outlook_value"], None,
+            inputs["presentation_capture"], inputs["request_signature"], fingerprints)
+    with _trade_jobs_lock:
+        return bool(_trade_job_is_fresh(*args, session_read=session_read)
+                    or _trade_running_matches(*args, session_read=session_read))
 
 
 def _trade_deck_end(finished: dict, deck: dict, row: dict | None, key, league_id: str,
@@ -7434,8 +7497,9 @@ def _trade_fingerprints_match(job: dict, current, *, running: bool = False,
 
     `current` is the caller's _trade_current_fingerprints() for the job's
     league and format. Compare only: this runs under _trade_jobs_lock. A None
-    stamp (a failed kickoff read, or a worker that read other picks:
-    `_note_job_picks_read`) never matches a read. A None `current` (a failed
+    stamp never matches a read: a failed kickoff read, or a worker whose own
+    reads disagree with the stamp (`_note_job_picks_read`: other picks, a
+    flipped draft verdict, or a failed picks or draft read, #487 QA P3-5). A None `current` (a failed
     read) can't prove staleness (contract §4.4, A2): it keeps a RUNNING job
     (`running=True`), whatever its stamp, None included, and never makes a
     completed job fresh. Hand-built jobs
@@ -8385,7 +8449,7 @@ def _deck_quality_filters_enabled() -> bool:
 
 
 def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters,
-                           lineup_slots) -> dict:
+                           lineup_slots, deferred: int = 0) -> dict:
     """models-lead addendum D2: what deck_quality.filter_deck read for this run,
     frozen once per run in the pack's run header (`run["filter_inputs"]`), so
     #453's audit re-runs B-DK-4/5/6 on the filter's own inputs. Audit
@@ -8399,7 +8463,20 @@ def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters
     - qb_te: per team the filter keyed (`viewer_team`, as overwritten with the
       viewer's roster, and each card's counterparty), its QB and TE holdings.
     - protected: the trade_hashes `is_protected` exempted.
-    A recording failure raises; the caller then records filter_ran True with
+    - repeat_head (models-eng, #503): when the repeat cap ran short (it kept
+      fewer than REPEAT_WINDOW cards ahead of the `deferred` ones, so every
+      card past them is one it deferred), the trade_hashes of the cards it
+      kept, in order; else null.
+    A market value is recorded as a plain float, or null when it isn't a
+    finite number (#492 QA P3-4: a NaN or inf made the header non-strict
+    JSON; a numpy float wouldn't serialize at all); a bool is the 1.0 or 0.0
+    the filter compared. A non-finite one's null is listed in
+    `market_coerced` (sorted ids, absent when none), so the audit never reads
+    it as an unseeded asset: the filter's NaN behavior is order-dependent, so
+    such a card is not auditable for breakup and filler (#503 QA P2). A non-finite value is a
+    data bug, and its null can read differently from what the filter did
+    (a NaN first on a card drops the filter's filler bar to the floor; the
+    audit skips the null and uses the real max). A recording failure raises; the caller then records filter_ran True with
     no inputs (the audit reads that deck as not auditable), and serves the
     filtered deck."""
     from . import deck_quality as _dq
@@ -8409,16 +8486,35 @@ def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters
     assets = {a for c in cards for a in (*c.give_player_ids, *c.receive_player_ids)}
     assets.update(a for held in qb_te.values() for a in held)
     ordered = sorted(assets, key=str)
-    return {
+    head = len(cards) - deferred
+    coerced = set()
+
+    def value(a):
+        v = market(a)
+        if v is None:
+            return None
+        v = float(v)                  # a bool is the 1 or 0 the filter compared
+        if math.isfinite(v):
+            return v
+        coerced.add(str(a))
+        return None
+
+    record = {
         "v": 1, "filter_ran": True, "viewer_team": viewer_team,
         "lineup_slots": None if lineup_slots is None else list(lineup_slots),
-        "market": {str(a): market(a) for a in ordered},
+        "market": {str(a): value(a) for a in ordered},
         "position": {str(a): position(a) for a in ordered},
         "qb_te": {team: [str(a) for a in held] for team, held in qb_te.items()},
         "protected": sorted({_deck_trade_hash(c.give_player_ids, c.receive_player_ids,
                                               c.target_user_id)
                              for c in cards if _dq.is_protected(c)}),
+        "repeat_head": ([_deck_trade_hash(c.give_player_ids, c.receive_player_ids,
+                                          c.target_user_id) for c in cards[:head]]
+                        if head < _dq.REPEAT_WINDOW else None),
     }
+    if coerced:   # #503 QA P2: a null the filter saw as a value, never an unseeded asset
+        record["market_coerced"] = sorted(coerced)
+    return record
 
 
 def _records_in_order(cards, records, survivors) -> list:
@@ -12927,6 +13023,9 @@ def _run_trade_job(
                 if _job_live(job):
                     job["owner_presentment"] = owner_presentment
         filter_inputs = {"v": 1, "filter_ran": False}   # models-lead addendum D2
+        with _trade_jobs_lock:   # #492 QA P3-1: only a deck with deferred evidence keeps it
+            _fi_job = _trade_jobs.get(job_id)
+            _fi_record = _job_live(_fi_job) and _fi_job.get("evidence") is not None
         if _deck_quality_filters_enabled() and final_cards:
             # Operator, 2026-10-14 (Calibration grades of this engine): drop breakup / junk
             # filler / redundant TE-QB cards and cap repeats, before the served/ghost split so a
@@ -12944,11 +13043,13 @@ def _run_trade_job(
                 final_cards, quality_counts = _deck_quality.filter_deck(
                     final_cards, viewer_id=viewer_team, market=quality_market,
                     position=quality_position, rosters=quality_rosters, lineup_slots=quality_slots)
+                filter_inputs = {"v": 1, "filter_ran": True}
                 try:
-                    filter_inputs = _quality_filter_inputs(
-                        final_cards, viewer_team=viewer_team, market=quality_market,
-                        position=quality_position, rosters=quality_rosters,
-                        lineup_slots=quality_slots)
+                    if _fi_record:
+                        filter_inputs = _quality_filter_inputs(
+                            final_cards, viewer_team=viewer_team, market=quality_market,
+                            position=quality_position, rosters=quality_rosters,
+                            lineup_slots=quality_slots, deferred=quality_counts["deferred"])
                 except Exception as inputs_err:   # provenance never unfilters the deck
                     log.warning("trade-job %s: quality filter inputs not recorded: %s",
                                 job_id, inputs_err)
