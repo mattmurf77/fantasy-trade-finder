@@ -3371,16 +3371,18 @@ def _prepared_job_matches(job):
         and prepared_trade_read_guard.valid(sys.modules[__name__], guard))
 
 
-def _trade_job_public_view(job: dict, *, page_start: int | None = None, snap=None) -> dict:
+def _trade_job_public_view(job: dict, *, page_start: int | None = None,
+                           prior_cards: list | None = None, snap=None) -> dict:
     """Shape returned to the mobile app by /api/trades/generate + /status.
     Hides internal-only fields like the cache key. Call OUTSIDE the job lock
     with a copied snapshot: one current history projection owns every card.
     `page_start`: the served slice's start index for a paged serve
     (_trade_job_page_view), None for the legacy cumulative body, which
-    `deck_i1_check` counts only once the job is complete. `snap`: the
-    caller's roster snapshot for S0's serve rules (_trade_current_snapshot's
-    first part), so one read feeds its freshness check and this serve; None
-    reads one."""
+    `deck_i1_check` counts only once the job is complete. `prior_cards`: a
+    later page's raw cards before its slice, for D3's window (_served_cap).
+    `snap`: the caller's roster snapshot for S0's serve rules
+    (_trade_current_snapshot's first part), so one read feeds its freshness
+    check and this serve; None reads one."""
     out = {
         "job_id":          job["job_id"],
         "status":          job["status"],
@@ -3439,6 +3441,7 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None, snap=Non
     kick_floor = None
     withdrawn = []                        # cards S0's I-1 drops at this serve (evidence, C-b)
     cut = []                              # cards the disposition projection cuts (models-lead B4)
+    moves = {}                            # D3: cards displayed out of build order (evidence)
     live_paged = job.get("evidence_mode") == "live" and bool(job.get("page_scope"))
     if out["cards"] and (job.get("evidence") is not None or live_paged):
         # C-b sticky drop: a card I-1 withdrew at an earlier serve of this deck
@@ -3467,6 +3470,9 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None, snap=Non
         if not block:
             kept = {id(c) for c in out["cards"]}
             withdrawn = [c for c in checked if id(c) not in kept]
+            # D3: the repeat cap on the order the withdrawals leave.
+            out["cards"], moves = _served_cap(job, out["cards"], prior_cards,
+                                              job.get("cards") or [])
         if block == "roster_check_unavailable":
             out.update(cards=[], status="error", error="roster_check_unavailable")
         elif block == "roster_gate_miss":
@@ -3493,7 +3499,8 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None, snap=Non
     if job.get("evidence") is not None and (out["cards"] or withdrawn or cut):
         _deck_evidence_delivered(job["evidence"], out["cards"],
                                  partial=job.get("status") == "error", withdrawn=withdrawn,
-                                 cut=cut, league_id=job["key"][1])
+                                 cut=cut, league_id=job["key"][1],
+                                 moves=moves if out["cards"] else None)
     elif live_paged and (out["cards"] or withdrawn or cut):   # #417 P2-1: rows written at build
         _deck_evidence_live_delivered(job["job_id"], job["key"][0], job["key"][1],
                                       out["cards"], withdrawn, cut)
@@ -3700,10 +3707,11 @@ def _i1_event_exit_drain() -> None:
     """atexit (gunicorn exits its worker normally on SIGTERM): let the queued
     writes land, bounded, then log the drops not yet warned (#468 QA P3-3). A
     worker that died with writes queued behind it is started again first, or
-    those writes would be lost (#485 QA P3). An interpreter that refuses a new
-    thread at shutdown (CPython 3.12 may: "can't create new thread at
-    interpreter shutdown") loses them, logged with the count, and the drain
-    doesn't wait on a queue nothing serves (#519 QA): exit never raises."""
+    those writes would be lost (#485 QA P3). Defensive: should an interpreter
+    ever refuse a new thread at shutdown ("can't create new thread at
+    interpreter shutdown"; #519 QA saw the restart work on 3.12.3, 3.12.15 and
+    3.14), the writes are lost, logged once with the count, and the drain
+    doesn't wait on a queue nothing serves: exit never raises."""
     q = _i1_event_queue
     if q.unfinished_tasks:
         try:
@@ -4062,7 +4070,7 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None, snap=None) -> d
     end = len(raw) if replace else min(len(raw), cursor + _trade_page_size())
     served = [] if job.get("status") == "error" else raw[start:end]
     out = _trade_job_public_view({**job, "cards": copy.deepcopy(served)}, page_start=start,
-                                 snap=snap)
+                                 prior_cards=raw[:start] if start else None, snap=snap)
     if out["status"] == "error" or "wait_reason" in out:     # S0 §3b withhold: cursor holds
         out.update(cards=[], cursor=cursor, total_ready=0, replace=False)
     else:
@@ -4109,7 +4117,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 6
+DECK_PIPELINE_VERSION = 8
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4156,6 +4164,7 @@ DECK_PIPELINE_FUNCTIONS = (
     "_league_lineup_slots", "_league_slot_order", "_sleeper_lineup_slots",
     "_sleeper_roster_limit", "_value_core_standings", "_build_trade_roster_context",
     "_assigned_slot_order", "_load_trade_disposition_keys", "_ranking_confidence",
+    "_is_pool_timeout",   # whether a failed read is retried, so whether the owner arm forfeits
     # the flag gates that switch layers on
     "_deck_diversity_enabled", "_deck_exploration_enabled", "_deck_fatigue_enabled",
     "_deck_first_session_enabled", "_deck_quality_filters_enabled", "_deck_signal_v2_enabled",
@@ -4237,6 +4246,8 @@ DECK_PIPELINE_PINS = {
     4: "864cf30974da20ea",   # #486 QA P3s: one draft-context read per job, noted with the picks; both threaded into _owner_generation_context, a failed read still forfeiting the owner arm (same values; no shape change)
     5: "99d62fcaf7ad01ef",   # models-lead addendum D2: the quality filter's inputs recorded per run (_quality_filter_inputs; the same callables; no shape change)
     6: "d5176ae18c66d208",   # #492 QA P3-1: the record only for a deck with deferred evidence; repeat_head (models-eng #503) from the filter's counts; no shape change
+    7: "facf9a9f34b7529a",   # #487 QA P3-3 (models-eng): one immediate retry inside the picks and draft-context memos; a transient failure no longer forfeits the owner arm
+    8: "f7ed33e6ab94af03",   # #521 QA P3-3: a pool timeout isn't retried at once (_is_pool_timeout): it forfeits the owner arm, as before v7; other failures as v7
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4801,6 +4812,10 @@ class _DeckEvidence:
         # Every id S0's I-1 withdrew at any serve of this deck: never served
         # again (the C-b sticky drop), and recorded in deck_card_withdrawals.
         self.sticky: set = set()
+        # D3: the cards a serve displayed out of build order, {index: anchor
+        # index} (each right after its anchor's card, in the same response),
+        # a card's first delivery winning; the pack header's display_moves.
+        self.display_moves: dict = {}
         # Withdrawals not yet written: {impression_id: (served_before, at)}.
         # They land in the same transaction as their serve's delivery evidence
         # (the pack insert or header CAS, or stage 1's rows; #417 P3-5).
@@ -5172,6 +5187,8 @@ def _deck_pack_input(ev: _DeckEvidence):
         run["stored_count"] = ev.stored_count
     if ev.deck_source:                    # §6: eval reads deck_source off the run metadata
         run["deck_source"] = ev.deck_source
+    if ev.display_moves:                  # D3: absent when no serve moved a card
+        run["display_moves"] = _merge_display_moves(None, ev.display_moves)
     return ev.pack_cards, rows, ev.served_at, run
 
 
@@ -5227,7 +5244,9 @@ def _deck_pack_first_write(ev: _DeckEvidence, cards: list[dict], run: dict,
             return False
     with ev.lock:
         ev.pack, ev.pack_cards = state, None
-        ev.pack_dirty = not inserted or state.run["deliveries"] != ev.deliveries
+        ev.pack_dirty = (not inserted or state.run["deliveries"] != ev.deliveries
+                         or any(str(i) not in (state.run.get("display_moves") or {})
+                                for i in ev.display_moves))
     if not inserted:                      # our deliveries and withdrawals, merged in by the CAS
         return _deck_pack_flush_header(ev, withdrawals=withdrawals)
     if ev.pack_dirty:                     # a delivery landed while the pack was built
@@ -5248,6 +5267,9 @@ def _deck_pack_flush_header(ev: _DeckEvidence, withdrawals=()) -> bool:
         state = ev.pack
         if dirty:
             state.run["deliveries"] = _merge_deliveries(state.run.get("deliveries"), ev.deliveries)
+            if ev.display_moves:
+                state.run["display_moves"] = _merge_display_moves(state.run.get("display_moves"),
+                                                                  ev.display_moves)
             ev.pack_dirty = False
     if not dirty:
         if withdrawals:
@@ -5278,6 +5300,13 @@ def _merge_deliveries(a, b) -> list:
     return [[index, earliest[index]] for index in sorted(earliest)]
 
 
+def _merge_display_moves(stored, ours) -> dict:
+    """D3: the union of two display_moves maps as the header stores them
+    ({"<index>": anchor index}), the stored entry winning (a card's first
+    delivery wins)."""
+    return {**{str(i): a for i, a in (ours or {}).items()}, **(stored or {})}
+
+
 def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
     """Another instance updated the header first: keep both. Deliveries are
     the union (earliest time per index); retired stays true once true (the
@@ -5285,8 +5314,12 @@ def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
     missed keeping the stored cause (it landed first), and upgrade_misses is
     that map's tally, so a card two instances missed counts once;
     upgrade_miss_row_gone and upgrade_miss_row_gone_why are unions the same
-    way, each kept to its parent's keys."""
+    way, each kept to its parent's keys; display_moves is the union, the
+    stored entry winning (D3)."""
     merged = {**ours, **stored}
+    moves = _merge_display_moves(stored.get("display_moves"), ours.get("display_moves"))
+    if moves:
+        merged["display_moves"] = moves
     merged["deliveries"] = _merge_deliveries(stored.get("deliveries"), ours.get("deliveries"))
     if stored.get("retired") or ours.get("retired"):
         merged["retired"] = True
@@ -6116,9 +6149,11 @@ def _deck_evidence_write(ev: _DeckEvidence) -> None:
 
 def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
                                 delivered_at: str | None = None, withdrawn: set = frozenset(),
-                                new_drops: Mapping = {}, league_id: str | None = None) -> None:
+                                new_drops: Mapping = {}, league_id: str | None = None,
+                                moves: Mapping = {}) -> None:
     """Thread target: a stored deck's delivery once its job has left this
     process, from the row's evidence_blob read fresh under the write lock.
+    `moves`: the serve's D3 display moves (a packed deck's only).
     `new_drops`: this serve's new withdrawals ({impression_id: reason}),
     written in the same transaction
     as the delivery's evidence (#417 P3-5); served_before is the deck's
@@ -6161,6 +6196,12 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
                     ev.pending_withdrawals[iid] = (1 if served else 0, delivered_at, new_drops[iid])
                 ev.sticky |= set(new_drops)
                 ev.delivered.update(ids)
+                if moves and not ev.packed:      # the serve checked for a pack; never here
+                    log.warning("deck-evidence %s: display moves on an unpacked deck, "
+                                "not recorded", deck_job_id)
+                elif moves:
+                    with ev.lock:            # an earlier response delivered up to `last`
+                        _deck_note_moves(ev, moves, lambda index: index > last)
                 ev.withdrawn = set(withdrawn) - ev.delivered
                 ev.delivered_at.update(dict.fromkeys(ids, delivered_at))
                 ev.served_at = ev.served_at or delivered_at
@@ -6193,7 +6234,7 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
 
 def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = False,
                              withdrawn: list = (), cut: list = (),
-                             league_id: str | None = None) -> None:
+                             league_id: str | None = None, moves: Mapping | None = None) -> None:
     """Record a delivery of `cards` (public dicts: what the response sends,
     after S0's serve rules) from `ev`'s deck. Once its run has ended, the write
     runs off the request thread. A card published before its impression id
@@ -6202,7 +6243,9 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
     ended partial. `withdrawn`: the cards S0's I-1 dropped at this serve: no row (C-b),
     and never served again in this deck (the sticky drop); each is recorded once
     in deck_card_withdrawals (`league_id`: the deck's league). `cut`: the cards
-    the disposition projection removed, withdrawn the same way (models-lead B4)."""
+    the disposition projection removed, withdrawn the same way (models-lead B4).
+    `moves`: the cards this serve displayed out of build order (D3,
+    _served_repeat_cap), into the pack header's display_moves."""
     reasons = _withdrawal_reasons(withdrawn, cut)
     dropped = set(reasons)
     ids, hashes = set(), set()
@@ -6242,6 +6285,8 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
                                         for i in ev.by_hash.get(h, ())}
         ev.delivered |= ids
         ev.delivered_hashes |= hashes
+        _deck_note_moves(ev, moves,
+                         lambda index: _evidence_contract.card_impression_id(ev.job_id, index) in fresh)
         _deck_evidence_cover(ev, fresh, now)
         go = (new or bool(withdrawals)) and ev.complete
     if go:
@@ -6314,6 +6359,190 @@ def _deck_sticky(deck_job_id: str, user_id: str, *, loaded_only: bool = False) -
         return set()
     _deck_withdrawn_note(deck_job_id, ids)
     return ids
+
+
+def _deck_note_moves(ev: _DeckEvidence, moves, first) -> None:
+    """Under `ev.lock`: a serve's D3 display moves, a card's first delivery
+    winning; a new one dirties the pack header. `first(index)`: whether this
+    response is the card's first delivery. A move for a card an earlier
+    response delivered unmoved is refused (logged): eval would place it away
+    from where the user first saw it (#517 QA P2-1)."""
+    refused = 0
+    for index, anchor in (moves or {}).items():
+        if not first(index):
+            refused += 1
+        elif index not in ev.display_moves:
+            ev.display_moves[index] = anchor
+            ev.pack_dirty = True
+    if refused:
+        log.warning("deck-evidence %s: %d display move%s for an earlier delivery's cards, "
+                    "not recorded", ev.job_id, refused, "" if refused == 1 else "s")
+
+
+# Served-card keys that mark deck_quality's protected cards (PROTECTED_ATTRS as
+# trade_card_to_dict names them; fatigue_retest serializes as "retest").
+_SERVED_PROTECTED_KEYS = ("likes_you", "source_like_impression_id", "standing_offer_reason",
+                          "injected", "wildcard", "retest", "owner_published")
+
+
+def _display_key(index: int, moves: Mapping) -> tuple:
+    """eval's displayed order (backend/eval/data.py): a moved card right after
+    its anchor's card, moved cards behind one anchor in build order."""
+    return (moves[index], 1, index) if index in moves else (index, 0, index)
+
+
+def _served_repeat_cap(cards: list, deck_job_id: str, *, prior=(), delivered=frozenset(),
+                       recorded: Mapping | None = None, withheld=()) -> tuple[list, dict]:
+    """models-lead addendum D3: deck_quality's repeat cap re-applied to the
+    displayed order at a serve. A disposition cut or I-1's drop (mode 2) of a
+    never-delivered card ahead of the cards the filter deferred pulls them
+    into the displayed first REPEAT_WINDOW, and B-DK-7 counts what users see.
+
+    `cards`: this response's, in build order, after the serve rules. `prior`:
+    the cards earlier responses displayed ahead of them (a later page's); they
+    fill the window first. `delivered`: impression ids an earlier response
+    sent, which hold their places, as protected cards do (the app never moves
+    a card it holds); `withheld`: delivered cards this response no longer
+    sends (withdrawn after delivery, served_before 1), which eval keeps in
+    their places, so they hold theirs here too, unsent; `recorded` (index ->
+    anchor index) re-applies the moves earlier responses made. An over-cap card
+    moves to just after the last card the window takes, never out of this
+    response, so its delivery boundary holds. Returns (the cards in displayed
+    order, the new moves). Nothing moves unless every card has a contract id,
+    in build order, and that last card is one this response sends first (eval
+    reads a move only with its card and anchor in one delivery, #501); so a
+    move's anchor is above its card and never itself moved."""
+    from .deck_quality import REPEAT_CAP, REPEAT_WINDOW
+    recorded = recorded or {}
+    indexes = [_deck_card_index(deck_job_id, c.get("impression_id")) for c in cards]
+    if None in indexes or any(a >= b for a, b in zip(indexes, indexes[1:])):
+        return cards, {}
+    index_of = {id(c): i for c, i in zip(cards, indexes)}
+    for c in withheld:
+        index = _deck_card_index(deck_job_id, c.get("impression_id"))
+        if index is not None:
+            index_of[id(c)] = index
+    unsent = {id(c) for c in withheld if id(c) in index_of}
+    every_card = [*cards, *(c for c in withheld if id(c) in unsent)]
+
+    def key(card, moves):
+        return _display_key(index_of[id(card)], moves)
+
+    def assets(card):
+        return [p["id"] for p in (*card.get("give", []), *card.get("receive", []))]
+
+    def sent(order):
+        return [c for c in order if id(c) not in unsent]
+
+    shown = sorted(every_card, key=lambda c: key(c, recorded))
+    seen: collections.Counter = collections.Counter()
+    for c in list(prior)[:REPEAT_WINDOW]:
+        seen.update(assets(c))
+    head = min(len(prior), REPEAT_WINDOW)
+    taken, deferred, tail = [], [], []
+    for c in shown:
+        if head >= REPEAT_WINDOW:
+            tail.append(c)
+            continue
+        held = (id(c) in unsent or c.get("impression_id") in delivered
+                or any(c.get(k) for k in _SERVED_PROTECTED_KEYS))
+        if not held and any(seen[a] >= REPEAT_CAP for a in assets(c)):
+            deferred.append(c)
+            continue
+        seen.update(assets(c))
+        head += 1
+        taken.append(c)
+    if not deferred or not taken:
+        return sent(shown), {}
+    last = taken[-1]
+    if id(last) in unsent or last.get("impression_id") in delivered:
+        return sent(shown), {}
+    anchor = index_of[id(last)]
+    moves = {index_of[id(d)]: anchor for d in deferred if index_of[id(d)] < anchor}
+    if not moves:
+        return sent(shown), {}
+    return sent(taken + deferred + tail), moves
+
+
+def _served_cap(job: dict, cards: list, earlier=None, before=()) -> tuple[list, dict]:
+    """D3 on an in-process deck's serve: `cards` capped, and the moves for its
+    evidence. Only a packed deck (its pack header records the moves, so eval's
+    displayed positions follow them) while deck.quality_filters is on;
+    anything else serves in build order, as before. `earlier`: a later page's
+    raw cards before it (their delivered ones fill the window first);
+    `before`: this response's cards before the serve's withdrawals (its
+    delivered ones keep their places, sent or not)."""
+    ev = job.get("evidence")
+    if not cards or ev is None or not ev.packed or not _deck_quality_filters_enabled():
+        return cards, {}
+    with ev.lock:
+        delivered, recorded = set(ev.delivered), dict(ev.display_moves)
+    prior = [c for c in earlier or () if c.get("impression_id") in delivered]
+    sending = {c.get("impression_id") for c in cards}
+    withheld = [c for c in before if c.get("impression_id") in delivered - sending]
+    return _served_repeat_cap(cards, job["job_id"], prior=prior, delivered=delivered,
+                              recorded=recorded, withheld=withheld)
+
+
+def _served_cap_stored(row: dict, cards: list, earlier: list, sticky: set,
+                       before=()) -> tuple[list, dict]:
+    """D3 on a stored page's serve (_trade_page_view): through the deck's job
+    while it is in this process; after it left, on a deck with a pack, with
+    what _served_cap reads from the evidence read from the pack instead
+    (#517 QA P1-1): the delivered cards (_deck_stored_delivered), the moves
+    already recorded, and this response's delivered cards it no longer sends.
+    A deck with no pack serves in build order: nothing would record a move."""
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(row["deck_job_id"])
+        if job is not None and job["key"][0] == row["user_id"]:
+            job = {"job_id": job["job_id"], "evidence": job.get("evidence")}
+        else:
+            job = None
+    if job is not None:
+        return _served_cap(job, cards, earlier, before)
+    if not cards or not _deck_quality_filters_enabled():
+        return cards, {}
+    state = _deck_pack_state(row["deck_job_id"], row["user_id"])
+    if state is None:
+        return cards, {}
+    delivered = _deck_stored_delivered(row["deck_job_id"], row["user_id"], state,
+                                       [*earlier, *before], sticky)
+    recorded = {int(k): v for k, v in (state.run.get("display_moves") or {}).items()}
+    prior = [c for c in earlier if c.get("impression_id") in delivered]
+    sending = {c.get("impression_id") for c in cards}
+    withheld = [c for c in before if c.get("impression_id") in delivered - sending]
+    return _served_repeat_cap(cards, row["deck_job_id"], prior=prior, delivered=delivered,
+                              recorded=recorded, withheld=withheld)
+
+
+def _deck_stored_delivered(deck_job_id: str, user_id: str, state, cards: list,
+                           sticky: set) -> set:
+    """After a deck's job left the process: the impression ids among `cards`
+    that an earlier response delivered, as eval reads them. That's every card
+    at or under the pack's last delivery boundary, less those withdrawn before
+    any delivery (served_before 0, W0). A withdrawal not yet readable counts
+    as W0, as before. The withdrawals are read only when the deck has one."""
+    boundaries = [d[0] for d in state.run.get("deliveries") or [] if d]
+    last = max(boundaries, default=-1)
+    served_then_withdrawn = set()
+    if sticky:
+        from . import database as _db
+        try:
+            served_then_withdrawn = {r["impression_id"] for r in _db.load_deck_withdrawals(deck_job_id)
+                                     if r["user_id"] == user_id and r["served_before"]}
+        except Exception:
+            log.warning("deck-withdrawals %s: unreadable; D3 reads every withdrawal as W0",
+                        deck_job_id, exc_info=True)
+    out = set()
+    for card in cards:
+        iid = card.get("impression_id")
+        index = _deck_card_index(deck_job_id, iid)
+        if index is None or index > last:
+            continue
+        if iid in sticky and iid not in served_then_withdrawn:
+            continue
+        out.add(iid)
+    return out
 
 
 def _disposition_cut(before: list, after: list) -> list:
@@ -6407,8 +6636,14 @@ def _deck_live_stamp(deck_job_id: str, user_id: str, league_id: str | None, ids,
     stamps them and the next serve that drops a card records it."""
     from . import database as _db
     try:
-        _db.stamp_live_deliveries(deck_job_id, user_id, league_id, sorted(ids), at,
-                                  dict(new_drops))
+        if not _db.stamp_live_deliveries(deck_job_id, user_id, league_id, sorted(ids), at,
+                                         dict(new_drops)):
+            # A deck with no rows and no pack (a deferred deck whose page row
+            # was stored without its evidence): eval can't see these cards, and
+            # an outcome on one is an orphan. Counted in the logs for the read.
+            log.error("deck-evidence %s: %d delivered card%s of a deck with no evidence "
+                      "(no rows, no pack); eval can't see them", deck_job_id, len(ids),
+                      "" if len(ids) == 1 else "s")
     except Exception:
         log.warning("deck-evidence %s: live delivery not recorded", deck_job_id, exc_info=True)
         with _deck_live_stamped_lock:
@@ -6417,11 +6652,11 @@ def _deck_live_stamp(deck_job_id: str, user_id: str, league_id: str | None, ids,
 
 
 def _deck_evidence_delivered_stored(row: Mapping, cards: list, withdrawn: list = (),
-                                    cut: list = ()) -> None:
+                                    cut: list = (), moves: Mapping | None = None) -> None:
     """A delivery of a stored page's `cards` (sent, after S0's serve rules; the
     `withdrawn` ones I-1 dropped, the `cut` ones the disposition projection
-    removed): through the deck's job while it is in this process, else
-    through the row's evidence_blob."""
+    removed; `moves` D3's): through the deck's job while it is in this
+    process, else through the row's evidence_blob."""
     with _trade_jobs_lock:
         job = _trade_jobs.get(row["deck_job_id"])
         in_process = job is not None and job["key"][0] == row["user_id"]
@@ -6429,7 +6664,7 @@ def _deck_evidence_delivered_stored(row: Mapping, cards: list, withdrawn: list =
         live = in_process and job.get("evidence_mode") != "deferred"
     if ev is not None:
         _deck_evidence_delivered(ev, cards, withdrawn=withdrawn, cut=cut,
-                                 league_id=row["league_id"])
+                                 league_id=row["league_id"], moves=moves)
         return
     if live:                              # its rows were written at build: stamp them (P2-1)
         _deck_evidence_live_delivered(row["deck_job_id"], row["user_id"], row["league_id"],
@@ -6450,7 +6685,7 @@ def _deck_evidence_delivered_stored(row: Mapping, cards: list, withdrawn: list =
     _start_deck_evidence_thread(target=_deck_evidence_write_stored,
                                 args=(row["user_id"], row["deck_job_id"], ids, lease,
                                       datetime.now(timezone.utc).isoformat(), dropped - ids,
-                                      new_drops, row["league_id"]))
+                                      new_drops, row["league_id"], moves or {}))
 
 
 def _deck_evidence_job_done(job_id: str) -> None:
@@ -6634,9 +6869,13 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
                                                    row["deck_job_id"], snap=snap, report=i1_report)
     kept = {id(c) for c in cards}
     withdrawn = [] if block else [c for c in checked if id(c) not in kept]
+    moves = {}
+    if not block:                         # D3: the repeat cap on the order the withdrawals leave
+        cards, moves = _served_cap_stored(row, cards, pages["cards"][:cursor], sticky,
+                                          pages["cards"][cursor:end])
     cards = _with_trade_hash(cards)       # P2: the client's dedupe key
     if cards or withdrawn or cut:         # ADR-025 stage 1: a delivery, after S0's rules
-        _deck_evidence_delivered_stored(row, cards, withdrawn, cut)
+        _deck_evidence_delivered_stored(row, cards, withdrawn, cut, moves)
     opponents = pages.get("opponents_total") or 0
     out = {"job_id": row["deck_job_id"], "status": "complete", "opponents_done": opponents,
            "opponents_total": opponents, "cards": cards, "error": None, "cursor": end,
@@ -7095,14 +7334,24 @@ def _trade_rebase_job_current(sess: Mapping, job: dict, fairness_threshold, inpu
     running one, against the same snapshot (`current`, P1's serve read) and
     the session's read. With no snapshot (a failed read, or trade_i1_mode 0),
     or one with no stored rows (status "missing": its fp says nothing about the
-    job's rosters), nothing proves it stale (A2): it's followed, as before, and
-    the page view's own checks (revocation, policy, S0's serve rules, which
-    gate-miss a missing read) still decide what it sends."""
+    job's rosters), the read can't prove the job stale (A2), so only the
+    fingerprint compare is skipped: the job's own stamp stands in for the
+    read, and every other check P1's backing makes still runs (the policy, the
+    TTL, the request signature, the session's read). A None stamp (a failed
+    kickoff read, or a worker whose reads disagreed) is never followed then
+    (#520 QA P3-1): stricter than P1, whose `_trade_fingerprints_match` keeps
+    a running None-stamp job on a failed read, and at trade_i1_mode 0. Here it
+    kicks a rebuild instead (#530 QA). The page view's checks (revocation,
+    policy, S0's serve rules, which gate-miss a missing read) still decide
+    what it sends."""
     if any(token.revoked for token in inputs["input_epochs"]):
         return False
     if current is None or current[0].status == "missing":
-        return True
-    fingerprints = (current[0].fp, current[1])
+        if "roster_fp" in job and job["roster_fp"] is None:
+            return False
+        fingerprints = (job.get("roster_fp"), job.get("values_snapshot_id"))
+    else:
+        fingerprints = (current[0].fp, current[1])
     session_read = sess.get("roster_fetch_started_at")
     args = (job, fairness_threshold, inputs["outlook_value"], None,
             inputs["presentation_capture"], inputs["request_signature"], fingerprints)
@@ -11853,7 +12102,17 @@ def _run_trade_job(
             if not _draft_loaded:
                 _draft_loaded = True
                 try:
-                    _draft_memo = get_league_draft_context(league_id) or {}
+                    try:
+                        _draft_memo = get_league_draft_context(league_id) or {}
+                    except Exception as first_err:
+                        # One immediate retry (models-eng, v7): a DB blip must not
+                        # forfeit the owner arm. Failed only when both raise. A
+                        # pool timeout isn't retried: the pool is exhausted, and a
+                        # retry would only wait again and add to it (v8).
+                        if _is_pool_timeout(first_err):
+                            raise
+                        log.info("trade-job: draft context read failed, retrying: %s", first_err)
+                        _draft_memo = get_league_draft_context(league_id) or {}
                 except Exception as draft_err:
                     log.warning("trade-job: draft context read failed: %s", draft_err)
                     _draft_memo, _draft_failure = {}, draft_err
@@ -11864,8 +12123,17 @@ def _run_trade_job(
             if not _picks_loaded:
                 _picks_loaded = True
                 try:
-                    _picks_memo = load_draft_picks(league_id=league_id,
-                                                   source=_pick_read_source())
+                    try:
+                        _picks_memo = load_draft_picks(league_id=league_id,
+                                                       source=_pick_read_source())
+                    except Exception as first_err:
+                        # One immediate retry, as the draft context's (v7); never
+                        # after a pool timeout (v8).
+                        if _is_pool_timeout(first_err):
+                            raise
+                        log.info("trade-job: draft picks read failed, retrying: %s", first_err)
+                        _picks_memo = load_draft_picks(league_id=league_id,
+                                                       source=_pick_read_source())
                 except Exception as picks_err:
                     log.warning("trade-job: draft picks read failed: %s", picks_err)
                     _picks_memo, _picks_failure = [], picks_err
@@ -11873,9 +12141,10 @@ def _run_trade_job(
                                      _job_draft_context().get("status") == "drafted")
             return _picks_memo
 
-        # The owner path's view of the same two reads: a failed read raises, so
-        # its context capture fails and the owner arm forfeits, as when it read
-        # them itself. Every other reader keeps the degrade-to-empty above.
+        # The owner path's view of the same two reads: a failed read (both
+        # attempts raised) raises, so its context capture fails and the owner
+        # arm forfeits, as when it read them itself. Every other reader keeps
+        # the degrade-to-empty above.
         def _owner_job_draft_picks() -> list:
             picks = _job_draft_picks()
             if _picks_failure is not None:
@@ -13568,6 +13837,13 @@ def _roster_read_in_flight(league_id, roster_read, read_rows) -> bool:
     except Exception as err:
         log.warning("roster refresh state unavailable for league %s: %s", league_id, err)
         return False
+
+
+def _is_pool_timeout(err: BaseException) -> bool:
+    """A connection-pool checkout timeout (QueuePool exhausted): the job's
+    memoized reads never retry it at once (#521 QA P3-3)."""
+    from sqlalchemy.exc import TimeoutError as _PoolTimeout
+    return isinstance(err, _PoolTimeout)
 
 
 def _note_job_picks_read(job_id, picks, drafted: bool = False) -> None:
@@ -27126,6 +27402,10 @@ def admin_config_update(key: str):
 
     Operator-only (X-Cron-Secret, same as /api/cron/*): this mutates live
     ranking/trade math for every user, so it must never be world-callable.
+
+    `app_min_version` (B8) is also checked against the shared write policy
+    (backend/app_version_policy.py) and refused with 400 + the reason, since a
+    typo there locks every gate-aware build out of the app.
     """
     _require_cron_auth()
     try:
@@ -27133,6 +27413,11 @@ def admin_config_update(key: str):
         if "value" not in body:
             return jsonify({"error": "body must contain 'value'"}), 400
         new_value = float(body["value"])
+        if key == "app_min_version":
+            from .app_version_policy import validate_app_min_version
+            refusal = validate_app_min_version(new_value)
+            if refusal:
+                return jsonify({"error": refusal}), 400
         source = str(body.get("source") or "admin-api")[:64]
         result = set_config(key, new_value, source=source)
 
@@ -28234,17 +28519,53 @@ def session_init():
 # Session Ping — lightweight liveness check
 # ---------------------------------------------------------------------------
 
+def _session_verification(sess: dict) -> dict:
+    """The additive `verification` object, as session/init returns it (same
+    four fields, same sources): this session's own `verified` stamp, and the
+    user_id's stored verified_via.
+
+    An unverified or demo session (the ones session/init refuses, 403) gets
+    the constant unverified answer before any lookup. Reading the claimed
+    user_id's verified_via for it would tell anyone who can name a user_id
+    whether that account exists and which provider proved it (legal R28.9
+    row 4 / R28.14; release-lead #524 QA P1)."""
+    if not sess.get("verified") or sess.get("is_demo"):
+        return {
+            "session_verified": False,
+            "user_verified":    False,
+            "verified_via":     None,
+            "enforced":         is_enabled("auth.enforce_verified_writes"),
+        }
+    verified_via = None
+    try:
+        from . import accounts as _accounts
+        verified_via = _accounts.get_user_verified_via(sess.get("user_id"))
+    except Exception as verif_err:
+        log.warning("session/ping: verified_via lookup failed: %s", verif_err)
+    return {
+        "session_verified": bool(sess.get("verified")),
+        "user_verified":    bool(verified_via),
+        "verified_via":     verified_via,
+        "enforced":         is_enabled("auth.enforce_verified_writes"),
+    }
+
+
 @app.route("/api/session/ping", methods=["GET"])
 def session_ping():
-    """GET /api/session/ping — check whether the current session is alive."""
+    """GET /api/session/ping — check whether the current session is alive.
+
+    Also returns `verification` (head-eng 2026-10-28): an account-only
+    session (Apple-first, no league) never reaches session/init, the other
+    source of that field, so its client asks here instead."""
     sess = _get_session(request.headers.get("X-Session-Token", ""))
     if not sess:
         return jsonify({"ok": False}), 401
     sess["last_active"] = time.time()
     return jsonify({
-        "ok":      True,
-        "user_id": sess["user_id"],
-        "league":  sess.get("league", {}).name if sess.get("league") else "",
+        "ok":           True,
+        "user_id":      sess["user_id"],
+        "league":       sess.get("league", {}).name if sess.get("league") else "",
+        "verification": _session_verification(sess),
     })
 
 
@@ -31488,6 +31809,9 @@ def feature_flags_route():
 
     Frontend fetches this at boot + on the ≥30-min foreground refetch
     (analytics-platform §4.6b) and stashes flags in window.FTF_FLAGS.
+
+    B8 adds one more additive top-level key, `app_min_version` (int; 0 =
+    off): the mobile minimum-version gate. See `_app_min_version`.
     """
     experiments: dict[str, str] = {}
     configs: dict[str, dict] = {}
@@ -31533,7 +31857,49 @@ def feature_flags_route():
         "flags":       flags_dict(),
         "experiments": experiments,
         "configs":     configs,
+        **_update_gate_fields(),
     })
+
+
+def _update_gate_fields() -> dict:
+    """B8: the two additive gate fields on /api/feature-flags, from ONE
+    model_config read. A read error serves both fields' off/unset values."""
+    try:
+        cfg = get_config()
+    except Exception:
+        cfg = {}
+    return {
+        "app_min_version": _app_min_version(cfg),
+        "app_store_live":  _app_store_live(cfg),
+    }
+
+
+def _app_min_version(cfg: dict) -> int:
+    """B8 minimum-version gate: the `app_min_version` model_config knob as a
+    non-negative int (major*10000 + minor*100 + patch; 0 = off).
+
+    Defensive by contract: a missing row, NaN/infinity, a fractional value or
+    a negative one all serve 0, so a bad row can only ever turn the gate OFF.
+    Writes are guarded separately (backend/app_version_policy.py).
+    """
+    try:
+        raw = float(cfg.get("app_min_version", 0))
+    except Exception:
+        return 0
+    if not math.isfinite(raw) or raw < 0 or raw != int(raw):
+        return 0
+    return int(raw)
+
+
+def _app_store_live(cfg: dict) -> int:
+    """B8 Update-button target: the `app_store_live` model_config knob as
+    1 (App Store), 0 (TestFlight) or -1 (unset: the client's compiled UTC
+    fallback decides). Anything other than exactly 0 or 1 serves -1."""
+    try:
+        raw = float(cfg.get("app_store_live", -1))
+    except Exception:
+        return -1
+    return int(raw) if raw in (0.0, 1.0) else -1
 
 
 @app.route("/api/feature-flags/reload", methods=["POST"])
@@ -36219,17 +36585,20 @@ _PAYWALL_PRODUCTS = [
 # (24.99 / 12 = 2.0825; 34.99 / 12 = 2.9158): rounding down would
 # understate the annual price.
 #
-# The rise is an INSTANT, not a UTC date: 2027-01-01 00:00
-# America/Los_Angeles (PST, UTC-8) = 08:00 UTC. Terms §14.8 promises the
-# Founder price to anyone subscribing "by December 31, 2026", and a UTC
-# date flipped at 7 pm ET on Dec 31. LA midnight keeps the founder price
-# through the whole of Dec 31 in every contiguous-US time zone (Alaska and
-# Hawaii end Dec 31 one and two hours later still).
+# The rise is an INSTANT: 2027-01-02 04:00 UTC (11 pm ET / 8 pm PT on
+# Jan 1). That is App Store Connect's US start time for a price change
+# scheduled for 2027-01-02 (Apple's start-times-by-country table), and the
+# operator approved scheduling both changes for Jan 2 (2026-10-28,
+# monetization-pm). A change scheduled for 2027-01-01 would start in the US
+# at 2027-01-01 04:00 UTC, 11 pm ET on Dec 31, which breaks Terms §14.8
+# (the Founder price for anyone subscribing "by December 31, 2026"). So the
+# Founder price holds through all of Dec 31 in every US time zone, and
+# through most of Jan 1.
 # FALLBACK ONLY: StoreKit's localized price is authoritative, and this
 # instant only decides which strings the server shows when StoreKit is
-# unavailable. monetization-pm checks it against the App Store Connect
-# scheduled price change; if the two differ, move this constant to match.
-_PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 1, 8, 0, tzinfo=timezone.utc)
+# unavailable. monetization-pm records the start time App Store Connect
+# shows (setup §3d); if the two differ, move this constant to match.
+_PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 2, 4, 0, tzinfo=timezone.utc)
 _PAYWALL_PRICES = {
     "ftf_pro_monthly": ({"display_price": "$4.99"},
                         {"display_price": "$6.99"}),
