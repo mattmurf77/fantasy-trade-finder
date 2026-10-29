@@ -210,15 +210,18 @@ def test_a_failure_leaves_the_store_untouched_and_no_temp_file(store, monkeypatc
 
 def test_a_concurrent_reader_only_ever_sees_a_whole_store(tmp_path, monkeypatch):
     """Atomicity: a reader beside the rewrites sees only whole states (every
-    line complete, a line count some whole state had); each rewrite is a new
-    inode, never an in-place write."""
+    line complete, a line count some whole state had); the rewrites replace
+    the file, never write it in place. A held fd pins the original inode, so
+    its number can't be reused (ext4 and overlayfs reuse freed ones) and it
+    still reads the original bytes."""
     import threading
     monkeypatch.setenv("VALUE_MODEL_DIR", str(tmp_path))
     ids = [f"p{i}" for i in range(8)]
     for r in range(20):
         vm.append_model(_model({f"{a}|{b}": 0.1 for a in ids for b in ids if a != b}))
     path = vm.models_path()
-    states, inode = {open(path, "rb").read().count(b"\n")}, os.stat(path).st_ino
+    original = open(path, "rb").read()
+    states, held = {original.count(b"\n")}, open(path, "rb")   # pins the original inode
     seen, stop = [], threading.Event()
 
     def reader():
@@ -235,5 +238,9 @@ def test_a_concurrent_reader_only_ever_sees_a_whole_store(tmp_path, monkeypatch)
     finally:
         stop.set()
         thread.join()
-    assert seen and all(n in states and whole for n, whole in seen)
-    assert os.stat(path).st_ino != inode
+    try:
+        assert seen and all(n in states and whole for n, whole in seen)
+        assert os.fstat(held.fileno()).st_ino != os.stat(path).st_ino
+        assert held.read() == original
+    finally:
+        held.close()
