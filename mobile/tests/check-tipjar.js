@@ -19,7 +19,12 @@
 //   7. purchases.ts stays the ONLY react-native-purchases importer, and the
 //      tip helpers keep the configured-guard before any SDK call.
 //   8. The Settings entry row (settings-tip-row) exists on BOTH settings
-//      surfaces, inside the same `monetize.paywall` gate as the pro row.
+//      surfaces, inside the same `monetize.paywall` gate as the pro row AND
+//      inside a `tipsOffered` gate (head-eng's B8: the row shows only while
+//      the cached /api/paywall/config `tips[]` is non-empty). The hook is
+//      called at the component's top level; `tipsOffered` is EXECUTED here
+//      (state/useTipsOffered.ts transpiled with stubs), and useTipsOffered
+//      must subscribe with `enabled: false` (never fetching).
 //   9. The backend tip guard exists: entitlements.is_tip_product referenced
 //      by the projector, and every served tip SKU is ftf_tip_-prefixed on
 //      the server (cross-checked into backend/server.py so a drifted id
@@ -39,6 +44,7 @@ const ROOTNAV = path.join(ROOT, 'src/navigation/RootNav.tsx');
 const TABNAV = path.join(ROOT, 'src/navigation/TabNav.tsx');
 const HUB = path.join(ROOT, 'src/screens/settings/SettingsHubScreen.tsx');
 const FLAT = path.join(ROOT, 'src/screens/SettingsScreen.tsx');
+const TIPS_HOOK = path.join(ROOT, 'src/state/useTipsOffered.ts');
 const BE_ENTL = path.join(REPO, 'backend/entitlements.py');
 const BE_SERVER = path.join(REPO, 'backend/server.py');
 
@@ -145,18 +151,86 @@ const beServer = read(BE_SERVER);
   }
 }
 
-// 8 — settings entry on both surfaces, inside the paywall gate
+// 8 — settings entry on both surfaces, inside the paywall gate AND the
+//     tipsOffered gate; the hook imported and called at the top level
 {
-  const inHub = hub.includes('settings-tip-row')
-    && hub.indexOf('settings-tip-row') > hub.indexOf('paywallOn ?');
-  const inFlat = flat.includes('settings-tip-row')
-    && flat.indexOf('settings-tip-row') > flat.indexOf('paywallEnabled ?');
+  // The row sits after `<flag> ? (`, after a `{tipsOffered ? (` that opens
+  // inside the flag block, and before that tips block's `) : null}`, which
+  // in turn closes before the flag block's fragment `</>`.
+  const gated = (text, flag) => {
+    const flagAt = text.indexOf(`${flag} ? (`);
+    const tipAt = text.indexOf('{tipsOffered ? (', flagAt);
+    const rowAt = text.indexOf('settings-tip-row');
+    const tipEnd = tipAt > -1 ? text.indexOf(') : null}', tipAt) : -1;
+    const fragEnd = tipEnd > -1 ? text.indexOf('</>', tipEnd) : -1;
+    return flagAt > -1 && tipAt > flagAt && rowAt > tipAt && tipEnd > rowAt
+      && fragEnd > tipEnd
+      && (text.match(/settings-tip-row/g) || []).length === 1
+      && /import \{ useTipsOffered \} from '(\.\.\/)+state\/useTipsOffered';/.test(text)
+      && /^ {2}const tipsOffered\s*= useTipsOffered\(\);$/m.test(text);
+  };
+  const inHub = gated(hub, 'paywallOn');
+  const inFlat = gated(flat, 'paywallEnabled');
   const navs = (hub + flat).match(/navigate\?\.\('TipJar', \{ source: 'settings' \}\)/g) || [];
   if (inHub && inFlat && navs.length === 2) {
-    ok('8. settings-tip-row on both surfaces, flag-gated, navigates to TipJar');
+    ok('8. settings-tip-row on both surfaces, inside the flag gate AND the tipsOffered gate, navigates to TipJar');
   } else {
-    bad('8. settings-tip-row on both surfaces, flag-gated, navigates to TipJar',
+    bad('8. settings-tip-row on both surfaces, inside the flag gate AND the tipsOffered gate, navigates to TipJar',
       `hub=${inHub} flat=${inFlat} navs=${navs.length}`);
+  }
+}
+
+// 8b/8c — tipsOffered EXECUTED; useTipsOffered subscribes with enabled:false
+{
+  let ts = null;
+  try { ts = require('typescript'); } catch { /* reported below */ }
+  const src = read(TIPS_HOOK);
+  if (!ts || !src) {
+    bad('8b. tipsOffered executed', ts ? 'missing state/useTipsOffered.ts'
+      : 'typescript not resolvable — run `npm install` in mobile/ first');
+  } else {
+    const js = ts.transpileModule(src, { compilerOptions: {
+      module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019,
+    } }).outputText;
+    let seen = null;      // the options useTipsOffered hands to useQuery
+    let cached;           // what the stubbed cache "holds"
+    const stubs = {
+      '@tanstack/react-query': {
+        useQuery: (opts) => { seen = opts; return { data: cached }; },
+      },
+      '../api/billing': {
+        getPaywallConfig: () => { throw new Error('useTipsOffered fetched'); },
+      },
+    };
+    const mod = { exports: {} };
+    new Function('module', 'exports', 'require', js)(mod, mod.exports, (name) => {
+      if (name in stubs) return stubs[name];
+      throw new Error(`state/useTipsOffered.ts gained a runtime import ("${name}")`);
+    });
+    const { tipsOffered, useTipsOffered } = mod.exports;
+    const tip = { product_id: 'ftf_tip_199', display_price: '$1.99' };
+    const cases = [
+      [undefined, false], [null, false], [{}, false], [{ tips: [] }, false],
+      [{ tips: [tip] }, true],
+    ];
+    const wrong = cases.filter(([cfg, want]) => tipsOffered(cfg) !== want)
+      .map(([cfg, want]) => `${JSON.stringify(cfg)} → ${!want}`);
+    if (wrong.length === 0) {
+      ok('8b. tipsOffered: undefined/null/{}/{tips:[]} → false; {tips:[tip]} → true');
+    } else {
+      bad('8b. tipsOffered: undefined/null/{}/{tips:[]} → false; {tips:[tip]} → true',
+        `wrong: ${wrong.join('; ')}`);
+    }
+    cached = { enabled: true, tips: [tip] };
+    const shown = useTipsOffered();
+    const shape = seen && seen.enabled === false
+      && JSON.stringify(seen.queryKey) === JSON.stringify(['paywall-config', 'ios']);
+    if (shape && shown === true) {
+      ok("8c. useTipsOffered subscribes to ['paywall-config','ios'] with enabled: false (never fetches)");
+    } else {
+      bad("8c. useTipsOffered subscribes to ['paywall-config','ios'] with enabled: false (never fetches)",
+        `options=${JSON.stringify(seen && { queryKey: seen.queryKey, enabled: seen.enabled })} shown=${shown}`);
+    }
   }
 }
 

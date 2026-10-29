@@ -22,7 +22,10 @@ as_of as given; only the CLI reads the clock.
 The G-table (a barred G prints PASS or FAIL):
 
   G1   pack integrity: pack_integrity decks among the decks with a pack row,
-       retired or not. Bar 0.
+       retired or not, plus packs whose WHOLE run["display_moves"] (moves past
+       as_of too) breaks the writer's contract (data.display_moves_problem;
+       models-lead F1: the loader checks only delivered moves, so a malformed
+       later move fails here at once). Bar 0.
   G2   no unexplained gaps: incomplete_deck decks among the FINAL packed
        decks and EVERY pack-less deck (A3). A packed deck is final when its
        pack retired by as_of or was served more than 25 h
@@ -51,7 +54,8 @@ The G-table (a barred G prints PASS or FAIL):
        recommendation (B3 (f4)) prints when G1 fails or G3 has orphans (lost
        data); an outcome on a ghost row is a serve bug and goes back to
        models-lead.
-  G7   upgrade misses (U4-R2), every cause summed over the loaded packs.
+  G7   upgrade misses (U4-R2), every cause summed over the loaded packs but
+       pack_integrity decks (G1's; row gone skips them too).
        Bar: other == 0. Reported, never barred (addendum C4): row gone, the
        misses whose pack recorded a stored count above the card while its
        page row was gone, with how many are named (C4 (d1)'s sub-count) and
@@ -125,7 +129,7 @@ from urllib.parse import unquote, unquote_plus
 from sqlalchemy import Integer, String, Text, column, create_engine, event, func, inspect, select, table
 
 from backend.database import deck_impressions_table, deck_outcomes_table
-from backend.eval import data
+from backend.eval import data, evidence_pack
 from backend.eval.data import (
     CALIBRATION_REFRESH, IN_FLIGHT, IN_FLIGHT_WINDOW, INCOMPLETE_DECK, NO_DELIVERY_EVIDENCE,
     PACK_INTEGRITY, PACK_TABLE, PARTIAL_RUN_TIER, UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT,
@@ -252,9 +256,11 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
         withdrawals = _withdrawals_by_reason(conn, since, until, as_of)
 
     pack_integrity = [d for d in decks if d.exclusion == PACK_INTEGRITY]
+    malformed = _malformed_moves(packs, skip={d.deck_job_id for d in pack_integrity})
     g1 = {"pack_decks": len(packs), "pack_integrity": len(pack_integrity),
-          "ids": [d.deck_job_id for d in pack_integrity][:LIST_CAP],
-          "status": FAIL if pack_integrity else PASS}
+          "display_moves_malformed": len(malformed),
+          "ids": ([d.deck_job_id for d in pack_integrity] + malformed)[:LIST_CAP],
+          "status": FAIL if pack_integrity or malformed else PASS}
 
     trades = [d for d in decks if d.exclusion != CALIBRATION_REFRESH]
     final_packed = [d for d in trades if d.deck_job_id in packs
@@ -268,7 +274,7 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
           "insufficient": len(final_packed) < MIN_FINAL_DECKS,
           "status": FAIL if incomplete else PASS}
 
-    misses = _sum_counts(d.upgrade_misses for d in decks)
+    misses = _sum_counts(d.upgrade_misses for d in decks if d.exclusion != PACK_INTEGRITY)
     gone = _row_gone(packs, skip={d.deck_job_id for d in pack_integrity})
     g7 = {"upgrade_misses": misses, "row_gone": gone["total"], "row_gone_named": gone["named"],
           "row_gone_split": gone["split"],
@@ -439,6 +445,26 @@ def _pack_rows(conn, since, until, as_of) -> dict[str, tuple[str, str]]:
     return {r.run_id: (r.served_at, r.header_json) for r in conn.execute(q)}
 
 
+def _malformed_moves(packs: dict, skip=()) -> list[str]:
+    """G1 (F1): the run_ids, sorted, whose pack header's whole
+    run["display_moves"] breaks the writer's contract, past as_of included
+    (data.display_moves_problem). A pack in `skip` (already pack_integrity)
+    or with an unreadable header or deliveries is the loader's."""
+    out = []
+    for run_id, (_served_at, header) in packs.items():
+        head = data._json_dict(header) or {}
+        run, card_count = head.get("run"), head.get("card_count")
+        if run_id in skip or not isinstance(run, dict) or type(card_count) is not int:
+            continue
+        try:
+            evidence_pack.check_deliveries(run, card_count)
+        except evidence_pack.PackIntegrityError:
+            continue
+        if data.display_moves_problem(run, card_count):
+            out.append(run_id)
+    return sorted(out)
+
+
 def _outcome_ids(conn, since, until, as_of) -> list[str]:
     """The impression_id of every outcome acted in the window, by as_of."""
     out = deck_outcomes_table
@@ -491,7 +517,7 @@ def weekly_read(engine, *, as_of: str) -> dict:
         packs = _pack_rows(conn, since, None, as_of)
     packed = set(packs)
 
-    misses = _sum_counts(d.upgrade_misses for d in decks)
+    misses = _sum_counts(d.upgrade_misses for d in decks if d.exclusion != PACK_INTEGRITY)
     causes = {cause: n for cause, n in misses.items() if cause in U4_R4_CAUSES}
     viewed = _viewed(decks)
     gone = _row_gone(packs, skip={d.deck_job_id for d in decks if d.exclusion == PACK_INTEGRITY})
@@ -535,7 +561,8 @@ def render(r: FlipRead) -> str:
         "",
         "| G | what | result | bar | status |",
         "|---|---|---|---|---|",
-        f"| G1 | pack_integrity decks / decks with a pack row | {g1['pack_integrity']} / "
+        f"| G1 | pack_integrity decks (+ malformed display moves) / decks with a pack row "
+        f"| {g1['pack_integrity']} (+ {g1['display_moves_malformed']}) / "
         f"{g1['pack_decks']} | 0 | {g1['status']} |",
         f"| G2 | incomplete_deck / Trades decks read (final packed + every pack-less) "
         f"| {g2['incomplete']} / {g2['final_packed_decks'] + g2['packless_decks']} "
@@ -555,7 +582,7 @@ def render(r: FlipRead) -> str:
         "",
     ]
     if g1["ids"]:
-        lines.append(f"G1 pack_integrity decks: {', '.join(g1['ids'])}")
+        lines.append(f"G1 pack_integrity or malformed-display-moves decks: {', '.join(g1['ids'])}")
     if g2["ids"]:
         lines.append("G2 incomplete decks (each must coincide with a restart or the kill): "
                      + ", ".join(f"{job} (served {at})" for job, at in g2["ids"]))
