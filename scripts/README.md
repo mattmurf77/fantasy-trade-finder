@@ -62,3 +62,12 @@ These read public endpoints and write only local captures. Re-run only to refres
 verified backup path/checksum. It only normalizes existing impression debug
 features in bounded transactions. It is not a seeder and never initializes the
 application. See [runbook](../docs/runbook.md#database-storage-incident-and-compaction-2026-09-15).
+
+## One-time data purge
+
+`purge_entry_users.py` removes the orphaned unverified ESPN/MFL entry users
+(`entry:*`, legal R28.12 row 2 and R28.16) through `accounts.delete_user_data`,
+one id per call. `--cutoff` is required; the default is a counts-only dry run,
+`--execute --expect N` deletes, `--verify` checks nothing is left. It prints
+counts only, never an id. The prod run needs the operator's word. See
+[runbook](../docs/runbook.md#purge-orphaned-espnmfl-entry-users-one-time-2026-11).
