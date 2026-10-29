@@ -87,7 +87,9 @@ check(/\n  flags: \{ \.\.\.LAUNCHED_FLAG_DEFAULTS \},/.test(src),
 check(/set\(\{ flags: \{ \.\.\.LAUNCHED_FLAG_DEFAULTS, \.\.\.\(parsed as FlagMap\) \} \}\)/.test(body('loadCachedFlags')),
   '5b. a cached map spreads OVER the defaults (a cached false wins)');
 const reval = body('revalidateFlags');
-check(/const flags = await loadFeatureFlags\(/.test(reval) && /set\(\{ flags, loaded: true \}\)/.test(reval)
+// The set() that follows the fetch takes `flags` whole (shorthand), whatever
+// else it sets alongside (B8's appMinVersion / appStoreLive).
+check(/const flags = await loadFeatureFlags\(/.test(reval) && /set\(\{\s*flags,\s*loaded: true[,\s]/.test(reval)
   && !/LAUNCHED_FLAG_DEFAULTS/.test(reval),
   '5c. a successful fetch replaces the whole map, with no defaults merged under it (a server false wins)');
 

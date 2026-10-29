@@ -500,6 +500,7 @@ Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b2-flag
   - **P1-1:** `landing.platform_options` is no longer baked. A baked `true` painted chips that dead-end while the server holds the flag off (the purge window). It's baked with ask 16. Guard pin 4 keeps it out.
   - **P2-1:** the defaults' comment no longer contains the ESPN sign-in flag's literal, which had turned #443's `check-espn-signin-flag` pins 4/6 red.
   - **P3-1:** pin 5, "a server or cached false wins": the store starts from the defaults, a cached map spreads over them, and a fetch replaces the whole map. **Sabotage 4/4 red**, covering QA's three surviving wiring cases plus the chips flag baked again.
+  - **2026-10-29, CI after merging main (#404, B8's update gate):** B8 widened the post-fetch `set({ flags, loaded: true })` to also set `appMinVersion` / `appStoreLive`, so pin 5c's exact-text match went red in `mobile-typecheck`. Pin 5c now matches a `set({ flags, loaded: true, …` that takes `flags` whole, still with no `LAUNCHED_FLAG_DEFAULTS` in the revalidate. **Sabotage 3/3 red** on the new shape (defaults merged under the fetch; the fetched map not set; defaults spread into it); a comment-only control stays green. tsc clean, 124/124, testid-lint OK.
   - **P3-4:** the TestFlight checklist is rewritten to 6 steps: online, offline, warm, server-false, Settings, kill switch. The offline step now expects **no** chips.
   - **Not taken:**
     - P3-2: the s0.1 guide intro is latent until `onboarding.guided_avatar` goes on;
