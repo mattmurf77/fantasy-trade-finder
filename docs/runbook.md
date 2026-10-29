@@ -240,13 +240,15 @@ backend increment. Physical-device checks and the three-second KPI remain separa
   - No `pool_pre_ping`.
 - `backend/server.py`: `_ensure_background_threads()` runs once per pid from a `before_request` hook, so it runs in whichever process serves requests (the gunicorn worker, or `python run.py` on its first request). It:
   - starts `_cleanup_loop`, unless `FTF_DISABLE_CLEANUP_LOOP=1` (tests);
-  - then resumes queued Win Now work. That always runs, but the function keeps its own `FTF_TEST_MODE` / `FTF_BUILD_MODE` guard.
+  - then starts a short-lived `win-now-resume` thread that resumes queued Win Now work. That always runs, but the function keeps its own `FTF_TEST_MODE` / `FTF_BUILD_MODE` guard. It runs off the request path: inline it held `_bg_threads_lock` for ~49 ms while concurrent first requests waited.
+- `backend/server.py` `_cleanup_loop`: each step (including the trade-job sweep, `_evict_trade_page_store` and `_drop_stale_deck_evidence`) has its own `try/except` + `log.exception`, so one failure cannot end that worker's loop.
 - `requirements.txt` pins `gunicorn==26.2.0` to match what Render installs. The pin is harmless and is not the cause (see `living-memory/DEPENDENCIES.md` 2026-10-26).
 
 **What to watch after the deploy:**
 - **No** "decryption failed or bad record mac" and **no** "SSL SYSCALL EOF" for 24 h.
 - "Cleaned up N stale session(s)" and "Trade jobs swept: … evicted" now appear with the **worker's** pid, starting about 5 min after the first request. Before this fix they could only come from the master, where the session and job maps are empty.
 - In-process trade jobs older than `_JOB_RETENTION` (4 h) are now evicted in prod for the first time. A tap after that rebuilds the deck instead of reusing a long-finished job.
+- `_JOB_HARD_TIMEOUT` also applies in prod for the first time. It is 300 s, measured from `started_at` (or a prepared job's last durable adoption progress): a stuck-job backstop, not a latency target (prod pre-gens reach their first owner batch at 60-75 s). Each timed-out job logs one WARNING, `trade-job <id> timed out: <N>s since start, <M> cards published`, next to the "Trade jobs swept" summary.
 - Worker memory should flatten instead of growing with every session since the last restart.
 - Win Now jobs queued before a deploy now resume in the worker after its first request. Previously a job stayed queued until something triggered a restart.
 

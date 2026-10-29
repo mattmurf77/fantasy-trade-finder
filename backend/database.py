@@ -3509,7 +3509,7 @@ _MODEL_CONFIG_DEFAULTS = [
     # `max_per_opponent` change a no-op on the served deck. Value MATCHES
     # trade_service._DEFAULT_CFG exactly; seeding is behavior-neutral.
     ("exploration_base_per_opp", 5.0, "full sweep: served cards kept per opponent — the base exploration_overgen adds to, and the width _split_exploration_pool trims back to. 5.0 reproduces the pre-knob hardcoded constant exactly"),
-    ("full_sweep_budget_s",     30.0, "full sweep: wall-clock seconds of opponent sweep before generation stops starting new pairs, checked BETWEEN opponents. Read only while trade.full_sweep is ON — it replaces the global_target card count as the job's ceiling, because trade_optimizer.generate_pair_trades_v3 carries no deadline of its own. <=0 disables the rail (job then bounded only by _JOB_HARD_TIMEOUT, 60s)"),
+    ("full_sweep_budget_s",     30.0, "full sweep: wall-clock seconds of opponent sweep before generation stops starting new pairs, checked BETWEEN opponents. Read only while trade.full_sweep is ON — it replaces the global_target card count as the job's ceiling, because trade_optimizer.generate_pair_trades_v3 carries no deadline of its own. <=0 disables the rail (job then bounded only by _JOB_HARD_TIMEOUT)"),
     # ── Personal-market policy (backend/trade_policy.py; scope block
     # docs/plans/personal-market-policy/scope.md). Every value here is an
     # EXPERIMENT SETTING, not a permanent product truth — which is exactly why

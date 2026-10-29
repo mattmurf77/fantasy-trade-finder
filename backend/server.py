@@ -2394,7 +2394,9 @@ _trade_jobs_lock = threading.Lock()
 # prevents a permanent per-account epoch ledger in this process-local cache.
 _trade_input_epochs = weakref.WeakValueDictionary()
 _PREGEN_TTL_SECONDS  = 1800   # 30 min — fresh cache window
-_JOB_HARD_TIMEOUT    = 60     # seconds — past this a stuck job is marked error
+_JOB_HARD_TIMEOUT    = 300    # seconds — past this a stuck job is marked error. A
+                              # stuck-job backstop, not a latency target: prod
+                              # pre-gens reach their first owner batch at 60-75 s.
 _JOB_RETENTION       = 4 * 3600  # keep finished jobs around for ~4hr cleanup
 
 
@@ -2942,36 +2944,51 @@ def _cleanup_loop() -> None:
         #       the frontend stops polling
         #   (b) finished jobs older than _JOB_RETENTION → drop entirely
         #   (c) keep _trade_jobs_by_key in sync with _trade_jobs
-        now = time.monotonic()
-        evicted = 0
-        timed_out = 0
-        with _trade_jobs_lock:
-            to_drop = []
-            for jid, job in _trade_jobs.items():
-                age = now - (job.get("finished_at") or job.get("started_at") or now)
-                if _trade_job_stalled(job, now):
-                    job["status"] = "error"
-                    job["error"]  = "timeout"
-                    job["finished_at"] = now
-                    timed_out += 1
-                if age > _JOB_RETENTION:
-                    to_drop.append(jid)
-            for jid in to_drop:
-                key = _trade_jobs[jid].get("key")
-                _note_deck_evicted(jid, _trade_jobs[jid])   # U4: an evicted_split's clock
-                _trade_jobs.pop(jid, None)
-                if key and _trade_jobs_by_key.get(key) == jid:
-                    _trade_jobs_by_key.pop(key, None)
-                evicted += 1
-        if evicted or timed_out:
-            log.info("Trade jobs swept: %d evicted, %d timed out", evicted, timed_out)
+        # Each timed-out job gets its own line (logged after the lock), so a
+        # stuck job can be told apart from a slow live one.
+        try:
+            now = time.monotonic()
+            evicted = 0
+            timed_out = []
+            with _trade_jobs_lock:
+                to_drop = []
+                for jid, job in _trade_jobs.items():
+                    age = now - (job.get("finished_at") or job.get("started_at") or now)
+                    if _trade_job_stalled(job, now):
+                        timed_out.append((jid, now - (job.get("started_at") or now),
+                                          len(job.get("cards") or [])))
+                        job["status"] = "error"
+                        job["error"]  = "timeout"
+                        job["finished_at"] = now
+                    if age > _JOB_RETENTION:
+                        to_drop.append(jid)
+                for jid in to_drop:
+                    key = _trade_jobs[jid].get("key")
+                    _note_deck_evicted(jid, _trade_jobs[jid])   # U4: an evicted_split's clock
+                    _trade_jobs.pop(jid, None)
+                    if key and _trade_jobs_by_key.get(key) == jid:
+                        _trade_jobs_by_key.pop(key, None)
+                    evicted += 1
+            for jid, since_start, cards in timed_out:
+                log.warning("trade-job %s timed out: %.0fs since start, %d cards published",
+                            jid, since_start, cards)
+            if evicted or timed_out:
+                log.info("Trade jobs swept: %d evicted, %d timed out", evicted, len(timed_out))
+        except Exception:
+            log.exception("trade-job sweep failed")
 
         # P1 first-page store: age, then the byte ceiling; flag off ⇒ untouched.
-        _evict_trade_page_store()
+        try:
+            _evict_trade_page_store()
+        except Exception:
+            log.exception("trade-page-store eviction failed")
         # ADR-025 C8: no archive purge until packing (models-lead R2.6 S2).
         # F5: undelivered deferred decks past the fresh window (only flag-on
         # jobs carry evidence).
-        _drop_stale_deck_evidence()
+        try:
+            _drop_stale_deck_evidence()
+        except Exception:
+            log.exception("stale deck-evidence drop failed")
 
         # Silent durable inventory refresh is deliberately separate from the
         # notification-bearing daily tick and weekly replenishment.
@@ -2995,9 +3012,11 @@ _bg_threads_pid: int | None = None
 def _ensure_background_threads() -> None:
     """Per process, once: start `_cleanup_loop` (skipped when
     FTF_DISABLE_CLEANUP_LOOP=1, i.e. tests via conftest; prod never sets it),
-    then resume queued Win Now work (`start_worker_on_startup` keeps its own
-    FTF_TEST_MODE / FTF_BUILD_MODE guard and runs either way). Idempotent per
-    pid; a forked child (new pid) starts its own."""
+    then a short-lived `win-now-resume` thread that resumes queued Win Now work
+    (`start_worker_on_startup` keeps its own FTF_TEST_MODE / FTF_BUILD_MODE
+    guard and runs either way). The resume is off the request path: run inline
+    it held `_bg_threads_lock` ~49 ms, and concurrent first requests waited on
+    it. Idempotent per pid; a forked child (new pid) starts its own."""
     global _bg_threads_pid
     pid = os.getpid()
     if _bg_threads_pid == pid:
@@ -3008,11 +3027,15 @@ def _ensure_background_threads() -> None:
         if os.environ.get("FTF_DISABLE_CLEANUP_LOOP") != "1":
             threading.Thread(target=_cleanup_loop, name="cleanup-loop", daemon=True).start()
         _bg_threads_pid = pid
-        from . import win_now_service
-        try:
-            win_now_service.start_worker_on_startup(_sleeper_get)
-        except Exception:                 # never fail the request that got here first
-            log.exception("win-now worker resume failed")
+
+        def resume_win_now():
+            from . import win_now_service
+            try:
+                win_now_service.start_worker_on_startup(_sleeper_get)
+            except Exception:
+                log.exception("win-now worker resume failed")
+
+        threading.Thread(target=resume_win_now, name="win-now-resume", daemon=True).start()
 
 
 @app.before_request
