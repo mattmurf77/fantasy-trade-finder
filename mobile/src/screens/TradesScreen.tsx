@@ -127,6 +127,10 @@ import {
 // Pure, zero runtime imports (tests/check-trade-pages.js runs them).
 import {
   deckCardKey,
+  autoResearchAfterAnswer,
+  autoResearchHidesError,
+  autoResearchOnJobError,
+  autoResearchSearchId,
   deckEndState,
   deckFullyDelivered,
   isPagedEnvelope,
@@ -138,6 +142,7 @@ import {
   pageRetryDelayMs,
   unseenCount,
   wantsNextPage,
+  type AutoResearchState,
   type PageFetchPhase,
 } from '../utils/tradePages';
 import StandingOfferSheet from '../components/StandingOfferSheet';
@@ -756,6 +761,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // adopted page's), the job it ran, and the keys of the cards it delivered:
   // only a fronted card FROM THIS SET can be the search's first card (an
   // in-place search appends behind older cards that are still showing).
+  // The automatic re-search after an input change (utils/tradePages
+  // AutoResearchState): one per search, reset by every new search.
+  const autoResearchRef = useRef<AutoResearchState>('idle');
   const deckSearchRef = useRef<{ id: string; jobId?: string; keys: Set<string> } | null>(
     adopted?.snapshot.search_id
       ? {
@@ -2240,7 +2248,9 @@ export default function TradesScreen({ navigation, route }: any) {
     // `force` (item 7) skips the
     // server's complete-fresh job cache — used by the post-Quick-Set
     // regeneration, whose board change doesn't alter the cache key.
-    mutationFn: (vars: { auto?: boolean; force?: boolean; repeat?: boolean; searchId?: string }) => {
+    mutationFn: (vars: {
+      auto?: boolean; force?: boolean; repeat?: boolean; searchId?: string; research?: boolean;
+    }) => {
       // Pins are read from the store (not the render closure) so a
       // pin-then-generate in the same tick (#186 keep-side) always sends
       // the fresh lists.
@@ -2278,8 +2288,10 @@ export default function TradesScreen({ navigation, route }: any) {
       canvasSelectionRef.current = null;
       // 200 ms path (E2): page 1 under the dispatch's client search id
       // (minted in dispatchGenerate, never saved into the request above, so
-      // a repeat is a new search).
-      return generateTrades(request, vars.searchId ? { searchId: vars.searchId } : undefined);
+      // a repeat is a new search). Always paged: the automatic re-search,
+      // which carries no search id once its trace settled, gets page 1 too
+      // (#525 QA P2-1), never the legacy body.
+      return generateTrades(request, { searchId: vars.searchId });
     },
     // #330 R-10 — stamp the dispatch-time epoch; onSuccess/onError compare
     // it against the current one and drop stale results entirely.
@@ -2287,12 +2299,15 @@ export default function TradesScreen({ navigation, route }: any) {
     // epoch, so an answer from before it must bind ITS key, not the newer
     // dispatch's (the save effect then writes nothing under the new key).
     onMutate: () => ({ epoch: deckEpochRef.current, deviceKey }),
-    onSuccess: (snapshot, _vars, ctx) => {
+    onSuccess: (snapshot, vars, ctx) => {
       if (
         applyJobResult(snapshot, ctx?.epoch ?? deckEpochRef.current, deckEpochRef.current) === null
       ) {
         return; // stale epoch — a reset intervened; nothing is applied
       }
+      // A new search's answer starts a new re-search budget (only the answer:
+      // see autoResearchAfterAnswer).
+      autoResearchRef.current = autoResearchAfterAnswer(autoResearchRef.current, !!vars.research);
       setJob(snapshot);
       setDeckFailure(null); // P0-2 — covers the auto + force + inline callers
       // C — the answer is the server's: its scope and validation time feed
@@ -2313,7 +2328,7 @@ export default function TradesScreen({ navigation, route }: any) {
           status: snapshot.status,
           cardCount: snapshot.cards.length,
           job_id: snapshot.job_id,
-        });
+        }, { replace: !!vars.research });   // the re-search's answer: R2 names its job
         noteSearchCards(snapshot.job_id, snapshot.cards);
         if (snapshot.status === 'complete' && snapshot.cards.length === 0) failFirstCard(ds.id, 'empty');
       }
@@ -2401,12 +2416,16 @@ export default function TradesScreen({ navigation, route }: any) {
   //                                      the host is live, routed anyway (the
   //                                      rule is every site, no exceptions)
   //   6. handleSuppressionUndo         — F3 deck-note undo (deck-tree, ditto)
+  //   8. the automatic re-search       — an inputs_changed deck, once no
+  //                                      card is left (analytics-lead (a)):
+  //                                      no R1, its open search id or none
   //   7. QuickSet regen focus effect   — board-change forced regen (its
   //                                      inline clear kills the old session
   //                                      first — see the effect)
   function dispatchGenerate(
     vars: { auto?: boolean; force?: boolean; repeat?: boolean },
     mutateOpts?: Parameters<typeof generateMutation.mutate>[1],
+    research?: { searchId: string | null },
   ) {
     lastFairRequestRef.current = null;
     if (canvasResultsLive) {
@@ -2419,9 +2438,19 @@ export default function TradesScreen({ navigation, route }: any) {
     // 200 ms path — every dispatch is a search with a client search id (E2
     // `search_id`, echoed): the tap's, when a search-starting control began
     // one (R1), else a fresh one (a regeneration, the first-run auto-start).
-    const claimed = claimPendingSearch();
+    // The automatic re-search (`research`) claims nothing and mints nothing:
+    // it carries its search's open trace id, else none. Every other dispatch
+    // is a new search: its re-search budget starts again when its answer
+    // lands (onSuccess), never here.
+    const claimed = research ? research.searchId : claimPendingSearch();
     deckSearchRef.current = claimed ? { id: claimed, keys: new Set() } : null;
-    generateMutation.mutate({ ...vars, searchId: claimed ?? uuidv4() }, mutateOpts);
+    generateMutation.mutate(
+      {
+        ...vars,
+        searchId: research ? research.searchId ?? undefined : claimed ?? uuidv4(),
+        research: !!research,
+      },
+      mutateOpts);
   }
 
   // Poll while a job is running. Self-scheduling setTimeout loop with
@@ -2530,12 +2559,20 @@ export default function TradesScreen({ navigation, route }: any) {
   // the retry tick (job still 'error', deckFailure just cleared).
   useEffect(() => {
     if (job?.status !== 'error') return;
+    // An input change revoked the deck: recovered by the automatic re-search
+    // (the effect beside deckEnd), never a deckFailure, so never an R2b.
+    if (autoResearchOnJobError(autoResearchRef.current, job.error) === 'pending') {
+      autoResearchRef.current = 'pending';
+      return;
+    }
     // #339 item 12 — S0's roster check couldn't run: the NAMED error state
     // (GateErrorCard), never the generic "server may still be waking up".
     setDeckFailure(isRosterCheckError(job.error)
       ? { kind: 'roster_check', message: GATE_ROSTER_CHECK_FAILED_LINE }
       : { kind: 'job_error', message: jobErrorCopy(job.error) });
-  }, [job?.status, job?.error]);
+    // job_id too: a new search whose own answer is the same error (an
+    // inputs_changed again) must be read afresh (#525 QA P1-1r).
+  }, [job?.job_id, job?.status, job?.error]);
 
   // #330 R-6 — scoped-empty derivation, at COMPLETION time. Both zero-card
   // paths funnel through `job` (instant cache-hit onSuccess and the polled
@@ -4216,6 +4253,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // R1 — the sweep's search began at its tap (forkCanvasSearch or
     // handleFindTrades); this claims it. A sweep with no tap behind it (the
     // dormant #402 browse retry) begins its own, with this source.
+    autoResearchRef.current = 'idle';   // a new search: its own re-search budget
     let claimedFair = claimPendingSearch();
     if (!claimedFair) {
       beginTradeSearch({ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' });
@@ -4777,9 +4815,29 @@ export default function TradesScreen({ navigation, route }: any) {
   const endPhase: PageFetchPhase = devicePhase === 'running' ? 'loading'
     : devicePhase === 'failed' ? 'failed'
     : pagePhase;
-  const deckEnd = pagedWithCards && !rawTopCard && job
+  const deckEndRaw = pagedWithCards && !rawTopCard && job
     ? deckEndState({ ...job, phase: endPhase, online })
     : null;
+  // An `inputs_changed` being recovered shows nothing, never the error card
+  // (decided at render, so the card never flashes before the effect below);
+  // offline, the Offline card, as the re-search waits for the network
+  // (#525 QA P3).
+  const deckEnd = deckEndRaw === 'error' && autoResearchHidesError(
+    autoResearchRef.current, job?.error,
+    generateMutation.isPending && !!generateMutation.variables?.research)
+    ? (online ? 'pending' : 'offline')
+    : deckEndRaw;
+  // The automatic re-search: once the user has no card left to see, the one
+  // pending `inputs_changed` re-runs the search in place, as Try again would,
+  // without its tap (no R1) and without a new search_id.
+  useEffect(() => {
+    if (autoResearchRef.current !== 'pending' || rawTopCard || job?.status !== 'error') return;
+    autoResearchRef.current = 'used';
+    setScopedEmpty(null);
+    dispatchGenerate({ repeat: true }, undefined,
+      { searchId: autoResearchSearchId(deckSearchRef.current?.id, isSearchOpen) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawTopCard?.trade_id, job?.job_id, job?.status, job?.error]);   // job_id: P1-1r
   useEffect(() => {
     if (deckEnd === 'end') setEndLatched(true);
   }, [deckEnd]);

@@ -695,10 +695,11 @@ console.log('check-canvas-results:');
 //      defaults. Each pin names the sabotage it would catch.
 // ═══════════════════════════════════════════════════════════════════════
 {
-  // (a) DISPATCH CENSUS — 7 call sites + the definition, nothing raw.
+  // (a) DISPATCH CENSUS — 8 call sites + the definition, nothing raw
+  //     (the 8th: the automatic re-search on inputs_changed).
   const calls = count(tradesCode, /dispatchGenerate\(/g);
-  assert(calls === 8,
-    '12a. dispatchGenerate: 7 routed dispatch sites + 1 definition (both CTAs share handleFindTrades)',
+  assert(calls === 9,
+    '12a. dispatchGenerate: 8 routed dispatch sites + 1 definition (both CTAs share handleFindTrades; the 8th is the automatic re-search)',
     `saw ${calls} — a new site must be added to the helper's census table AND this count`);
   // (b) the first-run auto-start is the P0: it must create a session.
   assert(/autoGenRef\.current = 'kicked';[\s\S]{0,500}?dispatchGenerate\(\{ auto: true \}\)/.test(tradesCode),

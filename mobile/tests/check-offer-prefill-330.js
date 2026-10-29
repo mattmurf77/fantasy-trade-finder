@@ -191,8 +191,8 @@ assert(
 // here is the same: no new dispatch site.
 assert(
   countOf(tradesCode, 'generateMutation.mutate(') === 1
-    && countOf(tradesCode, 'dispatchGenerate(') === 8,
-  'S-2 the count of generate dispatch sites does not increase over base (1 raw mutate; 7 routed + definition)',
+    && countOf(tradesCode, 'dispatchGenerate(') === 9,
+  'S-2 the count of generate dispatch sites does not increase over base (1 raw mutate; 8 routed + definition, the 8th the automatic re-search)',
   `saw mutate=${countOf(tradesCode, 'generateMutation.mutate(')} helper=${countOf(tradesCode, 'dispatchGenerate(')} — a new dispatch site is a second generation per handoff waiting to happen`,
 );
 assert(
