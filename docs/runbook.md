@@ -77,6 +77,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
   - [Screen library (capture freshness)](#screen-library-capture-freshness)
   - [Failure symptom / lever](#failure-symptom-lever)
 - [Database](#database)
+  - [Orphaned-overhaul sweep (legal R28.22 d2, 2026-10-29)](#orphaned-overhaul-sweep-legal-r2822-d2-2026-10-29)
 - [Feature flags](#feature-flags)
 - [Trade engine flags + kill switch](#trade-engine-flags-kill-switch)
 - [Runtime tuning](#runtime-tuning)
@@ -309,6 +310,15 @@ Prereq: `brew install pngquant` (the runner falls back to `sips` downscale with 
 - **Prod:** Postgres via `DATABASE_URL`. Take a Render snapshot before destructive changes.
 - **Schema source of truth:** `backend/database.py`.
 - **Migrations:** No migration tool. `_migrate_db()` in `database.py` applies idempotent additive ALTERs and seeds `model_config` defaults via INSERT OR IGNORE on every startup. For destructive changes, write a one-off script and run it manually.
+
+### Orphaned-overhaul sweep (legal R28.22 d2, 2026-10-29)
+
+A background DELETE in the cleanup loop. It runs once per process, on the first tick, 5 minutes after boot (`server._sweep_orphaned_overhauls_once` → `accounts.delete_orphaned_overhauls`).
+- **What it removes:** team overhauls whose owner account no longer exists, with their offers, roadmaps, attempts and reservations, and child rows whose overhaul is already gone. These are accounts deleted, or entry users purged, before account deletion covered overhauls (#540).
+  - An owner is **live** while a `users` row, a durable `sessions` row, or an `accounts` row (as the `acct_` alias or the bound Sleeper id) names their `account_user_id`.
+  - An overhaul is also swept when its owner's `users` row was created more than an hour after it: a new account under a reused id.
+- **Logs:** a success logs `Deleted N overhaul(s) whose owner account no longer exists, and M row(s) under them`, and logs nothing when there's nothing to do. A failure logs `orphaned-overhaul sweep failed (<ErrorClass>); retried next tick` and tries again next tick. Neither ever carries ids: the failure line logs the class only, because a DB error's text holds the statement's parameters.
+- **If it misbehaves:** set `FTF_DISABLE_CLEANUP_LOOP=1` to stop the whole loop (tests do), or revert #540. Rows already swept are gone. They're data the owner asked to delete, so there's nothing to restore.
 
 ---
 

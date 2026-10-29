@@ -2892,13 +2892,15 @@ def _sweep_orphaned_overhauls_once() -> None:
         return
     try:
         from . import accounts as _accounts
-        n = _accounts.delete_orphaned_overhauls()
-    except Exception:
-        log.warning("orphaned-overhaul sweep failed; retried next tick", exc_info=True)
+        counts = _accounts.delete_orphaned_overhauls()
+    except Exception as exc:
+        # The class only: a DB error's text carries the statement's parameters.
+        log.warning("orphaned-overhaul sweep failed (%s); retried next tick", type(exc).__name__)
         return
     _orphaned_overhauls_swept = True
-    if n:
-        log.info("Deleted %d overhaul(s) whose owner account no longer exists", n)
+    if counts["overhauls"] or counts["child_rows"]:
+        log.info("Deleted %d overhaul(s) whose owner account no longer exists, and %d row(s) under them",
+                 counts["overhauls"], counts["child_rows"])
 
 
 def _cleanup_loop() -> None:

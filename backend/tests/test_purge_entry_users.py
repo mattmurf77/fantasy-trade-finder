@@ -446,7 +446,7 @@ def test_info_counts_never_fail_verify(engine, capsys):
     assert "standing_offers.team_user_ids 1" in out
     assert "user_events.props 1" in out
     # Overhaul rows are no longer a deletion gap, so the info has no line for them.
-    assert "overhaul" not in out
+    assert "known general deletion gap" not in out
 
 
 def test_no_id_reaches_stdout_or_the_log(engine, capsys, caplog):
@@ -728,6 +728,32 @@ def test_execute_anonymizes_targets_in_the_pick_audit_trail_and_verify_d_passes(
     code, out = run(capsys, "--verify")
     assert code == 0, out
     assert "(d) pick_assignment_changed events naming a removed entry id: 0 -> OK" in out
+
+
+def _overhaul_naming(conn, oid, holder, roster_key):
+    seed(conn, db.overhauls_table, oid, overhaul_id=oid, account_user_id=SLEEPER, league_user_id=SLEEPER,
+         snapshot_json=json.dumps({"rosters": {SLEEPER: ["p1"], roster_key: ["p2"]}}),
+         recovery_json=json.dumps({"holder_user_id": holder, "holder_username": "x"}))
+
+
+def test_execute_anonymizes_targets_in_overhaul_snapshots_and_verify_h_passes(engine, capsys):
+    with engine.begin() as conn:
+        _overhaul_naming(conn, "ovh-target", ESPN, MFL)        # targets, in another user's overhaul
+        _overhaul_naming(conn, "ovh-kept", VERIFIED, VERIFIED)  # a skipped (kept) entry user may remain
+    assert run(capsys, "--execute", "--expect", "3")[0] == 0
+    code, out = run(capsys, "--verify")
+    assert code == 0, out
+    assert "(h) overhaul snapshots and recoveries naming a removed entry id: 0 -> OK" in out
+
+
+def test_verify_h_fails_on_a_removed_entry_id_left_in_an_overhaul_snapshot(engine, capsys):
+    assert run(capsys, "--execute", "--expect", "3")[0] == 0
+    with engine.begin() as conn:
+        _overhaul_naming(conn, "ovh-left", SLEEPER, ESPN)       # a target's id survives as a roster key
+        _overhaul_naming(conn, "ovh-held", MFL, SLEEPER)        # another holds a recovery pick
+    code, out = run(capsys, "--verify")
+    assert code == 1
+    assert "(h) overhaul snapshots and recoveries naming a removed entry id: 2 -> FAIL" in out
 
 
 def test_verify_d_fails_on_a_removed_entry_id_left_in_the_pick_audit_trail(engine, capsys):
