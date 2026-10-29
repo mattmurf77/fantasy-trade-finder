@@ -4,11 +4,12 @@ Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b1-appl
 
 - **The change:** the landing's "Already have an account? Sign in with Apple" text link becomes Apple's own button.
   - CONTINUE, WHITE (solid white, Apple's dark-background style; release-lead #507 QA P2-b), `signin.apple-continue-btn`;
-  - directly under the chip row, 44pt like the other sign-in buttons (P2-a);
+  - below the username field and its Continue (or the ESPN/MFL panel), after a chalk-dim "or", 44pt like the other sign-in buttons (P2-a; head-product's position ruling 2026-10-28, which amends ADR-006 decision 1 in this PR);
   - the same `handleAppleSignIn`.
   - The flags-off SIGN_IN button is unchanged.
   - `handleSubmit` returns while an Apple sign-in is in flight (QA P3).
-- **New guard `check-signin-apple-parity.js`** (7 AST pins, hardened after QA: every condition above the button, `appleShown` and the availability effect pinned, height against `styles.button.height`, rendered-text check). **Sabotage 19/19 red** (10 in round 1, 9 after QA, incl. QA's six escapes), restored byte-identical. A comment-only rename, which isn't a real mutation, correctly stays green.
+  - The landing body is a `ScrollView` (flexGrow 1 and centered, `keyboardShouldPersistTaps="handled"`, the guide notifier on scroll, layout and content size), so the returning-user, session-expired and error states scroll on an SE instead of clipping. The "or" and the legal line are chalk-dim.
+- **New guard `check-signin-apple-parity.js`** (9 AST pins, hardened after QA: every condition above the button, `appleShown` and the availability effect pinned, height against `styles.button.height`, rendered-text check; after the ruling, pin 2 is the new position with the "or" right before the button, pin 8 the ScrollView, pin 9 chalk-dim). **Sabotage 35/35 red** (10 in round 1, 9 after QA incl. QA's six escapes, 16 after the ruling, each on its target pin), restored byte-identical. With the scroll notifier removed, `check-guide-spotlight-tracking` also goes red (9b). A comment-only edit, which isn't a real mutation, correctly stays green.
 - **Runs:** see the PR (tsc, the full `check-*.js` loop, testid-lint).
 - **App Review notes:** legal's R28.16 row 7 paragraph covers the four doors, and release-lead owns the submission text.
 

@@ -14,8 +14,11 @@
 //      appleShown`: buttonType CONTINUE, buttonStyle WHITE (Apple's style for
 //      dark backgrounds; release-lead #507 QA P2-b), onPress
 //      handleAppleSignIn, testID "signin.apple-continue-btn".
-//   2. It comes right under the platform chip row, and before the username
-//      field (the username field stays the primary door, below it).
+//   2. It comes BELOW the username field and its Continue, and below the
+//      ESPN/MFL panel, before "Just looking?": the username field stays the
+//      primary door (ADR-006 decision 1 as amended 2026-10-28; head-product's
+//      B1 ruling). Its block is the very next one after the Continue block, and
+//      inside it only an "or" divider comes before the button.
 //   3. Its style is as tall as the landing's other sign-in buttons
 //      (styles.button.height, at least 44; release-lead #507 QA P2-a), and
 //      carries only alignSelf / height / marginBottom (no margin, position or
@@ -30,6 +33,15 @@
 //   7. Nothing else can hide it: `appleShown` is exactly `appleAvailable ||
 //      TEST_APPLE_SUB !== null`, and the availability effect's early return is
 //      exactly `!accountsEnabled || Platform.OS !== 'ios'`.
+//   8. The landing body scrolls instead of clipping (an SE in the
+//      returning-user, session-expired and error states): one ScrollView,
+//      the KeyboardAvoidingView's only child, holding the whole form, with
+//      contentContainerStyle styles.body (flexGrow 1, centered, no `flex`),
+//      keyboardShouldPersistTaps "handled" (one tap acts with the keyboard up),
+//      and the guide notifier on onScroll with a throttle.
+//   9. The "or" and the legal line are chalk-dim, never chalk-faint (that is
+//      for placeholders and disabled text); the landing's "or" adds only
+//      marginTop space.md.
 //
 // Run: node tests/check-signin-apple-parity.js
 
@@ -129,21 +141,47 @@ check('1. the landing renders Apple\'s own CONTINUE button (WHITE), behind landi
   expect(attrText(b, 'testID') === 'signin.apple-continue-btn', `testID is ${attrText(b, 'testID')}`);
 });
 
-check('2. it sits right under the platform chip row, above the username field', () => {
+// The `{…}` JSX expression a node renders in (its nearest enclosing one).
+function jsxExprOf(node) {
+  for (let p = node.parent; p; p = p.parent) if (ts.isJsxExpression(p)) return p;
+  return null;
+}
+const byTestID = (id) => findAll(sf, (n) => tagName(n) !== null && attrText(n, 'testID') === id);
+// A JSX parent's children that render: no whitespace-only text, no {/* … */}.
+const rendering = (kids) => kids.filter((c) => !(ts.isJsxText(c) && !c.getText(sf).trim())
+  && !(ts.isJsxExpression(c) && !c.expression));
+
+check('2. it sits below the username Continue and the ESPN/MFL panel, after an "or", before "Just looking?"', () => {
   const b = landingApple[0];
   expect(b, 'no landing Apple button');
-  const row = findAll(sf, (n) => tagName(n) === 'View'
-    && attrText(n, 'style') === 'styles.platformRow')[0];
-  const username = findAll(sf, (n) => tagName(n) === 'TextInput'
-    && attrText(n, 'testID') === 'signin.username-input')[0];
-  expect(row && username, 'the chip row or the username field is missing');
-  expect(row.pos < b.pos && b.pos < username.pos,
-    'the Apple button is not between the chip row and the username field');
-  // Nothing else renders between the chip row's block and the Apple block.
-  const rowBlock = row.parent.parent;           // <View …>…</View> → the ?: whenTrue
-  const between = text.slice(rowBlock.end, b.pos);
-  expect(!/<(?!\/)(?!>)(?!AppleAuthentication)[A-Za-z]/.test(stripComments(between).replace(/\)\s*:\s*null\s*\}\s*\{\s*landingOn\s*&&\s*appleShown\s*\?\s*\(\s*<>/, '')),
-    'another element renders between the chip row and the Apple button');
+  const [cont] = byTestID('signin.continue-btn');
+  const [panel] = byTestID('signin.platform-panel');
+  const [field] = byTestID('signin.username-input');
+  const [demo] = byTestID('signin.demo-link');
+  expect(cont && panel && field && demo, 'Continue, the platform panel, the username field or the demo link is missing');
+  expect(panel.pos < b.pos && field.pos < b.pos && cont.pos < b.pos,
+    'the Apple button is not below the platform panel, the username field and Continue');
+  expect(b.pos < demo.pos, 'the Apple button is not above "Just looking?"');
+  // The Apple block is the very next rendered child after the Continue block.
+  const contExpr = jsxExprOf(cont);
+  const appleExpr = jsxExprOf(b.parent && ts.isJsxFragment(b.parent) ? b.parent : b);
+  const form = contExpr && contExpr.parent;
+  expect(form && appleExpr && appleExpr.parent === form, 'the Continue block and the Apple block are not siblings');
+  const kids = rendering(form.children);
+  expect(kids.indexOf(appleExpr) === kids.indexOf(contExpr) + 1,
+    'something renders between the Continue block and the Apple block');
+  // Inside the block: the "or", then the button, then only the busy spinner.
+  const frag = b.parent;
+  expect(ts.isJsxFragment(frag), 'the Apple button is not in its own fragment');
+  const inner = rendering(frag.children);
+  const [or, btn, ...rest] = inner;
+  expect(or && ts.isJsxElement(or) && tagName(or.openingElement) === 'Text'
+    && attrText(or.openingElement, 'style') === '[styles.orDivider, styles.landingOrDivider]'
+    && or.children.map((c) => c.getText(sf)).join('').trim() === 'or',
+    `the block's first child is not the "or" divider: ${or ? or.getText(sf).slice(0, 60) : 'none'}`);
+  expect(btn === b, 'the Apple button does not come right after the "or"');
+  expect(rest.length === 1 && rest[0].getText(sf).replace(/\s+/g, ' ').startsWith('{appleBusy ?'),
+    `after the button the block renders ${rest.map((r) => r.getText(sf).slice(0, 30))}, want only the busy spinner`);
 });
 
 check('3. it is as tall as the other sign-in buttons (>= 44), with no layout push', () => {
@@ -211,6 +249,49 @@ check('7. nothing else can hide it: appleShown and the availability effect are a
   expect(effects.length === 1, `${effects.length} availability effect(s), want 1`);
   const first = effects[0].arguments[0].body.statements[0].getText(sf).replace(/\s+/g, ' ');
   expect(first === "if (!accountsEnabled || Platform.OS !== 'ios') return;", `the effect's guard is: ${first}`);
+});
+
+const styleDecl = (name) => findAll(sf, (n) => ts.isPropertyAssignment(n) && n.name.getText(sf) === name
+  && ts.isObjectLiteralExpression(n.initializer))[0];
+const styleProps = (name) => {
+  const d = styleDecl(name);
+  return d ? Object.fromEntries(d.initializer.properties.filter((q) => q.name)
+    .map((q) => [q.name.getText(sf), ts.isPropertyAssignment(q) ? q.initializer.getText(sf) : '...'])) : null;
+};
+
+check('8. the landing body scrolls (centered when it fits), one tap acts with the keyboard up', () => {
+  const scrolls = findAll(sf, (n) => tagName(n) === 'ScrollView');
+  expect(scrolls.length === 1, `${scrolls.length} ScrollView(s) in the screen, want 1`);
+  const sv = scrolls[0];
+  expect(ts.isJsxOpeningElement(sv), 'the ScrollView is self-closing');
+  const svEl = sv.parent;
+  const kav = svEl.parent;
+  expect(ts.isJsxElement(kav) && tagName(kav.openingElement) === 'KeyboardAvoidingView',
+    'the ScrollView is not directly inside the KeyboardAvoidingView');
+  const kavKids = rendering(kav.children).filter((c) => !ts.isJsxExpression(c));
+  expect(kavKids.length === 1 && kavKids[0] === svEl, 'the KeyboardAvoidingView renders more than the ScrollView');
+  for (const n of [landingApple[0], ...byTestID('signin.username-input'), ...byTestID('signin.demo-link')]) {
+    expect(n && svEl.pos < n.pos && n.end <= svEl.end, 'the form is not inside the ScrollView');
+  }
+  expect(attrText(sv, 'contentContainerStyle') === 'styles.body',
+    `contentContainerStyle is ${attrText(sv, 'contentContainerStyle')}`);
+  expect(attrText(sv, 'keyboardShouldPersistTaps') === 'handled',
+    `keyboardShouldPersistTaps is ${attrText(sv, 'keyboardShouldPersistTaps')}`);
+  expect(attrText(sv, 'onScroll') === 'notifyGuideTargetsMoved' && attr(sv, 'scrollEventThrottle'),
+    'onScroll does not announce to the guide, or has no throttle');
+  const body = styleProps('body');
+  expect(body && body.flexGrow === '1' && body.justifyContent === "'center'" && !('flex' in body),
+    `styles.body is ${JSON.stringify(body)}, want flexGrow 1, justifyContent center, no flex`);
+});
+
+check('9. the "or" and the legal line are chalk-dim', () => {
+  const or = styleProps('orDivider');
+  const landingOr = styleProps('landingOrDivider');
+  const legal = styleProps('legalLine');
+  expect(or && or.color === 'chalk.dim', `orDivider color is ${or && or.color}`);
+  expect(landingOr && JSON.stringify(landingOr) === JSON.stringify({ marginTop: 'space.md' }),
+    `landingOrDivider is ${JSON.stringify(landingOr)}, want only marginTop space.md`);
+  expect(legal && legal.color === 'chalk.dim', `legalLine color is ${legal && legal.color}`);
 });
 
 console.log(failures === 0

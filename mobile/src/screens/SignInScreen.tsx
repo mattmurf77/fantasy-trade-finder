@@ -10,6 +10,7 @@ import {
   Platform,
   KeyboardAvoidingView,
   Linking,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -27,7 +28,11 @@ import {
   guidedAvatarActive,
 } from '../state/useGuide';
 import { getOnboardingState, patchOnboardingState } from '../state/useOnboardingState';
-import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
+import {
+  notifyGuideTargetsMoved,
+  registerGuideTarget,
+  unregisterGuideTarget,
+} from '../state/guideTargets';
 import { S as GUIDE } from '../components/analystScript';
 import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
 import { fetchInviteMeta } from '../api/league';
@@ -96,7 +101,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   const accountsEnabled   = useFlag('auth.accounts');
   // Username-first landing (onboarding plan item 5, ADR-006 account-later):
   // when on, the Sleeper username field is the primary surface and Apple is
-  // Apple's own Continue button under the chips (B1). Flags-off renders the P2.6 layout
+  // Apple's own Continue button below the username Continue (B1). Flags-off renders the P2.6 layout
   // unchanged. NOTE: the demo affordances below still require
   // landing.try_before_sync (the backend demo endpoint 404s without it) —
   // the operator flips that flag together with onboarding.landing.
@@ -593,7 +598,25 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}
       >
-        <View style={styles.body}>
+        {/* B1 (#507): with Apple at the bottom, the returning-user,
+            session-expired and error states run past an SE's height, so the
+            body scrolls instead of clipping. flexGrow + center keep it
+            centered when it fits; it bounces only when it doesn't.
+            "handled": with the keyboard up, the first tap on Continue, Apple,
+            a chip or the hint row acts instead of only closing the keyboard.
+            The username field and the platform link are guide targets, and a
+            spotlight frame is absolute window coordinates, so every move is
+            announced (check-guide-spotlight-tracking rules 9 and 10). */}
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={styles.body}
+          keyboardShouldPersistTaps="handled"
+          alwaysBounceVertical={false}
+          onScroll={notifyGuideTargetsMoved}
+          scrollEventThrottle={16}
+          onLayout={notifyGuideTargetsMoved}
+          onContentSizeChange={notifyGuideTargetsMoved}
+        >
           <View style={styles.hero}>
             <TickLabel>Dynasty Fantasy Football</TickLabel>
             <Text style={styles.headline}>
@@ -616,7 +639,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
             {/* P0-3 — the invited banner. INSIDE styles.form, beside the
                 reauth notice, so it renders in BOTH `landingOn` variants:
                 with onboarding.landing on, the Apple entry is the Continue
-                button under the chips and everything above this changes, so a banner attached
+                button below the username Continue and everything above this changes, so a banner attached
                 to the Apple block would vanish for exactly the cohort P0-9
                 is testing. */}
             {inviteHeadline ? (
@@ -657,33 +680,6 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                   );
                 })}
               </View>
-            ) : null}
-            {landingOn && appleShown ? (
-              <>
-                {/* B1 (Product's pre-launch review, 2026-10-27; guideline 4.8
-                    and Apple's sign-in HIG): once ESPN/MFL sign-in mints
-                    accounts, Sign in with Apple must be an equivalent, equally
-                    prominent option. So the landing shows Apple's own button
-                    (CONTINUE, WHITE: Apple's style for dark backgrounds, a
-                    solid white button), the height of the landing's other
-                    sign-in buttons (44, styles.button), right under the chips,
-                    in place of the old "Already have an account?" text link.
-                    The username field below stays the primary door. ADR-006
-                    (amended by ux-lead).
-                    An ESPN/MFL chip selection still rides this flow
-                    (handleAppleSignIn's platformIntent). */}
-                <AppleAuthentication.AppleAuthenticationButton
-                  testID="signin.apple-continue-btn"
-                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-                  cornerRadius={radii.sm}
-                  style={styles.appleContinueButton}
-                  onPress={handleAppleSignIn}
-                />
-                {appleBusy ? (
-                  <ActivityIndicator color={chalk.dim} style={styles.appleBusy} />
-                ) : null}
-              </>
             ) : null}
             {!landingOn && appleShown ? (
               <>
@@ -845,6 +841,35 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               )}
             </Pressable>
             )}
+            {landingOn && appleShown ? (
+              <>
+                {/* B1 (Product's pre-launch review, 2026-10-27; guideline 4.8
+                    and Apple's sign-in HIG): once ESPN/MFL sign-in mints
+                    accounts, Sign in with Apple must be an equivalent, equally
+                    prominent option. So the landing shows Apple's own button
+                    (CONTINUE, WHITE: Apple's style for dark backgrounds, a
+                    solid white button), the height of the landing's other
+                    sign-in buttons (44, styles.button), in place of the old
+                    "Already have an account?" text link. It sits BELOW the
+                    username field and its Continue, or the ESPN/MFL panel,
+                    after an "or": the username field stays the primary door
+                    (ADR-006 decision 1 as amended 2026-10-28; head-product's
+                    B1 ruling). An ESPN/MFL chip selection still rides this
+                    flow (handleAppleSignIn's platformIntent). */}
+                <Text style={[styles.orDivider, styles.landingOrDivider]}>or</Text>
+                <AppleAuthentication.AppleAuthenticationButton
+                  testID="signin.apple-continue-btn"
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                  cornerRadius={radii.sm}
+                  style={styles.appleContinueButton}
+                  onPress={handleAppleSignIn}
+                />
+                {appleBusy ? (
+                  <ActivityIndicator color={chalk.dim} style={styles.appleBusy} />
+                ) : null}
+              </>
+            ) : null}
 
             {tryDemoEnabled ? (
               <Pressable
@@ -889,7 +914,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               </Text>
             </Text>
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
       {/* V2 (D-164) — entry-mode link sheets. Mount pattern mirrors
           LeaguePicker: ESPN sheet unconditional (it manages its own Modal
@@ -942,8 +967,10 @@ function signInErrorCode(err: any): string {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
   flex: { flex: 1 },
+  // The ScrollView's content container (B1): grows to the viewport so it
+  // centers when it fits, and scrolls when it doesn't.
   body: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: space.xl,
     justifyContent: 'center',
     alignItems: 'flex-start',
@@ -1078,11 +1105,18 @@ const styles = StyleSheet.create({
     height: 44,
     marginBottom: space.md,
   },
+  // chalk-dim: readable content, and chalk-faint is only for placeholders
+  // and disabled text (design-system.md; design-lead's B1 review).
   orDivider: {
     ...type.bodySm,
-    color: chalk.faint,
+    color: chalk.dim,
     textAlign: 'center',
     marginBottom: space.md,
+  },
+  // B1: the landing's "or" between Continue and Apple, space.md above and
+  // below (orDivider carries the below).
+  landingOrDivider: {
+    marginTop: space.md,
   },
   // Sleeper demoted to a secondary (outline) action when Apple is shown.
   buttonSecondary: {
@@ -1118,7 +1152,7 @@ const styles = StyleSheet.create({
   },
   legalLine: {
     ...type.bodySm,
-    color: chalk.faint,
+    color: chalk.dim,
     textAlign: 'center',
     alignSelf: 'stretch',
     marginTop: space.lg,
