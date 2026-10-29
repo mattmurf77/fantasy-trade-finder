@@ -4,6 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Fleeced — Dynasty Trade Finder</title>
+  <!-- C3 (pre-launch review): Safari's App Store smart banner. release-lead fills the
+       app id at the 11-18 flip, with [APP STORE URL]; the share landings take theirs from
+       IOS_INSTALL_URL (#504). -->
+  <meta name="apple-itunes-app" content="app-id=[APP STORE ID]">
   <meta name="description" content="Rank your dynasty players, compare boards with your leaguemates, and find trades where both sides come out ahead. Free. Works with Sleeper, ESPN, and MyFantasyLeague.">
   <link rel="canonical" href="https://fantasy-trade-finder.onrender.com/">
   <meta property="og:type" content="website">
@@ -170,6 +174,7 @@
             <p class="cb-auth-help"><a href="https://github.com/mattmurf77/fantasy-trade-finder/releases/tag/extension-v0.1.1" target="_blank" rel="noopener noreferrer">Install the extension</a>, then <a href="https://sleeper.com/login" target="_blank" rel="noopener noreferrer">sign in to Sleeper</a> in another tab and verify your username here.</p>
             <p class="cb-auth-help">Your password stays with Sleeper. Fleeced stores its sign-in token encrypted to verify your account and send trades you approve. <a href="/privacy.html">Privacy</a></p>
           </details>
+          <p class="cb-auth-help lp-espn-mfl-cta">League on ESPN or MFL? Connect it in the Fleeced iPhone app. <a href="[APP STORE URL]">Download on the App Store <span aria-hidden="true">→</span></a></p>
 
           </div>
 
@@ -263,7 +268,7 @@
           <div class="cb-entry-panel hidden" id="entry-mobile" role="status">
             <h3 class="lp-mobile-title" id="entry-mobile-title">Continue in the Fleeced app</h3>
             <p class="cb-auth-help" id="entry-mobile-description"></p>
-            <a class="lp-mobile-link" href="/contact.html">Request TestFlight access <span aria-hidden="true">→</span></a>
+            <a class="lp-mobile-link" href="[APP STORE URL]">Download on the App Store <span aria-hidden="true">→</span></a>
           </div>
 
           <!-- Shared team-claim step (both platforms): the preview's teams;

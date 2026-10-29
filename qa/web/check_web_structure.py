@@ -723,20 +723,32 @@ def run() -> int:
     r.check("POL-faq-extension-link", bool(release) and set(faq_release) == {release[0]},
             f"FAQ extension link {faq_release} != index.html's {release[:1]}")
 
-    # Q5/Q6 first paragraphs: marketing's OA-8 text (marketing-lead-copy.md §2;
-    # §1g rows 3-4, FIXED), which legal R28.15 row 7 treats as the live
-    # pre-launch Q5/Q6: sign in with Apple or Sleeper, then link the league.
-    # Neither may say "choose ESPN" / "choose MFL" (the old sign-in chips). At
-    # the 11-18 flip, R28.15 row 7's release sentences replace these.
-    OA8 = (
-        ("Q5", "How do I connect an ESPN league?",
-         "In the iPhone app, sign in with Apple or Sleeper, then go to Settings → Leagues → Link an "
-         "ESPN league and sign in on ESPN's own page inside the app. Your ESPN password stays on "
-         "ESPN's sign-in page, and the app lists your leagues."),
-        ("Q6", "How do I connect an MFL league?",
-         "In the iPhone app, sign in with Apple or Sleeper, then go to Settings → Leagues → Link an "
-         "MFL league. Sign in with your MFL username and password, or enter a league ID or a "
+    # ESPN/MFL sign-in wording for the 11-18 release binary (legal R28.15 row
+    # 7, W3; marketing-lead-copy.md §6 addendum 8 §A: faq.q5.release.signin,
+    # faq.q6.release.signin). This replaces POL-faq-oa8's pre-release Q5/Q6
+    # pin, and lives in the droppable commit: drop it and POL-faq-oa8 is back.
+    # Every other sentence stays as legal notes ("Your ESPN password stays…";
+    # Q6's last paragraph is the fixed-now text). Neither first paragraph may
+    # say "choose ESPN" / "choose MFL".
+    SIGNIN = (
+        ("Q5 first paragraph", "How do I connect an ESPN league?", 0,
+         "In the iPhone app, sign in with ESPN on ESPN's own page inside the app, or sign in another "
+         "way and go to Settings → Leagues → Link an ESPN league. Your ESPN password stays on ESPN's "
+         "sign-in page, and the app lists your leagues."),
+        # R28.17 B: the staged "confirm the login is yours" sentence is
+        # withdrawn (ESPN sign-in keeps no cookies), so the live wording stays.
+        ("Q5 cookie paragraph", "How do I connect an ESPN league?", 1,
+         "The app keeps two ESPN sign-in cookies: espn_s2 (encrypted) and SWID (your ESPN member ID). "
+         "They're used to import your leagues and to send trades you approve. Disconnect any time in "
+         "Settings."),
+        # R28.17 B: paragraph 1 in full; OA-8's second sentence is dropped.
+        ("Q6 first paragraph", "How do I connect an MFL league?", 0,
+         "In the iPhone app, sign in with your MFL username and password, or sign in another way and "
+         "go to Settings → Leagues → Link an MFL league, where you can also enter a league ID or a "
          "myfantasyleague.com league URL."),
+        ("Q6 second paragraph", "How do I connect an MFL league?", 1,
+         "Your password goes to MFL to sign you in. It's never stored. Your MFL username and the "
+         "encrypted session MFL returns are kept."),
     )
 
     def inline_text(fragment: str) -> str:
@@ -747,20 +759,112 @@ def run() -> int:
         r'<summary>(.*?)</summary>\s*<div class="faq-body">(.*?)</div>',
         strip_comments(faq), flags=re.S)}
     problems = []
-    for label, question, want in OA8:
-        if question not in faq_items:
-            problems.append(f'{label} "{question}" not found')
-            continue
-        first = re.search(r"<p\b[^>]*>(.*?)</p>", faq_items[question], flags=re.S)
-        lead = inline_text(first.group(1)) if first else ""
-        if " ".join(want.split()) not in lead:
-            problems.append(f"{label} first paragraph is not marketing's OA-8 text")
-        chose = re.findall(r"\bchoose\s+(?:ESPN|MFL)\b", lead, flags=re.I)
-        if chose:
-            problems.append(f'{label} first paragraph says "{chose[0]}"')
-    r.check("POL-faq-oa8", not problems,
+    for label, question, index, want in SIGNIN:
+        paras = [inline_text(p) for p in re.findall(r"<p\b[^>]*>(.*?)</p>", faq_items.get(question, ""), flags=re.S)]
+        got = paras[index] if len(paras) > index else ""
+        if got != " ".join(want.split()):
+            problems.append(f"{label} is not legal's release sign-in text")
+        if index == 0:
+            chose = re.findall(r"\bchoose\s+(?:ESPN|MFL)\b", got, flags=re.I)
+            if chose:
+                problems.append(f'{label} says "{chose[0]}"')
+    r.check("RELFLIP-signin[faq.html]", not problems,
             "; ".join(problems) if problems
-            else 'Q5/Q6 open with "sign in with Apple or Sleeper, then … Link an ESPN/MFL league"')
+            else "faq.q5/q6.release.signin: legal's sign-in sentences verbatim")
+
+    # ── RELFLIP: the 11-18 web release flip (onboarding-eng) ─────────────
+    # Copy: marketing-lead-copy.md §1 m3.web.mobile_cta, §6 addenda 7-8
+    # m3.web.espn_mfl_cta (+ .link) and §2 faq.q3.release. The App Store URL
+    # is the `[APP STORE URL]` placeholder until release-lead fills it at the
+    # flip; the text pins take it or a real apps.apple.com URL, and
+    # RELFLIP-no-app-store-placeholder is the deliberate merge blocker (the
+    # old [OPERATOR NAME] idea): red until the real URL is in.
+    STORE_URL = r"(?:\[APP STORE URL\]|https://apps\.apple\.com/[^\s\"'<>()]+)"
+    STORE_LINK = (r'<a\b[^>]*\bhref="' + STORE_URL + r'"[^>]*>\s*Download on the App Store\s*'
+                  r'<span aria-hidden="true">→</span>\s*</a>')
+    index_body = strip_style_and_script(strip_comments(body_of(all_sources["index.html"])))
+
+    panel = re.search(r'<div\b[^>]*\bid="entry-mobile"[^>]*>(.*?)</div>', index_body, flags=re.S)
+    cta = re.findall(r'<a\b[^>]*class="lp-mobile-link"[^>]*>.*?</a>', panel.group(1), flags=re.S) if panel else []
+    testflight = re.findall(r"TestFlight", plain(index_body))
+    r.check("RELFLIP-app-store-cta[index.html]",
+            len(cta) == 1 and re.fullmatch(STORE_LINK, cta[0].strip(), flags=re.S) is not None and not testflight,
+            ("no #entry-mobile panel" if not panel else
+             f"{len(cta)} lp-mobile-link(s) in #entry-mobile, want 1" if len(cta) != 1 else
+             "the page still says TestFlight" if testflight else
+             f"not 'Download on the App Store <span aria-hidden=\"true\">→</span>' to the App Store URL: {cta[0][:120]}")
+            if not (len(cta) == 1 and re.fullmatch(STORE_LINK, cta[0].strip(), flags=re.S) and not testflight)
+            else "m3.web.mobile_cta: Download on the App Store → (arrow aria-hidden)")
+
+    ESPN_MFL_LINE = "League on ESPN or MFL? Connect it in the Fleeced iPhone app."
+    line_re = (r'<details class="lp-login-help">.*?</details>\s*'
+               r'<p class="cb-auth-help lp-espn-mfl-cta">\s*' + re.escape(ESPN_MFL_LINE)
+               + r"\s*" + STORE_LINK + r"\s*</p>")
+    placed = re.findall(line_re, index_body, flags=re.S)
+    copies = plain(index_body).count(ESPN_MFL_LINE)
+    styles = strip_css_comments(all_sources.get("css/styles.css", ""))
+    rule = lambda sel: re.search(re.escape(sel) + r"\s*\{([^}]*)\}", styles)  # noqa: E731
+    line_rule, link_rule = rule(".cb-auth-help.lp-espn-mfl-cta"), rule(".cb-auth-help.lp-espn-mfl-cta a")
+    chalk_line = bool(line_rule) and re.search(r"(?:^|;)\s*color\s*:\s*var\(--chalk\)", line_rule.group(1))
+    chalk_link = bool(link_rule) and re.search(r"(?:^|;)\s*color\s*:\s*var\(--chalk\)", link_rule.group(1)) \
+        and re.search(r"text-decoration\s*:\s*underline", link_rule.group(1))
+    ok_line = len(placed) == 1 and copies == 1 and chalk_line and chalk_link
+    r.check("RELFLIP-espn-mfl-line[index.html]", ok_line,
+            (f"the line appears {copies}x in the page, want once" if copies != 1 else
+             "not directly after the \"How Sleeper sign-in works\" details, with its App Store link "
+             "(arrow aria-hidden)" if len(placed) != 1 else
+             "the line isn't chalk (.cb-auth-help.lp-espn-mfl-cta { color: var(--chalk) })" if not chalk_line else
+             "its link isn't chalk + underline")
+            if not ok_line else "m3.web.espn_mfl_cta: under the Sleeper door, chalk, link chalk + underline")
+
+    # faq.q3.release with paragraph 1 as faq.q3.release.signin (legal R28.15
+    # row 7, droppable commit); the web paragraph stays Sleeper-only.
+    Q3_RELEASE = [
+        r"On iPhone: the Fleeced app on the App Store \(" + STORE_URL
+        + r"\)\. Sign in with Apple, Sleeper, ESPN or MFL\. You can also connect ESPN and MFL "
+        r"leagues after you sign in\.",
+        re.escape("On a computer: the web app on this site, in Chrome or Edge with the Fleeced "
+                  "browser extension installed. The extension is installed by hand from a release "
+                  "download; it isn't in the Chrome Web Store. The web app signs in with Sleeper "
+                  "only. ESPN and MFL leagues connect through the iPhone app."),
+        re.escape("There's no Android app. Phone browsers can't run the extension, so on a phone, "
+                  "use the iPhone app."),
+    ]
+    q3 = faq_items.get("Where can I use Fleeced?")
+    q3_paras = [inline_text(p) for p in re.findall(r"<p\b[^>]*>(.*?)</p>", q3 or "", flags=re.S)]
+    q3_bad = [i + 1 for i, (want, got) in enumerate(zip(Q3_RELEASE, q3_paras))
+              if not re.fullmatch(want, got)]
+    r.check("RELFLIP-faq-q3-release[faq.html]",
+            bool(q3) and len(q3_paras) == len(Q3_RELEASE) and not q3_bad,
+            ("Q3 \"Where can I use Fleeced?\" not found" if not q3 else
+             f"Q3 has {len(q3_paras)} paragraphs, want {len(Q3_RELEASE)}" if len(q3_paras) != len(Q3_RELEASE) else
+             f"Q3 paragraph(s) {q3_bad} not marketing's faq.q3.release")
+            if not (q3 and len(q3_paras) == len(Q3_RELEASE) and not q3_bad)
+            else "faq.q3.release verbatim (3 paragraphs)")
+
+    # C3 (Product's pre-launch review, 2026-10-27): Safari's App Store smart
+    # banner on the landing, once in <head>, with the [APP STORE ID]
+    # placeholder or the digits of the App Store URL the page links to.
+    head = re.search(r"<head\b.*?</head>", strip_comments(all_sources["index.html"]), flags=re.S | re.I)
+    banners = re.findall(r'<meta\b[^>]*\bname="apple-itunes-app"[^>]*>', head.group(0) if head else "")
+    in_body = "apple-itunes-app" in strip_comments(body_of(all_sources["index.html"]))
+    content = re.search(r'\bcontent="app-id=(\[APP STORE ID\]|\d{6,12})"', banners[0]) if len(banners) == 1 else None
+    url_ids = set(re.findall(r'href="https://apps\.apple\.com/[^"]*?/id(\d{6,12})', strip_comments(all_sources["index.html"])))
+    id_ok = bool(content) and (content.group(1) == "[APP STORE ID]" or url_ids == {content.group(1)})
+    r.check("RELFLIP-smart-banner[index.html]", len(banners) == 1 and not in_body and id_ok,
+            (f"{len(banners)} apple-itunes-app meta(s) in <head>, want 1" if len(banners) != 1 else
+             "an apple-itunes-app meta outside <head>" if in_body else
+             "content isn't app-id=[APP STORE ID] or app-id=<the App Store URL's digits>")
+            if not (len(banners) == 1 and not in_body and id_ok)
+            else "C3 smart banner in <head> (placeholder, or the listing's id)")
+
+    # The deliberate blocker: no served page may carry the placeholders.
+    holders = sorted(f"{name} {ph}" for name, src in all_sources.items()
+                     for ph in ("[APP STORE URL]", "[APP STORE ID]") if ph in src)
+    r.check("RELFLIP-no-app-store-placeholder", not holders,
+            "still in " + ", ".join(holders)
+            + " — release-lead fills the real apps.apple.com URL and its app id at the 11-18 flip"
+            if holders else "no [APP STORE URL] / [APP STORE ID] in any served page")
 
     return r.report(), r
 
