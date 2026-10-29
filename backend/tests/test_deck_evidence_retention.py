@@ -311,6 +311,7 @@ def test_a_failed_full_row_chunk_keeps_the_cursor(db, monkeypatch, caplog):
     deck(db, "p0", 120)
     monkeypatch.setattr(db_module, "_delete_old_trade_impressions", lambda *a: 0)
     monkeypatch.setattr(db_module, "_delete_old_page_store", lambda *a: 0)
+    monkeypatch.setattr(db_module, "_delete_old_grading_sessions", lambda *a: 0)
     real_begin = db.begin
     state = {"fail": True}
 
@@ -339,7 +340,8 @@ def test_legacy_trade_impressions_go_at_the_cap(db):
 
 
 @pytest.mark.parametrize("step,name", [("_delete_old_trade_impressions", "trade_impressions"),
-                                       ("_delete_old_page_store", "trade_page_store")])
+                                       ("_delete_old_page_store", "trade_page_store"),
+                                       ("_delete_old_grading_sessions", "grading_sessions")])
 def test_a_failed_side_step_never_stops_the_others(db, monkeypatch, caplog, step, name):
     deck(db, "p0", 120)
 
@@ -568,3 +570,58 @@ def test_a_dropped_index_is_noticed_at_the_next_check(db, monkeypatch, caplog):
     with caplog.at_level("WARNING"):
         assert db_module._deck_impressions_served_index_ready() is False
     assert any("wait for ix_deck_impressions_served" in r.getMessage() for r in caplog.records)
+
+
+# ── head-eng 2026-10-29: receipts grades and Calibration under the cap ───────
+
+def _grade(engine, impression_id, served):
+    from backend.database import receipts_grades_table
+    with engine.begin() as conn:
+        conn.execute(insert(receipts_grades_table).values(
+            impression_id=impression_id, window_days=14, grader_version="receipts-1",
+            status="graded", league_id="lg", user_id="u1", served_at=served, graded_at=served))
+
+
+def _grades(engine):
+    from backend.database import receipts_grades_table as g
+    with engine.connect() as conn:
+        return sorted(conn.execute(select(g.c.impression_id)).scalars())
+
+
+def test_receipts_grades_go_with_their_deck_at_the_cap(db):
+    """A packed deck's grades by contract id (its rows already gone at 90
+    days), a pack-less deck's by its rows; a recent deck's stay."""
+    deck(db, "packed", 400)
+    deck(db, "rows-only", 380, packed=False)
+    deck(db, "recent", 30)
+    with db.connect() as conn:
+        legacy_id = conn.execute(select(deck_impressions_table.c.impression_id).where(
+            deck_impressions_table.c.deck_job_id == "rows-only").limit(1)).scalar()
+    _grade(db, "packed:0", iso(400))
+    _grade(db, legacy_id, iso(380))
+    _grade(db, "recent:0", iso(30))
+    purge()
+    assert _grades(db) == ["recent:0"]
+
+
+def test_receipts_grades_are_counted_in_the_decks_transaction(db):
+    deck(db, "old", 400)
+    _grade(db, "old:0", iso(400))
+    _grade(db, "old:5", iso(400))                        # a packed card with no row
+    assert purge(full_row_days=0)["receipts_grades"] == 2
+
+
+def test_calibration_sessions_and_their_cards_go_at_the_cap(db):
+    from backend.database import grading_cards_table as gc, grading_sessions_table as gs
+    with db.begin() as conn:
+        for sid, days in (("old", 400), ("new", 30)):
+            conn.execute(insert(gs).values(session_id=sid, user_id="u1", league_id="lg",
+                                           status="completed", seed="1", created_at=iso(days),
+                                           counts_json="{}", source_json="{}"))
+            conn.execute(insert(gc), [
+                {"card_id": f"{sid}{k}", "session_id": sid, "user_id": "u1", "position": k,
+                 "arms_json": "{}", "trade_json": '{"partner_name": "x"}'} for k in (1, 2)])
+    assert purge() == {"grading_sessions": 1}
+    with db.connect() as conn:
+        assert list(conn.execute(select(gs.c.session_id)).scalars()) == ["new"]
+        assert sorted(conn.execute(select(gc.c.card_id)).scalars()) == ["new1", "new2"]

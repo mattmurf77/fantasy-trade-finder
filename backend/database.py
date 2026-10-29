@@ -7238,16 +7238,18 @@ def _delete_deck(conn, deck_job_id: str, user_id: str, league_id: str,
     string range: under prod's collation neither is a plain index range."""
     i, o, p = deck_impressions_table, deck_outcomes_table, deck_evidence_packs_table
     w, c, b = deck_card_withdrawals_table, deck_candidate_sets_table, bakeoff_runs_table
-    r, sh = trade_pass_reasons_table, trade_policy_shadow_table
+    r, sh, g = trade_pass_reasons_table, trade_policy_shadow_table, receipts_grades_table
     contract_ids = [f"{deck_job_id}:{k}" for k in range(card_count)]
     row_ids = select(i.c.impression_id).where(i.c.deck_job_id == deck_job_id)
     counts: dict[str, int] = {}
     for name, stmt in (
             *((name, delete(t).where(t.c.impression_id.in_(contract_ids[k:k + 500])))
-              for name, t in (("deck_outcomes", o), ("trade_pass_reasons", r))
+              for name, t in (("deck_outcomes", o), ("trade_pass_reasons", r),
+                              ("receipts_grades", g))
               for k in range(0, len(contract_ids), 500)),
             ("deck_outcomes", delete(o).where(o.c.impression_id.in_(row_ids))),
             ("trade_pass_reasons", delete(r).where(r.c.impression_id.in_(row_ids))),
+            ("receipts_grades", delete(g).where(g.c.impression_id.in_(row_ids))),
             ("deck_impressions", delete(i).where(i.c.deck_job_id == deck_job_id)),
             ("deck_card_withdrawals", delete(w).where(w.c.deck_job_id == deck_job_id)),
             ("deck_candidate_sets", delete(c).where(
@@ -7277,6 +7279,21 @@ def _delete_old_trade_impressions(cutoff: str, limit: int) -> int:
             return 0
         return conn.execute(delete(t).where(t.c.id <= upper, t.c.shown_at < cutoff)
                             ).rowcount or 0
+
+
+def _delete_old_grading_sessions(cutoff: str, limit: int) -> int:
+    """Calibration's blind-grading sessions created before the cap, and their
+    cards (the shown trades), oldest first, `limit` sessions at a time (head-
+    eng 2026-10-29: under the 365-day cap, no exception). A small table: the
+    created_at scan is cheap."""
+    gs, gc = grading_sessions_table, grading_cards_table
+    with engine.begin() as conn:
+        ids = list(conn.execute(select(gs.c.session_id).where(gs.c.created_at < cutoff)
+                                .order_by(gs.c.created_at, gs.c.session_id).limit(limit)).scalars())
+        if not ids:
+            return 0
+        conn.execute(delete(gc).where(gc.c.session_id.in_(ids)))
+        return conn.execute(delete(gs).where(gs.c.session_id.in_(ids))).rowcount or 0
 
 
 def _delete_old_page_store(cutoff: str, limit: int) -> int:
@@ -7333,8 +7350,9 @@ def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks:
     - `days` (the cap, 365): up to `batch_decks` decks past it, each in its
       own transaction, lose every store at once (E-a1): outcomes (every kind)
       and pass reasons, deck_impressions rows, withdrawals, the candidate set,
-      the bakeoff_runs row, the trade_policy_shadow rows and the pack; and
-      legacy trade_impressions and trade_page_store rows past it go too (the
+      the bakeoff_runs row, the trade_policy_shadow rows, the receipts grades
+      and the pack; and legacy trade_impressions, trade_page_store rows and
+      Calibration's grading sessions (with their cards) past it go too (the
       page store's own eviction runs only while the store is on);
     - `full_row_days` (90): a packed deck's deck_impressions rows (full and
       ghost) past it go, and the pack keeps every card until the cap. A deck
@@ -7369,7 +7387,8 @@ def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks:
     for name, step, batch in (
             ("trade_impressions", _delete_old_trade_impressions,
              limit * _EVIDENCE_PRUNE_ROWS_PER_DECK),
-            ("trade_page_store", _delete_old_page_store, limit)):
+            ("trade_page_store", _delete_old_page_store, limit),
+            ("grading_sessions", _delete_old_grading_sessions, limit)):
         try:
             n = step(cap, batch)
         except Exception:
