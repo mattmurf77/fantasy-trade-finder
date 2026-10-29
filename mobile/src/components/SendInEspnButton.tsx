@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, Linking, ViewStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Button from './chalkline/Button';
@@ -9,11 +9,13 @@ import { getEspnLinkStatus, proposeTradeToEspn } from '../api/sendInEspn';
 import { validateTradeSend } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
 import { isSendOutcomeUnknown } from '../api/sendOutcome';
+import { beginSend, getSendRecord, settleSend, subscribeSends, tradeSendKey } from '../api/sendRegistry';
 import {
   SEND_NOT_SENT_TITLE,
   SEND_OUTCOME_UNKNOWN_TITLE,
   sendNotSentFallback,
   sendOutcomeUnknownBody,
+  sendOutcomeUnknownMessage,
 } from '../utils/sendOutcomeCopy';
 import type { SendSurface } from '../utils/tradeText';
 
@@ -69,7 +71,8 @@ interface Props {
   surface: SendSurface;
 }
 
-type State = 'idle' | 'checking' | 'sending' | 'sent';
+// The pre-send checks only. Sending / sent live in api/sendRegistry.ts.
+type State = 'idle' | 'checking';
 
 export default function SendInEspnButton({
   leagueId,
@@ -87,6 +90,12 @@ export default function SendInEspnButton({
   const enabled = useFlag('espn.send');
   const navigation = useNavigation<any>();
   const [state, setState] = useState<State>('idle');
+  // This trade's send, from the registry (api/sendRegistry.ts), so it
+  // survives a remount: leave and reopen the trade during the wait and the
+  // button still says "Sending…". It re-renders when the send settles; the
+  // result alert is shown once, by the doPropose call that sent it.
+  const sendKey = tradeSendKey('espn', leagueId, theirUserId, givePlayerIds, receivePlayerIds);
+  const sendState = useSyncExternalStore(subscribeSends, () => getSendRecord(sendKey)?.state);
   // True while we're waiting for the user to come back from the ESPN connect
   // webview — the screen-focus handler consumes it to report the result
   // (same mechanism as the Sleeper twin's awaitingLinkRef).
@@ -144,7 +153,10 @@ export default function SendInEspnButton({
   }, [navigation]);
 
   const doPropose = useCallback(async () => {
-    setState('sending');
+    // Synchronous, before any await: a second send of this trade while one is
+    // in flight (another mount, a same-frame double tap) is refused here,
+    // with no request (#527 QA P3-5).
+    if (!beginSend(sendKey)) return;
     try {
       await proposeTradeToEspn({
         league_id: leagueId,
@@ -153,18 +165,21 @@ export default function SendInEspnButton({
         receive_player_ids: receivePlayerIds,
         impression_id: impressionId,
       });
-      setState('sent');
+      settleSend(sendKey, 'sent');
       haptics.success();
       try {
         onSent?.();
       } catch {
         /* tally must never break the send flow */
       }
+      // Alert.alert is global, not tied to this component, so this one alert
+      // shows even if the button unmounted during the wait. A remount never
+      // alerts: it only re-renders from the registry.
       Alert.alert('Trade sent', 'Check ESPN for the pending offer.', [
         { text: 'OK', onPress: () => void maybeRequestReview('send_in_espn') },
       ]);
     } catch (err) {
-      setState('idle');
+      settleSend(sendKey, isSendOutcomeUnknown(err) ? 'unknown' : 'not_sent');
       const body = err instanceof ApiError ? (err.body as any) : undefined;
       const code: string | undefined = body?.error;
       const detail: string | undefined = body?.detail || body?.message;
@@ -232,7 +247,7 @@ export default function SendInEspnButton({
         );
       }
     }
-  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, goConnect, goReconnect, openEspn]);
+  }, [sendKey, leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, goConnect, goReconnect, openEspn]);
 
   // #180-parity pre-flight — the shared /api/trades/validate has no ESPN
   // branch yet, so this degrades to checked:false (plain confirm). Never
@@ -247,12 +262,15 @@ export default function SendInEspnButton({
       receive_player_ids: receivePlayerIds,
     });
     setState('idle');
+    // After an unknown outcome on this trade, the dialog that gates the send
+    // starts with marketing's 8e line (utils/sendOutcomeCopy.ts, no new copy).
+    const reminder = getSendRecord(sendKey)?.state === 'unknown' ? `${sendOutcomeUnknownMessage('ESPN')}\n\n` : '';
 
     if (warnings.length > 0) {
       const blocking = warnings.some((w) => w.severity === 'blocking');
       Alert.alert(
         blocking ? 'This trade will likely fail' : 'Heads up before sending',
-        warnings.map((w) => `• ${w.message}`).join('\n\n'),
+        reminder + warnings.map((w) => `• ${w.message}`).join('\n\n'),
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Send anyway', onPress: () => { void doPropose(); } },
@@ -263,16 +281,16 @@ export default function SendInEspnButton({
 
     Alert.alert(
       'Send this trade?',
-      'This proposes the trade directly in ESPN — your leaguemate gets it as a pending offer (it expires in 48 hours).',
+      reminder + 'This proposes the trade directly in ESPN — your leaguemate gets it as a pending offer (it expires in 48 hours).',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Send', onPress: () => { void doPropose(); } },
       ],
     );
-  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, doPropose]);
+  }, [sendKey, leagueId, theirUserId, givePlayerIds, receivePlayerIds, doPropose]);
 
   const onPress = useCallback(async () => {
-    if (state !== 'idle') return;
+    if (state !== 'idle' || sendState === 'in_flight' || sendState === 'sent') return;
     haptics.pickup();
     if (!leagueId || !theirUserId) {
       openEspn();
@@ -308,13 +326,13 @@ export default function SendInEspnButton({
         ],
       );
     }
-  }, [state, leagueId, theirUserId, openEspn, confirmSend, goConnect]);
+  }, [state, sendState, leagueId, theirUserId, openEspn, confirmSend, goConnect]);
 
   if (!enabled) return null;
 
   const label =
-    state === 'sent' ? 'Proposal sent'
-    : state === 'sending' ? 'Sending…'
+    sendState === 'sent' ? 'Proposal sent'
+    : sendState === 'in_flight' ? 'Sending…'
     : 'Send in ESPN';
 
   return (
@@ -323,7 +341,7 @@ export default function SendInEspnButton({
       label={label}
       variant="secondary"
       compact={compact}
-      disabled={state === 'sending' || state === 'checking' || state === 'sent'}
+      disabled={state === 'checking' || sendState === 'in_flight' || sendState === 'sent'}
       onPress={onPress}
       style={style}
     />
