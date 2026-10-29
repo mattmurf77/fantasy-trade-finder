@@ -130,6 +130,9 @@ client.setOnVerificationRequired(() => { mirrorCalls += 1; });
 let signals = [];
 let handlerReturn = () => undefined;
 client.setOnProRequired((s) => { signals.push(s); return handlerReturn(s); });
+// The executed sections below test the gate itself, so its switch is ON
+// here (§0 covers it off, against its own client and router).
+client.setPaywallGateOn(() => true);
 function reset() {
   signals = []; sent.length = 0; responses.length = 0; mirrorCalls = 0; handlerReturn = () => undefined;
 }
@@ -137,6 +140,113 @@ async function rejects(p) {
   try { await p; } catch (e) { return e; }
   throw new Error('expected the call to reject');
 }
+
+// ═══ 0. flags off → dark (release-lead QA P1-1), executed ═════════════════
+// While `monetize.paywall` is off, or unknown before the flags load, every
+// gate path is today's origin/main: nothing opens, nothing is held or
+// re-sent, the call is sent ONCE, and its caller gets the same ApiError (the
+// banner mirror still fires for a 403, as on main). A fresh client and a
+// fresh router wired to EACH OTHER, with the flags store saying off.
+const CLIENT_STUBS = {
+  'expo-constants': { default: { expoConfig: { version: '1.22.0', extra: { apiBaseUrl: 'https://api.test' } } } },
+  'expo-device': { deviceType: 1, DeviceType: { UNKNOWN: 0, PHONE: 1, TABLET: 2, DESKTOP: 3 }, osVersion: '18.0' },
+  'expo-secure-store': { getItemAsync: async (k) => (k === 'ftf.sessionToken' ? 'tok-1' : null), setItemAsync: async () => {}, deleteItemAsync: async () => {} },
+  'react-native': { AppState: { addEventListener: () => ({ remove() {} }) }, Platform: { OS: 'ios' } },
+  './events': { track: () => {} },
+};
+const flags0 = {};
+const session0 = { user: { user_id: '12345', account_only: false }, isDemo: false, verification: null };
+let mirror0 = 0;
+const client0 = load('api/client.ts', CLIENT_STUBS, { fetch: fakeFetch });
+client0.setOnVerificationRequired(() => { mirror0 += 1; });
+const nav0 = [];
+const trace0 = [];
+const gate0 = load('state/usePaywallGate.ts', {
+  zustand: { create: makeZustandCreate() },
+  '@react-native-async-storage/async-storage': { default: { getItem: async () => null, setItem: async () => {} } },
+  './tradeSearchTrace': { openSearchId: () => 's0', failFirstCard: (id, reason) => trace0.push([id, reason]) },
+  '../utils/firstCardEvent': load('utils/firstCardEvent.ts', {}),
+  '../api/client': client0,
+  './useFeatureFlags': { useFeatureFlags: { getState: () => ({ flags: flags0 }) } },
+  './useSession': { useSession: { getState: () => session0 } },
+});
+gate0.installPaywallGate({
+  isReady: () => true, navigate: (...a) => nav0.push(a), getCurrentRoute: () => ({ name: 'Trades' }),
+  addListener: () => () => {}, reset: () => {},
+});
+// A spy in front of the router: when off, the client must never dispatch.
+const dispatched0 = [];
+client0.setOnProRequired((sig) => { dispatched0.push(sig); return gate0.handleGateSignal(sig); });
+const DARK = [
+  ['402 preview_used', '/api/trades/generate', 402, { error: 'pro_required', gate: 'preview_used' }],
+  ['402 verify_required', '/api/trades/generate', 402, { error: 'pro_required', gate: 'verify_required' }],
+  ['403 verification_required on a gated route', '/api/trades/generate', 403, { error: 'verification_required' }],
+  ['403 verification_required on a free route', '/api/rankings/save', 403, { error: 'verification_required' }],
+];
+const heldFor = (p, ms) => Promise.race([p.then(() => 'settled', () => 'settled'), new Promise((r) => setTimeout(() => r('held'), ms))]);
+
+check('0a. flags off [executed]: each gate answer opens NOTHING, is not held, is sent ONCE, and rejects with main\'s ApiError', async () => {
+  for (const verified of [true, false, null]) {
+    session0.verification = verified === null ? null : { session_verified: verified };
+    for (const [name, p, status, body] of DARK) {
+      responses.length = 0; sent.length = 0; nav0.length = 0; dispatched0.length = 0; mirror0 = 0;
+      responses.push({ status, body });
+      const call = client0.api.post(p, {});
+      const state = await heldFor(call, 50);
+      const e = await rejects(call);
+      const at = `${name} (${verified === null ? 'unknown' : verified ? 'verified' : 'unverified'} session)`;
+      eq(state, 'settled', `${at}: not held`);
+      eq(sent.length, 1, `${at}: sent once`);
+      eq(dispatched0.length, 0, `${at}: the client dispatched to the router`);
+      eq(nav0.length, 0, `${at}: navigated`);
+      eq(gate0.usePaywallGate.getState().verifyOpen, false, `${at}: the VerifySheet opened`);
+      assert(e instanceof client0.ApiError && e.status === status && JSON.stringify(e.body) === JSON.stringify(body)
+        && e.message === (body.message || body.error), `${at}: not main's ApiError`);
+      eq(mirror0, status === 403 ? 1 : 0, `${at}: the banner mirror (main-identical)`);
+      eq(trace0.length, 0, `${at}: an R2b was settled`);
+    }
+  }
+});
+check('0b. flags off: gateSignalFor → null for every gate answer (the consumers fall back to today\'s path); on, it classifies', () => {
+  for (const [name, p, status, body] of DARK) {
+    eq(client0.gateSignalFor(new client0.ApiError(status, body), p), null, `${name}, off`);
+  }
+  eq(client0.gateSignalFor(new client0.ApiError(403, { error: 'token_user_mismatch' }), '/api/sleeper/link'), null, 'mismatch, off');
+  flags0['monetize.paywall'] = true;
+  try {
+    for (const [name, p, status, body] of DARK.slice(0, 3)) {
+      assert(client0.gateSignalFor(new client0.ApiError(status, body), p), `${name}, on: the switch is what is dark`);
+    }
+  } finally {
+    delete flags0['monetize.paywall'];
+  }
+});
+check('0c. unknown → off: an absent or non-true flag is off, and a client with NO reader installed is dark', async () => {
+  eq(gate0.paywallGateOn(), false, 'absent');
+  flags0['monetize.paywall'] = 'true';
+  eq(gate0.paywallGateOn(), false, 'non-boolean');
+  delete flags0['monetize.paywall'];
+  const bare = load('api/client.ts', CLIENT_STUBS, { fetch: fakeFetch });
+  const calls = [];
+  bare.setOnProRequired((sig) => { calls.push(sig); return new Promise(() => {}); });
+  eq(bare.gateSignalFor(new bare.ApiError(402, { error: 'pro_required', gate: 'lapsed' }), '/api/trades/generate'), null, 'gateSignalFor, no reader');
+  responses.length = 0; sent.length = 0;
+  responses.push({ status: 403, body: { error: 'verification_required' } });
+  const call = bare.api.post('/api/trades/generate', {});
+  eq(await heldFor(call, 50), 'settled', 'no reader: not held');
+  await rejects(call);
+  eq(calls.length, 0, 'no reader: nothing dispatched');
+});
+check('0d. flags off: the router itself opens nothing for any signal (belt and braces)', () => {
+  nav0.length = 0;
+  const before = gate0.usePaywallGate.getState().verifySeq;
+  for (const sig of [{ action: 'paywall', gate: 'lapsed', kind: 'find' }, { action: 'verify', gate: null, kind: 'send' }, { action: 'verify_mismatch' }]) {
+    eq(gate0.handleGateSignal(sig, '/api/trades/generate'), undefined, `${sig.action}: no hold`);
+  }
+  eq(trace0.length, 0, 'no R2b settle');
+  eq(nav0.length, 0, 'navigated');
+  eq(gate0.usePaywallGate.getState().verifySeq, before, 'opened the sheet');
+});
 
 check('1a. a user-initiated 402 opens the paywall: {action:paywall, gate, kind:find}', async () => {
   reset();
@@ -314,6 +424,7 @@ function makeZustandCreate() {
 }
 const session = { user: { user_id: '12345', account_only: false }, isDemo: false, verification: null };
 let seamHandler = null;
+let gateReader = null;
 // M2: the offer trigger's once-per-user memory lives in AsyncStorage.
 const storage = new Map();
 const storageWrites = [];
@@ -330,7 +441,8 @@ const gateMod = load('state/usePaywallGate.ts', {
   './tradeSearchTrace': { openSearchId: () => traceOpen, failFirstCard: (id, reason) => traceCalls.push([id, reason]) },
   '../utils/firstCardEvent': load('utils/firstCardEvent.ts', {}),
   zustand: { create: makeZustandCreate() },
-  '../api/client': { setOnProRequired: (fn) => { seamHandler = fn; } },
+  '../api/client': { setOnProRequired: (fn) => { seamHandler = fn; }, setPaywallGateOn: (fn) => { gateReader = fn; } },
+  './useFeatureFlags': { useFeatureFlags: { getState: () => ({ flags: { 'monetize.paywall': true } }) } },
   './useSession': { useSession: { getState: () => session } },
 });
 const navCalls = [];
@@ -343,8 +455,9 @@ const fakeNav = {
 };
 gateMod.installPaywallGate(fakeNav);
 
-check('3a. installPaywallGate wires the client seam to the router', () => {
+check('3a. installPaywallGate wires the client seam to the router, and the gate switch to monetize.paywall', () => {
   assert(seamHandler === gateMod.handleGateSignal, 'setOnProRequired(handleGateSignal) not called');
+  assert(gateReader === gateMod.paywallGateOn, 'setPaywallGateOn(paywallGateOn) not called');
 });
 check('3b. a paywall signal opens Paywall {source:gate, gate, kind} for a verified session', () => {
   navCalls.length = 0;
@@ -728,6 +841,49 @@ check('6d. [shape] an unverified session never sees the paywall (backstop → th
   assert(/if \(!paywallOn \|\| unverified\) return null;/.test(s), 'renders nothing while unverified');
   assert(/useEffect\(\(\) => \{\s*if \(!paywallOn \|\| !unverified\) return;\s*verifyFirst\(\);\s*\}, \[paywallOn, unverified, verifyFirst\]\);/.test(s),
     'the backstop opens the VerifySheet through verifyFirst (§9b)');
+});
+check('6f. R28.9 [shape]: an unverified session fetches nothing subscription-specific — the config, offerings and eligibility queries all wait on `!unverified` (release-lead QA S2d)', () => {
+  const s = strip(read('screens/PaywallScreen.tsx'));
+  assert(/queryFn: \(\) => getPaywallConfig\('ios'\),\s*enabled: paywallOn && !unverified,/.test(s), 'the paywall config');
+  assert(/queryFn: \(\) => getOfferings\(\),\s*enabled: paywallOn && !unverified,/.test(s), 'the offerings');
+  assert(/queryFn: \(\) => checkIntroEligibility\(storeProducts\),\s*enabled: paywallOn && !unverified && storeProducts\.length > 0,/.test(s), 'the intro eligibility');
+  eq((s.match(/useQuery\(\{/g) || []).length, 3, 'exactly these three queries');
+});
+check('6g. release-lead QA P3 [executed]: a user change resets useEntitlements (not-entitled defaults, the device cache dropped, the server asked again); boot\'s null → user hydrate keeps the grace cache', async () => {
+  const sessionStore = makeZustandCreate()(() => ({ user: null, hasToken: true }));
+  const removed = [];
+  let fetches = 0;
+  const ent = load('state/useEntitlements.ts', {
+    zustand: { create: makeZustandCreate() },
+    '@react-native-async-storage/async-storage': { default: {
+      getItem: async () => null, setItem: async () => {}, removeItem: async (k) => { removed.push(k); },
+    } },
+    '../api/billing': { getEntitlements: async () => { fetches += 1; return { pro: false, enforcing: false }; } },
+    '../api/purchases': { hasProEntitlement: () => false, onCustomerInfoChange: () => () => {}, setOnPurchasesReady: () => {} },
+    './useSession': { useSession: sessionStore },
+  });
+  ent.initEntitlements();
+  await tick(); await tick();
+  const grant = { pro: true, founder: true, enforcing: true, expiresAt: '2027-01-01', optimistic: false };
+  ent.useEntitlements.setState(grant);
+  const f0 = fetches;
+  sessionStore.setState({ user: { user_id: 'A' } });
+  await tick();
+  eq(ent.useEntitlements.getState().pro, true, 'boot hydrate (null → A) keeps the cached answer');
+  eq(removed.length, 0, 'boot hydrate keeps the device cache');
+  ent.useEntitlements.setState(grant);
+  sessionStore.setState({ user: { user_id: 'B' } });
+  const st = ent.useEntitlements.getState();
+  eq(JSON.stringify([st.pro, st.founder, st.enforcing, st.expiresAt]), JSON.stringify([false, false, false, null]), 'A → B resets');
+  eq(removed[0], 'ftf.entitlements.v1', 'the device cache dropped');
+  await tick();
+  assert(fetches > f0, 'the server asked again');
+  ent.useEntitlements.setState(grant);
+  sessionStore.setState({ user: null });
+  eq(ent.useEntitlements.getState().pro, false, 'sign-out resets');
+  ent.useEntitlements.setState(grant);
+  sessionStore.setState({ user: null, hasToken: false });
+  eq(ent.useEntitlements.getState().pro, true, 'no user change, no reset');
 });
 check('6e. [shape] the analytics row is registered with the emitter (gate + kind)', () => {
   const tax = fs.readFileSync(path.join(ROOT, '..', 'backend', 'analytics_taxonomy.py'), 'utf8');
@@ -1119,7 +1275,7 @@ check('8j. D16 GRANTED [shape]: the pre-check runs first on every Send tap — t
 
 check('8k. D16 (c) [executed]: Win Now maps a 402 / verify 403 to no line (the gate opened the paywall or the sheet), never "HTTP 402"; other errors keep their copy', () => {
   const errorCopy = extractFn('screens/WinNowScreen.tsx', 'errorCopy', {});
-  const actionErrorCopy = extractFn('screens/WinNowScreen.tsx', 'actionErrorCopy', { ApiError: client.ApiError, errorCopy });
+  const actionErrorCopy = extractFn('screens/WinNowScreen.tsx', 'actionErrorCopy', { gateSignalFor: client.gateSignalFor, errorCopy });
   const E = (status, body) => new client.ApiError(status, body);
   eq(errorCopy(E(402, { error: 'pro_required', gate: 'lapsed' })), 'HTTP 402', '(why: the raw fallback)');
   eq(actionErrorCopy(E(402, { error: 'pro_required', gate: 'lapsed' })), '', '402');
@@ -1678,6 +1834,29 @@ check('9k. head-eng 2026-10-28 [executed + shape]: unknown verification renders 
     'idReady tracks RevenueCat\'s identity for THIS user');
   eq((strip(read(SUBS)).match(/subscriptionSessionState\(/g) || []).length, 2, 'one predicate, used by the render (via useSession) and by the tap');
   assert(!/isUnverifiedSession|session_verified/.test(main + ver), 'no second copy of the rule in the render or the tap');
+});
+
+check('8p. QA P1-1 [executed + shape]: flags off, the deck / landing / Win Now / R2b gate paths are today\'s — each derives the gate from gateSignalFor (null while off)', () => {
+  const V403 = { error: 'verification_required' };
+  const off = (status, body, p) => client0.gateSignalFor(new client0.ApiError(status, body), p);
+  eq(off(403, V403, '/api/trades/status'), null, 'noteDeckGateEnd: a 403 is no end (today\'s page failure path)');
+  eq(off(403, V403, '/api/trades/generate'), null, 'the landing fork: a 403 pushes as today');
+  const pure = load('utils/firstCardEvent.ts', {});
+  eq(pure.gateFailureReason(off(403, V403, '/api/trades/generate')), 'error', 'R2b: today\'s error');
+  const errorCopy = extractFn('screens/WinNowScreen.tsx', 'errorCopy', {});
+  const offCopy = extractFn('screens/WinNowScreen.tsx', 'actionErrorCopy', { gateSignalFor: client0.gateSignalFor, errorCopy });
+  const e403 = new client0.ApiError(403, V403, 'verification_required');
+  eq(offCopy(e403), errorCopy(e403), 'Win Now, off: today\'s error line for a 403');
+  assert(offCopy(e403) !== '', 'Win Now, off: not blanked');
+  const onCopy = extractFn('screens/WinNowScreen.tsx', 'actionErrorCopy', { gateSignalFor: client.gateSignalFor, errorCopy });
+  eq(onCopy(new client.ApiError(403, V403, 'verification_required')), '', 'Win Now, on: no line (the sheet opened)');
+  const code = strip(read(TRADES));
+  const fnText = (name) => { const at = code.indexOf(`function ${name}(`); return code.slice(at, code.indexOf('\n  }\n', at)); };
+  assert(/const signal = gateSignalFor\(e, '\/api\/trades\/status'\);/.test(fnText('noteDeckGateEnd')), 'noteDeckGateEnd reads gateSignalFor');
+  assert(/\.catch\(\(e\) => \{\s*const gate = gateSignalFor\(e, '\/api\/trades\/generate'\);/.test(code), 'the landing fork reads gateSignalFor');
+  eq((code.match(/\.isVerificationRequired\b/g) || []).length, 1, 'TradesScreen: only main\'s swipe-toast copy reads isVerificationRequired');
+  const win = strip(read('screens/WinNowScreen.tsx'));
+  assert(!/isVerificationRequired|isProRequired/.test(win), 'WinNowScreen reads no gate field directly');
 });
 
 function walk(dir, out = []) {

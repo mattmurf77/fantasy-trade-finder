@@ -432,6 +432,7 @@ function loadMain(rel, requireMap, globals = {}) {
   return mod.exports;
 }
 
+const gateFlags = { 'monetize.paywall': true };
 async function gateScenarios() {
   // The real client against a scripted fetch.
   const responses = [];
@@ -468,6 +469,9 @@ async function gateScenarios() {
     zustand: { create: zustandCreate },
     '../api/client': client,
     './useSession': { useSession: { getState: () => session } },
+    // The gate's switch (monetize.paywall): on for these scenarios, then off
+    // for the flags-off case below (release-lead QA P1-1).
+    './useFeatureFlags': { useFeatureFlags: { getState: () => ({ flags: gateFlags }) } },
     './tradeSearchTrace': traceProxy,
     '../utils/firstCardEvent': pure,
   });
@@ -517,6 +521,13 @@ async function gateScenarios() {
   cases.push(['a background 402 while a search is open → paywall (the deck settles it)',
     await run([{ status: 402, body: { error: 'pro_required', gate: 'preview_used' } }], { background: true, deck: deckPath }), 'paywall']);
   cases.push(['402 with no gate (an older server) → paywall', await run([{ status: 402, body: { error: 'pro_required' } }]), 'paywall']);
+  // Flags off (release-lead QA P1-1): main's R2b. The listener settles
+  // nothing (no sheet opens, nothing is held); the deck's existing failure
+  // path reports `error`, exactly as today.
+  gateFlags['monetize.paywall'] = false;
+  cases.push(['flags off: a 403 verification_required on /api/trades/generate → error (today\'s R2b)',
+    await run([{ status: 403, body: { error: 'verification_required' } }]), 'error']);
+  gateFlags['monetize.paywall'] = true;
   for (const [name, res, want, retried] of cases) {
     check(`10b. EXECUTED: ${name}`, res.out.length === 1 && res.reasons === want && (!retried || res.retried),
       `got [${res.reasons}]${retried && !res.retried ? ', and the call was not retried' : ''}`);
@@ -557,7 +568,7 @@ async function gateScenarios() {
 {
   const gateSrc = stripComments(read('state/usePaywallGate.ts'));
   check('10d. the router sends R2b FIRST in the gate listener, for a SEARCH route\'s find answer only, before it opens anything',
-    /export function handleGateSignal\(signal: GateSignal, path\?: string\): Promise<GateOutcome> \| void \{\s*if \(signal\.action !== 'verify_mismatch' && signal\.kind === 'find' && !!path && SEARCH_PATHS\.has\(path\)\) \{\s*const open = openSearchId\(\);\s*if \(open\) failFirstCard\(open, gateFailureReason\(signal\)\);\s*\}\s*if \(signal\.action === 'paywall'\)/.test(gateSrc)
+    /export function handleGateSignal\(signal: GateSignal, path\?: string\): Promise<GateOutcome> \| void \{\s*if \(!paywallGateOn\(\)\) return;\s*if \(signal\.action !== 'verify_mismatch' && signal\.kind === 'find' && !!path && SEARCH_PATHS\.has\(path\)\) \{\s*const open = openSearchId\(\);\s*if \(open\) failFirstCard\(open, gateFailureReason\(signal\)\);\s*\}\s*if \(signal\.action === 'paywall'\)/.test(gateSrc)
       && /const SEARCH_PATHS: ReadonlySet<string> = new Set\(\['\/api\/trades\/generate', '\/api\/trades\/fair-packages'\]\);/.test(gateSrc)
       && /outcome = _onProRequired\(signal, _pathname\(path\)\);/.test(stripComments(read('api/client.ts'))));
   const deckR2b = trades.match(/failDeckSearch\(gateFailureReason\(gateSignalFor\(e, '\/api\/trades\/(generate|fair-packages)'\)\)\);/g) || [];

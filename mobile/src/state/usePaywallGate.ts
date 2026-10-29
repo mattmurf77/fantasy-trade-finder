@@ -3,6 +3,7 @@ import { create } from 'zustand';
 
 import {
   setOnProRequired,
+  setPaywallGateOn,
   type GateKind,
   type GateOutcome,
   type GateSignal,
@@ -10,6 +11,7 @@ import {
 import type { PaywallSource, VerifyPath } from '../copy/monetization';
 import { gateFailureReason } from '../utils/firstCardEvent';
 import { failFirstCard, openSearchId } from './tradeSearchTrace';
+import { useFeatureFlags } from './useFeatureFlags';
 import { useSession, type SavedUser } from './useSession';
 
 // The paywall router (#393 M1; D1, D3, D9, D15–D18).
@@ -245,6 +247,9 @@ const SEARCH_PATHS: ReadonlySet<string> = new Set(['/api/trades/generate', '/api
 
 /** The client.ts seam handler. Exported for the structural check. */
 export function handleGateSignal(signal: GateSignal, path?: string): Promise<GateOutcome> | void {
+  // Belt and braces: the client already sends nothing while the gate is off
+  // (no R2b settle, no open).
+  if (!paywallGateOn()) return;
   // R2b (analytics-lead's grant): a search route's gate answer settles the
   // open search the moment it arrives, before the paywall or the sheet
   // shows. Later, the verify hold would turn it into `timeout`, `abandoned`
@@ -266,7 +271,15 @@ export function handleGateSignal(signal: GateSignal, path?: string): Promise<Gat
 }
 
 /** App start (App.tsx): wire the client seam to this router. */
+/** The gate's on switch: `monetize.paywall`, read synchronously from the
+ *  flags store the way useFlag does. Unknown (not loaded, or absent) is off:
+ *  while it's off every gate path is today's (api/client's setPaywallGateOn). */
+export function paywallGateOn(): boolean {
+  return useFeatureFlags.getState().flags['monetize.paywall'] === true;
+}
+
 export function installPaywallGate(nav: GateNavigator): void {
   _nav = nav;
+  setPaywallGateOn(paywallGateOn);
   setOnProRequired(handleGateSignal);
 }
