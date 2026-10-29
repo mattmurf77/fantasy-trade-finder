@@ -80,13 +80,29 @@ const NEW = [
   { id: 'settings.hub.notifications',    file: 'SettingsHubScreen.tsx',  why: 'hub group row' },
   { id: 'settings.hub.account',          file: 'SettingsHubScreen.tsx',  why: 'hub group row' },
   { id: 'settings.hub.about',            file: 'SettingsHubScreen.tsx',  why: 'hub group row' },
+  // Added later by #354 BL-10 (D-3), not this plan: the feedback inbox row's
+  // public home on Help & about (it had no testID while it sat under Testing).
+  { id: 'settings.feedback-inbox',       file: 'AboutSection.tsx',       why: '#354 BL-10 feedback inbox row on Help & about' },
+  // #354 review items, also not this plan: the plain Credits block on Help &
+  // about (design-lead change 2), and the Testing page's honest unavailable
+  // line for a non-tester deep link (D-7), with its "Back to Settings"
+  // button (marketing-lead copy addendum 6A).
+  { id: 'settings.credits',              file: 'AboutSection.tsx',       why: '#354 Credits block on Help & about' },
+  { id: 'settings.testing-unavailable',  file: 'SettingsTestingScreen.tsx', why: '#354 D-7 Testing page unavailable line' },
+  { id: 'settings.testing-unavailable.back', file: 'SettingsTestingScreen.tsx', why: 'addendum 6A Back to Settings on the unavailable page' },
 ];
 
 // The Testing hub row is the seventh group row but is gated
-// (`__DEV__ || testing.stage_users`), so it is listed apart from the six
-// that every release build renders.
+// (useTesterSurface(): `__DEV__ || testing.stage_users ||
+// testing.timing_readout`, #354 D-7), so it is listed apart from the six
+// that every release build renders. The timing readout (#363, ruling 11)
+// is gated by its own `testing.timing_readout` flag; its id is the
+// component's default testID, so it lives in TimingReadoutRow.tsx, and
+// check-settings-ia.js T1 pins that the Testing page mounts it unchanged.
 const NEW_GATED = [
   { id: 'settings.hub.testing', file: 'SettingsHubScreen.tsx', why: 'hub group row, dev/tester builds only' },
+  { id: 'settings.testing.timing-readout', file: 'TimingReadoutRow.tsx',
+    why: '#363 timing readout, after TestingSection on Settings › Testing (testing.timing_readout)' },
 ];
 
 // Dies with the modal presentation (plan §5, §8).
@@ -222,7 +238,7 @@ const inNewTree = (id) => [...(idsToFiles.get(id) || [])].some((f) => f.startsWi
   };
 
   check(NEW, 'new testIDs (version row + identity block + the six release hub rows)');
-  check(NEW_GATED, 'new gated testID (Testing hub row)');
+  check(NEW_GATED, 'new gated testIDs (Testing hub row, timing readout)');
 }
 
 // ── 3. settings.close-btn is gone, everywhere ─────────────────────────────

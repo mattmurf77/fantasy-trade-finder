@@ -256,40 +256,30 @@ assert(
 
 // ══ 3. #298 — a property on events that already fire, not a new name ══════
 
+// RE-KEYED 2026-10-23 (time to suggestion R1, addendum v2): find_trades_tapped
+// now fires AT THE TAP with a client `search_id`, so it has ONE emitter —
+// `beginTradeSearch` in state/tradeSearchTrace.ts — called by every
+// search-starting control. TradesScreen calls it from handleFindTrades (both
+// CTAs and every in-deck retry) with the ONE deckMode derivation; the #330
+// auto-run and the fair sweep no longer emit at dispatch (the canvas,
+// League Summary and Usage Trends taps did, in their own files).
+const TRACE = path.join(ROOT, 'mobile/src/state/tradeSearchTrace.ts');
+const traceText = fs.readFileSync(TRACE, 'utf8');
 const findTapped = trackPropKeys(tradesText, 'find_trades_tapped');
 assert(
-  findTapped.length === 3,
-  '#298 all find_trades_tapped call sites are accounted for',
-  'expected 3 (handleFindTrades, shared by both layout CTAs + the #330 '
-    + 'auto-run emit in the choke-point effect + the #384 W6-B fair-package '
-    + `sweep, which is a find-trades dispatch with no job), saw ${findTapped.length}`,
+  findTapped.length === 0 && trackPropKeys(traceText, 'find_trades_tapped').length === 1,
+  '#298/R1 find_trades_tapped has exactly one emitter (beginTradeSearch), none left in TradesScreen',
+  `TradesScreen has ${findTapped.length} direct emitters — a dispatch-time emitter double-counts the tap`,
 );
 assert(
-  // W6-B (D-153) — the fairness-only sweep is still a search the user asked
-  // for, so it fires the SAME event with the same attributable source and the
-  // ONE deckMode derivation. A sweep that fired nothing would make the
-  // calculator's conversion look like it stopped converting.
-  (tradesCode.match(
-    /track\('find_trades_tapped', \{ source, mode: deckMode \}, 'Trades'\)/g,
-  ) || []).length === 1
-    && /async function runFairPackages\([\s\S]*?source: string = 'calculator',/.test(tradesCode)
-    && /if \(!lastFairRequestRef\.current\) \{\s*track\('find_trades_tapped'/.test(tradesCode),
-  "#384 the fair sweep defaults to source:'calculator'; named retries emit once with their actual source",
-  'a synchronous sweep that skips the event is a search that vanishes from the funnel',
+  /beginTradeSearch\(\{\s*source: source \?\? \(isDeepLinkDeck \? 'deep_link' : undefined\),\s*mode: deckMode,/.test(tradesCode),
+  "#298 handleFindTrades begins the search with `mode: deckMode`, with or without a `source`",
 );
 assert(
-  // #384 — the auto-run emitter now attributes the calculator's hand-off too
-  // (`source` is a ternary over the armed origin); `mode` still reads the
-  // ONE deckMode derivation.
-  (tradesCode.match(
-    /track\(\s*'find_trades_tapped',\s*\{\s*source: autoRunOrigin === 'calculator' \? 'calculator' : 'league_offer',\s*mode: deckMode,\s*\},\s*'Trades',?\s*\)/g,
-  ) || []).length === 1,
-  "#330 the third emitter is the auto-run's source:'league_offer' (or 'calculator') dispatch, reading the same deckMode",
-  'a third emitter with its own mode derivation is how the arms come to disagree; details pinned by check-offer-prefill-330.js S-3',
-);
-assert(
-  /source \? \{ source, mode: deckMode \} : \{ mode: deckMode \}/.test(tradesText),
-  '#298 handleFindTrades sends `mode` with or without a `source`',
+  /async function runFairPackages\([\s\S]*?source: R1Source = 'calculator',/.test(tradesCode)
+    && /let claimedFair = claimPendingSearch\(\);\s*if \(!claimedFair\) \{\s*beginTradeSearch\(\{ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' \}\);/.test(tradesCode),
+  "#384 the fair sweep claims its tap's search; an untapped sweep begins one (default source:'calculator')",
+  'a synchronous sweep with no search is a search that vanishes from the funnel',
 );
 assert(
   countOf(tradesCode, 'onPress={() => handleFindTrades()}') === 2,
@@ -324,7 +314,7 @@ assert(
 const CROSS = [
   ['league_team_closed', leagueText, true],
   ['lineup_impact_unavailable', calcText, true],
-  ['find_trades_tapped', tradesText, false],
+  ['find_trades_tapped', traceText, false],
 ];
 for (const [name, text, exact] of CROSS) {
   const registered = taxonomyProps(name);

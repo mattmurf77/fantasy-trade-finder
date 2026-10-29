@@ -280,9 +280,10 @@ inputs beyond the one throw-in check noted below:
    piece the viewer receives and on the partner's published board
    (`snapshot.partner_boards`) for a piece the partner receives. Apart from that
    check the core sees market values, rosters, roster rules, untouchables and
-   pins only: no personal board and no windows. It is bounded by an 8 s time
-   budget, 40,000 checks per partner and `vc_max_per_partner` kept trades per
-   partner.
+   pins only: no personal board and no windows. It is bounded by its check and
+   keep caps only (40,000 checks per partner and `vc_max_per_partner` kept
+   trades per partner), never by the clock, so machine load cannot change a
+   deck. A 30 s safety ceiling (`core.SAFETY_CEILING_S`) marks pathology only.
 2. **Ranking (`windows.py`, `ranking.py`, `deck.py`), order plus variety.** Each fair
    trade gets three scores in [0, 1]. **Value** is the size of the return and
    whether a real piece comes back. **Outlook** is the fit with both teams'
@@ -415,7 +416,9 @@ the same seat, built from the same DB reads the bench uses —
 app's own engine; the one place server-path code imports from `backend/eval/`)
 → `league_record` → `snapshot_for_seat` — with standings, lineup slots and
 roster limit overridden from `ServerInputs`. Fewer than 10 ⇒ `failed` with
-`value_core_too_few`; an exception ⇒ logged, `failed` with `value_core_failed`.
+`value_core_too_few`; an exception ⇒ logged, `failed` with `value_core_failed`;
+a run that hit the core's safety ceiling (a partial pool) ⇒ ERROR log, `failed`
+with `value_core_failed`, no cards.
 
 **Blinding, by construction.** Cards from both arms are merged by
 (partner, give set, receive set) — a trade both engines produced is one card
@@ -574,6 +577,21 @@ Contested and orphaned slots are withheld from priced reads by a **row filter** 
 **M-C (flag `picks.assign_tradeable`, 2026-08-08 — [build-w3-mc.md](plans/draft-extensions/build-w3-mc.md))** opts all seven read sites in at once through one helper, `server._pick_read_source()`, and collapses the two duplicated **three-clause** engine literals into `server._owned_picks_available()` — whose ESPN clause is now a DATA test (`has_assigned_picks`) rather than a platform test. `picks_supported` follows the same rule. Every payload that prices a pick carries `source: "platform" | "user"` (+ `season`); the flag off restores the platform-only default and removes the fields, byte for byte.
 
 
+**Roster refresh and fingerprint stamp (S0, [scope](plans/trade-time-to-suggestion/scope-eng-s0-fetch.md) §B.3).** Session init's authoritative Sleeper read (rosters, users, league meta; `session_input.resolve_session_input`) is the league's roster refresh. Its rosters and meta are handed to the background daemon (no second read), and the meta seeds `_FA_LEAGUE_META_CACHE`. The daemon replace-syncs Sleeper `league_members`, syncs owned picks and draft state, then `roster_refresh.record_outcome` writes `league_roster_state` (`fresh`). A failed read writes `stale` + `last_error_code` and never touches the rows. `roster_refresh.maybe_refresh_async` re-runs the same Sleeper segment as a single-flight background kick when a league is past the roster bound (P41). Every server-side Sleeper read passes one per-process 429 circuit (`backend/sleeper_http.py`). **After a `fresh` write, both refreshes stamp the fingerprint on their own background thread** (PR-B, `roster_refresh.stamp`):
+
+```
+rows committed -> record_outcome: mark_league_roster_fresh
+  -> stamp: old = league_roster_state.roster_fp
+            new = roster_snapshot(conn, league, pick_source=server._pick_read_source()).fp   (trades-eng's rfp1)
+            new == old                    -> done (no write, no hook)
+            cas_league_roster_fp(old,new) -> UPDATE ... WHERE roster_fp = old (IS NULL on the first stamp)
+            lost (another refresh won)    -> done (no hook)
+  -> after commit, no lock held: roster_snapshot.on_roster_change(league, old, new)
+       -> trades-eng's handler (server._invalidate_league_trade_jobs_on_roster_change)
+```
+
+The stamp never raises and never changes the recorded outcome. A fingerprint error leaves `roster_fp` as stored. ESPN/MFL/Fleaflicker leagues are not refreshed here, so they are never stamped. Their imports, the user pick-assignment routes and `_refresh_sleeper_members` write fingerprint inputs without firing the hook, and the serve recomputes `rfp1` from rows either way (scope §B.6).
+
 ## Components
 
 ### Backend (`backend/`)
@@ -623,6 +641,7 @@ Contested and orphaned slots are withheld from priced reads by a **row filter** 
 | `blind_grading.py` | new (2026-10-02) | **Calibration — in-app blind grading, value-core Gate 2 (flag `grading.blind` — on for every app user; the flag is the kill switch)**, [scope](plans/blind-grading/scope.md) / [PRD](plans/blind-grading/prd.md) / [HLD](plans/blind-grading/hld.md) / [LLD](plans/blind-grading/lld.md) / [specs](plans/blind-grading/specs.md). Leaf service: imports `database` at module level, `eval.value_core_bench` / `value_core.*` / `trade_service` lazily, never `server` or `tools`. Owns arm sourcing (current arm from the caller's served `deck_impressions`; value-core arm from `read_league_inputs` → `league_record` → `snapshot_for_seat` → `pipeline.run` with default config), merge by (partner, give set, receive set), the secret-seed shuffle, **`neutral_trade` — the only producer of `trade_json`**, answer validation (`TAGS`, 1–5 or skip) and scoring (`summarize` / `arm_summaries`, the `blind_grade._score` arithmetic). Two-phase build: `start_session` (request thread, 202 + `building`) and `build_session` (daemon thread; `open` or `failed`, never raises). Routes in `server.py` only gate (`_grading_gate` → 404) and gather `ServerInputs`; `GET /api/admin/grading/report` is the lead's readout and `POST /api/admin/grading/pregenerate` (`blind_grading.pregenerate`) pre-builds a session for every user with a fresh deck. Writes only `grading_sessions` / `grading_cards`. [§ Calibration](#calibration-blind-grading) |
 | `deck_quality.py` | new (2026-10-14) | **Live-deck quality filters** (flag `deck.quality_filters`, D-207). Pure: given the served cards in order, market / position lookups, team rosters and the lineup template, it returns the kept cards plus `{breakup, filler, redundant, deferred}` counts. The rules match the value core's (`value_core/core.py`): breakup 0.70, filler max(450, 25% of the headliner), redundant TE/QB at 0.70 with the superflex slot counted. It adds a repeat cap of 3 per asset in the first 30 cards, deferring rather than dropping. Called once in `server._run_trade_job` after owner presentment, before the served/ghost split. Protected cards are untouched; presentation records follow the re-order (`_records_in_order`). |
 | `fit_engine.py` | new (2026-10-09) | **Fit-first trade generation, two approaches under test** ([scope](plans/fit-scorecard/scope.md), D-200). Every asset gets a **team value** per team; a trade is kept only when both sides gain by their own team value (B: neither loses), and `value_core.core.evaluate_trade` still applies every hard rule. Approach A (`fit_a`): market × window × need × board multipliers. Approach B (`fit_b`): dynasty / redraft grades (redraft = rest-of-season value over replacement from Sleeper's weekly projections) × team profiles (outlook, positional need, redraft/dynasty priority), candidates restricted to each side's sells meeting the other's buys. Pure: no I/O except `fetch_ros_points` (transport injected). Used only by `blind_grading.add_fit_arms` (Calibration arms `fit_a` / `fit_b`) and `eval/fit_scorecard_test.py`; never serves Acquire. |
+| `daily_tick.py` | new (2026-10-22, ~100) | **Daily-tick runner** (S3 fix, [scope](plans/daily-tick-fix/scope.md)): the serial, single-flight step runner behind `POST /api/cron/daily-tick`. `start()` runs the step table it is handed on ONE `daily-tick-runner` daemon thread, isolates each step, and logs one `daily-tick step=` line per step. Imports nothing from `server`; the step table and step bodies stay in `server.py` (§ Cron ticks → Daily-tick runner) |
 
 ### Backend support files
 
@@ -722,9 +741,32 @@ External scheduler (Render cron) hits four endpoints:
 |---|---|---|
 | `POST /api/cron/realtime-tick` | every 1–5 min | Drain `notification_queue` rows whose `deliver_after` has passed |
 | `POST /api/cron/hourly-tick` | hourly | Bundle drain + quiet-hours summary push at user's local 8am |
-| `POST /api/cron/daily-tick` | once daily | Weekly digests + re-engagement scans (`winback_dormant`-style kinds) |
+| `POST /api/cron/daily-tick` | once daily (13:30 UTC) | 202 at once; a single-flight runner thread then runs nine steps serially: roster snapshots, Usage Trends store, receipts grading, rookie class-load monitor, player-cache guard, re-engagement scans, deck replenishment (deferred: a hard skip since 2026-10-23), eval nightly, value-model refit (see *Daily-tick runner* below) |
 | `POST /api/cron/value-snapshot` | once daily | Upsert consensus value of every universal-pool player into `player_value_history` (#57). Kept separate from `daily-tick` so a push-scan failure can't stop history collection. **NOT provisioned in `render.yaml`** — a dedicated `value-snapshot-daily` cron was added 2026-07-26 and reverted the same day (`1e50d3e`, broke blueprint sync). The **operative mechanism is `hourly-tick`'s idempotent fallback guard** (shared `_write_daily_value_snapshots`), which writes today's snapshot whenever a format is missing — cadence is guaranteed by the existing hourly cron alone. (This row previously claimed the dedicated cron existed; corrected 2026-08-14 as part of ADR-011 — the runbook § value-snapshot monitoring had the truth all along.) |
 | `POST /api/cron/roster-snapshot` | none (manual/external lever) | ADR-011 Writer C: force the weekly league-state snapshot sweep by hand (daemon + budget, idempotent per `period_key` via the existing `'weekly'` rows). Nothing schedules it — the scheduled path is a weekday-gated pass inside `daily-tick` (Writer B), and the on-sync writer (A) needs no scheduler at all. When a cron migration lands, provisioning this route is a one-line workflow addition. |
+
+### Daily-tick runner (S3 fix, 2026-10-22)
+
+[Scope](plans/daily-tick-fix/scope.md) · [code-walk](plans/daily-tick-fix/code-walk.md). Render's `notif-daily-tick` cron is an HTTP POST into the one sync gunicorn worker (`--workers 1 --timeout 120`), so the tick must never do its work on the request thread; done inline, it was killed at 120 s every day.
+
+- **Wiring:** `cron_daily_tick` runs `_require_cron_auth()`, takes `now`, calls `daily_tick.start(_daily_tick_steps(), now, log=log)` and returns `202 {ok, started}`. `backend/daily_tick.py` holds a module lock taken non-blocking (a second tick while one runs gets `started: false` and a warning with the run's age) and runs the table on one `daily-tick-runner` daemon thread. Each step is wrapped in `try/except Exception` and logs `daily-tick step=<key> ms=<int> outcome=<ok|skipped|error> detail=<…>`; the lock is released in `finally`.
+- **Step table** (`server._daily_tick_steps()`, in run order; permanent-loss writers first, CPU-heavy last):
+
+  | # | Key | Runs | Gate (read at run time) |
+  |---|---|---|---|
+  | 1 | `roster_snapshot` | `_run_roster_snapshot_sweep` (ADR-011 Writer B) | `market.roster_history`; `FTF_ROSTER_SNAPSHOT_WEEKDAY` `>=` gate |
+  | 2 | `usage_trends` | `_run_usage_refresh` → `usage_trends_refresh.refresh_usage_weeks` | `usage_trends.enabled`; `_usage_refresh_lock` |
+  | 3 | `receipts_grade` | `receipts_service.run_grading(trigger="daily_tick")` | `receipts.grading` / `FTF_RECEIPTS_GRADE`; `is_running()` |
+  | 4 | `rookie_monitor` | `_check_rookie_class_load(_CURRENT_SEASON + 1)` | none |
+  | 5 | `players_guard` | `_players_refresh_worker` | `_IS_PROD_ENV` and cache past TTL; `FTF_PLAYERS_REFRESH`; `_players_refresh_active` |
+  | 6 | `reengagement` | the winback / finish_ranking / season_start user scan | per-kind caps in `_send_typed_push` |
+  | 7 | `replenishment` | **deferred (2026-10-23):** hard skip, `detail=deferred: C2`; `_run_weekly_replenishment(now)` is not called | none: the flag is not read. Re-enabled = `deck.replenishment`; `replenish_weekday` `>=` gate, after C2 and the self-renewal fix |
+  | 8 | `eval_nightly` | `eval.nightly.run_all(window_days=30)` | none (idempotent per UTC day) |
+  | 9 | `value_model_refit` | `_value_model.nightly_refit(now=now)` | `deck.value_model` |
+
+  Steps 1, 2, 3 and 5 are inline entries (`_daily_tick_<key>`) beside their async wrappers: same gates, same lock or single-flight, same body, so the dedicated `/api/cron/roster-snapshot`, `/usage-trends-refresh`, `/receipts-grade` and `/players-refresh` routes are unchanged.
+- **In-process by design.** The rejected alternative (A) was running the steps in the cron service's own process. It is deferred, as a post-launch follow-up once the helpers are extracted out of `server.py`, for two reasons. Three steps are tied to web-process state: the players guard (the on-disk cache plus `_pool_generation`), replenishment (`_sessions` plus `_trade_jobs`) and the refit (the served `models.jsonl`). And importing `server.py` runs `init_db()` and starts `_cleanup_loop` and the Win Now worker.
+- **Limits:** a hung step blocks the steps after it and, through single-flight, the next day's run; a worker restart mid-run loses the rest of that run (steps are idempotent and the weekday gates are `>=`, so the next day retries). Runbook § Cron schedule has the log format and the liveness checks.
 
 ## Event recording
 
@@ -776,8 +818,10 @@ available to pending/swipe routes and suppression sees live decisions. Ranking
 services retain execution-time reads; player objects, other request service
 mutations, DB preferences and feature/config reads are not immutable snapshots.
 This is a limited in-process prerequisite, **not** stateless request handling,
-durable jobs, full thread safety, or a separate worker. One Gunicorn worker and
-all generation/timing policies remain unchanged. See the [implementation record](plans/budget-scalability/implementation.md).
+durable jobs, or a separate worker. Thread safety for the single worker's four
+`gthread` threads comes from E1's locks (`RankingService`, single-flight session
+init, the shared dicts and job safety; [E1](plans/e1-concurrency/scope.md)). One
+Gunicorn worker and all generation/timing policies remain unchanged. See the [implementation record](plans/budget-scalability/implementation.md).
 
 Trade-job revocation epochs are captured before input reads and retained through
 admission, worker publication and copied public responses. Kickoff adds the

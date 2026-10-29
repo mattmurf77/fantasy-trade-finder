@@ -18,6 +18,7 @@ import math
 import os
 import threading
 import time
+import zlib
 from datetime import datetime, timezone
 
 try:
@@ -26,10 +27,11 @@ except ImportError:                # pragma: no cover
     ZoneInfo = None  # type: ignore
 
 from sqlalchemy import (
-    Column, Float, Index, Integer, MetaData, String, Table, Text, UniqueConstraint,
-    create_engine, delete, func, insert, literal, or_, select, update, and_, text,
+    Column, Float, Index, Integer, LargeBinary, MetaData, String, Table, Text, UniqueConstraint,
+    case, create_engine, delete, func, insert, literal, or_, select, update, and_, text,
 )
 from sqlalchemy import event as sa_event
+from sqlalchemy.types import TypeDecorator
 from datetime import timedelta
 
 # #158 — shared pick ladder + owned-pick pool_value reconciliation. Lives in a
@@ -633,6 +635,26 @@ league_members_table = Table("league_members", metadata,
     UniqueConstraint("league_id", "user_id", name="uq_league_member"),
 )
 
+# S0 (launch §3a) — the per-league roster refresh record. One row per league,
+# written by the session-init Sleeper refresh (success: 'fresh' + refreshed_at;
+# a failed read: 'stale' + last_error_code — the last good rows are never
+# touched on failure). The row only ever holds 'fresh' | 'stale' (fingerprint
+# contract v0.3 §3): "missing" is DERIVED by trades-eng's roster_snapshot from
+# absent league_members rows, never stored, so rows that arrive by another
+# path can't be blanked by a stale stored verdict.
+# roster_fp is NULL until the PR-B stamp writes trades-eng's rfp1 fingerprint.
+# League-keyed, no user_id: not part of account deletion/export. New table, so
+# metadata.create_all creates it on both dialects — no migration_cols row.
+# Scope: docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md §B.2.
+league_roster_state_table = Table("league_roster_state", metadata,
+    Column("league_id",       String, primary_key=True),  # platform-native id (leagues PK semantics)
+    Column("roster_fp",       String),                    # "rfp1:…" — PR-B; NULL until stamped
+    Column("refreshed_at",    String),                    # ISO UTC: fetch start of the last fully committed refresh
+    Column("status",          String, nullable=False),    # 'fresh' | 'stale' (never 'missing': derived, contract v0.3)
+    Column("last_error_code", String),                    # closed set (sleeper_http.classify + picks_unavailable/write_failed); NULL after success
+    Column("updated_at",      String, nullable=False),    # ISO UTC of this write
+)
+
 # FB-147 — Sleeper trade-block snapshot, per league. One row per asset a
 # manager currently has "on the block" in the Sleeper app. Replaced
 # atomically on every sync (delete + insert, snapshot semantics like
@@ -926,7 +948,9 @@ Index(
 # sort-key multiplier ACTUALLY applied to this card (1.0 when ordering was
 # off/deterministic) — the off-policy-evaluation prerequisite.
 deck_impressions_table = Table("deck_impressions", metadata,
-    Column("impression_id", String,  primary_key=True),  # uuid4 hex, minted at serve
+    # uuid4 hex, minted at build; a packed-evidence deck's non-ghost card has
+    # contract.card_impression_id = "<deck_job_id>:<card_index>" (R4.2 U2).
+    Column("impression_id", String,  primary_key=True),
     Column("user_id",       String,  nullable=False),    # user the deck was served to
     Column("league_id",     String,  nullable=False),
     Column("deck_job_id",   String,  nullable=False),    # _trade_jobs job_id
@@ -1068,6 +1092,31 @@ deck_impressions_table = Table("deck_impressions", metadata,
     Column("trade_concept_id",          String),
     Column("policy_variant",            String),
     Column("source_like_impression_id", String),
+    # ── deferred evidence (ADR-025 stage 1; flag trade.first_page_store) ──
+    # Which evidence rule wrote this row. Set only on rows written at delivery
+    # from a deferred job's build-time snapshot (server._DeckEvidence); NULL on
+    # every row written at build (flag off, or a live-mode job) and on
+    # pre-change rows. Ruling 17's precedence, highest first:
+    #   'ghost'        C5: never delivered; a narrow row, even inside the first 30
+    #   'first30'      C4: card_index < 30, full whether delivered or not
+    #   'delivered'    a card past the first 30 sent to a client
+    #   'archive'      C8: an undelivered card past the first 30 of a 2% deck
+    #                  (eval contract.is_archive_deck)
+    #   'full_interim' stage 1 only, at archive's rank: the same card on any
+    #                  other deck, written full until packing replaces it
+    # 'partial_run' overrides them all (ruling 21; replay excludes it): every
+    # row of a run that ended partial (error, timeout, supersede), and of a
+    # deck first delivered after its job left the process with cards past
+    # the stored ones (S1b). A card S0's I-1 dropped is never written (C-b).
+    # A later delivery raises only 'archive' and 'full_interim' to
+    # 'delivered'. No row is deleted: C8's archive retention waits for the
+    # packing stage (models-lead R2.6 S2).
+    Column("evidence_tier",             String),
+    # ISO UTC: when this card was first sent to a client (any tier, first30
+    # included). NULL for an undelivered card (first30, archive, full_interim),
+    # a ghost, and every row written at build (granted by head-eng, G2) but a
+    # live-mode page-scoped deck's, stamped at each delivery (#417 P2-1).
+    Column("delivered_at",              String),
 )
 
 Index(
@@ -1079,6 +1128,12 @@ Index(
     "ix_deck_impressions_job",
     deck_impressions_table.c.deck_job_id,
 )
+# C8 retention (ADR-025) has no index yet: the archive partial index arrives
+# with stage-2 packing, which restores the purge (models-lead R2.6 S2). Build it
+# then with CREATE INDEX CONCURRENTLY off the boot path (an operator one-off or
+# a migration script, with a lock_timeout), never in _migrate_db: a plain
+# CREATE INDEX on prod's deck_impressions blocks writes for a full scan and
+# can outlast gunicorn's 120 s boot timeout.
 
 # Private debug evidence, content-addressed within one user/job. Core card
 # evidence and labels remain on deck_impressions; only debug snapshots expire.
@@ -1110,6 +1165,13 @@ deck_candidate_sets_table = Table("deck_candidate_sets", metadata,
     Column("set_hash",         String,  nullable=False),
     Column("candidates_json",  Text,    nullable=False),
     Column("created_at",       String,  nullable=False),    # ISO UTC
+    # Candidate-set packing (eng-evidence-contract §9, head-eng ruling 25;
+    # flag trade.packed_evidence): evidence_pack.pack_candidates' bytes and
+    # version, stored verbatim. candidates_packed IS NOT NULL is authoritative:
+    # a packed row stores candidates_json = '' (it stays NOT NULL), and readers
+    # never parse that ''. NULL on legacy rows and on a set that didn't pack.
+    Column("candidates_packed", LargeBinary),
+    Column("cand_pack_version", Integer),
 )
 
 Index(
@@ -1118,11 +1180,163 @@ Index(
     deck_candidate_sets_table.c.league_id,
 )
 
+
+class CompressedJSON(TypeDecorator):
+    """JSON stored zlib-compressed in a binary column (BLOB / BYTEA).
+
+    Bind: bytes pass through, so a writer can compress once and count the
+    bytes; any other value is JSON-encoded and compressed here. Result: the
+    decoded JSON, or None when the bytes do not decode. A read (the page
+    serve, the account export) therefore never raises on a bad row, and the
+    export archive stays JSON.
+    """
+    impl = LargeBinary
+    cache_ok = True
+
+    @staticmethod
+    def encode(value) -> bytes:
+        return zlib.compress(json.dumps(value, separators=(",", ":")).encode("utf-8"))
+
+    def process_bind_param(self, value, dialect):
+        if value is None or isinstance(value, (bytes, bytearray, memoryview)):
+            return value
+        return self.encode(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        try:
+            return json.loads(zlib.decompress(bytes(value)))
+        except (zlib.error, ValueError, TypeError) as err:
+            log.warning("compressed JSON column does not decode: %s", err)
+            return None
+
+
+# ── P1 first-page store (flag trade.first_page_store) ───────────────────────
+# docs/plans/trade-time-to-suggestion/scope-eng-200ms.md §2, §6.2, §7. One row
+# per (user, league, format, request_scope): the first trade_pages_stored ×
+# trade_page_size cards of the latest complete organic job, in final served
+# order, plus the stamps the serve compares (roster_fp, values_snapshot_id,
+# engine_version, config_signature, experiment_digest). Read and written only by server.py while
+# the store is on (the flag and the first_page_store_enabled knob). user_id is
+# the account deletion/export key
+# (accounts._ADDITIONAL_PRIVATE_TABLES). Upserted by save_trade_page with a
+# supersede guard: a row is replaced only by one built at the same time or
+# later. An input change (rankings, preferences, dispositions) marks rows
+# state='stale' and advances built_at to the change (mark_trade_pages_stale),
+# so no deck admitted before it can overwrite the mark. A roster move needs no
+# mark: the serve compares roster_fp. evidence_blob holds a deferred deck's
+# build-time evidence for its stored cards (server._DeckEvidence, ADR-025
+# stage 1), shrunk as rows are written at delivery; NULL for a deck with none.
+trade_page_store_table = Table("trade_page_store", metadata,
+    Column("id",                 Integer, primary_key=True, autoincrement=True),
+    Column("user_id",            String,  nullable=False),
+    Column("league_id",          String,  nullable=False),
+    Column("scoring_format",     String,  nullable=False),
+    Column("request_scope",      String,  nullable=False),   # "organic:f=0.50"
+    Column("roster_fp",          String,  nullable=False),   # rfp1 at the job's kickoff
+    Column("values_snapshot_id", String,  nullable=False),   # vsn1 at the job's kickoff
+    Column("engine_version",     String,  nullable=False),
+    Column("config_signature",   String,  nullable=False),   # the job's request signature
+    Column("experiment_digest",  String,  nullable=False),   # the user's deck-affecting experiment variants
+    Column("deck_job_id",        String,  nullable=False),
+    Column("built_at",           String,  nullable=False),   # ISO UTC, the job's admission
+    Column("expires_at",         String,  nullable=False),   # ISO UTC, earliest stored card expiry
+    Column("last_served_at",     String,  nullable=True),    # ISO UTC
+    Column("card_count",         Integer, nullable=False),
+    Column("pages_blob",         CompressedJSON, nullable=False),  # {"v", "opponents_total", "cards"}
+    Column("evidence_blob",      CompressedJSON, nullable=True),   # same BLOB / BYTEA type
+    Column("stored_bytes",       Integer, nullable=False),   # len(pages_blob) + len(evidence_blob)
+    Column("state",              String,  nullable=False),   # "ready" | "stale"
+    UniqueConstraint("user_id", "league_id", "scoring_format", "request_scope",
+                     name="uq_trade_page_store_scope"),
+)
+
+Index("ix_trade_page_store_last_served", trade_page_store_table.c.last_served_at)
+Index("ix_trade_page_store_league", trade_page_store_table.c.league_id)
+
+# ── P2 deck lineage (flag trade.first_page_store) ───────────────────────────
+# One row per organic deck: (user_id, deck_job_id) and the scope it is built
+# under. Inserted (insert-or-ignore, record_trade_deck_lineage) by the deck's
+# job worker when it starts, before the engine runs (best-effort, its own
+# transaction), so a deck still running at a restart has one too.
+# /api/trades/status?deck=D reads the requester's row when D's job is gone
+# from this process and no page row is D's own (a deploy restarts the one
+# worker): the row proves D organic and names its scope, so D is rebased
+# instead of 404. Purged after 24 h by the page-store eviction pass. user_id
+# is the account deletion/export key (accounts._ADDITIONAL_PRIVATE_TABLES).
+trade_deck_lineage_table = Table("trade_deck_lineage", metadata,
+    Column("id",             Integer, primary_key=True, autoincrement=True),
+    Column("user_id",        String,  nullable=False),
+    Column("deck_job_id",    String,  nullable=False),
+    Column("league_id",      String,  nullable=False),
+    Column("scoring_format", String,  nullable=False),
+    Column("request_scope",  String,  nullable=False),   # "organic:f=0.50"
+    Column("recorded_at",    String,  nullable=False),   # ISO UTC (page_store_iso): the first page write
+    UniqueConstraint("user_id", "deck_job_id", name="uq_trade_deck_lineage_deck"),
+)
+
+Index("ix_trade_deck_lineage_recorded", trade_deck_lineage_table.c.recorded_at)
+
+# ── C-b withdrawals (models-lead R2.4 addendum §2; head-eng's schema grant) ──
+# One row per card S0's I-1 withdrew from a packed-evidence deck at a serve
+# (flag trade.first_page_store / trade.packed_evidence only), keyed by its
+# build index. Append-only: insert-or-ignore, the first withdrawal wins
+# (record_deck_withdrawals). `served_before` is 1 when an earlier response had
+# delivered the card. A withdrawn card is never served again in that deck (the
+# sticky drop): the serve reads this table once per deck after the deck's job
+# has left the process. Eval removes a never-delivered withdrawal (W0) from the
+# deck; one delivered before keeps its position. user_id is the account
+# deletion/export key (accounts._ADDITIONAL_PRIVATE_TABLES). New and empty:
+# create_all makes it, no boot DDL.
+deck_card_withdrawals_table = Table("deck_card_withdrawals", metadata,
+    Column("id",                 Integer, primary_key=True, autoincrement=True),
+    Column("deck_job_id",        String,  nullable=False),
+    Column("card_index",         Integer, nullable=False),   # the build index
+    Column("user_id",            String,  nullable=False),
+    Column("league_id",          String,  nullable=False),
+    Column("reason",             String,  nullable=False),   # 'i1_dropped' | 'disposition_cut'
+    Column("first_withdrawn_at", String,  nullable=False),   # ISO UTC
+    Column("served_before",      Integer, nullable=False),   # 0/1
+    Column("impression_id",      String),                    # contract.card_impression_id
+    UniqueConstraint("deck_job_id", "card_index", name="uq_deck_card_withdrawals_card"),
+)
+Index("ix_deck_card_withdrawals_user", deck_card_withdrawals_table.c.user_id)
+
+# ── ADR-025 stage 2: packed deck evidence (S8; flag trade.packed_evidence) ──
+# eng-evidence-contract §6, one row per served packed-evidence deck. The five
+# pack columns are evidence_pack.PackedRun's fields, stored verbatim.
+# cards_blob holds every built card but ghosts, fixed at the deck's first
+# delivery (never-delivered withdrawals included: eval removes them through
+# deck_card_withdrawals). header_json carries the run metadata: deliveries
+# (the page boundaries in card_index space), built_at, page_store, retired /
+# retired_at. A later delivery or the retirement rewrites ONLY header_json and
+# checksum (update_deck_evidence_pack_header), never cards_blob, so Postgres
+# keeps the TOASTed blob. user_id is the account deletion/export key
+# (accounts._ADDITIONAL_PRIVATE_TABLES; the export carries the unpacked run).
+# New and empty: create_all makes it, no boot DDL.
+deck_evidence_packs_table = Table("deck_evidence_packs", metadata,
+    Column("run_id",       String,  primary_key=True),       # the deck's deck_job_id
+    Column("user_id",      String,  nullable=False),
+    Column("league_id",    String,  nullable=False),
+    Column("served_at",    String,  nullable=False),         # ISO UTC: the first delivery
+    Column("pack_version", Integer, nullable=False),
+    Column("header_json",  Text,    nullable=False),
+    Column("cards_blob",   LargeBinary, nullable=False),
+    Column("checksum",     String(64), nullable=False),
+    Column("card_count",   Integer, nullable=False),
+    Column("created_at",   String,  nullable=False),
+)
+Index("ix_deck_evidence_packs_served", deck_evidence_packs_table.c.served_at)
+Index("ix_deck_evidence_packs_user_league",
+      deck_evidence_packs_table.c.user_id, deck_evidence_packs_table.c.league_id)
+
 # ── suggestion.telemetry — executed-trade tagging ───────────────────────────
 # One row per captured sleeper_trades transaction examined by the matcher
 # (suggestion_telemetry.match_league_trades, hooked after every
 # sync_league_trades pass). was_recommended = 1 iff the trade matched a
-# NON-ghost (actually rendered) logged suggestion under the D-scope-5
+# NON-ghost shown logged suggestion (viewed or first 30; R-U6a,
+# _evidence_shown) under the D-scope-5
 # similarity rule; the best GHOST match is linked separately — the
 # ghost_* columns are the incrementality read (did a withheld suggestion
 # execute anyway?). Multi-team / unresolvable trades get a row with
@@ -1703,6 +1917,12 @@ app_feedback_table = Table("app_feedback", metadata,
     # POST /api/feedback contract byte-identical — see save_feedback).
     Column("status",            String),                  # see FEEDBACK_STATUSES
     Column("status_updated_at", String),                  # ISO, set on status change
+    # #360 QA P2-1 (head-eng): sha256 hex of the X-Session-Token of the
+    # UNVERIFIED session that sent the note (never the raw token). When that
+    # same session verifies in place, attach_session_feedback moves the note
+    # to the now-proven user and clears this. NULL for verified-at-post,
+    # no-token and unknown-token notes, and after attach.
+    Column("session_key",       Text),
     Index("idx_app_feedback_created_at", "created_at"),
     Index("idx_app_feedback_user_id",    "user_id"),
 )
@@ -2975,6 +3195,19 @@ _MODEL_CONFIG_DEFAULTS = [
     ("force_supersedes_running", 1.0, "/api/trades/generate: 1 = `force: true` supersedes an already-RUNNING job for the same key (the superseded worker finishes quietly — no further snapshots, no impression rows, no trades_generated event); 0 restores the pre-2026-08-18 behaviour where a forced request silently returned the in-flight job and the regeneration never happened"),
     # ── Paged trade responses (E2, docs/plans/trade-time-to-suggestion) ──
     ("trade_page_size", 30.0, "/api/trades/generate `page: 1` and /api/trades/status `cursor` (opt-in paging): max cards per response; clamped to 1-200 at read. Unpaged (legacy) requests never read it"),
+    ("trade_paged_responses", 1.0, "Kill switch for opt-in paging (E2): 1 = honor `page`/`cursor`; 0 = ignore them and serve the legacy cumulative body, which the #363 app handles as its pre-paging deck path. Deploy-free"),
+    # ── S0 serve rules (roster fingerprint contract v0.4 §3, §3b) ────────
+    ("trade_i1_mode", 1.0, "S0 live-path switch, read per request (default 1 until C-b, models-lead option B): 2 = strict (I-1 drops cards with moved assets; the no-card gate misses follow trade_gate_miss_mode); 1 = lenient (check and log, serve every card, never withhold); 0 = off (the pre-S0 path: no I-1, no fingerprint read or compare, no withhold, no floor kick). NaN or any other value reads as 1. Deploy-free"),
+    ("trade_roster_change_revoke", 1.0, "S0 kill for the on_roster_change handler alone, read per call: 0 = the handler does nothing: no revoke, no re-stamp, no move recorded (the rest of S0 follows trade_i1_mode); 1 = it revokes a league job built on an older Sleeper read than the refreshed rows, only for a user whose session already holds the newer read (#470 QA), re-stamps a job whose rosters (its read's members, the picks then stored) hash to the new stamp, and records the move (#481 QA, #484 QA). NaN or any other value reads as 1. Deploy-free"),
+    ("trade_gate_miss_mode", 0.0, "S0's no-card gate misses: 1 = serve them (roster_check_unavailable when the roster check can't run; the §3b withhold with wait_reason 'roster_check'); 0 = hold them for binaries before 1.22.0, which show them as 'Search failed' (a check that can't run serves the cards unchecked, loudly logged; a past-bound stale roster serves its I-1-filtered cards, logged roster_gate_miss_held). Flip to 1 once 1.22.0 is distributed. NaN or any other value reads as 0. Deploy-free"),
+    ("trade_roster_bound_s", 300.0, "S0 §3b: a Sleeper roster whose last refresh is older than this many seconds is past the bound. Past the bound, the serve kicks one background roster refresh (P41); past it with the last attempt failed (league_roster_state 'stale'), cached cards are withheld (wait_reason 'roster_check'). Deploy-free"),
+    ("trade_import_roster_fresh_s", 86400.0, "S0 §3: an ESPN/MFL/Fleaflicker league's stored rosters read 'fresh' while their newest league_members.updated_at is younger than this many seconds, else 'stale'. Logged only: never withholds, never rebuilds (ruling 29). Deploy-free"),
+    # ── First-page store (P1, flag trade.first_page_store; read only while it is on) ──
+    ("first_page_store_enabled", 1.0, "P1 kill knob, ANDed with the flag trade.first_page_store: any finite value >= 1 keeps the first-page store on; 0, a negative, NaN or an unreadable value stops every store read, write, serve and stale mark. Deploy-free via scripts/set_knob.py. Re-enabling after an off period (this knob or the flag): set it to its previous value + 1; it's hashed into every page's config_signature, so pages that missed the off period's stale marks fall through and rebuild. Alternative: UPDATE trade_page_store SET state = 'stale'"),
+    ("trade_pages_stored", 3.0, "Pages of trade_page_size cards stored per trade_page_store row; clamped to 1-10 at read"),
+    ("trade_prefetch_remaining", 50.0, "Served as `prefetch_remaining` on paged responses: the client fetches the next page when this many ready cards remain; clamped to 1-200 at read. 50 per head-eng ruling 10's sizing: 44-card swipe bursts at 0.4 s/card plus the prefetch round trip"),
+    ("trade_page_store_evict_days", 30.0, "trade_page_store eviction: delete rows not served (or, never served, not built) in this many days; clamped to 1-3650 at read"),
+    ("trade_page_store_max_bytes", 262144000.0, "trade_page_store eviction: when SUM(stored_bytes) exceeds this, delete least recently served rows until under it"),
     # ── Board-override pins (docs/reviews/2026-08-18-valuation-age-audit.md) ──
     # Read by ranking_service. pin_tier_bounded=0 with the other three at their
     # shipped values restores the pre-2026-08-18 freeze exactly (goldens:
@@ -3321,6 +3554,19 @@ _MODEL_CONFIG_DEFAULTS = [
     ("vc_standings_weight",       0.30, "value core windows: full weight of the points-for index; ramps linearly from week 0 to week 8"),
     ("vc_throwin_min_ratio",      2.0,  "value core: a piece too small for the junk rules may ride along only if its recipient's board values it at >= this x consensus market (and >= the asset floor)"),
     ("vc_testers_only",           1.0,  "value core rollout: 1 = serve only the tester allowlist while trade.value_core is on; 0 = everyone"),
+    # ── Minimum-version gate (B8, head-eng ruling 35) ────────────────────
+    # Served as the top-level int `app_min_version` on GET /api/feature-flags
+    # (server._app_min_version). Encoding major*10000 + minor*100 + patch
+    # (1.22.0 = 12200); 0 = OFF. Seeded 0 and insert-if-absent like every
+    # row here, so a deploy never gates anyone and never resets a raised
+    # value. release-lead's deploy-free kill switch:
+    # PUT /api/admin/config/app_min_version (docs/config-reference.md).
+    ("app_min_version",           0,    "min-version gate: builds whose version int (major*10000+minor*100+patch) is below this get a blocking Update required screen; 0 = off. Served on GET /api/feature-flags; a missing, non-integral, NaN or negative value serves 0. Writes are checked by backend/app_version_policy.py"),
+    # Where the gate's Update button goes: 1 = App Store, 0 = TestFlight,
+    # -1 = unset (the client's compiled UTC instant decides). Served as the
+    # top-level int `app_store_live` on GET /api/feature-flags; anything but
+    # exactly 0 or 1 serves -1.
+    ("app_store_live",           -1,    "min-version gate Update target: 1 = App Store, 0 = TestFlight, -1 = unset (the app's compiled fallback, App Store from 2026-11-18T08:00:00Z). Served on GET /api/feature-flags; anything but 0/1 serves -1"),
 ]
 
 
@@ -3551,6 +3797,14 @@ def _migrate_db() -> None:
         ("deck_impressions",   "trade_concept_id",          "VARCHAR"),
         ("deck_impressions",   "policy_variant",            "VARCHAR"),
         ("deck_impressions",   "source_like_impression_id", "VARCHAR"),
+        # Deferred evidence (ADR-025 stage 1): NULL on every row written at
+        # build and on all existing rows; no backfill by design.
+        ("deck_impressions",   "evidence_tier",             "VARCHAR"),
+        ("deck_impressions",   "delivered_at",              "VARCHAR"),
+        # Candidate-set packing (S8): nullable, NULL on every existing row.
+        ("deck_candidate_sets", "candidates_packed",
+         "BYTEA" if DATABASE_URL.startswith("postgres") else "BLOB"),
+        ("deck_candidate_sets", "cand_pack_version",        "INTEGER"),
         ("trade_decisions",    "impression_id",             "VARCHAR"),
         ("trade_decisions",    "trade_concept_id",          "VARCHAR"),
         ("trade_matches",      "trade_concept_id",          "VARCHAR"),
@@ -3633,7 +3887,9 @@ def _migrate_db() -> None:
     # for any future additive ALTERs. Indexes are declared on the Table
     # definition so create_all() handles them on fresh DBs.
     _app_feedback_migrations: list[tuple[str, str, str]] = [
-        # (table, column, type) — currently none; placeholder for future work
+        # (table, column, type)
+        # #360 QA P2-1: hash of the unverified session that sent the note.
+        ("app_feedback", "session_key", "TEXT"),
     ]
     for table, col, col_type in _app_feedback_migrations:
         try:
@@ -4438,6 +4694,7 @@ def record_event(
     tz:          str | None = None,
     platform:    str | None = None,
     touch_user:  bool = True,
+    bind=None,
 ) -> dict | None:
     """Append one row to user_events AND bump the matching users.last_*_at
     column (and device snapshot columns) in a single transaction.
@@ -4445,9 +4702,13 @@ def record_event(
     `platform` (e.g. 'server') is written to user_events.platform; omitted,
     the INSERT names no platform column, exactly as before. `touch_user=False`
     writes ONLY the event row — no users denorm UPDATE, no streak step — for
-    server-fired events whose owner did nothing (referral loop D-1's
-    invite_landing_*: an invitee's open must not make a dormant inviter look
-    active to the cron ticks). Both defaults keep today's behaviour.
+    server-fired events whose owner did nothing: referral loop D-1's
+    invite_landing_* (an invitee's open must not make a dormant inviter look
+    active to the cron ticks), and system outcomes that fire on background
+    polls (e.g. `deck_i1_check`), which must not move `last_active_at` or
+    `events_count`. `bind`: the engine to write through, default this
+    module's. A background writer passes the one it captured on the request
+    thread. All three defaults keep today's behaviour.
 
     Always inserts a new row — never overwrites prior events. The denorm
     columns on `users` are pointers to the most recent event of each type
@@ -4466,7 +4727,7 @@ def record_event(
     streak_result: dict | None = None
     extra: dict = {"platform": platform} if platform is not None else {}
     try:
-        with engine.begin() as conn:
+        with (bind if bind is not None else engine).begin() as conn:
             conn.execute(
                 insert(user_events_table).values(
                     user_id     = user_id,
@@ -6924,6 +7185,542 @@ def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
         return conn.execute(delete(d).where(d.c.snapshot_id.in_(ids))).rowcount or 0
 
 
+# Tiers a later delivery raises to 'delivered' (ruling 17's precedence: ghost >
+# first30 > delivered > archive, full_interim beside archive). Never 'ghost' or
+# 'first30': a later delivery never downgrades a tier.
+_EVIDENCE_TIERS_BELOW_DELIVERED = ("full_interim", "archive")
+# Tiers a first view raises to 'viewed' (R4.2: the revised C3).
+_EVIDENCE_TIERS_BELOW_VIEWED = ("full_interim", "archive", "delivered")
+# Tiers whose rows a later delivery stamps with delivered_at (never a ghost's;
+# a build-time row, tier NULL, only a live-mode page-scoped deck's, through
+# _stamp_delivered's build_rows: #417 cross-check P2-1).
+_EVIDENCE_TIERS_DELIVERABLE = ("first30", "delivered", "full_interim", "archive", "viewed")
+# R-U6a and models-lead's R3 (2026-10-26; ADR-025 C3, R4.2 U6): which rows
+# receipts and the executed-trade matcher read as recommendations. A row
+# written at build (tier NULL: legacy and flag-off rows) as before; a deferred
+# or packed deck's card only when it's in the first 30 or the user acted on it:
+# a first outcome of any kind, joined by impression_id (U2's contract ids). R3:
+# "viewed" comes from that outcome, never from the tier or from whether a full
+# row exists. So 'delivered' (sent, not seen), 'archive', 'full_interim' and
+# 'partial_run' rows count only once acted on. Ghost rows pass as before: never
+# a recommendation, each reader handles them by is_ghost (receipts skip them;
+# the matcher links them as its incrementality read).
+_DECK_FIRST_OUTCOMES = ("viewed", "like", "pass", "propose", "undo", "not_interested")
+
+
+def _deck_card_acted():
+    """EXISTS a first outcome of the row's card, joined by impression_id. It
+    never runs for a NULL-tier row (the OR short-circuits). SQLite probes
+    ix_deck_outcomes_impression per row; Postgres may plan it as a hashed
+    SubPlan instead (one scan of deck_outcomes per query, ~28 ms at 200k rows,
+    #424 QA): fine for the receipts queue and the matcher's league pass."""
+    i, o = deck_impressions_table, deck_outcomes_table
+    return (select(literal(1))
+            .where(o.c.impression_id == i.c.impression_id, o.c.action.in_(_DECK_FIRST_OUTCOMES))
+            .exists())
+
+
+# The packed-evidence flip (analytics-lead 2026-10-26): the UTC day ("YYYY-MM-DD")
+# trade.first_page_store and trade.packed_evidence went on together. From it,
+# _evidence_shown narrows a packed deck's rows to viewed-or-first-30 (R-U6a), so
+# receipts' graded volume and the endorsement ratio's `recommended` both change
+# meaning. None until the flip: the scribe sets this one value on flip day, and
+# both series' `series_break` caveats read it (receipts_service.admin_metrics,
+# server.suggestion_telemetry_ratio_route), so the two can't drift.
+PACKED_EVIDENCE_FLIP_DAY: str | None = None
+# The caveat code every series-break entry carries (analytics_queries,
+# receipts_service, the ratio route), so a reader can match on one value.
+SERIES_BREAK_CAVEAT = "series_break"
+_flip_day_warned = False
+
+
+def packed_evidence_flip_day() -> str | None:
+    """PACKED_EVIDENCE_FLIP_DAY as both caveats read it (#448 QA): a
+    "YYYY-MM-DD" str that round-trips through date.fromisoformat, else None,
+    with a WARNING once per process for any other value, so a malformed day is
+    never a 500 on either admin route nor a silent miss."""
+    global _flip_day_warned
+    from datetime import date
+    day = PACKED_EVIDENCE_FLIP_DAY
+    if day is None:
+        return None
+    try:
+        if isinstance(day, str) and date.fromisoformat(day).isoformat() == day:
+            return day
+    except ValueError:
+        pass
+    if not _flip_day_warned:
+        _flip_day_warned = True
+        log.warning("PACKED_EVIDENCE_FLIP_DAY %r is not a YYYY-MM-DD day: no series_break "
+                    "caveat on receipts or the endorsement ratio until it is", day)
+    return None
+
+
+def _evidence_shown():
+    """The one eligibility predicate receipts and the matcher share (R-U6a)."""
+    i = deck_impressions_table
+    return or_(i.c.evidence_tier.is_(None), i.c.evidence_tier == "first30",
+               i.c.is_ghost == 1, _deck_card_acted())
+
+
+# R3: a card the user acted on whose row isn't a full row (no assets): neither
+# reader can grade or match it, so each reports it instead of dropping it
+# silently, by cause. The cause is the writer's own classification, read from
+# the card's run: its pack's run metadata `upgrade_miss_cards`
+# ({"<card_index>": cause}, U4-R2). No pack, or no entry for the card: other.
+VIEWED_WITHOUT_FULL_ROW_CAUSES = ("restart_split", "evicted_split", "other")
+
+
+def load_viewed_without_full_row(*, league_id: str | None = None, since_iso: str | None = None,
+                                 until_iso: str | None = None) -> dict[str, dict[str, int]]:
+    """Per run (deck_job_id), R3's acted-on cards with no full row, by cause:
+    {run_id: {"restart_split": n, "evicted_split": n, "other": n}}. Non-ghost
+    rows of a deferred or packed deck (tier set: a pre-telemetry row has no
+    assets either and isn't counted), optionally in one league and a
+    served_at window. The runs' pack headers are read in one query per 500
+    runs; a cause outside the three reads as other."""
+    i, p = deck_impressions_table, deck_evidence_packs_table
+    where = [or_(i.c.is_ghost.is_(None), i.c.is_ghost == 0), i.c.evidence_tier.isnot(None),
+             i.c.assets_json.is_(None), _deck_card_acted()]
+    if league_id is not None:
+        where.append(i.c.league_id == league_id)
+    if since_iso is not None:
+        where.append(i.c.served_at >= since_iso)
+    if until_iso is not None:
+        where.append(i.c.served_at <= until_iso)
+    with engine.connect() as conn:
+        rows = conn.execute(select(i.c.deck_job_id, i.c.card_index).where(and_(*where))).all()
+        run_ids = sorted({r.deck_job_id for r in rows})
+        miss_cards: dict[str, dict] = {}
+        for start in range(0, len(run_ids), 500):
+            for h in conn.execute(select(p.c.run_id, p.c.header_json).where(
+                    p.c.run_id.in_(run_ids[start:start + 500]))):
+                try:
+                    cards = json.loads(h.header_json)["run"].get("upgrade_miss_cards")
+                except (TypeError, ValueError, KeyError, AttributeError):
+                    cards = None
+                miss_cards[h.run_id] = cards if isinstance(cards, dict) else {}
+    runs: dict[str, dict[str, int]] = {}
+    for r in rows:
+        cause = miss_cards.get(r.deck_job_id, {}).get(str(r.card_index), "other")
+        counts = runs.setdefault(r.deck_job_id, dict.fromkeys(VIEWED_WITHOUT_FULL_ROW_CAUSES, 0))
+        counts[cause if cause in counts else "other"] += 1
+    return runs
+
+
+def _stamp_delivered(conn, deck_job_id: str, delivered: dict, raise_to: str | None, *,
+                     build_rows: bool = False) -> None:
+    """The delivery stamp, on the caller's transaction: each of `deck_job_id`'s
+    rows in `delivered` ({impression_id: delivery time}) gets that
+    `delivered_at` once (the first delivery wins), and from a lower tier the
+    tier `raise_to`. Never a ghost's row. `build_rows` (#417 cross-check P2-1):
+    a live-mode page-scoped deck's rows, written at build with no tier, are
+    stamped too (the stamp only: their tier stays NULL)."""
+    i = deck_impressions_table
+    stampable = i.c.evidence_tier.in_(_EVIDENCE_TIERS_DELIVERABLE)
+    if build_rows:
+        stampable = or_(stampable, and_(i.c.evidence_tier.is_(None),
+                                        or_(i.c.is_ghost.is_(None), i.c.is_ghost == 0)))
+    by_time: dict = {}
+    for iid, at in delivered.items():
+        by_time.setdefault(at, []).append(iid)
+    for at, ids in by_time.items():
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            conn.execute(update(i).where(
+                i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
+                i.c.delivered_at.is_(None), stampable,
+            ).values(delivered_at=at))
+            if raise_to is not None:
+                conn.execute(update(i).where(
+                    i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
+                    i.c.evidence_tier.in_(_EVIDENCE_TIERS_BELOW_VIEWED if raise_to == "viewed"
+                                          else _EVIDENCE_TIERS_BELOW_DELIVERED),
+                ).values(evidence_tier=raise_to))
+
+
+def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
+                       diagnostics: list | tuple = (), delivered: dict | None = None,
+                       deck_job_id: str | None = None, raise_to: str | None = "delivered",
+                       withdrawals=()) -> None:
+    """Deferred evidence (ADR-025 stage 1): one delivery write, one transaction.
+
+    `rows` are a deferred deck's build-time deck_impressions rows, each with its
+    `evidence_tier`. Each is inserted at most once per impression_id (ON CONFLICT
+    DO NOTHING), so a retried delivery writes nothing twice, and compacted
+    exactly as save_deck_impressions compacts. Rows are normalized to every
+    column, so full and narrow rows share one VALUES statement. `diagnostics`
+    are the deck's deck_diagnostic_snapshots rows the compacted rows reference
+    (content-addressed, so also at most once). `candidate_set` is the deck's
+    deck_candidate_sets row, also at most once. `delivered` maps impression
+    ids of `deck_job_id` written undelivered and since delivered to their
+    delivery time: each gets that `delivered_at` (once) and, from a lower
+    tier, the tier `raise_to`: 'delivered' (stage 1), 'viewed' (a packed deck's
+    first view, R4.2), or None (a packed deck's delivery: the stamp only).
+    """
+    delivered = dict(delivered or {})
+    if not rows and candidate_set is None and not diagnostics and not delivered and not withdrawals:
+        return
+    from .deck_diagnostics import compact_rows
+    columns = [c.name for c in deck_impressions_table.columns]
+    with engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as upsert
+        else:
+            from sqlalchemy.dialects.sqlite import insert as upsert
+        _insert_withdrawals(conn, list(withdrawals))   # one transaction with the delivery (P3-5)
+        _save_deck_diagnostic_snapshots(conn, list(diagnostics))
+        for start in range(0, len(rows), DECK_IMPRESSION_INSERT_ROWS):
+            compacted, snapshots = compact_rows(rows[start:start + DECK_IMPRESSION_INSERT_ROWS])
+            _save_deck_diagnostic_snapshots(conn, snapshots)
+            conn.execute(upsert(deck_impressions_table).values(
+                [{name: row.get(name) for name in columns} for row in compacted]
+            ).on_conflict_do_nothing(index_elements=["impression_id"]))
+        if candidate_set is not None:
+            conn.execute(upsert(deck_candidate_sets_table).values(**candidate_set)
+                         .on_conflict_do_nothing(index_elements=["candidate_set_id"]))
+        _stamp_delivered(conn, deck_job_id, delivered, raise_to)
+    log.info("deck evidence: deck=%s rows=%d candidate_set=%s delivered=%d",
+             deck_job_id, len(rows), candidate_set is not None, len(delivered))
+
+
+def mark_deck_impression_viewed(impression_id: str) -> bool:
+    """R4.2: a first view raises an archive deck's row to 'viewed'."""
+    i = deck_impressions_table
+    with engine.begin() as conn:
+        return bool(conn.execute(update(i).where(
+            i.c.impression_id == impression_id, i.c.evidence_tier == "archive",
+        ).values(evidence_tier="viewed")).rowcount)
+
+
+def save_deck_evidence_pack(row: dict, withdrawals=()) -> bool:
+    """Insert a deck's pack row (insert-or-ignore on run_id: written once, at
+    the deck's first delivery), with that serve's withdrawals in the same
+    transaction (#417 cross-check P3-5). True when the pack was inserted;
+    False (nothing written) when another writer's pack is there: the caller
+    merges into its header, withdrawals included."""
+    t = deck_evidence_packs_table
+    with engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        else:
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+        if not conn.execute(dialect_insert(t).values(**row).on_conflict_do_nothing(
+                index_elements=[t.c.run_id])).rowcount:
+            return False
+        _insert_withdrawals(conn, list(withdrawals))
+        return True
+
+
+def update_deck_evidence_pack_header(run_id: str, header_json: str, checksum: str,
+                                     old_checksum: str, withdrawals=()) -> bool:
+    """A later delivery, a counted miss or the retirement: rewrite header_json
+    and checksum only, never cards_blob (fixed at build; Postgres keeps its
+    TOAST), compare-and-swap on the checksum the writer last read, so a deploy
+    overlap can't lose an update. The serve's withdrawals land in the same
+    transaction, only if the header did (#417 cross-check P3-5). False when
+    another writer got there first (nothing written)."""
+    t = deck_evidence_packs_table
+    with engine.begin() as conn:
+        if not conn.execute(update(t).where(
+                t.c.run_id == run_id, t.c.checksum == old_checksum,
+        ).values(header_json=header_json, checksum=checksum)).rowcount:
+            return False
+        _insert_withdrawals(conn, list(withdrawals))
+        return True
+
+
+def load_deck_evidence_pack_header(run_id: str) -> dict | None:
+    """A pack's user_id, header_json and checksum, without its cards."""
+    t = deck_evidence_packs_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t.c.user_id, t.c.header_json, t.c.checksum)
+                           .where(t.c.run_id == run_id)).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def load_deck_evidence_pack(run_id: str) -> dict | None:
+    t = deck_evidence_packs_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t).where(t.c.run_id == run_id)).mappings().first()
+    return dict(row) if row is not None else None
+
+
+# ---------------------------------------------------------------------------
+# P1 first-page store (trade_page_store; flag trade.first_page_store)
+# ---------------------------------------------------------------------------
+
+_PAGE_STORE_KEY = ("user_id", "league_id", "scoring_format", "request_scope")
+# Replaced on a rebuild. last_served_at survives it: eviction is by use.
+_PAGE_STORE_REPLACED = (
+    "roster_fp", "values_snapshot_id", "engine_version", "config_signature",
+    "experiment_digest", "deck_job_id",
+    "built_at", "expires_at", "card_count", "pages_blob", "evidence_blob", "stored_bytes", "state",
+)
+
+
+def page_store_iso(epoch_seconds: float) -> str:
+    """The one timestamp format of trade_page_store, so ISO strings compare in order."""
+    return datetime.fromtimestamp(epoch_seconds, timezone.utc).isoformat(timespec="microseconds")
+
+
+def trade_deck_lineage_insert(dialect_name: str, row: dict):
+    """The insert-or-ignore of a page row's deck lineage (P2):
+    ON CONFLICT (user_id, deck_job_id) DO NOTHING on both dialects."""
+    if dialect_name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+    t = trade_deck_lineage_table
+    return dialect_insert(t).values(
+        user_id=row["user_id"], deck_job_id=row["deck_job_id"], league_id=row["league_id"],
+        scoring_format=row["scoring_format"], request_scope=row["request_scope"],
+        recorded_at=page_store_iso(time.time()),
+    ).on_conflict_do_nothing(index_elements=[t.c.user_id, t.c.deck_job_id])
+
+
+def save_trade_page(row: dict) -> bool:
+    """Upsert one page row. An existing row is replaced only when the new
+    `built_at` is at or after its own (the supersede guard), in one statement,
+    so concurrent writers for a key leave exactly one consistent row. True when
+    the row was written."""
+    t = trade_page_store_table
+    with engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        else:
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+        stmt = dialect_insert(t).values(**row)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[t.c[name] for name in _PAGE_STORE_KEY],
+            set_={name: stmt.excluded[name] for name in _PAGE_STORE_REPLACED},
+            where=t.c.built_at <= stmt.excluded.built_at)
+        return bool(conn.execute(stmt).rowcount)
+
+
+def record_trade_deck_lineage(row: dict) -> None:
+    """Insert-or-ignore one organic deck's lineage row (P2), in its own
+    transaction: written when the deck's job starts, apart from any page write."""
+    with engine.begin() as conn:
+        conn.execute(trade_deck_lineage_insert(conn.dialect.name, row))
+
+
+def _trade_page_columns(evidence: bool):
+    """A page row's columns. The serve reads leave out evidence_blob, so a
+    poll decodes one blob, its pages (#369 QA); only the deferred-evidence
+    writer (server._deck_evidence_write_stored) reads it."""
+    t = trade_page_store_table
+    return [c for c in t.c if evidence or c.name != "evidence_blob"]
+
+
+def load_trade_page(user_id: str, league_id: str, scoring_format: str,
+                    request_scope: str, *, evidence: bool = False) -> dict | None:
+    """The page row for one key (a unique-index read), pages decoded, or None.
+    `evidence`: include evidence_blob (decoded)."""
+    t = trade_page_store_table
+    with engine.connect() as conn:
+        row = conn.execute(select(*_trade_page_columns(evidence)).where(
+            t.c.user_id == user_id, t.c.league_id == league_id,
+            t.c.scoring_format == scoring_format,
+            t.c.request_scope == request_scope)).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def load_trade_page_deck_job_id(user_id: str, league_id: str, scoring_format: str,
+                                request_scope: str) -> str | None:
+    """The deck_job_id whose page row holds one key now (the unique-index read,
+    one column, no blobs), or None when the key has no row."""
+    t = trade_page_store_table
+    with engine.connect() as conn:
+        return conn.execute(select(t.c.deck_job_id).where(
+            t.c.user_id == user_id, t.c.league_id == league_id,
+            t.c.scoring_format == scoring_format,
+            t.c.request_scope == request_scope)).scalar()
+
+
+def load_trade_page_for_job(user_id: str, deck_job_id: str, *,
+                            evidence: bool = False) -> dict | None:
+    """The viewer's page row built by `deck_job_id`, or None. `evidence`:
+    include evidence_blob (decoded)."""
+    t = trade_page_store_table
+    with engine.connect() as conn:
+        row = conn.execute(select(*_trade_page_columns(evidence)).where(
+            t.c.user_id == user_id, t.c.deck_job_id == deck_job_id)).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def _insert_withdrawals(conn, rows) -> int:
+    """C-b withdrawals on the caller's transaction, insert-or-ignore on
+    (deck_job_id, card_index): the first withdrawal of a card wins."""
+    if not rows:
+        return 0
+    t = deck_card_withdrawals_table
+    if conn.dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+    inserted = 0
+    for row in rows:
+        inserted += conn.execute(dialect_insert(t).values(**row).on_conflict_do_nothing(
+            index_elements=[t.c.deck_job_id, t.c.card_index])).rowcount or 0
+    return inserted
+
+
+def record_deck_withdrawals(rows: list[dict]) -> int:
+    """Append C-b withdrawals on their own (a serve that withdrew a card and
+    delivered nothing new). The count of rows inserted."""
+    if not rows:
+        return 0
+    with engine.begin() as conn:
+        return _insert_withdrawals(conn, rows)
+
+
+def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delivered_ids,
+                          at: str, withdrawn=None) -> bool:
+    """#417 cross-check P2-1 / P3-5: a live-mode page-scoped deck's delivery
+    (the value core, prepared adoption), one transaction. Its rows were
+    written at build (tier NULL, the page_store marker), so the delivery
+    stamps `at`, the response's time, on the rows of exactly the cards sent
+    (by impression_id): _stamp_delivered with build_rows, so once each (the
+    first delivery wins) and never a ghost's. The serve's withdrawals land in
+    the same transaction, each card_index from its row and served_before from
+    its delivered_at before this stamp: both are recorded or neither.
+    `withdrawn`: {impression_id: reason} ("i1_dropped", "disposition_cut").
+    Returns False when it delivered cards of a deck with no row at all: their
+    evidence is nowhere (no rows, no pack), so eval can't see them."""
+    i = deck_impressions_table
+    withdrawn = dict(withdrawn or {})
+    delivered_ids = [x for x in delivered_ids if isinstance(x, str)]
+    withdrawn_ids = sorted(x for x in withdrawn if isinstance(x, str))
+    with engine.begin() as conn:
+        found = {}
+        if withdrawn_ids:
+            found = {r.impression_id: r for r in conn.execute(
+                select(i.c.impression_id, i.c.card_index, i.c.delivered_at).where(
+                    i.c.deck_job_id == deck_job_id, i.c.user_id == user_id,
+                    i.c.impression_id.in_(withdrawn_ids), or_(i.c.is_ghost.is_(None), i.c.is_ghost == 0)))}
+        _stamp_delivered(conn, deck_job_id, dict.fromkeys(delivered_ids, at), None,
+                         build_rows=True)
+        _insert_withdrawals(conn, [
+            {"deck_job_id": deck_job_id, "card_index": found[iid].card_index, "user_id": user_id,
+             "league_id": league_id, "reason": withdrawn[iid], "first_withdrawn_at": at,
+             "impression_id": iid,
+             "served_before": 1 if found[iid].delivered_at is not None else 0}   # exactly 0 or 1
+            for iid in withdrawn_ids if iid in found])
+        return not delivered_ids or conn.execute(
+            select(literal(1)).where(i.c.deck_job_id == deck_job_id).limit(1)).first() is not None
+
+
+def load_delivered_impression_ids(impression_ids) -> set:
+    """The ids among `impression_ids` whose deck_impressions row has a
+    delivered_at (a card an earlier response sent)."""
+    ids = [i for i in impression_ids if isinstance(i, str)]
+    if not ids:
+        return set()
+    i = deck_impressions_table
+    with engine.connect() as conn:
+        return {r[0] for r in conn.execute(select(i.c.impression_id).where(
+            i.c.impression_id.in_(ids), i.c.delivered_at.isnot(None)))}
+
+
+def load_deck_withdrawals(deck_job_id: str) -> list[dict]:
+    """Every withdrawal recorded for one deck (an indexed read)."""
+    t = deck_card_withdrawals_table
+    with engine.connect() as conn:
+        return [dict(r) for r in conn.execute(
+            select(t).where(t.c.deck_job_id == deck_job_id).order_by(t.c.card_index)).mappings()]
+
+
+def load_trade_deck_lineage(user_id: str, deck_job_id: str) -> dict | None:
+    """The requester's lineage row for one deck (a unique-index read), or None."""
+    t = trade_deck_lineage_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t).where(
+            t.c.user_id == user_id, t.c.deck_job_id == deck_job_id)).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def purge_trade_deck_lineage(*, max_age_s: float = 86400.0, batch_size: int = 500) -> int:
+    """Delete up to `batch_size` lineage rows recorded more than `max_age_s`
+    ago (oldest first); a larger backlog finishes over later passes."""
+    t = trade_deck_lineage_table
+    cutoff = page_store_iso(time.time() - max_age_s)
+    with engine.begin() as conn:
+        old = (select(t.c.id).where(t.c.recorded_at < cutoff)
+               .order_by(t.c.recorded_at, t.c.id).limit(max(1, min(batch_size, 1000))))
+        return conn.execute(delete(t).where(t.c.id.in_(old))).rowcount or 0
+
+
+def touch_trade_page(page_id: int, served_at: str) -> None:
+    t = trade_page_store_table
+    with engine.begin() as conn:
+        conn.execute(update(t).where(t.c.id == page_id).values(last_served_at=served_at))
+
+
+def save_trade_page_evidence(user_id: str, deck_job_id: str, evidence_blob: bytes | None,
+                             pages_bytes: int) -> bool:
+    """Rewrite the evidence_blob of the viewer's row built by `deck_job_id` (and
+    its stored_bytes = pages_bytes + len(evidence_blob)), after a delivery wrote
+    some of its snapshots. A row since rebuilt by another deck is untouched.
+    True when the row was updated."""
+    t = trade_page_store_table
+    with engine.begin() as conn:
+        return bool(conn.execute(update(t).where(
+            t.c.user_id == user_id, t.c.deck_job_id == deck_job_id,
+        ).values(evidence_blob=evidence_blob,
+                 stored_bytes=pages_bytes + len(evidence_blob or b""))).rowcount)
+
+
+def mark_trade_pages_stale(*, marked_at: str, user_id: str | None = None,
+                           league_id: str | None = None) -> int:
+    """One bounded UPDATE after an input change: every row of `user_id` (all
+    its leagues), or every row in `league_id`. Sets state='stale' and advances
+    built_at to `marked_at`, so the supersede guard refuses any deck admitted
+    before the change. Returns the rows marked."""
+    if (user_id is None) == (league_id is None):
+        raise ValueError("exactly one of user_id, league_id")
+    t = trade_page_store_table
+    scope = t.c.user_id == user_id if user_id is not None else t.c.league_id == league_id
+    with engine.begin() as conn:
+        return conn.execute(update(t).where(scope).values(
+            state="stale",
+            built_at=case((t.c.built_at < marked_at, marked_at), else_=t.c.built_at),
+        )).rowcount or 0
+
+
+def evict_trade_pages(*, evict_days: int, max_bytes: int,
+                      batch_size: int = 500) -> tuple[int, int]:
+    """One bounded pass of page-store eviction; returns (aged, over_budget).
+
+    1. Delete up to `batch_size` rows whose last serve (or, never served, whose
+       build) is older than `evict_days`.
+    2. If SUM(stored_bytes) is still above `max_bytes`, delete least recently
+       served rows, from up to `batch_size`, until it is not.
+    A larger backlog finishes over later passes.
+    """
+    t = trade_page_store_table
+    batch = max(1, min(batch_size, 1000))
+    last_use = func.coalesce(t.c.last_served_at, t.c.built_at)
+    cutoff = page_store_iso(time.time() - evict_days * 86400)
+    with engine.begin() as conn:
+        aged_ids = select(t.c.id).where(last_use < cutoff).order_by(last_use, t.c.id).limit(batch)
+        aged = conn.execute(delete(t).where(t.c.id.in_(aged_ids))).rowcount or 0
+    with engine.begin() as conn:
+        over = (conn.execute(select(func.coalesce(func.sum(t.c.stored_bytes), 0))).scalar() or 0) - max_bytes
+        doomed, freed = [], 0
+        if over > 0:
+            for page_id, size in conn.execute(select(t.c.id, t.c.stored_bytes)
+                                              .order_by(last_use, t.c.id).limit(batch)):
+                if freed >= over:
+                    break
+                doomed.append(page_id)
+                freed += size or 0
+        removed = 0
+        if doomed:
+            removed = conn.execute(delete(t).where(t.c.id.in_(doomed))).rowcount or 0
+    return aged, removed
+
+
 # ---------------------------------------------------------------------------
 # Personal-market policy writers (scope: docs/plans/personal-market-policy/)
 # ---------------------------------------------------------------------------
@@ -7444,6 +8241,7 @@ def load_impressions_for_matching(
                     deck_impressions_table.c.assets_json.isnot(None),
                     deck_impressions_table.c.served_at >= since_iso,
                     deck_impressions_table.c.served_at <= until_iso,
+                    _evidence_shown(),            # R4.2 U6
                 )
             )
         ).fetchall()
@@ -7493,8 +8291,9 @@ def save_suggestion_trade_links(rows: list[dict]) -> int:
 
 def suggestion_ratio_by_league(league_id: str | None = None) -> list[dict]:
     """The always-on endorsement dashboard: per league, executed trades
-    examined, how many matched a rendered suggestion (was_recommended), the
-    ratio, and how many matched a withheld ghost (the incrementality read)."""
+    examined, how many matched a shown suggestion, viewed or first 30
+    (was_recommended; R-U6a, _evidence_shown), the ratio, and how many matched
+    a withheld ghost (the incrementality read)."""
     q = select(
         suggestion_trade_links_table.c.league_id,
         func.count(suggestion_trade_links_table.c.id).label("executed"),
@@ -7517,6 +8316,25 @@ def suggestion_ratio_by_league(league_id: str | None = None) -> list[dict]:
             "ghost_matches": int(r.ghost_matches or 0),
         })
     return out
+
+
+def suggestion_link_day_span(league_id: str | None = None) -> tuple[str | None, str | None]:
+    """The first and last UTC day of the links' trades, optionally in one
+    league: (None, None) with no links. A trade's day is the one the matcher
+    reads (traded_at, else its sleeper_trades row's synced_at), else the link's
+    computed_at. The ratio route's series-break caveat reads it."""
+    t, s = suggestion_trade_links_table, sleeper_trades_table
+    day = func.substr(func.coalesce(t.c.traded_at, s.c.synced_at, t.c.computed_at), 1, 10)
+    # The league in the ON clause too (#448 QA): the same rows, and Postgres
+    # plans it on the league (23 ms → 1.3 ms).
+    q = select(func.min(day), func.max(day)).select_from(
+        t.outerjoin(s, (s.c.transaction_id == t.c.transaction_id)
+                    & (s.c.league_id == t.c.league_id)))
+    if league_id:
+        q = q.where(t.c.league_id == league_id)
+    with engine.connect() as conn:
+        first, last = conn.execute(q).one()
+    return first, last
 
 
 def load_board_state(
@@ -8469,6 +9287,121 @@ def load_league_members(league_id: str) -> list[dict]:
             d["player_ids"] = []
         result.append(d)
     return result
+
+
+# ---------------------------------------------------------------------------
+# League roster refresh state (S0) — `league_roster_state`
+# ---------------------------------------------------------------------------
+# One small row per league; every write is a single-row upsert (G-072: bounded).
+# Timestamps are ISO-8601 UTC text (dual-dialect; no SQL JSON or date functions).
+# The stored status is only ever one of these two (contract v0.3 §3).
+ROSTER_STATE_FRESH = "fresh"
+ROSTER_STATE_STALE = "stale"
+
+
+def _dialect_insert(conn):
+    """The dialect-specific `insert` that supports on_conflict_do_update."""
+    if conn.dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+    return dialect_insert
+
+
+def get_league_roster_state(league_id: str) -> dict | None:
+    """The league's refresh record, or None when it was never written."""
+    t = league_roster_state_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t).where(t.c.league_id == str(league_id))).first()
+    return dict(row._mapping) if row else None
+
+
+def mark_league_roster_fresh(league_id: str, refreshed_at: str) -> None:
+    """A refresh committed its rows: status 'fresh', error cleared.
+
+    `refreshed_at` only moves forward (ISO strings in one fixed format compare
+    in time order), so a slow older refresh finishing last can't rewind it.
+    `roster_fp` is left as stored.
+    """
+    from sqlalchemy import case
+    t = league_roster_state_table
+    now = _now()
+    with engine.begin() as conn:
+        stmt = _dialect_insert(conn)(t).values(
+            league_id=str(league_id), roster_fp=None, refreshed_at=refreshed_at,
+            status=ROSTER_STATE_FRESH, last_error_code=None, updated_at=now)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["league_id"],
+            set_={
+                "refreshed_at": case(
+                    (t.c.refreshed_at.is_(None), stmt.excluded.refreshed_at),
+                    (stmt.excluded.refreshed_at > t.c.refreshed_at, stmt.excluded.refreshed_at),
+                    else_=t.c.refreshed_at),
+                "status": stmt.excluded.status,
+                "last_error_code": None,
+                "updated_at": stmt.excluded.updated_at,
+            })
+        conn.execute(stmt)
+
+
+def mark_league_roster_failed(league_id: str, error_code: str) -> str:
+    """A refresh failed: the last good rows are untouched. Returns the status written.
+
+    Always 'stale' + `last_error_code`; `roster_fp` and `refreshed_at` keep
+    their stored values (NULL on a league never refreshed). Whether the league
+    has any rows at all ("missing") is derived from `league_members` by the
+    reader, never stored here (fingerprint contract v0.3 §3).
+    """
+    t = league_roster_state_table
+    lid = str(league_id)
+    now = _now()
+    status = ROSTER_STATE_STALE
+    with engine.begin() as conn:
+        stmt = _dialect_insert(conn)(t).values(
+            league_id=lid, roster_fp=None, refreshed_at=None, status=status,
+            last_error_code=str(error_code), updated_at=now)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["league_id"],
+            set_={"status": stmt.excluded.status,
+                  "last_error_code": stmt.excluded.last_error_code,
+                  "updated_at": stmt.excluded.updated_at})
+        conn.execute(stmt)
+    return status
+
+
+def cas_league_roster_fp(league_id: str, old_fp: str | None, new_fp: str) -> bool:
+    """S0 PR-B: set `roster_fp` to `new_fp` only while it still equals `old_fp`.
+
+    One UPDATE … WHERE (`IS NULL` when `old_fp` is None, a league's first
+    stamp), committed before it returns. True when this call won; False when
+    another refresh stamped first, or the league has no row. Touches no
+    other column.
+    """
+    t = league_roster_state_table
+    same = t.c.roster_fp.is_(None) if old_fp is None else t.c.roster_fp == old_fp
+    with engine.begin() as conn:
+        result = conn.execute(update(t).where(t.c.league_id == str(league_id), same)
+                              .values(roster_fp=new_fp))
+    return result.rowcount == 1
+
+
+def replace_league_members_snapshot(league_id: str, members: list[dict]) -> bool:
+    """S0 — replace a league's membership with an authoritative snapshot.
+
+    Sleeper session init used to UPSERT, so the rows of managers who left a
+    league (or legacy rows keyed on a co-owner's own id) were never deleted
+    (G-075), and one player could sit on two teams' stored rosters. The
+    session-init read is now complete and authoritative, so it replaces.
+
+    Refuses an empty snapshot (G-015: an empty REPLACE is a wipe): returns
+    False and touches nothing. Otherwise one delete-then-insert transaction
+    (`replace_espn_league_members`, already platform-agnostic); returns True.
+    """
+    rows = [m for m in (members or []) if m.get("user_id")]
+    if not rows:
+        return False
+    replace_espn_league_members(league_id, rows)
+    return True
 
 
 def replace_trade_block(league_id: str, entries: list[dict]) -> None:
@@ -11639,6 +12572,25 @@ def load_draft_picks(
     return out
 
 
+def load_draft_pick_seasons(league_id: str,
+                            source: str = PICK_SOURCE_PLATFORM) -> set[int]:
+    """The distinct seasons of one league's PLATFORM draft-pick rows, from one
+    `SELECT DISTINCT season` (no full rows). Same predicate as
+    `load_draft_picks`'s default. Platform only: the contested/orphaned
+    exclusion for user rows is a row filter a season set can't carry, so any
+    other `source` raises. Read by `server._sleeper_prior_grid_excludes`
+    (#470 QA P3-2)."""
+    if source != PICK_SOURCE_PLATFORM:
+        raise ValueError(f"load_draft_pick_seasons reads platform rows only, not {source!r}")
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(draft_picks_table.c.season).distinct()
+            .where(draft_picks_table.c.league_id == league_id)
+            .where(_pick_source_predicate(source))
+        ).fetchall()
+    return {int(r[0]) for r in rows}
+
+
 def seed_pick_grid(
     league_id: str,
     member_user_ids: list[str],
@@ -14369,9 +15321,14 @@ def save_feedback(
     device_type: str | None = None,
     os_version: str | None = None,
     client_created_at: str | None = None,
+    session_key: str | None = None,
 ) -> dict:
     """Insert (idempotently on client_id) a feedback row and return
     {server_id, created_at, duplicate}.
+
+    `session_key` is the sha256 hex of an UNVERIFIED session's token (#360
+    QA P2-1), so attach_session_feedback can hand the note to that session's
+    user once it verifies in place. Callers pass None otherwise.
 
     Retries with the same client_id are dropped: we look up the existing
     row and return its ids so the mobile client can move on. SQLite uses
@@ -14389,11 +15346,11 @@ def save_feedback(
                     INSERT INTO app_feedback
                         (client_id, user_id, username, screen, severity, text,
                          app_version, platform, device_type, os_version,
-                         client_created_at, created_at)
+                         client_created_at, created_at, session_key)
                     VALUES
                         (:client_id, :user_id, :username, :screen, :severity, :text,
                          :app_version, :platform, :device_type, :os_version,
-                         :client_created_at, :created_at)
+                         :client_created_at, :created_at, :session_key)
                     ON CONFLICT (client_id) DO NOTHING
                     RETURNING id
                     """
@@ -14411,6 +15368,7 @@ def save_feedback(
                     "os_version": os_version,
                     "client_created_at": client_created_at,
                     "created_at": now_iso,
+                    "session_key": session_key,
                 },
             ).fetchone()
             if res:
@@ -14426,11 +15384,11 @@ def save_feedback(
                     INSERT OR IGNORE INTO app_feedback
                         (client_id, user_id, username, screen, severity, text,
                          app_version, platform, device_type, os_version,
-                         client_created_at, created_at)
+                         client_created_at, created_at, session_key)
                     VALUES
                         (:client_id, :user_id, :username, :screen, :severity, :text,
                          :app_version, :platform, :device_type, :os_version,
-                         :client_created_at, :created_at)
+                         :client_created_at, :created_at, :session_key)
                     """
                 ),
                 {
@@ -14446,6 +15404,7 @@ def save_feedback(
                     "os_version": os_version,
                     "client_created_at": client_created_at,
                     "created_at": now_iso,
+                    "session_key": session_key,
                 },
             )
             if cur.rowcount == 1 and cur.lastrowid:
@@ -14467,6 +15426,59 @@ def save_feedback(
         # Shouldn't happen — either we just inserted (handled above) or a
         # duplicate exists. Defensive fallback.
         return {"server_id": 0, "created_at": now_iso, "duplicate": True}
+
+
+def find_feedback_by_client_id(client_id: str) -> dict | None:
+    """{server_id, created_at} of the note with this client_id, or None.
+    POST /api/feedback uses it on the throttled path only, so an idempotent
+    retry of a note already held still gets its 200 `duplicate` (#360 QA
+    P2-2: duplicates never count against the throttle)."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(app_feedback_table.c.id, app_feedback_table.c.created_at)
+            .where(app_feedback_table.c.client_id == client_id)
+        ).fetchone()
+    return {"server_id": int(row[0]), "created_at": row[1]} if row else None
+
+
+def attach_session_feedback(session_key: str, user_id: str,
+                            username: str | None) -> int:
+    """Hand an unverified session's notes to its user once it verifies in
+    place (#360 QA P2-1, head-eng's ruling). Returns how many rows moved.
+
+    The proof is `session_key`: the sha256 of the bearer token that sent the
+    notes, matched against the token now verifying. Never by username. Only
+    still-anonymous rows (user_id IS NULL) move, and the key is cleared, so a
+    second call for the same session is a no-op.
+    """
+    if not session_key or not user_id:
+        return 0
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(app_feedback_table)
+            .where(app_feedback_table.c.session_key == session_key)
+            .where(app_feedback_table.c.user_id.is_(None))
+            .values(user_id=user_id, username=username, session_key=None)
+        )
+        return res.rowcount or 0
+
+
+def detach_session_feedback(session_key: str) -> int:
+    """Drop the session_key from a token's still-anonymous notes, so they can
+    never attach (release-lead delta QA E). Called when /api/session/init
+    re-points that token at a DIFFERENT user: the notes were sent as the old
+    identity and must not follow the token to the new one. The rows stay,
+    anonymous. Returns how many rows changed."""
+    if not session_key:
+        return 0
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(app_feedback_table)
+            .where(app_feedback_table.c.session_key == session_key)
+            .where(app_feedback_table.c.user_id.is_(None))
+            .values(session_key=None)
+        )
+        return res.rowcount or 0
 
 
 def list_feedback(*, since_id: int = 0, limit: int = 100) -> list[dict]:
@@ -15132,6 +16144,12 @@ def _receipts_serve_date_expr():
     return func.substr(deck_impressions_table.c.served_at, 1, 10)
 
 
+# deck_source as server._log_deck_signal_impressions dumps it (default
+# separators), and the compact form, for the receipts exclusion (S4).
+_CALIBRATION_REFRESH_MARKERS = ('"deck_source": "grading_refresh"',
+                                '"deck_source":"grading_refresh"')
+
+
 def _receipts_candidate_where(window_days: int, grader_version: str,
                               serve_dates: list[str]):
     """Shared WHERE for the grading queue and its backlog COUNT (LLD §4.1).
@@ -15152,6 +16170,9 @@ def _receipts_candidate_where(window_days: int, grader_version: str,
         starve a run.
       * no grade row at this (window, grader_version) — the queue is defined
         by ABSENCE, which is what makes the job idempotent by construction.
+      * not a Calibration refresh deck (features_json `deck_source` =
+        'grading_refresh', ADR-025 S4): never shown in Trades, so never a
+        receipt. A NULL features_json stays eligible.
     """
     g = receipts_grades_table
     already = (
@@ -15167,6 +16188,10 @@ def _receipts_candidate_where(window_days: int, grader_version: str,
             deck_impressions_table.c.is_ghost == 0),
         _receipts_serve_date_expr().in_([str(d) for d in serve_dates]),
         ~already,
+        _evidence_shown(),                        # R4.2 U6: viewed cards and the first 30
+        or_(deck_impressions_table.c.features_json.is_(None),
+            and_(*(~deck_impressions_table.c.features_json.contains(marker, autoescape=True)
+                   for marker in _CALIBRATION_REFRESH_MARKERS))),
     )
 
 
@@ -15484,12 +16509,25 @@ def load_league_scoring_map(league_ids: list[str]) -> dict[str, str]:
 # and PROPAGATES exceptions: a swallowed read would masquerade as
 # needs_fresh_deck. Joins carry an explicit onclause (no FKs, house style).
 
+def _grading_not_partial_run(di):
+    """ADR-025 ruling 25: Calibration's current arm skips a deck job with any
+    'partial_run' row (a run that ended partial, or a truncated lost-job deck),
+    as replay does. Per job, through ix_deck_impressions_job; NULL tiers
+    (every row written at build) pass."""
+    partial = deck_impressions_table.alias("partial_run_rows")
+    return ~(select(literal(1))
+             .where(partial.c.deck_job_id == di.c.deck_job_id,
+                    partial.c.evidence_tier == "partial_run")
+             .exists())
+
+
 def load_grading_legacy_deck(user_id: str, league_id: str
                              ) -> tuple[str | None, str | None, list[dict]]:
     """(deck_job_id, served_at, rows) of the caller's newest deck job that has at least one
     QUALIFYING row; (None, None, []) when none. Qualifying (hld §3.1):
     COALESCE(is_ghost,0)=0, model_arm IS NOT NULL, model_arm <> 'value_core',
-    source_like_impression_id IS NULL, trade_intent IS NULL, assets_json IS NOT NULL.
+    source_like_impression_id IS NULL, trade_intent IS NULL, assets_json IS NOT NULL,
+    and the job has no 'partial_run' row (ADR-025 ruling 25).
     Job = argmax MAX(served_at) over qualifying rows grouped by deck_job_id.
     rows = that job's qualifying rows ORDER BY card_index, each
     {impression_id, card_index, model_arm, assets_json, features_json} (JSON left as stored)."""
@@ -15503,6 +16541,7 @@ def load_grading_legacy_deck(user_id: str, league_id: str
         di.c.source_like_impression_id.is_(None),
         di.c.trade_intent.is_(None),
         di.c.assets_json.isnot(None),
+        _grading_not_partial_run(di),
     )
     with engine.connect() as conn:
         job = conn.execute(
@@ -15536,7 +16575,7 @@ def list_grading_candidates(since_iso: str) -> list[dict]:
             .where(func.coalesce(di.c.is_ghost, 0) == 0, di.c.model_arm.isnot(None),
                    di.c.model_arm != "value_core", di.c.source_like_impression_id.is_(None),
                    di.c.trade_intent.is_(None), di.c.assets_json.isnot(None),
-                   di.c.served_at >= since_iso)
+                   _grading_not_partial_run(di), di.c.served_at >= since_iso)
         ).all()
         members = {(str(r.league_id), str(r.user_id)) for r in conn.execute(
             select(lm.c.league_id, lm.c.user_id)).all()}
