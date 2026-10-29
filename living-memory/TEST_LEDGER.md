@@ -1,3 +1,19 @@
+## 2026-10-29 — Exit guards on three async mobile check suites (platforms-eng; head-eng ask from trades-eng's #546 finding)
+
+Test-only (`mobile/tests/`), no app code. D-056 posture. `check-espn-cookies.js`, `check-send-timeout.js` and `check-vault-subsumes-legacy.js` had no exit guard: an `await` that never settles, or an early `return`, let the event loop drain and node exit 0 mid-run, so a green run wasn't evidence.
+
+- **Change:** each gets `check-device-first-page`'s pattern (mobile/tests/README.md § Writing one): `let finished = false;` + `process.on('exit')` that sets `exitCode = 1` and prints "did not finish" when the run never reached its end; `finished = true` just before the final report. 12 lines each.
+- **Sabotage, each run with and without the guard, then restored (byte-identical, clean run exit 0):**
+
+| Suite | early `return` | hung `await` | `throw` |
+|---|---|---|---|
+| check-espn-cookies | guard 1 / none 0 | guard 1 / none 0 | 1 / 1 |
+| check-send-timeout | guard 1 / none 0 | guard 1 / none 0 | 1 / 1 |
+| check-vault-subsumes-legacy | guard 1 / none 0 | guard 1 / none 0 | 1 / 1 |
+
+  (A throw already exits 1 via the unhandled rejection; the guard is what catches the return and the hang.)
+- **Not here:** #539's new `check-send-registry.js` has the same gap; it gets the guard on #539 or right after it merges (release-lead's call).
+
 ## 2026-10-29 — The model-store hook hardened (#542 QA P3s)
 
 Gates: eval code only (`backend/eval/redaction.py`) plus the runbook. No route, schema, event, flag, knob or engine-module change. The hook stays dark until trades-eng's scrub calls it.
