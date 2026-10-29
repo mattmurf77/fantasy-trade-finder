@@ -15,6 +15,37 @@ Gates: a transport-only guard asked for by head-eng (via platforms-eng); no anal
 - **Sabotage (1), red then restored:** the cap block removed → the chunked-1-MiB test and the boundary test go red (200, not 413; the whole body read); the four others stay green.
 - **Not covered:** a real gunicorn chunked request (the test client sets `wsgi.input_terminated`, as gunicorn does); no network.
 
+## 2026-10-29 — G3-e: `deck_outcomes.user_id`; account deletion and export also match an outcome by its owner
+
+Gates: full (an additive schema change). Scope block: `docs/plans/trade-time-to-suggestion/scope-outcome-owner.md`. head-eng's R28.22 routing, item G3-e. Docs: `data-dictionary.md` § `deck_outcomes`, and `api-reference.md`'s `DELETE /api/account` and `GET /api/account/export` rows. No flag, event or client change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The change:** `deck_outcomes.user_id` (nullable) plus `ix_deck_outcomes_user`.
+  - Written by `save_deck_outcome` from `acting_user_id`.
+  - Deletion deletes by it after today's row path, under its own count, `deck_outcomes_by_owner_deleted`. Export adds by it, deduped and in id order.
+  - `scripts/purge_entry_users.py`'s `DELETION_ONLY_KEYS` gains the column.
+  - The index is **never built at boot** (revised after release-lead's question, same day). A plain `CREATE INDEX` blocks every outcome write for its scan. A fresh DB gets it from the declaration. On prod it's built by `scripts/create_outcome_owner_index.py` (`CONCURRENTLY`, 5 s `lock_timeout`, autocommit, an INVALID leftover rebuilt), run once after the deploy on the operator's word. Until then deletion and export scan. No backfill.
+- **Code walk (the gap is latent, not live):** `save_deck_outcome` is the only outcome writer, and its insert requires an owned `deck_impressions` row (`owner.exists()`). So a #535 deck (no rows, no pack) gets no outcome today: the write is dropped as an `unknown` reject. The column makes the owner a property of the outcome itself, whatever later prunes or never wrote its row.
+- **Tests:** `backend/tests/test_deck_outcome_owner.py`, 7:
+  - the write and the session path stamp the owner;
+  - deletion reaches a column-only outcome (an alias's too), with the right counts and the others kept;
+  - export has each row once, in id order;
+  - boot on the old table adds the column and never the index, idempotent, no backfill; a fresh DB gets the index;
+  - the script builds it on an existing table, `--check` writes nothing, idempotent;
+  - the script's Postgres build pinned (`CONCURRENTLY`, autocommit, `lock_timeout`, INVALID dropped).
+- **Sabotages, 16/16 red** (the new file, `test_purge_entry_users.py`, `test_account_deletion_coverage.py`):
+  - a NULL owner;
+  - the deletion: no owner delete; owner delete moved first;
+  - the export: no owner match; no dedupe; no sort;
+  - the migration: no column; the index built at boot; no metadata index;
+  - the script: not `CONCURRENTLY`; not autocommit; no `lock_timeout`; INVALID not dropped; `--check` builds; the wrong column;
+  - the purge key missing.
+- **Suites:** the full backend suite on the first version: 9831 passed, 2 skipped. On the revision: 9832 passed, 2 skipped.
+- **The #523 resync (2026-10-29, after #523 merged as `f7b6ec4d`):**
+  - The export block keeps all three paths: #523's rows plus pack contract ids (chunked), then G3-e's owner select, deduped by id, sorted once.
+  - Added QA's `test_three_paths_one_run` (onboarding-eng's ask): one outcome reachable only by its row, one only by a pack contract id, one only by `user_id`. Each is exported once, all are deleted in one run, and another user's outcome past the pack's `card_count` stays.
+  - 4/4 sabotages fail it: either path dropped from export or from deletion.
+  - The 39 test files touching `deck_outcomes`, retention, purge and deletion coverage: 1555 passed.
+
 ## 2026-10-29 — The model-store hook hardened (#542 QA P3s)
 
 Gates: eval code only (`backend/eval/redaction.py`) plus the runbook. No route, schema, event, flag, knob or engine-module change. The hook stays dark until trades-eng's scrub calls it.
@@ -115,6 +146,84 @@ Gates: eval code only (`backend/eval/{data,replay,scorers,contract,persistence,f
   - The clean run: 205.
 - **Eval-related suites** (`test_eval_*`, `test_value_model*`, packed and deferred evidence, blind grade, scorecard, the new redaction tests): 811 passed.
 - **B-DK-6 with a coerced ±inf** (release-lead's #515 QA): it stays audited. The null can only lower the audit's count below the filter's, so a served card's verdict can't flip; QA saw mismatches on dropped cards only.
+## 2026-10-29 — #525 re-QA: a new search answered with inputs_changed is read afresh (P1-1r); checklist paths
+
+Gates: release-lead's #525 re-QA at `2546963b`. Every earlier fix was verified by their harness; this is the one residual, plus the checklist. Same PR (11-06 binary). D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **P1-1r:**
+  - **The case:** a Try again (N3), or a tap while a re-search is pending (N3b), whose own answer is `inputs_changed`, on a deck already holding a revoked job. Its answer reset the budget, but the error mirror and the auto re-search effect keyed only on `job?.status` and `job?.error`, which were unchanged. So nothing re-read the error: `('idle', 'inputs_changed')` hid it with nothing pending.
+  - **The fix:** both effects now depend on `job?.job_id` too (release-lead's harness-verified fix). The new search gets its one re-search, then the error card.
+  - **Checks:** executed 11p (from `used` and from `pending`); 11q pins both dependency lists.
+- **Checklist (P2):**
+  - a GET-side-only player or Specific Team with an empty canvas (a give-side pin runs the fair sweep, which never sees `inputs_changed`);
+  - the end card's real copy, "You've seen every trade for now.";
+  - Pass, not Like (a Like may reach a real leaguemate);
+  - step 5 needs a cold search with a visible wait.
+- **Stale §10 references:** fixed in the scope and LLD (the section is §11).
+- **P3s accepted, not changed:**
+  - **N4:** a re-search may fire alongside a tap's own request: one extra generate, rare. The server joins the same-key job. Guarding it would reopen an empty-slot path when the tap's request fails.
+  - **N2:** Retry while offline shows the error card, and two generates run on reconnect. The mutations are paused offline, so this is pre-existing offline behaviour.
+- **Checks:** `check-trade-first-card-events` (11a–11q) and the related suites pass; `tsc` is clean.
+
+## 2026-10-29 — #525: R2 names the re-search's response, not the revoked one (analytics-lead)
+
+Gates: analytics-lead's ask after release-lead's #525 QA P3: R2's `job_id` named the revoked job, which broke R2-to-deck joins, and its `serve_source` was misattributed. No taxonomy change and no new prop. Mobile only. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is the check suite and tsc.
+
+- **The change:** `noteFirstResponse(searchId, first, { replace })`. The automatic re-search's answer passes `replace: !!vars.research` and overwrites the open trace's `job_id`, `serve_source` and `freshness_state`.
+  - Every other response stays first-wins, and a settled trace never changes.
+  - Timing still runs from the original tap, and R2 fires once.
+- **Checks:** `check-trade-first-card-events` §11 (ii) is extended. 11m: R2 carries the rebuilt response's three fields. 11n: an ordinary later response doesn't overwrite, and a settled trace doesn't change. 11o: only the re-search's answer passes `replace`.
+- **Sabotages:** 5/5 red (never replace, always replace, replace a settled trace, the screen never or always replacing).
+- **Other evidence:** the five related suites and `tsc` are green.
+
+## 2026-10-29 — #525 QA (NO-GO at `05fee1fa`), fixed: no endless empty slot; the re-search paged; the offline card; checklist
+
+Gates: release-lead's #525 QA, P1-1, P2-1 to P2-3 and P3s. Same PR (11-06 binary). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is the check suites, tsc, and the TestFlight checklist in the scope block.
+
+- **P1-1, the endless empty slot:**
+  - **Before:** Try again reset the re-search budget at dispatch. When its request failed, the revoked job stayed, `('idle', 'inputs_changed')` hid the error, and nothing re-ran.
+  - **Now:** only a new search's *answer* resets it (`autoResearchAfterAnswer` in `onSuccess`), and the hide holds only while the re-search itself is in flight (`generateMutation.variables.research`).
+  - **Check:** executed case 11l (c2).
+- **P2-1, the un-paged re-search:** `generateTrades(request, { searchId: vars.searchId })`. Every dispatch sends `page: 1`, plus `search_id` only when it has one, so the re-search after R2 is paged. `check-trade-pages` 5a pins it (its regex used to pin the un-paged line).
+- **P2-2, with #488:**
+  - the re-search carries `research: true` on the mutation's variables, so #488's D2 can treat it as background, like `vars.auto`;
+  - the after-402 end state is agreed with engagement-eng (whoever merges second wires it);
+  - this section is now §11, ahead of #488's §10, which ends in an async exit.
+- **P2-3:** the TestFlight checklist is rewritten:
+  - a pinned cold search, with the change made while the deck builds;
+  - "the end card means it didn't trigger: redo";
+  - safety notes (the board edit, never Send/Propose, no Sleeper roster move);
+  - which decks pass the error through after the flip;
+  - `testing.timing_readout`.
+- **P3s:**
+  - offline while recovering shows the Offline card, not an empty slot;
+  - `trades_generated` carries no search_id (the scope's wording fixed);
+  - the R2 `serve_source` skew is flagged to analytics-lead.
+- **Checks:** `check-trade-first-card-events` (all, with 11a–11l) and `check-trade-pages` pass, and `tsc --noEmit` is clean.
+
+## 2026-10-28 — The automatic re-search on `inputs_changed` (analytics-lead's option (a); for the 11-06 binary)
+
+Gates: release-lead's #470 QA P2-1 follow-up; analytics-lead's grant of option (a) with conditions (2026-10-28, cc head-eng and head-product); head-eng: build once that answer came. The scope block is `docs/plans/trade-time-to-suggestion/scope-auto-research.md`. Mobile only; no event, value, flag, route or schema change. D-056: the evidence is the structural check, a code-walk and a TestFlight checklist.
+
+- **The change:** a deck the server revoked for an input change (`status: 'error'`, `error: 'inputs_changed'`) re-searches once, by itself, when the user has no card left, instead of "Couldn't load more trades."
+  - No R1, and no new search_id: the open trace's id, else none.
+  - No R2b: no deckFailure.
+  - At most once per search.
+  - The error card is hidden at render while it recovers.
+- **`check-trade-first-card-events.js` §10** (10a–10k, all pass):
+  - analytics-lead's four cases, executed against `utils/tradePages.ts` and the real `state/tradeSearchTrace.ts`;
+  - the TradesScreen wiring, by shape.
+- **Census counts updated for the 8th dispatch site:** `check-canvas-results` 12a, `check-inline-home` 7f, `check-results-push` 4f, `check-offer-prefill-330` S-2 and `check-trade-pages` 5a (its shape).
+  - All five passed on main and failed after the change until updated: they caught the new dispatch site, as designed.
+  - Every `mobile/tests/check-*.js` passes. `tsc --noEmit` is clean; testid-lint is OK.
+- **Sabotage, each red then restored (6):**
+  - the recovery removed (10g);
+  - a minted id for the re-search (4a, 10i);
+  - the id sent when the trace has settled (10a);
+  - a second re-search allowed (10f);
+  - the error card not hidden (10j);
+  - the re-search through a tap path (10h).
+- **TestFlight:** the scope's §3 checklist (6 steps, two devices), for the operator on the 11-06 build. Not yet run.
 
 ## 2026-10-28 — Paywall price rise moves to 2027-01-02 04:00 UTC (App Store Connect's US start for a Jan-2 schedule; follow-up to #494)
 
