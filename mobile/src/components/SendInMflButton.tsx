@@ -215,31 +215,48 @@ export default function SendInMflButton({
       receive_player_ids: receivePlayerIds,
     });
     setState('idle');
-    // After an unknown outcome on this trade, the dialog that gates the send
-    // starts with marketing's 8f line (utils/sendOutcomeCopy.ts, no new copy).
-    const reminder = getSendRecord(sendKey)?.state === 'unknown' ? `${sendOutcomeUnknownMessage('MFL')}\n\n` : '';
 
-    if (warnings.length > 0) {
-      const blocking = warnings.some((w) => w.severity === 'blocking');
+    // Each dialog captures this trade's registry state when it is built. A
+    // queued second dialog (a same-frame double tap) can be pressed long
+    // after the first send went out, so its Send only sends if the state is
+    // unchanged. If the trade has since gone in flight or been sent, it does
+    // nothing (the button already says so). Otherwise (now unknown, or
+    // cleared) the dialog opens again, current.
+    function showConfirm(): void {
+      const shown = getSendRecord(sendKey)?.state;
+      const send = () => {
+        const now = getSendRecord(sendKey)?.state;
+        if (now === shown) void doPropose();
+        else if (now !== 'in_flight' && now !== 'sent') showConfirm();
+      };
+      // After an unknown outcome on this trade, the dialog that gates the
+      // send starts with marketing's 8f line (utils/sendOutcomeCopy.ts, no
+      // new copy).
+      const reminder = shown === 'unknown' ? `${sendOutcomeUnknownMessage('MFL')}\n\n` : '';
+
+      if (warnings.length > 0) {
+        const blocking = warnings.some((w) => w.severity === 'blocking');
+        Alert.alert(
+          blocking ? 'This trade will likely fail' : 'Heads up before sending',
+          reminder + warnings.map((w) => `• ${w.message}`).join('\n\n'),
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Send anyway', onPress: send },
+          ],
+        );
+        return;
+      }
+
       Alert.alert(
-        blocking ? 'This trade will likely fail' : 'Heads up before sending',
-        reminder + warnings.map((w) => `• ${w.message}`).join('\n\n'),
+        'Send this trade?',
+        reminder + 'This proposes the trade directly in MFL — your leaguemate gets it as a pending offer (it expires in 7 days).',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Send anyway', onPress: () => { void doPropose(); } },
+          { text: 'Send', onPress: send },
         ],
       );
-      return;
     }
-
-    Alert.alert(
-      'Send this trade?',
-      reminder + 'This proposes the trade directly in MFL — your leaguemate gets it as a pending offer (it expires in 7 days).',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Send', onPress: () => { void doPropose(); } },
-      ],
-    );
+    showConfirm();
   }, [sendKey, leagueId, theirUserId, givePlayerIds, receivePlayerIds, doPropose]);
 
   // A successful sign-in resumes the send immediately — the confirm alert

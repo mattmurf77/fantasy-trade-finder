@@ -10,8 +10,9 @@
 // remount reads it back. The buttons read it with useSyncExternalStore.
 //
 // In memory, per app run: it survives a remount, NOT an app restart (a cold
-// start begins empty). Bounded: at most SEND_REGISTRY_CAP trades, the oldest
-// dropped first. Plain module state, no React, no imports.
+// start begins empty). Bounded: past SEND_REGISTRY_CAP trades, `sent` entries
+// go first, then `unknown`, oldest first in each, and never one `in_flight`.
+// Plain module state, no React, no imports.
 // Pinned by tests/check-send-registry.js.
 
 export type SendPlatform = 'espn' | 'mfl';
@@ -83,12 +84,21 @@ export function subscribeSends(listener: () => void): () => void {
 function put(key: string, state: SendState): void {
   records.delete(key); // re-inserted as the newest
   records.set(key, { state, at: Date.now() });
-  while (records.size > SEND_REGISTRY_CAP) {
-    const oldest = records.keys().next().value;
-    if (oldest === undefined) break;
-    records.delete(oldest);
-  }
+  evict();
   emit();
+}
+
+// Over the cap, drop what costs least to forget: a confirmed send (its button
+// goes back to an idle Send), then an unknown outcome (its reminder is lost),
+// oldest first in each. Never a send in flight: forgetting one would let a
+// remount send it again, so if every entry is in flight the map stays over.
+function evict(): void {
+  for (const state of ['sent', 'unknown'] as const) {
+    for (const [key, record] of records) {
+      if (records.size <= SEND_REGISTRY_CAP) return;
+      if (record.state === state) records.delete(key);
+    }
+  }
 }
 
 function emit(): void {
