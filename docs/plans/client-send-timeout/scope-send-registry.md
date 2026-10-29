@@ -27,16 +27,18 @@ A send's state lived only in the button's `useState`, and the ESPN/MFL propose r
      - A definitive not-sent answer (`*_write_failed`, `*_unavailable`, auth, unmapped assets, `feature_disabled`, …) clears the entry: `settleSend(key, 'not_sent')`.
    - **Why `sent` is recorded:** the button's local `'sent'` state is gone, so the registry has to carry "Proposal sent" for the button that sent the trade. As a result, a remount shows it too, and nothing offers an idle Send for a trade that was just confirmed. `beginSend` refuses `sent` as well as `in_flight`, but only a stale second confirm dialog can reach a refusal: the button itself is disabled in both states.
    - **Lifetime:** in memory, per app run. It survives a remount, **not an app restart**.
-   - **Bounded (P3-3):** over `SEND_REGISTRY_CAP` = 50 trades, `evict()` (`sendRegistry.ts:95`) drops `sent` entries first, then `unknown` ones, oldest first in each. A re-recorded trade counts as the newest.
+   - **Bounded (P3-3):** over `SEND_REGISTRY_CAP` = 50 trades, `evict()` (`sendRegistry.ts:98`) drops `sent` entries first, then `unknown` ones, oldest first in each. A re-recorded trade counts as the newest.
      - It never drops an `in_flight` entry: forgetting one would let a remount send that trade again.
      - If every entry is in flight, the map stays over the cap.
+     - It never drops the entry just written (#539 delta QA). Without that skip, a send that settles while the map is over the cap (because everything else is in flight) would be forgotten at once.
 2. **The buttons** (`SendInEspnButton.tsx`, `SendInMflButton.tsx`, same change in each):
    - **Remount:** the label and `disabled` come from `useSyncExternalStore(subscribeSends, () => getSendRecord(sendKey)?.state)` (ESPN `:97-98`, MFL `:95-96`), so a remount, or the same button showing a different trade, reads that trade's state. "Sending…" and "Proposal sent" are the existing labels. The local state keeps only `'idle' | 'checking'`, for the link-status and validate checks.
    - **Double tap (#527 QA P3-5):** `doPropose`'s first statement is `if (!beginSend(sendKey)) return;` (ESPN `:159`, MFL `:118`), before any await. A same-frame double tap, a second queued confirm dialog, or a second mount sends no second request.
    - **Settle:** the try block calls `settleSend(sendKey, 'sent')` (ESPN `:168`, MFL `:127`). The catch starts with `settleSend(sendKey, isSendOutcomeUnknown(err) ? 'unknown' : 'not_sent')` (ESPN `:182`, MFL `:141`), ahead of #527's unchanged alert ladder.
-   - **Reminder:** when this trade's entry is `unknown`, the dialog that gates the send begins with marketing's approved 8e/8f line, `sendOutcomeUnknownMessage(platform)`, then a blank line, then the dialog's existing text (ESPN `:282`, MFL `:235`). This applies to both "Send this trade?" and the warnings dialog ("Send anyway"). The buttons are unchanged. **No new copy.**
-   - **A stale dialog doesn't send (P3-1):** `confirmSend` builds its dialog in `showConfirm()` (ESPN `:272`, MFL `:225`).
-     - `showConfirm()` captures the trade's registry state as `shown` when the dialog is built. The dialog's Send (and Send anyway) calls `doPropose` only if the state still equals `shown` (ESPN `:276`, MFL `:229`).
+   - **Reminder:** when this trade's entry is `unknown`, the dialog that gates the send begins with marketing's approved 8e/8f line, `sendOutcomeUnknownMessage(platform)`, then a blank line, then the dialog's existing text (ESPN `:284`, MFL `:237`). This applies to both "Send this trade?" and the warnings dialog ("Send anyway"). The buttons are unchanged. **No new copy.**
+   - **A stale dialog doesn't send (P3-1):** `confirmSend` builds its dialog in `showConfirm()` (ESPN `:274`, MFL `:227`).
+     - `showConfirm()` captures the trade's registry **record** as `shown` when the dialog is built. The dialog's Send (and Send anyway) calls `doPropose` only if the record is still the same object (ESPN `:278`, MFL `:231`).
+     - Every write makes a new record, so the comparison also catches unknown → another send → unknown again (the ABA case, #539 delta QA). Comparing the state alone would miss it and let a stale dialog send a third POST.
      - **The case it fixes:** a same-frame double tap queues two dialogs. Send on the first goes out, and the second stays open through the 60–91 s wait. After "Check before resending", Send on that second dialog used to send a second POST of an unknown trade, with no reminder.
      - **In flight or sent since the dialog was built:** nothing happens. The button already shows Sending… / Proposal sent.
      - **Unknown since** (or cleared by a later definitive refusal): the dialog opens again, current. After an unknown outcome it carries the reminder, and Send on it sends, knowingly.
@@ -77,7 +79,7 @@ None. No table, flag, env var or route. Sends stay behind `espn.send` and `trade
 
 ## 3. Evidence scope
 
-- [x] **Structural guard:** `mobile/tests/check-send-registry.js` (`npm run test:send-registry`), **35 checks**. It started at 31; P3-1 added R2d and R2e for each button, and P3-3 rewrote R6a.
+- [x] **Structural guard:** `mobile/tests/check-send-registry.js` (`npm run test:send-registry`), **37 checks**. It started at 31. P3-1 added R2d and R2e for each button, P3-3 rewrote R6a, and the delta QA added R2f for each button and extended R6a.
   - **What it executes:** the real `api/sendRegistry.ts` and the real `SendInEspnButton` / `SendInMflButton`. They are transpiled and run under a minimal hooks shim (state kept across renders, a fresh state for a remount, `useSyncExternalStore` subscribed per mount), with a fake `Alert` and a scripted propose. It also uses the real `api/client.ts` `ApiError`, `api/sendOutcome.ts` and `utils/sendOutcomeCopy.ts`.
   - **#379 compatibility (P3-5):** the module shim also answers `../utils/openExternal` (`openPlatform`), which the buttons import once #379 lands. Before #379 it is unused.
   - **R1, the key:**
@@ -95,7 +97,11 @@ None. No table, flag, env var or route. Sends stay behind `espn.send` and `trade
       - Send on that reopened dialog then sends (two POSTs).
       - A stale dialog pressed while in flight, or after a confirmed send, does nothing and opens nothing.
       - The warnings dialog behaves the same.
-    - **R2e:** both dialogs' Send is `send`, and `doPropose` is reachable only inside `if (now === shown)`, with `shown = getSendRecord(sendKey)?.state` (AST).
+    - **R2e:** both dialogs' Send is `send`, and `doPropose` is reachable only inside `if (now === shown)`, where `shown` and `now` are both `getSendRecord(sendKey)`, the record object (AST).
+    - **R2f, the ABA case:**
+      - The trade is already unknown, and a double tap queues two dialogs, both carrying the reminder.
+      - Send on the first goes out (POST 2) and times out again: still unknown, but a new record.
+      - Send on the second sends **nothing** (still 2 POSTs) and reopens the dialog with the reminder. Send on that one is POST 3, sent knowingly.
   - **R3, a remount:** it renders "Sending…", disabled, and a tap does nothing. The same instance shows another trade as idle, and the first trade as Sending… again.
   - **R4, one alert:** send, unmount, remount, then success / timeout / `write_failed` gives **exactly one** result alert. The remount is notified and shows "Proposal sent" / idle / idle.
   - **R5, outcomes:**
@@ -105,7 +111,7 @@ None. No table, flag, env var or route. Sends stay behind `espn.send` and `trade
     - Five definitive not-sent answers clear the entry, and the next dialog has no reminder.
     - The catch's first statement and the reminder expression are pinned (AST).
   - **R6, the module:**
-    - It is bounded, in P3-3's order (R6a). With the cap filled by interleaved in-flight / unknown / sent entries, each new trade evicts the oldest `sent` entry, then the oldest `unknown` one (a re-recorded one counts as newest). It never evicts an `in_flight` entry: with every entry in flight, the map goes to cap + 1.
+    - It is bounded, in P3-3's order (R6a). With the cap filled by interleaved in-flight / unknown / sent entries, each new trade evicts the oldest `sent` entry, then the oldest `unknown` one (a re-recorded one counts as newest). It never evicts an `in_flight` entry: with every entry in flight, the map goes to cap + 1. A `sent` or `unknown` entry that settles while the map is over the cap stays until the next trade is written.
     - The API semantics and the listeners are pinned.
     - It has no imports, and its comment states the restart limit.
     - The Sleeper button and the overhaul don't import it.
@@ -122,6 +128,9 @@ None. No table, flag, env var or route. Sends stay behind `espn.send` and `trade
   | P3-1: the `now === shown` comparison removed (Send always calls `doPropose`), ESPN | 2: R2d, R2e |
   | P3-1: same, MFL | 2: R2d, R2e |
   | P3-3: evict `in_flight` entries first | 1: R6a |
+  | Delta QA, ABA: compare the state only (`now?.state === shown?.state`), ESPN | 2: R2e, R2f |
+  | Delta QA, ABA: same, MFL | 2: R2e, R2f |
+  | Delta QA: the just-written skip dropped from `evict()` | 1: R6a |
 
   Re-run on the revised code, (a)–(d2) all stay red:
   - (a): 5 each, with R2d joining;
@@ -149,7 +158,7 @@ None. No table, flag, env var or route. Sends stay behind `espn.send` and `trade
   - Time from the confirm dialog's **Send**.
 
   1. iPhone on the 11-06 build, MFL sandbox league linked, MFL sign-in stored. Settings → Developer → Network Link Conditioner, with a 100%-loss profile ready.
-  2. Turn the profile on. Open a **Matches or Awaiting card** with the test counterparty. Don't use the calculator: it loses the trade when you leave. Tap **Send in MFL**, then **Send**. Within about 30 s, back out of the card and reopen the same one.
+  2. Turn the profile on. Open a **Matches or Awaiting card** with the test counterparty. Don't use the calculator: it loses the trade when you leave. Tap **Send in MFL**. With the conditioner on, the confirm dialog takes **about 30 s to appear**, because the link check and validate each wait out 15 s. Tap **Send**. Within about 30 s, back out of the card and reopen the same one.
      - Expected: the button reads **Sending…** and is disabled.
      - Tapping it does nothing.
   3. Wait for the alert (about 60–91 s).
