@@ -34,6 +34,24 @@ Gates: head-eng's check 3, from release-lead's prod sweep: "Purged 500 expired d
 - **Tests:** `test_deck_diagnostics.py`. A call drains up to `max_batches` and stops at a short batch (one read, counted); the loop passes the ceiling.
 - **Sabotages:** 3/3 red (one batch only, no short-batch stop, the loop without the ceiling).
 
+## 2026-10-29 — The model-store hook hardened (#542 QA P3s)
+
+Gates: eval code only (`backend/eval/redaction.py`) plus the runbook. No route, schema, event, flag, knob or engine-module change. The hook stays dark until trades-eng's scrub calls it.
+
+- **The token map is validated** (`redaction.check_tokens`). Every value must start with `redacted:` and must not itself be a key of the map. Otherwise it raises `ValueError`, naming a count and never an id. A map like `{"u7": "u70"}` would otherwise re-key a deleted user's pairs onto a live user.
+- **A symlinked store path** resolves to its target (`os.path.realpath`), so the id can't survive there.
+- **The temp file** is `fchmod`ed inside its `fdopen`, so no fd leaks when `fchmod` fails, and it's fsynced before the replace.
+- **QA's four store cases are ported:**
+  - prefix-sharing ids (deleting u7 or acct_1 leaves u70, u700 and acct_12 alone);
+  - any store mode kept (0600, 0640, 0664);
+  - a failure at any step (`mkstemp`, `fchmod`, `fsync`, `replace`, an interrupt at `replace`) leaves the store's bytes, inode, mtime, mode and open fds untouched, with no temp file;
+  - a concurrent reader sees only whole states, and each rewrite is a new inode.
+- **Runbook:** never run `python3 -m backend.value_model --refit` while the daily tick runs. The scrub retries the hook when it raises.
+- **Tests:** `test_eval_redaction_model_store.py`: 25 (+14).
+- **Correction to #542's entry:** that PR added +2 tests to this file, not +3. The entry stands as written; the ledger is append-only.
+- **Sabotage, each red then restored (3):** no map check; no `realpath`; `fchmod` before `fdopen`. The fsync is durability-only, so no test can show it.
+- **Suites:** all `test_eval_*` plus `test_evidence_pack.py` and `test_deck_value_model.py`, on main @ `7edc9e74`: 485 passed.
+
 ## 2026-10-29 — The model-store hook under legal R28.22; #529 QA P3s
 
 Gates: eval code only (`backend/eval/{redaction,data,flip_read,scorers,bdk_audit}.py`) plus docs. No route, schema, event, flag, knob or engine-module change. The hook is still dark until trades-eng's scrub calls it, in the daily tick before `nightly_refit`.
