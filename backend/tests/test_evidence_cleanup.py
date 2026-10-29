@@ -569,11 +569,21 @@ class _OrderedLock:
             self.held.names = []
         return self.held.names
 
-    def acquire(self, *a, **k):
+    DEADLOCK_S = 5
+
+    def acquire(self, blocking=True, timeout=-1):
         names = self._set()
         if self.name == "jobs" and "ledger" in names:
             self.violations.append("jobs under ledger")
-        got = self.inner.acquire(*a, **k)
+        if blocking and timeout == -1:
+            # #489 QA P3-3: a self-deadlock fails the test instead of hanging it.
+            got = self.inner.acquire(timeout=self.DEADLOCK_S)
+            if not got:
+                self.violations.append(f"{self.name} lock not acquired in {self.DEADLOCK_S} s")
+                raise AssertionError(f"{self.name} lock not acquired in {self.DEADLOCK_S} s "
+                                     "(a self-deadlock?)")
+        else:
+            got = self.inner.acquire(blocking, timeout)
         if got:
             names.append(self.name)
         return got
