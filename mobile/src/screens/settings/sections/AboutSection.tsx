@@ -1,4 +1,5 @@
-// Settings § About — Help & FAQ, Privacy Policy, Terms of Use, Version.
+// Settings § About — Help & FAQ, Your feedback, Privacy Policy, Terms of Use,
+// Credits, Version (that order: design-lead #354 change 3, ux-lead D-3).
 //
 // Lifted verbatim from SettingsScreen.tsx (origin/main) `aboutSection` at
 // :1416-1458, plus:
@@ -23,9 +24,11 @@
 // No queries, no loading state, so there is nothing to place a per-section
 // placeholder against.
 //
-// Note: this module takes no `SettingsSectionProps` — every row opens an
-// external URL via Linking, so it needs neither a notice surface nor in-app
-// navigation.
+// Props: `navigate` only (no notice surface). The "Your feedback" row (#354
+// BL-10, D-3: moved here from the tester-only TestingSection so every user
+// can reach the inbox) is the one in-app push; both hosts pass `navigate`:
+// SettingsAboutScreen and the flat SettingsScreen `aboutSection`. Every other
+// pressable row opens an external URL via Linking. Credits is a plain block.
 
 import React from 'react';
 import { View, Text, Pressable, Linking } from 'react-native';
@@ -35,6 +38,7 @@ import { chalk, type } from '../../../theme/chalkline';
 import { TickLabel, Icon } from '../../../components/chalkline';
 import { useFlag } from '../../../state/useFeatureFlags';
 import { styles } from '../styles';
+import type { SettingsSectionProps } from './types';
 
 const WEB_ORIGIN = 'https://fantasy-trade-finder.onrender.com';
 
@@ -48,7 +52,7 @@ function appVersionLabel(): string | null {
   return version ?? build ?? null;
 }
 
-export default function AboutSection() {
+export default function AboutSection({ navigate }: Pick<SettingsSectionProps, 'navigate'>) {
   const helpSurfaceEnabled = useFlag('ux.help_surface');
   const versionLabel = appVersionLabel();
 
@@ -76,6 +80,21 @@ export default function AboutSection() {
           <Icon name="chevron-right" color={chalk.dim} size={16} />
         </Pressable>
       ) : null}
+      {/* #354 BL-10 (D-3): public home of the feedback inbox. Unflagged (D-4). */}
+      <Pressable
+        testID="settings.feedback-inbox"
+        accessibilityRole="button"
+        onPress={() => navigate('FeedbackInbox')}
+        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowKey}>Your feedback</Text>
+          <Text style={styles.rowSub}>
+            Notes you've sent with the flag button, and where each one stands.
+          </Text>
+        </View>
+        <Icon name="chevron-right" color={chalk.dim} size={16} />
+      </Pressable>
       <Pressable
         accessibilityRole="link"
         accessibilityHint="Opens in your browser"
@@ -94,6 +113,22 @@ export default function AboutSection() {
         <Text style={[styles.rowKey, { flex: 1 }]}>Terms of Use</Text>
         <Icon name="chevron-right" color={chalk.dim} size={16} />
       </Pressable>
+      {/* Credits (LEG-S3; legal-lead-drafts.md Part 3, wording verbatim;
+          design-lead #354 changes 1-2): a NON-pressable block read as one
+          accessible element. The URL shows in full as the CC-BY attribution,
+          so there is no link, no partial-text tap target and no chevron.
+          Q5b: no league platform is named. */}
+      <View testID="settings.credits" accessible style={styles.linkRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowKey}>Credits</Text>
+          <Text style={styles.rowSub}>
+            Consensus values from DynastyProcess and other published sources.
+          </Text>
+          <Text style={styles.rowSub}>
+            Data by nflverse (https://github.com/nflverse/nfldata), CC-BY.
+          </Text>
+        </View>
+      </View>
       {/* F7 — the build the user is actually running, for support triage. */}
       {versionLabel ? (
         <View testID="settings.version" style={styles.kvRow}>

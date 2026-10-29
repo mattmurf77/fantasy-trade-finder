@@ -517,6 +517,32 @@ def test_build_session_failure_marks_failed_never_raises(engine):
     bg.build_session(session_id="000000000000000000", server=SERVER, engine=boom)
 
 
+def test_safety_ceiling_run_never_becomes_a_session(engine):
+    """A value-core run that hit the core's safety ceiling holds a partial pool. The arm
+    refuses it with the documented value_core_failed (503) even though it has enough cards,
+    and build_session marks the session failed with no cards written."""
+    def ceiling_engine(trades):
+        inner = stub_engine(trades)
+
+        def run(*a, **kw):
+            result = inner(*a, **kw)
+            result.core.safety_ceiling_hit = result.core.budget_exhausted = True
+            return result
+        return run
+
+    inputs, _ = inputs_and_catalog()
+    with pytest.raises(bg.GradingError) as e:
+        bg.run_value_core(inputs, seat="u1", server=SERVER, engine=ceiling_engine(VALUE_CORE))
+    assert (e.value.code, e.value.status, e.value.detail) == ("value_core_failed", 503, {})
+
+    seed_current_deck(engine)
+    sid = bg.start_session(user_id="u1", league_user_id="u1", league_id="L1", now=NOW)["session"]["session_id"]
+    bg.build_session(session_id=sid, server=SERVER, engine=ceiling_engine(VALUE_CORE))
+    row = db.load_grading_session(sid)
+    assert row["status"] == "failed" and json.loads(row["error_json"]) == {"code": "value_core_failed"}
+    assert count(db.grading_cards_table) == 0
+
+
 def test_build_session_is_idempotent_for_non_building_sessions(engine):
     seed_current_deck(engine)
     sid = start_and_build(engine)

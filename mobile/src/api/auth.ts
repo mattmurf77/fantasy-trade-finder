@@ -163,12 +163,12 @@ export async function linkSleeperUsername(
 export interface AccountInfo {
   ok: boolean;
   sleeper_user_id: string;
-  verified_via: 'sleeper' | 'apple' | 'google' | null;
+  verified_via: 'sleeper' | 'apple' | 'google' | 'mfl_login' | 'espn' | null;
   account: {
     account_id: string;
     sleeper_user_id: string | null;
     created_at: string;
-    identities: Array<{ provider: 'apple' | 'google'; linked_at: string }>;
+    identities: Array<{ provider: 'apple' | 'google' | 'espn' | 'mfl'; linked_at: string }>;
   } | null;
   /** P2.6 — session is keyed to an account with no linked Sleeper source. */
   account_only?: boolean;
@@ -184,13 +184,27 @@ export async function getAccount(): Promise<AccountInfo> {
 // Always available (not flag-gated). Deletes the user's data per the
 // privacy policy; the backend also invalidates every session server-side,
 // so the caller must sign out locally on success.
+//
+// LEG-S6 (#354): `appleAuthorizationCode`, a fresh Sign in with Apple code,
+// goes up as `apple_authorization_code` so the server can revoke Sign in with
+// Apple (accounts.revoke_apple_tokens). Without a code this is the plain,
+// body-less DELETE, and the server deletes either way.
 export interface DeleteAccountResponse {
   ok: boolean;
   deleted: Record<string, number>;
+  /** True only when Apple confirmed the Sign in with Apple revocation. */
+  apple_revoked?: boolean;
 }
 
-export async function deleteAccount(): Promise<DeleteAccountResponse> {
-  return apiRequest<DeleteAccountResponse>('/api/account', { method: 'DELETE' });
+export async function deleteAccount(
+  opts: { appleAuthorizationCode?: string | null } = {},
+): Promise<DeleteAccountResponse> {
+  return apiRequest<DeleteAccountResponse>('/api/account', {
+    method: 'DELETE',
+    ...(opts.appleAuthorizationCode
+      ? { body: { apple_authorization_code: opts.appleAuthorizationCode } }
+      : {}),
+  });
 }
 
 // POST /api/session/init — full app session. Called after the user picks
@@ -258,6 +272,14 @@ async function requireSameSession(token: string | null): Promise<void> {
   }
 }
 
+// Time to trade suggestion (R2 `launch_state`, T3): a search tapped before
+// this process's first session-init completed is a `cold_launch`. Process
+// lifetime, in memory; set once a /api/session/init response is accepted.
+let _sessionInitCompleted = false;
+export function sessionInitCompletedThisProcess(): boolean {
+  return _sessionInitCompleted;
+}
+
 export async function sessionInit(body: SessionInitBody, control: SessionInitControl): Promise<SessionInitResponse> {
   control.assertCurrent();
   const sessionToken = control.token;
@@ -280,6 +302,7 @@ export async function sessionInit(body: SessionInitBody, control: SessionInitCon
       deadlineAt: control.deadlineAt, beforeDispatch: () => { control.assertCurrent(); control.onDispatch(); }}));
   await requireSameSession(sessionToken);
   control.assertCurrent();
+  _sessionInitCompleted = true;
   // Mirror the server's verified-session state into the store so the
   // verify banner reacts to every init/revalidate. Loaded inline to avoid
   // a circular import (same pattern as consumeInvitedBy below).

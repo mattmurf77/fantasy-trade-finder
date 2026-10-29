@@ -24,8 +24,12 @@ trivial):
 Features come from the SAME frozen features_json the F1 spine logs
 (via backend.eval.data.card_dict at train time and card_features() at
 serve time — identical key names, so no training/serving skew), plus:
-  - F5 taste-match scores (prefMatch_long/short cosine of the user's live
-    taste vector against the card's frozen taste_attrs),
+  - F5 taste-match scores (prefMatch_long/short): in a fit or an eval,
+    the serve-time values frozen on the card (taste_pref_long/short,
+    models-lead R4.1; absent = 0.0, the no-signal anchor). Only live
+    serving (serving_scores) reads the user's live taste vectors; no fit
+    or eval path does, so a re-fit at the same `as_of` is reproducible
+    and taste learned after a card was served never scores it,
   - per-(user, partner) smoothed historical like rate ("partner history"),
   - served position as a TRAIN-TIME debiasing feature only (YouTube
     shallow-tower pattern): at predict time it is pinned to its training
@@ -38,7 +42,10 @@ on a head applies the Monolith log-odds correction
 (logit += ln(rate)) at predict time so probabilities stay honest.
 
 The V-vector — strategy, not learning (PRD §2): hand-set values read
-LIVE from model_config at scoring time (changeable without retraining):
+LIVE from model_config at serving time (changeable without retraining);
+an eval pins them once per run, records them, and passes them to
+rank_score explicitly (the value_model scorer takes the pin as a
+constructor argument; models-lead R5.2 (a)):
 
     rank_score = P(like)·V_like + P(like)·P(propose|like)·V_propose
     V_like     = model_config value_model_v_like     (default 1.0)
@@ -63,6 +70,7 @@ Nightly refit is idempotent per UTC date (an existing record for today
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -97,6 +105,40 @@ def _cfg(key: str, default: float) -> float:
         return float(default)
 
 
+# ---------------------------------------------------------------------------
+# Configuration is pinned and recorded per run (models-lead R5.2 (a)). A fit
+# reads FIT_CONFIG and an eval of rank_score reads SCORE_CONFIG; each pins the
+# values once (pin_config), records them with the SHA-256 of the whole live
+# model_config, and a refit or replay passes a recorded pin back explicitly:
+# train_model(config=...), rank_score(v_values=...), and the value_model
+# scorer's constructor. Only live serving reads the V-vector live.
+# ---------------------------------------------------------------------------
+
+FIT_CONFIG = {"value_model_calib_frac": 0.2, "value_model_l2": 0.01,
+              "value_model_l2_cat": 0.5}
+SCORE_CONFIG = {"value_model_v_like": V_LIKE_DEFAULT,
+                "value_model_v_propose": V_PROPOSE_DEFAULT}
+
+
+def model_config_sha256() -> str:
+    """SHA-256 of the whole live model_config (trade_service's live dict) as
+    canonical JSON."""
+    try:
+        from .trade_service import _cfg as live
+        doc = json.dumps(dict(live), sort_keys=True, separators=(",", ":"), default=str)
+    except Exception:
+        doc = "{}"
+    return hashlib.sha256(doc.encode("utf-8")).hexdigest()
+
+
+def pin_config(keys: dict) -> dict:
+    """Read `keys` ({key: default}) from live model_config once:
+    {"values": {key: value}, "model_config_sha256": ...}, the record a fit
+    or an eval keeps and a refit or replay passes back."""
+    return {"values": {k: _cfg(k, d) for k, d in keys.items()},
+            "model_config_sha256": model_config_sha256()}
+
+
 def models_path() -> str:
     # Env re-read at call time so tests can point at a tmp dir (F8 idiom).
     base = os.environ.get("VALUE_MODEL_DIR", MODELS_DIR)
@@ -116,6 +158,10 @@ K_PREF_LONG = "_pref_long"
 K_PREF_SHORT = "_pref_short"
 K_PARTNER_RATE = "_partner_rate"
 K_POSITION = "_position"       # served-position fraction; TRAIN-TIME ONLY
+# Frozen card keys (R4.1): the taste matches taste_service.taste_multipliers
+# used when the card was served. Absent when the taste layer didn't run.
+K_TASTE_PREF_LONG = "taste_pref_long"
+K_TASTE_PREF_SHORT = "taste_pref_short"
 
 
 def _num(v, default=0.0) -> float:
@@ -230,9 +276,10 @@ def _taste_attrs_of(f: dict) -> list[str]:
 
 
 class _TasteCache:
-    """Per-run cache of (short, long) taste vectors by user — one DB read
-    per user per training run / deck / eval pass. Any failure degrades to
-    empty vectors (prefMatch 0.0), never an exception."""
+    """LIVE SERVING ONLY (serving_scores): (short, long) taste vectors by
+    user, one DB read per user per deck. Never used by a fit or an eval
+    (R4.1): those read the frozen taste_pref_long/short. Any failure
+    degrades to empty vectors (prefMatch 0.0), never an exception."""
 
     def __init__(self):
         self._by_user: dict[str, tuple[dict, dict]] = {}
@@ -402,17 +449,17 @@ class ValueModel:
         self.trained_at = trained_at
         self.train_date = train_date
         self.meta = dict(meta or {})
-        self._taste = _TasteCache()
 
     # -- feature injection ---------------------------------------------------
     def _inject(self, f: dict, user_id, *, position=None) -> dict:
         """Return a copy of the features dict with the computed features
-        injected. `position` None (serving/eval) ⇒ the training mean —
-        the shallow-tower drop; the model never reads card_index."""
+        injected. The taste matches are the card's frozen
+        taste_pref_long/short (0.0 when absent), never a live read.
+        `position` None (serving/eval) ⇒ the training mean — the
+        shallow-tower drop; the model never reads card_index."""
         g = dict(f)
-        pl, ps = self._taste.pref_match(user_id, _taste_attrs_of(f))
-        g[K_PREF_LONG] = pl
-        g[K_PREF_SHORT] = ps
+        g[K_PREF_LONG] = _num(f.get(K_TASTE_PREF_LONG))
+        g[K_PREF_SHORT] = _num(f.get(K_TASTE_PREF_SHORT))
         partner = f.get("partner_user_id")
         g[K_PARTNER_RATE] = self.partner_rates.get(
             _partner_key(user_id, partner), self.global_like_rate)
@@ -431,15 +478,19 @@ class ValueModel:
             extract_features(self._inject(f, user_id)))
 
     # -- the V-vector (strategy layer — live model_config reads) -------------
-    def rank_score(self, f: dict, user_id) -> float:
-        v_like = _cfg("value_model_v_like", V_LIKE_DEFAULT)
-        v_prop = _cfg("value_model_v_propose", V_PROPOSE_DEFAULT)
+    def rank_score(self, f: dict, user_id, *, v_values: dict | None = None) -> float:
+        """v_values: a pinned SCORE_CONFIG values dict (an eval passes the
+        one it recorded). None: read the V-vector live (serving only)."""
+        if v_values is None:
+            v_values = {k: _cfg(k, d) for k, d in SCORE_CONFIG.items()}
+        v_like = float(v_values["value_model_v_like"])
+        v_prop = float(v_values["value_model_v_propose"])
         pl = self.p_like(f, user_id)
         return pl * v_like + pl * self.p_propose_given_like(f, user_id) * v_prop
 
     # -- card-dict entry points (F8 scorer: user_id rides the card dict) -----
-    def rank_score_from_card(self, card: dict) -> float:
-        return self.rank_score(card, card.get("user_id"))
+    def rank_score_from_card(self, card: dict, *, v_values: dict | None = None) -> float:
+        return self.rank_score(card, card.get("user_id"), v_values=v_values)
 
     def p_like_from_card(self, card: dict) -> float:
         return self.p_like(card, card.get("user_id"))
@@ -488,29 +539,37 @@ MIN_LIKE_POS = 5
 MIN_PROPOSE_ROWS = 20
 MIN_PROPOSE_POS = 3
 
-_POSITION_NORM = 10.0   # card_index / this, clipped to [0,1] — train-only
+_POSITION_NORM = 10.0   # displayed position / this, clipped to [0,1] — train-only
 
 
 def build_training_rows(decks) -> tuple[list[dict], list[dict]]:
     """LoggedDecks → (like_rows, propose_rows), each row =
     {"f": features_json-shaped dict, "y": 0/1, "user_id", "served_at",
-     "position": card_index/_POSITION_NORM}.
+     "position": position/_POSITION_NORM}, where position is the card's
+    displayed position (LoggedCard.position: card_index less the recorded
+    never-delivered withdrawals below it, the slot the user was shown).
 
     like head:    viewed ∧ ¬undone ∧ (liked ∨ passed), y = liked.
     propose head: viewed ∧ ¬undone ∧ liked,            y = proposed.
+
+    "f" is the card's frozen block in whichever form it was stored: its
+    features_json, else its compact block (a narrow row, or a packed card
+    whose outcomes joined by id, R4.2 U2), so a viewed card trains the same
+    whether or not it was upgraded to a full row.
     """
     like_rows: list[dict] = []
     propose_rows: list[dict] = []
     for deck in decks:
         for c in deck.cards:
-            if not c.viewed or c.undone or c.features is None:
+            f = c.features if c.features is not None else c.features_compact
+            if not c.viewed or c.undone or f is None:
                 continue
             row = {
-                "f": c.features,
+                "f": f,
                 "user_id": c.user_id,
-                "partner": (c.features or {}).get("partner_user_id"),
+                "partner": f.get("partner_user_id"),
                 "served_at": c.served_at,
-                "position": _clip(c.card_index / _POSITION_NORM, 0.0, 1.0),
+                "position": _clip(c.position / _POSITION_NORM, 0.0, 1.0),
             }
             if c.liked or c.passed:
                 like_rows.append({**row, "y": 1.0 if c.liked else 0.0})
@@ -546,12 +605,19 @@ def _vectorize(rows: list[dict], model: "ValueModel") -> list[tuple[dict, float]
     ]
 
 
-def train_model(decks, *, now: datetime | None = None) -> ValueModel | None:
-    """Fit both heads on all supplied decks (callers pass history ≤ now —
-    the nightly refit passes everything; the time discipline for EVAL is
-    F8's job, not this function's). Returns None when the like head lacks
-    MIN_LIKE_ROWS/MIN_LIKE_POS — no model is better than a fake one."""
-    now = now or datetime.now(timezone.utc)
+def train_model(decks, *, as_of: datetime, config: dict | None = None) -> ValueModel | None:
+    """Fit both heads on all supplied decks (callers pass history served
+    before `as_of` — the nightly refit loads until=as_of, as_of=as_of; the
+    time discipline for EVAL is F8's job, not this function's). `as_of` is
+    the fit's explicit clock: it stamps trained_at / train_date, and
+    nothing in the fit reads the wall clock or live taste state (R4.1).
+    `config` is a pin_config(FIT_CONFIG) record: given, the fit reads its
+    values and never live model_config; omitted, the live values are
+    pinned now. Either way it is recorded in meta["config"] (R5.2 (a)), so
+    a re-fit on the same corpus, as_of and config is bit-identical.
+    Returns None when the like head lacks MIN_LIKE_ROWS/MIN_LIKE_POS — no
+    model is better than a fake one."""
+    config = config if config is not None else pin_config(FIT_CONFIG)
     like_rows, propose_rows = build_training_rows(decks)
     n_like_pos = int(sum(r["y"] for r in like_rows))
     if len(like_rows) < MIN_LIKE_ROWS or n_like_pos < MIN_LIKE_POS:
@@ -559,9 +625,10 @@ def train_model(decks, *, now: datetime | None = None) -> ValueModel | None:
                  "not training", len(like_rows), n_like_pos)
         return None
 
-    calib_frac = _clip(_cfg("value_model_calib_frac", 0.2), 0.05, 0.5)
-    l2 = max(0.0, _cfg("value_model_l2", 0.01))
-    l2_cat = max(0.0, _cfg("value_model_l2_cat", 0.5))
+    values = config["values"]
+    calib_frac = _clip(float(values["value_model_calib_frac"]), 0.05, 0.5)
+    l2 = max(0.0, float(values["value_model_l2"]))
+    l2_cat = max(0.0, float(values["value_model_l2_cat"]))
     split = max(1, int(len(like_rows) * (1.0 - calib_frac)))
     fit_rows, cal_rows = like_rows[:split], like_rows[split:]
 
@@ -575,8 +642,8 @@ def train_model(decks, *, now: datetime | None = None) -> ValueModel | None:
         partner_rates=partner_rates,
         global_like_rate=global_rate,
         position_mean=position_mean,
-        trained_at=now.isoformat(),
-        train_date=now.date().isoformat(),
+        trained_at=as_of.isoformat(),
+        train_date=as_of.date().isoformat(),
     )
 
     model.like_head.fit(_vectorize(fit_rows, model), l2=l2, l2_cat=l2_cat)
@@ -598,6 +665,7 @@ def train_model(decks, *, now: datetime | None = None) -> ValueModel | None:
         "n_calibration_rows": len(cal_rows),
         "calib_frac": calib_frac, "l2": l2, "l2_cat": l2_cat,
         "propose_head": "lr" if model.propose_head else "constant",
+        "config": config,
     }
     return model
 
@@ -693,8 +761,8 @@ def nightly_refit(*, engine=None, db_url: str | None = None,
                     "train_date": today}
         from backend.eval.data import load_decks
         decks = load_decks(engine=engine, db_url=db_url,
-                           until=now.isoformat())
-        model = train_model(decks, now=now)
+                           until=now.isoformat(), as_of=now.isoformat())
+        model = train_model(decks, as_of=now)
         if model is None:
             return {"status": "skipped", "reason": "insufficient labels",
                     "train_date": today}
@@ -760,9 +828,12 @@ def serving_scores(cards, *, user_id: str, league_id: str,
             except Exception:
                 ranked_count = None
         out: dict[int, float] = {}
+        taste = _TasteCache()   # the one live taste read (serving only)
         for c in cards:
             f = card_features(c, players_dict or {}, seed_map or {},
                               ranked_player_count=ranked_count)
+            f[K_TASTE_PREF_LONG], f[K_TASTE_PREF_SHORT] = taste.pref_match(
+                user_id, _taste_attrs_of(f))
             out[id(c)] = float(model.rank_score(f, user_id))
         return out
     except Exception as e:
