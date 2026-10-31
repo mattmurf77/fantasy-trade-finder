@@ -47,7 +47,8 @@ import backend.server as server
 from backend import accounts, roster_snapshot
 from backend.database import draft_picks_table, league_members_table, metadata
 from backend.tests.test_i1_serve_filter import (  # noqa: F401  (fixture)
-    KEY, LEAGUE, OPP, PK_MINE, PK_OPP, THIRD, TOKEN, UID, live)
+    KEY, LEAGUE, OPP, PK_MINE, PK_OPP, STORED_PICKS, STORED_ROSTERS, THIRD, TOKEN, UID,
+    _roster_state, live)
 from backend.tests.test_trade_fingerprint_reads_unlocked import (  # noqa: F401  (fixture)
     PLATFORM_LEAGUE, PLATFORM_USER, INIT_TOKEN, init_harness)
 
@@ -992,6 +993,34 @@ def test_status_page_goes_through_s0_after_a_roster_move(p1, spawned, monkeypatc
     assert (body["status"], body["error"], body["cards"]) == ("error", "roster_check_unavailable", [])
     assert (body["cursor"], body["total_ready"]) == (30, 0)       # the cursor holds
 
+
+def test_a_paged_withhold_on_the_stored_deck_holds_the_cursor_then_serves_i1s_survivors(
+        p1, spawned, monkeypatch):
+    """test_i1_serve_filter's paged withhold with the flags on (#551): the
+    cursor reads the real stored deck. A stale roster past its bound withholds
+    it with the cursor held; once fresh, exactly the stored cards that pass I-1
+    on the stored rosters serve, and at least one card is dropped."""
+    client, engine, _ = p1
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_gate_miss_mode", 1.0)
+    job_id = run_job()
+    deck = stored()["pages_blob"]["cards"]
+    owner = {pid: uid for uid, roster in STORED_ROSTERS.items() for pid in roster}
+    owner.update(STORED_PICKS)
+    assert {a["id"] for c in deck for a in c["give"] + c["receive"]} <= owner.keys()
+    survivors = {c["trade_id"] for c in deck
+                 if all(owner[a["id"]] == UID for a in c["give"])
+                 and all(owner[a["id"]] == c["target_user_id"] for a in c["receive"])}
+    assert survivors and len(survivors) < len(deck)      # I-1 has a card to drop
+    _roster_state(engine, status="stale", refreshed_ago=600)
+    body = status(client, job_id, 0).get_json()
+    assert body["serve_source"] == "page"
+    assert (body["cards"], body["cursor"], body["total_ready"], body["wait_reason"]) == (
+        [], 0, 0, "roster_check")
+    _roster_state(engine, status="fresh", refreshed_ago=5)
+    body = status(client, job_id, 0).get_json()
+    assert body["serve_source"] == "page" and "wait_reason" not in body
+    assert {c["trade_id"] for c in body["cards"]} == survivors
+    assert body["cursor"] == len(deck)
 
 def test_status_for_another_users_job_is_not_served_from_the_store(p1, spawned):
     client, _, sess = p1
