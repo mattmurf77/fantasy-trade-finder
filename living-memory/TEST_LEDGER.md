@@ -1,3 +1,17 @@
+## 2026-10-31 — G3-e under legal R28.23: an orphan outcome's owner id is one deletion's alias resolution covers
+
+Gates: head-eng's relay of legal R28.23 (G3-e accepted on three conditions), condition 2. Test only. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **`test_account_deletion_coverage.py::test_an_outcome_on_a_deck_with_no_rows_and_no_pack_goes_by_its_owner`:** outcomes on a deck with no row and no pack (#535's shape) are owned by:
+  - the user's own id;
+  - an account alias;
+  - a working key a durable session recorded for the account;
+  - and, as the control, another user.
+  Deletion leaves only the other user's. The owner id is the verified session's `user_id` (`_save_deck_outcome_safe` refuses any other), so it's one of these.
+- **Sabotages, 2/2 red:** the owner-column delete removed; working keys not resolved.
+- **Condition 1, by code** (no prod read from trades-eng): a deck without rows exists only in deferred-evidence mode. That mode is admitted only with `trade.first_page_store` on (the `job["evidence_mode"] = "deferred"` branch of the job kickoff), and the flag is off in prod. So #535's shape can't have occurred, and the read-only count is release-lead's to run.
+- **Suites:** `test_account_deletion_coverage.py` and `test_deck_outcome_owner.py` pass.
+
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
 Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
