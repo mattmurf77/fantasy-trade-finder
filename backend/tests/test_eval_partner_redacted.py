@@ -159,14 +159,14 @@ def test_the_share_trigger_is_above_5_percent_of_the_window(excluded, over):
 # ---------------------------------------------------------------------------
 
 def _two_decks(scrubbed: bool):
-    """c: clean. r: card 2 scrubbed when `scrubbed`. Both viewed whole, with
-    likes, a pass and a propose."""
+    """c: clean. r: card 2 scrubbed when `scrubbed`. Each: rows 0-2 and a pack
+    of 3-5, viewed whole, with likes, a pass and a propose."""
     db = make_db()
     for job in ("c", "r"):
         cards = _deck_cards(job, 6)
         if job == "r" and scrubbed:
             cards[2] = _scrubbed(cards[2])
-        write_deck(db.eng, db.packs, cards, full=range(6), viewed=range(6))
+        write_deck(db.eng, db.packs, cards, full=range(3), packed=range(3, 6), viewed=range(6))
         act(db, job, 1, "like")
         act(db, job, 2, "like", "propose")
         act(db, job, 4, "pass")

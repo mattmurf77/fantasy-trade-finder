@@ -579,6 +579,18 @@ def test_a_deck_whose_cards_are_a_prefix_is_never_a_short_deck(monkeypatch, tier
     assert (t["violations"], t["explained_short_deck"]) == (1, 0)
 
 
+def test_a_short_deck_holding_a_redacted_card_is_still_explained():
+    """Addendum J1: a partner_redacted deck is excluded from replay, not from
+    the audit. It holds every card, so the short-deck proof still runs."""
+    db = make_db()
+    redacted = row("short", 5, partner_user_id=f"{REDACTED_PARTNER_PREFIX}aa11")
+    deck(db, "short", 12, {**{i: with_x("short", i) for i in (0, 1, 2, 9, 10, 11)}, 5: redacted})
+    assert [d.exclusion for d in eval_data.load_decks(engine=db.eng, since=SINCE,
+                                                      as_of=AS_OF)] == ["partner_redacted"]
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (0, 1)
+
+
 def test_ghost_rows_are_not_part_of_the_displayed_order():
     """#469 QA P3-1: the fixed point is over displayed cards only. A ghost
     carrying X at index 3 would break it if it were counted."""
