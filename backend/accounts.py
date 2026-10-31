@@ -615,7 +615,8 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #
 #   ALSO DELETE newer private tables in _ADDITIONAL_PRIVATE_TABLES,
 #            durable sessions, account-linked billing (including raw payloads),
-#            own deck impressions/outcomes, identity links, linked anonymous
+#            own deck impressions/outcomes (outcomes also by their own
+#            user_id, G3-e), identity links, linked anonymous
 #            device events/assignments, and private ranking sets/entries.
 #            Resolve acct_<account_id> aliases before removing identity rows.
 #   ALSO ANONYMIZE shared packages, public ranking authors, referral sides,
@@ -788,19 +789,37 @@ def _delete_user_data(sleeper_user_id: str,
 
         impressions = select(db.deck_impressions_table.c.impression_id).where(
             db.deck_impressions_table.c.user_id.in_(user_ids))
+        # A packed card's outcomes are keyed by its contract id, with or
+        # without a row: the evidence prune deletes a packed deck's rows at 90
+        # days and keeps its outcomes with the pack (#523 QA P1-1, E-b4).
+        contract_ids = db.deck_pack_contract_ids(conn, user_ids)
+        chunks = [contract_ids[k:k + 500] for k in range(0, len(contract_ids), 500)]
         res = conn.execute(delete(db.deck_outcomes_table).where(
             db.deck_outcomes_table.c.impression_id.in_(impressions)))
-        counts["deck_outcomes_deleted"] = res.rowcount or 0
+        counts["deck_outcomes_deleted"] = (res.rowcount or 0) + sum(
+            conn.execute(delete(db.deck_outcomes_table).where(
+                db.deck_outcomes_table.c.impression_id.in_(chunk))).rowcount or 0
+            for chunk in chunks)
         # Shared executed-trade records keep their aggregate classification,
         # but cannot retain links to deleted private suggestions.
         links = db.suggestion_trade_links_table
         for col in ("matched_impression_id", "ghost_impression_id"):
             res = conn.execute(update(links).where(links.c[col].in_(impressions))
                                .values({col: None}))
-            counts["suggestion_trade_links_" + col + "_anonymized"] = res.rowcount or 0
+            # Contract ids are only ever non-ghost cards' (a ghost keeps its
+            # uuid4), so only the matched column can hold one; neither column
+            # is indexed, so the ghost pass would scan for nothing.
+            counts["suggestion_trade_links_" + col + "_anonymized"] = (res.rowcount or 0) + (sum(
+                conn.execute(update(links).where(links.c[col].in_(chunk))
+                             .values({col: None})).rowcount or 0
+                for chunk in chunks) if col == "matched_impression_id" else 0)
         _del("deck_impressions", db.deck_impressions_table)
         for name in _ADDITIONAL_PRIVATE_TABLES:
             _del(name, getattr(db, name + "_table"))
+        # G3-e (legal R28.22): outcomes by their own user_id too, after the
+        # row and pack paths above, so this count is the outcomes only it
+        # reached.
+        _del("deck_outcomes_by_owner", db.deck_outcomes_table)
 
         # Another manager owns their confirmed-send record. Preserve its
         # package/provider history, but remove deleted-counterparty attribution
@@ -1239,10 +1258,24 @@ def export_user_data(sleeper_user_id: str,
             select(db.experiment_assignments_table).where(
                 db.experiment_assignments_table.c.unit_id.in_(
                     user_ids | acct_ids | anonymous_ids | devices))).fetchall())
-        impression_ids = [r["impression_id"] for r in tables["deck_impressions"]]
-        tables["deck_outcomes"] = _rows_as_dicts(conn.execute(
-            select(db.deck_outcomes_table).where(
-                db.deck_outcomes_table.c.impression_id.in_(impression_ids))).fetchall())
+        # Through the rows, and through the packs' contract ids: a packed
+        # card's outcomes outlive its row (#523 QA P1-1).
+        impression_ids = list(dict.fromkeys(
+            [r["impression_id"] for r in tables["deck_impressions"]]
+            + db.deck_pack_contract_ids(conn, user_ids)))
+        tables["deck_outcomes"] = [
+            row for k in range(0, len(impression_ids), 500)
+            for row in _rows_as_dicts(conn.execute(
+                select(db.deck_outcomes_table).where(
+                    db.deck_outcomes_table.c.impression_id.in_(impression_ids[k:k + 500]))
+                .order_by(db.deck_outcomes_table.c.id)).fetchall())]
+        # G3-e: and by the outcome's own user_id, each row once.
+        outcomes = db.deck_outcomes_table
+        known = {r["id"] for r in tables["deck_outcomes"]}
+        tables["deck_outcomes"] += [r for r in _rows_as_dicts(conn.execute(
+            select(outcomes).where(outcomes.c.user_id.in_(user_ids))).fetchall())
+            if r["id"] not in known]
+        tables["deck_outcomes"].sort(key=lambda r: r["id"])
         rank_set_ids = [r["id"] for r in tables["rank_sets"]]
         tables["rank_set_entries"] = _rows_as_dicts(conn.execute(
             select(db.rank_set_entries_table).where(
