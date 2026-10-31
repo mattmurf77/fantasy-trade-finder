@@ -772,7 +772,7 @@ Flag `trade.first_page_store` (default **false**). Spec: `docs/plans/org-bringup
 
 **`served_at`** on a deferred row is the deck's **first delivery** time, one timestamp shared by every row the deck writes (ghosts and later-written rows included), as the logger's start was one per deck before. Features and valuation stay frozen at build (C6).
 
-Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_impressions_job` on `deck_job_id`. No archive index yet: the partial index for C8's purge (`(evidence_tier, served_at) WHERE evidence_tier = 'archive'`) arrives with stage-2 packing, which restores the purge (S2), and must be built `CONCURRENTLY` off the boot path (an operator one-off or a separate migration script, with a `lock_timeout`), never in `_migrate_db`: a plain `CREATE INDEX` on prod's `deck_impressions` blocks writes for a full scan and can outlast gunicorn's 120 s boot timeout.
+Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_impressions_job` on `deck_job_id`; `ix_deck_impressions_served` on `served_at` (the evidence retention prune's pack-less decks). The last is declared on the table, so a fresh DB gets it, but on prod it is built by `scripts/create_evidence_retention_index.py` (`CONCURRENTLY`, a 5 s `lock_timeout`), never at boot. Until it exists the prune skips pack-less decks. **Retention** (legal R28.20 (iii); dark until the cap is set, `docs/config-reference.md`): the cleanup loop's `purge_deck_evidence` deletes, from a deck's first delivery, a packed deck's rows here after `deck_evidence_full_row_days` (90), and every store of a deck after `deck_evidence_retention_days` (365), all at once: its outcomes, pass reasons, rows, withdrawals, candidate set, `bakeoff_runs` row, `trade_policy_shadow` rows and pack; legacy `trade_impressions` and `trade_page_store` rows past the cap too. A deck with no pack keeps its rows until the cap. No archive index yet: the partial index for C8's purge (`(evidence_tier, served_at) WHERE evidence_tier = 'archive'`) arrives with stage-2 packing, which restores the purge (S2), and must be built `CONCURRENTLY` off the boot path (an operator one-off or a separate migration script, with a `lock_timeout`), never in `_migrate_db`: a plain `CREATE INDEX` on prod's `deck_impressions` blocks writes for a full scan and can outlast gunicorn's 120 s boot timeout.
 
 ---
 
@@ -791,8 +791,9 @@ F1 labels, **append-only**, joined to `deck_impressions` by `impression_id` (sof
 | `detail_expanded` | int | 0/1/NULL — opened player menu / swap sheet / keep-side on the card |
 | `calc_opened` | int | 0/1/NULL — edit-in-calculator (#190) from the card |
 | `acted_at` | str | ISO UTC (server clock) |
+| `user_id` | str, nullable | **G3-e (legal R28.22, 2026-10-29):** the acting session user, written by `save_deck_outcome` from `acting_user_id`; the insert's owner check makes it the impression's owner. Account deletion and export match on it **as well as** on the user's rows and packs, so an outcome stays reachable however its deck's evidence is stored or pruned (deletion counts what only this column reached as `deck_outcomes_by_owner_deleted`). NULL on rows written before it: additive via `_migrate_db`, **no backfill** (those are reached through rows and packs) |
 
-Indexes: `ix_deck_outcomes_impression` on `impression_id`.
+Indexes: `ix_deck_outcomes_impression` on `impression_id`; `ix_deck_outcomes_user` on `user_id` (G3-e). A fresh DB gets it from the declaration; on an existing table it is built **off the boot path** by `scripts/create_outcome_owner_index.py` (Postgres: `CREATE INDEX CONCURRENTLY`, 5 s `lock_timeout`, autocommit; an INVALID leftover is dropped and rebuilt), never in `init_db`: a plain `CREATE INDEX` holds a SHARE lock that blocks every outcome write for its scan. Until it exists, deletion and export find the rows by a scan.
 
 ---
 

@@ -51,6 +51,7 @@ import SteerSlider from '../components/SteerSlider';
 import { useSession, type RankMethodPref } from '../state/useSession';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
 import { useEntitlements } from '../state/useEntitlements';
+import { useTipsOffered } from '../state/useTipsOffered';
 import { guideToggleTitle, guideToggleDescriptionOff } from '../utils/mascotCopy';
 import { useOnboardingState } from '../state/useOnboardingState';
 import { useGuide } from '../state/useGuide';
@@ -108,6 +109,9 @@ export default function SettingsScreen({ navigation }: any) {
   // the paywall stays reachable whichever `account.settings_hub` state the
   // build runs in — exactly one of the two ever mounts.
   const paywallEnabled          = useFlag('monetize.paywall');
+  // B8 #1: the tip row also needs the server to offer tips (a cache
+  // subscription that never fetches; unknown → hidden).
+  const tipsOffered             = useTipsOffered();
   // (The pick-pricing segmented control and its `trade.slot_pricing` flag
   // read were REMOVED 2026-08-21, D-144 — pick pricing is no longer a
   // setting. See TradeValuesSection.tsx, which owns this block in v2.)
@@ -1066,19 +1070,23 @@ export default function SettingsScreen({ navigation }: any) {
         </View>
         <Icon name="chevron-right" color={chalk.dim} size={16} />
       </Pressable>
-      <Pressable
-        testID="settings-tip-row"
-        accessibilityRole="button"
-        accessibilityLabel="Support Fleeced. Tip jar"
-        onPress={() => navigation.navigate?.('TipJar', { source: 'settings' })}
-        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={styles.rowKey}>Support Fleeced</Text>
-          <Text style={styles.rowSub}>Tip jar</Text>
-        </View>
-        <Icon name="chevron-right" color={chalk.dim} size={16} />
-      </Pressable>
+      {/* The tip-jar row shows only while the server offers tips (B8 #1;
+          `tips: []` at launch); the TipJar route stays registered. */}
+      {tipsOffered ? (
+        <Pressable
+          testID="settings-tip-row"
+          accessibilityRole="button"
+          accessibilityLabel="Support Fleeced. Tip jar"
+          onPress={() => navigation.navigate?.('TipJar', { source: 'settings' })}
+          style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowKey}>Support Fleeced</Text>
+            <Text style={styles.rowSub}>Tip jar</Text>
+          </View>
+          <Icon name="chevron-right" color={chalk.dim} size={16} />
+        </Pressable>
+      ) : null}
     </>
   ) : null;
 
