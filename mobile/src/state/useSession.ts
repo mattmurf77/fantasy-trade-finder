@@ -59,6 +59,9 @@ interface InviteIntent {
    *  state can name the league without a second call site (lld-p0-3 §2.0).
    *  Null when unresolved — every consumer degrades to "their league". */
   leagueName: string | null;
+  /** FR-10 — the invite id `t` (utils/inviteId). Optional: blobs written
+   *  before it existed simply lack it. */
+  inviteId?: string | null;
   /** Capture time, ms epoch. TTL is evaluated on READ, never by a timer. */
   ts: number;
 }
@@ -172,6 +175,12 @@ interface SessionState {
   /** P0-3 — resolved league name for the invite copy, or null. Resolved
    *  once by SignInScreen's banner and cached into the persisted blob. */
   invitedLeagueName: string | null;
+  /** FR-10 — invite id `t` captured from an invite link. Mirrors
+   *  `invitedBy`: persisted in the invite blob (14-day TTL), last write
+   *  wins, consumed by the session-init body builder via consumeInviteId().
+   *  consumeInvitedLeague deletes the blob on pin but leaves THIS in memory,
+   *  because session init runs after the pin. */
+  inviteId: string | null;
   /** Preferred ranking flow — where the Rank tab opens at launch. Null =
    *  never chosen → the Rank tab shows the Build-your-board chooser
    *  (RankHomeScreen). Hydrated from AsyncStorage in bootstrap(); changed
@@ -224,6 +233,13 @@ interface SessionState {
    *  by initLeagueSession (or any other path that POSTs /api/session/init).
    *  Returns null when no referral was captured. */
   consumeInvitedBy: () => string | null;
+  /** FR-10 — record the invite id. No-ops on blank. Callers pass only a
+   *  value that passed utils/inviteId's isInviteId (pinned by
+   *  tests/check-invite-links.js), so nothing malformed is ever stored. */
+  setInviteId: (id: string) => void;
+  /** FR-10 — read the pending invite id and clear it (memory + blob field).
+   *  Called when a session-init body is built. Null when none was captured. */
+  consumeInviteId: () => string | null;
   /** P0-3 — record the invited league. Trims; no-ops on blank. Stamps a
    *  fresh capture time and clears any cached league NAME when the id
    *  changed (a stale name on a new league is worse than no name). */
@@ -269,6 +285,7 @@ export const useSession = create<SessionState>((set, get) => ({
   invitedBy: null,
   invitedLeagueId: null,
   invitedLeagueName: null,
+  inviteId: null,
   rankingMethodPref: null,
   verification: null,
   verifyBannerDismissed: false,
@@ -302,6 +319,7 @@ export const useSession = create<SessionState>((set, get) => ({
     let invitedLeagueId: string | null = null;
     let invitedLeagueName: string | null = null;
     let invitedByStored: string | null = null;
+    let inviteIdStored: string | null = null;
     _inviteTs = 0;
     try {
       if (inviteRaw) {
@@ -314,6 +332,7 @@ export const useSession = create<SessionState>((set, get) => ({
           invitedLeagueId   = typeof blob?.leagueId   === 'string' ? blob.leagueId   : null;
           invitedLeagueName = typeof blob?.leagueName === 'string' ? blob.leagueName : null;
           invitedByStored   = typeof blob?.invitedBy  === 'string' ? blob.invitedBy  : null;
+          inviteIdStored    = typeof blob?.inviteId   === 'string' ? blob.inviteId   : null;   // FR-10
         }
       }
     } catch {
@@ -332,6 +351,8 @@ export const useSession = create<SessionState>((set, get) => ({
       // Only hydrate the inviter when this launch has not already captured
       // one from a live link — a link tapped THIS launch is fresher.
       ...(get().invitedBy ? {} : invitedByStored ? { invitedBy: invitedByStored } : {}),
+      // FR-10 — same rule for the invite id.
+      ...(get().inviteId ? {} : inviteIdStored ? { inviteId: inviteIdStored } : {}),
     });
 
     // Purchases identity bridge (iap-enablement). A RESTORED session is the
@@ -523,6 +544,7 @@ export const useSession = create<SessionState>((set, get) => ({
       leagueId:   st.invitedLeagueId,
       invitedBy:  u,
       leagueName: st.invitedLeagueName,
+      inviteId:   st.inviteId,
       ts:         _inviteTs,
     });
   },
@@ -530,6 +552,46 @@ export const useSession = create<SessionState>((set, get) => ({
   consumeInvitedBy: () => {
     const cur = get().invitedBy;
     if (cur) set({ invitedBy: null });
+    return cur;
+  },
+
+  // FR-10 — the invite id `t`, the twin of setInvitedBy / consumeInvitedBy
+  // above: memory + persisted blob, last write wins, consumed when the
+  // session-init body is built (not on server success).
+  setInviteId: (id) => {
+    if (!id) return;
+    set({ inviteId: id });
+    const st = get();
+    if (!_inviteTs) _inviteTs = Date.now();
+    void _persistInviteIntent({
+      leagueId:   st.invitedLeagueId,
+      invitedBy:  st.invitedBy,
+      leagueName: st.invitedLeagueName,
+      inviteId:   id,
+      ts:         _inviteTs,
+    });
+  },
+
+  consumeInviteId: () => {
+    const cur = get().inviteId;
+    if (!cur) return null;
+    set({ inviteId: null });
+    // Clear the blob FIELD so a relaunch can't re-hydrate a spent id. A
+    // read-modify-write, unlike the whole-blob writers, so the blob's other
+    // fields (a persisted invitedBy that memory already consumed) survive.
+    // Skipped when the pin already removed the blob (_inviteTs === 0) or a
+    // newer id has landed since (its own write already replaced this one).
+    void (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(INVITE_KEY);
+        if (!raw || !_inviteTs || get().inviteId) return;
+        const blob = JSON.parse(raw) as InviteIntent | null;
+        if (!blob?.inviteId) return;
+        await _persistInviteIntent({ ...blob, inviteId: null });
+      } catch {
+        /* non-fatal — the TTL sweeps it eventually */
+      }
+    })();
     return cur;
   },
 
@@ -547,6 +609,7 @@ export const useSession = create<SessionState>((set, get) => ({
       leagueId:   id,
       invitedBy:  st.invitedBy,
       leagueName,
+      inviteId:   st.inviteId,   // FR-10 — whole-blob write carries the id
       ts:         _inviteTs,
     });
   },
@@ -560,6 +623,7 @@ export const useSession = create<SessionState>((set, get) => ({
       leagueId:   st.invitedLeagueId,
       invitedBy:  st.invitedBy,
       leagueName: n,
+      inviteId:   st.inviteId,   // FR-10 — whole-blob write carries the id
       // NOT re-stamped: resolving a name is not a fresh invite, and letting
       // it re-stamp would silently extend the 14-day TTL.
       ts:         _inviteTs || Date.now(),
@@ -710,6 +774,7 @@ export const useSession = create<SessionState>((set, get) => ({
       invitedBy:         null,
       invitedLeagueId:   null,
       invitedLeagueName: null,
+      inviteId:          null,
       verification:   null,
       verifyBannerDismissed: false,
     });

@@ -738,6 +738,19 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     #                                       over a payload already in memory)
     "usage_trends_action", "usage_trends_availability_opened",
     "usage_trends_view_changed",
+    # ── Referral loop v1, launch binary (2026-10-23) ─────────────────────
+    # Grant: analytics-lead, PR #350
+    # (docs/business/analytics/2026-10-15-referral-loop-events.md), P18.
+    # Registered in the SAME commit as its emitter (C7, G-031):
+    # mobile/src/utils/deepLinks.ts handleDeepLink, when a NON-league link
+    # (`/s/trade/<id>`, `/s/p/<id>`, a bare `/?ref=`) opens the app.
+    # INTENT, deliberately absent from NON_INTENT_EVENTS: its twin
+    # `invite_link_opened` is INTENT and twins land on the same side.
+    # Anonymous openers are stripped by device_exclusion() either way.
+    # The four referral SERVER names (invite_landing_opened,
+    # invite_landing_cta, referral_attributed, referral_activated) are NOT
+    # here: they land in SERVER_FIRED_EVENTS with their emitters (D-1).
+    "share_link_opened",
     # ── Minimum-version gate (B8, 2026-10-24; head-eng ruling 35 + the
     # analytics-lead B8 grant). Registered in the SAME commit as the emitters
     # (mobile/src/screens/UpdateGateScreen.tsx); both land in
@@ -1232,14 +1245,38 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # is a user_events COLUMN derived server-side in analytics_ingest.py
     # (the NULL-`platform` incident), it is never a prop, and it must not
     # become one.
+    # REFERRAL LOOP v1 (2026-10-23; grant: analytics-lead, PR #350,
+    # docs/business/analytics/2026-10-15-referral-loop-events.md). The four
+    # rows below are WIDENED IN PLACE, in the emitters' commit (C7).
+    # Pre-edit contents, verbatim:
+    #     invite_shared        {"league_id", "surface", "not_joined",
+    #                           "total_mates", "platform"}
+    #     invite_link_opened   {"league_id", "has_ref", "format", "auth_state"}
+    #     invite_league_pinned {"league_id", "source", "ms_since_open"}
+    #     invite_pin_failed    {"league_id", "reason"}
+    # `invite_id` is the public share id `t` (C3): opaque, no PII, grants no
+    # access, never an auth credential. The parse rows send the well-formed
+    # `t` as received (^[A-Za-z0-9_-]{8,64}$), else omit it;
+    # `invite_shared` sends the id the mint returned, only on success.
+    # `mint_outcome` ∈ ok | failed | timeout | rate_limited | disabled |
+    # demo (disabled = growth.referral_ledger off, no call made). NO key
+    # here may contain "token" (C1): ingest drops such keys silently.
     "invite_shared":           frozenset({"league_id", "surface",
                                           "not_joined", "total_mates",
-                                          "platform"}),
+                                          "platform", "invite_id",
+                                          "mint_outcome"}),
     "invite_link_opened":      frozenset({"league_id", "has_ref", "format",
-                                          "auth_state"}),
+                                          "auth_state", "invite_id"}),
     "invite_league_pinned":    frozenset({"league_id", "source",
-                                          "ms_since_open"}),
-    "invite_pin_failed":       frozenset({"league_id", "reason"}),
+                                          "ms_since_open", "invite_id"}),
+    "invite_pin_failed":       frozenset({"league_id", "reason",
+                                          "invite_id"}),
+    # NEW (same grant). `kind` ∈ trade | package | ref_root (the link
+    # format, never a surface); `has_ref` is a boolean, never the username
+    # (C9); `auth_state` is the invite_link_opened enum above (a signed-in
+    # opener reports authed_non_member: these links carry no league).
+    # `utm_*` props wait for the UTM capture build.
+    "share_link_opened":       frozenset({"kind", "has_ref", "auth_state"}),
     # `unit` (account|device) is registered but NOT emitted today: the
     # client cannot derive it — GET /api/feature-flags returns the merged
     # experiments/configs maps without the unit_type that

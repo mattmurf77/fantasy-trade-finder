@@ -15,7 +15,8 @@ interface Props {
   compact?: boolean; // 36px instead of 44px
   /** Optional leading Chalkline icon (16px, label-colored). */
   icon?: IconName;
-  /** Replaces the label with a spinner; implies disabled. */
+  /** A centred spinner over the label, which stays in layout invisible so
+   *  the button keeps its size; inactive but not dimmed. */
   loading?: boolean;
   style?: ViewStyle;
   testID?: string;   // UI-test harness id (registry: mobile/src/components/CLAUDE.md)
@@ -70,22 +71,34 @@ export default function Button({
           backgroundColor: pressed ? v.bgPressed : v.bg,
           borderColor,
         },
-        inactive && styles.disabled,
+        // Only `disabled` dims; `loading` stays inactive but undimmed
+        // (design-lead #364).
+        disabled && styles.disabled,
         style,
       ]}
     >
-      {({ pressed }) =>
-        loading ? (
-          <ActivityIndicator size="small" color={v.text} />
-        ) : (
-          <View style={styles.content}>
+      {({ pressed }) => {
+        const content = (
+          <View style={loading ? [styles.content, styles.hidden] : styles.content}>
             {icon ? <Icon name={icon} size={16} color={pressed ? v.textPressed : v.text} /> : null}
             <Text scale="body" style={[styles.label, { color: pressed ? v.textPressed : v.text }]}>
               {label}
             </Text>
           </View>
-        )
-      }
+        );
+        if (!loading) return content;
+        // design-lead #364: `loading` keeps the label's box (no width jump)
+        // and centres the spinner over it, in the label colour. Inactive, so
+        // there is never a pressed fill.
+        return (
+          <>
+            {content}
+            <View style={styles.spinner}>
+              <ActivityIndicator size="small" color={v.text} />
+            </View>
+          </>
+        );
+      }}
     </Pressable>
   );
 }
@@ -153,4 +166,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   disabled: { opacity: 0.45 },
+  hidden: { opacity: 0 },
+  spinner: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

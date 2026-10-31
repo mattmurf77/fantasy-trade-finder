@@ -23,6 +23,7 @@
   /* Lines */
   --line: #262C35;
   --line-strong: #59647A;
+  --line-strong-raised: #6B7587; /* ink-2 raised surfaces, no separating fill: 3.60:1 (design-lead #364) */
 
   /* Text */
   --chalk: #ECEFF4;
