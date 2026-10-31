@@ -563,6 +563,7 @@ def test_a_version_bump_runs_the_model_store_again(engine, monkeypatch):
 # ── #557 QA P1s ─────────────────────────────────────────────────────────────
 
 BILATERAL = {"generator": "owner_v2_bilateral", "market": {"give": 1.0},
+             "construction": {"partner": DEL},       # an id in a kept field
              "viewer": {"support": {"score": 0.6}},
              "counterparty": {"support": {"score": 0.7}},
              "bilateral": {"weaker_support": 0.6, "total_support": 1.3, "preference_fulfillment": 0.2},
@@ -584,9 +585,10 @@ def test_the_bilateral_valuation_loses_the_partners_fields_and_the_id(engine):
     row, _f = card(engine, "c-bilateral-6")
     v = json.loads(row["valuation_json"])
     assert v == {"generator": "owner_v2_bilateral", "market": {"give": 1.0},
+                 "construction": {"partner": token},
                  "viewer": {"support": {"score": 0.6}},
                  "assets": [{"id": "p", "market": 5.0, "viewer_preference": {"tier": 1}}]}
-    assert DEL not in row["valuation_json"] and token not in row["valuation_json"]
+    assert DEL not in row["valuation_json"]
 
 
 def test_an_owner_selected_runs_top_level_input_and_its_arms_are_scrubbed(engine):
