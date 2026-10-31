@@ -15,6 +15,9 @@ pinned separately in test_share_package.py and must not change.
 Trade links are token-only since #362 (build O8): section 4 covers a live
 /s/trade/<token> page, the expired page every miss gets, and both PNGs,
 minting tokens with test_trade_share_tokens.py's fixture and helpers.
+
+Section 5 pins legal R13 on every /s/* page: a Privacy link, the Fleeced
+brand (no "Fantasy Trade Finder"), tokens.css, and the og PNG footer.
 """
 import re
 from pathlib import Path
@@ -235,3 +238,79 @@ def test_trade_cards_carry_noindex_header(env, kind):
     assert r.headers["Cache-Control"] == "public, max-age=300"
     is_miss_card = r.data == og_image.render_expired_trade_card()
     assert is_miss_card is (kind != "live")
+
+
+# ---------------------------------------------------------------------------
+# 5. Legal R13: privacy link + Fleeced brand on every /s/* page, og footer
+# ---------------------------------------------------------------------------
+
+PRIVACY_LINK = '<a href="/privacy">Privacy</a>'
+BRAND_DIV = '<div class="brand">Fleeced: Dynasty Trade Finder</div>'
+TOKENS_CSS = '<link rel="stylesheet" href="/css/tokens.css">'
+
+
+def _assert_r13(r) -> None:
+    assert r.status_code == 200
+    html = r.get_data(as_text=True)
+    assert html.count(PRIVACY_LINK) == 1
+    assert "Fantasy Trade Finder" not in html
+    titles = re.findall(r"<title>[^<]*</title>", html)
+    assert len(titles) == 1 and titles[0].endswith(" · Fleeced</title>"), titles
+    assert html.count(BRAND_DIV) == 1
+    # The link sits directly after the brand div, inside .card.
+    assert re.search(re.escape(BRAND_DIV) + r'\s*<div class="legal-links">'
+                     + re.escape(PRIVACY_LINK) + r"</div>\s*</div>\s*</body>",
+                     html)
+    assert html.count(TOKENS_CSS) == 1
+
+
+@pytest.mark.parametrize("page", [
+    f"/s/p/{SID}",
+    "/s/tiers/qb/someuser",
+])
+def test_share_pages_carry_privacy_link_and_fleeced_brand(client, page):
+    _assert_r13(client.get(page))
+
+
+@pytest.mark.parametrize("kind", ["live", "numeric_id", "unknown_token"])
+def test_trade_pages_carry_privacy_link_and_fleeced_brand(env, kind):
+    key = _live_token(env) if kind == "live" else _miss(env, kind)
+    r = env.get(f"/s/trade/{key}")
+    _assert_r13(r)
+    html = r.get_data(as_text=True)
+    if kind == "live":
+        assert "Trade Match" in html
+    else:
+        assert og_image.TRADE_LINK_EXPIRED_TITLE in html
+
+
+def test_privacy_link_target_exists(client):
+    assert client.get("/privacy").status_code == 200
+
+
+def test_og_footer_brand_is_fleeced_source_level():
+    """SOURCE-LEVEL check, not a pixel check: reads og_image.py as text.
+
+    It proves the old brand string is gone from the module and the footer
+    assignment names Fleeced. It does not prove what the PNG shows; the
+    next test spies on the drawn text for that.
+    """
+    src = Path(og_image.__file__).read_text()
+    assert "Fantasy Trade Finder" not in src
+    footers = re.findall(r"^\s*footer = (.+)$", src, re.M)
+    assert len(footers) == 1 and "Fleeced" in footers[0], footers
+
+
+def test_og_trade_card_still_renders_with_fleeced_footer(env):
+    tok = _live_token(env)
+    text = og_image.ImageDraw.ImageDraw.text
+    with patch.object(og_image.ImageDraw.ImageDraw, "text", autospec=True,
+                      side_effect=text) as spy:
+        r = env.get(f"/og/trade/{tok}.png")
+    assert r.status_code == 200
+    assert r.headers["Content-Type"] == "image/png"
+    assert r.data[:8] == b"\x89PNG\r\n\x1a\n"
+    drawn = [c.args[2] if len(c.args) > 2 else c.kwargs.get("text")
+             for c in spy.call_args_list]
+    assert "Fleeced · fantasy-trade-finder.onrender.com" in drawn
+    assert not any("Fantasy Trade Finder" in str(t) for t in drawn)

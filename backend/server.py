@@ -31116,7 +31116,7 @@ def _share_html(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{esc(title)} · Fantasy Trade Finder</title>
+  <title>{esc(title)} · Fleeced</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex">
   <meta name="description" content="{esc(description)}">
@@ -31130,6 +31130,7 @@ def _share_html(
   <meta name="twitter:title" content="{esc(title)}">
   <meta name="twitter:description" content="{esc(description)}">
   <meta name="twitter:image" content="{esc(og_image_url)}">
+  <link rel="stylesheet" href="/css/tokens.css">
   <style>
     body{{margin:0;background:#0f1322;color:#f5f7fc;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
          min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}}
@@ -31142,6 +31143,9 @@ def _share_html(
           border-radius:999px;font-weight:600;text-decoration:none;}}
     .cta:hover{{background:#8cc6ff;}}
     .brand{{margin-top:36px;color:#6b7a9a;font-size:13px;}}
+    .legal-links {{ margin-top: 8px; font-size: 13px; color: var(--chalk-faint); }}
+    .legal-links a {{ color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }}
+    .legal-links a:hover {{ text-decoration-color: var(--ice); }}
   </style>
 </head>
 <body>
@@ -31150,7 +31154,8 @@ def _share_html(
     <h1>{esc(title)}</h1>
     <p>{esc(description)}</p>
     <a class="cta" href="{esc(cta_url)}">{esc(cta_text)}</a>
-    <div class="brand">Fantasy Trade Finder</div>
+    <div class="brand">Fleeced: Dynasty Trade Finder</div>
+    <div class="legal-links"><a href="/privacy">Privacy</a></div>
   </div>
 </body>
 </html>"""

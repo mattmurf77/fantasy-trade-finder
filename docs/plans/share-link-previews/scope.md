@@ -156,3 +156,61 @@ analytics event or mobile change. `POST /api/share/package` still returns relati
 - **Evidence recorded:** `living-memory/TEST_LEDGER.md` entry naming what ran and what it proved. Not written on this branch; left to league-eng / release so it does not collide with other open PRs
 - **TestFlight verification:** n/a (no mobile change). The operator checklist in §3 is run after deploy; log the outcome in TEST_LEDGER
 - Express lane declared by the operator? no
+
+## 2026-10-31 — R13: privacy link and the Fleeced brand on `/s/*`
+
+**Entry point:** head-eng (2026-10-31). Legal-lead's R13 (`docs/plans/org-bringup/leads/legal-lead.md` § R13, product S4) requires a privacy link on every `/s/*` page and the brand "Fleeced" there. release-lead found the expired page mixed "Open Fleeced…" with a "Fantasy Trade Finder" title and footer. It's folded into #511 because #511 already rewrites `_share_html`: one writer, one delta QA. The policy line ("shared trades are public to anyone with the link") is #373's (onboarding-eng), not this PR's.
+
+**What changes** (every `/s/*` page renders through `_share_html`: `/s/p`, `/s/tiers`, a live `/s/trade/<token>`, the expired-trade page):
+- `<title>`: `{title} · Fleeced` (was `· Fantasy Trade Finder`).
+- The brand line under the CTA: `Fleeced: Dynasty Trade Finder` (D-057's full name; was `Fantasy Trade Finder`).
+- New, directly under it: `<div class="legal-links"><a href="/privacy">Privacy</a></div>`, linking the existing `/privacy` route. The styles are #373's passed rules verbatim (`.legal-links` 13px `--chalk-faint`; links `--chalk`, underlined, `--ice` on hover), from `/css/tokens.css`. Nothing else on the page is restyled.
+- The og PNG card footer (`og_image.py`): `Fleeced · fantasy-trade-finder.onrender.com` (was `Fantasy Trade Finder · …`). The card is the unfurl image and is embedded in every `/s/*` page.
+- No new copy beyond the brand name and the "Privacy" label.
+
+**Analytics:** (c) waived, as §1. A static link and brand text, nothing to measure. **Schema, flags, routes:** none.
+
+**Evidence** (`test_share_link_previews.py` §5, 8 cases):
+- `_assert_r13` runs on `/s/p`, `/s/tiers`, a live `/s/trade/<token>`, and the expired page (numeric id and unknown token). It checks:
+  - the Privacy link appears exactly once, directly after the brand line and inside `.card`;
+  - no "Fantasy Trade Finder";
+  - one `<title>`, ending ` · Fleeced`;
+  - the brand line appears once;
+  - `tokens.css` is linked once.
+- `/privacy` returns 200.
+- The og footer:
+  - a source-level check, labelled as such: no "Fantasy Trade Finder" in `og_image.py`, and the footer contains "Fleeced";
+  - a real `/og/trade/<token>.png` render: 200, `image/png`, PNG bytes. A spy on `ImageDraw.text` proves the Fleeced footer is the string drawn.
+- The footer layout is fixed-position and left-aligned (`_draw_footer` at `(60, CARD_H-50)`), so the shorter string moves nothing.
+
+Results:
+- pytest share set + #362's account tests: 138 passed. `check_web_structure` 196/196. `check-share-trade-token` 14/14.
+- Sabotage runs, each red, then restored:
+
+  | Sabotage | Red |
+  |---|---|
+  | privacy link removed | the 5 page tests |
+  | old `<title>` | the 5 page tests |
+  | old brand line | the 5 page tests |
+  | old og footer | the 2 footer tests |
+  | href → `/terms` | the 5 page tests |
+  | title `· Fleeced: Dynasty Trade Finder` | the 5, on the title check |
+  | brand line `Fleeced` only | the 5, on the brand check |
+
+- The link rules are scoped under `.legal-links`, so the CTA `<a>` is untouched. They don't depend on #373 landing.
+
+**Docs:** `docs/api-reference.md` n/a (page content, not a contract).
+
+**Follow-up, not this PR:** the share page and og cards predate Chalkline: a `-apple-system, Segoe UI, Roboto` stack, a 16px image radius and shadow, a pill CTA, and the old navy palette. A restyle is design-lead's call.
+
+**Operator checklist** (after deploy):
+
+| # | Steps | Expected |
+|---|---|---|
+| R1 | Open a live `/s/trade/<token>` link in Safari | The tab title ends "· Fleeced". Under the CTA: "Fleeced: Dynasty Trade Finder", then an underlined **Privacy** link. Tapping it opens the privacy policy. |
+| R2 | Open an expired or unknown `/s/trade/…` link | The same brand line and **Privacy** link. "Fantasy Trade Finder" appears nowhere on the page. |
+| R3 | Paste a share link into iMessage | The unfurl card's footer reads "Fleeced · fantasy-trade-finder.onrender.com". |
+
+**Reviews:** legal-lead (R13 met), design-lead (#373's link style reused), both routed via head-eng.
+
+**Flagged, not changed:** `server.py:28191` push copy "@{name} joined Fantasy Trade Finder via your invite." It's off `/s/*`, so it goes to head-eng for marketing.
