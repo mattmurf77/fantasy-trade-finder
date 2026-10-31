@@ -7579,16 +7579,35 @@ def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks:
     return counts
 
 
-def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
-    """Expire one bounded batch of debug nodes, never cards/valuations/outcomes."""
+def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500,
+                           max_batches: int = 1) -> int:
+    """Expire debug nodes, never cards/valuations/outcomes: up to `max_batches`
+    bounded batches of the oldest, each its own transaction (the ids read by
+    the created_at index, then a primary-key delete), stopping at the first
+    short batch. One batch a tick fell behind the write rate (head-eng
+    2026-10-29: always at the 500 cap). A failed batch logs what the batches
+    before it already deleted (they stay committed), then raises."""
     if days <= 0:
         return 0
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     d = deck_diagnostic_snapshots_table
-    with engine.begin() as conn:
-        ids = select(d.c.snapshot_id).where(d.c.created_at < cutoff).order_by(
-            d.c.created_at, d.c.snapshot_id).limit(max(1, min(batch_size, 1000)))
-        return conn.execute(delete(d).where(d.c.snapshot_id.in_(ids))).rowcount or 0
+    size = max(1, min(batch_size, 1000))
+    total = 0
+    try:
+        for _ in range(max(1, max_batches)):
+            with engine.begin() as conn:
+                ids = list(conn.execute(select(d.c.snapshot_id).where(d.c.created_at < cutoff)
+                                        .order_by(d.c.created_at, d.c.snapshot_id).limit(size)).scalars())
+                if ids:
+                    total += conn.execute(delete(d).where(d.c.snapshot_id.in_(ids))).rowcount or 0
+            if len(ids) < size:
+                break
+    except Exception:
+        if total:
+            log.warning("deck diagnostics purge: %d expired snapshots deleted before a batch failed",
+                        total)
+        raise
+    return total
 
 
 # Tiers a later delivery raises to 'delivered' (ruling 17's precedence: ghost >
