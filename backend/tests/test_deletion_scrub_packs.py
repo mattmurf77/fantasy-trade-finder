@@ -409,8 +409,11 @@ def test_g_a2_unpack_equals_the_original_with_items_1_to_5_applied(engine):
 def test_deletion_revokes_the_live_jobs_that_name_the_person(engine, monkeypatch):
     """The scrub rewrites stored decks only. A job held in this process keeps
     the person's original cards, and at trade_i1_mode 0 or 1 it would serve
-    them until it leaves memory, so the delete route revokes it. A running job
-    in their league is revoked too; another league's job is left alone."""
+    them until it leaves memory, so the delete route revokes it, whether its
+    cards are dicts or TradeCard objects. A running job in their league is
+    revoked too, with the neutral inputs_changed: its owner is a leaguemate
+    (#559 re-QA P2-a). Another league's job is left alone."""
+    from types import SimpleNamespace
     import backend.server as server
     monkeypatch.setattr(server, "touch_user_activity", lambda *a, **kw: None)
     monkeypatch.setattr(accounts, "apple_identity_subjects", lambda *a, **kw: set())
@@ -421,6 +424,9 @@ def test_deletion_revokes_the_live_jobs_that_name_the_person(engine, monkeypatch
         "running-there": {"key": (OTHER, LEAGUE, "1qb_ppr"), "status": "running", "cards": []},
         "elsewhere": {"key": (VIEWER, "league-other", "1qb_ppr"), "status": "complete",
                       "cards": [{"target_user_id": OTHER, "trade_id": "t2"}]},
+        "card-objects": {"key": (OTHER, "league-other", "1qb_ppr"), "status": "complete",
+                         "cards": [SimpleNamespace(target_user_id=OTHER, trade_id="t3"),
+                                   SimpleNamespace(target_user_id=DEL, trade_id="t4")]},
     }
     monkeypatch.setattr(server, "_trade_jobs", jobs)
     with server._sessions_lock:
@@ -429,13 +435,81 @@ def test_deletion_revokes_the_live_jobs_that_name_the_person(engine, monkeypatch
         response = server.app.test_client().delete(
             "/api/account", headers={"X-Session-Token": "synthetic-delete-token"})
         assert response.status_code == 200, response.get_json()
-        assert response.get_json()["deleted"]["trade_jobs_revoked"] == 2
+        assert response.get_json()["deleted"]["trade_jobs_revoked"] == 3
     finally:
         with server._sessions_lock:
             server._sessions.pop("synthetic-delete-token", None)
     assert jobs["names-them"]["superseded"] and jobs["names-them"]["cards"] == []
-    assert jobs["running-there"]["superseded"] and jobs["running-there"]["status"] == "error"
+    assert jobs["card-objects"]["superseded"] and jobs["card-objects"]["cards"] == []
+    running = jobs["running-there"]
+    assert running["superseded"] and (running["status"], running["error"]) == ("error", "inputs_changed")
     assert not jobs["elsewhere"].get("superseded") and jobs["elsewhere"]["cards"]
+
+
+def _delete_through_the_route(server, monkeypatch, sessions=()):
+    monkeypatch.setattr(server, "touch_user_activity", lambda *a, **kw: None)
+    monkeypatch.setattr(accounts, "apple_identity_subjects", lambda *a, **kw: set())
+    tokens = {"synthetic-delete-token": {"user_id": DEL, "verified": True},
+              **{f"synthetic-viewer-{i}": sess for i, sess in enumerate(sessions)}}
+    with server._sessions_lock:
+        server._sessions.update(tokens)
+    try:
+        response = server.app.test_client().delete(
+            "/api/account", headers={"X-Session-Token": "synthetic-delete-token"})
+        assert response.status_code == 200, response.get_json()
+        return response.get_json()["deleted"]
+    finally:
+        with server._sessions_lock:
+            for token in tokens:
+                server._sessions.pop(token, None)
+
+
+def test_deletion_purges_every_sessions_trade_cards_naming_the_person(engine, monkeypatch):
+    """A session's TradeService card store, shared with its trade jobs, keeps
+    the cards it generated, and GET /api/trades serves them with no expiry
+    (#559 re-QA P2-b). Deletion removes the person's cards from every
+    session's services, every format's, and keeps everyone else's."""
+    from types import SimpleNamespace
+    import backend.server as server
+
+    def store(*partners):
+        return SimpleNamespace(_trade_cards={
+            f"{p}-{i}": SimpleNamespace(trade_id=f"{p}-{i}", target_user_id=p)
+            for i, p in enumerate(partners)})
+    a, b, c = store(DEL, OTHER, DEL), store(DEL), store(OTHER)
+    sessions = [{"user_id": VIEWER, "trade_svc": a, "trade_svcs": {"1qb_ppr": a, "sf_tep": b}},
+                {"user_id": OTHER, "trade_svc": c}]
+    deleted = _delete_through_the_route(server, monkeypatch, sessions)
+    assert deleted["trade_cards_purged"] == 3
+    assert [card.target_user_id for card in a._trade_cards.values()] == [OTHER]
+    assert b._trade_cards == {} and len(c._trade_cards) == 1
+    assert DEL in server._deleted_partner_ids
+
+
+def test_get_trades_never_serves_a_card_written_after_the_purge(engine, monkeypatch):
+    """A job still running at the deletion writes its cards straight into the
+    session's store, after the purge; GET /api/trades filters them on the
+    deleted ids (#559 re-QA P2-b)."""
+    from unittest.mock import MagicMock
+    import backend.server as server
+    from backend.trade_service import TradeCard
+    _delete_through_the_route(server, monkeypatch)
+
+    def card(partner, i):
+        return TradeCard(trade_id=f"late-{i}", league_id=LEAGUE, proposing_user_id=VIEWER,
+                         target_user_id=partner, target_username="name",
+                         give_player_ids=[f"g{i}"], receive_player_ids=[f"r{i}"],
+                         mismatch_score=1.0, fairness_score=0.9, composite_score=0.5)
+    service = MagicMock()
+    service.get_pending_trades.return_value = [card(DEL, 0), card(OTHER, 1)]
+    session = {"user_id": VIEWER, "verified": True, "active_format": "1qb_ppr",
+               "league": MagicMock(), "players": [], "trade_svc": service}
+    monkeypatch.setattr(server, "_get_session", lambda _token: session)
+    monkeypatch.setattr(server, "_project_trade_dispositions", lambda cards, *a, **kw: cards)
+    response = server.app.test_client().get(f"/api/trades?league_id={LEAGUE}",
+                                            headers={"X-Session-Token": "viewer-token"})
+    assert response.status_code == 200, response.get_json()
+    assert [c["target_user_id"] for c in response.get_json()] == [OTHER]
 
 
 # ── #559 QA1: the in-process upgrade reloads the scrubbed pack ─────────────

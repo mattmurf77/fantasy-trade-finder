@@ -808,7 +808,8 @@ def redact_page_card(card: dict, ids, token: str) -> dict:
     """One stored page card. Its target becomes the token and the placeholder
     name, and the partner's fields go. It never serves again: the serve rules
     drop a token-target card in every I-1 mode, before I-1, and record it as
-    a never-delivered withdrawal, reason "partner_deleted" (server.
+    a withdrawal, reason "partner_deleted", served_before 1 when an earlier
+    response had delivered it, else 0 (server.
     _roster_serve_rules; models-lead addendum J4: at prod's mode 1, I-1
     alone would serve it)."""
     ids = set(ids)

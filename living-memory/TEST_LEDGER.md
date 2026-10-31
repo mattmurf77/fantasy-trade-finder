@@ -1,3 +1,28 @@
+## 2026-10-31 — Deletion scrub stage 2, release-lead's #559 re-QA: neutral revoke reason, session card purge
+
+Gates: release-lead's re-QA, GO-with-notes on #557 (b62fb21e) and on #559 (8412a475), with two P2s to fix before #559 merges. Route: `DELETE /api/account`'s `deleted` counts gain `trade_cards_purged`, and `GET /api/trades` drops cards whose partner deleted their account in this process. Both are noted in api-reference. No schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P2-a:** a running job revoked by a deletion now errors with `inputs_changed`, not `partner_deleted`. Its owner is a leaguemate: mobile retries `inputs_changed` on its own, and web would have toasted the raw code.
+- **P2-b:** each session's TradeService card store was a second in-process holder. It's shared with the session's jobs, and `GET /api/trades` serves it with no expiry. The fix:
+  - `_purge_session_trade_cards` removes the person's cards from every session's services, every format's;
+  - the deleted ids go in `_deleted_partner_ids`, which `GET /api/trades` filters on, catching a still-running job that writes after the purge;
+  - the revoke and purge run in a `try` after the commit, so a failure there never makes a committed deletion a 500;
+  - `conftest` clears the set for every test.
+- **P3s:**
+  - a test for the revoke's TradeCard-object branch;
+  - `octet_length` pinned with multibyte rows: about 40 characters but 100 bytes each, so each row is its own batch under a 120-byte cap;
+  - the SQLite >= 3.43 floor recorded in DEPENDENCIES;
+  - the withdrawal wording: `served_before` can be 1, and the drop runs before `deck_i1_check`;
+  - in the scope: the pre-scrub window (about 0.1 s, up to one 5-min tick if the kick fails), the revoke's cost, and what a revoked deck still writes;
+  - the R-G entry's two wording errors fixed and its three omissions added.
+- **Tests:**
+  - the revoke test now covers TradeCard objects and asserts `inputs_changed` (4 jobs, 3 revoked);
+  - `test_deletion_purges_every_sessions_trade_cards_naming_the_person`;
+  - `test_get_trades_never_serves_a_card_written_after_the_purge`;
+  - `test_bakeoff_batches_count_stored_bytes_not_characters`.
+- **Sabotages, 13/13 red:** the six from the QA round, plus the reason left as `i1_dropped`, the revoke reason `partner_deleted`, the TradeCard-object branch, a purge that pops nothing, a purge that skips `trade_svcs`, the serve filter removed, and `octet_length` back to `length()`.
+- **Runs:** the deletion, evidence, page store, I-1, withdrawals, session-race, card-privacy, bilateral-route and prepared-trade suites: 672 passed.
+
 ## 2026-10-31 — Deletion scrub stage 2, release-lead's #559 QA: partner_deleted moves in, live jobs revoked, page roster_evaluation
 
 Gates: release-lead's #559 NO-GO (P1, P2, P3s). P1: models-lead's J4 moves from #562 into #559, so #559 merges on its own. Route: `DELETE /api/account`'s `deleted` counts gain `trade_jobs_revoked` (additive; api-reference updated). Serve path: `_roster_serve_rules` drops a token-target card in every I-1 mode, and the withdrawal reason `partner_deleted` (data dictionary updated). No schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

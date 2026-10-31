@@ -92,16 +92,23 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
   - Tests drive the race, the stale cache and the held row.
 - **A redacted card never serves, in any I-1 mode** (models-lead addendum J4, head-eng's option (b); moved from stage 3 into stage 2 so #559 merges on its own, release-lead's #559 QA P1). At prod's `trade_i1_mode` 1, I-1 alone would serve it while a stale page rebuilds.
   - `_roster_serve_rules`, which /generate, /status (legacy and paged) and the page-store serve share, drops any card whose target is a redaction token before I-1.
-  - It's recorded as a never-delivered withdrawal with its own reason, `partner_deleted`, counted apart so G10's mode-1 rule on `i1_dropped` stays clean.
+  - It's recorded as a withdrawal with its own reason, `partner_deleted`, counted apart so G10's mode-1 rule on `i1_dropped` stays clean. `served_before` is 1 when an earlier response had delivered the card (a deck served before the deletion, or one built after it within the 6 h grace), else 0.
+  - It runs before `deck_i1_check`, so a redacted card is in neither of that event's `cards` / `kept` counts.
 
 ### 0.4 Decks in flight at deletion
 
 - A live job's `_DeckEvidence` holds unwritten rows from its build-time snapshot. A delivery after the scrub writes them, and with them the old id and the c2 fields.
 - **The tick's second DB pass rewrites them.** The window is at most until that tick.
 - **Jobs held in this process are revoked when the deletion commits** (release-lead's #559 QA P2). The scrub rewrites stored decks, never an in-memory job, which at `trade_i1_mode` 0 or 1 would keep serving the person's original cards (their id, name and reasons) until it left memory.
-  - The delete route reads the person's leagues before the deletion removes their rows (`_deletion_scrub_leagues`). After it commits, `_revoke_trade_jobs_naming` revokes every job whose cards name a deleted id and every job still running in one of those leagues (it may yet publish such cards): superseded, cards cleared, a running one errored. The next request builds a fresh deck. The response's `deleted` counts gain `trade_jobs_revoked`.
-  - Another instance's jobs aren't reached; they age out within its retention. Their stored decks are the scrub's.
+  - The delete route reads the person's leagues before the deletion removes their rows (`_deletion_scrub_leagues`). After it commits, `_revoke_trade_jobs_naming` revokes every job whose cards name a deleted id (dicts or `TradeCard` objects) and every job still running in one of those leagues (it may yet publish such cards): superseded, cards cleared, a running one errored. The next request builds a fresh deck. The response's `deleted` counts gain `trade_jobs_revoked`.
+  - **The reason is the neutral `inputs_changed`** (release-lead's re-QA P2-a). A running job's error reaches its owner, a leaguemate. Mobile retries `inputs_changed` on its own; `partner_deleted` would show a dead-end error card, and web would toast the raw code, telling them someone deleted their account. A revoked complete job already reported `inputs_changed`.
+  - **Each session's TradeService card store is purged too** (re-QA P2-b). It's shared with the session's trade jobs and served by `GET /api/trades` with no expiry, so it kept the person's cards (id, name, narrative) after the revoke and the scrub. `_purge_session_trade_cards` removes every card whose partner is a deleted id from every session's services, every format's; the counts gain `trade_cards_purged`. A job still running at the deletion writes its cards straight into that store, after the purge, so `GET /api/trades` also drops cards whose partner is in the process's `_deleted_partner_ids`.
+  - Both run after the commit, inside a `try`: a failure is logged by class and never turns a committed deletion into a 500.
+  - **Cost:** the revoke holds `_trade_jobs_lock` for O(jobs × cards), measured by release-lead at 61–67 ms for 2,000 jobs × 150 cards and 0.34–0.75 s for 5,000 × 200. The purge holds `_sessions_lock` only to list the sessions. Fine at today's volume; revisit if the job registry grows past a few thousand.
+  - **What a revoked deck still writes:** an outcome on one of its cards that the client already holds writes a full row, as any outcome does. The scrub's grace pass redacts it.
+  - Another process's jobs and sessions aren't reached. Prod runs one (`render.yaml`: `--workers 1`); with more, they'd keep them until they leave memory. Their stored decks are the scrub's.
 - A stored page's redacted cards are dropped by the serve rules above, whatever the I-1 mode.
+- **The pre-scrub window** (release-lead's re-QA P3): between the deletion's commit and the scrub's page-store league pass, a stored page still holds the person's cards with their id, so a serve in that window can deliver them. The kick starts the scrub off the request, so the window is about 0.1 s; if the kick fails, it's up to one cleanup tick (5 min).
 
 ## 1. Analytics scope
 

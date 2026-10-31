@@ -718,6 +718,23 @@ def test_bakeoff_batches_by_count_and_by_bytes_each_renewing_the_lease(engine, m
     assert n == 4 and len(renewed) == 3
 
 
+
+def test_bakeoff_batches_count_stored_bytes_not_characters(engine, monkeypatch):
+    """The byte cap reads octet_length, the stored size (#557 re-QA notes).
+    Two rows of three-byte characters: about 40 characters but 100 bytes each,
+    so each is a batch of its own under a 120-byte cap, where length() would
+    count characters and put them together. Needs SQLite 3.43 or later
+    (living-memory/DEPENDENCIES.md)."""
+    with engine.begin() as conn:
+        for run_id in ("m1", "m2"):
+            conn.execute(insert(db.bakeoff_runs_table).values(
+                run_id=run_id, deck_job_id="d", user_id=VIEWER, league_id=LEAGUE, arm_order="[]",
+                deck_size=1, arms_json="{}", created_at=EARLY,
+                config_json=json.dumps({"pad": "\u20ac" * 30}, ensure_ascii=False)))
+    monkeypatch.setattr(scrub, "_BAKEOFF_BATCH_BYTES", 120)
+    with engine.connect() as conn:
+        assert scrub._bakeoff_batches(conn, ["m1", "m2"]) == [["m1"], ["m2"]]
+
 def test_every_impressions_batch_renews_the_lease(engine, monkeypatch):
     """#557 re-QA P3: the rows are redacted in batches, each renewing the
     job's lease, so a long league pass can't outlast it."""
