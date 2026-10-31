@@ -26,6 +26,7 @@ Gates: full (operator did not declare express). Scope blocks: `docs/plans/server
 - **Suites** (one process each, with `test_error_alerts.py` first, so later files run after Sentry was on in-process):
   - venv with `sentry-sdk==2.72.0`: 120 passed. That's `test_error_alerts` 33, `test_fork_safe_db_and_threads` 17, `test_feedback_public` 14, `test_feedback_public_limits` 33, `test_feedback_text_cap` 3, `test_feedback_attach_on_verify` 12 and `test_daily_tick_runner` 8;
   - system Python **without** the SDK: 87 passed, `test_error_alerts` skipped (`importorskip`). So `server.py` imports cleanly without the package.
+  - After the review revision and the merge of `origin/main` at `98b9291f`, in the venv: 123 passed (`test_error_alerts` 36; the other six files unchanged at 87).
   - Local Python 3.14.4; CI and prod run 3.12. The full suite was not run locally (shared machine); CI runs it.
 - **Overhead** (laptop, Flask test client, rough):
   - Sentry off: the two hooks cost about 0.3 µs per request (a module-flag check; `report_5xx` is called only for a 5xx).
