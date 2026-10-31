@@ -104,6 +104,7 @@ Gates: release-lead's #557 QA @ `cbbb80f3`. No new table, flag, event or route c
   - a config-reference row for `FTF_DISABLE_DELETION_SCRUB_KICK`.
 - **Not fixed here, named:** `prepared_runtime.owner_evaluation.snapshot_json` is latent while `prepared_trade_inventory_enabled` is 0, and goes with the prepared-adoption work. `notifications` and `user_events.props.partner_user_id` went to head-eng and legal.
 - **Tests:** `test_deletion_scrub.py`, 32 passed.
+- **The full backend suite at the top of the stack** (#562 @ `fa6fc57e`, carrying #557's QA fixes and J4/J2): 10,230 passed, 2 skipped, 0 failed.
 - **Sabotages, 11/11 red:**
   - bilateral kept;
   - `counterparty_preference` kept;
