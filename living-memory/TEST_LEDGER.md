@@ -1,3 +1,16 @@
+## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
+
+Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P3-1, the flags-on twin** (`test_trade_page_store.py`):
+  - the in-memory job's cards are swapped after the store, so a serve from the job instead of the stored deck can't pass;
+  - a cursor past 0, whose slice still has a card for I-1 to drop, is withheld with that cursor held, then serves exactly the I-1 survivors from it;
+  - it's served before cursor 0, because a cursor-0 serve would withdraw its drops and the sticky drop (C-b) would hide them either way.
+  - **Sabotages, 2/2 red:** I-1 skipped past cursor 0; the status served from the job, not the stored deck.
+- **P3-2:** `test_a_superseded_job_writes_no_impressions` pins both flags off, through a shared `flags_off` fixture with its control. With the flags on it was vacuous (impressions wait for delivery). The fence still matters on a flags-off rollback.
+  - **Sabotage:** removing the fence (`and not _job_superseded(job_id)` at the impression write) makes it red.
+- **Suites:** force-supersede and the page store, both files pass.
+
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
 Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
