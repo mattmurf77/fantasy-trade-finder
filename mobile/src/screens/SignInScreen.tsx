@@ -10,12 +10,13 @@ import {
   Platform,
   KeyboardAvoidingView,
   Linking,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { TickLabel, Text as ChalkText } from '../components/chalkline';
-import { appleSignIn, resolveSmartStart, signIn } from '../api/auth';
+import { appleSignIn, refreshVerification, resolveSmartStart, signIn } from '../api/auth';
 import { track } from '../api/events';
 import { consumeAppleReauthHint, NO_LEAGUE_ID, useSession } from '../state/useSession';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
@@ -27,7 +28,11 @@ import {
   guidedAvatarActive,
 } from '../state/useGuide';
 import { getOnboardingState, patchOnboardingState } from '../state/useOnboardingState';
-import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
+import {
+  notifyGuideTargetsMoved,
+  registerGuideTarget,
+  unregisterGuideTarget,
+} from '../state/guideTargets';
 import { S as GUIDE } from '../components/analystScript';
 import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
 import { fetchInviteMeta } from '../api/league';
@@ -45,7 +50,7 @@ const TEST_APPLE_SUB = testLaunchArg('FTFTestAppleSub');
 /** Landing platform options (`landing.platform_options`): the entry chip a
  *  non-Sleeper manager selected. Since D-164 the chip's own panel carries the
  *  sessionless entry flow, so this type survives for the ONE remaining Apple
- *  path — the quiet "Already have an account?" re-entry link, whose callbacks
+ *  path — the landing's Continue with Apple button (B1), whose callbacks
  *  carry it so RootNav can land LeaguePicker with the matching link sheet
  *  auto-opened (#130 `espnLink` / its `mflLink` twin). */
 export type EntryPlatformIntent = 'espn' | 'mfl';
@@ -95,8 +100,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   const tryDemoEnabled    = useFlag('landing.try_before_sync');
   const accountsEnabled   = useFlag('auth.accounts');
   // Username-first landing (onboarding plan item 5, ADR-006 account-later):
-  // when on, the Sleeper username field is the primary surface and Apple
-  // demotes to a quiet re-entry link. Flags-off renders the P2.6 layout
+  // when on, the Sleeper username field is the primary surface and Apple is
+  // Apple's own Continue button below the username Continue (B1). Flags-off renders the P2.6 layout
   // unchanged. NOTE: the demo affordances below still require
   // landing.try_before_sync (the backend demo endpoint 404s without it) —
   // the operator flips that flag together with onboarding.landing.
@@ -113,12 +118,18 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // and platform-agnostic.
   const platformOptionsFlag = useFlag('landing.platform_options');
   const espnLinkOn = useFlag('espn.link');
+  // `espn.signin` hides ONLY this ESPN entry chip (Settings → link ESPN league
+  // and MFL sign-in stay on). useFlag is `!!flags[key]`, so a server that
+  // doesn't send the key yet reads false here: the chip stays hidden until
+  // the server flag ships — the fail-safe direction, intended. Deliberately
+  // absent from LAUNCHED_FLAG_DEFAULTS: a server `false` must never paint it.
+  const espnSignInOn = useFlag('espn.signin');
   const mflLinkOn = useFlag('mfl.link');
   const [entryPlatform, setEntryPlatform] =
     useState<'sleeper' | EntryPlatformIntent>('sleeper');
   const platformChips: Array<'sleeper' | EntryPlatformIntent> = [
     'sleeper',
-    ...(espnLinkOn ? (['espn'] as const) : []),
+    ...(espnLinkOn && espnSignInOn ? (['espn'] as const) : []),
     ...(mflLinkOn ? (['mfl'] as const) : []),
   ];
   // A single chip is no choice — hide the row unless ≥2 platforms are live.
@@ -130,12 +141,12 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // renders.
   useEffect(() => {
     if (
-      (entryPlatform === 'espn' && !espnLinkOn) ||
+      (entryPlatform === 'espn' && !(espnLinkOn && espnSignInOn)) ||
       (entryPlatform === 'mfl' && !mflLinkOn)
     ) {
       setEntryPlatform('sleeper');
     }
-  }, [entryPlatform, espnLinkOn, mflLinkOn]);
+  }, [entryPlatform, espnLinkOn, espnSignInOn, mflLinkOn]);
 
   // V2 (D-164): which entry-mode link sheet is open. One at a time — iOS
   // won't stack sibling RN Modals (#266 class).
@@ -143,15 +154,22 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
 
   // Entry mint landed (the sheet stored the session token already) — pin the
   // entry user. account_only is accurate AND load-bearing: it tells
-  // LeaguePicker's refresh to skip the Sleeper league fetch (an entry:… id
-  // is not a Sleeper user id) and merge the platform leagues instead.
-  async function handleEntrySession(u: { user_id: string; display_name: string }) {
+  // LeaguePicker's refresh to skip the Sleeper league fetch (an acct_* key is
+  // not a Sleeper user id) and merge the platform leagues instead. A platform
+  // identity bound to a Sleeper user mints that Sleeper id with account_only
+  // false and the Sleeper username, so the mint's values win over the default.
+  async function handleEntrySession(u: {
+    user_id: string;
+    display_name: string;
+    account_only?: boolean;
+    username?: string;
+  }) {
     await setUser({
       user_id: u.user_id,
-      username: '',
+      username: u.username ?? '',
       display_name: u.display_name,
       avatar_id: null,
-      account_only: true,
+      account_only: u.account_only ?? true,
     });
   }
 
@@ -386,6 +404,10 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
           league_id:   res.league_id || NO_LEAGUE_ID,
           league_name: res.league_name || 'No league linked',
         });
+        // No session init follows for this session, so ask the server for
+        // its verification now (head-eng 2026-10-28). Not awaited: the
+        // navigation below doesn't wait on it.
+        void refreshVerification();
         track('signin_succeeded', { method: 'apple' }, 'SignIn');
         (onAccountSignedIn ?? onSignedIn)(platformIntent);
       } else {
@@ -409,7 +431,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
     override?: string,
     method: 'sleeper' | 'last_user' = 'sleeper',
   ) {
-    if (busy) return;
+    if (busy || appleBusy) return;
     const rawInput = (override ?? username).trim();
     if (!rawInput) {
       setError('Enter your Sleeper username');
@@ -448,8 +470,10 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
             'SignIn',
           );
           // ESPN/MFL are live platforms now — a league URL just can't START
-          // sign-in (the link routes need a session first). Point at the
-          // entry chips when they render; otherwise at the Settings path.
+          // sign-in (the link routes need a session first). Point at that
+          // platform's entry chip only when IT renders (`espn.signin` hides
+          // ESPN's alone, so the picker can be up without it); otherwise at
+          // the Settings path.
           const pname =
             resolved.platform === 'espn'
               ? 'ESPN'
@@ -457,7 +481,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               ? 'MFL'
               : null;
           setError(
-            pname && platformPickerShown
+            pname && platformPickerShown && (platformChips as string[]).includes(resolved.platform ?? '')
               ? `That's an ${pname} league URL — choose ${pname} above to link it.`
               : pname
               ? `${pname} leagues link after sign-in — enter a Sleeper username here, or sign in with Apple and link your league from Settings.`
@@ -547,7 +571,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   }
 
   async function handleTryDemo() {
-    if (demoBusy || busy) return;
+    // Not while an Apple sign-in is in flight either (release-lead #507 QA P3).
+    if (demoBusy || busy || appleBusy) return;
     setDemoBusy(true);
     setError(null);
     setErrorKind(null);
@@ -578,7 +603,25 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}
       >
-        <View style={styles.body}>
+        {/* B1 (#507): with Apple at the bottom, the returning-user,
+            session-expired and error states run past an SE's height, so the
+            body scrolls instead of clipping. flexGrow + center keep it
+            centered when it fits; it bounces only when it doesn't.
+            "handled": with the keyboard up, the first tap on Continue, Apple,
+            a chip or the hint row acts instead of only closing the keyboard.
+            The username field and the platform link are guide targets, and a
+            spotlight frame is absolute window coordinates, so every move is
+            announced (check-guide-spotlight-tracking rules 9 and 10). */}
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={styles.body}
+          keyboardShouldPersistTaps="handled"
+          alwaysBounceVertical={false}
+          onScroll={notifyGuideTargetsMoved}
+          scrollEventThrottle={16}
+          onLayout={notifyGuideTargetsMoved}
+          onContentSizeChange={notifyGuideTargetsMoved}
+        >
           <View style={styles.hero}>
             <TickLabel>Dynasty Fantasy Football</TickLabel>
             <Text style={styles.headline}>
@@ -600,8 +643,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
             ) : null}
             {/* P0-3 — the invited banner. INSIDE styles.form, beside the
                 reauth notice, so it renders in BOTH `landingOn` variants:
-                with onboarding.landing on, the Apple entry demotes to a text
-                link and everything above this changes, so a banner attached
+                with onboarding.landing on, the Apple entry is the Continue
+                button below the username Continue and everything above this changes, so a banner attached
                 to the Apple block would vanish for exactly the cohort P0-9
                 is testing. */}
             {inviteHeadline ? (
@@ -766,7 +809,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 testID="signin.error-demo-escape"
                 accessibilityRole="button"
                 onPress={handleTryDemo}
-                disabled={busy || demoBusy}
+                disabled={busy || demoBusy || appleBusy}
                 hitSlop={8}
                 style={styles.errorEscape}
               >
@@ -803,13 +846,42 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               )}
             </Pressable>
             )}
+            {landingOn && appleShown ? (
+              <>
+                {/* B1 (Product's pre-launch review, 2026-10-27; guideline 4.8
+                    and Apple's sign-in HIG): once ESPN/MFL sign-in mints
+                    accounts, Sign in with Apple must be an equivalent, equally
+                    prominent option. So the landing shows Apple's own button
+                    (CONTINUE, WHITE: Apple's style for dark backgrounds, a
+                    solid white button), the height of the landing's other
+                    sign-in buttons (44, styles.button), in place of the old
+                    "Already have an account?" text link. It sits BELOW the
+                    username field and its Continue, or the ESPN/MFL panel,
+                    after an "or": the username field stays the primary door
+                    (ADR-006 decision 1 as amended 2026-10-28; head-product's
+                    B1 ruling). An ESPN/MFL chip selection still rides this
+                    flow (handleAppleSignIn's platformIntent). */}
+                <Text style={[styles.orDivider, styles.landingOrDivider]}>or</Text>
+                <AppleAuthentication.AppleAuthenticationButton
+                  testID="signin.apple-continue-btn"
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                  cornerRadius={radii.sm}
+                  style={styles.appleContinueButton}
+                  onPress={handleAppleSignIn}
+                />
+                {appleBusy ? (
+                  <ActivityIndicator color={chalk.dim} style={styles.appleBusy} />
+                ) : null}
+              </>
+            ) : null}
 
             {tryDemoEnabled ? (
               <Pressable
                 testID="signin.demo-link"
                 accessibilityRole="button"
                 onPress={handleTryDemo}
-                disabled={busy || demoBusy}
+                disabled={busy || demoBusy || appleBusy}
                 style={styles.tryDemoBtn}
                 hitSlop={8}
               >
@@ -829,32 +901,6 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               </Pressable>
             ) : null}
 
-            {landingOn && appleShown ? (
-              // ADR-006: quiet re-entry door for existing Apple-bound
-              // (P2.6 account-only) users — they may have no Sleeper
-              // username to type. Text link by design: it must never
-              // compete with the username field. (Conscious HIG tradeoff:
-              // the official Apple button is reserved for the flags-off
-              // layout; revisit if App Review objects.)
-              <Pressable
-                testID="signin.apple-link"
-                accessibilityRole="button"
-                onPress={handleAppleSignIn}
-                disabled={busy || demoBusy || appleBusy}
-                style={styles.tryDemoBtn}
-                hitSlop={8}
-              >
-                {({ pressed }) =>
-                  appleBusy ? (
-                    <ActivityIndicator color={chalk.dim} />
-                  ) : (
-                    <Text style={[styles.tryDemoText, pressed && styles.tryDemoTextPressed]}>
-                      Already have an account? Sign in with Apple
-                    </Text>
-                  )
-                }
-              </Pressable>
-            ) : null}
 
             <Text style={styles.legalLine}>
               By signing in you agree to the{' '}
@@ -873,7 +919,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               </Text>
             </Text>
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
       {/* V2 (D-164) — entry-mode link sheets. Mount pattern mirrors
           LeaguePicker: ESPN sheet unconditional (it manages its own Modal
@@ -926,8 +972,10 @@ function signInErrorCode(err: any): string {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
   flex: { flex: 1 },
+  // The ScrollView's content container (B1): grows to the viewport so it
+  // centers when it fits, and scrolls when it doesn't.
   body: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: space.xl,
     justifyContent: 'center',
     alignItems: 'flex-start',
@@ -1054,11 +1102,26 @@ const styles = StyleSheet.create({
   appleBusy: {
     marginBottom: space.md,
   },
+  // B1: the landing's Apple button is as tall as its other sign-in buttons
+  // (styles.button, 44: Apple's HIG says no smaller than the other sign-in
+  // options, and 44 is the tap minimum).
+  appleContinueButton: {
+    alignSelf: 'stretch',
+    height: 44,
+    marginBottom: space.md,
+  },
+  // chalk-dim: readable content, and chalk-faint is only for placeholders
+  // and disabled text (design-system.md; design-lead's B1 review).
   orDivider: {
     ...type.bodySm,
-    color: chalk.faint,
+    color: chalk.dim,
     textAlign: 'center',
     marginBottom: space.md,
+  },
+  // B1: the landing's "or" between Continue and Apple, space.md above and
+  // below (orDivider carries the below).
+  landingOrDivider: {
+    marginTop: space.md,
   },
   // Sleeper demoted to a secondary (outline) action when Apple is shown.
   buttonSecondary: {
@@ -1094,7 +1157,7 @@ const styles = StyleSheet.create({
   },
   legalLine: {
     ...type.bodySm,
-    color: chalk.faint,
+    color: chalk.dim,
     textAlign: 'center',
     alignSelf: 'stretch',
     marginTop: space.lg,
