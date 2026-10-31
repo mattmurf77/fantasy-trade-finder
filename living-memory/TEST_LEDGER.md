@@ -11,6 +11,14 @@ Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_
 - **Sabotages, 2/2 red:** I-1's drops ignored on the page path; the withhold ignored on the page path.
 - **Suites:** force-supersede, I-1 serve filter, page store and packed evidence: 317 passed on main and 317 passed on a flags-on copy of `ops/200ms-flip` (with failure 1's fix).
 - **Full backend suite, flags on** (`ops/200ms-flip` @ `8080663e` plus this branch's three test files): 10,055 passed, 2 skipped, 0 failed.
+## 2026-10-31 — #373: legal R28.23's server-Sentry lines pasted; the share lines pinned as two versions (#362 not live ships)
+
+Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.
+
+- **Item 2, server Sentry:** privacy §1 gains the "Server error reports (Sentry)" bullet right after the app Sentry bullet. The §2 no-trackers line, §3's purposes line and §4's Sentry line each gain the server. Pasted word for word from `legal-lead-drafts.md` Part 1. `POL-r28-23-sentry` pins all four, and the §1 bullet's place after the app bullet. It also fails if any of the three app-only lines is still there.
+- **Item 3b, share lines:** `#362` is open, not live, so the "#362 not live" text ships. It's already on the page and matches Part 3's previous-text quotes word for word. `POL-r28-23-share` pins the chosen version (`SHARE_362_LIVE = False`). It fails if any marker phrase of the other version shows up, so a half-done swap or an early claim also fails. The swap is ready as local `local/373-r28-23-share-live`: one commit with the four text edits and the flag flip.
+- **Sabotage:** 14/14 red (a word changed, a line removed, a line reverted, the §1 bullet moved off the app bullet, an old line kept beside a new one, one share line swapped alone, a new-version fragment added early). Positive control: the full swap is 244/244; the flag flip alone, or the text alone, is red. Every pinned string checked against the drafts.
+- **Suites:** web structure 244/244 (242 before, plus 2).
 
 ## 2026-10-31 — #544 QA round 3: the X3 coverage hole closed; T-10 resolves namespace lookups; the residual documented by class
 
@@ -1887,6 +1895,19 @@ Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b7-d13-
     - the Privacy label changed;
     - the agreement text softened.
   - Two malformed first-try mutations were re-run as valid JSX.
+
+## 2026-10-31 — #373: no "beta" or "hobby" text on any page the binary links to (release-lead #549 QA P2; head-eng)
+
+Web only, on #373 (`feat/m7-p28-web-pages`).
+
+- **Confirmed removed:** all seven of main's lines are gone from #373, and from #373 merged with `origin/main` (merge-tree clean):
+  - `terms.html` 74-75, 104, 106, 128 and 132;
+  - `privacy.html:260`;
+  - `faq.html:206` ("A native iOS app is in TestFlight beta…", which #549's scope missed).
+
+  None of #373's `web/*.html` say "beta" or "hobby".
+- **Pin widened:** `POL-no-stale-claims` (no "Fantasy Trade Finder", "hobby" or "beta" in visible text) now runs on `faq.html` and `contact.html` as well as privacy and terms. Checker 241/241.
+- **Sabotage 8/8 red**, restored byte-identical: each of main's seven lines put back on its page, plus a "beta" line on contact. A "beta" only in an HTML comment correctly stays green.
 
 ## 2026-10-15 — #326 value core v4, #328 live-deck filters, #327 Calibration Yes/No
 
