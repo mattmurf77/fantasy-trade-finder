@@ -6,7 +6,7 @@
 
 ## 1. Analytics scope
 
-`win_now_objective_selected` is emitted server-side when an authenticated search is accepted, once per submitted job, with objective, sacrifice/fairness limits, job ID, client platform and league platform. No duplicate client selection event. Raw protected lists and private ranking boards are not analytics properties. The taxonomy registration is part of this build; the event is classified as intent, and platform is derived from X-Device as ios/android/web.
+`win_now_objective_selected` is emitted server-side when an authenticated search is accepted, once per submitted job, with objective, sacrifice/fairness limits, job ID, client platform and league platform. No duplicate client selection event. Raw protected lists and private ranking boards are not analytics properties. The taxonomy registration is part of this build; the event is classified as intent, and platform is derived from X-Device, else a declared X-Source (`backend/client_device.py`), as ios | android | web | extension, else NULL (G-068, 2026-10-31).
 
 Like/pass writes go only to `win_now_decisions`, retaining the objective and frozen scenario through its scenario reference. No legacy `/api/trades/swipe`, queue, match or proposal path is added by this beta; none of these actions trains dynasty Elo. Real proposal/acceptance attribution remains future work, not an implied beta capability.
 
