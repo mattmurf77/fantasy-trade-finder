@@ -70,6 +70,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Independent offline model scorecard](#independent-offline-model-scorecard)
 - [Local dev](#local-dev)
 - [Deploy (Render)](#deploy-render)
+- [DB connections and background threads across fork](#db-connections-and-background-threads-across-fork)
 - [Pre-ship simulator gate (2026-08-08)](#pre-ship-simulator-gate-2026-08-08)
   - [Risk-tier matrix (operator-owned; deviations are decisions, recorded in the feature's scope block)](#risk-tier-matrix-operator-owned-deviations-are-decisions-recorded-in-the-features-scope-block)
   - [Evidence](#evidence)
@@ -77,6 +78,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
   - [Screen library (capture freshness)](#screen-library-capture-freshness)
   - [Failure symptom / lever](#failure-symptom-lever)
 - [Database](#database)
+- [Migration DDL never blocks boot](#migration-ddl-never-blocks-boot)
 - [Feature flags](#feature-flags)
 - [Trade engine flags + kill switch](#trade-engine-flags-kill-switch)
 - [Runtime tuning](#runtime-tuning)
@@ -221,6 +223,39 @@ backend increment. Physical-device checks and the three-second KPI remain separa
 
 ---
 
+## DB connections and background threads across fork
+
+**Root cause** (found in release-lead's 2026-10-26 deploy watch):
+- Render's default for Python services is `GUNICORN_CMD_ARGS="--preload --access-logfile - --bind=0.0.0.0:10000"`. It does not appear in the service's env list.
+- With `--preload`, gunicorn imports the app in the **master** and then forks the worker. Every boot logs "Database initialised" before "Booting worker".
+- So prod has **always** preloaded, and the import-time background work has probably never run in the serving process. The gunicorn version is not the cause: 26.2.0 still loads in the master only with `preload_app`.
+- **Inherited connections:** pooled DB connections opened during import (init_db, player sync) were inherited by the worker. Master and worker then shared the same SSL sockets, which gave "decryption failed or bad record mac", for example in `load_pending_matches_older_than` inside `cron_realtime_tick`.
+- **Threads that never ran in the worker:** threads do not survive fork.
+  - The import-time `_cleanup_loop` ran **only in the master**. The serving worker never swept its own sessions or trade jobs, while the master's loop issued its DB purges over the shared connections.
+  - The import-time Win Now resume (`start_worker_on_startup`) started `win-now-worker` in the master. The worker inherited `_worker_running=True` with no thread, so `wake_worker` was a no-op until a restart.
+- **Idle drops:** "SSL SYSCALL EOF" on later idle passes was the server dropping idle connections.
+
+**Fix.** It does not depend on the gunicorn version, and uses no gunicorn hooks or conf file.
+- `backend/database.py`:
+  - `os.register_at_fork(after_in_child=_reset_pools_after_fork)` calls `dispose(close=False)` on `engine`, `ingest_engine` and `ro_engine`. A forked child starts with empty pools, and the parent keeps its sockets.
+  - Postgres engines get `pool_recycle=280` and libpq TCP keepalives (`keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=5`) via `_pg_engine_kwargs`. `ro_engine` keeps its read-only `options`.
+  - No `pool_pre_ping`.
+- `backend/server.py`: `_ensure_background_threads()` runs once per pid from a `before_request` hook, so it runs in whichever process serves requests (the gunicorn worker, or `python run.py` on its first request). It:
+  - starts `_cleanup_loop`, unless `FTF_DISABLE_CLEANUP_LOOP=1` (tests);
+  - then starts a short-lived `win-now-resume` thread that resumes queued Win Now work. That always runs, but the function keeps its own `FTF_TEST_MODE` / `FTF_BUILD_MODE` guard. It runs off the request path: inline it held `_bg_threads_lock` for ~49 ms while concurrent first requests waited.
+- `backend/server.py` `_cleanup_loop`: each step (including the in-memory session sweep, `_prune_deck_evidence`, the trade-job sweep, `_evict_trade_page_store` and `_drop_stale_deck_evidence`) has its own `try/except` + `log.exception`, so one failure cannot end that worker's loop.
+- `requirements.txt` pins `gunicorn==26.2.0` to match what Render installs. The pin is harmless and is not the cause (see `living-memory/DEPENDENCIES.md` 2026-10-26).
+
+**What to watch after the deploy:**
+- **No** "decryption failed or bad record mac" and **no** "SSL SYSCALL EOF" for 24 h.
+- "Cleaned up N stale session(s)" and "Trade jobs swept: … evicted" now appear with the **worker's** pid, starting about 5 min after the first request. Before this fix they could only come from the master, where the session and job maps are empty.
+- In-process trade jobs older than `_JOB_RETENTION` (4 h) are now evicted in prod for the first time. A tap after that rebuilds the deck instead of reusing a long-finished job.
+- `_JOB_HARD_TIMEOUT` also applies in prod for the first time. It is 300 s, measured from `started_at` (or a prepared job's last durable adoption progress): a stuck-job backstop, not a latency target (prod pre-gens reach their first owner batch at 60-75 s). Each timed-out job logs one WARNING, `trade-job <id> timed out: <N>s since start, <M> cards published`, next to the "Trade jobs swept" summary.
+- Worker memory should flatten instead of growing with every session since the last restart.
+- Win Now jobs queued before a deploy now resume in the worker after its first request. Previously a job stayed queued until something triggered a restart.
+
+---
+
 ## Pre-ship simulator gate (2026-08-08)
 
 > **RETIRED (2026-08-15, D-056 — extending D-P1-08).** Maestro/simulator work is retired
@@ -309,6 +344,46 @@ Prereq: `brew install pngquant` (the runner falls back to `sips` downscale with 
 - **Prod:** Postgres via `DATABASE_URL`. Take a Render snapshot before destructive changes.
 - **Schema source of truth:** `backend/database.py`.
 - **Migrations:** No migration tool. `_migrate_db()` in `database.py` applies idempotent additive ALTERs and seeds `model_config` defaults via INSERT OR IGNORE on every startup. For destructive changes, write a one-off script and run it manually.
+
+---
+
+## Migration DDL never blocks boot
+
+Why this exists: on #416's deploy, the boot spent about 90 s in `init_db`.
+- `_migrate_db()` ran every listed `ALTER TABLE … ADD COLUMN` (112) and every `CREATE INDEX IF NOT EXISTS` (15) on every boot.
+- On Postgres the ALTER takes ACCESS EXCLUSIVE and the CREATE INDEX takes SHARE, both **before** checking whether the object already exists.
+- The new instance's DDL queued behind the still-serving old instance, and the old instance's queries then queued behind the DDL.
+
+How it works now (`backend/database.py`, `_SchemaSnapshot` / `_run_guarded_ddl`):
+- **Precheck.** `_migrate_db` reads each table's columns and indexes once, and skips any column or index that already exists. A normal boot therefore issues **no** ADD COLUMN and **no** CREATE INDEX. Only the two `DROP INDEX IF EXISTS` no-ops remain; they take no lock when the index is absent.
+- **Catalog reads cannot hang.** On Postgres each read runs on its own short-lived connection that first runs `SET lock_timeout = '3s'`, and that connection is closed before any DDL.
+  - A lock-busy read fails the boot with `MIGRATION_LOCK_BUSY <table>`. It does not fall back to "assume nothing exists", which would retry every column.
+  - Any other read error keeps the old fallback: that table's DDL just runs.
+- **Lock guard for missing DDL (Postgres).** Each statement runs in its own transaction after `SET LOCAL lock_timeout = '3s'`. A missing **column** also gets `SET LOCAL statement_timeout = '30s'` (ADD COLUMN is metadata-only). A missing **index** gets **no** statement_timeout, so a build that has its lock is never cancelled.
+  - On `55P03` (lock_not_available) or `57014` (query_canceled) it retries up to 10 attempts, about 1 s apart (about 40 s at most).
+  - If the table is still locked, it logs at ERROR `MIGRATION_LOCK_BUSY <table>.<col>` (or `<index>`) and **raises**, so `init_db` and the boot fail.
+  - Any other error is swallowed as before (the "already exists" race).
+- **SQLite:** same precheck. No SET, no retry.
+
+**Why it fails instead of serving:** readers need every metadata column.
+- SQLAlchemy Core `select(<table>)`, and any insert that lists every metadata column, names every declared column. Postgres rejects one that is not there yet.
+- For example, a missing `deck_impressions.evidence_tier` would fail every deck evidence write.
+- A missing `deck_candidate_sets.candidates_packed` would fail the prepared-offer reads.
+- A missing `overhaul_attempts.provider_status` would fail every overhaul status read.
+
+**Fail-boot is safe only because prod preloads.**
+- Render's default `GUNICORN_CMD_ARGS` includes `--preload`, so `init_db` runs in the gunicorn master before the port opens. A failed boot never takes traffic: the deploy fails and the old instance keeps serving.
+- **Without** `--preload`, the master opens the port first. Then a failing worker boot exits only after traffic has switched to it.
+- Making `--preload` explicit in `render.yaml` is release-lead's call.
+
+**Shipping a column or index:**
+- A deploy that adds a column goes out in a **quiet window**: low traffic, and no long-running cron or job holding the table.
+- While the guard retries (up to about 40 s), the old instance's queries on that table can stall up to 3 s per attempt, queued behind the waiting ALTER.
+- **If the boot fails with `MIGRATION_LOCK_BUSY`:** the old instance keeps serving, so nothing is down. **Redeploy** in a quieter moment.
+- **Never hand-edit the prod schema.**
+- **A new index on a large table** must be built `CREATE INDEX CONCURRENTLY` **off the boot path**, as an operator one-off or a migration script with a lock_timeout. See the C8 retention note beside `deck_impressions`' indexes in `database.py`. The boot guard only bounds the lock wait. A plain build still blocks writes for the length of the scan once it has the lock.
+- **`build.sh` imports `backend.server`**, so `init_db` also runs during the Render build. A lock-busy failure there hides behind the "Sleeper cache bake skipped" message. Read the build log, not only the deploy log.
+- **Check it landed:** the boot completes, and `\d <table>` in psql against `DATABASE_URL_PROD` shows the column or index.
 
 ---
 
