@@ -1,3 +1,21 @@
+## 2026-10-31 — C2, release-lead's #566 QA (GO-with-notes): renders redrawn, checklist fixed, guard by meaning
+
+Gates: the C2 scope (`docs/plans/share-text-c2/scope.md`). Client-only; no schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the structural guard plus the operator's TestFlight checklist.
+
+- **P2-2, the renders:** `renders/render.py` now draws both before/after PNGs from the code:
+  - `TierBadge`'s pick-value ladder labels (uppercased by `type.label`) in `chalk.base`, with a 1px border in the tier's colour. The first draw had cyan "ELITE" / "STARTER" badges.
+  - `PositionChip` the same way; a pick shows its number;
+  - the wordmark and the URL footer in both panes. The first draw had no footer.
+- **P2-3, the checklist:** steps 2 and 5 now read the message body sent with the image in Messages (there's no capture toggle on iOS). Step 1 adds a pick, the footer and the unchanged on-screen verdict. Step 3 notes the link preview's "% fair" is #511's.
+- **P3, the guard (`check-share-text.js`):**
+  - It now bans `.verdict`, `point_ratio`, `give_value` / `receive_value`, `favors`, "fair" and "%" in every share region.
+  - It scans the card's render body, which must render the line it's given exactly once.
+  - The card's style key `verdict` is now `valueLine`, and the stale "verdict" comments are fixed (`ShareTradeImage.tsx`, `TradeCalculatorScreen.tsx` ×2, `InLeagueCalculator.tsx`).
+- **Runs:**
+  - The guard passes 93/93 here and fails 28 against main's share code.
+  - **Sabotages, 6/6 red:** release-lead's four bypasses (a bare `evalQuery.data?.verdict` in the text share, "`${…}% fair`" in the in-league fallback, the verdict in the caption, a hard-coded "Verdict: fair" in the card), plus "Fair" alone in the card and `point_ratio` as a prop.
+  - All 135 `check-*.js` suites pass; `tsc --noEmit` is clean and testid-lint is green.
+
 ## 2026-10-31 — C2: shared trades state "Package value" only (remove-only share text)
 
 Gates: the scope block `docs/plans/share-text-c2/scope.md`. head-bizops's decision under the launch-roadmap approval, routed by head-eng for the 11-06 binary. Client copy removal only: no route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture. The evidence is the structural guard plus the TestFlight checklist in the scope (§3).

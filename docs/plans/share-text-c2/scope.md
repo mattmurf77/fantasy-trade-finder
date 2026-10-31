@@ -28,8 +28,10 @@
 - [x] **Structural guard:** `mobile/tests/check-share-text.js` (`npm run test:share-text`). It pins:
   - `SHARE_VALUE_LINE` is "Package value";
   - the share image has no TOTAL row and takes no totals;
-  - in each `<ShareTradeImage … />` element and in the calculator's `shareTrade` text, no verdict / win / board / ratio / consensus-total string and no verdict function remain, and each states `SHARE_VALUE_LINE`.
-  - **Against main's share code it fails 19 checks.**
+  - in each `<ShareTradeImage … />` element (caption, line and fallback), in the calculator's `shareTrade` text and in the card's own render body, no verdict / win / board / ratio / consensus-total string and no verdict function remain;
+  - by meaning too (release-lead's #566 QA P3): no `.verdict` read, `point_ratio`, `give_value` / `receive_value`, `favors`, "fair" or "%";
+  - each share region states `SHARE_VALUE_LINE`, and the card renders the line it's given exactly once.
+  - **Against main's share code it fails 28 checks.** release-lead's four bypasses (a bare `.verdict` in the text share, "`${…}% fair`" in the fallback, the verdict in the caption, a hard-coded "Verdict: fair" in the card) and two variants are each red.
 - [x] **Unit tests:** none. This is a client-only copy removal; the guard covers it.
 - [x] **Before/after renders** (for the operator's design OK): `renders/calculator-before-after.png`, and `renders/in-league-before-after.png` against a diverging opponent. They're mocks, not device captures (D-056). `renders/render.py` draws them from the code:
   - the layout of `ShareTradeImage`, with main's TOTAL rows in the before pane;
