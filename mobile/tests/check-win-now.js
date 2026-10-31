@@ -60,7 +60,7 @@ check('mobile probability and pp formatting preserves zero and rejects missing d
   const u = utility.exports;
   assert.equal(u.probability(0), '0.0%'); assert.equal(u.probability(null), '—'); assert.equal(u.probability(1.1), '—');
   assert.equal(u.impact(.2, .25, true), '+5.0 pp'); assert.equal(u.impact(.25, .2, true), '-5.0 pp'); assert.equal(u.impact(undefined, .2, true), '—');
-  assert.match(u.sourceReceipt({calibrated: false}), /Uncalibrated beta/);
+  assert.match(u.sourceReceipt({calibrated: false}), /Uncalibrated estimate/);
   assert.match(u.sourceReceipt({calibrated: false}), /projection\/model uncertainty is excluded/);
   assert.equal(u.nextThree({weekly_win_probabilities: {'1': .9}}), undefined);
 });
@@ -113,6 +113,16 @@ const click = async label => {
 };
 const baseline = {status: 'available', meta: {source: 'Test provider', as_of: '2026-09-04T12:00:00Z', snapshot_id: 'snap', model_version: 'test', championship_available: false, coverage: .95}, buyer_roster_id: 1, teams: [{roster_id: 1, username: 'Buyer', projected_seed: 2, expected_wins: 8, expected_losses: 6, expected_ties: 0, playoff_probability: .2, bye_probability: .1}, {roster_id: 2, username: 'Earlier finish', projected_seed: 1.123}], assets: [{id: 'a', name: 'Buyer asset', owner_roster_id: 1}, {id: 'b', name: 'Partner asset', owner_roster_id: 2}, ...['a2', 'a3', 'a4'].map(id => ({id, name: id, owner_roster_id: 1}))]};
 const trade = name => ({scenario_id: name, partner_roster_id: 2, partner_username: name, give: [baseline.assets[0]], receive: [baseline.assets[1]], conservative_season_gain: .01, buyer: {before: {playoff_probability: .2}, after: {playoff_probability: .25}, uncertainty: {playoff_probability: {lower_bound: .01, upper_bound: .08, confirmation_delta: .03}}}, partner: {before: {playoff_probability: .1}, after: {playoff_probability: .12}}, valuation: {partner_basis: 'market_estimate', partner_confidence: .4, partner_coverage: 0, partner_intent: 'unknown'}});
+// A check that awaits something that never settles would let the event loop
+// drain and node exit 0 mid-run: an unfinished run fails instead.
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-win-now did not finish (a check hung): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 (async () => {
   window.FTFWinNow.onView('win-now');
   check('dark flags cause no requests', () => assert.equal(requests.length, 0));
@@ -131,7 +141,7 @@ const trade = name => ({scenario_id: name, partner_roster_id: 2, partner_usernam
   check('web standings use average finish in sorted order and mark beta', () => {
     const output = text('win-now-controls'); assert.match(output, /Avg finish \/ team/); assert.match(output, /1.12 Earlier finish/);
     assert.ok(output.indexOf('Earlier finish') < output.indexOf('Buyer'));
-    assert.match(output, /Uncalibrated beta/); assert.match(output, /projection\/model uncertainty is excluded/);
+    assert.match(output, /Uncalibrated estimate/); assert.match(output, /projection\/model uncertainty is excluded/);
   });
   check('validated title unavailable despite estimates', () => assert.equal(all().filter(n => n.tag === 'button' && n.textContent === 'Championship').length, 0));
   for (const [id, invalid, valid] of [['win-now-budget', '11', '3'], ['win-now-fairness', '70', '90']]) {
@@ -167,5 +177,6 @@ const trade = name => ({scenario_id: name, partner_roster_id: 2, partner_usernam
   check('errors stop progress and enable manual retry', () => { assert.match(text('win-now-status'), /Forecast source is stale/); assert.equal(all().find(n => n.id === 'win-now-search').disabled, false); assert.equal([...timers.values()].filter(t => t.ms === 1500).length, 0); });
   await click('Find Win Now trades'); const pending = requests.at(-1); window.FTFWinNow.onView('trades'); await reply(pending, {status: 'complete', result: {meta: baseline.meta, trades: [trade('Late')]}});
   check('mode exit clears scenario results and cancels request', () => { assert.equal(pending.options.signal.aborted, true); assert.doesNotMatch(text('win-now-results'), /Late/); });
+  finished = true;
   console.log(`Win Now: ${checks} checks passed`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

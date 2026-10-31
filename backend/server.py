@@ -254,6 +254,7 @@ from .database import (
 )
 from . import sleeper_write as _sleeper_write
 from . import ownership_copy as _ownership_copy   # I-2 send-time refusal copy
+from . import write_outcome as _write_outcome     # C10 send outcome-unknown kind
 from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
 from . import daily_tick as _daily_tick         # POST /api/cron/daily-tick step runner (S3)
@@ -2394,7 +2395,9 @@ _trade_jobs_lock = threading.Lock()
 # prevents a permanent per-account epoch ledger in this process-local cache.
 _trade_input_epochs = weakref.WeakValueDictionary()
 _PREGEN_TTL_SECONDS  = 1800   # 30 min — fresh cache window
-_JOB_HARD_TIMEOUT    = 60     # seconds — past this a stuck job is marked error
+_JOB_HARD_TIMEOUT    = 300    # seconds — past this a stuck job is marked error. A
+                              # stuck-job backstop, not a latency target: prod
+                              # pre-gens reach their first owner batch at 60-75 s.
 _JOB_RETENTION       = 4 * 3600  # keep finished jobs around for ~4hr cleanup
 
 
@@ -2903,6 +2906,12 @@ def _sweep_orphaned_overhauls_once() -> None:
                  counts["overhauls"], counts["child_rows"])
 
 
+# Diagnostics expiry per cleanup tick: up to 20 x 500 rows (10,000 a tick,
+# 2.88M a day); one 500-row batch a tick fell behind the write rate.
+_DIAG_PURGE_MAX_BATCHES = 20
+_DIAG_PURGE_BATCH = 500
+
+
 def _cleanup_loop() -> None:
     """Background thread: evict stale sessions + stuck/old trade jobs."""
     while True:
@@ -2914,14 +2923,17 @@ def _cleanup_loop() -> None:
         # (verified, flag-on) sessions keep their durable row and rebuild on
         # the next request; unverified sessions have no row, so for them the
         # 4h idle eviction stays terminal (the squatter-window defense).
-        cutoff = time.time() - 4 * 3600
-        with _sessions_lock:
-            stale = [t for t, s in _sessions.items()
-                     if s.get("last_active", 0) < cutoff]
-            for t in stale:
-                _sessions.pop(t, None)
-        if stale:
-            log.info("Cleaned up %d stale session(s)", len(stale))
+        try:
+            cutoff = time.time() - 4 * 3600
+            with _sessions_lock:
+                stale = [t for t, s in _sessions.items()
+                         if s.get("last_active", 0) < cutoff]
+                for t in stale:
+                    _sessions.pop(t, None)
+            if stale:
+                log.info("Cleaned up %d stale session(s)", len(stale))
+        except Exception:
+            log.exception("stale-session sweep failed")
 
         # Durable session rows — rolling 90d idle expiry (read-time checks
         # in _restore_persisted_session make this purely hygienic).
@@ -2943,15 +2955,28 @@ def _cleanup_loop() -> None:
             log.warning("api-observability purge failed: %s", e)
 
         # Debug evidence is separate from durable card/outcome/valuation rows.
-        # One bounded batch per tick; failures remain visible and retry next tick.
+        # Up to _DIAG_PURGE_MAX_BATCHES bounded batches per tick (one fell
+        # behind the write rate); failures remain visible and retry next tick.
         try:
             from .database import purge_deck_diagnostics
             days = int(os.environ.get("FTF_DECK_DIAGNOSTIC_RETENTION_DAYS", "14"))
-            purged = purge_deck_diagnostics(days=days)
+            purged = purge_deck_diagnostics(days=days, batch_size=_DIAG_PURGE_BATCH,
+                                            max_batches=_DIAG_PURGE_MAX_BATCHES)
             if purged:
-                log.info("Purged %d expired deck diagnostic snapshots", purged)
+                # At the ceiling the tick can't tell whether rows are left
+                # (exactly 10,000 may have been all of them); the next says.
+                log.info("Purged %d expired deck diagnostic snapshots%s", purged,
+                         " (the tick's ceiling: more may remain)"
+                         if purged >= _DIAG_PURGE_MAX_BATCHES * _DIAG_PURGE_BATCH else "")
         except Exception:
             log.exception("deck-diagnostic retention failed")
+
+        # Deck-evidence retention (legal R28.20 (iii)): dark until
+        # deck_evidence_retention_days is set; one bounded pass per tick.
+        try:
+            _prune_deck_evidence()
+        except Exception:
+            log.exception("deck-evidence retention failed")
 
         # S8: retire the packed decks that can't be delivered again here
         # (superseded, revoked, at the 24 h cap, or about to be evicted below).
@@ -2967,36 +2992,51 @@ def _cleanup_loop() -> None:
         #       the frontend stops polling
         #   (b) finished jobs older than _JOB_RETENTION → drop entirely
         #   (c) keep _trade_jobs_by_key in sync with _trade_jobs
-        now = time.monotonic()
-        evicted = 0
-        timed_out = 0
-        with _trade_jobs_lock:
-            to_drop = []
-            for jid, job in _trade_jobs.items():
-                age = now - (job.get("finished_at") or job.get("started_at") or now)
-                if _trade_job_stalled(job, now):
-                    job["status"] = "error"
-                    job["error"]  = "timeout"
-                    job["finished_at"] = now
-                    timed_out += 1
-                if age > _JOB_RETENTION:
-                    to_drop.append(jid)
-            for jid in to_drop:
-                key = _trade_jobs[jid].get("key")
-                _note_deck_evicted(jid, _trade_jobs[jid])   # U4: an evicted_split's clock
-                _trade_jobs.pop(jid, None)
-                if key and _trade_jobs_by_key.get(key) == jid:
-                    _trade_jobs_by_key.pop(key, None)
-                evicted += 1
-        if evicted or timed_out:
-            log.info("Trade jobs swept: %d evicted, %d timed out", evicted, timed_out)
+        # Each timed-out job gets its own line (logged after the lock), so a
+        # stuck job can be told apart from a slow live one.
+        try:
+            now = time.monotonic()
+            evicted = 0
+            timed_out = []
+            with _trade_jobs_lock:
+                to_drop = []
+                for jid, job in _trade_jobs.items():
+                    age = now - (job.get("finished_at") or job.get("started_at") or now)
+                    if _trade_job_stalled(job, now):
+                        timed_out.append((jid, now - (job.get("started_at") or now),
+                                          len(job.get("cards") or [])))
+                        job["status"] = "error"
+                        job["error"]  = "timeout"
+                        job["finished_at"] = now
+                    if age > _JOB_RETENTION:
+                        to_drop.append(jid)
+                for jid in to_drop:
+                    key = _trade_jobs[jid].get("key")
+                    _note_deck_evicted(jid, _trade_jobs[jid])   # U4: an evicted_split's clock
+                    _trade_jobs.pop(jid, None)
+                    if key and _trade_jobs_by_key.get(key) == jid:
+                        _trade_jobs_by_key.pop(key, None)
+                    evicted += 1
+            for jid, since_start, cards in timed_out:
+                log.warning("trade-job %s timed out: %.0fs since start, %d cards published",
+                            jid, since_start, cards)
+            if evicted or timed_out:
+                log.info("Trade jobs swept: %d evicted, %d timed out", evicted, len(timed_out))
+        except Exception:
+            log.exception("trade-job sweep failed")
 
         # P1 first-page store: age, then the byte ceiling; flag off ⇒ untouched.
-        _evict_trade_page_store()
+        try:
+            _evict_trade_page_store()
+        except Exception:
+            log.exception("trade-page-store eviction failed")
         # ADR-025 C8: no archive purge until packing (models-lead R2.6 S2).
         # F5: undelivered deferred decks past the fresh window (only flag-on
         # jobs carry evidence).
-        _drop_stale_deck_evidence()
+        try:
+            _drop_stale_deck_evidence()
+        except Exception:
+            log.exception("stale deck-evidence drop failed")
 
         # Silent durable inventory refresh is deliberately separate from the
         # notification-bearing daily tick and weekly replenishment.
@@ -3007,8 +3047,68 @@ def _cleanup_loop() -> None:
             log.warning("prepared inventory maintenance unavailable", exc_info=True)
 
 
-if os.environ.get("FTF_DISABLE_CLEANUP_LOOP") != "1":  # tests set it (conftest); prod never does
-    threading.Thread(target=_cleanup_loop, daemon=True).start()
+def _prune_deck_evidence() -> dict:
+    """The cleanup loop's deck-evidence retention step (database.
+    purge_deck_evidence) with its two deploy-free knobs: the cap
+    (`deck_evidence_retention_days`, 0 = off) and the packed decks' full-row
+    bound (`deck_evidence_full_row_days`). Logs the counts it deleted (never
+    an id); never raises."""
+    try:
+        from .database import purge_deck_evidence
+        pruned = purge_deck_evidence(
+            days=_deck_cfg("deck_evidence_retention_days", 0.0),
+            full_row_days=_deck_cfg("deck_evidence_full_row_days", 90.0))
+        if pruned:
+            log.info("[evidence] retention pruned %s", pruned)
+        return pruned
+    except Exception:
+        log.exception("deck-evidence retention failed")
+        return {}
+
+
+
+# Long-lived background threads start in the process that SERVES requests,
+# once per pid. Render's default GUNICORN_CMD_ARGS includes --preload, so the
+# app is imported in the gunicorn master before the worker is forked, and
+# threads do not survive fork: a start at import time ran only in the master,
+# never in the worker (docs/runbook.md § "DB connections and background threads
+# across fork"). The master never serves a request.
+_bg_threads_lock = threading.Lock()
+_bg_threads_pid: int | None = None
+
+
+def _ensure_background_threads() -> None:
+    """Per process, once: start `_cleanup_loop` (skipped when
+    FTF_DISABLE_CLEANUP_LOOP=1, i.e. tests via conftest; prod never sets it),
+    then a short-lived `win-now-resume` thread that resumes queued Win Now work
+    (`start_worker_on_startup` keeps its own FTF_TEST_MODE / FTF_BUILD_MODE
+    guard and runs either way). The resume is off the request path: run inline
+    it held `_bg_threads_lock` ~49 ms, and concurrent first requests waited on
+    it. Idempotent per pid; a forked child (new pid) starts its own."""
+    global _bg_threads_pid
+    pid = os.getpid()
+    if _bg_threads_pid == pid:
+        return
+    with _bg_threads_lock:
+        if _bg_threads_pid == pid:
+            return
+        if os.environ.get("FTF_DISABLE_CLEANUP_LOOP") != "1":
+            threading.Thread(target=_cleanup_loop, name="cleanup-loop", daemon=True).start()
+        _bg_threads_pid = pid
+
+        def resume_win_now():
+            from . import win_now_service
+            try:
+                win_now_service.start_worker_on_startup(_sleeper_get)
+            except Exception:
+                log.exception("win-now worker resume failed")
+
+        threading.Thread(target=resume_win_now, name="win-now-resume", daemon=True).start()
+
+
+@app.before_request
+def _start_background_threads():
+    _ensure_background_threads()
 
 
 # ---------------------------------------------------------------------------
@@ -4141,7 +4241,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 7
+DECK_PIPELINE_VERSION = 8
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4188,6 +4288,7 @@ DECK_PIPELINE_FUNCTIONS = (
     "_league_lineup_slots", "_league_slot_order", "_sleeper_lineup_slots",
     "_sleeper_roster_limit", "_value_core_standings", "_build_trade_roster_context",
     "_assigned_slot_order", "_load_trade_disposition_keys", "_ranking_confidence",
+    "_is_pool_timeout",   # whether a failed read is retried, so whether the owner arm forfeits
     # the flag gates that switch layers on
     "_deck_diversity_enabled", "_deck_exploration_enabled", "_deck_fatigue_enabled",
     "_deck_first_session_enabled", "_deck_quality_filters_enabled", "_deck_signal_v2_enabled",
@@ -4270,6 +4371,7 @@ DECK_PIPELINE_PINS = {
     5: "99d62fcaf7ad01ef",   # models-lead addendum D2: the quality filter's inputs recorded per run (_quality_filter_inputs; the same callables; no shape change)
     6: "d5176ae18c66d208",   # #492 QA P3-1: the record only for a deck with deferred evidence; repeat_head (models-eng #503) from the filter's counts; no shape change
     7: "facf9a9f34b7529a",   # #487 QA P3-3 (models-eng): one immediate retry inside the picks and draft-context memos; a transient failure no longer forfeits the owner arm
+    8: "f7ed33e6ab94af03",   # #521 QA P3-3: a pool timeout isn't retried at once (_is_pool_timeout): it forfeits the owner arm, as before v7; other failures as v7
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -12128,7 +12230,11 @@ def _run_trade_job(
                         _draft_memo = get_league_draft_context(league_id) or {}
                     except Exception as first_err:
                         # One immediate retry (models-eng, v7): a DB blip must not
-                        # forfeit the owner arm. Failed only when both raise.
+                        # forfeit the owner arm. Failed only when both raise. A
+                        # pool timeout isn't retried: the pool is exhausted, and a
+                        # retry would only wait again and add to it (v8).
+                        if _is_pool_timeout(first_err):
+                            raise
                         log.info("trade-job: draft context read failed, retrying: %s", first_err)
                         _draft_memo = get_league_draft_context(league_id) or {}
                 except Exception as draft_err:
@@ -12145,7 +12251,10 @@ def _run_trade_job(
                         _picks_memo = load_draft_picks(league_id=league_id,
                                                        source=_pick_read_source())
                     except Exception as first_err:
-                        # One immediate retry, as the draft context's (v7).
+                        # One immediate retry, as the draft context's (v7); never
+                        # after a pool timeout (v8).
+                        if _is_pool_timeout(first_err):
+                            raise
                         log.info("trade-job: draft picks read failed, retrying: %s", first_err)
                         _picks_memo = load_draft_picks(league_id=league_id,
                                                        source=_pick_read_source())
@@ -13852,6 +13961,13 @@ def _roster_read_in_flight(league_id, roster_read, read_rows) -> bool:
     except Exception as err:
         log.warning("roster refresh state unavailable for league %s: %s", league_id, err)
         return False
+
+
+def _is_pool_timeout(err: BaseException) -> bool:
+    """A connection-pool checkout timeout (QueuePool exhausted): the job's
+    memoized reads never retry it at once (#521 QA P3-3)."""
+    from sqlalchemy.exc import TimeoutError as _PoolTimeout
+    return isinstance(err, _PoolTimeout)
 
 
 def _note_job_picks_read(job_id, picks, drafted: bool = False) -> None:
@@ -24442,6 +24558,111 @@ def _roster_read_failed_copy(platform: str) -> str:
     return _ownership_copy.roster_read_failed(platform)
 
 
+# C10 (head-eng pre-launch triage): plain copy for an ESPN/MFL trade-send
+# write that failed. Final copy: marketing-lead-copy.md §6 addendum 10, items
+# 8a–8h (2026-10-28), straight apostrophes as approved; a swap is a change
+# here and nowhere else. Never "failed", "error" or provider text, and never
+# "nothing was sent" where the outcome is unknown. The provider's raw body
+# goes to the log (`_provider_body_for_log`), never into `detail` / `message`.
+_SEND_REJECTED_COPY = ("{platform} didn't accept this trade, so nothing was sent. "
+                       "You can still propose it on {platform}.")                      # 8a / 8b
+_SEND_NOT_SENT_COPY = ("Couldn't reach {platform} right now, so nothing was sent. "
+                       "Try again in a moment.")                                      # 8c / 8d
+_SEND_OUTCOME_UNKNOWN_COPY = ("Couldn't confirm whether this trade reached {platform}. "
+                              "Check your league's pending trades on {platform} "
+                              "before you send it again.")                            # 8e / 8f
+# POST /api/trades/respond-mfl answers an existing trade (accept / reject /
+# revoke), so "this trade … nothing was sent" would be wrong there. 8g also
+# covers its not-sent (network) case: addendum 10 has no separate line.
+_RESPOND_REJECTED_COPY = ("{platform} didn't accept your response, so nothing changed. "
+                          "Check the trade on {platform}.")                           # 8g
+_RESPOND_OUTCOME_UNKNOWN_COPY = ("Couldn't confirm whether your response reached {platform}. "
+                                 "Check the trade on {platform} before you respond again.")  # 8h
+# The write-side 401/403 on POST /api/trades/propose-espn (addendum 10's
+# optional line, §6 "Not touched").
+_ESPN_WRITE_AUTH_EXPIRED_COPY = "Your ESPN sign-in has expired. Connect ESPN again to send."
+
+
+def _send_write_failed(code_prefix: str, platform: str, kind, *,
+                       rejected_copy: str = _SEND_REJECTED_COPY,
+                       network_copy: str = _SEND_NOT_SENT_COPY,
+                       unknown_copy: str = _SEND_OUTCOME_UNKNOWN_COPY) -> tuple[dict, int]:
+    """C10: a propose (or respond) route's response for a failed, non-auth
+    provider write.
+
+    `kind` 'outcome_unknown' (the provider may have the write, see
+    backend/write_outcome.py) → 502 `{code_prefix}_outcome_unknown`, so the
+    client never invites a blind retry that could send it twice. Every other
+    kind keeps 502 `{code_prefix}_write_failed`; its line is chosen by kind:
+    'network' (nothing was processed: DNS, refused, no route, or MFL's 429
+    throttle) gets the "couldn't reach … try again" line, anything else
+    ('error', 'input') the "didn't accept" line. All carry `kind` and
+    `detail` == `message` == plain copy, never provider text."""
+    if kind == _write_outcome.OUTCOME_UNKNOWN:
+        msg = unknown_copy.format(platform=platform)
+        return {"error": f"{code_prefix}_outcome_unknown", "kind": kind,
+                "detail": msg, "message": msg}, 502
+    msg = (network_copy if kind == "network" else rejected_copy).format(platform=platform)
+    return {"error": f"{code_prefix}_write_failed", "kind": kind,
+            "detail": msg, "message": msg}, 502
+
+
+# Send pre-flight budget (release-lead QA P1-A on #527, 2026-10-28). The iOS
+# client most likely gives up on a request after ~60 s idle (RN 0.81 fetch
+# leaves the XHR timeout 0, so NSURLSession's 60 s default applies), and the
+# propose routes send no bytes until the write ends. Invariant: a provider
+# write never STARTS so late that it can finish after the client gave up, or a
+# user who checks, sees nothing yet and resends gets a double send.
+# 30 = 60 − the write's 15 s timeout (`_HTTP_TIMEOUT`, backend/mfl_write.py:60
+# and backend/espn_write.py:82) − MFL's 1 s write spacing
+# (backend/mfl_write.py:65, slept inside `_issue_import`) − ~14 s margin for
+# time before the handler runs; a write that starts inside the budget ends by
+# ~46 s if it stalls at most once. urllib's 15 s timeout is per socket
+# operation (DNS is unbounded; connect and TLS are 15 s each, per resolved
+# address), so several stalls after a pre-flight near 30 s can still put the
+# request on the wire past ~60 s: the budget bounds when the write STARTS, and
+# #527's "Check before resending" covers that residual. Past it, `_mfl_propose_core` / `_espn_propose_core` skip the write
+# and answer their own "nothing was sent" read-failure response.
+_SEND_PREFLIGHT_BUDGET_S = 30
+_send_clock = time.monotonic        # tests inject a fake clock
+
+
+def _send_preflight_over_budget(t0: float, what: str) -> bool:
+    """True when a propose core that read `_send_clock()` into `t0` at entry
+    is past `_SEND_PREFLIGHT_BUDGET_S`, so it must not start the provider
+    write. Logs one WARNING line with the elapsed seconds."""
+    elapsed = _send_clock() - t0
+    if elapsed <= _SEND_PREFLIGHT_BUDGET_S:
+        return False
+    log.warning("%s: pre-flight took %.1fs, past the %ds send budget; nothing sent",
+                what, elapsed, _SEND_PREFLIGHT_BUDGET_S)
+    return True
+
+
+# Masks for provider text before it is logged (docs/integrations/espn.md §6,
+# mfl.md §6): SWID-shaped GUIDs (credential half AND member id), cookie
+# name=value pairs, then any long opaque blob (espn_s2's percent-encoded shape).
+_PROVIDER_LOG_REDACTIONS = (
+    (re.compile(r"\{?[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\}?"), "[redacted]"),
+    (re.compile(r"(?i)\b(espn_s2|swid|mfl_user_id)(\"?\s*[=:]\s*\"?)[^;\s\"&,}]+"),
+     r"\1\2[redacted]"),
+    (re.compile(r"[A-Za-z0-9%+/=_-]{80,}"), "[redacted]"),
+)
+_PROVIDER_LOG_LIMIT = 300
+
+
+def _provider_body_for_log(text) -> str:
+    """C10: a provider error body (or transport text) made fit for a WARNING
+    log line: whitespace flattened, cookies / SWIDs / long blobs masked, then
+    truncated to `_PROVIDER_LOG_LIMIT` characters. Never a response field."""
+    s = " ".join(str(text or "").split())
+    for rx, sub in _PROVIDER_LOG_REDACTIONS:
+        s = rx.sub(sub, s)
+    if len(s) > _PROVIDER_LOG_LIMIT:
+        s = f"{s[:_PROVIDER_LOG_LIMIT]}…[+{len(s) - _PROVIDER_LOG_LIMIT} chars]"
+    return s
+
+
 def _ownership_refusal(side: str, assets, names, counterparty_name=None) -> tuple[dict, int]:
     """I-2 (trade-time-to-suggestion PRD §5.3, platforms-pm R4): the one
     send-time refusal for an asset that a live roster read shows has moved.
@@ -27305,6 +27526,10 @@ def admin_config_update(key: str):
 
     Operator-only (X-Cron-Secret, same as /api/cron/*): this mutates live
     ranking/trade math for every user, so it must never be world-callable.
+
+    `app_min_version` (B8) is also checked against the shared write policy
+    (backend/app_version_policy.py) and refused with 400 + the reason, since a
+    typo there locks every gate-aware build out of the app.
     """
     _require_cron_auth()
     try:
@@ -27312,6 +27537,11 @@ def admin_config_update(key: str):
         if "value" not in body:
             return jsonify({"error": "body must contain 'value'"}), 400
         new_value = float(body["value"])
+        if key == "app_min_version":
+            from .app_version_policy import validate_app_min_version
+            refusal = validate_app_min_version(new_value)
+            if refusal:
+                return jsonify({"error": refusal}), 400
         source = str(body.get("source") or "admin-api")[:64]
         result = set_config(key, new_value, source=source)
 
@@ -28413,17 +28643,53 @@ def session_init():
 # Session Ping — lightweight liveness check
 # ---------------------------------------------------------------------------
 
+def _session_verification(sess: dict) -> dict:
+    """The additive `verification` object, as session/init returns it (same
+    four fields, same sources): this session's own `verified` stamp, and the
+    user_id's stored verified_via.
+
+    An unverified or demo session (the ones session/init refuses, 403) gets
+    the constant unverified answer before any lookup. Reading the claimed
+    user_id's verified_via for it would tell anyone who can name a user_id
+    whether that account exists and which provider proved it (legal R28.9
+    row 4 / R28.14; release-lead #524 QA P1)."""
+    if not sess.get("verified") or sess.get("is_demo"):
+        return {
+            "session_verified": False,
+            "user_verified":    False,
+            "verified_via":     None,
+            "enforced":         is_enabled("auth.enforce_verified_writes"),
+        }
+    verified_via = None
+    try:
+        from . import accounts as _accounts
+        verified_via = _accounts.get_user_verified_via(sess.get("user_id"))
+    except Exception as verif_err:
+        log.warning("session/ping: verified_via lookup failed: %s", verif_err)
+    return {
+        "session_verified": bool(sess.get("verified")),
+        "user_verified":    bool(verified_via),
+        "verified_via":     verified_via,
+        "enforced":         is_enabled("auth.enforce_verified_writes"),
+    }
+
+
 @app.route("/api/session/ping", methods=["GET"])
 def session_ping():
-    """GET /api/session/ping — check whether the current session is alive."""
+    """GET /api/session/ping — check whether the current session is alive.
+
+    Also returns `verification` (head-eng 2026-10-28): an account-only
+    session (Apple-first, no league) never reaches session/init, the other
+    source of that field, so its client asks here instead."""
     sess = _get_session(request.headers.get("X-Session-Token", ""))
     if not sess:
         return jsonify({"ok": False}), 401
     sess["last_active"] = time.time()
     return jsonify({
-        "ok":      True,
-        "user_id": sess["user_id"],
-        "league":  sess.get("league", {}).name if sess.get("league") else "",
+        "ok":           True,
+        "user_id":      sess["user_id"],
+        "league":       sess.get("league", {}).name if sess.get("league") else "",
+        "verification": _session_verification(sess),
     })
 
 
@@ -30782,15 +31048,57 @@ def og_tier_card(pos, username):
     return _png_response(png, status=status)
 
 
-@app.route("/og/trade/<match_id>.png")
-def og_trade_card(match_id):
-    """Render a trade match's give/get + fairness as a 1200x630 PNG."""
+# ---------------------------------------------------------------------------
+# Trade share links (build O8, 2026-10-20). /s/trade/<token> and
+# /og/trade/<token>.png resolve ONLY through trade_share_tokens: a 128-bit
+# token minted by POST /api/share/trade for a participant of the match. They
+# used to take the sequential trade_matches.id, so walking the ids exposed
+# every mutual match. Every miss (a numeric id, an unknown, revoked or
+# malformed token, an orphaned match) gets ONE generic "expired" page / PNG,
+# status 200, identical bytes and headers, so a miss can't be told from an
+# expired link and old numeric links unfurl cleanly instead of looking
+# broken. No per-IP GET limiter (head-eng ruling): the token space is the
+# defence. Tokens are bearer secrets — never log one.
+# ---------------------------------------------------------------------------
+
+from .database import (  # noqa: E402
+    create_trade_share_token, resolve_trade_share_token,
+    TradeShareRateLimited,
+)
+
+# token_urlsafe(16) → exactly 22 chars of the URL-safe base64 alphabet.
+_TRADE_SHARE_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{22}")
+
+
+def _resolve_trade_share(token) -> dict | None:
+    """The trade_matches row a live share token points at, else None."""
+    if not isinstance(token, str) or not _TRADE_SHARE_TOKEN_RE.fullmatch(token):
+        return None
+    try:
+        return resolve_trade_share_token(token)
+    except Exception as e:
+        # The type only: a DB error's text carries its bound parameters,
+        # which here is the token.
+        log.warning("trade share lookup failed: %s", type(e).__name__)
+        return None
+
+
+@app.route("/og/trade/<token>.png")
+def og_trade_card(token):
+    """Render a shared trade's give/get + fairness as a 1200x630 PNG.
+
+    A hit renders from the row the token resolves to; every miss returns
+    the same generic "expired" PNG, status 200.
+    """
     if _og_image is None:
         return _og_unavailable_response()
+    match = _resolve_trade_share(token)
+    if match is None:
+        return _png_response(_og_image.render_expired_trade_card())
     try:
-        png, status = _og_image.render_trade_card(match_id)
+        png, status = _og_image.render_trade_card(match)
     except Exception as e:
-        log.error("og_trade_card error (%s): %s", match_id, e)
+        log.error("og_trade_card error (match %s): %s", match.get("id"), e)
         png = _og_image.render_placeholder_card("Share card unavailable", str(e)[:80])
         status = 500
     return _png_response(png, status=status)
@@ -30803,20 +31111,25 @@ def _share_html(
     image_url: str,
     cta_text: str,
     cta_url: str,
+    noindex: bool = False,
 ) -> "Response":
-    """Minimal HTML wrapper with OG tags + small human-readable body."""
+    """Minimal HTML wrapper with OG tags + small human-readable body.
+
+    `noindex` adds a robots noindex meta (the expired-trade page); left
+    False, the output is byte-identical to before the parameter existed."""
     # Escape minimal HTML special chars — we never render user-controlled
     # HTML inside any attribute, so basic replacement is sufficient.
     def esc(s: str) -> str:
         return (s or "").replace("&", "&amp;").replace("<", "&lt;") \
                          .replace(">", "&gt;").replace('"', "&quot;")
 
+    robots = '\n  <meta name="robots" content="noindex">' if noindex else ""
     html = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>{esc(title)} · Fantasy Trade Finder</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1">{robots}
   <meta name="description" content="{esc(description)}">
   <meta property="og:type" content="website">
   <meta property="og:title" content="{esc(title)}">
@@ -30888,12 +31201,28 @@ def share_tiers_page(pos, username):
     )
 
 
-@app.route("/s/trade/<match_id>")
-def share_trade_page(match_id):
-    """HTML wrapper with OG tags for a trade verdict share link."""
+@app.route("/s/trade/<token>")
+def share_trade_page(token):
+    """HTML wrapper with OG tags for a trade verdict share link.
+
+    A hit renders the trade page; every miss renders the one generic,
+    noindex "expired" page (status 200). Its og:image is a fixed miss URL
+    so the unfurl shows the generic PNG too. The words live in og_image.
+    """
+    if _og_image is None:
+        return _og_unavailable_response()
+    if _resolve_trade_share(token) is None:
+        return _share_html(
+            title=_og_image.TRADE_LINK_EXPIRED_TITLE,
+            description=_og_image.TRADE_LINK_EXPIRED_BODY,
+            image_url="/og/trade/expired.png",
+            cta_text="Find your next trade",
+            cta_url="/",
+            noindex=True,
+        )
     title = "Trade Match"
     description = "A dynasty fantasy trade — see the give/get breakdown and fairness verdict."
-    image_url = f"/og/trade/{match_id}.png"
+    image_url = f"/og/trade/{token}.png"
     return _share_html(
         title=title,
         description=description,
@@ -30907,7 +31236,7 @@ def share_trade_page(match_id):
 # Share landing for arbitrary packages (teardown S7 PRD-01 follow-up,
 # flag `growth.share_landing`; W2B handoff).
 #
-# /s/trade/<match_id> only works for MUTUAL matches (a trade_matches row).
+# /s/trade/<token> only works for MUTUAL matches (a trade_matches row).
 # Calculator builds and liked-but-unmatched trades previously fell back to
 # the bare site root. This trio gives them a real landing object:
 #   POST /api/share/package  (session-authed, rate-limited) → /s/p/<id>
@@ -30984,6 +31313,73 @@ def create_share_package_route():
             })
     log.error("share/package: could not mint a short_id for %s", user_id)
     return jsonify({"error": "store_failed"}), 500
+
+
+_TRADE_SHARE_HOURLY_LIMIT = 30   # mints per user — abuse guard (head-eng ruling)
+_TRADE_SHARE_MATCH_ID_MAX = 2**31 - 1   # trade_matches.id is int4 on Postgres
+
+
+def _share_trade_match_id(raw) -> int | None:
+    """A positive int (or a string of ASCII digits) in int4 range, else None.
+    Out-of-range values are refused here so Postgres never errors on them —
+    an error would answer differently from the 404 every other miss gets."""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, str) and re.fullmatch(r"[0-9]{1,10}", raw):
+        raw = int(raw)
+    if isinstance(raw, int) and 0 < raw <= _TRADE_SHARE_MATCH_ID_MAX:
+        return raw
+    return None
+
+
+@app.route("/api/share/trade", methods=["POST"])
+@_gate_unverified_write
+def create_share_trade_route():
+    """POST /api/share/trade — mint (or return) the caller's share token for a
+    mutual match (build O8). 404 while `growth.share_landing` is dark.
+
+    Body: {"match_id": <int>}
+    → {ok, token, url: "/s/trade/<token>", og_image: "/og/trade/<token>.png"}
+
+    Only a party to the match can mint, by the predicate every match route
+    uses (session user_id == user_a_id or user_b_id). A non-participant, a
+    missing match and a malformed id all get the same 404 not_found, so the
+    route can't be used to probe ids. Idempotent per (match, sharer): a
+    re-share returns the caller's live token and never counts against the
+    hourly limit; only a new mint does (one transaction in the helper). Demo
+    sessions are refused, as on /api/share/package.
+    """
+    if not is_enabled("growth.share_landing"):
+        return jsonify({"error": "not_found"}), 404
+    sess = _require_session()
+    user_id = str(sess.get("user_id") or "")
+    if sess.get("is_demo") or user_id.startswith("demo_user_"):
+        return jsonify({"error": "demo_session"}), 400
+
+    body = request.get_json(force=True, silent=True)
+    match_id = _share_trade_match_id(body.get("match_id") if isinstance(body, dict) else None)
+    if match_id is None:
+        return jsonify({"error": "not_found"}), 404
+
+    try:
+        token = create_trade_share_token(match_id, user_id,
+                                         hourly_limit=_TRADE_SHARE_HOURLY_LIMIT)
+    except TradeShareRateLimited:
+        return jsonify({"error": "rate_limited",
+                        "message": "Too many shares — try again later."}), 429
+    except Exception as e:
+        # The type only: a DB error's text carries the INSERT's bound
+        # parameters, the new token among them.
+        log.error("share/trade: could not mint a token for %s: %s", user_id, type(e).__name__)
+        return jsonify({"error": "store_failed"}), 500
+    if token is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({
+        "ok": True,
+        "token": token,
+        "url": f"/s/trade/{token}",
+        "og_image": f"/og/trade/{token}.png",
+    })
 
 
 @app.route("/s/p/<short_id>")
@@ -31667,6 +32063,9 @@ def feature_flags_route():
 
     Frontend fetches this at boot + on the ≥30-min foreground refetch
     (analytics-platform §4.6b) and stashes flags in window.FTF_FLAGS.
+
+    B8 adds one more additive top-level key, `app_min_version` (int; 0 =
+    off): the mobile minimum-version gate. See `_app_min_version`.
     """
     experiments: dict[str, str] = {}
     configs: dict[str, dict] = {}
@@ -31712,7 +32111,49 @@ def feature_flags_route():
         "flags":       flags_dict(),
         "experiments": experiments,
         "configs":     configs,
+        **_update_gate_fields(),
     })
+
+
+def _update_gate_fields() -> dict:
+    """B8: the two additive gate fields on /api/feature-flags, from ONE
+    model_config read. A read error serves both fields' off/unset values."""
+    try:
+        cfg = get_config()
+    except Exception:
+        cfg = {}
+    return {
+        "app_min_version": _app_min_version(cfg),
+        "app_store_live":  _app_store_live(cfg),
+    }
+
+
+def _app_min_version(cfg: dict) -> int:
+    """B8 minimum-version gate: the `app_min_version` model_config knob as a
+    non-negative int (major*10000 + minor*100 + patch; 0 = off).
+
+    Defensive by contract: a missing row, NaN/infinity, a fractional value or
+    a negative one all serve 0, so a bad row can only ever turn the gate OFF.
+    Writes are guarded separately (backend/app_version_policy.py).
+    """
+    try:
+        raw = float(cfg.get("app_min_version", 0))
+    except Exception:
+        return 0
+    if not math.isfinite(raw) or raw < 0 or raw != int(raw):
+        return 0
+    return int(raw)
+
+
+def _app_store_live(cfg: dict) -> int:
+    """B8 Update-button target: the `app_store_live` model_config knob as
+    1 (App Store), 0 (TestFlight) or -1 (unset: the client's compiled UTC
+    fallback decides). Anything other than exactly 0 or 1 serves -1."""
+    try:
+        raw = float(cfg.get("app_store_live", -1))
+    except Exception:
+        return -1
+    return int(raw) if raw in (0.0, 1.0) else -1
 
 
 @app.route("/api/feature-flags/reload", methods=["POST"])
@@ -37998,6 +38439,7 @@ def propose_trade_to_mfl():
       404 feature_disabled | 403 verification_required | 404 mfl_not_linked
       409 mfl_franchise_unknown | 409 mfl_not_connected | 409 mfl_auth_expired
       422 mfl_asset_unmapped (+ unmapped[]) | 502 mfl_write_failed
+      502 mfl_outcome_unknown (C10: the import may have landed — no retry)
       400 bad_request
       422 asset_not_owned | 422 counterparty_asset_not_owned (I-2)
 
@@ -38060,6 +38502,7 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     byte-identical; on that path these re-checks are no-ops. Extracted
     2026-09-07 exactly the way `_sleeper_propose_core` was.
     """
+    _t0 = _send_clock()      # the send pre-flight budget starts here
     if _TEST_MODE:
         return {"error": "test_mode_propose_disabled"}, 599
     if not is_enabled("trade.send_in_mfl"):
@@ -38177,20 +38620,18 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
         return {"error": "mfl_unavailable", "kind": "network",
                 "detail": _msg, "message": _msg}, 502
 
-    def _auth_expired(detail):
+    def _auth_expired():
         # Dead/rejected cookie — drop the stored credential so the client
         # re-prompts MFL sign-in (same treatment as mfl_auth_import). Shared
         # by the I-2 ownership reads (a 401/403 export) and the write itself.
+        # C10: the provider's text is logged by the caller, never returned.
         try:
             delete_mfl_credential(user_id)
         except Exception:
             log.exception("mfl propose: credential delete failed")
         sess.pop("mfl_cookie", None)
-        return {
-            "error": "mfl_auth_expired",
-            "message": "Your MFL sign-in expired — sign in again.",
-            "detail": (str(detail or ""))[:200],
-        }, 409
+        _msg = "Your MFL sign-in expired — sign in again."
+        return {"error": "mfl_auth_expired", "message": _msg, "detail": _msg}, 409
 
     norm = _mfl_write.normalize_franchise_id
     my_n, their_n = norm(my_fid), norm(their_fid)
@@ -38202,7 +38643,7 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
             raw = _mfl.fetch_rosters(league_id, year, host, cookie=cookie, raise_auth=True)
         except _mfl.MflAuthError as e:
             log.warning("mfl propose: ownership read auth-rejected: %s", e)
-            return _auth_expired(str(e))
+            return _auth_expired()
         except Exception as e:  # P2-1: rosters transport
             # `_fetch_one` wraps only HTTPError / URLError / bad JSON. A read
             # timeout, connection reset, IncompleteRead or BadStatusLine would
@@ -38233,7 +38674,7 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
                                                 raise_auth=True)
         except _mfl.MflAuthError as e:
             log.warning("mfl propose: ownership read auth-rejected: %s", e)
-            return _auth_expired(str(e))
+            return _auth_expired()
         except Exception as e:  # P2-1: futureDraftPicks transport
             log.warning("mfl propose: futureDraftPicks read failed: %s", type(e).__name__)
             return _read_failed()
@@ -38277,19 +38718,24 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
     _proposal_event_id = proposal_event_id
+    # Pre-flight budget (`_SEND_PREFLIGHT_BUDGET_S`): crosswalk, host and the
+    # I-2 reads can take ~60 s here, so a slow pre-flight skips the write (and
+    # its spacing sleep) rather than land a trade after the client gave up.
+    if _send_preflight_over_budget(_t0, "mfl propose"):
+        return _read_failed()
     try:
         result = _mfl_write.propose_trade(cookie, host, year, req)
     except _mfl_write.MflWriteAuthError as e:
-        log.warning("mfl propose auth-rejected: %s", getattr(e, "detail", None))
-        return _auth_expired(getattr(e, "detail", ""))
+        log.warning("mfl propose auth-rejected: %s",
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        return _auth_expired()
     except _mfl_write.MflWriteError as e:
-        log.warning("mfl propose write-failed [%s]: %s", e.kind,
-                    getattr(e, "detail", None))
-        return {
-            "error": "mfl_write_failed",
-            "kind": e.kind,
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }, 502
+        # C10: MFL's raw body is for this log line only. A timeout or reset
+        # after the import went out is `mfl_outcome_unknown`, never a plain
+        # failure the user would retry into a second send.
+        log.warning("mfl propose write-failed [%s] %s: %s", e.kind, e,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        return _send_write_failed("mfl", "MFL", e.kind)
 
     # F1 (deck.signal_v2) — same proposal-sent outcome hook as the Sleeper
     # route; additive/optional, only reached on a successful MFL import.
@@ -38347,6 +38793,7 @@ def respond_trade_in_mfl():
     SAME flag as propose, one send surface, one knob) | 403
     verification_required | 404 mfl_not_linked | 409 mfl_not_connected |
     409 mfl_auth_expired (credential dropped) | 502 mfl_write_failed |
+    502 mfl_outcome_unknown (C10: the response may have landed — no retry) |
     400 bad_request.
     """
     if _TEST_MODE:
@@ -38409,25 +38856,23 @@ def respond_trade_in_mfl():
             cookie, host, year, league_id, trade_id, response,
             comments=(str(body.get("comments") or "").strip() or None))
     except _mfl_write.MflWriteAuthError as e:
-        log.warning("mfl respond auth-rejected: %s", getattr(e, "detail", None))
+        log.warning("mfl respond auth-rejected: %s",
+                    _provider_body_for_log(getattr(e, "detail", None)))
         try:
             delete_mfl_credential(user_id)
         except Exception:
             log.exception("mfl respond: credential delete failed")
         sess.pop("mfl_cookie", None)
-        return jsonify({
-            "error": "mfl_auth_expired",
-            "message": "Your MFL sign-in expired — sign in again.",
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 409
+        _msg = "Your MFL sign-in expired — sign in again."
+        return jsonify({"error": "mfl_auth_expired", "message": _msg, "detail": _msg}), 409
     except _mfl_write.MflWriteError as e:
-        log.warning("mfl respond write-failed [%s]: %s", e.kind,
-                    getattr(e, "detail", None))
-        return jsonify({
-            "error": "mfl_write_failed",
-            "kind": e.kind,
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 502
+        # C10: same rule as propose — MFL's raw body is for this log line only.
+        log.warning("mfl respond write-failed [%s] %s: %s", e.kind, e,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        payload, status = _send_write_failed(
+            "mfl", "MFL", e.kind, rejected_copy=_RESPOND_REJECTED_COPY,
+            network_copy=_RESPOND_REJECTED_COPY, unknown_copy=_RESPOND_OUTCOME_UNKNOWN_COPY)
+        return jsonify(payload), status
 
     # trade_responded (server-fired, taxonomy 2026-08-11) — confirmed-success
     # only; every failure branch returned before this. Same discipline as
@@ -38599,6 +39044,7 @@ def propose_trade_to_espn():
       409 espn_team_unknown | 409 espn_not_connected | 409 espn_auth_expired
       (stored credential dropped) | 422 espn_pick_unsupported (+ picks[])
       | 422 espn_asset_unmapped (+ unmapped[]) | 502 espn_write_failed
+      | 502 espn_outcome_unknown (C10: the proposal may exist — no retry)
       | 400 bad_request
       | 422 asset_not_owned | 422 counterparty_asset_not_owned (I-2)
       | 502 espn_unavailable (`kind: "network"`; I-2 R3, live read failed)
@@ -38660,6 +39106,7 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     `espn_pick_unsupported`); the overhaul refuses them earlier, at
     prepare-send, so nothing is half-sent.
     """
+    _t0 = _send_clock()      # the send pre-flight budget starts here
     if _TEST_MODE:
         return {"error": "test_mode_propose_disabled"}, 599
     if not is_enabled("espn.send"):
@@ -38859,30 +39306,33 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
     _proposal_event_id = proposal_event_id
+    # Pre-flight budget (`_SEND_PREFLIGHT_BUDGET_S`): ESPN's whole send is
+    # ~45 s at worst today (crosswalk 15 + league read 15 + write 15), under
+    # the client's ~60 s, so this rarely trips; it keeps the invariant if a
+    # pre-flight read is added here later.
+    if _send_preflight_over_budget(_t0, "espn propose"):
+        return _read_failed()
     try:
         result = _espn_write.propose_trade(espn_s2, swid, req)
     except _espn_write.EspnWriteAuthError as e:
         # TODO(live-verify): until the auth probe clears, a 401/403 here may
         # mean cookies alone never authorize a server-side write — either
         # way: structured error, credential drop, client re-prompts connect.
-        log.warning("espn propose auth-rejected: %s", getattr(e, "detail", None))
+        log.warning("espn propose auth-rejected: %s",
+                    _provider_body_for_log(getattr(e, "detail", None)))
         try:
             delete_espn_credential(user_id)
         except Exception:
             log.exception("espn propose: credential delete failed")
-        return {
-            "error": "espn_auth_expired",
-            "message": "ESPN rejected the sign-in — connect ESPN again.",
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }, 409
+        _msg = _ESPN_WRITE_AUTH_EXPIRED_COPY
+        return {"error": "espn_auth_expired", "message": _msg, "detail": _msg}, 409
     except _espn_write.EspnWriteError as e:
-        log.warning("espn propose write-failed [%s]: %s", e.kind,
-                    getattr(e, "detail", None))
-        return {
-            "error": "espn_write_failed",
-            "kind": e.kind,
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }, 502
+        # C10: ESPN's raw body is for this log line only. A timeout or reset
+        # after the POST went out is `espn_outcome_unknown`, never a plain
+        # failure the user would retry into a second send.
+        log.warning("espn propose write-failed [%s] %s: %s", e.kind, e,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        return _send_write_failed("espn", "ESPN", e.kind)
 
     # F1 (deck.signal_v2) — same proposal-sent outcome hook as the Sleeper/MFL
     # routes; additive/optional, only reached on a successful ESPN write.
@@ -39143,8 +39593,8 @@ _install_win_now(app, require_session=_require_initialized_session,
                  read_denial=_verified_read_denial, write_denial=_verified_write_denial,
                  active_format=_active_format, league_user_id=_league_user_id,
                  pool_provider=_get_universal_pool, fetch_json=_sleeper_get)
-from . import win_now_service as _win_now_service
-_win_now_service.start_worker_on_startup(_sleeper_get)
+# Queued Win Now work resumes per serving process from _ensure_background_threads,
+# never at import (under --preload that would run in the gunicorn master).
 
 # Team overhaul (docs/plans/team-overhaul/BUILD-CONTRACT.md §3) — same seam
 # as Win Now: routes live in overhaul_api, server-private helpers are injected.

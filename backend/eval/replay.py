@@ -123,6 +123,13 @@ prints a line starting "ERROR U4-R2:" when `other` (the one cause that must
 be 0) is above 0. Reporting only: no rule reads it, so it leaves
 EXCLUSION_RULE_VERSION alone.
 
+Redacted partners (models-lead E-b5): account deletion replaces a deleted
+user's platform id in other users' records with one random token per
+deleted user (contract.REDACTED_PARTNER_PREFIX). EvalRun.redacted_partners
+counts the distinct tokens among the loaded cards' partner_user_id, every
+deck loaded, so a refit that differs across a deletion is explained. A
+count only: eval never resolves a token, and treats that partner as unknown.
+
 EXCLUSION_RULE_VERSION is stamped on every EvalRun and persisted record;
 verdict() and render_report() say so when runs graded under different rules
 are compared (R2.5 (2)). The model_config a scorer reads is pinned, passed
@@ -143,6 +150,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from backend import value_model as _value_model
+from backend.eval.contract import REDACTED_PARTNER_PREFIX
 from backend.eval.data import (
     CALIBRATION_REFRESH,
     IN_FLIGHT,
@@ -198,8 +206,13 @@ EXCLUSION_REASONS = (
 #      no_delivery_evidence when they have none; in-flight packs
 #      (retired=false within the window, deliveries read as of as_of) are
 #      in_flight; outcome beyond recorded deliveries → incomplete_deck.
+#   6  5, plus serve-time display moves (models-lead D3, F1/F2): a pack's
+#      run["display_moves"] delivered as of the read reorder its displayed
+#      positions (so e(k) and the logged-position term read where each card
+#      was shown), and a move record breaking the writer's contract is
+#      pack_integrity; the logged scorer ranks by displayed position.
 # Estimates graded under different versions are not comparable.
-EXCLUSION_RULE_VERSION = 5
+EXCLUSION_RULE_VERSION = 6
 # R5.2 (b): a read whose labels must be complete settles them this long
 # after the window's last served deck (late views, proposes days later).
 DEFAULT_SETTLE_LAG_DAYS = 7.0
@@ -237,6 +250,7 @@ class EvalRun:
     withdrawn_removed_cards: int = 0 # never-delivered withdrawals removed from included decks
     withdrawn_removed_by_reason: dict = field(default_factory=dict)  # the same by reason, sorted
     upgrade_misses: dict = field(default_factory=dict)  # cause -> count, every loaded pack (U4-R2)
+    redacted_partners: int = 0       # distinct redaction tokens among loaded cards' partners (E-b5)
     exposure_positions: int = 0      # positions with an estimated e(k)
     metrics: dict = field(default_factory=dict)    # metric -> MetricEstimate
     eval_start: str | None = None
@@ -252,6 +266,15 @@ class EvalRun:
 # ---------------------------------------------------------------------------
 # Exposure curve
 # ---------------------------------------------------------------------------
+
+def redacted_partners(decks: list[LoggedDeck]) -> int:
+    """E-b5: the distinct redaction tokens among the loaded cards'
+    partner_user_id (module doc). A count only; no token is resolved."""
+    return len({p for deck in decks for c in deck.cards if not c.is_ghost
+                for p in [((c.features if c.features is not None else c.features_compact)
+                           or {}).get("partner_user_id")]
+                if isinstance(p, str) and p.startswith(REDACTED_PARTNER_PREFIX)})
+
 
 def exposure_curve(decks: list[LoggedDeck]) -> dict[int, float]:
     """e(k) = P(viewed | served at displayed position k), Laplace(+1/+2)-
@@ -380,6 +403,7 @@ def evaluate(
         for cause, n in deck.upgrade_misses.items():
             misses[cause] = misses.get(cause, 0) + n
     run.upgrade_misses = dict(sorted(misses.items()))
+    run.redacted_partners = redacted_partners(decks)
 
     # weights/rewards per deck (bootstrap clusters)
     clusters: list[dict] = []   # {"w": [...], "r_like": [...], "r_propose": [...]}
@@ -621,6 +645,7 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
             f"withdrawn_removed_cards={run.withdrawn_removed_cards} "
             f"withdrawn_removed_by_reason={json.dumps(run.withdrawn_removed_by_reason, sort_keys=True)} "
             f"upgrade_misses={json.dumps(run.upgrade_misses, sort_keys=True)} "
+            f"redacted_partners={run.redacted_partners} "
             f"tilt_clipped={run.tilt_clipped} "
             f"(bounds [{TILT_MIN}, {TILT_MAX}])"
         )

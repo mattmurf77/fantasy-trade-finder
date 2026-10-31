@@ -52,12 +52,16 @@ def rows(engine, table):
 
 @pytest.mark.parametrize("table_name", accounts._ADDITIONAL_PRIVATE_TABLES)
 def test_new_private_rows_and_aliases_removed_counterparty_kept(engine, table_name):
+    """The user's and alias's rows go; the counterparty's row stays exactly as
+    it was, column for column (#544 QA P2-1: an UPDATE of every user's rows
+    through the private-table loop kept the right user_ids and passed)."""
     table = getattr(db, table_name + "_table")
     with engine.begin() as conn:
         for uid in (UID, ALIAS, OTHER):
             seed(conn, table, uid, user_id=uid)
+    before = [dict(r) for r in rows(engine, table) if r["user_id"] == OTHER]
     accounts.delete_user_data(UID)
-    assert [r["user_id"] for r in rows(engine, table)] == [OTHER]
+    assert [dict(r) for r in rows(engine, table)] == before
 
 
 def test_encrypted_credentials_billing_and_all_sessions_removed(engine):
@@ -199,6 +203,18 @@ def test_referral_counterparties_and_public_league_grids_are_preserved(engine):
     assert rows(engine, db.trade_block_table)[0]["user_id"] is None
     history = rows(engine, db.league_roster_history_table)
     assert len(history) == 1 and history[0]["owner_user_id"] is None
+
+
+def test_trade_share_tokens_minted_by_the_user_are_deleted(engine):
+    """Build O8: a share link dies with its sharer's account (every alias);
+    the counterparty's own tokens for the same match survive."""
+    with engine.begin() as conn:
+        for uid in (UID, ALIAS, OTHER):
+            seed(conn, db.trade_share_tokens_table, uid,
+                 token="synthetic-token-" + uid, match_id=1, created_by=uid)
+    counts = accounts.delete_user_data(UID)
+    assert counts["trade_share_tokens_deleted"] == 2
+    assert [r["created_by"] for r in rows(engine, db.trade_share_tokens_table)] == [OTHER]
 
 
 def test_route_evicts_bound_alias_and_account_sessions(engine, monkeypatch):

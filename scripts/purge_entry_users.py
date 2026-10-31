@@ -92,6 +92,7 @@ DELETION_ONLY_KEYS = (
     ("subscription_events_table", "user_id"),
     ("identity_links_table", "sleeper_user_id"),
     ("experiment_assignments_table", "unit_id"),
+    ("deck_outcomes_table", "user_id"),
     ("trade_matches_table", "user_a_id"),
     ("trade_matches_table", "user_b_id"),
     ("trade_impressions_table", "target_user_id"),
