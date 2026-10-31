@@ -148,12 +148,12 @@
     if (inFlight || Date.now() < nextFlushAt || !flagOn() || !queue.length) return;
     inFlight = true;
     var batch = queue.slice(0, BATCH_MAX);
-    // X-Source is the `source` column. The backend defaults it to "mobile"
-    // (analytics_ingest.py) because mobile is the one client that sends no
-    // such header — so omitting it here does not land NULL, it lands a LIE:
-    // every web row would read source:"mobile" and contaminate per-client
-    // splits. The extension already declares 'extension'; test_events_api's
-    // test_platform_from_body_when_no_device_header pins web to "web".
+    // X-Source is the `source` column. Until G-068's 2026-10-31 fix the
+    // backend defaulted it to "mobile", so a web batch without it landed a LIE.
+    // flushOnHide's sendBeacon CAN'T carry headers, so both sends also declare
+    // source:"web" in the body, and for the beacon the body is the source of
+    // truth (analytics_ingest.py _resolve_event_source; the header wins when
+    // present). HYG-events-declare-source / HYG-events-beacon-source pin both.
     var headers = { "Content-Type": "application/json", "X-Device-Id": deviceId(),
                     "X-Source": "web" };
     try { var tok = localStorage.getItem(TOKEN_KEY); if (tok) headers["X-Session-Token"] = tok; } catch (e) {}
@@ -163,7 +163,7 @@
     // so the backend can't derive it. Without this every web event lands with
     // platform NULL and per-platform segmentation is blind.
     fetch("/api/events", { method: "POST", headers: headers,
-        body: JSON.stringify({ events: batch, platform: "web" }),
+        body: JSON.stringify({ events: batch, platform: "web", source: "web" }),
         signal: ctrl ? ctrl.signal : undefined, keepalive: true })
       .then(function (res) {
         if (timer) clearTimeout(timer);
@@ -201,7 +201,7 @@
       if (!flagOn() || !queue.length || !navigator.sendBeacon) return;
       var batch = queue.slice(0, BATCH_MAX);
       var ok = navigator.sendBeacon("/api/events",
-        new Blob([JSON.stringify({ events: batch, device_id: deviceId(), platform: "web" })],
+        new Blob([JSON.stringify({ events: batch, device_id: deviceId(), platform: "web", source: "web" })],
                  { type: "application/json" }));
       if (ok) { queue.splice(0, batch.length); persist(); }
     } catch (e) {}

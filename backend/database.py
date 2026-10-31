@@ -2419,7 +2419,7 @@ user_events_table = Table("user_events", metadata,
     Column("device_type",  String),                     # 'iphone' | 'ipad' | 'macos' | 'web' | 'extension'
     Column("os_version",   String),                     # '17.4' | '18.1' | etc.
     Column("app_version",  String),                     # '1.2.3'
-    Column("source",       String),                     # 'mobile' | 'web' | 'api' | 'cron'
+    Column("source",       String),                     # client: 'mobile' | 'web' | 'extension' (ingest) · server: 'api' | 'server' | 'calc_queue' · NULL = client unidentified (G-068)
     Column("props",        Text),                       # JSON — event-specific extras
     Column("event_id",     String),                     # client UUID — idempotent retries / dedup (unique index below)
     Column("device_id",    String),                     # stable per-install anon id ('dev_' + UUID)

@@ -911,7 +911,7 @@ Sign-in requests may carry `device_id` (body) or `X-Device-Id` (header) on `/api
 
 - `device_tokens.platform`: `ios`, `android`
 - `user_events.device_type`: `iphone`, `ipad`, `macos`, `web`, `extension`
-- `user_events.source`: `mobile`, `web`, `api`, `cron`
+- `user_events.source`: client-declared `mobile`, `web`, `extension` (the only values `POST /api/events` accepts, by `X-Source` header or body `source`); server-written `api`, `server`, `calc_queue`; NULL when no client identified itself (G-068, 2026-10-31). Web must declare `source: "web"` in the body as well as the header, because its `sendBeacon` flush can't set headers.
 
 ---
 
