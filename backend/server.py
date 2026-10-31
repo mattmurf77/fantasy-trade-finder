@@ -2889,6 +2889,41 @@ _DIAG_PURGE_MAX_BATCHES = 20
 _DIAG_PURGE_BATCH = 500
 
 
+def _deletion_scrub_leagues(user_ids) -> set:
+    """The leagues a person's traces may sit in (deletion_scrub's capture),
+    read before the deletion removes their rows; empty on a failed read."""
+    try:
+        from . import database as _db, deletion_scrub as _deletion_scrub
+        with _db.engine.connect() as conn:
+            return set(_deletion_scrub.capture_leagues(conn, user_ids))
+    except Exception as err:          # the class only: a DB error's text quotes its ids
+        log.error("deletion scrub league read failed: %s", type(err).__name__)
+        return set()
+
+
+def _revoke_trade_jobs_naming(user_ids, league_ids) -> int:
+    """Account deletion (#559 QA P2): the scrub rewrites stored decks, never a
+    job held in this process, which at trade_i1_mode 0 or 1 would keep
+    serving the person's original cards (their id, name and reasons) until
+    it leaves memory. So every job whose cards name a deleted id is revoked,
+    and so is every job still running in one of their leagues (it may yet
+    publish such cards). The next request builds a fresh deck. Returns the
+    count. Another instance's jobs age out within its retention."""
+    ids, leagues = set(user_ids), set(league_ids)
+    revoked = 0
+    with _trade_jobs_lock:
+        for job in _trade_jobs.values():
+            names = any((c.get("target_user_id") if isinstance(c, Mapping)
+                         else getattr(c, "target_user_id", None)) in ids
+                        for c in job.get("cards") or ())
+            running = (job.get("status") == "running"
+                       and (job.get("key") or (None, None))[1] in leagues)
+            if (names or running) and not _trade_job_revoked(job):
+                _revoke_trade_job_locked(job, "partner_deleted")
+                revoked += 1
+    return revoked
+
+
 def _kick_deletion_scrub() -> None:
     """The deletion route's start of the scrub; never raises (the account is
     already deleted, and the cleanup loop retries the job)."""
@@ -33880,6 +33915,8 @@ def delete_account_route():
                     revoke_err)
     try:
         with _accounts.deletion_scope(user_id, sess.get("account_id")) as (user_ids, account_ids):
+            # Read before the deletion removes them: the live jobs to revoke.
+            scrub_leagues = _deletion_scrub_leagues(user_ids)
             with _session_restore_lock:
                 with _sessions_lock:
                     counts = _accounts.delete_user_data(
@@ -33894,7 +33931,9 @@ def delete_account_route():
         return jsonify({"error": "deletion_failed"}), 500
     # The scrub of other users' decks (legal R28.20 (ii)): its job committed
     # with the deletion; start it off the request. The cleanup loop retries,
-    # so a failed start never fails the deletion (#557 QA P3).
+    # so a failed start never fails the deletion (#557 QA P3). In-memory jobs
+    # never see the scrub, so the ones that name the person are revoked here.
+    counts["trade_jobs_revoked"] = _revoke_trade_jobs_naming(user_ids, scrub_leagues)
     _kick_deletion_scrub()
     log.info("delete_account: user %s deleted (%s)", user_id, counts)
     return jsonify({"ok": True, "deleted": counts,

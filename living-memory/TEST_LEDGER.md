@@ -1,3 +1,15 @@
+## 2026-10-31 — Deletion scrub stage 2, release-lead's #559 QA: partner_deleted moves in, live jobs revoked, page roster_evaluation
+
+Gates: release-lead's #559 NO-GO (P1, P2, P3s). P1: models-lead's J4 moves from #562 into #559, so #559 merges on its own. Route: `DELETE /api/account`'s `deleted` counts gain `trade_jobs_revoked` (additive; api-reference updated). Serve path: `_roster_serve_rules` drops a token-target card in every I-1 mode, and the withdrawal reason `partner_deleted` (data dictionary updated). No schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P1, J4 (from #562's ddd84fde):** the serve rules drop a redacted card before I-1 in modes 0, 1 and 2; `_withdrawal_reasons` records `partner_deleted`, apart from `i1_dropped` and `disposition_cut`; stage 2's page-view filter is folded into the shared rules. Its tests and G-a2's unpack test move into `test_deletion_scrub_packs.py`.
+- **P2:** the delete route reads the person's leagues before the deletion (`_deletion_scrub_leagues`), and after it commits revokes every in-process job whose cards name a deleted id or that is still running in one of those leagues (`_revoke_trade_jobs_naming`). Test: three jobs through the real route; the naming job and the running one are revoked, another league's is untouched.
+- **P3s:**
+  - **QA1:** an in-process packed deck (`deferred_deck(packed=True)`), partner deleted and scrubbed, then a first view past 30: the upgrade reloads the pack and writes the viewed row with the token, no `likes_you`, null scores, and no id.
+  - **Page `roster_evaluation`:** `redact_page_card` applies the deck row's rule (`_redact_roster`, shared): the deleted ids' `teams` entries go on any card, `mutual_benefit` on a redacted one.
+  - **The page-store scan decodes every row:** noted, not changed.
+- **Sabotages, 6/6 red:** the revoke call (count faked), the running-job arm, the J4 drop, the in-process reload, the held-row redaction, and the page-card roster rule.
+- **Runs:** `test_deletion_scrub_packs.py` 18 and `test_deletion_scrub.py` 36 pass. The deletion, deferred/packed evidence, page store, I-1 serve filter, withdrawals and session-race suites: 601 passed.
 ## 2026-10-31 — Deletion scrub: other users' notifications and events (head-eng, 10-31)
 
 Gates: head-eng's ruling on the two stores release-lead's #557 QA found (add both; legal gets an FYI), in #562. No new table; `partner_names_json` now holds `{leagues, usernames}` (new in #562, so no migration of its shape). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
