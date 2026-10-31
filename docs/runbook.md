@@ -71,6 +71,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Local dev](#local-dev)
 - [Deploy (Render)](#deploy-render)
 - [DB connections and background threads across fork](#db-connections-and-background-threads-across-fork)
+- [Server error alerts (Sentry)](#server-error-alerts-sentry)
 - [Pre-ship simulator gate (2026-08-08)](#pre-ship-simulator-gate-2026-08-08)
   - [Risk-tier matrix (operator-owned; deviations are decisions, recorded in the feature's scope block)](#risk-tier-matrix-operator-owned-deviations-are-decisions-recorded-in-the-features-scope-block)
   - [Evidence](#evidence)
@@ -253,6 +254,58 @@ backend increment. Physical-device checks and the three-second KPI remain separa
 - `_JOB_HARD_TIMEOUT` also applies in prod for the first time. It is 300 s, measured from `started_at` (or a prepared job's last durable adoption progress): a stuck-job backstop, not a latency target (prod pre-gens reach their first owner batch at 60-75 s). Each timed-out job logs one WARNING, `trade-job <id> timed out: <N>s since start, <M> cards published`, next to the "Trade jobs swept" summary.
 - Worker memory should flatten instead of growing with every session since the last restart.
 - Win Now jobs queued before a deploy now resume in the worker after its first request. Previously a job stayed queued until something triggered a restart.
+
+---
+
+## Server error alerts (Sentry)
+
+GNG-1 (error alerts) and SUP-M7 (`feedback_received`): `backend/error_alerts.py`, [scope](plans/server-error-alerts/scope.md). **Dark until `SENTRY_DSN` is set.** With no DSN, the SDK is never initialized or even imported.
+
+**What's captured, once on:**
+- **Every ERROR+ log line becomes an event**, and INFO+ lines become breadcrumbs (the last 30). That covers:
+  - route exceptions (the generic `handle_unexpected_error` logs them with the stack);
+  - the `_cleanup_loop` step guards;
+  - `daily-tick: step … raised`;
+  - every other `log.error` / `log.exception` (about 170 sites);
+  - gunicorn's own ERROR lines in the master (`--preload` imports the app there).
+  - `log.warning` never alerts.
+- **`http_5xx`:** a 5xx response that produced no event of its own (no ERROR log on the way to it), tagged `route` / `status` / `method`. A 500 is never counted twice, and 4xx never reports.
+- **`feedback_received`** (info level): one per new `POST /api/feedback` note, tagged only `feedback_id` and `kind` (bug / polish / idea). The note itself stays in our DB; read it with `GET /api/feedback/admin` or the `feedback` skill.
+- **Not captured:** tracing, profiling, request bodies, cookies, headers, users, frame locals, outbound-HTTP breadcrumbs, and SQL queries.
+
+**What's scrubbed** (`scrub_event` / `scrub_breadcrumb`; if scrubbing fails, the event or breadcrumb is dropped):
+- The request keeps only the method and the URL without its query.
+- The user is removed.
+- In every message, exception value, log parameter, extra, context and breadcrumb, these become `[Filtered]`:
+  - JWTs and `Bearer …`;
+  - credential `key=value` and `"key": "value"` pairs (cookie, `espn_s2`, `SWID`, `MFL_USER_ID`, `APIKEY`, token, secret, password, auth, session, dsn);
+  - emails, UUIDs and GUIDs;
+  - long hex or base64 runs (24+ characters);
+  - **any 9+ digit run** (Sleeper user and league ids).
+- Values under keys like `user_id`, `owner_id`, `partner`, `email` and `username` are replaced wholesale.
+- Tags `route`, `status`, `method`, `feedback_id` and `kind` pass as they are, so alert rules can match them.
+
+**Before turning it on (both gates):**
+1. **Privacy page:** legal updates `web/privacy.html`, which today names Sentry for the mobile app only. head-eng routes it.
+2. **Volume:** release-lead counts prod ERROR lines per day (Render logs, `[ERROR]`) and checks the count against the Sentry plan's event quota.
+
+**Turning it on (operator only; agents never handle the DSN):**
+1. Create a Sentry project with the Python / Flask platform, and copy its DSN.
+2. In the Render dashboard → the web service → Environment, add `SENTRY_DSN`. Optionally add `SENTRY_ENVIRONMENT` (default `production`). Render redeploys.
+   - It goes in the dashboard, not `render.yaml`. [Render ignores render.yaml envVars](#render-ignores-renderyaml-envvars-on-the-dashboard-created-web-service-2026-07-19) on this service, and the DSN is never committed.
+   - `RENDER_GIT_COMMIT` (set by Render) becomes the release.
+3. **First hour:** trigger nothing on purpose. Watch the Sentry issue stream for:
+   - the volume you expected from the gate-2 count;
+   - no `[Filtered]`-free credential in any event (spot-check three events);
+   - one issue per distinct error.
+   - The boot log has **no** `error_alerts: Sentry init failed` line. That line means a malformed DSN, and alerts are off.
+
+**Suggested alert rules (in Sentry):**
+- **A new issue is created → email** the operator. This is the main alert.
+- **`message` equals `feedback_received` → email.** Send it per event while volume is low, or as an hourly or daily digest once it isn't.
+- **Optional:** an issue tagged `route` seen more than N times in 1 h → email, for a route that has started failing hard.
+
+**Turning it off:** delete `SENTRY_DSN` in the Render dashboard. The redeploy that follows starts with alerts dark, and no code change is needed.
 
 ---
 

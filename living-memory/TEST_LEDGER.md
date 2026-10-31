@@ -1,3 +1,36 @@
+## 2026-10-31 — GNG-1 server error alerts through Sentry + SUP-M7 `feedback_received` (dark until `SENTRY_DSN`)
+
+Gates: full (operator did not declare express). Scope blocks: `docs/plans/server-error-alerts/scope.md` and `scope-feedback-alert.md`. Docs updated: `config-reference.md` (env vars), `runbook.md` § "Server error alerts (Sentry)", `architecture.md` (module row), `api-reference.md` (`POST /api/feedback` side effect), and `living-memory/DEPENDENCIES.md` 2026-10-31. No schema, flag, route-contract or analytics change.
+
+- **Tests:** `backend/tests/test_error_alerts.py`, 33. They use a fake DSN and a recording `Transport` subclass, so nothing goes over the network. The client is closed and the global client reset in teardown, and an autouse guard asserts Sentry is off before and after each test. Cases (a)-(h):
+  - (a) no DSN: no init, no client, no capture, the SDK never imported (subprocess); a malformed DSN gives False and doesn't fail boot; the init options are pinned;
+  - (b) a raising route is exactly one event, with the stack;
+  - (c) a handled 503 is one `http_5xx` with route/status/method tags and a fingerprint; a 404 is none; a handled 500 after `log.exception` is one event;
+  - (d) a `_cleanup_loop` step raising is one event (the `loop_pass` harness);
+  - (e) a `daily_tick` step raising is one event;
+  - (f) the serialized envelope bytes hold none of: body, `espn_s2`, SWID, JWT, `X-Cron-Secret`, `?token=`, an 18-digit id, an email. Plus the pattern table, the event shape, breadcrumbs, and fail closed (unit and e2e);
+  - (g) new feedback is one `feedback_received` with exactly `{feedback_id, kind}` and nothing of the note, user, session or client id; a duplicate sends none;
+  - (h) a thread started in a request carries no request.
+- **Sabotages, 10/10 red then green:**
+  - the no-DSN guard removed: red at setup, since `import backend.server` turned Sentry on;
+  - the 5xx dedupe check removed: (b) and the handled 500 count 2;
+  - `>= 500` changed to `>= 400`: the 404 reports;
+  - `before_send` removed: secrets in the envelope;
+  - request headers kept: `X-Cron-Secret` in the envelope;
+  - the 9+ digit pattern removed: the league id leaks, and the pattern/shape cases fail;
+  - `scrub_event` fails open: the event is sent;
+  - `notify` on a fork of the request scope: request and transaction attached;
+  - the duplicate guard removed: a second `feedback_received`;
+  - `propagate_scope=True`: the thread event carries the request.
+- **Suites** (one process each, with `test_error_alerts.py` first, so later files run after Sentry was on in-process):
+  - venv with `sentry-sdk==2.72.0`: 120 passed. That's `test_error_alerts` 33, `test_fork_safe_db_and_threads` 17, `test_feedback_public` 14, `test_feedback_public_limits` 33, `test_feedback_text_cap` 3, `test_feedback_attach_on_verify` 12 and `test_daily_tick_runner` 8;
+  - system Python **without** the SDK: 87 passed, `test_error_alerts` skipped (`importorskip`). So `server.py` imports cleanly without the package.
+  - Local Python 3.14.4; CI and prod run 3.12. The full suite was not run locally (shared machine); CI runs it.
+- **Overhead** (laptop, Flask test client, rough):
+  - Sentry off: the two hooks cost about 0.3 µs per request (a module-flag check; `report_5xx` is called only for a 5xx).
+  - Sentry on: about +0.4 ms per request (the SDK's WSGI middleware, scope fork and session tracking; our hooks about 2 µs), plus about 80 µs per INFO+ log line as a breadcrumb in isolation (about 25 µs of it the scrub regexes). The scrub is linear on a 100 KB string (≤ 0.25 s), since every unanchored run is bounded.
+- **Not verified:** a real Sentry project. The DSN stays unset until legal's privacy-page update; the runbook lists the first-hour checks.
+
 ## 2026-10-29 — G3-e: `deck_outcomes.user_id`; account deletion and export also match an outcome by its owner
 
 Gates: full (an additive schema change). Scope block: `docs/plans/trade-time-to-suggestion/scope-outcome-owner.md`. head-eng's R28.22 routing, item G3-e. Docs: `data-dictionary.md` § `deck_outcomes`, and `api-reference.md`'s `DELETE /api/account` and `GET /api/account/export` rows. No flag, event or client change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

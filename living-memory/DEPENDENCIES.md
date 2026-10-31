@@ -10,6 +10,7 @@
 ---
 
 ## Table of Contents
+- [2026-10-31](#2026-10-31)
 - [2026-10-26](#2026-10-26)
 - [2026-10-05](#2026-10-05)
 - [2026-08-28](#2026-08-28)
@@ -20,6 +21,24 @@
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
 
 ---
+
+## 2026-10-31
+
+### Backend: `sentry-sdk` added, pinned (server error alerts, GNG-1)
+
+| Package | Version | Changed | Why |
+|---|---|---|---|
+| `sentry-sdk` | `==2.72.0` (new) | branch `feat/server-error-alerts` | Server-side error alerts (GNG-1) and the `feedback_received` alert (SUP-M7), in `backend/error_alerts.py`. **Dark until `SENTRY_DSN` is set**, which waits on legal's privacy-page update. MIT. Pulls in `urllib3>=1.26.11` and `certifi`. |
+
+- **Why this version:** the newest 2.x uploaded at least 14 days before 2026-10-31. 2.72.0 was uploaded 2026-10-12. 2.73.0 (2026-10-22) was too new, and 3.0.0b1/b2 are pre-releases of a new major.
+- **Imported lazily:** `sentry_sdk` is imported only when `SENTRY_DSN` is set. A checkout whose Python lacks the package still imports `backend.server`, and `test_error_alerts.py` skips itself (`importorskip`). CI installs it from `requirements.txt`.
+- **Fork safety under `--preload`** relies on the SDK: its `BackgroundWorker` restarts its sender thread when the pid changes (`sentry_sdk/worker.py:59,65,86,95`, `submit` at `:140`). **Re-check that on any bump.** The session flusher and backpressure monitor restart per pid too.
+- **Options that matter on a bump:**
+  - `auto_enabling_integrations=False`. The SQLAlchemy integration breadcrumbs every query with its parameters.
+  - `trace_propagation_targets=[]`. The default `[".*"]` adds `sentry-trace`/`baggage` headers to every outbound `http.client` request, even with tracing off.
+  - `Scope.clear()` does not drop event processors, so `notify` uses brand-new scopes.
+  - `send_default_pii` is **deprecated** in 2.72.0, in favour of `data_collection`. It's still honoured (only a DeprecationWarning). Revisit on the 3.x upgrade.
+- **Bumping it later:** re-run `backend/tests/test_error_alerts.py`, which pins the init options, the scrub, and the one-event counts.
 
 ## 2026-10-26
 
