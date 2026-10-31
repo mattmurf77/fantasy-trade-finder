@@ -497,6 +497,8 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
       setPendingOwner(null);
       haptics.success();
       setToast({ msg: 'Pick updated', tone: 'success' });
+      // The calculator's picks (its ESPN note and pickers, #531) read this.
+      void queryClient.invalidateQueries({ queryKey: ['league-picks', leagueId] });
     },
     onError: (err, vars, context) => {
       // The CAS conflict is the ONE failure with a real choice behind it,
@@ -548,6 +550,7 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
       haptics.success();
       setToast({ msg: 'Board saved', tone: 'success' });
       void queryClient.invalidateQueries({ queryKey: assignmentsKey });
+      void queryClient.invalidateQueries({ queryKey: ['league-picks', leagueId] });
     },
     onError: (err) => {
       const code = pickAssignmentErrorCode(err);
