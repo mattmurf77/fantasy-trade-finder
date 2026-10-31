@@ -53,6 +53,10 @@ LEASE = timedelta(minutes=10)
 IN_FLIGHT_GRACE = timedelta(hours=6)
 ALERT_AFTER = timedelta(hours=24)
 _BATCH = 200
+# The fallback scans: rows per keyset page, and pages per run (one run per
+# cleanup tick, so ~100k rows a tick, well inside the lease).
+_SCAN_BATCH = 2000
+_SCAN_PAGES_PER_RUN = 50
 
 # ── What a redacted card loses (scope §0.2, §1.3) ───────────────────────────
 # features_json keys from the partner's account (likes, standing offers and
@@ -281,12 +285,45 @@ def _loads(raw):
         return None
 
 
-def _scrub_impressions(job: dict) -> int:
-    """deck_impressions rows that name a deleted id, of decks served up to the
-    job's cutoff, found per viewer and league (ix_deck_impressions_user_league)."""
+def _redact_impressions(impression_ids, job: dict) -> int:
+    """Redact these deck_impressions rows (any that still name a deleted id)."""
     ids, token = set(job["ids"]), job["token"]
     imp = db.deck_impressions_table
-    mentions = or_(*[imp.c.features_json.contains(pid, autoescape=True) for pid in ids])
+    changed = 0
+    for start in range(0, len(impression_ids), _BATCH):
+        with db.engine.begin() as conn:
+            rows = conn.execute(select(imp.c.impression_id, imp.c.features_json,
+                                       imp.c.valuation_json).where(
+                imp.c.impression_id.in_(impression_ids[start:start + _BATCH]))).all()
+            for impression_id, raw_features, raw_valuation in rows:
+                features = _loads(raw_features)
+                if not isinstance(features, dict):
+                    continue
+                new = redact_features(features, ids, token)
+                if new == features:
+                    continue
+                values = {"features_json": json.dumps(new)}
+                if features.get("partner_user_id") in ids:
+                    values.update({c: None for c in _COLUMNS_NULLED})
+                    valuation = _loads(raw_valuation)
+                    if valuation is not None:
+                        values["valuation_json"] = json.dumps(redact_valuation(valuation))
+                conn.execute(update(imp).where(imp.c.impression_id == impression_id)
+                             .values(**values))
+                changed += 1
+    return changed
+
+
+def _mentions(column, ids):
+    return or_(*[column.contains(pid, autoescape=True) for pid in sorted(ids)])
+
+
+def _scrub_impressions(job: dict) -> int:
+    """The league pass: deck_impressions rows naming a deleted id, of decks
+    served up to the job's cutoff, per viewer and league
+    (ix_deck_impressions_user_league)."""
+    ids = set(job["ids"])
+    imp = db.deck_impressions_table
     changed = 0
     with db.engine.connect() as conn:
         pairs = [(v, lg) for lg in job["leagues"] for v in _viewers(conn, lg, ids)]
@@ -294,29 +331,34 @@ def _scrub_impressions(job: dict) -> int:
         with db.engine.connect() as conn:
             found = conn.execute(select(imp.c.impression_id).where(
                 imp.c.user_id == viewer, imp.c.league_id == league_id,
-                imp.c.served_at <= job["cutoff"], mentions)).scalars().all()
-        for start in range(0, len(found), _BATCH):
-            with db.engine.begin() as conn:
-                rows = conn.execute(select(imp.c.impression_id, imp.c.features_json,
-                                           imp.c.valuation_json).where(
-                    imp.c.impression_id.in_(found[start:start + _BATCH]))).all()
-                for impression_id, raw_features, raw_valuation in rows:
-                    features = _loads(raw_features)
-                    if not isinstance(features, dict):
-                        continue
-                    new = redact_features(features, ids, token)
-                    if new == features:
-                        continue
-                    values = {"features_json": json.dumps(new)}
-                    if features.get("partner_user_id") in ids:
-                        values.update({c: None for c in _COLUMNS_NULLED})
-                        valuation = _loads(raw_valuation)
-                        if valuation is not None:
-                            values["valuation_json"] = json.dumps(redact_valuation(valuation))
-                    conn.execute(update(imp).where(imp.c.impression_id == impression_id)
-                                 .values(**values))
-                    changed += 1
+                imp.c.served_at <= job["cutoff"],
+                _mentions(imp.c.features_json, ids))).scalars().all()
+        changed += _redact_impressions(found, job)
     return changed
+
+
+def _scan_impressions(job: dict, after: str, budget: list) -> tuple[str | None, int]:
+    """The fallback scan (head-eng, 10-31: a league the person left before
+    deleting isn't captured): every deck_impressions row up to the cutoff, in
+    keyset pages of _SCAN_BATCH by impression_id, while `budget` (a one-item
+    list of pages left) lasts. Returns (the cursor to resume from, or None at
+    the end; rows changed)."""
+    ids = set(job["ids"])
+    imp = db.deck_impressions_table
+    changed = 0
+    while budget[0] > 0:
+        budget[0] -= 1
+        with db.engine.connect() as conn:
+            rows = conn.execute(select(
+                imp.c.impression_id, _mentions(imp.c.features_json, ids).label("hit")).where(
+                imp.c.impression_id > after, imp.c.served_at <= job["cutoff"],
+                imp.c.user_id.notin_(sorted(ids)),
+            ).order_by(imp.c.impression_id).limit(_SCAN_BATCH)).all()
+        if not rows:
+            return None, changed
+        changed += _redact_impressions([r.impression_id for r in rows if r.hit], job)
+        after = rows[-1].impression_id
+    return after, changed
 
 
 def _redact_member(member: dict, ids, token: str) -> dict:
@@ -328,48 +370,88 @@ def _redact_member(member: dict, ids, token: str) -> dict:
     return out
 
 
-def _scrub_candidate_sets(job: dict) -> int:
-    """deck_candidate_sets made up to the job's cutoff: a member whose
-    partner is a deleted id takes the token and loses its base_score, in the
-    packed column through the codec (G-a3) and in legacy candidates_json."""
+def _redact_candidate_set(conn, row, job: dict) -> bool:
+    """A member whose partner is a deleted id takes the token and loses its
+    base_score, in the packed column through the codec (G-a3) and in legacy
+    candidates_json. True when the row changed."""
     from .eval import evidence_pack
     ids, token = set(job["ids"]), job["token"]
+    cs = db.deck_candidate_sets_table
+    values = {}
+    members = _loads(row.candidates_json)
+    if isinstance(members, list):
+        new = [_redact_member(m, ids, token) if isinstance(m, dict) else m for m in members]
+        if new != members:
+            values["candidates_json"] = json.dumps(new)
+    if row.candidates_packed is not None:
+        run, cards = evidence_pack.unpack_candidates(evidence_pack.PackedCandidates(
+            row.cand_pack_version, row.candidates_packed))
+        new = [_redact_member(m, ids, token) for m in cards]
+        if new != cards:
+            values["candidates_packed"] = evidence_pack.pack_candidates(run, new).candidates_packed
+    if values:
+        conn.execute(update(cs).where(cs.c.candidate_set_id == row.candidate_set_id)
+                     .values(**values))
+    return bool(values)
+
+
+def _candidate_columns():
+    cs = db.deck_candidate_sets_table
+    return (cs.c.candidate_set_id, cs.c.candidates_json, cs.c.candidates_packed,
+            cs.c.cand_pack_version)
+
+
+def _scrub_candidate_sets(job: dict) -> int:
+    """The league pass: deck_candidate_sets made up to the job's cutoff, per
+    viewer and league."""
+    ids = set(job["ids"])
     cs = db.deck_candidate_sets_table
     changed = 0
     with db.engine.connect() as conn:
         pairs = [(v, lg) for lg in job["leagues"] for v in _viewers(conn, lg, ids)]
     for viewer, league_id in pairs:
         with db.engine.begin() as conn:
-            rows = conn.execute(select(cs.c.candidate_set_id, cs.c.candidates_json,
-                                       cs.c.candidates_packed, cs.c.cand_pack_version).where(
-                cs.c.user_id == viewer, cs.c.league_id == league_id,
-                cs.c.created_at <= job["cutoff"])).all()
-            for set_id, raw_json, packed, version in rows:
-                values = {}
-                members = _loads(raw_json)
-                if isinstance(members, list):
-                    new = [_redact_member(m, ids, token) if isinstance(m, dict) else m
-                           for m in members]
-                    if new != members:
-                        values["candidates_json"] = json.dumps(new)
-                if packed is not None:
-                    run, cards = evidence_pack.unpack_candidates(
-                        evidence_pack.PackedCandidates(version, packed))
-                    new = [_redact_member(m, ids, token) for m in cards]
-                    if new != cards:
-                        values["candidates_packed"] = evidence_pack.pack_candidates(
-                            run, new).candidates_packed
-                if values:
-                    conn.execute(update(cs).where(cs.c.candidate_set_id == set_id).values(**values))
-                    changed += 1
+            for row in conn.execute(select(*_candidate_columns()).where(
+                    cs.c.user_id == viewer, cs.c.league_id == league_id,
+                    cs.c.created_at <= job["cutoff"])).all():
+                changed += _redact_candidate_set(conn, row, job)
     return changed
 
 
-# The DB phase's stores, in order (scope §0.2; packs and the page store come
-# with SCRUB_VERSION 2).
+def _scan_candidate_sets(job: dict, after: str, budget: list) -> tuple[str | None, int]:
+    """The fallback scan of deck_candidate_sets, as _scan_impressions. A
+    packed set is compressed, so it's decoded here to be checked (one row
+    per deck, a few KB)."""
+    ids = set(job["ids"])
+    cs = db.deck_candidate_sets_table
+    changed = 0
+    while budget[0] > 0:
+        budget[0] -= 1
+        with db.engine.begin() as conn:
+            rows = conn.execute(select(*_candidate_columns()).where(
+                cs.c.candidate_set_id > after, cs.c.created_at <= job["cutoff"],
+                cs.c.user_id.notin_(sorted(ids)),
+            ).order_by(cs.c.candidate_set_id).limit(_SCAN_BATCH)).all()
+            if not rows:
+                return None, changed
+            for row in rows:
+                if row.candidates_packed is not None or any(
+                        pid in (row.candidates_json or "") for pid in ids):
+                    changed += _redact_candidate_set(conn, row, job)
+        after = rows[-1].candidate_set_id
+    return after, changed
+
+
+# The DB phase, in order (scope §0.2; packs and the page store come with
+# SCRUB_VERSION 2). First the league pass over the captured leagues, then the
+# fallback scans of whole stores, resumable from a cursor on the job row.
 _STORES = (
     ("deck_impressions", _scrub_impressions),
     ("deck_candidate_sets", _scrub_candidate_sets),
+)
+_SCANS = (
+    ("deck_impressions", _scan_impressions),
+    ("deck_candidate_sets", _scan_candidate_sets),
 )
 
 
@@ -420,22 +502,48 @@ def _short(job_id: str) -> str:
 
 
 def _run_db(job: dict, now: datetime) -> bool:
+    """One run of the job's DB phase: the league pass when a pass starts,
+    then the fallback scans for up to _SCAN_PAGES_PER_RUN pages. A pass that
+    isn't finished keeps its cursor on the row (scan_json) and the next run
+    resumes it; True only when the whole pass is done."""
     t = db.deletion_scrub_jobs_table
-    counts = {}
+    state = _loads(job.get("scan_json"))
+    if not isinstance(state, dict) or state.get("version") != SCRUB_VERSION:
+        state = None
     try:
-        for name, scrub in _STORES:
-            counts[name] = scrub(job)
+        if state is None:
+            state = {"version": SCRUB_VERSION, "scan": 0, "after": "",
+                     "counts": {name: scrub(job) for name, scrub in _STORES}}
+        budget = [_SCAN_PAGES_PER_RUN]
+        while state["scan"] < len(_SCANS):
+            name, scan = _SCANS[state["scan"]]
+            after, changed = scan(job, state["after"], budget)
+            key = name + "_scan"
+            state["counts"][key] = state["counts"].get(key, 0) + changed
+            if after is not None:
+                break
+            state["scan"], state["after"] = state["scan"] + 1, ""
+        else:
+            after = None
+        if after is not None:
+            state["after"] = after
     except Exception as err:      # the class only: a message may quote an id
         with db.engine.begin() as conn:
             conn.execute(update(t).where(t.c.job_id == job["job_id"]).values(
                 claimed_until=None, last_error=type(err).__name__))
         log.warning("[scrub] job=%s db pass failed: %s", _short(job["job_id"]), type(err).__name__)
         return False
+    if state["scan"] < len(_SCANS):
+        with db.engine.begin() as conn:
+            conn.execute(update(t).where(t.c.job_id == job["job_id"]).values(
+                scan_json=json.dumps(state), claimed_until=None, last_error=None))
+        return False
     with db.engine.begin() as conn:
         conn.execute(update(t).where(t.c.job_id == job["job_id"]).values(
-            db_version=SCRUB_VERSION, db_done_at=_iso(now), claimed_until=None, last_error=None))
+            db_version=SCRUB_VERSION, db_done_at=_iso(now), scan_json=None,
+            claimed_until=None, last_error=None))
     log.info("[scrub] job=%s db_done version=%d counts=%s", _short(job["job_id"]),
-             SCRUB_VERSION, json.dumps(counts, sort_keys=True))
+             SCRUB_VERSION, json.dumps(state["counts"], sort_keys=True))
     return True
 
 

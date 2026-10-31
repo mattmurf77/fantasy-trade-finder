@@ -278,6 +278,58 @@ def test_candidate_members_take_the_token_through_the_codec_and_json(engine):
     assert packed["set_hash"] == evidence_pack.candidate_set_hash(want)
 
 
+# ── A league the person left before deleting (head-eng, 10-31) ──────────────
+
+LEFT = "league-they-left"
+
+
+def seed_left_league(engine):
+    """Decks in a league the person left before deleting: no membership, no
+    import, no roster history and no own deck name them there, so the league
+    pass can't find it."""
+    with engine.begin() as conn:
+        conn.execute(insert(db.league_members_table).values(league_id=LEFT, user_id=OTHER))
+        conn.execute(insert(db.deck_impressions_table).values(
+            impression_id="left-0", user_id=OTHER, league_id=LEFT, deck_job_id="deck-left",
+            card_index=0, trade_hash="hl", propensity=1.0, base_score=1.0, final_score=1.0,
+            served_at=EARLY, features_json=json.dumps(features_for(DEL, likes_you=True))))
+        conn.execute(insert(db.deck_candidate_sets_table).values(
+            candidate_set_id="cs-left", deck_job_id="deck-left", user_id=OTHER, league_id=LEFT,
+            size=2, set_hash=evidence_pack.candidate_set_hash(MEMBERS),
+            candidates_json=json.dumps(MEMBERS), created_at=EARLY))
+
+
+def test_a_partner_who_left_a_league_is_still_scrubbed_from_its_decks(engine):
+    seed_left_league(engine)
+    accounts.delete_user_data(DEL)
+    assert LEFT not in json.loads(job(engine)["league_ids_json"])      # the league pass misses it
+    token = job(engine)["token"]
+    assert scrub.run_pending() == 1
+    row, f = card(engine, "left-0")
+    assert f["partner_user_id"] == token and "likes_you" not in f and row["base_score"] is None
+    (cs,) = read(engine, db.deck_candidate_sets_table, candidate_set_id="cs-left")
+    assert json.loads(cs["candidates_json"])[0]["partner"] == token
+    assert job(engine)["scan_json"] is None
+
+
+def test_the_scan_is_bounded_per_run_and_resumes_from_its_cursor(engine, monkeypatch):
+    seed_left_league(engine)
+    monkeypatch.setattr(scrub, "_SCAN_BATCH", 1)
+    monkeypatch.setattr(scrub, "_SCAN_PAGES_PER_RUN", 2)
+    accounts.delete_user_data(DEL)
+    runs = 0
+    while not scrub.run_pending():
+        runs += 1
+        state = json.loads(job(engine)["scan_json"])
+        assert state["after"] and job(engine)["claimed_until"] is None    # kept; lease released
+        assert runs < 20
+    # 5 impressions + 3 candidate sets, one row a page, two pages a run (and
+    # an empty page closes each store).
+    assert runs >= 3
+    assert card(engine, "left-0")[1]["partner_user_id"] == job(engine)["token"]
+    assert job(engine)["scan_json"] is None
+
+
 # ── Lease, retry, grace, logs ───────────────────────────────────────────────
 
 def test_two_runners_never_claim_one_job(engine):

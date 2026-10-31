@@ -3178,6 +3178,7 @@ deletion_scrub_jobs_table = Table("deletion_scrub_jobs", metadata,
     Column("attempts",         Integer, nullable=False, server_default="0"),
     Column("claimed_until",    String),                      # ISO UTC lease; NULL = free
     Column("last_error",       String),                      # an exception class name, never a message
+    Column("scan_json",        Text),                        # an unfinished pass's scan cursor; NULL between passes
     Index("ix_deletion_scrub_jobs_deleted", "deleted_at"),
 )
 
