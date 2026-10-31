@@ -846,6 +846,16 @@ Gates: models-lead's ruling, D1 (`leads/models-lead-launch.md` addendum D), via 
   - the anomaly strictly past;
   - the anomaly not logged.
 
+## 2026-10-29 — D-13 P2-2 (legal R28.22, MUST for 11-06): the notice is never marked seen at sign-in; B7 removed
+
+Full gates (head-eng's routing of legal R28.22, Product agrees; scope `docs/plans/prelaunch-onboarding/scope-b7-d13-fresh-install.md`, § P2-2). Mobile only. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change:** B7 is removed. `useWhatsNew` no longer reads a boot fact, writes the seen key at boot, or hides the entry for a signed-out boot. `useSession` drops `bootSignedIn` (back to the branch base). The only seen-mark is the tip's own tap (`dismiss`), so every signed-in user, a fresh sign-in included, gets the D-13 tip once. No copy change; the pinned sign-in line stays.
+- **Guard** `check-whats-new.js` pin 8 rewritten (the seen key written once, in dismiss, and nowhere else in `src/`; no in-memory mark elsewhere; no session read; the exact entry condition; no `bootSignedIn`). **Sabotage 7/7 red**, restored byte-identical; a comment-only control stays green.
+- **TestFlight:** the scope's 6-step P2-2 checklist replaces B7's 3 steps.
+- **2026-10-29, release-lead delta QA @ `d318d180`: GO-with-notes.** An executed harness across 21 states shows the tip until its own tap (the same harness fails 17/21 on B7). **P2 (doc), fixed:** the checklist now says "the League tab, then League home" (LeagueHome sub-route), names both Apple entries (#507's button or the text link), and step 4 needs a device that never ran 1.22.0. The P3s (pin 8's indirect writes; no crediting the device ack to the first signed-in account) go to P2-3.
+- **Runs:** see the PR.
+
 ## 2026-10-27 — Session-init trade capture skips linked-platform leagues (G-030)
 
 Full gates, platforms-eng lead (platforms-pm audit F5). Server only, no API or schema change; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/trade-capture-platform-guard`.
@@ -1551,6 +1561,33 @@ Full gates ([scope](../docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md
 - **Reviews:** onboarding-eng approved the session-init diff (advisories A1/A2 recorded as R9/R11). The fingerprint contract with trades-eng is at v0.3.
 - **CI note:** one red run on `a860eaa3` was `test_ranking_service_threads`. That's a cross-branch wall-clock flake in #357 (`setswitchinterval(1e-6)` plus a 60 s join), routed to rankings-eng; it doesn't touch S0 code.
 - **Prod check after deploy:** for one app open, the Render log should show at most 8 `→ Sleeper GET` lines after `=== /api/session/init`. A `league_roster_state` row should then exist for that league (`status='fresh'`).
+
+## 2026-10-27 — B7: no D-13 policy notice right after agreeing (#380; Product's pre-launch review)
+
+Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b7-d13-fresh-install.md`). Mobile only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change:** `useSession.bootstrap` records `bootSignedIn: !!user`. When it's false (a fresh install, a reinstall or a signed-out user), the sign-in screen's "you agree" line came first, so `useWhatsNew` hides this release's notice and stores it as seen. A signed-in upgrader still sees it once.
+  - A first cut imported the hook into useSession, which broke `check-win-now-recovery.js`'s import allowlist. It was rewired to a boot fact in state, with no import.
+- **Pin 8 in `check-whats-new.js`:**
+  - the boot fact is set only by `bootstrap` (`!!user`, after the restore) and never reset by sign-out;
+  - the hook's read, the entry condition, and the guarded effect are SEEN_KEY's only writes besides dismiss.
+  - **Sabotage 8/8 red,** restored byte-identical. Pins 1–7 are unchanged.
+- **Runs:** see the PR (tsc, the full `check-*.js` loop, testid-lint).
+- **Operator TestFlight check** (11-06 build, `ux.whats_new` on):
+  1. a fresh install, after sign-in: no tip;
+  2. an install over a signed-in previous build: the tip shows once;
+  3. signed out, then signed in again: no tip.
+- **2026-10-28, release-lead QA @ `d6e3cfa1`: GO-with-notes. P2-1 fixed:** `check-whats-new.js` pin 9 checks B7's legal premise.
+  - The sign-in screen's "By signing in you agree to the Terms & Privacy Policy" line renders unconditionally in `SignInScreen`'s own JSX (no `{…}`, ternary or `&&` above it).
+  - It carries the "Terms" link to `/terms` and the "Privacy Policy" link to `/privacy`.
+  - **Sabotage 6/6 red,** restored byte-identical:
+    - the line removed;
+    - wrapped in `{landingOn ? (…) : null}`;
+    - wrapped in `{!isDemo && (…)}`;
+    - the Terms link pointed elsewhere;
+    - the Privacy label changed;
+    - the agreement text softened.
+  - Two malformed first-try mutations were re-run as valid JSX.
 
 ## 2026-10-15 — #326 value core v4, #328 live-deck filters, #327 Calibration Yes/No
 

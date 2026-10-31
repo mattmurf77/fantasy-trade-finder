@@ -128,6 +128,7 @@
     "test:trade-first-card-events": "node tests/check-trade-first-card-events.js",
     "test:timing-readout": "node tests/check-timing-readout.js",
     "test:vault-subsumes-legacy": "node tests/check-vault-subsumes-legacy.js",
+    "test:whats-new": "node tests/check-whats-new.js",
     "test:window-composite": "node tests/check-window-composite.js",
     "test:win-now": "node tests/check-win-now.js",
     "test:win-now-recovery": "node tests/check-win-now-recovery.js",
