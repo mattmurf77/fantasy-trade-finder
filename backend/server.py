@@ -31031,15 +31031,57 @@ def og_tier_card(pos, username):
     return _png_response(png, status=status)
 
 
-@app.route("/og/trade/<match_id>.png")
-def og_trade_card(match_id):
-    """Render a trade match's give/get + fairness as a 1200x630 PNG."""
+# ---------------------------------------------------------------------------
+# Trade share links (build O8, 2026-10-20). /s/trade/<token> and
+# /og/trade/<token>.png resolve ONLY through trade_share_tokens: a 128-bit
+# token minted by POST /api/share/trade for a participant of the match. They
+# used to take the sequential trade_matches.id, so walking the ids exposed
+# every mutual match. Every miss (a numeric id, an unknown, revoked or
+# malformed token, an orphaned match) gets ONE generic "expired" page / PNG,
+# status 200, identical bytes and headers, so a miss can't be told from an
+# expired link and old numeric links unfurl cleanly instead of looking
+# broken. No per-IP GET limiter (head-eng ruling): the token space is the
+# defence. Tokens are bearer secrets — never log one.
+# ---------------------------------------------------------------------------
+
+from .database import (  # noqa: E402
+    create_trade_share_token, resolve_trade_share_token,
+    TradeShareRateLimited,
+)
+
+# token_urlsafe(16) → exactly 22 chars of the URL-safe base64 alphabet.
+_TRADE_SHARE_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{22}")
+
+
+def _resolve_trade_share(token) -> dict | None:
+    """The trade_matches row a live share token points at, else None."""
+    if not isinstance(token, str) or not _TRADE_SHARE_TOKEN_RE.fullmatch(token):
+        return None
+    try:
+        return resolve_trade_share_token(token)
+    except Exception as e:
+        # The type only: a DB error's text carries its bound parameters,
+        # which here is the token.
+        log.warning("trade share lookup failed: %s", type(e).__name__)
+        return None
+
+
+@app.route("/og/trade/<token>.png")
+def og_trade_card(token):
+    """Render a shared trade's give/get + fairness as a 1200x630 PNG.
+
+    A hit renders from the row the token resolves to; every miss returns
+    the same generic "expired" PNG, status 200.
+    """
     if _og_image is None:
         return _og_unavailable_response()
+    match = _resolve_trade_share(token)
+    if match is None:
+        return _png_response(_og_image.render_expired_trade_card())
     try:
-        png, status = _og_image.render_trade_card(match_id)
+        png, status = _og_image.render_trade_card(match)
     except Exception as e:
-        log.error("og_trade_card error (%s): %s", match_id, e)
+        log.error("og_trade_card error (match %s): %s", match.get("id"), e)
         png = _og_image.render_placeholder_card("Share card unavailable", str(e)[:80])
         status = 500
     return _png_response(png, status=status)
@@ -31052,20 +31094,25 @@ def _share_html(
     image_url: str,
     cta_text: str,
     cta_url: str,
+    noindex: bool = False,
 ) -> "Response":
-    """Minimal HTML wrapper with OG tags + small human-readable body."""
+    """Minimal HTML wrapper with OG tags + small human-readable body.
+
+    `noindex` adds a robots noindex meta (the expired-trade page); left
+    False, the output is byte-identical to before the parameter existed."""
     # Escape minimal HTML special chars — we never render user-controlled
     # HTML inside any attribute, so basic replacement is sufficient.
     def esc(s: str) -> str:
         return (s or "").replace("&", "&amp;").replace("<", "&lt;") \
                          .replace(">", "&gt;").replace('"', "&quot;")
 
+    robots = '\n  <meta name="robots" content="noindex">' if noindex else ""
     html = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>{esc(title)} · Fantasy Trade Finder</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1">{robots}
   <meta name="description" content="{esc(description)}">
   <meta property="og:type" content="website">
   <meta property="og:title" content="{esc(title)}">
@@ -31137,12 +31184,28 @@ def share_tiers_page(pos, username):
     )
 
 
-@app.route("/s/trade/<match_id>")
-def share_trade_page(match_id):
-    """HTML wrapper with OG tags for a trade verdict share link."""
+@app.route("/s/trade/<token>")
+def share_trade_page(token):
+    """HTML wrapper with OG tags for a trade verdict share link.
+
+    A hit renders the trade page; every miss renders the one generic,
+    noindex "expired" page (status 200). Its og:image is a fixed miss URL
+    so the unfurl shows the generic PNG too. The words live in og_image.
+    """
+    if _og_image is None:
+        return _og_unavailable_response()
+    if _resolve_trade_share(token) is None:
+        return _share_html(
+            title=_og_image.TRADE_LINK_EXPIRED_TITLE,
+            description=_og_image.TRADE_LINK_EXPIRED_BODY,
+            image_url="/og/trade/expired.png",
+            cta_text="Find your next trade",
+            cta_url="/",
+            noindex=True,
+        )
     title = "Trade Match"
     description = "A dynasty fantasy trade — see the give/get breakdown and fairness verdict."
-    image_url = f"/og/trade/{match_id}.png"
+    image_url = f"/og/trade/{token}.png"
     return _share_html(
         title=title,
         description=description,
@@ -31156,7 +31219,7 @@ def share_trade_page(match_id):
 # Share landing for arbitrary packages (teardown S7 PRD-01 follow-up,
 # flag `growth.share_landing`; W2B handoff).
 #
-# /s/trade/<match_id> only works for MUTUAL matches (a trade_matches row).
+# /s/trade/<token> only works for MUTUAL matches (a trade_matches row).
 # Calculator builds and liked-but-unmatched trades previously fell back to
 # the bare site root. This trio gives them a real landing object:
 #   POST /api/share/package  (session-authed, rate-limited) → /s/p/<id>
@@ -31233,6 +31296,73 @@ def create_share_package_route():
             })
     log.error("share/package: could not mint a short_id for %s", user_id)
     return jsonify({"error": "store_failed"}), 500
+
+
+_TRADE_SHARE_HOURLY_LIMIT = 30   # mints per user — abuse guard (head-eng ruling)
+_TRADE_SHARE_MATCH_ID_MAX = 2**31 - 1   # trade_matches.id is int4 on Postgres
+
+
+def _share_trade_match_id(raw) -> int | None:
+    """A positive int (or a string of ASCII digits) in int4 range, else None.
+    Out-of-range values are refused here so Postgres never errors on them —
+    an error would answer differently from the 404 every other miss gets."""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, str) and re.fullmatch(r"[0-9]{1,10}", raw):
+        raw = int(raw)
+    if isinstance(raw, int) and 0 < raw <= _TRADE_SHARE_MATCH_ID_MAX:
+        return raw
+    return None
+
+
+@app.route("/api/share/trade", methods=["POST"])
+@_gate_unverified_write
+def create_share_trade_route():
+    """POST /api/share/trade — mint (or return) the caller's share token for a
+    mutual match (build O8). 404 while `growth.share_landing` is dark.
+
+    Body: {"match_id": <int>}
+    → {ok, token, url: "/s/trade/<token>", og_image: "/og/trade/<token>.png"}
+
+    Only a party to the match can mint, by the predicate every match route
+    uses (session user_id == user_a_id or user_b_id). A non-participant, a
+    missing match and a malformed id all get the same 404 not_found, so the
+    route can't be used to probe ids. Idempotent per (match, sharer): a
+    re-share returns the caller's live token and never counts against the
+    hourly limit; only a new mint does (one transaction in the helper). Demo
+    sessions are refused, as on /api/share/package.
+    """
+    if not is_enabled("growth.share_landing"):
+        return jsonify({"error": "not_found"}), 404
+    sess = _require_session()
+    user_id = str(sess.get("user_id") or "")
+    if sess.get("is_demo") or user_id.startswith("demo_user_"):
+        return jsonify({"error": "demo_session"}), 400
+
+    body = request.get_json(force=True, silent=True)
+    match_id = _share_trade_match_id(body.get("match_id") if isinstance(body, dict) else None)
+    if match_id is None:
+        return jsonify({"error": "not_found"}), 404
+
+    try:
+        token = create_trade_share_token(match_id, user_id,
+                                         hourly_limit=_TRADE_SHARE_HOURLY_LIMIT)
+    except TradeShareRateLimited:
+        return jsonify({"error": "rate_limited",
+                        "message": "Too many shares — try again later."}), 429
+    except Exception as e:
+        # The type only: a DB error's text carries the INSERT's bound
+        # parameters, the new token among them.
+        log.error("share/trade: could not mint a token for %s: %s", user_id, type(e).__name__)
+        return jsonify({"error": "store_failed"}), 500
+    if token is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({
+        "ok": True,
+        "token": token,
+        "url": f"/s/trade/{token}",
+        "og_image": f"/og/trade/{token}.png",
+    })
 
 
 @app.route("/s/p/<short_id>")
