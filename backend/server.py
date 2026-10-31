@@ -22657,6 +22657,13 @@ def _assignment_members(league_id: str) -> tuple[list[str], dict[str, str]]:
 
     Ordered deterministically by user_id so a never-configured league still
     seeds the same grid twice.
+
+    The names dict holds ONLY members with a real name (`username` →
+    `display_name`, the #289 rule). A nameless member is absent, never
+    mapped to their id: an id (`espn:{SWID}`, `acct_*`) is not a name and
+    would be served to every other league member. Callers fall back to the
+    slot label (`Team <original_roster_id>`) — `seed_pick_grid` does so on
+    its own, the PUT route via `_assignment_owner_name`.
     """
     try:
         rows = load_league_members(str(league_id))
@@ -22670,9 +22677,28 @@ def _assignment_members(league_id: str) -> tuple[list[str], dict[str, str]]:
         if not uid:
             continue
         ids.append(uid)
-        names[uid] = (m.get("username") or m.get("display_name") or f"Team {uid}")
+        name = str(m.get("username") or m.get("display_name") or "").strip()
+        if name:
+            names[uid] = name
     ids.sort()
     return ids, names
+
+
+def _assignment_owner_name(names: dict[str, str], rows: list[dict],
+                           owner: str) -> str:
+    """The `owner_username` an assignment PUT stores. Never the user id.
+
+    The member's real name when they have one; else their slot label,
+    `Team <original_roster_id>`, read off any grid row they originally own;
+    else `Unnamed team` (a member added after the grid was seeded has no
+    slot yet).
+    """
+    if owner in names:
+        return names[owner]
+    slot = next((str(r.get("original_roster_id") or "") for r in rows
+                 if str(r.get("original_user_id") or "") == owner
+                 and r.get("original_roster_id")), "")
+    return f"Team {slot}" if slot else "Unnamed team"
 
 
 def _assignment_settings(league_id: str, member_ids: list[str]) -> dict:
@@ -23061,7 +23087,7 @@ def pick_assignment_put_route(pick_id: str):
 
     outcome, row = assign_draft_pick(
         league_id=league_id, pick_id=str(pick_id), owner_user_id=owner,
-        owner_username=names.get(owner, f"Team {owner}"), actor_user_id=actor,
+        owner_username=_assignment_owner_name(names, prior, owner), actor_user_id=actor,
         if_assigned_at=token)
 
     if outcome == "not_found":
