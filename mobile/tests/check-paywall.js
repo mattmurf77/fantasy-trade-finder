@@ -21,6 +21,9 @@
 //      in-flight push during flag revalidation.
 //   3. Guideline 3.1.2 copy is rendered: price+period, trial terms, the
 //      auto-renew + cancel disclosure. Apple rejects on any one of these.
+//      (#393 M1: the copy moved to copy/monetization.ts — legal's R28.8
+//      `mon.pay.disc.*` and `mon.offer.trial_line` — and "N days free" is now
+//      REQUIRED ABSENT: the free month shows only when StoreKit confirms it.)
 //   4. Restore Purchases is WIRED, not merely labelled — the handler calls
 //      restorePurchases(). Guideline 3.1.1.
 //   5. Privacy Policy + Terms are tappable and point at /privacy and /terms.
@@ -37,6 +40,9 @@
 //  10. The entitlement store never persists a client-derived unlock and never
 //      lets a device receipt REVOKE. Server truth (check_pro) must be able to
 //      take Pro away; a receipt must never be able to grant it durably.
+//  11. The plan titles are exactly "Fleeced Pro Annual" / "Fleeced Pro
+//      Monthly", the App Store Connect display names (#393 D14(1), legal
+//      R28.8 #6); the old "Fleeced Pro — Monthly" em-dash fallbacks are gone.
 //
 // Run: node tests/check-paywall.js   (or npm run test:paywall)
 
@@ -49,6 +55,7 @@ const SRC = path.join(ROOT, 'src');
 const SCREEN = path.join(ROOT, 'src/screens/PaywallScreen.tsx');
 const PURCHASES = path.join(ROOT, 'src/api/purchases.ts');
 const BILLING = path.join(ROOT, 'src/api/billing.ts');
+const COPY = path.join(ROOT, 'src/copy/monetization.ts');
 const ENTITLEMENTS = path.join(ROOT, 'src/state/useEntitlements.ts');
 const ROOTNAV = path.join(ROOT, 'src/navigation/RootNav.tsx');
 const TABNAV = path.join(ROOT, 'src/navigation/TabNav.tsx');
@@ -69,6 +76,7 @@ const screenRaw = read(SCREEN);
 const s = strip(screenRaw);
 const purchases = strip(read(PURCHASES));
 const billing = strip(read(BILLING));
+const copy = strip(read(COPY));
 const entl = strip(read(ENTITLEMENTS));
 const rootnav = strip(read(ROOTNAV));
 const tabnav = strip(read(TABNAV));
@@ -119,31 +127,41 @@ const flat = strip(read(FLAT));
   } else ok('2. route registered unconditionally; PaywallScreen self-guards on the flag');
 }
 
-// 3 — guideline 3.1.2 copy, all of it, all rendered
+// 3 — guideline 3.1.2 copy, all of it, all rendered (#393 M1: from the copy
+//     module, legal R28.8; checked executed in check-paywall-gate.js 4g)
 {
   const problems = [];
-  if (!/Auto-renews until cancelled/.test(s)) {
-    problems.push('no auto-renew sentence ("Auto-renews until cancelled…")');
+  // Both disclosures carry the auto-renew sentence and the cancel route.
+  const renew = (copy.match(/Renews automatically until cancelled\./g) || []).length;
+  const cancel = (copy.match(/Cancel in your Apple ID settings at least 24 hours before/g) || []).length;
+  if (renew < 2 || cancel < 2) {
+    problems.push('mon.pay.disc.trial / .paid lost the auto-renew sentence or the cancel '
+      + 'route ("Renews automatically until cancelled." / "Cancel in your Apple ID '
+      + 'settings at least 24 hours before…")');
   }
-  if (!/Cancel anytime in Settings/.test(s)) {
-    problems.push('no cancellation instructions ("Cancel anytime in Settings ▸ Subscriptions.")');
+  if (!/1 month free, then \$\{pricePerPeriod\(period, price\)\}/.test(copy)) {
+    problems.push('no trial-terms line ("1 month free, then <price>/<period>") — a trial '
+      + 'with no stated conversion price is the classic 3.1.2 rejection');
   }
-  if (!/days free, then/.test(s)) {
-    problems.push('no trial-terms line ("N days free, then <price>") — a trial with '
-      + 'no stated conversion price is the classic 3.1.2 rejection');
-  }
-  // price + period: the suffix map is what turns "$34.99" into "$34.99/year".
-  if (!/\/year/.test(s) || !/\/month/.test(s)) {
+  // price + period: the suffix map is what turns "$24.99" into "$24.99/year".
+  if (!/annual:\s*'\/year'/.test(copy) || !/monthly:\s*'\/month'/.test(copy)) {
     problems.push('no period suffix map (/year, /month) — a bare price is not a '
       + 'price AND period');
   }
-  // The disclosure must not be hidden behind a data-loading branch.
-  if (!/AUTO_RENEW_COPY/.test(s)) {
-    problems.push('the auto-renew copy is not rendered through a constant the '
-      + 'screen always emits');
+  // The screen renders the selected plan's disclosure and price per period.
+  if (!/disclosure\(selected\.period, selected\.price, eligible\)/.test(s)
+    || !/pricePerPeriod\(/.test(s)) {
+    problems.push('PaywallScreen does not render the selected plan\'s disclosure and '
+      + 'price per period');
+  }
+  // "N days free" was the client's own trial string off a server day count;
+  // the free month now shows only when StoreKit confirms it (R28.8 #1, D14).
+  if (/days free/.test(s) || /days free/.test(copy) || /trial_days/.test(s)) {
+    problems.push('"N days free" / trial_days is back — the free-month copy keys off '
+      + 'StoreKit intro eligibility only');
   }
   if (problems.length === 0) {
-    ok('3. guideline 3.1.2 copy present: price+period, trial terms, auto-renew + cancel');
+    ok('3. guideline 3.1.2 copy present: price+period, trial terms, auto-renew + cancel; no "days free"');
   } else {
     bad('3. guideline 3.1.2 copy is complete', problems.join('; '));
   }
@@ -281,6 +299,56 @@ const flat = strip(read(FLAT));
       `serverFetch:${serverFetch} — a persisted client-derived unlock survives ` +
       'a relaunch and impersonates a server answer inside the 72h grace window; ' +
       'a receipt that can set pro=false lets an SDK cache miss look like a refund.');
+  }
+}
+
+// 11 — the plan titles match App Store Connect exactly (D14(1), R28.8 #6)
+{
+  const annual = /annual:\s*'Fleeced Pro Annual'/.test(copy);
+  const monthly = /monthly:\s*'Fleeced Pro Monthly'/.test(copy);
+  const emDash = /Fleeced Pro\s+[—–]/.test(s) || /Fleeced Pro\s+[—–]/.test(copy);
+  const fromConst = /PLAN_TITLE\[plan\.period\]/.test(s);
+  if (annual && monthly && !emDash && fromConst) {
+    ok('11. plan titles are exactly "Fleeced Pro Annual" / "Fleeced Pro Monthly" (no em-dash fallback)');
+  } else {
+    bad('11. plan titles match App Store Connect',
+      `annual:${annual} monthly:${monthly} emDash:${emDash} fromConst:${fromConst} — the ` +
+      'paywall title and Apple\'s purchase sheet must read the same; legal R28.8 #6.');
+  }
+}
+
+// 12 — 3.1.2: the disclosure is shown whenever a plan is selected, keyed on
+// `selected` ALONE (release-lead QA S5a/S5b). Never on a config field (the
+// club window), a fetch state, or anything else: a paywall that can render
+// a plan and a buy button without its auto-renew disclosure is a 3.1.2
+// rejection that looks like working code.
+{
+  const disc = /\{selected \? \(\s*<ChalkText variant="bodySm" style=\{styles\.disclosure\} testID="paywall-disclosure">\s*\{disclosure\(selected\.period, selected\.price, eligible\)\}/.test(s);
+  const once = (s.match(/testID="paywall-disclosure"/g) || []).length === 1;
+  if (disc && once) {
+    ok('12. the 3.1.2 disclosure renders whenever a plan is selected, gated on `selected` alone');
+  } else {
+    bad('12. the disclosure is keyed on `selected` alone',
+      `keyedOnSelected:${disc} rendersOnce:${once} — gating it on config, the club ` +
+      'window or a fetch state can show a plan and a buy button with no disclosure.');
+  }
+}
+
+// 13 — 3.1.2: Terms and Privacy always open (release-lead QA S5d). Their
+// taps call openLegal with nothing in front of it, and openLegal reads only
+// the API origin: never the paywall config, which can fail to load.
+{
+  const terms = /onPress=\{\(\) => openLegal\('\/terms'\)\}/.test(s);
+  const privacy = /onPress=\{\(\) => openLegal\('\/privacy'\)\}/.test(s);
+  const at = s.indexOf('const openLegal = useCallback(');
+  const body = at > -1 ? s.slice(at, s.indexOf('}, []);', at)) : '';
+  const pure = /void Linking\.openURL\(`\$\{getBaseUrl\(\)\}\$\{path\}`\);/.test(body) && !/config/.test(body);
+  if (terms && privacy && pure) {
+    ok('13. Terms and Privacy open unconditionally (no config dependency)');
+  } else {
+    bad('13. Terms and Privacy always open',
+      `terms:${terms} privacy:${privacy} openLegalReadsOnlyTheOrigin:${pure} — a legal ` +
+      'link that waits on the paywall config is dead whenever the config fails.');
   }
 }
 
