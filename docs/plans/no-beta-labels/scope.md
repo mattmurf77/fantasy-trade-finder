@@ -59,7 +59,7 @@ Not in scope:
   - Also scans every string value in `mobile/app.json` (display name, permission strings).
   - One explicit allowlist entry, with its reason: `UpdateGateScreen.tsx` `TESTFLIGHT_URL = 'itms-beta://'`, a URL scheme that is never rendered. Each allowlist entry must match exactly once, so stale entries fail.
   - A positive control: the scan must visit at least 100 files and find the three ribbons' `PROJECTED` / `Projected` strings, so it can't pass vacuously.
-- [x] **Unit tests:** no backend change, so none.
+- [x] **Unit tests:** `backend/tests/test_outlook_route_cache.py::test_mobile_ribbon_composes_the_lld_preseason_label` reads `LeagueSummaryScreen.tsx` and pinned `'beta'` in `betaRibbonLabel` (the #169 LLD label). CI `backend-tests` caught it at `ed33b55b`: 1 failed, 10052 passed. It's updated to the new contract: `'Projected'` plus `'preseason'`; no `'beta'` or `meta.beta` in the label; `showRecords = !meta.beta` still present. The first inventory searched only `mobile/tests`. Backend tests that read mobile source are in [Evidence](#evidence).
 - [x] **Code-walk proof** (file:line at the branch tip):
   - **Trade card:** `CardImpactBlock.tsx:182-183`. `<Text style={styles.ribbon} testID={`${testID}.odds.ribbon`}>` renders the literal `PROJECTED`. The file no longer reads `impact.beta`. The `beta` field stays in `api/calc.ts:230` / `shared/types.ts:590`.
   - **Team review:** `TeamReviewScreen.tsx:442-443`. `<ChalkText style={styles.ribbon}>` renders the literal `PROJECTED`. The file no longer reads `o.beta`; the field stays in `api/teamReview.ts:56`.
@@ -85,9 +85,10 @@ Not in scope:
 | `living-memory/LLD.md` | n/a | No new convention. The guard is listed in `mobile/tests/README.md`. |
 | `docs/architecture.md` | n/a | No module or data-flow change. |
 | `living-memory/HLD.md` | n/a | No new module, client or major flow. |
+| `docs/feedback/items/169-outlook-league-summary/odds-pipeline-lld.md` | **updated** | §Gating & off-season, the preseason label line: a dated note that "beta" is no longer shown and `meta.beta` still withholds records. |
 | `docs/cross-client-invariants.md` | n/a | The ribbon wording isn't registered. The registered rule, `meta.beta` as the two-state switch (no win-loss numbers in weeks 0–5), is unchanged. |
 | `docs/glossary.md` | n/a | No new term. |
-| ADR or `DECISIONS.md` | n/a | No non-obvious choice: the operator's launch tracker plus Apple 2.2. |
+| ADR or `DECISIONS.md` | **proposed, for the scribe** | D-094 records the "Projected · preseason · beta" ribbon as the live posture of 2026-08-19, so removing the word changes a documented posture. D-094's licensing conditions are untouched: (a) no `title_pct`, (b) `playoff_pct` only as the band chip, (c) `OUTLOOK_WEEK6_PERCENT_ENABLED` off. Proposed entry (next ID on main is D-209; the scribe assigns the final one): *"'Beta' leaves the outlook ribbons (App Review 2.2). The three playoff-outlook ribbons (League Summary, Team review, trade card) no longer show 'beta' (#549, launch tracker rank 4). `meta.beta` stays on the wire and still withholds win-loss numbers through week 5; bands, order and every D-094 constraint are unchanged. The ribbon reads 'Projected' / 'Projected · preseason'. Guard: `check-no-beta-copy.js`."* |
 
 ## 5. Ship gate declaration
 
@@ -130,6 +131,10 @@ At the branch tip, from `mobile/` with `NODE_PATH` at another checkout's `node_m
 | The 21 guards that read the three files (`analytics-297-302`, `analytics-300`, `card-impact-order`, `guide-spotlight-tracking`, `home-destinations`, `home-hub`, `league-candidates-300`, `league-drill-in`, `mascot-ram`, `member-entered-marker`, `offer-prefill-330`, `outlook-bands`, `outlook-row-source`, `picks-subset-invariance`, `position-split-parity`, `team-review-depth`, `team-review`, `trade-first-card-events`, `win-now`, `window-composite`, `window-signals`) | all exit 0, 0 FAIL |
 | `bash scripts/testid-lint.sh` | `testid-lint OK` |
 | `tsc --noEmit`, on a scratch copy of `mobile/` with a borrowed `node_modules` | exit 0 |
+| CI `backend-tests` at `ed33b55b` | **1 failed**, 10052 passed: `test_outlook_route_cache.py::test_mobile_ribbon_composes_the_lld_preseason_label` pinned `'beta'` in `betaRibbonLabel` |
+| `pytest test_outlook_route_cache.py test_outlook_odds.py`, after updating that test | 56 passed, 1 skipped (the offline backtest, env-gated) |
+| `pytest` on the 11 backend files that read mobile source (`git grep -l -E "LeagueSummaryScreen\|TeamReviewScreen\|CardImpactBlock\|mobile/src" -- backend/tests`) | 358 passed |
+| Updated test, sabotage: `parts.push('beta')` back / `showRecords = true` / `'preseason'` push removed | each red, on its own assertion only |
 
 **Sabotage** (applied, guard run, restored byte for byte):
 
