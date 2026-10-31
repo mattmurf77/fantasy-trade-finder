@@ -180,7 +180,7 @@ export default function CardImpactBlock({
           <View style={styles.oddsHead}>
             <Text style={styles.kicker}>Playoff outlook</Text>
             <Text style={styles.ribbon} testID={`${testID}.odds.ribbon`}>
-              {impact.beta ? 'PROJECTED · BETA' : 'PROJECTED'}
+              PROJECTED
             </Text>
           </View>
 
