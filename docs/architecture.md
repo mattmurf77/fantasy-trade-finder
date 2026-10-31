@@ -762,7 +762,8 @@ External scheduler (Render cron) hits four endpoints:
   | 6 | `reengagement` | the winback / finish_ranking / season_start user scan | per-kind caps in `_send_typed_push` |
   | 7 | `replenishment` | **deferred (2026-10-23):** hard skip, `detail=deferred: C2`; `_run_weekly_replenishment(now)` is not called | none: the flag is not read. Re-enabled = `deck.replenishment`; `replenish_weekday` `>=` gate, after C2 and the self-renewal fix |
   | 8 | `eval_nightly` | `eval.nightly.run_all(window_days=30)` | none (idempotent per UTC day) |
-  | 9 | `value_model_refit` | `_value_model.nightly_refit(now=now)` | `deck.value_model` |
+  | 9 | `deletion_scrub` | `deletion_scrub.tick(now)`: due DB passes, the model store's redaction, finished jobs deleted, the 24 h count | none (every deletion has a job); before the refit, never beside it |
+  | 10 | `value_model_refit` | `_value_model.nightly_refit(now=now)` | `deck.value_model` |
 
   Steps 1, 2, 3 and 5 are inline entries (`_daily_tick_<key>`) beside their async wrappers: same gates, same lock or single-flight, same body, so the dedicated `/api/cron/roster-snapshot`, `/usage-trends-refresh`, `/receipts-grade` and `/players-refresh` routes are unchanged.
 - **In-process by design.** The rejected alternative (A) was running the steps in the cron service's own process. It is deferred, as a post-launch follow-up once the helpers are extracted out of `server.py`, for two reasons. Three steps are tied to web-process state: the players guard (the on-disk cache plus `_pool_generation`), replenishment (`_sessions` plus `_trade_jobs`) and the refit (the served `models.jsonl`). And importing `server.py` runs `init_db()` and starts `_cleanup_loop` and the Win Now worker.
@@ -942,3 +943,16 @@ See [latency investigation](plans/trade-search-latency/README.md).
 ### App-open trade preparation
 
 Native cold launch and foreground resume initialize the restored league without blocking the initial screen. `api/auth.sessionInit` reads the shared saved fairness preference and sends `trade_fairness_threshold`. The server starts its existing background trade worker immediately after authoritative league/session assembly; installed clients that omit the field use 0.5, matching the native default. Startup retries failed jobs, preserves active searches and matching fresh work, and replaces completed jobs with mismatched fairness/shape settings. Preparation is independent of onboarding flags; native startup sends no duplicate generate request. Find a Trade adopts matching running/completed jobs; different fairness or shape must not inherit an incompatible running warm-up. Existing targeted searches and forced ranking/preference refreshes retain their regeneration paths. Full owner safety and durable evidence gates remain before cards appear. Warm-up does not guarantee three-second generation or preserve decks across backend restarts.
+
+## Account deletion's scrub of other users' decks (legal R28.20 (ii), 2026-10-31)
+
+`accounts._delete_user_data` deletes the person's own rows in one transaction. In that same transaction:
+- it reads the leagues their traces may sit in (memberships, imported leagues, roster history, their own decks);
+- it inserts a `deletion_scrub_jobs` row with a random token;
+- it gives the small stores that token: other users' `user_taste` for the person, and standing-offer team lists. It clears `trade_matches.match_valuation_json` on either side.
+
+`backend/deletion_scrub.py` then works the job off the request:
+- **DB pass:** started by the route, retried by `_cleanup_loop` under a lease, and run once more after a 6 h in-flight grace. It finds other users' deck rows and candidate sets per league and viewer, and redacts each card whose partner is the person: the token, their account's fields removed, the blended scores nulled.
+- **Model pass:** the daily tick's `deletion_scrub` step, before `value_model_refit`.
+
+The job row is deleted when both are done. Packs, the page store and the traced stores are later stages: `SCRUB_VERSION` re-runs kept jobs when one lands.

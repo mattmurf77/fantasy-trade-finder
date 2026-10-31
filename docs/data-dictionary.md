@@ -206,6 +206,7 @@ counterparty board disclosure or client analytics event is added.
   - [`grading_sessions`](#grading_sessions)
   - [`grading_cards`](#grading_cards)
   - [`tab_selected` values (`user_events`)](#tab_selected-values-user_events)
+- [`deletion_scrub_jobs`](#deletion_scrub_jobs) — the deletion scrub's work rows (legal R28.20 (ii))
 - [Experiment engine tables (analytics platform P3)](#experiment-engine-tables-analytics-platform-p3)
   - [`experiment_layers`](#experiment_layers)
   - [`experiments`](#experiments)
@@ -2102,6 +2103,39 @@ Index: `ix_grading_cards_session` (`session_id`). Invariants: `grade IS NOT NULL
 ### `tab_selected` values (`user_events`)
 
 Calibration adds **no** event (scope waiver, plan D9); the tables above are the record and the admin report is the readout. The existing client event `tab_selected {tab, from_tab, refocus, intercepted}` (NON_INTENT) gains the value **`calibration`** in `tab` and `from_tab`, from `trackTab('calibration', …)`; `tab` is a free string, so the taxonomy is unchanged. **`draft` / `from_tab: "draft"` stop arriving while `draft.tab` is false** (off since 2026-10-02): a dashboard reading `tab = 'draft'` reads zero from that date — a real behavior change, not data loss. `screen_viewed` / `screen_left` gain the `screen` value `CalibrationHome`.
+
+---
+
+## `deletion_scrub_jobs`
+
+The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scrub.py`; scope `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md`).
+- **Lifecycle:** one row per account deletion, inserted in `accounts._delete_user_data`'s own transaction, so a committed deletion always has its scrub and a rolled-back one has none. The row is deleted when the scrub of other users' decks is done (legal (ix)).
+- **Retention:** it's kept while any scrub stage is unbuilt (`deletion_scrub.COMPLETE` false), so later stages re-run it (`SCRUB_VERSION`). Past 24 h unfinished, it's retried and counted at ERROR, up to 30 days, and never abandoned.
+- **Privacy:** it holds the deleted user's ids only for that time. It's never exported (its subject is gone), and no id from it is ever logged.
+
+| Column | Type | Notes |
+|---|---|---|
+| `job_id` | str PK | uuid4 hex. Logs show its first 8 characters |
+| `token` | str, not null | `redacted:<uuid4 hex>`, random, one per deletion, the same in every store (glossary: redaction token) |
+| `partner_ids_json` | text (JSON), not null | The deleted user's resolved ids (`accounts._user_data_scope`: aliases, account working keys) |
+| `league_ids_json` | text (JSON), not null | The leagues their traces may be in, read before the deletion removes their rows: memberships, imported leagues, roster history, their own decks |
+| `deleted_at` | str, not null | ISO UTC. The DB pass touches decks served up to `deleted_at` + 6 h (`IN_FLIGHT_GRACE`: a deck built before the deletion carries its first delivery as `served_at`), never later ones |
+| `db_version` | int, not null, default 0 | The `SCRUB_VERSION` of the last full DB pass; older re-runs |
+| `db_done_at` | str | ISO UTC of the last full DB pass. One more runs once the grace has passed |
+| `model_done_at` | str | ISO UTC the value-model store was redacted (the daily tick's `deletion_scrub` step, before the refit) |
+| `attempts` | int, not null, default 0 | Lease claims |
+| `claimed_until` | str | ISO UTC lease (10 min), taken by compare-and-swap; NULL = free |
+| `last_error` | str | The last failure's exception class, never its message |
+
+Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.
+
+**What a redacted card holds** (stage 1: `deck_impressions` and `deck_candidate_sets`):
+- **Which cards:** every card whose partner is a deleted id is treated the same way, in every store (R28.22 b2). Any other row naming the id gets the token in its place.
+- **`deck_impressions`:** `features_json.partner_user_id`, `partner:<id>` taste attrs and owner-request member ids become the token. These are removed: `likes_you`, `standing_offer`, `standing_offer_reason`, `breaker`, `breaker_shadow`, `negmem.exempt`, the partner's side of `fit` / `fit_diag` (`them`, `aggregate`, `bucket`, `lenses.them`), `roster_evaluation.teams[<id>]` and its `mutual_benefit`, and the owner request's partner board, sources and preferences.
+- **Nulled:** `surplus_margin`, the `base_score` / `final_score` / `source_like_impression_id` columns. In `valuation_json`, the partner's board and the values blending it are removed (`partner_board`, `mutual`, `counterparty`, `preference_priority`, the floors, assets' partner values, `windows.partner`, `detail.outlook.partner`, `core.throwin.recipient_value`), and the market and the viewer's own stay. These fail legal's solve-back test (scope §1.3).
+- **`deck_candidate_sets`:** the member's `partner` becomes the token and its `base_score` is nulled, in `candidates_packed` through the codec and in legacy `candidates_json`. `set_hash` is unchanged.
+- **Kept:** hashes (`trade_hash` and the rest, legal (viii)).
+- **In the deletion transaction:** other users' `user_taste` `partner:<id>` rows become one `partner:<token>` row each (two aliases' weights summed). Standing offers' `team_user_ids` take the token. `trade_matches.match_valuation_json` is cleared when either side is the person.
 
 ---
 

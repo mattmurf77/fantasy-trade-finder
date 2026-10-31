@@ -42,13 +42,16 @@
   - **Residual:** a league they left before deleting, and that none of these still names, isn't found. The 365-day prune bounds it. This is stated to head-eng, not hidden.
 - **Two phases.** The row is deleted only when both are done.
   - **DB phase:** every store in §0.2. It runs in a background thread the deletion route kicks, and the cleanup loop retries any row past its lease. The lease is a CAS claim on `claimed_until`, so two instances during a deploy never run one job twice.
-  - **Model phase:** `eval.redaction.redact_model_store(tokens)`, as a `_daily_tick_steps` entry `deletion_scrub_model` placed **before** `value_model_refit` (models-eng 8b, #542). A test pins the order. A raise leaves the row for the next tick.
-  - **The DB phase runs once more in that tick, before the row goes.** That catches rows a deck already in flight at deletion wrote later from its build-time snapshot (§0.4).
+  - **Model phase:** `eval.redaction.redact_model_store(tokens)`, in the daily-tick step `deletion_scrub`, placed **before** `value_model_refit` (models-eng 8b, #542). It runs only for jobs whose DB pass is current, so the refit trains on scrubbed rows. A test pins the order. A raise leaves the row for the next tick.
+  - **The DB phase runs once more after `IN_FLIGHT_GRACE` (6 h),** from the cleanup loop. That catches rows a deck already in flight at deletion wrote later from its build-time snapshot (§0.4).
+  - **Until every stage is built (`COMPLETE`), finished rows are kept,** so a later stage's `SCRUB_VERSION` re-runs them. legal (ix) is about finishing the scrub, and the scrub isn't finished until then.
 - **Alert:** each tick, if any row is older than 24 h, the log gets `[scrub] unfinished jobs=<n> oldest_h=<h>` at ERROR (counts only). A row older than 30 days isn't abandoned: it keeps retrying and keeps alerting (ix).
 
 ### 0.2 Stores and what each card loses
 
-The rows to touch are found per captured league through the existing `(user_id, league_id)` and league indexes, then filtered to cards whose partner is one of the ids. **Only decks built before `deleted_at` are touched.** Decks built later treat the person as any non-user leaguemate (legal (vii)).
+The rows to touch are found per captured league and per viewer (the league's members and importers) through the existing `(user_id, league_id)` indexes, then filtered to rows that mention an id.
+- **Which decks:** a deck's rows carry its first delivery as `served_at`, so a deck built before the deletion can be first delivered after it. Decks served up to `deleted_at` + `IN_FLIGHT_GRACE` (6 h) are touched, and later ones never: they treat the person as any non-user leaguemate (legal (vii)).
+- **Which cards:** a card whose partner is a deleted id is redacted in full. Any other row that names an id gets the token in its place.
 
 | Store | Partner id → token | Removed (c2) | Nulled (blended, §1.3) |
 |---|---|---|---|
@@ -57,12 +60,12 @@ The rows to touch are found per captured league through the existing `(user_id, 
 | | header: the partner's hashes leave `run.filter_inputs.protected`; `run.redacted_at` is added (G-a3's four changes) | | |
 | `deck_candidate_sets` | packed (`pack_candidates`) or legacy `candidates_json` member `partner` | — | `base_score` |
 | `trade_page_store` | `pages_blob` `target_user_id` (→ token) and `target_username` (→ placeholder); `evidence_blob` rows, the same as `deck_impressions`; `run_meta.filter_inputs` the same as the pack header | the same as rows, plus `reasons` that quote the partner, and v2 `rationale.counterparty.timeline` when declared | the same as rows |
-| `user_taste` (other users) | attribute `partner:<id>` → `partner:<token>`, merged if present | — | — |
-| `standing_offers` (other users) | `team_user_ids` | — | — |
-| `grading_cards` (other users) | — | `trade_json.partner_name` → placeholder | — |
-| `trade_matches` | ids are already the placeholder today | the deleted side's board and preference values in `match_valuation_json`, both directions | — |
+| `user_taste` (other users) | attribute `partner:<id>` → `partner:<token>`; two aliases of the person merge into one row (weights summed). In the deletion transaction | — | — |
+| `standing_offers` (other users) | `team_user_ids`, in the deletion transaction | — | — |
+| `grading_cards` (other users) | — | `trade_json.partner_name` → placeholder (stage 3: the cards hold a display name, not an id, so finding them needs the trace) | — |
+| `trade_matches` | ids are already the placeholder today | `match_valuation_json` cleared whole when either side is the person, in the deletion transaction (it holds user_a's own board as the viewer and user_b's as the partner; the `trade_proposals.valuation_json` precedent) | — |
 | model store | E-b3 (`redact_model_store`) | — | — |
-| `deck_diagnostic_snapshots` | — | rows older than 30 days are deleted by the scrub (they expire at 14 days today) | — |
+| `deck_diagnostic_snapshots` | — | stage 3: rows older than 30 days are deleted by the scrub (they expire at 14 days today) | — |
 
 Already handled by deletion today, untouched: `trade_proposals`, `trade_impressions`, `bad_trade_flags` (NULL), `prepared_trade_*` (deleted), `trade_matches` ids.
 
@@ -128,9 +131,9 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
   - **idempotence:** a second run changes nothing;
   - **decks built after the deletion are untouched;**
   - **the tick:**
-    - `deletion_scrub_model` runs before `value_model_refit` (order pinned);
+    - `deletion_scrub` runs right before `value_model_refit` (order pinned);
     - a raise keeps the row;
-    - the second DB pass;
+    - the second DB pass after the grace;
   - **export:** another user's export after the scrub holds no id and no c2 field of the deleted user.
 - [x] **Sabotages** recorded in TEST_LEDGER: one per store, plus the lease, the order and the CAS rebuild.
 - [x] **Structural guard / TestFlight checklist: WAIVED.** Backend only, with no client surface.
@@ -139,7 +142,7 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
 
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
-| `docs/api-reference.md` | n/a | no route added or changed; the deletion route's response gains no field |
+| `docs/api-reference.md` | updated | `DELETE /api/account`: the job, the side tables and their counts in `deleted`; `POST /api/cron/daily-tick`: step 9 `deletion_scrub`, ten steps |
 | `living-memory/LLD.md` | updated | deletion: the scrub job and its two phases |
 | `docs/architecture.md` | updated | account deletion's data flow: the scrub after the transaction |
 | `living-memory/HLD.md` | n/a | no new module class or client; one step inside deletion |
@@ -154,8 +157,8 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
 - **CI green:** `backend-tests`, `mobile-typecheck`, `testid-lint`.
 - **Evidence recorded:** TEST_LEDGER, one entry per PR.
 - **Staging, three PRs:**
-  1. the job, the deletion hook, the runner and tick, rows, candidate sets, the side tables and the model store;
+  1. the job, the deletion hook, the runner and tick, rows, candidate sets, the side tables (`user_taste`, `standing_offers`, `trade_matches`) and the model store;
   2. packs through the codec, the CAS fix, the page store and the in-flight pass;
-  3. the traced items (f), with diagnostics.
+  3. the traced items (f), `grading_cards` and diagnostics. It sets `COMPLETE`, so finished jobs are deleted from then on.
   - Packs and the page store are empty in prod until the flip (`trade.packed_evidence` off). PR 2 lands before the flip.
 - Express lane declared by the operator? No.

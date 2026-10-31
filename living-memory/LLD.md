@@ -56,6 +56,7 @@
 - [Deferred evidence: write what the serve sends, after S0's rules (2026-10-26, ADR-025 stage 1, #370)](#deferred-evidence-write-what-the-serve-sends-after-s0s-rules-2026-10-26-adr-025-stage-1-370)
 - [Packed evidence: the pack at first delivery, header-only updates, full row on view (2026-10-27, ADR-025 stage 2, S8)](#packed-evidence-the-pack-at-first-delivery-header-only-updates-full-row-on-view-2026-10-27-adr-025-stage-2-s8)
 - [P1 page store: stamps, S0's serve rules, the deck pipeline guard (2026-10-26, trade.first_page_store)](#p1-page-store-stamps-s0s-serve-rules-the-deck-pipeline-guard-2026-10-26-tradefirst_page_store)
+- [Deletion scrub: a work row in the deletion's transaction, two phases, one rule per field (2026-10-31, legal R28.20 (ii))](#deletion-scrub-a-work-row-in-the-deletions-transaction-two-phases-one-rule-per-field-2026-10-31-legal-r2820-ii)
 
 ---
 
@@ -978,3 +979,12 @@ Flag `trade.packed_evidence`, which `trade.first_page_store` requires (P1's AND)
   - A new evidence table belongs in `_delete_deck`'s list.
   - **Account export and deletion reach a packed deck's outcomes by contract id** (`database.deck_pack_contract_ids`, every `<run_id>:<k>` under the pack's `card_count`), not only through the user's rows. The full-row bound deletes those rows and keeps the outcomes, so a rows-only path would export none of them and leave them forever (#523 QA P1-1, E-b4). The same ids unlink `suggestion_trade_links`.
 - **Retirement and exit:** the cleanup loop retires a deck's pack (superseded, revoked, 24 h, or about to be evicted), wrapped like its other steps (a DB error must never kill that thread); a retirement that didn't land is undone in memory so the next tick retries it; `_deck_evidence_drain` joins in-flight evidence writes at exit. Stage 1's `full_interim` path still runs for a deck with `packed` false, which the AND makes unreachable in production; it goes in a follow-up.
+
+## Deletion scrub: a work row in the deletion's transaction, two phases, one rule per field (2026-10-31, legal R28.20 (ii))
+
+`backend/deletion_scrub.py`; scope `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md`.
+- **Work that must outlive a request but never be lost is a row written in the triggering transaction.** That's the deletion, with a lease taken by compare-and-swap, so two runners never work one row. A crash, a raise or a deploy just leaves the row for the cleanup loop.
+- **No id leaves through a log, the tick's detail or an exception's text.** Catch, and log `type(err).__name__`, never `log.exception`: a DB error quotes its parameters.
+- **One rule per field, applied to every card of the partner in every store (R28.22 b2):** `redact_features` / `redact_valuation` / `_redact_member`. A new store calls the same functions and bumps `SCRUB_VERSION`. A new partner-derived field goes into those rules. Fields are **removed**, never set False (G-a1). Blended scores that solve back are nulled.
+- **The model store is redacted only in the daily tick, before the refit,** and only for jobs whose DB pass is current. So the refit trains on scrubbed rows.
+- **A deck's rows carry its first delivery as `served_at`.** So "built before the deletion" is approximated by a grace (6 h): decks served up to then are scrubbed, later ones never.
