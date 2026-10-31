@@ -376,7 +376,7 @@ The pick-denominated **TradeValueBar** (feedback #157) is the universal trade ve
 
 Deck cards **omit** all four when rebuilt from client echo (server-restart FB-46 path); clients gate the bar on `give_value`/`receive_value` being present.
 
-**Locations to update together:** `backend/server.py` (`_value_verdict_payload`, `trade_evaluate_route`, `trade_card_to_dict`), the card-construction sites in `backend/trade_service.py` + `backend/trade_optimizer.py` (stamp `give_value`/`receive_value`), `mobile/src/components/TradeValueBar.tsx` + `TradeCard.tsx`, `mobile/src/api/trades.ts` + `mobile/src/api/calc.ts` + `mobile/src/shared/types.ts`.
+**Locations to update together:** `backend/server.py` (`_value_verdict_payload`, `trade_evaluate_route`, `trade_card_to_dict`, `_consensus_pricing` / `_consensus_verdict` (shared by evaluate and the share card), `_share_value_bar`), `backend/og_image.py` (`_draw_value_bar`, `value_bar_label`; the og share card draws this verdict with side-neutral words, marketing addendum 14, and computes its ±2nd tick from the current generic-pick values, while the app still uses `SECOND_IN_FIRSTS = 0.57`, a known drift), the card-construction sites in `backend/trade_service.py` + `backend/trade_optimizer.py` (stamp `give_value`/`receive_value`), `mobile/src/components/TradeValueBar.tsx` + `TradeCard.tsx`, `mobile/src/api/trades.ts` + `mobile/src/api/calc.ts` + `mobile/src/shared/types.ts`.
 
 ---
 

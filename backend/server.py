@@ -18007,10 +18007,112 @@ def trade_evaluate_route():
         return _trade_evaluate_impl(_mode)
 
 
+# ── The consensus verdict: ONE code path for evaluate and the share card ───
+# docs/plans/share-card-value-bar/scope.md. `_trade_evaluate_impl` prices and
+# judges a trade through these three helpers, and the og share cards
+# (`_share_value_bar`) call `_consensus_verdict` too, so the card's bar and
+# the calculator's verdict can't drift. None of them reads a session or a
+# member board: the price is the universal-pool consensus plus the league's
+# owned-pick prices, under whatever stud-tax / pick-pricing pin the caller
+# set (evaluate: the caller's mode; the card: market).
+
+def _consensus_pricing(fmt: str, league_id: str | None = None):
+    """The consensus value function for `fmt` (and `league_id`'s owned picks).
+
+    Returns (pool_players, seed, pick_vals, pick_rows, seed_value):
+      pool_players  the universal pool's players for `fmt`
+      seed          universal-pool seed Elo: players and generic picks
+      pick_vals     league-owned pick_id -> priced value (value space)
+      pick_rows     the owned-pick rows priced, in load order
+      seed_value    pid -> value: the owned-pick price, else
+                    elo_to_value(seed.get(pid, 1500))
+    """
+    _pool_players, seed = _get_universal_pool(fmt)
+    e2v = _trade_service_mod.elo_to_value
+
+    # #158 — league-scoped owned picks (e.g. "2027 1st") are NOT in the
+    # universal-pool `seed`, so they'd otherwise be silently dropped. When a
+    # league_id rides along, resolve each owned pick_id to its pool_value
+    # (already in elo_to_value units, so it composes directly with player
+    # values). Generic picks (generic_pick_*) still resolve via `seed`.
+    #
+    # The price is resolved at READ time under the pricing mode pinned by
+    # the caller (trade_evaluate_route, alongside the #215 stud-tax pin; the
+    # share card pins the same default). Since D-144 that is always
+    # `market_slots`, and the waterfall is the pick's OWN slot price when
+    # D-090 resolves one → the round curve → the stored ladder value. The
+    # stored column is never written — pricing is read-time in every mode.
+    #
+    # W3 M-C (S1) — the read opts into asserted rows behind
+    # `picks.assign_tradeable` (`_pick_read_source`).
+    league_pick_vals: dict[str, float] = {}
+    league_pick_rows: list[dict] = []
+    if league_id and league_id != "league_demo":
+        try:
+            # D-144 per-slot pricing needs the league's resolved draft
+            # order. Looked up ONCE per request (it is DB-backed with a
+            # 60s cache), never per pick — same discipline as the deck
+            # lane's lookup in `_owned_pick_assets`.
+            _slot_order = _league_slot_order(league_id)
+            for _p in load_draft_picks(league_id=league_id,
+                                       source=_pick_read_source()):
+                league_pick_vals[_p["pick_id"]] = _priced_pick_value(
+                    _p, _slot_order, fmt)
+                league_pick_rows.append(_p)
+        except Exception as _lp_err:
+            log.warning("evaluate: owned-pick load failed (continuing): %s", _lp_err)
+
+    def seed_value(pid: str) -> float:
+        if pid in league_pick_vals:
+            return league_pick_vals[pid]        # already in value space
+        return e2v(seed.get(pid, 1500.0))
+
+    return _pool_players, seed, league_pick_vals, league_pick_rows, seed_value
+
+
+def _consensus_split(give_ids, recv_ids, seed, pick_vals):
+    """(give, recv, dropped): each side's ids the consensus can price, and
+    every id it can't (the engine's graceful-drop rule)."""
+    give    = [p for p in give_ids if p in seed or p in pick_vals]
+    recv    = [p for p in recv_ids if p in seed or p in pick_vals]
+    dropped = [p for p in list(give_ids) + list(recv_ids)
+               if p not in seed and p not in pick_vals]
+    return give, recv, dropped
+
+
+def _consensus_verdict(give_ids, recv_ids, fmt: str, league_id: str | None = None,
+                       *, pricing=None, fairness_threshold: float = 0.75) -> dict | None:
+    """The consensus value verdict for one trade, or None when either side
+    is empty after unpriceable ids are dropped.
+
+    Returns `_value_verdict_payload`'s shape ({give_value, receive_value,
+    favors, gap}) plus `point_ratio`, `fairness` (the `_fairness_v3` gate at
+    `fairness_threshold`) and `dropped_ids`. `even` is `point_ratio >= 0.95`,
+    evaluate's rule. Pure over its inputs: no session, no member board.
+    `pricing` is a `_consensus_pricing` result the caller already holds
+    (evaluate passes its own, so the league's picks load once).
+    """
+    from .trade_optimizer import _consensus_packages, _fairness_v3
+
+    if pricing is None:
+        pricing = _consensus_pricing(fmt, league_id)
+    _pool, seed, pick_vals, _rows, seed_value = pricing
+    give, recv, dropped = _consensus_split(give_ids, recv_ids, seed, pick_vals)
+    if not give or not recv:
+        return None
+    gv, rv = _consensus_packages(give, recv, seed_value)
+    give_value, receive_value = round(gv, 1), round(rv, 1)
+    fairness, point_ratio, _gv, _rv = _fairness_v3(
+        give, recv, seed_value, None, fairness_threshold)
+    out = _value_verdict_payload(give_value, receive_value, point_ratio >= 0.95)
+    out.update(point_ratio=point_ratio, fairness=fairness, dropped_ids=dropped)
+    return out
+
+
 def _trade_evaluate_impl(stud_tax_mode: str):
     """The /api/trade/evaluate body — runs inside the caller's stud-tax
     mode context (see trade_evaluate_route)."""
-    from .trade_optimizer import _consensus_packages, _fairness_v3
+    from .trade_optimizer import _consensus_packages
 
     body = request.get_json(silent=True) or {}
     give_raw = body.get("give_player_ids") or []
@@ -18047,49 +18149,21 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         caller_user_id = _mode_b_sess.get("user_id")
 
     try:
-        _pool_players, seed = _get_universal_pool(fmt)
+        # The consensus pricing and verdict are shared with the og share card
+        # (`_consensus_pricing` / `_consensus_verdict`, docs/plans/
+        # share-card-value-bar/scope.md), so the two can never drift.
+        _pricing = _consensus_pricing(fmt, league_id)
+        _pool_players, seed, league_pick_vals, _league_pick_rows, seed_value = _pricing
         e2v = _trade_service_mod.elo_to_value
 
-        # #158 — league-scoped owned picks (e.g. "2027 1st") are NOT in the
-        # universal-pool `seed`, so they'd otherwise be silently dropped. When a
-        # league_id rides along, resolve each owned pick_id to its pool_value
-        # (already in elo_to_value units, so it composes directly with player
-        # values). Generic picks (generic_pick_*) still resolve via `seed`.
-        #
-        # The price is resolved at READ time under the pricing mode pinned for
-        # this request by trade_evaluate_route, alongside the #215 stud-tax
-        # pin. Since D-144 that is always `market_slots`, and the waterfall is
-        # the pick's OWN slot price when D-090 resolves one → the round curve
-        # → the stored ladder value. The stored column is never written —
-        # pricing is read-time in every mode.
-        #
-        # W3 M-C (S1) — the read opts into asserted rows behind
-        # `picks.assign_tradeable`, and each priced pick entry carries its
-        # provenance + season so the client can badge it and deep-link the
-        # correction. Flag off ⇒ the platform-only default and no new keys.
-        league_pick_vals: dict[str, float] = {}
-        league_pick_meta: dict[str, dict] = {}
+        # W3 M-C (S1) — each priced pick entry carries its provenance + season
+        # so the client can badge it and deep-link the correction. Flag off ⇒
+        # the platform-only default and no new keys.
         _tradeable = _asserted_picks_tradeable()
-        if league_id and league_id != "league_demo":
-            try:
-                # D-144 per-slot pricing needs the league's resolved draft
-                # order. Looked up ONCE per request (it is DB-backed with a
-                # 60s cache), never per pick — same discipline as the deck
-                # lane's lookup in `_owned_pick_assets`.
-                _slot_order = _league_slot_order(league_id)
-                for _p in load_draft_picks(league_id=league_id,
-                                           source=_pick_read_source()):
-                    league_pick_vals[_p["pick_id"]] = _priced_pick_value(
-                        _p, _slot_order, fmt)
-                    league_pick_meta[_p["pick_id"]] = _pick_wire_source(
-                        _p, _tradeable, with_season=True)
-            except Exception as _lp_err:
-                log.warning("evaluate: owned-pick load failed (continuing): %s", _lp_err)
-
-        def seed_value(pid: str) -> float:
-            if pid in league_pick_vals:
-                return league_pick_vals[pid]        # already in value space
-            return e2v(seed.get(pid, 1500.0))
+        league_pick_meta: dict[str, dict] = {
+            _p["pick_id"]: _pick_wire_source(_p, _tradeable, with_season=True)
+            for _p in _league_pick_rows
+        }
 
         # #277 — tier walked off the RAW seed Elo via the canonical
         # band-walk (same convention as /api/trade/values; never derived
@@ -18099,10 +18173,8 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         _evener_tier = (lambda pid, pos:
                         RankingService.tier_for_elo(seed.get(pid, 1500.0), pos, fmt))
 
-        give    = [p for p in give_raw if p in seed or p in league_pick_vals]
-        recv    = [p for p in recv_raw if p in seed or p in league_pick_vals]
-        dropped = [p for p in give_raw + recv_raw
-                   if p not in seed and p not in league_pick_vals]
+        give, recv, dropped = _consensus_split(give_raw, recv_raw, seed,
+                                               league_pick_vals)
 
         per_player = [
             {"player_id": pid, "side": side, "value": round(seed_value(pid), 1),
@@ -18117,20 +18189,22 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         # as generic-pick equivalents ("≈ a Mid 2nd") so the delta is an
         # actionable counteroffer instead of an abstract number. `favors` +
         # `gap` are built by the shared _value_verdict_payload helper (the same
-        # one the deck cards use, so the two verdicts can never drift).
+        # one the deck cards use, so the two verdicts can never drift), via
+        # `_consensus_verdict` (the same call the og share card makes).
         gap = None
-        if give or recv:
-            gv, rv = _consensus_packages(give, recv, seed_value)
-            give_value, receive_value = round(gv, 1), round(rv, 1)
-        if give and recv:
-            fairness, point_ratio, _gv, _rv = _fairness_v3(
-                give, recv, seed_value, None, thr)
+        _cv = _consensus_verdict(give_raw, recv_raw, fmt, league_id,
+                                 pricing=_pricing, fairness_threshold=thr)
+        if _cv is not None:                 # both sides priced
+            give_value, receive_value = _cv["give_value"], _cv["receive_value"]
+            fairness, point_ratio = _cv["fairness"], _cv["point_ratio"]
             even = point_ratio >= 0.95
             verdict = ("even" if even
                        else "fair" if fairness is not None else "unfair")
-            _vp = _value_verdict_payload(give_value, receive_value, even)
-            favors = _vp["favors"]
-            gap = _vp["gap"]
+            favors = _cv["favors"]
+            gap = _cv["gap"]
+        elif give or recv:                  # one-sided: package values only
+            gv, rv = _consensus_packages(give, recv, seed_value)
+            give_value, receive_value = round(gv, 1), round(rv, 1)
 
         result = {
             "scoring_format":     fmt,
@@ -31061,9 +31135,137 @@ def _resolve_trade_share(token) -> dict | None:
         return None
 
 
+# ---------------------------------------------------------------------------
+# The value bar on the og share cards (docs/plans/share-card-value-bar/
+# scope.md). The verdict is `_consensus_verdict`, the same call
+# /api/trade/evaluate makes, in market stud-tax mode (the no-session
+# default): never the sharer's private board or session. The words on the
+# bar live in og_image (marketing addendum 14); this side decides bar or no
+# bar, and names the draft picks.
+# ---------------------------------------------------------------------------
+
+_SHARE_BAR_FORMATS = ("1qb_ppr", "sf_tep")
+
+# An owned pick's id is database.make_pick_id's
+# `{league}_{season}_{round}_{original_roster}`.
+_OWNED_PICK_ID_RE = re.compile(r"^(.+?)_(\d{4})_(\d{1,2})_(.+)$")
+
+
+def _share_bar_format(raw) -> str | None:
+    """A share URL's `?fmt=`, only when it names a real format."""
+    return raw if raw in _SHARE_BAR_FORMATS else None
+
+
+def _value_bar_date(d) -> str:
+    """A date -> "Nov 13, 2026" (B4: three-letter month, no leading zero,
+    four-digit year)."""
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def _share_pick_labels(asset_ids) -> dict[str, str]:
+    """Card labels for the draft-pick ids among `asset_ids`: a pick is never
+    a players row, so without a label the card drew "Unknown player".
+
+    Generic rungs use `generic_pick_label` ("Mid 1st Round Pick"); owned
+    picks use `_owned_pick_label` on the season and round in the pick's own
+    id ("2026 1st"), so the label survives the pick's row leaving
+    draft_picks after its draft. The original owner's name is left off on
+    purpose: it is a leaguemate's username, on a public image."""
+    labels: dict[str, str] = {}
+    for aid in {str(a) for a in (asset_ids or []) if a}:
+        parsed = parse_generic_pick_id(aid)
+        if parsed is not None:
+            labels[aid] = generic_pick_label(*parsed)
+            continue
+        m = _OWNED_PICK_ID_RE.match(aid)
+        if m:
+            labels[aid] = _owned_pick_label(
+                {"season": int(m.group(2)), "round": int(m.group(3))})
+    return labels
+
+
+def _share_value_bar(give_ids, recv_ids, fmt, league_id=None) -> dict | None:
+    """The value bar a share card draws, as {verdict: {favors, gap,
+    second_in_firsts}, as_of, scoring_format}, or None for no bar.
+
+    No bar (Product rule) when the format is unknown, either side is empty,
+    any id on either side can't be priced, or a side's value is 0. Unpriced
+    ids are never dropped to draw a bar anyway. Never raises: a failure is
+    no bar.
+
+    `as_of` is the UTC date of THIS render: the values are computed now,
+    from the live pool, and legal allows render-time values only when the
+    date shown is the day they were computed. `second_in_firsts` puts the
+    +/-2nd ticks where a Mid 2nd sits TODAY (Mid 2nd / Mid 1st over the
+    current generic-pick values), so a fill can't end on "2nd" under a
+    label that says "a Late 1st".
+    """
+    if _og_image is None or fmt not in _SHARE_BAR_FORMATS:
+        return None
+    give = [str(x) for x in (give_ids or []) if x]
+    recv = [str(x) for x in (recv_ids or []) if x]
+    if not give or not recv:
+        return None
+    ts = _trade_service_mod
+    try:
+        # Market stud tax and the default pick pricing, as for an anonymous
+        # evaluate; an outer pin (a test or harness) is kept, the
+        # entry-point convention.
+        with ts.stud_tax_override(ts.pinned_stud_tax_mode() or ts.STUD_TAX_DEFAULT), \
+                ts.pick_pricing_override(ts.pinned_pick_pricing_mode()
+                                         or ts.pick_pricing_mode_for_user(None)):
+            v = _consensus_verdict(give, recv, fmt, league_id or None)
+        if (v is None or v["dropped_ids"]
+                or v["give_value"] <= 0 or v["receive_value"] <= 0):
+            return None
+        e2v = ts.elo_to_value
+        second_in_firsts = (e2v(GENERIC_PICK_SEEDS[(2, "Mid")])
+                            / e2v(GENERIC_PICK_SEEDS[(1, "Mid")]))
+        as_of = _value_bar_date(datetime.now(timezone.utc).date())
+    except Exception as e:
+        log.warning("share card value bar failed (no bar): %s", type(e).__name__)
+        return None
+    return {"verdict": {"favors": v["favors"], "gap": v["gap"],
+                        "second_in_firsts": second_in_firsts},
+            "as_of": as_of, "scoring_format": fmt}
+
+
+def _share_card_kwargs(give_ids, recv_ids, fmt, league_id=None) -> dict:
+    """The renderer kwargs for one share card: the bar (or none) and the
+    pick labels."""
+    bar = _share_value_bar(give_ids, recv_ids, fmt, league_id) or {}
+    return {
+        "verdict":        bar.get("verdict"),
+        "as_of":          bar.get("as_of"),
+        "scoring_format": bar.get("scoring_format"),
+        "pick_labels":    _share_pick_labels(list(give_ids or []) + list(recv_ids or [])),
+    }
+
+
+def _trade_share_card_kwargs(match: dict) -> dict:
+    """`_share_card_kwargs` for a resolved trade share: EXACTLY the lists the
+    card draws as YOU GIVE (user_a_give) and YOU GET (user_a_receive), in
+    the league's own scoring format."""
+    try:
+        give = json.loads(match.get("user_a_give") or "[]")
+        recv = json.loads(match.get("user_a_receive") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        give, recv = [], []
+    if not isinstance(give, list) or not isinstance(recv, list):
+        give, recv = [], []
+    league_id = str(match.get("league_id") or "")
+    try:
+        fmt = get_league_scoring(league_id) if league_id else None
+    except Exception as e:
+        log.warning("share card: league format lookup failed (no bar): %s",
+                    type(e).__name__)
+        fmt = None
+    return _share_card_kwargs(give, recv, fmt, league_id)
+
+
 @app.route("/og/trade/<token>.png")
 def og_trade_card(token):
-    """Render a shared trade's give/get + fairness as a 1200x630 PNG.
+    """Render a shared trade's give/get and value bar as a 1200x630 PNG.
 
     A hit renders from the row the token resolves to; every miss returns
     the same generic "expired" PNG, status 200.
@@ -31074,7 +31276,8 @@ def og_trade_card(token):
     if match is None:
         return _png_response(_og_image.render_expired_trade_card())
     try:
-        png, status = _og_image.render_trade_card(match)
+        png, status = _og_image.render_trade_card(
+            match, **_trade_share_card_kwargs(match))
     except Exception as e:
         log.error("og_trade_card error (match %s): %s", match.get("id"), e)
         png = _og_image.render_placeholder_card("Share card unavailable", str(e)[:80])
@@ -31103,8 +31306,12 @@ def _share_html(
     image_url: str,
     cta_text: str,
     cta_url: str,
+    image_alt: str | None = None,
 ) -> "Response":
-    """Minimal HTML wrapper with OG tags + small human-readable body."""
+    """Minimal HTML wrapper with OG tags + small human-readable body.
+
+    `image_alt` adds og:image:alt (the share cards' alt text, marketing
+    addendum 14 B8); without it the page is unchanged."""
     # Escape minimal HTML special chars — we never render user-controlled
     # HTML inside any attribute, so basic replacement is sufficient.
     def esc(s: str) -> str:
@@ -31113,6 +31320,8 @@ def _share_html(
 
     # Unfurlers need an absolute image URL; the visible <img> stays relative.
     og_image_url = _absolute_url(image_url)
+    alt_meta = (f'\n  <meta property="og:image:alt" content="{esc(image_alt)}">'
+                if image_alt else "")
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -31127,7 +31336,7 @@ def _share_html(
   <meta property="og:description" content="{esc(description)}">
   <meta property="og:image" content="{esc(og_image_url)}">
   <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
+  <meta property="og:image:height" content="630">{alt_meta}
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{esc(title)}">
   <meta name="twitter:description" content="{esc(description)}">
@@ -31208,7 +31417,8 @@ def share_trade_page(token):
     """
     if _og_image is None:
         return _og_unavailable_response()
-    if _resolve_trade_share(token) is None:
+    match = _resolve_trade_share(token)
+    if match is None:
         return _share_html(
             title=_og_image.TRADE_LINK_EXPIRED_TITLE,
             description=_og_image.TRADE_LINK_EXPIRED_BODY,
@@ -31217,7 +31427,15 @@ def share_trade_page(token):
             cta_url="/",
         )
     title = "Trade Match"
-    description = "A dynasty fantasy trade — see the give/get breakdown and fairness verdict."
+    # The line matches the image: a comparison is promised only when the
+    # card draws the bar (marketing addendum 14 A1).
+    card = _trade_share_card_kwargs(match)
+    if card["verdict"] is not None:
+        description = ("A dynasty fantasy trade. See the give/get breakdown and how "
+                       "the values compare in draft-pick terms. Values are an "
+                       "estimate from market consensus, not a guarantee.")
+    else:
+        description = "A dynasty fantasy trade. See the give/get breakdown."
     image_url = f"/og/trade/{token}.png"
     return _share_html(
         title=title,
@@ -31225,6 +31443,8 @@ def share_trade_page(token):
         image_url=image_url,
         cta_text="Find your next trade",
         cta_url="/",
+        image_alt=_og_image.value_bar_alt(card["verdict"], card["as_of"],
+                                          card["scoring_format"]),
     )
 
 
@@ -31391,13 +31611,29 @@ def share_package_page(short_id):
     if pkg is None:
         return jsonify({"error": "not_found"}), 404
     n = len(pkg["give_ids"]) + len(pkg["receive_ids"])
+    # `?fmt=` (1qb_ppr / sf_tep) is the package's scoring format: a package
+    # stores none, and without one the card draws no bar, so a superflex
+    # package is never priced as 1QB. It rides into og:image, as /s/tiers.
+    fmt = _share_bar_format(request.args.get("fmt"))
+    card = _share_card_kwargs(pkg["give_ids"], pkg["receive_ids"], fmt)
+    if card["verdict"] is not None:
+        description = (f"A {n}-player dynasty trade package. See the give/get "
+                       "breakdown and how the values compare in draft-pick terms. "
+                       "Values are an estimate from market consensus, not a guarantee.")
+    else:
+        description = f"A {n}-player dynasty trade package. See the give/get breakdown."
+    image_url = f"/og/p/{short_id}.png"
+    if fmt:
+        image_url += f"?fmt={fmt}"
     return _share_html(
         title="Trade Package",
-        description=(f"A {n}-player dynasty trade package — see the give/get "
-                     "breakdown and fairness read."),
-        image_url=f"/og/p/{short_id}.png",
+        description=description,
+        image_url=image_url,
         cta_text="Build your own trade",
         cta_url="/",
+        image_alt=(_og_image.value_bar_alt(card["verdict"], card["as_of"],
+                                           card["scoring_format"])
+                   if _og_image is not None else None),
     )
 
 
@@ -31408,8 +31644,17 @@ def og_package_card(short_id):
         return jsonify({"error": "not_found"}), 404
     if _og_image is None:
         return _og_unavailable_response()
+    fmt = _share_bar_format(request.args.get("fmt"))
     try:
-        png, status = _og_image.render_package_card(short_id)
+        kwargs = {}
+        try:
+            pkg = load_shared_package(short_id)
+        except Exception as e:
+            log.warning("og_package_card: package lookup failed: %s", type(e).__name__)
+            pkg = None
+        if pkg is not None:
+            kwargs = _share_card_kwargs(pkg["give_ids"], pkg["receive_ids"], fmt)
+        png, status = _og_image.render_package_card(short_id, **kwargs)
     except Exception as e:
         log.error("og_package_card error (%s): %s", short_id, e)
         png = _og_image.render_placeholder_card("Share card unavailable", str(e)[:80])
