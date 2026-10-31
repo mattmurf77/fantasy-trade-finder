@@ -941,6 +941,36 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     #                          (the route also needs growth.join_landing).
     "invite_landing_opened",
     "invite_landing_cta",
+    # ── Referral loop L7, 2026-10-24 (prd.md FR-13–FR-17, §7, §10). Same
+    # grant (analytics-lead PR #350, C1–C9), registered in the SAME commit as
+    # each emitter (backend/referral_ledger.py). Owner: the REFERRER, while
+    # the invitee is the one acting; written with platform="server" and
+    # touch_user=False (C6), and NON_INTENT in analytics_queries for the
+    # invite_landing_* reason above. No invitee id (C2), no username (C9),
+    # no key containing "token" (C1). Server-fired, so the props live here
+    # and are pinned at the writer by tests/test_referral_ledger.py:
+    #   referral_attributed  invite_id (the share id `t` = share_token, never
+    #                        a sibling's invite_token), referral_id
+    #                        (referrals.id), league_id, attribution_method
+    #                        token|league_match, league_platform
+    #                        sleeper|espn|mfl|fleaflicker, notified (bool:
+    #                        the FR-18 bell row was written). At a NEW
+    #                        user's first session init, ledger credit only.
+    #   referral_activated   invite_id, referral_id, league_id,
+    #                        days_to_activate (int 0–14), notified (bool:
+    #                        the FR-19 row was written or merged). The
+    #                        invitee's first stage-7 event (C5: read from
+    #                        analytics_queries.FUNNEL_STAGES, today
+    #                        trade_proposed | match_swiped) within 14 days of
+    #                        joined_at; never trades_generated.
+    #
+    # `signup` (above, owner = the new user, class unchanged) gains two props
+    # while growth.referral_ledger is on (FR-16): attribution
+    # token|league_match|legacy_ref|none and attribution_miss
+    # unknown|expired|not_member|null. A signup row with no props predates
+    # the flag (pre-instrumentation), not `none`.
+    "referral_attributed",
+    "referral_activated",
     # ── S0's I-1 serve check, 2026-10-27 (analytics-lead's pre-grant, the
     # 2026-10-26 report §2 (a); models-lead R2.4 addendum (ii)) — registered
     # in the SAME commit as its emitter (server._emit_deck_i1_check).

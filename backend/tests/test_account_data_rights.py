@@ -166,6 +166,33 @@ def test_export_happy_path_matches_deletion_matrix(client):
     assert "SHARE_TOKEN_MINE" not in exported and "SHARE_TOKEN_THEIRS" not in exported
 
 
+def test_export_referrals_omit_both_bearer_ids(client):
+    """Referral loop L7 (FR-23): both sides of the user's referrals are
+    exported with the ledger columns, never invite_token or share_token."""
+    c, token, flags_on = client
+    flags_on.add("account.data_export")
+    db_module.upsert_user(sleeper_user_id=UID)
+    with db_module.engine.begin() as conn:
+        for referrer, referred, tok in ((UID, "other_uid", "INVITEMINE01"),
+                                        ("other_uid", UID, "INVITETHEIRS"),
+                                        ("other_uid", "third_uid", "INVITEOTHERS")):
+            conn.execute(insert(db_module.referrals_table).values(
+                referrer_user_id=referrer, referred_user_id=referred, league_id="lg1",
+                invite_token=tok, share_token=tok, status="joined",
+                surface="league_home", attribution_method="token",
+                created_at="2026-10-24T00:00:00+00:00"))
+    r = c.get("/api/account/export", headers=_h(token))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    refs = r.get_json()["tables"]["referrals"]
+    assert sorted((x["referrer_user_id"], x["referred_user_id"]) for x in refs) == sorted([
+        ("other_uid", UID), (UID, "other_uid")])
+    for x in refs:
+        assert "invite_token" not in x and "share_token" not in x
+        assert (x["surface"], x["attribution_method"]) == ("league_home", "token")
+    exported = r.get_data(as_text=True)
+    assert "INVITEMINE01" not in exported and "INVITETHEIRS" not in exported
+
+
 # ---------------------------------------------------------------------------
 # 2 + 3. Apple revocation on deletion
 # ---------------------------------------------------------------------------
