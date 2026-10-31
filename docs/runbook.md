@@ -731,7 +731,7 @@ If these stop firing, queued pushes pile up in `notification_queue` and digests/
 - **Known limits:**
   - A hung step blocks the steps after it, and single-flight then blocks the next day's run too (the "already in flight" warning names its age). Every network call in the steps carries a timeout; restarting the worker clears it.
   - A worker restart mid-run (a deploy at 13:30, an OOM) loses the rest of that run. Each step is idempotent and the weekday gates are `>=`, so the next day retries.
-  - The run shares the free instance's CPU with request traffic while it runs; the CPU-heavy steps (7 once re-enabled, 8) run last.
+  - The run shares the web worker's CPU and GIL with request traffic while it runs (one gunicorn worker, `--threads 4` since #398, `standard` plan since #376); the CPU-heavy steps (7 once re-enabled, 8) run last.
 - **Until it is deployed,** the manual workarounds still apply. Usage Trends, weekly once Sleeper's state rolls over: `python3 scripts/refresh_usage_trends.py --remote`. Roster snapshots: `POST /api/cron/roster-snapshot`.
 
 **Sweep scope (2026-09-03).** Both league sweeps are now bounded: the hourly draft-status queue and the weekly roster-snapshot work-list only return leagues whose `leagues.updated_at` is inside `database.ACTIVE_LEAGUE_WINDOW_DAYS` (30 — stamped by `upsert_league` on every `session_init`), so a league nobody opens any more stops costing platform reads. `POST /api/cron/roster-snapshot` passes `active_within_days=None` and still sweeps everything; per-league forcing is `_refresh_league_draft_status(league_id, force=True)`, which skips the cheap-skip entirely.
