@@ -36,7 +36,7 @@ from backend.database import deck_impressions_table, deck_outcomes_table
 from backend.eval.bdk_audit import (
     FAIL, INCOMPLETE, NOT_AUDITABLE, PASS, ReadOnlyViolation, audit, main, render,
 )
-from backend.eval.contract import card_impression_id
+from backend.eval.contract import REDACTED_PARTNER_PREFIX, card_impression_id
 from backend.tests.test_eval_pack_reader import SERVED, _card, _deck_cards, _row, pack_table
 from backend.tests.test_eval_withdrawals_and_paging import (
     DB, _after, act, make_db, put_pack, withdraw, withdrawals_table,
@@ -876,3 +876,121 @@ def test_help_documents_the_exit_codes(capsys):
     for line in ("0  PASS", "1  FAIL", "2  a refused database or a ReadOnlyViolation",
                  "3  INCOMPLETE", "4  an unexpected error"):
         assert line in out
+
+
+# ---------------------------------------------------------------------------
+# #503 QA follow-ups; models-lead F3 / F4; #515's market_coerced
+# ---------------------------------------------------------------------------
+
+def _clean_market(job, idx):
+    return {a: v for i in idx for side in shape(None, job, i) for a, v in side.items()}
+
+
+def test_a_card_holding_a_coerced_value_is_not_auditable_for_breakup_and_filler():
+    """#515: the filter saw NaN/inf there, recorded null and listed in
+    market_coerced. Breakup and filler read it order-dependently, so they
+    can't be checked; B-DK-6 reads it as None and still checks the card."""
+    db = make_db()
+    give, receive = shape("breakup", "d", 1)
+    market = {**_clean_market("d", (0,)), **dict.fromkeys(give), **receive}
+    deck(db, "d", 2, {1: row("d", 1, give, receive)},
+         record={"market": market, "market_coerced": sorted(give)})
+    r = run(db)
+    for name in ("breakup", "filler"):
+        assert (r.rules[name]["audited"], r.rules[name]["not_auditable"]) == (1, 1), name
+    assert r.rules["redundant"]["audited"] == 2 and r.filter_inputs == {"recorded": 1}
+
+
+@pytest.mark.parametrize("over", [
+    {"market": {"d-g0": "2000"}},             # #503 QA P3-2: a string crashed the read
+    {"market": {"d-g0": True}},               # and a bool read as 1.0
+    {"market_coerced": "d-g0"},
+    {"market_coerced": [5]},
+], ids=["string", "bool", "coerced_not_list", "coerced_not_str"])
+def test_a_record_with_a_malformed_value_is_record_failed(over):
+    db = make_db()
+    deck(db, "d", 2, record=over)
+    r = run(db)
+    assert r.filter_inputs == {"record_failed": 1}
+    assert r.rules["breakup"]["status"] == NOT_AUDITABLE
+
+
+def test_an_asset_with_a_market_but_no_position_is_not_auditable():
+    """#503 QA P3-1: coverage needs both halves of the record."""
+    db = make_db()
+    market = _clean_market("d", (0, 1))
+    positions = dict.fromkeys(market, "WR")
+    del positions["d-r1"]
+    deck(db, "d", 2, record={"market": market, "position": positions})
+    for name in ("breakup", "filler", "redundant"):
+        t = run(db).rules[name]
+        assert (t["audited"], t["not_auditable"]) == (1, 1), name
+
+
+def test_exemptions_are_split_by_deck_type():
+    """models-lead F3: a protected card is exempt with or without a record;
+    the split shows how much of a PASS rests on each."""
+    db = make_db()
+    deck(db, "rec", 2, record={"protected": [th(1)]})
+    deck(db, "row", 2, {1: row("row", 1, likes_you=True)})
+    r = run(db)
+    for name in ("breakup", "filler", "redundant"):
+        assert r.rules[name]["protected_by_deck"] == {"recorded": 1, "no_record": 1}, name
+    assert "B-DK-4..6 exempt (protected) cards by deck (F3): recorded 1, no record 1." in render(r)
+
+
+def test_live_evidence_decks_cut_inside_the_window_are_counted_not_checked():
+    """models-lead F4: D3's serve-time re-cap runs only on packed decks, so a
+    live-evidence deck with a never-delivered withdrawal in its first W
+    cards is counted, never certified; one cut past W, or a packed deck, is
+    not."""
+    db = make_db()
+    deck(db, "cut", W + 2)
+    withdraw(db, "cut", 5, 0, reason="disposition_cut")
+    deck(db, "late", W + 2)
+    withdraw(db, "late", W + 1, 0, reason="disposition_cut")
+    deck(db, "packed", W + 2, record={})
+    withdraw(db, "packed", 5, 0, reason="disposition_cut")
+    r = run(db)
+    assert r.rules["repeat"]["after_cut_not_checked"] == 1
+    assert "B-DK-7 after-cut: not checked (1): live-evidence (no-pack) decks" in render(r)
+
+
+REDACTED = f"{REDACTED_PARTNER_PREFIX}9f0c"
+
+
+@pytest.mark.parametrize("record", [{}, None], ids=["recorded", "no_record"])
+def test_a_redacted_partner_s_cards_are_not_auditable(record):
+    """head-eng 2026-10-29: the deletion scrub drops a redacted partner's
+    hashes from filter_inputs.protected and its qb_te entry (and may clear
+    its rows' likes_you), so its cards' protection and holdings are unknown:
+    not auditable for all four rules, never a violation and never a pass.
+    Card 1 trips breakup and card 3 is X's fourth copy, so each would read as
+    a violation."""
+    db = make_db()
+    deck(db, "r", W, {1: row("r", 1, *shape("breakup", "r", 1), partner_user_id=REDACTED),
+                      **{i: with_x("r", i) for i in (0, 2)},
+                      3: with_x("r", 3, partner_user_id=REDACTED), 4: with_x("r", 4)},
+         record=record)
+    r = run(db)
+    for name in ("breakup", "filler", "redundant"):
+        assert (r.rules[name]["violations"] or 0, r.rules[name]["protected"]) == (0, 0), name
+    assert r.rules["breakup"]["not_auditable"] == (2 if record is not None else W)
+    t = r.rules["repeat"]
+    assert (t["violations"], t["not_auditable"], t["incomplete_decks"]) == (0, 2, 1)
+    assert t["status"] == INCOMPLETE and r.overall == INCOMPLETE and r.redacted_cards == 2
+    out = render(r)
+    assert ("Redacted partners (account deletion): 2 audit-set cards not auditable for "
+            "B-DK-4..7") in out
+    assert "1 decks have a window card with no full row or a redacted partner." in out
+
+
+def test_only_the_token_marks_a_redacted_partner():
+    """A partner id that merely contains the prefix is audited as usual, and
+    a deck without redacted cards prints no redaction line."""
+    db = make_db()
+    deck(db, "p", 2, {1: row("p", 1, *shape("breakup", "p", 1),
+                             partner_user_id=f"x{REDACTED_PARTNER_PREFIX}1")}, record={})
+    r = run(db)
+    assert (r.rules["breakup"]["violations"], r.redacted_cards) == (1, 0)
+    assert "Redacted partners" not in render(r)
