@@ -19,12 +19,16 @@ minting tokens with test_trade_share_tokens.py's fixture and helpers.
 Section 5 pins legal R13 on every /s/* page: a Privacy link, the Fleeced
 brand (no "Fantasy Trade Finder"), tokens.css, and the og PNG footer.
 
-Section 6 pins design-lead's og trade card fixes B1-B3 on a real render:
-the verdict clears the meter bar, no missing-glyph box or centre disc, and
-the position chips use the cross-client position colours with ink-0 labels.
+Section 6 pins the og trade card fixes on a real render: no fairness number
+or meter (models-lead I6 replaced B1), no missing-glyph box or centre disc,
+and the position chips use the cross-client position colours with ink-0
+labels.
 
 Section 7 pins the same ink-0 label on the tier card's position chip
 (/og/tiers/<pos>/<username>.png, dark behind growth.tier_board_share).
+
+Section 8 pins the recentred trade card layout and the "+N more" row for a
+side with more than 3 players.
 """
 import io
 import re
@@ -338,10 +342,9 @@ def test_og_trade_card_still_renders_with_fleeced_footer(env):
 INK_0 = (12, 14, 17)
 
 
-def _spied_trade_card(env):
-    """Render a live /og/trade/<token>.png, recording every text,
-    rounded_rectangle and ellipse call on the canvas, in draw order."""
-    tok = _live_token(env)
+def _spied_get(c, path, flags=None):
+    """GET an og PNG, recording every text, line, rounded_rectangle and
+    ellipse call on any canvas, in draw order."""
     calls = []
     cls = og_image.ImageDraw.ImageDraw
 
@@ -353,33 +356,40 @@ def _spied_trade_card(env):
             return real(self, *a, **kw)
         return wrapper
 
-    with patch.object(cls, "text", spy("text")), \
+    with patch.object(server, "is_enabled", flags or SHARE_ON), \
+         patch.object(cls, "text", spy("text")), \
+         patch.object(cls, "line", spy("line")), \
          patch.object(cls, "rounded_rectangle", spy("rounded_rectangle")), \
          patch.object(cls, "ellipse", spy("ellipse")):
-        r = env.get(f"/og/trade/{tok}.png")
+        r = c.get(path)
     assert r.status_code == 200
     assert r.headers["Content-Type"] == "image/png"
     return r, calls
+
+
+def _spied_trade_card(env):
+    """Render a live /og/trade/<token>.png through _spied_get."""
+    return _spied_get(env, f"/og/trade/{_live_token(env)}.png")
 
 
 def _texts(calls):
     return [(a[0], a[1], kw) for name, a, kw in calls if name == "text"]
 
 
-def test_og_trade_card_b1_verdict_clears_meter_bar(env):
-    """B1: the "N% fair" glyph box ends at least 16px above the meter bar."""
+def test_og_trade_card_has_no_fairness_number_or_meter(env):
+    """models-lead I6 (replaces B1): the search-rank "% fair" number is gone.
+    No drawn text has a percentage or the word "fair", nothing is drawn in the
+    old meter band (y 500-540), and _compute_fairness no longer exists."""
     _, calls = _spied_trade_card(env)
-    verdict = [i for i, (name, a, _) in enumerate(calls)
-               if name == "text" and re.fullmatch(r"\d+% fair", a[1])]
-    assert len(verdict) == 1, verdict
-    i = verdict[0]
-    (x, y), label = calls[i][1][:2]
-    _, top, _, bottom = calls[i][2]["font"].getbbox(label)
-    # The bar (track + fill) is every rounded rectangle drawn after the verdict.
-    bars = [a[0] for name, a, _ in calls[i + 1:] if name == "rounded_rectangle"]
-    assert bars, "no meter bar drawn after the verdict"
-    bar_top = min(b[1] for b in bars)
-    assert bar_top - (y + bottom) >= 16, (y + top, y + bottom, bar_top)
+    for _, text, _ in _texts(calls):
+        assert not re.search(r"\d+\s*%", text), text
+        assert "fair" not in text.lower(), text
+    for name, a, _ in calls:
+        if name == "rounded_rectangle":
+            _, y0, _, y1 = a[0]
+            assert not (y0 <= 540 and y1 >= 500), a[0]
+    assert not hasattr(og_image, "_compute_fairness")
+    assert not hasattr(og_image, "_fairness_color")
 
 
 # Every glyph here is in each font og_image can load (Arial, Helvetica, SF,
@@ -397,7 +407,7 @@ def test_og_trade_card_b2_no_missing_glyph_or_centre_disc(env):
     for _, text, _ in _texts(calls):
         assert "⇄" not in text
         assert set(text) <= SAFE_CHARS, (text, set(text) - SAFE_CHARS)
-    cx, cy = og_image.CARD_W // 2, (135 + 415) // 2   # between the columns
+    cx, cy = og_image.CARD_W // 2, (175 + 455) // 2   # between the columns
     for name, a, _ in calls:
         if name == "ellipse":
             x0, y0, x1, y1 = a[0]
@@ -504,3 +514,61 @@ def test_og_tier_card_position_label_is_ink_0(env):
         assert x0 <= cx <= x1 and y0 <= cy <= y1, (pos, chips[0], labels[0])
         assert _wcag_contrast(fill, chip_fill) >= 3.0, (pos, chip_fill, fill)
         assert fill == INK_0, (pos, fill)
+
+
+# ---------------------------------------------------------------------------
+# 8. og trade card: recentred layout, "+N more" past 3 players a side
+# ---------------------------------------------------------------------------
+
+PANEL_FILL = (255, 255, 255, 18)
+
+
+def test_og_trade_card_layout_is_recentred(env):
+    """With the verdict gone the card is recentred (design-lead): the title
+    is drawn at y=85, both give/get panels span y 175-455, and the footer
+    rule stays at y=560."""
+    _, calls = _spied_trade_card(env)
+    panels = [a[0] for name, a, kw in calls
+              if name == "rounded_rectangle" and kw.get("fill") == PANEL_FILL]
+    assert len(panels) == 2, panels
+    assert all((p[1], p[3]) == (175, 455) for p in panels), panels
+    titles = [xy for xy, text, _ in _texts(calls) if text == "Trade Match"]
+    assert titles == [(60, 85)], titles
+    rules = [a[0] for name, a, _ in calls if name == "line"]
+    assert rules == [[(60, 560), (og_image.CARD_W - 60, 560)]], rules
+
+
+MORE_RE = re.compile(r"\+\d+ more")
+GIVE = [("np1", "Avery Firstman", "WR"), ("np2", "Blake Secondo", "RB"),
+        ("np3", "Casey Thirdly", "QB"), ("np4", "Drew Fourtner", "TE"),
+        ("np5", "Emery Fifthson", "WR")]
+
+
+@pytest.mark.parametrize("n", [3, 4, 5])
+def test_og_package_card_caps_a_side_at_two_names_plus_n_more(env, n):
+    """A side of 3 draws all 3 names. Over 3, it draws the first 2 names and
+    then "+N more" (N = len - 2) in TEXT_MUTED, at the third row's y and in
+    the player-name font. Rendered through /og/p (render_package_card)."""
+    with db_module.engine.begin() as conn:
+        for pid, name, pos in GIVE[:n] + [("np9", "Gale Getter", "RB")]:
+            conn.execute(insert(db_module.players_table).values(
+                player_id=pid, full_name=name, position=pos, search_rank=50))
+    sid = f"pkgMore{n}"
+    assert db_module.create_shared_package(sid, USER_A, [p for p, _, _ in GIVE[:n]],
+                                           ["np9"])
+    _, calls = _spied_get(env, f"/og/p/{sid}.png")
+    texts = _texts(calls)
+    drawn = [text for _, text, _ in texts]
+    names = [name for _, name, _ in GIVE[:n]]
+    more = [(xy, text, kw) for xy, text, kw in texts if MORE_RE.fullmatch(text)]
+    if n == 3:
+        assert all(name in drawn for name in names), drawn
+        assert more == []
+        return
+    assert names[:2] == [t for t in drawn if t in names], drawn   # only the first 2
+    assert [text for _, text, _ in more] == [f"+{n - 2} more"]
+    (x, y), _, kw = more[0]
+    assert kw["fill"] == og_image.TEXT_MUTED
+    name_fonts = {id(k["font"]) for _, t, k in texts if t in names}
+    assert name_fonts == {id(kw["font"])}                 # the player-name font
+    assert (x, y) == (60 + 24, 175 + 70 + 2 * 66 + 6)     # third row, give side

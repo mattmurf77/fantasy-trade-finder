@@ -453,60 +453,13 @@ def _player_display_name(player: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Trade fairness card
+# Trade give/get card (no fairness number: models-lead I6, Product 2026-10-31)
 # ---------------------------------------------------------------------------
-
-def _compute_fairness(
-    give_ids: list[str],
-    receive_ids: list[str],
-    players_by_id: dict[str, dict],
-) -> int:
-    """
-    Produce a 0–100 fairness score from the two sides' player data.
-
-    We don't have persisted composite scores on the match record, so this
-    derives a rough fairness from search_rank symmetry: the closer the
-    sides' average search_rank, the higher the fairness score. This is
-    purely cosmetic for the share card — the authoritative fairness
-    stays inside trade_service.
-    """
-    def avg_rank(ids: list[str]) -> float:
-        ranks = []
-        for pid in ids:
-            p = players_by_id.get(str(pid))
-            if not p:
-                continue
-            r = p.get("search_rank")
-            if r is None:
-                continue
-            ranks.append(float(r))
-        if not ranks:
-            return 500.0
-        return sum(ranks) / len(ranks)
-
-    a = avg_rank(give_ids)
-    b = avg_rank(receive_ids)
-    if a <= 0 and b <= 0:
-        return 50
-    denom = max(a, b) or 1.0
-    ratio = min(a, b) / denom  # 0..1 — closer to 1 means more even
-    # Map ratio 0..1 → 40..98 so trades always look like they're in range
-    score = 40 + ratio * 58
-    return int(round(max(0, min(100, score))))
-
-
-def _fairness_color(score: int) -> tuple[int, int, int]:
-    if score >= 85:
-        return (76,  175, 80)     # green
-    if score >= 65:
-        return (255, 193, 7)      # amber
-    return (244, 67, 54)          # red
-
 
 def render_trade_card(match: dict) -> tuple[bytes, int]:
     """
-    Render a trade give/get card with fairness verdict for ONE resolved
-    trade_matches row (a dict; only user_a_give / user_a_receive are read).
+    Render a trade give/get card for ONE resolved trade_matches row (a
+    dict; only user_a_give / user_a_receive are read).
 
     The caller resolves the row through trade_share_tokens (build O8). This
     function never looks a match up by a value taken from a URL: the old
@@ -535,13 +488,10 @@ def render_trade_card(match: dict) -> tuple[bytes, int]:
     all_ids = [str(x) for x in (a_give + a_receive)]
     players_by_id = load_players_by_ids(all_ids) if all_ids else {}
 
-    fairness = _compute_fairness(a_give, a_receive, players_by_id)
-
     return _render_trade_card_png(
         give_ids=a_give,
         receive_ids=a_receive,
         players_by_id=players_by_id,
-        fairness=fairness,
     ), 200
 
 
@@ -596,13 +546,11 @@ def render_package_card(short_id) -> tuple[bytes, int]:
     receive = [str(x) for x in pkg.get("receive_ids") or []]
     all_ids = give + receive
     players_by_id = load_players_by_ids(all_ids) if all_ids else {}
-    fairness = _compute_fairness(give, receive, players_by_id)
 
     return _render_trade_card_png(
         give_ids=give,
         receive_ids=receive,
         players_by_id=players_by_id,
-        fairness=fairness,
         title="Trade Package",
     ), 200
 
@@ -611,7 +559,6 @@ def _render_trade_card_png(
     give_ids: list[str],
     receive_ids: list[str],
     players_by_id: dict[str, dict],
-    fairness: int,
     title: str = "Trade Match",
 ) -> bytes:
     img = _new_canvas()
@@ -621,18 +568,17 @@ def _render_trade_card_png(
     font_side    = _load_font(30, bold=True)
     font_player  = _load_font(28)
     font_pos     = _load_font(20, bold=True)
-    font_score   = _load_font(72, bold=True)
     font_small   = _load_font(22)
 
     # Header
-    draw.text((60, 45), title, font=font_title, fill=TEXT_PRIMARY)
+    draw.text((60, 85), title, font=font_title, fill=TEXT_PRIMARY)
 
     # Two sides
     col_w = 470
     left_x = 60
     right_x = CARD_W - 60 - col_w
-    col_top = 135
-    col_bot = 415
+    col_top = 175
+    col_bot = 455
 
     # Column backgrounds
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
@@ -658,7 +604,9 @@ def _render_trade_card_png(
         if not ids:
             draw.text((x0 + 24, y0 + 80), "—", font=font_player, fill=TEXT_MUTED)
             return
-        for i, pid in enumerate(ids[:3]):
+        # Over 3 players: 2 names, then "+N more" in the third row's slot.
+        shown = ids if len(ids) <= 3 else ids[:2]
+        for i, pid in enumerate(shown):
             p = players_by_id.get(str(pid))
             if p:
                 name = _player_display_name(p)
@@ -686,35 +634,12 @@ def _render_trade_card_png(
             # Player name (truncated to column)
             name = _truncate(draw, name, font_player, (x0 + col_w - 20) - text_x)
             draw.text((text_x, row_y + 6), name, font=font_player, fill=TEXT_PRIMARY)
+        if len(ids) > 3:
+            draw.text((x0 + 24, y0 + 70 + 2 * 66 + 6), f"+{len(ids) - 2} more",
+                      font=font_player, fill=TEXT_MUTED)
 
     render_side(left_x, col_top, give_ids)
     render_side(right_x, col_top, receive_ids)
-
-    # Fairness verdict
-    verdict_y = 428
-    label = f"{fairness}% fair"
-    lw = _text_width(draw, label, font_score)
-    color = _fairness_color(fairness)
-    draw.text(
-        ((CARD_W - lw) // 2, verdict_y),
-        label, font=font_score, fill=color,
-    )
-
-    # Progress bar
-    bar_x0 = 200
-    bar_x1 = CARD_W - 200
-    bar_y0 = CARD_H - 115
-    bar_y1 = bar_y0 + 14
-    draw.rounded_rectangle(
-        [bar_x0, bar_y0, bar_x1, bar_y1],
-        radius=7, fill=DIVIDER,
-    )
-    fill_x = bar_x0 + int((bar_x1 - bar_x0) * (max(0, min(100, fairness)) / 100.0))
-    if fill_x > bar_x0 + 1:
-        draw.rounded_rectangle(
-            [bar_x0, bar_y0, fill_x, bar_y1],
-            radius=7, fill=color,
-        )
 
     _draw_footer(draw, font_small)
     return _to_png_bytes(img)

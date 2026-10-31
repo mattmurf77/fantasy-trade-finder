@@ -211,13 +211,14 @@ Results:
 | R1 | Open a live `/s/trade/<token>` link in Safari | The tab title ends "· Fleeced: Dynasty Trade Finder". Under the CTA: "Fleeced: Dynasty Trade Finder", then an underlined **Privacy** link. Tapping it opens the privacy policy. |
 | R2 | Open an expired or unknown `/s/trade/…` link | The same brand line and **Privacy** link. "Fantasy Trade Finder" appears nowhere on the page. |
 | R3 | Paste a share link into iMessage | The unfurl card's footer reads "Fleeced: Dynasty Trade Finder · fantasy-trade-finder.onrender.com" on one line. **The player names are readable at thumbnail size, not tiny text** (design-lead B4: with no TrueType font on the server, Pillow falls back to a 10px default. If so, vendor a TTF, such as the OFL Archivo files on `design/og-cards`, as the first `_FONT_CANDIDATES` entry). |
-| R4 | Same card, a trade with a QB and a TE | The "% fair" text sits clear above the meter bar. There's no box or odd glyph between YOU GIVE and YOU GET. QB chips are orange and TE chips are purple, with dark labels. |
+| R4 | Same card, a trade with a QB and a TE; then share a trade where one side has 4+ players | No percentage, "fair" text or meter anywhere on the card, and the panels sit centred between the title and the footer. There's no box or odd glyph between YOU GIVE and YOU GET. QB chips are orange and TE chips are purple, with dark labels. On the 4+ side: two players, then "+N more" in grey. |
 
 **Legal: PASSES R13** (legal-lead R28.23, via head-eng 2026-11-01). Every `/s/*` page renders through `_share_html` with the Fleeced title, the brand line, the Privacy link and `noindex`, and the preview footer carries the Fleeced brand.
 
 **Flag-on gate for `growth.tier_board_share` (legal, 2026-11-01).** `/s/tiers/<pos>/<username>` puts the username in its title and description. The route is dark today. **Before that flag is ever turned on, it needs:**
 - (a) an unguessable token in place of the username in the URL, with the username shown only if the sharer chooses to show it;
-- (b) the ink-0 tier-card label, done in `c1e62fa8`.
+- (b) the ink-0 tier-card label, done in `c1e62fa8`;
+- (c) the tier-chip label must fit its 90px chip. Today "WR" overflows by +7px in Arial and +19px in DejaVu Bold, and "QB" by +3px in DejaVu (release-lead QA P3, 2026-11-01; renders in their `qa362/out/r511/tier-chips-sheet.png`). Shrink the label or widen the chip.
 
 **Reviews:** design-lead **passed** the link style and brand line at `8b90d674` (2026-10-31). Their two string changes (`s4.title`, `s4.og_footer`) and the `.brand` contrast fix are applied. Legal-lead's review of R13 is routed via head-eng.
 
@@ -235,7 +236,7 @@ Results:
 - **B3:** `POS_COLORS` contradicted the cross-client invariants (QB red, TE orange). It now uses QB `#f97316`, RB `#22c55e`, WR `#3b82f6` and TE `#a855f7`. Chip labels move from white (2.3:1 on RB) to ink-0 (4.9–8.5:1). `og_image.py` is added to the invariants row's Locations.
 - **B4** (fonts on the server, unverified) rides operator checklist R3.
 
-**Not changing for launch:** the card's "% fair" number. It's cosmetic (`_compute_fairness` maps rank symmetry into 40–98), and Product is taking it to models-lead for the post-launch restyle (GB-02).
+**Superseded 2026-11-01: the "% fair" number and meter are removed before launch** (head-eng; Product decision on models-lead addendum I6). The number was the ratio of the two sides' average Sleeper search rank, which is popularity, not value: it ignored package size and skipped picks, and "no percentage of any kind is safe publicly". It isn't replaced with a verdict. B1 (text clearing the bar) is moot. The card is recentred per design-lead (title y=85, panels 175–455; 85px above, 105px to the footer rule). "+N more" (approved) replaces the silent `ids[:3]` cut when a side has more than 3 players. Evidence: see [2026-11-01 — no fairness number](#2026-11-01--no-fairness-number-recentre-n-more).
 
 **Evidence** (`test_share_link_previews.py` §6). `_spied_trade_card` renders a real `/og/trade/<token>.png` and records every `text`, `rounded_rectangle` and `ellipse` call.
 - **B1:** the "% fair" glyph box (`font.getbbox` at its xy) ends at least 16px above the meter bar. Measured clearance at 72px: 19px in Arial Bold and DejaVu Sans Bold, 30 in Helvetica, 16 in SFNS (the last fallback), 77 with `load_default()`.
@@ -262,3 +263,37 @@ Sabotage runs, each red only on its own test:
   - That surface 404s while `growth.tier_board_share` is off (`config/features.json`), so it isn't widened here.
   - **Done 2026-11-01** (head-eng): the tier card label is now ink-0 (QB 6.90, RB 8.48, WR 5.26, TE 4.88:1; white was 2.80, 2.28, 3.68, 3.96). `test_og_tier_card_position_label_is_ink_0` renders all four positions with the flag on, asserts WCAG ≥ 3:1 for the drawn fill on its chip, and asserts the ink-0 fill. Sabotage (white) fails it on QB (2.80). pytest 7-file set: 146 passed.
   - Left for the GB-02 restyle (flag dark): "WR" at 58px Arial Bold is 97px wide on the 90px chip and overflows by 3–4px each side. With white text the overflow showed on navy; with ink-0 it may read as slightly clipped.
+
+## 2026-11-01 — no fairness number; recentre; +N more
+
+**Entry point:** head-eng (2026-11-01). Product decided to drop the og trade card's "% fair" number and meter before launch (models-lead addendum I6), and #511 doesn't merge without it. The approved title and footer strings, the position colours and the give/get layout stay.
+
+**Changes** (`og_image.py`):
+- `_compute_fairness`, the verdict text and the meter are removed.
+- design-lead's recentre: title (60, 85); `col_top` 175; `col_bot` 455.
+- "+N more" in `TEXT_MUTED` replaces the third row when a side has more than 3 players: 2 names, then "+(len−2) more". With exactly 3 players, all 3 names are drawn.
+
+`_fairness_color` is removed too, since nothing else used it. Both `render_trade_card` and `render_package_card` drop the argument, and the card no longer reads `search_rank`. "+N more" starts at the chip column (x0+24), like a row with no chip. If design-lead wants it under the names (x0+94), that's a one-number change pinned by the test.
+
+**Evidence** (`test_share_link_previews.py` §6 and §8, real renders with draw-call spies):
+- `test_og_trade_card_has_no_fairness_number_or_meter`: no drawn text matches `\d+\s*%` or contains "fair"; no rounded rectangle in y 500–540; no `_compute_fairness` or `_fairness_color` attribute. It replaces B1's clearance test.
+- `test_og_trade_card_layout_is_recentred`: two panels spanning y 175→455, "Trade Match" at (60, 85), and the footer rule as the only line, at 560.
+- `test_og_package_card_caps_a_side_at_two_names_plus_n_more[3,4,5]` through `/og/p` (`render_package_card`). With 3 players, all 3 names and no "+N more". With 4 or 5, the first 2 names, then one `+{n-2} more` in `TEXT_MUTED`, in the player font, at (84, 383).
+- B2's centre check moves to y=315.
+
+Results: pytest 7-file set 150 passed; `check_web_structure` 196/196. Renders were reviewed by league-eng (2-for-2 and 5-for-1).
+
+Sabotage runs, each red only on its own tests:
+
+| Sabotage | Red |
+|---|---|
+| verdict draw back | no-fairness |
+| meter track only | no-fairness (band) |
+| `col_top` 135 | layout, `+N` [4,5] |
+| `ids[:3]` with no "+N more" | `+N` [4,5] |
+| "+N more" in white | `+N` [4,5] |
+
+**Copy decision needed before launch (via head-eng → marketing; not changed here).** Two share-page descriptions still promise the verdict the card no longer shows. Each feeds `<meta name=description>`, `og:description`, `twitter:description` and the visible `<p>`:
+- `server.py:31220` (live `/s/trade/<token>`): "A dynasty fantasy trade — see the give/get breakdown and fairness verdict."
+- `server.py:31397` (`/s/p/<id>`, marketing's `s2.pkg.desc`): "…see the give/get breakdown and fairness read."
+- `server.py:31064` is only a docstring. Nothing in mobile or web share paths reads the og number.
