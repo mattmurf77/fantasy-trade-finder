@@ -136,6 +136,12 @@ Gates: head-eng's ruling on the c3 list (2026-10-29): `receipts_grades`, `gradin
 - **Sabotages:** 5/5 red (contract-id grades kept, row grades kept, grading skipped, no cutoff, cards kept). T-10 is red on an aliased delete and on a tuple-alias update outside `_delete_deck`.
 
 
+## 2026-10-31 — Exit guard on check-send-registry (follow-up to #547, after #539 merged)
+
+Test-only (`mobile/tests/check-send-registry.js`). release-lead asked for it after #539 merged, so the guard didn't move #539's QA'd head. It's the `check-device-first-page` pattern #547 used: a `finished` flag, and an exit handler that sets `exitCode 1` when the run didn't reach its end.
+
+- **Sabotage, with and without the guard, then restored (clean run 37/37, exit 0):** an early `return` → guard 1 / none 0; a hung `await` → guard 1 / none 0; a `throw` → 1 / 1.
+
 ## 2026-10-29 — #537 QA P3s: the doc count, QA's drain tests ported, the ceiling line honest, a failed batch's count logged
 
 Gates: release-lead's #537 QA (GO, SQLite + PG 18 in 3 collations), P3-1 to P3-3, taken on #537 before the operator's go. P3-4 (verify `ix_deck_diagnostic_snapshots_created_at` on prod) is release-lead's read-only check. No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
