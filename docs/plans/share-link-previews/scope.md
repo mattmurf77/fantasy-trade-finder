@@ -297,3 +297,15 @@ Sabotage runs, each red only on its own tests:
 - `server.py:31220` (live `/s/trade/<token>`): "A dynasty fantasy trade — see the give/get breakdown and fairness verdict."
 - `server.py:31397` (`/s/p/<id>`, marketing's `s2.pkg.desc`): "…see the give/get breakdown and fairness read."
 - `server.py:31064` is only a docstring. Nothing in mobile or web share paths reads the og number.
+
+## Renders for the operator's design review (2026-11-01)
+
+These are for the rule of 2026-10-31 (every design change gets the operator's approval, in parallel with release). head-product shows them; they're also embedded in the #511 PR body. "Before" is `origin/main` (`29ba8f26`); "after" is `c2ec824f`.
+- Trade card, 2-for-2: [before](renders/og-trade-card-2for2-before.png) · [after](renders/og-trade-card-2for2-after.png).
+- Trade card, 5-for-1: [before](renders/og-trade-card-5for1-before.png) · [after](renders/og-trade-card-5for1-after.png). Main silently showed 3 of 5 players.
+- Live `/s/trade` page at 1280×900, 2x, headless Chrome: [before](renders/share-page-before.png) · [after](renders/share-page-after.png).
+
+How they were made:
+- The cards come from each version's own `_render_trade_card_png` with the same give/get lists. Main's number comes from its own `_compute_fairness`. The after card is byte-identical to the real `/og/trade/<token>.png` route.
+- The pages are main's `_share_html` source and the Flask test client at `c2ec824f`, each served locally with `tokens.css` and its card.
+- The after page still shows "…and fairness verdict" in its description. That's the copy item routed to marketing.
