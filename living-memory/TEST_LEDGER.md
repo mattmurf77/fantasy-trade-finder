@@ -1,3 +1,13 @@
+## 2026-10-31 — The value bar's ±2nd landmark at today's Mid 2nd / Mid 1st (0.57 → 0.287)
+
+Gates: the scope block `docs/plans/value-bar-scale/scope.md` (head-eng, for the 11-06 binary). A constant and a CSS position; no route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **`backend/tests/test_value_bar_scale.py`, 2 tests:**
+  - the app's `SECOND_IN_FIRSTS` equals `elo_to_value(Mid 2nd) / elo_to_value(Mid 1st)` over `GENERIC_PICK_SEEDS` (0.2865), within 0.005. **Main's 0.57 fails it.**
+  - the web landing miniature's four landmark positions sit at 50 ∓ 0.287 × 50%.
+- **Render:** `docs/plans/value-bar-scale/renders/before-after.png`, a geometry mock for the operator's design review.
+- **TestFlight:** the operator's 4-step checklist in the scope.
+
 ## 2026-10-29 — Addendum G2 and G3 in eval, plus addendum H's H-a1 and H-a2: the response boundary, F4's four buckets, explained #535 orphans
 
 Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook. No route, schema, event, flag, knob or engine-module change. This is models-lead's single eval PR (G-b5); it goes to models-lead as an R-G entry before merge (`models-eng-r-g-g2-eval-pr.md`, group notes).

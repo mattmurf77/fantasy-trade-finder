@@ -376,6 +376,8 @@ The pick-denominated **TradeValueBar** (feedback #157) is the universal trade ve
 
 Deck cards **omit** all four when rebuilt from client echo (server-restart FB-46 path); clients gate the bar on `give_value`/`receive_value` being present.
 
+**The ±2nd landmark** sits at the Mid 2nd / Mid 1st value ratio over `GENERIC_PICK_SEEDS` (`elo_to_value`). That's **0.287** today: mobile `TradeValueBar.tsx` `SECOND_IN_FIRSTS`, and the web landing miniature's 35.65% / 64.35% (`web/css/styles.css` `.lp-market-*`). The share card's bar computes the same ratio server-side (#564). `backend/tests/test_value_bar_scale.py` pins the app constant to the seeds; it had drifted to 0.57, which put a fill reading "≈ a Late 1st" on the "2nd" tick.
+
 **Locations to update together:** `backend/server.py` (`_value_verdict_payload`, `trade_evaluate_route`, `trade_card_to_dict`), the card-construction sites in `backend/trade_service.py` + `backend/trade_optimizer.py` (stamp `give_value`/`receive_value`), `mobile/src/components/TradeValueBar.tsx` + `TradeCard.tsx`, `mobile/src/api/trades.ts` + `mobile/src/api/calc.ts` + `mobile/src/shared/types.ts`.
 
 ---

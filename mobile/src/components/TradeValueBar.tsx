@@ -29,12 +29,15 @@ import { chalk, ice, ink, radii, semantic, space, tier as tierColors, type } fro
 // Scale: the bar spans ±1 generic Mid 1st (the "base first"), so the fill
 // position IS gap.firsts — where it lands is literally the pick reading. The
 // inner ticks mark the ±2nd landmark, the ends are ±1st. The ±2nd tick sits at
-// the mid-2nd / mid-1st value ratio (≈0.57, from backend GENERIC_PICK_SEEDS) —
-// a static visual reference only; real magnitude always comes from gap.firsts.
+// the Mid 2nd / Mid 1st value ratio over backend GENERIC_PICK_SEEDS (the same
+// source the share card's bar uses, #564), pinned to it by
+// backend/tests/test_value_bar_scale.py so the two can't drift again: at 0.57
+// a fill reading "≈ a Late 1st" (0.6 firsts) ended on the "2nd" tick. A
+// static visual reference only; real magnitude always comes from gap.firsts.
 // Gaps beyond one first clamp to the end and the copy falls back to firsts
 // ("≈ 1.4 mid 1sts").
-const SECOND_IN_FIRSTS = 0.57;
-const SECOND_PCT = 50 - SECOND_IN_FIRSTS * 50; // ≈21.5% — the −2nd landmark
+const SECOND_IN_FIRSTS = 0.287;
+const SECOND_PCT = 50 - SECOND_IN_FIRSTS * 50; // ≈35.7% — the −2nd landmark
 
 export interface TradeValueBarProps {
   /** Consensus value of the side you send (give_value). */
