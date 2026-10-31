@@ -1,3 +1,16 @@
+## 2026-10-31 — #552 QA follow-ups: C1's lost-pack read pinned on its own, withdrawals by index, the tier comment, ADR-025's title
+
+Gates: release-lead's #552 QA (GO with notes, merged as `1398a9ce`), P2-1 and P3-1 to P3-3. Tests, a comment and a doc title only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P2-1:** C1's +26 h `incomplete_deck` came from the never-delivered withdrawal's index hole (0..29 plus 36), so a lost-pack rule cut to its in-flight half stayed green. C1 is now parametrized over `w0_past_30`.
+  - Without a W0 past 30 the rows have no hole, so only the lost-pack rule can exclude the deck.
+  - The control: with `PACK_REQUIRED_SINCE = None`, the same +26 h read is a complete deck (no exclusion).
+  - Sabotage (the rule keeps only its in-flight half): `[False]` red, `[True]` green, as release-lead found.
+- **P3-1:** the withdrawals are asserted as `(card_index, served_before)`: `[(3, 1), (36, 0)]`. The comments name mine40's card at index 36 (the ghosts shift it).
+- **P3-2:** `database.py`'s `evidence_tier` comment puts `viewed` above `delivered`, `archive` and `full_interim` (the tiers a first view raises, `_EVIDENCE_TIERS_BELOW_VIEWED`). Its `delivered_at` comes from this process's delivery stamp, then the pack's delivery of its index, then the outcome's time.
+- **P3-3:** ADR-025's title adds the 2% archive decks.
+- **Suites:** packed evidence, deferred evidence, eval withdrawals and paging: 307 passed.
+
 ## 2026-10-31 — S1–S8 package follow-ups: S1 (b) in packed mode, C1 for a refused pack, S7 and U6 docs, ADR-025's title
 
 Gates: the S1–S8 evidence package (`trades-eng-s1-s8-package.md` in the group notes folder, against main `63e373e2`), §7 items 1–4: trades-eng's small closers before models-lead's sign-off. Tests and docs only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
