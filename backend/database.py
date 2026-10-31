@@ -4229,16 +4229,14 @@ def _migrate_db() -> None:
     # ── Referral loop L7 (PRD §9) — the ledger's two indexes on an existing
     # `referrals` table. Declared on the Table too, so a fresh DB gets them
     # from create_all; these run after the migration_cols ALTERs above, so
-    # share_token exists by now. Same idempotent pattern, both dialects.
+    # share_token exists by now. Same pattern as the blocks above: only a
+    # genuinely missing index gets DDL, under the lock guard, so a migrated
+    # DB issues no CREATE INDEX at boot (test_migrate_ddl_lock_safety).
     for idx_name, cols in (("ix_referrals_share_token",   "share_token"),
                            ("ix_referrals_league_status", "league_id, status")):
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(
-                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON referrals ({cols})"
-                ))
-        except Exception as e:
-            print(f"[migrate] referrals index {idx_name} failed: {e}")
+        if not schema.has_index("referrals", idx_name):
+            _create_index_guarded(
+                f"CREATE INDEX IF NOT EXISTS {idx_name} ON referrals ({cols})", idx_name)
 
     # ── trade_matches.status: 'active' → 'pending' (review P0) ─────────────
     # Earlier code wrote status='active' on insert; every cron reader filters
