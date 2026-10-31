@@ -3946,8 +3946,15 @@ def _roster_serve_rules(cards, league_id: str, viewer_id: str, ref: str, *, snap
     a roster_snapshot the caller already read (P1), else one is read here.
     `report`: filled with the serve's `deck_i1_check` props when the check
     ran (_roster_serve_check); left empty otherwise (mode 0, the admin hook,
-    a failed read), so those serves emit nothing.
+    a failed read), so those serves emit nothing. A card whose partner is a
+    deletion scrub's redaction token is dropped first, in every mode.
     """
+    # The deletion scrub's redacted cards (the partner deleted their account;
+    # the target is a redaction token) never serve, in any mode, ahead of
+    # I-1 (models-lead addendum J4, head-eng's option (b)). The caller records
+    # them as never-delivered withdrawals, reason "partner_deleted".
+    if cards:
+        cards = [c for c in cards if not _redacted_target(c)]
     mode = _trade_i1_mode()
     forced = _gate_miss_test(league_id) if cards else None
     block = past_bound = None
@@ -6716,11 +6723,14 @@ def _disposition_cut(before: list, after: list) -> list:
 
 def _withdrawal_reasons(withdrawn=(), cut=()) -> dict:
     """{impression_id: reason} for a serve's withdrawals: I-1's drops
-    ("i1_dropped") and the disposition projection's cuts ("disposition_cut",
-    models-lead B4). The same sticky drop, served_before and transaction rules
-    apply to both; eval removes both and counts them by reason."""
-    reasons = {c["impression_id"]: "i1_dropped" for c in withdrawn
-               if isinstance(c.get("impression_id"), str)}
+    ("i1_dropped"), the deletion scrub's redacted cards ("partner_deleted",
+    models-lead J4: dropped by the serve rules in every mode, counted apart so
+    G10's mode-1 rule on "i1_dropped" stays clean) and the disposition
+    projection's cuts ("disposition_cut", models-lead B4). The same sticky
+    drop, served_before and transaction rules apply to all three; eval
+    removes them and counts them by reason."""
+    reasons = {c["impression_id"]: ("partner_deleted" if _redacted_target(c) else "i1_dropped")
+               for c in withdrawn if isinstance(c.get("impression_id"), str)}
     reasons.update((c["impression_id"], "disposition_cut") for c in cut
                    if isinstance(c.get("impression_id"), str))
     return reasons
@@ -7029,10 +7039,6 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
     i1_report = {}
     cards, block, past_bound = _roster_serve_rules(checked, league_id, viewer_id,
                                                    row["deck_job_id"], snap=snap, report=i1_report)
-    # A card the deletion scrub redacted (its partner deleted their account)
-    # never serves, whatever the I-1 mode (lenient, C-e, a pick-only card):
-    # it leaves with the I-1 drops, as a withdrawal.
-    cards = [c for c in cards if not _redacted_target(c)]
     kept = {id(c) for c in cards}
     withdrawn = [] if block else [c for c in checked if id(c) not in kept]
     moves = {}
@@ -7059,9 +7065,12 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
 
 
 def _redacted_target(card) -> bool:
-    """A stored card whose partner is a deletion scrub's redaction token."""
+    """A card (a stored dict or a TradeCard) whose partner is a deletion
+    scrub's redaction token."""
     from .eval.contract import REDACTED_PARTNER_PREFIX
-    return str((card or {}).get("target_user_id") or "").startswith(REDACTED_PARTNER_PREFIX)
+    target = (card.get("target_user_id") if isinstance(card, Mapping)
+              else getattr(card, "target_user_id", None))
+    return str(target or "").startswith(REDACTED_PARTNER_PREFIX)
 
 
 def _trade_page_stale(row: dict, snap, vsn=None) -> bool:

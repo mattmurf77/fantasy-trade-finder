@@ -11,6 +11,8 @@ from sqlalchemy import create_engine, insert, inspect as sa_inspect, select, tex
 from backend import accounts, database as db, deletion_scrub as scrub
 from backend.tests.test_deletion_scrub import (  # noqa: F401  (fixture)
     DEL, EARLY, LEAGUE, OTHER, VIEWER, engine, job, read)
+from backend.tests.test_trade_page_store import p1, spawned  # noqa: F401  (fixtures)
+from backend.tests.test_i1_serve_filter import live  # noqa: F401  (fixture)
 
 PLACEHOLDER = accounts.DELETED_USER_PLACEHOLDER
 
@@ -148,3 +150,119 @@ def test_boot_adds_the_names_column_to_an_existing_jobs_table(tmp_path, monkeypa
     db.init_db()
     assert "partner_names_json" in {c["name"] for c in sa_inspect(eng).get_columns("deletion_scrub_jobs")}
     eng.dispose()
+
+
+# ── J4: a redacted card never serves, in any I-1 mode ───────────────────────
+
+TOKEN_CARD = {"trade_id": "t0", "target_user_id": "redacted:" + "0" * 32, "impression_id": "d:0"}
+PLAIN_CARD = {"trade_id": "t1", "target_user_id": OTHER, "impression_id": "d:1"}
+
+
+def test_the_serve_rules_drop_a_redacted_card_in_every_mode(monkeypatch):
+    """models-lead addendum J4: at prod's trade_i1_mode 1, S0's check serves
+    every card, so the drop sits ahead of it in _roster_serve_rules, which
+    /generate, /status (legacy and paged) and the page-store serve share."""
+    import backend.server as server
+    monkeypatch.setattr(server, "_roster_serve_check",
+                        lambda cards, *a, **k: (list(cards), None, False))   # lenient: all serve
+    monkeypatch.setattr(server, "_gate_miss_test", lambda league_id: None)
+    for mode in (0, 1, 2):
+        monkeypatch.setattr(server, "_trade_i1_mode", lambda m=mode: m)
+        cards, block, _ = server._roster_serve_rules([TOKEN_CARD, PLAIN_CARD], LEAGUE, VIEWER, "d")
+        assert (cards, block) == ([PLAIN_CARD], None), mode
+
+
+def test_a_redacted_card_is_withdrawn_as_partner_deleted_and_counted_apart():
+    import backend.server as server
+    assert server._withdrawal_reasons([TOKEN_CARD, PLAIN_CARD], [{"impression_id": "d:2"}]) == {
+        "d:0": "partner_deleted", "d:1": "i1_dropped", "d:2": "disposition_cut"}
+
+
+def test_at_mode_1_a_stored_page_never_serves_its_redacted_card(p1, spawned, monkeypatch):
+    """The J4 scenario end to end: the scrub has rewritten a stored deck's
+    card (its target is the token). At trade_i1_mode 1, page 1 serves every
+    other card, and the redacted one leaves as a never-delivered withdrawal,
+    reason partner_deleted."""
+    import backend.server as server
+    from backend.tests.test_trade_page_store import generate, run_job, stored
+    client, engine, _ = p1
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_i1_mode", 1.0)
+    run_job()
+    row = stored()
+    cards = row["pages_blob"]["cards"]
+    token = "redacted:" + "1" * 32
+    redacted = cards[0]["impression_id"]
+    # The scrub's own rewrite of the card (its target is the person's id).
+    rewritten = [scrub.redact_page_card(cards[0], {cards[0]["target_user_id"]}, token)] + cards[1:]
+    with engine.begin() as conn:
+        conn.execute(update(db.trade_page_store_table).values(
+            pages_blob={**row["pages_blob"], "cards": rewritten}))
+    body = generate(client, page=1).get_json()
+    assert body["serve_source"] == "page"
+    assert redacted not in [c["impression_id"] for c in body["cards"]]
+    assert {c["impression_id"] for c in body["cards"]} == {c["impression_id"] for c in cards[1:]}
+    rows = read(engine, db.deck_card_withdrawals_table)
+    assert [(r["reason"], r["served_before"]) for r in rows] == [("partner_deleted", 0)]
+
+
+# ── J2: E-b2 item 5, identical in every store; G-a2's unpack test ──────────
+
+def test_item_5_applies_identically_in_rows_packs_and_the_page_store():
+    """models-lead addendum J2 (G-a1's uniformity): on a redacted card the
+    blended scores go the same way wherever the card is stored: base_score,
+    final_score and surplus_margin null; fit.aggregate removed; value_core's
+    outlook, priority and effective removed."""
+    from backend.tests.test_deletion_scrub import features_for
+    token, ids = "redacted:t", {DEL}
+    valuation = {"scores": {"value": 0.6, "outlook": 0.7, "rank": 0.5, "priority": 0.62},
+                 "effective": 0.61, "market": {"give": 1.0}}
+    features = features_for(DEL, fit={"you": 60.0, "them": 70.0, "aggregate": 130.0})
+    row = {"base_score": 150.0, "final_score": 160.0, "source_like_impression_id": None,
+           "features_json": json.dumps(features), "valuation_json": json.dumps(valuation)}
+
+    def item_5_holds(r):
+        f = json.loads(r["features_json"])
+        v = json.loads(r["valuation_json"])
+        assert (r["base_score"], r["final_score"], f["surplus_margin"]) == (None, None, None)
+        assert "aggregate" not in f["fit"] and f["fit"]["you"] == 60.0
+        assert v["scores"] == {"value": 0.6, "rank": 0.5} and "effective" not in v
+    item_5_holds(scrub.redact_row(row, ids, token))                       # deck_impressions
+    blob = scrub.redact_evidence_blob({"rows": [{**row, "impression_id": "d:0", "trade_hash": "h"}]},
+                                      ids, token)
+    item_5_holds(blob["rows"][0])                                         # the page store's evidence
+    packed = scrub.redact_packed_card({"partner_user_id": DEL, "base_score": 150.0,
+                                       "final_score": 160.0, "surplus_margin": 42.0}, ids, token)
+    assert (packed["base_score"], packed["final_score"], packed["surplus_margin"]) == (None, None, None)
+    page = scrub.redact_page_card({"target_user_id": DEL, "composite_score": 150.0,
+                                   "mismatch_score": 42.0, "fit": {"aggregate": 130.0}}, ids, token)
+    assert (page["composite_score"], page["mismatch_score"]) == (None, None) and "fit" not in page
+
+
+def test_g_a2_unpack_equals_the_original_with_items_1_to_5_applied(engine):
+    """models-lead addendum J2: unpack(redacted) == unpack(original) with
+    E-b2's items 1-5 applied, written out here apart from the scrub's code;
+    every other card bit-identical; the codec round-trips a null float."""
+    from backend.tests.test_deletion_scrub_packs import insert_pack, stored_pack
+    before_run, before = insert_pack(engine)
+    accounts.delete_user_data(DEL)
+    token = job(engine)["token"]
+    scrub.run_pending()
+    _row, run, cards = stored_pack(engine)
+
+    def items_1_to_5(card):
+        if card["partner_user_id"] != DEL:
+            return card
+        out = {k: v for k, v in card.items() if k != "likes_you"}         # 2: c2 fields removed
+        out["partner_user_id"] = token                                    # 1: the token
+        out["taste_attrs"] = [f"partner:{token}" if a == f"partner:{DEL}" else a
+                              for a in card["taste_attrs"]]
+        out.update(base_score=None, final_score=None, surplus_margin=None)  # 5: blended nulled
+        return out
+    assert cards == [items_1_to_5(c) for c in before]
+    for got, was in zip(cards, before):
+        if was["partner_user_id"] != DEL:
+            assert json.dumps(got, sort_keys=True) == json.dumps(was, sort_keys=True)
+    assert cards[0]["base_score"] is None and isinstance(before[0]["base_score"], float)
+    inputs = run["filter_inputs"]                                         # 3: holdings, protected
+    assert DEL not in inputs["qb_te"] and f"{0:016x}" not in inputs["protected"]
+    assert run["redacted_at"]                                             # 4: redacted_at

@@ -87,7 +87,9 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
   - A cached `_PackState` whose stored header changed outside its run (only the codec rewrites the dictionaries) reloads from the row in place. Its pending run changes merge onto the stored run, where the stored keys win, `redacted_at` among them. That runs on `_deck_pack_commit`'s CAS miss and before every upgrade.
   - An upgrade's row from a deck's build-time snapshot takes the pack's token (`_redacted_held_row`): the redacted pack card names the token where the snapshot names the person, which gives the mapping with no id kept.
   - Tests drive the race, the stale cache and the held row.
-- **A redacted page card never serves** (`_redacted_target`): it leaves with the I-1 drops as a withdrawal, whatever the I-1 mode.
+- **A redacted card never serves, in any I-1 mode** (models-lead addendum J4, head-eng's option (b)). At prod's `trade_i1_mode` 1, I-1 alone would serve it while a stale page rebuilds.
+  - `_roster_serve_rules`, which /generate, /status (legacy and paged) and the page-store serve share, drops any card whose target is a redaction token before I-1.
+  - It's recorded as a never-delivered withdrawal with its own reason, `partner_deleted`, counted apart so G10's mode-1 rule on `i1_dropped` stays clean.
 
 ### 0.4 Decks in flight at deletion
 
@@ -100,7 +102,7 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
 - [x] **(c) WAIVED. No analytics needed.**
   - The scrub emits no event and changes none. It is a deletion step.
   - Its observable is one server log line per job phase, `[scrub] job db_done counts={store: n}` / `model_done changed=<n>`, plus the 24 h alert. They carry counts, never ids.
-  - Eval's side (G-a4 to G-a6: redacted cards counted, not auditable, explained replay differences) is models-eng's.
+  - Eval's side is models-eng's, in PR C (models-lead addendum J1): redacted decks are a `partner_redacted` exclusion, not compared (G-a5 as revised), and redacted cards are never training rows.
 
 ### 1.3 Blended scalars: the solve-back test (R28.22 b)
 
@@ -113,7 +115,7 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
 | value_core `scores.outlook`, `scores.priority`, `effective` (stage 3) | `outlook = (viewer + partner) / 2` (`value_core/ranking.py:115-118`); `priority` and `effective` are built from it with the weights | `detail.outlook.viewer`, `scores.value`, `scores.rank` | **FAIL:** the partner's outlook score solves back. **Removed** on a redacted card; `value` and `rank` (market, the viewer's own board) stay |
 | `propensity` | the Thompson multiplier the viewer's sampler drew (`server.py:9206`) | — | **keep:** the viewer's own sampling, with no partner input |
 
-**Consequence for eval** (models-eng and models-lead, G-a5): a redacted card's three scores are null in every store. Replay already counts redacted cards apart (G-a4 to G-a6). head-eng was told 10-31 that `base_score` and `final_score` fail, where the routing expected them kept. If Eng wants to keep either, it goes to legal; until then they're nulled.
+**Consequence for eval** (models-eng and models-lead, G-a5): a redacted card's blended scores are null or removed in every store (E-b2 item 5, models-lead addendum J2). Eval doesn't exclude redacted cards yet: today a null score reads as 0. models-lead's J1 makes `partner_redacted` a deck exclusion for replay, e(k) and calibration, and skips redacted cards in the fit, in models-eng's PR C. head-eng was told 10-31 that `base_score` and `final_score` fail, where the routing expected them kept. If Eng wants to keep either, it goes to legal; until then they're nulled.
 
 ## 2. Schema & flag scope
 
@@ -139,7 +141,7 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
   - **uniformity:** every card of the partner, in every store, the same way;
   - **G-a2:**
     - a real pack scrubbed and unpacked: every non-redacted card is bit-identical, and the redacted ones differ only in the four changes;
-    - a fixture replay leaves non-redacted cards bit-identical;
+    - a fixture replay leaves non-redacted **decks** bit-identical, and redacted decks are excluded, not compared (models-lead J2; models-eng's, in PR C);
   - **the CAS race:** a live writer's header commit after a scrub keeps the scrub;
   - **idempotence:** a second run changes nothing;
   - **decks built after the deletion are untouched;**

@@ -687,8 +687,11 @@ _PAGE_CARD_KEYS_NULLED = ("mismatch_score", "composite_score", "surplus_margin",
 
 def redact_page_card(card: dict, ids, token: str) -> dict:
     """One stored page card. Its target becomes the token and the placeholder
-    name, and the partner's fields go. S0's I-1 then withdraws it at serve:
-    the person's roster rows are gone, so no receive asset is the token's."""
+    name, and the partner's fields go. It never serves again: the serve rules
+    drop a token-target card in every I-1 mode, before I-1, and record it as
+    a never-delivered withdrawal, reason "partner_deleted" (server.
+    _roster_serve_rules; models-lead addendum J4: at prod's mode 1, I-1
+    alone would serve it)."""
     if card.get("target_user_id") not in ids:
         return _replace_ids(card, ids, token)
     out = {k: v for k, v in card.items() if k not in _PAGE_CARD_KEYS_REMOVED}

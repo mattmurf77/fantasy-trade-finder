@@ -12,7 +12,7 @@
 - value_core's `scores.outlook` (`(viewer + partner) / 2`, with the viewer's side kept), and `priority` and `effective` built from it, are removed on a redacted card (stage 3).
 
 Separately, the scrub's job row is inserted in the deletion's own transaction, so a committed deletion always has its scrub.
-**Consequences:** Redacted cards have no scores for replay; eval already counts them apart (G-a4 to G-a6). If Eng later wants a score kept, it goes to legal. Jobs are kept until every scrub stage is built (`COMPLETE`), so later stages scrub earlier deletions. The 24 h alert fires for kept jobs meanwhile.
+**Consequences:** Redacted cards have no scores for replay. Eval's exclusion of redacted decks (`partner_redacted`) is models-lead's addendum J1, built in models-eng's PR C. If Eng later wants a score kept, it goes to legal. Jobs are kept until every scrub stage is built (`COMPLETE`), so later stages scrub earlier deletions. The 24 h alert fires for kept jobs meanwhile.
 
 ## D-208 — Calibration asks Yes / No instead of 1–5 (app 1.21.3)
 

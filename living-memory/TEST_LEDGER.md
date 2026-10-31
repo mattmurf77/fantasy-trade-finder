@@ -1,3 +1,19 @@
+## 2026-10-31 — Deletion scrub: models-lead addendum J4 (a redacted card never serves) and J2 (item 5's tests)
+
+Gates: head-eng's relay of models-lead addendum J (11-01), on #562. It touches the serve path: `_roster_serve_rules` drops a token-target card, and a new withdrawal reason, `partner_deleted`. That comes to models-lead as an R-G entry, with the pack codec's, before merge. No schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **J4, head-eng's option (b):** `_roster_serve_rules`, which /generate, /status (legacy and paged) and the page-store serve share, drops any card whose `target_user_id` is a redaction token, ahead of I-1 and in every mode. At prod's mode 1, I-1 alone would have served it while a stale page rebuilds. `_withdrawal_reasons` records it as `partner_deleted`, counted apart from `i1_dropped`. Stage 2's page-view filter moves into the shared rules. The `redact_page_card` docstring is fixed.
+- **Tests (`test_deletion_scrub_stage3.py`):**
+  - the serve rules drop a redacted card in modes 0, 1 and 2;
+  - the reasons are `partner_deleted`, `i1_dropped` and `disposition_cut`;
+  - **end to end at mode 1:** a real stored deck whose card the scrub rewrote serves every other card, and that one leaves as a never-delivered withdrawal with reason `partner_deleted`;
+  - **J2:** item 5 is identical in rows, the page store's evidence, packs and page cards;
+  - **G-a2's unpack test:** `unpack(redacted)` equals `unpack(original)` with items 1–5 written out apart from the scrub's code, the other cards are bit-identical, and a null float round-trips.
+- **Sabotages, 2/2 red:** no J4 drop; the reason left as `i1_dropped`.
+- **Scope fixes:**
+  - "Replay already counts redacted cards apart (G-a4 to G-a6)" is struck. J1's `partner_redacted` exclusion is models-eng's PR C.
+  - The fixture replay line now reads "non-redacted **decks**", with redacted decks excluded, not compared.
+
 ## 2026-10-31 — Deletion scrub stage 3: Calibration cards, overdue diagnostics, value_core's blended scores, the narrative; COMPLETE
 
 Gates: the scope block `scope-deletion-scrub.md` (legal R28.22 f's trace, c3 #7 and #13); `SCRUB_VERSION` 3, `COMPLETE`. Schema: `deletion_scrub_jobs.partner_names_json`, added to existing tables at boot. No flag, no event, no route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

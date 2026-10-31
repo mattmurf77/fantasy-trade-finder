@@ -1336,7 +1336,7 @@ deck_card_withdrawals_table = Table("deck_card_withdrawals", metadata,
     Column("card_index",         Integer, nullable=False),   # the build index
     Column("user_id",            String,  nullable=False),
     Column("league_id",          String,  nullable=False),
-    Column("reason",             String,  nullable=False),   # 'i1_dropped' | 'disposition_cut'
+    Column("reason",             String,  nullable=False),   # 'i1_dropped' | 'partner_deleted' | 'disposition_cut'
     Column("first_withdrawn_at", String,  nullable=False),   # ISO UTC
     Column("served_before",      Integer, nullable=False),   # 0/1
     Column("impression_id",      String),                    # contract.card_impression_id

@@ -296,26 +296,3 @@ def test_a_page_row_in_a_league_the_person_left_is_found_by_the_scan(engine):
     scrub.run_pending()
     (row,) = read(engine, db.trade_page_store_table)
     assert row["pages_blob"]["cards"][0]["target_user_id"] == job(engine)["token"]
-
-
-def test_a_redacted_page_card_never_serves_and_leaves_as_a_withdrawal(monkeypatch):
-    """Whatever S0 keeps (lenient mode, C-e, a pick-only card), a card whose
-    partner is a redaction token is withdrawn at serve."""
-    import backend.server as server
-    delivered = []
-    for name, fn in (("_deck_sticky", lambda *a: set()),
-                     ("_project_trade_dispositions", lambda page, *a: list(page)),
-                     ("_disposition_cut", lambda *a: []),
-                     ("_roster_serve_rules", lambda checked, *a, **k: (list(checked), None, False)),
-                     ("_served_cap_stored", lambda row, cards, *a: (cards, {})),
-                     ("_with_trade_hash", lambda cards: cards),
-                     ("_deck_evidence_delivered_stored",
-                      lambda row, cards, withdrawn, cut, moves: delivered.append((cards, withdrawn))),
-                     ("_trade_prefetch_remaining", lambda: 50)):
-        monkeypatch.setattr(server, name, fn)
-    token_card, other = page_card("redacted:" + "0" * 32, 0), page_card(OTHER, 1)
-    row = {"pages_blob": {"cards": [token_card, other], "opponents_total": 2},
-           "league_id": LEAGUE, "deck_job_id": "deck-page", "card_count": 2}
-    out, _ = server._trade_page_view(row, 0, user_id=VIEWER, viewer_id=VIEWER, snap=None)
-    assert out["cards"] == [other]
-    assert delivered == [([other], [token_card])]
