@@ -22,7 +22,10 @@ as_of as given; only the CLI reads the clock.
 The G-table (a barred G prints PASS or FAIL):
 
   G1   pack integrity: pack_integrity decks among the decks with a pack row,
-       retired or not. Bar 0.
+       retired or not, plus packs whose WHOLE run["display_moves"] (moves past
+       as_of too) breaks the writer's contract (data.display_moves_problem;
+       models-lead F1: the loader checks only delivered moves, so a malformed
+       later move fails here at once). Bar 0.
   G2   no unexplained gaps: incomplete_deck decks among the FINAL packed
        decks and EVERY pack-less deck (A3). A packed deck is final when its
        pack retired by as_of or was served more than 25 h
@@ -51,8 +54,12 @@ The G-table (a barred G prints PASS or FAIL):
        recommendation (B3 (f4)) prints when G1 fails or G3 has orphans (lost
        data); an outcome on a ghost row is a serve bug and goes back to
        models-lead.
-  G7   upgrade misses (U4-R2), every cause summed over the loaded packs.
-       Bar: other == 0.
+  G7   upgrade misses (U4-R2), every cause summed over the loaded packs but
+       pack_integrity decks (G1's; row gone skips them too).
+       Bar: other == 0. Reported, never barred (addendum C4): row gone, the
+       misses whose pack recorded a stored count above the card while its
+       page row was gone, with how many are named (C4 (d1)'s sub-count) and
+       the (d1) split; and the U4-R4 sum over the window, indicative only.
   G8   withdrawal_conflict decks. Bar 0.
   G9   no_delivery_evidence decks with any outcome (a missed delivered_at
        stamp, B3). Bar 0. The no_delivery_evidence total is reported too.
@@ -69,9 +76,10 @@ packed decks, else PASS.
 
 --weekly adds the two rolling 7-day ceilings over [as_of - 7 d, as_of], for
 the weekly BL-001 monitor through head-bizops:
-  U4-R4  the named upgrade-miss causes (U4_R4_CAUSES; None = every cause but
-         other) over viewed cards, at most U4_R4_CEILING. Viewed cards are
-         the distinct loaded non-ghost cards with a `viewed` outcome.
+  U4-R4  restart_split + evicted_split (U4_R4_CAUSES, addendum C2; a cause
+         added later joins only by name) over viewed cards, at most
+         U4_R4_CEILING, per cause and with row gone. Viewed cards are the
+         distinct loaded non-ghost cards with a `viewed` outcome.
   B4     disposition_cut removals over delivered-range positions, at most
          B4_CEILING. Delivered-range positions are the delivered non-ghost
          cards plus the disposition_cut never-delivered (W0) removals, over
@@ -121,7 +129,7 @@ from urllib.parse import unquote, unquote_plus
 from sqlalchemy import Integer, String, Text, column, create_engine, event, func, inspect, select, table
 
 from backend.database import deck_impressions_table, deck_outcomes_table
-from backend.eval import data
+from backend.eval import data, evidence_pack
 from backend.eval.data import (
     CALIBRATION_REFRESH, IN_FLIGHT, IN_FLIGHT_WINDOW, INCOMPLETE_DECK, NO_DELIVERY_EVIDENCE,
     PACK_INTEGRITY, PACK_TABLE, PARTIAL_RUN_TIER, UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT,
@@ -130,9 +138,9 @@ from backend.eval.data import (
 
 # A3: fewer final packed decks than this and G2 reads INSUFFICIENT (extend to 48 h).
 MIN_FINAL_DECKS = 10
-# U4-R4: the upgrade-miss causes the weekly ceiling counts (None: every named
-# cause, i.e. every key but `other`) and the ceiling over viewed cards.
-U4_R4_CAUSES: tuple[str, ...] | None = None
+# U4-R4: the upgrade-miss causes the weekly ceiling sums (addendum C2) and the
+# ceiling over viewed cards.
+U4_R4_CAUSES = ("restart_split", "evicted_split")
 U4_R4_CEILING = 0.01
 # B4: disposition_cut removals over delivered-range positions.
 B4_CEILING = 0.05
@@ -152,7 +160,8 @@ PASS, FAIL, INSUFFICIENT, REPORT = "PASS", "FAIL", "INSUFFICIENT", "REPORT"
 _PACK_ROWS = table(PACK_TABLE, column("run_id", String), column("served_at", String),
                    column("header_json", Text), column("card_count", Integer))
 _WITHDRAWAL_ROWS = table(WITHDRAWALS_TABLE, column("reason", String),
-                         column("first_withdrawn_at", String))
+                         column("first_withdrawn_at", String), column("deck_job_id", String),
+                         column("card_index", Integer), column("served_before", Integer))
 
 
 class ReadOnlyViolation(RuntimeError):
@@ -246,11 +255,14 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
         packs = _pack_rows(conn, since, until, as_of)
         g3 = _g3(conn, decks, _outcome_ids(conn, since, until, as_of))
         withdrawals = _withdrawals_by_reason(conn, since, until, as_of)
+        w0 = _w0_indexes(conn, list(packs))
 
     pack_integrity = [d for d in decks if d.exclusion == PACK_INTEGRITY]
+    malformed = _malformed_moves(packs, skip={d.deck_job_id for d in pack_integrity}, w0=w0)
     g1 = {"pack_decks": len(packs), "pack_integrity": len(pack_integrity),
-          "ids": [d.deck_job_id for d in pack_integrity][:LIST_CAP],
-          "status": FAIL if pack_integrity else PASS}
+          "display_moves_malformed": len(malformed),
+          "ids": ([d.deck_job_id for d in pack_integrity] + malformed)[:LIST_CAP],
+          "status": FAIL if pack_integrity or malformed else PASS}
 
     trades = [d for d in decks if d.exclusion != CALIBRATION_REFRESH]
     final_packed = [d for d in trades if d.deck_job_id in packs
@@ -264,8 +276,13 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
           "insufficient": len(final_packed) < MIN_FINAL_DECKS,
           "status": FAIL if incomplete else PASS}
 
-    misses = _sum_counts(d.upgrade_misses for d in decks)
-    g7 = {"upgrade_misses": misses,
+    misses = _sum_counts(d.upgrade_misses for d in decks if d.exclusion != PACK_INTEGRITY)
+    gone = _row_gone(packs, skip={d.deck_job_id for d in pack_integrity})
+    g7 = {"upgrade_misses": misses, "row_gone": gone["total"], "row_gone_named": gone["named"],
+          "row_gone_split": gone["split"],
+          # Addendum C4: the U4-R4 sum over this window is indicative only; the
+          # 7-day ceiling is read weekly. Never part of G7's status.
+          "indicative": _ceiling(_named_misses(misses), _viewed(decks), U4_R4_CEILING),
           "status": FAIL if misses.get(UPGRADE_MISS_OTHER, 0) > 0 else PASS}
 
     conflicts = [d.deck_job_id for d in decks if d.exclusion == WITHDRAWAL_CONFLICT]
@@ -297,6 +314,55 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
             c.evidence_tier == PARTIAL_RUN_TIER for c in d.cards)),
         withdrawn_removed_by_reason=_sum_counts(d.withdrawn_removed_by_reason for d in decks),
         g1=g1, g2=g2, g3=g3, g7=g7, g8=g8, g9=g9, g10=g10, overall=overall)
+
+
+def _named_misses(misses: dict) -> int:
+    """The U4-R4 numerator: the U4_R4_CAUSES counts, summed."""
+    return sum(misses.get(cause, 0) for cause in U4_R4_CAUSES)
+
+
+def _viewed(decks) -> int:
+    """The U4-R4 denominator: viewed non-ghost cards (a viewed outcome joined by
+    impression_id, never a row's existence)."""
+    return sum(1 for d in decks for c in d.cards if not c.is_ghost and c.viewed)
+
+
+def _row_gone(packs, skip=()) -> dict:
+    """U4 option A's guard, reported under G7 and never barred: the misses on
+    the stored path whose pack recorded a stored count above the card while its
+    page row was gone (run["upgrade_miss_row_gone"], card_index -> the pack's
+    stored count), and how many of those carry a named cause in
+    run["upgrade_miss_cards"] (absent means other). With A on, the named ones
+    are named only because the row was gone; with A off, the entries are the
+    `other` misses A would name. A page-store bug can't hide behind A.
+    Addendum C4 (d1) splits it by run["upgrade_miss_row_gone_why"]
+    (card_index -> "replaced", the key's row now holds a newer deck, explained,
+    or "no_row": aged, over budget, or a bug); an entry with no why is
+    "unsplit", as is any other why. (d1)'s sub-count is `named`. Absent keys
+    count 0; a pack in `skip` (failing integrity) or unreadable is G1's."""
+    total = named = 0
+    split = {"replaced": 0, "no_row": 0, "unsplit": 0}
+    for job, (_served_at, header_json) in packs.items():
+        if job in skip:
+            continue
+        try:
+            run = json.loads(header_json)["run"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        if not isinstance(run, dict):
+            continue
+        gone, causes = run.get("upgrade_miss_row_gone"), run.get("upgrade_miss_cards")
+        why = run.get("upgrade_miss_row_gone_why")
+        if not isinstance(gone, dict):
+            continue
+        causes = causes if isinstance(causes, dict) else {}
+        why = why if isinstance(why, dict) else {}
+        for index in gone:
+            total += 1
+            named += causes.get(index, UPGRADE_MISS_OTHER) != UPGRADE_MISS_OTHER
+            reason = why.get(index)
+            split[reason if reason in ("replaced", "no_row") else "unsplit"] += 1
+    return {"total": total, "named": named, "split": split}
 
 
 def _final(deck, pack, as_of: str, in_flight_from: str) -> bool:
@@ -381,6 +447,40 @@ def _pack_rows(conn, since, until, as_of) -> dict[str, tuple[str, str]]:
     return {r.run_id: (r.served_at, r.header_json) for r in conn.execute(q)}
 
 
+def _malformed_moves(packs: dict, skip=(), w0=None) -> list[str]:
+    """G1 (F1): the run_ids, sorted, whose pack header's whole
+    run["display_moves"] breaks the writer's contract, past as_of included
+    (data.display_moves_problem; `w0`: run_id -> its served_before=0
+    indexes, from _w0_indexes). A pack in `skip` (already pack_integrity)
+    or with an unreadable header or deliveries is the loader's."""
+    out = []
+    for run_id, (_served_at, header) in packs.items():
+        head = data._json_dict(header) or {}
+        run, card_count = head.get("run"), head.get("card_count")
+        if run_id in skip or not isinstance(run, dict) or type(card_count) is not int:
+            continue
+        try:
+            evidence_pack.check_deliveries(run, card_count)
+        except evidence_pack.PackIntegrityError:
+            continue
+        if data.display_moves_problem(run, card_count, (w0 or {}).get(run_id, frozenset())):
+            out.append(run_id)
+    return sorted(out)
+
+
+def _w0_indexes(conn, run_ids: list[str]) -> dict[str, set[int]]:
+    """run_id -> the card_indexes of its served_before=0 withdrawals, every
+    one recorded (G1 checks the whole header, past as_of too)."""
+    if not run_ids or not inspect(conn).has_table(WITHDRAWALS_TABLE):
+        return {}
+    w, out = _WITHDRAWAL_ROWS, {}
+    for chunk in _chunks(sorted(run_ids)):
+        for run_id, index in conn.execute(select(w.c.deck_job_id, w.c.card_index).where(
+                w.c.deck_job_id.in_(chunk), w.c.served_before == 0)):
+            out.setdefault(run_id, set()).add(index)
+    return out
+
+
 def _outcome_ids(conn, since, until, as_of) -> list[str]:
     """The impression_id of every outcome acted in the window, by as_of."""
     out = deck_outcomes_table
@@ -430,12 +530,13 @@ def weekly_read(engine, *, as_of: str) -> dict:
     since = (datetime.fromisoformat(as_of) - WEEK).isoformat()
     decks = load_decks(engine=engine, since=since, as_of=as_of)
     with engine.connect() as conn:
-        packed = set(_pack_rows(conn, since, None, as_of))
+        packs = _pack_rows(conn, since, None, as_of)
+    packed = set(packs)
 
-    misses = _sum_counts(d.upgrade_misses for d in decks)
-    causes = {cause: n for cause, n in misses.items()
-              if (cause != UPGRADE_MISS_OTHER if U4_R4_CAUSES is None else cause in U4_R4_CAUSES)}
-    viewed = sum(1 for d in decks for c in d.cards if not c.is_ghost and c.viewed)
+    misses = _sum_counts(d.upgrade_misses for d in decks if d.exclusion != PACK_INTEGRITY)
+    causes = {cause: n for cause, n in misses.items() if cause in U4_R4_CAUSES}
+    viewed = _viewed(decks)
+    gone = _row_gone(packs, skip={d.deck_job_id for d in decks if d.exclusion == PACK_INTEGRITY})
 
     evidenced = [d for d in decks if d.exclusion is None and (
         d.deck_job_id in packed or any(not c.is_ghost and data._delivered_by(c.delivered_at, as_of)
@@ -444,7 +545,9 @@ def weekly_read(engine, *, as_of: str) -> dict:
     delivered = sum(1 for d in evidenced for c in d.cards if not c.is_ghost and c.delivered)
     return {
         "since": since, "as_of": as_of,
-        "u4_r4": {**_ceiling(sum(causes.values()), viewed, U4_R4_CEILING), "causes": causes},
+        "u4_r4": {**_ceiling(sum(causes.values()), viewed, U4_R4_CEILING), "causes": causes,
+                  "row_gone": gone["total"], "row_gone_named": gone["named"],
+                  "row_gone_split": gone["split"]},
         "b4": {**_ceiling(cuts, delivered + cuts, B4_CEILING), "evidenced_decks": len(evidenced)},
     }
 
@@ -474,7 +577,8 @@ def render(r: FlipRead) -> str:
         "",
         "| G | what | result | bar | status |",
         "|---|---|---|---|---|",
-        f"| G1 | pack_integrity decks / decks with a pack row | {g1['pack_integrity']} / "
+        f"| G1 | pack_integrity decks (+ malformed display moves) / decks with a pack row "
+        f"| {g1['pack_integrity']} (+ {g1['display_moves_malformed']}) / "
         f"{g1['pack_decks']} | 0 | {g1['status']} |",
         f"| G2 | incomplete_deck / Trades decks read (final packed + every pack-less) "
         f"| {g2['incomplete']} / {g2['final_packed_decks'] + g2['packless_decks']} "
@@ -494,7 +598,7 @@ def render(r: FlipRead) -> str:
         "",
     ]
     if g1["ids"]:
-        lines.append(f"G1 pack_integrity decks: {', '.join(g1['ids'])}")
+        lines.append(f"G1 pack_integrity or malformed-display-moves decks: {', '.join(g1['ids'])}")
     if g2["ids"]:
         lines.append("G2 incomplete decks (each must coincide with a restart or the kill): "
                      + ", ".join(f"{job} (served {at})" for job, at in g2["ids"]))
@@ -510,6 +614,13 @@ def render(r: FlipRead) -> str:
         lines.append(f"G8 withdrawal_conflict decks: {', '.join(g8['ids'])}")
     if g9["ids"]:
         lines.append(f"G9 no_delivery_evidence decks with an outcome: {', '.join(g9['ids'])}")
+    lines.append(f"G7 (not barred) row gone: {g7['row_gone']} misses whose pack recorded a "
+                 f"stored count above the card while its page row was gone; "
+                 f"{g7['row_gone_named']} of them with a named cause (U4 option A's guard); "
+                 f"{_pairs(g7['row_gone_split'])}.")
+    lines.append(_ceiling_line("G7 (not barred) indicative U4-R4 over this window, named misses "
+                               "/ viewed cards", g7["indicative"])
+                 + "; indicative only, the 7-day ceiling is read with --weekly.")
     lines.append(f"G10 note: {g10['note']}.")
     lines.append(f"v5 exclusions (decks): {_pairs(r.exclusions)}; partial_run decks "
                  f"(replay): {r.partial_run_decks}; withdrawn_removed_by_reason "
@@ -532,7 +643,9 @@ def render(r: FlipRead) -> str:
         lines += ["", f"Weekly ceilings, decks served {w['since']} to {w['as_of']} "
                       "(BL-001 monitor, via head-bizops):",
                   _ceiling_line("U4-R4 named upgrade misses / viewed cards", w["u4_r4"])
-                  + f" [{_pairs(w['u4_r4']['causes'])}]",
+                  + f" [{_pairs(w['u4_r4']['causes'])}]; row gone "
+                  f"{w['u4_r4']['row_gone']} ({w['u4_r4']['row_gone_named']} named; "
+                  f"{_pairs(w['u4_r4']['row_gone_split'])}), not barred",
                   _ceiling_line("B4 disposition_cut removals / delivered-range positions",
                                 w["b4"])]
     return "\n".join(lines)
@@ -600,6 +713,20 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _settled_as_of(as_of: str | None, prog: str) -> str:
+    """The CLI's as_of (module doc): the wall clock minus STAMP_SETTLE by
+    default, and a later --as-of clamped to that, with a note on stderr
+    giving both values. bdk_audit's CLI shares it."""
+    settled = (_now() - STAMP_SETTLE).replace(microsecond=0).isoformat()
+    as_of = as_of or settled
+    if datetime.fromisoformat(as_of) > datetime.fromisoformat(settled):
+        print(f"{prog}: note: --as-of {as_of} is later than now minus STAMP_SETTLE "
+              f"({STAMP_SETTLE.total_seconds() / 60:g} min); clamped to {settled}",
+              file=sys.stderr)
+        as_of = settled
+    return as_of
+
+
 class _Parser(argparse.ArgumentParser):
     """argparse whose usage errors are redacted: a database URL passed by
     mistake (a stray positional, a mistyped flag) is never printed in full."""
@@ -635,7 +762,7 @@ def main(argv=None) -> int:
                          "report transaction_read_only = on before anything reads")
     ap.add_argument("--weekly", action="store_true",
                     help="also print the rolling 7-day ceilings over [as_of - 7 d, as_of]: "
-                         "U4-R4, named upgrade misses / viewed cards <= 1%%; B4, "
+                         "U4-R4, restart_split + evicted_split / viewed cards <= 1%%; B4, "
                          "disposition_cut removals / delivered-range positions <= 5%%, "
                          "where delivered-range positions are the delivered non-ghost cards "
                          "plus the disposition_cut never-delivered removals, over the "
@@ -663,13 +790,7 @@ def _run(args) -> int:
     except ValueError as e:              # a URL parser's message can echo the URL
         print(f"flip_read: {_redact(str(e), args.db)}", file=sys.stderr)
         return 2
-    settled = (_now() - STAMP_SETTLE).replace(microsecond=0).isoformat()
-    as_of = args.as_of or settled
-    if datetime.fromisoformat(as_of) > datetime.fromisoformat(settled):
-        print(f"flip_read: note: --as-of {as_of} is later than now minus STAMP_SETTLE "
-              f"({STAMP_SETTLE.total_seconds() / 60:g} min); clamped to {settled}",
-              file=sys.stderr)
-        as_of = settled
+    as_of = _settled_as_of(args.as_of, "flip_read")
     try:
         result = flip_read(eng, since=args.since, as_of=as_of, until=args.until,
                            i1_mode=args.i1_mode)

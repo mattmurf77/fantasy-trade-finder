@@ -1028,6 +1028,14 @@
     //    • profiles.public_pages    — public /u/<username> page (profile.html)
     // ═══════════════════════════════════════════════════════════════
 
+    // The web's ESPN/MFL chips are OFF, whatever `landing.platform_options`
+    // says (head-eng 2026-10-27): that flag now means the APP's proof-based
+    // ESPN/MFL sign-in, and the web has no proof-based sign-in until after
+    // launch. A web build that adds one turns this on; never read the
+    // landing flag here (qa/web/check_web_structure.py GATE-web-espn-mfl-off).
+    // Declared before _applyLandingFlags(), which runs the chip reveal at once.
+    const WEB_PLATFORM_ENTRY = false;
+
     // Reveal flag-gated landing surfaces once the flag fetch completes.
     // _loadFeatureFlags() is fired at module top; we poll once on DOMContentLoaded
     // so the initial paint doesn't flash the CTA if the flag is off.
@@ -1201,7 +1209,7 @@
       } catch (_) { return null; }
     }
 
-    // Chip-row reveal — mirrors SignInScreen's platformPickerShown: the flag
+    // Chip-row reveal — mirrors SignInScreen's platformPickerShown: the gate
     // AND ≥2 live platforms (a one-chip "choice" is noise). Per-platform
     // chips additionally need espn.link / mfl.link; the MFL sign-in block
     // needs mfl.auth_link and the ESPN "find my leagues" link needs
@@ -1209,7 +1217,7 @@
     function _applyPlatformOptionsFlag() {
       const row = document.getElementById('platform-row');
       if (!row || !window.FTF_FLAG) return;
-      const optionsOn = window.FTF_FLAG('landing.platform_options');
+      const optionsOn = WEB_PLATFORM_ENTRY;
       const espnOn = optionsOn && window.FTF_FLAG('espn.link');
       const mflOn  = optionsOn && window.FTF_FLAG('mfl.link');
       const espnChip = document.getElementById('platform-chip-espn');
@@ -1250,7 +1258,7 @@
 
     function selectEntryPlatform(p) {
       if (!['sleeper', 'espn', 'mfl'].includes(p)) return;
-      if (p !== 'sleeper' && (!window.FTF_FLAG('landing.platform_options') || !window.FTF_FLAG(`${p}.link`))) return;
+      if (p !== 'sleeper' && (!WEB_PLATFORM_ENTRY || !window.FTF_FLAG(`${p}.link`))) return;
       _entryPlatformSel = p;
       _entryPreview = null;
       for (const id of ['sleeper', 'espn', 'mfl']) {
@@ -5579,11 +5587,11 @@
           <div class="summary-card">
             <div class="summary-card-value">${(data.leaguemates_joined || 0) + 1} / ${(data.leaguemates_total || 0) + 1}</div>
             <div class="summary-card-label">Leaguemates Joined</div>
-            <div class="summary-card-sub">Have a Trade Finder account (including you)</div>
+            <div class="summary-card-sub">Have a Fleeced account (including you)</div>
           </div>
           <div class="summary-card">
             <div class="summary-card-value">${_leagueUnlockedCount(data)}</div>
-            <div class="summary-card-label">Unlocked Trade Finder</div>
+            <div class="summary-card-label">Ranked</div>
             <div class="summary-card-sub">Ready to match</div>
           </div>`;
       }

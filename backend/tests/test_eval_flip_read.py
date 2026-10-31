@@ -81,8 +81,26 @@ def test_g1_counts_unreadable_packs_among_every_pack(tamper):
     text = render(r)
     if tamper:
         assert r.g1["ids"] == ["bad"] and r.overall == FAIL
-        assert "| G1 | pack_integrity decks / decks with a pack row | 1 / 3 | 0 | FAIL |" in text
+        assert "| G1 | pack_integrity decks (+ malformed display moves) / decks with a pack row | 1 (+ 0) / 3 | 0 | FAIL |" in text
         assert "models-lead recommends the kill" in text
+
+
+@pytest.mark.parametrize("run", [5, None, "x", [1]], ids=["int", "null", "str", "list"])
+def test_g1_a_pack_whose_run_is_not_an_object_fails_g1_not_the_read(run):
+    """A parseable header whose run is not an object is G1's FAIL and the B3
+    (f4) kill, on the 24 h read and the weekly one, never a crash."""
+    db = make_db()
+    write_deck(db.eng, db.packs, _deck_cards("ok", 10), full=range(5), packed=range(5, 10))
+    write_deck(db.eng, db.packs, _deck_cards("bad", 10), full=range(5), packed=range(5, 10),
+               edit=lambda p: replace(p, header_json=json.dumps(
+                   {**json.loads(p.header_json), "run": run})))
+    r = flip_read(db.eng, since=SINCE, as_of=EARLY)
+    assert r.g1["ids"] == ["bad"] and r.g1["status"] == FAIL and r.overall == FAIL
+    assert r.g7["row_gone"] == 0
+    assert "models-lead recommends the kill" in render(r)
+    assert weekly_read(db.eng, as_of=LATE)["u4_r4"]["row_gone"] == 0
+    # The guard holds on its own, not only through the integrity skip.
+    assert fr._row_gone({"bad": (SERVED, json.dumps({"run": run}))})["total"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +331,64 @@ def test_g7_bars_other_and_prints_every_cause(misses, total, status):
     assert f"| G7 | upgrade misses by cause | {causes} | other 0 | {status} |" in render(r)
 
 
+def test_g7_reports_misses_whose_page_row_was_gone_without_barring_them():
+    """U4 option A's guard (head-eng's condition 1): misses whose pack recorded
+    a stored count above the card while the page row was gone, and how many of
+    them carry a named cause. Reported, never barred: G7 stays bar-on-other."""
+    db = make_db()
+    _packed(db, "p", upgrade_misses={"restart_split": 1, "other": 0},
+            upgrade_miss_cards={"12": "restart_split", "40": "evicted_split", "41": "other"},
+            upgrade_miss_row_gone={"12": 90, "40": 90, "41": 90},
+            upgrade_miss_row_gone_why={"12": "replaced", "40": "no_row"})   # 41: unsplit
+    _packed(db, "q", upgrade_misses={"restart_split": 1},
+            upgrade_miss_row_gone={"7": 90})                     # no cause map: other
+    _packed(db, "r", upgrade_misses={"restart_split": 1})        # no row-gone key: 0
+    r = flip_read(db.eng, since=SINCE, as_of=EARLY)
+    assert (r.g7["row_gone"], r.g7["row_gone_named"]) == (4, 2)
+    assert r.g7["row_gone_split"] == {"replaced": 1, "no_row": 1, "unsplit": 2}   # C4 (d1)
+    assert r.g7["status"] == PASS                                # never barred
+    assert ("G7 (not barred) row gone: 4 misses whose pack recorded a stored count above "
+            "the card while its page row was gone; 2 of them with a named cause (U4 option "
+            "A's guard); replaced=1, no_row=1, unsplit=2.") in render(r)
+
+
+def test_row_gone_never_reads_a_pack_failing_integrity():
+    """A pack failing integrity is G1's: its run metadata is not trusted, so
+    its row-gone entries are not counted (its misses are not either)."""
+    db = make_db()
+    _packed(db, "bad", upgrade_misses={"restart_split": 1},
+            upgrade_miss_cards={"7": "restart_split"}, upgrade_miss_row_gone={"7": 90})
+    with db.eng.begin() as conn:
+        conn.execute(db.packs.update().where(db.packs.c.run_id == "bad")
+                     .values(checksum="0" * 64))
+    r = flip_read(db.eng, since=SINCE, as_of=EARLY)
+    assert r.g1["ids"] == ["bad"]
+    assert (r.g7["upgrade_misses"], r.g7["row_gone"], r.g7["row_gone_named"]) == ({}, 0, 0)
+    assert weekly_read(db.eng, as_of=LATE)["u4_r4"]["row_gone"] == 0
+
+
+def test_g7_row_gone_reads_any_other_why_as_unsplit():
+    db = make_db()
+    _packed(db, "p", upgrade_misses={"restart_split": 3},
+            upgrade_miss_cards={"6": "restart_split", "7": "restart_split", "8": "restart_split"},
+            upgrade_miss_row_gone={"6": 90, "7": 90, "8": 90},
+            upgrade_miss_row_gone_why={"6": "mystery", "7": ["replaced"], "8": {"no_row": 1}})
+    r = flip_read(db.eng, since=SINCE, as_of=EARLY)
+    assert r.g7["row_gone_split"] == {"replaced": 0, "no_row": 0, "unsplit": 3}
+
+
+def test_g7_reports_the_u4_r4_sum_over_the_window_as_indicative_only():
+    """Addendum C4: over the 24 h window the U4-R4 sum (named causes / viewed
+    cards) is indicative; it never changes G7's status, which bars other only."""
+    db = _joins_db()                                   # 2 viewed cards in the window
+    _packed(db, "p", upgrade_misses={"restart_split": 1, "evicted_split": 1, "other": 0})
+    r = flip_read(db.eng, since=SINCE, as_of=LATE)
+    ind = r.g7["indicative"]
+    assert (ind["numerator"], ind["status"]) == (2, "OVER") and ind["denominator"] >= 2
+    assert r.g7["status"] == PASS
+    assert "indicative only, the 7-day ceiling is read with --weekly" in render(r)
+
+
 # ---------------------------------------------------------------------------
 # G8, G9, G10
 # ---------------------------------------------------------------------------
@@ -429,14 +505,37 @@ def test_weekly_u4_r4_named_misses_over_viewed_cards(named, status):
     put_deck(db, "liked", 10)
     for i in range(10):
         act(db, "liked", i, "like")
-    _packed(db, "p", upgrade_misses={**named, "other": 3})
+    _packed(db, "p", upgrade_misses={**named, "other": 3},
+            upgrade_miss_row_gone={"40": 90}, upgrade_miss_row_gone_why={"40": "replaced"})
     _packed(db, "old", served_at="2026-10-16T12:00:00+00:00",
-            upgrade_misses={"restart_split": 9})
+            upgrade_misses={"restart_split": 9}, upgrade_miss_row_gone={"50": 90})
     w = weekly_read(db.eng, as_of=LATE)
     u = w["u4_r4"]
     assert (u["numerator"], u["denominator"]) == (sum(named.values()), 100)
+    # C4 (d1): the weekly line reports row_gone too, the old deck's not read
+    assert u["row_gone"] == 1 and u["row_gone_split"] == {"replaced": 1, "no_row": 0,
+                                                           "unsplit": 0}
     assert u["causes"] == dict(sorted(named.items())) and u["status"] == status
-    assert u["ceiling"] == fr.U4_R4_CEILING == 0.01 and fr.U4_R4_CAUSES is None
+    assert u["ceiling"] == fr.U4_R4_CEILING == 0.01
+    assert fr.U4_R4_CAUSES == ("restart_split", "evicted_split")
+
+
+def test_u4_r4_sums_the_two_named_causes_once():
+    """Addendum C2: restart_split + evicted_split, by name. `other` and a
+    cause added later stay out, and a row-gone miss, already counted under
+    its cause, is not counted again: in the weekly sum or the indicative one."""
+    db = make_db()
+    put_deck(db, "viewed", 100, viewed=range(100))
+    _packed(db, "p", upgrade_misses={"restart_split": 1, "evicted_split": 1,
+                                     "cross_worker": 2, "other": 3},
+            upgrade_miss_cards={"5": "restart_split", "6": "evicted_split"},
+            upgrade_miss_row_gone={"5": 90, "6": 90})
+    u = weekly_read(db.eng, as_of=LATE)["u4_r4"]
+    assert (u["numerator"], u["denominator"]) == (2, 100)
+    assert u["causes"] == {"evicted_split": 1, "restart_split": 1}
+    assert (u["row_gone"], u["row_gone_named"]) == (2, 2)
+    ind = flip_read(db.eng, since=SINCE, as_of=LATE).g7["indicative"]
+    assert (ind["numerator"], ind["denominator"]) == (2, 100)
 
 
 @pytest.mark.parametrize("cuts, status", [(4, "OK"), (5, "OK"), (6, "OVER")],
@@ -507,12 +606,12 @@ def test_the_cli_reads_a_sqlite_file_read_only_and_never_writes(tmp_path, capsys
     args = ["--db", str(path), "--since", "2026-10-23T00:00:00Z", "--as-of", _after(20)]
     assert main(args) == 3                                         # INSUFFICIENT: not a pass
     out = capsys.readouterr().out
-    assert "| G1 | pack_integrity decks / decks with a pack row | 0 / 2 | 0 | PASS |" in out
+    assert "| G1 | pack_integrity decks (+ malformed display moves) / decks with a pack row | 0 (+ 0) / 2 | 0 | PASS |" in out
     assert ("| G2 | incomplete_deck / Trades decks read (final packed + every pack-less) "
             "| 0 / 3 (1 final packed + 2 pack-less) | 0; INSUFFICIENT below 10 final packed "
             "| PASS |") in out
     assert "| G3 | outcomes joining no card / on a ghost row | 0 / 0 of 7" in out
-    assert "OVERALL: INSUFFICIENT" in out and "U4-R4" not in out
+    assert "OVERALL: INSUFFICIENT" in out and "Weekly ceilings" not in out
 
     # 1 restart split over 7 viewed cards is over 1%: OVER exits 1, over INSUFFICIENT's 3.
     assert main(args + ["--weekly"]) == 1

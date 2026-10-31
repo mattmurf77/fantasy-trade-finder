@@ -10,6 +10,7 @@
 ---
 
 ## Table of Contents
+- [2026-10-26](#2026-10-26)
 - [2026-10-05](#2026-10-05)
 - [2026-08-28](#2026-08-28)
 - [2026-08-15](#2026-08-15)
@@ -19,6 +20,39 @@
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
 
 ---
+
+## 2026-10-26
+
+### Backend: `gunicorn` pinned to the version prod runs
+
+| Package | Version | Changed | Why |
+|---|---|---|---|
+| `gunicorn` | `==26.2.0` (was `>=22.0.0`) | branch `fix/fork-safe-db-and-worker-threads` | Prod (Render) installs 26.2.0. The pin matches prod and is harmless: CI already resolved to 26.2.0. **It is not the cause of the fork problems below**, and it does not make local runs import the app the way prod does: local `python run.py` does not preload. |
+
+- **Found in** release-lead's read-only deploy watch on 2026-10-26, while chasing "decryption failed or bad record mac" and "SSL SYSCALL EOF".
+- **The cause is Render's default `GUNICORN_CMD_ARGS`:** `"--preload --access-logfile - --bind=0.0.0.0:10000"` for Python services.
+  - It does not appear in the service's env list.
+  - With `--preload`, gunicorn imports the app in the **master** and then forks the worker. Every boot logs "Database initialised" before "Booting worker".
+  - So prod has always preloaded. gunicorn 26.2.0 still loads in the master only with `preload_app`.
+- **What it broke:**
+  - Threads started at import ran in the master and died in the worker at fork. `_cleanup_loop` has probably never run where requests are served.
+  - The Win Now resume started `win-now-worker` in the master, so the worker inherited `_worker_running=True` with no thread.
+  - The worker inherited the master's pooled SSL connections.
+- **The fix does not depend on the gunicorn version:**
+  - an `os.register_at_fork` child hook disposes every engine's pool (`close=False`);
+  - Postgres engines get `pool_recycle=280` and libpq keepalives;
+  - the cleanup loop and the Win Now resume start per process from a `before_request` hook.
+
+  See `docs/runbook.md` § "DB connections and background threads across fork".
+- **Bumping it later:** no special care is needed for the fork fix. Keep the pin in step with what Render installs.
+
+### Backend: `flask` floor raised to 3.1
+
+| Package | Version | Changed | Why |
+|---|---|---|---|
+| `flask` | `>=3.1` (was `>=3.0.0`) | `feat/354-public-feedback` (#360) | `POST /api/feedback` sets a per-request `request.max_content_length` so an over-cap chunked body is 413, not read and stored (#360 QA P2-2). That attribute is settable per request only from Flask 3.1; on 3.0 the line raises `AttributeError` and every feedback POST would be a 500. Prod already installs 3.1.x (lower-bound only, so `pip` takes the latest); the floor now says so. |
+
+- No version actually changes in prod or CI; this only stops a fresh build from resolving to 3.0.
 
 ## 2026-10-05
 

@@ -91,8 +91,9 @@ def p1(live, monkeypatch):
     # leaves its delivery's ids pending forever (#419 QA: the F4 test failed
     # after the page suites).
     monkeypatch.setattr(server, "_deck_evidence_pending", {})
-    monkeypatch.setattr(server, "_deck_evicted_at", {})        # U4: evicted decks, per process
-    monkeypatch.setattr(server, "_deck_held", {})              # U4: decks this process built
+    monkeypatch.setattr(server, "_deck_evicted_at", collections.OrderedDict())   # U4: evicted here
+    monkeypatch.setattr(server, "_deck_held", collections.OrderedDict())         # U4: built here
+    monkeypatch.setattr(server, "_deck_f5_dropped", collections.OrderedDict())   # D1: F5 dropped here
     # Cached pack states, per test: the tests reuse deck ids (deck-0000), and a
     # state left by an earlier test carries its CAS checksum and counted misses.
     monkeypatch.setattr(server, "_deck_pack_states", {})
