@@ -213,6 +213,12 @@ Results:
 | R3 | Paste a share link into iMessage | The unfurl card's footer reads "Fleeced: Dynasty Trade Finder · fantasy-trade-finder.onrender.com" on one line. **The player names are readable at thumbnail size, not tiny text** (design-lead B4: with no TrueType font on the server, Pillow falls back to a 10px default. If so, vendor a TTF, such as the OFL Archivo files on `design/og-cards`, as the first `_FONT_CANDIDATES` entry). |
 | R4 | Same card, a trade with a QB and a TE | The "% fair" text sits clear above the meter bar. There's no box or odd glyph between YOU GIVE and YOU GET. QB chips are orange and TE chips are purple, with dark labels. |
 
+**Legal: PASSES R13** (legal-lead R28.23, via head-eng 2026-11-01). Every `/s/*` page renders through `_share_html` with the Fleeced title, the brand line, the Privacy link and `noindex`, and the preview footer carries the Fleeced brand.
+
+**Flag-on gate for `growth.tier_board_share` (legal, 2026-11-01).** `/s/tiers/<pos>/<username>` puts the username in its title and description. The route is dark today. **Before that flag is ever turned on, it needs:**
+- (a) an unguessable token in place of the username in the URL, with the username shown only if the sharer chooses to show it;
+- (b) the ink-0 tier-card label, done in `c1e62fa8`.
+
 **Reviews:** design-lead **passed** the link style and brand line at `8b90d674` (2026-10-31). Their two string changes (`s4.title`, `s4.og_footer`) and the `.brand` contrast fix are applied. Legal-lead's review of R13 is routed via head-eng.
 
 **Not done here (design-lead optional item 5):** the expired page's approved `p29.*` set (title "Link expired — Fleeced: Dynasty Trade Finder", headline, body, og lines) is engagement-eng's P29 work. Its tab title reads "This trade link has expired. · Fleeced: Dynasty Trade Finder" until then.
