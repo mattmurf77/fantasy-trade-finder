@@ -1,3 +1,16 @@
+## 2026-10-31 — Deletion scrub: other users' notifications and events (head-eng, 10-31)
+
+Gates: head-eng's ruling on the two stores release-lead's #557 QA found (add both; legal gets an FYI), in #562. No new table; `partner_names_json` now holds `{leagues, usernames}` (new in #562, so no migration of its shape). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **`notifications`:** a match / disposition notification naming the person by username (unique) in `metadata_json.partner_username` takes the placeholder there and as `@name` in the title and body. Ids in the metadata take the token. A display name is never matched, since it could be another user's username.
+- **`user_events`:** ids in other users' `props` take the token.
+- Both are fallback scans in bounded pages, renewing the lease.
+- **Tests (`test_deletion_scrub_stage3.py`):**
+  - five notifications: two of the person's by username, another partner's, one whose username equals the person's display name (untouched), and one with the person's id;
+  - two events.
+- **Sabotages, 5/5 red:** no notifications scan; no events scan; display names matched; the title kept; the metadata username kept.
+- **Suites:** the three scrub files pass.
+
 ## 2026-10-31 — Deletion scrub: models-lead addendum J4 (a redacted card never serves) and J2 (item 5's tests)
 
 Gates: head-eng's relay of models-lead addendum J (11-01), on #562. It touches the serve path: `_roster_serve_rules` drops a token-target card, and a new withdrawal reason, `partner_deleted`. That comes to models-lead as an R-G entry, with the pack codec's, before merge. No schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

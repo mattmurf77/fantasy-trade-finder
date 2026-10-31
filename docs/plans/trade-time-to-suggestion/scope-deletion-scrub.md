@@ -73,6 +73,8 @@ The rows to touch are found per captured league and per viewer (the league's mem
 | `trade_matches` | ids are already the placeholder today | `match_valuation_json` cleared whole when either side is the person, in the deletion transaction (it holds user_a's own board as the viewer and user_b's as the partner; the `trade_proposals.valuation_json` precedent) | — |
 | model store | E-b3 (`redact_model_store`) | — | — |
 | `deck_diagnostic_snapshots` (stage 3) | — | a row past 30 days (a purge that fell behind) naming them is deleted; younger ones go with the 14-day purge, inside legal's 30 days | — |
+| `notifications` (other users'; head-eng 10-31, found in release-lead's #557 QA) | ids in `metadata_json` | a match / disposition notification naming them by **username** (unique) in `metadata_json.partner_username`: that username becomes the placeholder there and as `@name` in the title and body. A display name is never matched, since it could be someone else's | — |
+| `user_events` (other users'; the same) | ids in `props` (e.g. `partner_user_id`) | — | — |
 
 Already handled by deletion today, untouched: `trade_proposals`, `trade_impressions`, `bad_trade_flags` (NULL), `prepared_trade_*` (deleted), `trade_matches` ids.
 

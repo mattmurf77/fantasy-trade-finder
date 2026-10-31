@@ -2126,7 +2126,7 @@ The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scr
 | `attempts` | int, not null, default 0 | Lease claims |
 | `claimed_until` | str | ISO UTC lease (10 min), taken by compare-and-swap; NULL = free |
 | `last_error` | str | The last failure's exception class, never its message |
-| `partner_names_json` | text (JSON) | `{league_id: [display names, usernames]}`, read before the deletion removes the person's `league_members` rows: a Calibration card names its partner by display name. As private as the ids, and never logged. Added to existing tables at boot (`_migrate_db`) |
+| `partner_names_json` | text (JSON) | `{leagues: {league_id: [display names, usernames]}, usernames: [...]}`, read before the deletion removes the person's `league_members` and `users` rows. A Calibration card names its partner by display name. A notification names them by username, and only usernames (unique) are matched there. As private as the ids, and never logged. Added to existing tables at boot (`_migrate_db`) |
 | `scan_json` | text (JSON) | An unfinished DB pass's state: the league pass's counts, which fallback scan is running, and its keyset cursor. The next run resumes from it. NULL between passes |
 
 Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.
@@ -2149,6 +2149,8 @@ Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.
   - A diagnostic past 30 days naming them is deleted.
   - A redacted page card also loses its `narrative`.
   - A redacted value_core card loses `scores.outlook`, `scores.priority` and `effective`.
+  - **Other users' `notifications`** naming them by username in `metadata_json.partner_username`: the placeholder there and as `@name` in the title and body, with ids in the metadata taken by the token.
+  - **Other users' `user_events`:** ids in `props` take the token.
 - **Kept:** hashes (`trade_hash` and the rest, legal (viii)).
 - **In the deletion transaction:** other users' `user_taste` `partner:<id>` rows become one `partner:<token>` row each (two aliases' weights summed). Standing offers' `team_user_ids` take the token. `trade_matches.match_valuation_json` is cleared when either side is the person.
 
