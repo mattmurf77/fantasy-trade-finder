@@ -36,7 +36,7 @@ Eng slot is approved (engagement-eng from 10-28, weekends, the 11-03 checkpoint;
   on the offer** (3.1.2). When access ends, a gated action opens the **standard paywall**; free surfaces stay free.
 - **Prices (decided): the Founding GMs price, $4.99/mo and $24.99/yr,** each with a 1-month free trial. From
   **2027-01-02 04:00 UTC** (Jan 1, 11 pm ET; last club day 2026-12-31, kept whole in every US zone) new subscribers pay $6.99/$34.99; existing ones keep their price (Apple's
-  price preservation). **No Founder SKU, no lifetime, no Season Pass; tips stay dark.**
+  price preservation). **No Founder SKU, no lifetime, no Season Pass.** Tips: dark in this memo, then **Tips reversed 2026-11-01 (operator): a working tip jar ships at launch; see `docs/plans/tip-jar/` (PR #569).**
 - **TestFlight users:** no app clock, no comp, the tester welcome. **Web:** the same rule behind its own knob, ungated
   until 11-18, then the first web deck and "continue on iPhone"; no web trial. The extension's routes are all free.
 - **Cost: about 9.25–9.75 eng-days; ≈ 7.65 binary-critical,** 1.6–2.1 server-side or later (the ruling took 1.5 d out,
@@ -55,7 +55,7 @@ Eng slot is approved (engagement-eng from 10-28, weekends, the 11-03 checkpoint;
 | 3 | Prices | **$4.99 / $24.99 at launch** with 1-month trials; **$6.99 / $34.99** for new subscribers from 2027-01-02 04:00 UTC (scheduled 2027-01-02) | Launch at $6.99/$34.99, discount by code | A later cut passes through to everyone; a founder price set too low is locked for the cohort |
 | 4 | Founder mechanism | **Apple price preservation**, one SKU per plan | A separate Founder SKU; offer codes; $119 lifetime | A separate SKU either stops founders' renewals or leaks the price to everyone |
 | 5 | Name, cut-off, commitment | **"Founding GMs";** last day **2026-12-31**; **commit** to keeping the price while subscribed | Another name; a later cut-off | An uncommitted line reads as bait; a cut-off that slips is a false-urgency claim (5.6) |
-| 6 | Lifetime, Season Pass, tips | **Drop / defer / keep dark** | Ship tips as built | More IAPs to review on the first submission, and a perpetual grant with storage liability |
+| 6 | Lifetime, Season Pass, tips | **Drop / defer / keep dark** (tips reversed 2026-11-01 by the operator: they ship, PR #569) | Ship tips as built | More IAPs to review on the first submission, and a perpetual grant with storage liability |
 | 7 | TestFlight users | **No clock, no comp**; Founding GMs on the same terms | 90-day comp (#347) | A comp past the cut-off makes them miss the founder price |
 | 8 | Web and extension | **Web gated by the server rule** under `paywall_web_enforce_enabled`, **ungated until 11-18** (head-product); extension unchanged | A web trial | A web-only free window is a bypass with no purchase path |
 | 9 | Identity | **Pro counts only on verified or demo sessions** (head-eng's P47). Unverified sessions get **no free page** (P53): the existing account check answers 403 `verification_required` at the first trade action, and the client opens the same verify sheet as for the **status-blind** backstop 402 `verify_required`, subscriber or not (legal R28.9 row 4, a MUST; `org/leads/legal-lead.md:1677`) | Pro on any session; a verify gate only for subscribers | A paid entitlement usable from a claimable username; a subscriber-only gate reveals who pays |
@@ -174,7 +174,8 @@ ranking and Calibration); and the August trial ruling (14 days monthly), now 1 m
   price change at 04:00 UTC on its date, so 2027-01-02 lands Jan 1 at 11 pm ET and 2027-01-01 would cut Dec 31 short
   (operator 2026-10-28, "Yes, Jan 2"). The "from Jan 1" line is legal-lead's to align with the reworded §14.8.
 - **Dropped at launch:** the lifetime; the Season Pass (already deferred to 2027); tips (dark: three fewer IAPs on a
-  first review, plus one binary line to hide the Settings tip row, `SettingsHubScreen.tsx:300-305`); #347's league cap
+  first review, plus one binary line to hide the Settings tip row, `SettingsHubScreen.tsx:300-305`; **reversed 2026-11-01 by the
+  operator, see PR #569**); #347's league cap
   (5g; moot when free users get no trades).
 
 ## (c) What's gated after the trial
@@ -343,7 +344,7 @@ is ≈ 7.65 eng-days, so the slack is **about 0.35 working days, ~2.35 calendar 
 still needs head-eng's rows 11–17 confirmed, design-lead's visuals by 10-28, the `mz.*` copy by ~11-02, and **the
 operator lane:** Paid Applications Agreement, banking, tax, SBP; the subscription group with both SKUs at $4.99/$24.99, a
 1-month intro on each, and the increase scheduled for 2027-01-02 with "keep current price"; multiseat and Family Sharing
-off; tips not submitted; RevenueCat (`pro`, offering, webhook); `REVENUECAT_WEBHOOK_SECRET` on Render;
+off; tips not submitted (reversed 2026-11-01: tips ride the 11-10 submission, PR #569); RevenueCat (`pro`, offering, webhook); `REVENUECAT_WEBHOOK_SECRET` on Render;
 `EXPO_PUBLIC_REVENUECAT_IOS_KEY` in EAS production by ~11-07; two App Review demo accounts (both gated); Gate 0. **Checkpoint 11-03:** if the
 client gate PR isn't CI-green, pull it from the binary and run R3; a half-built gate in the review binary is the worst outcome.
 
@@ -386,7 +387,7 @@ client gate PR isn't CI-green, pull it from the binary and run R3; a half-built 
 1. **Mechanism:** A-preview (Apple's 1-month trial at ux §1's trigger; one free deck page). **DECIDED.**
 2. **Gate scope:** C2, with the four calls (calculator value check, viewing Matches, Draft Room, Calibration free). **DECIDED.**
 3. **Prices:** $4.99/$24.99 with 1-month trials; $6.99/$34.99 for new subscribers from 2027-01-02 04:00 UTC (scheduled 2027-01-02; operator 2026-10-28). **DECIDED.**
-4. **Founder mechanism:** price preservation; no Founder SKU or lifetime; Season Pass deferred; tips dark. **DECIDED.**
+4. **Founder mechanism:** price preservation; no Founder SKU or lifetime; Season Pass deferred; tips dark. **DECIDED.** **Tips reversed 2026-11-01 (operator): a working tip jar ships at launch; see `docs/plans/tip-jar/` (PR #569).**
 5. **Name:** "Founding GMs". 6. **Cut-off:** last day 2026-12-31. 7. **Keep the founder price while subscribed on your
    plan,** with legal's lapse wording. **All three DECIDED.**
 8. **TestFlight users:** no clock, no comp; grants only for the operator's 2 ids and the granted App Review demo (both
