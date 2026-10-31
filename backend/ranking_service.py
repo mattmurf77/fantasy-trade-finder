@@ -740,6 +740,13 @@ class RankingService:
         """
         k = _c("trade_k_like") if decision == "like" else _c("trade_k_pass")
         k *= fit_mult
+        # A2: generic pick rungs never take a trade signal — they only reach
+        # here from client-echoed card context. Strip before the
+        # decomposition; a side left empty skips the pair.
+        # See docs/plans/generic-pick-signal-strip.md.
+        from .pick_values import strip_generic_pick_pair
+        winner_ids, loser_ids = strip_generic_pick_pair(
+            winner_ids, loser_ids, site="record_trade_signal")
         for wid in winner_ids:
             for lid in loser_ids:
                 if wid == lid:
@@ -770,6 +777,11 @@ class RankingService:
         Uses the same _trade_swipes list as record_trade_signal so it is
         automatically included in _compute_elo and replayed from the DB.
         """
+        # A2: same strip as record_trade_signal — a match can be minted from
+        # a client-echoed card, so its sides can carry a generic rung.
+        from .pick_values import strip_generic_pick_pair
+        winner_ids, loser_ids = strip_generic_pick_pair(
+            winner_ids, loser_ids, site="record_disposition_signal")
         for wid in winner_ids:
             for lid in loser_ids:
                 if wid == lid:

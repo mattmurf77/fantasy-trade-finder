@@ -6414,8 +6414,19 @@ def save_trade_swipes(
     Elo AND persist the signal. Returns True only after both commit; a lost
     swipe write rolls back the claim so a contextful reason retry can repair.
     Ordinary callers retain their existing return/behavior.
+
+    A2 (docs/plans/generic-pick-signal-strip.md): a generic pick rung is never
+    persisted — same strip as record_trade_signal, so the replay keeps
+    mirroring the live board. The return value does NOT change: it keys off
+    the UNSTRIPPED pair, so a pair the strip empties still claims the reason
+    and returns True (it was handled; there was just nothing to write), and
+    `/api/trades/pass-reason`'s `elo_written` answers exactly as before.
     """
     now  = _now()
+    from .pick_values import strip_generic_pick_pair
+    had_pairs = any(w != l for w in winner_ids for l in loser_ids)
+    winner_ids, loser_ids = strip_generic_pick_pair(
+        winner_ids, loser_ids, site="save_trade_swipes")
     rows = []
     for wid in winner_ids:
         for lid in loser_ids:
@@ -6430,7 +6441,7 @@ def save_trade_swipes(
                 "created_at":       now,
                 "scoring_format":   scoring_format,
             })
-    if rows:
+    if rows or (had_pairs and pass_reason_key is not None):
         with engine.begin() as conn:
             if pass_reason_key is not None:
                 reason = conn.execute(select(trade_pass_reasons_table).where(and_(
@@ -6439,7 +6450,8 @@ def save_trade_swipes(
                 )).with_for_update()).first()
                 if reason is None or reason.elo_signal_at is not None:
                     return False
-            conn.execute(insert(swipe_decisions_table), rows)
+            if rows:
+                conn.execute(insert(swipe_decisions_table), rows)
             if pass_reason_key is not None:
                 conn.execute(update(trade_pass_reasons_table).where(
                     trade_pass_reasons_table.c.impression_id == pass_reason_key
