@@ -7029,6 +7029,10 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
     i1_report = {}
     cards, block, past_bound = _roster_serve_rules(checked, league_id, viewer_id,
                                                    row["deck_job_id"], snap=snap, report=i1_report)
+    # A card the deletion scrub redacted (its partner deleted their account)
+    # never serves, whatever the I-1 mode (lenient, C-e, a pick-only card):
+    # it leaves with the I-1 drops, as a withdrawal.
+    cards = [c for c in cards if not _redacted_target(c)]
     kept = {id(c) for c in cards}
     withdrawn = [] if block else [c for c in checked if id(c) not in kept]
     moves = {}
@@ -7052,6 +7056,12 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
     if i1_report:                         # off-thread, each card once per deck
         _emit_deck_i1_check(user_id, league_id, row["deck_job_id"], i1_report)
     return out, past_bound
+
+
+def _redacted_target(card) -> bool:
+    """A stored card whose partner is a deletion scrub's redaction token."""
+    from .eval.contract import REDACTED_PARTNER_PREFIX
+    return str((card or {}).get("target_user_id") or "").startswith(REDACTED_PARTNER_PREFIX)
 
 
 def _trade_page_stale(row: dict, snap, vsn=None) -> bool:

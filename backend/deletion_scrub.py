@@ -585,18 +585,146 @@ def _scan_packs(job: dict, after: str, budget: list) -> tuple[str | None, int]:
     return after, changed
 
 
-# The DB phase, in order (scope §0.2; the page store comes with stage 2's
-# second half). First the league pass over the captured leagues, then the
+# ── The page store (trade_page_store) ───────────────────────────────────────
+
+# accounts.DELETED_USER_PLACEHOLDER (accounts imports this module lazily).
+_PLACEHOLDER = "deleted_user"
+# A served card's fields from the partner's account, removed on a redacted
+# card (the c2 list's PG keys), and its blended scores, nulled.
+_PAGE_CARD_KEYS_REMOVED = ("likes_you", "standing_offer_reason", "reasons", "rationale",
+                           "fit", "breaker")
+_PAGE_CARD_KEYS_NULLED = ("mismatch_score", "composite_score", "surplus_margin",
+                          "base_score", "final_score")
+
+
+def redact_page_card(card: dict, ids, token: str) -> dict:
+    """One stored page card. Its target becomes the token and the placeholder
+    name, and the partner's fields go. S0's I-1 then withdraws it at serve:
+    the person's roster rows are gone, so no receive asset is the token's."""
+    if card.get("target_user_id") not in ids:
+        return _replace_ids(card, ids, token)
+    out = {k: v for k, v in card.items() if k not in _PAGE_CARD_KEYS_REMOVED}
+    out.update(target_user_id=token, target_username=_PLACEHOLDER)
+    for key in _PAGE_CARD_KEYS_NULLED:
+        if key in out:
+            out[key] = None
+    if isinstance(out.get("match_context"), dict):
+        out["match_context"] = {k: v for k, v in out["match_context"].items()
+                                if k != "opponent_outlook"}
+    return _replace_ids(out, ids, token)
+
+
+def redact_evidence_blob(blob: dict, ids, token: str) -> dict:
+    """A page row's deferred evidence: its rows and ghosts as deck_impressions
+    rows are redacted, its candidate set's members, its trade_impressions'
+    target (NULL, as deletion does to the table), its run metadata as a pack
+    run; then any other mention of an id takes the token."""
+    ids = set(ids)
+    out = dict(blob)
+    rows = [r for r in (out.get("rows") or []) if isinstance(r, dict)]
+    for key in ("rows", "ghosts"):
+        if isinstance(out.get(key), list):
+            out[key] = [redact_row(r, ids, token) if isinstance(r, dict) else r for r in out[key]]
+    cs = out.get("candidate_set")
+    if isinstance(cs, dict):
+        members = _loads(cs.get("candidates_json")) if isinstance(cs.get("candidates_json"), str) else None
+        if isinstance(members, list):
+            out["candidate_set"] = {**cs, "candidates_json": json.dumps(
+                [_redact_member(m, ids, token) if isinstance(m, dict) else m for m in members])}
+    ti = out.get("trade_impressions")
+    if isinstance(ti, list):
+        out["trade_impressions"] = [{**r, "target_user_id": None}
+                                    if isinstance(r, dict) and r.get("target_user_id") in ids else r
+                                    for r in ti]
+    if isinstance(out.get("run_meta"), dict):
+        partners = []
+        for r in rows:
+            f = _loads(r.get("features_json")) if isinstance(r.get("features_json"), str) else r.get("features_json")
+            partners.append({"trade_hash": r.get("trade_hash"),
+                             "partner_user_id": (f or {}).get("partner_user_id")})
+        out["run_meta"] = redact_pack_run(out["run_meta"], partners, ids)
+    return _replace_ids(out, ids, token)
+
+
+def _redact_page_rows(row_ids, job: dict) -> int:
+    """Rewrite these page rows, unless a rebuild replaced one meanwhile (its
+    deck_job_id moved): that row is re-read and redone."""
+    ids, token = set(job["ids"]), job["token"]
+    t = db.trade_page_store_table
+    changed = 0
+    for row_id in row_ids:
+        for _attempt in range(5):
+            with db.engine.begin() as conn:
+                row = conn.execute(select(t).where(t.c.id == row_id)).mappings().first()
+                if row is None:
+                    break
+                pages, evidence = row["pages_blob"], row["evidence_blob"]
+                new_pages = pages
+                if isinstance(pages, dict) and isinstance(pages.get("cards"), list):
+                    new_pages = {**pages, "cards": [redact_page_card(c, ids, token)
+                                                    if isinstance(c, dict) else c
+                                                    for c in pages["cards"]]}
+                new_evidence = (redact_evidence_blob(evidence, ids, token)
+                                if isinstance(evidence, dict) else evidence)
+                if new_pages == pages and new_evidence == evidence:
+                    break
+                size = len(db.CompressedJSON.encode(new_pages)) + (
+                    len(db.CompressedJSON.encode(new_evidence)) if new_evidence is not None else 0)
+                if conn.execute(update(t).where(
+                        t.c.id == row_id, t.c.deck_job_id == row["deck_job_id"],
+                        t.c.built_at == row["built_at"]).values(
+                        pages_blob=new_pages, evidence_blob=new_evidence,
+                        stored_bytes=size)).rowcount:
+                    changed += 1
+                    break
+        else:
+            raise RuntimeError("page row kept changing")
+    return changed
+
+
+def _scrub_page_store(job: dict) -> int:
+    """The league pass over the page store (ix_trade_page_store_league)."""
+    t = db.trade_page_store_table
+    with db.engine.connect() as conn:
+        found = conn.execute(select(t.c.id).where(
+            t.c.league_id.in_(job["leagues"]), t.c.built_at <= job["cutoff"])).scalars().all()
+    return _redact_page_rows(found, job)
+
+
+def _scan_page_store(job: dict, after: str, budget: list) -> tuple[str | None, int]:
+    """The fallback scan of the page store. Its blobs are compressed, so every
+    row is decoded and rewritten if it names an id (one row per user, league
+    and scope; pages expire in days)."""
+    t = db.trade_page_store_table
+    changed = 0
+    cursor = int(after or 0)
+    while budget[0] > 0:
+        budget[0] -= 1
+        with db.engine.connect() as conn:
+            found = conn.execute(select(t.c.id).where(
+                t.c.id > cursor, t.c.built_at <= job["cutoff"],
+                t.c.user_id.notin_(sorted(job["ids"])),
+            ).order_by(t.c.id).limit(_SCAN_BATCH)).scalars().all()
+        if not found:
+            return None, changed
+        changed += _redact_page_rows(found, job)
+        cursor = found[-1]
+    return str(cursor), changed
+
+
+# The DB phase, in order (scope §0.2). First the league pass over the captured leagues, then the
 # fallback scans of whole stores, resumable from a cursor on the job row.
 _STORES = (
     ("deck_impressions", _scrub_impressions),
     ("deck_candidate_sets", _scrub_candidate_sets),
     ("deck_evidence_packs", _scrub_packs),
+    ("trade_page_store", _scrub_page_store),
 )
 _SCANS = (
     ("deck_impressions", _scan_impressions),
     ("deck_candidate_sets", _scan_candidate_sets),
     ("deck_evidence_packs", _scan_packs),
+    ("trade_page_store", _scan_page_store),
 )
 
 

@@ -218,3 +218,104 @@ def test_a_held_rows_upgrade_after_a_scrub_takes_the_packs_token(engine):
     assert json.loads(row["valuation_json"]) == {"market": {"r": 1}}
     other = {**held, "impression_id": "deck-pack:1", "features_json": json.dumps(features_for(OTHER))}
     assert server._redacted_held_row(other, state, 1) == other
+
+
+# ── The page store ──────────────────────────────────────────────────────────
+
+def page_card(partner, i, **extra):
+    return {"trade_id": f"t{i}", "league_id": LEAGUE, "target_user_id": partner,
+            "target_username": "name", "give": [{"id": "g"}], "receive": [{"id": "r"}],
+            "decision": None, "impression_id": f"deck-page:{i}", "mismatch_score": 9.0,
+            "composite_score": 150.0, "narrative": "n", **extra}
+
+
+def insert_page(engine, league=LEAGUE, user=VIEWER, deck="deck-page"):
+    from backend.tests.test_deletion_scrub import RICH, features_for
+    rich = dict(likes_you=True, standing_offer_reason="x", reasons=["they rank r at 2x"],
+                rationale={"counterparty": {"timeline": "declared"}}, fit={"them": 70.0},
+                breaker={"objections": ["o"]},
+                match_context={"opponent_outlook": {"source": "declared", "value": "rebuild"},
+                               "user_needs": ["QB"]})
+    pages = {"v": 1, "opponents_total": 2,
+             "cards": [page_card(DEL, 0, **rich), page_card(OTHER, 1)]}
+    evidence = {"v": 1, "served_at": EARLY, "league_id": league,
+                "rows": [{"impression_id": "deck-page:0", "card_index": 0, "trade_hash": "h0",
+                          "base_score": 150.0, "final_score": 160.0,
+                          "source_like_impression_id": "l",
+                          "features_json": json.dumps(features_for(DEL, **RICH)),
+                          "valuation_json": json.dumps({"partner_board": {}, "market": {}})},
+                         {"impression_id": "deck-page:1", "card_index": 1, "trade_hash": "h1",
+                          "base_score": 1.0, "features_json": json.dumps(features_for(OTHER))}],
+                "candidate_set": {"candidates_json": json.dumps(
+                    [{"trade_hash": "h0", "partner": DEL, "base_score": 1.0}])},
+                "trade_impressions": [{"target_user_id": DEL}, {"target_user_id": OTHER}],
+                "run_meta": {"filter_inputs": {"qb_te": {DEL: ["q"], OTHER: ["q2"]},
+                                               "protected": ["h0", "h1"]}}}
+    with engine.begin() as conn:
+        conn.execute(insert(db.trade_page_store_table).values(
+            user_id=user, league_id=league, scoring_format="1qb_ppr", request_scope="organic",
+            roster_fp="r", values_snapshot_id="v", engine_version="e", config_signature="c",
+            experiment_digest="d", deck_job_id=deck, built_at=EARLY,
+            expires_at="2999-01-01T00:00:00+00:00", card_count=2, pages_blob=pages,
+            evidence_blob=evidence, stored_bytes=1, state="ready"))
+    return pages
+
+
+def test_a_page_rows_cards_and_evidence_are_redacted(engine):
+    pages = insert_page(engine)
+    accounts.delete_user_data(DEL)
+    token = job(engine)["token"]
+    scrub.run_pending()
+    (row,) = read(engine, db.trade_page_store_table)
+    c0, c1 = row["pages_blob"]["cards"]
+    assert c1 == pages["cards"][1]                               # another partner's card
+    assert (c0["target_user_id"], c0["target_username"]) == (token, accounts.DELETED_USER_PLACEHOLDER)
+    for key in ("likes_you", "standing_offer_reason", "reasons", "rationale", "fit", "breaker"):
+        assert key not in c0, key
+    assert (c0["mismatch_score"], c0["composite_score"]) == (None, None)
+    assert c0["match_context"] == {"user_needs": ["QB"]}
+    ev = row["evidence_blob"]
+    r0 = ev["rows"][0]
+    assert json.loads(r0["features_json"])["partner_user_id"] == token
+    assert (r0["base_score"], r0["final_score"], r0["source_like_impression_id"]) == (None, None, None)
+    assert json.loads(r0["valuation_json"]) == {"market": {}}
+    assert ev["rows"][1]["features_json"] == json.dumps(
+        __import__("backend.tests.test_deletion_scrub", fromlist=["x"]).features_for(OTHER))
+    assert json.loads(ev["candidate_set"]["candidates_json"]) == [
+        {"trade_hash": "h0", "partner": token, "base_score": None}]
+    assert ev["trade_impressions"] == [{"target_user_id": None}, {"target_user_id": OTHER}]
+    assert ev["run_meta"]["filter_inputs"] == {"qb_te": {OTHER: ["q2"]}, "protected": ["h1"]}
+    assert DEL not in json.dumps(row["pages_blob"]) + json.dumps(ev)
+    assert row["stored_bytes"] == (len(db.CompressedJSON.encode(row["pages_blob"]))
+                                   + len(db.CompressedJSON.encode(ev)))
+
+
+def test_a_page_row_in_a_league_the_person_left_is_found_by_the_scan(engine):
+    insert_page(engine, league="league-left", user=OTHER, deck="deck-left-page")
+    accounts.delete_user_data(DEL)
+    scrub.run_pending()
+    (row,) = read(engine, db.trade_page_store_table)
+    assert row["pages_blob"]["cards"][0]["target_user_id"] == job(engine)["token"]
+
+
+def test_a_redacted_page_card_never_serves_and_leaves_as_a_withdrawal(monkeypatch):
+    """Whatever S0 keeps (lenient mode, C-e, a pick-only card), a card whose
+    partner is a redaction token is withdrawn at serve."""
+    import backend.server as server
+    delivered = []
+    for name, fn in (("_deck_sticky", lambda *a: set()),
+                     ("_project_trade_dispositions", lambda page, *a: list(page)),
+                     ("_disposition_cut", lambda *a: []),
+                     ("_roster_serve_rules", lambda checked, *a, **k: (list(checked), None, False)),
+                     ("_served_cap_stored", lambda row, cards, *a: (cards, {})),
+                     ("_with_trade_hash", lambda cards: cards),
+                     ("_deck_evidence_delivered_stored",
+                      lambda row, cards, withdrawn, cut, moves: delivered.append((cards, withdrawn))),
+                     ("_trade_prefetch_remaining", lambda: 50)):
+        monkeypatch.setattr(server, name, fn)
+    token_card, other = page_card("redacted:" + "0" * 32, 0), page_card(OTHER, 1)
+    row = {"pages_blob": {"cards": [token_card, other], "opponents_total": 2},
+           "league_id": LEAGUE, "deck_job_id": "deck-page", "card_count": 2}
+    out, _ = server._trade_page_view(row, 0, user_id=VIEWER, viewer_id=VIEWER, snap=None)
+    assert out["cards"] == [other]
+    assert delivered == [([other], [token_card])]
