@@ -22,7 +22,7 @@ TEST_LEDGER note replaces it. Operator-declared only, never agent-selected.
 **Date:** 2026-10-27
 **Entry point:** direct ask — Product pre-launch review, item C6 (task `c6-eng-backend-1`, manager `league-eng`)
 **Builder:** eng-backend worker `c6-eng-backend-1`, branch `fix/share-link-previews`
-**Operator sign-off on waivers:** pending — the one waiver (§1 analytics) was set by league-eng in the task brief; league-eng surfaces it to the operator
+**Operator sign-off on waivers:** waived, operator-approved 2026-11-01 (the one waiver, §1 analytics, covering C6 and R13; recorded via head-eng). This covers the waiver only. Merging still needs the operator's own go in release-lead's session.
 
 **Problem.** Shared links (`/s/*`) did not unfurl into previews in iMessage, Slack, X or
 Discord, for two reasons:
@@ -58,6 +58,7 @@ analytics event or mobile change. `POST /api/share/package` still returns relati
 - [x] **(c) WAIVED — no analytics needed because:** this is a server-rendered metadata and
       crawler-directive fix. Nothing new happens in a client, and an unfurler fetching a page
       or card is not a user action we can or should attribute. Set by league-eng in the brief.
+      **Waived, operator-approved 2026-11-01.**
 
 ## 2. Schema & flag scope
 
@@ -168,7 +169,7 @@ analytics event or mobile change. `POST /api/share/package` still returns relati
 - The og PNG card footer (`og_image.py`): `Fleeced: Dynasty Trade Finder · fantasy-trade-finder.onrender.com` (marketing `s4.og_footer`; was `Fantasy Trade Finder · …`). Measured at 22px, it's 624–686px wide on macOS fonts. The worst case is DejaVu Sans Bold at 846px (right edge x=906), which is probably prod, since it's the first Linux candidate. All fit the 1080px rule (right edge ≤ 1140). `_draw_footer` is fixed-position and left-aligned, so nothing is measured or clipped. The card is the unfurl image and is embedded in every `/s/*` page.
 - No new copy beyond the brand name and the "Privacy" label. The three strings are marketing's approved `s4.*` (`marketing-lead-wave2.md` S5 rows; approved to ship by launch in `marketing-lead-referral-approval.md`). `s4.og_site` (a new `og:site_name` tag) isn't in that ship list, so it's not added.
 
-**Analytics:** (c) waived, as §1. A static link and brand text, nothing to measure. **Schema, flags, routes:** none.
+**Analytics:** (c) waived, as §1 (operator-approved 2026-11-01). A static link and brand text, nothing to measure. **Schema, flags, routes:** none.
 
 **Evidence** (`test_share_link_previews.py` §5, 8 cases):
 - `_assert_r13` runs on `/s/p`, `/s/tiers`, a live `/s/trade/<token>`, and the expired page (numeric id and unknown token). It checks:
@@ -253,4 +254,5 @@ Sabotage runs, each red only on its own test:
 - The trade/package card chip (`/og/trade`, `/og/p`) now has an ink-0 label: 4.88–8.48:1, and 5.77:1 on the grey fallback chip for K/DEF.
 - The tier card (`/og/tiers`, `_render_tier_card_filled`) gets the new chip colours, but its 58px label stays white: QB 2.80:1 and RB 2.28:1, under the 3:1 large-text bar.
   - That surface 404s while `growth.tier_board_share` is off (`config/features.json`), so it isn't widened here.
-  - **Follow-up before that flag ever flips:** an ink-0 label on the tier card chip.
+  - **Done 2026-11-01** (head-eng): the tier card label is now ink-0 (QB 6.90, RB 8.48, WR 5.26, TE 4.88:1; white was 2.80, 2.28, 3.68, 3.96). `test_og_tier_card_position_label_is_ink_0` renders all four positions with the flag on, asserts WCAG ≥ 3:1 for the drawn fill on its chip, and asserts the ink-0 fill. Sabotage (white) fails it on QB (2.80). pytest 7-file set: 146 passed.
+  - Left for the GB-02 restyle (flag dark): "WR" at 58px Arial Bold is 97px wide on the 90px chip and overflows by 3–4px each side. With white text the overflow showed on navy; with ink-0 it may read as slightly clipped.

@@ -385,7 +385,7 @@ def _render_tier_card_filled(
     pos_w = _text_width(draw, pos, font_title)
     draw.text(
         (chip_x + (chip_w - pos_w) // 2, chip_y + 2),
-        pos, font=font_title, fill=(255, 255, 255),
+        pos, font=font_title, fill=(12, 14, 17),
     )
 
     title = f"My {pos} Tiers"

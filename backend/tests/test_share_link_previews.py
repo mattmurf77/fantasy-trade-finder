@@ -22,6 +22,9 @@ brand (no "Fantasy Trade Finder"), tokens.css, and the og PNG footer.
 Section 6 pins design-lead's og trade card fixes B1-B3 on a real render:
 the verdict clears the meter bar, no missing-glyph box or centre disc, and
 the position chips use the cross-client position colours with ink-0 labels.
+
+Section 7 pins the same ink-0 label on the tier card's position chip
+(/og/tiers/<pos>/<username>.png, dark behind growth.tier_board_share).
 """
 import io
 import re
@@ -29,7 +32,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, insert
 
 import backend.database as db_module
 import backend.server as server
@@ -427,3 +430,77 @@ def test_og_trade_card_b3_position_colours_match_invariants(env):
     labels = [kw["fill"] for _, text, kw in _texts(calls) if text in doc]
     assert len(chips) == 2 and len(labels) == 2, (chips, labels)  # one WR per side
     assert labels == [INK_0, INK_0]
+
+
+# ---------------------------------------------------------------------------
+# 7. og tier card position label is ink-0 (B3 follow-up; flag dark)
+# ---------------------------------------------------------------------------
+
+TIER_USER = "888888888800000201"
+TIER_USERNAME = "tierboardowner"
+
+
+def _wcag_contrast(fg, bg) -> float:
+    """WCAG 2.2 contrast ratio of two sRGB 0-255 colours (see the test)."""
+    def lum(rgb):
+        c = [v / 255 for v in rgb]
+        c = [x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    hi, lo = sorted((lum(fg), lum(bg)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _spied_tier_card(env, pos):
+    """Render a filled /og/tiers/<pos>/<username>.png with the flag on,
+    recording every text and rounded_rectangle call, in draw order."""
+    calls = []
+    cls = og_image.ImageDraw.ImageDraw
+
+    def spy(name):
+        real = getattr(cls, name)
+
+        def wrapper(self, *a, **kw):
+            calls.append((name, a, kw))
+            return real(self, *a, **kw)
+        return wrapper
+
+    with patch.object(server, "is_enabled", ALL_SHARE_FLAGS), \
+         patch.object(cls, "text", spy("text")), \
+         patch.object(cls, "rounded_rectangle", spy("rounded_rectangle")):
+        r = env.get(f"/og/tiers/{pos.lower()}/{TIER_USERNAME}.png")
+    assert r.status_code == 200
+    assert r.headers["Content-Type"] == "image/png"
+    return calls
+
+
+def test_og_tier_card_position_label_is_ink_0(env):
+    """For each POS_COLORS position, the tier card's 58px position label is
+    drawn on its POS_COLORS chip in ink-0 (12, 14, 17), and that label clears
+    the WCAG 2.2 large-text bar (SC 1.4.3, 3:1) on the chip. Contrast is the
+    WCAG 2.2 formula: each sRGB channel c = v/255 is linearised as c/12.92 if
+    c <= 0.04045 else ((c + 0.055)/1.055)^2.4; relative luminance
+    L = 0.2126 R + 0.7152 G + 0.0722 B; ratio = (L_hi + 0.05)/(L_lo + 0.05)."""
+    db_module.upsert_user(TIER_USER, username=TIER_USERNAME, display_name="Tier Owner")
+    with db_module.engine.begin() as conn:
+        for pos in og_image.POS_COLORS:
+            conn.execute(insert(db_module.players_table).values(
+                player_id=f"tier-{pos}", full_name=f"Tierboard {pos}",
+                position=pos, search_rank=10))
+    db_module.save_tier_overrides(
+        TIER_USER, {f"tier-{pos}": 1700.0 for pos in og_image.POS_COLORS},
+        scoring_format="1qb_ppr")
+
+    for pos, chip_fill in og_image.POS_COLORS.items():
+        calls = _spied_tier_card(env, pos)
+        texts = [a[1] for name, a, _ in calls if name == "text"]
+        assert f"Tierboard {pos}" in texts, texts          # the filled card
+        chips = [a[0] for name, a, kw in calls
+                 if name == "rounded_rectangle" and kw.get("fill") == chip_fill]
+        labels = [(a[0], kw["font"].getbbox(pos), kw["fill"]) for name, a, kw in calls
+                  if name == "text" and a[1] == pos]
+        assert len(chips) == 1 and len(labels) == 1, (pos, chips, labels)
+        (x0, y0, x1, y1), ((lx, ly), (l, t, r, b), fill) = chips[0], labels[0]
+        cx, cy = lx + (l + r) / 2, ly + (t + b) / 2      # glyph-box centre
+        assert x0 <= cx <= x1 and y0 <= cy <= y1, (pos, chips[0], labels[0])
+        assert _wcag_contrast(fill, chip_fill) >= 3.0, (pos, chip_fill, fill)
+        assert fill == INK_0, (pos, fill)
