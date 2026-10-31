@@ -11,7 +11,8 @@
 // `sleeper://` scheme instead, through utils/openExternal.ts, and shows the
 // Get Sleeper alert (operator D2, 2026-10-20) when Sleeper isn't installed.
 //
-// Here (S-ids are the PRD's; H-ids are the b3 brief's, not the PRD's):
+// Here (S-ids are the PRD's; H-ids are the b3 brief's, not the PRD's;
+// P-ids are design-lead's layout review's):
 //   S1  ClaimSheet, FreeAgentsScreen and UsageTrendsScreen: no
 //       `sleeper.com/leagues` literal, no Linking.openURL to a Sleeper host [AST]
 //   S2  SendInSleeperButton imports openInSleeperApp from
@@ -50,6 +51,14 @@
 //       otherwise, never an add-ladder path                                 [executed]
 //   S16 SendInSleeperButton has no Linking at all, so doPropose /
 //       confirmSend / goConnect can't open anything                        [AST]
+//   P1  ClaimSheet's fixed footer (design-lead, 2026-11-01: 648pt of content
+//       vs the SE's 567pt sheet; ux-lead's keyboard and scroll conditions):
+//       one fa-claim.footer View holds the CTA and the "Sleeper doesn't
+//       allow apps…" footnote, outside every ScrollView, right after the
+//       ScrollView's closing tag in the sheet's SafeAreaView; a
+//       KeyboardAvoidingView ('padding' on iOS) wraps both; the ScrollView
+//       has a ref that a mount-once effect calls flashScrollIndicators on;
+//       keyboardShouldPersistTaps="handled" stays                          [AST]
 //
 // Deferred (not true on this branch; each owner adds its S-check with the
 // migration):
@@ -60,6 +69,8 @@
 // HONEST LABEL (G-035): S1, S2, S8, S9, S16, H1 and H2 prove wirings are
 // present, not behavior: no claim-sheet code is executed here. S3–S7, S10
 // and S13 execute the real modules.
+// P1 is AST-only too: it proves the footer's structure, not its layout. No
+// sheet is measured and no keyboard is raised.
 //
 // Run: node tests/check-sleeper-handoff.js
 
@@ -624,6 +635,141 @@ for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
     'H2 FreeAgentsScreen tests query.isError before query.isLoading (isLoading sits in the isError=false branch)',
     `${err.length} isError / ${load.length} isLoading conditionals`,
   );
+}
+
+// P1 — the CTA and its footnote sit in a fixed footer under the ScrollView
+// (design-lead, 2026-11-01): on an iPhone SE a full-roster FAAB claim
+// measured 648pt against the 567pt sheet, and the CTA scrolled out of view.
+// (e)–(g) are ux-lead's conditions: the footer rises with the number pad,
+// the scroll bar flashes once on open, and one tap on the CTA works with
+// the pad up.
+{
+  const sf = parse(CLAIM);
+  const decl = declarations(sf);
+  const FOOTNOTE = "Sleeper doesn't allow apps to submit claims — finish in Sleeper.";
+  const opening = (n) => (ts.isJsxElement(n) ? n.openingElement : n);
+  const tagOf = (n) => opening(n).tagName.getText(sf);
+  const attrOf = (n, name) => {
+    const a = opening(n).attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText(sf) === name);
+    return a ? a.initializer || null : null;
+  };
+  const testIdOf = (n) => {
+    const i = attrOf(n, 'testID');
+    return i && ts.isStringLiteral(i) ? i.text : null;
+  };
+  const strOf = (init) => {
+    if (!init) return null;
+    if (ts.isStringLiteral(init)) return init.text;
+    const e = ts.isJsxExpression(init) && init.expression ? unparen(init.expression) : null;
+    return e && (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) ? e.text : null;
+  };
+  const elements = [];
+  walk(sf, (n) => { if (ts.isJsxElement(n) || ts.isJsxSelfClosingElement(n)) elements.push(n); });
+  const isScroll = (n) => ts.isJsxElement(n) && /ScrollView$/.test(tagOf(n));
+  const ancestors = (n) => {
+    const out = [];
+    for (let p = n.parent; p; p = p.parent) if (ts.isJsxElement(p)) out.push(p);
+    return out;
+  };
+  const chain = (n) => ancestors(n).map((p) => tagOf(p) + (testIdOf(p) ? `#${testIdOf(p)}` : '')).join(' < ');
+  const jsxKids = (el) => el.children.filter((c) => ts.isJsxElement(c) || ts.isJsxSelfClosingElement(c));
+
+  // (a) exactly one fa-claim.footer, and it is a View.
+  const footers = elements.filter((n) => testIdOf(n) === 'fa-claim.footer');
+  assert(footers.length === 1 && ts.isJsxElement(footers[0]) && tagOf(footers[0]) === 'View',
+    'P1a ClaimSheet renders exactly one fa-claim.footer View',
+    footers.map((n) => `<${tagOf(n)}>`).join(', ') || 'none found');
+  const footer = footers.length === 1 && ts.isJsxElement(footers[0]) ? footers[0] : null;
+
+  // (b) the CTA is inside the footer and inside no ScrollView.
+  const ctas = elements.filter((n) => tagOf(n) === 'Button' && testIdOf(n) === 'fa-claim.open-sleeper');
+  const ctaUp = ctas.length === 1 ? ancestors(ctas[0]) : [];
+  assert(
+    ctas.length === 1 && !!footer && ctaUp.includes(footer) && !ctaUp.some(isScroll),
+    'P1b the fa-claim.open-sleeper Button is inside fa-claim.footer and inside no ScrollView',
+    ctas.length !== 1 ? `${ctas.length} CTAs found` : `ancestors: ${chain(ctas[0])}`,
+  );
+
+  // (c) the footer follows the ScrollView's closing tag, as its sibling in the
+  //     sheet's SafeAreaView.
+  const parent = footer ? ancestors(footer)[0] : null;
+  const siblingScrolls = parent ? jsxKids(parent).filter(isScroll) : [];
+  assert(
+    !!footer && !!parent && tagOf(parent) === 'SafeAreaView' && jsxKids(parent).includes(footer) &&
+      siblingScrolls.length === 1 && footer.getStart(sf) > siblingScrolls[0].closingElement.end &&
+      !ancestors(footer).some(isScroll),
+    "P1c the footer comes after the ScrollView's closing tag, both direct children of the sheet's SafeAreaView",
+    parent ? `parent <${tagOf(parent)}>, sibling ScrollViews: ${siblingScrolls.length}` : 'no footer parent',
+  );
+
+  // (d) the footnote is inside the footer (and so outside the ScrollView).
+  const notes = [];
+  walk(sf, (n) => {
+    const text = ts.isJsxText(n) || ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)
+      ? n.text.replace(/\s+/g, ' ').trim() : null;
+    if (text && text.includes("Sleeper doesn't allow apps")) notes.push({ n, text });
+  });
+  assert(
+    notes.length === 1 && notes[0].text === FOOTNOTE && !!footer &&
+      notes[0].n.pos >= footer.pos && notes[0].n.end <= footer.end,
+    `P1d the footnote "${FOOTNOTE}" is inside fa-claim.footer`,
+    notes.length !== 1 ? `${notes.length} footnotes found` : `in: ${chain(notes[0].n)}`,
+  );
+
+  // (e) one KeyboardAvoidingView wraps the ScrollView and the footer, with
+  //     behavior 'padding' on iOS (a literal "padding", or a Platform.OS
+  //     === 'ios' conditional whose iOS branch is 'padding').
+  const scrolls = elements.filter(isScroll);
+  const scroll = scrolls.length === 1 ? scrolls[0] : null;
+  const kavOf = (n) => ancestors(n).find((p) => tagOf(p) === 'KeyboardAvoidingView') || null;
+  const kav = scroll ? kavOf(scroll) : null;
+  const behavior = kav ? attrOf(kav, 'behavior') : null;
+  const iosPadding = (() => {
+    if (strOf(behavior) === 'padding') return true;
+    const e = behavior && ts.isJsxExpression(behavior) && behavior.expression ? unparen(behavior.expression) : null;
+    if (!e || !ts.isConditionalExpression(e)) return false;
+    const c = squash(unparen(e.condition).getText(sf)).replace(/"/g, "'");
+    const s = unparen(e.whenTrue);
+    return (c === "Platform.OS==='ios'" || c === "'ios'===Platform.OS") && ts.isStringLiteral(s) && s.text === 'padding';
+  })();
+  assert(
+    !!kav && !!footer && kavOf(footer) === kav && iosPadding,
+    "P1e one KeyboardAvoidingView wraps the ScrollView and the footer, behavior 'padding' on iOS",
+    `ScrollViews: ${scrolls.length}; KAV around the ScrollView: ${!!kav}; same KAV around the footer: ${!!kav && !!footer && kavOf(footer) === kav}; behavior: ${behavior ? behavior.getText(sf) : 'none'}`,
+  );
+
+  // (f) the ScrollView's ref is a useRef, and flashScrollIndicators is
+  //     called on it once, from a useEffect with [] deps (the sheet is
+  //     mounted only while open, so that is once per open).
+  const refInit = scroll ? attrOf(scroll, 'ref') : null;
+  const refName = refInit && ts.isJsxExpression(refInit) && refInit.expression && ts.isIdentifier(refInit.expression)
+    ? refInit.expression.text : null;
+  const isUseRef = !!refName && /^(React\.)?useRef\b/.test(decl[refName] || '');
+  const flashes = [];
+  walk(sf, (n) => {
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
+        n.expression.name.text === 'flashScrollIndicators') flashes.push(n);
+  });
+  const onRef = flashes.filter((c) => !!refName && squash(c.expression.expression.getText(sf)).replace(/[!?]$/, '') === `${refName}.current`);
+  const effectOf = (n) => {
+    for (let p = n.parent; p; p = p.parent) {
+      if (ts.isCallExpression(p) && /^(React\.)?useEffect$/.test(p.expression.getText(sf))) return p;
+    }
+    return null;
+  };
+  const effect = onRef.length === 1 ? effectOf(onRef[0]) : null;
+  const once = !!effect && effect.arguments.length === 2 &&
+    ts.isArrayLiteralExpression(effect.arguments[1]) && effect.arguments[1].elements.length === 0;
+  assert(
+    isUseRef && onRef.length === 1 && once,
+    'P1f the ScrollView has a useRef ref, and one mount-once useEffect (deps []) calls flashScrollIndicators on it',
+    `ref: ${refName || 'none'} (${refName ? decl[refName] || 'undeclared' : '-'}); flashScrollIndicators calls: ${flashes.length}, on the ref: ${onRef.length}; in a useEffect: ${!!effect}; deps []: ${once}`,
+  );
+
+  // (g) one tap on the CTA still works with the pad up.
+  const persist = scroll ? attrOf(scroll, 'keyboardShouldPersistTaps') : null;
+  assert(strOf(persist) === 'handled', 'P1g keyboardShouldPersistTaps="handled" stays on the ScrollView',
+    persist ? persist.getText(sf) : 'absent');
 }
 
 // ═══════════════════════════════════════════════════════════════════════

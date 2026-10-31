@@ -15,6 +15,7 @@
 - [5. Ship gate declaration](#5-ship-gate-declaration)
 - [2026-10-28 — design-lead review](#2026-10-28--design-lead-review)
 - [Copy for design-lead](#copy-for-design-lead)
+- [2026-11-01 — pinned CTA footer](#2026-11-01--pinned-cta-footer)
 - [Known risk](#known-risk)
 
 ---
@@ -132,6 +133,10 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
   | 8 | installed | **Steps variant.** As 2 (Usage Trends, a non-focused league) | Row 1 names **the league the Add targeted** (the one FTF switched to), not the previously focused league. |
   | 9 | installed, a **FAAB** league | **Steps variant.** Free agents → Add → type a bid of 5, then clear it; repeat on a full roster with a drop picked | With room: a 4th row "4 Bid **$5**" appears as you type and disappears when the bid is cleared. Full roster with a drop picked: "4 Drop **{drop}**" then "5 Bid **$5**". The numbers never skip. |
   | 10 | installed, **full roster**, an **empty drop list**: mark every rostered player untouchable in FTF (untouchables are left out of the drop list) | **Steps variant.** Free agents → Add → look at the drop section and the steps | The drop section says "No droppable players found on your roster." and the untouchables note. Row 4 still renders and reads "4 Drop a player to make room", in the same dim grey as the other rows (not amber, not red), never "pick a player above". Rows 1–3 and the copy line don't change. In a FAAB league, a bid adds "5 Bid **$…**". |
+  | 11 | installed, an **iPhone SE** (or the smallest screen available), a **FAAB** league with a **full roster** | **Pinned footer.** Free agents → Add → pick a drop → type a bid of 12 | Without scrolling, **Open in Sleeper to claim** and the footnote under it are visible at the bottom of the sheet, above a hairline. When the sheet opens, the scroll indicator flashes briefly. |
+  | 12 | as 11 | Tap the bid field so the number pad opens, then tap **Open in Sleeper to claim** once | The button stays above the number pad, and one tap opens Sleeper. The sheet doesn't close and the picks aren't lost. |
+  | 13 | as 11 | With the sheet open, scroll the list | Steps 4 (Drop) and 5 (Bid) scroll into view above the pinned footer. Nothing is hidden behind it. |
+  | 14 | installed | With the claim sheet open (bid field not focused), tap the dimmed area above the sheet; then open a **priority-waiver** league with room on the roster | The tap closes the sheet, as before. The short sheet fits its content, with no empty band, and the CTA sits directly under the steps. On a notched phone with the number pad up, a small gap above the pad (the bottom safe area) is expected. |
 
 - [ ] **WAIVED because:** n/a, not waived.
 - `testID`s added/renamed: commit 1 none (`fa-claim.open-sleeper` kept); commit 2 adds `fa-claim.steps`; commit 3 adds `fa-claim.step.league` / `.search` / `.add` / `.drop` / `.bid`; commits 4 and 5 none. `bash scripts/testid-lint.sh` → `testid-lint OK` at all five.
@@ -219,6 +224,55 @@ Still open:
 - Closed by commit 5 (marketing addendum 12): the words. "Claim in {League}", the fallback line for the off 11-03 revert, is retired.
 - Closed by commit 3: the missing-league degrade (now the fallback row), the bid (now a row), and VoiceOver reading "→" as "right arrow" (no arrows left; each row reads as one element).
 - Closed by commit 4: a full roster whose drop list is empty (every player untouchable, or none droppable) said "Drop: pick a player above" with no one listed above. design-lead's ruling (review 2026-10-28, a SHOULD): keep the drop row, since the user still has to drop someone in Sleeper, and change only the words, to "Drop a player to make room". Chalk-dim like every row; no new style, no warn colour. Marketing kept "Drop a player to make room" (addendum 12).
+
+## 2026-11-01 — pinned CTA footer
+
+**Finding** (design-lead, 2026-11-01). On an iPhone SE (375×667), in a FAAB league with a full roster, a drop picked and a $12 bid, the sheet's content is 648pt against `maxHeight: '85%'` (567pt). The CTA starts about 35pt below the visible sheet. Main's sheet, without the steps block, is 460pt. design-lead missed this in their 10-28 review.
+
+**Fix** (design-lead's spec, with ux-lead's two conditions). The operator's design review runs in parallel and doesn't block the merge:
+- The CTA (`fa-claim.open-sleeper`) and its footnote move out of the `ScrollView` into a fixed footer (`fa-claim.footer`) under it, inside the sheet's `SafeAreaView`. The footer is ink-2, with a 1px `ink.line` top border, padding 12/16/16 and a gap of 8. The `ScrollView` keeps the header, bid, drop list and steps, and the sheet keeps `maxHeight: '85%'`.
+- **ux-lead 1:** the content sits in a `KeyboardAvoidingView` (`padding` on iOS), so the footer rises above the bid field's number pad. `keyboardShouldPersistTaps="handled"` stays, so one tap on the CTA works with the pad up. Without this, a tap above the sheet would hit the backdrop, which closes the sheet and loses the picks.
+- **ux-lead 2:** `flashScrollIndicators()` runs when the sheet opens, so the steps under the footer read as scrollable.
+- No change to the CTA's label, `onPress`, disabled logic, testID or the footnote text.
+
+**Two choices made while building, both following existing code:**
+- **The `KeyboardAvoidingView` is the outer wrapper** (`kav: { flex: 1, justifyContent: 'flex-end' }`, `pointerEvents="box-none"`), like every other sheet in `mobile/src` (FeedbackSheet, RankImportSheet, MflSignInSheet, LinkSleeperSheet and others).
+  - RN 0.81.5's padding is `frame.y + frame.height − keyboard.screenY` with `frame` relative to its parent (`KeyboardAvoidingView.js:110`, `:129`). A KAV inside the bottom-anchored sheet would leave the footer about 100pt under the number pad on an SE.
+  - The sheet therefore drops its `position: 'absolute'` bottom anchoring, since the KAV places it, and keeps `maxHeight: '85%'`.
+- **`flexShrink: 1` on the sheet's SafeAreaView** (`sheetBody`), so the ScrollView shrinks and the footer stays on screen. This is from the Yoga layout rules, not a device run.
+
+**Evidence** (`ClaimSheet.tsx`):
+- `FLASH_DELAY_MS = 400` (`:109`). The effect is at `:145-149`, `useEffect(…, [])`, and runs once per open, after the roughly 300ms slide-in.
+- KAV at `:190`, ref at `:199`, `keyboardShouldPersistTaps="handled"` at `:201`.
+- `</ScrollView>` is at `:406`, after the steps. The footer `fa-claim.footer` is at `:411` (style `footerBar` `:575`: ink-2, a 1px `ink.line` top border, `space.md`/`space.lg` padding, `gap: space.sm`). The CTA and footnote are unchanged.
+
+**Guard P1** (`check-sleeper-handoff.js`, structure only):
+- (a) exactly one `fa-claim.footer` View;
+- (b) the CTA is inside it and inside no ScrollView;
+- (c) the footer comes after `</ScrollView>`, both as direct children of the SafeAreaView;
+- (d) the footnote is inside the footer, verbatim;
+- (e) the ScrollView and the footer share a KAV with `padding` on iOS;
+- (f) the ref comes from `useRef`, and `flashScrollIndicators` is called once from a `[]`-deps `useEffect`;
+- (g) `keyboardShouldPersistTaps="handled"`.
+
+S2 and S8 needed no rule change.
+
+| Command | Result |
+|---|---|
+| `node tests/check-sleeper-handoff.js` | 94 PASS, 0 FAIL (87 + P1a–g) |
+| `check-external-links` / `check-usage-trends` / `check-send-button-platform` | 48/0, 76/0, 32/0 |
+| `bash scripts/testid-lint.sh` | OK (new testID `fa-claim.footer`) |
+| `tsc --noEmit` (scratch copy, shared `mobile-deps` install) | exit 0 |
+| `git merge-tree` with `2eb1bf83` then `512ee3f8` | ClaimSheet and the guard merge cleanly (`hasDrop` kept). `2eb1bf83`'s only conflict is `mobile/tests/README.md`, the same as on the unmodified head, and it goes away once #509 takes main with #528 |
+
+| # | Sabotage | Red |
+|---|---|---|
+| 1 | CTA back inside the ScrollView | P1b |
+| 2 | Footnote left in the ScrollView | P1d |
+| 3 | Footer View removed | P1a–e |
+| 4 | KAV removed | P1e |
+| 5 | `flashScrollIndicators` removed | P1f |
+| 6 | `keyboardShouldPersistTaps` removed | P1g | TestFlight rows 11–13 are above. The render is design-lead's before/after, pane 4 (`renders/claim-sheet-se-before-after.png`).
 
 ## Known risk
 
