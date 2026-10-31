@@ -38,6 +38,8 @@ export const MON = {
   'mon.offer.cta_paid': 'Subscribe',
   'mon.offer.not_now': 'Not now',
   'mon.offer.close_a11y': 'Close',
+  // §9.2 the free page's end card (M2): the eyebrow above `mon.lock.find`
+  'mon.preview.page_end': "That's the first page.",
   // §9.3 the lock lines (headlines when a locked action opens the paywall)
   'mon.lock.find': 'Finding trades needs a subscription.',
   'mon.lock.send': 'Sending trades needs a subscription.',
@@ -51,6 +53,8 @@ export const MON = {
   'mon.pay.b3': 'Proposals sent to Sleeper, ESPN or MFL',
   'mon.pay.b4': 'Shop a player and Win Now trade targets',
   'mon.pay.restore': 'Restore purchases',
+  // §9.4 (row §2): the end card's button (M2) and Settings' non-member row
+  'mon.pay.see_plans': 'See plans',
   'mon.pay.terms': 'Terms of Use',
   'mon.pay.privacy': 'Privacy Policy',
   'mon.pay.error':
