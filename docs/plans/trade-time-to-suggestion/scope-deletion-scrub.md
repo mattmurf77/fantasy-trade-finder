@@ -66,7 +66,7 @@ The rows to touch are found per captured league and per viewer (the league's mem
 | | header: the partner's hashes leave `run.filter_inputs.protected`; `run.redacted_at` is added (G-a3's four changes) | | |
 | `deck_candidate_sets` | packed (`pack_candidates`) or legacy `candidates_json` member `partner` | — | `base_score` |
 | `bakeoff_runs` (other users'; found by legal f's trace, 10-31, so a correction to the c3 list's "partner-free") | any id in `config_json`, `arms_json`, `agreement_json` and `groups_json` (#557 QA P1-3); an owner arm's `diagnostics.pools[<id>]` (that member's preference-ordered assets) goes. Fallback scan only: a league pass over megabyte rows isn't bounded | the owner engine's frozen `input` holds every league member's board, sources, preferences and declared and inferred outlooks, under `owner_request` (organic runs) or at the top level (owner-selected runs: fair packages, asset ideas; #557 QA P1-2); the person's member loses `elo` / `board_updated_at`, and their `opponent_sources`, `manager_preferences`, `opponent_outlooks` and `inferred_outlooks` entries go | — |
-| `trade_page_store` (stage 2) | `pages_blob` `target_user_id` (→ token) and `target_username` (→ the placeholder); `evidence_blob` rows and ghosts, the same as `deck_impressions`; its candidate set; `trade_impressions[].target_user_id` → NULL (as deletion does to the table); `run_meta.filter_inputs` the same as the pack run; any other id mention → token | a redacted page card loses `likes_you`, `standing_offer_reason`, `reasons`, `rationale`, `fit`, `breaker` and `match_context.opponent_outlook`; the narrative is stage 3's trace | `mismatch_score`, `composite_score` (and the row's scores) |
+| `trade_page_store` (stage 2) | `pages_blob` `target_user_id` (→ token) and `target_username` (→ the placeholder); `evidence_blob` rows and ghosts, the same as `deck_impressions`; its candidate set; `trade_impressions[].target_user_id` → NULL (as deletion does to the table); `run_meta.filter_inputs` the same as the pack run; any other id mention → token | a redacted page card loses `likes_you`, `standing_offer_reason`, `reasons`, `rationale`, `fit`, `breaker` and `match_context.opponent_outlook`; a page card's `roster_evaluation` (stored when `trade.roster_protection` is on) loses the deleted ids' `teams` entries on any card, and `mutual_benefit` on a redacted card, as a deck row does (#559 QA); the narrative is stage 3's trace | `mismatch_score`, `composite_score` (and the row's scores) |
 | `user_taste` (other users) | attribute `partner:<id>` → `partner:<token>`; two aliases of the person merge into one row (weights summed). In the deletion transaction | — | — |
 | `standing_offers` (other users) | `team_user_ids`, in the deletion transaction | — | — |
 | `grading_cards` (other users) | — | `trade_json.partner_name` → placeholder (stage 3: the cards hold a display name, not an id, so finding them needs the trace) | — |
@@ -88,13 +88,18 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
   - A cached `_PackState` whose stored header changed outside its run (only the codec rewrites the dictionaries) reloads from the row in place. Its pending run changes merge onto the stored run, where the stored keys win, `redacted_at` among them. That runs on `_deck_pack_commit`'s CAS miss and before every upgrade.
   - An upgrade's row from a deck's build-time snapshot takes the pack's token (`_redacted_held_row`): the redacted pack card names the token where the snapshot names the person, which gives the mapping with no id kept.
   - Tests drive the race, the stale cache and the held row.
-- **A redacted page card never serves** (`_redacted_target`): it leaves with the I-1 drops as a withdrawal, whatever the I-1 mode.
+- **A redacted card never serves, in any I-1 mode** (models-lead addendum J4, head-eng's option (b); moved from stage 3 into stage 2 so #559 merges on its own, release-lead's #559 QA P1). At prod's `trade_i1_mode` 1, I-1 alone would serve it while a stale page rebuilds.
+  - `_roster_serve_rules`, which /generate, /status (legacy and paged) and the page-store serve share, drops any card whose target is a redaction token before I-1.
+  - It's recorded as a never-delivered withdrawal with its own reason, `partner_deleted`, counted apart so G10's mode-1 rule on `i1_dropped` stays clean.
 
 ### 0.4 Decks in flight at deletion
 
 - A live job's `_DeckEvidence` holds unwritten rows from its build-time snapshot. A delivery after the scrub writes them, and with them the old id and the c2 fields.
 - **The tick's second DB pass rewrites them.** The window is at most until that tick.
-- The page store's cards keep serving through S0's I-1 check. The person's `league_members` rows are gone, so a card receiving their assets fails I-1 and is withdrawn, never served.
+- **Jobs held in this process are revoked when the deletion commits** (release-lead's #559 QA P2). The scrub rewrites stored decks, never an in-memory job, which at `trade_i1_mode` 0 or 1 would keep serving the person's original cards (their id, name and reasons) until it left memory.
+  - The delete route reads the person's leagues before the deletion removes their rows (`_deletion_scrub_leagues`). After it commits, `_revoke_trade_jobs_naming` revokes every job whose cards name a deleted id and every job still running in one of those leagues (it may yet publish such cards): superseded, cards cleared, a running one errored. The next request builds a fresh deck. The response's `deleted` counts gain `trade_jobs_revoked`.
+  - Another instance's jobs aren't reached; they age out within its retention. Their stored decks are the scrub's.
+- A stored page's redacted cards are dropped by the serve rules above, whatever the I-1 mode.
 
 ## 1. Analytics scope
 
