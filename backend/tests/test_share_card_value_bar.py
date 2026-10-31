@@ -404,6 +404,79 @@ def test_a_user_b_mint_is_oriented_to_user_b(world):
     assert a["firsts"] == b["firsts"] and a["label"] == b["label"]
 
 
+class _GuardedMatch(dict):
+    """A resolved trade_matches row that raises if anything reads an
+    A-oriented per-side column: the bar must come from the sharer-oriented
+    lists and the token's own snapshot only."""
+    def __init__(self, row, forbidden):
+        super().__init__(row)
+        self._forbidden = forbidden
+
+    def _check(self, key):
+        if key in self._forbidden:
+            raise AssertionError(f"the share view read {key!r}")
+
+    def __getitem__(self, key):
+        self._check(key)
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        self._check(key)
+        return super().get(key, default)
+
+
+def test_user_b_card_bar_leans_on_b_columns(world):
+    """Legal R28.25 (release-lead QA P3-2): user_b's card draws B's side.
+
+    One match where A's receive side is worth more (LEAN_GET from A's view).
+    A's card: A's give under YOU GIVE and a green fill leaning right toward
+    YOU GET. B's card: B's give (A's receive) under YOU GIVE and an amber
+    fill leaning left toward YOU GIVE. Same label on both. Neither view reads
+    match_valuation_json or any other A-oriented per-side column."""
+    a_give, a_recv = LEAN_GET
+    mid = _add_match(a_give, a_recv)
+    a_tok = _mint_token(world, mid, USER_A)
+    b_tok = _mint_token(world, mid, USER_B)
+
+    cols = db_module.trade_matches_table.c.keys()
+    forbidden = {"match_valuation_json"} | {
+        c for c in cols if c.startswith(("user_a_", "user_b_"))
+        and c not in ("user_a_give", "user_a_receive")}
+    assert "match_valuation_json" in cols and "user_a_decision" in forbidden
+    real = server._resolve_trade_share
+    with patch.object(server, "_resolve_trade_share",
+                      side_effect=lambda tok: _GuardedMatch(real(tok), forbidden)):
+        _, a_calls = _spied(world, f"/og/trade/{a_tok}.png")
+        _, b_calls = _spied(world, f"/og/trade/{b_tok}.png")
+        a_page = world.get(f"/s/trade/{a_tok}").get_data(as_text=True)
+        b_page = world.get(f"/s/trade/{b_tok}").get_data(as_text=True)
+
+    names = {PLAYERS[pid][0]: pid for pid in a_give + a_recv}
+
+    def columns(calls):
+        drawn = [(x, t) for (x, _), t, _ in _texts(calls) if t in names]
+        return ([names[t] for x, t in drawn if x < CARD_W // 2],
+                [names[t] for x, t in drawn if x >= CARD_W // 2])
+
+    v = server._consensus_verdict(a_give, a_recv, "1qb_ppr", LEAGUE)
+    length = round(min(1.0, abs(v["gap"]["firsts"])) * 540)
+    assert v["favors"] == "receive" and 0 < length < 540
+
+    # A's card: A's give under YOU GIVE; leans right toward YOU GET, green.
+    assert columns(a_calls) == (a_give, a_recv)
+    assert _track_fills(a_calls) == [([600, 452, 600 + length, 470], og_image.SEMANTIC_POS)]
+    # B's card: B's give (A's receive) under YOU GIVE; leans left, amber.
+    assert columns(b_calls) == (a_recv, a_give)
+    assert _track_fills(b_calls) == [([600 - length, 452, 600, 470], og_image.SEMANTIC_WARN)]
+    # The same label on both, and both pages promise the comparison.
+    a_label = "".join(t for t, _ in _label_runs(a_calls))
+    assert a_label == "".join(t for t, _ in _label_runs(b_calls)) == "≈ an Early 2nd in value"
+    assert _meta(a_page, "name", "description") == _meta(b_page, "name", "description") \
+        == TRADE_WITH_BAR
+    assert "leaning to the get side" in _meta(a_page, "property", "og:image:alt")
+    assert "leaning to the give side" in _meta(b_page, "property", "og:image:alt")
+
+
 # ---------------------------------------------------------------------------
 # 3. A view never prices
 # ---------------------------------------------------------------------------
