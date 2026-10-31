@@ -1474,6 +1474,38 @@ check('8r. QA P2-3 [executed + shape]: the standing-offer post\'s gate answer sh
   eq(client0.gateSignalFor(new client0.ApiError(402, { error: 'pro_required', gate: 'lapsed' }), '/api/trades/standing-offer'), null, 'off: 402');
   eq(client0.gateSignalFor(new client0.ApiError(403, { error: 'verification_required' }), '/api/trades/standing-offer'), null, 'off: 403');
 });
+check('8s. release-lead round-3 P3 [executed]: the ROUTER\'s own demo exclusion: in demo openOfferTrigger opens nothing (null, no navigate, no VerifySheet, not spent), even with a verified answer; a verified session still opens', async () => {
+  let route = 'Trades';
+  const navs = [];
+  const nav = {
+    isReady: () => true,
+    navigate: (name, params) => { navs.push([name, params]); route = name; },
+    getCurrentRoute: () => ({ name: route }),
+    addListener: () => () => {},
+    reset() {},
+  };
+  gateMod.installPaywallGate(nav);
+  const saved = { ...session };
+  try {
+    await gateMod.hydrateOfferShown('u8s');
+    eq(gateMod.offerTriggerOpen('u8s'), true, 'read, never shown');
+    Object.assign(session, { user: { user_id: 'demo_user_ab12' }, isDemo: true, verification: { session_verified: true } });
+    const seq = gateMod.usePaywallGate.getState().verifySeq;
+    for (const source of ['first_opinion', 'left_deck']) {
+      eq(gateMod.openOfferTrigger(source, 'u8s'), null, `demo, ${source}: returns null`);
+    }
+    eq(navs.length, 0, 'demo: navigated');
+    eq(gateMod.usePaywallGate.getState().verifySeq, seq, 'demo: opened the VerifySheet');
+    eq(gateMod.offerTriggerOpen('u8s'), true, 'demo: the once-only offer was spent');
+    Object.assign(session, { user: { user_id: '12345' }, isDemo: false, verification: { session_verified: true } });
+    const closed = gateMod.openOfferTrigger('first_opinion', 'u8s');
+    assert(closed && typeof closed.then === 'function', 'a verified session still opens');
+    eq(JSON.stringify(navs[0]), JSON.stringify(['Paywall', { source: 'first_opinion' }]), 'verified: the trigger variant');
+  } finally {
+    Object.assign(session, saved);
+    gateMod.installPaywallGate(fakeNav);
+  }
+});
 
 // ═══ 10. RC identity — RevenueCat identifies ONLY verified sessions ═══════
 // head-eng 2026-10-29 (release-lead QA P2-5): a typed, unverified Sleeper id
