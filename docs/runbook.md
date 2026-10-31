@@ -266,29 +266,34 @@ GNG-1 (error alerts) and SUP-M7 (`feedback_received`): `backend/error_alerts.py`
   - route exceptions (the generic `handle_unexpected_error` logs them with the stack);
   - the `_cleanup_loop` step guards;
   - `daily-tick: step … raised`;
-  - every other `log.error` / `log.exception` / `log.critical` (177 call sites scanned);
+  - every other `log.error` / `log.exception` / `log.critical` (about 177 call sites scanned);
   - gunicorn's own ERROR lines in the master (`--preload` imports the app there).
   - `log.warning` never alerts.
 - **`http_5xx`:** a 5xx response that produced no event of its own (no ERROR log on the way to it), tagged `route` / `status` / `method`. A 500 is never counted twice, and 4xx never reports.
+  - **Never for a 501:** that's our "not available for this platform or basis" answer, not a fault.
+  - **At most one per route and status per worker per hour.** About 37 handled-5xx returns log no ERROR (a Sleeper outage's 503s, a platform write's 502s), so without the cap an outage would be one event per request. Sentry is the alarm; the request count is in the Render access log.
 - **`feedback_received`** (info level): one per new `POST /api/feedback` note, tagged only `feedback_id` and `kind` (bug / polish / idea). The note itself stays in our DB; read it with `GET /api/feedback/admin` or the `feedback` skill.
 
 **What an event contains: an allowlist (legal R28.23).** `scrub_event` builds every event from this list and drops everything else, unknown fields included. If building it fails, the event isn't sent.
-- **The SDK's own fields:** event id, time, level, logger name, release, environment, server name, SDK and module versions, the fingerprint, and the transaction (the Flask endpoint's function name).
+- **The SDK's own fields:** event id, time, level, logger name, release, environment, SDK and module versions, the fingerprint, and the transaction (the Flask endpoint's function name). Not the server's host name.
 - **The request:** the method and the **Flask route pattern** (`/s/trade/<match_id>`), never the real path or query. Outside a request, there's no request at all.
-- **The error:** its exception type and module, and the stack frames as file, function and line only: no locals, and no source lines. **Never the exception's message**, which can carry a username or SQL `[parameters: …]`.
+- **The error:** its exception type and module, and the stack frames as file, function and line only: no locals, no source lines, and no absolute paths. **Never the exception's message**, which can carry a username or SQL `[parameters: …]`.
 - **The log line:** its **template** (`"lookup failed for %s"`), and only from a logger we control: `backend.*`, `trade_finder`, `ftf.*` and `gunicorn.error`. Any other logger's template becomes `[Filtered]`, though its logger name and level still go, so the alert fires and says where it came from.
   - **Every parameter is `[Filtered]`, numbers included**, because a `match_id` is a `/s/trade/` link code. Counts and timings stay in the Render logs.
   - A pattern scrub also runs over the template as a second layer.
-  - Our templates are guaranteed constant by a CI test (`test_every_error_log_template_in_backend_is_a_constant`).
+  - A logged object that isn't a string (`log.error(exc)`, whose "template" would be the exception's text) becomes `[Filtered]`.
+  - Our templates are kept constant by a CI test that needs no SDK (`test_error_log_templates.py`, over `backend/` and `scripts/`).
 - **Messages:** `http_5xx` and `feedback_received` only; anything else becomes `[Filtered]`.
 - **Tags:** `route`, `status`, `method`, `feedback_id` and `kind` only.
-- **Contexts:** the Python runtime, the OS and the trace ids.
+- **Contexts:** the Python runtime and the OS.
 - **Never sent:** users, IPs, headers, cookies, request bodies, extras, breadcrumbs (they're off), log parameters, frame locals, source code lines, third-party log templates, tracing, profiling, SQL queries, and log lines as Sentry Logs.
+  - **No trace ids or baggage** (legal R28.23 condition 3): a caller can set them with `sentry-trace` / `baggage` headers, and the SDK would copy them into the event and its envelope header.
+  - **No release-health sessions:** with no error, nothing is sent at all.
 - **Detail lives in the Render logs; Sentry locates.** An event tells you which error, in which code, on which route, and how often. To see the actual values, look up the same minute in the Render logs.
 
 **Before turning it on (both gates):**
 1. **MUST, privacy page:** set `SENTRY_DSN` only once the privacy page with legal's R28.23 lines is **live** in production. Those lines ship in #373 (onboarding-eng). Legal cleared backend Sentry on that condition. Until then, the page names Sentry for the mobile app only.
-2. **Volume:** release-lead counts prod ERROR lines per day (Render logs, `[ERROR]`) and checks the count against the Sentry plan's event quota.
+2. **Volume:** release-lead counts prod ERROR lines per day (Render logs, `[ERROR]`; 0 in 48 h on 10-29 → 10-31) and the 5xx rate (the access log), and checks both against the Sentry plan's event quota. `http_5xx` is capped as above; an ERROR-log storm isn't capped in code, so keep Sentry's spike protection on.
 
 **Turning it on (operator only; agents never handle the DSN):**
 1. Create a Sentry project with the Python / Flask platform.

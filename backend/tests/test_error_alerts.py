@@ -23,7 +23,7 @@ fixture also records each event as the SDK built it, before scrub_event
       envelope bytes, request.url the route pattern, no breadcrumbs collected),
       credentials, a match_id (a link code) as a log param, a third-party
       logger's template, a logged exception object, frames without source
-      lines or paths, condition 3's inbound sentry-trace / baggage (no trace
+      lines or paths, inbound sentry-trace / baggage (no trace
       id or baggage in the envelope, its header included), the event shape,
       the pattern layer, fail closed
   (g) POST /api/feedback: one feedback_received carrying exactly feedback_id
@@ -59,6 +59,16 @@ Sabotage record (each applied, observed red, restored green):
   ints pass _logentry's params again              -> (f) match_id RED
   templates from every logger                     -> (f) third-party logger RED
   include_source_context=True                     -> (f) no source lines, init RED
+  2026-10-31, release-lead QA delta (P1, P2s, P3s)
+  `trace` back in _CONTEXTS                       -> (f) inbound trace/baggage, shape RED
+  auto_session_tracking=False removed             -> (i) no envelope, init RED
+  the 501 exclusion removed                       -> (c) cap/501 RED
+  the hourly cap removed                          -> (c) cap/501 RED
+  the non-str record.msg check removed            -> (f) logged exception object RED
+  frames keep every key (abs_path)                -> (f) no source lines, shape RED
+  server_name back in _PASS_KEYS                  -> (f) no source lines, shape RED
+  _meta back in _PASS_KEYS                        -> (f) condition 7, shape RED
+  (the two template-guard sabotages are in test_error_log_templates.py)
 """
 import copy
 import json
@@ -469,7 +479,8 @@ def test_frames_carry_no_source_lines(sentry, monkeypatch, client):
         assert key not in raw, key
 
 
-# Legal R28.23 condition 3: inbound trace headers, which any caller can set.
+# Legal R28.23 conditions 2 and 4: inbound trace headers, which any caller can set
+# (a baggage sentry-user_id is a user context).
 TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736"
 PARENT_SPAN = "00f067aa0ba902b7"
 B_USER = "baggage-user-55Tq"
@@ -477,7 +488,7 @@ B_TXN = "baggage-txn-44Rp"
 B_OTHER = "baggage-other-33Sn"
 
 
-def test_legal_condition_3_no_inbound_trace_or_baggage_leaves(sentry, monkeypatch, client):
+def test_no_inbound_trace_or_baggage_leaves(sentry, monkeypatch, client):
     monkeypatch.setitem(server.app.view_functions, BOOM, _boom)
     res = client.post("/api/admin/experiments/x/transition", headers={
         "sentry-trace": f"{TRACE_ID}-{PARENT_SPAN}-1",
