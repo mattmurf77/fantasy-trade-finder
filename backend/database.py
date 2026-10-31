@@ -1133,13 +1133,17 @@ deck_impressions_table = Table("deck_impressions", metadata,
     #                  (eval contract.is_archive_deck)
     #   'full_interim' stage 1 only, at archive's rank: the same card on any
     #                  other deck, written full until packing replaces it
+    #   'viewed'       trade.packed_evidence (R4.2, the revised C3): a packed
+    #                  card's full row, written at its first outcome of any
+    #                  kind; delivered_at comes from the pack's deliveries
     # 'partial_run' overrides them all (ruling 21; replay excludes it): every
     # row of a run that ended partial (error, timeout, supersede), and of a
     # deck first delivered after its job left the process with cards past
     # the stored ones (S1b). A card S0's I-1 dropped is never written (C-b).
     # A later delivery raises only 'archive' and 'full_interim' to
-    # 'delivered'. No row is deleted: C8's archive retention waits for the
-    # packing stage (models-lead R2.6 S2).
+    # 'delivered'. The evidence path deletes no row; the only deletes are the
+    # retention cap's (#523, dark at cap 0: a deck's rows at 365 days, a packed
+    # deck's at 90) and account deletion's.
     Column("evidence_tier",             String),
     # ISO UTC: when this card was first sent to a client (any tier, first30
     # included). NULL for an undelivered card (first30, archive, full_interim),
@@ -3067,10 +3071,12 @@ mock_drafts_table = Table("mock_drafts", metadata,
 #
 # receipts_grades — APPEND-ONLY. One row per
 # (impression_id, window_days, grader_version) that reaches a TERMINAL
-# status ('graded' or 'ungradeable'). Never UPDATEd, never DELETEd:
-# corrections are a new `grader_version` with the old rows retained
-# (HLD D-3), which is what makes "we can't move the goalposts" mechanical
-# rather than aspirational. Rows whose window endpoint is not yet resolvable
+# status ('graded' or 'ungradeable'). Never UPDATEd, and never DELETEd to
+# correct a grade: corrections are a new `grader_version` with the old rows
+# retained (HLD D-3), which is what makes "we can't move the goalposts"
+# mechanical rather than aspirational. The one delete is legal's 365-day
+# retention cap (R28.20 (iii)): `_delete_deck` takes a deck's grades with the
+# deck, and account deletion takes the user's (T-10 pins both). Rows whose window endpoint is not yet resolvable
 # are simply absent — the queue is defined by that absence (LLD §4.1), so
 # idempotency is structural rather than bookkept.
 receipts_grades_table = Table("receipts_grades", metadata,
@@ -7445,7 +7451,7 @@ def _delete_deck(conn, deck_job_id: str, user_id: str, league_id: str,
     string range: under prod's collation neither is a plain index range."""
     i, o, p = deck_impressions_table, deck_outcomes_table, deck_evidence_packs_table
     w, c, b = deck_card_withdrawals_table, deck_candidate_sets_table, bakeoff_runs_table
-    r, sh = trade_pass_reasons_table, trade_policy_shadow_table
+    r, sh, g = trade_pass_reasons_table, trade_policy_shadow_table, receipts_grades_table
     contract_ids = [f"{deck_job_id}:{k}" for k in range(card_count)]
     row_ids = select(i.c.impression_id).where(i.c.deck_job_id == deck_job_id)
     counts: dict[str, int] = {}
@@ -7455,6 +7461,11 @@ def _delete_deck(conn, deck_job_id: str, user_id: str, league_id: str,
               for k in range(0, len(contract_ids), 500)),
             ("deck_outcomes", delete(o).where(o.c.impression_id.in_(row_ids))),
             ("trade_pass_reasons", delete(r).where(r.c.impression_id.in_(row_ids))),
+            # The receipts grades: the one sanctioned delete of an append-only
+            # table, these two statements exactly (T-10 pins them).
+            *(("receipts_grades", delete(g).where(g.c.impression_id.in_(contract_ids[k:k + 500])))
+              for k in range(0, len(contract_ids), 500)),
+            ("receipts_grades", delete(g).where(g.c.impression_id.in_(row_ids))),
             ("deck_impressions", delete(i).where(i.c.deck_job_id == deck_job_id)),
             ("deck_card_withdrawals", delete(w).where(w.c.deck_job_id == deck_job_id)),
             ("deck_candidate_sets", delete(c).where(
@@ -7484,6 +7495,29 @@ def _delete_old_trade_impressions(cutoff: str, limit: int) -> int:
             return 0
         return conn.execute(delete(t).where(t.c.id <= upper, t.c.shown_at < cutoff)
                             ).rowcount or 0
+
+
+def _delete_old_grading_sessions(cutoff: str, limit: int) -> int:
+    """Calibration's blind-grading sessions created before the cap, and their
+    cards (the shown trades), oldest first, `limit` sessions at a time (head-
+    eng 2026-10-29: under the 365-day cap, no exception). A small table: the
+    created_at scan is cheap."""
+    gs, gc = grading_sessions_table, grading_cards_table
+    with engine.begin() as conn:
+        ids = list(conn.execute(select(gs.c.session_id).where(gs.c.created_at < cutoff)
+                                .order_by(gs.c.created_at, gs.c.session_id).limit(limit)).scalars())
+        if not ids:
+            return 0
+        # Sessions first: fold_grading_cards starts by updating its session
+        # row, so a fold racing this either waits and finds the session gone,
+        # or commits first and its cards are seen by the card delete below.
+        # Cards first would let a fold land cards for a session about to go.
+        # Every grading writer takes the session before its cards (the fold
+        # and answer_grading_card too), so none of them can deadlock with
+        # this on Postgres (#544 QA P3-1; test_grading_lock_order.py).
+        n = conn.execute(delete(gs).where(gs.c.session_id.in_(ids))).rowcount or 0
+        conn.execute(delete(gc).where(gc.c.session_id.in_(ids)))
+        return n
 
 
 def _delete_old_page_store(cutoff: str, limit: int) -> int:
@@ -7540,8 +7574,9 @@ def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks:
     - `days` (the cap, 365): up to `batch_decks` decks past it, each in its
       own transaction, lose every store at once (E-a1): outcomes (every kind)
       and pass reasons, deck_impressions rows, withdrawals, the candidate set,
-      the bakeoff_runs row, the trade_policy_shadow rows and the pack; and
-      legacy trade_impressions and trade_page_store rows past it go too (the
+      the bakeoff_runs row, the trade_policy_shadow rows, the receipts grades
+      and the pack; and legacy trade_impressions, trade_page_store rows and
+      Calibration's grading sessions (with their cards) past it go too (the
       page store's own eviction runs only while the store is on);
     - `full_row_days` (90): a packed deck's deck_impressions rows (full and
       ghost) past it go, and the pack keeps every card until the cap. A deck
@@ -7576,7 +7611,8 @@ def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks:
     for name, step, batch in (
             ("trade_impressions", _delete_old_trade_impressions,
              limit * _EVIDENCE_PRUNE_ROWS_PER_DECK),
-            ("trade_page_store", _delete_old_page_store, limit)):
+            ("trade_page_store", _delete_old_page_store, limit),
+            ("grading_sessions", _delete_old_grading_sessions, limit)):
         try:
             n = step(cap, batch)
         except Exception:
@@ -7667,7 +7703,7 @@ def _deck_card_acted():
 # meaning. None until the flip: the scribe sets this one value on flip day, and
 # both series' `series_break` caveats read it (receipts_service.admin_metrics,
 # server.suggestion_telemetry_ratio_route), so the two can't drift.
-PACKED_EVIDENCE_FLIP_DAY: str | None = None
+PACKED_EVIDENCE_FLIP_DAY: str | None = "2026-10-31"  # the flip day (UTC); set by release-lead in the flip PR
 # The caveat code every series-break entry carries (analytics_queries,
 # receipts_service, the ratio route), so a reader can match on one value.
 SERIES_BREAK_CAVEAT = "series_break"
@@ -16592,8 +16628,10 @@ def update_mock_draft(mock_id: int, user_id: str, *, picks_json: str | None = No
 # INSERT + SELECT ONLY, deliberately. `receipts_grades` and
 # `receipts_grade_runs` are append-only (HLD D-3): a wrong grade is corrected
 # by bumping `grader_version` and regrading, never by editing a row. There is
-# no UPDATE or DELETE helper for either table anywhere in the codebase, and
-# `backend/tests/test_receipts_grading.py` (T-10) fails if one appears.
+# no UPDATE helper for either table, and no DELETE but legal's retention cap
+# (`_delete_deck`, a deck's grades at 365 days) and account deletion;
+# `backend/tests/test_receipts_append_only.py` (T-10) parses every backend/
+# and scripts/ file and fails if any other write appears.
 
 def _receipts_serve_date_expr():
     """`substr(served_at, 1, 10)` — the UTC serve DATE of an impression.
@@ -17228,23 +17266,32 @@ def answer_grading_card(card_id: str, user_id: str, *, grade: int | None, skippe
     """One engine.begin():
       1. the card joined to its session, both owned by user_id → no row ⇒ None
          (unknown or foreign card);
-      2. session status != 'open' ⇒ {"session_id", "status", "rejected": True, "answered", "total"};
-      3. UPDATE the card: grade, skipped (0/1), tags_json, graded_at = now;
-      4. remaining = count(grade IS NULL AND skipped = 0); total = count(*);
-      5. remaining == 0 ⇒ UPDATE sessions SET status='completed', completed_at=now
+      2. lock the session row (FOR UPDATE) and read its status under the lock;
+         gone by then (the retention prune) ⇒ None, as for an unknown card;
+      3. session status != 'open' ⇒ {"session_id", "status", "rejected": True, "answered", "total"};
+      4. UPDATE the card: grade, skipped (0/1), tags_json, graded_at = now;
+      5. remaining = count(grade IS NULL AND skipped = 0); total = count(*);
+      6. remaining == 0 ⇒ UPDATE sessions SET status='completed', completed_at=now
          WHERE session_id = :sid AND status = 'open'.
+    Lock order, session then card, the one every grading writer and the
+    retention prune use (#544 QA P3-1): taking the card first deadlocked on
+    Postgres with the prune, which deletes the session, then its cards.
     Returns {"session_id", "status": "open"|"completed", "rejected": False,
              "answered": total - remaining, "total": total}."""
     gc, gs = grading_cards_table, grading_sessions_table
     with engine.begin() as conn:
         row = conn.execute(
-            select(gc.c.session_id, gs.c.status)
+            select(gc.c.session_id)
             .select_from(gc.join(gs, gc.c.session_id == gs.c.session_id))
             .where(gc.c.card_id == card_id, gc.c.user_id == user_id, gs.c.user_id == user_id)
         ).first()
         if row is None:
             return None
-        sid, status = row.session_id, row.status
+        sid = row.session_id
+        status = conn.execute(
+            select(gs.c.status).where(gs.c.session_id == sid).with_for_update()).scalar()
+        if status is None:
+            return None
         if status != "open":
             total, remaining = _grading_counts(conn, sid)
             return {"session_id": sid, "status": status, "rejected": True,

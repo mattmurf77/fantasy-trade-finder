@@ -29,6 +29,10 @@ Section 7 pins the same ink-0 label on the tier card's position chip
 
 Section 8 pins the recentred trade card layout and the "+N more" row for a
 side with more than 3 players.
+
+Section 9 pins the live /s/trade and /s/p descriptions to marketing's
+fallback lines (addendum 14 Part A): with the card's fairness number gone,
+no page promises one, and "fair" appears nowhere on either page.
 """
 import io
 import re
@@ -572,3 +576,38 @@ def test_og_package_card_caps_a_side_at_two_names_plus_n_more(env, n):
     name_fonts = {id(k["font"]) for _, t, k in texts if t in names}
     assert name_fonts == {id(kw["font"])}                 # the player-name font
     assert (x, y) == (60 + 24, 175 + 70 + 2 * 66 + 6)     # third row, give side
+
+
+# ---------------------------------------------------------------------------
+# 9. Share-page descriptions promise no fairness read (addendum 14 Part A)
+# ---------------------------------------------------------------------------
+
+TRADE_DESCRIPTION = "A dynasty fantasy trade. See the give/get breakdown."
+PACKAGE_DESCRIPTION = "A 2-player dynasty trade package. See the give/get breakdown."
+
+
+def _assert_description_without_fair(html: str, description: str) -> None:
+    """The one description feeds meta description, og:description,
+    twitter:description and the visible <p>; "fair" is on none of the page."""
+    assert _meta(html, "name", "description") == description
+    assert _meta(html, "property", "og:description") == description
+    assert _meta(html, "name", "twitter:description") == description
+    assert html.count(f"<p>{description}</p>") == 1
+    assert "fair" not in html.lower(), re.findall(r".{0,40}fair.{0,40}", html, re.I)
+
+
+def test_live_trade_page_description_has_no_fairness(env):
+    tok = _live_token(env)
+    r = env.get(f"/s/trade/{tok}")
+    assert r.status_code == 200
+    html = r.get_data(as_text=True)
+    assert "Trade Match" in html                      # the hit, not the miss
+    # The random token sits in the image URLs; mask it so a token that
+    # happens to contain "fair" cannot flake the check.
+    _assert_description_without_fair(html.replace(tok, "<token>"), TRADE_DESCRIPTION)
+
+
+def test_package_page_description_has_no_fairness(client):
+    r = client.get(f"/s/p/{SID}")                     # 1 give + 1 receive: n = 2
+    assert r.status_code == 200
+    _assert_description_without_fair(r.get_data(as_text=True), PACKAGE_DESCRIPTION)

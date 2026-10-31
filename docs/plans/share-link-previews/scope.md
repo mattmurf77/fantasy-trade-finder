@@ -309,3 +309,15 @@ How they were made:
 - The cards come from each version's own `_render_trade_card_png` with the same give/get lists. Main's number comes from its own `_compute_fairness`. The after card is byte-identical to the real `/og/trade/<token>.png` route.
 - The pages are main's `_share_html` source and the Flask test client at `c2ec824f`, each served locally with `tokens.css` and its card.
 - The after page still shows "…and fairness verdict" in its description. That's the copy item routed to marketing.
+
+## 2026-11-01 — share-page descriptions (fallback lines) and the C1 side fix
+
+**Descriptions (release-lead's delta-QA P2; marketing addendum 14 Part A, via head-eng).** #511 draws no bar, so both pages use marketing's approved fallback lines. This resolves the "copy decision needed" item above.
+- `/s/trade/<token>`: "A dynasty fantasy trade. See the give/get breakdown."
+- `/s/p/<id>`: "A {n}-player dynasty trade package. See the give/get breakdown." `{n}` is the total player count, unchanged.
+
+Each feeds the meta description, `og:description`, `twitter:description` and the visible `<p>`. No share page says "fair" anymore. §9 tests the exact strings on all four tags and that "fair" is absent; two sabotage runs (each old string put back) each went red.
+
+**C1, the side fix** (cherry-picked from #564's `691184a8` as `bba76f16`, at head-eng's request). `resolve_trade_share_token` returns the row oriented to the sharer, so a user_b share no longer draws user_a's columns. `test_share_side_orientation.py` has 3 tests.
+
+**Runs:** the share set (8 files): 155 passed; `check_web_structure` 196/196.
