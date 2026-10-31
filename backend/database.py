@@ -61,8 +61,21 @@ if DATABASE_URL.startswith("postgres://"):
 # below — analytics-platform LLD §3.3, NFR-2.)
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
+
+def _pg_engine_kwargs(**connect_args) -> dict:
+    """Postgres-only engine options (docs/runbook.md § "DB connections and
+    background threads across fork"): recycle a pooled connection before the
+    server side drops it idle, and turn on libpq TCP keepalives so a dead peer
+    is noticed. `connect_args` (e.g. ro_engine's `options`) are kept. These
+    are libpq conninfo keys, accepted by psycopg2 (shipped, G-073) and psycopg 3."""
+    return {"pool_recycle": 280,
+            "connect_args": {**connect_args, "keepalives": 1, "keepalives_idle": 30,
+                             "keepalives_interval": 10, "keepalives_count": 5}}
+
+
 engine   = create_engine(DATABASE_URL, echo=False, future=True,
-                         connect_args=_connect_args)
+                         **({"connect_args": _connect_args} if DATABASE_URL.startswith("sqlite")
+                            else _pg_engine_kwargs()))
 metadata = MetaData()
 
 # Silent prepared offers are private artifacts, not shown impressions. The
@@ -351,6 +364,8 @@ overhaul_reservations_table = Table("overhaul_reservations", metadata,
 #   ro_engine     — read-only report queries (P2 consumers); mode=ro URI on
 #                   SQLite, default_transaction_read_only on Postgres
 
+_PG_RO_OPTIONS = "-c default_transaction_read_only=on -c statement_timeout=5s"
+
 if engine.dialect.name == "sqlite":
     @sa_event.listens_for(engine, "connect")
     def _sqlite_on_connect(dbapi_conn, _rec):
@@ -399,8 +414,22 @@ else:
                              # sqlite-only)
     ro_engine = create_engine(
         DATABASE_URL, future=True, pool_size=2, max_overflow=1,
-        connect_args={"options": "-c default_transaction_read_only=on "
-                                 "-c statement_timeout=5s"})
+        **_pg_engine_kwargs(options=_PG_RO_OPTIONS))
+
+
+def _reset_pools_after_fork() -> None:
+    """os.register_at_fork child hook. Under gunicorn --preload (Render's
+    default GUNICORN_CMD_ARGS) the app is imported in the MASTER before the
+    fork, so a worker inherits pooled DB connections whose
+    sockets (and SSL state) the master still holds. Drop them from the child's
+    pools WITHOUT closing (close=False): the parent keeps its sockets, and the
+    child opens fresh ones on first use. Engines are read at call time."""
+    for eng in {id(e): e for e in (engine, ingest_engine, ro_engine)}.values():
+        eng.dispose(close=False)
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_pools_after_fork)
 
 
 def analytics_boot_status() -> dict:
@@ -1128,6 +1157,14 @@ Index(
     "ix_deck_impressions_job",
     deck_impressions_table.c.deck_job_id,
 )
+# The evidence retention prune finds pack-less decks past the bound by their
+# first delivery (purge_deck_evidence). On prod it is built off the boot path
+# (scripts/create_evidence_retention_index.py, CONCURRENTLY), never in init_db:
+# a plain CREATE INDEX on prod's deck_impressions blocks writes for a full scan.
+Index(
+    "ix_deck_impressions_served",
+    deck_impressions_table.c.served_at,
+)
 # C8 retention (ADR-025) has no index yet: the archive partial index arrives
 # with stage-2 packing, which restores the purge (models-lead R2.6 S2). Build it
 # then with CREATE INDEX CONCURRENTLY off the boot path (an operator one-off or
@@ -1439,6 +1476,11 @@ Index(
 # gesture, so a second pass while `deck_pass_outcome_recorded` is True is
 # skipped by `server._save_deck_outcome_safe` (counted as `dup_pass` on the
 # analytics-health rejects). An undone pass may be passed again.
+# `user_id` (G3-e, legal R28.22): the session user who wrote the outcome, which
+# the insert's owner check makes the impression's owner. Account deletion and
+# export match on it as well as on the user's rows and packs, so an outcome
+# stays reachable however its deck's evidence is stored or pruned. NULL on rows
+# written before it (no backfill: those are reached through rows and packs).
 deck_outcomes_table = Table("deck_outcomes", metadata,
     Column("id",              Integer, primary_key=True, autoincrement=True),
     Column("impression_id",   String,  nullable=False),  # deck_impressions.impression_id
@@ -1447,11 +1489,20 @@ deck_outcomes_table = Table("deck_outcomes", metadata,
     Column("detail_expanded", Integer),                  # 0|1|NULL — opened menu/swap/keep-side
     Column("calc_opened",     Integer),                  # 0|1|NULL — edit-in-calculator (#190)
     Column("acted_at",        String,  nullable=False),  # ISO UTC (server clock)
+    Column("user_id",         String),                   # the acting user (G3-e); NULL before it
 )
 
 Index(
     "ix_deck_outcomes_impression",
     deck_outcomes_table.c.impression_id,
+)
+# G3-e. A fresh DB gets it from this declaration. On an existing table it is
+# built off the boot path (scripts/create_outcome_owner_index.py, CONCURRENTLY),
+# never in init_db: a plain CREATE INDEX holds a SHARE lock that blocks every
+# outcome write for its whole scan. Deletion and export work without it (a scan).
+Index(
+    "ix_deck_outcomes_user",
+    deck_outcomes_table.c.user_id,
 )
 
 # ── TikTok-discovery F3 (flag deck.fatigue) — durable decline suppression ───
@@ -3194,6 +3245,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_i1_mode", 1.0, "S0 live-path switch, read per request (default 1 until C-b, models-lead option B): 2 = strict (I-1 drops cards with moved assets; the no-card gate misses follow trade_gate_miss_mode); 1 = lenient (check and log, serve every card, never withhold); 0 = off (the pre-S0 path: no I-1, no fingerprint read or compare, no withhold, no floor kick). NaN or any other value reads as 1. Deploy-free"),
     ("trade_roster_change_revoke", 1.0, "S0 kill for the on_roster_change handler alone, read per call: 0 = the handler does nothing: no revoke, no re-stamp, no move recorded (the rest of S0 follows trade_i1_mode); 1 = it revokes a league job built on an older Sleeper read than the refreshed rows, only for a user whose session already holds the newer read (#470 QA), re-stamps a job whose rosters (its read's members, the picks then stored) hash to the new stamp, and records the move (#481 QA, #484 QA). NaN or any other value reads as 1. Deploy-free"),
     ("trade_gate_miss_mode", 0.0, "S0's no-card gate misses: 1 = serve them (roster_check_unavailable when the roster check can't run; the §3b withhold with wait_reason 'roster_check'); 0 = hold them for binaries before 1.22.0, which show them as 'Search failed' (a check that can't run serves the cards unchecked, loudly logged; a past-bound stale roster serves its I-1-filtered cards, logged roster_gate_miss_held). Flip to 1 once 1.22.0 is distributed. NaN or any other value reads as 0. Deploy-free"),
+    # ── Deck-evidence retention (head-eng 2026-10-28; dark until a bound is set) ──
+    ("deck_evidence_retention_days", 0.0, "Deck-evidence retention cap (legal R28.20 (iii): 365). The cleanup loop deletes, a bounded batch per tick, every store of a deck first delivered more than this many days ago, all at once: its outcomes, pass reasons, deck_impressions rows, withdrawals, candidate set, bakeoff_runs row, policy shadow rows and pack; and legacy trade_impressions and trade_page_store rows past it. 0 = off: the whole prune, full rows included, stays dark. A value under 56 (receipts' window) is refused: nothing is deleted and a warning is logged. Deploy-free"),
+    ("deck_evidence_full_row_days", 90.0, "Deck-evidence retention, full rows (legal R28.20 (iii): 90): a PACKED deck's deck_impressions rows (full and ghost) are deleted this many days after its first delivery; the pack keeps every card until deck_evidence_retention_days. A deck with no pack keeps its rows until the cap. Acts only while deck_evidence_retention_days is on; 0 or a value at or past the cap = rows go with the deck at the cap; under 56 = refused and logged. Deploy-free"),
     ("trade_roster_bound_s", 300.0, "S0 §3b: a Sleeper roster whose last refresh is older than this many seconds is past the bound. Past the bound, the serve kicks one background roster refresh (P41); past it with the last attempt failed (league_roster_state 'stale'), cached cards are withheld (wait_reason 'roster_check'). Deploy-free"),
     ("trade_import_roster_fresh_s", 86400.0, "S0 §3: an ESPN/MFL/Fleaflicker league's stored rosters read 'fresh' while their newest league_members.updated_at is younger than this many seconds, else 'stale'. Logged only: never withholds, never rebuilds (ruling 29). Deploy-free"),
     # ── First-page store (P1, flag trade.first_page_store; read only while it is on) ──
@@ -3503,7 +3557,7 @@ _MODEL_CONFIG_DEFAULTS = [
     # `max_per_opponent` change a no-op on the served deck. Value MATCHES
     # trade_service._DEFAULT_CFG exactly; seeding is behavior-neutral.
     ("exploration_base_per_opp", 5.0, "full sweep: served cards kept per opponent — the base exploration_overgen adds to, and the width _split_exploration_pool trims back to. 5.0 reproduces the pre-knob hardcoded constant exactly"),
-    ("full_sweep_budget_s",     30.0, "full sweep: wall-clock seconds of opponent sweep before generation stops starting new pairs, checked BETWEEN opponents. Read only while trade.full_sweep is ON — it replaces the global_target card count as the job's ceiling, because trade_optimizer.generate_pair_trades_v3 carries no deadline of its own. <=0 disables the rail (job then bounded only by _JOB_HARD_TIMEOUT, 60s)"),
+    ("full_sweep_budget_s",     30.0, "full sweep: wall-clock seconds of opponent sweep before generation stops starting new pairs, checked BETWEEN opponents. Read only while trade.full_sweep is ON — it replaces the global_target card count as the job's ceiling, because trade_optimizer.generate_pair_trades_v3 carries no deadline of its own. <=0 disables the rail (job then bounded only by _JOB_HARD_TIMEOUT)"),
     # ── Personal-market policy (backend/trade_policy.py; scope block
     # docs/plans/personal-market-policy/scope.md). Every value here is an
     # EXPERIMENT SETTING, not a permanent product truth — which is exactly why
@@ -3613,15 +3667,149 @@ def _evict_prerelease_espn_verified_stamps() -> int:
         return res.rowcount or 0
 
 
+# ── Migration DDL lock safety (docs/runbook.md § "Migration DDL never blocks
+# boot"). On Postgres, `ALTER TABLE … ADD COLUMN` takes ACCESS EXCLUSIVE before
+# it checks whether the column exists, and CREATE INDEX IF NOT EXISTS takes
+# SHARE before its check. Running every listed DDL on every boot therefore
+# queued exclusive locks behind the still-serving old instance (#416: ~90 s in
+# init_db). `_migrate_db` now inspects the schema (each catalog read under a
+# 3 s lock_timeout) and issues only the DDL that is actually missing. Missing
+# DDL runs under a short lock_timeout, and if the table stays busy the boot
+# FAILS (head-eng ruling on #427): readers name every metadata column, so
+# serving without it is worse.
+_DDL_LOCK_TIMEOUT = "3s"
+_DDL_STATEMENT_TIMEOUT = "30s"      # ADD COLUMN only; an index build is never cancelled
+_DDL_ATTEMPTS = 10          # 10 × (3 s lock wait + ~1 s sleep) ≈ 40 s at most
+_DDL_RETRY_SLEEP_S = 1.0
+_PG_LOCK_BUSY_CODES = frozenset({"55P03", "57014"})   # lock_not_available, query_canceled
+
+
+def _pg_lock_busy(exc) -> bool:
+    return getattr(getattr(exc, "orig", None), "pgcode", None) in _PG_LOCK_BUSY_CODES
+
+
+def _fail_lock_busy(label: str, what: str, exc) -> None:
+    log.error("MIGRATION_LOCK_BUSY %s: %s; failing the boot", label, what)
+    raise RuntimeError(f"MIGRATION_LOCK_BUSY {label}") from exc
+
+
+class _SchemaSnapshot:
+    """Per-table cached column and index-name sets for one `_migrate_db` call.
+    Each table is read once, through an inspector on its own short-lived
+    connection; on Postgres that connection first runs `SET lock_timeout`, so
+    a catalog read can never hang behind an ACCESS EXCLUSIVE holder, and it is
+    closed before any DDL runs. A lock-busy read fails the boot
+    (MIGRATION_LOCK_BUSY <table>). A table that does not exist reads as None
+    (any ALTER on it would fail anyway); any other inspection error reads as
+    an empty set, so the DDL simply runs as it did before."""
+
+    def __init__(self):
+        self._cols: dict = {}
+        self._idx: dict = {}
+
+    def _load(self, cache, table, kind):
+        if table not in cache:
+            from sqlalchemy import inspect as sa_inspect
+            from sqlalchemy.exc import NoSuchTableError
+            try:
+                with engine.connect() as conn:
+                    if _ddl_is_postgres():
+                        _execute_ddl(conn, f"SET lock_timeout = '{_DDL_LOCK_TIMEOUT}'")
+                    read = getattr(sa_inspect(conn), kind)
+                    cache[table] = {item["name"] for item in read(table)}
+            except NoSuchTableError:
+                cache[table] = None
+            except Exception as exc:
+                if _ddl_is_postgres() and _pg_lock_busy(exc):
+                    _fail_lock_busy(table, "catalog read lock-busy", exc)
+                cache[table] = set()
+        return cache[table]
+
+    def columns(self, table):
+        return self._load(self._cols, table, "get_columns")
+
+    def has_index(self, table, name) -> bool:
+        return name in (self._load(self._idx, table, "get_indexes") or ())
+
+    @staticmethod
+    def parse_create_index(ddl: str):
+        """(index, table) for `CREATE [UNIQUE] INDEX IF NOT EXISTS <i> ON <t>`, else None."""
+        import re
+        m = re.match(r"\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+(\w+)",
+                     ddl, re.I)
+        return (m.group(1), m.group(2)) if m else None
+
+
+def _ddl_is_postgres() -> bool:
+    return engine.dialect.name == "postgresql"
+
+
+def _execute_ddl(conn, sql: str) -> None:
+    conn.execute(text(sql))
+
+
+def _run_guarded_ddl(ddl: str, label: str, *, statement_timeout: bool) -> bool:
+    """One DDL statement in its own transaction. Postgres: under SET LOCAL
+    lock_timeout (plus statement_timeout when asked), retried on a lock or
+    statement timeout up to _DDL_ATTEMPTS times; if still busy, logs
+    MIGRATION_LOCK_BUSY at ERROR and RAISES, so init_db and the boot fail.
+    Any other error is swallowed as before (e.g. the "already exists" race).
+    Returns True when the statement ran."""
+    pg = _ddl_is_postgres()
+    for attempt in range(1, _DDL_ATTEMPTS + 1):
+        try:
+            with engine.begin() as conn:
+                if pg:
+                    _execute_ddl(conn, f"SET LOCAL lock_timeout = '{_DDL_LOCK_TIMEOUT}'")
+                    if statement_timeout:
+                        _execute_ddl(conn, f"SET LOCAL statement_timeout = '{_DDL_STATEMENT_TIMEOUT}'")
+                _execute_ddl(conn, ddl)
+            return True
+        except Exception as exc:
+            if not (pg and _pg_lock_busy(exc)):
+                return False
+            if attempt == _DDL_ATTEMPTS:
+                _fail_lock_busy(label, f"still locked after {_DDL_ATTEMPTS} attempts", exc)
+            time.sleep(_DDL_RETRY_SLEEP_S)
+    return False
+
+
+def _add_column_guarded(table: str, col: str, col_type: str) -> bool:
+    """ADD COLUMN under the guard, with a statement_timeout (metadata-only)."""
+    return _run_guarded_ddl(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}",
+                            f"{table}.{col}", statement_timeout=True)
+
+
+def _create_index_guarded(ddl: str, index: str) -> bool:
+    """A genuinely missing CREATE INDEX under the guard: lock_timeout only, so
+    a build that got its lock is never cancelled. A large table's index is
+    still built CONCURRENTLY off the boot path (the C8 retention note
+    beside deck_impressions' indexes); this only bounds the lock wait."""
+    return _run_guarded_ddl(ddl, index, statement_timeout=False)
+
+
 def _migrate_db() -> None:
     """
     Add columns that may be missing from older DB schemas.
-    Each ALTER TABLE is wrapped in try/except so it's idempotent — safe to
-    call on a fresh DB or one that already has all columns.
+    The schema is inspected once per call; only a column (or index) that is
+    actually missing gets DDL, each in its own transaction, so a normal boot
+    issues no ADD COLUMN at all. See `_add_column_guarded` for the Postgres
+    lock guard: a column whose table stays locked raises MIGRATION_LOCK_BUSY,
+    which fails init_db and the boot.
 
     Also seeds model_config with default values (INSERT OR IGNORE so that
     any manually-tuned rows survive re-deploys).
     """
+    schema = _SchemaSnapshot()
+
+    def _add_missing_columns(cols) -> None:
+        for table, col, col_type in cols:
+            present = schema.columns(table)
+            if present is None or col in present:
+                continue
+            if _add_column_guarded(table, col, col_type):
+                present.add(col)
+
     migration_cols = [
         # Email capture (2026-07-17 spec) — dark behind auth.email_capture
         ("accounts",           "email",                 "VARCHAR"),
@@ -3811,16 +3999,13 @@ def _migrate_db() -> None:
         # ── team overhaul, all-platform sends (2026-09-07): MFL/ESPN cores
         # report a status word without a transaction id.
         ("overhaul_attempts",  "provider_status",           "VARCHAR"),
+        # ── G3-e (legal R28.22): an outcome's owner, for deletion and export.
+        ("deck_outcomes",      "user_id",                   "VARCHAR"),
     ]
-    # Each ALTER TABLE gets its own transaction so a "column already exists"
+    # Only missing columns get an ALTER, each in its own transaction so a
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
     # entire transaction as aborted on any error — even if Python catches it.
-    for table, col, col_type in migration_cols:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-        except Exception:
-            pass   # column already exists — safe to ignore
+    _add_missing_columns(migration_cols)
 
     # Backfill: tag existing rows with '1qb_ppr' format since that was the only one
     _backfill_dual_format()
@@ -3862,12 +4047,7 @@ def _migrate_db() -> None:
     _agent1_skip_migrations = [
         # (table, column, type) — currently none; placeholder for future work
     ]
-    for table, col, col_type in _agent1_skip_migrations:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-        except Exception:
-            pass
+    _add_missing_columns(_agent1_skip_migrations)
 
     # ── app_feedback migrations ────────────────────────────────────────────
     # The table itself is created by metadata.create_all(); this block is
@@ -3878,12 +4058,7 @@ def _migrate_db() -> None:
         # #360 QA P2-1: hash of the unverified session that sent the note.
         ("app_feedback", "session_key", "TEXT"),
     ]
-    for table, col, col_type in _app_feedback_migrations:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-        except Exception:
-            pass
+    _add_missing_columns(_app_feedback_migrations)
 
     # ── user_events / identity_links analytics indexes ────────────────────
     # Tracking plan v2 §S1/S2 + analytics-platform LLD §3.1/§3.2. All
@@ -3905,11 +4080,15 @@ def _migrate_db() -> None:
         "DROP INDEX IF EXISTS ix_identity_links_device",
     ]
     for ddl in _user_events_env_indexes:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(ddl))
-        except Exception:
-            pass
+        create = schema.parse_create_index(ddl)
+        if create is None:                       # DROP INDEX IF EXISTS: no lock when absent
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+            except Exception:
+                pass
+        elif not schema.has_index(create[1], create[0]):
+            _create_index_guarded(ddl, create[0])   # present: skipped (no SHARE lock)
 
     # ── Analytics P0 — wrapped_events cutover timestamp (LLD §6.4, FR-4) ──
     # Set ONCE (INSERT-or-ignore) at the first boot of the deploy that flips
@@ -3946,13 +4125,9 @@ def _migrate_db() -> None:
         ("idx_app_feedback_user_id",    "app_feedback", "user_id"),
     ]
     for idx_name, tbl, cols in _app_feedback_indexes:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(
-                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})"
-                ))
-        except Exception:
-            pass
+        if not schema.has_index(tbl, idx_name):
+            _create_index_guarded(
+                f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})", idx_name)
 
     # ── Multi-league refactor: composite indexes on trade_matches ─────────
     # Existing tables won't have the indexes declared on trade_matches_table
@@ -3974,13 +4149,9 @@ def _migrate_db() -> None:
         ("ix_draft_picks_league_source",  "draft_picks",   "league_id, source"),
     ]
     for idx_name, tbl, cols in _trade_match_indexes:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(
-                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})"
-                ))
-        except Exception:
-            pass
+        if not schema.has_index(tbl, idx_name):
+            _create_index_guarded(
+                f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})", idx_name)
 
     # ── Hot-cold-start indexes (review #B1) ────────────────────────────────
     # These tables were declared with no composite indexes and full-scan on
@@ -4018,13 +4189,9 @@ def _migrate_db() -> None:
          "scoring_format, snapshot_date"),
     ]
     for idx_name, tbl, cols in _hot_path_indexes:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(
-                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})"
-                ))
-        except Exception:
-            pass
+        if not schema.has_index(tbl, idx_name):
+            _create_index_guarded(
+                f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})", idx_name)
 
     # ── trade_matches.status: 'active' → 'pending' (review P0) ─────────────
     # Earlier code wrote status='active' on insert; every cron reader filters
@@ -7152,6 +7319,266 @@ def load_deck_diagnostics(impression_id: str, user_id: str) -> dict | None:
     return expand_features(features, snapshots)
 
 
+# Deck-evidence retention, legal R28.20 (iii) final, with models-lead's
+# addendum E: every deck-evidence store expires 365 days after a deck's first
+# delivery, deck-atomic (E-a1); a packed deck's full rows (ghost rows
+# included, E-c2) after 90 (E-c1); a deck with no pack keeps its rows under
+# the 365-day cap (E-a3: they are its only replay record). Receipts read up to
+# 56 days back: the shortest bound either knob accepts.
+DECK_EVIDENCE_RETENTION_FLOOR_DAYS = 56
+_EVIDENCE_PRUNE_ROWS_PER_DECK = 150   # rows read per wanted deck (a deck has ~35-130)
+_FULL_ROW_PRUNE_PACKS = 500            # packs whose full rows go in one statement
+_served_index_ready = False            # ix_deck_impressions_served seen at the last check
+_served_index_checked = 0.0            # monotonic time of that check
+_SERVED_INDEX_RECHECK_S = 3600.0       # a seen index is checked again hourly (#523 QA P3-5)
+_served_index_warned = False
+_bound_warned: set = set()             # (knob, value) pairs already warned about
+# The full-row pass's place in the packs' (served_at, run_id) order: every
+# pack at or before it, inside the 365-day cap, has had its full rows deleted.
+# In memory only: a restart walks again from the cap, in bounded chunks.
+_full_row_cursor: tuple[str, str] | None = None
+
+
+def _deck_impressions_served_index_ready() -> bool:
+    """Whether ix_deck_impressions_served exists: without it the pack-less
+    scan would read the whole table, so the prune skips it (logged once, and
+    again if a seen index goes missing). Missing, it's looked for every call;
+    seen, it's checked again hourly, so a dropped index stops the scan."""
+    global _served_index_ready, _served_index_checked, _served_index_warned
+    now = time.monotonic()
+    if not _served_index_ready or now - _served_index_checked >= _SERVED_INDEX_RECHECK_S:
+        from sqlalchemy import inspect as _inspect
+        names = {ix.get("name") for ix in _inspect(engine).get_indexes("deck_impressions")}
+        ready = "ix_deck_impressions_served" in names
+        if not ready and (_served_index_ready or not _served_index_warned):
+            _served_index_warned = True
+            log.warning("deck-evidence retention: pack-less decks wait for "
+                        "ix_deck_impressions_served (scripts/create_evidence_retention_index.py)")
+        _served_index_ready, _served_index_checked = ready, now
+    return _served_index_ready
+
+
+DECK_EVIDENCE_RETENTION_MAX_DAYS = 36500   # past this a bound is a typo, not a policy
+
+
+def _bound_ok(name: str, days) -> bool:
+    """A retention bound in force: set (> 0), finite, at most
+    DECK_EVIDENCE_RETENTION_MAX_DAYS and not under the floor. A refused value
+    is logged once per value, not every tick (#523 QA P3-3)."""
+    if not days or days <= 0:
+        return False
+    if not math.isfinite(days) or days > DECK_EVIDENCE_RETENTION_MAX_DAYS:
+        why = f"isn't a finite count of days up to {DECK_EVIDENCE_RETENTION_MAX_DAYS}"
+    elif days < DECK_EVIDENCE_RETENTION_FLOOR_DAYS:
+        why = f"is under the {DECK_EVIDENCE_RETENTION_FLOOR_DAYS}-day floor"
+    else:
+        return True
+    if (name, repr(days)) not in _bound_warned:
+        _bound_warned.add((name, repr(days)))
+        log.warning("deck-evidence retention: %s %s days %s; nothing deleted under it",
+                    name, days, why)
+    return False
+
+
+def _expired_decks(cutoff: str, limit: int) -> dict[str, tuple[str, str, int]]:
+    """Up to `limit` decks first delivered before `cutoff`, oldest first, as
+    {deck_job_id: (user_id, league_id, card_count)}: packed decks by their
+    pack's served_at (card_count, the pack's); then, once
+    ix_deck_impressions_served exists, pack-less decks by their rows'
+    (bounded, in index order, never a DISTINCT over the backlog; card_count
+    0). A packed deck is only ever found through its pack, so it goes whole."""
+    p, i = deck_evidence_packs_table, deck_impressions_table
+    with engine.connect() as conn:
+        decks = {r.run_id: (r.user_id, r.league_id, r.card_count or 0) for r in conn.execute(
+            select(p.c.run_id, p.c.user_id, p.c.league_id, p.c.card_count)
+            .where(p.c.served_at < cutoff).order_by(p.c.served_at, p.c.run_id).limit(limit))}
+        if len(decks) < limit and _deck_impressions_served_index_ready():
+            found: dict[str, tuple[str, str, int]] = {}
+            for r in conn.execute(
+                    select(i.c.deck_job_id, i.c.user_id, i.c.league_id)
+                    .where(i.c.served_at < cutoff).order_by(i.c.served_at)
+                    .limit((limit - len(decks)) * _EVIDENCE_PRUNE_ROWS_PER_DECK)):
+                if r.deck_job_id not in decks:
+                    found.setdefault(r.deck_job_id, (r.user_id, r.league_id, 0))
+            if found:
+                packed = set(conn.execute(select(p.c.run_id).where(
+                    p.c.run_id.in_(list(found)))).scalars())
+                for job, owner in found.items():
+                    if job not in packed and len(decks) < limit:
+                        decks[job] = owner
+    return decks
+
+
+def deck_pack_contract_ids(conn, user_ids) -> list[str]:
+    """Every contract id ("<deck_job_id>:<k>", k < card_count; R4.2 U2) of the
+    users' packed decks, on the caller's connection. A packed card's outcomes
+    are keyed by it whether or not the card has a row, and the evidence
+    prune's full-row bound deletes the rows long before the pack, so account
+    export and deletion find outcomes through these too (#523 QA P1-1)."""
+    p = deck_evidence_packs_table
+    return [f"{run_id}:{k}" for run_id, n in conn.execute(
+        select(p.c.run_id, p.c.card_count).where(p.c.user_id.in_(list(user_ids))))
+        for k in range(n or 0)]
+
+
+def _delete_deck(conn, deck_job_id: str, user_id: str, league_id: str,
+                 card_count: int) -> dict[str, int]:
+    """Every store of one deck (E-a1). The per-card ones first, outcomes and
+    pass reasons: a packed card's by its contract id ("<deck_job_id>:<k>" for
+    each of the pack's `card_count` cards, R4.2 U2), whether or not it has a
+    row, and a row's by the row's impression_id. Exact ids, never a LIKE or a
+    string range: under prod's collation neither is a plain index range."""
+    i, o, p = deck_impressions_table, deck_outcomes_table, deck_evidence_packs_table
+    w, c, b = deck_card_withdrawals_table, deck_candidate_sets_table, bakeoff_runs_table
+    r, sh = trade_pass_reasons_table, trade_policy_shadow_table
+    contract_ids = [f"{deck_job_id}:{k}" for k in range(card_count)]
+    row_ids = select(i.c.impression_id).where(i.c.deck_job_id == deck_job_id)
+    counts: dict[str, int] = {}
+    for name, stmt in (
+            *((name, delete(t).where(t.c.impression_id.in_(contract_ids[k:k + 500])))
+              for name, t in (("deck_outcomes", o), ("trade_pass_reasons", r))
+              for k in range(0, len(contract_ids), 500)),
+            ("deck_outcomes", delete(o).where(o.c.impression_id.in_(row_ids))),
+            ("trade_pass_reasons", delete(r).where(r.c.impression_id.in_(row_ids))),
+            ("deck_impressions", delete(i).where(i.c.deck_job_id == deck_job_id)),
+            ("deck_card_withdrawals", delete(w).where(w.c.deck_job_id == deck_job_id)),
+            ("deck_candidate_sets", delete(c).where(
+                c.c.user_id == user_id, c.c.league_id == league_id,
+                c.c.deck_job_id == deck_job_id)),
+            ("bakeoff_runs", delete(b).where(b.c.deck_job_id == deck_job_id)),
+            ("trade_policy_shadow", delete(sh).where(sh.c.deck_job_id == deck_job_id)),
+            ("deck_evidence_packs", delete(p).where(p.c.run_id == deck_job_id))):
+        n = conn.execute(stmt).rowcount or 0
+        if n:
+            counts[name] = counts.get(name, 0) + n
+    return counts
+
+
+def _delete_old_trade_impressions(cutoff: str, limit: int) -> int:
+    """Legacy trade_impressions (still written beside deck_impressions) past
+    the cap, among the oldest `limit` ids: rows are inserted in shown_at order,
+    so no index on shown_at is needed. An id bound, a primary-key range scan;
+    an IN over a LIMIT subquery planned as a semi join over the whole table on
+    Postgres every tick (#523 QA P2-1)."""
+    t = trade_impressions_table
+    with engine.begin() as conn:
+        upper = conn.execute(select(t.c.id).order_by(t.c.id).offset(limit - 1).limit(1)).scalar()
+        if upper is None:                     # fewer rows than the batch: all of them
+            upper = conn.execute(select(func.max(t.c.id))).scalar()
+        if upper is None:
+            return 0
+        return conn.execute(delete(t).where(t.c.id <= upper, t.c.shown_at < cutoff)
+                            ).rowcount or 0
+
+
+def _delete_old_page_store(cutoff: str, limit: int) -> int:
+    """trade_page_store rows built before the cap: a backstop for the store's
+    own eviction (trade_page_store_evict_days, 30 by default), which runs only
+    while the store is on and could be set past the cap. One row per scope,
+    so the table stays small and a scan is cheap."""
+    t = trade_page_store_table
+    with engine.begin() as conn:
+        ids = select(t.c.id).where(t.c.built_at < cutoff).order_by(t.c.id).limit(limit)
+        return conn.execute(delete(t).where(t.c.id.in_(ids.scalar_subquery()))).rowcount or 0
+
+
+def _delete_packed_full_rows(cutoff: str, floor: str, chunks: int) -> int:
+    """The full-row bound (E-c1): the deck_impressions rows of packed decks
+    first delivered before `cutoff` (and not before `floor`, the cap, whose
+    decks go whole), `_FULL_ROW_PRUNE_PACKS` packs a statement, at most
+    `chunks` statements a call, resuming from `_full_row_cursor`. The pack,
+    its outcomes and the rest stay until the cap. A failed chunk keeps the
+    cursor, so it is retried next tick."""
+    global _full_row_cursor
+    p, i = deck_evidence_packs_table, deck_impressions_table
+    deleted = 0
+    for _ in range(max(1, chunks)):
+        q = select(p.c.served_at, p.c.run_id).where(p.c.served_at < cutoff,
+                                                    p.c.served_at >= floor)
+        if _full_row_cursor is not None:
+            at, run = _full_row_cursor
+            q = q.where(or_(p.c.served_at > at, and_(p.c.served_at == at, p.c.run_id > run)))
+        try:
+            with engine.begin() as conn:
+                packs = conn.execute(q.order_by(p.c.served_at, p.c.run_id)
+                                     .limit(_FULL_ROW_PRUNE_PACKS)).all()
+                if packs:
+                    deleted += conn.execute(delete(i).where(
+                        i.c.deck_job_id.in_([r.run_id for r in packs]))).rowcount or 0
+        except Exception:
+            log.warning("deck-evidence retention: full rows not deleted; retried next tick",
+                        exc_info=True)
+            break
+        if not packs:
+            break
+        _full_row_cursor = (packs[-1].served_at, packs[-1].run_id)
+        if len(packs) < _FULL_ROW_PRUNE_PACKS:
+            break
+    return deleted
+
+
+def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks: int = 200,
+                        full_row_chunks: int = 20, now: datetime | None = None) -> dict[str, int]:
+    """Deck-evidence retention (legal R28.20 (iii), final; models-lead
+    addendum E), one bounded pass per cleanup tick, measured from a deck's
+    first delivery (`served_at`):
+    - `days` (the cap, 365): up to `batch_decks` decks past it, each in its
+      own transaction, lose every store at once (E-a1): outcomes (every kind)
+      and pass reasons, deck_impressions rows, withdrawals, the candidate set,
+      the bakeoff_runs row, the trade_policy_shadow rows and the pack; and
+      legacy trade_impressions and trade_page_store rows past it go too (the
+      page store's own eviction runs only while the store is on);
+    - `full_row_days` (90): a packed deck's deck_impressions rows (full and
+      ghost) past it go, and the pack keeps every card until the cap. A deck
+      with no pack keeps its rows until the cap (E-a3, E-c1).
+    `days` 0 means off, and nothing runs. A bound under
+    DECK_EVIDENCE_RETENTION_FLOOR_DAYS is refused and logged; so is the
+    full-row one, which is also unused at or past the cap. Pack-less decks are
+    found through ix_deck_impressions_served only once it exists (built off
+    the boot path; until then they wait, logged once). Returns rows deleted
+    per table, plus "decks" ({} when nothing was deleted)."""
+    if not _bound_ok("deck_evidence_retention_days", days):
+        return {}
+    now = now or datetime.now(timezone.utc)
+    cap = (now - timedelta(days=days)).isoformat()
+    limit = max(1, min(batch_decks, 1000))
+    decks = _expired_decks(cap, limit)
+    counts: dict[str, int] = {}
+    done = 0
+    for deck_job_id, (user_id, league_id, card_count) in decks.items():
+        try:
+            with engine.begin() as conn:
+                deleted = _delete_deck(conn, deck_job_id, user_id, league_id, card_count)
+        except Exception:
+            log.warning("deck-evidence retention: deck %s not deleted; retried next tick",
+                        deck_job_id, exc_info=True)
+            continue
+        done += 1
+        for name, n in deleted.items():
+            counts[name] = counts.get(name, 0) + n
+    if done:
+        counts["decks"] = done
+    for name, step, batch in (
+            ("trade_impressions", _delete_old_trade_impressions,
+             limit * _EVIDENCE_PRUNE_ROWS_PER_DECK),
+            ("trade_page_store", _delete_old_page_store, limit)):
+        try:
+            n = step(cap, batch)
+        except Exception:
+            n = 0
+            log.warning("deck-evidence retention: %s not deleted; retried next tick", name,
+                        exc_info=True)
+        if n:
+            counts[name] = n
+    if full_row_days and _bound_ok("deck_evidence_full_row_days",
+                                   full_row_days) and full_row_days < days:
+        rows = _delete_packed_full_rows((now - timedelta(days=full_row_days)).isoformat(),
+                                        cap, full_row_chunks)
+        if rows:
+            counts["full_rows"] = rows
+    return counts
+
+
 def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
     """Expire one bounded batch of debug nodes, never cards/valuations/outcomes."""
     if days <= 0:
@@ -7803,6 +8230,8 @@ def save_deck_outcome(
     A view is recorded once. Other actions can repeat after undo, with at
     most 32 of each action per impression. The owner row serializes these
     bounds on Postgres; SQLite's single insert/select checks them atomically.
+    The row carries `acting_user_id` as its `user_id` (G3-e), which the owner
+    check makes the impression's owner.
     """
     if action not in ("viewed", "like", "pass", "not_interested", "propose", "undo"):
         raise ValueError(f"unknown deck outcome action: {action!r}")
@@ -7827,10 +8256,11 @@ def save_deck_outcome(
             literal(impression_id), literal(action), literal(dwell_ms),
             literal(None if detail_expanded is None else int(detail_expanded)),
             literal(None if calc_opened is None else int(calc_opened)),
-            literal(datetime.now(timezone.utc).isoformat()),
+            literal(datetime.now(timezone.utc).isoformat()), literal(acting_user_id),
         ).where(owner.exists(), count < (1 if action == "viewed" else 32))
         result = conn.execute(insert(deck_outcomes_table).from_select(
-            ["impression_id", "action", "dwell_ms", "detail_expanded", "calc_opened", "acted_at"],
+            ["impression_id", "action", "dwell_ms", "detail_expanded", "calc_opened", "acted_at",
+             "user_id"],
             values))
         return result.rowcount == 1
 
