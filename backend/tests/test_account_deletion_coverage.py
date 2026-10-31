@@ -48,12 +48,16 @@ def rows(engine, table):
 
 @pytest.mark.parametrize("table_name", accounts._ADDITIONAL_PRIVATE_TABLES)
 def test_new_private_rows_and_aliases_removed_counterparty_kept(engine, table_name):
+    """The user's and alias's rows go; the counterparty's row stays exactly as
+    it was, column for column (#544 QA P2-1: an UPDATE of every user's rows
+    through the private-table loop kept the right user_ids and passed)."""
     table = getattr(db, table_name + "_table")
     with engine.begin() as conn:
         for uid in (UID, ALIAS, OTHER):
             seed(conn, table, uid, user_id=uid)
+    before = [dict(r) for r in rows(engine, table) if r["user_id"] == OTHER]
     accounts.delete_user_data(UID)
-    assert [r["user_id"] for r in rows(engine, table)] == [OTHER]
+    assert [dict(r) for r in rows(engine, table)] == before
 
 
 def test_encrypted_credentials_billing_and_all_sessions_removed(engine):
@@ -119,6 +123,21 @@ def test_shared_device_deletes_anonymous_history_preserves_other_identity(engine
     assert {r["user_id"] for r in rows(engine, db.user_events_table)} == {OTHER, "device:unrelated"}
     assert {r["unit_id"] for r in rows(engine, db.experiment_assignments_table)} == {OTHER, "device:unrelated"}
     assert [r["sleeper_user_id"] for r in rows(engine, db.identity_links_table)] == [OTHER]
+
+
+def test_an_outcome_on_a_deck_with_no_rows_and_no_pack_goes_by_its_owner(engine):
+    """G3-e (legal R28.23, condition 2): #535's shape, an outcome whose deck
+    has no row and no pack, is reached only through deck_outcomes.user_id. That
+    id is the verified session's user_id (_save_deck_outcome_safe), so it must
+    be one the alias resolution covers: the user's own id, an account alias, or
+    a working key a durable session recorded for the account."""
+    working = "synthetic-working-key"
+    with engine.begin() as conn:
+        seed(conn, db.sessions_table, "synthetic-session", user_id=working, account_id=AID)
+        for i, uid in enumerate((UID, ALIAS, working, OTHER)):
+            seed(conn, db.deck_outcomes_table, uid, impression_id=f"gone-job:{i}", user_id=uid)
+    accounts.delete_user_data(UID)
+    assert [r["user_id"] for r in rows(engine, db.deck_outcomes_table)] == [OTHER]
 
 
 def test_outcomes_follow_impressions_shared_trade_record_retained(engine):
@@ -195,6 +214,18 @@ def test_referral_counterparties_and_public_league_grids_are_preserved(engine):
     assert rows(engine, db.trade_block_table)[0]["user_id"] is None
     history = rows(engine, db.league_roster_history_table)
     assert len(history) == 1 and history[0]["owner_user_id"] is None
+
+
+def test_trade_share_tokens_minted_by_the_user_are_deleted(engine):
+    """Build O8: a share link dies with its sharer's account (every alias);
+    the counterparty's own tokens for the same match survive."""
+    with engine.begin() as conn:
+        for uid in (UID, ALIAS, OTHER):
+            seed(conn, db.trade_share_tokens_table, uid,
+                 token="synthetic-token-" + uid, match_id=1, created_by=uid)
+    counts = accounts.delete_user_data(UID)
+    assert counts["trade_share_tokens_deleted"] == 2
+    assert [r["created_by"] for r in rows(engine, db.trade_share_tokens_table)] == [OTHER]
 
 
 def test_route_evicts_bound_alias_and_account_sessions(engine, monkeypatch):

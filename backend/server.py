@@ -2395,7 +2395,9 @@ _trade_jobs_lock = threading.Lock()
 # prevents a permanent per-account epoch ledger in this process-local cache.
 _trade_input_epochs = weakref.WeakValueDictionary()
 _PREGEN_TTL_SECONDS  = 1800   # 30 min — fresh cache window
-_JOB_HARD_TIMEOUT    = 60     # seconds — past this a stuck job is marked error
+_JOB_HARD_TIMEOUT    = 300    # seconds — past this a stuck job is marked error. A
+                              # stuck-job backstop, not a latency target: prod
+                              # pre-gens reach their first owner batch at 60-75 s.
 _JOB_RETENTION       = 4 * 3600  # keep finished jobs around for ~4hr cleanup
 
 
@@ -2881,6 +2883,12 @@ def _trade_job_stalled(job, now):
     return now - last_progress > _JOB_HARD_TIMEOUT
 
 
+# Diagnostics expiry per cleanup tick: up to 20 x 500 rows (10,000 a tick,
+# 2.88M a day); one 500-row batch a tick fell behind the write rate.
+_DIAG_PURGE_MAX_BATCHES = 20
+_DIAG_PURGE_BATCH = 500
+
+
 def _cleanup_loop() -> None:
     """Background thread: evict stale sessions + stuck/old trade jobs."""
     while True:
@@ -2890,14 +2898,17 @@ def _cleanup_loop() -> None:
         # (verified, flag-on) sessions keep their durable row and rebuild on
         # the next request; unverified sessions have no row, so for them the
         # 4h idle eviction stays terminal (the squatter-window defense).
-        cutoff = time.time() - 4 * 3600
-        with _sessions_lock:
-            stale = [t for t, s in _sessions.items()
-                     if s.get("last_active", 0) < cutoff]
-            for t in stale:
-                _sessions.pop(t, None)
-        if stale:
-            log.info("Cleaned up %d stale session(s)", len(stale))
+        try:
+            cutoff = time.time() - 4 * 3600
+            with _sessions_lock:
+                stale = [t for t, s in _sessions.items()
+                         if s.get("last_active", 0) < cutoff]
+                for t in stale:
+                    _sessions.pop(t, None)
+            if stale:
+                log.info("Cleaned up %d stale session(s)", len(stale))
+        except Exception:
+            log.exception("stale-session sweep failed")
 
         # Durable session rows — rolling 90d idle expiry (read-time checks
         # in _restore_persisted_session make this purely hygienic).
@@ -2919,15 +2930,28 @@ def _cleanup_loop() -> None:
             log.warning("api-observability purge failed: %s", e)
 
         # Debug evidence is separate from durable card/outcome/valuation rows.
-        # One bounded batch per tick; failures remain visible and retry next tick.
+        # Up to _DIAG_PURGE_MAX_BATCHES bounded batches per tick (one fell
+        # behind the write rate); failures remain visible and retry next tick.
         try:
             from .database import purge_deck_diagnostics
             days = int(os.environ.get("FTF_DECK_DIAGNOSTIC_RETENTION_DAYS", "14"))
-            purged = purge_deck_diagnostics(days=days)
+            purged = purge_deck_diagnostics(days=days, batch_size=_DIAG_PURGE_BATCH,
+                                            max_batches=_DIAG_PURGE_MAX_BATCHES)
             if purged:
-                log.info("Purged %d expired deck diagnostic snapshots", purged)
+                # At the ceiling the tick can't tell whether rows are left
+                # (exactly 10,000 may have been all of them); the next says.
+                log.info("Purged %d expired deck diagnostic snapshots%s", purged,
+                         " (the tick's ceiling: more may remain)"
+                         if purged >= _DIAG_PURGE_MAX_BATCHES * _DIAG_PURGE_BATCH else "")
         except Exception:
             log.exception("deck-diagnostic retention failed")
+
+        # Deck-evidence retention (legal R28.20 (iii)): dark until
+        # deck_evidence_retention_days is set; one bounded pass per tick.
+        try:
+            _prune_deck_evidence()
+        except Exception:
+            log.exception("deck-evidence retention failed")
 
         # S8: retire the packed decks that can't be delivered again here
         # (superseded, revoked, at the 24 h cap, or about to be evicted below).
@@ -2943,36 +2967,51 @@ def _cleanup_loop() -> None:
         #       the frontend stops polling
         #   (b) finished jobs older than _JOB_RETENTION → drop entirely
         #   (c) keep _trade_jobs_by_key in sync with _trade_jobs
-        now = time.monotonic()
-        evicted = 0
-        timed_out = 0
-        with _trade_jobs_lock:
-            to_drop = []
-            for jid, job in _trade_jobs.items():
-                age = now - (job.get("finished_at") or job.get("started_at") or now)
-                if _trade_job_stalled(job, now):
-                    job["status"] = "error"
-                    job["error"]  = "timeout"
-                    job["finished_at"] = now
-                    timed_out += 1
-                if age > _JOB_RETENTION:
-                    to_drop.append(jid)
-            for jid in to_drop:
-                key = _trade_jobs[jid].get("key")
-                _note_deck_evicted(jid, _trade_jobs[jid])   # U4: an evicted_split's clock
-                _trade_jobs.pop(jid, None)
-                if key and _trade_jobs_by_key.get(key) == jid:
-                    _trade_jobs_by_key.pop(key, None)
-                evicted += 1
-        if evicted or timed_out:
-            log.info("Trade jobs swept: %d evicted, %d timed out", evicted, timed_out)
+        # Each timed-out job gets its own line (logged after the lock), so a
+        # stuck job can be told apart from a slow live one.
+        try:
+            now = time.monotonic()
+            evicted = 0
+            timed_out = []
+            with _trade_jobs_lock:
+                to_drop = []
+                for jid, job in _trade_jobs.items():
+                    age = now - (job.get("finished_at") or job.get("started_at") or now)
+                    if _trade_job_stalled(job, now):
+                        timed_out.append((jid, now - (job.get("started_at") or now),
+                                          len(job.get("cards") or [])))
+                        job["status"] = "error"
+                        job["error"]  = "timeout"
+                        job["finished_at"] = now
+                    if age > _JOB_RETENTION:
+                        to_drop.append(jid)
+                for jid in to_drop:
+                    key = _trade_jobs[jid].get("key")
+                    _note_deck_evicted(jid, _trade_jobs[jid])   # U4: an evicted_split's clock
+                    _trade_jobs.pop(jid, None)
+                    if key and _trade_jobs_by_key.get(key) == jid:
+                        _trade_jobs_by_key.pop(key, None)
+                    evicted += 1
+            for jid, since_start, cards in timed_out:
+                log.warning("trade-job %s timed out: %.0fs since start, %d cards published",
+                            jid, since_start, cards)
+            if evicted or timed_out:
+                log.info("Trade jobs swept: %d evicted, %d timed out", evicted, len(timed_out))
+        except Exception:
+            log.exception("trade-job sweep failed")
 
         # P1 first-page store: age, then the byte ceiling; flag off ⇒ untouched.
-        _evict_trade_page_store()
+        try:
+            _evict_trade_page_store()
+        except Exception:
+            log.exception("trade-page-store eviction failed")
         # ADR-025 C8: no archive purge until packing (models-lead R2.6 S2).
         # F5: undelivered deferred decks past the fresh window (only flag-on
         # jobs carry evidence).
-        _drop_stale_deck_evidence()
+        try:
+            _drop_stale_deck_evidence()
+        except Exception:
+            log.exception("stale deck-evidence drop failed")
 
         # Silent durable inventory refresh is deliberately separate from the
         # notification-bearing daily tick and weekly replenishment.
@@ -2983,8 +3022,68 @@ def _cleanup_loop() -> None:
             log.warning("prepared inventory maintenance unavailable", exc_info=True)
 
 
-if os.environ.get("FTF_DISABLE_CLEANUP_LOOP") != "1":  # tests set it (conftest); prod never does
-    threading.Thread(target=_cleanup_loop, daemon=True).start()
+def _prune_deck_evidence() -> dict:
+    """The cleanup loop's deck-evidence retention step (database.
+    purge_deck_evidence) with its two deploy-free knobs: the cap
+    (`deck_evidence_retention_days`, 0 = off) and the packed decks' full-row
+    bound (`deck_evidence_full_row_days`). Logs the counts it deleted (never
+    an id); never raises."""
+    try:
+        from .database import purge_deck_evidence
+        pruned = purge_deck_evidence(
+            days=_deck_cfg("deck_evidence_retention_days", 0.0),
+            full_row_days=_deck_cfg("deck_evidence_full_row_days", 90.0))
+        if pruned:
+            log.info("[evidence] retention pruned %s", pruned)
+        return pruned
+    except Exception:
+        log.exception("deck-evidence retention failed")
+        return {}
+
+
+
+# Long-lived background threads start in the process that SERVES requests,
+# once per pid. Render's default GUNICORN_CMD_ARGS includes --preload, so the
+# app is imported in the gunicorn master before the worker is forked, and
+# threads do not survive fork: a start at import time ran only in the master,
+# never in the worker (docs/runbook.md § "DB connections and background threads
+# across fork"). The master never serves a request.
+_bg_threads_lock = threading.Lock()
+_bg_threads_pid: int | None = None
+
+
+def _ensure_background_threads() -> None:
+    """Per process, once: start `_cleanup_loop` (skipped when
+    FTF_DISABLE_CLEANUP_LOOP=1, i.e. tests via conftest; prod never sets it),
+    then a short-lived `win-now-resume` thread that resumes queued Win Now work
+    (`start_worker_on_startup` keeps its own FTF_TEST_MODE / FTF_BUILD_MODE
+    guard and runs either way). The resume is off the request path: run inline
+    it held `_bg_threads_lock` ~49 ms, and concurrent first requests waited on
+    it. Idempotent per pid; a forked child (new pid) starts its own."""
+    global _bg_threads_pid
+    pid = os.getpid()
+    if _bg_threads_pid == pid:
+        return
+    with _bg_threads_lock:
+        if _bg_threads_pid == pid:
+            return
+        if os.environ.get("FTF_DISABLE_CLEANUP_LOOP") != "1":
+            threading.Thread(target=_cleanup_loop, name="cleanup-loop", daemon=True).start()
+        _bg_threads_pid = pid
+
+        def resume_win_now():
+            from . import win_now_service
+            try:
+                win_now_service.start_worker_on_startup(_sleeper_get)
+            except Exception:
+                log.exception("win-now worker resume failed")
+
+        threading.Thread(target=resume_win_now, name="win-now-resume", daemon=True).start()
+
+
+@app.before_request
+def _start_background_threads():
+    _ensure_background_threads()
 
 
 # ---------------------------------------------------------------------------
@@ -24483,6 +24582,38 @@ def _send_write_failed(code_prefix: str, platform: str, kind, *,
             "detail": msg, "message": msg}, 502
 
 
+# Send pre-flight budget (release-lead QA P1-A on #527, 2026-10-28). The iOS
+# client most likely gives up on a request after ~60 s idle (RN 0.81 fetch
+# leaves the XHR timeout 0, so NSURLSession's 60 s default applies), and the
+# propose routes send no bytes until the write ends. Invariant: a provider
+# write never STARTS so late that it can finish after the client gave up, or a
+# user who checks, sees nothing yet and resends gets a double send.
+# 30 = 60 − the write's 15 s timeout (`_HTTP_TIMEOUT`, backend/mfl_write.py:60
+# and backend/espn_write.py:82) − MFL's 1 s write spacing
+# (backend/mfl_write.py:65, slept inside `_issue_import`) − ~14 s margin for
+# time before the handler runs; a write that starts inside the budget ends by
+# ~46 s if it stalls at most once. urllib's 15 s timeout is per socket
+# operation (DNS is unbounded; connect and TLS are 15 s each, per resolved
+# address), so several stalls after a pre-flight near 30 s can still put the
+# request on the wire past ~60 s: the budget bounds when the write STARTS, and
+# #527's "Check before resending" covers that residual. Past it, `_mfl_propose_core` / `_espn_propose_core` skip the write
+# and answer their own "nothing was sent" read-failure response.
+_SEND_PREFLIGHT_BUDGET_S = 30
+_send_clock = time.monotonic        # tests inject a fake clock
+
+
+def _send_preflight_over_budget(t0: float, what: str) -> bool:
+    """True when a propose core that read `_send_clock()` into `t0` at entry
+    is past `_SEND_PREFLIGHT_BUDGET_S`, so it must not start the provider
+    write. Logs one WARNING line with the elapsed seconds."""
+    elapsed = _send_clock() - t0
+    if elapsed <= _SEND_PREFLIGHT_BUDGET_S:
+        return False
+    log.warning("%s: pre-flight took %.1fs, past the %ds send budget; nothing sent",
+                what, elapsed, _SEND_PREFLIGHT_BUDGET_S)
+    return True
+
+
 # Masks for provider text before it is logged (docs/integrations/espn.md §6,
 # mfl.md §6): SWID-shaped GUIDs (credential half AND member id), cookie
 # name=value pairs, then any long opaque blob (espn_s2's percent-encoded shape).
@@ -30858,6 +30989,9 @@ def _png_response(data: bytes, status: int = 200) -> "Response":
     resp.headers["Content-Type"]  = "image/png"
     resp.headers["Cache-Control"] = "public, max-age=300"
     resp.headers["Content-Length"] = str(len(data))
+    # Crawlable on purpose (robots.txt) so link unfurlers can fetch the
+    # card, but kept out of search indexes.
+    resp.headers["X-Robots-Tag"] = "noindex"
     return resp
 
 
@@ -30892,18 +31026,74 @@ def og_tier_card(pos, username):
     return _png_response(png, status=status)
 
 
-@app.route("/og/trade/<match_id>.png")
-def og_trade_card(match_id):
-    """Render a trade match's give/get + fairness as a 1200x630 PNG."""
+# ---------------------------------------------------------------------------
+# Trade share links (build O8, 2026-10-20). /s/trade/<token> and
+# /og/trade/<token>.png resolve ONLY through trade_share_tokens: a 128-bit
+# token minted by POST /api/share/trade for a participant of the match. They
+# used to take the sequential trade_matches.id, so walking the ids exposed
+# every mutual match. Every miss (a numeric id, an unknown, revoked or
+# malformed token, an orphaned match) gets ONE generic "expired" page / PNG,
+# status 200, identical bytes and headers, so a miss can't be told from an
+# expired link and old numeric links unfurl cleanly instead of looking
+# broken. No per-IP GET limiter (head-eng ruling): the token space is the
+# defence. Tokens are bearer secrets — never log one.
+# ---------------------------------------------------------------------------
+
+from .database import (  # noqa: E402
+    create_trade_share_token, resolve_trade_share_token,
+    TradeShareRateLimited,
+)
+
+# token_urlsafe(16) → exactly 22 chars of the URL-safe base64 alphabet.
+_TRADE_SHARE_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{22}")
+
+
+def _resolve_trade_share(token) -> dict | None:
+    """The trade_matches row a live share token points at, else None."""
+    if not isinstance(token, str) or not _TRADE_SHARE_TOKEN_RE.fullmatch(token):
+        return None
+    try:
+        return resolve_trade_share_token(token)
+    except Exception as e:
+        # The type only: a DB error's text carries its bound parameters,
+        # which here is the token.
+        log.warning("trade share lookup failed: %s", type(e).__name__)
+        return None
+
+
+@app.route("/og/trade/<token>.png")
+def og_trade_card(token):
+    """Render a shared trade's give/get card as a 1200x630 PNG (no fairness number since #511).
+
+    A hit renders from the row the token resolves to; every miss returns
+    the same generic "expired" PNG, status 200.
+    """
     if _og_image is None:
         return _og_unavailable_response()
+    match = _resolve_trade_share(token)
+    if match is None:
+        return _png_response(_og_image.render_expired_trade_card())
     try:
-        png, status = _og_image.render_trade_card(match_id)
+        png, status = _og_image.render_trade_card(match)
     except Exception as e:
-        log.error("og_trade_card error (%s): %s", match_id, e)
+        log.error("og_trade_card error (match %s): %s", match.get("id"), e)
         png = _og_image.render_placeholder_card("Share card unavailable", str(e)[:80])
         status = 500
     return _png_response(png, status=status)
+
+
+def _absolute_url(path: str) -> str:
+    """Absolutise a root-relative path ("/og/...") against this request's host.
+
+    Link unfurlers (iMessage, Slack, X, Discord) need an absolute og:image.
+    Render terminates TLS and there is no ProxyFix, so `request.scheme`
+    reads "http" there — deployed envs are forced to https. X-Forwarded-*
+    headers are deliberately not consulted.
+    """
+    if not path.startswith("/"):
+        return path
+    scheme = "https" if _IS_PROD_ENV else request.scheme
+    return f"{scheme}://{request.host}{path}"
 
 
 def _share_html(
@@ -30921,23 +31111,28 @@ def _share_html(
         return (s or "").replace("&", "&amp;").replace("<", "&lt;") \
                          .replace(">", "&gt;").replace('"', "&quot;")
 
+    # Unfurlers need an absolute image URL; the visible <img> stays relative.
+    og_image_url = _absolute_url(image_url)
+
     html = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{esc(title)} · Fantasy Trade Finder</title>
+  <title>{esc(title)} · Fleeced: Dynasty Trade Finder</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
   <meta name="description" content="{esc(description)}">
   <meta property="og:type" content="website">
   <meta property="og:title" content="{esc(title)}">
   <meta property="og:description" content="{esc(description)}">
-  <meta property="og:image" content="{esc(image_url)}">
+  <meta property="og:image" content="{esc(og_image_url)}">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{esc(title)}">
   <meta name="twitter:description" content="{esc(description)}">
-  <meta name="twitter:image" content="{esc(image_url)}">
+  <meta name="twitter:image" content="{esc(og_image_url)}">
+  <link rel="stylesheet" href="/css/tokens.css">
   <style>
     body{{margin:0;background:#0f1322;color:#f5f7fc;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
          min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}}
@@ -30949,7 +31144,10 @@ def _share_html(
     .cta{{display:inline-block;background:#6eb4ff;color:#0f1322;padding:14px 28px;
           border-radius:999px;font-weight:600;text-decoration:none;}}
     .cta:hover{{background:#8cc6ff;}}
-    .brand{{margin-top:36px;color:#6b7a9a;font-size:13px;}}
+    .brand{{margin-top:36px;color:var(--chalk-dim);font-size:13px;}}
+    .legal-links {{ margin-top: 8px; font-size: 13px; color: var(--chalk-faint); }}
+    .legal-links a {{ color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }}
+    .legal-links a:hover {{ text-decoration-color: var(--ice); }}
   </style>
 </head>
 <body>
@@ -30958,13 +31156,15 @@ def _share_html(
     <h1>{esc(title)}</h1>
     <p>{esc(description)}</p>
     <a class="cta" href="{esc(cta_url)}">{esc(cta_text)}</a>
-    <div class="brand">Fantasy Trade Finder</div>
+    <div class="brand">Fleeced: Dynasty Trade Finder</div>
+    <div class="legal-links"><a href="/privacy">Privacy</a></div>
   </div>
 </body>
 </html>"""
     resp = make_response(html)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
     resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["X-Robots-Tag"] = "noindex"
     return resp
 
 
@@ -30998,12 +31198,27 @@ def share_tiers_page(pos, username):
     )
 
 
-@app.route("/s/trade/<match_id>")
-def share_trade_page(match_id):
-    """HTML wrapper with OG tags for a trade verdict share link."""
+@app.route("/s/trade/<token>")
+def share_trade_page(token):
+    """HTML wrapper with OG tags for a trade verdict share link.
+
+    A hit renders the trade page; every miss renders the one generic,
+    noindex "expired" page (status 200). Its og:image is a fixed miss URL
+    so the unfurl shows the generic PNG too. The words live in og_image.
+    """
+    if _og_image is None:
+        return _og_unavailable_response()
+    if _resolve_trade_share(token) is None:
+        return _share_html(
+            title=_og_image.TRADE_LINK_EXPIRED_TITLE,
+            description=_og_image.TRADE_LINK_EXPIRED_BODY,
+            image_url="/og/trade/expired.png",
+            cta_text="Find your next trade",
+            cta_url="/",
+        )
     title = "Trade Match"
-    description = "A dynasty fantasy trade — see the give/get breakdown and fairness verdict."
-    image_url = f"/og/trade/{match_id}.png"
+    description = "A dynasty fantasy trade. See the give/get breakdown."
+    image_url = f"/og/trade/{token}.png"
     return _share_html(
         title=title,
         description=description,
@@ -31017,7 +31232,7 @@ def share_trade_page(match_id):
 # Share landing for arbitrary packages (teardown S7 PRD-01 follow-up,
 # flag `growth.share_landing`; W2B handoff).
 #
-# /s/trade/<match_id> only works for MUTUAL matches (a trade_matches row).
+# /s/trade/<token> only works for MUTUAL matches (a trade_matches row).
 # Calculator builds and liked-but-unmatched trades previously fell back to
 # the bare site root. This trio gives them a real landing object:
 #   POST /api/share/package  (session-authed, rate-limited) → /s/p/<id>
@@ -31096,6 +31311,73 @@ def create_share_package_route():
     return jsonify({"error": "store_failed"}), 500
 
 
+_TRADE_SHARE_HOURLY_LIMIT = 30   # mints per user — abuse guard (head-eng ruling)
+_TRADE_SHARE_MATCH_ID_MAX = 2**31 - 1   # trade_matches.id is int4 on Postgres
+
+
+def _share_trade_match_id(raw) -> int | None:
+    """A positive int (or a string of ASCII digits) in int4 range, else None.
+    Out-of-range values are refused here so Postgres never errors on them —
+    an error would answer differently from the 404 every other miss gets."""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, str) and re.fullmatch(r"[0-9]{1,10}", raw):
+        raw = int(raw)
+    if isinstance(raw, int) and 0 < raw <= _TRADE_SHARE_MATCH_ID_MAX:
+        return raw
+    return None
+
+
+@app.route("/api/share/trade", methods=["POST"])
+@_gate_unverified_write
+def create_share_trade_route():
+    """POST /api/share/trade — mint (or return) the caller's share token for a
+    mutual match (build O8). 404 while `growth.share_landing` is dark.
+
+    Body: {"match_id": <int>}
+    → {ok, token, url: "/s/trade/<token>", og_image: "/og/trade/<token>.png"}
+
+    Only a party to the match can mint, by the predicate every match route
+    uses (session user_id == user_a_id or user_b_id). A non-participant, a
+    missing match and a malformed id all get the same 404 not_found, so the
+    route can't be used to probe ids. Idempotent per (match, sharer): a
+    re-share returns the caller's live token and never counts against the
+    hourly limit; only a new mint does (one transaction in the helper). Demo
+    sessions are refused, as on /api/share/package.
+    """
+    if not is_enabled("growth.share_landing"):
+        return jsonify({"error": "not_found"}), 404
+    sess = _require_session()
+    user_id = str(sess.get("user_id") or "")
+    if sess.get("is_demo") or user_id.startswith("demo_user_"):
+        return jsonify({"error": "demo_session"}), 400
+
+    body = request.get_json(force=True, silent=True)
+    match_id = _share_trade_match_id(body.get("match_id") if isinstance(body, dict) else None)
+    if match_id is None:
+        return jsonify({"error": "not_found"}), 404
+
+    try:
+        token = create_trade_share_token(match_id, user_id,
+                                         hourly_limit=_TRADE_SHARE_HOURLY_LIMIT)
+    except TradeShareRateLimited:
+        return jsonify({"error": "rate_limited",
+                        "message": "Too many shares — try again later."}), 429
+    except Exception as e:
+        # The type only: a DB error's text carries the INSERT's bound
+        # parameters, the new token among them.
+        log.error("share/trade: could not mint a token for %s: %s", user_id, type(e).__name__)
+        return jsonify({"error": "store_failed"}), 500
+    if token is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({
+        "ok": True,
+        "token": token,
+        "url": f"/s/trade/{token}",
+        "og_image": f"/og/trade/{token}.png",
+    })
+
+
 @app.route("/s/p/<short_id>")
 def share_package_page(short_id):
     """Public OG landing page for a shared package (flag growth.share_landing)."""
@@ -31111,8 +31393,7 @@ def share_package_page(short_id):
     n = len(pkg["give_ids"]) + len(pkg["receive_ids"])
     return _share_html(
         title="Trade Package",
-        description=(f"A {n}-player dynasty trade package — see the give/get "
-                     "breakdown and fairness read."),
+        description=f"A {n}-player dynasty trade package. See the give/get breakdown.",
         image_url=f"/og/p/{short_id}.png",
         cta_text="Build your own trade",
         cta_url="/",
@@ -38216,6 +38497,7 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     byte-identical; on that path these re-checks are no-ops. Extracted
     2026-09-07 exactly the way `_sleeper_propose_core` was.
     """
+    _t0 = _send_clock()      # the send pre-flight budget starts here
     if _TEST_MODE:
         return {"error": "test_mode_propose_disabled"}, 599
     if not is_enabled("trade.send_in_mfl"):
@@ -38431,6 +38713,11 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
     _proposal_event_id = proposal_event_id
+    # Pre-flight budget (`_SEND_PREFLIGHT_BUDGET_S`): crosswalk, host and the
+    # I-2 reads can take ~60 s here, so a slow pre-flight skips the write (and
+    # its spacing sleep) rather than land a trade after the client gave up.
+    if _send_preflight_over_budget(_t0, "mfl propose"):
+        return _read_failed()
     try:
         result = _mfl_write.propose_trade(cookie, host, year, req)
     except _mfl_write.MflWriteAuthError as e:
@@ -38814,6 +39101,7 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     `espn_pick_unsupported`); the overhaul refuses them earlier, at
     prepare-send, so nothing is half-sent.
     """
+    _t0 = _send_clock()      # the send pre-flight budget starts here
     if _TEST_MODE:
         return {"error": "test_mode_propose_disabled"}, 599
     if not is_enabled("espn.send"):
@@ -39013,6 +39301,12 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
     _proposal_event_id = proposal_event_id
+    # Pre-flight budget (`_SEND_PREFLIGHT_BUDGET_S`): ESPN's whole send is
+    # ~45 s at worst today (crosswalk 15 + league read 15 + write 15), under
+    # the client's ~60 s, so this rarely trips; it keeps the invariant if a
+    # pre-flight read is added here later.
+    if _send_preflight_over_budget(_t0, "espn propose"):
+        return _read_failed()
     try:
         result = _espn_write.propose_trade(espn_s2, swid, req)
     except _espn_write.EspnWriteAuthError as e:
@@ -39294,8 +39588,8 @@ _install_win_now(app, require_session=_require_initialized_session,
                  read_denial=_verified_read_denial, write_denial=_verified_write_denial,
                  active_format=_active_format, league_user_id=_league_user_id,
                  pool_provider=_get_universal_pool, fetch_json=_sleeper_get)
-from . import win_now_service as _win_now_service
-_win_now_service.start_worker_on_startup(_sleeper_get)
+# Queued Win Now work resumes per serving process from _ensure_background_threads,
+# never at import (under --preload that would run in the gunicorn master).
 
 # Team overhaul (docs/plans/team-overhaul/BUILD-CONTRACT.md §3) — same seam
 # as Win Now: routes live in overhaul_api, server-private helpers are injected.
