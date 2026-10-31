@@ -21,8 +21,9 @@ import type { Tier } from '../shared/types';
 
 // Share-as-image (DynastyDealer teardown 2026-07-26, polish item 5): render
 // a clean Chalkline share card of the trade — caption + both sides with
-// values + verdict + a "Dynasty Trade Finder" wordmark AND the share URL —
-// to a PNG (react-native-view-shot) and hand it to the native share sheet.
+// tiers (picks: values) + "Package value" (C2) + a "Dynasty Trade Finder"
+// wordmark AND the share URL — to a PNG (react-native-view-shot) and hand it
+// to the native share sheet.
 //
 // audit P1-1: the card used to carry no link at all, so a recipient of the
 // screenshot had nothing to type. Every artifact this component produces
@@ -248,7 +249,7 @@ export default function ShareTradeImage(props: Props) {
           {sideBlock(props.sendTitle, props.sendAssets)}
           <View style={styles.divider} />
           {sideBlock(props.receiveTitle, props.receiveAssets)}
-          <Text style={styles.verdict}>{props.verdictLine}</Text>
+          <Text style={styles.valueLine}>{props.verdictLine}</Text>
           {/* P1-1 — the footer mirrors the server's own OG card footer
               (backend/og_image.py _draw_footer) so the two artifacts read
               as one product, and so a screenshot has somewhere to go. */}
@@ -288,7 +289,7 @@ const styles = StyleSheet.create({
   assetValue: { ...type.data, color: chalk.base },
   tierSlot: { alignSelf: 'center' },
   divider: { height: 1, backgroundColor: ink.line },
-  verdict: { ...type.title, color: chalk.base, textAlign: 'center' },
+  valueLine: { ...type.title, color: chalk.base, textAlign: 'center' },
   // The card's own gap is space.md; the wordmark and the URL are one block,
   // so they sit tighter than that and read as a single footer.
   footer: { gap: 2, alignItems: 'stretch' },

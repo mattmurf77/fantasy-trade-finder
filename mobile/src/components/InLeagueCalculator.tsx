@@ -1571,7 +1571,7 @@ export default function InLeagueCalculator({
               renders above the verdict (see the D-303-1 comment there).
               Share + Clear deliberately stay here. */}
           {/* Share-as-image (DynastyDealer teardown 2026-07-26): render the
-              verdict to a PNG for the native share sheet; text fallback. */}
+              trade to a PNG for the native share sheet; text fallback. */}
           {bothSides && ev ? (
             <ShareTradeImage
               caption={`vs @${opponent?.username ?? 'them'} · ${FORMAT_LABEL[format]}`}

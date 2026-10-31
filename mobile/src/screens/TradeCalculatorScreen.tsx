@@ -620,7 +620,8 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
   const liveReady = !!valuesQuery.data;
 
   // Share-as-image (DynastyDealer teardown 2026-07-26) — live mode only:
-  // the share card needs a server verdict and the pool's names/positions.
+  // shown once the server's evaluation has loaded; the card needs the pool's
+  // names/positions (it states no verdict, C2).
   const liveShareAssets = (ids: string[]): ShareAsset[] =>
     ids
       .map((id) => livePlayerById[id])
@@ -1013,7 +1014,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
               <Button label="Share trade" variant="secondary" onPress={shareTrade} />
             ) : null}
             {/* Share-as-image (DynastyDealer teardown 2026-07-26): PNG of
-                the verdict card via the native sheet; text fallback. */}
+                the trade card via the native sheet; text fallback. */}
             {bothSides && evalQuery.data ? (
               <ShareTradeImage
                 caption={`Trade idea · ${FORMATS.find((f) => f.key === format)?.label ?? ''}`}

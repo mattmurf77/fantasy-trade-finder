@@ -31,13 +31,24 @@
   - in each `<ShareTradeImage … />` element and in the calculator's `shareTrade` text, no verdict / win / board / ratio / consensus-total string and no verdict function remain, and each states `SHARE_VALUE_LINE`.
   - **Against main's share code it fails 19 checks.**
 - [x] **Unit tests:** none. This is a client-only copy removal; the guard covers it.
-- [x] **Before/after renders** (for the operator's design approval): `renders/calculator-before-after.png` and `renders/in-league-before-after.png`, the latter against a diverging opponent. They're Pillow mocks of `ShareTradeImage`'s layout in the Chalkline tokens and the card's fonts, not device captures (D-056).
-- [x] **Manual TestFlight checklist** (operator, on the 11-06 binary):
-  1. Calculator (live, both sides filled) → **Share image**: the card shows the two sides with tier badges and then "Package value". No TOTAL rows, no "Verdict", no "%".
-  2. In the same state, turn image capture off (or on Android) → the text fallback reads "Trade idea (…)", "Side A: …", "Side B: …", "Package value", and nothing else.
-  3. Calculator → **Share** (the text button) → the same three lines plus "Package value", and a "Build your own" link when share landing is on. No "Consensus:", "ratio" or "Verdict".
-  4. In-league calculator, against an opponent whose board diverges from yours (a "Wins by my board" or "@opp wins" verdict on screen) → **Share image**: the card says "Package value", never a win or board line. The on-screen verdict is unchanged.
-  5. The in-league text fallback reads "Trade idea vs @opp (…)", "I send: …", "I get: …", "Package value".
+- [x] **Before/after renders** (for the operator's design OK): `renders/calculator-before-after.png`, and `renders/in-league-before-after.png` against a diverging opponent. They're mocks, not device captures (D-056). `renders/render.py` draws them from the code:
+  - the layout of `ShareTradeImage`, with main's TOTAL rows in the before pane;
+  - `TierBadge`'s pick-value ladder labels ("2 1sts", "1 1st", …; `type.label` uppercases them on the device), drawn in `chalk.base` with a 1px border in the tier's colour;
+  - `PositionChip` the same way, with a pick's border in `ink.lineStrong`; a pick shows its number;
+  - the wordmark, then the URL footer;
+  - the Chalkline tokens and the card's own fonts.
+  The first version drew cyan "ELITE" / "STARTER" badges and no URL footer (release-lead's #566 QA P2-2). Redrawn.
+- [x] **Manual TestFlight checklist** (operator, on the 11-06 binary). There's no image-capture toggle on an iPhone: the text fallback is the message body sent with the image (`ShareTradeImage.tsx:150`), so steps 2 and 5 read it in Messages.
+  1. **Calculator** (live, both sides filled, a pick on one side) → **Share image**. The card shows:
+     - the two sides, players with their tier badges and the pick with its number;
+     - then "Package value", then the "Dynasty Trade Finder" wordmark and the URL footer;
+     - no TOTAL rows, no "Verdict", no "%".
+     The on-screen verdict card is unchanged.
+  2. **In step 1's share sheet, pick Messages and read the text body.** It's exactly 4 lines, "Trade idea (…)", "Side A: …", "Side B: …", "Package value", then the link. No Consensus, ratio, Verdict, win or board line.
+  3. **Calculator → Share** (the text button). The message is the same 4 lines, then "Build your own: <link>" when share landing is on. No "Consensus:", "ratio" or "Verdict".
+     - The link's preview still says "% fair" until #511 is live. That's #511's, not C2's.
+  4. **In-league calculator**, against an opponent whose board diverges from yours (a "Wins by my board" or "@opp wins" verdict on screen) → **Share image**. The card says "Package value", never a win or board line, with the wordmark and the URL footer. The on-screen verdict is unchanged.
+  5. **In step 4's share sheet, pick Messages and read the text body.** It's exactly 4 lines, "Trade idea vs @opp (…)", "I send: …", "I get: …", "Package value", then the link. No Consensus, ratio, Verdict, win or board line.
 - `testID`s added/renamed: none.
 
 ## 4. Docs scope
