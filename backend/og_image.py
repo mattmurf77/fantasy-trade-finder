@@ -592,9 +592,13 @@ def _render_trade_card_png(
     pick_labels: Optional[dict] = None,
 ) -> bytes:
     pick_labels = pick_labels or {}
-    # The bar needs all three: the basis line names the format and the date
-    # (legal R28.24 #1), so a verdict without them draws no bar.
-    bar = verdict is not None and bool(as_of) and bool(scoring_format)
+    # The bar needs all four: the basis line names the format and the date
+    # (legal R28.24 #1), and the +/-2nd ticks need the snapshot's
+    # `second_in_firsts`. There is no default fraction: a verdict without a
+    # valid one draws no bar, never a tick from a stale constant.
+    second_in_firsts = (verdict or {}).get("second_in_firsts")
+    bar = (verdict is not None and bool(as_of) and bool(scoring_format)
+           and valid_second_in_firsts(second_in_firsts))
     img = _new_canvas()
     draw = ImageDraw.Draw(img)
 
@@ -684,7 +688,7 @@ def _render_trade_card_png(
     render_side(right_x, col_top, receive_ids)
 
     if bar:
-        _draw_value_bar(draw, verdict, as_of, scoring_format)
+        _draw_value_bar(draw, verdict, as_of, scoring_format, second_in_firsts)
 
     _draw_footer(draw, font_small)
     return _to_png_bytes(img)
@@ -709,12 +713,6 @@ def _render_trade_card_png(
 
 PICK_CHIP_LABEL = "PK"
 PICK_CHIP_FILL = (151, 161, 174)    # chalk-dim: neutral, never a position hex
-
-# TradeValueBar.tsx's static tick constant. FALLBACK ONLY, for a verdict
-# that carries no `second_in_firsts`: it has drifted from the generic-pick
-# values (a Mid 2nd is ~0.29 of a Mid 1st today), and on the card a fill
-# ending on "2nd" under "a Late 1st" contradicts itself.
-APP_SECOND_IN_FIRSTS = 0.57
 
 VB_X0, VB_X1 = 60, CARD_W - 60      # track x 60-1140
 VB_MID = (VB_X0 + VB_X1) // 2       # 600: even
@@ -812,10 +810,18 @@ def _basis_line(draw, font, scoring_format: str, as_of: str) -> str:
     return basis
 
 
-def _draw_value_bar(draw, verdict: dict, as_of: str, scoring_format: str) -> None:
+def valid_second_in_firsts(value) -> bool:
+    """A usable +/-2nd tick fraction: a real number with 0 < value < 1."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and 0 < value < 1)
+
+
+def _draw_value_bar(draw, verdict: dict, as_of: str, scoring_format: str,
+                    second_in_firsts: float) -> None:
     """The bar in the band between the panels (bottom y=375 with the bar)
     and the footer rule (y=560): label line y=398, track y 452-470, scale
-    labels y=488, basis and date line y=518."""
+    labels y=488, basis and date line y=518. `second_in_firsts` (required,
+    from the snapshot) places the +/-2nd ticks."""
     f_label = _load_font(30, bold=True)
     f_basis = _load_font(20)
     f_scale = _load_font(18)
@@ -848,9 +854,6 @@ def _draw_value_bar(draw, verdict: dict, as_of: str, scoring_format: str) -> Non
             box = [VB_MID - length, ty0, VB_MID, ty1]
         draw.rounded_rectangle(box, radius=3,
                                fill=SEMANTIC_POS if leans_get else SEMANTIC_WARN)
-    second_in_firsts = verdict.get("second_in_firsts")
-    if not isinstance(second_in_firsts, (int, float)) or not 0 < second_in_firsts < 1:
-        second_in_firsts = APP_SECOND_IN_FIRSTS
     sec = round(second_in_firsts * VB_HALF)
     for tx in (VB_MID - sec, VB_MID + sec):
         draw.rectangle([tx - 1, ty0 - VB_TICK_OVERHANG, tx, ty1 + VB_TICK_OVERHANG],

@@ -1762,7 +1762,7 @@ The og share card (`/og/trade/<token>.png`, `/og/p/<short_id>.png`) and its shar
 | `format` | `1qb_ppr` \| `sf_tep` |
 | `league_id` | the match's league (trade shares); null for packages |
 | `computed_at` | ISO UTC mint time; the card's date is its UTC date |
-| `second_in_firsts` | Mid 2nd / Mid 1st over the generic-pick values at mint: where the ±2nd ticks go |
+| `second_in_firsts` | Mid 2nd / Mid 1st over the generic-pick values at mint: where the ±2nd ticks go. Required, a number with 0 < x < 1; there is no default fraction, so a snapshot without a valid one is malformed and draws no bar |
 | `pool.snapshot` | `roster_snapshot`'s `vsn1` for (format, league): a hash of the consensus seed and the league's pick rows that priced it |
 | `pool.version` | the pricing that produced it: `evaluate-mode-a/<stud-tax mode>/<pick-pricing mode>`, today `evaluate-mode-a/market/market_slots` |
 

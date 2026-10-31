@@ -691,24 +691,59 @@ def test_a_mid_2nd_fill_ends_at_the_drawn_2nd_tick(world):
     assert abs(fill[2] - right_tick) <= 20, (fill, right_tick)
 
 
-def test_ticks_fall_back_to_the_apps_constant_without_the_fraction():
+_MISSING = object()
+BAD_FRACTIONS = pytest.mark.parametrize(
+    "bad", [_MISSING, 0, 1, "0.287"], ids=["missing", "zero", "one", "string"])
+
+
+@BAD_FRACTIONS
+def test_a_snapshot_without_a_valid_second_in_firsts_draws_no_bar(world, bad):
+    """There is no default tick fraction (#567 moved the app's to ~0.287; a
+    stale 0.57 would put a Late 1st on the 2nd tick). A snapshot whose
+    second_in_firsts is missing, 0, 1 or a string is malformed: the card is
+    the #511 no-bar card, byte for byte, and the page uses the fallback
+    lines."""
+    give, recv = LEAN_GET
+    tok = _share(world, give, recv)
+    snap = json.loads(_token_snapshot(tok))
+    if bad is _MISSING:
+        snap.pop("second_in_firsts")
+    else:
+        snap["second_in_firsts"] = bad
+    raw = json.dumps(snap)
+    t = db_module.trade_share_tokens_table
+    with db_module.engine.begin() as conn:
+        conn.execute(t.update().where(t.c.token == tok).values(value_snapshot=raw))
+    assert server._value_bar_from_snapshot(raw) is None
+
+    r, calls = _spied(world, f"/og/trade/{tok}.png")
+    assert not _has_track(calls)
+    assert r.data == _legacy_card(give, recv)
+    assert [xy for xy, text, _ in _texts(calls) if text == "Trade Match"] == [(60, 85)]
+    assert _panels(calls) == [(175, 455), (175, 455)]
+    page = world.get(f"/s/trade/{tok}").get_data(as_text=True)
+    assert _meta(page, "name", "description") == TRADE_NO_BAR
+    assert _meta(page, "property", "og:image:alt") == "Trade card: the give/get breakdown."
+
+
+@BAD_FRACTIONS
+def test_the_renderer_has_no_default_tick_fraction(bad):
+    """The renderer itself draws no bar for a verdict without a valid
+    second_in_firsts, rather than ticks from a stale constant."""
     players = {"p1": {"full_name": "Pat One", "position": "WR"},
                "p2": {"full_name": "Sam Two", "position": "RB"}}
-    verdict = {"favors": "receive",
-               "gap": {"firsts": 0.5, "pick_equivalent": None}}
-    calls = []
-    cls = og_image.ImageDraw.ImageDraw
-    real = cls.rectangle
-
-    def spy(self, *a, **kw):
-        calls.append(("rectangle", a, kw))
-        return real(self, *a, **kw)
-    with patch.object(cls, "rectangle", spy):
-        og_image._render_trade_card_png(["p1"], ["p2"], players, verdict=verdict,
-                                        as_of=AS_OF, scoring_format="1qb_ppr")
-    sec = round(og_image.APP_SECOND_IN_FIRSTS * 540)
-    assert og_image.APP_SECOND_IN_FIRSTS == 0.57 and sec == 308
-    assert _tick_xs(calls) == [600 - sec, 600 + sec]
+    verdict = {"favors": "receive", "gap": {"firsts": 0.5, "pick_equivalent": None}}
+    plain = og_image._render_trade_card_png(["p1"], ["p2"], players)
+    with_bar = og_image._render_trade_card_png(
+        ["p1"], ["p2"], players, verdict={**verdict, "second_in_firsts": SECOND_IN_FIRSTS},
+        as_of=AS_OF, scoring_format="1qb_ppr")
+    assert with_bar != plain                      # the control: a valid fraction draws
+    if bad is not _MISSING:
+        verdict["second_in_firsts"] = bad
+    assert og_image._render_trade_card_png(
+        ["p1"], ["p2"], players, verdict=verdict,
+        as_of=AS_OF, scoring_format="1qb_ppr") == plain
+    assert not hasattr(og_image, "APP_SECOND_IN_FIRSTS")
 
 
 # ---------------------------------------------------------------------------

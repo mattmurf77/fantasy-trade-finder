@@ -31260,7 +31260,9 @@ def _value_bar_from_snapshot(raw) -> dict | None:
     """{verdict, as_of, scoring_format} for the renderer from a share row's
     `value_snapshot`, or None (no bar) for NULL or anything malformed. Reads
     the snapshot only: it never prices. `as_of` is `computed_at`'s UTC date,
-    the day the values were computed."""
+    the day the values were computed. `second_in_firsts` is required (a
+    number with 0 < x < 1): the ticks have no default fraction, so a
+    snapshot without one is malformed."""
     if not raw:
         return None
     try:
@@ -31268,10 +31270,11 @@ def _value_bar_from_snapshot(raw) -> dict | None:
         if not isinstance(snap, dict) or snap.get("v") != 1:
             return None
         favors, firsts, label = snap["favors"], snap["firsts"], snap.get("label")
-        fmt = snap["format"]
+        fmt, second_in_firsts = snap["format"], snap.get("second_in_firsts")
         if (favors not in _SNAPSHOT_FAVORS or fmt not in _SHARE_BAR_FORMATS
                 or isinstance(firsts, bool) or not isinstance(firsts, (int, float))
-                or firsts < 0 or not (label is None or isinstance(label, str))):
+                or firsts < 0 or not (label is None or isinstance(label, str))
+                or not _og_image.valid_second_in_firsts(second_in_firsts)):
             return None
         computed = datetime.fromisoformat(snap["computed_at"])
         if computed.tzinfo is None:
@@ -31282,7 +31285,7 @@ def _value_bar_from_snapshot(raw) -> dict | None:
     return {"verdict": {"favors": favors,
                         "gap": {"firsts": firsts,
                                 "pick_equivalent": {"label": label} if label else None},
-                        "second_in_firsts": snap.get("second_in_firsts")},
+                        "second_in_firsts": second_in_firsts},
             "as_of": as_of, "scoring_format": fmt}
 
 
