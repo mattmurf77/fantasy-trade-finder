@@ -190,7 +190,11 @@ import SwapSuggestSheet from '../components/SwapSuggestSheet';
 import { getProgress } from '../api/rankings';
 import { track, msSinceOpen } from '../api/events';
 import { ApiError, gateSignalFor, getBaseUrl } from '../api/client';
-import { resolveShareUrl } from '../utils/shareLinks';
+import {
+  resolveShareUrl,
+  resolveTradeShareUrl,
+  TRADE_SHARE_PACKAGE_TIMEOUT_MS,
+} from '../utils/shareLinks';
 import { useInterruptSlot, useMutedDuringTour, useInterruptCoordinator } from '../state/useInterruptCoordinator';
 // #393 M2 — the paywall's deck pieces (the offer trigger, the preview end card).
 import { useEntitlements } from '../state/useEntitlements';
@@ -6514,10 +6518,13 @@ export default function TradesScreen({ navigation, route }: any) {
     const ref = user?.username ? `ref=${encodeURIComponent(user.username)}` : '';
     let landing = false;
     let url: string;
+    // O8: a mutual match shares a server-minted /s/trade/<token> link; null
+    // (mint failed) falls through to the package rung below, then the root.
+    const tradeUrl = shareLandingOn && matchId ? await resolveTradeShareUrl(matchId) : null;
     if (!shareLandingOn) {
       url = 'https://fantasy-trade-finder.onrender.com';
-    } else if (matchId) {
-      url = `${getBaseUrl()}/s/trade/${matchId}${ref ? `?${ref}` : ''}`;
+    } else if (tradeUrl) {
+      url = `${tradeUrl}${ref ? `?${ref}` : ''}`;
       landing = true;
     } else {
       const resolved = await resolveShareUrl({
@@ -6529,6 +6536,8 @@ export default function TradesScreen({ navigation, route }: any) {
         surface: 'trades_liked',
         hasPickAssets:
           c.give_players.some(isPickAsset) || c.receive_players.some(isPickAsset),
+        // A trade mint already failed (matchId): bound this rung too.
+        timeoutMs: matchId ? TRADE_SHARE_PACKAGE_TIMEOUT_MS : undefined,
         onOutcome: (outcome, give_n, receive_n) =>
           track(
             'share_package_created',
