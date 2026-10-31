@@ -714,7 +714,7 @@ If these stop firing, queued pushes pile up in `notification_queue` and digests/
 - **Reading the log:** Render logs for `srv-d7g37ftckfvc73a32gvg`, 13:30–14:30 UTC, search `daily-tick step=`:
   ```
   daily-tick step=<key> ms=<int> outcome=<ok|skipped|error> detail=<short>
-  daily-tick done ms=<int> steps=9 errors=<k>
+  daily-tick done ms=<int> steps=10 errors=<k>
   ```
   - One line per step, in order 1→9, then one `done` line. `ms` is that step's wall time.
   - `skipped` = its gate was closed; `detail` says which (`flag off`, `weekday_gate=N`, `busy`, `in_flight`, `prod_env=False …`), or `deferred: C2` for step 7.
@@ -722,7 +722,7 @@ If these stop firing, queued pushes pile up in `notification_queue` and digests/
   - `detail` carries what the response used to: the re-engagement counters, the roster sweep stats, the usage summary, the grading summary, the refit status. Replenish `eligible/generated/pushed/skipped_done/errors` come back only once step 7 is re-enabled.
   - `daily-tick: a run is already in flight (started Ns ago)` = a second POST arrived while a run was still going; it answered `started: false` and started nothing.
 - **Liveness checks** (the first full UTC day after deploy, and again after the first Wednesday):
-  1. Render logs, 13:30–14:30 UTC: `POST /api/cron/daily-tick` returns **202** and there is **no** `WORKER TIMEOUT`; nine `daily-tick step=` lines appear in order 1→9, then `daily-tick done`; note every `ms=` value.
+  1. Render logs, 13:30–14:30 UTC: `POST /api/cron/daily-tick` returns **202** and there is **no** `WORKER TIMEOUT`; ten `daily-tick step=` lines appear in order 1→10, then `daily-tick done`; note every `ms=` value.
   2. Roster history (from Tuesday on, the weekday gate): `SELECT source, count(*), max(snapshot_at) FROM league_roster_history GROUP BY 1` shows `weekly` rows with a `snapshot_at` in this ISO week (§ roster-snapshot monitoring below).
   3. Usage Trends (from the first tick after Sleeper rolls `week`): `SELECT season, week, team_count, fetched_at FROM usage_week_loads ORDER BY season, week` shows the just-finished week with 26–32 teams and today's `fetched_at`, not a hand load.
   4. Value snapshots (hourly-tick guard, not a daily-tick step, but confirms the worker is no longer restarted daily): `player_value_history` has rows for today's UTC date.
