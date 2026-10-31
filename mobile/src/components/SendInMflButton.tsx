@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useSyncExternalStore } from 'react';
 import { Alert, Linking, ViewStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Button from './chalkline/Button';
@@ -10,11 +10,13 @@ import { getMflLinkStatus, proposeTradeToMfl } from '../api/sendInMfl';
 import { validateTradeSend } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
 import { isSendOutcomeUnknown } from '../api/sendOutcome';
+import { beginSend, getSendRecord, settleSend, subscribeSends, tradeSendKey } from '../api/sendRegistry';
 import {
   SEND_NOT_SENT_TITLE,
   SEND_OUTCOME_UNKNOWN_TITLE,
   sendNotSentFallback,
   sendOutcomeUnknownBody,
+  sendOutcomeUnknownMessage,
 } from '../utils/sendOutcomeCopy';
 import type { SendSurface } from '../utils/tradeText';
 
@@ -70,7 +72,8 @@ interface Props {
   sendPreCheck?: (resume: () => void) => boolean;
 }
 
-type State = 'idle' | 'checking' | 'sending' | 'sent';
+// The pre-send checks only. Sending / sent live in api/sendRegistry.ts.
+type State = 'idle' | 'checking';
 
 export default function SendInMflButton({
   leagueId,
@@ -89,6 +92,12 @@ export default function SendInMflButton({
   const enabled = useFlag('trade.send_in_mfl');
   const navigation = useNavigation<any>();
   const [state, setState] = useState<State>('idle');
+  // This trade's send, from the registry (api/sendRegistry.ts), so it
+  // survives a remount: leave and reopen the trade during the wait and the
+  // button still says "Sending…". It re-renders when the send settles; the
+  // result alert is shown once, by the doPropose call that sent it.
+  const sendKey = tradeSendKey('mfl', leagueId, theirUserId, givePlayerIds, receivePlayerIds);
+  const sendState = useSyncExternalStore(subscribeSends, () => getSendRecord(sendKey)?.state);
   // In-flow MFL sign-in (send-auth lazy flow) — a focused sheet, right on
   // the send surface, instead of a cross-surface punt to the league picker.
   const [signInVisible, setSignInVisible] = useState(false);
@@ -107,7 +116,10 @@ export default function SendInMflButton({
   }, [navigation]);
 
   const doPropose = useCallback(async () => {
-    setState('sending');
+    // Synchronous, before any await: a second send of this trade while one is
+    // in flight (another mount, a same-frame double tap) is refused here,
+    // with no request (#527 QA P3-5).
+    if (!beginSend(sendKey)) return;
     try {
       await proposeTradeToMfl({
         league_id: leagueId,
@@ -116,18 +128,21 @@ export default function SendInMflButton({
         receive_player_ids: receivePlayerIds,
         impression_id: impressionId,
       });
-      setState('sent');
+      settleSend(sendKey, 'sent');
       haptics.success();
       try {
         onSent?.();
       } catch {
         /* tally must never break the send flow */
       }
+      // Alert.alert is global, not tied to this component, so this one alert
+      // shows even if the button unmounted during the wait. A remount never
+      // alerts: it only re-renders from the registry.
       Alert.alert('Trade sent', 'Check MFL for the pending offer.', [
         { text: 'OK', onPress: () => void maybeRequestReview('send_in_mfl') },
       ]);
     } catch (err) {
-      setState('idle');
+      settleSend(sendKey, isSendOutcomeUnknown(err) ? 'unknown' : 'not_sent');
       const body = err instanceof ApiError ? (err.body as any) : undefined;
       const code: string | undefined = body?.error;
       const detail: string | undefined = body?.detail || body?.message;
@@ -189,7 +204,7 @@ export default function SendInMflButton({
         );
       }
     }
-  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, openSignIn, goReconnect, openMfl]);
+  }, [sendKey, leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, openSignIn, goReconnect, openMfl]);
 
   // #180-parity pre-flight — the shared /api/trades/validate branches to a
   // fresh MFL rosters export server-side. Never throws; findings are
@@ -205,28 +220,50 @@ export default function SendInMflButton({
     });
     setState('idle');
 
-    if (warnings.length > 0) {
-      const blocking = warnings.some((w) => w.severity === 'blocking');
+    // Each dialog captures this trade's registry record when it is built. A
+    // queued second dialog (a same-frame double tap) can be pressed long
+    // after the first send went out, so its Send only sends if the record is
+    // the same object. Every write makes a new one, so this also catches
+    // unknown → another send → unknown again, which a state comparison would
+    // miss. If the trade has since gone in flight or been sent, it does
+    // nothing (the button already says so). Otherwise (unknown, or cleared)
+    // the dialog opens again, current.
+    function showConfirm(): void {
+      const shown = getSendRecord(sendKey);
+      const send = () => {
+        const now = getSendRecord(sendKey);
+        if (now === shown) void doPropose();
+        else if (now?.state !== 'in_flight' && now?.state !== 'sent') showConfirm();
+      };
+      // After an unknown outcome on this trade, the dialog that gates the
+      // send starts with marketing's 8f line (utils/sendOutcomeCopy.ts, no
+      // new copy).
+      const reminder = shown?.state === 'unknown' ? `${sendOutcomeUnknownMessage('MFL')}\n\n` : '';
+
+      if (warnings.length > 0) {
+        const blocking = warnings.some((w) => w.severity === 'blocking');
+        Alert.alert(
+          blocking ? 'This trade will likely fail' : 'Heads up before sending',
+          reminder + warnings.map((w) => `• ${w.message}`).join('\n\n'),
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Send anyway', onPress: send },
+          ],
+        );
+        return;
+      }
+
       Alert.alert(
-        blocking ? 'This trade will likely fail' : 'Heads up before sending',
-        warnings.map((w) => `• ${w.message}`).join('\n\n'),
+        'Send this trade?',
+        reminder + 'This proposes the trade directly in MFL — your leaguemate gets it as a pending offer (it expires in 7 days).',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Send anyway', onPress: () => { void doPropose(); } },
+          { text: 'Send', onPress: send },
         ],
       );
-      return;
     }
-
-    Alert.alert(
-      'Send this trade?',
-      'This proposes the trade directly in MFL — your leaguemate gets it as a pending offer (it expires in 7 days).',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Send', onPress: () => { void doPropose(); } },
-      ],
-    );
-  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, doPropose]);
+    showConfirm();
+  }, [sendKey, leagueId, theirUserId, givePlayerIds, receivePlayerIds, doPropose]);
 
   // A successful sign-in resumes the send immediately — the confirm alert
   // inside confirmSend ("Send this trade?") still gates the actual write,
@@ -240,6 +277,11 @@ export default function SendInMflButton({
   // runs it exactly as a fresh one: the no-target hand-off, the link-status
   // check and its sign-in prompt, then the "Send this trade?" confirm.
   const proceed = useCallback(async () => {
+    // Main's send registry (#539): a send that went in flight or landed while
+    // the verify sheet was up never reaches the confirm again. Read live: a
+    // resumed `proceed` was captured before the sheet opened.
+    const live = getSendRecord(sendKey)?.state;
+    if (live === 'in_flight' || live === 'sent') return;
     haptics.pickup();
     if (!leagueId || !theirUserId) {
       openMfl();
@@ -275,22 +317,22 @@ export default function SendInMflButton({
         ],
       );
     }
-  }, [leagueId, theirUserId, openMfl, confirmSend, openSignIn]);
+  }, [sendKey, leagueId, theirUserId, openMfl, confirmSend, openSignIn]);
 
   // #393 M2 (D16): the router's Send pre-check runs first. This twin's own
   // tap reaches its confirm step (the router only renders it), so it runs
   // here too; after a verify it resumes with `proceed`, not straight to the confirm.
   const onPress = useCallback(() => {
-    if (state !== 'idle') return;
+    if (state !== 'idle' || sendState === 'in_flight' || sendState === 'sent') return;
     if (sendPreCheck?.(() => { void proceed(); })) return;
     void proceed();
-  }, [state, sendPreCheck, proceed]);
+  }, [state, sendState, sendPreCheck, proceed]);
 
   if (!enabled) return null;
 
   const label =
-    state === 'sent' ? 'Proposal sent'
-    : state === 'sending' ? 'Sending…'
+    sendState === 'sent' ? 'Proposal sent'
+    : sendState === 'in_flight' ? 'Sending…'
     : 'Send in MFL';
 
   return (
@@ -300,7 +342,7 @@ export default function SendInMflButton({
         label={label}
         variant="secondary"
         compact={compact}
-        disabled={state === 'sending' || state === 'checking' || state === 'sent'}
+        disabled={state === 'checking' || sendState === 'in_flight' || sendState === 'sent'}
         onPress={onPress}
         style={style}
       />

@@ -1307,28 +1307,35 @@ check('8i. D16 GRANTED [executed]: the Send pre-check — dark unless flag + enf
 });
 
 check('8j. D16 GRANTED [shape]: the pre-check runs first on every Send tap — the router and the MFL/ESPN twins it renders (their confirm is reached through their own tap) — and a verify resumes with `proceed`, the whole unchanged tap (hand-off, link check, the confirm alert), never a propose', () => {
-  const tap = (call, deps) => new RegExp(`const onPress = useCallback\\(\\(\\) => \\{\\s*if \\(state !== 'idle'\\) return;\\s*if \\(${call}\\(\\(\\) => \\{ void proceed\\(\\); \\}\\)\\) return;\\s*void proceed\\(\\);\\s*\\}, \\[${deps}\\]\\);`);
+  const IDLE = "state !== 'idle'";
+  const IDLE_NOT_SENDING = "state !== 'idle' \\|\\| sendState === 'in_flight' \\|\\| sendState === 'sent'";
+  const tap = (call, deps, guard = IDLE) => new RegExp(`const onPress = useCallback\\(\\(\\) => \\{\\s*if \\(${guard}\\) return;\\s*if \\(${call}\\(\\(\\) => \\{ void proceed\\(\\); \\}\\)\\) return;\\s*void proceed\\(\\);\\s*\\}, \\[${deps}\\]\\);`);
   const router = strip(read('components/SendInSleeperButton.tsx'));
   assert(tap('sendPreCheck', 'state, proceed').test(router), 'router: the pre-check, then proceed');
   eq((router.match(/sendPreCheck=\{sendPreCheck\}/g) || []).length, 2, 'the router hands it to both twins');
   const fnSrc = router.slice(router.indexOf('export function sendPreCheck('), router.indexOf('interface Props'));
   assert(!/propose|doPropose|Alert/.test(fnSrc), 'the pre-check itself never sends or confirms');
   const twins = {
-    'components/SendInMflButton.tsx': /const proceed = useCallback\(async \(\) => \{\s*haptics\.pickup\(\);\s*if \(!leagueId \|\| !theirUserId\) \{\s*openMfl\(\);\s*return;\s*\}[\s\S]*?await getMflLinkStatus\(\)[\s\S]*?\{ text: 'Sign in', onPress: openSignIn \}/,
-    'components/SendInEspnButton.tsx': /const proceed = useCallback\(async \(\) => \{\s*haptics\.pickup\(\);\s*if \(!leagueId \|\| !theirUserId\) \{\s*openEspn\(\);\s*return;\s*\}[\s\S]*?await getEspnLinkStatus\(\)/,
+    'components/SendInMflButton.tsx': /const proceed = useCallback\(async \(\) => \{\s*const live = getSendRecord\(sendKey\)\?\.state;\s*if \(live === 'in_flight' \|\| live === 'sent'\) return;\s*haptics\.pickup\(\);\s*if \(!leagueId \|\| !theirUserId\) \{\s*openMfl\(\);\s*return;\s*\}[\s\S]*?await getMflLinkStatus\(\)[\s\S]*?\{ text: 'Sign in', onPress: openSignIn \}/,
+    'components/SendInEspnButton.tsx': /const proceed = useCallback\(async \(\) => \{\s*const live = getSendRecord\(sendKey\)\?\.state;\s*if \(live === 'in_flight' \|\| live === 'sent'\) return;\s*haptics\.pickup\(\);\s*if \(!leagueId \|\| !theirUserId\) \{\s*openEspn\(\);\s*return;\s*\}[\s\S]*?await getEspnLinkStatus\(\)/,
   };
   assert(/const proceed = useCallback\(async \(\) => \{\s*recordGuideReceipt\(GUIDE_RECEIPTS\.sendAttempted\);\s*track\('sleeper_send_attempted'[\s\S]*?openInSleeper\(\);[\s\S]*?await getSleeperLinkStatus\(\)/.test(router),
     'router: proceed is the whole unchanged tap');
   for (const rel of ['components/SendInSleeperButton.tsx', 'components/SendInMflButton.tsx', 'components/SendInEspnButton.tsx']) {
     const s = strip(read(rel));
     if (twins[rel]) {
-      assert(tap('sendPreCheck\\?\\.', 'state, sendPreCheck, proceed').test(s), `${rel}: the pre-check, then proceed (never straight to confirmSend)`);
+      // Main's send registry (#539): the twins' tap also refuses while this
+      // trade is in flight or sent.
+      assert(tap('sendPreCheck\\?\\.', 'state, sendState, sendPreCheck, proceed', IDLE_NOT_SENDING).test(s), `${rel}: the pre-check, then proceed (never straight to confirmSend)`);
       assert(twins[rel].test(s), `${rel}: proceed is the whole unchanged tap (hand-off, link check, sign-in)`);
       assert(!/from '\.\/SendInSleeperButton'/.test(s), `${rel}: takes it as a prop (no import cycle)`);
     }
     assert(!/sendPreCheck\??\.?\(\(\) => \{ void confirmSend\(\); \}\)/.test(s), `${rel}: no continuation skips to confirmSend`);
     const confirmFn = s.slice(s.indexOf('const confirmSend = useCallback('), s.indexOf('const proceed = useCallback('));
-    assert(/\{ text: 'Send', onPress: \(\) => \{ void doPropose\(\); \} \}/.test(confirmFn), `${rel}: confirmSend's alert gates the propose`);
+    const direct = /\{ text: 'Send', onPress: \(\) => \{ void doPropose\(\); \} \}/.test(confirmFn);
+    const viaRegistry = /\{ text: 'Send', onPress: send \}/.test(confirmFn)
+      && /const send = \(\) => \{\s*const now = getSendRecord\(sendKey\);\s*if \(now === shown\) void doPropose\(\);/.test(confirmFn);
+    assert(direct || viaRegistry, `${rel}: confirmSend's alert gates the propose`);
   }
 });
 

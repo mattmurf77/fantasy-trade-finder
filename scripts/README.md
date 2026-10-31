@@ -71,3 +71,12 @@ one id per call. `--cutoff` is required; the default is a counts-only dry run,
 `--execute --expect N` deletes, `--verify` checks nothing is left. It prints
 counts only, never an id. The prod run needs the operator's word. See
 [runbook](../docs/runbook.md#purge-orphaned-espnmfl-entry-users-one-time-2026-11).
+
+## One-time index build
+
+`create_outcome_owner_index.py` builds `ix_deck_outcomes_user` (G3-e) on an
+existing database, off the boot path: `CREATE INDEX CONCURRENTLY` with a 5 s
+`lock_timeout` on Postgres, where a plain build would block every outcome write
+for its scan. `--check` only reports. It's idempotent, and an INVALID leftover
+is rebuilt. Run it once after the deploy that adds `deck_outcomes.user_id`; the
+prod run needs the operator's word.
