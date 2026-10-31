@@ -791,7 +791,7 @@ def test_e2e_flag_off_is_byte_identical_to_today(env, init_env, monkeypatch):
     assert types == ["league_member_joined", "referral_joined"]
     legacy = next(n for n in _notifs(env, REFERRER) if n["type"] == "referral_joined")
     assert legacy["title"] == legacy["body"] == (
-        "@newbie joined Fantasy Trade Finder via your invite.")
+        "@newbie joined Fleeced from your invite.")
     assert _events(env, "referral_attributed") == []
 
 
@@ -1087,3 +1087,15 @@ def test_a_deleted_invitee_keeps_the_referrers_side(env):
     # A joined row with no invitee is never re-claimed by the next joiner.
     _attr(invite_id=T1, user_id="u_next")
     assert [r["referred_user_id"] for r in _rows(env)] == [None, "u_next"]
+
+
+# ── The pre-ledger invite receipt's copy (marketing §6 addendum 13 item 1) ──
+
+def test_legacy_receipt_copy_verbatim():
+    assert server._referral_receipt_body("newbie", "Newbie N") == "@newbie joined Fleeced from your invite."
+    assert server._referral_receipt_body(None, "Newbie N") == "@Newbie N joined Fleeced from your invite."
+    # No name to show: the fallback line, never a raw id.
+    assert server._referral_receipt_body(None, None) == "Someone you invited joined Fleeced."
+    assert server._referral_receipt_body("", "") == "Someone you invited joined Fleeced."
+    for args in (("newbie", None), (None, None)):
+        assert "Fantasy Trade Finder" not in server._referral_receipt_body(*args)

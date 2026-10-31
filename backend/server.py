@@ -17725,6 +17725,17 @@ INVITE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
 # An invite id is valid for credit this long after mint (PRD §7.1, assumed).
 _INVITE_ID_VALID_DAYS = 30
+
+
+def _referral_receipt_body(username: str | None, display_name: str | None) -> str:
+    """The pre-ledger invite receipt (`referral_joined`: the push and the bell
+    row, title = body). Marketing's §6 addendum 13 item 1 (2026-10-31; voice
+    only, no legal stamp): "Fleeced" as the object, "from" over "via". With no
+    name to show, the fallback line, never a raw id."""
+    name = username or display_name
+    if not name:
+        return "Someone you invited joined Fleeced."
+    return f"@{name} joined Fleeced from your invite."
 _INVITE_SYSTEM_OWNER = "system:invite"   # event owner when neither t nor ref resolves
 
 # Link-preview fetchers (#350 C4), matched case-insensitively as UA
@@ -28726,7 +28737,7 @@ def session_init():
                             push_notification(
                                 user_id=referrer_uid,
                                 type="referral_joined",
-                                body=f"@{new_username} joined Fantasy Trade Finder via your invite.",
+                                body=_referral_receipt_body(username, display_name),
                                 meta={
                                     "new_user_id":   user_id,
                                     "new_username":  new_username,
