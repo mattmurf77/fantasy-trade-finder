@@ -2,10 +2,12 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getEntitlements } from '../api/billing';
 import {
+  currentIdentityUserId,
   hasProEntitlement,
   onCustomerInfoChange,
   setOnPurchasesReady,
 } from '../api/purchases';
+import { customerInfoApplies } from './subscriptionSession';
 import { useSession } from './useSession';
 
 // useEntitlements — the client's cached view of Pro (pro-subscription LLD §4,
@@ -58,6 +60,13 @@ interface EntitlementState {
   /** True while `pro` comes from a device receipt the server has not
    *  confirmed. Never persisted; cleared by the next successful refresh. */
   optimistic: boolean;
+  /** The server's enforce predicate (#393 D7). The gate UI renders only
+   *  while this is true. Read from `enforcing` alone: an unverified session's
+   *  blanked subscription fields never make it false. Not persisted. */
+  enforcing: boolean;
+  /** Founding GMs member (S1). False on a blanked (unverified) response or an
+   *  older server. Display only; never a gate input. Not persisted. */
+  founder: boolean;
 
   /** Local AsyncStorage hydrate + the 72 h grace evaluation. No network. */
   loadCached: () => Promise<void>;
@@ -73,6 +82,8 @@ export const useEntitlements = create<EntitlementState>((set, get) => ({
   expiresAt: null,
   loaded: false,
   optimistic: false,
+  enforcing: false,
+  founder: false,
 
   loadCached: async () => {
     try {
@@ -103,11 +114,17 @@ export const useEntitlements = create<EntitlementState>((set, get) => ({
     if (!useSession.getState().hasToken) return;
     try {
       const res = await getEntitlements();
-      const pro = !!res?.pro;
+      // `=== true`: the server blanks every subscription field for an
+      // unverified session (R28.9), and a blank reads as NOT entitled.
+      const pro = res?.pro === true;
       const expiresAt = res?.expires_at ?? null;
+      const founder = res?.founder === true;
+      // `enforcing` stays the server's state even on a blanked response; it
+      // is never inferred from the subscription fields (#393 D7, D16).
+      const enforcing = res?.enforcing === true;
       // Server wins in BOTH directions, and clearing `optimistic` here is the
       // point: a refund or a failed webhook must be able to take Pro away.
-      set({ pro, expiresAt, loaded: true, optimistic: false });
+      set({ pro, expiresAt, founder, enforcing, loaded: true, optimistic: false });
       const blob: CachedEntitlements = { pro, expiresAt, fetchedAt: Date.now() };
       try {
         await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(blob));
@@ -142,6 +159,17 @@ export function initEntitlements(): void {
     .loadCached()
     .then(() => useEntitlements.getState().refresh())
     .catch(() => {});
+  // A different user (sign-out, a switch) never keeps the last user's answer
+  // (release-lead QA P3): the not-entitled defaults, the device cache dropped,
+  // the server asked again. Boot's null → user hydrate isn't a change, so the
+  // offline grace cache still applies there.
+  useSession.subscribe((s, prev) => {
+    const was = prev.user?.user_id;
+    if (!was || s.user?.user_id === was) return;
+    useEntitlements.setState({ pro: false, expiresAt: null, founder: false, enforcing: false, optimistic: false });
+    AsyncStorage.removeItem(CACHE_KEY).catch(() => {});
+    void useEntitlements.getState().refresh();
+  });
   // Attach the CustomerInfo listener the moment purchases become usable —
   // which is when the session working key first reaches `initPurchases`, at
   // boot for a restored session and at sign-in otherwise. Attaching before
@@ -153,7 +181,12 @@ export function initEntitlements(): void {
     if (_listenerBound) return;
     _listenerBound = true;
     onCustomerInfoChange((info) => {
-      useEntitlements.getState().noteCustomerInfo(hasProEntitlement(info));
+      // Believe the push only while this session is verified AND RevenueCat's
+      // identity is this session's user (subscriptionSession): a device last
+      // logged in as A never shows A's state to a session for B.
+      if (customerInfoApplies(useSession.getState(), currentIdentityUserId())) {
+        useEntitlements.getState().noteCustomerInfo(hasProEntitlement(info));
+      }
       // Ask the server too — the push is the hint, the fetch is the answer.
       void useEntitlements.getState().refresh();
     });

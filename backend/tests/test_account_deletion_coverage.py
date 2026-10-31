@@ -125,6 +125,21 @@ def test_shared_device_deletes_anonymous_history_preserves_other_identity(engine
     assert [r["sleeper_user_id"] for r in rows(engine, db.identity_links_table)] == [OTHER]
 
 
+def test_an_outcome_on_a_deck_with_no_rows_and_no_pack_goes_by_its_owner(engine):
+    """G3-e (legal R28.23, condition 2): #535's shape, an outcome whose deck
+    has no row and no pack, is reached only through deck_outcomes.user_id. That
+    id is the verified session's user_id (_save_deck_outcome_safe), so it must
+    be one the alias resolution covers: the user's own id, an account alias, or
+    a working key a durable session recorded for the account."""
+    working = "synthetic-working-key"
+    with engine.begin() as conn:
+        seed(conn, db.sessions_table, "synthetic-session", user_id=working, account_id=AID)
+        for i, uid in enumerate((UID, ALIAS, working, OTHER)):
+            seed(conn, db.deck_outcomes_table, uid, impression_id=f"gone-job:{i}", user_id=uid)
+    accounts.delete_user_data(UID)
+    assert [r["user_id"] for r in rows(engine, db.deck_outcomes_table)] == [OTHER]
+
+
 def test_outcomes_follow_impressions_shared_trade_record_retained(engine):
     with engine.begin() as conn:
         for uid in (UID, ALIAS, OTHER):

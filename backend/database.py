@@ -16447,17 +16447,32 @@ def create_trade_share_token(match_id: int, user_id: str, *,
 
 def resolve_trade_share_token(token: str) -> dict | None:
     """The trade_matches row a live token points at, as a dict, or None for
-    an unknown or revoked token or an orphaned match (the row is gone)."""
+    an unknown or revoked token or an orphaned match (the row is gone).
+
+    The row is oriented to the SHARER: when user_b minted the token,
+    `user_a_give` and `user_a_receive` come back swapped, so YOU GIVE is
+    always what the sharer gives. `shared_by` ('a' | 'b') says which party
+    that was. `created_by` itself stays server-side and is not returned."""
     if not token:
         return None
     tm, tst = trade_matches_table, trade_share_tokens_table
     with engine.connect() as conn:
         row = conn.execute(
-            select(tm)
+            select(tm, tst.c.created_by)
             .select_from(tst.join(tm, tm.c.id == tst.c.match_id))
             .where(and_(tst.c.token == token, tst.c.revoked_at.is_(None)))
         ).fetchone()
-    return dict(row._mapping) if row is not None else None
+    if row is None:
+        return None
+    out = dict(row._mapping)
+    created_by = out.pop("created_by", None)
+    if created_by is not None and created_by == out.get("user_b_id"):
+        out["user_a_give"], out["user_a_receive"] = (
+            out.get("user_a_receive"), out.get("user_a_give"))
+        out["shared_by"] = "b"
+    else:
+        out["shared_by"] = "a"
+    return out
 
 
 def _count_recent_trade_share_tokens(conn, user_id: str, *, hours: int = 1) -> int:
