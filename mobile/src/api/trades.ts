@@ -365,12 +365,14 @@ function normalizeJobSnapshot(raw: any): PagedTradeJobSnapshot {
 export async function generateTrades(
   body: GenerateBody,
   paging?: { searchId?: string },
+  request?: { background?: boolean },
 ): Promise<PagedTradeJobSnapshot> {
   const res = await api.post<any>(
     '/api/trades/generate',
     paging
       ? { ...body, page: 1, ...(paging.searchId ? { search_id: paging.searchId } : {}) }
       : body,
+    request,
   );
   const snap = normalizeJobSnapshot(res);
   // An old server doesn't echo the id; the search still owns it.
@@ -388,6 +390,7 @@ export async function generateTrades(
 export async function getTradeStatus(
   jobId: string,
   page?: { deck?: string; cursor: number },
+  request?: { background?: boolean },
 ): Promise<PagedTradeJobSnapshot> {
   const paged = page
     ? `&deck=${encodeURIComponent(page.deck || jobId)}`
@@ -395,6 +398,7 @@ export async function getTradeStatus(
     : '';
   const res = await api.get<any>(
     `/api/trades/status?job_id=${encodeURIComponent(jobId)}${paged}`,
+    request,
   );
   return normalizeJobSnapshot(res);
 }

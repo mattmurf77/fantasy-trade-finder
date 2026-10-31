@@ -120,6 +120,8 @@ function sessionHarness() {
     '../api/client': h.client, '../api/auth': auth, '../api/winNow': winNow,
     '../api/league': {connectLeague: (...args) => providers.connect(...args)},
     '../api/sleeper': sleeper, '../api/purchases': {initPurchases: async () => {}},
+    // useSession's purchases identity bridge reads the pure predicate module.
+    './subscriptionSession': load('src/state/subscriptionSession.ts', name => { throw Error(`unexpected subscriptionSession import ${name}`); }, h.time),
     '../observability/sentry': {setUser: () => {}},
     './queryClient': {seedLeagueSessionCaches: (id, seed) => seeds.push({id, seed}), queryClient: {invalidateQueries: input => invalidations.push(input)}},
     '../api/rankings': {getActiveScoringFormat: async () => '1qb_ppr'},
@@ -181,6 +183,16 @@ function picker(h) {
   }, h.time);
   return {ui, invoke};
 }
+// A check that awaits something that never settles would let the event loop
+// drain and node exit 0 mid-run: an unfinished run fails instead.
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-win-now-recovery did not finish (a check hung): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 let failures = 0, passed = 0;
 async function check(name, fn) {
   try { await fn(); passed++; console.log(`PASS ${name}`); }
@@ -665,6 +677,7 @@ async function main() {
     assert.doesNotMatch(recovery, /searchWinNow|evaluateWinNow|decideWinNow|api\.post/);
     assert.doesNotMatch(read('src/api/client.ts'), /(?:from|require\()\s*['"]\.\.\/state/);
   });
+  finished = true;
   console.log(`${passed} passed; ${failures} failed (native Win Now recovery)`);
   process.exitCode = failures ? 1 : 0;
 }
