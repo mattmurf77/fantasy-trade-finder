@@ -64,3 +64,43 @@ export function countsByLeague<T extends { league_id: string }>(
   for (const r of rows) out[r.league_id] = (out[r.league_id] || 0) + 1;
   return out;
 }
+
+/**
+ * R2 (action-banner ux-states §2) — the row a push / banner arrival names.
+ * Index of the row whose `match_id` equals `matchId` in the array the
+ * mutual FlatList renders, or -1 (not found: dismissed, expired, or not in
+ * the loaded list — the caller then lands on the list quietly). Ids are
+ * compared as strings: normalizeTradeMatch stringifies `match_id`, and the
+ * screen stringifies the route param.
+ */
+export function indexForMatch(
+  rows: readonly { match_id: string }[],
+  matchId: string,
+): number {
+  return rows.findIndex((r) => r.match_id === matchId);
+}
+
+/**
+ * R2 (ux-states §7 "When the match isn't there") — the not-found line, shown
+ * when an arrival's match is missing after one refetch (dismissed, or gone
+ * for any other reason; it never guesses why). Its words go to marketing
+ * through head-product (~11-03), so it SHIPS AS `null`: no line, and the
+ * arrival just shows the Mutual list. The swap is this one constant.
+ *   Working words (ux-lead, NOT approved — never ship them as-is):
+ *   "We couldn't find that match. It may have been cleared."
+ */
+export const MATCH_NOT_FOUND_LINE: string | null = null;
+
+/** ~4 s, so a whole line can be read (§7). */
+export const NOT_FOUND_HOLD_MS = 4000;
+
+/**
+ * The Toast for the not-found line, or null for no line. Neutral tone (the
+ * Toast default), held NOT_FOUND_HOLD_MS. `null` in → nothing renders;
+ * a string in → exactly that string.
+ */
+export function notFoundToast(
+  line: string | null,
+): { msg: string; holdMs: number } | null {
+  return line ? { msg: line, holdMs: NOT_FOUND_HOLD_MS } : null;
+}
