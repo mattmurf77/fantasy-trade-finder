@@ -48,12 +48,16 @@ def rows(engine, table):
 
 @pytest.mark.parametrize("table_name", accounts._ADDITIONAL_PRIVATE_TABLES)
 def test_new_private_rows_and_aliases_removed_counterparty_kept(engine, table_name):
+    """The user's and alias's rows go; the counterparty's row stays exactly as
+    it was, column for column (#544 QA P2-1: an UPDATE of every user's rows
+    through the private-table loop kept the right user_ids and passed)."""
     table = getattr(db, table_name + "_table")
     with engine.begin() as conn:
         for uid in (UID, ALIAS, OTHER):
             seed(conn, table, uid, user_id=uid)
+    before = [dict(r) for r in rows(engine, table) if r["user_id"] == OTHER]
     accounts.delete_user_data(UID)
-    assert [r["user_id"] for r in rows(engine, table)] == [OTHER]
+    assert [dict(r) for r in rows(engine, table)] == before
 
 
 def test_encrypted_credentials_billing_and_all_sessions_removed(engine):
