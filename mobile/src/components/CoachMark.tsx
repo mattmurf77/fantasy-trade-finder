@@ -13,9 +13,16 @@ interface Props {
   text: string;
   onDismiss: () => void;
   testID?: string;
+  /** VoiceOver hint; override when the tap does more than dismiss. */
+  accessibilityHint?: string;
 }
 
-export default function CoachMark({ text, onDismiss, testID }: Props) {
+export default function CoachMark({
+  text,
+  onDismiss,
+  testID,
+  accessibilityHint = 'Tap to dismiss',
+}: Props) {
   return (
     <Pressable
       testID={testID}
@@ -24,7 +31,7 @@ export default function CoachMark({ text, onDismiss, testID }: Props) {
       // (name) into the hint, per the label/hint split.
       accessibilityRole="button"
       accessibilityLabel={text}
-      accessibilityHint="Tap to dismiss"
+      accessibilityHint={accessibilityHint}
       style={({ pressed }) => [styles.mark, pressed && styles.markPressed]}
     >
       <Text style={styles.text}>{text}</Text>
