@@ -46,6 +46,7 @@ import FeedbackFAB from '../../components/FeedbackFAB';
 import { useTesterSurface } from './useTesterSurface';
 import SubscriptionSection from '../../components/SubscriptionSection';
 import { useTipsOffered } from '../../state/useTipsOffered';
+import { subscriptionSessionState } from '../../state/subscriptionSession';
 import { hubStyles, styles } from './styles';
 
 // The ranking preview names the flow the SteerSlider names. Values are the
@@ -101,6 +102,9 @@ export default function SettingsHubScreen({ navigation }: any) {
   // B8 #1: the tip row also needs the server to offer tips. A cache
   // subscription that never fetches (rule 1 holds); unknown → hidden.
   const tipsOffered = useTipsOffered();
+  // A tip is a purchase: only for an exactly-verified session (demo,
+  // unverified and unknown never see the row; state/subscriptionSession).
+  const sessionVerified = useSession((s) => subscriptionSessionState(s) === 'verified');
 
   const go = (route: string) => () => navigation?.navigate?.(route);
 
@@ -302,7 +306,7 @@ export default function SettingsHubScreen({ navigation }: any) {
         <SubscriptionSection />
         {/* The tip-jar row shows only while the server offers tips (B8 #1;
             `tips: []` at launch); the TipJar route stays registered. */}
-        {paywallOn && tipsOffered ? (
+        {paywallOn && tipsOffered && sessionVerified ? (
           <NavRow
             testID="settings-tip-row"
             title="Support Fleeced"

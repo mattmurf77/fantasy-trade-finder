@@ -55,6 +55,7 @@ import { openAppleSubscriptions } from '../components/SubscriptionSection';
 import { DELETE_ACCOUNT_BODY, DELETE_ACCOUNT_SUB_NOTE } from '../copy/deleteAccount';
 import { MON } from '../copy/monetization';
 import { useTipsOffered } from '../state/useTipsOffered';
+import { subscriptionSessionState } from '../state/subscriptionSession';
 import { guideToggleTitle, guideToggleDescriptionOff } from '../utils/mascotCopy';
 import { useOnboardingState } from '../state/useOnboardingState';
 import { useGuide } from '../state/useGuide';
@@ -115,6 +116,9 @@ export default function SettingsScreen({ navigation }: any) {
   // B8 #1: the tip row also needs the server to offer tips (a cache
   // subscription that never fetches; unknown → hidden).
   const tipsOffered             = useTipsOffered();
+  // A tip is a purchase: only for an exactly-verified session (demo,
+  // unverified and unknown never see the row; state/subscriptionSession).
+  const sessionVerified         = useSession((s) => subscriptionSessionState(s) === 'verified');
   // (The pick-pricing segmented control and its `trade.slot_pricing` flag
   // read were REMOVED 2026-08-21, D-144 — pick pricing is no longer a
   // setting. See TradeValuesSection.tsx, which owns this block in v2.)
@@ -1049,7 +1053,7 @@ export default function SettingsScreen({ navigation }: any) {
   const proSection = (
     <>
       <SubscriptionSection />
-      {paywallEnabled && tipsOffered ? (
+      {paywallEnabled && tipsOffered && sessionVerified ? (
         <Pressable
           testID="settings-tip-row"
           accessibilityRole="button"

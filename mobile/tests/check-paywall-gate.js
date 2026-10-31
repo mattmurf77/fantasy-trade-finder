@@ -1903,6 +1903,67 @@ check('9k. head-eng 2026-10-28 [executed + shape]: unknown verification renders 
     'Restore: unverified or demo → the sheet; RevenueCat not this user → the error line, before restorePurchases');
   assert(!/isUnverifiedSession|session_verified/.test(main + ver), 'no second copy of the rule in the render or the tap');
 });
+check('9l. release-lead round-3 P3 [executed]: Settings › Subscription Restore re-checks the session before noting CustomerInfo; a session or user change while the restore is out skips the note, the server refresh still runs', async () => {
+  // VerifiedRows itself, transpiled from the file and run under a fake React
+  // (hooks as plain calls, JSX as element objects), its Restore row pressed.
+  const { sf } = astOf(SUBS);
+  const node = findNodes(sf, (n) => ts.isFunctionDeclaration(n) && n.name?.text === 'VerifiedRows')[0];
+  assert(node, 'VerifiedRows not found');
+  const js = ts.transpileModule(node.getText(sf), {
+    compilerOptions: { target: ts.ScriptTarget.ES2019, jsx: ts.JsxEmit.React },
+    fileName: 'VerifiedRows.tsx',
+  }).outputText;
+  const findId = (n, id) => {
+    if (!n || typeof n !== 'object') return null;
+    if (Array.isArray(n)) { for (const c of n) { const f = findId(c, id); if (f) return f; } return null; }
+    if (n.props && n.props.testID === id) return n;
+    return n.props ? findId(n.props.children, id) : null;
+  };
+  // §10's session swaps: control, unverified, another user, another verified user RevenueCat moved to.
+  for (const [name, swap, noted] of SWAPS) {
+    const state = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
+    const ctl = { rcId: '111' };
+    const out = deferred();
+    const notes = [];
+    const refreshes = [];
+    const lines = [];
+    const hook = (sel) => sel(state);
+    hook.getState = () => state;
+    const deps = {
+      React: { createElement: (type, props, ...children) => ({ type, props: { ...(props || {}), children } }), Fragment: 'Fragment' },
+      useState: (init) => [typeof init === 'function' ? init() : init, (v) => lines.push(v)],
+      useEffect: () => {},
+      useSession: hook,
+      useEntitlements: (sel) => sel({ loaded: false, pro: false, founder: false,
+        noteCustomerInfo: (p) => notes.push(p), refresh: async () => { refreshes.push(1); } }),
+      isIdentityReady: () => true, onIdentityChange: () => () => {}, getActivePro: async () => null,
+      STATUS_ROWS_AT_LAUNCH: false,
+      subscriptionSessionState: subSession.subscriptionSessionState,
+      customerInfoApplies: subSession.customerInfoApplies,
+      currentIdentityUserId: () => ctl.rcId,
+      openVerify: () => {}, openPaywall: () => {},
+      MON: copy.MON,
+      restorePurchases: () => out.promise,
+      hasProEntitlement: (info) => !!(info && info.entitlements && info.entitlements.active.pro),
+      track: () => {},
+      LinkRow: 'LinkRow', ChalkText: 'ChalkText', ManageSubscriptionLink: 'ManageSubscriptionLink', MemberStatus: 'MemberStatus',
+      styles: {},
+    };
+    const names = Object.keys(deps);
+    // eslint-disable-next-line no-new-func
+    const VerifiedRows = new Function(...names, `${js}\nreturn VerifiedRows;`)(...names.map((n) => deps[n]));
+    const row = findId(VerifiedRows(), 'settings-subscription-restore');
+    assert(row, `${name}: the Restore row rendered`);
+    row.props.onPress();
+    await settleAll();
+    swap(state, ctl);
+    out.resolve(PRO_INFO);
+    await settleAll();
+    eq(JSON.stringify(notes), JSON.stringify(noted ? [true] : []), `${name}: noteCustomerInfo`);
+    eq(refreshes.length, 1, `${name}: the server refresh`);
+    assert(lines.includes(copy.MON['mon.pay.restore_ok']), `${name}: the rest of the flow is unchanged (restore_ok line)`);
+  }
+});
 
 check('8p. QA P1-1 [executed + shape]: flags off, the deck / landing / Win Now / R2b gate paths are today\'s — each derives the gate from gateSignalFor (null while off)', () => {
   const V403 = { error: 'verification_required' };

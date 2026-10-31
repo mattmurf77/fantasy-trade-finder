@@ -157,19 +157,70 @@ const beServer = read(BE_SERVER);
   const subs = strip(read(path.join(ROOT, 'src/state/useTipsOffered.ts')));
   const hook = /export function useTipsOffered\(\): boolean \{\s*const \{ data \} = useQuery<PaywallConfig>\(\{\s*queryKey: \['paywall-config', 'ios'\],\s*queryFn: \(\) => getPaywallConfig\('ios'\),\s*enabled: false,\s*\}\);\s*return tipsOffered\(data\);/.test(subs)
     && /return Array\.isArray\(config\?\.tips\) && config\.tips\.length > 0;/.test(subs);
+  // Round-3 P3: the row also needs an EXACTLY-verified session (the shared
+  // predicate), so demo, unverified and unknown never see it (8d executes it).
   const gated = (text, flag) => text.includes('settings-tip-row')
     && /import \{ useTipsOffered \} from '(\.\.\/)+state\/useTipsOffered';/.test(text)
+    && /import \{ subscriptionSessionState \} from '(\.\.\/)+state\/subscriptionSession';/.test(text)
     && /const tipsOffered\s*= useTipsOffered\(\);/.test(text)
-    && text.indexOf(`${flag} && tipsOffered ? (`) > -1
-    && text.indexOf('settings-tip-row') > text.indexOf(`${flag} && tipsOffered ? (`);
+    && /const sessionVerified\s*= useSession\(\(s\) => subscriptionSessionState\(s\) === 'verified'\);/.test(text)
+    && text.indexOf(`${flag} && tipsOffered && sessionVerified ? (`) > -1
+    && text.indexOf('settings-tip-row') > text.indexOf(`${flag} && tipsOffered && sessionVerified ? (`);
   const inHub = gated(hub, 'paywallOn');
   const inFlat = gated(flat, 'paywallEnabled');
   const navs = (hub + flat).match(/navigate\?\.\('TipJar', \{ source: 'settings' \}\)/g) || [];
   if (hook && inHub && inFlat && navs.length === 2) {
-    ok('8. settings-tip-row on both surfaces only with the flag AND the server offering tips (never-fetching cache read)');
+    ok('8. settings-tip-row on both surfaces only with the flag AND the server offering tips (never-fetching cache read) AND an exactly-verified session');
   } else {
-    bad('8. settings-tip-row on both surfaces only with the flag AND the server offering tips (never-fetching cache read)',
+    bad('8. settings-tip-row on both surfaces only with the flag AND the server offering tips (never-fetching cache read) AND an exactly-verified session',
       `hook=${hook} hub=${inHub} flat=${inFlat} navs=${navs.length}`);
+  }
+}
+
+// The shared predicate module, transpiled and loaded for real (it has no
+// runtime imports). Used by 8d and 10.
+let tsc = null;
+try { tsc = require('typescript'); } catch { /* reported by 8b */ }
+function loadTs(rel, stubs, tsx = false) {
+  const js = tsc.transpileModule(fs.readFileSync(path.join(ROOT, rel), 'utf8'), {
+    compilerOptions: { module: tsc.ModuleKind.CommonJS, target: tsc.ScriptTarget.ES2019, ...(tsx ? { jsx: tsc.JsxEmit.React } : {}) },
+    fileName: path.basename(rel),
+  }).outputText;
+  const mod = { exports: {} };
+  new Function('module', 'exports', 'require', js)(mod, mod.exports, (name) => {
+    if (Object.prototype.hasOwnProperty.call(stubs, name)) return stubs[name];
+    throw new Error(`${rel} gained an unexpected runtime import ("${name}")`);
+  });
+  return mod.exports;
+}
+const subSession = tsc ? loadTs('src/state/subscriptionSession.ts', {}) : null;
+const SESSIONS = [
+  ['verified', { isDemo: false, verification: { session_verified: true }, user: { user_id: '111' } }, true],
+  ['demo (even with a verified answer)', { isDemo: true, verification: { session_verified: true }, user: { user_id: 'demo_user_ab12' } }, false],
+  ['unverified', { isDemo: false, verification: { session_verified: false }, user: { user_id: '111' } }, false],
+  ['unknown', { isDemo: false, verification: null, user: { user_id: '111' } }, false],
+];
+
+// 8d — EXECUTED: each surface's own `sessionVerified` selector, run on the
+//      real predicate: only an exactly-verified session shows the row.
+{
+  const name = '8d. the tip row\'s session selector (both surfaces, executed): demo, unverified and unknown hide it; verified shows it';
+  if (!subSession) {
+    bad(name, 'typescript not resolvable');
+  } else {
+    const wrong = [];
+    for (const [surface, text] of [['hub', hub], ['flat', flat]]) {
+      // Whatever selector the file passes (not the exact text 8 pins).
+      const m = text.match(/const sessionVerified\s*= useSession\(([^;]+)\);/);
+      if (!m) { wrong.push(`${surface}: selector not found`); continue; }
+      // eslint-disable-next-line no-new-func
+      const sel = new Function('subscriptionSessionState', `return ${m[1]};`)(subSession.subscriptionSessionState);
+      for (const [label, state, want] of SESSIONS) {
+        if (sel(state) !== want) wrong.push(`${surface}/${label} → ${!want}`);
+      }
+    }
+    if (wrong.length === 0) ok(name);
+    else bad(name, wrong.join('; '));
   }
 }
 
@@ -238,6 +289,82 @@ const beServer = read(BE_SERVER);
   } else {
     bad('9. backend is_tip_product guard present; served tip SKUs all ftf_tip_*',
       `guard=${guard} served=${JSON.stringify(served)}`);
+  }
+}
+
+// 10 — EXECUTED: the tip purchase refuses unless customerInfoApplies (round-3
+//      P3). TipJarScreen runs under a fake React (hooks as plain calls, JSX
+//      as element objects) and a tip is pressed. A refusal is the screen's
+//      existing failure path: no purchaseTip, paywall_purchase_failed
+//      tracked, "That didn't go through" shown. The refusal throws before
+//      any await, so it lands synchronously.
+{
+  const name = '10. the tip purchase runs ONLY when customerInfoApplies (verified AND RevenueCat is this user); demo, unverified, unknown and a mismatched identity take the failure path, nothing bought';
+  if (!subSession) {
+    bad(name, 'typescript not resolvable');
+  } else {
+    const TIP = { product_id: 'ftf_tip_199', display_price: '$1.99' };
+    const mount = (state, rcId) => {
+      const buys = [];
+      const events = [];
+      const sets = [];
+      const React = {
+        createElement: (type, props, ...children) => ({ type, props: { ...(props || {}), children } }),
+        Fragment: 'Fragment',
+        useState: (init) => [init, (v) => sets.push(v)],
+        useEffect: () => {},
+        useCallback: (fn) => fn,
+        useMemo: (fn) => fn(),
+      };
+      const hook = (sel) => sel(state);
+      hook.getState = () => state;
+      const tokens = new Proxy({}, { get: () => 1 });
+      const screen = loadTs('src/screens/TipJarScreen.tsx', {
+        react: { __esModule: true, default: React, ...React },
+        'react-native': { ActivityIndicator: 'ActivityIndicator', Pressable: 'Pressable', ScrollView: 'ScrollView', StyleSheet: { create: (x) => x }, View: 'View' },
+        'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
+        '@tanstack/react-query': { useQuery: ({ queryKey }) => ({ isLoading: false,
+          data: queryKey[0] === 'paywall-config' ? { enabled: true, tips: [TIP] } : [{ identifier: TIP.product_id, priceString: '$1.99' }] }) },
+        '../components/chalkline/Text': { __esModule: true, default: 'ChalkText' },
+        '../components/chalkline': { Button: 'Button', Icon: 'Icon' },
+        '../theme/chalkline': { chalk: tokens, ice: tokens, ink: tokens, radii: tokens, semantic: tokens, space: tokens },
+        '../api/billing': { getPaywallConfig: async () => ({}) },
+        '../api/purchases': {
+          currentIdentityUserId: () => rcId, getTipProducts: async () => [], isUserCancelled: () => false,
+          PurchaseIdentityError: class PurchaseIdentityError extends Error {},
+          purchaseTip: (p) => { buys.push(p.identifier); return new Promise(() => {}); },
+        },
+        '../state/useFeatureFlags': { useFlag: () => true },
+        '../state/useSession': { useSession: hook },
+        '../state/subscriptionSession': subSession,
+        '../api/events': { track: (n, p) => { events.push([n, p]); } },
+      }, true);
+      const tree = screen.default({ navigation: { canGoBack: () => true, goBack() {} }, route: { params: { source: 'settings' } } });
+      const find = (n, id) => {
+        if (!n || typeof n !== 'object') return null;
+        if (Array.isArray(n)) { for (const c of n) { const f = find(c, id); if (f) return f; } return null; }
+        if (n.props && n.props.testID === id) return n;
+        return n.props ? find(n.props.children, id) : null;
+      };
+      const option = find(tree, `tipjar-option-${TIP.product_id}`);
+      if (option) option.props.onPress();
+      return { option, buys, events, sets };
+    };
+    const wrong = [];
+    const cases = [...SESSIONS.map(([label, state, runs]) => [label, state, state.user.user_id, runs]),
+      ['verified, RevenueCat is ANOTHER user', SESSIONS[0][1], '999', false]];
+    for (const [label, state, rcId, runs] of cases) {
+      const m = mount(state, rcId);
+      if (!m.option) { wrong.push(`${label}: the tip option did not render`); continue; }
+      if (m.buys.length !== (runs ? 1 : 0)) wrong.push(`${label}: purchaseTip calls ${m.buys.length}`);
+      if (!runs) {
+        const failed = m.events.some(([n, p]) => n === 'paywall_purchase_failed' && p.user_cancelled === false);
+        const copy = m.sets.includes('That didn’t go through. You haven’t been charged.');
+        if (!failed || !copy) wrong.push(`${label}: not the existing failure path (failed=${failed} copy=${copy})`);
+      }
+    }
+    if (wrong.length === 0) ok(name);
+    else bad(name, wrong.join('; '));
   }
 }
 

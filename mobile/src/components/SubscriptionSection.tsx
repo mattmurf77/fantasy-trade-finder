@@ -171,7 +171,12 @@ function VerifiedRows() {
       const info = await restorePurchases(userId);
       const restored = hasProEntitlement(info);
       track('paywall_restore', { restored });
-      if (restored) noteCustomerInfo(true);
+      // Re-check before noting: the session or user may have changed while
+      // the restore was out. Only the note is skipped; the refresh decides.
+      const now = useSession.getState();
+      if (restored && now.user?.user_id === userId && customerInfoApplies(now, currentIdentityUserId())) {
+        noteCustomerInfo(true);
+      }
       // Always re-ask the server, as the paywall's Restore does.
       await refreshEntitlements();
       setRestoreLine(restored ? MON['mon.pay.restore_ok'] : MON['mon.pay.restore_none']);
