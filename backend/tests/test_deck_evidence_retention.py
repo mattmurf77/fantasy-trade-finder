@@ -149,8 +149,13 @@ def purge(**kw):
 def test_off_deletes_nothing_full_rows_included(db, days):
     deck(db, "old", 400)
     deck(db, "mid", 120)
+    _grade(db, "old:0", iso(400))
+    _calibration(db, "old-session", 400)
+    _calibration(db, "ancient-session", "2001-01-01T00:00:00+00:00")   # past any clock's cap
     assert purge(days=days) == {}
     assert counts(db, "old") == counts(db, "mid") == WHOLE
+    assert _grades(db) == ["old:0"]
+    assert _sessions_and_cards(db) == (["ancient-session", "old-session"], 4)
 
 
 def test_a_cap_under_the_floor_is_refused_and_logged(db, caplog):
@@ -311,6 +316,7 @@ def test_a_failed_full_row_chunk_keeps_the_cursor(db, monkeypatch, caplog):
     deck(db, "p0", 120)
     monkeypatch.setattr(db_module, "_delete_old_trade_impressions", lambda *a: 0)
     monkeypatch.setattr(db_module, "_delete_old_page_store", lambda *a: 0)
+    monkeypatch.setattr(db_module, "_delete_old_grading_sessions", lambda *a: 0)
     real_begin = db.begin
     state = {"fail": True}
 
@@ -339,7 +345,8 @@ def test_legacy_trade_impressions_go_at_the_cap(db):
 
 
 @pytest.mark.parametrize("step,name", [("_delete_old_trade_impressions", "trade_impressions"),
-                                       ("_delete_old_page_store", "trade_page_store")])
+                                       ("_delete_old_page_store", "trade_page_store"),
+                                       ("_delete_old_grading_sessions", "grading_sessions")])
 def test_a_failed_side_step_never_stops_the_others(db, monkeypatch, caplog, step, name):
     deck(db, "p0", 120)
 
@@ -568,3 +575,136 @@ def test_a_dropped_index_is_noticed_at_the_next_check(db, monkeypatch, caplog):
     with caplog.at_level("WARNING"):
         assert db_module._deck_impressions_served_index_ready() is False
     assert any("wait for ix_deck_impressions_served" in r.getMessage() for r in caplog.records)
+
+
+# ── head-eng 2026-10-29: receipts grades and Calibration under the cap ───────
+
+def _grade(engine, impression_id, served):
+    from backend.database import receipts_grades_table
+    with engine.begin() as conn:
+        conn.execute(insert(receipts_grades_table).values(
+            impression_id=impression_id, window_days=14, grader_version="receipts-1",
+            status="graded", league_id="lg", user_id="u1", served_at=served, graded_at=served))
+
+
+def _grades(engine):
+    from backend.database import receipts_grades_table as g
+    with engine.connect() as conn:
+        return sorted(conn.execute(select(g.c.impression_id)).scalars())
+
+
+def test_receipts_grades_go_with_their_deck_at_the_cap(db):
+    """A packed deck's grades by contract id (its rows already gone at 90
+    days), a pack-less deck's by its rows; a recent deck's stay."""
+    deck(db, "packed", 400)
+    deck(db, "rows-only", 380, packed=False)
+    deck(db, "recent", 30)
+    with db.connect() as conn:
+        legacy_id = conn.execute(select(deck_impressions_table.c.impression_id).where(
+            deck_impressions_table.c.deck_job_id == "rows-only").limit(1)).scalar()
+    _grade(db, "packed:0", iso(400))
+    _grade(db, legacy_id, iso(380))
+    _grade(db, "recent:0", iso(30))
+    purge()
+    assert _grades(db) == ["recent:0"]
+
+
+def test_receipts_grades_are_counted_in_the_decks_transaction(db):
+    deck(db, "old", 400)
+    _grade(db, "old:0", iso(400))
+    _grade(db, "old:5", iso(400))                        # a packed card with no row
+    assert purge(full_row_days=0)["receipts_grades"] == 2
+
+
+def _calibration(engine, sid, days):
+    """A completed Calibration session created `days` ago (or at `days` when
+    it's an ISO string), with two cards."""
+    from backend.database import grading_cards_table as gc, grading_sessions_table as gs
+    created = days if isinstance(days, str) else iso(days)
+    with engine.begin() as conn:
+        conn.execute(insert(gs).values(session_id=sid, user_id="u1", league_id="lg",
+                                       status="completed", seed="1", created_at=created,
+                                       counts_json="{}", source_json="{}"))
+        conn.execute(insert(gc), [
+            {"card_id": f"{sid}{k}", "session_id": sid, "user_id": "u1", "position": k,
+             "arms_json": "{}", "trade_json": '{"partner_name": "x"}'} for k in (1, 2)])
+
+
+def _sessions_and_cards(engine):
+    from backend.database import grading_cards_table as gc, grading_sessions_table as gs
+    with engine.connect() as conn:
+        return (sorted(conn.execute(select(gs.c.session_id)).scalars()),
+                conn.execute(select(func.count()).select_from(gc)).scalar())
+
+
+def test_calibration_sessions_and_their_cards_go_at_the_cap(db):
+    from backend.database import grading_cards_table as gc, grading_sessions_table as gs
+    _calibration(db, "old", 400)
+    _calibration(db, "new", 30)
+    assert purge() == {"grading_sessions": 1}
+    with db.connect() as conn:
+        assert list(conn.execute(select(gs.c.session_id)).scalars()) == ["new"]
+        assert sorted(conn.execute(select(gc.c.card_id)).scalars()) == ["new1", "new2"]
+
+
+def test_receipts_grades_go_in_the_decks_own_transaction(db):
+    """#544 QA P2-1: a statement failing after the grade deletes rolls the
+    grades back with the rest of the deck. In their own transaction, or on a
+    second connection, they'd be gone while the deck stayed whole."""
+    from sqlalchemy import event
+    deck(db, "old", 400)
+    _grade(db, "old:0", iso(400))                        # a card with a row
+    _grade(db, "old:5", iso(400))                        # a packed card with no row
+    seen = []
+
+    def fail_after_grades(conn, cursor, stmt, *a):
+        s = " ".join(stmt.split()).upper()
+        if s.startswith("DELETE FROM RECEIPTS_GRADES"):
+            seen.append(1)
+        elif s.startswith("DELETE FROM DECK_IMPRESSIONS") and seen:
+            raise RuntimeError("after the grades")
+    event.listen(db, "before_cursor_execute", fail_after_grades)
+    try:
+        got = purge(full_row_days=0)
+    finally:
+        event.remove(db, "before_cursor_execute", fail_after_grades)
+    assert seen and "decks" not in got                   # the grade deletes ran, then the deck failed
+    assert counts(db, "old") == WHOLE
+    assert _grades(db) == ["old:0", "old:5"]
+
+
+def test_grading_sessions_go_before_their_cards(db):
+    """#544 QA P3: fold_grading_cards first updates its session row, so with
+    the session deleted first a racing fold either waits and finds it gone or
+    commits first and its cards are caught by the card delete."""
+    from sqlalchemy import event
+    _calibration(db, "old", 400)
+    order = []
+
+    def note(conn, cursor, stmt, *a):
+        s = " ".join(stmt.split()).upper()
+        for t in ("GRADING_SESSIONS", "GRADING_CARDS"):
+            if s.startswith(f"DELETE FROM {t}"):
+                order.append(t)
+    event.listen(db, "before_cursor_execute", note)
+    try:
+        purge()
+    finally:
+        event.remove(db, "before_cursor_execute", note)
+    assert order == ["GRADING_SESSIONS", "GRADING_CARDS"]
+    assert _sessions_and_cards(db) == ([], 0)
+
+
+def test_the_loop_step_at_its_default_cap_deletes_nothing(db, monkeypatch):
+    """#544 QA P2-2: the real cleanup step, knobs at their defaults (cap 0),
+    over a deck, its grades and a Calibration session all past 365 days."""
+    for key in ("deck_evidence_retention_days", "deck_evidence_full_row_days"):
+        monkeypatch.delitem(server._trade_service_mod._cfg, key, raising=False)
+    deck(db, "old", 400)
+    _grade(db, "old:0", iso(400))
+    _calibration(db, "old-session", 400)
+    _calibration(db, "ancient-session", "2001-01-01T00:00:00+00:00")   # past any clock's cap
+    assert server._prune_deck_evidence() == {}
+    assert counts(db, "old") == WHOLE
+    assert _grades(db) == ["old:0"]
+    assert _sessions_and_cards(db) == (["ancient-session", "old-session"], 4)
