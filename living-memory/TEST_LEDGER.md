@@ -11,12 +11,15 @@ Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_
 - **Sabotages, 2/2 red:** I-1's drops ignored on the page path; the withhold ignored on the page path.
 - **Suites:** force-supersede, I-1 serve filter, page store and packed evidence: 317 passed on main and 317 passed on a flags-on copy of `ops/200ms-flip` (with failure 1's fix).
 - **Full backend suite, flags on** (`ops/200ms-flip` @ `8080663e` plus this branch's three test files): 10,055 passed, 2 skipped, 0 failed.
-## 2026-10-31 — #373: legal R28.23's server-Sentry lines pasted; the share lines pinned as two versions (#362 not live ships)
+## 2026-10-31 — #373: legal R28.23's server-Sentry lines pasted; the share lines pinned as two versions (#362 live ships)
 
 Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.
 
 - **Item 2, server Sentry:** privacy §1 gains the "Server error reports (Sentry)" bullet right after the app Sentry bullet. The §2 no-trackers line, §3's purposes line and §4's Sentry line each gain the server. Pasted word for word from `legal-lead-drafts.md` Part 1. `POL-r28-23-sentry` pins all four, and the §1 bullet's place after the app bullet. It also fails if any of the three app-only lines is still there.
-- **Item 3b, share lines:** `#362` is open, not live, so the "#362 not live" text ships. It's already on the page and matches Part 3's previous-text quotes word for word. `POL-r28-23-share` pins the chosen version (`SHARE_362_LIVE = False`). It fails if any marker phrase of the other version shows up, so a half-done swap or an early claim also fails. The swap is ready as local `local/373-r28-23-share-live`: one commit with the four text edits and the flag flip.
+- **Item 3b, share lines:** `POL-r28-23-share` pins the version that `SHARE_362_LIVE` names. It fails if any marker phrase of the other version shows up, so a half-done swap or an early claim also fails.
+  - It first shipped the "#362 not live" text (Part 3's previous text) while `#362` was open.
+  - `#362` deployed at 20:56Z (`3efcb5ed`; release-lead, and GitHub's deployment record). The swap commit `628946d5`, cherry-picked from `local/373-r28-23-share-live`, now carries the "#362 live" text: §3 hard-to-guess links, §5 matched-trade links stop working on deletion, and §6's removes and anonymized items. It sets `SHARE_362_LIVE = True`.
+  - Sabotage on the live text: 9/9 red (each line reverted or reworded, the §6 item moved out of its list, an old §5 sentence kept beside the new one, the flag flipped back alone).
 - **Sabotage:** 14/14 red (a word changed, a line removed, a line reverted, the §1 bullet moved off the app bullet, an old line kept beside a new one, one share line swapped alone, a new-version fragment added early). Positive control: the full swap is 244/244; the flag flip alone, or the text alone, is red. Every pinned string checked against the drafts.
 - **Suites:** web structure 244/244 (242 before, plus 2).
 
