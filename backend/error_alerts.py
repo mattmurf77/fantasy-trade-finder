@@ -15,7 +15,8 @@ With a DSN, what becomes an event:
     log.exception carries the stack. So do the _cleanup_loop step guards and
     daily_tick.run's per-step guard;
   * `http_5xx`, once, for a 5xx response that produced no event of its own
-    (report_5xx, from server's after_request hook). 4xx never reports;
+    (report_5xx, from server's after_request hook), at most once per route
+    and status per worker per hour. 4xx and 501 never report;
   * `notify(...)` messages (feedback_received), carrying their tags only.
 
 What is sent is built from an allowlist (legal R28.23; scope.md has the
@@ -23,10 +24,14 @@ conditions table): scrub_event (before_send) keeps the SDK's own fields, the
 request as method + route pattern, exception type/module/frames (file,
 function, line; no message, locals or source lines), the log template (from
 our own loggers only; every param [Filtered]), our own message constants,
-allowlisted tags and the runtime/os/trace contexts. Anything
-else, unknown keys included, is dropped; if building it raises, nothing is
-sent. Breadcrumbs are off. Sentry locates an error; its detail stays in the
-Render logs. The pattern scrub (_PATTERNS, the shapes api_observability and
+allowlisted tags and the runtime/os contexts. Anything else, unknown keys
+included, is dropped; if building it raises, nothing is sent. No trace
+context: its ids and the dynamic sampling context come from an inbound
+sentry-trace / baggage header any caller can write, and the SDK builds the
+envelope header's `trace` from contexts.trace after before_send
+(sentry_sdk/client.py:959, then :1202-1211); with no tracing they link
+nothing. Breadcrumbs are off. Sentry locates an error; its detail stays in
+the Render logs. The pattern scrub (_PATTERNS, the shapes api_observability and
 analytics_ingest already redact, copied so this module needs no database
 import) is a second layer over the templates.
 
@@ -39,7 +44,9 @@ Beyond the init options GNG-1 names:
     request (mobile sets the same);
   * ThreadingIntegration(propagate_scope=False): _cleanup_loop is started
     from the first request's before_request hook, so with propagation every
-    cleanup-loop event would carry that first request.
+    cleanup-loop event would carry that first request;
+  * auto_session_tracking=False: release-health sessions would send an
+    envelope each minute of traffic, errors or not.
 
 Fork safety under gunicorn --preload: init runs in the master, and starts no
 thread. sentry-sdk 2.72.0's BackgroundWorker (the HTTP transport's sender)
@@ -55,6 +62,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
+import time
 
 from flask import g, has_request_context, request
 
@@ -70,11 +79,11 @@ _ALLOWED_TAGS = frozenset({"route", "status", "method", "feedback_id", "kind"})
 # The only capture_message texts sent; any other becomes [Filtered].
 _MESSAGES = frozenset({"http_5xx", "feedback_received"})
 
-# The only contexts sent: the SDK's runtime / os, and the trace ids.
-_CONTEXTS = frozenset({"runtime", "os", "trace"})
+# The only contexts sent: the SDK's runtime / os (not trace: see the module doc).
+_CONTEXTS = frozenset({"runtime", "os"})
 
 # Loggers whose templates are sent: ours (backend.* from getLogger(__name__),
-# trade_finder, ftf.*), whose templates the AST guard in test_error_alerts
+# trade_finder, ftf.*), whose templates test_error_log_templates.py
 # keeps constant, and gunicorn's error log. A name matches itself or a child.
 # Any other logger's template becomes [Filtered]; its name and level still go.
 _OUR_LOGGERS = ("backend", "trade_finder", "ftf", "gunicorn.error")
@@ -122,11 +131,12 @@ _PATTERNS = (
 )
 
 # Top-level event keys the SDK fills from code or config, never from request
-# data: sent as they are.
+# data: sent as they are. Not server_name (the host name), nor _meta (it
+# names what the SDK trimmed, header names among them).
 _PASS_KEYS = frozenset({
     "event_id", "timestamp", "start_timestamp", "level", "logger", "platform",
-    "release", "environment", "dist", "server_name", "sdk", "modules",
-    "fingerprint", "transaction", "transaction_info", "type", "debug_meta", "_meta",
+    "release", "environment", "dist", "sdk", "modules",
+    "fingerprint", "transaction", "transaction_info", "type", "debug_meta",
 })
 
 # The parts of an exception or thread entry sent: the code-derived ones (type
@@ -134,6 +144,18 @@ _PASS_KEYS = frozenset({
 # include_source_context=False). Never
 # `value`, the exception's text.
 _CODE_KEYS = frozenset({"type", "module", "mechanism", "stacktrace"})
+
+# The parts of a frame sent: not abs_path (the checkout path; on a laptop, the
+# user's home), vars, or source lines.
+_FRAME_KEYS = frozenset({"filename", "module", "function", "lineno", "in_app"})
+
+# report_5xx sends one http_5xx per (route, status) per worker per this many
+# seconds. About 37 handled 5xx returns log no ERROR (a Sleeper outage's 503s,
+# a platform write's 502s), so without a cap an outage is one event per
+# request. Sentry is the alarm; the count is in the Render access log.
+_HTTP_5XX_EVERY_S = 3600.0
+_http_5xx_last: dict = {}
+_http_5xx_lock = threading.Lock()
 
 
 def init_error_alerts() -> bool:
@@ -162,6 +184,7 @@ def init_error_alerts() -> bool:
             # No tracing or profiling: traces/profiles_sample_rate stay unset.
             auto_enabling_integrations=False,
             trace_propagation_targets=[],
+            auto_session_tracking=False,
             integrations=[
                 FlaskIntegration(),
                 # No breadcrumbs, and no log lines shipped as Sentry Logs.
@@ -211,12 +234,25 @@ def request_started() -> None:
         g._error_alerts_last_event = sentry_sdk.last_event_id()
 
 
+def _first_in_window(route: str, status: int) -> bool:
+    now = time.monotonic()
+    with _http_5xx_lock:
+        last = _http_5xx_last.get((route, status))
+        if last is not None and now - last < _HTTP_5XX_EVERY_S:
+            return False
+        _http_5xx_last[(route, status)] = now
+        return True
+
+
 def report_5xx(status: int) -> None:
     """after_request, for a status >= 500: one `http_5xx` event tagged with
     route, status and method, unless this request already captured an event
     (handle_unexpected_error's log.exception, or any other ERROR log on the
-    way to the 5xx), so a 500 is never counted twice. Never raises."""
-    if not _initialized:
+    way to the 5xx), so a 500 is never counted twice; and not for a 501 (our
+    "not available for this platform or basis" answer, not a fault), or when
+    this route and status already sent one within _HTTP_5XX_EVERY_S. Never
+    raises."""
+    if not _initialized or status == 501:
         return
     try:
         import sentry_sdk
@@ -225,6 +261,8 @@ def report_5xx(status: int) -> None:
         if sentry_sdk.last_event_id() != g.get("_error_alerts_last_event"):
             return
         route = request.url_rule.rule if request.url_rule else "<unmatched>"
+        if not _first_in_window(route, status):
+            return
         with sentry_sdk.new_scope() as scope:
             scope.set_tag("route", route)
             scope.set_tag("status", str(status))
@@ -250,12 +288,13 @@ def _ours(logger) -> bool:
         logger == name or logger.startswith(name + ".") for name in _OUR_LOGGERS)
 
 
-def _logentry(entry: dict, logger) -> dict:
-    """The template (record.msg) only from a logger we control, pattern-scrubbed
-    as a second layer; from any other logger, [Filtered]. Every param is
-    [Filtered], numbers too (a match_id is a /s/trade/ link code); `formatted`
-    is rebuilt from those two, and dropped when they don't format (a %d)."""
-    if not _ours(logger):
+def _logentry(entry: dict, logger, record=None) -> dict:
+    """The template (record.msg) only from a logger we control, and only when
+    it is a str (log.error(exc) logs the exception's text), pattern-scrubbed
+    as a second layer; otherwise [Filtered]. Every param is [Filtered],
+    numbers too (a match_id is a /s/trade/ link code); `formatted` is rebuilt
+    from those two, and dropped when they don't format (a %d)."""
+    if not _ours(logger) or (record is not None and not isinstance(record.msg, str)):
         return {"message": _FILTERED}
     template = _scrub_str(entry["message"])
     raw = entry.get("params") or []
@@ -271,13 +310,15 @@ def _logentry(entry: dict, logger) -> dict:
 
 def _stack(block: dict) -> dict:
     """`exception` / `threads`: per entry its type, module, mechanism and
-    frames, with frame locals dropped. Never the value: an exception's text can
+    frames, each frame as _FRAME_KEYS. Never the value: an exception's text can
     carry a username or SQL parameters."""
     entries = []
     for entry in block.get("values") or []:
         kept = {k: v for k, v in entry.items() if k in _CODE_KEYS}
-        for frame in (kept.get("stacktrace") or {}).get("frames") or []:
-            frame.pop("vars", None)
+        if isinstance(kept.get("stacktrace"), dict):
+            kept["stacktrace"] = {"frames": [
+                {k: v for k, v in frame.items() if k in _FRAME_KEYS}
+                for frame in kept["stacktrace"].get("frames") or []]}
         entries.append(kept)
     return {"values": entries}
 
@@ -294,7 +335,7 @@ def _route():
     return {"method": request.method, "url": rule.rule if rule else "<unmatched>"}
 
 
-def _allowlisted(event: dict) -> dict:
+def _allowlisted(event: dict, hint) -> dict:
     out = {k: v for k, v in event.items() if k in _PASS_KEYS}
     if "request" in event:
         req = _route()
@@ -304,7 +345,8 @@ def _allowlisted(event: dict) -> dict:
         if isinstance(event.get(key), dict):
             out[key] = _stack(event[key])
     if "logentry" in event:
-        out["logentry"] = _logentry(event["logentry"], event.get("logger"))
+        out["logentry"] = _logentry(event["logentry"], event.get("logger"),
+                                    (hint or {}).get("log_record"))
     if "message" in event:
         out["message"] = event["message"] if event["message"] in _MESSAGES else _FILTERED
     if isinstance(event.get("tags"), dict):
@@ -319,7 +361,7 @@ def scrub_event(event, hint=None):
     breadcrumbs and every unknown key dropped); None, so nothing is sent, when
     building it raises."""
     try:
-        return _allowlisted(event)
+        return _allowlisted(event, hint)
     except Exception:
         return None
 

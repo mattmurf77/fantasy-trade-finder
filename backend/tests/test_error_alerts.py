@@ -15,19 +15,23 @@ fixture also records each event as the SDK built it, before scrub_event
       nothing, and the SDK is never imported; a malformed DSN doesn't fail boot
   (b) a raising route: exactly one event, with the stack, without its text
   (c) a handled 503: one http_5xx (route/status/method tags, fingerprint);
-      a 404: none; a handled 500 after log.exception: one
+      a 404: none; a handled 500 after log.exception: one; one per route and
+      status per hour; a 501: none
   (d) one _cleanup_loop pass with a step raising: one event, the guard's template
   (e) a daily_tick step raising: one event
   (f) the allowlist: legal R28.23's condition-7 request (no planted value in the
       envelope bytes, request.url the route pattern, no breadcrumbs collected),
       credentials, a match_id (a link code) as a log param, a third-party
-      logger's template, frames without source lines, the event shape, the
-      pattern layer, fail closed
+      logger's template, a logged exception object, frames without source
+      lines or paths, condition 3's inbound sentry-trace / baggage (no trace
+      id or baggage in the envelope, its header included), the event shape,
+      the pattern layer, fail closed
   (g) POST /api/feedback: one feedback_received carrying exactly feedback_id
       and kind, nothing of the note; a duplicate: none
   (h) a thread started in a request: its event carries no request
-  (i) the structural guard: every error-level log template in backend/ is a
-      constant (the template-only rule depends on it)
+  (i) no error, no envelope: release-health sessions are off
+The structural guard (every error-level log template is a constant, which
+the template rule depends on) is test_error_log_templates.py: it needs no SDK.
 
 Sabotage record (each applied, observed red, restored green):
   2026-10-31
@@ -49,13 +53,13 @@ Sabotage record (each applied, observed red, restored green):
   request headers kept                            -> (f) condition 7 (X-Session-Token), credentials RED
   logging breadcrumbs re-enabled (level=INFO and  -> (f) condition 7 (collected), init, breadcrumb RED
     before_breadcrumb returning the crumb)
-  one f-string log.error added to server.py       -> (i) RED
+  one f-string log.error added to server.py       -> the template guard RED (now
+                                                     test_error_log_templates.py)
   2026-10-31, legal R28.23 strict follow-ups
   ints pass _logentry's params again              -> (f) match_id RED
   templates from every logger                     -> (f) third-party logger RED
   include_source_context=True                     -> (f) no source lines, init RED
 """
-import ast
 import copy
 import json
 import logging
@@ -152,6 +156,7 @@ def sentry(monkeypatch):
     monkeypatch.setattr(sentry_sdk, "init",
                         lambda **kwargs: real_init(transport=_Recorder, **kwargs))
     monkeypatch.setattr(error_alerts, "_initialized", False)
+    monkeypatch.setattr(error_alerts, "_http_5xx_last", {})
     monkeypatch.setenv("SENTRY_DSN", FAKE_DSN)
     # No background-thread start (win-now-resume) from a first request mid-test.
     monkeypatch.setattr(server, "_bg_threads_pid", os.getpid())
@@ -228,6 +233,7 @@ def test_init_options(monkeypatch):
     assert "traces_sample_rate" not in kw and "profiles_sample_rate" not in kw
     assert "enable_logs" not in kw
     assert kw["auto_enabling_integrations"] is False and kw["trace_propagation_targets"] == []
+    assert kw["auto_session_tracking"] is False
     assert kw["before_send"] is error_alerts.scrub_event
     assert kw["before_breadcrumb"] is error_alerts.scrub_breadcrumb
     by_name = {type(i).__name__: i for i in kw["integrations"]}
@@ -279,6 +285,26 @@ def test_a_handled_503_is_one_http_5xx_and_a_404_none(sentry, monkeypatch, clien
     assert event["request"] == {"method": "POST", "url": route}
     assert client.get("/api/no-such-route").status_code == 404
     assert len(sentry.events()) == 1
+
+
+def test_http_5xx_once_per_route_and_status_an_hour_and_never_501(sentry, monkeypatch, client):
+    status = [503]
+    for name in (UNAVAILABLE, BOOM):
+        monkeypatch.setitem(server.app.view_functions, name,
+                            lambda **_: (jsonify({"error": "unavailable"}), status[0]))
+    decide, decide_rule = "/api/admin/experiments/x/decide", "/api/admin/experiments/<key>/decide"
+    for code in (503, 503, 503, 502, 502, 501, 501):
+        status[0] = code
+        assert client.post(decide).status_code == code
+    status[0] = 503
+    assert client.post("/api/admin/experiments/x/transition").status_code == 503
+    sent = [(e["tags"]["route"], e["tags"]["status"]) for e in sentry.events()]
+    assert sent == [(decide_rule, "503"), (decide_rule, "502"),
+                    ("/api/admin/experiments/<key>/transition", "503")]
+    # An hour on, the same route and status report again.
+    error_alerts._http_5xx_last[(decide_rule, 503)] -= error_alerts._HTTP_5XX_EVERY_S
+    assert client.post(decide).status_code == 503
+    assert len(sentry.events()) == 4
 
 
 @pytest.fixture
@@ -367,6 +393,7 @@ def test_legal_condition_7_no_planted_value_leaves(sentry, monkeypatch, client, 
     raw = sentry.raw()
     for planted in (L_USER_ID, L_USERNAME, L_SHARE, L_EMAIL, L_IP, L_COOKIE, L_AUTH, L_SESSION):
         assert planted.encode() not in raw, planted
+    assert b'"_meta"' not in raw                 # it would name the dropped headers
 
 
 def test_no_credential_reaches_the_envelope(sentry, monkeypatch, client):
@@ -406,6 +433,16 @@ def test_a_match_id_never_reaches_the_envelope(sentry, monkeypatch, client):
     assert not re.search(rb"(?<![0-9A-Za-z])%d(?![0-9A-Za-z])" % MATCH_ID, sentry.raw())
 
 
+def test_a_logged_exception_object_is_filtered(sentry):
+    # log.error(exc): record.msg is the exception, so the "template" is its text.
+    server.log.error(LookupError(f"no user row for {L_USERNAME}"))
+    [event] = sentry.events()
+    assert event["logentry"] == {"message": "[Filtered]"}
+    assert L_USERNAME in sentry.pre_events()[0]["logentry"]["message"]    # it was collected
+    sentry_sdk.flush()
+    assert L_USERNAME.encode() not in sentry.raw()
+
+
 def test_a_third_party_template_is_filtered(sentry):
     logging.getLogger("thirdparty.sdk").error(f"lookup failed for {L_USERNAME} at {L_EMAIL}")
     [event] = sentry.events()
@@ -421,11 +458,43 @@ def test_frames_carry_no_source_lines(sentry, monkeypatch, client):
     assert client.post("/api/admin/experiments/x/transition").status_code == 500
     [event] = sentry.events()
     frames = event["exception"]["values"][0]["stacktrace"]["frames"]
-    assert frames and all({"filename", "function", "lineno"} <= set(f) for f in frames)
+    assert frames and all({"filename", "function", "lineno"} <= set(f) <= error_alerts._FRAME_KEYS
+                          for f in frames)
+    assert any("abs_path" in f for f in sentry.pre_events()[0]["exception"]["values"][0]
+               ["stacktrace"]["frames"])                                  # it was collected
     sentry_sdk.flush()
     raw = sentry.raw()
-    for key in (b'"context_line"', b'"pre_context"', b'"post_context"'):
+    for key in (b'"context_line"', b'"pre_context"', b'"post_context"', b'"abs_path"',
+                b'"server_name"', str(REPO).encode()):
         assert key not in raw, key
+
+
+# Legal R28.23 condition 3: inbound trace headers, which any caller can set.
+TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736"
+PARENT_SPAN = "00f067aa0ba902b7"
+B_USER = "baggage-user-55Tq"
+B_TXN = "baggage-txn-44Rp"
+B_OTHER = "baggage-other-33Sn"
+
+
+def test_legal_condition_3_no_inbound_trace_or_baggage_leaves(sentry, monkeypatch, client):
+    monkeypatch.setitem(server.app.view_functions, BOOM, _boom)
+    res = client.post("/api/admin/experiments/x/transition", headers={
+        "sentry-trace": f"{TRACE_ID}-{PARENT_SPAN}-1",
+        "baggage": (f"sentry-trace_id={TRACE_ID},sentry-user_id={B_USER},"
+                    f"sentry-transaction={B_TXN},sentry-public_key=public,other={B_OTHER}"),
+        "traceparent": f"00-{TRACE_ID}-{PARENT_SPAN}-01"})
+    assert res.status_code == 500
+    [event] = sentry.events()
+    assert "trace" not in event.get("contexts", {})
+    # Not vacuous: the SDK continued the inbound trace, its baggage included.
+    trace = sentry.pre_events()[0]["contexts"]["trace"]
+    assert trace["trace_id"] == TRACE_ID and B_USER in json.dumps(trace)
+    sentry_sdk.flush()
+    assert sentry.items and all("trace" not in env.headers for _, env in sentry.items)
+    raw = sentry.raw()                           # each envelope's header line included
+    for planted in (TRACE_ID, PARENT_SPAN, B_USER, B_TXN, B_OTHER):
+        assert planted.encode() not in raw, planted
 
 
 @pytest.mark.parametrize("text, expected", [
@@ -461,6 +530,8 @@ def test_scrub_patterns(text, expected):
 def _shape_event():
     return {
         "event_id": "a" * 32, "release": "f" * 40, "level": "error", "logger": "trade_finder",
+        "server_name": "srv-host-1",
+        "_meta": {"request": {"headers": {"X-Session-Token": {"": {"rem": [["!config", "x"]]}}}}},
         "transaction": "admin_experiment_transition_route",
         "message": f"user {EMAIL} league {LEAGUE}",
         "logentry": {"message": "failed %s %s n=%d t=%.1f", "params": [LEAGUE, "bob", 42, 3.5],
@@ -470,9 +541,12 @@ def _shape_event():
             "mechanism": {"type": "logging", "handled": True},
             "stacktrace": {"frames": [{"function": "_attach_presession_feedback",
                                        "filename": "backend/server.py", "lineno": 3,
+                                       "abs_path": "/Users/bob/ftf/backend/server.py",
+                                       "in_app": True, "context_line": "note = bob",
                                        "vars": {"note": "MY-PRIVATE-FEEDBACK"}}]}}]},
         "extra": {"sys.argv": ["gunicorn"], "user_id": "u1"},
-        "contexts": {"trace": {"trace_id": "b" * 32, "span_id": "c" * 16},
+        "contexts": {"trace": {"trace_id": "b" * 32, "span_id": "c" * 16,
+                               "dynamic_sampling_context": {"user_id": "bob"}},
                      "runtime": {"name": "CPython", "version": "3.12.7"},
                      "custom": {"text": "bob"}},
         "tags": {"route": "/api/league/<league_id>", "feedback_id": "12", "kind": "bug",
@@ -501,11 +575,12 @@ def test_scrub_event_is_an_allowlist():
     assert out["exception"] == {"values": [{
         "type": "RuntimeError", "module": None, "mechanism": {"type": "logging", "handled": True},
         "stacktrace": {"frames": [{"function": "_attach_presession_feedback",
-                                   "filename": "backend/server.py", "lineno": 3}]}}]}
-    assert out["contexts"] == {"trace": event["contexts"]["trace"],
-                               "runtime": event["contexts"]["runtime"]}
+                                   "filename": "backend/server.py", "lineno": 3,
+                                   "in_app": True}]}}]}
+    assert out["contexts"] == {"runtime": event["contexts"]["runtime"]}
     assert out["tags"] == {"route": "/api/league/<league_id>", "feedback_id": "12", "kind": "bug"}
     assert "bob" not in json.dumps(out) and L_IP not in json.dumps(out)
+    assert "X-Session-Token" not in json.dumps(out)
 
 
 def test_scrub_event_request_and_message_edges():
@@ -635,90 +710,11 @@ def test_a_thread_started_in_a_request_carries_no_request(sentry, monkeypatch, c
     assert "request" not in event
 
 
-# ── (i) every error-level log template is a constant ───────────────────────
+# ── (i) no error, no envelope ──────────────────────────────────────────────
 
-_ERROR_METHODS = {"error", "exception", "critical"}
-
-
-def _bound_once_to_a_str(scope, name, parents):
-    """Whether `name` is bound exactly once in `scope` (any store: assignment,
-    loop, with, unpacking), by `name = "<str constant>"`, and isn't a parameter."""
-    if not isinstance(scope, ast.Module) and name in {a.arg for a in ast.walk(scope.args)
-                                                      if isinstance(a, ast.arg)}:
-        return False
-    stores = [n for n in ast.walk(scope)
-              if isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Store)]
-    if len(stores) != 1:
-        return False
-    assign = parents.get(stores[0])
-    return (isinstance(assign, ast.Assign) and len(assign.targets) == 1
-            and assign.targets[0] is stores[0] and isinstance(assign.value, ast.Constant)
-            and isinstance(assign.value.value, str))
-
-
-def _template_violations(source):
-    """(scanned, [(line, call)]): every log.error/exception/critical call, and
-    every log.log(level, …) call, on any receiver named like a logger, whose
-    template is not a str constant, or a name bound once, in its function,
-    to one."""
-    tree = ast.parse(source)
-    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
-    scanned, bad = 0, []
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-            continue
-        recv = node.func.value
-        recv_name = recv.id if isinstance(recv, ast.Name) else getattr(recv, "attr", "")
-        if "log" not in recv_name.lower():
-            continue
-        if node.func.attr in _ERROR_METHODS:
-            index = 0
-        elif node.func.attr == "log":
-            index = 1
-        else:
-            continue
-        scanned += 1
-        arg = node.args[index] if len(node.args) > index else None
-        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-            continue
-        if isinstance(arg, ast.Name):
-            scope = parents.get(node)
-            while scope is not None and not isinstance(
-                    scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
-                scope = parents.get(scope)
-            if scope is not None and _bound_once_to_a_str(scope, arg.id, parents):
-                continue
-        bad.append((node.lineno, ast.unparse(node)[:120]))
-    return scanned, bad
-
-
-@pytest.mark.parametrize("source, ok", [
-    ('log.error("x %s", a)', True),
-    ('log.exception("a " "b %s", a)', True),            # implicit concatenation: a constant
-    ('def f(a):\n    t = ("a %s "\n         "b")\n    log.error(t, a)', True),
-    ('log.log(logging.ERROR, "x %s", a)', True),
-    ('log.error(f"x {a}")', False),
-    ('logger.exception("x %s" % a)', False),
-    ('self.log.critical("x {}".format(a))', False),
-    ('logging.error("x " + a)', False),
-    ('log.error(str(e))', False),
-    ('log.log(level, f"x {a}")', False),
-    ('def f(a, b):\n    t = "x"\n    if b:\n        t = a\n    log.error(t)', False),
-    ('def f(rows):\n    t = "x"\n    for t in rows:\n        log.error(t)', False),
-    ('def f(t):\n    log.error(t)', False),
-])
-def test_template_guard_detector(source, ok):
-    scanned, bad = _template_violations(source)
-    assert scanned == 1 and (bad == []) is ok
-
-
-def test_every_error_log_template_in_backend_is_a_constant():
-    scanned, bad = 0, []
-    for path in sorted((REPO / "backend").rglob("*.py")):
-        if "tests" in path.relative_to(REPO / "backend").parts:
-            continue
-        n, violations = _template_violations(path.read_text())
-        scanned += n
-        bad += [f"{path.relative_to(REPO)}:{line} {call}" for line, call in violations]
-    assert scanned >= 170, scanned                       # the scan sees the call sites
-    assert bad == [], "error-level log templates must be constants:\n" + "\n".join(bad)
+def test_no_envelope_without_an_error(sentry, monkeypatch, client):
+    monkeypatch.setitem(server.app.view_functions, BOOM, lambda **_: jsonify({"ok": True}))
+    for _ in range(3):
+        assert client.post("/api/admin/experiments/x/transition").status_code == 200
+    sentry_sdk.flush()                           # would flush release-health sessions
+    assert sentry.items == []
