@@ -5,3 +5,4 @@ psycopg2-binary>=2.9.0
 sqlalchemy>=2.0.0,<2.1   # 2.1 makes psycopg (v3) the default postgresql:// driver; we ship psycopg2 (G-073)
 Pillow>=10.0
 cryptography>=42.0.0   # Fernet encryption for Sleeper write tokens (trade.send_in_sleeper)
+segno==1.6.6           # server-side inline-SVG QR on the join landing (referral loop D-1, FR-7/AC-7f); no QR service is ever called

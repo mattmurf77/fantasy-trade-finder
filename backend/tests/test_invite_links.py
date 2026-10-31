@@ -155,9 +155,12 @@ def test_t8_invite_meta_resolves_sleeper_name(meta_db):
                       lambda lid: {"name": "Lakeview Dynasty"}):
         body = _client().get(
             "/api/league/invite-meta?league_id=990000000000000001").get_json()
+    # FR-11 (referral loop) added the two invite keys; null without `t`.
     assert body == {"league_id": "990000000000000001",
                     "league_name": "Lakeview Dynasty",
-                    "platform": "sleeper"}
+                    "platform": "sleeper",
+                    "inviter_display_name": None,
+                    "invite_status": None}
 
 
 def test_t9_invite_meta_degrades_on_failure(meta_db):
