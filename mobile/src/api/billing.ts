@@ -14,8 +14,11 @@
 
 import { api } from './client';
 
-/** GET /api/me/entitlements. `enforcing` echoes `monetize.entitlements`, so a
- *  client can tell "you are not Pro" from "gating is not on yet". */
+/** GET /api/me/entitlements. `enforcing` is the server's enforce predicate
+ *  (the same one the 402 gate uses), so a client can tell "you are not Pro"
+ *  from "gating is not on yet". For an UNVERIFIED session the server blanks
+ *  every subscription field (`pro`/`founder` false, `sources` [], R28.9) but
+ *  keeps `enforcing`: a blank reads as not entitled, never as not enforcing. */
 export interface EntitlementsResponse {
   pro: boolean;
   ad_free: boolean;
@@ -24,6 +27,8 @@ export interface EntitlementsResponse {
   /** Furthest expiry among active pro rows; null when one is perpetual. */
   expires_at: string | null;
   enforcing?: boolean;
+  /** Founding GMs member (S1, #465). Absent on an older server ⇒ false. */
+  founder?: boolean;
 }
 
 /** One purchasable plan as the SERVER describes it. `display_price` is the
@@ -34,9 +39,19 @@ export interface PaywallProduct {
   period: string;              // 'monthly' | 'annual' | 'lifetime' | 'season'
   display_price: string;
   per_month_equiv?: string;
-  trial_days: number;
+  /** "1 month" (S1). Display context only: the free-month copy keys off
+   *  StoreKit intro eligibility (purchases.checkIntroEligibility), never this
+   *  and never a day count. (`trial_days` is gone, #393 D14.) */
+  trial_period?: string;
   hero: boolean;
   badge?: string;              // 'best_value' — enum in cross-client-invariants
+}
+
+/** The Founding GMs window (S1, #465). Absent on an older server ⇒ closed. */
+export interface PaywallClub {
+  name: string;
+  closes_at: string;
+  open: boolean;
 }
 
 /** One rendered block of the paywall. `kind` is an OPEN set on purpose: an
@@ -57,6 +72,8 @@ export interface PaywallConfig {
   platform?: string;
   pages?: PaywallPage[];
   products?: PaywallProduct[];
+  club?: PaywallClub;
+  /** Per-SKU claim only. Never read for copy (#393 D6). */
   trial_eligible?: boolean;
   dismissible?: boolean;
   /** Tip-jar consumables (support-the-platform; no entitlement). */
