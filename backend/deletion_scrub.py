@@ -114,16 +114,25 @@ def capture_leagues(conn, user_ids) -> list[str]:
     return sorted(x for x in found if x)
 
 
-def capture_names(conn, user_ids) -> dict[str, list[str]]:
-    """The person's display names and usernames per league, read before the
-    deletion removes their league_members rows: a Calibration card names its
-    partner by display name, never by id."""
-    m = db.league_members_table
-    names: dict[str, set] = {}
+def capture_names(conn, user_ids) -> dict:
+    """The person's names, read before the deletion removes their rows:
+    `leagues` = {league_id: [display names and usernames]} (a Calibration card
+    names its partner by display name, never by id), and `usernames`, which
+    are unique (a notification names its partner by username, so only those
+    match there: a display name could be someone else's)."""
+    m, u = db.league_members_table, db.users_table
+    ids = list(user_ids)
+    by_league: dict[str, set] = {}
+    usernames: set = set()
     for league_id, display, username in conn.execute(select(
-            m.c.league_id, m.c.display_name, m.c.username).where(m.c.user_id.in_(list(user_ids)))):
-        names.setdefault(league_id, set()).update(n for n in (display, username) if n)
-    return {lg: sorted(ns) for lg, ns in names.items() if ns}
+            m.c.league_id, m.c.display_name, m.c.username).where(m.c.user_id.in_(ids))):
+        by_league.setdefault(league_id, set()).update(n for n in (display, username) if n)
+        if username:
+            usernames.add(username)
+    usernames.update(n for n in conn.execute(select(u.c.username).where(
+        u.c.sleeper_user_id.in_(ids))).scalars() if n)
+    return {"leagues": {lg: sorted(ns) for lg, ns in by_league.items() if ns},
+            "usernames": sorted(usernames)}
 
 
 def enqueue(conn, user_ids, league_ids, now: datetime | None = None) -> str:
@@ -918,7 +927,8 @@ def _redact_grading_session(conn, session: dict, job: dict) -> int:
     shows they were a partner but no names were captured, any of theirs):
     its partner_name becomes the placeholder. Returns the cards changed."""
     ids, token = set(job["ids"]), job["token"]
-    names = set((job.get("names") or {}).get(session["league_id"], ()))
+    by_league = (job.get("names") or {}).get("leagues") or {}
+    names = set(by_league.get(session["league_id"], ()))
     gs, gc = db.grading_sessions_table, db.grading_cards_table
     source = _loads(session["source_json"])
     theirs = set()
@@ -930,7 +940,7 @@ def _redact_grading_session(conn, session: dict, job: dict) -> int:
             # A league the person had left (no names captured there), but the
             # session's own source shows they were a partner in it: their
             # names from every league.
-            names = {n for ns in (job.get("names") or {}).values() for n in ns}
+            names = {n for ns in by_league.values() for n in ns}
         new = _replace_ids(source, ids, token)
         if new != source:
             conn.execute(update(gs).where(gs.c.session_id == session["session_id"])
@@ -1017,6 +1027,89 @@ def _scan_diagnostics(job: dict, after: str, budget: "_Budget") -> tuple[str | N
     return after, deleted
 
 
+# ── Other users' notifications and events (head-eng, 10-31; release-lead's
+# #557 QA): a match / disposition notification names its partner by username
+# in its title, body and metadata; an event's props can carry a partner id.
+
+def redact_notification(row: dict, ids, token: str, usernames) -> dict | None:
+    """One other user's notification, or None when it doesn't name the person.
+    It's theirs when its metadata names them by username (unique) or holds one
+    of their ids: their username becomes the placeholder in the title, body
+    and metadata, and every id the token."""
+    meta = _loads(row["metadata_json"]) if isinstance(row["metadata_json"], str) else None
+    meta = meta if isinstance(meta, dict) else {}
+    named = meta.get("partner_username") in usernames
+    text_ids = any(pid in (row["metadata_json"] or "") for pid in ids)
+    if not named and not text_ids:
+        return None
+    title, body = row["title"] or "", row["body"] or ""
+    for name in (usernames if named else ()):
+        title = title.replace(f"@{name}", f"@{_PLACEHOLDER}")
+        body = body.replace(f"@{name}", f"@{_PLACEHOLDER}")
+    new_meta = _replace_ids(meta, set(ids), token)
+    if named:
+        new_meta["partner_username"] = _PLACEHOLDER
+    return {"title": title if row["title"] is not None else None,
+            "body": body if row["body"] is not None else None,
+            "metadata_json": json.dumps(new_meta)}
+
+
+def _scan_notifications(job: dict, after: str, budget: "_Budget") -> tuple[str | None, int]:
+    ids, token = set(job["ids"]), job["token"]
+    usernames = set((job.get("names") or {}).get("usernames") or ())
+    t = db.notifications_table
+    terms = sorted(ids) + [f'"partner_username": "{n}"' for n in sorted(usernames)]
+    hit = or_(*[t.c.metadata_json.contains(term, autoescape=True) for term in terms])
+    changed, cursor = 0, int(after or 0)
+    while budget.take():
+        with db.engine.begin() as conn:
+            rows = conn.execute(select(t.c.id, t.c.title, t.c.body, t.c.metadata_json,
+                                       hit.label("hit")).where(
+                t.c.id > cursor, t.c.user_id.notin_(sorted(ids)),
+            ).order_by(t.c.id).limit(_SCAN_BATCH)).mappings().all()
+            if not rows:
+                return None, changed
+            for row in rows:
+                if not row["hit"]:
+                    continue
+                try:
+                    values = redact_notification(row, ids, token, usernames)
+                except Exception as err:   # a poison row: counted, the pass not done
+                    _row_failed(job, "notifications", err)
+                    continue
+                if values:
+                    conn.execute(update(t).where(t.c.id == row["id"]).values(**values))
+                    changed += 1
+        cursor = rows[-1]["id"]
+    return str(cursor), changed
+
+
+def _scan_user_events(job: dict, after: str, budget: "_Budget") -> tuple[str | None, int]:
+    """Other users' events whose props name a deleted id: the token."""
+    ids, token = set(job["ids"]), job["token"]
+    t = db.user_events_table
+    changed, cursor = 0, int(after or 0)
+    while budget.take():
+        with db.engine.begin() as conn:
+            rows = conn.execute(select(t.c.id, t.c.props, _mentions(t.c.props, ids).label("hit")).where(
+                t.c.id > cursor, t.c.user_id.notin_(sorted(ids)),
+            ).order_by(t.c.id).limit(_SCAN_BATCH)).mappings().all()
+            if not rows:
+                return None, changed
+            for row in rows:
+                if not row["hit"]:
+                    continue
+                props = _loads(row["props"])
+                if not isinstance(props, (dict, list)):
+                    continue
+                new = _replace_ids(props, ids, token)
+                if new != props:
+                    conn.execute(update(t).where(t.c.id == row["id"]).values(props=json.dumps(new)))
+                    changed += 1
+        cursor = rows[-1]["id"]
+    return str(cursor), changed
+
+
 # The DB phase, in order (scope §0.2). First the league pass over the captured leagues, then the
 # fallback scans of whole stores, resumable from a cursor on the job row.
 _STORES = (
@@ -1036,6 +1129,8 @@ _SCANS = (
     ("trade_page_store", _scan_page_store),
     ("grading_cards", _scan_grading),
     ("deck_diagnostic_snapshots", _scan_diagnostics),
+    ("notifications", _scan_notifications),
+    ("user_events", _scan_user_events),
 )
 
 

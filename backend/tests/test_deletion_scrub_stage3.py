@@ -28,7 +28,8 @@ def name_people(engine):
 def test_the_persons_names_per_league_are_captured_at_deletion(engine):
     name_people(engine)
     accounts.delete_user_data(DEL)
-    assert json.loads(job(engine)["partner_names_json"]) == {LEAGUE: ["Del Name", "deluser"]}
+    assert json.loads(job(engine)["partner_names_json"]) == {
+        "leagues": {LEAGUE: ["Del Name", "deluser"]}, "usernames": ["deluser"]}
 
 
 def test_a_redacted_page_card_loses_its_narrative():
@@ -266,3 +267,49 @@ def test_g_a2_unpack_equals_the_original_with_items_1_to_5_applied(engine):
     inputs = run["filter_inputs"]                                         # 3: holdings, protected
     assert DEL not in inputs["qb_te"] and f"{0:016x}" not in inputs["protected"]
     assert run["redacted_at"]                                             # 4: redacted_at
+
+
+# ── Other users' notifications and events (head-eng 10-31) ─────────────────
+
+def notification(conn, title, meta, user=VIEWER):
+    conn.execute(insert(db.notifications_table).values(
+        user_id=user, type="trade_match", title=title, body="CeeDee Lamb for Tyreek Hill",
+        metadata_json=json.dumps(meta), created_at=EARLY))
+
+
+def test_notifications_naming_the_person_take_the_placeholder_and_the_token(engine):
+    """A match / disposition notification names its partner by username
+    (unique) in its title and metadata: it takes the placeholder there, and
+    any id in its metadata the token. A display name is never matched: it
+    could be someone else's username."""
+    name_people(engine)
+    with engine.begin() as conn:
+        notification(conn, "Trade match with @deluser", {"partner_username": "deluser", "match_id": 1})
+        notification(conn, "@deluser accepted your trade", {"partner_username": "deluser"})
+        notification(conn, "Trade match with @otheruser", {"partner_username": "otheruser"})
+        notification(conn, "Trade match with @Del Name", {"partner_username": "Del Name"})  # another person
+        notification(conn, "Counter offer", {"partner_user_id": DEL})
+    accounts.delete_user_data(DEL)
+    token = job(engine)["token"]
+    scrub.run_pending()
+    rows = {r["id"]: r for r in read(engine, db.notifications_table)}
+    got = [(r["title"], json.loads(r["metadata_json"])) for _id, r in sorted(rows.items())]
+    assert got == [
+        (f"Trade match with @{PLACEHOLDER}", {"partner_username": PLACEHOLDER, "match_id": 1}),
+        (f"@{PLACEHOLDER} accepted your trade", {"partner_username": PLACEHOLDER}),
+        ("Trade match with @otheruser", {"partner_username": "otheruser"}),
+        ("Trade match with @Del Name", {"partner_username": "Del Name"}),
+        ("Counter offer", {"partner_user_id": token}),
+    ]
+
+
+def test_other_users_events_naming_the_person_take_the_token(engine):
+    with engine.begin() as conn:
+        for props in ({"partner_user_id": DEL, "surface": "deck"}, {"partner_user_id": OTHER}):
+            conn.execute(insert(db.user_events_table).values(
+                user_id=VIEWER, event_type="trade_matched", occurred_at=EARLY, props=json.dumps(props)))
+    accounts.delete_user_data(DEL)
+    token = job(engine)["token"]
+    scrub.run_pending()
+    props = [json.loads(r["props"]) for r in read(engine, db.user_events_table)]
+    assert props == [{"partner_user_id": token, "surface": "deck"}, {"partner_user_id": OTHER}]

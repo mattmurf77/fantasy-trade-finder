@@ -3179,7 +3179,7 @@ deletion_scrub_jobs_table = Table("deletion_scrub_jobs", metadata,
     Column("claimed_until",    String),                      # ISO UTC lease; NULL = free
     Column("last_error",       String),                      # an exception class name, never a message
     Column("scan_json",        Text),                        # an unfinished pass's scan cursor; NULL between passes
-    Column("partner_names_json", Text),                      # {league_id: [display names]}: Calibration cards name partners
+    Column("partner_names_json", Text),                      # {leagues: {league_id: [names]}, usernames: [..]}
     Index("ix_deletion_scrub_jobs_deleted", "deleted_at"),
 )
 
