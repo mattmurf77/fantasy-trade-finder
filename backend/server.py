@@ -2906,6 +2906,12 @@ def _trade_job_stalled(job, now):
     return now - last_progress > _JOB_HARD_TIMEOUT
 
 
+# Diagnostics expiry per cleanup tick: up to 20 x 500 rows (10,000 a tick,
+# 2.88M a day); one 500-row batch a tick fell behind the write rate.
+_DIAG_PURGE_MAX_BATCHES = 20
+_DIAG_PURGE_BATCH = 500
+
+
 def _cleanup_loop() -> None:
     """Background thread: evict stale sessions + stuck/old trade jobs."""
     while True:
@@ -2947,13 +2953,19 @@ def _cleanup_loop() -> None:
             log.warning("api-observability purge failed: %s", e)
 
         # Debug evidence is separate from durable card/outcome/valuation rows.
-        # One bounded batch per tick; failures remain visible and retry next tick.
+        # Up to _DIAG_PURGE_MAX_BATCHES bounded batches per tick (one fell
+        # behind the write rate); failures remain visible and retry next tick.
         try:
             from .database import purge_deck_diagnostics
             days = int(os.environ.get("FTF_DECK_DIAGNOSTIC_RETENTION_DAYS", "14"))
-            purged = purge_deck_diagnostics(days=days)
+            purged = purge_deck_diagnostics(days=days, batch_size=_DIAG_PURGE_BATCH,
+                                            max_batches=_DIAG_PURGE_MAX_BATCHES)
             if purged:
-                log.info("Purged %d expired deck diagnostic snapshots", purged)
+                # At the ceiling the tick can't tell whether rows are left
+                # (exactly 10,000 may have been all of them); the next says.
+                log.info("Purged %d expired deck diagnostic snapshots%s", purged,
+                         " (the tick's ceiling: more may remain)"
+                         if purged >= _DIAG_PURGE_MAX_BATCHES * _DIAG_PURGE_BATCH else "")
         except Exception:
             log.exception("deck-diagnostic retention failed")
 
