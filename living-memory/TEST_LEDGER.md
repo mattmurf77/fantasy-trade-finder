@@ -33,7 +33,9 @@ Gates: the scope block `scope-deletion-scrub.md` §0.3 (head-eng's ruling 2, 10-
   - no page scan.
 - **Suites:**
   - stage 1's `test_deletion_scrub.py` still passes;
-  - every pack-writer and page-store suite (17 files): 898 passed.
+  - every pack-writer and page-store suite (17 files): 898 passed;
+  - **the full backend suite** at `3e7dcf3e`: 10,207 passed, 2 skipped, 0 failed;
+  - after stage 1's `bakeoff_runs` update was merged in (`77d55a47`): both scrub files (36) and every evidence, page-store and deletion suite, 1,442 passed.
 
 ## 2026-10-31 — Deletion scrub stage 1: the job, the hook, the tick step, rows, candidate sets, side tables (legal R28.20 (ii), R28.22)
 
