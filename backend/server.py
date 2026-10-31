@@ -2889,6 +2889,41 @@ _DIAG_PURGE_MAX_BATCHES = 20
 _DIAG_PURGE_BATCH = 500
 
 
+def _deletion_scrub_leagues(user_ids) -> set:
+    """The leagues a person's traces may sit in (deletion_scrub's capture),
+    read before the deletion removes their rows; empty on a failed read."""
+    try:
+        from . import database as _db, deletion_scrub as _deletion_scrub
+        with _db.engine.connect() as conn:
+            return set(_deletion_scrub.capture_leagues(conn, user_ids))
+    except Exception as err:          # the class only: a DB error's text quotes its ids
+        log.error("deletion scrub league read failed: %s", type(err).__name__)
+        return set()
+
+
+def _revoke_trade_jobs_naming(user_ids, league_ids) -> int:
+    """Account deletion (#559 QA P2): the scrub rewrites stored decks, never a
+    job held in this process, which at trade_i1_mode 0 or 1 would keep
+    serving the person's original cards (their id, name and reasons) until
+    it leaves memory. So every job whose cards name a deleted id is revoked,
+    and so is every job still running in one of their leagues (it may yet
+    publish such cards). The next request builds a fresh deck. Returns the
+    count. Another instance's jobs age out within its retention."""
+    ids, leagues = set(user_ids), set(league_ids)
+    revoked = 0
+    with _trade_jobs_lock:
+        for job in _trade_jobs.values():
+            names = any((c.get("target_user_id") if isinstance(c, Mapping)
+                         else getattr(c, "target_user_id", None)) in ids
+                        for c in job.get("cards") or ())
+            running = (job.get("status") == "running"
+                       and (job.get("key") or (None, None))[1] in leagues)
+            if (names or running) and not _trade_job_revoked(job):
+                _revoke_trade_job_locked(job, "partner_deleted")
+                revoked += 1
+    return revoked
+
+
 def _kick_deletion_scrub() -> None:
     """The deletion route's start of the scrub; never raises (the account is
     already deleted, and the cleanup loop retries the job)."""
@@ -3961,8 +3996,15 @@ def _roster_serve_rules(cards, league_id: str, viewer_id: str, ref: str, *, snap
     a roster_snapshot the caller already read (P1), else one is read here.
     `report`: filled with the serve's `deck_i1_check` props when the check
     ran (_roster_serve_check); left empty otherwise (mode 0, the admin hook,
-    a failed read), so those serves emit nothing.
+    a failed read), so those serves emit nothing. A card whose partner is a
+    deletion scrub's redaction token is dropped first, in every mode.
     """
+    # The deletion scrub's redacted cards (the partner deleted their account;
+    # the target is a redaction token) never serve, in any mode, ahead of
+    # I-1 (models-lead addendum J4, head-eng's option (b)). The caller records
+    # them as never-delivered withdrawals, reason "partner_deleted".
+    if cards:
+        cards = [c for c in cards if not _redacted_target(c)]
     mode = _trade_i1_mode()
     forced = _gate_miss_test(league_id) if cards else None
     block = past_bound = None
@@ -6731,11 +6773,14 @@ def _disposition_cut(before: list, after: list) -> list:
 
 def _withdrawal_reasons(withdrawn=(), cut=()) -> dict:
     """{impression_id: reason} for a serve's withdrawals: I-1's drops
-    ("i1_dropped") and the disposition projection's cuts ("disposition_cut",
-    models-lead B4). The same sticky drop, served_before and transaction rules
-    apply to both; eval removes both and counts them by reason."""
-    reasons = {c["impression_id"]: "i1_dropped" for c in withdrawn
-               if isinstance(c.get("impression_id"), str)}
+    ("i1_dropped"), the deletion scrub's redacted cards ("partner_deleted",
+    models-lead J4: dropped by the serve rules in every mode, counted apart so
+    G10's mode-1 rule on "i1_dropped" stays clean) and the disposition
+    projection's cuts ("disposition_cut", models-lead B4). The same sticky
+    drop, served_before and transaction rules apply to all three; eval
+    removes them and counts them by reason."""
+    reasons = {c["impression_id"]: ("partner_deleted" if _redacted_target(c) else "i1_dropped")
+               for c in withdrawn if isinstance(c.get("impression_id"), str)}
     reasons.update((c["impression_id"], "disposition_cut") for c in cut
                    if isinstance(c.get("impression_id"), str))
     return reasons
@@ -7044,10 +7089,6 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
     i1_report = {}
     cards, block, past_bound = _roster_serve_rules(checked, league_id, viewer_id,
                                                    row["deck_job_id"], snap=snap, report=i1_report)
-    # A card the deletion scrub redacted (its partner deleted their account)
-    # never serves, whatever the I-1 mode (lenient, C-e, a pick-only card):
-    # it leaves with the I-1 drops, as a withdrawal.
-    cards = [c for c in cards if not _redacted_target(c)]
     kept = {id(c) for c in cards}
     withdrawn = [] if block else [c for c in checked if id(c) not in kept]
     moves = {}
@@ -7074,9 +7115,12 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
 
 
 def _redacted_target(card) -> bool:
-    """A stored card whose partner is a deletion scrub's redaction token."""
+    """A card (a stored dict or a TradeCard) whose partner is a deletion
+    scrub's redaction token."""
     from .eval.contract import REDACTED_PARTNER_PREFIX
-    return str((card or {}).get("target_user_id") or "").startswith(REDACTED_PARTNER_PREFIX)
+    target = (card.get("target_user_id") if isinstance(card, Mapping)
+              else getattr(card, "target_user_id", None))
+    return str(target or "").startswith(REDACTED_PARTNER_PREFIX)
 
 
 def _trade_page_stale(row: dict, snap, vsn=None) -> bool:
@@ -33871,6 +33915,8 @@ def delete_account_route():
                     revoke_err)
     try:
         with _accounts.deletion_scope(user_id, sess.get("account_id")) as (user_ids, account_ids):
+            # Read before the deletion removes them: the live jobs to revoke.
+            scrub_leagues = _deletion_scrub_leagues(user_ids)
             with _session_restore_lock:
                 with _sessions_lock:
                     counts = _accounts.delete_user_data(
@@ -33885,7 +33931,9 @@ def delete_account_route():
         return jsonify({"error": "deletion_failed"}), 500
     # The scrub of other users' decks (legal R28.20 (ii)): its job committed
     # with the deletion; start it off the request. The cleanup loop retries,
-    # so a failed start never fails the deletion (#557 QA P3).
+    # so a failed start never fails the deletion (#557 QA P3). In-memory jobs
+    # never see the scrub, so the ones that name the person are revoked here.
+    counts["trade_jobs_revoked"] = _revoke_trade_jobs_naming(user_ids, scrub_leagues)
     _kick_deletion_scrub()
     log.info("delete_account: user %s deleted (%s)", user_id, counts)
     return jsonify({"ok": True, "deleted": counts,

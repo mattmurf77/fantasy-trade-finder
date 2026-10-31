@@ -187,6 +187,21 @@ def _taste_attr(attr, ids, token):
     return attr
 
 
+def _redact_roster(record: dict, ids, redacted: bool) -> dict:
+    """A card's roster_evaluation: the deleted ids' team entries (keyed by
+    their id, with their explicit outlook) go on any card, and on a redacted
+    card the partner's side of it, mutual_benefit, goes too."""
+    roster = record.get("roster_evaluation")
+    if not isinstance(roster, dict):
+        return record
+    roster = dict(roster)
+    if isinstance(roster.get("teams"), dict):
+        roster["teams"] = {k: v for k, v in roster["teams"].items() if k not in ids}
+    if redacted:
+        roster.pop("mutual_benefit", None)
+    return {**record, "roster_evaluation": roster}
+
+
 def redact_features(features: dict, ids, token: str) -> dict:
     """A deck row's features_json for a card naming a deleted id. The id
     becomes the token everywhere (a dict key, a value, a taste attr). On a
@@ -194,15 +209,7 @@ def redact_features(features: dict, ids, token: str) -> dict:
     too, the same way on every such card (scope §0.2)."""
     ids = set(ids)
     redacted = features.get("partner_user_id") in ids
-    # The partner's team entry and its explicit outlook, keyed by their id.
-    roster = features.get("roster_evaluation")
-    if isinstance(roster, dict):
-        roster = dict(roster)
-        if isinstance(roster.get("teams"), dict):
-            roster["teams"] = {k: v for k, v in roster["teams"].items() if k not in ids}
-        if redacted:
-            roster.pop("mutual_benefit", None)
-        features = {**features, "roster_evaluation": roster}
+    features = _redact_roster(features, ids, redacted)
     out = _replace_ids(features, ids, token)
     if isinstance(out.get("taste_attrs"), list):
         out["taste_attrs"] = [_taste_attr(a, ids, token) for a in out["taste_attrs"]]
@@ -768,8 +775,15 @@ _PAGE_CARD_KEYS_NULLED = ("mismatch_score", "composite_score", "surplus_margin",
 
 def redact_page_card(card: dict, ids, token: str) -> dict:
     """One stored page card. Its target becomes the token and the placeholder
-    name, and the partner's fields go. S0's I-1 then withdraws it at serve:
-    the person's roster rows are gone, so no receive asset is the token's."""
+    name, and the partner's fields go. It never serves again: the serve rules
+    drop a token-target card in every I-1 mode, before I-1, and record it as
+    a never-delivered withdrawal, reason "partner_deleted" (server.
+    _roster_serve_rules; models-lead addendum J4: at prod's mode 1, I-1
+    alone would serve it)."""
+    ids = set(ids)
+    # The roster evidence a page card carries when trade.roster_protection is
+    # on (server._card_to_dict), redacted as on a deck row.
+    card = _redact_roster(card, ids, card.get("target_user_id") in ids)
     if card.get("target_user_id") not in ids:
         return _replace_ids(card, ids, token)
     out = {k: v for k, v in card.items() if k not in _PAGE_CARD_KEYS_REMOVED}

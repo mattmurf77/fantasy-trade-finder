@@ -3,12 +3,15 @@ addendum G: G-a1 to G-a3), and the cached writer state that must not undo or
 leak around a scrub. Harness: test_deletion_scrub's engine and seed."""
 import json
 
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, update
 
 from backend import accounts, database as db, deletion_scrub as scrub
 from backend.eval import evidence_pack
 from backend.tests.test_deletion_scrub import (  # noqa: F401  (fixture)
     DEL, EARLY, LEAGUE, OTHER, VIEWER, engine, job, read)
+from backend.tests.test_trade_page_store import p1, spawned  # noqa: F401  (fixtures)
+from backend.tests.test_i1_serve_filter import live  # noqa: F401  (fixture)
+from backend.tests.test_deferred_evidence import deferred  # noqa: F401  (fixture)
 
 SHARED = {"user_id": VIEWER, "league_id": LEAGUE, "deck_job_id": "deck-pack",
           "served_at": EARLY, "candidate_set_id": None, "candidate_set_size": None,
@@ -290,6 +293,25 @@ def test_a_page_rows_cards_and_evidence_are_redacted(engine):
                                    + len(db.CompressedJSON.encode(ev)))
 
 
+
+def test_a_page_cards_roster_evaluation_is_redacted_as_on_a_deck_row():
+    """With trade.roster_protection on, a page card carries the card's
+    roster_evaluation (server._card_to_dict): every team's entry, keyed by
+    user id, and the partner's side, mutual_benefit (#559 QA)."""
+    token = "redacted:" + "a" * 32
+    roster = {"teams": {VIEWER: {"outlook": "contend"}, DEL: {"outlook": "rebuild"},
+                        OTHER: {"outlook": "rebuild"}},
+              "mutual_benefit": {"them": 4.0}, "verdict": "ok"}
+    theirs = scrub.redact_page_card(page_card(DEL, 0, roster_evaluation=roster), {DEL}, token)
+    assert theirs["roster_evaluation"] == {
+        "teams": {VIEWER: {"outlook": "contend"}, OTHER: {"outlook": "rebuild"}}, "verdict": "ok"}
+    # Another partner's card that lists the person's team keeps its own read.
+    other = scrub.redact_page_card(page_card(OTHER, 1, roster_evaluation=roster), {DEL}, token)
+    assert other["roster_evaluation"] == {
+        "teams": {VIEWER: {"outlook": "contend"}, OTHER: {"outlook": "rebuild"}},
+        "mutual_benefit": {"them": 4.0}, "verdict": "ok"}
+    assert DEL not in json.dumps(theirs) + json.dumps(other)
+
 def test_a_page_row_in_a_league_the_person_left_is_found_by_the_scan(engine):
     insert_page(engine, league="league-left", user=OTHER, deck="deck-left-page")
     accounts.delete_user_data(DEL)
@@ -298,24 +320,146 @@ def test_a_page_row_in_a_league_the_person_left_is_found_by_the_scan(engine):
     assert row["pages_blob"]["cards"][0]["target_user_id"] == job(engine)["token"]
 
 
-def test_a_redacted_page_card_never_serves_and_leaves_as_a_withdrawal(monkeypatch):
-    """Whatever S0 keeps (lenient mode, C-e, a pick-only card), a card whose
-    partner is a redaction token is withdrawn at serve."""
+# ── J4: a redacted card never serves, in any I-1 mode ───────────────────────
+
+TOKEN_CARD = {"trade_id": "t0", "target_user_id": "redacted:" + "0" * 32, "impression_id": "d:0"}
+PLAIN_CARD = {"trade_id": "t1", "target_user_id": OTHER, "impression_id": "d:1"}
+
+
+def test_the_serve_rules_drop_a_redacted_card_in_every_mode(monkeypatch):
+    """models-lead addendum J4: at prod's trade_i1_mode 1, S0's check serves
+    every card, so the drop sits ahead of it in _roster_serve_rules, which
+    /generate, /status (legacy and paged) and the page-store serve share."""
     import backend.server as server
-    delivered = []
-    for name, fn in (("_deck_sticky", lambda *a: set()),
-                     ("_project_trade_dispositions", lambda page, *a: list(page)),
-                     ("_disposition_cut", lambda *a: []),
-                     ("_roster_serve_rules", lambda checked, *a, **k: (list(checked), None, False)),
-                     ("_served_cap_stored", lambda row, cards, *a: (cards, {})),
-                     ("_with_trade_hash", lambda cards: cards),
-                     ("_deck_evidence_delivered_stored",
-                      lambda row, cards, withdrawn, cut, moves: delivered.append((cards, withdrawn))),
-                     ("_trade_prefetch_remaining", lambda: 50)):
-        monkeypatch.setattr(server, name, fn)
-    token_card, other = page_card("redacted:" + "0" * 32, 0), page_card(OTHER, 1)
-    row = {"pages_blob": {"cards": [token_card, other], "opponents_total": 2},
-           "league_id": LEAGUE, "deck_job_id": "deck-page", "card_count": 2}
-    out, _ = server._trade_page_view(row, 0, user_id=VIEWER, viewer_id=VIEWER, snap=None)
-    assert out["cards"] == [other]
-    assert delivered == [([other], [token_card])]
+    monkeypatch.setattr(server, "_roster_serve_check",
+                        lambda cards, *a, **k: (list(cards), None, False))   # lenient: all serve
+    monkeypatch.setattr(server, "_gate_miss_test", lambda league_id: None)
+    for mode in (0, 1, 2):
+        monkeypatch.setattr(server, "_trade_i1_mode", lambda m=mode: m)
+        cards, block, _ = server._roster_serve_rules([TOKEN_CARD, PLAIN_CARD], LEAGUE, VIEWER, "d")
+        assert (cards, block) == ([PLAIN_CARD], None), mode
+
+
+def test_a_redacted_card_is_withdrawn_as_partner_deleted_and_counted_apart():
+    import backend.server as server
+    assert server._withdrawal_reasons([TOKEN_CARD, PLAIN_CARD], [{"impression_id": "d:2"}]) == {
+        "d:0": "partner_deleted", "d:1": "i1_dropped", "d:2": "disposition_cut"}
+
+
+def test_at_mode_1_a_stored_page_never_serves_its_redacted_card(p1, spawned, monkeypatch):
+    """The J4 scenario end to end: the scrub has rewritten a stored deck's
+    card (its target is the token). At trade_i1_mode 1, page 1 serves every
+    other card, and the redacted one leaves as a never-delivered withdrawal,
+    reason partner_deleted."""
+    import backend.server as server
+    from backend.tests.test_trade_page_store import generate, run_job, stored
+    client, engine, _ = p1
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_i1_mode", 1.0)
+    run_job()
+    row = stored()
+    cards = row["pages_blob"]["cards"]
+    token = "redacted:" + "1" * 32
+    redacted = cards[0]["impression_id"]
+    # The scrub's own rewrite of the card (its target is the person's id).
+    rewritten = [scrub.redact_page_card(cards[0], {cards[0]["target_user_id"]}, token)] + cards[1:]
+    with engine.begin() as conn:
+        conn.execute(update(db.trade_page_store_table).values(
+            pages_blob={**row["pages_blob"], "cards": rewritten}))
+    body = generate(client, page=1).get_json()
+    assert body["serve_source"] == "page"
+    assert redacted not in [c["impression_id"] for c in body["cards"]]
+    assert {c["impression_id"] for c in body["cards"]} == {c["impression_id"] for c in cards[1:]}
+    rows = read(engine, db.deck_card_withdrawals_table)
+    assert [(r["reason"], r["served_before"]) for r in rows] == [("partner_deleted", 0)]
+
+
+# ── G-a2's unpack test (models-lead addendum J2) ─────────────────────────────
+
+def test_g_a2_unpack_equals_the_original_with_items_1_to_5_applied(engine):
+    """models-lead addendum J2: unpack(redacted) == unpack(original) with
+    E-b2's items 1-5 applied, written out here apart from the scrub's code;
+    every other card bit-identical; the codec round-trips a null float."""
+    before_run, before = insert_pack(engine)
+    accounts.delete_user_data(DEL)
+    token = job(engine)["token"]
+    scrub.run_pending()
+    _row, run, cards = stored_pack(engine)
+
+    def items_1_to_5(card):
+        if card["partner_user_id"] != DEL:
+            return card
+        out = {k: v for k, v in card.items() if k != "likes_you"}         # 2: c2 fields removed
+        out["partner_user_id"] = token                                    # 1: the token
+        out["taste_attrs"] = [f"partner:{token}" if a == f"partner:{DEL}" else a
+                              for a in card["taste_attrs"]]
+        out.update(base_score=None, final_score=None, surplus_margin=None)  # 5: blended nulled
+        return out
+    assert cards == [items_1_to_5(c) for c in before]
+    for got, was in zip(cards, before):
+        if was["partner_user_id"] != DEL:
+            assert json.dumps(got, sort_keys=True) == json.dumps(was, sort_keys=True)
+    assert cards[0]["base_score"] is None and isinstance(before[0]["base_score"], float)
+    inputs = run["filter_inputs"]                                         # 3: holdings, protected
+    assert DEL not in inputs["qb_te"] and f"{0:016x}" not in inputs["protected"]
+    assert run["redacted_at"]                                             # 4: redacted_at
+
+
+# ── #559 QA P2: in-memory jobs naming the person are revoked at deletion ───
+
+def test_deletion_revokes_the_live_jobs_that_name_the_person(engine, monkeypatch):
+    """The scrub rewrites stored decks only. A job held in this process keeps
+    the person's original cards, and at trade_i1_mode 0 or 1 it would serve
+    them until it leaves memory, so the delete route revokes it. A running job
+    in their league is revoked too; another league's job is left alone."""
+    import backend.server as server
+    monkeypatch.setattr(server, "touch_user_activity", lambda *a, **kw: None)
+    monkeypatch.setattr(accounts, "apple_identity_subjects", lambda *a, **kw: set())
+    jobs = {
+        "names-them": {"key": (VIEWER, LEAGUE, "1qb_ppr"), "status": "complete",
+                       "cards": [{"target_user_id": DEL, "trade_id": "t0"},
+                                 {"target_user_id": OTHER, "trade_id": "t1"}]},
+        "running-there": {"key": (OTHER, LEAGUE, "1qb_ppr"), "status": "running", "cards": []},
+        "elsewhere": {"key": (VIEWER, "league-other", "1qb_ppr"), "status": "complete",
+                      "cards": [{"target_user_id": OTHER, "trade_id": "t2"}]},
+    }
+    monkeypatch.setattr(server, "_trade_jobs", jobs)
+    with server._sessions_lock:
+        server._sessions["synthetic-delete-token"] = {"user_id": DEL, "verified": True}
+    try:
+        response = server.app.test_client().delete(
+            "/api/account", headers={"X-Session-Token": "synthetic-delete-token"})
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json()["deleted"]["trade_jobs_revoked"] == 2
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop("synthetic-delete-token", None)
+    assert jobs["names-them"]["superseded"] and jobs["names-them"]["cards"] == []
+    assert jobs["running-there"]["superseded"] and jobs["running-there"]["status"] == "error"
+    assert not jobs["elsewhere"].get("superseded") and jobs["elsewhere"]["cards"]
+
+
+# ── #559 QA1: the in-process upgrade reloads the scrubbed pack ─────────────
+
+def test_an_in_process_upgrade_after_the_scrub_writes_the_redacted_row(deferred, monkeypatch):
+    """A packed deck still held in this process: its partner deletes their
+    account and the scrub rewrites the pack. A first view of a card past the
+    first 30 then writes its full row from the job's build-time snapshot,
+    after reloading the pack, so it carries the token, never the person's id
+    or their fields (without the reload it wrote the original row back)."""
+    from backend.tests.test_i1_serve_filter import OPP as PARTNER
+    from backend.tests.test_packed_evidence import by_index, packed_deck, status, view
+    client, engine, _ = deferred
+    monkeypatch.setenv("FTF_DISABLE_DELETION_SCRUB_KICK", "1")
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 30)                 # the pack, delivered past 30
+    accounts.delete_user_data(PARTNER)
+    scrub.run_pending()
+    token = job(engine)["token"]
+    view(job_id, 45)                           # the job is still in this process
+    row = by_index(engine)[(0, 45)]
+    features = json.loads(row["features_json"])
+    assert row["evidence_tier"] == "viewed"
+    assert features["partner_user_id"] == token and "likes_you" not in features
+    assert (row["base_score"], row["final_score"]) == (None, None)
+    assert PARTNER not in row["features_json"]
