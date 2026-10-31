@@ -1,0 +1,132 @@
+<!doctype html>
+<!-- Static 1200x630 OG cards. ?card=invite (default) | ?card=expired. Rendered by render.py. -->
+<html lang="en" data-card="invite">
+<head>
+<meta charset="utf-8">
+<title>OG card</title>
+<script>
+  var card = new URLSearchParams(location.search).get("card");
+  if (card === "expired") document.documentElement.dataset.card = "expired";
+</script>
+<style>
+@font-face {
+  font-family: "OG Barlow Condensed";
+  src: url("fonts/barlow-condensed-bold.ttf") format("truetype");
+  font-weight: 700;
+  font-display: block;
+}
+@font-face {
+  font-family: "OG Archivo";
+  src: url("fonts/archivo-semibold.ttf") format("truetype");
+  font-weight: 600;
+  font-display: block;
+}
+:root {
+  /* Chalkline tokens (docs/design/design-system.md) */
+  --ink-0: #0C0E11;
+  --ink-1: #13161B;
+  --line: #262C35;
+  --chalk: #ECEFF4;
+  --chalk-dim: #97A1AE;
+  --ice: #56D9EC;
+}
+html, body { margin: 0; padding: 0; background: var(--ink-0); }
+.og {
+  width: 1200px;
+  height: 630px;
+  background: var(--ink-0);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+/* Text column: 80px left edge, 48px (xxxl) gutter to the ram box -> 608px wide */
+.txt {
+  flex: 1;
+  min-width: 0;
+  padding: 0 48px 0 80px;
+}
+.logo {
+  margin: 0;
+  font: 700 148px/1 "OG Barlow Condensed";
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--chalk);
+  white-space: nowrap;
+}
+.logo .dot { color: var(--ice); }
+.line {
+  margin: 28px 0 0;
+  font: 600 52px/60px "OG Archivo"; /* fixed line box: both cards share one grid */
+  color: var(--chalk-dim);
+  white-space: nowrap;
+}
+.line.expired { font-size: 48px; }
+[data-card="invite"] .line.expired,
+[data-card="expired"] .line.invite { display: none; }
+.rambox {
+  box-sizing: border-box;
+  width: 384px;
+  height: 384px;
+  margin-right: 80px;
+  flex: none;
+  background: var(--ink-1);
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rambox img { width: 288px; height: 288px; display: block; }
+.rule {
+  position: absolute;
+  left: 80px;
+  right: 80px;
+  bottom: 72px;
+  border-top: 2px solid var(--line);
+}
+</style>
+</head>
+<body>
+<div class="og">
+  <div class="txt">
+    <h1 class="logo">FLEECED<span class="dot">.</span></h1>
+    <p class="line invite">Dynasty Trade Finder</p>
+    <p class="line expired">This trade link has expired.</p>
+  </div>
+  <div class="rambox"><img src="../../../../mobile/assets/mascot/ram/neutral@3x.png" width="288" height="288" alt="Fleeced the ram"></div>
+  <div class="rule"></div>
+</div>
+<script>
+  /* Layout + font self-check, read by render.py through --dump-dom. Paints nothing. */
+  document.fonts.ready.then(function () {
+    var faces = [];
+    document.fonts.forEach(function (f) { faces.push(f.family.replace(/"/g, "") + ":" + f.status); });
+    var line = document.querySelector('.line.' + document.documentElement.dataset.card);
+    var logo = document.querySelector(".logo");
+    var box = document.querySelector(".rambox").getBoundingClientRect();
+    var rule = document.querySelector(".rule").getBoundingClientRect();
+    var lr = line.getBoundingClientRect();
+    var range = document.createRange();
+    range.selectNodeContents(line);
+    var ink = range.getBoundingClientRect();
+    range.selectNodeContents(logo);
+    var logoInk = range.getBoundingClientRect();
+    var report = {
+      card: document.documentElement.dataset.card,
+      faces: faces,
+      lineFontPx: parseFloat(getComputedStyle(line).fontSize),
+      logoFontPx: parseFloat(getComputedStyle(logo).fontSize),
+      lineTextRight: ink.right,
+      logoTextRight: logoInk.right,
+      lineRects: line.getClientRects().length,
+      lineOverflow: line.scrollWidth > line.clientWidth,
+      lineBottom: lr.bottom,
+      box: [box.left, box.top, box.right, box.bottom],
+      ruleTop: rule.top
+    };
+    document.body.setAttribute("data-report", JSON.stringify(report));
+  });
+</script>
+</body>
+</html>
