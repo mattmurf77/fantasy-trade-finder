@@ -3,7 +3,8 @@ OG share card image generation (PNG, 1200×630) using Pillow.
 
 Exports:
     render_tier_card(username, pos, scoring_format) -> bytes
-    render_trade_card(match_id) -> bytes
+    render_trade_card(match_row) -> (bytes, status)
+    render_expired_trade_card() -> bytes
     render_placeholder_card(title, subtitle) -> bytes
 
 All renderers always return a valid PNG as bytes. They never write
@@ -14,6 +15,7 @@ placeholder card.
 
 from __future__ import annotations
 
+import functools
 import io
 import json
 import logging
@@ -183,9 +185,14 @@ def _to_png_bytes(img: "Image.Image") -> bytes:
 # Placeholder card (used for errors / empty states)
 # ---------------------------------------------------------------------------
 
-def render_placeholder_card(title: str, subtitle: str = "") -> bytes:
+def render_placeholder_card(title: str, subtitle: str = "", *,
+                            shrink_to_fit: bool = False) -> bytes:
     """Render a simple centered placeholder card — used for unknown users,
-    missing tiers, or bad match ids. Always returns a valid PNG."""
+    missing tiers, or bad match ids. Always returns a valid PNG.
+
+    `shrink_to_fit` steps the title font down (to 40px at the smallest)
+    before truncating, for a fixed sentence that must read in full whatever
+    font the host has (the expired-trade card)."""
     if _PIL_IMPORT_ERROR is not None:
         raise RuntimeError(
             "Pillow is not installed. Run: pip install Pillow>=10.0"
@@ -197,6 +204,11 @@ def render_placeholder_card(title: str, subtitle: str = "") -> bytes:
     font_mid = _load_font(34, bold=False)
     font_small = _load_font(22)
 
+    if shrink_to_fit:
+        size = 72
+        while size > 40 and _text_width(draw, title, font_big) > CARD_W - 120:
+            size -= 4
+            font_big = _load_font(size, bold=True)
     title = _truncate(draw, title, font_big, CARD_W - 120)
     tw = _text_width(draw, title, font_big)
     draw.text(((CARD_W - tw) // 2, 220), title, font=font_big, fill=TEXT_PRIMARY)
@@ -489,49 +501,32 @@ def _fairness_color(score: int) -> tuple[int, int, int]:
     return (244, 67, 54)          # red
 
 
-def render_trade_card(match_id) -> tuple[bytes, int]:
+def render_trade_card(match: dict) -> tuple[bytes, int]:
     """
-    Render a trade give/get card with fairness verdict for a single match.
+    Render a trade give/get card with fairness verdict for ONE resolved
+    trade_matches row (a dict; only user_a_give / user_a_receive are read).
 
-    Returns (png_bytes, http_status_code). 200 on success, 404 if the
-    match_id can't be resolved (still a valid placeholder PNG).
+    The caller resolves the row through trade_share_tokens (build O8). This
+    function never looks a match up by a value taken from a URL: the old
+    int(match_id) lookup is what let anyone walk the sequential ids.
+
+    Returns (png_bytes, http_status_code): 200 on success, 500 when the
+    player lookup is unavailable (still a valid placeholder PNG).
     """
     if _PIL_IMPORT_ERROR is not None:
         raise RuntimeError(
             "Pillow is not installed. Run: pip install Pillow>=10.0"
         ) from _PIL_IMPORT_ERROR
 
-    # Load the match row directly (load_matches filters by user_id which
-    # we don't have at share time — the share page is public).
     try:
-        from .database import engine, trade_matches_table, load_players_by_ids
-        from sqlalchemy import select
+        from .database import load_players_by_ids
     except Exception as e:
         log.error("og_image: import failed: %s", e)
         return render_placeholder_card("Unavailable", "Data service offline"), 500
 
     try:
-        mid = int(match_id)
-    except (TypeError, ValueError):
-        return render_placeholder_card("Match not found", f"id={match_id!r}"), 404
-
-    try:
-        with engine.connect() as conn:
-            row = conn.execute(
-                select(trade_matches_table).where(
-                    trade_matches_table.c.id == mid
-                )
-            ).fetchone()
-    except Exception as e:
-        log.error("og_image: match lookup failed for %s: %s", mid, e)
-        return render_placeholder_card("Unavailable", "Data service offline"), 500
-
-    if row is None:
-        return render_placeholder_card("Match not found", f"id={mid}"), 404
-
-    try:
-        a_give    = json.loads(row.user_a_give)    if row.user_a_give    else []
-        a_receive = json.loads(row.user_a_receive) if row.user_a_receive else []
+        a_give    = json.loads(match.get("user_a_give"))    if match.get("user_a_give")    else []
+        a_receive = json.loads(match.get("user_a_receive")) if match.get("user_a_receive") else []
     except (json.JSONDecodeError, TypeError):
         a_give, a_receive = [], []
 
@@ -546,6 +541,24 @@ def render_trade_card(match_id) -> tuple[bytes, int]:
         players_by_id=players_by_id,
         fairness=fairness,
     ), 200
+
+
+# The ONE place the "expired trade link" words live — the /s/trade miss page
+# (server.share_trade_page) and the PNG below both read them. Proposed copy
+# (build O8); marketing-lead's wording replaces it here when it lands.
+TRADE_LINK_EXPIRED_TITLE = "This trade link has expired."
+TRADE_LINK_EXPIRED_BODY = "Open Fleeced to see your trades."
+
+
+@functools.lru_cache(maxsize=1)
+def render_expired_trade_card() -> bytes:
+    """The generic card every /og/trade miss returns (numeric id, unknown,
+    revoked or malformed token, orphaned match). Takes no input, so it
+    reveals nothing about the miss; cached once per process, so every miss
+    is byte-identical. lru_cache is thread-safe and never caches the
+    Pillow-unavailable RuntimeError, which still raises on every call."""
+    return render_placeholder_card(TRADE_LINK_EXPIRED_TITLE, TRADE_LINK_EXPIRED_BODY,
+                                   shrink_to_fit=True)
 
 
 def render_package_card(short_id) -> tuple[bytes, int]:

@@ -30,13 +30,14 @@ REPO = Path(__file__).resolve().parents[2]
 
 # ── Item 6: the flag ────────────────────────────────────────────────────────
 
-def test_the_packed_evidence_flag_is_registered_and_off():
+def test_the_packed_evidence_flag_is_registered_and_on():
     """The 3-touch mirror (FLAG_KEYS, config/features.json, the release
-    fixture). It ships off; it goes on before trade.first_page_store (R2.4 §3)."""
+    fixture). The code default stays off; features.json turns it on, with
+    trade.first_page_store, in #551's one-step flip."""
     features = json.loads((REPO / "config/features.json").read_text())
     release = json.loads((REPO / "backend/tests/fixtures/flags/release.json").read_text())
     assert "trade.packed_evidence" in FLAG_KEYS and DEFAULT_FLAGS["trade.packed_evidence"] is False
-    assert features["trade.packed_evidence"] is False
+    assert features["trade.packed_evidence"] is True
     assert release["trade.packed_evidence"] == features["trade.packed_evidence"]
 
 
