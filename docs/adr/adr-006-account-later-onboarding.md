@@ -1,6 +1,6 @@
 # ADR-006 — Account-Later Onboarding (Apple Moves from Front Door to Save Moment)
 
-**Status:** Accepted (shipping dark behind `onboarding.v2` + `onboarding.landing` / `onboarding.apple_save_moment`)
+**Status:** Accepted (shipping dark behind `onboarding.v2` + `onboarding.landing` / `onboarding.apple_save_moment`). Decision 1 amended 2026-10-28 (B1 / #507).
 **Date:** 2026-07-17
 **Initiative:** Onboarding & conversion redesign (docs/plans/onboarding-conversion/plan.md v2.1); 3-round ux-design × pm-growth review, converged 2026-07-17. Amends the account-first posture of the account-auth plan (docs/plans/account-auth-plan-2026-07-11.md, P2.6).
 
@@ -22,6 +22,9 @@ Facts the redesign rests on:
 **Account-later, not account-less.** Apple remains the *only* durable, cross-device identity. It moves from the front door to the moment the user first has something durable to protect:
 
 1. **Landing** (flag `onboarding.landing`): primary surface is the Sleeper username field. Apple appears as a quiet "Already have an account? Sign in with Apple" re-entry link — required, because P2.6 account-only users may have no Sleeper username to type; removing their door would strand the already-converted cohort.
+
+   > **Amendment (2026-10-28, B1 / #507).** Landing decision 1 is amended. Once ESPN and MFL sign-in create accounts, App Store guideline 4.8 and Apple's sign-in HIG need Sign in with Apple as an equivalent, equally prominent option. So the landing's Apple entry becomes Apple's own `AppleAuthenticationButton` (type CONTINUE, style WHITE for the dark background, the height of the landing's other sign-in buttons) in place of the "Already have an account? Sign in with Apple" text link. It sits **below** the username field and its Continue button, and below the ESPN/MFL panel, so the username field stays the landing's primary surface. The save-moment prompt (decision 2), the bind target (4), and the riders are unchanged. Placing the button above the field would restore Apple to the front door, which this ADR rejects.
+
 2. **Save-moment prompt** (flag `onboarding.apple_save_moment`): the Apple modal fires on the first save-moment-class event — first liked trade or first Quick Set save. **Honest framing only** (cross-device / device-loss protection). "Save your board" framing is prohibited: boards persist regardless, and a discoverable false claim poisons every subsequent ask (push, future paywall).
 3. **Ask policy:** max one automatic modal per save-moment class (first like, first Quick Set save, first mutual match), decline persisted (`ftf_onboarding_state`), never an immediate re-ask. Unbound users with ≥N swipes get one *non-modal* dismissible banner above the session-2 deck (iOS cannot render UI at backgrounding, so any "exit ask" is really a re-entry modal — rejected in review). An evergreen "Back up your board" row in Settings carries the ask thereafter.
 4. **Bind target:** Apple binds to the (unverified) Sleeper username of the active session. Precondition: the first-run identity-confirm strip ("Trading as @username — not you?"), which catches valid-but-wrong-username sessions before a durable bind. SleeperConnect verification at the save moment was **rejected** (friction at the peak-conversion point); verification lives in Settings post-bind.
