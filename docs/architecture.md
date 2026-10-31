@@ -952,7 +952,7 @@ Native cold launch and foreground resume initialize the restored league without 
 - it gives the small stores that token: other users' `user_taste` for the person, and standing-offer team lists. It clears `trade_matches.match_valuation_json` on either side.
 
 `backend/deletion_scrub.py` then works the job off the request:
-- **DB pass:** started by the route, retried by `_cleanup_loop` under a lease, and run once more after a 6 h in-flight grace. It finds other users' deck rows and candidate sets per league and viewer, and redacts each card whose partner is the person: the token, their account's fields removed, the blended scores nulled.
+- **DB pass:** started by the route, retried by `_cleanup_loop` under a lease, and run once more after a 6 h in-flight grace. It finds other users' deck rows and candidate sets per league and viewer, then scans each whole store in bounded, resumable pages for leagues the person had left. It redacts each card whose partner is the person: the token, their account's fields removed, the blended scores nulled.
 - **Model pass:** the daily tick's `deletion_scrub` step, before `value_model_refit`.
 
 The job row is deleted when both are done. Packs, the page store and the traced stores are later stages: `SCRUB_VERSION` re-runs kept jobs when one lands.

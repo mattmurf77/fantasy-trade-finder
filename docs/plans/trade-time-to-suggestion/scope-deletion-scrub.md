@@ -39,9 +39,14 @@
   - `leagues` rows they imported;
   - `league_roster_history` rows naming them;
   - the leagues of their own decks (`deck_impressions` and `deck_evidence_packs` by `user_id`).
-  - **Residual:** a league they left before deleting, and that none of these still names, isn't found. The 365-day prune bounds it. This is stated to head-eng, not hidden.
+  - **The fallback scan closes the residual** (head-eng, 10-31): a league they left before deleting, which none of these still names. After the league pass, the DB phase scans every row of each store up to the cutoff.
+    - It reads keyset pages of 2,000 rows by primary key, 50 pages a run. The database does the text match, so only matched rows come back. A packed candidate set is decoded to be checked: one per deck, a few KB.
+    - The cursor is kept on the job row (`scan_json`), so the next cleanup tick resumes it.
+    - **Sizing:** about 100k rows a 5-minute tick, so 1M rows in about 50 minutes, twice per deletion (the pass and the grace pass). Deletions are rare.
+    - **The alternative,** a partner→deck side index written at deck time, covers only new writes. Existing rows would need the same full read as a backfill, plus a change on the hot evidence writer. So the scan was picked.
+    - Stage 2 scans packs' `header_json` and the page store the same way.
 - **Two phases.** The row is deleted only when both are done.
-  - **DB phase:** every store in §0.2. It runs in a background thread the deletion route kicks, and the cleanup loop retries any row past its lease. The lease is a CAS claim on `claimed_until`, so two instances during a deploy never run one job twice.
+  - **DB phase:** every store in §0.2, first the league pass, then the fallback scans. It runs in a background thread the deletion route kicks, and the cleanup loop retries any row past its lease and resumes an unfinished scan. The lease is a CAS claim on `claimed_until`, so two instances during a deploy never run one job twice.
   - **Model phase:** `eval.redaction.redact_model_store(tokens)`, in the daily-tick step `deletion_scrub`, placed **before** `value_model_refit` (models-eng 8b, #542). It runs only for jobs whose DB pass is current, so the refit trains on scrubbed rows. A test pins the order. A raise leaves the row for the next tick.
   - **The DB phase runs once more after `IN_FLIGHT_GRACE` (6 h),** from the cleanup loop. That catches rows a deck already in flight at deletion wrote later from its build-time snapshot (§0.4).
   - **Until every stage is built (`COMPLETE`), finished rows are kept,** so a later stage's `SCRUB_VERSION` re-runs them. legal (ix) is about finishing the scrub, and the scrub isn't finished until then.

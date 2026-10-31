@@ -2118,7 +2118,7 @@ The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scr
 | `job_id` | str PK | uuid4 hex. Logs show its first 8 characters |
 | `token` | str, not null | `redacted:<uuid4 hex>`, random, one per deletion, the same in every store (glossary: redaction token) |
 | `partner_ids_json` | text (JSON), not null | The deleted user's resolved ids (`accounts._user_data_scope`: aliases, account working keys) |
-| `league_ids_json` | text (JSON), not null | The leagues their traces may be in, read before the deletion removes their rows: memberships, imported leagues, roster history, their own decks |
+| `league_ids_json` | text (JSON), not null | The leagues their traces may be in, read before the deletion removes their rows: memberships, imported leagues, roster history, their own decks. They drive the fast league pass. A fallback scan of each whole store then finds the rest (a league the person left) |
 | `deleted_at` | str, not null | ISO UTC. The DB pass touches decks served up to `deleted_at` + 6 h (`IN_FLIGHT_GRACE`: a deck built before the deletion carries its first delivery as `served_at`), never later ones |
 | `db_version` | int, not null, default 0 | The `SCRUB_VERSION` of the last full DB pass; older re-runs |
 | `db_done_at` | str | ISO UTC of the last full DB pass. One more runs once the grace has passed |
@@ -2126,6 +2126,7 @@ The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scr
 | `attempts` | int, not null, default 0 | Lease claims |
 | `claimed_until` | str | ISO UTC lease (10 min), taken by compare-and-swap; NULL = free |
 | `last_error` | str | The last failure's exception class, never its message |
+| `scan_json` | text (JSON) | An unfinished DB pass's state: the league pass's counts, which fallback scan is running, and its keyset cursor. The next run resumes from it. NULL between passes |
 
 Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.
 

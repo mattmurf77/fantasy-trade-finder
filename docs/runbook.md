@@ -1685,6 +1685,7 @@ update.
 
 `backend/deletion_scrub.py`; scope `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md`.
 - **Each deletion** commits one `deletion_scrub_jobs` row, with a random token, the deleted ids and their leagues. The route then starts the DB pass off the request, and the cleanup loop retries any job past its 10-minute lease.
+- **What a pass does:** the league pass, then a fallback scan of each whole store (deck rows, candidate sets) for leagues the person had left. The scan runs about 100k rows a cleanup tick and resumes from its cursor (`scan_json`). A job with a big table stays unfinished for some ticks, which is normal.
 - **Second pass:** one more DB pass runs 6 h after the deletion, for decks that were in flight.
 - **Daily tick:** step `deletion_scrub` redacts the value-model store, then deletes finished jobs.
 - **Healthy:** `[scrub] job=<8 chars> db_done version=<n> counts={...}` after each pass, and `daily-tick step=deletion_scrub outcome=ok` daily. Log lines never carry an id.
