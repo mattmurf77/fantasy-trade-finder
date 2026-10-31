@@ -35,12 +35,23 @@ A string naming a receipts table (a constant, a concatenation, a loop variable
 over such strings) makes a `metadata.tables[...]`, `getattr(...)`,
 `Table(...)` or `table(...)` lookup a reference, governed as above.
 
-The residual (documented, not caught): a table reached through a value
-computed at run time across functions (a name returned by a helper), a runtime
-search (`metadata.sorted_tables` filtered by prefix), code or SQL that only
-exists at run time (`exec`/`eval`, a file read and executed), and the ORM (a
-mapped class: `session.query(Grade).delete()`, `delete(Grade)`); the codebase
-has no ORM.
+The residual (documented, not caught; T-10 catches accidents, not deliberate
+evasion: release-lead's #544 round-3 ruling):
+- a table reached through a value computed at run time across functions (a
+  name returned by a helper), or by a runtime search (`metadata.sorted_tables`
+  filtered by prefix);
+- a back-reference from an allowed use: `t.c.<col>.table`, `insert(t).table`,
+  `select(t).get_final_froms()[0]`;
+- SQL text the renderer doesn't resolve: `"%(t)s" % {...}`, `.format_map`,
+  `string.Template`, `b"...".decode()`, and SQL built by `list.append` then
+  `' '.join`;
+- code or SQL that only exists at run time (`exec`/`eval`, a file read and
+  executed);
+- the ORM (a mapped class: `session.query(Grade).delete()`, `delete(Grade)`);
+  the codebase has no ORM.
+A static name looked up in a namespace (`globals()[...]`, `vars(m)[...]`,
+`m.__dict__[...]`, `operator.attrgetter(...)(m)`, `m.__getattribute__(...)`)
+IS resolved.
 """
 import ast
 import importlib.util
@@ -308,6 +319,12 @@ class Scan:
         return []
 
     # ── what is a receipts table ─────────────────────────────────────────
+    def _namespace(self, node):
+        """globals(), vars(...) or <x>.__dict__: a namespace a name can be looked up in."""
+        if isinstance(node, ast.Call) and self._fname(node.func) in ("globals", "vars", "locals"):
+            return True
+        return isinstance(node, ast.Attribute) and node.attr == "__dict__"
+
     @staticmethod
     def _tables_lookup(node, st):
         return (isinstance(node, ast.Attribute) and node.attr == "tables") or (
@@ -326,6 +343,8 @@ class Scan:
         if isinstance(node, ast.Attribute):
             return node.attr in REF_NAMES
         if isinstance(node, ast.Subscript):
+            if self._namespace(node.value):
+                return self._render(node.slice, st) in REF_NAMES
             return self._tables_lookup(node.value, st) and self._render(node.slice, st) in TABLES
         if isinstance(node, ast.Call):
             f, name = node.func, self._fname(node.func)
@@ -339,6 +358,13 @@ class Scan:
                     st.names_resolved or isinstance(node.args[1], ast.Constant))
             if name == "get" and isinstance(f, ast.Attribute) and self._tables_lookup(f.value, st):
                 return first is not None and self._render(first, st) in TABLES
+            if name == "get" and isinstance(f, ast.Attribute) and self._namespace(f.value):
+                return first is not None and self._render(first, st) in REF_NAMES
+            if name == "__getattribute__" and first is not None:
+                return self._render(first, st) in REF_NAMES
+            if (isinstance(f, ast.Call) and self._fname(f.func) == "attrgetter" and f.args
+                    and self._render(f.args[0], st) in REF_NAMES):
+                return True                                 # attrgetter('<table>_table')(module)
             if name in ("Table", "table", "TableClause") and first is not None:
                 return self._render(first, st) in TABLES
             return False
@@ -793,6 +819,11 @@ CASES = {
     "update_only_sql": (D, END, _fn("conn.execute(text('UPDATE ONLY receipts_grades SET status = 1'))")),
     "walrus_rebinds_g_in_delete_deck": (D, ("REPLACE", "              for k in range(0, len(contract_ids), 500)),\n            (\"receipts_grades\", delete(g)"),
                                         "              for k in range(0, len(contract_ids), 500) if (g := receipts_grade_runs_table) is not None),\n            (\"receipts_grades\", delete(g)"),
+    "globals_lookup": (D, END, _fn("conn.execute(delete(globals()['receipts_grades_table']))")),
+    "vars_lookup": (R, END, _fn("conn.execute(delete(vars(db)['receipts_grades_table']))")),
+    "dunder_dict_lookup": (R, END, _fn("conn.execute(delete(db.__dict__.get('receipts_grades_table')))")),
+    "attrgetter_lookup": (R, END, _fn("import operator\nconn.execute(delete(operator.attrgetter('receipts_grades_table')(db)))")),
+    "getattribute_lookup": (R, END, _fn("conn.execute(delete(db.__getattribute__('receipts_grades_table')))")),
     "accounts_second_del": (A, ("REPLACE", "        for name in _ADDITIONAL_PRIVATE_TABLES:\n"),
                             "        _del('receipts_grade_runs', getattr(db, 'receipts_grade_runs_table'))\n"
                             "        for name in _ADDITIONAL_PRIVATE_TABLES:\n"),
