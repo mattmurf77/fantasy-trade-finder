@@ -22698,7 +22698,8 @@ def _assignment_settings(league_id: str, member_ids: list[str]) -> dict:
     return {"rounds": rounds, "order_type": order_type, "order": order}
 
 
-def _assignment_slots(league_id: str, settings: dict) -> list[dict]:
+def _assignment_slots(league_id: str, settings: dict,
+                      first_season: int | None = None) -> list[dict]:
     """Every asserted slot for a league, annotated for the client.
 
     `include_contested=True`: this surface is exactly where a contested or
@@ -22706,9 +22707,14 @@ def _assignment_slots(league_id: str, settings: dict) -> list[dict]:
     it. The rows are still withheld from every priced payload, by the row
     filter inside `load_draft_picks` (never by nulling `pool_value`, which
     `_power_picks_by_owner` would silently re-derive).
+
+    `first_season` (C5, `_assignment_first_season`) HIDES rows of earlier
+    seasons from the grid; it never deletes them. `None` = every row.
     """
     rows = load_draft_picks(league_id=str(league_id), source=PICK_SOURCE_USER,
                             include_contested=True)
+    if first_season is not None:
+        rows = [r for r in rows if int(r.get("season") or 0) >= first_season]
     if not rows:
         return []
     contested = contested_pick_ids(str(league_id))
@@ -22946,15 +22952,47 @@ def _assignment_league(sess: dict, league_id: str):
     return None, ({"error": "league_not_found"}, 404)
 
 
+def _assignment_first_season(league_id: str, season: int) -> int:
+    """The first class the pick-assignment GRID shows (C5).
+
+    `season + 1` once the league's `season` rookie draft is past, else
+    `season`. The signal is the CACHED verdict on the leagues row
+    (`get_league_draft_context` → `status` / `confidence`), read through the
+    shared `_current_season_picks_visible` predicate; for ESPN that verdict
+    comes from the rookies-on-rosters heuristic. The #228 fail-safe holds:
+    unknown, not_drafted, low confidence, no row, a row for another season or
+    a DB error all keep `season`. No calendar backstop.
+
+    The grid only (C5 scope a): the Draft Room's `_assignment_grid` and every
+    priced `load_draft_picks(source=user)` reader are untouched.
+    """
+    try:
+        ctx = get_league_draft_context(league_id)
+        if (ctx and ctx.get("season") is not None
+                and int(ctx["season"]) == int(season)
+                and not _current_season_picks_visible(ctx.get("status"),
+                                                      ctx.get("confidence"))):
+            return int(season) + 1
+    except Exception:
+        log.warning("pick-assignment: draft-context read failed for %s",
+                    league_id, exc_info=True)
+    return int(season)
+
+
 @app.route("/api/league/pick-assignments", methods=["GET"])
 @_gate_unverified_read
 def pick_assignments_route():
     """GET /api/league/pick-assignments?league_id=&season=
 
     The whole grid: `settings` (rounds / order_type / order), `seasons[]`
-    (always current + 3, ascending), `progress` and `seeded`. 192 slots is
+    (current + 3, ascending), `progress` and `seeded`. 192 slots is
     ~40 KB and one round-trip beats four, so this never paginates; the client
-    defaults to the current season and collapses the rest.
+    defaults to the first season and collapses the rest.
+
+    C5: once the league's rookie draft reads drafted, `seasons[]` starts at
+    season + 1 (`_assignment_first_season`). The additive `current_season`
+    is the league's season either way, so the client can tell a future class
+    from the current one.
 
     `slots[].assigned_at` is ALSO the optimistic-concurrency token the PUT
     below carries back. It is `null` on a never-assigned row.
@@ -22982,8 +23020,10 @@ def pick_assignments_route():
         return jsonify({"error": "not_in_league"}), 403
 
     settings = _assignment_settings(league_id, member_ids)
-    slots = _assignment_slots(league_id, settings)
+    slots = _assignment_slots(league_id, settings,
+                              first_season=_assignment_first_season(league_id, season))
     payload = _assignment_payload(league_id, settings, slots, len(member_ids))
+    payload["current_season"] = int(season)
 
     # ESPN auto-derived round-1 order — a DEFAULT for the setup step, only
     # while the league has no stored order of its own. `_assignment_settings`
@@ -23058,6 +23098,11 @@ def pick_assignment_put_route(pick_id: str):
                              include_contested=True)
     prior_row = next((r for r in prior if str(r.get("pick_id")) == str(pick_id)), None)
     prior_owner = str(prior_row.get("owner_user_id") or "") if prior_row else ""
+    # C5 — a pick of the drafted class is not on the grid, so it gets the
+    # same answer as any other pick that isn't, before anything is written.
+    first = _assignment_first_season(league_id, season)
+    if prior_row and int(prior_row["season"]) < first:
+        return jsonify({"error": "pick_not_found"}), 404
 
     outcome, row = assign_draft_pick(
         league_id=league_id, pick_id=str(pick_id), owner_user_id=owner,
@@ -23070,7 +23115,7 @@ def pick_assignment_put_route(pick_id: str):
     settings = _assignment_settings(league_id, member_ids)
     if outcome == "stale":
         # The WHOLE current row, so the conflict UI needs no second read.
-        current = _assignment_slots(league_id, settings)
+        current = _assignment_slots(league_id, settings, first_season=first)
         current = next((s for s in current if s["pick_id"] == str(pick_id)), None)
         return jsonify({"error": "stale_assignment", "current": current}), 409
 
@@ -23088,7 +23133,7 @@ def pick_assignment_put_route(pick_id: str):
     })
     invalidate_pick_assignment_cache(league_id)
 
-    slots = _assignment_slots(league_id, settings)
+    slots = _assignment_slots(league_id, settings, first_season=first)
     updated = next((s for s in slots if s["pick_id"] == str(pick_id)), None)
     payload = _assignment_payload(league_id, settings, slots, len(member_ids))
     return jsonify({"ok": True, "slot": updated,
@@ -23107,6 +23152,10 @@ def pick_assignments_order_route():
     board tractable: a league with three trades leaves 189 slots untouched and
     the three float into the client's "Traded picks" review. Re-running
     without `reseed` preserves every edited slot verbatim.
+
+    C5: once the league's rookie draft reads drafted, the seeded classes start
+    at season + 1 (`_assignment_first_season`). Prices stay relative to the
+    league season, and the spent class's rows are kept, only hidden.
 
     `rounds` is USER-SETTABLE (operator decision 2), clamped server-side to
     1..ROOKIE_MAX_ROUNDS. That clamp is the conservation bound's only lever,
@@ -23174,10 +23223,12 @@ def pick_assignments_order_route():
     # slot label, so the cached order must not survive it.
     _invalidate_slot_order(league_id)
 
+    first = _assignment_first_season(league_id, season)
     result = seed_pick_grid(
         league_id=league_id, member_user_ids=settings["order"],
         user_id_to_name=names, actor_user_id=actor,
         current_season=int(season), rounds=settings["rounds"],
+        first_season=first,
         seasons_ahead=_ASSIGNMENT_SEASONS_AHEAD,
         scoring_format=_active_format(sess),
         platform=str(getattr(g_league, "platform", None)
@@ -23185,7 +23236,7 @@ def pick_assignments_order_route():
                      or "espn").lower(),
         reseed=bool(body.get("reseed")))
 
-    slots = _assignment_slots(league_id, settings)
+    slots = _assignment_slots(league_id, settings, first_season=first)
     payload = _assignment_payload(league_id, settings, slots, len(member_ids))
     return jsonify({"ok": True, "seeded": result["seeded"],
                     "reseeded_over": result["reseeded_over"],
