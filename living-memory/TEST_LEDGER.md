@@ -4,9 +4,11 @@ Gates: the C2 scope (`docs/plans/share-text-c2/scope.md`). Client-only; no schem
 
 - **P2-2, the renders:** `renders/render.py` now draws both before/after PNGs from the code:
   - `TierBadge`'s pick-value ladder labels (uppercased by `type.label`) in `chalk.base`, with a 1px border in the tier's colour. The first draw had cyan "ELITE" / "STARTER" badges.
-  - `PositionChip` the same way; a pick shows its number;
+  - `PositionChip` the same way;
+  - **picks as each host builds them** (release-lead's re-QA P2-A). The calculator's pick is a generic rung: an RB chip, "Mid 1st Round Pick" and a "1 1ST" badge. The in-league pick is an owned league pick: a PICK chip, "2027 2nd" and its number, with the `/?ref=` URL (no mint). The second draw had an impossible "PICK 2027 Mid 1st 2,117" row in the calculator;
+  - main's TOTALs are the evaluation's package values (`_consensus_packages`), not the rows' sum, and its calculator verdict comes from `_fairness_v3`;
   - the wordmark and the URL footer in both panes. The first draw had no footer.
-- **P2-3, the checklist:** steps 2 and 5 now read the message body sent with the image in Messages (there's no capture toggle on iOS). Step 1 adds a pick, the footer and the unchanged on-screen verdict. Step 3 notes the link preview's "% fair" is #511's.
+- **P2-3, the checklist:** steps 2 and 5 now read the message body sent with the image in Messages (there's no capture toggle on iOS). Step 1 adds the footer and the unchanged on-screen verdict; a calculator pick shows its stand-in chip and tier badge. Step 4 adds a league pick, which shows its number with the `/?ref=` link. Step 3 notes the link preview's "% fair" is #511's.
 - **P3, the guard (`check-share-text.js`):**
   - It now bans `.verdict`, `point_ratio`, `give_value` / `receive_value`, `favors`, "fair" and "%" in every share region.
   - It scans the card's render body, which must render the line it's given exactly once.

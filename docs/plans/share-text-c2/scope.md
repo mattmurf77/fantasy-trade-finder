@@ -34,22 +34,23 @@
   - **Against main's share code it fails 28 checks.** release-lead's four bypasses (a bare `.verdict` in the text share, "`${…}% fair`" in the fallback, the verdict in the caption, a hard-coded "Verdict: fair" in the card) and two variants are each red.
 - [x] **Unit tests:** none. This is a client-only copy removal; the guard covers it.
 - [x] **Before/after renders** (for the operator's design OK): `renders/calculator-before-after.png`, and `renders/in-league-before-after.png` against a diverging opponent. They're mocks, not device captures (D-056). `renders/render.py` draws them from the code:
-  - the layout of `ShareTradeImage`, with main's TOTAL rows in the before pane;
+  - the layout of `ShareTradeImage`, with main's TOTAL rows in the before pane. Their figures are the evaluation's package values (after adjustments), from the backend's own `_consensus_packages`, and main's calculator verdict comes from `_fairness_v3`;
   - `TierBadge`'s pick-value ladder labels ("2 1sts", "1 1st", …; `type.label` uppercases them on the device), drawn in `chalk.base` with a 1px border in the tier's colour;
-  - `PositionChip` the same way, with a pick's border in `ink.lineStrong`; a pick shows its number;
+  - `PositionChip` the same way;
+  - picks as each host builds them. The live calculator's pick is a generic rung from `/api/trade/values`: a year-less name ("Mid 1st Round Pick"), a stand-in position (a 1st is "RB") and a tier badge. The in-league pick is an owned league pick ("2027 2nd"): a PICK chip in `ink.lineStrong` and its number. A package holding one skips the mint, so that pane's URL is the `/?ref=` link;
   - the wordmark, then the URL footer;
   - the Chalkline tokens and the card's own fonts.
-  The first version drew cyan "ELITE" / "STARTER" badges and no URL footer (release-lead's #566 QA P2-2). Redrawn.
+  The first version drew cyan "ELITE" / "STARTER" badges and no URL footer (release-lead's #566 QA P2-2). The second drew a calculator pick that can't occur ("PICK", "2027 Mid 1st", a number) and TOTALs as the rows' sum (P2-A). Both redrawn.
 - [x] **Manual TestFlight checklist** (operator, on the 11-06 binary). There's no image-capture toggle on an iPhone: the text fallback is the message body sent with the image (`ShareTradeImage.tsx:150`), so steps 2 and 5 read it in Messages.
-  1. **Calculator** (live, both sides filled, a pick on one side) → **Share image**. The card shows:
-     - the two sides, players with their tier badges and the pick with its number;
+  1. **Calculator** (live, both sides filled) → **Share image**. The card shows:
+     - the two sides, each asset with its tier badge as on screen. A generic pick from the calculator's list shows its stand-in position chip and a tier badge too (e.g. RB, "Mid 1st Round Pick", 1 1ST);
      - then "Package value", then the "Dynasty Trade Finder" wordmark and the URL footer;
      - no TOTAL rows, no "Verdict", no "%".
      The on-screen verdict card is unchanged.
   2. **In step 1's share sheet, pick Messages and read the text body.** It's exactly 4 lines, "Trade idea (…)", "Side A: …", "Side B: …", "Package value", then the link. No Consensus, ratio, Verdict, win or board line.
   3. **Calculator → Share** (the text button). The message is the same 4 lines, then "Build your own: <link>" when share landing is on. No "Consensus:", "ratio" or "Verdict".
      - The link's preview still says "% fair" until #511 is live. That's #511's, not C2's.
-  4. **In-league calculator**, against an opponent whose board diverges from yours (a "Wins by my board" or "@opp wins" verdict on screen) → **Share image**. The card says "Package value", never a win or board line, with the wordmark and the URL footer. The on-screen verdict is unchanged.
+  4. **In-league calculator**, against an opponent whose board diverges from yours (a "Wins by my board" or "@opp wins" verdict on screen), with one of your league picks on a side → **Share image**. The card says "Package value", never a win or board line. The league pick shows a PICK chip and its number. The footer has the wordmark and the plain `/?ref=` link (a package holding a pick isn't minted). The on-screen verdict is unchanged.
   5. **In step 4's share sheet, pick Messages and read the text body.** It's exactly 4 lines, "Trade idea vs @opp (…)", "I send: …", "I get: …", "Package value", then the link. No Consensus, ratio, Verdict, win or board line.
 - `testID`s added/renamed: none.
 

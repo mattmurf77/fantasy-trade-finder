@@ -11,7 +11,9 @@
 // Scoped to the share code: the share image component and its render body,
 // each <ShareTradeImage … /> element (its caption, verdictLine and fallback
 // text) and the calculator's shareTrade text. Banned by string and by
-// meaning (a .verdict read, the ratio, the side values, "fair", "%"). The in-app verdict (LeagueVerdict, the
+// meaning (a .verdict read, the ratio, the side values, "fair", "even", a
+// win, a total, "%"). Not covered: a verdict read into a variable outside
+// these regions and passed in by a neutral name (that needs data flow). The in-app verdict (LeagueVerdict, the
 // calculator's verdict card) is unchanged and not checked here.
 //
 // Run: node tests/check-share-text.js
@@ -65,13 +67,18 @@ check('the share image has no TOTAL row', !/>TOTAL</.test(image) && !/styles\.to
 check('the share image takes no totals', !/sendTotal|receiveTotal/.test(image));
 
 // By meaning, not only by string (release-lead's #566 QA): a verdict read
-// off the evaluation, its ratio, its side values or its favoured side, the
-// word "fair", or a percentage, anywhere in the share code.
+// off the evaluation, its ratio, its side values or its favoured side;
+// "fair" (and "Unfair"), "even", a win; a total or a sum; a percentage.
+// Matched against the code with its comments stripped, so the comments that
+// explain C2 may name what it removed.
 const BANNED_PATTERNS = [
   [/\.verdict\b/, '.verdict'], [/point_ratio/, 'point_ratio'],
   [/\b(give|receive)_value\b/, 'give_value / receive_value'], [/\bfavors\b/, 'favors'],
-  [/\bfair\b/i, '"fair"'], [/%/, '"%"'],
+  [/fair/i, '"fair"'], [/\beven\b/i, '"even"'], [/\bwins?\b/i, '"win"'],
+  [/total/i, '"total"'], [/\.reduce\(/, 'a sum (.reduce)'], [/%/, '"%"'],
 ];
+const stripComments = (src) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
 
 const shareCode = [
   ['the calculator\'s share image', elements(calc)],
@@ -88,7 +95,7 @@ for (const [where, regions] of [...shareCode, ['the share image\'s render body',
       check(`${where} has no "${banned}"`, !r.includes(banned));
     }
     for (const [pattern, name] of BANNED_PATTERNS) {
-      check(`${where} has no ${name}`, !pattern.test(r));
+      check(`${where} has no ${name}`, !pattern.test(stripComments(r)));
     }
   }
 }

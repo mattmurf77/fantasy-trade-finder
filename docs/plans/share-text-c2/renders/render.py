@@ -10,19 +10,39 @@ What it mirrors, by file:
   (type.title, centred); the footer (wordmark, then the URL, 11/14 Archivo
   SemiBold in chalk.faint, gap 2, the URL shrunk to fit down to 0.8).
   Main's card adds each side's TOTAL row (a hairline, then TOTAL in
-  type.label chalk.dim and the sum in type.data).
+  type.label chalk.dim and the figure in type.data). That figure is the
+  evaluation's give_value / receive_value, the package value after its
+  adjustments, not the rows' sum: drawn here from the backend's own
+  trade_optimizer._consensus_packages over the mock's values, as
+  /api/trade/evaluate computes it; main's calculator verdict likewise comes
+  from _fairness_v3 ("even" at a ratio of 0.95 or more, else "fair" or
+  "unfair") and the favoured side.
 - TierBadge.tsx / PositionChip.tsx, size sm: a 1px border in the tier's or
   position's colour (a pick's: ink.lineStrong), padding 4 by 1, radius xs,
   the label in type.label (uppercase, tracked) in chalk.base. Tier labels
   are the pick-value ladder's ("2 1sts", "1 1st", ...).
+- Picks, as each host builds them:
+  - the live calculator's are the pool's generic rungs from
+    /api/trade/values: a year-less name ("Mid 1st Round Pick",
+    pick_values.generic_pick_label), a stand-in position (_PICK_POS: a 1st
+    is "RB") and a ladder tier, so the card draws an RB chip and a tier
+    badge (TradeCalculatorScreen's tierFor is null only for pos "PICK");
+  - the in-league calculator's are the user's owned league picks
+    ("2027 2nd", server._owned_pick_label), pos "PICK" and no tier, so the
+    card draws a PICK chip and the pick's number. A package holding one
+    skips the mint (hasPickAssets), so its URL is the ?ref= rung.
 - theme/chalkline.ts and theme/colors.ts: every colour and type size.
 
 Run from the repo root (fonts from the shared mobile deps):
   python3 docs/plans/share-text-c2/renders/render.py
 """
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+from backend.trade_optimizer import _consensus_packages, _fairness_v3  # noqa: E402
 
 FONTS = Path("/Users/teresadickens/ftf-worktrees/mobile-deps/mobile/node_modules/@expo-google-fonts")
 OUT = Path(__file__).resolve().parent
@@ -85,7 +105,7 @@ def outlined_label(d, x_right, y_mid, text, border):
     return x0, w
 
 
-def card(caption, sides, verdict, url, totals):
+def card(caption, sides, verdict, url, totals=None):
     W, pad, gap = 360 * S, 16 * S, 12 * S
     img = Image.new("RGB", (W, 1000 * S), INK0)
     d = ImageDraw.Draw(img)
@@ -115,7 +135,7 @@ def card(caption, sides, verdict, url, totals):
             y += 4 * S
             d.rectangle((pad, y, W - pad - 1, y + S - 1), fill=LINE)
             y += S + 4 * S                               # paddingTop space.xs
-            total = f"{sum(VALUES[n] for _, n, _ in assets):,}"
+            total = f"{round(totals[i]):,}"
             draw_text(d, pad, y + 2 * S, "TOTAL", LABEL, DIM)
             draw_text(d, W - pad - width(d, total, DATA), y, total, DATA, BASE)
             y += 18 * S
@@ -163,26 +183,48 @@ def pair(name, left_label, before, right_label, after):
     out.save(OUT / name)
 
 
-# Values on the elo_to_value scale; a player's row shows its tier, a pick's its value.
+# Illustrative values on the elo_to_value scale; a player's row shows its tier,
+# an owned league pick's row its value. "Mid 1st Round Pick" is the generic
+# rung at its seed (elo_to_value(1650), first_1 for an RB).
 VALUES = {"Garrett Wilson": 4630, "Breece Hall": 5210, "Jalen Hurts": 6400,
-          "Sam LaPorta": 2450, "C.J. Stroud": 6500, "2027 Mid 1st": 2117}
+          "Mid 1st Round Pick": 2117, "Sam LaPorta": 2450, "C.J. Stroud": 6500,
+          "2027 2nd": 640}
+
+
+def evaluation(sides):
+    """Main's TOTALs and the calculator's verdict, as /api/trade/evaluate
+    computes them (server.py: _consensus_packages, _fairness_v3 at the 0.75
+    default, _value_verdict_payload's favours)."""
+    give, recv = ([n for _, n, _ in assets] for _, assets in sides)
+    value = VALUES.__getitem__
+    gv, rv = _consensus_packages(give, recv, value)
+    fairness, ratio, *_ = _fairness_v3(give, recv, value, None, 0.75)
+    even = ratio >= 0.95
+    verdict = "even" if even else "fair" if fairness is not None else "unfair"
+    favors = "even" if even else "receive" if rv > gv else "give"
+    return (round(gv, 1), round(rv, 1)), verdict, favors
+
 
 calc = [("Side A sends", [("WR", "Garrett Wilson", "firsts_2"), ("RB", "Breece Hall", "firsts_2")]),
-        ("Side B sends", [("QB", "Jalen Hurts", "firsts_3"), ("PICK", "2027 Mid 1st", None)])]
+        ("Side B sends", [("QB", "Jalen Hurts", "firsts_3"), ("RB", "Mid 1st Round Pick", "first_1")])]
+calc_totals, verdict, favors = evaluation(calc)
+calc_line = f"Verdict: {verdict}" + {"give": " · Side A sends more",
+                                      "receive": " · Side B sends more"}.get(favors, "")
 calc_url = "fantasy-trade-finder.onrender.com/s/p/Hk3x9Q2a?ref=yourname"
 pair("calculator-before-after.png",
      "Before (main)",
-     card("Trade idea · 1QB PPR", calc, "Verdict: fair · Side A sends more", calc_url, True),
+     card("Trade idea · 1QB PPR", calc, calc_line, calc_url, calc_totals),
      "After (#566)",
-     card("Trade idea · 1QB PPR", calc, "Package value", calc_url, False))
+     card("Trade idea · 1QB PPR", calc, "Package value", calc_url))
 
 league = [("You send", [("WR", "Garrett Wilson", "firsts_2"), ("TE", "Sam LaPorta", "first_1")]),
-          ("You receive", [("QB", "C.J. Stroud", "firsts_3")])]
-league_url = "fantasy-trade-finder.onrender.com/s/p/q7Lm2Wd0?ref=yourname"
+          ("You receive", [("QB", "C.J. Stroud", "firsts_3"), ("PICK", "2027 2nd", None)])]
+league_totals, _, _ = evaluation(league)
+league_url = "fantasy-trade-finder.onrender.com/?ref=yourname"   # a pick: no mint
 pair("in-league-before-after.png",
      "Before (main), the opponent's board diverges",
      card("vs @mike_dynasty · SF TEP", league,
-          "Wins by my board — @mike_dynasty likely disagrees", league_url, True),
+          "Wins by my board — @mike_dynasty likely disagrees", league_url, league_totals),
      "After (#566)",
-     card("vs @mike_dynasty · SF TEP", league, "Package value", league_url, False))
+     card("vs @mike_dynasty · SF TEP", league, "Package value", league_url))
 print("ok")
