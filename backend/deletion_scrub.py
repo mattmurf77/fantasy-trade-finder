@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -628,7 +629,11 @@ def _db_pass(now: datetime) -> int:
 
 
 def kick() -> None:
-    """Start the DB phase now, off the request (the deletion route)."""
+    """Start the DB phase now, off the request (the deletion route). The
+    test suite sets FTF_DISABLE_DELETION_SCRUB_KICK (a thread would outlive a
+    test's engine); prod never does, and the cleanup loop retries either way."""
+    if os.environ.get("FTF_DISABLE_DELETION_SCRUB_KICK") == "1":
+        return
     def run():
         try:
             run_pending()
