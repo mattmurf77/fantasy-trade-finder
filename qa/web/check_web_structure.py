@@ -704,7 +704,7 @@ def run() -> int:
     # head-eng confirms which. The swap flips SHARE_362_LIVE with the text.
     # Each version's markers are phrases only it uses; none may show while the
     # other version ships, so a half-done swap or an early claim fails too.
-    SHARE_362_LIVE = False
+    SHARE_362_LIVE = True
     R28_23_SHARE_MARKERS = {
         True: ("hard to guess", "no set end date", "stops working", "which stop working",
                "other shared trade pages"),

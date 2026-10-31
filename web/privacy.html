@@ -198,7 +198,7 @@
       <li>
         <strong>Sharing features.</strong>
         <ul>
-          <li>Share images and shared trade pages contain only what you chose to share. Anyone with the link can view a shared page, and shared pages stay available so links keep working (see section 5).</li>
+          <li>Share images and shared trade pages contain only what you chose to share. Anyone with the link can view a shared page. Links use random codes that are hard to guess, but anyone you send one to can pass it on. Shared pages stay available so links keep working (see section 5).</li>
           <li>Invite links you share include your Sleeper username so we can show who invited a new user.</li>
           <li>If the public-profile feature is turned on, your profile page (at /u/your-username) would show your display name, avatar, league count, your saved tier snapshot and your top over- and under-consensus takes. It never shows private league data or other users' rankings. This feature is currently off.</li>
         </ul>
@@ -253,7 +253,7 @@
         <p>An expired connection we haven't used again stays stored until one of those happens.</p>
       </li>
       <li><strong>Subscription and purchase records:</strong> kept while your account exists, and deleted with it.</li>
-      <li><strong>Shared trade pages and share snapshots:</strong> kept so links keep working. If you delete your account, they stay available with your account link removed; email us to remove one.</li>
+      <li><strong>Shared trade pages and share snapshots:</strong> kept with no set end date, so links keep working. A link you shared to a matched trade stops working if you delete your account; the other manager's own link to that trade isn't affected. Other shared pages stay available with your account link removed. Email us to remove one.</li>
       <li><strong>Sign-in sessions:</strong> end after a period of inactivity. Saved sessions end after 90 days without use, at sign-out, or when your account is deleted.</li>
       <li><strong>Server logs</strong> used for debugging are short-lived. Our hosting provider keeps standard request logs under its own policy.</li>
       <li><strong>Backups:</strong> our database host keeps point-in-time recovery backups for 7 days. Data you delete can remain in those backups until they roll off, for up to 7 days. We use backups only to recover the Service from a failure.</li>
@@ -273,7 +273,8 @@
               <li>notifications, notification settings and push tokens;</li>
               <li>activity and usage events, and linked anonymous usage history;</li>
               <li>saved sign-in sessions;</li>
-              <li>stored Sleeper, ESPN and MFL connections.</li>
+              <li>stored Sleeper, ESPN and MFL connections;</li>
+              <li>links you shared to matched trades, which stop working.</li>
             </ul>
           </li>
           <li>
@@ -282,7 +283,7 @@
               <li>trade matches keep the other side's record, with your identifier replaced by a deleted-user placeholder;</li>
               <li>references to you in other users' sent trade proposals and "bad trade" flags are cleared;</li>
               <li>feedback you sent keeps its triage status, with your account link and note text removed;</li>
-              <li>shared trade pages stay available, with your account link removed;</li>
+              <li>other shared trade pages stay available, with your account link removed;</li>
               <li>rank sets you shared publicly stay available, credited to "Deleted contributor";</li>
               <li>referral records keep the referral, with your account link removed.</li>
             </ul>
