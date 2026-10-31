@@ -1,3 +1,16 @@
+## 2026-10-31 — #373: no "beta" or "hobby" text on any page the binary links to (release-lead #549 QA P2; head-eng)
+
+Web only, on #373 (`feat/m7-p28-web-pages`).
+
+- **Confirmed removed:** all seven of main's lines are gone from #373, and from #373 merged with `origin/main` (merge-tree clean):
+  - `terms.html` 74-75, 104, 106, 128 and 132;
+  - `privacy.html:260`;
+  - `faq.html:206` ("A native iOS app is in TestFlight beta…", which #549's scope missed).
+
+  None of #373's `web/*.html` say "beta" or "hobby".
+- **Pin widened:** `POL-no-stale-claims` (no "Fantasy Trade Finder", "hobby" or "beta" in visible text) now runs on `faq.html` and `contact.html` as well as privacy and terms. Checker 241/241.
+- **Sabotage 8/8 red**, restored byte-identical: each of main's seven lines put back on its page, plus a "beta" line on contact. A "beta" only in an HTML comment correctly stays green.
+
 ## 2026-10-15 — #326 value core v4, #328 live-deck filters, #327 Calibration Yes/No
 
 - #326: CI 4/4 green on `fd805933`. Value-core, grading and fit suites 230 passed; the redundancy test gains the superflex third-QB and QB-for-QB cases.

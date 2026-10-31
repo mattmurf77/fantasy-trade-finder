@@ -333,7 +333,11 @@ def run() -> int:
         src = strip_comments(all_sources[page])
         return strip_style_and_script(head_of(src) + body_of(src))
 
-    for page in POLICY:
+    # Every page the binary links to (App Review taps Terms and Privacy, and the
+    # FAQ and contact pages are linked from them), not only the two policies:
+    # #549's sweep missed faq.html's "native iOS app is in TestFlight beta"
+    # (release-lead #549 QA P2; head-eng 2026-10-31).
+    for page in SUPPORT_PAGES:
         text = visible(page)
         bad = [label for label, pat in (
             ('"Fantasy Trade Finder"', r"Fantasy\s+Trade\s+Finder"),
