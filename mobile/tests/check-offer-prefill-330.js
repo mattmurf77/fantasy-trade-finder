@@ -191,8 +191,8 @@ assert(
 // here is the same: no new dispatch site.
 assert(
   countOf(tradesCode, 'generateMutation.mutate(') === 1
-    && countOf(tradesCode, 'dispatchGenerate(') === 8,
-  'S-2 the count of generate dispatch sites does not increase over base (1 raw mutate; 7 routed + definition)',
+    && countOf(tradesCode, 'dispatchGenerate(') === 9,
+  'S-2 the count of generate dispatch sites does not increase over base (1 raw mutate; 8 routed + definition, the 8th the automatic re-search)',
   `saw mutate=${countOf(tradesCode, 'generateMutation.mutate(')} helper=${countOf(tradesCode, 'dispatchGenerate(')} — a new dispatch site is a second generation per handoff waiting to happen`,
 );
 assert(
@@ -204,21 +204,24 @@ assert(
 // S-3 — analytics: the auto-run emits find_trades_tapped source:'league_offer'
 // ═══════════════════════════════════════════════════════════════════════
 
+// RE-KEYED 2026-10-23 (time to suggestion R1, addendum v2): the hand-off's
+// find_trades_tapped fires AT THE TAP in LeagueSummaryScreen (Offer →
+// league_offer, Target → league_target), with the client search id the
+// auto-run's request then carries — so the choke point emits NOTHING (a
+// dispatch-time emit would double-count the tap).
 assert(
-  // #384 — `source` is a ternary over the armed origin (calculator vs
-  // league_offer); the emit is still inside the autoRun branch, still `mode:
-  // deckMode`, still exactly one call.
-  /if \(autoRun\) \{[\s\S]*?track\(\s*'find_trades_tapped',\s*\{\s*source: autoRunOrigin === 'calculator' \? 'calculator' : 'league_offer',\s*mode: deckMode,\s*\},\s*'Trades',?\s*\);\s*\}/.test(chokeEffect),
-  "S-3 the auto-run dispatch emits find_trades_tapped {source:'league_offer' | 'calculator', mode}",
-  'sabotage detected: dropping the emit makes handoff adoption unmeasurable; emitting outside the autoRun branch double-counts in-place team picks',
+  !/track\(\s*'find_trades_tapped'/.test(chokeEffect)
+    && /if \(selected\) \{[\s\S]*?beginTradeSearch\(\{\s*source: verb === 'offer' \? 'league_offer' : 'league_target',/.test(leagueCode),
+  "S-3 the Offer/Target tap begins the search (league_offer | league_target); the auto-run dispatch emits nothing",
+  'sabotage detected: no tap-time R1 makes handoff adoption unmeasurable; a dispatch emit double-counts it',
 );
 // Source-of-truth cross-check (the check-league-candidates-300.js pattern):
 // the props must be REGISTERED — an unregistered prop is stripped by ingest
 // behind a 200, with no 4xx and no client log.
 const propsRow = (taxonomy.match(/"find_trades_tapped":\s*frozenset\(\{([^}]*)\}\)/) || [])[1];
 assert(
-  !!propsRow && /"source"/.test(propsRow) && /"mode"/.test(propsRow),
-  'S-3 find_trades_tapped registers {source, mode} in backend/analytics_taxonomy.py',
+  !!propsRow && /"source"/.test(propsRow) && /"mode"/.test(propsRow) && /"search_id"/.test(propsRow),
+  'S-3 find_trades_tapped registers {source, mode, search_id} in backend/analytics_taxonomy.py',
   `sabotage detected: prop-name-level ingest would silently strip the new value (row: ${propsRow})`,
 );
 assert(
@@ -338,7 +341,8 @@ assert(
   'sabotage detected: after a scoped zero-result, toggling fairness leaves the stale "No trade found" card until the next search (QA F-4)',
 );
 assert(
-  /onMutate: \(\) => \(\{ epoch: deckEpochRef\.current \}\)/.test(tradesCode),
+  // (200 ms path C stamps the dispatch-time device page key beside it.)
+  /onMutate: \(\) => \(\{ epoch: deckEpochRef\.current(, deviceKey)? \}\)/.test(tradesCode),
   'S-5 every dispatch stamps the current epoch into the mutation context',
 );
 assert(

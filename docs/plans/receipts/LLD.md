@@ -134,6 +134,27 @@ they include all graded rows and report `gradeable_share` / `flag_low_share` ins
 `n == rows used` invariant holds on both surfaces over their respective row sets. Available regardless of
 `receipts.screen`; requires `receipts.grading` on (404 `feature_disabled` while fully dark).
 
+**Series break at the packed-evidence flip (U6 R-U6b, 2026-10-26).** The response always
+carries `caveats` (usually `[]`). Once `database.PACKED_EVIDENCE_FLIP_DAY` is set (one value,
+shared with the endorsement ratio's caveat at `/api/admin/suggestion-telemetry/ratio`),
+and the serve dates of the graded rows used span that day, it holds one entry:
+`{code: "series_break", scope: "receipts", detail: "U6/R-U6a: receipts move to viewed-or-first-30
+cards at the packed-evidence flip", day}`. This is the #418 `analytics_queries.SERIES_BREAKS`
+pattern. The constant ships `None`, and the scribe fills it in at the flip, because before then
+no row carries a non-NULL `evidence_tier` and nothing breaks. A readout that straddles the flip
+compares two populations: every built card before it, and viewed-or-first-30 cards after it
+(§4.1).
+
+**`viewed_without_full_row` (models-lead R3).** `{restart_split, evicted_split, other, runs}` counts the
+cards a user acted on that have no full row (no `assets_json`), so they can be neither graded
+nor matched; they are counted here so they are never silently dropped. Each card's cause is
+the one the evidence writer recorded when its upgrade missed: its run's pack header,
+`run["upgrade_miss_cards"]` (`restart_split`, `evicted_split` or `other`), read in one query
+for the runs involved; no pack or no entry for the card is `other`. The card's index no
+longer decides. The matcher logs the same counts once per run. If the
+count fails, the block is `{…: null, unavailable: true}` and the rest of the response is
+unaffected.
+
 Route additions land in `docs/api-reference.md` in the same PR (mandatory docs gate).
 
 ## 3. Data structures & schema
@@ -144,8 +165,12 @@ Additive tables in `backend/database.py` (house style: soft references, no FKs �
 
 ```python
 # receipts_grades — APPEND-ONLY. One row per (impression, window, grader_version)
-# reaching a terminal status. Never UPDATEd/DELETEd; corrections = new grader_version
-# (D-3). The impression row is the preregistered prediction; this table records only
+# reaching a terminal status. Never UPDATEd, never DELETEd to correct a grade;
+# corrections = new grader_version (D-3). The one delete is legal's 365-day retention
+# cap (`_delete_deck`, 2026-10-29) and account deletion (T-10 pins both; its residual,
+# not caught, by class: run-time-computed names and runtime table searches, back-references
+# from an allowed use, SQL text built in forms the renderer doesn't resolve, exec/eval or
+# a file run, and the ORM, which the codebase doesn't use). The impression row is the preregistered prediction; this table records only
 # how consensus moved afterward.
 receipts_grades_table = Table("receipts_grades", metadata,
     Column("id",              Integer, primary_key=True, autoincrement=True),
@@ -223,6 +248,12 @@ todo = SELECT i.* FROM deck_impressions i
        WHERE i.assets_json IS NOT NULL                   -- telemetry era only (NG-7)
          AND (i.is_ghost IS NULL OR i.is_ghost = 0)      -- operator ruling 2026-08-21:
                                                          -- ghost rows are never graded
+         AND (i.evidence_tier IS NULL                    -- U6 R-U6a + models-lead R3:
+              OR i.evidence_tier = 'first30'             -- database._evidence_shown, the
+              OR EXISTS (SELECT 1 FROM deck_outcomes o   -- same predicate the matcher's
+                          WHERE o.impression_id = i.impression_id   -- was_recommended uses
+                            AND o.action IN ('viewed','like','pass',
+                                             'propose','undo','not_interested')))
          AND date(i.served_at) + :w <= utc_today()       -- per window w ∈ (14,28,56)
          AND NOT EXISTS (SELECT 1 FROM receipts_grades g
                           WHERE g.impression_id = i.impression_id
@@ -230,6 +261,27 @@ todo = SELECT i.* FROM deck_impressions i
                             AND g.grader_version = :GRADER_VERSION)
        ORDER BY i.served_at LIMIT :batch
 ```
+
+**Eligibility (U6 R-U6a, models-lead R3, 2026-10-26).** U6 ("viewed + first 30") is accepted on
+the record by analytics-lead (2026-10-26: "U6 is accepted on the record", with conditions R-U6a,
+eligibility = viewed or first 30, and R-U6b, a series break at the flip) and by trades-eng, who
+owns receipts and the matcher and built R-U6a with no deviation (#424). Under ADR-025 packed evidence, a
+`deck_impressions` row no longer means a card was shown. A row counts as a recommendation
+only if one of these holds:
+- it was written at build (`evidence_tier` NULL: legacy and flag-off rows, unchanged);
+- it is a `first30` card;
+- the card has a first outcome of any kind, joined by `impression_id`.
+
+"Viewed" comes from `deck_outcomes`, never from the tier or from whether a full row exists. So
+`delivered`, `archive`, `full_interim`, `partial_run` and even a `viewed` row count only once
+acted on. The executed-trade matcher (`load_impressions_for_matching`, `was_recommended`) uses
+the same `database._evidence_shown()` predicate, so the two never disagree on what was
+recommended. The matcher also passes its ghost rows through, unchanged, for the incrementality
+read. The outcome check is an EXISTS on `deck_outcomes.impression_id`, which never runs for a NULL-tier row; SQLite
+probes `ix_deck_outcomes_impression` per row, and Postgres may plan it as a hashed SubPlan (one scan of `deck_outcomes`
+per query, about 28 ms at 200k rows). That index was created with the table, so no migration is
+needed. An acted-on card with no full row can't be graded; it is counted in §2.3
+`viewed_without_full_row` instead, by the cause its run's pack records.
 
 Date arithmetic is shown PG-flavored; the implementation computes cutoff dates in Python
 so the identical query runs on SQLite (tests) and Postgres (prod). Retry-pending
@@ -396,7 +448,7 @@ flags off; tables inert. Mobile ships in the normal EAS cadence; server can depl
   filter stands as defense in depth), dedup-by-earliest, min-n
   gating, all-windows payload, flag-off 404s; `n == len(rows used)` (post-dedup,
   post-coverage) asserted; Wilson implementation against 3/5 → [0.231, 0.882].
-- **T-10 append-only:** module exposes no UPDATE/DELETE for `receipts_` tables.
+- **T-10 append-only:** `backend/tests/test_receipts_append_only.py` (AST-based since #544's QA; an allowlist of uses since its round 2). A receipts table, or a name bound to one, may appear anywhere in `backend/` or `scripts/` only as the subject of a read or an insert (`select`, `select_from`, `join`, `insert`, `_dialect_insert`, `exists`, `.c`, `.insert()`), as `.name` in SQL text (itself checked), bound to a local name, or in the retention cap's two pinned statements in `_delete_deck`. Account deletion removes a user's grades by name, through `accounts._ADDITIONAL_PRIVATE_TABLES`. SQL text in `.py` and `.sql` files that writes one is a finding. **Residual, not caught** (T-10 catches accidents, not deliberate evasion; release-lead's #544 round-3 ruling): a table reached through a value computed at run time across functions, or a runtime search of `metadata.sorted_tables`; a back-reference from an allowed use (`t.c.<col>.table`, `insert(t).table`, `select(t).get_final_froms()[0]`); SQL text the renderer doesn't resolve (`"%(t)s" % {...}`, `.format_map`, `string.Template`, `b"...".decode()`, SQL built by `list.append` then `' '.join`); code or SQL that only exists at run time (`exec`/`eval`, a file read and executed); and the ORM (a mapped class: `session.query(Grade).delete()`, `delete(Grade)`; the codebase has no ORM). A static name looked up in a namespace (`globals()`, `vars()`, `__dict__`, `attrgetter`, `__getattribute__`) is resolved.
 - **Structural (`mobile/tests/check-receipts.js` + npm script):** ReceiptsScreen
   registered as root-stack push; `FeedbackFAB activeScreen="Receipts"` exactly once; all
   three window chips bound to one payload; no bare `Receipt` component name (collision

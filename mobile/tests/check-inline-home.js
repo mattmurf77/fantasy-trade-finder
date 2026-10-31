@@ -238,8 +238,8 @@ console.log('check-inline-home:');
   // lifecycle rides every dispatch (check-canvas-results §12 census). The
   // no-new-site invariant is unchanged — it just counts the helper's calls.
   assert(count(tradesCode, /generateMutation\.mutate\(/g) === 1
-    && count(tradesCode, /dispatchGenerate\(/g) === 8,
-    '7f. no new generate dispatch site was added (1 raw mutate in the helper; 7 routed sites + definition)',
+    && count(tradesCode, /dispatchGenerate\(/g) === 9,
+    '7f. no new generate dispatch site was added (1 raw mutate in the helper; 8 routed sites + definition, the 8th the automatic re-search)',
     'a second site is a second search per tap waiting to happen');
   assert(/\}, \[finderMode, scopedOpponent, autoRunSeq, canvasRunSeq, fairnessReady\]\);/.test(trades),
     '7g. the choke point lists the inline trigger and fairness hydration as deps');
@@ -386,9 +386,11 @@ console.log('check-inline-home:');
       + '(fair sweep with a give side, model deck on empty canvas, D-153)');
     // The deck-summary copy quotes the CTA's label verbatim (#316); with
     // the bar gone on the merged view it must quote the canvas cell's
-    // fixed "Find a Trade" instead — and keep the flag-off quote.
+    // fixed "Find a Trade" instead. RE-PINNED 2026-10-22 (head-eng ruling
+    // 13, D13): the page CTA's "more" state is gone, so off the merged view
+    // the copy names no control (check-no-finding-more.js pins the removal).
     assert(/canvasHost === 'flag'\s*\n?\s*\? 'Fresh ideas land every week — or tap Find a Trade to search again now\.'/.test(trades)
-      && /: 'Fresh ideas land every week — or tap Find more trades to search again now\.'/.test(trades),
+      && /: 'Fresh ideas land every week\.'/.test(trades),
       '11c. T-2: the deck-summary copy quotes whichever control renders',
       'copy naming a control that is not on the page is a #316-class lie');
   }

@@ -70,6 +70,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Independent offline model scorecard](#independent-offline-model-scorecard)
 - [Local dev](#local-dev)
 - [Deploy (Render)](#deploy-render)
+- [DB connections and background threads across fork](#db-connections-and-background-threads-across-fork)
 - [Pre-ship simulator gate (2026-08-08)](#pre-ship-simulator-gate-2026-08-08)
   - [Risk-tier matrix (operator-owned; deviations are decisions, recorded in the feature's scope block)](#risk-tier-matrix-operator-owned-deviations-are-decisions-recorded-in-the-features-scope-block)
   - [Evidence](#evidence)
@@ -77,6 +78,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
   - [Screen library (capture freshness)](#screen-library-capture-freshness)
   - [Failure symptom / lever](#failure-symptom-lever)
 - [Database](#database)
+- [Migration DDL never blocks boot](#migration-ddl-never-blocks-boot)
 - [Feature flags](#feature-flags)
 - [Trade engine flags + kill switch](#trade-engine-flags-kill-switch)
 - [Runtime tuning](#runtime-tuning)
@@ -108,8 +110,11 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Analytics platform P1 — ingestion pipeline + kill-switch latency (2026-07-18)](#analytics-platform-p1-ingestion-pipeline-kill-switch-latency-2026-07-18)
 - [Render ignores render.yaml envVars on the dashboard-created web service (2026-07-19)](#render-ignores-renderyaml-envvars-on-the-dashboard-created-web-service-2026-07-19)
 - [Offline eval harness — replay/IPS on the F1 impression spine (F8, 2026-07-26)](#offline-eval-harness-replayips-on-the-f1-impression-spine-f8-2026-07-26)
+- [200 ms flip: model-side 24 h read (2026-10-26)](#200-ms-flip-model-side-24-h-read-2026-10-26)
+- [B-DK-4..7 production audit (2026-10-26)](#b-dk-47-production-audit-2026-10-26)
 - [MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)](#mfl-numeric-league-ids-wiped-draft-picks-on-session-init-200-2026-07-27)
 - [Sleeper-flake still wiped draft picks after the #200 fix (#220, 2026-08-01)](#sleeper-flake-still-wiped-draft-picks-after-the-200-fix-220-2026-08-01)
+- [Sleeper 429 / circuit open (S0, 2026-10-20)](#sleeper-429--circuit-open-s0-2026-10-20)
 - [Player-cache refresh (rookie-draft M0, 2026-08-06)](#player-cache-refresh-rookie-draft-m0-2026-08-06)
 - [Rookie-scope board restore (rookie-draft M2, 2026-08-06)](#rookie-scope-board-restore-rookie-draft-m2-2026-08-06)
 - [Draft Room polling budget (rookie-draft M4, 2026-08-06)](#draft-room-polling-budget-rookie-draft-m4-2026-08-06)
@@ -121,6 +126,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Retiring the onboarding experiment overlay — open-access Phase A (2026-08-15)](#retiring-the-onboarding-experiment-overlay--open-access-phase-a-2026-08-15)
 - [Organic trade backfill (2026-08-16)](#organic-trade-backfill-2026-08-16)
 - [ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)](#espn-identity-binding--one-time-cohort-re-sign-in-321-2026-08-16)
+- [Purge orphaned ESPN/MFL entry users (one-time, 2026-11)](#purge-orphaned-espnmfl-entry-users-one-time-2026-11)
 
 ---
 
@@ -183,6 +189,18 @@ from historical decisions/inbound offers, which must retain original terms.
 - **Static:** `web/` served by Flask.
 - Set `ANTHROPIC_API_KEY` in Render dashboard if smart matchups should be enabled in prod.
 
+### The gthread switch (E1)
+
+The web service runs one gunicorn worker with **`--threads 4`** (E1). The live start command comes from the
+service settings, **not** `render.yaml` (G-018; confirmed 2026-10-24 by an API read, which showed the dashboard
+command while the blueprint said `plan: free` against a live `standard`). So merging this file changes nothing
+by itself. On the operator's word, set the start command on the service (Render API `PATCH /v1/services/<id>`
+or the dashboard), then deploy and read the live command back. **Rollback:** the same command without
+`--threads 4`, then deploy. Watch the first 13:30 UTC daily tick and the request p95 after the switch.
+
+As of 2026-10-24 the service reports **`autoDeploy: yes`**: every merge to `main` deploys at once. That
+supersedes the 2026-09-20 note above.
+
 ### First-action latency release (2026-09-21)
 
 This backend release changes job admission, diagnostic preparation and incremental
@@ -202,6 +220,39 @@ now remain terminal instead of allowing a late worker to revive the job. Ordinar
 identical requests join; input changes/force can revoke old work. No database
 cleanup, arm adjustment or new TestFlight binary is required for this compatible
 backend increment. Physical-device checks and the three-second KPI remain separate.
+
+---
+
+## DB connections and background threads across fork
+
+**Root cause** (found in release-lead's 2026-10-26 deploy watch):
+- Render's default for Python services is `GUNICORN_CMD_ARGS="--preload --access-logfile - --bind=0.0.0.0:10000"`. It does not appear in the service's env list.
+- With `--preload`, gunicorn imports the app in the **master** and then forks the worker. Every boot logs "Database initialised" before "Booting worker".
+- So prod has **always** preloaded, and the import-time background work has probably never run in the serving process. The gunicorn version is not the cause: 26.2.0 still loads in the master only with `preload_app`.
+- **Inherited connections:** pooled DB connections opened during import (init_db, player sync) were inherited by the worker. Master and worker then shared the same SSL sockets, which gave "decryption failed or bad record mac", for example in `load_pending_matches_older_than` inside `cron_realtime_tick`.
+- **Threads that never ran in the worker:** threads do not survive fork.
+  - The import-time `_cleanup_loop` ran **only in the master**. The serving worker never swept its own sessions or trade jobs, while the master's loop issued its DB purges over the shared connections.
+  - The import-time Win Now resume (`start_worker_on_startup`) started `win-now-worker` in the master. The worker inherited `_worker_running=True` with no thread, so `wake_worker` was a no-op until a restart.
+- **Idle drops:** "SSL SYSCALL EOF" on later idle passes was the server dropping idle connections.
+
+**Fix.** It does not depend on the gunicorn version, and uses no gunicorn hooks or conf file.
+- `backend/database.py`:
+  - `os.register_at_fork(after_in_child=_reset_pools_after_fork)` calls `dispose(close=False)` on `engine`, `ingest_engine` and `ro_engine`. A forked child starts with empty pools, and the parent keeps its sockets.
+  - Postgres engines get `pool_recycle=280` and libpq TCP keepalives (`keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=5`) via `_pg_engine_kwargs`. `ro_engine` keeps its read-only `options`.
+  - No `pool_pre_ping`.
+- `backend/server.py`: `_ensure_background_threads()` runs once per pid from a `before_request` hook, so it runs in whichever process serves requests (the gunicorn worker, or `python run.py` on its first request). It:
+  - starts `_cleanup_loop`, unless `FTF_DISABLE_CLEANUP_LOOP=1` (tests);
+  - then starts a short-lived `win-now-resume` thread that resumes queued Win Now work. That always runs, but the function keeps its own `FTF_TEST_MODE` / `FTF_BUILD_MODE` guard. It runs off the request path: inline it held `_bg_threads_lock` for ~49 ms while concurrent first requests waited.
+- `backend/server.py` `_cleanup_loop`: each step (including the in-memory session sweep, `_prune_deck_evidence`, the trade-job sweep, `_evict_trade_page_store` and `_drop_stale_deck_evidence`) has its own `try/except` + `log.exception`, so one failure cannot end that worker's loop.
+- `requirements.txt` pins `gunicorn==26.2.0` to match what Render installs. The pin is harmless and is not the cause (see `living-memory/DEPENDENCIES.md` 2026-10-26).
+
+**What to watch after the deploy:**
+- **No** "decryption failed or bad record mac" and **no** "SSL SYSCALL EOF" for 24 h.
+- "Cleaned up N stale session(s)" and "Trade jobs swept: … evicted" now appear with the **worker's** pid, starting about 5 min after the first request. Before this fix they could only come from the master, where the session and job maps are empty.
+- In-process trade jobs older than `_JOB_RETENTION` (4 h) are now evicted in prod for the first time. A tap after that rebuilds the deck instead of reusing a long-finished job.
+- `_JOB_HARD_TIMEOUT` also applies in prod for the first time. It is 300 s, measured from `started_at` (or a prepared job's last durable adoption progress): a stuck-job backstop, not a latency target (prod pre-gens reach their first owner batch at 60-75 s). Each timed-out job logs one WARNING, `trade-job <id> timed out: <N>s since start, <M> cards published`, next to the "Trade jobs swept" summary.
+- Worker memory should flatten instead of growing with every session since the last restart.
+- Win Now jobs queued before a deploy now resume in the worker after its first request. Previously a job stayed queued until something triggered a restart.
 
 ---
 
@@ -296,11 +347,52 @@ Prereq: `brew install pngquant` (the runner falls back to `sips` downscale with 
 
 ---
 
+## Migration DDL never blocks boot
+
+Why this exists: on #416's deploy, the boot spent about 90 s in `init_db`.
+- `_migrate_db()` ran every listed `ALTER TABLE … ADD COLUMN` (112) and every `CREATE INDEX IF NOT EXISTS` (15) on every boot.
+- On Postgres the ALTER takes ACCESS EXCLUSIVE and the CREATE INDEX takes SHARE, both **before** checking whether the object already exists.
+- The new instance's DDL queued behind the still-serving old instance, and the old instance's queries then queued behind the DDL.
+
+How it works now (`backend/database.py`, `_SchemaSnapshot` / `_run_guarded_ddl`):
+- **Precheck.** `_migrate_db` reads each table's columns and indexes once, and skips any column or index that already exists. A normal boot therefore issues **no** ADD COLUMN and **no** CREATE INDEX. Only the two `DROP INDEX IF EXISTS` no-ops remain; they take no lock when the index is absent.
+- **Catalog reads cannot hang.** On Postgres each read runs on its own short-lived connection that first runs `SET lock_timeout = '3s'`, and that connection is closed before any DDL.
+  - A lock-busy read fails the boot with `MIGRATION_LOCK_BUSY <table>`. It does not fall back to "assume nothing exists", which would retry every column.
+  - Any other read error keeps the old fallback: that table's DDL just runs.
+- **Lock guard for missing DDL (Postgres).** Each statement runs in its own transaction after `SET LOCAL lock_timeout = '3s'`. A missing **column** also gets `SET LOCAL statement_timeout = '30s'` (ADD COLUMN is metadata-only). A missing **index** gets **no** statement_timeout, so a build that has its lock is never cancelled.
+  - On `55P03` (lock_not_available) or `57014` (query_canceled) it retries up to 10 attempts, about 1 s apart (about 40 s at most).
+  - If the table is still locked, it logs at ERROR `MIGRATION_LOCK_BUSY <table>.<col>` (or `<index>`) and **raises**, so `init_db` and the boot fail.
+  - Any other error is swallowed as before (the "already exists" race).
+- **SQLite:** same precheck. No SET, no retry.
+
+**Why it fails instead of serving:** readers need every metadata column.
+- SQLAlchemy Core `select(<table>)`, and any insert that lists every metadata column, names every declared column. Postgres rejects one that is not there yet.
+- For example, a missing `deck_impressions.evidence_tier` would fail every deck evidence write.
+- A missing `deck_candidate_sets.candidates_packed` would fail the prepared-offer reads.
+- A missing `overhaul_attempts.provider_status` would fail every overhaul status read.
+
+**Fail-boot is safe only because prod preloads.**
+- Render's default `GUNICORN_CMD_ARGS` includes `--preload`, so `init_db` runs in the gunicorn master before the port opens. A failed boot never takes traffic: the deploy fails and the old instance keeps serving.
+- **Without** `--preload`, the master opens the port first. Then a failing worker boot exits only after traffic has switched to it.
+- Making `--preload` explicit in `render.yaml` is release-lead's call.
+
+**Shipping a column or index:**
+- A deploy that adds a column goes out in a **quiet window**: low traffic, and no long-running cron or job holding the table.
+- While the guard retries (up to about 40 s), the old instance's queries on that table can stall up to 3 s per attempt, queued behind the waiting ALTER.
+- **If the boot fails with `MIGRATION_LOCK_BUSY`:** the old instance keeps serving, so nothing is down. **Redeploy** in a quieter moment.
+- **Never hand-edit the prod schema.**
+- **A new index on a large table** must be built `CREATE INDEX CONCURRENTLY` **off the boot path**, as an operator one-off or a migration script with a lock_timeout. See the C8 retention note beside `deck_impressions`' indexes in `database.py`. The boot guard only bounds the lock wait. A plain build still blocks writes for the length of the scan once it has the lock.
+- **`build.sh` imports `backend.server`**, so `init_db` also runs during the Render build. A lock-busy failure there hides behind the "Sleeper cache bake skipped" message. Read the build log, not only the deploy log.
+- **Check it landed:** the boot completes, and `\d <table>` in psql against `DATABASE_URL_PROD` shows the column or index.
+
+---
+
 ## Feature flags
 
 - Edit `config/features.json` and commit/deploy, OR
 - `POST /api/feature-flags/reload` to re-read without restart, OR
 - Set `FTF_FLAGS` env var for process-level overrides.
+- Don't roll back `account.settings_hub` after the 11-06 build: the flat Settings fallback deletes without the LEG-S6 Apple code (#446).
 
 ---
 
@@ -471,6 +563,8 @@ python -m backend.eval.blind_grade export --cards A.json --cards B.json [...] --
 python -m backend.eval.blind_grade import --sheet <NEW_DIR>/grade-sheet.csv --key <NEW_DIR>/key.private.json
 ```
 
+`served` reads the latest Trades deck per league served in the last 30 days (`SERVED_LOOKBACK`), skipping Calibration refresh decks and decks whose evidence contradicts itself. It takes the top `--top` cards (30) by displayed position, after removing withdrawn cards nobody saw. Its stdout summary names `leagues_without_deck` (no gradeable deck in 30 days: pick another league or seat) and `leagues_with_no_cards` (a deck was found but gave 0 gradeable cards, every chosen card lacking a full row: also pick another league or seat), and counts `skipped_no_row` (chosen cards with no full row, never back-filled). It also prints `skipped_decks_in_lookback_by_reason` (the CardSet's `skipped_decks_by_reason`): every ungradeable deck in the 30-day lookback, by reason, in every league and older than the graded deck too. A `pack_integrity` or `withdrawal_conflict` count there is also a flip-read G1 / G8 signal.
+
 `export` samples 40 cards per variant, merges identical trades, shuffles, and writes `grade-sheet.csv` plus `key.private.json`. The sheet names no variant, and its reasons column is blank by default (`show_reasons=False`), because engine-specific phrasing would reveal the source. Give graders the CSV only, never the key. Grades are integers 1–5 (blank = ungraded). Tags are `;`-separated from `same_guy_again`, `too_small`, `never_accept`, `wrong_my_window`, `wrong_their_window`, `junk_filler`, `overpay`. `import` rejects anything else and names the card, then writes `summary.json` next to the sheet: per-variant mean, share graded 4 or more, and tag counts. Target: mean ≥ 4.0 and clearly above the incumbent.
 
 **Kill switch.** A value-core failure while building a deck is logged (`value-core: deck build failed … falling back to the legacy engine`) and that job is finished by the legacy engine, so a rising count of that log line is the signal to act.
@@ -478,7 +572,7 @@ python -m backend.eval.blind_grade import --sheet <NEW_DIR>/grade-sheet.csv --ke
 1. **Stop it:** set `trade.value_core` to `false` (a `config/features.json` change, or an `FTF_FLAGS` override), then `POST /api/feature-flags/reload`. The safety signature changes, so the next `/api/trades/generate` runs the legacy engine and no cached value-core deck is reused.
 2. **Narrow it (deploy-free):** `vc_testers_only` → `1` with `scripts/set_knob.py` or `PUT /api/admin/config/vc_testers_only` (`X-Cron-Secret`). Serving returns to the tester allowlist only.
 
-**Reading the job log.** Each value-core job logs one INFO line: `trade-job <id> value_core: partners=… packages=… checked=… fair=… served=… truncated=… budget_exhausted=… core_ms=… total_ms=…`. `budget_exhausted=True` means the 8 s core budget stopped enumeration and a partial pool was ranked and served. `truncated` counts partners that hit the per-partner keep cap or the check cap. A standings failure logs `value-core: standings unavailable league=…` and the job continues with windows from roster age and picks only.
+**Reading the job log.** Each value-core job logs one INFO line: `trade-job <id> value_core: partners=… packages=… checked=… fair=… served=… truncated=… budget_exhausted=… core_ms=… total_ms=…`. The only thing that sets `budget_exhausted` is the 30 s safety ceiling (pathology), always together with `CoreDiagnostics.safety_ceiling_hit`. The core is bounded by its check caps, never by the clock, so this is not load. A ceiling run never reaches this INFO line, because the job refuses the partial pool (head-eng ruling 15). Look instead for two ERROR lines: `value-core: safety ceiling … hit; stopped with N/M partners done, K pairs checked` and `trade-job <id> value_core: safety ceiling hit (…); refusing the partial pool`. The job ends with error `value_core_failed`. Check for a machine stall (a frozen or starved process, a paused instance) or a pathological input (an extreme roster or package count), not traffic. `truncated` counts partners that hit the per-partner keep cap or the check cap. A standings failure logs `value-core: standings unavailable league=…` and the job continues with windows from roster age and picks only.
 
 ### Gate 2 — Calibration (in-app blind grading)
 
@@ -610,17 +704,35 @@ External scheduler (Render cron) must hit:
 
 If these stop firing, queued pushes pile up in `notification_queue` and digests/re-engagement go silent.
 
-**Known outage: `daily-tick` is killed every day (found 2026-10-15, not yet fixed).**
-- **Symptom:** every day from at least 2026-10-01 to 2026-10-14, gunicorn logged `WORKER TIMEOUT` about 13:33 UTC, ~150 s after the 13:30 run, and the tick returned **500**.
-- **Cause:**
-  - The tick does too much work inline on the request thread, past `--timeout 120`.
-  - The Wednesday 2026-10-14 traceback is inside `_run_weekly_replenishment` → `_kickoff_trade_job`, which builds decks synchronously. That pass runs Wed–Sun (`replenish_weekday`).
-  - The Monday and Tuesday kills left no traceback. That points at an earlier inline step, most likely the re-engagement scan.
-- **Consequence:**
-  - Every later step in the tick never runs: value-model refit, the players-cache guard, the rookie class-load monitor, the weekly roster-snapshot sweep, the **Usage Trends store refresh** and receipts grading.
-  - Each kill also restarts the single worker, which clears in-process caches.
-- **Diagnose:** Render logs for `srv-d7g37ftckfvc73a32gvg`, 13:29–13:40 UTC, text `WORKER TIMEOUT` / `POST /api/cron/daily-tick`.
-- **Until it's fixed,** run the skipped writers by hand. Usage Trends, weekly once Sleeper's state rolls over: `python3 scripts/refresh_usage_trends.py --remote`. Roster snapshots: `POST /api/cron/roster-snapshot`.
+**`daily-tick` runner (S3 fix, 2026-10-22, [scope](plans/daily-tick-fix/scope.md)) — replaces the *Known outage* note.**
+- **What changed:**
+  - **Before:** the tick ran every step inline on the request thread, past gunicorn's `--timeout 120`. From at least 2026-10-01 the worker was killed about 13:33 UTC every day (`WORKER TIMEOUT`, tick **500**): Wed–Sun inside `_run_weekly_replenishment` → `_kickoff_trade_job`, Mon–Tue most likely the re-engagement scan or the eval nightly. Every step after the kill never ran, and each kill restarted the single worker (clearing in-process caches).
+  - **Now:** the handler authenticates, starts ONE single-flight runner thread (`backend/daily_tick.py`) and returns **202 `{"ok": true, "started": <bool>}`** at once. The steps run serially on that thread; each is isolated, so a raise is logged `outcome=error` and the next step still runs. The response no longer carries counters; they moved to the per-step log line.
+  - **Order:** 1 `roster_snapshot` · 2 `usage_trends` · 3 `receipts_grade` · 4 `rookie_monitor` · 5 `players_guard` · 6 `reengagement` · 7 `replenishment` (**deferred**) · 8 `eval_nightly` · 9 `value_model_refit`. Permanent-loss writers first, the CPU-heavy steps last. Each step reads its own gate at run time (gates: [api-reference](api-reference.md) § `daily-tick`).
+  - **Step 7 is deferred (operator, 2026-10-23):** a hard skip that logs `outcome=skipped detail=deferred: C2` every day, until trades-eng's C2 (no evidence for unserved builds) and the replenishment self-renewal fix (`db-capacity.md` latent issue 1) land. It reads no flag, so `deck.replenishment` has no effect through the tick. See § Weekly deck replenishment below.
+- **Reading the log:** Render logs for `srv-d7g37ftckfvc73a32gvg`, 13:30–14:30 UTC, search `daily-tick step=`:
+  ```
+  daily-tick step=<key> ms=<int> outcome=<ok|skipped|error> detail=<short>
+  daily-tick done ms=<int> steps=9 errors=<k>
+  ```
+  - One line per step, in order 1→9, then one `done` line. `ms` is that step's wall time.
+  - `skipped` = its gate was closed; `detail` says which (`flag off`, `weekday_gate=N`, `busy`, `in_flight`, `prod_env=False …`), or `deferred: C2` for step 7.
+  - `error` = it raised (`detail` is the exception class and message; the traceback is the `daily-tick: step <key> raised` line just above it) or it reported a failure (players refresh, usage state read, refit).
+  - `detail` carries what the response used to: the re-engagement counters, the roster sweep stats, the usage summary, the grading summary, the refit status. Replenish `eligible/generated/pushed/skipped_done/errors` come back only once step 7 is re-enabled.
+  - `daily-tick: a run is already in flight (started Ns ago)` = a second POST arrived while a run was still going; it answered `started: false` and started nothing.
+- **Liveness checks** (the first full UTC day after deploy, and again after the first Wednesday):
+  1. Render logs, 13:30–14:30 UTC: `POST /api/cron/daily-tick` returns **202** and there is **no** `WORKER TIMEOUT`; nine `daily-tick step=` lines appear in order 1→9, then `daily-tick done`; note every `ms=` value.
+  2. Roster history (from Tuesday on, the weekday gate): `SELECT source, count(*), max(snapshot_at) FROM league_roster_history GROUP BY 1` shows `weekly` rows with a `snapshot_at` in this ISO week (§ roster-snapshot monitoring below).
+  3. Usage Trends (from the first tick after Sleeper rolls `week`): `SELECT season, week, team_count, fetched_at FROM usage_week_loads ORDER BY season, week` shows the just-finished week with 26–32 teams and today's `fetched_at`, not a hand load.
+  4. Value snapshots (hourly-tick guard, not a daily-tick step, but confirms the worker is no longer restarted daily): `player_value_history` has rows for today's UTC date.
+  5. If `receipts.grading` is on: a `receipts_grade_runs` start/end pair with `trigger = 'daily_tick'` for today.
+  6. Every day, the `replenishment` step logs `outcome=skipped detail=deferred: C2` and no `deck_replenish_log` row is written.
+- **No scheduler of their own:** `POST /api/cron/players-refresh` and `POST /api/cron/receipts-grade` have no Render cron. Day to day they run as tick steps 5 and 3; their routes stay as manual levers.
+- **Known limits:**
+  - A hung step blocks the steps after it, and single-flight then blocks the next day's run too (the "already in flight" warning names its age). Every network call in the steps carries a timeout; restarting the worker clears it.
+  - A worker restart mid-run (a deploy at 13:30, an OOM) loses the rest of that run. Each step is idempotent and the weekday gates are `>=`, so the next day retries.
+  - The run shares the free instance's CPU with request traffic while it runs; the CPU-heavy steps (7 once re-enabled, 8) run last.
+- **Until it is deployed,** the manual workarounds still apply. Usage Trends, weekly once Sleeper's state rolls over: `python3 scripts/refresh_usage_trends.py --remote`. Roster snapshots: `POST /api/cron/roster-snapshot`.
 
 **Sweep scope (2026-09-03).** Both league sweeps are now bounded: the hourly draft-status queue and the weekly roster-snapshot work-list only return leagues whose `leagues.updated_at` is inside `database.ACTIVE_LEAGUE_WINDOW_DAYS` (30 — stamped by `upsert_league` on every `session_init`), so a league nobody opens any more stops costing platform reads. `POST /api/cron/roster-snapshot` passes `active_within_days=None` and still sweeps everything; per-league forcing is `_refresh_league_draft_status(league_id, force=True)`, which skips the cheap-skip entirely.
 
@@ -659,14 +771,16 @@ Same gap rule as value-snapshot: **a missed week stays a gap — never fabricate
 
 ## Weekly deck replenishment (F10, flag `deck.replenishment`, 2026-07-26)
 
-Runs **inside** `POST /api/cron/daily-tick` — no separate schedule. Dark by default; flag off is byte-identical (no work, no pushes, no `replenish` key in the tick response).
+Runs as `POST /api/cron/daily-tick` step 7 (`replenishment`) — no separate schedule.
+
+- **Deferred since 2026-10-23 (operator: ship S3 without it):** step 7 is an unconditional hard skip. Every day it logs `outcome=skipped detail=deferred: C2` and does no work (no deck builds, no pushes, no inbox rows, no marker rows). It reads no flag, so `deck.replenishment` has **no effect through the tick**, on or off. It stays deferred until trades-eng's C2 (no evidence for unserved builds) and the self-renewal fix (`db-capacity.md` latent issue 1) land. **Re-enabling** = restoring the flag-gated call in `_daily_tick_replenishment` (`backend/server.py`; the docstring holds the exact lines). The bullets below describe the pass as it runs once re-enabled.
 
 - **Weekly gate:** the pass unlocks when `now.weekday() >= replenish_weekday` (`model_config`, default `2` = Wednesday, chosen post-waivers). The gate is `>=` on purpose: a missed Wednesday cron run self-heals Thu–Sun. **Tune the day** by setting the `replenish_weekday` model_config key (0 = Monday … 6 = Sunday); no deploy needed.
 - **Idempotency:** one `deck_replenish_log` row per (user, league, ISO week) is written *before* the push; reruns in the same week skip both regeneration and push. The `deck_replenished` dedup key (`{league_id}:{iso_week}`) is a second, independent 1/week/league backstop in `notification_events_log`.
 - **Eligibility:** user-leagues with a trade disposition or deck generation in the trailing 30 days (`load_active_deck_user_leagues`). Everyone else is untouched — no zombie churn.
 - **Generation:** the existing job machinery, run synchronously per pair — a live session is reused when present, otherwise a headless session is rebuilt from `league_members` + replayed swipes. Decks land in the normal 30-min pre-gen cache (`_PREGEN_TTL_SECONDS`), so a push tapped hours later triggers a normal fresh generation rather than serving the cached one — acceptable; the push copy claims inventory, not a frozen deck.
 - **Push policy:** kind `deck_replenished`, **reengagement bucket** — with `notif.reengagement_default_off` on (the shipping default) users must have opted in. Empty decks write the marker but never push; the expired-card count appears in copy only when > 0.
-- **Monitoring:** the tick response's `replenish` object (`eligible / generated / pushed / skipped_done / errors`). `pushed` counts dispatcher *attempts* — preference-gated skips still decrement nothing there; check `notification_events_log` kind `deck_replenished` for actual sends. Sustained `errors` usually means a league whose `league_members` rosters were never persisted.
+- **Monitoring:** once re-enabled, the `daily-tick step=replenishment` log line's `detail` (`eligible / generated / pushed / skipped_done / errors`). `pushed` counts dispatcher *attempts* — preference-gated skips still decrement nothing there; check `notification_events_log` kind `deck_replenished` for actual sends. Sustained `errors` usually means a league whose `league_members` rosters were never persisted.
 
 ---
 
@@ -1019,12 +1133,72 @@ Adding `FTF_TESTER_ALLOWLIST` to `render.yaml` envVars and deploying did NOT set
 
 `backend/eval/` grades candidate deck rankers on logged data before any user sees them (docs/plans/tiktok-discovery/prds/F8-offline-eval.md). Read-only against product tables; only writes are JSON-lines run records under `data/eval_runs/` (gitignored).
 
-- **Grade candidates:** `python3 -m backend.eval.replay --scorer base_score --scorer random` (default DB; `--db path.db` for a copy/snapshot — prefer grading a `sqlite3 .backup` copy on prod). Prints a markdown table (IPS/SNIPS, 95% cluster-bootstrap CI, ESS, verdict vs the `production` baseline) plus exclusion accounting: `null_propensity` / `never_viewed` / `undo_reversed` / `bad_features` / `scorer_error` — the counts must sum to the loaded total; a printed WARNING means a harness bug, file it.
+- **Grade candidates:** `python3 -m backend.eval.replay --scorer base_score --scorer random` (default DB; `--db path.db` for a copy/snapshot — prefer grading a `sqlite3 .backup` copy on prod). Prints a markdown table (IPS/SNIPS, 95% cluster-bootstrap CI, ESS, verdict vs the `production` baseline) plus exclusion accounting: `null_propensity` / `never_viewed` / `undo_reversed` per card, then whole-deck reasons, each also counted in decks: `calibration_refresh` (a deck Calibration's targeted refresh built, `deck_source='grading_refresh'`; never shown in Trades, so it is out of replay, e(k) and calibration, ahead of every other reason) / `partial_run` (a card from a partial run, `evidence_tier='partial_run'`) / `in_flight` (its pack isn't final yet, unretired and within 25 h of the read's `as_of`, or a deck served at or after `backend/eval/data.PACK_REQUIRED_SINCE` has no pack yet within that window; it may still be live, so this is **not** an error) / `pack_integrity` (its pack fails its checksum, has an unknown version, or holds another run's cards) / `withdrawal_conflict` (a recorded never-delivered withdrawal's row has a `delivered_at`, or a withdrawal index is outside the deck) / `incomplete_deck` (a gap in its card indexes after the pack merge that no never-delivered withdrawal explains, an outcome past its pack's last recorded delivery, or a required pack missing past 25 h) / `no_delivery_evidence` (a paged deck, `page_store` marker or `evidence_tier`, with no pack and no `delivered_at` on any row) / `missing_scorer_inputs` (a card with neither `features_json` nor a compact block, C7 (iv)) / `scorer_error`. The counts must sum to the loaded total; a printed WARNING means a harness bug, file it. Any `pack_integrity`, `incomplete_deck`, `withdrawal_conflict` or `no_delivery_evidence` count is evidence loss: investigate the evidence writer. `withdrawn_removed_cards` is not an exclusion: it counts the never-delivered withdrawn cards (`deck_card_withdrawals`) removed from included decks, whose later cards move up to their displayed positions. `withdrawn_removed_by_reason` splits it by `reason` (`i1_dropped`, `disposition_cut`). `upgrade_misses` sums the packs' cause-coded upgrade misses (U4-R2) over every loaded deck; a line starting `ERROR U4-R2:` means `other` > 0, which must be 0: take it to models-lead. Every report and run record carries the eval-rule version (`replay.EXCLUSION_RULE_VERSION`, now 6: delivered-position exposure, the `as_of` read filter, the `calibration_refresh` exclusion, serve-time withdrawals at displayed positions, paged decks never legacy, in-flight packs, and serve-time display moves with the logged scorer ranking by displayed position); comparing runs across versions prints `RULE-MISMATCH`. **The read is settled by default:** without `--as-of`, it grades decks served before now minus `--settle-lag-days` (default 7), as of the window's last `served_at` plus the lag. Outcomes acted after `as_of` aren't read, so late views and proposes have time to land. Each record also carries the pinned V-vector and the `model_config` SHA-256 it was graded under (`config`). The rules are in `docs/plans/trade-time-to-suggestion/eng-evidence-contract.md` §8.
 - **Sanity first, always:** `python3 -m backend.eval.replay --self-check` replays the logged policy against its own logs; the observed like/propose rate must fall inside the replayed CI (exit 1 otherwise). Run it before trusting any candidate readout — a self-check failure means the log or the estimator is broken, not the candidate.
+- **`redacted_partners`** (models-lead E-b5) is the window's count of distinct account-deletion tokens (`redacted:…`) among the cards' partners. A refit that differs before and after a deletion is explained by it: a deleted user who reappears under their platform id splits that pair's history. It's a count only. No eval tool resolves a token, and none uses a hash that embeds the partner (`trade_hash` and the like) to work out whose a redacted record was (legal R28.20 (viii)).
+- **The value-model store hook** (`eval/redaction.redact_model_store`, models-lead E-b3) applies legal R28.22 to every record's `partner_rates`: a key whose viewer is the deleted user (their own rates) is deleted, and a key whose partner is the deleted user takes the scrub's token. It drops a torn (unparseable) line that may hold a deleted id: the loader skips those lines anyway. It takes no lock, because `value_model.append_model` has none and that module is engine-hashed. A refit appended during the rewrite would be lost, so the scrub calls the hook in the daily tick before `nightly_refit`, never beside it. The daily tick is serial (`--workers 1`), so the only collision left is an operator refit: **never run `python3 -m backend.value_model --refit` while the daily tick runs.** The scrub retries the hook when it raises (the store kept changing). The hook refuses a mis-built token map (`ValueError`, no ids in the message): every value must start with `redacted:` and must not itself be a key. A symlinked store path is resolved to its target.
 - **`UNRELIABLE` verdict** = ESS below the gate (`EVAL_ESS_MIN`, default 100). That is the harness refusing to bless the number, not a failure — collect more log or narrow the question. The `random` scorer is a permanent canary: it must grade worse than `production`; if it ever grades level on healthy volume, stop and debug the harness.
 - **Trainable scorers (F6):** the harness enforces the time-ordered protocol — `--eval-start` is mandatory for any scorer with `fit()`; fitting sees only pre-split decks, scoring only post-split. There is deliberately no shuffled-CV mode.
-- **Nightly re-runs:** `python3 -m backend.eval.nightly` (or `backend.eval.nightly.run_all()`) grades every registered scorer on the trailing 30d, idempotent per (UTC day, scorer, window) via `runs.jsonl` — safe to re-invoke. Per-scorer failures are recorded as `status:"error"` records and counted, never raised. **The `/api/cron/daily-tick` hook is NOT wired yet** (W4 handoff — F7 owned server.py that wave); until the lead pastes the snippet from `feedback-workspace/tiktok-discovery/build/W4-F8.md`, nightly runs are manual.
+- **Nightly re-runs:** `python3 -m backend.eval.nightly` (or `backend.eval.nightly.run_all()`) grades every registered scorer on the trailing 30d (the CLI grades the 30d ending `--settle-lag-days`, default 7, ago, as of its last served deck plus the lag; `run_all()` with no lag, as the daily tick calls it, grades up to now), idempotent per (UTC day, scorer, window) via `runs.jsonl` — safe to re-invoke. Per-scorer failures are recorded as `status:"error"` records and counted, never raised. **The `/api/cron/daily-tick` hook is NOT wired yet** (W4 handoff — F7 owned server.py that wave); until the lead pastes the snippet from `feedback-workspace/tiktok-discovery/build/W4-F8.md`, nightly runs are manual.
 - **The gate (process):** no ranking-affecting change (F5 η's, F6, tweaks) graduates without (a) a replay win with adequate ESS, then (b) an interleaving/experiment win. Cite run records, not vibes.
+
+## 200 ms flip: model-side 24 h read (2026-10-26)
+
+After `trade.packed_evidence` and `trade.first_page_store` go on together, models-eng runs the model-side read over the first 24 h and posts the output; release-lead collects it for models-lead (`docs/plans/trade-time-to-suggestion/eng-evidence-contract.md` §8, "The 24 h flip read").
+
+- **Run it read-only:** `python3 -m backend.eval.flip_read --db "$DATABASE_URL_PROD" --allow-postgres-readonly --since <flip time, ISO UTC> --as-of <flip + 24 h> --weekly` (add `--json` for a pasteable object). Load the URL from `secrets.local.env` without printing it. Without the flag a Postgres URL is refused; with it, every session is set read-only and must report `transaction_read_only = on` before anything reads. A SQLite copy needs no flag (`--db path.db` opens `mode=ro`).
+- **The settle is built in:** `delivered_at` is stamped off the request thread, so a read as of "now" can catch an outcome before its card's stamp and show a live deck as `incomplete_deck` (a transient G2 FAIL). The tool applies the settle itself: its `as_of` is at most now minus 5 min (`STAMP_SETTLE`). That is the default, and an `--as-of` later than that (the command above, run right at flip + 24 h) is clamped to it, with a `flip_read: note:` line on stderr giving both values. Nothing to wait for or add by hand.
+- **Reading it:** G1, G2, G3, G7, G8, G9 and G10 (at `--i1-mode` 0 or 1) are barred (PASS or FAIL). G2 bars `incomplete_deck` over the final packed decks and every pack-less (live-evidence) deck; its 10-deck minimum counts final packed decks only. G3 bars outcomes joining no card and, apart, outcomes on a ghost row (a ghost reached a client). G1 also FAILs on a pack whose whole `display_moves` record breaks the writer's contract (moves past `as_of` included; models-lead F1). Eval itself checks only the moves delivered by `as_of`, so a re-read stays stable while the writer is still flagged at once; that malformed-moves count comes to models-lead. G10 reports withdrawals by reason and is barred on `i1_dropped`: `--i1-mode` (default 1, the launch `trade_i1_mode`) makes any `i1_dropped` a G10 FAIL at 0 or 1, and only reported at 2; pass `--i1-mode 2` only for a window run at mode 2. `OVERALL: INSUFFICIENT` means fewer than 10 final packed decks: rerun with `--as-of` at flip + 48 h.
+- **Exit status:** 0 = PASS; 1 = FAIL, or a `--weekly` ceiling OVER (either wins over INSUFFICIENT); 2 = a refused database or a `ReadOnlyViolation` mid-read (nothing on stdout), or a usage error, a malformed ISO 8601 `--since`, `--until` or `--as-of` included; 3 = INSUFFICIENT (nothing failed, but not a pass); 4 = the tool crashed (its traceback on stderr): not a verdict, take the traceback to models-eng. Exit 1 is only ever a verdict.
+- **G7 (models-lead addendum C4):** `other` = 0 is the only bar.
+  - `restart_split`, `evicted_split` and **row gone** are reported.
+  - **Row gone** is the misses whose pack recorded a stored count above the card while its page row was gone (`upgrade_miss_row_gone`), how many of them are named (`upgrade_miss_cards`), and the C4 (d1) split: **replaced** (the row now holds a newer deck, explained), **no_row** (aged, over budget, or a bug) or unsplit. (d1)'s sub-count is the named one. A rising no_row is a page-store bug for trades-eng. The split needs #454's writer: before it, every entry reads unsplit; with it, an entry is unsplit only when its pack predates the page-store key, the key's read failed, or the deck's own row was back. A pack failing G1 is not read for row gone, and G1's `pack_integrity` decks don't count toward the G7 upgrade-miss sum either.
+  - The U4-R4 sum (named misses / viewed cards) over the read window is **indicative only**.
+  - The ceiling, `restart_split + evicted_split` ≤ 1% of viewed cards over any rolling 7 days, reported per cause and with row gone, is read with `--weekly`. Those two causes are named (`U4_R4_CAUSES`): `other` and any cause added later stay out of the sum.
+- **Error output is redacted (exit 2, usage errors included, and exit 4):** every piece of a database URL on the command line after its scheme that is 3+ characters long, split on `: @ / ? & = # ,` and also percent-decoded (`+` read both as itself and as a space), becomes `***`, longest first. That covers:
+  - a driver's connect error, which can echo a password with an unencoded `@` as part of a "host", or split a host list on `,`;
+  - a URL parser's error;
+  - a URL passed by mistake as a stray argument.
+
+  1–2 character pieces aren't redacted, and harmless words in the URL (a username like `postgres`) are redacted along the way. A SQLite path isn't redacted. Percent-encode the password in `DATABASE_URL_PROD` anyway. Tests that build Render-shaped URLs use `.invalid` hosts: Render's wildcard DNS resolves made-up `*.render.com` names.
+- **Stop rule (B3 (f4)):** if G1 fails or G3 has orphans (outcomes joining no card), that window's evidence is being lost. models-lead recommends the kill (`first_page_store_enabled` 0) at once, and the operator decides via release-lead. Any other failure goes to models-lead, an outcome on a ghost row included: that is a serve bug (a ghost reached a client), not lost data.
+- **Weekly:** the `--weekly` lines (U4-R4 named upgrade misses ≤ 1% of viewed cards, B4 disposition cuts ≤ 5% of delivered-range positions) ride the BL-001 monitor through head-bizops for the first 4 weeks. An OVER goes to models-lead.
+
+## B-DK-4..7 production audit (2026-10-26)
+
+`backend/eval/bdk_audit.py` counts served violations of `deck.quality_filters`' four rules against a bar of 0: B-DK-4 breakup, B-DK-5 filler, B-DK-6 redundant TE/QB, B-DK-7 repeat (models-lead-launch.md addendum C §C5). It's a prod read, run only on the operator's word: first on the post-flip window, then weekly with the readout. It isn't flip-gating; it's due before the launch-week freeze.
+
+- **Run it read-only:** `python3 -m backend.eval.bdk_audit --db "$DATABASE_URL_PROD" --allow-postgres-readonly --since <window start, ISO UTC> [--until <end>]` (add `--json` for a pasteable object). Load the URL from `secrets.local.env` without printing it. It uses the flip read's read-only engine, error redaction and `as_of` settle (a `bdk_audit: note:` line on stderr when it clamps).
+- **What it reads:** each Trades deck in the window: its first 30 cards by displayed position, plus every card with a `viewed` outcome. Calibration refresh decks are left out. `pack_integrity` and `withdrawal_conflict` decks are skipped and counted, since their displayed positions can't be trusted. A viewed card with no full row is reported by its pack's `upgrade_miss_cards` cause (U4-R3; no entry reads `other`).
+- **Reading it:** each rule prints violations, audited cards, protected (exempt) cards, not-auditable cards, the bar and a status. `NOT_AUDITABLE` prints `n/a`, never 0.
+  - **B-DK-4, B-DK-5 and B-DK-6 read the filter's own inputs (models-lead D2, #492).** The pack's `run["filter_inputs"]` records the market, positions, lineup slots, the viewer's and counterparties' QB/TE holdings, and the trade_hashes it protected. `valuation_json` is never read: approximate values can't certify a zero bar.
+    - The `Filter inputs` line counts the audited decks by record state:
+      - `recorded`;
+      - `record_failed`: recording failed or the record is malformed;
+      - `pack_without_record`: packed before #492;
+      - `no_pack`: live evidence, meaning pinned, opponent, intent, presentation-exempt and demo decks, and any deck without a pack.
+    - Only `recorded` decks are audited for B-DK-4..6; on the rest those rules are not auditable, so the read is `INCOMPLETE`, not a pass.
+    - A deck whose record says `filter_ran: false` went out unfiltered. It's skipped for every rule and counted as `filter_not_run`.
+    - A record value that's neither null nor a number makes the record `record_failed`.
+    - **A card holding an asset in the record's `market_coerced`** (#515: the filter saw NaN or infinity and the record wrote null) is not auditable for breakup and filler. Those rules read such a value order-dependently. B-DK-6 still checks the card.
+    - An asset the record never saw makes its card not auditable. A recorded null (or NaN) market goes to the rules as the filter saw it. An unknown lineup means the filter skipped B-DK-6, which reads as a pass.
+    - From #515's `market_coerced` on, a null market not listed there is a genuinely unseeded asset and is audited exactly. On a v6 record written before `market_coerced` (#515 before `68d602f2`), check a filler FAIL on a card with a null-market asset by hand: a NaN seed may sit behind that null.
+  - **Protection:** on a recorded deck it's the filter's own protected trade_hashes, so a fatigue retest card is handled correctly. On a deck without a record (B-DK-7 only), it comes from the row's flags. A fatigue retest isn't recorded there, so check a violation's `trade_hash` against `deck_suppressions.retest_trade_hash`.
+  - **What a PASS certifies (models-lead F3):** zero violations among the non-protected audit-set cards, and no non-protected card left unchecked. The `exempt (protected) cards by deck` line splits B-DK-4..6's exemptions into recorded and no-record decks, so a PASS that rests on exemptions shows.
+  - **`B-DK-7 after-cut: not checked (n)` (models-lead F4):** B-DK-7 certifies packed decks. A live-evidence (no-pack) deck's serve-time cut can pull a deferred card into its first 30, and D3's re-cap doesn't run there. n counts such decks with a never-delivered withdrawal inside their first 30. **Send n to head-eng from the 24 h read and every weekly read before the freeze:** if it's above 0, trades-eng's extension lands before the freeze.
+  - **`Redacted partners (account deletion): n audit-set cards not auditable`:** the deletion scrub drops a deleted partner's `trade_hash`es from `filter_inputs.protected` and their `qb_te` entry, and may clear their rows' `likes_you`. So a card whose partner is a `redacted:` token has unknown protection and holdings, and it's not auditable for all four rules. For B-DK-7 that also makes its deck incomplete. The rules read INCOMPLETE, never PASS, on such a window. Only the token marks the card, never a hash.
+  - **A B-DK-7 breach** whose example shows ghost slots or withdrawn cards may come from the serve order, not the filter: the filter ran before those were removed.
+  - **B-DK-7 explains two kinds of breach** (counted in `explained`, not violations; each example carries its `why`):
+    - `protected`: every over-cap card is protected (they hold their positions).
+    - `short_deck`: the deck had fewer than 30 cards the cap could keep, so the cards `_repeat_cap` deferred still sit inside the first 30. The audit re-runs `deck_quality._repeat_cap` itself on the deck's whole displayed order. If the order is unchanged (the filter could do no better), the breach is explained. That needs a full row for every displayed card; without one, the breach stays a violation. It also needs proof the loaded cards are the whole deck, so these breaches stay violations too:
+      - a loader exclusion, except a packed deck that's only `in_flight` (a pack holds every built card). A pack-less `in_flight` deck, or a lost pack's `incomplete_deck`, holds just the first 30 and the viewed rows;
+      - a `partial_run` deck (its delivered rows);
+      - **a pack-less deck of 30 or more cards, never-delivered withdrawals included.** Owner and prepared decks publish in batches of 30 then 100, and one stopped after its first batch carries no marker. So a complete pack-less deck of 30 or more reads FAIL: the safe side.
+
+      Also conservative: a packed deck has no rows for its unviewed cards past the first 30, so after the flip a short-deck-style breach on a deck of more than 30 cards reads FAIL, unless the record carries `repeat_head`. That's trades-eng's v6: the trade_hashes of the cards the cap kept, written only when it kept fewer than 30. Then the breach is explained when every unprotected over-cap card is one the cap deferred (not in `repeat_head`), and a `repeat_head` naming one is a violation. Without the field, check those examples by hand.
+  - **A malformed row is not auditable, never a crash:** an `assets_json` side that's missing, empty or not a list.
+  - Any FAIL goes to models-lead.
+- **Exit status:** 0 = PASS; 1 = FAIL; 2 = a refused database or a `ReadOnlyViolation` (nothing on stdout), or a usage error; 3 = INCOMPLETE (nothing failed, but a rule couldn't check every card, or a deck was skipped: not a pass); 4 = the tool crashed (its redacted traceback on stderr): not a verdict, take it to models-eng.
 
 ## MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)
 
@@ -1032,7 +1206,7 @@ Operator report: "Draft picks are missing from league summary" (League Rankings,
 
 - **Fix (2026-07-27):** the daemon now discriminates with `is_linked_platform_league(league_id)`: platform-linked numeric ids skip the Sleeper grid sync and re-run `_sync_mfl_owned_picks` instead (no network — reads `leagues.platform_future_picks`). This also **self-heals** previously clobbered leagues on their next session init; no manual data repair needed. Tests: `backend/tests/test_owned_picks.py::test_numeric_mfl_id_detected_as_platform_league`, `::test_mfl_renormalization_restores_clobbered_picks`.
 - **Diagnosis pattern for "X missing from league summary":** check `draft_picks` rows for the ACTIVE league id first (`SELECT league_id, COUNT(*) FROM draft_picks GROUP BY league_id`) — the League Summary client renders picks only when the payload carries non-zero `teams[].picks`, and it degrades silently (no pill, no bar segment, no Draft capital section) when the league has no pick rows. The client had no bug here.
-- **Watch item:** other Sleeper-only session-init daemons still gate on `isdigit()` alone (scoring auto-detect meta fetch, trade capture, lineup-slot fetch). They fail soft for MFL ids (no writes to shared stores) but waste a Sleeper call; if one ever gains a replace-style write, it needs the same `is_linked_platform_league` guard.
+- **Watch item (updated 2026-10-27):** every Sleeper-only session-init daemon step now checks `is_linked_platform_league`, so a numeric MFL/ESPN/Fleaflicker id makes no Sleeper call. The scoring auto-detect meta fetch (`_fetch_sleeper_league_meta`) checks it itself, and the lineup-slot fetch (`_sleeper_lineup_slots`) reaches Sleeper only through that meta fetch. The last gap was trade capture: its `market.trade_capture` block gated on `isdigit()` alone, so a numeric MFL/ESPN id cost up to 18 Sleeper `transactions` reads per init; it now also checks `_platform_linked`. When adding a daemon step that calls Sleeper, give it the same guard: a step that gains a replace-style write without it would clobber a linked league's data, as in #200.
 
 ## Sleeper-flake still wiped draft picks after the #200 fix (#220, 2026-08-01)
 
@@ -1040,6 +1214,33 @@ Operator re-report post-#200: "Picks still not present on the bar chart" (League
 
 - **Fix (2026-08-01):** the daemon step is extracted to `server._sync_sleeper_owned_picks`, which **skips the sync (keeps the prior snapshot)** whenever the rosters or league-meta read is unavailable, and `database.sync_draft_picks` no-ops on empty `roster_ids` (defense in depth for every caller). A skip logs `owned-pick sync skipped … (keeping prior snapshot)` and the next init retries. Tests: `backend/tests/test_owned_picks.py::test_sync_empty_roster_ids_keeps_prior_snapshot`, `::test_daemon_step_skips_when_sleeper_rosters_unavailable`, `::test_daemon_step_skips_when_league_meta_unavailable`.
 - **Operational rule:** any daemon whose write is replace-style must treat "fetch came back empty" as SKIP, never as "the league truly has nothing" — the #200/#220 clobber class is exactly that conflation.
+
+## Sleeper 429 / circuit open (S0, 2026-10-20)
+
+Since S0, every server-side Sleeper **read** goes through one per-process circuit (`backend/sleeper_http.py`; rule
+in `docs/integrations/sleeper.md` §4.1). A Sleeper `429` opens it for at least the `Retry-After` (else 2 s, doubling
+per consecutive 429, with jitter; soft cap 600 s, hard ceiling 3,600 s).
+
+- **Symptom:** Render logs show `sleeper 429: circuit open <s> league=<id> status=429 strikes=<n>`, then
+  `sleeper circuit open: read skipped …` lines. While it's open:
+  - `/api/session/init` for Sleeper leagues returns `503 league_data_unavailable`. The app keeps its token and any
+    live server session, so taps keep working from stored state.
+  - Sleeper sends are blocked with "couldn't confirm rosters" (the live roster check can't run), and the daemon's
+    trade-block, pick and transaction syncs skip.
+  - `league_roster_state` rows go `stale` with `last_error_code = 'rate_limited'`. That's a read,
+    not a fix: no prod writes are needed.
+- **What clears it:** time. The window ends on its own, and the next successful read resets the strike count.
+  There's no manual reset in prod; a deploy or restart also clears it (it's in-process state). Don't restart to
+  "fix" a 429: a fresh process that resumes full fan-out against a throttled IP just trips it again, with a
+  shorter window.
+- **Data safety:** while it's open, the owned-pick sync keeps the prior `draft_picks` snapshot, and the draft-status
+  refresh keeps the cached verdict (both would otherwise act on reads that never happened; the #220 clobber
+  class). No repair is needed afterwards.
+- **If it recurs:** the per-init budget is ≤ 8 Sleeper calls (`test_session_init_sleeper_calls.py`). Check
+  `api_events` for `service = 'sleeper'` with `status = 429` by endpoint class to find the hot path (read-only,
+  through analytics-lead). A sustained ceiling (3,600 s windows) means Sleeper is throttling the IP, not one
+  request: escalate to platforms-eng. Cloudflare 1010 is a separate failure (`blocked`, a 403); it doesn't open
+  the circuit.
 
 ## Player-cache refresh (rookie-draft M0, 2026-08-06)
 
@@ -1289,3 +1490,193 @@ code, reconstruct diagnostics from retained snapshot nodes (or the verified
 backup); pause expiry with FTF_DECK_DIAGNOSTIC_RETENTION_DAYS=0. Never wipe the
 snapshot table as a rollback. Expiry does not delete impressions, labels,
 valuations or receipts, and a paused policy cannot recover already-expired detail.
+
+## Purge orphaned ESPN/MFL entry users (one-time, 2026-11)
+
+**What:** the old unverified ESPN/MFL league-ID sign-in minted users keyed
+`entry:espn:<SWID>`, `entry:espn:<league>.t<team>` and
+`entry:mfl:<league>.f<franchise>`. Nobody can delete them (no account a person
+can prove), and an ESPN one may carry a third person's identifier. Legal
+(R28.12 row 2, R28.16) requires removing them through the full deletion path.
+`scripts/purge_entry_users.py` does that: `accounts.delete_user_data`, one id
+per call, which also anonymizes shared rows per privacy §6 (trade matches,
+platform pick-grid owners, Fleeced-minted team ids on recorded picks, and
+Fleeced-minted owners/actors in other users' `pick_assignment_changed` audit
+events). It is never a bare row delete.
+
+**What other members see:** a `leagues` row a purged entry user imported is
+deleted, shared or not (main's behaviour). Another Fleeced member of that ESPN
+or MFL league re-links it in Settings → Leagues and then owns the new row; a
+Sleeper league is re-created by any member's next session start. (Keeping the
+row with the importer anonymized was tried and reverted, #452: it stranded the
+remaining member's linker routes and kept the importer's id in the league's
+pick-assignment order.) Support line, if asked: "Re-link the league in
+Settings → Leagues".
+
+**Why it must finish first:** ESPN/MFL sign-in is coming back as a proof-based
+sign-in. Its `platform_identity_in_use` check searches every user's
+`espn_credentials` / `mfl_credentials`. A credential left on an entry user
+would answer 409 to the real owner.
+
+**When:** finished by 11-05, and before `landing.platform_options` goes back on
+(operator ask 16).
+
+**The prod run needs the operator's own word in the acting session.** Counts
+only, everywhere: never paste an id, SWID, team or league name into a PR, log,
+chat or this runbook. The script prints counts only; an unexpected error prints
+only its type (exit 3) and the next move is a fresh dry run.
+
+**Who runs what** (release-lead, 2026-10-26). A deletion has no rollback, so
+**the operator runs step 5, `--execute`, themself.** release-lead may run the
+read-only steps (the dry run, `--verify`), the flag flip, the Render restarts
+and **takes the snapshot (step 4)** on the operator's word. Deleting a backup
+destroys data permanently, the same class as `--execute`, so **the operator
+deletes the snapshot, not release-lead**: release-lead records its deletion
+due date in the step-8 record and reminds the operator before it. Nobody else
+runs `--execute`. Pass **`--expect-db <the prod database's name>`** in every
+command: the script refuses (exit 2) when the connected database's name
+differs.
+
+Point the script at prod with `DATABASE_URL` set in the acting shell from
+`secrets.local.env` (`DATABASE_URL_PROD`), never typed into chat. Every mode
+first prints the database identity (dialect, the host's first label, the
+database name; never credentials), and it refuses a local SQLite database
+unless `--allow-local` is passed (local test runs only).
+
+**The prod count (counts only; legal R28.17).** analytics-lead ran it
+read-only on 2026-10-27 at 13:04 UTC, against this script's selection at
+`d1d540a4`:
+- **2 entry users:**
+  - 1 unverified `entry:espn` user: a normal target, and its 1
+    `espn_credentials` row goes with it;
+  - 1 verified, MFL-login-only `entry:mfl` user: skipped, and it holds 1
+    `mfl_credentials` row.
+- 0 bound to Apple or Google; 0 credential rows on ids with no users row.
+- **Both are the operator's own test logins,** so no customer (and no Founder)
+  is affected.
+
+**Verified entry users keep their accounts but lose their ESPN/MFL credential
+rows** (legal R28.17 A1; Product yes).
+- `--delete-verified-credentials M` on the execute command deletes those rows
+  and nothing else of theirs: users, accounts, sessions and entitlements all
+  stay. It's part of the operator's step-5 run.
+- That way one execute + verify passes both parts of R28.16's post-check:
+  - **(1)** zero `entry:%` users without `verified_via`: `--verify` (g);
+  - **(2)** zero `espn_credentials` / `mfl_credentials` rows on ANY `entry:%`
+    user, verified or not: `--verify` (b).
+- **The app then degrades readably.** The user's league still loads from the
+  stored snapshot. Settings reports MFL as not connected, and a trade send
+  shows "Sign in with MFL" instead of an error. This is pinned by
+  `backend/tests/test_purge_mfl_reconnect.py` (server) and
+  `mobile/tests/check-send-button-platform.js` (the alert).
+- The SWID-bearing identity links and the MFL-login-only users stay at launch
+  (R28.17 A3, A5). The step-6 restart drops any session-only copy of a cookie.
+
+1. **Flip `landing.platform_options` OFF** (operator ask 12, release-lead's
+   session), then **confirm it reads false via `GET /api/feature-flags`**.
+2. **Restart the Render web service,** so live in-memory entry sessions can't
+   re-create users. **Note the UTC time the restart completed: that is the
+   `--cutoff`** (a full datetime with seconds and a timezone, e.g.
+   `2026-10-26T14:00:00Z`). Using the restart, not the flag flip, puts any
+   entry user minted in between among the targets, so the dry run doesn't stop
+   for it. Entry users created before the cutoff are targets; at or after it,
+   they are not.
+3. **Dry run against prod:**
+   `python3 scripts/purge_entry_users.py --cutoff <the step-2 time> --expect-db <prod db>`.
+   - Check the printed **database identity** is prod.
+   - Note the target count N. Targets are entry ids with a users row that is
+     unverified (`verified_via` NULL) and created before the cutoff, plus entry
+     ids with no users row at all. It also reports, and never touches,
+     "skipped (verified or after cutoff)" (e.g. an MFL entry that proved an
+     MFL login, `verified_via = 'mfl_login'`) and "skipped (no usable
+     created_at)".
+   - Note the "credential rows on verified entry users" count M; the count
+     above says 1. **If "credential rows on other skipped entry users" isn't
+     0, or "skipped (no usable created_at)" isn't 0, STOP and ask head-eng:**
+     `--verify` would fail (b) or (g), and this procedure deletes neither.
+   - **If "unverified created after cutoff" is non-zero** (decided in
+     advance, so 11-05 isn't at risk): confirm the flag still reads false,
+     restart once more, take that restart's completion time as the new cutoff,
+     and repeat the dry run. If it's still non-zero, STOP and ask head-eng;
+     the dry run prints no execute command until it's zero.
+4. **Snapshot** the prod database (Render Postgres backup) and note its
+   timestamp; don't run step 5 until it shows as complete. **Restoring it is a
+   full restore that loses every write made after it**, every user's, not just
+   the purge's: a last resort. **Delete it once step 7 passes, and in any case
+   within 7 days** (privacy §5 promises deleted data leaves backups within 7
+   days; a manual snapshot would otherwise outlive that). **The operator
+   deletes it**; release-lead reminds them before the due date.
+5. **Execute. The operator runs it, nobody else, after re-checking that the
+   printed database identity is prod.** Copy the exact command the dry run
+   printed under "next (the operator runs this exact command, after a DB
+   snapshot)": it is pre-filled with the dry run's cutoff (UTC, microseconds
+   kept), `--expect N`, `--expect-db` naming the database the dry run read
+   and, when M > 0, `--delete-verified-credentials M`, e.g.
+   `python3 scripts/purge_entry_users.py --cutoff 2026-10-26T14:00:00Z --execute --expect N --expect-db <prod db> --delete-verified-credentials M`.
+   It refuses (exit 2, nothing deleted) if N or M no longer matches (re-run the
+   dry run) or if a target's deletion would also remove a non-entry alias, such
+   as a bound account (escalate to head-eng). It continues past a failing id and
+   exits 1 if any failed. Keep the printed summed counts.
+   - **The credential step comes after the purge's summary and fails closed.**
+     - It runs only when every target was deleted cleanly.
+     - It deletes exactly M rows or none.
+     - Otherwise it prints `SKIPPED`, `ROLLED BACK` or `FAILED (<type>)`,
+       exits 1 and changes nothing. Then dry-run again and run the command
+       it prints, which will be `--expect 0` if the targets are gone.
+6. **Restart the Render web service again.** The script deletes the durable
+   session rows, but a live in-memory entry session survives in the running
+   process until it restarts.
+7. **Verify:** `… --cutoff <same> --verify --expect-db <prod db>`. **Check the
+   printed database identity is prod first.** It exits 0 only if (a) no target
+   id remains in any key column, (b) no `espn_credentials` / `mfl_credentials`
+   row sits on any `entry:` id, skipped ones included, (c) no unverified
+   entry user was created at or after the cutoff, (d) no removed entry id is
+   still named in a `pick_assignment_changed` audit event (other users'
+   events; a skipped, kept entry user may still appear), (e) the `users`
+   table exists and isn't empty (an empty or wrong database fails), (f)
+   no league's `pick_assignment_settings.order` still lists a removed entry id
+   (other importers' rows included), and (g) no `entry:` user without
+   `verified_via` remains. (g) and (b) are R28.16's two parts.
+   - If (a) isn't clean, repeat steps 3–7, with a fresh snapshot.
+   - A credential on a SKIPPED entry user has its own message. On a verified
+     one, re-run the dry run and the command it prints (`--expect 0
+     --delete-verified-credentials M`). On any other, a human looks (escalate
+     to head-eng). Never delete one by hand.
+   - If (g) fails, an unverified entry user is left that the purge skips (no
+     usable `created_at`): STOP and ask head-eng.
+   - If (c) fails, the flag or a restart wasn't done: investigate before
+     re-running.
+   - **If (e) fails, STOP: this is an empty or wrong database.** Check
+     `DATABASE_URL` in the shell and the identity line against `--expect-db`.
+     Never run `--execute` against it.
+   - **If (d) or (f) fails, re-running won't help:** the dry run will show 0
+     targets. The leftover is an entry id removed by a deletion that ran
+     before these anonymizations existed, or an audit row written afterwards.
+     Record the count only and escalate to head-eng; never hand-edit the rows.
+     The fix is a one-off anonymization through `accounts`, needing its own
+     ruling.
+   - The info lines never fail the check: JSON mentions in
+     `standing_offers.team_user_ids`, `leagues.opponent_data` and other event
+     types' `user_events.props`, and overhaul references (the known general
+     deletion gap, privacy §6 "not yet").
+8. **Record counts only** (targets deleted, verified users' credential rows
+   deleted, the verify lines), plus the snapshot's deletion due date (once step 7
+   passes, and no later than 7 days after it was taken). **The operator
+   deletes the snapshot**; release-lead records the due date here and reminds
+   the operator before it. Send the purge date to head-bizops. Support uses
+   it: "data from ESPN and MFL sign-ins made before <date> was deleted on that
+   date".
+
+Backups roll off within 7 days, so deleted rows can remain in a backup for up
+to 7 days (privacy §5). There is no schema change, so no data-dictionary
+update.
+
+**Post-launch, owner head-eng (logged 2026-10-27, legal R28.17):**
+- **A3:** re-key the SWID-bearing `entry:espn:<SWID>` users to `acct_*`, or
+  delete them once no way in remains. The id can carry another person's
+  member id. The prod count found 0 bound to Apple or Google.
+- **A5:** delete the MFL-login-only verified `entry:mfl` users through
+  `delete_user_data` once every session has ended. Saved sessions end after 90
+  days unused (privacy §5). Until then, ops-support closes any request about
+  such an account with D4.
+

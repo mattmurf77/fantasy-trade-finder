@@ -123,6 +123,8 @@ function sessionHarness() {
     '../observability/sentry': {setUser: () => {}},
     './queryClient': {seedLeagueSessionCaches: (id, seed) => seeds.push({id, seed}), queryClient: {invalidateQueries: input => invalidations.push(input)}},
     '../api/rankings': {getActiveScoringFormat: async () => '1qb_ppr'},
+    // 200 ms path C: sign-out / account switch clear the device-held trade pages.
+    './devicePageStore': {clearDevicePages: async () => {}},
   };
   state = load('src/state/useSession.ts', name => {
     if (name === './leagueSession') return load('src/state/leagueSession.ts', dep => { assert.equal(dep, '../api/client'); return h.client; }, h.time);
@@ -179,6 +181,16 @@ function picker(h) {
   }, h.time);
   return {ui, invoke};
 }
+// A check that awaits something that never settles would let the event loop
+// drain and node exit 0 mid-run: an unfinished run fails instead.
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-win-now-recovery did not finish (a check hung): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 let failures = 0, passed = 0;
 async function check(name, fn) {
   try { await fn(); passed++; console.log(`PASS ${name}`); }
@@ -663,6 +675,7 @@ async function main() {
     assert.doesNotMatch(recovery, /searchWinNow|evaluateWinNow|decideWinNow|api\.post/);
     assert.doesNotMatch(read('src/api/client.ts'), /(?:from|require\()\s*['"]\.\.\/state/);
   });
+  finished = true;
   console.log(`${passed} passed; ${failures} failed (native Win Now recovery)`);
   process.exitCode = failures ? 1 : 0;
 }

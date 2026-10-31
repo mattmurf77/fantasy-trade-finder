@@ -259,6 +259,17 @@ async function runColdStart(s) {
   return nav;
 }
 
+// An async suite whose run returns early, throws past its handler, or awaits
+// something that never settles would let node exit 0 mid-run: an unfinished
+// run fails instead (check-device-first-page's pattern; trades-eng, #546).
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-league-picker-recovery did not finish (a check returned early, threw or hung): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 async function main() {
   // 1 ─ executed
   for (const [label, scenario, outcome] of PICK_EXITS) {
@@ -351,6 +362,7 @@ async function main() {
     expect(!/silently re-?mint/i.test(prose), 'useSession.ts still says Sleeper sessions silently re-mint');
   });
 
+  finished = true;
   console.log(`${passed} passed; ${failures} failed (league picker recovery)`);
   process.exitCode = failures ? 1 : 0;
 }
