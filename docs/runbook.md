@@ -1225,6 +1225,11 @@ After `trade.packed_evidence` and `trade.first_page_store` go on together, model
 
   1–2 character pieces aren't redacted, and harmless words in the URL (a username like `postgres`) are redacted along the way. A SQLite path isn't redacted. Percent-encode the password in `DATABASE_URL_PROD` anyway. Tests that build Render-shaped URLs use `.invalid` hosts: Render's wildcard DNS resolves made-up `*.render.com` names.
 - **Stop rule (B3 (f4)):** if G1 fails or G3 has orphans (outcomes joining no card), that window's evidence is being lost. models-lead recommends the kill (`first_page_store_enabled` 0) at once, and the operator decides via release-lead. Any other failure goes to models-lead, an outcome on a ghost row included: that is a serve bug (a ghost reached a client), not lost data.
+- **#535's decks in G3 (models-lead addendum G3):** release-lead copies every `deck-evidence <deck_job_id>: n delivered cards of a deck with no evidence` line in the read's window into the read (G3-a). Pass that file as `--no-evidence-log <file>` (bdk_audit takes the same file for its no-evidence bucket).
+  - **What explains an orphan (G3-b, as corrected by I3-a):** its impression id's run is a captured `deck_job_id`, whatever its index. #535's n counts the cards actually sent, so a deck with a cut or a drop sends an index at or past it. Such orphans are reported as `explained: no-evidence deck` and don't FAIL. Those at or past the deck's logged count (its lines summed) are printed apart as `past the logged count: m`, and don't FAIL alone either. Both count toward G3-d's 1%.
+  - **What still FAILs and recommends the kill:** any other orphan (G3-c), or explained outcomes above 1% of the window's outcomes on packed-admitted decks (G3-d).
+  - **Without the file**, G3 says `none given` and no orphan can be explained.
+  - **Any #535 deck in the lines** prints that trades-eng closes the path before the launch-week freeze, and mode 2 waits for that fix (G3-d).
 - **Weekly:** the `--weekly` lines (U4-R4 named upgrade misses ≤ 1% of viewed cards, B4 disposition cuts ≤ 5% of delivered-range positions) ride the BL-001 monitor through head-bizops for the first 4 weeks. An OVER goes to models-lead.
 
 ## B-DK-4..7 production audit (2026-10-26)
@@ -1248,10 +1253,21 @@ After `trade.packed_evidence` and `trade.first_page_store` go on together, model
     - From #515's `market_coerced` on, a null market not listed there is a genuinely unseeded asset and is audited exactly. On a v6 record written before `market_coerced` (#515 before `68d602f2`), check a filler FAIL on a card with a null-market asset by hand: a NaN seed may sit behind that null.
   - **Protection:** on a recorded deck it's the filter's own protected trade_hashes, so a fatigue retest card is handled correctly. On a deck without a record (B-DK-7 only), it comes from the row's flags. A fatigue retest isn't recorded there, so check a violation's `trade_hash` against `deck_suppressions.retest_trade_hash`.
   - **What a PASS certifies (models-lead F3):** zero violations among the non-protected audit-set cards, and no non-protected card left unchecked. The `exempt (protected) cards by deck` line splits B-DK-4..6's exemptions into recorded and no-record decks, so a PASS that rests on exemptions shows.
-  - **`B-DK-7 after-cut: not checked (n)` (models-lead F4):** B-DK-7 certifies packed decks. A live-evidence (no-pack) deck's serve-time cut can pull a deferred card into its first 30, and D3's re-cap doesn't run there. n counts such decks with a never-delivered withdrawal inside their first 30. **Send n to head-eng from the 24 h read and every weekly read before the freeze:** if it's above 0, trades-eng's extension lands before the freeze.
-  - **`Redacted partners (account deletion): n audit-set cards not auditable`:** the deletion scrub drops a deleted partner's `trade_hash`es from `filter_inputs.protected` and their `qb_te` entry, and may clear their rows' `likes_you`. So a card whose partner is a `redacted:` token has unknown protection and holdings, and it's not auditable for all four rules. For B-DK-7 that also makes its deck incomplete. The rules read INCOMPLETE, never PASS, on such a window. Only the token marks the card, never a hash.
+  - **`B-DK-7 decks with a serve-time cut in their first 30` (models-lead G-b4, replacing F4's line):** every deck with a never-delivered withdrawal inside its displayed first 30 lands in exactly one bucket:
+    - `audited, packed`: D3 re-capped it, and a breach there may be explained by the response boundary (below).
+    - `audited from rows, no pack`: S1b partial runs and lost or in-flight packs. D3 didn't run, so a breach is a violation.
+    - `not checked, live evidence`: intent, pinned and opponent decks. B-DK-7 doesn't check them, so their window cards are not auditable (`live_cut`) and B-DK-7 can't PASS while this is above 0. **This is F4's trigger: send n to head-eng from the 24 h read and every weekly read before the freeze.** If it's above 0, trades-eng's extension lands before the freeze.
+    - `not checked, no rows and no pack`: #535's decks, counted from the read's captured log lines. Pass them with `--no-evidence-log <file>`: release-lead's G3-a copy of every `deck-evidence <id>: n delivered cards of a deck with no evidence` line in the window. Without the file it prints `not read`.
+  - **`B-DK-7 response boundary (models-lead G-b1)`:** a breach on a packed deck is explained as `boundary` only with both proofs, from the pack's `deliveries` and the deck's rows:
+    - a recorded cut before the over-cap card whose displayed slot is inside the first 30;
+    - re-running the cap inside the card's own response, with earlier responses fixed, leaves that response's order unchanged.
+    - A missing row, a missing cut or no pack is a violation.
+    - The line gives n, the decks, and their rate over audited packed decks, with up to 5 examples. **Above 1% in the 24 h read or any weekly read, (c) (hold the card back to the next response) is required before the launch-week freeze (G-b3).**
+    - A B-DK-7 PASS with a boundary n above 0 says so in the report's first line (G-b2): it's a known residual the user saw, not a clean pass.
+  - **`Not auditable, by cause (models-lead H-a2)` and `INCOMPLETE from redaction only: yes/no`:** each rule's unchecked cards split by cause (`redacted`, `no_full_row`, `no_filter_record`, `asset_not_recorded`, `market_coerced`, `live_cut`), and B-DK-7's incomplete decks too. `yes` means every unchecked card in every rule that isn't PASS is redacted and no deck was skipped. Under H-a3 such a read meets its bar when the checked cards have zero violations and redacted cards are at most 1% of the audit-set cards; the read then says `meets the bar: n redacted, not checked`. Anything else goes to models-lead.
+  - **`Redacted partners (account deletion): n of N audit-set cards (x%)`:** the deletion scrub drops a deleted partner's `trade_hash`es from `filter_inputs.protected` and their `qb_te` entry, and may clear their rows' `likes_you`. So a card whose partner is a `redacted:` token has unknown protection and holdings, and it's not auditable for B-DK-4..6. For B-DK-7 its copies still count toward the cap for every other card (models-lead H-a1). Only its own over-cap verdict is unknown: such a breach is never a violation and never explained, and its deck is incomplete (`redacted`). Only the token marks the card, never a hash.
   - **A B-DK-7 breach** whose example shows ghost slots or withdrawn cards may come from the serve order, not the filter: the filter ran before those were removed.
-  - **B-DK-7 explains two kinds of breach** (counted in `explained`, not violations; each example carries its `why`):
+  - **B-DK-7 explains three kinds of breach (the third, `boundary`, above)** (counted in `explained`, not violations; each example carries its `why`):
     - `protected`: every over-cap card is protected (they hold their positions).
     - `short_deck`: the deck had fewer than 30 cards the cap could keep, so the cards `_repeat_cap` deferred still sit inside the first 30. The audit re-runs `deck_quality._repeat_cap` itself on the deck's whole displayed order. If the order is unchanged (the filter could do no better), the breach is explained. That needs a full row for every displayed card; without one, the breach stays a violation. It also needs proof the loaded cards are the whole deck, so these breaches stay violations too:
       - a loader exclusion, except a packed deck that's only `in_flight` (a pack holds every built card). A pack-less `in_flight` deck, or a lost pack's `incomplete_deck`, holds just the first 30 and the viewed rows;
@@ -1501,6 +1517,28 @@ The security-data-hardening change prevents new bearer tokens entering analytics
 Analytics session IDs now use a domain-separated `analytics_v1:` SHA-256 representation (77 characters), distinct from authentication token hashes. Historical/raw and new/hashed identifiers do not correlate across the rollout boundary. The cleanup script prints counts only, never session tokens or database connection URLs.
 
 Deletion now covers credentials, account aliases, durable sessions, linked anonymous events and newer private tables. Export version 2 covers the expanded private scope and excludes credential material. Submitted feedback notes are removed; public league records, global aggregates, published ranking snapshots and other managers’ records can remain. `user_data_lifecycle` drains active account work and rejects queued stale work in the deployed single-worker process. Deletion times out without deleting if work cannot drain in 10 seconds; retry after the operation finishes. Do not increase the worker count or introduce external direct writers without distributed fencing (ADR-017). Historical poisoned imported membership rows are not repaired by server-authoritative session initialization and need an operator-reviewed resync.
+
+## Trade share links: enumeration fix (build O8, 2026-10-20)
+
+**The hole.** `/s/trade/<x>` and `/og/trade/<x>.png` took the sequential `trade_matches.id` with no auth, and `og_image.render_trade_card` loaded the row directly. Anyone could walk the ids and read every mutual match's give/get and fairness verdict, across leagues.
+
+**The fix.** Both routes now resolve only through `trade_share_tokens` (`docs/data-dictionary.md`): a 128-bit `token_urlsafe(16)` minted by `POST /api/share/trade` for a party to the match (30 new mints/user/hour, a re-share never counts; `growth.share_landing`-gated). A numeric id never resolves. Every miss (numeric id, unknown, revoked or malformed token, orphaned match) gets one generic "This trade link has expired." page (noindex) and PNG, status 200, identical bytes, so a miss can't be told from an expired link. There is no per-IP GET limiter by design: guessing in a 2^128 space is infeasible, and a left-most `X-Forwarded-For` hop is client-spoofable.
+
+**Old links.** Every `/s/trade/<number>` link already shared, and every link an older TestFlight build still produces, now shows the expired page. That is intended (keeping them working would keep the hole open). The minimum-version gate (launch item 19) moves users onto a build that mints tokens. Nothing to migrate.
+
+**Symptoms.** A user says a fresh share shows "expired": check that the link is `/s/trade/<22 chars>` (an older binary still shares numeric links), then that the row exists and `revoked_at` is NULL. The mobile client falls back to a `/s/p/<id>` package link when the mint fails or takes over 2 s, so a share can still carry a working landing while this route is broken. Never log or paste a token: it is a bearer secret.
+
+**Logging.** The app never logs a token (the lookup and mint DB-error lines record only the exception type, because a DB error's text carries its bound parameters); the host's request log records request paths, so Render's access log holds every `/s/trade/<token>` and `/og/trade/<token>.png` request with its live token. Treat that log as holding working links.
+
+**Revoking a link.** Nothing in v1 writes `revoked_at`. To kill one share (for example, a user asks for a posted link to stop working), set it on that row:
+
+```sql
+UPDATE trade_share_tokens SET revoked_at = '<ISO UTC now>' WHERE token = '<token>';
+-- or every link to one match:
+UPDATE trade_share_tokens SET revoked_at = '<ISO UTC now>' WHERE match_id = <id> AND revoked_at IS NULL;
+```
+
+The link shows the expired page on the next request (responses carry `Cache-Control: public, max-age=300`, so a cached copy can outlive it by up to 5 minutes). A re-share by the same user then mints a new token. **This is a production write: release-lead runs it, on the operator's go, never a build session.** Deleting the sharer's account also deletes their tokens.
 
 ## Database storage incident and compaction (2026-09-15)
 
