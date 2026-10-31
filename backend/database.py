@@ -1133,13 +1133,17 @@ deck_impressions_table = Table("deck_impressions", metadata,
     #                  (eval contract.is_archive_deck)
     #   'full_interim' stage 1 only, at archive's rank: the same card on any
     #                  other deck, written full until packing replaces it
+    #   'viewed'       trade.packed_evidence (R4.2, the revised C3): a packed
+    #                  card's full row, written at its first outcome of any
+    #                  kind; delivered_at comes from the pack's deliveries
     # 'partial_run' overrides them all (ruling 21; replay excludes it): every
     # row of a run that ended partial (error, timeout, supersede), and of a
     # deck first delivered after its job left the process with cards past
     # the stored ones (S1b). A card S0's I-1 dropped is never written (C-b).
     # A later delivery raises only 'archive' and 'full_interim' to
-    # 'delivered'. No row is deleted: C8's archive retention waits for the
-    # packing stage (models-lead R2.6 S2).
+    # 'delivered'. The evidence path deletes no row; the only deletes are the
+    # retention cap's (#523, dark at cap 0: a deck's rows at 365 days, a packed
+    # deck's at 90) and account deletion's.
     Column("evidence_tier",             String),
     # ISO UTC: when this card was first sent to a client (any tier, first30
     # included). NULL for an undelivered card (first30, archive, full_interim),

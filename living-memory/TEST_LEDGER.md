@@ -31,6 +31,22 @@ Gates: the operator's "fix the deadlock" (#544 QA round 2 P3-1, documented on 10
 - **Docs:** the prune's comment and the cap knob in `config-reference.md` no longer carry the "before the cap" caveat.
 - **Suites:** lock order, T-10, retention, receipts, blind grading (all `test_blind_grading*`): 308 passed.
 
+## 2026-10-31 — S1–S8 package follow-ups: S1 (b) in packed mode, C1 for a refused pack, S7 and U6 docs, ADR-025's title
+
+Gates: the S1–S8 evidence package (`trades-eng-s1-s8-package.md` in the group notes folder, against main `63e373e2`), §7 items 1–4: trades-eng's small closers before models-lead's sign-off. Tests and docs only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **S1 (b) in packed mode:** `test_s1b_a_truncated_lost_job_deck_is_written_as_a_partial_run` is parametrized over `packed`. In both modes a truncated lost-job deck writes only `partial_run` rows, and never a pack.
+- **S8 C1 when `pack_run` refuses a deck:** `test_c1_a_deck_that_wont_pack_gets_no_row_past_30_and_eval_reads_a_lost_pack`.
+  - At every delivery there's no pack and no row past the first 30, so never a `full_interim` one.
+  - The refusal is logged at ERROR, and each serve's withdrawals are still recorded (one served-before, one W0).
+  - Eval reads the deck as `in_flight` at +1 h and `incomplete_deck` at +26 h, a lost pack, never a complete 30-card deck (`PACK_REQUIRED_SINCE` is set on main).
+- **Sabotages, 4/4 red:** the refusal records no withdrawals; the refusal logged at WARNING; `PACK_REQUIRED_SINCE = None`; a partial run allowed to write a pack.
+- **Docs:**
+  - **S7:** the `evidence_tier` comment lists `viewed`, and "No row is deleted" now names the dark retention cap and account deletion (`database.py`, `data-dictionary.md`).
+  - **U6:** the receipts LLD cites analytics-lead's and trades-eng's acceptances on main.
+  - **ADR-025:** retitled to "write full rows only for viewed cards (and the first 30)".
+- **Suites:** deferred evidence, packed evidence, eval withdrawals and paging: 306 passed.
+
 ## 2026-10-29 — #544 QA round 2: T-10 as an allowlist of uses; SQL normalised; the Calibration deadlock documented
 
 Gates: release-lead's #544 delta re-QA (everything passes but T-10: 22 of 39 new forms outside the documented residual got through). P1-1 (narrowed) and P3-1. Still dark. No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -104,6 +120,7 @@ Gates: head-eng's ruling on the c3 list (2026-10-29): `receipts_grades`, `gradin
   - Calibration sessions and cards past the cap go, newer ones stay;
   - the side-step isolation includes grading.
 - **Sabotages:** 5/5 red (contract-id grades kept, row grades kept, grading skipped, no cutoff, cards kept). T-10 is red on an aliased delete and on a tuple-alias update outside `_delete_deck`.
+
 
 ## 2026-10-29 — #537 QA P3s: the doc count, QA's drain tests ported, the ceiling line honest, a failed batch's count logged
 
