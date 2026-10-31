@@ -31063,7 +31063,7 @@ def _resolve_trade_share(token) -> dict | None:
 
 @app.route("/og/trade/<token>.png")
 def og_trade_card(token):
-    """Render a shared trade's give/get + fairness as a 1200x630 PNG.
+    """Render a shared trade's give/get card as a 1200x630 PNG (no fairness number since #511).
 
     A hit renders from the row the token resolves to; every miss returns
     the same generic "expired" PNG, status 200.
@@ -31217,7 +31217,7 @@ def share_trade_page(token):
             cta_url="/",
         )
     title = "Trade Match"
-    description = "A dynasty fantasy trade — see the give/get breakdown and fairness verdict."
+    description = "A dynasty fantasy trade. See the give/get breakdown."
     image_url = f"/og/trade/{token}.png"
     return _share_html(
         title=title,
@@ -31393,8 +31393,7 @@ def share_package_page(short_id):
     n = len(pkg["give_ids"]) + len(pkg["receive_ids"])
     return _share_html(
         title="Trade Package",
-        description=(f"A {n}-player dynasty trade package — see the give/get "
-                     "breakdown and fairness read."),
+        description=f"A {n}-player dynasty trade package. See the give/get breakdown.",
         image_url=f"/og/p/{short_id}.png",
         cta_text="Build your own trade",
         cta_url="/",
