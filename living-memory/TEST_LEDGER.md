@@ -10,6 +10,7 @@ Gates: head-eng's relay of models-lead addendum J (11-01), on #562. It touches t
   - **J2:** item 5 is identical in rows, the page store's evidence, packs and page cards;
   - **G-a2's unpack test:** `unpack(redacted)` equals `unpack(original)` with items 1–5 written out apart from the scrub's code, the other cards are bit-identical, and a null float round-trips.
 - **Sabotages, 2/2 red:** no J4 drop; the reason left as `i1_dropped`.
+- **Suites:** the three scrub files, 49 passed; every serve-path, I-1, page-store and evidence suite, 1,122 passed.
 - **Scope fixes:**
   - "Replay already counts redacted cards apart (G-a4 to G-a6)" is struck. J1's `partner_redacted` exclusion is models-eng's PR C.
   - The fixture replay line now reads "non-redacted **decks**", with redacted decks excluded, not compared.
