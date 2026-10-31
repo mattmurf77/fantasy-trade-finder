@@ -1,3 +1,141 @@
+## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
+
+Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **2, `test_control_a_normal_job_does_write_impressions`:** with packed evidence on, an organic job defers its impressions to delivery (#370), so the control wrote none. It now pins both flags off rather than reading `features.json`.
+- **3, `test_paged_withhold_holds_the_cursor`:** with the store on, `/status?cursor=0` reads the stored deck, which is the job's real cards (g1→r1, g2→r1, g1→r2, g2→r2), not the `CARDS` the test swaps into the in-memory job. Only g2→r2 passes I-1 on the stored rosters, and that one card is what served. So this was a fixture artifact, not an I-1 gap. The test now pins both flags off.
+- **The flags-on twin:** `test_trade_page_store.py::test_a_paged_withhold_on_the_stored_deck_holds_the_cursor_then_serves_i1s_survivors`, with the page-store fixture (both flags on) and the real stored deck.
+  - A stale roster past its bound withholds the page on `/status?cursor=0` with the cursor held: `([], 0, 0, "roster_check")`.
+  - Once fresh, exactly the stored cards that pass I-1 serve. The test computes them from the stored rosters and picks, independent of the server.
+  - The deck must have a card for I-1 to drop.
+- **Sabotages, 2/2 red:** I-1's drops ignored on the page path; the withhold ignored on the page path.
+- **Suites:** force-supersede, I-1 serve filter, page store and packed evidence: 317 passed on main and 317 passed on a flags-on copy of `ops/200ms-flip` (with failure 1's fix).
+- **Full backend suite, flags on** (`ops/200ms-flip` @ `8080663e` plus this branch's three test files): 10,055 passed, 2 skipped, 0 failed.
+
+## 2026-10-31 — #544 QA round 3: the X3 coverage hole closed; T-10 resolves namespace lookups; the residual documented by class
+
+Gates: release-lead's #544 round-3 re-QA (one small round to merge): P2-1 must-fix, plus the ruling on the 14 forms. Still dark. No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P2-1 (X3):** `test_account_deletion_coverage::test_new_private_rows_and_aliases_removed_counterparty_kept` compares the counterparty's rows **column for column** before and after, for every private table. It used to check only which `user_id`s were left.
+  - **X3** (`_delete_user_data` UPDATEs every user's `receipts_grades` through the exempt name loop) now fails it on `[receipts_grades]`.
+  - T-10 stays green on X3, since that loop is exempt by design; the coverage test is what catches it. The test also hardens account deletion for every other private table.
+- **T-10, the five static-string lookups (optional, taken):** `globals()[...]`, `vars(m)[...]`, `m.__dict__[...]` / `.get(...)`, `operator.attrgetter(...)(m)` and `m.__getattribute__(...)` resolve to a receipts table when the name is static, then the allowlist governs. 5 new cases, all caught.
+- **The residual, documented by class** in the test docstring, `docs/plans/receipts/LLD.md` (§3 and T-10) and the data dictionary (release-lead's ruling: T-10 catches accidents, not deliberate evasion):
+  - run-time-computed names and runtime table searches;
+  - back-references from an allowed use (`t.c.<col>.table`, `insert(t).table`, `get_final_froms()`);
+  - SQL text built with `%(…)s` dicts, `.format_map`, `string.Template`, `bytes.decode` or `list.append` + `join`;
+  - `exec`/`eval` or a file run;
+  - the ORM.
+- **Suites:** T-10 108 passed; account deletion coverage 52 passed. False-positive rescan with the new lookup rules: main `98b9291f` (every file) 0 findings; 101 open PRs (their 141 changed backend/scripts files; an unchanged file scans as on main) 0 findings.
+
+## 2026-10-31 — Calibration's lock order: answer_grading_card locks the session first (the deadlock fixed, not documented)
+
+Gates: the operator's "fix the deadlock" (#544 QA round 2 P3-1, documented on 10-29 as a must-fix before the cap). On #544. No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest plus a local Postgres 18 race.
+
+- **The cause:** `answer_grading_card` updated the card, then the session. Every other grading writer takes the session first: the prune (sessions, then cards), `fold_grading_cards`, `finish_grading_session_build` and `insert_grading_session`.
+- **The fix:** the answer reads its card's session id, then locks the session row (`SELECT … FOR UPDATE`) and reads its status under the lock, before it touches the card. If the session is gone by then (the prune), it returns `None`, which is the route's 404.
+- **Proof on Postgres 18** (a throwaway local cluster; release-lead's `test_qa544_race.py` plus a new fold-versus-answer race; each interleaving forced with statement hooks):
+  - **Before:** the prune against an answer deadlocked in both interleavings, killing the prune in one and the answer in the other. A fold re-numbering the card being answered deadlocked against it in both interleavings too, and that one is live on main today.
+  - **After, 3 runs:** no deadlock in any of the 6 races. In the answer-first race, the prune waits, then deletes the session and its cards. In the prune-first race, the answer waits, then finds the session gone and returns `None`. The fold backs out (`False`) when its card got answered. Nothing is left partial.
+- **CI** (`backend/tests/test_grading_lock_order.py`, 3 tests; CI has no Postgres, so the order is pinned on the source):
+  - every function in `database.py` that writes or locks a card and touches the session table takes the session first, the five known ones included, and any new one is covered;
+  - the answer's first operation is the session `FOR UPDATE`;
+  - an answer to a session deleted between its read and its lock returns `None` and writes nothing.
+- **Sabotages, 5/5 red:** no `FOR UPDATE`; the card updated before the lock; a vanished session not handled; the prune deleting cards first; the fold touching a card first.
+- **Docs:** the prune's comment and the cap knob in `config-reference.md` no longer carry the "before the cap" caveat.
+- **Suites:** lock order, T-10, retention, receipts, blind grading (all `test_blind_grading*`): 308 passed.
+
+## 2026-10-31 — S1–S8 package follow-ups: S1 (b) in packed mode, C1 for a refused pack, S7 and U6 docs, ADR-025's title
+
+Gates: the S1–S8 evidence package (`trades-eng-s1-s8-package.md` in the group notes folder, against main `63e373e2`), §7 items 1–4: trades-eng's small closers before models-lead's sign-off. Tests and docs only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **S1 (b) in packed mode:** `test_s1b_a_truncated_lost_job_deck_is_written_as_a_partial_run` is parametrized over `packed`. In both modes a truncated lost-job deck writes only `partial_run` rows, and never a pack.
+- **S8 C1 when `pack_run` refuses a deck:** `test_c1_a_deck_that_wont_pack_gets_no_row_past_30_and_eval_reads_a_lost_pack`.
+  - At every delivery there's no pack and no row past the first 30, so never a `full_interim` one.
+  - The refusal is logged at ERROR, and each serve's withdrawals are still recorded (one served-before, one W0).
+  - Eval reads the deck as `in_flight` at +1 h and `incomplete_deck` at +26 h, a lost pack, never a complete 30-card deck (`PACK_REQUIRED_SINCE` is set on main).
+- **Sabotages, 4/4 red:** the refusal records no withdrawals; the refusal logged at WARNING; `PACK_REQUIRED_SINCE = None`; a partial run allowed to write a pack.
+- **Docs:**
+  - **S7:** the `evidence_tier` comment lists `viewed`, and "No row is deleted" now names the dark retention cap and account deletion (`database.py`, `data-dictionary.md`).
+  - **U6:** the receipts LLD cites analytics-lead's and trades-eng's acceptances on main.
+  - **ADR-025:** retitled to "write full rows only for viewed cards (and the first 30)".
+- **Suites:** deferred evidence, packed evidence, eval withdrawals and paging: 306 passed.
+
+## 2026-10-29 — #544 QA round 2: T-10 as an allowlist of uses; SQL normalised; the Calibration deadlock documented
+
+Gates: release-lead's #544 delta re-QA (everything passes but T-10: 22 of 39 new forms outside the documented residual got through). P1-1 (narrowed) and P3-1. Still dark. No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **T-10, round 3** (`backend/tests/test_receipts_append_only.py`): an allowlist of USES, not a deny-list of writes.
+  - **What it allows:** a receipts table, or a name bound to one, may appear only:
+    - as the subject of `select` / `select_from` / `join` / `outerjoin` / `insert` / `_dialect_insert` / `exists`, or `.c` / `.insert()` / `.join()` / `.select()` / `.alias()`;
+    - as `.name` in SQL text;
+    - bound to a local name;
+    - in `_delete_deck`'s two pinned statements.
+  - **What it flags:** passing it on, returning or yielding it, storing it (tuple, dict, attribute, class body, global, module alias), a default, a star, or any other method (`.delete`, `.drop`, `getattr(t, …)`, `Delete(t)`, `drop_all(tables=[t])`).
+  - **Name strings:**
+    - Constants, `+`, `%`, `.format`, `.join`, names bound to static strings, and loop variables over name tuples all make `metadata.tables[...]`, `.get`, `getattr`, `Table`/`table` lookups references.
+    - This replaces the bare-name rule, which flagged QA's admin-counts read.
+  - **SQL text:** comments and identifier quotes are stripped; `ONLY`, a schema and `MERGE … THEN DELETE/UPDATE` are covered. `.sql` files are read too.
+  - **Pins:** the bindings of `g`, `i`, `contract_ids`, `row_ids` in `_delete_deck` are pinned. No scope nested in it may rebind them (a walrus).
+  - **Scoping as Python does it:** comprehensions are their own scope, and a name bound in a function is local to it.
+  - **Account deletion:** `accounts._delete_user_data` loops over every private table by name (`receipts_grades` among them) and reuses its loop variables, so name lookups there aren't resolved. A direct reference is still checked, and a test pins `receipts_grades` on `_ADDITIONAL_PRIVATE_TABLES`.
+  - **Residual, documented** in the test, `docs/plans/receipts/LLD.md` (T-10 and §3) and the data dictionary:
+    - a table reached through a value computed at run time across functions;
+    - a runtime `metadata.sorted_tables` search;
+    - `exec`/`eval` or a file read and executed;
+    - the ORM (waived: none in the codebase).
+- **Tests:** 103.
+  - **Caught (89 cases):** the clean tree; QA's 27 round-1 and 37 round-2 cases (the ORM pair waived); 25 more of ours (walrus in `_delete_deck`, global, module alias, yield, `.append`, `conn.info[...]`, `.join` SQL, a `--` comment, `UPDATE ONLY`, a second accounts `_del`, …). Each is caught by its intended rule.
+  - **Left alone (8):** QA's 6 false positives plus 2 of ours.
+  - **Also:** the SQL normaliser; the accounts rights path; the file inventory.
+- **0 false positives across all 60 open PRs and main** (each tree scanned).
+- **P3-1 (the Calibration deadlock), documented, to fix before the cap goes above 0:**
+  - On Postgres the session prune can deadlock with `answer_grading_card` (card, then session). Postgres aborts one side; nothing is left partial.
+  - No prune order avoids it: `fold_grading_cards` locks session, then cards. The fix is one order for the two.
+  - Written in the prune's comment and in `config-reference.md` on the cap knob.
+- **Sabotages:** the 14 deletion sabotages are still 14/14 red.
+- **Suites:** T-10, retention, receipts, blind-grading DB, deletion coverage: 265 passed.
+
+## 2026-10-29 — #544 QA: T-10 rebuilt on the syntax tree; grades pinned in the deck's transaction; Calibration at cap 0; sessions before cards
+
+Gates: release-lead's #544 QA (deletion code correct; NOT ready on the guard). P1-1, P2-1, P2-2 and both P3s, on #544. Still dark (cap 0). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P1-1, T-10 (receipts' append-only guard):** QA injected 27 non-retention writes, and 21 passed the line-regex over two files. It's now `backend/tests/test_receipts_append_only.py`.
+  - **What it reads:** every non-test `.py` under `backend/` and `scripts/`, parsed. In each function and at module level, the names bound to a receipts table are followed through assignments, annotations, walruses, tuple unpacking, loops, comprehensions, `.alias()`, `metadata.tables[...]` / `.get(...)` and `getattr`.
+  - **What it flags:**
+    - **W:** `delete`/`update` of one (any import alias, `table=` too), `.delete()`/`.update()` on one, an upsert or an `OR REPLACE` prefix on a statement built from one (a statement held in a variable included);
+    - **S:** SQL text that writes one (case, whitespace, f-strings, `+` and `%` resolved: delete/update/replace/truncate/drop/alter/upsert);
+    - **N:** a receipts table's bare name as a string outside two sites (`_delete_deck`'s count label, accounts' `_ADDITIONAL_PRIVATE_TABLES`);
+    - **P:** the retention delete referenced, imported or called outside its chain.
+  - **The exemption is the statement, not the place:** `_delete_deck`'s two grade deletes, exactly (by contract ids, by row ids). They were rewritten as their own statements for that, so a "correction" inside `_delete_deck` is caught.
+  - **The callers are pinned:** `_delete_deck` only from `purge_deck_evidence`, which only from `server._prune_deck_evidence`, never with `now=` or `**`. The test also asserts both sanctioned statements and both calls are really there.
+  - **Scanner tests:** QA's 27 cases plus 22 more (loops over table tuples, a module tuple, `getattr` with a concatenated name, `tables.get`, a `.alias()`, an upsert through a statement variable, `table=`, `sa.delete`, `%` SQL, TRUNCATE, SQL upsert, REPLACE INTO, a name list, a by-reference or imported `_delete_deck`, `**` kwargs, a lambda inside `_delete_deck`, a scripts file). All 49 caught, each by its intended rule. Reads and `on_conflict_do_nothing` inserts stay allowed.
+  - **Residual, documented:** a table reached only through a name computed at run time across statements.
+- **P2-1:** `test_receipts_grades_go_in_the_decks_own_transaction`. A statement failing after the grade deletes leaves the deck whole and its grades in place. QA's Q6 (own transaction) and Q6b (second connection) are red.
+- **P2-2:** the off test and a real-loop-step test (knobs at their defaults, cap 0) seed a Calibration session past 365 days, one dated 2001 (past any clock's cap), and old grades; nothing goes. QA's Q8 and Q8b are red.
+- **P3:**
+  - Stale "never DELETEd" comments are corrected (`database.py`'s two receipts comments, `docs/plans/receipts/LLD.md` §3 and T-10, the data dictionary's claim).
+  - `_delete_old_grading_sessions` deletes sessions before their cards. `fold_grading_cards` first updates its session row, so a racing fold either waits and finds the session gone, or commits first and its cards are caught. A test pins the order.
+- **Sabotages, 14/14 red** (the three PR test files): QA's T1–T5, Q6, Q6b, Q7a–c, Q8, Q8b (adapted to the new statement layout), plus cards-before-sessions and the tick passing `now=`.
+- **Suites:** the full backend suite: 10047 passed, 2 skipped.
+
+## 2026-10-29 — Retention cap: receipts grades and Calibration's grading tables (head-eng's ruling)
+
+Gates: head-eng's ruling on the c3 list (2026-10-29): `receipts_grades`, `grading_cards` and `grading_sessions` go under the 365-day cap, with no exception named to legal. A follow-up to #523 (#523 itself is unchanged), and still dark: the cap knob is 0. No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **`receipts_grades`:** deleted in the deck's own transaction (`_delete_deck`), by contract ids and by row ids, like outcomes and pass reasons.
+  - A packed deck's grades outlive its rows (deleted at 90 days) and go at the cap.
+  - The receipts queue ("no grade row yet") reads the rows, which are gone first, so nothing re-grades a deleted deck.
+- **Calibration:** `grading_sessions` created before the cap, and their `grading_cards` (the shown trades), go by `created_at`, oldest first, in bounded batches. It's a side step like the page store's, isolated.
+- **T-10 (receipts' append-only guard):** it now also catches a write through an alias of a receipts table, so the exception can't hide behind a rename. The one sanctioned exception is the retention delete in `_delete_deck`. The data dictionary says so.
+- **Tests:**
+  - grades of a packed deck (contract ids) and a pack-less deck (row ids) go at the cap, and a recent deck's stay;
+  - a row-less packed card's grade is counted in the deck's transaction;
+  - Calibration sessions and cards past the cap go, newer ones stay;
+  - the side-step isolation includes grading.
+- **Sabotages:** 5/5 red (contract-id grades kept, row grades kept, grading skipped, no cutoff, cards kept). T-10 is red on an aliased delete and on a tuple-alias update outside `_delete_deck`.
+
+
 ## 2026-10-31 — Exit guard on check-send-registry (follow-up to #547, after #539 merged)
 
 Test-only (`mobile/tests/check-send-registry.js`). release-lead asked for it after #539 merged, so the guard didn't move #539's QA'd head. It's the `check-device-first-page` pattern #547 used: a `finished` flag, and an exit handler that sets `exitCode 1` when the run didn't reach its end.
@@ -39,6 +177,22 @@ Gates: head-eng's check 3, from release-lead's prod sweep: "Purged 500 expired d
 - **The backlog's size and age** need a read-only prod query (release-lead): the oldest `created_at`, the count past 14 and past 30 days, and rows written a day.
 - **Tests:** `test_deck_diagnostics.py`. A call drains up to `max_batches` and stops at a short batch (one read, counted); the loop passes the ceiling.
 - **Sabotages:** 3/3 red (one batch only, no short-batch stop, the loop without the ceiling).
+## 2026-10-29 — Mobile async guards fail when a check hangs (check-win-now-recovery passed 7 of 39 silently)
+
+Gates: engagement-eng's report (release-lead's #488 QA found it). Test harness only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the suites themselves.
+
+- **The defect:** `mobile/tests/check-win-now-recovery.js` sets `process.exitCode` only when `main()` completes. An `await` that never settles drained the event loop, and node exited 0 after 7 checks.
+  - On main all 39 run (8 runs, two `node_modules` installs). On #488's head (`5031fb40`) T3 hangs, so #488's break looked green.
+- **The fix:** the guard `check-device-first-page.js` and `check-gate-miss.js` already use: `finished`, a `process.on('exit')` that fails an unfinished run, and `finished = true` before the summary. It's now in the six other trades-owned async suites: `check-win-now-recovery`, `check-win-now`, `check-trade-pages`, `check-trade-disposition`, `check-owner-offer-signals`, `check-fairness-default`.
+- **`mobile/tests/README.md` § Writing one:** an async guard must fail if it never finishes.
+- **Proof:**
+  - **6/6:** a `new Promise(() => {})` injected before each suite's finish now exits 1 with "did not finish". Without the guard (the control) each exits 0.
+  - **#488's tree:** the guarded recovery suite exits 1 instead of 0.
+  - **All 126 `mobile/tests/check-*.js`** pass on the branch.
+- **T3's hang on #488 (diagnosis, handed to engagement-eng):**
+  - The cause: `apiRequest`'s catch now `return`s the async `_afterGateFailure(...)` instead of `throw err`. With the gate off, that adds microtask hops before the 409 retry schedules its backoff timer. The harness's `flush()` drains 80 ticks, so the timer is scheduled after `advance()` has moved the clock past it, and it never fires.
+  - Deepening `flush` to 400 completes T3. Throwing synchronously when the gate is off (`if (opts.background || !_gateIsOn()) throw err;`) runs #488's own test file 39/39.
+- **Not touched (other teams' async suites, no guard; routed to head-eng):** `check-apple-revoke-on-delete`, `check-espn-cookies`, `check-league-picker-recovery`, `check-send-timeout`, `check-sleeper-ownership`, `check-vault-subsumes-legacy`.
 
 ## 2026-10-29 — G3-e: `deck_outcomes.user_id`; account deletion and export also match an outcome by its owner
 
@@ -85,6 +239,21 @@ Test-only (`mobile/tests/`), no app code. D-056 posture. `check-espn-cookies.js`
 
   (A throw already exits 1 via the unhandled rejection; the guard is what catches the return and the hang.)
 - **Not here:** #539's new `check-send-registry.js` has the same gap; it gets the guard on #539 or right after it merges (release-lead's call).
+## 2026-10-29 — Exit guards on three async mobile suites (head-eng's ask, from trades-eng's #546 finding)
+
+Test-only: no app code, no user-visible change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The gap:** `check-apple-revoke-on-delete.js` (#446), `check-league-picker-recovery.js` (the 10-17 incident) and `check-sleeper-ownership.js` (#279) are async and had no exit guard. A run that returned early or awaited something that never settled let node exit 0 mid-run, so a green run there wasn't evidence.
+- **The fix:** `check-device-first-page`'s pattern in each: `let finished = false` with an `exit` hook that fails an unfinished run (`process.exitCode = 1` plus a "did not finish" line), and `finished = true` right before the summary.
+- **Sabotage, before the last check, guarded vs `origin/main`'s unguarded copy:**
+
+  | suite | early return | throw | hang (a never-settling await) |
+  |---|---|---|---|
+  | guarded (all three) | exit 1 | exit 1 | exit 1 |
+  | unguarded on main (all three) | **exit 0** | exit 1 | **exit 0** |
+
+  Restored byte-identical. A throw already failed (an unhandled rejection, or the suite's own `.catch`). The guard is what catches the other two.
+- **Runs:** each suite passes, exit 0; the full `check-*.js` loop is run on the PR.
 
 ## 2026-10-29 — The model-store hook hardened (#542 QA P3s)
 
