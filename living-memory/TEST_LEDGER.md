@@ -46,7 +46,7 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
 - **Updated tests:**
   - `test_daily_tick_route.py`: ten steps.
   - `test_purge_entry_users.py`: `user_taste.attr`, the derived `partner:<id>` key, listed as not a user column.
-- **Suites:** every test touching deletion, export or the tick (17 files): 909 passed before those two updates, and both pass after them (68).
+- **Suites:** every test touching deletion, export or the tick (17 files): 909 passed before those two updates, and both pass after them (68). **The full backend suite at `671dd526`** (main `fabfe92c` merged): 10,195 passed, 2 skipped, 0 failed.
 
 ## 2026-10-31 — #544 QA round 3: the X3 coverage hole closed; T-10 resolves namespace lookups; the residual documented by class
 
