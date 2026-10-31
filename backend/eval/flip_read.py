@@ -58,10 +58,13 @@ The G-table (a barred G prints PASS or FAIL):
        and no pack logs `deck-evidence <deck_job_id>: n delivered cards of a
        deck with no evidence`; release-lead copies every such line in the
        window into the read (G3-a), passed as --no-evidence-log. An orphan is
-       explained (G3-b) only when its impression id's run equals a captured
-       deck_job_id and its index is below that deck's delivered count (its
-       lines summed): those decks (no_evidence_decks_explained) and outcomes
-       (explained_orphans) are reported and don't FAIL. Any other orphan
+       explained (G3-b, as corrected by I3-a) when its impression id's run
+       equals a captured deck_job_id, whatever its index: #535's n counts the
+       cards sent, so a deck with a cut or a drop sends an index at or past
+       it. Those decks (no_evidence_decks_explained) and outcomes
+       (explained_orphans) are reported and don't FAIL; the outcomes at or
+       past the deck's logged count (its lines summed) are counted apart
+       (explained_past_count) and don't FAIL alone either. Any other orphan
        FAILs and recommends the kill (G3-c), and so do explained outcomes
        above 1% of the window's outcomes on packed-admitted decks (a pack row
        or tiered rows, the explained ones included; G3-d). With any #535 deck
@@ -420,19 +423,20 @@ def _g3(conn, decks, outcome_ids: list[str], packed=frozenset(),
     orphans += [iid for iid in elsewhere if iid not in found and iid not in ghost_rows]
     delivered = no_evidence or {}
 
-    def no_evidence_card(iid) -> bool:        # G3-b: a captured deck, below its count
-        run, index = _run_of(iid)
-        return run in delivered and index < delivered[run]
+    def no_evidence_card(iid) -> bool:        # G3-b (I3-a): a captured deck, any index
+        return _run_of(iid)[0] in delivered
 
     explained = [iid for iid in orphans if no_evidence_card(iid)]
     unexplained = [iid for iid in orphans if not no_evidence_card(iid)]
+    past_count = sum(1 for iid in explained                      # a cut or a drop before it
+                     if _run_of(iid)[1] >= delivered[_run_of(iid)[0]])
     admitted_outcomes = joined_admitted + len(explained)
     over_limit = len(explained) * 100 > admitted_outcomes                          # G3-d
     return {"outcomes": len(outcome_ids), "joined": joined,
             "joined_outside_window": sum(1 for iid in elsewhere if iid in found),
             "on_ghost": len(on_ghost), "ghost_ids": sorted(set(on_ghost))[:LIST_CAP],
             "orphans": len(unexplained), "ids": sorted(set(unexplained))[:LIST_CAP],
-            "explained_orphans": len(explained),
+            "explained_orphans": len(explained), "explained_past_count": past_count,
             "no_evidence_decks_explained": len({_run_of(iid)[0] for iid in explained}),
             "packed_admitted_outcomes": admitted_outcomes, "explained_over_limit": over_limit,
             "no_evidence_decks": None if no_evidence is None else len(no_evidence),
@@ -669,7 +673,8 @@ def render(r: FlipRead) -> str:
     else:
         lines.append(
             f"G3 explained: no-evidence deck (models-lead G3-b): {g3['explained_orphans']} "
-            f"outcomes on {g3['no_evidence_decks_explained']} decks, of "
+            f"outcomes on {g3['no_evidence_decks_explained']} decks (past the logged count: "
+            f"{g3['explained_past_count']}), of "
             f"{g3['packed_admitted_outcomes']} outcomes on packed-admitted decks"
             + (" (above 1%: G3 FAILs, G3-d)" if g3["explained_over_limit"] else "") + ".")
         if g3["no_evidence_decks"]:

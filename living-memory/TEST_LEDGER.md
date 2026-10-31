@@ -17,13 +17,13 @@ Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook
 - **H-a1:** a redacted card's assets count toward the cap. Only its own over-cap verdict is unknown, and that's never counted as explained.
 - **H-a2:** `not_auditable` and B-DK-7's incomplete decks are split by cause, and the report prints "INCOMPLETE from redaction only: yes/no".
 - **G3-b/c/d (`flip_read --no-evidence-log`):**
-  - an orphan counts as explained only when its run is a captured #535 deck and its index is below that deck's delivered count;
+  - an orphan counts as explained when its run is a captured #535 deck, whatever its index (head-eng I3-a, 2026-10-31: #535's n counts the cards sent, so a deck with a cut or a drop sends an index at or past it). Those at or past the logged count print apart as "past the logged count: m", and don't FAIL alone;
   - any other orphan, or explained outcomes above 1% of packed-admitted outcomes, FAILs and recommends the kill;
   - any #535 deck in the lines prints the G3-d close-the-path line.
 - **Tests:**
   - `test_eval_bdk_audit.py`: 90. That's +8 (each bucket in one read; G-b1's explained, no-cut, missing-row and clean-card-left outcomes; the CLI log file; H-a2), +3 rewritten for H-a1, and 3 updated for G-b4.
-  - `test_eval_flip_read.py`: 93 (+6).
-- **Sabotage, each red then restored (11):**
+  - `test_eval_flip_read.py`: 95 (+8). I3-a added the #535 deck with a cut and an outcome on its last sent card, and a past-the-count variant of the 1% test; the at-the-count case now reads explained.
+- **Sabotage, each red then restored (13):**
   - the cut check off;
   - the fixed point always true;
   - H-a1 undone;
@@ -32,7 +32,9 @@ Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook
   - no first line;
   - redaction-only always yes;
   - a missing row read as no assets;
-  - G3-b without the count;
+  - G3-b back to "below the count" (I3-a);
+  - the past-the-count tally always 0 (I3-a);
+  - past-the-count outcomes left out of the 1% (I3-a);
   - G3-d without the limit;
   - the kill without the limit.
 - **Suites:** all `test_eval_*` plus `test_evidence_pack.py` and `test_deck_value_model.py`, on main @ `9370670e`: 481 passed.
