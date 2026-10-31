@@ -1690,8 +1690,7 @@ update.
 - **Daily tick:** step `deletion_scrub` redacts the value-model store, then deletes finished jobs.
 - **Healthy:** `[scrub] job=<8 chars> db_done version=<n> counts={...}` after each pass, and `daily-tick step=deletion_scrub outcome=ok` daily. Log lines never carry an id.
 - **The alert:** `[scrub] unfinished jobs=<n> oldest_h=<h>` at ERROR, from the tick.
-  - Until every scrub stage is built (`deletion_scrub.COMPLETE`), finished jobs are kept on purpose, so a later stage scrubs their deletions too. The alert fires for them, and that is expected.
-  - After that, it means a job keeps failing. `last_error` on the row is the exception class.
+  - Since stage 3 (`deletion_scrub.COMPLETE`), a job is deleted once its grace pass (6 h) and the model store are done. A job past 24 h therefore means a stuck job: a pass that keeps failing, or a model store that keeps raising. `last_error` on the row is the exception class.
   - Legal (ix): keep retrying up to 30 days, never abandon a job.
 - **`[evidence] pack state reloaded after a redaction job=<deck>`** (INFO): a live writer's cached pack copy met a scrubbed pack and reloaded it before writing. Expected for a while after a deletion, and harmless.
 - **A failing pass:** `[scrub] job=… db pass failed: <Class>` (the class only, since a DB error's text can quote an id). Read the row's `last_error` and `attempts`, fix the cause, and the next cleanup tick retries.

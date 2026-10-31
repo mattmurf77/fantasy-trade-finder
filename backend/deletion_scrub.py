@@ -44,11 +44,11 @@ from .eval.contract import REDACTED_PARTNER_PREFIX
 log = logging.getLogger("trade_finder")
 
 # Bump when a store or field is added: a row whose db_version is older runs
-# its DB phase again.
-SCRUB_VERSION = 2
-# False until every store in the scope is built (scope §5's staging). Until
-# then a finished row is kept, so the later stages scrub its deletion too.
-COMPLETE = False
+# its DB phase again. 3: every store in the scope (stage 3, COMPLETE).
+SCRUB_VERSION = 3
+# True once every store in the scope is built (stage 3). Before that a
+# finished row was kept, so the later stages scrubbed its deletion too.
+COMPLETE = True
 
 LEASE = timedelta(minutes=10)
 IN_FLIGHT_GRACE = timedelta(hours=6)
@@ -109,6 +109,18 @@ def capture_leagues(conn, user_ids) -> list[str]:
     return sorted(x for x in found if x)
 
 
+def capture_names(conn, user_ids) -> dict[str, list[str]]:
+    """The person's display names and usernames per league, read before the
+    deletion removes their league_members rows: a Calibration card names its
+    partner by display name, never by id."""
+    m = db.league_members_table
+    names: dict[str, set] = {}
+    for league_id, display, username in conn.execute(select(
+            m.c.league_id, m.c.display_name, m.c.username).where(m.c.user_id.in_(list(user_ids)))):
+        names.setdefault(league_id, set()).update(n for n in (display, username) if n)
+    return {lg: sorted(ns) for lg, ns in names.items() if ns}
+
+
 def enqueue(conn, user_ids, league_ids, now: datetime | None = None) -> str:
     """Insert the job row in the caller's (the deletion's) transaction and
     return its token."""
@@ -117,6 +129,7 @@ def enqueue(conn, user_ids, league_ids, now: datetime | None = None) -> str:
         job_id=uuid.uuid4().hex, token=token,
         partner_ids_json=json.dumps(sorted(user_ids)),
         league_ids_json=json.dumps(sorted(league_ids)),
+        partner_names_json=json.dumps(capture_names(conn, user_ids)),
         deleted_at=_iso(now or datetime.now(timezone.utc)), db_version=0, attempts=0))
     return token
 
@@ -270,6 +283,12 @@ def redact_valuation(valuation):
     if isinstance(core, dict) and isinstance(core.get("throwin"), dict):
         out["core"] = {**core, "throwin": {k: v for k, v in core["throwin"].items()
                                            if k != "recipient_value"}}
+    # value_core blends the partner's outlook in: outlook = (viewer + partner)
+    # / 2 with the viewer's side kept, priority and effective from it (scope
+    # §1.3). value and rank (market and the viewer's own board) stay.
+    out.pop("effective", None)
+    if isinstance(out.get("scores"), dict):
+        out["scores"] = {k: v for k, v in out["scores"].items() if k not in ("outlook", "priority")}
     return out
 
 
@@ -658,7 +677,10 @@ _PLACEHOLDER = "deleted_user"
 # A served card's fields from the partner's account, removed on a redacted
 # card (the c2 list's PG keys), and its blended scores, nulled.
 _PAGE_CARD_KEYS_REMOVED = ("likes_you", "standing_offer_reason", "reasons", "rationale",
-                           "fit", "breaker")
+                           "fit", "breaker",
+                           # its second sentence frames the card in the
+                           # partner's declared window (trade_narrative)
+                           "narrative")
 _PAGE_CARD_KEYS_NULLED = ("mismatch_score", "composite_score", "surplus_margin",
                           "base_score", "final_score")
 
@@ -778,6 +800,116 @@ def _scan_page_store(job: dict, after: str, budget: list) -> tuple[str | None, i
     return str(cursor), changed
 
 
+# ── Calibration (grading_sessions / grading_cards) and diagnostics ──────────
+
+def _redact_grading_session(conn, session: dict, job: dict) -> int:
+    """One other user's Calibration session. Its hidden source names the
+    current arm's partners by id (→ the token). A card is the person's when
+    the source's current arm lists it with a deleted partner id, or when it
+    names them by one of their names (that league's, or, where the source
+    shows they were a partner but no names were captured, any of theirs):
+    its partner_name becomes the placeholder. Returns the cards changed."""
+    ids, token = set(job["ids"]), job["token"]
+    names = set((job.get("names") or {}).get(session["league_id"], ()))
+    gs, gc = db.grading_sessions_table, db.grading_cards_table
+    source = _loads(session["source_json"])
+    theirs = set()
+    if isinstance(source, dict):
+        current = (source.get("current") or {}).get("cards") or []
+        theirs = {(frozenset(c.get("give") or ()), frozenset(c.get("receive") or ()))
+                  for c in current if isinstance(c, dict) and c.get("partner_id") in ids}
+        if theirs and not names:
+            # A league the person had left (no names captured there), but the
+            # session's own source shows they were a partner in it: their
+            # names from every league.
+            names = {n for ns in (job.get("names") or {}).values() for n in ns}
+        new = _replace_ids(source, ids, token)
+        if new != source:
+            conn.execute(update(gs).where(gs.c.session_id == session["session_id"])
+                         .values(source_json=json.dumps(new, sort_keys=True)))
+    changed = 0
+    for card in conn.execute(select(gc.c.card_id, gc.c.trade_json, gc.c.arms_json).where(
+            gc.c.session_id == session["session_id"])).mappings():
+        trade, arms = _loads(card["trade_json"]), _loads(card["arms_json"])
+        values = {}
+        if isinstance(trade, dict):
+            key = (frozenset(a.get("id") for a in trade.get("give") or () if isinstance(a, dict)),
+                   frozenset(a.get("id") for a in trade.get("receive") or () if isinstance(a, dict)))
+            if key in theirs or trade.get("partner_name") in names:
+                if trade.get("partner_name") != _PLACEHOLDER:
+                    values["trade_json"] = json.dumps({**trade, "partner_name": _PLACEHOLDER},
+                                                      sort_keys=True)
+        if isinstance(arms, dict):
+            new_arms = _replace_ids(arms, ids, token)
+            if new_arms != arms:
+                values["arms_json"] = json.dumps(new_arms, sort_keys=True)
+        if values:
+            conn.execute(update(gc).where(gc.c.card_id == card["card_id"]).values(**values))
+            changed += 1
+    return changed
+
+
+def _scrub_grading(job: dict) -> int:
+    """The league pass over Calibration sessions in the captured leagues."""
+    gs = db.grading_sessions_table
+    changed = 0
+    with db.engine.begin() as conn:
+        for session in conn.execute(select(gs.c.session_id, gs.c.league_id, gs.c.source_json).where(
+                gs.c.league_id.in_(job["leagues"]), gs.c.created_at <= job["cutoff"],
+                gs.c.user_id.notin_(sorted(job["ids"])))).mappings().all():
+            changed += _redact_grading_session(conn, session, job)
+    return changed
+
+
+def _scan_grading(job: dict, after: str, budget: list) -> tuple[str | None, int]:
+    """The fallback scan of Calibration sessions whose source names an id (a
+    league the person had left)."""
+    ids = set(job["ids"])
+    gs = db.grading_sessions_table
+    changed = 0
+    while budget[0] > 0:
+        budget[0] -= 1
+        with db.engine.begin() as conn:
+            rows = conn.execute(select(gs.c.session_id, gs.c.league_id, gs.c.source_json,
+                                       _mentions(gs.c.source_json, ids).label("hit")).where(
+                gs.c.session_id > after, gs.c.created_at <= job["cutoff"],
+                gs.c.user_id.notin_(sorted(ids)),
+            ).order_by(gs.c.session_id).limit(_SCAN_BATCH)).mappings().all()
+            if not rows:
+                return None, changed
+            for row in rows:
+                if row["hit"]:
+                    changed += _redact_grading_session(conn, row, job)
+        after = rows[-1]["session_id"]
+    return after, changed
+
+
+# Diagnostics expire at 14 days (FTF_DECK_DIAGNOSTIC_RETENTION_DAYS); one
+# that has outlived 30 (a purge that fell behind) and names the person goes
+# (legal R28.22, c3 #13).
+_DIAGNOSTICS_OVERDUE = timedelta(days=30)
+
+
+def _scan_diagnostics(job: dict, after: str, budget: list) -> tuple[str | None, int]:
+    ids = set(job["ids"])
+    t = db.deck_diagnostic_snapshots_table
+    overdue = _iso(datetime.now(timezone.utc) - _DIAGNOSTICS_OVERDUE)
+    deleted = 0
+    while budget[0] > 0:
+        budget[0] -= 1
+        with db.engine.begin() as conn:
+            rows = conn.execute(select(t.c.snapshot_id, _mentions(t.c.payload_json, ids).label("hit")).where(
+                t.c.snapshot_id > after, t.c.created_at < overdue,
+            ).order_by(t.c.snapshot_id).limit(_SCAN_BATCH)).all()
+            if not rows:
+                return None, deleted
+            hits = [r.snapshot_id for r in rows if r.hit]
+            if hits:
+                deleted += conn.execute(delete(t).where(t.c.snapshot_id.in_(hits))).rowcount or 0
+        after = rows[-1].snapshot_id
+    return after, deleted
+
+
 # The DB phase, in order (scope §0.2). First the league pass over the captured leagues, then the
 # fallback scans of whole stores, resumable from a cursor on the job row.
 _STORES = (
@@ -786,6 +918,7 @@ _STORES = (
     ("bakeoff_runs", _scrub_bakeoff_runs),
     ("deck_evidence_packs", _scrub_packs),
     ("trade_page_store", _scrub_page_store),
+    ("grading_cards", _scrub_grading),
 )
 _SCANS = (
     ("deck_impressions", _scan_impressions),
@@ -793,6 +926,8 @@ _SCANS = (
     ("bakeoff_runs", _scan_bakeoff_runs),
     ("deck_evidence_packs", _scan_packs),
     ("trade_page_store", _scan_page_store),
+    ("grading_cards", _scan_grading),
+    ("deck_diagnostic_snapshots", _scan_diagnostics),
 )
 
 
@@ -800,6 +935,7 @@ def _job(row) -> dict:
     deleted = datetime.fromisoformat(row["deleted_at"])
     return {**dict(row), "ids": json.loads(row["partner_ids_json"]),
             "leagues": json.loads(row["league_ids_json"]),
+            "names": json.loads(row.get("partner_names_json") or "{}"),
             # A deck's rows carry its first delivery as served_at, so a deck
             # built before the deletion and first delivered after it is told
             # apart only by the grace: decks served up to IN_FLIGHT_GRACE
@@ -924,7 +1060,10 @@ def _finish(now: datetime) -> int:
     with db.engine.begin() as conn:
         for row in conn.execute(select(t).where(
                 t.c.db_version == SCRUB_VERSION, t.c.model_done_at.isnot(None))).mappings():
-            if not _db_due(row, now):
+            # Done means the grace pass ran too (decks in flight at deletion).
+            grace = datetime.fromisoformat(row["deleted_at"]) + IN_FLIGHT_GRACE
+            if (row["scan_json"] is None and row["db_done_at"] is not None
+                    and datetime.fromisoformat(row["db_done_at"]) >= grace):
                 finished += conn.execute(delete(t).where(t.c.job_id == row["job_id"])).rowcount or 0
     return finished
 
