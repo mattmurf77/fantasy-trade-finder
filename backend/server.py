@@ -2883,6 +2883,12 @@ def _trade_job_stalled(job, now):
     return now - last_progress > _JOB_HARD_TIMEOUT
 
 
+# Diagnostics expiry per cleanup tick: up to 20 x 500 rows (10,000 a tick,
+# 2.88M a day); one 500-row batch a tick fell behind the write rate.
+_DIAG_PURGE_MAX_BATCHES = 20
+_DIAG_PURGE_BATCH = 500
+
+
 def _cleanup_loop() -> None:
     """Background thread: evict stale sessions + stuck/old trade jobs."""
     while True:
@@ -2924,13 +2930,19 @@ def _cleanup_loop() -> None:
             log.warning("api-observability purge failed: %s", e)
 
         # Debug evidence is separate from durable card/outcome/valuation rows.
-        # One bounded batch per tick; failures remain visible and retry next tick.
+        # Up to _DIAG_PURGE_MAX_BATCHES bounded batches per tick (one fell
+        # behind the write rate); failures remain visible and retry next tick.
         try:
             from .database import purge_deck_diagnostics
             days = int(os.environ.get("FTF_DECK_DIAGNOSTIC_RETENTION_DAYS", "14"))
-            purged = purge_deck_diagnostics(days=days)
+            purged = purge_deck_diagnostics(days=days, batch_size=_DIAG_PURGE_BATCH,
+                                            max_batches=_DIAG_PURGE_MAX_BATCHES)
             if purged:
-                log.info("Purged %d expired deck diagnostic snapshots", purged)
+                # At the ceiling the tick can't tell whether rows are left
+                # (exactly 10,000 may have been all of them); the next says.
+                log.info("Purged %d expired deck diagnostic snapshots%s", purged,
+                         " (the tick's ceiling: more may remain)"
+                         if purged >= _DIAG_PURGE_MAX_BATCHES * _DIAG_PURGE_BATCH else "")
         except Exception:
             log.exception("deck-diagnostic retention failed")
 
@@ -31569,7 +31581,7 @@ def og_tier_card(pos, username):
 
 from .database import (  # noqa: E402
     create_trade_share_token, resolve_trade_share_token,
-    count_recent_trade_share_tokens,
+    TradeShareRateLimited,
 )
 
 # token_urlsafe(16) → exactly 22 chars of the URL-safe base64 alphabet.
@@ -31583,7 +31595,9 @@ def _resolve_trade_share(token) -> dict | None:
     try:
         return resolve_trade_share_token(token)
     except Exception as e:
-        log.warning("trade share lookup failed: %s", e)
+        # The type only: a DB error's text carries its bound parameters,
+        # which here is the token.
+        log.warning("trade share lookup failed: %s", type(e).__name__)
         return None
 
 
@@ -31856,7 +31870,9 @@ def create_share_trade_route():
     Only a party to the match can mint, by the predicate every match route
     uses (session user_id == user_a_id or user_b_id). A non-participant, a
     missing match and a malformed id all get the same 404 not_found, so the
-    route can't be used to probe ids. Idempotent per (match, sharer). Demo
+    route can't be used to probe ids. Idempotent per (match, sharer): a
+    re-share returns the caller's live token and never counts against the
+    hourly limit; only a new mint does (one transaction in the helper). Demo
     sessions are refused, as on /api/share/package.
     """
     if not is_enabled("growth.share_landing"):
@@ -31872,18 +31888,15 @@ def create_share_trade_route():
         return jsonify({"error": "not_found"}), 404
 
     try:
-        recent = count_recent_trade_share_tokens(user_id, hours=1)
-    except Exception as e:
-        log.warning("share/trade: rate-limit count failed: %s", e)
-        recent = 0
-    if recent >= _TRADE_SHARE_HOURLY_LIMIT:
+        token = create_trade_share_token(match_id, user_id,
+                                         hourly_limit=_TRADE_SHARE_HOURLY_LIMIT)
+    except TradeShareRateLimited:
         return jsonify({"error": "rate_limited",
                         "message": "Too many shares — try again later."}), 429
-
-    try:
-        token = create_trade_share_token(match_id, user_id)
     except Exception as e:
-        log.error("share/trade: could not mint a token for %s: %s", user_id, e)
+        # The type only: a DB error's text carries the INSERT's bound
+        # parameters, the new token among them.
+        log.error("share/trade: could not mint a token for %s: %s", user_id, type(e).__name__)
         return jsonify({"error": "store_failed"}), 500
     if token is None:
         return jsonify({"error": "not_found"}), 404

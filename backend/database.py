@@ -7600,16 +7600,35 @@ def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks:
     return counts
 
 
-def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
-    """Expire one bounded batch of debug nodes, never cards/valuations/outcomes."""
+def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500,
+                           max_batches: int = 1) -> int:
+    """Expire debug nodes, never cards/valuations/outcomes: up to `max_batches`
+    bounded batches of the oldest, each its own transaction (the ids read by
+    the created_at index, then a primary-key delete), stopping at the first
+    short batch. One batch a tick fell behind the write rate (head-eng
+    2026-10-29: always at the 500 cap). A failed batch logs what the batches
+    before it already deleted (they stay committed), then raises."""
     if days <= 0:
         return 0
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     d = deck_diagnostic_snapshots_table
-    with engine.begin() as conn:
-        ids = select(d.c.snapshot_id).where(d.c.created_at < cutoff).order_by(
-            d.c.created_at, d.c.snapshot_id).limit(max(1, min(batch_size, 1000)))
-        return conn.execute(delete(d).where(d.c.snapshot_id.in_(ids))).rowcount or 0
+    size = max(1, min(batch_size, 1000))
+    total = 0
+    try:
+        for _ in range(max(1, max_batches)):
+            with engine.begin() as conn:
+                ids = list(conn.execute(select(d.c.snapshot_id).where(d.c.created_at < cutoff)
+                                        .order_by(d.c.created_at, d.c.snapshot_id).limit(size)).scalars())
+                if ids:
+                    total += conn.execute(delete(d).where(d.c.snapshot_id.in_(ids))).rowcount or 0
+            if len(ids) < size:
+                break
+    except Exception:
+        if total:
+            log.warning("deck diagnostics purge: %d expired snapshots deleted before a batch failed",
+                        total)
+        raise
+    return total
 
 
 # Tiers a later delivery raises to 'delivered' (ruling 17's precedence: ghost >
@@ -16357,12 +16376,33 @@ def count_recent_shared_packages(user_id: str, *, hours: int = 1) -> int:
 # (build O8). The token is the only key; a trade_matches.id never resolves.
 # ---------------------------------------------------------------------------
 
-def create_trade_share_token(match_id: int, user_id: str) -> str | None:
+class TradeShareRateLimited(Exception):
+    """create_trade_share_token: a NEW mint would pass the hourly limit."""
+
+
+# Advisory-lock class id for the trade-share mint (Postgres two-int form:
+# this constant + hashtext(user_id)). Nothing else in the app takes advisory
+# locks; the constant keeps the key space its own if something ever does.
+_TRADE_SHARE_LOCK_CLASS = 8008
+
+
+def create_trade_share_token(match_id: int, user_id: str, *,
+                             hourly_limit: int | None = None) -> str | None:
     """The caller's live share token for a match, minted on first share.
 
     Idempotent per (match, sharer): a live (non-revoked) token this user
-    already holds for this match is returned as is; otherwise a new
-    secrets.token_urlsafe(16) is minted (re-minted on a PK collision).
+    already holds for this match is returned as is, with no count and no
+    insert, so a re-share never counts against the limit. Otherwise a new
+    secrets.token_urlsafe(16) is minted (re-minted on a PK collision), after
+    the hourly count: at or over `hourly_limit` new mints in the last hour it
+    raises TradeShareRateLimited and writes nothing.
+
+    One transaction holds the participant check, the live-token lookup, the
+    count and the insert. On Postgres a transaction-level advisory lock keyed
+    on the user serialises that user's concurrent mints, so a burst can't
+    overshoot the limit or leave two live tokens for one match. SQLite (local
+    dev only) gets the plain transaction: a concurrent burst there can still
+    overshoot by one or two.
 
     None when the match doesn't exist or `user_id` isn't one of its two
     parties. The participant predicate is the one every match route uses
@@ -16380,6 +16420,11 @@ def create_trade_share_token(match_id: int, user_id: str) -> str | None:
         token = secrets.token_urlsafe(16)
         try:
             with engine.begin() as conn:
+                if conn.dialect.name == "postgresql":
+                    conn.execute(
+                        text(f"SELECT pg_advisory_xact_lock({_TRADE_SHARE_LOCK_CLASS}, hashtext(:uid))"),
+                        {"uid": user_id},
+                    )
                 match = conn.execute(
                     select(tm.c.user_a_id, tm.c.user_b_id).where(tm.c.id == match_id)
                 ).fetchone()
@@ -16395,6 +16440,9 @@ def create_trade_share_token(match_id: int, user_id: str) -> str | None:
                 ).scalar()
                 if live:
                     return live
+                if (hourly_limit is not None
+                        and _count_recent_trade_share_tokens(conn, user_id) >= hourly_limit):
+                    raise TradeShareRateLimited()
                 conn.execute(insert(tst).values(
                     token=token, match_id=match_id,
                     created_by=user_id, created_at=_now(),
@@ -16420,18 +16468,16 @@ def resolve_trade_share_token(token: str) -> dict | None:
     return dict(row._mapping) if row is not None else None
 
 
-def count_recent_trade_share_tokens(user_id: str, *, hours: int = 1) -> int:
-    """Tokens this user minted inside the window — the mint rate-limit input."""
-    if not user_id:
-        return 0
+def _count_recent_trade_share_tokens(conn, user_id: str, *, hours: int = 1) -> int:
+    """Tokens this user minted inside the window — the mint rate-limit input.
+    Runs on the mint's own connection, inside its transaction."""
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     tst = trade_share_tokens_table
-    with engine.connect() as conn:
-        n = conn.execute(
-            select(func.count())
-            .select_from(tst)
-            .where(and_(tst.c.created_by == user_id, tst.c.created_at >= cutoff))
-        ).scalar()
+    n = conn.execute(
+        select(func.count())
+        .select_from(tst)
+        .where(and_(tst.c.created_by == user_id, tst.c.created_at >= cutoff))
+    ).scalar()
     return int(n or 0)
 
 

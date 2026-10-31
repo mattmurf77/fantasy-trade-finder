@@ -68,6 +68,10 @@ export interface ResolveArgs {
    *  too, so there is no shape that is safely a pick and not a player. */
   hasPickAssets: boolean;
   signal?: AbortSignal;
+  /** Cap on the package mint request (apiRequest's per-call timeout);
+   *  omitted = the default 15 s. shareLikedTrade sets it after a failed
+   *  trade mint (TRADE_SHARE_PACKAGE_TIMEOUT_MS). */
+  timeoutMs?: number;
   /** Injected so this module has no import cycle with api/events.ts.
    *  Called once per mint attempt that REACHED the server (plus the demo
    *  short-circuit), never on a cache hit. */
@@ -141,7 +145,12 @@ export async function resolveShareUrl(args: ResolveArgs): Promise<ResolvedShareU
     if (hit) return hit;
 
     // 7. Mint. createSharePackage never throws (api/calc.ts).
-    const res = await createSharePackage(args.giveIds, args.receiveIds, args.signal);
+    const res = await createSharePackage(
+      args.giveIds,
+      args.receiveIds,
+      args.signal,
+      args.timeoutMs,
+    );
     args.onOutcome?.(res.outcome, args.giveIds.length, args.receiveIds.length);
     if (res.outcome !== 'ok') return floor;
 
@@ -161,6 +170,16 @@ export async function resolveShareUrl(args: ResolveArgs): Promise<ResolvedShareU
 
 /** How long a share tap waits for the trade-token mint before falling back. */
 export const TRADE_SHARE_MINT_TIMEOUT_MS = 2_000;
+
+/** The package rung's cap when it runs after a failed trade mint, so a
+ *  matched-trade share waits at most 2 s + 1.5 s = 3.5 s before the ?ref=
+ *  floor (before O8 that path made no request at all). 1.5 s is the
+ *  smallest bound that still fits a healthy mint: one small POST (a count
+ *  and an insert server-side; qa/README.md's warm API budget is p95 under
+ *  500 ms) plus a fresh TLS handshake on a slow cellular link, about 3x
+ *  headroom. After a mint TIMEOUT the link is already bad, and a longer
+ *  wait only delays the floor. */
+export const TRADE_SHARE_PACKAGE_TIMEOUT_MS = 1_500;
 
 /** A mutual match's share landing (build O8): <base>/s/trade/<token>, where
  *  the token is minted server-side by POST /api/share/trade. The client

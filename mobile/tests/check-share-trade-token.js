@@ -22,13 +22,19 @@
 //      The share sheet waits on that mint, so resolveTradeShareUrl must give
 //      up after TRADE_SHARE_MINT_TIMEOUT_MS (2 s) and return null — EXECUTED:
 //      the function is lifted out and run against a mint that never answers.
+//      When the mint fails, the package rung that follows is capped at
+//      TRADE_SHARE_PACKAGE_TIMEOUT_MS (1.5 s; mint + package ≤ 4 s) through
+//      apiRequest's timeoutMs (2k-2m). The shared token URL carries
+//      ?ref=<sharer> (2n, EXECUTED), and shareLikedTrade is the only client
+//      path to the mint (2o), so 2n covers every client.
 //   3. rewriteUniversalPath maps /s/trade/<anything> to app/matches with NO id
 //      segment (the token is not a match id), keeping the query suffix.
 //      EXECUTED: the function is lifted out of deepLinks.ts and run.
 //
-// HONEST LABEL: 1 and 2a-2g prove the absence/presence of exact wirings by
-// pattern, not runtime behaviour; 2h-2j and 3 are behavioural. Runtime proof
-// is the operator TestFlight checklist in docs/plans/share-link-tokens/scope.md.
+// HONEST LABEL: 1, 2a-2h, 2k, 2m and 2o prove the absence/presence of exact
+// wirings by pattern, not runtime behaviour; 2i-2j, 2l, 2n and 3 execute the
+// lifted code. Runtime proof is the operator TestFlight checklist in
+// docs/plans/share-link-tokens/scope.md.
 //
 // Run: node tests/check-share-trade-token.js   (npm run test:share-trade-token)
 
@@ -126,6 +132,94 @@ function braceBody(src, from) {
   const API = stripComments(read('mobile/src/api/share.ts'));
   assert(/apiRequest<[\s\S]*?>\('\/api\/share\/trade'/.test(API) && /match_id: matchId/.test(API),
     '2g. api/share.ts posts {match_id} to /api/share/trade');
+
+  // 2l-2m (release-lead P3-3). After a failed trade mint the package rung
+  // runs; before O8 a matched trade made no request at all, so that rung
+  // gets a short cap instead of apiRequest's 15 s default.
+  const pkgAt = flat.indexOf('await resolveShareUrl(');
+  const pkgArgs = pkgAt === -1 ? '' : braceBody(flat, pkgAt) || '';
+  const tm = pkgArgs.match(/timeoutMs: ([^,]+),/);
+  let capped = null;
+  let uncapped = 'unset';
+  if (tm) {
+    try {
+      // eslint-disable-next-line no-new-func
+      const cap = new Function('matchId', 'TRADE_SHARE_PACKAGE_TIMEOUT_MS', `return ${tm[1]};`);
+      capped = cap('42', 1500);
+      uncapped = cap(undefined, 1500);
+    } catch (e) {
+      capped = String(e);
+    }
+  }
+  assert(capped === 1500 && uncapped === undefined,
+    '2l. shareLikedTrade caps the package rung (timeoutMs) when a trade mint was tried, and only then (EXECUTED)',
+    tm ? `matchId set → ${capped}; no matchId → ${uncapped}` : 'no timeoutMs in the resolveShareUrl args');
+  const CALC = stripComments(read('mobile/src/api/calc.ts')).replace(/\s+/g, ' ');
+  const calcAt = CALC.indexOf('export async function createSharePackage(');
+  const calcFn = calcAt === -1 ? '' : CALC.slice(calcAt, CALC.indexOf("'/api/share/package'", calcAt) + 200);
+  assert(/createSharePackage\( ?args\.giveIds, args\.receiveIds, args\.signal, args\.timeoutMs,? ?\)/.test(LINKS)
+      && /timeoutMs\?: number,? ?\): Promise</.test(calcFn)
+      && /\('\/api\/share\/package', \{[^}]*[{,] timeoutMs[,}]/.test(calcFn),
+    '2m. resolveShareUrl forwards timeoutMs to createSharePackage, which passes it to apiRequest');
+
+  // 2n-2o (release-lead P3-4). The token URL carries ?ref=<sharer>, the
+  // attribution every other share link carries. EXECUTED: the `ref` and
+  // `url` expressions are lifted out of shareLikedTrade and run.
+  const refExpr = flat.match(/const ref = ([^;]+);/);
+  const urlExpr = flat.match(/else if \(tradeUrl\) \{ url = ([^;]+);/);
+  let withRef = null;
+  let noUser = null;
+  if (refExpr && urlExpr) {
+    try {
+      // eslint-disable-next-line no-new-func
+      const mkRef = new Function('user', `return ${refExpr[1]};`);
+      // eslint-disable-next-line no-new-func
+      const mkUrl = new Function('tradeUrl', 'ref', `return ${urlExpr[1]};`);
+      const T = 'https://base.example/s/trade/AbC_-1234567890123456Xy';
+      withRef = mkUrl(T, mkRef({ username: 'bo b&x' }));
+      noUser = mkUrl(T, mkRef(null));
+    } catch (e) {
+      withRef = String(e);
+    }
+  }
+  assert(withRef === 'https://base.example/s/trade/AbC_-1234567890123456Xy?ref=bo%20b%26x'
+      && noUser === 'https://base.example/s/trade/AbC_-1234567890123456Xy',
+    '2n. the shared token URL is <server url>?ref=<encoded username> (EXECUTED)',
+    refExpr && urlExpr ? `signed in → ${withRef}; signed out → ${noUser}`
+      : `could not find ${refExpr ? '' : 'const ref '}${urlExpr ? '' : 'the tradeUrl url assignment'}`);
+}
+
+// 2o. shareLikedTrade is the ONLY place a token URL is built, so 2n covers
+// every client. A new caller of the mint (in mobile/src, web/js or
+// extension/) must carry ?ref= too: pin it in 2n's style, then widen this.
+{
+  const callers = [];
+  const scan = (rel) => {
+    const abs = path.join(REPO, rel);
+    if (!fs.existsSync(abs)) return;
+    for (const ent of fs.readdirSync(abs, { withFileTypes: true })) {
+      if (ent.name === 'node_modules' || ent.name.startsWith('.')) continue;
+      const child = path.join(rel, ent.name);
+      if (ent.isDirectory()) scan(child);
+      else if (/\.(ts|tsx|js|jsx|mjs|cjs|html)$/.test(ent.name)) {
+        const src = stripComments(read(child));
+        if (/\/api\/share\/trade\b/.test(src)) callers.push(`${child} (POST /api/share/trade)`);
+        if (/\bcreateTradeShare\(/.test(src)) callers.push(`${child} (createTradeShare)`);
+        if (/\bresolveTradeShareUrl\(/.test(src)) callers.push(`${child} (resolveTradeShareUrl)`);
+      }
+    }
+  };
+  ['mobile/src', 'web/js', 'extension'].forEach(scan);
+  const want = [
+    'mobile/src/api/share.ts (POST /api/share/trade)',
+    'mobile/src/api/share.ts (createTradeShare)',
+    'mobile/src/screens/TradesScreen.tsx (resolveTradeShareUrl)',
+    'mobile/src/utils/shareLinks.ts (createTradeShare)',
+    'mobile/src/utils/shareLinks.ts (resolveTradeShareUrl)',
+  ];
+  assert(JSON.stringify(callers.sort()) === JSON.stringify(want),
+    '2o. the trade mint is reached only through shareLikedTrade (no web/js or extension caller)',
+    callers.sort().join(' | '));
 }
 
 // ── 2h-2j. The mint wait is bounded (executed) ───────────────────────────
@@ -137,6 +231,14 @@ async function checkMintIsBounded() {
   const c = SRC.match(/export const TRADE_SHARE_MINT_TIMEOUT_MS = ([0-9_]+);/);
   assert(c !== null && Number(c[1].replace(/_/g, '')) === 2000,
     '2h. TRADE_SHARE_MINT_TIMEOUT_MS is 2000 ms', c ? c[1] : 'constant not found');
+  // P3-3: mint + package rung, the worst wait before the ?ref= floor, stays
+  // well under 5 s (before O8 a matched-trade share made no request).
+  const p = SRC.match(/export const TRADE_SHARE_PACKAGE_TIMEOUT_MS = ([0-9_]+);/);
+  const pkgMs = p ? Number(p[1].replace(/_/g, '')) : NaN;
+  const mintMs = c ? Number(c[1].replace(/_/g, '')) : NaN;
+  assert(pkgMs === 1500 && mintMs + pkgMs <= 4000,
+    '2k. TRADE_SHARE_PACKAGE_TIMEOUT_MS is 1500 ms; mint + package rung ≤ 4 s before the ?ref= floor',
+    `package ${p ? p[1] : 'constant not found'}, mint ${mintMs}`);
   const at = SRC.indexOf('export async function resolveTradeShareUrl(');
   const body = at === -1 ? null : braceBody(SRC, SRC.indexOf(')', at));
   let make = null;

@@ -1069,9 +1069,10 @@
     //  the form for that platform's panel:
     //    preview → POST /api/entry/platform (no team_id): the link route's
     //              choose_team shape; nothing persisted, no session yet
-    //    claim   → POST /api/entry/platform (team_id): mints a session for a
-    //              DETERMINISTIC entry:<platform>:… user id (re-claiming the
-    //              same team recovers the same boards)
+    //    claim   → POST /api/entry/platform (team_id): mints a session for
+    //              the proven identity — an acct_* account key, or the bound
+    //              Sleeper id when that identity is linked to a Sleeper user
+    //              (re-claiming the same team recovers the same boards)
     //    import  → the canonical POST /api/{espn,mfl}/link under the fresh
     //              token — no import logic is duplicated here
     //  Then the ordinary league flow takes over: showLeagueScreen lists the
@@ -1095,9 +1096,12 @@
     let _entryMflPass     = '';
     const _PLATFORM_LABEL = { sleeper: 'Sleeper', espn: 'ESPN', mfl: 'MyFantasyLeague' };
 
-    // Entry ids are minted as entry:<platform>:… (D-164). The prefix is how
-    // every Sleeper-only path in this file routes entry users to the
-    // platform snapshot instead.
+    // Legacy entry ids look like entry:<platform>:… (D-164). The proof-based
+    // mint now returns an acct_* key, or the bound Sleeper id, and this
+    // prefix test does NOT match either; the web mints none (_entryPost
+    // throws), so it only recognises a user saved by an older session. The
+    // prefix is how every Sleeper-only path in this file routes entry users
+    // to the platform snapshot instead.
     function _isEntryUser(u) {
       return !!(u && String(u.user_id || '').startsWith('entry:'));
     }
@@ -1112,7 +1116,7 @@
     // plain failure because the recovery is different: an entry user's
     // session CANNOT be rebuilt from localStorage — /api/{espn,mfl}/leagues
     // requires a session, and the only way to get one is to re-claim the
-    // team on the landing (deterministic `entry:` ids recover the same
+    // team on the landing (re-claiming the same team recovers the same
     // boards, D-164). Entry sessions are unverified, so they are never
     // server-persisted and die on every restart/deploy — this is the normal
     // end of one, not an edge case.
@@ -1211,14 +1215,16 @@
 
     // Chip-row reveal — mirrors SignInScreen's platformPickerShown: the gate
     // AND ≥2 live platforms (a one-chip "choice" is noise). Per-platform
-    // chips additionally need espn.link / mfl.link; the MFL sign-in block
-    // needs mfl.auth_link and the ESPN "find my leagues" link needs
-    // espn.league_picker (the v2.1 actions 404 without them).
+    // chips additionally need espn.link / mfl.link (ESPN's also needs
+    // espn.signin, the operator's off switch for ESPN sign-in alone; a flag
+    // the server doesn't send reads false, so the chip stays hidden); the MFL
+    // sign-in block needs mfl.auth_link and the ESPN "find my leagues" link
+    // needs espn.league_picker (the v2.1 actions 404 without them).
     function _applyPlatformOptionsFlag() {
       const row = document.getElementById('platform-row');
       if (!row || !window.FTF_FLAG) return;
       const optionsOn = WEB_PLATFORM_ENTRY;
-      const espnOn = optionsOn && window.FTF_FLAG('espn.link');
+      const espnOn = optionsOn && window.FTF_FLAG('espn.link') && window.FTF_FLAG('espn.signin');
       const mflOn  = optionsOn && window.FTF_FLAG('mfl.link');
       const espnChip = document.getElementById('platform-chip-espn');
       const mflChip  = document.getElementById('platform-chip-mfl');
@@ -1259,6 +1265,7 @@
     function selectEntryPlatform(p) {
       if (!['sleeper', 'espn', 'mfl'].includes(p)) return;
       if (p !== 'sleeper' && (!WEB_PLATFORM_ENTRY || !window.FTF_FLAG(`${p}.link`))) return;
+      if (p === 'espn' && !window.FTF_FLAG('espn.signin')) return;
       _entryPlatformSel = p;
       _entryPreview = null;
       for (const id of ['sleeper', 'espn', 'mfl']) {
