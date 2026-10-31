@@ -3,7 +3,7 @@
 **Date:** 2026-10-31
 **Entry point:** direct ask. head-eng, on the operator's "assign out pending backlog work for launch now" (2026-10-31): launch tracker backlog rank 4. Apple guideline 2.2 says betas belong on TestFlight, and reviewers flag "beta" in an App Store binary. Due in release-lead's queue by 11-03 for the 11-06 binary; otherwise it moves to update 1.
 **Builder:** eng-mobile worker for league-eng, branch `build/no-beta-labels` (from `origin/main` @ `63e373e2`)
-**Operator sign-off on waivers:** pending, via head-eng. One waiver, §1 (c).
+**Operator sign-off on waivers:** waived, operator-approved 2026-11-01 (one waiver, §1 (c); recorded via head-eng). This covers the waiver only. Merging still needs the operator's own go in release-lead's session.
 
 ## Contents
 
@@ -44,7 +44,7 @@ Not in scope:
 
 - [ ] **(a) New events specced:** none.
 - [ ] **(b) Existing events cover it:** none. No event fires on these ribbons.
-- [x] **(c) WAIVED, no analytics needed:** a label-text removal on three ribbons. No behaviour, flow or data changes, so there's nothing new to measure.
+- [x] **(c) WAIVED, no analytics needed:** a label-text removal on three ribbons. No behaviour, flow or data changes, so there's nothing new to measure. **Waived, operator-approved 2026-11-01.**
 
 ## 2. Schema & flag scope
 
