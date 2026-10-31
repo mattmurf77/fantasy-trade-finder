@@ -3157,6 +3157,28 @@ grading_cards_table = Table("grading_cards", metadata,
     Index("ix_grading_cards_session", "session_id"),
 )
 
+# Deletion scrub (legal R28.20 (ii), R28.22; backend/deletion_scrub.py): one
+# row per account deletion, inserted in the deletion's own transaction, so a
+# committed deletion always has its scrub. It holds the deleted user's ids and
+# their leagues only until the scrub of other users' decks finishes (legal
+# (ix): deleted then; past 24 h it keeps retrying, up to 30 days, and alerts
+# with a count). The token is random and no mapping to the ids is kept once
+# the row goes. Never exported (its subject is gone) and never logged.
+deletion_scrub_jobs_table = Table("deletion_scrub_jobs", metadata,
+    Column("job_id",           String,  primary_key=True),   # uuid4 hex
+    Column("token",            String,  nullable=False),     # redacted:<uuid4 hex>
+    Column("partner_ids_json", Text,    nullable=False),     # JSON list: the resolved ids
+    Column("league_ids_json",  Text,    nullable=False),     # JSON list, captured at deletion
+    Column("deleted_at",       String,  nullable=False),     # ISO UTC; decks built after are untouched
+    Column("db_version",       Integer, nullable=False, server_default="0"),  # SCRUB_VERSION last run
+    Column("db_done_at",       String),                      # ISO UTC of the last full DB pass
+    Column("model_done_at",    String),                      # ISO UTC; the model store, in the daily tick
+    Column("attempts",         Integer, nullable=False, server_default="0"),
+    Column("claimed_until",    String),                      # ISO UTC lease; NULL = free
+    Column("last_error",       String),                      # an exception class name, never a message
+    Index("ix_deletion_scrub_jobs_deleted", "deleted_at"),
+)
+
 # Default values seeded on first run.  Only inserted if the key doesn't
 # already exist (INSERT OR IGNORE) so manual overrides survive re-deploys.
 _MODEL_CONFIG_DEFAULTS = [

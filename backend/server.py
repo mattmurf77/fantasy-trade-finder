@@ -2946,6 +2946,14 @@ def _cleanup_loop() -> None:
         except Exception:
             log.exception("deck-diagnostic retention failed")
 
+        # The deletion scrub (legal R28.20 (ii)): any job whose DB pass is
+        # due, under its lease (a crash, a raise, or the in-flight grace).
+        try:
+            from . import deletion_scrub as _deletion_scrub
+            _deletion_scrub.run_pending()
+        except Exception as err:      # the class only: a DB error's text quotes its ids
+            log.error("deletion scrub pass failed: %s", type(err).__name__)
+
         # Deck-evidence retention (legal R28.20 (iii)): dark until
         # deck_evidence_retention_days is set; one bounded pass per tick.
         try:
@@ -30318,8 +30326,19 @@ def _daily_tick_steps() -> list:
         S("reengagement",      _daily_tick_reengagement),
         S("replenishment",     _daily_tick_replenishment),
         S("eval_nightly",      _daily_tick_eval_nightly),
+        # Before the refit, never beside it (models-eng #542): the model
+        # store's redaction takes no lock against the refit's append.
+        S("deletion_scrub",    _daily_tick_deletion_scrub),
         S("value_model_refit", _daily_tick_value_model_refit),
     ]
+
+
+def _daily_tick_deletion_scrub(now: datetime):
+    """daily-tick step: the deletion scrub's due DB passes, the model store
+    for every job whose DB pass is current, finished jobs deleted, and the
+    unfinished past 24 h counted at ERROR (legal R28.20 (ii), (ix))."""
+    from . import deletion_scrub as _deletion_scrub
+    return _deletion_scrub.tick(now)
 
 
 def _daily_tick_rookie_monitor(now: datetime):
@@ -33654,6 +33673,10 @@ def delete_account_route():
     except Exception:
         log.exception("delete_account: deletion failed for %s", user_id)
         return jsonify({"error": "deletion_failed"}), 500
+    # The scrub of other users' decks (legal R28.20 (ii)): its job committed
+    # with the deletion; start it off the request. The cleanup loop retries.
+    from . import deletion_scrub as _deletion_scrub
+    _deletion_scrub.kick()
     log.info("delete_account: user %s deleted (%s)", user_id, counts)
     return jsonify({"ok": True, "deleted": counts,
                     "apple_revoked": apple_revoked})
