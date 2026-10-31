@@ -2,7 +2,7 @@
 
 Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md` (no waivers but analytics, a log-only job). Schema: the new table `deletion_scrub_jobs`. No flag; no event; a route's counts and the daily tick's steps change (api-reference). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
 
-- **`backend/tests/test_deletion_scrub.py`, 22 tests:**
+- **`backend/tests/test_deletion_scrub.py`, 24 tests:**
   - **The job:**
     - written in the deletion transaction with a random token, the ids and the leagues, captured before `league_members` goes;
     - none on a rollback;
@@ -11,6 +11,9 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
     - the 6 h grace pass scrubs a row an in-flight deck wrote later;
     - **a partner who left a league before deleting is still scrubbed from its decks:** rows and candidate sets, found by the fallback scan (head-eng 10-31);
     - the scan is bounded per run and resumes from its cursor;
+    - **legal f's trace (10-31):**
+      - another partner's card loses the person's owner inputs (outlooks, sources, preferences, board);
+      - other users' `bakeoff_runs` keep the owner engine's full frozen input, and it loses the person's account fields, in the league and through the scan;
     - no id in any log line.
   - **Stores:**
     - a redacted card takes the token, loses `likes_you`, `standing_offer(_reason)`, `breaker(_shadow)`, `negmem.exempt` and the partner's sides of `fit` / `fit_diag` / `roster_evaluation` / the owner request, and its blended scores are nulled;
@@ -27,7 +30,7 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
     - a finished job is deleted only once `COMPLETE`;
     - the 24 h ERROR line carries counts only;
     - the tick never raises an error's text.
-- **Sabotages, 15/15 red:**
+- **Sabotages, 18 run, 17 red and 1 green by design:**
   - no taste rename;
   - no standing-offer token;
   - the match valuation kept;
@@ -42,7 +45,11 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
   - no grace pass;
   - an error's text logged;
   - no fallback scan;
-  - the scan cursor not kept.
+  - the scan cursor not kept;
+  - owner inputs redacted only on the person's own cards;
+  - outlooks kept;
+  - no `bakeoff_runs` scan.
+  - **Green, by design:** removing `bakeoff_runs`' league pass. The fallback scan covers every row the league pass does, so each league pass is a fast path, never the only one.
 - **Updated tests:**
   - `test_daily_tick_route.py`: ten steps.
   - `test_purge_entry_users.py`: `user_taste.attr`, the derived `partner:<id>` key, listed as not a user column.
