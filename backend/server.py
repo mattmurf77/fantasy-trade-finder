@@ -27197,6 +27197,12 @@ def league_format_stats_route():
 # Sleeper API Proxy Routes
 # ---------------------------------------------------------------------------
 
+def _sleeper_upstream_unavailable(code: int) -> bool:
+    """True when a Sleeper HTTPError means "Sleeper can't serve us right now"
+    (5xx outage, 429 rate limit, 403 block) rather than "not found" (M10)."""
+    return code >= 500 or code in (403, 429)
+
+
 @app.route("/api/sleeper/user/<path:username>")
 def sleeper_user(username):
     """Validate a Sleeper username and return basic user info.
@@ -27279,11 +27285,12 @@ def sleeper_user(username):
         return jsonify(data)
 
     except urllib.error.HTTPError as e:
-        # Only a 4xx means the user genuinely doesn't exist. A 5xx is a
-        # Sleeper outage — telling the user "User not found" sends them down
-        # a dead end of retyping a correct username. Surface it as 503 so the
-        # client can show a "try again shortly" message instead.
-        if e.code >= 500:
+        # Only a plain 4xx means the user genuinely doesn't exist. A 5xx,
+        # 429 or 403 is Sleeper being unavailable to us — telling the user
+        # "User not found" sends them down a dead end of retyping a correct
+        # username. Surface it as 503 so the client can show a "try again
+        # shortly" message instead.
+        if _sleeper_upstream_unavailable(e.code):
             log.warning("  Sleeper HTTPError %s — upstream unavailable", e.code)
             return jsonify({"error": "sleeper_unavailable",
                             "message": "Sleeper is unavailable — try again shortly."}), 503
@@ -27381,9 +27388,9 @@ def sleeper_rosters(league_id):
         log.info("  returned %s rosters", len(data) if isinstance(data, list) else "non-list")
         return jsonify(data or [])
     except urllib.error.HTTPError as e:
-        # 4xx → the league doesn't exist on Sleeper; 5xx → Sleeper outage.
-        # Don't leak the raw upstream error string to the client.
-        if e.code >= 500:
+        # 4xx → the league doesn't exist on Sleeper; 5xx/429/403 → Sleeper
+        # unavailable. Don't leak the raw upstream error string to the client.
+        if _sleeper_upstream_unavailable(e.code):
             log.warning("  rosters: Sleeper %s — upstream unavailable", e.code)
             return jsonify({"error": "sleeper_unavailable",
                             "message": "Sleeper is unavailable — try again shortly."}), 503
