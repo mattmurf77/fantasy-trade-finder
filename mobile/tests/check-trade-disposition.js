@@ -46,6 +46,16 @@ const P = { trade_id: 'p', league_id: 'L', opponent_user_id: 'B', give_player_id
 const Q = { ...P, trade_id: 'q', give_player_ids: ['q'] };
 const R = { ...P, trade_id: 'r', give_player_ids: ['s'] };
 
+// A check that awaits something that never settles would let the event loop
+// drain and node exit 0 mid-run: an unfinished run fails instead.
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-trade-disposition did not finish (a check hung): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 (async () => {
   let body;
   let response = { ok: true, passed: false };
@@ -354,6 +364,7 @@ const R = { ...P, trade_id: 'r', give_player_ids: ['s'] };
     assert.match(screen, /if \(passWriteStatus\(attempt\.state\) === 'committed'\) return;/);
     assert.match(screen, /key=\{`\$\{topCard\.trade_id\}:\$\{passRetryVersion\}`\}/);
   });
+  finished = true;
   console.log(`Trade disposition: ${passed} passed, ${failed} failed.`);
   process.exitCode = failed ? 1 : 0;
 })();
