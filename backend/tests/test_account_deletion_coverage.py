@@ -216,6 +216,18 @@ def test_referral_counterparties_and_public_league_grids_are_preserved(engine):
     assert len(history) == 1 and history[0]["owner_user_id"] is None
 
 
+def test_trade_share_tokens_minted_by_the_user_are_deleted(engine):
+    """Build O8: a share link dies with its sharer's account (every alias);
+    the counterparty's own tokens for the same match survive."""
+    with engine.begin() as conn:
+        for uid in (UID, ALIAS, OTHER):
+            seed(conn, db.trade_share_tokens_table, uid,
+                 token="synthetic-token-" + uid, match_id=1, created_by=uid)
+    counts = accounts.delete_user_data(UID)
+    assert counts["trade_share_tokens_deleted"] == 2
+    assert [r["created_by"] for r in rows(engine, db.trade_share_tokens_table)] == [OTHER]
+
+
 def test_route_evicts_bound_alias_and_account_sessions(engine, monkeypatch):
     from backend import server
     sessions = {
