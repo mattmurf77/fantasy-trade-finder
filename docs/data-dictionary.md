@@ -2110,7 +2110,7 @@ Calibration adds **no** event (scope waiver, plan D9); the tables above are the 
 
 The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scrub.py`; scope `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md`).
 - **Lifecycle:** one row per account deletion, inserted in `accounts._delete_user_data`'s own transaction, so a committed deletion always has its scrub and a rolled-back one has none. The row is deleted when the scrub of other users' decks is done (legal (ix)).
-- **Retention:** it's kept while any scrub stage is unbuilt (`deletion_scrub.COMPLETE` false), so later stages re-run it (`SCRUB_VERSION`). Past 24 h unfinished, it's retried and counted at ERROR, up to 30 days, and never abandoned.
+- **Retention:** it's deleted once its grace pass and the model store are done (`deletion_scrub.COMPLETE` since stage 3; before that, rows were kept so later stages re-ran them through `SCRUB_VERSION`). Past 24 h unfinished, it's retried and counted at ERROR, up to 30 days, and never abandoned.
 - **Privacy:** it holds the deleted user's ids only for that time. It's never exported (its subject is gone), and no id from it is ever logged.
 
 | Column | Type | Notes |
@@ -2126,6 +2126,7 @@ The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scr
 | `attempts` | int, not null, default 0 | Lease claims |
 | `claimed_until` | str | ISO UTC lease (10 min), taken by compare-and-swap; NULL = free |
 | `last_error` | str | The last failure's exception class, never its message |
+| `partner_names_json` | text (JSON) | `{league_id: [display names, usernames]}`, read before the deletion removes the person's `league_members` rows: a Calibration card names its partner by display name. As private as the ids, and never logged. Added to existing tables at boot (`_migrate_db`) |
 | `scan_json` | text (JSON) | An unfinished DB pass's state: the league pass's counts, which fallback scan is running, and its keyset cursor. The next run resumes from it. NULL between passes |
 
 Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.
@@ -2143,6 +2144,11 @@ Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.
 - **`trade_page_store` (stage 2):**
   - **A redacted page card:** its target takes the token and the placeholder name, and it loses `likes_you`, `standing_offer_reason`, `reasons`, `rationale`, `fit`, `breaker` and `match_context.opponent_outlook`. `mismatch_score` / `composite_score` are nulled, and it never serves again (withdrawn at serve).
   - **`evidence_blob`:** its rows and candidate set are redacted as above, `trade_impressions[].target_user_id` is NULLed, and `run_meta.filter_inputs` is redacted as a pack run.
+- **Stage 3:**
+  - Other users' Calibration sessions take the token in their hidden `source_json`, and the person's cards take the placeholder as `partner_name` (by the source's current arm, or by name; grades kept).
+  - A diagnostic past 30 days naming them is deleted.
+  - A redacted page card also loses its `narrative`.
+  - A redacted value_core card loses `scores.outlook`, `scores.priority` and `effective`.
 - **Kept:** hashes (`trade_hash` and the rest, legal (viii)).
 - **In the deletion transaction:** other users' `user_taste` `partner:<id>` rows become one `partner:<token>` row each (two aliases' weights summed). Standing offers' `team_user_ids` take the token. `trade_matches.match_valuation_json` is cleared when either side is the person.
 

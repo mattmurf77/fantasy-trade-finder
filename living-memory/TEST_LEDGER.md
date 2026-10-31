@@ -1,3 +1,31 @@
+## 2026-10-31 — Deletion scrub stage 3: Calibration cards, overdue diagnostics, value_core's blended scores, the narrative; COMPLETE
+
+Gates: the scope block `scope-deletion-scrub.md` (legal R28.22 f's trace, c3 #7 and #13); `SCRUB_VERSION` 3, `COMPLETE`. Schema: `deletion_scrub_jobs.partner_names_json`, added to existing tables at boot. No flag, no event, no route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The trace:** `features.presentation` is partner-free (indexes and player counts). The narrative's second sentence frames a card in the partner's declared window, so it goes from a redacted page card. value_core's `outlook = (viewer + partner) / 2` with the viewer's side kept fails the solve-back test, so `scores.outlook`, `scores.priority` and `effective` go. `value` and `rank` stay.
+- **`backend/tests/test_deletion_scrub_stage3.py`, 8 tests:**
+  - the person's names per league are captured at deletion;
+  - the narrative goes from a redacted page card;
+  - value_core's blended scores go and `value` and `rank` stay;
+  - other users' Calibration cards take the placeholder, by the source's current arm and by name, and the source is tokenized, with grades kept;
+  - a session in a league the person left is found by the fallback scan, and its value-core card is matched by any of their names;
+  - an overdue diagnostic naming them is deleted, and a young one isn't;
+  - a job is deleted only once its grace pass and the model store are done;
+  - boot adds the names column to an existing jobs table.
+- **A real fix the tests found:** with `COMPLETE` on, `_finish` would have deleted a job before its grace pass ran. It now requires `db_done_at` at or past the grace time. Two stage-1 tests were updated for `COMPLETE`.
+- **Sabotages, 10/10 red:**
+  - narrative kept;
+  - value_core scores kept;
+  - names not captured;
+  - no provenance match;
+  - no grading scan;
+  - no diagnostics scan;
+  - the diagnostics age ignored;
+  - finish before the grace pass;
+  - no boot migration;
+  - a left league's names unused.
+- **Suites:** the three scrub files, 44 passed.
+
 ## 2026-10-31 — Deletion scrub stage 2: packs through the codec, the cached writer state, the page store (legal R28.22, G-a1 to G-a3)
 
 Gates: the scope block `scope-deletion-scrub.md` §0.3 (head-eng's ruling 2, 10-31); `SCRUB_VERSION` 2. No schema change past stage 1's table, no flag, no event, no route contract change; one serve rule (a redacted page card is withdrawn). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

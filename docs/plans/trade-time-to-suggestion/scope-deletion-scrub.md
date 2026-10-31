@@ -49,7 +49,7 @@
   - **DB phase:** every store in §0.2, first the league pass, then the fallback scans. It runs in a background thread the deletion route kicks, and the cleanup loop retries any row past its lease and resumes an unfinished scan. The lease is a CAS claim on `claimed_until`, so two instances during a deploy never run one job twice.
   - **Model phase:** `eval.redaction.redact_model_store(tokens)`, in the daily-tick step `deletion_scrub`, placed **before** `value_model_refit` (models-eng 8b, #542). It runs only for jobs whose DB pass is current, so the refit trains on scrubbed rows. A test pins the order. A raise leaves the row for the next tick.
   - **The DB phase runs once more after `IN_FLIGHT_GRACE` (6 h),** from the cleanup loop. That catches rows a deck already in flight at deletion wrote later from its build-time snapshot (§0.4).
-  - **Until every stage is built (`COMPLETE`), finished rows are kept,** so a later stage's `SCRUB_VERSION` re-runs them. legal (ix) is about finishing the scrub, and the scrub isn't finished until then.
+  - **Until every stage was built, finished rows were kept,** so a later stage's `SCRUB_VERSION` re-ran them. Stage 3 sets `COMPLETE`: a row is deleted once its grace pass and the model store are done (legal (ix)).
 - **Alert:** each tick, if any row is older than 24 h, the log gets `[scrub] unfinished jobs=<n> oldest_h=<h>` at ERROR (counts only). A row older than 30 days isn't abandoned: it keeps retrying and keeps alerting (ix).
 
 ### 0.2 Stores and what each card loses
@@ -68,10 +68,10 @@ The rows to touch are found per captured league and per viewer (the league's mem
 | `trade_page_store` (stage 2) | `pages_blob` `target_user_id` (→ token) and `target_username` (→ the placeholder); `evidence_blob` rows and ghosts, the same as `deck_impressions`; its candidate set; `trade_impressions[].target_user_id` → NULL (as deletion does to the table); `run_meta.filter_inputs` the same as the pack run; any other id mention → token | a redacted page card loses `likes_you`, `standing_offer_reason`, `reasons`, `rationale`, `fit`, `breaker` and `match_context.opponent_outlook`; the narrative is stage 3's trace | `mismatch_score`, `composite_score` (and the row's scores) |
 | `user_taste` (other users) | attribute `partner:<id>` → `partner:<token>`; two aliases of the person merge into one row (weights summed). In the deletion transaction | — | — |
 | `standing_offers` (other users) | `team_user_ids`, in the deletion transaction | — | — |
-| `grading_cards` (other users) | — | `trade_json.partner_name` → placeholder (stage 3: the cards hold a display name, not an id, so finding them needs the trace) | — |
+| `grading_cards` / `grading_sessions` (other users; stage 3) | the session's hidden `source_json` and the cards' `arms_json` | `trade_json.partner_name` → placeholder when the card is the person's. That's either when the source's current arm lists the card with their id, or when it names them by one of their names. Their names per league are captured at deletion (`partner_names_json`), and in a league they had left, where the source shows them, any of their names count. Grades are kept | — |
 | `trade_matches` | ids are already the placeholder today | `match_valuation_json` cleared whole when either side is the person, in the deletion transaction (it holds user_a's own board as the viewer and user_b's as the partner; the `trade_proposals.valuation_json` precedent) | — |
 | model store | E-b3 (`redact_model_store`) | — | — |
-| `deck_diagnostic_snapshots` | — | stage 3: rows older than 30 days are deleted by the scrub (they expire at 14 days today) | — |
+| `deck_diagnostic_snapshots` (stage 3) | — | a row past 30 days (a purge that fell behind) naming them is deleted; younger ones go with the 14-day purge, inside legal's 30 days | — |
 
 Already handled by deletion today, untouched: `trade_proposals`, `trade_impressions`, `bad_trade_flags` (NULL), `prepared_trade_*` (deleted), `trade_matches` ids.
 
@@ -110,6 +110,7 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
 | `surplus_margin` (= `mismatch_score`) | harmonic mean of `fit.you` / `fit.them` (`trade_gen_fit.py:470-472`); v2 `user_gain` / `opp_gain` | `fit.you` (the viewer's) | **FAILS:** `them` solves from `you` and the mean. **Nulled** (legal's list) |
 | `base_score` (= `composite_score`) and `fit.aggregate` | `aggregate_raw = you_raw + them_raw` on fit cards (`trade_gen_fit.py:475`, `:778-788`); on a liked card, the likes boost sets it to the deck's max + 1.0 (`server.py:8319`) | `fit.you` | **FAILS, both:** `them = aggregate − you`, and the +1.0 over the deck's max encodes the like. **Both go:** `base_score` nulled, `fit.aggregate` removed |
 | `final_score` | `base × propensity × fatigue × taste × diversity` (`server.py:9300-9328`, the post-multiplier key) | `propensity`, `taste_pref_*` | **FAILS:** with the stored multipliers it recovers `base_score` (fatigue is 1 on most cards). **Nulled** |
+| value_core `scores.outlook`, `scores.priority`, `effective` (stage 3) | `outlook = (viewer + partner) / 2` (`value_core/ranking.py:115-118`); `priority` and `effective` are built from it with the weights | `detail.outlook.viewer`, `scores.value`, `scores.rank` | **FAIL:** the partner's outlook score solves back. **Removed** on a redacted card; `value` and `rank` (market, the viewer's own board) stay |
 | `propensity` | the Thompson multiplier the viewer's sampler drew (`server.py:9206`) | — | **keep:** the viewer's own sampling, with no partner input |
 
 **Consequence for eval** (models-eng and models-lead, G-a5): a redacted card's three scores are null in every store. Replay already counts redacted cards apart (G-a4 to G-a6). head-eng was told 10-31 that `base_score` and `final_score` fail, where the routing expected them kept. If Eng wants to keep either, it goes to legal; until then they're nulled.
@@ -171,6 +172,6 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
 - **Staging, three PRs:**
   1. the job, the deletion hook, the runner and tick, rows, candidate sets, the side tables (`user_taste`, `standing_offers`, `trade_matches`) and the model store;
   2. packs through the codec, the CAS fix, the page store and the in-flight pass;
-  3. the traced items (f), `grading_cards` and diagnostics. It sets `COMPLETE`, so finished jobs are deleted from then on.
+  3. the traced items (f), `grading_cards` and diagnostics (built: #559's follow-up). It sets `COMPLETE`. The trace found `features.presentation` partner-free (indexes and player counts only); the narrative goes from a redacted page card, and value_core's blended scores go (§1.3).
   - Packs and the page store are empty in prod until the flip (`trade.packed_evidence` off). PR 2 lands before the flip.
 - Express lane declared by the operator? No.
