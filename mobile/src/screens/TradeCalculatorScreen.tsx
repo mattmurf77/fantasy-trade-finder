@@ -29,7 +29,7 @@ import {
 } from '../api/calc';
 import TradeSide from '../components/TradeSide';
 import ConsensusVerdictCard from '../components/ConsensusVerdictCard';
-import ShareTradeImage, { type ShareAsset } from '../components/ShareTradeImage';
+import ShareTradeImage, { SHARE_VALUE_LINE, type ShareAsset } from '../components/ShareTradeImage';
 import SuggestionCard from '../components/SuggestionCard';
 import PlayerPickerModal from '../components/PlayerPickerModal';
 import Toast from '../components/Toast';
@@ -560,14 +560,9 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
       `Trade idea (DTF Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
       `Side A: ${names(liveSendIds)}`,
       `Side B: ${names(liveReceiveIds)}`,
-      evalQuery.data
-        ? `Consensus: ${Math.round(evalQuery.data.give_value).toLocaleString()} vs ${Math.round(evalQuery.data.receive_value).toLocaleString()}${
-            evalQuery.data.point_ratio !== null
-              ? ` (ratio ${Math.round(evalQuery.data.point_ratio * 100)}%)`
-              : ''
-          }`
-        : '',
-      evalQuery.data?.verdict ? `Verdict: ${evalQuery.data.verdict}` : '',
+      // C2 (head-bizops): a share publishes no verdict, ratio or totals —
+      // the package and its label only (check-share-text).
+      SHARE_VALUE_LINE,
     ];
     // S7 PRD-01 (growth.share_landing): shares carry a landing URL with
     // ?ref= attribution.
@@ -638,16 +633,6 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
         // #277/#280 — share card matches the on-screen TradeSide labels.
         tier: tierFor(liveBoard, p),
       }));
-  const liveVerdictLine = (d: { verdict: string | null; favors: string | null }) =>
-    d.verdict
-      ? `Verdict: ${d.verdict}` +
-        (d.favors === 'give'
-          ? ' · Side A sends more'
-          : d.favors === 'receive'
-          ? ' · Side B sends more'
-          : '')
-      : 'Package value';
-
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       {/* S3 PRD-03 — Clear-trade Undo toast (only ever set flag-on). */}
@@ -1036,9 +1021,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                 receiveTitle="Side B sends"
                 sendAssets={liveShareAssets(liveSendIds)}
                 receiveAssets={liveShareAssets(liveReceiveIds)}
-                sendTotal={evalQuery.data.give_value}
-                receiveTotal={evalQuery.data.receive_value}
-                verdictLine={liveVerdictLine(evalQuery.data)}
+                verdictLine={SHARE_VALUE_LINE}
                 giveIds={liveSendIds}
                 receiveIds={liveReceiveIds}
                 surface="calc_live"
@@ -1049,8 +1032,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                   `Trade idea (DTF Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
                   `Side A: ${liveSendIds.map((id) => livePlayerById[id]?.name ?? id).join(', ')}`,
                   `Side B: ${liveReceiveIds.map((id) => livePlayerById[id]?.name ?? id).join(', ')}`,
-                  `Consensus: ${Math.round(evalQuery.data.give_value).toLocaleString()} vs ${Math.round(evalQuery.data.receive_value).toLocaleString()}`,
-                  liveVerdictLine(evalQuery.data),
+                  SHARE_VALUE_LINE,
                 ].join('\n')}
               />
             ) : null}

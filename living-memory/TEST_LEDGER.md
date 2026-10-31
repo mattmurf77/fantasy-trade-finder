@@ -1,3 +1,15 @@
+## 2026-10-31 — C2: shared trades state "Package value" only (remove-only share text)
+
+Gates: the scope block `docs/plans/share-text-c2/scope.md`. head-bizops's decision under the launch-roadmap approval, routed by head-eng for the 11-06 binary. Client copy removal only: no route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture. The evidence is the structural guard plus the TestFlight checklist in the scope (§3).
+
+- **`mobile/tests/check-share-text.js` (`npm run test:share-text`), 53 checks pass:**
+  - `SHARE_VALUE_LINE` is "Package value";
+  - the share image has no TOTAL row and takes no totals;
+  - in each `<ShareTradeImage … />` and the calculator's `shareTrade` text, no "(ratio ", "Verdict: ", win / board line, "Consensus: " / "Consensus verdict|read", "sends more", or verdict function remains, and each states `SHARE_VALUE_LINE`.
+  - **Against main's share code it fails 19.**
+- **Suites:** all 135 `mobile/tests/check-*.js` pass; `tsc --noEmit` is clean.
+- **TestFlight:** the operator's 5-step checklist, on the 11-06 binary.
+
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
 Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

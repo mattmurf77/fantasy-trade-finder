@@ -66,6 +66,11 @@ export interface ShareAsset {
   tier?: Tier | null;
 }
 
+/** C2 (head-bizops, under the launch-roadmap approval): the one line a shared
+ *  trade states, on the image and in the text, in every state. The existing
+ *  label; no new copy. */
+export const SHARE_VALUE_LINE = 'Package value';
+
 interface Props {
   /** e.g. "The Big League · SF TEP" or "Trade idea · 1QB PPR". */
   caption: string;
@@ -73,9 +78,10 @@ interface Props {
   receiveTitle: string;
   sendAssets: ShareAsset[];
   receiveAssets: ShareAsset[];
-  sendTotal: number;
-  receiveTotal: number;
-  /** One-line verdict, e.g. "Win–win by both boards" or "Verdict: fair". */
+  /** The card's one line under the sides: SHARE_VALUE_LINE. C2
+   *  (head-bizops): a shared card states no verdict, win, board read, ratio
+   *  or totals; an in-league line would publish a read of the partner's
+   *  board (privacy §3). */
   verdictLine: string;
   /** Plain-text share used when image capture fails (and on Android). */
   fallbackText: string;
@@ -198,7 +204,7 @@ export default function ShareTradeImage(props: Props) {
     };
   }, [phase, doCapture]);
 
-  const sideBlock = (title: string, assets: ShareAsset[], total: number) => (
+  const sideBlock = (title: string, assets: ShareAsset[]) => (
     <View style={styles.side}>
       <Text style={styles.sideTitle}>{title}</Text>
       {assets.map((a) => (
@@ -208,9 +214,8 @@ export default function ShareTradeImage(props: Props) {
             {a.name}
           </Text>
           {/* #277/#280 — per-player rows carry the tier label; picks keep
-              the numeric value (a pick's name already reads as a rung).
-              Package TOTALS below stay numeric — a sum of tiers is
-              meaningless. */}
+              the numeric value (a pick's name already reads as a rung). No
+              package TOTAL row (C2: a shared card states no totals). */}
           {a.tier ? (
             // TierBadge hardcodes alignSelf:'flex-start'; re-center it in
             // this vertically-centered row.
@@ -222,10 +227,6 @@ export default function ShareTradeImage(props: Props) {
           )}
         </View>
       ))}
-      <View style={styles.totalRow}>
-        <Text style={styles.totalLabel}>TOTAL</Text>
-        <Text style={styles.totalValue}>{Math.round(total).toLocaleString()}</Text>
-      </View>
     </View>
   );
 
@@ -244,9 +245,9 @@ export default function ShareTradeImage(props: Props) {
       <View style={styles.offscreen} pointerEvents="none">
         <View ref={shotRef} collapsable={false} style={styles.card}>
           <Text style={styles.caption}>{props.caption}</Text>
-          {sideBlock(props.sendTitle, props.sendAssets, props.sendTotal)}
+          {sideBlock(props.sendTitle, props.sendAssets)}
           <View style={styles.divider} />
-          {sideBlock(props.receiveTitle, props.receiveAssets, props.receiveTotal)}
+          {sideBlock(props.receiveTitle, props.receiveAssets)}
           <Text style={styles.verdict}>{props.verdictLine}</Text>
           {/* P1-1 — the footer mirrors the server's own OG card footer
               (backend/og_image.py _draw_footer) so the two artifacts read
@@ -286,15 +287,6 @@ const styles = StyleSheet.create({
   assetName: { ...type.bodySm, color: chalk.base, flex: 1 },
   assetValue: { ...type.data, color: chalk.base },
   tierSlot: { alignSelf: 'center' },
-  totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    borderTopWidth: 1,
-    borderTopColor: ink.line,
-    paddingTop: space.xs,
-  },
-  totalLabel: { ...type.label, color: chalk.dim },
-  totalValue: { ...type.data, color: chalk.base },
   divider: { height: 1, backgroundColor: ink.line },
   verdict: { ...type.title, color: chalk.base, textAlign: 'center' },
   // The card's own gap is space.md; the wordmark and the URL are one block,
