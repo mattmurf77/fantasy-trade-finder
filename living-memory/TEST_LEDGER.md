@@ -37,6 +37,24 @@ Gates: the scope block `scope-deletion-scrub.md` §0.3 (head-eng's ruling 2, 10-
   - **the full backend suite** at `3e7dcf3e`: 10,207 passed, 2 skipped, 0 failed;
   - after stage 1's `bakeoff_runs` update was merged in (`77d55a47`): both scrub files (36) and every evidence, page-store and deletion suite, 1,442 passed.
 
+## 2026-10-31 — Deletion scrub: #557 re-QA notes (GO with notes)
+
+Gates: release-lead's #557 re-QA @ `a241e8f0` (GO with notes; all 3 P1s closed end to end on SQLite and PG). No schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P2-2:** bakeoff rows are read in batches capped at 20 rows and at 8 MB (`_bakeoff_batches`, by the columns' length; one oversized row is a batch of its own). Every redaction batch, and every viewer pass over candidate sets, renews the lease, so a 21.7 MB page on a small Postgres can't outlast it.
+- **P3s:**
+  - a pass that ran every store but left poison rows (`row_failures`) still lets the model store go, since it needs only the ids;
+  - failures are counted once per run, and named as failed row redactions (a row can fail in the league pass and the scan both);
+  - QA7 is pinned: a lease lost after the run's last renew makes the done write mark nothing.
+- **Not here:** the offline `bilateral_revision_benchmark`'s KeyError on a redacted member's missing `elo` is models-eng's (G-a4), and was flagged to them.
+- **Tests:** `test_deletion_scrub.py`, 35 passed.
+- **Sabotages, 5/5 red:**
+  - the done write not a CAS;
+  - no byte cap;
+  - no renew per batch;
+  - poison blocking the model store;
+  - failures double-counted.
+
 ## 2026-10-31 — Deletion scrub: #557 QA (NO-GO, 3 P1s) answered
 
 Gates: release-lead's #557 QA @ `cbbb80f3`. No new table, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
