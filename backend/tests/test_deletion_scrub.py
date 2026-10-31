@@ -650,3 +650,69 @@ def test_the_cleanup_step_kick_and_its_thread_log_the_class_only(engine, monkeyp
                         "[scrub] kicked pass failed: RuntimeError",
                         "deletion scrub start failed: RuntimeError"]
     assert not any(DEL in r.getMessage() for r in caplog.records)
+
+
+# ── #557 re-QA notes ────────────────────────────────────────────────────────
+
+def test_a_run_whose_lease_was_taken_before_its_done_write_writes_nothing(engine, monkeypatch):
+    """#557 re-QA QA7: the lease is lost after the run's last renew; the done
+    write is a CAS on it too, so it marks nothing done."""
+    accounts.delete_user_data(DEL)
+    now = datetime.now(timezone.utc)
+    held = scrub._claim_one(now, set())
+    monkeypatch.setattr(scrub._Lease, "renew", lambda self: None)   # the run never notices
+    with engine.begin() as conn:
+        conn.execute(db.deletion_scrub_jobs_table.update().values(claimed_until="9999-01-01"))
+    assert scrub._run_db(held, now) is False
+    row = job(engine)
+    assert (row["db_version"], row["db_done_at"], row["claimed_until"]) == (0, None, "9999-01-01")
+
+
+def test_a_permanent_poison_row_counts_once_per_pass_and_never_blocks_the_model_store(
+        engine, monkeypatch, caplog):
+    from backend.eval import redaction
+    calls = []
+    monkeypatch.setattr(redaction, "redact_model_store", lambda tokens: calls.append(tokens) or 0)
+    real = scrub.redact_features
+
+    def poison(features, ids, token):
+        if features.get("receive_value") == 101.0:
+            raise ValueError("synthetic poison")
+        return real(features, ids, token)
+    with engine.begin() as conn:
+        impression(conn, "c-poison-5", DEL, features=features_for(DEL, receive_value=101.0))
+    monkeypatch.setattr(scrub, "redact_features", poison)
+    accounts.delete_user_data(DEL)
+    caplog.set_level(logging.INFO, logger="trade_finder")
+    now = datetime.now(timezone.utc)
+    scrub.run_pending(now)
+    # One poison row, hit by the league pass and by the scan: 2 failed
+    # redactions, counted once each.
+    assert any("had 2 failed row redactions" in r.getMessage() for r in caplog.records)
+    assert job(engine)["last_error"] == "row_failures"
+    scrub.tick(now)
+    assert len(calls) == 1 and job(engine)["model_done_at"] is not None
+
+
+def test_bakeoff_batches_by_count_and_by_bytes_each_renewing_the_lease(engine, monkeypatch):
+    """#557 re-QA P2-2: a page of megabyte bakeoff rows is read in batches
+    capped by bytes as well as rows, and every batch renews the lease."""
+    with engine.begin() as conn:
+        for run_id, size in (("r1", 10), ("r2", 10), ("r3", 100), ("r4", 10)):
+            conn.execute(insert(db.bakeoff_runs_table).values(
+                run_id=run_id, deck_job_id="d", user_id=VIEWER, league_id=LEAGUE, arm_order="[]",
+                deck_size=1, arms_json="{}", created_at=EARLY,
+                config_json=json.dumps({"partner": DEL, "pad": "x" * size})))
+    # ~52 bytes a small row, ~142 the big one: two small rows fit, the big
+    # one is a batch of its own.
+    monkeypatch.setattr(scrub, "_BAKEOFF_BATCH_BYTES", 120)
+    with engine.connect() as conn:
+        assert scrub._bakeoff_batches(conn, ["r1", "r2", "r3", "r4"]) == [["r1", "r2"], ["r3"], ["r4"]]
+    renewed = []
+
+    class Lease:
+        def renew(self):
+            renewed.append(1)
+    n = scrub._redact_bakeoff_runs(["r1", "r2", "r3", "r4"],
+                                   {"ids": [DEL], "token": "redacted:t", "lease": Lease(), "job_id": "j"})
+    assert n == 4 and len(renewed) == 3

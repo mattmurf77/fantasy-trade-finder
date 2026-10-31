@@ -37,7 +37,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 
 from . import database as db
 from .eval.contract import REDACTED_PARTNER_PREFIX
@@ -355,6 +355,7 @@ def _redact_impressions(impression_ids, job: dict) -> int:
     imp = db.deck_impressions_table
     changed = 0
     for start in range(0, len(impression_ids), _BATCH):
+        _renew(job)
         with db.engine.begin() as conn:
             rows = conn.execute(select(imp.c.impression_id, imp.c.features_json,
                                        imp.c.valuation_json).where(
@@ -486,6 +487,7 @@ def _scrub_candidate_sets(job: dict) -> int:
     with db.engine.connect() as conn:
         pairs = [(v, lg) for lg in job["leagues"] for v in _viewers(conn, lg, ids)]
     for viewer, league_id in pairs:
+        _renew(job)
         with db.engine.begin() as conn:
             for row in conn.execute(select(*_candidate_columns()).where(
                     cs.c.user_id == viewer, cs.c.league_id == league_id,
@@ -583,6 +585,7 @@ def _redact_packs(run_ids, job: dict) -> int:
     t = db.deck_evidence_packs_table
     changed = 0
     for run_id in run_ids:
+        _renew(job)
         for _attempt in range(5):
             with db.engine.begin() as conn:
                 row = conn.execute(select(t).where(t.c.run_id == run_id)).mappings().first()
@@ -676,8 +679,36 @@ def redact_bakeoff_json(value, ids, token: str):
 
 _BAKEOFF_JSON_COLUMNS = ("arms_json", "agreement_json", "groups_json")
 # Bakeoff rows can run to megabytes (#557 QA P2: one 2,000-row page of 2.2 MB
-# rows took 20 s), so they're read and scanned a few at a time.
+# rows took 20 s; a 21.7 MB row is possible), so they're read in batches of at
+# most this many rows and this many bytes, each batch renewing the lease.
 _BAKEOFF_BATCH = 20
+_BAKEOFF_BATCH_BYTES = 8 * 1024 * 1024
+
+
+def _renew(job: dict) -> None:
+    """Renew the job's lease between batches (none in a direct call)."""
+    if job.get("lease") is not None:
+        job["lease"].renew()
+
+
+def _bakeoff_batches(conn, run_ids) -> list[list]:
+    """run_ids grouped into batches by count and by their rows' total size
+    (one row bigger than the byte cap is a batch of its own)."""
+    t = db.bakeoff_runs_table
+    size = sum((func.coalesce(func.length(t.c[c]), 0)
+                for c in ("config_json",) + _BAKEOFF_JSON_COLUMNS), 0)
+    sizes = dict(conn.execute(select(t.c.run_id, size).where(t.c.run_id.in_(list(run_ids)))).all())
+    batches, current, total = [], [], 0
+    for run_id in run_ids:
+        n = sizes.get(run_id, 0) or 0
+        if current and (len(current) >= _BAKEOFF_BATCH or total + n > _BAKEOFF_BATCH_BYTES):
+            batches.append(current)
+            current, total = [], 0
+        current.append(run_id)
+        total += n
+    if current:
+        batches.append(current)
+    return batches
 
 
 def _redact_bakeoff_runs(run_ids, job: dict) -> int:
@@ -685,10 +716,15 @@ def _redact_bakeoff_runs(run_ids, job: dict) -> int:
     t = db.bakeoff_runs_table
     columns = ("config_json",) + _BAKEOFF_JSON_COLUMNS
     changed = 0
-    for start in range(0, len(run_ids), _BAKEOFF_BATCH):
+    batches = []
+    for start in range(0, len(run_ids), 500):
+        with db.engine.connect() as conn:
+            batches += _bakeoff_batches(conn, run_ids[start:start + 500])
+    for batch in batches:
+        _renew(job)
         with db.engine.begin() as conn:
             for row in conn.execute(select(t.c.run_id, *(t.c[c] for c in columns)).where(
-                    t.c.run_id.in_(run_ids[start:start + _BAKEOFF_BATCH]))).mappings().all():
+                    t.c.run_id.in_(batch))).mappings().all():
                 values = {}
                 try:
                     for column in columns:
@@ -809,6 +845,7 @@ def _redact_page_rows(row_ids, job: dict) -> int:
     t = db.trade_page_store_table
     changed = 0
     for row_id in row_ids:
+        _renew(job)
         for _attempt in range(5):
             with db.engine.begin() as conn:
                 row = conn.execute(select(t).where(t.c.id == row_id)).mappings().first()
@@ -1120,7 +1157,7 @@ def _run_db(job: dict, now: datetime) -> bool:
                 lease.renew()
                 counts[name] = scrub(job)
             state = {"version": SCRUB_VERSION, "scan": 0, "after": "", "counts": counts,
-                     "failures": job["failures"]}
+                     "failures": 0}
         budget = _Budget(_SCAN_PAGES_PER_RUN, lease)
         after = None
         while state["scan"] < len(_SCANS):
@@ -1148,7 +1185,7 @@ def _run_db(job: dict, now: datetime) -> bool:
         # Rows it couldn't redact: the whole pass again later, never done.
         lease.write(scan_json=None, claimed_until=_iso(now + _ROW_FAILURE_BACKOFF),
                     last_error="row_failures")
-        log.warning("[scrub] job=%s pass left %d rows unredacted; retried in %s",
+        log.warning("[scrub] job=%s pass had %d failed row redactions; retried in %s",
                     _short(job["job_id"]), state["failures"], _ROW_FAILURE_BACKOFF)
         return False
     values = dict(db_version=SCRUB_VERSION, db_done_at=_iso(now), scan_json=None,
@@ -1232,8 +1269,12 @@ def _tick(now: datetime) -> tuple[str, dict]:
     t = db.deletion_scrub_jobs_table
     with db.engine.connect() as conn:
         rows = [_job(r) for r in conn.execute(select(t)).mappings()]
+    # A pass that ran every store but left poison rows (row_failures) has
+    # still scrubbed the rest, and the model store needs only the ids, so a
+    # permanent poison row never blocks it (#557 re-QA P3).
     ready = [r for r in rows if r["model_done_at"] is None
-             and r["db_version"] == SCRUB_VERSION and r["db_done_at"] is not None]
+             and ((r["db_version"] == SCRUB_VERSION and r["db_done_at"] is not None)
+                  or r["last_error"] == "row_failures")]
     detail = {"jobs": len(rows), "model_rows": len(ready)}
     model_error = None
     if ready:
