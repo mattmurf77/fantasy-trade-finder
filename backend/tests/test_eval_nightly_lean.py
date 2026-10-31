@@ -233,4 +233,5 @@ def test_nightly_with_a_settle_lag_grades_settled_decks_as_of_last_served_plus_l
             assert set(record["config"]["values"]) == set(vm.SCORE_CONFIG)
             assert len(record["config"]["model_config_sha256"]) == 64
         else:
-            assert record["config"] is None
+            assert record["config"] == {}                         # R6.3: read none
+        assert len(record["model_config_sha256"]) == 64 and record["code_sha"]

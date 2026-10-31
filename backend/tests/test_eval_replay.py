@@ -492,6 +492,56 @@ def test_cli_end_to_end(tmp_path, capsys, monkeypatch):
     for r in records:
         assert r["n_total"] == r["n_included"] + sum(r["excluded"].values())
         assert "like" in r["metrics"] and "verdict" in r["metrics"]["like"]
+        # R6.3: none of these reads config, so it's explicitly empty, not None
+        assert r["config"] == {} and len(r["model_config_sha256"]) == 64 and r["code_sha"]
+        assert r["as_of"] and r["settle_lag_days"] == 7.0
+
+
+def test_every_registered_scorers_run_is_self_describing(tmp_path, monkeypatch):
+    """models-lead R6.3: `config` is the pin a configured scorer read or {}
+    (never None, which can't say "read nothing" from "not recorded"); the
+    live model_config's SHA-256 and the code sha are always set; the read's
+    as_of and settle lag ride along. On the run and on its record."""
+    import backend.value_model as vm
+    from backend.eval.persistence import run_record
+    from backend.eval.replay import code_sha
+    from backend.eval.scorers import registered_names
+    monkeypatch.setenv("VALUE_MODEL_DIR", str(tmp_path / "vm"))
+    monkeypatch.setattr(vm, "_model_cache", None)
+    decks = _uniform_decks()
+    pin = vm.pin_config(vm.SCORE_CONFIG)
+    for name in registered_names():
+        scorer = get_scorer(name, seed=1, config=pin)
+        split = {"eval_start": decks[6].served_at} if hasattr(scorer, "fit") else {}
+        run = evaluate(scorer, decks, ess_min=1, bootstrap=0, seed=0,
+                       as_of="2026-10-27T00:00:00+00:00", settle_lag_days=7.0, **split)
+        assert run.config == (pin if getattr(scorer, "takes_config", False) else {}), name
+        assert run.model_config_sha256 == vm.model_config_sha256()
+        assert len(run.model_config_sha256) == 64
+        assert run.code_sha == code_sha() != ""
+        record = run_record(run, run)
+        for key in ("config", "model_config_sha256", "code_sha", "as_of", "settle_lag_days",
+                    "exclusion_rule_version"):
+            assert record[key] == getattr(run, key), (name, key)
+        assert (record["as_of"], record["settle_lag_days"]) == ("2026-10-27T00:00:00+00:00", 7.0)
+
+
+def test_code_sha_is_the_deploy_commit_then_git_then_unknown(monkeypatch):
+    import subprocess
+    from backend.eval import replay
+    monkeypatch.setattr(replay, "_code_sha", None)
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "abc123")
+    assert replay.code_sha() == "abc123"
+    monkeypatch.setattr(replay, "_code_sha", None)
+    monkeypatch.delenv("RENDER_GIT_COMMIT")
+    assert len(replay.code_sha()) == 40                   # this checkout's HEAD
+
+    def no_git(*_a, **_k):
+        raise OSError("no git here")
+    monkeypatch.setattr(replay, "_code_sha", None)
+    monkeypatch.setattr(subprocess, "run", no_git)
+    assert replay.code_sha() == "unknown"
+    monkeypatch.setattr(replay, "_code_sha", None)
 
 
 def test_nightly_run_all_idempotent(tmp_path, monkeypatch):
