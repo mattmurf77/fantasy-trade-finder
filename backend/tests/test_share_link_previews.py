@@ -11,6 +11,10 @@ Opening the paths to crawlers is only safe with `noindex` on both the
 landing (meta + X-Robots-Tag) and the PNG (X-Robots-Tag), pinned here.
 The JSON contract of POST /api/share/package (relative url/og_image) is
 pinned separately in test_share_package.py and must not change.
+
+Trade links are token-only since #362 (build O8): section 4 covers a live
+/s/trade/<token> page, the expired page every miss gets, and both PNGs,
+minting tokens with test_trade_share_tokens.py's fixture and helpers.
 """
 import re
 from pathlib import Path
@@ -21,7 +25,11 @@ from sqlalchemy import create_engine
 
 import backend.database as db_module
 import backend.server as server
+from backend import og_image
 from backend.database import metadata
+from backend.tests.test_trade_share_tokens import (  # noqa: F401  (env is a fixture)
+    SHARE_ON, USER_A, _add_match, _mint, env,
+)
 
 SID = "pkgPreview1"
 ROBOTS_TXT = Path(__file__).resolve().parents[2] / "web" / "robots.txt"
@@ -58,14 +66,17 @@ def _meta(html: str, attr: str, name: str) -> str:
 # 1. og:image / twitter:image are absolute; path unchanged
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("page, image_path", [
-    (f"/s/p/{SID}", f"/og/p/{SID}.png"),
-    ("/s/trade/m123", "/og/trade/m123.png"),
-])
-@pytest.mark.parametrize("is_prod, origin", [
+# /s/trade/<token> is in section 4 (token-only since #362).
+ORIGINS = [
     (False, "http://localhost"),
     (True, "https://localhost"),
+]
+
+
+@pytest.mark.parametrize("page, image_path", [
+    (f"/s/p/{SID}", f"/og/p/{SID}.png"),
 ])
+@pytest.mark.parametrize("is_prod, origin", ORIGINS)
 def test_og_and_twitter_image_are_absolute(client, page, image_path,
                                            is_prod, origin):
     with patch.object(server, "_IS_PROD_ENV", is_prod):
@@ -82,7 +93,6 @@ def test_og_and_twitter_image_are_absolute(client, page, image_path,
 
 @pytest.mark.parametrize("page", [
     f"/s/p/{SID}",
-    "/s/trade/m123",
     "/s/tiers/qb/someuser",
 ])
 def test_share_pages_are_noindex(client, page):
@@ -109,7 +119,6 @@ class _StubRenderer:
 
 @pytest.mark.parametrize("path", [
     f"/og/p/{SID}.png",
-    "/og/trade/m123.png",
     "/og/tiers/qb/someuser.png",
 ])
 def test_og_cards_carry_noindex_header(client, path):
@@ -151,3 +160,78 @@ def test_robots_txt_keeps_other_disallows():
         "/404.html",
     }
     assert expected <= set(_disallows())
+
+
+# ---------------------------------------------------------------------------
+# 4. Token-only trade links (#362, build O8): live page, expired page, PNGs
+# ---------------------------------------------------------------------------
+
+UNKNOWN_TOKEN = "A" * 22
+
+
+def _live_token(c) -> str:
+    """Mint a real share token for a fresh mutual match, as USER_A."""
+    with patch.object(server, "is_enabled", SHARE_ON):
+        r = _mint(c, USER_A, _add_match())
+    assert r.status_code == 200, r.get_data(as_text=True)
+    return r.get_json()["token"]
+
+
+def _miss(c, kind: str) -> str:
+    if kind == "numeric_id":     # the id of a match that has a live share
+        mid = _add_match()
+        with patch.object(server, "is_enabled", SHARE_ON):
+            assert _mint(c, USER_A, mid).status_code == 200
+        return str(mid)
+    if kind == "unknown_token":
+        return UNKNOWN_TOKEN
+    raise AssertionError(kind)
+
+
+def _assert_unfurlable_noindex(r, image_url: str) -> str:
+    assert r.status_code == 200
+    html = r.get_data(as_text=True)
+    assert _meta(html, "property", "og:image") == image_url
+    assert _meta(html, "name", "twitter:image") == image_url
+    assert len(re.findall(r'<meta name="robots"', html)) == 1
+    assert _meta(html, "name", "robots") == "noindex"
+    assert r.headers.get("X-Robots-Tag") == "noindex"
+    return html
+
+
+@pytest.mark.parametrize("is_prod, origin", ORIGINS)
+def test_live_trade_page_is_absolute_and_noindex(env, is_prod, origin):
+    tok = _live_token(env)
+    with patch.object(server, "_IS_PROD_ENV", is_prod):
+        r = env.get(f"/s/trade/{tok}")
+    html = _assert_unfurlable_noindex(r, f"{origin}/og/trade/{tok}.png")
+    assert "Trade Match" in html                      # the hit, not the miss
+    assert f'<img src="/og/trade/{tok}.png"' in html  # visible <img> stays relative
+
+
+@pytest.mark.parametrize("kind", ["numeric_id", "unknown_token"])
+@pytest.mark.parametrize("is_prod, origin", ORIGINS)
+def test_expired_trade_page_is_absolute_and_noindex(env, kind, is_prod, origin):
+    key = _miss(env, kind)
+    with patch.object(server, "_IS_PROD_ENV", is_prod):
+        r = env.get(f"/s/trade/{key}")
+    html = _assert_unfurlable_noindex(r, f"{origin}/og/trade/expired.png")
+    assert og_image.TRADE_LINK_EXPIRED_TITLE in html
+    assert "Trade Match" not in html
+
+
+@pytest.mark.parametrize("kind", ["live", "numeric_id", "unknown_token", "expired"])
+def test_trade_cards_carry_noindex_header(env, kind):
+    if kind == "live":
+        key = _live_token(env)
+    elif kind == "expired":          # the expired page's own og:image
+        key = "expired"
+    else:
+        key = _miss(env, kind)
+    r = env.get(f"/og/trade/{key}.png")
+    assert r.status_code == 200
+    assert r.headers["Content-Type"] == "image/png"
+    assert r.headers.get("X-Robots-Tag") == "noindex"
+    assert r.headers["Cache-Control"] == "public, max-age=300"
+    is_miss_card = r.data == og_image.render_expired_trade_card()
+    assert is_miss_card is (kind != "live")

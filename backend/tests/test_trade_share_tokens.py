@@ -121,9 +121,10 @@ def test_participant_mints_a_token_and_both_routes_render_the_trade(env):
     page = env.get(f"/s/trade/{tok}")
     assert page.status_code == 200
     html = page.get_data(as_text=True)
-    assert f'content="/og/trade/{tok}.png"' in html
+    assert f'content="http://localhost/og/trade/{tok}.png"' in html
     assert "Trade Match" in html
-    assert "robots" not in html          # only the miss page is noindex
+    # Every /s/* page is noindex since C6 (#511).
+    assert html.count('<meta name="robots" content="noindex">') == 1
     assert USER_A not in html and USER_B not in html
 
     png = env.get(f"/og/trade/{tok}.png")
@@ -284,7 +285,7 @@ def test_every_miss_is_the_same_generic_page_and_png(env):
     assert og_image.TRADE_LINK_EXPIRED_TITLE in html
     assert og_image.TRADE_LINK_EXPIRED_BODY in html
     assert '<meta name="robots" content="noindex">' in html
-    assert 'content="/og/trade/expired.png"' in html
+    assert 'content="http://localhost/og/trade/expired.png"' in html
     assert 'href="/"' in html
     assert ref_png.data == og_image.render_expired_trade_card()
     for m in misses:

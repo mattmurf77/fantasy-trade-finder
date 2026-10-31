@@ -71,15 +71,32 @@ analytics event or mobile change. `POST /api/share/package` still returns relati
 ## 3. Evidence scope
 
 - [ ] **Structural guard:** n/a — no mobile change.
-- [x] **Unit tests:** new `backend/tests/test_share_link_previews.py` (12 cases). Each
+- [x] **Unit tests:** new `backend/tests/test_share_link_previews.py` (18 cases). Each
       test was sabotaged (code broken, test seen red, code restored):
-  - `test_og_and_twitter_image_are_absolute` (`/s/p/<id>`, `/s/trade/<id>` ×
+  - **2026-10-31:** #511 is now stacked on #362 @ `49a2eeb0` (merge `2152e0e5`), with
+    `_share_html`'s `noindex` parameter dropped. Trade links are token-only, so their
+    coverage moved to section 4 below.
+  - `test_og_and_twitter_image_are_absolute` (`/s/p/<id>` ×
     local/prod): both tags equal `http://localhost/og/...` locally and
     `https://localhost/og/...` with `_IS_PROD_ENV` patched True, path unchanged.
-  - `test_share_pages_are_noindex` (`/s/p`, `/s/trade`, `/s/tiers`): robots meta is
+  - `test_share_pages_are_noindex` (`/s/p`, `/s/tiers`): robots meta is
     `noindex`, `X-Robots-Tag: noindex`, `Cache-Control` unchanged.
-  - `test_og_cards_carry_noindex_header` (`/og/p`, `/og/trade`, `/og/tiers`, stub
+  - `test_og_cards_carry_noindex_header` (`/og/p`, `/og/tiers`, stub
     renderer): `X-Robots-Tag: noindex`, `Cache-Control` unchanged.
+  - Section 4, trade links (tokens minted with `test_trade_share_tokens.py`'s `env`
+    fixture and its `_mint` / `_add_match` helpers):
+    - `test_live_trade_page_is_absolute_and_noindex` (local/prod): `og:image` and
+      `twitter:image` equal `<origin>/og/trade/<token>.png`, the robots noindex meta
+      appears exactly once, `X-Robots-Tag: noindex`; the visible `<img>` stays relative.
+    - `test_expired_trade_page_is_absolute_and_noindex` (a shared match's numeric id and
+      an unknown token, × local/prod): the same three properties, with
+      `<origin>/og/trade/expired.png`.
+    - `test_trade_cards_carry_noindex_header` (live token, numeric id, unknown token,
+      `expired`; real renderer): `X-Robots-Tag: noindex`, `Cache-Control` unchanged, and
+      only the live token gets a non-expired card.
+  - Sabotage, 2026-10-31: duplicating the robots meta in `_share_html` turns only the
+    section 4 page tests red (6), because `test_share_pages_are_noindex` reads the first
+    robots meta and does not pin the count.
   - `test_robots_txt_does_not_block_share_paths`: no `Disallow` rule prefixes an `/s/`
     or `/og/` path.
   - `test_robots_txt_keeps_other_disallows`: `/admin/`, `/style-guide.html`,
