@@ -1,16 +1,3 @@
-## 2026-10-31 — #552 QA follow-ups: C1's lost-pack read pinned on its own, withdrawals by index, the tier comment, ADR-025's title
-
-Gates: release-lead's #552 QA (GO with notes, merged as `1398a9ce`), P2-1 and P3-1 to P3-3. Tests, a comment and a doc title only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
-
-- **P2-1:** C1's +26 h `incomplete_deck` came from the never-delivered withdrawal's index hole (0..29 plus 36), so a lost-pack rule cut to its in-flight half stayed green. C1 is now parametrized over `w0_past_30`.
-  - Without a W0 past 30 the rows have no hole, so only the lost-pack rule can exclude the deck.
-  - The control: with `PACK_REQUIRED_SINCE = None`, the same +26 h read is a complete deck (no exclusion).
-  - Sabotage (the rule keeps only its in-flight half): `[False]` red, `[True]` green, as release-lead found.
-- **P3-1:** the withdrawals are asserted as `(card_index, served_before)`: `[(3, 1), (36, 0)]`. The comments name mine40's card at index 36 (the ghosts shift it).
-- **P3-2:** `database.py`'s `evidence_tier` comment puts `viewed` above `delivered`, `archive` and `full_interim` (the tiers a first view raises, `_EVIDENCE_TIERS_BELOW_VIEWED`). Its `delivered_at` comes from this process's delivery stamp, then the pack's delivery of its index, then the outcome's time.
-- **P3-3:** ADR-025's title adds the 2% archive decks.
-- **Suites:** packed evidence, deferred evidence, eval withdrawals and paging: 307 passed.
-
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
 Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -24,6 +11,19 @@ Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_
 - **Sabotages, 2/2 red:** I-1's drops ignored on the page path; the withhold ignored on the page path.
 - **Suites:** force-supersede, I-1 serve filter, page store and packed evidence: 317 passed on main and 317 passed on a flags-on copy of `ops/200ms-flip` (with failure 1's fix).
 - **Full backend suite, flags on** (`ops/200ms-flip` @ `8080663e` plus this branch's three test files): 10,055 passed, 2 skipped, 0 failed.
+
+## 2026-10-31 — #552 QA follow-ups: C1's lost-pack read pinned on its own, withdrawals by index, the tier comment, ADR-025's title
+
+Gates: release-lead's #552 QA (GO with notes, merged as `1398a9ce`), P2-1 and P3-1 to P3-3. Tests, a comment and a doc title only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P2-1:** C1's +26 h `incomplete_deck` came from the never-delivered withdrawal's index hole (0..29 plus 36), so a lost-pack rule cut to its in-flight half stayed green. C1 is now parametrized over `w0_past_30`.
+  - Without a W0 past 30 the rows have no hole, so only the lost-pack rule can exclude the deck.
+  - The control: with `PACK_REQUIRED_SINCE = None`, the same +26 h read is a complete deck (no exclusion).
+  - Sabotage (the rule keeps only its in-flight half): `[False]` red, `[True]` green, as release-lead found.
+- **P3-1:** the withdrawals are asserted as `(card_index, served_before)`: `[(3, 1), (36, 0)]`. The comments name mine40's card at index 36 (the ghosts shift it).
+- **P3-2:** `database.py`'s `evidence_tier` comment ranks `viewed` above `delivered`, `archive` and `full_interim` (`_EVIDENCE_TIERS_BELOW_VIEWED`). A first view raises only an `archive` row to it (`mark_deck_impression_viewed`); release-lead's QA found `_stamp_delivered`'s `raise_to="viewed"` path has no caller. Its `delivered_at` comes from this process's delivery stamp, then the pack's delivery of its index, then the outcome's time.
+- **P3-3:** ADR-025's title adds the 2% archive decks.
+- **Suites:** packed evidence, deferred evidence, eval withdrawals and paging: 307 passed.
 
 ## 2026-10-31 — #544 QA round 3: the X3 coverage hole closed; T-10 resolves namespace lookups; the residual documented by class
 
