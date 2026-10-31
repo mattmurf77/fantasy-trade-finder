@@ -258,7 +258,10 @@ todo = SELECT i.* FROM deck_impressions i
        ORDER BY i.served_at LIMIT :batch
 ```
 
-**Eligibility (U6 R-U6a, models-lead R3, 2026-10-26).** Under ADR-025 packed evidence, a
+**Eligibility (U6 R-U6a, models-lead R3, 2026-10-26).** U6 ("viewed + first 30") is accepted on
+the record by analytics-lead (2026-10-26: "U6 is accepted on the record", with conditions R-U6a,
+eligibility = viewed or first 30, and R-U6b, a series break at the flip) and by trades-eng, who
+owns receipts and the matcher and built R-U6a with no deviation (#424). Under ADR-025 packed evidence, a
 `deck_impressions` row no longer means a card was shown. A row counts as a recommendation
 only if one of these holds:
 - it was written at build (`evidence_tier` NULL: legacy and flag-off rows, unchanged);
