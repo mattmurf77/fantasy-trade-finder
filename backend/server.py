@@ -30989,6 +30989,9 @@ def _png_response(data: bytes, status: int = 200) -> "Response":
     resp.headers["Content-Type"]  = "image/png"
     resp.headers["Cache-Control"] = "public, max-age=300"
     resp.headers["Content-Length"] = str(len(data))
+    # Crawlable on purpose (robots.txt) so link unfurlers can fetch the
+    # card, but kept out of search indexes.
+    resp.headers["X-Robots-Tag"] = "noindex"
     return resp
 
 
@@ -31079,6 +31082,20 @@ def og_trade_card(token):
     return _png_response(png, status=status)
 
 
+def _absolute_url(path: str) -> str:
+    """Absolutise a root-relative path ("/og/...") against this request's host.
+
+    Link unfurlers (iMessage, Slack, X, Discord) need an absolute og:image.
+    Render terminates TLS and there is no ProxyFix, so `request.scheme`
+    reads "http" there — deployed envs are forced to https. X-Forwarded-*
+    headers are deliberately not consulted.
+    """
+    if not path.startswith("/"):
+        return path
+    scheme = "https" if _IS_PROD_ENV else request.scheme
+    return f"{scheme}://{request.host}{path}"
+
+
 def _share_html(
     *,
     title: str,
@@ -31086,36 +31103,36 @@ def _share_html(
     image_url: str,
     cta_text: str,
     cta_url: str,
-    noindex: bool = False,
 ) -> "Response":
-    """Minimal HTML wrapper with OG tags + small human-readable body.
-
-    `noindex` adds a robots noindex meta (the expired-trade page); left
-    False, the output is byte-identical to before the parameter existed."""
+    """Minimal HTML wrapper with OG tags + small human-readable body."""
     # Escape minimal HTML special chars — we never render user-controlled
     # HTML inside any attribute, so basic replacement is sufficient.
     def esc(s: str) -> str:
         return (s or "").replace("&", "&amp;").replace("<", "&lt;") \
                          .replace(">", "&gt;").replace('"', "&quot;")
 
-    robots = '\n  <meta name="robots" content="noindex">' if noindex else ""
+    # Unfurlers need an absolute image URL; the visible <img> stays relative.
+    og_image_url = _absolute_url(image_url)
+
     html = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{esc(title)} · Fantasy Trade Finder</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">{robots}
+  <title>{esc(title)} · Fleeced: Dynasty Trade Finder</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
   <meta name="description" content="{esc(description)}">
   <meta property="og:type" content="website">
   <meta property="og:title" content="{esc(title)}">
   <meta property="og:description" content="{esc(description)}">
-  <meta property="og:image" content="{esc(image_url)}">
+  <meta property="og:image" content="{esc(og_image_url)}">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{esc(title)}">
   <meta name="twitter:description" content="{esc(description)}">
-  <meta name="twitter:image" content="{esc(image_url)}">
+  <meta name="twitter:image" content="{esc(og_image_url)}">
+  <link rel="stylesheet" href="/css/tokens.css">
   <style>
     body{{margin:0;background:#0f1322;color:#f5f7fc;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
          min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}}
@@ -31127,7 +31144,10 @@ def _share_html(
     .cta{{display:inline-block;background:#6eb4ff;color:#0f1322;padding:14px 28px;
           border-radius:999px;font-weight:600;text-decoration:none;}}
     .cta:hover{{background:#8cc6ff;}}
-    .brand{{margin-top:36px;color:#6b7a9a;font-size:13px;}}
+    .brand{{margin-top:36px;color:var(--chalk-dim);font-size:13px;}}
+    .legal-links {{ margin-top: 8px; font-size: 13px; color: var(--chalk-faint); }}
+    .legal-links a {{ color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }}
+    .legal-links a:hover {{ text-decoration-color: var(--ice); }}
   </style>
 </head>
 <body>
@@ -31136,13 +31156,15 @@ def _share_html(
     <h1>{esc(title)}</h1>
     <p>{esc(description)}</p>
     <a class="cta" href="{esc(cta_url)}">{esc(cta_text)}</a>
-    <div class="brand">Fantasy Trade Finder</div>
+    <div class="brand">Fleeced: Dynasty Trade Finder</div>
+    <div class="legal-links"><a href="/privacy">Privacy</a></div>
   </div>
 </body>
 </html>"""
     resp = make_response(html)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
     resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["X-Robots-Tag"] = "noindex"
     return resp
 
 
@@ -31193,7 +31215,6 @@ def share_trade_page(token):
             image_url="/og/trade/expired.png",
             cta_text="Find your next trade",
             cta_url="/",
-            noindex=True,
         )
     title = "Trade Match"
     description = "A dynasty fantasy trade — see the give/get breakdown and fairness verdict."

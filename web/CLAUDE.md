@@ -15,7 +15,7 @@ Flask backend (`run.py`), so a page is live the moment the file exists.
 | `profile.html` | yes | Public profile, served at `/u/<username>`. Dark — `profiles.public_pages` is false |
 | `ranking-method.html` | yes | "Set your rankings" explainer. **Not linked from any web page** — it is reached from the mobile app (`mobile/src/screens/TradesScreen.tsx` `readMoreUrl`), so do not delete it. Static content only; its tiles were fake controls until 2026-08-19 |
 | `faq.html` | yes | FAQ |
-| `robots.txt` / `sitemap.xml` | yes | Crawler directives. Templates, operator pages and share landings are `Disallow`-ed |
+| `robots.txt` / `sitemap.xml` | yes | Crawler directives. Templates and operator pages are `Disallow`-ed. Share landings (`/s/`, `/og/`) are crawlable on purpose so link unfurlers can fetch them, and kept out of indexes by `noindex` (meta + `X-Robots-Tag`) in `backend/server.py` |
 | `contact.html` | yes | Contact + data requests. Posts to the public `POST /api/feedback` (`screen=web-contact`, or `web-contact-data-request` with a `[DATA REQUEST]` text prefix). The only route a web visitor has to a deletion/access request — both legal docs link here |
 | `404.html` | yes | HTML not-found page. Served by the `404` errorhandler in `backend/server.py` for browser navigation; `/api/*` and `/og/*` keep returning JSON |
 | `privacy.html` / `terms.html` | yes | Legal pages (App Store / Play listing links point here) |
