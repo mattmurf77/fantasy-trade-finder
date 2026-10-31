@@ -22,7 +22,7 @@ Bias toward caution over speed; use judgment for trivial tasks.
 - **Mobile:** React Native 0.81 + Expo SDK 54 (TypeScript) in `mobile/`; 31 screens; EAS → TestFlight
 - **Browser extension:** Chrome/Edge MV3 in `extension/`
 - **League platforms:** Sleeper (read + GraphQL trade write), ESPN (`espn.*` flags, live), MyFantasyLeague (`mfl.*`, live). Fleaflicker is dark (`fleaflicker.link` false)
-- **Skills:** 36 repo-local Claude Code skills in `.claude/skills/` — role skills (`eng-*`, `pm-*`, `mkt-*`, `an-*`, `ops-*`, `fin-*`) plus the `feedback`, `feature-evaluator`, `project-architect`, `project-reorganizer`, `living-memory-format-check` pipelines. `maestro-test` is present but **dead** — D-056 retired Maestro; do not invoke it. Retired skill workspaces are in `archive/skill-workspaces/`
+- **Skills:** 38 repo-local Claude Code skills in `.claude/skills/` — role skills (`eng-*`, `pm-*`, `mkt-*`, `an-*`, `ops-*`, `fin-*`) plus the `feedback`, `feature-evaluator`, `project-architect`, `project-reorganizer`, `living-memory-format-check`, `project-agent-hierarchy` pipelines. `maestro-test` is present but **dead** — D-056 retired Maestro; do not invoke it. Retired skill workspaces are in `archive/skill-workspaces/`
 - **CI:** `.github/workflows/ci.yml` — `pytest backend/tests`, `tsc --noEmit`, `mobile/scripts/testid-lint.sh`. The `mobile/tests/check-*.js` structural suites are `npm run`-only and **gate nothing yet** (open item in NEXT.md)
 - **Optional AI:** Anthropic Claude API for smart matchup selection (env `ANTHROPIC_API_KEY`); algorithmic fallback when unset
 
