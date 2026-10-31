@@ -189,7 +189,11 @@ import SwapSuggestSheet from '../components/SwapSuggestSheet';
 import { getProgress } from '../api/rankings';
 import { track, msSinceOpen } from '../api/events';
 import { ApiError, getBaseUrl } from '../api/client';
-import { resolveShareUrl, resolveTradeShareUrl } from '../utils/shareLinks';
+import {
+  resolveShareUrl,
+  resolveTradeShareUrl,
+  TRADE_SHARE_PACKAGE_TIMEOUT_MS,
+} from '../utils/shareLinks';
 import { useInterruptSlot, useMutedDuringTour } from '../state/useInterruptCoordinator';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
 import TeamReviewEntryCard from '../components/TeamReviewEntryCard';
@@ -6268,6 +6272,8 @@ export default function TradesScreen({ navigation, route }: any) {
         surface: 'trades_liked',
         hasPickAssets:
           c.give_players.some(isPickAsset) || c.receive_players.some(isPickAsset),
+        // A trade mint already failed (matchId): bound this rung too.
+        timeoutMs: matchId ? TRADE_SHARE_PACKAGE_TIMEOUT_MS : undefined,
         onOutcome: (outcome, give_n, receive_n) =>
           track(
             'share_package_created',

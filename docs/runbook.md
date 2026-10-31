@@ -1443,11 +1443,13 @@ Deletion now covers credentials, account aliases, durable sessions, linked anony
 
 **The hole.** `/s/trade/<x>` and `/og/trade/<x>.png` took the sequential `trade_matches.id` with no auth, and `og_image.render_trade_card` loaded the row directly. Anyone could walk the ids and read every mutual match's give/get and fairness verdict, across leagues.
 
-**The fix.** Both routes now resolve only through `trade_share_tokens` (`docs/data-dictionary.md`): a 128-bit `token_urlsafe(16)` minted by `POST /api/share/trade` for a party to the match (30 mints/user/hour, `growth.share_landing`-gated). A numeric id never resolves. Every miss (numeric id, unknown, revoked or malformed token, orphaned match) gets one generic "This trade link has expired." page (noindex) and PNG, status 200, identical bytes, so a miss can't be told from an expired link. There is no per-IP GET limiter by design: guessing in a 2^128 space is infeasible, and a left-most `X-Forwarded-For` hop is client-spoofable.
+**The fix.** Both routes now resolve only through `trade_share_tokens` (`docs/data-dictionary.md`): a 128-bit `token_urlsafe(16)` minted by `POST /api/share/trade` for a party to the match (30 new mints/user/hour, a re-share never counts; `growth.share_landing`-gated). A numeric id never resolves. Every miss (numeric id, unknown, revoked or malformed token, orphaned match) gets one generic "This trade link has expired." page (noindex) and PNG, status 200, identical bytes, so a miss can't be told from an expired link. There is no per-IP GET limiter by design: guessing in a 2^128 space is infeasible, and a left-most `X-Forwarded-For` hop is client-spoofable.
 
 **Old links.** Every `/s/trade/<number>` link already shared, and every link an older TestFlight build still produces, now shows the expired page. That is intended (keeping them working would keep the hole open). The minimum-version gate (launch item 19) moves users onto a build that mints tokens. Nothing to migrate.
 
 **Symptoms.** A user says a fresh share shows "expired": check that the link is `/s/trade/<22 chars>` (an older binary still shares numeric links), then that the row exists and `revoked_at` is NULL. The mobile client falls back to a `/s/p/<id>` package link when the mint fails or takes over 2 s, so a share can still carry a working landing while this route is broken. Never log or paste a token: it is a bearer secret.
+
+**Logging.** The app never logs a token (the lookup and mint DB-error lines record only the exception type, because a DB error's text carries its bound parameters); the host's request log records request paths, so Render's access log holds every `/s/trade/<token>` and `/og/trade/<token>.png` request with its live token. Treat that log as holding working links.
 
 **Revoking a link.** Nothing in v1 writes `revoked_at`. To kill one share (for example, a user asks for a posted link to stop working), set it on that row:
 
