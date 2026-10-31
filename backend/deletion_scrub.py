@@ -44,7 +44,7 @@ log = logging.getLogger("trade_finder")
 
 # Bump when a store or field is added: a row whose db_version is older runs
 # its DB phase again.
-SCRUB_VERSION = 1
+SCRUB_VERSION = 2
 # False until every store in the scope is built (scope §5's staging). Until
 # then a finished row is kept, so the later stages scrub its deletion too.
 COMPLETE = False
@@ -285,6 +285,29 @@ def _loads(raw):
         return None
 
 
+def redact_row(row: dict, ids, token: str) -> dict:
+    """A deck_impressions row (as a dict of its columns, features_json and
+    valuation_json as JSON text or objects) after the scrub: the same rules
+    as the stored rows get. Used by the server for a row it writes from a
+    deck's build-time snapshot after the scrub redacted that card."""
+    ids = set(ids)
+    out = dict(row)
+    raw = out.get("features_json")
+    features = _loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(features, dict):
+        return out
+    new = redact_features(features, ids, token)
+    out["features_json"] = json.dumps(new) if isinstance(raw, str) else new
+    if features.get("partner_user_id") in ids:
+        out.update({c: None for c in _COLUMNS_NULLED if c in out})
+        raw_valuation = out.get("valuation_json")
+        valuation = _loads(raw_valuation) if isinstance(raw_valuation, str) else raw_valuation
+        if isinstance(valuation, dict):
+            redacted = redact_valuation(valuation)
+            out["valuation_json"] = json.dumps(redacted) if isinstance(raw_valuation, str) else redacted
+    return out
+
+
 def _redact_impressions(impression_ids, job: dict) -> int:
     """Redact these deck_impressions rows (any that still name a deleted id)."""
     ids, token = set(job["ids"]), job["token"]
@@ -442,16 +465,138 @@ def _scan_candidate_sets(job: dict, after: str, budget: list) -> tuple[str | Non
     return after, changed
 
 
-# The DB phase, in order (scope §0.2; packs and the page store come with
-# SCRUB_VERSION 2). First the league pass over the captured leagues, then the
+# ── Packs (deck_evidence_packs): through the codec only (G-a3) ─────────────
+
+# A packed card's blended scores (scope §1.3); `likes_you` is removed.
+_PACKED_NULLED = ("surplus_margin", "base_score", "final_score")
+
+
+def redact_packed_card(card: dict, ids, token: str) -> dict:
+    """One packed card: a `partner:<id>` taste attr takes the token on any
+    card; a redacted card (its partner is a deleted id) takes the token as
+    its partner, loses `likes_you` and has its blended scores nulled."""
+    out = dict(card)
+    if isinstance(out.get("taste_attrs"), list):
+        out["taste_attrs"] = [_taste_attr(a, ids, token) for a in out["taste_attrs"]]
+    if out.get("partner_user_id") in ids:
+        out["partner_user_id"] = token
+        out.pop("likes_you", None)
+        for key in _PACKED_NULLED:
+            if key in out:
+                out[key] = None
+    return out
+
+
+def redact_pack_run(run: dict, cards: list[dict], ids) -> dict:
+    """The pack's run metadata: the person's QB/TE holdings and the protected
+    trade_hashes of their cards leave the quality filter's recorded inputs
+    (G-a3's third change)."""
+    inputs = run.get("filter_inputs")
+    if not isinstance(inputs, dict):
+        return run
+    inputs = dict(inputs)
+    if isinstance(inputs.get("qb_te"), dict):
+        inputs["qb_te"] = {k: v for k, v in inputs["qb_te"].items() if k not in ids}
+    if isinstance(inputs.get("protected"), list):
+        theirs = {c.get("trade_hash") for c in cards if c.get("partner_user_id") in ids}
+        inputs["protected"] = [h for h in inputs["protected"] if h not in theirs]
+    return {**run, "filter_inputs": inputs}
+
+
+def redact_pack(row: dict, ids, token: str, now: str):
+    """A deck_evidence_packs row's new pack columns, or None when nothing
+    names a deleted id: unpack_run, the four changes (the token, the c2
+    field, the run's holdings and protected hashes, `redacted_at`), then
+    pack_run, which refuses an inexact pack. card_count and every other card
+    are unchanged (G-a2)."""
+    from .eval import evidence_pack
+    ids = set(ids)
+    run, cards = evidence_pack.unpack_run(evidence_pack.PackedRun(
+        row["pack_version"], row["header_json"], bytes(row["cards_blob"]), row["checksum"],
+        row["card_count"]))
+    new_cards = [redact_packed_card(c, ids, token) for c in cards]
+    new_run = redact_pack_run(run, cards, ids)
+    if new_cards == cards and new_run == run:
+        return None
+    return evidence_pack.pack_run({**new_run, "redacted_at": now}, new_cards,
+                                  card_count=row["card_count"])
+
+
+def _redact_packs(run_ids, job: dict) -> int:
+    """Rewrite these packs by compare-and-swap on their checksum: a live
+    writer's header update in between makes the scrub re-read and redo (and
+    the writer, on its own miss, rebuilds from the scrubbed row:
+    server._fresh_pack_state)."""
+    ids, token = set(job["ids"]), job["token"]
+    t = db.deck_evidence_packs_table
+    changed = 0
+    for run_id in run_ids:
+        for _attempt in range(5):
+            with db.engine.begin() as conn:
+                row = conn.execute(select(t).where(t.c.run_id == run_id)).mappings().first()
+                if row is None:
+                    break
+                packed = redact_pack(row, ids, token, _iso(datetime.now(timezone.utc)))
+                if packed is None:
+                    break
+                if conn.execute(update(t).where(
+                        t.c.run_id == run_id, t.c.checksum == row["checksum"]).values(
+                        pack_version=packed.pack_version, header_json=packed.header_json,
+                        cards_blob=packed.cards_blob, checksum=packed.checksum)).rowcount:
+                    changed += 1
+                    break
+        else:
+            raise RuntimeError("pack kept changing")
+    return changed
+
+
+def _scrub_packs(job: dict) -> int:
+    """The league pass over packs: the partner dictionary, the taste
+    vocabulary and the holdings are all in header_json."""
+    ids = set(job["ids"])
+    t = db.deck_evidence_packs_table
+    found = []
+    with db.engine.connect() as conn:
+        pairs = [(v, lg) for lg in job["leagues"] for v in _viewers(conn, lg, ids)]
+        for viewer, league_id in pairs:
+            found += conn.execute(select(t.c.run_id).where(
+                t.c.user_id == viewer, t.c.league_id == league_id,
+                t.c.served_at <= job["cutoff"], _mentions(t.c.header_json, ids))).scalars().all()
+    return _redact_packs(found, job)
+
+
+def _scan_packs(job: dict, after: str, budget: list) -> tuple[str | None, int]:
+    """The fallback scan of packs, as _scan_impressions, matching on
+    header_json (never reading cards_blob unless it matches)."""
+    ids = set(job["ids"])
+    t = db.deck_evidence_packs_table
+    changed = 0
+    while budget[0] > 0:
+        budget[0] -= 1
+        with db.engine.connect() as conn:
+            rows = conn.execute(select(t.c.run_id, _mentions(t.c.header_json, ids).label("hit")).where(
+                t.c.run_id > after, t.c.served_at <= job["cutoff"],
+                t.c.user_id.notin_(sorted(ids)),
+            ).order_by(t.c.run_id).limit(_SCAN_BATCH)).all()
+        if not rows:
+            return None, changed
+        changed += _redact_packs([r.run_id for r in rows if r.hit], job)
+        after = rows[-1].run_id
+    return after, changed
+
+
+# The DB phase, in order (scope §0.2; the page store comes with stage 2's
+# second half). First the league pass over the captured leagues, then the
 # fallback scans of whole stores, resumable from a cursor on the job row.
 _STORES = (
     ("deck_impressions", _scrub_impressions),
     ("deck_candidate_sets", _scrub_candidate_sets),
+    ("deck_evidence_packs", _scrub_packs),
 )
 _SCANS = (
     ("deck_impressions", _scan_impressions),
     ("deck_candidate_sets", _scan_candidate_sets),
+    ("deck_evidence_packs", _scan_packs),
 )
 
 
