@@ -31116,7 +31116,7 @@ def _share_html(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{esc(title)} · Fleeced</title>
+  <title>{esc(title)} · Fleeced: Dynasty Trade Finder</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex">
   <meta name="description" content="{esc(description)}">
@@ -31142,7 +31142,7 @@ def _share_html(
     .cta{{display:inline-block;background:#6eb4ff;color:#0f1322;padding:14px 28px;
           border-radius:999px;font-weight:600;text-decoration:none;}}
     .cta:hover{{background:#8cc6ff;}}
-    .brand{{margin-top:36px;color:#6b7a9a;font-size:13px;}}
+    .brand{{margin-top:36px;color:var(--chalk-dim);font-size:13px;}}
     .legal-links {{ margin-top: 8px; font-size: 13px; color: var(--chalk-faint); }}
     .legal-links a {{ color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }}
     .legal-links a:hover {{ text-decoration-color: var(--ice); }}

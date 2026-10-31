@@ -162,11 +162,11 @@ analytics event or mobile change. `POST /api/share/package` still returns relati
 **Entry point:** head-eng (2026-10-31). Legal-lead's R13 (`docs/plans/org-bringup/leads/legal-lead.md` § R13, product S4) requires a privacy link on every `/s/*` page and the brand "Fleeced" there. release-lead found the expired page mixed "Open Fleeced…" with a "Fantasy Trade Finder" title and footer. It's folded into #511 because #511 already rewrites `_share_html`: one writer, one delta QA. The policy line ("shared trades are public to anyone with the link") is #373's (onboarding-eng), not this PR's.
 
 **What changes** (every `/s/*` page renders through `_share_html`: `/s/p`, `/s/tiers`, a live `/s/trade/<token>`, the expired-trade page):
-- `<title>`: `{title} · Fleeced` (was `· Fantasy Trade Finder`).
-- The brand line under the CTA: `Fleeced: Dynasty Trade Finder` (D-057's full name; was `Fantasy Trade Finder`).
+- `<title>`: `{title} · Fleeced: Dynasty Trade Finder` (marketing `s4.title`; was `· Fantasy Trade Finder`).
+- The brand line under the CTA: `Fleeced: Dynasty Trade Finder` (marketing `s4.brand`, D-057's full name; was `Fantasy Trade Finder`). Its colour becomes `var(--chalk-dim)`: the old `#6b7a9a` was 4.29:1 on `#0f1322`, under AA for 13px text, and the new colour is 7.06:1 (design-lead).
 - New, directly under it: `<div class="legal-links"><a href="/privacy">Privacy</a></div>`, linking the existing `/privacy` route. The styles are #373's passed rules verbatim (`.legal-links` 13px `--chalk-faint`; links `--chalk`, underlined, `--ice` on hover), from `/css/tokens.css`. Nothing else on the page is restyled.
-- The og PNG card footer (`og_image.py`): `Fleeced · fantasy-trade-finder.onrender.com` (was `Fantasy Trade Finder · …`). The card is the unfurl image and is embedded in every `/s/*` page.
-- No new copy beyond the brand name and the "Privacy" label.
+- The og PNG card footer (`og_image.py`): `Fleeced: Dynasty Trade Finder · fantasy-trade-finder.onrender.com` (marketing `s4.og_footer`; was `Fantasy Trade Finder · …`). Measured at 22px, it's 624–686px wide on macOS fonts. The worst case is DejaVu Sans Bold at 846px (right edge x=906), which is probably prod, since it's the first Linux candidate. All fit the 1080px rule (right edge ≤ 1140). `_draw_footer` is fixed-position and left-aligned, so nothing is measured or clipped. The card is the unfurl image and is embedded in every `/s/*` page.
+- No new copy beyond the brand name and the "Privacy" label. The three strings are marketing's approved `s4.*` (`marketing-lead-wave2.md` S5 rows; approved to ship by launch in `marketing-lead-referral-approval.md`). `s4.og_site` (a new `og:site_name` tag) isn't in that ship list, so it's not added.
 
 **Analytics:** (c) waived, as §1. A static link and brand text, nothing to measure. **Schema, flags, routes:** none.
 
@@ -207,10 +207,14 @@ Results:
 
 | # | Steps | Expected |
 |---|---|---|
-| R1 | Open a live `/s/trade/<token>` link in Safari | The tab title ends "· Fleeced". Under the CTA: "Fleeced: Dynasty Trade Finder", then an underlined **Privacy** link. Tapping it opens the privacy policy. |
+| R1 | Open a live `/s/trade/<token>` link in Safari | The tab title ends "· Fleeced: Dynasty Trade Finder". Under the CTA: "Fleeced: Dynasty Trade Finder", then an underlined **Privacy** link. Tapping it opens the privacy policy. |
 | R2 | Open an expired or unknown `/s/trade/…` link | The same brand line and **Privacy** link. "Fantasy Trade Finder" appears nowhere on the page. |
-| R3 | Paste a share link into iMessage | The unfurl card's footer reads "Fleeced · fantasy-trade-finder.onrender.com". |
+| R3 | Paste a share link into iMessage | The unfurl card's footer reads "Fleeced: Dynasty Trade Finder · fantasy-trade-finder.onrender.com" on one line. |
 
-**Reviews:** legal-lead (R13 met), design-lead (#373's link style reused), both routed via head-eng.
+**Reviews:** design-lead **passed** the link style and brand line at `8b90d674` (2026-10-31). Their two string changes (`s4.title`, `s4.og_footer`) and the `.brand` contrast fix are applied. Legal-lead's review of R13 is routed via head-eng.
+
+**Not done here (design-lead optional item 5):** the expired page's approved `p29.*` set (title "Link expired — Fleeced: Dynasty Trade Finder", headline, body, og lines) is engagement-eng's P29 work. Its tab title reads "This trade link has expired. · Fleeced: Dynasty Trade Finder" until then.
+
+**Merge overlap:** #386 (Referral D-1, also stacked on #362) also rewrites `_share_html` (`share_kind`/`noindex`, drops `cta_url`). Whichever lands second must keep the R13 lines; `_assert_r13` catches a drop.
 
 **Flagged, not changed:** `server.py:28191` push copy "@{name} joined Fantasy Trade Finder via your invite." It's off `/s/*`, so it goes to head-eng for marketing.

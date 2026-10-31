@@ -247,6 +247,7 @@ def test_trade_cards_carry_noindex_header(env, kind):
 PRIVACY_LINK = '<a href="/privacy">Privacy</a>'
 BRAND_DIV = '<div class="brand">Fleeced: Dynasty Trade Finder</div>'
 TOKENS_CSS = '<link rel="stylesheet" href="/css/tokens.css">'
+OG_FOOTER = "Fleeced: Dynasty Trade Finder · fantasy-trade-finder.onrender.com"
 
 
 def _assert_r13(r) -> None:
@@ -255,8 +256,13 @@ def _assert_r13(r) -> None:
     assert html.count(PRIVACY_LINK) == 1
     assert "Fantasy Trade Finder" not in html
     titles = re.findall(r"<title>[^<]*</title>", html)
-    assert len(titles) == 1 and titles[0].endswith(" · Fleeced</title>"), titles
+    assert len(titles) == 1 and titles[0].endswith(
+        " · Fleeced: Dynasty Trade Finder</title>"), titles
     assert html.count(BRAND_DIV) == 1
+    # .brand reads var(--chalk-dim) from tokens.css (AA contrast on #0f1322).
+    brand_rules = re.findall(r"\.brand\{[^}]*\}", html)
+    assert len(brand_rules) == 1 and "color:var(--chalk-dim);" in brand_rules[0], \
+        brand_rules
     # The link sits directly after the brand div, inside .card.
     assert re.search(re.escape(BRAND_DIV) + r'\s*<div class="legal-links">'
                      + re.escape(PRIVACY_LINK) + r"</div>\s*</div>\s*</body>",
@@ -292,13 +298,13 @@ def test_og_footer_brand_is_fleeced_source_level():
     """SOURCE-LEVEL check, not a pixel check: reads og_image.py as text.
 
     It proves the old brand string is gone from the module and the footer
-    assignment names Fleeced. It does not prove what the PNG shows; the
-    next test spies on the drawn text for that.
+    assignment is marketing's approved string. It does not prove what the
+    PNG shows; the next test spies on the drawn text for that.
     """
     src = Path(og_image.__file__).read_text()
     assert "Fantasy Trade Finder" not in src
     footers = re.findall(r"^\s*footer = (.+)$", src, re.M)
-    assert len(footers) == 1 and "Fleeced" in footers[0], footers
+    assert footers == [f'"{OG_FOOTER}"'], footers
 
 
 def test_og_trade_card_still_renders_with_fleeced_footer(env):
@@ -312,5 +318,5 @@ def test_og_trade_card_still_renders_with_fleeced_footer(env):
     assert r.data[:8] == b"\x89PNG\r\n\x1a\n"
     drawn = [c.args[2] if len(c.args) > 2 else c.kwargs.get("text")
              for c in spy.call_args_list]
-    assert "Fleeced · fantasy-trade-finder.onrender.com" in drawn
+    assert OG_FOOTER in drawn
     assert not any("Fantasy Trade Finder" in str(t) for t in drawn)
