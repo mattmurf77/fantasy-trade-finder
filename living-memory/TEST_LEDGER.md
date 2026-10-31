@@ -38,6 +38,18 @@ Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook
   - G3-d without the limit;
   - the kill without the limit.
 - **Suites:** all `test_eval_*` plus `test_evidence_pack.py` and `test_deck_value_model.py`, on main @ `9370670e`: 481 passed.
+## 2026-11-01 — #373: privacy §6's two "not yet" team-overhaul sentences dropped (#540 deletes and exports overhauls)
+
+Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.
+
+- **Legal's trigger "S18 lands"** (drafts Part 4.2, R28.22): drop each sentence once its half is live. `#540` deletes the user's own overhauls and exports them, so both go:
+  - "team-overhaul plans you created, which aren't yet removed by in-app deletion…" (§6 What may remain);
+  - "Team-overhaul plans are not yet included; email us for a copy." (§6 Export).
+  - Pushed only after `#540` was on main; `#373` deploys after it.
+- **Pins:** `POL-overhaul-covered` fails if either sentence comes back (`local/373-r28-20-full` still carries both). `POL-r28-19`'s position anchor moves to the inviter line's "Email us to have it removed;", the item now before it.
+- **Sabotage:** 4/4 red: each sentence back, one reworded, and the R28.19 item removed.
+- **Suites:** web structure 249/249.
+
 ## 2026-11-01 — #373 QA P1-1: legal R28.25's §3 calculator line pinned; /privacy links pinned (P3-1)
 
 Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.

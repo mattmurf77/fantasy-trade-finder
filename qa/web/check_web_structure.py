@@ -655,7 +655,7 @@ def run() -> int:
          "placeholder; references to you in other users' sent trade proposals and \"bad trade\" flags "
          "are cleared; feedback you sent"),
         ("§6 may remain: suggestions already shown",
-         "Email us and we'll delete them; trade suggestions already shown to other users, which stay in "
+         "Email us to have it removed; trade suggestions already shown to other users, which stay in "
          "their records and can include your platform user ID, the players you held and the values the "
          "suggestion used. They're deleted when that user deletes their account; public league records "
          "on Sleeper, ESPN or MFL"),
@@ -769,6 +769,16 @@ def run() -> int:
             (f"not verbatim ({version} version, legal R28.23 3b): " + "; ".join(want)) if want else
             ("the other version's line is also there: " + "; ".join(other)) if other else
             f"share lines verbatim ({version} version)")
+
+    # Legal R28.22 / drafts trigger "S18 lands": #540 deletes and exports the
+    # user's own team overhauls, so privacy §6's two "not yet" overhaul
+    # sentences are gone and must not come back (local/373-r28-20-full still
+    # carries them).
+    stale_ovh = [t for t in ("aren't yet removed by in-app deletion",
+                             "Team-overhaul plans are not yet included") if t in priv]
+    r.check("POL-overhaul-covered[privacy.html]", not stale_ovh,
+            "§6 still says overhaul plans aren't covered: " + "; ".join(stale_ovh) if stale_ovh
+            else "§6 has no \"not yet\" overhaul sentence")
 
     # Legal R28.25 row 5 (2026-11-01), a MUST for 11-06: privacy §3 says a
     # leaguemate in the in-league calculator sees a numeric read of your
