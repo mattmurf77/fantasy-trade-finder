@@ -24,7 +24,7 @@ Gates: the scope block `scope-deletion-scrub.md` (legal R28.22 f's trace, c3 #7 
   - finish before the grace pass;
   - no boot migration;
   - a left league's names unused.
-- **Suites:** the three scrub files, 44 passed.
+- **Suites:** the three scrub files, 44 passed; every deletion, scrub, tick and Calibration suite, 1,371 passed; **the full backend suite** at `60f13dd0`: 10,218 passed, 2 skipped, 0 failed.
 
 ## 2026-10-31 — Deletion scrub stage 2: packs through the codec, the cached writer state, the page store (legal R28.22, G-a1 to G-a3)
 
