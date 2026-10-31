@@ -707,3 +707,18 @@ def test_bakeoff_batches_by_count_and_by_bytes_each_renewing_the_lease(engine, m
     n = scrub._redact_bakeoff_runs(["r1", "r2", "r3", "r4"],
                                    {"ids": [DEL], "token": "redacted:t", "lease": Lease(), "job_id": "j"})
     assert n == 4 and len(renewed) == 3
+
+
+def test_every_impressions_batch_renews_the_lease(engine, monkeypatch):
+    """#557 re-QA P3: the rows are redacted in batches, each renewing the
+    job's lease, so a long league pass can't outlast it."""
+    monkeypatch.setattr(scrub, "_BATCH", 1)
+    renewed = []
+
+    class Lease:
+        def renew(self):
+            renewed.append(1)
+    ids = ["c-del-0", "c-del-1", "c-other-2"]
+    scrub._redact_impressions(ids, {"ids": [DEL], "token": "redacted:t", "lease": Lease(),
+                                    "job_id": "j"})
+    assert len(renewed) == len(ids)

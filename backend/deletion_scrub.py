@@ -527,7 +527,9 @@ def _bakeoff_batches(conn, run_ids) -> list[list]:
     """run_ids grouped into batches by count and by their rows' total size
     (one row bigger than the byte cap is a batch of its own)."""
     t = db.bakeoff_runs_table
-    size = sum((func.coalesce(func.length(t.c[c]), 0)
+    # octet_length reads the stored size; length() decompresses each TOASTed
+    # value to count characters (#557 re-QA P3).
+    size = sum((func.coalesce(func.octet_length(t.c[c]), 0)
                 for c in ("config_json",) + _BAKEOFF_JSON_COLUMNS), 0)
     sizes = dict(conn.execute(select(t.c.run_id, size).where(t.c.run_id.in_(list(run_ids)))).all())
     batches, current, total = [], [], 0
