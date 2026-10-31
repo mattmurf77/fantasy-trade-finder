@@ -283,7 +283,9 @@ def test_candidate_members_take_the_token_through_the_codec_and_json(engine):
 def test_two_runners_never_claim_one_job(engine):
     accounts.delete_user_data(DEL)
     now = datetime.now(timezone.utc)
-    assert len(scrub._claim(now)) == 1 and scrub._claim(now) == []
+    stale = job(engine)                      # both runners read the row before either claims
+    assert scrub._take(stale, now) is True and scrub._take(stale, now) is False
+    assert scrub._claim(now) == []           # held
     assert scrub._claim(now + scrub.LEASE + timedelta(seconds=1)) != []     # a crashed holder
 
 

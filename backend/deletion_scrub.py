@@ -401,18 +401,18 @@ def _claim(now: datetime) -> list[dict]:
     with db.engine.connect() as conn:
         rows = conn.execute(select(t).where(or_(t.c.claimed_until.is_(None),
                                                 t.c.claimed_until < _iso(now)))).mappings().all()
-    held = []
-    for row in rows:
-        if not _db_due(row, now):
-            continue
-        lease = (t.c.claimed_until.is_(None) if row["claimed_until"] is None
-                 else t.c.claimed_until == row["claimed_until"])
-        with db.engine.begin() as conn:
-            got = conn.execute(update(t).where(t.c.job_id == row["job_id"], lease).values(
-                claimed_until=_iso(now + LEASE), attempts=t.c.attempts + 1)).rowcount
-        if got:
-            held.append(_job(row))
-    return held
+    return [_job(row) for row in rows if _db_due(row, now) and _take(row, now)]
+
+
+def _take(row, now: datetime) -> bool:
+    """Take the row's lease if it is still the one read (CAS): of two
+    runners that read the same row, one wins."""
+    t = db.deletion_scrub_jobs_table
+    lease = (t.c.claimed_until.is_(None) if row["claimed_until"] is None
+             else t.c.claimed_until == row["claimed_until"])
+    with db.engine.begin() as conn:
+        return bool(conn.execute(update(t).where(t.c.job_id == row["job_id"], lease).values(
+            claimed_until=_iso(now + LEASE), attempts=t.c.attempts + 1)).rowcount)
 
 
 def _short(job_id: str) -> str:
