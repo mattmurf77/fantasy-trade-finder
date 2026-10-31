@@ -307,6 +307,43 @@ def _insert_events_ignore(conn, rows: list[dict]) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
+# `source` resolution (G-068). The column used to default to "mobile" when
+# X-Source was absent, so web's sendBeacon flush (which cannot set headers)
+# landed web rows as mobile. A missing signal must land MISSING_EVENT_SOURCE,
+# never another client's name.
+# ---------------------------------------------------------------------------
+
+# The only values a client may claim, by header or by body. `api`, `server`
+# and `calc_queue` are server-written (record_event) and never come through
+# /api/events, so neither channel may claim them.
+CLIENT_EVENT_SOURCES = frozenset({"mobile", "web", "extension"})
+# Body platforms that name a non-mobile client on their own: cached copies of
+# the old web events.js send platform:"web" in the beacon body but no source.
+_SELF_NAMED_PLATFORMS = frozenset({"web", "extension"})
+# Stored when no client identified itself. analytics-lead owns this value and
+# decided NULL on 2026-10-31.
+MISSING_EVENT_SOURCE = None
+
+
+def _resolve_event_source(headers, body: dict, device_info: dict) -> str | None:
+    """First match wins: X-Source header in the closed set → body `source` in
+    the closed set → body `platform` web/extension → an X-Device header (only
+    the mobile SDK sends one) → MISSING_EVENT_SOURCE."""
+    header = (headers.get("X-Source") or "").strip().lower()
+    if header in CLIENT_EVENT_SOURCES:
+        return header
+    claimed = str(body.get("source") or "").strip().lower()
+    if claimed in CLIENT_EVENT_SOURCES:
+        return claimed
+    platform = str(body.get("platform") or "").strip().lower()
+    if platform in _SELF_NAMED_PLATFORMS:
+        return platform
+    if (device_info.get("device_type") or "").strip():
+        return "mobile"
+    return MISSING_EVENT_SOURCE
+
+
+# ---------------------------------------------------------------------------
 # The pipeline (LLD §4.1, exact order)
 # ---------------------------------------------------------------------------
 
@@ -387,7 +424,7 @@ def ingest_request(session_user_id: str | None, *, on_accepted=None):
 
     # Request-level stamps shared by every row.
     info = getattr(g, "device_info", {}) or {}
-    source = (request.headers.get("X-Source") or "").strip() or "mobile"
+    source = _resolve_event_source(request.headers, body, info)
     # Coarse geo: CDN-provided country header only (CF-IPCountry when
     # Cloudflare fronts the service; X-Country-Code as a generic fallback).
     # Never derived from or stored with the raw IP (PII posture, FR-47).
