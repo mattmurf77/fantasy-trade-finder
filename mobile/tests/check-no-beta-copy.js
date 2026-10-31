@@ -10,13 +10,13 @@
 // Projected; the `beta` data fields, and `showRecords = !meta.beta`, are
 // unchanged. Failure mode this catches: any string that can reach the screen
 // (a string literal, a template literal part, JSX text, an accessibilityLabel,
-// an app.json display string) bringing the word back.
+// an app.json display string, an Info.plist value) bringing the word back.
 //
 // Pinned:
-//   (s1) Every .ts / .tsx / .js / .jsx under src/, plus App.tsx, parsed as an
-//        AST (so comments never count). A StringLiteral,
-//        NoSubstitutionTemplateLiteral, template head / middle / tail or
-//        JsxText matching /\bbeta\b/i FAILS, except:
+//   (s1) Every .ts / .tsx / .js / .jsx under src/, plus App.tsx,
+//        app.config.js and index.ts, parsed as an AST (so comments never
+//        count). A StringLiteral, NoSubstitutionTemplateLiteral, template
+//        head / middle / tail or JsxText matching /\bbeta\b/i FAILS, except:
 //          - the value of a testID / nativeID JSX attribute (never shown);
 //          - import / export module specifiers, and require('…') /
 //            import('…') arguments;
@@ -24,15 +24,23 @@
 //          - quoted property names (the `name` of a PropertyAssignment);
 //          - the ALLOW list below.
 //   (s2) Every string value in app.json (display name, permission strings).
+//   (s3) Every <string>…</string> value in ios/DTFDynastyTradeFinder/Info.plist
+//        (CFBundleDisplayName, usage descriptions), read with a regex over
+//        the XML (XML comments stripped first); one matching /\bbeta\b/i
+//        FAILS.
 //   (a)  ALLOW is a ratchet: each entry must match exactly one string in its
 //        file. One that matches none (stale) or several FAILS.
 //   (p)  Positive controls, so the scan can't pass vacuously: at least 100
-//        files scanned, and the scan itself visits each ribbon's
-//        PROJECTED / 'Projected' string.
+//        files scanned, App.tsx, app.config.js and index.ts among them, each
+//        with its strings visited; Info.plist's CFBundleDisplayName value
+//        scanned; and the scan itself visits each ribbon's PROJECTED /
+//        'Projected' string.
 //
 // HONEST LABEL (G-035): this proves the source holds no such string, not what
-// renders. A "beta" assembled at runtime from non-matching pieces, or served by
-// the backend, is not seen here (TestFlight checklist: scope.md §3).
+// renders. Out of its reach: strings assembled at runtime ('BE' + 'TA',
+// computed keys) and text the server sends (TestFlight checklist: scope.md
+// §3). Server messages are covered, for Win Now's `Unavailable` messages
+// only, by backend/tests/test_no_beta_user_messages.py.
 //
 // Run: node tests/check-no-beta-copy.js   (or: npm run test:no-beta-copy)
 
@@ -122,7 +130,8 @@ function excluded(n) {
 }
 
 // ── Scan ──────────────────────────────────────────────────────────────────
-const files = [...listSources(path.join(ROOT, 'src')), path.join(ROOT, 'App.tsx')];
+const ROOT_SOURCES = ['App.tsx', 'app.config.js', 'index.ts'];
+const files = [...listSources(path.join(ROOT, 'src')), ...ROOT_SOURCES.map((f) => path.join(ROOT, f))];
 const seen = new Map(); // rel → [{ node, text }] for every string the scan visited
 const hits = [];
 const allowHits = ALLOW.map(() => 0);
@@ -152,7 +161,7 @@ for (const abs of files) {
 
 assert(
   hits.length === 0,
-  `s1 no string literal, template part or JSX text in src/ or App.tsx matches /\\bbeta\\b/i (${hits.length} hit(s))`,
+  `s1 no string literal, template part or JSX text in src/, App.tsx, app.config.js or index.ts matches /\\bbeta\\b/i (${hits.length} hit(s))`,
   hits,
 );
 
@@ -175,6 +184,20 @@ assert(
   );
 }
 
+// ── Info.plist ────────────────────────────────────────────────────────────
+const PLIST = 'ios/DTFDynastyTradeFinder/Info.plist';
+const plistValues = [];
+{
+  const xml = fs.readFileSync(path.join(ROOT, PLIST), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+  for (const m of xml.matchAll(/<string>([\s\S]*?)<\/string>/g)) plistValues.push(m[1]);
+  const plistHits = plistValues.filter((v) => BETA.test(v)).map((v) => JSON.stringify(v));
+  assert(
+    plistValues.length > 0 && plistHits.length === 0,
+    `s3 no <string> value in ${PLIST} matches /\\bbeta\\b/i (${plistValues.length} values scanned)`,
+    plistHits,
+  );
+}
+
 // ── Allowlist ratchet ─────────────────────────────────────────────────────
 ALLOW.forEach((e, i) => {
   assert(
@@ -187,7 +210,10 @@ ALLOW.forEach((e, i) => {
 });
 
 // ── Positive controls ─────────────────────────────────────────────────────
-assert(files.length >= 100, `p1 the scan visited at least 100 files (${files.length})`);
+assert(
+  files.length >= 100 && ROOT_SOURCES.every((f) => seen.has(f)),
+  `p1 the scan visited at least 100 files (${files.length}), ${ROOT_SOURCES.join(', ')} among them`,
+);
 
 const within = (node, ancestor) => {
   for (let p = node; p; p = p.parent) if (p === ancestor) return true;
@@ -240,6 +266,18 @@ function ribbonStrings(rel, testID) {
     !!fn && texts.includes('Projected'),
     "p4 LeagueSummaryScreen: the scan visits 'Projected' inside betaRibbonLabel",
     fn ? `strings inside: ${JSON.stringify(texts)}` : 'function betaRibbonLabel not found',
+  );
+}
+for (const f of ROOT_SOURCES) {
+  const n = (seen.get(f) || []).length;
+  assert(n > 0, `p5 ${f}: the scan parsed it and visited its strings (${n})`);
+}
+{
+  const m = fs.readFileSync(path.join(ROOT, PLIST), 'utf8')
+    .match(/<key>CFBundleDisplayName<\/key>\s*<string>([\s\S]*?)<\/string>/);
+  assert(
+    !!m && plistValues.includes(m[1]),
+    `p6 Info.plist: the scan read the CFBundleDisplayName value (${m ? JSON.stringify(m[1]) : 'not found'})`,
   );
 }
 

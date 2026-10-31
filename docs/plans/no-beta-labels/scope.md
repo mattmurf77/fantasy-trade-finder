@@ -30,10 +30,14 @@ The word "beta" is removed from every user-visible string in the iOS binary. The
 | `mobile/src/screens/LeagueSummaryScreen.tsx` | `betaRibbonLabel` no longer appends `beta`. The Season outlook ribbon reads `Projected · preseason` before week 1 and `Projected` otherwise (was `Projected · preseason · beta` / `Projected · beta` through week 5). `meta.beta` still hides win-loss records through week 5 (`showRecords = !meta.beta`), which is the load-bearing honesty rule (`docs/cross-client-invariants.md` § Playoff outlook bands), unchanged. The header comment is updated. Identifiers (`betaRibbonLabel`, `styles.betaRibbon`) and the testID `league-summary.odds.beta-ribbon` keep their names: none of them is shown. |
 | `mobile/tests/check-no-beta-copy.js` (new) + `npm run test:no-beta-copy` | Guard (§3). |
 | `mobile/tests/README.md` | Row for the new guard. |
+| `backend/win_now_service.py:154` (follow-up, release-lead QA P2) | The Win Now "unavailable" message, which `WinNowScreen.tsx:195` renders from `baseline.message` once a league reaches its fantasy playoffs, reads "Win Now supports projections before the fantasy playoffs begin." (was "This beta supports…"). The reason code is unchanged. The wording swap goes via head-eng for marketing confirmation. New `backend/tests/test_no_beta_user_messages.py`: no `Unavailable(...)` string argument anywhere in `backend/` matches `\bbeta\b`. |
+| `mobile/tests/check-no-beta-copy.js` (follow-up, release-lead QA P3) | Also scans `app.config.js`, `index.ts` and `ios/DTFDynastyTradeFinder/Info.plist` `<string>` values. Its header states the limits: runtime-assembled strings and server text are out of its reach. |
+| `mobile/src/api/league.ts:726-728` (follow-up, release-lead QA P3) | A stale comment that quoted "Projected · preseason · beta". |
 
 Not in scope:
 - **Web** (`web/terms.html`, `web/privacy.html` "beta" lines): #373 (onboarding-eng) covers them, per head-eng.
-- **Backend:** no user-facing backend string contains "beta". Every hit in `backend/*.py` is a comment, a statistics term (the Beta distribution) or admin analytics copy.
+- **Backend:** *corrected 2026-10-31.* The first inventory said no user-facing backend string contained "beta", but its search output was cut off at 40 lines and missed `win_now_service.py:154`, which release-lead's QA found. That one is fixed above. The rest are comments, the Beta distribution, admin analytics copy, the never-rendered `MODEL_VERSION`, and `beta` data fields.
+- **`config/features.json:79`**, the `_comment_outlook_odds` string, still quotes "Projected · preseason · beta". The file is a flag surface, so it's flagged to head-eng rather than edited here.
 - **Win Now** shows "Uncalibrated estimate" (`utils/winNow.ts:22`), not "beta".
 
 ## 1. Analytics scope
@@ -71,6 +75,8 @@ Not in scope:
   | 1 | League → Season outlook section | The ribbon beside "Season outlook" reads **PROJECTED** (or **PROJECTED · PRESEASON** before week 1), never "BETA". The source says `'Projected'`, but `type.label` renders it uppercase, as on rows 2 and 3 (design-lead, 2026-10-31). In a league with fewer than 6 completed weeks, win-loss records stay hidden, as before. |
   | 2 | Trades → a trade card that shows the "Playoff outlook" block | The ribbon reads **PROJECTED**, never "BETA". |
   | 3 | League → a team → Team review → "Playoff outlook" card | The ribbon reads **PROJECTED**, never "BETA". |
+  | 4 (optional, release-lead QA) | Use a drafted Sleeper league whose `start_week` is after the current NFL week, so `completed_weeks = 0`: open League → Season outlook, then a trade card and Team review in that league | Season outlook reads **PROJECTED · PRESEASON** with no win-loss records. The trade card and Team review ribbons read **PROJECTED**. Never "BETA". |
+  | 5 (optional; from the week the league's fantasy playoffs start) | Win Now in a league whose regular season is over | The unavailable message reads "Win Now supports projections before the fantasy playoffs begin.", never "beta". |
 
   On 2026-10-31 most leagues have 6+ completed weeks, so `beta` is already false and these rows show no visible change. The guard is the evidence for the early-season case. Rows 1–3 confirm nothing else moved.
 - `testID`s added/renamed: none. `bash scripts/testid-lint.sh` must stay OK.
@@ -135,6 +141,10 @@ At the branch tip, from `mobile/` with `NODE_PATH` at another checkout's `node_m
 | `pytest test_outlook_route_cache.py test_outlook_odds.py`, after updating that test | 56 passed, 1 skipped (the offline backtest, env-gated) |
 | `pytest` on the 11 backend files that read mobile source (`git grep -l -E "LeagueSummaryScreen\|TeamReviewScreen\|CardImpactBlock\|mobile/src" -- backend/tests`) | 358 passed |
 | Updated test, sabotage: `parts.push('beta')` back / `showRecords = true` / `'preseason'` push removed | each red, on its own assertion only |
+| Follow-ups (release-lead QA): `node tests/check-no-beta-copy.js` | 12 PASS, 0 FAIL: 337 files, 31 `app.json` values, 25 `Info.plist` values |
+| `pytest test_no_beta_user_messages.py` + the 13 `backend/tests` files that mention `win_now` | 523 passed. Re-run by league-eng (new test + `test_win_now_service`, `test_win_now_api`, `test_outlook_route_cache`): 115 passed |
+| Follow-up sabotage runs | Win Now message back to "This beta…" → pytest red. `Unavailable("x", "Beta only")` (bare name and attribute form) → red. `Unavailable("beta_only")` with no message, which shows as "Beta only" → red. `CFBundleDisplayName` "Fleeced Beta" → guard s3 red. "test beta" in `app.config.js` and a `'beta'` literal in `index.ts` → guard s1 red. |
+| `testid-lint`, `tsc --noEmit` (deps-linked copy, shared `mobile-deps` install) | OK, exit 0 |
 
 **Sabotage** (applied, guard run, restored byte for byte):
 
