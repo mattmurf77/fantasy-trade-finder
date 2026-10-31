@@ -31,6 +31,7 @@
   - in each `<ShareTradeImage … />` element and in the calculator's `shareTrade` text, no verdict / win / board / ratio / consensus-total string and no verdict function remain, and each states `SHARE_VALUE_LINE`.
   - **Against main's share code it fails 19 checks.**
 - [x] **Unit tests:** none. This is a client-only copy removal; the guard covers it.
+- [x] **Before/after renders** (for the operator's design approval): `renders/calculator-before-after.png` and `renders/in-league-before-after.png`, the latter against a diverging opponent. They're Pillow mocks of `ShareTradeImage`'s layout in the Chalkline tokens and the card's fonts, not device captures (D-056).
 - [x] **Manual TestFlight checklist** (operator, on the 11-06 binary):
   1. Calculator (live, both sides filled) → **Share image**: the card shows the two sides with tier badges and then "Package value". No TOTAL rows, no "Verdict", no "%".
   2. In the same state, turn image capture off (or on Android) → the text fallback reads "Trade idea (…)", "Side A: …", "Side B: …", "Package value", and nothing else.
