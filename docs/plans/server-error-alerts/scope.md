@@ -20,11 +20,11 @@ With a DSN:
 - **Each event is built from an allowlist** (`scrub_event`, before_send), following legal R28.23. Anything not listed is dropped, unknown keys included. If building it raises, nothing is sent.
   - The SDK's own top-level fields, as before.
   - `request` is `{method, url}`, where `url` is the **Flask route pattern** (`url_rule.rule`, else `<unmatched>`), read on the capturing thread. It is never the path or query. With no request context, there is no `request`.
-  - `exception` / `threads`: type, module, mechanism and frames, with no locals. **No `value`**: the exception's text.
+  - `exception` / `threads`: type, module, mechanism and frames. Frames carry file, function and line only: no locals, and no source lines (`include_source_context=False`). **No `value`**: the exception's text.
   - `logentry`:
-    - the **template** (`record.msg`), with the pattern scrub over it as a second layer;
-    - `params`, keeping only numbers under 9 digits, `[Filtered]` otherwise;
-    - `formatted`, rebuilt from those two, or dropped if they don't format.
+    - the **template** (`record.msg`), **only from a logger we control** (`backend.*`, `trade_finder`, `ftf.*`, `gunicorn.error`), with the pattern scrub over it as a second layer. Any other logger's template becomes `[Filtered]`; its name and level still go;
+    - `params`: **every one is `[Filtered]`, numbers included**, because a `match_id` is a `/s/trade/` link code;
+    - `formatted`, rebuilt from those two, or dropped if they don't format (a `%d`).
   - `message`: only `http_5xx` or `feedback_received`, else `[Filtered]`.
   - `tags`: `route`, `status`, `method`, `feedback_id` and `kind` only.
   - `contexts`: `runtime`, `os` and `trace` only.
@@ -48,18 +48,19 @@ With a DSN:
 
 ## Legal R28.23 conditions
 
-Legal's R28.23 text isn't in the repo. Rows 5 and 7 carry the numbers rankings-eng gave; the other rows follow the brief's order and the page's promise, so **rankings-eng should confirm the numbering against legal's note**. File:line refs are `backend/error_alerts.py` unless noted. Tests are in `backend/tests/test_error_alerts.py`.
+The source is legal-lead's R28.23, row 2 ("Server error reports (Sentry)"), in `docs/plans/org-bringup/leads/legal-lead.md` in the org-bringup worktree. Rows below follow legal's order. File:line refs are `backend/error_alerts.py` unless noted, and tests are in `backend/tests/test_error_alerts.py`. A sabotage, named in brackets, turns its test red.
 
-| Condition | Where it's met | Test (sabotage that turns it red) |
-|---|---|---|
-| Names, IDs and link codes out of the **address** | `_route` `:277-286`: method + `url_rule.rule` only; `_allowlisted` `:291-294` sends it only inside a request | `test_legal_condition_7_no_planted_value_leaves`, `test_scrub_event_request_and_message_edges` (real path; query kept) |
-| Personal details out of the **log lines** | `_param` / `_logentry` `:239-261`: the template, numbers under 9 digits, `formatted` rebuilt; `_scrub_str` `:233` over the template as a second layer. Templates must be constants: AST guard (i) | condition 7, `test_scrub_event_is_an_allowlist`, `test_a_raising_daily_tick_step_is_one_event`, `test_every_error_log_template_in_backend_is_a_constant` (raw params kept; one f-string `log.error`) |
-| No exception text or locals | `_stack` `:264-274` (`_CODE_KEYS` `:128`, no `value`, frame `vars` popped at `:272`); `include_local_variables=False` `:151` | condition 7, the allowlist test (`value` kept) |
-| No account or platform user ID, username, IP, sign-in details or content | `_allowlisted` `:289-306`: no `user`, `extra` or `breadcrumbs`, and no headers, cookies or body in `request`; tags `:303` and contexts `:305` allowlisted; `send_default_pii=False` `:150`; `max_request_body_size="never"` `:152`. `feedback_received` carries id and severity only (`server.py` `submit_feedback_route`) | condition 7, `test_no_credential_reaches_the_envelope`, the feedback test (headers kept; notify on a fork) |
-| **5**: Sentry project Data Scrubber, Default Scrubbers, Prevent Storing of IP Addresses ON | operator, `docs/runbook.md` § Server error alerts, "Turning it on" step 2 | none in code; the runbook's first-hour check opens three events |
-| Logging breadcrumbs (strictest form: none) | `LoggingIntegration(level=None, …, sentry_logs_level=None)` `:159`; `scrub_breadcrumb` `:319-323` returns None; the allowlist drops `breadcrumbs` | `test_breadcrumbs_are_off`, `test_init_options`, condition 7's "none collected" check (breadcrumbs re-enabled) |
-| "If that can't be done, the report isn't sent" | `scrub_event` `:309-316`: any exception → None | `test_a_scrubber_exception_drops_the_event`, `…_sends_nothing_unsafe` (fail open) |
-| **7**: one request with the planted id, username, share token, email and IP in the path; `?ref=`/`token=`; X-Forwarded-For, X-Real-IP, Cookie, Authorization (plus X-Session-Token, which the SDK's own header filter doesn't know); the values logged, held in a local, and raised | `test_legal_condition_7_no_planted_value_leaves`. It checks that none of the planted values is in the serialized envelope bytes, and that `request.url` is the route pattern. It also checks the SDK did collect them before the allowlist, so the test isn't vacuous | all six legal sabotages, plus `before_send` removed |
+| # | Legal's condition | Where it's met | Test |
+|---|---|---|---|
+| 1 | **The address is the route pattern** (or id/username/token segments replaced); **the query string is dropped** | `_route` `:285-294`: method + `url_rule.rule`, else `<unmatched>`, read on the capturing thread; `_allowlisted` `:299-302` sends it only inside a request context | `test_legal_condition_7_no_planted_value_leaves`, `test_scrub_event_request_and_message_edges`, `test_a_match_id_never_reaches_the_envelope` [real path; query kept] |
+| 2 | **No request headers are sent** (cookies, `Authorization`, `X-Forwarded-For`, `X-Real-IP`) | `_route` builds `request` from method and pattern only, so the SDK's `headers`, `cookies`, `env`, `data` and `query_string` never pass `_allowlisted` (`:297-314`); `max_request_body_size="never"` `:161` | condition 7 (all four, plus `X-Session-Token`), `test_no_credential_reaches_the_envelope` [headers kept] |
+| 3 | **Stack traces go without local variables** | `include_local_variables=False` `:159`; frame `vars` popped `:280`. Stricter: no source lines either (`include_source_context=False` `:160`) and no exception text (`_stack` `:272-282`, `_CODE_KEYS` `:136`) | condition 7 (the planted values are held in a local), `test_frames_carry_no_source_lines`, `test_scrub_event_is_an_allowlist` [`value` kept; `include_source_context=True`] |
+| 4 | **`send_default_pii=False`; no user context; logging breadcrumbs pass the scrub** | `send_default_pii=False` `:158`; `_allowlisted` drops `user`, `extra` and `breadcrumbs` (`:297-314`). Breadcrumbs, the strictest form, are off: `LoggingIntegration(level=None, …, sentry_logs_level=None)` `:168`, and `scrub_breadcrumb` returns None (`:327-331`). The log lines that *are* sent (events) carry the template from our loggers only (`_ours` `:248`, `_OUR_LOGGERS` `:80`), every param `[Filtered]` (`_logentry` `:253-269`), and the pattern scrub over it (`_scrub_str` `:242`). Templates are constants (the AST guard). Tags `:311` and contexts `:313` are allowlisted | condition 7, `test_a_match_id_never_reaches_the_envelope`, `test_a_third_party_template_is_filtered`, `test_template_only_from_our_loggers`, `test_breadcrumbs_are_off`, `test_init_options`, `test_every_error_log_template_in_backend_is_a_constant` [raw params kept; ints pass; templates from every logger; breadcrumbs re-enabled; an f-string `log.error`] |
+| 5 | **Sentry's own server-side scrubbing stays on**, as a second layer | operator-side: `docs/runbook.md` § Server error alerts, "Turning it on" step 2 (Data Scrubber, Use Default Scrubbers, Prevent Storing of IP Addresses ON; the last also answers legal's Q11) | none in code; the runbook's first-hour check opens three events |
+| 6 | **The feedback alert carries only the id and the severity** | `notify` (`:188-203`, fresh scopes, the given tags only), called from `server.py:16269` in `submit_feedback_route` with `feedback_id` and `kind` only; `_MESSAGES` `:71` | `test_new_feedback_is_one_tag_only_alert_and_a_duplicate_none` [notify on a fork; the duplicate guard removed] |
+| 7 | **A test pins it:** an error carrying a user id, a username, a share token, an email and an IP in the path, the query, a log line and a local comes out clean, or isn't sent | `test_legal_condition_7_no_planted_value_leaves`. It asserts none of the 8 planted values is in the serialized envelope bytes, `request.url` is the route pattern, the SDK did collect the values before the allowlist (not vacuous), and no breadcrumbs were collected. "Or isn't sent": `scrub_event` `:317-324`, where any exception → None (`test_a_scrubber_exception_*`) | the six R28.23 sabotages, plus `before_send` removed and fail-open |
+
+**Legal's gate (MUST):** the operator sets `SENTRY_DSN` only after the page with these lines (#373) is live. Per legal, it doesn't wait on A2/Q11.
 
 ## 1. Analytics scope
 
@@ -82,18 +83,18 @@ Legal's R28.23 text isn't in the repo. Rows 5 and 7 carry the numbers rankings-e
 <!-- D-056: Maestro and the simulator are retired. -->
 
 - Maestro: **retired (D-056)**. Simulator captures: **retired (D-056)**.
-- [x] **Unit tests:** `backend/tests/test_error_alerts.py`, 52 tests, with a recording transport and a fake DSN, so nothing goes over the network:
+- [x] **Unit tests:** `backend/tests/test_error_alerts.py`, 68 tests, with a recording transport and a fake DSN, so nothing goes over the network:
   - (a) no DSN: no client, nothing sent, the SDK never imported; a malformed DSN doesn't fail boot; the init options are pinned;
   - (b) a raising route is one event, with the stack but without its text;
   - (c) a handled 503 is one `http_5xx`, with its tags and fingerprint; a 404 is none; a handled 500 after `log.exception` is one event;
   - (d) a `_cleanup_loop` step raising is one event;
   - (e) a `daily_tick` step raising is one event;
-  - (f) the allowlist: legal's condition-7 request and the credential request (no planted value in the envelope bytes), the event shape and edges, the pattern layer, breadcrumbs off, and fail closed (e2e too);
+  - (f) the allowlist: legal's condition-7 request, the credential request, a `match_id` log param and a third-party logger's template (no planted value in the envelope bytes), frames without source lines, templates only from our loggers, the event shape and edges, the pattern layer, breadcrumbs off, and fail closed (e2e too);
   - (g) see the SUP-M7 block;
   - (h) a thread started in a request carries no request;
   - (i) the AST guard: every error-level log template in `backend/` is a constant (177 calls in 153 files).
 
-  Seventeen sabotages, each red then green; see `living-memory/TEST_LEDGER.md` 2026-10-31.
+  Twenty sabotages, each red then green; see `living-memory/TEST_LEDGER.md` 2026-10-31.
 - [x] **Code-walk proof** (fork safety under `--preload`; sentry-sdk 2.72.0):
   - `init_error_alerts()` runs in the gunicorn master and starts no thread. Checked: `threading.enumerate()` is unchanged after init.
   - In the forked worker, the first event calls `BackgroundWorker.submit` (`sentry_sdk/worker.py:140`), which calls `_ensure_thread` (`:65`).

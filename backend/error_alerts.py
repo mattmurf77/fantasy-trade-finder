@@ -20,9 +20,10 @@ With a DSN, what becomes an event:
 
 What is sent is built from an allowlist (legal R28.23; scope.md has the
 conditions table): scrub_event (before_send) keeps the SDK's own fields, the
-request as method + route pattern, exception type/module/frames without their
-message or locals, the log template with only small numeric params, our own
-message constants, allowlisted tags and the runtime/os/trace contexts. Anything
+request as method + route pattern, exception type/module/frames (file,
+function, line; no message, locals or source lines), the log template (from
+our own loggers only; every param [Filtered]), our own message constants,
+allowlisted tags and the runtime/os/trace contexts. Anything
 else, unknown keys included, is dropped; if building it raises, nothing is
 sent. Breadcrumbs are off. Sentry locates an error; its detail stays in the
 Render logs. The pattern scrub (_PATTERNS, the shapes api_observability and
@@ -71,6 +72,12 @@ _MESSAGES = frozenset({"http_5xx", "feedback_received"})
 
 # The only contexts sent: the SDK's runtime / os, and the trace ids.
 _CONTEXTS = frozenset({"runtime", "os", "trace"})
+
+# Loggers whose templates are sent: ours (backend.* from getLogger(__name__),
+# trade_finder, ftf.*), whose templates the AST guard in test_error_alerts
+# keeps constant, and gunicorn's error log. A name matches itself or a child.
+# Any other logger's template becomes [Filtered]; its name and level still go.
+_OUR_LOGGERS = ("backend", "trade_finder", "ftf", "gunicorn.error")
 
 _DIGIT, _LOWER, _UPPER = re.compile(r"\d"), re.compile(r"[a-z]"), re.compile(r"[A-Z]")
 
@@ -123,7 +130,8 @@ _PASS_KEYS = frozenset({
 })
 
 # The parts of an exception or thread entry sent: the code-derived ones (type
-# and module group the issue; frames are file/function/line/source). Never
+# and module group the issue; frames are file/function/line, no source:
+# include_source_context=False). Never
 # `value`, the exception's text.
 _CODE_KEYS = frozenset({"type", "module", "mechanism", "stacktrace"})
 
@@ -149,6 +157,7 @@ def init_error_alerts() -> bool:
             release=os.environ.get("RENDER_GIT_COMMIT") or None,
             send_default_pii=False,
             include_local_variables=False,
+            include_source_context=False,       # frames: file, function, line; no code lines
             max_request_body_size="never",
             # No tracing or profiling: traces/profiles_sample_rate stay unset.
             auto_enabling_integrations=False,
@@ -236,22 +245,21 @@ def _scrub_str(text: str) -> str:
     return text
 
 
-def _param(value):
-    """A log parameter as sent: a number of fewer than 9 digits, else
-    [Filtered] (strings, objects, ids)."""
-    if isinstance(value, (int, float)) and sum(c.isdigit() for c in repr(value)) < 9:
-        return value
-    return _FILTERED
+def _ours(logger) -> bool:
+    return isinstance(logger, str) and any(
+        logger == name or logger.startswith(name + ".") for name in _OUR_LOGGERS)
 
 
-def _logentry(entry: dict) -> dict:
-    """The template (record.msg, a constant: test_error_alerts' AST guard),
-    pattern-scrubbed as a second layer; the params filtered; `formatted`
-    rebuilt from those two, and dropped when they don't format."""
+def _logentry(entry: dict, logger) -> dict:
+    """The template (record.msg) only from a logger we control, pattern-scrubbed
+    as a second layer; from any other logger, [Filtered]. Every param is
+    [Filtered], numbers too (a match_id is a /s/trade/ link code); `formatted`
+    is rebuilt from those two, and dropped when they don't format (a %d)."""
+    if not _ours(logger):
+        return {"message": _FILTERED}
     template = _scrub_str(entry["message"])
     raw = entry.get("params") or []
-    params = ({k: _param(v) for k, v in raw.items()} if isinstance(raw, dict)
-              else [_param(v) for v in raw])
+    params = {k: _FILTERED for k in raw} if isinstance(raw, dict) else [_FILTERED] * len(raw)
     out = {"message": template, "params": params}
     try:
         out["formatted"] = (template % (params if isinstance(params, dict) else tuple(params))
@@ -296,7 +304,7 @@ def _allowlisted(event: dict) -> dict:
         if isinstance(event.get(key), dict):
             out[key] = _stack(event[key])
     if "logentry" in event:
-        out["logentry"] = _logentry(event["logentry"])
+        out["logentry"] = _logentry(event["logentry"], event.get("logger"))
     if "message" in event:
         out["message"] = event["message"] if event["message"] in _MESSAGES else _FILTERED
     if isinstance(event.get("tags"), dict):

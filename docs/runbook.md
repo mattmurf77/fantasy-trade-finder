@@ -275,12 +275,15 @@ GNG-1 (error alerts) and SUP-M7 (`feedback_received`): `backend/error_alerts.py`
 **What an event contains: an allowlist (legal R28.23).** `scrub_event` builds every event from this list and drops everything else, unknown fields included. If building it fails, the event isn't sent.
 - **The SDK's own fields:** event id, time, level, logger name, release, environment, server name, SDK and module versions, the fingerprint, and the transaction (the Flask endpoint's function name).
 - **The request:** the method and the **Flask route pattern** (`/s/trade/<match_id>`), never the real path or query. Outside a request, there's no request at all.
-- **The error:** its exception type and module, and the stack frames (file, function, line, source lines), with no locals. **Never the exception's message**, which can carry a username or SQL `[parameters: …]`.
-- **The log line:** its **template** (`"lookup failed for %s"`). Parameters are kept only if they're numbers under 9 digits; every other one, strings included, becomes `[Filtered]`. A pattern scrub also runs over the template as a second layer. The template is guaranteed constant by a CI test (`test_every_error_log_template_in_backend_is_a_constant`).
+- **The error:** its exception type and module, and the stack frames as file, function and line only: no locals, and no source lines. **Never the exception's message**, which can carry a username or SQL `[parameters: …]`.
+- **The log line:** its **template** (`"lookup failed for %s"`), and only from a logger we control: `backend.*`, `trade_finder`, `ftf.*` and `gunicorn.error`. Any other logger's template becomes `[Filtered]`, though its logger name and level still go, so the alert fires and says where it came from.
+  - **Every parameter is `[Filtered]`, numbers included**, because a `match_id` is a `/s/trade/` link code. Counts and timings stay in the Render logs.
+  - A pattern scrub also runs over the template as a second layer.
+  - Our templates are guaranteed constant by a CI test (`test_every_error_log_template_in_backend_is_a_constant`).
 - **Messages:** `http_5xx` and `feedback_received` only; anything else becomes `[Filtered]`.
 - **Tags:** `route`, `status`, `method`, `feedback_id` and `kind` only.
 - **Contexts:** the Python runtime, the OS and the trace ids.
-- **Never sent:** users, IPs, headers, cookies, request bodies, extras, breadcrumbs (they're off), frame locals, tracing, profiling, SQL queries, and log lines as Sentry Logs.
+- **Never sent:** users, IPs, headers, cookies, request bodies, extras, breadcrumbs (they're off), log parameters, frame locals, source code lines, third-party log templates, tracing, profiling, SQL queries, and log lines as Sentry Logs.
 - **Detail lives in the Render logs; Sentry locates.** An event tells you which error, in which code, on which route, and how often. To see the actual values, look up the same minute in the Render logs.
 
 **Before turning it on (both gates):**
@@ -292,14 +295,14 @@ GNG-1 (error alerts) and SUP-M7 (`feedback_received`): `backend/error_alerts.py`
 2. **In that project's Settings → Security & Privacy, keep these ON** (legal R28.23 condition 5, a second layer the operator controls):
    - **Data Scrubber**;
    - **Use Default Scrubbers**;
-   - **Prevent Storing of IP Addresses**.
+   - **Prevent Storing of IP Addresses**. Legal's Q11 asks whether this is on; tell legal it is.
 3. Copy the project's DSN. In the Render dashboard → the web service → Environment, add `SENTRY_DSN`, and optionally `SENTRY_ENVIRONMENT` (default `production`). Render redeploys.
    - It goes in the dashboard, not `render.yaml`. [Render ignores render.yaml envVars](#render-ignores-renderyaml-envvars-on-the-dashboard-created-web-service-2026-07-19) on this service, and the DSN is never committed.
    - `RENDER_GIT_COMMIT` (set by Render) becomes the release.
 4. **First hour:** trigger nothing on purpose. Watch the Sentry issue stream for:
    - the volume you expected from the gate-2 count;
    - one issue per distinct error;
-   - **open three events.** Each request should be a route pattern, with no real path or `?`; the log message should be a template with `[Filtered]` or small numbers only; and there should be no exception message, user, IP or headers.
+   - **open three events.** Each request should be a route pattern, with no real path or `?`; the log message should be a template with `[Filtered]` parameters only; and there should be no exception message, user, IP or headers.
    - The boot log has **no** `error_alerts: Sentry init failed` line. That line means a malformed DSN, and alerts are off.
 
 **Suggested alert rules (in Sentry):**

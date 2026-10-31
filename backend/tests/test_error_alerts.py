@@ -20,7 +20,9 @@ fixture also records each event as the SDK built it, before scrub_event
   (e) a daily_tick step raising: one event
   (f) the allowlist: legal R28.23's condition-7 request (no planted value in the
       envelope bytes, request.url the route pattern, no breadcrumbs collected),
-      credentials, the event shape, the pattern layer, fail closed
+      credentials, a match_id (a link code) as a log param, a third-party
+      logger's template, frames without source lines, the event shape, the
+      pattern layer, fail closed
   (g) POST /api/feedback: one feedback_received carrying exactly feedback_id
       and kind, nothing of the note; a duplicate: none
   (h) a thread started in a request: its event carries no request
@@ -48,12 +50,17 @@ Sabotage record (each applied, observed red, restored green):
   logging breadcrumbs re-enabled (level=INFO and  -> (f) condition 7 (collected), init, breadcrumb RED
     before_breadcrumb returning the crumb)
   one f-string log.error added to server.py       -> (i) RED
+  2026-10-31, legal R28.23 strict follow-ups
+  ints pass _logentry's params again              -> (f) match_id RED
+  templates from every logger                     -> (f) third-party logger RED
+  include_source_context=True                     -> (f) no source lines, init RED
 """
 import ast
 import copy
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -77,6 +84,7 @@ REPO = Path(__file__).resolve().parents[2]
 FAKE_DSN = "https://public@example.invalid/1"
 BOOM = "admin_experiment_transition_route"        # POST /api/admin/experiments/<key>/transition
 UNAVAILABLE = "admin_experiment_decide_route"     # POST /api/admin/experiments/<key>/decide
+DISPOSITION = "disposition_trade_match"           # POST /api/trades/matches/<int:match_id>/disposition
 LOOKUP = "sleeper_user"                           # GET /api/sleeper/user/<path:username>
 
 # Planted values live up here, out of the source context (5 lines either side)
@@ -98,6 +106,7 @@ L_IP = "203.0.113.7"
 L_COOKIE = "ck-legal-77Zq"
 L_AUTH = "az-legal-88Yw"
 L_SESSION = "sess-legal-66Xv"
+MATCH_ID = 4217                                   # a /s/trade/ link code
 
 
 class _Recorder(Transport):
@@ -214,6 +223,7 @@ def test_init_options(monkeypatch):
     [kw] = seen
     assert (kw["dsn"], kw["environment"], kw["release"]) == (FAKE_DSN, "production", "0123abcd")
     assert kw["send_default_pii"] is False and kw["include_local_variables"] is False
+    assert kw["include_source_context"] is False
     assert kw["max_request_body_size"] == "never"
     assert "traces_sample_rate" not in kw and "profiles_sample_rate" not in kw
     assert "enable_logs" not in kw
@@ -378,6 +388,46 @@ def test_no_credential_reaches_the_envelope(sentry, monkeypatch, client):
         assert secret.encode() not in raw, secret
 
 
+def test_a_match_id_never_reaches_the_envelope(sentry, monkeypatch, client):
+    def failed(match_id):
+        server.log.error("disposition_trade_match failed — match_id=%s", match_id)
+        return jsonify({"error": "internal"}), 500
+    monkeypatch.setitem(server.app.view_functions, DISPOSITION, failed)
+    res = client.post(f"/api/trades/matches/{MATCH_ID}/disposition")
+    assert res.status_code == 500
+    [event] = sentry.events()                    # the log line; no http_5xx on top
+    assert event["logentry"] == {
+        "message": "disposition_trade_match failed — match_id=%s", "params": ["[Filtered]"],
+        "formatted": "disposition_trade_match failed — match_id=[Filtered]"}
+    assert event["request"]["url"] == "/api/trades/matches/<int:match_id>/disposition"
+    assert MATCH_ID in sentry.pre_events()[0]["logentry"]["params"]     # it was collected
+    sentry_sdk.flush()
+    # Delimited, so an event id, trace id or timestamp holding "4217" can't match.
+    assert not re.search(rb"(?<![0-9A-Za-z])%d(?![0-9A-Za-z])" % MATCH_ID, sentry.raw())
+
+
+def test_a_third_party_template_is_filtered(sentry):
+    logging.getLogger("thirdparty.sdk").error(f"lookup failed for {L_USERNAME} at {L_EMAIL}")
+    [event] = sentry.events()
+    assert (event["logger"], event["level"]) == ("thirdparty.sdk", "error")
+    assert event["logentry"] == {"message": "[Filtered]"}
+    sentry_sdk.flush()
+    raw = sentry.raw()
+    assert L_USERNAME.encode() not in raw and L_EMAIL.encode() not in raw
+
+
+def test_frames_carry_no_source_lines(sentry, monkeypatch, client):
+    monkeypatch.setitem(server.app.view_functions, BOOM, _boom)
+    assert client.post("/api/admin/experiments/x/transition").status_code == 500
+    [event] = sentry.events()
+    frames = event["exception"]["values"][0]["stacktrace"]["frames"]
+    assert frames and all({"filename", "function", "lineno"} <= set(f) for f in frames)
+    sentry_sdk.flush()
+    raw = sentry.raw()
+    for key in (b'"context_line"', b'"pre_context"', b'"post_context"'):
+        assert key not in raw, key
+
+
 @pytest.mark.parametrize("text, expected", [
     (f"Cookie: espn_s2={ESPN_S2}; SWID={SWID}", "Cookie: [Filtered]; SWID=[Filtered]"),
     (f"auth failed: Bearer {JWT}", "auth failed: [Filtered]"),
@@ -446,9 +496,8 @@ def test_scrub_event_is_an_allowlist():
         assert out[key] == event[key]
     assert out["request"] == {"method": "GET", "url": "/api/sleeper/user/<path:username>"}
     assert out["message"] == "[Filtered]"            # not one of our constants
-    assert out["logentry"] == {"message": "failed %s %s n=%d t=%.1f",
-                               "params": ["[Filtered]", "[Filtered]", 42, 3.5],
-                               "formatted": "failed [Filtered] [Filtered] n=42 t=3.5"}
+    assert out["logentry"] == {"message": "failed %s %s n=%d t=%.1f",       # %d: no formatted
+                               "params": ["[Filtered]"] * 4}
     assert out["exception"] == {"values": [{
         "type": "RuntimeError", "module": None, "mechanism": {"type": "logging", "handled": True},
         "stacktrace": {"frames": [{"function": "_attach_presession_feedback",
@@ -468,14 +517,38 @@ def test_scrub_event_request_and_message_edges():
     with server.app.test_request_context("/api/feedback", method="POST"):
         assert error_alerts.scrub_event({"message": "feedback_received"}, {}) == {
             "message": "feedback_received"}          # no request unless the SDK attached one
+    ours = {"logger": "backend.negmem"}
     assert error_alerts.scrub_event(
-        {"logentry": {"message": "%d%% of %s", "params": [12, 123456789]}}, {}) == {
-            "logentry": {"message": "%d%% of %s", "params": [12, "[Filtered]"],
-                         "formatted": "12% of [Filtered]"}}
+        {**ours, "logentry": {"message": "%(n)s%% of %(x)s", "params": {"n": 3, "x": 12}}}, {}) == {
+            **ours, "logentry": {"message": "%(n)s%% of %(x)s",
+                                 "params": {"n": "[Filtered]", "x": "[Filtered]"},
+                                 "formatted": "[Filtered]% of [Filtered]"}}
+    assert error_alerts.scrub_event(
+        {**ours, "logentry": {"message": "%s of %s", "params": [12, "bob"]}}, {}) == {
+            **ours, "logentry": {"message": "%s of %s", "params": ["[Filtered]"] * 2,
+                                 "formatted": "[Filtered] of [Filtered]"}}
     # A %d given [Filtered] doesn't format: formatted is dropped, not guessed.
     assert error_alerts.scrub_event(
-        {"logentry": {"message": "id %d", "params": [123456789012]}}, {}) == {
-            "logentry": {"message": "id %d", "params": ["[Filtered]"]}}
+        {**ours, "logentry": {"message": "id %d", "params": [4217]}}, {}) == {
+            **ours, "logentry": {"message": "id %d", "params": ["[Filtered]"]}}
+    # No logger named: not one of ours, so no template.
+    assert error_alerts.scrub_event({"logentry": {"message": "x %s", "params": [1]}}, {}) == {
+        "logentry": {"message": "[Filtered]"}}
+
+
+@pytest.mark.parametrize("logger, ours", [
+    ("backend.negmem", True), ("backend", True), ("backend.eval.flip_read", True),
+    ("trade_finder", True), ("trade_finder.wrapped", True), ("ftf.roster_history", True),
+    ("gunicorn.error", True),
+    ("gunicorn.access", False), ("backendx", False), ("urllib3.connectionpool", False),
+    ("sqlalchemy.pool.impl.QueuePool", False), ("", False), (None, False),
+])
+def test_template_only_from_our_loggers(logger, ours):
+    event = {"logger": logger, "level": "error",
+             "logentry": {"message": "lookup failed for %s", "params": ["bob"]}}
+    out = error_alerts.scrub_event(event, {})
+    assert (out["logger"], out["level"]) == (logger, "error")
+    assert out["logentry"]["message"] == ("lookup failed for %s" if ours else "[Filtered]")
 
 
 def test_breadcrumbs_are_off():
