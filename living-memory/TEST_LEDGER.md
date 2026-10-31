@@ -1,3 +1,44 @@
+## 2026-10-29 — Addendum G2 and G3 in eval, plus addendum H's H-a1 and H-a2: the response boundary, F4's four buckets, explained #535 orphans
+
+Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook. No route, schema, event, flag, knob or engine-module change. This is models-lead's single eval PR (G-b5); it goes to models-lead as an R-G entry before merge (`models-eng-r-g-g2-eval-pr.md`, group notes).
+
+- **G-b1, the response-boundary proof.** A breach on a packed deck counts as `boundary` only when every unprotected or redacted over-cap card has both proofs, from the pack's `deliveries` and the deck's rows:
+  - a recorded cut before it in build order, whose displayed slot is inside the window;
+  - re-running the cap inside its own response, with earlier responses fixed, leaves that response's order unchanged.
+  - A missing row, a missing cut or no pack is a violation.
+- **G-b2, the report:**
+  - the boundary n, its decks, and their rate over audited packed decks, with up to 5 examples;
+  - a B-DK-7 PASS with n > 0 says so in the report's first line.
+- **G-b4, four buckets** for decks with a cut in their window:
+  - audited, packed;
+  - audited from rows;
+  - not checked, live evidence. This is F4's trigger, and these cards are now `live_cut`, not auditable;
+  - not checked, no rows and no pack: #535's lines, read from `--no-evidence-log`.
+- **H-a1:** a redacted card's assets count toward the cap. Only its own over-cap verdict is unknown, and that's never counted as explained.
+- **H-a2:** `not_auditable` and B-DK-7's incomplete decks are split by cause, and the report prints "INCOMPLETE from redaction only: yes/no".
+- **G3-b/c/d (`flip_read --no-evidence-log`):**
+  - an orphan counts as explained when its run is a captured #535 deck, whatever its index (head-eng I3-a, 2026-10-31: #535's n counts the cards sent, so a deck with a cut or a drop sends an index at or past it). Those at or past the logged count print apart as "past the logged count: m", and don't FAIL alone;
+  - any other orphan, or explained outcomes above 1% of packed-admitted outcomes, FAILs and recommends the kill;
+  - any #535 deck in the lines prints the G3-d close-the-path line.
+- **Tests:**
+  - `test_eval_bdk_audit.py`: 90. That's +8 (each bucket in one read; G-b1's explained, no-cut, missing-row and clean-card-left outcomes; the CLI log file; H-a2), +3 rewritten for H-a1, and 3 updated for G-b4.
+  - `test_eval_flip_read.py`: 95 (+8). I3-a added the #535 deck with a cut and an outcome on its last sent card, and a past-the-count variant of the 1% test; the at-the-count case now reads explained.
+- **Sabotage, each red then restored (13):**
+  - the cut check off;
+  - the fixed point always true;
+  - H-a1 undone;
+  - an unknown copy read as protected;
+  - live decks checked;
+  - no first line;
+  - redaction-only always yes;
+  - a missing row read as no assets;
+  - G3-b back to "below the count" (I3-a);
+  - the past-the-count tally always 0 (I3-a);
+  - past-the-count outcomes left out of the 1% (I3-a);
+  - G3-d without the limit;
+  - the kill without the limit.
+- **Suites:** all `test_eval_*` plus `test_evidence_pack.py` and `test_deck_value_model.py`, on main @ `9370670e`: 481 passed.
+
 ## 2026-10-27 — I-2 copy follow-ups: pick/asset-aware unnamed fallback; overhaul prepare-receipt variant; marketing's final strings
 
 Full gates, backend only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest and a code-walk. Two commits on `feat/i2-copy-followups`: the mechanism (first, with placeholder strings), then marketing's final strings (marketing-lead §6 addendum 9, 2026-10-27, relayed by head-eng). A copy change is `backend/ownership_copy.py` plus the strings in the tests.
@@ -154,6 +195,12 @@ Gates: head-eng's ruling on the c3 list (2026-10-29): `receipts_grades`, `gradin
   - the side-step isolation includes grading.
 - **Sabotages:** 5/5 red (contract-id grades kept, row grades kept, grading skipped, no cutoff, cards kept). T-10 is red on an aliased delete and on a tuple-alias update outside `_delete_deck`.
 
+
+## 2026-10-31 — Exit guard on check-send-registry (follow-up to #547, after #539 merged)
+
+Test-only (`mobile/tests/check-send-registry.js`). release-lead asked for it after #539 merged, so the guard didn't move #539's QA'd head. It's the `check-device-first-page` pattern #547 used: a `finished` flag, and an exit handler that sets `exitCode 1` when the run didn't reach its end.
+
+- **Sabotage, with and without the guard, then restored (clean run 37/37, exit 0):** an early `return` → guard 1 / none 0; a hung `await` → guard 1 / none 0; a `throw` → 1 / 1.
 
 ## 2026-10-29 — #537 QA P3s: the doc count, QA's drain tests ported, the ceiling line honest, a failed batch's count logged
 
