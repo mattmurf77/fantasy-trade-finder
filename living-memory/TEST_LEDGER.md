@@ -11,6 +11,20 @@ Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3
   - **Sabotage:** removing the fence (`and not _job_superseded(job_id)` at the impression write) makes it red.
 - **Suites:** force-supersede and the page store, both files pass.
 
+## 2026-10-31 — G3-e under legal R28.23: an orphan outcome's owner id is one deletion's alias resolution covers
+
+Gates: head-eng's relay of legal R28.23 (G3-e accepted on three conditions), condition 2. Test only. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **`test_account_deletion_coverage.py::test_an_outcome_on_a_deck_with_no_rows_and_no_pack_goes_by_its_owner`:** outcomes on a deck with no row and no pack (#535's shape) are owned by:
+  - the user's own id;
+  - an account alias;
+  - a working key a durable session recorded for the account;
+  - and, as the control, another user.
+  Deletion leaves only the other user's. The owner id is the verified session's `user_id` (`_save_deck_outcome_safe` refuses any other), so it's one of these.
+- **Sabotages, 2/2 red:** the owner-column delete removed; working keys not resolved.
+- **Condition 1, by code** (no prod read from trades-eng): a deck without rows exists only in deferred-evidence mode. That mode is admitted only with `trade.first_page_store` on (the `job["evidence_mode"] = "deferred"` branch of the job kickoff), and the flag is off in prod. So #535's shape can't have occurred, and the read-only count is release-lead's to run.
+- **Suites:** `test_account_deletion_coverage.py` and `test_deck_outcome_owner.py` pass.
+
 ## 2026-10-29 — Addendum G2 and G3 in eval, plus addendum H's H-a1 and H-a2: the response boundary, F4's four buckets, explained #535 orphans
 
 Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook. No route, schema, event, flag, knob or engine-module change. This is models-lead's single eval PR (G-b5); it goes to models-lead as an R-G entry before merge (`models-eng-r-g-g2-eval-pr.md`, group notes).

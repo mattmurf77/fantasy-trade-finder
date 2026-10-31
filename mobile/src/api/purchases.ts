@@ -55,6 +55,91 @@ let _sdkLoadFailed = false;
 let _configured = false;
 let _configuredUserId: string | null = null;
 
+// ── Identity-ready gate (#393 M1, D12) ──────────────────────────────────────
+// The RevenueCat webhook grants `pro` to RevenueCat's appUserID, and the
+// server checks the SESSION's user_id. A purchase made while RevenueCat
+// still holds the previous identity (a `logIn` in flight after an account
+// switch) would grant the wrong user, and a reviewer who bought would stay
+// gated: a rejection. So purchase and restore wait until RevenueCat's
+// identity is confirmed to be the caller's current session user_id, and the
+// paywall shows a pending CTA meanwhile. `_identityUserId` is set only once
+// `configure` or `logIn` for that id has completed; `_identitySeq` makes a
+// slow, superseded `logIn` unable to claim readiness for the wrong user.
+let _identityUserId: string | null = null;
+let _identitySeq = 0;
+const _identityListeners = new Set<() => void>();
+
+function _setIdentity(userId: string | null): void {
+  _identityUserId = userId;
+  for (const fn of _identityListeners) {
+    try {
+      fn();
+    } catch {
+      /* a listener never breaks the identity bridge */
+    }
+  }
+}
+
+/** True once RevenueCat's identity is confirmed to be `userId`. */
+export function isIdentityReady(userId: string | null | undefined): boolean {
+  return _configured && !!userId && _identityUserId === userId;
+}
+
+/** The identity RevenueCat has COMPLETED (configure, or the latest `logIn`
+ *  landed), else null. `state/subscriptionSession.customerInfoApplies` reads
+ *  it before any CustomerInfo is believed. */
+export function currentIdentityUserId(): string | null {
+  return _configured ? _identityUserId : null;
+}
+
+/** Re-render hook for the pending CTA. Returns an unsubscribe. */
+export function onIdentityChange(cb: () => void): () => void {
+  _identityListeners.add(cb);
+  return () => {
+    _identityListeners.delete(cb);
+  };
+}
+
+/** Resolves once RevenueCat's identity is `userId`; rejects after `timeoutMs`
+ *  (the session changed under the caller, or a `logIn` never completed). */
+export function whenIdentityReady(userId: string, timeoutMs = 15_000): Promise<void> {
+  if (isIdentityReady(userId)) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      unsub();
+      reject(new PurchaseIdentityError());
+    }, timeoutMs);
+    const unsub = onIdentityChange(() => {
+      if (!isIdentityReady(userId)) return;
+      clearTimeout(timer);
+      unsub();
+      resolve();
+    });
+  });
+}
+
+/** Thrown by purchase / restore when RevenueCat's identity isn't (or can't be
+ *  confirmed to be) the current session user. Nothing reached Apple's sheet. */
+export class PurchaseIdentityError extends Error {
+  constructor() {
+    super('purchase_identity_not_ready');
+    this.name = 'PurchaseIdentityError';
+  }
+}
+
+async function _assertIdentity(P: PurchasesSdk, sessionUserId: string): Promise<void> {
+  if (!sessionUserId) throw new PurchaseIdentityError();
+  await whenIdentityReady(sessionUserId);
+  // Belt and braces: ask the SDK itself, right before Apple's sheet.
+  let current: string | null = null;
+  try {
+    current = await P.getAppUserID();
+  } catch {
+    current = null;
+  }
+  if (current !== sessionUserId) throw new PurchaseIdentityError();
+}
+
 /** Lazy SDK handle. Returns null when there is no key, or when requiring the
  *  package throws (a bare/Expo Go runtime without the native module). */
 function sdk(): PurchasesSdk | null {
@@ -125,19 +210,26 @@ function _notifyReady(): void {
 export async function initPurchases(userId: string): Promise<void> {
   const P = sdk();
   if (!P || !userId) return;
+  const seq = ++_identitySeq;
   try {
     if (!_configured) {
       P.configure({ apiKey: API_KEY, appUserID: userId });
       _configured = true;
       _configuredUserId = userId;
+      _setIdentity(userId);
       _notifyReady();
       return;
     }
     // Already configured this launch — a different working key means the user
     // switched accounts, so alias the RevenueCat identity across.
     if (_configuredUserId !== userId) {
+      // Not ready for anyone until this logIn lands: purchase/restore wait.
+      _setIdentity(null);
       await P.logIn(userId);
       _configuredUserId = userId;
+      if (seq === _identitySeq) _setIdentity(userId);
+    } else if (seq === _identitySeq && _identityUserId !== userId) {
+      _setIdentity(userId);
     }
   } catch {
     // Expo Go / Preview API Mode / a malformed key. Leave `_configured` false
@@ -163,22 +255,31 @@ export async function getOfferings(): Promise<PurchasesOfferings | null> {
  *  Returns null when purchases are unavailable (no key / Expo Go) — the caller
  *  shows the "not available" state. A real StoreKit failure THROWS, because
  *  the caller must distinguish a user cancel (silent) from an error (visible);
- *  narrow it with `isUserCancelled` rather than reading the error shape. */
+ *  narrow it with `isUserCancelled` rather than reading the error shape.
+ *
+ *  `sessionUserId` is the CURRENT session's user_id. The call waits until
+ *  RevenueCat's identity is that user (D12) and throws `PurchaseIdentityError`
+ *  if it can't be confirmed: Apple's sheet never opens for the wrong user. */
 export async function purchasePackage(
   pkg: PurchasesPackage,
+  sessionUserId: string,
 ): Promise<MakePurchaseResult | null> {
   const P = sdk();
   if (!P || !_configured) return null;
+  await _assertIdentity(P, sessionUserId);
   return P.purchasePackage(pkg);
 }
 
 /** Restore Purchases (App Store guideline 3.1.1 — required on any screen that
  *  sells a subscription). Null when purchases are unavailable or the restore
  *  itself failed; an empty-but-successful restore returns a CustomerInfo with
- *  no active entitlements, which is a different (and honest) answer. */
-export async function restorePurchases(): Promise<CustomerInfo | null> {
+ *  no active entitlements, which is a different (and honest) answer. Waits on
+ *  the same identity gate as `purchasePackage` (a restore aliases the Apple
+ *  ID's purchases onto RevenueCat's current identity). */
+export async function restorePurchases(sessionUserId: string): Promise<CustomerInfo | null> {
   const P = sdk();
   if (!P || !_configured) return null;
+  await _assertIdentity(P, sessionUserId);
   try {
     return await P.restorePurchases();
   } catch {
@@ -224,6 +325,56 @@ export function hasProEntitlement(info: CustomerInfo | null | undefined): boolea
  *  error and must never surface an error message. */
 export function isUserCancelled(err: unknown): boolean {
   return !!(err && typeof err === 'object' && (err as { userCancelled?: boolean }).userCancelled);
+}
+
+/** True when StoreKit deferred the purchase (Ask to Buy / SCA): not a failure,
+ *  and nothing was charged yet. RevenueCat's PAYMENT_PENDING_ERROR, code "20". */
+export function isPaymentPending(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { code?: unknown; readableErrorCode?: unknown; userInfo?: { readableErrorCode?: unknown } };
+  return String(e.code) === '20'
+    || e.readableErrorCode === 'PAYMENT_PENDING_ERROR'
+    || e.userInfo?.readableErrorCode === 'PAYMENT_PENDING_ERROR';
+}
+
+// ── Intro (free-month) eligibility (#393 M1, D6; legal R28.8 #1) ────────────
+// "Free" copy appears ONLY when StoreKit confirms, for this Apple ID, that the
+// product's introductory offer is ours: one free month. Unknown, loading, an
+// SDK error, no SDK, or an intro offer that isn't exactly one free month all
+// read as NOT eligible, so the screen shows the paid disclosure and no "free"
+// anywhere. The server's `trial_eligible` is a per-SKU claim, never read here.
+
+/** RevenueCat's `INTRO_ELIGIBILITY_STATUS_ELIGIBLE` (UNKNOWN 0, INELIGIBLE 1,
+ *  ELIGIBLE 2, NO_INTRO_OFFER_EXISTS 3). A literal so this stays pure. */
+export const INTRO_ELIGIBLE_STATUS = 2;
+
+/** Pure: StoreKit confirms a free month for this product. */
+export function isConfirmedFreeMonth(
+  status: unknown,
+  intro: { price?: number; period?: string; periodUnit?: string; periodNumberOfUnits?: number } | null | undefined,
+): boolean {
+  if (status !== INTRO_ELIGIBLE_STATUS || !intro) return false;
+  if (intro.price !== 0) return false;
+  return intro.period === 'P1M' || (intro.periodUnit === 'MONTH' && intro.periodNumberOfUnits === 1);
+}
+
+/** product id → confirmed free month. A product absent from the map, or an
+ *  empty map, means NOT eligible. Never throws. */
+export async function checkIntroEligibility(
+  products: PurchasesStoreProduct[],
+): Promise<Record<string, boolean>> {
+  const out: Record<string, boolean> = {};
+  const P = sdk();
+  if (!P || !_configured || products.length === 0) return out;
+  try {
+    const res = await P.checkTrialOrIntroductoryPriceEligibility(products.map((p) => p.identifier));
+    for (const p of products) {
+      out[p.identifier] = isConfirmedFreeMonth(res?.[p.identifier]?.status, p.introPrice);
+    }
+  } catch {
+    // Unknown is not eligible.
+  }
+  return out;
 }
 
 // ── Tip jar (consumables) ───────────────────────────────────────────────────
