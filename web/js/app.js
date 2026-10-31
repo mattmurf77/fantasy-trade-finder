@@ -1033,7 +1033,11 @@
     // ESPN/MFL sign-in, and the web has no proof-based sign-in until after
     // launch. A web build that adds one turns this on; never read the
     // landing flag here (qa/web/check_web_structure.py GATE-web-espn-mfl-off).
-    // Declared before _applyLandingFlags(), which runs the chip reveal at once.
+    // Declared before the immediate _applyLandingFlags() call below, so the
+    // constant is initialized when the reveal first runs. That first call can
+    // still end in a caught TDZ on `_entryPlatformSel` (declared further down;
+    // pre-existing and harmless: the chips are already set by then, and the
+    // reveal runs again on 'ftf:flags-ready').
     const WEB_PLATFORM_ENTRY = false;
 
     // Reveal flag-gated landing surfaces once the flag fetch completes.
@@ -5594,11 +5598,11 @@
           <div class="summary-card">
             <div class="summary-card-value">${(data.leaguemates_joined || 0) + 1} / ${(data.leaguemates_total || 0) + 1}</div>
             <div class="summary-card-label">Leaguemates Joined</div>
-            <div class="summary-card-sub">Have a Fleeced account (including you)</div>
+            <div class="summary-card-sub">Have a Trade Finder account (including you)</div>
           </div>
           <div class="summary-card">
             <div class="summary-card-value">${_leagueUnlockedCount(data)}</div>
-            <div class="summary-card-label">Ranked</div>
+            <div class="summary-card-label">Unlocked Trade Finder</div>
             <div class="summary-card-sub">Ready to match</div>
           </div>`;
       }

@@ -1054,6 +1054,29 @@ Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b2-flag
     - P3-3: the entry sheet should close when the chips flag is withdrawn.
     - Both are in `SignInScreen.tsx`, which #443 and #507 are changing, so they're logged for that stack.
 
+## 2026-10-27 — Web gate follow-ups: the pin hardened, and the harness waits (#491 QA P3-1…P3-5)
+
+Gates: these are QA P3s on #491 (full gates, scope `docs/plans/landing-platform-options/scope-web-gate.md`). The work is web and QA only; no route, schema, flag or event changes.
+
+- **P3-1, pin `GATE-web-espn-mfl-off` hardened:**
+  - **Flag literal:** any `landing.platform_options` literal fails in comment-stripped web JS (every `web/js/**/*.js`) and in every page's inline scripts.
+  - **The gate constant:** exactly one `WEB_PLATFORM_ENTRY` declaration (`const`/`let`/`var`) anywhere, and it's `const … = false`.
+  - **The reveal:** `espnOn` / `mflOn` must come from `optionsOn` and be assigned once each.
+  - **The chips:**
+    - the row and each ESPN/MFL chip exist exactly once, on `index.html` only;
+    - each is hidden by the class *token*;
+    - no other platform chip ships visible;
+    - no other page, new ones included, carries a chip.
+  - **Sabotage 20/20 red**, every file restored byte-identical. That covers QA's 11 green cases, the 8 original cases, plus "another JS file reads the flag" and "a chip on a new page".
+- **P3-2:** `check_browser_auth_runtime.cjs` waits for `window.FTF_FLAGS_READY` before asserting the chips are hidden. Not run: there's no Playwright install here.
+- **P3-3:** the `app.js` comment and this ledger's "(no TDZ)" note are corrected. The first call can still end in a caught TDZ on `_entryPlatformSel`; that's pre-existing and harmless.
+- **P3-4:** the `docs/design/components.md` PlatformChips row now says "web hard-off".
+- **P3-5:** the `app.js?v=` cache-buster is bumped to `web-espn-mfl-off-20261027`.
+- **Runs:**
+  - checker 196/196;
+  - the same with #456 merged in: GATE passes, and the only failures are the 2 deliberate App Store URL blockers;
+  - `node --check` passes on both JS files.
+
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 
 Gates: QA follow-ups to #486 (stacked on it). No route, schema, event, flag or knob change. `DECK_PIPELINE_VERSION` 3 → 4:
@@ -1100,7 +1123,7 @@ The values are the same, so the deck's shape doesn't change. models-eng reviews 
 
 Full gates (head-eng's ask, item 3; scope: [scope-web-gate.md](../docs/plans/landing-platform-options/scope-web-gate.md)). Web only; D-056: `FTF_SKIP_SIM_GATE=1` posture, no mobile change.
 
-- **Change:** `web/js/app.js` `const WEB_PLATFORM_ENTRY = false` replaces both reads of `landing.platform_options` (the chip reveal and `selectEntryPlatform`). It's declared above `_applyLandingFlags()`, which runs the reveal at once (no TDZ).
+- **Change:** `web/js/app.js` `const WEB_PLATFORM_ENTRY = false` replaces both reads of `landing.platform_options` (the chip reveal and `selectEntryPlatform`). It's declared above `_applyLandingFlags()`, which runs the reveal at once, so the constant itself is initialized there. (Corrected 2026-10-27, release-lead #491 QA P3-3: that first call can still end in a caught TDZ on `_entryPlatformSel`. That's pre-existing and harmless.)
 - **Pin `GATE-web-espn-mfl-off[index.html]`** (`qa/web/check_web_structure.py`):
   - no web script or page reads the flag;
   - exactly one `const WEB_PLATFORM_ENTRY = false;`;
