@@ -17,6 +17,22 @@ Full gates, backend only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is 
 - **Docs:** `docs/api-reference.md`: the Sleeper, MFL and ESPN propose 422 rows (asset-aware count, final copy) and the overhaul `prepare-send` and `send` rows.
 - **Not run:** the full suite (CI runs it); `tsc --noEmit` (no mobile change).
 
+## 2026-10-31 — S1–S8 package follow-ups: S1 (b) in packed mode, C1 for a refused pack, S7 and U6 docs, ADR-025's title
+
+Gates: the S1–S8 evidence package (`trades-eng-s1-s8-package.md` in the group notes folder, against main `63e373e2`), §7 items 1–4: trades-eng's small closers before models-lead's sign-off. Tests and docs only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **S1 (b) in packed mode:** `test_s1b_a_truncated_lost_job_deck_is_written_as_a_partial_run` is parametrized over `packed`. In both modes a truncated lost-job deck writes only `partial_run` rows, and never a pack.
+- **S8 C1 when `pack_run` refuses a deck:** `test_c1_a_deck_that_wont_pack_gets_no_row_past_30_and_eval_reads_a_lost_pack`.
+  - At every delivery there's no pack and no row past the first 30, so never a `full_interim` one.
+  - The refusal is logged at ERROR, and each serve's withdrawals are still recorded (one served-before, one W0).
+  - Eval reads the deck as `in_flight` at +1 h and `incomplete_deck` at +26 h, a lost pack, never a complete 30-card deck (`PACK_REQUIRED_SINCE` is set on main).
+- **Sabotages, 4/4 red:** the refusal records no withdrawals; the refusal logged at WARNING; `PACK_REQUIRED_SINCE = None`; a partial run allowed to write a pack.
+- **Docs:**
+  - **S7:** the `evidence_tier` comment lists `viewed`, and "No row is deleted" now names the dark retention cap and account deletion (`database.py`, `data-dictionary.md`).
+  - **U6:** the receipts LLD cites analytics-lead's and trades-eng's acceptances on main.
+  - **ADR-025:** retitled to "write full rows only for viewed cards (and the first 30)".
+- **Suites:** deferred evidence, packed evidence, eval withdrawals and paging: 306 passed.
+
 ## 2026-10-29 — #537 QA P3s: the doc count, QA's drain tests ported, the ceiling line honest, a failed batch's count logged
 
 Gates: release-lead's #537 QA (GO, SQLite + PG 18 in 3 collations), P3-1 to P3-3, taken on #537 before the operator's go. P3-4 (verify `ix_deck_diagnostic_snapshots_created_at` on prod) is release-lead's read-only check. No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -52,6 +68,22 @@ Gates: head-eng's check 3, from release-lead's prod sweep: "Purged 500 expired d
 - **The backlog's size and age** need a read-only prod query (release-lead): the oldest `created_at`, the count past 14 and past 30 days, and rows written a day.
 - **Tests:** `test_deck_diagnostics.py`. A call drains up to `max_batches` and stops at a short batch (one read, counted); the loop passes the ceiling.
 - **Sabotages:** 3/3 red (one batch only, no short-batch stop, the loop without the ceiling).
+## 2026-10-29 — Mobile async guards fail when a check hangs (check-win-now-recovery passed 7 of 39 silently)
+
+Gates: engagement-eng's report (release-lead's #488 QA found it). Test harness only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the suites themselves.
+
+- **The defect:** `mobile/tests/check-win-now-recovery.js` sets `process.exitCode` only when `main()` completes. An `await` that never settles drained the event loop, and node exited 0 after 7 checks.
+  - On main all 39 run (8 runs, two `node_modules` installs). On #488's head (`5031fb40`) T3 hangs, so #488's break looked green.
+- **The fix:** the guard `check-device-first-page.js` and `check-gate-miss.js` already use: `finished`, a `process.on('exit')` that fails an unfinished run, and `finished = true` before the summary. It's now in the six other trades-owned async suites: `check-win-now-recovery`, `check-win-now`, `check-trade-pages`, `check-trade-disposition`, `check-owner-offer-signals`, `check-fairness-default`.
+- **`mobile/tests/README.md` § Writing one:** an async guard must fail if it never finishes.
+- **Proof:**
+  - **6/6:** a `new Promise(() => {})` injected before each suite's finish now exits 1 with "did not finish". Without the guard (the control) each exits 0.
+  - **#488's tree:** the guarded recovery suite exits 1 instead of 0.
+  - **All 126 `mobile/tests/check-*.js`** pass on the branch.
+- **T3's hang on #488 (diagnosis, handed to engagement-eng):**
+  - The cause: `apiRequest`'s catch now `return`s the async `_afterGateFailure(...)` instead of `throw err`. With the gate off, that adds microtask hops before the 409 retry schedules its backoff timer. The harness's `flush()` drains 80 ticks, so the timer is scheduled after `advance()` has moved the clock past it, and it never fires.
+  - Deepening `flush` to 400 completes T3. Throwing synchronously when the gate is off (`if (opts.background || !_gateIsOn()) throw err;`) runs #488's own test file 39/39.
+- **Not touched (other teams' async suites, no guard; routed to head-eng):** `check-apple-revoke-on-delete`, `check-espn-cookies`, `check-league-picker-recovery`, `check-send-timeout`, `check-sleeper-ownership`, `check-vault-subsumes-legacy`.
 
 ## 2026-10-29 — G3-e: `deck_outcomes.user_id`; account deletion and export also match an outcome by its owner
 
@@ -98,6 +130,21 @@ Test-only (`mobile/tests/`), no app code. D-056 posture. `check-espn-cookies.js`
 
   (A throw already exits 1 via the unhandled rejection; the guard is what catches the return and the hang.)
 - **Not here:** #539's new `check-send-registry.js` has the same gap; it gets the guard on #539 or right after it merges (release-lead's call).
+## 2026-10-29 — Exit guards on three async mobile suites (head-eng's ask, from trades-eng's #546 finding)
+
+Test-only: no app code, no user-visible change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The gap:** `check-apple-revoke-on-delete.js` (#446), `check-league-picker-recovery.js` (the 10-17 incident) and `check-sleeper-ownership.js` (#279) are async and had no exit guard. A run that returned early or awaited something that never settled let node exit 0 mid-run, so a green run there wasn't evidence.
+- **The fix:** `check-device-first-page`'s pattern in each: `let finished = false` with an `exit` hook that fails an unfinished run (`process.exitCode = 1` plus a "did not finish" line), and `finished = true` right before the summary.
+- **Sabotage, before the last check, guarded vs `origin/main`'s unguarded copy:**
+
+  | suite | early return | throw | hang (a never-settling await) |
+  |---|---|---|---|
+  | guarded (all three) | exit 1 | exit 1 | exit 1 |
+  | unguarded on main (all three) | **exit 0** | exit 1 | **exit 0** |
+
+  Restored byte-identical. A throw already failed (an unhandled rejection, or the suite's own `.catch`). The guard is what catches the other two.
+- **Runs:** each suite passes, exit 0; the full `check-*.js` loop is run on the PR.
 
 ## 2026-10-29 — The model-store hook hardened (#542 QA P3s)
 

@@ -112,6 +112,16 @@ assert(
 // 2. The pregen read site, end to end
 // ═══════════════════════════════════════════════════════════════════════
 
+// A check that awaits something that never settles would let the event loop
+// drain and node exit 0 mid-run: an unfinished run fails instead.
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-fairness-default did not finish (a check hung): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 (async () => {
   // ═════════════════════════════════════════════════════════════════════
   // 3. The screen read site derives from the SAME helper
@@ -156,6 +166,7 @@ assert(
   assert(auth.includes("api.post<SessionInitResponse>('/api/session/init', initBody"),
     'the enriched startup payload reaches the server');
   console.log('');
+  finished = true;
   if (failures) {
     console.error(`${failures} check(s) failed.`);
     process.exit(1);
