@@ -18009,12 +18009,12 @@ def trade_evaluate_route():
 
 # ── The consensus verdict: ONE code path for evaluate and the share card ───
 # docs/plans/share-card-value-bar/scope.md. `_trade_evaluate_impl` prices and
-# judges a trade through these three helpers, and the og share cards
-# (`_share_value_bar`) call `_consensus_verdict` too, so the card's bar and
-# the calculator's verdict can't drift. None of them reads a session or a
-# member board: the price is the universal-pool consensus plus the league's
-# owned-pick prices, under whatever stud-tax / pick-pricing pin the caller
-# set (evaluate: the caller's mode; the card: market).
+# judges a trade through these three helpers, and the share mints
+# (`_share_value_snapshot`) call `_consensus_verdict` too, so the card's
+# stored bar and the calculator's verdict can't drift. None of them reads a
+# session or a member board: the price is the universal-pool consensus plus
+# the league's owned-pick prices, under whatever stud-tax / pick-pricing pin
+# the caller set (evaluate: the caller's mode; the share mint: market).
 
 def _consensus_pricing(fmt: str, league_id: str | None = None):
     """The consensus value function for `fmt` (and `league_id`'s owned picks).
@@ -31115,7 +31115,7 @@ def og_tier_card(pos, username):
 
 from .database import (  # noqa: E402
     create_trade_share_token, resolve_trade_share_token,
-    TradeShareRateLimited,
+    TradeShareRateLimited, load_trade_match_sides,
 )
 
 # token_urlsafe(16) → exactly 22 chars of the URL-safe base64 alphabet.
@@ -31137,14 +31137,18 @@ def _resolve_trade_share(token) -> dict | None:
 
 # ---------------------------------------------------------------------------
 # The value bar on the og share cards (docs/plans/share-card-value-bar/
-# scope.md). The verdict is `_consensus_verdict`, the same call
-# /api/trade/evaluate makes, in market stud-tax mode (the no-session
-# default): never the sharer's private board or session. The words on the
-# bar live in og_image (marketing addendum 14); this side decides bar or no
-# bar, and names the draft picks.
+# scope.md; models-lead K-a2). The verdict is computed ONCE, at share time,
+# by `_consensus_verdict` (the same call /api/trade/evaluate makes) in market
+# stud-tax mode, never from the sharer's private board or session, and stored
+# on the share's own row as `value_snapshot`. The card and the share page
+# draw ONLY from that snapshot: a view never prices. A share with no
+# snapshot (any share made before this) draws no bar. The words on the bar
+# live in og_image (marketing addendum 14); this side decides bar or no bar,
+# and names the draft picks.
 # ---------------------------------------------------------------------------
 
 _SHARE_BAR_FORMATS = ("1qb_ppr", "sf_tep")
+_SNAPSHOT_FAVORS = ("give", "receive", "even")
 
 # An owned pick's id is database.make_pick_id's
 # `{league}_{season}_{round}_{original_roster}`.
@@ -31152,7 +31156,7 @@ _OWNED_PICK_ID_RE = re.compile(r"^(.+?)_(\d{4})_(\d{1,2})_(.+)$")
 
 
 def _share_bar_format(raw) -> str | None:
-    """A share URL's `?fmt=`, only when it names a real format."""
+    """A share's scoring format, only when it names a real one."""
     return raw if raw in _SHARE_BAR_FORMATS else None
 
 
@@ -31184,23 +31188,32 @@ def _share_pick_labels(asset_ids) -> dict[str, str]:
     return labels
 
 
-def _share_value_bar(give_ids, recv_ids, fmt, league_id=None) -> dict | None:
-    """The value bar a share card draws, as {verdict: {favors, gap,
-    second_in_firsts}, as_of, scoring_format}, or None for no bar.
+def _share_value_snapshot(give_ids, recv_ids, fmt, league_id=None) -> str | None:
+    """The share-time value snapshot for one share, as the JSON text its row
+    stores, or None (NULL: no bar). Called by the two mints, never by a view.
 
-    No bar (Product rule) when the format is unknown, either side is empty,
-    any id on either side can't be priced, or a side's value is 0. Unpriced
-    ids are never dropped to draw a bar anyway. Never raises: a failure is
-    no bar.
+    Mode A consensus only: `_consensus_verdict` under market stud tax and the
+    default pick pricing (an outer pin, a test or harness, is kept: the
+    entry-point convention), with `league_id`'s owned picks priced (K-a7).
+    None (K-a6) when the format is unknown, either side is empty, any id
+    can't be priced, a side values at 0 or less, or anything raises (logged
+    by error type only). Unpriced ids are never dropped to store one anyway.
 
-    `as_of` is the UTC date of THIS render: the values are computed now,
-    from the live pool, and legal allows render-time values only when the
-    date shown is the day they were computed. `second_in_firsts` puts the
-    +/-2nd ticks where a Mid 2nd sits TODAY (Mid 2nd / Mid 1st over the
-    current generic-pick values), so a fill can't end on "2nd" under a
-    label that says "a Late 1st".
+    It holds exactly {v, favors, firsts, label, format, league_id,
+    computed_at, second_in_firsts, pool: {snapshot, version}}: never a
+    board, client-sent values, player values or totals, usernames, player
+    ids, or gap.value points.
+      firsts            |gap| in Mid 1sts (the fill length, the B2 label)
+      label             gap.pick_equivalent.label, or None (B1 vs B2)
+      second_in_firsts  Mid 2nd / Mid 1st over the generic-pick values at
+                        mint: where the +/-2nd ticks go
+      computed_at       ISO UTC; the card's date is its UTC date
+      pool.snapshot     roster_snapshot's vsn1 for (format, league): a hash
+                        of the consensus seed and the league's pick rows
+      pool.version      the pricing that produced it (Mode A evaluate, the
+                        stud-tax mode, the pick-pricing mode)
     """
-    if _og_image is None or fmt not in _SHARE_BAR_FORMATS:
+    if fmt not in _SHARE_BAR_FORMATS:
         return None
     give = [str(x) for x in (give_ids or []) if x]
     recv = [str(x) for x in (recv_ids or []) if x]
@@ -31208,12 +31221,9 @@ def _share_value_bar(give_ids, recv_ids, fmt, league_id=None) -> dict | None:
         return None
     ts = _trade_service_mod
     try:
-        # Market stud tax and the default pick pricing, as for an anonymous
-        # evaluate; an outer pin (a test or harness) is kept, the
-        # entry-point convention.
-        with ts.stud_tax_override(ts.pinned_stud_tax_mode() or ts.STUD_TAX_DEFAULT), \
-                ts.pick_pricing_override(ts.pinned_pick_pricing_mode()
-                                         or ts.pick_pricing_mode_for_user(None)):
+        stud_mode = ts.pinned_stud_tax_mode() or ts.STUD_TAX_DEFAULT
+        pick_mode = ts.pinned_pick_pricing_mode() or ts.pick_pricing_mode_for_user(None)
+        with ts.stud_tax_override(stud_mode), ts.pick_pricing_override(pick_mode):
             v = _consensus_verdict(give, recv, fmt, league_id or None)
         if (v is None or v["dropped_ids"]
                 or v["give_value"] <= 0 or v["receive_value"] <= 0):
@@ -31221,19 +31231,66 @@ def _share_value_bar(give_ids, recv_ids, fmt, league_id=None) -> dict | None:
         e2v = ts.elo_to_value
         second_in_firsts = (e2v(GENERIC_PICK_SEEDS[(2, "Mid")])
                             / e2v(GENERIC_PICK_SEEDS[(1, "Mid")]))
-        as_of = _value_bar_date(datetime.now(timezone.utc).date())
+        from . import roster_snapshot
+        from .database import engine as _engine
+        with _engine.connect() as conn:
+            vsn = roster_snapshot.values_snapshot_id(
+                conn, fmt, league_id or "", g_universal_by_format.get(fmt) or {},
+                pick_source=_pick_read_source(), generation=pool_generation())
+        pick = v["gap"].get("pick_equivalent")
+        snapshot = {
+            "v":                1,
+            "favors":           v["favors"],
+            "firsts":           v["gap"]["firsts"],
+            "label":            pick["label"] if pick else None,
+            "format":           fmt,
+            "league_id":        league_id or None,
+            "computed_at":      datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "second_in_firsts": second_in_firsts,
+            "pool": {"snapshot": vsn,
+                     "version": f"evaluate-mode-a/{stud_mode}/{pick_mode}"},
+        }
     except Exception as e:
-        log.warning("share card value bar failed (no bar): %s", type(e).__name__)
+        log.warning("share value snapshot failed (stored NULL): %s", type(e).__name__)
         return None
-    return {"verdict": {"favors": v["favors"], "gap": v["gap"],
-                        "second_in_firsts": second_in_firsts},
+    return json.dumps(snapshot, sort_keys=True)
+
+
+def _value_bar_from_snapshot(raw) -> dict | None:
+    """{verdict, as_of, scoring_format} for the renderer from a share row's
+    `value_snapshot`, or None (no bar) for NULL or anything malformed. Reads
+    the snapshot only: it never prices. `as_of` is `computed_at`'s UTC date,
+    the day the values were computed."""
+    if not raw:
+        return None
+    try:
+        snap = json.loads(raw)
+        if not isinstance(snap, dict) or snap.get("v") != 1:
+            return None
+        favors, firsts, label = snap["favors"], snap["firsts"], snap.get("label")
+        fmt = snap["format"]
+        if (favors not in _SNAPSHOT_FAVORS or fmt not in _SHARE_BAR_FORMATS
+                or isinstance(firsts, bool) or not isinstance(firsts, (int, float))
+                or firsts < 0 or not (label is None or isinstance(label, str))):
+            return None
+        computed = datetime.fromisoformat(snap["computed_at"])
+        if computed.tzinfo is None:
+            return None
+        as_of = _value_bar_date(computed.astimezone(timezone.utc).date())
+    except (ValueError, TypeError, KeyError):
+        return None
+    return {"verdict": {"favors": favors,
+                        "gap": {"firsts": firsts,
+                                "pick_equivalent": {"label": label} if label else None},
+                        "second_in_firsts": snap.get("second_in_firsts")},
             "as_of": as_of, "scoring_format": fmt}
 
 
-def _share_card_kwargs(give_ids, recv_ids, fmt, league_id=None) -> dict:
-    """The renderer kwargs for one share card: the bar (or none) and the
-    pick labels."""
-    bar = _share_value_bar(give_ids, recv_ids, fmt, league_id) or {}
+def _share_card_kwargs(give_ids, recv_ids, value_snapshot) -> dict:
+    """The renderer kwargs for one share card: the bar from the row's stored
+    snapshot (or none) and the pick labels. Never prices."""
+    bar = (_value_bar_from_snapshot(value_snapshot) if _og_image is not None
+           else None) or {}
     return {
         "verdict":        bar.get("verdict"),
         "as_of":          bar.get("as_of"),
@@ -31242,25 +31299,25 @@ def _share_card_kwargs(give_ids, recv_ids, fmt, league_id=None) -> dict:
     }
 
 
-def _trade_share_card_kwargs(match: dict) -> dict:
-    """`_share_card_kwargs` for a resolved trade share: EXACTLY the lists the
-    card draws as YOU GIVE (user_a_give) and YOU GET (user_a_receive), in
-    the league's own scoring format."""
+def _match_side_ids(match: dict) -> tuple[list, list]:
+    """user_a_give / user_a_receive of a trade_matches row (JSON text) as
+    lists; ([], []) when malformed."""
     try:
         give = json.loads(match.get("user_a_give") or "[]")
         recv = json.loads(match.get("user_a_receive") or "[]")
     except (json.JSONDecodeError, TypeError):
-        give, recv = [], []
+        return [], []
     if not isinstance(give, list) or not isinstance(recv, list):
-        give, recv = [], []
-    league_id = str(match.get("league_id") or "")
-    try:
-        fmt = get_league_scoring(league_id) if league_id else None
-    except Exception as e:
-        log.warning("share card: league format lookup failed (no bar): %s",
-                    type(e).__name__)
-        fmt = None
-    return _share_card_kwargs(give, recv, fmt, league_id)
+        return [], []
+    return give, recv
+
+
+def _trade_share_card_kwargs(match: dict) -> dict:
+    """`_share_card_kwargs` for a resolved trade share: the lists the card
+    draws as YOU GIVE (user_a_give) and YOU GET (user_a_receive), already
+    oriented to the sharer, and the token's stored snapshot."""
+    give, recv = _match_side_ids(match)
+    return _share_card_kwargs(give, recv, match.get("value_snapshot"))
 
 
 @app.route("/og/trade/<token>.png")
@@ -31486,7 +31543,8 @@ def create_share_package_route():
     """POST /api/share/package — snapshot an arbitrary give/receive package
     for a public share landing. 404 while `growth.share_landing` is dark.
 
-    Body: {"give_player_ids": [...], "receive_player_ids": [...]}
+    Body: {"give_player_ids": [...], "receive_player_ids": [...],
+           "scoring_format"?: "1qb_ppr" | "sf_tep"}
     → {ok, short_id, url: "/s/p/<id>", og_image: "/og/p/<id>.png"}
     Demo sessions are refused (shared demo user would pool the rate limit
     and demo shares are disabled client-side anyway).
@@ -31518,9 +31576,17 @@ def create_share_package_route():
         return jsonify({"error": "rate_limited",
                         "message": "Too many shares — try again later."}), 429
 
+    # Optional `scoring_format` (1qb_ppr / sf_tep; anything else is ignored):
+    # with it, the share-time value snapshot (K-a2) is stored and the card
+    # draws the value bar; without it (the app doesn't send it yet) no bar.
+    # There's no league, so only generic picks can be priced.
+    fmt = _share_bar_format(body.get("scoring_format"))
+    value_snapshot = _share_value_snapshot(give, receive, fmt) if fmt else None
+
     for _ in range(4):   # token_urlsafe(6) collisions are ~impossible; belt+braces
         short_id = secrets.token_urlsafe(6)
-        if create_shared_package(short_id, user_id, give, receive):
+        if create_shared_package(short_id, user_id, give, receive,
+                                 value_snapshot=value_snapshot):
             return jsonify({
                 "ok": True,
                 "short_id": short_id,
@@ -31577,9 +31643,35 @@ def create_share_trade_route():
     if match_id is None:
         return jsonify({"error": "not_found"}), 404
 
+    # The share-time value snapshot (K-a2), priced on the SHARER's side (the
+    # lists swap for user_b, as resolve_trade_share_token draws them), in the
+    # league's format with its owned picks (K-a7). Only a party's share is
+    # priced; the mint below still decides every 404. It is stored on a NEW
+    # token only: a re-share keeps the snapshot its token was minted with.
+    value_snapshot = None
+    try:
+        sides = load_trade_match_sides(match_id)
+    except Exception as e:
+        log.warning("share/trade: match read for the value snapshot failed: %s",
+                    type(e).__name__)
+        sides = None
+    if sides is not None and user_id in (sides["user_a_id"], sides["user_b_id"]):
+        give, recv = _match_side_ids(sides)
+        if user_id == sides["user_b_id"]:
+            give, recv = recv, give
+        league_id = str(sides.get("league_id") or "")
+        try:
+            fmt = get_league_scoring(league_id) if league_id else None
+        except Exception as e:
+            log.warning("share/trade: league format lookup failed (no snapshot): %s",
+                        type(e).__name__)
+            fmt = None
+        value_snapshot = _share_value_snapshot(give, recv, fmt, league_id)
+
     try:
         token = create_trade_share_token(match_id, user_id,
-                                         hourly_limit=_TRADE_SHARE_HOURLY_LIMIT)
+                                         hourly_limit=_TRADE_SHARE_HOURLY_LIMIT,
+                                         value_snapshot=value_snapshot)
     except TradeShareRateLimited:
         return jsonify({"error": "rate_limited",
                         "message": "Too many shares — try again later."}), 429
@@ -31611,11 +31703,10 @@ def share_package_page(short_id):
     if pkg is None:
         return jsonify({"error": "not_found"}), 404
     n = len(pkg["give_ids"]) + len(pkg["receive_ids"])
-    # `?fmt=` (1qb_ppr / sf_tep) is the package's scoring format: a package
-    # stores none, and without one the card draws no bar, so a superflex
-    # package is never priced as 1QB. It rides into og:image, as /s/tiers.
-    fmt = _share_bar_format(request.args.get("fmt"))
-    card = _share_card_kwargs(pkg["give_ids"], pkg["receive_ids"], fmt)
+    # Bar or no bar comes from the package's stored value snapshot (K-a2),
+    # so the line under the image never promises a comparison it lacks.
+    card = _share_card_kwargs(pkg["give_ids"], pkg["receive_ids"],
+                              pkg.get("value_snapshot"))
     if card["verdict"] is not None:
         description = (f"A {n}-player dynasty trade package. See the give/get "
                        "breakdown and how the values compare in draft-pick terms. "
@@ -31623,8 +31714,6 @@ def share_package_page(short_id):
     else:
         description = f"A {n}-player dynasty trade package. See the give/get breakdown."
     image_url = f"/og/p/{short_id}.png"
-    if fmt:
-        image_url += f"?fmt={fmt}"
     return _share_html(
         title="Trade Package",
         description=description,
@@ -31644,7 +31733,6 @@ def og_package_card(short_id):
         return jsonify({"error": "not_found"}), 404
     if _og_image is None:
         return _og_unavailable_response()
-    fmt = _share_bar_format(request.args.get("fmt"))
     try:
         kwargs = {}
         try:
@@ -31653,7 +31741,8 @@ def og_package_card(short_id):
             log.warning("og_package_card: package lookup failed: %s", type(e).__name__)
             pkg = None
         if pkg is not None:
-            kwargs = _share_card_kwargs(pkg["give_ids"], pkg["receive_ids"], fmt)
+            kwargs = _share_card_kwargs(pkg["give_ids"], pkg["receive_ids"],
+                                        pkg.get("value_snapshot"))
         png, status = _og_image.render_package_card(short_id, **kwargs)
     except Exception as e:
         log.error("og_package_card error (%s): %s", short_id, e)

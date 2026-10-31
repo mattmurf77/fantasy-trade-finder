@@ -2799,6 +2799,12 @@ shared_packages_table = Table("shared_packages", metadata,
     Column("give_ids",    Text,   nullable=False),      # JSON list[str] of player ids
     Column("receive_ids", Text,   nullable=False),      # JSON list[str] of player ids
     Column("created_at",  String, nullable=False),      # ISO UTC
+    # Share-time value snapshot (models-lead K-a2; docs/data-dictionary.md):
+    # JSON {v, favors, firsts, label, format, league_id, computed_at,
+    # second_in_firsts, pool{snapshot, version}}, written once at mint by
+    # server._share_value_snapshot. The og card draws its value bar ONLY from
+    # this. NULL = no bar (no scoring_format sent, K-a6, or a pre-snapshot row).
+    Column("value_snapshot", Text),
     Index("ix_shared_packages_user", "user_id"),
 )
 
@@ -2821,6 +2827,10 @@ trade_share_tokens_table = Table("trade_share_tokens", metadata,
     Column("created_by", String,  nullable=False),      # sharer's session user_id
     Column("created_at", String,  nullable=False),      # ISO UTC; rate-limit input
     Column("revoked_at", String),                       # ISO UTC; NULL = live
+    # Share-time value snapshot (models-lead K-a2), as on shared_packages:
+    # written once at mint, oriented to the sharer, never recomputed. NULL =
+    # no bar (K-a6, or a token minted before the column existed).
+    Column("value_snapshot", Text),
     Index("ix_trade_share_tokens_match", "match_id"),
     Index("ix_trade_share_tokens_creator", "created_by", "created_at"),
 )
@@ -4001,6 +4011,11 @@ def _migrate_db() -> None:
         ("overhaul_attempts",  "provider_status",           "VARCHAR"),
         # ── G3-e (legal R28.22): an outcome's owner, for deletion and export.
         ("deck_outcomes",      "user_id",                   "VARCHAR"),
+        # ── Share card value bar (models-lead K-a2): the share-time value
+        # snapshot. NO DEFAULT and NO BACKFILL: every existing share reads
+        # NULL, which draws no bar (a pre-snapshot share has no stored value).
+        ("trade_share_tokens", "value_snapshot",            "TEXT"),
+        ("shared_packages",    "value_snapshot",            "TEXT"),
     ]
     # Only missing columns get an ALTER, each in its own transaction so a
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -16251,9 +16266,11 @@ def create_shared_package(
     user_id: str,
     give_ids: list[str],
     receive_ids: list[str],
+    value_snapshot: str | None = None,
 ) -> bool:
     """Insert one share snapshot. False on a short_id collision (caller
-    re-mints and retries)."""
+    re-mints and retries). `value_snapshot` is the share-time value JSON
+    (server._share_value_snapshot), or None for no value bar."""
     try:
         with engine.begin() as conn:
             conn.execute(insert(shared_packages_table).values(
@@ -16262,6 +16279,7 @@ def create_shared_package(
                 give_ids=json.dumps([str(x) for x in give_ids]),
                 receive_ids=json.dumps([str(x) for x in receive_ids]),
                 created_at=_now(),
+                value_snapshot=value_snapshot,
             ))
         return True
     except Exception:
@@ -16269,8 +16287,8 @@ def create_shared_package(
 
 
 def load_shared_package(short_id: str) -> dict | None:
-    """{short_id, user_id, give_ids: list, receive_ids: list, created_at}
-    or None."""
+    """{short_id, user_id, give_ids: list, receive_ids: list, created_at,
+    value_snapshot: JSON text | None} or None."""
     if not short_id:
         return None
     with engine.connect() as conn:
@@ -16320,12 +16338,16 @@ _TRADE_SHARE_LOCK_CLASS = 8008
 
 
 def create_trade_share_token(match_id: int, user_id: str, *,
-                             hourly_limit: int | None = None) -> str | None:
+                             hourly_limit: int | None = None,
+                             value_snapshot: str | None = None) -> str | None:
     """The caller's live share token for a match, minted on first share.
 
     Idempotent per (match, sharer): a live (non-revoked) token this user
     already holds for this match is returned as is, with no count and no
-    insert, so a re-share never counts against the limit. Otherwise a new
+    insert, so a re-share never counts against the limit. `value_snapshot`
+    (the share-time value JSON, server._share_value_snapshot) is written
+    only on a NEW token: a re-returned token keeps the snapshot it was minted
+    with, and one minted before the column existed stays NULL. Otherwise a new
     secrets.token_urlsafe(16) is minted (re-minted on a PK collision), after
     the hourly count: at or over `hourly_limit` new mints in the last hour it
     raises TradeShareRateLimited and writes nothing.
@@ -16379,6 +16401,7 @@ def create_trade_share_token(match_id: int, user_id: str, *,
                 conn.execute(insert(tst).values(
                     token=token, match_id=match_id,
                     created_by=user_id, created_at=_now(),
+                    value_snapshot=value_snapshot,
                 ))
             return token
         except IntegrityError:
@@ -16393,13 +16416,15 @@ def resolve_trade_share_token(token: str) -> dict | None:
     The row is oriented to the SHARER: when user_b minted the token,
     `user_a_give` and `user_a_receive` come back swapped, so YOU GIVE is
     always what the sharer gives. `shared_by` ('a' | 'b') says which party
-    that was. `created_by` itself stays server-side and is not returned."""
+    that was. `created_by` itself stays server-side and is not returned.
+    `value_snapshot` is the token's share-time value JSON (already oriented
+    to the sharer at mint), or None."""
     if not token:
         return None
     tm, tst = trade_matches_table, trade_share_tokens_table
     with engine.connect() as conn:
         row = conn.execute(
-            select(tm, tst.c.created_by)
+            select(tm, tst.c.created_by, tst.c.value_snapshot)
             .select_from(tst.join(tm, tm.c.id == tst.c.match_id))
             .where(and_(tst.c.token == token, tst.c.revoked_at.is_(None)))
         ).fetchone()
@@ -16414,6 +16439,20 @@ def resolve_trade_share_token(token: str) -> dict | None:
     else:
         out["shared_by"] = "a"
     return out
+
+
+def load_trade_match_sides(match_id: int) -> dict | None:
+    """{league_id, user_a_id, user_b_id, user_a_give, user_a_receive} for one
+    trade_matches row (the lists as stored JSON text), or None. The share
+    mint reads it to price the sharer's side BEFORE its own transaction."""
+    tm = trade_matches_table
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(tm.c.league_id, tm.c.user_a_id, tm.c.user_b_id,
+                   tm.c.user_a_give, tm.c.user_a_receive)
+            .where(tm.c.id == match_id)
+        ).fetchone()
+    return dict(row._mapping) if row is not None else None
 
 
 def _count_recent_trade_share_tokens(conn, user_id: str, *, hours: int = 1) -> int:

@@ -106,3 +106,48 @@ The og trade card (`/og/trade/<token>.png`) draws the app's **TradeValueBar** in
 5. **The date is the render date (UTC), not the last value-snapshot date.** Legal allows render-time values only if the date shown is the day they were computed, and K-a2 says the date must never differ from the values drawn.
 6. **Market stud-tax mode; pick labels without the original owner's name.** "2026 1st" is parsed from the pick id. A leaguemate's username doesn't go on a public image.
 7. **No bar** when the format is unknown, a side is empty, any asset is unpriced, a side's value is ≤0, or anything raises (only the error type is logged). The page description and `og:image:alt` follow the image: a bar gets the bar line, no bar gets the fallback line (addendum 14 A).
+
+## 2026-11-01 — K-a2: a stored snapshot at share time (operator: "Yes, add the column")
+
+**Decision.** The operator approved the schema change in head-eng's session on 2026-11-01, on models-lead's K-a2 (a MUST) and legal R28.24's privacy MUST. It supersedes this scope's render-time value source, the "no schema change" line in §2, and decision 5 (the date).
+
+**What changes:**
+- **Schema:** a nullable `value_snapshot` TEXT (JSON) column on `trade_share_tokens` and on `shared_packages`. It's written once, at share time, from Mode A consensus only (`_consensus_verdict`, market mode).
+  - **It stores:** `favors`, `firsts`, `label` (the pick equivalent), `format`, `league_id` (K-a7 pick pricing; null for packages), `computed_at` (UTC), `second_in_firsts`, and `pool` {`snapshot`, `version`}.
+  - **It never stores:** a board, client-sent values, player values or totals, `gap.value` points, or usernames.
+  - `shared_packages` stays anonymized: values, labels and the date only.
+- **Mint:**
+  - `POST /api/share/trade` computes the snapshot on the **sharer-oriented** lists, with the league's format and league id. A re-returned token keeps its original snapshot.
+  - `POST /api/share/package` takes an optional `scoring_format`. The app doesn't send it yet (update 1), so package shares draw no bar until then.
+  - **K-a6 at mint:** if any asset is unpriced, a side is empty, or a side values at 0 or less, no snapshot is stored, so no bar.
+- **View:** `/og/trade` and `/og/p` draw ONLY from the snapshot and never recompute (a test patches the pricing to raise on view).
+  - A share with no snapshot, which means every share made before this change, draws no bar, and its page uses the fallback description.
+  - **The date is the snapshot's `computed_at` date**, which keeps legal's "absolute date matching the drawn values".
+  - **The view-time `?fmt=` is removed** from `/s/p` and `/og/p`. The format lives in the snapshot, and a view must not price. That's a deviation from head-eng's note: the format moves into the mint request (`scoring_format`) instead of a view-time query parameter.
+- **Ticks:** `second_in_firsts` is stored in the snapshot at mint, so the ticks match the values drawn.
+
+**Docs table changes:**
+- `docs/data-dictionary.md` is **updated** (the new column on both tables).
+- `docs/api-reference.md` is **updated** (both mint routes, both og routes, `/s/p`).
+- Account deletion and export coverage is updated for the new column.
+- §2 now reads "one new column on two tables (operator-approved 2026-11-01)".
+
+**The operator's colour decision (11-01, via head-product, "Green and amber"):** the single neutral fill is replaced by the app's mapping. Leaning to YOU GET is pos green, leaning to YOU GIVE is warn amber, and even is the ice nub. The constants are `og_image.SEMANTIC_POS` / `SEMANTIC_WARN` / `ICE_BASE`, citing `TradeValueBar.tsx` and `chalkline.ts`.
+
+**Evidence:**
+- **Migration:** the repo's own `_migrate_db` → `migration_cols` → `_add_missing_columns` → `_add_column_guarded` path. It inspects first; on Postgres it runs under the `lock_timeout` and `statement_timeout` guard. Fresh databases get the column from `create_all`, with no default and no backfill. Tested on an old-schema SQLite file with rows: exactly two `ALTER TABLE … ADD COLUMN value_snapshot TEXT`, and the old rows read NULL.
+- **Pool identifier:**
+  - `pool.snapshot` is the existing `vsn1` content hash (`roster_snapshot.values_snapshot_id`) of the consensus seed and the league's pick rows. It doesn't cover the DP pick-price file, a stated limit.
+  - `pool.version` is `"evaluate-mode-a/market/market_slots"`. No code-version constant exists for this path; `value-core-4` belongs to the deck engine and would mislead.
+- **Mint:** the trade snapshot is priced on the sharer-oriented lists (swapped for user_b), in the league's format, with owned picks. A re-share keeps its original snapshot. A package needs `scoring_format`, and with no league only generic picks price.
+- **Deletion and export:** trade tokens are deleted with the sharer (the snapshot goes with the row) and exported with `value_snapshot`. Packages are anonymized and their snapshot stays, holding nothing that names the sharer. Covered by a new test.
+- `test_share_card_value_bar.py` has 79 tests, all minting through the real routes.
+  - **A view never prices:** pricing patched to raise on view still serves the bar from the snapshot.
+  - A pool change after mint leaves the image unchanged.
+  - A NULL or malformed snapshot draws no bar and uses the fallback description.
+  - K-a6 at mint.
+  - The snapshot's key set is pinned: no values, totals, gap points, ids or usernames.
+  - The date comes from `computed_at`, not the view clock.
+  - The pos/warn/ice mapping.
+- **Runs:** share set 232; evaluate files 407 (192 golden responses still identical); deletion and data rights 75; full backend 10189 passed / 2 skipped; `check_web_structure` 196/196. The no-bar card is still byte-identical to `013eac18`.
+- **Sabotage runs, each caught:** the view recomputes (17 red), a board read at mint, `gap.value` stored, the column dropped from the export, no NULL handling (17 red), the date from the view clock, and pos and warn swapped (5 red).

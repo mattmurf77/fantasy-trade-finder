@@ -468,10 +468,10 @@ def render_trade_card(match: dict, *, verdict: Optional[dict] = None,
     Render a trade give/get card for ONE resolved trade_matches row (a
     dict; only user_a_give / user_a_receive are read).
 
-    `verdict` ({favors, gap, second_in_firsts}, from
-    server._share_value_bar), `as_of` (the render's UTC date, "Mon D,
-    YYYY") and `scoring_format` draw the value bar;
-    with no verdict the card is the no-bar card, byte for byte.
+    `verdict` ({favors, gap, second_in_firsts}), `as_of` ("Mon D, YYYY")
+    and `scoring_format` draw the value bar; the server reads all three from
+    the share's stored value snapshot (server._value_bar_from_snapshot).
+    With no verdict the card is the no-bar card, byte for byte.
     `pick_labels` ({pick_id: label}) names draft picks, which aren't
     players rows. The server computes all of them: og_image never imports
     server.
@@ -540,8 +540,8 @@ def render_package_card(short_id, *, verdict: Optional[dict] = None,
     `growth.share_landing`). Same layout as the trade-match card; sides
     come from the sharer's snapshot rather than a trade_matches row.
     `verdict`, `as_of`, `scoring_format` and `pick_labels` are as for
-    render_trade_card (a package draws its bar only when its format is
-    known: server.og_package_card's `?fmt=`).
+    render_trade_card (a package draws its bar only when it was shared
+    with a scoring format, so a value snapshot was stored).
 
     Returns (png_bytes, http_status_code): 200 on success, 404 for an
     unknown short_id (placeholder PNG body).
@@ -700,10 +700,11 @@ def _render_trade_card_png(
 # by the server from the current generic-pick values). Geometry and colour:
 # design-lead's spec (v2, 2026-11-01). Words: marketing addendum 14 part B
 # (legal R28.24, models-lead K): they describe the trade's SIDES, never
-# people, and never say who comes out ahead. ONE neutral fill for the lean
-# and the even nub, so neither side is coloured good or bad: the lean alone
-# points at the column with more value. No "win", "You"/"They", value
-# numbers, "fair", percentages, heading or end labels.
+# people, and never say who comes out ahead; the lean points at the column
+# with more value. The fill takes the app's colours exactly (operator,
+# 2026-11-01: "Green and amber"): green toward YOU GET, amber toward YOU
+# GIVE, the ice nub when even. No "win", "You"/"They", value numbers,
+# "fair", percentages, heading or end labels.
 # ---------------------------------------------------------------------------
 
 PICK_CHIP_LABEL = "PK"
@@ -726,7 +727,13 @@ VB_BASIS_Y = 518                    # the basis and date line, its own row
 VB_NUB_W = 12                       # the even nub
 
 VB_TRACK  = (35, 40, 51)            # ink-3
-VB_FILL   = (151, 161, 174)         # chalk-dim: the one neutral fill (lean and nub)
+# The fill: TradeValueBar.tsx:87 `fillColor = even ? ice.base : youWin ?
+# semantic.pos : semantic.warn` (youWin = favors 'receive', :81), with the
+# token values from mobile/src/theme/chalkline.ts. Named after the tokens so
+# the card and the app can't drift; test_share_card_value_bar pins both.
+SEMANTIC_POS  = (34, 197, 94)       # semantic.pos  '#22C55E', chalkline.ts:58
+SEMANTIC_WARN = (245, 158, 11)      # semantic.warn '#F59E0B', chalkline.ts:60
+ICE_BASE      = (86, 217, 236)      # ice.base      '#56D9EC', chalkline.ts:44
 VB_TICK   = (61, 70, 84)            # ink.lineStrong (raised from ink.line to read at card scale)
 VB_CENTER = (89, 100, 122)          # ink.lineStrongA11y
 VB_PICK   = (45, 212, 191)          # tier first_1, the app's pick-label colour
@@ -831,7 +838,7 @@ def _draw_value_bar(draw, verdict: dict, as_of: str, scoring_format: str) -> Non
     if even:
         half_nub = VB_NUB_W // 2
         draw.rounded_rectangle([VB_MID - half_nub, ty0, VB_MID + half_nub, ty1],
-                               radius=3, fill=VB_FILL)
+                               radius=3, fill=ICE_BASE)
     else:
         # Clamped at one Mid 1st (the end of the track).
         length = round(min(1.0, abs(float(verdict["gap"]["firsts"]))) * VB_HALF)
@@ -839,7 +846,8 @@ def _draw_value_bar(draw, verdict: dict, as_of: str, scoring_format: str) -> Non
             box = [VB_MID, ty0, VB_MID + length, ty1]
         else:               # more value on the YOU GIVE side: lean left
             box = [VB_MID - length, ty0, VB_MID, ty1]
-        draw.rounded_rectangle(box, radius=3, fill=VB_FILL)
+        draw.rounded_rectangle(box, radius=3,
+                               fill=SEMANTIC_POS if leans_get else SEMANTIC_WARN)
     second_in_firsts = verdict.get("second_in_firsts")
     if not isinstance(second_in_firsts, (int, float)) or not 0 < second_in_firsts < 1:
         second_in_firsts = APP_SECOND_IN_FIRSTS
