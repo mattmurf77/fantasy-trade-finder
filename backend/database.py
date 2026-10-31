@@ -1909,7 +1909,7 @@ recorded_picks_table = Table("recorded_picks", metadata,
 #   sets, and web/js/app.js notifTypeIcon + clickNotif.
 #     trade_match · trade_accepted · trade_declined · referral_joined ·
 #     league_member_joined · league_member_unlocked_trades ·
-#     match_expiring · deck_replenished · counter_offer
+#     match_expiring · deck_replenished · counter_offer · referral_activated
 # metadata_json: JSON-encoded dict with context fields, e.g.:
 #   { "match_id": 42, "partner_username": "joe", "give": ["CeeDee Lamb"], "receive": ["Tyreek Hill"] }
 # is_read: 0 = unread, 1 = read
@@ -2893,7 +2893,7 @@ referrals_table = Table("referrals", metadata,
     Column("id",                    Integer, primary_key=True, autoincrement=True),
     Column("referrer_user_id",      String,  nullable=False),
     Column("referred_user_id",      String),                  # filled when invitee identified
-    Column("league_id",             String,  nullable=False), # the shared Sleeper league
+    Column("league_id",             String,  nullable=False), # the shared league, any platform
     Column("invite_token",          String,  nullable=False), # carried by share-card deep link
     Column("status",                String,  nullable=False, server_default="pending"),
                                                               # pending → joined → activated →
@@ -2910,11 +2910,19 @@ referrals_table = Table("referrals", metadata,
     Column("last_opened_at",        String),                  # latest human landing open
     Column("open_count",            Integer, server_default="0"),  # human landing opens
     Column("unfurled_at",           String),                  # first link-preview fetch
+    # Referral loop L7 (PRD §9): the ledger. share_token is the id in the
+    # link (`t`): = invite_token on a minted row, the parent's id on a
+    # group-chat sibling (§7.6); NULLed on the referrer's account deletion.
+    Column("share_token",           String),
+    Column("surface",               String),                  # InviteSurface at mint
+    Column("attribution_method",    String),                  # token | league_match; NULL while pending
     UniqueConstraint("invite_token", name="uq_referral_token"),
     UniqueConstraint("referrer_user_id", "referred_user_id",
                      name="uq_referral_pair"),
     Index("ix_referrals_referrer", "referrer_user_id"),
     Index("ix_referrals_referred", "referred_user_id"),
+    Index("ix_referrals_share_token", "share_token"),
+    Index("ix_referrals_league_status", "league_id", "status"),   # §7.5 candidates
 )
 
 # Outbound affiliate click ledger. subid joins partner payout reports back to
@@ -3608,6 +3616,11 @@ _MODEL_CONFIG_DEFAULTS = [
     ("vc_standings_weight",       0.30, "value core windows: full weight of the points-for index; ramps linearly from week 0 to week 8"),
     ("vc_throwin_min_ratio",      2.0,  "value core: a piece too small for the junk rules may ride along only if its recipient's board values it at >= this x consensus market (and >= the asset floor)"),
     ("vc_testers_only",           1.0,  "value core rollout: 1 = serve only the tester allowlist while trade.value_core is on; 0 = everyone"),
+    # ── Referral loop L7 — deploy-free kill switch for the invite-id mint ──
+    # Read per request from the DB (server._referral_mint_enabled, the
+    # force_supersedes_running pattern), never cached: a flip lands on the
+    # next mint with no restart. Not a trade or ranking input.
+    ("referral_mint_enabled",     1.0,  "referral loop L7: exactly 1 = POST /api/invite/token mints while growth.referral_ledger is on; any other value = 404 not_found (clients fall back to the league-only link). Kill: scripts/set_knob.py referral_mint_enabled 0"),
     # ── Minimum-version gate (B8, head-eng ruling 35) ────────────────────
     # Served as the top-level int `app_min_version` on GET /api/feature-flags
     # (server._app_min_version). Encoding major*10000 + minor*100 + patch
@@ -4012,6 +4025,13 @@ def _migrate_db() -> None:
         ("referrals",          "last_opened_at",            "VARCHAR"),
         ("referrals",          "open_count",                "INTEGER DEFAULT 0"),
         ("referrals",          "unfurled_at",               "VARCHAR"),
+        # ── referral loop L7 (§9): the ledger columns. All nullable: rows
+        # written before L7 have no share id, surface or method. Their two
+        # indexes are created explicitly below (create_all never adds an
+        # index to an existing table).
+        ("referrals",          "share_token",               "VARCHAR"),
+        ("referrals",          "surface",                   "VARCHAR"),
+        ("referrals",          "attribution_method",        "VARCHAR"),
         # ── G3-e (legal R28.22): an outcome's owner, for deletion and export.
         ("deck_outcomes",      "user_id",                   "VARCHAR"),
     ]
@@ -4205,6 +4225,18 @@ def _migrate_db() -> None:
         if not schema.has_index(tbl, idx_name):
             _create_index_guarded(
                 f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})", idx_name)
+
+    # ── Referral loop L7 (PRD §9) — the ledger's two indexes on an existing
+    # `referrals` table. Declared on the Table too, so a fresh DB gets them
+    # from create_all; these run after the migration_cols ALTERs above, so
+    # share_token exists by now. Same pattern as the blocks above: only a
+    # genuinely missing index gets DDL, under the lock guard, so a migrated
+    # DB issues no CREATE INDEX at boot (test_migrate_ddl_lock_safety).
+    for idx_name, cols in (("ix_referrals_share_token",   "share_token"),
+                           ("ix_referrals_league_status", "league_id, status")):
+        if not schema.has_index("referrals", idx_name):
+            _create_index_guarded(
+                f"CREATE INDEX IF NOT EXISTS {idx_name} ON referrals ({cols})", idx_name)
 
     # ── trade_matches.status: 'active' → 'pending' (review P0) ─────────────
     # Earlier code wrote status='active' on insert; every cron reader filters
@@ -14146,6 +14178,238 @@ def load_notifications(user_id: str, unread_only: bool = False) -> list[dict]:
     if unread_only:
         rows = [r for r in rows if not r.get("is_read")]
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Referral loop L7 — the ledger's SQL (rules: backend/referral_ledger.py)
+# ---------------------------------------------------------------------------
+
+def league_has_member(league_id: str, user_id: str) -> bool:
+    """True when `league_members` holds `user_id` for `league_id`: the DB
+    membership snapshot every session init writes and that platform leagues
+    are resolved from (session_input.resolve_session_input)."""
+    if not league_id or not user_id:
+        return False
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(league_members_table.c.user_id)
+            .where(league_members_table.c.league_id == str(league_id))
+            .where(league_members_table.c.user_id == str(user_id))
+            .limit(1)
+        ).fetchone()
+    return row is not None
+
+
+def count_referral_mints_today(referrer_user_id: str, league_id: str) -> int:
+    """Invite ids this inviter minted for this league since UTC midnight
+    (FR-6). Minted rows only (invite_token = share_token): group-chat
+    siblings are joins, not mints."""
+    r = referrals_table
+    day_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0).isoformat()
+    with engine.connect() as conn:
+        return int(conn.execute(
+            select(func.count()).select_from(r)
+            .where(r.c.referrer_user_id == referrer_user_id)
+            .where(r.c.league_id == str(league_id))
+            .where(r.c.invite_token == r.c.share_token)
+            .where(r.c.created_at >= day_start)
+        ).scalar() or 0)
+
+
+def create_referral_invite(referrer_user_id: str, league_id: str,
+                           surface: str) -> dict:
+    """Mint one invite id (PRD §7.1, §8.1): secrets.token_urlsafe(9), 12
+    URL-safe chars, stored as invite_token AND share_token on one `pending`
+    row. Re-minted on a uq_referral_token collision. Returns
+    {invite_id, created_at}."""
+    import secrets
+    from sqlalchemy.exc import IntegrityError
+
+    for _ in range(4):   # a 72-bit collision is ~impossible; belt+braces
+        invite_id, now = secrets.token_urlsafe(9), _now()
+        try:
+            with engine.begin() as conn:
+                conn.execute(insert(referrals_table).values(
+                    referrer_user_id=referrer_user_id, league_id=str(league_id),
+                    invite_token=invite_id, share_token=invite_id,
+                    status="pending", surface=surface, created_at=now,
+                ))
+            return {"invite_id": invite_id, "created_at": now}
+        except IntegrityError:
+            continue
+    raise RuntimeError("could not mint a unique invite id")
+
+
+def get_referral_for_referred(user_id: str, status: str | None = None) -> dict | None:
+    """The ledger row crediting `user_id` (a user is credited at most once
+    ever, §7.6), optionally only in `status`. Served by ix_referrals_referred."""
+    if not user_id:
+        return None
+    r = referrals_table
+    q = select(r).where(r.c.referred_user_id == user_id)
+    if status is not None:
+        q = q.where(r.c.status == status)
+    with engine.connect() as conn:
+        row = conn.execute(q.order_by(r.c.id).limit(1)).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def claim_referral(referral_id: int, referred_user_id: str, method: str) -> bool:
+    """§7.4 step 4 / §7.5: credit a `pending`, unclaimed row to the invitee.
+    One conditional UPDATE, so two concurrent first sessions can't both
+    claim it. False when the row was already claimed (or isn't pending), or
+    when uq_referral_pair refuses a second row for this (referrer, referred)."""
+    from sqlalchemy.exc import IntegrityError
+    r = referrals_table
+    try:
+        with engine.begin() as conn:
+            return conn.execute(
+                update(r)
+                .where(r.c.id == referral_id)
+                .where(r.c.referred_user_id.is_(None))
+                .where(r.c.status == "pending")
+                .values(referred_user_id=referred_user_id, status="joined",
+                        joined_at=_now(), attribution_method=method)
+            ).rowcount == 1
+    except IntegrityError:
+        return False
+
+
+def insert_referral_sibling(parent: dict, referred_user_id: str) -> int | None:
+    """§7.6: a further joiner through an already-claimed id gets its own
+    `joined` row — same referrer, league, surface and created_at (the link's
+    mint time), share_token = the parent's id, and a fresh unique
+    invite_token `<share_token>~<6 random>` that is never emitted or linked.
+    Returns the new id, or None when uq_referral_pair already holds this
+    (referrer, referred) pair."""
+    import secrets
+    from sqlalchemy.exc import IntegrityError
+    r = referrals_table
+    for _ in range(4):
+        values = dict(
+            referrer_user_id=parent["referrer_user_id"],
+            referred_user_id=referred_user_id,
+            league_id=parent["league_id"],
+            invite_token=f"{parent['share_token']}~{secrets.token_urlsafe(6)[:6]}",
+            share_token=parent["share_token"],
+            status="joined", surface=parent.get("surface"),
+            created_at=parent["created_at"], joined_at=_now(),
+            attribution_method="token",
+        )
+        try:
+            with engine.begin() as conn:
+                return conn.execute(insert(r).values(**values)).inserted_primary_key[0]
+        except IntegrityError:
+            with engine.connect() as conn:
+                pair = conn.execute(
+                    select(r.c.id)
+                    .where(r.c.referrer_user_id == parent["referrer_user_id"])
+                    .where(r.c.referred_user_id == referred_user_id)
+                ).fetchone()
+            if pair is not None:
+                return None
+    return None
+
+
+def league_match_candidates(league_id: str, invitee_user_id: str, *,
+                            opened_since: str, created_since: str) -> list[dict]:
+    """§7.5 candidates in the invitee's first-session league: minted rows
+    (share_token set), `pending`, unclaimed, opened since `opened_since`,
+    created since `created_since`, referrer ≠ invitee. Newest open first;
+    each carries the referrer's users.username as `referrer_username` (the
+    legacy invited_by tie-breaker). Served by ix_referrals_league_status."""
+    r, u = referrals_table, users_table
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(r, u.c.username.label("referrer_username"))
+            .select_from(r.outerjoin(u, u.c.sleeper_user_id == r.c.referrer_user_id))
+            .where(r.c.league_id == str(league_id))
+            .where(r.c.status == "pending")
+            .where(r.c.referred_user_id.is_(None))
+            .where(r.c.share_token.is_not(None))
+            .where(r.c.opened_at >= opened_since)
+            .where(r.c.created_at >= created_since)
+            .where(r.c.referrer_user_id != invitee_user_id)
+            .order_by(r.c.opened_at.desc(), r.c.id.desc())
+        ).fetchall()
+    return [dict(row._mapping) for row in rows]
+
+
+def activate_referral(referral_id: int, qualifying_event: str) -> bool:
+    """FR-17: joined → activated, stamping activated_at and the event's
+    name. One conditional UPDATE (WHERE status = 'joined'), so it stamps
+    once however many emitters race. True when this call stamped it."""
+    r = referrals_table
+    with engine.begin() as conn:
+        return conn.execute(
+            update(r)
+            .where(r.c.id == referral_id)
+            .where(r.c.status == "joined")
+            .values(status="activated", activated_at=_now(),
+                    qualifying_event=qualifying_event)
+        ).rowcount == 1
+
+
+def merge_into_unread_referral_join(user_id: str, referral_id: int, *,
+                                    title: str, body: str, meta: dict) -> bool:
+    """R-F7 (ux-lead): when the inviter's referral_joined row for this
+    referral is still UNREAD and live, rewrite it in place as the
+    referral_activated row (type, title, body, meta; created_at bumped like
+    the GD-8 coalescer), so one person gets one row. Conditional on
+    is_read = 0 and dismissed_at IS NULL, so a row read meanwhile is never
+    rewritten. False when there is no such row (the caller posts its own)."""
+    n = notifications_table
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(n.c.id, n.c.metadata_json)
+            .where(n.c.user_id == user_id)
+            .where(n.c.type == "referral_joined")
+            .where(n.c.is_read == 0)
+            .where(n.c.dismissed_at.is_(None))
+            .order_by(n.c.created_at.desc())
+            .limit(50)
+        ).fetchall()
+    for row in rows:
+        try:
+            if json.loads(row.metadata_json or "{}").get("referral_id") != referral_id:
+                continue
+        except (TypeError, ValueError):
+            continue
+        with engine.begin() as conn:
+            return conn.execute(
+                update(n)
+                .where(n.c.id == row.id)
+                .where(n.c.is_read == 0)
+                .where(n.c.dismissed_at.is_(None))
+                .values(type="referral_activated", title=title, body=body,
+                        metadata_json=json.dumps(meta), created_at=_now())
+            ).rowcount == 1
+    return False
+
+
+def get_user_names(user_id: str) -> dict | None:
+    """{username, display_name} of a users row, or None without one."""
+    if not user_id:
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.username, users_table.c.display_name)
+            .where(users_table.c.sleeper_user_id == user_id)
+        ).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def get_league_platform(league_id: str) -> str:
+    """The `leagues.platform` of a stored league ('sleeper' when unset or
+    unknown): the platform-linked leagues carry espn / mfl / fleaflicker."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(leagues_table.c.platform)
+            .where(leagues_table.c.sleeper_league_id == str(league_id))
+            .limit(1)
+        ).fetchone()
+    return (row.platform if row and row.platform else "sleeper")
 
 
 # ---------------------------------------------------------------------------

@@ -2,19 +2,22 @@
 
 Grant: analytics-lead, PR #350
 (docs/business/analytics/2026-10-15-referral-loop-events.md), conditions
-C1-C9. This section is that addendum's §Verification items 1-6 for the two
-server names D-1 emits: `invite_landing_opened` and `invite_landing_cta`.
+C1-C9. This section is that addendum's §Verification items 1-6 for the four
+server names: `invite_landing_opened` and `invite_landing_cta` (D-1, the join
+landing) and `referral_attributed` and `referral_activated` (L7, the ledger:
+backend/referral_ledger.py), plus item 5's C5 half (the activation set IS
+stage 7 of FUNNEL_STAGES).
 
 PR #364 (build/referral-binary) creates this same file with the CLIENT rows
 (`_CLIENT_PROPS`; items 1-4 and 7). When the two meet, keep both: this
 section adds only `_SERVER_PROPS` / `_SERVER_OPTIONAL`, the `_srv_*` helpers
-and the `test_server_*` tests, and touches no client name. The remaining two
-server names (`referral_attributed`, `referral_activated`, and item 5's C5
-half) join `_SERVER_PROPS` with their emitters.
+and the `test_server_*` tests, and touches no client name.
 
 Server-fired names have no CLIENT_EVENT_PROPS row, so each emitter's props
-are CAPTURED AT THE WRITER (`server.record_event`) and compared `==` to the
-granted set (item 2).
+are CAPTURED AT THE WRITER and compared `==` to the granted set (item 2).
+One spy, on both writer names: the landing calls `server.record_event`, the
+ledger calls `database.record_event` (the same function, bound twice), so
+each event is captured exactly once.
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -26,6 +29,8 @@ from sqlalchemy.pool import StaticPool
 import backend.analytics_queries as aq
 import backend.analytics_taxonomy as at
 import backend.database as db_module
+import backend.feature_flags as feature_flags
+import backend.referral_ledger as rl
 import backend.server as server
 from backend.database import (
     metadata, referrals_table, user_events_table, users_table,
@@ -41,6 +46,8 @@ _SRV_INVITE_ID = "Ab3dEf6hIj9k"         # 12 URL-safe chars, the minted shape (�
 _SRV_LEAGUE_ID = "123456789012345678"   # an 18-digit Sleeper id
 _SRV_REFERRER = "u_srv_referrer"
 _SRV_PRIOR = "2026-01-01T00:00:00+00:00"
+_SRV_INVITEE = "u_srv_invitee"          # L7: a new user arriving through the link
+_SRV_REFERRAL_ID = 1                    # the fixture's one referrals row
 _SRV_IPHONE = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 "
                "Mobile/15E148 Safari/604.1")
@@ -52,23 +59,37 @@ _SERVER_PROPS: dict[str, dict] = {
     "invite_landing_cta":    {"invite_id": _SRV_INVITE_ID,
                               "league_id": _SRV_LEAGUE_ID,
                               "cta": "ios_install", "device_class": "ios"},
+    # L7: the invitee's first session credits the link (§7.4), then their
+    # first trade opinion activates it (FR-17). No invitee id (C2).
+    "referral_attributed":   {"invite_id": _SRV_INVITE_ID,
+                              "referral_id": _SRV_REFERRAL_ID,
+                              "league_id": _SRV_LEAGUE_ID,
+                              "attribution_method": "token",
+                              "league_platform": "sleeper", "notified": True},
+    "referral_activated":    {"invite_id": _SRV_INVITE_ID,
+                              "referral_id": _SRV_REFERRAL_ID,
+                              "league_id": _SRV_LEAGUE_ID,
+                              "days_to_activate": 0, "notified": True},
 }
 _SERVER_OPTIONAL: dict[str, set] = {
     "invite_landing_opened": {"invite_id"},   # invite_status stays, as null
     "invite_landing_cta":    {"invite_id"},
+    "referral_attributed":   set(),           # every key, every time
+    "referral_activated":    set(),
 }
 
 
 @pytest.fixture()
 def srv(monkeypatch):
     """Throwaway DB, both D-1 flags on, the beta URL set, no Sleeper egress,
-    and a spy on the writer."""
+    and a spy on the writer (both of its names)."""
     engine = create_engine("sqlite://", poolclass=StaticPool,
                            connect_args={"check_same_thread": False})
     metadata.create_all(engine)
     monkeypatch.setattr(db_module, "engine", engine)
-    monkeypatch.setattr(server, "is_enabled", lambda k: k in {
-        "growth.join_landing", "growth.referral_ledger"})
+    flags = {"growth.join_landing", "growth.referral_ledger"}
+    monkeypatch.setattr(server, "is_enabled", lambda k: k in flags)
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda k: k in flags)
     monkeypatch.setattr(server, "_fetch_sleeper_league_meta",
                         lambda lid: {"name": "Lakeview Dynasty"})
     monkeypatch.setenv("IOS_INSTALL_URL", "https://testflight.apple.com/join/AbCdEfGh")
@@ -78,7 +99,7 @@ def srv(monkeypatch):
             display_name="Srv Ref", last_active_at=_SRV_PRIOR, events_count=5))
         conn.execute(insert(referrals_table).values(
             referrer_user_id=_SRV_REFERRER, league_id=_SRV_LEAGUE_ID,
-            invite_token=_SRV_INVITE_ID, status="pending",
+            invite_token=_SRV_INVITE_ID, share_token=_SRV_INVITE_ID, status="pending",
             created_at=(datetime.now(timezone.utc) - timedelta(days=1)).isoformat()))
     captured = []
     real = server.record_event
@@ -87,6 +108,7 @@ def srv(monkeypatch):
         captured.append((user_id, event_type, kw))
         return real(user_id, event_type, **kw)
     monkeypatch.setattr(server, "record_event", _spy)
+    monkeypatch.setattr(db_module, "record_event", _spy)   # the ledger's writer
     server.app.config["TESTING"] = True
     return engine, captured
 
@@ -101,6 +123,17 @@ def _srv_drive(with_t=True):
     q = f"?t={_SRV_INVITE_ID}" if with_t else ""
     _srv_get(f"/app/league/join/{_SRV_LEAGUE_ID}{q}")
     _srv_get(f"/app/league/join/{_SRV_LEAGUE_ID}/go/ios{q}")
+
+
+def _srv_drive_ledger():
+    """L7: the invitee's first session through the link, then their first
+    trade opinion (the writers the session-init daemon and the stage-7
+    emitters call)."""
+    rl.attribute_first_session(
+        is_new_user=True, user_id=_SRV_INVITEE, league_id=_SRV_LEAGUE_ID,
+        league_platform="sleeper", invite_id=_SRV_INVITE_ID, invited_by=None,
+        new_username="srvnew")
+    rl.maybe_activate_referral(_SRV_INVITEE, "trade_proposed")
 
 
 def _srv_rows(engine):
@@ -127,6 +160,7 @@ def test_server_names_are_server_fired_only():
 def test_server_props_captured_at_the_writer_are_exact(srv):
     _, captured = srv
     _srv_drive(with_t=True)
+    _srv_drive_ledger()
     assert [name for _, name, _ in captured] == list(_SERVER_PROPS)
     for _, name, kw in captured:
         assert kw["props"] == _SERVER_PROPS[name], name
@@ -147,6 +181,7 @@ def test_server_rows_carry_no_token_key(srv):
     engine, _ = srv
     _srv_drive(with_t=True)
     _srv_drive(with_t=False)
+    _srv_drive_ledger()
     for name, props in _SERVER_PROPS.items():
         assert not any("token" in k for k in props), name
     for row in _srv_rows(engine):
@@ -158,10 +193,11 @@ def test_server_rows_add_no_device_platform_prop(srv):
     the device bucket is `device_class`."""
     engine, _ = srv
     _srv_drive(with_t=True)
+    _srv_drive_ledger()
     for name, props in _SERVER_PROPS.items():
         assert "platform" not in props, name
     rows = _srv_rows(engine)
-    assert len(rows) == 2
+    assert len(rows) == len(_SERVER_PROPS)
     for row in rows:
         assert "platform" not in json.loads(row["props"])
         assert row["platform"] == "server"
@@ -195,6 +231,50 @@ def test_server_writes_never_move_the_owners_users_row(srv):
     assert {r["user_id"] for r in rows} == {_SRV_REFERRER} and len(rows) == 3
     assert _user() == before
     assert (before["last_active_at"], before["events_count"]) == (_SRV_PRIOR, 5)
+
+
+def test_server_ledger_writes_never_move_the_owners_users_row(srv):
+    """C6 for the L7 rows: owned by the referrer, caused by the invitee."""
+    engine, _ = srv
+    with engine.connect() as conn:
+        before = dict(conn.execute(select(users_table).where(
+            users_table.c.sleeper_user_id == _SRV_REFERRER)).fetchone()._mapping)
+    _srv_drive_ledger()
+    rows = _srv_rows(engine)
+    assert [r["event_type"] for r in rows] == ["referral_attributed", "referral_activated"]
+    assert {r["user_id"] for r in rows} == {_SRV_REFERRER}
+    with engine.connect() as conn:
+        after = dict(conn.execute(select(users_table).where(
+            users_table.c.sleeper_user_id == _SRV_REFERRER)).fetchone()._mapping)
+    assert after == before
+
+
+def test_server_ledger_rows_carry_no_invitee_id(srv):
+    """C2: the referrer's rows never name the referred user; join through
+    referral_id to the ledger instead."""
+    engine, _ = srv
+    _srv_drive_ledger()
+    for name in ("referral_attributed", "referral_activated"):
+        assert "referred_user_id" not in _SERVER_PROPS[name], name
+    for row in _srv_rows(engine):
+        assert _SRV_INVITEE not in row["props"]
+
+
+def test_server_activation_set_is_funnel_stage_7():
+    """Item 5's C5 half: referral_activated's qualifying set is read from
+    stage 7 of FUNNEL_STAGES (today trade_proposed | match_swiped), never a
+    hand list, and never includes stage 6's trades_generated."""
+    (stage7,) = [ev for n, _name, ev in aq.FUNNEL_STAGES if n == 7]
+    (stage6,) = [ev for n, _name, ev in aq.FUNNEL_STAGES if n == 6]
+    assert rl.STAGE7_EVENTS == frozenset(stage7)
+    assert rl.STAGE7_EVENTS == {"trade_proposed", "match_swiped"}
+    assert not rl.STAGE7_EVENTS & set(stage6)
+
+
+def test_signup_keeps_its_class():
+    """FR-16 widens signup's props only; the event stays INTENT (stage 2)."""
+    assert "signup" in at.SERVER_FIRED_EVENTS
+    assert "signup" in aq.INTENT_EVENTS and "signup" not in aq.NON_INTENT_EVENTS
 
 
 # ---------------------------------------------------------------------------

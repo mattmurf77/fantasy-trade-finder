@@ -113,6 +113,7 @@ in its featured-offer ordering. See [release evidence](plans/owner-v2-bilateral/
 - [Flags — API observability (2026-08-09, ships **ON**)](#flags-api-observability-2026-08-09-ships-on)
 - [Flags — P0 remediation (2026-08-11 mobile UX audit)](#flags-p0-remediation-2026-08-11-mobile-ux-audit-plans)
 - [Flags — Referral loop D-1: install CTA (2026-10-15, ships **OFF**)](#flags--referral-loop-d-1-install-cta-2026-10-15-ships-off)
+- [Flags — Referral loop L7: the ledger (2026-10-24, ships **OFF**)](#flags--referral-loop-l7-the-ledger-2026-10-24-ships-off)
 - [Flags — Counterparty breaker (2026-08-21, ships **OFF**)](#flags-counterparty-breaker-2026-08-21-ships-off)
 - [Flags — Negative-results memory (2026-08-22, ships **OFF**)](#flags-negative-results-memory-2026-08-22-ships-off)
   - [The allowlist is the OTHER half of the ON-condition](#the-allowlist-is-the-other-half-of-the-on-condition)
@@ -129,6 +130,7 @@ in its featured-offer ordering. See [release evidence](plans/owner-v2-bilateral/
   - [Minimum-version gate (B8) — `backend/server.py`, DB-seeded](#minimum-version-gate-b8-backendserverpy-db-seeded)
   - [S0 serve rules (roster check) — `backend/server.py`, DB-seeded](#s0-serve-rules-roster-check--backendserverpy-db-seeded)
   - [First-page store (P1, flag `trade.first_page_store`) — `backend/server.py`, DB-seeded](#first-page-store-p1-flag-tradefirst_page_store--backendserverpy-db-seeded)
+  - [Referral invite mint (L7) — `backend/server.py`, DB-seeded](#referral-invite-mint-l7-backendserverpy-db-seeded)
   - [Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded](#consensus-seed-blend-145148-backenddata_loaderpy-db-seeded)
   - [Trade engine v2 (Tier 1) — `trade_service._DEFAULT_CFG`](#trade-engine-v2-tier-1-trade_service_default_cfg)
   - [Tier 2 — marginal valuation + outlook blend](#tier-2-marginal-valuation-outlook-blend)
@@ -701,6 +703,18 @@ Spec: `docs/plans/referral-loop/prd.md` (branch `plan/referral-loop` @ `91f1cc29
 
 ---
 
+## Flags — Referral loop L7: the ledger (2026-10-24, ships **OFF**)
+
+Spec: `docs/plans/referral-loop/prd.md` @ `91f1cc29` §7, §8.1, §8.4, §11; events PR #350. L7 adds **no new flag**: it gives `growth.referral_ledger` (registered by D-1, above, default **false**) its mint, attribution and activation meaning. Flipping it is the operator's call (planned 2026-11-18); L7 flips nothing.
+
+| `growth.referral_ledger` ON also gates | Behaviour | Off |
+|---|---|---|
+| The mint, `POST /api/invite/token` | Mints a 12-char invite id per share, 10 per inviter per league per UTC day. Also needs `model_config` `referral_mint_enabled` = 1 ([kill switch](#referral-invite-mint-l7-backendserverpy-db-seeded)) | `404 not_found`; clients emit today's league-only links |
+| Attribution at a new user's first session init ([api-reference](api-reference.md#apisessioninit--invite-attribution-referral-loop-l7)) | Credit by token (§7.4), else the league-match fallback (§7.5); server-derived `users.invited_by`; `signup.attribution` / `attribution_miss`; one `referral_joined` row (FR-18) and the `league_member_joined` fanout skipping that inviter's inbox row (FR-20); server event `referral_attributed` | Today's behaviour, byte for byte: the client's `invited_by`, no `signup` props, the legacy `referral_joined` row from `invited_by` alone |
+| Activation (FR-17, FR-19) | After each stage-7 server emitter (the swipe route, the calculator queue, the reasoned pass), `referral_ledger.maybe_activate_referral` stamps a `joined` row `activated` when it is the invitee's first opinion within 14 days of `joined_at` (the qualifying set is read from `analytics_queries.FUNNEL_STAGES` stage 7; `trades_generated` never activates), posts the inviter's inbox-only `referral_activated` row (merged into the still-unread join row, R-F7) and records `referral_activated` | One flag check per stage-7 event, no DB read, no write |
+
+---
+
 ## Flags — Counterparty breaker (2026-08-21, ships **OFF**)
 
 Plan + doc suite: [docs/plans/counterparty-breaker/](plans/counterparty-breaker/) (PLAN · PRD · HLD · LLD · [scope](plans/counterparty-breaker/scope.md)). Two flags, both default **false**; the second **requires** the first. The 25 `breaker_*` `model_config` knobs are [below](#counterparty-breaker-flag-tradebreaker--trade_service_default_cfg-db-seeded).
@@ -930,6 +944,12 @@ Read through `_deck_cfg` only while the store is on (`trade_prefetch_remaining` 
 | `trade_prefetch_remaining` | 50.0 | Served as `prefetch_remaining` on paged `/api/trades/generate` and `/api/trades/status` responses: the client requests the next page when this many ready cards remain (at least one full page ahead, U3). Seeded at 50 (was 30) per head-eng ruling 10's sizing: a 44-card swipe burst at 0.4 s/card plus the prefetch round trip must not reach the end of the buffer. Clamped to 1–200; with no `model_config` row the code default is also 50. |
 | `trade_page_store_evict_days` | 30.0 | The cleanup loop deletes rows whose `last_served_at` (or `built_at`, never served) is older than this. Clamped to 1–3650. |
 | `trade_page_store_max_bytes` | 262144000.0 | Then, while `SUM(stored_bytes)` exceeds this (250 MB, scope §7), it deletes least recently used rows. Both passes are bounded to 500 rows per tick. |
+
+### Referral invite mint (L7) — `backend/server.py`, DB-seeded
+
+| Key | Default | Meaning |
+|---|---|---|
+| `referral_mint_enabled` | 1.0 (**ON**) | The deploy-free kill switch for `POST /api/invite/token` (referral loop L7, [api-reference](api-reference.md)). The route mints only while `growth.referral_ledger` is on **and** this knob is **exactly 1**; either off → `404 {"error":"not_found"}`, which every client already treats as "fall back to the league-only link", so sharing never breaks. **Read per request straight from the DB** (`server._referral_mint_enabled()` → `database.get_config()`, the `force_supersedes_running` pattern), never from a cache: a flip lands on the next mint with **no restart and no deploy**, whichever way it was written. Not a trade or ranking input: `ranking_service.reload_config` never loads it. (`trade_service.reload_config` copies every `model_config` row into `_cfg`, so like every new row it is part of `_trade_request_signature` and the owner-experiment config hash; seeding it changes those once at deploy, as `trade_page_size` did.) **Kill recipe:** `python3 scripts/set_knob.py referral_mint_enabled 0` (or `PUT /api/admin/config/referral_mint_enabled` with `{"value": 0}` and `X-Cron-Secret`); restore with `1`. Attribution, activation and landing-open recording keep running for links already in the wild: this stops new ids only, and the flag is the whole-loop switch. |
 
 ### Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded
 

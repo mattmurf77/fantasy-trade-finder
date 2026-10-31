@@ -406,6 +406,12 @@ NON_INTENT_EVENTS = frozenset({
     # the `receipts_grade_run` class. Grant: analytics-lead C1–C9.
     "invite_landing_opened",
     "invite_landing_cta",
+    # ── Referral loop L7, 2026-10-24 — same class, same reason, same grant:
+    # owned by the REFERRER, caused by the invitee's first session (and, for
+    # referral_activated, the invitee's first trade opinion). Each added in
+    # the SAME commit as its emitter (backend/referral_ledger.py).
+    "referral_attributed",
+    "referral_activated",
     # ── Time to trade suggestion, 2026-10-23 — added in the SAME commit as
     # the emitters (docs/business/analytics/2026-10-20-time-to-suggestion-
     # events.md v2). R2/R2b are a system outcome echoing the R1 tap

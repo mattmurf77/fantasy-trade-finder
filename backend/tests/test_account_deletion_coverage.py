@@ -197,6 +197,34 @@ def test_referral_counterparties_and_public_league_grids_are_preserved(engine):
     assert len(history) == 1 and history[0]["owner_user_id"] is None
 
 
+def test_referral_ledger_columns_on_deletion(engine):
+    """Referral loop L7 (FR-23): the deleted sender's public invite id
+    (share_token) dies on every alias's rows, so the link credits no one;
+    surface and attribution_method stay with the anonymized row; the
+    counterparty's own link (the user was only the invitee) is untouched."""
+    with engine.begin() as conn:
+        seed(conn, db.referrals_table, "sent", referrer_user_id=UID,
+             referred_user_id=OTHER, invite_token="tokSent00001", share_token="tokSent00001",
+             surface="league_home", attribution_method="token", status="joined")
+        seed(conn, db.referrals_table, "alias-sent", referrer_user_id=ALIAS,
+             invite_token="tokAlias0001", share_token="tokAlias0001",
+             surface="web_invite", status="pending")
+        seed(conn, db.referrals_table, "received", referrer_user_id=OTHER,
+             referred_user_id=UID, invite_token="tokRecv00001", share_token="tokRecv00001",
+             surface="trades_banner", attribution_method="league_match", status="joined")
+    accounts.delete_user_data(UID)
+    by_token = {r["invite_token"]: r for r in rows(engine, db.referrals_table)}
+    for tok, surface in (("tokSent00001", "league_home"), ("tokAlias0001", "web_invite")):
+        assert by_token[tok]["share_token"] is None
+        assert by_token[tok]["surface"] == surface
+        assert by_token[tok]["referrer_user_id"].startswith(accounts.DELETED_USER_PLACEHOLDER)
+    assert by_token["tokSent00001"]["attribution_method"] == "token"
+    received = by_token["tokRecv00001"]
+    assert received["share_token"] == "tokRecv00001" and received["referred_user_id"] is None
+    assert (received["surface"], received["attribution_method"]) == ("trades_banner", "league_match")
+    assert received["referrer_user_id"] == OTHER
+
+
 def test_trade_share_tokens_minted_by_the_user_are_deleted(engine):
     """Build O8: a share link dies with its sharer's account (every alias);
     the counterparty's own tokens for the same match survive."""
