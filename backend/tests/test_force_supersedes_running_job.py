@@ -30,6 +30,7 @@ import pytest
 from sqlalchemy import create_engine, select, text
 
 import backend.database as db_module
+import backend.feature_flags as ff
 import backend.server as server
 from backend.database import deck_impressions_table, metadata
 from backend.ranking_service import Player, RankingService
@@ -205,10 +206,14 @@ def _run_one_job_synchronously():
     )
 
 
-def test_control_a_normal_job_does_write_impressions(live):
+def test_control_a_normal_job_does_write_impressions(live, monkeypatch):
     """The control. Without it, the assertion below could pass because the
-    harness never writes impressions at all."""
+    harness never writes impressions at all. The job writes them only with
+    packed evidence off: with it on they wait for delivery (#370), so the
+    flags are pinned here rather than read from features.json."""
     _, engine = live
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": False,
+                                             "trade.packed_evidence": False})
     with patch.object(server, "_deck_signal_v2_enabled", lambda: True):
         _run_one_job_synchronously()
     assert _impression_count(engine) > 0
