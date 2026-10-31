@@ -49,6 +49,7 @@ Gates: full (`#373`, legal text only). No route, schema, flag or event change. D
 - **Pins:** `POL-overhaul-covered` fails if either sentence comes back (`local/373-r28-20-full` still carries both). `POL-r28-19`'s position anchor moves to the inviter line's "Email us to have it removed;", the item now before it.
 - **Sabotage:** 4/4 red: each sentence back, one reworded, and the R28.19 item removed.
 - **Suites:** web structure 249/249.
+- **Also, the FAQ footer links (design-lead, #373 QA P3-6; the operator's approval of the render is pending, not a hold):** the three inline `style="color: …"` attributes are gone. One `.faq-footer a` rule makes them chalk and underlined; the ice appears only on the hover underline. The new `POL-no-ice-links[faq|contact]` extends the existing no-ice-link rule to those two pages. Sabotage 4/4 red: the rule coloured ice, the hover coloured ice, an inline ice link on contact, and the pre-fix FAQ file. Web structure 251/251.
 
 ## 2026-11-01 — #373 QA P1-1: legal R28.25's §3 calculator line pinned; /privacy links pinned (P3-1)
 

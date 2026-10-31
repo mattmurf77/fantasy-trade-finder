@@ -389,7 +389,7 @@ def run() -> int:
     ICE = re.compile(r"var\(\s*--(?:ice|ice-press|accent)\s*\)|#56d9ec|#3fc2d6", re.I)
     LINK_SEL = re.compile(r"(?:^|[\s>+~])a(?:[:.\[#][^\s>+~]*)?$")
     COLOR_DECL = re.compile(r"(?:^|;)\s*color\s*:\s*([^;]+)", re.I)
-    for page in POLICY:
+    def link_styles(page: str):
         css = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", strip_comments(all_sources[page]), re.S | re.I))
         rules = [(sel.strip(), decl) for sels, decl in re.findall(r"([^{}]+)\{([^{}]*)\}", css)
                  for sel in sels.split(",")]
@@ -397,6 +397,10 @@ def run() -> int:
                      and any(ICE.search(v) for v in COLOR_DECL.findall(decl))]
         inline = [m for m in re.findall(r"<a\b[^>]*\bstyle=[\"']([^\"']*)", body_of(all_sources[page]), re.I)
                   if any(ICE.search(v) for v in COLOR_DECL.findall(m))]
+        return rules, ice_links, inline
+
+    for page in POLICY:
+        rules, ice_links, inline = link_styles(page)
         base = [decl for sel, decl in rules if sel == "a"]
         base_ok = len(base) == 1 \
             and any(re.search(r"var\(\s*--(?:chalk|text)\s*\)", v) for v in COLOR_DECL.findall(base[0])) \
@@ -406,6 +410,16 @@ def run() -> int:
                  f"{len(inline)} inline ice link style(s)" if inline else
                  "the base `a` rule is not chalk + underline") if not (base_ok and not ice_links and not inline)
                 else "reading links chalk + underline, no ice text links")
+
+    # The FAQ and contact pages have no base `a` rule, but their links follow
+    # the same rule: no ice text colour (design-lead, #373 QA P3-6, the FAQ
+    # footer's mailto).
+    for page in ("faq.html", "contact.html"):
+        _, ice_links, inline = link_styles(page)
+        r.check(f"POL-no-ice-links[{page}]", not ice_links and not inline,
+                ("ice-coloured link rule(s): " + ", ".join(ice_links) if ice_links else
+                 f"{len(inline)} inline ice link style(s)") if (ice_links or inline)
+                else "no ice text links")
 
     for page in SUPPORT_PAGES:
         raw = all_sources[page]
