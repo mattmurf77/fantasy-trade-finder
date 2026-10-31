@@ -961,6 +961,7 @@ def _scrub_grading(job: dict) -> int:
     """The league pass over Calibration sessions in the captured leagues."""
     gs = db.grading_sessions_table
     changed = 0
+    _renew(job)
     with db.engine.begin() as conn:
         for session in conn.execute(select(gs.c.session_id, gs.c.league_id, gs.c.source_json).where(
                 gs.c.league_id.in_(job["leagues"]), gs.c.created_at <= job["cutoff"],
