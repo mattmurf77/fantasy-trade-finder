@@ -184,7 +184,8 @@ from backend.deck_quality import (
 )
 from backend.eval.data import (
     CALIBRATION_REFRESH, IN_FLIGHT, PACK_INTEGRITY, PACK_TABLE, PARTIAL_RUN_TIER,
-    UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT, WITHDRAWALS_TABLE, _json_dict, load_decks,
+    PARTNER_REDACTED, UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT, WITHDRAWALS_TABLE, _json_dict,
+    load_decks,
 )
 from backend.eval.flip_read import (
     _PACK_ROWS, FAIL, LIST_CAP, PASS, ReadOnlyViolation, _chunks, _iso, _Parser, _redact,
@@ -501,7 +502,8 @@ def _short_deck(deck, rows, fetch, packed: bool, protected_of) -> bool:
     A redacted partner's card may read unprotected (the scrub may have
     removed its protection, never added one). That can only break the fixed
     point, never make one, so it needs no exclusion here."""
-    if deck.exclusion is not None and not (packed and deck.exclusion == IN_FLIGHT):
+    if deck.exclusion not in (None, PARTNER_REDACTED) and not (
+            packed and deck.exclusion == IN_FLIGHT):     # a redacted deck holds every card
         return False
     if any(c.evidence_tier == PARTIAL_RUN_TIER for c in deck.cards):
         return False

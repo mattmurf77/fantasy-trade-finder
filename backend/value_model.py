@@ -541,14 +541,12 @@ MIN_PROPOSE_POS = 3
 
 _POSITION_NORM = 10.0   # displayed position / this, clipped to [0,1] — train-only
 
-# G-a6 (models-lead addendum G, I5): the fit's named exclusion for cards whose
-# partner deleted their account (the loader's LoggedCard.partner_redacted).
-# The deletion scrub strips likes_you from every such card, true or not
-# (legal R28.22 b2), so a true like reads as none. While those cards are few
-# the fit keeps them; once redacted cards lacking likes_you exceed this share
-# of the fit window's cards with likes_you true, it leaves them all out.
+# The fit's named exclusion for cards whose partner deleted their account (the
+# loader's LoggedCard.partner_redacted; eval.data.PARTNER_REDACTED). The
+# scrub strips likes_you and nulls surplus_margin on every such card, which
+# would read as no like and no surplus, so no redacted card is an honest
+# training row (models-lead addendum J1, superseding G-a6's 1% test).
 PARTNER_REDACTED = "partner_redacted"
-PARTNER_REDACTED_MAX_PCT = 1
 
 
 def _trainable(c):
@@ -558,30 +556,7 @@ def _trainable(c):
     return f if c.viewed and not c.undone else None
 
 
-def partner_redacted_test(decks) -> dict:
-    """G-a6's 1% test over the cards the fit reads (_trainable): `lost_likes`,
-    the partner_redacted cards lacking likes_you (an upper bound on the likes
-    the scrub removed: the true number is unknowable by design, G-a5);
-    `liked`, the cards with likes_you true; `fires` when lost_likes is above
-    PARTNER_REDACTED_MAX_PCT % of liked; `excluded`, the partner_redacted
-    cards a fit then leaves out (0 when it doesn't fire)."""
-    lost = liked = redacted = 0
-    for deck in decks:
-        for c in deck.cards:
-            f = _trainable(c)
-            if f is None:
-                continue
-            liked += bool(f.get("likes_you"))
-            if c.partner_redacted:
-                redacted += 1
-                lost += "likes_you" not in f
-    fires = lost * 100 > PARTNER_REDACTED_MAX_PCT * liked
-    return {"lost_likes": lost, "liked": liked, "fires": fires,
-            "excluded": redacted if fires else 0}
-
-
-def build_training_rows(decks, *, skip_partner_redacted: bool = False
-                        ) -> tuple[list[dict], list[dict]]:
+def build_training_rows(decks) -> tuple[list[dict], list[dict]]:
     """LoggedDecks → (like_rows, propose_rows), each row =
     {"f": features_json-shaped dict, "y": 0/1, "user_id", "served_at",
      "position": position/_POSITION_NORM}, where position is the card's
@@ -596,16 +571,14 @@ def build_training_rows(decks, *, skip_partner_redacted: bool = False
     whose outcomes joined by id, R4.2 U2), so a viewed card trains the same
     whether or not it was upgraded to a full row.
 
-    skip_partner_redacted leaves out the cards the loader marks
-    partner_redacted (G-a6's named exclusion; train_model sets it only when
-    partner_redacted_test fires).
+    A card the loader marks partner_redacted is never a row (PARTNER_REDACTED).
     """
     like_rows: list[dict] = []
     propose_rows: list[dict] = []
     for deck in decks:
         for c in deck.cards:
             f = _trainable(c)
-            if f is None or (skip_partner_redacted and c.partner_redacted):
+            if f is None or c.partner_redacted:
                 continue
             row = {
                 "f": f,
@@ -659,18 +632,12 @@ def train_model(decks, *, as_of: datetime, config: dict | None = None) -> ValueM
     pinned now. Either way it is recorded in meta["config"] (R5.2 (a)), so
     a re-fit on the same corpus, as_of and config is bit-identical.
     Returns None when the like head lacks MIN_LIKE_ROWS/MIN_LIKE_POS — no
-    model is better than a fake one. When G-a6's 1% test fires, the fit
-    leaves out the partner_redacted cards and meta["exclusions"] names it
-    with its n; meta["partner_redacted_test"] records the test either way."""
+    model is better than a fake one. meta["exclusions"] names the
+    partner_redacted cards the fit read past (PARTNER_REDACTED) and their n."""
     config = config if config is not None else pin_config(FIT_CONFIG)
-    redacted = partner_redacted_test(decks)
-    if redacted["fires"]:
-        log.warning("value model: %s exclusion (G-a6): %d redacted cards left out of the fit "
-                    "(%d lacking likes_you, above %d%% of %d with it)", PARTNER_REDACTED,
-                    redacted["excluded"], redacted["lost_likes"], PARTNER_REDACTED_MAX_PCT,
-                    redacted["liked"])
-    like_rows, propose_rows = build_training_rows(
-        decks, skip_partner_redacted=redacted["fires"])
+    redacted = sum(1 for d in decks for c in d.cards
+                   if c.partner_redacted and _trainable(c) is not None)
+    like_rows, propose_rows = build_training_rows(decks)
     n_like_pos = int(sum(r["y"] for r in like_rows))
     if len(like_rows) < MIN_LIKE_ROWS or n_like_pos < MIN_LIKE_POS:
         log.info("value model: insufficient labels (%d like rows, %d pos) — "
@@ -718,8 +685,7 @@ def train_model(decks, *, as_of: datetime, config: dict | None = None) -> ValueM
         "calib_frac": calib_frac, "l2": l2, "l2_cat": l2_cat,
         "propose_head": "lr" if model.propose_head else "constant",
         "config": config,
-        "exclusions": {PARTNER_REDACTED: redacted["excluded"]} if redacted["fires"] else {},
-        "partner_redacted_test": redacted,
+        "exclusions": {PARTNER_REDACTED: redacted},
     }
     return model
 

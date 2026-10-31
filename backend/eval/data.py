@@ -158,6 +158,18 @@ deck whole and never sinks it; calibration excludes its cards.
                    a marked deck without a pack (paging, above) whose live
                    table lacks delivered_at, or none of whose non-ghost rows
                    has one: nothing says which cards were delivered
+  partner_redacted a card of the deck, ghosts included (replay ranks them),
+                   is LoggedCard.partner_redacted: its partner deleted their
+                   account, and the scrub nulled its blended scores, which a
+                   scorer would read as 0 and sink (models-lead addendum J1;
+                   C7 (iv): excludes, never sinks). Only the token marks a
+                   deck, never a null score. It ranks below every reason
+                   above and below replay's partial_run (a partial-run deck
+                   is never marked), so redaction can't mask a broken deck.
+                   Replay, e(k) and calibration leave it out. The B-DK
+                   audit, G3's joins and the flip read's integrity checks
+                   keep it, and the fit drops only the redacted cards
+                   (value_model.build_training_rows).
 
 Lean load: only the columns eval reads are selected, and
 project_features=True (the nightly) also trims each parsed features dict
@@ -233,6 +245,10 @@ WITHDRAWAL_CONFLICT = "withdrawal_conflict"
 INCOMPLETE_DECK = "incomplete_deck"
 IN_FLIGHT = "in_flight"
 NO_DELIVERY_EVIDENCE = "no_delivery_evidence"
+PARTNER_REDACTED = "partner_redacted"
+# J1: above this share of a window's decks excluded as partner_redacted, a
+# replay or calibration read used for a gate goes to models-lead before use.
+PARTNER_REDACTED_GATE_PCT = 5
 # The paging marker (module doc): a card's features_json / compact block, or a
 # pack's run metadata, with this key == 1 is from the page-store path.
 PAGE_STORE_MARKER = "page_store"
@@ -307,9 +323,9 @@ class LoggedCard:
     def partner_redacted(self) -> bool:
         """The loader's mark for a card whose partner deleted their account:
         its frozen partner_user_id is a redaction token (contract.
-        REDACTED_PARTNER_PREFIX; models-lead G-a4). Every reader still sees
-        the card; only the fit's named exclusion acts on the mark, and only
-        when its 1% test fires (value_model.PARTNER_REDACTED, G-a6)."""
+        REDACTED_PARTNER_PREFIX; models-lead G-a4). Its deck is excluded
+        as PARTNER_REDACTED (module doc), and the fit never trains on it
+        (value_model.build_training_rows; addendum J1)."""
         partner = ((self.features if self.features is not None else self.features_compact)
                    or {}).get("partner_user_id")
         return isinstance(partner, str) and partner.startswith(REDACTED_PARTNER_PREFIX)
@@ -690,7 +706,19 @@ def load_decks(
             deck.exclusion = INCOMPLETE_DECK
         elif no_evidence:
             deck.exclusion = NO_DELIVERY_EVIDENCE
+        elif (any(c.partner_redacted for c in deck.cards)
+              and not any(c.evidence_tier == PARTIAL_RUN_TIER for c in deck.cards)):
+            deck.exclusion = PARTNER_REDACTED
     return result
+
+
+def partner_redacted_share(decks: list[LoggedDeck]) -> dict:
+    """J1's trigger: the decks excluded as PARTNER_REDACTED, of the window's
+    decks, and whether that is above PARTNER_REDACTED_GATE_PCT % (then a
+    read used for a gate goes to models-lead before it's used)."""
+    n = sum(1 for d in decks if d.exclusion == PARTNER_REDACTED)
+    return {"decks": n, "window_decks": len(decks),
+            "over_gate": n * 100 > PARTNER_REDACTED_GATE_PCT * len(decks)}
 
 
 def last_served_at(engine=None, db_url: str | None = None, since: str | None = None,

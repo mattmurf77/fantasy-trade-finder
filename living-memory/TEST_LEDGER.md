@@ -1,21 +1,19 @@
-## 2026-10-31 — G-a5 and G-a6: what the scrub cleared, and the fit's named exclusion `partner_redacted`
+## 2026-10-31 — Redacted decks in eval (models-lead addendum J1/J2, and G-a5): the `partner_redacted` exclusion, the fit, what the scrub cleared
 
-Gates: eval code (`backend/eval/{data,replay,persistence}.py`) plus `backend/value_model.py`, the runbook and the evidence contract. No route, schema, event, flag or knob change. **`value_model.py` is engine-hashed, so merging moves `engine_version` once:** release-lead lands it after the 24 h read closes, at a low-traffic hour, before the operator's device runs and before 11-10 (head-eng, models-lead I5). It goes to models-lead as an R-G entry before merge.
+Gates: eval code (`backend/eval/{data,replay,persistence,calibration,flip_read,bdk_audit}.py`) plus `backend/value_model.py`, the runbook and the evidence contract. No route, schema, event, flag or knob change. Eval rules go to version 7. **`value_model.py` is engine-hashed, so merging moves `engine_version` once:** release-lead lands it after the 24 h read closes, at a low-traffic hour, before the operator's device runs and before 11-10 (head-eng; models-lead I5, J1). It goes to models-lead as an R-G entry before merge. It supersedes this PR's first build (G-a6's 1% test), which J1 made moot.
 
-- **G-a6 (`value_model`):**
-  - `partner_redacted_test` runs over the cards the fit reads (viewed, not undone, with a block). It fires when the redacted cards lacking `likes_you` exceed 1% of the cards with `likes_you` true.
-  - Only then does `train_model` leave out the cards the loader marks `partner_redacted`. Below 1% the rows, and so the fit, are unchanged.
-  - `meta["exclusions"]` names it with its n, `meta["partner_redacted_test"]` records the test either way, and the refit logs a WARNING with the counts.
-- **The loader (`eval/data`):** `LoggedCard.partner_redacted` (the frozen `partner_user_id` is a redaction token, rows and packed cards alike) and `LoggedDeck.redacted_at` (the pack run's). Every card stays loaded.
-- **G-a5 (`replay`):** the run, its record and its report carry the redacted cards, those lacking `likes_you` (an upper bound), the decks with a pack `redacted_at`, and those redacted since the previous persisted read of the same window (`persistence.previous_read_at`). The report also prints G-a6's test over the window.
-- **Tests:** `test_eval_partner_redacted.py`, 12:
-  - the mark on rows and packed cards, and not on an id merely containing the prefix;
-  - the G-a5 counts with no previous read, one between the two redactions, and one before both;
-  - the run, its record and the report's two lines;
-  - the previous read is the latest record of the same window, and the CLI passes it;
-  - the 1% boundary (at 1%: kept; above: excluded), counting only cards the fit reads;
-  - on synthetic decks: below 1% the fit keeps every redacted row; above it, the fit equals one on the decks without those cards, differs from keeping them, and the decks still hold every card.
-- **Sabotage, each red then restored (10):** never skip; always skip; fire at exactly 1%; count cards the fit doesn't read; no meta exclusion; mark rows only; no `redacted_at`; "since" with `>=`; no report lines; the CLI without the previous read.
+- **J1, the loader (`eval/data`):** `LoggedCard.partner_redacted` (the frozen `partner_user_id` is a redaction token, on rows, packed cards and ghosts). A deck holding one is `partner_redacted`, below every integrity reason and below `partial_run`. Only the token marks a deck; a null score on an unredacted card keeps today's path. `LoggedDeck.redacted_at` is the pack run's stamp.
+- **Who skips the deck:** replay (`EvalRun.partner_redacted_decks`, its cards in `excluded`), e(k) and calibration. **Who keeps it:** the B-DK audit (its short-deck rule reads it as unexcluded), G3's joins, and the flip read's checks (the B4 weekly ceiling, and the exclusion report lists it).
+- **The fit:** `build_training_rows` and replay's `_fit_rows` never take a redacted card. `meta["exclusions"]` = `{"partner_redacted": n}`.
+- **The trigger:** `data.partner_redacted_share`; the replay report prints the excluded share and, above 5%, that a gate read goes to models-lead first.
+- **G-a5 (`replay`, `persistence`):** the redacted cards, those lacking `likes_you` (an upper bound), the decks with a pack `redacted_at`, and those redacted since the previous persisted read of the same window.
+- **Tests:** `test_eval_partner_redacted.py`, 20:
+  - J1: the mark and the exclusion, nothing dropped; only the token marks (a nulled score on a clean card doesn't, nor an id merely containing the prefix); a redacted ghost marks; `incomplete_deck` and `partial_run` win; the 5% boundary.
+  - J2: for each of the 5 registered scorers, the clean deck's estimates are bit-identical across the scrub (`repr` of every metric) and e(k) too; the redacted deck is excluded and counted and never scored. Calibration leaves it out. The flip read joins its outcomes and reads B4 the same.
+  - The fit: no redacted card is a training row (both heads, and `_fit_rows`), and the fit equals one on the decks without those cards.
+  - G-a5: the counts, the run, record and report lines, the previous read, and the CLI.
+  - Pins moved to version 7 and the new key: `test_eval_pack_reader.py`, `test_eval_refresh_and_live_columns.py`, `test_eval_withdrawals_and_paging.py`, `test_eval_flip_read.py`, `test_eval_calibration.py`.
+- **Sabotage, each red then restored (11):** SABOTAGE
 
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 

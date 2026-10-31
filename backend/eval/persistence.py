@@ -64,7 +64,8 @@ def run_record(run, baseline, extra: dict | None = None) -> dict:
         "redacted_at_decks": run.redacted_at_decks,
         "redacted_since_previous_read": run.redacted_since_previous_read,
         "previous_read_at": run.previous_read_at,
-        "partner_redacted_test": dict(run.partner_redacted_test),
+        "partner_redacted_decks": run.partner_redacted_decks,
+        "partner_redacted_share": dict(run.partner_redacted_share),
         "tilt_clipped": run.tilt_clipped,
         "metrics": {
             name: {

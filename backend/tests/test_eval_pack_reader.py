@@ -348,9 +348,9 @@ def test_calibration_excludes_integrity_deck_cards():
 def test_exclusion_rule_version_is_stamped_and_mixed_versions_are_flagged():
     decks = load_decks(engine=_mixed_engine())
     run = evaluate(_Spy(), decks, ess_min=1, bootstrap=20, seed=0)
-    assert EXCLUSION_RULE_VERSION == 6 and run.exclusion_rule_version == 6
+    assert EXCLUSION_RULE_VERSION == 7 and run.exclusion_rule_version == 7
     record = run_record(run, run)
-    assert record["exclusion_rule_version"] == 6 and record_rule_version(record) == 6
+    assert record["exclusion_rule_version"] == 7 and record_rule_version(record) == 7
     assert record_rule_version({"scorer": "production"}) == 1      # written before the field
 
     assert rule_version_note([3, 3]) is None
@@ -360,7 +360,7 @@ def test_exclusion_rule_version_is_stamped_and_mixed_versions_are_flagged():
     old = replace(run, exclusion_rule_version=2)      # before delivered-position exposure
     assert verdict(run, run) != "RULE-MISMATCH"
     assert verdict(run, old) == "RULE-MISMATCH" == verdict(old, run)
-    assert "Exclusion rules: version 6." in render_report([run], run)
+    assert "Exclusion rules: version 7." in render_report([run], run)
     mixed = render_report([run], old)
     assert "WARNING: exclusion rules differ" in mixed and "RULE-MISMATCH" in mixed
 
