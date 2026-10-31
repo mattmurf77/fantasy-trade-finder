@@ -1,125 +1,179 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 
 import ChalkText from '../components/chalkline/Text';
-import { Button, Icon, TickLabel } from '../components/chalkline';
-import { chalk, flare, ice, ink, radii, semantic, space } from '../theme/chalkline';
+import { Button, Icon } from '../components/chalkline';
+import { chalk, flare, ice, ink, radii, space } from '../theme/chalkline';
 import { getBaseUrl } from '../api/client';
 import { getPaywallConfig, type PaywallConfig, type PaywallProduct } from '../api/billing';
 import {
+  checkIntroEligibility,
+  currentIdentityUserId,
   getOfferings,
   hasProEntitlement,
+  isIdentityReady,
+  isPaymentPending,
   isUserCancelled,
+  onIdentityChange,
   purchasePackage,
+  PurchaseIdentityError,
+  purchasesReady,
   restorePurchases,
+  whenIdentityReady,
   type PurchasesPackage,
+  type PurchasesStoreProduct,
 } from '../api/purchases';
 import { useEntitlements } from '../state/useEntitlements';
 import { useFlag } from '../state/useFeatureFlags';
+import { syncPurchasesIdentity, useSession } from '../state/useSession';
+import { customerInfoApplies, purchasesIdentityTarget } from '../state/subscriptionSession';
+import { isUnverifiedSession, openVerify } from '../state/usePaywallGate';
 import { track } from '../api/events';
+import {
+  FOUNDER_TAG,
+  MON,
+  PLAN_TITLE,
+  annualSubLine,
+  ctaLabel,
+  disclosure,
+  headlineFor,
+  offerBodyFor,
+  planPeriod,
+  pricePerPeriod,
+  trialLine,
+  type PlanPeriod,
+} from '../copy/monetization';
 
-// PAYWALL — the one purchase surface in the app (pro-subscription LLD §3/§4,
-// iap-enablement scope block).
+// PAYWALL — the one purchase surface in the app (#393 M1; ux-lead
+// "Monetization copy placement"; design-lead §1 FINAL). Every string is a
+// `mon.*` key from copy/monetization.ts, verbatim from marketing-lead §9 with
+// legal's R28.8 rules.
 //
 // SHIPS DARK. `monetize.paywall` is false everywhere today; the route is
-// registered unconditionally (RootNav rule) and this component self-guards, so
-// a stale push while the flag is off dismisses instead of selling anything.
+// registered unconditionally (RootNav rule) and this component self-guards,
+// so a stale push while the flag is off dismisses instead of selling.
 //
-// ── App Store guideline 3.1.2, which is why this screen looks the way it
-//    does ────────────────────────────────────────────────────────────────
-// Everything Apple requires must be VISIBLE BEFORE the purchase, on this
-// screen, without scrolling into a legal appendix or tapping through:
-//   • the plan's name                    → planTitle()
-//   • price and period                   → "$34.99/year"
-//   • trial length and what follows it   → "14 days free, then $34.99/year"
-//   • auto-renew + how to cancel         → AUTO_RENEW_COPY, rendered above the CTA
-//   • a WORKING Restore Purchases        → paywall-restore
-//   • tappable Privacy Policy + Terms    → paywall-privacy-link / paywall-terms-link
-// Rejections here are cheap to avoid and expensive to fix, so none of these
-// are conditional on data loading: the disclosure and the links render even
-// when the config fetch fails.
+// ONE SCREEN, VARIANTS BY HOW IT WAS OPENED (`route.params.source`):
+//   gate (a locked action, with the 402's `gate` + `kind`) → mon.lock.find /
+//   mon.lock.send · first_opinion / left_deck (the M2 trigger) →
+//   mon.offer.headline + mon.offer.body · preview_end (the M2 end card) →
+//   mon.offer.headline, no body · settings / anything else → mon.pay.headline.
+// VERIFIED SESSIONS ONLY: a session the server reported unverified gets the
+// VerifySheet instead, never the paywall or the trial offer (R28.9).
 //
-// PRICES. StoreKit's localized `priceString` wins whenever offerings loaded —
-// it is the only string guaranteed to match what the App Store will charge in
-// the user's storefront and currency. The server's `display_price` is the
-// fallback for the case where the SDK is unavailable (no key / Expo Go), so
-// the screen still renders honestly instead of showing an empty card.
+// LAYOUT: a scroll area (headline, body, value + bullets, free line, the
+// Founding GMs block in the club window) above a BOTTOM-ANCHORED block that
+// is always visible: the plan radio rows, the selected plan's price and
+// trial line, its disclosure, the button, and Not now · Restore · Terms ·
+// Privacy. The block is about 326 pt, so it fits a 4.7" SE (667 pt); if large
+// Dynamic Type makes it taller than half the window it stops anchoring and
+// joins the end of the scroll, keeping its order. Nothing is clipped.
+//
+// "FREE" ONLY WHEN STOREKIT CONFIRMS IT (R28.8 #1): the trial line, the trial
+// disclosure and "Start 1-month trial" render only when RevenueCat confirms
+// this Apple ID's free month for the selected plan. Unknown, loading or an
+// error is the PAID state: the paid disclosure, "Subscribe", no "free"
+// anywhere. `config.trial_eligible` is never read for copy.
+//
+// No countdown, days-left, trial-end date or "ends soon" anywhere (D10).
 //
 // #188 — this is a MODAL. Modals are the documented FeedbackFAB exception, so
-// there is deliberately no <FeedbackFAB> here.
+// there is deliberately no FeedbackFAB here.
 //
-// Chalkline (ADR-004/005): ink-1 cards, ONE ice fill (the purchase CTA), the
-// "Best value" chip flare-BORDERED because it is informational rather than an
-// action, Barlow Condensed headers. No gradients, no emoji, radius ≤ 8.
+// Chalkline: ice only for the one primary action and the selected plan;
+// flare only for the FounderTag. No SAVE badge, no gradients, no red.
 
-/** Cancel instructions Apple expects, in Apple's own navigation terms. */
-const AUTO_RENEW_COPY =
-  'Auto-renews until cancelled. Cancel anytime in Settings ▸ Subscriptions.';
+const BULLETS = ['mon.pay.b1', 'mon.pay.b2', 'mon.pay.b3', 'mon.pay.b4'] as const;
+const FOUNDER_LINES = [
+  'mon.pay.founder.price',
+  'mon.pay.founder.new',
+  'mon.pay.founder.keep',
+  'mon.pay.founder.lapse',
+] as const;
 
-/** period → the suffix that turns a price into a price-per-period. */
-const PERIOD_SUFFIX: Record<string, string> = {
-  monthly: '/month',
-  annual: '/year',
-  weekly: '/week',
-  lifetime: ' once',
-  season: ' per season',
-};
+/** Shown only on a build without the RevenueCat key (dev / pre-11-05). */
+const UNAVAILABLE_COPY =
+  'Purchases aren’t available on this build yet. Try again after the next update.';
 
-/** period → plan name. Only used when StoreKit has not given us a localized
- *  product title; never invented for a period we do not recognise. */
-const PERIOD_NAME: Record<string, string> = {
-  monthly: 'Fleeced Pro — Monthly',
-  annual: 'Fleeced Pro — Annual',
-  lifetime: 'Fleeced Pro — Lifetime',
-  season: 'Fleeced Pro — Season Pass',
-};
-
-/** Feature-key → the line the grid shows. Keys are the cross-client enum in
- *  docs/cross-client-invariants.md; an unknown key is skipped rather than
- *  printed raw, so an older binary degrades quietly. */
-const FEATURE_COPY: Record<string, string> = {
-  unlimited_leagues: 'Every league you play in, not just one',
-  portfolio: 'Portfolio — your roster value over time',
-  engine_knobs: 'Tune the trade engine to how you trade',
-  extension_overlays: 'Full values in the browser extension',
-  ad_free: 'No ads, anywhere',
-};
+type Status = 'error' | 'pending' | 'restore_ok' | 'restore_none' | 'unavailable';
 
 interface Plan {
   product: PaywallProduct;
+  period: PlanPeriod;
   /** The StoreKit package, when offerings loaded. Null ⇒ display-only. */
   pkg: PurchasesPackage | null;
-  title: string;
-  priceLine: string;
-  perMonth: string | null;
-  trialLine: string | null;
+  /** StoreKit's localized price when offerings loaded, else the server's. */
+  price: string;
 }
 
-function planTitle(p: PaywallProduct, pkg: PurchasesPackage | null): string {
-  return pkg?.product?.title || PERIOD_NAME[p.period] || 'Fleeced Pro';
+/** May this session buy or restore NOW (state/subscriptionSession,
+ *  customerInfoApplies)? A verified session whose own RevenueCat logIn is
+ *  still landing waits for it (whenIdentityReady's 15 s), the wait
+ *  `_assertIdentity` always gave; an unverified, unknown or demo session is
+ *  refused at once. Re-reads the session after the wait. */
+async function customerInfoAppliesNow(): Promise<boolean> {
+  const target = purchasesIdentityTarget(useSession.getState());
+  if (target && purchasesReady() && currentIdentityUserId() !== target) {
+    try {
+      await whenIdentityReady(target);
+    } catch {
+      /* timed out: refused below */
+    }
+  }
+  return customerInfoApplies(useSession.getState(), currentIdentityUserId());
 }
 
-function priceLine(p: PaywallProduct, pkg: PurchasesPackage | null): string {
-  const price = pkg?.product?.priceString || p.display_price;
-  return `${price}${PERIOD_SUFFIX[p.period] ?? ''}`;
+/** Re-check right before noting CustomerInfo the SDK returned for `userId`:
+ *  the session (or RevenueCat's identity) may have changed while Apple's
+ *  sheet was up. False skips only the optimistic note; the server refresh
+ *  decides either way. */
+function customerInfoStillApplies(userId: string): boolean {
+  const s = useSession.getState();
+  return s.user?.user_id === userId && customerInfoApplies(s, currentIdentityUserId());
 }
 
 export default function PaywallScreen({ navigation, route }: any) {
   const source: string = route?.params?.source ?? 'unknown';
+  const gate: string | undefined = route?.params?.gate || undefined;
+  const kind: 'find' | 'send' | undefined =
+    route?.params?.kind === 'send' || route?.params?.kind === 'find' ? route.params.kind : undefined;
   const paywallOn = useFlag('monetize.paywall');
   const refreshEntitlements = useEntitlements((s) => s.refresh);
   const noteCustomerInfo = useEntitlements((s) => s.noteCustomerInfo);
+  const userId = useSession((s) => s.user?.user_id ?? null);
+  // The router's predicate: server-reported unverified, or a demo (demo shows
+  // no purchase flow, head-eng 2026-10-29).
+  const unverified = useSession((s) => isUnverifiedSession(s));
+  const { height: windowHeight } = useWindowDimensions();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<Status | null>(null);
+  const [idReady, setIdReady] = useState(() => isIdentityReady(userId));
+  const [blockHeight, setBlockHeight] = useState(0);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  }, []);
 
   const dismiss = useCallback(() => {
     if (navigation?.canGoBack?.()) navigation.goBack();
     else navigation?.navigate?.('Main');
   }, [navigation]);
+  const closeSoon = useCallback(() => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(dismiss, 2500);
+  }, [dismiss]);
 
   // Self-guard. The route stays registered while the flag is off (a flag must
   // gate the entry point, not the navigator entry), so the screen itself is
@@ -128,10 +182,22 @@ export default function PaywallScreen({ navigation, route }: any) {
     if (!paywallOn) dismiss();
   }, [paywallOn, dismiss]);
 
+  // Backstop for a direct navigate (the router already sends these to the
+  // sheet): an unverified session gets the VerifySheet, after this modal is
+  // gone so the two never present at once. Nothing subscription-specific
+  // renders in between (R28.9).
+  useEffect(() => {
+    if (!paywallOn || !unverified) return;
+    dismiss();
+    // Not cleared on unmount: dismissing unmounts this screen, and the sheet
+    // must still open once the modal is gone. openVerify is idempotent.
+    setTimeout(() => void openVerify(), 450);
+  }, [paywallOn, unverified, dismiss]);
+
   const configQuery = useQuery({
     queryKey: ['paywall-config', 'ios'],
     queryFn: () => getPaywallConfig('ios'),
-    enabled: paywallOn,
+    enabled: paywallOn && !unverified,
     staleTime: 5 * 60_000,
   });
 
@@ -141,7 +207,7 @@ export default function PaywallScreen({ navigation, route }: any) {
   const offeringsQuery = useQuery({
     queryKey: ['paywall-offerings'],
     queryFn: () => getOfferings(),
-    enabled: paywallOn,
+    enabled: paywallOn && !unverified,
     staleTime: 5 * 60_000,
   });
 
@@ -149,135 +215,347 @@ export default function PaywallScreen({ navigation, route }: any) {
 
   // The SERVER's flag beats this device's cached one. `{"enabled": false}` is
   // what /api/paywall/config answers while `monetize.paywall` is off, so a
-  // client whose flag map is stale (or overlaid by an experiment) still leaves
-  // rather than selling a product the server says is not for sale.
+  // client whose flag map is stale still leaves rather than selling.
   useEffect(() => {
     if (config && config.enabled === false) dismiss();
   }, [config, dismiss]);
 
+  // `dismissible` (always true from S1) governs Close, Not now and the swipe.
   const dismissible = config?.dismissible !== false;
-  const products = useMemo(() => config?.products ?? [], [config]);
+  useEffect(() => {
+    navigation?.setOptions?.({ gestureEnabled: dismissible });
+  }, [navigation, dismissible]);
 
+  // Only the two launch SKUs, whose titles match App Store Connect (R28.8
+  // #6): Annual (the hero) first, Monthly below.
   const plans: Plan[] = useMemo(() => {
     const packages = offeringsQuery.data?.current?.availablePackages ?? [];
-    return products.map((p) => {
-      const pkg = packages.find((x) => x.product?.identifier === p.product_id) ?? null;
-      const price = priceLine(p, pkg);
-      const trialEligible = config?.trial_eligible !== false;
-      return {
-        product: p,
-        pkg,
-        title: planTitle(p, pkg),
-        priceLine: price,
-        perMonth: p.per_month_equiv ? `${p.per_month_equiv}/month, billed yearly` : null,
-        trialLine:
-          trialEligible && p.trial_days > 0
-            ? `${p.trial_days} days free, then ${price}`
-            : null,
-      };
-    });
-  }, [products, offeringsQuery.data, config]);
+    const out: Plan[] = [];
+    for (const product of config?.products ?? []) {
+      const period = planPeriod(product.period);
+      if (!period) continue;
+      const pkg = packages.find((x) => x.product?.identifier === product.product_id) ?? null;
+      out.push({ product, period, pkg, price: pkg?.product?.priceString || product.display_price });
+    }
+    return out.sort((a, b) => (a.period === 'annual' ? 0 : 1) - (b.period === 'annual' ? 0 : 1));
+  }, [config, offeringsQuery.data]);
 
-  // Default selection = the hero SKU the server marked, else the first plan.
+  // StoreKit intro eligibility for the two products (D6). Until it answers,
+  // and on any error, `eligibleFor` is false: the paid state.
+  const storeProducts = useMemo(
+    () => plans.map((p) => p.pkg?.product).filter((p): p is PurchasesStoreProduct => !!p),
+    [plans],
+  );
+  const eligibilityQuery = useQuery({
+    queryKey: ['paywall-intro-eligibility', userId, storeProducts.map((p) => p.identifier).join(',')],
+    queryFn: () => checkIntroEligibility(storeProducts),
+    enabled: paywallOn && !unverified && storeProducts.length > 0,
+    staleTime: 60_000,
+  });
+  const eligibleFor = (productId: string) => eligibilityQuery.data?.[productId] === true;
+
+  // Default selection = Annual (the hero), else the first plan.
   useEffect(() => {
     if (selectedId || plans.length === 0) return;
-    setSelectedId((plans.find((p) => p.product.hero) ?? plans[0]).product.product_id);
+    setSelectedId((plans.find((p) => p.period === 'annual') ?? plans[0]).product.product_id);
   }, [plans, selectedId]);
 
-  useEffect(() => {
-    if (!paywallOn) return;
-    // `platform` is the literal 'ios': this build's only store surface is the
-    // App Store (the RevenueCat key is the Apple SDK key), and a literal keeps
-    // the taxonomy dimension enumerable.
-    track('paywall_viewed', { source, platform: 'ios' });
-  }, [paywallOn, source]);
-
   const selected = plans.find((p) => p.product.product_id === selectedId) ?? null;
+  const eligible = !!selected && eligibleFor(selected.product.product_id);
+
+  // R28.8 #2: "$2.09/month, billed yearly. 58% less than 12 months at $4.99."
+  // from live StoreKit prices only; absent without them.
+  const annualSub = useMemo(() => {
+    const annual = plans.find((p) => p.period === 'annual')?.pkg?.product;
+    const monthly = plans.find((p) => p.period === 'monthly')?.pkg?.product;
+    return annualSubLine(annual, monthly);
+  }, [plans]);
+
+  // RevenueCat identity must be this session's user before Apple's sheet
+  // (D12). While it isn't, the button shows a pending state.
+  useEffect(() => {
+    setIdReady(isIdentityReady(userId));
+    const unsub = onIdentityChange(() => setIdReady(isIdentityReady(userId)));
+    // A logIn that failed earlier gets another go, through useSession's
+    // bridge: only a verified session may identify RevenueCat (demo and
+    // unverified never). The bridge never throws.
+    if (userId && purchasesReady() && !isIdentityReady(userId)) syncPurchasesIdentity(useSession.getState());
+    return unsub;
+  }, [userId]);
+  const identityPending = purchasesReady() && !idReady;
+
+  useEffect(() => {
+    if (!paywallOn || unverified) return;
+    // `platform` is the literal 'ios': this build's only store surface is the
+    // App Store, and a literal keeps the taxonomy dimension enumerable.
+    // `gate` (the 402's reason) and `kind` (find | send) ride only when the
+    // paywall was opened by a locked action.
+    track('paywall_viewed', {
+      source,
+      platform: 'ios',
+      ...(gate ? { gate } : {}),
+      ...(kind ? { kind } : {}),
+    });
+  }, [paywallOn, unverified, source, gate, kind]);
 
   const onPurchase = useCallback(async () => {
-    if (!selected || busy) return;
+    if (!selected || busy || !userId) return;
     const productId = selected.product.product_id;
-    setError(null);
+    setStatus(null);
     track('paywall_purchase_initiated', { product_id: productId, source });
     if (!selected.pkg) {
       // No StoreKit package behind this row — offerings never loaded (no SDK
-      // key, Expo Go, or a RevenueCat offering that does not carry this SKU).
-      // Say so plainly rather than pretending to charge.
-      setError('Purchases aren’t available on this build yet. Try again after the next update.');
+      // key, Expo Go, or an offering without this SKU). Say so plainly.
+      setStatus('unavailable');
       track('paywall_purchase_failed', { product_id: productId, user_cancelled: false });
       return;
     }
     setBusy(true);
     try {
-      const result = await purchasePackage(selected.pkg);
+      // A purchase returns CustomerInfo, so it runs only while this session is
+      // verified AND RevenueCat is this user, even one that verified earlier
+      // and has since lost it. A refusal is the identity-not-ready path.
+      if (!(await customerInfoAppliesNow())) throw new PurchaseIdentityError();
+      const result = await purchasePackage(selected.pkg, userId);
       if (!result) {
-        setError('Purchases aren’t available on this build yet. Try again after the next update.');
+        setStatus('unavailable');
         track('paywall_purchase_failed', { product_id: productId, user_cancelled: false });
         return;
       }
       track('paywall_purchase_completed', { product_id: productId, source });
       // Optimistic unlock so the app opens up now; the webhook + the fetch
       // below are what actually decide, and the server can still say no.
-      noteCustomerInfo(hasProEntitlement(result.customerInfo));
+      if (customerInfoStillApplies(userId)) noteCustomerInfo(hasProEntitlement(result.customerInfo));
       await refreshEntitlements();
       dismiss();
     } catch (err) {
       const cancelled = isUserCancelled(err);
       track('paywall_purchase_failed', { product_id: productId, user_cancelled: cancelled });
-      // A cancel is a decision, not a failure — it gets no error message.
-      if (!cancelled) {
-        setError('That purchase didn’t go through. You haven’t been charged.');
+      if (isPaymentPending(err)) {
+        // Ask to Buy: nothing charged yet. Say so once, then close.
+        setStatus('pending');
+        closeSoon();
+      } else if (!cancelled) {
+        // A cancel is a decision, not a failure — it gets no message.
+        setStatus('error');
       }
     } finally {
       setBusy(false);
     }
-  }, [selected, busy, source, noteCustomerInfo, refreshEntitlements, dismiss]);
+  }, [selected, busy, userId, source, noteCustomerInfo, refreshEntitlements, dismiss, closeSoon]);
 
   const onRestore = useCallback(async () => {
-    if (busy) return;
+    if (busy || !userId) return;
     setBusy(true);
-    setError(null);
+    setStatus(null);
     try {
-      const info = await restorePurchases();
+      // Restore reads CustomerInfo and moves this Apple ID's purchases onto
+      // RevenueCat's identity, so it runs only while this session is verified
+      // AND RevenueCat is this user (state/subscriptionSession). Otherwise it
+      // takes the identity-not-confirmed path, the same as the catch below.
+      if (!(await customerInfoAppliesNow())) {
+        setStatus('error');
+        return;
+      }
+      const info = await restorePurchases(userId);
       const restored = hasProEntitlement(info);
       track('paywall_restore', { restored });
-      if (restored) noteCustomerInfo(true);
+      if (restored && customerInfoStillApplies(userId)) noteCustomerInfo(true);
       // Always re-ask the server: a restore that found nothing on THIS Apple
       // ID can still be a user whose grant lives on their account row.
       await refreshEntitlements();
-      if (restored) dismiss();
-      else setError('No subscription found on this Apple ID.');
+      if (restored) {
+        setStatus('restore_ok');
+        closeSoon();
+      } else {
+        // The offer stays open.
+        setStatus('restore_none');
+      }
+    } catch {
+      // RevenueCat's identity couldn't be confirmed as this user.
+      setStatus('error');
     } finally {
       setBusy(false);
     }
-  }, [busy, noteCustomerInfo, refreshEntitlements, dismiss]);
+  }, [busy, userId, noteCustomerInfo, refreshEntitlements, closeSoon]);
 
   const openLegal = useCallback((path: '/privacy' | '/terms') => {
     // The backend origin serves the web app at `/` (client.ts getBaseUrl), so
-    // the legal pages live at the API base — one origin, no second constant to
-    // drift when the deploy target moves.
+    // the legal pages live at the API base — one origin, no second constant.
     void Linking.openURL(`${getBaseUrl()}${path}`);
   }, []);
 
-  if (!paywallOn) return null;
+  if (!paywallOn || unverified) return null;
 
-  const featurePage = config?.pages?.find((p) => p.kind === 'features');
-  const headlinePage = config?.pages?.find((p) => p.kind === 'trades_found');
   const loading = configQuery.isLoading || offeringsQuery.isLoading;
+  const body = offerBodyFor(source, eligible);
+  const clubOpen = config?.club?.open === true;
+  // Dynamic Type: past half the window, the block joins the scroll's end.
+  const unanchored = blockHeight > 0 && blockHeight > windowHeight * 0.5;
+
+  const statusSlot = status ? (
+    <View style={styles.statusSlot} testID="paywall-status" accessibilityLiveRegion="polite">
+      <ChalkText variant="bodySm" style={styles.statusText}>
+        {status === 'error'
+          ? MON['mon.pay.error']
+          : status === 'pending'
+            ? MON['mon.pay.pending']
+            : status === 'restore_ok'
+              ? MON['mon.pay.restore_ok']
+              : status === 'restore_none'
+                ? MON['mon.pay.restore_none']
+                : UNAVAILABLE_COPY}
+      </ChalkText>
+      {status === 'error' ? (
+        <Button
+          testID="paywall-try-again"
+          label={MON['mon.pay.error.retry']}
+          variant="ghost"
+          compact
+          onPress={() => void onPurchase()}
+          disabled={busy}
+        />
+      ) : null}
+    </View>
+  ) : null;
+
+  const anchoredBlock = (
+    <View
+      style={[styles.anchored, unanchored && styles.anchoredInline]}
+      onLayout={(e) => setBlockHeight(e.nativeEvent.layout.height)}
+      testID="paywall-anchored"
+    >
+      {statusSlot}
+      <View accessibilityRole="radiogroup" style={styles.plans}>
+        {plans.map((plan) => {
+          const active = plan.product.product_id === selectedId;
+          const pp = pricePerPeriod(plan.period, plan.price);
+          const sub = plan.period === 'annual' ? annualSub : null;
+          return (
+            <Pressable
+              key={plan.product.product_id}
+              testID={`paywall-plan-${plan.product.product_id}`}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: active, checked: active }}
+              accessibilityLabel={`${PLAN_TITLE[plan.period]}. ${pp}.${sub ? ` ${sub}` : ''}`}
+              onPress={() => setSelectedId(plan.product.product_id)}
+              style={({ pressed }) => [
+                styles.planRow,
+                active && styles.planRowActive,
+                pressed && styles.pressedWell,
+              ]}
+            >
+              <View style={styles.planLeft}>
+                <ChalkText variant="title">{PLAN_TITLE[plan.period]}</ChalkText>
+                {sub ? <ChalkText variant="bodySm">{sub}</ChalkText> : null}
+              </View>
+              {/* /year is the largest price text (R28.8 #2): data-lg, while
+                  the per-month figure above is body-sm. */}
+              <ChalkText variant="dataLg">{pp}</ChalkText>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {selected ? (
+        <View style={styles.summary} testID="paywall-summary">
+          {/* The selected price, at 22 pt against the button's 14 pt label:
+              the prominence legal's CTA rule reads (R28.8 #3). */}
+          <ChalkText variant="dataLg">{pricePerPeriod(selected.period, selected.price)}</ChalkText>
+          {eligible ? (
+            <ChalkText variant="bodySm" style={styles.trialLine}>
+              {trialLine(selected.period, selected.price)}
+            </ChalkText>
+          ) : null}
+        </View>
+      ) : null}
+
+      {selected ? (
+        <ChalkText variant="bodySm" style={styles.disclosure} testID="paywall-disclosure">
+          {disclosure(selected.period, selected.price, eligible)}
+        </ChalkText>
+      ) : null}
+
+      <View testID="paywall-offer-cta">
+        <Button
+          testID="paywall-purchase-cta"
+          label={ctaLabel(eligible)}
+          onPress={() => void onPurchase()}
+          loading={busy || identityPending}
+          disabled={!selected || busy || identityPending}
+        />
+      </View>
+
+      <View style={styles.linkRow}>
+        {dismissible ? (
+          <>
+            <Pressable
+              testID="paywall-offer-not-now"
+              accessibilityRole="button"
+              onPress={dismiss}
+              style={styles.linkHit}
+            >
+              <ChalkText variant="bodySm" style={styles.linkChalk}>
+                {MON['mon.offer.not_now']}
+              </ChalkText>
+            </Pressable>
+            <ChalkText variant="bodySm" style={styles.linkDot}>
+              ·
+            </ChalkText>
+          </>
+        ) : null}
+        <Pressable
+          testID="paywall-restore"
+          accessibilityRole="button"
+          onPress={() => void onRestore()}
+          disabled={busy}
+          style={styles.linkHit}
+        >
+          <ChalkText variant="bodySm" style={styles.linkChalk}>
+            {MON['mon.pay.restore']}
+          </ChalkText>
+        </Pressable>
+        <ChalkText variant="bodySm" style={styles.linkDot}>
+          ·
+        </ChalkText>
+        <Pressable
+          testID="paywall-terms-link"
+          accessibilityRole="link"
+          accessibilityHint="Opens in your browser"
+          onPress={() => openLegal('/terms')}
+          style={styles.linkHit}
+        >
+          <ChalkText variant="bodySm" style={styles.linkUnderline}>
+            {MON['mon.pay.terms']}
+          </ChalkText>
+        </Pressable>
+        <ChalkText variant="bodySm" style={styles.linkDot}>
+          ·
+        </ChalkText>
+        <Pressable
+          testID="paywall-privacy-link"
+          accessibilityRole="link"
+          accessibilityHint="Opens in your browser"
+          onPress={() => openLegal('/privacy')}
+          style={styles.linkHit}
+        >
+          <ChalkText variant="bodySm" style={styles.linkUnderline}>
+            {MON['mon.pay.privacy']}
+          </ChalkText>
+        </Pressable>
+      </View>
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.root} testID="paywall-screen" edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <ChalkText variant="heading" style={styles.headerTitle}>
-          Fleeced Pro
-        </ChalkText>
         {dismissible ? (
           <Pressable
             testID="paywall-close"
             accessibilityRole="button"
-            accessibilityLabel="Close"
+            accessibilityLabel={MON['mon.offer.close_a11y']}
             onPress={dismiss}
-            hitSlop={8}
             style={({ pressed }) => [styles.closeBtn, pressed && styles.pressedWell]}
           >
             <Icon name="x" size={20} color={chalk.dim} />
@@ -285,144 +563,62 @@ export default function PaywallScreen({ navigation, route }: any) {
         ) : null}
       </View>
 
-      <ScrollView contentContainerStyle={styles.body}>
-        {headlinePage?.title ? (
-          <ChalkText variant="display" style={styles.hero}>
-            {headlinePage.title}
+      <ScrollView>
+        <View style={styles.scrollPad}>
+          <ChalkText variant="display" testID="paywall-headline">
+            {headlineFor(source, kind)}
           </ChalkText>
-        ) : null}
+          {body ? (
+            <ChalkText variant="body" style={styles.dim}>
+              {body}
+            </ChalkText>
+          ) : null}
 
-        {featurePage?.features?.length ? (
-          <View style={styles.featureBlock}>
-            <TickLabel>What you get</TickLabel>
-            {featurePage.features.map((key) =>
-              FEATURE_COPY[key] ? (
-                <View key={key} style={styles.featureRow}>
-                  <Icon name="check" size={16} color={ice.base} />
-                  <ChalkText variant="body" style={styles.featureText}>
-                    {FEATURE_COPY[key]}
-                  </ChalkText>
-                </View>
-              ) : null,
-            )}
-          </View>
-        ) : null}
-
-        {loading ? (
-          <View style={styles.loading}>
-            <ActivityIndicator color={ice.base} />
-          </View>
-        ) : null}
-
-        {!loading && plans.length === 0 ? (
-          <ChalkText variant="bodySm" style={styles.emptyNote}>
-            Plans aren’t available right now. Please try again later.
-          </ChalkText>
-        ) : null}
-
-        {plans.map((plan) => {
-          const active = plan.product.product_id === selectedId;
-          return (
-            <Pressable
-              key={plan.product.product_id}
-              testID={`paywall-plan-${plan.product.product_id}`}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: active }}
-              accessibilityLabel={
-                `${plan.title}. ${plan.priceLine}.` +
-                (plan.trialLine ? ` ${plan.trialLine}.` : '')
-              }
-              onPress={() => setSelectedId(plan.product.product_id)}
-              style={({ pressed }) => [
-                styles.planCard,
-                active && styles.planCardActive,
-                pressed && styles.pressedWell,
-              ]}
-            >
-              <View style={styles.planHeadRow}>
-                <ChalkText variant="title" style={styles.planTitle}>
-                  {plan.title}
+          <View style={styles.value}>
+            <ChalkText variant="body">{MON['mon.pay.value']}</ChalkText>
+            {BULLETS.map((key) => (
+              <View key={key} style={styles.bulletRow}>
+                <Icon name="check" size={16} color={chalk.dim} />
+                <ChalkText variant="body" style={styles.bulletText}>
+                  {MON[key]}
                 </ChalkText>
-                {plan.product.badge === 'best_value' ? (
-                  <View style={styles.badge}>
-                    <ChalkText variant="label" style={styles.badgeText}>
-                      Best value
-                    </ChalkText>
-                  </View>
-                ) : null}
               </View>
-              <ChalkText variant="dataLg" style={styles.planPrice}>
-                {plan.priceLine}
-              </ChalkText>
-              {plan.perMonth ? (
-                <ChalkText variant="bodySm">{plan.perMonth}</ChalkText>
-              ) : null}
-              {plan.trialLine ? (
-                <ChalkText variant="bodySm">{plan.trialLine}</ChalkText>
-              ) : null}
-            </Pressable>
-          );
-        })}
-
-        {error ? (
-          <View style={styles.errorBox}>
-            <ChalkText variant="bodySm" style={styles.errorText}>
-              {error}
-            </ChalkText>
+            ))}
           </View>
-        ) : null}
 
-        {/* Guideline 3.1.2 — renders unconditionally, above the CTA, whether or
-            not the plan fetch succeeded. */}
-        <ChalkText variant="bodySm" style={styles.disclosure}>
-          {AUTO_RENEW_COPY}
-        </ChalkText>
+          <ChalkText variant="bodySm">{MON['mon.lock.free']}</ChalkText>
 
-        <Button
-          testID="paywall-purchase-cta"
-          label={selected?.trialLine ? 'Start free trial' : 'Continue'}
-          onPress={onPurchase}
-          loading={busy}
-          disabled={!selected || busy}
-          style={styles.cta}
-        />
+          {clubOpen ? (
+            <View style={styles.club} testID="paywall-club">
+              <View style={styles.founderTag}>
+                <ChalkText variant="label" style={styles.founderTagText}>
+                  {FOUNDER_TAG}
+                </ChalkText>
+              </View>
+              <ChalkText variant="title">{MON['mon.club.join']}</ChalkText>
+              {FOUNDER_LINES.map((key) => (
+                <ChalkText key={key} variant="bodySm">
+                  {MON[key]}
+                </ChalkText>
+              ))}
+            </View>
+          ) : null}
 
-        <Button
-          testID="paywall-restore"
-          label="Restore Purchases"
-          variant="ghost"
-          onPress={onRestore}
-          disabled={busy}
-        />
-
-        <View style={styles.legalRow}>
-          <Pressable
-            testID="paywall-privacy-link"
-            accessibilityRole="link"
-            accessibilityHint="Opens in your browser"
-            onPress={() => openLegal('/privacy')}
-            hitSlop={8}
-          >
-            <ChalkText variant="bodySm" style={styles.legalLink}>
-              Privacy Policy
+          {loading ? (
+            <View style={styles.loading}>
+              <ActivityIndicator color={chalk.dim} />
+            </View>
+          ) : null}
+          {!loading && plans.length === 0 ? (
+            <ChalkText variant="bodySm" style={styles.emptyNote}>
+              Plans aren’t available right now. Please try again later.
             </ChalkText>
-          </Pressable>
-          <ChalkText variant="bodySm" style={styles.legalDot}>
-            ·
-          </ChalkText>
-          <Pressable
-            testID="paywall-terms-link"
-            accessibilityRole="link"
-            accessibilityHint="Opens in your browser"
-            onPress={() => openLegal('/terms')}
-            hitSlop={8}
-          >
-            <ChalkText variant="bodySm" style={styles.legalLink}>
-              Terms of Use
-            </ChalkText>
-          </Pressable>
+          ) : null}
         </View>
+        {unanchored ? anchoredBlock : null}
       </ScrollView>
+
+      {unanchored ? null : anchoredBlock}
     </SafeAreaView>
   );
 }
@@ -431,68 +627,73 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: ink.ink0 },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: ink.line,
+    justifyContent: 'flex-end',
+    paddingHorizontal: space.sm,
+    minHeight: 44,
   },
-  headerTitle: { flex: 1 },
   closeBtn: {
-    width: 32,
-    height: 32,
+    width: 44,
+    height: 44,
     borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
   pressedWell: { backgroundColor: ink.ink3 },
-  body: { padding: space.lg, gap: space.md, paddingBottom: space.xxl },
-  hero: { marginBottom: space.sm },
-  featureBlock: { gap: space.sm, marginBottom: space.sm },
-  featureRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  featureText: { flex: 1 },
-  loading: { paddingVertical: space.xl, alignItems: 'center' },
-  emptyNote: { textAlign: 'center', paddingVertical: space.lg },
-  planCard: {
-    backgroundColor: ink.ink1,
-    borderWidth: 1,
-    borderColor: ink.line,
-    borderRadius: radii.md,
-    padding: space.lg,
-    gap: space.xs,
-  },
-  // Selection is a border change, never a lift or a shadow (prohibition #7/#8).
-  planCardActive: { borderColor: ice.base },
-  planHeadRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  planTitle: { flex: 1 },
-  // Informational highlight ⇒ flare BORDER + flare text on ink, never a fill
-  // and never on the action itself (ADR-005).
-  badge: {
+  scrollPad: { paddingHorizontal: space.lg, paddingBottom: space.lg, gap: space.md },
+  dim: { color: chalk.dim },
+  value: { gap: space.sm },
+  bulletRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  bulletText: { flex: 1 },
+  club: { gap: space.sm, marginTop: space.sm },
+  // FounderTag (design-lead): flare label, 1px flare border, r-xs, no fill.
+  founderTag: {
+    alignSelf: 'flex-start',
     borderWidth: 1,
     borderColor: flare.base,
     borderRadius: radii.xs,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  badgeText: { color: flare.base },
-  planPrice: { marginTop: space.xs },
-  errorBox: {
-    borderLeftWidth: 3,
-    borderLeftColor: semantic.neg,
+  founderTagText: { color: flare.base },
+  loading: { paddingVertical: space.lg, alignItems: 'center' },
+  emptyNote: { textAlign: 'center', paddingVertical: space.lg },
+  // The anchored block: ink-1, a 1px line top hairline, padded space.md.
+  anchored: {
     backgroundColor: ink.ink1,
-    borderRadius: radii.sm,
+    borderTopWidth: 1,
+    borderTopColor: ink.line,
     padding: space.md,
+    gap: space.sm,
   },
-  errorText: { color: chalk.base },
-  disclosure: { marginTop: space.xs },
-  cta: { marginTop: space.xs },
-  legalRow: {
+  anchoredInline: { marginTop: space.md },
+  statusSlot: { gap: space.xs },
+  statusText: { color: chalk.base },
+  plans: { gap: space.sm },
+  planRow: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: space.sm,
-    marginTop: space.sm,
+    borderWidth: 1,
+    borderColor: ink.lineStrong,
+    borderRadius: radii.md,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
   },
-  legalLink: { color: ice.base },
-  legalDot: { color: chalk.faint },
+  // Selection is a border change, never a lift or a shadow.
+  planRowActive: { borderColor: ice.base },
+  planLeft: { flex: 1, gap: 2 },
+  summary: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: space.sm },
+  trialLine: { color: chalk.base },
+  disclosure: { color: chalk.dim },
+  linkRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  linkHit: { minHeight: 44, justifyContent: 'center', paddingHorizontal: space.xs },
+  linkChalk: { color: chalk.base },
+  linkUnderline: { color: chalk.base, textDecorationLine: 'underline' },
+  linkDot: { color: chalk.faint },
 });

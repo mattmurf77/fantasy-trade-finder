@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, Linking, ViewStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Button from './chalkline/Button';
@@ -9,11 +9,13 @@ import { getEspnLinkStatus, proposeTradeToEspn } from '../api/sendInEspn';
 import { validateTradeSend } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
 import { isSendOutcomeUnknown } from '../api/sendOutcome';
+import { beginSend, getSendRecord, settleSend, subscribeSends, tradeSendKey } from '../api/sendRegistry';
 import {
   SEND_NOT_SENT_TITLE,
   SEND_OUTCOME_UNKNOWN_TITLE,
   sendNotSentFallback,
   sendOutcomeUnknownBody,
+  sendOutcomeUnknownMessage,
 } from '../utils/sendOutcomeCopy';
 import type { SendSurface } from '../utils/tradeText';
 
@@ -67,9 +69,13 @@ interface Props {
    *  Sleeper-named and ESPN siblings are unregistered in the taxonomy), so
    *  today this prop is carried, not fired. */
   surface: SendSurface;
+  /** #393 M2 (D16): the router's Send pre-check (SendInSleeperButton's
+   *  `sendPreCheck`), passed in so this twin's own tap runs it too. */
+  sendPreCheck?: (resume: () => void) => boolean;
 }
 
-type State = 'idle' | 'checking' | 'sending' | 'sent';
+// The pre-send checks only. Sending / sent live in api/sendRegistry.ts.
+type State = 'idle' | 'checking';
 
 export default function SendInEspnButton({
   leagueId,
@@ -83,10 +89,17 @@ export default function SendInEspnButton({
   // Carried for P0-7 parity (see Props); intentionally unread until ESPN
   // attempt/failure events are registered in the taxonomy.
   surface: _surface,
+  sendPreCheck,
 }: Props) {
   const enabled = useFlag('espn.send');
   const navigation = useNavigation<any>();
   const [state, setState] = useState<State>('idle');
+  // This trade's send, from the registry (api/sendRegistry.ts), so it
+  // survives a remount: leave and reopen the trade during the wait and the
+  // button still says "Sending…". It re-renders when the send settles; the
+  // result alert is shown once, by the doPropose call that sent it.
+  const sendKey = tradeSendKey('espn', leagueId, theirUserId, givePlayerIds, receivePlayerIds);
+  const sendState = useSyncExternalStore(subscribeSends, () => getSendRecord(sendKey)?.state);
   // True while we're waiting for the user to come back from the ESPN connect
   // webview — the screen-focus handler consumes it to report the result
   // (same mechanism as the Sleeper twin's awaitingLinkRef).
@@ -144,7 +157,10 @@ export default function SendInEspnButton({
   }, [navigation]);
 
   const doPropose = useCallback(async () => {
-    setState('sending');
+    // Synchronous, before any await: a second send of this trade while one is
+    // in flight (another mount, a same-frame double tap) is refused here,
+    // with no request (#527 QA P3-5).
+    if (!beginSend(sendKey)) return;
     try {
       await proposeTradeToEspn({
         league_id: leagueId,
@@ -153,18 +169,21 @@ export default function SendInEspnButton({
         receive_player_ids: receivePlayerIds,
         impression_id: impressionId,
       });
-      setState('sent');
+      settleSend(sendKey, 'sent');
       haptics.success();
       try {
         onSent?.();
       } catch {
         /* tally must never break the send flow */
       }
+      // Alert.alert is global, not tied to this component, so this one alert
+      // shows even if the button unmounted during the wait. A remount never
+      // alerts: it only re-renders from the registry.
       Alert.alert('Trade sent', 'Check ESPN for the pending offer.', [
         { text: 'OK', onPress: () => void maybeRequestReview('send_in_espn') },
       ]);
     } catch (err) {
-      setState('idle');
+      settleSend(sendKey, isSendOutcomeUnknown(err) ? 'unknown' : 'not_sent');
       const body = err instanceof ApiError ? (err.body as any) : undefined;
       const code: string | undefined = body?.error;
       const detail: string | undefined = body?.detail || body?.message;
@@ -232,7 +251,7 @@ export default function SendInEspnButton({
         );
       }
     }
-  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, goConnect, goReconnect, openEspn]);
+  }, [sendKey, leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, goConnect, goReconnect, openEspn]);
 
   // #180-parity pre-flight — the shared /api/trades/validate has no ESPN
   // branch yet, so this degrades to checked:false (plain confirm). Never
@@ -248,31 +267,60 @@ export default function SendInEspnButton({
     });
     setState('idle');
 
-    if (warnings.length > 0) {
-      const blocking = warnings.some((w) => w.severity === 'blocking');
+    // Each dialog captures this trade's registry record when it is built. A
+    // queued second dialog (a same-frame double tap) can be pressed long
+    // after the first send went out, so its Send only sends if the record is
+    // the same object. Every write makes a new one, so this also catches
+    // unknown → another send → unknown again, which a state comparison would
+    // miss. If the trade has since gone in flight or been sent, it does
+    // nothing (the button already says so). Otherwise (unknown, or cleared)
+    // the dialog opens again, current.
+    function showConfirm(): void {
+      const shown = getSendRecord(sendKey);
+      const send = () => {
+        const now = getSendRecord(sendKey);
+        if (now === shown) void doPropose();
+        else if (now?.state !== 'in_flight' && now?.state !== 'sent') showConfirm();
+      };
+      // After an unknown outcome on this trade, the dialog that gates the
+      // send starts with marketing's 8e line (utils/sendOutcomeCopy.ts, no
+      // new copy).
+      const reminder = shown?.state === 'unknown' ? `${sendOutcomeUnknownMessage('ESPN')}\n\n` : '';
+
+      if (warnings.length > 0) {
+        const blocking = warnings.some((w) => w.severity === 'blocking');
+        Alert.alert(
+          blocking ? 'This trade will likely fail' : 'Heads up before sending',
+          reminder + warnings.map((w) => `• ${w.message}`).join('\n\n'),
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Send anyway', onPress: send },
+          ],
+        );
+        return;
+      }
+
       Alert.alert(
-        blocking ? 'This trade will likely fail' : 'Heads up before sending',
-        warnings.map((w) => `• ${w.message}`).join('\n\n'),
+        'Send this trade?',
+        reminder + 'This proposes the trade directly in ESPN — your leaguemate gets it as a pending offer (it expires in 48 hours).',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Send anyway', onPress: () => { void doPropose(); } },
+          { text: 'Send', onPress: send },
         ],
       );
-      return;
     }
+    showConfirm();
+  }, [sendKey, leagueId, theirUserId, givePlayerIds, receivePlayerIds, doPropose]);
 
-    Alert.alert(
-      'Send this trade?',
-      'This proposes the trade directly in ESPN — your leaguemate gets it as a pending offer (it expires in 48 hours).',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Send', onPress: () => { void doPropose(); } },
-      ],
-    );
-  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, doPropose]);
-
-  const onPress = useCallback(async () => {
-    if (state !== 'idle') return;
+  // The tap past the pre-check, unchanged. A tap resumed after a verify
+  // runs it exactly as a fresh one: the no-target hand-off, the link-status
+  // check and its sign-in prompt, then the "Send this trade?" confirm.
+  const proceed = useCallback(async () => {
+    // Main's send registry (#539): a send that went in flight or landed while
+    // the verify sheet was up never reaches the confirm again. Read live: a
+    // resumed `proceed` was captured before the sheet opened.
+    const live = getSendRecord(sendKey)?.state;
+    if (live === 'in_flight' || live === 'sent') return;
     haptics.pickup();
     if (!leagueId || !theirUserId) {
       openEspn();
@@ -308,13 +356,22 @@ export default function SendInEspnButton({
         ],
       );
     }
-  }, [state, leagueId, theirUserId, openEspn, confirmSend, goConnect]);
+  }, [sendKey, leagueId, theirUserId, openEspn, confirmSend, goConnect]);
+
+  // #393 M2 (D16): the router's Send pre-check runs first. This twin's own
+  // tap reaches its confirm step (the router only renders it), so it runs
+  // here too; after a verify it resumes with `proceed`, not straight to the confirm.
+  const onPress = useCallback(() => {
+    if (state !== 'idle' || sendState === 'in_flight' || sendState === 'sent') return;
+    if (sendPreCheck?.(() => { void proceed(); })) return;
+    void proceed();
+  }, [state, sendState, sendPreCheck, proceed]);
 
   if (!enabled) return null;
 
   const label =
-    state === 'sent' ? 'Proposal sent'
-    : state === 'sending' ? 'Sending…'
+    sendState === 'sent' ? 'Proposal sent'
+    : sendState === 'in_flight' ? 'Sending…'
     : 'Send in ESPN';
 
   return (
@@ -323,7 +380,7 @@ export default function SendInEspnButton({
       label={label}
       variant="secondary"
       compact={compact}
-      disabled={state === 'sending' || state === 'checking' || state === 'sent'}
+      disabled={state === 'checking' || sendState === 'in_flight' || sendState === 'sent'}
       onPress={onPress}
       style={style}
     />

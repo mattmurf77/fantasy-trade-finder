@@ -266,6 +266,7 @@ from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
 from .eval import contract as _evidence_contract  # ADR-025 S3: the one evidence contract (#382)
 from . import pick_slots                          # D-090 — real-slot pick labels AND, since D-144, per-slot prices
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
+from . import error_alerts as _error_alerts     # GNG-1 — Sentry error alerts, dark until SENTRY_DSN
 from . import sleeper_http as _sleeper_http   # S0 — per-process Sleeper 429 circuit
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
 from types import SimpleNamespace   # proposal-time policy shim (see
@@ -2300,7 +2301,29 @@ def _consensus_pos_ranks(scoring_format: str) -> tuple[dict[str, int], dict[str,
 # ---------------------------------------------------------------------------
 
 _PROJECT_ROOT = pathlib.Path(__file__).parent.parent
+# GNG-1: Sentry, dark until SENTRY_DSN (docs/runbook.md § Server error alerts).
+# Before Flask(), as the SDK's Flask integration asks. Under --preload this
+# runs in the gunicorn master; the SDK's sender thread restarts per pid
+# (backend/error_alerts.py module doc cites sentry_sdk/worker.py).
+_error_alerts.init_error_alerts()
 app = Flask(__name__, static_folder=str(_PROJECT_ROOT / "web"), static_url_path="")
+
+
+# GNG-1: a 5xx response that produced no Sentry event of its own (no ERROR log
+# on the way to it) becomes one `http_5xx` event; 4xx never reports. The
+# start hook notes the request's last event id, and is registered first so it
+# runs before every other before_request. Both return at once when Sentry is off.
+@app.before_request
+def _error_alerts_request_start() -> None:
+    _error_alerts.request_started()
+
+
+@app.after_request
+def _error_alerts_5xx(response):
+    if response.status_code >= 500:
+        _error_alerts.report_5xx(response.status_code)
+    return response
+
 
 # ---------------------------------------------------------------------------
 # Session store — multi-user support
@@ -2883,6 +2906,12 @@ def _trade_job_stalled(job, now):
     return now - last_progress > _JOB_HARD_TIMEOUT
 
 
+# Diagnostics expiry per cleanup tick: up to 20 x 500 rows (10,000 a tick,
+# 2.88M a day); one 500-row batch a tick fell behind the write rate.
+_DIAG_PURGE_MAX_BATCHES = 20
+_DIAG_PURGE_BATCH = 500
+
+
 def _cleanup_loop() -> None:
     """Background thread: evict stale sessions + stuck/old trade jobs."""
     while True:
@@ -2924,13 +2953,19 @@ def _cleanup_loop() -> None:
             log.warning("api-observability purge failed: %s", e)
 
         # Debug evidence is separate from durable card/outcome/valuation rows.
-        # One bounded batch per tick; failures remain visible and retry next tick.
+        # Up to _DIAG_PURGE_MAX_BATCHES bounded batches per tick (one fell
+        # behind the write rate); failures remain visible and retry next tick.
         try:
             from .database import purge_deck_diagnostics
             days = int(os.environ.get("FTF_DECK_DIAGNOSTIC_RETENTION_DAYS", "14"))
-            purged = purge_deck_diagnostics(days=days)
+            purged = purge_deck_diagnostics(days=days, batch_size=_DIAG_PURGE_BATCH,
+                                            max_batches=_DIAG_PURGE_MAX_BATCHES)
             if purged:
-                log.info("Purged %d expired deck diagnostic snapshots", purged)
+                # At the ceiling the tick can't tell whether rows are left
+                # (exactly 10,000 may have been all of them); the next says.
+                log.info("Purged %d expired deck diagnostic snapshots%s", purged,
+                         " (the tick's ceiling: more may remain)"
+                         if purged >= _DIAG_PURGE_MAX_BATCHES * _DIAG_PURGE_BATCH else "")
         except Exception:
             log.exception("deck-diagnostic retention failed")
 
@@ -16227,6 +16262,12 @@ def submit_feedback_route():
         return jsonify({"error": "internal"}), 500
     if result.get("duplicate"):
         _release_reservations()
+    else:
+        # SUP-M7: the "feedback received" alert (Sentry; a no-op until
+        # SENTRY_DSN). The stored row's id and severity only: never the text,
+        # screen, user, session or client id.
+        _error_alerts.notify("feedback_received", feedback_id=result["server_id"],
+                             kind=severity)
 
     # Tracking plan v2 §S3 — feedback_submitted. NEVER the note text (§S4);
     # anonymous submissions (no session) have no user to attribute to, and
@@ -30977,6 +31018,9 @@ def _png_response(data: bytes, status: int = 200) -> "Response":
     resp.headers["Content-Type"]  = "image/png"
     resp.headers["Cache-Control"] = "public, max-age=300"
     resp.headers["Content-Length"] = str(len(data))
+    # Crawlable on purpose (robots.txt) so link unfurlers can fetch the
+    # card, but kept out of search indexes.
+    resp.headers["X-Robots-Tag"] = "noindex"
     return resp
 
 
@@ -31011,18 +31055,74 @@ def og_tier_card(pos, username):
     return _png_response(png, status=status)
 
 
-@app.route("/og/trade/<match_id>.png")
-def og_trade_card(match_id):
-    """Render a trade match's give/get + fairness as a 1200x630 PNG."""
+# ---------------------------------------------------------------------------
+# Trade share links (build O8, 2026-10-20). /s/trade/<token> and
+# /og/trade/<token>.png resolve ONLY through trade_share_tokens: a 128-bit
+# token minted by POST /api/share/trade for a participant of the match. They
+# used to take the sequential trade_matches.id, so walking the ids exposed
+# every mutual match. Every miss (a numeric id, an unknown, revoked or
+# malformed token, an orphaned match) gets ONE generic "expired" page / PNG,
+# status 200, identical bytes and headers, so a miss can't be told from an
+# expired link and old numeric links unfurl cleanly instead of looking
+# broken. No per-IP GET limiter (head-eng ruling): the token space is the
+# defence. Tokens are bearer secrets — never log one.
+# ---------------------------------------------------------------------------
+
+from .database import (  # noqa: E402
+    create_trade_share_token, resolve_trade_share_token,
+    TradeShareRateLimited,
+)
+
+# token_urlsafe(16) → exactly 22 chars of the URL-safe base64 alphabet.
+_TRADE_SHARE_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{22}")
+
+
+def _resolve_trade_share(token) -> dict | None:
+    """The trade_matches row a live share token points at, else None."""
+    if not isinstance(token, str) or not _TRADE_SHARE_TOKEN_RE.fullmatch(token):
+        return None
+    try:
+        return resolve_trade_share_token(token)
+    except Exception as e:
+        # The type only: a DB error's text carries its bound parameters,
+        # which here is the token.
+        log.warning("trade share lookup failed: %s", type(e).__name__)
+        return None
+
+
+@app.route("/og/trade/<token>.png")
+def og_trade_card(token):
+    """Render a shared trade's give/get card as a 1200x630 PNG (no fairness number since #511).
+
+    A hit renders from the row the token resolves to; every miss returns
+    the same generic "expired" PNG, status 200.
+    """
     if _og_image is None:
         return _og_unavailable_response()
+    match = _resolve_trade_share(token)
+    if match is None:
+        return _png_response(_og_image.render_expired_trade_card())
     try:
-        png, status = _og_image.render_trade_card(match_id)
+        png, status = _og_image.render_trade_card(match)
     except Exception as e:
-        log.error("og_trade_card error (%s): %s", match_id, e)
+        log.error("og_trade_card error (match %s): %s", match.get("id"), e)
         png = _og_image.render_placeholder_card("Share card unavailable", str(e)[:80])
         status = 500
     return _png_response(png, status=status)
+
+
+def _absolute_url(path: str) -> str:
+    """Absolutise a root-relative path ("/og/...") against this request's host.
+
+    Link unfurlers (iMessage, Slack, X, Discord) need an absolute og:image.
+    Render terminates TLS and there is no ProxyFix, so `request.scheme`
+    reads "http" there — deployed envs are forced to https. X-Forwarded-*
+    headers are deliberately not consulted.
+    """
+    if not path.startswith("/"):
+        return path
+    scheme = "https" if _IS_PROD_ENV else request.scheme
+    return f"{scheme}://{request.host}{path}"
 
 
 def _share_html(
@@ -31040,23 +31140,28 @@ def _share_html(
         return (s or "").replace("&", "&amp;").replace("<", "&lt;") \
                          .replace(">", "&gt;").replace('"', "&quot;")
 
+    # Unfurlers need an absolute image URL; the visible <img> stays relative.
+    og_image_url = _absolute_url(image_url)
+
     html = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{esc(title)} · Fantasy Trade Finder</title>
+  <title>{esc(title)} · Fleeced: Dynasty Trade Finder</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
   <meta name="description" content="{esc(description)}">
   <meta property="og:type" content="website">
   <meta property="og:title" content="{esc(title)}">
   <meta property="og:description" content="{esc(description)}">
-  <meta property="og:image" content="{esc(image_url)}">
+  <meta property="og:image" content="{esc(og_image_url)}">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{esc(title)}">
   <meta name="twitter:description" content="{esc(description)}">
-  <meta name="twitter:image" content="{esc(image_url)}">
+  <meta name="twitter:image" content="{esc(og_image_url)}">
+  <link rel="stylesheet" href="/css/tokens.css">
   <style>
     body{{margin:0;background:#0f1322;color:#f5f7fc;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
          min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}}
@@ -31068,7 +31173,10 @@ def _share_html(
     .cta{{display:inline-block;background:#6eb4ff;color:#0f1322;padding:14px 28px;
           border-radius:999px;font-weight:600;text-decoration:none;}}
     .cta:hover{{background:#8cc6ff;}}
-    .brand{{margin-top:36px;color:#6b7a9a;font-size:13px;}}
+    .brand{{margin-top:36px;color:var(--chalk-dim);font-size:13px;}}
+    .legal-links {{ margin-top: 8px; font-size: 13px; color: var(--chalk-faint); }}
+    .legal-links a {{ color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }}
+    .legal-links a:hover {{ text-decoration-color: var(--ice); }}
   </style>
 </head>
 <body>
@@ -31077,13 +31185,15 @@ def _share_html(
     <h1>{esc(title)}</h1>
     <p>{esc(description)}</p>
     <a class="cta" href="{esc(cta_url)}">{esc(cta_text)}</a>
-    <div class="brand">Fantasy Trade Finder</div>
+    <div class="brand">Fleeced: Dynasty Trade Finder</div>
+    <div class="legal-links"><a href="/privacy">Privacy</a></div>
   </div>
 </body>
 </html>"""
     resp = make_response(html)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
     resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["X-Robots-Tag"] = "noindex"
     return resp
 
 
@@ -31117,12 +31227,27 @@ def share_tiers_page(pos, username):
     )
 
 
-@app.route("/s/trade/<match_id>")
-def share_trade_page(match_id):
-    """HTML wrapper with OG tags for a trade verdict share link."""
+@app.route("/s/trade/<token>")
+def share_trade_page(token):
+    """HTML wrapper with OG tags for a trade verdict share link.
+
+    A hit renders the trade page; every miss renders the one generic,
+    noindex "expired" page (status 200). Its og:image is a fixed miss URL
+    so the unfurl shows the generic PNG too. The words live in og_image.
+    """
+    if _og_image is None:
+        return _og_unavailable_response()
+    if _resolve_trade_share(token) is None:
+        return _share_html(
+            title=_og_image.TRADE_LINK_EXPIRED_TITLE,
+            description=_og_image.TRADE_LINK_EXPIRED_BODY,
+            image_url="/og/trade/expired.png",
+            cta_text="Find your next trade",
+            cta_url="/",
+        )
     title = "Trade Match"
-    description = "A dynasty fantasy trade — see the give/get breakdown and fairness verdict."
-    image_url = f"/og/trade/{match_id}.png"
+    description = "A dynasty fantasy trade. See the give/get breakdown."
+    image_url = f"/og/trade/{token}.png"
     return _share_html(
         title=title,
         description=description,
@@ -31136,7 +31261,7 @@ def share_trade_page(match_id):
 # Share landing for arbitrary packages (teardown S7 PRD-01 follow-up,
 # flag `growth.share_landing`; W2B handoff).
 #
-# /s/trade/<match_id> only works for MUTUAL matches (a trade_matches row).
+# /s/trade/<token> only works for MUTUAL matches (a trade_matches row).
 # Calculator builds and liked-but-unmatched trades previously fell back to
 # the bare site root. This trio gives them a real landing object:
 #   POST /api/share/package  (session-authed, rate-limited) → /s/p/<id>
@@ -31215,6 +31340,73 @@ def create_share_package_route():
     return jsonify({"error": "store_failed"}), 500
 
 
+_TRADE_SHARE_HOURLY_LIMIT = 30   # mints per user — abuse guard (head-eng ruling)
+_TRADE_SHARE_MATCH_ID_MAX = 2**31 - 1   # trade_matches.id is int4 on Postgres
+
+
+def _share_trade_match_id(raw) -> int | None:
+    """A positive int (or a string of ASCII digits) in int4 range, else None.
+    Out-of-range values are refused here so Postgres never errors on them —
+    an error would answer differently from the 404 every other miss gets."""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, str) and re.fullmatch(r"[0-9]{1,10}", raw):
+        raw = int(raw)
+    if isinstance(raw, int) and 0 < raw <= _TRADE_SHARE_MATCH_ID_MAX:
+        return raw
+    return None
+
+
+@app.route("/api/share/trade", methods=["POST"])
+@_gate_unverified_write
+def create_share_trade_route():
+    """POST /api/share/trade — mint (or return) the caller's share token for a
+    mutual match (build O8). 404 while `growth.share_landing` is dark.
+
+    Body: {"match_id": <int>}
+    → {ok, token, url: "/s/trade/<token>", og_image: "/og/trade/<token>.png"}
+
+    Only a party to the match can mint, by the predicate every match route
+    uses (session user_id == user_a_id or user_b_id). A non-participant, a
+    missing match and a malformed id all get the same 404 not_found, so the
+    route can't be used to probe ids. Idempotent per (match, sharer): a
+    re-share returns the caller's live token and never counts against the
+    hourly limit; only a new mint does (one transaction in the helper). Demo
+    sessions are refused, as on /api/share/package.
+    """
+    if not is_enabled("growth.share_landing"):
+        return jsonify({"error": "not_found"}), 404
+    sess = _require_session()
+    user_id = str(sess.get("user_id") or "")
+    if sess.get("is_demo") or user_id.startswith("demo_user_"):
+        return jsonify({"error": "demo_session"}), 400
+
+    body = request.get_json(force=True, silent=True)
+    match_id = _share_trade_match_id(body.get("match_id") if isinstance(body, dict) else None)
+    if match_id is None:
+        return jsonify({"error": "not_found"}), 404
+
+    try:
+        token = create_trade_share_token(match_id, user_id,
+                                         hourly_limit=_TRADE_SHARE_HOURLY_LIMIT)
+    except TradeShareRateLimited:
+        return jsonify({"error": "rate_limited",
+                        "message": "Too many shares — try again later."}), 429
+    except Exception as e:
+        # The type only: a DB error's text carries the INSERT's bound
+        # parameters, the new token among them.
+        log.error("share/trade: could not mint a token for %s: %s", user_id, type(e).__name__)
+        return jsonify({"error": "store_failed"}), 500
+    if token is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({
+        "ok": True,
+        "token": token,
+        "url": f"/s/trade/{token}",
+        "og_image": f"/og/trade/{token}.png",
+    })
+
+
 @app.route("/s/p/<short_id>")
 def share_package_page(short_id):
     """Public OG landing page for a shared package (flag growth.share_landing)."""
@@ -31230,8 +31422,7 @@ def share_package_page(short_id):
     n = len(pkg["give_ids"]) + len(pkg["receive_ids"])
     return _share_html(
         title="Trade Package",
-        description=(f"A {n}-player dynasty trade package — see the give/get "
-                     "breakdown and fairness read."),
+        description=f"A {n}-player dynasty trade package. See the give/get breakdown.",
         image_url=f"/og/p/{short_id}.png",
         cta_text="Build your own trade",
         cta_url="/",
