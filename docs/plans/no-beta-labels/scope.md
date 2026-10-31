@@ -68,7 +68,7 @@ Not in scope:
 
   | # | Steps | Expected |
   |---|---|---|
-  | 1 | League → Season outlook section | The ribbon beside "Season outlook" reads **Projected**, never "beta". In a league with fewer than 6 completed weeks (or preseason: **Projected · preseason**), win-loss records stay hidden, as before. |
+  | 1 | League → Season outlook section | The ribbon beside "Season outlook" reads **PROJECTED** (or **PROJECTED · PRESEASON** before week 1), never "BETA". The source says `'Projected'`, but `type.label` renders it uppercase, as on rows 2 and 3 (design-lead, 2026-10-31). In a league with fewer than 6 completed weeks, win-loss records stay hidden, as before. |
   | 2 | Trades → a trade card that shows the "Playoff outlook" block | The ribbon reads **PROJECTED**, never "BETA". |
   | 3 | League → a team → Team review → "Playoff outlook" card | The ribbon reads **PROJECTED**, never "BETA". |
 
@@ -117,7 +117,7 @@ The rest are not shown to users and stay:
 ## Reviews
 
 - **models-lead** (outlook behaviour): the ribbon loses its early-season "beta" cue. The honesty rule that matters (no win-loss numbers while `meta.beta`) is untouched, and so are bands and order.
-- **design-lead** (UI): text-only change on three existing ribbons, with no token or layout change.
+- **design-lead** (UI): text-only change on three existing ribbons, with no token or layout change. **Approved 2026-10-31** at `390ab9ee`, with no code change. All three ribbons render uppercase through `type.label` (`CardImpactBlock.tsx:244`, `TeamReviewScreen.tsx:1343`, `LeagueSummaryScreen.tsx:3640`), so the source casing makes no difference. "PROJECTED" alone still reads as the caveat tag. The one fix was the casing in TestFlight row 1, now applied.
 
 ## Evidence
 
