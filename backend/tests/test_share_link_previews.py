@@ -18,7 +18,12 @@ minting tokens with test_trade_share_tokens.py's fixture and helpers.
 
 Section 5 pins legal R13 on every /s/* page: a Privacy link, the Fleeced
 brand (no "Fantasy Trade Finder"), tokens.css, and the og PNG footer.
+
+Section 6 pins design-lead's og trade card fixes B1-B3 on a real render:
+the verdict clears the meter bar, no missing-glyph box or centre disc, and
+the position chips use the cross-client position colours with ink-0 labels.
 """
+import io
 import re
 from pathlib import Path
 from unittest.mock import patch
@@ -36,6 +41,7 @@ from backend.tests.test_trade_share_tokens import (  # noqa: F401  (env is a fix
 
 SID = "pkgPreview1"
 ROBOTS_TXT = Path(__file__).resolve().parents[2] / "web" / "robots.txt"
+INVARIANTS_MD = Path(__file__).resolve().parents[2] / "docs" / "cross-client-invariants.md"
 
 
 def _flags(*enabled):
@@ -320,3 +326,104 @@ def test_og_trade_card_still_renders_with_fleeced_footer(env):
              for c in spy.call_args_list]
     assert OG_FOOTER in drawn
     assert not any("Fantasy Trade Finder" in str(t) for t in drawn)
+
+
+# ---------------------------------------------------------------------------
+# 6. og trade card B1-B3 (design-lead review; Product: before launch)
+# ---------------------------------------------------------------------------
+
+INK_0 = (12, 14, 17)
+
+
+def _spied_trade_card(env):
+    """Render a live /og/trade/<token>.png, recording every text,
+    rounded_rectangle and ellipse call on the canvas, in draw order."""
+    tok = _live_token(env)
+    calls = []
+    cls = og_image.ImageDraw.ImageDraw
+
+    def spy(name):
+        real = getattr(cls, name)
+
+        def wrapper(self, *a, **kw):
+            calls.append((name, a, kw))
+            return real(self, *a, **kw)
+        return wrapper
+
+    with patch.object(cls, "text", spy("text")), \
+         patch.object(cls, "rounded_rectangle", spy("rounded_rectangle")), \
+         patch.object(cls, "ellipse", spy("ellipse")):
+        r = env.get(f"/og/trade/{tok}.png")
+    assert r.status_code == 200
+    assert r.headers["Content-Type"] == "image/png"
+    return r, calls
+
+
+def _texts(calls):
+    return [(a[0], a[1], kw) for name, a, kw in calls if name == "text"]
+
+
+def test_og_trade_card_b1_verdict_clears_meter_bar(env):
+    """B1: the "N% fair" glyph box ends at least 16px above the meter bar."""
+    _, calls = _spied_trade_card(env)
+    verdict = [i for i, (name, a, _) in enumerate(calls)
+               if name == "text" and re.fullmatch(r"\d+% fair", a[1])]
+    assert len(verdict) == 1, verdict
+    i = verdict[0]
+    (x, y), label = calls[i][1][:2]
+    _, top, _, bottom = calls[i][2]["font"].getbbox(label)
+    # The bar (track + fill) is every rounded rectangle drawn after the verdict.
+    bars = [a[0] for name, a, _ in calls[i + 1:] if name == "rounded_rectangle"]
+    assert bars, "no meter bar drawn after the verdict"
+    bar_top = min(b[1] for b in bars)
+    assert bar_top - (y + bottom) >= 16, (y + top, y + bottom, bar_top)
+
+
+# Every glyph here is in each font og_image can load (Arial, Helvetica, SF,
+# DejaVu): printable ASCII plus the "·" footer separator, the "—" empty-side
+# dash and the "…" truncation ellipsis.
+SAFE_CHARS = {chr(c) for c in range(0x20, 0x7F)} | {"·", "—", "…"}
+
+
+def test_og_trade_card_b2_no_missing_glyph_or_centre_disc(env):
+    """B2: no drawn text uses U+21C4 "⇄" or any character outside SAFE_CHARS
+    (printable ASCII U+0020-U+007E, U+00B7 "·", U+2014 "—", U+2026 "…"),
+    and nothing is drawn in the card centre between the two columns: no
+    ellipse covers it and its pixels are the plain background."""
+    r, calls = _spied_trade_card(env)
+    for _, text, _ in _texts(calls):
+        assert "⇄" not in text
+        assert set(text) <= SAFE_CHARS, (text, set(text) - SAFE_CHARS)
+    cx, cy = og_image.CARD_W // 2, (135 + 415) // 2   # between the columns
+    for name, a, _ in calls:
+        if name == "ellipse":
+            x0, y0, x1, y1 = a[0]
+            assert not (x0 <= cx <= x1 and y0 <= cy <= y1), a[0]
+    card = og_image.Image.open(io.BytesIO(r.data)).convert("RGB")
+    canvas = og_image._new_canvas()
+    for dx in range(-30, 31, 5):
+        for dy in range(-30, 31, 5):
+            p = (cx + dx, cy + dy)
+            assert card.getpixel(p) == canvas.getpixel(p), p
+
+
+def _invariant_position_colors() -> dict:
+    doc = INVARIANTS_MD.read_text()
+    section = doc.split("## Position color tokens", 1)[1].split("\n## ", 1)[0]
+    rows = re.findall(r"^\| (QB|RB|WR|TE) \| [^|]+\| `#([0-9a-fA-F]{6})` \|$",
+                      section, re.M)
+    return {pos: tuple(int(h[i:i + 2], 16) for i in (0, 2, 4)) for pos, h in rows}
+
+
+def test_og_trade_card_b3_position_colours_match_invariants(env):
+    """B3: POS_COLORS equals docs/cross-client-invariants.md § Position color
+    tokens, and the trade card's chip labels are ink-0 on those chips."""
+    doc = _invariant_position_colors()
+    assert sorted(doc) == ["QB", "RB", "TE", "WR"], doc
+    assert og_image.POS_COLORS == doc
+    _, calls = _spied_trade_card(env)
+    chips = [a[0] for name, a, kw in calls
+             if name == "rounded_rectangle" and kw.get("fill") == doc["WR"]]
+    labels = [kw["fill"] for _, text, kw in _texts(calls) if text in doc]
+    assert len(chips) == 2 and len(labels) == 2, (chips, labels)  # one WR per side
+    assert labels == [INK_0, INK_0]

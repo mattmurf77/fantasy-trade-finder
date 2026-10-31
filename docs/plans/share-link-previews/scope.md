@@ -209,7 +209,8 @@ Results:
 |---|---|---|
 | R1 | Open a live `/s/trade/<token>` link in Safari | The tab title ends "· Fleeced: Dynasty Trade Finder". Under the CTA: "Fleeced: Dynasty Trade Finder", then an underlined **Privacy** link. Tapping it opens the privacy policy. |
 | R2 | Open an expired or unknown `/s/trade/…` link | The same brand line and **Privacy** link. "Fantasy Trade Finder" appears nowhere on the page. |
-| R3 | Paste a share link into iMessage | The unfurl card's footer reads "Fleeced: Dynasty Trade Finder · fantasy-trade-finder.onrender.com" on one line. |
+| R3 | Paste a share link into iMessage | The unfurl card's footer reads "Fleeced: Dynasty Trade Finder · fantasy-trade-finder.onrender.com" on one line. **The player names are readable at thumbnail size, not tiny text** (design-lead B4: with no TrueType font on the server, Pillow falls back to a 10px default. If so, vendor a TTF, such as the OFL Archivo files on `design/og-cards`, as the first `_FONT_CANDIDATES` entry). |
+| R4 | Same card, a trade with a QB and a TE | The "% fair" text sits clear above the meter bar. There's no box or odd glyph between YOU GIVE and YOU GET. QB chips are orange and TE chips are purple, with dark labels. |
 
 **Reviews:** design-lead **passed** the link style and brand line at `8b90d674` (2026-10-31). Their two string changes (`s4.title`, `s4.og_footer`) and the `.brand` contrast fix are applied. Legal-lead's review of R13 is routed via head-eng.
 
@@ -218,3 +219,38 @@ Results:
 **Merge overlap:** #386 (Referral D-1, also stacked on #362) also rewrites `_share_html` (`share_kind`/`noindex`, drops `cta_url`). Whichever lands second must keep the R13 lines; `_assert_r13` catches a drop.
 
 **Flagged, not changed:** `server.py:28191` push copy "@{name} joined Fantasy Trade Finder via your invite." It's off `/s/*`, so it goes to head-eng for marketing.
+
+## 2026-10-31 — og trade card fix (B1–B3, before launch)
+
+**Entry point:** head-eng and Product (2026-10-31). C6 makes `_render_trade_card_png` (`/og/trade/<token>.png`, `/og/p/<id>.png`) the iMessage, Slack and X preview for every share, so its defects become public. design-lead's spec (`docs/plans/org-bringup/reports/design-lead.md` § "Broken, not just off-brand") is a minimal fix of about 10 lines, not a restyle:
+- **B1:** the "% fair" verdict text overlapped the meter bar by 20px. `font_score` 96 → 72 and `verdict_y` 445 → 428 leave 19px clear.
+- **B2:** the "⇄" swap glyph (U+21C4) is missing from Arial, Helvetica and SF and renders as a box. The disc and glyph are removed; the YOU GIVE / YOU GET headers carry the meaning.
+- **B3:** `POS_COLORS` contradicted the cross-client invariants (QB red, TE orange). It now uses QB `#f97316`, RB `#22c55e`, WR `#3b82f6` and TE `#a855f7`. Chip labels move from white (2.3:1 on RB) to ink-0 (4.9–8.5:1). `og_image.py` is added to the invariants row's Locations.
+- **B4** (fonts on the server, unverified) rides operator checklist R3.
+
+**Not changing for launch:** the card's "% fair" number. It's cosmetic (`_compute_fairness` maps rank symmetry into 40–98), and Product is taking it to models-lead for the post-launch restyle (GB-02).
+
+**Evidence** (`test_share_link_previews.py` §6). `_spied_trade_card` renders a real `/og/trade/<token>.png` and records every `text`, `rounded_rectangle` and `ellipse` call.
+- **B1:** the "% fair" glyph box (`font.getbbox` at its xy) ends at least 16px above the meter bar. Measured clearance at 72px: 19px in Arial Bold and DejaVu Sans Bold, 30 in Helvetica, 16 in SFNS (the last fallback), 77 with `load_default()`.
+- **B2:** no drawn text has U+21C4 or anything outside a named safe set (printable ASCII plus `·`, `—`, `…`). No ellipse covers the card centre, and a 13×13 pixel grid at the centre is plain background.
+- **B3:** `POS_COLORS` equals the invariants doc's Position color table, which the test parses, and the trade card's chip labels are ink-0 `(12,14,17)`.
+
+Results: pytest 7-file set 141 passed; `check_web_structure` 196/196. Before and after renders were reviewed by league-eng: the verdict clears the bar, the disc and box are gone, and the chips are orange, green, blue and purple with dark labels.
+
+Sabotage runs, each red only on its own test:
+
+| Sabotage | Red |
+|---|---|
+| `font_score` 96 / `verdict_y` 445 | B1 |
+| disc + "⇄" restored | B2 |
+| disc only | B2 (ellipse) |
+| a white block at the centre | B2 (pixels) |
+| TE back to `(255,167,38)` | B3 |
+| chip label back to white | B3 |
+
+**Where the new colours reach:**
+- `POS_COLORS` is used only in `og_image.py`.
+- The trade/package card chip (`/og/trade`, `/og/p`) now has an ink-0 label: 4.88–8.48:1, and 5.77:1 on the grey fallback chip for K/DEF.
+- The tier card (`/og/tiers`, `_render_tier_card_filled`) gets the new chip colours, but its 58px label stays white: QB 2.80:1 and RB 2.28:1, under the 3:1 large-text bar.
+  - That surface 404s while `growth.tier_board_share` is off (`config/features.json`), so it isn't widened here.
+  - **Follow-up before that flag ever flips:** an ink-0 label on the tier card chip.

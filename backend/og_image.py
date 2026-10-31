@@ -49,11 +49,13 @@ TEXT_MUTED   = (160, 174, 200)
 ACCENT       = (110, 180, 255)
 DIVIDER      = (60,  72, 105)
 
+# Canonical position hexes: docs/cross-client-invariants.md § Position color
+# tokens. Chip labels on them are ink-0 (12, 14, 17); white fails contrast.
 POS_COLORS = {
-    "QB": (239, 83,  80),
-    "RB": (102, 187, 106),
-    "WR": (66,  165, 245),
-    "TE": (255, 167, 38),
+    "QB": (249, 115, 22),
+    "RB": (34,  197, 94),
+    "WR": (59,  130, 246),
+    "TE": (168, 85,  247),
 }
 
 # Matches ranking_service.ORDERED_TIERS ordering (best → worst) — the
@@ -619,7 +621,7 @@ def _render_trade_card_png(
     font_side    = _load_font(30, bold=True)
     font_player  = _load_font(28)
     font_pos     = _load_font(20, bold=True)
-    font_score   = _load_font(96, bold=True)
+    font_score   = _load_font(72, bold=True)
     font_small   = _load_font(22)
 
     # Header
@@ -676,7 +678,7 @@ def _render_trade_card_png(
                 cw = _text_width(draw, pos, font_pos)
                 draw.text(
                     (x0 + 24 + (chip_w - cw) // 2, row_y + 10),
-                    pos, font=font_pos, fill=(255, 255, 255),
+                    pos, font=font_pos, fill=(12, 14, 17),
                 )
                 text_x = x0 + 24 + chip_w + 14
             else:
@@ -688,23 +690,8 @@ def _render_trade_card_png(
     render_side(left_x, col_top, give_ids)
     render_side(right_x, col_top, receive_ids)
 
-    # Center swap arrow
-    center_y = (col_top + col_bot) // 2
-    arrow_cx = CARD_W // 2
-    draw.ellipse(
-        [arrow_cx - 40, center_y - 40, arrow_cx + 40, center_y + 40],
-        fill=(255, 255, 255, 255),
-        outline=ACCENT, width=3,
-    )
-    arrow = "⇄"
-    aw = _text_width(draw, arrow, font_side)
-    draw.text(
-        (arrow_cx - aw // 2, center_y - 24),
-        arrow, font=font_side, fill=(15, 19, 34),
-    )
-
     # Fairness verdict
-    verdict_y = 445
+    verdict_y = 428
     label = f"{fairness}% fair"
     lw = _text_width(draw, label, font_score)
     color = _fairness_color(fairness)
