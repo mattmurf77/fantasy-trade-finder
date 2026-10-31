@@ -2908,7 +2908,12 @@ def _revoke_trade_jobs_naming(user_ids, league_ids) -> int:
     it leaves memory. So every job whose cards name a deleted id is revoked,
     and so is every job still running in one of their leagues (it may yet
     publish such cards). The next request builds a fresh deck. Returns the
-    count. Another instance's jobs age out within its retention."""
+    count. Another instance's jobs age out within its retention.
+
+    The reason is the neutral "inputs_changed", never "partner_deleted": a
+    running job's error reaches its owner, a leaguemate (mobile retries
+    inputs_changed on its own; web would toast the raw code), and must not
+    tell them someone deleted their account (#559 re-QA P2-a)."""
     ids, leagues = set(user_ids), set(league_ids)
     revoked = 0
     with _trade_jobs_lock:
@@ -2919,9 +2924,43 @@ def _revoke_trade_jobs_naming(user_ids, league_ids) -> int:
             running = (job.get("status") == "running"
                        and (job.get("key") or (None, None))[1] in leagues)
             if (names or running) and not _trade_job_revoked(job):
-                _revoke_trade_job_locked(job, "partner_deleted")
+                _revoke_trade_job_locked(job, "inputs_changed")
                 revoked += 1
     return revoked
+
+
+# Account deletion (#559 re-QA P2-b): the ids deleted in this process. Each
+# session's TradeService card store (shared with its trade jobs) keeps the
+# cards it generated, and GET /api/trades serves them with no expiry, so a
+# deletion purges them; this set filters any card a still-running job writes
+# after the purge. Never pruned: deletions are rare, and a restart clears the
+# stores it guards. Prod runs one process (render.yaml: --workers 1).
+_deleted_partner_ids: set = set()
+
+
+def _purge_session_trade_cards(user_ids) -> int:
+    """Remove every card whose partner is a deleted id from every session's
+    trade services' card stores (and the module default's). Returns the
+    count. Late writers are caught by `_deleted_partner_ids` at serve."""
+    ids = set(user_ids)
+    _deleted_partner_ids.update(ids)
+    with _sessions_lock:
+        sessions = list(_sessions.values())
+    services = {id(trade_service): trade_service}
+    for sess in sessions:
+        for svc in (sess.get("trade_svc"), *(sess.get("trade_svcs") or {}).values()):
+            if svc is not None:
+                services[id(svc)] = svc
+    purged = 0
+    for svc in services.values():
+        store = getattr(svc, "_trade_cards", None)
+        if not isinstance(store, dict):
+            continue
+        for trade_id, card in list(store.items()):
+            if getattr(card, "target_user_id", None) in ids:
+                store.pop(trade_id, None)
+                purged += 1
+    return purged
 
 
 def _kick_deletion_scrub() -> None:
@@ -4002,7 +4041,8 @@ def _roster_serve_rules(cards, league_id: str, viewer_id: str, ref: str, *, snap
     # The deletion scrub's redacted cards (the partner deleted their account;
     # the target is a redaction token) never serve, in any mode, ahead of
     # I-1 (models-lead addendum J4, head-eng's option (b)). The caller records
-    # them as never-delivered withdrawals, reason "partner_deleted".
+    # them as withdrawals, reason "partner_deleted" (served_before 1 when an
+    # earlier response had delivered the card, else 0).
     if cards:
         cards = [c for c in cards if not _redacted_target(c)]
     mode = _trade_i1_mode()
@@ -21227,6 +21267,9 @@ def get_trades():
     g_players     = sess["players"]
     league_id = request.args.get("league_id") or None
     cards = trade_service.get_pending_trades(user_id=g_user_id, league_id=league_id)
+    # A card a still-running job wrote after a deletion's purge (#559 re-QA P2-b).
+    cards = [card for card in cards
+             if getattr(card, "target_user_id", None) not in _deleted_partner_ids]
     pending_owner_config = dict(_trade_service_mod._cfg)
     pending_exemptions = _significance_exemptions_for(trade_service)
     cards = _pending_owner_cards(cards, pending_owner_config, pending_exemptions)
@@ -33932,8 +33975,14 @@ def delete_account_route():
     # The scrub of other users' decks (legal R28.20 (ii)): its job committed
     # with the deletion; start it off the request. The cleanup loop retries,
     # so a failed start never fails the deletion (#557 QA P3). In-memory jobs
-    # never see the scrub, so the ones that name the person are revoked here.
-    counts["trade_jobs_revoked"] = _revoke_trade_jobs_naming(user_ids, scrub_leagues)
+    # and session card stores never see the scrub, so the ones that name the
+    # person are revoked and purged here; a failure there is logged, never a
+    # 500 for a deletion that committed.
+    try:
+        counts["trade_jobs_revoked"] = _revoke_trade_jobs_naming(user_ids, scrub_leagues)
+        counts["trade_cards_purged"] = _purge_session_trade_cards(user_ids)
+    except Exception as err:          # the class only: its text may quote ids
+        log.error("delete_account: in-memory revoke failed: %s", type(err).__name__)
     _kick_deletion_scrub()
     log.info("delete_account: user %s deleted (%s)", user_id, counts)
     return jsonify({"ok": True, "deleted": counts,

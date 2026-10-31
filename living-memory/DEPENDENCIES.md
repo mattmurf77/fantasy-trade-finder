@@ -10,6 +10,7 @@
 ---
 
 ## Table of Contents
+- [2026-10-31](#2026-10-31)
 - [2026-10-26](#2026-10-26)
 - [2026-10-05](#2026-10-05)
 - [2026-08-28](#2026-08-28)
@@ -18,6 +19,14 @@
 - [2026-05-21](#2026-05-21)
 - [Local Conventions That Become Dependencies If Violated](#local-conventions-that-become-dependencies-if-violated)
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
+
+---
+
+## 2026-10-31
+
+| Package | Version | Changed | Why |
+|---|---|---|---|
+| SQLite (the library Python links) | `>= 3.43` (a floor, nothing pinned) | `feat/trades-deletion-scrub` (#557) | `deletion_scrub._bakeoff_batches` sizes rows with `octet_length()`, which SQLite added in 3.43.0. On an older SQLite the scrub's bakeoff pass raises "no such function". Postgres has it. CI's Ubuntu Python has 3.45, local macOS 3.50; prod is Postgres. Pinned by `test_bakeoff_batches_count_stored_bytes_not_characters`. |
 
 ---
 
@@ -161,6 +170,7 @@
 - **Two file locations** — `data/trade_finder.db` (canonical) AND `trade_finder.db` at repo root (legacy duplicate). Code currently reads from `data/`; root file is residual. Cleanup pending — see [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) Q-001.
 - **No migration framework.** Schema changes require manual ALTER or DROP/CREATE in `database.py`. Don't ship schema changes without coordinating with anyone else who has a local DB.
 - **WAL mode not enabled.** Concurrent reader/writer access can lock — single-process for now.
+- **Version floor 3.43** for `octet_length()` (the deletion scrub; see 2026-10-31 above).
 - **Postgres-swappable** via `DATABASE_URL` env var. Untested in production; will need at least one full run-through before relying on it.
 
 ### macOS port 5000

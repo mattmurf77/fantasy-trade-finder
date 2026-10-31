@@ -104,6 +104,18 @@ def _u4_ledger_guard_state():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _deleted_partner_ids_clear():
+    """Account deletion's in-process set of deleted ids (#559 re-QA P2-b), which
+    GET /api/trades filters on, starts empty in every test: a deletion test
+    would otherwise hide a later test's cards for the same id. Only once
+    `backend.server` is imported; no `monkeypatch`, as above."""
+    server = sys.modules.get("backend.server")
+    if server is not None and hasattr(server, "_deleted_partner_ids"):
+        server._deleted_partner_ids.clear()
+    yield
+
+
 def _drain_deck_i1_checks():
     server = sys.modules.get("backend.server")
     if server is not None and hasattr(server, "_drain_deck_i1_checks"):
