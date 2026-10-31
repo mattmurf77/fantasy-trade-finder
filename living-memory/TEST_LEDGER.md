@@ -1,3 +1,14 @@
+## 2026-11-01 — #373 QA P1-1: legal R28.25's §3 calculator line pinned; /privacy links pinned (P3-1)
+
+Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.
+
+- **P1-1 (legal R28.25 row 5, a MUST for 11-06):** privacy §3 gains the in-league calculator bullet right after the "raw ranking list" line, word for word from `legal-lead-drafts.md` Part 1 §3. `POL-r28-25-calculator` pins it together with the line before it, so it stays in place.
+- **P3-1:** `POL-privacy-linked[terms|faq|contact]`: each page keeps at least one `/privacy` link.
+- **P3-2:** `qa/web/check_web_structure.py` is back to mode 100755. The swap commit, built with `git commit-tree`, had set it to 100644.
+- **P3-7:** the checker's source comment now says the legal and marketing working files aren't tracked in the repo.
+- **Sabotage:** 8/8 red: the bullet removed, moved below the "like" line, "and by how much" dropped, a word changed, the second sentence dropped, and every `/privacy` link dropped on terms, faq and contact.
+- **Suites:** web structure 248/248 (244 + 4).
+
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
 Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

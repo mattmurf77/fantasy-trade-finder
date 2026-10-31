@@ -340,7 +340,10 @@ def run() -> int:
     # ── POL: launch policy, contact and FAQ pages (#354 M7, P28, SUP-M4) ─
     # Text: legal-lead-drafts.md Parts 1-3 (privacy, terms), Part 5 (R28:
     # terms §14 subscriptions and the privacy RevenueCat lines) and
-    # marketing-lead-copy.md (§1b c1-c8, §2 FAQ). One support address,
+    # marketing-lead-copy.md (§1b c1-c8, §2 FAQ). Both are agent-org working
+    # files (docs/plans/org-bringup/leads/), not tracked in this repo, so the
+    # strings pinned below are the repo's copy of legal's text; changes to
+    # them come through legal-lead. One support address,
     # written with an ASCII @, always a real mailto. The placeholder check is
     # meant to fail until [OPERATOR NAME], Part 5's {…} fill values and its
     # ⟪VERIFY⟫ mark are resolved: it is the merge blocker for publishing
@@ -750,6 +753,29 @@ def run() -> int:
             (f"not verbatim ({version} version, legal R28.23 3b): " + "; ".join(want)) if want else
             ("the other version's line is also there: " + "; ".join(other)) if other else
             f"share lines verbatim ({version} version)")
+
+    # Legal R28.25 row 5 (2026-11-01), a MUST for 11-06: privacy §3 says a
+    # leaguemate in the in-league calculator sees a numeric read of your
+    # board. Pinned with the "raw ranking list" sentence before it, so it
+    # stays right after that line. If the read ever goes direction-only,
+    # legal drops "and by how much" (a re-open trigger), and this pin moves
+    # with that text.
+    R28_25_CALC = (
+        "but it does influence which trade suggestions your leaguemates see. In the in-league trade "
+        "calculator, a leaguemate who builds a trade with you can see how it scores by your rankings: "
+        "whether it gains or loses value for you, and by how much. They can't see your ranking list, "
+        "but trying many trades could hint at how you value players.")
+    r.check("POL-r28-25-calculator[privacy.html]", R28_25_CALC in priv,
+            "§3 calculator line not verbatim after the raw-ranking line (legal R28.25 row 5)"
+            if R28_25_CALC not in priv else "§3 calculator line verbatim, after the raw-ranking line")
+
+    # release-lead #373 QA P3-1: the other support pages each keep at least
+    # one link to the privacy policy.
+    for page in ("terms.html", "faq.html", "contact.html"):
+        body = strip_comments(body_of(all_sources[page]))
+        links = len(re.findall(r'<a\b[^>]*\bhref=["\']/privacy["\']', body))
+        r.check(f"POL-privacy-linked[{page}]", links >= 1,
+                "no link to /privacy" if not links else f"{links} link(s) to /privacy")
 
     # head-eng 2026-10-27 (#360 follow-up b): a rate-limited (429) or any other
     # failed send must still leave a way to send a data request, so the
