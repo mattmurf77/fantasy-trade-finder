@@ -1,3 +1,35 @@
+## 2026-10-27 — Concurrent swipes no longer lose a taste update (user_taste upsert)
+
+Gates: head-eng's assigned bug fix (release-lead's prod log: `UniqueViolation` on `user_taste_pkey` at `taste_service.py:363`, 20:23:49Z). The scope block is waived: this is a bug fix that makes F5 store what it already claimed to store. There is no route, schema, event, flag or knob change, and the data dictionary and config reference each gain a line. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest on SQLite and on a local Postgres 18.
+
+- **The bug:**
+  - Two outcomes in flight each read the user's taste rows, then wrote them with delete + insert.
+  - On Postgres the second insert failed on the primary key and the update was dropped (logged non-fatal). On SQLite it silently replaced the first.
+  - Either way one swipe's reward was lost.
+- **The fix:** `database.merge_user_taste_rows`, called by `update_taste_from_outcome`, does one transaction:
+  - an `UPDATE … RETURNING` writes the computed weights to rows still as read (`updated_at` unchanged);
+  - every other row is upserted on the PK as the reward, added to whatever is there: a row written, created or deleted since the read, or one that was never there;
+  - rows left below `taste_epsilon` on both vectors are deleted (GC on update).
+- **Tests:** `test_taste_concurrent_writes.py`, 5 tests on SQLite, plus Postgres when `FTF_TEST_POSTGRES_URL` is set.
+  - Threads read before either writes:
+    - two first swipes;
+    - two swipes on 10-day-old rows;
+    - a pass that empties a row next to a like, in both write orders;
+    - and the one-swipe baseline.
+  - **On main's code:** 8 of 10 fail. The Postgres cases log the prod error verbatim; only the baseline passes.
+  - **With the fix:** 10/10 pass. The taste-adjacent suites (deck taste, frozen taste, exploration, account deletion, age pref, bake-off serving, evidence pack, nightly lean, scorer contract) all pass, 207 tests.
+  - **Full backend suite** at defdc65b (SQLite, no Postgres URL): 9336 passed, 7 skipped, 5 of them this file's Postgres cases.
+- **Sabotage, each red then restored (5):**
+  - the merge overwrites instead of adding (6 red);
+  - no "still as read" check (4);
+  - a non-matching row inserts its computed weights, not the reward (6);
+  - no GC after the write (2);
+  - GC only after a merge (2).
+- **Not covered (follow-ups):**
+  - the read-side GC in `load_taste_vectors` still deletes by what it read, so it can drop a reward written in between;
+  - `replace_user_taste_prior` is still delete + insert, so two concurrent board saves can hit the same primary-key error;
+  - CI has no Postgres, so the Postgres cases run only where the URL is set.
+
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
 Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

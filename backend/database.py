@@ -9332,6 +9332,62 @@ def replace_user_taste_rows(
             ])
 
 
+def merge_user_taste_rows(
+    user_id: str,
+    rows: dict,
+    *,
+    seen: dict,
+    reward: float,
+    now_iso: str,
+    eps: float,
+) -> None:
+    """F5 — one outcome's taste write, safe against a concurrent outcome.
+
+    rows: {attr: (w_short, w_long)} computed from the rows read; seen:
+    {attr: updated_at} of those rows (an attr absent from it had none).
+    A row still as read takes its computed weights. Every other row (written,
+    created or deleted since the read, or never there) is upserted on the
+    primary key as `reward` on both vectors, added to the row's weights when
+    there is one: that row was written moments ago, so its decay is
+    negligible. Then rows left below `eps` on both vectors are deleted (GC on
+    update). One txn. Delete+insert (replace_user_taste_rows) lost the second
+    of two concurrent updates: it replaced the first, or failed on
+    user_taste_pkey (head-eng 2026-10-27)."""
+    if not rows:
+        return
+    t = user_taste_table
+    with engine.begin() as conn:
+        read = [a for a in sorted(rows) if a in seen]
+        matched = set()
+        if read:
+            matched = set(conn.execute(
+                update(t)
+                .where(t.c.user_id == user_id,
+                       or_(*(and_(t.c.attr == a, t.c.updated_at == seen[a]) for a in read)))
+                .values(w_short=case({a: float(rows[a][0]) for a in read}, value=t.c.attr),
+                        w_long=case({a: float(rows[a][1]) for a in read}, value=t.c.attr),
+                        updated_at=now_iso)
+                .returning(t.c.attr)).scalars())
+        rest = [a for a in sorted(rows) if a not in matched]
+        if rest:
+            if conn.dialect.name == "postgresql":
+                from sqlalchemy.dialects.postgresql import insert as dialect_insert
+            else:
+                from sqlalchemy.dialects.sqlite import insert as dialect_insert
+            stmt = dialect_insert(t).values([
+                {"user_id": user_id, "attr": a, "w_short": float(reward),
+                 "w_long": float(reward), "updated_at": now_iso} for a in rest])
+            conn.execute(stmt.on_conflict_do_update(
+                index_elements=[t.c.user_id, t.c.attr],
+                set_={"w_short": t.c.w_short + stmt.excluded.w_short,
+                      "w_long": t.c.w_long + stmt.excluded.w_long,
+                      "updated_at": stmt.excluded.updated_at}))
+        if rest or any(abs(ws) < eps and abs(wl) < eps for ws, wl in rows.values()):
+            conn.execute(delete(t).where(
+                t.c.user_id == user_id, t.c.attr.in_(list(rows)),
+                func.abs(t.c.w_short) < eps, func.abs(t.c.w_long) < eps))
+
+
 def replace_user_taste_prior(user_id: str, prior: dict, now_iso: str) -> None:
     """F5 — rewrite the user's board-derived prior wholesale (PRD amendment):
     every existing "prior:"-prefixed row is dropped, then one row per prior

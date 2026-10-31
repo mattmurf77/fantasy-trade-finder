@@ -62,6 +62,7 @@ from datetime import datetime, timezone
 from .database import (
     load_deck_impression,
     load_user_taste,
+    merge_user_taste_rows,
     replace_user_taste_prior,
     replace_user_taste_rows,
 )
@@ -343,22 +344,23 @@ def update_taste_from_outcome(impression_id: str, action: str, dwell_ms=None) ->
         wanted = set(attrs)
         existing = {r["attr"]: r for r in load_user_taste(imp["user_id"])
                     if r["attr"] in wanted}
-        upserts: dict[str, tuple] = {}
-        deletes: list[str] = []
+        rows: dict[str, tuple] = {}
         for a in attrs:
             row = existing.get(a)
             if row:
                 dt = _age_days(row["updated_at"], now)
                 w_s = _decay(row["w_short"], dt, tau_s) + reward
                 w_l = _decay(row["w_long"], dt, tau_l) + reward
+            elif abs(reward) < eps:
+                continue
             else:
                 w_s = w_l = reward
-            if abs(w_s) < eps and abs(w_l) < eps:
-                if row:
-                    deletes.append(a)     # GC on update (admission/expiry)
-                continue
-            upserts[a] = (w_s, w_l, now_iso)
-        replace_user_taste_rows(imp["user_id"], upserts, deletes)
+            rows[a] = (w_s, w_l)          # below ε on both: GC on update (admission/expiry)
+        # One upsert: a row another outcome wrote since this read merges with
+        # it instead of losing one update (head-eng 2026-10-27).
+        merge_user_taste_rows(imp["user_id"], rows,
+                              seen={a: r["updated_at"] for a, r in existing.items()},
+                              reward=reward, now_iso=now_iso, eps=eps)
     except Exception as e:
         log.warning("taste update failed (non-fatal): %s", e)
 
