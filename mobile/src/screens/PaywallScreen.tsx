@@ -152,6 +152,15 @@ async function customerInfoAppliesNow(): Promise<boolean> {
   return customerInfoApplies(useSession.getState(), currentIdentityUserId());
 }
 
+/** Re-check right before noting CustomerInfo the SDK returned for `userId`:
+ *  the session (or RevenueCat's identity) may have changed while Apple's
+ *  sheet was up. False skips only the optimistic note; the server refresh
+ *  decides either way. */
+function customerInfoStillApplies(userId: string): boolean {
+  const s = useSession.getState();
+  return s.user?.user_id === userId && customerInfoApplies(s, currentIdentityUserId());
+}
+
 export default function PaywallScreen({ navigation, route }: any) {
   const source: string = route?.params?.source ?? 'unknown';
   const gate: string | undefined = route?.params?.gate || undefined;
@@ -365,7 +374,7 @@ export default function PaywallScreen({ navigation, route }: any) {
       track('paywall_purchase_completed', { product_id: productId, source });
       // Optimistic unlock so the app opens up now; the webhook + the fetch
       // below are what actually decide, and the server can still say no.
-      noteCustomerInfo(hasProEntitlement(result.customerInfo));
+      if (customerInfoStillApplies(userId)) noteCustomerInfo(hasProEntitlement(result.customerInfo));
       await refreshEntitlements();
       // D10: the Founding GMs welcome, once per user, only inside the club
       // window. It REPLACES this modal, so its Back lands on the same card.
@@ -414,7 +423,7 @@ export default function PaywallScreen({ navigation, route }: any) {
       const info = await restorePurchases(userId);
       const restored = hasProEntitlement(info);
       track('paywall_restore', { restored });
-      if (restored) noteCustomerInfo(true);
+      if (restored && customerInfoStillApplies(userId)) noteCustomerInfo(true);
       // Always re-ask the server: a restore that found nothing on THIS Apple
       // ID can still be a user whose grant lives on their account row.
       await refreshEntitlements();

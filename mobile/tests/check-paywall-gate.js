@@ -1962,6 +1962,38 @@ check('8r. QA P2-3 [executed + shape]: the standing-offer post\'s gate answer sh
   eq(client0.gateSignalFor(new client0.ApiError(402, { error: 'pro_required', gate: 'lapsed' }), '/api/trades/standing-offer'), null, 'off: 402');
   eq(client0.gateSignalFor(new client0.ApiError(403, { error: 'verification_required' }), '/api/trades/standing-offer'), null, 'off: 403');
 });
+check('8s. release-lead round-3 P3 [executed]: the ROUTER\'s own demo exclusion: in demo openOfferTrigger opens nothing (null, no navigate, no VerifySheet, not spent), even with a verified answer; a verified session still opens', async () => {
+  let route = 'Trades';
+  const navs = [];
+  const nav = {
+    isReady: () => true,
+    navigate: (name, params) => { navs.push([name, params]); route = name; },
+    getCurrentRoute: () => ({ name: route }),
+    addListener: () => () => {},
+    reset() {},
+  };
+  gateMod.installPaywallGate(nav);
+  const saved = { ...session };
+  try {
+    await gateMod.hydrateOfferShown('u8s');
+    eq(gateMod.offerTriggerOpen('u8s'), true, 'read, never shown');
+    Object.assign(session, { user: { user_id: 'demo_user_ab12' }, isDemo: true, verification: { session_verified: true } });
+    const seq = gateMod.usePaywallGate.getState().verifySeq;
+    for (const source of ['first_opinion', 'left_deck']) {
+      eq(gateMod.openOfferTrigger(source, 'u8s'), null, `demo, ${source}: returns null`);
+    }
+    eq(navs.length, 0, 'demo: navigated');
+    eq(gateMod.usePaywallGate.getState().verifySeq, seq, 'demo: opened the VerifySheet');
+    eq(gateMod.offerTriggerOpen('u8s'), true, 'demo: the once-only offer was spent');
+    Object.assign(session, { user: { user_id: '12345' }, isDemo: false, verification: { session_verified: true } });
+    const closed = gateMod.openOfferTrigger('first_opinion', 'u8s');
+    assert(closed && typeof closed.then === 'function', 'a verified session still opens');
+    eq(JSON.stringify(navs[0]), JSON.stringify(['Paywall', { source: 'first_opinion' }]), 'verified: the trigger variant');
+  } finally {
+    Object.assign(session, saved);
+    gateMod.installPaywallGate(fakeNav);
+  }
+});
 
 // ═══ 10. RC identity — RevenueCat identifies ONLY verified sessions ═══════
 // head-eng 2026-10-29 (release-lead QA P2-5): a typed, unverified Sleeper id
@@ -2220,6 +2252,9 @@ check('10j. the CustomerInfo listener believes a push ONLY for a verified sessio
 // `ctl` stays live after the mount: a test may move RevenueCat's identity
 // (`rcId`) or settle `whenIdentityReady` mid-handler. `plan: true` gives the
 // screen one selected Annual plan with a StoreKit package, so Purchase runs.
+// `ctl.purchasePackage` / `ctl.restorePurchases` replace the SDK answers (a
+// test can hold them while it changes the session); `notes` / `refreshes`
+// record the entitlement store's optimistic note and server refresh.
 function mountPaywall({ state, rcId, ready = false, ctl = { rcId, ready }, plan = false }) {
   const inits = [];
   const syncs = [];
@@ -2228,6 +2263,8 @@ function mountPaywall({ state, rcId, ready = false, ctl = { rcId, ready }, plan 
   const waits = [];
   const buys = [];
   const events = [];
+  const notes = [];
+  const refreshes = [];
   let stateIdx = 0;
   const React = {
     createElement: (type, props, ...children) => ({ type, props: { ...(props || {}), children } }),
@@ -2286,13 +2323,21 @@ function mountPaywall({ state, rcId, ready = false, ctl = { rcId, ready }, plan 
       hasProEntitlement: (info) => !!(info && info.entitlements && info.entitlements.active.pro),
       initPurchases: async (id) => { inits.push(id); }, isIdentityReady: () => false, isPaymentPending: () => false,
       isUserCancelled: () => false, onIdentityChange: () => () => {},
-      purchasePackage: async (pkg, id) => { buys.push([pkg.product.identifier, id]); return { customerInfo: { entitlements: { active: {} } } }; },
+      purchasePackage: async (pkg, id) => {
+        buys.push([pkg.product.identifier, id]);
+        return ctl.purchasePackage ? ctl.purchasePackage(pkg, id) : { customerInfo: { entitlements: { active: {} } } };
+      },
       PurchaseIdentityError: class PurchaseIdentityError extends Error {},
       purchasesReady: () => ctl.ready,
       whenIdentityReady: (id) => { waits.push(id); return ctl.whenIdentityReady ? ctl.whenIdentityReady(id) : Promise.reject(new Error('timeout')); },
-      restorePurchases: async (id) => { restores.push(id); return { entitlements: { active: { pro: {} } } }; },
+      restorePurchases: async (id) => {
+        restores.push(id);
+        return ctl.restorePurchases ? ctl.restorePurchases(id) : { entitlements: { active: { pro: {} } } };
+      },
     },
-    '../state/useEntitlements': { useEntitlements: (sel) => sel({ refresh: async () => {}, noteCustomerInfo: () => {} }) },
+    '../state/useEntitlements': { useEntitlements: (sel) => sel({
+      refresh: async () => { refreshes.push(1); }, noteCustomerInfo: (pro) => { notes.push(pro); },
+    }) },
     '../state/useFeatureFlags': { useFlag: () => true },
     '../state/useSession': { useSession: hook, syncPurchasesIdentity: (s) => { syncs.push(s); } },
     '../state/subscriptionSession': subSession,
@@ -2326,7 +2371,7 @@ function mountPaywall({ state, rcId, ready = false, ctl = { rcId, ready }, plan 
     if (node.props && node.props.testID === id) return node;
     return node.props ? find(node.props.children, id) : null;
   };
-  return { tree, find: (id) => find(tree, id), effects, sets, restores, verifies, nav, timers, inits, syncs, waits, buys, events };
+  return { tree, find: (id) => find(tree, id), effects, sets, restores, verifies, nav, timers, inits, syncs, waits, buys, events, notes, refreshes };
 }
 check('10k. PaywallScreen Restore runs ONLY when customerInfoApplies; otherwise the identity-not-confirmed path (status "error", no new copy)', async () => {
   const ver = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
@@ -2481,6 +2526,52 @@ check('10o. Restore WAITS for a verified session\'s in-flight logIn (whenIdentit
     eq(mm.restores.length, 0, `${name}: restorePurchases calls`);
     if (name === 'unknown') assert(mm.sets.includes('error'), `${name}: refused with the error status`);
     else assert(mm.verifies.length >= 1, `${name}: the D9 verify route`);
+  }
+});
+
+// 10p / 10q (release-lead round-3 P3): the SDK answers for the session that
+// started the call; if the session or user changed while Apple's sheet was
+// up, its CustomerInfo is NOT noted (no optimistic `pro` for the new
+// session), while the server refresh still runs.
+const PRO_INFO = { entitlements: { active: { pro: {} } } };
+const SWAPS = [
+  ['no change (control)', () => {}, true],
+  ['the session turned UNVERIFIED', (st) => { st.verification = V(false); }, false],
+  ['a DIFFERENT user (RevenueCat still the first)', (st) => { st.user = sleeperUser('222'); }, false],
+  ['a different VERIFIED user RevenueCat already moved to', (st, ctl) => { st.user = sleeperUser('222'); ctl.rcId = '222'; }, false],
+];
+const settleAll = async () => { for (let i = 0; i < 8; i += 1) await tick(); };
+check('10p. Purchase: a session or user change while Apple\'s sheet is up skips the CustomerInfo note; the server refresh still runs', async () => {
+  for (const [name, swap, noted] of SWAPS) {
+    const sheet = deferred();
+    const ctl = { rcId: '111', ready: true, purchasePackage: () => sheet.promise };
+    const state = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
+    const m = mountPaywall({ state, ctl, plan: true });
+    m.find('paywall-purchase-cta').props.onPress();
+    await settleAll();
+    eq(m.buys.length, 1, `${name}: the purchase started`);
+    swap(state, ctl);
+    sheet.resolve({ customerInfo: PRO_INFO });
+    await settleAll();
+    eq(JSON.stringify(m.notes), JSON.stringify(noted ? [true] : []), `${name}: noteCustomerInfo`);
+    eq(m.refreshes.length, 1, `${name}: the server refresh`);
+  }
+});
+check('10q. Restore: a session or user change while the restore is out skips the CustomerInfo note; the server refresh still runs', async () => {
+  for (const [name, swap, noted] of SWAPS) {
+    const sheet = deferred();
+    const ctl = { rcId: '111', ready: true, restorePurchases: () => sheet.promise };
+    const state = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
+    const m = mountPaywall({ state, ctl });
+    m.find('paywall-restore').props.onPress();
+    await settleAll();
+    eq(m.restores.length, 1, `${name}: the restore started`);
+    swap(state, ctl);
+    sheet.resolve(PRO_INFO);
+    await settleAll();
+    eq(JSON.stringify(m.notes), JSON.stringify(noted ? [true] : []), `${name}: noteCustomerInfo`);
+    eq(m.refreshes.length, 1, `${name}: the server refresh`);
+    assert(m.sets.includes('restore_ok'), `${name}: the rest of the flow is unchanged (restore_ok)`);
   }
 });
 
