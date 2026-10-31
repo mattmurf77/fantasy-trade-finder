@@ -28,6 +28,8 @@ import backend.server as server
 from backend.data_loader import normalise_name
 from backend.database import metadata, players_table
 
+pytestmark = pytest.mark.usefixtures("no_real_network")
+
 
 # ── fixture payloads ───────────────────────────────────────────────────────
 

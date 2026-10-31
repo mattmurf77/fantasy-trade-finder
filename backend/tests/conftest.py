@@ -50,6 +50,7 @@ env seam. `test_ktc_blend` pins its own KTC data explicitly.
 
 import os
 import pathlib
+import socket
 import sys
 
 import pytest
@@ -98,6 +99,68 @@ def _u4_ledger_guard_state():
         server._ledger_guard_warned_at = float("-inf")
     yield
 
+
+_LOOPBACK_HOSTS = {None, "", "localhost", "0.0.0.0", "::1"}
+
+
+def _is_loopback(host) -> bool:
+    return host in _LOOPBACK_HOSTS or str(host).startswith("127.")
+
+
+@pytest.fixture()
+def no_real_network():
+    """Opt-in guard: the test FAILS if anything tries to reach a non-loopback host.
+
+    Why a failure at teardown and not just a raise at the call site: the
+    session-init daemon, the trade-capture sweep and the other Sleeper fetchers
+    wrap every upstream read in `except Exception` and carry on (a flake must
+    never break a user's init), so a raised connection error is swallowed and
+    the test would pass while still having hit the network. The attempt is
+    recorded here and asserted when the test ends. The raise stays, so the code
+    under test sees an ordinary connection failure instead of a live reply.
+
+    Patches `socket.getaddrinfo` (every hostname lookup: urllib, requests,
+    http.client) and `socket.socket.connect` (literal-IP URLs and anything that
+    skips the lookup). Loopback stays open, so Flask's test client and any
+    local fixture server are unaffected. Restored by hand rather than through
+    `monkeypatch`, like the ledger guard above, so it does not reorder the
+    test's own monkeypatch teardown.
+
+    Used via `pytestmark = pytest.mark.usefixtures("no_real_network")` in the
+    test files that run the session-init daemon inline. It returns the list of
+    attempts for a test that wants to assert on them.
+    """
+    attempts: list[str] = []
+    real_getaddrinfo = socket.getaddrinfo
+    real_connect = socket.socket.connect
+
+    def _blocked_getaddrinfo(host, *args, **kwargs):
+        if _is_loopback(host):
+            return real_getaddrinfo(host, *args, **kwargs)
+        attempts.append(f"lookup {host}")
+        raise OSError(f"no_real_network: blocked lookup of {host!r}")
+
+    def _blocked_connect(self, address):
+        host = address[0] if isinstance(address, tuple) else address
+        if _is_loopback(host):
+            return real_connect(self, address)
+        attempts.append(f"connect {address}")
+        raise OSError(f"no_real_network: blocked connect to {address!r}")
+
+    socket.getaddrinfo = _blocked_getaddrinfo
+    socket.socket.connect = _blocked_connect
+    try:
+        yield attempts
+    finally:
+        socket.getaddrinfo = real_getaddrinfo
+        socket.socket.connect = real_connect
+    if attempts:
+        counts = {a: attempts.count(a) for a in dict.fromkeys(attempts)}
+        pytest.fail(
+            "test attempted real outbound network (%d attempts): %s. Mock the "
+            "fetcher (e.g. trade_block_service.fetch_league_players, "
+            "sleeper_trades_service.fetch_week_transactions) instead."
+            % (len(attempts), counts), pytrace=False)
 
 def _drain_deck_i1_checks():
     server = sys.modules.get("backend.server")

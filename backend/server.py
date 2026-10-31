@@ -28105,13 +28105,22 @@ def session_init():
             nonlocal _meta_fetched, _meta_payload
             if not _meta_fetched:
                 _meta_fetched = True
-                _meta_payload = _s0_raw.get("meta") or _fetch_sleeper_league_meta(league_id)
+                _meta_payload = _s0_raw.get("meta") or (
+                    None if _platform_linked
+                    else _fetch_sleeper_league_meta(league_id))
             return _meta_payload
 
         try:
             # Platform-link state is a DB fact that nothing in this daemon
-            # writes, so every guard below reads it once.
-            _platform_linked = is_linked_platform_league(league_id)
+            # writes, so every guard below reads it once. The request thread
+            # already resolved the platform authoritatively, and the leagues
+            # row can vanish between that and this read. The row check then
+            # answers False for a league that is not on Sleeper, and
+            # upsert_league below re-creates the row with no platform. A
+            # non-Sleeper authoritative platform therefore counts as linked
+            # too, so no Sleeper-bound step below depends on the row alone.
+            _platform_linked = (authoritative["platform"] != "sleeper"
+                                or is_linked_platform_league(league_id))
 
             # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE
             # upsert_user runs so we can emit a one-time referral-receipt
@@ -28349,7 +28358,7 @@ def session_init():
             # flake just leaves the previous snapshot in place. No-op for
             # non-Sleeper league ids (ESPN/demo) and when the flag is off.
             try:
-                if is_enabled("sleeper.trade_block"):
+                if is_enabled("sleeper.trade_block") and not _platform_linked:
                     from .trade_block_service import sync_league_trade_block
                     _n_blk = sync_league_trade_block(league_id, rosters=_rh_roster_rows)
                     _invalidate_trade_block_cache(league_id)
@@ -28417,8 +28426,13 @@ def session_init():
             # is what /api/rankings + /api/trio relabel the generic pick
             # rungs from. Cheap-skipped against the cached checked_at, and
             # self-contained failure handling inside the helper, so it can
-            # never affect the syncs above.
-            _refresh_league_draft_status(league_id)
+            # never affect the syncs above. It reads the platform from the
+            # leagues row, so a row that vanished and was re-created
+            # platform-less (see _platform_linked) would read as Sleeper and
+            # spend Sleeper reads on another platform's league: skip it until
+            # the row agrees with the platform the request resolved.
+            if authoritative["platform"] == "sleeper" or is_linked_platform_league(league_id):
+                _refresh_league_draft_status(league_id)
 
             # ── S0: record this init's Sleeper roster refresh ─────────
             # After members, picks and draft state are committed. Never raises.
