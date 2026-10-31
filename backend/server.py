@@ -31918,6 +31918,7 @@ def feature_flags_route():
     # evaluator module doesn't exist yet; fail-open to empty, never 500).
     try:
         from . import experiments as _exp
+        from .client_device import declared_source
         device_id = (request.headers.get("X-Device-Id") or "").strip() or None
         token = request.headers.get("X-Session-Token", "")
         account_unit = None
@@ -31931,7 +31932,8 @@ def feature_flags_route():
         # target platform/app_version/os — the only attrs available pre-auth.
         info = getattr(g, "device_info", {}) or {}
         header_attrs = {
-            "platform": (str(request.headers.get("X-Source") or "").strip()
+            # G-068: only a declared client (web | extension) passes through.
+            "platform": (declared_source(request.headers)
                          or ("ios" if (info.get("device_type") or "").lower()
                              in ("iphone", "ipad", "macos") else None)),
             "app_version": info.get("app_version"),

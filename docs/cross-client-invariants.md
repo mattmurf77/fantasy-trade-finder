@@ -913,6 +913,8 @@ Sign-in requests may carry `device_id` (body) or `X-Device-Id` (header) on `/api
 - `user_events.device_type`: `iphone`, `ipad`, `macos`, `web`, `extension`
 - `user_events.source`: `mobile`, `web`, `api`, `cron`
 
+**`user_events.device_type` beyond the list above** (G-068, 2026-10-31): mobile also sends `android`, and the value is **NULL** when no client identified itself, never another client's name. The server-written overhaul and Win Now rows resolve it in `backend/client_device.py`: `X-Device`, else `X-Source` `web`/`extension`, else NULL. The server never guesses `web`, so **the web's `apiFetch` (`web/js/app.js`) declares `X-Source: web` on every call** (the web app sends no `X-Device`). Pinned by `HYG-apifetch-declares-source` in `qa/web/check_web_structure.py`.
+
 ---
 
 ## League platform enum
