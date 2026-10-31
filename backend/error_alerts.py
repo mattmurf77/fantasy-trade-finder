@@ -71,6 +71,19 @@ _SENSITIVE_KEYS = (
     "user_id", "owner_id", "partner", "email", "username",
 )
 
+_DIGIT, _LOWER, _UPPER = re.compile(r"\d"), re.compile(r"[a-z]"), re.compile(r"[A-Z]")
+
+
+def _token_shaped(match) -> str:
+    """A 24+ run is a token only with a digit, or with both cases: snake_case
+    identifiers (prepared_trade_inventories, _drop_stale_deck_evidence) in an
+    error message survive."""
+    run = match.group(0)
+    if _DIGIT.search(run) or (_LOWER.search(run) and _UPPER.search(run)):
+        return _FILTERED
+    return run
+
+
 # In order: the specific credential shapes first, then the generic runs.
 # Event strings have no length cap (the SDK default), so every unanchored
 # run before a literal is bounded: an unbounded one is quadratic on a long
@@ -94,7 +107,8 @@ _PATTERNS = (
     # espn_s2-shaped blobs, percent-encoded or not
     (re.compile(r"[A-Za-z0-9%+/=]{80,}"), _FILTERED),
     # long hex / base64url runs: session tokens, Fernet ciphertext, API keys
-    (re.compile(r"[A-Za-z0-9_-]{24,}"), _FILTERED),
+    # (with a digit or both cases; _token_shaped)
+    (re.compile(r"[A-Za-z0-9_-]{24,}"), _token_shaped),
     # any run of 9+ digits: Sleeper user and league ids are 18-19
     (re.compile(r"\d{9,}"), _FILTERED),
 )

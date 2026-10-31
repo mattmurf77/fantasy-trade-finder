@@ -20,7 +20,7 @@ With a DSN:
 - **Scrubbing** (`before_send` / `before_breadcrumb`) mirrors and extends mobile's S0 scrub. Both fail closed.
   - The request keeps only `method` and `url`, with no query.
   - The user is removed.
-  - Every content string is scrubbed: JWTs, bearer, credential `key=value`s (cookies, `espn_s2`, `SWID`, `MFL_USER_ID`, `APIKEY`, `?token=`), emails, UUIDs and GUIDs, 80+ base64/percent blobs, 24+ hex or base64url runs, and **any run of 9+ digits**.
+  - Every content string is scrubbed: JWTs, bearer, credential `key=value`s (cookies, `espn_s2`, `SWID`, `MFL_USER_ID`, `APIKEY`, `?token=`), emails, UUIDs and GUIDs, 80+ base64/percent blobs, 24+ hex or base64url runs that have a digit or both cases (a snake_case identifier survives), and **any run of 9+ digits**.
   - Sensitive dict keys are replaced wholesale.
   - Tag keys `route`, `status`, `method`, `feedback_id` and `kind` pass unscrubbed.
   - Outbound-HTTP breadcrumbs are dropped.
@@ -60,7 +60,7 @@ With a DSN:
 <!-- D-056: Maestro and the simulator are retired. -->
 
 - Maestro: **retired (D-056)**. Simulator captures: **retired (D-056)**.
-- [x] **Unit tests:** `backend/tests/test_error_alerts.py`, 33 tests, with a recording transport and a fake DSN, so nothing goes over the network:
+- [x] **Unit tests:** `backend/tests/test_error_alerts.py`, 36 tests, with a recording transport and a fake DSN, so nothing goes over the network:
   - (a) no DSN: no client, nothing sent, the SDK never imported; a malformed DSN doesn't fail boot; the init options are pinned;
   - (b) a raising route is one event, with the stack;
   - (c) a handled 503 is one `http_5xx`, with its tags and fingerprint; a 404 is none; a handled 500 after `log.exception` is one event;
@@ -70,7 +70,7 @@ With a DSN:
   - (g) see the SUP-M7 block;
   - (h) a thread started in a request carries no request.
 
-  Ten sabotages, each red then green; see `living-memory/TEST_LEDGER.md` 2026-10-31.
+  Eleven sabotages, each red then green; see `living-memory/TEST_LEDGER.md` 2026-10-31.
 - [x] **Code-walk proof** (fork safety under `--preload`; sentry-sdk 2.72.0):
   - `init_error_alerts()` runs in the gunicorn master and starts no thread. Checked: `threading.enumerate()` is unchanged after init.
   - In the forked worker, the first event calls `BackgroundWorker.submit` (`sentry_sdk/worker.py:140`), which calls `_ensure_thread` (`:65`).

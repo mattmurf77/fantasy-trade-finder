@@ -34,6 +34,8 @@ Sabotage record (2026-10-31; each applied, observed red, restored green):
   notify on sentry_sdk.new_scope() (a fork)       -> (g) RED (request, transaction)
   the feedback route's duplicate guard removed    -> (g) RED (a second event)
   ThreadingIntegration(propagate_scope=True)      -> (h) RED
+  the 24+ run rule back to "any run" (no digit /  -> (f) patterns RED (both identifiers
+    mixed-case check)                                 filtered)
 """
 import copy
 import logging
@@ -306,8 +308,14 @@ def test_no_secret_reaches_the_envelope(sentry, monkeypatch, client, caplog):
     ("id 0f8fad5b-d9cb-469f-a165-70867728950e", "id [Filtered]"),
     (f"swid {SWID}", "swid [Filtered]"),
     ("s2 " + ESPN_S2.replace("%2F", "/").replace("%3D", "="), "s2 [Filtered]"),
-    ("key 5f4dcc3b5aa765d61d8327deb882cf99", "key [Filtered]"),
-    ("fernet gAAAAABlZ2V0X3Rva2VuX2Jhc2U2NHVybA", "fernet [Filtered]"),
+    # 24+ runs: a token has a digit or both cases; a snake_case identifier survives
+    ('relation "prepared_trade_inventories" does not exist',
+     'relation "prepared_trade_inventories" does not exist'),
+    ("_drop_stale_deck_evidence failed", "_drop_stale_deck_evidence failed"),
+    ("tok QwErTyUiOpAsDfGhJkLzXcVbNmQwErTy", "tok [Filtered]"),           # 32, mixed case
+    ("key 5f4dcc3b5aa765d61d8327deb882cf99", "key [Filtered]"),           # 32, hex
+    ("fernet gAAAAABnK3xYq1_9vTzR2c-ZpLm8wQe4sHjN0bVfXy7UaDiOgPkEtWrS5MhC6lAnJ3uIo",
+     "fernet [Filtered]"),
     (f"league {LEAGUE} user 123456789", "league [Filtered] user [Filtered]"),
     ("week 12345678 of 2026", "week 12345678 of 2026"),
     ("Unhandled error on POST /api/feedback", "Unhandled error on POST /api/feedback"),
@@ -329,7 +337,7 @@ def test_scrub_event_shape():
             "stacktrace": {"frames": [{"function": "_attach_presession_feedback",
                                        "filename": "backend/server.py", "lineno": 3,
                                        "vars": {"note": "MY-PRIVATE-FEEDBACK"}}]}}]},
-        "extra": {"user_id": "u1", "nested": {"api_key": "k", "note": "A" * 30}},
+        "extra": {"user_id": "u1", "nested": {"api_key": "k", "note": "aB" * 15}},
         "contexts": {"trace": {"trace_id": "b" * 32, "span_id": "c" * 16},
                      "custom": {"partner": "p", "text": "id 123456789"}},
         "tags": {"route": "/api/league/<league_id>", "feedback_id": "1234567890123",

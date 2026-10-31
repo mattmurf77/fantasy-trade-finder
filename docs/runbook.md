@@ -280,7 +280,7 @@ GNG-1 (error alerts) and SUP-M7 (`feedback_received`): `backend/error_alerts.py`
   - JWTs and `Bearer …`;
   - credential `key=value` and `"key": "value"` pairs (cookie, `espn_s2`, `SWID`, `MFL_USER_ID`, `APIKEY`, token, secret, password, auth, session, dsn);
   - emails, UUIDs and GUIDs;
-  - long hex or base64 runs (24+ characters);
+  - long hex or base64 runs (24+ characters with a digit, or with both upper and lower case, so snake_case identifiers like `prepared_trade_inventories` survive);
   - **any 9+ digit run** (Sleeper user and league ids).
 - Values under keys like `user_id`, `owner_id`, `partner`, `email` and `username` are replaced wholesale.
 - Tags `route`, `status`, `method`, `feedback_id` and `kind` pass as they are, so alert rules can match them.
