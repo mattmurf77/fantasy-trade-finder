@@ -42,7 +42,9 @@ RICH = dict(
                              "members": [{"id": DEL, "elo": {"p1": 1500}, "board_updated_at": "t",
                                           "username": "n"}],
                              "opponent_sources": {DEL: {"p1": "board"}},
-                             "manager_preferences": {VIEWER: {"targets": []}, DEL: {"targets": ["p1"]}}}},
+                             "manager_preferences": {VIEWER: {"targets": []}, DEL: {"targets": ["p1"]}},
+                             "opponent_outlooks": {DEL: "rebuild", OTHER: "contend"},
+                             "inferred_outlooks": {DEL: "rebuild", VIEWER: "contend"}}},
 )
 VALUATION = {
     "basis": "divergence", "market": {"viewer_gives": 10, "viewer_receives": 11},
@@ -217,6 +219,8 @@ def test_a_redacted_card_takes_the_token_and_loses_the_partners_fields(engine):
     inputs = f["owner_request"]["input"]
     assert inputs["members"] == [{"id": token, "username": "n"}]
     assert inputs["opponent_sources"] == {} and inputs["manager_preferences"] == {VIEWER: {"targets": []}}
+    assert inputs["opponent_outlooks"] == {OTHER: "contend"}
+    assert inputs["inferred_outlooks"] == {VIEWER: "contend"}
     # Kept: consensus, the viewer's own, the platform's.
     assert (f["give_value"], f["receive_value"], f["fairness_score"], f["basis"]) == (
         10.0, 11.0, 0.9, "divergence")
@@ -250,16 +254,63 @@ def test_another_partners_card_and_a_later_deck_are_untouched(engine):
 def test_redact_features_is_idempotent_and_leaves_a_card_without_the_id_alone():
     once = scrub.redact_features(features_for(DEL, **RICH), {DEL}, "redacted:t")
     assert scrub.redact_features(once, {DEL}, "redacted:t") == once
+    plain = features_for(OTHER)
+    assert scrub.redact_features(plain, {DEL}, "redacted:t") == plain
+
+
+def test_another_partners_card_loses_the_persons_owner_inputs_too():
+    """The owner request rides on every card of its run with every member's
+    outlook: on another partner's card the person's account fields go too
+    (and their id is the token), while that card's own fields stay."""
     other = features_for(OTHER, **RICH)
-    assert scrub.redact_features(other, {DEL}, "redacted:t") == {
-        **other, "roster_evaluation": {"teams": {VIEWER: {"outlook": "contend"}},
-                                       "mutual_benefit": {"partner_preference_source": "observed"}},
-        "owner_request": {"input": {**RICH["owner_request"]["input"],
-                                    "members": [{**RICH["owner_request"]["input"]["members"][0],
-                                                 "id": "redacted:t"}],
-                                    "opponent_sources": {"redacted:t": {"p1": "board"}},
-                                    "manager_preferences": {VIEWER: {"targets": []},
-                                                            "redacted:t": {"targets": ["p1"]}}}}}
+    out = scrub.redact_features(other, {DEL}, "redacted:t")
+    inputs = out["owner_request"]["input"]
+    assert inputs["members"] == [{"id": "redacted:t", "username": "n"}]
+    assert inputs["opponent_sources"] == {}
+    assert inputs["manager_preferences"] == {VIEWER: {"targets": []}}
+    assert inputs["opponent_outlooks"] == {OTHER: "contend"}
+    assert inputs["inferred_outlooks"] == {VIEWER: "contend"}
+    assert out["likes_you"] is True and out["surplus_margin"] == 42.0      # not a redacted card
+    assert out["roster_evaluation"]["mutual_benefit"] == RICH["roster_evaluation"]["mutual_benefit"]
+
+
+# ── bakeoff_runs (legal f's trace, 10-31) ───────────────────────────────────
+
+OWNER_INPUT = {"user_id": VIEWER,
+               "members": [{"id": DEL, "elo": {"p1": 1500}, "board_updated_at": "t"},
+                           {"id": OTHER, "elo": {"p2": 1400}, "board_updated_at": "u"}],
+               "opponent_sources": {DEL: {"p1": "board"}, OTHER: {"p2": "board"}},
+               "manager_preferences": {VIEWER: {"t": 1}, DEL: {"t": 2}, OTHER: {"t": 3}},
+               "opponent_outlooks": {DEL: "rebuild", OTHER: "contend"},
+               "inferred_outlooks": {DEL: "rebuild"}}
+
+
+def bakeoff_run(conn, run_id, league=LEAGUE, user=VIEWER):
+    conn.execute(insert(db.bakeoff_runs_table).values(
+        run_id=run_id, deck_job_id="deck-1", user_id=user, league_id=league, arm_order="[]",
+        deck_size=1, arms_json="{}", created_at=EARLY,
+        config_json=json.dumps({"owner_request": {"input": OWNER_INPUT, "unit": "team_draft"},
+                                "per_opponent": {DEL: 1, OTHER: 2}})))
+
+
+def test_a_bakeoff_runs_frozen_owner_input_loses_the_persons_account_fields(engine):
+    """Other users' bakeoff runs keep the owner engine's full frozen input:
+    every league member's board, sources, preferences and outlooks."""
+    with engine.begin() as conn:
+        bakeoff_run(conn, "run-1")
+        bakeoff_run(conn, "run-left", league="league-gone", user=OTHER)
+    token = delete_and_scrub(engine)
+    for run_id in ("run-1", "run-left"):          # the second only through the scan
+        (row,) = read(engine, db.bakeoff_runs_table, run_id=run_id)
+        config = json.loads(row["config_json"])
+        inputs = config["owner_request"]["input"]
+        assert inputs["members"] == [{"id": token},
+                                     {"id": OTHER, "elo": {"p2": 1400}, "board_updated_at": "u"}]
+        assert inputs["opponent_sources"] == {OTHER: {"p2": "board"}}
+        assert inputs["manager_preferences"] == {VIEWER: {"t": 1}, OTHER: {"t": 3}}
+        assert inputs["opponent_outlooks"] == {OTHER: "contend"} and inputs["inferred_outlooks"] == {}
+        assert config["per_opponent"] == {token: 1, OTHER: 2}
+        assert DEL not in row["config_json"]
 
 
 # ── deck_candidate_sets ─────────────────────────────────────────────────────
@@ -321,7 +372,9 @@ def test_the_scan_is_bounded_per_run_and_resumes_from_its_cursor(engine, monkeyp
     while not scrub.run_pending():
         runs += 1
         state = json.loads(job(engine)["scan_json"])
-        assert state["after"] and job(engine)["claimed_until"] is None    # kept; lease released
+        # Kept (at a cursor, or at the start of the next store), lease released.
+        assert state["version"] == scrub.SCRUB_VERSION and "after" in state
+        assert job(engine)["claimed_until"] is None
         assert runs < 20
     # 5 impressions + 3 candidate sets, one row a page, two pages a run (and
     # an empty page closes each store).

@@ -39,7 +39,7 @@ Gates: the scope block `scope-deletion-scrub.md` §0.3 (head-eng's ruling 2, 10-
 
 Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md` (no waivers but analytics, a log-only job). Schema: the new table `deletion_scrub_jobs`. No flag; no event; a route's counts and the daily tick's steps change (api-reference). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
 
-- **`backend/tests/test_deletion_scrub.py`, 22 tests:**
+- **`backend/tests/test_deletion_scrub.py`, 24 tests:**
   - **The job:**
     - written in the deletion transaction with a random token, the ids and the leagues, captured before `league_members` goes;
     - none on a rollback;
@@ -48,6 +48,9 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
     - the 6 h grace pass scrubs a row an in-flight deck wrote later;
     - **a partner who left a league before deleting is still scrubbed from its decks:** rows and candidate sets, found by the fallback scan (head-eng 10-31);
     - the scan is bounded per run and resumes from its cursor;
+    - **legal f's trace (10-31):**
+      - another partner's card loses the person's owner inputs (outlooks, sources, preferences, board);
+      - other users' `bakeoff_runs` keep the owner engine's full frozen input, and it loses the person's account fields, in the league and through the scan;
     - no id in any log line.
   - **Stores:**
     - a redacted card takes the token, loses `likes_you`, `standing_offer(_reason)`, `breaker(_shadow)`, `negmem.exempt` and the partner's sides of `fit` / `fit_diag` / `roster_evaluation` / the owner request, and its blended scores are nulled;
@@ -64,7 +67,7 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
     - a finished job is deleted only once `COMPLETE`;
     - the 24 h ERROR line carries counts only;
     - the tick never raises an error's text.
-- **Sabotages, 15/15 red:**
+- **Sabotages, 18 run, 17 red and 1 green by design:**
   - no taste rename;
   - no standing-offer token;
   - the match valuation kept;
@@ -79,11 +82,29 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
   - no grace pass;
   - an error's text logged;
   - no fallback scan;
-  - the scan cursor not kept.
+  - the scan cursor not kept;
+  - owner inputs redacted only on the person's own cards;
+  - outlooks kept;
+  - no `bakeoff_runs` scan.
+  - **Green, by design:** removing `bakeoff_runs`' league pass. The fallback scan covers every row the league pass does, so each league pass is a fast path, never the only one.
 - **Updated tests:**
   - `test_daily_tick_route.py`: ten steps.
   - `test_purge_entry_users.py`: `user_taste.attr`, the derived `partner:<id>` key, listed as not a user column.
 - **Suites:** every test touching deletion, export or the tick (17 files): 909 passed before those two updates, and both pass after them (68). **The full backend suite at `671dd526`** (main `fabfe92c` merged): 10,195 passed, 2 skipped, 0 failed.
+
+## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
+
+Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **2, `test_control_a_normal_job_does_write_impressions`:** with packed evidence on, an organic job defers its impressions to delivery (#370), so the control wrote none. It now pins both flags off rather than reading `features.json`.
+- **3, `test_paged_withhold_holds_the_cursor`:** with the store on, `/status?cursor=0` reads the stored deck, which is the job's real cards (g1→r1, g2→r1, g1→r2, g2→r2), not the `CARDS` the test swaps into the in-memory job. Only g2→r2 passes I-1 on the stored rosters, and that one card is what served. So this was a fixture artifact, not an I-1 gap. The test now pins both flags off.
+- **The flags-on twin:** `test_trade_page_store.py::test_a_paged_withhold_on_the_stored_deck_holds_the_cursor_then_serves_i1s_survivors`, with the page-store fixture (both flags on) and the real stored deck.
+  - A stale roster past its bound withholds the page on `/status?cursor=0` with the cursor held: `([], 0, 0, "roster_check")`.
+  - Once fresh, exactly the stored cards that pass I-1 serve. The test computes them from the stored rosters and picks, independent of the server.
+  - The deck must have a card for I-1 to drop.
+- **Sabotages, 2/2 red:** I-1's drops ignored on the page path; the withhold ignored on the page path.
+- **Suites:** force-supersede, I-1 serve filter, page store and packed evidence: 317 passed on main and 317 passed on a flags-on copy of `ops/200ms-flip` (with failure 1's fix).
+- **Full backend suite, flags on** (`ops/200ms-flip` @ `8080663e` plus this branch's three test files): 10,055 passed, 2 skipped, 0 failed.
 
 ## 2026-10-31 — #544 QA round 3: the X3 coverage hole closed; T-10 resolves namespace lookups; the residual documented by class
 

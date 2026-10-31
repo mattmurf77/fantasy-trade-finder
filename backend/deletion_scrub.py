@@ -200,6 +200,12 @@ def redact_features(features: dict, ids, token: str) -> dict:
     out = _replace_ids(features, ids, token)
     if isinstance(out.get("taste_attrs"), list):
         out["taste_attrs"] = [_taste_attr(a, ids, token) for a in out["taste_attrs"]]
+    # The owner engine's frozen request rides on every card of its run, with
+    # every member's declared and inferred outlook, so the person's account
+    # fields go from it on any card that names them, not only their own.
+    for key in ("owner_request", "owner_experiment"):
+        if isinstance(out.get(key), dict):
+            out[key] = _redact_owner_request(out[key], token)
     if not redacted:
         return out
     for key in _FEATURE_KEYS_REMOVED:
@@ -215,15 +221,14 @@ def redact_features(features: dict, ids, token: str) -> dict:
             if isinstance(fit.get("lenses"), dict):
                 fit["lenses"] = {k: v for k, v in fit["lenses"].items() if k != "them"}
             out[key] = fit
-    for key in ("owner_request", "owner_experiment"):
-        if isinstance(out.get(key), dict):
-            out[key] = _redact_owner_request(out[key], token)
     return out
 
 
 def _redact_owner_request(snapshot: dict, token: str) -> dict:
-    """The owner engine's frozen request: the partner's board (members' elo
-    and board time), their sources and their preferences go."""
+    """The owner engine's frozen request (ids already the token): the
+    person's board (their member's elo and board time), sources, preferences
+    and declared and inferred outlooks go. A per-card snapshot holds only its
+    partner's member; a bakeoff run's holds every member's."""
     snapshot = dict(snapshot)
     inputs = snapshot.get("input")
     if isinstance(inputs, dict):
@@ -233,7 +238,8 @@ def _redact_owner_request(snapshot: dict, token: str) -> dict:
                 {k: v for k, v in m.items() if k not in ("elo", "board_updated_at")}
                 if isinstance(m, dict) and m.get("id") == token else m
                 for m in inputs["members"]]
-        for key in ("opponent_sources", "manager_preferences"):
+        for key in ("opponent_sources", "manager_preferences", "opponent_outlooks",
+                    "inferred_outlooks"):
             if isinstance(inputs.get(key), dict):
                 inputs[key] = {k: v for k, v in inputs[key].items() if k != token}
         snapshot["input"] = inputs
@@ -585,6 +591,65 @@ def _scan_packs(job: dict, after: str, budget: list) -> tuple[str | None, int]:
     return after, changed
 
 
+def redact_bakeoff_config(config, ids, token: str):
+    """A bakeoff run's config_json: any id becomes the token, and the owner
+    request's frozen input (every member's board, sources, preferences and
+    outlooks) loses the person's account fields (legal f's trace, 10-31)."""
+    if not isinstance(config, dict):
+        return config
+    out = _replace_ids(config, set(ids), token)
+    if isinstance(out.get("owner_request"), dict):
+        out["owner_request"] = _redact_owner_request(out["owner_request"], token)
+    return out
+
+
+def _redact_bakeoff_runs(run_ids, job: dict) -> int:
+    ids, token = set(job["ids"]), job["token"]
+    t = db.bakeoff_runs_table
+    changed = 0
+    for start in range(0, len(run_ids), _BATCH):
+        with db.engine.begin() as conn:
+            for run_id, raw in conn.execute(select(t.c.run_id, t.c.config_json).where(
+                    t.c.run_id.in_(run_ids[start:start + _BATCH]))).all():
+                config = _loads(raw)
+                new = redact_bakeoff_config(config, ids, token)
+                if new != config:
+                    conn.execute(update(t).where(t.c.run_id == run_id)
+                                 .values(config_json=json.dumps(new, default=str)))
+                    changed += 1
+    return changed
+
+
+def _scrub_bakeoff_runs(job: dict) -> int:
+    """The league pass over bakeoff_runs (ix_bakeoff_runs_league)."""
+    ids = set(job["ids"])
+    t = db.bakeoff_runs_table
+    with db.engine.connect() as conn:
+        found = conn.execute(select(t.c.run_id).where(
+            t.c.league_id.in_(job["leagues"]), t.c.created_at <= job["cutoff"],
+            t.c.user_id.notin_(sorted(ids)), _mentions(t.c.config_json, ids))).scalars().all()
+    return _redact_bakeoff_runs(found, job)
+
+
+def _scan_bakeoff_runs(job: dict, after: str, budget: list) -> tuple[str | None, int]:
+    """The fallback scan of bakeoff_runs, as _scan_impressions."""
+    ids = set(job["ids"])
+    t = db.bakeoff_runs_table
+    changed = 0
+    while budget[0] > 0:
+        budget[0] -= 1
+        with db.engine.connect() as conn:
+            rows = conn.execute(select(t.c.run_id, _mentions(t.c.config_json, ids).label("hit")).where(
+                t.c.run_id > after, t.c.created_at <= job["cutoff"],
+                t.c.user_id.notin_(sorted(ids)),
+            ).order_by(t.c.run_id).limit(_SCAN_BATCH)).all()
+        if not rows:
+            return None, changed
+        changed += _redact_bakeoff_runs([r.run_id for r in rows if r.hit], job)
+        after = rows[-1].run_id
+    return after, changed
+
+
 # ── The page store (trade_page_store) ───────────────────────────────────────
 
 # accounts.DELETED_USER_PLACEHOLDER (accounts imports this module lazily).
@@ -717,12 +782,14 @@ def _scan_page_store(job: dict, after: str, budget: list) -> tuple[str | None, i
 _STORES = (
     ("deck_impressions", _scrub_impressions),
     ("deck_candidate_sets", _scrub_candidate_sets),
+    ("bakeoff_runs", _scrub_bakeoff_runs),
     ("deck_evidence_packs", _scrub_packs),
     ("trade_page_store", _scrub_page_store),
 )
 _SCANS = (
     ("deck_impressions", _scan_impressions),
     ("deck_candidate_sets", _scan_candidate_sets),
+    ("bakeoff_runs", _scan_bakeoff_runs),
     ("deck_evidence_packs", _scan_packs),
     ("trade_page_store", _scan_page_store),
 )
