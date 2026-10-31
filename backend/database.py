@@ -3179,6 +3179,7 @@ deletion_scrub_jobs_table = Table("deletion_scrub_jobs", metadata,
     Column("claimed_until",    String),                      # ISO UTC lease; NULL = free
     Column("last_error",       String),                      # an exception class name, never a message
     Column("scan_json",        Text),                        # an unfinished pass's scan cursor; NULL between passes
+    Column("partner_names_json", Text),                      # {league_id: [display names]}: Calibration cards name partners
     Index("ix_deletion_scrub_jobs_deleted", "deleted_at"),
 )
 
@@ -4007,6 +4008,9 @@ def _migrate_db() -> None:
         ("overhaul_attempts",  "provider_status",           "VARCHAR"),
         # ── G3-e (legal R28.22): an outcome's owner, for deletion and export.
         ("deck_outcomes",      "user_id",                   "VARCHAR"),
+        # ── the deletion scrub, stage 3: the person's names per league (a
+        # Calibration card names its partner by display name).
+        ("deletion_scrub_jobs", "partner_names_json",       "TEXT"),
     ]
     # Only missing columns get an ALTER, each in its own transaction so a
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
