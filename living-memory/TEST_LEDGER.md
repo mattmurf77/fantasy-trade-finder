@@ -81,7 +81,8 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
     - **legal f's trace (10-31):**
       - another partner's card loses the person's owner inputs (outlooks, sources, preferences, board);
       - other users' `bakeoff_runs` keep the owner engine's full frozen input, and it loses the person's account fields, in the league and through the scan;
-    - no id in any log line.
+    - no id in any log line;
+    - **CI fix (10-31):** the route's kicked thread never starts in the suite (`FTF_DISABLE_DELETION_SCRUB_KICK`, set in conftest like `FTF_DISABLE_CLEANUP_LOOP`). It outlived a route test's engine and raised "Set changed size during iteration" in the pool's dispose. A test pins both behaviors.
   - **Stores:**
     - a redacted card takes the token, loses `likes_you`, `standing_offer(_reason)`, `breaker(_shadow)`, `negmem.exempt` and the partner's sides of `fit` / `fit_diag` / `roster_evaluation` / the owner request, and its blended scores are nulled;
     - a plain card of the same partner is scrubbed the same way (uniformity);

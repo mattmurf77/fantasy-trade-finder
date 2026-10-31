@@ -491,3 +491,17 @@ def test_the_tick_never_raises_an_errors_text(engine, monkeypatch):
     monkeypatch.setattr(scrub, "_db_pass", lambda now: (_ for _ in ()).throw(
         RuntimeError(f"quoting {DEL}")))
     assert scrub.tick(datetime.now(timezone.utc)) == ("error", {"error": "RuntimeError"})
+
+
+def test_the_route_kicks_the_scrub_off_the_request_and_tests_never_start_the_thread(
+        engine, monkeypatch):
+    """kick() starts the DB phase on a daemon thread; the suite disables it
+    (conftest), since a thread would outlive a test's engine."""
+    import threading
+    started = []
+    monkeypatch.setattr(threading.Thread, "start", lambda self: started.append(self.name))
+    scrub.kick()
+    assert started == []                                   # disabled in the suite
+    monkeypatch.setenv("FTF_DISABLE_DELETION_SCRUB_KICK", "0")
+    scrub.kick()
+    assert started == ["deletion-scrub"]
