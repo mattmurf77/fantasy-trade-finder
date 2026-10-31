@@ -329,6 +329,19 @@ def run() -> int:
              f"not hidden in the markup: {', '.join(shown)}")
             if not ok else "web ESPN/MFL chips hard-off; landing.platform_options is the app's flag")
 
+    # G-068: server-written rows (Win Now search, overhaul events) take
+    # device_type from X-Device, else a declared X-Source, else NULL. The
+    # server no longer guesses "web", and the web sends no X-Device, so
+    # apiFetch must declare X-Source: web. Scoped to apiFetch's own body, so a
+    # stray string elsewhere in app.js can't satisfy it.
+    api_fetch = re.search(r"\n([ \t]*)async function apiFetch\([^)]*\)\s*\{(.*?)\n\1\}", app_js, flags=re.S)
+    r.check("HYG-apifetch-declares-source",
+            api_fetch is not None and re.search(
+                r"""["']X-Source["']\s*\]?\s*[:=]\s*["']web["']""", api_fetch.group(2)) is not None,
+            "web/js/app.js has no `async function apiFetch(`" if api_fetch is None else
+            "apiFetch does not set X-Source to 'web'; the web's server-written rows "
+            "would land device_type NULL")
+
     tiers = read("positional-tiers.html")
     r.check("HYG-no-stale-sample-roster", "SAMPLE_PLAYERS" not in tiers,
             "hardcoded 2024-era roster rendered before the API responds")

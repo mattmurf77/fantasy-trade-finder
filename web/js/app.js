@@ -106,6 +106,9 @@
       // Inject session token on every request
       opts.headers = opts.headers || {};
       if (sessionToken) opts.headers['X-Session-Token'] = sessionToken;
+      // G-068: the server no longer guesses "web" for a request with no
+      // X-Device, so the web declares itself (device_type / platform stamps).
+      opts.headers['X-Source'] = 'web';
 
       const method = (opts.method || 'GET').toUpperCase();
       let bodyPreview;
