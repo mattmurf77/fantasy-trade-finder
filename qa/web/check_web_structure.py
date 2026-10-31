@@ -663,6 +663,94 @@ def run() -> int:
             "the false \"references to you on other users' trade decks… are cleared\" line is still there"
             if stale19 else f"{len(R28_19)} R28.19 runs verbatim; the false trade-decks line gone")
 
+    # Legal R28.23 (2026-10-31). Item 2: server error reports (Sentry) in
+    # privacy §1-§4, word for word; the operator sets SENTRY_DSN only after
+    # this text is live. The §1 bullet is pinned with the end of the app
+    # Sentry bullet so it stays right after it.
+    R28_23_SENTRY = (
+        ("§1 server error reports bullet",
+         "Sentry may also record the IP address a report came from. Server error reports (Sentry). "
+         "When our server hits an error, it sends Sentry a report so we can fix it: the type of "
+         "request and the address it went to, the error and where in our code it happened, and "
+         "related lines from our server's logs. Before a report is sent, names, IDs and link codes "
+         "are taken out of the address, and personal details are taken out of the log lines. If that "
+         "can't be done, the report isn't sent. Server reports don't include your account or "
+         "platform user ID, your username, your IP address, sign-in details or the content of what "
+         "you send us. When someone sends feedback, Sentry also gets an alert with the feedback's "
+         "reference number and severity, not its text."),
+        ("§2 no-trackers line",
+         "The only third party that receives diagnostic data is Sentry, for app crashes and "
+         "performance and for server errors."),
+        ("§3 purposes line",
+         "To keep the Service working and improve it: crash and error reports, feedback, activity "
+         "events and server monitoring."),
+        ("§4 Sentry line",
+         "Sentry: receives crash and performance reports from the iOS app and error reports from "
+         "our server, as described above."),
+    )
+    stale23 = ("is Sentry, for crashes and performance.", "improve it: crash reports,",
+               "from the iOS app, as described above.")
+    missing23 = [label for label, s in R28_23_SENTRY if " ".join(s.split()) not in priv]
+    old23 = [s for s in stale23 if s in priv]
+    r.check("POL-r28-23-sentry[privacy.html]", not missing23 and not old23,
+            ("not verbatim (legal R28.23 item 2): " + "; ".join(missing23)) if missing23 else
+            ("app-only Sentry line still there: " + "; ".join(old23)) if old23 else
+            f"{len(R28_23_SENTRY)} R28.23 Sentry lines verbatim")
+
+    # R28.23 item 3b: the share-link lines in §3, §5 and §6 come in two
+    # versions. The new one is true only once #362 is live (unguessable trade
+    # links; a sharer's matched-trade link is deleted with their account).
+    # Exactly one version ships, the one matching prod at this page's deploy;
+    # head-eng confirms which. The swap flips SHARE_362_LIVE with the text.
+    # Each version's markers are phrases only it uses; none may show while the
+    # other version ships, so a half-done swap or an early claim fails too.
+    SHARE_362_LIVE = False
+    R28_23_SHARE_MARKERS = {
+        True: ("hard to guess", "no set end date", "stops working", "which stop working",
+               "other shared trade pages"),
+        False: ("view a shared page, and shared pages",
+                "they stay available with your account link removed; email us",
+                "removed; shared trade pages stay available"),
+    }
+    R28_23_SHARE = {
+        True: (
+            ("§3 shared pages",
+             "Anyone with the link can view a shared page. Links use random codes that are hard to "
+             "guess, but anyone you send one to can pass it on. Shared pages stay available so links "
+             "keep working (see section 5)."),
+            ("§5 shared pages",
+             "Shared trade pages and share snapshots: kept with no set end date, so links keep "
+             "working. A link you shared to a matched trade stops working if you delete your account; "
+             "the other manager's own link to that trade isn't affected. Other shared pages stay "
+             "available with your account link removed. Email us to remove one."),
+            ("§6 removes",
+             "stored Sleeper, ESPN and MFL connections; links you shared to matched trades, which stop "
+             "working. What is anonymized instead,"),
+            ("§6 anonymized",
+             "note text removed; other shared trade pages stay available, with your account link "
+             "removed;"),
+        ),
+        False: (
+            ("§3 shared pages",
+             "Anyone with the link can view a shared page, and shared pages stay available so links "
+             "keep working (see section 5)."),
+            ("§5 shared pages",
+             "Shared trade pages and share snapshots: kept so links keep working. If you delete your "
+             "account, they stay available with your account link removed; email us to remove one."),
+            ("§6 removes",
+             "stored Sleeper, ESPN and MFL connections. What is anonymized instead,"),
+            ("§6 anonymized",
+             "note text removed; shared trade pages stay available, with your account link removed;"),
+        ),
+    }
+    want = [label for label, s in R28_23_SHARE[SHARE_362_LIVE] if " ".join(s.split()) not in priv]
+    other = [m for m in R28_23_SHARE_MARKERS[not SHARE_362_LIVE] if m in priv]
+    version = "#362 live" if SHARE_362_LIVE else "#362 not live"
+    r.check("POL-r28-23-share[privacy.html]", not want and not other,
+            (f"not verbatim ({version} version, legal R28.23 3b): " + "; ".join(want)) if want else
+            ("the other version's line is also there: " + "; ".join(other)) if other else
+            f"share lines verbatim ({version} version)")
+
     # head-eng 2026-10-27 (#360 follow-up b): a rate-limited (429) or any other
     # failed send must still leave a way to send a data request, so the
     # contact form's ONE error path is c7 (marketing-lead-copy §1, approved

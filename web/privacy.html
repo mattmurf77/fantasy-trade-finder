@@ -152,6 +152,7 @@
       </li>
       <li><strong>Subscriptions and purchases.</strong> If you subscribe, Apple handles the payment; we never see your card or billing details. We and our subscription service provider, RevenueCat, receive your subscription status, plan, trial, purchase and renewal dates, and transaction identifiers from Apple, linked to your account, so we can give you access and keep billing records. RevenueCat also receives your account identifier when you sign in.</li>
       <li><strong>Crash and performance data (Sentry).</strong> The iOS app uses Sentry to report crashes and performance traces (a sample of app interactions). Reports include device model, OS version and app version. After sign-in they're tagged with an account identifier (your Fleeced account ID, Sleeper user ID or ESPN member ID, depending on how you signed in) so we can look into your bug reports. They never carry your name or email address. The tag is cleared when you sign out. Sentry is set up not to collect other personal data by default. Sentry may also record the IP address a report came from.</li>
+      <li><strong>Server error reports (Sentry).</strong> When our server hits an error, it sends Sentry a report so we can fix it: the type of request and the address it went to, the error and where in our code it happened, and related lines from our server's logs. Before a report is sent, names, IDs and link codes are taken out of the address, and personal details are taken out of the log lines. If that can't be done, the report isn't sent. Server reports don't include your account or platform user ID, your username, your IP address, sign-in details or the content of what you send us. When someone sends feedback, Sentry also gets an alert with the feedback's reference number and severity, not its text.</li>
       <li>
         <strong>Cookies and local storage.</strong>
         <ul>
@@ -167,7 +168,7 @@
       <li><strong>We don't store passwords.</strong> Sleeper and ESPN passwords stay on their own sign-in pages. MFL passwords are forwarded to MFL once and never stored.</li>
       <li><strong>We don't ask for card numbers</strong> or payment-account passwords.</li>
       <li><strong>No precise location, contacts, camera, microphone or health data.</strong> The only location-related data is the country code described in section 1.</li>
-      <li><strong>No advertising or third-party marketing analytics tools.</strong> There are no ad networks and no trackers such as Google Analytics, Meta, Firebase Analytics or Mixpanel in the app or website. The usage analytics above are collected and stored by us alone. The only third party that receives diagnostic data is Sentry, for crashes and performance.</li>
+      <li><strong>No advertising or third-party marketing analytics tools.</strong> There are no ad networks and no trackers such as Google Analytics, Meta, Firebase Analytics or Mixpanel in the app or website. The usage analytics above are collected and stored by us alone. The only third party that receives diagnostic data is Sentry, for app crashes and performance and for server errors.</li>
       <li><strong>We don't sell your personal information,</strong> and we don't share it for targeted advertising.</li>
     </ul>
 
@@ -203,7 +204,7 @@
         </ul>
       </li>
       <li><strong>To answer you:</strong> your messages, feedback and data requests.</li>
-      <li><strong>To keep the Service working and improve it:</strong> crash reports, feedback, activity events and server monitoring.</li>
+      <li><strong>To keep the Service working and improve it:</strong> crash and error reports, feedback, activity events and server monitoring.</li>
     </ul>
 
     <h2>4. Third parties</h2>
@@ -218,7 +219,7 @@
     <ul>
       <li><strong>Render:</strong> hosts our server and database in the United States (Oregon). Your data is stored on Render's infrastructure, and Render keeps standard server request logs.</li>
       <li><strong>Expo, and Apple/Google push services (APNs / FCM):</strong> deliver push notifications. They process your push token and the notification content, which can include leaguemates' usernames.</li>
-      <li><strong>Sentry:</strong> receives crash and performance reports from the iOS app, as described above.</li>
+      <li><strong>Sentry:</strong> receives crash and performance reports from the iOS app and error reports from our server, as described above.</li>
       <li><strong>Anthropic:</strong> receives player details and anonymous rating signals for matchup selection, as described above.</li>
       <li><strong>Google:</strong> hosts our support mailbox (Gmail), which stores the emails you send us. It also serves our website's fonts, which means Google receives your IP address; the app bundles its fonts and makes no such request.</li>
       <li><strong>RevenueCat:</strong> manages subscriptions and purchases for us. It receives your account identifier and the purchase records Apple provides.</li>
