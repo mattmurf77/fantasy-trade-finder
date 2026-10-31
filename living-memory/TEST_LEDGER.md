@@ -12,8 +12,9 @@ Gates: eval code (`backend/eval/{data,replay,persistence,calibration,flip_read,b
   - J2: for each of the 5 registered scorers, the clean deck's estimates are bit-identical across the scrub (`repr` of every metric) and e(k) too; the redacted deck is excluded and counted and never scored. Calibration leaves it out. The flip read joins its outcomes and reads B4 the same.
   - The fit: no redacted card is a training row (both heads, and `_fit_rows`), and the fit equals one on the decks without those cards.
   - G-a5: the counts, the run, record and report lines, the previous read, and the CLI.
+  - `test_eval_bdk_audit.py` +1: a short deck holding a redacted card is still explained.
   - Pins moved to version 7 and the new key: `test_eval_pack_reader.py`, `test_eval_refresh_and_live_columns.py`, `test_eval_withdrawals_and_paging.py`, `test_eval_flip_read.py`, `test_eval_calibration.py`.
-- **Sabotage, each red then restored (11):** SABOTAGE
+- **Sabotage, each red then restored (11):** the loader never marks; replay scores the deck (nulls as 0); the fit keeps redacted cards; `_fit_rows` keeps them; partial-run decks marked; calibration keeps the deck; B4 drops it; the flip report drops the reason; the gate at exactly 5%; the B-DK short-deck rule refuses it; ghosts don't mark.
 
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
