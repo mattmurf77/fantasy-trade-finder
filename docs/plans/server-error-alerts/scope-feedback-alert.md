@@ -5,7 +5,7 @@
 **Builder:** rankings-eng build worker, branch `feat/server-error-alerts`
 **Operator sign-off on waivers:** not needed (no waivers)
 
-Rides on GNG-1's Sentry wiring: [scope.md](scope.md). It is **dark until `SENTRY_DSN` is set**, and has the same two gates as GNG-1 before then. The privacy-page gate applies here too: legal updates `web/privacy.html` (`:175-182`, `:190`, `:209` name Sentry for the mobile app only) before the operator sets the DSN.
+Rides on GNG-1's Sentry wiring: [scope.md](scope.md). It is **dark until `SENTRY_DSN` is set**, and has the same two gates as GNG-1 before then. The MUST gate applies here too: the operator sets the DSN only once the privacy page carrying legal's R28.23 lines (#373) is live. The event goes through the same allowlist; its `message` is one of the two allowlisted constants.
 
 ## What it is
 

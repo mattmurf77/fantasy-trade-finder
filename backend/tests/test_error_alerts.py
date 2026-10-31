@@ -1,43 +1,57 @@
 """Server error alerts through Sentry (GNG-1) and the feedback_received alert
 (SUP-M7): backend/error_alerts.py and its server.py wiring.
 
-docs/plans/server-error-alerts/scope.md §3. Nothing leaves the process: a
-case that turns Sentry on uses a fake DSN and a recording transport (the
-`sentry` fixture), whose teardown closes the client and resets the SDK's
-global client, so no other test runs with Sentry active (the autouse guard
-asserts it before and after every test here). Counts are of events captured
-on the test's own thread, so a stray daemon thread left by another test
-can't change them; the leak checks read every envelope.
+docs/plans/server-error-alerts/scope.md §3 (and its legal R28.23 table).
+Nothing leaves the process: a case that turns Sentry on uses a fake DSN and a
+recording transport (the `sentry` fixture), whose teardown closes the client
+and resets the SDK's global client, so no other test runs with Sentry active
+(the autouse guard asserts it before and after every test here). Counts are
+of events captured on the test's own thread, so a stray daemon thread left by
+another test can't change them; the leak checks read every envelope. The
+fixture also records each event as the SDK built it, before scrub_event
+(`sentry.pre`), to pin what is never collected at all.
 
   (a) no SENTRY_DSN: init is False, no client, notify and the 5xx hook send
       nothing, and the SDK is never imported; a malformed DSN doesn't fail boot
-  (b) a raising route: exactly one event, with the stack
+  (b) a raising route: exactly one event, with the stack, without its text
   (c) a handled 503: one http_5xx (route/status/method tags, fingerprint);
       a 404: none; a handled 500 after log.exception: one
-  (d) one _cleanup_loop pass with a step raising: one event, the guard's message
+  (d) one _cleanup_loop pass with a step raising: one event, the guard's template
   (e) a daily_tick step raising: one event
-  (f) the scrub end to end (no secret in the envelope bytes), scrub_event's
-      patterns, and fail closed
+  (f) the allowlist: legal R28.23's condition-7 request (no planted value in the
+      envelope bytes, request.url the route pattern, no breadcrumbs collected),
+      credentials, the event shape, the pattern layer, fail closed
   (g) POST /api/feedback: one feedback_received carrying exactly feedback_id
       and kind, nothing of the note; a duplicate: none
   (h) a thread started in a request: its event carries no request
+  (i) the structural guard: every error-level log template in backend/ is a
+      constant (the template-only rule depends on it)
 
-Sabotage record (2026-10-31; each applied, observed red, restored green):
+Sabotage record (each applied, observed red, restored green):
+  2026-10-31
   no-DSN guard removed in init_error_alerts       -> (a) RED (at setup: importing
                                                      backend.server turned Sentry on)
   report_5xx's last-event-id check removed        -> (b), (c) handled 500 RED (2 events)
   after_request `>= 500` changed to `>= 400`      -> (c) RED (the 404 reports)
   before_send=scrub_event removed                 -> (f) RED
-  request headers kept by _scrub_event            -> (f) RED (X-Cron-Secret leaks)
-  the 9+ digit pattern removed                    -> (f) RED (league id), patterns, shape
   scrub_event returns the event on error          -> (f) fail-closed unit + e2e RED
   notify on sentry_sdk.new_scope() (a fork)       -> (g) RED (request, transaction)
   the feedback route's duplicate guard removed    -> (g) RED (a second event)
-  ThreadingIntegration(propagate_scope=True)      -> (h) RED
-  the 24+ run rule back to "any run" (no digit /  -> (f) patterns RED (both identifiers
-    mixed-case check)                                 filtered)
+  ThreadingIntegration(propagate_scope=True)      -> (h) RED (the request collected)
+  the 24+ run rule back to "any run"              -> (f) patterns RED (identifiers)
+  2026-10-31, legal R28.23 revision
+  request.url the real path                       -> (f) condition 7 RED
+  request.url keeps the query                     -> (f) condition 7 RED
+  exception `value` kept                          -> (f) condition 7, shape RED
+  raw log params kept                             -> (f) condition 7, shape RED
+  request headers kept                            -> (f) condition 7 (X-Session-Token), credentials RED
+  logging breadcrumbs re-enabled (level=INFO and  -> (f) condition 7 (collected), init, breadcrumb RED
+    before_breadcrumb returning the crumb)
+  one f-string log.error added to server.py       -> (i) RED
 """
+import ast
 import copy
+import json
 import logging
 import os
 import subprocess
@@ -63,17 +77,27 @@ REPO = Path(__file__).resolve().parents[2]
 FAKE_DSN = "https://public@example.invalid/1"
 BOOM = "admin_experiment_transition_route"        # POST /api/admin/experiments/<key>/transition
 UNAVAILABLE = "admin_experiment_decide_route"     # POST /api/admin/experiments/<key>/decide
+LOOKUP = "sleeper_user"                           # GET /api/sleeper/user/<path:username>
 
+# Planted values live up here, out of the source context (5 lines either side)
+# the SDK attaches to a raising test frame.
 JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJlLXNlY3JldA"
 ESPN_S2 = "AEBxyz" + "Q2xvdWQ%2FS2V5%3D" * 8
 SWID = "{1A2B3C4D-1111-2222-3333-444455556666}"
 LEAGUE = "123456789012345678"
 EMAIL = "owner@example.com"
 QUERY_TOKEN = "qwerty123456789012345678"
-# Kept up here, out of the source context (5 lines either side) the SDK
-# attaches to a raising test frame.
 BODY_SECRET = "SECRET-BODY-123"
 CRON_HEADER_SECRET = "cron-abc"
+# Legal R28.23 condition 7.
+L_USER_ID = "987654321098765432"
+L_USERNAME = "smurf-legal-test"
+L_SHARE = "tok9Qx2LmPz"
+L_EMAIL = "legal-test@example.com"
+L_IP = "203.0.113.7"
+L_COOKIE = "ck-legal-77Zq"
+L_AUTH = "az-legal-88Yw"
+L_SESSION = "sess-legal-66Xv"
 
 
 class _Recorder(Transport):
@@ -82,6 +106,7 @@ class _Recorder(Transport):
     def __init__(self, options=None):
         super().__init__(options)
         self.items = []
+        self.pre = []          # (thread, event as the SDK built it, before scrub_event)
 
     def capture_envelope(self, envelope):
         self.items.append((threading.get_ident(), envelope))
@@ -90,6 +115,10 @@ class _Recorder(Transport):
         thread = threading.get_ident() if thread is None else thread
         return [env.get_event() for ident, env in self.items
                 if ident == thread and env.get_event() is not None]
+
+    def pre_events(self, thread=None):
+        thread = threading.get_ident() if thread is None else thread
+        return [event for ident, event in self.pre if ident == thread]
 
     def raw(self):
         return b"".join(env.serialize() for _, env in self.items)
@@ -119,8 +148,15 @@ def sentry(monkeypatch):
     monkeypatch.setattr(server, "_bg_threads_pid", os.getpid())
     _fresh_scopes()
     assert error_alerts.init_error_alerts() is True
+    client = sentry_sdk.get_client()
+    recorder, scrub = client.transport, client.options["before_send"]
+
+    def before_send(event, hint):
+        recorder.pre.append((threading.get_ident(), copy.deepcopy(event)))
+        return scrub(event, hint)
+    client.options["before_send"] = before_send
     try:
-        yield sentry_sdk.get_client().transport
+        yield recorder
     finally:
         sentry_sdk.get_client().close()
         sentry_sdk.get_global_scope().set_client(None)
@@ -178,13 +214,18 @@ def test_init_options(monkeypatch):
     [kw] = seen
     assert (kw["dsn"], kw["environment"], kw["release"]) == (FAKE_DSN, "production", "0123abcd")
     assert kw["send_default_pii"] is False and kw["include_local_variables"] is False
-    assert kw["max_request_body_size"] == "never" and kw["max_breadcrumbs"] == 30
+    assert kw["max_request_body_size"] == "never"
     assert "traces_sample_rate" not in kw and "profiles_sample_rate" not in kw
+    assert "enable_logs" not in kw
     assert kw["auto_enabling_integrations"] is False and kw["trace_propagation_targets"] == []
     assert kw["before_send"] is error_alerts.scrub_event
     assert kw["before_breadcrumb"] is error_alerts.scrub_breadcrumb
-    assert sorted(type(i).__name__ for i in kw["integrations"]) == [
-        "FlaskIntegration", "LoggingIntegration", "ThreadingIntegration"]
+    by_name = {type(i).__name__: i for i in kw["integrations"]}
+    assert sorted(by_name) == ["FlaskIntegration", "LoggingIntegration", "ThreadingIntegration"]
+    logging_i = by_name["LoggingIntegration"]
+    assert logging_i._handler is not None                 # ERROR+ records become events
+    assert logging_i._breadcrumb_handler is None          # no breadcrumbs (legal R28.23)
+    assert logging_i._sentry_logs_handler is None
 
 
 def test_a_malformed_dsn_leaves_alerts_off(monkeypatch):
@@ -207,8 +248,10 @@ def test_a_raising_route_is_one_event_with_its_stack(sentry, monkeypatch, client
     [event] = sentry.events()                    # no http_5xx on top of it
     assert event["level"] == "error"
     assert event["logentry"]["message"] == "Unhandled error on %s %s"
+    assert event["logentry"]["formatted"] == "Unhandled error on [Filtered] [Filtered]"
+    assert event["request"] == {"method": "POST", "url": "/api/admin/experiments/<key>/transition"}
     [exc] = event["exception"]["values"]
-    assert exc["type"] == "RuntimeError"
+    assert exc["type"] == "RuntimeError" and "value" not in exc
     assert "_boom" in [f["function"] for f in exc["stacktrace"]["frames"]]
 
 
@@ -223,6 +266,7 @@ def test_a_handled_503_is_one_http_5xx_and_a_404_none(sentry, monkeypatch, clien
     assert (event["message"], event["level"]) == ("http_5xx", "error")
     assert event["tags"] == {"route": route, "status": "503", "method": "POST"}
     assert event["fingerprint"] == ["http_5xx", route, "503"]
+    assert event["request"] == {"method": "POST", "url": route}
     assert client.get("/api/no-such-route").status_code == 404
     assert len(sentry.events()) == 1
 
@@ -255,6 +299,7 @@ def test_a_failing_cleanup_step_is_one_event(sentry, monkeypatch, loop_pass):
     [event] = sentry.events()
     assert event["logentry"]["message"] == "deck-evidence retention failed"
     assert event["exception"]["values"][0]["type"] == "RuntimeError"
+    assert "request" not in event
 
 
 def test_a_raising_daily_tick_step_is_one_event(sentry):
@@ -262,18 +307,60 @@ def test_a_raising_daily_tick_step_is_one_event(sentry):
         raise ValueError("kaput")
     [result] = daily_tick.run([daily_tick.Step("boom", boom)], object(), log=server.log)
     assert result.outcome == "error"
-    [event] = sentry.events()                    # the WARNING step line is a breadcrumb
-    assert event["logentry"]["message"] == "daily-tick: step %s raised"
-    assert event["logentry"]["params"] == ["boom"]
+    [event] = sentry.events()                    # the WARNING step line is not an event
+    assert event["logentry"] == {"message": "daily-tick: step %s raised",
+                                 "params": ["[Filtered]"],
+                                 "formatted": "daily-tick: step [Filtered] raised"}
     assert event["exception"]["values"][0]["type"] == "ValueError"
 
 
-# ── (f) the scrub ──────────────────────────────────────────────────────────
+# ── (f) the allowlist ──────────────────────────────────────────────────────
 
-def test_no_secret_reaches_the_envelope(sentry, monkeypatch, client, caplog):
+def _lookup(username):
+    """Legal R28.23 condition 7: the path's tail carries the planted values."""
+    user_id, name, share, email, ip = username.split("/")
+    held = {"user_id": user_id, "username": name, "share": share, "email": email, "ip": ip}
+    server.log.info("resolving %s", name)            # would be a breadcrumb
+    try:
+        raise LookupError(f"no user row for {held}")
+    except LookupError:
+        server.log.exception("lookup failed for %s %s %s", name, email, ip)
+    raise RuntimeError(f"lookup failed for {name} {email} {ip} {user_id} {share}")
+
+
+def test_legal_condition_7_no_planted_value_leaves(sentry, monkeypatch, client, caplog):
     caplog.set_level(logging.INFO, logger=server.log.name)   # basicConfig's DEBUG, as in prod
+    monkeypatch.setitem(server.app.view_functions, LOOKUP, _lookup)
+    res = client.get(
+        f"/api/sleeper/user/{L_USER_ID}/{L_USERNAME}/{L_SHARE}/{L_EMAIL}/{L_IP}"
+        f"?ref={L_USERNAME}&token={L_SHARE}",
+        headers={"X-Forwarded-For": L_IP, "X-Real-IP": L_IP,
+                 "Cookie": f"session={L_COOKIE}", "Authorization": f"Bearer {L_AUTH}",
+                 "X-Session-Token": L_SESSION})
+    assert res.status_code == 500
+    events = sentry.events()
+    # The route's log.exception, then the generic handler's.
+    assert [e["logentry"]["message"] for e in events] == [
+        "lookup failed for %s %s %s", "Unhandled error on %s %s"]
+    for event in events:
+        assert event["request"] == {"method": "GET", "url": "/api/sleeper/user/<path:username>"}
+        assert {"user", "extra", "breadcrumbs"}.isdisjoint(event)
+        assert all("value" not in exc for exc in event["exception"]["values"])
+    assert events[0]["logentry"]["formatted"] == "lookup failed for [Filtered] [Filtered] [Filtered]"
+    # Not vacuous: the SDK did collect them (path, query, log params, exception
+    # text), and collected no breadcrumbs at all.
+    pre = json.dumps(sentry.pre_events(), default=str)
+    for planted in (L_USER_ID, L_USERNAME, L_SHARE, L_EMAIL, L_IP):
+        assert planted in pre, planted
+    assert all(not (e.get("breadcrumbs") or {}).get("values") for e in sentry.pre_events())
+    sentry_sdk.flush()
+    raw = sentry.raw()
+    for planted in (L_USER_ID, L_USERNAME, L_SHARE, L_EMAIL, L_IP, L_COOKIE, L_AUTH, L_SESSION):
+        assert planted.encode() not in raw, planted
+
+
+def test_no_credential_reaches_the_envelope(sentry, monkeypatch, client):
     def boom(key):
-        server.log.info("looking up league %s for %s", key, EMAIL)   # a breadcrumb
         raise RuntimeError(f"lookup failed for {EMAIL} in league {key}")
     monkeypatch.setitem(server.app.view_functions, BOOM, boom)
     res = client.post(
@@ -283,11 +370,7 @@ def test_no_secret_reaches_the_envelope(sentry, monkeypatch, client, caplog):
                  "Authorization": f"Bearer {JWT}", "X-Cron-Secret": CRON_HEADER_SECRET})
     assert res.status_code == 500
     [event] = sentry.events()
-    assert event["request"] == {
-        "method": "POST", "url": "http://localhost/api/admin/experiments/[Filtered]/transition"}
-    assert "user" not in event
-    assert "looking up league [Filtered] for [Filtered]" in [
-        b["message"] for b in event["breadcrumbs"]["values"]]
+    assert event["request"] == {"method": "POST", "url": "/api/admin/experiments/<key>/transition"}
     sentry_sdk.flush()
     raw = sentry.raw()
     for secret in (BODY_SECRET, ESPN_S2, SWID[1:-1], JWT, CRON_HEADER_SECRET, QUERY_TOKEN,
@@ -321,65 +404,85 @@ def test_no_secret_reaches_the_envelope(sentry, monkeypatch, client, caplog):
     ("Unhandled error on POST /api/feedback", "Unhandled error on POST /api/feedback"),
 ])
 def test_scrub_patterns(text, expected):
+    """The pattern layer, which runs over every log template."""
     assert error_alerts._scrub_str(text) == expected
 
 
-def test_scrub_event_shape():
-    event = {
-        "event_id": "a" * 32, "release": "f" * 40, "level": "error",
+def _shape_event():
+    return {
+        "event_id": "a" * 32, "release": "f" * 40, "level": "error", "logger": "trade_finder",
         "transaction": "admin_experiment_transition_route",
         "message": f"user {EMAIL} league {LEAGUE}",
-        "logentry": {"message": "failed %s %s", "params": [LEAGUE, int(LEAGUE)],
-                     "formatted": f"failed {LEAGUE} {int(LEAGUE)}"},
+        "logentry": {"message": "failed %s %s n=%d t=%.1f", "params": [LEAGUE, "bob", 42, 3.5],
+                     "formatted": f"failed {LEAGUE} bob n=42 t=3.5"},
         "exception": {"values": [{
-            "type": "RuntimeError", "module": None, "value": f"token=abc SWID={SWID}",
+            "type": "RuntimeError", "module": None, "value": f"user bob SWID={SWID}",
             "mechanism": {"type": "logging", "handled": True},
             "stacktrace": {"frames": [{"function": "_attach_presession_feedback",
                                        "filename": "backend/server.py", "lineno": 3,
                                        "vars": {"note": "MY-PRIVATE-FEEDBACK"}}]}}]},
-        "extra": {"user_id": "u1", "nested": {"api_key": "k", "note": "aB" * 15}},
+        "extra": {"sys.argv": ["gunicorn"], "user_id": "u1"},
         "contexts": {"trace": {"trace_id": "b" * 32, "span_id": "c" * 16},
-                     "custom": {"partner": "p", "text": "id 123456789"}},
-        "tags": {"route": "/api/league/<league_id>", "feedback_id": "1234567890123",
-                 "kind": "bug", "other": EMAIL, "session": "x"},
-        "user": {"id": "u1"},
-        "request": {"method": "GET", "url": f"https://h/api/x/{LEAGUE}?token=q#f",
-                    "query_string": "token=q", "headers": {"X-Session-Token": "t"},
-                    "cookies": {"s": "1"}, "data": "body", "env": {"REMOTE_ADDR": "1.2.3.4"}},
-        "breadcrumbs": {"values": [{"message": f"hi {EMAIL}",
-                                    "data": {"username": "bob", "n": 5}}]},
+                     "runtime": {"name": "CPython", "version": "3.12.7"},
+                     "custom": {"text": "bob"}},
+        "tags": {"route": "/api/league/<league_id>", "feedback_id": "12", "kind": "bug",
+                 "other": "bob"},
+        "user": {"id": "u1", "ip_address": L_IP},
+        "request": {"method": "GET", "url": "https://h/api/sleeper/user/bob?ref=bob",
+                    "query_string": "ref=bob", "headers": {"X-Session-Token": "t"},
+                    "cookies": {"s": "1"}, "data": "body", "env": {"REMOTE_ADDR": L_IP}},
+        "breadcrumbs": {"values": [{"message": "hi bob", "data": {"username": "bob"}}]},
+        "spans": [{"description": "SELECT bob"}], "surprise": "bob",
     }
-    out = error_alerts.scrub_event(copy.deepcopy(event), {})
-    for key in ("event_id", "release", "level", "transaction"):
+
+
+def test_scrub_event_is_an_allowlist():
+    event = _shape_event()
+    with server.app.test_request_context("/api/sleeper/user/bob?ref=bob"):
+        out = error_alerts.scrub_event(copy.deepcopy(event), {})
+    assert sorted(out) == ["contexts", "event_id", "exception", "level", "logentry", "logger",
+                           "message", "release", "request", "tags", "transaction"]
+    for key in ("event_id", "release", "level", "logger", "transaction"):
         assert out[key] == event[key]
-    assert "user" not in out
-    assert out["request"] == {"method": "GET", "url": "https://h/api/x/[Filtered]"}
-    assert out["message"] == "user [Filtered] league [Filtered]"
-    assert out["logentry"]["params"] == ["[Filtered]", "[Filtered]"]
-    [exc] = out["exception"]["values"]
-    assert exc["value"] == "token=[Filtered] SWID=[Filtered]"
-    assert exc["stacktrace"]["frames"] == [{"function": "_attach_presession_feedback",
-                                            "filename": "backend/server.py", "lineno": 3}]
-    assert out["extra"] == {"user_id": "[Filtered]",
-                            "nested": {"api_key": "[Filtered]", "note": "[Filtered]"}}
+    assert out["request"] == {"method": "GET", "url": "/api/sleeper/user/<path:username>"}
+    assert out["message"] == "[Filtered]"            # not one of our constants
+    assert out["logentry"] == {"message": "failed %s %s n=%d t=%.1f",
+                               "params": ["[Filtered]", "[Filtered]", 42, 3.5],
+                               "formatted": "failed [Filtered] [Filtered] n=42 t=3.5"}
+    assert out["exception"] == {"values": [{
+        "type": "RuntimeError", "module": None, "mechanism": {"type": "logging", "handled": True},
+        "stacktrace": {"frames": [{"function": "_attach_presession_feedback",
+                                   "filename": "backend/server.py", "lineno": 3}]}}]}
     assert out["contexts"] == {"trace": event["contexts"]["trace"],
-                               "custom": {"partner": "[Filtered]", "text": "id [Filtered]"}}
-    assert out["tags"] == {"route": "/api/league/<league_id>", "feedback_id": "1234567890123",
-                           "kind": "bug", "other": "[Filtered]", "session": "[Filtered]"}
-    assert out["breadcrumbs"] == {"values": [{"message": "hi [Filtered]",
-                                              "data": {"username": "[Filtered]", "n": 5}}]}
+                               "runtime": event["contexts"]["runtime"]}
+    assert out["tags"] == {"route": "/api/league/<league_id>", "feedback_id": "12", "kind": "bug"}
+    assert "bob" not in json.dumps(out) and L_IP not in json.dumps(out)
 
 
-def test_scrub_breadcrumb():
-    sleeper = {"type": "http", "category": "httplib",
-               "data": {"url": "https://api.sleeper.app/v1/user/x", "method": "GET"}}
-    assert error_alerts.scrub_breadcrumb(sleeper, {}) is None
-    assert error_alerts.scrub_breadcrumb({"type": "http", "category": "x"}, {}) is None
-    crumb = {"type": "log", "category": "trade_finder", "message": f"league {LEAGUE}",
-             "data": {"email": EMAIL, "n": 1}}
-    assert error_alerts.scrub_breadcrumb(crumb, {}) == {
-        "type": "log", "category": "trade_finder", "message": "league [Filtered]",
-        "data": {"email": "[Filtered]", "n": 1}}
+def test_scrub_event_request_and_message_edges():
+    event = {"message": "http_5xx", "request": {"method": "POST", "url": "https://h/x/bob"}}
+    with server.app.test_request_context("/x/bob", method="POST"):
+        assert error_alerts.scrub_event(copy.deepcopy(event), {}) == {
+            "message": "http_5xx", "request": {"method": "POST", "url": "<unmatched>"}}
+    assert error_alerts.scrub_event(copy.deepcopy(event), {}) == {"message": "http_5xx"}
+    with server.app.test_request_context("/api/feedback", method="POST"):
+        assert error_alerts.scrub_event({"message": "feedback_received"}, {}) == {
+            "message": "feedback_received"}          # no request unless the SDK attached one
+    assert error_alerts.scrub_event(
+        {"logentry": {"message": "%d%% of %s", "params": [12, 123456789]}}, {}) == {
+            "logentry": {"message": "%d%% of %s", "params": [12, "[Filtered]"],
+                         "formatted": "12% of [Filtered]"}}
+    # A %d given [Filtered] doesn't format: formatted is dropped, not guessed.
+    assert error_alerts.scrub_event(
+        {"logentry": {"message": "id %d", "params": [123456789012]}}, {}) == {
+            "logentry": {"message": "id %d", "params": ["[Filtered]"]}}
+
+
+def test_breadcrumbs_are_off():
+    for crumb in ({"type": "http", "category": "httplib",
+                   "data": {"url": "https://api.sleeper.app/v1/user/x"}},
+                  {"type": "log", "category": "trade_finder", "message": "hi", "data": {}}):
+        assert error_alerts.scrub_breadcrumb(crumb, {}) is None
 
 
 def _raising(*_a, **_kw):
@@ -387,21 +490,20 @@ def _raising(*_a, **_kw):
 
 
 def test_a_scrubber_exception_drops_the_event(monkeypatch):
-    monkeypatch.setattr(error_alerts, "_scrub", _raising)
-    assert error_alerts.scrub_event({"message": "x"}, {}) is None
-    assert error_alerts.scrub_breadcrumb({"message": "x"}, {}) is None
+    monkeypatch.setattr(error_alerts, "_allowlisted", _raising)
+    assert error_alerts.scrub_event({"message": "http_5xx"}, {}) is None
 
 
-def test_a_scrubber_exception_sends_nothing_and_the_route_still_answers(sentry, monkeypatch,
-                                                                        client):
+def test_a_scrubber_exception_sends_nothing_unsafe(sentry, monkeypatch, client):
     def boom(key):
-        server.log.info("a breadcrumb for %s", key)
         raise RuntimeError(f"lookup failed for {EMAIL}")
-    monkeypatch.setattr(error_alerts, "_scrub", _raising)
+    monkeypatch.setattr(error_alerts, "_scrub_str", _raising)
     monkeypatch.setitem(server.app.view_functions, BOOM, boom)
     assert client.post(f"/api/admin/experiments/{LEAGUE}/transition").status_code == 500
-    assert sentry.events() == []
-    assert EMAIL.encode() not in sentry.raw()
+    # The log event fails to build and isn't sent; with no event for the
+    # request, the 5xx is reported from constants alone.
+    assert [e.get("message") for e in sentry.events()] == ["http_5xx"]
+    assert EMAIL.encode() not in sentry.raw() and LEAGUE.encode() not in sentry.raw()
 
 
 # ── (g) the feedback_received alert ────────────────────────────────────────
@@ -453,6 +555,97 @@ def test_a_thread_started_in_a_request_carries_no_request(sentry, monkeypatch, c
         return jsonify({"ok": True})
     monkeypatch.setitem(server.app.view_functions, BOOM, spawn)
     assert client.post("/api/admin/experiments/x/transition").status_code == 200
-    [event] = [e for e in sentry.events(thread=ident[0])
-               if e["logentry"]["message"] == "synthetic background failure"]
+    [pre] = [e for e in sentry.pre_events(thread=ident[0])
+             if e["logentry"]["message"] == "synthetic background failure"]
+    assert "request" not in pre                   # never collected (propagate_scope=False)
+    [event] = sentry.events(thread=ident[0])
     assert "request" not in event
+
+
+# ── (i) every error-level log template is a constant ───────────────────────
+
+_ERROR_METHODS = {"error", "exception", "critical"}
+
+
+def _bound_once_to_a_str(scope, name, parents):
+    """Whether `name` is bound exactly once in `scope` (any store: assignment,
+    loop, with, unpacking), by `name = "<str constant>"`, and isn't a parameter."""
+    if not isinstance(scope, ast.Module) and name in {a.arg for a in ast.walk(scope.args)
+                                                      if isinstance(a, ast.arg)}:
+        return False
+    stores = [n for n in ast.walk(scope)
+              if isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Store)]
+    if len(stores) != 1:
+        return False
+    assign = parents.get(stores[0])
+    return (isinstance(assign, ast.Assign) and len(assign.targets) == 1
+            and assign.targets[0] is stores[0] and isinstance(assign.value, ast.Constant)
+            and isinstance(assign.value.value, str))
+
+
+def _template_violations(source):
+    """(scanned, [(line, call)]): every log.error/exception/critical call, and
+    every log.log(level, …) call, on any receiver named like a logger, whose
+    template is not a str constant, or a name bound once, in its function,
+    to one."""
+    tree = ast.parse(source)
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    scanned, bad = 0, []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        recv = node.func.value
+        recv_name = recv.id if isinstance(recv, ast.Name) else getattr(recv, "attr", "")
+        if "log" not in recv_name.lower():
+            continue
+        if node.func.attr in _ERROR_METHODS:
+            index = 0
+        elif node.func.attr == "log":
+            index = 1
+        else:
+            continue
+        scanned += 1
+        arg = node.args[index] if len(node.args) > index else None
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            continue
+        if isinstance(arg, ast.Name):
+            scope = parents.get(node)
+            while scope is not None and not isinstance(
+                    scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+                scope = parents.get(scope)
+            if scope is not None and _bound_once_to_a_str(scope, arg.id, parents):
+                continue
+        bad.append((node.lineno, ast.unparse(node)[:120]))
+    return scanned, bad
+
+
+@pytest.mark.parametrize("source, ok", [
+    ('log.error("x %s", a)', True),
+    ('log.exception("a " "b %s", a)', True),            # implicit concatenation: a constant
+    ('def f(a):\n    t = ("a %s "\n         "b")\n    log.error(t, a)', True),
+    ('log.log(logging.ERROR, "x %s", a)', True),
+    ('log.error(f"x {a}")', False),
+    ('logger.exception("x %s" % a)', False),
+    ('self.log.critical("x {}".format(a))', False),
+    ('logging.error("x " + a)', False),
+    ('log.error(str(e))', False),
+    ('log.log(level, f"x {a}")', False),
+    ('def f(a, b):\n    t = "x"\n    if b:\n        t = a\n    log.error(t)', False),
+    ('def f(rows):\n    t = "x"\n    for t in rows:\n        log.error(t)', False),
+    ('def f(t):\n    log.error(t)', False),
+])
+def test_template_guard_detector(source, ok):
+    scanned, bad = _template_violations(source)
+    assert scanned == 1 and (bad == []) is ok
+
+
+def test_every_error_log_template_in_backend_is_a_constant():
+    scanned, bad = 0, []
+    for path in sorted((REPO / "backend").rglob("*.py")):
+        if "tests" in path.relative_to(REPO / "backend").parts:
+            continue
+        n, violations = _template_violations(path.read_text())
+        scanned += n
+        bad += [f"{path.relative_to(REPO)}:{line} {call}" for line, call in violations]
+    assert scanned >= 170, scanned                       # the scan sees the call sites
+    assert bad == [], "error-level log templates must be constants:\n" + "\n".join(bad)

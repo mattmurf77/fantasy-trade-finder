@@ -261,43 +261,45 @@ backend increment. Physical-device checks and the three-second KPI remain separa
 
 GNG-1 (error alerts) and SUP-M7 (`feedback_received`): `backend/error_alerts.py`, [scope](plans/server-error-alerts/scope.md). **Dark until `SENTRY_DSN` is set.** With no DSN, the SDK is never initialized or even imported.
 
-**What's captured, once on:**
-- **Every ERROR+ log line becomes an event**, and INFO+ lines become breadcrumbs (the last 30). That covers:
+**What becomes an event, once on:**
+- **Every ERROR+ log line.** That covers:
   - route exceptions (the generic `handle_unexpected_error` logs them with the stack);
   - the `_cleanup_loop` step guards;
   - `daily-tick: step … raised`;
-  - every other `log.error` / `log.exception` (about 170 sites);
+  - every other `log.error` / `log.exception` / `log.critical` (177 call sites scanned);
   - gunicorn's own ERROR lines in the master (`--preload` imports the app there).
   - `log.warning` never alerts.
 - **`http_5xx`:** a 5xx response that produced no event of its own (no ERROR log on the way to it), tagged `route` / `status` / `method`. A 500 is never counted twice, and 4xx never reports.
 - **`feedback_received`** (info level): one per new `POST /api/feedback` note, tagged only `feedback_id` and `kind` (bug / polish / idea). The note itself stays in our DB; read it with `GET /api/feedback/admin` or the `feedback` skill.
-- **Not captured:** tracing, profiling, request bodies, cookies, headers, users, frame locals, outbound-HTTP breadcrumbs, and SQL queries.
 
-**What's scrubbed** (`scrub_event` / `scrub_breadcrumb`; if scrubbing fails, the event or breadcrumb is dropped):
-- The request keeps only the method and the URL without its query.
-- The user is removed.
-- In every message, exception value, log parameter, extra, context and breadcrumb, these become `[Filtered]`:
-  - JWTs and `Bearer …`;
-  - credential `key=value` and `"key": "value"` pairs (cookie, `espn_s2`, `SWID`, `MFL_USER_ID`, `APIKEY`, token, secret, password, auth, session, dsn);
-  - emails, UUIDs and GUIDs;
-  - long hex or base64 runs (24+ characters with a digit, or with both upper and lower case, so snake_case identifiers like `prepared_trade_inventories` survive);
-  - **any 9+ digit run** (Sleeper user and league ids).
-- Values under keys like `user_id`, `owner_id`, `partner`, `email` and `username` are replaced wholesale.
-- Tags `route`, `status`, `method`, `feedback_id` and `kind` pass as they are, so alert rules can match them.
+**What an event contains: an allowlist (legal R28.23).** `scrub_event` builds every event from this list and drops everything else, unknown fields included. If building it fails, the event isn't sent.
+- **The SDK's own fields:** event id, time, level, logger name, release, environment, server name, SDK and module versions, the fingerprint, and the transaction (the Flask endpoint's function name).
+- **The request:** the method and the **Flask route pattern** (`/s/trade/<match_id>`), never the real path or query. Outside a request, there's no request at all.
+- **The error:** its exception type and module, and the stack frames (file, function, line, source lines), with no locals. **Never the exception's message**, which can carry a username or SQL `[parameters: …]`.
+- **The log line:** its **template** (`"lookup failed for %s"`). Parameters are kept only if they're numbers under 9 digits; every other one, strings included, becomes `[Filtered]`. A pattern scrub also runs over the template as a second layer. The template is guaranteed constant by a CI test (`test_every_error_log_template_in_backend_is_a_constant`).
+- **Messages:** `http_5xx` and `feedback_received` only; anything else becomes `[Filtered]`.
+- **Tags:** `route`, `status`, `method`, `feedback_id` and `kind` only.
+- **Contexts:** the Python runtime, the OS and the trace ids.
+- **Never sent:** users, IPs, headers, cookies, request bodies, extras, breadcrumbs (they're off), frame locals, tracing, profiling, SQL queries, and log lines as Sentry Logs.
+- **Detail lives in the Render logs; Sentry locates.** An event tells you which error, in which code, on which route, and how often. To see the actual values, look up the same minute in the Render logs.
 
 **Before turning it on (both gates):**
-1. **Privacy page:** legal updates `web/privacy.html`, which today names Sentry for the mobile app only. head-eng routes it.
+1. **MUST, privacy page:** set `SENTRY_DSN` only once the privacy page with legal's R28.23 lines is **live** in production. Those lines ship in #373 (onboarding-eng). Legal cleared backend Sentry on that condition. Until then, the page names Sentry for the mobile app only.
 2. **Volume:** release-lead counts prod ERROR lines per day (Render logs, `[ERROR]`) and checks the count against the Sentry plan's event quota.
 
 **Turning it on (operator only; agents never handle the DSN):**
-1. Create a Sentry project with the Python / Flask platform, and copy its DSN.
-2. In the Render dashboard → the web service → Environment, add `SENTRY_DSN`. Optionally add `SENTRY_ENVIRONMENT` (default `production`). Render redeploys.
+1. Create a Sentry project with the Python / Flask platform.
+2. **In that project's Settings → Security & Privacy, keep these ON** (legal R28.23 condition 5, a second layer the operator controls):
+   - **Data Scrubber**;
+   - **Use Default Scrubbers**;
+   - **Prevent Storing of IP Addresses**.
+3. Copy the project's DSN. In the Render dashboard → the web service → Environment, add `SENTRY_DSN`, and optionally `SENTRY_ENVIRONMENT` (default `production`). Render redeploys.
    - It goes in the dashboard, not `render.yaml`. [Render ignores render.yaml envVars](#render-ignores-renderyaml-envvars-on-the-dashboard-created-web-service-2026-07-19) on this service, and the DSN is never committed.
    - `RENDER_GIT_COMMIT` (set by Render) becomes the release.
-3. **First hour:** trigger nothing on purpose. Watch the Sentry issue stream for:
+4. **First hour:** trigger nothing on purpose. Watch the Sentry issue stream for:
    - the volume you expected from the gate-2 count;
-   - no `[Filtered]`-free credential in any event (spot-check three events);
-   - one issue per distinct error.
+   - one issue per distinct error;
+   - **open three events.** Each request should be a route pattern, with no real path or `?`; the log message should be a template with `[Filtered]` or small numbers only; and there should be no exception message, user, IP or headers.
    - The boot log has **no** `error_alerts: Sentry init failed` line. That line means a malformed DSN, and alerts are off.
 
 **Suggested alert rules (in Sentry):**

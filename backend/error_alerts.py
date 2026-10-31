@@ -9,7 +9,7 @@ imported: `init_error_alerts` returns False, and the request hooks and
 `notify` return at a module-flag check.
 
 With a DSN, what becomes an event:
-  * every ERROR+ log record (LoggingIntegration; INFO+ become breadcrumbs).
+  * every ERROR+ log record (LoggingIntegration; no breadcrumbs).
     Route exceptions arrive this way: server.handle_unexpected_error handles
     every exception, so Flask's got_request_exception never fires, and its
     log.exception carries the stack. So do the _cleanup_loop step guards and
@@ -18,12 +18,16 @@ With a DSN, what becomes an event:
     (report_5xx, from server's after_request hook). 4xx never reports;
   * `notify(...)` messages (feedback_received), carrying their tags only.
 
-Scrubbing mirrors the mobile S0 scrub (mobile/src/observability/sentry.ts)
-and goes further, since server events can carry credentials and ids:
-scrub_event (before_send) and scrub_breadcrumb (before_breadcrumb), both
-fail closed. The value shapes are the ones api_observability._VALUE_SHAPE_RES
-and analytics_ingest._PII_VALUE_RES already redact, plus the rest of the
-GNG-1 list; copied, not imported, so this module needs no database import.
+What is sent is built from an allowlist (legal R28.23; scope.md has the
+conditions table): scrub_event (before_send) keeps the SDK's own fields, the
+request as method + route pattern, exception type/module/frames without their
+message or locals, the log template with only small numeric params, our own
+message constants, allowlisted tags and the runtime/os/trace contexts. Anything
+else, unknown keys included, is dropped; if building it raises, nothing is
+sent. Breadcrumbs are off. Sentry locates an error; its detail stays in the
+Render logs. The pattern scrub (_PATTERNS, the shapes api_observability and
+analytics_ingest already redact, copied so this module needs no database
+import) is a second layer over the templates.
 
 Beyond the init options GNG-1 names:
   * auto_enabling_integrations=False: the SQLAlchemy integration would add a
@@ -51,7 +55,7 @@ import logging
 import os
 import re
 
-from flask import g, request
+from flask import g, has_request_context, request
 
 log = logging.getLogger(__name__)
 
@@ -59,17 +63,14 @@ _initialized = False
 
 _FILTERED = "[Filtered]"
 
-# Tag keys alert rules match on: their values pass through unscrubbed.
-# feedback_id is an autoincrement row id; the 9-digit rule never sees it.
+# The only tags sent (alert rules match on them); values as set by our code.
 _ALLOWED_TAGS = frozenset({"route", "status", "method", "feedback_id", "kind"})
 
-# A dict value under a key containing one of these (case-insensitive) is
-# replaced wholesale.
-_SENSITIVE_KEYS = (
-    "token", "secret", "password", "passwd", "cookie", "auth", "session", "dsn",
-    "api_key", "apikey", "swid", "espn_s2", "jwt", "credential",
-    "user_id", "owner_id", "partner", "email", "username",
-)
+# The only capture_message texts sent; any other becomes [Filtered].
+_MESSAGES = frozenset({"http_5xx", "feedback_received"})
+
+# The only contexts sent: the SDK's runtime / os, and the trace ids.
+_CONTEXTS = frozenset({"runtime", "os", "trace"})
 
 _DIGIT, _LOWER, _UPPER = re.compile(r"\d"), re.compile(r"[a-z]"), re.compile(r"[A-Z]")
 
@@ -114,15 +115,16 @@ _PATTERNS = (
 )
 
 # Top-level event keys the SDK fills from code or config, never from request
-# data. Every other key is scrubbed (unknown ones included).
+# data: sent as they are.
 _PASS_KEYS = frozenset({
     "event_id", "timestamp", "start_timestamp", "level", "logger", "platform",
     "release", "environment", "dist", "server_name", "sdk", "modules",
     "fingerprint", "transaction", "transaction_info", "type", "debug_meta", "_meta",
 })
 
-# The code-derived parts of an exception or thread entry (type and module
-# group the issue; frames are file/function/line/source).
+# The parts of an exception or thread entry sent: the code-derived ones (type
+# and module group the issue; frames are file/function/line/source). Never
+# `value`, the exception's text.
 _CODE_KEYS = frozenset({"type", "module", "mechanism", "stacktrace"})
 
 
@@ -148,13 +150,13 @@ def init_error_alerts() -> bool:
             send_default_pii=False,
             include_local_variables=False,
             max_request_body_size="never",
-            max_breadcrumbs=30,
             # No tracing or profiling: traces/profiles_sample_rate stay unset.
             auto_enabling_integrations=False,
             trace_propagation_targets=[],
             integrations=[
                 FlaskIntegration(),
-                LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+                # No breadcrumbs, and no log lines shipped as Sentry Logs.
+                LoggingIntegration(level=None, event_level=logging.ERROR, sentry_logs_level=None),
                 ThreadingIntegration(propagate_scope=False),
             ],
             before_send=scrub_event,
@@ -225,7 +227,7 @@ def report_5xx(status: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Scrubbing
+# The event allowlist (legal R28.23)
 # ---------------------------------------------------------------------------
 
 def _scrub_str(text: str) -> str:
@@ -234,84 +236,88 @@ def _scrub_str(text: str) -> str:
     return text
 
 
-def _sensitive(key) -> bool:
-    k = str(key).lower()
-    return any(s in k for s in _SENSITIVE_KEYS)
-
-
-def _scrub(value):
-    """Every string pattern-scrubbed, every dict value under a sensitive key
-    replaced, recursively. A number whose digits match is replaced too."""
-    if isinstance(value, str):
-        return _scrub_str(value)
-    if isinstance(value, dict):
-        return {k: _FILTERED if _sensitive(k) else _scrub(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_scrub(v) for v in value]
-    if value is None or isinstance(value, bool):
+def _param(value):
+    """A log parameter as sent: a number of fewer than 9 digits, else
+    [Filtered] (strings, objects, ids)."""
+    if isinstance(value, (int, float)) and sum(c.isdigit() for c in repr(value)) < 9:
         return value
-    if isinstance(value, (int, float)):
-        return value if _scrub_str(repr(value)) == repr(value) else _FILTERED
-    return _scrub_str(repr(value))
+    return _FILTERED
 
 
-def _scrub_stack_entries(block: dict) -> dict:
-    """`exception` / `threads`: each entry's value (the message) scrubbed,
-    its code-derived parts kept, any frame locals dropped."""
+def _logentry(entry: dict) -> dict:
+    """The template (record.msg, a constant: test_error_alerts' AST guard),
+    pattern-scrubbed as a second layer; the params filtered; `formatted`
+    rebuilt from those two, and dropped when they don't format."""
+    template = _scrub_str(entry["message"])
+    raw = entry.get("params") or []
+    params = ({k: _param(v) for k, v in raw.items()} if isinstance(raw, dict)
+              else [_param(v) for v in raw])
+    out = {"message": template, "params": params}
+    try:
+        out["formatted"] = (template % (params if isinstance(params, dict) else tuple(params))
+                            if params else template)
+    except Exception:
+        pass
+    return out
+
+
+def _stack(block: dict) -> dict:
+    """`exception` / `threads`: per entry its type, module, mechanism and
+    frames, with frame locals dropped. Never the value: an exception's text can
+    carry a username or SQL parameters."""
     entries = []
     for entry in block.get("values") or []:
-        entry = {k: v if k in _CODE_KEYS else _scrub(v) for k, v in entry.items()}
-        for frame in (entry.get("stacktrace") or {}).get("frames") or []:
+        kept = {k: v for k, v in entry.items() if k in _CODE_KEYS}
+        for frame in (kept.get("stacktrace") or {}).get("frames") or []:
             frame.pop("vars", None)
-        entries.append(entry)
-    return {**block, "values": entries}
+        entries.append(kept)
+    return {"values": entries}
 
 
-def _scrub_event(event: dict) -> dict:
-    out = {}
-    for key, value in event.items():
-        if key in _PASS_KEYS:
-            out[key] = value
-        elif key == "user":
-            continue
-        elif key == "request":
-            url = value.get("url")
-            out[key] = {k: v for k, v in (
-                ("method", value.get("method")),
-                ("url", _scrub_str(url.split("?", 1)[0].split("#", 1)[0])
-                 if isinstance(url, str) else None)) if v is not None}
-        elif key == "tags" and isinstance(value, dict):
-            out[key] = {k: v if k in _ALLOWED_TAGS else _FILTERED if _sensitive(k) else _scrub(v)
-                        for k, v in value.items()}
-        elif key == "contexts" and isinstance(value, dict):
-            out[key] = {k: v if k == "trace" else _scrub(v) for k, v in value.items()}
-        elif key in ("exception", "threads") and isinstance(value, dict):
-            out[key] = _scrub_stack_entries(value)
-        else:
-            out[key] = _scrub(value)
+def _route():
+    """The request as sent: its method and Flask route pattern, never the path
+    or query (a path can hold a username, an id or a bearer link such as
+    /s/trade/<match_id>; share links carry ?ref=<username>). before_send runs
+    on the capturing thread, so this is that thread's request; None outside
+    one."""
+    if not has_request_context():
+        return None
+    rule = request.url_rule
+    return {"method": request.method, "url": rule.rule if rule else "<unmatched>"}
+
+
+def _allowlisted(event: dict) -> dict:
+    out = {k: v for k, v in event.items() if k in _PASS_KEYS}
+    if "request" in event:
+        req = _route()
+        if req is not None:
+            out["request"] = req
+    for key in ("exception", "threads"):
+        if isinstance(event.get(key), dict):
+            out[key] = _stack(event[key])
+    if "logentry" in event:
+        out["logentry"] = _logentry(event["logentry"])
+    if "message" in event:
+        out["message"] = event["message"] if event["message"] in _MESSAGES else _FILTERED
+    if isinstance(event.get("tags"), dict):
+        out["tags"] = {k: v for k, v in event["tags"].items() if k in _ALLOWED_TAGS}
+    if isinstance(event.get("contexts"), dict):
+        out["contexts"] = {k: v for k, v in event["contexts"].items() if k in _CONTEXTS}
     return out
 
 
 def scrub_event(event, hint=None):
-    """before_send: the event with request reduced to method + url (no query),
-    user removed, every string in its content scrubbed; None (dropped) when
-    scrubbing raises."""
+    """before_send: the event rebuilt from the allowlist above (extra, user,
+    breadcrumbs and every unknown key dropped); None, so nothing is sent, when
+    building it raises."""
     try:
-        return _scrub_event(event)
+        return _allowlisted(event)
     except Exception:
         return None
 
 
 def scrub_breadcrumb(crumb, hint=None):
-    """before_breadcrumb: outbound-HTTP breadcrumbs dropped (the backend twin
-    of mobile's sleeper.com drop); others get message and data scrubbed. None
-    (dropped) when scrubbing raises."""
-    try:
-        if crumb.get("category") == "httplib" or crumb.get("type") == "http":
-            return None
-        for key in ("message", "data"):
-            if key in crumb:
-                crumb[key] = _scrub(crumb[key])
-        return crumb
-    except Exception:
-        return None
+    """before_breadcrumb: breadcrumbs are off. Logging records none
+    (LoggingIntegration(level=None)); every other source, outbound HTTP
+    among them, is dropped here."""
+    return None

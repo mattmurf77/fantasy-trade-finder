@@ -37,6 +37,7 @@
   - `auto_enabling_integrations=False`. The SQLAlchemy integration breadcrumbs every query with its parameters.
   - `trace_propagation_targets=[]`. The default `[".*"]` adds `sentry-trace`/`baggage` headers to every outbound `http.client` request, even with tracing off.
   - `Scope.clear()` does not drop event processors, so `notify` uses brand-new scopes.
+  - **The allowlist (legal R28.23) reads the SDK's event shape:** `logentry.message` is the template (`record.msg`) and `params` are the args; exception text lives in `values[].value`; the request lives in `request`. `LoggingIntegration(level=None, sentry_logs_level=None)` turns breadcrumbs and Sentry Logs off. A bump that changes any of these must keep `test_error_alerts.py`'s condition-7 test green.
   - `send_default_pii` is **deprecated** in 2.72.0, in favour of `data_collection`. It's still honoured (only a DeprecationWarning). Revisit on the 3.x upgrade.
 - **Bumping it later:** re-run `backend/tests/test_error_alerts.py`, which pins the init options, the scrub, and the one-event counts.
 
