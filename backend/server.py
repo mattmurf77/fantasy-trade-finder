@@ -31038,7 +31038,7 @@ def og_tier_card(pos, username):
 
 from .database import (  # noqa: E402
     create_trade_share_token, resolve_trade_share_token,
-    count_recent_trade_share_tokens,
+    TradeShareRateLimited,
 )
 
 # token_urlsafe(16) → exactly 22 chars of the URL-safe base64 alphabet.
@@ -31319,7 +31319,9 @@ def create_share_trade_route():
     Only a party to the match can mint, by the predicate every match route
     uses (session user_id == user_a_id or user_b_id). A non-participant, a
     missing match and a malformed id all get the same 404 not_found, so the
-    route can't be used to probe ids. Idempotent per (match, sharer). Demo
+    route can't be used to probe ids. Idempotent per (match, sharer): a
+    re-share returns the caller's live token and never counts against the
+    hourly limit; only a new mint does (one transaction in the helper). Demo
     sessions are refused, as on /api/share/package.
     """
     if not is_enabled("growth.share_landing"):
@@ -31335,16 +31337,11 @@ def create_share_trade_route():
         return jsonify({"error": "not_found"}), 404
 
     try:
-        recent = count_recent_trade_share_tokens(user_id, hours=1)
-    except Exception as e:
-        log.warning("share/trade: rate-limit count failed: %s", e)
-        recent = 0
-    if recent >= _TRADE_SHARE_HOURLY_LIMIT:
+        token = create_trade_share_token(match_id, user_id,
+                                         hourly_limit=_TRADE_SHARE_HOURLY_LIMIT)
+    except TradeShareRateLimited:
         return jsonify({"error": "rate_limited",
                         "message": "Too many shares — try again later."}), 429
-
-    try:
-        token = create_trade_share_token(match_id, user_id)
     except Exception as e:
         # The type only: a DB error's text carries the INSERT's bound
         # parameters, the new token among them.

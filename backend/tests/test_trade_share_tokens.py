@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine, delete, insert, select, text, update
+from sqlalchemy import create_engine, delete, func, insert, select, text, update
 from sqlalchemy.exc import OperationalError
 
 import backend.database as db_module
@@ -233,6 +233,41 @@ def test_hourly_mint_limit_is_30(env):
                          .where(db_module.trade_share_tokens_table.c.created_by == USER_A)
                          .values(created_at=old))
         assert _mint(env, USER_A, mids[30]).status_code == 200
+
+
+def test_reshare_at_the_limit_returns_the_live_token_and_only_new_mints_count(env):
+    """Release-lead P3-1: the live-token lookup runs before the count, so a
+    re-share at the limit is a 200 with the same body, not a 429."""
+    mids = [_add_match() for _ in range(31)]
+    with patch.object(server, "is_enabled", SHARE_ON):
+        first = [_mint(env, USER_A, m) for m in mids[:30]]
+        assert all(r.status_code == 200 for r in first)
+        again = _mint(env, USER_A, mids[0])
+        assert again.status_code == 200
+        assert again.get_json() == first[0].get_json()       # same token, same shape
+        assert _mint(env, USER_A, mids[30]).status_code == 429   # a new match still is
+        # A revoked token isn't live: sharing that match again is a NEW mint,
+        # so it counts, and at the limit it is refused.
+        tst = db_module.trade_share_tokens_table
+        with db_module.engine.begin() as conn:
+            conn.execute(update(tst).where(tst.c.token == first[1].get_json()["token"])
+                         .values(revoked_at="2026-10-31T00:00:00+00:00"))
+        assert _mint(env, USER_A, mids[1]).status_code == 429
+    with db_module.engine.connect() as conn:          # the re-share wrote nothing
+        assert conn.execute(select(func.count()).select_from(tst)).scalar() == 30
+
+
+def test_count_and_insert_share_the_mint_transaction(env):
+    """A count failure fails the whole mint (500, nothing written) instead of
+    being skipped: the count runs on the mint's own transaction."""
+    mid = _add_match()
+    with patch.object(db_module, "_count_recent_trade_share_tokens",
+                      side_effect=RuntimeError("count failed")), \
+            patch.object(server, "is_enabled", SHARE_ON):
+        r = _mint(env, USER_A, mid)
+    assert r.status_code == 500 and r.get_json() == {"error": "store_failed"}
+    with db_module.engine.connect() as conn:
+        assert conn.execute(select(db_module.trade_share_tokens_table)).first() is None
 
 
 # ---------------------------------------------------------------------------
