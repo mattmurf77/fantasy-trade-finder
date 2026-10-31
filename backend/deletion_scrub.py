@@ -932,14 +932,13 @@ def _scrub_grading(job: dict) -> int:
     return changed
 
 
-def _scan_grading(job: dict, after: str, budget: list) -> tuple[str | None, int]:
+def _scan_grading(job: dict, after: str, budget: "_Budget") -> tuple[str | None, int]:
     """The fallback scan of Calibration sessions whose source names an id (a
     league the person had left)."""
     ids = set(job["ids"])
     gs = db.grading_sessions_table
     changed = 0
-    while budget[0] > 0:
-        budget[0] -= 1
+    while budget.take():
         with db.engine.begin() as conn:
             rows = conn.execute(select(gs.c.session_id, gs.c.league_id, gs.c.source_json,
                                        _mentions(gs.c.source_json, ids).label("hit")).where(
@@ -961,13 +960,12 @@ def _scan_grading(job: dict, after: str, budget: list) -> tuple[str | None, int]
 _DIAGNOSTICS_OVERDUE = timedelta(days=30)
 
 
-def _scan_diagnostics(job: dict, after: str, budget: list) -> tuple[str | None, int]:
+def _scan_diagnostics(job: dict, after: str, budget: "_Budget") -> tuple[str | None, int]:
     ids = set(job["ids"])
     t = db.deck_diagnostic_snapshots_table
     overdue = _iso(datetime.now(timezone.utc) - _DIAGNOSTICS_OVERDUE)
     deleted = 0
-    while budget[0] > 0:
-        budget[0] -= 1
+    while budget.take():
         with db.engine.begin() as conn:
             rows = conn.execute(select(t.c.snapshot_id, _mentions(t.c.payload_json, ids).label("hit")).where(
                 t.c.snapshot_id > after, t.c.created_at < overdue,
