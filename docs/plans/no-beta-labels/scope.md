@@ -123,6 +123,8 @@ The rest are not shown to users and stay:
 
 ## Reviews
 
+**Operator design review** (rule of 2026-10-31: every design change gets the operator's approval, in parallel with release). The before/after render of the three ribbons is [`renders/ribbons-before-after.png`](renders/ribbons-before-after.png), built from [`renders/ribbons-before-after.html`](renders/ribbons-before-after.html). It's an HTML mockup from the component styles, rendered at 2x with headless Chrome. It's not a capture (D-056): the frozen screen library has no frame of these ribbons. Text is the only change. head-product shows it to the operator.
+
 - **models-lead** (outlook behaviour): the ribbon loses its early-season "beta" cue. The honesty rule that matters (no win-loss numbers while `meta.beta`) is untouched, and so are bands and order.
 - **design-lead** (UI): text-only change on three existing ribbons, with no token or layout change. **Approved 2026-10-31** at `390ab9ee`, with no code change. All three ribbons render uppercase through `type.label` (`CardImpactBlock.tsx:244`, `TeamReviewScreen.tsx:1343`, `LeagueSummaryScreen.tsx:3640`), so the source casing makes no difference. "PROJECTED" alone still reads as the caveat tag. The one fix was the casing in TestFlight row 1, now applied.
 
