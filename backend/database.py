@@ -7629,7 +7629,7 @@ def _deck_card_acted():
 # meaning. None until the flip: the scribe sets this one value on flip day, and
 # both series' `series_break` caveats read it (receipts_service.admin_metrics,
 # server.suggestion_telemetry_ratio_route), so the two can't drift.
-PACKED_EVIDENCE_FLIP_DAY: str | None = None
+PACKED_EVIDENCE_FLIP_DAY: str | None = "2026-11-04"  # the flip day (UTC); set by release-lead in the flip PR
 # The caveat code every series-break entry carries (analytics_queries,
 # receipts_service, the ratio route), so a reader can match on one value.
 SERIES_BREAK_CAVEAT = "series_break"
