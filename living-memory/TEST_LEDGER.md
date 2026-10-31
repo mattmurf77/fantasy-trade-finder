@@ -1,4 +1,4 @@
-## 2026-10-31 — C2, release-lead's #566 QA (GO-with-notes): renders redrawn, checklist fixed, guard by meaning
+## 2026-10-31 — C2, release-lead's #566 QA and re-QA (GO-with-notes): renders redrawn, checklist fixed, guard by meaning
 
 Gates: the C2 scope (`docs/plans/share-text-c2/scope.md`). Client-only; no schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the structural guard plus the operator's TestFlight checklist.
 
@@ -10,12 +10,16 @@ Gates: the C2 scope (`docs/plans/share-text-c2/scope.md`). Client-only; no schem
   - the wordmark and the URL footer in both panes. The first draw had no footer.
 - **P2-3, the checklist:** steps 2 and 5 now read the message body sent with the image in Messages (there's no capture toggle on iOS). Step 1 adds the footer and the unchanged on-screen verdict; a calculator pick shows its stand-in chip and tier badge. Step 4 adds a league pick, which shows its number with the `/?ref=` link. Step 3 notes the link preview's "% fair" is #511's.
 - **P3, the guard (`check-share-text.js`):**
-  - It now bans `.verdict`, `point_ratio`, `give_value` / `receive_value`, `favors`, "fair" and "%" in every share region.
+  - It now bans `.verdict`, `point_ratio`, `give_value` / `receive_value`, `favors`, "fair" (with "Unfair", `/fair/i`), "even", a win (with an ASCII "Win-win"), "total", `.reduce(` and "%" in every share region. They're matched with comments stripped, so C2's comments can name what it removed.
+  - Not covered: a verdict read into a variable outside the scanned regions and passed in under a neutral name (that needs data flow).
   - It scans the card's render body, which must render the line it's given exactly once.
   - The card's style key `verdict` is now `valueLine`, and the stale "verdict" comments are fixed (`ShareTradeImage.tsx`, `TradeCalculatorScreen.tsx` ×2, `InLeagueCalculator.tsx`).
 - **Runs:**
-  - The guard passes 93/93 here and fails 28 against main's share code.
-  - **Sabotages, 6/6 red:** release-lead's four bypasses (a bare `evalQuery.data?.verdict` in the text share, "`${…}% fair`" in the in-league fallback, the verdict in the caption, a hard-coded "Verdict: fair" in the card), plus "Fair" alone in the card and `point_ratio` as a prop.
+  - The guard passes 109/109 here and fails 31 against main's share code.
+  - **Sabotages, 11/11 red:**
+    - release-lead's first four bypasses: a bare `evalQuery.data?.verdict` in the text share, "`${…}% fair`" in the in-league fallback, the verdict in the caption, a hard-coded "Verdict: fair" in the card;
+    - "Fair" alone in the card, and `point_ratio` as a prop;
+    - the re-QA's: an "Unfair", "Even trade" or "You win" caption, an ASCII "Win-win" in the text share, and a total summed in the card.
   - All 135 `check-*.js` suites pass; `tsc --noEmit` is clean and testid-lint is green.
 
 ## 2026-10-31 — C2: shared trades state "Package value" only (remove-only share text)

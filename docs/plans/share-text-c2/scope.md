@@ -29,9 +29,9 @@
   - `SHARE_VALUE_LINE` is "Package value";
   - the share image has no TOTAL row and takes no totals;
   - in each `<ShareTradeImage … />` element (caption, line and fallback), in the calculator's `shareTrade` text and in the card's own render body, no verdict / win / board / ratio / consensus-total string and no verdict function remain;
-  - by meaning too (release-lead's #566 QA P3): no `.verdict` read, `point_ratio`, `give_value` / `receive_value`, `favors`, "fair" or "%";
+  - by meaning too (release-lead's #566 QA P3s), in the code with comments stripped: no `.verdict` read, `point_ratio`, `give_value` / `receive_value`, `favors`, "fair" (with "Unfair"), "even", a win, "total", `.reduce(` or "%". A verdict passed in through a variable defined elsewhere isn't covered;
   - each share region states `SHARE_VALUE_LINE`, and the card renders the line it's given exactly once.
-  - **Against main's share code it fails 28 checks.** release-lead's four bypasses (a bare `.verdict` in the text share, "`${…}% fair`" in the fallback, the verdict in the caption, a hard-coded "Verdict: fair" in the card) and two variants are each red.
+  - **Against main's share code it fails 31 checks.** Each bypass release-lead named is red: a bare `.verdict` in the text share, "`${…}% fair`" in the fallback, the verdict in the caption, a hard-coded "Verdict: fair" in the card, an "Unfair" / "Even trade" / "You win" caption, an ASCII "Win-win", and a total summed in the card. So are two variants.
 - [x] **Unit tests:** none. This is a client-only copy removal; the guard covers it.
 - [x] **Before/after renders** (for the operator's design OK): `renders/calculator-before-after.png`, and `renders/in-league-before-after.png` against a diverging opponent. They're mocks, not device captures (D-056). `renders/render.py` draws them from the code:
   - the layout of `ShareTradeImage`, with main's TOTAL rows in the before pane. Their figures are the evaluation's package values (after adjustments), from the backend's own `_consensus_packages`, and main's calculator verdict comes from `_fairness_v3`;
