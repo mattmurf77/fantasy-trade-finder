@@ -804,9 +804,10 @@ def _scan_page_store(job: dict, after: str, budget: list) -> tuple[str | None, i
 def _redact_grading_session(conn, session: dict, job: dict) -> int:
     """One other user's Calibration session. Its hidden source names the
     current arm's partners by id (→ the token). A card is the person's when
-    the source's current arm lists it with a deleted partner id, or, in a
-    captured league, when it names them by one of their names: its
-    partner_name becomes the placeholder. Returns the cards changed."""
+    the source's current arm lists it with a deleted partner id, or when it
+    names them by one of their names (that league's, or, where the source
+    shows they were a partner but no names were captured, any of theirs):
+    its partner_name becomes the placeholder. Returns the cards changed."""
     ids, token = set(job["ids"]), job["token"]
     names = set((job.get("names") or {}).get(session["league_id"], ()))
     gs, gc = db.grading_sessions_table, db.grading_cards_table
@@ -816,6 +817,11 @@ def _redact_grading_session(conn, session: dict, job: dict) -> int:
         current = (source.get("current") or {}).get("cards") or []
         theirs = {(frozenset(c.get("give") or ()), frozenset(c.get("receive") or ()))
                   for c in current if isinstance(c, dict) and c.get("partner_id") in ids}
+        if theirs and not names:
+            # A league the person had left (no names captured there), but the
+            # session's own source shows they were a partner in it: their
+            # names from every league.
+            names = {n for ns in (job.get("names") or {}).values() for n in ns}
         new = _replace_ids(source, ids, token)
         if new != source:
             conn.execute(update(gs).where(gs.c.session_id == session["session_id"])

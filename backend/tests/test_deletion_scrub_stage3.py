@@ -90,13 +90,16 @@ def test_other_users_calibration_cards_naming_the_person_take_the_placeholder(en
 
 
 def test_a_session_in_a_league_the_person_left_is_found_by_its_source(engine):
-    """Their names aren't captured there, so the current arm's provenance
-    finds their card; the fallback scan finds the session."""
+    """The fallback scan finds the session. The current arm's provenance
+    finds their card, and since the source shows they were a partner there,
+    a value-core card naming them by any of their names goes too."""
+    name_people(engine)
     with engine.begin() as conn:
-        session(conn, "s-left", "league-left", [("Del Name", "a", "b"), ("Other Name", "c", "d")])
+        session(conn, "s-left", "league-left", [("Del Name", "a", "b"), ("Del Name", "e", "f"),
+                                                ("Other Name", "c", "d")])
     accounts.delete_user_data(DEL)
     scrub.run_pending()
-    assert names_on_cards(engine, "s-left") == [PLACEHOLDER, "Other Name"]
+    assert names_on_cards(engine, "s-left") == [PLACEHOLDER, PLACEHOLDER, "Other Name"]
 
 
 # ── Diagnostics ─────────────────────────────────────────────────────────────
