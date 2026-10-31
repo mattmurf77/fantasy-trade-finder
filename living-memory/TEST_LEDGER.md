@@ -1,3 +1,42 @@
+## 2026-10-31 — Deletion scrub stage 2: packs through the codec, the cached writer state, the page store (legal R28.22, G-a1 to G-a3)
+
+Gates: the scope block `scope-deletion-scrub.md` §0.3 (head-eng's ruling 2, 10-31); `SCRUB_VERSION` 2. No schema change past stage 1's table, no flag, no event, no route contract change; one serve rule (a redacted page card is withdrawn). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **`backend/tests/test_deletion_scrub_packs.py`, 12 tests:**
+  - **Packs:**
+    - a pack is rewritten through the codec with exactly the four changes;
+    - non-redacted cards are bit-identical, directly and through `eval.data.load_decks` (G-a2);
+    - a pack in a league the person left is found by the scan;
+    - a second run changes nothing;
+    - a pack that names nobody deleted is byte-identical;
+    - a concurrent header update makes the scrub redo on the new row, keeping that update.
+  - **The cached writer state:**
+    - a writer's commit after a scrub keeps the scrub, and the pack still unpacks;
+    - a stale cached state reloads once, and a plain header update doesn't reload it;
+    - a held row's upgrade takes the pack's token.
+  - **The page store:**
+    - its cards and evidence are redacted, and `stored_bytes` is recomputed;
+    - a page row in a left league is found by the scan;
+    - a redacted card never serves and leaves as a withdrawal.
+- **Sabotages, 16/16 red:**
+  - the commit ignores the scrub;
+  - the state never reloads;
+  - the held row isn't redacted;
+  - the old card index is kept;
+  - `likes_you`, the scores, `qb_te`, `protected` or `redacted_at` kept in packs (one sabotage each);
+  - no pack CAS;
+  - no pack scan;
+  - page cards kept;
+  - a token card served;
+  - blob rows kept;
+  - blob `trade_impressions` kept;
+  - no page scan.
+- **Suites:**
+  - stage 1's `test_deletion_scrub.py` still passes;
+  - every pack-writer and page-store suite (17 files): 898 passed;
+  - **the full backend suite** at `3e7dcf3e`: 10,207 passed, 2 skipped, 0 failed;
+  - after stage 1's `bakeoff_runs` update was merged in (`77d55a47`): both scrub files (36) and every evidence, page-store and deletion suite, 1,442 passed.
+
 ## 2026-10-31 — Deletion scrub stage 1: the job, the hook, the tick step, rows, candidate sets, side tables (legal R28.20 (ii), R28.22)
 
 Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md` (no waivers but analytics, a log-only job). Schema: the new table `deletion_scrub_jobs`. No flag; no event; a route's counts and the daily tick's steps change (api-reference). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

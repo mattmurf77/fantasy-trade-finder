@@ -372,7 +372,9 @@ def test_the_scan_is_bounded_per_run_and_resumes_from_its_cursor(engine, monkeyp
     while not scrub.run_pending():
         runs += 1
         state = json.loads(job(engine)["scan_json"])
-        assert state["after"] and job(engine)["claimed_until"] is None    # kept; lease released
+        # Kept (at a cursor, or at the start of the next store), lease released.
+        assert state["version"] == scrub.SCRUB_VERSION and "after" in state
+        assert job(engine)["claimed_until"] is None
         assert runs < 20
     # 5 impressions + 3 candidate sets, one row a page, two pages a run (and
     # an empty page closes each store).

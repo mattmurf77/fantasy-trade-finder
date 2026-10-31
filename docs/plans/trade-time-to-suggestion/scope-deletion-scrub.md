@@ -65,7 +65,7 @@ The rows to touch are found per captured league and per viewer (the league's mem
 | | header: the partner's hashes leave `run.filter_inputs.protected`; `run.redacted_at` is added (G-a3's four changes) | | |
 | `deck_candidate_sets` | packed (`pack_candidates`) or legacy `candidates_json` member `partner` | — | `base_score` |
 | `bakeoff_runs` (other users'; found by legal f's trace, 10-31, so a correction to the c3 list's "partner-free") | any id in `config_json` | the owner request's frozen `input` holds every league member's board, sources, preferences and declared and inferred outlooks; the person's member loses `elo` / `board_updated_at`, and their `opponent_sources`, `manager_preferences`, `opponent_outlooks` and `inferred_outlooks` entries go | — |
-| `trade_page_store` | `pages_blob` `target_user_id` (→ token) and `target_username` (→ placeholder); `evidence_blob` rows, the same as `deck_impressions`; `run_meta.filter_inputs` the same as the pack header | the same as rows, plus `reasons` that quote the partner, and v2 `rationale.counterparty.timeline` when declared | the same as rows |
+| `trade_page_store` (stage 2) | `pages_blob` `target_user_id` (→ token) and `target_username` (→ the placeholder); `evidence_blob` rows and ghosts, the same as `deck_impressions`; its candidate set; `trade_impressions[].target_user_id` → NULL (as deletion does to the table); `run_meta.filter_inputs` the same as the pack run; any other id mention → token | a redacted page card loses `likes_you`, `standing_offer_reason`, `reasons`, `rationale`, `fit`, `breaker` and `match_context.opponent_outlook`; the narrative is stage 3's trace | `mismatch_score`, `composite_score` (and the row's scores) |
 | `user_taste` (other users) | attribute `partner:<id>` → `partner:<token>`; two aliases of the person merge into one row (weights summed). In the deletion transaction | — | — |
 | `standing_offers` (other users) | `team_user_ids`, in the deletion transaction | — | — |
 | `grading_cards` (other users) | — | `trade_json.partner_name` → placeholder (stage 3: the cards hold a display name, not an id, so finding them needs the trace) | — |
@@ -75,13 +75,19 @@ The rows to touch are found per captured league and per viewer (the league's mem
 
 Already handled by deletion today, untouched: `trade_proposals`, `trade_impressions`, `bad_trade_flags` (NULL), `prepared_trade_*` (deleted), `trade_matches` ids.
 
-### 0.3 Packs: the codec path and the writers' cached state
+### 0.3 Packs: the codec path and the writers' cached state (stage 2, built)
 
-- **Each pack:** unpack, apply the four changes to the matching cards, then pack with the same `run` plus `redacted_at`. The row is written by CAS on the stored checksum. `card_count`, `PACK_VERSION` and every non-redacted card are unchanged; G-a2 tests that bit for bit.
-- **The writer's cached state must not undo it.** `_deck_pack_commit`'s CAS-miss path re-reads only the stored `run` and re-renders from its cached prefix. After a scrub, that would write the old partner dictionary back, with a checksum that no longer matches `cards_blob`.
-  - **The fix:** on a miss whose stored `run.redacted_at` differs from the cached state's, rebuild the state from the row (`_load_pack_state`) and re-apply the pending delta (new deliveries, counted misses) before retrying.
-  - The scrub also evicts the deck from this process's `_deck_pack_states`.
-  - A test drives the race.
+- **Each pack:** `deletion_scrub.redact_pack` runs `unpack_run`, the four changes, then `pack_run(run, cards, card_count=same)`. The four changes:
+  - a redacted card's `partner_user_id` takes the token, `likes_you` is removed and its blended scores are nulled;
+  - `partner:<id>` taste attrs take the token on any card;
+  - `run.filter_inputs.qb_te[<id>]` and the protected hashes of the person's cards go;
+  - `run.redacted_at` is added.
+  - The row is written by CAS on the stored checksum, and a miss re-reads and redoes. `card_count`, `PACK_VERSION` and every non-redacted card are unchanged, which G-a2's tests check bit for bit and through eval's own reader.
+- **The writer's cached state can neither undo nor leak around it** (head-eng's ruling 2): `server._fresh_pack_state`.
+  - A cached `_PackState` whose stored header changed outside its run (only the codec rewrites the dictionaries) reloads from the row in place. Its pending run changes merge onto the stored run, where the stored keys win, `redacted_at` among them. That runs on `_deck_pack_commit`'s CAS miss and before every upgrade.
+  - An upgrade's row from a deck's build-time snapshot takes the pack's token (`_redacted_held_row`): the redacted pack card names the token where the snapshot names the person, which gives the mapping with no id kept.
+  - Tests drive the race, the stale cache and the held row.
+- **A redacted page card never serves** (`_redacted_target`): it leaves with the I-1 drops as a withdrawal, whatever the I-1 mode.
 
 ### 0.4 Decks in flight at deletion
 

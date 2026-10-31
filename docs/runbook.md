@@ -1693,5 +1693,6 @@ update.
   - Until every scrub stage is built (`deletion_scrub.COMPLETE`), finished jobs are kept on purpose, so a later stage scrubs their deletions too. The alert fires for them, and that is expected.
   - After that, it means a job keeps failing. `last_error` on the row is the exception class.
   - Legal (ix): keep retrying up to 30 days, never abandon a job.
+- **`[evidence] pack state reloaded after a redaction job=<deck>`** (INFO): a live writer's cached pack copy met a scrubbed pack and reloaded it before writing. Expected for a while after a deletion, and harmless.
 - **A failing pass:** `[scrub] job=… db pass failed: <Class>` (the class only, since a DB error's text can quote an id). Read the row's `last_error` and `attempts`, fix the cause, and the next cleanup tick retries.
 - **Stopping a runaway job:** delete its row (`DELETE FROM deletion_scrub_jobs WHERE job_id = …`). The deletion itself is already committed. Only the rest of the scrub of other users' decks is lost, and legal (ix) says to finish it, so tell head-eng first.
