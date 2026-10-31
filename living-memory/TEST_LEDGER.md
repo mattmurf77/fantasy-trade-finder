@@ -1,3 +1,20 @@
+## 2026-10-31 — Calibration's lock order: answer_grading_card locks the session first (the deadlock fixed, not documented)
+
+Gates: the operator's "fix the deadlock" (#544 QA round 2 P3-1, documented on 10-29 as a must-fix before the cap). On #544. No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest plus a local Postgres 18 race.
+
+- **The cause:** `answer_grading_card` updated the card, then the session. Every other grading writer takes the session first: the prune (sessions, then cards), `fold_grading_cards`, `finish_grading_session_build` and `insert_grading_session`.
+- **The fix:** the answer reads its card's session id, then locks the session row (`SELECT … FOR UPDATE`) and reads its status under the lock, before it touches the card. If the session is gone by then (the prune), it returns `None`, which is the route's 404.
+- **Proof on Postgres 18** (a throwaway local cluster; release-lead's `test_qa544_race.py` plus a new fold-versus-answer race; each interleaving forced with statement hooks):
+  - **Before:** the prune against an answer deadlocked in both interleavings, killing the prune in one and the answer in the other. A fold re-numbering the card being answered deadlocked against it in both interleavings too, and that one is live on main today.
+  - **After, 3 runs:** no deadlock in any of the 6 races. In the answer-first race, the prune waits, then deletes the session and its cards. In the prune-first race, the answer waits, then finds the session gone and returns `None`. The fold backs out (`False`) when its card got answered. Nothing is left partial.
+- **CI** (`backend/tests/test_grading_lock_order.py`, 3 tests; CI has no Postgres, so the order is pinned on the source):
+  - every function in `database.py` that writes or locks a card and touches the session table takes the session first, the five known ones included, and any new one is covered;
+  - the answer's first operation is the session `FOR UPDATE`;
+  - an answer to a session deleted between its read and its lock returns `None` and writes nothing.
+- **Sabotages, 5/5 red:** no `FOR UPDATE`; the card updated before the lock; a vanished session not handled; the prune deleting cards first; the fold touching a card first.
+- **Docs:** the prune's comment and the cap knob in `config-reference.md` no longer carry the "before the cap" caveat.
+- **Suites:** lock order, T-10, retention, receipts, blind grading (all `test_blind_grading*`): 308 passed.
+
 ## 2026-10-29 — #544 QA round 2: T-10 as an allowlist of uses; SQL normalised; the Calibration deadlock documented
 
 Gates: release-lead's #544 delta re-QA (everything passes but T-10: 22 of 39 new forms outside the documented residual got through). P1-1 (narrowed) and P3-1. Still dark. No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

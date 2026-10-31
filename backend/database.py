@@ -7470,13 +7470,9 @@ def _delete_old_grading_sessions(cutoff: str, limit: int) -> int:
         # row, so a fold racing this either waits and finds the session gone,
         # or commits first and its cards are seen by the card delete below.
         # Cards first would let a fold land cards for a session about to go.
-        # Known, to fix before the cap is turned on (#544 QA P3-1): on
-        # Postgres this can deadlock with answer_grading_card answering the
-        # session's last card, which locks the card, then the session.
-        # Postgres aborts one side, so nothing is left partial: the prune
-        # retries next tick, or the answer returns a one-off 500. No order
-        # here avoids it: the fold locks session then cards, the answer card
-        # then session. The fix is one order for those two (session first).
+        # Every grading writer takes the session before its cards (the fold
+        # and answer_grading_card too), so none of them can deadlock with
+        # this on Postgres (#544 QA P3-1; test_grading_lock_order.py).
         n = conn.execute(delete(gs).where(gs.c.session_id.in_(ids))).rowcount or 0
         conn.execute(delete(gc).where(gc.c.session_id.in_(ids)))
         return n
@@ -17060,23 +17056,32 @@ def answer_grading_card(card_id: str, user_id: str, *, grade: int | None, skippe
     """One engine.begin():
       1. the card joined to its session, both owned by user_id → no row ⇒ None
          (unknown or foreign card);
-      2. session status != 'open' ⇒ {"session_id", "status", "rejected": True, "answered", "total"};
-      3. UPDATE the card: grade, skipped (0/1), tags_json, graded_at = now;
-      4. remaining = count(grade IS NULL AND skipped = 0); total = count(*);
-      5. remaining == 0 ⇒ UPDATE sessions SET status='completed', completed_at=now
+      2. lock the session row (FOR UPDATE) and read its status under the lock;
+         gone by then (the retention prune) ⇒ None, as for an unknown card;
+      3. session status != 'open' ⇒ {"session_id", "status", "rejected": True, "answered", "total"};
+      4. UPDATE the card: grade, skipped (0/1), tags_json, graded_at = now;
+      5. remaining = count(grade IS NULL AND skipped = 0); total = count(*);
+      6. remaining == 0 ⇒ UPDATE sessions SET status='completed', completed_at=now
          WHERE session_id = :sid AND status = 'open'.
+    Lock order, session then card, the one every grading writer and the
+    retention prune use (#544 QA P3-1): taking the card first deadlocked on
+    Postgres with the prune, which deletes the session, then its cards.
     Returns {"session_id", "status": "open"|"completed", "rejected": False,
              "answered": total - remaining, "total": total}."""
     gc, gs = grading_cards_table, grading_sessions_table
     with engine.begin() as conn:
         row = conn.execute(
-            select(gc.c.session_id, gs.c.status)
+            select(gc.c.session_id)
             .select_from(gc.join(gs, gc.c.session_id == gs.c.session_id))
             .where(gc.c.card_id == card_id, gc.c.user_id == user_id, gs.c.user_id == user_id)
         ).first()
         if row is None:
             return None
-        sid, status = row.session_id, row.status
+        sid = row.session_id
+        status = conn.execute(
+            select(gs.c.status).where(gs.c.session_id == sid).with_for_update()).scalar()
+        if status is None:
+            return None
         if status != "open":
             total, remaining = _grading_counts(conn, sid)
             return {"session_id": sid, "status": status, "rejected": True,
