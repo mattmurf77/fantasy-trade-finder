@@ -758,6 +758,17 @@ def _delete_user_data(sleeper_user_id: str,
         # in this same transaction; stale generation/adoption tokens then fail.
         from .prepared_trade_store import delete_for_users as delete_prepared_for_users
         counts.update(delete_prepared_for_users(conn, user_ids))
+        # Legal R28.20 (ii) / R28.22: the scrub of this person's traces in
+        # OTHER users' decks. Its job row (a random token, the ids, and the
+        # leagues, read before the deletes below remove them) commits with
+        # this deletion; the route kicks the deck stores off the request and
+        # the cleanup loop retries them (backend/deletion_scrub.py). The small
+        # stores take the same token here.
+        from . import deletion_scrub
+        token = deletion_scrub.enqueue(conn, user_ids,
+                                       deletion_scrub.capture_leagues(conn, user_ids))
+        counts["deletion_scrub_jobs_enqueued"] = 1
+        counts.update(deletion_scrub.scrub_side_tables(conn, user_ids, token))
         # Revoke durable tokens in this transaction. A failure must roll back
         # the deletion, never return success with restorable credentials.
         for name in ("sessions", "entitlements", "subscription_events"):
@@ -1017,17 +1028,19 @@ def _delete_user_data(sleeper_user_id: str,
         _del("trade_impressions", db.trade_impressions_table)
 
         # Shared rows — anonymize the deleted side, keep the counterparty's
-        # record (incl. status + both decisions) intact.
+        # record (incl. status + both decisions) intact. The match-time
+        # valuation holds both sides' boards (user_a's own as the viewer,
+        # user_b's as the partner), so it goes either way (legal R28.22 e).
         res = conn.execute(
             update(db.trade_matches_table)
             .where(db.trade_matches_table.c.user_a_id.in_(user_ids))
-            .values(user_a_id=DELETED_USER_PLACEHOLDER)
+            .values(user_a_id=DELETED_USER_PLACEHOLDER, match_valuation_json=None)
         )
         n = res.rowcount or 0
         res = conn.execute(
             update(db.trade_matches_table)
             .where(db.trade_matches_table.c.user_b_id.in_(user_ids))
-            .values(user_b_id=DELETED_USER_PLACEHOLDER)
+            .values(user_b_id=DELETED_USER_PLACEHOLDER, match_valuation_json=None)
         )
         counts["trade_matches_anonymized"] = n + (res.rowcount or 0)
 

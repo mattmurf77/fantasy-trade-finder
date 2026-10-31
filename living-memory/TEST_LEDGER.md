@@ -1,3 +1,61 @@
+## 2026-10-31 — Deletion scrub stage 1: the job, the hook, the tick step, rows, candidate sets, side tables (legal R28.20 (ii), R28.22)
+
+Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md` (no waivers but analytics, a log-only job). Schema: the new table `deletion_scrub_jobs`. No flag; no event; a route's counts and the daily tick's steps change (api-reference). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **`backend/tests/test_deletion_scrub.py`, 24 tests:**
+  - **The job:**
+    - written in the deletion transaction with a random token, the ids and the leagues, captured before `league_members` goes;
+    - none on a rollback;
+    - the lease's CAS, tested with a stale read;
+    - a failed pass records the class only and is retried;
+    - the 6 h grace pass scrubs a row an in-flight deck wrote later;
+    - **a partner who left a league before deleting is still scrubbed from its decks:** rows and candidate sets, found by the fallback scan (head-eng 10-31);
+    - the scan is bounded per run and resumes from its cursor;
+    - **legal f's trace (10-31):**
+      - another partner's card loses the person's owner inputs (outlooks, sources, preferences, board);
+      - other users' `bakeoff_runs` keep the owner engine's full frozen input, and it loses the person's account fields, in the league and through the scan;
+    - no id in any log line;
+    - **CI fix (10-31):** the route's kicked thread never starts in the suite (`FTF_DISABLE_DELETION_SCRUB_KICK`, set in conftest like `FTF_DISABLE_CLEANUP_LOOP`). It outlived a route test's engine and raised "Set changed size during iteration" in the pool's dispose. A test pins both behaviors.
+  - **Stores:**
+    - a redacted card takes the token, loses `likes_you`, `standing_offer(_reason)`, `breaker(_shadow)`, `negmem.exempt` and the partner's sides of `fit` / `fit_diag` / `roster_evaluation` / the owner request, and its blended scores are nulled;
+    - a plain card of the same partner is scrubbed the same way (uniformity);
+    - another partner's card and a deck served past the cutoff are byte-identical;
+    - candidate members take the token through the codec and in JSON, and the other member is bit-identical;
+    - taste aliases merge;
+    - standing offers take the token;
+    - `match_valuation_json` is cleared on either side.
+  - **The tick:**
+    - the step sits right before `value_model_refit`;
+    - the model store is redacted once, with every id mapped to its token;
+    - a raise keeps the job;
+    - a finished job is deleted only once `COMPLETE`;
+    - the 24 h ERROR line carries counts only;
+    - the tick never raises an error's text.
+- **Sabotages, 18 run, 17 red and 1 green by design:**
+  - no taste rename;
+  - no standing-offer token;
+  - the match valuation kept;
+  - `surplus_margin` kept;
+  - `likes_you` kept;
+  - scores kept;
+  - valuation kept;
+  - the packed candidate path skipped;
+  - no lease CAS;
+  - the step after the refit;
+  - no cutoff;
+  - no grace pass;
+  - an error's text logged;
+  - no fallback scan;
+  - the scan cursor not kept;
+  - owner inputs redacted only on the person's own cards;
+  - outlooks kept;
+  - no `bakeoff_runs` scan.
+  - **Green, by design:** removing `bakeoff_runs`' league pass. The fallback scan covers every row the league pass does, so each league pass is a fast path, never the only one.
+- **Updated tests:**
+  - `test_daily_tick_route.py`: ten steps.
+  - `test_purge_entry_users.py`: `user_taste.attr`, the derived `partner:<id>` key, listed as not a user column.
+- **Suites:** every test touching deletion, export or the tick (17 files): 909 passed before those two updates, and both pass after them (68). **The full backend suite at `671dd526`** (main `fabfe92c` merged): 10,195 passed, 2 skipped, 0 failed.
+
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
 Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

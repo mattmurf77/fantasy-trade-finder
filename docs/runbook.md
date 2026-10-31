@@ -127,6 +127,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Organic trade backfill (2026-08-16)](#organic-trade-backfill-2026-08-16)
 - [ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)](#espn-identity-binding--one-time-cohort-re-sign-in-321-2026-08-16)
 - [Purge orphaned ESPN/MFL entry users (one-time, 2026-11)](#purge-orphaned-espnmfl-entry-users-one-time-2026-11)
+- [Deletion scrub: other users' decks after an account deletion (legal R28.20 (ii), 2026-10-31)](#deletion-scrub-other-users-decks-after-an-account-deletion-legal-r2820-ii-2026-10-31)
 
 ---
 
@@ -708,7 +709,7 @@ If these stop firing, queued pushes pile up in `notification_queue` and digests/
 - **What changed:**
   - **Before:** the tick ran every step inline on the request thread, past gunicorn's `--timeout 120`. From at least 2026-10-01 the worker was killed about 13:33 UTC every day (`WORKER TIMEOUT`, tick **500**): Wed–Sun inside `_run_weekly_replenishment` → `_kickoff_trade_job`, Mon–Tue most likely the re-engagement scan or the eval nightly. Every step after the kill never ran, and each kill restarted the single worker (clearing in-process caches).
   - **Now:** the handler authenticates, starts ONE single-flight runner thread (`backend/daily_tick.py`) and returns **202 `{"ok": true, "started": <bool>}`** at once. The steps run serially on that thread; each is isolated, so a raise is logged `outcome=error` and the next step still runs. The response no longer carries counters; they moved to the per-step log line.
-  - **Order:** 1 `roster_snapshot` · 2 `usage_trends` · 3 `receipts_grade` · 4 `rookie_monitor` · 5 `players_guard` · 6 `reengagement` · 7 `replenishment` (**deferred**) · 8 `eval_nightly` · 9 `value_model_refit`. Permanent-loss writers first, the CPU-heavy steps last. Each step reads its own gate at run time (gates: [api-reference](api-reference.md) § `daily-tick`).
+  - **Order:** 1 `roster_snapshot` · 2 `usage_trends` · 3 `receipts_grade` · 4 `rookie_monitor` · 5 `players_guard` · 6 `reengagement` · 7 `replenishment` (**deferred**) · 8 `eval_nightly` · 9 `deletion_scrub` · 10 `value_model_refit`. Permanent-loss writers first, the CPU-heavy steps last. Each step reads its own gate at run time (gates: [api-reference](api-reference.md) § `daily-tick`).
   - **Step 7 is deferred (operator, 2026-10-23):** a hard skip that logs `outcome=skipped detail=deferred: C2` every day, until trades-eng's C2 (no evidence for unserved builds) and the replenishment self-renewal fix (`db-capacity.md` latent issue 1) land. It reads no flag, so `deck.replenishment` has no effect through the tick. See § Weekly deck replenishment below.
 - **Reading the log:** Render logs for `srv-d7g37ftckfvc73a32gvg`, 13:30–14:30 UTC, search `daily-tick step=`:
   ```
@@ -1680,3 +1681,17 @@ update.
   days unused (privacy §5). Until then, ops-support closes any request about
   such an account with D4.
 
+## Deletion scrub: other users' decks after an account deletion (legal R28.20 (ii), 2026-10-31)
+
+`backend/deletion_scrub.py`; scope `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md`.
+- **Each deletion** commits one `deletion_scrub_jobs` row, with a random token, the deleted ids and their leagues. The route then starts the DB pass off the request, and the cleanup loop retries any job past its 10-minute lease.
+- **What a pass does:** the league pass, then a fallback scan of each whole store (deck rows, candidate sets) for leagues the person had left. The scan runs about 100k rows a cleanup tick and resumes from its cursor (`scan_json`). A job with a big table stays unfinished for some ticks, which is normal.
+- **Second pass:** one more DB pass runs 6 h after the deletion, for decks that were in flight.
+- **Daily tick:** step `deletion_scrub` redacts the value-model store, then deletes finished jobs.
+- **Healthy:** `[scrub] job=<8 chars> db_done version=<n> counts={...}` after each pass, and `daily-tick step=deletion_scrub outcome=ok` daily. Log lines never carry an id.
+- **The alert:** `[scrub] unfinished jobs=<n> oldest_h=<h>` at ERROR, from the tick.
+  - Until every scrub stage is built (`deletion_scrub.COMPLETE`), finished jobs are kept on purpose, so a later stage scrubs their deletions too. The alert fires for them, and that is expected.
+  - After that, it means a job keeps failing. `last_error` on the row is the exception class.
+  - Legal (ix): keep retrying up to 30 days, never abandon a job.
+- **A failing pass:** `[scrub] job=… db pass failed: <Class>` (the class only, since a DB error's text can quote an id). Read the row's `last_error` and `attempts`, fix the cause, and the next cleanup tick retries.
+- **Stopping a runaway job:** delete its row (`DELETE FROM deletion_scrub_jobs WHERE job_id = …`). The deletion itself is already committed. Only the rest of the scrub of other users' decks is lost, and legal (ix) says to finish it, so tell head-eng first.

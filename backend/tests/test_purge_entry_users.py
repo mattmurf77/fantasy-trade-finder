@@ -686,6 +686,9 @@ NOT_USER_KEYS = {
     # the pick audit-trail scrub selects its events by type (#452 QA round 2);
     # the ids it rewrites live in props, which (d) checks.
     ("user_events", "event_type"),
+    # the deletion scrub renames OTHER users' taste for the person, whose
+    # attr is "partner:<id>" (legal R28.20 (ii)): a derived key, not an id.
+    ("user_taste", "attr"),
 }
 
 
