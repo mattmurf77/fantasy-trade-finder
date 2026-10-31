@@ -183,7 +183,7 @@ from sqlalchemy import (
 
 from backend.database import deck_impressions_table, deck_outcomes_table
 from backend.eval import evidence_pack
-from backend.eval.contract import PROJECTION_KEYS, card_impression_id
+from backend.eval.contract import PROJECTION_KEYS, REDACTED_PARTNER_PREFIX, card_impression_id
 
 # The deck_impressions columns eval reads (never select(imp): valuation_json,
 # assets_json and the rest are large and unused here).
@@ -303,6 +303,17 @@ class LoggedCard:
         if self.position is None:
             self.position = self.card_index
 
+    @property
+    def partner_redacted(self) -> bool:
+        """The loader's mark for a card whose partner deleted their account:
+        its frozen partner_user_id is a redaction token (contract.
+        REDACTED_PARTNER_PREFIX; models-lead G-a4). Every reader still sees
+        the card; only the fit's named exclusion acts on the mark, and only
+        when its 1% test fires (value_model.PARTNER_REDACTED, G-a6)."""
+        partner = ((self.features if self.features is not None else self.features_compact)
+                   or {}).get("partner_user_id")
+        return isinstance(partner, str) and partner.startswith(REDACTED_PARTNER_PREFIX)
+
 
 @dataclass
 class LoggedDeck:
@@ -322,6 +333,9 @@ class LoggedDeck:
     # The pack's upgrade misses, cause -> count, sorted (U4-R2; module doc);
     # {} without a readable pack.
     upgrade_misses: dict[str, int] = field(default_factory=dict)
+    # When the deletion scrub last rewrote the deck's pack (its run's
+    # redacted_at, ISO UTC); None without one or without a readable pack (G-a5).
+    redacted_at: str | None = None
 
 
 def resolve_engine(engine=None, db_url: str | None = None):
@@ -571,6 +585,7 @@ def load_decks(
             continue
         run, last_delivered, cards = got
         deck.upgrade_misses = _upgrade_misses(run)
+        deck.redacted_at = run.get("redacted_at")
         if run.get(PAGE_STORE_MARKER) == 1:
             marked.add(p.run_id)
         # deck_source is not a pack key (CONTRACT_KEYS): refresh decks are kept

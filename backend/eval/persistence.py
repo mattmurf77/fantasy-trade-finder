@@ -59,6 +59,12 @@ def run_record(run, baseline, extra: dict | None = None) -> dict:
         "withdrawn_removed_by_reason": dict(sorted(run.withdrawn_removed_by_reason.items())),
         "upgrade_misses": dict(sorted(run.upgrade_misses.items())),
         "redacted_partners": run.redacted_partners,
+        "redacted_cards": run.redacted_cards,
+        "redacted_cards_lacking": dict(run.redacted_cards_lacking),
+        "redacted_at_decks": run.redacted_at_decks,
+        "redacted_since_previous_read": run.redacted_since_previous_read,
+        "previous_read_at": run.previous_read_at,
+        "partner_redacted_test": dict(run.partner_redacted_test),
         "tilt_clipped": run.tilt_clipped,
         "metrics": {
             name: {
@@ -105,3 +111,11 @@ def load_runs() -> list[dict]:
             except json.JSONDecodeError:
                 continue   # torn write — skip, never crash the harness
     return records
+
+
+def previous_read_at(**window) -> str | None:
+    """recorded_at of the latest persisted run whose record matches every
+    `window` key (the CLI passes db, since, until and as_of), else None.
+    G-a5 counts the decks redacted since then."""
+    return max((r["recorded_at"] for r in load_runs()
+                if all(r.get(k) == v for k, v in window.items())), default=None)

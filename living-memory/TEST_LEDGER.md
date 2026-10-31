@@ -1,3 +1,22 @@
+## 2026-10-31 — G-a5 and G-a6: what the scrub cleared, and the fit's named exclusion `partner_redacted`
+
+Gates: eval code (`backend/eval/{data,replay,persistence}.py`) plus `backend/value_model.py`, the runbook and the evidence contract. No route, schema, event, flag or knob change. **`value_model.py` is engine-hashed, so merging moves `engine_version` once:** release-lead lands it after the 24 h read closes, at a low-traffic hour, before the operator's device runs and before 11-10 (head-eng, models-lead I5). It goes to models-lead as an R-G entry before merge.
+
+- **G-a6 (`value_model`):**
+  - `partner_redacted_test` runs over the cards the fit reads (viewed, not undone, with a block). It fires when the redacted cards lacking `likes_you` exceed 1% of the cards with `likes_you` true.
+  - Only then does `train_model` leave out the cards the loader marks `partner_redacted`. Below 1% the rows, and so the fit, are unchanged.
+  - `meta["exclusions"]` names it with its n, `meta["partner_redacted_test"]` records the test either way, and the refit logs a WARNING with the counts.
+- **The loader (`eval/data`):** `LoggedCard.partner_redacted` (the frozen `partner_user_id` is a redaction token, rows and packed cards alike) and `LoggedDeck.redacted_at` (the pack run's). Every card stays loaded.
+- **G-a5 (`replay`):** the run, its record and its report carry the redacted cards, those lacking `likes_you` (an upper bound), the decks with a pack `redacted_at`, and those redacted since the previous persisted read of the same window (`persistence.previous_read_at`). The report also prints G-a6's test over the window.
+- **Tests:** `test_eval_partner_redacted.py`, 12:
+  - the mark on rows and packed cards, and not on an id merely containing the prefix;
+  - the G-a5 counts with no previous read, one between the two redactions, and one before both;
+  - the run, its record and the report's two lines;
+  - the previous read is the latest record of the same window, and the CLI passes it;
+  - the 1% boundary (at 1%: kept; above: excluded), counting only cards the fit reads;
+  - on synthetic decks: below 1% the fit keeps every redacted row; above it, the fit equals one on the decks without those cards, differs from keeping them, and the decks still hold every card.
+- **Sabotage, each red then restored (10):** never skip; always skip; fire at exactly 1%; count cards the fit doesn't read; no meta exclusion; mark rows only; no `redacted_at`; "since" with `>=`; no report lines; the CLI without the previous read.
+
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
 Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
