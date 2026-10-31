@@ -32,7 +32,8 @@
   - `deleted_at`;
   - `db_done_at`, `model_done_at`;
   - `attempts`, `claimed_until`;
-  - `last_error_code`, a class name only, never a message.
+  - `last_error`, a class name only, never a message (or `row_failures` when a pass left a row it couldn't redact);
+  - `scan_json`, an unfinished pass's cursor.
 - **The row is inserted inside `_delete_user_data`'s transaction.** So a committed deletion always has its scrub, and a rolled-back deletion has none. The leagues are captured in that transaction too, before `league_members` loses the person's rows.
 - **Leagues** are the union of:
   - the person's `league_members` rows;
@@ -64,7 +65,7 @@ The rows to touch are found per captured league and per viewer (the league's mem
 | `deck_evidence_packs` (codec) | the packed `partner_user_id`; the taste attr `partner:<id>` in the vocabulary; the `run.filter_inputs.qb_te` key is dropped | `likes_you` | `surplus_margin`, `base_score`, `final_score` |
 | | header: the partner's hashes leave `run.filter_inputs.protected`; `run.redacted_at` is added (G-a3's four changes) | | |
 | `deck_candidate_sets` | packed (`pack_candidates`) or legacy `candidates_json` member `partner` | — | `base_score` |
-| `bakeoff_runs` (other users'; found by legal f's trace, 10-31, so a correction to the c3 list's "partner-free") | any id in `config_json` | the owner request's frozen `input` holds every league member's board, sources, preferences and declared and inferred outlooks; the person's member loses `elo` / `board_updated_at`, and their `opponent_sources`, `manager_preferences`, `opponent_outlooks` and `inferred_outlooks` entries go | — |
+| `bakeoff_runs` (other users'; found by legal f's trace, 10-31, so a correction to the c3 list's "partner-free") | any id in `config_json`, `arms_json`, `agreement_json` and `groups_json` (#557 QA P1-3); an owner arm's `diagnostics.pools[<id>]` (that member's preference-ordered assets) goes. Fallback scan only: a league pass over megabyte rows isn't bounded | the owner engine's frozen `input` holds every league member's board, sources, preferences and declared and inferred outlooks, under `owner_request` (organic runs) or at the top level (owner-selected runs: fair packages, asset ideas; #557 QA P1-2); the person's member loses `elo` / `board_updated_at`, and their `opponent_sources`, `manager_preferences`, `opponent_outlooks` and `inferred_outlooks` entries go | — |
 | `trade_page_store` (stage 2) | `pages_blob` `target_user_id` (→ token) and `target_username` (→ the placeholder); `evidence_blob` rows and ghosts, the same as `deck_impressions`; its candidate set; `trade_impressions[].target_user_id` → NULL (as deletion does to the table); `run_meta.filter_inputs` the same as the pack run; any other id mention → token | a redacted page card loses `likes_you`, `standing_offer_reason`, `reasons`, `rationale`, `fit`, `breaker` and `match_context.opponent_outlook`; the narrative is stage 3's trace | `mismatch_score`, `composite_score` (and the row's scores) |
 | `user_taste` (other users) | attribute `partner:<id>` → `partner:<token>`; two aliases of the person merge into one row (weights summed). In the deletion transaction | — | — |
 | `standing_offers` (other users) | `team_user_ids`, in the deletion transaction | — | — |
@@ -108,6 +109,7 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
 |---|---|---|---|
 | `basis` | `"divergence"` / `"consensus"` | — | **keep** (legal: it only says the partner has a board) |
 | `surplus_margin` (= `mismatch_score`) | harmonic mean of `fit.you` / `fit.them` (`trade_gen_fit.py:470-472`); v2 `user_gain` / `opp_gain` | `fit.you` (the viewer's) | **FAILS:** `them` solves from `you` and the mean. **Nulled** (legal's list) |
+| owner_v2_bilateral `bilateral.{weaker_support,total_support,preference_fulfillment}` (#557 QA P1-1) | min / sum of the viewer's and the counterparty's support and net preference (`trade_gen_bilateral.py:257-262`) | `viewer.support`, `viewer.intent` | **FAILS:** the counterparty's side solves back. **`bilateral` removed**; and `term_efficiency` (each companion classed by its recipient's preference-derived `benefits`) and `assets[].counterparty_preference` (their tier, percentile, direction) go, and every id in `valuation_json` takes the token |
 | `base_score` (= `composite_score`) and `fit.aggregate` | `aggregate_raw = you_raw + them_raw` on fit cards (`trade_gen_fit.py:475`, `:778-788`); on a liked card, the likes boost sets it to the deck's max + 1.0 (`server.py:8319`) | `fit.you` | **FAILS, both:** `them = aggregate − you`, and the +1.0 over the deck's max encodes the like. **Both go:** `base_score` nulled, `fit.aggregate` removed |
 | `final_score` | `base × propensity × fatigue × taste × diversity` (`server.py:9300-9328`, the post-multiplier key) | `propensity`, `taste_pref_*` | **FAILS:** with the stored multipliers it recovers `base_score` (fatigue is 1 on most cards). **Nulled** |
 | `propensity` | the Thompson multiplier the viewer's sampler drew (`server.py:9206`) | — | **keep:** the viewer's own sampling, with no partner input |

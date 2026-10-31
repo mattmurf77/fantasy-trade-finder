@@ -389,9 +389,9 @@ def test_two_runners_never_claim_one_job(engine):
     accounts.delete_user_data(DEL)
     now = datetime.now(timezone.utc)
     stale = job(engine)                      # both runners read the row before either claims
-    assert scrub._take(stale, now) is True and scrub._take(stale, now) is False
-    assert scrub._claim(now) == []           # held
-    assert scrub._claim(now + scrub.LEASE + timedelta(seconds=1)) != []     # a crashed holder
+    assert scrub._take(stale, now) is not None and scrub._take(stale, now) is None
+    assert scrub._claim_one(now, set()) is None                             # held
+    assert scrub._claim_one(now + scrub.LEASE + timedelta(seconds=1), set()) is not None
 
 
 def test_a_failed_pass_records_the_class_only_and_is_retried(engine, monkeypatch, caplog):
@@ -498,3 +498,148 @@ def test_the_route_kicks_the_scrub_off_the_request_and_tests_never_start_the_thr
     monkeypatch.setenv("FTF_DISABLE_DELETION_SCRUB_KICK", "0")
     scrub.kick()
     assert started == ["deletion-scrub"]
+
+
+# ── #557 QA: the lease, one job per claim, poison rows, a version bump ─────
+
+def test_a_run_that_outlasted_its_lease_writes_nothing(engine):
+    """#557 QA P2: another runner took the job over (this run's lease ran
+    out); every write of the stale run is a CAS on its lease, so it writes
+    no scan cursor, no done mark, nothing."""
+    accounts.delete_user_data(DEL)
+    now = datetime.now(timezone.utc)
+    held = scrub._claim_one(now, set())
+    with engine.begin() as conn:             # the other runner's lease
+        conn.execute(db.deletion_scrub_jobs_table.update().values(claimed_until="9999-01-01"))
+    assert scrub._run_db(held, now) is False
+    row = job(engine)
+    assert (row["claimed_until"], row["scan_json"], row["db_version"], row["db_done_at"]) == (
+        "9999-01-01", None, 0, None)
+
+
+def test_each_claim_takes_one_job(engine):
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id="second-person"))
+    accounts.delete_user_data(DEL)
+    accounts.delete_user_data("second-person")
+    now = datetime.now(timezone.utc)
+    first = scrub._claim_one(now, set())
+    held = [r for r in read(engine, db.deletion_scrub_jobs_table) if r["claimed_until"]]
+    assert [r["job_id"] for r in held] == [first["job_id"]]                 # the other waits
+    assert scrub.run_pending(now + scrub.LEASE + timedelta(seconds=1)) == 2
+
+
+def test_a_poison_row_is_counted_and_the_pass_retried_later(engine, monkeypatch):
+    """#557 QA P3: a row whose redaction raises doesn't stop the others; the
+    pass isn't done, and it runs again after the backoff, not every tick."""
+    real = scrub.redact_features
+
+    def poison(features, ids, token):
+        if features.get("receive_value") == 101.0:
+            raise ValueError("synthetic poison")
+        return real(features, ids, token)
+    with engine.begin() as conn:
+        from backend.tests.test_deletion_scrub import impression as _imp  # noqa: F401
+        impression(conn, "c-poison-5", DEL, features=features_for(DEL, receive_value=101.0))
+    monkeypatch.setattr(scrub, "redact_features", poison)
+    accounts.delete_user_data(DEL)
+    now = datetime.now(timezone.utc)
+    assert scrub.run_pending(now) == 0
+    row = job(engine)
+    assert (row["last_error"], row["db_version"], row["scan_json"]) == ("row_failures", 0, None)
+    assert row["claimed_until"] > (now + timedelta(minutes=30)).isoformat()   # the backoff
+    assert card(engine, "c-del-1")[1]["partner_user_id"] == row["token"]     # the rest done
+
+
+def test_a_version_bump_runs_the_model_store_again(engine, monkeypatch):
+    from backend.eval import redaction
+    monkeypatch.setattr(redaction, "redact_model_store", lambda tokens: 0)
+    delete_and_scrub(engine)
+    scrub.tick(datetime.now(timezone.utc))
+    assert job(engine)["model_done_at"] is not None
+    monkeypatch.setattr(scrub, "SCRUB_VERSION", scrub.SCRUB_VERSION + 1)
+    scrub.run_pending()
+    assert job(engine)["model_done_at"] is None
+
+
+# ── #557 QA P1s ─────────────────────────────────────────────────────────────
+
+BILATERAL = {"generator": "owner_v2_bilateral", "market": {"give": 1.0},
+             "construction": {"partner": DEL},       # an id in a kept field
+             "viewer": {"support": {"score": 0.6}},
+             "counterparty": {"support": {"score": 0.7}},
+             "bilateral": {"weaker_support": 0.6, "total_support": 1.3, "preference_fulfillment": 0.2},
+             "term_efficiency": {"useful_companions": [{"asset_id": "p", "recipient": DEL,
+                                                        "benefits": ["personal_preference"]}],
+                                 "comparisons": [{"asset_id": "p", "recipient": DEL}]},
+             "assets": [{"id": "p", "market": 5.0, "viewer_preference": {"tier": 1},
+                         "counterparty_preference": {"tier": 2, "source": "explicit"}}]}
+
+
+def test_the_bilateral_valuation_loses_the_partners_fields_and_the_id(engine):
+    """#557 QA P1-1: owner_v2_bilateral's valuation keeps the raw id in
+    term_efficiency's recipients, the partner's preference per asset, and
+    bilateral scores that sum or min both sides (the viewer's kept, so they
+    solve back)."""
+    with engine.begin() as conn:
+        impression(conn, "c-bilateral-6", DEL, valuation=BILATERAL)
+    token = delete_and_scrub(engine)
+    row, _f = card(engine, "c-bilateral-6")
+    v = json.loads(row["valuation_json"])
+    assert v == {"generator": "owner_v2_bilateral", "market": {"give": 1.0},
+                 "construction": {"partner": token},
+                 "viewer": {"support": {"score": 0.6}},
+                 "assets": [{"id": "p", "market": 5.0, "viewer_preference": {"tier": 1}}]}
+    assert DEL not in row["valuation_json"]
+
+
+def test_an_owner_selected_runs_top_level_input_and_its_arms_are_scrubbed(engine):
+    """#557 QA P1-2 and P1-3: owner-selected runs (fair packages, asset ideas)
+    keep the frozen input at the top level of config_json; every run's arms,
+    agreement and groups name members by id, and an owner arm's pools are the
+    person's preference-ordered assets."""
+    with engine.begin() as conn:
+        conn.execute(insert(db.bakeoff_runs_table).values(
+            run_id="run-owner", deck_job_id="deck-1", user_id=VIEWER, league_id=LEAGUE,
+            arm_order="[]", deck_size=1, created_at=EARLY,
+            config_json=json.dumps({"input": OWNER_INPUT, "unit": "owner_only"}),
+            arms_json=json.dumps({"owner": {"diagnostics": {
+                "per_opponent": {DEL: {"evaluated": 3}, OTHER: {"evaluated": 2}},
+                "pools": {DEL: {"give": ["a"], "receive": ["b"]}, OTHER: {"give": ["c"]}}}}}),
+            agreement_json=json.dumps({"by_partner": {DEL: 1}}),
+            groups_json=json.dumps([{"partner": DEL}])))
+    token = delete_and_scrub(engine)
+    (row,) = read(engine, db.bakeoff_runs_table, run_id="run-owner")
+    inputs = json.loads(row["config_json"])["input"]
+    assert inputs["members"][0] == {"id": token}
+    assert inputs["manager_preferences"] == {VIEWER: {"t": 1}, OTHER: {"t": 3}}
+    assert inputs["opponent_outlooks"] == {OTHER: "contend"}
+    diag = json.loads(row["arms_json"])["owner"]["diagnostics"]
+    assert diag["pools"] == {OTHER: {"give": ["c"]}}
+    assert diag["per_opponent"] == {token: {"evaluated": 3}, OTHER: {"evaluated": 2}}
+    assert json.loads(row["agreement_json"]) == {"by_partner": {token: 1}}
+    assert json.loads(row["groups_json"]) == [{"partner": token}]
+    assert not any(DEL in (row[c] or "") for c in ("config_json", "arms_json", "agreement_json",
+                                                   "groups_json"))
+
+
+def test_the_cleanup_step_kick_and_its_thread_log_the_class_only(engine, monkeypatch, caplog):
+    """#557 QA P3: the cleanup loop's step, the route's start and the kicked
+    thread each catch a raise and log its class, never its text (a DB error
+    quotes its parameters)."""
+    import threading
+    import backend.server as server
+    caplog.set_level(logging.INFO, logger="trade_finder")
+    boom = lambda *a, **k: (_ for _ in ()).throw(RuntimeError(f"quoting {DEL}"))  # noqa: E731
+    monkeypatch.setattr(scrub, "run_pending", boom)
+    server._cleanup_deletion_scrub()                      # the cleanup loop's step
+    monkeypatch.setenv("FTF_DISABLE_DELETION_SCRUB_KICK", "0")
+    monkeypatch.setattr(threading.Thread, "start", lambda self: self.run())
+    scrub.kick()                                          # the kicked thread's catch
+    monkeypatch.setattr(scrub, "kick", boom)
+    server._kick_deletion_scrub()                         # the route's catch
+    messages = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert messages == ["deletion scrub pass failed: RuntimeError",
+                        "[scrub] kicked pass failed: RuntimeError",
+                        "deletion scrub start failed: RuntimeError"]
+    assert not any(DEL in r.getMessage() for r in caplog.records)

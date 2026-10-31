@@ -37,6 +37,41 @@ Gates: the scope block `scope-deletion-scrub.md` §0.3 (head-eng's ruling 2, 10-
   - **the full backend suite** at `3e7dcf3e`: 10,207 passed, 2 skipped, 0 failed;
   - after stage 1's `bakeoff_runs` update was merged in (`77d55a47`): both scrub files (36) and every evidence, page-store and deletion suite, 1,442 passed.
 
+## 2026-10-31 — Deletion scrub: #557 QA (NO-GO, 3 P1s) answered
+
+Gates: release-lead's #557 QA @ `cbbb80f3`. No new table, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P1-1, owner_v2_bilateral's valuation:**
+  - every id in `valuation_json` takes the token (it was only pruned);
+  - a redacted card loses `bilateral`: `total_support` and `preference_fulfillment` sum both sides and `weaker_support` mins them, with the viewer's side kept, so they solve back (scope §1.3);
+  - it loses `term_efficiency` (each companion classed by its recipient's preference-derived `benefits`) and assets' `counterparty_preference`.
+- **P1-2:** owner-selected bakeoff runs' top-level `input` loses the person's board, sources, preferences and outlooks.
+- **P1-3:** bakeoff `arms_json`, `agreement_json` and `groups_json` take the token, and an owner arm's `diagnostics.pools[<person>]` goes.
+- **P2:**
+  - the lease is renewed by CAS on every scan page and league store, and every write of a run is conditioned on it, so a runner that outlasted its lease writes nothing;
+  - a runner claims one job at a time;
+  - bakeoff pages are 200 rows (reads of 20), and bakeoff has no unbounded league pass (the scan covers it).
+- **P3:**
+  - a poison row is counted, the pass isn't marked done, and it's retried after a 1 h backoff;
+  - a version bump re-runs the model store;
+  - the route's kick and the cleanup step never raise, and log the class only (tested);
+  - doc drift fixed (ten steps, `steps=10`, the scope's `last_error`);
+  - a config-reference row for `FTF_DISABLE_DELETION_SCRUB_KICK`.
+- **Not fixed here, named:** `prepared_runtime.owner_evaluation.snapshot_json` is latent while `prepared_trade_inventory_enabled` is 0, and goes with the prepared-adoption work. `notifications` and `user_events.props.partner_user_id` went to head-eng and legal.
+- **Tests:** `test_deletion_scrub.py`, 32 passed.
+- **Sabotages, 11/11 red:**
+  - bilateral kept;
+  - `counterparty_preference` kept;
+  - valuation ids kept;
+  - the top-level input kept;
+  - pools kept;
+  - arms not tokenized;
+  - writes not on the lease;
+  - claiming every job;
+  - poison ignored;
+  - the model store not re-run;
+  - the route's kick unguarded.
+
 ## 2026-10-31 — Deletion scrub stage 1: the job, the hook, the tick step, rows, candidate sets, side tables (legal R28.20 (ii), R28.22)
 
 Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md` (no waivers but analytics, a log-only job). Schema: the new table `deletion_scrub_jobs`. No flag; no event; a route's counts and the daily tick's steps change (api-reference). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
