@@ -1449,6 +1449,8 @@ Deletion now covers credentials, account aliases, durable sessions, linked anony
 
 **Symptoms.** A user says a fresh share shows "expired": check that the link is `/s/trade/<22 chars>` (an older binary still shares numeric links), then that the row exists and `revoked_at` is NULL. The mobile client falls back to a `/s/p/<id>` package link when the mint fails or takes over 2 s, so a share can still carry a working landing while this route is broken. Never log or paste a token: it is a bearer secret.
 
+**Logging.** The app never logs a token (the lookup and mint DB-error lines record only the exception type, because a DB error's text carries its bound parameters); the host's request log records request paths, so Render's access log holds every `/s/trade/<token>` and `/og/trade/<token>.png` request with its live token. Treat that log as holding working links.
+
 **Revoking a link.** Nothing in v1 writes `revoked_at`. To kill one share (for example, a user asks for a posted link to stop working), set it on that row:
 
 ```sql

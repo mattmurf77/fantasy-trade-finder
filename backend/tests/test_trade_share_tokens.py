@@ -11,13 +11,15 @@ Synthetic in-memory SQLite only — never the live DB.
 """
 import base64
 import json
+import logging
 import re
 import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine, delete, insert, select, update
+from sqlalchemy import create_engine, delete, insert, select, text, update
+from sqlalchemy.exc import OperationalError
 
 import backend.database as db_module
 import backend.server as server
@@ -298,6 +300,54 @@ def test_lookup_failure_degrades_to_the_generic_miss(env):
     with patch.object(server, "resolve_trade_share_token",
                       side_effect=RuntimeError("db down")):
         _same_response(env.get(f"/s/trade/{tok}"), ref_page)
+
+
+# ---------------------------------------------------------------------------
+# Logging: the app never logs a token (release-lead P3-2). A DB error's text
+# carries its bound parameters, so the two DB log sites log the type only.
+# ---------------------------------------------------------------------------
+
+CANARY = "LOGcanaryTOKEN0123456x"   # 22 chars: a well-formed token
+
+
+def _app_log(caplog):
+    return "\n".join(r.getMessage() for r in caplog.records if r.name == "trade_finder")
+
+
+def test_a_lookup_db_error_logs_no_token(env, caplog):
+    caplog.set_level(logging.WARNING, logger="trade_finder")
+    tok = db_module.create_trade_share_token(_add_match(), USER_A)
+    with db_module.engine.begin() as conn:           # a real DB error
+        conn.execute(text("DROP TABLE trade_share_tokens"))
+    r = env.get(f"/s/trade/{tok}")
+    assert r.status_code == 200 and tok not in r.get_data(as_text=True)
+    logged = _app_log(caplog)
+    assert "trade share lookup failed: OperationalError" in logged
+    assert tok not in logged
+
+
+def test_a_mint_db_error_logs_no_token(env, caplog):
+    caplog.set_level(logging.WARNING, logger="trade_finder")
+    mid = _add_match()
+    # Make the INSERT itself fail with a real OperationalError (a trigger
+    # that writes to a dropped table), and fix the token so it can be found.
+    with db_module.engine.begin() as conn:
+        conn.execute(text("CREATE TABLE o8_gone (x)"))
+        conn.execute(text("CREATE TRIGGER o8_fail BEFORE INSERT ON trade_share_tokens "
+                          "BEGIN INSERT INTO o8_gone VALUES (1); END"))
+        conn.execute(text("DROP TABLE o8_gone"))
+    with patch("secrets.token_urlsafe", return_value=CANARY):
+        # The hazard is real: the error's own text carries the new token.
+        with pytest.raises(OperationalError) as err:
+            db_module.create_trade_share_token(mid, USER_A)
+        assert CANARY in str(err.value)
+        with patch.object(server, "is_enabled", SHARE_ON):
+            r = _mint(env, USER_A, mid)
+    assert r.status_code == 500
+    assert r.get_json() == {"error": "store_failed"}
+    logged = _app_log(caplog)
+    assert f"share/trade: could not mint a token for {USER_A}: OperationalError" in logged
+    assert CANARY not in logged
 
 
 def test_expired_card_is_deterministic():

@@ -31052,7 +31052,9 @@ def _resolve_trade_share(token) -> dict | None:
     try:
         return resolve_trade_share_token(token)
     except Exception as e:
-        log.warning("trade share lookup failed: %s", e)
+        # The type only: a DB error's text carries its bound parameters,
+        # which here is the token.
+        log.warning("trade share lookup failed: %s", type(e).__name__)
         return None
 
 
@@ -31344,7 +31346,9 @@ def create_share_trade_route():
     try:
         token = create_trade_share_token(match_id, user_id)
     except Exception as e:
-        log.error("share/trade: could not mint a token for %s: %s", user_id, e)
+        # The type only: a DB error's text carries the INSERT's bound
+        # parameters, the new token among them.
+        log.error("share/trade: could not mint a token for %s: %s", user_id, type(e).__name__)
         return jsonify({"error": "store_failed"}), 500
     if token is None:
         return jsonify({"error": "not_found"}), 404
