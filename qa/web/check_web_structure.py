@@ -517,10 +517,12 @@ def run() -> int:
     # as it renders. The text is hard-coded from the rulings' tables and
     # legal-lead-drafts.md Parts 1-2; any edit to it comes back through
     # legal-lead.
-    def rendered(page: str) -> str:
-        body = strip_style_and_script(strip_comments(body_of(all_sources[page])))
-        text = re.sub(r"<[^>]+>", "", BLOCK_TAG.sub(" ", body))
+    def render_text(html: str) -> str:
+        text = re.sub(r"<[^>]+>", "", BLOCK_TAG.sub(" ", html))
         return re.sub(r"\s+", " ", unescape(text).replace("’", "'")).strip()
+
+    def rendered(page: str) -> str:
+        return render_text(strip_style_and_script(strip_comments(body_of(all_sources[page]))))
 
     R28_15 = {
         "privacy.html": (
@@ -659,7 +661,21 @@ def run() -> int:
          "on Sleeper, ESPN or MFL"),
     )
     priv = rendered("privacy.html")
-    missing19 = [label for label, s in R28_19 if " ".join(s.split()) not in priv]
+    priv_secs = {n: render_text(h) for n, h in numbered("privacy.html")}
+
+    # From R28.19 on, each pinned run appears exactly once on the page, inside
+    # the section its label's "§N" names (release-lead #373 QA P3): a plain
+    # `in` let a duplicated line, or a line moved to another section along
+    # with its neighbour, stay green. Runs carry a neighbour's words for
+    # position, so a copy of the line alone wouldn't repeat the whole run:
+    # every clause of 25+ characters must be on the page once, too.
+    def once(label: str, s: str) -> bool:
+        s = " ".join(s.split())
+        sec = priv_secs.get(re.match(r"§(\d+)", label).group(1), "")
+        clauses = [c for c in re.split(r"(?<=[.;:])\s+", s) if len(c) >= 25]
+        return priv.count(s) == 1 and sec.count(s) == 1 and all(priv.count(c) == 1 for c in clauses)
+
+    missing19 = [label for label, s in R28_19 if not once(label, s)]
     stale19 = "on other users' trade decks" in priv
     r.check("POL-r28-19[privacy.html]", not missing19 and not stale19,
             ("not verbatim (legal R28.19): " + "; ".join(missing19)) if missing19 else
@@ -693,7 +709,7 @@ def run() -> int:
     )
     stale23 = ("is Sentry, for crashes and performance.", "improve it: crash reports,",
                "from the iOS app, as described above.")
-    missing23 = [label for label, s in R28_23_SENTRY if " ".join(s.split()) not in priv]
+    missing23 = [label for label, s in R28_23_SENTRY if not once(label, s)]
     old23 = [s for s in stale23 if s in priv]
     r.check("POL-r28-23-sentry[privacy.html]", not missing23 and not old23,
             ("not verbatim (legal R28.23 item 2): " + "; ".join(missing23)) if missing23 else
@@ -746,7 +762,7 @@ def run() -> int:
              "note text removed; shared trade pages stay available, with your account link removed;"),
         ),
     }
-    want = [label for label, s in R28_23_SHARE[SHARE_362_LIVE] if " ".join(s.split()) not in priv]
+    want = [label for label, s in R28_23_SHARE[SHARE_362_LIVE] if not once(label, s)]
     other = [m for m in R28_23_SHARE_MARKERS[not SHARE_362_LIVE] if m in priv]
     version = "#362 live" if SHARE_362_LIVE else "#362 not live"
     r.check("POL-r28-23-share[privacy.html]", not want and not other,
@@ -765,9 +781,10 @@ def run() -> int:
         "calculator, a leaguemate who builds a trade with you can see how it scores by your rankings: "
         "whether it gains or loses value for you, and by how much. They can't see your ranking list, "
         "but trying many trades could hint at how you value players.")
-    r.check("POL-r28-25-calculator[privacy.html]", R28_25_CALC in priv,
-            "§3 calculator line not verbatim after the raw-ranking line (legal R28.25 row 5)"
-            if R28_25_CALC not in priv else "§3 calculator line verbatim, after the raw-ranking line")
+    calc_ok = once("§3", R28_25_CALC)
+    r.check("POL-r28-25-calculator[privacy.html]", calc_ok,
+            "§3 calculator line not verbatim once, in §3, after the raw-ranking line (legal R28.25 row 5)"
+            if not calc_ok else "§3 calculator line verbatim once, in §3, after the raw-ranking line")
 
     # release-lead #373 QA P3-1: the other support pages each keep at least
     # one link to the privacy policy.

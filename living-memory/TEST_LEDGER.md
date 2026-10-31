@@ -48,6 +48,11 @@ Gates: full (`#373`, legal text only). No route, schema, flag or event change. D
 - **P3-7:** the checker's source comment now says the legal and marketing working files aren't tracked in the repo.
 - **Sabotage:** 8/8 red: the bullet removed, moved below the "like" line, "and by how much" dropped, a word changed, the second sentence dropped, and every `/privacy` link dropped on terms, faq and contact.
 - **Suites:** web structure 248/248 (244 + 4).
+- **Delta-QA P3 (GO-with-notes at `b9de0166`): pinned once, in its section.** Before this, the R28.19, R28.23 and R28.25 pins were a plain `in`, so a duplicated line, or a line moved to another section with its neighbour, stayed green.
+  - `once()` now requires each run to appear exactly once on the page and inside the section its label's "§N" names (`numbered()`).
+  - Runs carry a neighbour's words to fix their position, so every clause of 25+ characters must also be on the page once. Without this, a copy of the bullet alone would pass. No clause repeats on today's page.
+  - Sabotage 10/10 red: the calculator bullet duplicated in place, copied into §4, and moved into §4 together with the raw-ranking line; the server bullet, the §2 line, the §5 share line and the §6 anonymized item each duplicated; the §4 Sentry line and the §6 removes item copied into §5; the R28.19 sent-proposals item duplicated.
+  - The earlier sets re-run red: 5/5, 8/8 and 1/1. Web structure 248/248.
 
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
