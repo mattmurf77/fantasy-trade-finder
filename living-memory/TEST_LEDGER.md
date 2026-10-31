@@ -12,7 +12,7 @@ Gates: release-lead's #544 round-3 re-QA (one small round to merge): P2-1 must-f
   - SQL text built with `%(…)s` dicts, `.format_map`, `string.Template`, `bytes.decode` or `list.append` + `join`;
   - `exec`/`eval` or a file run;
   - the ORM.
-- **Suites:** T-10 108 passed; account deletion coverage 52 passed. False-positive rescan of every open PR and main: FPSCAN.
+- **Suites:** T-10 108 passed; account deletion coverage 52 passed. False-positive rescan with the new lookup rules: main `98b9291f` (every file) 0 findings; 101 open PRs (their 141 changed backend/scripts files; an unchanged file scans as on main) 0 findings.
 
 ## 2026-10-31 — Calibration's lock order: answer_grading_card locks the session first (the deadlock fixed, not documented)
 
