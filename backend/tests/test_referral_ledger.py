@@ -609,7 +609,7 @@ def test_join_row_title_differs_from_body(env):
     _attr(invite_id=T1, new_username="newbie")
     (n,) = _notifs(env)
     assert n["type"] == "referral_joined"
-    assert n["title"] == "@newbie joined Fleeced via your invite"
+    assert n["title"] == "@newbie joined Fleeced from your invite."
     assert n["body"] == ("Once they rank, trades with them can use their board, "
                          "not just consensus.")
     assert n["title"] != n["body"]
@@ -1099,3 +1099,14 @@ def test_legacy_receipt_copy_verbatim():
     assert server._referral_receipt_body("", "") == "Someone you invited joined Fleeced."
     for args in (("newbie", None), (None, None)):
         assert "Fantasy Trade Finder" not in server._referral_receipt_body(*args)
+
+
+def test_join_row_title_fallback_never_shows_an_id(env):
+    # The caller passes the raw user id when the invitee has no username or
+    # display name: the title is the fallback line, never the id.
+    rid = _mint_row(env, T1)
+    _attr(invite_id=T1, new_username=INVITEE)
+    (n,) = _notifs(env)
+    assert n["type"] == "referral_joined"
+    assert n["title"] == "Someone you invited joined Fleeced."
+    assert INVITEE not in n["title"] and n["title"] != n["body"]

@@ -46,8 +46,11 @@ LEAGUE_MATCH_OPEN_DAYS = 14
 # (docs/plans/referral-loop/marketing-inputs.md @ 91f1cc29 §A), verbatim.
 # Title != body by rule (AC-18, AC-19). One dict so a copy change is one hunk.
 COPY = {
-    # gp.push.joined_inbox_title / gp.push.joined_inbox_body
-    "joined_title": "@{new_username} joined Fleeced via your invite",
+    # gp.push.joined_inbox_title / gp.push.joined_inbox_body. The title takes
+    # marketing's §6 addendum 13 "from" (head-bizops via head-eng, 2026-10-31),
+    # matching the pre-ledger receipt; with no name to show, the fallback line.
+    "joined_title": "@{new_username} joined Fleeced from your invite.",
+    "joined_title_anon": "Someone you invited joined Fleeced.",
     "joined_body":  "Once they rank, trades with them can use their board, not just consensus.",
     # gp.inbox.activated_title / gp.inbox.activated_body. The body quotes the
     # likes-you pill label (mobile TradeCard.tsx, web app.js): if that label
@@ -216,7 +219,10 @@ def _post_joined_row(credited: dict, user_id: str, new_username: str) -> bool:
     try:
         db.create_notification(
             user_id=str(credited["referrer_user_id"]), type_="referral_joined",
-            title=COPY["joined_title"].format(new_username=new_username),
+            # The caller falls back to the raw user id when the invitee has no
+            # username or display name: never show an id, use the fallback.
+            title=(COPY["joined_title_anon"] if not new_username or new_username == user_id
+                   else COPY["joined_title"].format(new_username=new_username)),
             body=COPY["joined_body"],
             metadata={"new_user_id":  user_id,
                       "new_username": new_username,
