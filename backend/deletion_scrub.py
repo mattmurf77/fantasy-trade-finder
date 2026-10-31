@@ -33,6 +33,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -71,11 +72,15 @@ _COLUMNS_NULLED = ("base_score", "final_score", "source_like_impression_id")
 # and `boards` stay.
 _FIT_KEYS_REMOVED = ("them", "aggregate", "bucket")
 # valuation_json, every engine's shape (trade_policy, owner, value_core).
+# owner_v2_bilateral (#557 QA P1-1): `bilateral` sums or mins both sides'
+# support and net preference with the viewer's side kept (it solves back,
+# scope §1.3), and `term_efficiency` classifies each companion by its
+# recipient's preference-derived benefits.
 _VALUATION_KEYS_REMOVED = ("partner_board", "mutual", "counterparty", "preference_priority",
-                           "counterparty_benefits")
+                           "counterparty_benefits", "bilateral", "term_efficiency")
 _VALUATION_ASSET_KEYS_REMOVED = ("partner_raw_value", "partner_effective_value",
                                  "partner_confidence", "counterparty_personal",
-                                 "counterparty_source")
+                                 "counterparty_source", "counterparty_preference")
 _VALUATION_POLICY_KEYS_REMOVED = ("policy_floor", "effective_floor")
 
 
@@ -292,6 +297,14 @@ def _loads(raw):
         return None
 
 
+def _row_failed(job: dict, store: str, err: Exception) -> None:
+    """A row whose redaction raised (a poison row, #557 QA P3): counted, so
+    the pass isn't done and is retried; the class only is logged."""
+    job["failures"] = job.get("failures", 0) + 1
+    log.warning("[scrub] job=%s %s row not redacted: %s", _short(job["job_id"]), store,
+                type(err).__name__)
+
+
 def _redact_impressions(impression_ids, job: dict) -> int:
     """Redact these deck_impressions rows (any that still name a deleted id)."""
     ids, token = set(job["ids"]), job["token"]
@@ -306,15 +319,23 @@ def _redact_impressions(impression_ids, job: dict) -> int:
                 features = _loads(raw_features)
                 if not isinstance(features, dict):
                     continue
-                new = redact_features(features, ids, token)
+                try:
+                    new = redact_features(features, ids, token)
+                except Exception as err:   # a poison row: counted, the pass not done
+                    _row_failed(job, "deck_impressions", err)
+                    continue
                 if new == features:
                     continue
                 values = {"features_json": json.dumps(new)}
+                valuation = _loads(raw_valuation)
                 if features.get("partner_user_id") in ids:
                     values.update({c: None for c in _COLUMNS_NULLED})
-                    valuation = _loads(raw_valuation)
                     if valuation is not None:
-                        values["valuation_json"] = json.dumps(redact_valuation(valuation))
+                        valuation = redact_valuation(valuation)
+                if valuation is not None:
+                    new_valuation = _replace_ids(valuation, ids, token)
+                    if new_valuation != _loads(raw_valuation):
+                        values["valuation_json"] = json.dumps(new_valuation)
                 conn.execute(update(imp).where(imp.c.impression_id == impression_id)
                              .values(**values))
                 changed += 1
@@ -344,17 +365,16 @@ def _scrub_impressions(job: dict) -> int:
     return changed
 
 
-def _scan_impressions(job: dict, after: str, budget: list) -> tuple[str | None, int]:
+def _scan_impressions(job: dict, after: str, budget: "_Budget") -> tuple[str | None, int]:
     """The fallback scan (head-eng, 10-31: a league the person left before
     deleting isn't captured): every deck_impressions row up to the cutoff, in
-    keyset pages of _SCAN_BATCH by impression_id, while `budget` (a one-item
-    list of pages left) lasts. Returns (the cursor to resume from, or None at
+    keyset pages of _SCAN_BATCH by impression_id, while `budget` (the run's
+    pages left; each renews the job's lease) lasts. Returns (the cursor to resume from, or None at
     the end; rows changed)."""
     ids = set(job["ids"])
     imp = db.deck_impressions_table
     changed = 0
-    while budget[0] > 0:
-        budget[0] -= 1
+    while budget.take():
         with db.engine.connect() as conn:
             rows = conn.execute(select(
                 imp.c.impression_id, _mentions(imp.c.features_json, ids).label("hit")).where(
@@ -385,17 +405,22 @@ def _redact_candidate_set(conn, row, job: dict) -> bool:
     ids, token = set(job["ids"]), job["token"]
     cs = db.deck_candidate_sets_table
     values = {}
-    members = _loads(row.candidates_json)
-    if isinstance(members, list):
-        new = [_redact_member(m, ids, token) if isinstance(m, dict) else m for m in members]
-        if new != members:
-            values["candidates_json"] = json.dumps(new)
-    if row.candidates_packed is not None:
-        run, cards = evidence_pack.unpack_candidates(evidence_pack.PackedCandidates(
-            row.cand_pack_version, row.candidates_packed))
-        new = [_redact_member(m, ids, token) for m in cards]
-        if new != cards:
-            values["candidates_packed"] = evidence_pack.pack_candidates(run, new).candidates_packed
+    try:
+        members = _loads(row.candidates_json)
+        if isinstance(members, list):
+            new = [_redact_member(m, ids, token) if isinstance(m, dict) else m for m in members]
+            if new != members:
+                values["candidates_json"] = json.dumps(new)
+        if row.candidates_packed is not None:
+            run, cards = evidence_pack.unpack_candidates(evidence_pack.PackedCandidates(
+                row.cand_pack_version, row.candidates_packed))
+            new = [_redact_member(m, ids, token) for m in cards]
+            if new != cards:
+                values["candidates_packed"] = evidence_pack.pack_candidates(
+                    run, new).candidates_packed
+    except Exception as err:      # a poison row (an unreadable pack): counted
+        _row_failed(job, "deck_candidate_sets", err)
+        return False
     if values:
         conn.execute(update(cs).where(cs.c.candidate_set_id == row.candidate_set_id)
                      .values(**values))
@@ -425,15 +450,14 @@ def _scrub_candidate_sets(job: dict) -> int:
     return changed
 
 
-def _scan_candidate_sets(job: dict, after: str, budget: list) -> tuple[str | None, int]:
+def _scan_candidate_sets(job: dict, after: str, budget: "_Budget") -> tuple[str | None, int]:
     """The fallback scan of deck_candidate_sets, as _scan_impressions. A
     packed set is compressed, so it's decoded here to be checked (one row
     per deck, a few KB)."""
     ids = set(job["ids"])
     cs = db.deck_candidate_sets_table
     changed = 0
-    while budget[0] > 0:
-        budget[0] -= 1
+    while budget.take():
         with db.engine.begin() as conn:
             rows = conn.execute(select(*_candidate_columns()).where(
                 cs.c.candidate_set_id > after, cs.c.created_at <= job["cutoff"],
@@ -451,56 +475,92 @@ def _scan_candidate_sets(job: dict, after: str, budget: list) -> tuple[str | Non
 
 def redact_bakeoff_config(config, ids, token: str):
     """A bakeoff run's config_json: any id becomes the token, and the owner
-    request's frozen input (every member's board, sources, preferences and
-    outlooks) loses the person's account fields (legal f's trace, 10-31)."""
+    engine's frozen input (every member's board, sources, preferences and
+    outlooks) loses the person's account fields (legal f's trace, 10-31),
+    under `owner_request` (organic runs) or at the top level (owner-selected
+    runs: fair packages, asset ideas; #557 QA P1-2)."""
     if not isinstance(config, dict):
         return config
     out = _replace_ids(config, set(ids), token)
     if isinstance(out.get("owner_request"), dict):
         out["owner_request"] = _redact_owner_request(out["owner_request"], token)
+    if isinstance(out.get("input"), dict):
+        out = _redact_owner_request(out, token)
     return out
+
+
+def _drop_pools(value, token: str):
+    """An owner arm's diagnostics keep each member's asset pools, ordered by
+    that member's preferences (trade_gen_owner._Search.pools): the person's
+    entry goes, wherever a `pools` map sits."""
+    if isinstance(value, dict):
+        return {k: ({u: p for u, p in v.items() if u != token} if k == "pools" and isinstance(v, dict)
+                    else _drop_pools(v, token)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_drop_pools(v, token) for v in value]
+    return value
+
+
+def redact_bakeoff_json(value, ids, token: str):
+    """A bakeoff run's arms_json, agreement_json or groups_json (#557 QA
+    P1-3): any id becomes the token and the person's pools go."""
+    return _drop_pools(_replace_ids(value, set(ids), token), token)
+
+
+_BAKEOFF_JSON_COLUMNS = ("arms_json", "agreement_json", "groups_json")
+# Bakeoff rows can run to megabytes (#557 QA P2: one 2,000-row page of 2.2 MB
+# rows took 20 s), so they're read and scanned a few at a time.
+_BAKEOFF_BATCH = 20
 
 
 def _redact_bakeoff_runs(run_ids, job: dict) -> int:
     ids, token = set(job["ids"]), job["token"]
     t = db.bakeoff_runs_table
+    columns = ("config_json",) + _BAKEOFF_JSON_COLUMNS
     changed = 0
-    for start in range(0, len(run_ids), _BATCH):
+    for start in range(0, len(run_ids), _BAKEOFF_BATCH):
         with db.engine.begin() as conn:
-            for run_id, raw in conn.execute(select(t.c.run_id, t.c.config_json).where(
-                    t.c.run_id.in_(run_ids[start:start + _BATCH]))).all():
-                config = _loads(raw)
-                new = redact_bakeoff_config(config, ids, token)
-                if new != config:
-                    conn.execute(update(t).where(t.c.run_id == run_id)
-                                 .values(config_json=json.dumps(new, default=str)))
+            for row in conn.execute(select(t.c.run_id, *(t.c[c] for c in columns)).where(
+                    t.c.run_id.in_(run_ids[start:start + _BAKEOFF_BATCH]))).mappings().all():
+                values = {}
+                try:
+                    for column in columns:
+                        old = _loads(row[column])
+                        if old is None:
+                            continue
+                        new = (redact_bakeoff_config(old, ids, token) if column == "config_json"
+                               else redact_bakeoff_json(old, ids, token))
+                        if new != old:
+                            values[column] = json.dumps(new, default=str)
+                except Exception as err:   # a poison row: counted, the pass not done
+                    _row_failed(job, "bakeoff_runs", err)
+                    continue
+                if values:
+                    conn.execute(update(t).where(t.c.run_id == row["run_id"]).values(**values))
                     changed += 1
     return changed
 
 
-def _scrub_bakeoff_runs(job: dict) -> int:
-    """The league pass over bakeoff_runs (ix_bakeoff_runs_league)."""
-    ids = set(job["ids"])
-    t = db.bakeoff_runs_table
-    with db.engine.connect() as conn:
-        found = conn.execute(select(t.c.run_id).where(
-            t.c.league_id.in_(job["leagues"]), t.c.created_at <= job["cutoff"],
-            t.c.user_id.notin_(sorted(ids)), _mentions(t.c.config_json, ids))).scalars().all()
-    return _redact_bakeoff_runs(found, job)
+def _bakeoff_mentions(t, ids):
+    return or_(*[_mentions(t.c[c], ids) for c in ("config_json",) + _BAKEOFF_JSON_COLUMNS])
 
 
-def _scan_bakeoff_runs(job: dict, after: str, budget: list) -> tuple[str | None, int]:
+# The bakeoff scan's page: the database still reads each row's text to match
+# it, so a page of megabyte rows is kept to a size one lease covers.
+_BAKEOFF_SCAN_BATCH = 200
+
+
+def _scan_bakeoff_runs(job: dict, after: str, budget: "_Budget") -> tuple[str | None, int]:
     """The fallback scan of bakeoff_runs, as _scan_impressions."""
     ids = set(job["ids"])
     t = db.bakeoff_runs_table
     changed = 0
-    while budget[0] > 0:
-        budget[0] -= 1
+    while budget.take():
         with db.engine.connect() as conn:
-            rows = conn.execute(select(t.c.run_id, _mentions(t.c.config_json, ids).label("hit")).where(
+            rows = conn.execute(select(t.c.run_id, _bakeoff_mentions(t, ids).label("hit")).where(
                 t.c.run_id > after, t.c.created_at <= job["cutoff"],
                 t.c.user_id.notin_(sorted(ids)),
-            ).order_by(t.c.run_id).limit(_SCAN_BATCH)).all()
+            ).order_by(t.c.run_id).limit(_BAKEOFF_SCAN_BATCH)).all()
         if not rows:
             return None, changed
         changed += _redact_bakeoff_runs([r.run_id for r in rows if r.hit], job)
@@ -514,7 +574,8 @@ def _scan_bakeoff_runs(job: dict, after: str, budget: list) -> tuple[str | None,
 _STORES = (
     ("deck_impressions", _scrub_impressions),
     ("deck_candidate_sets", _scrub_candidate_sets),
-    ("bakeoff_runs", _scrub_bakeoff_runs),
+    # bakeoff_runs has no league pass: a LIKE over its megabyte rows isn't
+    # bounded, and the bounded scan below covers every row (#557 QA P2).
 )
 _SCANS = (
     ("deck_impressions", _scan_impressions),
@@ -543,46 +604,107 @@ def _db_due(row, now: datetime) -> bool:
     return now >= grace and datetime.fromisoformat(row["db_done_at"]) < grace
 
 
-def _claim(now: datetime) -> list[dict]:
-    """The due rows this caller now holds, each by a CAS on its lease, so two
-    runners (a deploy overlap, the kicked thread and the cleanup loop) never
-    work one row at once."""
+class _LeaseLost(Exception):
+    """Another runner holds the job now (this run outlasted its lease)."""
+
+
+class _Lease:
+    """A job's lease while one run works it (#557 QA P2): renewed by CAS on
+    every scan page and league store, and every write of the run is
+    conditioned on it, so a runner that outlasted it writes nothing."""
+
+    def __init__(self, job_id: str, held: str, now: datetime):
+        self.job_id, self.held, self.now, self.t0 = job_id, held, now, time.monotonic()
+
+    def write(self, **values) -> bool:
+        t = db.deletion_scrub_jobs_table
+        with db.engine.begin() as conn:
+            return bool(conn.execute(update(t).where(
+                t.c.job_id == self.job_id, t.c.claimed_until == self.held).values(**values)).rowcount)
+
+    def renew(self) -> None:
+        held = _iso(self.now + timedelta(seconds=time.monotonic() - self.t0) + LEASE)
+        if held != self.held:
+            if not self.write(claimed_until=held):
+                raise _LeaseLost()
+            self.held = held
+
+
+class _Budget:
+    """The scan pages a run has left; taking one renews the job's lease."""
+
+    def __init__(self, pages: int, lease: _Lease):
+        self.pages, self.lease = pages, lease
+
+    def take(self) -> bool:
+        if self.pages <= 0:
+            return False
+        self.pages -= 1
+        self.lease.renew()
+        return True
+
+
+def _claim_one(now: datetime, skip: set) -> dict | None:
+    """One due job this caller now holds, by a CAS on its lease (#557 QA P2:
+    claiming every due job at once let leases run out while the others
+    waited). Of two runners that read the same row, one wins."""
     t = db.deletion_scrub_jobs_table
     with db.engine.connect() as conn:
         rows = conn.execute(select(t).where(or_(t.c.claimed_until.is_(None),
-                                                t.c.claimed_until < _iso(now)))).mappings().all()
-    return [_job(row) for row in rows if _db_due(row, now) and _take(row, now)]
+                                                t.c.claimed_until < _iso(now)))
+                            .order_by(t.c.deleted_at)).mappings().all()
+    for row in rows:
+        if row["job_id"] in skip or not _db_due(row, now):
+            continue
+        held = _take(row, now)
+        if held is not None:
+            return {**_job(row), "lease": _Lease(row["job_id"], held, now)}
+    return None
 
 
-def _take(row, now: datetime) -> bool:
-    """Take the row's lease if it is still the one read (CAS): of two
-    runners that read the same row, one wins."""
+def _take(row, now: datetime) -> str | None:
+    """Take the row's lease if it is still the one read (CAS); the new
+    lease's value, or None when another runner took it first."""
     t = db.deletion_scrub_jobs_table
     lease = (t.c.claimed_until.is_(None) if row["claimed_until"] is None
              else t.c.claimed_until == row["claimed_until"])
+    held = _iso(now + LEASE)
     with db.engine.begin() as conn:
-        return bool(conn.execute(update(t).where(t.c.job_id == row["job_id"], lease).values(
-            claimed_until=_iso(now + LEASE), attempts=t.c.attempts + 1)).rowcount)
+        got = conn.execute(update(t).where(t.c.job_id == row["job_id"], lease).values(
+            claimed_until=held, attempts=t.c.attempts + 1)).rowcount
+    return held if got else None
 
 
 def _short(job_id: str) -> str:
     return job_id[:8]
 
 
+# A pass that left rows it couldn't redact (a poison row) is retried from the
+# start after this, not every tick; past 24 h the tick's count says so.
+_ROW_FAILURE_BACKOFF = timedelta(hours=1)
+
+
 def _run_db(job: dict, now: datetime) -> bool:
     """One run of the job's DB phase: the league pass when a pass starts,
     then the fallback scans for up to _SCAN_PAGES_PER_RUN pages. A pass that
     isn't finished keeps its cursor on the row (scan_json) and the next run
-    resumes it; True only when the whole pass is done."""
-    t = db.deletion_scrub_jobs_table
+    resumes it; True only when the whole pass is done. Every write is a CAS
+    on the run's lease."""
+    lease = job["lease"]
     state = _loads(job.get("scan_json"))
     if not isinstance(state, dict) or state.get("version") != SCRUB_VERSION:
         state = None
+    job["failures"] = 0
     try:
         if state is None:
-            state = {"version": SCRUB_VERSION, "scan": 0, "after": "",
-                     "counts": {name: scrub(job) for name, scrub in _STORES}}
-        budget = [_SCAN_PAGES_PER_RUN]
+            counts = {}
+            for name, scrub in _STORES:
+                lease.renew()
+                counts[name] = scrub(job)
+            state = {"version": SCRUB_VERSION, "scan": 0, "after": "", "counts": counts,
+                     "failures": job["failures"]}
+        budget = _Budget(_SCAN_PAGES_PER_RUN, lease)
+        after = None
         while state["scan"] < len(_SCANS):
             name, scan = _SCANS[state["scan"]]
             after, changed = scan(job, state["after"], budget)
@@ -591,33 +713,42 @@ def _run_db(job: dict, now: datetime) -> bool:
             if after is not None:
                 break
             state["scan"], state["after"] = state["scan"] + 1, ""
-        else:
-            after = None
         if after is not None:
             state["after"] = after
+        state["failures"] = state.get("failures", 0) + job["failures"]
+    except _LeaseLost:
+        log.warning("[scrub] job=%s lease lost: another runner holds it", _short(job["job_id"]))
+        return False
     except Exception as err:      # the class only: a message may quote an id
-        with db.engine.begin() as conn:
-            conn.execute(update(t).where(t.c.job_id == job["job_id"]).values(
-                claimed_until=None, last_error=type(err).__name__))
+        lease.write(claimed_until=None, last_error=type(err).__name__)
         log.warning("[scrub] job=%s db pass failed: %s", _short(job["job_id"]), type(err).__name__)
         return False
     if state["scan"] < len(_SCANS):
-        with db.engine.begin() as conn:
-            conn.execute(update(t).where(t.c.job_id == job["job_id"]).values(
-                scan_json=json.dumps(state), claimed_until=None, last_error=None))
+        lease.write(scan_json=json.dumps(state), claimed_until=None, last_error=None)
         return False
-    with db.engine.begin() as conn:
-        conn.execute(update(t).where(t.c.job_id == job["job_id"]).values(
-            db_version=SCRUB_VERSION, db_done_at=_iso(now), scan_json=None,
-            claimed_until=None, last_error=None))
+    if state["failures"]:
+        # Rows it couldn't redact: the whole pass again later, never done.
+        lease.write(scan_json=None, claimed_until=_iso(now + _ROW_FAILURE_BACKOFF),
+                    last_error="row_failures")
+        log.warning("[scrub] job=%s pass left %d rows unredacted; retried in %s",
+                    _short(job["job_id"]), state["failures"], _ROW_FAILURE_BACKOFF)
+        return False
+    values = dict(db_version=SCRUB_VERSION, db_done_at=_iso(now), scan_json=None,
+                  claimed_until=None, last_error=None)
+    if 0 < job["db_version"] < SCRUB_VERSION:
+        values["model_done_at"] = None    # a new version: the model store again too
+    if not lease.write(**values):
+        log.warning("[scrub] job=%s lease lost before its done write", _short(job["job_id"]))
+        return False
     log.info("[scrub] job=%s db_done version=%d counts=%s", _short(job["job_id"]),
              SCRUB_VERSION, json.dumps(state["counts"], sort_keys=True))
     return True
 
 
 def run_pending(now: datetime | None = None) -> int:
-    """Run every due DB pass this caller can claim; returns how many finished.
-    The deletion route's kicked thread and the cleanup loop call it."""
+    """Run every due DB pass this caller can claim, one job at a time;
+    returns how many finished. The deletion route's kicked thread and the
+    cleanup loop call it."""
     now = now or datetime.now(timezone.utc)
     done = _db_pass(now)
     _finish(now)
@@ -625,7 +756,11 @@ def run_pending(now: datetime | None = None) -> int:
 
 
 def _db_pass(now: datetime) -> int:
-    return sum(_run_db(job, now) for job in _claim(now))
+    done, seen = 0, set()
+    while (job := _claim_one(now, seen)) is not None:
+        seen.add(job["job_id"])
+        done += _run_db(job, now)
+    return done
 
 
 def kick() -> None:

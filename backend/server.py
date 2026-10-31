@@ -2889,6 +2889,25 @@ _DIAG_PURGE_MAX_BATCHES = 20
 _DIAG_PURGE_BATCH = 500
 
 
+def _kick_deletion_scrub() -> None:
+    """The deletion route's start of the scrub; never raises (the account is
+    already deleted, and the cleanup loop retries the job)."""
+    try:
+        from . import deletion_scrub as _deletion_scrub
+        _deletion_scrub.kick()
+    except Exception as err:          # the class only: a DB error's text quotes its ids
+        log.error("deletion scrub start failed: %s", type(err).__name__)
+
+
+def _cleanup_deletion_scrub() -> None:
+    """The cleanup loop's scrub step: every due job's DB pass; never raises."""
+    try:
+        from . import deletion_scrub as _deletion_scrub
+        _deletion_scrub.run_pending()
+    except Exception as err:          # the class only: a DB error's text quotes its ids
+        log.error("deletion scrub pass failed: %s", type(err).__name__)
+
+
 def _cleanup_loop() -> None:
     """Background thread: evict stale sessions + stuck/old trade jobs."""
     while True:
@@ -2948,11 +2967,7 @@ def _cleanup_loop() -> None:
 
         # The deletion scrub (legal R28.20 (ii)): any job whose DB pass is
         # due, under its lease (a crash, a raise, or the in-flight grace).
-        try:
-            from . import deletion_scrub as _deletion_scrub
-            _deletion_scrub.run_pending()
-        except Exception as err:      # the class only: a DB error's text quotes its ids
-            log.error("deletion scrub pass failed: %s", type(err).__name__)
+        _cleanup_deletion_scrub()
 
         # Deck-evidence retention (legal R28.20 (iii)): dark until
         # deck_evidence_retention_days is set; one bounded pass per tick.
@@ -33674,9 +33689,9 @@ def delete_account_route():
         log.exception("delete_account: deletion failed for %s", user_id)
         return jsonify({"error": "deletion_failed"}), 500
     # The scrub of other users' decks (legal R28.20 (ii)): its job committed
-    # with the deletion; start it off the request. The cleanup loop retries.
-    from . import deletion_scrub as _deletion_scrub
-    _deletion_scrub.kick()
+    # with the deletion; start it off the request. The cleanup loop retries,
+    # so a failed start never fails the deletion (#557 QA P3).
+    _kick_deletion_scrub()
     log.info("delete_account: user %s deleted (%s)", user_id, counts)
     return jsonify({"ok": True, "deleted": counts,
                     "apple_revoked": apple_revoked})
