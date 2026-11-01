@@ -27,6 +27,12 @@ Gates: the scope block `docs/plans/shop-send-elo/scope.md`. Analytics: `trade_pr
   - five probe rules;
   - the traded segment, the replay, the barrier, and the send decided as not-decided and as a pass.
 - **Reader audit:** every `trade_decisions` reader, in scope §3. Two read every row and now filter like/pass (analytics `traded`, the replay). The barrier is hardened. The deck's discovery keys count a send as decided like a like.
+- **release-lead's QA notes at 4996e091 (GO-with-notes):**
+  - The Awaiting test seeds `league_members`, so it is no longer vacuous.
+  - A parametrised pin covers four like/pass readers: Thompson shape counts, the global like rate, engine telemetry and negmem.
+  - The event fires even if the swipe persist fails after the row commits.
+  - Docs: `user_events.source` gains `shop_send` (and the existing `calc_queue`); `trade_proposals.source` gains the pre-existing `overhaul`.
+  - `test_shop_send_elo.py` now has 61 tests (60 pass and 1 skips until #389). There are 33 sabotages, all RED: 6 new, and the 2 double-filtered readers break both layers.
 - **Full backend suite at 961c15be:** 10,348 passed, 4 skipped (19 m 47 s). An earlier run had 6 failures; all were `inspect.getsource` tests broken by my editing `server.py` mid-run, and all pass in isolation on both the branch and the base. After merging #574's ed2b314b (no backend logic), the targeted rerun passes: `test_shop_send_elo` + `test_calc_trade_queue` 95, and the taxonomy/analytics/flags/config subset 355.
 
 ## 2026-11-01 — Shop proposes the trade on the league's platform (#531 follow-up; operator's design review)

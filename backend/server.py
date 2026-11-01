@@ -22005,13 +22005,21 @@ def _record_shop_send_signal(sess, *, league_id, their_user_id, give_ids,
             )
             if not wrote:
                 return
-            save_trade_swipes(
-                user_id        = g_user_id,
-                winner_ids     = receive_ids,
-                loser_ids      = give_ids,
-                k_factor       = _rs_c("trade_k_like") * fit_mult,
-                scoring_format = _active_format(sess),
-            )
+            # The row is committed, so the event below must fire whatever
+            # happens to the swipe persist (analytics-lead: the event mirrors
+            # the row). A lost swipe write costs only the replay of this one
+            # signal, which the in-memory board already holds.
+            try:
+                save_trade_swipes(
+                    user_id        = g_user_id,
+                    winner_ids     = receive_ids,
+                    loser_ids      = give_ids,
+                    k_factor       = _rs_c("trade_k_like") * fit_mult,
+                    scoring_format = _active_format(sess),
+                )
+            except Exception as swipe_err:
+                log.warning("shop send: swipe persist failed (row and event kept): %s",
+                            swipe_err)
             record_event(
                 g_user_id,
                 "trade_proposed",

@@ -867,7 +867,7 @@ trade_proposals_table = Table("trade_proposals", metadata,
     Column("target_user_id",          String),
     Column("provider",                String,  nullable=False),   # sleeper|espn|mfl
     Column("provider_transaction_id", String),
-    Column("source",                  String),   # deck | match | calculator | shop (server._PROPOSE_SOURCES; unknown = deck)
+    Column("source",                  String),   # deck | match | calculator | shop (server._PROPOSE_SOURCES; unknown = deck) | overhaul (overhaul_api)
     Column("give_asset_ids",          Text,    nullable=False),   # JSON, FINAL
     Column("receive_asset_ids",       Text,    nullable=False),   # JSON, FINAL
     Column("origin_trade_hash",       String),

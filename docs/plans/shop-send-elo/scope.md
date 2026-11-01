@@ -37,7 +37,7 @@
 
 ## 3. Evidence scope
 
-- [x] **Unit tests:** `backend/tests/test_shop_send_elo.py`, 56 tests (one skips until #389 merges). It reuses `test_calc_trade_queue.py`'s harness, so the queue and the send run in the same world.
+- [x] **Unit tests:** `backend/tests/test_shop_send_elo.py`, 61 tests (60 pass; one skips until #389 merges). It reuses `test_calc_trade_queue.py`'s harness, so the queue and the send run in the same world.
   - **The record:** the row, the Elo and the event.
   - **Parity with the queue:** same pairs, same K, with the bake-off freeze live.
   - **#389:** a generic pick takes no signal. It skips on this base, and was verified against #389's diff: it passes, and goes red with the strip disabled.
@@ -50,7 +50,11 @@
   - **The D-170 bar:** six cases, plus the caller in the test-only member shape.
   - **Never raises.**
   - **Routes:** all three. They record before the platform call, stand whatever the platform answers, record nothing for any other source (the ledger value is checked for each), record nothing with the flag off, and a failing signal never blocks the send.
-- [x] **Sabotage:** 26 single-rule breaks, each RED (TEST_LEDGER lists them).
+- [x] **Sabotage:** 33 single-rule breaks, each RED (TEST_LEDGER lists them). Two readers filter twice: Awaiting (its SQL, then `history.actionable`) and the global like rate (its SQL, then the `like`/`pass` keys). Their sabotages break both layers.
+- [x] **release-lead's QA notes at 4996e091:**
+  - The Awaiting test now seeds `league_members`, so a real like in the same world is awaiting. It was vacuous before.
+  - A parametrised pin covers the Thompson shape counts, the global like rate, engine telemetry and negmem's retraction leg. Each is zero for a send and one for a like.
+  - The event now fires even if `save_trade_swipes` raises after the row commits (tested).
 - [x] **Code-walk proof:** the reader audit below, file:line-cited.
 - [x] **Manual TestFlight checklist — WAIVED because:** backend-only. The client half (`source: "shop"`) is #574's and is covered by its guard. Runtime proof of the Elo half is a server read, which is out of scope for agents (no prod reads).
 - `testID`s: none.
@@ -80,7 +84,11 @@
 | `accounts.delete_user_data` / `export_user_data` | deleted and exported by `user_id`, like any row (tested) |
 | `deletion_scrub` (#557/#559/#562, not on main) | doesn't touch `trade_decisions`. A send row has no partner column; its `calcq_` id is a hash, the same exposure as a calculator like today |
 
-**Known, unchanged:**
+**Known, unchanged, and open with head-product** (release-lead P3-3, against "no double count"):
+- A calculator ✓ of a package already sent adds a second Elo signal. `find_live_trade_like` reads likes only, so the queue doesn't see the send row's shared `calcq_` id.
+- A sent package can come back to the deck after 7 days. The pre-#574 Shop like sat in Awaiting, and R4 excluded it for as long as it was live.
+
+Both are small to change; they wait on head-product's call. The rest is unchanged:
 - A later deck like or calculator queue of a package already sent adds its own Elo. That is the same as today's deck like plus a queue of one package. The 7-day decided window keeps the deck from re-serving it.
 - The probe and the write are serialised by the per-user `service._lock` in one process. Production runs one worker.
 

@@ -32,15 +32,17 @@ import json
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import insert, select
 
 import backend.database as db_module
 import backend.feature_flags as ff
+import backend.negmem as negmem
 import backend.pick_values as pick_values
 import backend.server as server
 import backend.tests.test_calc_trade_queue as tcq
 from backend.database import (
     find_mirror_like,
+    league_members_table,
     load_awaiting_trades,
     load_recent_league_likes,
     save_trade_decision,
@@ -182,12 +184,60 @@ def test_the_send_row_never_reaches_the_counterpartys_deck(world):
     assert cards == []
 
 
+def _seed_members(engine):
+    """Awaiting resolves the partner by roster ownership, so without these
+    rows it would return [] for a real like too."""
+    with engine.begin() as conn:
+        conn.execute(insert(league_members_table), [
+            {"league_id": LEAGUE, "user_id": ME, "username": "me",
+             "roster_data": json.dumps(tcq.MY_ROSTER)},
+            {"league_id": LEAGUE, "user_id": OPP, "username": "opp",
+             "roster_data": json.dumps(tcq.THEIR_ROSTER)},
+        ])
+
+
 def test_the_send_row_is_not_a_like_for_matches_or_awaiting(world):
-    _client, _engine, sess, _service, _tsvc, _league = world
+    _client, engine, sess, _service, _tsvc, _league = world
+    _seed_members(engine)
     _send(sess)
     # The counterparty liking the mirror package finds no like of mine.
     assert find_mirror_like(OPP, LEAGUE, ME, list(RECV), list(GIVE)) is None
     assert load_awaiting_trades(ME) == []
+    # Not vacuous: a real like of another package with the same partner IS
+    # awaiting and IS a mirror like, in the same world.
+    save_trade_decision(ME, LEAGUE, "abcd1234", ["g2"], ["r2"], "like")
+    assert [a["trade_id"] for a in load_awaiting_trades(ME)] == ["abcd1234"]
+    assert find_mirror_like(OPP, LEAGUE, ME, ["r2"], ["g2"]) is not None
+    assert find_mirror_like(OPP, LEAGUE, ME, list(RECV), list(GIVE)) is None
+
+
+# Every reader of like/pass counts, pinned against a send row (the LLD rule:
+# a reader that means like/pass filters for it). Each is non-vacuous: a real
+# like in the same world counts once.
+LIKE_PASS_READERS = [
+    ("thompson shape counts",
+     lambda: db_module.load_trade_decision_shape_counts(ME, LEAGUE),
+     lambda r: sum(likes + passes for likes, passes in r.values())),
+    ("global like rate",
+     lambda: db_module.load_global_like_rate(30),
+     lambda r: r[1]),
+    ("engine telemetry",
+     lambda: db_module.load_engine_telemetry(30, LEAGUE),
+     lambda r: r["decisions"]["likes"] + r["decisions"]["passes"]),
+    ("negmem retraction leg",
+     lambda: negmem._fetch_retracted(ME, LEAGUE, "2000-01-01"),
+     len),
+]
+
+
+@pytest.mark.parametrize("name,read,count", LIKE_PASS_READERS,
+                         ids=[r[0] for r in LIKE_PASS_READERS])
+def test_like_pass_readers_never_count_a_send(world, name, read, count):
+    _client, _engine, sess, _service, _tsvc, _league = world
+    _send(sess)
+    assert count(read()) == 0
+    save_trade_decision(ME, LEAGUE, "abcd1234", ["g2"], ["r2"], "like")
+    assert count(read()) == 1
 
 
 def test_the_send_row_is_not_a_trade_opinion_for_analytics(world):
@@ -373,6 +423,17 @@ def test_sending_to_yourself_records_nothing_even_when_you_are_a_member(monkeypa
         assert _rows(engine) == [] and _memory(service) == []
     finally:
         gen.close()
+
+
+def test_the_event_follows_the_row_even_if_the_swipe_persist_fails(world):
+    """Once the send row commits, `trade_proposed` fires: a failed
+    `save_trade_swipes` loses only that signal's replay, never the event."""
+    _client, engine, sess, service, _tsvc, _league = world
+    with patch.object(server, "save_trade_swipes", side_effect=RuntimeError("db blip")):
+        _send(sess)
+    assert [r.decision for r in _rows(engine)] == ["send"]
+    assert len(_proposed(server.record_event)) == 1
+    assert len(_memory(service)) == 1 and _swipes(engine) == []
 
 
 def test_a_failed_write_never_raises(world):

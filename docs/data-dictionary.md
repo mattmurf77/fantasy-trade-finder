@@ -846,7 +846,7 @@ The durable record of a **confirmed provider send**. Scope block: `docs/plans/pe
 | `target_user_id` | str, nullable | |
 | `provider` | str | `sleeper` / `espn` / `mfl` |
 | `provider_transaction_id` | str, nullable | The second idempotency key, deduped in `save_trade_proposal` by select-then-insert rather than a partial unique index — most sends legitimately have none, so the constraint would have to be `UNIQUE … WHERE NOT NULL`, and `_migrate_db` cannot add indexes to existing tables, so it would exist on fresh databases and silently not in production. |
-| `source` | str | `deck` / `match` / `calculator` / `shop`. The propose body's validated `source` (`server._PROPOSE_SOURCES`); absent or unknown is `deck`. `shop` (#531) is sent only by the Shop tile's send. |
+| `source` | str | `deck` / `match` / `calculator` / `shop` / `overhaul`. The propose body's validated `source` (`server._PROPOSE_SOURCES`; absent or unknown is `deck`); `shop` (#531) is sent only by the Shop tile's send. `overhaul` is stamped server-side by the team-overhaul send (`overhaul_api.py`), never from a body. |
 | `give_asset_ids`, `receive_asset_ids` | JSON text | The **final** package actually sent. |
 | `origin_trade_hash` | str, nullable | The originating impression's `trade_hash`. |
 | `final_trade_hash` | str | Hash of the package that was sent. |
@@ -1570,7 +1570,7 @@ Append-only log of meaningful user actions. Hot reads use the denormalized `user
 | `league_id`, `session_id` | str | `session_id` is a 77-character domain-separated analytics digest; never a bearer token. |
 | `device_type` | str | `iphone` / `ipad` / `macos` / `web` / `extension` |
 | `os_version`, `app_version` | str | |
-| `source` | str | `mobile` / `web` / `api` / `cron` |
+| `source` | str | `mobile` / `web` / `api` / `cron`. Server-fired trade rows also use `calc_queue` (the queue route's `trade_proposed`) and `shop_send` (#531, D-210: the propose routes' Shop-send `trade_proposed`) |
 | `props` | JSON text | event-specific extras |
 | `event_id` | str, unique (nullable) | client-generated UUID — idempotent retries / dedup ([tracking plan v2 §S1](business/analytics/2026-07-17-tracking-plan-v2.md)) |
 | `device_id` | str, indexed | stable per-install anon id (`dev_` + UUID) — pre-signin attribution |
