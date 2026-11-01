@@ -1,3 +1,32 @@
+## 2026-11-01 — Deletion scrub stage 3, release-lead's #562 re-QA (GO-with-notes): failed sessions, older cards on Postgres, match-row notifications
+
+Gates: release-lead's re-QA at 03d35f63. No new schema beyond `grading_cards.partner_user_id`; a boot backfill fills it. No flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest on SQLite and Postgres.
+
+- **P2-A (a regression from the last round):** the scan's session pass took only `building` sessions. A failed or retired session keeps its building source, so the source kept the raw id. It now takes any session whose source names an id.
+- **P2-B:**
+  - The scan's prefilter now looks at every NULL-partner card. The deck row isn't visible to SQL, and LIKE is case-sensitive on Postgres, so on PG these cards were never traced.
+  - A boot backfill, `database.backfill_grading_card_partners`, gives older cards their partner while deck rows and names are live: the current arm's deck row, else the one league member shown by `partner_name`. An ambiguous or unknown name stays NULL.
+  - The scope states the narrower residual left after this.
+- **P3s:**
+  - **Notifications:** a match notification's `trade_matches` row decides who its partner is (deletion set the person's side to the placeholder). A leaguemate whose display name is their username is no longer redacted, and a copy in a league they had left is.
+  - **Docs:** the data-dictionary, scope and `capture_names` drift is fixed.
+  - `_stuck_at` ignores an older-version cursor.
+- **Postgres:** `test_deletion_scrub_calibration.py` is parametrized over SQLite and Postgres (`FTF_TEST_PG_URL`; CI runs SQLite). Run locally against Postgres.app on 127.0.0.1, both pass.
+- **New tests:**
+  - a failed and a building session in a league they left;
+  - older current-arm cards with no captured name (only the deck row finds them);
+  - the backfill: names while live, the deck row alone (L3), an ambiguous "Twin" left NULL, idempotent;
+  - the scan's cutoff and owner;
+  - the left-league collision guard (u5 "kim");
+  - two match-row notifications.
+- **Sabotages, 30/30 red, run against Postgres too:**
+  - the 20 from last round, with P2-4 now a proper no-op instead of an IndentationError;
+  - P2-A building-only, P2-B no NULL term (red on PG);
+  - the backfill without its deck-row step, without its name step, or taking an ambiguous name;
+  - the match row ignored;
+  - S-Q12 and S-Q19 on the scan, N1 the left-league guard, F1 no scan session pass.
+- **Runs:** the related suites with Postgres, 883 passed.
+
 ## 2026-11-01 — Deletion scrub stage 3, release-lead's #562 QA (NO-GO, 2 Calibration P1s): fixed on the real build path
 
 Gates: release-lead's #562 QA. Schema: `grading_cards.partner_user_id` (hidden, nullable; added to existing tables at boot; data dictionary updated). No flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
