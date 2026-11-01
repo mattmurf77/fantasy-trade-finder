@@ -86,9 +86,9 @@ export default function SendInEspnButton({
   onSent,
   compact,
   style,
-  // Carried for P0-7 parity (see Props); intentionally unread until ESPN
-  // attempt/failure events are registered in the taxonomy.
-  surface: _surface,
+  // Carried for P0-7 parity (see Props). No ESPN attempt/failure events
+  // are registered yet; the one read is doPropose's #531 Shop tag.
+  surface,
   sendPreCheck,
 }: Props) {
   const enabled = useFlag('espn.send');
@@ -168,6 +168,7 @@ export default function SendInEspnButton({
         give_player_ids: givePlayerIds,
         receive_player_ids: receivePlayerIds,
         impression_id: impressionId,
+        ...(surface === 'shop' ? { source: 'shop' as const } : {}),
       });
       settleSend(sendKey, 'sent');
       haptics.success();
@@ -251,7 +252,7 @@ export default function SendInEspnButton({
         );
       }
     }
-  }, [sendKey, leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, goConnect, goReconnect, openEspn]);
+  }, [sendKey, leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, surface, onSent, goConnect, goReconnect, openEspn]);
 
   // #180-parity pre-flight — the shared /api/trades/validate has no ESPN
   // branch yet, so this degrades to checked:false (plain confirm). Never
