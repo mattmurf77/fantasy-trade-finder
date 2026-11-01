@@ -36929,8 +36929,9 @@ def _paywall_products(now: datetime) -> list:
 # circuits the projector, so a tip can never grant `pro`. Guideline 3.1.1:
 # in-app tips to the developer must be IAP. SERVED BEHIND A KNOB (tip-jar
 # plan §3 S1, docs/plans/tip-jar/plan.md): the route sends this list only
-# while model_config `paywall_tips_enabled` is exactly 1 and the resolved
-# platform is `ios`; otherwise `tips: []`. The knob defaults to 0 and
+# while model_config `paywall_tips_enabled` is exactly 1, the resolved
+# platform is `ios` and the session is verified and not demo; otherwise
+# `tips: []`. The knob defaults to 0 and
 # release-lead sets it to 1 once the three products exist in App Store
 # Connect; setting it back to 0 is the deploy-free kill switch.
 _PAYWALL_TIPS = [
