@@ -595,7 +595,8 @@ def test_og_package_card_names_the_calculators_generic_picks(env):
     assert "Mid 1st Round Pick" in drawn and "Late 2nd Round Pick" in drawn, drawn
     assert drawn.count("PK") == 2 and drawn.count("Unknown player") == 2, drawn
     fills = [kw.get("fill") for name, args, kw in calls if name == "rounded_rectangle"]
-    assert fills.count(og_image.PICK_CHIP_FILL) == 2, fills
+    assert og_image.PICK_CHIP_FILL == (151, 161, 174)        # chalk-dim, #564's chip
+    assert fills.count((151, 161, 174)) == 2, fills
 
 
 # ---------------------------------------------------------------------------
