@@ -105,6 +105,9 @@ DELETION_ONLY_KEYS = (
     ("draft_picks_table", "original_user_id"),
     ("recorded_picks_table", "picking_team_id"),
     ("prepared_trade_participants_table", "participant_user_id"),
+    # Other users' overhaul offers naming the deleted user (overhauls'
+    # account_user_id comes from the export manifest).
+    ("overhaul_offers_table", "counterparty_user_id"),
 )
 # Reported as info counts, never a failure (onboarding-eng, 2026-10-26).
 # user_events.props: OTHER users' events can name an entry id (e.g.
@@ -113,10 +116,6 @@ DELETION_ONLY_KEYS = (
 JSON_MENTIONS = (("standing_offers_table", "team_user_ids"),
                  ("leagues_table", "opponent_data"),
                  ("user_events_table", "props"))
-OVERHAUL_REFS = (("overhauls_table", "account_user_id"),
-                 ("overhauls_table", "league_user_id"),
-                 ("overhaul_offers_table", "counterparty_user_id"),
-                 ("overhaul_reservations_table", "seller_user_id"))
 CREDENTIAL_TABLES = ("espn_credentials_table", "mfl_credentials_table")
 
 
@@ -287,6 +286,30 @@ def _assignment_event_entry_ids(found) -> set[str]:
     return named
 
 
+def _overhaul_snapshot_entry_ids(found) -> set[str]:
+    """entry: ids still keying an overhaul snapshot's `rosters` or holding its
+    recovery pick (other users' overhauls). delete_user_data anonymizes a
+    deleted Fleeced-minted id there, so after --execute only skipped entry
+    users may remain."""
+    if "overhauls" not in found["existing"]:
+        return set()
+    ovh = db.overhauls_table
+    named: set[str] = set()
+    with db.engine.connect() as conn:
+        for snap, rec in conn.execute(select(ovh.c.snapshot_json, ovh.c.recovery_json).where(
+                ovh.c.snapshot_json.like("%" + ENTRY_PREFIX + "%")
+                | ovh.c.recovery_json.like("%" + ENTRY_PREFIX + "%"))).all():
+            for raw, pick in ((snap, lambda d: list(d.get("rosters") or {}) if isinstance(d.get("rosters"), dict) else []),
+                              (rec, lambda d: [d.get("holder_user_id")])):
+                try:
+                    value = json.loads(raw or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if isinstance(value, dict):
+                    named.update(k for k in pick(value) if isinstance(k, str) and k.startswith(ENTRY_PREFIX))
+    return named
+
+
 def _assignment_order_entry_ids(found) -> set[str]:
     """entry: ids still listed in any league's pick_assignment_settings.order
     (other importers' rows included). delete_user_data anonymizes a deleted
@@ -319,13 +342,10 @@ def _users_count(found) -> int | None:
 
 def _info(found) -> list[str]:
     json_counts = _count_like(JSON_MENTIONS, found["existing"], "%" + ENTRY_PREFIX + "%")
-    overhaul = _count_like(OVERHAUL_REFS, found["existing"], ENTRY_PREFIX + "%")
     return [
         "info (never a failure):",
         "  rows whose JSON mentions an entry: id: "
         + ", ".join(f"{k} {v}" for k, v in json_counts.items()),
-        "  overhaul rows naming an entry: id (known general deletion gap, privacy §6 'not yet'): "
-        + ", ".join(f"{k} {v}" for k, v in overhaul.items()),
     ]
 
 
@@ -507,6 +527,10 @@ def verify(cutoff) -> int:
     # (f) no league's pick-assignment order still lists a removed entry id.
     leftover_orders = _assignment_order_entry_ids(found) - skipped
     ok_f = not leftover_orders
+    # (h) no other user's overhaul snapshot or recovery still names a removed
+    # entry id (release-lead #540 QA P3).
+    leftover_snapshots = _overhaul_snapshot_entry_ids(found) - skipped
+    ok_h = not leftover_snapshots
     # (e) a machine identity check: an empty or wrong database must not pass.
     n_users = _users_count(found)
     ok_e = bool(n_users)
@@ -545,9 +569,11 @@ def verify(cutoff) -> int:
                  f"{len(leftover_orders)} -> {'OK' if ok_f else 'FAIL'}")
     lines.append(f"(g) entry users without verified_via (legal R28.16 part 1): {unverified} -> "
                  f"{'OK' if ok_g else 'FAIL'}")
+    lines.append(f"(h) overhaul snapshots and recoveries naming a removed entry id: "
+                 f"{len(leftover_snapshots)} -> {'OK' if ok_h else 'FAIL'}")
     lines += _info(found)
     print("\n".join(lines))
-    return 0 if ok_a and ok_b and ok_c and ok_d and ok_e and ok_f and ok_g else 1
+    return 0 if ok_a and ok_b and ok_c and ok_d and ok_e and ok_f and ok_g and ok_h else 1
 
 
 def _db_name(url) -> str:
