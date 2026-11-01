@@ -43,7 +43,11 @@ def test_the_league_example_gap_is_a_mid_2nd_at_todays_values():
     league = (BAR.parents[1] / "screens/LeagueScreen.tsx").read_text()
     block = re.search(r"^const EXAMPLE_GAP = \{(.*?)^\};$", league, re.M | re.S)
     assert block, "EXAMPLE_GAP moved: update this test"
-    nums = {k: float(v) for k, v in re.findall(r"^\s*(value|firsts): ([0-9.]+),$", block.group(1), re.M)}
+    # The top level only (two-space indent): pick_equivalent's nested `value`
+    # is checked on its own below (#567 delta QA P2: `^\s*` let it shadow
+    # the top-level value users see).
+    nums = {k: float(v) for k, v in re.findall(r"^  (value|firsts): ([0-9.]+),$", block.group(1), re.M)}
+    assert set(nums) == {"value", "firsts"}, nums
     pick_value = float(re.search(r"pick_equivalent: \{.*?value: ([0-9.]+),", block.group(1), re.S).group(1))
     e2v = ts.elo_to_value
     mid_2nd, mid_1st = e2v(GENERIC_PICK_SEEDS[(2, "Mid")]), e2v(GENERIC_PICK_SEEDS[(1, "Mid")])
