@@ -1,8 +1,8 @@
 # Feature Scope — Matches push arrival: scroll to the card and mark it (R2)
 
-**Date:** 2026-10-31
+**Date:** 2026-10-31 (round 2, after release-lead's QA on #568: 2026-11-01)
 **Entry point:** direct ask: head-eng's 11-06 bug-fix call on ux-lead's finding R2 (head-product ruled it into Update 1's scope on 2026-11-01, then pulled it forward as a bug fix). The spec is `docs/plans/action-banner/ux-states.md` §7 (draft 1.2) plus design-lead's mark spec. Both live on the org-bringup branch, not on `main` yet.
-**Builder:** eng-mobile worker for engagement-eng (branch `fix/matches-push-scroll`)
+**Builder:** eng-mobile worker for engagement-eng (branch `fix/matches-push-scroll`, PR #568)
 **Operator sign-off on waivers:** not needed. The waivers below are "n/a" rows; none touches a gate the operator owns.
 
 ---
@@ -22,8 +22,8 @@ whatever state it's in (§7 R9), so a mark is the only thing that can say which 
   (`deepLinks.ts:287`, `:335-337`).
 - The id is a `trade_matches` row. `GET /api/trades/matches/all` returns every row the user is party to, in every
   status (`server.py:25298-25306`, `database.py:11191`).
-- That query (`MatchesScreen.tsx:308`) feeds only the Mutual FlatList: `visibleMatches` at `:761`, rendered at `:1486-1488`
-  with key `match_id`.
+- That query (`MatchesScreen.tsx:344`) feeds only the Mutual FlatList: `visibleMatches` at `:797`, rendered at
+  `:1584-1587` with key `match_id`.
 - Awaiting rows have no `match_id`: they're keyed `league_id:trade_id`. Standing holds offers.
 - So the effect switches the segment to Mutual and never looks anywhere else.
 
@@ -48,28 +48,55 @@ whatever state it's in (§7 R9), so a mark is the only thing that can say which 
 
 **Maestro delta / simulator-gate tier: dead sections (D-056).** No flows and no captures.
 
-- [x] **Structural guard:** `mobile/tests/check-matches-push-scroll.js` (`npm run test:matches-push-scroll`), 60 checks.
-  - **Executed:** `indexForMatch`, `notFoundToast` (null → no line; a string → exactly that string, 4 s), and the shipped
-    `MATCH_NOT_FOUND_LINE === null`.
+- [x] **Structural guard:** `mobile/tests/check-matches-push-scroll.js` (`npm run test:matches-push-scroll`), 85 checks.
+  - **Executed** (`utils/matchesDerive.ts`, transpiled and run under node):
+    - `indexForMatch`;
+    - `notFoundToast`: null → no line; a string → exactly that string, held 4 s;
+    - the shipped `MATCH_NOT_FOUND_LINE === null`;
+    - `clampOffset`: floors at 0, caps at the content end;
+    - `scrollFailureJump`: the estimate minus `viewOffset`, clamped; on a fresh mount (average 0) a step to the furthest
+      measured row; nothing measured → no jump;
+    - `endClamp`: a settle past the end pulls back to it.
   - **Structural pins:**
-    - reads `match_id` and `ts`, with ts dedupe;
+    - typed route params (no `useRoute<any>`); reads `match_id` and `ts`, with `ts` dedupe;
     - lands on Mutual before the wait;
+    - **cancels on a blur or a segment change after Mutual has rendered** (`finishArrival` + `endMark`);
     - waits for the list, then refetches once;
     - the not-found and error branches;
     - the chip goes to All only when it hides the row;
-    - `scrollToIndex` with `viewPosition 0`;
-    - `onScrollToIndexFailed` jumps to the estimate, then retries once;
+    - `scrollToIndex` with `viewPosition 0` and **`viewOffset: ARRIVAL_VIEW_OFFSET` (a space token ≥ 8pt)**, on both the
+      first scroll and the retry;
+    - `onScrollToIndexFailed`: the clamped estimate or the measured-row step, then **at most 4 retries**;
+    - the estimate clamped to the tracked content end; **a settle past the end pulled back once**;
     - the drag guard;
-    - momentum-settle, plus a fallback;
+    - momentum-settle, plus the 600 ms fallback; the 250 ms retry delay;
     - the overlay props, `ARRIVAL_MARK`'s values, and 2000 ms then 120 ms ease-out on the native driver;
     - Reduce Motion;
     - keyed on `ts`;
-    - timers cleared on unmount and when the row goes;
-    - VoiceOver focus;
+    - timers cleared on unmount, when the row goes, and inside `endMark`;
+    - VoiceOver focus (and its deps);
+    - the found path's order (`finishArrival` before the mark is armed, shown or scrolled to); `showMark(` called from
+      exactly three places; `trustView` trusted only when Mutual was already up;
     - no analytics and no API call;
     - the producer contract in `deepLinks.ts` and `RootNav.tsx`.
   - **G-035 label:** it proves the wiring, not runtime behavior.
-  - **Sabotage:** 21 mutants, each run once, all RED. Files restored byte-identical (sha-checked).
+  - **Sabotage:** 37 mutants (20 from round 1, re-anchored; 17 for round 2), each run once, all RED. Files restored
+    byte-identical (sha-checked).
+    - Round 2:
+      - drop `viewOffset` from the first scroll, or from the retry;
+      - set `viewOffset` under 8pt;
+      - leave `viewOffset` out of the estimate;
+      - leave the arrival armed on a blur, or on a segment change;
+      - remove the end pull-back, or the estimate clamp;
+      - make the retries unbounded;
+      - drop the average-0 step;
+      - drop `finishArrival` from the found path;
+      - add a fourth `showMark` call;
+      - change the fallback from 600 to 1000 ms;
+      - always trust viewability;
+      - drop `ts` from the a11y deps;
+      - make `endMark` keep its timers;
+      - set the route back to `any`.
 - [x] **Unit tests:** no backend change, so no pytest.
 - [x] **Code-walk proof:** below.
 - [x] **Manual TestFlight checklist:** below. This is the only runtime evidence.
@@ -86,103 +113,149 @@ whatever state it's in (§7 R9), so a mark is the only thing that can say which 
   `:374` passes a numeric `ts`.
 
 **Param → effect (`screens/MatchesScreen.tsx`)**
-- `:801-803` reads `match_id` and `ts` as strings.
-- The effect at `:893` waits for `isFocused` and returns at `:894` if this `ts` is already done.
-- New arrival: `:904` switches to Mutual at once (§7 step 1).
-- `:907` waits while the first fetch or a refetch runs (step 2).
-- `:913` looks the id up in `hiddenAwareMatches` (every league, minus pending dismisses).
-- Missing: `:921` refetches once, unless paused offline. The effect runs again when `isFetching` drops.
-- Found: `:942` sets the chip to All, but only when `visibleMatches` lacks the row (step 3).
-- The effect waits for the Mutual list to render, then sets `markRef` and `mark` to pending.
+- `:129` types the params (`MatchesRouteParams`) and `:260` reads them. `:837-839` reads `match_id` and `ts` as strings.
+- The arrival effect starts at `:944`.
+  - **Blurred:** if an arrival had already reached Mutual, `:949` ends it (`finishArrival`) and clears the mark.
+  - **Focused:** it returns at `:954` if this `ts` is already done.
+- New arrival: `:965` switches to Mutual at once (§7 step 1).
+- Same arrival, and the user has since picked Awaiting or Standing after Mutual rendered: `:966` cancels it. A later
+  return to Mutual never scrolls, marks or re-chips.
+- `:974` waits while the first fetch or a refetch runs (step 2).
+- `:976` looks the id up in `hiddenAwareMatches` (every league, minus pending dismisses).
+- Missing: `:984` refetches once, unless paused offline. The effect runs again when `isFetching` drops.
+- Found: `:1005` sets the chip to All, but only when `visibleMatches` lacks the row (step 3).
+- The effect waits for the Mutual list to render, calls `finishArrival`, then sets the mark to pending.
 
 **Effect → row visible → marked**
-- `:954`: if the user dragged during the wait, or the row is already fully on screen (100% viewability config,
-  `onViewableItemsChanged`), there's no scroll and the mark shows at once.
-- Otherwise `:961` calls `scrollToIndex({ index, animated:true, viewPosition:0 })`, which puts the badge and header at
-  the top (step 4).
-- An unmeasured row calls `onScrollToIndexFailed` (`:969`, wired at `:1491`). That jumps to
-  `averageItemLength × index`, without animation and ignoring that jump's own momentum-end, then retries `scrollToIndex`
-  once, 250 ms later, in a `try`.
-- A drag (`onArrivalDrag`, `:1002`) cancels a pending retry.
-- `onMomentumScrollEnd` (`onArrivalSettle`, `:997`) calls `showMark` (`:845`). A 600 ms fallback covers a scroll that
-  moves nothing: Fabric emits no momentum-end when the offset is unchanged.
-- `showMark` sets full opacity and `shown`. The row's last child (`:1579`) then renders the `ARRIVAL_MARK` outline.
+- `:1017`: if the user dragged during the wait, or the row is already fully on screen (100% viewability config,
+  `onViewableItemsChanged`; trusted only when Mutual was up before the arrival), there's no scroll and the mark shows at
+  once.
+- Otherwise `:1024` arms the 600 ms fallback.
+- `:1025` calls `scrollToIndex({ index, viewPosition:0, viewOffset: ARRIVAL_VIEW_OFFSET })`. The row lands 8pt
+  (`space.sm`, `:115`) below the list's top, so the outline's −6pt top stroke isn't clipped (P2-1).
+- An unmeasured row calls `onScrollToIndexFailed` (`:1040`, wired at `:1589`).
+  - With a measured average, `scrollFailureJump` (`:1051`) jumps to `average × index − viewOffset`, clamped to the
+    content end tracked by `onContentSizeChange` / `onLayout` (`:1594-1599`).
+  - On a fresh mount the average is 0, so it steps to `highestMeasuredFrameIndex` instead.
+  - It then retries `scrollToIndex` 250 ms later, in a `try`, at most `ARRIVAL_MAX_TRIES = 4` times (`:123`, `:1062`).
+    After that, the last jump stands.
+  - Each try covers at least one 10-row render batch, and about five in 250 ms. So four reach row 40 even at the floor.
+- A drag (`onArrivalDrag`, `:1100`) cancels a pending retry.
+- `onMomentumScrollEnd` (`onArrivalSettle`, `:1081`):
+  - **Past the content end:** VirtualizedList never clamps `scrollToIndex`, so a tail row can overshoot. `endClamp`
+    (`:1086`) detects it and pulls back to the end once, then waits for that settle.
+  - **Otherwise:** it calls `showMark` (`:892`). The 600 ms fallback covers a scroll that moves nothing, because Fabric
+    emits no momentum-end when the offset is unchanged.
+- `showMark` sets full opacity and `shown`. The row's last child (`:1683`) then renders the `ARRIVAL_MARK` outline
+  (`:94`).
   - It's `pointerEvents="none"`, `accessible={false}` and `importantForAccessibility="no-hide-descendants"`, keyed on `ts`.
-  - It holds 2000 ms, then `Animated.timing` takes it 1 → 0 over 120 ms ease-out on the native driver (`:861`), then
+  - It holds 2000 ms, then `Animated.timing` takes it 1 → 0 over 120 ms ease-out on the native driver (`:908`), then
     `endMark`.
-  - Under Reduce Motion (`:853`) it's removed after the same hold, with no fade.
-- The header ref (`:1516`) takes VoiceOver focus on show (`:889`, step 6).
-- `:880` ends the mark and clears its timer if the row leaves `visibleMatches` or the segment changes.
-- `:873` clears every timer on unmount.
+  - Under Reduce Motion (`:900`) it's removed after the same hold, with no fade.
+- The header ref (`:1620`) takes VoiceOver focus on show (`:941`, step 6).
+- `:932` ends the mark and clears its timer if the row leaves `visibleMatches` or the segment changes.
+- `:925` clears every timer on unmount.
 
 **Not-found path**
-- After the one refetch, the id is still missing at `:913`, so `finish()` runs.
-- If the fetch failed or is paused offline (`:928`), the arrival ends with no line and no scroll. The existing error or
-  empty state shows, and a later pull to refresh can't jump, because the `ts` is done.
+- After the one refetch, the id is still missing at `:976`, so `finishArrival()` runs.
+- If the fetch failed or is paused offline (`:991`), the arrival ends with no line and no scroll. The existing state
+  shows, and a later pull to refresh can't jump, because the `ts` is done.
 - Otherwise:
   - `endMark()` runs, so nothing is marked;
-  - the list scrolls to the top unless the user dragged (`:933`);
-  - `notFoundToast(MATCH_NOT_FOUND_LINE)` returns `null`, so no Toast shows (`:935`).
-- There's no toast, no error and no event. The arrival shows the Mutual list, or its empty state.
+  - the list scrolls to the top unless the user dragged (`:996`);
+  - `notFoundToast(MATCH_NOT_FOUND_LINE)` returns `null`, so no Toast shows (`:998`).
 
 ### §7 coverage
 
 | §7 row | Covered by |
 |---|---|
-| Land on Mutual; chip to All only if it hides the row | code + check (P-3, P-7) |
-| Wait for the list; refetch once when missing | code + check (P-4, P-5) |
-| `scrollToIndex` with `viewPosition 0`, estimate, then one retry | code + check (P-8, P-9). Visible landing: TestFlight 1, 4 |
-| A row already fully in view doesn't scroll | code + check (P-8b, P-8c). TestFlight 3 |
-| A drag drops the scroll | code + check (P-8b, P-10). Runtime: TestFlight 8 |
+| Land on Mutual; chip to All only if it hides the row | code + check (P-3a, P-7). TestFlight 2, 3 |
+| Wait for the list; refetch once when missing | code + check (P-4, P-5). TestFlight 5 |
+| `scrollToIndex` (`viewPosition 0`, `viewOffset`), estimate or step, bounded retries, end clamp | code + check (P-8, P-9, P-11c, U-3 to U-5). Visible landing: TestFlight 1, 4a–4c, 14 |
+| A row already fully in view doesn't scroll | code + check (P-8c, P-8d, P-20d). TestFlight 3 |
+| A drag drops the scroll | code + check (P-8c, P-10). Runtime: TestFlight 8 |
+| An unfinished arrival never stays armed | code + check (P-3b, P-3c). TestFlight 8b, 10 |
 | Mark: whole row, 2000 ms, 120 ms native fade, Reduce Motion, once per `ts`, timers cleared | code + check (P-12 to P-17). Look and timing: TestFlight 1, 9, 12, 13, 14 |
 | VoiceOver focus on the header | code + check (P-18). TestFlight 11 |
-| Dismissed, or not found after a fresh fetch | code + check (P-6). TestFlight 6 |
+| Dismissed, or not found after a fresh fetch | code + check (P-6). TestFlight 6a, 6b |
 | Declined / already sent | Found, because the list returns every status (`server.py:25298-25306`). TestFlight only |
 | Expired | Can't happen (head-product's v1 ruling 2). n/a |
-| Fetch failed, or offline with the id not cached | code + check (P-6a). TestFlight 7 |
+| Offline (paused) or fetch failed, with the id not cached | code + check (P-6a). TestFlight 7a (paused), 7b (failed) |
 | Offline with the id cached | code: found in the cache, no refetch. TestFlight only |
 | Mutual empty | code: the empty state; the line is `null`. TestFlight only |
 | The not-found line | the constant, shipped `null`, plus check (U-2a to U-2c, P-6). The words go to marketing (~11-03) |
-| No arrival, no change (tab press, League tiles) | code: no `match_id` means no effect; a stale `ts` is already done. TestFlight 10 |
+| No arrival, no change (tab press, League tiles, re-arrival probes) | code: no `match_id` means no effect; a done `ts` never replays. TestFlight 10 |
 
 ### Manual TestFlight checklist
 
-This follows ux-states §7. Use two accounts, A on the phone and B on the web, in one league, with mutual matches
-between them. B accepts on the web.
+This follows ux-states §7, with release-lead's QA additions on #568.
+
+**Preconditions:**
+- Two accounts: A on the phone, B on the web, in two shared leagues, with at least 12 mutual matches across them. B
+  accepts on the web.
+- Notifications on for A. Quiet hours off, or test between 08:00 and 22:00.
+- Every push step needs a match B hasn't accepted yet. Repeats can use the bell-inbox "Trade match with @B" rows instead
+  of a fresh push.
+- Step 13 runs on a build that includes #488.
 
 1. **Cold start:**
-   - Kill the app on A. B accepts.
+   - Kill the app on A. B accepts a match that is **not the first card**.
    - Tap the "@B accepted your trade" push.
    - Matches opens on Mutual, scrolled to that card, with a flare outline round the whole row for about 2 s.
+   - **All four sides of the outline are visible.**
 2. **Wrong segment and chip:**
-   - Leave Matches on Awaiting, with the chip on another league.
+   - Leave Matches on Awaiting, with the chip on the other league.
    - Tap the push: Mutual opens, the chip goes to All, and the card is scrolled to and outlined.
 3. **Right chip:** with the chip on the match's own league, tap the push. The chip stays. If the card is already fully in
    view, the list doesn't move and the outline shows at once.
-4. **Long list:** with 8 or more matches, tap the push for the bottom one. It scrolls fully into view, with its header at
-   the top.
-5. **Brand-new match:** tap a new-match push within seconds. The card is scrolled to and outlined, and nothing else shows.
+4. **Long list:**
+   - **4a. Warm:** with Matches already open on Mutual, tap the push for a row ≥ 6. It scrolls with the header 8pt below
+     the list's top, outlined.
+   - **4b. Remount:** leave Matches on Awaiting, with 12 or more matches. Tap the push for a row ≥ 11. Mutual remounts
+     and the card scrolls into view, outlined.
+   - **4c. The last card, on the biggest phone:** tap the push for the last card. No blank band stays under it. If the
+     scroll ran past the end, it pulls back once before the outline shows.
+5. **Brand-new match:** open Matches, then have the match form and tap its push within 15 s. The card is scrolled to and
+   outlined (the one refetch found it), and nothing else shows.
 6. **Dismissed:**
-   - Dismiss a match and wait past Undo.
-   - Tap its old notification in the TopBar inbox.
-   - The Mutual list shows at its top, nothing is outlined, and **no line shows**: `MATCH_NOT_FOUND_LINE` ships `null`
-     until marketing's words land.
-7. **Offline:**
-   - Turn on airplane mode, then tap a push for a match this phone hasn't loaded.
-   - The normal error state shows, with no line.
-   - Turn the network back on and pull to refresh: the list doesn't jump.
-8. **Drag first:** on 3G (Network Link Conditioner), tap a push and start scrolling at once. The list never jumps under
-   your finger.
-9. **Repeat:** after the outline fades, scroll away, then tap the same inbox notification again. It scrolls and outlines
-   again.
-10. **No arrival, no change:** a plain Matches tab press, and League home's Matches tiles, never scroll, outline or show
-    a line.
-11. **VoiceOver on:** after the scroll, focus is on "New match with @‹name›". The outline isn't announced.
-12. **Reduce Motion on:** the outline disappears at about 2 s, with no fade.
-13. **Send while outlined:** tap Send in Sleeper while the outline shows. It works normally (the overlay passes touches
-    through).
-14. **The look:** a 2pt flare outline, 6pt outside the row, radius 8. No fill, tint or glow. The green header and the ice
-    Send button are unchanged.
+   - **6a.** Dismiss a match and wait past Undo. Tap its old notification in the TopBar inbox. The Mutual list shows at
+     its top, nothing is outlined, and **no line shows**: `MATCH_NOT_FOUND_LINE` ships `null` until marketing's words
+     land.
+   - **6b.** Dismiss a match, and **during the Undo window** tap its inbox row. Same as 6a: the top, nothing outlined, no
+     line. Then tap Undo: the card comes back, unmarked, and the list doesn't jump.
+7. **Offline.** Airplane mode pauses queries rather than failing them (NetInfo → `onlineManager`, `App.tsx:254-266`),
+   so it never shows the error state.
+   - **7a. Paused:**
+     - Receive a push for a match this phone hasn't loaded.
+     - Turn airplane mode on, then tap the push from Notification Center.
+     - Matches opens on Mutual with the cached list (if one is under 30 min old) or "No mutual matches yet". There's no
+       outline, no line and no jump.
+     - Turn airplane mode off: the list loads, and doesn't jump or outline. Pull to refresh: no jump either.
+   - **7b. Failed (the real error state):**
+     - Join a hotspot with no internet (connected, no route), then tap a push for an unloaded match.
+     - The "Could not load matches." error state shows, with no line.
+     - Restore internet and pull to refresh: the list loads and doesn't jump.
+8. **Drag first:** on 3G (Network Link Conditioner; it needs Developer Mode on the phone), tap a push and start scrolling
+   at once. The list never jumps under your finger.
+   - **8b. Cancel mid-wait:** on 3G, tap a push, then pick Awaiting before the list lands. Go back to Mutual: no scroll,
+     no outline, and the chip is as you left it.
+9. **Repeat:**
+   - After the outline fades, scroll away, then tap the same inbox notification again. It scrolls and outlines again.
+   - **Fast double-tap** on an inbox row: one scroll and one outline, with no stutter.
+10. **No arrival, no change:** none of these ever scroll, outline or show a line:
+    - a plain Matches tab press, and League home's Matches tiles;
+    - **re-arrival probes** after an arrival: tab away and back, background then foreground, pull to refresh, and
+      dismiss *another* match.
+11. **VoiceOver on:** after the scroll, VoiceOver reads "New match with @B" first. The outline isn't announced.
+12. **Reduce Motion on:** the outline disappears at about 2 s, with no fade. **Screen-record it.**
+13. **Send while outlined** (a build with #488): tap Send in Sleeper while the outline shows, then **cancel at "Send
+    this trade?"**. The dialog works normally (the overlay passes touches through), and nothing is sent.
+14. **The look:**
+    - A 2pt flare outline, 6pt outside the row, radius 8. No fill, tint or glow.
+    - **The top edge is visible after a scroll** (the row sits 8pt below the list's top).
+    - The green header and the secondary Send in Sleeper button are unchanged. The card carries no ice.
+
+**Render:** `renders/arrival-mark.png` (design-lead's v2).
 
 ## 4. Docs scope
 
@@ -192,20 +265,24 @@ between them. B accepts on the web.
 | `living-memory/LLD.md` | n/a | No schema, route or invariant convention shifted |
 | `docs/architecture.md` | n/a | No module wiring or data-flow change. It's a client-side screen effect |
 | `living-memory/HLD.md` | n/a | Not an architecture shift |
-| `docs/cross-client-invariants.md` | n/a | No shared enum, colour or threshold. The mark uses the existing `flare.base`, `radii.md` and `duration.fast` tokens |
+| `docs/cross-client-invariants.md` | n/a | No shared enum, colour or threshold. The mark uses the existing `flare.base`, `radii.md`, `duration.fast` and `space.sm` tokens |
 | `docs/glossary.md` | n/a | No new domain term |
 | ADR or `DECISIONS.md` | n/a | The behavior is ux-lead's §7 and design-lead's mark spec. Not a new architectural choice |
+| `docs/design/components.md` | updated | Feedback & status: an "Arrival mark" row (design-lead's spec) |
 | `mobile/tests/README.md` | updated | Matches row: `check-matches-push-scroll` |
 | `mobile/src/screens/CLAUDE.md` | updated | `MatchesScreen` row: the arrival behavior |
 | `docs/plans/README.md` | updated | New thread row |
 
 ## 5. Ship gate declaration
 
-- **CI:** on the worker's machine, `tsc --noEmit` is clean, all 135 `mobile/tests/check-*.js` pass, and `testid-lint`
+- **CI:** on the worker's machine, `tsc --noEmit` is clean, all 136 `mobile/tests/check-*.js` pass, and `testid-lint`
   is OK. CI on the pushed sha is the lead's to confirm.
 - **Evidence:** `living-memory/TEST_LEDGER.md` is written at merge by the lead or release-lead. This worker commits only.
-- **TestFlight:** the 14 steps above, run by the operator or release-lead QA, with the outcome logged in TEST_LEDGER.
+- **TestFlight:** the steps above, run by the operator or release-lead QA, with the outcome logged in TEST_LEDGER.
 - **Express lane:** no. The full gates apply, kept lean for a bug fix.
 - **Open edges:**
   - The not-found line ships `null`. Marketing's words (~11-03) are a one-constant swap.
   - When the line is set, it replaces an Undo toast that's showing at that moment.
+  - **The tail clamp happens at the settle.** VirtualizedList doesn't expose cell offsets, so a tail row that overshoots
+    is pulled back to the content end once its scroll settles. A brief overshoot can show, but no band stays. The
+    estimate jump is clamped up front.

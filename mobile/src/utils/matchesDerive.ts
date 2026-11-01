@@ -104,3 +104,47 @@ export function notFoundToast(
 ): { msg: string; holdMs: number } | null {
   return line ? { msg: line, holdMs: NOT_FOUND_HOLD_MS } : null;
 }
+
+/**
+ * R2 — floor a scroll target at 0 and cap it at the content end
+ * (`maxOffset` = content length − visible length; null when not yet known),
+ * so an estimate never scrolls past either edge.
+ */
+export function clampOffset(offset: number, maxOffset: number | null): number {
+  const floored = Math.max(0, offset);
+  return maxOffset == null ? floored : Math.min(floored, Math.max(0, maxOffset));
+}
+
+/**
+ * R2 — where onScrollToIndexFailed jumps before its retry. With a measured
+ * average, the estimated offset (index × average − viewOffset, clamped).
+ * On a fresh mount the average is 0, so step to the furthest measured row
+ * instead and let the next batch render beyond it. null: nothing measured
+ * yet, so no jump (the retry still runs).
+ */
+export function scrollFailureJump(
+  info: { index: number; averageItemLength: number; highestMeasuredFrameIndex: number },
+  viewOffset: number,
+  maxOffset: number | null,
+): { offset: number } | { index: number } | null {
+  if (info.averageItemLength > 0) {
+    return { offset: clampOffset(info.averageItemLength * info.index - viewOffset, maxOffset) };
+  }
+  if (info.highestMeasuredFrameIndex >= 0) return { index: info.highestMeasuredFrameIndex };
+  return null;
+}
+
+/**
+ * R2 — VirtualizedList never clamps scrollToIndex, so a tail row's
+ * viewPosition-0 target can land past the content end and leave a blank
+ * band under the last card. Given a settled scroll, the end offset to pull
+ * back to, or null when it's within bounds (1pt tolerance).
+ */
+export function endClamp(
+  offsetY: number,
+  contentLength: number,
+  visibleLength: number,
+): number | null {
+  const max = Math.max(0, contentLength - visibleLength);
+  return offsetY > max + 1 ? max : null;
+}
