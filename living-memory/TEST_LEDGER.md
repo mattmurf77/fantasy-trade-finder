@@ -1,3 +1,27 @@
+## 2026-11-01 — Deletion scrub stage 3, release-lead's #562 delta QA at ec018bc2 (GO-with-notes, P3s only)
+
+- **The backfill:**
+  - Its first read now runs in a transaction under the same `SET LOCAL` timeouts. A held lock made it wait 12 s; it could have waited forever.
+  - It never fills the session's own user (QA's case c).
+  - `trade_json.receive` must be a list, so a scalar no longer sinks its chunk on every boot.
+  - Failed chunks are summarised in one warning.
+  - The SET LOCALs go through `_execute_ddl`, which a SQLite-run test can spy on, so CI guards them too.
+- **The notification scan:** it no longer ORs two SQL terms per captured match id. It reads the notifications of the person's matches' counterparties instead. QA timed 2,000 ids at 102 s on Postgres, and 600+ broke SQLite's expression limit. The redundant `match_id in match_ids` and `or deleted_side` are gone. The chunk re-select's `IS NULL` stays, to avoid re-filling.
+- **Docs:** the scope's residual now says a wrong name fill needs the players to have moved, and that traded or pick-only cards stay NULL. The `capture_names` and `redact_notification` docstrings are fixed.
+- **New tests:**
+  - every backfill transaction sets both timeouts, on SQLite via the spy;
+  - the viewer is never filled, and a scalar receive is skipped with 0 chunks failed;
+  - a person with 1,500 matches is scanned on SQLite;
+  - the non-ASCII notification goes to a recipient with no match, so only the escaped term finds it.
+- **Sabotages, 47/47 red, with Postgres:**
+  - the 42 from last round, with moved anchors updated;
+  - the first read without timeouts;
+  - the viewer allowed;
+  - receive not checked for a list;
+  - a SQL term per match id again;
+  - no counterparty rows.
+- **Runs:** the related and migration suites with Postgres, 905 passed.
+
 ## 2026-11-01 — Deletion scrub stage 3, release-lead's #562 delta QA (GO-with-notes): the boot backfill hardened, match ids captured
 
 - **The backfill** (release-lead: it runs from `_migrate_db`, so during a Render build too, against prod while the old instance serves):
