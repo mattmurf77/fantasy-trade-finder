@@ -67,7 +67,7 @@
 | §4.3 `:240-285`: the two append-only tables | `platform` is required (closed set). `sleeper_transaction_id` → `platform_transaction_id`. `attempt_id` is unique for the send. `result` gains `unknown`. **Append-only kept** (§2) |
 | §4.4 `:306-309`: `GET`/`DELETE /api/sleeper/write-consent` | **`GET`/`DELETE /api/platform-write-consent?platform=sleeper`**. The Settings "Stop roster moves" row shows **only while a grant is active**, server-driven |
 | §5 `:311-326`: after the move | **Kept.** One invalidation refreshes the FA list, drop list and FAAB. **K-F5, reduced (trades-pm, 11-01):** the held page is discarded and the server saves the roster before answering, so the next search drops B; cards already on screen keep B until then (§B10) |
-| §6 `:328-362`: seven granted `sleeper_fa_*` events | **Kept**, plus two **proposed, not granted** changes (§1) |
+| §6 `:328-362`: seven granted `sleeper_fa_*` events | **Renamed `fa_move_*`** with `league_platform`, plus `outcome_unknown`: **granted 2026-11-01 (`analytics-lead`)** with C1–C6 (§1) |
 | §7 `:364-391`: AC-19..AC-40, post-launch | **At launch.** AC-20, AC-29, AC-30, AC-33, AC-35 and AC-40 change, and AC-41..AC-48 are added (§3) |
 
 ## B. Product calls (platforms-pm, 2026-11-01)
@@ -176,7 +176,7 @@ free_agents[i].move_mode: "handoff"                 // optional per-row override
 
 The Settings › Leagues "Stop roster moves" row shows only while a grant is active, driven by the consent `GET`. **Legal's launch minimum arrives via `head-bizops` by ~11-04 and folds in.** It is an open input (§F).
 
-**B9. Analytics.** consent.md's granted events and conditions stand (F1–F5, G-rules). Two changes are **proposed, not granted**, and need analytics-lead's re-grant via `head-product` (§1).
+**B9. Analytics.** consent.md's events and conditions stand (F1–F5, G-rules), renamed `fa_move_*` with `league_platform`, plus `outcome_unknown`. **Granted 2026-11-01 (`analytics-lead`)** with C1–C6 (§1). Build to `fa_move_*`.
 
 **B10. K-F5, the deck after a move: answered by `trades-pm`, 2026-11-01** (cited at `origin/main` @ `84c4c448`).
 - **What ships.** It's in the 11-06 binary, in a **reduced form**: after a completed move, the **next search** no longer offers the dropped player (B). Cards already on screen keep B until that search.
@@ -200,19 +200,22 @@ The Settings › Leagues "Stop roster moves" row shows only while a grant is act
 
 **For `ux-lead` and `design-lead`.** This is the full set the **11-06 binary must carry**, including claims and the `{platform}_*` suffix mapping, so that claims, MFL and ESPN can light up with no build.
 - The user-facing text column gives **intent**, not final words (§G).
-- Event names are consent.md §6's granted `sleeper_fa_*` names, shortened here (`connect_shown` = `sleeper_fa_connect_shown`). They become `fa_move_*` if the §1 re-grant lands.
+- Event names are the granted `fa_move_*` names (§1), shortened here (`connect_shown` = `fa_move_connect_shown`).
+  - Every one carries `league_platform` (C1).
+  - `error_code` is the platform-free suffix (C2).
+  - The hand-off event keeps its full name, `sleeper_handoff_resolved`.
 
 | # | State | Trigger (server code or capability) | What the user sees (intent) | Actions | Event | Sheet after |
 |---|---|---|---|---|---|---|
-| 1 | **Hand-off** | `move.mode='handoff'`: Sleeper with `sleeper.send_add_drop` off; per-row `move_mode='handoff'`; or 404 `feature_disabled` from the move route | Today's sheet (bid, drop) and one CTA, "Open in Sleeper to claim" (`fa-claim.open-sleeper`). **No steps, no clipboard.** Footer: you'll finish this in Sleeper (server line, replacing `ClaimSheet.tsx:312`) | Open in Sleeper to claim (#509's opener; #379's D2 alert if Sleeper isn't installed); Cancel | none new | Stays until the open. No refresh |
+| 1 | **Hand-off** | `move.mode='handoff'`: Sleeper with `sleeper.send_add_drop` off; per-row `move_mode='handoff'`; or 404 `feature_disabled` from the move route | Today's sheet (bid, drop) and one CTA, "Open in Sleeper to claim" (`fa-claim.open-sleeper`). **No steps, no clipboard.** Footer: you'll finish this in Sleeper (server line, replacing `ClaimSheet.tsx:312`) | Open in Sleeper to claim (#509's opener; #379's D2 alert if Sleeper isn't installed); Cancel | `sleeper_handoff_resolved {target: add}` on the open (#528) | Stays until the open. No refresh |
 | 2 | **Unsupported** | `move.mode='unsupported'` (ESPN or MFL until Update 1, Fleaflicker, local/demo), or `move` absent on a non-Sleeper league | Unchanged: the Add is dimmed and the tap shows `NO_ADD_REASON`, byte for byte (`ClaimSheet.tsx:67-100`) | OK | none | No sheet |
 | 3 | **Connect** | Pre-tap `move.connect='not_linked'`, or 409 `{platform}_not_linked` | A connect step in the sheet, saying why: "Connect your Sleeper sign-in to make moves from here" (`s351.connect`, approved) | **Connect** opens the platform's connect screen; the sheet is hidden, not destroyed, and comes back with bid and drop intact, **never auto-sending** (consent.md `:84-88`). **Do it in Sleeper instead** | `connect_shown {reason: not_linked}` | Stays (hidden while connecting) |
 | 4 | **Verify** | `move.connect='expired'` / `'unverified'`, or 409 `{platform}_expired`, or 403 `verification_required` | The same step, with **Verify** | As 3 | `connect_shown {reason: expired \| unverified}` | Stays |
 | 5 | **Consent needed** (first / lapsed / version / withdrawn) | At the tap, `move.consent_until` is null or past → consent `GET` (text + `copy_version`). Safety net: 409 `consent_required` (carries the same) | The consent step: the server's text for (platform, `copy_version`, locale). v1 is legal-final now (consent.md §4.1); v2 once claims are on. "This move: {CTA label} in {League}." sits above an **unticked** box. Make the move is disabled until it's ticked | **Make the move** (a fresh tap; sends `consent: {copy_version, locale}`); **Not now** (back to the sheet, unchanged); **Do it in Sleeper instead** | `consent_shown {reason}`; on Make the move, `write_attempted {consent_ticked: true}`; server `consent_recorded` | Stays |
 | 6 | **Ready** | `mode='submit'`, connected, consent valid | **The named CTA is the per-move confirmation (D10)**: "Add A, drop B" / "Add A" / "Claim A for $N, drop B", matching the row's `move_kind`. The league is on or beside it. The finality line is always under it. A claim also shows the waiver line and bid. Inside a window: "Adds authorized until {date}" + **Turn off** (→ the Settings row) | CTA; Do it in Sleeper instead; Cancel | none until the tap | Open |
 | 7 | **Submitting** | CTA tapped | CTA loading; disabled from tap to result (D10(f)); the sheet can't be dismissed mid-send (design-lead to confirm) | none | `write_attempted` | Open |
-| 8 | **Added** | 200, `status: complete` | Says exactly what the platform reports: A added, B dropped, in {League}. A partial result is stated as reported (R15.1 `:767-771`, K-F6) | **Done** | server `write_succeeded {mode: add, result: accepted \| partial}` | Done closes. Refresh (note b). The held trade page is discarded automatically and the server has already saved the new roster (§B10), so the next search drops B. Cards already on screen keep B until then: the display half of W-AC-L5 the operator waived, the same as a drop made in Sleeper. A send including B is refused by the live roster read (`server.py:24697`); a Like may still record (AC-6b post-launch). In-place removal comes with strict mode |
-| 9 | **Waiver pending** | 200, `status: pending` | "Claim submitted" for A, bid $N, dropping B **if it clears**, run on the league's waiver schedule. **Never "added".** No cancel line until capture Q7b is verified (R15.8 `:874`) | **Done** | server `write_succeeded {mode: claim, result: accepted}` | Done closes. Refresh; the row reads "claim pending" for the session (consent.md §5) |
+| 8 | **Added** | 200, `status: complete` | Says exactly what the platform reports: A added, B dropped, in {League}. A partial result is stated as reported (R15.1 `:767-771`, K-F6) | **Done** | server `write_succeeded {move_kind: add, result: accepted \| partial}` | Done closes. Refresh (note b). The held trade page is discarded automatically and the server has already saved the new roster (§B10), so the next search drops B. Cards already on screen keep B until then: the display half of W-AC-L5 the operator waived, the same as a drop made in Sleeper. A send including B is refused by the live roster read (`server.py:24697`); a Like may still record (AC-6b post-launch). In-place removal comes with strict mode |
+| 9 | **Waiver pending** | 200, `status: pending` | "Claim submitted" for A, bid $N, dropping B **if it clears**, run on the league's waiver schedule. **Never "added".** No cancel line until capture Q7b is verified (R15.8 `:874`) | **Done** | server `write_succeeded {move_kind: claim, result: accepted}` | Done closes. Refresh; the row reads "claim pending" for the session (consent.md §5) |
 | 10a | **Rejected: roster full** | 422 `roster_full_drop_required` | Pick a player to drop. The drop list is highlighted. No result screen | Pick a drop, tap again (a new move, not a retry) | `write_failed {error_code, status}` (10a–10g) | Stays |
 | 10b | **Rejected: drop gone** | 422 `asset_not_owned` | B is no longer on your roster | Pick again | as 10a | Stays. Drop list refreshed |
 | 10c | **Rejected: player taken** | 422 `player_unavailable` | A was just picked up | **Done** (no retry) | as 10a | Closes. Refresh |
@@ -220,10 +223,10 @@ The Settings › Leagues "Stop roster moves" row shows only while a grant is act
 | 10e | **Rejected: changed** | 409 `move_kind_changed` | A went on (or off) waivers. Nothing was sent | Review the corrected CTA | as 10a | Stays. Re-reads the FA list |
 | 10f | **Rejected by the platform** | 502 `{platform}_write_failed` (the platform refused; `detail` is its sentence) | The reason in plain words. Nothing changed (R15.1 rejection line) | **No retry.** Open in Sleeper (secondary); Done | as 10a | Closes on Done |
 | 10g | **Unavailable** | 503 `{platform}_unconfigured` | Moves aren't available right now | Open in Sleeper; Done. No retry | as 10a | Closes on Done |
-| 11 | **Not sent** | 502 `{platform}_write_failed` with `kind: network` from a definite connect-phase failure (`request_never_sent`), or a pre-write read failure (`kind: roster_read`) | Couldn't reach Sleeper, so nothing was sent | **Try again**. The only retry anywhere; it's a fresh tap with a new `attempt_id` | `write_failed` | Stays |
-| 12 | **Outcome unknown** | 502 `{platform}_outcome_unknown`; 409 `move_in_progress`; client timeout; status 0; 500 `internal_error`; a 5xx with no code | **"Check before resending"** (8i). We couldn't confirm whether the move reached Sleeper; check your roster (or your claims) in Sleeper before trying again. Never "failed", never "try again" | **Open in Sleeper**; Done. **No retry, and the CTA does not come back for this player in this sheet** | `write_failed {error_code: outcome_unknown}` (proposed; `unknown` until re-granted) | Closes on Done. Refresh (a landed add leaves the list) |
-| 13 | **Connection rejected** | 409 `{platform}_rejected`: the platform refused the stored token. The server deletes the credential and appends a withdrawal (`credential_rejected`, consent.md `:300`) | Sleeper turned down Fleeced's connection, so nothing changed. Connect again to make moves | Done; Do it in Sleeper instead. **The next tap goes to Connect (3), then Consent (5)** | `write_failed {error_code: sleeper_rejected}`; server `consent_withdrawn {via: credential_rejected}` | Stays until Done. Capability refetched |
-| 14 | **Claims not enabled** | Per-row `move_mode='handoff'` for a waiver player, or 422 `waiver_claim_unsupported` (D5 not met) | This player is on waivers, and claims from Fleeced aren't on yet, so claim in Sleeper. The sheet switches to hand-off (1) with bid and drop kept | Open in Sleeper to claim | `write_failed {error_code: waiver_claim_unsupported}` (422 path only) | Stays, in hand-off mode |
+| 11 | **Not sent** | 502 `{platform}_write_failed` with `kind: network` from a definite connect-phase failure (`request_never_sent`), or a pre-write read failure (`kind: roster_read`) | Couldn't reach Sleeper, so nothing was sent | **Try again**. The only retry anywhere; it's a fresh tap with a new `attempt_id` | `write_failed {error_code: write_failed, kind: network \| roster_read}` (C6) | Stays |
+| 12 | **Outcome unknown** | Exactly C4's "couldn't confirm" read: 502 `{platform}_outcome_unknown` (`outcome_unknown`); 409 `move_in_progress`; 500 `internal_error`; the client's timer fired (`timeout`); status 0 (`network`); a 5xx with no usable code (`unknown`, status ≥ 500) | **"Check before resending"** (8i). We couldn't confirm whether the move reached Sleeper; check your roster (or your claims) in Sleeper before trying again. Never "failed", never "try again" | **Open in Sleeper**; Done. **No retry, and the CTA does not come back for this player in this sheet** | `write_failed {error_code, status}` with the code in brackets in the trigger cell (C4) | Closes on Done. Refresh (a landed add leaves the list) |
+| 13 | **Connection rejected** | 409 `{platform}_rejected`: the platform refused the stored token. The server deletes the credential and appends a withdrawal (`credential_rejected`, consent.md `:300`) | Sleeper turned down Fleeced's connection, so nothing changed. Connect again to make moves | Done; Do it in Sleeper instead. **The next tap goes to Connect (3), then Consent (5)** | `write_failed {error_code: rejected}`; server `consent_withdrawn {via: credential_rejected}` | Stays until Done. Capability refetched |
+| 14 | **Claims not enabled** | Per-row `move_mode='handoff'` for a waiver player, or 422 `waiver_claim_unsupported` (D5 not met) | This player is on waivers, and claims from Fleeced aren't on yet, so claim in Sleeper. The sheet switches to hand-off (1) with bid and drop kept | Open in Sleeper to claim | `write_failed {error_code: waiver_claim_unsupported}` (422 path only); then `sleeper_handoff_resolved {target: add}` on the open (#528) | Stays, in hand-off mode |
 | 15 | **Settings: Stop roster moves** | Consent `GET` → `valid: true` | Settings › Leagues: "Roster moves: on until {date}" + **Stop roster moves** (consent.md §4.4; status lines approved, R15.8 `:856`). The row shows only while a grant is active | One tap, no dialog. Then R15.2.6's notice, verbatim | server `consent_withdrawn {via: settings}` | n/a |
 
 **Notes:**
@@ -265,16 +268,48 @@ Sizing is platforms-eng's (sizing `:37-39`).
 
 ## 1. Analytics scope
 
-- [x] **(a) New events specced.** consent.md §6 (`:336-344`) and #351 scope.md §1 (`:73-99`) hold the seven `sleeper_fa_*` events. They were **granted 2026-10-20** by `analytics-lead` with conditions F1–F5 (`:348-358`) and the G-rules. They stand as granted. This block proposes two changes, **proposed, not granted**. They need analytics-lead's re-grant, routed via `head-product`:
+- [x] **(a) New events specced.** **Granted 2026-11-01 by `analytics-lead`**, with conditions C1–C6. consent.md §6's seven events (`:336-344`), granted 2026-10-20 with F1–F5 (`:348-358`) and the G-rules, are **renamed `fa_move_*`**. They also gain a closed prop **`league_platform` ∈ `sleeper` \| `mfl` \| `espn`** (P2), and `outcome_unknown` joins `error_code` (P1).
+  - **Never a prop named `platform`.** `user_events.platform` is the device-platform column (`backend/analytics_taxonomy.py:1168-1174`; the NULL-`platform` incident).
+  - **Nothing to migrate.** No `sleeper_fa_*` or `fa_move_*` name is registered, emitted or read on `origin/main` @ `84c4c448`. So there is no alias and no series break.
 
-  | # | Proposed change | Why |
-  |---|---|---|
-  | P1 | Add **`outcome_unknown`** to `write_failed.error_code`'s closed enum (today: §3 codes ∪ `network` \| `timeout` \| `unknown`, consent.md `:344`) | State 12 is a distinct, expected outcome. Folding it into `unknown` hides how often a move can't be confirmed |
-  | P2 | Rename **`sleeper_fa_*` → `fa_move_*`** (same seven events, same classes, same props) and add a closed prop **`league_platform` ∈ `sleeper` \| `mfl` \| `espn`** on all seven | The client is platform-neutral, and MFL and ESPN arrive server-only, so a `sleeper_` name would be wrong in Update 1 with no build to fix it. **Never a prop named `platform`:** `user_events.platform` is the device-platform column (`backend/analytics_taxonomy.py:1168-1174`; the NULL-`platform` incident) |
+  | Event | Side | Class | Props (granted) |
+  |---|---|---|---|
+  | `fa_move_connect_shown` | client | NON_INTENT (exposure) | `surface`, `reason` ∈ `not_linked` \| `expired` \| `unverified`, `league_platform` |
+  | `fa_move_consent_shown` | client | NON_INTENT (exposure) | `surface`, `reason` ∈ `first` \| `lapsed` \| `version` \| `withdrawn`, `league_platform` |
+  | `fa_move_consent_recorded` | server | NON_INTENT | `surface`, `copy_version`, `league_platform` |
+  | `fa_move_consent_withdrawn` | server | NON_INTENT | `via` ∈ `settings` \| `disconnect` \| `credential_expired` \| `credential_rejected`, `league_platform` |
+  | `fa_move_write_attempted` | client | INTENT | `surface`, `has_drop`, `has_bid`, `consent_ticked`, `attempt_id`, `league_platform` |
+  | `fa_move_write_succeeded` | server | INTENT | `move_kind` ∈ `add` \| `claim` (C5), `has_drop`, `has_bid`, `result` ∈ `accepted` \| `partial`, `attempt_id`, `league_platform` |
+  | `fa_move_write_failed` | client | INTENT | `surface`, `error_code` (C3), `status` (int), `attempt_id`, `league_platform`, `kind` (C6, only when present) |
 
-  - **If the re-grant doesn't land before the emitters ship:** the build ships the **granted** `sleeper_fa_*` names and maps outcome unknown to the granted `unknown`. MFL and ESPN in Update 1 then need P2 first.
-  - F1–F5 hold either way: the tables are the record of truth; `attempt_id` rides on attempted, succeeded and failed; succeeded is only `accepted` \| `partial`; no ids, names or amounts. The emitters are registered in `ALLOWED_CLIENT_EVENTS`, `CLIENT_EVENT_PROPS` and `NON_INTENT_EVENTS` **in the same commit** as the emitters, with a dated addendum first.
-  - **Hand-off event:** `sleeper_handoff_resolved` (granted, #351 scope.md `:48-64`) **is not emitted by #509** @ `d14b7308`. This block doesn't add it.
+  **Conditions C1–C6 (`analytics-lead`, 2026-11-01), in substance:**
+  - **C1. `league_platform` is always present, never null.**
+    - Client events fire only when `move.mode = 'submit'`, where the capability's `league_platform` is set. A null capability emits nothing (a client test, F15).
+    - Server events use the resolved platform.
+    - The two consent events use the consent's `?platform=` value. For a grant recorded by the move route, that is the same resolved platform.
+  - **C2. `error_code` is platform-free.** It records the suffix (`not_linked`, `expired`, `unconfigured`, `rejected`, `write_failed`, `outcome_unknown`). The platform lives in `league_platform`.
+  - **C3. A closed set of 21 values,** enumerated in the addendum and pinned by test against the route's codes:
+    - `feature_disabled`, `bad_request`, `verification_required`, `not_linked`, `expired`, `unconfigured`, `consent_required`;
+    - `roster_full_drop_required`, `asset_not_owned`, `player_unavailable`, `waiver_bid_over_budget`, `waiver_claim_unsupported`, `move_kind_changed`;
+    - `rejected`, `write_failed`, `outcome_unknown`, `move_in_progress`, `internal_error`;
+    - `network`, `timeout`, `unknown`.
+  - **C4. Record the cause as it happened.** `error_code` is the response's code when it has one. Otherwise it is `timeout` (the client's timer fired), `network` (status 0) or `unknown` (no usable code).
+    - **"Couldn't confirm"** (§C state 12) is the defined read: `error_code` ∈ {`outcome_unknown`, `move_in_progress`, `internal_error`, `timeout`, `network`}, or `unknown` with status ≥ 500.
+    - State 12's trigger list matches it exactly, and a client test maps each trigger to its (`error_code`, `status`) (F15).
+  - **C5.** `write_succeeded`'s `mode` prop becomes **`move_kind`** (`add` \| `claim`), matching the response rename (§A).
+  - **C6, taken by `platforms-pm`:** `write_failed` carries `kind`, the server's kind (`network` \| `roster_read`), **only when the body has one**, and is absent otherwise. That keeps state 11 (not sent, the only retry) apart from 10f (the platform refused).
+
+  **Unchanged:**
+  - F1–F5;
+  - the classes: four NON_INTENT, three INTENT;
+  - none is a WAT event.
+
+  **Registration.** The events are registered in `ALLOWED_CLIENT_EVENTS`, `CLIENT_EVENT_PROPS` and `NON_INTENT_EVENTS` **in the emitters' commit**. That commit comes after a dated addendum stating the seams: no history before ship, and MFL/ESPN rows start with Update 1. The test file is `backend/tests/test_analytics_taxonomy_fa_move.py` (§3).
+
+  **Hand-off event.** `sleeper_handoff_resolved` (granted G1–G7, #351 scope.md `:48-64`) **is emitted, by #528** (`feat/sleeper-handoff-resolved` @ `c77a3f72`, draft).
+  - The merge order is #379 → #528 → #509. #509 passes `hasDrop` @ `2eb1bf83` (`build/b3-hasdrop`, `ClaimSheet.tsx:164`).
+  - So hand-off states 1 and 14 are already instrumented (`target=add`).
+  - It keeps its `sleeper_` name, because only Sleeper has a hand-off.
 - [ ] **(b) Existing events cover it.** Not chosen.
 - [ ] **(c) WAIVED.** Not chosen.
 
@@ -326,6 +361,8 @@ Sizing is platforms-eng's (sizing `:37-39`).
   | F10 | **No steps block and no clipboard write** in `ClaimSheet` in any mode (operator, 11-01) | Re-add `fa-claim.steps` |
   | F11 | Consent text is rendered only from the server payload. No consent literal exists in `mobile/src`. The echoed `copy_version` is the one received | Bake v1 into the client |
   | F12 | A terminal result invalidates the `['free-agents', leagueId]` prefix | Drop the invalidation |
+  | F14 | **Analytics C2/C6.** `error_code` is the platform-free suffix from C3's closed set. `kind` is set only when the body carries `network` or `roster_read` | Send `sleeper_write_failed` as the code |
+  | F15 | **Analytics C1/C4, executed.** A null capability (or any mode but `submit`) emits no `fa_move_*` event. Each state-12 trigger maps to its (`error_code`, `status`): `outcome_unknown`, `move_in_progress`, `internal_error`, `timeout`, `network`/0, `unknown`/≥500 | Emit with `league_platform: null`; map a timeout to `unknown` |
   | F13 | **K-F5 (§B10).** The move request goes through the shared API client, whose `_noteWrite` (`mobile/src/api/client.ts:418-425`) discards the held page on any non-GET. No direct `fetch` exists in the move path. The claim sheet fires no extra event or hook for it | Send the move with a bare `fetch` |
 
   - **Plus the held-page path:** an assertion in `mobile/tests/check-device-first-page.js` that `discardsDevicePages('/api/league/free-agents/move')` is true. It goes in the claim-sheet PR, reviewed by `trades-eng` (§B10). Sabotage: drop the path from `discardsDevicePages`.
@@ -361,7 +398,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
     - `test_sleeper_write.py`: golden bodies from the capture, and the new ops classified through `write_outcome.py`;
     - the flag-parity tests: `sleeper.send_add_drop` defaults false;
     - `test_account_deletion_coverage.py`: automatic, through the tuple;
-    - the taxonomy test, per the §1 outcome.
+    - **`backend/tests/test_analytics_taxonomy_fa_move.py`** (new): the seven `fa_move_*` names with exact props, including `league_platform` and `move_kind`; the class split (four NON_INTENT, three INTENT); C3's 21-value `error_code` set, pinned against the route's codes; C6's `kind`.
 - [x] **Code-walk proof.** The builder fills this skeleton with file:line citations, in `docs/plans/sleeper-fa-write/code-walk.md`:
   1. Host Add → `move.mode` → sheet, or `NO_ADD_REASON`.
   2. `faMoveGate` → connect, verify, consent or submit.
@@ -408,7 +445,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
   - **AC-33:** copy versions are server-side.
   - **AC-35:** replaced by AC-48.
   - **AC-37:** reduced form (§B10). The next search no longer offers B, and cards already on screen keep it until then. Verified by F13, the `check-device-first-page.js` assertion, the K-F5 route tests, and T14–T15.
-  - **AC-40:** names per §1.
+  - **AC-40:** the seven `fa_move_*` events, per §1 and C1–C6.
 
   **New:**
 
@@ -447,7 +484,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
 
 - **Simulator-gate tier: WAIVED.** D-056 retired the tier matrix. `FTF_SKIP_SIM_GATE=1` is the standing posture, with the evidence in §3 named in its place.
 - **CI green** on the pushed sha: `backend-tests`, `mobile-typecheck` (which runs every `check-*.js`, including `check-fa-move.js`), and `maestro-testid-lint`.
-- **The 11-06 binary gate (client, dark).** F1–F13 and the `check-device-first-page.js` assertion pass, and the code-walk is written. It needs no flag or server change to ship.
+- **The 11-06 binary gate (client, dark).** F1–F15 and the `check-device-first-page.js` assertion pass, and the code-walk is written. It needs no flag or server change to ship.
 - **D6, restated for launch.** The flip needs **all** of these:
   1. **Legal's launch minimum folded in.** LEG-L12 as `legal-lead` scopes it for launch (`legal-lead.md:421`), arriving via `head-bizops` ~11-04: the consent copy (v1; v2 before claims), the R15.3 tables, and the privacy and terms text, live.
   2. **The capture recorded** in `capture.md`, redacted (AC-19).
@@ -457,7 +494,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
 
   #351's P31 device tests gate #509's hand-off merge, not this flip. **The flip itself is the operator's.** The TestFlight checklist runs straight after it, and the flag goes back off on any failure.
 - **Claims** need, in addition, D5: the current copy at v2 **and** the claim shape captured.
-- **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the F1–F13 sabotages (applied and reverted), the backend tests, the code-walk, the T1–T15 outcomes, and `FTF_SKIP_SIM_GATE=1`.
+- **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the F1–F15 sabotages (applied and reverted), the backend tests, the code-walk, the T1–T15 outcomes, and `FTF_SKIP_SIM_GATE=1`.
 - **Express lane declared by the operator?** No. Schema, API and flag surfaces are all touched, so full gates apply.
 
 ## E. Platform scope
@@ -496,7 +533,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
 
 **Inputs owed** (routed, not decided here):
 - **`legal-lead`**, via `head-bizops`: the launch minimum (~11-04). Also, if `eng-architect` picks a write-once move row, confirmation that it still meets R15.3 (§B6).
-- **`analytics-lead`**, via `head-product`: P1 and P2.
+- **`analytics-lead` — granted 2026-11-01:** P1 and P2, with C1–C6 (§1).
 - **`ux-lead` and `design-lead`:** §C, including note (d).
 - **marketing**, via `head-product`: §G.
 - **`trades-pm` — answered 2026-11-01:** K-F5 is in the 11-06 binary in a reduced form. After a completed move, the next search no longer offers the dropped player; cards already on screen keep it until that search. The build requirements are §B10. `head-eng` confirms who builds the `devicePage.ts` change (`trades-eng` reviews it).
@@ -556,4 +593,4 @@ From capture.md §8 (`:349-363`), in short, plus two that are new at launch:
 - **The move core's server worst case,** and so the client timeout. It's known only after the capture fixes the calls.
 - **Whether the 11-06 client can open MFL's and ESPN's connect screens from the sheet** (§E).
 - **Legal's launch minimum:** content and date (~11-04).
-- **The #509 trim:** this block assumes #509 lands as CTA-only. As of `d14b7308` it keeps "Open in Sleeper to claim" and the current footer, and emits no hand-off event.
+- **The #509 trim:** this block assumes #509 lands as CTA-only. As of `d14b7308` it keeps "Open in Sleeper to claim" and the current footer. The hand-off event is emitted by #528, not #509 (§1). Merge order is #379 → #528 → #509, and #509's `hasDrop` is at `2eb1bf83`.
