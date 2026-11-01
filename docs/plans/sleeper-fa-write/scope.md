@@ -24,7 +24,7 @@
 **Date:** 2026-11-01
 **Entry point:** direct ask from the operator (2026-11-01), routed to `platforms-pm`. Written by a `platforms-pm` spec worker.
 **Builder:** `platforms-eng` under `head-eng`: the dark client for the 2026-11-06 binary, then the server after the capture. Not started.
-**Operator sign-off on waivers:** two waivers, both the dead D-056 sections (§3 Maestro delta, §5 Simulator-gate tier). They are standing D-056 waivers, not choices. They're surfaced with this PR. The operator decisions this block needs are in §F.
+**Operator sign-off on waivers:** two waivers, both the dead D-056 sections (§3 Maestro delta, §5 Simulator-gate tier). They are standing D-056 waivers, not choices. They're surfaced with this PR. The operator decisions are in §F: decision 1 was decided on 2026-11-01, and 2–4 are open.
 
 ---
 
@@ -293,7 +293,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
 
 | When | What | Owner |
 |---|---|---|
-| 11-01 | D1 pulled to launch; this block | operator; `platforms-pm` |
+| 11-01 | D1 pulled to launch; this block. The operator approves the two tables and `sleeper.send_add_drop` (§F1) | operator; `platforms-pm` |
 | **11-02 midday** | This spec and §C to `platforms-eng`; `ux-lead` and `design-lead` review §C | `platforms-pm` → `head-product` |
 | **by 11-02** | The capture session (capture.md §4). It is operator-driven: every Sleeper write is the operator's own click, and **each live write needs the operator's approval when it runs** | operator + `platforms-eng` |
 | ~11-04 | Legal's launch minimum arrives via `head-bizops` and folds into §G and §5 | `legal-lead` |
@@ -380,7 +380,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
   - `result` gains **`unknown`**.
   - Moves are recorded under `attempt_id` with `phase ∈ sent | result`, unique on (`attempt_id`, `phase`) (§B6). The `sent` row is written before the platform call.
   - Coverage is unchanged: both join `delete_user_data` / `export_user_data` through `accounts._ADDITIONAL_PRIVATE_TABLES` (`backend/accounts.py:685`) in the same change, and are deleted with the account (R15.8 D12 `:852`, [PRO]).
-  - **A bright line: the operator's yes is needed** (§F1).
+  - **A bright line. Approved by the operator on 2026-11-01** (§F1).
 - **New flag: `sleeper.send_add_drop`.** It supersedes `sleeper.fa_write`.
   - Default `false`. It goes in `config/features.json`, `FLAG_KEYS` (`backend/feature_flags.py:47`), the flag fixtures and `docs/config-reference.md`. It is **never** in mobile `LAUNCHED_FLAG_DEFAULTS`, and **no client reads it**.
   - It gates the move route and the consent routes (404 when off), and makes the capability answer `handoff`.
@@ -598,7 +598,9 @@ Sizing is platforms-eng's (sizing `:37-39`).
 ## F. Decisions needed
 
 **For the operator, via `head-product`:**
-1. **Schema and flag: a bright line.** Two new tables (`platform_write_consents`, `platform_write_moves`) and the kill switch `sleeper.send_add_drop`. **Needs the operator's yes** before the server build. The client binary doesn't need it.
+1. **Schema and flag: decided 2026-11-01.** The two new tables (`platform_write_consents`, `platform_write_moves`) and the kill switch `sleeper.send_add_drop`.
+   - The operator, verbatim: "Yes, approve".
+   - Given in `head-product`'s session and relayed by `head-product`. `head-eng` passed it to `platforms-eng`.
 2. **`head-bizops`'s 11-01 yes/no on the app submitting free-agent moves:** pending. Record only the decision.
 3. **The capture session by 11-02** (platforms-eng's ask, platforms-eng.md `:14-17`). This needs two answers:
    - **(a) method:** copy each request from Chrome DevTools by hand (head-eng's recommendation), or platforms-eng injects a redacting read script;
