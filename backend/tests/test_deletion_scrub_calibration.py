@@ -462,11 +462,12 @@ def test_the_backfill_uses_the_deck_row_and_skips_an_ambiguous_name(eng, monkeyp
     with eng.begin() as conn:
         conn.execute(insert(db.league_members_table), [
             {"league_id": "L1", "user_id": uid, "username": None, "display_name": "Twin",
-             "roster_data": "[]"} for uid in ("u7", "u8")])
+             "roster_data": json.dumps(["p77"])} for uid in ("u7", "u8")])
         conn.execute(insert(db.grading_cards_table).values(
             card_id="twin", session_id=s["L1"], user_id="u1", position=998,
             arms_json=json.dumps({"value_core": {"deck_position": 1, "reasons": []}}),
-            trade_json=json.dumps({"partner_name": "Twin", "give": [], "receive": []})))
+            trade_json=json.dumps({"partner_name": "Twin", "give": [],
+                                   "receive": [{"id": "p77", "position": "WR"}]})))
     db.backfill_grading_card_partners()
     l3 = cards(eng, s["L3"])
     current = [c for c in l3 if "current" in json.loads(c["arms_json"])]
