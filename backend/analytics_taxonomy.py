@@ -933,7 +933,8 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # platform_write_consents / platform_write_moves rows are the R15.3 record
     # of truth, never these (F1). Props, exactly:
     #   fa_move_consent_recorded  — surface, copy_version, league_platform.
-    #     NON_INTENT. `surface` is null: the contract's request carries none.
+    #     NON_INTENT. `surface` ∈ free_agents | usage_trends from the request,
+    #     ABSENT when the request has none (G2: absent, never null).
     #   fa_move_consent_withdrawn — via (settings | disconnect |
     #     credential_expired | credential_rejected), league_platform.
     #     NON_INTENT; the two credential_* (system) rows are non-touching (F2).

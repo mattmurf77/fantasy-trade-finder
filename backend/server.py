@@ -24807,14 +24807,26 @@ def sleeper_link():
 
     exp = _sleeper_write.token_expiry(token)
     expires_at = datetime.fromtimestamp(exp, tz=timezone.utc).isoformat() if exp else None
+    withdrawn = 0
     try:
         ciphertext = _sleeper_write.encrypt_token(token)
+        # D1, R15.2.5: re-consent after a reconnect. A (re-)link replaces the
+        # credential, so it first ends any open roster-move consent (via
+        # 'disconnect', the granted closed set's reconnect value; a first link
+        # has none open). Withdraw BEFORE the upsert: if the withdrawal fails,
+        # nothing is stored; if the store fails, the user just re-consents.
+        withdrawn = _fa_db.withdraw_platform_write_grants(
+            user_id, "sleeper", "disconnect", _fa_move_now())
         upsert_sleeper_credential(user_id, sleeper_user_id, ciphertext, expires_at)
     except _sleeper_write.SleeperWriteError:
         return jsonify({"error": "sleeper_unconfigured"}), 503
     except Exception:
         log.exception("sleeper_link store failed")
         return jsonify({"error": "store_failed"}), 500
+    finally:
+        if withdrawn:
+            _fa_move_event(user_id, "fa_move_consent_withdrawn",
+                           {"via": "disconnect", "league_platform": "sleeper"})
 
     if proven_live:
         # Claim matches + oracle passed → this session controls the account.
@@ -36562,6 +36574,8 @@ _FA_MOVE_PLATFORMS = ("sleeper", "mfl", "espn")
 _FA_MOVE_SURFACES = ("free_agents", "usage_trends")
 # Contract §3: `attempt_id` is opaque, 8–64 of [A-Za-z0-9._-], unique per user.
 _FA_MOVE_ATTEMPT_ID_RE = re.compile(r"[A-Za-z0-9._-]{8,64}")
+# Player ids (FTF canonical = Sleeper): ASCII digits, or a team-defense code.
+_FA_MOVE_PLAYER_ID_RE = re.compile(r"[0-9]{1,12}|[A-Z]{2,4}")
 # Each platform's server-only kill switch. MFL and ESPN add theirs in Update 1.
 _FA_MOVE_FLAGS = {"sleeper": "sleeper.send_add_drop"}
 
@@ -36597,7 +36611,7 @@ def _fa_move_league_platform(league_id) -> str:
     (local / demo) league. A numeric id with no league row is Sleeper, the
     same reading as `is_linked_platform_league` (the free-agents route)."""
     lid = str(league_id or "").strip()
-    if not lid.isdigit():
+    if not (lid.isascii() and lid.isdigit()):
         return "local"
     return _fa_db.get_league_platform(lid) or "sleeper"
 
@@ -36702,12 +36716,20 @@ def _fa_move_grant(user_id: str, platform: str, platform_user_id, now: datetime)
         _fa_copy.CURRENT_CONSENT_VERSION.get(platform), now)
 
 
-def _fa_move_blocks(user_id: str, league_id: str, now: datetime) -> dict[str, str]:
+def _fa_move_blocks(user_id: str, league_id: str, now: datetime, *,
+                    before_id: int | None = None,
+                    checked_at: datetime | None = None) -> dict[str, str]:
     """Scope §B6's double-move block for (user, league): add-player id →
     'unconfirmed' (a move sent < 15 min ago with no result yet, or with
     result 'unknown') or 'pending_claim' (a claim the platform holds as
     pending, < 24 h old: the league's next waiver run isn't known yet, and no
-    later result is ever recorded for it today)."""
+    later result is ever recorded for it today).
+
+    The post-insert race check passes `before_id` (only moves whose `sent` row
+    was inserted before that row id) and `checked_at` (when this request
+    passed step 7b): a move of the player that LANDED (accepted / partial)
+    and was sent at or after `checked_at` blocks too, because this request's
+    pre-write reads may predate it. A failed move never blocks."""
     rows = _fa_db.recent_platform_write_moves(user_id, league_id,
                                               now - _FA_MOVE_PENDING_CLAIM_BLOCK)
     by_attempt: dict[str, dict] = {}
@@ -36716,6 +36738,8 @@ def _fa_move_blocks(user_id: str, league_id: str, now: datetime) -> dict[str, st
     out: dict[str, str] = {}
     for phases in by_attempt.values():
         sent, done = phases.get("sent"), phases.get("result")
+        if sent is None or (before_id is not None and int(sent["id"]) >= before_id):
+            continue
         try:
             sent_at = datetime.fromisoformat(str(sent["sent_at"]))
         except (TypeError, ValueError, KeyError):
@@ -36725,6 +36749,9 @@ def _fa_move_blocks(user_id: str, league_id: str, now: datetime) -> dict[str, st
         if done is None or done.get("result") == "unknown":
             if age < _FA_MOVE_UNCONFIRMED_BLOCK:
                 reason = "unconfirmed"
+        elif (checked_at is not None and done.get("result") in ("accepted", "partial")
+              and sent_at.replace(tzinfo=sent_at.tzinfo or timezone.utc) >= checked_at):
+            reason = "unconfirmed"
         elif done.get("status") == "pending" and done.get("result") in ("accepted", "partial"):
             if age < _FA_MOVE_PENDING_CLAIM_BLOCK:
                 reason = "pending_claim"
@@ -36799,16 +36826,28 @@ def platform_write_consent_route():
            withdrawal (`via: settings`) for every open grant. One tap, no
            confirm; idempotent (a repeat appends nothing, same body). `notice`
            is R15.2.6's text, verbatim.
-    Both need a session only, never a verified one (contract §2: withdrawal
-    is as easy as consent), so neither carries `@_gate_unverified_write`. And
-    NEITHER follows a kill switch: GET always answers, and DELETE always
-    works, so a user can withdraw while moves are switched off (only the move
-    route and the capability follow `*.send_add_drop`). 401 without a
-    session; 400 bad_request for a `platform` outside sleeper | mfl | espn.
-    Never returns a token.
+    Both need a VERIFIED session (head-eng's security check; contract §2): an
+    unverified session can carry another user's id (a username-only sign-in),
+    so it could forge a withdrawal into the append-only record or read whether
+    someone consented. GET → `_verified_read_denial`, DELETE →
+    `_verified_write_denial`, both 403 `verification_required`. Withdrawal is
+    still as easy as consent: a grant is only ever made from a verified
+    session (the move route's step 3). NEITHER follows a kill switch: GET
+    always answers, and DELETE always works, so a user can withdraw while
+    moves are switched off (only the move route and the capability follow
+    `*.send_add_drop`). 401 without a session; 400 bad_request for a
+    `platform` outside sleeper | mfl | espn. Never returns a token.
     """
     sess = _require_session()
     user_id = str(sess.get("user_id") or "")
+    if not user_id:
+        raise _SessionExpired()
+    denial = (_verified_write_denial(sess) if request.method == "DELETE"
+              else _verified_read_denial(sess))
+    if denial is not None:
+        body, status = _fa_move_error("verification_required", 403,
+                                      _fa_copy.message("verification_required"))
+        return jsonify(body), status
     platform = request.args.get("platform") or ""
     if platform not in _FA_MOVE_PLATFORMS:
         body, status = _fa_move_error("bad_request", 400, _fa_copy.message("bad_request"))
@@ -36816,10 +36855,6 @@ def platform_write_consent_route():
     now = _fa_move_now()
 
     if request.method == "DELETE":
-        # A session only, never a verified one (contract §2, R15.2.6):
-        # withdrawing only removes a permission, so it is as easy as giving it.
-        if not user_id:
-            raise _SessionExpired()
         if _fa_db.withdraw_platform_write_grants(user_id, platform, "settings", now):
             _fa_move_event(user_id, "fa_move_consent_withdrawn",
                            {"via": "settings", "league_platform": platform})
@@ -36864,6 +36899,9 @@ def _fa_move_parse_body(body) -> dict | None:
     kind, attempt_id = body.get("move_kind"), body.get("attempt_id")
     if not league_id or not add_id or (raw_drop not in (None, "") and not drop_id):
         return None
+    # Sleeper player ids are digits; a team defense is its 2–4 letter code.
+    if not all(_FA_MOVE_PLAYER_ID_RE.fullmatch(p) for p in (add_id, drop_id) if p):
+        return None
     if drop_id == add_id or kind not in ("add", "claim"):
         return None
     # Opaque, never parsed as a UUID (contract §3): the client's is UUID-shaped
@@ -36875,7 +36913,8 @@ def _fa_move_parse_body(body) -> dict | None:
         raw_bid = body.get("faab_bid")
         if isinstance(raw_bid, bool) or not isinstance(raw_bid, (int, float)):
             return None
-        if raw_bid < 0 or raw_bid != int(raw_bid):
+        # NaN and ±inf are 400s, never a 500 from int(); whole dollars only.
+        if not math.isfinite(raw_bid) or raw_bid < 0 or raw_bid != int(raw_bid):
             return None
         bid = int(raw_bid)
     surface = body.get("surface")       # optional; any other value is ignored (contract §3)
@@ -36891,6 +36930,16 @@ def _fa_move_parse_body(body) -> dict | None:
             "surface": surface}
 
 
+def _fa_move_consent_required(user_id: str, platform: str, platform_user_id: str,
+                              now: datetime) -> tuple[dict, int]:
+    """409 `consent_required` with the current consent block and, when known,
+    why it's asked (contract §2 `reason`)."""
+    reason = _fa_db.platform_write_consent_reason(
+        user_id, platform, platform_user_id, _fa_copy.CURRENT_CONSENT_VERSION.get(platform), now)
+    return _fa_move_error("consent_required", 409, _fa_copy.message("consent_required", platform),
+                          consent=_fa_copy.consent_block(platform, reason=reason))
+
+
 def _fa_move_consent_step(user_id: str, platform: str, platform_user_id: str,
                           req: dict, now: datetime):
     """Scope §B3 step 9. Returns (refusal, grant): a refusal is 409
@@ -36902,11 +36951,7 @@ def _fa_move_consent_step(user_id: str, platform: str, platform_user_id: str,
     current = _fa_copy.CURRENT_CONSENT_VERSION.get(platform)
 
     def _required():
-        reason = _fa_db.platform_write_consent_reason(user_id, platform, platform_user_id,
-                                                      current, now)
-        return _fa_move_error("consent_required", 409,
-                              _fa_copy.message("consent_required", platform),
-                              consent=_fa_copy.consent_block(platform, reason=reason))
+        return _fa_move_consent_required(user_id, platform, platform_user_id, now)
 
     shown = req["consent"]
     if shown is not None:
@@ -36920,9 +36965,12 @@ def _fa_move_consent_step(user_id: str, platform: str, platform_user_id: str,
             copy_version=current, locale=shown["locale"], consented_at=now,
             client_platform=device.get("device_type"), app_version=device.get("app_version"),
             trigger_attempt_id=req["attempt_id"])
-        _fa_move_event(user_id, "fa_move_consent_recorded",
-                       {"surface": req["surface"], "copy_version": current,
-                        "league_platform": platform},
+        # analytics-lead's G2 rule: `surface` is absent, never null, when the
+        # request has none (or an unknown one).
+        props = {"copy_version": current, "league_platform": platform}
+        if req["surface"]:
+            props["surface"] = req["surface"]
+        _fa_move_event(user_id, "fa_move_consent_recorded", props,
                        league_id=req["league_id"])
         return None, grant
     grant = _fa_move_grant(user_id, platform, platform_user_id, now)
@@ -36995,9 +37043,11 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
     """
     t0 = _fa_move_clock()
     user_id = str(sess.get("user_id") or "")
-    # 3. A verified session (the hard write gate; demo sessions never reach
-    # a Sleeper league).
-    if not user_id or _verified_write_denial(sess) is not None:
+    # 3. A verified session (the hard write gate). `_verified_write_denial`
+    # lets a synthetic demo session through; a demo session never makes a
+    # platform move, so it is refused here with the same code.
+    if (not user_id or sess.get("is_demo") or _synthetic_demo_session(sess)
+            or _verified_write_denial(sess) is not None):
         return _fa_move_error("verification_required", 403,
                               _fa_copy.message("verification_required"))
     # 4. The body.
@@ -37025,7 +37075,8 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
         return _fa_move_error("move_in_progress", 409,
                               _fa_copy.message("move_in_progress", platform),
                               title=_fa_copy.UNKNOWN_TITLE)
-    # 7b. The double-move block (§B6): a new tap for the same player.
+    # 7b. The double-move block (§B6): a new tap for the same player. `now`
+    # is also when this check passed (the post-insert race check, 12b).
     block = _fa_move_blocks(user_id, league_id, now).get(add_id)
     if block:
         names = _player_names_by_id([add_id])
@@ -37099,17 +37150,33 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
     if actual is not None and actual != kind:
         return _fa_move_error("move_kind_changed", 409, _fa_copy.message(
             "move_kind_changed", platform, add=add_name))
-    if kind == "claim" and bid is not None:
-        faab = (_sleeper_waivers(league_id, (mine.get("settings") or {}).get(
-            "waiver_budget_used")) or {}).get("faab") or {}
-        remaining = faab.get("remaining")
-        if remaining is not None and bid > remaining:
+    if kind == "claim":
+        # FAAB fails closed: a claim on a FAAB league (or one whose waiver type
+        # can't be read) whose remaining budget is unknown is refused as a
+        # read failure, nothing sent; a bid is bounded to 0..budget and to
+        # what's left.
+        waivers = _sleeper_waivers(league_id, (mine.get("settings") or {}).get(
+            "waiver_budget_used")) or {}
+        faab = waivers.get("faab") or {}
+        remaining, budget = faab.get("remaining"), faab.get("budget")
+        if waivers.get("type") is None or (waivers.get("type") == "faab" and (
+                remaining is None or budget is None)):
+            return _fa_move_error(f"{platform}_write_failed", 502,
+                                  _fa_copy.message("write_failed_roster_read", platform),
+                                  kind="roster_read")
+        if waivers.get("type") == "faab" and bid is not None and (
+                bid > budget or bid > remaining):
+            left = max(int(remaining), 0)
             return _fa_move_error("waiver_bid_over_budget", 422, _fa_copy.message(
-                "waiver_bid_over_budget", platform, remaining=remaining), remaining=remaining)
+                "waiver_bid_over_budget", platform, remaining=left), remaining=left)
     if _fa_move_preflight_over_budget(t0):
         return _fa_move_error(f"{platform}_write_failed", 502,
                               _fa_copy.message("write_failed_roster_read", platform),
                               kind="roster_read")
+    # The grant again, right before the `sent` row: a withdrawal (Settings,
+    # disconnect, re-link) during the preflight stops the move.
+    if _fa_move_grant(user_id, platform, platform_user_id, _fa_move_now()) is None:
+        return _fa_move_consent_required(user_id, platform, platform_user_id, _fa_move_now())
     # 12. The `sent` row BEFORE the platform call, unique on (user, attempt_id,
     # 'sent'): a concurrent duplicate of this tap loses here and never sends.
     record = {"attempt_id": attempt_id, "user_id": user_id, "platform": platform,
@@ -37118,11 +37185,27 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
               "add_player_ids": json.dumps([add_id]),
               "drop_player_ids": json.dumps([drop_id] if drop_id else []),
               "faab_bid": bid}
-    if not _fa_db.record_platform_write_move(
-            {**record, "phase": "sent", "sent_at": _fa_move_now().isoformat()}):
+    sent_id = _fa_db.record_platform_write_move(
+        {**record, "phase": "sent", "sent_at": _fa_move_now().isoformat()})
+    if not sent_id:
         return _fa_move_error("move_in_progress", 409,
                               _fa_copy.message("move_in_progress", platform, add=add_name),
                               title=_fa_copy.UNKNOWN_TITLE)
+    # 12b. The double-move block, made atomic: step 7b and the insert above are
+    # two steps, so two taps (different attempt_ids, same player) can both pass
+    # 7b. Re-read after the insert: an earlier-inserted (lower id) move of this
+    # player that still blocks wins; this one records its 409 and never sends.
+    rival = _fa_move_blocks(user_id, league_id, _fa_move_now(), before_id=sent_id,
+                            checked_at=now).get(add_id)
+    if rival:
+        key = "move_in_progress_pending_claim" if rival == "pending_claim" else "move_in_progress"
+        payload, status = _fa_move_error("move_in_progress", 409,
+                                         _fa_copy.message(key, platform, add=add_name),
+                                         title=_fa_copy.UNKNOWN_TITLE)
+        _fa_db.record_platform_write_move({
+            **record, "phase": "result", "result": "error", "error_code": "move_in_progress",
+            "response_status": status, "response_json": json.dumps(payload)})
+        return payload, status
     fa_req = _sleeper_write.FaMoveRequest(
         league_id=league_id, roster_id=roster_id, add_player_id=add_id,
         drop_player_id=drop_id, move_kind=kind, faab_bid=bid)

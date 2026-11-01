@@ -15191,19 +15191,20 @@ def recent_platform_write_moves(user_id: str, league_id: str, since: datetime) -
     return [r for r in rows if r["attempt_id"] in recent]
 
 
-def record_platform_write_move(row: dict) -> bool:
-    """Append one move row ('sent' or 'result'). False when that
-    (user_id, attempt_id, phase) already exists: for 'sent', a concurrent
-    duplicate of the same tap got there first and must not send."""
+def record_platform_write_move(row: dict) -> int | None:
+    """Append one move row ('sent' or 'result') and return its row id (ids
+    grow with insert order: the double-move race check compares them). None
+    when that (user_id, attempt_id, phase) already exists: for 'sent', a
+    concurrent duplicate of the same tap got there first and must not send."""
     from sqlalchemy.exc import IntegrityError
     values = dict(row)
     values.setdefault("recorded_at", _now())
     try:
         with engine.begin() as conn:
-            conn.execute(insert(platform_write_moves_table).values(**values))
+            res = conn.execute(insert(platform_write_moves_table).values(**values))
+            return int(res.inserted_primary_key[0])
     except IntegrityError:
-        return False
-    return True
+        return None
 
 
 def set_league_member_roster(league_id: str, member_user_id: str, player_ids: list) -> bool:

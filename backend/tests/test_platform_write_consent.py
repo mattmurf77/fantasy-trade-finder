@@ -332,17 +332,26 @@ def test_delete_withdraws_once_and_is_idempotent(h):
 
 
 @pytest.mark.parametrize("enforce", [False, True])
-def test_delete_needs_a_session_only(h, enforce):
-    """Contract §2 / R15.2.6: withdrawal is as easy as consent, so an
-    UNVERIFIED session can stop roster moves (whatever the write-gate flag)."""
+def test_an_unverified_session_with_the_victims_id_is_refused(h, enforce):
+    """head-eng's security check (contract §2): a username-only sign-in yields
+    the victim's user_id in an UNVERIFIED session. It must neither forge a
+    withdrawal into the append-only record (or fire the event) nor read
+    whether the victim consented, whatever the write-gate flag says."""
     if enforce:
         h.flags.add("auth.enforce_verified_writes")
-    _grant(h)
-    h.sess["verified"] = False
-    r = _delete(h)
-    assert r.status_code == 200 and r.get_json()["notice"] == WITHDRAWAL_NOTICE
-    assert [c["withdrawn_via"] for c in h.consents() if c["kind"] == "withdrawal"] == ["settings"]
-    assert _get(h).status_code == 200                        # GET too
+    grant = _grant(h)                                        # the victim's real grant
+    h.sess["verified"] = False                               # the squatter's session, same id
+    for r in (_delete(h), _get(h)):
+        assert r.status_code == 403
+        body = _err(r)
+        assert body["error"] == "verification_required"
+        assert "valid" not in body and "until" not in body   # nothing about the grant leaks
+    assert [c for c in h.consents() if c["kind"] == "withdrawal"] == []
+    assert h.events_named("fa_move_consent_withdrawn") == []
+    assert _active(h, h.now)["consent_id"] == grant["consent_id"]
+    h.sess["verified"] = True                                # the real, verified owner can
+    assert _get(h).get_json()["valid"] is True
+    assert _delete(h).status_code == 200
 
 
 def test_no_session_is_401(h):
@@ -350,14 +359,10 @@ def test_no_session_is_401(h):
         assert method("/api/platform-write-consent?platform=sleeper").status_code == 401
 
 
-def test_no_unverified_write_gate_on_the_consent_route():
-    """Structural twin (sabotage: put `@_gate_unverified_write` or a
-    `_verified_write_denial` check back on it)."""
-    view = server.app.view_functions["platform_write_consent_route"]
-    assert not hasattr(view, "__wrapped__")                  # no decorator wrapped it
+def test_the_consent_route_checks_both_denials():
+    """Structural twin (sabotage: drop either denial)."""
     src = inspect.getsource(server.platform_write_consent_route)
-    for check in ("_verified_write_denial(", "_gate_unverified_write\n", '"verified"'):
-        assert check not in src, check
+    assert "_verified_write_denial(sess)" in src and "_verified_read_denial(sess)" in src
 
 
 # ---------------------------------------------------------------------------

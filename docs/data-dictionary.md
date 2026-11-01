@@ -1639,7 +1639,7 @@ Expo push tokens. Composite uniqueness via `device_token` PK + indexed `user_id`
 
 Interim home; folds into the auth epic's `linked_sources` when that lands.
 
-**Deleting a row ends roster-move consent.** `delete_sleeper_credential(user_id, *, withdrawn_via)` deletes the row and, in the same transaction, appends a `platform_write_consents` withdrawal for every open Sleeper grant (`withdrawn_via` is required: `disconnect` | `credential_expired` | `credential_rejected`). Server callers go through `server._drop_sleeper_credential`. Account deletion deletes both consent tables outright instead (R15.8 D12).
+**Deleting a row ends roster-move consent.** `delete_sleeper_credential(user_id, *, withdrawn_via)` deletes the row and, in the same transaction, appends a `platform_write_consents` withdrawal for every open Sleeper grant (`withdrawn_via` is required: `disconnect` | `credential_expired` | `credential_rejected`). Server callers go through `server._drop_sleeper_credential`. A (re-)link (`POST /api/sleeper/link`) ends any open grant first too (`disconnect`, R15.2.5). Account deletion deletes both consent tables outright instead (R15.8 D12).
 
 ---
 
@@ -1672,7 +1672,7 @@ User-keyed: deleted with the account and included in the export (`accounts._ADDI
 
 ## `platform_write_moves`
 
-D1 free-agent moves. The record of each move Fleeced sent to a platform for the user (legal R15.3). **Append-only, two rows per move** under the client's `attempt_id`: phase `sent`, written **before** the platform call, then phase `result`. Unique on (`user_id`, `attempt_id`, `phase`), so one tap can never send twice; the id is opaque and only unique per user (another user's identical id is a different move); a repeat of an `attempt_id` replays the `result` row's `response_json`. A move refused before the write (no consent, roster full, player taken, …) writes no row. Never holds a token. Written by `record_platform_write_move`; read by `platform_write_move_rows` (idempotency) and `recent_platform_write_moves` (the double-move block: a `sent` row with no result or `result = 'unknown'` under 15 minutes old, or a pending claim under 24 h, blocks a new move for that player).
+D1 free-agent moves. The record of each move Fleeced sent to a platform for the user (legal R15.3). **Append-only, two rows per move** under the client's `attempt_id`: phase `sent`, written **before** the platform call, then phase `result`. Unique on (`user_id`, `attempt_id`, `phase`), so one tap can never send twice; the id is opaque and only unique per user (another user's identical id is a different move); a repeat of an `attempt_id` replays the `result` row's `response_json`. A move refused before the write (no consent, roster full, player taken, …) writes no row. Never holds a token. Written by `record_platform_write_move`; read by `platform_write_move_rows` (idempotency) and `recent_platform_write_moves` (the double-move block: a `sent` row with no result or `result = 'unknown'` under 15 minutes old, or a pending claim under 24 h, blocks a new move for that player; after inserting its own `sent` row a request re-reads, and an earlier-inserted (lower `id`) move of the player that still blocks makes it record its own 409 `result` and never send, which makes the block atomic).
 
 | Column | Type | Notes |
 |---|---|---|

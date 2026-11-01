@@ -223,12 +223,25 @@ _ABSENT = object()
 
 @pytest.fixture()
 def h(monkeypatch):
-    monkeypatch.setenv("SLEEPER_TOKEN_KEY", Fernet.generate_key().decode())
     # The default pool for an in-memory SQLite DB gives each thread its own
     # connection. Never StaticPool here: the first request of a process starts
     # the `win-now-resume` thread (server._ensure_background_threads), which
     # would then share this test's one connection and race it.
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    yield from _harness(monkeypatch, create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}))
+
+
+@pytest.fixture()
+def h_file(monkeypatch, tmp_path):
+    """The same harness on a file DB, which every thread sees: for the
+    concurrent-request tests."""
+    yield from _harness(monkeypatch, create_engine(
+        f"sqlite:///{tmp_path / 'fa_move.db'}",
+        connect_args={"check_same_thread": False, "timeout": 30}))
+
+
+def _harness(monkeypatch, engine):
+    monkeypatch.setenv("SLEEPER_TOKEN_KEY", Fernet.generate_key().decode())
     db_module.metadata.create_all(engine)
     monkeypatch.setattr(db_module, "engine", engine)
     hz = Harness(monkeypatch, engine)
@@ -352,17 +365,23 @@ def test_write_succeeded_event_exact_props(h):
                            "result": "accepted", "attempt_id": body["attempt_id"],
                            "league_platform": "sleeper"}
     (rec,) = h.events_named("fa_move_consent_recorded")
-    assert rec[2]["props"] == {"surface": None, "copy_version": V1, "league_platform": "sleeper"}
+    assert rec[2]["props"] == {"copy_version": V1, "league_platform": "sleeper"}   # no surface sent
 
 
 @pytest.mark.parametrize("sent,recorded", [("free_agents", "free_agents"),
                                            ("usage_trends", "usage_trends"),
-                                           ("deck", None), (7, None), (_ABSENT, None)])
+                                           ("deck", _ABSENT), (7, _ABSENT), (None, _ABSENT),
+                                           (_ABSENT, _ABSENT)])
 def test_surface_is_recorded_on_consent_recorded(h, sent, recorded):
-    """Contract §3: the optional `surface`; any other value is null, never a 400."""
+    """Contract §3: the optional `surface`, never a 400. analytics G2: the key
+    is ABSENT when the request has none or an unknown one, never null."""
     assert h.post(surface=sent).status_code == 200
     (rec,) = h.events_named("fa_move_consent_recorded")
-    assert rec[2]["props"]["surface"] == recorded
+    props = rec[2]["props"]
+    if recorded is _ABSENT:
+        assert "surface" not in props
+    else:
+        assert props["surface"] == recorded
 
 
 # ---------------------------------------------------------------------------
@@ -922,3 +941,189 @@ def test_no_roster_write_unless_complete(h, mode):
     h.post()
     assert h.saves == [] and h.stamps == []
     assert h.stored_roster() == [DROP, KEEP]
+
+
+# ---------------------------------------------------------------------------
+# Round 3 (head-eng's security check of #578)
+# ---------------------------------------------------------------------------
+
+def _rival_sent_row(h, attempt="rival-attempt-01"):
+    return {"attempt_id": attempt, "phase": "sent", "user_id": USER, "platform": "sleeper",
+            "league_id": LEAGUE, "move_kind": "add", "add_player_ids": json.dumps([ADD]),
+            "drop_player_ids": "[]", "sent_at": h.now.isoformat()}
+
+
+def test_double_move_race_loses_to_an_earlier_insert(h, monkeypatch):
+    """P2-1: two taps with DIFFERENT attempt_ids for one player both pass the
+    step-7b check; the later insert re-reads, finds the earlier unresolved
+    `sent` row, records its own 409 and never calls the platform."""
+    real = db_module.record_platform_write_move
+
+    def _racing(row):
+        if row["phase"] == "sent" and row["attempt_id"] != "rival-attempt-01":
+            real(_rival_sent_row(h))           # the other tap inserted first
+        return real(row)
+    monkeypatch.setattr(db_module, "record_platform_write_move", _racing)
+    attempt = "loser-attempt-01"
+    r = h.post(attempt_id=attempt)
+    assert r.status_code == 409 and _err(r)["error"] == "move_in_progress"
+    assert h.platform.calls == []
+    (mine,) = [m for m in h.moves(attempt) if m["phase"] == "result"]
+    assert mine["result"] == "error" and mine["error_code"] == "move_in_progress"
+    assert h.post(attempt_id=attempt).get_json() == r.get_json()     # replayed, still no call
+    assert h.platform.calls == []
+
+
+def test_a_later_insert_does_not_block_the_earlier_one(h, monkeypatch):
+    real = db_module.record_platform_write_move
+
+    def _racing(row):
+        out = real(row)
+        if row["phase"] == "sent" and row["attempt_id"] != "rival-attempt-01":
+            real(_rival_sent_row(h))           # the other tap inserted just after
+        return out
+    monkeypatch.setattr(db_module, "record_platform_write_move", _racing)
+    assert h.post().status_code == 200
+    assert len(h.platform.calls) == 1
+
+
+def test_two_concurrent_taps_send_once(h_file, monkeypatch):
+    """P2-1 with real threads: both requests pass step 7b (a barrier holds
+    them in the preflight read), then exactly one sends."""
+    h = h_file
+    barrier = threading.Barrier(2, timeout=20)
+    real = server._fetch_league_rosters
+
+    def _together(lid):
+        barrier.wait()
+        return real(lid)
+    monkeypatch.setattr(server, "_fetch_league_rosters", _together)
+    results = {}
+
+    def _tap(attempt):
+        client = server.app.test_client()
+        r = client.post("/api/league/free-agents/move",
+                        headers={"X-Session-Token": TOKEN, "Content-Type": "application/json"},
+                        data=json.dumps(h.body(attempt_id=attempt)))
+        results[attempt] = r.status_code
+    threads = [threading.Thread(target=_tap, args=(f"race-tap-{i}-xyz",)) for i in (1, 2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    assert sorted(results.values()) == [200, 409], results
+    assert len(h.platform.calls) == 1
+
+
+@pytest.mark.parametrize("bid", [float("nan"), float("inf"), float("-inf"), "7", True, -1, 1.5])
+def test_a_non_numeric_or_non_finite_bid_is_bad_request(h, monkeypatch, bid):
+    """P2-2: never the 500 that int(nan) / int(inf) used to raise."""
+    monkeypatch.setattr(server, "_fa_move_claims_enabled", lambda p: True)
+    r = h.post(move_kind="claim", faab_bid=bid)
+    assert r.status_code == 400 and _err(r)["error"] == "bad_request"
+    assert h.platform.calls == []
+
+
+def _claims_on(monkeypatch):
+    monkeypatch.setattr(server, "_fa_move_claims_enabled", lambda p: True)
+    monkeypatch.setattr(sleeper_write, "FA_CLAIM_SHAPE_CAPTURED", True)
+
+
+@pytest.mark.parametrize("case", ["used_unknown", "budget_unknown", "type_unknown"])
+def test_faab_fails_closed_when_the_budget_is_unknown(h, monkeypatch, case):
+    """P2-2: a claim whose remaining FAAB can't be known is refused as a read
+    failure, nothing sent, with or without a bid."""
+    _claims_on(monkeypatch)
+    if case == "used_unknown":
+        h.rosters[0]["settings"] = {}
+    elif case == "budget_unknown":
+        h.meta = {**META, "settings": {**META["settings"], "waiver_budget": None}}
+    else:
+        h.meta = {**META, "settings": {"reserve_slots": 0, "taxi_slots": 0}}
+    for bid in (5, _ABSENT):
+        r = h.post(move_kind="claim", faab_bid=bid)
+        assert r.status_code == 502
+        body = _err(r)
+        assert body["error"] == "sleeper_write_failed" and body["kind"] == "roster_read"
+    assert h.platform.calls == []
+
+
+@pytest.mark.parametrize("bid,status", [(80, 200), (81, 422), (101, 422), (10 ** 9, 422), (0, 200)])
+def test_a_bid_is_bounded_by_budget_and_remaining(h, monkeypatch, bid, status):
+    _claims_on(monkeypatch)
+    h.platform.mode = "pending"
+    r = h.post(move_kind="claim", faab_bid=bid)        # budget 100, used 20, remaining 80
+    assert r.status_code == status, r.get_json()
+    if status == 422:
+        assert _err(r)["remaining"] == 80 and h.platform.calls == []
+
+
+def test_a_priority_waiver_claim_needs_no_faab(h, monkeypatch):
+    _claims_on(monkeypatch)
+    h.platform.mode = "pending"
+    h.meta = {**META, "settings": {"reserve_slots": 0, "taxi_slots": 0, "waiver_type": 0}}
+    assert h.post(move_kind="claim").status_code == 200
+
+
+@pytest.mark.parametrize("field,value", [
+    ("add_player_id", "abc"), ("add_player_id", "12a"), ("add_player_id", "1234567890123"),
+    ("add_player_id", "dst"), ("add_player_id", "ABCDE"), ("add_player_id", "٣٤٥"),
+    ("drop_player_id", "67 94"), ("drop_player_id", "x1"),
+])
+def test_player_ids_are_validated(h, field, value):
+    r = h.post(**{field: value})
+    assert r.status_code == 400 and _err(r)["error"] == "bad_request"
+    assert h.platform.calls == []
+
+
+def test_a_team_defense_code_is_a_valid_player_id(h):
+    assert h.post(add_player_id="KC").status_code == 200
+
+
+def test_a_non_ascii_digit_league_id_is_not_a_sleeper_league(h):
+    assert server._fa_move_league_platform("١٢٣٤٥") == "local"
+    r = h.post(league_id="١٢٣٤٥")
+    assert r.status_code == 404 and h.platform.calls == []
+
+
+def test_a_withdrawal_during_preflight_stops_the_move(h, monkeypatch):
+    """P3: the grant is checked again right before the `sent` row."""
+    real = server._fetch_league_rosters
+
+    def _withdraw_meanwhile(lid):
+        db_module.withdraw_platform_write_grants(USER, "sleeper", "settings", h.now)
+        return real(lid)
+    monkeypatch.setattr(server, "_fetch_league_rosters", _withdraw_meanwhile)
+    r = h.post()
+    assert r.status_code == 409
+    body = _err(r)
+    assert body["error"] == "consent_required" and body["consent"]["reason"] == "withdrawn"
+    _no_write(h)
+
+
+@pytest.mark.parametrize("verified", [False, True])
+def test_a_demo_session_is_refused(h, verified):
+    """P3: `_verified_write_denial` lets a synthetic demo session through; the
+    move route refuses it at step 3 with the same code."""
+    h.sess.update(is_demo=True, user_id="demo_user_abc", verified=verified)
+    r = h.post()
+    assert r.status_code == 403 and _err(r)["error"] == "verification_required"
+    _no_write(h)
+
+
+def test_relinking_sleeper_withdraws_open_consent(h, monkeypatch):
+    """P3, R15.2.5: re-consent after a reconnect."""
+    from unittest.mock import MagicMock
+    monkeypatch.setattr(sleeper_write, "verify_token_live", MagicMock(return_value={"raw": {}}))
+    assert h.post().status_code == 200                      # a grant now exists
+    r = h.client.post("/api/sleeper/link", headers={"X-Session-Token": TOKEN,
+                                                    "Content-Type": "application/json"},
+                      data=json.dumps({"token": _jwt()}))
+    assert r.status_code == 200, r.get_json()
+    assert [c["withdrawn_via"] for c in h.consents() if c["kind"] == "withdrawal"] == ["disconnect"]
+    (ev,) = h.events_named("fa_move_consent_withdrawn")
+    assert ev[2]["props"] == {"via": "disconnect", "league_platform": "sleeper"}
+    h.rosters = _rosters(mine=(KEEP, ADD))
+    r = h.post(add_player_id="7777", drop_player_id=ADD, consent=_ABSENT)
+    assert r.status_code == 409 and _err(r)["consent"]["reason"] == "withdrawn"
+

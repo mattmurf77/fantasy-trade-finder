@@ -22,6 +22,7 @@ from backend.tests.test_fa_move_route import (  # noqa: F401  (h is a fixture)
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 SERVER_EVENTS = {
+    # `surface` only when the request carried a known one (G2: absent, never null).
     "fa_move_consent_recorded": {"surface", "copy_version", "league_platform"},
     "fa_move_consent_withdrawn": {"via", "league_platform"},
     "fa_move_write_succeeded": SUCCEEDED_PROPS,
@@ -64,12 +65,15 @@ def test_emitted_props_are_exactly_the_granted_ones(h):
     assert seen == set(SERVER_EVENTS)
     for _, name, kw in h.events:
         props = kw["props"]
-        assert set(props) == SERVER_EVENTS[name], (name, props)
+        expected = SERVER_EVENTS[name]
+        if name == "fa_move_consent_recorded" and "surface" not in props:
+            expected = expected - {"surface"}
+        assert set(props) == expected, (name, props)
         assert "platform" not in props                         # the device column, never a prop
         assert props["league_platform"] in ("sleeper", "mfl", "espn")   # C1: never null
         assert kw.get("source") == "api"
-        if name == "fa_move_consent_recorded":
-            assert props["surface"] in ("free_agents", "usage_trends", None)
+        if name == "fa_move_consent_recorded" and "surface" in props:
+            assert props["surface"] in ("free_agents", "usage_trends")      # never None
         if name == "fa_move_consent_withdrawn":
             assert props["via"] in ("settings", "disconnect", "credential_expired",
                                     "credential_rejected")
@@ -91,7 +95,8 @@ def _route_codes() -> set[str]:
     `_fa_move_error(...)` call, `{platform}_` stripped (C2: by suffix)."""
     codes = set()
     for fn in (server._fa_move_core, server._fa_move_write_failure,
-               server._fa_move_consent_step, server.league_free_agents_move_route,
+               server._fa_move_consent_step, server._fa_move_consent_required,
+               server.league_free_agents_move_route,
                server.platform_write_consent_route):
         tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
         for node in ast.walk(tree):
