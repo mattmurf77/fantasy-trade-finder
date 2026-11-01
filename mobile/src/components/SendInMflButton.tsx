@@ -67,6 +67,9 @@ interface Props {
    *  today this prop is carried, not fired — the moment MFL attempt/failure
    *  events are registered, the dimension is already at hand. */
   surface: SendSurface;
+  /** #393 M2 (D16): the router's Send pre-check (SendInSleeperButton's
+   *  `sendPreCheck`), passed in so this twin's own tap runs it too. */
+  sendPreCheck?: (resume: () => void) => boolean;
 }
 
 // The pre-send checks only. Sending / sent live in api/sendRegistry.ts.
@@ -84,6 +87,7 @@ export default function SendInMflButton({
   // Carried for P0-7 parity (see Props); intentionally unread until MFL
   // attempt/failure events are registered in the taxonomy.
   surface: _surface,
+  sendPreCheck,
 }: Props) {
   const enabled = useFlag('trade.send_in_mfl');
   const navigation = useNavigation<any>();
@@ -269,8 +273,15 @@ export default function SendInMflButton({
     void confirmSend();
   }, [confirmSend]);
 
-  const onPress = useCallback(async () => {
-    if (state !== 'idle' || sendState === 'in_flight' || sendState === 'sent') return;
+  // The tap past the pre-check, unchanged. A tap resumed after a verify
+  // runs it exactly as a fresh one: the no-target hand-off, the link-status
+  // check and its sign-in prompt, then the "Send this trade?" confirm.
+  const proceed = useCallback(async () => {
+    // Main's send registry (#539): a send that went in flight or landed while
+    // the verify sheet was up never reaches the confirm again. Read live: a
+    // resumed `proceed` was captured before the sheet opened.
+    const live = getSendRecord(sendKey)?.state;
+    if (live === 'in_flight' || live === 'sent') return;
     haptics.pickup();
     if (!leagueId || !theirUserId) {
       openMfl();
@@ -306,7 +317,16 @@ export default function SendInMflButton({
         ],
       );
     }
-  }, [state, sendState, leagueId, theirUserId, openMfl, confirmSend, openSignIn]);
+  }, [sendKey, leagueId, theirUserId, openMfl, confirmSend, openSignIn]);
+
+  // #393 M2 (D16): the router's Send pre-check runs first. This twin's own
+  // tap reaches its confirm step (the router only renders it), so it runs
+  // here too; after a verify it resumes with `proceed`, not straight to the confirm.
+  const onPress = useCallback(() => {
+    if (state !== 'idle' || sendState === 'in_flight' || sendState === 'sent') return;
+    if (sendPreCheck?.(() => { void proceed(); })) return;
+    void proceed();
+  }, [state, sendState, sendPreCheck, proceed]);
 
   if (!enabled) return null;
 
