@@ -1,6 +1,7 @@
 """write_outcome.py — when did a trade-send write fail: before or after it was sent?
 
-Shared by the provider write adapters (`espn_write.py`, `mfl_write.py`). Pure:
+Shared by the provider write adapters (`espn_write.py`, `mfl_write.py`, and
+`sleeper_write.py`'s free-agent move transport, `_post_graphql_write`). Pure:
 no Flask, no DB, no network.
 
 A failed write is one of two things (C10, head-eng pre-launch triage):

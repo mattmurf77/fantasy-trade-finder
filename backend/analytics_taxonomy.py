@@ -920,6 +920,28 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # type), unchecked_generic, unchecked_pick_owner. No league id, no raw job
     # id, no player ids.
     "deck_i1_check",
+    # ── D1 free-agent moves, 2026-11-01 (granted by analytics-lead with
+    # C1-C6: docs/plans/sleeper-fa-write/scope.md §1 on plan/fa-moves-launch;
+    # consent.md §6 F1-F5). The three SERVER halves, registered in the SAME
+    # commit as their emitters (server._fa_move_core, the consent route and
+    # every Sleeper-credential deletion). The four client halves
+    # (fa_move_connect_shown, _consent_shown, _write_attempted,
+    # _write_failed) are registered by the client PR with their emitters.
+    # Never a prop named `platform` (that is the device column, the NULL-
+    # `platform` incident): the league's platform rides `league_platform`
+    # ('sleeper' | 'mfl' | 'espn', always set, C1). Telemetry only: the
+    # platform_write_consents / platform_write_moves rows are the R15.3 record
+    # of truth, never these (F1). Props, exactly:
+    #   fa_move_consent_recorded  — surface, copy_version, league_platform.
+    #     NON_INTENT. `surface` is null: the contract's request carries none.
+    #   fa_move_consent_withdrawn — via (settings | disconnect |
+    #     credential_expired | credential_rejected), league_platform.
+    #     NON_INTENT; the two credential_* (system) rows are non-touching (F2).
+    #   fa_move_write_succeeded   — move_kind (add | claim, C5), has_drop,
+    #     has_bid, result (accepted | partial), attempt_id, league_platform.
+    #     INTENT. Only on a 200 (F4); league_id rides the envelope column.
+    "fa_move_consent_recorded", "fa_move_consent_withdrawn",
+    "fa_move_write_succeeded",
 })
 
 # ---------------------------------------------------------------------------

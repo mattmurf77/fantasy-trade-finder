@@ -139,6 +139,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # the `on_block` card serialization; off = payloads byte-identical to
     # pre-147. backend/trade_block_service.py
     "sleeper.trade_block",
+    # D1 free-agent moves (docs/plans/sleeper-fa-write/): the app submits a
+    # Sleeper add / add+drop (claims only under R15.8 D5) on the user's
+    # behalf. SERVER-ONLY kill switch: gates POST /api/league/free-agents/move
+    # and GET/DELETE /api/platform-write-consent (404 when off) and lets the
+    # free-agents capability answer move.mode 'submit' (else 'handoff'). Never
+    # in mobile LAUNCHED_FLAG_DEFAULTS; no client reads it. Supersedes the
+    # never-shipped `sleeper.fa_write`. MFL/ESPN get their own keys in Update 1.
+    "sleeper.send_add_drop",
     # FB-147 engine hook — SOFT, acquire-side trade-block boost. A card whose
     # ACQUIRE side holds a player the counterparty flagged "on the block" gets
     # a bounded composite bump (knob block_boost_weight). Applied AFTER all
