@@ -66,7 +66,7 @@
 | §4.2 `:224-238`: mechanics | **Unchanged.** Validity is keyed by (user, platform, `platform_user_id`) |
 | §4.3 `:240-285`: the two append-only tables | `platform` is required (closed set). `sleeper_transaction_id` → `platform_transaction_id`. `attempt_id` is unique for the send. `result` gains `unknown`. **Append-only kept** (§2) |
 | §4.4 `:306-309`: `GET`/`DELETE /api/sleeper/write-consent` | **`GET`/`DELETE /api/platform-write-consent?platform=sleeper`**. The Settings "Stop roster moves" row shows **only while a grant is active**, server-driven |
-| §5 `:311-326`: after the move | **Kept.** One invalidation refreshes the FA list, drop list and FAAB. K-F5 deck invalidation is open (§F) |
+| §5 `:311-326`: after the move | **Kept.** One invalidation refreshes the FA list, drop list and FAAB. **K-F5, reduced (trades-pm, 11-01):** the held page is discarded and the server saves the roster before answering, so the next search drops B; cards already on screen keep B until then (§B10) |
 | §6 `:328-362`: seven granted `sleeper_fa_*` events | **Kept**, plus two **proposed, not granted** changes (§1) |
 | §7 `:364-391`: AC-19..AC-40, post-launch | **At launch.** AC-20, AC-29, AC-30, AC-33, AC-35 and AC-40 change, and AC-41..AC-48 are added (§3) |
 
@@ -178,6 +178,24 @@ The Settings › Leagues "Stop roster moves" row shows only while a grant is act
 
 **B9. Analytics.** consent.md's granted events and conditions stand (F1–F5, G-rules). Two changes are **proposed, not granted**, and need analytics-lead's re-grant via `head-product` (§1).
 
+**B10. K-F5, the deck after a move: answered by `trades-pm`, 2026-11-01** (cited at `origin/main` @ `84c4c448`).
+- **What ships.** It's in the 11-06 binary, in a **reduced form**: after a completed move, the **next search** no longer offers the dropped player (B). Cards already on screen keep B until that search.
+- **Client, in the 11-06 binary.**
+  - `platforms-eng` adds `/api/league/free-agents/move` to `discardsDevicePages` (`mobile/src/utils/devicePage.ts:253-256`), with an assertion in `mobile/tests/check-device-first-page.js`, in the claim-sheet PR.
+  - `trades-eng` reviews that file, because it is the 200 ms held-page path. `head-eng` confirms who builds it.
+  - **The move request must go through the shared API client.** Its `_noteWrite` (`mobile/src/api/client.ts:418-425`, called at `:657` and `:674`) discards the held page on any non-GET request. Guard F13 pins this (§3).
+  - The claim sheet fires no extra event or hook. Clearing the held page on a pending or failed move is harmless.
+- **Server, built with the route.**
+  - **Save the roster before answering.** On `status: complete`, the route saves the user's new roster (B off, A on) **before it answers**, because the phone drops its held page when the request finishes.
+  - **Then stamp, off the request thread.** It calls `roster_refresh.stamp` off the request thread (`backend/roster_refresh.py:95-141`; call rules at `backend/roster_snapshot.py:321-333`).
+    - The deck serve computes its fingerprint from the stored roster (`backend/server.py:6950-6968`), so a deck built on the old roster stops matching.
+    - The stamp also cancels that league's old deck jobs (`server.py:14075-14093`).
+  - **Pending, failed and outcome-unknown moves don't touch the roster.** A claim that clears later is picked up by the normal session-start roster refresh.
+- **Cards already on screen** keep B until the next search. That is the display half of W-AC-L5 the operator waived (I-1 runs log-only), and it's the same as a drop made in Sleeper itself.
+  - A send that includes B is still refused by the live roster read (`server.py:24697`).
+  - A Like on that card may still record (AC-6b is post-launch).
+  - Removing the card in place comes with strict mode.
+
 ## C. States
 
 **For `ux-lead` and `design-lead`.** This is the full set the **11-06 binary must carry**, including claims and the `{platform}_*` suffix mapping, so that claims, MFL and ESPN can light up with no build.
@@ -193,7 +211,7 @@ The Settings › Leagues "Stop roster moves" row shows only while a grant is act
 | 5 | **Consent needed** (first / lapsed / version / withdrawn) | At the tap, `move.consent_until` is null or past → consent `GET` (text + `copy_version`). Safety net: 409 `consent_required` (carries the same) | The consent step: the server's text for (platform, `copy_version`, locale). v1 is legal-final now (consent.md §4.1); v2 once claims are on. "This move: {CTA label} in {League}." sits above an **unticked** box. Make the move is disabled until it's ticked | **Make the move** (a fresh tap; sends `consent: {copy_version, locale}`); **Not now** (back to the sheet, unchanged); **Do it in Sleeper instead** | `consent_shown {reason}`; on Make the move, `write_attempted {consent_ticked: true}`; server `consent_recorded` | Stays |
 | 6 | **Ready** | `mode='submit'`, connected, consent valid | **The named CTA is the per-move confirmation (D10)**: "Add A, drop B" / "Add A" / "Claim A for $N, drop B", matching the row's `move_kind`. The league is on or beside it. The finality line is always under it. A claim also shows the waiver line and bid. Inside a window: "Adds authorized until {date}" + **Turn off** (→ the Settings row) | CTA; Do it in Sleeper instead; Cancel | none until the tap | Open |
 | 7 | **Submitting** | CTA tapped | CTA loading; disabled from tap to result (D10(f)); the sheet can't be dismissed mid-send (design-lead to confirm) | none | `write_attempted` | Open |
-| 8 | **Added** | 200, `status: complete` | Says exactly what the platform reports: A added, B dropped, in {League}. A partial result is stated as reported (R15.1 `:767-771`, K-F6) | **Done** | server `write_succeeded {mode: add, result: accepted \| partial}` | Done closes. Refresh (note b) |
+| 8 | **Added** | 200, `status: complete` | Says exactly what the platform reports: A added, B dropped, in {League}. A partial result is stated as reported (R15.1 `:767-771`, K-F6) | **Done** | server `write_succeeded {mode: add, result: accepted \| partial}` | Done closes. Refresh (note b). The held trade page is discarded automatically and the server has already saved the new roster (§B10), so the next search drops B. Cards already on screen keep B until then: the display half of W-AC-L5 the operator waived, the same as a drop made in Sleeper. A send including B is refused by the live roster read (`server.py:24697`); a Like may still record (AC-6b post-launch). In-place removal comes with strict mode |
 | 9 | **Waiver pending** | 200, `status: pending` | "Claim submitted" for A, bid $N, dropping B **if it clears**, run on the league's waiver schedule. **Never "added".** No cancel line until capture Q7b is verified (R15.8 `:874`) | **Done** | server `write_succeeded {mode: claim, result: accepted}` | Done closes. Refresh; the row reads "claim pending" for the session (consent.md §5) |
 | 10a | **Rejected: roster full** | 422 `roster_full_drop_required` | Pick a player to drop. The drop list is highlighted. No result screen | Pick a drop, tap again (a new move, not a retry) | `write_failed {error_code, status}` (10a–10g) | Stays |
 | 10b | **Rejected: drop gone** | 422 `asset_not_owned` | B is no longer on your roster | Pick again | as 10a | Stays. Drop list refreshed |
@@ -216,7 +234,7 @@ The Settings › Leagues "Stop roster moves" row shows only while a grant is act
   - `waivers.faab.remaining`;
   - the `move` capability.
 
-  Usage Trends' FA query is invalidated too. Deck invalidation is K-F5 (§F).
+  Usage Trends' FA query is invalidated too. The trade deck is K-F5, reduced form (§B10): the next search drops B.
 - **(c) Codes map by suffix.** `_not_linked`, `_expired`, `_rejected`, `_unconfigured`, `_write_failed` and `_outcome_unknown` map by suffix, so MFL and ESPN need no build.
 - **(d) Open for ux-lead.** In `submit` mode with `claims: false`, does the FAAB bid field hide (only claims spend a bid) or stay? Today it always shows for FAAB leagues (`ClaimSheet.tsx:189-229`).
 
@@ -308,6 +326,9 @@ Sizing is platforms-eng's (sizing `:37-39`).
   | F10 | **No steps block and no clipboard write** in `ClaimSheet` in any mode (operator, 11-01) | Re-add `fa-claim.steps` |
   | F11 | Consent text is rendered only from the server payload. No consent literal exists in `mobile/src`. The echoed `copy_version` is the one received | Bake v1 into the client |
   | F12 | A terminal result invalidates the `['free-agents', leagueId]` prefix | Drop the invalidation |
+  | F13 | **K-F5 (§B10).** The move request goes through the shared API client, whose `_noteWrite` (`mobile/src/api/client.ts:418-425`) discards the held page on any non-GET. No direct `fetch` exists in the move path. The claim sheet fires no extra event or hook for it | Send the move with a bare `fetch` |
+
+  - **Plus the held-page path:** an assertion in `mobile/tests/check-device-first-page.js` that `discardsDevicePages('/api/league/free-agents/move')` is true. It goes in the claim-sheet PR, reviewed by `trades-eng` (§B10). Sabotage: drop the path from `discardsDevicePages`.
 
 - [x] **Unit tests** (backend; platforms mocked through each adapter's `_opener`; never a live write):
   - `backend/tests/test_fa_move_route.py`:
@@ -320,7 +341,11 @@ Sizing is platforms-eng's (sizing `:37-39`).
     - a connect-phase failure → `kind: network`, "not sent";
     - `move_kind_changed`;
     - a claim refused until v2 **and** the shape is captured;
-    - the preflight budget.
+    - the preflight budget;
+    - **K-F5 (§B10):**
+      - on `status: complete`, the new roster (B off, A on) is saved **before** the response is returned;
+      - `roster_refresh.stamp` runs **off the request thread** (sabotage: call it inline);
+      - **no roster write** on a pending, failed or outcome-unknown move.
   - `backend/tests/test_fa_move_capability.py`: `mode`, `claims`, `connect` and `consent_until` per platform and flag state:
     - Sleeper off → `handoff`; on → `submit`;
     - MFL, ESPN, Fleaflicker and local → `unsupported`;
@@ -341,8 +366,8 @@ Sizing is platforms-eng's (sizing `:37-39`).
   1. Host Add → `move.mode` → sheet, or `NO_ADD_REASON`.
   2. `faMoveGate` → connect, verify, consent or submit.
   3. Consent `GET` → step → `POST …/move` with `consent`.
-  4. Server, the §B3 order: test mode → any kill switch → session → body → league platform → kill switch → `attempt_id` → credential → consent (grant committed) → pre-write reads + budget → D5 / `move_kind` → adapter write (`write_outcome` classification) → move rows → event → response.
-  5. Client result by `status` / code → Done → FA invalidation.
+  4. Server, the §B3 order: test mode → any kill switch → session → body → league platform → kill switch → `attempt_id` → credential → consent (grant committed) → pre-write reads + budget → D5 / `move_kind` → adapter write (`write_outcome` classification) → move rows → on `complete`, save the roster → event → response → `roster_refresh.stamp` off the request thread (§B10).
+  5. Client result by `status` / code → the shared client's `_noteWrite` discards the held page → Done → FA invalidation.
   6. Withdrawals: Settings, disconnect, expiry, rejection.
   7. Capability computation per platform.
 - [x] **Manual TestFlight checklist** (dummy league; the only runtime evidence mobile gets). **Every real move below is a production platform write.** Each one:
@@ -367,6 +392,10 @@ Sizing is platforms-eng's (sizing `:37-39`).
   | T11 | Grant active | Settings › Leagues → **Stop roster moves** | "Roster moves: on until {date}"; R15.2.6's notice verbatim; the row disappears; the next move asks consent again |
   | T12 | Sheet open, flag on | The operator sets the flag **off** in `FTF_FLAGS` → tap | 404 → hand-off mode; nothing sent. Pull to refresh → "Open in Sleeper to claim" |
   | T13 | Connected, grant active | Disconnect Sleeper → reconnect → move | Consent re-asked (withdrawal via `disconnect`) |
+  | T14 | After T4's completed add/drop, before reversing | Start a **new** trade search | **No card includes B** |
+  | T15 | A trade card that was already on screen showing B before T4 | Send that card | **Send is refused** with the readable message (the live roster read); nothing is sent |
+
+  **For launch, T14 and T15 supersede consent.md's step 29** (`:475`). There is no in-place card-removal step: cards already on screen keep B until the next search (§B10). `trades-pm` is asking `head-product` to update PRD step L4b to match.
 
 - [ ] **WAIVED.** Not waived.
 - **`testID`s** (all static strings, so they pass `testid-lint.sh`):
@@ -378,6 +407,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
   - **AC-29 / AC-30:** the gate takes `move`.
   - **AC-33:** copy versions are server-side.
   - **AC-35:** replaced by AC-48.
+  - **AC-37:** reduced form (§B10). The next search no longer offers B, and cards already on screen keep it until then. Verified by F13, the `check-device-first-page.js` assertion, the K-F5 route tests, and T14–T15.
   - **AC-40:** names per §1.
 
   **New:**
@@ -403,7 +433,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
 | `docs/integrations/sleeper.md` | **updated (by the build)** | §1.2 GraphQL ops (and its endpoint count), §3.3 the captured shapes (redacted per capture.md §5), §4 the new error modes including outcome unknown |
 | `docs/integrations/mfl.md`, `espn.md` | n/a now | Update 1, when their free-agent writes are verified (§E) |
 | `living-memory/LLD.md` | **updated (by the build)** | Two conventions: (1) on-behalf platform writes need a server-enforced, versioned, time-boxed consent record checked before the write call; (2) **a server-decided capability drives client behaviour for platform writes, and the client never reads the kill switch** |
-| `docs/architecture.md` | **updated (by the build)** | Module rows: the `sleeper_write.py` ops, and `write_outcome.py` now serving Sleeper. Route wiring: `…/move` → league platform → per-platform adapter. The FA read's capability |
+| `docs/architecture.md` | **updated (by the build)** | Module rows: the `sleeper_write.py` ops, and `write_outcome.py` now serving Sleeper. Route wiring: `…/move` → league platform → per-platform adapter, then on a completed move the roster save and an off-thread `roster_refresh.stamp` (§B10). The FA read's capability |
 | `living-memory/HLD.md` | **updated (by the build)** | The platform-neutral write seam counts: one route dispatching to per-platform adapters, plus a server-decided client mode that lets new platforms light up server-only. `eng-architect` may downgrade it to n/a if it judges this a convention, not a shift |
 | `docs/cross-client-invariants.md` | **updated (by the build)** | The consent `copy_version` strings (`sleeper-roster-moves-v1` / `-v2`) and the `move.mode` / `move_kind` enums |
 | `docs/glossary.md` | **updated (by the build)** | **Write consent**; **move capability** (`move.mode`) |
@@ -417,7 +447,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
 
 - **Simulator-gate tier: WAIVED.** D-056 retired the tier matrix. `FTF_SKIP_SIM_GATE=1` is the standing posture, with the evidence in §3 named in its place.
 - **CI green** on the pushed sha: `backend-tests`, `mobile-typecheck` (which runs every `check-*.js`, including `check-fa-move.js`), and `maestro-testid-lint`.
-- **The 11-06 binary gate (client, dark).** F1–F12 pass, and the code-walk is written. It needs no flag or server change to ship.
+- **The 11-06 binary gate (client, dark).** F1–F13 and the `check-device-first-page.js` assertion pass, and the code-walk is written. It needs no flag or server change to ship.
 - **D6, restated for launch.** The flip needs **all** of these:
   1. **Legal's launch minimum folded in.** LEG-L12 as `legal-lead` scopes it for launch (`legal-lead.md:421`), arriving via `head-bizops` ~11-04: the consent copy (v1; v2 before claims), the R15.3 tables, and the privacy and terms text, live.
   2. **The capture recorded** in `capture.md`, redacted (AC-19).
@@ -427,7 +457,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
 
   #351's P31 device tests gate #509's hand-off merge, not this flip. **The flip itself is the operator's.** The TestFlight checklist runs straight after it, and the flag goes back off on any failure.
 - **Claims** need, in addition, D5: the current copy at v2 **and** the claim shape captured.
-- **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the F1–F12 sabotages (applied and reverted), the backend tests, the code-walk, the T1–T13 outcomes, and `FTF_SKIP_SIM_GATE=1`.
+- **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the F1–F13 sabotages (applied and reverted), the backend tests, the code-walk, the T1–T15 outcomes, and `FTF_SKIP_SIM_GATE=1`.
 - **Express lane declared by the operator?** No. Schema, API and flag surfaces are all touched, so full gates apply.
 
 ## E. Platform scope
@@ -469,7 +499,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
 - **`analytics-lead`**, via `head-product`: P1 and P2.
 - **`ux-lead` and `design-lead`:** §C, including note (d).
 - **marketing**, via `head-product`: §G.
-- **`trades-pm`:** K-F5 deck invalidation (consent.md `:317-318`). Is it in the 11-06 binary? If not, a dropped player can sit on deck cards until the next refresh.
+- **`trades-pm` — answered 2026-11-01:** K-F5 is in the 11-06 binary in a reduced form. After a completed move, the next search no longer offers the dropped player; cards already on screen keep it until that search. The build requirements are §B10. `head-eng` confirms who builds the `devicePage.ts` change (`trades-eng` reviews it).
 - **`platforms-eng`:**
   - the connect mapping (§E);
   - the move core's worst case (§B5);
