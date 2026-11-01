@@ -1177,9 +1177,8 @@ def redact_notification(row: dict, ids, token: str, usernames, display_names=(),
     their ids. Who the partner is: for a match notification, the match row says
     (`match_partner_deleted`: its other side is the deletion's placeholder, or
     a live user), so the partner name is theirs whatever it says, or it isn't
-    (#562 re-QA P3:
-    a leaguemate whose display name is their username, and a copy sent in a
-    league they had left). Otherwise: by username (unique), by display name
+    (#562 re-QA P3: a leaguemate whose display name is their username, and a
+    copy sent in a league they had left). Otherwise: by username (unique), by display name
     (the second liker's copy) only where the caller passed them, a recipient
     who shared a league with the person, or by a raw id (no names). That name
     and any "@<id>" become the placeholder in the title and body, the
@@ -1273,7 +1272,7 @@ def _scan_notifications(job: dict, after: str, budget: "_Budget") -> tuple[str |
                 except Exception as err:   # a poison row: counted, the pass not done
                     _row_failed(job, "notifications", err)
                     continue
-                if values:
+                if values and any(values[k] != row[k] for k in values):   # never an unchanged write
                     conn.execute(update(t).where(t.c.id == row["id"]).values(**values))
                     changed += 1
         cursor = rows[-1]["id"]

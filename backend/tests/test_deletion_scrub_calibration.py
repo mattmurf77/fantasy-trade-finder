@@ -535,6 +535,29 @@ def test_the_backfill_writes_only_the_partner_in_chunks_with_one_deck_lookup_eac
     assert f"grading_cards partner backfill: {filled} cards, 0 chunks failed" in text_
 
 
+class _Records(list):
+    pass
+
+
+def caplog_at(level):
+    """Collect db's log records at `level` without the caplog fixture (this
+    test already monkeypatches db.engine)."""
+    import contextlib
+    import logging
+
+    @contextlib.contextmanager
+    def ctx():
+        records = _Records()
+        handler = logging.Handler(level)
+        handler.emit = records.append
+        db.log.addHandler(handler)
+        try:
+            yield records
+        finally:
+            db.log.removeHandler(handler)
+    return ctx()
+
+
 def test_the_backfill_counts_only_what_committed_and_never_raises(eng, monkeypatch):
     """A chunk that fails (here its commit) is rolled back, not counted, and
     skipped; the others land. A failure before any chunk returns 0. It never
@@ -559,10 +582,14 @@ def test_the_backfill_counts_only_what_committed_and_never_raises(eng, monkeypat
     class Broken:
         dialect = eng.dialect
 
-        def connect(self):
+        def begin(self):
             raise RuntimeError("no database")
+        connect = begin
     monkeypatch.setattr(db, "engine", Broken())
-    assert db.backfill_grading_card_partners() == 0
+    import logging
+    with caplog_at(logging.WARNING) as records:
+        assert db.backfill_grading_card_partners() == 0
+    assert any("partner backfill failed: RuntimeError" in r.getMessage() for r in records)
 
 
 def test_on_postgres_each_chunk_sets_its_lock_and_statement_timeouts(eng, monkeypatch):
@@ -626,15 +653,21 @@ def test_every_backfill_transaction_sets_both_timeouts(eng, monkeypatch):
     read and every chunk issue SET LOCAL lock_timeout and statement_timeout."""
     older(eng, monkeypatch)
     monkeypatch.setattr(db, "_BACKFILL_CHUNK", 10)
+    pending = sum(1 for c in all_cards(eng).values() if c["partner_user_id"] is None)
     issued = []
     monkeypatch.setattr(db, "_ddl_is_postgres", lambda: True)
     monkeypatch.setattr(db, "_execute_ddl", lambda conn, sql: issued.append(sql))
-    begins = []
-    real_begin = db.engine.begin
+    begins, connects = [], []
+    real_begin, real_connect = db.engine.begin, db.engine.connect
     monkeypatch.setattr(db.engine, "begin", lambda: begins.append(1) or real_begin())
+    monkeypatch.setattr(db.engine, "connect", lambda: connects.append(1) or real_connect())
     db.backfill_grading_card_partners()
-    assert begins and issued == [f"SET LOCAL lock_timeout = '{db._DDL_LOCK_TIMEOUT}'",
-                                 f"SET LOCAL statement_timeout = '{db._DDL_STATEMENT_TIMEOUT}'"] * len(begins)
+    # The first read and every chunk, each a transaction with both timeouts;
+    # nothing on a bare connection: begin() opens one connect() of its own, so
+    # any other read would show as an extra connect (#562 final QA P3-1).
+    assert len(begins) == 1 + -(-pending // 10) and len(connects) == len(begins)
+    assert issued == [f"SET LOCAL lock_timeout = '{db._DDL_LOCK_TIMEOUT}'",
+                      f"SET LOCAL statement_timeout = '{db._DDL_STATEMENT_TIMEOUT}'"] * len(begins)
 
 
 def test_the_backfill_never_fills_the_sessions_own_user_and_skips_a_bad_receive(eng, monkeypatch, caplog):

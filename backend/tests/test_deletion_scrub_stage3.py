@@ -368,12 +368,14 @@ def test_a_person_with_many_matches_is_scanned_without_a_term_per_match(engine):
     mt = db.trade_matches_table
     with engine.begin() as conn:
         conn.execute(insert(mt), [
-            {"id": 1000 + i, "league_id": LEAGUE, "user_a_id": DEL, "user_b_id": f"cp{i % 40}",
+            {"id": 1000 + i, "league_id": LEAGUE, "user_a_id": DEL, "user_b_id": f"cp{i}",
              "user_a_give": "[]", "user_a_receive": "[]", "status": "pending"} for i in range(1500)])
-        notification(conn, "Trade match with @Someone", {"partner_username": "Someone", "match_id": 1007},
-                     user="cp7")
-        notification(conn, "Trade match with @Someone", {"partner_username": "Someone", "match_id": 1007},
-                     user="cp8")                                   # not a side of match 1007
+        # One counterparty per match, and one past the first 500 match ids, so
+        # every batch of the counterparty lookup is needed (#562 final QA P3-2).
+        notification(conn, "Trade match with @Someone", {"partner_username": "Someone", "match_id": 2200},
+                     user="cp1200")
+        notification(conn, "Trade match with @Someone", {"partner_username": "Someone", "match_id": 2200},
+                     user="cp1201")                                # not a side of match 2200
     accounts.delete_user_data(DEL)
     assert scrub.run_pending() == 1
     rows = sorted(read(engine, db.notifications_table), key=lambda r: r["id"])
