@@ -37,7 +37,11 @@ free_agents[i].move_line:  string                     // optional; the server's 
 
 ## 2. Consent routes
 
-Both 404 `feature_disabled` while every `*.send_add_drop` is off. `platform` ∈ `sleeper | mfl | espn`; anything else is 400 `bad_request`.
+**The consent routes are never gated by a kill switch.**
+- GET always answers 200, with `valid: false` and no status line when there's no grant. The Settings row then stays hidden, and dark periods log no failures.
+- DELETE always works. A user can withdraw a grant even while moves are switched off.
+- Only the move route and the capability follow `*.send_add_drop`.
+- `platform` ∈ `sleeper | mfl | espn`; anything else is 400 `bad_request`.
 
 **`GET /api/platform-write-consent?platform=sleeper`** → 200:
 
@@ -65,7 +69,7 @@ Both 404 `feature_disabled` while every `*.send_add_drop` is off. `platform` ∈
 **`DELETE /api/platform-write-consent?platform=sleeper`** → 200 `{ platform, valid: false, notice: string }`. `notice` is R15.2.6's withdrawal text, verbatim. Idempotent: a second DELETE returns the same body.
 
 - **Both routes need a session only, never a verified one.** Withdrawal must be as easy as giving it (R15.2.6), and withdrawing only removes a permission.
-- **Errors:** 401 with no session; 404 `feature_disabled`; 400 `bad_request` for an unknown platform. On any DELETE failure, the client keeps the row and shows a neutral "couldn't turn it off, try again" line. The grant stays in force until a DELETE succeeds.
+- **Errors:** 401 with no session; 400 `bad_request` for an unknown platform. A 404 means an older server; the client treats it like `valid: false`. On any DELETE failure, the client keeps the row and shows a neutral "couldn't turn it off, try again" line. The grant stays in force until a DELETE succeeds.
 
 ## 3. POST /api/league/free-agents/move
 
@@ -79,10 +83,15 @@ Both 404 `feature_disabled` while every `*.send_add_drop` is off. `platform` ∈
   move_kind:       "add" | "claim", // what the CTA named
   faab_bid?:       number,          // claims only
   consent?:        { copy_version: string, locale: string },  // only from the consent step
-  attempt_id:      string,          // UUID, one per tap
+  attempt_id:      string,          // one per tap; see the rule below
   surface?:        "free_agents" | "usage_trends"  // the sheet's host; the server records it on fa_move_consent_recorded and ignores any other value
 }
 ```
+
+**`attempt_id` rule:**
+- The client sends a v4-UUID-**shaped** string (8-4-4-4-12 hex). Hermes has no Web Crypto, so it may come from `Math.random`, not a CSPRNG.
+- The server treats it as **opaque**: it accepts 8–64 characters of `[A-Za-z0-9._-]` and never parses it as a UUID or stores it in a `uuid` column.
+- **Idempotency is scoped per user:** (user, `attempt_id`) identifies a move. Another user's identical id is a different move, never a replay.
 
 **200:**
 
