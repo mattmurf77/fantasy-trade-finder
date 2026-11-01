@@ -34,6 +34,61 @@ Gates: the scope block `docs/plans/share-text-c2/scope.md`. head-bizops's decisi
 - **Suites:** all 135 `mobile/tests/check-*.js` pass; `tsc --noEmit` is clean.
 - **TestFlight:** the operator's 5-step checklist, on the 11-06 binary.
 
+## 2026-10-31 — GNG-1 server error alerts through Sentry + SUP-M7 `feedback_received` (dark until `SENTRY_DSN`)
+
+Gates: full (operator did not declare express). Scope blocks: `docs/plans/server-error-alerts/scope.md` and `scope-feedback-alert.md`. Docs updated: `config-reference.md` (env vars), `runbook.md` § "Server error alerts (Sentry)", `architecture.md` (module row), `api-reference.md` (`POST /api/feedback` side effect), and `living-memory/DEPENDENCIES.md` 2026-10-31. No schema, flag, route-contract or analytics change. **Revised the same day for legal R28.23:** events are built from an allowlist (scope.md has the conditions table).
+
+- **Tests:** `backend/tests/test_error_alerts.py`, 68. They use a fake DSN and a recording `Transport` subclass, so nothing goes over the network. The client is closed and the global client reset in teardown, and an autouse guard asserts Sentry is off before and after each test. The fixture also records each event as the SDK built it, before the allowlist, so a test can pin what is never collected. Cases (a)-(i):
+  - (a) no DSN: no init, no client, no capture, the SDK never imported (subprocess); a malformed DSN gives False and doesn't fail boot; the init options are pinned;
+  - (b) a raising route is exactly one event, with the stack, without its text, and with `request.url` the route pattern;
+  - (c) a handled 503 is one `http_5xx` with route/status/method tags and a fingerprint; a 404 is none; a handled 500 after `log.exception` is one event;
+  - (d) a `_cleanup_loop` step raising is one event (the `loop_pass` harness);
+  - (e) a `daily_tick` step raising is one event;
+  - (f) **legal's condition 7**, one request planting a user id, username, share token, email and IP in the path, `?ref=`/`token=` in the query, X-Forwarded-For / X-Real-IP / Cookie / Authorization / X-Session-Token headers, the values logged with `log.exception`, held in a local and raised:
+    - none of them is in the serialized envelope bytes;
+    - `request.url` is `/api/sleeper/user/<path:username>`;
+    - the SDK did collect them before the allowlist (not vacuous);
+    - no breadcrumbs were collected.
+    Also: `match_id=4217` (a `/s/trade/` link code) logged as an int param never reaches the envelope (a delimited regex over the bytes); a third-party logger's f-string template becomes `[Filtered]`, with its logger name and level kept; templates only from `backend.*` / `trade_finder` / `ftf.*` / `gunicorn.error` (13 names); frames carry file, function and line, with no `context_line` / `pre_context` / `post_context` in the bytes; the credential request (body, `espn_s2`, SWID, JWT, `X-Cron-Secret`, `?token=`), the allowlist shape and edges (unmatched route, no request context, `formatted` dropped when it can't format), the pattern layer (snake_case identifiers survive), breadcrumbs off, and fail closed (unit and e2e; the 5xx is still reported from constants);
+  - (g) new feedback is one `feedback_received` with exactly `{feedback_id, kind}` and nothing of the note, user, session or client id; a duplicate sends none;
+  - (h) a thread started in a request carries no request (pinned before the allowlist too);
+  - (i) the AST guard: every `log.error` / `exception` / `critical` and `log.log` template in `backend/` (not tests) is a str constant, or a name bound once to one. That's 177 calls in 153 files, and 0 violations; `server.py:5984` `log.error(line, *args)` resolves to its two-line constant.
+- **Sabotages, 20/20 red then green** (the whole matrix was re-run after each R28.23 round):
+  - the no-DSN guard removed: red at setup, since `import backend.server` turned Sentry on;
+  - the 5xx dedupe check removed: (b) and the handled 500 count 2;
+  - `>= 500` changed to `>= 400`: the 404 reports;
+  - `before_send` removed: secrets in the envelope;
+  - the 9+ digit pattern removed: the league id leaks, and the pattern/shape cases fail;
+  - `scrub_event` fails open: the event is sent;
+  - `notify` on a fork of the request scope: request and transaction attached;
+  - the duplicate guard removed: a second `feedback_received`;
+  - `propagate_scope=True`: the thread event carries the request;
+  - the 24+ run rule back to "any run": `prepared_trade_inventories` and `_drop_stale_deck_evidence` are filtered (2 pattern cases red);
+  - **R28.23:** the real path sent, the query kept, exception `value` kept, raw log params kept, request headers kept (X-Session-Token leaks; the SDK itself blanks Cookie, Authorization, X-Forwarded-For and X-Real-IP). With only the condition-7 bytes check left in, each of these five still fails, so each one leaks planted values into the envelope;
+  - **R28.23:** logging breadcrumbs re-enabled (`level=logging.INFO`, and `before_breadcrumb` returning the crumb). Condition 7's "none collected" check, `test_init_options` and `test_breadcrumbs_are_off` fail. The allowlist alone would still keep breadcrumbs out of the bytes;
+  - **R28.23:** one f-string `log.error` added to `server.py`: the AST guard fails;
+  - **R28.23 strict:** ints let through `_logentry`'s params again: the `match_id` test fails;
+  - **R28.23 strict:** templates from every logger: the third-party test and the six not-ours cases fail;
+  - **R28.23 strict:** `include_source_context=True`: the no-source-lines test and `test_init_options` fail.
+- **Suites** (one process each, with `test_error_alerts.py` first, so later files run after Sentry was on in-process):
+  - venv with `sentry-sdk==2.72.0`: 120 passed. That's `test_error_alerts` 33, `test_fork_safe_db_and_threads` 17, `test_feedback_public` 14, `test_feedback_public_limits` 33, `test_feedback_text_cap` 3, `test_feedback_attach_on_verify` 12 and `test_daily_tick_runner` 8;
+  - system Python **without** the SDK: 87 passed, `test_error_alerts` skipped (`importorskip`). So `server.py` imports cleanly without the package.
+  - After the review revision and the merge of `origin/main` at `98b9291f`, in the venv: 123 passed (`test_error_alerts` 36; the other six files unchanged at 87).
+  - After the R28.23 revision, on the branch at `aa0f8c02` (main `29ba8f26` merged), in the venv: 139 passed (`test_error_alerts` 52; the other six at 87). System Python without the SDK: 87 passed, 1 skipped. The AST guard is in the skipped file, so it runs only where the SDK is installed, as in CI.
+  - **R28.23 strict follow-ups** (every param `[Filtered]`, templates only from our loggers, `include_source_context=False`): 155 passed in the venv (`test_error_alerts` 68; the other six at 87).
+  - Local Python 3.14.4; CI and prod run 3.12. The full suite was not run locally (shared machine); CI runs it.
+- **Overhead** (laptop, Flask test client, rough):
+  - Sentry off: the two hooks cost about 0.3 µs per request (a module-flag check; `report_5xx` is called only for a 5xx).
+  - Sentry on: about +0.4 ms per request (the SDK's WSGI middleware, scope fork and session tracking; our hooks about 2 µs), plus about 80 µs per INFO+ log line as a breadcrumb in isolation (about 25 µs of it the scrub regexes). Breadcrumbs have been off since the R28.23 revision, so that per-line cost is gone. The scrub is linear on a 100 KB string (≤ 0.25 s), since every unanchored run is bounded.
+- **Revision after rankings-eng's review (same day):** a 24+ run of `[A-Za-z0-9_-]` is filtered only if it has a digit, or both upper and lower case (`_token_shaped`, a match callback, still linear). So error text like `relation "prepared_trade_inventories" does not exist` keeps its identifier. The 80+ espn_s2 rule and the 9+ digit rule are unchanged.
+- **Release-lead's QA at `1f824097` (NO-GO, one P1), and the delta.** release-lead ran the real HTTP transport against a fake Sentry on 127.0.0.1 and grepped the raw, decompressed envelope bytes for 40 planted values. Everything else passed: conditions 1, 2, 4 and 5, chained `__cause__` / `__context__` and ExceptionGroup messages absent, 24/24 of their sabotages red, dark exactly as main, the sender restarting per pid under `--preload`, about 2 s added at shutdown with an unreachable DSN.
+  - **P1:** an inbound `baggage: sentry-user_id=…` header reached the envelope header `trace`, and `sentry-trace` ids reached `contexts.trace`. Fix: `trace` dropped from `_CONTEXTS`. The SDK builds the envelope header from `contexts.trace.dynamic_sampling_context` after before_send (`sentry_sdk/client.py:959`, then `:1202-1211`), so neither is sent. New `test_no_inbound_trace_or_baggage_leaves` plants `sentry-trace`, `baggage` (with a third-party item) and `traceparent`, checks the SDK did continue the trace before the allowlist, and asserts no planted value in the envelope bytes, header lines included, and no `trace` envelope header.
+  - **P2s:** `auto_session_tracking=False` (new `test_no_envelope_without_an_error`: three 200s and a flush send nothing). `http_5xx` is never sent for a 501 and at most once per route and status per worker per hour (new cap test).
+  - **P3s:** `server_name`, `_meta` and frame `abs_path` no longer sent; a non-str `record.msg` (`log.error(exc)`) is `[Filtered]` (new test). The template guard moved to `backend/tests/test_error_log_templates.py`, which needs no SDK, scans any receiver but `ap` / `parser` / `math` / `super()` (so a chained `logging.getLogger(...).error(f…)` and an alias are caught), and covers `scripts/`. `getattr(log, "error")` isn't followed; the str check and the pattern layer still hold there.
+  - **Sabotages, 10/10 red then green** (30 in all): `trace` back in `_CONTEXTS`; `auto_session_tracking=False` removed; the 501 exclusion removed; the hourly cap removed; the str check removed; frames keeping every key; `server_name` back; `_meta` back; a chained `getLogger(__name__).error(f"…")` added to `server.py`; the old "log"-named receiver rule.
+  - **Suites, in the venv:** 168 passed (`test_error_alerts` 58, `test_error_log_templates` 23, the other six at 87). System Python without the SDK: the template guard 23 passed, `test_error_alerts` skipped.
+- **Not verified:** a real Sentry project, and the Sentry-side settings of condition 5. The DSN MUST stay unset until the privacy page carrying legal's R28.23 lines (#373) is live; the runbook lists the first-hour checks.
+
 ## 2026-10-31 — G3-e under legal R28.23: an orphan outcome's owner id is one deletion's alias resolution covers
 
 Gates: head-eng's relay of legal R28.23 (G3-e accepted on three conditions), condition 2. Test only. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
