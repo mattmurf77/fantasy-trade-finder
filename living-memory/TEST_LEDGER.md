@@ -75,6 +75,10 @@ Gates: the scope block `scope-deletion-scrub.md` §0.3 (head-eng's ruling 2, 10-
   - **the full backend suite** at `3e7dcf3e`: 10,207 passed, 2 skipped, 0 failed;
   - after stage 1's `bakeoff_runs` update was merged in (`77d55a47`): both scrub files (36) and every evidence, page-store and deletion suite, 1,442 passed.
 
+## 2026-10-31 — Deletion scrub: main's #540 merged in; deletion_scrub_jobs named as kept with a reason
+
+#540 (on main) added a person-column scan to `test_account_deletion_coverage`: every table with a column that can name a person must be named in `accounts.py`. `deletion_scrub_jobs.partner_ids_json` matched, so the merged branch failed it. The table is now in `accounts._KEPT_WITH_REASON`: the deletion's own record, holding the resolved ids until the scrub finishes, then deleted. Not exported, because the person is gone. Before the fix it failed with `['deletion_scrub_jobs']`. The deletion-coverage and scrub suites pass 98. The API reference's DELETE row and daily-tick count were merged by hand: main's overhaul text plus the scrub paragraph, with ten tick steps.
+
 ## 2026-10-31 — Deletion scrub: #557 re-QA notes (GO with notes)
 
 Gates: release-lead's #557 re-QA @ `a241e8f0` (GO with notes; all 3 P1s closed end to end on SQLite and PG). No schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -186,6 +190,88 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
   - `test_purge_entry_users.py`: `user_taste.attr`, the derived `partner:<id>` key, listed as not a user column.
 - **Suites:** every test touching deletion, export or the tick (17 files): 909 passed before those two updates, and both pass after them (68). **The full backend suite at `671dd526`** (main `fabfe92c` merged): 10,195 passed, 2 skipped, 0 failed.
 
+## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
+
+Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P3-1, the flags-on twin** (`test_trade_page_store.py`):
+  - the in-memory job's cards are swapped after the store, so a serve from the job instead of the stored deck can't pass;
+  - a cursor past 0, whose slice still has a card for I-1 to drop, is withheld with that cursor held, then serves exactly the I-1 survivors from it;
+  - it's served before cursor 0, because a cursor-0 serve would withdraw its drops and the sticky drop (C-b) would hide them either way.
+  - **Sabotages, 2/2 red:** I-1 skipped past cursor 0; the status served from the job, not the stored deck.
+- **P3-2:** `test_a_superseded_job_writes_no_impressions` pins both flags off, through a shared `flags_off` fixture with its control. With the flags on it was vacuous (impressions wait for delivery). The fence still matters on a flags-off rollback.
+  - **Sabotage:** removing the fence (`and not _job_superseded(job_id)` at the impression write) makes it red.
+- **Suites:** force-supersede and the page store, both files pass.
+
+## 2026-10-31 — GNG-1 server error alerts through Sentry + SUP-M7 `feedback_received` (dark until `SENTRY_DSN`)
+
+Gates: full (operator did not declare express). Scope blocks: `docs/plans/server-error-alerts/scope.md` and `scope-feedback-alert.md`. Docs updated: `config-reference.md` (env vars), `runbook.md` § "Server error alerts (Sentry)", `architecture.md` (module row), `api-reference.md` (`POST /api/feedback` side effect), and `living-memory/DEPENDENCIES.md` 2026-10-31. No schema, flag, route-contract or analytics change. **Revised the same day for legal R28.23:** events are built from an allowlist (scope.md has the conditions table).
+
+- **Tests:** `backend/tests/test_error_alerts.py`, 68. They use a fake DSN and a recording `Transport` subclass, so nothing goes over the network. The client is closed and the global client reset in teardown, and an autouse guard asserts Sentry is off before and after each test. The fixture also records each event as the SDK built it, before the allowlist, so a test can pin what is never collected. Cases (a)-(i):
+  - (a) no DSN: no init, no client, no capture, the SDK never imported (subprocess); a malformed DSN gives False and doesn't fail boot; the init options are pinned;
+  - (b) a raising route is exactly one event, with the stack, without its text, and with `request.url` the route pattern;
+  - (c) a handled 503 is one `http_5xx` with route/status/method tags and a fingerprint; a 404 is none; a handled 500 after `log.exception` is one event;
+  - (d) a `_cleanup_loop` step raising is one event (the `loop_pass` harness);
+  - (e) a `daily_tick` step raising is one event;
+  - (f) **legal's condition 7**, one request planting a user id, username, share token, email and IP in the path, `?ref=`/`token=` in the query, X-Forwarded-For / X-Real-IP / Cookie / Authorization / X-Session-Token headers, the values logged with `log.exception`, held in a local and raised:
+    - none of them is in the serialized envelope bytes;
+    - `request.url` is `/api/sleeper/user/<path:username>`;
+    - the SDK did collect them before the allowlist (not vacuous);
+    - no breadcrumbs were collected.
+    Also: `match_id=4217` (a `/s/trade/` link code) logged as an int param never reaches the envelope (a delimited regex over the bytes); a third-party logger's f-string template becomes `[Filtered]`, with its logger name and level kept; templates only from `backend.*` / `trade_finder` / `ftf.*` / `gunicorn.error` (13 names); frames carry file, function and line, with no `context_line` / `pre_context` / `post_context` in the bytes; the credential request (body, `espn_s2`, SWID, JWT, `X-Cron-Secret`, `?token=`), the allowlist shape and edges (unmatched route, no request context, `formatted` dropped when it can't format), the pattern layer (snake_case identifiers survive), breadcrumbs off, and fail closed (unit and e2e; the 5xx is still reported from constants);
+  - (g) new feedback is one `feedback_received` with exactly `{feedback_id, kind}` and nothing of the note, user, session or client id; a duplicate sends none;
+  - (h) a thread started in a request carries no request (pinned before the allowlist too);
+  - (i) the AST guard: every `log.error` / `exception` / `critical` and `log.log` template in `backend/` (not tests) is a str constant, or a name bound once to one. That's 177 calls in 153 files, and 0 violations; `server.py:5984` `log.error(line, *args)` resolves to its two-line constant.
+- **Sabotages, 20/20 red then green** (the whole matrix was re-run after each R28.23 round):
+  - the no-DSN guard removed: red at setup, since `import backend.server` turned Sentry on;
+  - the 5xx dedupe check removed: (b) and the handled 500 count 2;
+  - `>= 500` changed to `>= 400`: the 404 reports;
+  - `before_send` removed: secrets in the envelope;
+  - the 9+ digit pattern removed: the league id leaks, and the pattern/shape cases fail;
+  - `scrub_event` fails open: the event is sent;
+  - `notify` on a fork of the request scope: request and transaction attached;
+  - the duplicate guard removed: a second `feedback_received`;
+  - `propagate_scope=True`: the thread event carries the request;
+  - the 24+ run rule back to "any run": `prepared_trade_inventories` and `_drop_stale_deck_evidence` are filtered (2 pattern cases red);
+  - **R28.23:** the real path sent, the query kept, exception `value` kept, raw log params kept, request headers kept (X-Session-Token leaks; the SDK itself blanks Cookie, Authorization, X-Forwarded-For and X-Real-IP). With only the condition-7 bytes check left in, each of these five still fails, so each one leaks planted values into the envelope;
+  - **R28.23:** logging breadcrumbs re-enabled (`level=logging.INFO`, and `before_breadcrumb` returning the crumb). Condition 7's "none collected" check, `test_init_options` and `test_breadcrumbs_are_off` fail. The allowlist alone would still keep breadcrumbs out of the bytes;
+  - **R28.23:** one f-string `log.error` added to `server.py`: the AST guard fails;
+  - **R28.23 strict:** ints let through `_logentry`'s params again: the `match_id` test fails;
+  - **R28.23 strict:** templates from every logger: the third-party test and the six not-ours cases fail;
+  - **R28.23 strict:** `include_source_context=True`: the no-source-lines test and `test_init_options` fail.
+- **Suites** (one process each, with `test_error_alerts.py` first, so later files run after Sentry was on in-process):
+  - venv with `sentry-sdk==2.72.0`: 120 passed. That's `test_error_alerts` 33, `test_fork_safe_db_and_threads` 17, `test_feedback_public` 14, `test_feedback_public_limits` 33, `test_feedback_text_cap` 3, `test_feedback_attach_on_verify` 12 and `test_daily_tick_runner` 8;
+  - system Python **without** the SDK: 87 passed, `test_error_alerts` skipped (`importorskip`). So `server.py` imports cleanly without the package.
+  - After the review revision and the merge of `origin/main` at `98b9291f`, in the venv: 123 passed (`test_error_alerts` 36; the other six files unchanged at 87).
+  - After the R28.23 revision, on the branch at `aa0f8c02` (main `29ba8f26` merged), in the venv: 139 passed (`test_error_alerts` 52; the other six at 87). System Python without the SDK: 87 passed, 1 skipped. The AST guard is in the skipped file, so it runs only where the SDK is installed, as in CI.
+  - **R28.23 strict follow-ups** (every param `[Filtered]`, templates only from our loggers, `include_source_context=False`): 155 passed in the venv (`test_error_alerts` 68; the other six at 87).
+  - Local Python 3.14.4; CI and prod run 3.12. The full suite was not run locally (shared machine); CI runs it.
+- **Overhead** (laptop, Flask test client, rough):
+  - Sentry off: the two hooks cost about 0.3 µs per request (a module-flag check; `report_5xx` is called only for a 5xx).
+  - Sentry on: about +0.4 ms per request (the SDK's WSGI middleware, scope fork and session tracking; our hooks about 2 µs), plus about 80 µs per INFO+ log line as a breadcrumb in isolation (about 25 µs of it the scrub regexes). Breadcrumbs have been off since the R28.23 revision, so that per-line cost is gone. The scrub is linear on a 100 KB string (≤ 0.25 s), since every unanchored run is bounded.
+- **Revision after rankings-eng's review (same day):** a 24+ run of `[A-Za-z0-9_-]` is filtered only if it has a digit, or both upper and lower case (`_token_shaped`, a match callback, still linear). So error text like `relation "prepared_trade_inventories" does not exist` keeps its identifier. The 80+ espn_s2 rule and the 9+ digit rule are unchanged.
+- **Release-lead's QA at `1f824097` (NO-GO, one P1), and the delta.** release-lead ran the real HTTP transport against a fake Sentry on 127.0.0.1 and grepped the raw, decompressed envelope bytes for 40 planted values. Everything else passed: conditions 1, 2, 4 and 5, chained `__cause__` / `__context__` and ExceptionGroup messages absent, 24/24 of their sabotages red, dark exactly as main, the sender restarting per pid under `--preload`, about 2 s added at shutdown with an unreachable DSN.
+  - **P1:** an inbound `baggage: sentry-user_id=…` header reached the envelope header `trace`, and `sentry-trace` ids reached `contexts.trace`. Fix: `trace` dropped from `_CONTEXTS`. The SDK builds the envelope header from `contexts.trace.dynamic_sampling_context` after before_send (`sentry_sdk/client.py:959`, then `:1202-1211`), so neither is sent. New `test_no_inbound_trace_or_baggage_leaves` plants `sentry-trace`, `baggage` (with a third-party item) and `traceparent`, checks the SDK did continue the trace before the allowlist, and asserts no planted value in the envelope bytes, header lines included, and no `trace` envelope header.
+  - **P2s:** `auto_session_tracking=False` (new `test_no_envelope_without_an_error`: three 200s and a flush send nothing). `http_5xx` is never sent for a 501 and at most once per route and status per worker per hour (new cap test).
+  - **P3s:** `server_name`, `_meta` and frame `abs_path` no longer sent; a non-str `record.msg` (`log.error(exc)`) is `[Filtered]` (new test). The template guard moved to `backend/tests/test_error_log_templates.py`, which needs no SDK, scans any receiver but `ap` / `parser` / `math` / `super()` (so a chained `logging.getLogger(...).error(f…)` and an alias are caught), and covers `scripts/`. `getattr(log, "error")` isn't followed; the str check and the pattern layer still hold there.
+  - **Sabotages, 10/10 red then green** (30 in all): `trace` back in `_CONTEXTS`; `auto_session_tracking=False` removed; the 501 exclusion removed; the hourly cap removed; the str check removed; frames keeping every key; `server_name` back; `_meta` back; a chained `getLogger(__name__).error(f"…")` added to `server.py`; the old "log"-named receiver rule.
+  - **Suites, in the venv:** 168 passed (`test_error_alerts` 58, `test_error_log_templates` 23, the other six at 87). System Python without the SDK: the template guard 23 passed, `test_error_alerts` skipped.
+- **Not verified:** a real Sentry project, and the Sentry-side settings of condition 5. The DSN MUST stay unset until the privacy page carrying legal's R28.23 lines (#373) is live; the runbook lists the first-hour checks.
+
+## 2026-10-31 — G3-e under legal R28.23: an orphan outcome's owner id is one deletion's alias resolution covers
+
+Gates: head-eng's relay of legal R28.23 (G3-e accepted on three conditions), condition 2. Test only. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **`test_account_deletion_coverage.py::test_an_outcome_on_a_deck_with_no_rows_and_no_pack_goes_by_its_owner`:** outcomes on a deck with no row and no pack (#535's shape) are owned by:
+  - the user's own id;
+  - an account alias;
+  - a working key a durable session recorded for the account;
+  - and, as the control, another user.
+  Deletion leaves only the other user's. The owner id is the verified session's `user_id` (`_save_deck_outcome_safe` refuses any other), so it's one of these.
+- **Sabotages, 2/2 red:** the owner-column delete removed; working keys not resolved.
+- **Condition 1, by code** (no prod read from trades-eng): a deck without rows exists only in deferred-evidence mode. That mode is admitted only with `trade.first_page_store` on (the `job["evidence_mode"] = "deferred"` branch of the job kickoff), and the flag is off in prod. So #535's shape can't have occurred, and the read-only count is release-lead's to run.
+- **Suites:** `test_account_deletion_coverage.py` and `test_deck_outcome_owner.py` pass.
+
 ## 2026-10-29 — Addendum G2 and G3 in eval, plus addendum H's H-a1 and H-a2: the response boundary, F4's four buckets, explained #535 orphans
 
 Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook. No route, schema, event, flag, knob or engine-module change. This is models-lead's single eval PR (G-b5); it goes to models-lead as an R-G entry before merge (`models-eng-r-g-g2-eval-pr.md`, group notes).
@@ -240,6 +326,19 @@ Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_
 - **Sabotages, 2/2 red:** I-1's drops ignored on the page path; the withhold ignored on the page path.
 - **Suites:** force-supersede, I-1 serve filter, page store and packed evidence: 317 passed on main and 317 passed on a flags-on copy of `ops/200ms-flip` (with failure 1's fix).
 - **Full backend suite, flags on** (`ops/200ms-flip` @ `8080663e` plus this branch's three test files): 10,055 passed, 2 skipped, 0 failed.
+
+## 2026-10-31 — #552 QA follow-ups: C1's lost-pack read pinned on its own, withdrawals by index, the tier comment, ADR-025's title
+
+Gates: release-lead's #552 QA (GO with notes, merged as `1398a9ce`), P2-1 and P3-1 to P3-3. Tests, a comment and a doc title only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P2-1:** C1's +26 h `incomplete_deck` came from the never-delivered withdrawal's index hole (0..29 plus 36), so a lost-pack rule cut to its in-flight half stayed green. C1 is now parametrized over `w0_past_30`.
+  - Without a W0 past 30 the rows have no hole, so only the lost-pack rule can exclude the deck.
+  - The control: with `PACK_REQUIRED_SINCE = None`, the same +26 h read is a complete deck (no exclusion).
+  - Sabotage (the rule keeps only its in-flight half): `[False]` red, `[True]` green, as release-lead found.
+- **P3-1:** the withdrawals are asserted as `(card_index, served_before)`: `[(3, 1), (36, 0)]`. The comments name mine40's card at index 36 (the ghosts shift it).
+- **P3-2:** `database.py`'s `evidence_tier` comment ranks `viewed` above `delivered`, `archive` and `full_interim` (`_EVIDENCE_TIERS_BELOW_VIEWED`). A first view raises only an `archive` row to it (`mark_deck_impression_viewed`); release-lead's QA found `_stamp_delivered`'s `raise_to="viewed"` path has no caller. Its `delivered_at` comes from this process's delivery stamp, then the pack's delivery of its index, then the outcome's time.
+- **P3-3:** ADR-025's title adds the 2% archive decks.
+- **Suites:** packed evidence, deferred evidence, eval withdrawals and paging: 307 passed.
 
 ## 2026-10-31 — #544 QA round 3: the X3 coverage hole closed; T-10 resolves namespace lookups; the residual documented by class
 
@@ -662,6 +761,30 @@ Gates: release-lead's #470 QA P2-1 follow-up; analytics-lead's grant of option (
   - the error card not hidden (10j);
   - the re-search through a tap path (10h).
 - **TestFlight:** the scope's §3 checklist (6 steps, two devices), for the operator on the 11-06 build. Not yet run.
+## 2026-10-29 — Team overhaul in account deletion and export (head-eng's ask; trades-eng found the gap)
+
+Full gates (scope `docs/plans/team-overhaul/scope-account-deletion.md`). Server only, no schema, not flag-gated. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change (`backend/accounts.py`):**
+  - deletion removes the user's own `overhauls` (by `account_user_id`) and every offer, roadmap, attempt and reservation under them;
+  - in OTHER users' overhauls, an offer naming them (any id in their scope) gets the placeholder for the counterparty and card target id and name, loses the counterparty's Fleeced-derived card fields, gets `evidence_json` NULL, goes stale if liked or undecided, and, if undecided, gets a re-minted `package_hash`; their roadmap summaries list the placeholder, and a Fleeced-minted id keying their snapshot rosters or holding their recovery pick becomes the placeholder (trades-eng's review);
+  - the export carries the user's own overhaul rows, without offers' `evidence_json` and with the counterparty's card fields removed;
+  - the one-time purge discovers `overhaul_offers.counterparty_user_id`.
+- **Tests:** four new in `test_account_deletion_coverage.py` (deletion and scrub with a no-residue check; minted ids in snapshots and recovery; export; a schema scan that fails on main's `accounts.py` with exactly the three overhaul tables), plus the purge discovery and info tests updated.
+- **Sabotage 27/27 red** (13 deletion, 8 after trades-eng's review, 4 export, 1 scan, 1 purge), restored byte-identical; a probe table also fails the scan.
+- **2026-10-29, release-lead QA @ `6ea56e5e`: NO-GO on a P1 → fixed.**
+  - **P1:** the scrub also matched the deleted user's own overhauls' `league_user_id`, which for a Sleeper co-owner is the roster's PRIMARY owner, a live person. `named_ids` is now `user_ids` only (an offer names a counterparty by league member id: the user's own id on ESPN/MFL, the roster owner on Sleeper). New co-owner test; test 1's ESPN-member premise (which real sessions don't produce) is now an `acct_` platform member.
+  - **P2-1:** a stored `counterparty_asset_not_owned` blocker on a scrubbed offer named the team in `compat_json`; it now gets `ownership_copy`'s unnamed message.
+  - **P2-2:** the sweep also removes overhauls whose owner's `users` row was created more than an hour after them (a reused id).
+  - **P3s:** the sweep counts an `accounts` row (acct_ alias or bound Sleeper id) as live, since `migrate_board_data` deletes a users row on a bind; the comment now names the durable session as the strong signal (session_init writes the users row in a background thread); the failure log carries the error class only; counts come from rowcounts; child rows whose overhaul is gone are swept; the schema scan covers owner / counterparty / holder / seller / recipient / partner / member / author / username / *_by columns; purge `--verify` gains (h) for overhaul snapshots and recoveries; a runbook note. P2-3 (a generation racing a deletion) and set-based UPDATEs for heavy users are follow-ups.
+  - **QA's 7 escapes are now red** (LIKE-prefix scrub, snapshot keys by prefix, orphan by league_user_id, live by prefix, ids logged, two scan probes), with 12 more on the new code: **sabotage 19/19 red**; the earlier rounds' still-applicable 22 stay red.
+- **2026-10-29, release-lead re-QA @ `96673f2a`: GO-with-notes** (SQLite and PG; acct_42 ruled kept). The P3s are taken:
+  - the re-signup rule skips an owner whose durable session or accounts row is no newer than the overhaul (QA case 994: a live user whose users row landed late);
+  - the compat test pins the rewrite to the counterparty side (a give-side blocker on the same offer is untouched);
+  - timestamps parse as UTC.
+  **Sabotage 5/5 red** (59 in all).
+- **Legal R28.22 additions (head-eng, 10-29):** the scrubbed cards' `mismatch_score` / `composite_score` are nulled (the blended-scalar test: on the owner arms they're the same presentation rank, so the copy goes with the nulled surplus_margin; no final_score is stored on an overhaul card). And `delete_orphaned_overhauls` deletes overhauls whose owner has no users row and no durable session, with their children, once per process from the cleanup loop, logging a count only. Three new tests. **Sabotage 8/8 red** (35/35 in all).
+- **Runs:** see the PR.
 
 ## 2026-10-28 — Paywall price rise moves to 2027-01-02 04:00 UTC (App Store Connect's US start for a Jan-2 schedule; follow-up to #494)
 

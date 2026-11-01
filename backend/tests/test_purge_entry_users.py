@@ -438,9 +438,6 @@ def test_info_counts_never_fail_verify(engine, capsys):
     with engine.begin() as conn:
         seed(conn, db.standing_offers_table, "so", user_id=SLEEPER, league_id="61408",
              player_id="p1", round=1, team_user_ids=f'["{LATE}"]')
-        seed(conn, db.overhaul_offers_table, "ovh", offer_id="ovh_1", overhaul_id="ovh_x", revision=1,
-             package_hash="h", counterparty_user_id=VERIFIED, give_ids_json="[]",
-             receive_ids_json="[]", card_json="{}", created_at=BEFORE)
         # Another user's event naming an entry id (pick_assignment_changed.new_owner).
         seed(conn, db.user_events_table, "ev", user_id=SLEEPER, event_type="pick_assignment_changed",
              props=f'{{"actor": "{SLEEPER}", "new_owner": "{LATE}"}}')
@@ -448,8 +445,8 @@ def test_info_counts_never_fail_verify(engine, capsys):
     assert code == 0, out
     assert "standing_offers.team_user_ids 1" in out
     assert "user_events.props 1" in out
-    assert "known general deletion gap, privacy §6 'not yet'): " in out
-    assert "overhaul_offers.counterparty_user_id 1" in out
+    # Overhaul rows are no longer a deletion gap, so the info has no line for them.
+    assert "known general deletion gap" not in out
 
 
 def test_no_id_reaches_stdout_or_the_log(engine, capsys, caplog):
@@ -680,6 +677,9 @@ NOT_USER_KEYS = {
     ("suggestion_trade_links", "ghost_impression_id"),
     ("rank_set_entries", "rank_set_id"), ("rank_set_adoptions", "rank_set_id"),
     ("rank_sets", "id"), ("prepared_trade_manifests_v2", "inventory_id"),
+    # the rows under an overhaul, reached through overhauls.account_user_id.
+    ("overhaul_offers", "overhaul_id"), ("overhaul_roadmaps", "overhaul_id"),
+    ("overhaul_attempts", "overhaul_id"), ("overhaul_reservations", "overhaul_id"),
     # = comparisons against fixed enum values, not ids.
     ("rank_sets", "visibility"), ("league_roster_history", "team_key_quality"),
     ("prepared_trade_participants", "subject_kind"),
@@ -731,6 +731,32 @@ def test_execute_anonymizes_targets_in_the_pick_audit_trail_and_verify_d_passes(
     code, out = run(capsys, "--verify")
     assert code == 0, out
     assert "(d) pick_assignment_changed events naming a removed entry id: 0 -> OK" in out
+
+
+def _overhaul_naming(conn, oid, holder, roster_key):
+    seed(conn, db.overhauls_table, oid, overhaul_id=oid, account_user_id=SLEEPER, league_user_id=SLEEPER,
+         snapshot_json=json.dumps({"rosters": {SLEEPER: ["p1"], roster_key: ["p2"]}}),
+         recovery_json=json.dumps({"holder_user_id": holder, "holder_username": "x"}))
+
+
+def test_execute_anonymizes_targets_in_overhaul_snapshots_and_verify_h_passes(engine, capsys):
+    with engine.begin() as conn:
+        _overhaul_naming(conn, "ovh-target", ESPN, MFL)        # targets, in another user's overhaul
+        _overhaul_naming(conn, "ovh-kept", VERIFIED, VERIFIED)  # a skipped (kept) entry user may remain
+    assert run(capsys, "--execute", "--expect", "3")[0] == 0
+    code, out = run(capsys, "--verify")
+    assert code == 0, out
+    assert "(h) overhaul snapshots and recoveries naming a removed entry id: 0 -> OK" in out
+
+
+def test_verify_h_fails_on_a_removed_entry_id_left_in_an_overhaul_snapshot(engine, capsys):
+    assert run(capsys, "--execute", "--expect", "3")[0] == 0
+    with engine.begin() as conn:
+        _overhaul_naming(conn, "ovh-left", SLEEPER, ESPN)       # a target's id survives as a roster key
+        _overhaul_naming(conn, "ovh-held", MFL, SLEEPER)        # another holds a recovery pick
+    code, out = run(capsys, "--verify")
+    assert code == 1
+    assert "(h) overhaul snapshots and recoveries naming a removed entry id: 2 -> FAIL" in out
 
 
 def test_verify_d_fails_on_a_removed_entry_id_left_in_the_pick_audit_trail(engine, capsys):
