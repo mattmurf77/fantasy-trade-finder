@@ -120,10 +120,12 @@ def capture_leagues(conn, user_ids) -> list[str]:
 
 def capture_names(conn, user_ids) -> dict:
     """The person's names, read before the deletion removes their rows:
-    `leagues` = {league_id: [display names and usernames]} (a Calibration card
-    names its partner by display name, never by id), and `usernames`, which
-    are unique (a notification names its partner by username, so only those
-    match there: a display name could be someone else's)."""
+    `leagues` = {league_id: [display names and usernames]} and `usernames`
+    (unique). Used where a row names its partner only by name: an older
+    Calibration card, a traded-pick label (both guarded by the league's
+    remaining members' names), and a notification (its match row decides;
+    without one, usernames anywhere and display names for a recipient who
+    shared a league)."""
     m, u = db.league_members_table, db.users_table
     ids = list(user_ids)
     by_league: dict[str, set] = {}
@@ -1160,20 +1162,29 @@ def _scan_diagnostics(job: dict, after: str, budget: "_Budget") -> tuple[str | N
 # #557 QA): a match / disposition notification names its partner by username
 # in its title, body and metadata; an event's props can carry a partner id.
 
-def redact_notification(row: dict, ids, token: str, usernames, display_names=()) -> dict | None:
+def redact_notification(row: dict, ids, token: str, usernames, display_names=(),
+                        match_partner_deleted=None) -> dict | None:
     """One other user's notification, or None when it doesn't name the person.
-    It's theirs when its metadata names them as the partner (by username, which
-    is unique; by display name, which the second liker's copy uses, only where
-    the caller passed them: a recipient who shared a league with the person; or
-    by a raw id, a member with neither name) or holds one of their ids. That
-    name and any "@<id>" become the placeholder in the title and body, the
+    It's theirs when its metadata names them as the partner or holds one of
+    their ids. Who the partner is: for a match notification, the match row says
+    (`match_partner_deleted`: its other side is the deletion's placeholder, or
+    a live user), so any of their names counts or none does (#562 re-QA P3:
+    a leaguemate whose display name is their username, and a copy sent in a
+    league they had left). Otherwise: by username (unique), by display name
+    (the second liker's copy) only where the caller passed them, a recipient
+    who shared a league with the person, or by a raw id (no names). That name
+    and any "@<id>" become the placeholder in the title and body, the
     metadata's partner name the placeholder, and every id the token."""
     meta = _loads(row["metadata_json"]) if isinstance(row["metadata_json"], str) else None
     meta = meta if isinstance(meta, dict) else {}
     ids = set(ids)
     partner = meta.get("partner_username")
-    named = isinstance(partner, str) and (partner in usernames or partner in display_names
-                                          or partner in ids)
+    if match_partner_deleted is None:
+        named = isinstance(partner, str) and (partner in usernames or partner in display_names
+                                              or partner in ids)
+    else:
+        named = (match_partner_deleted and isinstance(partner, str)
+                 and (partner in usernames or partner in display_names or partner in ids))
     text_ids = any(pid in (row["metadata_json"] or "") for pid in ids)
     if not named and not text_ids:
         return None
@@ -1203,6 +1214,21 @@ def _scan_notifications(job: dict, after: str, budget: "_Budget") -> tuple[str |
     with db.engine.connect() as conn:
         mates = set(conn.execute(select(m.c.user_id).where(
             m.c.league_id.in_(job["leagues"]), m.c.user_id.notin_(sorted(ids)))).scalars())
+    matches = db.trade_matches_table
+
+    def match_partner_deleted(conn, row):
+        """For a match notification: is the match's other side the deletion's
+        placeholder? None when it has no match row to ask."""
+        meta = _loads(row["metadata_json"])
+        match_id = meta.get("match_id") if isinstance(meta, dict) else None
+        if not isinstance(match_id, int) or isinstance(match_id, bool):
+            return None
+        sides = conn.execute(select(matches.c.user_a_id, matches.c.user_b_id).where(
+            matches.c.id == match_id)).first()
+        if sides is None or row["user_id"] not in sides:
+            return None
+        other = sides.user_b_id if sides.user_a_id == row["user_id"] else sides.user_a_id
+        return other == _PLACEHOLDER
     changed, cursor = 0, int(after or 0)
     while budget.take():
         with db.engine.begin() as conn:
@@ -1216,8 +1242,11 @@ def _scan_notifications(job: dict, after: str, budget: "_Budget") -> tuple[str |
                 if not row["hit"]:
                     continue
                 try:
-                    values = redact_notification(row, ids, token, usernames,
-                                                 display_names if row["user_id"] in mates else ())
+                    deleted_side = match_partner_deleted(conn, row)
+                    values = redact_notification(
+                        row, ids, token, usernames,
+                        display_names if row["user_id"] in mates or deleted_side else (),
+                        deleted_side)
                 except Exception as err:   # a poison row: counted, the pass not done
                     _row_failed(job, "notifications", err)
                     continue
@@ -1508,7 +1537,8 @@ def _abandon(now: datetime) -> int:
 def _stuck_at(row) -> str:
     """Where an unfinished job stood: a scan's store name, or a phase."""
     state = _loads(row.scan_json)
-    if isinstance(state, dict) and isinstance(state.get("scan"), int) and state["scan"] < len(_SCANS):
+    if (isinstance(state, dict) and state.get("version") == SCRUB_VERSION
+            and isinstance(state.get("scan"), int) and state["scan"] < len(_SCANS)):
         return _SCANS[state["scan"]][0] + "_scan"
     if row.db_version < SCRUB_VERSION or row.db_done_at is None:
         return "db_pass"

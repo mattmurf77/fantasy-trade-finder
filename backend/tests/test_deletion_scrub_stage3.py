@@ -213,6 +213,18 @@ def test_notifications_naming_the_person_take_the_placeholder_and_the_token(engi
         notification(conn, "Trade match with @Del Name", {"partner_username": "Del Name"},
                      user="stranger")                                                   # shares no league
         notification(conn, f"@{DEL} countered your offer", {"partner_user_id": DEL})   # the id, no name
+        # Match notifications: the match row says who the partner is (re-QA P3).
+        mt = db.trade_matches_table
+        conn.execute(update(db.league_members_table).where(
+            db.league_members_table.c.user_id == OTHER).values(display_name="deluser"))
+        conn.execute(insert(mt), [
+            {"id": 7, "league_id": LEAGUE, "user_a_id": VIEWER, "user_b_id": OTHER,
+             "user_a_give": "[]", "user_a_receive": "[]", "status": "pending", "created_at": EARLY},
+            {"id": 8, "league_id": "league-left", "user_a_id": "stranger", "user_b_id": DEL,
+             "user_a_give": "[]", "user_a_receive": "[]", "status": "pending", "created_at": EARLY}])
+        notification(conn, "Trade match with @deluser", {"partner_username": "deluser", "match_id": 7})
+        notification(conn, "Trade match with @Del Name", {"partner_username": "Del Name", "match_id": 8},
+                     user="stranger")
     accounts.delete_user_data(DEL)
     token = job(engine)["token"]
     scrub.run_pending()
@@ -228,6 +240,8 @@ def test_notifications_naming_the_person_take_the_placeholder_and_the_token(engi
         (f"Trade match with @{PLACEHOLDER}", {"partner_username": PLACEHOLDER}),
         ("Trade match with @Del Name", {"partner_username": "Del Name"}),
         (f"@{PLACEHOLDER} countered your offer", {"partner_user_id": token}),
+        ("Trade match with @deluser", {"partner_username": "deluser", "match_id": 7}),   # OTHER's
+        (f"Trade match with @{PLACEHOLDER}", {"partner_username": PLACEHOLDER, "match_id": 8}),
     ]
 
 

@@ -2112,7 +2112,7 @@ One row per card in a session, in shuffled order.
 | `skipped` | int, not null, server default `0` | `1` ⇒ `grade IS NULL` and `tags_json = '[]'` |
 | `tags_json` | text (JSON), not null, server default `[]` | De-duplicated subset of the seven tags in `blind_grading.TAGS` ([cross-client-invariants § Calibration tags and scale](cross-client-invariants.md#calibration-tags-and-scale)), in `TAGS` order |
 | `graded_at` | str | ISO UTC of the latest answer — a re-grade overwrites |
-| `partner_user_id` | str | **HIDDEN**, never served: the card's partner (`league_members.user_id`), written by `build_session` and `add_fit_arms`, so an account deletion's scrub finds the person's cards by id (a built session keeps no partner ids anywhere else). NULL on cards built before it (#562); the scrub traces those by the current arm's deck row or by name. The scrub sets it to the redaction token |
+| `partner_user_id` | str | **HIDDEN**, never served: the card's partner (`league_members.user_id`), written by `build_session` and `add_fit_arms`, so an account deletion's scrub finds the person's cards by id (a built session keeps no partner ids anywhere else). NULL on cards built before it (#562) until the boot backfill (`database.backfill_grading_card_partners`: the current arm's deck row, else the one league member shown by `partner_name`); the scrub traces any still NULL by deck row, raw id or name. The scrub sets it to the redaction token |
 
 Index: `ix_grading_cards_session` (`session_id`). Invariants: `grade IS NOT NULL ⇒ skipped = 0`; a session is `completed` ⇔ every card has `grade IS NOT NULL OR skipped = 1`, flipped in the same transaction as the last answer (`answer_grading_card`); an answer against a non-`open` session is rejected (409 `session_completed`), never written.
 
@@ -2142,7 +2142,7 @@ The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scr
 | `attempts` | int, not null, default 0 | Lease claims |
 | `claimed_until` | str | ISO UTC lease (10 min), taken by compare-and-swap; NULL = free |
 | `last_error` | str | The last failure's exception class, never its message |
-| `partner_names_json` | text (JSON) | `{leagues: {league_id: [display names, usernames]}, usernames: [...]}`, read before the deletion removes the person's `league_members` and `users` rows. A Calibration card names its partner by display name. A notification names them by username, and only usernames (unique) are matched there. As private as the ids, and never logged. Added to existing tables at boot (`_migrate_db`) |
+| `partner_names_json` | text (JSON) | `{leagues: {league_id: [display names, usernames]}, usernames: [...]}`, read before the deletion removes the person's `league_members` and `users` rows. Used where a row names its partner only by name: an older Calibration card (before `grading_cards.partner_user_id`), a traded-pick label, a notification. A name a remaining member of that league uses is never matched on a card. A notification's match row decides who its partner is; without one, usernames (unique) match anywhere and display names only for a recipient who shared a league. As private as the ids, and never logged. Added to existing tables at boot (`_migrate_db`) |
 | `scan_json` | text (JSON) | An unfinished DB pass's state: the league pass's counts, which fallback scan is running, and its keyset cursor. The next run resumes from it. NULL between passes |
 
 Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.
@@ -2161,11 +2161,17 @@ Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.
   - **A redacted page card:** its target takes the token and the placeholder name, and it loses `likes_you`, `standing_offer_reason`, `reasons`, `rationale`, `fit`, `breaker` and `match_context.opponent_outlook`. `mismatch_score` / `composite_score` are nulled, and it never serves again (withdrawn at serve).
   - **`evidence_blob`:** its rows and candidate set are redacted as above, `trade_impressions[].target_user_id` is NULLed, and `run_meta.filter_inputs` is redacted as a pack run.
 - **Stage 3:**
-  - Other users' Calibration sessions take the token in their hidden `source_json`, and the person's cards take the placeholder as `partner_name` (by the source's current arm, or by name; grades kept).
-  - A diagnostic past 30 days naming them is deleted.
+  - **Other users' Calibration sessions:**
+    - A building, failed or retired session's hidden `source_json` takes the token.
+    - The person's cards are found by `grading_cards.partner_user_id` (older cards by the boot backfill, their deck row, a raw id, or a name no remaining member uses). They take the placeholder as `partner_name` and the token as `partner_user_id`, and every arm loses `gain_partner` and `reasons`. Grades are kept.
+    - On any card, a traded-pick label "(from <their name>)" takes the placeholder.
+  - A diagnostic past the 14-day retention naming them is deleted.
   - A redacted page card also loses its `narrative`.
   - A redacted value_core card loses `scores.outlook`, `scores.priority` and `effective`.
-  - **Other users' `notifications`** naming them by username in `metadata_json.partner_username`: the placeholder there and as `@name` in the title and body, with ids in the metadata taken by the token.
+  - **Other users' `notifications`** naming them in `metadata_json.partner_username`, matched as stored (JSON escapes included):
+    - a match notification when its `trade_matches` row's other side is the placeholder;
+    - otherwise by username anywhere, by display name for a recipient who shared a league, or by a raw id.
+    The name takes the placeholder there and as `@name` in the title and body, so does any `@<id>`, and ids in the metadata take the token.
   - **Other users' `user_events`:** ids in `props` take the token.
 - **Kept:** hashes (`trade_hash` and the rest, legal (viii)).
 - **In the deletion transaction:** other users' `user_taste` `partner:<id>` rows become one `partner:<token>` row each (two aliases' weights summed). Standing offers' `team_user_ids` take the token. `trade_matches.match_valuation_json` is cleared when either side is the person.
