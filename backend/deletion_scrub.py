@@ -1046,8 +1046,9 @@ def _redact_grading_card(conn, card: dict, league_id: str, ctx: _GradingContext)
 
 
 def _redact_grading_source(conn, session: dict, ctx: _GradingContext) -> None:
-    """A session still building keeps its selected cards' partner ids in its
-    hidden source (a built one keeps none): the token."""
+    """A session still building, or one that failed or was retired while
+    building, keeps its selected cards' partner ids in its hidden source (a
+    built one keeps none): the token."""
     gs = db.grading_sessions_table
     source = _loads(session["source_json"])
     if isinstance(source, (dict, list)):
@@ -1088,7 +1089,10 @@ def _scan_grading(job: dict, after: str, budget: "_Budget") -> tuple[str | None,
     names = {n for ns in ((job.get("names") or {}).get("leagues") or {}).values() for n in ns}
     names |= set((job.get("names") or {}).get("usernames") or ())
     terms = sorted(ids | names)
-    hit = or_(gc.c.partner_user_id.in_(sorted(ids)),
+    # Older cards (the column NULL) are always looked at: their deck row is a
+    # trace the SQL can't see, and a LIKE on names is case-sensitive on
+    # Postgres (#562 re-QA P2-B).
+    hit = or_(gc.c.partner_user_id.in_(sorted(ids)), gc.c.partner_user_id.is_(None),
               *[gc.c.trade_json.contains(t, autoescape=True) for t in terms],
               *[gc.c.trade_json.contains(json.dumps(t)[1:-1], autoescape=True)
                 for t in terms if json.dumps(t)[1:-1] != t],
@@ -1111,11 +1115,13 @@ def _scan_grading(job: dict, after: str, budget: "_Budget") -> tuple[str | None,
         after = rows[-1]["card_id"]
     else:
         return after, changed
-    # Sessions still building (no cards yet) in a league the person left.
+    # Sessions whose hidden source still lists partner ids, in a league the
+    # person left: one still building, or one that failed or was retired
+    # while building, which keeps that source (#562 re-QA P2-A).
     with db.engine.begin() as conn:
         ctx = _GradingContext(conn, job)
         for session in conn.execute(select(gs.c.session_id, gs.c.source_json).where(
-                gs.c.status == "building", gs.c.created_at <= job["cutoff"],
+                gs.c.created_at <= job["cutoff"],
                 gs.c.user_id.notin_(sorted(ids)), gs.c.league_id.notin_(job["leagues"]),
                 _mentions(gs.c.source_json, ids))).mappings().all():
             _redact_grading_source(conn, session, ctx)

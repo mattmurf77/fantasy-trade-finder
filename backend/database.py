@@ -4058,6 +4058,10 @@ def _migrate_db() -> None:
     # #258 — entity-decode MFL names stored before #210's import-time cleaning
     _backfill_mfl_name_entities()
 
+    # #562 re-QA P2-B — Calibration cards built before grading_cards.
+    # partner_user_id get it while their deck rows and names are still live.
+    backfill_grading_card_partners()
+
     # P0-1 (audit 2026-08-09) — users who completed a Quick Set board before
     # the point-of-use ranking_method writes shipped are stuck on the trio
     # branch with unlocked:false. Same slot, same idempotent-every-boot
@@ -4426,6 +4430,65 @@ def _backfill_dual_format() -> None:
                     print(f"[backfill] user {row.sleeper_user_id} update failed: {e}")
     except Exception as e:
         print(f"[backfill] users JSON rewrite failed: {e}")
+
+
+def backfill_grading_card_partners() -> int:
+    """#562 re-QA P2-B: give Calibration cards built before
+    grading_cards.partner_user_id their partner, so an account deletion's
+    scrub finds them by id. A current-arm card takes its deck row's partner
+    (arms_json.current.impression_id → features_json.partner_user_id); any
+    other takes the one member of the session's league whose shown name
+    (display name, else username, else id, as blind_grading.build_catalog
+    names a partner) equals its partner_name. Ambiguous or unknown stays
+    NULL, for the scrub's own fallbacks. Deck rows prune at 90 days and names
+    change, so this runs at boot, on NULL rows only (idempotent, cheap: the
+    feature is testers-only). Returns the cards filled."""
+    gc, gs = grading_cards_table, grading_sessions_table
+    imp, m = deck_impressions_table, league_members_table
+    filled = 0
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(select(gc.c.card_id, gc.c.arms_json, gc.c.trade_json, gs.c.league_id)
+                                .join(gs, gs.c.session_id == gc.c.session_id)
+                                .where(gc.c.partner_user_id.is_(None))).mappings().all()
+            shown: dict = {}
+            for row in rows:
+                partner = None
+                try:
+                    arms, trade = json.loads(row["arms_json"]), json.loads(row["trade_json"])
+                except (TypeError, ValueError):
+                    continue
+                current = arms.get("current") if isinstance(arms, dict) else None
+                if isinstance(current, dict) and isinstance(current.get("impression_id"), str):
+                    raw = conn.execute(select(imp.c.features_json).where(
+                        imp.c.impression_id == current["impression_id"])).scalar()
+                    try:
+                        features = json.loads(raw) if raw else None
+                    except (TypeError, ValueError):
+                        features = None
+                    if isinstance(features, dict) and features.get("partner_user_id"):
+                        partner = str(features["partner_user_id"])
+                name = trade.get("partner_name") if isinstance(trade, dict) else None
+                if partner is None and isinstance(name, str):
+                    league = row["league_id"]
+                    if league not in shown:
+                        shown[league] = {}
+                        for uid, display, username in conn.execute(select(
+                                m.c.user_id, m.c.display_name, m.c.username).where(m.c.league_id == league)):
+                            shown[league].setdefault(display or username or uid, set()).add(str(uid))
+                    owners = shown[league].get(name, set())
+                    if len(owners) == 1:
+                        partner = next(iter(owners))
+                if partner is not None:
+                    conn.execute(gc.update().where(gc.c.card_id == row["card_id"],
+                                                   gc.c.partner_user_id.is_(None))
+                                 .values(partner_user_id=partner))
+                    filled += 1
+        if filled:
+            log.info("grading_cards partner backfill: %d cards", filled)
+    except Exception as err:          # never blocks boot; the scrub keeps its fallbacks
+        log.warning("grading_cards partner backfill failed: %s", type(err).__name__)
+    return filled
 
 
 def _backfill_mfl_name_entities() -> None:

@@ -5,12 +5,18 @@ ranking.card_reasons' real templates) and add_fit_arms (fit_engine.generate
 stubbed, so the provenance is what add_fit_arms writes). A built session keeps
 no partner ids in its source; the scrub finds the person's cards by
 grading_cards.partner_user_id, and older cards (the column NULL) by their deck
-row or a name. World adapted from release-lead's QA harness (qa562)."""
+row or a name. World adapted from release-lead's QA harness (qa562).
+
+Runs on SQLite, and on Postgres too when FTF_TEST_PG_URL names a scratch
+database (it's dropped and recreated per test): the scan's SQL prefilter
+behaves differently there (LIKE is case-sensitive), which SQLite can't show
+(#562 re-QA P2-B)."""
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine, delete, insert, select, update
+from sqlalchemy import create_engine, delete, insert, select, text, update
 
 from backend import accounts, blind_grading as bg, database as db, deletion_scrub as scrub
 from backend.value_core.types import (CoreDiagnostics, DeckEntry, FairTrade, PipelineResult,
@@ -27,9 +33,19 @@ PICK = "L1_2027_1_3"
 PLACEHOLDER = accounts.DELETED_USER_PLACEHOLDER
 
 
-@pytest.fixture()
-def eng(monkeypatch, tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path}/c.db", connect_args={"check_same_thread": False})
+PG = os.environ.get("FTF_TEST_PG_URL")
+
+
+@pytest.fixture(params=["sqlite", "postgres"])
+def eng(request, monkeypatch, tmp_path):
+    if request.param == "postgres":
+        if not PG:
+            pytest.skip("FTF_TEST_PG_URL not set")
+        engine = create_engine(PG)
+        with engine.begin() as conn:
+            conn.execute(text("DROP SCHEMA public CASCADE; CREATE SCHEMA public"))
+    else:
+        engine = create_engine(f"sqlite:///{tmp_path}/c.db", connect_args={"check_same_thread": False})
     db.metadata.create_all(engine)
     monkeypatch.setattr(db, "engine", engine)
     from backend.eval import redaction
@@ -308,3 +324,125 @@ def test_a_job_done_at_stage_2_runs_again(eng, monkeypatch):
     assert scrub.run_pending(deleted + timedelta(hours=8)) == 1
     assert all(json.loads(c["trade_json"])["partner_name"] == PLACEHOLDER
                for c in cards(eng, s["L1"]) if theirs(c))
+
+
+def left_league(eng, monkeypatch, *, legacy_cards=True, boot_before_leaving=False):
+    """L5: u1 and u3, where u3 went by "KimFive" (a name of theirs nowhere
+    else) and left before deleting, so nothing about them was captured there.
+    u1's built session has current-arm cards (traceable only by their deck
+    row) and value-core cards. u5 joins L2 with display name "kim" (u3's
+    username) and has older cards in u2's L2 session."""
+    s = world(eng, monkeypatch)
+    with eng.begin() as conn:
+        conn.execute(insert(db.leagues_table).values(
+            sleeper_league_id="L5", user_id="u1", name="League L5", platform="sleeper",
+            default_scoring="1qb_ppr"))
+        conn.execute(insert(db.league_members_table), [
+            member("L5", "u1", "me", "Me"), member("L5", DEL, "kimfive", "KimFive")])
+        deck(conn, "u1", "L5", "J6", trades("u1", (DEL,), 20))
+    s["L5"] = build("u1", "L5", trades("u1", (DEL,), 20, give_off=1))
+    # u2's sessions in L5 that failed and are still building: start_session's
+    # building source, which lists u3 (fail_grading_session keeps it).
+    building = json.dumps({"version": bg.VERSION, "seat": "u2", "scoring_format": "1qb_ppr",
+                           "current": {"cards": [{"partner_id": DEL, "give": [ROSTER["u1"][0]],
+                                                  "receive": [ROSTER[DEL][0]], "provenance": {}}]}},
+                          sort_keys=True)
+    with eng.begin() as conn:
+        gs = db.grading_sessions_table
+        for sid in ("L5-failed", "L5-building"):
+            conn.execute(insert(gs).values(session_id=sid, user_id="u2", league_id="L5",
+                                           status="building", seed="1", created_at=NOW.isoformat(),
+                                           counts_json="{}", source_json=building))
+    assert db.fail_grading_session("L5-failed", json.dumps({"code": "value_core_failed"}))
+    s["L5-failed"] = "L5-failed"
+    if boot_before_leaving:          # a deploy's boot backfill while they're still in L5
+        legacy(eng, [s["L1"], s["L3"], s["L5"]])
+        assert db.backfill_grading_card_partners()
+    with eng.begin() as conn:
+        m = db.league_members_table
+        conn.execute(delete(m).where(m.c.league_id == "L5", m.c.user_id == DEL))
+        conn.execute(insert(m).values(member("L2", "u4", "kimfan2", "kim")))
+        gc = db.grading_cards_table
+        conn.execute(insert(gc).values(
+            card_id="u5-old", session_id=s["L2"], user_id="u2", position=999,
+            arms_json=json.dumps({"value_core": {"deck_position": 1, "reasons": ["Fair on value"]}}),
+            trade_json=json.dumps({"partner_name": "kim", "give": [], "receive": []})))
+    s["L5-building"] = "L5-building"
+    if legacy_cards:
+        legacy(eng, [s["L5"]])
+    return s
+
+
+def test_a_failed_or_building_session_in_a_league_they_left_takes_the_token(eng, monkeypatch):
+    """#562 re-QA P2-A: a session that failed (or was retired) while building
+    keeps its building source, partner ids and all; the scan's session pass
+    took only building ones."""
+    s = left_league(eng, monkeypatch)
+    token = delete_and_scrub(eng)
+    with eng.connect() as conn:
+        gs = db.grading_sessions_table
+        for sid in (s["L5-failed"], s["L5-building"]):
+            source = conn.execute(select(gs.c.source_json).where(gs.c.session_id == sid)).scalar()
+            assert token in source and f'"{DEL}"' not in source, sid
+
+
+def test_older_current_arm_cards_in_a_league_with_no_captured_name_are_traced(eng, monkeypatch):
+    """#562 re-QA P2-B: in L5 nothing names them in a way the SQL could
+    match, so only the deck row finds the current-arm cards; the scan must
+    look at every older card, on Postgres too. In L2, "kim" is u5's display
+    name, so u5's older card keeps it (the left-league collision guard)."""
+    s = left_league(eng, monkeypatch)
+    token = delete_and_scrub(eng)
+    current = [c for c in cards(eng, s["L5"]) if "current" in json.loads(c["arms_json"])]
+    assert current
+    for c in current:
+        assert_redacted(c, token)
+    (u5,) = [c for c in cards(eng, s["L2"]) if c["card_id"] == "u5-old"]
+    assert json.loads(u5["trade_json"])["partner_name"] == "kim" and u5["partner_user_id"] is None
+
+
+def test_the_backfill_gives_older_cards_their_partner(eng, monkeypatch):
+    """At boot, before any deletion: a current-arm card takes its deck row's
+    partner, any other the one member shown by its partner_name; ambiguous or
+    unknown stays NULL. Then every one of the person's cards in L5, value
+    core included, is redacted by id."""
+    s = left_league(eng, monkeypatch, legacy_cards=False, boot_before_leaving=True)
+    assert all(c["partner_user_id"] is not None for c in cards(eng, s["L1"]))
+    assert {c["partner_user_id"] for c in cards(eng, s["L1"])} == {"u2", DEL, "u4"}
+    l5 = cards(eng, s["L5"])
+    assert l5 and all(c["partner_user_id"] == DEL for c in l5)   # deck row, or "KimFive" while live
+    l3_old = [c for c in cards(eng, s["L3"]) if "current" not in json.loads(c["arms_json"])]
+    assert l3_old and all(c["partner_user_id"] is None for c in l3_old)   # "OldKim": nobody now
+    db.backfill_grading_card_partners()                                   # u5's card, added since
+    assert db.backfill_grading_card_partners() == 0                       # idempotent
+    token = delete_and_scrub(eng)
+    for c in cards(eng, s["L5"]):
+        assert_redacted(c, token)
+
+
+def test_the_scan_keeps_the_cutoff_and_the_owner(eng, monkeypatch):
+    """In a league they had left (the scan's side): a session created after
+    the cutoff, and a session owned by a deleted id (a re-signup within the
+    grace), are never scrubbed."""
+    s = left_league(eng, monkeypatch)
+    accounts.delete_user_data(DEL)
+    with eng.connect() as conn:
+        job = dict(conn.execute(select(db.deletion_scrub_jobs_table)).mappings().one())
+    deleted = datetime.fromisoformat(job["deleted_at"])
+    late = (deleted + scrub.IN_FLIGHT_GRACE + timedelta(minutes=1)).isoformat()
+    pick = json.dumps({"partner_name": "Me", "give": [],
+                       "receive": [{"id": "x", "name": f"2027 1st (from {DEL_DISPLAY})"}]})
+    with eng.begin() as conn:
+        gs, gc = db.grading_sessions_table, db.grading_cards_table
+        for sid, owner, created in (("late-L5", "u1", late), ("own-L5", DEL, deleted.isoformat())):
+            conn.execute(insert(gs).values(session_id=sid, user_id=owner, league_id="L5", status="open",
+                                           seed="1", created_at=created, counts_json="{}", source_json="{}"))
+            conn.execute(insert(gc).values(card_id=f"{sid}-1", session_id=sid, user_id=owner, position=1,
+                                           partner_user_id=DEL if owner != DEL else "u1",
+                                           arms_json=json.dumps({"value_core": {"reasons": ["r"]}}),
+                                           trade_json=pick))
+    assert scrub.run_pending(deleted + timedelta(minutes=1)) == 1
+    for sid in ("late-L5", "own-L5"):
+        (c,) = cards(eng, sid)
+        assert c["trade_json"] == pick and json.loads(c["arms_json"]) == {"value_core": {"reasons": ["r"]}}, sid
+    assert s
