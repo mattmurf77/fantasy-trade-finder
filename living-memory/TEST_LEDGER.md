@@ -1,3 +1,34 @@
+## 2026-11-01 — Shop send keeps its Elo signal: a `decision = "send"` row anchors the queue's Elo half (#531 follow-up, stacked on #574, D-210)
+
+Gates: the scope block `docs/plans/shop-send-elo/scope.md`. Analytics: `trade_proposed` `props.decision` gains `send`, a closed set `like` | `send` (analytics-lead, 11-01). No schema change; `trade_decisions.decision` gains the value `send`. No new flags. D-056: `FTF_SKIP_SIM_GATE=1` posture; backend-only, so the evidence is pytest, sabotage and the reader audit.
+
+- **The change:** on `source: "shop"` (#574's routers), the Sleeper, MFL and ESPN propose routes call `_record_shop_send_signal` before the platform call. It is once per package, and it stands whatever the platform answers.
+  - It writes a `send` row with the queue's deterministic `calcq_` id.
+  - It moves the board exactly as `POST /api/trades/queue` does.
+  - It fires `trade_proposed` (source `shop`, decision `send`) iff the row is written.
+  - `trade_proposals.source` gains `shop` (analytics-lead's deploy-before-the-binary condition).
+- **Tests:** `backend/tests/test_shop_send_elo.py`, 56 tests (55 pass and 1 skips until #389 merges). It reuses `test_calc_trade_queue.py`'s harness. It covers:
+  - the record;
+  - parity with the queue (pairs and K, with the bake-off freeze live);
+  - no deck card (likes-you, injector, mirror-match, Awaiting);
+  - analytics `traded` / `liked_trades_min`, the offline replay, and the unstamped-barrier case;
+  - the 7-day decided window;
+  - account export and deletion;
+  - once only (a repeat send, a queued package, a deck like, a league-mate's like, a retracted like, a renewed like);
+  - the G-049 replay skip;
+  - the D-170 bar (6 cases, plus self in the member shape);
+  - never raising;
+  - all three routes: they record before the platform call, whatever the platform answers, for no other source (the ledger value per source), and not with the flag off; a failing signal never blocks the send.
+- **#389's pick test:** run against #389's diff in a throwaway worktree, it passes, and it goes red with the strip disabled.
+- **Sabotage:** 27 single-rule breaks, all RED:
+  - the probe, like-not-send, the event without a row, pass K, the freeze, winner/loser, the in-memory signal, props.source, props.decision;
+  - the league, self and empty-side checks, and the never-raises guard;
+  - the ledger set, the hook ignoring the source, the hook after the platform call, a missing hook;
+  - five probe rules;
+  - the traded segment, the replay, the barrier, and the send decided as not-decided and as a pass.
+- **Reader audit:** every `trade_decisions` reader, in scope §3. Two read every row and now filter like/pass (analytics `traded`, the replay). The barrier is hardened. The deck's discovery keys count a send as decided like a like.
+- **Full backend suite at 961c15be:** 10,348 passed, 4 skipped (19 m 47 s). An earlier run had 6 failures; all were `inspect.getsource` tests broken by my editing `server.py` mid-run, and all pass in isolation on both the branch and the base. After merging #574's ed2b314b (no backend logic), the targeted rerun passes: `test_shop_send_elo` + `test_calc_trade_queue` 95, and the taxonomy/analytics/flags/config subset 355.
+
 ## 2026-11-01 — Shop proposes the trade on the league's platform (#531 follow-up; operator's design review)
 
 Gates: the scope block `docs/plans/shop-platform-send/scope.md`. Analytics: the send events' `surface` gains `shop` (taxonomy comment and `SendSurface` in the same commit; granted by analytics-lead 11-01). No schema, flag or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture; evidence is the structural guard, the code-walk and the TestFlight checklist.
