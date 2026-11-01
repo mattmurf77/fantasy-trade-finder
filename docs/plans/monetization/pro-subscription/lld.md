@@ -123,7 +123,7 @@ as `/api/me/entitlements`). Flag-aware: `monetize.paywall` OFF → `{"enabled": 
   ],
   "trial_eligible": true,   // ← trial is StoreKit's "Free, 1 Month" intro offer on each plan (historical: 14d/30d per 2026-08-29, earlier 0/14 then 3/14)
   "dismissible": true,
-  "tips": []   // ← none at launch: the ftf_tip_* SKUs are not submitted to App Store Connect (#494)
+  "tips": [...] // ← _PAYWALL_TIPS (ftf_tip_199/499/999) only while model_config paywall_tips_enabled = 1 and platform = ios; otherwise [] (tip jar S1, 2026-11-01; default 0)
 }
 ```
 
