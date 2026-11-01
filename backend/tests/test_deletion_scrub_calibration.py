@@ -223,13 +223,18 @@ def legacy(eng, sids):
 
 
 def test_older_cards_are_traced_by_deck_row_raw_id_or_a_name_no_one_else_uses(eng, monkeypatch):
-    """Older cards (the column NULL): a current-arm card by its deck row, the
+    """Older cards (the column NULL): a current-arm card by its deck row (in
+    L3 only that finds it: the card says "OldKim", "NewKim" was captured), the
     L4 cards by the raw id shown as the name, and value-core / fit cards in L1
     by "Kim K.". "kim" (their username) is also u4's display name in L1, so it
     is never matched there: u4's cards keep it (QA P3)."""
     s = world(eng, monkeypatch)
-    legacy(eng, [s["L1"], s["L4"]])
+    legacy(eng, [s["L1"], s["L3"], s["L4"]])
     token = delete_and_scrub(eng)
+    current = [c for c in cards(eng, s["L3"]) if theirs(c) and "current" in json.loads(c["arms_json"])]
+    assert current
+    for c in current:
+        assert_redacted(c, token)
     for league in ("L1", "L4"):
         for c in cards(eng, s[league]):
             if theirs(c):

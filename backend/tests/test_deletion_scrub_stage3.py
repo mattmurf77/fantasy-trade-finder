@@ -212,6 +212,7 @@ def test_notifications_naming_the_person_take_the_placeholder_and_the_token(engi
         notification(conn, "Trade match with @renée", {"partner_username": "renée"})   # stored as \u escapes
         notification(conn, "Trade match with @Del Name", {"partner_username": "Del Name"},
                      user="stranger")                                                   # shares no league
+        notification(conn, f"@{DEL} countered your offer", {"partner_user_id": DEL})   # the id, no name
     accounts.delete_user_data(DEL)
     token = job(engine)["token"]
     scrub.run_pending()
@@ -226,6 +227,7 @@ def test_notifications_naming_the_person_take_the_placeholder_and_the_token(engi
         (f"Trade match with @{PLACEHOLDER}", {"partner_username": PLACEHOLDER}),
         (f"Trade match with @{PLACEHOLDER}", {"partner_username": PLACEHOLDER}),
         ("Trade match with @Del Name", {"partner_username": "Del Name"}),
+        (f"@{PLACEHOLDER} countered your offer", {"partner_user_id": token}),
     ]
 
 
