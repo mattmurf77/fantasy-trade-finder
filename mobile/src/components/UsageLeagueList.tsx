@@ -171,8 +171,7 @@ export function UsageAvailabilitySheet({
             </View>
             <UsageLeagueList player={player} rows={rows} onAdd={onAdd} onTrade={onTrade} />
             <Text style={styles.footer}>
-              Add opens a quick claim check, then finishes in the Sleeper app. Trade opens the trade
-              finder in that league.
+              Add opens a quick claim check. Trade opens the trade finder in that league.
             </Text>
           </ScrollView>
         </SafeAreaView>
