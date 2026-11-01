@@ -1,3 +1,19 @@
+## 2026-11-01 — Shop proposes the trade on the league's platform (#531 follow-up; operator's design review)
+
+Gates: the scope block `docs/plans/shop-platform-send/scope.md`. Analytics: the send events' `surface` gains `shop` (taxonomy comment and `SendSurface` in the same commit; analytics-lead's grant requested by head-eng). No schema, flag or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture; evidence is the structural guard, the code-walk and the TestFlight checklist.
+
+- **The change:** the ShopAsset tile's "Show it to @name" (`queueCalcTrade` → `/api/trades/queue`) is replaced by `SendInSleeperButton`, the platform send router. It's mounted with the idea's league, partner, ids and names, and `surface="shop"`. Send-only (head-eng): no deck queue, no likes-you card, no Elo signal. The ✕ dismiss is unchanged.
+- **Guard:** `mobile/tests/check-shop-send.js`, 16 checks. It covers the router's props, never `queueCalcTrade` or `/api/trades/queue`, the old button gone, the dismiss intact, and `shop` in `SendSurface`. Against main's code it fails 15.
+- **Updated guards:**
+  - `check-shop-deck.js`: h5d is now the router's `surface="shop"`; i1 and i3 are the router mount and no `queueCalcTrade`.
+  - `check-b5-copy.js`: item 4 is superseded, and the banned-word list drops the two Shop strings.
+  - `check-trade-text.js`: `SEND_SURFACES`.
+- **Code-walk:** `docs/plans/shop-platform-send/code-walk.md`, Sleeper, MFL and ESPN from the tap to the platform write, file:line-cited.
+  - Stated plainly: Sleeper has no outcome-unknown state (a timeout shows "Couldn't send", as on every mount), while MFL and ESPN have it.
+  - Only the Sleeper send events carry `surface`.
+- **TestFlight checklist:** `docs/plans/shop-platform-send/testflight.md`, 7 steps, including ESPN with a pick (`espn_pick_unsupported`, its exact alert quoted).
+- **Runs:** `tsc --noEmit` is clean, all 136 `check-*.js` suites pass, testid-lint is green, and the analytics backend tests pass 138.
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

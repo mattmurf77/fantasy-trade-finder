@@ -15,7 +15,7 @@
 
 ## 1. Analytics scope
 - [x] **(a) Changed events, specced against the taxonomy:**
-  - The send events' `surface` dimension gains **`shop`**: `sleeper_send_attempted` / `sleeper_send_failed` and the MFL / ESPN twins that take `SendSurface`. It's registered in `analytics_taxonomy.py`'s comment and in `tradeText.ts`'s `SendSurface` / `SEND_SURFACES` in the same commit. No new event name and no new prop name.
+  - The send events' `surface` dimension gains **`shop`**: `sleeper_send_attempted` and `sleeper_send_failed`, the only send events that carry it. The MFL and ESPN buttons take `SendSurface` but fire no events today, on any mount. It's registered in `analytics_taxonomy.py`'s comment and in `tradeText.ts`'s `SendSurface` / `SEND_SURFACES` in the same commit. No new event name and no new prop name.
   - **Shift:** Shop stops firing `calc_trade_queued` (screen `ShopAsset`) and, server-side, `trade_proposed` with source `calculator` from the queue emitter. Shop sends show up in the send funnel with `surface = 'shop'`. analytics-lead is told in the PR.
   - **Grant:** analytics-lead's grant for the `shop` value is requested by head-eng through head-product. release-lead holds the merge until it's on record.
 
