@@ -8,7 +8,8 @@
 **Why:**
 - The live calculator's pool holds the 12 generic pick rungs (`generic_pick_<round>_<early|mid|late>`, `server.py`'s universal pool), and its share passes them through (`hasPickAssets={false}`: they aren't league picks).
 - The `/s/p/<id>` landing's OG card looks names up in the `players` table, which has no generic picks, so it drew **"Unknown player"**. That's the PR-14 failure in another place.
-- **The change** (server-only, live with the next Render deploy; no app binary): `og_image.render_package_card` resolves a `generic_pick_*` id to the label the calculator shows (`pick_values.generic_pick_label`, e.g. "Mid 1st Round Pick") with the PICK chip. Any other unknown id still says "Unknown player".
+- **The change** (server-only, live with the next Render deploy; no app binary): `og_image.render_package_card` resolves a `generic_pick_*` id (parsed by the shared `pick_values.parse_generic_pick_id`) to the label the calculator shows (`pick_values.generic_pick_label`, e.g. "Mid 1st Round Pick") with a "PK" chip on chalk-dim. Any other unknown id still says "Unknown player".
+- **Aligned with #564** (league-eng's share-card value bar, open), which fixes the same card with the same parser, label, chip and constants (`PICK_CHIP_LABEL`, `PICK_CHIP_FILL`). The card changes once, and the operator approves one look. Applied together, the only conflict is one line (the chip colour's condition), and both PRs' tests pass (175). Whichever lands second deletes the duplicate (release-lead).
 - **Unchanged:** league picks. The in-league share skips the mint for those (`hasPickAssets`, PR-14).
 
 ## 1. Analytics scope
@@ -18,9 +19,10 @@
 - **New/changed tables, columns, flags, env vars or `model_config` keys:** none. The card is behind `growth.share_landing` as before.
 
 ## 3. Evidence scope
-- [x] **Unit test:** `backend/tests/test_share_link_previews.py::test_og_package_card_names_the_calculators_generic_picks`. Through `/og/p`, two generic picks draw "Mid 1st Round Pick" / "Late 2nd Round Pick" with PICK chips, and an id nothing knows draws "Unknown player". It fails on main's code.
+- [x] **Unit test:** `backend/tests/test_share_link_previews.py::test_og_package_card_names_the_calculators_generic_picks`. Through `/og/p`, two generic picks draw "Mid 1st Round Pick" / "Late 2nd Round Pick" with "PK" chips on chalk-dim. A round that doesn't exist (`generic_pick_9_mid`) and an extra part (`generic_pick_1_mid_x`) still draw "Unknown player". It fails on main's code; a lenient parse, the old grey chip and no lookup each fail it too.
 - [x] **Before/after:** `before-after.png`, rendered by the real `og_image.render_package_card` (not a mock) for one package, before and after.
-- [x] **Manual check** (operator, after the Render deploy, with `growth.share_landing` on): in the live calculator, put a generic pick (PICK filter) on a side → **Share** → open the "Build your own" link. The preview card names the pick ("Mid 1st Round Pick") with a PICK chip, not "Unknown player".
+- [x] **Manual check** (operator, after the Render deploy, with `growth.share_landing` on): in the live calculator, put a generic pick (PICK filter) on a side → **Share** → open the "Build your own" link. The preview card names the pick ("Mid 1st Round Pick") with a grey "PK" chip, not "Unknown player".
+- **Operator design review** (release-lead sends it after QA; runs alongside the merge): `before-after.png`.
 - `testID`s added/renamed: none.
 
 ## 4. Docs scope
