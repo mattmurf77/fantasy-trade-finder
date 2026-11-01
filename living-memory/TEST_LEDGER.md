@@ -16,6 +16,19 @@ Gates: eval code (`backend/eval/{data,replay,persistence,calibration,flip_read,b
   - Pins moved to version 7 and the new key: `test_eval_pack_reader.py`, `test_eval_refresh_and_live_columns.py`, `test_eval_withdrawals_and_paging.py`, `test_eval_flip_read.py`, `test_eval_calibration.py`.
 - **Sabotage, each red then restored (11):** the loader never marks; replay scores the deck (nulls as 0); the fit keeps redacted cards; `_fit_rows` keeps them; partial-run decks marked; calibration keeps the deck; B4 drops it; the flip report drops the reason; the gate at exactly 5%; the B-DK short-deck rule refuses it; ghosts don't mark.
 
+## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
+
+Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P3-1, the flags-on twin** (`test_trade_page_store.py`):
+  - the in-memory job's cards are swapped after the store, so a serve from the job instead of the stored deck can't pass;
+  - a cursor past 0, whose slice still has a card for I-1 to drop, is withheld with that cursor held, then serves exactly the I-1 survivors from it;
+  - it's served before cursor 0, because a cursor-0 serve would withdraw its drops and the sticky drop (C-b) would hide them either way.
+  - **Sabotages, 2/2 red:** I-1 skipped past cursor 0; the status served from the job, not the stored deck.
+- **P3-2:** `test_a_superseded_job_writes_no_impressions` pins both flags off, through a shared `flags_off` fixture with its control. With the flags on it was vacuous (impressions wait for delivery). The fence still matters on a flags-off rollback.
+  - **Sabotage:** removing the fence (`and not _job_superseded(job_id)` at the impression write) makes it red.
+- **Suites:** force-supersede and the page store, both files pass.
+
 ## 2026-10-31 — GNG-1 server error alerts through Sentry + SUP-M7 `feedback_received` (dark until `SENTRY_DSN`)
 
 Gates: full (operator did not declare express). Scope blocks: `docs/plans/server-error-alerts/scope.md` and `scope-feedback-alert.md`. Docs updated: `config-reference.md` (env vars), `runbook.md` § "Server error alerts (Sentry)", `architecture.md` (module row), `api-reference.md` (`POST /api/feedback` side effect), and `living-memory/DEPENDENCIES.md` 2026-10-31. No schema, flag, route-contract or analytics change. **Revised the same day for legal R28.23:** events are built from an allowlist (scope.md has the conditions table).
@@ -139,6 +152,19 @@ Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_
 - **Sabotages, 2/2 red:** I-1's drops ignored on the page path; the withhold ignored on the page path.
 - **Suites:** force-supersede, I-1 serve filter, page store and packed evidence: 317 passed on main and 317 passed on a flags-on copy of `ops/200ms-flip` (with failure 1's fix).
 - **Full backend suite, flags on** (`ops/200ms-flip` @ `8080663e` plus this branch's three test files): 10,055 passed, 2 skipped, 0 failed.
+
+## 2026-10-31 — #552 QA follow-ups: C1's lost-pack read pinned on its own, withdrawals by index, the tier comment, ADR-025's title
+
+Gates: release-lead's #552 QA (GO with notes, merged as `1398a9ce`), P2-1 and P3-1 to P3-3. Tests, a comment and a doc title only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P2-1:** C1's +26 h `incomplete_deck` came from the never-delivered withdrawal's index hole (0..29 plus 36), so a lost-pack rule cut to its in-flight half stayed green. C1 is now parametrized over `w0_past_30`.
+  - Without a W0 past 30 the rows have no hole, so only the lost-pack rule can exclude the deck.
+  - The control: with `PACK_REQUIRED_SINCE = None`, the same +26 h read is a complete deck (no exclusion).
+  - Sabotage (the rule keeps only its in-flight half): `[False]` red, `[True]` green, as release-lead found.
+- **P3-1:** the withdrawals are asserted as `(card_index, served_before)`: `[(3, 1), (36, 0)]`. The comments name mine40's card at index 36 (the ghosts shift it).
+- **P3-2:** `database.py`'s `evidence_tier` comment ranks `viewed` above `delivered`, `archive` and `full_interim` (`_EVIDENCE_TIERS_BELOW_VIEWED`). A first view raises only an `archive` row to it (`mark_deck_impression_viewed`); release-lead's QA found `_stamp_delivered`'s `raise_to="viewed"` path has no caller. Its `delivered_at` comes from this process's delivery stamp, then the pack's delivery of its index, then the outcome's time.
+- **P3-3:** ADR-025's title adds the 2% archive decks.
+- **Suites:** packed evidence, deferred evidence, eval withdrawals and paging: 307 passed.
 
 ## 2026-10-31 — #544 QA round 3: the X3 coverage hole closed; T-10 resolves namespace lookups; the residual documented by class
 
@@ -561,6 +587,30 @@ Gates: release-lead's #470 QA P2-1 follow-up; analytics-lead's grant of option (
   - the error card not hidden (10j);
   - the re-search through a tap path (10h).
 - **TestFlight:** the scope's §3 checklist (6 steps, two devices), for the operator on the 11-06 build. Not yet run.
+## 2026-10-29 — Team overhaul in account deletion and export (head-eng's ask; trades-eng found the gap)
+
+Full gates (scope `docs/plans/team-overhaul/scope-account-deletion.md`). Server only, no schema, not flag-gated. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change (`backend/accounts.py`):**
+  - deletion removes the user's own `overhauls` (by `account_user_id`) and every offer, roadmap, attempt and reservation under them;
+  - in OTHER users' overhauls, an offer naming them (any id in their scope) gets the placeholder for the counterparty and card target id and name, loses the counterparty's Fleeced-derived card fields, gets `evidence_json` NULL, goes stale if liked or undecided, and, if undecided, gets a re-minted `package_hash`; their roadmap summaries list the placeholder, and a Fleeced-minted id keying their snapshot rosters or holding their recovery pick becomes the placeholder (trades-eng's review);
+  - the export carries the user's own overhaul rows, without offers' `evidence_json` and with the counterparty's card fields removed;
+  - the one-time purge discovers `overhaul_offers.counterparty_user_id`.
+- **Tests:** four new in `test_account_deletion_coverage.py` (deletion and scrub with a no-residue check; minted ids in snapshots and recovery; export; a schema scan that fails on main's `accounts.py` with exactly the three overhaul tables), plus the purge discovery and info tests updated.
+- **Sabotage 27/27 red** (13 deletion, 8 after trades-eng's review, 4 export, 1 scan, 1 purge), restored byte-identical; a probe table also fails the scan.
+- **2026-10-29, release-lead QA @ `6ea56e5e`: NO-GO on a P1 → fixed.**
+  - **P1:** the scrub also matched the deleted user's own overhauls' `league_user_id`, which for a Sleeper co-owner is the roster's PRIMARY owner, a live person. `named_ids` is now `user_ids` only (an offer names a counterparty by league member id: the user's own id on ESPN/MFL, the roster owner on Sleeper). New co-owner test; test 1's ESPN-member premise (which real sessions don't produce) is now an `acct_` platform member.
+  - **P2-1:** a stored `counterparty_asset_not_owned` blocker on a scrubbed offer named the team in `compat_json`; it now gets `ownership_copy`'s unnamed message.
+  - **P2-2:** the sweep also removes overhauls whose owner's `users` row was created more than an hour after them (a reused id).
+  - **P3s:** the sweep counts an `accounts` row (acct_ alias or bound Sleeper id) as live, since `migrate_board_data` deletes a users row on a bind; the comment now names the durable session as the strong signal (session_init writes the users row in a background thread); the failure log carries the error class only; counts come from rowcounts; child rows whose overhaul is gone are swept; the schema scan covers owner / counterparty / holder / seller / recipient / partner / member / author / username / *_by columns; purge `--verify` gains (h) for overhaul snapshots and recoveries; a runbook note. P2-3 (a generation racing a deletion) and set-based UPDATEs for heavy users are follow-ups.
+  - **QA's 7 escapes are now red** (LIKE-prefix scrub, snapshot keys by prefix, orphan by league_user_id, live by prefix, ids logged, two scan probes), with 12 more on the new code: **sabotage 19/19 red**; the earlier rounds' still-applicable 22 stay red.
+- **2026-10-29, release-lead re-QA @ `96673f2a`: GO-with-notes** (SQLite and PG; acct_42 ruled kept). The P3s are taken:
+  - the re-signup rule skips an owner whose durable session or accounts row is no newer than the overhaul (QA case 994: a live user whose users row landed late);
+  - the compat test pins the rewrite to the counterparty side (a give-side blocker on the same offer is untouched);
+  - timestamps parse as UTC.
+  **Sabotage 5/5 red** (59 in all).
+- **Legal R28.22 additions (head-eng, 10-29):** the scrubbed cards' `mismatch_score` / `composite_score` are nulled (the blended-scalar test: on the owner arms they're the same presentation rank, so the copy goes with the nulled surplus_margin; no final_score is stored on an overhaul card). And `delete_orphaned_overhauls` deletes overhauls whose owner has no users row and no durable session, with their children, once per process from the cleanup loop, logging a count only. Three new tests. **Sabotage 8/8 red** (35/35 in all).
+- **Runs:** see the PR.
 
 ## 2026-10-28 — Paywall price rise moves to 2027-01-02 04:00 UTC (App Store Connect's US start for a Jan-2 schedule; follow-up to #494)
 
