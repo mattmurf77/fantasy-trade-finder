@@ -266,6 +266,7 @@ from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
 from .eval import contract as _evidence_contract  # ADR-025 S3: the one evidence contract (#382)
 from . import pick_slots                          # D-090 — real-slot pick labels AND, since D-144, per-slot prices
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
+from . import error_alerts as _error_alerts     # GNG-1 — Sentry error alerts, dark until SENTRY_DSN
 from . import sleeper_http as _sleeper_http   # S0 — per-process Sleeper 429 circuit
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
 from types import SimpleNamespace   # proposal-time policy shim (see
@@ -2300,7 +2301,29 @@ def _consensus_pos_ranks(scoring_format: str) -> tuple[dict[str, int], dict[str,
 # ---------------------------------------------------------------------------
 
 _PROJECT_ROOT = pathlib.Path(__file__).parent.parent
+# GNG-1: Sentry, dark until SENTRY_DSN (docs/runbook.md § Server error alerts).
+# Before Flask(), as the SDK's Flask integration asks. Under --preload this
+# runs in the gunicorn master; the SDK's sender thread restarts per pid
+# (backend/error_alerts.py module doc cites sentry_sdk/worker.py).
+_error_alerts.init_error_alerts()
 app = Flask(__name__, static_folder=str(_PROJECT_ROOT / "web"), static_url_path="")
+
+
+# GNG-1: a 5xx response that produced no Sentry event of its own (no ERROR log
+# on the way to it) becomes one `http_5xx` event; 4xx never reports. The
+# start hook notes the request's last event id, and is registered first so it
+# runs before every other before_request. Both return at once when Sentry is off.
+@app.before_request
+def _error_alerts_request_start() -> None:
+    _error_alerts.request_started()
+
+
+@app.after_request
+def _error_alerts_5xx(response):
+    if response.status_code >= 500:
+        _error_alerts.report_5xx(response.status_code)
+    return response
+
 
 # ---------------------------------------------------------------------------
 # Session store — multi-user support
@@ -2883,6 +2906,29 @@ def _trade_job_stalled(job, now):
     return now - last_progress > _JOB_HARD_TIMEOUT
 
 
+_orphaned_overhauls_swept = False
+
+
+def _sweep_orphaned_overhauls_once() -> None:
+    """Legal R28.22 d2: once per process, the overhauls left behind by accounts
+    deleted before deletion covered them (accounts.delete_orphaned_overhauls).
+    Logs a count only. A failure is retried on the next tick."""
+    global _orphaned_overhauls_swept
+    if _orphaned_overhauls_swept:
+        return
+    try:
+        from . import accounts as _accounts
+        counts = _accounts.delete_orphaned_overhauls()
+    except Exception as exc:
+        # The class only: a DB error's text carries the statement's parameters.
+        log.warning("orphaned-overhaul sweep failed (%s); retried next tick", type(exc).__name__)
+        return
+    _orphaned_overhauls_swept = True
+    if counts["overhauls"] or counts["child_rows"]:
+        log.info("Deleted %d overhaul(s) whose owner account no longer exists, and %d row(s) under them",
+                 counts["overhauls"], counts["child_rows"])
+
+
 # Diagnostics expiry per cleanup tick: up to 20 x 500 rows (10,000 a tick,
 # 2.88M a day); one 500-row batch a tick fell behind the write rate.
 _DIAG_PURGE_MAX_BATCHES = 20
@@ -2893,6 +2939,8 @@ def _cleanup_loop() -> None:
     """Background thread: evict stale sessions + stuck/old trade jobs."""
     while True:
         time.sleep(300)  # check every 5 min
+
+        _sweep_orphaned_overhauls_once()
 
         # Sessions — 4hr inactivity. This is a MEMORY sweep only: persisted
         # (verified, flag-on) sessions keep their durable row and rebuild on
@@ -16239,6 +16287,12 @@ def submit_feedback_route():
         return jsonify({"error": "internal"}), 500
     if result.get("duplicate"):
         _release_reservations()
+    else:
+        # SUP-M7: the "feedback received" alert (Sentry; a no-op until
+        # SENTRY_DSN). The stored row's id and severity only: never the text,
+        # screen, user, session or client id.
+        _error_alerts.notify("feedback_received", feedback_id=result["server_id"],
+                             kind=severity)
 
     # Tracking plan v2 §S3 — feedback_submitted. NEVER the note text (§S4);
     # anonymous submissions (no session) have no user to attribute to, and
