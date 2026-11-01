@@ -556,24 +556,30 @@ def render_package_card(short_id) -> tuple[bytes, int]:
     ), 200
 
 
+# A draft pick's chip on the card: "PK" on chalk-dim, a neutral fill, never a
+# position hex (docs/cross-client-invariants.md § Position color tokens). The
+# same constants and look as #564 (league-eng's share-card value bar), so the
+# card changes once whichever lands first.
+PICK_CHIP_LABEL = "PK"
+PICK_CHIP_FILL = (151, 161, 174)    # chalk-dim
+
+
 def _generic_pick_records(ids: Iterable[str]) -> dict[str, dict]:
     """The live calculator's 12 generic pick rungs (`generic_pick_<round>_
     <early|mid|late>`, server.py's universal pool) aren't `players` rows, so a
     shared package holding one drew "Unknown player" (release-lead, #566 QA
     follow-up). Each gets the label the calculator shows ("Mid 1st Round
-    Pick", pick_values.generic_pick_label) and the PICK chip. Any other
-    unknown id stays unknown."""
-    from .pick_values import GENERIC_PICK_SEEDS, generic_pick_label
+    Pick", pick_values.generic_pick_label) and the PK chip; ids are parsed by
+    the shared pick_values.parse_generic_pick_id. Any other unknown id stays
+    unknown."""
+    from .pick_values import generic_pick_label, parse_generic_pick_id
 
     out: dict[str, dict] = {}
     for pid in ids:
-        parts = str(pid).split("_")
-        if len(parts) != 4 or parts[:2] != ["generic", "pick"] or not parts[2].isdigit():
-            continue
-        rnd, tier = int(parts[2]), parts[3].title()
-        if (rnd, tier) in GENERIC_PICK_SEEDS:
-            out[str(pid)] = {"player_id": str(pid), "full_name": generic_pick_label(rnd, tier),
-                             "position": "PICK"}
+        parsed = parse_generic_pick_id(str(pid))
+        if parsed is not None:
+            out[str(pid)] = {"player_id": str(pid), "full_name": generic_pick_label(*parsed),
+                             "position": PICK_CHIP_LABEL}
     return out
 
 
@@ -640,7 +646,8 @@ def _render_trade_card_png(
             # Position chip
             if pos:
                 chip_w, chip_h = 56, 32
-                color = POS_COLORS.get(pos, (120, 144, 156))
+                color = (PICK_CHIP_FILL if pos == PICK_CHIP_LABEL
+                         else POS_COLORS.get(pos, (120, 144, 156)))
                 draw.rounded_rectangle(
                     [x0 + 24, row_y + 4, x0 + 24 + chip_w, row_y + 4 + chip_h],
                     radius=8, fill=color,
