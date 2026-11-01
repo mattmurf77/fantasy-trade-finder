@@ -30,6 +30,8 @@
 //      enabled only for monetize.paywall AND a verified session), all four
 //      ['paywall-config'] subscribers share one key + queryFn, and it is
 //      mounted once under RootNav's Main and referenced by no other file.
+//      8h: a drop out of verified (unverified, demo, user change, sign-out)
+//      removes the cached ['paywall-config'] entry once, EXECUTED.
 //   9. The backend tip guard exists: entitlements.is_tip_product referenced
 //      by the projector, and every served tip SKU is ftf_tip_-prefixed on
 //      the server (cross-checked into backend/server.py so a drifted id
@@ -241,7 +243,7 @@ const beServer = read(BE_SERVER);
   }
 }
 
-// 8d/8e — the warm observer (tip jar C1, docs/plans/tip-jar/plan.md §3):
+// 8d/8e — the warm observer (tip jar C1, PR #569's docs/plans/tip-jar/plan.md §3):
 //     EXECUTED (state/useWarmPaywallConfig.ts transpiled with stubs, the real
 //     subscriptionSession.ts behind it). Same key + queryFn as the hook, the
 //     screens' staleTime, focus refetch on, and enabled = flag AND verified.
@@ -268,8 +270,26 @@ const beServer = read(BE_SERVER);
     const subscriptionSession = load(sessSrc, {}, 'state/subscriptionSession.ts');
     let seen = null; let flag = false; let session = null;
     const flagKeys = []; const fetched = [];
+    // A one-slot fake React effect runner (the hook has ONE useEffect): runs
+    // the effect on the first render and whenever a dep changes (Object.is),
+    // like React's commit; `fx.reset()` is a fresh mount.
+    const fx = { deps: null, pending: null, reset() { this.deps = null; this.pending = null; } };
+    const removed = [];   // each removeQueries call: { filter, enabled at that render }
+    const client = { removeQueries: (filter) => removed.push({ filter, enabled: seen && seen.enabled }) };
+    const render = () => {
+      warm.useWarmPaywallConfig();
+      if (fx.pending) { const run = fx.pending; fx.pending = null; run(); }
+    };
     const warm = load(src, {
-      '@tanstack/react-query': { useQuery: (opts) => { seen = opts; return {}; } },
+      'react': { useEffect: (fn, deps) => {
+        const changed = !fx.deps || deps.length !== fx.deps.length || deps.some((d, i) => !Object.is(d, fx.deps[i]));
+        fx.deps = deps;
+        if (changed) fx.pending = fn;
+      } },
+      '@tanstack/react-query': {
+        useQuery: (opts) => { seen = opts; return {}; },
+        useQueryClient: () => client,
+      },
       '../api/billing': { getPaywallConfig: (p) => { fetched.push(p); return Promise.resolve({}); } },
       './useFeatureFlags': { useFlag: (k) => { flagKeys.push(k); return flag; } },
       './useSession': { useSession: (sel) => sel(session) },
@@ -312,10 +332,43 @@ const beServer = read(BE_SERVER);
       bad('8e. warm observer gate: flag off / unverified / unknown / demo → disabled; flag + verified → enabled',
         `wrong: ${wrong.join('; ')}`);
     }
+
+    // 8h — not verified ⇒ the cached entry is REMOVED (release-lead QA on
+    //      #575): a verified → unverified / demo / unknown (a user change) /
+    //      signed-out transition removes ['paywall-config'] ONCE; verified →
+    //      verified never does; it never fires while the observer is enabled,
+    //      and further not-verified renders don't repeat it (no loop).
+    const verifiedS = { isDemo: false, verification: { session_verified: true }, user: sleeper };
+    const drops = [
+      ['unverified', { isDemo: false, verification: { session_verified: false }, user: sleeper }],
+      ['demo', { isDemo: true, verification: { session_verified: true }, user: acct }],
+      ['unknown (user change)', { isDemo: false, verification: null, user: { user_id: '999', account_only: false } }],
+      ['signed out', { isDemo: false, verification: null, user: null }],
+    ];
+    const problems = [];
+    const sequence = (states) => {
+      fx.reset(); removed.length = 0; flag = true;
+      states.forEach((st) => { session = st; render(); });
+      return removed.slice();
+    };
+    const keep = sequence([verifiedS, verifiedS, verifiedS]);
+    if (keep.length !== 0) problems.push(`verified → verified removed ${keep.length}x`);
+    drops.forEach(([name, st]) => {
+      const r = sequence([verifiedS, st, st]);
+      const exact = r.length === 1 && JSON.stringify(r[0].filter) === JSON.stringify({ queryKey: ['paywall-config'] })
+        && r[0].enabled === false;
+      if (!exact) problems.push(`verified → ${name}: ${JSON.stringify(r)}`);
+    });
+    if (problems.length === 0) {
+      ok("8h. not verified ⇒ ['paywall-config'] removed once (unverified / demo / user change / signed out); verified → verified keeps it; no loop");
+    } else {
+      bad("8h. not verified ⇒ ['paywall-config'] removed once (unverified / demo / user change / signed out); verified → verified keeps it; no loop",
+        problems.join('; '));
+    }
   }
 }
 
-// 8f — one cache entry: every ['paywall-config' subscriber in src/ is one of
+// 8f — one cache entry: every ['paywall-config' (either quote) user in src/ is one of
 //     the four, each with the identical key + queryFn
 {
   const SHARED = /queryKey: \['paywall-config', 'ios'\],\s*queryFn: \(\) => getPaywallConfig\('ios'\),/;
@@ -325,7 +378,7 @@ const beServer = read(BE_SERVER);
   const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).forEach((e) => {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) walk(p);
-    else if (/\.(ts|tsx)$/.test(e.name) && strip(fs.readFileSync(p, 'utf8')).includes("['paywall-config'")) {
+    else if (/\.(ts|tsx)$/.test(e.name) && /\[\s*['"]paywall-config['"]/.test(strip(fs.readFileSync(p, 'utf8')))) {
       users.push(path.relative(ROOT, p));
     }
   });
