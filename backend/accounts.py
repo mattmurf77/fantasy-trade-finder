@@ -692,6 +692,16 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "deck_card_withdrawals", "deck_evidence_packs",
 )
 
+# Tables that name a person and are neither deleted nor exported here, each
+# with its reason (test_account_deletion_coverage's person-column scan).
+_KEPT_WITH_REASON = {
+    # The deletion's own record: its row holds the resolved ids only until
+    # the scrub of OTHER users' stores finishes, and is then deleted
+    # (deletion_scrub.enqueue below; legal R28.20 (ii), (ix)). Not the
+    # person's data to export: they're gone.
+    "deletion_scrub_jobs": "the deletion scrub's job, deleted when it finishes",
+}
+
 # Team overhaul (BUILD-CONTRACT §4) keys its owner as `account_user_id`, and
 # the rest by `overhaul_id`, so none of it fits the user_id loop above.
 _OVERHAUL_CHILD_TABLES = ("overhaul_offers", "overhaul_roadmaps", "overhaul_attempts",

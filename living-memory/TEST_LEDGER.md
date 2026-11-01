@@ -1,3 +1,7 @@
+## 2026-10-31 — Deletion scrub: main's #540 merged in; deletion_scrub_jobs named as kept with a reason
+
+#540 (on main) added a person-column scan to `test_account_deletion_coverage`: every table with a column that can name a person must be named in `accounts.py`. `deletion_scrub_jobs.partner_ids_json` matched, so the merged branch failed it. The table is now in `accounts._KEPT_WITH_REASON`: the deletion's own record, holding the resolved ids until the scrub finishes, then deleted. Not exported, because the person is gone. Before the fix it failed with `['deletion_scrub_jobs']`. The deletion-coverage and scrub suites pass 98. The API reference's DELETE row and daily-tick count were merged by hand: main's overhaul text plus the scrub paragraph, with ten tick steps.
+
 ## 2026-10-31 — Deletion scrub: #557 re-QA notes (GO with notes)
 
 Gates: release-lead's #557 re-QA @ `a241e8f0` (GO with notes; all 3 P1s closed end to end on SQLite and PG). No schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
