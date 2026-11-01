@@ -37,13 +37,13 @@
   - the layout of `ShareTradeImage`, with main's TOTAL rows in the before pane. Their figures are the evaluation's package values (after adjustments), from the backend's own `_consensus_packages`, and main's calculator verdict comes from `_fairness_v3`;
   - `TierBadge`'s pick-value ladder labels ("2 1sts", "1 1st", …; `type.label` uppercases them on the device), drawn in `chalk.base` with a 1px border in the tier's colour;
   - `PositionChip` the same way;
-  - picks as each host builds them. The live calculator's pick is a generic rung from `/api/trade/values`: a year-less name ("Mid 1st Round Pick"), a stand-in position (a 1st is "RB") and a tier badge. The in-league pick is an owned league pick ("2027 2nd"): a PICK chip in `ink.lineStrong` and its number. A package holding one skips the mint, so that pane's URL is the `/?ref=` link;
+  - picks as each host builds them. The live calculator's pick is a generic rung from `/api/trade/values`: a year-less name ("Late 1st Round Pick"), a stand-in position (a 1st is "RB") and a tier badge. The in-league pick is an owned league pick ("2027 2nd"): a PICK chip in `ink.lineStrong` and its number, today's DynastyProcess SF TEP price (434, the `pool_value` the card draws). Every asset is keyed by a real-shaped id, so the backend's first-round exemption (#427) applies to the generic pick as it does on device. A package holding one skips the mint, so that pane's URL is the `/?ref=` link;
   - the wordmark, then the URL footer;
   - the Chalkline tokens and the card's own fonts.
-  The first version drew cyan "ELITE" / "STARTER" badges and no URL footer (release-lead's #566 QA P2-2). The second drew a calculator pick that can't occur ("PICK", "2027 Mid 1st", a number) and TOTALs as the rows' sum (P2-A). Both redrawn.
+  The first version drew cyan "ELITE" / "STARTER" badges and no URL footer (release-lead's #566 QA P2-2). The second drew a calculator pick that can't occur ("PICK", "2027 Mid 1st", a number) and TOTALs as the rows' sum (P2-A). The third passed display names as ids to the package math, so the generic pick missed its first-round exemption and the calculator's before pane showed 8,600 and "fair" where main gives 8,870 and "even" (re-check P2-1). All redrawn; the calculator now uses a Late 1st, which main does score "fair · Side A sends more" (9,119 / 8,151, ratio 0.894).
 - [x] **Manual TestFlight checklist** (operator, on the 11-06 binary). There's no image-capture toggle on an iPhone: the text fallback is the message body sent with the image (`ShareTradeImage.tsx:150`), so steps 2 and 5 read it in Messages.
-  1. **Calculator** (live, both sides filled) → **Share image**. The card shows:
-     - the two sides, each asset with its tier badge as on screen. A generic pick from the calculator's list shows its stand-in position chip and a tier badge too (e.g. RB, "Mid 1st Round Pick", 1 1ST);
+  1. **Calculator** (live, both sides filled, with a generic pick from the PICK filter on one side) → **Share image**. The card shows:
+     - the two sides, each asset with its tier badge as on screen. The generic pick shows its stand-in position chip and a tier badge too (e.g. RB, "Late 1st Round Pick", 1 1ST);
      - then "Package value", then the "Dynasty Trade Finder" wordmark and the URL footer;
      - no TOTAL rows, no "Verdict", no "%".
      The on-screen verdict card is unchanged.

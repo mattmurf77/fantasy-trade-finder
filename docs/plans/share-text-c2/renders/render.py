@@ -23,7 +23,7 @@ What it mirrors, by file:
   are the pick-value ladder's ("2 1sts", "1 1st", ...).
 - Picks, as each host builds them:
   - the live calculator's are the pool's generic rungs from
-    /api/trade/values: a year-less name ("Mid 1st Round Pick",
+    /api/trade/values: a year-less name ("Late 1st Round Pick",
     pick_values.generic_pick_label), a stand-in position (_PICK_POS: a 1st
     is "RB") and a ladder tier, so the card draws an RB chip and a tier
     badge (TradeCalculatorScreen's tierFor is null only for pos "PICK");
@@ -118,7 +118,8 @@ def card(caption, sides, verdict, url, totals=None):
             y += S + gap
         draw_text(d, pad, y, title, LABEL, BASE)
         y += 14 * S
-        for pos, name, tier in assets:
+        for pos, asset_id, tier in assets:
+            name = NAMES[asset_id]
             y += 4 * S                                   # side gap space.xs
             row_h = 20 * S                               # the chip's height sets the row
             mid = y + row_h / 2
@@ -128,7 +129,7 @@ def card(caption, sides, verdict, url, totals=None):
             if tier:
                 outlined_label(d, W - pad, mid, TIER_LABEL[tier], TIER[tier])
             else:
-                value = f"{VALUES[name]:,}"
+                value = f"{round(VALUES[asset_id]):,}"   # Math.round(a.value).toLocaleString()
                 draw_text(d, W - pad - width(d, value, DATA), mid - 9 * S, value, DATA, BASE)
             y += row_h
         if totals:
@@ -183,19 +184,27 @@ def pair(name, left_label, before, right_label, after):
     out.save(OUT / name)
 
 
-# Illustrative values on the elo_to_value scale; a player's row shows its tier,
-# an owned league pick's row its value. "Mid 1st Round Pick" is the generic
-# rung at its seed (elo_to_value(1650), first_1 for an RB).
-VALUES = {"Garrett Wilson": 4630, "Breece Hall": 5210, "Jalen Hurts": 6400,
-          "Mid 1st Round Pick": 2117, "Sam LaPorta": 2450, "C.J. Stroud": 6500,
-          "2027 2nd": 640}
+# Each asset by a real-shaped id, because the backend's package math decides
+# by the id's shape: a generic rung's `generic_pick_1_*` id gets #427's
+# first-round exemption (trade_service.first_round_pick_mask), which a display
+# name would not (release-lead's #566 re-check P2-1). Players carry
+# Sleeper-shaped ids; an owned league pick is `<league>_<season>_<round>_<roster>`.
+# Values are on the elo_to_value scale and illustrative for players. The Late
+# 1st is the generic rung at its seed (elo_to_value(1580), first_1 for an RB).
+# The league pick is today's DynastyProcess SF TEP price for a 2027 2nd, the
+# pool_value the in-league card draws (_priced_pick_value).
+NAMES = {"8146": "Garrett Wilson", "8155": "Breece Hall", "6904": "Jalen Hurts",
+         "generic_pick_1_late": "Late 1st Round Pick", "9484": "Sam LaPorta",
+         "9758": "C.J. Stroud", "1048123456789012345_2027_2_4": "2027 2nd"}
+VALUES = {"8146": 4630, "8155": 5210, "6904": 6400, "generic_pick_1_late": 1491.8,
+          "9484": 2450, "9758": 6500, "1048123456789012345_2027_2_4": 434.1}
 
 
 def evaluation(sides):
     """Main's TOTALs and the calculator's verdict, as /api/trade/evaluate
     computes them (server.py: _consensus_packages, _fairness_v3 at the 0.75
     default, _value_verdict_payload's favours)."""
-    give, recv = ([n for _, n, _ in assets] for _, assets in sides)
+    give, recv = ([aid for _, aid, _ in assets] for _, assets in sides)
     value = VALUES.__getitem__
     gv, rv = _consensus_packages(give, recv, value)
     fairness, ratio, *_ = _fairness_v3(give, recv, value, None, 0.75)
@@ -205,8 +214,8 @@ def evaluation(sides):
     return (round(gv, 1), round(rv, 1)), verdict, favors
 
 
-calc = [("Side A sends", [("WR", "Garrett Wilson", "firsts_2"), ("RB", "Breece Hall", "firsts_2")]),
-        ("Side B sends", [("QB", "Jalen Hurts", "firsts_3"), ("RB", "Mid 1st Round Pick", "first_1")])]
+calc = [("Side A sends", [("WR", "8146", "firsts_2"), ("RB", "8155", "firsts_2")]),
+        ("Side B sends", [("QB", "6904", "firsts_3"), ("RB", "generic_pick_1_late", "first_1")])]
 calc_totals, verdict, favors = evaluation(calc)
 calc_line = f"Verdict: {verdict}" + {"give": " · Side A sends more",
                                       "receive": " · Side B sends more"}.get(favors, "")
@@ -217,8 +226,8 @@ pair("calculator-before-after.png",
      "After (#566)",
      card("Trade idea · 1QB PPR", calc, "Package value", calc_url))
 
-league = [("You send", [("WR", "Garrett Wilson", "firsts_2"), ("TE", "Sam LaPorta", "first_1")]),
-          ("You receive", [("QB", "C.J. Stroud", "firsts_3"), ("PICK", "2027 2nd", None)])]
+league = [("You send", [("WR", "8146", "firsts_2"), ("TE", "9484", "first_1")]),
+          ("You receive", [("QB", "9758", "firsts_3"), ("PICK", "1048123456789012345_2027_2_4", None)])]
 league_totals, _, _ = evaluation(league)
 league_url = "fantasy-trade-finder.onrender.com/?ref=yourname"   # a pick: no mint
 pair("in-league-before-after.png",
