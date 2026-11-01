@@ -1,3 +1,13 @@
+## 2026-11-01 — Deletion scrub stage 3: release-lead's final #562 QA (GO-with-notes, stack cleared), test gaps closed
+
+- **P3-1:** the timeout spy also counts `connect()`. `begin()` opens one connection of its own, so a bare-connection first read shows up as an extra one, and the begins must equal the chunks plus one.
+- **P3-2:** the 1,500-match test uses one counterparty per match and probes match 2200 (cp1200), past the first 500 ids.
+- **P3-3:** the broken engine raises on `begin()` too, and the test asserts the "partner backfill failed: RuntimeError" warning.
+- **P3-4, in part:** the notification scan never writes an unchanged row. A row already showing the placeholder is skipped.
+- **Docstring:** the nit is fixed.
+- **Sabotages:** release-lead's three survivors (a bare first read, only the first 500 match ids, a re-raise on a dead engine) are red now, and the 47 still are.
+- **Not taken:** P3-5 (a `match_id` ≥ 2^63 is synthetic) and P3-6 (batching the counterparty lookups, about 45 s at 2,000 counterparties, off the request).
+
 ## 2026-11-01 — Deletion scrub stage 3, release-lead's #562 delta QA at ec018bc2 (GO-with-notes, P3s only)
 
 - **The backfill:**
