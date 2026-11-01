@@ -1,3 +1,36 @@
+## 2026-11-01 — Deletion scrub stage 3, release-lead's #562 delta QA (GO-with-notes): the boot backfill hardened, match ids captured
+
+- **The backfill** (release-lead: it runs from `_migrate_db`, so during a Render build too, against prod while the old instance serves):
+  - **Chunks:** 500 cards, each its own transaction.
+  - **Timeouts on Postgres:** `SET LOCAL lock_timeout` 3 s and `statement_timeout` 30 s (the `_run_guarded_ddl` values).
+  - **Lookups:** one batched deck-row lookup per chunk.
+  - **Counts:** the rows actually updated (`rowcount`), added only after the chunk commits.
+  - **Failures:** a failed chunk is skipped, logged by class, and retried at the next boot. It never raises.
+  - **The roster guard (QA's optional):** a name fill needs the card's received players, at least one and all of them, on that member's roster, so after a rename "Jared" can't fill u9. A pick-only card stays NULL.
+- **Notifications:** the person's `trade_matches` ids are captured at deletion, in `partner_names_json.match_ids`, before their side becomes the placeholder. A notification on one of their matches, sent to a side, takes the placeholder whatever partner name it used: a name never captured ("KimFive") or one since changed.
+- **Docs:** scope:76's diagnostics now read 14 days. The backfill's build-time behaviour and the match-id capture are in the scope and the data dictionary.
+- **New tests:**
+  - `init_db` runs the backfill;
+  - only `partner_user_id` changes (grades, tags, positions kept);
+  - one deck lookup per chunk;
+  - the log has counts and no ids;
+  - a failed commit isn't counted and its chunk is retried;
+  - no database returns 0;
+  - Postgres sets both timeouts per chunk;
+  - the roster guard;
+  - the "Twin" ambiguity on its own;
+  - the SQLite-visible P2-B case ("Zed" in L6);
+  - `_stuck_at`'s version check;
+  - KimFive on a captured match, and a non-side recipient left alone.
+- **Sabotages, 42/42 red, with Postgres:**
+  - last round's 30;
+  - the backfill re-raising, logging an id, not called at boot, clearing a grade, counting before commit, looking up per card, without timeouts on PG, without the roster guard;
+  - the recipient-is-a-side guard dropped;
+  - match ids not captured;
+  - the match row still asking for a known name;
+  - `_stuck_at`'s version check dropped.
+- **Runs:** the related and migration suites with Postgres, 900 passed.
+
 ## 2026-11-01 — Deletion scrub stage 3, release-lead's #562 re-QA (GO-with-notes): failed sessions, older cards on Postgres, match-row notifications
 
 Gates: release-lead's re-QA at 03d35f63. No new schema beyond `grading_cards.partner_user_id`; a boot backfill fills it. No flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest on SQLite and Postgres.
