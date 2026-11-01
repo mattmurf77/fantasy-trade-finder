@@ -1,3 +1,17 @@
+## 2026-10-31 — The value bar, release-lead's #567 QA (GO-with-notes): the League example, renders from the app's tokens, a checklist that discriminates
+
+Gates: release-lead's #567 QA, with three P2s before the 11-06 binary. Client-only plus a backend test; no schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **P2-1:** the League "Works right now" example (`LeagueScreen.tsx` `EXAMPLE_GAP`), the clients' only static gap, said "a Mid 2nd (≈ 0.6 firsts)" at 380 and filled far past the new tick. It's now 607, 0.29 firsts, pick value 606.5: what the server sends for a Mid 2nd gap. `test_the_league_example_gap_is_a_mid_2nd_at_todays_values` pins it to the seeds. Main's fixture fails it.
+- **P2-2:** `renders/render.py` draws `TradeValueBar` from its styles at 317pt and 283pt: `before-after-317.png` (an Early 2nd "You win", a Mid 2nd "They win") and `before-after-283.png` (the League example). It uses the app's tokens and fonts, `semantic.pos` / `semantic.warn`, `ink.line` ticks on the `ink3` rail, and the Plex Mono labels in their inset frame (8.6pt inboard). The gaps come from the server's `_pick_gap_equivalent`. The old geometry sketch `before-after.png` is removed.
+- **P2-3:** the checklist is rewritten so a step can catch the old build. Step 1 is now an Early 2nd (past the tick now, short of it before), with the "about a third of the way" cue. It adds They-win, the League example, and the largest standard text size. The web miniature is noted as a Render-deploy check, not TestFlight.
+- **P3s:**
+  - `docs/design/components.md`'s "≈0.57" and "21.5%/78.5%" are fixed, and the file is now in the docs table;
+  - the scope notes that a live `elo_value_k` change wouldn't move the app's constant;
+  - the scope notes the label crowding at large text (a design follow-up);
+  - the scope notes that whichever of #564 / #567 lands second drops #564's "still 0.57" line.
+- **Runs:** `test_value_bar_scale.py` 3 passed.
+
 ## 2026-10-31 — The value bar's ±2nd landmark at today's Mid 2nd / Mid 1st (0.57 → 0.287)
 
 Gates: the scope block `docs/plans/value-bar-scale/scope.md` (head-eng, for the 11-06 binary). A constant and a CSS position; no route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
