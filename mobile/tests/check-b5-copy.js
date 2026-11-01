@@ -69,13 +69,14 @@ check('item 3: saving picks refreshes the calculator\'s picks (#531 QA P1-1)', (
   assert.ok(seed.indexOf(inv) >= 0 && seed.indexOf(inv) < seed.indexOf('onError:'), 'seed onSuccess');
 });
 
-check('item 4: the ShopAsset button and its VoiceOver label, word for word', () => {
+check('item 4: superseded (#531 follow-up) — the ShopAsset button is the platform send router', () => {
+  // The operator (2026-11-01) wants the trade sent on the league's platform,
+  // so "Show it to @name" and its queue button are gone; the router's own
+  // labels apply (check-shop-send.js, check-send-button-platform.js).
   const shop = read('mobile/src/components/ShopOffersBody.tsx');
-  once(shop, 'label={`Show it to @${item.counterparty_username}`}');
-  once(shop, 'accessibilityLabel={`Show this offer to @${item.counterparty_username} in their Fleeced deck`}');
+  assert.ok(!shop.includes('Show it to @') && !shop.includes('in their Fleeced deck'));
   assert.ok(!shop.includes('Send this offer'));
-  // The same Button as before: its testID and handler are untouched.
-  assert.match(shop, /testID="shop\.like-btn"\s*\n\s*label=\{`Show it to @\$\{item\.counterparty_username\}`\}/);
+  assert.match(shop, /<SendInSleeperButton[\s\S]*?surface="shop"/);
 });
 check('item 4: the queue toasts, word for word, each on its own branch', () => {
   const q = read('mobile/src/utils/queueCalcTrade.ts');
@@ -89,17 +90,14 @@ check('item 4: the shop name is normalized to a string, never undefined', () => 
 });
 
 check('no banned words in the shipped strings (read from the source)', () => {
-  const shop = read('mobile/src/components/ShopOffersBody.tsx');
   const q = read('mobile/src/utils/queueCalcTrade.ts');
   const strings = [
     ...['mobile/src/utils/winNow.ts', 'web/js/win-now.js'].map(f => read(f).match(/'Calibrated model' : '([^']+)'/)[1]),
     calc.match(/<Text style=\{styles\.note\}>(No draft picks[^<]+)<\/Text>/)[1],
     calc.match(/<Text style=\{styles\.noteLink\}>([^<]+)<\/Text>/)[1],
-    shop.match(/label=\{`(Show it to [^`]+)`\}/)[1],
-    shop.match(/accessibilityLabel=\{`(Show this offer [^`]+)`\}/)[1],
     ...[...q.matchAll(/`(It's (?:already|waiting) in [^`]+)`/g)].map(m => m[1]),
   ];
-  assert.equal(strings.length, 8);
+  assert.equal(strings.length, 6);
   for (const str of strings) assert.ok(!/\b(beta|read-only|failed|error)\b/i.test(str), str);
 });
 

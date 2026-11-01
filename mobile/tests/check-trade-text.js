@@ -135,7 +135,7 @@ check('15 no reason claims "Sleeper-only" (#309 — MFL/ESPN sends are live)',
 // ── SEND_SURFACES ───────────────────────────────────────────────────────
 // 16: pins the dimension values P0-7 registers in the analytics taxonomy.
 check('16 surfaces are exactly deck/match/awaiting/calculator',
-  SEND_SURFACES, ['deck', 'match', 'awaiting', 'calculator']);
+  SEND_SURFACES, ['deck', 'match', 'awaiting', 'calculator', 'shop']);
 
 // ── formatTradeForClipboard ─────────────────────────────────────────────
 const FULL = {

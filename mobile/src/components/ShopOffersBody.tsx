@@ -40,7 +40,8 @@ import {
 import { track } from '../api/events';
 import { haptics } from '../utils/haptics';
 import { assetIdeaKey, ideaToCard } from '../utils/ideaToCard';
-import { queueCalcTrade, type QueueToast } from '../utils/queueCalcTrade';
+import type { QueueToast } from '../utils/queueCalcTrade';
+import SendInSleeperButton from './SendInSleeperButton';
 import {
   SHOP_MODES,
   SHOP_MODE_GROUP,
@@ -76,11 +77,14 @@ import type { Player, TradeCard } from '../shared/types';
 // tier membership, not the ±band).
 //
 // Decisions per tile:
-//   ✓ like    — `queueCalcTrade` → POST /api/trades/queue AS-IS (ruling A:
-//               the like moves the Elo board exactly like the calculator's ✓;
-//               `record_elo` was ruled out). Refusals render the shipped
-//               `queueRefusalLine` copy; `calc_trade_queued` fires with
-//               screen 'ShopAsset'. The SCREEN owns the Toast mount
+//   send      — the platform send router, SendInSleeperButton, as the deck,
+//               Matches and both calculators mount it (operator 11-01: "the
+//               trade gets sent on the platform they play on, not in our
+//               app"): Sleeper, MFL or ESPN by the league's platform, with
+//               their confirm, outcome-unknown handling, per-platform blocks
+//               and copy. surface 'shop'. Send-only: no deck queue, so no
+//               likes-you card and no Elo signal (head-eng 11-01).
+//               The SCREEN owns the Toast mount for the dismiss
 //               (`onToast` — host = ShopAssetScreen, rev3-spec §1).
 //   ✕ dismiss — full deck-pass semantics via POST /api/trades/swipe
 //               `decision:'pass'`, but the POST is HELD for UNDO_HOLD_MS and
@@ -329,8 +333,6 @@ export default function ShopOffersBody({
   // path in `commitDismiss`, where the server never recorded the pass and
   // honesty requires the tile back.
   const [suppressed, setSuppressed] = useState<Set<string>>(new Set());
-  // Per-idea in-flight guard for the ✓ — disables the pair while queueing.
-  const [busyKey, setBusyKey] = useState<string | null>(null);
   const [pagerW, setPagerW] = useState(0);
   const listRef = useRef<FlatList<AssetIdea>>(null);
   const queryClient = useQueryClient();
@@ -712,29 +714,6 @@ export default function ShopOffersBody({
     track('shop_positions_selected', { n }, 'ShopAsset');
   }, [debouncedSwapKey]);
 
-  // ── Like: the calculator's ✓, verbatim (ruling A) ─────────────────────
-  async function handleLike(idea: AssetIdea) {
-    const key = assetIdeaKey(idea);
-    if (busyKey) return;
-    setBusyKey(key);
-    try {
-      const res = await queueCalcTrade({
-        leagueId,
-        opponent: {
-          userId: idea.counterparty_user_id,
-          name: idea.counterparty_username,
-        },
-        giveIds: idea.give_player_ids,
-        receiveIds: idea.receive_player_ids,
-        screen: 'ShopAsset',
-        signal: signalForOffer(ideaToCard(idea, leagueId)),
-      });
-      onToast(res.toast);
-    } finally {
-      setBusyKey(null);
-    }
-  }
-
   // ── Pager mechanics ───────────────────────────────────────────────────
   // P-1 UNIVERSAL RULE (rulings 2026-08-28 R-C): the pager position
   // derives from the rendered data — scrolls REACT to data changes, they
@@ -1011,7 +990,6 @@ export default function ShopOffersBody({
               }}
               renderItem={({ item }) => {
                 const key = assetIdeaKey(item);
-                const busy = busyKey === key;
                 const gain = item.difference >= 0;
                 return (
                   <View style={[styles.tile, { width: pagerW || 1 }]} testID={`shop.card.${key}`}>
@@ -1052,27 +1030,29 @@ export default function ShopOffersBody({
                       <Pressable
                         testID="shop.dismiss-btn"
                         onPress={() => handleDismiss(item)}
-                        disabled={busy}
                         accessibilityRole="button"
                         accessibilityLabel="Dismiss this offer"
                         style={({ pressed }) => [
                           styles.dismissBtn,
                           pressed && styles.dismissBtnPressed,
-                          busy && styles.btnDisabled,
                         ]}
                       >
                         <Icon name="x" size={16} color={chalk.dim} />
                       </Pressable>
                       <View style={styles.likeWrap}>
-                        <Button
-                          testID="shop.like-btn"
-                          label={`Show it to @${item.counterparty_username}`}
-                          accessibilityLabel={`Show this offer to @${item.counterparty_username} in their Fleeced deck`}
-                          icon="check"
-                          variant="primary"
+                        {/* #531 follow-up: proposes the trade on the league's
+                            platform (the router picks Sleeper / MFL / ESPN),
+                            never a Fleeced deck queue. */}
+                        <SendInSleeperButton
+                          leagueId={leagueId}
+                          theirUserId={item.counterparty_user_id}
+                          givePlayerIds={item.give_player_ids}
+                          receivePlayerIds={item.receive_player_ids}
+                          givePlayerNames={item.give.map((p) => p.name)}
+                          receivePlayerNames={item.receive.map((p) => p.name)}
+                          opponentUsername={item.counterparty_username}
+                          surface="shop"
                           compact
-                          loading={busy}
-                          onPress={() => handleLike(item)}
                         />
                       </View>
                     </View>
@@ -1289,7 +1269,6 @@ const styles = StyleSheet.create({
     borderColor: ink.lineStrong,
   },
   dismissBtnPressed: { backgroundColor: ink.ink3 },
-  btnDisabled: { opacity: 0.5 },
   likeWrap: { flex: 1 },
   pageHint: {
     color: chalk.faint,

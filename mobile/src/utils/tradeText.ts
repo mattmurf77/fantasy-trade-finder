@@ -57,11 +57,11 @@ export const NO_SEND_REASON: Record<Exclude<SendPlatform, 'sleeper'>, string> = 
  *  module, on P0-7's behalf: every value P0-7 will register as an analytics
  *  dimension is greppable in one place, importable without dragging React into
  *  the transpile, and pinned by check-trade-text.js. P0-6 fires no events. */
-export type SendSurface = 'deck' | 'match' | 'awaiting' | 'calculator';
+export type SendSurface = 'deck' | 'match' | 'awaiting' | 'calculator' | 'shop';
 
 /** Exported only so the unit test can assert the union's exact membership —
  *  a TS type erases at transpile and cannot be checked at runtime. */
-export const SEND_SURFACES: readonly SendSurface[] = ['deck', 'match', 'awaiting', 'calculator'];
+export const SEND_SURFACES: readonly SendSurface[] = ['deck', 'match', 'awaiting', 'calculator', 'shop'];
 
 // Per-INDEX fallback, not per-array: a partially-resolved names array (the
 // MatchesScreen adapters do exactly this — `m.my_side_player_names?.[i] || id`)

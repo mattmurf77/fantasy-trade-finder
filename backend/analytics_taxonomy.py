@@ -1190,9 +1190,10 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "league_team_opened":      frozenset({"via", "rank", "basis", "subset",
                                           "filter_count"}),
     "league_home_action_tapped": frozenset({"action"}),
-    # `surface` ∈ deck | match | awaiting | calculator — the four
+    # `surface` ∈ deck | match | awaiting | calculator | shop — the five
     # SendInSleeperButton mounts (P0-6 SEND_SURFACES; 'awaiting' is the
-    # Matches non-match send row, NOT 'suggested').
+    # Matches non-match send row, NOT 'suggested'; 'shop' is the ShopAsset
+    # window's tile, #531's follow-up, 2026-11-01).
     "sleeper_send_attempted":  frozenset({"surface", "give_n", "receive_n",
                                           "from_deck", "has_target"}),
     # `error_code` is a CLOSED enum: the 17 server codes of
