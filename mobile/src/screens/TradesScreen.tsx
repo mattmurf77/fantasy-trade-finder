@@ -1931,7 +1931,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // flag its actions require. Three-way conjunction: trade.shop_asset (the
   // feature's own kill switch), trade.asset_ideas (the window's data —
   // POST /api/trades/asset-ideas 404s without it), and calc.merged_layout
-  // (the window's ✓ posts POST /api/trades/queue, which 404s without it).
+  // (kept in the conjunction; until the 11-06 binary the window's ✓ posted
+  // POST /api/trades/queue, which 404s without it. The send router that
+  // replaced it (#531 follow-up) needs no calculator route).
   // A fourth prerequisite is structural rather than part of this
   // conjunction: trade.finder_targeting — the keep chips this entry rides
   // on render only under it (onKeepSide is threaded to TradeCard only when
@@ -1944,8 +1946,9 @@ export default function TradesScreen({ navigation, route }: any) {
   const shopAssetOn = useFlag('trade.shop_asset');
   // #384 — the merged calculator flow. Two consumers on this screen: the
   // deck's exhausted state offers the two calculator-first exits (ruling
-  // 8), and — QA round 2 P-4 — the shop conjunction right below (the
-  // window's ✓ queues through this flag's route).
+  // 8), and — QA round 2 P-4 — the shop conjunction right below (kept as
+  // is; the window's ✓ queued through this flag's route until the 11-06
+  // binary, when it became the platform send).
   const calcMergedOn = useFlag('calc.merged_layout');
   const shopEnabled = shopAssetOn && assetIdeasOn && calcMergedOn;
   // Rev-3 (rev3-spec.md §1) — the shop is a pushed WINDOW now: no
