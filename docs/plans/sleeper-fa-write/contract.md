@@ -68,8 +68,14 @@ free_agents[i].move_line:  string                     // optional; the server's 
 
 **`DELETE /api/platform-write-consent?platform=sleeper`** → 200 `{ platform, valid: false, notice: string }`. `notice` is R15.2.6's withdrawal text, verbatim. Idempotent: a second DELETE returns the same body.
 
-- **Both routes need a session only, never a verified one.** Withdrawal must be as easy as giving it (R15.2.6), and withdrawing only removes a permission.
-- **Errors:** 401 with no session; 400 `bad_request` for an unknown platform. A 404 means an older server; the client treats it like `valid: false`. On any DELETE failure, the client keeps the row and shows a neutral "couldn't turn it off, try again" line. The grant stays in force until a DELETE succeeds.
+- **Both routes need a verified session** (head-eng's security check, 11-01). An unverified session can carry another user's id: a username-only sign-in yields the victim's user_id. Such a session could then forge a withdrawal into the append-only record, or read whether someone consented.
+  - This still keeps withdrawal as easy as consent (R15.2.6). A grant can only be created from a verified session (the move route's step 3), so anyone holding a grant can withdraw it the same way.
+  - GET answers 403 `verification_required` (`_verified_read_denial`); DELETE answers 403 `verification_required` (`_verified_write_denial`).
+- **Errors:** 401 with no session; 403 `verification_required`; 400 `bad_request` for an unknown platform. A 404 means an older server.
+- **Client handling:**
+  - Settings treats a GET 404 or 403 like `valid: false` (no row).
+  - On any DELETE failure, Settings keeps the row and shows a neutral "couldn't turn it off, try again" line. The grant stays in force until a DELETE succeeds.
+  - In the sheet, a consent GET 403 `verification_required` goes to state 4 (Verify), like the move route's 403.
 
 ## 3. POST /api/league/free-agents/move
 
