@@ -1,6 +1,6 @@
 ## 2026-11-01 — Shop proposes the trade on the league's platform (#531 follow-up; operator's design review)
 
-Gates: the scope block `docs/plans/shop-platform-send/scope.md`. Analytics: the send events' `surface` gains `shop` (taxonomy comment and `SendSurface` in the same commit; analytics-lead's grant requested by head-eng). No schema, flag or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture; evidence is the structural guard, the code-walk and the TestFlight checklist.
+Gates: the scope block `docs/plans/shop-platform-send/scope.md`. Analytics: the send events' `surface` gains `shop` (taxonomy comment and `SendSurface` in the same commit; granted by analytics-lead 11-01). No schema, flag or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture; evidence is the structural guard, the code-walk and the TestFlight checklist.
 
 - **The change:** the ShopAsset tile's "Show it to @name" (`queueCalcTrade` → `/api/trades/queue`) is replaced by `SendInSleeperButton`, the platform send router. It's mounted with the idea's league, partner, ids and names, and `surface="shop"`. Send-only (head-eng): no deck queue, no likes-you card, no Elo signal. The ✕ dismiss is unchanged.
 - **Guard:** `mobile/tests/check-shop-send.js`, 16 checks. It covers the router's props, never `queueCalcTrade` or `/api/trades/queue`, the old button gone, the dismiss intact, and `shop` in `SendSurface`. Against main's code it fails 15.
@@ -13,6 +13,17 @@ Gates: the scope block `docs/plans/shop-platform-send/scope.md`. Analytics: the 
   - Only the Sleeper send events carry `surface`.
 - **TestFlight checklist:** `docs/plans/shop-platform-send/testflight.md`, 7 steps, including ESPN with a pick (`espn_pick_unsupported`, its exact alert quoted).
 - **Runs:** `tsc --noEmit` is clean, all 136 `check-*.js` suites pass, testid-lint is green, and the analytics backend tests pass 138.
+- **P2-1, the idea's impression** (release-lead; head-eng 11-01): the Shop send passes `impressionId={signalV2On ? item.impression_id : undefined}`, the deck's rule, so a Shop send records the `propose` outcome. `check-shop-send.js` now has 31 checks; the 2 new ones fail on 1f278727. Merge hold: analytics-lead's OK on `from_deck: true` for Shop.
+- **release-lead's QA notes at b6b55cfe (GO-with-notes):**
+  - stale Shop-queue wording fixed in the taxonomy and queries comments, `features.json`'s comment, config-reference, `components/CLAUDE.md` and check-trade-text's title;
+  - the `calc_trade_queued` addendum line added;
+  - the invariants send line now says `sleeper_send_succeeded` carries no `surface`;
+  - `trade.send_in_sleeper`'s kill-switch row notes the Shop tile;
+  - the code-walk puts the link check in `proceed`;
+  - the TestFlight checklist adds the leaguemate and asset checks, the ESPN assigned-picks precondition and a not-linked step, and marks the can't-send step n/a while Fleaflicker is dark;
+  - `check-shop-send.js` (29) asserts the only `queueCalcTrade` import is `import type`.
+
+  Re-run: all 136 suites pass and testid-lint is green.
 - **Shop source tag** (head-eng's option A for the kept Elo half): each platform router's propose call sends `source: 'shop'` only for `surface === 'shop'`. `check-shop-send.js` now has 28 checks (12 new) and fails 11 on #574's previous head ab53a2ef. Re-run: `tsc --noEmit` is clean, all 136 suites pass and testid-lint is green.
 
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off

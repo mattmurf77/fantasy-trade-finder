@@ -18,7 +18,8 @@
 - [x] **(a) Changed events, specced against the taxonomy:**
   - The send events' `surface` dimension gains **`shop`**: `sleeper_send_attempted` and `sleeper_send_failed`, the only send events that carry it. The MFL and ESPN buttons take `SendSurface` but fire no events today, on any mount. It's registered in `analytics_taxonomy.py`'s comment and in `tradeText.ts`'s `SendSurface` / `SEND_SURFACES` in the same commit. No new event name and no new prop name.
   - **Shift:** Shop stops firing `calc_trade_queued` (screen `ShopAsset`) and, server-side, `trade_proposed` with source `calculator` from the queue emitter. Shop sends show up in the send funnel with `surface = 'shop'`. analytics-lead is told in the PR.
-  - **Grant:** analytics-lead's grant for the `shop` value is requested by head-eng through head-product. release-lead holds the merge until it's on record.
+  - **Grant:** analytics-lead granted the `shop` value on 11-01.
+  - **The idea's impression (release-lead P2-1, head-eng 11-01):** the Shop send passes `impressionId={signalV2On ? item.impression_id : undefined}`, as the deck passes its card's. With the F1 spine on, a Shop send therefore records the `propose` outcome on the idea's `deck_impressions` row, taste's strongest positive; without it, Shop would feed the taste model and negmem only negatives (the ✕). It also sets **`from_deck: true`** on Shop's `sleeper_send_*` events. analytics-lead's OK on that is asked through head-product, and release-lead holds the merge until it's on record.
 
 ## 2. Schema & flag scope
 - **New/changed tables, columns, flags, env vars or `model_config` keys:** none. The send router's existing flags gate each platform.

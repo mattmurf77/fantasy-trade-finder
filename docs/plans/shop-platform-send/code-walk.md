@@ -25,8 +25,10 @@ Traced at `ab9879bd` (branch `fix/trades-531-shop-platform-send`). File:line ref
 
 ## Sleeper
 
-1. **The tap** → `confirmSend` (`:382`): the link check, then the `/api/trades/validate` pre-flight (#180). Warnings show "This trade will likely fail" / "Heads up before sending" with Send anyway or Cancel. Then the "Send this trade?" alert (`:406`).
-   - `track('sleeper_send_attempted', {surface: 'shop', …})` fires at `:429`.
+1. **The tap** → `onPress` (`:480`): the paywall/verify `sendPreCheck` (`:71`, a no-op unless `monetize.paywall` is enforcing), then `proceed` (`:420`).
+   - `track('sleeper_send_attempted', {surface: 'shop', …})` fires first, at `:431`.
+   - **The link check** is in `proceed` (`getSleeperLinkStatus`, `:452`). Not linked → "Connect Sleeper first" → Connect → `goConnect` (`SleeperConnect`). Linked, or status unknown → `confirmSend` (`:384`).
+   - `confirmSend` runs the `/api/trades/validate` pre-flight (#180). Warnings show "This trade will likely fail" / "Heads up before sending" with Send anyway or Cancel. Then comes the "Send this trade?" alert (`:408`).
 2. **Send** → `doPropose` (`:254`) → `proposeTradeToSleeper` (`:257`, `api/sendInSleeper.ts:203`) → `POST /api/trades/propose` (`backend/server.py:24892`), the GraphQL propose. It encodes league picks server-side (D-176).
 3. **Success** → "Trade sent / Check your Sleeper app for the pending offer." (`:277`).
 4. **Failure** → `track('sleeper_send_failed', {surface: 'shop', error_code, …})` (`:289`), then the existing per-code alerts:
@@ -62,4 +64,5 @@ Traced at `ab9879bd` (branch `fix/trades-531-shop-platform-send`). File:line ref
 
 - **Before:** the Shop tile's button "Show it to @name" called `queueCalcTrade` → `POST /api/trades/queue`. That queued the trade into @name's Fleeced deck as a likes-you card, moved the Elo board (Ruling A), and fired `calc_trade_queued` (screen `ShopAsset`) and, server-side, `trade_proposed` (source `calculator`). Nothing reached the platform.
 - **After:** the platform paths above. Analytics: only the Sleeper send events carry a `surface`, now `shop` from this mount.
+- **The idea's impression** (release-lead P2-1). The mount passes `impressionId={signalV2On ? item.impression_id : undefined}` (`ShopOffersBody.tsx`, `signalV2On = useFlag('deck.signal_v2')`), the deck's own rule (`TradesScreen.tsx:10056`). A Shop tile is never edited, so the package sent is exactly the served idea's. Each router puts it on the propose request as `impression_id`. The routes validate it (`_owned_impression_id`) and append a `propose` outcome (`_save_deck_outcome_safe`, `server.py:25179`, `:38791`, `:39388`). Client-side, `from_deck: !!impressionId` makes Shop's `sleeper_send_*` events `from_deck: true` when the spine is on.
 - **The Shop tag** (head-eng's option A, for the kept Elo half). In each router's `doPropose`, the request gains `...(surface === 'shop' ? { source: 'shop' as const } : {})`: `SendInSleeperButton.tsx`, `SendInMflButton.tsx` and `SendInEspnButton.tsx`, each right after `impression_id`. The payload types `ProposeTradePayload`, `ProposeMflTradePayload` and `ProposeEspnTradePayload` carry `source?: 'shop'`. The deck, Matches, Awaiting and calculator mounts pass their own `surface`, so the spread is empty and their requests are byte-identical to today. The server reads `body.get("source")` against `("deck", "match", "calculator")` (`server.py:24955`, `:38529`, `:39136`). Until the server PR adds `shop`, the tag falls back to `deck`, the value every send gets today.

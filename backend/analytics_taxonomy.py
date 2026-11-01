@@ -665,9 +665,11 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # selection settling into a fetch (rev-3: the row filters all three
     # modes), and `shop_dismiss_undone` the Undo tap inside the held
     # window — its sibling `swipe_undone` is likewise not in the
-    # non-intent set. The window's like reuses `calc_trade_queued` (screen
-    # 'ShopAsset') and its dismiss lands as the server-fired `match_swiped`
-    # — neither needs registration here.
+    # non-intent set. The window's send (#531 follow-up, from the 11-06
+    # binary) is the platform send router, whose `sleeper_send_*` events
+    # carry surface 'shop'; before that binary its ✓ reused `calc_trade_queued`
+    # (screen 'ShopAsset'), which Shop no longer fires. Its dismiss lands as
+    # the server-fired `match_swiped`. None of these needs registration here.
     "shop_opened", "shop_mode_selected", "shop_positions_selected",
     "shop_dismiss_undone",
     # The #384-local pass overlay (plan.md W2 — this page only; the shipped
