@@ -64,6 +64,9 @@ Both 404 `feature_disabled` while every `*.send_add_drop` is off. `platform` ∈
 
 **`DELETE /api/platform-write-consent?platform=sleeper`** → 200 `{ platform, valid: false, notice: string }`. `notice` is R15.2.6's withdrawal text, verbatim. Idempotent: a second DELETE returns the same body.
 
+- **Both routes need a session only, never a verified one.** Withdrawal must be as easy as giving it (R15.2.6), and withdrawing only removes a permission.
+- **Errors:** 401 with no session; 404 `feature_disabled`; 400 `bad_request` for an unknown platform. On any DELETE failure, the client keeps the row and shows a neutral "couldn't turn it off, try again" line. The grant stays in force until a DELETE succeeds.
+
 ## 3. POST /api/league/free-agents/move
 
 **Request** (through the shared API client, never a bare `fetch`):
@@ -76,7 +79,8 @@ Both 404 `feature_disabled` while every `*.send_add_drop` is off. `platform` ∈
   move_kind:       "add" | "claim", // what the CTA named
   faab_bid?:       number,          // claims only
   consent?:        { copy_version: string, locale: string },  // only from the consent step
-  attempt_id:      string           // UUID, one per tap
+  attempt_id:      string,          // UUID, one per tap
+  surface?:        "free_agents" | "usage_trends"  // the sheet's host; the server records it on fa_move_consent_recorded and ignores any other value
 }
 ```
 
@@ -172,10 +176,13 @@ Every slot is optional. Missing → the client's neutral fallback (never consent
 | Key | Used in | Example (not final) |
 |---|---|---|
 | `header_add`, `header_claim` | sheet header by `move_kind` | `Add {name}` / `Claim {name}` |
-| `cta_add`, `cta_add_drop`, `cta_claim`, `cta_claim_drop` | state 6 CTA (D10(a)) | `Add {add}, drop {drop}` |
+| `cta_add`, `cta_add_drop`, `cta_claim`, `cta_claim_drop` | state 6 CTA (D10(a)); the claim forms carry `{bid}` | `Add {add}, drop {drop}` / `Claim {add} for {bid}, drop {drop}` |
+| `cta_claim_no_bid`, `cta_claim_drop_no_bid` | a claim with no bid (a priority-waiver league) | `Claim {add}` / `Claim {add}, drop {drop}` |
 | `league_line` | beside the CTA | `In {league}` |
 | `finality` | under the CTA, always | legal-final G7 |
-| `waiver_line` | claims, under the CTA | R15.1, with `{bid}` |
+| `waiver_line` | a claim **with** a drop, under the CTA | R15.1 (`:766`): "This places a waiver claim for {add} (dropping {drop} if it clears). Sleeper processes it on its waiver schedule." |
+| `waiver_line_no_drop` | a claim **without** a drop | the same sentence with no parenthetical |
+| `bid_line` | under the waiver line, **only when the claim has a bid** | R15.1: "Bid: {bid}" |
 | `window_line` | inside a consent window | `Adds authorized until {date}` |
 | `turn_off` | the window line's action | `Turn off` |
 | `do_in_platform` | every submit step | `Do it in Sleeper instead` |
