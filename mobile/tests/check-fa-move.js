@@ -40,6 +40,16 @@
 // Plus: dark-safety (no capability → #509's hand-off, its footer neutral),
 // the testIDs, Settings' Stop roster moves row, and K-F5's path agreement
 // with utils/devicePage.ts (check-device-first-page.js executes the rule).
+// Round 1 of platforms-eng's review (2026-11-01):
+//   L1  the consent step's legal links: the block's `links`, else the app's
+//       own Terms / Privacy from getBaseUrl(), through openPlatform with no
+//       catch                                                              [executed + AST]
+//   R1  the block's `reason` wins for fa_move_consent_shown                [executed + AST]
+//   P1  "Claim pending" on the Free Agents row after a state-9 result, in
+//       memory, keyed by league + player, written only from submit mode    [executed + AST]
+//   T7  contract §7's fill rules: {bid} as "$N" ($0 for an empty FAAB bid),
+//       {date} a short date with no time, a missing known placeholder falls
+//       back                                                                [executed]
 //
 // HONEST LABEL (G-035): the [AST] checks prove wirings are present, not
 // behavior; no React tree is rendered here. The [executed] checks run the
@@ -752,6 +762,98 @@ process.on('exit', () => {
     expect(/show\(\{ step: 'ready', ctaNotice: \{ text: said \?\? slot\('not_sent_line'\)/.test(caseClause(claim, 'not_sent')),
       "case 'not_sent' (a server 502 with a kind)");
   });
+
+  // ── Review round 1: L1, R1, P1, T7 ───────────────────────────────────────
+  {
+    const h = harness();
+    const M = h.faMove;
+    await check('L1 links: the block\'s own when it sends them; else the app\'s Terms and Privacy at the API base', () => {
+      const own = M.readConsentBlock({ ...BLOCK, links: [{ label: 'Terms', url: 'https://legal.example/terms' }] });
+      eq(M.consentLinks(own), [{ label: 'Terms', url: 'https://legal.example/terms' }], 'server links');
+      eq(M.consentLinks(M.readConsentBlock(BLOCK)), [
+        { label: 'Terms', url: `${h.client.getBaseUrl()}/terms` },
+        { label: 'Privacy', url: `${h.client.getBaseUrl()}/privacy` },
+      ], 'fallback links');
+      const junk = M.readConsentBlock({ ...BLOCK, links: [{ label: 'x', url: 'javascript:alert(1)' }, { label: 'y', url: 'http://a.b' },
+        { label: '', url: 'https://a.b' }, null, 'https://a.b'] });
+      expect(junk && !('links' in junk), `unsafe or empty links kept: ${JSON.stringify(junk && junk.links)}`);
+      eq(M.consentLinks(junk).map((l) => l.url), [`${h.client.getBaseUrl()}/terms`, `${h.client.getBaseUrl()}/privacy`],
+        'nothing usable → the app\'s own');
+      expect(/const base = getBaseUrl\(\);[\s\S]*`\$\{base\}\/terms`[\s\S]*`\$\{base\}\/privacy`/.test(declText(fa, 'consentLinks')),
+        'consentLinks builds from getBaseUrl(), as PaywallScreen\'s openLegal does');
+      eq(wording(fa).filter((t) => /^https?:\/\//.test(t)), [], 'a hard-coded base URL in faMove.ts');
+    });
+  }
+  await check('L1 the consent step renders the links row and opens each through openPlatform, no catch, no Linking', () => {
+    const consent = actionBranches(claim).consent.getText(claim);
+    expect(/consentLinks\(view\.block\)\.map\(/.test(consent) && /onPress=\{\(\) => openConsentLink\(l\.url\)\}/.test(consent)
+      && /accessibilityRole="link"/.test(consent), 'the links row');
+    const open = declText(claim, 'openConsentLink');
+    expect(/^\(url: string\) => \{\s*void openPlatform\(\{[^}]*httpsUrl: url[^}]*appMissing: 'https'[^}]*\}\);\s*\}$/.test(open),
+      `openConsentLink = ${open.slice(0, 120)}`);
+    expect(!/\.catch\(/.test(claimText), 'a .catch in ClaimSheet');
+    expect(identRefs(claim, 'Linking') === 0, 'Linking in ClaimSheet');
+  });
+  {
+    const h = harness();
+    const M = h.faMove;
+    await check('R1 the block\'s `reason` is fa_move_consent_shown\'s reason; absent, the client\'s reading; unknown values dropped', () => {
+      const first = { consentUntil: null, shownVersion: null, offeredVersion: 'v1', withdrawnHere: false };
+      eq(M.consentShownReason(M.readConsentBlock({ ...BLOCK, reason: 'withdrawn' }), first), 'withdrawn', 'server reason');
+      eq(M.consentShownReason(M.readConsentBlock(BLOCK), first), 'first', 'inferred');
+      eq(M.consentShownReason(M.readConsentBlock(BLOCK), { ...first, consentUntil: '2020-01-01T00:00:00Z' }), 'lapsed', 'inferred lapsed');
+      const bogus = M.readConsentBlock({ ...BLOCK, reason: 'because' });
+      expect(bogus && !('reason' in bogus), 'an unknown reason kept');
+      eq([...M.CONSENT_REASONS], ['first', 'lapsed', 'version', 'withdrawn'], 'the granted set');
+    });
+  }
+  await check('R1 showConsent reports consentShownReason(block, …) on fa_move_consent_shown', () => {
+    const t = declText(claim, 'showConsent');
+    expect(/const reason = consentShownReason\(block, \{/.test(t)
+      && /trackFaMove\(m, 'fa_move_consent_shown', \{ surface: analyticsSurface, reason \}\)/.test(t), 'showConsent');
+  });
+  await check('P1 the claims-pending store: empty at start, keyed by league + player, in memory only', () => {
+    const zustand = require(path.join(__dirname, '..', 'node_modules', 'zustand'));
+    const store = load('src/state/claimsPending.ts', only({ zustand }), {});
+    const keys = () => store.useClaimsPending.getState().keys;
+    eq(keys().size, 0, 'empty at start');
+    store.markClaimPending('L1', '4046');
+    eq([store.isClaimPending(keys(), 'L1', '4046'), store.isClaimPending(keys(), 'L2', '4046'),
+      store.isClaimPending(keys(), 'L1', '9999'), store.isClaimPending(keys(), undefined, '4046')],
+    [true, false, false, false], 'lookups');
+    expect(!/AsyncStorage|SecureStore|persist/.test(read('src/state/claimsPending.ts').replace(/^\s*\/\/.*$/gm, '')), 'persisted');
+  });
+  await check('P1 only a state-9 (pending) result marks it, and only the Free Agents row reads it', () => {
+    const everywhere = srcFiles().reduce((k, f) => {
+      const sf = ts.createSourceFile(f, fs.readFileSync(f, 'utf8'), ts.ScriptTarget.Latest, true,
+        f.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+      return k + calls(sf, 'markClaimPending').length;
+    }, 0);
+    eq(everywhere, 1, 'markClaimPending call sites');
+    const apply = declText(claim, 'applyOutcome');
+    const responseBranch = apply.slice(apply.indexOf("if ('response' in outcome)"), apply.indexOf('const f = outcome.failure;'));
+    expect(/const pending = res\.status === 'pending';[\s\S]*if \(pending\) markClaimPending\(leagueId, row\.player_id\);/.test(responseBranch),
+      'marked only when pending');
+    const faSrc = read(FREE_AGENTS);
+    expect(/claimPending=\{isClaimPending\(pendingClaims, leagueId, item\.player_id\)\}/.test(faSrc), 'the row is told');
+    expect(/statsSlot=\{\s*claimPending \? \(\s*<Text style=\{styles\.dropLine\} numberOfLines=\{1\}>\s*\{FA_MOVE_FALLBACK_COPY\.claim_pending\}\s*<\/Text>\s*\) : drop \? \(/.test(faSrc),
+      'the row shows "Claim pending" only when pending, else the drop line as before');
+    eq(read(FA_MOVE).match(/claim_pending: '([^']+)'/)[1], 'Claim pending', 'the neutral string');
+  });
+  {
+    const h = harness();
+    const M = h.faMove;
+    await check('T7 contract §7: {bid} is "$N" (an empty FAAB bid is $0); {date} short, no time; a missing known placeholder falls back', () => {
+      eq([M.bidText(7), M.bidText(0)], ['$7', '$0'], 'bidText');
+      expect(/const claimBid = kind === 'claim' && faab \? \(bidNum \?\? 0\) : null;/.test(claimText), 'an empty FAAB bid is 0');
+      const d = M.windowDateText('2026-11-08T15:00:00Z');
+      expect(/^[A-Z][a-z]{2} \d{1,2}$/.test(d), `{date} = ${d}`);
+      eq(M.moveCopy({ waiver_line: 'Bid {bid}' }, 'waiver_line', { bid: '$7' }, 'sleeper'), 'Bid $7', 'server template, filled');
+      eq(M.moveCopy({ cta_add: 'Add {add}, drop {drop}' }, 'cta_add', { add: 'A' }, 'sleeper'), 'Add A', 'missing {drop} → the fallback');
+      eq(M.moveCopy({ league_line: 'In {league}' }, 'league_line', {}, 'sleeper'), null, 'no value anywhere → not shown');
+      eq(M.moveCopy({ turn_off: 'Off {later}' }, 'turn_off', {}, 'sleeper'), 'Off {later}', 'unknown placeholder kept');
+    });
+  }
 
   // ── Dark-safety, testIDs, Settings ────────────────────────────────────────
   await check('dark: no capability → the hand-off render (#509): its CTA and the neutral footer; never the false Sleeper claim', () => {
