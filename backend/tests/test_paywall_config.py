@@ -284,7 +284,7 @@ def test_tips_served_on_ios_when_knob_is_1(client, monkeypatch, mem_engine, quer
 ])
 def test_tips_need_a_verified_non_demo_session(client, monkeypatch, mem_engine,
                                                session, served):
-    """Defence in depth behind the app's verified-only Settings row: knob 1
+    """Defence in depth behind #495's verified-only Settings row: knob 1
     + ios still serves [] to an unverified or demo session (the same
     predicate as _session_verification)."""
     _flags(monkeypatch, "monetize.paywall")
