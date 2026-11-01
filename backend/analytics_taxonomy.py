@@ -775,13 +775,20 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # session, so no DAU seam is expected.
     "rankings_import_applied",
     # Trades
+    # trade_proposed `props.decision` is a closed set: 'like' | 'send'.
+    # 'send' (#531, D-210, 2026-11-01) is a Shop send's Elo half, fired by the
+    # propose routes once per `trade_decisions` row with decision 'send'.
+    # match_swiped stays 'pass'. WAT, first opinion and the opinions count
+    # read the event type, so a Shop send counts in each.
     # trade_proposed / match_swiped props gained `source` (2026-08-29,
     # propose-label spine — docs/plans/three-model-bakeoff/
     # scope-propose-label.md): which surface produced the disposition.
     # Closed enum 'deck' | 'browse' | 'today' | 'shop' (client-declared via
     # the swipe body's `surface` field, server-validated against
-    # server._SWIPE_SURFACES) | 'calculator' (server-stamped on the
-    # /api/trades/queue emitter) | null (pre-surface client / unknown —
+    # server._SWIPE_SURFACES; 'shop' is also server-stamped on a Shop send's
+    # Elo-half trade_proposed by the propose routes, #531) | 'calculator'
+    # (server-stamped on the /api/trades/queue emitter) | null (pre-surface
+    # client / unknown —
     # never a raw passthrough; the NULL-`platform` lesson says null must
     # mean "old client", not "we trusted a string").
     "trade_proposed", "match_swiped", "match_viewed", "match_dismissed",

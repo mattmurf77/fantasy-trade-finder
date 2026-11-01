@@ -1514,8 +1514,10 @@ def _product_op(conn, key, val):
             "HAVING COUNT(DISTINCT league_id) >= :n"), {"n": n}).scalars().all()
         return set(rows)
     if key == "traded":
+        # like/pass only: a #531 Shop `send` row is not a trade opinion.
         rows = conn.execute(text(
-            "SELECT DISTINCT user_id FROM trade_decisions")).scalars().all()
+            "SELECT DISTINCT user_id FROM trade_decisions "
+            "WHERE decision IN ('like', 'pass')")).scalars().all()
         return set(rows)
     if key == "liked_trades_min":
         try:

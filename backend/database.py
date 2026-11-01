@@ -631,7 +631,7 @@ trade_decisions_table = Table("trade_decisions", metadata,
     Column("trade_id",           String),
     Column("give_player_ids",    Text,    nullable=False),    # JSON array
     Column("receive_player_ids", Text,    nullable=False),    # JSON array
-    Column("decision",           String,  nullable=False),    # 'like' | 'pass'
+    Column("decision",           String,  nullable=False),    # 'like' | 'pass' | 'send' (#531 Shop send: Elo anchor, never a like)
     Column("created_at",         String),
     # #318 — awaiting-dismiss. ISO UTC when the user retracted this like from
     # the "Awaiting them" list; NULL = live. A retracted like is invisible to
@@ -6752,7 +6752,10 @@ class TradeInterestHistory:
                 continue
             row["_order"] = (stamp, row["id"]) if stamp is not None else None
             self.rows.append(row)
-            barrier = (self.passes if row["decision"] == "pass" or stamp is None else
+            # An unknown stamp is a barrier only on a like/pass row; a #531
+            # `send` row is never a pass.
+            barrier = (self.passes if row["decision"] == "pass" or (
+                           stamp is None and row["decision"] in ("like", "pass")) else
                        self.withdrawn if row.get("retracted_at") else None)
             if barrier is not None:
                 order = row["_order"]
@@ -6776,7 +6779,10 @@ class TradeInterestHistory:
         now = now or datetime.now(timezone.utc)
         mixed, passes = set(), set()
         for row in self.rows:
-            if row["user_id"] != user_id or row["decision"] not in ("like", "pass"):
+            # A #531 Shop `send` is decided like a like (7-day window, never a
+            # pass), as the pre-#574 Shop queue's like row was: the deck
+            # doesn't re-serve a package the user just sent on the platform.
+            if row["user_id"] != user_id or row["decision"] not in ("like", "pass", "send"):
                 continue
             is_pass = row["decision"] == "pass"
             stamp = row["_order"][0] if row["_order"] is not None else None
@@ -6937,6 +6943,38 @@ def find_live_trade_like(user_id: str, league_id: str, trade_id: str,
     if row is None:
         return None
     return {"id": row["id"], "created_at": row["created_at"]}
+
+
+def find_prior_trade_signal(user_id: str, league_id: str, trade_id: str,
+                            give_player_ids: list, receive_player_ids: list,
+                            target_user_id: str | None = None) -> bool:
+    """#531 Shop send — has this user already put an Elo signal on this exact
+    package? Read-only.
+
+    True when either holds:
+      * a `decision = "send"` row with this deterministic `trade_id` (a repeat
+        Shop send; once per package, unbounded in time), or
+      * a still-live like of the same give set and receive set, whatever its
+        `trade_id`: a calculator or pre-#574 Shop queue (`calcq_`, the same id)
+        or a deck like (an 8-hex id). "Live" is `find_live_trade_like`'s rule:
+        not retracted, and not renewed by a later pass.
+    """
+    if not (user_id and league_id and trade_id):
+        return False
+    give, recv = frozenset(give_player_ids), frozenset(receive_player_ids)
+    history = load_trade_interest_history(
+        [league_id], user_ids=[user_id, target_user_id] if target_user_id else [user_id])
+    for row in history.rows:
+        if row["user_id"] != user_id:
+            continue
+        if row["decision"] == "send" and row["trade_id"] == trade_id:
+            return True
+        if (row["decision"] == "like" and not row.get("retracted_at")
+                and frozenset(row["give_player_ids"]) == give
+                and frozenset(row["receive_player_ids"]) == recv
+                and not history.renewable(row, target_user_id)):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
