@@ -55,6 +55,18 @@ const TEST_APPLE_SUB = testLaunchArg('FTFTestAppleSub');
  *  auto-opened (#130 `espnLink` / its `mflLink` twin). */
 export type EntryPlatformIntent = 'espn' | 'mfl';
 
+/** The landing's platform tiles (operator 11-01: "three tiles. Sleeper espn
+ *  mfl"; design-lead's spec). Name, the dim line under it, and the radio's
+ *  spoken label. The lines are placeholders until marketing's words land
+ *  (head-eng → head-bizops). */
+const PLATFORM_TILE: Record<'sleeper' | EntryPlatformIntent, {
+  name: string; line: string; a11y: string;
+}> = {
+  sleeper: { name: 'Sleeper', line: 'Username', a11y: 'Sleeper, sign in with your username' },
+  espn: { name: 'ESPN', line: 'Sign in', a11y: 'ESPN, sign in with your ESPN account' },
+  mfl: { name: 'MFL', line: 'Sign in', a11y: 'MFL, sign in with your MyFantasyLeague account' },
+};
+
 interface Props {
   onSignedIn: (platformIntent?: EntryPlatformIntent) => void;
   /** Called when the user opts into the seeded demo session. Bundle 8 sends
@@ -652,35 +664,33 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 {inviteHeadline}
               </Text>
             ) : null}
-            {/* Landing platform options — Sleeper · ESPN · MFL entry chips.
+            {/* Landing platform tiles — Sleeper · ESPN · MFL, equal width,
+                one per live platform (platformChips; never a dead tile).
                 Sleeper (default) leaves the form below untouched; ESPN/MFL
-                swap it for the explainer + Apple panel further down. */}
+                swap it for the explainer + link panel further down. */}
             {platformPickerShown ? (
-              <View style={styles.platformRow}>
+              <View style={styles.platformRow} accessibilityRole="radiogroup">
                 {platformChips.map((p) => {
                   const on = entryPlatform === p;
+                  const tile = PLATFORM_TILE[p];
                   return (
                     <Pressable
                       key={p}
                       testID={`signin.platform-${p}`}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Use ${
-                        p === 'sleeper' ? 'Sleeper' : p === 'espn' ? 'ESPN' : 'MyFantasyLeague'
-                      }`}
+                      accessibilityRole="radio"
+                      accessibilityLabel={tile.a11y}
                       accessibilityState={{ selected: on }}
                       onPress={() => selectEntryPlatform(p)}
                       disabled={busy || demoBusy || appleBusy}
                       style={({ pressed }) => [
-                        styles.platformChip,
-                        on && styles.platformChipOn,
-                        pressed && !on && styles.platformChipPressed,
+                        styles.platformTile,
+                        on && styles.platformTileOn,
+                        pressed && !on && styles.platformTilePressed,
                       ]}
                     >
-                      <ChalkText
-                        style={[styles.platformChipText, on && styles.platformChipTextOn]}
-                      >
-                        {p === 'sleeper' ? 'Sleeper' : p === 'espn' ? 'ESPN' : 'MFL'}
-                      </ChalkText>
+                      {on ? <View style={styles.platformTileTick} /> : null}
+                      <ChalkText style={styles.platformTileName}>{tile.name}</ChalkText>
+                      <ChalkText style={styles.platformTileLine}>{tile.line}</ChalkText>
                     </Pressable>
                   );
                 })}
@@ -1061,33 +1071,38 @@ const styles = StyleSheet.create({
     marginTop: -space.xs,
     marginBottom: space.sm,
   },
-  // ── Landing platform options (Sleeper · ESPN · MFL entry chips) ────────
-  // Outline chips matching hintRow's border treatment; selected = ice, the
-  // one action accent Chalkline allows.
+  // ── Landing platform tiles (Sleeper · ESPN · MFL; design-lead's spec) ──
+  // Equal ink-1 tiles on the a11y line. Selected = the ice border plus a 3×14
+  // ice tick (the PlayerCard selected construction); the name stays chalk.
   platformRow: {
     flexDirection: 'row',
     gap: space.sm,
     marginBottom: space.md,
   },
-  platformChip: {
+  platformTile: {
     flex: 1,
-    minHeight: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: ink.lineStrong,
-    borderRadius: radii.sm,
+    minHeight: 64,
+    paddingVertical: 10,
     paddingHorizontal: space.md,
+    justifyContent: 'center',
+    gap: 2,
+    backgroundColor: ink.ink1,
+    borderWidth: 1,
+    borderColor: ink.lineStrongA11y,
+    borderRadius: radii.md,
   },
-  platformChipOn: { borderColor: ice.base },
-  platformChipPressed: { backgroundColor: ink.ink3 },
-  platformChipText: {
-    ...type.bodySm,
-    fontFamily: fonts.uiSemi,
-    color: chalk.dim,
+  platformTileOn: { borderColor: ice.base },
+  platformTilePressed: { backgroundColor: ink.ink3 },
+  platformTileTick: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 3,
+    height: 14,
+    backgroundColor: ice.base,
   },
-  platformChipTextOn: { color: chalk.base },
+  platformTileName: { ...type.title, color: chalk.base },
+  platformTileLine: { ...type.bodySm, color: chalk.dim },
   platformExplainer: {
     ...type.bodySm,
     color: chalk.dim,

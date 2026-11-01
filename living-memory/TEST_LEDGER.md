@@ -316,6 +316,15 @@ Gates: engagement-eng's report (release-lead's #488 QA found it). Test harness o
   - The cause: `apiRequest`'s catch now `return`s the async `_afterGateFailure(...)` instead of `throw err`. With the gate off, that adds microtask hops before the 409 retry schedules its backoff timer. The harness's `flush()` drains 80 ticks, so the timer is scheduled after `advance()` has moved the clock past it, and it never fires.
   - Deepening `flush` to 400 completes T3. Throwing synchronously when the gate is off (`if (opts.background || !_gateIsOn()) throw err;`) runs #488's own test file 39/39.
 - **Not touched (other teams' async suites, no guard; routed to head-eng):** `check-apple-revoke-on-delete`, `check-espn-cookies`, `check-league-picker-recovery`, `check-send-timeout`, `check-sleeper-ownership`, `check-vault-subsumes-legacy`.
+## 2026-11-01 — Sign-in landing: three platform tiles (operator 11-01; design-lead's spec)
+
+Gates: full (`docs/plans/prelaunch-onboarding/scope-signin-three-tiles.md`). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the structural guard, sabotage, a code-walk and a TestFlight checklist.
+
+- **What:** the landing's Sleeper / ESPN / MFL chips are now equal tiles: ink-1, the a11y border, the name with a dim line under it, the ice border plus a 3×14 tick when selected. They form a radiogroup of radios. The flags, the selection and the entry flow are unchanged. A tile shows only for a live platform (never a dead one).
+- **Guard:** `check-signin-tiles.js`, 6 AST pins: the row and its gate; each tile's role, state, label, busy guard and single handler; `PLATFORM_TILE`; the spec's styles, with ice only on the selected border and the tick; the tick only on the selected tile; the door minting only through `POST /api/entry/platform`. **Sabotage 15/15 red.**
+- **Kept green:** `check-landing-platform-options`, `check-espn-signin-flag`, `check-signin-apple-parity` (9), `check-guide-script`, `check-signin-identity-labels`, `tsc --noEmit`, `testid-lint`.
+- **Code-walk:** in the scope §3 (tile → `selectEntryPlatform` → panel → entry sheet → `entryPlatformMint` → `/api/entry/platform`; no tile under `landing.platform_options` OFF).
+- **TestFlight:** the 7-step SE checklist in the scope §3, for the 11-07 window, before ask 16.
 
 ## 2026-10-29 — G3-e: `deck_outcomes.user_id`; account deletion and export also match an outcome by its owner
 
