@@ -1768,7 +1768,8 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # web/pro.html ships.
     #
     # `product_id` is the store SKU (ftf_pro_monthly | ftf_pro_annual |
-    # ftf_founder | ftf_season_pass_2026 — docs/cross-client-invariants.md),
+    # ftf_founder | ftf_season_pass_2026 | ftf_tip_199 | ftf_tip_499 |
+    # ftf_tip_999 — docs/cross-client-invariants.md),
     # a closed vocabulary. NO price, NO currency, NO transaction or receipt
     # identifier ever rides in props: the money is the ledger's
     # (subscription_events) and the receipt is Apple's.
@@ -1782,10 +1783,11 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #
     # paywall_viewed, #393 (analytics-lead's grant; registered with the M1
     # emitter, PaywallScreen.tsx): `source` is the CLOSED set
-    #   first_opinion | left_deck | gate | settings | preview_end | unknown
+    #   first_opinion | left_deck | gate | settings | preview_end | unknown | tip_jar
     # (first_opinion / left_deck = the offer trigger after the first opinion
     # or on leaving the deck; gate = a locked action's 402 or a pre-check;
-    # preview_end = the free page's end card; settings = Settings › See plans).
+    # preview_end = the free page's end card; settings = Settings › See plans;
+    # tip_jar = TipJarScreen, Settings › Subscription › Support Fleeced).
     # `gate` is the 402's reason, verbatim from the server's closed enum
     #   preview_used | trial_expired | lapsed | never_trialed
     # (verify_required never reaches the paywall: it opens the VerifySheet).

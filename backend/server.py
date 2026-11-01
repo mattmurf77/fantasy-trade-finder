@@ -36927,14 +36927,30 @@ def _paywall_products(now: datetime) -> list:
 # Tip jar (operator request 2026-08-28): consumable "support the platform"
 # SKUs. Money with NO entitlement — entitlements.is_tip_product() short-
 # circuits the projector, so a tip can never grant `pro`. Guideline 3.1.1:
-# in-app tips to the developer must be IAP. NOT SERVED at launch (#393, as
-# #465 does): the tip SKUs are not being submitted to App Store Connect, so
-# the route sends `tips: []`. This list is what to restore if they are.
+# in-app tips to the developer must be IAP. SERVED BEHIND A KNOB (tip-jar
+# plan §3 S1, docs/plans/tip-jar/plan.md): the route sends this list only
+# while model_config `paywall_tips_enabled` is exactly 1 and the resolved
+# platform is `ios`; otherwise `tips: []`. The knob defaults to 0 and
+# release-lead sets it to 1 once the three products exist in App Store
+# Connect; setting it back to 0 is the deploy-free kill switch.
 _PAYWALL_TIPS = [
     {"product_id": "ftf_tip_199", "display_price": "$1.99"},
     {"product_id": "ftf_tip_499", "display_price": "$4.99"},
     {"product_id": "ftf_tip_999", "display_price": "$9.99"},
 ]
+
+
+def _paywall_tips_enabled() -> bool:
+    """model_config `paywall_tips_enabled` == 1, read live on every request
+    through get_config() (no cache), so setting it to 0 hides the tips with
+    no deploy. Anything but exactly 1 is off: 0, 2, NaN, a non-number, a
+    missing row or a failed read (the inline fallback matches the 0 seed,
+    G-064)."""
+    try:
+        return float(get_config().get("paywall_tips_enabled", 0.0)) == 1.0
+    except Exception:
+        return False
+
 
 _PAYWALL_PLATFORMS = ("ios", "web", "extension")
 
@@ -36976,12 +36992,14 @@ def paywall_config():
         # "we offer a trial on this SKU" claim, not a per-user promise.
         "trial_eligible": True,
         "dismissible": True,
-        # Tip-jar consumables: none at launch (the SKUs are not submitted to
-        # App Store Connect; see _PAYWALL_TIPS). A tip would still grant
-        # nothing (entitlements.is_tip_product). Rides monetize.paywall: tips
-        # are purchase UI, and the flag's contract is "no purchase UI anywhere"
-        # when off.
-        "tips": [],
+        # Tip-jar consumables: served behind the `paywall_tips_enabled` knob
+        # (exactly 1) and on `ios` only, the one platform with in-app
+        # purchase; otherwise []. See _PAYWALL_TIPS. A tip grants nothing
+        # (entitlements.is_tip_product). Rides monetize.paywall too: tips
+        # are purchase UI, and the flag's contract is "no purchase UI
+        # anywhere" when off.
+        "tips": (_PAYWALL_TIPS
+                 if platform == "ios" and _paywall_tips_enabled() else []),
     })
 
 
