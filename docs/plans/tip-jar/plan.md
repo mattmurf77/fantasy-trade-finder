@@ -82,8 +82,11 @@
 - **Review notes, one per tip:**
 
   > Optional tip to support the developer. Consumable. It unlocks no content, features or
-  > benefits, and the app grants nothing on purchase. To find it: Settings › Subscription ›
-  > Support Fleeced (use either demo account).
+  > benefits, and the app grants nothing on purchase. To find it: sign in first (Sign in with
+  > Apple works), then Settings › Subscription › Support Fleeced. Demo mode shows no purchase flow.
+
+  The sign-in line matches the purchases note in `docs/business/ops/2026-11-18-launch.md`. Demo mode gets no
+  RevenueCat at all, and #576 serves it no tips.
 
 ## 2. Copy (marketing) and legal checks: routed through head-product
 
@@ -127,7 +130,10 @@
   - **The ask:** keep that query warm from an always-mounted place while `monetize.paywall` is on (for example, a `useQuery` with `enabled: paywallOn` under `Main`). That keeps the Settings hub's zero-network rule intact (`SettingsHubScreen.tsx:100-101`). Eng chooses the place.
   - `check-tipjar.js` §8c pins `enabled: false` and needs to pin the new shape.
 - **C2:** the copy from §2.
-- **C3:** the tip row hides on unverified sessions along with the rest of the Subscription section (T13). On main the section has no verify condition (`SettingsHubScreen.tsx:302-328`). Whichever PR builds T13's single "Verify this session first" row must hide the tip row too. That's one condition, not new work.
+- **C3:** the tip row hides on unverified sessions along with the rest of the Subscription section (T13). On main the section has no verify condition (`SettingsHubScreen.tsx:302-328`).
+  - **#495 (Paywall M3) carries it:** the verified-only Settings tip row, plus TipJar's `customerInfoApplies` purchase guard.
+  - **Builds:** S1 is #576. It also serves no tips to unverified or demo sessions, as defence in depth. C1 is #575, which also clears the cached config whenever a session stops being verified.
+  - **Merge order:** #569 (this plan) merges first or alongside #576, which links to it.
 - **No change to the purchase path.** `getTipProducts` → `P.getProducts(ids, NON_SUBSCRIPTION)` and `purchaseTip` → `purchaseStoreProduct` (`purchases.ts`) work with real products by id, with **no offering needed**. That matches RevenueCat's guidance for consumables: an entitlement is optional, and fetching products directly is supported.
 
 **Analytics (analytics-lead; server-side reads, no binary):**
@@ -157,7 +163,7 @@ Written for the setup doc's format (📱 phone / 💻 computer, `[verify on scre
 | TJ6 | **Tax category** **[verify on screen]** | Leave Apple's default | |
 | TJ7 | Repeat TJ1–TJ6 | **`Tip 4.99`** / **`ftf_tip_499`** / **$4.99** / **Medium Tip**, then **`Tip 9.99`** / **`ftf_tip_999`** / **$9.99** / **Large Tip** | |
 | TJ8 | RevenueCat → **Products** | Add, or import, `ftf_tip_199`, `ftf_tip_499` and `ftf_tip_999`. **Don't attach them to the `pro` entitlement (6e) and don't put them in the offering (6f).** The app fetches tips by id, and a tip attached to `pro` would grant Pro | |
-| TJ9 | `release-lead`'s session, **once eng says S1 is deployed** | Say: `The three tip products exist. Set paywall_tips_enabled to 1.` | |
+| TJ9 | `release-lead`'s session. **Only when both are true:** (1) eng says S1 (#576) is deployed; (2) **#495's tip guard** (the verified-only tip row, plus TipJar's purchase guard) is merged **and in the build under test or review**. Without #495, demo and unverified sessions would see a purchase flow, against the App Review note | Say: `The three tip products exist. Set paywall_tips_enabled to 1.` release-lead checks (2) before setting it | |
 | TJ10 | 📱 **11-07**, on the gated TestFlight build | Settings › Subscription › **Support Fleeced** → screenshot the tip jar → upload it as **each** tip's Review Screenshot. Each tip shows **Ready to Submit** **[verify on screen]** | |
 | TJ11 | **11-10**, with step 5 | On each tip: **Add for Review** → iOS → the **11-10 version**. Step 5b's list becomes: the version, the group, `ftf_pro_monthly`, `ftf_pro_annual`, `ftf_tip_199`, `ftf_tip_499`, `ftf_tip_999` | |
 
@@ -170,6 +176,11 @@ Apple takes an app's first consumable only with a new app version, so tips then 
 
 **If App Review objects only to the tips:** remove them from the submission, resubmit, and set the knob to 0. The subscriptions and the launch go ahead.
 
+**What the knob does and doesn't do:**
+- **At 1, it's live whenever the paywall is.** Once `monetize.paywall` is on, tips are served at once. So set the knob only under TJ9's two conditions.
+- **At 0, it hides the row on the next config read.** It doesn't close a TipJar screen that's already open.
+- **The hard stop** is taking the three products off sale in App Store Connect (each tip's **Availability** → remove from sale **[verify on screen]**). Use it only if a tip must stop selling immediately, because putting them back needs Apple again.
+
 ### Checks (add to step 8, 11-07 to 11-09, on the gated build, after TJ9)
 
 | # | Device | Account | Do | You should see | ✅ / ❌ |
@@ -179,7 +190,7 @@ Apple takes an app's first consumable only with a new app version, so tips then 
 | **T23** | 📱 | Same | Tap a tip, then **Cancel** on Apple's sheet | Back on the jar, with no error | |
 | **T24** | 📱 + `release-lead` | Same | Say `Set paywall_tips_enabled to 0.` → relaunch → Settings. Then `Set it back to 1.` → relaunch | At **0**: no tip row. At **1**: the row is back | |
 | **T25** | 📱 | Same | Read the jar and Apple's purchase sheet | No "unlock", "get", "perk", "donate" or "donation"; the sheet's name matches TJ4 | |
-| **T26** | 📱 | An **unverified** session (T13's) | Settings | **No** tip row, same as T13 | |
+| **T26** | 📱 | An **unverified** session (T13's), then **demo mode** | Settings | **No** tip row in either, same as T13 | |
 
 ## 5. Timeline
 
@@ -195,6 +206,7 @@ Apple takes an app's first consumable only with a new app version, so tips then 
 ## 6. Risks
 
 - **First-review surface.** Three more in-app purchases. Mitigated by the remove-and-resubmit path and the knob, so tips can't hold the launch.
+- **#495's tip guard misses the binary.** Then TJ9's condition (2) fails: keep the knob at 0, and don't submit tips at 11-10.
 - **C1 misses the 11-06 binary.** Then the row appears only after opening the paywall, so a reviewer may not find the tips. **In that case don't submit tips at 11-10.** Keep the knob at 0 and ship them with the next version.
 - **Paywall metrics polluted by tips** if analytics-lead's read filters aren't in place by the first K read.
 - **Copy claims** ("built by one person", "every one goes straight into…"): legal checks them before 11-03.
