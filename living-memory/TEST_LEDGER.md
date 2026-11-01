@@ -1,3 +1,32 @@
+## 2026-11-01 — D1 free-agent moves: the dark client for the 11-06 binary (`feat/fa-moves-client`, on #509 @ `d14b7308`)
+
+Gates: full (schema/API/flag/analytics surfaces; no express). Mobile client only, plus the four client events' registration; the server (route, consent routes, tables, capability, `sleeper.send_add_drop`) is a separate PR. Ships dark: it renders only from the server's `move` capability, so on today's server the sheet and both hosts route as on `d14b7308` (code-walk §Dark-safety names the one timing difference: Usage Trends reads the FA list before routing, capped at 3 s). D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is below, the code-walk (`docs/plans/sleeper-fa-write/code-walk.md`) and the scope's TestFlight rows T1–T15 / FA1–FA6 / AX1 after the flip.
+
+- **New suite `mobile/tests/check-fa-move.js`** (`npm run test:fa-move`): 45 passed, 0 failed. Pins F1–F17 of the scope's §3; executed where the scope says executed (the gate's truth table, outcome-unknown recognition, F15's per-trigger `(error_code, status)` table through the real `api/client.ts` under a fake clock, F17 with a stubbed NetInfo, F6's 91 s timeout, F9's one `attempt_id` per tap, F13's `_noteWrite`).
+- **Sabotage, each red then restored (18 in `check-fa-move`, run against a scratch copy of `mobile/src` via `FTF_MOBILE_TEST_ROOT`; the unsabotaged copy green):**
+  - F1 read `flags['sleeper.send_add_drop']` in ClaimSheet → F1 red;
+  - F2 return `submit` for unticked + lapsed → F2 red;
+  - F3 a Try again button on state 12 → F3 red;
+  - F4 hard-code `` `Add ${row.name}` `` as the CTA label → F4 red;
+  - F5 map only `sleeper_*` suffixes → F5 (and F14) red;
+  - F6 drop `timeoutMs` (the 15 s default) → both F6 checks red;
+  - F7 call `attemptMove` straight from the CTA's `onPress` → F7 red;
+  - F8 initialise the box `true` → F8 red;
+  - F9 mint the id once at module load (not per tap) → F9 red;
+  - F10 re-add a `fa-claim.steps` View → F10 (and the dark-safety check) red;
+  - F11 bake v1's checkbox sentence into `faMove.ts` → F11 red;
+  - F12 drop the `['free-agents', leagueId]` invalidation → F12 red;
+  - F13 send the move with a bare `fetch` → both F13 checks red (plus F6, F9, F11, F14, F15);
+  - F14 send the raw `sleeper_write_failed` as `error_code` → F14 (and F5, F15) red;
+  - F15 emit with `league_platform: null` outside `submit` → F15 red; map a timeout to `unknown` → F15's timeout row red;
+  - F16 `onRequestClose={onClose}` → F16 red;
+  - F17 skip the NetInfo read (send anyway) → F17 red.
+- **Other sabotages, red then restored (real files backed up and copied back):** `discardsDevicePages` without the move path → `check-device-first-page` 1k red; a `KeyboardAvoidingView` in ClaimSheet's hand-off render → `check-sleeper-handoff` S2 red; `fa_move_consent_shown` left out of `NON_INTENT_EVENTS` → `test_fa_move_class_split` red; `attempt_id` out of `_HEX_ID_PROPS` → the ingest test red (its uuid has a 16-digit run).
+- **Edited guards:** `check-device-first-page.js` 1k gains the move-path assertion (trades-eng reviews); `check-sleeper-handoff.js` S2's no-`KeyboardAvoidingView` half now covers the hand-off render (`if (!submitLayout)`) only, since D1's pinned action block is design-lead's spec for the in-app layout.
+- **All mobile suites:** every `tests/check-*.js`, 122 of 122 exit 0 (`check-device-first-page` 37 ✓, `check-sleeper-handoff` 69/0, `check-usage-trends` 76, `check-settings-ia` 27). `npx tsc --noEmit` 0 errors. `scripts/testid-lint.sh` OK.
+- **Backend:** new `backend/tests/test_analytics_taxonomy_fa_move.py`, 8 passed (names, exact props, `league_platform` and never `platform`, `kind` only on write_failed, two NON_INTENT and two INTENT and none WAT, C3's 21 values against the client's `FA_MOVE_ERROR_CODES`, ingest end to end). `pytest backend/tests/test_analytics_taxonomy_fa_move.py backend/tests -k "taxonomy or analytics"`: 177 passed. `-k "event or ingest or intent or scrub or pii"`: 206 passed.
+- **Not run:** the full backend suite (the server is untouched beyond the taxonomy, `NON_INTENT_EVENTS` and `_HEX_ID_PROPS`); any device or TestFlight row (dark until the flip).
+
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 
 Gates: QA follow-ups to #486 (stacked on it). No route, schema, event, flag or knob change. `DECK_PIPELINE_VERSION` 3 → 4:
