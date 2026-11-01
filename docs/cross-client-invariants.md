@@ -691,7 +691,7 @@ The invite URL is emitted by mobile (`mobile/src/utils/deepLinks.ts` `buildInvit
 | WR | blue | `#3b82f6` |
 | TE | purple | `#a855f7` |
 
-**Locations:** `mobile/src/theme/colors.ts` (`colors.position`), `mobile/src/components/PositionChip.tsx` (rgba tint bases), `web/profile.html` (`--qb`…`--te`), plus any progress-bar component. Tier colors must not reuse these hues (see Tier color tokens above).
+**Locations:** `mobile/src/theme/colors.ts` (`colors.position`), `mobile/src/components/PositionChip.tsx` (rgba tint bases), `web/profile.html` (`--qb`…`--te`), `backend/og_image.py` (`POS_COLORS`, the share/unfurl card chips, which use an ink-0 label for contrast; aligned 2026-10-31, #511), plus any progress-bar component. Tier colors must not reuse these hues (see Tier color tokens above).
 
 **Draft capital is NOT a position, and never takes a position hex (#14 FR1, reaffirmed #293/#294 2026-08-10).** Wherever a chart or bar decomposes a roster's value, the owned-pick group renders in a **neutral ink/chalk tone** — never orange/green/blue/purple — because a position hex would assert that picks are a fifth position. Mobile uses `chalk.faint` for the live segment and `ink.ink3` for its grayed-out (drill-in defocus) state (`mobile/src/screens/LeagueSummaryScreen.tsx`: `PICKS_COLOR`, `GRAY_SEGMENT.PICKS`); web's `league-rankings.html` picks segment follows the same rule. The group's label is **"Picks"** in legends and filter pills and **"Draft capital"** as a section header. Pick value is **subset- and filter-independent**: a client that offers starters/bench or position views must include the team's full `picks.value` in every one of them, so the two subsets deliberately do **not** partition the total.
 
