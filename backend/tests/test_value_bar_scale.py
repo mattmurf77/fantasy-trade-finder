@@ -32,3 +32,22 @@ def test_the_web_landing_miniature_puts_its_ticks_at_the_same_landmark():
                            (r"\.lp-market-scale span:nth-child\(4\)", 50 + second * 50)):
         got = float(re.search(selector + r" \{ left: ([0-9.]+)%; \}", css).group(1))
         assert abs(got - want) < 0.1, (selector, got, want)
+
+
+def test_the_league_example_gap_is_a_mid_2nd_at_todays_values():
+    """mobile/src/screens/LeagueScreen.tsx EXAMPLE_GAP, the "Works right now"
+    card every user with no matches sees, is the clients' only static gap. Its
+    pick, value and firsts must be what the server would send for a Mid 2nd
+    gap (_pick_gap_equivalent), or the fill and the copy disagree again (#567
+    QA P2-1: it said "a Mid 2nd (≈ 0.6 firsts)" and filled past the tick)."""
+    league = (BAR.parents[1] / "screens/LeagueScreen.tsx").read_text()
+    block = re.search(r"^const EXAMPLE_GAP = \{(.*?)^\};$", league, re.M | re.S)
+    assert block, "EXAMPLE_GAP moved: update this test"
+    nums = {k: float(v) for k, v in re.findall(r"^\s*(value|firsts): ([0-9.]+),$", block.group(1), re.M)}
+    pick_value = float(re.search(r"pick_equivalent: \{.*?value: ([0-9.]+),", block.group(1), re.S).group(1))
+    e2v = ts.elo_to_value
+    mid_2nd, mid_1st = e2v(GENERIC_PICK_SEEDS[(2, "Mid")]), e2v(GENERIC_PICK_SEEDS[(1, "Mid")])
+    assert "label: 'Mid 2nd Round Pick'" in block.group(1)
+    assert abs(pick_value - mid_2nd) < 0.5, (pick_value, round(mid_2nd, 1))
+    assert abs(nums["value"] - mid_2nd) < 1, (nums["value"], round(mid_2nd, 1))
+    assert abs(nums["firsts"] - round(nums["value"] / mid_1st, 2)) < 0.005, (nums["firsts"], nums["value"] / mid_1st)

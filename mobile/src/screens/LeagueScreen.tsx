@@ -1115,16 +1115,18 @@ function StatCard({ label, sub, value, icon, onPress, testID }: {
 // Static, honest demo content: the flare label (informational highlight,
 // ADR-005) says outright it is not from the user's league, and the value
 // readout is the REAL TradeValueBar component with fixed props (favors
-// receive, +380 ≈ 0.6 firsts → "a Mid 2nd") — same verdict language the
-// calculator and deck speak, no invented UI.
+// receive, +607 ≈ 0.29 firsts → "a Mid 2nd") — same verdict language the
+// calculator and deck speak, no invented UI. The numbers are today's: a Mid
+// 2nd is 606.5, 0.287 of a Mid 1st (GENERIC_PICK_SEEDS), so the fill ends on
+// the +2nd tick, as the server would draw this gap (#567 QA P2-1).
 const EXAMPLE_GAP = {
-  value: 380,
+  value: 607,
   add_to: 'give' as const,
-  firsts: 0.6,
+  firsts: 0.29,
   pick_equivalent: {
     pick_id: 'example_mid_2nd',
     label: 'Mid 2nd Round Pick',
-    value: 380,
+    value: 606.5,
   },
 };
 
