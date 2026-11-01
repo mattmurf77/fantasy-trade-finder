@@ -358,6 +358,7 @@ export default function ShopOffersBody({
   // prefsQuery, so this reads the warm cache and adds no request; the flag
   // is dark today (`trade.avoid_positions` false), making this latent.
   const avoidOn = useFlag('trade.avoid_positions');
+  const signalV2On = useFlag('deck.signal_v2');
   const prefsQuery = useQuery({
     queryKey: ['league-prefs', leagueId],
     queryFn: () => getLeaguePreferences(leagueId),
@@ -1052,6 +1053,11 @@ export default function ShopOffersBody({
                           receivePlayerNames={item.receive.map((p) => p.name)}
                           opponentUsername={item.counterparty_username}
                           surface="shop"
+                          // release-lead P2-1: the idea's own impression, as
+                          // the deck passes its card's, so a Shop send records
+                          // the `propose` outcome (the server checks ownership
+                          // and the package). F1 spine only.
+                          impressionId={signalV2On ? item.impression_id : undefined}
                           compact
                         />
                       </View>

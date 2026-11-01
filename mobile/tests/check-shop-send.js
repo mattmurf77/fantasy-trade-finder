@@ -50,11 +50,16 @@ const props = {
   receivePlayerNames: /\breceivePlayerNames=\{item\.receive\.map\(\(p\) => p\.name\)\}/,
   opponentUsername: /\bopponentUsername=\{item\.counterparty_username\}/,
   surface: /\bsurface="shop"/,
+  // release-lead P2-1 (head-eng 11-01): the idea's own impression, F1 spine
+  // only, exactly as the deck passes its card's, so a Shop send records the
+  // `propose` outcome.
+  impressionId: /\bimpressionId=\{signalV2On \? item\.impression_id : undefined\}/,
 };
 for (const [name, re] of Object.entries(props)) {
   check(`the router gets ${name} from the idea`, re.test(mount));
 }
 check('the router is imported', /import SendInSleeperButton from '\.\/SendInSleeperButton';/.test(shop));
+check("signalV2On reads the F1 spine flag", /const signalV2On = useFlag\('deck\.signal_v2'\);/.test(shop));
 
 // Never the deck queue.
 check('the Shop body never calls queueCalcTrade', !/\bqueueCalcTrade\s*\(/.test(shop));
