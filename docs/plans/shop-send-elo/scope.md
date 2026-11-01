@@ -104,5 +104,6 @@
 - **CI green:** `backend-tests`, `mobile-typecheck`, `testid-lint`.
 - **Evidence recorded:** TEST_LEDGER.
 - **Order:** after #574, which carries the client tag. There is no binary dependency: until this lands, the tag is ledgered as `deck`.
+- **Deploy before the 11-06 binary reaches users** (analytics-lead's condition). #574 also passes the Shop idea's impression, so without this PR's allow-list every Shop send lands in `trade_proposals` as `deck` and inflates the deck's confirmed sends. Shop sends would also emit no `trade_proposed`; if the binary reaches users first, that needs a SERIES_BREAKS row dated that day. analytics-lead's confirmed-send read is `trade_proposals WHERE source = 'shop'`, which needs `trade.valuation_telemetry` on (it is, via env, since 09-05).
 - **Merge hold:** none left. analytics-lead's `props.decision` answer is on record.
 - Express lane declared by the operator? No.
