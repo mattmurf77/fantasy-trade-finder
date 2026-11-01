@@ -116,28 +116,55 @@ export function clampOffset(offset: number, maxOffset: number | null): number {
 }
 
 /**
- * R2 — where onScrollToIndexFailed jumps before its retry. With a measured
- * average, the estimated offset (index × average − viewOffset, clamped).
- * On a fresh mount the average is 0, so step to the furthest measured row
- * instead and let the next batch render beyond it. null: nothing measured
- * yet, so no jump (the retry still runs).
+ * R2 — where onScrollToIndexFailed jumps before its retry: the row's
+ * estimated top (the list's top padding + index × average cell length,
+ * which already includes each separator) minus viewOffset, clamped. null
+ * when nothing is measured yet (average 0, a fresh mount): no jump, and the
+ * retry runs once the first cells have laid out. (VirtualizedList starts
+ * highestMeasuredFrameIndex at 0, not -1, so a "step to the furthest
+ * measured row" here was always scrollToIndex(0) — a no-op on a fresh
+ * mount — and is gone.)
  */
 export function scrollFailureJump(
-  info: { index: number; averageItemLength: number; highestMeasuredFrameIndex: number },
+  info: { index: number; averageItemLength: number },
+  padTop: number,
   viewOffset: number,
   maxOffset: number | null,
-): { offset: number } | { index: number } | null {
-  if (info.averageItemLength > 0) {
-    return { offset: clampOffset(info.averageItemLength * info.index - viewOffset, maxOffset) };
-  }
-  if (info.highestMeasuredFrameIndex >= 0) return { index: info.highestMeasuredFrameIndex };
-  return null;
+): number | null {
+  if (!(info.averageItemLength > 0)) return null;
+  return clampOffset(padTop + info.averageItemLength * info.index - viewOffset, maxOffset);
+}
+
+/**
+ * R2 — is the arrival row already in view with room for the mark's top
+ * stroke, so it needn't scroll (§7 step 4)? `fullyVisible` holds the keys of
+ * cells that are 100% on screen (a cell is the row plus the separator below
+ * it). Row 0's top sits at the list's top padding, so it clears when
+ * padTop − scrollY ≥ viewOffset. Any other row clears when the row above it
+ * is fully visible too, which puts at least that row and a separator above
+ * it. Otherwise it scrolls with viewOffset as usual.
+ */
+export function alreadyInView(
+  index: number,
+  rowKey: string,
+  prevKey: string | null,
+  fullyVisible: ReadonlySet<string>,
+  scrollY: number,
+  padTop: number,
+  viewOffset: number,
+): boolean {
+  if (!fullyVisible.has(rowKey)) return false;
+  if (index === 0) return padTop - scrollY >= viewOffset;
+  return prevKey != null && fullyVisible.has(prevKey);
 }
 
 /**
  * R2 — VirtualizedList never clamps scrollToIndex, so a tail row's
- * viewPosition-0 target can land past the content end and leave a blank
- * band under the last card. Given a settled scroll, the end offset to pull
+ * viewPosition-0 target can ask for an offset past the content end. On iOS,
+ * Fabric's scrollTo already clamps to the content bounds
+ * (RCTScrollViewComponentView.mm `scrollTo:y:animated:`), so this never
+ * fires there; it stays as a guard should the list ever allow overflow
+ * (scrollToOverflowEnabled). Given a settled scroll, the end offset to pull
  * back to, or null when it's within bounds (1pt tolerance).
  */
 export function endClamp(

@@ -70,6 +70,7 @@ import {
   notFoundToast,
   clampOffset,
   scrollFailureJump,
+  alreadyInView,
   endClamp,
 } from '../utils/matchesDerive';
 import { readErrorCopy } from '../utils/verification';
@@ -88,9 +89,9 @@ const UNDO_HOLD_MS = 5000;
 // R2 (ux-states §7 "The mark", design-lead's spec 2026-11-01) — the arrival
 // mark: a 2pt flare outline round the WHOLE Mutual row (league badge, header
 // and card), absolutely positioned so nothing moves. Flare because it is an
-// informational highlight (ADR-005), not an action (the card carries no ice:
-// Send in Sleeper is a secondary button); never a fill, tint, shadow or
-// glow. One constant, so a revision is one change.
+// informational highlight (ADR-005), not an action (the card has no ice
+// button: Send in Sleeper is a secondary button); never a fill, tint,
+// shadow or glow. One constant, so a revision is one change.
 export const ARRIVAL_MARK = {
   style: {
     position: 'absolute',
@@ -112,14 +113,19 @@ const ARRIVAL_SETTLE_FALLBACK_MS = 600;
 const ARRIVAL_RETRY_MS = 250;
 // The row lands this far below the list's top edge, so the scroll view
 // doesn't clip the mark's −6pt top stroke (release-lead QA P2-1).
-const ARRIVAL_VIEW_OFFSET = space.sm; // 8pt, as design-lead's v2 render
-// onScrollToIndexFailed retries at most this many times. On a fresh mount
-// averageItemLength is 0, so each try steps to the furthest measured row and
-// lets the next batches render past it: VirtualizedList adds up to
-// maxToRenderPerBatch (10) rows per 50 ms batch, so one ARRIVAL_RETRY_MS wait
-// covers ~5 batches. Even at a floor of one batch (10 rows) per try, four
-// tries reach row 40+, past the 8–12 rows TestFlight step 4 uses. Then the
-// last jump stands (by then with a real average) and the fallback marks.
+const ARRIVAL_VIEW_OFFSET = space.sm; // 8pt, as design-lead's render
+// The Mutual list's top padding (styles.list). The arrival math reads it:
+// row 0's top sits here, and the estimate jump starts from it.
+const MATCHES_LIST_PAD = space.lg;
+// onScrollToIndexFailed retries at most this many times, so an arrival can
+// never loop. On a fresh mount nothing is measured yet (average 0), so the
+// first failure has no estimate to jump to and just waits ARRIVAL_RETRY_MS
+// for the first cells to lay out. Each later failure jumps to the estimate
+// (padding + index × the measured average − viewOffset); the list renders
+// the window round it, so the next retry usually finds the row measured.
+// The second or third try normally lands; 4 bounds a list whose heights vary
+// enough that the estimate keeps missing. Past it, the last jump stands and
+// the fallback marks.
 const ARRIVAL_MAX_TRIES = 4;
 
 // Every producer of Matches' route params: League home's tiles (FB-91 /
@@ -865,6 +871,7 @@ export default function MatchesScreen() {
   // The Mutual list's content and viewport heights, to clamp an estimate.
   const listContentHRef = useRef(0);
   const listViewportHRef = useRef(0);
+  const listScrollYRef = useRef(0);
   const scrollTriesRef = useRef(0);
   const endClampedRef = useRef(false);
   const ignoreSettleRef = useRef(false);
@@ -1014,7 +1021,16 @@ export default function MatchesScreen() {
     // 4. Scroll — dropped if the user dragged first (the list never moves
     // under a finger), skipped if the row is already fully in view. Either
     // way the mark (5) shows straight away; otherwise once the scroll settles.
-    if (dragged || (trustView && fullyVisibleRef.current.has(arrivalMatchId))) {
+    const inView = trustView && alreadyInView(
+      index,
+      arrivalMatchId,
+      index > 0 ? visibleMatches[index - 1].match_id : null,
+      fullyVisibleRef.current,
+      listScrollYRef.current,
+      MATCHES_LIST_PAD,
+      ARRIVAL_VIEW_OFFSET,
+    );
+    if (dragged || inView) {
       showMark(arrivalTs);
       return;
     }
@@ -1033,12 +1049,11 @@ export default function MatchesScreen() {
       matchesQuery.isFetching, matchesQuery.isPaused, matchesQuery.isError]);
 
   // Rows vary in height and there's no getItemLayout, so a row not yet
-  // measured can't be scrolled to. Jump first (to the clamped estimate, or,
-  // on a fresh mount where the average is still 0, to the furthest measured
-  // row) so the window renders round it, then retry after layout — at most
-  // ARRIVAL_MAX_TRIES times.
+  // measured can't be scrolled to. Jump to the clamped estimate (none on a
+  // fresh mount, where nothing is measured yet) so the window renders round
+  // it, then retry after layout — at most ARRIVAL_MAX_TRIES times.
   const onArrivalScrollFailed = useCallback(
-    (info: { index: number; averageItemLength: number; highestMeasuredFrameIndex: number }) => {
+    (info: { index: number; averageItemLength: number }) => {
       const list = matchesListRef.current;
       if (!list) return;
       scrollTriesRef.current += 1;
@@ -1048,17 +1063,8 @@ export default function MatchesScreen() {
       const contentH = listContentHRef.current;
       const viewportH = listViewportHRef.current;
       const maxOffset = contentH > 0 && viewportH > 0 ? contentH - viewportH : null;
-      const jump = scrollFailureJump(info, ARRIVAL_VIEW_OFFSET, maxOffset);
-      if (jump && 'offset' in jump) {
-        list.scrollToOffset({ offset: jump.offset, animated: false });
-      } else if (jump) {
-        list.scrollToIndex({
-          index: jump.index,
-          animated: false,
-          viewPosition: 0,
-          viewOffset: ARRIVAL_VIEW_OFFSET,
-        });
-      }
+      const jump = scrollFailureJump(info, MATCHES_LIST_PAD, ARRIVAL_VIEW_OFFSET, maxOffset);
+      if (jump != null) list.scrollToOffset({ offset: jump, animated: false });
       if (!willRetry) return; // the last jump stands; its settle (or the fallback) marks
       retryTimerRef.current = setTimeout(() => {
         ignoreSettleRef.current = false;
@@ -1086,7 +1092,8 @@ export default function MatchesScreen() {
       const end = endClamp(contentOffset.y, contentSize.height, layoutMeasurement.height);
       if (end != null && !endClampedRef.current) {
         // A tail row's target ran past the content end: pull back to the end,
-        // so no blank band stays under the last card; mark when that settles.
+        // then mark when that settles. Fabric's scrollTo already clamps on
+        // iOS, so this is a guard, not a path iPhones take (see endClamp).
         endClampedRef.current = true;
         armSettleFallback(m.ts);
         matchesListRef.current?.scrollToOffset({ offset: end, animated: true });
@@ -1596,6 +1603,9 @@ export default function MatchesScreen() {
             }}
             onLayout={(e) => {
               listViewportHRef.current = e.nativeEvent.layout.height;
+            }}
+            onScroll={(e) => {
+              listScrollYRef.current = e.nativeEvent.contentOffset.y;
             }}
             refreshControl={
               <RefreshControl
@@ -2192,7 +2202,7 @@ const styles = StyleSheet.create({
   },
   chipCountActive: { color: chalk.base },
 
-  list: { padding: space.lg, paddingBottom: 96 },
+  list: { padding: MATCHES_LIST_PAD, paddingBottom: 96 },
   leagueBadgeRow: { flexDirection: 'row', paddingHorizontal: space.xs },
   matchHeader: {
     flexDirection: 'row',

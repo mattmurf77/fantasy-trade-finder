@@ -97,6 +97,7 @@ const {
   NOT_FOUND_HOLD_MS,
   clampOffset,
   scrollFailureJump,
+  alreadyInView,
   endClamp,
 } = moduleShim.exports;
 
@@ -118,18 +119,26 @@ eq('U-3b clampOffset passes an in-range offset', clampOffset(240, 500), 240);
 eq('U-3c clampOffset caps at the content end (no blank band)', clampOffset(900, 500), 500);
 eq('U-3d unknown end → floor only', clampOffset(900, null), 900);
 eq('U-3e content shorter than the viewport → 0', clampOffset(40, -100), 0);
-eq('U-4a measured average → the estimate, minus the view offset',
-  scrollFailureJump({ index: 10, averageItemLength: 300, highestMeasuredFrameIndex: 4 }, 12, null),
-  { offset: 2988 });
+eq('U-4a measured average → top padding + index × average − viewOffset',
+  scrollFailureJump({ index: 10, averageItemLength: 300 }, 16, 8, null), 3008);
 eq('U-4b the estimate is clamped to the content end',
-  scrollFailureJump({ index: 10, averageItemLength: 300, highestMeasuredFrameIndex: 4 }, 12, 2500),
-  { offset: 2500 });
-eq('U-4c fresh mount (average 0) → step to the furthest measured row',
-  scrollFailureJump({ index: 20, averageItemLength: 0, highestMeasuredFrameIndex: 3 }, 12, null),
-  { index: 3 });
-eq('U-4d nothing measured → no jump',
-  scrollFailureJump({ index: 20, averageItemLength: 0, highestMeasuredFrameIndex: -1 }, 12, null),
-  null);
+  scrollFailureJump({ index: 10, averageItemLength: 300 }, 16, 8, 2500), 2500);
+eq('U-4c row 0\'s estimate is its own top (the padding) less the view offset',
+  scrollFailureJump({ index: 0, averageItemLength: 300 }, 16, 8, null), 8);
+eq('U-4d fresh mount (average 0, nothing measured) → no jump; the retry waits for layout',
+  scrollFailureJump({ index: 20, averageItemLength: 0 }, 16, 8, null), null);
+{
+  const fv = new Set(['a', 'b', 'c']);
+  eq('U-6a row 0 at the list top (16pt padding ≥ 8) → in view, no scroll',
+    alreadyInView(0, 'a', null, fv, 0, 16, 8), true);
+  eq('U-6b row 0 scrolled 10pt (top 6pt from the edge) → scroll, or the top stroke clips',
+    alreadyInView(0, 'a', null, fv, 10, 16, 8), false);
+  eq('U-6c a row whose row above is fully visible → in view',
+    alreadyInView(2, 'c', 'b', fv, 400, 16, 8), true);
+  eq('U-6d the first fully visible row (row above cut off) → scroll with viewOffset',
+    alreadyInView(2, 'c', 'b', new Set(['c']), 400, 16, 8), false);
+  eq('U-6e not fully visible → scroll', alreadyInView(1, 'x', 'a', fv, 0, 16, 8), false);
+}
 eq('U-5a a settle past the end → pull back to the end', endClamp(900, 1500, 700), 800);
 eq('U-5b a settle within 1pt of the end → no pull', endClamp(800.5, 1500, 700), null);
 eq('U-5c an in-range settle → no pull', endClamp(300, 1500, 700), null);
@@ -239,9 +248,13 @@ assert(/matchesListRef\.current\?\.scrollToIndex\(\{ index, animated: true, view
   assert(val >= 8, 'P-8b ARRIVAL_VIEW_OFFSET is a space token ≥ 8pt (clears the outline\'s 6pt outset)',
     `space.${vo} = ${val}`);
 }
-assert(/if \(dragged \|\| \(trustView && fullyVisibleRef\.current\.has\(arrivalMatchId\)\)\) \{ showMark\(arrivalTs\); return; \}/.test(EFFECT)
-  && EFFECT.indexOf('if (dragged ||') < EFFECT.indexOf('scrollToIndex('),
-  'P-8c a drag first, or a row already fully in view, skips the scroll and marks straight away');
+assert(/const inView = trustView && alreadyInView\( index, arrivalMatchId, index > 0 \? visibleMatches\[index - 1\]\.match_id : null, fullyVisibleRef\.current, listScrollYRef\.current, MATCHES_LIST_PAD, ARRIVAL_VIEW_OFFSET, \); if \(dragged \|\| inView\) \{ showMark\(arrivalTs\); return; \}/.test(EFFECT)
+  && EFFECT.indexOf('if (dragged || inView)') < EFFECT.indexOf('scrollToIndex('),
+  'P-8c a drag first, or a row in view with ≥ ARRIVAL_VIEW_OFFSET above it (alreadyInView), skips the scroll and marks straight away');
+assert(/onScroll=\{\(e\) => \{ listScrollYRef\.current = e\.nativeEvent\.contentOffset\.y; \}\}/.test(LIST)
+  && /const MATCHES_LIST_PAD = space\.lg;/.test(F)
+  && /list: \{ padding: MATCHES_LIST_PAD, paddingBottom: 96 \}/.test(F),
+  'P-8e the in-view test reads the tracked scroll offset and the list\'s real top padding (styles.list uses MATCHES_LIST_PAD)');
 assert(/viewabilityConfig = useRef\(\{ itemVisiblePercentThreshold: 100 \}\)\.current/.test(BLOCK)
   && LIST.includes('viewabilityConfig={viewabilityConfig}')
   && LIST.includes('onViewableItemsChanged={onViewableItemsChanged}'),
@@ -250,9 +263,11 @@ assert(/viewabilityConfig = useRef\(\{ itemVisiblePercentThreshold: 100 \}\)\.cu
 // P-9 — onScrollToIndexFailed: jump, then retry after layout, BOUNDED.
 assert(LIST.includes('onScrollToIndexFailed={onArrivalScrollFailed}'),
   'P-9a onScrollToIndexFailed is wired on the Mutual FlatList (the one holding matchesListRef)');
-assert(/const jump = scrollFailureJump\(info, ARRIVAL_VIEW_OFFSET, maxOffset\);/.test(FAILED)
-  && /if \(jump && 'offset' in jump\) \{ list\.scrollToOffset\(\{ offset: jump\.offset, animated: false \}\); \} else if \(jump\) \{ list\.scrollToIndex\(\{ index: jump\.index, animated: false, viewPosition: 0, viewOffset: ARRIVAL_VIEW_OFFSET, \}\); \}/.test(FAILED),
-  'P-9b it jumps to the clamped estimate, or (average 0) steps to the furthest measured row');
+assert(/const jump = scrollFailureJump\(info, MATCHES_LIST_PAD, ARRIVAL_VIEW_OFFSET, maxOffset\); if \(jump != null\) list\.scrollToOffset\(\{ offset: jump, animated: false \}\);/.test(FAILED)
+  && !/highestMeasuredFrameIndex/.test(BLOCK),
+  'P-9b it jumps to the clamped estimate from the list\'s top padding (no jump when nothing is measured; no dead index step)');
+assert(/scrollTriesRef\.current \+= 1; const willRetry = scrollTriesRef\.current <= ARRIVAL_MAX_TRIES; ignoreSettleRef\.current = willRetry;/.test(FAILED),
+  'P-9g (N-15) a jump that will be retried is not the settle: ignoreSettleRef = willRetry');
 assert(/const maxOffset = contentH > 0 && viewportH > 0 \? contentH - viewportH : null;/.test(FAILED)
   && /onContentSizeChange=\{\(_w, h\) => \{ listContentHRef\.current = h; \}\}/.test(LIST)
   && /onLayout=\{\(e\) => \{ listViewportHRef\.current = e\.nativeEvent\.layout\.height; \}\}/.test(LIST),
@@ -265,14 +280,17 @@ assert(/scrollTriesRef\.current \+= 1; const willRetry = scrollTriesRef\.current
 assert(/retryTimerRef\.current = setTimeout\(\(\) => \{[\s\S]*try \{ matchesListRef\.current\?\.scrollToIndex\(\{ index: info\.index, animated: true, viewPosition: 0, viewOffset: ARRIVAL_VIEW_OFFSET, \}\); \} catch[\s\S]*\}, ARRIVAL_RETRY_MS\);/.test(FAILED),
   'P-9e the retry is scrollToIndex after layout, with the same viewOffset, guarded (a list change never throws)');
 assert(/scrollTriesRef\.current = 0;/.test(FOUND), 'P-9f each arrival gets its own retry budget');
+assert(/finishArrival\(\); clearMarkTimers\(\); markRef\.current = \{ ts: arrivalTs, shown: false \};/.test(FOUND),
+  'P-9h (N-25) the found path clears an earlier arrival\'s timers before arming its own (an old retry can\'t scroll to the old index)');
 
 // P-10 — the list never moves under a finger.
 assert(LIST.includes('onScrollBeginDrag={onArrivalDrag}')
   && /const onArrivalDrag = useCallback\(\(\) => \{ if \(arrivalRef\.current\) arrivalRef\.current\.dragged = true; clearTimeout\(retryTimerRef\.current\);/.test(BLOCK),
   'P-10 a drag marks the arrival dragged and cancels a pending retry');
 
-// P-11 — the mark appears once the scroll settles (or a fallback); a tail
-// target that ran past the end is pulled back first (no blank band).
+// P-11 — the mark appears once the scroll settles (or a fallback). A settle
+// past the content end is pulled back first; on iOS Fabric's scrollTo
+// already clamps, so P-11c pins a guard that iPhones never exercise.
 assert(LIST.includes('onMomentumScrollEnd={onArrivalSettle}')
   && /if \(!m \|\| m\.shown \|\| ignoreSettleRef\.current\) return;/.test(SETTLE)
   && /showMark\(m\.ts\);/.test(SETTLE),
