@@ -4,6 +4,7 @@ page card; value_core's blended scores; other users' Calibration cards; overdue
 diagnostics; the boot migration for the names column. Harness:
 test_deletion_scrub's engine and seed."""
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine, insert, inspect as sa_inspect, select, text, update
@@ -226,3 +227,38 @@ def test_other_users_events_naming_the_person_take_the_token(engine):
     scrub.run_pending()
     props = [json.loads(r["props"]) for r in read(engine, db.user_events_table)]
     assert props == [{"partner_user_id": token, "surface": "deck"}, {"partner_user_id": OTHER}]
+
+
+
+def test_a_job_unfinished_after_30_days_is_deleted_and_eng_told(engine, caplog, monkeypatch):
+    """Legal (ix): retries run for up to 30 days. A job that never finishes (a
+    poison row never sets db_version, so _finish never deletes it) has its row,
+    the ids, deleted past 30 days, with an ERROR by count and error class only.
+    A younger unfinished job keeps retrying and alerting (#559 delta QA)."""
+    accounts.delete_user_data(DEL)
+    t = db.deletion_scrub_jobs_table
+    now = datetime.now(timezone.utc)
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id="second-person"))
+    accounts.delete_user_data("second-person")
+    with engine.begin() as conn:
+        rows = conn.execute(select(t.c.job_id).order_by(t.c.job_id)).scalars().all()
+        old, young = sorted(rows)
+        # Both stuck: another runner holds them, so this tick's pass can't
+        # finish them (as a poison row leaves a job unfinished for good).
+        conn.execute(update(t).where(t.c.job_id == old).values(
+            deleted_at=(now - timedelta(days=31)).isoformat(), last_error="row_failures",
+            claimed_until="9999-01-01"))
+        conn.execute(update(t).where(t.c.job_id == young).values(
+            deleted_at=(now - timedelta(days=29)).isoformat(), last_error="row_failures",
+            claimed_until="9999-01-01"))
+    from backend.eval import redaction
+    monkeypatch.setattr(redaction, "redact_model_store", lambda tokens: 0)
+    caplog.set_level(logging.ERROR, logger="trade_finder")
+    _, detail = scrub.tick(now)                   # the daily tick's step
+    assert detail["abandoned"] == 1
+    with engine.connect() as conn:
+        assert conn.execute(select(t.c.job_id)).scalars().all() == [young]
+    (line,) = [r.getMessage() for r in caplog.records if "abandoned" in r.getMessage()]
+    assert line == "[scrub] abandoned jobs=1 after_days=30 last_errors={'row_failures': 1}"
+    assert DEL not in caplog.text and "second-person" not in caplog.text

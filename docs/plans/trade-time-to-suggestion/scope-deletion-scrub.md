@@ -51,7 +51,7 @@
   - **Model phase:** `eval.redaction.redact_model_store(tokens)`, in the daily-tick step `deletion_scrub`, placed **before** `value_model_refit` (models-eng 8b, #542). It runs only for jobs whose DB pass is current, so the refit trains on scrubbed rows. A test pins the order. A raise leaves the row for the next tick.
   - **The DB phase runs once more after `IN_FLIGHT_GRACE` (6 h),** from the cleanup loop. That catches rows a deck already in flight at deletion wrote later from its build-time snapshot (§0.4).
   - **Until every stage was built, finished rows were kept,** so a later stage's `SCRUB_VERSION` re-ran them. Stage 3 sets `COMPLETE`: a row is deleted once its grace pass and the model store are done (legal (ix)).
-- **Alert:** each tick, if any row is older than 24 h, the log gets `[scrub] unfinished jobs=<n> oldest_h=<h>` at ERROR (counts only). A row older than 30 days isn't abandoned: it keeps retrying and keeps alerting (ix).
+- **Alert:** each tick, if any row is older than 24 h, the log gets `[scrub] unfinished jobs=<n> oldest_h=<h>` at ERROR (counts only). **Past 30 days a job stops** (`RETRY_LIMIT`, `_abandon` in the tick). Its row, which holds the ids, is deleted, and the log gets `[scrub] abandoned jobs=<n> after_days=30 last_errors={<class>: <n>}` at ERROR, with counts and classes only. A store row the scrub couldn't rewrite (a poison row: it never sets `db_version`, so `_finish` would never delete the job) stays for eng to fix by hand, which the 24 h alert has asked for daily since. This is trades-eng's reading of (ix), "retrying for up to 30 days": the ids aren't kept past the retries. The alternative was to keep the row and escalate. Legal to confirm through head-eng (release-lead's #559 delta QA).
 
 ### 0.2 Stores and what each card loses
 
@@ -191,4 +191,5 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
   2. packs through the codec, the CAS fix, the page store and the in-flight pass;
   3. the traced items (f), `grading_cards` and diagnostics (built: #559's follow-up). It sets `COMPLETE`. The trace found `features.presentation` partner-free (indexes and player counts only); the narrative goes from a redacted page card, and value_core's blended scores go (§1.3).
   - Packs and the page store are empty in prod until the flip (`trade.packed_evidence` off). PR 2 lands before the flip.
+- **The three ship together, #557 → #559 → #562, in one release** (release-lead's plan). The job rows that hold the deleted ids are only deleted once #562 sets `COMPLETE` (`_finish`) and the 30-day stop (`_abandon`). Deployed alone, #557 or #559 would keep every deletion's row until #562 deployed. The merge waits on the flip's 24 h read, models-lead's R-G and the operator's go.
 - Express lane declared by the operator? No.

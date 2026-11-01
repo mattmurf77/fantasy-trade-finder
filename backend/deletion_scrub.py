@@ -54,6 +54,9 @@ COMPLETE = True
 LEASE = timedelta(minutes=10)
 IN_FLIGHT_GRACE = timedelta(hours=6)
 ALERT_AFTER = timedelta(hours=24)
+# Legal (ix): an unfinished job retries for up to 30 days, then its row (the
+# ids) is deleted and eng told (_abandon).
+RETRY_LIMIT = timedelta(days=30)
 _BATCH = 200
 # The fallback scans: rows per keyset page, and pages per run (one run per
 # cleanup tick, so ~100k rows a tick, well inside the lease).
@@ -1342,6 +1345,30 @@ def kick() -> None:
     threading.Thread(target=run, name="deletion-scrub", daemon=True).start()
 
 
+def _abandon(now: datetime) -> int:
+    """Legal (ix): a job retries for up to 30 days. Past that its row, which
+    holds the ids, is deleted, and eng is told at ERROR by count and last error
+    class only. A store row the scrub could not rewrite (a poison row) stays
+    for eng to fix by hand, which the 24 h alert has asked for every day since
+    (#559 delta QA: a poison row never set db_version, so _finish never
+    deleted its job and the ids were held for good)."""
+    if not COMPLETE:
+        return 0
+    t = db.deletion_scrub_jobs_table
+    with db.engine.begin() as conn:
+        rows = [r for r in conn.execute(select(t.c.job_id, t.c.deleted_at, t.c.last_error)).all()
+                if datetime.fromisoformat(r.deleted_at) < now - RETRY_LIMIT]
+        if rows:
+            conn.execute(delete(t).where(t.c.job_id.in_([r.job_id for r in rows])))
+    if rows:
+        errors = {}
+        for r in rows:
+            errors[r.last_error or "none"] = errors.get(r.last_error or "none", 0) + 1
+        log.error("[scrub] abandoned jobs=%d after_days=%d last_errors=%s",
+                  len(rows), RETRY_LIMIT.days, errors)
+    return len(rows)
+
+
 def _finish(now: datetime) -> int:
     """Delete the rows whose scrub is done (legal (ix))."""
     if not COMPLETE:
@@ -1401,6 +1428,7 @@ def _tick(now: datetime) -> tuple[str, dict]:
                 conn.execute(update(t).where(t.c.job_id.in_([r["job_id"] for r in ready]))
                              .values(model_done_at=_iso(now)))
     detail["finished"] = _finish(now)
+    detail["abandoned"] = _abandon(now)
     with db.engine.connect() as conn:
         left = conn.execute(select(t.c.deleted_at)).scalars().all()
     old = [datetime.fromisoformat(d) for d in left
