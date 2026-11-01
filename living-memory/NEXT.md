@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-11-01 — Shop send (#574 / #577): two Update 1 follow-ups](#2026-11-01--shop-send-574--577-two-update-1-follow-ups)
 - [2026-10-15 — Daily tick dies at the 120 s worker timeout every day: move its inline work off the request thread](#2026-10-15--daily-tick-dies-at-the-120-s-worker-timeout-every-day-move-its-inline-work-off-the-request-thread)
 - [2026-10-12 — Usage Trends: run both TestFlight checklists on 1.21.2 (165), then the two design calls](#2026-10-12--usage-trends-run-both-testflight-checklists-on-1212-165-then-the-two-design-calls)
 - [2026-10-10 — Home hub: run the TestFlight checklist on 1.20.0, then the two follow-ups](#2026-10-10--home-hub-run-the-testflight-checklist-on-1200-then-the-two-follow-ups)
@@ -51,6 +52,13 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-11-01 — Shop send (#574 / #577): two Update 1 follow-ups
+
+Product logged both on 2026-11-01 as fine for launch (release-lead's #577 QA, P3-3). The context is in [`docs/plans/shop-send-elo/scope.md`](../docs/plans/shop-send-elo/scope.md) and D-210.
+
+1. **A sent package stays out of the sender's deck until the proposal resolves, or for at least 30 days.** Today a Shop send's `decision = "send"` row is decided only through the D-067 discovery keys' 7-day like window. The pre-#574 Shop like sat in Awaiting and was excluded by R4 for as long as it was live. *Why:* without this, a trade the user already sent on the platform can come back to their deck after a week.
+2. **A later calculator ✓ of a package already sent adds no second Elo update.** `find_live_trade_like` reads likes only, so the queue route doesn't see the send row's shared `calcq_` id. The ✓ should still record its like and card, without the Elo. *Why:* head-product's "no double count" covers send then queue, not just queue then send.
 
 ## 2026-10-15 — Daily tick dies at the 120 s worker timeout every day: move its inline work off the request thread
 

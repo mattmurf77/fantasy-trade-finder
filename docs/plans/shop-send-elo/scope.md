@@ -25,7 +25,8 @@
   - It fires once per recorded `send` row, timed to the write (analytics-lead's rule, via head-eng). So a Shop-only ESPN or MFL user still counts toward WAT and first opinion.
   - It no longer carries the "calculator" mislabel the pre-#574 Shop queue had.
   - **`props.decision = "send"`** (analytics-lead, 11-01): the event mirrors the row, so `trade_proposed.decision` becomes the closed set `like` | `send`. It is on record in analytics-lead's report. There's no history and no coded reader of `props.decision`, so there is no series break. Experiment `like_rate` matches on event type only; analytics-lead has recorded a `decision = 'like'` filter as a precondition before any experiment uses it.
-  - **Also for analytics-lead:** the `traded` segment (`analytics_queries._product_op`) now reads `decision IN ('like', 'pass')`. That's its documented definition, so a send-only user is not "traded".
+  - **The `traded` segment** (`analytics_queries._product_op`) now reads `decision IN ('like', 'pass')`, its documented definition, so a send-only user is not "traded". **analytics-lead acked (b), keep it** (11-01): there's no past data change (prod holds only like and pass) and there are no saved segments, and they superseded their earlier "traded includes Shop senders" line.
+  - **Chosen, not confirmed (analytics-lead acked (a), 11-01; Product: "once per trade on confirm" is the user's tap, refusals included).** `trade_proposed{decision: send}` is the first qualifying tap per package. `trade_proposals WHERE source = 'shop'` is one row per provider-confirmed send. They won't reconcile 1:1: compare at package level, and the gap is refusals, unknown outcomes, abandoned sends and packages already liked. The envelope source `shop_send` follows `calc_queue`.
   - The event and the props are unchanged; the taxonomy comment and the invariants enum note are updated.
 
 ## 2. Schema & flag scope
@@ -84,11 +85,11 @@
 | `accounts.delete_user_data` / `export_user_data` | deleted and exported by `user_id`, like any row (tested) |
 | `deletion_scrub` (#557/#559/#562, not on main) | doesn't touch `trade_decisions`. A send row has no partner column; its `calcq_` id is a hash, the same exposure as a calculator like today |
 
-**Known, unchanged, and open with head-product** (release-lead P3-3, against "no double count"):
-- A calculator ✓ of a package already sent adds a second Elo signal. `find_live_trade_like` reads likes only, so the queue doesn't see the send row's shared `calcq_` id.
-- A sent package can come back to the deck after 7 days. The pre-#574 Shop like sat in Awaiting, and R4 excluded it for as long as it was live.
+**Logged for Update 1** (Product, 11-01: fine for launch; `living-memory/NEXT.md`; release-lead P3-3):
+- **A sent package stays out of the sender's deck until the proposal resolves, or for at least 30 days.** Today it's 7 days, through the discovery keys' like window. The pre-#574 Shop like sat in Awaiting, and R4 excluded it for as long as it was live.
+- **A later calculator ✓ of a package already sent adds no second Elo update.** Today it does: `find_live_trade_like` reads likes only, so the queue doesn't see the send row's shared `calcq_` id. The ✓ should still record its like and card.
 
-Both are small to change; they wait on head-product's call. The rest is unchanged:
+The rest is unchanged:
 - A later deck like or calculator queue of a package already sent adds its own Elo. That is the same as today's deck like plus a queue of one package. The 7-day decided window keeps the deck from re-serving it.
 - The probe and the write are serialised by the per-user `service._lock` in one process. Production runs one worker.
 
