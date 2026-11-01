@@ -546,6 +546,7 @@ def render_package_card(short_id) -> tuple[bytes, int]:
     receive = [str(x) for x in pkg.get("receive_ids") or []]
     all_ids = give + receive
     players_by_id = load_players_by_ids(all_ids) if all_ids else {}
+    players_by_id.update(_generic_pick_records(i for i in all_ids if i not in players_by_id))
 
     return _render_trade_card_png(
         give_ids=give,
@@ -553,6 +554,27 @@ def render_package_card(short_id) -> tuple[bytes, int]:
         players_by_id=players_by_id,
         title="Trade Package",
     ), 200
+
+
+def _generic_pick_records(ids: Iterable[str]) -> dict[str, dict]:
+    """The live calculator's 12 generic pick rungs (`generic_pick_<round>_
+    <early|mid|late>`, server.py's universal pool) aren't `players` rows, so a
+    shared package holding one drew "Unknown player" (release-lead, #566 QA
+    follow-up). Each gets the label the calculator shows ("Mid 1st Round
+    Pick", pick_values.generic_pick_label) and the PICK chip. Any other
+    unknown id stays unknown."""
+    from .pick_values import GENERIC_PICK_SEEDS, generic_pick_label
+
+    out: dict[str, dict] = {}
+    for pid in ids:
+        parts = str(pid).split("_")
+        if len(parts) != 4 or parts[:2] != ["generic", "pick"] or not parts[2].isdigit():
+            continue
+        rnd, tier = int(parts[2]), parts[3].title()
+        if (rnd, tier) in GENERIC_PICK_SEEDS:
+            out[str(pid)] = {"player_id": str(pid), "full_name": generic_pick_label(rnd, tier),
+                             "position": "PICK"}
+    return out
 
 
 def _render_trade_card_png(
