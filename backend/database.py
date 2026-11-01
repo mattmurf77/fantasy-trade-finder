@@ -4432,62 +4432,105 @@ def _backfill_dual_format() -> None:
         print(f"[backfill] users JSON rewrite failed: {e}")
 
 
+_BACKFILL_CHUNK = 500
+
+
 def backfill_grading_card_partners() -> int:
     """#562 re-QA P2-B: give Calibration cards built before
     grading_cards.partner_user_id their partner, so an account deletion's
     scrub finds them by id. A current-arm card takes its deck row's partner
-    (arms_json.current.impression_id → features_json.partner_user_id); any
+    (arms_json.current.impression_id → features_json.partner_user_id). Any
     other takes the one member of the session's league whose shown name
     (display name, else username, else id, as blind_grading.build_catalog
-    names a partner) equals its partner_name. Ambiguous or unknown stays
-    NULL, for the scrub's own fallbacks. Deck rows prune at 90 days and names
-    change, so this runs at boot, on NULL rows only (idempotent, cheap: the
-    feature is testers-only). Returns the cards filled."""
+    names a partner) equals its partner_name and whose roster holds the
+    card's received players (a name alone can be someone else's after a
+    rename). Ambiguous or unknown stays NULL, for the scrub's own fallbacks.
+
+    Deck rows prune at 90 days and names change, so it runs at boot, on NULL
+    rows only (idempotent). It runs from _migrate_db, so during a Render build
+    too, against prod while the old instance serves (#562 delta QA): chunks of
+    _BACKFILL_CHUNK cards, each its own transaction, on Postgres under SET
+    LOCAL lock_timeout and statement_timeout, with one deck-row lookup per
+    chunk. A chunk that fails is skipped and logged by class; the next boot
+    retries it. It never raises. Returns the rows actually written."""
     gc, gs = grading_cards_table, grading_sessions_table
     imp, m = deck_impressions_table, league_members_table
-    filled = 0
+    pg = engine.dialect.name == "postgresql"
     try:
-        with engine.begin() as conn:
-            rows = conn.execute(select(gc.c.card_id, gc.c.arms_json, gc.c.trade_json, gs.c.league_id)
-                                .join(gs, gs.c.session_id == gc.c.session_id)
-                                .where(gc.c.partner_user_id.is_(None))).mappings().all()
-            shown: dict = {}
-            for row in rows:
-                partner = None
-                try:
-                    arms, trade = json.loads(row["arms_json"]), json.loads(row["trade_json"])
-                except (TypeError, ValueError):
-                    continue
-                current = arms.get("current") if isinstance(arms, dict) else None
-                if isinstance(current, dict) and isinstance(current.get("impression_id"), str):
-                    raw = conn.execute(select(imp.c.features_json).where(
-                        imp.c.impression_id == current["impression_id"])).scalar()
+        with engine.connect() as conn:
+            pending = conn.execute(select(gc.c.card_id).where(gc.c.partner_user_id.is_(None))
+                                   .order_by(gc.c.card_id)).scalars().all()
+    except Exception as err:          # never blocks boot; the scrub keeps its fallbacks
+        log.warning("grading_cards partner backfill failed: %s", type(err).__name__)
+        return 0
+    members: dict = {}                # league_id -> [(user_id, shown name, roster ids)]
+    filled = failed = 0
+    for i in range(0, len(pending), _BACKFILL_CHUNK):
+        try:
+            with engine.begin() as conn:
+                if pg:
+                    conn.execute(text(f"SET LOCAL lock_timeout = '{_DDL_LOCK_TIMEOUT}'"))
+                    conn.execute(text(f"SET LOCAL statement_timeout = '{_DDL_STATEMENT_TIMEOUT}'"))
+                rows = conn.execute(select(gc.c.card_id, gc.c.arms_json, gc.c.trade_json, gs.c.league_id)
+                                    .join(gs, gs.c.session_id == gc.c.session_id)
+                                    .where(gc.c.card_id.in_(pending[i:i + _BACKFILL_CHUNK]),
+                                           gc.c.partner_user_id.is_(None))).mappings().all()
+                cards = []
+                for row in rows:
+                    try:
+                        arms, trade = json.loads(row["arms_json"]), json.loads(row["trade_json"])
+                    except (TypeError, ValueError):
+                        continue
+                    current = arms.get("current") if isinstance(arms, dict) else None
+                    impression = (current.get("impression_id")
+                                  if isinstance(current, dict) else None)
+                    cards.append((row["card_id"], row["league_id"],
+                                  impression if isinstance(impression, str) else None,
+                                  trade if isinstance(trade, dict) else {}))
+                wanted = sorted({c[2] for c in cards if c[2]})
+                deck_partner = {}
+                for impression_id, raw in (conn.execute(select(imp.c.impression_id, imp.c.features_json)
+                                                        .where(imp.c.impression_id.in_(wanted))).all()
+                                           if wanted else ()):
                     try:
                         features = json.loads(raw) if raw else None
                     except (TypeError, ValueError):
                         features = None
                     if isinstance(features, dict) and features.get("partner_user_id"):
-                        partner = str(features["partner_user_id"])
-                name = trade.get("partner_name") if isinstance(trade, dict) else None
-                if partner is None and isinstance(name, str):
-                    league = row["league_id"]
-                    if league not in shown:
-                        shown[league] = {}
-                        for uid, display, username in conn.execute(select(
-                                m.c.user_id, m.c.display_name, m.c.username).where(m.c.league_id == league)):
-                            shown[league].setdefault(display or username or uid, set()).add(str(uid))
-                    owners = shown[league].get(name, set())
-                    if len(owners) == 1:
-                        partner = next(iter(owners))
-                if partner is not None:
-                    conn.execute(gc.update().where(gc.c.card_id == row["card_id"],
-                                                   gc.c.partner_user_id.is_(None))
-                                 .values(partner_user_id=partner))
-                    filled += 1
-        if filled:
-            log.info("grading_cards partner backfill: %d cards", filled)
-    except Exception as err:          # never blocks boot; the scrub keeps its fallbacks
-        log.warning("grading_cards partner backfill failed: %s", type(err).__name__)
+                        deck_partner[impression_id] = str(features["partner_user_id"])
+                new_leagues = sorted({c[1] for c in cards} - set(members))
+                for league in new_leagues:
+                    members[league] = []
+                for league, uid, display, username, roster in (conn.execute(select(
+                        m.c.league_id, m.c.user_id, m.c.display_name, m.c.username, m.c.roster_data)
+                        .where(m.c.league_id.in_(new_leagues))).all() if new_leagues else ()):
+                    try:
+                        held = {str(p) for p in (json.loads(roster) if roster else [])}
+                    except (TypeError, ValueError):
+                        held = set()
+                    members[league].append((str(uid), display or username or str(uid), held))
+                written = 0
+                for card_id, league, impression, trade in cards:
+                    partner = deck_partner.get(impression) if impression else None
+                    name = trade.get("partner_name")
+                    if partner is None and isinstance(name, str):
+                        players = {str(a.get("id")) for a in trade.get("receive") or ()
+                                   if isinstance(a, dict) and a.get("position") != "PICK"}
+                        owners = [uid for uid, shown, held in members.get(league, ())
+                                  if shown == name and players <= held]
+                        if len(owners) == 1:
+                            partner = owners[0]
+                    if partner is not None:
+                        res = conn.execute(gc.update().where(gc.c.card_id == card_id,
+                                                             gc.c.partner_user_id.is_(None))
+                                           .values(partner_user_id=partner))
+                        written += res.rowcount or 0
+            filled += written             # counted once its chunk committed
+        except Exception as err:          # never blocks boot; skipped until the next boot
+            failed += 1
+            log.warning("grading_cards partner backfill chunk failed: %s", type(err).__name__)
+    if filled or failed:
+        log.info("grading_cards partner backfill: %d cards, %d chunks failed", filled, failed)
     return filled
 
 

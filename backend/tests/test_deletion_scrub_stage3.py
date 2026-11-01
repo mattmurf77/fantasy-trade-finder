@@ -25,10 +25,16 @@ def name_people(engine):
 
 
 def test_the_persons_names_per_league_are_captured_at_deletion(engine):
+    """Their names, and their trade matches, read before the deletion puts the
+    placeholder on their side."""
     name_people(engine)
+    mt = db.trade_matches_table
+    with engine.connect() as conn:
+        mine = sorted(conn.execute(select(mt.c.id).where(
+            (mt.c.user_a_id == DEL) | (mt.c.user_b_id == DEL))).scalars())
     accounts.delete_user_data(DEL)
     assert json.loads(job(engine)["partner_names_json"]) == {
-        "leagues": {LEAGUE: ["Del Name", "deluser"]}, "usernames": ["deluser"]}
+        "leagues": {LEAGUE: ["Del Name", "deluser"]}, "usernames": ["deluser"], "match_ids": mine}
 
 
 def test_a_redacted_page_card_loses_its_narrative():
@@ -219,11 +225,18 @@ def test_notifications_naming_the_person_take_the_placeholder_and_the_token(engi
             db.league_members_table.c.user_id == OTHER).values(display_name="deluser"))
         conn.execute(insert(mt), [
             {"id": 7, "league_id": LEAGUE, "user_a_id": VIEWER, "user_b_id": OTHER,
-             "user_a_give": "[]", "user_a_receive": "[]", "status": "pending", "created_at": EARLY},
+             "user_a_give": "[]", "user_a_receive": "[]", "status": "pending"},
             {"id": 8, "league_id": "league-left", "user_a_id": "stranger", "user_b_id": DEL,
-             "user_a_give": "[]", "user_a_receive": "[]", "status": "pending", "created_at": EARLY}])
+             "user_a_give": "[]", "user_a_receive": "[]", "status": "pending"}])
         notification(conn, "Trade match with @deluser", {"partner_username": "deluser", "match_id": 7})
         notification(conn, "Trade match with @Del Name", {"partner_username": "Del Name", "match_id": 8},
+                     user="stranger")
+        # A name never captured (or since changed) on one of their matches; and
+        # one of their matches named on a notification to someone not on it.
+        conn.execute(insert(mt).values(id=9, league_id="league-left", user_a_id=DEL, user_b_id=VIEWER,
+                                       user_a_give="[]", user_a_receive="[]", status="pending"))
+        notification(conn, "Trade match with @KimFive", {"partner_username": "KimFive", "match_id": 9})
+        notification(conn, "Trade match with @KimFive", {"partner_username": "KimFive", "match_id": 9},
                      user="stranger")
     accounts.delete_user_data(DEL)
     token = job(engine)["token"]
@@ -242,6 +255,8 @@ def test_notifications_naming_the_person_take_the_placeholder_and_the_token(engi
         (f"@{PLACEHOLDER} countered your offer", {"partner_user_id": token}),
         ("Trade match with @deluser", {"partner_username": "deluser", "match_id": 7}),   # OTHER's
         (f"Trade match with @{PLACEHOLDER}", {"partner_username": PLACEHOLDER, "match_id": 8}),
+        (f"Trade match with @{PLACEHOLDER}", {"partner_username": PLACEHOLDER, "match_id": 9}),
+        ("Trade match with @KimFive", {"partner_username": "KimFive", "match_id": 9}),   # not a side
     ]
 
 

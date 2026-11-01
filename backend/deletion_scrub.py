@@ -137,8 +137,14 @@ def capture_names(conn, user_ids) -> dict:
             usernames.add(username)
     usernames.update(n for n in conn.execute(select(u.c.username).where(
         u.c.sleeper_user_id.in_(ids))).scalars() if n)
+    # Their trade matches, read before the deletion puts the placeholder on
+    # their side: a notification on one of them names them whatever name it
+    # used (#562 delta QA).
+    tm = db.trade_matches_table
+    match_ids = conn.execute(select(tm.c.id).where(
+        or_(tm.c.user_a_id.in_(ids), tm.c.user_b_id.in_(ids)))).scalars().all()
     return {"leagues": {lg: sorted(ns) for lg, ns in by_league.items() if ns},
-            "usernames": sorted(usernames)}
+            "usernames": sorted(usernames), "match_ids": sorted(match_ids)}
 
 
 def enqueue(conn, user_ids, league_ids, now: datetime | None = None) -> str:
@@ -1183,8 +1189,9 @@ def redact_notification(row: dict, ids, token: str, usernames, display_names=(),
         named = isinstance(partner, str) and (partner in usernames or partner in display_names
                                               or partner in ids)
     else:
-        named = (match_partner_deleted and isinstance(partner, str)
-                 and (partner in usernames or partner in display_names or partner in ids))
+        # The match row settles it: the partner is them, whatever name the
+        # notification used (one never captured, or since changed), or not.
+        named = bool(match_partner_deleted) and isinstance(partner, str)
     text_ids = any(pid in (row["metadata_json"] or "") for pid in ids)
     if not named and not text_ids:
         return None
@@ -1207,9 +1214,11 @@ def _scan_notifications(job: dict, after: str, budget: "_Budget") -> tuple[str |
     display_names = {n for ns in (names.get("leagues") or {}).values() for n in ns}
     t, m = db.notifications_table, db.league_members_table
     # Matched raw and as json.dumps writes it (a non-ASCII name as \u escapes).
+    match_ids = {i for i in names.get("match_ids") or () if isinstance(i, int)}
     terms = sorted(ids) + sorted({f'"partner_username": {form}'
                                   for n in usernames | display_names
                                   for form in (json.dumps(n), f'"{n}"')})
+    terms += sorted({f'"match_id": {i}{end}' for i in match_ids for end in (",", "}")})
     hit = or_(*[t.c.metadata_json.contains(term, autoescape=True) for term in terms])
     with db.engine.connect() as conn:
         mates = set(conn.execute(select(m.c.user_id).where(
@@ -1217,8 +1226,10 @@ def _scan_notifications(job: dict, after: str, budget: "_Budget") -> tuple[str |
     matches = db.trade_matches_table
 
     def match_partner_deleted(conn, row):
-        """For a match notification: is the match's other side the deletion's
-        placeholder? None when it has no match row to ask."""
+        """For a match notification sent to one of the match's sides: is the
+        other side this person (one of their captured matches) or another
+        deleted one (the placeholder), or a live user? None when there's no
+        match row naming the recipient to ask."""
         meta = _loads(row["metadata_json"])
         match_id = meta.get("match_id") if isinstance(meta, dict) else None
         if not isinstance(match_id, int) or isinstance(match_id, bool):
@@ -1228,7 +1239,7 @@ def _scan_notifications(job: dict, after: str, budget: "_Budget") -> tuple[str |
         if sides is None or row["user_id"] not in sides:
             return None
         other = sides.user_b_id if sides.user_a_id == row["user_id"] else sides.user_a_id
-        return other == _PLACEHOLDER
+        return match_id in match_ids or other == _PLACEHOLDER
     changed, cursor = 0, int(after or 0)
     while budget.take():
         with db.engine.begin() as conn:
