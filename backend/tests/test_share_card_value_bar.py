@@ -918,6 +918,59 @@ def test_share_package_page_has_no_fmt_and_follows_the_snapshot(world):
     assert _meta(without, "property", "og:image:alt") == "Trade card: the give/get breakdown."
 
 
+PKG_WITH_BAR = ("See the give/get breakdown and how the values compare in "
+                "draft-pick terms. Values are an estimate from market consensus, "
+                "not a guarantee.")
+PKG_NO_BAR = "See the give/get breakdown."
+
+
+def _package_lines(html):
+    """Every place /s/p prints its description: the description,
+    og:description and twitter:description tags and the visible <p>."""
+    p = re.search(r"<p>([^<]*)</p>", html)
+    return [_meta(html, "name", "description"),
+            _meta(html, "property", "og:description"),
+            _meta(html, "name", "twitter:description"),
+            p.group(1) if p else None]
+
+
+@pytest.mark.parametrize("give, recv", [
+    (["vb_te1", "generic_pick_2_mid"], ["vb_qb1"]),     # a pick on the give side
+    (["vb_te1"], ["vb_qb1", "generic_pick_3_late"]),    # a pick on the get side
+])
+def test_a_package_with_a_pick_drops_the_player_count(world, give, recv):
+    """Marketing addendum 14 A2: a draft pick isn't a player, so a package
+    holding one says "A dynasty trade package." with no count, bar or not.
+    Players-only packages keep "A {n}-player"."""
+    with_bar = _share_package(world, give, recv, scoring_format="1qb_ppr")
+    bare = _share_package(world, give, recv)
+    players = _share_package(world, *LEAN_GET, scoring_format="1qb_ppr")
+    players_bare = _share_package(world, *LEAN_GET)
+    assert _package_snapshot(with_bar) is not None and _package_snapshot(bare) is None
+    assert _package_snapshot(players) is not None
+    with patch.object(server, "is_enabled", SHARE_ON):
+        page = {sid: world.get(f"/s/p/{sid}").get_data(as_text=True)
+                for sid in (with_bar, bare, players, players_bare)}
+    assert _package_lines(page[with_bar]) == [f"A dynasty trade package. {PKG_WITH_BAR}"] * 4
+    assert _package_lines(page[bare]) == [f"A dynasty trade package. {PKG_NO_BAR}"] * 4
+    for sid in (with_bar, bare):
+        assert "-player" not in page[sid]
+    # The alt text carries no count either way.
+    assert _meta(page[with_bar], "property", "og:image:alt").startswith(
+        "Trade card: the give/get breakdown and a value bar leaning to the ")
+    assert _meta(page[bare], "property", "og:image:alt") == "Trade card: the give/get breakdown."
+    assert _package_lines(page[players]) == [f"A 2-player dynasty trade package. {PKG_WITH_BAR}"] * 4
+    assert _package_lines(page[players_bare]) == [f"A 2-player dynasty trade package. {PKG_NO_BAR}"] * 4
+
+
+def test_a_package_with_an_owned_pick_drops_the_player_count(world):
+    sid = _share_package(world, [OWNED_PICK], ["vb_wr1"], scoring_format="1qb_ppr")
+    assert _package_snapshot(sid) is None        # no league on a package: unpriced
+    with patch.object(server, "is_enabled", SHARE_ON):
+        html = world.get(f"/s/p/{sid}").get_data(as_text=True)
+    assert _package_lines(html) == [f"A dynasty trade package. {PKG_NO_BAR}"] * 4
+
+
 # ---------------------------------------------------------------------------
 # 7. The sharer's private board and settings never move a snapshot
 # ---------------------------------------------------------------------------

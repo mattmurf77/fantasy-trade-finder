@@ -19,6 +19,8 @@
 
 ## What ships
 
+> **Superseded in part (2026-11-01).** The value source is now a share-time snapshot (K-a2), the view-time `?fmt=` is gone (packages take `scoring_format` at mint), the fill is the app's green/amber/ice, the date is the snapshot's `computed_at`, and there's no default tick fraction. See [K-a2](#2026-11-01--k-a2-a-stored-snapshot-at-share-time-operator-yes-add-the-column). The table below describes the first build.
+
 The og trade card (`/og/trade/<token>.png`) draws the app's **TradeValueBar** in the band #511 freed between the panels (bottom y=455) and the footer rule (y=560). The package card (`/og/p/<id>.png`) does too, when its scoring format is known.
 
 | Area | Change |
@@ -45,7 +47,7 @@ The og trade card (`/og/trade/<token>.png`) draws the app's **TradeValueBar** in
 - New or changed tables or columns: **none**.
 - New or changed feature flags: **none**. It renders under the existing `growth.share_landing`. Rollback is a revert and redeploy, with no binary.
 - New env vars or `model_config` keys: **none**.
-- API surface: an optional `fmt` query parameter on `GET /s/p/<id>` and `GET /og/p/<id>.png`. There's no new route.
+- API surface: no new route. `POST /api/share/package` takes an optional `scoring_format`, and both mints write the snapshot. *(The first build's view-time `fmt` parameter was removed with K-a2.)* Schema: **one new column (`value_snapshot`) on two tables, operator-approved 2026-11-01**.
 
 ## 3. Evidence scope
 
@@ -83,7 +85,8 @@ The og trade card (`/og/trade/<token>.png`) draws the app's **TradeValueBar** in
 
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
-| `docs/api-reference.md` | **updated** | `/s/p` and `/og/p`: optional `fmt`. `/og/trade` and `/og/p`: the value bar and pick labels. |
+| `docs/api-reference.md` | **updated** | `POST /api/share/trade` (writes the snapshot), `POST /api/share/package` (optional `scoring_format`), `/og/trade` and `/og/p` (draw only from the snapshot; the date is `computed_at`; a required `second_in_firsts`), `/s/p` (no `fmt`), and the sharer orientation. |
+| `docs/data-dictionary.md` | **updated** | `value_snapshot` on `trade_share_tokens` and `shared_packages`: the JSON fields and the never-stores list. |
 | `living-memory/LLD.md` | n/a | No new convention: the verdict helper is the existing shared-verdict rule, now reused by og. |
 | `docs/architecture.md` | n/a | No module wiring change. og_image still renders from the data it's given. |
 | `living-memory/HLD.md` | n/a | No new module, client or flow. |

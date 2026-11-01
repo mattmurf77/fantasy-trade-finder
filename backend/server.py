@@ -31764,12 +31764,17 @@ def share_package_page(short_id):
     # so the line under the image never promises a comparison it lacks.
     card = _share_card_kwargs(pkg["give_ids"], pkg["receive_ids"],
                               pkg.get("value_snapshot"))
+    # A draft pick isn't a player (marketing addendum 14 A2): with one on
+    # either side the line drops the count. `pick_labels` is the card's own
+    # pick detection (`_share_pick_labels`, the PK chip's source).
+    lead = ("A dynasty trade package." if card["pick_labels"]
+            else f"A {n}-player dynasty trade package.")
     if card["verdict"] is not None:
-        description = (f"A {n}-player dynasty trade package. See the give/get "
+        description = (f"{lead} See the give/get "
                        "breakdown and how the values compare in draft-pick terms. "
                        "Values are an estimate from market consensus, not a guarantee.")
     else:
-        description = f"A {n}-player dynasty trade package. See the give/get breakdown."
+        description = f"{lead} See the give/get breakdown."
     image_url = f"/og/p/{short_id}.png"
     return _share_html(
         title="Trade Package",
