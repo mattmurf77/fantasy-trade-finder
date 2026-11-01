@@ -96,37 +96,54 @@ def short_pick(label_):
     return ("an " if core[0] in "AEIOU" else "a ") + core
 
 
-def bar(W, favors, gap, second_in_firsts):
-    """One TradeValueBar, W pt wide, on the ink1 card it sits in (16pt pad)."""
-    pad = 16
-    img = Image.new("RGB", ((W + 2 * pad) * S, 260 * S), INK1)
+def bar(W, favors, gap, second_in_firsts, them="They", surface="deck"):
+    """One TradeValueBar, W pt of bar, in the surface it sits in: a deck card
+    (ink1, 16pt padding), or the League example card's lower half (ink0, 12pt
+    padding inside a 1pt ink.line border, the bar under a hairline with 10pt
+    above it: LeagueScreen exTrade / exValueBar)."""
+    league = surface == "league"
+    pad, bg = (12, INK0) if league else (16, INK1)
+    edge = 1 if league else 0
+    img = Image.new("RGB", ((W + 2 * pad + 2 * edge) * S, 300 * S), bg)
     d = ImageDraw.Draw(img)
-    x0, y = pad * S, pad * S
+    x0, y = (pad + edge) * S, pad * S
+    if league:                                            # exValueBar's hairline
+        d.rectangle((x0, y, x0 + W * S - 1, y + S - 1), fill=LINE)
+        y += S + 10 * S
+    even = favors in ("even", None)
     you_win = favors == "receive"
-    fill_c = POS if you_win else WARN
+    fill_c = ICE if even else POS if you_win else WARN
     firsts = abs(gap["firsts"])
-    frac = min(1, firsts) * (1 if you_win else -1)
+    frac = 0 if even else min(1, firsts) * (1 if you_win else -1)
     pick = gap["pick_equivalent"]
+    winner = None if even else "You" if you_win else them
 
     label(d, x0, y, "Dynasty value swing", DIM)
-    y += 14 * S + 8 * S                                   # gap space.sm
+    y += 14 * S + 8 * S                                   # wrap gap space.sm
     y += 4 * S                                            # winner marginTop
-    text(d, x0, y, ("You" if you_win else "They") + " win", UI_SEMI(16), fill_c, 22)
+    text(d, x0, y, "Even" if even else f"{winner} win", UI_SEMI(16), BASE if even else fill_c, 22)
     y += 22 * S + 8 * S
     x = x0
-    x += text(d, x, y, "by ", UI(13), DIM, 18)
-    x += text(d, x, y, ("+" if you_win else "−") + f"{round(gap['value']):,}", DATA(13), fill_c, 18)
-    x += text(d, x, y, "  ·  ", UI(13), DIM, 18)
-    x += text(d, x, y, short_pick(pick["label"]), UI_SEMI(13), FIRST_1, 18)
-    text(d, x, y, f" (≈ {firsts:.1f} firsts)", UI(13), DIM, 18)
-    y += 18 * S + 8 * S
+    if even:
+        x += text(d, x, y, "Within a rounding error — ", UI(13), DIM, 18)
+        x += text(d, x, y, f"{round(gap['value']):,}", DATA(13), BASE, 18)
+        text(d, x, y, " apart" + (f" (≈ {gap['firsts']:.1f} firsts)" if gap["firsts"] else ""), UI(13), DIM, 18)
+    else:
+        x += text(d, x, y, "by ", UI(13), DIM, 18)
+        x += text(d, x, y, ("+" if you_win else "−") + f"{round(gap['value']):,}", DATA(13), fill_c, 18)
+        x += text(d, x, y, "  ·  ", UI(13), DIM, 18)
+        x += text(d, x, y, short_pick(pick["label"]), UI_SEMI(13), FIRST_1, 18)
+        text(d, x, y, f" (≈ {firsts:.1f} firsts)", UI(13), DIM, 18)
+    y += 18 * S + 8 * S                                   # wrap gap
 
     y += 8 * S                                            # track marginTop
     tw = W * S
-    rail_top = y + 1 * S
+    rail_top = y + 1 * S                                  # 14pt rail centred in 16
     d.rounded_rectangle((x0, rail_top, x0 + tw, rail_top + 14 * S), radius=2 * S, fill=INK3)
     mid = x0 + tw / 2
-    if frac > 0:
+    if even:                                              # the centred 6pt nub
+        d.rounded_rectangle((mid - 3 * S, rail_top, mid + 3 * S, rail_top + 14 * S), radius=2 * S, fill=ICE)
+    elif frac > 0:
         d.rounded_rectangle((mid, rail_top, mid + frac * tw / 2, rail_top + 14 * S), radius=2 * S, fill=fill_c)
     else:
         d.rounded_rectangle((mid + frac * tw / 2, rail_top, mid, rail_top + 14 * S), radius=2 * S, fill=fill_c)
@@ -135,32 +152,39 @@ def bar(W, favors, gap, second_in_firsts):
         tx = x0 + tw * p / 100
         d.rectangle((tx, y - 4 * S, tx + S - 1, y + 20 * S - 1), fill=LINE)
     d.rectangle((mid - S, y - 4 * S, mid - 1, y + 20 * S - 1), fill=LINE_A11Y)
-    y += 16 * S + 8 * S                                   # scale row marginTop
+    y += 16 * S + 8 * S + 8 * S                           # wrap gap + scale row marginTop
 
     scale = DATA(11)
     text(d, x0, y, "−1st", scale, FAINT, 18)
     text(d, x0 + tw - 30 * S, y, "+1st", scale, FAINT, 18)
     frame_x, frame_w = x0 + 30 * S, tw - 60 * S
-    for p, s in ((second_pct, "−2nd"), (50, "Even"), (100 - second_pct, "+2nd")):
-        cx = frame_x + frame_w * p / 100
-        text(d, cx - width(d, s, scale) / 2, y, s, scale, FAINT, 18)
-    y += 18 * S + 4 * S                                   # end row marginTop
-    label(d, x0, y, "They win", DIM if you_win else fill_c)
+    for p, s_ in ((second_pct, "−2nd"), (50, "Even"), (100 - second_pct, "+2nd")):
+        cx = frame_x + frame_w * p / 100                  # the 12pt middle frame,
+        text(d, cx - width(d, s_, scale) / 2, y + 3 * S, s_, scale, FAINT, 18)  # centred in 18
+    y += 18 * S + 8 * S + 4 * S                           # wrap gap + end row marginTop
+    them_end = f"{them} win"
+    label(d, x0, y, them_end, fill_c if winner == them else DIM)
     yw = width(d, "YOU WIN", UI_SEMI(11), 0.88)
     label(d, x0 + tw - yw, y, "You win", fill_c if you_win else DIM)
-    y += 14 * S + 8 * S
+    y += 14 * S + 8 * S                                   # wrap gap
     wy = y + 9 * S                                        # "Why?" row, minHeight 32
     label(d, x0, wy, "Why?", DIM)
     cx, cy = x0 + tw - 7 * S, wy + 7 * S                  # chevron-down, 14pt
     d.line((cx - 4 * S, cy - 2 * S, cx, cy + 2 * S, cx + 4 * S, cy - 2 * S), fill=DIM, width=round(1.5 * S))
     y += 32 * S + pad * S
-    return img.crop((0, 0, img.width, y))
+    img = img.crop((0, 0, img.width, y + edge * S))
+    if league:                                            # the card's border
+        d = ImageDraw.Draw(img)
+        w_, h_ = img.width, img.height
+        d.rounded_rectangle((0, -8 * S, w_ - 1, h_ - 1), radius=8 * S, outline=LINE, width=S)
+    return img
 
 
-def sheet(name, W, cases):
+def sheet(name, W, cases, them="They", surface="deck"):
     """Rows of cases, a before (0.57) and an after (0.287) column each."""
     cols = [("Before (main): ±2nd tick at 0.57", 0.57), ("After (#567): ±2nd tick at 0.287", 0.287)]
-    tiles = [[bar(W, favors, gap_b if i == 0 else gap_a, second) for i, (_, second) in enumerate(cols)]
+    tiles = [[bar(W, favors, gap_b if i == 0 else gap_a, second, them, surface)
+              for i, (_, second) in enumerate(cols)]
              for _, favors, gap_b, gap_a in cases]
     m, top, gap_x, row_h = 16 * S, 34 * S, 32 * S, 26 * S
     tw, th = tiles[0][0].width, max(t.height for row in tiles for t in row)
@@ -183,13 +207,17 @@ def sheet(name, W, cases):
 
 mid_2nd = elo_to_value(GENERIC_PICK_SEEDS[(2, "Mid")])
 early_2nd = elo_to_value(GENERIC_PICK_SEEDS[(2, "Early")])
-# A calculator or deck card on a 375pt phone (317pt of bar).
+# A deck card on a 375pt phone (317pt of bar; TradeCard passes the partner's
+# handle as themLabel). The calculator's bar is 309pt, the same drawing.
+even = {**gap_for(250), "pick_equivalent": None}
 sheet("before-after-317.png", 317, [
     ("You win by an Early 2nd: the fill ends past the +2nd tick (it stopped short of it before)",
      "receive", gap_for(early_2nd), gap_for(early_2nd)),
-    ("They win by a Mid 2nd: the fill ends on the −2nd tick",
+    ("@mike_dynasty wins by a Mid 2nd: the fill ends on the −2nd tick",
      "give", gap_for(mid_2nd), gap_for(mid_2nd)),
-])
+    ("Even (250 apart): the centred nub, unchanged; only the ticks move",
+     "even", even, even),
+], them="@mike_dynasty")
 # The League "Works right now" example card (283pt of bar): main's fixture
 # (380, 0.6 firsts, "a Mid 2nd") before, today's Mid 2nd after (P2-1).
 old_example = {"value": 380, "firsts": 0.6,
@@ -199,5 +227,5 @@ new_example = {"value": 607, "firsts": 0.29,
 sheet("before-after-283.png", 283, [
     ("League \"Works right now\" example: \"a Mid 2nd\", ending on the +2nd tick after",
      "receive", old_example, new_example),
-])
+], surface="league")
 print("ok")

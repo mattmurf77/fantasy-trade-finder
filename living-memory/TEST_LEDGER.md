@@ -1,3 +1,18 @@
+## 2026-10-31 — The value bar, release-lead's #567 delta QA (GO-with-notes): the example test's indent, renders R1–R4, checklist wording
+
+- **P2, the test:** `^\s*(value|firsts)` also matched `pick_equivalent.value: 606.5`, which shadowed the top-level `value`, so the value users see was never checked. It now reads the top level at its two-space indent and requires both keys. A top-level 380 or 9999, or `firsts` 0.6, fails it; all three were green before.
+- **Renders:**
+  - **R1:** the wrap's 8pt gap before the scale row and the end row. The mock was 16pt short.
+  - **R2:** the middle scale labels sit 3pt lower: the 12pt middle row is centred in the 18pt row.
+  - **R3:** the League bar is on the example card, `ink0` with 12pt padding, under its hairline, inside the 1pt border.
+  - **R4:** the 317 sheet is a deck card, with "@mike_dynasty win" as TradeCard passes the handle. The calculator's 309pt bar draws the same.
+  - **Optional:** an Even case shows the centred nub. Re-running `render.py` reproduces both PNGs.
+- **Checklist and scope:**
+  - steps 4–5 say to switch to a league with 0 mutual and 0 awaiting matches;
+  - step 5 and the scope call the label crowding what it is, a regression of this change (it started at text scale 2.41 before, 1.21 now at 283pt), with the design follow-up;
+  - the stale #564 "still 0.57" note is removed, since #564's 30ef8349 dropped that line.
+- **Runs:** `test_value_bar_scale.py` 3 passed.
+
 ## 2026-10-31 — The value bar, release-lead's #567 QA (GO-with-notes): the League example, renders from the app's tokens, a checklist that discriminates
 
 Gates: release-lead's #567 QA, with three P2s before the 11-06 binary. Client-only plus a backend test; no schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
@@ -9,7 +24,6 @@ Gates: release-lead's #567 QA, with three P2s before the 11-06 binary. Client-on
   - `docs/design/components.md`'s "≈0.57" and "21.5%/78.5%" are fixed, and the file is now in the docs table;
   - the scope notes that a live `elo_value_k` change wouldn't move the app's constant;
   - the scope notes the label crowding at large text (a design follow-up);
-  - the scope notes that whichever of #564 / #567 lands second drops #564's "still 0.57" line.
 - **Runs:** `test_value_bar_scale.py` 3 passed.
 
 ## 2026-10-31 — The value bar's ±2nd landmark at today's Mid 2nd / Mid 1st (0.57 → 0.287)
