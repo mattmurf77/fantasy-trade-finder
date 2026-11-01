@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon, PositionBadge, Text, TickLabel } from './chalkline';
@@ -54,12 +54,15 @@ export function UsageLeagueList({
   onAdd,
   onTrade,
   compact = false,
+  addingLeagueId = null,
 }: {
   player: UsagePlayer;
   rows: UsageLeagueRow[];
   onAdd: (leagueId: string) => void;
   onTrade: (leagueId: string) => void;
   compact?: boolean;
+  /** D1: the league whose Add is waiting on its capability (≤ 3 s). */
+  addingLeagueId?: string | null;
 }) {
   return (
     <View>
@@ -95,12 +98,18 @@ export function UsageLeagueList({
                   ? `Add ${player.name} in ${row.name}`
                   : `Find a trade for ${player.name} in ${row.name}`
               }
+              accessibilityState={{ disabled: addingLeagueId === row.league_id, busy: addingLeagueId === row.league_id }}
+              disabled={addingLeagueId === row.league_id}
               onPress={() =>
                 row.status === 'free_agent' ? onAdd(row.league_id) : onTrade(row.league_id)
               }
               style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
             >
-              <Icon name={row.status === 'free_agent' ? 'plus' : 'trade'} size={16} color={chalk.base} />
+              {addingLeagueId === row.league_id ? (
+                <ActivityIndicator size="small" color={chalk.base} />
+              ) : (
+                <Icon name={row.status === 'free_agent' ? 'plus' : 'trade'} size={16} color={chalk.base} />
+              )}
               <Text style={styles.actionText}>{row.status === 'free_agent' ? 'Add' : 'Trade'}</Text>
             </Pressable>
           ) : null}

@@ -43,22 +43,23 @@ import { isEspnLeague } from '../api/espn';
 import { isMflLeague, isFleaflickerLeague } from '../api/platformLink';
 import {
   attemptMove,
-  bidText,
+  capabilityOrNull,
   consentEcho,
   consentLinks,
   consentShownReason,
   consentValidAt,
   consumeWithdrawal,
   faMoveGate,
-  fallbackCopy,
+  fetchConsentStep,
   fillTemplate,
-  getConsent,
   isSubmitCapability,
   moveCopy,
-  moveCtaLabel,
-  readConsentBlock,
+  rowMoveFields,
+  termsChanged,
   trackFaMove,
   windowDateText,
+  withTimeout,
+  FA_MOVE_REREAD_WAIT_MS,
   FA_MOVE_STILL_SENDING_MS,
   type AttemptOutcome,
   type ConsentBlock,
@@ -67,14 +68,24 @@ import {
   type FaMoveCapability,
   type FaMoveRow,
   type FaMoveSurface,
-  type FallbackKey,
-  type GateStep,
-  type LeaguePlatform,
-  type MoveCopyKey,
   type MoveKind,
 } from '../api/faMove';
 import { markClaimPending } from '../state/claimsPending';
 import { useSession } from '../state/useSession';
+import {
+  actionBlockPinned,
+  copyFns,
+  dropListShown,
+  initialView,
+  moveSelection,
+  planFailure,
+  planKindChanged,
+  planNotSent,
+  planResponse,
+  resumeAfterConnect,
+  type Plan,
+  type SheetView,
+} from '../utils/claimSheetPlan';
 import { openInSleeperApp } from '../utils/sleeperHandoff';
 import { openPlatform, type ExternalSurface } from '../utils/openExternal';
 
@@ -151,27 +162,9 @@ const SHEET_DISMISS_MS = 450;
 // After the Modal's slide-in (about 300ms on iOS), so the flash is seen.
 const FLASH_DELAY_MS = 400;
 // The sheet's maxHeight below. Above half of it, the action block stops
-// pinning and joins the end of the scroll (design-lead, accessibility sizes).
+// pinning and joins the end of the scroll (design-lead, accessibility sizes;
+// utils/claimSheetPlan actionBlockPinned).
 const SHEET_MAX_FRACTION = 0.85;
-
-// One inline line in a step: a refusal (--neg) or a plain notice (chalk).
-type Notice = { text: string; tone: 'neg' | 'chalk' };
-type ResultKind =
-  | 'added' // 8
-  | 'pending' // 9
-  | 'player_taken' // 10c
-  | 'platform_refused' // 10f
-  | 'unavailable' // 10g
-  | 'unknown' // 12
-  | 'neutral' // 12-style: a 400 or an unrecognised 4xx
-  | 'rejected'; // 13
-// Each step replaces the sheet's content rather than stacking (scope §C (e)).
-type SheetView =
-  | { step: 'handoff'; line: string | null } // 1, 14, F4
-  | { step: 'ready'; ctaNotice?: Notice; dropNotice?: Notice } // 6, with 10a/10b/10e/11 inline
-  | { step: 'connect'; verify: boolean; line: string | null; backedOut: boolean } // 3, 4
-  | { step: 'consent'; block: ConsentBlock; termsChanged: boolean } // 5
-  | { step: 'result'; kind: ResultKind; title: string; lines: string[] }; // 8, 9, 10c, 10f, 10g, 12, 13
 
 // #179 claim sheet. Two modes, both decided by the server (D1, scope §B1):
 //  - Hand-off (no capability, today's server; `move.mode` 'handoff'): FTF
@@ -181,7 +174,8 @@ type SheetView =
 //    executes it. No steps block, no clipboard (operator, 2026-11-01).
 //  - Submit (`move.mode` 'submit'): the named CTA is the move (D10), behind
 //    connect → consent → move (api/faMove.ts faMoveGate), with the result
-//    stated as the platform reports it.
+//    stated as the platform reports it. The decisions are pure functions in
+//    utils/claimSheetPlan; this component renders them and runs their effects.
 export default function ClaimSheet({
   row,
   leagueId,
@@ -222,23 +216,18 @@ export default function ClaimSheet({
   // D1 state. The capability is held from the tap and changes only on this
   // sheet's own re-reads, so a background refetch never swaps the CTA under
   // the user's thumb.
-  const [move, setMove] = useState<FaMoveCapability | null>(openedWith ?? null);
-  const [rowMove, setRowMove] = useState<FaMoveRow>({
-    move_kind: row.move_kind,
-    move_mode: row.move_mode,
-    move_line: row.move_line,
-  });
+  // No usable capability: nothing of it is used, `move.copy` and the row's
+  // move_* fields included (fully legacy).
+  const [move, setMove] = useState<FaMoveCapability | null>(() => capabilityOrNull(openedWith));
+  const [rowMove, setRowMove] = useState<FaMoveRow>(() => rowMoveFields(openedWith, row));
   // A refusal's correction of move.connect (409 not_linked, say). null = the capability's.
   const [connect, setConnect] = useState<string | null>(null);
   // A refusal's or the consent GET's correction of move.consent_until.
   const [consentOverride, setConsentOverride] = useState<boolean | null>(null);
-  const [view, setView] = useState<SheetView>(() =>
-    initialView(
-      openedWith ?? null,
-      { move_kind: row.move_kind, move_mode: row.move_mode, move_line: row.move_line },
-      { league: leagueName ?? null, name: row.name },
-    ),
-  );
+  const [view, setView] = useState<SheetView>(() => {
+    const cap = capabilityOrNull(openedWith);
+    return initialView(cap, rowMoveFields(cap, row), copyFns(cap, { league: leagueName ?? null, name: row.name }));
+  });
   const [viewSeq, setViewSeq] = useState(0);
   const [ticked, setTicked] = useState(false);
   const [sending, setSending] = useState(false);
@@ -248,7 +237,7 @@ export default function ClaimSheet({
   const [hidden, setHidden] = useState(false);
   const [serverRemaining, setServerRemaining] = useState<number | null>(null);
   const [requireDrop, setRequireDrop] = useState(false);
-  const [blockHeight, setBlockHeight] = useState(0);
+  const [pinned, setPinned] = useState(true);
 
   const mountedRef = useRef(true);
   const sendingRef = useRef(false);
@@ -264,7 +253,9 @@ export default function ClaimSheet({
 
   const busy = sending || loadingConsent;
   const submitLayout = isSubmitCapability(move);
-  const platform: LeaguePlatform = isSubmitCapability(move) ? move.league_platform : 'sleeper';
+  const vars: CopyVars = { league: leagueName ?? null, name: row.name };
+  const copy = copyFns(move, vars);
+  const { platform, slot, fallback } = copy;
   // The only external opener this binary has is Sleeper's (#509, #379).
   const opensSleeper = platform === 'sleeper';
   // Both hosts pass their surface (check-sleeper-handoff H1).
@@ -281,30 +272,30 @@ export default function ClaimSheet({
   const candidates = dropCandidates?.players ?? [];
   const untouchablesExcluded = dropCandidates?.untouchables_excluded ?? 0;
   // Open slots known and > 0 ⇒ no drop needed; 0 (or unknown, when we have
-  // candidates) ⇒ show the least-valuable-first drop list.
-  const showDropList = openSlots !== null ? openSlots === 0 : candidates.length > 0;
+  // candidates) ⇒ show the least-valuable-first drop list; and always when
+  // the server said a drop is required (10a).
+  const showDropList = dropListShown({ openSlots, candidates: candidates.length, requireDrop });
 
   // Note (d): an add spends no FAAB, so in-app adds hide the bid; a claim
   // and every hand-off show it on FAAB leagues.
   const bidApplies = view.step === 'handoff' || kind === 'claim';
-  const claimBid = kind === 'claim' && faab ? (bidNum ?? 0) : null;
-  const dropName = candidates.find((c) => c.id === dropId)?.name ?? null;
-  const needsDrop = (openSlots === 0 || requireDrop) && !dropId;
 
-  const vars: CopyVars = { league: leagueName ?? null, name: row.name };
-  const slot = (key: MoveCopyKey, extra: CopyVars = {}) =>
-    moveCopy(move?.copy, key, { ...vars, ...extra }, platform);
-  const fallback = (key: FallbackKey, extra: CopyVars = {}) =>
-    fallbackCopy(key, { ...vars, ...extra }, platform);
-
-  // D10(a): the named CTA, the per-move confirmation. The consent step's
-  // "This move" line is this same string.
-  const ctaLabel = moveCtaLabel(
-    move?.copy,
+  // D10(a): the named CTA is the per-move confirmation, and it names exactly
+  // what the request sends: one selection (the drop that is still in the
+  // list, the claim's bid) feeds the CTA, the consent step's "This move"
+  // line, the waiver lines and the request.
+  const sel = moveSelection({
+    rowName: row.name,
     kind,
-    { add: row.name, drop: dropName, bid: claimBid != null ? bidText(claimBid) : null },
+    dropId,
+    candidates,
+    faab: !!faab,
+    bid,
+    copy: move?.copy,
     platform,
-  );
+  });
+  const ctaLabel = sel.ctaLabel;
+  const needsDrop = (openSlots === 0 || requireDrop) && !sel.drop;
 
   useEffect(
     () => () => {
@@ -323,6 +314,12 @@ export default function ClaimSheet({
     // Once, at open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A selected drop that a refresh took out of the candidates is cleared
+  // (the selection already stopped naming or sending it).
+  useEffect(() => {
+    if (dropId && !candidates.some((c) => c.id === dropId)) setDropId(null);
+  }, [dropId, candidates]);
 
   // State 7: the "still sending" line after ~8 s; the CTA stays busy.
   useEffect(() => {
@@ -351,8 +348,9 @@ export default function ClaimSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Back from the connect screen: re-read the capability, then resume at the
-  // next step needed. Never sends by itself (consent.md :84-88, contract §6).
+  // Back from the connect screen: re-read the capability (bounded), then
+  // resume at the next step needed. Never sends by itself (consent.md
+  // :84-88, contract §6). A failed re-read goes on as connected.
   const onConnectReturn = useRef<() => void>(() => {});
   onConnectReturn.current = () => {
     if (!awaitingConnectRef.current) return;
@@ -360,26 +358,23 @@ export default function ClaimSheet({
     void (async () => {
       const fresh = await refetchSafe();
       if (!mountedRef.current) return;
-      const nextMove = fresh ? fresh.move ?? null : move;
-      const freshRow = fresh?.free_agents?.find((r) => r.player_id === row.player_id);
-      const nextRow: FaMoveRow = freshRow
-        ? { move_kind: freshRow.move_kind, move_mode: freshRow.move_mode, move_line: freshRow.move_line }
-        : rowMove;
-      setMove(nextMove);
-      setRowMove(nextRow);
+      const next = resumeAfterConnect(fresh, { move, row: rowMove, playerId: row.player_id });
+      const nextCopy = copyFns(next.move, vars);
+      setMove(next.move);
+      setRowMove(next.row);
       setConnect(null);
       setConsentOverride(null);
       setHidden(false);
-      const valid = consentValidAt(nextMove?.consent_until, Date.now());
-      const step = faMoveGate({ move: nextMove, row: nextRow, consentValid: valid, ticked: false });
+      const valid = consentValidAt(next.move?.consent_until, Date.now());
+      const step = faMoveGate({ move: next.move, row: next.row, consentValid: valid, ticked: false });
       if (step === 'connect' || step === 'verify') {
         // A cancelled or failed sign-in: the same step, bid and drop intact (F2).
-        show({ step: 'connect', verify: step === 'verify', line: connectLine(step, nextMove), backedOut: true });
-        trackConnectShown(nextMove, null, analyticsSurface);
+        show(initialView(next.move, next.row, nextCopy, true));
+        trackConnectShown(next.move, null, analyticsSurface);
       } else if (step === 'consent') {
-        await openConsent(false, nextMove);
+        await openConsent(false, next.move);
       } else {
-        show(initialView(nextMove, nextRow, vars));
+        show(initialView(next.move, next.row, nextCopy));
       }
     })();
   };
@@ -390,24 +385,15 @@ export default function ClaimSheet({
     setViewSeq((n) => n + 1);
   }
 
-  async function refetchSafe(): Promise<FreeAgentsResponse | undefined> {
-    try {
-      return refetch ? await refetch() : undefined;
-    } catch {
-      return undefined;
-    }
+  // Every in-sheet re-read is bounded, so the sheet never stays busy offline.
+  function refetchSafe(): Promise<FreeAgentsResponse | undefined> {
+    return refetch ? withTimeout(refetch(), FA_MOVE_REREAD_WAIT_MS) : Promise.resolve(undefined);
   }
 
   // F12: a terminal result refreshes the FA list, drop list, FAAB and the
   // capability together (all one read), on both hosts' keys.
   function refreshList() {
     void queryClient.invalidateQueries({ queryKey: ['free-agents', leagueId] });
-  }
-
-  function connectLine(step: GateStep, m: FaMoveCapability | null): string | null {
-    if (step === 'verify') return moveCopy(m?.copy, 'verify_line', vars, platform);
-    if ((connect ?? m?.connect) === 'other_account') return moveCopy(m?.copy, 'other_account_line', vars, platform);
-    return moveCopy(m?.copy, 'connect_line', vars, platform);
   }
 
   function requestClose() {
@@ -445,7 +431,8 @@ export default function ClaimSheet({
     setHidden(true);
     setTimeout(() => {
       if (target === 'sleeper') navigation.navigate('SleeperConnect');
-      else navigation.navigate('EspnConnect', { reason: 'send' });
+      // No `reason: 'send'`: that copy is about sending trades.
+      else navigation.navigate('EspnConnect');
     }, SHEET_DISMISS_MS);
   }
 
@@ -454,34 +441,41 @@ export default function ClaimSheet({
     setTimeout(() => navigation.navigate('SettingsLeagues'), SHEET_DISMISS_MS);
   }
 
-  // The consent step (5), from the GET (`sendIfValid`: the CTA was tapped,
-  // so a grant the capability didn't know about sends now).
+  // The consent step (5) (`sendIfValid`: the CTA was tapped, so a grant the
+  // capability didn't know about sends now). NetInfo comes first: offline,
+  // or a GET with no answer, is state 11 with nothing sent; after a connect
+  // (no tap) it is just Ready. Only a server failure or an incomplete block
+  // is F4's hand-off.
   async function openConsent(sendIfValid: boolean, m: FaMoveCapability | null = move) {
     if (!isSubmitCapability(m)) return;
     setLoadingConsent(true);
-    let status: Awaited<ReturnType<typeof getConsent>> | null = null;
-    try {
-      status = await getConsent(m.league_platform);
-    } catch {
-      status = null;
-    }
+    const step = await fetchConsentStep(m.league_platform);
     if (!mountedRef.current) return;
     setLoadingConsent(false);
-    if (status?.valid === true) {
-      setConsentOverride(true);
-      if (sendIfValid) await send(null, true);
-      else show({ step: 'ready' });
-      return;
+    switch (step.kind) {
+      case 'offline':
+      case 'not_sent':
+        if (sendIfValid) apply(planNotSent(copy));
+        else show({ step: 'ready' });
+        return;
+      case 'valid':
+        setConsentOverride(true);
+        if (sendIfValid) await send(null, true);
+        else show({ step: 'ready' });
+        return;
+      case 'consent':
+        showConsent(step.block, m);
+        return;
+      case 'unavailable':
+        show({ step: 'handoff', line: slot('unavailable_line') });
+        return;
     }
-    const block = readConsentBlock(status?.consent);
-    // F4: no consent text from the server → the hand-off, never baked-in text.
-    if (!block) show({ step: 'handoff', line: slot('unavailable_line') });
-    else showConsent(block, m);
   }
 
   function showConsent(block: ConsentBlock, m: FaMoveCapability | null = move) {
     if (!isSubmitCapability(m)) return;
-    const termsChanged = shownVersionRef.current != null && shownVersionRef.current !== block.copy_version;
+    // The server says the terms changed, or this sheet showed another version (F5).
+    const changed = termsChanged(block, shownVersionRef.current);
     // The server's reason when the block carries one, else the client's reading.
     const reason = consentShownReason(block, {
       consentUntil: m.consent_until,
@@ -499,7 +493,7 @@ export default function ClaimSheet({
     // an offline tap was holding.
     pendingConsentRef.current = null;
     setTicked(false);
-    show({ step: 'consent', block, termsChanged });
+    show({ step: 'consent', block, termsChanged: changed });
     trackFaMove(m, 'fa_move_consent_shown', { surface: analyticsSurface, reason });
   }
 
@@ -514,7 +508,7 @@ export default function ClaimSheet({
     const step = faMoveGate({ move, row: rowMove, connect, consentValid: valid, ticked: false });
     if (step === 'submit') await send(null, true);
     else if (step === 'consent') await openConsent(true);
-    else show(initialView(move, rowMove, vars));
+    else show(initialView(move, rowMove, copy));
   }
 
   // The one call site of the move API, behind the gate's submit /
@@ -534,12 +528,11 @@ export default function ClaimSheet({
     const outcome = await attemptMove({
       move,
       surface: analyticsSurface,
+      // Exactly what the CTA named (the selection), plus the consent echo.
       request: {
         league_id: leagueId,
         add_player_id: row.player_id,
-        ...(dropId ? { drop_player_id: dropId } : {}),
-        move_kind: kind,
-        ...(claimBid != null ? { faab_bid: claimBid } : {}),
+        ...sel.request,
         ...(echo ? { consent: echo } : {}),
       },
     });
@@ -559,115 +552,50 @@ export default function ClaimSheet({
       // Offline at the tap (F17): state 11, nothing sent. A consent the user
       // gave goes with the retry, since it never reached the server.
       if (echo) pendingConsentRef.current = echo;
-      show({ step: 'ready', ctaNotice: { text: slot('not_sent_line') ?? '', tone: 'neg' } });
+      apply(planNotSent(copy));
       return;
     }
     pendingConsentRef.current = null;
     if ('response' in outcome) {
-      const res = outcome.response;
-      const pending = res.status === 'pending';
-      setConsentOverride(true);
-      // State 9: the host's row reads "Claim pending" for the app session.
-      if (pending) markClaimPending(leagueId, row.player_id);
-      refreshList();
-      show({
-        step: 'result',
-        kind: pending ? 'pending' : 'added',
-        title: res.title || fallback(pending ? 'result_pending' : 'result_added') || '',
-        lines: Array.isArray(res.lines) ? res.lines.filter((l) => typeof l === 'string') : [],
-      });
+      apply(planResponse(outcome.response, copy));
       return;
     }
-    const f = outcome.failure;
-    const said = f.message ?? null;
-    const refusal = (k: ResultKind) => {
-      refreshList();
-      show({ step: 'result', kind: k, title: f.title ?? fallback('refusal_title') ?? '', lines: said ? [said] : [] });
-    };
-    switch (f.state) {
-      case 'handoff': // 404 feature_disabled: moves are off; nothing was sent.
-        show({ step: 'handoff', line: slot('unavailable_line') });
-        return;
-      case 'connect':
-        setConnect('not_linked');
-        show({ step: 'connect', verify: false, line: said ?? slot('connect_line'), backedOut: false });
-        trackConnectShown(move, 'not_linked', analyticsSurface);
-        return;
-      case 'verify': {
-        const reason = f.errorCode === 'expired' ? 'expired' : 'unverified';
-        setConnect(reason);
-        show({ step: 'connect', verify: true, line: said ?? slot('verify_line'), backedOut: false });
-        trackConnectShown(move, reason, analyticsSurface);
-        return;
-      }
-      case 'consent':
-        setConsentOverride(false);
-        if (f.consent) showConsent(f.consent);
-        else show({ step: 'handoff', line: slot('unavailable_line') });
-        return;
-      case 'roster_full': // 10a, the safety net: pick a drop, then a new tap.
-        setRequireDrop(true);
-        show({ step: 'ready', dropNotice: { text: said ?? fallback('drop_to_make_room') ?? '', tone: 'neg' } });
-        scrollRef.current?.scrollTo({ y: dropYRef.current, animated: true });
-        return;
-      case 'drop_gone': // 10b: clear the stale pick, refresh the drop list.
-        setDropId(null);
-        refreshList();
-        show({ step: 'ready', dropNotice: { text: said ?? fallback('refusal_title') ?? '', tone: 'neg' } });
-        return;
-      case 'over_budget': // 10d: the bid error, against the server's remaining.
-        if (typeof f.remaining === 'number') setServerRemaining(f.remaining);
-        show({ step: 'ready' });
-        return;
-      case 'kind_changed': {
-        // 10e: re-read the list; the CTA now names what the server will send.
-        const fresh = await refetchSafe();
-        if (!mountedRef.current) return;
-        const freshRow = fresh?.free_agents?.find((r) => r.player_id === row.player_id);
-        const nextRow: FaMoveRow = {
-          move_kind: freshRow?.move_kind ?? (kind === 'add' ? 'claim' : 'add'),
-          move_mode: freshRow?.move_mode,
-          move_line: freshRow?.move_line,
-        };
-        const nextMove = isSubmitCapability(fresh?.move) ? fresh!.move! : move;
-        setMove(nextMove);
-        setRowMove(nextRow);
-        const line = said ?? fallback('refusal_title') ?? '';
-        const step = faMoveGate({ move: nextMove, row: nextRow, connect, consentValid: false, ticked: false });
-        if (step === 'handoff') show({ step: 'handoff', line });
-        else show({ step: 'ready', ctaNotice: { text: line, tone: 'chalk' } });
-        return;
-      }
-      case 'claims_off': // 14: the hand-off, bid and drop kept.
-        show({ step: 'handoff', line: said ?? slot('unavailable_line') });
-        return;
-      case 'not_sent': // 11: nothing was sent; the same named CTA retries.
-        show({ step: 'ready', ctaNotice: { text: said ?? slot('not_sent_line') ?? '', tone: 'neg' } });
-        return;
-      case 'player_taken':
-      case 'platform_refused':
-      case 'unavailable':
-      case 'neutral':
-        refusal(f.state);
-        return;
-      case 'rejected': // 13: the server dropped the credential.
-        setConnect('not_linked');
-        refusal('rejected');
-        return;
-      case 'unknown': {
-        // 12: never "failed", never a retry (F3). The server's own words only
-        // for its own codes; anything else gets the client's 8i copy.
-        const own = f.errorCode === 'outcome_unknown' || f.errorCode === 'move_in_progress';
-        refreshList();
-        show({
-          step: 'result',
-          kind: 'unknown',
-          title: (own && f.title) || slot('unknown_title') || '',
-          lines: [(own && said) || slot('unknown_body') || ''],
-        });
-        return;
-      }
+    const plan = planFailure(outcome.failure, copy);
+    if (!plan.reread) {
+      apply(plan);
+      return;
     }
+    // 10e: re-read the list (bounded); the CTA then names what the server will send.
+    const fresh = await refetchSafe();
+    if (!mountedRef.current) return;
+    const next = planKindChanged(fresh, {
+      move,
+      kind,
+      said: outcome.failure.message ?? null,
+      connect,
+      playerId: row.player_id,
+      copy,
+    });
+    setMove(next.move);
+    setRowMove(next.row);
+    show(next.view);
+  }
+
+  // Runs a plan's effects, then shows its step.
+  function apply(plan: Plan) {
+    if (plan.connect !== undefined) setConnect(plan.connect);
+    if (plan.consentOverride !== undefined) setConsentOverride(plan.consentOverride);
+    if (plan.requireDrop) setRequireDrop(true);
+    if (plan.clearDrop) setDropId(null);
+    if (plan.serverRemaining !== undefined) setServerRemaining(plan.serverRemaining);
+    // F12: a terminal result refreshes the list, drop list, FAAB and capability.
+    if (plan.refresh) refreshList();
+    // State 9: the host's row reads "Claim pending" for the app session.
+    if (plan.markPending) markClaimPending(leagueId, row.player_id);
+    if (plan.trackConnect) trackConnectShown(move, plan.trackConnect, analyticsSurface);
+    if (plan.consent) showConsent(plan.consent);
+    else if (plan.view) show(plan.view);
+    if (plan.scrollToDrop) scrollRef.current?.scrollTo({ y: dropYRef.current, animated: true });
   }
 
   // ── Pieces ────────────────────────────────────────────────────────────
@@ -887,7 +815,6 @@ export default function ClaimSheet({
     actionBlock = handoffBlock;
   } else if (view.step === 'ready') {
     const leagueLine = slot('league_line');
-    const waiverLine = kind === 'claim' ? slot('waiver_line', { bid: claimBid != null ? bidText(claimBid) : null }) : null;
     actionBlock = (
       <>
         {focusLine(view.ctaNotice?.text, view.ctaNotice?.tone === 'neg' ? sheetStyles.negLine : sheetStyles.chalkLine)}
@@ -904,7 +831,12 @@ export default function ClaimSheet({
           style={sheetStyles.namedCta}
         />
         {stillSending ? <Text style={sheetStyles.dimLine}>{slot('still_sending')}</Text> : null}
-        {waiverLine ? <Text style={sheetStyles.dimLine}>{waiverLine}</Text> : null}
+        {/* A claim: the waiver line (with or without the drop), then the bid line when it has one. */}
+        {sel.waiverLines.map((l, i) => (
+          <Text key={i} style={sheetStyles.dimLine}>
+            {l}
+          </Text>
+        ))}
         <Text style={sheetStyles.dimLine}>{slot('finality')}</Text>
         {windowOpen ? (
           <Text style={sheetStyles.dimLine}>
@@ -994,6 +926,8 @@ export default function ClaimSheet({
         </View>
       </>
     );
+  } else if (view.step === 'unsupported') {
+    actionBlock = <Button label="Done" variant="primary" onPress={onClose} />;
   } else {
     const openLabel = fallback('open_in_platform') ?? '';
     const k = view.kind;
@@ -1037,6 +971,20 @@ export default function ClaimSheet({
           </Text>
         ))}
         {thisMove ? <Text style={sheetStyles.thisMove}>{thisMove}</Text> : null}
+      </View>
+    );
+  } else if (view.step === 'unsupported') {
+    // MFL / ESPN with no in-app path in this binary (contract §6): that
+    // platform's NO_ADD_REASON, as the host's alert would say it.
+    const reason = NO_ADD_REASON[platform === 'sleeper' ? 'local' : platform];
+    body = (
+      <View style={sheetStyles.result}>
+        <View ref={focusRef} accessible>
+          <Text style={type.title} accessibilityRole="header" testID="fa-claim.result">
+            {reason.title}
+          </Text>
+        </View>
+        <Text style={sheetStyles.dimLine}>{reason.body}</Text>
       </View>
     );
   } else if (view.step === 'result') {
@@ -1097,13 +1045,20 @@ export default function ClaimSheet({
   // ── The in-app move sheet: header / scrolling body / pinned action
   // block (ink-2, top hairline). At accessibility sizes, a block taller
   // than half the sheet joins the end of the scroll instead (design-lead).
-  const unpinned = blockHeight > (windowHeight * SHEET_MAX_FRACTION) / 2;
+  // The measured view is the block's content, the same in both parents, and
+  // the decision has hysteresis (utils/claimSheetPlan actionBlockPinned).
+  const unpinned = !pinned;
   const block = (
-    <View
-      style={unpinned ? sheetStyles.blockInScroll : sheetStyles.blockPinned}
-      onLayout={(e) => setBlockHeight(e.nativeEvent.layout.height)}
-    >
-      {actionBlock}
+    <View style={unpinned ? sheetStyles.blockInScroll : sheetStyles.blockPinned}>
+      <View
+        style={sheetStyles.blockContent}
+        onLayout={(e) => {
+          const h = e.nativeEvent.layout.height;
+          setPinned((p) => actionBlockPinned(p, h, windowHeight * SHEET_MAX_FRACTION));
+        }}
+      >
+        {actionBlock}
+      </View>
     </View>
   );
   const submitLayoutSheet = (
@@ -1141,24 +1096,6 @@ export default function ClaimSheet({
       </KeyboardAvoidingView>
     </Modal>
   );
-}
-
-// The sheet's first step for a capability (scope §C): the hand-off for
-// none, `handoff`, `unsupported` or a held row; the connect / verify step
-// when not connected; otherwise Ready (consent is asked at the tap).
-function initialView(move: FaMoveCapability | null, row: FaMoveRow, vars: CopyVars): SheetView {
-  const step = faMoveGate({ move, row, consentValid: false, ticked: false });
-  if (step === 'connect' || step === 'verify') {
-    const m = move as FaMoveCapability;
-    const key: MoveCopyKey =
-      step === 'verify' ? 'verify_line' : m.connect === 'other_account' ? 'other_account_line' : 'connect_line';
-    const line =
-      moveCopy(m.copy, key, vars, m.league_platform) ??
-      moveCopy(m.copy, step === 'verify' ? 'verify_line' : 'connect_line', vars, m.league_platform);
-    return { step: 'connect', verify: step === 'verify', line, backedOut: false };
-  }
-  if (step === 'consent' || step === 'submit' || step === 'submit_with_consent') return { step: 'ready' };
-  return { step: 'handoff', line: row.move_mode === 'handoff' ? row.move_line ?? null : null };
 }
 
 // fa_move_connect_shown {reason} (C1: submit only). An unknown connect
@@ -1304,6 +1241,7 @@ const sheetStyles = StyleSheet.create({
 
   // D1 — the pinned action block (design-lead): ink-2, a top hairline,
   // padding 12/16/16, gap 8.
+  // utils/claimSheetPlan's PINNED_BLOCK_CHROME is this padding + hairline.
   blockPinned: {
     backgroundColor: ink.ink2,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -1311,15 +1249,15 @@ const sheetStyles = StyleSheet.create({
     paddingTop: space.md,
     paddingHorizontal: space.lg,
     paddingBottom: space.lg,
-    gap: space.sm,
   },
   // The same block at the end of the scroll (accessibility text sizes).
   blockInScroll: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: ink.line,
     paddingTop: space.md,
-    gap: space.sm,
   },
+  // What's measured: the same width and height in both parents.
+  blockContent: { gap: space.sm },
   // The named CTA grows to two lines and never truncates a name (D10).
   namedCta: { height: undefined, minHeight: 44, paddingVertical: space.sm },
   dimLine: { ...type.bodySm, color: chalk.dim },

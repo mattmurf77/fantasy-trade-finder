@@ -36,11 +36,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, TickLabel } from '../../components/chalkline';
 import FeedbackFAB from '../../components/FeedbackFAB';
 import Toast from '../../components/Toast';
-import { getConsent, withdrawConsent, type LeaguePlatform } from '../../api/faMove';
+import { FA_MOVE_FALLBACK_COPY, readConsentStatus, withdrawConsent, type LeaguePlatform } from '../../api/faMove';
 import { isEspnLeague } from '../../api/espn';
 import { isMflLeague } from '../../api/platformLink';
 import { useSession } from '../../state/useSession';
-import { chalk, type } from '../../theme/chalkline';
+import { chalk, space, type } from '../../theme/chalkline';
 import { styles } from './styles';
 import LeaguesSection from './sections/LeaguesSection';
 import PlatformLinkSection from './sections/PlatformLinkSection';
@@ -80,7 +80,7 @@ export default function SettingsLeaguesScreen({ navigation }: any) {
         </View>
         <PlatformDisconnectSection onNotice={onNotice} navigate={navigate} />
         {movePlatforms.map((p) => (
-          <RosterMovesRow key={p} platform={p} onNotice={onNotice} />
+          <RosterMovesRow key={p} platform={p} />
         ))}
       </ScrollView>
       <Toast
@@ -95,28 +95,25 @@ export default function SettingsLeaguesScreen({ navigation }: any) {
 }
 
 // D1 — Stop roster moves (scope §C state 15; consent.md §4.4). Shown only
-// while the consent GET says a grant is active: a 404 (every platform's
-// server-side kill switch off, so on today's server) or any error renders
-// nothing.
+// while the consent GET says a grant is active (contract §2: 200 with
+// `valid: false` when there's none; a 404 is an older server, read the same
+// way; any other error shows nothing). This client has no request option
+// that keeps that 404 out of api_request_failed.
 // One tap, no dialog (K-F7). The server's withdrawal notice (R15.2.6)
-// replaces the row verbatim and takes VoiceOver focus; the row goes.
-function RosterMovesRow({
-  platform,
-  onNotice,
-}: {
-  platform: LeaguePlatform;
-  onNotice: (msg: string, tone?: 'success' | 'warn') => void;
-}) {
+// replaces the row verbatim and takes VoiceOver focus; the row goes. A
+// failed DELETE keeps the row (the grant stays in force) with a line saying so.
+function RosterMovesRow({ platform }: { platform: LeaguePlatform }) {
   const queryClient = useQueryClient();
   const consentQuery = useQuery({
     queryKey: ['platform-write-consent', platform],
-    queryFn: () => getConsent(platform),
+    queryFn: () => readConsentStatus(platform),
     staleTime: 60_000,
     retry: false,
   });
   const [stopping, setStopping] = useState(false);
   const [stopped, setStopped] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   const noticeRef = useRef<View>(null);
 
   useEffect(() => {
@@ -131,6 +128,7 @@ function RosterMovesRow({
   async function stop() {
     if (stopping) return;
     setStopping(true);
+    setFailed(false);
     try {
       const out = await withdrawConsent(platform);
       setStopped(true);
@@ -139,7 +137,7 @@ function RosterMovesRow({
       // The claim sheet's capability (consent_until) rides on the FA read.
       queryClient.invalidateQueries({ queryKey: ['free-agents'] });
     } catch {
-      onNotice("Couldn't stop roster moves — try again.", 'warn');
+      setFailed(true);
     } finally {
       setStopping(false);
     }
@@ -155,18 +153,25 @@ function RosterMovesRow({
   const status = consentQuery.data;
   if (stopped || status?.valid !== true) return null;
   return (
-    <View style={styles.kvRow}>
-      <Text testID="settings.roster-moves.status" style={rosterMoveText.status}>
-        {status.status_line || 'Roster moves'}
-      </Text>
-      <Button
-        testID="settings.roster-moves.stop"
-        label={status.stop_label || 'Stop roster moves'}
-        variant="secondary"
-        compact
-        loading={stopping}
-        onPress={() => void stop()}
-      />
+    <View>
+      <View style={styles.kvRow}>
+        <Text testID="settings.roster-moves.status" style={rosterMoveText.status}>
+          {status.status_line || 'Roster moves'}
+        </Text>
+        <Button
+          testID="settings.roster-moves.stop"
+          label={status.stop_label || 'Stop roster moves'}
+          variant="secondary"
+          compact
+          loading={stopping}
+          onPress={() => void stop()}
+        />
+      </View>
+      {failed ? (
+        <Text style={rosterMoveText.failed} accessibilityLiveRegion="polite">
+          {FA_MOVE_FALLBACK_COPY.stop_failed}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -174,4 +179,5 @@ function RosterMovesRow({
 const rosterMoveText = StyleSheet.create({
   status: { ...type.bodySm, color: chalk.dim, flex: 1 },
   notice: { ...type.bodySm, color: chalk.base, flex: 1 },
+  failed: { ...type.bodySm, color: chalk.base, marginTop: space.xs },
 });

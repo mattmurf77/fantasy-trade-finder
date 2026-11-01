@@ -19,8 +19,8 @@
 import NetInfo from '@react-native-community/netinfo';
 
 import { apiRequest, ApiError, getBaseUrl } from './client';
-import { uuidv4 } from './_queue';
 import { track } from './events';
+import { getFreeAgents } from './league';
 
 // ── Wire types (contract §1–§3) ─────────────────────────────────────────────
 
@@ -38,9 +38,13 @@ export type MoveCopyKey =
   | 'cta_add_drop'
   | 'cta_claim'
   | 'cta_claim_drop'
+  | 'cta_claim_no_bid'
+  | 'cta_claim_drop_no_bid'
   | 'league_line'
   | 'finality'
   | 'waiver_line'
+  | 'waiver_line_no_drop'
+  | 'bid_line'
   | 'window_line'
   | 'turn_off'
   | 'do_in_platform'
@@ -128,6 +132,8 @@ export interface MoveRequest {
   faab_bid?: number;
   consent?: ConsentEcho;
   attempt_id: string;
+  /** The sheet's host (contract §3); the server records it on consent. */
+  surface?: FaMoveSurface;
 }
 
 export interface MoveResponse {
@@ -212,6 +218,9 @@ export function isSubmitCapability(move: unknown): move is FaMoveCapability & { 
 // (contract §6). MFL has none in the 11-06 binary: `submit` there with a
 // connect that isn't `ok` is shown as `unsupported`.
 const CONNECTABLE: readonly LeaguePlatform[] = ['sleeper', 'espn'];
+export function hasConnectScreen(platform: LeaguePlatform | null | undefined): boolean {
+  return !!platform && CONNECTABLE.includes(platform);
+}
 
 export type GateStep =
   | 'legacy'
@@ -260,8 +269,23 @@ export function faMoveGate(input: {
  *  today (hand-off and unsupported are decided there, and the hand-off this
  *  binary has is Sleeper's). */
 export function faMoveOpensSheet(move: unknown, row?: FaMoveRow | null): boolean {
-  const step = faMoveGate({ move, row, consentValid: false, ticked: false });
-  return step !== 'legacy' && step !== 'unsupported' && step !== 'handoff';
+  // In `submit` mode every step opens the sheet, a held row included: on a
+  // non-Sleeper league it shows the server's move_line (this binary has no
+  // other platform's opener), never NO_ADD_REASON's read-only text.
+  return isSubmitCapability(move) && faMoveGate({ move, row, consentValid: false, ticked: false }) !== 'unsupported';
+}
+
+/** The capability, or null when it's absent, malformed or an unknown mode:
+ *  then nothing of it is used, `move.copy` included (fully legacy). */
+export function capabilityOrNull(move: unknown): FaMoveCapability | null {
+  return isMoveCapability(move) ? move : null;
+}
+
+/** A row's D1 fields, only under a usable capability: with none, every
+ *  row's move_kind / move_mode / move_line is ignored. */
+export function rowMoveFields(move: unknown, row: FaMoveRow | null | undefined): FaMoveRow {
+  if (!isMoveCapability(move) || !row) return {};
+  return { move_kind: row.move_kind, move_mode: row.move_mode, move_line: row.move_line };
 }
 
 /** Valid until a moment strictly after `nowMs`. */
@@ -317,6 +341,50 @@ export function consentLinks(block: ConsentBlock): ConsentLink[] {
     { label: FA_MOVE_FALLBACK_COPY.terms_link, url: `${base}/terms` },
     { label: FA_MOVE_FALLBACK_COPY.privacy_link, url: `${base}/privacy` },
   ];
+}
+
+/** What a consent GET at the tap leads to. NetInfo is read first: offline
+ *  sends no GET at all. A GET that fails at the network level (status 0, the
+ *  client's timer) is "not sent" (state 11), like the move itself. Only a
+ *  server-side failure or an incomplete block is F4's hand-off. */
+export type ConsentStep =
+  | { kind: 'offline' }
+  | { kind: 'not_sent' }
+  | { kind: 'valid' }
+  | { kind: 'consent'; block: ConsentBlock }
+  | { kind: 'unavailable' };
+
+export async function fetchConsentStep(platform: LeaguePlatform): Promise<ConsentStep> {
+  if (await isOffline()) return { kind: 'offline' };
+  let status: ConsentStatus;
+  try {
+    status = await getConsent(platform);
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.isTimeout || err.status === 0) return { kind: 'not_sent' };
+    return { kind: 'unavailable' };
+  }
+  if (status && status.valid === true) return { kind: 'valid' };
+  const block = readConsentBlock(status?.consent);
+  return block ? { kind: 'consent', block } : { kind: 'unavailable' };
+}
+
+/** Settings' read (contract §2): 200 with `valid: false` when there's no
+ *  grant; a 404 is an older server, read as `valid: false` too. */
+export async function readConsentStatus(platform: LeaguePlatform): Promise<ConsentStatus> {
+  try {
+    return await getConsent(platform);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      return { platform, valid: false, until: null, status_line: null, stop_label: null };
+    }
+    throw err;
+  }
+}
+
+/** F5 / review round 2: the "terms changed" line shows when the server says
+ *  the version changed, or the sheet already showed another copy_version. */
+export function termsChanged(block: ConsentBlock, shownVersion: string | null): boolean {
+  return block.reason === 'version' || (shownVersion != null && shownVersion !== block.copy_version);
 }
 
 /** The pair the move request echoes: the shown block's, as received (F11). */
@@ -520,6 +588,46 @@ export function isMoveOutcomeUnknown(err: unknown): boolean {
   return classifyMoveError(err).state === 'unknown';
 }
 
+// ── Bounded reads ───────────────────────────────────────────────────────────
+
+/** The sheet's own re-reads (after Connect, on 10e) give up after this, so
+ *  the sheet never stays busy offline; the server's 409s are the net. */
+export const FA_MOVE_REREAD_WAIT_MS = 5_000;
+/** How long a host waits for a league's capability before routing as today. */
+export const FA_MOVE_CAPABILITY_WAIT_MS = 3_000;
+
+/** `p`'s value, or undefined if it rejects or takes longer than `ms`. */
+export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(undefined), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      () => {
+        clearTimeout(t);
+        resolve(undefined);
+      },
+    );
+  });
+}
+
+/** A host's pre-read of one league's capability and one row's D1 fields
+ *  (Usage Trends, before it switches league and opens the sheet). A plain
+ *  call, outside the query cache: the sheet reads its own list after the
+ *  switch. Only `move` and the tapped row's fields are used. */
+export async function readMoveCapability(
+  leagueId: string,
+  playerId: string,
+  waitMs: number = FA_MOVE_CAPABILITY_WAIT_MS,
+): Promise<{ move: FaMoveCapability | null; row: FaMoveRow }> {
+  const data = await withTimeout(getFreeAgents(leagueId, 'ALL'), waitMs);
+  const move = capabilityOrNull(data?.move);
+  const tapped = data?.free_agents?.find((r) => r.player_id === playerId);
+  return { move, row: rowMoveFields(move, tapped) };
+}
+
 // ── Analytics (scope §1, C1–C6) ─────────────────────────────────────────────
 
 export type FaMoveSurface = 'free_agents' | 'usage_trends';
@@ -545,6 +653,24 @@ export type AttemptOutcome =
   | { sent: true; attemptId: string; response: MoveResponse }
   | { sent: true; attemptId: string; failure: MoveFailure };
 
+/** One attempt_id: a v4-UUID-shaped string, 8-4-4-4-12 lowercase hex
+ *  (contract §3). Hermes has no Web Crypto, so it uses crypto.getRandomValues
+ *  when it exists and Math.random otherwise; the server treats the id as
+ *  opaque and scopes it per user, so it needs to be unique, not secret. */
+export function newAttemptId(): string {
+  const bytes = new Uint8Array(16);
+  const c = (globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } }).crypto;
+  if (c && typeof c.getRandomValues === 'function') {
+    c.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const h = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 async function isOffline(): Promise<boolean> {
   try {
     const state = await NetInfo.fetch();
@@ -564,8 +690,8 @@ export async function attemptMove(input: {
   request: Omit<MoveRequest, 'attempt_id'>;
 }): Promise<AttemptOutcome> {
   if (await isOffline()) return { sent: false };
-  const attemptId = uuidv4();
-  const body: MoveRequest = { ...input.request, attempt_id: attemptId };
+  const attemptId = newAttemptId();
+  const body: MoveRequest = { ...input.request, surface: input.surface, attempt_id: attemptId };
   trackFaMove(input.move, 'fa_move_write_attempted', {
     surface: input.surface,
     has_drop: body.drop_player_id != null,
@@ -633,7 +759,9 @@ export const FA_MOVE_FALLBACK_COPY = {
   cta_claim_drop_no_bid: 'Claim {add}, drop {drop}',
   league_line: 'In {league}',
   finality: "Final once it's made. Fleeced can't undo it.",
-  waiver_line: "This is a waiver claim. It runs on your league's waiver schedule.",
+  waiver_line: "This is a waiver claim for {add}, dropping {drop} if it clears. It runs on your league's waiver schedule.",
+  waiver_line_no_drop: "This is a waiver claim for {add}. It runs on your league's waiver schedule.",
+  bid_line: 'Bid: {bid}',
   window_line: 'Moves authorized until {date}',
   turn_off: 'Turn off',
   do_in_platform: 'Do it in {platform} instead',
@@ -662,6 +790,11 @@ export const FA_MOVE_FALLBACK_COPY = {
   link_hint: 'Opens in your browser',
   // The host's list row after a claim was submitted (scope §C state 9).
   claim_pending: 'Claim pending',
+  // A non-Sleeper row held in hand-off with no server line (this binary has
+  // no other platform's opener).
+  held_line: "This move can't be made from Fleeced right now. Check {platform}.",
+  // Settings, when DELETE fails (contract §2): the grant stays in force.
+  stop_failed: "Couldn't turn it off. Try again.",
 } satisfies Record<MoveCopyKey, string> & Record<string, string>;
 export type FallbackKey = keyof typeof FA_MOVE_FALLBACK_COPY;
 
@@ -695,13 +828,28 @@ export function moveCtaLabel(
   platform: LeaguePlatform | null,
 ): string {
   const hasDrop = !!vars.drop;
+  const hasBid = !!vars.bid;
+  // Contract §7: a claim with no bid (a priority-waiver league) has its own
+  // slots; the bid forms carry {bid}.
   const key: MoveCopyKey =
-    kind === 'claim' ? (hasDrop ? 'cta_claim_drop' : 'cta_claim') : hasDrop ? 'cta_add_drop' : 'cta_add';
-  return (
-    moveCopy(copy, key, vars, platform) ??
-    fallbackCopy(hasDrop ? 'cta_claim_drop_no_bid' : 'cta_claim_no_bid', vars, platform) ??
-    vars.add
-  );
+    kind === 'claim'
+      ? hasBid
+        ? hasDrop ? 'cta_claim_drop' : 'cta_claim'
+        : hasDrop ? 'cta_claim_drop_no_bid' : 'cta_claim_no_bid'
+      : hasDrop ? 'cta_add_drop' : 'cta_add';
+  return moveCopy(copy, key, vars, platform) ?? vars.add;
+}
+
+/** A claim's lines under the CTA (contract §7): `waiver_line` with a drop,
+ *  `waiver_line_no_drop` without, then `bid_line` only when there's a bid. */
+export function waiverLines(
+  copy: MoveCopy | null | undefined,
+  vars: { add: string; drop?: string | null; bid?: string | null },
+  platform: LeaguePlatform | null,
+): string[] {
+  const lines = [moveCopy(copy, vars.drop ? 'waiver_line' : 'waiver_line_no_drop', vars, platform)];
+  if (vars.bid) lines.push(moveCopy(copy, 'bid_line', vars, platform));
+  return lines.filter((l): l is string => !!l);
 }
 
 /** `{bid}`: the dollar amount, as the CTA names it ("Claim A for $7"). */

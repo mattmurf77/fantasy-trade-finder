@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 import { Button, Icon, Text, TickLabel } from '../components/chalkline';
 import ClaimSheet, { explainNoAdd, resolveAddPlatform, type ClaimTarget } from '../components/ClaimSheet';
@@ -24,8 +24,8 @@ import { UsageStatsHeader, UsageStatsRow, statsTableWidth } from '../components/
 import { chalk, fonts, ice, ink, radii, scrim, shadowSheet, space, type } from '../theme/chalkline';
 import { ApiError } from '../api/client';
 import { track } from '../api/events';
-import { getFreeAgents, type FreeAgentsResponse } from '../api/league';
-import { faMoveOpensSheet, type FaMoveCapability } from '../api/faMove';
+import { getFreeAgents } from '../api/league';
+import { faMoveOpensSheet, readMoveCapability, type FaMoveCapability } from '../api/faMove';
 import { getUsageTrends, type UsageMetric, type UsagePlayer } from '../api/usageTrends';
 import { useFlag } from '../state/useFeatureFlags';
 import { useFinderTargets } from '../state/useFinderTargets';
@@ -83,10 +83,6 @@ const ORDERS: { key: UsageOrder; label: string }[] = [
 let lastView: UsageView = 'simple';
 // Version A's order toggle, remembered the same way. Biggest jumps by default.
 let lastOrder: UsageOrder = 'jumps';
-// D1: how long an Add waits for the league's FA read before routing as
-// today. The sheet used to open first and read after; this bounds the wait
-// that reading first adds.
-const CAPABILITY_WAIT_MS = 3_000;
 
 type ListItem =
   | { kind: 'section'; key: string; title: string; sub: string }
@@ -118,7 +114,8 @@ export default function UsageTrendsScreen() {
   const { width: screenWidth } = useWindowDimensions();
   // D1: `move` is the league's capability as read at the Add tap.
   const [claim, setClaim] = useState<{ target: ClaimTarget; leagueId: string; move: FaMoveCapability | null } | null>(null);
-  const queryClient = useQueryClient();
+  // D1: the Add whose capability read is running (up to 3 s), shown busy.
+  const [adding, setAdding] = useState<{ playerId: string; leagueId: string } | null>(null);
 
   // The Free Agents link pushes `{ownership:'free_agents'}`; honour it on a
   // re-push into an already-mounted screen too.
@@ -289,48 +286,32 @@ export default function UsageTrendsScreen() {
     navigation.navigate('Main', { screen: 'Trades', params: { screen: 'TradesHome' } });
   };
 
-  // D1: the league's FA read, for its move capability and this player's
-  // row. The same read the sheet makes, under the sheet's own key, so it
-  // isn't made twice. Undefined on failure or after CAPABILITY_WAIT_MS.
-  const readFreeAgents = (lgId: string): Promise<FreeAgentsResponse | undefined> =>
-    Promise.race([
-      queryClient
-        .fetchQuery({
-          queryKey: ['free-agents', lgId, 'ALL'],
-          queryFn: () => getFreeAgents(lgId, 'ALL'),
-          staleTime: 60_000,
-        })
-        .catch(() => undefined),
-      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), CAPABILITY_WAIT_MS)),
-    ]);
-
   const doAdd = async (p: UsagePlayer, lgId: string) => {
+    if (adding) return;
     trackAction('add', p, lgId);
     const platform = resolveAddPlatform(lgId, isDemo);
-    // D1 (scope §B1): the server's capability first. No `move` in the
-    // answer (today's server), or no answer in time, routes exactly as before.
-    const faRead = isDemo ? Promise.resolve(undefined) : readFreeAgents(lgId);
-    await closeSheetFirst();
-    const fa = await faRead;
-    const move = fa?.move ?? null;
-    const faRow = fa?.free_agents?.find((r) => r.player_id === p.player_id);
-    if (platform !== 'sleeper' && !faMoveOpensSheet(move, faRow)) {
+    // D1 (scope §B1): the server's capability first, from a plain read
+    // (outside the query cache; the sheet reads its own list after the
+    // switch, as before), bounded at 3 s. Only `move` and this player's
+    // move_* fields are used. None (today's server) routes exactly as before.
+    setAdding({ playerId: p.player_id, leagueId: lgId });
+    let cap: Awaited<ReturnType<typeof readMoveCapability>>;
+    try {
+      const read = isDemo ? Promise.resolve({ move: null, row: {} }) : readMoveCapability(lgId, p.player_id);
+      await closeSheetFirst();
+      cap = await read;
+    } finally {
+      setAdding(null);
+    }
+    if (platform !== 'sleeper' && !faMoveOpensSheet(cap.move, cap.row)) {
       explainNoAdd(platform);
       return;
     }
     if (!(await switchTo(lgId))) return;
     setClaim({
-      target: {
-        player_id: p.player_id,
-        name: p.name,
-        position: p.position,
-        team: p.team,
-        move_kind: faRow?.move_kind,
-        move_mode: faRow?.move_mode,
-        move_line: faRow?.move_line,
-      },
+      target: { player_id: p.player_id, name: p.name, position: p.position, team: p.team, ...cap.row },
       leagueId: lgId,
-      move,
+      move: cap.move,
     });
   };
 
@@ -420,6 +401,7 @@ export default function UsageTrendsScreen() {
             focusStatus={focusStatus}
             leagueStatuses={(data?.leagues ?? []).map((lg) => statusIn(lg, p.player_id))}
             onAdd={() => focusId && doAdd(p, focusId)}
+            adding={adding?.playerId === p.player_id}
             onTrade={() => focusId && doTrade(p, focusId)}
             onRerank={() => doRerank(p)}
             onAvailability={() => {
@@ -449,6 +431,8 @@ export default function UsageTrendsScreen() {
         onRerank={() => doRerank(p)}
         onLeagueAdd={(lgId) => doAdd(p, lgId)}
         onLeagueTrade={(lgId) => doTrade(p, lgId)}
+        adding={adding?.playerId === p.player_id && adding.leagueId === focusId}
+        addingLeagueId={adding?.playerId === p.player_id ? adding.leagueId : null}
       />
     );
   };
