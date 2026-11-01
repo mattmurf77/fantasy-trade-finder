@@ -206,20 +206,26 @@ def _run_one_job_synchronously():
     )
 
 
-def test_control_a_normal_job_does_write_impressions(live, monkeypatch):
-    """The control. Without it, the assertion below could pass because the
-    harness never writes impressions at all. The job writes them only with
-    packed evidence off: with it on they wait for delivery (#370), so the
-    flags are pinned here rather than read from features.json."""
-    _, engine = live
+@pytest.fixture()
+def flags_off(monkeypatch):
+    """The job writes impressions only with packed evidence off: with it on
+    they wait for delivery (#370), so these tests pin both flags off rather
+    than read features.json. The supersede fence still matters there, on a
+    flags-off rollback (#555 QA P3-2)."""
     monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": False,
                                              "trade.packed_evidence": False})
+
+
+def test_control_a_normal_job_does_write_impressions(live, flags_off):
+    """The control. Without it, the assertion below could pass because the
+    harness never writes impressions at all."""
+    _, engine = live
     with patch.object(server, "_deck_signal_v2_enabled", lambda: True):
         _run_one_job_synchronously()
     assert _impression_count(engine) > 0
 
 
-def test_a_superseded_job_writes_no_impressions(live):
+def test_a_superseded_job_writes_no_impressions(live, flags_off):
     """THE regression guard. The worker keeps running — nothing can stop it —
     but a deck nobody will ever see must leave no trace in the corpus.
 

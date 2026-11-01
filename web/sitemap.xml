@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Only pages that render standalone content for a first-time visitor.
-     Templates (player.html, profile.html), operator surfaces and share
-     landings are excluded and Disallow-ed in robots.txt. -->
+     Templates (player.html, profile.html) and operator surfaces are
+     excluded and Disallow-ed in robots.txt. Share landings are excluded
+     but crawlable (noindex) so link unfurlers can fetch them. -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://fantasy-trade-finder.onrender.com/</loc>
