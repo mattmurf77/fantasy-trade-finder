@@ -2975,13 +2975,31 @@ def _revoke_trade_jobs_naming(user_ids, league_ids) -> int:
     return revoked
 
 
-# Account deletion (#559 re-QA P2-b): the ids deleted in this process. Each
-# session's TradeService card store (shared with its trade jobs) keeps the
-# cards it generated, and GET /api/trades serves them with no expiry, so a
-# deletion purges them; this set filters any card a still-running job writes
-# after the purge. Never pruned: deletions are rare, and a restart clears the
-# stores it guards. Prod runs one process (render.yaml: --workers 1).
-_deleted_partner_ids: set = set()
+# Account deletion (#559 re-QA P2-b): the ids deleted in this process, each
+# with the time until which a card naming it is hidden. Each session's
+# TradeService card store (shared with its trade jobs) keeps the cards it
+# generated, and GET /api/trades serves them with no expiry, so a deletion
+# purges them, and GET /api/trades hides any card built before that time: a
+# job still running at the deletion builds and writes cards from the board it
+# read before it. The window is an hour, twelve _JOB_HARD_TIMEOUTs; a card
+# built after it comes from a search started after the deletion, from public
+# league data (legal (vii)), and serves (#559 delta QA P3). Never pruned:
+# deletions are rare, and a restart clears the stores it guards. Prod runs one
+# process (render.yaml: --workers 1).
+_DELETED_PARTNER_WINDOW = timedelta(hours=1)
+_deleted_partner_ids: dict = {}
+
+
+def _built_before_partner_deleted(card) -> bool:
+    """True for a card naming a deleted id that was built before its window
+    closed; an unreadable `created_at` counts as before."""
+    until = _deleted_partner_ids.get(getattr(card, "target_user_id", None))
+    if until is None:
+        return False
+    try:
+        return datetime.fromisoformat(card.created_at) < until
+    except (AttributeError, TypeError, ValueError):
+        return True
 
 
 def _purge_session_trade_cards(user_ids) -> int:
@@ -2989,7 +3007,8 @@ def _purge_session_trade_cards(user_ids) -> int:
     trade services' card stores (and the module default's). Returns the
     count. Late writers are caught by `_deleted_partner_ids` at serve."""
     ids = set(user_ids)
-    _deleted_partner_ids.update(ids)
+    until = datetime.now(timezone.utc) + _DELETED_PARTNER_WINDOW
+    _deleted_partner_ids.update(dict.fromkeys(ids, until))
     with _sessions_lock:
         sessions = list(_sessions.values())
     services = {id(trade_service): trade_service}
@@ -21322,8 +21341,7 @@ def get_trades():
     league_id = request.args.get("league_id") or None
     cards = trade_service.get_pending_trades(user_id=g_user_id, league_id=league_id)
     # A card a still-running job wrote after a deletion's purge (#559 re-QA P2-b).
-    cards = [card for card in cards
-             if getattr(card, "target_user_id", None) not in _deleted_partner_ids]
+    cards = [card for card in cards if not _built_before_partner_deleted(card)]
     pending_owner_config = dict(_trade_service_mod._cfg)
     pending_exemptions = _significance_exemptions_for(trade_service)
     cards = _pending_owner_cards(cards, pending_owner_config, pending_exemptions)
@@ -34050,13 +34068,17 @@ def delete_account_route():
     # with the deletion; start it off the request. The cleanup loop retries,
     # so a failed start never fails the deletion (#557 QA P3). In-memory jobs
     # and session card stores never see the scrub, so the ones that name the
-    # person are revoked and purged here; a failure there is logged, never a
-    # 500 for a deletion that committed.
+    # person are purged and revoked here, each on its own (one failing never
+    # skips the other, #559 delta QA P3), logged and never a 500 for a
+    # deletion that committed.
     try:
-        counts["trade_jobs_revoked"] = _revoke_trade_jobs_naming(user_ids, scrub_leagues)
         counts["trade_cards_purged"] = _purge_session_trade_cards(user_ids)
     except Exception as err:          # the class only: its text may quote ids
-        log.error("delete_account: in-memory revoke failed: %s", type(err).__name__)
+        log.error("delete_account: session card purge failed: %s", type(err).__name__)
+    try:
+        counts["trade_jobs_revoked"] = _revoke_trade_jobs_naming(user_ids, scrub_leagues)
+    except Exception as err:
+        log.error("delete_account: trade job revoke failed: %s", type(err).__name__)
     _kick_deletion_scrub()
     log.info("delete_account: user %s deleted (%s)", user_id, counts)
     return jsonify({"ok": True, "deleted": counts,

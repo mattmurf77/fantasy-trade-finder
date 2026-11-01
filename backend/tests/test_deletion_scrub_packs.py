@@ -2,6 +2,7 @@
 addendum G: G-a1 to G-a3), and the cached writer state that must not undo or
 leak around a scrub. Harness: test_deletion_scrub's engine and seed."""
 import json
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import insert, select, update
 
@@ -488,20 +489,28 @@ def test_deletion_purges_every_sessions_trade_cards_naming_the_person(engine, mo
 
 def test_get_trades_never_serves_a_card_written_after_the_purge(engine, monkeypatch):
     """A job still running at the deletion writes its cards straight into the
-    session's store, after the purge; GET /api/trades filters them on the
-    deleted ids (#559 re-QA P2-b)."""
+    session's store, after the purge; GET /api/trades hides a card naming a
+    deleted id that was built within the window after the deletion (#559
+    re-QA P2-b), and serves one built after it (delta QA P3)."""
     from unittest.mock import MagicMock
     import backend.server as server
     from backend.trade_service import TradeCard
     _delete_through_the_route(server, monkeypatch)
 
-    def card(partner, i):
+    def card(partner, i, **extra):
         return TradeCard(trade_id=f"late-{i}", league_id=LEAGUE, proposing_user_id=VIEWER,
                          target_user_id=partner, target_username="name",
                          give_player_ids=[f"g{i}"], receive_player_ids=[f"r{i}"],
-                         mismatch_score=1.0, fairness_score=0.9, composite_score=0.5)
+                         mismatch_score=1.0, fairness_score=0.9, composite_score=0.5, **extra)
+    after_window = (datetime.now(timezone.utc) + server._DELETED_PARTNER_WINDOW
+                    + timedelta(minutes=1)).isoformat()
     service = MagicMock()
-    service.get_pending_trades.return_value = [card(DEL, 0), card(OTHER, 1)]
+    # Built now (inside the window: a job running at the deletion), with an
+    # unreadable time (counted as before), and after the window (a search
+    # started after the deletion, from public league data: #559 delta QA P3).
+    service.get_pending_trades.return_value = [
+        card(DEL, 0), card(OTHER, 1), card(DEL, 2, created_at="?"),
+        card(DEL, 3, created_at=after_window)]
     session = {"user_id": VIEWER, "verified": True, "active_format": "1qb_ppr",
                "league": MagicMock(), "players": [], "trade_svc": service}
     monkeypatch.setattr(server, "_get_session", lambda _token: session)
@@ -509,7 +518,7 @@ def test_get_trades_never_serves_a_card_written_after_the_purge(engine, monkeypa
     response = server.app.test_client().get(f"/api/trades?league_id={LEAGUE}",
                                             headers={"X-Session-Token": "viewer-token"})
     assert response.status_code == 200, response.get_json()
-    assert [c["target_user_id"] for c in response.get_json()] == [OTHER]
+    assert sorted(c["trade_id"] for c in response.get_json()) == ["late-1", "late-3"]
 
 
 # ── #559 QA1: the in-process upgrade reloads the scrubbed pack ─────────────
@@ -537,3 +546,33 @@ def test_an_in_process_upgrade_after_the_scrub_writes_the_redacted_row(deferred,
     assert features["partner_user_id"] == token and "likes_you" not in features
     assert (row["base_score"], row["final_score"]) == (None, None)
     assert PARTNER not in row["features_json"]
+
+
+
+def test_the_purge_and_the_revoke_each_run_when_the_other_fails(engine, monkeypatch):
+    """#559 delta QA P3: they shared one try, so a revoke that raised skipped
+    the purge (and the serve filter's ids). Each now runs on its own, and the
+    deletion still answers 200."""
+    from types import SimpleNamespace
+    import backend.server as server
+
+    def boom(*a, **kw):
+        raise RuntimeError("boom")
+    store = SimpleNamespace(_trade_cards={"t": SimpleNamespace(trade_id="t", target_user_id=DEL)})
+    monkeypatch.setattr(server, "_revoke_trade_jobs_naming", boom)
+    deleted = _delete_through_the_route(server, monkeypatch, [{"user_id": VIEWER, "trade_svc": store}])
+    assert deleted["trade_cards_purged"] == 1 and store._trade_cards == {}
+    assert "trade_jobs_revoked" not in deleted and DEL in server._deleted_partner_ids
+
+
+def test_the_revoke_runs_when_the_purge_fails(engine, monkeypatch):
+    import backend.server as server
+
+    def boom(*a, **kw):
+        raise RuntimeError("boom")
+    jobs = {"names-them": {"key": (VIEWER, LEAGUE, "1qb_ppr"), "status": "complete",
+                           "cards": [{"target_user_id": DEL, "trade_id": "t0"}]}}
+    monkeypatch.setattr(server, "_trade_jobs", jobs)
+    monkeypatch.setattr(server, "_purge_session_trade_cards", boom)
+    deleted = _delete_through_the_route(server, monkeypatch)
+    assert deleted["trade_jobs_revoked"] == 1 and jobs["names-them"]["superseded"]
