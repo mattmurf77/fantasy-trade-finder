@@ -25,6 +25,11 @@
 //      called at the component's top level; `tipsOffered` is EXECUTED here
 //      (state/useTipsOffered.ts transpiled with stubs), and useTipsOffered
 //      must subscribe with `enabled: false` (never fetching).
+//      8d-8g (tip jar C1): the warm observer state/useWarmPaywallConfig.ts
+//      is EXECUTED (same key + queryFn, 5-min staleTime, focus refetch;
+//      enabled only for monetize.paywall AND a verified session), all four
+//      ['paywall-config'] subscribers share one key + queryFn, and it is
+//      mounted once under RootNav's Main and referenced by no other file.
 //   9. The backend tip guard exists: entitlements.is_tip_product referenced
 //      by the projector, and every served tip SKU is ftf_tip_-prefixed on
 //      the server (cross-checked into backend/server.py so a drifted id
@@ -45,6 +50,8 @@ const TABNAV = path.join(ROOT, 'src/navigation/TabNav.tsx');
 const HUB = path.join(ROOT, 'src/screens/settings/SettingsHubScreen.tsx');
 const FLAT = path.join(ROOT, 'src/screens/SettingsScreen.tsx');
 const TIPS_HOOK = path.join(ROOT, 'src/state/useTipsOffered.ts');
+const WARM_HOOK = path.join(ROOT, 'src/state/useWarmPaywallConfig.ts');
+const SUB_SESSION = path.join(ROOT, 'src/state/subscriptionSession.ts');
 const BE_ENTL = path.join(REPO, 'backend/entitlements.py');
 const BE_SERVER = path.join(REPO, 'backend/server.py');
 
@@ -231,6 +238,133 @@ const beServer = read(BE_SERVER);
       bad("8c. useTipsOffered subscribes to ['paywall-config','ios'] with enabled: false (never fetches)",
         `options=${JSON.stringify(seen && { queryKey: seen.queryKey, enabled: seen.enabled })} shown=${shown}`);
     }
+  }
+}
+
+// 8d/8e — the warm observer (tip jar C1, docs/plans/tip-jar/plan.md §3):
+//     EXECUTED (state/useWarmPaywallConfig.ts transpiled with stubs, the real
+//     subscriptionSession.ts behind it). Same key + queryFn as the hook, the
+//     screens' staleTime, focus refetch on, and enabled = flag AND verified.
+{
+  let ts = null;
+  try { ts = require('typescript'); } catch { /* reported below */ }
+  const src = read(WARM_HOOK);
+  const sessSrc = read(SUB_SESSION);
+  if (!ts || !src || !sessSrc) {
+    bad('8d. warm observer executed', ts ? 'missing state/useWarmPaywallConfig.ts or subscriptionSession.ts'
+      : 'typescript not resolvable — run `npm install` in mobile/ first');
+  } else {
+    const load = (code, stubs, label) => {
+      const js = ts.transpileModule(code, { compilerOptions: {
+        module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019,
+      } }).outputText;
+      const mod = { exports: {} };
+      new Function('module', 'exports', 'require', js)(mod, mod.exports, (name) => {
+        if (name in stubs) return stubs[name];
+        throw new Error(`${label} gained a runtime import ("${name}")`);
+      });
+      return mod.exports;
+    };
+    const subscriptionSession = load(sessSrc, {}, 'state/subscriptionSession.ts');
+    let seen = null; let flag = false; let session = null;
+    const flagKeys = []; const fetched = [];
+    const warm = load(src, {
+      '@tanstack/react-query': { useQuery: (opts) => { seen = opts; return {}; } },
+      '../api/billing': { getPaywallConfig: (p) => { fetched.push(p); return Promise.resolve({}); } },
+      './useFeatureFlags': { useFlag: (k) => { flagKeys.push(k); return flag; } },
+      './useSession': { useSession: (sel) => sel(session) },
+      './subscriptionSession': subscriptionSession,
+    }, 'state/useWarmPaywallConfig.ts');
+
+    const sleeper = { user_id: '123456', account_only: false };
+    const acct = { user_id: 'acct_abc', account_only: true };
+    flag = true; session = { isDemo: false, verification: { session_verified: true }, user: sleeper };
+    const rendered = warm.WarmPaywallConfig();
+    if (seen) seen.queryFn();
+    const shape = rendered === null && seen
+      && JSON.stringify(seen.queryKey) === JSON.stringify(['paywall-config', 'ios'])
+      && JSON.stringify(fetched) === JSON.stringify(['ios'])
+      && seen.staleTime === 5 * 60_000 && seen.refetchOnWindowFocus === true
+      && flagKeys.length > 0 && flagKeys.every((k) => k === 'monetize.paywall');
+    if (shape) {
+      ok("8d. warm observer: ['paywall-config','ios'] + getPaywallConfig('ios'), staleTime 5 min, focus refetch, reads monetize.paywall, renders null");
+    } else {
+      bad("8d. warm observer: ['paywall-config','ios'] + getPaywallConfig('ios'), staleTime 5 min, focus refetch, reads monetize.paywall, renders null",
+        `options=${JSON.stringify(seen && { queryKey: seen.queryKey, staleTime: seen.staleTime, refetchOnWindowFocus: seen.refetchOnWindowFocus })} fetched=${JSON.stringify(fetched)} flags=${JSON.stringify(flagKeys)} rendered=${rendered}`);
+    }
+
+    const cases = [
+      ['flag off, verified', false, { isDemo: false, verification: { session_verified: true }, user: sleeper }, false],
+      ['unverified', true, { isDemo: false, verification: { session_verified: false }, user: sleeper }, false],
+      ['unknown', true, { isDemo: false, verification: null, user: sleeper }, false],
+      ['demo (server says verified)', true, { isDemo: true, verification: { session_verified: true }, user: acct }, false],
+      ['verified (server)', true, { isDemo: false, verification: { session_verified: true }, user: sleeper }, true],
+      ['verified (acct_ account-only)', true, { isDemo: false, verification: null, user: acct }, true],
+    ];
+    const wrong = cases.filter(([, f, s, want]) => {
+      flag = f; session = s; seen = null;
+      warm.useWarmPaywallConfig();
+      return !seen || seen.enabled !== want;
+    }).map(([name, , , want]) => `${name} → ${!want}`);
+    if (wrong.length === 0) {
+      ok('8e. warm observer gate: flag off / unverified / unknown / demo → disabled; flag + verified → enabled');
+    } else {
+      bad('8e. warm observer gate: flag off / unverified / unknown / demo → disabled; flag + verified → enabled',
+        `wrong: ${wrong.join('; ')}`);
+    }
+  }
+}
+
+// 8f — one cache entry: every ['paywall-config' subscriber in src/ is one of
+//     the four, each with the identical key + queryFn
+{
+  const SHARED = /queryKey: \['paywall-config', 'ios'\],\s*queryFn: \(\) => getPaywallConfig\('ios'\),/;
+  const want = ['src/screens/PaywallScreen.tsx', 'src/screens/TipJarScreen.tsx',
+    'src/state/useTipsOffered.ts', 'src/state/useWarmPaywallConfig.ts'];
+  const users = [];
+  const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).forEach((e) => {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walk(p);
+    else if (/\.(ts|tsx)$/.test(e.name) && strip(fs.readFileSync(p, 'utf8')).includes("['paywall-config'")) {
+      users.push(path.relative(ROOT, p));
+    }
+  });
+  walk(path.join(ROOT, 'src'));
+  const shared = want.filter((f) => SHARED.test(strip(read(path.join(ROOT, f)))));
+  if (JSON.stringify(users.sort()) === JSON.stringify([...want].sort()) && shared.length === want.length) {
+    ok("8f. the four ['paywall-config','ios'] subscribers share one key + queryFn (PaywallScreen, TipJarScreen, useTipsOffered, useWarmPaywallConfig)");
+  } else {
+    bad("8f. the four ['paywall-config','ios'] subscribers share one key + queryFn",
+      `users=${JSON.stringify(users)} shared=${JSON.stringify(shared)}`);
+  }
+}
+
+// 8g — mounted ONCE, under RootNav's always-mounted `Main` screen (which stays
+//     mounted beneath every Settings push), and referenced nowhere else: in
+//     particular not in any Settings file, so the hub stays zero-network
+{
+  const mainAt = rootnav.indexOf('<Stack.Screen name="Main">');
+  const mainEnd = mainAt > -1 ? rootnav.indexOf('</Stack.Screen>', mainAt) : -1;
+  const mountAt = rootnav.indexOf('<WarmPaywallConfig />');
+  const mounted = mainAt > -1 && mountAt > mainAt && mountAt < mainEnd
+    && (rootnav.match(/<WarmPaywallConfig \/>/g) || []).length === 1
+    && /import \{ WarmPaywallConfig \} from '\.\.\/state\/useWarmPaywallConfig';/.test(rootnav);
+  const refs = [];
+  const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).forEach((e) => {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walk(p);
+    else if (/\.(ts|tsx)$/.test(e.name) && /WarmPaywallConfig/.test(strip(fs.readFileSync(p, 'utf8')))) {
+      refs.push(path.relative(ROOT, p));
+    }
+  });
+  walk(path.join(ROOT, 'src'));
+  const only = JSON.stringify(refs.sort())
+    === JSON.stringify(['src/navigation/RootNav.tsx', 'src/state/useWarmPaywallConfig.ts']);
+  if (mounted && only) {
+    ok('8g. WarmPaywallConfig mounted once under RootNav Main; referenced by no other file (no Settings file)');
+  } else {
+    bad('8g. WarmPaywallConfig mounted once under RootNav Main; referenced by no other file (no Settings file)',
+      `mounted=${mounted} refs=${JSON.stringify(refs)}`);
   }
 }
 

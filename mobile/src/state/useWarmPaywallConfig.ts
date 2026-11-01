@@ -1,0 +1,35 @@
+import { useQuery } from '@tanstack/react-query';
+
+import { getPaywallConfig } from '../api/billing';
+import { useFlag } from './useFeatureFlags';
+import { useSession } from './useSession';
+import { subscriptionSessionState } from './subscriptionSession';
+
+// Tip jar C1 (docs/plans/tip-jar/plan.md §3, head-eng GO 2026-11-01): keeps
+// ['paywall-config','ios'] warm so the Settings tip row (useTipsOffered, a
+// never-fetching subscriber) can see `tips[]` for a user who never opened the
+// paywall. Same key and queryFn as PaywallScreen, TipJarScreen and
+// useTipsOffered: one cache entry. Mounted ONCE, under RootNav's `Main`, which
+// stays mounted beneath every Settings push, so the entry is never GC'd and
+// the Settings hub stays zero-network. Verified sessions only (#474 S2d; demo,
+// unverified and unknown fetch nothing). The queryClient default is
+// `refetchOnWindowFocus: false`, so it is turned on here: App.tsx bridges
+// focusManager to AppState, and a foreground past `staleTime` refetches.
+
+export function useWarmPaywallConfig(): void {
+  const paywallOn = useFlag('monetize.paywall');
+  const verified = useSession((s) => subscriptionSessionState(s) === 'verified');
+  useQuery({
+    queryKey: ['paywall-config', 'ios'],
+    queryFn: () => getPaywallConfig('ios'),
+    enabled: paywallOn && verified,
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/** Renders nothing; mounts the warm observer. */
+export function WarmPaywallConfig(): null {
+  useWarmPaywallConfig();
+  return null;
+}
