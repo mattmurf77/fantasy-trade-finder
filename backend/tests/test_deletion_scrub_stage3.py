@@ -358,3 +358,22 @@ def test_stuck_at_reads_only_this_versions_cursor():
     old = json.dumps({"version": scrub.SCRUB_VERSION - 1, "scan": 0})
     assert scrub._stuck_at(row(now)) == scrub._SCANS[0][0] + "_scan"
     assert scrub._stuck_at(row(old)) == "db_pass"
+
+
+def test_a_person_with_many_matches_is_scanned_without_a_term_per_match(engine):
+    """#562 delta QA P3: the scan ORed two SQL terms per captured match id, so
+    600+ ids broke SQLite's expression limit and the job never finished. It now
+    reads the counterparties' notifications instead."""
+    mt = db.trade_matches_table
+    with engine.begin() as conn:
+        conn.execute(insert(mt), [
+            {"id": 1000 + i, "league_id": LEAGUE, "user_a_id": DEL, "user_b_id": f"cp{i % 40}",
+             "user_a_give": "[]", "user_a_receive": "[]", "status": "pending"} for i in range(1500)])
+        notification(conn, "Trade match with @Someone", {"partner_username": "Someone", "match_id": 1007},
+                     user="cp7")
+        notification(conn, "Trade match with @Someone", {"partner_username": "Someone", "match_id": 1007},
+                     user="cp8")                                   # not a side of match 1007
+    accounts.delete_user_data(DEL)
+    assert scrub.run_pending() == 1
+    rows = sorted(read(engine, db.notifications_table), key=lambda r: r["id"])
+    assert [r["title"] for r in rows] == [f"Trade match with @{PLACEHOLDER}", "Trade match with @Someone"]

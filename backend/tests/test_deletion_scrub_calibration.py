@@ -619,3 +619,48 @@ def test_an_older_current_arm_card_whose_name_matches_nothing_is_scanned_on_sqli
     assert current
     for c in current:
         assert_redacted(c, token)
+
+
+def test_every_backfill_transaction_sets_both_timeouts(eng, monkeypatch):
+    """Seen on SQLite too (CI runs SQLite): with Postgres assumed, the first
+    read and every chunk issue SET LOCAL lock_timeout and statement_timeout."""
+    older(eng, monkeypatch)
+    monkeypatch.setattr(db, "_BACKFILL_CHUNK", 10)
+    issued = []
+    monkeypatch.setattr(db, "_ddl_is_postgres", lambda: True)
+    monkeypatch.setattr(db, "_execute_ddl", lambda conn, sql: issued.append(sql))
+    begins = []
+    real_begin = db.engine.begin
+    monkeypatch.setattr(db.engine, "begin", lambda: begins.append(1) or real_begin())
+    db.backfill_grading_card_partners()
+    assert begins and issued == [f"SET LOCAL lock_timeout = '{db._DDL_LOCK_TIMEOUT}'",
+                                 f"SET LOCAL statement_timeout = '{db._DDL_STATEMENT_TIMEOUT}'"] * len(begins)
+
+
+def test_the_backfill_never_fills_the_sessions_own_user_and_skips_a_bad_receive(eng, monkeypatch, caplog):
+    """(c) The viewer, renamed "Jared" and now holding the players the card
+    received from u2 (the trade went through), is never the partner. A card
+    whose receive is not a list (never written by neutral_trade) is left alone
+    without sinking its chunk."""
+    import logging
+    s = world(eng, monkeypatch)
+    legacy(eng, [s["L1"]])
+    jared = [c for c in cards(eng, s["L1"]) if json.loads(c["trade_json"])["partner_name"] == "Jared"
+             and "current" not in json.loads(c["arms_json"])]
+    received = sorted({a["id"] for c in jared for a in json.loads(c["trade_json"])["receive"]
+                       if a["position"] != "PICK"})
+    with eng.begin() as conn:
+        m = db.league_members_table
+        conn.execute(update(m).where(m.c.league_id == "L1", m.c.user_id == "u2").values(display_name="J2"))
+        conn.execute(update(m).where(m.c.league_id == "L1", m.c.user_id == "u1").values(
+            display_name="Jared", roster_data=json.dumps(ROSTER["u1"] + received)))
+        conn.execute(insert(db.grading_cards_table).values(
+            card_id="scalar", session_id=s["L1"], user_id="u1", position=997,
+            arms_json=json.dumps({"value_core": {}}),
+            trade_json=json.dumps({"partner_name": "Me", "give": [], "receive": 5})))
+    caplog.set_level(logging.INFO, logger=db.log.name)
+    filled = db.backfill_grading_card_partners()
+    by_id = {c["card_id"]: c for c in cards(eng, s["L1"])}
+    assert all(by_id[c["card_id"]]["partner_user_id"] is None for c in jared)
+    assert by_id["scalar"]["partner_user_id"] is None
+    assert filled and f"{filled} cards, 0 chunks failed" in caplog.text
