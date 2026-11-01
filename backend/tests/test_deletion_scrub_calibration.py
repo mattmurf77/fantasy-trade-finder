@@ -446,3 +446,26 @@ def test_the_scan_keeps_the_cutoff_and_the_owner(eng, monkeypatch):
         (c,) = cards(eng, sid)
         assert c["trade_json"] == pick and json.loads(c["arms_json"]) == {"value_core": {"reasons": ["r"]}}, sid
     assert s
+
+
+def test_the_backfill_uses_the_deck_row_and_skips_an_ambiguous_name(eng, monkeypatch):
+    """L3's older current-arm cards say "OldKim", which nobody shows now: only
+    their deck row gives the partner. A card naming "Twin", which two L1
+    members show, stays NULL rather than guessing."""
+    s = world(eng, monkeypatch)
+    legacy(eng, [s["L3"]])
+    with eng.begin() as conn:
+        conn.execute(insert(db.league_members_table), [
+            {"league_id": "L1", "user_id": uid, "username": None, "display_name": "Twin",
+             "roster_data": "[]"} for uid in ("u7", "u8")])
+        conn.execute(insert(db.grading_cards_table).values(
+            card_id="twin", session_id=s["L1"], user_id="u1", position=998,
+            arms_json=json.dumps({"value_core": {"deck_position": 1, "reasons": []}}),
+            trade_json=json.dumps({"partner_name": "Twin", "give": [], "receive": []})))
+    db.backfill_grading_card_partners()
+    l3 = cards(eng, s["L3"])
+    current = [c for c in l3 if "current" in json.loads(c["arms_json"])]
+    assert current and all(c["partner_user_id"] == DEL for c in current)
+    assert all(c["partner_user_id"] is None for c in l3 if c not in current)
+    (twin,) = [c for c in cards(eng, s["L1"]) if c["card_id"] == "twin"]
+    assert twin["partner_user_id"] is None
