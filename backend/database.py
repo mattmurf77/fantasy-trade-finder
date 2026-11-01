@@ -4443,8 +4443,9 @@ def backfill_grading_card_partners() -> int:
     other takes the one member of the session's league whose shown name
     (display name, else username, else id, as blind_grading.build_catalog
     names a partner) equals its partner_name and whose roster holds the
-    card's received players (a name alone can be someone else's after a
-    rename). Ambiguous or unknown stays NULL, for the scrub's own fallbacks.
+    card's received players, at least one (a name alone can be someone else's
+    after a rename). Ambiguous, unknown or pick-only stays NULL, for the
+    scrub's own fallbacks.
 
     Deck rows prune at 90 days and names change, so it runs at boot, on NULL
     rows only (idempotent). It runs from _migrate_db, so during a Render build
@@ -4516,8 +4517,10 @@ def backfill_grading_card_partners() -> int:
                     if partner is None and isinstance(name, str):
                         players = {str(a.get("id")) for a in trade.get("receive") or ()
                                    if isinstance(a, dict) and a.get("position") != "PICK"}
+                        # At least one received player, all on that roster: a
+                        # pick-only card has no roster evidence and stays NULL.
                         owners = [uid for uid, shown, held in members.get(league, ())
-                                  if shown == name and players <= held]
+                                  if shown == name and players and players <= held]
                         if len(owners) == 1:
                             partner = owners[0]
                     if partner is not None:

@@ -349,3 +349,12 @@ def test_a_pass_that_straddles_the_grace_is_not_the_grace_pass(engine, monkeypat
     assert DEL not in late["features_json"]
     scrub.tick(t + timedelta(minutes=1))
     assert read(engine, db.deletion_scrub_jobs_table) == []
+
+
+def test_stuck_at_reads_only_this_versions_cursor():
+    from types import SimpleNamespace
+    row = lambda scan_json: SimpleNamespace(scan_json=scan_json, db_version=0, db_done_at=None)  # noqa: E731
+    now = json.dumps({"version": scrub.SCRUB_VERSION, "scan": 0})
+    old = json.dumps({"version": scrub.SCRUB_VERSION - 1, "scan": 0})
+    assert scrub._stuck_at(row(now)) == scrub._SCANS[0][0] + "_scan"
+    assert scrub._stuck_at(row(old)) == "db_pass"

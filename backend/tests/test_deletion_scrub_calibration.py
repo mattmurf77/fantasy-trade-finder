@@ -407,8 +407,13 @@ def test_the_backfill_gives_older_cards_their_partner(eng, monkeypatch):
     unknown stays NULL. Then every one of the person's cards in L5, value
     core included, is redacted by id."""
     s = left_league(eng, monkeypatch, legacy_cards=False, boot_before_leaving=True)
-    assert all(c["partner_user_id"] is not None for c in cards(eng, s["L1"]))
-    assert {c["partner_user_id"] for c in cards(eng, s["L1"])} == {"u2", DEL, "u4"}
+
+    def pick_only(c):
+        return all(a["position"] == "PICK" for a in json.loads(c["trade_json"])["receive"])
+    l1 = cards(eng, s["L1"])
+    assert all(c["partner_user_id"] is not None for c in l1 if not pick_only(c))
+    assert [c["partner_user_id"] for c in l1 if pick_only(c)] == [None]   # no roster evidence
+    assert {c["partner_user_id"] for c in l1} - {None} == {"u2", DEL, "u4"}
     l5 = cards(eng, s["L5"])
     assert l5 and all(c["partner_user_id"] == DEL for c in l5)   # deck row, or "KimFive" while live
     l3_old = [c for c in cards(eng, s["L3"]) if "current" not in json.loads(c["arms_json"])]
@@ -469,3 +474,147 @@ def test_the_backfill_uses_the_deck_row_and_skips_an_ambiguous_name(eng, monkeyp
     assert all(c["partner_user_id"] is None for c in l3 if c not in current)
     (twin,) = [c for c in cards(eng, s["L1"]) if c["card_id"] == "twin"]
     assert twin["partner_user_id"] is None
+
+
+# ── The boot backfill, hardened (#562 delta QA): it runs from _migrate_db, so
+# during a Render build too, against prod while the old instance serves ────
+
+def older(eng, monkeypatch):
+    s = world(eng, monkeypatch)
+    legacy(eng, [s["L1"], s["L3"], s["L4"]])
+    return s
+
+
+def all_cards(eng):
+    with eng.connect() as conn:
+        return {r["card_id"]: dict(r) for r in conn.execute(select(db.grading_cards_table)).mappings()}
+
+
+def test_init_db_runs_the_backfill(tmp_path, monkeypatch):
+    url = f"sqlite:///{tmp_path / 'boot.db'}"
+    engine = create_engine(url)
+    db.metadata.create_all(engine)
+    monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.setattr(db, "DATABASE_URL", url)
+    calls = []
+    monkeypatch.setattr(db, "backfill_grading_card_partners", lambda: calls.append(1) or 0)
+    db.init_db()
+    assert calls == [1]
+    engine.dispose()
+
+
+def test_the_backfill_writes_only_the_partner_in_chunks_with_one_deck_lookup_each(eng, monkeypatch, caplog):
+    """Chunks of _BACKFILL_CHUNK, each its own transaction with one batched
+    deck-row lookup; only partner_user_id changes (grades, tags, positions
+    kept); the log carries counts, never an id or a name."""
+    import logging
+    from sqlalchemy import event
+    s = older(eng, monkeypatch)
+    for c in db.load_grading_cards(s["L1"])[:3]:
+        bg.answer_card(user_id="u1", card_id=c["card_id"], body={"grade": 2, "tags": []})
+    before = all_cards(eng)
+    pending = sum(1 for c in before.values() if c["partner_user_id"] is None)
+    monkeypatch.setattr(db, "_BACKFILL_CHUNK", 7)
+    lookups = []
+    event.listen(eng, "before_cursor_execute",
+                 lambda conn, cur, stmt, *a: lookups.append(1) if "FROM deck_impressions" in stmt else None)
+    caplog.set_level(logging.INFO, logger=db.log.name)
+    filled = db.backfill_grading_card_partners()
+    chunks = -(-pending // 7)
+    assert 0 < filled <= pending and len(lookups) <= chunks
+    after = all_cards(eng)
+    assert sum(1 for c in after.values() if c["partner_user_id"] is not None) - \
+        sum(1 for c in before.values() if c["partner_user_id"] is not None) == filled
+    for cid, row in before.items():
+        assert {k: v for k, v in after[cid].items() if k != "partner_user_id"} == \
+            {k: v for k, v in row.items() if k != "partner_user_id"}, cid
+    text_ = caplog.text
+    for needle in ("u1", "u2", DEL, "u4", DEL_DISPLAY, "Jared", "kimfan"):
+        assert needle not in text_, needle
+    assert f"grading_cards partner backfill: {filled} cards, 0 chunks failed" in text_
+
+
+def test_the_backfill_counts_only_what_committed_and_never_raises(eng, monkeypatch):
+    """A chunk that fails (here its commit) is rolled back, not counted, and
+    skipped; the others land. A failure before any chunk returns 0. It never
+    raises (it runs at boot)."""
+    from sqlalchemy import event
+    older(eng, monkeypatch)
+    monkeypatch.setattr(db, "_BACKFILL_CHUNK", 5)
+    commits = []
+
+    def fail_first_commit(conn):
+        commits.append(1)
+        if len(commits) == 1:
+            raise RuntimeError("commit failed")
+    event.listen(eng, "commit", fail_first_commit)
+    before = sum(1 for c in all_cards(eng).values() if c["partner_user_id"] is None)
+    filled = db.backfill_grading_card_partners()
+    event.remove(eng, "commit", fail_first_commit)
+    after = sum(1 for c in all_cards(eng).values() if c["partner_user_id"] is None)
+    assert filled == before - after and filled > 0
+    assert db.backfill_grading_card_partners() > 0          # the skipped chunk, next boot
+
+    class Broken:
+        dialect = eng.dialect
+
+        def connect(self):
+            raise RuntimeError("no database")
+    monkeypatch.setattr(db, "engine", Broken())
+    assert db.backfill_grading_card_partners() == 0
+
+
+def test_on_postgres_each_chunk_sets_its_lock_and_statement_timeouts(eng, monkeypatch):
+    from sqlalchemy import event
+    if eng.dialect.name != "postgresql":
+        pytest.skip("Postgres only: SET LOCAL")
+    older(eng, monkeypatch)
+    monkeypatch.setattr(db, "_BACKFILL_CHUNK", 10)
+    seen = []
+    event.listen(eng, "before_cursor_execute", lambda conn, cur, stmt, *a: seen.append(stmt))
+    db.backfill_grading_card_partners()
+    locks = [x for x in seen if x.startswith("SET LOCAL lock_timeout")]
+    stmts = [x for x in seen if x.startswith("SET LOCAL statement_timeout")]
+    updates = [x for x in seen if x.startswith("UPDATE grading_cards")]
+    assert locks and len(locks) == len(stmts) and updates
+
+
+def test_a_name_fill_needs_the_cards_players_on_that_members_roster(eng, monkeypatch):
+    """After a rename, "Jared" can name someone else: u2's older card stays
+    NULL when the member now shown as "Jared" (u9) doesn't hold the players it
+    received from u2, rather than being filled with u9."""
+    s = world(eng, monkeypatch)
+    legacy(eng, [s["L1"]])
+    with eng.begin() as conn:
+        m = db.league_members_table
+        conn.execute(update(m).where(m.c.league_id == "L1", m.c.user_id == "u2").values(display_name="J2"))
+        conn.execute(insert(m).values(league_id="L1", user_id="u9", username="nine", display_name="Jared",
+                                      roster_data=json.dumps(["p99"])))
+    db.backfill_grading_card_partners()
+    jared = [c for c in cards(eng, s["L1"]) if json.loads(c["trade_json"])["partner_name"] == "Jared"
+             and "current" not in json.loads(c["arms_json"])]
+    assert jared and all(c["partner_user_id"] is None for c in jared)
+
+
+def test_an_older_current_arm_card_whose_name_matches_nothing_is_scanned_on_sqlite(eng, monkeypatch):
+    """The P2-B case visible on SQLite too: in L6, a league they left, they went
+    by "Zed", which shares no text with any name captured, so only the scan's
+    NULL-partner term brings the card to its deck-row trace."""
+    s = world(eng, monkeypatch)
+    with eng.begin() as conn:
+        conn.execute(insert(db.leagues_table).values(
+            sleeper_league_id="L6", user_id="u1", name="League L6", platform="sleeper",
+            default_scoring="1qb_ppr"))
+        conn.execute(insert(db.league_members_table), [
+            member("L6", "u1", "me", "Me"), member("L6", DEL, "zzz", "Zed")])
+        deck(conn, "u1", "L6", "J7", trades("u1", (DEL,), 20))
+    s["L6"] = build("u1", "L6", trades("u1", (DEL,), 20, give_off=1))
+    legacy(eng, [s["L6"]])
+    with eng.begin() as conn:
+        m = db.league_members_table
+        conn.execute(delete(m).where(m.c.league_id == "L6", m.c.user_id == DEL))
+    token = delete_and_scrub(eng)
+    current = [c for c in cards(eng, s["L6"]) if "current" in json.loads(c["arms_json"])]
+    assert current
+    for c in current:
+        assert_redacted(c, token)
