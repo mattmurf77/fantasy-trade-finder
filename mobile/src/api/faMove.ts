@@ -18,7 +18,7 @@
 
 import NetInfo from '@react-native-community/netinfo';
 
-import { apiRequest, ApiError } from './client';
+import { apiRequest, ApiError, getBaseUrl } from './client';
 import { uuidv4 } from './_queue';
 import { track } from './events';
 
@@ -88,6 +88,15 @@ export interface ConsentBlock {
   /** Template with {cta} and {league} (R15.8 D10(d)). */
   this_move: string;
   button_label: string;
+  /** Legal's "Terms · Privacy" row. Absent: the app's own pages. */
+  links?: ConsentLink[];
+  /** For fa_move_consent_shown. Absent: the client infers it. */
+  reason?: ConsentReason;
+}
+
+export interface ConsentLink {
+  label: string;
+  url: string;
 }
 
 export interface ConsentStatus {
@@ -273,6 +282,17 @@ export function readConsentBlock(raw: unknown): ConsentBlock | null {
   }
   const body = c.body;
   if (!Array.isArray(body) || body.length === 0 || !body.every((p) => typeof p === 'string')) return null;
+  // Optional. A link is kept only with a label and an https URL; none left
+  // means the app's own Terms and Privacy (consentLinks).
+  const links = Array.isArray(c.links)
+    ? c.links.filter(
+        (l): l is ConsentLink =>
+          !!l && typeof l === 'object' &&
+          typeof (l as ConsentLink).label === 'string' && (l as ConsentLink).label.trim() !== '' &&
+          typeof (l as ConsentLink).url === 'string' && /^https:\/\/\S+$/.test((l as ConsentLink).url),
+      ).map((l) => ({ label: l.label, url: l.url }))
+    : [];
+  const reason = (CONSENT_REASONS as readonly unknown[]).includes(c.reason) ? (c.reason as ConsentReason) : undefined;
   return {
     copy_version: c.copy_version as string,
     locale: c.locale as string,
@@ -281,7 +301,22 @@ export function readConsentBlock(raw: unknown): ConsentBlock | null {
     checkbox_label: c.checkbox_label as string,
     this_move: c.this_move as string,
     button_label: c.button_label as string,
+    ...(links.length ? { links } : {}),
+    ...(reason ? { reason } : {}),
   };
+}
+
+/** The consent step's links row (R15.8's "Terms · Privacy"): the block's own
+ *  links when it carries any, else the app's Terms and Privacy pages, built
+ *  as PaywallScreen's openLegal builds them (the API origin serves the web
+ *  app, so the pages live at the API base; no second base URL). */
+export function consentLinks(block: ConsentBlock): ConsentLink[] {
+  if (block.links && block.links.length) return block.links;
+  const base = getBaseUrl();
+  return [
+    { label: FA_MOVE_FALLBACK_COPY.terms_link, url: `${base}/terms` },
+    { label: FA_MOVE_FALLBACK_COPY.privacy_link, url: `${base}/privacy` },
+  ];
 }
 
 /** The pair the move request echoes: the shown block's, as received (F11). */
@@ -296,7 +331,8 @@ export function consumeWithdrawal(platform: LeaguePlatform): boolean {
   return _withdrawnHere.delete(platform);
 }
 
-export type ConsentReason = 'first' | 'lapsed' | 'version' | 'withdrawn';
+export const CONSENT_REASONS = ['first', 'lapsed', 'version', 'withdrawn'] as const;
+export type ConsentReason = (typeof CONSENT_REASONS)[number];
 
 /** `fa_move_consent_shown.reason`. The contract carries no reason, so this
  *  is the client's best reading: a 409 whose copy_version differs from the
@@ -312,6 +348,16 @@ export function consentReason(input: {
   if (input.withdrawnHere) return 'withdrawn';
   if (input.consentUntil) return 'lapsed';
   return 'first';
+}
+
+/** `fa_move_consent_shown.reason`: the block's own `reason` when the server
+ *  sends one (contract §2), else the client's reading above. */
+export function consentShownReason(
+  block: ConsentBlock,
+  inference: Parameters<typeof consentReason>[0],
+): ConsentReason {
+  const inferred = consentReason(inference);
+  return block.reason ?? inferred;
 }
 
 // ── Codes → states (contract §4) ────────────────────────────────────────────
@@ -610,6 +656,12 @@ export const FA_MOVE_FALLBACK_COPY = {
   drop_to_make_room: 'Drop a player to make room',
   not_now: 'Not now',
   tick_hint: 'Tick the box to make the move',
+  // The consent step's links when the block carries none (R15.8: "Terms · Privacy").
+  terms_link: 'Terms',
+  privacy_link: 'Privacy',
+  link_hint: 'Opens in your browser',
+  // The host's list row after a claim was submitted (scope §C state 9).
+  claim_pending: 'Claim pending',
 } satisfies Record<MoveCopyKey, string> & Record<string, string>;
 export type FallbackKey = keyof typeof FA_MOVE_FALLBACK_COPY;
 

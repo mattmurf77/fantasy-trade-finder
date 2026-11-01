@@ -28,7 +28,8 @@ import ClaimSheet, { explainNoAdd, resolveAddPlatform } from '../components/Clai
 import FeedbackFAB from '../components/FeedbackFAB';
 import PlayerCard from '../components/PlayerCard';
 import { getFreeAgents, type FreeAgentRow } from '../api/league';
-import { faMoveOpensSheet, type FaMoveCapability } from '../api/faMove';
+import { faMoveOpensSheet, FA_MOVE_FALLBACK_COPY, type FaMoveCapability } from '../api/faMove';
+import { isClaimPending, useClaimsPending } from '../state/claimsPending';
 import { ApiError } from '../api/client';
 import { readErrorCopy } from '../utils/verification';
 import { useSession } from '../state/useSession';
@@ -82,6 +83,9 @@ export default function FreeAgentsScreen() {
   const [claimTarget, setClaimTarget] = useState<FreeAgentRow | null>(null);
   // The capability as it was at the tap; the sheet holds it from there.
   const [claimMove, setClaimMove] = useState<FaMoveCapability | null>(null);
+  // D1 state 9: claims submitted this app session (empty unless the server
+  // answered `submit`, so the rows are unchanged on today's server).
+  const pendingClaims = useClaimsPending((s) => s.keys);
   const onAdd = useCallback(
     (row: FreeAgentRow) => {
       if (!leagueId) return;
@@ -211,6 +215,7 @@ export default function FreeAgentsScreen() {
             <FreeAgentRowCard
               row={item}
               canAdd={faMoveOpensSheet(move, item) || addPlatform === 'sleeper'}
+              claimPending={isClaimPending(pendingClaims, leagueId, item.player_id)}
               onAdd={onAdd}
             />
           )}
@@ -248,10 +253,13 @@ export default function FreeAgentsScreen() {
 function FreeAgentRowCard({
   row,
   canAdd,
+  claimPending,
   onAdd,
 }: {
   row: FreeAgentRow;
   canAdd: boolean;
+  /** D1 state 9: a claim for this player was submitted this session. */
+  claimPending: boolean;
   onAdd: (row: FreeAgentRow) => void;
 }) {
   const drop = row.drop_suggestion;
@@ -285,7 +293,11 @@ function FreeAgentRowCard({
           />
         }
         statsSlot={
-          drop ? (
+          claimPending ? (
+            <Text style={styles.dropLine} numberOfLines={1}>
+              {FA_MOVE_FALLBACK_COPY.claim_pending}
+            </Text>
+          ) : drop ? (
             <Text style={styles.dropLine} numberOfLines={1}>
               Drop: {drop.name}{' '}
               <Text style={styles.dropDelta}>

@@ -45,7 +45,8 @@ import {
   attemptMove,
   bidText,
   consentEcho,
-  consentReason,
+  consentLinks,
+  consentShownReason,
   consentValidAt,
   consumeWithdrawal,
   faMoveGate,
@@ -72,9 +73,10 @@ import {
   type MoveCopyKey,
   type MoveKind,
 } from '../api/faMove';
+import { markClaimPending } from '../state/claimsPending';
 import { useSession } from '../state/useSession';
 import { openInSleeperApp } from '../utils/sleeperHandoff';
-import type { ExternalSurface } from '../utils/openExternal';
+import { openPlatform, type ExternalSurface } from '../utils/openExternal';
 
 // #179 claim sheet + the "where can an Add happen" resolver, shared by the
 // Free Agents finder and Usage Trends (moved out of FreeAgentsScreen
@@ -422,6 +424,12 @@ export default function ClaimSheet({
     void openInSleeperApp({ target: 'add', leagueId, playerId: row.player_id, surface });
   };
 
+  // The consent step's legal links (R15.8 "Terms · Privacy"), through the
+  // shared external opener: it alerts when nothing opens, so no catch here.
+  const openConsentLink = (url: string) => {
+    void openPlatform({ platform, httpsUrl: url, surface, appMissing: 'https' });
+  };
+
   // "Do it in Sleeper instead" (K-F4): the sheet switches to the hand-off,
   // bid and drop kept.
   function doInPlatform() {
@@ -474,7 +482,8 @@ export default function ClaimSheet({
   function showConsent(block: ConsentBlock, m: FaMoveCapability | null = move) {
     if (!isSubmitCapability(m)) return;
     const termsChanged = shownVersionRef.current != null && shownVersionRef.current !== block.copy_version;
-    const reason = consentReason({
+    // The server's reason when the block carries one, else the client's reading.
+    const reason = consentShownReason(block, {
       consentUntil: m.consent_until,
       shownVersion: shownVersionRef.current,
       offeredVersion: block.copy_version,
@@ -558,6 +567,8 @@ export default function ClaimSheet({
       const res = outcome.response;
       const pending = res.status === 'pending';
       setConsentOverride(true);
+      // State 9: the host's row reads "Claim pending" for the app session.
+      if (pending) markClaimPending(leagueId, row.player_id);
       refreshList();
       show({
         step: 'result',
@@ -965,6 +976,22 @@ export default function ClaimSheet({
           }}
         />
         {doInSleeper}
+        {/* R15.8 v1 ends "[Make the move] · [Not now] — Terms · Privacy". */}
+        <View style={sheetStyles.linksRow}>
+          {consentLinks(view.block).map((l, i) => (
+            <React.Fragment key={`${i}:${l.url}`}>
+              {i > 0 ? <Text style={sheetStyles.dimLine}>·</Text> : null}
+              <Pressable
+                accessibilityRole="link"
+                accessibilityHint={fallback('link_hint') ?? undefined}
+                hitSlop={8}
+                onPress={() => openConsentLink(l.url)}
+              >
+                <Text style={sheetStyles.linkText}>{l.label}</Text>
+              </Pressable>
+            </React.Fragment>
+          ))}
+        </View>
       </>
     );
   } else {
@@ -1300,6 +1327,8 @@ const sheetStyles = StyleSheet.create({
   // Refusals are --neg text, never a fill.
   negLine: { ...type.bodySm, color: semantic.neg },
   inlineLink: { color: chalk.base, textDecorationLine: 'underline' },
+  linksRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm },
+  linkText: { ...type.bodySm, color: chalk.dim, textDecorationLine: 'underline' },
   thisMove: { ...type.bodySm, color: chalk.base, fontStyle: 'italic' },
   result: { gap: space.sm, paddingTop: space.sm },
   // design-lead's #351 §2.3 checkbox: 20×20, --r-xs, 1.5px line-strong on
