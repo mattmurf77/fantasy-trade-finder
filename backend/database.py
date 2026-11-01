@@ -2676,7 +2676,9 @@ sleeper_credentials_table = Table("sleeper_credentials", metadata,
 #     consent timestamp.
 #   * A move is two rows under the client's `attempt_id`: phase 'sent',
 #     written BEFORE the platform call, then phase 'result'. Unique on
-#     (attempt_id, phase), so one tap can never send twice.
+#     (user_id, attempt_id, phase), so one tap can never send twice. The id
+#     is OPAQUE and per user (contract §3): the client may mint it from
+#     Math.random, so another user's identical id is a different move.
 # Neither table ever stores a token or credential. User-keyed: both join
 # account deletion and export through accounts._ADDITIONAL_PRIVATE_TABLES
 # (R15.8 D12: deleted with the account). New tables, so metadata.create_all
@@ -2707,7 +2709,7 @@ platform_write_consents_table = Table("platform_write_consents", metadata,
 
 platform_write_moves_table = Table("platform_write_moves", metadata,
     Column("id",                      Integer, primary_key=True, autoincrement=True),
-    Column("attempt_id",              String, nullable=False),  # client UUID, one per tap
+    Column("attempt_id",              String, nullable=False),  # client id, one per tap; opaque
     Column("phase",                   String, nullable=False),  # sent | result
     Column("user_id",                 String, nullable=False),  # FTF user id
     Column("platform",                String, nullable=False),  # sleeper | mfl | espn
@@ -2728,7 +2730,8 @@ platform_write_moves_table = Table("platform_write_moves", metadata,
     Column("response_json",           Text),                    # result rows: the body answered, replayed
                                                                 # for a repeat of the same attempt_id
     Column("recorded_at",             String, nullable=False),  # row insert time, server UTC
-    UniqueConstraint("attempt_id", "phase", name="uq_platform_write_moves_attempt_phase"),
+    UniqueConstraint("user_id", "attempt_id", "phase",
+                     name="uq_platform_write_moves_user_attempt_phase"),
     Index("ix_platform_write_moves_user_league", "user_id", "league_id"),
 )
 
@@ -15167,12 +15170,13 @@ def withdraw_platform_write_grants(user_id: str, platform: str, via: str, now: d
         return _run(c)
 
 
-def platform_write_move_rows(attempt_id: str) -> list[dict]:
-    """Both rows (or just 'sent', or none) recorded under one attempt_id."""
+def platform_write_move_rows(user_id: str, attempt_id: str) -> list[dict]:
+    """Both rows (or just 'sent', or none) of one user's attempt_id. Scoped per
+    user: an attempt_id is opaque and only unique within a user (contract §3)."""
     t = platform_write_moves_table
     with engine.connect() as conn:
         return [dict(r._mapping) for r in conn.execute(
-            select(t).where(t.c.attempt_id == str(attempt_id)))]
+            select(t).where(t.c.user_id == str(user_id), t.c.attempt_id == str(attempt_id)))]
 
 
 def recent_platform_write_moves(user_id: str, league_id: str, since: datetime) -> list[dict]:
@@ -15189,8 +15193,8 @@ def recent_platform_write_moves(user_id: str, league_id: str, since: datetime) -
 
 def record_platform_write_move(row: dict) -> bool:
     """Append one move row ('sent' or 'result'). False when that
-    (attempt_id, phase) already exists: for 'sent', a concurrent duplicate of
-    the same tap got there first and must not send."""
+    (user_id, attempt_id, phase) already exists: for 'sent', a concurrent
+    duplicate of the same tap got there first and must not send."""
     from sqlalchemy.exc import IntegrityError
     values = dict(row)
     values.setdefault("recorded_at", _now())

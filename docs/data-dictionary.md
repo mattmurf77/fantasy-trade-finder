@@ -1672,12 +1672,12 @@ User-keyed: deleted with the account and included in the export (`accounts._ADDI
 
 ## `platform_write_moves`
 
-D1 free-agent moves. The record of each move Fleeced sent to a platform for the user (legal R15.3). **Append-only, two rows per move** under the client's `attempt_id`: phase `sent`, written **before** the platform call, then phase `result`. Unique on (`attempt_id`, `phase`), so one tap can never send twice; a repeat of an `attempt_id` replays the `result` row's `response_json`. A move refused before the write (no consent, roster full, player taken, …) writes no row. Never holds a token. Written by `record_platform_write_move`; read by `platform_write_move_rows` (idempotency) and `recent_platform_write_moves` (the double-move block: a `sent` row with no result or `result = 'unknown'` under 15 minutes old, or a pending claim under 24 h, blocks a new move for that player).
+D1 free-agent moves. The record of each move Fleeced sent to a platform for the user (legal R15.3). **Append-only, two rows per move** under the client's `attempt_id`: phase `sent`, written **before** the platform call, then phase `result`. Unique on (`user_id`, `attempt_id`, `phase`), so one tap can never send twice; the id is opaque and only unique per user (another user's identical id is a different move); a repeat of an `attempt_id` replays the `result` row's `response_json`. A move refused before the write (no consent, roster full, player taken, …) writes no row. Never holds a token. Written by `record_platform_write_move`; read by `platform_write_move_rows` (idempotency) and `recent_platform_write_moves` (the double-move block: a `sent` row with no result or `result = 'unknown'` under 15 minutes old, or a pending claim under 24 h, blocks a new move for that player).
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | int PK | autoincrement |
-| `attempt_id` | str | Client UUID, one per tap; joins the `fa_move_*` events |
+| `attempt_id` | str | Client id, one per tap: opaque, 8–64 of `[A-Za-z0-9._-]` (UUID-shaped, never parsed as one); joins the `fa_move_*` events |
 | `phase` | str | `sent` \| `result` |
 | `user_id` | str | FTF user id (indexed with `league_id`) |
 | `platform` | str | `sleeper` \| `mfl` \| `espn` |

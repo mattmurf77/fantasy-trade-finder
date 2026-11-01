@@ -808,6 +808,7 @@ The 11-06 binary is built against [contract.md](plans/sleeper-fa-write/contract.
 | `free_agents[i].move_kind` | `add` \| `claim` \| `null` | `null` = the server can't tell (always, until the capture answers Q8); the CTA then names an add |
 | `free_agents[i].move_mode` | `handoff` (optional) | Per-row override, with `move_line` |
 | Consent `copy_version` | `sleeper-roster-moves-v1` (now) \| `sleeper-roster-moves-v2` (required before claims, R15.8 D5) | Texts live **only** on the server (`backend/fa_move_copy.py`, hash-pinned); the client echoes `{copy_version, locale}` back. A wording change is a new version. Locale `en-US` |
+| Move request `attempt_id` | opaque, 8–64 of `[A-Za-z0-9._-]` | UUID-shaped from the client (may be `Math.random`), never parsed as a UUID; idempotency is per (user, `attempt_id`) |
 | Move request `surface` (optional) | `free_agents` \| `usage_trends` | The sheet's host; recorded on `fa_move_consent_recorded.surface`; any other value → null |
 | Claim copy forms | `waiver_line` (with a drop) / `waiver_line_no_drop`; `bid_line` only when the claim has a bid; `cta_claim[_drop]` (with `{bid}`) / `cta_claim[_drop]_no_bid` | R15.1's line in its four forms, so no slot names a missing half |
 | Consent block `reason` (optional) | `first` \| `lapsed` \| `version` \| `withdrawn` | Sent when the server knows it; absent → the client infers it |

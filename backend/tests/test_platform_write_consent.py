@@ -219,10 +219,21 @@ def _delete(h, platform="sleeper"):
                            headers={"X-Session-Token": TOKEN})
 
 
-def test_routes_404_while_every_kill_switch_is_off(h):
-    h.flags.discard("sleeper.send_add_drop")
-    for r in (_get(h), _delete(h)):
-        assert r.status_code == 404 and _err(r)["error"] == "feature_disabled"
+def test_routes_never_follow_the_kill_switch(h):
+    """Contract §2: GET always answers and DELETE always works, so a user can
+    withdraw while moves are switched off (sabotage: re-add the flag gate)."""
+    _grant(h)
+    h.flags.clear()                                          # every flag off
+    r = _get(h)
+    assert r.status_code == 200 and r.get_json()["valid"] is True
+    r = _delete(h)
+    assert r.status_code == 200 and r.get_json()["notice"] == WITHDRAWAL_NOTICE
+    assert [c["withdrawn_via"] for c in h.consents() if c["kind"] == "withdrawal"] == ["settings"]
+    body = _get(h).get_json()
+    assert body["valid"] is False and body["status_line"] is None and body["stop_label"] is None
+    assert body["consent"]["copy_version"] == V1             # the block is still there
+    # The move route does follow it.
+    assert h.post().status_code == 404
 
 
 @pytest.mark.parametrize("platform", [None, "", "fleaflicker", "Sleeper", "local"])

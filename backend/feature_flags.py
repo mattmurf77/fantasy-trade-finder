@@ -142,8 +142,8 @@ FLAG_KEYS: tuple[str, ...] = (
     # D1 free-agent moves (docs/plans/sleeper-fa-write/): the app submits a
     # Sleeper add / add+drop (claims only under R15.8 D5) on the user's
     # behalf. SERVER-ONLY kill switch: gates POST /api/league/free-agents/move
-    # and GET/DELETE /api/platform-write-consent (404 when off) and lets the
-    # free-agents capability answer move.mode 'submit' (else 'handoff'). Never
+    # (404 when off) and lets the free-agents capability answer move.mode
+    # 'submit' (else 'handoff'). The consent routes never follow it. Never
     # in mobile LAUNCHED_FLAG_DEFAULTS; no client reads it. Supersedes the
     # never-shipped `sleeper.fa_write`. MFL/ESPN get their own keys in Update 1.
     "sleeper.send_add_drop",

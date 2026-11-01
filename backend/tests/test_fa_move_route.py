@@ -192,9 +192,9 @@ class Harness:
         b.update(over)
         return {k: v for k, v in b.items() if v is not _ABSENT}
 
-    def post(self, **over):
+    def post(self, token=TOKEN, **over):
         return self.client.post("/api/league/free-agents/move",
-                                headers={"X-Session-Token": TOKEN,
+                                headers={"X-Session-Token": token,
                                          "Content-Type": "application/json",
                                          "X-Device": "iphone", "X-App-Version": "1.22.0"},
                                 data=json.dumps(self.body(**over)))
@@ -441,7 +441,7 @@ def test_pre_write_refusals_never_call_the_platform(h, monkeypatch, setup, statu
     elif setup == "missing_attempt":
         over["attempt_id"] = _ABSENT
     elif setup == "bad_attempt":
-        over["attempt_id"] = "not-a-uuid"
+        over["attempt_id"] = "short"
     elif setup == "bad_kind":
         over["move_kind"] = "trade"
     elif setup == "drop_is_add":
@@ -702,14 +702,55 @@ def test_a_concurrent_duplicate_loses_the_sent_row_race(h, monkeypatch):
     assert h.platform.calls == []
 
 
-def test_another_users_attempt_id_is_refused(h):
-    attempt = str(uuid.uuid4())
-    db_module.record_platform_write_move({
-        "attempt_id": attempt, "phase": "sent", "user_id": "someone-else",
-        "platform": "sleeper", "league_id": LEAGUE, "sent_at": h.now.isoformat()})
-    r = h.post(attempt_id=attempt)
+OPAQUE_ID = "loc-mrpy6qog-2t72t6-1a2b3c4d"       # a Math.random id, not a UUID
+
+
+@pytest.mark.parametrize("attempt_id", [OPAQUE_ID, "abcdefgh", "A.b_c-9" + "x" * 57,
+                                        "6f1c2e8a-3b4d-4c5e-8f9a-0b1c2d3e4f5a"])
+def test_attempt_id_is_opaque(h, attempt_id):
+    """Contract §3: 8–64 of [A-Za-z0-9._-], never parsed as a UUID."""
+    r = h.post(attempt_id=attempt_id)
+    assert r.status_code == 200 and r.get_json()["attempt_id"] == attempt_id
+    assert {m["attempt_id"] for m in h.moves()} == {attempt_id}
+
+
+@pytest.mark.parametrize("attempt_id", ["", "short7c", "x" * 65, "has space1", "slash/abcd",
+                                        "ünicode-id", 12345678, None])
+def test_malformed_attempt_id_is_bad_request(h, attempt_id):
+    r = h.post(attempt_id=attempt_id)
     assert r.status_code == 400 and _err(r)["error"] == "bad_request"
     assert h.platform.calls == []
+
+
+USER2 = "424242424242424242"
+TOKEN2 = "sess-fa-move-2"
+
+
+def test_two_users_with_the_same_attempt_id_each_get_their_own_move(h):
+    """Contract §3: idempotency is per (user, attempt_id). Another user's
+    identical id is a different move: never a replay, never a 400."""
+    h.rosters = _rosters() + [{"owner_id": USER2, "roster_id": 5, "players": ["5151"]}]
+    db_module.upsert_sleeper_credential(USER2, USER2, sleeper_write.encrypt_token(_jwt(uid=USER2)),
+                                        None)
+    with server._sessions_lock:
+        server._sessions[TOKEN2] = {"user_id": USER2, "verified": True,
+                                    "active_format": "1qb_ppr", "last_active": time.time()}
+    try:
+        first = h.post(attempt_id=OPAQUE_ID)
+        second = h.post(token=TOKEN2, attempt_id=OPAQUE_ID, drop_player_id="5151")
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop(TOKEN2, None)
+    assert first.status_code == second.status_code == 200, second.get_json()
+    assert len(h.platform.calls) == 2                       # two moves, no replay
+    sent = [json.loads(c[0].data)["variables"] for c in h.platform.calls]
+    assert [v["roster_id"] for v in sent] == [3, 5]
+    rows = h.moves(OPAQUE_ID)
+    assert sorted((m["user_id"], m["phase"]) for m in rows) == sorted(
+        [(USER, "sent"), (USER, "result"), (USER2, "sent"), (USER2, "result")])
+    # And each user's repeat replays only their own answer.
+    assert h.post(attempt_id=OPAQUE_ID).get_json() == first.get_json()
+    assert len(h.platform.calls) == 2
 
 
 # ---------------------------------------------------------------------------

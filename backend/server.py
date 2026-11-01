@@ -36560,6 +36560,8 @@ _FA_MOVE_PLATFORMS = ("sleeper", "mfl", "espn")
 # The claim sheet's hosts (contract §3 `surface`), recorded on
 # fa_move_consent_recorded; any other value is recorded as null.
 _FA_MOVE_SURFACES = ("free_agents", "usage_trends")
+# Contract §3: `attempt_id` is opaque, 8–64 of [A-Za-z0-9._-], unique per user.
+_FA_MOVE_ATTEMPT_ID_RE = re.compile(r"[A-Za-z0-9._-]{8,64}")
 # Each platform's server-only kill switch. MFL and ESPN add theirs in Update 1.
 _FA_MOVE_FLAGS = {"sleeper": "sleeper.send_add_drop"}
 
@@ -36584,8 +36586,8 @@ _fa_move_clock = time.monotonic                      # tests inject
 
 
 def _fa_move_any_flag_on() -> bool:
-    """Contract §2 / scope §B3 step 2: the routes exist only while any
-    platform's `*.send_add_drop` is on."""
+    """Scope §B3 step 2: the move route exists only while any platform's
+    `*.send_add_drop` is on. The consent routes never follow it (contract §2)."""
     return any(is_enabled(key) for key in _FA_MOVE_FLAGS.values())
 
 
@@ -36798,15 +36800,13 @@ def platform_write_consent_route():
            confirm; idempotent (a repeat appends nothing, same body). `notice`
            is R15.2.6's text, verbatim.
     Both need a session only, never a verified one (contract §2: withdrawal
-    is as easy as consent), so neither carries `@_gate_unverified_write`.
-    401 without a session; 404 feature_disabled while every `*.send_add_drop`
-    is off; 400 bad_request for a `platform` outside sleeper | mfl | espn.
+    is as easy as consent), so neither carries `@_gate_unverified_write`. And
+    NEITHER follows a kill switch: GET always answers, and DELETE always
+    works, so a user can withdraw while moves are switched off (only the move
+    route and the capability follow `*.send_add_drop`). 401 without a
+    session; 400 bad_request for a `platform` outside sleeper | mfl | espn.
     Never returns a token.
     """
-    if not _fa_move_any_flag_on():
-        body, status = _fa_move_error("feature_disabled", 404,
-                                      _fa_copy.message("feature_disabled"))
-        return jsonify(body), status
     sess = _require_session()
     user_id = str(sess.get("user_id") or "")
     platform = request.args.get("platform") or ""
@@ -36866,11 +36866,9 @@ def _fa_move_parse_body(body) -> dict | None:
         return None
     if drop_id == add_id or kind not in ("add", "claim"):
         return None
-    if not isinstance(attempt_id, str) or len(attempt_id) > 64:
-        return None
-    try:
-        uuid.UUID(attempt_id)
-    except ValueError:
+    # Opaque, never parsed as a UUID (contract §3): the client's is UUID-shaped
+    # but may come from Math.random (Hermes has no Web Crypto).
+    if not isinstance(attempt_id, str) or not _FA_MOVE_ATTEMPT_ID_RE.fullmatch(attempt_id):
         return None
     bid = None
     if kind == "claim" and body.get("faab_bid") is not None:   # an add spends no FAAB
@@ -37016,12 +37014,11 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
         return _fa_move_error("feature_disabled", 404,
                               _fa_copy.message("feature_disabled", platform))
     now = _fa_move_now()
-    # 7. The attempt_id: a repeat returns the recorded answer, or 409 while
-    # the first is still in flight. It never writes twice.
-    prior = _fa_db.platform_write_move_rows(attempt_id)
+    # 7. The attempt_id, per user: a repeat returns the recorded answer, or 409
+    # while the first is still in flight. It never writes twice. Another user's
+    # identical id is a different move (contract §3).
+    prior = _fa_db.platform_write_move_rows(user_id, attempt_id)
     if prior:
-        if any(str(r["user_id"]) != user_id for r in prior):
-            return _fa_move_error("bad_request", 400, _fa_copy.message("bad_request"))
         done = next((r for r in prior if r["phase"] == "result"), None)
         if done is not None and done.get("response_json"):
             return json.loads(done["response_json"]), int(done.get("response_status") or 200)
@@ -37113,7 +37110,7 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
         return _fa_move_error(f"{platform}_write_failed", 502,
                               _fa_copy.message("write_failed_roster_read", platform),
                               kind="roster_read")
-    # 12. The `sent` row BEFORE the platform call, unique on (attempt_id,
+    # 12. The `sent` row BEFORE the platform call, unique on (user, attempt_id,
     # 'sent'): a concurrent duplicate of this tap loses here and never sends.
     record = {"attempt_id": attempt_id, "user_id": user_id, "platform": platform,
               "platform_user_id": platform_user_id, "league_id": league_id,
@@ -37214,8 +37211,9 @@ def league_free_agents_move_route():
     """D1: make one free-agent move in the user's league (contract §3).
 
     Body {league_id, add_player_id, drop_player_id?, move_kind: add|claim,
-    faab_bid? (claims), consent?: {copy_version, locale}, attempt_id (UUID,
-    one per tap), surface? (free_agents|usage_trends)}. 200 {status: complete|pending, move_kind, result:
+    faab_bid? (claims), consent?: {copy_version, locale}, attempt_id (one per
+    tap; opaque, 8–64 of [A-Za-z0-9._-], unique per user), surface?
+    (free_agents|usage_trends)}. 200 {status: complete|pending, move_kind, result:
     accepted|partial, league_platform, attempt_id, title, lines,
     platform_transaction_id?}; a repeat of an attempt_id returns its recorded
     answer. Every error body is {error, message, detail == message, title?,
