@@ -51,9 +51,6 @@ export default function FreeAgentsScreen() {
   const navigation = useNavigation<any>();
   const [filter, setFilter] = useState<PositionFilter>('ALL');
   const leagueId = useSession((s) => s.league?.league_id);
-  // leagueId IS the session league's id, so the session league's name is
-  // always the claim league's (ClaimSheet's steps block names it).
-  const leagueName = useSession((s) => s.league?.league_name ?? null);
   const isDemo = useSession((s) => s.isDemo);
   // S4 PRD-05 (ux.empty_state_ctas): the no-league state gets the action
   // its copy describes. Flag off: copy-only, as before.
@@ -214,7 +211,6 @@ export default function FreeAgentsScreen() {
           key={claimTarget.player_id}
           row={claimTarget}
           leagueId={leagueId}
-          leagueName={leagueName}
           surface="free_agents"
           capacity={query.data?.roster_capacity}
           waivers={query.data?.waivers}

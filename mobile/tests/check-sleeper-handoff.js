@@ -11,27 +11,22 @@
 // `sleeper://` scheme instead, through utils/openExternal.ts, and shows the
 // Get Sleeper alert (operator D2, 2026-10-20) when Sleeper isn't installed.
 //
-// Here (S-ids are the PRD's; H-ids are the b3 brief's, not the PRD's;
-// P-ids are design-lead's layout review's):
+// Here (S-ids are the PRD's; H-ids are the b3 brief's, not the PRD's):
 //   S1  ClaimSheet, FreeAgentsScreen and UsageTrendsScreen: no
 //       `sleeper.com/leagues` literal, no Linking.openURL to a Sleeper host [AST]
 //   S2  SendInSleeperButton imports openInSleeperApp from
 //       ../utils/sleeperHandoff and calls it from openInSleeper (target
 //       'trade'). ClaimSheet half: the same import, and the
-//       fa-claim.open-sleeper CTA's handler calls it with target 'add'     [AST]
-//   S8  ClaimSheet renders fa-claim.steps between the drop section and the
-//       CTA, as design-lead's numbered list (2026-10-28): a TickLabel
-//       "IN SLEEPER"; an always-rendered league row (leagueName, else the
-//       fallback); search (row.name); add; a drop row (the selected drop,
-//       else "pick a player above", or "Drop a player to make room" when
-//       candidates.length === 0; only for a pick or openSlots === 0); a
-//       bid row gated on faab and a bid; rows numbered with no gap; then
-//       the copy disclosure as the last line. The CTA passes
-//       clipboardText: row.name                                            [AST]
+//       fa-claim.open-sleeper CTA's handler calls it with target 'add'
+//       and no clipboardText (no on-sheet disclosure, so nothing is
+//       copied). The sheet has no fa-claim.steps / fa-claim.step.* /
+//       fa-claim.footer testID and no KeyboardAvoidingView: the operator
+//       ruled out in-app claim instructions (2026-11-01), which retired
+//       S8 (PRD §4.2's steps block) and P1 (its pinned footer)             [AST]
 //   S9  the eight NO_ADD_REASON strings verbatim; explainNoAdd and
 //       resolveAddPlatform byte-identical to 04eae95b (AC-10)              [AST]
 //   H1  both ClaimSheet hosts pass `surface` (free_agents / usage_trends)
-//       and a `leagueName` that can only name the claim league             [AST]
+//       for the hand-off's ExternalTarget.surface                          [AST]
 //   H2  FreeAgentsScreen's render chain tests query.isError before
 //       query.isLoading (release-lead QA rule)                             [AST]
 //   S3  scheme opens: one openURL, `sleeper://…`, outcome 'app', no alert  [executed]
@@ -51,14 +46,6 @@
 //       otherwise, never an add-ladder path                                 [executed]
 //   S16 SendInSleeperButton has no Linking at all, so doPropose /
 //       confirmSend / goConnect can't open anything                        [AST]
-//   P1  ClaimSheet's fixed footer (design-lead, 2026-11-01: 648pt of content
-//       vs the SE's 567pt sheet; ux-lead's keyboard and scroll conditions):
-//       one fa-claim.footer View holds the CTA and the "Sleeper doesn't
-//       allow apps…" footnote, outside every ScrollView, right after the
-//       ScrollView's closing tag in the sheet's SafeAreaView; a
-//       KeyboardAvoidingView ('padding' on iOS) wraps both; the ScrollView
-//       has a ref that a mount-once effect calls flashScrollIndicators on;
-//       keyboardShouldPersistTaps="handled" stays                          [AST]
 //
 // Deferred (not true on this branch; each owner adds its S-check with the
 // migration):
@@ -66,11 +53,9 @@
 //   S14 → platforms-eng follow-up: the Send-in-Sleeper steps confirm +
 //       clipboard (PRD §4.3), waiting on design-lead / ux-lead copy
 //
-// HONEST LABEL (G-035): S1, S2, S8, S9, S16, H1 and H2 prove wirings are
+// HONEST LABEL (G-035): S1, S2, S9, S16, H1 and H2 prove wirings are
 // present, not behavior: no claim-sheet code is executed here. S3–S7, S10
 // and S13 execute the real modules.
-// P1 is AST-only too: it proves the footer's structure, not its layout. No
-// sheet is measured and no keyboard is raised.
 //
 // Run: node tests/check-sleeper-handoff.js
 
@@ -210,7 +195,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// S1 / S2 (ClaimSheet half) / S8 / S9 / H1 / H2 — the claim sheet and its hosts
+// S1 / S2 (ClaimSheet half) / S9 / H1 / H2 — the claim sheet and its hosts
 // ═══════════════════════════════════════════════════════════════════════
 const unparen = (n) => (ts.isParenthesizedExpression(n) ? unparen(n.expression) : n);
 const squash = (s) => s.replace(/\s+/g, '');
@@ -296,214 +281,45 @@ for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
   );
 }
 
-// S8 — the on-sheet steps block (PRD §4.2), as design-lead's numbered list
-// (review 2026-10-28). The bare rung reopens Sleeper's last-viewed league,
-// so the sheet is the only thing telling the user which league, player,
-// drop and bid; and nothing is copied silently.
+// S2 (ClaimSheet half, continued) — the CTA is a plain hand-off. The
+// operator ruled out in-app claim instructions (2026-11-01 design review;
+// a later build submits the claim in-app), so the sheet has no steps block
+// and no pinned footer, and with no on-sheet disclosure the CTA copies
+// nothing (#351 PRD §4.2: never copy silently).
 {
   const sf = parse(CLAIM);
-  const decl = declarations(sf);
-  const LEAGUE_FALLBACK = "Open the league you're claiming in";
-  const testIdOf = (el) => {
-    const a = el.openingElement.attributes.properties.find((p) =>
-      ts.isJsxAttribute(p) && p.name.getText(sf) === 'testID');
-    return a && a.initializer && ts.isStringLiteral(a.initializer) ? a.initializer.text : null;
-  };
-  const attrText = (el, name) => {
-    const a = el.openingElement.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText(sf) === name);
-    return a && a.initializer ? a.initializer.getText(sf) : null;
-  };
-  const elementsById = (root, id) => {
-    const out = [];
-    walk(root, (n) => { if (ts.isJsxElement(n) && testIdOf(n) === id) out.push(n); });
-    return out;
-  };
-  // What a node RENDERS: `{x}` children and `${x}` in a `{`…`}` child.
-  // A mention in a condition (`{dropName ? … : null}`) doesn't count.
-  const renderedIn = (root) => {
-    const out = [];
-    walk(root, (n) => {
-      if (!ts.isJsxExpression(n) || !n.expression || !(ts.isJsxElement(n.parent) || ts.isJsxFragment(n.parent))) return;
-      const e = unparen(n.expression);
-      if (ts.isTemplateExpression(e)) out.push(...e.templateSpans.map((s) => s.expression.getText(sf)));
-      else out.push(e.getText(sf));
-    });
-    return out;
-  };
-  // The conditions a row renders under, between it and the steps block:
-  // `c ? <row/> : …` and `c && <row/>`. `raw` as written; `expanded` adds
-  // the initializer of every const the conditions name, one level deep.
-  const gateOf = (row, block) => {
-    const raw = [];
-    for (let child = row, n = row.parent; n && n !== block; child = n, n = n.parent) {
-      if (ts.isConditionalExpression(n) && child !== n.condition) raw.push(n.condition.getText(sf));
-      if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken && child === n.right) {
-        raw.push(n.left.getText(sf));
-      }
-    }
-    const ids = raw.join(' ').match(/\b[A-Za-z_]\w*\b/g) || [];
-    return { raw, expanded: [...raw, ...ids.filter((id) => id in decl).map((id) => decl[id])].join(' ') };
-  };
-  const unconditional = (row, block) => {
-    for (let n = row.parent; n && n !== block; n = n.parent) {
-      if (!ts.isJsxElement(n) && !ts.isJsxFragment(n)) return false;
-    }
-    return true;
-  };
-  const conditionals = (root) => {
-    const out = [];
-    walk(root, (n) => { if (ts.isConditionalExpression(n)) out.push(n); });
-    return out;
-  };
-  const strLit = (n) => {
-    n = unparen(n);
-    return ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) ? n.text : null;
-  };
-
-  const steps = elementsById(sf, 'fa-claim.steps');
-  assert(steps.length === 1, 'S8 ClaimSheet renders one testID="fa-claim.steps"', `${steps.length} found`);
-  const block = steps[0];
-
-  // The heading: a TickLabel "IN SLEEPER", imported from ./chalkline.
-  let tickImported = false;
+  let openFn = null;
+  const instructionIds = [];
+  let kavRefs = 0;
   walk(sf, (n) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === 'openSleeper') openFn = n.initializer;
     if (
-      ts.isImportDeclaration(n) && n.moduleSpecifier.text === './chalkline' &&
-      n.importClause && n.importClause.namedBindings && ts.isNamedImports(n.importClause.namedBindings) &&
-      n.importClause.namedBindings.elements.some((e) => e.name.text === 'TickLabel' && !e.propertyName)
-    ) tickImported = true;
+      (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) ||
+        ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n)) &&
+      /fa-claim\.(steps|step\.|footer)/.test(n.text)
+    ) instructionIds.push(n.getText(sf));
+    if (ts.isIdentifier(n) && n.text === 'KeyboardAvoidingView') kavRefs += 1;
   });
-  const ticks = [];
-  if (block) {
-    walk(block, (n) => {
-      if (ts.isJsxElement(n) && n.openingElement.tagName.getText(sf) === 'TickLabel') {
-        ticks.push(n.children.map((c) => c.getText(sf)).join('').trim());
-      }
+  const calls = [];
+  if (openFn) {
+    walk(openFn, (n) => {
+      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'openInSleeperApp') calls.push(n);
     });
   }
-  assert(tickImported && ticks.length === 1 && ticks[0] === 'IN SLEEPER',
-    'S8 the block is headed by one TickLabel "IN SLEEPER" (imported from ./chalkline)',
-    `imported: ${tickImported}; TickLabels: ${JSON.stringify(ticks)}`);
-
-  // One row per step, inside the block.
-  const row = {};
-  for (const id of ['league', 'search', 'add', 'drop', 'bid']) {
-    const found = block ? elementsById(block, `fa-claim.step.${id}`) : [];
-    assert(found.length === 1, `S8 the block holds one testID="fa-claim.step.${id}" row`, `${found.length} found`);
-    row[id] = found[0];
-  }
-
-  // 1. League: always rendered (bare reopens the last-viewed league), the
-  //    league's name when known, else the fallback.
-  if (row.league) {
-    assert(unconditional(row.league, block), 'S8 the league row always renders (no condition gates it)',
-      gateOf(row.league, block).raw.join(' / '));
-    const pick = conditionals(row.league).find((c) => /\bleagueName\b/.test(c.condition.getText(sf)));
-    assert(
-      !!pick && renderedIn(pick.whenTrue).includes('leagueName') && strLit(pick.whenFalse) === LEAGUE_FALLBACK,
-      `S8 the league row renders leagueName, or "${LEAGUE_FALLBACK}" when it is null`,
-      pick ? pick.getText(sf).slice(0, 200) : 'no conditional on leagueName in the row',
-    );
-  }
-  // 2. Search: the free agent.
-  if (row.search) {
-    assert(renderedIn(row.search).includes('row.name'), 'S8 the search row renders the free agent (row.name)',
-      JSON.stringify(renderedIn(row.search)));
-  }
-  // 4. Drop: the selected drop's name; "pick a player above" when the
-  //    roster is full and none is picked; "Drop a player to make room" when
-  //    the drop list is empty too (design-lead, 2026-10-28: nothing above).
-  if (row.drop) {
-    // The drop name, inline or through a const that looks dropId up in candidates.
-    const dropConsts = Object.keys(decl).filter((k) =>
-      /\bcandidates\b/.test(decl[k]) && /\bdropId\b/.test(decl[k]) && /\.name\b/.test(decl[k]));
-    const isDrop = (t) => dropConsts.some((k) => new RegExp(`\\b${k}\\b`).test(t)) || (/\bcandidates\b/.test(t) && /\bdropId\b/.test(t));
-    const rendered = renderedIn(row.drop);
-    assert(
-      rendered.some((r) => dropConsts.includes(r) || (/\bcandidates\b/.test(r) && /\bdropId\b/.test(r))),
-      'S8 the drop row renders the selected drop (dropId looked up in candidates)',
-      `drop consts: ${dropConsts.join(', ') || 'none'}; rendered: ${JSON.stringify(rendered)}`,
-    );
-    // The no-pick branch is a string, or a conditional whose leaves are strings.
-    const PICK_ABOVE = /pick a player above/;
-    const MAKE_ROOM = 'Drop a player to make room';
-    const leaves = (n) => {
-      n = unparen(n);
-      return ts.isConditionalExpression(n) ? [...leaves(n.whenTrue), ...leaves(n.whenFalse)] : [strLit(n)];
-    };
-    const pick = conditionals(row.drop).find((c) => isDrop(c.condition.getText(sf)) && leaves(c.whenFalse).some((s) => PICK_ABOVE.test(s || '')));
-    assert(
-      !!pick && /\bopenSlots\s*===\s*0\b/.test(gateOf(row.drop, block).expanded),
-      'S8 the drop row shows "pick a player above" when no drop is picked, and renders only for a pick or openSlots === 0',
-      `gate: ${gateOf(row.drop, block).expanded}`,
-    );
-    const literals = [];
-    walk(row.drop, (n) => { if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) literals.push(n.text); });
-    assert(literals.filter((s) => s === MAKE_ROOM).length === 1, `S8 the drop row carries "${MAKE_ROOM}" once`,
-      JSON.stringify(literals));
-    // The empty-list split: `candidates.length === 0` (or an equivalent,
-    // inline or one const deep) picks MAKE_ROOM; the other branch keeps
-    // "pick a player above".
-    const EMPTY = /^(candidates\.length(===|==)0|0(===|==)candidates\.length|!candidates\.length|candidates\.length<1)$/;
-    const NON_EMPTY = /^(candidates\.length(!==|!=|>)0|candidates\.length>=1|!!candidates\.length|candidates\.length)$/;
-    const split = pick ? unparen(pick.whenFalse) : null;
-    let whenEmpty = null;
-    let otherwise = null;
-    if (split && ts.isConditionalExpression(split)) {
-      const t = squash(unparen(split.condition).getText(sf));
-      const c = Object.prototype.hasOwnProperty.call(decl, t) ? squash(decl[t]) : t;
-      if (EMPTY.test(c)) [whenEmpty, otherwise] = [split.whenTrue, split.whenFalse];
-      else if (NON_EMPTY.test(c)) [whenEmpty, otherwise] = [split.whenFalse, split.whenTrue];
-    }
-    assert(
-      !!whenEmpty && strLit(whenEmpty) === MAKE_ROOM && PICK_ABOVE.test(strLit(otherwise) || ''),
-      `S8 with no drop picked, the drop row shows "${MAKE_ROOM}" when candidates.length === 0, else "pick a player above"`,
-      split ? split.getText(sf).slice(0, 240) : 'no conditional on the drop in the row',
-    );
-  }
-  // 5. Bid: FAAB leagues, once a bid is entered.
-  if (row.bid) {
-    const gate = gateOf(row.bid, block).expanded;
-    assert(/\bfaab\b/.test(gate) && /\bbid(Num)?\b/.test(gate) && renderedIn(row.bid).some((r) => /\bbid(Num)?\b/.test(r)),
-      'S8 the bid row renders the bid, gated on faab and an entered bid', `gate: ${gate}`);
-  }
-  // Numbering: 1, 2, 3, then 4 / 5 with no gap (the bid is 5 only when the
-  // drop row renders, under the drop row's own condition).
-  if (row.league && row.search && row.add && row.drop && row.bid) {
-    const dropGate = gateOf(row.drop, block).raw;
-    const bidN = attrText(row.bid, 'n') || '';
-    const bidNExpr = row.bid.openingElement.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'n');
-    const e = bidNExpr && bidNExpr.initializer && ts.isJsxExpression(bidNExpr.initializer) ? unparen(bidNExpr.initializer.expression) : null;
-    assert(
-      attrText(row.league, 'n') === '{1}' && attrText(row.search, 'n') === '{2}' && attrText(row.add, 'n') === '{3}' &&
-        attrText(row.drop, 'n') === '{4}' && dropGate.length === 1 &&
-        !!e && ts.isConditionalExpression(e) && e.condition.getText(sf) === dropGate[0] &&
-        e.whenTrue.getText(sf) === '5' && e.whenFalse.getText(sf) === '4',
-      'S8 rows are numbered 1, 2, 3, then drop 4 and bid 5, or bid 4 without the drop row',
-      `drop gate: ${JSON.stringify(dropGate)}; bid n: ${bidN}`,
-    );
-  }
-  // The clipboard disclosure: the block's last line, after every row and
-  // directly above the CTA.
-  if (block) {
-    const kids = block.children.filter((c) => ts.isJsxElement(c) || ts.isJsxSelfClosingElement(c));
-    const last = kids[kids.length - 1];
-    const rowsEnd = Math.max(...Object.values(row).filter(Boolean).map((r) => r.end));
-    const ctaAt = read(CLAIM).indexOf('testID="fa-claim.open-sleeper"');
-    assert(
-      !!last && /paste it into search/.test(last.getText(sf)) && last.pos >= rowsEnd && block.end < ctaAt,
-      'S8 the copy disclosure ("…so you can paste it into search.") is the block\'s last line: after the rows, before the CTA',
-      last ? last.getText(sf).slice(0, 120) : 'no children',
-    );
-  }
+  const arg = calls.length === 1 ? calls[0].arguments[0] : null;
+  // A spread could carry clipboardText in, so it fails too.
+  const copies = arg && ts.isObjectLiteralExpression(arg)
+    ? arg.properties.filter((p) => ts.isSpreadAssignment(p) || (p.name && /clipboardText/.test(p.name.getText(sf))))
+    : null;
   assert(
-    /\bopenInSleeperApp\(\s*\{[^}]*clipboardText:\s*row\.name\b/.test(decl.openSleeper || ''),
-    'S8 the CTA passes clipboardText: row.name',
-    (decl.openSleeper || '').slice(0, 240),
+    !!copies && copies.length === 0,
+    "S2 openSleeper's one openInSleeperApp call passes no clipboardText (nothing is copied without the on-sheet disclosure)",
+    calls.length !== 1 ? `${calls.length} openInSleeperApp calls in openSleeper` : arg.getText(sf).slice(0, 240),
   );
-  const src = read(CLAIM);
-  const [drop, stepsAt, cta] = ['SELECT A PLAYER TO DROP', 'testID="fa-claim.steps"', 'testID="fa-claim.open-sleeper"'].map((s) => src.indexOf(s));
-  assert(drop !== -1 && drop < stepsAt && stepsAt < cta, 'S8 the steps sit between the drop section and the CTA');
+  assert(instructionIds.length === 0,
+    'S2 ClaimSheet has no fa-claim.steps / fa-claim.step.* / fa-claim.footer testID (no in-app claim instructions)',
+    instructionIds.join('; '));
+  assert(kavRefs === 0, 'S2 ClaimSheet has no KeyboardAvoidingView (no pinned footer)', `${kavRefs} found`);
 }
 
 // S9 — the non-Sleeper claim paths are byte-identical to 04eae95b
@@ -587,36 +403,17 @@ for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
   }
 }
 
-// H1 — both hosts name their surface, and the league name can only ever be
-// the claim league's (a wrong name sends the user to the wrong league).
+// H1 — both hosts name their surface.
 {
   const fa = parse(FREE_AGENTS);
-  const faDecl = declarations(fa);
   const faMounts = jsxMounts(fa, 'ClaimSheet');
   assert(faMounts.length === 1 && faMounts[0].surface === '"free_agents"',
     'H1 FreeAgentsScreen mounts ClaimSheet with surface="free_agents"', JSON.stringify(faMounts));
-  assert(
-    faMounts.length === 1 && faMounts[0].leagueName === '{leagueName}' && faMounts[0].leagueId === '{leagueId}' &&
-      squash(faDecl.leagueId || '') === squash('useSession((s) => s.league?.league_id)') &&
-      squash(faDecl.leagueName || '') === squash('useSession((s) => s.league?.league_name ?? null)'),
-    "H1 FreeAgentsScreen's leagueName is the session league's, the same league as its leagueId",
-    JSON.stringify({ mount: faMounts[0], leagueId: faDecl.leagueId, leagueName: faDecl.leagueName }),
-  );
 
   const ut = parse(USAGE_TRENDS);
-  const utDecl = declarations(ut);
   const utMounts = jsxMounts(ut, 'ClaimSheet');
   assert(utMounts.length === 1 && utMounts[0].surface === '"usage_trends"',
     'H1 UsageTrendsScreen mounts ClaimSheet with surface="usage_trends"', JSON.stringify(utMounts));
-  assert(
-    utMounts.length === 1 && utMounts[0].leagueId === '{claim.leagueId}' &&
-      squash(utMounts[0].leagueName || '') ===
-        squash('{leagueMeta.get(claim.leagueId)?.name ?? (claim.leagueId === leagueId ? (leagueName ?? null) : null)}') &&
-      squash(utDecl.leagueId || '') === squash('useSession((s) => s.league?.league_id)') &&
-      squash(utDecl.leagueName || '') === squash('useSession((s) => s.league?.league_name)'),
-    "H1 UsageTrendsScreen's leagueName: the claim league's own name, else the session name only when the claim league IS the session league, else null",
-    JSON.stringify({ mount: utMounts[0] }),
-  );
 }
 
 // H2 — FreeAgentsScreen: an error renders the error state, never the spinner.
@@ -635,141 +432,6 @@ for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
     'H2 FreeAgentsScreen tests query.isError before query.isLoading (isLoading sits in the isError=false branch)',
     `${err.length} isError / ${load.length} isLoading conditionals`,
   );
-}
-
-// P1 — the CTA and its footnote sit in a fixed footer under the ScrollView
-// (design-lead, 2026-11-01): on an iPhone SE a full-roster FAAB claim
-// measured 648pt against the 567pt sheet, and the CTA scrolled out of view.
-// (e)–(g) are ux-lead's conditions: the footer rises with the number pad,
-// the scroll bar flashes once on open, and one tap on the CTA works with
-// the pad up.
-{
-  const sf = parse(CLAIM);
-  const decl = declarations(sf);
-  const FOOTNOTE = "Sleeper doesn't allow apps to submit claims — finish in Sleeper.";
-  const opening = (n) => (ts.isJsxElement(n) ? n.openingElement : n);
-  const tagOf = (n) => opening(n).tagName.getText(sf);
-  const attrOf = (n, name) => {
-    const a = opening(n).attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText(sf) === name);
-    return a ? a.initializer || null : null;
-  };
-  const testIdOf = (n) => {
-    const i = attrOf(n, 'testID');
-    return i && ts.isStringLiteral(i) ? i.text : null;
-  };
-  const strOf = (init) => {
-    if (!init) return null;
-    if (ts.isStringLiteral(init)) return init.text;
-    const e = ts.isJsxExpression(init) && init.expression ? unparen(init.expression) : null;
-    return e && (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) ? e.text : null;
-  };
-  const elements = [];
-  walk(sf, (n) => { if (ts.isJsxElement(n) || ts.isJsxSelfClosingElement(n)) elements.push(n); });
-  const isScroll = (n) => ts.isJsxElement(n) && /ScrollView$/.test(tagOf(n));
-  const ancestors = (n) => {
-    const out = [];
-    for (let p = n.parent; p; p = p.parent) if (ts.isJsxElement(p)) out.push(p);
-    return out;
-  };
-  const chain = (n) => ancestors(n).map((p) => tagOf(p) + (testIdOf(p) ? `#${testIdOf(p)}` : '')).join(' < ');
-  const jsxKids = (el) => el.children.filter((c) => ts.isJsxElement(c) || ts.isJsxSelfClosingElement(c));
-
-  // (a) exactly one fa-claim.footer, and it is a View.
-  const footers = elements.filter((n) => testIdOf(n) === 'fa-claim.footer');
-  assert(footers.length === 1 && ts.isJsxElement(footers[0]) && tagOf(footers[0]) === 'View',
-    'P1a ClaimSheet renders exactly one fa-claim.footer View',
-    footers.map((n) => `<${tagOf(n)}>`).join(', ') || 'none found');
-  const footer = footers.length === 1 && ts.isJsxElement(footers[0]) ? footers[0] : null;
-
-  // (b) the CTA is inside the footer and inside no ScrollView.
-  const ctas = elements.filter((n) => tagOf(n) === 'Button' && testIdOf(n) === 'fa-claim.open-sleeper');
-  const ctaUp = ctas.length === 1 ? ancestors(ctas[0]) : [];
-  assert(
-    ctas.length === 1 && !!footer && ctaUp.includes(footer) && !ctaUp.some(isScroll),
-    'P1b the fa-claim.open-sleeper Button is inside fa-claim.footer and inside no ScrollView',
-    ctas.length !== 1 ? `${ctas.length} CTAs found` : `ancestors: ${chain(ctas[0])}`,
-  );
-
-  // (c) the footer follows the ScrollView's closing tag, as its sibling in the
-  //     sheet's SafeAreaView.
-  const parent = footer ? ancestors(footer)[0] : null;
-  const siblingScrolls = parent ? jsxKids(parent).filter(isScroll) : [];
-  assert(
-    !!footer && !!parent && tagOf(parent) === 'SafeAreaView' && jsxKids(parent).includes(footer) &&
-      siblingScrolls.length === 1 && footer.getStart(sf) > siblingScrolls[0].closingElement.end &&
-      !ancestors(footer).some(isScroll),
-    "P1c the footer comes after the ScrollView's closing tag, both direct children of the sheet's SafeAreaView",
-    parent ? `parent <${tagOf(parent)}>, sibling ScrollViews: ${siblingScrolls.length}` : 'no footer parent',
-  );
-
-  // (d) the footnote is inside the footer (and so outside the ScrollView).
-  const notes = [];
-  walk(sf, (n) => {
-    const text = ts.isJsxText(n) || ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)
-      ? n.text.replace(/\s+/g, ' ').trim() : null;
-    if (text && text.includes("Sleeper doesn't allow apps")) notes.push({ n, text });
-  });
-  assert(
-    notes.length === 1 && notes[0].text === FOOTNOTE && !!footer &&
-      notes[0].n.pos >= footer.pos && notes[0].n.end <= footer.end,
-    `P1d the footnote "${FOOTNOTE}" is inside fa-claim.footer`,
-    notes.length !== 1 ? `${notes.length} footnotes found` : `in: ${chain(notes[0].n)}`,
-  );
-
-  // (e) one KeyboardAvoidingView wraps the ScrollView and the footer, with
-  //     behavior 'padding' on iOS (a literal "padding", or a Platform.OS
-  //     === 'ios' conditional whose iOS branch is 'padding').
-  const scrolls = elements.filter(isScroll);
-  const scroll = scrolls.length === 1 ? scrolls[0] : null;
-  const kavOf = (n) => ancestors(n).find((p) => tagOf(p) === 'KeyboardAvoidingView') || null;
-  const kav = scroll ? kavOf(scroll) : null;
-  const behavior = kav ? attrOf(kav, 'behavior') : null;
-  const iosPadding = (() => {
-    if (strOf(behavior) === 'padding') return true;
-    const e = behavior && ts.isJsxExpression(behavior) && behavior.expression ? unparen(behavior.expression) : null;
-    if (!e || !ts.isConditionalExpression(e)) return false;
-    const c = squash(unparen(e.condition).getText(sf)).replace(/"/g, "'");
-    const s = unparen(e.whenTrue);
-    return (c === "Platform.OS==='ios'" || c === "'ios'===Platform.OS") && ts.isStringLiteral(s) && s.text === 'padding';
-  })();
-  assert(
-    !!kav && !!footer && kavOf(footer) === kav && iosPadding,
-    "P1e one KeyboardAvoidingView wraps the ScrollView and the footer, behavior 'padding' on iOS",
-    `ScrollViews: ${scrolls.length}; KAV around the ScrollView: ${!!kav}; same KAV around the footer: ${!!kav && !!footer && kavOf(footer) === kav}; behavior: ${behavior ? behavior.getText(sf) : 'none'}`,
-  );
-
-  // (f) the ScrollView's ref is a useRef, and flashScrollIndicators is
-  //     called on it once, from a useEffect with [] deps (the sheet is
-  //     mounted only while open, so that is once per open).
-  const refInit = scroll ? attrOf(scroll, 'ref') : null;
-  const refName = refInit && ts.isJsxExpression(refInit) && refInit.expression && ts.isIdentifier(refInit.expression)
-    ? refInit.expression.text : null;
-  const isUseRef = !!refName && /^(React\.)?useRef\b/.test(decl[refName] || '');
-  const flashes = [];
-  walk(sf, (n) => {
-    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
-        n.expression.name.text === 'flashScrollIndicators') flashes.push(n);
-  });
-  const onRef = flashes.filter((c) => !!refName && squash(c.expression.expression.getText(sf)).replace(/[!?]$/, '') === `${refName}.current`);
-  const effectOf = (n) => {
-    for (let p = n.parent; p; p = p.parent) {
-      if (ts.isCallExpression(p) && /^(React\.)?useEffect$/.test(p.expression.getText(sf))) return p;
-    }
-    return null;
-  };
-  const effect = onRef.length === 1 ? effectOf(onRef[0]) : null;
-  const once = !!effect && effect.arguments.length === 2 &&
-    ts.isArrayLiteralExpression(effect.arguments[1]) && effect.arguments[1].elements.length === 0;
-  assert(
-    isUseRef && onRef.length === 1 && once,
-    'P1f the ScrollView has a useRef ref, and one mount-once useEffect (deps []) calls flashScrollIndicators on it',
-    `ref: ${refName || 'none'} (${refName ? decl[refName] || 'undeclared' : '-'}); flashScrollIndicators calls: ${flashes.length}, on the ref: ${onRef.length}; in a useEffect: ${!!effect}; deps []: ${once}`,
-  );
-
-  // (g) one tap on the CTA still works with the pad up.
-  const persist = scroll ? attrOf(scroll, 'keyboardShouldPersistTaps') : null;
-  assert(strOf(persist) === 'handled', 'P1g keyboardShouldPersistTaps="handled" stays on the ScrollView',
-    persist ? persist.getText(sf) : 'absent');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
