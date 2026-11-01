@@ -796,6 +796,26 @@ A page is kept only from a complete, non-error, non-"updating" response carrying
 
 ---
 
+## Free-agent moves — capability enums, consent versions, codes (D1, 2026-11-01)
+
+The 11-06 binary is built against [contract.md](plans/sleeper-fa-write/contract.md) and can't change after it ships, so these strings are fixed. The client reads **no flag**; it renders from the server's `move` capability on `GET /api/league/free-agents`.
+
+| What | Values | Notes |
+|---|---|---|
+| `move.mode` | `submit` \| `handoff` \| `unsupported` | `move` absent, or any other `mode` → the client's legacy routing. The server never sends `submit` with `league_platform: null` |
+| `move.league_platform` | `sleeper` \| `mfl` \| `espn` \| `null` | The league row's platform; Fleaflicker and local leagues are `null` (and `unsupported`) |
+| `move.connect` | `ok` \| `not_linked` \| `expired` \| `unverified` \| `other_account` | Unknown values → the plain connect step, never Ready |
+| `free_agents[i].move_kind` | `add` \| `claim` \| `null` | `null` = the server can't tell (always, until the capture answers Q8); the CTA then names an add |
+| `free_agents[i].move_mode` | `handoff` (optional) | Per-row override, with `move_line` |
+| Consent `copy_version` | `sleeper-roster-moves-v1` (now) \| `sleeper-roster-moves-v2` (required before claims, R15.8 D5) | Texts live **only** on the server (`backend/fa_move_copy.py`, hash-pinned); the client echoes `{copy_version, locale}` back. A wording change is a new version. Locale `en-US` |
+| Response `status` / `result` | `complete` \| `pending`; `accepted` \| `partial` | `pending` is a claim: never "added" |
+| Error codes | contract §4; platform codes are `{platform}_<suffix>` | The client maps by **suffix** (`not_linked`, `expired`, `rejected`, `unconfigured`, `write_failed`, `outcome_unknown`), so MFL and ESPN need no build. `kind` on `{p}_write_failed` is `network` \| `roster_read` (state 11, not sent) or absent (10f, the platform refused) |
+| Timing | server worst case **76 s**; client timeout (76 + 15) × 1000 = 91 000 ms | 30 s preflight budget + the write path's timeouts ≤ 46 s, pinned by `test_fa_move_route.py::test_worst_case_is_a_pinned_sum` |
+
+**Locations:** `backend/server.py` (`_fa_move_capability`, `_fa_move_core`, `platform_write_consent_route`, `FA_MOVE_SERVER_WORST_CASE_S`), `backend/fa_move_copy.py`, `backend/sleeper_write.py` (`FA_MOVE_WRITE_TIMEOUTS_S`); the claim-sheet client (11-06 binary, `faMoveGate` and the move API module).
+
+---
+
 ## Progress gating thresholds
 
 Minimum rank decisions per position before Trade Finder unlocks. Tracked per scoring format; result lands in `users.unlocked_formats`.

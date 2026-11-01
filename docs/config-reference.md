@@ -97,6 +97,7 @@ in its featured-offer ordering. See [release evidence](plans/owner-v2-bilateral/
 - [Flags — Value-core trade engine (2026-09-30, ships **OFF**)](#flags--value-core-trade-engine-2026-09-30-ships-off)
 - [Flags — First-page store (P1, 2026-10-20, ships **OFF**)](#flags--first-page-store-p1-2026-10-20-ships-off)
 - [Flags — Send in Sleeper (flagged beta)](#flags-send-in-sleeper-flagged-beta)
+- [Flags — Free-agent moves (D1, 2026-11-01, ships **OFF**, server-only)](#flags-free-agent-moves-d1-2026-11-01-ships-off-server-only)
 - [Flags — Team overhaul (ships dark)](#flags-team-overhaul-ships-dark)
 - [Flags — Account auth (account-auth plan P2 — ships dark)](#flags-account-auth-account-auth-plan-p2-ships-dark)
 - [Flags — ESPN league linking (Phase 1 — ships dark)](#flags-espn-league-linking-phase-1-ships-dark)
@@ -388,6 +389,14 @@ Scope block: `docs/plans/trade-time-to-suggestion/scope-eng-200ms.md` §2, §6.2
 | `trade.send_in_sleeper` | false | ⚠️ **ToS-adverse.** `POST/GET/DELETE /api/sleeper/link` + `POST /api/trades/propose` (all 404 when off) — sends trades through Sleeper's *undocumented* private write API (`propose_trade` GraphQL mutation). Requires `SLEEPER_TOKEN_KEY`. Adapter: `backend/sleeper_write.py`; token store: `sleeper_credentials`. Capture + ToS/risk (C4): [runbook](plans/sleeper-write-capture-runbook.md). |
 | `trade.send_in_mfl` | false | "Send in MFL" — `POST /api/trades/propose-mfl` + the MFL branch of `POST /api/trades/validate` + the mobile send button on MFL leagues (404 / unmounted when off). Rides MFL's **documented** import API (`import?TYPE=tradeProposal`) with the #177 `MFL_USER_ID` cookie (`mfl_credentials`; requires `SLEEPER_TOKEN_KEY` for at-rest encryption). Adapter: `backend/mfl_write.py`. **Keep off until the operator live-verification checklist passes** (import response shape, wwwNN import host, pick encodings, MFL client registration): [scope block](feedback/items/177-mfl-auth-link/send-in-mfl-scope.md). |
 | `espn.send` | false | ⚠️ **Undocumented ESPN write API.** "Send in ESPN" — `POST /api/trades/propose-espn` + the mobile send button on ESPN leagues (404 / P0-6 copy fallback when off). Players only; picks hard-block. Payload live-verified for football 2026-08-11 ([capture](plans/espn-send-live-capture-2026-08-11.md)); adapter `backend/espn_write.py`; cookies from `espn_credentials` (requires `SLEEPER_TOKEN_KEY`). **Deliberately ABSENT from `config/features.json` (D-026)** — do not add the key until the auth probe proves `espn_s2`+`SWID` alone authorize a server-side POST (the captures were browser-session; a CSRF/session token may be required). |
+
+## Flags — Free-agent moves (D1, 2026-11-01, ships **OFF**, server-only)
+
+| Flag | Default | Gates |
+|---|---|---|
+| `sleeper.send_add_drop` | false | ⚠️ **ToS-adverse, highest blast radius (no undo).** The app making Sleeper free-agent moves (add, add+drop; waiver claims only once R15.8 D5 holds) on the user's behalf through Sleeper's private GraphQL API. **On:** `POST /api/league/free-agents/move` and `GET`/`DELETE /api/platform-write-consent` serve, and the `move` capability on `GET /api/league/free-agents` may answer `mode: 'submit'` for Sleeper leagues, but **only once the captured write shapes are in the code** (`sleeper_write.FA_MOVE_SHAPES_CAPTURED`): until then it answers `handoff` and the move route 404s even with the flag on. **Off:** all three routes 404 `feature_disabled`; the capability answers `handoff` (the claim sheet's "Open in Sleeper to claim"). **Server-only:** never in mobile `LAUNCHED_FLAG_DEFAULTS`, and no client reads it (the client renders from `move`). Requires `SLEEPER_TOKEN_KEY` and a stored `sleeper_credentials` row. Supersedes `sleeper.fa_write`, which never shipped. **Flip:** the operator's, under D6 for launch (`docs/plans/sleeper-fa-write/scope.md` §5 on `plan/fa-moves-launch`); the durable prod flip and the rollback are `FTF_FLAGS` on Render, which beats `config/features.json` (no deploy, no build); see `docs/runbook.md`. MFL and ESPN get `mfl.send_add_drop` / `espn.send_add_drop` in Update 1. Contract: [contract.md](plans/sleeper-fa-write/contract.md). |
+
+No new env vars or `model_config` keys: the 7-day consent window (`database.PLATFORM_WRITE_CONSENT_WINDOW`), the consent copy versions (`fa_move_copy.CURRENT_CONSENT_VERSION`), the 30 s preflight budget and the 76 s worst case (`server._FA_MOVE_PREFLIGHT_BUDGET_S`, `FA_MOVE_SERVER_WORST_CASE_S`), and the double-move block's 15 min / 24 h are code constants.
 
 ## Flags — Team overhaul (ships dark)
 
