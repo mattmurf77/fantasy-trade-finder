@@ -50,6 +50,21 @@
 //   T7  contract §7's fill rules: {bid} as "$N" ($0 for an empty FAAB bid),
 //       {date} a short date with no time, a missing known placeholder falls
 //       back                                                                [executed]
+// Round 2 (independent review + contract 7052d2d7 / 41c1443e), one pin per
+// fix, executed through utils/claimSheetPlan.ts and api/faMove.ts:
+//   X1  attempt_id: v4-shaped from Math.random with no `crypto`; 1,000 distinct
+//   X2  10a the client didn't foresee: drop list, server message, refresh
+//   X3  a drop that left the candidates is neither named nor sent
+//   X4  offline / no answer before the consent GET → state 11, no GET
+//   X5  Usage Trends' pre-read: a plain bounded call, only move + row; busy Add
+//   X6  pinned/unpinned: measured on the content, hysteresis, no flip-flop
+//   X7  MFL connect/verify/rejected → unsupported; held non-Sleeper rows show
+//       the server's line; EspnConnect without reason: 'send'
+//   X8  Settings: 404 = valid: false; a failed DELETE keeps the row + a line
+//   X9  "terms changed" also on reason: 'version'
+//   X10 fully legacy for an absent/unknown mode: no move.copy, no move_line
+//   X11 every in-sheet re-read is bounded; a failed one after Connect goes on
+//   X12 contract §7's claim/waiver slots by bid and drop; `surface` sent
 //
 // HONEST LABEL (G-035): the [AST] checks prove wirings are present, not
 // behavior; no React tree is rendered here. The [executed] checks run the
@@ -81,6 +96,8 @@ const USAGE_TRENDS = 'src/screens/UsageTrendsScreen.tsx';
 const SETTINGS_LEAGUES = 'src/screens/settings/SettingsLeaguesScreen.tsx';
 const DEVICE_PAGE = 'src/utils/devicePage.ts';
 const BUTTON = 'src/components/chalkline/Button.tsx';
+const PLAN = 'src/utils/claimSheetPlan.ts';
+const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 let failures = 0;
 let passed = 0;
@@ -236,7 +253,11 @@ function harness() {
   const writes = [];
   let responder = () => new Promise(() => {}); // never answers
   let net = { isConnected: true };
-  let minted = 0;
+  // Math.random is counted (Hermes has no Web Crypto, so the attempt id
+  // comes from it); `crypto` is absent from the sandbox, as on a device.
+  let rands = 0;
+  const countingMath = Object.create(Math);
+  countingMath.random = () => { rands += 1; if (rands === 1 || rands % 16 === 1) log.push('rand'); return Math.random(); };
   const native = {
     'expo-constants': { default: { expoConfig: { extra: { apiBaseUrl: 'https://example.invalid' }, version: 'test' } } },
     'expo-device': { DeviceType: { TABLET: 2, DESKTOP: 3 } },
@@ -256,15 +277,17 @@ function harness() {
   };
   const client = load('src/api/client.ts', only(native), time, { fetch });
   client.setOnWriteRequest((p) => writes.push(p));
+  const league = load('src/api/league.ts', only({ './client': client }), time);
   const faMove = load(FA_MOVE, only({
     './client': client,
-    './_queue': { uuidv4: () => { log.push('uuid'); minted += 1; return `attempt-${minted}`; } },
+    './league': league,
     './events': { track: (name, props) => { log.push('track'); events.push({ name, props }); } },
     '@react-native-community/netinfo': { default: { fetch: async () => { log.push('netinfo'); return net; } } },
-  }), time);
+  }), time, { Math: countingMath });
+  const plan = load(PLAN, only({ '../api/faMove': faMove }), time);
   return {
-    time, log, requests, events, writes, client, faMove,
-    minted: () => minted,
+    time, log, requests, events, writes, client, faMove, plan,
+    rands: () => rands,
     respond: (fn) => { responder = fn; },
     setNet: (s) => { net = s; },
   };
@@ -371,10 +394,10 @@ process.on('exit', () => {
     expect(/const move = query\.data\?\.move \?\? null;/.test(faSrc) && /move=\{claimMove\}/.test(faSrc),
       'Free Agents passes the capability it routed with');
     const ut = read(USAGE_TRENDS);
-    expect(/if \(platform !== 'sleeper' && !faMoveOpensSheet\(move, faRow\)\) \{\s*explainNoAdd\(platform\);\s*return;\s*\}/.test(ut),
+    expect(/if \(platform !== 'sleeper' && !faMoveOpensSheet\(cap\.move, cap\.row\)\) \{\s*explainNoAdd\(platform\);\s*return;\s*\}/.test(ut),
       'UsageTrendsScreen doAdd');
-    expect(/move=\{claim\.move\}/.test(ut) && /queryKey: \['free-agents', lgId, 'ALL'\]/.test(ut),
-      'Usage Trends reads the capability under the sheet\'s own key and passes it');
+    expect(/move=\{claim\.move\}/.test(ut) && /readMoveCapability\(lgId, p\.player_id\)/.test(ut),
+      'Usage Trends reads the capability and passes it');
   });
 
   // ── F3 ───────────────────────────────────────────────────────────────────
@@ -399,9 +422,12 @@ process.on('exit', () => {
   }
   await check('F3 state 12 is a result panel with no retry: no "Try again" in the sheet, no send from the result block', () => {
     expect(!literals(claim).some((t) => /try again/i.test(t)), 'a "Try again" literal in ClaimSheet');
-    const unknownCase = caseClause(claim, 'unknown');
-    expect(/step: 'result'/.test(unknownCase) && /kind: 'unknown'/.test(unknownCase) && !/step: 'ready'/.test(unknownCase),
-      "case 'unknown' shows the result panel");
+    const h = harness();
+    const cp = h.plan.copyFns(SUBMIT, { league: 'L', name: 'A' });
+    for (const code of ['sleeper_outcome_unknown', 'move_in_progress', 'internal_error']) {
+      const v = h.plan.planFailure(h.faMove.classifyMoveError(apiErr(h, 502, { error: code })), cp).view;
+      expect(v.step === 'result' && v.kind === 'unknown' && v.title === 'Check before resending', `${code} → ${JSON.stringify(v)}`);
+    }
     const result = actionBranches(claim).result;
     expect(result && !/onNamedCta|\bsend\(|make-move/.test(result.getText(claim)), 'the result block re-enables no CTA');
   });
@@ -438,7 +464,8 @@ process.on('exit', () => {
   await check('F4 ClaimSheet: the make-move CTA is `ctaLabel` = moveCtaLabel(move?.copy, kind, …); no Sleeper or "Add …" literal in the submit branch', () => {
     const ctas = jsxMounts(claim, 'Button').filter((m) => m.attrs.testID === '"fa-claim.make-move"');
     expect(ctas.some((m) => m.attrs.label === '{ctaLabel}'), 'no make-move Button labelled {ctaLabel}');
-    expect(/^moveCtaLabel\(\s*move\?\.copy,\s*kind,/.test(declText(claim, 'ctaLabel')), `ctaLabel = ${declText(claim, 'ctaLabel').slice(0, 80)}`);
+    expect(declText(claim, 'ctaLabel') === 'sel.ctaLabel' && /^moveSelection\(\{[\s\S]*\bkind,[\s\S]*copy: move\?\.copy,/.test(declText(claim, 'sel')),
+      `ctaLabel = ${declText(claim, 'ctaLabel').slice(0, 80)}`);
     expect(/rowMove\.move_kind === 'claim'/.test(declText(claim, 'kind')), 'kind comes from the row\'s move_kind');
     const sleeperLits = wording(claim).filter((t) => /Sleeper/.test(t));
     eq(sleeperLits, ['Open in Sleeper to claim'], 'Sleeper literals (only #509\'s pinned hand-off label)');
@@ -475,9 +502,11 @@ process.on('exit', () => {
       eq(C(418, { error: 'teapot', message: 'm' }).state, 'neutral', 'an unrecognised 4xx is the 12-style panel');
     });
     await check('F5 ClaimSheet shows the hand-off for feature_disabled and for claims_off, bid and drop kept', () => {
-      expect(/show\(\{ step: 'handoff'/.test(caseClause(claim, 'handoff')), "case 'handoff'");
-      expect(/show\(\{ step: 'handoff'/.test(caseClause(claim, 'claims_off')), "case 'claims_off'");
-      expect(!/setBid\(|setDropId\(/.test(caseClause(claim, 'claims_off') + caseClause(claim, 'handoff')), 'bid or drop reset');
+      const cp = h.plan.copyFns(SUBMIT, { league: 'L', name: 'A' });
+      for (const [status, code] of [[404, 'feature_disabled'], [422, 'waiver_claim_unsupported']]) {
+        const plan = h.plan.planFailure(C(status, { error: code, message: 'm' }), cp);
+        expect(plan.view && plan.view.step === 'handoff' && !plan.clearDrop, `${code} → ${JSON.stringify(plan)}`);
+      }
     });
   }
 
@@ -550,14 +579,14 @@ process.on('exit', () => {
     await check('F9 one attempt_id per tap: minted once, in the body and on write_attempted; a second tap gets a new one', async () => {
       const a = await h.faMove.attemptMove({ move: SUBMIT, surface: 'free_agents', request: REQ });
       const b = await h.faMove.attemptMove({ move: SUBMIT, surface: 'free_agents', request: REQ });
-      eq(h.minted(), 2, 'mints');
-      eq(h.requests.map((r) => r.body.attempt_id), ['attempt-1', 'attempt-2'], 'body attempt_ids');
-      eq([a.attemptId, b.attemptId], ['attempt-1', 'attempt-2'], 'returned ids');
+      eq(h.rands(), 32, 'Math.random draws (16 bytes per id, two taps)');
+      eq(h.requests.map((r) => r.body.attempt_id), [a.attemptId, b.attemptId], 'body attempt_ids');
+      expect(a.attemptId !== b.attemptId && V4.test(a.attemptId) && V4.test(b.attemptId), `ids ${a.attemptId} ${b.attemptId}`);
       eq(h.events.filter((e) => e.name === 'fa_move_write_attempted').map((e) => e.props.attempt_id),
-        ['attempt-1', 'attempt-2'], 'event attempt_ids');
-      expect(calls(fa, 'uuidv4').length === 1 && calls(fa, 'uuidv4', decl(fa, 'attemptMove')).length === 1,
-        'uuidv4 is called once, inside attemptMove');
-      expect(calls(claim, 'uuidv4').length === 0, 'ClaimSheet mints nothing');
+        [a.attemptId, b.attemptId], 'event attempt_ids');
+      expect(calls(fa, 'newAttemptId').length === 1 && calls(fa, 'newAttemptId', decl(fa, 'attemptMove')).length === 1,
+        'newAttemptId is called once, inside attemptMove');
+      expect(calls(claim, 'newAttemptId').length === 0 && calls(claim, 'uuidv4').length === 0, 'ClaimSheet mints nothing');
     });
   }
 
@@ -606,7 +635,7 @@ process.on('exit', () => {
     }
     const consent = actionBranches(claim).consent.getText(claim);
     expect(/view\.block\.checkbox_label/.test(consent) && /label=\{view\.block\.button_label\}/.test(consent), 'box and button labels');
-    expect(/if \(!block\) show\(\{ step: 'handoff', line: slot\('unavailable_line'\) \}\);/.test(declText(claim, 'openConsent')),
+    expect(/case 'unavailable':\s*show\(\{ step: 'handoff', line: slot\('unavailable_line'\) \}\);/.test(declText(claim, 'openConsent')),
       'F4 (ux-lead): no consent text from the server → the hand-off');
   });
 
@@ -614,11 +643,17 @@ process.on('exit', () => {
   await check("F12 a terminal result invalidates the ['free-agents', leagueId] prefix (both hosts' keys)", () => {
     expect(/invalidateQueries\(\{ queryKey: \['free-agents', leagueId\] \}\)/.test(declText(claim, 'refreshList')),
       'refreshList');
-    const apply = declText(claim, 'applyOutcome');
-    const responseBranch = apply.slice(apply.indexOf("if ('response' in outcome)"), apply.indexOf('const f = outcome.failure;'));
-    expect(/refreshList\(\);/.test(responseBranch), 'added / pending refresh');
-    expect(/refreshList\(\);/.test(declText(claim, 'refusal')), '10c / 10f / 10g / 13 / 12-style refresh');
-    expect(/refreshList\(\);/.test(caseClause(claim, 'unknown')), '12 refreshes');
+    expect(/if \(plan\.refresh\) refreshList\(\);/.test(declText(claim, 'apply')), 'apply() refreshes on plan.refresh');
+    const h = harness();
+    const cp = h.plan.copyFns(SUBMIT, { league: 'L', name: 'A' });
+    const C = (s, b) => h.faMove.classifyMoveError(apiErr(h, s, b));
+    expect(h.plan.planResponse({ status: 'complete', title: 't', lines: [] }, cp).refresh
+      && h.plan.planResponse({ status: 'pending', title: 't', lines: [] }, cp).refresh, '8 / 9 refresh');
+    for (const [st, code] of [[422, 'player_unavailable'], [502, 'sleeper_write_failed'], [503, 'sleeper_unconfigured'],
+      [409, 'sleeper_rejected'], [400, 'bad_request'], [502, 'sleeper_outcome_unknown'], [422, 'roster_full_drop_required'],
+      [422, 'asset_not_owned']]) {
+      expect(h.plan.planFailure(C(st, { error: code }), cp).refresh === true, `${code} refreshes`);
+    }
     expect(/queryKey: \['free-agents', leagueId, filter\]/.test(read(FREE_AGENTS))
       && /queryKey: \['free-agents', claim\?\.leagueId, 'ALL'\]/.test(read(USAGE_TRENDS)), 'both host keys sit under the prefix');
   });
@@ -747,20 +782,23 @@ process.on('exit', () => {
     await check('F17 offline at the tap: no request, no attempt_id, no event; NetInfo is read first', async () => {
       const out = await h.faMove.attemptMove({ move: SUBMIT, surface: 'free_agents', request: REQ });
       eq(out, { sent: false }, 'outcome');
-      eq([h.requests.length, h.minted(), h.events.length, h.writes.length], [0, 0, 0, 0], '[requests, mints, events, writes]');
+      eq([h.requests.length, h.rands(), h.events.length, h.writes.length], [0, 0, 0, 0], '[requests, Math.random draws, events, writes]');
       eq(h.log, ['netinfo'], 'call order');
       h.setNet({ isConnected: true });
       await h.faMove.attemptMove({ move: SUBMIT, surface: 'free_agents', request: REQ });
-      eq(h.log.slice(1, 4), ['netinfo', 'uuid', 'track'], 'online: NetInfo, then the mint, then attempted');
+      eq(h.log.slice(1, 4), ['netinfo', 'rand', 'track'], 'online: NetInfo, then the mint, then attempted');
     });
   }
   await check('F17 the sheet shows offline as state 11 (the named CTA with a --neg "nothing was sent" line), never 12', () => {
     const apply = declText(claim, 'applyOutcome');
     const offline = apply.slice(apply.indexOf('if (!outcome.sent) {'), apply.indexOf('pendingConsentRef.current = null;'));
-    expect(/show\(\{ step: 'ready', ctaNotice: \{ text: slot\('not_sent_line'\) \?\? '', tone: 'neg' \} \}\);/.test(offline)
-      && !/'result'|'unknown'/.test(offline), 'the offline branch');
-    expect(/show\(\{ step: 'ready', ctaNotice: \{ text: said \?\? slot\('not_sent_line'\)/.test(caseClause(claim, 'not_sent')),
-      "case 'not_sent' (a server 502 with a kind)");
+    expect(/apply\(planNotSent\(copy\)\);/.test(offline) && !/'result'|'unknown'/.test(offline), 'the offline branch');
+    const h = harness();
+    const cp = h.plan.copyFns(SUBMIT, { league: 'L', name: 'A' });
+    const v = h.plan.planNotSent(cp).view;
+    expect(v.step === 'ready' && v.ctaNotice.tone === 'neg' && /nothing was sent/.test(v.ctaNotice.text), `planNotSent ${JSON.stringify(v)}`);
+    const k = h.plan.planFailure(h.faMove.classifyMoveError(apiErr(h, 502, { error: 'sleeper_write_failed', kind: 'network', message: 'm' })), cp).view;
+    expect(k.step === 'ready' && k.ctaNotice.text === 'm' && k.ctaNotice.tone === 'neg', "a server 502 with a kind (state 11)");
   });
 
   // ── Review round 1: L1, R1, P1, T7 ───────────────────────────────────────
@@ -830,10 +868,11 @@ process.on('exit', () => {
       return k + calls(sf, 'markClaimPending').length;
     }, 0);
     eq(everywhere, 1, 'markClaimPending call sites');
-    const apply = declText(claim, 'applyOutcome');
-    const responseBranch = apply.slice(apply.indexOf("if ('response' in outcome)"), apply.indexOf('const f = outcome.failure;'));
-    expect(/const pending = res\.status === 'pending';[\s\S]*if \(pending\) markClaimPending\(leagueId, row\.player_id\);/.test(responseBranch),
-      'marked only when pending');
+    expect(/if \(plan\.markPending\) markClaimPending\(leagueId, row\.player_id\);/.test(declText(claim, 'apply')), 'apply() marks on plan.markPending');
+    const h = harness();
+    const cp = h.plan.copyFns(SUBMIT, { league: 'L', name: 'A' });
+    eq([h.plan.planResponse({ status: 'pending', title: 't', lines: [] }, cp).markPending,
+      h.plan.planResponse({ status: 'complete', title: 't', lines: [] }, cp).markPending], [true, false], 'marked only when pending');
     const faSrc = read(FREE_AGENTS);
     expect(/claimPending=\{isClaimPending\(pendingClaims, leagueId, item\.player_id\)\}/.test(faSrc), 'the row is told');
     expect(/statsSlot=\{\s*claimPending \? \(\s*<Text style=\{styles\.dropLine\} numberOfLines=\{1\}>\s*\{FA_MOVE_FALLBACK_COPY\.claim_pending\}\s*<\/Text>\s*\) : drop \? \(/.test(faSrc),
@@ -845,7 +884,9 @@ process.on('exit', () => {
     const M = h.faMove;
     await check('T7 contract §7: {bid} is "$N" (an empty FAAB bid is $0); {date} short, no time; a missing known placeholder falls back', () => {
       eq([M.bidText(7), M.bidText(0)], ['$7', '$0'], 'bidText');
-      expect(/const claimBid = kind === 'claim' && faab \? \(bidNum \?\? 0\) : null;/.test(claimText), 'an empty FAAB bid is 0');
+      const sel = h.plan.moveSelection({ rowName: 'A', kind: 'claim', dropId: null, candidates: [], faab: true, bid: '',
+        copy: undefined, platform: 'sleeper' });
+      eq([sel.bid, sel.ctaLabel, sel.request.faab_bid], [0, 'Claim A for $0', 0], 'an empty FAAB bid is $0');
       const d = M.windowDateText('2026-11-08T15:00:00Z');
       expect(/^[A-Z][a-z]{2} \d{1,2}$/.test(d), `{date} = ${d}`);
       eq(M.moveCopy({ waiver_line: 'Bid {bid}' }, 'waiver_line', { bid: '$7' }, 'sleeper'), 'Bid $7', 'server template, filled');
@@ -855,9 +896,225 @@ process.on('exit', () => {
     });
   }
 
+  // ── Review round 2: X1–X12 ───────────────────────────────────────────────
+  {
+    const h = harness();
+    await check('X1 attempt_id with no crypto (Hermes): v4-shaped from Math.random, and 1,000 calls are 1,000 values', () => {
+      const ids = Array.from({ length: 1000 }, () => h.faMove.newAttemptId());
+      const bad = ids.filter((id) => !V4.test(id));
+      eq(bad.slice(0, 3), [], 'ids not v4-shaped');
+      eq(new Set(ids).size, 1000, 'distinct ids');
+      expect(h.rands() === 16000, `Math.random draws ${h.rands()}`);
+      expect(!/from '\.\/_queue'/.test(faText), 'faMove.ts still imports _queue');
+    });
+    await check('X1 with crypto.getRandomValues present it is used, and the id is still v4-shaped', () => {
+      let used = 0;
+      const t = harness();
+      const withCrypto = load(FA_MOVE, only({
+        './client': t.client, './league': {}, './events': { track: () => {} },
+        '@react-native-community/netinfo': { default: { fetch: async () => ({ isConnected: true }) } },
+      }), t.time, { crypto: { getRandomValues: (a) => { used += 1; for (let i = 0; i < a.length; i++) a[i] = (i * 37) & 255; return a; } } });
+      const id = withCrypto.newAttemptId();
+      expect(used === 1 && V4.test(id), `used ${used}, id ${id}`);
+    });
+  }
+  {
+    const h = harness();
+    const cp = h.plan.copyFns(SUBMIT, { league: 'L', name: 'A' });
+    await check('X2 a 10a the client didn\'t foresee (open slots): the drop list shows, with the server\'s message, focus and a refresh', () => {
+      const plan = h.plan.planFailure(h.faMove.classifyMoveError(apiErr(h, 422, { error: 'roster_full_drop_required', message: 'Your roster is full.' })), cp);
+      expect(plan.requireDrop && plan.refresh && plan.scrollToDrop, `plan ${JSON.stringify(plan)}`);
+      eq(plan.view, { step: 'ready', dropNotice: { text: 'Your roster is full.', tone: 'neg' } }, 'view');
+      eq([h.plan.dropListShown({ openSlots: 2, candidates: 0, requireDrop: true }),
+        h.plan.dropListShown({ openSlots: 2, candidates: 3, requireDrop: false }),
+        h.plan.dropListShown({ openSlots: 0, candidates: 0, requireDrop: false })], [true, false, true], 'dropListShown');
+      expect(/const showDropList = dropListShown\(\{ openSlots, candidates: candidates\.length, requireDrop \}\);/.test(claimText), 'the sheet uses it');
+      expect(/\{dropNotice \? \(\s*<View ref=\{focusRef\} accessible>/.test(claimText), 'the message takes focus');
+    });
+    await check('X3 a drop a refresh took away: the CTA reads "Add A" and the body has no drop_player_id (one source)', async () => {
+      const base = { rowName: 'A', kind: 'add', dropId: 'b1', faab: false, bid: '', copy: undefined, platform: 'sleeper' };
+      const before = h.plan.moveSelection({ ...base, candidates: [{ id: 'b1', name: 'B' }] });
+      eq([before.ctaLabel, before.request.drop_player_id], ['Add A, drop B', 'b1'], 'B listed');
+      const after = h.plan.moveSelection({ ...base, candidates: [{ id: 'c1', name: 'C' }] });
+      eq([after.ctaLabel, 'drop_player_id' in after.request, after.drop], ['Add A', false, null], 'B gone');
+      h.respond(() => response(200, { status: 'complete', move_kind: 'add', result: 'accepted', league_platform: 'sleeper', attempt_id: 'x', title: 't', lines: [] }));
+      await h.faMove.attemptMove({ move: SUBMIT, surface: 'free_agents', request: { league_id: 'L', add_player_id: 'a1', ...after.request } });
+      expect(!('drop_player_id' in h.requests[0].body), `body ${JSON.stringify(h.requests[0].body)}`);
+      expect(/\.\.\.sel\.request,/.test(declText(claim, 'send')) && /fillTemplate\(block\.this_move, \{ cta: ctaLabel,/.test(claimText)
+        && /if \(dropId && !candidates\.some\(\(c\) => c\.id === dropId\)\) setDropId\(null\);/.test(claimText),
+      'the request, the CTA and "This move" all come from the selection; a vanished drop is cleared');
+    });
+  }
+  {
+    const cases = [
+      ['offline', (h) => h.setNet({ isConnected: false }), 'offline', 0],
+      ['network error', (h) => h.respond(() => Promise.reject(new TypeError('Network request failed'))), 'not_sent', 1],
+      ['timeout', () => {}, 'not_sent', 1],
+      ['500', (h) => h.respond(() => response(500, { error: 'internal_error' })), 'unavailable', 1],
+      ['404 (older server)', (h) => h.respond(() => response(404, '<html>')), 'unavailable', 1],
+      ['200 valid', (h) => h.respond(() => response(200, { platform: 'sleeper', valid: true })), 'valid', 1],
+      ['200 block', (h) => h.respond(() => response(200, { platform: 'sleeper', valid: false, consent: BLOCK })), 'consent', 1],
+      ['200 no block', (h) => h.respond(() => response(200, { platform: 'sleeper', valid: false })), 'unavailable', 1],
+    ];
+    for (const [name, arm, want, gets] of cases) {
+      await check(`X4 consent step: ${name} → ${want}${gets ? '' : ', and no GET at all'}`, async () => {
+        const h = harness();
+        arm(h);
+        const run = watch(h.faMove.fetchConsentStep('sleeper'));
+        // A GET is retried on a network error (api/client.ts), then gives up.
+        await h.time.advance(name === 'timeout' || name === 'network error' ? 20_000 : 0);
+        await flush();
+        expect(run.state === 'resolved', `step ${run.state}`);
+        eq([run.value.kind, h.requests.filter((r) => /platform-write-consent/.test(r.url)).length > 0 ? 1 : 0], [want, gets], 'step, GET');
+        expect(h.log[0] === 'netinfo', 'NetInfo first');
+      });
+    }
+    await check('X4 the sheet: offline or no answer at the tap → state 11 (planNotSent); after Connect → Ready', () => {
+      const t = declText(claim, 'openConsent');
+      expect(/case 'offline':\s*case 'not_sent':\s*if \(sendIfValid\) apply\(planNotSent\(copy\)\);\s*else show\(\{ step: 'ready' \}\);/.test(t), 'openConsent');
+      expect(/const step = await fetchConsentStep\(m\.league_platform\);/.test(t), 'reads through fetchConsentStep');
+    });
+  }
+  {
+    await check('X5 Usage Trends\' pre-read: a plain call, bounded at 3 s, giving only move and the tapped row', async () => {
+      const h = harness();
+      h.respond(() => response(200, { move: SUBMIT, free_agents: [{ player_id: 'p1', name: 'A', move_kind: 'claim', move_line: 'x', extra: 1 }], roster_capacity: {} }));
+      const out = await h.faMove.readMoveCapability('L1', 'p1');
+      eq(out, { move: SUBMIT, row: { move_kind: 'claim', move_line: 'x' } }, 'capability + row');
+      eq(h.requests.map((r) => r.url), ['https://example.invalid/api/league/free-agents?league_id=L1'], 'one plain read');
+      const slow = harness();
+      const run = watch(slow.faMove.readMoveCapability('L1', 'p1'));
+      await slow.time.advance(2_999);
+      expect(run.state === 'pending', 'gave up before 3 s');
+      await slow.time.advance(1);
+      eq(run.value, { move: null, row: {} }, 'no answer in 3 s → legacy');
+      const old = harness();
+      old.respond(() => response(200, { free_agents: [{ player_id: 'p1', move_mode: 'handoff', move_line: 'x' }] }));
+      eq(await old.faMove.readMoveCapability('L1', 'p1'), { move: null, row: {} }, 'today\'s server: nothing used');
+    });
+    await check('X5 Usage Trends never touches the sheet\'s cache, and shows the tapped Add busy while it reads', () => {
+      const ut = read(USAGE_TRENDS);
+      expect(!/fetchQuery|setQueryData|queryKey: \['free-agents', lgId/.test(ut), 'the sheet\'s key is written');
+      expect(/setAdding\(\{ playerId: p\.player_id, leagueId: lgId \}\);[\s\S]*finally \{\s*setAdding\(null\);\s*\}/.test(declText(parse(USAGE_TRENDS), 'doAdd')),
+        'busy from the tap to the routing');
+      for (const f of ['src/components/UsageTrendCard.tsx', 'src/components/UsageStatsTable.tsx', 'src/components/UsageLeagueList.tsx']) {
+        expect(/<ActivityIndicator size="small"/.test(read(f)) && /busy: (adding|addingLeagueId === row\.league_id)/.test(read(f)), `${f}: no busy Add`);
+      }
+    });
+  }
+  {
+    const h = harness();
+    await check('X6 the pin decision is pure, measured on the content, with hysteresis: no flip-flop at the boundary', () => {
+      const max = 600; // half = 300
+      const P = h.plan.actionBlockPinned;
+      const C = h.plan.PINNED_BLOCK_CHROME;
+      for (const content of [300 - C - 30, 300 - C - 10, 300 - C, 300 - C + 1, 300 - C + 10]) {
+        let pinned = true;
+        const seen = [];
+        for (let i = 0; i < 6; i++) { pinned = P(pinned, content, max); seen.push(pinned); }
+        expect(seen.every((x) => x === seen[seen.length - 1]), `content ${content}: ${seen}`);
+      }
+      // Re-measured with a few points of jitter around the boundary, a decision holds.
+      let pinned = P(true, 300 - C + 5, max);
+      expect(pinned === false, 'over half unpins');
+      for (const jitter of [-5, 3, -10, 0, -15]) pinned = P(pinned, 300 - C + jitter, max);
+      expect(pinned === false, 'jitter inside the band re-pinned');
+      expect(P(false, 300 - C - h.plan.PIN_HYSTERESIS - 1, max) === true, 'clearly under re-pins');
+      expect(/style=\{sheetStyles\.blockContent\}\s*onLayout=\{\(e\) => \{\s*const h = e\.nativeEvent\.layout\.height;\s*setPinned\(\(p\) => actionBlockPinned\(p, h, windowHeight \* SHEET_MAX_FRACTION\)\);/.test(claimText),
+        'the sheet measures the content and asks the pure function');
+    });
+  }
+  {
+    const h = harness();
+    const C = (st, b) => h.faMove.classifyMoveError(apiErr(h, st, b));
+    await check('X7 MFL: connect / verify / rejected render the unsupported explanation, never a dead Connect', () => {
+      const mfl = h.plan.copyFns({ ...SUBMIT, league_platform: 'mfl' }, { league: 'L', name: 'A' });
+      for (const [st, code] of [[409, 'mfl_not_linked'], [409, 'mfl_expired'], [403, 'verification_required'], [409, 'mfl_rejected']]) {
+        eq(h.plan.planFailure(C(st, { error: code }), mfl).view, { step: 'unsupported' }, code);
+      }
+      const espn = h.plan.copyFns({ ...SUBMIT, league_platform: 'espn' }, { league: 'L', name: 'A' });
+      eq(h.plan.planFailure(C(409, { error: 'espn_not_linked' }), espn).view.step, 'connect', 'ESPN keeps its connect step');
+      eq(h.plan.initialView({ ...SUBMIT, league_platform: 'mfl', connect: 'not_linked' }, {}, mfl), { step: 'unsupported' }, 'MFL at open');
+      expect(/const reason = NO_ADD_REASON\[platform === 'sleeper' \? 'local' : platform\];/.test(claimText), 'the sheet shows NO_ADD_REASON');
+    });
+    await check('X7 a non-Sleeper row held in hand-off opens the sheet with the server\'s line (else a neutral one), not NO_ADD_REASON', () => {
+      const espnMove = { ...SUBMIT, league_platform: 'espn' };
+      const held = { move_mode: 'handoff', move_line: 'A recent move wasn\'t confirmed.' };
+      expect(h.faMove.faMoveOpensSheet(espnMove, held), 'the host opens the sheet');
+      const espn = h.plan.copyFns(espnMove, { league: 'L', name: 'A' });
+      eq(h.plan.initialView(espnMove, held, espn), { step: 'handoff', line: 'A recent move wasn\'t confirmed.' }, 'server line');
+      eq(h.plan.initialView(espnMove, { move_mode: 'handoff' }, espn),
+        { step: 'handoff', line: "This move can't be made from Fleeced right now. Check ESPN." }, 'fallback');
+      expect(/else navigation\.navigate\('EspnConnect'\);/.test(claimText) && !/navigate\('EspnConnect',/.test(claimText), 'EspnConnect without reason: send');
+    });
+  }
+  {
+    await check('X8 Settings: a 404 is valid: false; a 500 stays an error; a failed DELETE keeps the row with a neutral line', async () => {
+      const h = harness();
+      let next = 0;
+      const answers = [[404, '<html>'], [200, { platform: 'sleeper', valid: false, status_line: null }], [500, { error: 'internal_error' }]];
+      h.respond(() => response(...answers[next++]));
+      eq((await h.faMove.readConsentStatus('sleeper')).valid, false, '404');
+      eq((await h.faMove.readConsentStatus('sleeper')).valid, false, '200 valid: false');
+      let threw = false;
+      try { await h.faMove.readConsentStatus('sleeper'); } catch { threw = true; }
+      expect(threw, 'a 500 was read as valid: false');
+      const row = declText(parse(SETTINGS_LEAGUES), 'RosterMovesRow');
+      expect(/\} catch \{\s*setFailed\(true\);\s*\}/.test(row) && /\{failed \? \(\s*<Text[^>]*>\s*\{FA_MOVE_FALLBACK_COPY\.stop_failed\}/.test(row),
+        'the failure line');
+      eq(read(FA_MOVE).match(/stop_failed: "([^"]+)"/)[1], "Couldn't turn it off. Try again.", 'the neutral string');
+    });
+  }
+  {
+    const h = harness();
+    await check('X9 "terms changed": on the block\'s reason: version, and on an in-sheet version change', () => {
+      const T = h.faMove.termsChanged;
+      eq([T({ ...BLOCK, reason: 'version' }, null), T(BLOCK, null), T(BLOCK, 'test-copy-v9'), T(BLOCK, 'test-copy-v8')],
+        [true, false, false, true], 'termsChanged');
+      expect(/const changed = termsChanged\(block, shownVersionRef\.current\);/.test(declText(claim, 'showConsent')), 'showConsent');
+    });
+    await check('X10 fully legacy for an absent or unknown mode: no move.copy, no row move_line', () => {
+      const bogus = { mode: 'bogus', copy: { handoff_footer: 'SERVER FOOTER' } };
+      eq(h.faMove.capabilityOrNull(bogus), null, 'capability');
+      eq(h.faMove.rowMoveFields(bogus, { move_mode: 'handoff', move_line: 'x' }), {}, 'row fields');
+      const cp = h.plan.copyFns(h.faMove.capabilityOrNull(bogus), { league: 'L', name: 'A' });
+      eq(cp.slot('handoff_footer'), "You'll finish this move in Sleeper.", 'the footer is the fallback');
+      eq(h.plan.initialView(null, h.faMove.rowMoveFields(null, { move_mode: 'handoff', move_line: 'x' }), cp), { step: 'handoff', line: null }, 'no line');
+    });
+    await check('X11 every in-sheet re-read is bounded (5 s), and a failed one after Connect goes on as connected', async () => {
+      const t = harness();
+      const run = watch(t.faMove.withTimeout(new Promise(() => {}), t.faMove.FA_MOVE_REREAD_WAIT_MS));
+      await t.time.advance(4_999);
+      expect(run.state === 'pending', 'gave up early');
+      await t.time.advance(1);
+      expect(run.state === 'resolved' && run.value === undefined, `at 5 s: ${run.state}`);
+      eq(t.faMove.FA_MOVE_REREAD_WAIT_MS, 5000, 'the bound');
+      const next = h.plan.resumeAfterConnect(undefined, { move: { ...SUBMIT, connect: 'not_linked', consent_until: null }, row: {}, playerId: 'p' });
+      expect(next.assumedConnected && next.move.connect === 'ok', 'assumed connected');
+      eq(h.faMove.faMoveGate({ move: next.move, row: next.row, consentValid: false, ticked: false }), 'consent', 'on to consent');
+      expect(/return refetch \? withTimeout\(refetch\(\), FA_MOVE_REREAD_WAIT_MS\)/.test(declText(claim, 'refetchSafe')), 'refetchSafe');
+    });
+    await check('X12 contract §7: the no-bid claim slots, waiver_line / waiver_line_no_drop, bid_line only with a bid; surface sent', async () => {
+      const copy = { cta_claim_no_bid: 'CLAIM {add}', cta_claim_drop_no_bid: 'CLAIM {add} - {drop}', waiver_line: 'W {add} {drop}',
+        waiver_line_no_drop: 'W {add}', bid_line: 'BID {bid}' };
+      const M = h.faMove;
+      eq([M.moveCtaLabel(copy, 'claim', { add: 'A' }, 'sleeper'), M.moveCtaLabel(copy, 'claim', { add: 'A', drop: 'B' }, 'sleeper')],
+        ['CLAIM A', 'CLAIM A - B'], 'no-bid claim slots');
+      eq(M.waiverLines(copy, { add: 'A', drop: 'B', bid: '$7' }, 'sleeper'), ['W A B', 'BID $7'], 'drop + bid');
+      eq(M.waiverLines(copy, { add: 'A' }, 'sleeper'), ['W A'], 'no drop, no bid');
+      const sel = h.plan.moveSelection({ rowName: 'A', kind: 'claim', dropId: null, candidates: [], faab: false, bid: '', copy, platform: 'sleeper' });
+      eq([sel.ctaLabel, sel.waiverLines, 'faab_bid' in sel.request], ['CLAIM A', ['W A'], false], 'a priority-waiver claim');
+      const t = harness();
+      t.respond(() => response(200, { status: 'pending', move_kind: 'claim', result: 'accepted', league_platform: 'sleeper', attempt_id: 'x', title: 't', lines: [] }));
+      await t.faMove.attemptMove({ move: SUBMIT, surface: 'usage_trends', request: REQ });
+      eq(t.requests[0].body.surface, 'usage_trends', 'surface on the request');
+    });
+  }
+
   // ── Dark-safety, testIDs, Settings ────────────────────────────────────────
   await check('dark: no capability → the hand-off render (#509): its CTA and the neutral footer; never the false Sleeper claim', () => {
-    expect(/useState<FaMoveCapability \| null>\(openedWith \?\? null\)/.test(claimText), 'the sheet starts from the host\'s capability');
+    expect(/useState<FaMoveCapability \| null>\(\(\) => capabilityOrNull\(openedWith\)\)/.test(claimText)
+      && /useState<FaMoveRow>\(\(\) => rowMoveFields\(openedWith, row\)\)/.test(claimText), 'the sheet starts from the host\'s capability, normalized');
     let handoff = null;
     walk(claim, (n) => {
       if (ts.isIfStatement(n) && unparen(n.expression).getText(claim) === '!submitLayout') handoff = n.thenStatement;
@@ -890,7 +1147,7 @@ process.on('exit', () => {
     expect(row, 'RosterMovesRow');
     const t = row.getText(sf);
     expect(/if \(stopped \|\| status\?\.valid !== true\) return null;/.test(t), 'hidden unless valid');
-    expect(/retry: false/.test(t) && /getConsent\(platform\)/.test(t), 'one consent GET, a 404 is a stable answer');
+    expect(/retry: false/.test(t) && /readConsentStatus\(platform\)/.test(t), 'one consent GET (a 404 reads as valid: false)');
     expect(!/Alert/.test(t), 'a dialog');
     expect(/onPress=\{\(\) => void stop\(\)\}/.test(t) && /withdrawConsent\(platform\)/.test(t), 'one tap withdraws');
     expect(/<Text style=\{rosterMoveText\.notice\}>\{notice\}<\/Text>/.test(t) && /setAccessibilityFocus/.test(t),
