@@ -569,6 +569,30 @@ Gates: release-lead's #470 QA P2-1 follow-up; analytics-lead's grant of option (
   - the error card not hidden (10j);
   - the re-search through a tap path (10h).
 - **TestFlight:** the scope's §3 checklist (6 steps, two devices), for the operator on the 11-06 build. Not yet run.
+## 2026-10-29 — Team overhaul in account deletion and export (head-eng's ask; trades-eng found the gap)
+
+Full gates (scope `docs/plans/team-overhaul/scope-account-deletion.md`). Server only, no schema, not flag-gated. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change (`backend/accounts.py`):**
+  - deletion removes the user's own `overhauls` (by `account_user_id`) and every offer, roadmap, attempt and reservation under them;
+  - in OTHER users' overhauls, an offer naming them (any id in their scope) gets the placeholder for the counterparty and card target id and name, loses the counterparty's Fleeced-derived card fields, gets `evidence_json` NULL, goes stale if liked or undecided, and, if undecided, gets a re-minted `package_hash`; their roadmap summaries list the placeholder, and a Fleeced-minted id keying their snapshot rosters or holding their recovery pick becomes the placeholder (trades-eng's review);
+  - the export carries the user's own overhaul rows, without offers' `evidence_json` and with the counterparty's card fields removed;
+  - the one-time purge discovers `overhaul_offers.counterparty_user_id`.
+- **Tests:** four new in `test_account_deletion_coverage.py` (deletion and scrub with a no-residue check; minted ids in snapshots and recovery; export; a schema scan that fails on main's `accounts.py` with exactly the three overhaul tables), plus the purge discovery and info tests updated.
+- **Sabotage 27/27 red** (13 deletion, 8 after trades-eng's review, 4 export, 1 scan, 1 purge), restored byte-identical; a probe table also fails the scan.
+- **2026-10-29, release-lead QA @ `6ea56e5e`: NO-GO on a P1 → fixed.**
+  - **P1:** the scrub also matched the deleted user's own overhauls' `league_user_id`, which for a Sleeper co-owner is the roster's PRIMARY owner, a live person. `named_ids` is now `user_ids` only (an offer names a counterparty by league member id: the user's own id on ESPN/MFL, the roster owner on Sleeper). New co-owner test; test 1's ESPN-member premise (which real sessions don't produce) is now an `acct_` platform member.
+  - **P2-1:** a stored `counterparty_asset_not_owned` blocker on a scrubbed offer named the team in `compat_json`; it now gets `ownership_copy`'s unnamed message.
+  - **P2-2:** the sweep also removes overhauls whose owner's `users` row was created more than an hour after them (a reused id).
+  - **P3s:** the sweep counts an `accounts` row (acct_ alias or bound Sleeper id) as live, since `migrate_board_data` deletes a users row on a bind; the comment now names the durable session as the strong signal (session_init writes the users row in a background thread); the failure log carries the error class only; counts come from rowcounts; child rows whose overhaul is gone are swept; the schema scan covers owner / counterparty / holder / seller / recipient / partner / member / author / username / *_by columns; purge `--verify` gains (h) for overhaul snapshots and recoveries; a runbook note. P2-3 (a generation racing a deletion) and set-based UPDATEs for heavy users are follow-ups.
+  - **QA's 7 escapes are now red** (LIKE-prefix scrub, snapshot keys by prefix, orphan by league_user_id, live by prefix, ids logged, two scan probes), with 12 more on the new code: **sabotage 19/19 red**; the earlier rounds' still-applicable 22 stay red.
+- **2026-10-29, release-lead re-QA @ `96673f2a`: GO-with-notes** (SQLite and PG; acct_42 ruled kept). The P3s are taken:
+  - the re-signup rule skips an owner whose durable session or accounts row is no newer than the overhaul (QA case 994: a live user whose users row landed late);
+  - the compat test pins the rewrite to the counterparty side (a give-side blocker on the same offer is untouched);
+  - timestamps parse as UTC.
+  **Sabotage 5/5 red** (59 in all).
+- **Legal R28.22 additions (head-eng, 10-29):** the scrubbed cards' `mismatch_score` / `composite_score` are nulled (the blended-scalar test: on the owner arms they're the same presentation rank, so the copy goes with the nulled surplus_margin; no final_score is stored on an overhaul card). And `delete_orphaned_overhauls` deletes overhauls whose owner has no users row and no durable session, with their children, once per process from the cleanup loop, logging a count only. Three new tests. **Sabotage 8/8 red** (35/35 in all).
+- **Runs:** see the PR.
 
 ## 2026-10-28 — Paywall price rise moves to 2027-01-02 04:00 UTC (App Store Connect's US start for a Jan-2 schedule; follow-up to #494)
 
