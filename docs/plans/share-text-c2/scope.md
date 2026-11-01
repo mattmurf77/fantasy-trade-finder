@@ -50,7 +50,7 @@
   2. **In step 1's share sheet, pick Messages and read the text body.** It's exactly 4 lines, "Trade idea (…)", "Side A: …", "Side B: …", "Package value", then the link. No Consensus, ratio, Verdict, win or board line.
   3. **Calculator → Share** (the text button). The message is the same 4 lines, then "Build your own: <link>" when share landing is on. No "Consensus:", "ratio" or "Verdict".
      - The link's preview still says "% fair" until #511 is live. That's #511's, not C2's.
-  4. **In-league calculator**, against an opponent whose board diverges from yours (a "Wins by my board" or "@opp wins" verdict on screen), with one of your league picks on a side → **Share image**. The card says "Package value", never a win or board line. The league pick shows a PICK chip and its number. The footer has the wordmark and the plain `/?ref=` link (a package holding a pick isn't minted). The on-screen verdict is unchanged.
+  4. **In-league calculator**, against an opponent whose board diverges from yours (the on-screen headline reads "You win by your board — @opp likely sees it as a loss." or "@opp wins by their board — this one costs you."), with a league pick on either side → **Share image**. The card says "Package value", never a win or board line. The league pick shows a PICK chip and its number. The footer has the wordmark and the plain `/?ref=` link (a package holding a pick isn't minted). The on-screen verdict is unchanged.
   5. **In step 4's share sheet, pick Messages and read the text body.** It's exactly 4 lines, "Trade idea vs @opp (…)", "I send: …", "I get: …", "Package value", then the link. No Consensus, ratio, Verdict, win or board line.
 - `testID`s added/renamed: none.
 
