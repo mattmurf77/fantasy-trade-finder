@@ -1125,17 +1125,22 @@ deck_impressions_table = Table("deck_impressions", metadata,
     # Which evidence rule wrote this row. Set only on rows written at delivery
     # from a deferred job's build-time snapshot (server._DeckEvidence); NULL on
     # every row written at build (flag off, or a live-mode job) and on
-    # pre-change rows. Ruling 17's precedence, highest first:
+    # pre-change rows. Ruling 17's precedence, highest first, with R4.2's
+    # 'viewed' ranked above 'delivered', 'archive' and 'full_interim':
     #   'ghost'        C5: never delivered; a narrow row, even inside the first 30
     #   'first30'      C4: card_index < 30, full whether delivered or not
+    #   'viewed'       trade.packed_evidence (R4.2, the revised C3): a packed
+    #                  card's full row, written at its first outcome of any
+    #                  kind (a first view raises an 'archive' row to it:
+    #                  mark_deck_impression_viewed);
+    #                  delivered_at is this process's delivery stamp for the
+    #                  card, else the pack's delivery of its index, else the
+    #                  outcome's time
     #   'delivered'    a card past the first 30 sent to a client
     #   'archive'      C8: an undelivered card past the first 30 of a 2% deck
     #                  (eval contract.is_archive_deck)
     #   'full_interim' stage 1 only, at archive's rank: the same card on any
     #                  other deck, written full until packing replaces it
-    #   'viewed'       trade.packed_evidence (R4.2, the revised C3): a packed
-    #                  card's full row, written at its first outcome of any
-    #                  kind; delivered_at comes from the pack's deliveries
     # 'partial_run' overrides them all (ruling 21; replay excludes it): every
     # row of a run that ended partial (error, timeout, supersede), and of a
     # deck first delivered after its job left the process with cards past
