@@ -215,7 +215,8 @@ def test_notifications_naming_the_person_take_the_placeholder_and_the_token(engi
         notification(conn, "Trade match with @Del Name", {"partner_username": "Del Name"})  # a leaguemate's copy
         notification(conn, "Counter offer", {"partner_user_id": DEL})
         notification(conn, f"Trade match with @{DEL}", {"partner_username": DEL})       # no names at all
-        notification(conn, "Trade match with @renée", {"partner_username": "renée"})   # stored as \u escapes
+        notification(conn, "Trade match with @renée", {"partner_username": "renée"},
+                     user="faraway")      # stored as \u escapes; no match, so only that term finds it
         notification(conn, "Trade match with @Del Name", {"partner_username": "Del Name"},
                      user="stranger")                                                   # shares no league
         notification(conn, f"@{DEL} countered your offer", {"partner_user_id": DEL})   # the id, no name
