@@ -355,6 +355,16 @@ def test_write_succeeded_event_exact_props(h):
     assert rec[2]["props"] == {"surface": None, "copy_version": V1, "league_platform": "sleeper"}
 
 
+@pytest.mark.parametrize("sent,recorded", [("free_agents", "free_agents"),
+                                           ("usage_trends", "usage_trends"),
+                                           ("deck", None), (7, None), (_ABSENT, None)])
+def test_surface_is_recorded_on_consent_recorded(h, sent, recorded):
+    """Contract §3: the optional `surface`; any other value is null, never a 400."""
+    assert h.post(surface=sent).status_code == 200
+    (rec,) = h.events_named("fa_move_consent_recorded")
+    assert rec[2]["props"]["surface"] == recorded
+
+
 # ---------------------------------------------------------------------------
 # Order of checks (§B3): every pre-write refusal, with detail == message and
 # NO opener call

@@ -7,6 +7,7 @@ no network).
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 from datetime import timedelta
 
@@ -319,12 +320,33 @@ def test_delete_withdraws_once_and_is_idempotent(h):
     assert r.status_code == 409 and _err(r)["error"] == "consent_required"
 
 
-def test_delete_needs_a_verified_session(h):
+@pytest.mark.parametrize("enforce", [False, True])
+def test_delete_needs_a_session_only(h, enforce):
+    """Contract §2 / R15.2.6: withdrawal is as easy as consent, so an
+    UNVERIFIED session can stop roster moves (whatever the write-gate flag)."""
+    if enforce:
+        h.flags.add("auth.enforce_verified_writes")
     _grant(h)
     h.sess["verified"] = False
     r = _delete(h)
-    assert r.status_code == 403 and _err(r)["error"] == "verification_required"
-    assert [c for c in h.consents() if c["kind"] == "withdrawal"] == []
+    assert r.status_code == 200 and r.get_json()["notice"] == WITHDRAWAL_NOTICE
+    assert [c["withdrawn_via"] for c in h.consents() if c["kind"] == "withdrawal"] == ["settings"]
+    assert _get(h).status_code == 200                        # GET too
+
+
+def test_no_session_is_401(h):
+    for method in (h.client.get, h.client.delete):
+        assert method("/api/platform-write-consent?platform=sleeper").status_code == 401
+
+
+def test_no_unverified_write_gate_on_the_consent_route():
+    """Structural twin (sabotage: put `@_gate_unverified_write` or a
+    `_verified_write_denial` check back on it)."""
+    view = server.app.view_functions["platform_write_consent_route"]
+    assert not hasattr(view, "__wrapped__")                  # no decorator wrapped it
+    src = inspect.getsource(server.platform_write_consent_route)
+    for check in ("_verified_write_denial(", "_gate_unverified_write\n", '"verified"'):
+        assert check not in src, check
 
 
 # ---------------------------------------------------------------------------

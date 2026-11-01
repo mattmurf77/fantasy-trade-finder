@@ -68,6 +68,8 @@ def test_emitted_props_are_exactly_the_granted_ones(h):
         assert "platform" not in props                         # the device column, never a prop
         assert props["league_platform"] in ("sleeper", "mfl", "espn")   # C1: never null
         assert kw.get("source") == "api"
+        if name == "fa_move_consent_recorded":
+            assert props["surface"] in ("free_agents", "usage_trends", None)
         if name == "fa_move_consent_withdrawn":
             assert props["via"] in ("settings", "disconnect", "credential_expired",
                                     "credential_rejected")

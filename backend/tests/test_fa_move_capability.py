@@ -26,7 +26,8 @@ from backend.tests.test_fa_move_route import (  # noqa: F401  (h is a fixture)
 
 CONTRACT_COPY_KEYS = {
     "header_add", "header_claim", "cta_add", "cta_add_drop", "cta_claim", "cta_claim_drop",
-    "league_line", "finality", "waiver_line", "window_line", "turn_off", "do_in_platform",
+    "cta_claim_no_bid", "cta_claim_drop_no_bid", "league_line", "finality", "waiver_line",
+    "waiver_line_no_drop", "bid_line", "window_line", "turn_off", "do_in_platform",
     "open_platform", "handoff_footer", "connect_line", "verify_line", "other_account_line",
     "not_sent_line", "unknown_title", "unknown_body", "unavailable_line", "still_sending",
 }
@@ -201,16 +202,27 @@ def test_approved_slots_verbatim():
     assert final["finality"] == "Final on Sleeper. Fleeced can't undo it."                    # G7
     assert final["do_in_platform"] == "Do it in Sleeper instead"                              # G20
     assert final["unknown_title"] == "Check before resending"                                 # 8i
-    assert final["waiver_line"].startswith(                                                   # G8
-        "This places a waiver claim for {add} (dropping {drop} if it clears). "
-        "Sleeper processes it on its waiver schedule.")
+    # G8, R15.1 :766, in the contract §7 forms.
+    assert final["waiver_line"] == ("This places a waiver claim for {add} (dropping {drop} "
+                                    "if it clears). Sleeper processes it on its waiver schedule.")
+    assert final["waiver_line_no_drop"] == ("This places a waiver claim for {add}. "
+                                            "Sleeper processes it on its waiver schedule.")
+    assert final["bid_line"] == "Bid: {bid}"
+    drafts = copy._SLEEPER_SLOTS_DRAFT
+    assert drafts["cta_claim_no_bid"] == "Claim {add}"
+    assert drafts["cta_claim_drop_no_bid"] == "Claim {add}, drop {drop}"
+    # A no-drop / no-bid form never names the missing half.
+    for key in ("waiver_line_no_drop", "cta_claim_no_bid"):
+        assert "{drop}" not in {**final, **drafts}[key]
+    for key in ("waiver_line", "waiver_line_no_drop", "cta_claim_no_bid", "cta_claim_drop_no_bid"):
+        assert "{bid}" not in {**final, **drafts}[key]
 
 
 def test_templates_never_write_their_own_dollar_sign():
     """Contract §7: the client fills `{bid}` WITH its "$" ("$7")."""
     for key, text in {**copy._SLEEPER_SLOTS_FINAL, **copy._SLEEPER_SLOTS_DRAFT}.items():
         assert "${" not in text, key
-    assert copy._SLEEPER_SLOTS_FINAL["waiver_line"].endswith("Bid: {bid}")
+    assert copy._SLEEPER_SLOTS_FINAL["bid_line"] == "Bid: {bid}"
     assert copy._SLEEPER_SLOTS_DRAFT["cta_claim"] == "Claim {add} for {bid}"
 
 

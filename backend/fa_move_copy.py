@@ -154,15 +154,14 @@ _SLEEPER_SLOTS_FINAL = {
     "connect_line": "Connect your Sleeper sign-in to make moves from here.",
     # G7, legal-final (R15.8 D10(b)).
     "finality": "Final on Sleeper. Fleeced can't undo it.",
-    # G8, legal-final (R15.1 :766, "Bid: ${n}" appended when there's a bid;
-    # the client's `{bid}` carries the "$", contract §7). FLAGGED in the build
-    # report: R15.1's line has two conditional halves and contract §7 gives it
-    # ONE slot. With no drop the client drops the slot for its fallback
-    # (contract §7); with no bid it fills "$0", wrong for a priority-waiver
-    # league. Claims are off (`claims: false`) until D5 holds, so it is never
-    # rendered before that is settled.
+    # G8, legal-final (R15.1 :766), in its forms (contract §7): with a drop,
+    # without one, and "Bid: ${n}" as its own line the client shows only when
+    # the claim has a bid (the client's `{bid}` carries the "$").
     "waiver_line": ("This places a waiver claim for {add} (dropping {drop} if it clears). "
-                    "Sleeper processes it on its waiver schedule. Bid: {bid}"),
+                    "Sleeper processes it on its waiver schedule."),
+    "waiver_line_no_drop": ("This places a waiver claim for {add}. "
+                            "Sleeper processes it on its waiver schedule."),
+    "bid_line": "Bid: {bid}",
     # G20, approved (s351.secondary, consent.md :132).
     "do_in_platform": "Do it in Sleeper instead",
     # G16's title reuses 8i (mobile/src/utils/sendOutcomeCopy.ts:9).
@@ -179,6 +178,8 @@ _SLEEPER_SLOTS_DRAFT = {
     "cta_add_drop": "Add {add}, drop {drop}",                           # G6
     "cta_claim": "Claim {add} for {bid}",                               # G6
     "cta_claim_drop": "Claim {add} for {bid}, drop {drop}",             # G6
+    "cta_claim_no_bid": "Claim {add}",                                  # G6, priority waivers
+    "cta_claim_drop_no_bid": "Claim {add}, drop {drop}",                # G6, priority waivers
     "league_line": "In {league}",                                       # G22
     "window_line": "Adds authorized until {date}",                      # G9 (consent.md :115)
     "turn_off": "Turn off",                                             # G9
@@ -197,7 +198,8 @@ _SLEEPER_SLOTS_DRAFT = {
 # Keys the client knows (contract §7); a test pins both dicts against it.
 MOVE_COPY_KEYS = frozenset({
     "header_add", "header_claim", "cta_add", "cta_add_drop", "cta_claim", "cta_claim_drop",
-    "league_line", "finality", "waiver_line", "window_line", "turn_off", "do_in_platform",
+    "cta_claim_no_bid", "cta_claim_drop_no_bid", "league_line", "finality", "waiver_line",
+    "waiver_line_no_drop", "bid_line", "window_line", "turn_off", "do_in_platform",
     "open_platform", "handoff_footer", "connect_line", "verify_line", "other_account_line",
     "not_sent_line", "unknown_title", "unknown_body", "unavailable_line", "still_sending",
 })

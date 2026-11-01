@@ -36557,6 +36557,9 @@ from . import database as _fa_db          # noqa: E402
 from . import fa_move_copy as _fa_copy    # noqa: E402
 
 _FA_MOVE_PLATFORMS = ("sleeper", "mfl", "espn")
+# The claim sheet's hosts (contract §3 `surface`), recorded on
+# fa_move_consent_recorded; any other value is recorded as null.
+_FA_MOVE_SURFACES = ("free_agents", "usage_trends")
 # Each platform's server-only kill switch. MFL and ESPN add theirs in Update 1.
 _FA_MOVE_FLAGS = {"sleeper": "sleeper.send_add_drop"}
 
@@ -36793,9 +36796,12 @@ def platform_write_consent_route():
     DELETE ?platform=sleeper → {platform, valid: false, notice}: appends a
            withdrawal (`via: settings`) for every open grant. One tap, no
            confirm; idempotent (a repeat appends nothing, same body). `notice`
-           is R15.2.6's text, verbatim. Write gate: 403 verification_required.
-    404 feature_disabled while every `*.send_add_drop` is off; 400 bad_request
-    for a `platform` outside sleeper | mfl | espn. Never returns a token.
+           is R15.2.6's text, verbatim.
+    Both need a session only, never a verified one (contract §2: withdrawal
+    is as easy as consent), so neither carries `@_gate_unverified_write`.
+    401 without a session; 404 feature_disabled while every `*.send_add_drop`
+    is off; 400 bad_request for a `platform` outside sleeper | mfl | espn.
+    Never returns a token.
     """
     if not _fa_move_any_flag_on():
         body, status = _fa_move_error("feature_disabled", 404,
@@ -36810,10 +36816,10 @@ def platform_write_consent_route():
     now = _fa_move_now()
 
     if request.method == "DELETE":
-        if not user_id or _verified_write_denial(sess) is not None:
-            body, status = _fa_move_error("verification_required", 403, _fa_copy.message(
-                "verification_required", platform))
-            return jsonify(body), status
+        # A session only, never a verified one (contract §2, R15.2.6):
+        # withdrawing only removes a permission, so it is as easy as giving it.
+        if not user_id:
+            raise _SessionExpired()
         if _fa_db.withdraw_platform_write_grants(user_id, platform, "settings", now):
             _fa_move_event(user_id, "fa_move_consent_withdrawn",
                            {"via": "settings", "league_platform": platform})
@@ -36874,6 +36880,8 @@ def _fa_move_parse_body(body) -> dict | None:
         if raw_bid < 0 or raw_bid != int(raw_bid):
             return None
         bid = int(raw_bid)
+    surface = body.get("surface")       # optional; any other value is ignored (contract §3)
+    surface = surface if surface in _FA_MOVE_SURFACES else None
     consent = body.get("consent")
     if consent is not None:
         if (not isinstance(consent, dict) or not isinstance(consent.get("copy_version"), str)
@@ -36881,7 +36889,8 @@ def _fa_move_parse_body(body) -> dict | None:
             return None
         consent = {"copy_version": consent["copy_version"], "locale": consent["locale"]}
     return {"league_id": league_id, "add_player_id": add_id, "drop_player_id": drop_id,
-            "move_kind": kind, "faab_bid": bid, "consent": consent, "attempt_id": attempt_id}
+            "move_kind": kind, "faab_bid": bid, "consent": consent, "attempt_id": attempt_id,
+            "surface": surface}
 
 
 def _fa_move_consent_step(user_id: str, platform: str, platform_user_id: str,
@@ -36914,7 +36923,8 @@ def _fa_move_consent_step(user_id: str, platform: str, platform_user_id: str,
             client_platform=device.get("device_type"), app_version=device.get("app_version"),
             trigger_attempt_id=req["attempt_id"])
         _fa_move_event(user_id, "fa_move_consent_recorded",
-                       {"surface": None, "copy_version": current, "league_platform": platform},
+                       {"surface": req["surface"], "copy_version": current,
+                        "league_platform": platform},
                        league_id=req["league_id"])
         return None, grant
     grant = _fa_move_grant(user_id, platform, platform_user_id, now)
@@ -37205,7 +37215,7 @@ def league_free_agents_move_route():
 
     Body {league_id, add_player_id, drop_player_id?, move_kind: add|claim,
     faab_bid? (claims), consent?: {copy_version, locale}, attempt_id (UUID,
-    one per tap)}. 200 {status: complete|pending, move_kind, result:
+    one per tap), surface? (free_agents|usage_trends)}. 200 {status: complete|pending, move_kind, result:
     accepted|partial, league_platform, attempt_id, title, lines,
     platform_transaction_id?}; a repeat of an attempt_id returns its recorded
     answer. Every error body is {error, message, detail == message, title?,
