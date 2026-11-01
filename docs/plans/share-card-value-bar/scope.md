@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-01
 **Entry point:** direct ask. head-eng (2026-11-01), on the operator's call via head-product: "Let's just prioritize building and shipping now. The draft pick value is going in". It's the next priority after #511's "% fair" removal (`c2ec824f`), and models-lead and legal may flag concerns but don't hold it. Due before the 11-13 referral date.
-**Builder:** eng-mobile/backend worker for league-eng, branch `build/share-card-value-bar`, **stacked on #511** (`fix/share-link-previews` @ `013eac18`).
+**Builder:** eng-mobile/backend worker for league-eng, branch `build/share-card-value-bar`, **stacked on #511** (`fix/share-link-previews` @ `013eac18`). *(Since 2026-11-01 the base is **main**: #511 squash-merged as `f7c77c60`, and `4c993eb3` merged main.)*
 **Operator sign-off on waivers:** pending, via head-eng. One waiver, §1 (c). The operator also reviews the card render (design rule, 2026-10-31, in parallel with release).
 
 ## Contents
@@ -44,14 +44,16 @@ The og trade card (`/og/trade/<token>.png`) draws the app's **TradeValueBar** in
 
 ## 2. Schema & flag scope
 
-- New or changed tables or columns: **none**.
+- New or changed tables or columns: **one**, `value_snapshot` (nullable TEXT JSON) on `trade_share_tokens` and `shared_packages` (K-a2, operator-approved 2026-11-01). *(The first build had none.)*
 - New or changed feature flags: **none**. It renders under the existing `growth.share_landing`. Rollback is a revert and redeploy, with no binary.
 - New env vars or `model_config` keys: **none**.
 - API surface: no new route. `POST /api/share/package` takes an optional `scoring_format`, and both mints write the snapshot. *(The first build's view-time `fmt` parameter was removed with K-a2.)* Schema: **one new column (`value_snapshot`) on two tables, operator-approved 2026-11-01**.
 
 ## 3. Evidence scope
 
-- [x] **Unit tests (pytest), done:** `backend/tests/test_share_card_value_bar.py` (65) and `test_share_side_orientation.py` (3).
+> **Superseded in part (2026-11-01):** the evidence below is the first, render-time build: one neutral fill, the 600±308 tick fallback, `?fmt=` through `/s/p`, and the UTC render date. K-a2 replaced all four; current evidence is in [K-a2](#2026-11-01--k-a2-a-stored-snapshot-at-share-time-operator-yes-add-the-column) and release-lead's QA (GO-with-notes at `47f6b00c` and `27d4be73`).
+
+- [x] **Unit tests (pytest), done (first build):** `backend/tests/test_share_card_value_bar.py` (65) and `test_share_side_orientation.py` (3).
   - **Parity:** `_consensus_verdict` equals `POST /api/trade/evaluate` (7 trades × 2 formats, both directions), and evaluate makes exactly one `_consensus_verdict` call. **Evaluate is byte-identical:** 192 captured responses before and after the refactor (market, heavy and off; owned and generic picks; dropped ids; one-sided; `sf_tep`; thresholds 0.5 and 1.0).
   - **Bar:** lean to YOU GET or YOU GIVE, the clamp at ±1 first, the even nub, one neutral fill.
   - **Ticks** at the current Mid-2nd fraction (≈0.287, 600±155). A "≈ a Late 1st" fill ends past the drawn 2nd tick; a "≈ a Mid 2nd" fill ends within ±20px of it; ticks fall back to 600±308 without the fraction.
@@ -103,7 +105,7 @@ The og trade card (`/og/trade/<token>.png`) draws the app's **TradeValueBar** in
 ## Decisions
 
 1. **Stacked follow-up, not riding #511** (head-eng gave league-eng the choice). #511's meter-removal delta QA keeps moving, and this lands right behind it.
-2. **Package cards without a known format draw no bar.** Pricing a superflex package as 1QB would be a wrong public verdict. `?fmt=` is the no-schema fix; the client half is update 1.
+2. *(Superseded by K-a2: the format now comes from `scoring_format` at mint, and the view-time `?fmt=` is removed.)* **Package cards without a known format draw no bar.** Pricing a superflex package as 1QB would be a wrong public verdict. `?fmt=` is the no-schema fix; the client half is update 1.
 3. **Market stud-tax mode.** The card can't know the sharer's mode, and consensus means market. A sharer on heavy or off may see slightly different numbers in the app.
 4. **The ±2nd ticks come from current values on the card. This reverses the first draft, which matched the app's `SECOND_IN_FIRSTS = 0.57`.** The worker's picks render showed "≈ a Late 1st" with the fill ending exactly on the "2nd" tick: since D-084, a Mid 2nd is 0.287 of a Mid 1st, not 0.57. A self-contradicting public card is worse than a card that differs from the app. The card now computes `e2v(Mid 2nd) / e2v(Mid 1st)` per render. The app's constant is flagged to head-eng as a separate fix (binary).
 5. **The date is the render date (UTC), not the last value-snapshot date.** Legal allows render-time values only if the date shown is the day they were computed, and K-a2 says the date must never differ from the values drawn.
@@ -154,3 +156,11 @@ The og trade card (`/og/trade/<token>.png`) draws the app's **TradeValueBar** in
   - The pos/warn/ice mapping.
 - **Runs:** share set 232; evaluate files 407 (192 golden responses still identical); deletion and data rights 75; full backend 10189 passed / 2 skipped; `check_web_structure` 196/196. The no-bar card is still byte-identical to `013eac18`.
 - **Sabotage runs, each caught:** the view recomputes (17 red), a board read at mint, `gap.value` stored, the column dropped from the export, no NULL handling (17 red), the date from the view clock, and pos and warn swapped (5 red).
+
+## 2026-11-01 — QA delta (`27d4be73`)
+
+release-lead: GO-with-notes at `27d4be73`. The merge is verified, `/s/p` matches A2 in all four tags, both SQLite and PG pass with 0/194 views moved, the migration adds 2 nullable columns and is idempotent, 15/15 sabotages went red, and CI is 4/4.
+- `/s/p` drops the player count when a package holds a draft pick (marketing addendum 14 A2).
+- A one-sided, one-id package reads "A 1-player dynasty trade package." (pre-existing; marketing's template).
+- **#567 conflict in `cross-client-invariants.md`** (whichever of #564 or #567 lands second): keep #567's "±2nd landmark" paragraph, keep #564's Locations list (a superset) and the first two sentences of #564's card paragraph. #564 no longer states the app constant; #567 owns that.
+- **Merge gates:** models-lead M6 and the operator's K4 (via head-eng), then the operator's own go for the schema change, after #511 (merged). Merge in a quiet window (`MIGRATION_LOCK_BUSY` on a held lock).
