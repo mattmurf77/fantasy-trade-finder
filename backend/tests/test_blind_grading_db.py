@@ -40,7 +40,8 @@ def card_row(cid, sid, position, user_id=UID, arms=("current",), **over):
     row = {"card_id": cid, "session_id": sid, "user_id": user_id, "position": position,
            "arms_json": json.dumps({a: {} for a in arms}),
            "trade_json": json.dumps({"partner_name": "P", "give": [], "receive": []}),
-           "grade": None, "skipped": 0, "tags_json": "[]", "graded_at": None}
+           "grade": None, "skipped": 0, "tags_json": "[]", "graded_at": None,
+           "partner_user_id": "P"}
     row.update(over)
     return row
 
@@ -73,8 +74,9 @@ def test_tables_created_with_expected_columns(engine):
     assert {n for n, c in sessions.items() if c["nullable"]} == {"completed_at", "error_json"}
     cards = {c["name"]: c for c in insp.get_columns("grading_cards")}
     assert list(cards) == ["card_id", "session_id", "user_id", "position", "arms_json",
-                           "trade_json", "grade", "skipped", "tags_json", "graded_at"]
-    assert {n for n, c in cards.items() if c["nullable"]} == {"grade", "graded_at"}
+                           "trade_json", "grade", "skipped", "tags_json", "graded_at",
+                           "partner_user_id"]
+    assert {n for n, c in cards.items() if c["nullable"]} == {"grade", "graded_at", "partner_user_id"}
     assert cards["skipped"]["default"] == "'0'" and cards["tags_json"]["default"] == "'[]'"
     uniques = {u["name"]: u["column_names"] for u in insp.get_unique_constraints("grading_cards")}
     assert uniques["uq_grading_card_position"] == ["session_id", "position"]

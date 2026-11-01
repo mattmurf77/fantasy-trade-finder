@@ -3183,6 +3183,11 @@ grading_cards_table = Table("grading_cards", metadata,
     Column("skipped",    Integer, nullable=False, server_default="0"),
     Column("tags_json",  Text,    nullable=False, server_default="[]"),
     Column("graded_at",  String),                       # ISO UTC of the latest answer
+    # HIDDEN, never served: the card's partner (league_members.user_id), so an
+    # account deletion's scrub finds the person's cards by id (#562 QA P1-2: a
+    # built session keeps no partner ids anywhere else). NULL on cards built
+    # before it; the scrub traces those another way.
+    Column("partner_user_id", String),
     UniqueConstraint("session_id", "position", name="uq_grading_card_position"),
     Index("ix_grading_cards_session", "session_id"),
 )
@@ -4039,6 +4044,8 @@ def _migrate_db() -> None:
         # ── the deletion scrub, stage 3: the person's names per league (a
         # Calibration card names its partner by display name).
         ("deletion_scrub_jobs", "partner_names_json",       "TEXT"),
+        # ── #562 QA P1-2: a Calibration card's partner, for the scrub.
+        ("grading_cards",      "partner_user_id",           "VARCHAR"),
     ]
     # Only missing columns get an ALTER, each in its own transaction so a
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the

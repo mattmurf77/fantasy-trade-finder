@@ -192,17 +192,25 @@ def notification(conn, title, meta, user=VIEWER):
 
 
 def test_notifications_naming_the_person_take_the_placeholder_and_the_token(engine):
-    """A match / disposition notification names its partner by username
-    (unique) in its title and metadata: it takes the placeholder there, and
-    any id in its metadata the token. A display name is never matched: it
-    could be someone else's username."""
+    """A match / disposition notification names its partner in its title and
+    metadata: by username (unique, matched anywhere); by display name (the
+    second liker's copy, #562 QA P2-2), matched only for a recipient who shared
+    a league with the person, since a display name could be someone else's; or
+    by a raw id when they had neither. That name, and any "@<id>", take the
+    placeholder, and any id in the metadata the token."""
     name_people(engine)
     with engine.begin() as conn:
+        u = db.users_table
+        conn.execute(update(u).where(u.c.sleeper_user_id == DEL).values(username="renée"))
         notification(conn, "Trade match with @deluser", {"partner_username": "deluser", "match_id": 1})
         notification(conn, "@deluser accepted your trade", {"partner_username": "deluser"})
         notification(conn, "Trade match with @otheruser", {"partner_username": "otheruser"})
-        notification(conn, "Trade match with @Del Name", {"partner_username": "Del Name"})  # another person
+        notification(conn, "Trade match with @Del Name", {"partner_username": "Del Name"})  # a leaguemate's copy
         notification(conn, "Counter offer", {"partner_user_id": DEL})
+        notification(conn, f"Trade match with @{DEL}", {"partner_username": DEL})       # no names at all
+        notification(conn, "Trade match with @renée", {"partner_username": "renée"})   # stored as \u escapes
+        notification(conn, "Trade match with @Del Name", {"partner_username": "Del Name"},
+                     user="stranger")                                                   # shares no league
     accounts.delete_user_data(DEL)
     token = job(engine)["token"]
     scrub.run_pending()
@@ -212,8 +220,11 @@ def test_notifications_naming_the_person_take_the_placeholder_and_the_token(engi
         (f"Trade match with @{PLACEHOLDER}", {"partner_username": PLACEHOLDER, "match_id": 1}),
         (f"@{PLACEHOLDER} accepted your trade", {"partner_username": PLACEHOLDER}),
         ("Trade match with @otheruser", {"partner_username": "otheruser"}),
-        ("Trade match with @Del Name", {"partner_username": "Del Name"}),
+        (f"Trade match with @{PLACEHOLDER}", {"partner_username": PLACEHOLDER}),
         ("Counter offer", {"partner_user_id": token}),
+        (f"Trade match with @{PLACEHOLDER}", {"partner_username": PLACEHOLDER}),
+        (f"Trade match with @{PLACEHOLDER}", {"partner_username": PLACEHOLDER}),
+        ("Trade match with @Del Name", {"partner_username": "Del Name"}),
     ]
 
 
@@ -262,3 +273,46 @@ def test_a_job_unfinished_after_30_days_is_deleted_and_eng_told(engine, caplog, 
     (line,) = [r.getMessage() for r in caplog.records if "abandoned" in r.getMessage()]
     assert line == "[scrub] abandoned jobs=1 after_days=30 last_errors={'row_failures': 1}"
     assert DEL not in caplog.text and "second-person" not in caplog.text
+
+
+def test_a_pass_that_straddles_the_grace_is_not_the_grace_pass(engine, monkeypatch):
+    """#562 QA P2-3: a resumable pass that started before IN_FLIGHT_GRACE and
+    ended after it counted as the grace pass, so a deck row written in flight
+    after its store's scan was never scrubbed and the job was deleted. The
+    pass's start is its db_done_at now: the grace pass still runs."""
+    from backend.eval import redaction
+    from backend.tests.test_deletion_scrub import features_for
+    monkeypatch.setattr(redaction, "redact_model_store", lambda tokens: 0)
+    monkeypatch.setattr(scrub, "_SCAN_BATCH", 1)
+    monkeypatch.setattr(scrub, "_SCAN_PAGES_PER_RUN", 2)
+    with engine.begin() as conn:
+        conn.execute(insert(db.user_events_table), [
+            {"user_id": VIEWER, "event_type": "x", "occurred_at": EARLY, "props": json.dumps({"i": i})}
+            for i in range(200)])                        # a long last scan
+    accounts.delete_user_data(DEL)
+    deleted = datetime.fromisoformat(job(engine)["deleted_at"])
+    start = t = deleted + timedelta(minutes=1)
+    wrote = False
+    while not scrub.run_pending(t):
+        state = json.loads(job(engine)["scan_json"] or "null")
+        if not wrote and state and state["scan"] >= 2:   # deck_impressions' scan is behind it
+            with engine.begin() as conn:
+                conn.execute(insert(db.deck_impressions_table).values(
+                    impression_id="late-9", user_id=VIEWER, league_id=LEAGUE, deck_job_id="deck-9",
+                    card_index=9, trade_hash="hlate", propensity=1.0,
+                    served_at=(deleted + timedelta(minutes=5)).isoformat(),
+                    features_json=json.dumps(features_for(DEL))))
+            wrote = True
+        t += timedelta(minutes=5)
+    assert wrote and t > deleted + scrub.IN_FLIGHT_GRACE           # it ended past the grace
+    row = job(engine)
+    assert datetime.fromisoformat(row["db_done_at"]) == start      # its start, not its end
+    assert scrub._db_due(row, t) and scrub._finish(t) == 0
+    grace_start = t
+    while not scrub.run_pending(t):                                # the grace pass, resumed
+        t += timedelta(minutes=5)
+    assert datetime.fromisoformat(job(engine)["db_done_at"]) == grace_start
+    (late,) = [r for r in read(engine, db.deck_impressions_table) if r["impression_id"] == "late-9"]
+    assert DEL not in late["features_json"]
+    scrub.tick(t + timedelta(minutes=1))
+    assert read(engine, db.deletion_scrub_jobs_table) == []

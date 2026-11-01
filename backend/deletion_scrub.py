@@ -936,87 +936,189 @@ def _scan_page_store(job: dict, after: str, budget: "_Budget") -> tuple[str | No
 
 # ── Calibration (grading_sessions / grading_cards) and diagnostics ──────────
 
-def _redact_grading_session(conn, session: dict, job: dict) -> int:
-    """One other user's Calibration session. Its hidden source names the
-    current arm's partners by id (→ the token). A card is the person's when
-    the source's current arm lists it with a deleted partner id, or when it
-    names them by one of their names (that league's, or, where the source
-    shows they were a partner but no names were captured, any of theirs):
-    its partner_name becomes the placeholder. Returns the cards changed."""
-    ids, token = set(job["ids"]), job["token"]
-    by_league = (job.get("names") or {}).get("leagues") or {}
-    names = set(by_league.get(session["league_id"], ()))
-    gs, gc = db.grading_sessions_table, db.grading_cards_table
+# A redacted Calibration card's arm fields computed from the partner's board or
+# window (#562 QA P1-1, legal R28.20 (ii) c2 and R28.22 b2's uniformity): the
+# fit arms' gain on the partner's own board, and the value-core arm's reasons
+# ("they rank X at 1.4× market", "Fits their rebuild"). Removed from every arm
+# of every redacted card, as a redacted page card loses `reasons`.
+_GRADING_ARM_KEYS_REMOVED = ("gain_partner", "reasons")
+
+
+class _GradingContext:
+    """Per run: the person's names to match, and each league's remaining
+    members' names (a name another member still uses is never theirs)."""
+
+    def __init__(self, conn, job: dict):
+        self.conn, self.ids, self.token = conn, set(job["ids"]), job["token"]
+        names = job.get("names") or {}
+        self.by_league = {lg: set(ns) for lg, ns in (names.get("leagues") or {}).items()}
+        self.every = {n for ns in self.by_league.values() for n in ns} | set(names.get("usernames") or ())
+        self._taken: dict[str, set] = {}
+        self._partners: dict[str, object] = {}
+
+    def names(self, league_id: str) -> set:
+        """The person's names that a card in this league can mean: that
+        league's captured names, or, in a league they had left (none
+        captured), any of theirs; minus any a remaining member uses."""
+        mine = self.by_league.get(league_id) or self.every
+        if league_id not in self._taken:
+            m = db.league_members_table
+            self._taken[league_id] = {n for row in self.conn.execute(
+                select(m.c.display_name, m.c.username).where(
+                    m.c.league_id == league_id, m.c.user_id.notin_(sorted(self.ids))))
+                for n in row if n}
+        return mine - self._taken[league_id]
+
+    def deck_partner(self, impression_id) -> object:
+        """A current-arm card's deck row partner (features_json), for cards
+        built before grading_cards.partner_user_id existed."""
+        if not isinstance(impression_id, str):
+            return None
+        if impression_id not in self._partners:
+            imp = db.deck_impressions_table
+            raw = self.conn.execute(select(imp.c.features_json).where(
+                imp.c.impression_id == impression_id)).scalar()
+            features = _loads(raw)
+            self._partners[impression_id] = (features.get("partner_user_id")
+                                             if isinstance(features, dict) else None)
+        return self._partners[impression_id]
+
+
+def _grading_card_is_theirs(card: dict, trade, arms, league_id: str, ctx: _GradingContext) -> bool:
+    pid = card.get("partner_user_id")
+    if pid is not None:
+        return pid in ctx.ids
+    # Built before the column: the current arm's deck row, a raw id shown as
+    # the name (a member with neither name), or one of their names here.
+    current = arms.get("current") if isinstance(arms, dict) else None
+    partner = ctx.deck_partner(current.get("impression_id")) if isinstance(current, dict) else None
+    if partner in ctx.ids or partner == ctx.token:
+        return True
+    name = trade.get("partner_name") if isinstance(trade, dict) else None
+    return name in ctx.ids or (isinstance(name, str) and name in ctx.names(league_id))
+
+
+def _relabel_picks(side, names: set):
+    """A traded pick's label names its original owner ("2027 1st (from Kim)"):
+    one of the person's names becomes the placeholder, on any card (#562 QA P2-4)."""
+    if not isinstance(side, list):
+        return side
+    out = []
+    for asset in side:
+        label = asset.get("name") if isinstance(asset, dict) else None
+        if isinstance(label, str) and label.endswith(")") and " (from " in label:
+            base, _, who = label[:-1].rpartition(" (from ")
+            if who in names:
+                asset = {**asset, "name": f"{base} (from {_PLACEHOLDER})"}
+        out.append(asset)
+    return out
+
+
+def _redact_grading_card(conn, card: dict, league_id: str, ctx: _GradingContext) -> bool:
+    """One card of another user's Calibration session. The person's card
+    (partner_user_id, or for an older card its deck row or name) takes the
+    placeholder as partner_name and the token as partner_user_id, and loses its
+    arms' partner fields. Any card: their traded-pick labels and any id."""
+    gc = db.grading_cards_table
+    trade, arms = _loads(card["trade_json"]), _loads(card["arms_json"])
+    theirs = _grading_card_is_theirs(card, trade, arms, league_id, ctx)
+    values = {}
+    if isinstance(trade, dict):
+        new = {**trade, **{side: _relabel_picks(trade.get(side), ctx.names(league_id))
+                           for side in ("give", "receive") if side in trade}}
+        if theirs:
+            new["partner_name"] = _PLACEHOLDER
+        if new != trade:
+            values["trade_json"] = json.dumps(new, sort_keys=True)
+    if isinstance(arms, dict):
+        new_arms = {arm: ({k: v for k, v in prov.items() if k not in _GRADING_ARM_KEYS_REMOVED}
+                          if theirs and isinstance(prov, dict) else prov)
+                    for arm, prov in arms.items()}
+        new_arms = _replace_ids(new_arms, ctx.ids, ctx.token)
+        if new_arms != arms:
+            values["arms_json"] = json.dumps(new_arms, sort_keys=True)
+    if theirs and card.get("partner_user_id") != ctx.token:
+        values["partner_user_id"] = ctx.token
+    if values:
+        conn.execute(update(gc).where(gc.c.card_id == card["card_id"]).values(**values))
+    return bool(values)
+
+
+def _redact_grading_source(conn, session: dict, ctx: _GradingContext) -> None:
+    """A session still building keeps its selected cards' partner ids in its
+    hidden source (a built one keeps none): the token."""
+    gs = db.grading_sessions_table
     source = _loads(session["source_json"])
-    theirs = set()
-    if isinstance(source, dict):
-        current = (source.get("current") or {}).get("cards") or []
-        theirs = {(frozenset(c.get("give") or ()), frozenset(c.get("receive") or ()))
-                  for c in current if isinstance(c, dict) and c.get("partner_id") in ids}
-        if theirs and not names:
-            # A league the person had left (no names captured there), but the
-            # session's own source shows they were a partner in it: their
-            # names from every league.
-            names = {n for ns in by_league.values() for n in ns}
-        new = _replace_ids(source, ids, token)
+    if isinstance(source, (dict, list)):
+        new = _replace_ids(source, ctx.ids, ctx.token)
         if new != source:
             conn.execute(update(gs).where(gs.c.session_id == session["session_id"])
                          .values(source_json=json.dumps(new, sort_keys=True)))
-    changed = 0
-    for card in conn.execute(select(gc.c.card_id, gc.c.trade_json, gc.c.arms_json).where(
-            gc.c.session_id == session["session_id"])).mappings():
-        trade, arms = _loads(card["trade_json"]), _loads(card["arms_json"])
-        values = {}
-        if isinstance(trade, dict):
-            key = (frozenset(a.get("id") for a in trade.get("give") or () if isinstance(a, dict)),
-                   frozenset(a.get("id") for a in trade.get("receive") or () if isinstance(a, dict)))
-            if key in theirs or trade.get("partner_name") in names:
-                if trade.get("partner_name") != _PLACEHOLDER:
-                    values["trade_json"] = json.dumps({**trade, "partner_name": _PLACEHOLDER},
-                                                      sort_keys=True)
-        if isinstance(arms, dict):
-            new_arms = _replace_ids(arms, ids, token)
-            if new_arms != arms:
-                values["arms_json"] = json.dumps(new_arms, sort_keys=True)
-        if values:
-            conn.execute(update(gc).where(gc.c.card_id == card["card_id"]).values(**values))
-            changed += 1
-    return changed
+
+
+_GRADING_CARD_COLUMNS = ("card_id", "session_id", "partner_user_id", "trade_json", "arms_json")
 
 
 def _scrub_grading(job: dict) -> int:
-    """The league pass over Calibration sessions in the captured leagues."""
-    gs = db.grading_sessions_table
+    """The league pass: every card of other users' Calibration sessions in the
+    person's captured leagues, up to the job's cutoff."""
+    gs, gc = db.grading_sessions_table, db.grading_cards_table
     changed = 0
     _renew(job)
     with db.engine.begin() as conn:
+        ctx = _GradingContext(conn, job)
         for session in conn.execute(select(gs.c.session_id, gs.c.league_id, gs.c.source_json).where(
                 gs.c.league_id.in_(job["leagues"]), gs.c.created_at <= job["cutoff"],
                 gs.c.user_id.notin_(sorted(job["ids"])))).mappings().all():
-            changed += _redact_grading_session(conn, session, job)
+            _redact_grading_source(conn, session, ctx)
+            for card in conn.execute(select(*[gc.c[c] for c in _GRADING_CARD_COLUMNS]).where(
+                    gc.c.session_id == session["session_id"])).mappings().all():
+                changed += _redact_grading_card(conn, card, session["league_id"], ctx)
     return changed
 
 
 def _scan_grading(job: dict, after: str, budget: "_Budget") -> tuple[str | None, int]:
-    """The fallback scan of Calibration sessions whose source names an id (a
-    league the person had left)."""
+    """The fallback scan, for leagues the person had left (the league pass
+    covers the captured ones): cards whose partner is a deleted id, or that
+    name them by id or by one of their names, and sessions whose hidden
+    source names an id."""
     ids = set(job["ids"])
-    gs = db.grading_sessions_table
+    gs, gc = db.grading_sessions_table, db.grading_cards_table
+    names = {n for ns in ((job.get("names") or {}).get("leagues") or {}).values() for n in ns}
+    names |= set((job.get("names") or {}).get("usernames") or ())
+    terms = sorted(ids | names)
+    hit = or_(gc.c.partner_user_id.in_(sorted(ids)),
+              *[gc.c.trade_json.contains(t, autoescape=True) for t in terms],
+              *[gc.c.trade_json.contains(json.dumps(t)[1:-1], autoescape=True)
+                for t in terms if json.dumps(t)[1:-1] != t],
+              _mentions(gc.c.arms_json, ids))
     changed = 0
     while budget.take():
         with db.engine.begin() as conn:
-            rows = conn.execute(select(gs.c.session_id, gs.c.league_id, gs.c.source_json,
-                                       _mentions(gs.c.source_json, ids).label("hit")).where(
-                gs.c.session_id > after, gs.c.created_at <= job["cutoff"],
-                gs.c.user_id.notin_(sorted(ids)),
-            ).order_by(gs.c.session_id).limit(_SCAN_BATCH)).mappings().all()
+            ctx = _GradingContext(conn, job)
+            rows = conn.execute(select(*[gc.c[c] for c in _GRADING_CARD_COLUMNS], gs.c.league_id,
+                                       gs.c.source_json, hit.label("hit")).join(
+                gs, gs.c.session_id == gc.c.session_id).where(
+                gc.c.card_id > after, gs.c.created_at <= job["cutoff"],
+                gs.c.user_id.notin_(sorted(ids)), gs.c.league_id.notin_(job["leagues"]),
+            ).order_by(gc.c.card_id).limit(_SCAN_BATCH)).mappings().all()
             if not rows:
-                return None, changed
+                break
             for row in rows:
                 if row["hit"]:
-                    changed += _redact_grading_session(conn, row, job)
-        after = rows[-1]["session_id"]
-    return after, changed
+                    changed += _redact_grading_card(conn, row, row["league_id"], ctx)
+        after = rows[-1]["card_id"]
+    else:
+        return after, changed
+    # Sessions still building (no cards yet) in a league the person left.
+    with db.engine.begin() as conn:
+        ctx = _GradingContext(conn, job)
+        for session in conn.execute(select(gs.c.session_id, gs.c.source_json).where(
+                gs.c.status == "building", gs.c.created_at <= job["cutoff"],
+                gs.c.user_id.notin_(sorted(ids)), gs.c.league_id.notin_(job["leagues"]),
+                _mentions(gs.c.source_json, ids))).mappings().all():
+            _redact_grading_source(conn, session, ctx)
+    return None, changed
 
 
 # Diagnostics expire at 14 days (FTF_DECK_DIAGNOSTIC_RETENTION_DAYS); one
@@ -1048,22 +1150,28 @@ def _scan_diagnostics(job: dict, after: str, budget: "_Budget") -> tuple[str | N
 # #557 QA): a match / disposition notification names its partner by username
 # in its title, body and metadata; an event's props can carry a partner id.
 
-def redact_notification(row: dict, ids, token: str, usernames) -> dict | None:
+def redact_notification(row: dict, ids, token: str, usernames, display_names=()) -> dict | None:
     """One other user's notification, or None when it doesn't name the person.
-    It's theirs when its metadata names them by username (unique) or holds one
-    of their ids: their username becomes the placeholder in the title, body
-    and metadata, and every id the token."""
+    It's theirs when its metadata names them as the partner (by username, which
+    is unique; by display name, which the second liker's copy uses, only where
+    the caller passed them: a recipient who shared a league with the person; or
+    by a raw id, a member with neither name) or holds one of their ids. That
+    name and any "@<id>" become the placeholder in the title and body, the
+    metadata's partner name the placeholder, and every id the token."""
     meta = _loads(row["metadata_json"]) if isinstance(row["metadata_json"], str) else None
     meta = meta if isinstance(meta, dict) else {}
-    named = meta.get("partner_username") in usernames
+    ids = set(ids)
+    partner = meta.get("partner_username")
+    named = isinstance(partner, str) and (partner in usernames or partner in display_names
+                                          or partner in ids)
     text_ids = any(pid in (row["metadata_json"] or "") for pid in ids)
     if not named and not text_ids:
         return None
     title, body = row["title"] or "", row["body"] or ""
-    for name in (usernames if named else ()):
+    for name in ({partner} if named else set()) | ids:
         title = title.replace(f"@{name}", f"@{_PLACEHOLDER}")
         body = body.replace(f"@{name}", f"@{_PLACEHOLDER}")
-    new_meta = _replace_ids(meta, set(ids), token)
+    new_meta = _replace_ids(meta, ids, token)
     if named:
         new_meta["partner_username"] = _PLACEHOLDER
     return {"title": title if row["title"] is not None else None,
@@ -1073,14 +1181,22 @@ def redact_notification(row: dict, ids, token: str, usernames) -> dict | None:
 
 def _scan_notifications(job: dict, after: str, budget: "_Budget") -> tuple[str | None, int]:
     ids, token = set(job["ids"]), job["token"]
-    usernames = set((job.get("names") or {}).get("usernames") or ())
-    t = db.notifications_table
-    terms = sorted(ids) + [f'"partner_username": "{n}"' for n in sorted(usernames)]
+    names = job.get("names") or {}
+    usernames = set(names.get("usernames") or ())
+    display_names = {n for ns in (names.get("leagues") or {}).values() for n in ns}
+    t, m = db.notifications_table, db.league_members_table
+    # Matched raw and as json.dumps writes it (a non-ASCII name as \u escapes).
+    terms = sorted(ids) + sorted({f'"partner_username": {form}'
+                                  for n in usernames | display_names
+                                  for form in (json.dumps(n), f'"{n}"')})
     hit = or_(*[t.c.metadata_json.contains(term, autoescape=True) for term in terms])
+    with db.engine.connect() as conn:
+        mates = set(conn.execute(select(m.c.user_id).where(
+            m.c.league_id.in_(job["leagues"]), m.c.user_id.notin_(sorted(ids)))).scalars())
     changed, cursor = 0, int(after or 0)
     while budget.take():
         with db.engine.begin() as conn:
-            rows = conn.execute(select(t.c.id, t.c.title, t.c.body, t.c.metadata_json,
+            rows = conn.execute(select(t.c.id, t.c.user_id, t.c.title, t.c.body, t.c.metadata_json,
                                        hit.label("hit")).where(
                 t.c.id > cursor, t.c.user_id.notin_(sorted(ids)),
             ).order_by(t.c.id).limit(_SCAN_BATCH)).mappings().all()
@@ -1090,7 +1206,8 @@ def _scan_notifications(job: dict, after: str, budget: "_Budget") -> tuple[str |
                 if not row["hit"]:
                     continue
                 try:
-                    values = redact_notification(row, ids, token, usernames)
+                    values = redact_notification(row, ids, token, usernames,
+                                                 display_names if row["user_id"] in mates else ())
                 except Exception as err:   # a poison row: counted, the pass not done
                     _row_failed(job, "notifications", err)
                     continue
@@ -1269,8 +1386,11 @@ def _run_db(job: dict, now: datetime) -> bool:
             for name, scrub in _STORES:
                 lease.renew()
                 counts[name] = scrub(job)
+            # The pass's start, kept with its cursor: it covers what was
+            # written before it began, so db_done_at is this, never the end
+            # of a pass that ran across the grace (#562 QA P2-3).
             state = {"version": SCRUB_VERSION, "scan": 0, "after": "", "counts": counts,
-                     "failures": 0}
+                     "failures": 0, "started_at": _iso(now)}
         budget = _Budget(_SCAN_PAGES_PER_RUN, lease)
         after = None
         while state["scan"] < len(_SCANS):
@@ -1301,8 +1421,8 @@ def _run_db(job: dict, now: datetime) -> bool:
         log.warning("[scrub] job=%s pass had %d failed row redactions; retried in %s",
                     _short(job["job_id"]), state["failures"], _ROW_FAILURE_BACKOFF)
         return False
-    values = dict(db_version=SCRUB_VERSION, db_done_at=_iso(now), scan_json=None,
-                  claimed_until=None, last_error=None)
+    values = dict(db_version=SCRUB_VERSION, db_done_at=state.get("started_at") or _iso(now),
+                  scan_json=None, claimed_until=None, last_error=None)
     if 0 < job["db_version"] < SCRUB_VERSION:
         values["model_done_at"] = None    # a new version: the model store again too
     if not lease.write(**values):
