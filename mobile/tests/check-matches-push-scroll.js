@@ -131,6 +131,8 @@ eq('U-4d fresh mount (average 0, nothing measured) → no jump; the retry waits 
   const fv = new Set(['a', 'b', 'c']);
   eq('U-6a row 0 at the list top (16pt padding ≥ 8) → in view, no scroll',
     alreadyInView(0, 'a', null, fv, 0, 16, 8), true);
+  eq('U-6a2 row 0 exactly 8pt from the edge (16 − 8 = 8) → in view (the ≥ boundary)',
+    alreadyInView(0, 'a', null, fv, 8, 16, 8), true);
   eq('U-6b row 0 scrolled 10pt (top 6pt from the edge) → scroll, or the top stroke clips',
     alreadyInView(0, 'a', null, fv, 10, 16, 8), false);
   eq('U-6c a row whose row above is fully visible → in view',
@@ -280,6 +282,8 @@ assert(/scrollTriesRef\.current \+= 1; const willRetry = scrollTriesRef\.current
 assert(/retryTimerRef\.current = setTimeout\(\(\) => \{[\s\S]*try \{ matchesListRef\.current\?\.scrollToIndex\(\{ index: info\.index, animated: true, viewPosition: 0, viewOffset: ARRIVAL_VIEW_OFFSET, \}\); \} catch[\s\S]*\}, ARRIVAL_RETRY_MS\);/.test(FAILED),
   'P-9e the retry is scrollToIndex after layout, with the same viewOffset, guarded (a list change never throws)');
 assert(/scrollTriesRef\.current = 0;/.test(FOUND), 'P-9f each arrival gets its own retry budget');
+assert(/retryTimerRef\.current = setTimeout\(\(\) => \{\s*ignoreSettleRef\.current = false;\s*const ts = markRef\.current\?\.ts;\s*if \(ts\) armSettleFallback\(ts\);\s*try \{/.test(FAILED),
+  'P-9i each retry re-arms the settle fallback before it scrolls (a 3rd+ try never marks before the row lands)');
 assert(/finishArrival\(\); clearMarkTimers\(\); markRef\.current = \{ ts: arrivalTs, shown: false \};/.test(FOUND),
   'P-9h (N-25) the found path clears an earlier arrival\'s timers before arming its own (an old retry can\'t scroll to the old index)');
 

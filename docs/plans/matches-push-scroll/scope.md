@@ -231,7 +231,8 @@ This follows ux-states §7, with release-lead's QA additions on #568.
    - Leave Matches on Awaiting, with the chip on the other league.
    - Tap the push: Mutual opens, the chip goes to All, and the card is scrolled to and outlined.
 3. **Right chip:** with the chip on the match's own league, tap the push. The chip stays. If the card is already fully in
-   view, the list doesn't move and the outline shows at once.
+   view and the card above it is fully in view too (or it's the first card, unscrolled), the list doesn't move and the
+   outline shows at once.
 4. **Long list:**
    - **4a. Warm:** with Matches already open on Mutual and the chip on All, tap the push for a row ≥ 6. It scrolls so the
      row's top, its league badge, lands 8pt below the list's top, outlined.
