@@ -1055,8 +1055,11 @@ export default function ShopOffersBody({
                           surface="shop"
                           // release-lead P2-1: the idea's own impression, as
                           // the deck passes its card's, so a Shop send records
-                          // the `propose` outcome (the server checks ownership
-                          // and the package). F1 spine only.
+                          // the `propose` outcome. The server checks only that
+                          // the impression is the caller's (no package hash);
+                          // a Shop tile can't be edited, so the package sent is
+                          // the idea's. F1 spine only, and only owner-path ideas
+                          // carry one.
                           impressionId={signalV2On ? item.impression_id : undefined}
                           compact
                         />

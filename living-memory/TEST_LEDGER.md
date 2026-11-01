@@ -11,9 +11,9 @@ Gates: the scope block `docs/plans/shop-platform-send/scope.md`. Analytics: the 
 - **Code-walk:** `docs/plans/shop-platform-send/code-walk.md`, Sleeper, MFL and ESPN from the tap to the platform write, file:line-cited.
   - Stated plainly: Sleeper has no outcome-unknown state (a timeout shows "Couldn't send", as on every mount), while MFL and ESPN have it.
   - Only the Sleeper send events carry `surface`.
-- **TestFlight checklist:** `docs/plans/shop-platform-send/testflight.md`, 7 steps, including ESPN with a pick (`espn_pick_unsupported`, its exact alert quoted).
+- **TestFlight checklist:** `docs/plans/shop-platform-send/testflight.md`, 8 steps (7 at first), including ESPN with a pick (`espn_pick_unsupported`, its exact alert quoted).
 - **Runs:** `tsc --noEmit` is clean, all 136 `check-*.js` suites pass, testid-lint is green, and the analytics backend tests pass 138.
-- **P2-1, the idea's impression** (release-lead; head-eng 11-01): the Shop send passes `impressionId={signalV2On ? item.impression_id : undefined}`, the deck's rule, so a Shop send records the `propose` outcome. `check-shop-send.js` now has 31 checks; the 2 new ones fail on 1f278727. Merge hold: analytics-lead's OK on `from_deck: true` for Shop.
+- **P2-1, the idea's impression** (release-lead; head-eng 11-01): the Shop send passes `impressionId={signalV2On ? item.impression_id : undefined}`, the deck's rule, so a Shop send records the `propose` outcome. `check-shop-send.js` now has 31 checks; the 2 new ones fail on 1f278727. analytics-lead OK'd `from_deck: true` for Shop (11-01). Only owner-path ideas carry an impression.
 - **release-lead's QA notes at b6b55cfe (GO-with-notes):**
   - stale Shop-queue wording fixed in the taxonomy and queries comments, `features.json`'s comment, config-reference, `components/CLAUDE.md` and check-trade-text's title;
   - the `calc_trade_queued` addendum line added;

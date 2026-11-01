@@ -71,6 +71,10 @@ check('only the QueueToast type is imported from queueCalcTrade',
 const queueImports = shop.match(/^import[^;]*from '\.\.\/utils\/queueCalcTrade';/gm) || [];
 check('queueCalcTrade is imported once, as a type only (no value import, no alias)',
   queueImports.length === 1 && /^import type /.test(queueImports[0]), queueImports.join(' | '));
+check('no require() of the queue helper (no aliased value import)',
+  !/require\(\s*['"][^'"]*queueCalcTrade['"]\s*\)/.test(shop));
+check('the queue API (queueTradeForOpponent → POST /api/trades/queue) is neither imported nor called',
+  !/\bqueueTradeForOpponent\b/.test(shop));
 
 // The ✕ dismiss is unchanged.
 check('the ✕ dismiss still dispatches handleDismiss',
