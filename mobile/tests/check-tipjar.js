@@ -337,7 +337,8 @@ const beServer = read(BE_SERVER);
     //      #575): a verified → unverified / demo / unknown (a user change) /
     //      signed-out transition removes ['paywall-config'] ONCE; verified →
     //      verified never does; it never fires while the observer is enabled,
-    //      and further not-verified renders don't repeat it (no loop).
+    //      and further not-verified renders don't repeat it (no loop). Sign-out
+    //      is two sets: user null with verification true is still verified.
     const verifiedS = { isDemo: false, verification: { session_verified: true }, user: sleeper };
     const drops = [
       ['unverified', { isDemo: false, verification: { session_verified: false }, user: sleeper }],
@@ -353,16 +354,26 @@ const beServer = read(BE_SERVER);
     };
     const keep = sequence([verifiedS, verifiedS, verifiedS]);
     if (keep.length !== 0) problems.push(`verified → verified removed ${keep.length}x`);
+    const exactOnce = (r) => r.length === 1 && r[0].enabled === false
+      && JSON.stringify(r[0].filter) === JSON.stringify({ queryKey: ['paywall-config'] });
     drops.forEach(([name, st]) => {
       const r = sequence([verifiedS, st, st]);
-      const exact = r.length === 1 && JSON.stringify(r[0].filter) === JSON.stringify({ queryKey: ['paywall-config'] })
-        && r[0].enabled === false;
-      if (!exact) problems.push(`verified → ${name}: ${JSON.stringify(r)}`);
+      if (!exactOnce(r)) problems.push(`verified → ${name}: ${JSON.stringify(r)}`);
     });
+    // useSession.signOut's two sets: the first nulls the user but leaves
+    // verification true, which subscriptionSessionState still calls verified
+    // (no removal); the second nulls verification, which removes it once. An
+    // effect keyed on `user` instead of `verified` fails here.
+    const midSignOut = { isDemo: false, verification: { session_verified: true }, user: null };
+    const signedOut = { isDemo: false, verification: null, user: null };
+    const mid = sequence([verifiedS, midSignOut, midSignOut]);
+    if (mid.length !== 0) problems.push(`sign-out's first set (user null, verified) removed ${mid.length}x`);
+    const full = sequence([verifiedS, midSignOut, signedOut, signedOut]);
+    if (!exactOnce(full)) problems.push(`sign-out's second set (verification null): ${JSON.stringify(full)}`);
     if (problems.length === 0) {
-      ok("8h. not verified ⇒ ['paywall-config'] removed once (unverified / demo / user change / signed out); verified → verified keeps it; no loop");
+      ok("8h. not verified ⇒ ['paywall-config'] removed once (unverified / demo / user change / signed out); verified → verified and sign-out's first set keep it; no loop");
     } else {
-      bad("8h. not verified ⇒ ['paywall-config'] removed once (unverified / demo / user change / signed out); verified → verified keeps it; no loop",
+      bad("8h. not verified ⇒ ['paywall-config'] removed once (unverified / demo / user change / signed out); verified → verified and sign-out's first set keep it; no loop",
         problems.join('; '));
     }
   }

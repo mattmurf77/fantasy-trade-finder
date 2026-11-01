@@ -20,9 +20,12 @@ import { subscriptionSessionState } from './subscriptionSession';
 //
 // Not verified ⇒ the entry is REMOVED (release-lead QA on #575): nothing else
 // clears it, and gcTime is 30 min, so a demo or unverified session started in
-// the same process would otherwise read a verified session's `tips[]`. A
-// sign-out (user null) and a user change (verification back to unknown) both
-// land here; keyed on `verified` alone, so it runs once per drop (or on a
+// the same process would otherwise read a verified session's `tips[]`. A user
+// change (verification back to unknown) lands here. So does a sign-out, but
+// not at its first `set`: a null user with `session_verified` true still
+// counts as verified. The clear comes from sign-out's second `set`
+// (verification → null), or from the next `Main` mount if `Main` unmounts in
+// between. Keyed on `verified` alone, so it runs once per drop (or on a
 // not-verified mount), never while this observer is enabled, and never loops.
 
 export function useWarmPaywallConfig(): void {
