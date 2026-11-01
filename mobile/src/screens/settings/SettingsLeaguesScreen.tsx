@@ -24,16 +24,23 @@
 //   on banner 1 covers the case where the card is the whole section.
 //
 // Data (plan §6): this page owns ['sleeper-link'], ['espn-link'], ['mfl-link'],
-// all three inside PlatformDisconnectSection. Nothing is fetched at the hub.
+// all three inside PlatformDisconnectSection, and D1's
+// ['platform-write-consent', platform] (RosterMovesRow below). Nothing is
+// fetched at the hub.
 
-import React, { useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, ScrollView, StyleSheet, Text, View, findNodeHandle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { TickLabel } from '../../components/chalkline';
+import { Button, TickLabel } from '../../components/chalkline';
 import FeedbackFAB from '../../components/FeedbackFAB';
 import Toast from '../../components/Toast';
+import { getConsent, withdrawConsent, type LeaguePlatform } from '../../api/faMove';
+import { isEspnLeague } from '../../api/espn';
+import { isMflLeague } from '../../api/platformLink';
 import { useSession } from '../../state/useSession';
+import { chalk, type } from '../../theme/chalkline';
 import { styles } from './styles';
 import LeaguesSection from './sections/LeaguesSection';
 import PlatformLinkSection from './sections/PlatformLinkSection';
@@ -42,6 +49,16 @@ import PlatformDisconnectSection from './sections/PlatformDisconnectSection';
 export default function SettingsLeaguesScreen({ navigation }: any) {
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
   const leagues = useSession((s) => s.leagues);
+  const isDemo = useSession((s) => s.isDemo);
+  const accountOnly = useSession((s) => !!s.user?.account_only);
+  // D1: one consent read per platform the user has a league on.
+  const movePlatforms: LeaguePlatform[] = isDemo
+    ? []
+    : [
+        ...(accountOnly ? [] : (['sleeper'] as const)),
+        ...(leagues.some((l) => isEspnLeague(l.league_id)) ? (['espn'] as const) : []),
+        ...(leagues.some((l) => isMflLeague(l.league_id)) ? (['mfl'] as const) : []),
+      ];
 
   // Plan §5 — this is a pushed page, not a modal, so the
   // `goBack() then navigate()` hack at SettingsScreen.tsx:227 is deliberately
@@ -62,6 +79,9 @@ export default function SettingsLeaguesScreen({ navigation }: any) {
           <TickLabel>Connected accounts</TickLabel>
         </View>
         <PlatformDisconnectSection onNotice={onNotice} navigate={navigate} />
+        {movePlatforms.map((p) => (
+          <RosterMovesRow key={p} platform={p} onNotice={onNotice} />
+        ))}
       </ScrollView>
       <Toast
         visible={!!toast}
@@ -73,3 +93,85 @@ export default function SettingsLeaguesScreen({ navigation }: any) {
     </SafeAreaView>
   );
 }
+
+// D1 — Stop roster moves (scope §C state 15; consent.md §4.4). Shown only
+// while the consent GET says a grant is active: a 404 (every platform's
+// server-side kill switch off, so on today's server) or any error renders
+// nothing.
+// One tap, no dialog (K-F7). The server's withdrawal notice (R15.2.6)
+// replaces the row verbatim and takes VoiceOver focus; the row goes.
+function RosterMovesRow({
+  platform,
+  onNotice,
+}: {
+  platform: LeaguePlatform;
+  onNotice: (msg: string, tone?: 'success' | 'warn') => void;
+}) {
+  const queryClient = useQueryClient();
+  const consentQuery = useQuery({
+    queryKey: ['platform-write-consent', platform],
+    queryFn: () => getConsent(platform),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const [stopping, setStopping] = useState(false);
+  const [stopped, setStopped] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeRef = useRef<View>(null);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => {
+      const node = noticeRef.current ? findNodeHandle(noticeRef.current) : null;
+      if (node != null) AccessibilityInfo.setAccessibilityFocus(node);
+    }, 150);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  async function stop() {
+    if (stopping) return;
+    setStopping(true);
+    try {
+      const out = await withdrawConsent(platform);
+      setStopped(true);
+      setNotice(typeof out?.notice === 'string' && out.notice ? out.notice : null);
+      queryClient.invalidateQueries({ queryKey: ['platform-write-consent', platform] });
+      // The claim sheet's capability (consent_until) rides on the FA read.
+      queryClient.invalidateQueries({ queryKey: ['free-agents'] });
+    } catch {
+      onNotice("Couldn't stop roster moves — try again.", 'warn');
+    } finally {
+      setStopping(false);
+    }
+  }
+
+  if (notice) {
+    return (
+      <View ref={noticeRef} accessible style={styles.row}>
+        <Text style={rosterMoveText.notice}>{notice}</Text>
+      </View>
+    );
+  }
+  const status = consentQuery.data;
+  if (stopped || status?.valid !== true) return null;
+  return (
+    <View style={styles.kvRow}>
+      <Text testID="settings.roster-moves.status" style={rosterMoveText.status}>
+        {status.status_line || 'Roster moves'}
+      </Text>
+      <Button
+        testID="settings.roster-moves.stop"
+        label={status.stop_label || 'Stop roster moves'}
+        variant="secondary"
+        compact
+        loading={stopping}
+        onPress={() => void stop()}
+      />
+    </View>
+  );
+}
+
+const rosterMoveText = StyleSheet.create({
+  status: { ...type.bodySm, color: chalk.dim, flex: 1 },
+  notice: { ...type.bodySm, color: chalk.base, flex: 1 },
+});
