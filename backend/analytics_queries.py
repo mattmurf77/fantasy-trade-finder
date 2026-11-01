@@ -409,6 +409,13 @@ NON_INTENT_EVENTS = frozenset({
     # its emitter): a server-fired outcome of each served page, on background
     # polls too. The serve's request already reflects the user's intent.
     "deck_i1_check",
+    # ── D1 free-agent moves, 2026-11-01 — added in the SAME commit as the
+    # emitters (mobile/src/api/faMove.ts; scope.md §1, granted with C1–C6).
+    # Both are EXPOSURES: a step the sheet showed, not a choice the user made.
+    # The decision is the named-CTA tap, `fa_move_write_attempted`, which
+    # stays INTENT with `fa_move_write_failed`.
+    "fa_move_connect_shown",
+    "fa_move_consent_shown",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

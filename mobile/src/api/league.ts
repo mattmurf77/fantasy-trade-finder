@@ -1,5 +1,6 @@
 import { api } from './client';
 import type { PickSource } from './pickAssignment';
+import type { FaMoveCapability, MoveKind } from './faMove';
 import type {
   ScoringFormat,
   ActivityEvent,
@@ -873,6 +874,12 @@ export interface FreeAgentRow {
    *  `value` was priced from (backend RankingService.tier_for_elo). Never
    *  re-derive a tier from `value` client-side. Absent on old servers. */
   tier?: Tier | null;
+  /** D1 (api/faMove.ts, contract §1): what the CTA would name; null = the
+   *  server can't tell. Absent on today's server. */
+  move_kind?: MoveKind | null;
+  /** D1: 'handoff' holds this row in the hand-off; `move_line` says why. */
+  move_mode?: string;
+  move_line?: string;
 }
 // #179 — roster-capacity context for the claim sheet. Sleeper leagues
 // only (null for platform/demo leagues); all fields best-effort — null
@@ -925,6 +932,9 @@ export interface FreeAgentsResponse {
   waivers?: FreeAgentWaivers | null;
   /** Absent on pre-claim-sheet servers. Sleeper leagues only. */
   drop_candidates?: FreeAgentDropCandidates | null;
+  /** D1: the league's move capability (api/faMove.ts). Absent on today's
+   *  server, and then every Add routes exactly as before. */
+  move?: FaMoveCapability | null;
 }
 export async function getFreeAgents(
   leagueId: string,
