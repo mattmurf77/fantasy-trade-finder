@@ -15,7 +15,6 @@ Nothing here makes a live write.
 """
 from __future__ import annotations
 
-import ast
 import base64
 import errno
 import http.client
@@ -23,7 +22,6 @@ import inspect
 import io
 import json
 import socket
-import textwrap
 import threading
 import time
 import urllib.error
@@ -33,7 +31,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import create_engine, insert, select
-from sqlalchemy.pool import StaticPool
 
 import backend.database as db_module
 import backend.server as server
@@ -226,8 +223,11 @@ _ABSENT = object()
 @pytest.fixture()
 def h(monkeypatch):
     monkeypatch.setenv("SLEEPER_TOKEN_KEY", Fernet.generate_key().decode())
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
+    # The default pool for an in-memory SQLite DB gives each thread its own
+    # connection. Never StaticPool here: the first request of a process starts
+    # the `win-now-resume` thread (server._ensure_background_threads), which
+    # would then share this test's one connection and race it.
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     db_module.metadata.create_all(engine)
     monkeypatch.setattr(db_module, "engine", engine)
     hz = Harness(monkeypatch, engine)

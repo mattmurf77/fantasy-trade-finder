@@ -17,7 +17,7 @@ import textwrap
 import backend.server as server
 from backend import analytics_queries, analytics_taxonomy, feature_flags
 from backend.tests.test_fa_move_route import (  # noqa: F401  (h is a fixture)
-    _ABSENT, SUCCEEDED_PROPS, TOKEN, V1, h,
+    SUCCEEDED_PROPS, TOKEN, h,
 )
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
