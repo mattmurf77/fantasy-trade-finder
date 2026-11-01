@@ -1,3 +1,34 @@
+## 2026-11-01 — Deletion scrub stage 3, release-lead's #562 QA (NO-GO, 2 Calibration P1s): fixed on the real build path
+
+Gates: release-lead's #562 QA. Schema: `grading_cards.partner_user_id` (hidden, nullable; added to existing tables at boot; data dictionary updated). No flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P1-2:** a built Calibration session keeps no partner ids (`final_source`), so the id match never fired on real data.
+  - `build_session` and `add_fit_arms` now write each card's partner to `grading_cards.partner_user_id`, and the scrub matches it.
+  - Older cards (the column NULL) are traced by the current arm's deck row, by a raw id shown as the name, or by one of the person's names in that league that no remaining member uses (QA P3: u4's display "kim").
+  - The league pass covers the captured leagues and the fallback scan (cards, joined to their session) only leagues they had left, so each is tested on its own.
+- **P1-1:** every arm of a redacted card loses `gain_partner` and `reasons`.
+- **P2-2 notifications:**
+  - display names are matched for recipients who shared a league;
+  - "@<id>" in titles becomes the placeholder;
+  - names are matched as `json.dumps` escapes them.
+- **P2-3:** `db_done_at` is the pass's start, kept in its cursor, so a pass across the grace isn't the grace pass.
+- **P2-4:** traded-pick labels "(from <their name>)" take the placeholder.
+- **P2-5:**
+  - the abandon line adds `stuck_at`;
+  - the data dictionary, runbook, module docstring and D-209 now describe the 30-day stop and its residue.
+- **P3:** diagnostics past the 14-day retention (not 30) that name the person are deleted.
+- **Tests:**
+  - `test_deletion_scrub_calibration.py`, 6 tests on the real `start_session` / `build_session` / `add_fit_arms` path (world adapted from QA's harness): the stored partner; every card by id (renamed, left league, nameless); older cards by deck row, raw id or a free name, with u4 kept; a left league by the scan; the cutoff and the owner filter; a stage-2 job re-run.
+  - In the stage 3 tests: the notification cases (a display name for a leaguemate and a stranger, the id-only "@<id>", "renée"), the straddle pass, and the 20-day diagnostic.
+- **Sabotages, 20/20 red:**
+  - QA's five gaps: Q1 no Calibration league pass, B4 no id match, Q7 `SCRUB_VERSION` 2, Q12 cutoff, Q19 owner;
+  - the deck-row trace, the raw-id name, the name match, the collision guard;
+  - the arm fields, the pick labels, the scan, the building source;
+  - notifications for any recipient, never by display name, without "@<id>", without escapes;
+  - the pass's end as `db_done_at`, 30-day diagnostics, and no `_abandon`.
+- **Runs:** the deletion, Calibration, evidence, page store, I-1, withdrawals and privacy suites, 867 passed.
+- **Open:** P2-1's solve-back is with legal (release-lead). Legal is to confirm the 30-day stop (head-eng). A card built before the column, outside the current arm, whose partner was renamed can't be traced; that's testers only.
+
 ## 2026-10-31 — Deletion scrub stage 3: a job stops after 30 days (legal (ix)), from release-lead's #559 delta QA
 
 Gates: release-lead's #559 delta QA, which noted that a permanently poisoned row never sets `db_version`, so `_finish` never deletes its job and the ids are held for good. No schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
