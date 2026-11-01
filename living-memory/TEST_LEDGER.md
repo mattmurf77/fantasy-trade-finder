@@ -1,3 +1,13 @@
+## 2026-10-31 — Deletion scrub stage 3: a job stops after 30 days (legal (ix)), from release-lead's #559 delta QA
+
+Gates: release-lead's #559 delta QA, which noted that a permanently poisoned row never sets `db_version`, so `_finish` never deletes its job and the ids are held for good. No schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The rule:** past `RETRY_LIMIT` (30 days from `deleted_at`), the tick's `_abandon` deletes the job's row and logs `[scrub] abandoned jobs=<n> after_days=30 last_errors={<class>: <n>}` at ERROR. It logs counts and classes only, never ids. A younger unfinished job keeps retrying and alerting. This is trades-eng's reading of legal (ix), for legal to confirm through head-eng; it's in the scope.
+- **The scope** also states the release order: #557, #559 and #562 ship together. Rows are deleted only once #562's `COMPLETE` and `_abandon` are deployed.
+- **Test:** `test_a_job_unfinished_after_30_days_is_deleted_and_eng_told`. Two stuck jobs (their leases held), 31 and 29 days old, go through the real tick: the 31-day one is deleted, the line is exact, and no id is in the log.
+- **Sabotages, 3/3 red:** no `_abandon` in the tick, a 60-day limit, and the abandon line carrying ids.
+- **Runs:** the stage 3, scrub and packs suites, 71 passed.
+
 ## 2026-10-31 — Deletion scrub stage 2, release-lead's #559 delta QA (GO-with-notes): two P3s
 
 - **The shared `try`:** the purge and the revoke now each have their own `try`, purge first. In release-lead's probe a raising revoke had skipped the purge, so `GET /api/trades` still served the deleter's cards. Tests: a raising revoke still purges, and a raising purge still revokes.
