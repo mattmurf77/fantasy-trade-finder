@@ -233,9 +233,50 @@ def test_platform_is_validated(h, platform):
 def test_get_without_a_grant(h):
     body = _get(h).get_json()
     assert body == {"platform": "sleeper", "valid": False, "until": None,
-                    "consent": copy.consent_block("sleeper"),
+                    "consent": copy.consent_block("sleeper", reason="first"),
                     "status_line": None, "stop_label": None}
     assert body["consent"]["copy_version"] == V1 and body["consent"]["locale"] == "en-US"
+    assert set(body["consent"]) == {"copy_version", "locale", "title", "body",
+                                    "checkbox_label", "this_move", "button_label",
+                                    "links", "reason"}
+
+
+def test_consent_links_are_terms_and_privacy():
+    """Contract §2 `links`: legal v1's "Terms · Privacy" row, the app's pages."""
+    assert copy.consent_block("sleeper")["links"] == [
+        {"label": "Terms", "url": "https://fantasy-trade-finder.onrender.com/terms"},
+        {"label": "Privacy", "url": "https://fantasy-trade-finder.onrender.com/privacy"}]
+    assert "reason" not in copy.consent_block("sleeper")
+
+
+def _reason(h):
+    return _get(h).get_json()["consent"].get("reason")
+
+
+def test_reason_first_lapsed_version_withdrawn(h, monkeypatch):
+    assert _reason(h) == "first"
+    _grant(h, at=h.now - timedelta(days=8))
+    assert _reason(h) == "lapsed"
+    _grant(h)
+    assert _reason(h) is None                                 # valid: nothing to ask
+    monkeypatch.setitem(copy.CURRENT_CONSENT_VERSION, "sleeper", V2)
+    assert _reason(h) == "version"
+    monkeypatch.setitem(copy.CURRENT_CONSENT_VERSION, "sleeper", V1)
+    assert _delete(h).status_code == 200
+    assert _reason(h) == "withdrawn"
+    _grant(h, account="another-account")                      # not this credential's
+    assert _reason(h) == "withdrawn"
+
+
+def test_reason_absent_without_a_credential(h):
+    db_module.delete_sleeper_credential(USER, withdrawn_via="disconnect")
+    assert "reason" not in _get(h).get_json()["consent"]
+
+
+def test_reason_rides_the_409_too(h):
+    _grant(h, at=h.now - timedelta(days=8))
+    r = h.post(consent=_ABSENT)
+    assert r.status_code == 409 and _err(r)["consent"]["reason"] == "lapsed"
 
 
 def test_get_with_an_open_grant(h, monkeypatch):

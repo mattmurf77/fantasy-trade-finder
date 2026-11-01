@@ -15115,6 +15115,32 @@ def active_platform_write_grant(user_id: str, platform: str, platform_user_id: s
     return latest if latest["consent_id"] in open_ids else None
 
 
+def platform_write_consent_reason(user_id: str, platform: str, platform_user_id: str | None,
+                                  copy_version: str | None, now: datetime) -> str | None:
+    """Why consent must be asked now (contract §2 `reason`), from the records
+    of (user, platform, platform_user_id): 'first' (no grant for this account),
+    'withdrawn' (its latest grant was withdrawn), 'version' (made at another
+    copy_version), 'lapsed' (past its 7 days), in that order of precedence.
+    None when that grant is still valid, or when the account isn't known."""
+    if not user_id or not platform_user_id:
+        return None
+    rows = platform_write_consent_rows(user_id, platform)
+    grants = [r for r in rows if r["kind"] == "grant"
+              and str(r.get("platform_user_id") or "") == str(platform_user_id)]
+    if not grants:
+        return "first"
+    latest = max(grants, key=lambda r: (_parse_utc(r["consented_at"]) or datetime.min.replace(
+        tzinfo=timezone.utc), r["recorded_at"]))
+    if any(r["kind"] == "withdrawal" and r["refers_to"] == latest["consent_id"] for r in rows):
+        return "withdrawn"
+    if latest.get("copy_version") != copy_version:
+        return "version"
+    exp = _parse_utc(latest.get("expires_at"))
+    if exp is None or now >= exp:
+        return "lapsed"
+    return None
+
+
 def withdraw_platform_write_grants(user_id: str, platform: str, via: str, now: datetime,
                                    *, conn=None) -> int:
     """Append one withdrawal row for each open grant of (user, platform), any

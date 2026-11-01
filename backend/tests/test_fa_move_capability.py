@@ -206,6 +206,14 @@ def test_approved_slots_verbatim():
         "Sleeper processes it on its waiver schedule.")
 
 
+def test_templates_never_write_their_own_dollar_sign():
+    """Contract §7: the client fills `{bid}` WITH its "$" ("$7")."""
+    for key, text in {**copy._SLEEPER_SLOTS_FINAL, **copy._SLEEPER_SLOTS_DRAFT}.items():
+        assert "${" not in text, key
+    assert copy._SLEEPER_SLOTS_FINAL["waiver_line"].endswith("Bid: {bid}")
+    assert copy._SLEEPER_SLOTS_DRAFT["cta_claim"] == "Claim {add} for {bid}"
+
+
 def test_never_the_false_sleeper_line():
     """Scope state 1: the neutral fallback is never "Sleeper doesn't allow
     apps to submit claims"; nor may the server say so."""

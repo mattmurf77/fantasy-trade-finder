@@ -478,7 +478,7 @@ def test_pre_write_refusals_never_call_the_platform(h, monkeypatch, setup, statu
     assert body["error"] == code
     _no_write(h)
     if code == "consent_required":
-        assert body["consent"] == copy.consent_block("sleeper")
+        assert body["consent"] == copy.consent_block("sleeper", reason="first")
         assert body["consent"]["copy_version"] == V1
         assert [c for c in h.consents() if c["kind"] == "grant"] == []
     if setup == "rosters_read_failed":

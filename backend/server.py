@@ -36783,7 +36783,10 @@ def platform_write_consent_route():
 
     GET    ?platform=sleeper → {platform, valid, until, consent, status_line,
            stop_label}. `consent` is the current version's text to show if the
-           user must consent now (null when the platform has none); `until`,
+           user must consent now (null when the platform has none), with
+           `links` (legal's Terms · Privacy row) and, when the stored
+           credential's account is known and no grant is open, `reason`
+           (first | lapsed | version | withdrawn); `until`,
            `status_line` and `stop_label` are null unless a grant is open. A
            grant is valid for (user, platform, the stored credential's account)
            only, so no credential means not valid.
@@ -36817,17 +36820,20 @@ def platform_write_consent_route():
         return jsonify({"platform": platform, "valid": False,
                         "notice": _fa_copy.withdrawal_notice(platform)})
 
-    grant = None
+    grant = reason = None
     if platform == "sleeper":
         cred = get_sleeper_credential(user_id)
         if cred:
             grant = _fa_move_grant(user_id, platform, cred.get("sleeper_user_id"), now)
+            reason = _fa_db.platform_write_consent_reason(
+                user_id, platform, str(cred.get("sleeper_user_id") or ""),
+                _fa_copy.CURRENT_CONSENT_VERSION.get(platform), now)
     until = grant["expires_at"] if grant else None
     return jsonify({
         "platform": platform,
         "valid": grant is not None,
         "until": until,
-        "consent": _fa_copy.consent_block(platform),
+        "consent": _fa_copy.consent_block(platform, reason=reason),
         "status_line": (_fa_copy.STATUS_LINE.format(date=_fa_move_date_label(until))
                         if grant else None),
         "stop_label": _fa_copy.STOP_LABEL if grant else None,
@@ -36889,8 +36895,11 @@ def _fa_move_consent_step(user_id: str, platform: str, platform_user_id: str,
     current = _fa_copy.CURRENT_CONSENT_VERSION.get(platform)
 
     def _required():
+        reason = _fa_db.platform_write_consent_reason(user_id, platform, platform_user_id,
+                                                      current, now)
         return _fa_move_error("consent_required", 409,
-                              _fa_copy.message("consent_required", platform), consent=block)
+                              _fa_copy.message("consent_required", platform),
+                              consent=_fa_copy.consent_block(platform, reason=reason))
 
     shown = req["consent"]
     if shown is not None:

@@ -32,7 +32,10 @@ Three kinds of string live here:
 
 Straight apostrophes, as R15.8 writes them. Templates use `{add}`, `{drop}`,
 `{bid}`, `{league}`, `{date}`, `{name}`, `{cta}` for the CLIENT to fill
-(contract §7); the server-filled strings below are formatted here.
+(contract §7). The client fills `{bid}` WITH its dollar sign ("$7"), so a
+template never writes its own `$`; `{date}` is a short date with no time. The
+server-filled strings below (results, refusals, the Settings status line) are
+formatted here.
 """
 from __future__ import annotations
 
@@ -102,17 +105,32 @@ def has_consent_text(platform: str, copy_version: str, locale: str) -> bool:
     return (platform, copy_version, locale) in CONSENT_TEXTS
 
 
-def consent_block(platform: str, locale: str = LOCALE) -> dict | None:
+# Legal's "Terms · Privacy" row under the consent step (R15.8 v1), sent as the
+# block's optional `links` (contract §2). The app's own pages, the same URLs
+# the app opens from Sign in and Settings › About.
+_APP_ORIGIN = "https://fantasy-trade-finder.onrender.com"
+CONSENT_LINKS = ({"label": "Terms", "url": f"{_APP_ORIGIN}/terms"},
+                 {"label": "Privacy", "url": f"{_APP_ORIGIN}/privacy"})
+
+# Why consent is being asked (contract §2 `reason`; fa_move_consent_shown's).
+CONSENT_REASONS = ("first", "lapsed", "version", "withdrawn")
+
+
+def consent_block(platform: str, locale: str = LOCALE, *, reason: str | None = None) -> dict | None:
     """The contract §2 `consent` block for the platform's CURRENT version, or
     None when the platform has no consent text (the client then hands off,
-    ux-lead F4)."""
+    ux-lead F4). `reason` is included only when the server knows it."""
     version = CURRENT_CONSENT_VERSION.get(platform)
     text = CONSENT_TEXTS.get((platform, version, locale)) if version else None
     if text is None:
         return None
-    return {"copy_version": version, "locale": locale, "title": text["title"],
-            "body": list(text["body"]), "checkbox_label": text["checkbox_label"],
-            "this_move": text["this_move"], "button_label": text["button_label"]}
+    block = {"copy_version": version, "locale": locale, "title": text["title"],
+             "body": list(text["body"]), "checkbox_label": text["checkbox_label"],
+             "this_move": text["this_move"], "button_label": text["button_label"],
+             "links": [dict(link) for link in CONSENT_LINKS]}
+    if reason in CONSENT_REASONS:
+        block["reason"] = reason
+    return block
 
 
 # ── Settings (G19, approved: R15.8 :856 status line; R15.2.6 notice) ─────────
@@ -136,14 +154,15 @@ _SLEEPER_SLOTS_FINAL = {
     "connect_line": "Connect your Sleeper sign-in to make moves from here.",
     # G7, legal-final (R15.8 D10(b)).
     "finality": "Final on Sleeper. Fleeced can't undo it.",
-    # G8, legal-final (R15.1 :766, "Bid: ${n}" appended when there's a bid).
-    # CONTRACT GAP, flagged in the build report: R15.1's line has two
-    # conditional halves (the drop, the bid) and contract §7 gives it ONE
-    # template slot. Correct only for a FAAB claim with a drop. Claims are off
-    # (capability `claims: false`) until D5 holds, so it is never rendered
-    # before that is settled.
+    # G8, legal-final (R15.1 :766, "Bid: ${n}" appended when there's a bid;
+    # the client's `{bid}` carries the "$", contract §7). FLAGGED in the build
+    # report: R15.1's line has two conditional halves and contract §7 gives it
+    # ONE slot. With no drop the client drops the slot for its fallback
+    # (contract §7); with no bid it fills "$0", wrong for a priority-waiver
+    # league. Claims are off (`claims: false`) until D5 holds, so it is never
+    # rendered before that is settled.
     "waiver_line": ("This places a waiver claim for {add} (dropping {drop} if it clears). "
-                    "Sleeper processes it on its waiver schedule. Bid: ${bid}"),
+                    "Sleeper processes it on its waiver schedule. Bid: {bid}"),
     # G20, approved (s351.secondary, consent.md :132).
     "do_in_platform": "Do it in Sleeper instead",
     # G16's title reuses 8i (mobile/src/utils/sendOutcomeCopy.ts:9).
@@ -158,8 +177,8 @@ _SLEEPER_SLOTS_DRAFT = {
     "header_claim": "Claim {name}",                                     # G24
     "cta_add": "Add {add}",                                             # G6
     "cta_add_drop": "Add {add}, drop {drop}",                           # G6
-    "cta_claim": "Claim {add} for ${bid}",                              # G6
-    "cta_claim_drop": "Claim {add} for ${bid}, drop {drop}",            # G6
+    "cta_claim": "Claim {add} for {bid}",                               # G6
+    "cta_claim_drop": "Claim {add} for {bid}, drop {drop}",             # G6
     "league_line": "In {league}",                                       # G22
     "window_line": "Adds authorized until {date}",                      # G9 (consent.md :115)
     "turn_off": "Turn off",                                             # G9
