@@ -1,3 +1,10 @@
+## 2026-10-31 — Deletion scrub stage 2, release-lead's #559 delta QA (GO-with-notes): two P3s
+
+- **The shared `try`:** the purge and the revoke now each have their own `try`, purge first. In release-lead's probe a raising revoke had skipped the purge, so `GET /api/trades` still served the deleter's cards. Tests: a raising revoke still purges, and a raising purge still revokes.
+- **Over-filter:** `_deleted_partner_ids` maps each deleted id to the end of its window, an hour after the deletion (twelve `_JOB_HARD_TIMEOUT`s). `GET /api/trades` hides a card naming the id only if it was built before then; an unreadable `created_at` counts as before. A card built after the window comes from a search started after the deletion, from public league data, and it serves. That covers a re-signup and another person on a slot-keyed entry id. The late-writer test now also serves a card built after the window and hides one with an unreadable time.
+- **Sabotages, 16/16 red:** the 13 from the re-QA (the serve-filter anchor updated), plus no window, an unreadable time that serves, and the purge and revoke back in one `try` with the revoke first.
+- **Runs:** `test_deletion_scrub_packs.py` 22 passed.
+
 ## 2026-10-31 — Deletion scrub stage 2, release-lead's #559 re-QA: neutral revoke reason, session card purge
 
 Gates: release-lead's re-QA, GO-with-notes on #557 (b62fb21e) and on #559 (8412a475), with two P2s to fix before #559 merges. Route: `DELETE /api/account`'s `deleted` counts gain `trade_cards_purged`, and `GET /api/trades` drops cards whose partner deleted their account in this process. Both are noted in api-reference. No schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
