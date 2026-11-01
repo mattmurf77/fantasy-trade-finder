@@ -113,7 +113,8 @@ interface Props {
   leagueName?: string;
   // P0-7 (analytics): which mount this is. REQUIRED so a missed mount is a
   // compile error, not a null dimension in the send funnel. Read by the
-  // track() calls in onPress/catch.
+  // track() calls in onPress/catch, and by doPropose: 'shop' tags the
+  // propose request `source: 'shop'` (#531's kept Elo half).
   surface: SendSurface;
 }
 
@@ -260,6 +261,7 @@ export default function SendInSleeperButton({
         give_player_ids: givePlayerIds,
         receive_player_ids: receivePlayerIds,
         impression_id: impressionId,
+        ...(surface === 'shop' ? { source: 'shop' as const } : {}),
       });
       setState('sent');
       haptics.success();
@@ -373,7 +375,7 @@ export default function SendInSleeperButton({
         );
       }
     }
-  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, goConnect]);
+  }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, surface, onSent, goConnect]);
 
   // #180 — pre-flight validation before the confirm. validateTradeSend never
   // throws (unreachable/flag-off degrades to checked:false → plain confirm);

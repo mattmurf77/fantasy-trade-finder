@@ -31,6 +31,10 @@ export interface ProposeTradePayload {
   // deck_impressions row as a `propose` outcome. Optional/additive — old
   // servers ignore it; only set when the flag is on.
   impression_id?: string;
+  // #531 (head-eng 11-01): set to 'shop' ONLY by a Shop-tile send, so the
+  // server can record the kept Elo half for it. Every other mount omits it.
+  // Optional/additive — an older server maps an unknown source to 'deck'.
+  source?: 'shop';
 }
 
 export interface ProposeTradeResult {

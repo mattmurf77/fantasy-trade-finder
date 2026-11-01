@@ -13,6 +13,7 @@ Gates: the scope block `docs/plans/shop-platform-send/scope.md`. Analytics: the 
   - Only the Sleeper send events carry `surface`.
 - **TestFlight checklist:** `docs/plans/shop-platform-send/testflight.md`, 7 steps, including ESPN with a pick (`espn_pick_unsupported`, its exact alert quoted).
 - **Runs:** `tsc --noEmit` is clean, all 136 `check-*.js` suites pass, testid-lint is green, and the analytics backend tests pass 138.
+- **Shop source tag** (head-eng's option A for the kept Elo half): each platform router's propose call sends `source: 'shop'` only for `surface === 'shop'`. `check-shop-send.js` now has 28 checks (12 new) and fails 11 on #574's previous head ab53a2ef. Re-run: `tsc --noEmit` is clean, all 136 suites pass and testid-lint is green.
 
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 

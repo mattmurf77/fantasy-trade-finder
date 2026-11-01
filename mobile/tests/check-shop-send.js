@@ -68,6 +68,26 @@ check('only the QueueToast type is imported from queueCalcTrade',
 check('the ✕ dismiss still dispatches handleDismiss',
   /testID="shop\.dismiss-btn"\s*\n\s*onPress=\{\(\) => handleDismiss\(item\)\}/.test(shop));
 
+// head-eng 11-01, option A: each platform router tags a Shop send's propose
+// request `source: 'shop'` (and only a Shop send's), so the server can record
+// #531's kept Elo half. The payload types carry the optional field.
+const TAG = "...(surface === 'shop' ? { source: 'shop' as const } : {}),";
+const routers = {
+  Sleeper: ['components/SendInSleeperButton.tsx', 'proposeTradeToSleeper', 'api/sendInSleeper.ts', 'ProposeTradePayload'],
+  MFL: ['components/SendInMflButton.tsx', 'proposeTradeToMfl', 'api/sendInMfl.ts', 'ProposeMflTradePayload'],
+  ESPN: ['components/SendInEspnButton.tsx', 'proposeTradeToEspn', 'api/sendInEspn.ts', 'ProposeEspnTradePayload'],
+};
+for (const [plat, [file, fn, apiFile, type]] of Object.entries(routers)) {
+  const src = read(file);
+  const call = (src.match(new RegExp(`await ${fn}\\(\\{[\\s\\S]*?\\}\\);`)) || [''])[0];
+  check(`${plat}: the propose call tags source 'shop' only when surface is 'shop'`, call.includes(TAG), call ? 'tag missing' : 'call not found');
+  check(`${plat}: the tag is the only source the propose call sends`, (call.match(/\bsource:/g) || []).length === 1);
+  check(`${plat}: surface is read, not discarded`, !/surface: _surface/.test(src));
+  const apiSrc = read(apiFile);
+  const body = (apiSrc.match(new RegExp(`export interface ${type} \\{[\\s\\S]*?\\n\\}`)) || [''])[0];
+  check(`${plat}: ${type} carries source?: 'shop'`, /\n  source\?: 'shop';/.test(body));
+}
+
 // The analytics dimension.
 check("SendSurface includes 'shop'",
   /export type SendSurface = [^;]*'shop'[^;]*;/.test(tradeText) &&
