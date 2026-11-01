@@ -120,12 +120,14 @@ def capture_leagues(conn, user_ids) -> list[str]:
 
 def capture_names(conn, user_ids) -> dict:
     """The person's names, read before the deletion removes their rows:
-    `leagues` = {league_id: [display names and usernames]} and `usernames`
-    (unique). Used where a row names its partner only by name: an older
-    Calibration card, a traded-pick label (both guarded by the league's
-    remaining members' names), and a notification (its match row decides;
-    without one, usernames anywhere and display names for a recipient who
-    shared a league)."""
+    `leagues` = {league_id: [display names and usernames]}, `usernames`
+    (unique), and `match_ids`, their trade_matches, read before the deletion
+    puts the placeholder on their side. The names are used where a row names
+    its partner only by name: an older Calibration card, a traded-pick label
+    (both guarded by the league's remaining members' names), and a
+    notification without a match row (usernames anywhere, display names for a
+    recipient who shared a league). The match ids give the counterparties
+    whose notifications the scan reads whatever name they used."""
     m, u = db.league_members_table, db.users_table
     ids = list(user_ids)
     by_league: dict[str, set] = {}
@@ -1174,7 +1176,8 @@ def redact_notification(row: dict, ids, token: str, usernames, display_names=(),
     It's theirs when its metadata names them as the partner or holds one of
     their ids. Who the partner is: for a match notification, the match row says
     (`match_partner_deleted`: its other side is the deletion's placeholder, or
-    a live user), so any of their names counts or none does (#562 re-QA P3:
+    a live user), so the partner name is theirs whatever it says, or it isn't
+    (#562 re-QA P3:
     a leaguemate whose display name is their username, and a copy sent in a
     league they had left). Otherwise: by username (unique), by display name
     (the second liker's copy) only where the caller passed them, a recipient
@@ -1214,21 +1217,31 @@ def _scan_notifications(job: dict, after: str, budget: "_Budget") -> tuple[str |
     display_names = {n for ns in (names.get("leagues") or {}).values() for n in ns}
     t, m = db.notifications_table, db.league_members_table
     # Matched raw and as json.dumps writes it (a non-ASCII name as \u escapes).
-    match_ids = {i for i in names.get("match_ids") or () if isinstance(i, int)}
     terms = sorted(ids) + sorted({f'"partner_username": {form}'
                                   for n in usernames | display_names
                                   for form in (json.dumps(n), f'"{n}"')})
-    terms += sorted({f'"match_id": {i}{end}' for i in match_ids for end in (",", "}")})
-    hit = or_(*[t.c.metadata_json.contains(term, autoescape=True) for term in terms])
+    matches = db.trade_matches_table
+    match_ids = sorted({i for i in names.get("match_ids") or () if isinstance(i, int)})
     with db.engine.connect() as conn:
         mates = set(conn.execute(select(m.c.user_id).where(
             m.c.league_id.in_(job["leagues"]), m.c.user_id.notin_(sorted(ids)))).scalars())
-    matches = db.trade_matches_table
+        # The other side of each of their matches: only a notification to one
+        # of them can be about one of their matches, so those rows are looked
+        # at whatever name they used, without a SQL term per match id (#562
+        # QA P3: 2,000 ids took 102 s on Postgres and broke SQLite's limit).
+        counterparties = set()
+        for k in range(0, len(match_ids), 500):
+            for a, b in conn.execute(select(matches.c.user_a_id, matches.c.user_b_id).where(
+                    matches.c.id.in_(match_ids[k:k + 500]))).all():
+                counterparties.update({a, b})
+        counterparties -= ids | {_PLACEHOLDER}
+    hit = or_(*[t.c.metadata_json.contains(term, autoescape=True) for term in terms],
+              *([t.c.user_id.in_(sorted(counterparties))] if counterparties else []))
 
     def match_partner_deleted(conn, row):
         """For a match notification sent to one of the match's sides: is the
-        other side this person (one of their captured matches) or another
-        deleted one (the placeholder), or a live user? None when there's no
+        other side the deletion's placeholder (this person, whose side it
+        became, or another deleted one), or a live user? None when there's no
         match row naming the recipient to ask."""
         meta = _loads(row["metadata_json"])
         match_id = meta.get("match_id") if isinstance(meta, dict) else None
@@ -1239,7 +1252,7 @@ def _scan_notifications(job: dict, after: str, budget: "_Budget") -> tuple[str |
         if sides is None or row["user_id"] not in sides:
             return None
         other = sides.user_b_id if sides.user_a_id == row["user_id"] else sides.user_a_id
-        return match_id in match_ids or other == _PLACEHOLDER
+        return other == _PLACEHOLDER
     changed, cursor = 0, int(after or 0)
     while budget.take():
         with db.engine.begin() as conn:
@@ -1256,8 +1269,7 @@ def _scan_notifications(job: dict, after: str, budget: "_Budget") -> tuple[str |
                     deleted_side = match_partner_deleted(conn, row)
                     values = redact_notification(
                         row, ids, token, usernames,
-                        display_names if row["user_id"] in mates or deleted_side else (),
-                        deleted_side)
+                        display_names if row["user_id"] in mates else (), deleted_side)
                 except Exception as err:   # a poison row: counted, the pass not done
                     _row_failed(job, "notifications", err)
                     continue

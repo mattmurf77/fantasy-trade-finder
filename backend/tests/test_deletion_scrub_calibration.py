@@ -544,9 +544,9 @@ def test_the_backfill_counts_only_what_committed_and_never_raises(eng, monkeypat
     monkeypatch.setattr(db, "_BACKFILL_CHUNK", 5)
     commits = []
 
-    def fail_first_commit(conn):
+    def fail_first_commit(conn):          # commit 1 is the pending read; 2 the first chunk
         commits.append(1)
-        if len(commits) == 1:
+        if len(commits) == 2:
             raise RuntimeError("commit failed")
     event.listen(eng, "commit", fail_first_commit)
     before = sum(1 for c in all_cards(eng).values() if c["partner_user_id"] is None)

@@ -4456,9 +4456,14 @@ def backfill_grading_card_partners() -> int:
     retries it. It never raises. Returns the rows actually written."""
     gc, gs = grading_cards_table, grading_sessions_table
     imp, m = deck_impressions_table, league_members_table
-    pg = engine.dialect.name == "postgresql"
+
+    def timeouts(conn):
+        if _ddl_is_postgres():
+            _execute_ddl(conn, f"SET LOCAL lock_timeout = '{_DDL_LOCK_TIMEOUT}'")
+            _execute_ddl(conn, f"SET LOCAL statement_timeout = '{_DDL_STATEMENT_TIMEOUT}'")
     try:
-        with engine.connect() as conn:
+        with engine.begin() as conn:  # the first read waits no longer than a chunk (#562 QA P3)
+            timeouts(conn)
             pending = conn.execute(select(gc.c.card_id).where(gc.c.partner_user_id.is_(None))
                                    .order_by(gc.c.card_id)).scalars().all()
     except Exception as err:          # never blocks boot; the scrub keeps its fallbacks
@@ -4466,13 +4471,13 @@ def backfill_grading_card_partners() -> int:
         return 0
     members: dict = {}                # league_id -> [(user_id, shown name, roster ids)]
     filled = failed = 0
+    first_error = None
     for i in range(0, len(pending), _BACKFILL_CHUNK):
         try:
             with engine.begin() as conn:
-                if pg:
-                    conn.execute(text(f"SET LOCAL lock_timeout = '{_DDL_LOCK_TIMEOUT}'"))
-                    conn.execute(text(f"SET LOCAL statement_timeout = '{_DDL_STATEMENT_TIMEOUT}'"))
-                rows = conn.execute(select(gc.c.card_id, gc.c.arms_json, gc.c.trade_json, gs.c.league_id)
+                timeouts(conn)
+                rows = conn.execute(select(gc.c.card_id, gc.c.arms_json, gc.c.trade_json,
+                                           gs.c.league_id, gs.c.user_id)
                                     .join(gs, gs.c.session_id == gc.c.session_id)
                                     .where(gc.c.card_id.in_(pending[i:i + _BACKFILL_CHUNK]),
                                            gc.c.partner_user_id.is_(None))).mappings().all()
@@ -4485,10 +4490,10 @@ def backfill_grading_card_partners() -> int:
                     current = arms.get("current") if isinstance(arms, dict) else None
                     impression = (current.get("impression_id")
                                   if isinstance(current, dict) else None)
-                    cards.append((row["card_id"], row["league_id"],
+                    cards.append((row["card_id"], row["league_id"], row["user_id"],
                                   impression if isinstance(impression, str) else None,
                                   trade if isinstance(trade, dict) else {}))
-                wanted = sorted({c[2] for c in cards if c[2]})
+                wanted = sorted({c[3] for c in cards if c[3]})
                 deck_partner = {}
                 for impression_id, raw in (conn.execute(select(imp.c.impression_id, imp.c.features_json)
                                                         .where(imp.c.impression_id.in_(wanted))).all()
@@ -4511,16 +4516,20 @@ def backfill_grading_card_partners() -> int:
                         held = set()
                     members[league].append((str(uid), display or username or str(uid), held))
                 written = 0
-                for card_id, league, impression, trade in cards:
+                for card_id, league, viewer, impression, trade in cards:
                     partner = deck_partner.get(impression) if impression else None
                     name = trade.get("partner_name")
-                    if partner is None and isinstance(name, str):
-                        players = {str(a.get("id")) for a in trade.get("receive") or ()
+                    receive = trade.get("receive")
+                    if partner is None and isinstance(name, str) and isinstance(receive, list):
+                        players = {str(a.get("id")) for a in receive
                                    if isinstance(a, dict) and a.get("position") != "PICK"}
                         # At least one received player, all on that roster: a
                         # pick-only card has no roster evidence and stays NULL.
+                        # Never the session's own user (a build never pairs a
+                        # viewer with themselves).
                         owners = [uid for uid, shown, held in members.get(league, ())
-                                  if shown == name and players and players <= held]
+                                  if shown == name and players and players <= held
+                                  and uid != viewer]
                         if len(owners) == 1:
                             partner = owners[0]
                     if partner is not None:
@@ -4531,7 +4540,10 @@ def backfill_grading_card_partners() -> int:
             filled += written             # counted once its chunk committed
         except Exception as err:          # never blocks boot; skipped until the next boot
             failed += 1
-            log.warning("grading_cards partner backfill chunk failed: %s", type(err).__name__)
+            first_error = first_error or type(err).__name__
+    if failed:
+        log.warning("grading_cards partner backfill: %d chunks failed (first: %s); retried next boot",
+                    failed, first_error)
     if filled or failed:
         log.info("grading_cards partner backfill: %d cards, %d chunks failed", filled, failed)
     return filled
