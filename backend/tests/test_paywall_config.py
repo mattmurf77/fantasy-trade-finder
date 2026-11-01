@@ -13,7 +13,8 @@ Covers:
   (e) ?platform=ios|web|extension accepted; unknown value degrades to ios
   (f) tip jar (tip-jar plan §3 S1) — `tips` is the three ftf_tip_ SKUs
       only while model_config `paywall_tips_enabled` is exactly 1 AND the
-      resolved platform is `ios`; `[]` at the seeded default 0, on web and
+      resolved platform is `ios` AND the session is verified and not demo
+      (an unverified or demo session gets []); `[]` at the seeded default 0, on web and
       extension, and for any other knob value (2, NaN, garbage, a missing
       row, a failed read); read live per request; flag off still serves
       `{"enabled": false}` alone; the list holds only tip products
@@ -78,10 +79,13 @@ def mem_engine():
 
 @pytest.fixture()
 def client():
+    """A VERIFIED, non-demo session, so the tip tests isolate the knob and
+    the platform; the session leg has its own tests in (f)."""
     server.app.config["TESTING"] = True
     c = server.app.test_client()
     with server._sessions_lock:
-        server._sessions[TOKEN] = {"user_id": USER, "last_active": 0.0}
+        server._sessions[TOKEN] = {"user_id": USER, "last_active": 0.0,
+                                   "verified": True}
     try:
         yield c
     finally:
@@ -269,6 +273,30 @@ def test_tips_served_on_ios_when_knob_is_1(client, monkeypatch, mem_engine, quer
     body = _get(client, query).get_json()
     assert body["platform"] == "ios"
     assert body["tips"] == TIPS
+
+
+@pytest.mark.parametrize("session, served", [
+    ({"verified": True}, True),
+    ({}, False),                                    # never verified
+    ({"verified": False}, False),
+    ({"verified": True, "is_demo": True}, False),   # demo, even if stamped
+    ({"is_demo": True}, False),
+])
+def test_tips_need_a_verified_non_demo_session(client, monkeypatch, mem_engine,
+                                               session, served):
+    """Defence in depth behind the app's verified-only Settings row: knob 1
+    + ios still serves [] to an unverified or demo session (the same
+    predicate as _session_verification)."""
+    _flags(monkeypatch, "monetize.paywall")
+    _set_tip_knob(mem_engine, 1.0)
+    with server._sessions_lock:
+        server._sessions[TOKEN] = {"user_id": USER, "last_active": 0.0,
+                                   **session}
+    r = _get(client, "?platform=ios")
+    assert r.status_code == 200
+    assert r.get_json()["tips"] == (TIPS if served else [])
+    if not served:
+        assert "ftf_tip" not in r.get_data(as_text=True)
 
 
 @pytest.mark.parametrize("platform", ["web", "extension"])

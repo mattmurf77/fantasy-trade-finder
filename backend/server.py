@@ -36975,12 +36975,15 @@ def paywall_config():
     about the user's storefront, currency, or an active promotional offer.
     They switch to the new-subscriber prices at _PAYWALL_PRICE_RISE_AT.
     """
-    _require_session()
+    sess = _require_session()
     if not is_enabled("monetize.paywall"):
         return jsonify({"enabled": False})
     platform = request.args.get("platform", "ios")
     if platform not in _PAYWALL_PLATFORMS:
         platform = "ios"
+    # Same predicate as _session_verification: an unverified or demo
+    # session is the unverified answer.
+    session_verified = bool(sess.get("verified")) and not sess.get("is_demo")
     return jsonify({
         "enabled": True,
         "platform": platform,
@@ -36993,13 +36996,16 @@ def paywall_config():
         "trial_eligible": True,
         "dismissible": True,
         # Tip-jar consumables: served behind the `paywall_tips_enabled` knob
-        # (exactly 1) and on `ios` only, the one platform with in-app
-        # purchase; otherwise []. See _PAYWALL_TIPS. A tip grants nothing
+        # (exactly 1), on `ios` only (the one platform with in-app
+        # purchase), and only to a verified, non-demo session (defence in
+        # depth behind the app's verified-only Settings row); otherwise [].
+        # See _PAYWALL_TIPS. A tip grants nothing
         # (entitlements.is_tip_product). Rides monetize.paywall too: tips
         # are purchase UI, and the flag's contract is "no purchase UI
         # anywhere" when off.
         "tips": (_PAYWALL_TIPS
-                 if platform == "ios" and _paywall_tips_enabled() else []),
+                 if platform == "ios" and session_verified
+                 and _paywall_tips_enabled() else []),
     })
 
 

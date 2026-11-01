@@ -20,7 +20,7 @@
 
 - **Tables or columns:** none.
 - **Feature flags:** none. Tips still ride `monetize.paywall` (off → `{"enabled": false}` and nothing else).
-- **`model_config` key:** **`paywall_tips_enabled`**, default **0**, seeded insert-if-absent (`backend/database.py`, after `app_store_live`). Exactly 1 → `tips` is `_PAYWALL_TIPS` on `GET /api/paywall/config` when the resolved platform is `ios`. Anything else → `[]`. Read live per request (`server._paywall_tips_enabled`), so it is the **deploy-free kill switch**: release-lead sets 0 to hide the tips. Documented in `docs/config-reference.md` § Tip jar.
+- **`model_config` key:** **`paywall_tips_enabled`**, default **0**, seeded insert-if-absent (`backend/database.py`, after `app_store_live`). Exactly 1 → `tips` is `_PAYWALL_TIPS` on `GET /api/paywall/config` when the resolved platform is `ios` **and** the session is verified and not demo (defence in depth, release-lead QA round 2). Anything else → `[]`. Read live per request (`server._paywall_tips_enabled`), so it is the **deploy-free kill switch**: release-lead sets 0 to hide the tips. Documented in `docs/config-reference.md` § Tip jar.
 
 ## 3. Evidence scope
 
@@ -29,6 +29,7 @@
   - the default (empty table → seed 0) → `[]`; the seed row is 0;
   - knob 1 + `ios` (explicit, omitted, or unknown → `ios`) → exactly the three SKUs, in order;
   - knob 1 + `web` / `extension` → `[]`;
+  - knob 1 + `ios` + an unverified session (never stamped, or `verified: False`) or a demo session (even one stamped verified) → `[]`; a verified session → the three SKUs;
   - knob 0, 2, -1, 0.5, 1.0001, or a missing row → `[]`;
   - garbage at the read (`"abc"`, `""`, `None`, NaN, inf) → `[]`;
   - a failed read → 200 with `[]`;
@@ -38,8 +39,9 @@
   - The file now runs against an autouse in-memory DB, because the route reads model_config. `test_entitlements.py` (tips grant nothing) is unchanged.
 - [x] **Code-walk proof:**
   - `server.py` `paywall_config`: `_require_session()` runs first, then the `monetize.paywall` early return (unchanged).
-  - `platform` is resolved next, with unknown values becoming `ios`.
-  - `"tips": _PAYWALL_TIPS if platform == "ios" and _paywall_tips_enabled() else []`. The platform check comes first, so `web` and `extension` never read the knob.
+  - `platform` is resolved next, with unknown values becoming `ios`. So "never on Android" isn't server-enforced; the app always sends `ios`. This was already the case before this PR.
+  - `session_verified = bool(sess.get("verified")) and not sess.get("is_demo")`, the same predicate as `_session_verification`, read from the session `_require_session()` already returned. No new session reads.
+  - `"tips": _PAYWALL_TIPS if platform == "ios" and session_verified and _paywall_tips_enabled() else []`. The platform and session checks come first, so `web`, `extension` and unverified or demo sessions never read the knob.
   - `_paywall_tips_enabled()` returns `float(get_config().get("paywall_tips_enabled", 0.0)) == 1.0` inside `try/except → False`.
   - `get_config()` reads the table on every call, with no cache.
   - The mobile app fetches `?platform=ios` only (`PaywallScreen.tsx:198-199`, `TipJarScreen.tsx:68-69`, `useTipsOffered.ts:20`).
@@ -58,7 +60,7 @@
 | `docs/architecture.md` | n/a | No module or data-flow change |
 | `living-memory/HLD.md` | n/a | No architecture change |
 | `docs/glossary.md` | n/a | "Tip jar" is already in use |
-| `docs/plans/monetization/pro-subscription/lld.md` §3 (`:100`, `:126`) | **not updated here** | scope.md lists it for the S1 PR, but it is outside this worker's allowed files. Flagged to engagement-eng |
+| `docs/plans/monetization/pro-subscription/lld.md` §3 | **updated** (`774b5596`) | `:126`, the `tips` line: `_PAYWALL_TIPS` only while `paywall_tips_enabled` = 1 and the platform is `ios`. `:100` is a dated 2026-10-27 history note and stays as written |
 | ADR or `DECISIONS.md` | n/a here | #393 decision 6's reversal for tips is recorded in plan.md and #393 (scope.md) |
 
 ## 5. Ship gate declaration
@@ -67,4 +69,5 @@
 - **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry for the pytest run and the sabotage, written by the lead with the PR.
 - **TestFlight verification:** T24 after release-lead sets the knob (TJ9), run by the operator.
 - **Deploy posture:** safe to deploy at any time with the knob at 0, because the response is byte-identical to today's `tips: []`.
+- **Flip precondition** (release-lead QA N1): `paywall_tips_enabled` = 1 only once the App Store Connect products exist **and** #495's tip guard is merged and in the binary under test or review. Details in `docs/config-reference.md` § Tip jar.
 - **Express lane:** no; full gates.
