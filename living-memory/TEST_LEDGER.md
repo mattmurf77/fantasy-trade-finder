@@ -38,6 +38,7 @@ Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook
   - G3-d without the limit;
   - the kill without the limit.
 - **Suites:** all `test_eval_*` plus `test_evidence_pack.py` and `test_deck_value_model.py`, on main @ `9370670e`: 481 passed.
+
 ## 2026-11-01 — #373: privacy §6's two "not yet" team-overhaul sentences dropped (#540 deletes and exports overhauls)
 
 Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.
@@ -49,6 +50,12 @@ Gates: full (`#373`, legal text only). No route, schema, flag or event change. D
 - **Pins:** `POL-overhaul-covered` fails if either sentence comes back (`local/373-r28-20-full` still carries both). `POL-r28-19`'s position anchor moves to the inviter line's "Email us to have it removed;", the item now before it.
 - **Sabotage:** 4/4 red: each sentence back, one reworded, and the R28.19 item removed.
 - **Suites:** web structure 249/249.
+- **Delta-QA P3s (GO-with-notes at `904e4732`):**
+  - `POL-overhaul-covered` now also fails on ANY overhaul mention in §6, not just the two exact sentences. §1's "team-overhaul plans you create" stays.
+  - The ice-link rule now also catches class-only selectors (any class an `<a>` on the page carries) and `<font color>`. That covers `POL-reading-links-chalk` and `POL-no-ice-links`.
+  - One explicit exception, pending design-lead: faq's pre-existing `.back-link:hover` (privacy and terms' `.back` stays chalk).
+  - Sabotage 7/7 red: a reworded overhaul line in §6's may-remain and export lists; a class-only ice rule; `<font color>` ice in a link; the exception widened to `.back-link` and to `.back-link:focus`. The earlier sets still go red.
+  - One missing blank line before an H2 is fixed.
 - **Also, the FAQ footer links (design-lead, #373 QA P3-6; the operator's approval of the render is pending, not a hold):** the three inline `style="color: …"` attributes are gone. One `.faq-footer a` rule makes them chalk and underlined; the ice appears only on the hover underline. The new `POL-no-ice-links[faq|contact]` extends the existing no-ice-link rule to those two pages. Sabotage 4/4 red: the rule coloured ice, the hover coloured ice, an inline ice link on contact, and the pre-fix FAQ file. Web structure 251/251.
 
 ## 2026-11-01 — #373 QA P1-1: legal R28.25's §3 calculator line pinned; /privacy links pinned (P3-1)

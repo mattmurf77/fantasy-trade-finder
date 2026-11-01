@@ -393,10 +393,19 @@ def run() -> int:
         css = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", strip_comments(all_sources[page]), re.S | re.I))
         rules = [(sel.strip(), decl) for sels, decl in re.findall(r"([^{}]+)\{([^{}]*)\}", css)
                  for sel in sels.split(",")]
-        ice_links = [sel for sel, decl in rules if LINK_SEL.search(sel)
+        body = body_of(all_sources[page])
+        # A rule styles a link when its last compound names `a`, or a class
+        # some <a> on the page carries (release-lead #373 QA P3).
+        a_classes = {c for m in re.findall(r"<a\b[^>]*\bclass=[\"']([^\"']*)", body, re.I) for c in m.split()}
+        def styles_link(sel: str) -> bool:
+            last = re.split(r"[\s>+~]+", sel.strip())[-1]
+            return bool(LINK_SEL.search(sel)) or any(
+                re.search(r"\." + re.escape(c) + r"(?![\w-])", last) for c in a_classes)
+        ice_links = [sel for sel, decl in rules if styles_link(sel)
                      and any(ICE.search(v) for v in COLOR_DECL.findall(decl))]
-        inline = [m for m in re.findall(r"<a\b[^>]*\bstyle=[\"']([^\"']*)", body_of(all_sources[page]), re.I)
+        inline = [m for m in re.findall(r"<a\b[^>]*\bstyle=[\"']([^\"']*)", body, re.I)
                   if any(ICE.search(v) for v in COLOR_DECL.findall(m))]
+        inline += [m for m in re.findall(r"<font\b[^>]*\bcolor=[\"']?([^\"'\s>]*)", body, re.I) if ICE.search(m)]
         return rules, ice_links, inline
 
     for page in POLICY:
@@ -414,8 +423,12 @@ def run() -> int:
     # The FAQ and contact pages have no base `a` rule, but their links follow
     # the same rule: no ice text colour (design-lead, #373 QA P3-6, the FAQ
     # footer's mailto).
+    # One pre-existing exception, pending design-lead's call (keep it as the
+    # back link's action state, or match privacy/terms' chalk `.back`).
+    ICE_LINK_EXCEPTIONS = {("faq.html", ".back-link:hover")}
     for page in ("faq.html", "contact.html"):
         _, ice_links, inline = link_styles(page)
+        ice_links = [sel for sel in ice_links if (page, sel) not in ICE_LINK_EXCEPTIONS]
         r.check(f"POL-no-ice-links[{page}]", not ice_links and not inline,
                 ("ice-coloured link rule(s): " + ", ".join(ice_links) if ice_links else
                  f"{len(inline)} inline ice link style(s)") if (ice_links or inline)
@@ -788,11 +801,15 @@ def run() -> int:
     # user's own team overhauls, so privacy §6's two "not yet" overhaul
     # sentences are gone and must not come back (local/373-r28-20-full still
     # carries them).
+    # Legal dropped both with nothing in their place, so §6 doesn't mention
+    # overhauls at all (§1's "team-overhaul plans you create" stays), and the
+    # exact sentences can't come back anywhere (release-lead QA P3).
     stale_ovh = [t for t in ("aren't yet removed by in-app deletion",
                              "Team-overhaul plans are not yet included") if t in priv]
+    stale_ovh += [c.strip() for c in re.findall(r"[^.;:]*overhaul[^.;:]*", priv_secs.get("6", ""), re.I)]
     r.check("POL-overhaul-covered[privacy.html]", not stale_ovh,
-            "§6 still says overhaul plans aren't covered: " + "; ".join(stale_ovh) if stale_ovh
-            else "§6 has no \"not yet\" overhaul sentence")
+            "§6 still mentions overhaul plans: " + "; ".join(stale_ovh) if stale_ovh
+            else "§6 has no overhaul line")
 
     # Legal R28.25 row 5 (2026-11-01), a MUST for 11-06: privacy §3 says a
     # leaguemate in the in-league calculator sees a numeric read of your
