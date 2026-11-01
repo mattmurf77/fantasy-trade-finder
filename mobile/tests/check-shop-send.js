@@ -63,6 +63,9 @@ check('the old queue button is gone (shop.like-btn, "Show it to")',
   !shop.includes('shop.like-btn') && !shop.includes('Show it to @') && !shop.includes('handleLike'));
 check('only the QueueToast type is imported from queueCalcTrade',
   /import type \{ QueueToast \} from '\.\.\/utils\/queueCalcTrade';/.test(shop));
+const queueImports = shop.match(/^import[^;]*from '\.\.\/utils\/queueCalcTrade';/gm) || [];
+check('queueCalcTrade is imported once, as a type only (no value import, no alias)',
+  queueImports.length === 1 && /^import type /.test(queueImports[0]), queueImports.join(' | '));
 
 // The ✕ dismiss is unchanged.
 check('the ✕ dismiss still dispatches handleDismiss',

@@ -25,8 +25,10 @@ Traced at `ab9879bd` (branch `fix/trades-531-shop-platform-send`). File:line ref
 
 ## Sleeper
 
-1. **The tap** → `confirmSend` (`:382`): the link check, then the `/api/trades/validate` pre-flight (#180). Warnings show "This trade will likely fail" / "Heads up before sending" with Send anyway or Cancel. Then the "Send this trade?" alert (`:406`).
-   - `track('sleeper_send_attempted', {surface: 'shop', …})` fires at `:429`.
+1. **The tap** → `onPress` (`:480`): the paywall/verify `sendPreCheck` (`:71`, a no-op unless `monetize.paywall` is enforcing), then `proceed` (`:420`).
+   - `track('sleeper_send_attempted', {surface: 'shop', …})` fires first, at `:431`.
+   - **The link check** is in `proceed` (`getSleeperLinkStatus`, `:452`). Not linked → "Connect Sleeper first" → Connect → `goConnect` (`SleeperConnect`). Linked, or status unknown → `confirmSend` (`:384`).
+   - `confirmSend` runs the `/api/trades/validate` pre-flight (#180). Warnings show "This trade will likely fail" / "Heads up before sending" with Send anyway or Cancel. Then comes the "Send this trade?" alert (`:408`).
 2. **Send** → `doPropose` (`:254`) → `proposeTradeToSleeper` (`:257`, `api/sendInSleeper.ts:203`) → `POST /api/trades/propose` (`backend/server.py:24892`), the GraphQL propose. It encodes league picks server-side (D-176).
 3. **Success** → "Trade sent / Check your Sleeper app for the pending offer." (`:277`).
 4. **Failure** → `track('sleeper_send_failed', {surface: 'shop', error_code, …})` (`:289`), then the existing per-code alerts:
