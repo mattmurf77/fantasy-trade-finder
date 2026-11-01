@@ -46,6 +46,7 @@ import {
   capabilityOrNull,
   consentEcho,
   consentLinks,
+  connectShownReason,
   consentShownReason,
   consentValidAt,
   consumeWithdrawal,
@@ -444,8 +445,9 @@ export default function ClaimSheet({
   // The consent step (5) (`sendIfValid`: the CTA was tapped, so a grant the
   // capability didn't know about sends now). NetInfo comes first: offline,
   // or a GET with no answer, is state 11 with nothing sent; after a connect
-  // (no tap) it is just Ready. Only a server failure or an incomplete block
-  // is F4's hand-off.
+  // (no tap) it is just Ready. A 403 `verification_required` is state 4,
+  // Verify, the same plan as the move route's 403. Only another server
+  // failure or an incomplete block is F4's hand-off.
   async function openConsent(sendIfValid: boolean, m: FaMoveCapability | null = move) {
     if (!isSubmitCapability(m)) return;
     setLoadingConsent(true);
@@ -462,6 +464,9 @@ export default function ClaimSheet({
         setConsentOverride(true);
         if (sendIfValid) await send(null, true);
         else show({ step: 'ready' });
+        return;
+      case 'verify':
+        apply(planFailure({ state: 'verify', errorCode: 'verification_required', status: 403, message: step.message }, copy));
         return;
       case 'consent':
         showConsent(step.block, m);
@@ -1099,11 +1104,9 @@ export default function ClaimSheet({
 }
 
 // fa_move_connect_shown {reason} (C1: submit only). An unknown connect
-// value is the plain connect step, so it counts as not_linked.
+// value shows the plain connect step, and is recorded as `unknown`.
 function trackConnectShown(move: FaMoveCapability | null, override: string | null, surface: FaMoveSurface) {
-  const c = override ?? move?.connect;
-  const reason = c === 'expired' || c === 'unverified' || c === 'other_account' ? c : 'not_linked';
-  trackFaMove(move, 'fa_move_connect_shown', { surface, reason });
+  trackFaMove(move, 'fa_move_connect_shown', { surface, reason: connectShownReason(override ?? move?.connect) });
 }
 
 // #179 claim sheet — construction mirrors SwapPlayerSheet (components.md →

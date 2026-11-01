@@ -18,11 +18,13 @@ Mobile only. Emitter: `mobile/src/api/faMove.ts` (`trackFaMove`, `attemptMove`),
 
 - **`surface`**: `free_agents` · `usage_trends`.
 - **`league_platform`** (C1): `sleeper` · `mfl` · `espn`, always present. The client emits only when the server's capability says `move.mode = 'submit'`, where it's set. Never a prop named `platform`.
-- **`connect_shown.reason`**: `not_linked` · `expired` · `unverified` · `other_account`. An unknown `connect` value shows the plain connect step and counts as `not_linked`.
+- **`connect_shown.reason`**: `not_linked` · `expired` · `unverified` · `other_account` · `unknown`. `unknown` is a `connect` value outside the closed set; the UI still shows the plain connect step (analytics-lead, round 3).
 - **`consent_shown.reason`**: `first` · `lapsed` · `version` · `withdrawn`. The server's own `consent.reason` when the consent block carries one (contract §2). Otherwise the client reads it: a 409 whose `copy_version` differs from the one shown is `version`; a Stop roster moves made in this app run is `withdrawn`; a grant the capability knew of that no longer holds is `lapsed`; otherwise `first`.
+- **In practice `consent_shown.reason` is server-authored:** the server sends `reason` in both the consent GET and the 409 block. The client's reading is a fallback, and an inferred `withdrawn` knows only this app run.
 - **`error_code`** (C2, C3): closed, 21 values, platform-free: `feature_disabled` · `bad_request` · `verification_required` · `not_linked` · `expired` · `unconfigured` · `consent_required` · `roster_full_drop_required` · `asset_not_owned` · `player_unavailable` · `waiver_bid_over_budget` · `waiver_claim_unsupported` · `move_kind_changed` · `rejected` · `write_failed` · `outcome_unknown` · `move_in_progress` · `internal_error` · `network` · `timeout` · `unknown`. `status` is the HTTP status; 0 for `timeout` and `network`.
-- **Two reads (C4):** "couldn't confirm" is `outcome_unknown`, `internal_error`, `timeout`, `network`, or `unknown` with `status` ≥ 500. "Repeat tap blocked" is `move_in_progress`.
+- **Two reads (C4, widened by analytics-lead in round 3):** "couldn't confirm" is `outcome_unknown`, `internal_error`, `timeout`, `network`, or `unknown` with `status` ≥ 500 **or 200–299** (a 2xx the client couldn't read, which it keeps recording as `unknown`/200). `unknown` with a 4xx stays out. "Repeat tap blocked" is `move_in_progress`.
 - **`kind`** (C6): `network` · `roster_read`, only when the response body carries one. It separates state 11 (not sent) from 10f (the platform refused).
+- **Joining on `attempt_id`:** always on (`user_id`, `attempt_id`), never on `attempt_id` alone. Ids are scoped per user (contract §3), so two users' identical ids are different moves.
 
 ## Seams
 

@@ -1808,7 +1808,8 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # this comment and the addendum (this registry constrains KEYS):
     #   `surface` ∈ free_agents | usage_trends — the claim sheet's host.
     #   connect_shown `reason` ∈ not_linked | expired | unverified |
-    #     other_account (an unknown connect value counts as not_linked).
+    #     other_account | unknown (`unknown` = a connect value outside the
+    #     closed set; the UI still shows the plain connect step).
     #   consent_shown `reason` ∈ first | lapsed | version | withdrawn.
     #   write_failed `error_code` is CLOSED, 21 values, platform-free (C2/C3):
     #     feature_disabled | bad_request | verification_required |
@@ -1818,9 +1819,11 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #     move_kind_changed | rejected | write_failed | outcome_unknown |
     #     move_in_progress | internal_error | network | timeout | unknown.
     #     "Couldn't confirm" = outcome_unknown | internal_error | timeout |
-    #     network, or unknown with status >= 500; "repeat tap blocked" =
-    #     move_in_progress (C4). `status` is the HTTP status, 0 for the
-    #     client's timer and for no answer at all.
+    #     network, or unknown with status >= 500 or 200-299 (a 2xx the
+    #     client couldn't read); unknown with a 4xx stays out. "Repeat tap
+    #     blocked" = move_in_progress (C4, widened by analytics-lead in
+    #     round 3). `status` is the HTTP status, 0 for the client's timer and
+    #     for no answer at all.
     #   write_failed `kind` ∈ network | roster_read, ONLY when the response
     #     body carries one (C6): state 11 "not sent" vs 10f "refused".
     # An offline tap sends nothing and records nothing, `attempted` included

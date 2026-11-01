@@ -43,7 +43,8 @@ FA_MOVE_TS = REPO / "mobile/src/api/faMove.ts"
 _ATTEMPT = "6f1c2d3e-0000-4000-8000-000000000000"
 
 _PROPS: dict[str, dict] = {
-    "fa_move_connect_shown": {"surface": "free_agents", "reason": "not_linked",
+    # `unknown` (round 3): a connect value outside the closed set.
+    "fa_move_connect_shown": {"surface": "free_agents", "reason": "unknown",
                               "league_platform": "sleeper"},
     "fa_move_consent_shown": {"surface": "usage_trends", "reason": "first",
                               "league_platform": "sleeper"},
@@ -125,6 +126,20 @@ def test_fa_move_error_code_set_matches_the_client():
     client = re.findall(r"'([a-z_]+)'", m.group(1))
     assert len(client) == len(set(client)) == 21
     assert set(client) == _ERROR_CODES
+
+
+# connect_shown's `reason`, granted (analytics-lead): the four connect values
+# and `unknown` for anything outside them (review round 3).
+_CONNECT_REASONS = {"not_linked", "expired", "unverified", "other_account", "unknown"}
+
+
+def test_fa_move_connect_reason_set_matches_the_client():
+    """The client's CONNECT_SHOWN_REASONS is the only source of the value
+    (mobile/src/api/faMove.ts connectShownReason)."""
+    src = FA_MOVE_TS.read_text()
+    m = re.search(r"export const CONNECT_SHOWN_REASONS = \[(.*?)\] as const;", src, re.S)
+    assert m, "CONNECT_SHOWN_REASONS not found in mobile/src/api/faMove.ts"
+    assert set(re.findall(r"'([a-z_]+)'", m.group(1))) == _CONNECT_REASONS
 
 
 # ---------------------------------------------------------------------------

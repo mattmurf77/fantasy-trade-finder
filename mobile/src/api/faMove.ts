@@ -345,11 +345,14 @@ export function consentLinks(block: ConsentBlock): ConsentLink[] {
 
 /** What a consent GET at the tap leads to. NetInfo is read first: offline
  *  sends no GET at all. A GET that fails at the network level (status 0, the
- *  client's timer) is "not sent" (state 11), like the move itself. Only a
- *  server-side failure or an incomplete block is F4's hand-off. */
+ *  client's timer) is "not sent" (state 11), like the move itself. A 403
+ *  `verification_required` (the route needs a verified session, contract §2)
+ *  is state 4, Verify, like the move route's 403. Only another server-side
+ *  failure or an incomplete block is F4's hand-off. */
 export type ConsentStep =
   | { kind: 'offline' }
   | { kind: 'not_sent' }
+  | { kind: 'verify'; message?: string }
   | { kind: 'valid' }
   | { kind: 'consent'; block: ConsentBlock }
   | { kind: 'unavailable' };
@@ -361,6 +364,10 @@ export async function fetchConsentStep(platform: LeaguePlatform): Promise<Consen
     status = await getConsent(platform);
   } catch (err) {
     if (!(err instanceof ApiError) || err.isTimeout || err.status === 0) return { kind: 'not_sent' };
+    if (err.isVerificationRequired) {
+      const message = (err.body as { message?: unknown }).message;
+      return { kind: 'verify', ...(typeof message === 'string' && message ? { message } : {}) };
+    }
     return { kind: 'unavailable' };
   }
   if (status && status.valid === true) return { kind: 'valid' };
@@ -369,12 +376,13 @@ export async function fetchConsentStep(platform: LeaguePlatform): Promise<Consen
 }
 
 /** Settings' read (contract §2): 200 with `valid: false` when there's no
- *  grant; a 404 is an older server, read as `valid: false` too. */
+ *  grant. A 404 (an older server) and a 403 `verification_required` (the
+ *  route needs a verified session) read as `valid: false` too: no row. */
 export async function readConsentStatus(platform: LeaguePlatform): Promise<ConsentStatus> {
   try {
     return await getConsent(platform);
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
+    if (err instanceof ApiError && (err.status === 404 || err.isVerificationRequired)) {
       return { platform, valid: false, until: null, status_line: null, stop_label: null };
     }
     throw err;
@@ -397,6 +405,17 @@ export function consentEcho(block: ConsentBlock): ConsentEcho {
 const _withdrawnHere = new Set<LeaguePlatform>();
 export function consumeWithdrawal(platform: LeaguePlatform): boolean {
   return _withdrawnHere.delete(platform);
+}
+
+/** `fa_move_connect_shown.reason` (analytics-lead, round 3): the capability's
+ *  connect value, and `unknown` for any value outside the closed set. The UI
+ *  shows the plain connect step for an unknown value either way. */
+export const CONNECT_SHOWN_REASONS = ['not_linked', 'expired', 'unverified', 'other_account', 'unknown'] as const;
+export type ConnectShownReason = (typeof CONNECT_SHOWN_REASONS)[number];
+export function connectShownReason(connect: unknown): ConnectShownReason {
+  return connect === 'not_linked' || connect === 'expired' || connect === 'unverified' || connect === 'other_account'
+    ? connect
+    : 'unknown';
 }
 
 export const CONSENT_REASONS = ['first', 'lapsed', 'version', 'withdrawn'] as const;

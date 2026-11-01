@@ -65,6 +65,13 @@
 //   X10 fully legacy for an absent/unknown mode: no move.copy, no move_line
 //   X11 every in-sheet re-read is bounded; a failed one after Connect goes on
 //   X12 contract §7's claim/waiver slots by bid and drop; `surface` sent
+// Round 3 (contract 3248995b: both consent routes need a verified session):
+//   Y1  Settings: a GET 403 verification_required is valid: false (no row);
+//       a DELETE 403 keeps the row with the "Couldn't turn it off" line   [executed + AST]
+//   Y2  the sheet: a consent GET 403 verification_required is state 4
+//       (Verify), the move route's plan, never F4's hand-off              [executed + AST]
+//   Y3  fa_move_connect_shown records an unknown connect value as
+//       `unknown` (analytics-lead); the UI still shows the connect step    [executed + AST]
 //
 // HONEST LABEL (G-035): the [AST] checks prove wirings are present, not
 // behavior; no React tree is rendered here. The [executed] checks run the
@@ -1108,6 +1115,59 @@ process.on('exit', () => {
       t.respond(() => response(200, { status: 'pending', move_kind: 'claim', result: 'accepted', league_platform: 'sleeper', attempt_id: 'x', title: 't', lines: [] }));
       await t.faMove.attemptMove({ move: SUBMIT, surface: 'usage_trends', request: REQ });
       eq(t.requests[0].body.surface, 'usage_trends', 'surface on the request');
+    });
+  }
+
+  // ── Review round 3: Y1, Y2 ───────────────────────────────────────────────
+  {
+    const VR = { error: 'verification_required', message: 'Verify your account first.' };
+    await check('Y1 Settings: a consent GET 403 verification_required reads as valid: false; a DELETE 403 rejects, so the row stays with its line', async () => {
+      const h = harness();
+      let next = 0;
+      const answers = [[403, VR], [403, { error: 'forbidden' }], [403, VR]];
+      h.respond(() => response(...answers[next++]));
+      eq((await h.faMove.readConsentStatus('sleeper')).valid, false, 'GET 403 verification_required');
+      let other = false;
+      try { await h.faMove.readConsentStatus('sleeper'); } catch { other = true; }
+      expect(other, 'another 403 was read as valid: false');
+      let rejected = false;
+      try { await h.faMove.withdrawConsent('sleeper'); } catch (e) { rejected = e.status === 403; }
+      expect(rejected, 'DELETE 403 did not reject');
+      expect(h.faMove.consumeWithdrawal('sleeper') === false, 'a refused DELETE was noted as a withdrawal');
+      const row = declText(parse(SETTINGS_LEAGUES), 'RosterMovesRow');
+      const caught = /\} catch \{([\s\S]*?)\}\s*finally/.exec(row);
+      expect(caught && /setFailed\(true\);/.test(caught[1]) && !/setStopped|setNotice/.test(caught[1]),
+        `the DELETE failure branch: ${caught && caught[1].trim()}`);
+    });
+    await check('Y2 the sheet: a consent GET 403 verification_required is state 4 (Verify), not the F4 hand-off', async () => {
+      const h = harness();
+      let next = 0;
+      const answers = [[403, VR], [403, { error: 'forbidden', message: 'no' }]];
+      h.respond(() => response(...answers[next++]));
+      eq(await h.faMove.fetchConsentStep('sleeper'), { kind: 'verify', message: 'Verify your account first.' }, '403 verification_required');
+      eq((await h.faMove.fetchConsentStep('sleeper')).kind, 'unavailable', 'another 403 is still F4');
+      const t = declText(claim, 'openConsent');
+      expect(/case 'verify':\s*apply\(planFailure\(\{ state: 'verify', errorCode: 'verification_required', status: 403, message: step\.message \}, copy\)\);/.test(t),
+        'openConsent applies the move route\'s verify plan');
+      const cp = h.plan.copyFns(SUBMIT, { league: 'L', name: 'A' });
+      const plan = h.plan.planFailure({ state: 'verify', errorCode: 'verification_required', status: 403, message: 'Verify your account first.' }, cp);
+      eq([plan.view.step, plan.view.verify, plan.view.line, plan.connect, plan.trackConnect],
+        ['connect', true, 'Verify your account first.', 'unverified', 'unverified'], 'state 4');
+      const moveRoute = h.plan.planFailure(h.faMove.classifyMoveError(apiErr(h, 403, VR)), cp);
+      eq(moveRoute, plan, 'the same plan as the move route\'s 403');
+    });
+  }
+
+  {
+    const h = harness();
+    await check('Y3 connect_shown.reason: the four connect values as themselves, anything else `unknown`; the step stays the plain connect', () => {
+      const R = h.faMove.connectShownReason;
+      eq(['not_linked', 'expired', 'unverified', 'other_account', 'banana', '', undefined, null, 'ok'].map(R),
+        ['not_linked', 'expired', 'unverified', 'other_account', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown'], 'reasons');
+      eq([...h.faMove.CONNECT_SHOWN_REASONS], ['not_linked', 'expired', 'unverified', 'other_account', 'unknown'], 'the granted set');
+      expect(/reason: connectShownReason\(override \?\? move\?\.connect\)/.test(declText(claim, 'trackConnectShown')), 'the sheet records through it');
+      const cp = h.plan.copyFns({ ...SUBMIT, connect: 'banana' }, { league: 'L', name: 'A' });
+      eq(h.plan.initialView({ ...SUBMIT, connect: 'banana' }, {}, cp).step, 'connect', 'the UI is the plain connect step');
     });
   }
 
