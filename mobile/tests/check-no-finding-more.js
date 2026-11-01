@@ -160,18 +160,51 @@ const EXEMPT = new Set(['screens/OverhaulReviewScreen.tsx::Finding more ideas'])
     if (ts.isFunctionDeclaration(n) && n.name?.text === 'DeckEndCard') fn = n.getText(sf);
     ts.forEachChild(n, visit);
   })(sf);
+  // #393 M2 (engagement-eng; trades-eng adjustment 4): DeckEndCard has ONE
+  // explicit variant, the paywall's preview end, rendered only when its
+  // `previewEnd` prop is set. It is carved out first, so 4a–4d keep pinning
+  // the genuine P30 card byte-for-byte on what is left; 4b2 and 4e pin the
+  // variant itself. With no variant in the file, `p30 === fn` and every
+  // check below is exactly what it was.
+  let previewIf = null;
+  let fnNode = null;
+  (function visit(n) {
+    if (ts.isFunctionDeclaration(n) && n.name?.text === 'DeckEndCard') fnNode = n;
+    ts.forEachChild(n, visit);
+  })(sf);
+  const fnStatements = fnNode && fnNode.body ? fnNode.body.statements : [];
+  for (const st of fnStatements) {
+    if (ts.isIfStatement(st) && st.expression.getText(sf) === 'previewEnd') previewIf = st;
+  }
+  const previewBranch = previewIf ? previewIf.getText(sf) : '';
+  const p30 = previewBranch ? fn.replace(previewBranch, '') : fn;
   // marketing-lead's copy file, rows p30.* — pinned verbatim.
   check('4a. P30 copy verbatim (p30.head, p30.body)',
     /export const DECK_END_TITLE = "You've seen every trade for now\.";/.test(comp)
       && /export const DECK_END_BODY = 'New ideas show up as rosters and values change\.';/.test(comp)
       && /<Text variant="heading">\{DECK_END_TITLE\}<\/Text>/.test(fn)
       && /<Text variant="bodySm" style=\{styles\.endBody\}>\{DECK_END_BODY\}<\/Text>/.test(fn));
-  const buttons = fn.match(/<Button\b/g) || [];
+  const buttons = p30.match(/<Button\b/g) || [];
   check('4b. exactly two actions: "Adjust your search" (p30.cta1, Primary) and "Back to Home" (p30.cta2, Secondary) — no third',
     buttons.length === 2
-      && /label="Adjust your search"\s*variant="primary"/.test(fn)
-      && /label="Back to Home"\s*variant="secondary"/.test(fn),
+      && /label="Adjust your search"\s*variant="primary"/.test(p30)
+      && /label="Back to Home"\s*variant="secondary"/.test(p30),
     `${buttons.length} buttons`);
+  if (previewIf) {
+    // The variant is the statement right before P30's return, and it returns:
+    // the P30 render is reached only when `previewEnd` is unset.
+    const at = fnStatements.indexOf(previewIf);
+    const last = fnStatements[fnStatements.length - 1];
+    check('4b2. #393 M2 preview_end: only when `previewEnd` is set; eyebrow + mon.lock.find; ONE Primary (See plans / Continue), no tally, no Adjust/Home',
+      at === fnStatements.length - 2 && ts.isReturnStatement(last)
+        && /^if \(previewEnd\) \{\s*return \(/.test(previewBranch)
+        && (previewBranch.match(/<Button\b/g) || []).length === 1
+        && /<Button\s+testID="deck-end-paywall-cta"\s+label=\{previewEnd\.verify \? MON\['mon\.verify\.continue'\] : MON\['mon\.pay\.see_plans'\]\}\s+variant="primary"\s+onPress=\{previewEnd\.onPress\}/.test(previewBranch)
+        && /<Text variant="heading">\{MON\['mon\.preview\.page_end'\]\}<\/Text>/.test(previewBranch)
+        && /<Text variant="bodySm" style=\{styles\.endBody\}>\{MON\['mon\.lock\.find'\]\}<\/Text>/.test(previewBranch)
+        && !/tally|onAdjust|onHome|DECK_END_|\$\d|price|free/i.test(previewBranch.replace(/MON\['mon\.[a-z_.]+'\]/g, '')),
+      'the variant is one if-return before P30, with exactly one Primary and no P30 parts');
+  }
   check('4c. no Like/Pass, no count, no "new trades" notice on the end card',
     !/onLike|onPass|disposition|Toast|Badge|newTrades|onSeeNew|count/i.test(fn.replace(/DeckEndCard/g, ''))
       && !/new trade/i.test(fn),
@@ -182,8 +215,15 @@ const EXEMPT = new Set(['screens/OverhaulReviewScreen.tsx::Finding more ideas'])
       && /\{tally && \(tally\.passed \|\| tally\.liked \|\| tally\.proposed\) \? \(/.test(fn) && !/tally\.passed \+|passed \+ tally/.test(fn)
       && /P36 \(head-product, 2026-10-23; PRD row 4\): suppressed at 0 · 0 · 0\./.test(fn));
   const code = stripComments(read('screens/TradesScreen.tsx'));
-  check('4e. the screen mounts it once, with exactly those props',
-    (code.match(/<DeckEndCard\b/g) || []).length === 1
+  // #393 M2: besides the one P30 mount, at most ONE preview_end mount, which
+  // carries exactly minHeight + previewEnd and renders only from the deck's
+  // 402 end (`pagedWithCards && deckGateEnd && (!rawTopCard || showDeckEndCard)`,
+  // ahead of P30 so a 402 end never shows P30).
+  const previewMounts = code.match(/\) : pagedWithCards && deckGateEnd && \(!rawTopCard \|\| showDeckEndCard\) \? \(\s*<DeckEndCard\s+minHeight=\{topCardH\}\s+previewEnd=\{\{[^}]*\}\}\s*\/>/g) || [];
+  check('4e. the screen mounts it once, with exactly those props (plus at most one preview_end mount, only from the 402 end)',
+    previewMounts.length <= 1
+      && (code.match(/<DeckEndCard\b/g) || []).length === 1 + previewMounts.length
+      && (code.match(/previewEnd=/g) || []).length === previewMounts.length
       && /<DeckEndCard\s+minHeight=\{topCardH\}\s+tally=\{replenishmentOn \? sessionTally : null\}\s+onAdjust=\{handleDeckEndAdjust\}\s+onHome=\{homeTabOn \? handleDeckEndHome : undefined\}\s*\/>/.test(code));
   check('4f. it renders only from showDeckEndCard = pagedWithCards && (latched || deckEnd === "end"), latched only on "end"',
     /const showDeckEndCard = pagedWithCards && \(endLatched \|\| deckEnd === 'end'\);/.test(code)
