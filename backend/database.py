@@ -3626,6 +3626,10 @@ _MODEL_CONFIG_DEFAULTS = [
     # top-level int `app_store_live` on GET /api/feature-flags; anything but
     # exactly 0 or 1 serves -1.
     ("app_store_live",           -1,    "min-version gate Update target: 1 = App Store, 0 = TestFlight, -1 = unset (the app's compiled fallback, App Store from 2026-11-18T08:00:00Z). Served on GET /api/feature-flags; anything but 0/1 serves -1"),
+    # ── Tip jar (tip-jar plan §3 S1, docs/plans/tip-jar/plan.md) ─────────
+    # release-lead sets 1 once ftf_tip_199/499/999 exist in App Store
+    # Connect; 0 is the deploy-free kill switch. Seeded 0, insert-if-absent.
+    ("paywall_tips_enabled",      0.0,  "tip jar: exactly 1 serves the ftf_tip_199/499/999 list as `tips` on GET /api/paywall/config for platform=ios on a verified, non-demo session while monetize.paywall is on; anything else (0, a missing row, a failed read) serves []. Read live per request, so 0 hides the tips without a deploy. A tip grants nothing (entitlements.is_tip_product)"),
 ]
 
 
