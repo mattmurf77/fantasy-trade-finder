@@ -54,7 +54,7 @@
 | §2.1 `:77` and prd.md §4.2 `:199-220`: hand-off mode = clipboard + steps block + Open in Sleeper | **Steps and clipboard dropped** (operator, 11-01). Hand-off = the single CTA "Open in Sleeper to claim", as #509 ships it (`ClaimSheet.tsx:304-310` today) |
 | §2.1 `:77`: "Flag off (or the route answers 404)" | `move.mode = 'handoff'`, or 404 `feature_disabled` from the move route |
 | §2.2–§2.4 `:90-135`: D10 named CTA, visual spec, "Do it in Sleeper instead" | **Unchanged.** "Do it in Sleeper instead" (`s351.secondary`, approved) now ships at launch |
-| §2.3 `:119`: "Recoverable failure (network or 5xx): the reason plus **Try again**" | **Narrowed.** Try again only when nothing was provably sent. Every after-send failure is **outcome unknown** (§B5, state 12) |
+| §2.3 `:119`: "Recoverable failure (network or 5xx): the reason plus **Try again**" | **Narrowed.** A retry only when nothing was provably sent, and it's the same named CTA, not a "Try again" label (state 11). Every after-send failure is **outcome unknown** (§B5, state 12) |
 | §3 `:156`: `POST /api/league/free-agents/add` | **`POST /api/league/free-agents/move`**. The platform comes from the league row (§B3) |
 | §3 `:160`: order of checks | **Kept**, with three steps added: platform resolution, the per-platform kill switch, and the `attempt_id` lookup (§B3) |
 | §3 `:164-175`: refusal table with `sleeper_*` codes | **Kept**, with `sleeper_*` → `{platform}_*`. New: `{platform}_outcome_unknown` (502), `move_in_progress` (409), `move_kind_changed` (409). Every body has `detail = message` plus an optional server `title` |
@@ -214,6 +214,11 @@ The Settings › Leagues "Stop roster moves" row shows only while a grant is act
   - per-state conditions (`:94-122`);
   - findings F1–F6 (`:124-156`);
   - TestFlight rows FA1–FA6 (`:158-176`, in §3).
+- **design-lead's visual delta (2026-11-01) is folded in**, also **pending the operator's approval**:
+  - the slot table "D1 in-app free-agent moves", `/Users/teresadickens/ftf-worktrees/org-bringup/docs/plans/org-bringup/reports/design-lead.md` `:3-44` (untracked);
+  - the mockup `mockups/fa-moves-sheet/index.html` (uncommitted). It's a **design prototype, never app behavior**.
+
+  Layout is in note (f).
 - Event names are the granted `fa_move_*` names (§1), shortened here (`connect_shown` = `fa_move_connect_shown`).
   - Every one carries `league_platform` (C1).
   - `error_code` is the platform-free suffix (C2).
@@ -227,7 +232,7 @@ The Settings › Leagues "Stop roster moves" row shows only while a grant is act
 | 4 | **Verify** | `move.connect='expired'` / `'unverified'`, or 409 `{platform}_expired`, or 403 `verification_required` | The same step, with **Verify** | As 3 | `connect_shown {reason: expired \| unverified}` | Stays |
 | 5 | **Consent needed** (first / lapsed / version / withdrawn) | At the tap, `move.consent_until` is null or past → consent `GET` (text + `copy_version`). Safety net: 409 `consent_required` (carries the same) | The consent step: the server's text for (platform, `copy_version`, locale). v1 is legal-final now (consent.md §4.1); v2 once claims are on. "This move: {CTA label} in {League}." sits above an **unticked** box. Make the move is disabled until it's ticked.<br>**ux-lead A5:**<ul><li>the "This move" line uses the same string and source as state 6's CTA;</li><li>Make the move sits directly under the box, and both are on screen together on an SE;</li><li>ticking never sends;</li><li>the disabled button has a VoiceOver hint.</li></ul>**F5:** a 409 `consent_required` carrying a new `copy_version` re-shows the new text **unticked**, with a "terms changed" line. The tick never carries over | **Make the move** (a fresh tap; sends `consent: {copy_version, locale}`); **Not now** (back to the sheet with bid and drop intact); **Do it in Sleeper instead** | `consent_shown {reason}`; on Make the move, `write_attempted {consent_ticked: true}`; server `consent_recorded` | Stays |
 | 6 | **Ready** | `mode='submit'`, connected, consent valid | **The named CTA is the per-move confirmation (D10)**: "Add A, drop B" / "Add A" / "Claim A for $N, drop B", matching the row's `move_kind`. The league is on or beside it. The finality line is always under it. A claim also shows the waiver line and bid. Inside a window: "Adds authorized until {date}" + **Turn off**.<br>**ux-lead:**<ul><li>roster full (`open_slots === 0`) with no drop picked → the CTA is **disabled**, with "Drop a player to make room" (#509's line). 10a is only the safety net;</li><li>a long CTA wraps to two lines and never truncates a name;</li><li>the bid follows note (d);</li><li>#509's pinned-CTA conditions carry over.</li></ul> | CTA; Do it in Sleeper instead; Cancel. **Turn off** closes the sheet and opens Settings › Leagues | none until the tap | Open |
-| 7 | **Submitting** | CTA tapped (and online, §B5) | CTA loading, and disabled from tap to result (D10(f)).<br>**Not dismissible** (ux-lead A1): the backdrop, Cancel and the Modal close request do nothing while sending. Cancel shows disabled, not hidden.<br>At ~8 s a "still sending" line appears, and the CTA stays busy (`accessibilityState` busy). The client timeout leads to 12 | none | `write_attempted` | Open |
+| 7 | **Submitting** | CTA tapped (and online, §B5) | CTA loading, and disabled from tap to result (D10(f)).<br>**Not dismissible** (ux-lead A1): the backdrop, Cancel and the Modal close request do nothing while sending. Cancel shows disabled, not hidden. design-lead agrees: backdrop taps, swipe-down and Android back are ignored until the result or the client timeout, and the CTA uses #364's `loading` state.<br>At ~8 s a "still sending" line appears, and the CTA stays busy (`accessibilityState` busy). The client timeout leads to 12 | none | `write_attempted` | Open |
 | 8 | **Added** | 200, `status: complete` | Says exactly what the platform reports: A added, B dropped, in {League}. A partial result is stated as reported (R15.1 `:767-771`, K-F6). Focus moves to the result title, which is announced | **Done** | server `write_succeeded {move_kind: add, result: accepted \| partial}` | Done closes. Refresh (note b). The held trade page is discarded automatically and the server has already saved the new roster (§B10), so the next search drops B. Cards already on screen keep B until then: the display half of W-AC-L5 the operator waived, the same as a drop made in Sleeper. A send including B is refused by the live roster read (`server.py:24697`); a Like may still record (AC-6b post-launch). In-place removal comes with strict mode |
 | 9 | **Waiver pending** | 200, `status: pending` | "Claim submitted" for A, bid $N, dropping B **if it clears**, run on the league's waiver schedule (say when, if the server knows). **Never "added".** No cancel line until capture Q7b is verified (R15.8 `:874`) | **Done** | server `write_succeeded {move_kind: claim, result: accepted}` | Done closes. Refresh; the row reads "claim pending" for the session (consent.md §5). The server blocks a second claim on that player (§B6) |
 | 10a | **Rejected: roster full** | 422 `roster_full_drop_required` | Pick a player to drop. The drop list is highlighted, scrolled into view, and gets focus. No result screen. A safety net only: state 6 disables the CTA first | Pick a drop, tap again (a new move, not a retry) | `write_failed {error_code, status}` (10a–10g) | Stays |
@@ -237,9 +242,9 @@ The Settings › Leagues "Stop roster moves" row shows only while a grant is act
 | 10e | **Rejected: changed** | 409 `move_kind_changed` | A went on (or off) waivers. A line says why the CTA's label changed and that nothing was sent, and focus moves to it | Review the corrected CTA | as 10a | Stays. Re-reads the FA list |
 | 10f | **Rejected by the platform** | 502 `{platform}_write_failed` (the platform refused; `detail` is its sentence) | The reason in plain words. Nothing changed (R15.1 rejection line) | **No retry.** Open in Sleeper (secondary); Done | as 10a | Closes on Done |
 | 10g | **Unavailable** | 503 `{platform}_unconfigured` | Moves aren't available right now | Open in Sleeper; Done. No retry | as 10a | Closes on Done |
-| 11 | **Not sent** | 502 `{platform}_write_failed` with `kind: network` from a definite connect-phase failure (`request_never_sent`), or a pre-write read failure (`kind: roster_read`); or **offline at the tap** (NetInfo; nothing is sent, §B5) | Couldn't reach Sleeper, so nothing was sent | **Try again**, the only retry anywhere (ux-lead A3).<ul><li>It's a fresh tap with a new `attempt_id`.</li><li>Consent isn't asked again, because it was committed before the platform call.</li><li>**Do it in Sleeper instead** sits beside it.</li></ul> | `write_failed {error_code: write_failed, kind: network \| roster_read}` (C6). **[pm]** None when offline at the tap: no attempt, so no `attempt_id` | Stays |
+| 11 | **Not sent** | 502 `{platform}_write_failed` with `kind: network` from a definite connect-phase failure (`request_never_sent`), or a pre-write read failure (`kind: roster_read`); or **offline at the tap** (NetInfo; nothing is sent, §B5) | A `--neg` line, "nothing was sent" (couldn't reach Sleeper), above **the same named CTA** | **The same named CTA**, the only retry anywhere. **[pm]** This is design-lead's form, not a "Try again" label: it keeps D10's named per-move confirmation, which is the conservative reading. It goes to legal's ~11-04 pass (via `head-bizops`) as a confirmation, not a blocker. ux-lead's A3 conditions hold:<ul><li>It's a fresh tap with a new `attempt_id`.</li><li>Consent isn't asked again, because it was committed before the platform call.</li><li>**Do it in Sleeper instead** sits beside it.</li></ul> | `write_failed {error_code: write_failed, kind: network \| roster_read}` (C6). **[pm]** None when offline at the tap: no attempt, so no `attempt_id` | Stays |
 | 12 | **Outcome unknown** | Exactly C4's "couldn't confirm" read: 502 `{platform}_outcome_unknown` (`outcome_unknown`); 409 `move_in_progress`; 500 `internal_error`; the client's timer fired (`timeout`); status 0 (`network`); a 5xx with no usable code (`unknown`, status ≥ 500) | **"Check before resending"** (8i). We couldn't confirm whether the move reached Sleeper; check your roster (or your claims) in Sleeper before trying again. Never "failed", never "try again" | **Open in Sleeper**; Done. **No retry.** The CTA doesn't come back for this player, **including after the sheet closes**: the row is held in hand-off by §B6's block for ~15 min (ux-lead A2/F1) | `write_failed {error_code, status}` with the code in brackets in the trigger cell (C4) | Closes on Done. Refresh (a landed add leaves the list) |
-| 13 | **Connection rejected** | 409 `{platform}_rejected`: the platform refused the stored token. The server deletes the credential and appends a withdrawal (`credential_rejected`, consent.md `:300`) | Sleeper turned down Fleeced's connection, so nothing changed. Connect again to make moves | **Connect again (primary**, ux-lead CHANGE) → 3, then 5, with the sheet intact; Do it in Sleeper instead; Done | `write_failed {error_code: rejected}`; server `consent_withdrawn {via: credential_rejected}` | Stays until Done. Capability refetched |
+| 13 | **Connection rejected** | 409 `{platform}_rejected`: the platform refused the stored token. The server deletes the credential and appends a withdrawal (`credential_rejected`, consent.md `:300`) | Sleeper turned down Fleeced's connection, so nothing changed. Connect again to make moves | **Connect again (primary**, ux-lead CHANGE) → 3, then 5, with the sheet intact; Do it in Sleeper instead; Done. design-lead's slot table, drawn against `26349e78`, lists Done + Do it in Sleeper only. Connect again is to be added (§F) | `write_failed {error_code: rejected}`; server `consent_withdrawn {via: credential_rejected}` | Stays until Done. Capability refetched |
 | 14 | **Claims not enabled** | Per-row `move_mode='handoff'` for a waiver player, or 422 `waiver_claim_unsupported` (D5 not met) | This player is on waivers, and claims from Fleeced aren't on yet, so claim in Sleeper. The sheet switches to hand-off (1) with bid and drop kept. A line says why the button changed and that nothing was sent; focus moves to it. On the 422 path the bid field appears empty and unfocused under that line (ux-lead A4) | Open in Sleeper to claim | `write_failed {error_code: waiver_claim_unsupported}` (422 path only); then `sleeper_handoff_resolved {target: add}` on the open (#528) | Stays, in hand-off mode |
 | 15 | **Settings: Stop roster moves** | Consent `GET` → `valid: true` | Settings › Leagues: "Roster moves: on until {date}" + **Stop roster moves** (consent.md §4.4; status lines approved, R15.8 `:856`). The row shows only while a grant is active | One tap, no dialog. Then R15.2.6's notice, verbatim. Focus moves to the notice, then the row goes | server `consent_withdrawn {via: settings}` | n/a |
 
@@ -256,8 +261,31 @@ The Settings › Leagues "Stop roster moves" row shows only while a grant is act
 - **(d) The FAAB field: answered by ux-lead A4.**
   - `submit` + add: **hidden**. An add spends no FAAB, and the CTA carries no bid.
   - `submit` + claim: **shown**, and in the CTA.
-  - Hand-off (the mode, the per-row override, or state 14): **shown on FAAB leagues**, as today (`ClaimSheet.tsx:189-229`).
-- **(e) Everywhere** (ux-lead). VoiceOver focus moves to each new step's title, and results are announced. Each step replaces the sheet's content rather than stacking.
+  - Hand-off (the mode, the per-row override, or state 14): **shown on FAAB leagues**, as today (`ClaimSheet.tsx:189-229`). On state 14's 422 path it is shown empty and unfocused.
+  - design-lead's mockup follows this. A4 settles design-lead's open note.
+- **(e) Everywhere** (ux-lead and design-lead agree). VoiceOver focus moves to each new step's title, and results are announced. Each step replaces the sheet's content rather than stacking.
+- **(f) Layout** (design-lead, `/Users/teresadickens/ftf-worktrees/org-bringup/docs/plans/org-bringup/reports/design-lead.md` `:7-40`).
+  - **Structure.** Header / scrolling bid and drop / a **pinned action block** (ink-2, top hairline). The block holds, top to bottom:
+    - "In {League}";
+    - the named CTA, which grows to two lines and is never truncated (D10);
+    - a claim's waiver line;
+    - the finality line, always shown;
+    - "Adds authorized until… · Turn off";
+    - "Do it in Sleeper instead".
+  - **On an SE:**
+    - add/drop fits with room to spare: 224pt of content above the 177pt pinned block, with the FAAB field hidden per note (d);
+    - a claim in an active window is a 283pt block, so 29pt of the drop list scrolls, and the confirmation never scrolls away.
+  - **Keyboard.** The sheet rises above the number pad (KeyboardAvoidingView), with `flashScrollIndicators()` on open.
+  - **Accessibility text sizes** (design-lead's layout call). When the pinned block would be taller than half the sheet, it **stops pinning and joins the end of the scroll**. The named CTA still wraps and is never truncated. It's the same rule as the action banner's tier 0.
+  - **By state:**
+    - **3/4** replace only the action block.
+    - **5** is its own step, with the unticked box (design-lead's #351 §2.3).
+    - **Results (8, 9, 10c, 10f, 10g, 12, 13)** swap the body to a result panel.
+      - Icon slot: a chalk check for 8 and an amber (`--warn`) info icon for 12. The others get none, so a pending claim (9) never reads as done.
+      - Pinned buttons per state. **12 makes Open in Sleeper primary.**
+      - Refusals use `--neg` text, never a fill. There is no Cancel on results.
+    - **Inline (10a, 10b, 10d, 10e, 11, 14):** the sheet stays.
+  - **Every title and message is a server slot** (§B4).
 
 ## D. Timeline and cut lines
 
@@ -452,7 +480,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
   | T6 | Sheet open on A | As commissioner on Sleeper web, add A to another dummy roster → tap in the app | "A was just picked up"; no write; Done → the list is refreshed |
   | T7 | Claims on (v2 current) | A FAAB claim with a $7 bid and a drop | Consent **re-asks with v2** (version bump). The CTA reads "Claim A for $7, drop B", with the waiver line and bid under it. The result says **claim submitted, never added**. Cancel in Sleeper if possible. *With claims off:* hand-off mode, bid and drop kept |
   | T8 | FAAB league | Bid > remaining → tap | The inline error and a disabled CTA (`ClaimSheet.tsx:129`, `:308`). If the server's remaining is lower than the app's, a 422 shows the server's figure; no write |
-  | T9 | Connected, consent valid | Tap, then **airplane mode immediately** | **"Check before resending"**; **no Try again**; Open in Sleeper offered. Airplane off → Sleeper shows whether it landed; the list after Done agrees. Reverse if it landed |
+  | T9 | Connected, consent valid | Tap, then **airplane mode immediately** | **"Check before resending"**; **no retry** (no CTA for that player); Open in Sleeper offered. Airplane off → Sleeper shows whether it landed; the list after Done agrees. Reverse if it landed |
   | T10 | Day 8 after T3's grant | Tap | The consent step (lapsed); no write until ticked. (The boundary itself is pinned by the backend test) |
   | T11 | Grant active | Settings › Leagues → **Stop roster moves** | "Roster moves: on until {date}"; R15.2.6's notice verbatim; the row disappears; the next move asks consent again |
   | T12 | Sheet open, flag on | The operator sets the flag **off** in `FTF_FLAGS` → tap | 404 → hand-off mode; nothing sent. Pull to refresh → "Open in Sleeper to claim" |
@@ -464,12 +492,13 @@ Sizing is platforms-eng's (sizing `:37-39`).
 
   | # | Setup | Steps | Expected |
   |---|---|---|---|
-  | FA1 | **Airplane Mode on** | Tap the CTA | **Not sent (11)** with Try again; nothing sent. Back online, Try again sends with **no consent step** |
+  | FA1 | **Airplane Mode on** | Tap the CTA | **Not sent (11)**: the "nothing was sent" line above the same named CTA; nothing sent. Back online, **the named CTA sends again, with no consent step** |
   | FA2 | Network Link Conditioner, 3G | Tap; **kill the app** mid-send; reopen and open that player's sheet | The "check Sleeper" line and **no Add or Claim CTA for ~15 min** (§B6). Exactly **one** move in Sleeper. Reverse |
   | FA3 | FAAB league, `submit` mode, a free agent | Open the sheet | **No bid field**; the CTA reads "Add A" or "Add A, drop B" |
   | FA4 | Roster full | Open the sheet | The CTA is **disabled until a drop is picked** |
   | FA5 | Not connected | Connect → cancel the sign-in; then Connect for real | Cancel: back on the connect step with bid and drop intact. Real connect: back **on the consent step** |
   | FA6 | Connected, consent valid | Tap; during Submitting, tap the backdrop and Cancel | Nothing closes. The still-sending line shows at ~8 s |
+  | AX1 | **The largest accessibility text size** (design-lead) | Open the sheet on add/drop and on a claim; scroll | The pinned block has joined the end of the scroll. The CTA is **fully readable and reachable by scrolling**, and **nothing is truncated** |
 
   **For launch, T14 and T15 supersede consent.md's step 29** (`:475`). There is no in-place card-removal step: cards already on screen keep B until the next search (§B10). `trades-pm` is asking `head-product` to update PRD step L4b to match.
 
@@ -533,7 +562,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
 
   #351's P31 device tests gate #509's hand-off merge, not this flip. **The flip itself is the operator's.** The TestFlight checklist runs straight after it, and the flag goes back off on any failure.
 - **Claims** need, in addition, D5: the current copy at v2 **and** the claim shape captured.
-- **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the F1–F17 sabotages (applied and reverted), the backend tests, the code-walk, the T1–T15 and FA1–FA6 outcomes, and `FTF_SKIP_SIM_GATE=1`.
+- **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the F1–F17 sabotages (applied and reverted), the backend tests, the code-walk, the T1–T15, FA1–FA6 and AX1 outcomes, and `FTF_SKIP_SIM_GATE=1`.
 - **Express lane declared by the operator?** No. Schema, API and flag surfaces are all touched, so full gates apply.
 
 ## E. Platform scope
@@ -574,7 +603,12 @@ Sizing is platforms-eng's (sizing `:37-39`).
 - **`legal-lead`**, via `head-bizops`: the launch minimum (~11-04). Also, if `eng-architect` picks a write-once move row, confirmation that it still meets R15.3 (§B6).
 - **`analytics-lead` — granted 2026-11-01:** P1 and P2, with C1–C6 (§1).
 - **`ux-lead` — done 2026-11-01:** flow verdicts folded into §B and §C, and FA1–FA6 into §3 (`/Users/teresadickens/ftf-worktrees/org-bringup/docs/plans/org-bringup/reports/ux-lead.md` `:34-176`). They are recommendations, pending the operator's approval.
-- **`design-lead`:** §C's visual review. Still open.
+- **`design-lead` — done 2026-11-01:** the visual delta is folded into §C note (f) and §3 AX1 (`/Users/teresadickens/ftf-worktrees/org-bringup/docs/plans/org-bringup/reports/design-lead.md` `:3-44`).
+  - Small follow-up: add **Connect again** as state 13's primary to the slot table, which predates ux-lead's change.
+  - design-lead owes the `components.md` rows on acceptance: action block, result panel, Checkbox.
+- **To the operator, via `head-product`:** both reviews (ux-lead's and design-lead's), with design-lead's PNG, `design-lead-fa-moves-sheet.png` in head-product's notes folder. Both are pending the operator's approval.
+- **`legal-lead`** (~11-04 pass, via `head-bizops`): confirm state 11's retry as the same named CTA. A confirmation, not a blocker.
+- **Marketing** (via `head-product`): the client fallbacks "In {League}" and "Sleeper isn't connected", plus the header by `move_kind` (§G G22–G24).
 - **`analytics-lead`:** `other_account` on `fa_move_connect_shown.reason`. Requested 11-01 (§1).
 - **marketing**, via `head-product`: §G.
 - **`trades-pm` — answered 2026-11-01:** K-F5 is in the 11-06 binary in a reduced form. After a completed move, the next search no longer offers the dropped player; cards already on screen keep it until that search. The build requirements are §B10. `head-eng` confirms who builds the `devicePage.ts` change (`trades-eng` reviews it).
@@ -603,13 +637,16 @@ Sizing is platforms-eng's (sizing `:37-39`).
 | G12 | 10a–10e | One line per refusal | Plain reason, and what to do next | needed |
 | G13 | 10f | Platform refused | Nothing changed; you can still do it in Sleeper | needed (draft: R15.1 `:769`) |
 | G14 | 10g | Unavailable | Moves can't be made right now | needed |
-| G15 | 11 | Not sent | Couldn't reach Sleeper, nothing was sent, try again | needed (precedent: `server.py:24598-24599`) |
+| G15 | 11 | Not sent | Couldn't reach Sleeper, so nothing was sent. The same named CTA under it is the retry, so no "try again" label | needed (precedent: `server.py:24598-24599`) |
 | G16 | 12 | Outcome unknown, title + body | We can't confirm it; check Sleeper before trying again; never "failed" or "try again" | title **reuses 8i** "Check before resending"; body needed (precedent `server.py:24600-24602`) |
 | G17 | 13 | Connection rejected | Sleeper turned down the connection; nothing changed; connect again | needed |
 | G18 | 14 | Claims not enabled | This player is on waivers; claim in Sleeper for now | needed |
 | G19 | 15 | Settings status lines + withdrawal notice | — | **approved** (R15.8 `:856`; R15.2.6 `:783`, verbatim) |
 | G20 | all | "Do it in Sleeper instead" | — | **approved** (`s351.secondary`) |
 | G21 | all | **Client fallbacks** (baked into the binary) | Neutral, platform-free wording for: result, refusal, outcome unknown and not sent. **Never consent text** | needed before 11-06 |
+| G22 | 6 | Client fallback: "In {League}" | Names the league beside the CTA (D10(a)) when the server line is missing | needed (design-lead) |
+| G23 | 3 | Client fallback: "Sleeper isn't connected" | Shown after backing out of connect (consent.md `:88`) | needed (design-lead) |
+| G24 | 1, 6 | Sheet header by `move_kind` | Today it reads "Claim {name}" even for an add. On `submit` + add it should probably be "Add {name}" | needed (design-lead's flag; marketing's word) |
 
 ## H. Risks
 
