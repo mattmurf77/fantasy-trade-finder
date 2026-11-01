@@ -123,6 +123,7 @@ class Platform:
         "http_500": "http_500",
         "http_504": "http_504",
         "http_400": "http_400",
+        "http_429": "http_429",
         "non_json_2xx": lambda: _Resp(b"<html>surprise</html>"),
         "no_data_2xx": lambda: _Resp(b'{"ok": true}'),
         "unreadable_node": lambda: _Resp(_data({"weird": 1})),
@@ -582,7 +583,7 @@ def test_after_send_failure_is_outcome_unknown_and_never_retried(h, mode):
     assert h.events_named("fa_move_write_succeeded") == []
 
 
-@pytest.mark.parametrize("mode", ["connect_refused", "dns", "no_route"])
+@pytest.mark.parametrize("mode", ["connect_refused", "dns", "no_route", "http_429"])
 def test_connect_phase_failure_is_not_sent(h, mode):
     h.platform.mode = mode
     r = h.post()

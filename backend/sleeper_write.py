@@ -495,8 +495,8 @@ def _post_graphql_write(op: str, token: str, body: dict, *, timeout: int, _opene
     failure by backend/write_outcome.py's rules (the ESPN/MFL adapters'):
 
       * 401/403, or an auth-worded GraphQL error → SleeperAuthError;
-      * a definite connect-phase failure (`request_never_sent`) → kind
-        'network': nothing was sent, a retry is safe;
+      * a definite connect-phase failure (`request_never_sent`) or a 429
+        throttle → kind 'network': nothing was processed, a retry is safe;
       * a timeout / reset / RemoteDisconnected after the request was written,
         a URLError urllib can't place before the send, an HTTP 5xx, or a 2xx
         that isn't readable JSON with a `data` object → kind OUTCOME_UNKNOWN:
@@ -534,6 +534,10 @@ def _post_graphql_write(op: str, token: str, body: dict, *, timeout: int, _opene
                                        detail=raw[:500])
             if e.code >= 500:
                 raise SleeperWriteError(f"Sleeper returned HTTP {e.code}", kind=unknown,
+                                        detail=raw[:500])
+            if e.code == 429:
+                # A throttle is a definite "not processed" (mfl_write's rule).
+                raise SleeperWriteError("Sleeper throttled the request", kind="network",
                                         detail=raw[:500])
             raise SleeperWriteError(f"Sleeper returned HTTP {e.code}", detail=raw[:500])
         except urllib.error.URLError as e:
