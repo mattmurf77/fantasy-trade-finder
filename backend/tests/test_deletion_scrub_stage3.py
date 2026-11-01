@@ -109,7 +109,8 @@ def test_a_session_in_a_league_the_person_left_is_found_by_its_source(engine):
 def test_an_overdue_diagnostic_naming_the_person_is_deleted(engine):
     now = datetime.now(timezone.utc)
     with engine.begin() as conn:
-        for sid, days, who in (("old-del", 40, DEL), ("new-del", 10, DEL), ("old-other", 40, OTHER)):
+        for sid, days, who in (("old-del", 40, DEL), ("past-del", 20, DEL), ("new-del", 10, DEL),
+                               ("old-other", 40, OTHER)):
             conn.execute(insert(db.deck_diagnostic_snapshots_table).values(
                 snapshot_id=sid, user_id=VIEWER, deck_job_id="deck-1",
                 created_at=(now - timedelta(days=days)).isoformat(),
@@ -117,7 +118,7 @@ def test_an_overdue_diagnostic_naming_the_person_is_deleted(engine):
     accounts.delete_user_data(DEL)
     scrub.run_pending()
     assert sorted(r["snapshot_id"] for r in read(engine, db.deck_diagnostic_snapshots_table)) == [
-        "new-del", "old-other"]          # the 14-day purge takes the newer one within 30 days
+        "new-del", "old-other"]          # past the 14-day retention goes; the purge takes the newer one
 
 
 # ── The lifecycle, complete ─────────────────────────────────────────────────
@@ -271,7 +272,8 @@ def test_a_job_unfinished_after_30_days_is_deleted_and_eng_told(engine, caplog, 
     with engine.connect() as conn:
         assert conn.execute(select(t.c.job_id)).scalars().all() == [young]
     (line,) = [r.getMessage() for r in caplog.records if "abandoned" in r.getMessage()]
-    assert line == "[scrub] abandoned jobs=1 after_days=30 last_errors={'row_failures': 1}"
+    assert line == ("[scrub] abandoned jobs=1 after_days=30 last_errors={'row_failures': 1} "
+                    "stuck_at={'db_pass': 1}")
     assert DEL not in caplog.text and "second-person" not in caplog.text
 
 

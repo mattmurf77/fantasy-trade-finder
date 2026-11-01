@@ -2112,6 +2112,7 @@ One row per card in a session, in shuffled order.
 | `skipped` | int, not null, server default `0` | `1` ⇒ `grade IS NULL` and `tags_json = '[]'` |
 | `tags_json` | text (JSON), not null, server default `[]` | De-duplicated subset of the seven tags in `blind_grading.TAGS` ([cross-client-invariants § Calibration tags and scale](cross-client-invariants.md#calibration-tags-and-scale)), in `TAGS` order |
 | `graded_at` | str | ISO UTC of the latest answer — a re-grade overwrites |
+| `partner_user_id` | str | **HIDDEN**, never served: the card's partner (`league_members.user_id`), written by `build_session` and `add_fit_arms`, so an account deletion's scrub finds the person's cards by id (a built session keeps no partner ids anywhere else). NULL on cards built before it (#562); the scrub traces those by the current arm's deck row or by name. The scrub sets it to the redaction token |
 
 Index: `ix_grading_cards_session` (`session_id`). Invariants: `grade IS NOT NULL ⇒ skipped = 0`; a session is `completed` ⇔ every card has `grade IS NOT NULL OR skipped = 1`, flipped in the same transaction as the last answer (`answer_grading_card`); an answer against a non-`open` session is rejected (409 `session_completed`), never written.
 
@@ -2125,7 +2126,7 @@ Calibration adds **no** event (scope waiver, plan D9); the tables above are the 
 
 The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scrub.py`; scope `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md`).
 - **Lifecycle:** one row per account deletion, inserted in `accounts._delete_user_data`'s own transaction, so a committed deletion always has its scrub and a rolled-back one has none. The row is deleted when the scrub of other users' decks is done (legal (ix)).
-- **Retention:** it's deleted once its grace pass and the model store are done (`deletion_scrub.COMPLETE` since stage 3; before that, rows were kept so later stages re-ran them through `SCRUB_VERSION`). Past 24 h unfinished, it's retried and counted at ERROR, up to 30 days, and never abandoned.
+- **Retention:** it's deleted once its grace pass and the model store are done (`deletion_scrub.COMPLETE` since stage 3; before that, rows were kept so later stages re-ran them through `SCRUB_VERSION`). Past 24 h unfinished, it's retried and counted at ERROR. Past 30 days (`RETRY_LIMIT`) it's deleted anyway, ids and all, and logged at ERROR as abandoned, with counts, error classes and where each job stood (`deletion_scrub._abandon`; trades-eng's reading of (ix), legal to confirm). What that leaves: a poison row still naming the person, and a stuck pass's unscanned stores.
 - **Privacy:** it holds the deleted user's ids only for that time. It's never exported (its subject is gone), and no id from it is ever logged.
 
 | Column | Type | Notes |
@@ -2136,7 +2137,7 @@ The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scr
 | `league_ids_json` | text (JSON), not null | The leagues their traces may be in, read before the deletion removes their rows: memberships, imported leagues, roster history, their own decks. They drive the fast league pass. A fallback scan of each whole store then finds the rest (a league the person left) |
 | `deleted_at` | str, not null | ISO UTC. The DB pass touches decks served up to `deleted_at` + 6 h (`IN_FLIGHT_GRACE`: a deck built before the deletion carries its first delivery as `served_at`), never later ones |
 | `db_version` | int, not null, default 0 | The `SCRUB_VERSION` of the last full DB pass; older re-runs |
-| `db_done_at` | str | ISO UTC of the last full DB pass. One more runs once the grace has passed |
+| `db_done_at` | str | ISO UTC of the **start** of the last full DB pass (it covers what was written before it began; a pass that ran across the grace isn't the grace pass, #562 QA P2-3). One more runs once the grace has passed |
 | `model_done_at` | str | ISO UTC the value-model store was redacted (the daily tick's `deletion_scrub` step, before the refit) |
 | `attempts` | int, not null, default 0 | Lease claims |
 | `claimed_until` | str | ISO UTC lease (10 min), taken by compare-and-swap; NULL = free |

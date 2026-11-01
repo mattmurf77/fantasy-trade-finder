@@ -14,9 +14,10 @@ loses them. This module then works the row:
   * the model phase (tick, a daily-tick step placed before value_model_refit,
     models-eng #542): eval.redaction.redact_model_store with the tokens;
   * the row is deleted once both are done (legal (ix)). Past ALERT_AFTER it
-    is kept and retried, and the tick logs a count at ERROR. Until every
-    store in the scope is built (COMPLETE), rows are kept, so a later
-    SCRUB_VERSION re-runs them.
+    is kept and retried, and the tick logs a count at ERROR; past RETRY_LIMIT
+    (30 days) it is deleted anyway and logged as abandoned (_abandon). Before
+    every stage was built (COMPLETE, true since stage 3) rows were kept, so a
+    later SCRUB_VERSION re-ran them.
 
 On a redacted card (its partner is a deleted id), in every store alike
 (R28.22 b2, uniformity): the partner id becomes the token; every field from
@@ -1121,16 +1122,19 @@ def _scan_grading(job: dict, after: str, budget: "_Budget") -> tuple[str | None,
     return None, changed
 
 
-# Diagnostics expire at 14 days (FTF_DECK_DIAGNOSTIC_RETENTION_DAYS); one
-# that has outlived 30 (a purge that fell behind) and names the person goes
-# (legal R28.22, c3 #13).
-_DIAGNOSTICS_OVERDUE = timedelta(days=30)
+# Diagnostics expire at their retention (FTF_DECK_DIAGNOSTIC_RETENTION_DAYS,
+# 14 days, the cleanup loop's purge). One past it (a purge that fell behind)
+# that names the person goes now (legal R28.22, c3 #13); a younger one goes
+# with the purge, inside legal's 30 days. It was 30, so a 20-day-old snapshot
+# outlived the job (#562 QA P3).
+def _diagnostics_overdue() -> timedelta:
+    return timedelta(days=int(os.environ.get("FTF_DECK_DIAGNOSTIC_RETENTION_DAYS", "14")))
 
 
 def _scan_diagnostics(job: dict, after: str, budget: "_Budget") -> tuple[str | None, int]:
     ids = set(job["ids"])
     t = db.deck_diagnostic_snapshots_table
-    overdue = _iso(datetime.now(timezone.utc) - _DIAGNOSTICS_OVERDUE)
+    overdue = _iso(datetime.now(timezone.utc) - _diagnostics_overdue())
     deleted = 0
     while budget.take():
         with db.engine.begin() as conn:
@@ -1467,26 +1471,42 @@ def kick() -> None:
 
 def _abandon(now: datetime) -> int:
     """Legal (ix): a job retries for up to 30 days. Past that its row, which
-    holds the ids, is deleted, and eng is told at ERROR by count and last error
-    class only. A store row the scrub could not rewrite (a poison row) stays
-    for eng to fix by hand, which the 24 h alert has asked for every day since
-    (#559 delta QA: a poison row never set db_version, so _finish never
-    deleted its job and the ids were held for good)."""
+    holds the ids, is deleted, and eng is told at ERROR by count, last error
+    class and where each job stood (a store's scan, the grace pass or the
+    model store), never ids. What it leaves: a store row the scrub could not
+    rewrite (a poison row) still names the person, and a job stuck mid-pass
+    leaves that store's rest and every later store, and the model store,
+    unscanned. With the ids gone, eng can't find those rows by id; the 24 h
+    alert asked for a fix every day of the 30 (#559 delta QA; legal to
+    confirm this reading of (ix) through head-eng)."""
     if not COMPLETE:
         return 0
     t = db.deletion_scrub_jobs_table
     with db.engine.begin() as conn:
-        rows = [r for r in conn.execute(select(t.c.job_id, t.c.deleted_at, t.c.last_error)).all()
+        rows = [r for r in conn.execute(select(t.c.job_id, t.c.deleted_at, t.c.last_error,
+                                               t.c.scan_json, t.c.db_version, t.c.db_done_at)).all()
                 if datetime.fromisoformat(r.deleted_at) < now - RETRY_LIMIT]
         if rows:
             conn.execute(delete(t).where(t.c.job_id.in_([r.job_id for r in rows])))
     if rows:
-        errors = {}
+        errors, stuck = {}, {}
         for r in rows:
             errors[r.last_error or "none"] = errors.get(r.last_error or "none", 0) + 1
-        log.error("[scrub] abandoned jobs=%d after_days=%d last_errors=%s",
-                  len(rows), RETRY_LIMIT.days, errors)
+            where = _stuck_at(r)
+            stuck[where] = stuck.get(where, 0) + 1
+        log.error("[scrub] abandoned jobs=%d after_days=%d last_errors=%s stuck_at=%s",
+                  len(rows), RETRY_LIMIT.days, errors, stuck)
     return len(rows)
+
+
+def _stuck_at(row) -> str:
+    """Where an unfinished job stood: a scan's store name, or a phase."""
+    state = _loads(row.scan_json)
+    if isinstance(state, dict) and isinstance(state.get("scan"), int) and state["scan"] < len(_SCANS):
+        return _SCANS[state["scan"]][0] + "_scan"
+    if row.db_version < SCRUB_VERSION or row.db_done_at is None:
+        return "db_pass"
+    return "grace_or_model_store"
 
 
 def _finish(now: datetime) -> int:
