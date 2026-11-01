@@ -423,12 +423,8 @@ def run() -> int:
     # The FAQ and contact pages have no base `a` rule, but their links follow
     # the same rule: no ice text colour (design-lead, #373 QA P3-6, the FAQ
     # footer's mailto).
-    # One pre-existing exception, pending design-lead's call (keep it as the
-    # back link's action state, or match privacy/terms' chalk `.back`).
-    ICE_LINK_EXCEPTIONS = {("faq.html", ".back-link:hover")}
     for page in ("faq.html", "contact.html"):
         _, ice_links, inline = link_styles(page)
-        ice_links = [sel for sel in ice_links if (page, sel) not in ICE_LINK_EXCEPTIONS]
         r.check(f"POL-no-ice-links[{page}]", not ice_links and not inline,
                 ("ice-coloured link rule(s): " + ", ".join(ice_links) if ice_links else
                  f"{len(inline)} inline ice link style(s)") if (ice_links or inline)
