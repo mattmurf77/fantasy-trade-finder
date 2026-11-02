@@ -754,25 +754,63 @@ def _short_pick(label: str) -> str:
     return ("an " if re.match(r"[AEIOU]", core, re.I) else "a ") + core
 
 
+# Which label line the bar shows: Product's final rule (legal R28.27).
+#   B1 "≈ a Mid 2nd in value"     a generic pick fits the gap, at any size
+#   B2 "≈ 1.4 Mid 1sts in value"  no pick fits and the gap is 1 first or more
+#   B3 "About even in value"      no pick fits and the gap is under 1 first,
+#                                 or `favors` is even with no pick
+# Legal's two conditions: "About even" never covers a gap a pick label fits
+# (1), and whenever "About even" shows the fill is the centre mark (2). The
+# label, the fill and the alt text all read value_bar_branch, so (2) holds by
+# construction.
+VB_B1 = "B1"
+VB_B2 = "B2"
+VB_B3 = "B3"
+# OPEN QUESTION, not decided here: `favors` even (point ratio >= 0.95; the
+# even band gets only the centre mark, models-lead M7) AND a pick label (a
+# big package where 5% of value is still worth, say, a Late 3rd). Condition 1
+# says B1, but M7 says centre mark only, and the snapshot stores no lean
+# direction for an even trade. Until Product, legal and models-lead settle
+# it, this branch keeps the behaviour from before the rule: "About even in
+# value" and the centre mark (test_share_card_b2_rule pins it as such).
+VB_OPEN_EVEN_BAND_WITH_PICK = "open:even-band-with-pick"
+
+
+def value_bar_branch(verdict: dict) -> str:
+    """The label branch for one verdict ({favors, gap: {firsts,
+    pick_equivalent}}): VB_B1, VB_B2, VB_B3 or VB_OPEN_EVEN_BAND_WITH_PICK."""
+    gap = verdict["gap"]
+    pick = gap.get("pick_equivalent")
+    even_band = verdict.get("favors") not in ("give", "receive")
+    if even_band and pick:
+        return VB_OPEN_EVEN_BAND_WITH_PICK
+    if even_band:
+        return VB_B3
+    if pick:
+        return VB_B1
+    if abs(float(gap["firsts"])) >= 1.0:
+        return VB_B2
+    return VB_B3
+
+
 def value_bar_is_even(verdict: dict) -> bool:
-    """Even per B3: `favors` is even (or missing), or the gap rounds to
-    0.0 firsts. The bar then draws the centred nub, never a sliver."""
-    if verdict.get("favors") not in ("give", "receive"):
-        return True
-    return round(abs(float(verdict["gap"]["firsts"])), 1) == 0.0
+    """True when the bar reads "About even in value" (B3, or the open
+    even-band-with-pick branch). The bar then draws the centred nub, never
+    a lean (legal condition 2)."""
+    return value_bar_branch(verdict) in (VB_B3, VB_OPEN_EVEN_BAND_WITH_PICK)
 
 
 def value_bar_label(verdict: dict) -> tuple[str, str, str]:
     """(lead, emphasis, tail) of the label line, marketing addendum 14:
     B1 "≈ a Mid 2nd in value", B2 "≈ 1.4 Mid 1sts in value",
     B3 "About even in value"."""
-    if value_bar_is_even(verdict):
-        return "", "About even", " in value"
+    branch = value_bar_branch(verdict)
     gap = verdict["gap"]
-    pick = gap.get("pick_equivalent")
-    if pick:
-        return "≈ ", _short_pick(pick["label"]), " in value"
-    return "≈ ", f"{abs(float(gap['firsts'])):.1f} Mid 1sts", " in value"
+    if branch == VB_B1:
+        return "≈ ", _short_pick(gap["pick_equivalent"]["label"]), " in value"
+    if branch == VB_B2:
+        return "≈ ", f"{abs(float(gap['firsts'])):.1f} Mid 1sts", " in value"
+    return "", "About even", " in value"
 
 
 def value_bar_alt(verdict: Optional[dict], as_of: Optional[str] = None,
