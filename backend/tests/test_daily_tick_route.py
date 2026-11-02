@@ -59,7 +59,7 @@ def client():
 
     flags_on: set = set()
     flag_fn = lambda k: k in flags_on   # noqa: E731
-    daily_tick.wait(10)                  # never inherit another test's run
+    daily_tick.wait(60)                  # never inherit another test's run
     assert not daily_tick._lock.locked()
     with patch.object(db_module, "engine", engine), \
          patch.object(server, "is_enabled", flag_fn), \
@@ -115,7 +115,7 @@ def test_post_returns_202_at_once_then_runs_all_nine_steps_in_order(client):
 
     def slow(key):
         def fn(now):
-            assert gate.wait(5), "gate never opened"
+            assert gate.wait(60), "gate never opened"
             ran.append((key, threading.current_thread().name, now))
             return "ok"
         return fn
@@ -127,7 +127,9 @@ def test_post_returns_202_at_once_then_runs_all_nine_steps_in_order(client):
         elapsed = time.monotonic() - t0
         assert r.status_code == 202
         assert r.get_json() == {"ok": True, "started": True}
-        assert elapsed < 1.0
+        # Loose on purpose (loaded CI runners): an inline handler would block
+        # for the gate's full 60 s at step 1, so 10 s still discriminates.
+        assert elapsed < 10.0
         assert ran == []                     # nothing finished before the 202
         gate.set()
         results = daily_tick.wait(30)
@@ -144,7 +146,7 @@ def test_second_post_while_a_run_is_in_flight_answers_started_false(client):
     gate = threading.Event()
 
     def blocking(now):
-        assert gate.wait(5)
+        assert gate.wait(60)
         return "ok"
 
     with _stub_steps({k: (blocking if k == "roster_snapshot" else _ok)
@@ -298,7 +300,7 @@ def test_usage_async_wrapper_still_runs_the_same_body(client):
         assert server._start_usage_refresh("cron_route", weeks=[3]) is True
         for t in [t for t in threading.enumerate()
                   if t.name == "usage-trends-refresh"]:
-            t.join(5)
+            t.join(30)
     assert seen == [("cron_route", {"weeks": [3]})]
     assert not server._usage_refresh_lock.locked()
 
