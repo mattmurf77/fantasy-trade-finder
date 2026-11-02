@@ -20,6 +20,7 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
 - **Runs:**
   - SQLite: 160 passed, 19 PG-only skipped.
   - **Postgres 18** (`FTF_TEST_PG_URL`): 190 passed, 1 skipped, across every scrub file plus account coverage.
+  - **Full backend suite** at `2a19ca9b`: 10,404 passed, 22 skipped (the Postgres-only cases among them).
 - **Sabotage:** 22 single-rule breaks, all RED: #8 ×3, #9 ×3, #7 ×4, #10 ×12. Two were fixed along the way: the swipe pattern matched pass-reason too, and the taste mapping needed the live-path test.
 - **Docs:** §0.4's wording by mode, and addendum Q's eval sentence (#557 `485cef6e`, #559 `bf0df9d0`).
 
