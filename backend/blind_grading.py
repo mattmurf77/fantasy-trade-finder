@@ -488,7 +488,8 @@ def _league_inputs(league_id: str, league_user_id: str, now: datetime
         keys = ("pick_id", "season", "round", "owner_user_id", "pick_value", "pool_value",
                 "is_traded", "original_username")
         inputs["picks"] = sorted(
-            ({k: p.get(k) for k in keys}
+            ({**{k: p.get(k) for k in keys},
+              "original_username": db.pick_team_name(p, "original")}   # #497 QA P2
              for p in db.load_draft_picks(league_id, source=db.PICK_SOURCE_ANY)),
             key=lambda p: str(p["pick_id"]))
     seat = str(league_user_id)

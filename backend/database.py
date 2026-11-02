@@ -13327,6 +13327,45 @@ def assign_draft_pick(league_id: str, pick_id: str, owner_user_id: str,
         return ("ok", _read())
 
 
+def pick_slot_team_name(rows, user_id: str) -> str:
+    """The assignment writers' name for a nameless member (#497): `Team <slot>`.
+
+    The slot is the member's `original_roster_id` on any of `rows` they
+    originally own; `Unnamed team` when they own none (a member added after
+    the grid was seeded has no slot yet). Never the user id.
+    """
+    uid = str(user_id or "")
+    slot = next((str(r.get("original_roster_id") or "") for r in rows
+                 if str(r.get("original_user_id") or "") == uid
+                 and r.get("original_roster_id")), "")
+    return f"Team {slot}" if slot else "Unnamed team"
+
+
+def pick_team_name(row: dict, side: str, rows=()) -> str | None:
+    """`row["<side>_username"]` as a client may see it; `side` is `original`
+    or `owner` (#497 QA P2).
+
+    Asserted rows stored before #497 can hold `Team <that side's user id>`
+    ("Team espn:{1A2B…}") or a blank name, and nothing rewrites them: a PUT
+    rewrites only `owner_username`, and `original_username` changes only on a
+    reseed, which drops recorded reassignments. So every client-facing reader
+    heals here at read time; no stored row is written.
+
+    A user-source name is replaced when it is blank or equals
+    `Team <the row's <side>_user_id>`, by the writers' own fallback
+    (`pick_slot_team_name`): the original side's slot is the row's own, the
+    owner side's is read off `rows`, the league's asserted rows. Real names,
+    "Team Rocket", a correct `Team <slot>` and every platform row pass through.
+    """
+    stored = row.get(f"{side}_username")
+    if row.get("source") != PICK_SOURCE_USER:
+        return stored
+    uid = str(row.get(f"{side}_user_id") or "")
+    if str(stored or "").strip() and not (uid and stored == f"Team {uid}"):
+        return stored
+    return pick_slot_team_name([row] if side == "original" else rows, uid)
+
+
 # ---------------------------------------------------------------------------
 # draft-extensions W3 M-D — live offline pick recording (flag
 # `draft.manual_picks`). Writes ONLY `recorded_picks` — never `draft_picks`,

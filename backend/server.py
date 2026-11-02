@@ -162,6 +162,7 @@ from .database import (
     load_draft_pick_seasons,
     # draft-extensions W3 M-A — user-asserted pick ownership (ADR-010)
     make_pick_id, seed_pick_grid, assign_draft_pick,
+    pick_slot_team_name, pick_team_name,
     contested_pick_ids, orphaned_pick_ids, invalidate_pick_assignment_cache,
     load_pick_assignment_settings, save_pick_assignment_settings,
     # D-090 — resolved current-season draft order, for real-slot pick labels
@@ -18728,6 +18729,8 @@ def get_league_picks():
             priced = _priced_pick_value(p, slot_order, fmt)
             value = round(priced, 1) if priced > 0 else None
             return {**p, "pool_value": value,
+                    "original_username": pick_team_name(p, "original"),
+                    "owner_username": pick_team_name(p, "owner", raw),
                     "label": _owned_pick_label(p, slot_order),
                     "tier": _pick_tier(value),
                     **_pick_wire_source(p, tradeable)}
@@ -18769,8 +18772,9 @@ def _owned_pick_label(p: dict, slot_order: dict | None = None) -> str:
     unit = (pick_slots.slot_suffix(rnd, slot) if slot
             else _PICK_ORDINALS.get(rnd, str(p.get("round"))))
     base = f"{season} {unit}"
-    if p.get("is_traded") and p.get("original_username"):
-        return f"{base} (from {p['original_username']})"
+    original = pick_team_name(p, "original")
+    if p.get("is_traded") and original:
+        return f"{base} (from {original})"
     return base
 
 
@@ -18836,6 +18840,10 @@ def _pick_labels_by_id(asset_ids) -> dict[str, str]:
                     # league below.
                     draft_picks_table.c.league_id,
                     draft_picks_table.c.original_roster_id,
+                    # #497 QA P2 — what `pick_team_name` heals an asserted
+                    # row's stored name from.
+                    draft_picks_table.c.source,
+                    draft_picks_table.c.original_user_id,
                 ).where(draft_picks_table.c.pick_id.in_(owned_ids))
             ).fetchall()
         orders: dict[str, dict | None] = {}
@@ -18850,6 +18858,8 @@ def _pick_labels_by_id(asset_ids) -> dict[str, str]:
                 "is_traded":          m["is_traded"],
                 "original_username":  m["original_username"],
                 "original_roster_id": m["original_roster_id"],
+                "source":             m["source"],
+                "original_user_id":   m["original_user_id"],
             }, orders[lg])
     except Exception as e:
         # Display-only enrichment — a lookup failure must never fail the
@@ -22745,14 +22755,12 @@ def _assignment_owner_name(names: dict[str, str], rows: list[dict],
     The member's real name when they have one; else their slot label,
     `Team <original_roster_id>`, read off any grid row they originally own;
     else `Unnamed team` (a member added after the grid was seeded has no
-    slot yet).
+    slot yet). The fallback is `pick_slot_team_name`, the one the read-time
+    guard (`pick_team_name`) heals with, so a healed read matches this write.
     """
     if owner in names:
         return names[owner]
-    slot = next((str(r.get("original_roster_id") or "") for r in rows
-                 if str(r.get("original_user_id") or "") == owner
-                 and r.get("original_roster_id")), "")
-    return f"Team {slot}" if slot else "Unnamed team"
+    return pick_slot_team_name(rows, owner)
 
 
 def _assignment_settings(league_id: str, member_ids: list[str]) -> dict:
@@ -22804,9 +22812,9 @@ def _assignment_slots(league_id: str, settings: dict) -> list[dict]:
             "slot":               slot_by_user.get(orig_user),
             "original_roster_id": str(r.get("original_roster_id") or ""),
             "original_user_id":   orig_user or None,
-            "original_username":  r.get("original_username"),
+            "original_username":  pick_team_name(r, "original"),
             "owner_user_id":      str(r.get("owner_user_id") or "") or None,
-            "owner_username":     r.get("owner_username"),
+            "owner_username":     pick_team_name(r, "owner", rows),
             "is_traded":          bool(r.get("is_traded")),
             "source":             r.get("source") or PICK_SOURCE_USER,
             "assigned_by":        r.get("assigned_by"),
@@ -22998,9 +23006,9 @@ def _assignment_grid(league_id: str, season: int):
             "round":             int(r.get("round") or 0),
             "slot":              slot_by_user.get(str(r.get("original_user_id") or "")),
             "owner_user_id":     r.get("owner_user_id"),
-            "owner_username":    r.get("owner_username"),
+            "owner_username":    pick_team_name(r, "owner", rows),
             "original_user_id":  r.get("original_user_id"),
-            "original_username": r.get("original_username"),
+            "original_username": pick_team_name(r, "original"),
             "is_traded":         bool(r.get("is_traded")),
         })
         at = r.get("assigned_at")
