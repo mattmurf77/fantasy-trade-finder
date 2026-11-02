@@ -104,6 +104,10 @@
 // Round 9 (release-lead's delta QA of 53f94665):
 //   P3-3 404 feature_disabled, 14 and a 10e that lands on the hand-off
 //        invalidate the cached capability                                [executed + AST]
+// Round 10 (release-lead's delta QA of 0168d383):
+//   P2-B back from Connect, a FAAB claim with an empty bid resumes at Ready
+//        (the line shown), never consent; consent only with a bid in hand  [executed + AST]
+//   P3-1 the bid line lives in the FAAB branch only                        [AST]
 // Round 5 (head-eng's design note; legal R28.26 / R28.27):
 //   B1  a working button keeps full brightness with its spinner, takes no
 //       tap (#364's Button: `loading`, not `disabled`)                     [executed + AST]
@@ -1292,7 +1296,7 @@ process.on('exit', () => {
       for (const [name, m] of [['named CTA', ready[0]], ['Make the move', make[0]]]) {
         expect(m && m.attrs.loading === '{busy}' && !/busy|sending/.test(m.attrs.disabled || ''), `${name}: loading=${m && m.attrs.loading} disabled=${m && m.attrs.disabled}`);
       }
-      expect(/if \(busy\) return;/.test(declText(claim, 'onNamedCta')) && /sendingRef\.current\) return;/.test(declText(claim, 'send')),
+      expect(/if \(busy \|\| sel\.needsBid\) return;/.test(declText(claim, 'onNamedCta')) && /sendingRef\.current\) return;/.test(declText(claim, 'send')),
         'taps stay ignored while busy');
     });
   }
@@ -1577,12 +1581,22 @@ process.on('exit', () => {
       await z.faMove.attemptMove({ move: SUBMIT, surface: 'free_agents', request: { ...REQ, ...pick({ bid: '0' }).request } });
       eq([z.events.find((e) => e.name === 'fa_move_write_attempted').props.has_bid, z.requests[0].body.faab_bid], [true, 0], 'a typed 0 is a bid');
     });
-    await check('B11 rule 1: the visible line under the empty field (the server\'s bid_needed_line, else the fallback), on the steps that send', () => {
+    await check('B11 rule 1: the visible line under the empty field (the server\'s bid_needed_line, else the fallback), on Ready, in the FAAB branch only', () => {
       expect(/\| 'bid_line'\s*\| 'bid_needed_line'/.test(faText), 'MoveCopyKey lists bid_needed_line');
       eq(h.faMove.FA_MOVE_FALLBACK_COPY.bid_needed_line, 'Enter a bid. $0 is allowed.', 'the fallback (G25)');
       expect(/PENDING MARKETING \(G25\)/.test(faText) && /PENDING MARKETING \(G26\)/.test(faText), 'both marked pending marketing');
       eq(P.copyFns({ ...SUBMIT, copy: { bid_needed_line: 'Server: bid?' } }, {}).slot('bid_needed_line'), 'Server: bid?', 'server slot first');
-      expect(/const bidNeeded = sel\.needsBid && \(view\.step === 'ready' \|\| view\.step === 'consent'\);/.test(claimText), 'when it shows');
+      eq(['ready', 'consent', 'connect', 'handoff', 'result'].map((st) => P.bidLineShown(st, true)), [true, false, false, false, false], 'on Ready only');
+      eq(P.bidLineShown('ready', false), false, 'never without a needed bid');
+      expect(/const bidNeeded = bidLineShown\(view\.step, sel\.needsBid\);/.test(claimText), 'the sheet asks the plan');
+      // P3-1 (release-lead): only the FAAB branch can show it, and only through bidNeeded.
+      eq((claimText.match(/bid_needed_line/g) || []).length, 1, "bid_needed_line in ClaimSheet");
+      let faabBranch = null;
+      walk(decl(claim, 'bidSection'), (n) => {
+        if (ts.isConditionalExpression(n) && unparen(n.condition).getText(claim) === 'faab') faabBranch = n;
+      });
+      expect(faabBranch && /\{bidNeeded \? \(/.test(faabBranch.whenTrue.getText(claim)) && /bid_needed_line/.test(faabBranch.whenTrue.getText(claim))
+        && !/bid_needed_line|bidNeeded/.test(faabBranch.whenFalse.getText(claim)), 'the line sits in the FAAB branch, never the priority-waiver one');
       const sec = declText(claim, 'bidSection');
       expect(/\{bidNeeded \? \(\s*<View ref=\{view\.step === 'ready' && view\.bidNeededFocus \? focusRef : undefined\} accessible>\s*<Text style=\{sheetStyles\.chalkLine\}>\{slot\('bid_needed_line'\)\}<\/Text>/.test(sec),
         'a visible Text under the field');
@@ -1649,6 +1663,53 @@ process.on('exit', () => {
     });
     await check('P3-1 (documented): the list gate\'s comment says an ESPN / MFL focus routes even its Sleeper leagues legacy', () => {
       expect(/Deliberate \(QA P3-1\): an ESPN \/ MFL focus is never prefetched/.test(declText(fa, 'prefetchListCapabilities')), 'the comment at the gate');
+    });
+  }
+
+  // ── Round 10 (release-lead's delta QA of 0168d383): P2-B ─────────────────
+  {
+    const h = harness();
+    const P = h.plan;
+    const OFF = { ...SUBMIT, consent_until: null };
+    await check('P2-B back from Connect: a FAAB claim with an empty bid resumes at Ready with the line; with a bid, consent as before', () => {
+      const r = (o) => P.connectReturnStep({ move: OFF, row: { move_kind: 'claim' }, consentValid: false, faab: true, bidField: '', ...o });
+      eq(r({}), 'view', 'empty bid → Ready');
+      const view = P.initialView(OFF, { move_kind: 'claim' }, P.copyFns(OFF, { add: 'A', league: 'L' }));
+      eq([view, P.bidLineShown(view.step, P.needsBidFor('claim', true, ''))], [{ step: 'ready' }, true], 'Ready, with the line shown');
+      eq([r({ bidField: '0' }), r({ bidField: '7' })], ['consent', 'consent'], 'a bid in hand (0 included) → consent');
+      eq([r({ row: { move_kind: 'add' } }), r({ row: {} }), r({ faab: false })], ['consent', 'consent', 'consent'], 'an add, or a priority-waiver claim, needs no bid');
+      eq([r({ consentValid: true }), r({ consentValid: true, bidField: '5' })], ['view', 'view'], 'consent valid → Ready, never an automatic send');
+      eq([r({ move: { ...OFF, connect: 'not_linked' } }), r({ move: { ...OFF, connect: 'expired' } })], ['connect', 'connect'], 'a failed sign-in → the same step');
+    });
+    await check('P2-B consent is never entered while a bid is needed (every connect × consent × kind × FAAB × field)', () => {
+      const bad = [];
+      for (const connect of ['ok', 'not_linked', 'expired', 'unverified', 'other_account']) {
+        for (const consentValid of [false, true]) {
+          for (const move_kind of ['add', 'claim', null]) {
+            for (const faab of [false, true]) {
+              for (const bidField of ['', '0', '12']) {
+                const kind = move_kind === 'claim' ? 'claim' : 'add';
+                const step = P.connectReturnStep({ move: { ...OFF, connect }, row: { move_kind }, consentValid, faab, bidField });
+                if (step === 'consent' && P.needsBidFor(kind, faab, bidField)) bad.push([connect, consentValid, move_kind, faab, bidField]);
+              }
+            }
+          }
+        }
+      }
+      eq(bad, [], 'consent entered with a bid needed');
+      eq([P.needsBidFor('claim', true, ''), P.needsBidFor('claim', true, '0'), P.needsBidFor('add', true, ''), P.needsBidFor('claim', false, '')],
+        [true, false, false, false], 'needsBidFor');
+      expect(/needsBid: needsBidFor\(input\.kind, input\.faab, input\.bid\),/.test(declText(parse(PLAN), 'moveSelection')), 'one gate: moveSelection uses it too');
+    });
+    await check('P2-B the sheet: the connect return asks connectReturnStep; the only other consent entry is the named CTA, after the bid guard', () => {
+      const ret = claimText.slice(claimText.indexOf('onConnectReturn.current = () => {'), claimText.indexOf("useEffect(() => navigation.addListener('focus'"));
+      expect(/const resume = connectReturnStep\(\{ move: next\.move, row: next\.row, consentValid: valid, faab: !!faab, bidField: bid \}\);/.test(ret)
+        && /\} else if \(resume === 'consent'\) \{\s*await openConsent\(false, next\.move\);/.test(ret) && !/faMoveGate/.test(ret), 'the connect return');
+      const opens = calls(claim, 'openConsent').map((c) => c.getText(claim));
+      eq(opens, ['openConsent(false, next.move)', 'openConsent(true)'], 'openConsent call sites');
+      const cta = declText(claim, 'onNamedCta');
+      expect(cta.indexOf('if (busy || sel.needsBid) return;') >= 0 && cta.indexOf('if (busy || sel.needsBid) return;') < cta.indexOf('openConsent(true)'), 'the named CTA guards first');
+      eq(calls(claim, 'showConsent').map((c) => c.getText(claim)), ['showConsent(step.block, m)', 'showConsent(plan.consent)'], 'showConsent: from openConsent, or a 409 after a send (which needs a bid)');
     });
   }
 

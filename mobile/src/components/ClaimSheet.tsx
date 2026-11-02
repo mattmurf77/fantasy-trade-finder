@@ -76,6 +76,8 @@ import { markClaimPending } from '../state/claimsPending';
 import { useSession } from '../state/useSession';
 import {
   actionBlockPinned,
+  bidLineShown,
+  connectReturnStep,
   copyFns,
   dropListShown,
   faabClaimWithoutBid,
@@ -306,9 +308,10 @@ export default function ClaimSheet({
   const ctaLabel = sel.ctaLabel;
   const needsDrop = (openSlots === 0 || requireDrop) && !sel.drop;
   // §B11 rule 1: a FAAB claim with an empty field disables every send (the
-  // named CTA, Make the move) and shows a visible line under the field, on
-  // the steps that send. A typed 0 is a bid.
-  const bidNeeded = sel.needsBid && (view.step === 'ready' || view.step === 'consent');
+  // named CTA, Make the move) and shows a visible line under the field on
+  // Ready (the consent step replaces the field, and is never entered while
+  // a bid is needed). A typed 0 is a bid.
+  const bidNeeded = bidLineShown(view.step, sel.needsBid);
 
   useEffect(
     () => () => {
@@ -394,12 +397,13 @@ export default function ClaimSheet({
       setConsentOverride(null);
       setHidden(false);
       const valid = consentValidAt(next.move?.consent_until, Date.now());
-      const step = faMoveGate({ move: next.move, row: next.row, consentValid: valid, ticked: false });
-      if (step === 'connect' || step === 'verify') {
+      // A FAAB claim with an empty bid resumes at Ready, never consent (§B11).
+      const resume = connectReturnStep({ move: next.move, row: next.row, consentValid: valid, faab: !!faab, bidField: bid });
+      if (resume === 'connect') {
         // A cancelled or failed sign-in: the same step, bid and drop intact (F2).
         show(initialView(next.move, next.row, nextCopy, true));
         trackConnectShown(next.move, null, analyticsSurface);
-      } else if (step === 'consent') {
+      } else if (resume === 'consent') {
         await openConsent(false, next.move);
       } else {
         show(initialView(next.move, next.row, nextCopy));
@@ -542,7 +546,8 @@ export default function ClaimSheet({
 
   // The named CTA (state 6, and state 11's retry: a fresh tap).
   async function onNamedCta() {
-    if (busy) return;
+    // §B11: disabled while a bid is needed; consent is only reached with one.
+    if (busy || sel.needsBid) return;
     if (pendingConsentRef.current) {
       await send(pendingConsentRef.current, false);
       return;

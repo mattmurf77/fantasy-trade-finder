@@ -295,6 +295,38 @@ export function planKindChanged(
   return { move, row, view, staleCapability: view.step === 'handoff' };
 }
 
+/** §B11 rule 6's gate from the field as typed: a FAAB claim with an empty
+ *  field (the same as `kind === 'claim' && faab && bid === null`). */
+export function needsBidFor(kind: MoveKind, faab: boolean, bidField: string): boolean {
+  return kind === 'claim' && faab && bidField === '';
+}
+
+/** §B11 rule 1's visible line shows on Ready only: the consent step
+ *  replaces the bid field, and is never entered while a bid is needed. */
+export function bidLineShown(step: SheetView['step'], needsBid: boolean): boolean {
+  return needsBid && step === 'ready';
+}
+
+/** Back from the connect screen: the step to resume at. `connect` = the
+ *  same step again (a cancelled or failed sign-in); `consent` = the consent
+ *  step; `view` = initialView (Ready, never an automatic send). A FAAB claim
+ *  with an empty field goes to Ready, not consent (release-lead's P2-B): the
+ *  line there asks for a bid, and the named CTA, once there is one, opens
+ *  consent as usual. So consent is only ever reached with a bid in hand. */
+export function connectReturnStep(input: {
+  move: FaMoveCapability | null;
+  row: FaMoveRow;
+  consentValid: boolean;
+  faab: boolean;
+  bidField: string;
+}): 'connect' | 'consent' | 'view' {
+  const step = faMoveGate({ move: input.move, row: input.row, consentValid: input.consentValid, ticked: false });
+  if (step === 'connect' || step === 'verify') return 'connect';
+  const kind: MoveKind = input.row.move_kind === 'claim' ? 'claim' : 'add';
+  if (step === 'consent' && !needsBidFor(kind, input.faab, input.bidField)) return 'consent';
+  return 'view';
+}
+
 /** Back from the connect screen. A failed or timed-out re-read goes on as
  *  connected (to consent or Ready); the server's 409s are the safety net. */
 export function resumeAfterConnect(
@@ -341,7 +373,7 @@ export function moveSelection(input: {
   return {
     drop,
     bid,
-    needsBid: input.kind === 'claim' && input.faab && bid === null,
+    needsBid: needsBidFor(input.kind, input.faab, input.bid),
     ctaLabel: moveCtaLabel(input.copy, input.kind, vars, input.platform),
     waiverLines: input.kind === 'claim' ? waiverLines(input.copy, vars, input.platform) : [],
     request: {
