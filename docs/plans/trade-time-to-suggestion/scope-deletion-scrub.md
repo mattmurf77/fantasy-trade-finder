@@ -88,7 +88,10 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
 
 - A live job's `_DeckEvidence` holds unwritten rows from its build-time snapshot. A delivery after the scrub writes them, and with them the old id and the c2 fields.
 - **The tick's second DB pass rewrites them.** The window is at most until that tick.
-- The page store's cards keep serving through S0's I-1 check. The person's `league_members` rows are gone, so a card receiving their assets fails I-1 and is withdrawn, never served.
+- The page store's cards keep serving through S0's I-1 check, and what that does depends on the mode.
+  - **At `trade_i1_mode` 2** the person's `league_members` rows are gone, so a card receiving their assets fails I-1 and is withdrawn, never served.
+  - **At prod's mode 1, I-1 doesn't withdraw it.** A deck already in memory when the deletion lands holds the person's real id and keeps serving until the scrub job ends. Stage 2 (#559) narrows this: it revokes in-process jobs at the deletion and drops redacted cards in every mode.
+  - **Eval is safe either way:** redacted cards are counted, never audited (G-a4 to G-a6). Whether the window is acceptable is with legal.
 
 ## 1. Analytics scope
 
