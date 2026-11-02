@@ -1732,6 +1732,7 @@ One row per provider identity. Keyed on the provider's stable `sub` claim — **
 | `give_ids` | text, not null | JSON `list[str]` of player ids (≤5) |
 | `receive_ids` | text, not null | JSON `list[str]` of player ids (≤5) |
 | `created_at` | str, not null | ISO UTC |
+| `value_snapshot` | text, nullable | The share-time value snapshot (models-lead K-a2; see [value_snapshot](#value_snapshot-share-time-value-json) below). Written once, by `POST /api/share/package`, only when the body carries `scoring_format`; there's no league, so only generic picks price. NULL = the card draws no value bar. Added in place by `_migrate_db` (`migration_cols`), no default, no backfill: every older row reads NULL. **Anonymized with the row:** it holds values, labels and the date only, so account deletion's `user_id` → placeholder rewrite leaves nothing personal |
 
 ---
 
@@ -1746,6 +1747,26 @@ One row per provider identity. Keyed on the provider's stable `sub` claim — **
 | `created_by` | str, not null | Sharer's session `user_id`. Part of `ix_trade_share_tokens_creator (created_by, created_at)`, the 30/hour mint-limit count |
 | `created_at` | str, not null | ISO UTC mint time |
 | `revoked_at` | str, nullable | ISO UTC; NULL = live. Set it to revoke a link (it then gets the generic expired page). Nothing in v1 writes it; see `docs/runbook.md` § Trade share links |
+| `value_snapshot` | text, nullable | The share-time value snapshot (models-lead K-a2; see below). Written once, on a NEW token, by `POST /api/share/trade`: priced on the sharer's side (the lists swap for user_b), in the league's format, with the league's owned picks. A re-share returns the token with the snapshot it was minted with; a token minted before the column existed stays NULL. NULL = no value bar. Added in place by `_migrate_db` (`migration_cols`), no default, no backfill. Deleted with the row when the sharer deletes their account; exported with the user's other `trade_share_tokens` columns (only `token` is omitted) |
+
+### `value_snapshot` (share-time value JSON)
+
+The og share card (`/og/trade/<token>.png`, `/og/p/<short_id>.png`) and its share page draw the value bar **only** from this snapshot; a view never prices (`server._value_bar_from_snapshot`). Written by `server._share_value_snapshot` from Mode A consensus only: `_consensus_verdict` (the call `POST /api/trade/evaluate` makes) in market stud-tax mode. It is NULL (K-a6) when any asset can't be priced, a side is empty or values at 0 or less, or the computation raises. Shape (`v` 1):
+
+| Field | Meaning |
+|---|---|
+| `v` | `1`, the shape version |
+| `favors` | `give` \| `receive` \| `even`, oriented to the sharer: `receive` = the YOU GET column has more value |
+| `firsts` | the gap in generic Mid 1sts (`gap.firsts`, non-negative): the fill length, and the "≈ 1.4 Mid 1sts" label |
+| `label` | `gap.pick_equivalent.label` (e.g. "Early 2nd Round Pick"), or null when no single pick fits |
+| `format` | `1qb_ppr` \| `sf_tep` |
+| `league_id` | the match's league (trade shares); null for packages |
+| `computed_at` | ISO UTC mint time; the card's date is its UTC date |
+| `second_in_firsts` | Mid 2nd / Mid 1st over the generic-pick values at mint: where the ±2nd ticks go. Required, a number with 0 < x < 1; there is no default fraction, so a snapshot without a valid one is malformed and draws no bar |
+| `pool.snapshot` | `roster_snapshot`'s `vsn1` for (format, league): a hash of the consensus seed and the league's pick rows that priced it |
+| `pool.version` | the pricing that produced it: `evaluate-mode-a/<stud-tax mode>/<pick-pricing mode>`, today `evaluate-mode-a/market/market_slots` |
+
+**Never stored:** a member's board or rankings, client-sent values, player values, package totals or `gap.value` points, usernames or user ids, player ids.
 
 ---
 

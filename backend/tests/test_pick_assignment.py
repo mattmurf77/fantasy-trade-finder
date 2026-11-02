@@ -206,7 +206,11 @@ _SEVEN_READ_SITES = frozenset({
     # three consumers. SAME site, same `_pick_read_source()`, same flag
     # reach — only the enclosing symbol this AST scan sees moved.
     "_job_draft_picks",
-    "_trade_evaluate_impl", "get_league_picks", "_owned_pick_assets",
+    # `_consensus_pricing` is `_trade_evaluate_impl`'s read, extracted
+    # verbatim (share-card-value-bar scope) so /api/trade/evaluate and the og
+    # share card's value bar price through one call: SAME read, same
+    # `_pick_read_source()`, only the enclosing symbol moved.
+    "_consensus_pricing", "get_league_picks", "_owned_pick_assets",
     "_power_picks_by_owner",
     # #365 / D-110, 2026-08-20 — the EIGHTH engine read site, DECIDED here
     # rather than silently added. `_first_round_ledgers` derives each member's

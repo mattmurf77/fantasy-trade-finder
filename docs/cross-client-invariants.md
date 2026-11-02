@@ -376,7 +376,9 @@ The pick-denominated **TradeValueBar** (feedback #157) is the universal trade ve
 
 Deck cards **omit** all four when rebuilt from client echo (server-restart FB-46 path); clients gate the bar on `give_value`/`receive_value` being present.
 
-**Locations to update together:** `backend/server.py` (`_value_verdict_payload`, `trade_evaluate_route`, `trade_card_to_dict`), the card-construction sites in `backend/trade_service.py` + `backend/trade_optimizer.py` (stamp `give_value`/`receive_value`), `mobile/src/components/TradeValueBar.tsx` + `TradeCard.tsx`, `mobile/src/api/trades.ts` + `mobile/src/api/calc.ts` + `mobile/src/shared/types.ts`.
+**Locations to update together:** `backend/server.py` (`_value_verdict_payload`, `trade_evaluate_route`, `trade_card_to_dict`, `_consensus_pricing` / `_consensus_verdict` (shared by evaluate and the share card), `_share_value_snapshot` (at share time), `_value_bar_from_snapshot` (at view, which never prices)), the card-construction sites in `backend/trade_service.py` + `backend/trade_optimizer.py` (stamp `give_value`/`receive_value`), `backend/database.py` (`trade_share_tokens.value_snapshot`, `shared_packages.value_snapshot`; see `docs/data-dictionary.md`), `backend/og_image.py` (`_draw_value_bar`, `value_bar_label`, `valid_second_in_firsts`, `SEMANTIC_POS` / `SEMANTIC_WARN` / `ICE_BASE` = the app's pos/warn/ice fill mapping), `mobile/src/components/TradeValueBar.tsx` + `TradeCard.tsx`, `mobile/src/api/trades.ts` + `mobile/src/api/calc.ts` + `mobile/src/shared/types.ts`.
+
+The og share card draws this verdict with side-neutral words (marketing addendum 14) from a stored share-time snapshot. Its ±2nd ticks come from the snapshot's required `second_in_firsts`, with no default fraction; a snapshot without one draws no bar.
 
 ---
 
