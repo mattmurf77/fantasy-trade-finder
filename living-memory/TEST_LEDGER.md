@@ -1526,6 +1526,17 @@ Gates: full (schema/API/flag/analytics surfaces; no express). Mobile client only
   - **`testflight-additions.md`:** UT1's wait is now about 10 seconds. New rows: UT2, an in-app Add on another Sleeper league from the availability list; UT3, Turn off → Stop roster moves → back → Add opens the hand-off, with no "on until".
   - **`check-fa-move`:** 112 passed, 0 failed. P3-3 is executed through `planFailure` / `planKindChanged`, with an AST check on both call sites; P3-1's comment is pinned.
   - **Sabotage, each red then restored (the unsabotaged copy green):** `apply()` ignoring `staleCapability`; the 10e path ignoring it; claims-off not flagged.
+- **Round 10 (2026-11-02; release-lead's delta QA of `0168d383`, CONDITIONAL GO, one P2 before the 11-06 binary):**
+  - **P2-B, fixed.** The path was a FAAB claim, not linked, empty bid → Connect → back. It opened the consent step, which replaces the bid field, so rule 1's line never showed, and Make the move sat disabled with only a VoiceOver hint.
+    - The connect return now asks a pure `connectReturnStep`: a FAAB claim with an empty field resumes at **Ready** with the line. With a bid in hand, it goes to consent as before.
+    - `onNamedCta` returns first while a bid is needed, and `needsBidFor` is the one gate, which `moveSelection` uses too. So consent is only entered with a bid.
+    - `bidLineShown` shows the line on Ready only. The dead `|| view.step === 'consent'` branch is gone.
+  - **P3-1, pinned.** The bid line lives only in the bid section's FAAB branch: `bid_needed_line` appears once in ClaimSheet, inside `faab ? …`.
+  - **P3-2 and P3-3, left as is.** Each has one line in the code-walk's known limits: the digits-only filter is #509's; rule 5 needs the client to know the league is FAAB.
+  - **Docs.** The code-walk's false "on the steps that send" claim is corrected, citations remapped. `testflight-additions.md` has a B11b row: not connected, empty bid → Connect → sign in → back on Ready with the line → type a bid → CTA → consent → tick → Make the move enabled.
+  - **`check-fa-move`:** 115 passed, 0 failed. New: P2-B ×3, executed through `connectReturnStep` / `bidLineShown` / `needsBidFor`, including an exhaustive connect × consent × kind × FAAB × field table. The rule 1 pin's regex is replaced by the executed `bidLineShown` plus the P3-1 branch pin. B1 follows the new guard.
+  - **Sabotage, 5, each red then restored (the unsabotaged copy green):** the plan going to consent regardless; the sheet going to consent regardless; the named CTA's bid guard dropped; the line on consent again; the line rendered in the priority-waiver branch. Re-checked after the `needsBidFor` refactor: round 8's `input.bid === '' ? 0`, an add sending the bid, and the line dropped, all still red.
+  - **Gate:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 139 of 139 exit 0 (`check-paywall-gate` 109 of 109, `check-sleeper-handoff` passing); `check-fa-move` 115 of 115. The backend is untouched.
 
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 
