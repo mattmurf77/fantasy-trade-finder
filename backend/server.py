@@ -22934,11 +22934,19 @@ def _espn_suggested_order(league_id: str, member_ids: list[str]) -> dict | None:
 
 def _assignment_payload(league_id: str, settings: dict,
                         slots: list[dict], member_count: int) -> dict:
+    """`progress.total` counts the classes the payload SHOWS (C5 P2-1).
+
+    A drafted grid seeded before the draft shows 3 classes until setup is
+    re-saved, and a flip back after that re-save shows 5, so a fixed
+    4-class total would read "48 of 64" (the Draft Room's "Continue
+    assigning" with nothing left) or "80 of 64". An unseeded grid has no
+    classes yet and keeps the 4-class figure.
+    """
     seasons: dict[int, list[dict]] = {}
     for s in slots:
         seasons.setdefault(s["season"], []).append(s)
-    total = (int(settings["rounds"]) * max(member_count, 0)
-             * (_ASSIGNMENT_SEASONS_AHEAD + 1))
+    classes = len(seasons) or (_ASSIGNMENT_SEASONS_AHEAD + 1)
+    total = int(settings["rounds"]) * max(member_count, 0) * classes
     return {
         "league_id": str(league_id),
         "settings":  settings,

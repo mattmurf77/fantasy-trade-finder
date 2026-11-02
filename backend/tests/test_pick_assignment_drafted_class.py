@@ -35,7 +35,7 @@ SEASON = 2026
 ROUNDS = 4
 FMT = "1qb_ppr"
 TOKEN = "test-token-c5-drafted-class"
-TOTAL = ROUNDS * len(MEMBERS) * 4       # progress.total: 4 classes, unchanged
+TOTAL = ROUNDS * len(MEMBERS) * 4       # progress.total of a 4-class grid
 
 
 # ---------------------------------------------------------------------------
@@ -214,8 +214,10 @@ def test_d4_drafted_get_hides_the_spent_class(client, flag_on, mem_db):
 
     assert _seasons(body) == [SEASON + 1, SEASON + 2, SEASON + 3]
     assert body["current_season"] == SEASON
-    assert body["progress"]["total"] == baseline["progress"]["total"] == TOTAL
-    assert body["progress"]["assigned"] == TOTAL - ROUNDS * len(MEMBERS)
+    assert baseline["progress"]["total"] == TOTAL
+    # P2-1: total counts the 3 classes shown, so the grid reads complete
+    assert (body["progress"]["assigned"] == body["progress"]["total"]
+            == TOTAL - ROUNDS * len(MEMBERS))
     # the visible classes are served exactly as before
     for yr in (SEASON + 1, SEASON + 2, SEASON + 3):
         assert _slots(body, yr) == _slots(baseline, yr)
@@ -358,3 +360,85 @@ def test_d8_verdict_flip_back_restores_the_spent_class(client, flag_on, mem_db):
     assert len(shown) == ROUNDS * len(MEMBERS)
     assert shown[PICK_2026]["owner_user_id"] == "u3"
     assert shown[PICK_2026]["assigned_at"] == before[PICK_2026]["assigned_at"]
+
+
+# ---------------------------------------------------------------------------
+# P2-1 — `progress.total` counts the classes the payload SHOWS
+# ---------------------------------------------------------------------------
+# A drafted grid seeded before the draft shows 3 classes until setup is
+# re-saved; a flip back after that re-save shows 5. The Draft Room reads
+# `assigned < total` as "Continue assigning", so a window-sized total would
+# prompt for work that does not exist (48 of 64) or read past complete
+# (80 of 64).
+
+CLASS = ROUNDS * len(MEMBERS)           # slots in one class
+
+
+def _progress(body):
+    return body["progress"]["assigned"], body["progress"]["total"]
+
+
+def test_p2_1_drafted_grid_before_resave_reads_complete(client, flag_on, mem_db):
+    assert _seed(client, rounds=ROUNDS).status_code == 200
+    _verdict("drafted", "medium")
+    body = _get(client)
+    assert _seasons(body) == [SEASON + 1, SEASON + 2, SEASON + 3]
+    assert _progress(body) == (3 * CLASS, 3 * CLASS)              # 48 of 48
+    # the PUT's progress counts the same classes
+    slot = _slots(body)[PICK_2027]
+    r = _put(client, PICK_2027, owner_user_id="u3",
+             if_assigned_at=slot["assigned_at"])
+    assert r.status_code == 200, r.get_json()
+    p = r.get_json()["progress"]
+    assert (p["assigned"], p["total"]) == (3 * CLASS, 3 * CLASS)
+
+
+def test_p2_1_drafted_grid_after_resave_reads_complete(client, flag_on, mem_db):
+    _before, resp = _d5_flow(client)
+    p = resp["progress"]
+    assert (p["assigned"], p["total"]) == (4 * CLASS, 4 * CLASS)  # 64 of 64
+    body = _get(client)
+    assert _seasons(body) == [SEASON + 1, SEASON + 2, SEASON + 3, SEASON + 4]
+    assert _progress(body) == (4 * CLASS, 4 * CLASS)
+
+
+def test_p2_1_flip_back_with_extra_class_reads_complete(client, flag_on, mem_db):
+    _d5_flow(client)
+    _verdict("not_drafted", "high")
+    body = _get(client)
+    assert _seasons(body) == [SEASON + i for i in range(5)]
+    assert _progress(body) == (5 * CLASS, 5 * CLASS)              # 80 of 80
+
+
+@pytest.mark.parametrize("drafted, classes", [
+    pytest.param(False, 4, id="not-drafted"),
+    pytest.param(True, 3, id="drafted-before-resave"),
+])
+def test_p2_1_new_member_without_reseed_stays_partial(
+        client, flag_on, mem_db, drafted, classes):
+    """The real "Continue assigning" case must still prompt."""
+    assert _seed(client, rounds=ROUNDS).status_code == 200
+    if drafted:
+        _verdict("drafted", "medium")
+    with db.engine.begin() as conn:
+        conn.execute(league_members_table.insert().values(
+            league_id=LEAGUE, user_id="u5", username="Team u5",
+            display_name="Team u5", roster_data="[]"))
+    body = _get(client)
+    assigned, total = _progress(body)
+    assert assigned == classes * CLASS
+    assert total == ROUNDS * 5 * classes
+    assert assigned < total
+
+
+@pytest.mark.parametrize("status, confidence", [
+    pytest.param(None, None, id="never-checked"),
+    pytest.param("drafted", "medium", id="drafted"),
+])
+def test_p2_1_unseeded_total_is_unchanged(
+        client, flag_on, mem_db, status, confidence):
+    _verdict(status, confidence)
+    body = _get(client)
+    assert body["seeded"] is False
+    assert body["seasons"] == []
+    assert _progress(body) == (0, TOTAL)                          # 0 of 64

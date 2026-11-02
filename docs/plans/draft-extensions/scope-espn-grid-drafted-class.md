@@ -29,8 +29,10 @@
   A grid seeded before the draft holds 2026–2029, so once the verdict reads
   drafted it shows 2027–2029. The 4th class (2030) is seeded the next time
   someone saves setup (`PickAssignmentScreen.tsx` setup path, which always
-  sends `reseed: false`). `progress.total` still counts 4 classes, so the
-  progress line reads 48 of 64 until then. An automatic top-up is a named
+  sends `reseed: false`). `progress.total` counts the classes shown
+  (`rounds × members × classes`, P2-1), so the progress line reads 48 of 48
+  until then and 64 of 64 after, and the Draft Room offers "Edit the draft
+  picks", not "Continue assigning". An automatic top-up is a named
   follow-up. The setup entry point stays reachable on a drafted grid because
   commit 2 moves the "change" link to the first visible tab (see §3).
 - **Fielded builds** without commit 2 infer the league season from
@@ -72,7 +74,7 @@
   | restored (`cmp`-identical to the fixed copies) | green (7 of 7) |
 
 - [x] **Unit tests:** new `backend/tests/test_pick_assignment_drafted_class.py`,
-  13 cases. It uses the real routes and an in-memory SQLite DB, and sets the
+  20 cases (13 C5 + 7 P2-1). It uses the real routes and an in-memory SQLite DB, and sets the
   verdict with the real setter `set_league_draft_status`, the writer
   `_refresh_league_draft_status` persists through.
 
@@ -81,13 +83,18 @@
   | D1 `not_drafted`/high · D2 `unknown`/low · D3 never checked (NULL) · D3 `not_drafted`/low | GET seasons 2026–2029, `current_season == 2026`, whole payload equal to the pre-verdict payload | pass ×4 |
   | D3 no leagues row | same, via the session league | pass |
   | helper fail-safes | drafted moves only the verdict's own season; a DB error keeps `season` | pass |
-  | D4 drafted, grid seeded 2026–2029 | GET shows 2027–2029, `current_season == 2026`, `progress.total` unchanged (64), 2027–2029 slots served exactly as before, 2026 rows still stored | pass |
+  | D4 drafted, grid seeded 2026–2029 | GET shows 2027–2029, `current_season == 2026`, progress 48 of 48 (P2-1; was 48 of 64), 2027–2029 slots served exactly as before, 2026 rows still stored | pass |
   | D5 drafted, re-save order (no reseed) | seasons 2027–2030; 2027–2029 rows byte-identical (an edit included); all 16 2026 rows still exist verbatim (an edit included) | pass |
   | D5 pricing | 2030 rows: `pool_value == pick_pool_value(rnd, 4, fmt)` and `pick_value == compute_pick_value(rnd, 2030, 2026, teams)`, with a check that the decay really differs between years_out 4 and 3 | pass |
   | D6 drafted, fresh league | the order route seeds 2027–2030 only, priced with years_out = season − 2026 | pass |
   | D7 drafted | PUT on a 2026 pick returns `404 pick_not_found`, the row is unchanged and no event fires; PUT on a 2027 pick succeeds | pass |
   | D8 flip back to `not_drafted` after D5 | GET shows 2026–2030 and the edited 2026 slot reappears as stored | pass |
   | seeder kept + new rows | a non-drafted re-save from 2 rounds to 4 writes, and kept rows are unchanged | pass |
+  | P2-1 drafted, not re-saved | GET 2027–2029 reads 48 of 48; a 2027 PUT's progress reads 48 of 48 | pass (red before P2-1: 48 of 64) |
+  | P2-1 drafted, re-saved | order response and GET read 64 of 64 | pass (green before too) |
+  | P2-1 flip back with 2030 present | GET 2026–2030 reads 80 of 80 | pass (red before: 80 of 64) |
+  | P2-1 new member, no re-seed ×2 | not drafted: 64 of 80; drafted: 48 of 60; `assigned < total` both | pass (drafted red before: 48 of 80) |
+  | P2-1 unseeded ×2 (never checked, drafted) | `seeded` false, no seasons, 0 of 64 | pass (green before too) |
 
   **Sabotage** (one at a time, each restored and `cmp`-verified):
 
@@ -98,12 +105,15 @@
   | s3 PUT refusal removed | 1 | 12 | D7 |
   | s4 `current_season=first` into the seeder | 4 | 9 | D5 pricing (372.5 vs 316.6), D6 pricing (606.5 vs 515.6); also D5 rows and D8, because the carry range `[current_season, first)` goes empty |
   | s5 seeder `id` strip removed | 4 | 9 | D5 ×2, D8, seeder kept + new rows (the bulk INSERT error) |
+  | s6 P2-1: `total` back to the fixed 4-class window | 4 | 16 | D4, P2-1 not re-saved, P2-1 flip back, P2-1 new member (drafted) |
 
   Existing tests touched: `test_espn_draft_order.py::test_espn_being_down_leaves_the_board_working`
   pinned the GET payload's exact key set and now includes the additive
   `current_season`. No other test asserted the always-current-season grid.
   `test_pick_assignment.py::test_w3_07` still asserts 2026–2029, because its
-  verdict is NULL.
+  verdict is NULL. P2-1 changed one C5 assert: D4 had pinned 48 of 64 and now
+  pins 48 of 48. Every assert of `total` on a full 4-class grid (D1–D3, D5,
+  `test_pick_assignment.py:589`) is unchanged and passes.
 - [x] **Code-walk proof** (line numbers on `fix/espn-grid-drafted-class`):
   1. Verdict. `backend/server.py:23935` `_refresh_league_draft_status` →
      `_detect_league_draft_status` (`:23834`) → `draft_status.detect`
