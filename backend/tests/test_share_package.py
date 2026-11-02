@@ -178,6 +178,15 @@ def test_no_smart_banner_until_ios_install_url_is_set(env, monkeypatch):
     assert "apple-itunes-app" not in _landing_html(env)
 
 
+@pytest.mark.parametrize("url", [
+    "https://apps.apple.com/app/id6740012345",           # no country or slug
+    "https://apps.apple.com/us/app/fleeced/id6740012345?mt=8",
+])
+def test_smart_banner_accepts_app_store_url_forms(env, monkeypatch, url):
+    monkeypatch.setenv("IOS_INSTALL_URL", url)
+    assert '<meta name="apple-itunes-app" content="app-id=6740012345">' in _landing_html(env)
+
+
 def test_smart_banner_carries_the_app_store_id(env, monkeypatch):
     monkeypatch.setenv("IOS_INSTALL_URL", "https://apps.apple.com/us/app/fleeced/id6740012345")
     html = _landing_html(env)
@@ -189,6 +198,10 @@ def test_smart_banner_carries_the_app_store_id(env, monkeypatch):
     "https://apps.apple.com/us/app/fleeced",            # no id
     "[APP STORE URL]",                                  # the #456 placeholder
     'https://apps.apple.com/app/id123"><script>x',      # an id that isn't digits-only up to a boundary
+    "https://evil.com/id6740012345",                    # another host (release-lead #504 QA P3)
+    "https://apps.apple.com.evil.com/app/id6740012345", # a look-alike host
+    "https://evil.com/?u=https://apps.apple.com/app/id6740012345",  # apple.com only inside the query
+    "http://apps.apple.com/app/id6740012345",           # not https
 ])
 def test_no_smart_banner_without_a_clean_app_id(env, monkeypatch, url):
     monkeypatch.setenv("IOS_INSTALL_URL", url)

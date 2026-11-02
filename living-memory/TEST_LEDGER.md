@@ -1,3 +1,11 @@
+## 2026-11-02 — #504 QA P3: the smart banner's App Store id is read only from an https://apps.apple.com URL
+
+Gates: full (`#504`). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest plus sabotage.
+
+- **What (release-lead's #504 light-QA P3):** `_APP_STORE_ID_RE` is anchored to `https://apps.apple.com/…/id<digits>` and `.match`ed from the start of `IOS_INSTALL_URL`. Before, it took `/id<digits>` from any host (`https://evil.com/id123456` gave 123456). That was harmless since release-lead sets the variable, but it's tighter now. `docs/config-reference.md`'s row says so.
+- **Tests:** `test_share_package.py` 25 passed. It rejects another host, a look-alike host (`apps.apple.com.evil.com`), apple.com only inside the query, and http; it accepts `/app/id…` with no country or slug, and a `?mt=8` query.
+- **Sabotage 3/3 red:** the old unanchored pattern, `.search` for `.match`, and `https?` allowed.
+
 ## 2026-10-31 — G3-e under legal R28.23: an orphan outcome's owner id is one deletion's alias resolution covers
 
 Gates: head-eng's relay of legal R28.23 (G3-e accepted on three conditions), condition 2. Test only. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

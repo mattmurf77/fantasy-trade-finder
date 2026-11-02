@@ -31084,13 +31084,14 @@ def og_trade_card(token):
 
 # C3 (Product's pre-launch review, 2026-10-27): Safari's App Store smart
 # banner on the /s/* share landings, live once the app is. IOS_INSTALL_URL is
-# the App Store listing URL (…/id<digits>), set at the 11-18 T0; unset or
-# without an app id, there's no banner. Only the digits are ever emitted.
-_APP_STORE_ID_RE = re.compile(r"/id(\d{6,12})(?:[/?#]|$)")
+# the App Store listing URL (https://apps.apple.com/…/id<digits>), set at the
+# 11-18 T0; unset, on another host, or without an app id, there's no banner.
+# Only the digits are ever emitted.
+_APP_STORE_ID_RE = re.compile(r"https://apps\.apple\.com/(?:[^?#]*/)?id(\d{6,12})(?:[/?#]|$)")
 
 
 def _apple_itunes_meta() -> str:
-    m = _APP_STORE_ID_RE.search(os.environ.get("IOS_INSTALL_URL", "").strip())
+    m = _APP_STORE_ID_RE.match(os.environ.get("IOS_INSTALL_URL", "").strip())
     return f'  <meta name="apple-itunes-app" content="app-id={m.group(1)}">\n' if m else ""
 
 
