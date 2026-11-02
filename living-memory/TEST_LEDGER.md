@@ -1,3 +1,19 @@
+## 2026-11-01 — #373: legal R28.26 pasted (free-agent moves "where available", tips, QA (a)–(c), M11 option (b)), all pinned
+
+Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.
+
+- **What (word for word from `legal-lead-drafts.md` Parts 1–2; relayed by head-eng's round 3b via the coordinator):**
+  - free-agent moves, "where available": privacy §1 (the Sleeper token sentence, the ESPN/MFL import lines, a new records item), §3, §4 (Sleeper, ESPN, MFL), §5 and §6 (removes; turn off). Terms §2, §5 (retitled; new 5.2; old 5.2 becomes 5.3) and §11;
+  - tips: privacy §1 and §4 ("or leave a tip", "any tips", "records of your purchase"); Terms new §14.11. Never "donation";
+  - QA (a) "before we store them", (b) the local-storage list, (c) §14.8 "Starting in January 2027".
+- **M11: option (b)**, the §6 unconfirmed-team item, the §1 "How you sign in" last sentence and the Terms §2 sentence. That's because `landing.platform_options` is ON on `main` and ask 12 hasn't been executed (legal R28.26; launch-readiness-product.md:601); release-lead confirms prod. `POL-r28-26-m11` pins whichever option `M11_ENTRY_LIVE` names and fails on any marker of the other. Option (a) is ready as local `local/373-m11-a`.
+- **Pins:** `POL-r28-26` (13 privacy runs via `once()`, 6 Terms runs once each; no "before they leave your device", "From January 1, 2027", "5.2 Platform terms", or "donat" on any support page) and `POL-r28-26-m11`.
+  - Updated for the new text: R28.15's Terms §2 pin (its last sentence moved to the M11 pin), R28.16's ESPN/MFL import lines, R28.23's §6 removes anchor (both versions), and `POL-terms-subscriptions` (14.1–14.11).
+  - `once()` exempts legal's repeated retention clause, "kept while your account exists, and deleted with it."
+- **Sabotage 25/25 red:** each line reverted or removed; the §5 line and the M11 item duplicated; tip → donation (privacy, Terms, FAQ); §5.3 back to 5.2; the M11 Terms text half-swapped; the M11 flag flipped alone. The earlier sets re-run red (one skip on an anchor R28.26 changed). Every pinned string was checked against the drafts.
+- **Suites:** web structure 253/253.
+- **Not in #373:** legal's SHOULD on other surfaces saying "January 1, 2027". The app's paywall (`mobile/src/copy/monetization.ts:71`) says "From January 1, 2027"; flagged to head-eng.
+
 ## 2026-10-29 — Addendum G2 and G3 in eval, plus addendum H's H-a1 and H-a2: the response boundary, F4's four buckets, explained #535 orphans
 
 Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook. No route, schema, event, flag, knob or engine-module change. This is models-lead's single eval PR (G-b5); it goes to models-lead as an R-G entry before merge (`models-eng-r-g-g2-eval-pr.md`, group notes).

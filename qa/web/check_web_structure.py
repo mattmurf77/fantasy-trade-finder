@@ -495,8 +495,8 @@ def run() -> int:
         problems.append(f"sections {[n for n, _ in terms_secs]}, want 1-14 in order")
     if not s14_text.startswith("14. Subscriptions, free trial and billing"):
         problems.append('no "14. Subscriptions, free trial and billing" heading')
-    if subs != list(range(1, 11)):
-        problems.append(f"§14 subsections {subs}, want 1-10 in order")
+    if subs != list(range(1, 12)):
+        problems.append(f"§14 subsections {subs}, want 1-11 in order (14.11 Tips, legal R28.26)")
     problems += [f'§14 lacks "{t}"' for t in (
         "Deleting the app or your Fleeced account does not cancel your subscription",
         "reportaproblem.apple.com",
@@ -574,7 +574,7 @@ def run() -> int:
             ("§2 sign-in paragraph",
              "You can sign in with Apple, with a Sleeper username, or, where available, with your ESPN "
              "or MyFantasyLeague login. You can also connect ESPN and MyFantasyLeague leagues after you "
-             "sign in. Only sign in with, and connect, accounts you own or are authorized to use."),
+             "sign in."),
             ("§14.1 subscribe line",
              "To subscribe, you need a verified account: Sign in with Apple, a verified Sleeper "
              "sign-in, or, where available, an ESPN or MFL sign-in."),
@@ -619,8 +619,9 @@ def run() -> int:
             ("§1 ESPN import",
              "Importing an ESPN league (after you sign in, or when you connect ESPN in Settings → "
              "Leagues): we keep two ESPN sign-in cookies, espn_s2 (stored encrypted) and SWID (your "
-             "ESPN member ID, stored as is). We use them to import your ESPN leagues and to send "
-             "trades you approve."),
+             "ESPN member ID, stored as is). We use them to import your ESPN leagues, to send trades "
+             "you approve and, where available, to make free-agent moves you start and confirm after "
+             "authorizing them."),
             ("§1 ESPN disconnect",
              "You can disconnect in Settings → Leagues, which deletes both cookies. If ESPN is how you "
              "sign in, your ESPN member ID stays as your sign-in until you delete your account."),
@@ -633,7 +634,8 @@ def run() -> int:
             ("§1 MFL import",
              "Importing an MFL league (after you sign in, or when you connect MFL in Settings → "
              "Leagues): we also keep the session MFL returns, encrypted, and use it to read your "
-             "leagues and to send trades you approve."),
+             "leagues, to send trades you approve and, where available, to make free-agent moves you "
+             "start and confirm after authorizing them."),
             ("§1 MFL disconnect",
              "You can disconnect in Settings → Leagues, which deletes the stored session. If MFL is how "
              "you sign in, your MFL username stays as your sign-in until you delete your account."),
@@ -692,10 +694,14 @@ def run() -> int:
     # with its neighbour, stay green. Runs carry a neighbour's words for
     # position, so a copy of the line alone wouldn't repeat the whole run:
     # every clause of 25+ characters must be on the page once, too.
+    # Clauses legal repeats word for word across lines (§5's retention
+    # formula), so they're never unique; the runs' other clauses still are.
+    SHARED_CLAUSES = {"kept while your account exists, and deleted with it."}
+
     def once(label: str, s: str) -> bool:
         s = " ".join(s.split())
         sec = priv_secs.get(re.match(r"§(\d+)", label).group(1), "")
-        clauses = [c for c in re.split(r"(?<=[.;:])\s+", s) if len(c) >= 25]
+        clauses = [c for c in re.split(r"(?<=[.;:])\s+", s) if len(c) >= 25 and c not in SHARED_CLAUSES]
         return priv.count(s) == 1 and sec.count(s) == 1 and all(priv.count(c) == 1 for c in clauses)
 
     missing19 = [label for label, s in R28_19 if not once(label, s)]
@@ -766,8 +772,8 @@ def run() -> int:
              "the other manager's own link to that trade isn't affected. Other shared pages stay "
              "available with your account link removed. Email us to remove one."),
             ("§6 removes",
-             "stored Sleeper, ESPN and MFL connections; links you shared to matched trades, which stop "
-             "working. What is anonymized instead,"),
+             "free-agent move authorizations and records; links you shared to matched trades, which "
+             "stop working. What is anonymized instead,"),
             ("§6 anonymized",
              "note text removed; other shared trade pages stay available, with your account link "
              "removed;"),
@@ -780,7 +786,7 @@ def run() -> int:
              "Shared trade pages and share snapshots: kept so links keep working. If you delete your "
              "account, they stay available with your account link removed; email us to remove one."),
             ("§6 removes",
-             "stored Sleeper, ESPN and MFL connections. What is anonymized instead,"),
+             "free-agent move authorizations and records. What is anonymized instead,"),
             ("§6 anonymized",
              "note text removed; shared trade pages stay available, with your account link removed;"),
         ),
@@ -822,6 +828,136 @@ def run() -> int:
     r.check("POL-r28-25-calculator[privacy.html]", calc_ok,
             "§3 calculator line not verbatim once, in §3, after the raw-ranking line (legal R28.25 row 5)"
             if not calc_ok else "§3 calculator line verbatim once, in §3, after the raw-ranking line")
+
+    # Legal R28.26 (2026-11-01), word for word from legal-lead-drafts.md
+    # Parts 1-2. Free-agent moves go in "where available" form whatever the
+    # flag (no second notice before the D1 flip); tips; and QA (a)-(c). Each
+    # privacy run is once(): once on the page, in its section.
+    terms = rendered("terms.html")
+    R28_26_PRIVACY = (
+        ("§1 error messages",
+         "Error messages are scrubbed of personal data and shortened before we store them."),
+        ("§1 Sleeper token",
+         "to submit or withdraw trade proposals. Where available, we also use it to make free-agent "
+         "moves (adding and dropping players, and placing waiver claims) that you start and confirm, "
+         "after you've authorized them in the app within the last 7 days."),
+        ("§1 free-agent records",
+         "Free-agent move authorizations and records (where available). When you authorize Fleeced to "
+         "make free-agent moves for you, we record when, for which platform account, which version of "
+         "the wording you saw, the app version you used, and when the authorization ends or you turn it "
+         "off. For each move, we record what was sent (the players, the kind of move and any waiver "
+         "bid), when, and the platform's response. We keep these to show the move was yours and to help "
+         "if something goes wrong. They never include your platform password or sign-in token."),
+        ("§1 subscriptions and tips",
+         "Subscriptions and purchases. If you subscribe or leave a tip, Apple handles the payment; we "
+         "never see your card or billing details. We and our subscription service provider, RevenueCat, "
+         "receive your subscription status, plan, trial, purchase and renewal dates, any tips, and "
+         "transaction identifiers from Apple"),
+        ("§1 local storage",
+         "if you arrived through an invite link, the inviter's Sleeper username and league. It also "
+         "keeps the website's settings and display state there, such as your scoring format, trades "
+         "you've queued and notices you've dismissed."),
+        ("§3 free-agent moves",
+         "send trade proposals you approve and, where available, make free-agent moves you start and "
+         "confirm;"),
+        ("§4 Sleeper",
+         "With your opt-in, we send your trade proposals and, where available, free-agent moves you "
+         "approve to Sleeper."),
+        ("§4 ESPN",
+         "ESPN: with your connection, we read your ESPN leagues and send trade proposals and, where "
+         "available, free-agent moves you approve."),
+        ("§4 MFL",
+         "MyFantasyLeague (MFL): with your connection, we read your MFL leagues and send trade proposals "
+         "and, where available, free-agent moves you approve."),
+        ("§4 Apple",
+         "If you subscribe or leave a tip, Apple processes the payment and gives us and RevenueCat the "
+         "records of your purchase."),
+        ("§5 free-agent records",
+         "Free-agent move authorizations and records: kept while your account exists, and deleted with "
+         "it. Turning off moves, or disconnecting the platform, ends the authorization at once; the "
+         "records of past moves stay until your account is deleted."),
+        ("§6 removes free-agent records",
+         "stored Sleeper, ESPN and MFL connections, and free-agent move authorizations and records;"),
+        ("§6 turn off free-agent moves",
+         "free-agent moves (where available): Settings → Leagues → Stop roster moves, shown while moves "
+         "are on. Disconnecting the platform also stops them. Moves already made stay on the platform;"),
+    )
+    R28_26_TERMS = (
+        ("§2 responsibility",
+         "You're responsible for activity under your account, including every trade proposal and "
+         "free-agent move sent at your direction."),
+        ("§5 title and 5.1", "5. Sending trades and free-agent moves to your league platforms 5.1 Trade proposals."),
+        ("§5.2",
+         "5.2 Free-agent moves (where available). Fleeced can add and drop players, and place waiver "
+         "claims, for you in leagues on platforms you've connected. It does so only when you start a "
+         "move and confirm it, after you've authorized Fleeced in the app. Your authorization lasts 7 "
+         "days, and you can withdraw it at any time in Settings. Fleeced never makes a move on its own. "
+         "A move is final on the platform. Fleeced can't undo it, and a player you drop may be claimed "
+         "by another team. A waiver claim runs on the platform's schedule and spends any bid you set. "
+         "The platform decides how and when a move is processed, for example under your league's "
+         "waiver rules. If the app can't confirm whether a move reached the platform, it says so. Check "
+         "your roster on the platform before trying again. The unofficial-connection risks in 5.1 apply "
+         "to free-agent moves too. 5.3 Platform terms."),
+        ("§11",
+         "That includes trade proposals and free-agent moves sent through it, and a platform rejecting, "
+         "delaying or processing them differently."),
+        ("§14.8",
+         "Starting in January 2027, new subscribers pay $6.99 a month or $34.99 a year."),
+        ("§14.11",
+         "14.11 Tips. Where available, you can leave an optional tip in the iPhone app. A tip is a "
+         "one-time payment through Apple. It doesn't buy or unlock any feature, content or benefit, and "
+         "it doesn't change your subscription. Refunds are handled by Apple (§14.6)."),
+    )
+    miss26 = [label for label, s in R28_26_PRIVACY if not once(label, s)]
+    miss26 += [f"terms {label}" for label, s in R28_26_TERMS if terms.count(" ".join(s.split())) != 1]
+    stale26 = [t for t in ("before they leave your device", "From January 1, 2027", "5.2 Platform terms")
+               if t in priv or t in terms]
+    stale26 += [f"\"donation\" on {pg}" for pg in SUPPORT_PAGES if re.search(r"donat", rendered(pg), re.I)]
+    r.check("POL-r28-26[privacy|terms]", not miss26 and not stale26,
+            ("not verbatim once (legal R28.26): " + "; ".join(miss26)) if miss26 else
+            ("superseded text still there: " + "; ".join(stale26)) if stale26 else
+            f"{len(R28_26_PRIVACY)} privacy + {len(R28_26_TERMS)} terms R28.26 runs verbatim")
+
+    # R28.26 item 1, M11: which text ships depends on prod at this page's
+    # deploy. (b), M11_ENTRY_LIVE, while landing.platform_options is ON in
+    # prod and #430 isn't deployed or legacy unverified entry:* accounts
+    # remain: privacy §6's item, privacy §1's last "How you sign in" sentence
+    # and Terms §2's sentence, all together. (a) otherwise: no item, and
+    # Terms §2 keeps "Only sign in with, and connect, …". release-lead
+    # confirms prod; the swap flips M11_ENTRY_LIVE with the text.
+    M11_ENTRY_LIVE = True
+    M11 = {
+        True: (
+            ("§6 unconfirmed-team accounts",
+             "Accounts started from an ESPN or MFL team that isn't confirmed as yours. If you started by "
+             "choosing your team in an ESPN or MFL league (where available), and the app shows your "
+             "account as not verified, Delete account and Download my data don't work for it in the app, "
+             "because the account could hold data that belongs to the team's real owner. Signing out ends "
+             "it on your device. To ask us to delete it, email fleecedapp@gmail.com. You'll be asked to "
+             "show that the team is yours; if that can't be done, nothing is deleted."),
+            ("§1 how you sign in, last sentence",
+             "is never stored (see \"Platform connections\" below). Where available, you can also start "
+             "by choosing your team in an ESPN or MFL league. Until the team is confirmed as yours, that "
+             "account is unverified. Its account ID is built from the league and team or, for an ESPN "
+             "team, from the team owner's ESPN member ID. League data."),
+        ),
+        False: (),
+    }
+    M11_TERMS = {
+        True: "Only sign in with, connect, or choose teams and accounts you own or are authorized to use.",
+        False: "Only sign in with, and connect, accounts you own or are authorized to use.",
+    }
+    M11_MARKERS = {True: ("isn't confirmed as yours", "start by choosing your team", "choose teams and accounts"),
+                   False: ("Only sign in with, and connect,",)}
+    want11 = [label for label, s in M11[M11_ENTRY_LIVE] if not once(label, s)]
+    if terms.count(M11_TERMS[M11_ENTRY_LIVE]) != 1:
+        want11.append("terms §2 sentence")
+    other11 = [m for m in M11_MARKERS[not M11_ENTRY_LIVE] if m in priv or m in terms]
+    v11 = "(b) entry live" if M11_ENTRY_LIVE else "(a) omitted"
+    r.check("POL-r28-26-m11[privacy|terms]", not want11 and not other11,
+            (f"M11 {v11}: not verbatim once: " + "; ".join(want11)) if want11 else
+            (f"M11 {v11}: the other option's text is there: " + "; ".join(other11)) if other11 else
+            f"M11 {v11}: verbatim, all together")
 
     # release-lead #373 QA P3-1: the other support pages each keep at least
     # one link to the privacy policy.

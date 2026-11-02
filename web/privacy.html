@@ -85,6 +85,7 @@
           <li><strong>ESPN:</strong> your ESPN member ID (called SWID), which identifies your account. You log in on ESPN's own page inside the app, and we check the login with ESPN (see "Platform connections" below).</li>
           <li><strong>MFL:</strong> your MFL username, which identifies your account. Your MFL password is used once to sign in to MFL and is never stored (see "Platform connections" below).</li>
         </ul>
+        <p>Where available, you can also start by choosing your team in an ESPN or MFL league. Until the team is confirmed as yours, that account is unverified. Its account ID is built from the league and team or, for an ESPN team, from the team owner's ESPN member ID.</p>
       </li>
       <li><strong>League data.</strong> From the platforms you connect we read your leagues, rosters, draft picks and league settings. We also read your leaguemates' usernames, display names and rosters, and your league's trades and roster history. We use leaguemates' data only to run trade discovery and league features for members of that league, and to confirm ESPN sign-ins (see "Platform connections" below).</li>
       <li>
@@ -101,7 +102,7 @@
         <p>We also record activity events (sign-in, ranking, trade actions) with a device snapshot: device type, OS version and app version.</p>
       </li>
       <li>
-        <strong>Usage analytics (first-party only).</strong> To understand where the app is confusing or broken, the app and website send us usage events: screens viewed, sign-in and setup steps completed, taps on core features, how long actions take, and app errors. Error messages are scrubbed of personal data and shortened before they leave your device. These events are processed and stored only on our own server; no analytics company receives them.
+        <strong>Usage analytics (first-party only).</strong> To understand where the app is confusing or broken, the app and website send us usage events: screens viewed, sign-in and setup steps completed, taps on core features, how long actions take, and app errors. Error messages are scrubbed of personal data and shortened before we store them. These events are processed and stored only on our own server; no analytics company receives them.
         <ul>
           <li><strong>Device identifier.</strong> Each install generates a random device identifier (a meaningless ID like dev_a1b2…) so we can count installs and see where new users get stuck before they sign in. It contains no information about you or your device. In the iOS app it is kept in the device's secure storage; on the website, in your browser's local storage; in the browser extension, in the extension's own storage.</li>
           <li><strong>Session identifier.</strong> Events also carry a session identifier, which we store only as a one-way hash.</li>
@@ -128,7 +129,7 @@
             <ul>
               <li>The app captures the session token Sleeper issues and we store it encrypted at rest. The encryption key lives only in our server environment, never in the database, and the server never returns the token to the app or website.</li>
               <li>The iOS app may also keep the token in the device's secure storage to re-verify you. The extension uses it only briefly and doesn't save it.</li>
-              <li>This token is a full-account Sleeper credential. We use it to verify ownership and, when you ask, to submit or withdraw trade proposals.</li>
+              <li>This token is a full-account Sleeper credential. We use it to verify ownership and, when you ask, to submit or withdraw trade proposals. Where available, we also use it to make free-agent moves (adding and dropping players, and placing waiver claims) that you start and confirm, after you've authorized them in the app within the last 7 days.</li>
               <li>You can disconnect at any time in Settings → Leagues, which deletes the stored token immediately.</li>
             </ul>
           </li>
@@ -136,7 +137,7 @@
             <strong>ESPN.</strong> You log in on ESPN's own page inside the app; we never see your password.
             <ul>
               <li><strong>Signing in with ESPN:</strong> we use ESPN's sign-in cookies to confirm that your login owns the team you pick, and we keep only your ESPN member ID (called SWID) to recognize you next time. To confirm ownership, we may also check your cookies against another league member's ESPN member ID, which members of that league can see. Nothing from that check is kept.</li>
-              <li><strong>Importing an ESPN league</strong> (after you sign in, or when you connect ESPN in Settings → Leagues): we keep two ESPN sign-in cookies, espn_s2 (stored encrypted) and SWID (your ESPN member ID, stored as is). We use them to import your ESPN leagues and to send trades you approve.</li>
+              <li><strong>Importing an ESPN league</strong> (after you sign in, or when you connect ESPN in Settings → Leagues): we keep two ESPN sign-in cookies, espn_s2 (stored encrypted) and SWID (your ESPN member ID, stored as is). We use them to import your ESPN leagues, to send trades you approve and, where available, to make free-agent moves you start and confirm after authorizing them.</li>
               <li>You can disconnect in Settings → Leagues, which deletes both cookies. If ESPN is how you sign in, your ESPN member ID stays as your sign-in until you delete your account.</li>
             </ul>
           </li>
@@ -144,20 +145,21 @@
             <strong>MFL.</strong> If you sign in with or connect MFL using your MFL username and password, your password passes through our server to MFL's sign-in once, to start a session. We never store it.
             <ul>
               <li><strong>Signing in with MFL:</strong> we keep your MFL username to recognize you next time.</li>
-              <li><strong>Importing an MFL league</strong> (after you sign in, or when you connect MFL in Settings → Leagues): we also keep the session MFL returns, encrypted, and use it to read your leagues and to send trades you approve.</li>
+              <li><strong>Importing an MFL league</strong> (after you sign in, or when you connect MFL in Settings → Leagues): we also keep the session MFL returns, encrypted, and use it to read your leagues, to send trades you approve and, where available, to make free-agent moves you start and confirm after authorizing them.</li>
               <li>You can disconnect in Settings → Leagues, which deletes the stored session. If MFL is how you sign in, your MFL username stays as your sign-in until you delete your account.</li>
             </ul>
           </li>
         </ul>
       </li>
-      <li><strong>Subscriptions and purchases.</strong> If you subscribe, Apple handles the payment; we never see your card or billing details. We and our subscription service provider, RevenueCat, receive your subscription status, plan, trial, purchase and renewal dates, and transaction identifiers from Apple, linked to your account, so we can give you access and keep billing records. RevenueCat also receives your account identifier when you sign in.</li>
+      <li><strong>Free-agent move authorizations and records</strong> (where available). When you authorize Fleeced to make free-agent moves for you, we record when, for which platform account, which version of the wording you saw, the app version you used, and when the authorization ends or you turn it off. For each move, we record what was sent (the players, the kind of move and any waiver bid), when, and the platform's response. We keep these to show the move was yours and to help if something goes wrong. They never include your platform password or sign-in token.</li>
+      <li><strong>Subscriptions and purchases.</strong> If you subscribe or leave a tip, Apple handles the payment; we never see your card or billing details. We and our subscription service provider, RevenueCat, receive your subscription status, plan, trial, purchase and renewal dates, any tips, and transaction identifiers from Apple, linked to your account, so we can give you access and keep billing records. RevenueCat also receives your account identifier when you sign in.</li>
       <li><strong>Crash and performance data (Sentry).</strong> The iOS app uses Sentry to report crashes and performance traces (a sample of app interactions). Reports include device model, OS version and app version. After sign-in they're tagged with an account identifier (your Fleeced account ID, Sleeper user ID or ESPN member ID, depending on how you signed in) so we can look into your bug reports. They never carry your name or email address. The tag is cleared when you sign out. Sentry is set up not to collect other personal data by default. Sentry may also record the IP address a report came from.</li>
       <li><strong>Server error reports (Sentry).</strong> When our server hits an error, it sends Sentry a report so we can fix it: the type of request and the address it went to, the error and where in our code it happened, and related lines from our server's logs. Before a report is sent, names, IDs and link codes are taken out of the address, and personal details are taken out of the log lines. If that can't be done, the report isn't sent. Server reports don't include your account or platform user ID, your username, your IP address, sign-in details or the content of what you send us. When someone sends feedback, Sentry also gets an alert with the feedback's reference number and severity, not its text.</li>
       <li>
         <strong>Cookies and local storage.</strong>
         <ul>
           <li>Our website sets no cookies.</li>
-          <li>It uses your browser's local storage for your sign-in token, your account and selected league, the device identifier, queued usage events and, if you arrived through an invite link, the inviter's Sleeper username.</li>
+          <li>It uses your browser's local storage for your sign-in token, your account and selected league, the device identifier, queued usage events and, if you arrived through an invite link, the inviter's Sleeper username and league. It also keeps the website's settings and display state there, such as your scoring format, trades you've queued and notices you've dismissed.</li>
           <li>The app keeps similar data in its own storage on your device.</li>
         </ul>
       </li>
@@ -181,7 +183,7 @@
           <li>generate trade suggestions;</li>
           <li>match you with leaguemates on mutually liked trades;</li>
           <li>show value trends;</li>
-          <li>send trade proposals you approve;</li>
+          <li>send trade proposals you approve and, where available, make free-agent moves you start and confirm;</li>
           <li>manage your trial and subscription;</li>
           <li>send the notifications you turned on.</li>
         </ul>
@@ -211,10 +213,10 @@
     <h2>4. Third parties</h2>
     <p><strong>Platforms you connect.</strong> We don't control these companies, and their own privacy policies apply to what they do.</p>
     <ul>
-      <li><strong>Sleeper:</strong> we read your public account and league data from Sleeper's API. With your opt-in, we send your trade proposals to Sleeper. On our website, player and user images load from Sleeper's image servers, which receive your IP address.</li>
-      <li><strong>ESPN:</strong> with your connection, we read your ESPN leagues and send trade proposals you approve.</li>
-      <li><strong>MyFantasyLeague (MFL):</strong> with your connection, we read your MFL leagues and send trade proposals you approve. Your MFL password passes to MFL's sign-in as described above.</li>
-      <li><strong>Apple:</strong> if you use Sign in with Apple, Apple confirms your identity to us. If you subscribe, Apple processes the payment and gives us and RevenueCat the records of your subscription. Apple also delivers push notifications on iOS.</li>
+      <li><strong>Sleeper:</strong> we read your public account and league data from Sleeper's API. With your opt-in, we send your trade proposals and, where available, free-agent moves you approve to Sleeper. On our website, player and user images load from Sleeper's image servers, which receive your IP address.</li>
+      <li><strong>ESPN:</strong> with your connection, we read your ESPN leagues and send trade proposals and, where available, free-agent moves you approve.</li>
+      <li><strong>MyFantasyLeague (MFL):</strong> with your connection, we read your MFL leagues and send trade proposals and, where available, free-agent moves you approve. Your MFL password passes to MFL's sign-in as described above.</li>
+      <li><strong>Apple:</strong> if you use Sign in with Apple, Apple confirms your identity to us. If you subscribe or leave a tip, Apple processes the payment and gives us and RevenueCat the records of your purchase. Apple also delivers push notifications on iOS.</li>
     </ul>
     <p><strong>Service providers that process data for us:</strong></p>
     <ul>
@@ -254,6 +256,7 @@
         <p>An expired connection we haven't used again stays stored until one of those happens.</p>
       </li>
       <li><strong>Subscription and purchase records:</strong> kept while your account exists, and deleted with it.</li>
+      <li><strong>Free-agent move authorizations and records:</strong> kept while your account exists, and deleted with it. Turning off moves, or disconnecting the platform, ends the authorization at once; the records of past moves stay until your account is deleted.</li>
       <li><strong>Shared trade pages and share snapshots:</strong> kept with no set end date, so links keep working. A link you shared to a matched trade stops working if you delete your account; the other manager's own link to that trade isn't affected. Other shared pages stay available with your account link removed. Email us to remove one.</li>
       <li><strong>Sign-in sessions:</strong> end after a period of inactivity. Saved sessions end after 90 days without use, at sign-out, or when your account is deleted.</li>
       <li><strong>Server logs</strong> used for debugging are short-lived. Our hosting provider keeps standard request logs under its own policy.</li>
@@ -274,7 +277,7 @@
               <li>notifications, notification settings and push tokens;</li>
               <li>activity and usage events, and linked anonymous usage history;</li>
               <li>saved sign-in sessions;</li>
-              <li>stored Sleeper, ESPN and MFL connections;</li>
+              <li>stored Sleeper, ESPN and MFL connections, and free-agent move authorizations and records;</li>
               <li>links you shared to matched trades, which stop working.</li>
             </ul>
           </li>
@@ -302,6 +305,7 @@
           </li>
         </ul>
       </li>
+      <li><strong>Accounts started from an ESPN or MFL team that isn't confirmed as yours.</strong> If you started by choosing your team in an ESPN or MFL league (where available), and the app shows your account as not verified, Delete account and Download my data don't work for it in the app, because the account could hold data that belongs to the team's real owner. Signing out ends it on your device. To ask us to delete it, email <a href="mailto:fleecedapp@gmail.com">fleecedapp@gmail.com</a>. You'll be asked to show that the team is yours; if that can't be done, nothing is deleted.</li>
       <li><strong>If you can't delete in the app</strong> (for example, you can't sign in), see "Requests outside the app" below.</li>
       <li>
         <strong>Export your data.</strong> In the app, Settings → Account &amp; data lets you download a copy of the data we hold about you (profile, rankings, decisions, events) as a machine-readable file.
@@ -326,6 +330,7 @@
         <ul>
           <li>push notifications: per category in Settings, or entirely in your device settings;</li>
           <li>platform connections: Settings → Leagues;</li>
+          <li>free-agent moves (where available): Settings → Leagues → Stop roster moves, shown while moves are on. Disconnecting the platform also stops them. Moves already made stay on the platform;</li>
           <li>sign out: ends your session on that device and clears the crash-report tag.</li>
         </ul>
       </li>
