@@ -1,3 +1,13 @@
+## 2026-11-01 — A shared package's OG card names the calculator's generic picks (release-lead's #566 follow-up)
+
+Gates: the scope block `docs/plans/share-landing-generic-picks/scope.md`. Server-only (`og_image.render_package_card`); no schema, flag, event or route contract change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest plus a real render.
+
+- **The bug:** the live calculator shares its 12 generic pick rungs, which aren't `players` rows, so the `/s/p` card drew "Unknown player".
+- **The fix:** `generic_pick_*` ids, parsed by the shared `parse_generic_pick_id`, get `generic_pick_label` ("Mid 1st Round Pick") and the "PK" chip on chalk-dim, aligned with open #564 (same parser, label, chip and constants; on #564 plus #573, #564's four changed test files, this PR's test included, pass 175, and release-lead's three-file set passes 141). Any other unknown id is unchanged, including `generic_pick_1_mid_x`. Sabotages: a lenient parse, the old grey chip, and no lookup are each red.
+- **Test:** `test_og_package_card_names_the_calculators_generic_picks`, through `/og/p`: two picks named, an unknown id still "Unknown player". It's red on main's code.
+- **Render:** `before-after.png`, from the real renderer.
+- **Runs:** `test_share_link_previews.py` passes.
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
