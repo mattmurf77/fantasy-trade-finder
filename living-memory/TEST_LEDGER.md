@@ -34,6 +34,14 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
   - **Postgres 18:** 203 passed, 1 skipped.
   - **Full suite at `b825a896`:** 10,416 passed, 22 skipped.
   - **Cross-PR rule:** whichever of #562 and #577 merges second wraps #577's Shop `trade_proposed` target in `live_deletion_token`.
+- **release-lead's #562 delta QA (GO-with-notes at `4da6b7a1`), its P3s:**
+  - **P3-B:** a raced match's id joins the job's `match_ids` (in memory and on the row), so an uncaptured or renamed partner name in the viewer's notification is redacted.
+  - **P3-C:** the five builder-green survivors now go RED (N05 mid-pass raw side, N08/N09 the scans back on `names()`, N11 a league traced only by roster history, N15 the user_a side). The standing offer, pack-fallback upgrade and overhaul mint are driven end to end (`test_deletion_scrub_gated_paths.py`, adapted from QA's qa562w probes).
+  - **P3-A:** re-signup over-redaction documented.
+  - **P3-D** (`notification_queue` until drained) is pre-existing and with head-eng for legal.
+  - **Sabotage:** 37, all RED.
+  - **Postgres 18:** 212 passed, 1 skipped.
+  - **Full suite at `73bf0d1e`:** 10,425 passed, 22 skipped.
 - **Sabotage:** 22 single-rule breaks, all RED: #8 ×3, #9 ×3, #7 ×4, #10 ×12. Two were fixed along the way: the swipe pattern matched pass-reason too, and the taste mapping needed the live-path test.
 - **Docs:** §0.4's wording by mode, and addendum Q's eval sentence (#557 `485cef6e`, #559 `bf0df9d0`).
 
