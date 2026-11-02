@@ -250,7 +250,13 @@ export function isRankingWritePath(path: string): boolean {
  *  format's key: the switch discards too, which drops that refresh. */
 export const FORMAT_SWITCH_PATH = '/api/scoring/switch';
 
+/** A free-agent move (D1, K-F5 reduced): a completed add/drop changes the
+ *  user's roster, and the server saves it before answering, so the next
+ *  search no longer offers the dropped player. Same path as api/faMove.ts. */
+export const FA_MOVE_PATH = '/api/league/free-agents/move';
+
 /** Every client write that discards the device pages the user holds. */
 export function discardsDevicePages(path: string): boolean {
-  return isRankingWritePath(path) || pathnameOf(path) === FORMAT_SWITCH_PATH;
+  const p = pathnameOf(path);
+  return isRankingWritePath(path) || p === FORMAT_SWITCH_PATH || p === FA_MOVE_PATH;
 }

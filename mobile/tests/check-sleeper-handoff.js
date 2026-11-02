@@ -20,9 +20,12 @@
 //       fa-claim.open-sleeper CTA's handler calls it with target 'add'
 //       and no clipboardText (no on-sheet disclosure, so nothing is
 //       copied). The sheet has no fa-claim.steps / fa-claim.step.* /
-//       fa-claim.footer testID and no KeyboardAvoidingView: the operator
-//       ruled out in-app claim instructions (2026-11-01), which retired
-//       S8 (PRD §4.2's steps block) and P1 (its pinned footer)             [AST]
+//       fa-claim.footer testID, and its hand-off render has no
+//       KeyboardAvoidingView: the operator ruled out in-app claim
+//       instructions (2026-11-01), which retired S8 (PRD §4.2's steps
+//       block) and P1 (its pinned footer). D1's in-app move layout
+//       (platforms-eng, 2026-11-01) pins design-lead's action block
+//       above the number pad; that render is outside this check          [AST]
 //   S9  the eight NO_ADD_REASON strings verbatim (the three platform
 //       bodies are #385's, LEG-M10); explainNoAdd and resolveAddPlatform
 //       byte-identical to 04eae95b (AC-10)                                 [AST]
@@ -332,6 +335,7 @@ for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
   let openFn = null;
   const instructionIds = [];
   let kavRefs = 0;
+  let handoffRender = null;
   walk(sf, (n) => {
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === 'openSleeper') openFn = n.initializer;
     if (
@@ -339,8 +343,14 @@ for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
         ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n)) &&
       /fa-claim\.(steps|step\.|footer)/.test(n.text)
     ) instructionIds.push(n.getText(sf));
-    if (ts.isIdentifier(n) && n.text === 'KeyboardAvoidingView') kavRefs += 1;
+    // D1: the hand-off render is ClaimSheet's `if (!submitLayout) { … }`.
+    if (ts.isIfStatement(n) && unparen(n.expression).getText(sf) === '!submitLayout') handoffRender = n.thenStatement;
   });
+  if (handoffRender) {
+    walk(handoffRender, (n) => {
+      if (ts.isIdentifier(n) && n.text === 'KeyboardAvoidingView') kavRefs += 1;
+    });
+  }
   const calls = [];
   if (openFn) {
     walk(openFn, (n) => {
@@ -360,7 +370,9 @@ for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
   assert(instructionIds.length === 0,
     'S2 ClaimSheet has no fa-claim.steps / fa-claim.step.* / fa-claim.footer testID (no in-app claim instructions)',
     instructionIds.join('; '));
-  assert(kavRefs === 0, 'S2 ClaimSheet has no KeyboardAvoidingView (no pinned footer)', `${kavRefs} found`);
+  assert(!!handoffRender && kavRefs === 0,
+    "S2 ClaimSheet's hand-off render has no KeyboardAvoidingView (no pinned footer)",
+    handoffRender ? `${kavRefs} found` : 'no `if (!submitLayout)` hand-off render');
 }
 
 // S9 — the non-Sleeper claim paths match their pinned values (#351 AC-10).
