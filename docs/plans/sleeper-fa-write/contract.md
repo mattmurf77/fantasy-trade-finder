@@ -201,12 +201,13 @@ Every slot is optional. Missing → the client's neutral fallback (never consent
 | `window_line` | inside a consent window | `Adds authorized until {date}` |
 | `turn_off` | the window line's action | `Turn off` |
 | `do_in_platform` | every submit step | `Do it in Sleeper instead` |
-| `open_platform` | hand-off CTA | `Open in Sleeper to claim` |
+| `open_platform` | hand-off CTA. **Reserved: the 11-06 binary doesn't read it** and shows #509's approved literal (check-sleeper-handoff S2 pins it) | `Open in Sleeper to claim` |
 | `handoff_footer` | state 1 | G1 |
 | `connect_line`, `verify_line`, `other_account_line` | states 3, 4 | G2, G3, F3 |
 | `not_sent_line` | state 11 | G15 |
 | `unknown_title`, `unknown_body` | state 12 | 8i "Check before resending" / G16 |
 | `unavailable_line` | F4 (consent text unreachable) | "Moves from Fleeced aren't available right now" |
 | `still_sending` | state 7, after 8 s | |
+| `offline_line` | state 11 when **Fleeced's server** wasn't reached: offline at the tap, or a consent GET with no answer. Not used for the server's `{p}_write_failed` + `kind: network`, which keeps `not_sent_line` | `Couldn't connect right now, so nothing was sent.` |
 
 Result and refusal text comes from the response (`title`, `lines`, `message`), never from `move.copy`.
