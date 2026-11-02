@@ -1,3 +1,14 @@
+## 2026-11-02 — #459 (overhaul blockers name the asset): release-lead's QA (GO-with-notes at e100443a), addressed; held until after 11-18
+
+- **P2:** `receive_overlap` now goes through `ownership_copy.asset_sentence` with a new `RECEIVE_OVERLAP` ("{asset} is requested by two packages."), so it names the asset or says "A player in this trade", never the raw id. `test_receive_overlap_names_the_asset` (named and unnamed cases) is new, and `test_no_overhaul_blocker_shows_a_raw_id` now includes `receive_overlap`. Sabotaging back to the f-string goes RED (2).
+- **Fresh base:** main is merged in (clean), so CI re-runs on today's main (#540 included).
+- **Runs:** `test_i2_overhaul.py` 19 passed; the overhaul/ownership/i2 subset is green (see the PR).
+- **Open, not this PR's:**
+  - the #463 merge rule: whichever merges second uses `_unnamed_subject([str(asset)])` for the unnamed subject;
+  - the copy review of the new `ownership_copy` strings (head-eng → head-bizops → marketing-lead);
+  - copy mode's raw-id fallback (Fleaflicker, dark);
+  - roadmaps stored before the merge keep their old messages (the app shows only the count).
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
