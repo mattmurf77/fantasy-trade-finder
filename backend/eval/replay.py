@@ -172,9 +172,6 @@ from datetime import datetime, timedelta, timezone
 
 from backend import value_model as _value_model
 from backend.eval.contract import REDACTED_PARTNER_PREFIX
-
-# Legal's c2 card fields the deletion scrub removes from a redacted card (G-a5).
-C2_CARD_FIELDS = ("likes_you",)
 from backend.eval.data import (
     CALIBRATION_REFRESH,
     IN_FLIGHT,
@@ -194,6 +191,9 @@ from backend.eval.data import (
     split_decks,
 )
 from backend.eval.scorers import get_scorer, registered_names
+
+# Legal's c2 card fields the deletion scrub removes from a redacted card (G-a5).
+C2_CARD_FIELDS = ("likes_you",)
 
 # Defaults — env-overridable (documented in docs/config-reference.md §F8).
 DEFAULT_ESS_MIN = float(os.environ.get("EVAL_ESS_MIN", "100"))
@@ -742,14 +742,14 @@ def _redaction_lines(run: EvalRun) -> list[str]:
     """G-a5 and J1's share (module doc): the same for every scorer, printed once."""
     lacking = "; ".join(f"lacking {name}: {n}" for name, n in run.redacted_cards_lacking.items())
     since = ("no previous read of this window" if run.previous_read_at is None else
-             f"{run.redacted_since_previous_read} since the previous read of this window "
-             f"({run.previous_read_at})")
+             f"{run.redacted_since_previous_read} of them since the previous read of this "
+             f"window ({run.previous_read_at})")
     share = run.partner_redacted_share
     pct = 100 * share["decks"] / share["window_decks"] if share["window_decks"] else 0.0
     return [
-        f"G-a5 redaction (every deck loaded): {run.redacted_cards} redacted cards; {lacking} "
-        f"(an upper bound on what the scrub removed); {run.redacted_at_decks} decks carry a "
-        f"pack redacted_at, {since}. Redacted decks are excluded, not compared.",
+        f"G-a5 redaction (every deck loaded): redacted cards {run.redacted_cards}; {lacking} "
+        f"(an upper bound on what the scrub removed); decks with a pack redacted_at "
+        f"{run.redacted_at_decks}, {since}. Redacted decks are excluded, not compared.",
         f"partner_redacted (J1): {share['decks']} of {share['window_decks']} decks in the "
         f"window excluded ({pct:.1f}%)"
         + (f"; above {PARTNER_REDACTED_GATE_PCT}%: a read used for a gate goes to models-lead "

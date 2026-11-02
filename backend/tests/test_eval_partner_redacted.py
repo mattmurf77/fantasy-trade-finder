@@ -215,16 +215,23 @@ def test_the_flip_read_and_g3_keep_the_redacted_deck():
 # J1: the fit drops every redacted card
 # ---------------------------------------------------------------------------
 
+def _scrub(card):
+    card.features = {**{key: v for key, v in card.features.items() if key != "likes_you"},
+                     "partner_user_id": TOKEN, "surplus_margin": None}
+
+
 def _world(tmp_path, k=25):
     """Synthetic decks with k of the cards the fit reads scrubbed in memory
-    (the token as partner, likes_you gone, surplus_margin nulled)."""
+    (the token as partner, likes_you gone, surplus_margin nulled), and one
+    unviewed card scrubbed too: the fit never reads it, so meta doesn't count
+    it."""
     db = tmp_path / "synth.db"
     build_synthetic_db(f"sqlite:///{db}", n_decks=300, seed=7)
     decks = load_decks(db_url=f"sqlite:///{db}")
     read = [c for d in decks for c in d.cards if c.viewed and not c.undone and c.features]
     for c in read[1::7][:k]:
-        c.features = {**{key: v for key, v in c.features.items() if key != "likes_you"},
-                      "partner_user_id": TOKEN, "surplus_margin": None}
+        _scrub(c)
+    _scrub(next(c for d in decks for c in d.cards if not c.viewed and c.features))
     return decks, k
 
 
@@ -241,7 +248,7 @@ def test_j1_no_redacted_card_becomes_a_training_row(tmp_path, mem_engine):
     assert model.meta["exclusions"] == {vm.PARTNER_REDACTED: k}
     kept = [replace(d, cards=[c for c in d.cards if not c.partner_redacted]) for d in decks]
     assert _without_meta(model) == _without_meta(vm.train_model(kept, as_of=AS_OF))
-    assert sum(c.partner_redacted for d in decks for c in d.cards) == k   # still loaded
+    assert sum(c.partner_redacted for d in decks for c in d.cards) == k + 1   # still loaded
     assert vm.PARTNER_REDACTED == PARTNER_REDACTED
 
 
@@ -268,9 +275,9 @@ def test_g_a5_and_the_share_are_on_the_run_its_record_and_its_report():
             record["previous_read_at"]) == (3, 1, EARLY)
     assert record["partner_redacted_share"] == {"decks": 1, "window_decks": 3, "over_gate": True}
     out = render_report([run], run)
-    assert ("G-a5 redaction (every deck loaded): 3 redacted cards; lacking likes_you: 2 (an "
-            "upper bound on what the scrub removed); 2 decks carry a pack redacted_at, 1 since "
-            f"the previous read of this window ({EARLY}). Redacted decks are excluded, not "
+    assert ("G-a5 redaction (every deck loaded): redacted cards 3; lacking likes_you: 2 (an "
+            "upper bound on what the scrub removed); decks with a pack redacted_at 2, 1 of them "
+            f"since the previous read of this window ({EARLY}). Redacted decks are excluded, not "
             "compared.") in out
     assert ("partner_redacted (J1): 1 of 3 decks in the window excluded (33.3%); above 5%: a "
             "read used for a gate goes to models-lead before it's used.") in out
@@ -285,6 +292,7 @@ def test_the_previous_read_is_the_latest_record_of_the_same_window():
     append_run({**window, "recorded_at": "2026-10-31T01:00:00+00:00"})
     append_run({**window, "recorded_at": "2026-10-31T03:00:00+00:00"})
     append_run({**window, "as_of": "2026-11-01", "recorded_at": "2026-10-31T09:00:00+00:00"})
+    append_run({**window})                                         # no recorded_at: skipped
     assert previous_read_at(**window) == "2026-10-31T03:00:00+00:00"
 
 
@@ -302,5 +310,5 @@ def test_the_cli_reads_the_previous_read_of_its_window(tmp_path, capsys):
     second = load_runs()[len(first):]
     assert {r["previous_read_at"] for r in second} == {max(r["recorded_at"] for r in first)}
     out = capsys.readouterr().out
-    assert "0 since the previous read of this window" in out
+    assert "0 of them since the previous read of this window" in out
     assert "partner_redacted (J1): 0 of " in out

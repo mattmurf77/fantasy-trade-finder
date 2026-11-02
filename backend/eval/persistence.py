@@ -118,5 +118,5 @@ def previous_read_at(**window) -> str | None:
     """recorded_at of the latest persisted run whose record matches every
     `window` key (the CLI passes db, since, until and as_of), else None.
     G-a5 counts the decks redacted since then."""
-    return max((r["recorded_at"] for r in load_runs()
-                if all(r.get(k) == v for k, v in window.items())), default=None)
+    return max((r["recorded_at"] for r in load_runs() if r.get("recorded_at")
+                and all(r.get(k) == v for k, v in window.items())), default=None)
