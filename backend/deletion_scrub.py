@@ -176,8 +176,15 @@ def scrub_side_tables(conn, user_ids, token: str) -> dict[str, int]:
         by_user.setdefault(row["user_id"], []).append(dict(row))
     for viewer, rows in by_user.items():
         # Two aliases of the person become one token, so their weights merge
-        # (the key is (user_id, attr)).
+        # (the key is (user_id, attr)), and so do a later pass's rows into the
+        # token row an earlier one wrote (_repair_side_tables).
         conn.execute(delete(taste).where(taste.c.user_id == viewer, taste.c.attr.in_(attrs)))
+        kept = conn.execute(select(taste).where(
+            taste.c.user_id == viewer, taste.c.attr == f"partner:{token}")).mappings().first()
+        rows = rows + ([dict(kept)] if kept else [])
+        if kept:
+            conn.execute(delete(taste).where(taste.c.user_id == viewer,
+                                             taste.c.attr == f"partner:{token}"))
         conn.execute(taste.insert().values(
             user_id=viewer, attr=f"partner:{token}",
             w_short=sum(r["w_short"] for r in rows), w_long=sum(r["w_long"] for r in rows),
@@ -203,6 +210,28 @@ def scrub_side_tables(conn, user_ids, token: str) -> dict[str, int]:
             changed += 1
     counts["standing_offers_team_redacted"] = changed
     return counts
+
+
+def _repair_side_tables(job: dict) -> int:
+    """Legal R28.26 #10, every pass: the deletion transaction scrubs the
+    small stores once (accounts; scrub_side_tables). A write that raced its
+    commit, or one written while the job lives by a path that missed the
+    write-time map (database.live_deletion_token), is caught here: other
+    users' taste for the person and their standing offers' team lists, and,
+    as the deletion NULLs them, `trade_proposals` (id and valuation),
+    `trade_impressions` and `bad_trade_flags` targets."""
+    ids = sorted(job["ids"])
+    with db.engine.begin() as conn:
+        counts = scrub_side_tables(conn, set(ids), job["token"])
+        p, i, f = db.trade_proposals_table, db.trade_impressions_table, db.bad_trade_flags_table
+        n = sum(counts.values())
+        n += conn.execute(update(p).where(p.c.target_user_id.in_(ids)).values(
+            target_user_id=None, valuation_json=None)).rowcount or 0
+        n += conn.execute(update(i).where(i.c.target_user_id.in_(ids)).values(
+            target_user_id=None)).rowcount or 0
+        n += conn.execute(update(f).where(f.c.target_user_id.in_(ids)).values(
+            target_user_id=None, target_username=None)).rowcount or 0
+    return n
 
 
 # ── The redaction rules ─────────────────────────────────────────────────────
@@ -1360,7 +1389,9 @@ _STORES = (
     ("deck_evidence_packs", _scrub_packs),
     ("trade_page_store", _scrub_page_store),
     ("grading_cards", _scrub_grading),
+    ("side_tables", _repair_side_tables),           # legal R28.26 #10, every pass
 )
+
 # ── Team overhaul offers (overhaul_offers.card_json) ────────────────────────
 
 def _scan_overhaul_offers(job: dict, after: str, budget: "_Budget") -> tuple[str | None, int]:

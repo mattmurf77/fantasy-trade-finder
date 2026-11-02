@@ -7258,6 +7258,63 @@ def league_pick_seasons(*, league_id: str, round: int = 1) -> list[int]:
 # Trade impressions (Tier 2 work item 2.4 — training-data pipeline)
 # ---------------------------------------------------------------------------
 
+# ── Legal R28.26 #10 (MUST): no write after a deletion re-creates the id ────
+#
+# While a deletion's scrub job row lives (normally 6-30 h; deletion_scrub), a
+# write that would store one of its ids as a trade's partner stores the
+# deletion's token instead, or NULL where the deletion itself NULLs that
+# column. That covers a card a client still holds from before the deletion.
+# During that window a card built AFTER the deletion that names the person as
+# a non-user leaguemate (legal (vii)) is mapped too: over-redaction, on the
+# private side. Cached in-process for _DELETION_TOKENS_TTL_S; the delete route
+# clears the cache when it commits, so this process sees its own deletion at
+# once.
+_DELETION_TOKENS_TTL_S = 5.0
+_deletion_tokens_cache: dict = {"at": 0.0, "map": {}}
+_deletion_tokens_lock = threading.Lock()
+
+
+def live_deletion_tokens() -> dict:
+    """{deleted id: token} over every live deletion_scrub_jobs row. A read
+    failure returns the last map (empty before any read): never raises on a
+    write path."""
+    now = time.monotonic()
+    with _deletion_tokens_lock:
+        if now - _deletion_tokens_cache["at"] < _DELETION_TOKENS_TTL_S:
+            return _deletion_tokens_cache["map"]
+    try:
+        t = deletion_scrub_jobs_table
+        with engine.connect() as conn:
+            rows = conn.execute(select(t.c.token, t.c.partner_ids_json)).all()
+        mapping = {}
+        for token, raw in rows:
+            try:
+                ids = json.loads(raw) if raw else []
+            except (TypeError, ValueError):
+                continue
+            for pid in ids if isinstance(ids, list) else ():
+                mapping[str(pid)] = token
+    except Exception as err:      # the class only: a DB error's text may quote an id
+        log.warning("live_deletion_tokens: read failed: %s", type(err).__name__)
+        with _deletion_tokens_lock:
+            return _deletion_tokens_cache["map"]
+    with _deletion_tokens_lock:
+        _deletion_tokens_cache.update(at=now, map=mapping)
+    return mapping
+
+
+def clear_deletion_tokens_cache() -> None:
+    with _deletion_tokens_lock:
+        _deletion_tokens_cache["at"] = 0.0
+
+
+def live_deletion_token(user_id) -> str | None:
+    """The live deletion token for one id, or None."""
+    if user_id is None:
+        return None
+    return live_deletion_tokens().get(str(user_id))
+
+
 def log_trade_impressions(user_id: str, league_id: str, cards: list) -> None:
     """
     Batch-insert one trade_impressions row per card in deck order.
@@ -7279,13 +7336,16 @@ def log_trade_impressions(user_id: str, league_id: str, cards: list) -> None:
     shown_at = datetime.now(timezone.utc).isoformat()
     rows = []
     try:
+        tokens = live_deletion_tokens()
         for pos, card in enumerate(cards):
             give = _f(card, "give_player_ids") or []
             recv = _f(card, "receive_player_ids") or []
+            target = _f(card, "target_user_id")
             rows.append({
                 "user_id":            user_id,
                 "league_id":          league_id,
-                "target_user_id":     _f(card, "target_user_id"),
+                # R28.26 #10: NULL, as the deletion NULLs this column.
+                "target_user_id":     None if str(target) in tokens else target,
                 "give_player_ids":    json.dumps(list(give)),
                 "receive_player_ids": json.dumps(list(recv)),
                 "basis":              _f(card, "basis", "divergence"),
