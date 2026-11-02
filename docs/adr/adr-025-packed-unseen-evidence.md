@@ -1,4 +1,4 @@
-# ADR-025: Pack evidence for unseen cards; write full rows only for delivered cards
+# ADR-025: Pack evidence for unseen cards; write full rows only for viewed cards, the first 30 and the 2% archive decks
 
 Date: 2026-10-20
 Status: Accepted (head-eng, 2026-10-25; models-lead accepted it with edits E1–E7, folded in). It supersedes

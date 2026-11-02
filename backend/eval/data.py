@@ -78,6 +78,24 @@ with no withdrawals it is card_index. The reason column ('i1_dropped',
 withdrawn_removed_by_reason splits the W0 removals by it (models-lead B4).
 No rule gates on it.
 
+Serve-time display moves (models-lead addendum D3): when a never-delivered
+withdrawal pulls a repeat-capped card into the first REPEAT_WINDOW, the
+server re-applies the cap and defers the card within its response. A pack's
+run["display_moves"], {"<card_index>": anchor card_index}, sparse, the
+card's first delivery winning, records that it was displayed right after
+the anchor; an absent key means no moves. A move counts once its response
+is delivered as of the read (the moved card is within the pack's
+deliveries), and only those moves are checked (models-lead F1), so a re-read
+at the same as_of is stable; flip_read's G1 checks the whole header
+(display_moves_problem), so a malformed later move still fails at once. A
+record that isn't a dict of canonical card_index strings can't be split by
+delivery, so it fails every read, an earlier one included.
+The anchor comes after its card in the same response. The kept non-ghost
+cards' positions above are then handed out in display order,
+(anchor, 1, card_index) for a moved card and (card_index, 0, card_index)
+otherwise: several cards moved behind one anchor keep their build order,
+and with no moves nothing changes. Only packed decks move cards.
+
 Upgrade misses (models-lead U4-R2): a pack's run metadata may carry
 "upgrade_misses", the writer's count of viewed cards that never got a full
 row, as a dict of cause -> int. "other" is the only cause that must be 0;
@@ -103,7 +121,15 @@ deck whole and never sinks it; calibration excludes its cards.
   pack_integrity   unpack_run refuses the pack (unreadable, unknown version,
                    checksum mismatch, row fields disagreeing with its
                    header, malformed deliveries), or it holds another run's
-                   cards; its cards are not merged
+                   cards; its cards are not merged. Also a pack whose
+                   run["display_moves"] isn't a dict of card_index strings,
+                   or whose moves delivered as of the read (F1) break the
+                   writer's contract: an anchor that isn't an int after its
+                   card; a moved card or anchor that isn't a kept non-ghost
+                   card or is a served_before=0 index; an anchor that is
+                   itself moved; or a move whose card and anchor fall in
+                   different deliveries entries (the positions can't be
+                   trusted). That pack is sound, so its cards stay merged
   withdrawal_conflict
                    the withdrawal disagrees with the evidence: a
                    served_before=0 index's card has a non-NULL
@@ -232,6 +258,8 @@ IN_FLIGHT_WINDOW = timedelta(hours=25)
 # The one upgrade-miss cause that must be 0 (U4-R2; module doc); every other
 # key of run["upgrade_misses"] is a named cause.
 UPGRADE_MISS_OTHER = "other"
+# The run metadata key of a pack's serve-time display moves (module doc, D3).
+DISPLAY_MOVES = "display_moves"
 # The LoggedCard fields a packed card takes from its unpacked dict; every other
 # unpacked key goes into its features_compact.
 _PACKED_LOGGED = (
@@ -311,9 +339,9 @@ def resolve_engine(engine=None, db_url: str | None = None):
 def card_dict(card: LoggedCard) -> dict:
     """The dict handed to a Scorer: frozen features (features_json when
     present, else the compact block) merged with logged fields. Baseline
-    scorers legitimately read `final_score` / `card_index`; honest
-    CANDIDATE scorers must not touch `card_index`, `final_score`, or
-    `propensity` — those encode the logged policy (backend/eval/contract.py
+    scorers legitimately read `final_score` / `position`; honest
+    CANDIDATE scorers must not touch `card_index`, `position`,
+    `final_score`, or `propensity` — those encode the logged policy (backend/eval/contract.py
     declares what each scorer may read). Logged fields win key collisions
     (they are ground truth)."""
     frozen = card.features if card.features is not None else card.features_compact
@@ -324,6 +352,7 @@ def card_dict(card: LoggedCard) -> dict:
         "user_id":       card.user_id,
         "league_id":     card.league_id,
         "card_index":    card.card_index,
+        "position":      card.position,
         "trade_hash":    card.trade_hash,
         "propensity":    card.propensity,
         "base_score":    card.base_score,
@@ -525,6 +554,8 @@ def load_decks(
                       (datetime.fromisoformat(as_of) - IN_FLIGHT_WINDOW).isoformat())
     # run_id -> (card_count, final, last delivered card_index as of the read)
     packed: dict[str, tuple[int, bool, int]] = {}
+    # run_id -> (run["display_moves"], run["deliveries"]), checked per deck below
+    moves_raw: dict[str, tuple] = {}
     pack_only = False
     for p in packs:
         deck = decks.get(p.run_id)
@@ -549,6 +580,7 @@ def load_decks(
             refresh.add(p.run_id)
         packed[p.run_id] = (p.card_count,
                             *_pack_state(run, last_delivered, p.served_at, as_of, in_flight_from))
+        moves_raw[p.run_id] = (run.get(DISPLAY_MOVES), run["deliveries"])
         full = {c.card_index for c in deck.cards if not c.is_ghost}
         for u in cards:
             if u["card_index"] not in full:
@@ -577,6 +609,11 @@ def load_decks(
         paged = deck.deck_job_id in marked and not (
             PAGING_RELEASED_AT is not None and deck.served_at < PAGING_RELEASED_AT)
         by_index = {c.card_index: c for c in deck.cards if not c.is_ghost}
+        moves = (_display_moves(*moves_raw[deck.deck_job_id], set(by_index), removed, pack[2])
+                 if pack else {})
+        if moves is None:          # display moves breaking the writer's contract
+            deck.exclusion = PACK_INTEGRITY
+            continue
 
         def shown(i: int) -> bool | None:
             """Whether the evidence says index i was delivered as of the read:
@@ -604,6 +641,17 @@ def load_decks(
         for c in deck.cards:
             if not c.is_ghost:
                 c.position = c.card_index - bisect_left(w0, c.card_index)
+        # D3: a move counts once its response is delivered as of the read (the
+        # moves above already are); the same positions are then handed out in
+        # display order (module doc).
+        if moves:
+            kept = [c for c in deck.cards if not c.is_ghost]
+            slots = sorted(c.position for c in kept)
+            in_display_order = sorted(kept, key=lambda c: (
+                (moves[c.card_index], 1, c.card_index) if c.card_index in moves
+                else (c.card_index, 0, c.card_index)))
+            for slot, c in zip(slots, in_display_order):
+                c.position = slot
         if pack:
             _n, final, last_delivered = pack
             if not final:
@@ -679,6 +727,76 @@ def _upgrade_misses(run: dict) -> dict[str, int]:
     if isinstance(raw, dict):
         return {cause: int(n) for cause, n in sorted(raw.items())}
     return {UPGRADE_MISS_OTHER: int(raw)}
+
+
+def _move_keys(raw) -> dict[int, object] | None:
+    """run["display_moves"] keyed by int card_index, anchors as written ({}
+    when absent); None when it isn't a dict of card_index strings."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict) or not all(
+            isinstance(k, str) and k.isdecimal() and str(int(k)) == k for k in raw):
+        return None
+    return {int(k): anchor for k, anchor in raw.items()}
+
+
+def _move_problem(i: int, anchor, moves: dict, lasts: list[int]) -> str | None:
+    """What's wrong with one move under the writer's contract (module doc),
+    or None: its anchor is an int after it, not itself moved, and both are
+    in one deliveries entry (`lasts`: each entry's last card_index)."""
+    if type(anchor) is not int:
+        return "an anchor that isn't an int"
+    if anchor <= i:
+        return "an anchor not after its card"
+    if anchor in moves:
+        return "an anchor that is itself moved"
+    k = bisect_left(lasts, i)
+    if k == len(lasts) or bisect_left(lasts, anchor) != k:
+        return "a card and its anchor in different deliveries"
+    return None
+
+
+def _display_moves(raw, deliveries: list, kept: set[int], w0: set[int],
+                   last_delivered: int) -> dict[int, int] | None:
+    """A pack's display moves delivered as of the read (models-lead F1), as
+    {card_index: anchor card_index}, or None when they break the writer's
+    contract (module doc, pack_integrity). Only moves whose card is at or
+    before `last_delivered` (the pack's as of the read) are checked and
+    applied, so a re-read at the same as_of is stable; G1 checks the whole
+    header (display_moves_problem). `deliveries` is the pack's whole,
+    already-validated list; `kept` the deck's non-ghost card indexes; `w0`
+    its served_before=0 indexes."""
+    moves = _move_keys(raw)
+    if moves is None:
+        return None
+    moves = {i: anchor for i, anchor in moves.items() if i <= last_delivered}
+    lasts = [d[0] for d in deliveries]
+    for i, anchor in moves.items():
+        if (_move_problem(i, anchor, moves, lasts) or not {i, anchor} <= kept
+                or {i, anchor} & w0):
+            return None
+    return moves
+
+
+def display_moves_problem(run: dict, card_count: int, w0=frozenset()) -> str | None:
+    """G1's structural check of a pack's WHOLE run["display_moves"], past as_of
+    too (models-lead F1: a malformed move fails G1 at once, though the loader
+    only reads delivered ones): None when it is well-formed, else what's
+    wrong. `run` is the pack's run metadata, with valid deliveries; `w0` the
+    deck's served_before=0 indexes, which no move may name (the loader's
+    rule, so G1 sees a later one too)."""
+    moves = _move_keys(run.get(DISPLAY_MOVES))
+    if moves is None:
+        return "not a dict of card_index strings"
+    lasts = [d[0] for d in run["deliveries"]]
+    for i, anchor in moves.items():
+        problem = (_move_problem(i, anchor, moves, lasts)
+                   or (None if 0 <= i < anchor < card_count else "a move outside the deck")
+                   or ("a never-delivered withdrawn card in a move" if {i, anchor} & w0
+                       else None))
+        if problem:
+            return f"card {i}: {problem}"
+    return None
 
 
 def _pack_state(run: dict, last_delivered: int, served_at: str, as_of: str | None,

@@ -21,8 +21,8 @@ Disallow: /player.html
 Disallow: /profile.html
 Disallow: /404.html
 
-# Per-user share landings — thin, and there can be very many.
-Disallow: /s/
-Disallow: /og/
+# Share landings (/s/) and card images (/og/) are crawlable on purpose, so
+# link unfurlers can fetch them. They are kept out of indexes by noindex
+# (meta + X-Robots-Tag) in backend/server.py.
 
 Sitemap: https://fantasy-trade-finder.onrender.com/sitemap.xml

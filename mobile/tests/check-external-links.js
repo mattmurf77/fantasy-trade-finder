@@ -86,6 +86,12 @@ const LEGACY = [
     arg: "'https://fantasy-trade-finder.onrender.com/privacy'" },
   { owner: 'app-shell, unassigned', file: 'src/screens/SleeperConnectScreen.tsx', call: 'openURL',
     arg: "'https://fantasy-trade-finder.onrender.com/privacy'" },
+  // Landed on main after this ratchet was written (taken at #379's 11-02 sync
+  // with main). Migrate when their owners next touch them.
+  { owner: 'monetization (#393 M3)', file: 'src/components/SubscriptionSection.tsx', call: 'openURL',
+    arg: 'APPLE_SUBSCRIPTIONS_URL' },
+  { owner: 'release (#404 B8)', file: 'src/screens/UpdateGateScreen.tsx', call: 'openURL',
+    arg: 'url' },
 ];
 
 let failures = 0;

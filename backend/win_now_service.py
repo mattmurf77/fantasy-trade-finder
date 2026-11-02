@@ -151,7 +151,7 @@ def load_league(actor, fetch):
     completed = completed_set.pop()
     regular = int(settings.get("playoff_week_start") or 15) - 1
     if completed >= regular:
-        raise Unavailable("postseason_in_progress_unsupported", "This beta supports projections before the fantasy playoffs begin.")
+        raise Unavailable("postseason_in_progress_unsupported", "This league's regular season is over. Win Now works only before the fantasy playoffs begin.")
     playoff_slots = int(settings.get("playoff_teams") or 6)
     rounds = math.ceil(math.log2(max(2, playoff_slots)))
     # Sleeper round-type values other than the standard one-week bracket need

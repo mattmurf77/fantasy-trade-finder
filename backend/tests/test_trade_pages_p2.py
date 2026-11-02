@@ -45,7 +45,7 @@ from backend import roster_snapshot
 from backend.database import league_members_table
 from backend.tests.test_i1_serve_filter import LEAGUE, OPP, UID, live  # noqa: F401  (fixture)
 from backend.tests.test_trade_page_store import (  # noqa: F401  (fixtures)
-    HEADERS, KEY, SCOPE, _row, _vote, build_page, file_db, generate, ids, p1, page_card, page_queries,
+    HEADERS, KEY, SCOPE, TOKEN, _row, _vote, build_page, file_db, generate, ids, p1, page_card, page_queries,
     run_job, set_row, spawned, statements, status, stored)
 from backend.tests.test_trade_responses_small import (  # noqa: F401  (fixtures)
     HEADERS as E2_HEADERS, JOB_ID, card, e2, generate as e2_generate, harness, seed_job,
@@ -304,6 +304,158 @@ def test_rebased_pages_from_a_row_go_through_s0(p1, spawned, monkeypatch, mode):
         assert body["status"] == "complete" and [c["impression_id"] for c in body["cards"]] == kept
 
 
+# ── #484 QA P3-2: case 2 follows the scope's newer job only while it's current ──
+
+def test_a_rebase_never_follows_a_newer_job_whose_rosters_moved(p1, spawned):
+    """The newer job's stamp no longer matches the stored rows: the rebase
+    kicks the rebuild instead of serving it, as a fresh tap would."""
+    client, engine, _ = p1
+    deck, job_id = revoked_deck_newer_job(engine)
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id]["roster_fp"] = "rfp1:" + "0" * 32
+    body = deck_status(client, deck, 0).get_json()
+    assert body["rebased"] is True and body["deck_id"] != job_id
+    assert len(spawned) == 1 and server._trade_jobs_by_key[KEY] == body["deck_id"]
+
+
+def test_a_rebase_follows_a_newer_running_job_that_still_matches(p1, spawned, monkeypatch):
+    client, engine, _ = p1
+    deck, job_id = revoked_deck_newer_job(engine)
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id].update(status="running", finished_at=None)
+    kicks = []
+    real_kick = server._trade_page_kick
+    monkeypatch.setattr(server, "_trade_page_kick",
+                        lambda *a, **k: kicks.append(1) or real_kick(*a, **k))
+    body = deck_status(client, deck, 0).get_json()
+    # followed, never reached through a kick that joins it
+    assert body["rebased"] is True and body["deck_id"] == job_id and not spawned and not kicks
+
+
+def test_a_rebase_never_follows_a_newer_job_once_an_input_changed(p1, spawned, monkeypatch):
+    """An input epoch revoked since the request read it (a vote, a ranking
+    change): the newer job is never followed, as P1's backing check."""
+    client, engine, _ = p1
+    deck, job_id = revoked_deck_newer_job(engine)
+    real = server._trade_page_request_inputs
+
+    def changed(*a, **k):
+        inputs = real(*a, **k)
+        return {**inputs, "input_epochs": (*inputs["input_epochs"],
+                                           __import__("types").SimpleNamespace(revoked=True))}
+    monkeypatch.setattr(server, "_trade_page_request_inputs", changed)
+    body = deck_status(client, deck, 0).get_json()
+    assert body["deck_id"] != job_id
+
+
+def test_the_rebase_check_passes_the_session_read(p1, spawned, monkeypatch):
+    """Both checks get the session's read, as at the other reuse sites."""
+    client, engine, _ = p1
+    deck, job_id = revoked_deck_newer_job(engine)
+    seen = []
+    real_fresh, real_running = server._trade_job_is_fresh, server._trade_running_matches
+    monkeypatch.setattr(server, "_trade_job_is_fresh",
+                        lambda *a, **k: seen.append(("fresh", a[0].get("job_id"), k.get("session_read")))
+                        or real_fresh(*a, **k))
+    monkeypatch.setattr(server, "_trade_running_matches",
+                        lambda *a, **k: seen.append(("running", a[0].get("job_id"), k.get("session_read")))
+                        or real_running(*a, **k))
+    read = "2026-10-28T11:00:00.000000+00:00"
+    with server._sessions_lock:
+        server._sessions[TOKEN]["roster_fetch_started_at"] = read
+    deck_status(client, deck, 0)
+    assert ("fresh", job_id, read) in seen
+
+
+# ── #520 QA P3-1/P3-3: on a failed read only the fingerprint compare is skipped ──
+
+def _failed_read(monkeypatch, engine=None, read="failed"):
+    """The two reads that can't prove a job stale (A2): a failed one (no
+    snapshot) and one with no stored rows (status "missing", the league's
+    member rows gone)."""
+    if read == "failed":
+        monkeypatch.setattr(server, "_trade_current_snapshot", lambda *a, **k: None)
+    else:
+        with engine.begin() as conn:
+            conn.execute(delete(league_members_table))
+
+
+def _kicks(monkeypatch):
+    kicks = []
+    real_kick = server._trade_page_kick
+    monkeypatch.setattr(server, "_trade_page_kick",
+                        lambda *a, **k: kicks.append(1) or real_kick(*a, **k))
+    return kicks
+
+
+@pytest.mark.parametrize("read", ["failed", "missing"])
+@pytest.mark.parametrize("status", ["complete", "running"])
+def test_a_failed_read_still_follows_a_current_newer_job(p1, spawned, monkeypatch, status, read):
+    """A2: a failed or a "missing" read can't prove the newer job stale, so it
+    is followed, complete or running, with no kick."""
+    client, engine, _ = p1
+    deck, job_id = revoked_deck_newer_job(engine)
+    if status == "running":
+        with server._trade_jobs_lock:
+            server._trade_jobs[job_id].update(status="running", finished_at=None)
+    _failed_read(monkeypatch, engine, read)
+    if read == "missing":         # the read really is "missing", not failed
+        assert server._trade_current_snapshot(LEAGUE, "1qb_ppr")[0].status == "missing"
+    kicks = _kicks(monkeypatch)
+    body = deck_status(client, deck, 0).get_json()
+    assert body["rebased"] is True and body["deck_id"] == job_id and not kicks
+
+
+@pytest.mark.parametrize("read", ["failed", "missing"])
+def test_a_failed_read_never_follows_once_an_input_changed(p1, spawned, monkeypatch, read):
+    client, engine, _ = p1
+    deck, job_id = revoked_deck_newer_job(engine)
+    _failed_read(monkeypatch, engine, read)
+    real = server._trade_page_request_inputs
+
+    def changed(*a, **k):
+        inputs = real(*a, **k)
+        return {**inputs, "input_epochs": (*inputs["input_epochs"],
+                                           __import__("types").SimpleNamespace(revoked=True))}
+    monkeypatch.setattr(server, "_trade_page_request_inputs", changed)
+    assert deck_status(client, deck, 0).get_json()["deck_id"] != job_id
+
+
+@pytest.mark.parametrize("read", ["failed", "missing"])
+@pytest.mark.parametrize("why", ["none_stamp", "running_none_stamp", "past_ttl", "superseded_read",
+                                 "signature_moved", "running_signature_moved"])
+def test_a_failed_read_still_runs_every_other_check(p1, spawned, monkeypatch, why, read):
+    """#520 QA P3-1: only the fingerprint compare is skipped. A None stamp
+    (complete or running), a job past the reuse TTL, one built on a read the
+    session has replaced, or one for another request signature (complete or
+    running) is never followed, on a failed or a "missing" read (#530 QA)."""
+    client, engine, _ = p1
+    deck, job_id = revoked_deck_newer_job(engine)
+    with server._trade_jobs_lock:
+        job = server._trade_jobs[job_id]
+        if why.startswith("running_"):
+            job.update(status="running", finished_at=None)
+        if why.endswith("none_stamp"):
+            job["roster_fp"] = None
+        elif why.endswith("signature_moved"):
+            job["request_signature"] = "another-request-signature"
+        elif why == "past_ttl":
+            job["finished_at"] = __import__("time").monotonic() - server._PREGEN_TTL_SECONDS - 60
+        else:
+            job["roster_fetch_started_at"] = "2026-10-01T00:00:00.000000+00:00"
+    if why == "superseded_read":
+        with server._sessions_lock:
+            server._sessions[TOKEN]["roster_fetch_started_at"] = "2026-10-28T11:00:00.000000+00:00"
+        monkeypatch.setattr(server, "_job_read_predates_move", lambda job: True)
+    _failed_read(monkeypatch, engine, read)
+    kicks = _kicks(monkeypatch)
+    body = deck_status(client, deck, 0).get_json()
+    # Refused means kicked, as a fresh tap. A running job's kick may join that
+    # same job (the key's dedupe), so its deck_id alone proves nothing.
+    assert kicks, body
+    assert why.startswith("running_") or body["deck_id"] != job_id
+
+
 @pytest.mark.parametrize("mode", [0.0, 1.0])
 def test_a_rebase_onto_a_job_goes_through_s0_like_the_job_id_form(p1, spawned, monkeypatch, mode):
     client, engine, _ = p1
@@ -425,6 +577,12 @@ def test_a_c_e_league_lets_every_card_through_on_every_deck_path(p1, spawned, ca
             league_id=LEAGUE, status="stale", last_error_code="write_failed",
             refreshed_at=datetime.now(timezone.utc).isoformat(timespec="microseconds"),
             updated_at=datetime.now(timezone.utc).isoformat(timespec="microseconds")))
+    if path == "rebased_job":
+        # #484 QA P3-2: a rebase follows the scope's newer job only while it is
+        # current, so it is the job built on these (edited) rows.
+        snap, _vsn = server._trade_current_snapshot(LEAGUE, "1qb_ppr")
+        with server._trade_jobs_lock:
+            server._trade_jobs[server._trade_jobs_by_key[KEY]]["roster_fp"] = snap.fp
     body = deck_status(client, target, cursor).get_json()
     assert len(body["cards"]) == full and "wait_reason" not in body
     lines = [r for r in caplog.records if r.getMessage().startswith("[i1] serve ")]
