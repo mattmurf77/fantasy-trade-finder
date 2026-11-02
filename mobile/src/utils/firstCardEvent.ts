@@ -26,8 +26,25 @@ export type R1Source =
 
 export type SearchType = 'organic' | 'pinned' | 'fair_sweep';
 export type ServeSource = 'device' | 'page' | 'cached' | 'joined' | 'fresh';
-/** R2b `reason`. `timeout` = FIRST_CARD_TIMEOUT_MS from the tap, no card. */
-export type FirstCardFailure = 'empty' | 'error' | 'abandoned' | 'timeout';
+/** R2b `reason`. `timeout` = FIRST_CARD_TIMEOUT_MS from the tap, no card.
+ *  `paywall` / `verify` (analytics-lead's grant, #393 M2): the search's gate
+ *  answer, see gateFailureReason. */
+export type FirstCardFailure = 'empty' | 'error' | 'abandoned' | 'timeout' | 'paywall' | 'verify';
+
+/** R2b `reason` for a failed search, from api/client's gateSignalFor (never
+ *  a re-parse of the response): `paywall` = a 402 pro_required with any gate
+ *  but verify_required (or none); `verify` = a 402 gate=verify_required, or a
+ *  403 verification_required on a gated route. No signal, the Sleeper link's
+ *  wrong account, and any send-kind signal are `error`. Structural type: this
+ *  module takes no runtime imports. */
+export function gateFailureReason(
+  signal: { action: string; kind?: string } | null | undefined,
+): FirstCardFailure {
+  if (!signal || signal.kind === 'send') return 'error';
+  if (signal.action === 'paywall') return 'paywall';
+  if (signal.action === 'verify') return 'verify';
+  return 'error';
+}
 export const FIRST_CARD_TIMEOUT_MS = 10_000;
 /** T1: the card must be at least this much on screen. */
 export const FIRST_CARD_MIN_VISIBLE = 0.5;

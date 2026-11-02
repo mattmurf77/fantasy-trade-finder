@@ -151,6 +151,11 @@ function mountWinNow(h) {
     '../components/chalkline/Text': {}, '../components/FeedbackFAB': {},
     '../state/useSession': h.state, '../state/useFeatureFlags': {useFlag: name => name !== 'outlook.championship_probabilities'},
     '../api/winNow': h.winNow,
+    // #393 M2: the paywall's three imports. Dark here, as with
+    // monetize.paywall off: no gate answer, no enforcement, no pre-check.
+    '../api/client': {gateSignalFor: () => null},
+    '../state/useEntitlements': {useEntitlements: Object.assign(sel => sel({enforcing: false, pro: false}), {getState: () => ({enforcing: false, pro: false})})},
+    '../state/usePaywallGate': {isUnverifiedSession: () => false, openPaywall: () => {}, openVerify: () => {}},
     '../utils/winNow': {seasonStale: () => false},
     '../theme/chalkline': {ink: {}, chalk: {}, ice: {}, space: {}, radii: {}, type: {}},
   };

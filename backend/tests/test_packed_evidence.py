@@ -374,13 +374,16 @@ def test_r42_after_a_restart_a_stored_card_upgrades_from_the_blob(deferred):
     assert [o["impression_id"] for o in outcomes(engine)] == [contract.card_impression_id(job_id, 50)]
 
 
+@pytest.mark.parametrize("w0_past_30", [True, False])
 def test_c1_a_deck_that_wont_pack_gets_no_row_past_30_and_eval_reads_a_lost_pack(
-        deferred, monkeypatch, caplog):
+        deferred, monkeypatch, caplog, w0_past_30):
     """S8's C1 hold when pack_run refuses a deck (it doesn't pack exactly; the
     S1-S8 package): no pack and no row past the first 30 at any delivery, so
     never a full_interim one; the refusal logged at ERROR; each serve's
     withdrawals still recorded. Eval reads the deck as in flight for 25 h,
-    then as incomplete_deck (a lost pack), never as a complete 30-card deck."""
+    then as incomplete_deck (a lost pack), never as a complete 30-card deck.
+    Without a never-delivered withdrawal past 30, the rows hold no index hole,
+    so the lost-pack rule alone excludes the deck (#552 QA P2-1)."""
     from datetime import datetime, timedelta
     from backend.eval import data as eval_data
     client, engine, _ = deferred
@@ -391,22 +394,31 @@ def test_c1_a_deck_that_wont_pack_gets_no_row_past_30_and_eval_reads_a_lost_pack
     job_id, served, ghosts, ev, _ = packed_deck(120, ghost_every=9)
     with caplog.at_level("ERROR"):
         status(client, job_id, 0)
-        own_all_but(engine, 3, 40)
+        own_all_but(engine, *((3, 40) if w0_past_30 else (3,)))
         status(client, job_id, 0)                          # card 3: served before, withdrawn
-        status(client, job_id, 30)                         # card 40: never delivered (W0)
+        status(client, job_id, 30)                         # mine40's card (index 36): never delivered (W0)
     written = rows(engine)
     assert rows(engine, PACKS) == []
     assert max(r["card_index"] for r in written if not r["is_ghost"]) < 30
     assert {r["evidence_tier"] for r in written if not r["is_ghost"]} == {"first30"}
     assert any("doesn't pack exactly; no pack written" in r.getMessage() and r.levelname == "ERROR"
                for r in caplog.records)
-    # one withdrawal served before (card 3), one never delivered (card 40's position)
-    assert sorted(r["served_before"] for r in rows(engine, db_module.deck_card_withdrawals_table)) == [0, 1]
+    # (card_index, served_before): card 3 served before; mine40's card (the
+    # ghosts put it at 36) never delivered
+    assert sorted((r["card_index"], r["served_before"])
+                  for r in rows(engine, db_module.deck_card_withdrawals_table)) == (
+        [(3, 1), (36, 0)] if w0_past_30 else [(3, 1)])
     served_at = datetime.fromisoformat(written[0]["served_at"])
-    for hours, exclusion in ((1, eval_data.IN_FLIGHT), (26, eval_data.INCOMPLETE_DECK)):
+
+    def read(hours):
         [deck] = eval_data.load_decks(engine=engine,
                                       as_of=(served_at + timedelta(hours=hours)).isoformat())
-        assert deck.exclusion == exclusion, hours
+        return deck.exclusion
+    for hours, exclusion in ((1, eval_data.IN_FLIGHT), (26, eval_data.INCOMPLETE_DECK)):
+        assert read(hours) == exclusion, hours
+    if not w0_past_30:       # the control: without the lost-pack rule, a complete 30-card deck
+        monkeypatch.setattr(eval_data, "PACK_REQUIRED_SINCE", None)
+        assert read(26) is None
 
 
 def test_s8_an_upgrade_past_the_recorded_deliveries_writes_no_delivery(deferred, monkeypatch, caplog):

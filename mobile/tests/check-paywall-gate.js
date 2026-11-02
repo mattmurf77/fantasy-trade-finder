@@ -13,6 +13,27 @@
 //     identity, so the webhook grants the wrong user_id and the reviewer who
 //     paid stays gated (D12): an App Review rejection;
 //   - a Send re-sent for the user after verifying, with no fresh tap (D18).
+// M3 (account surfaces; §9) adds:
+//   - Apple's sheet (or a Restore) reached by an unverified session, or a
+//     purchase made FOR the user after they verify (D9);
+//   - the Founding GMs welcome after the cut-off, twice, after a Restore, or
+//     with a countdown or confetti (D10, design §4.1);
+//   - Settings › Subscription varying by subscription for an unverified
+//     session, or showing a trial state or any date but the join date
+//     (R28.9 3f, D10);
+//   - the legal Delete line drifting from its verbatim text;
+//   - an invitee eyebrow with a raw "{inviter}" / "{league}" in it;
+//   - the Home mark or kept-price line shipping early.
+// M2 (the deck; §8) adds:
+//   - a prefetch, poll or auto-start that opens the paywall under the thumb
+//     (the pinned background set, D2);
+//   - the offer shown on the optimistic swipe, twice, over the guide, or to
+//     an unverified session (D4; scope guard 5);
+//   - the P30 end card drifting, or the preview end card growing a second
+//     action, a price or a "free" (D5);
+//   - a 402 rendered as "Couldn't load more trades", a refresh-failed line,
+//     a swipe toast, or Win Now's raw "HTTP 402" (D19, D16 c);
+//   - a Send that reaches its confirm step past the paywall (D16).
 // D-056 retired the simulator, so none of these is caught by looking.
 //
 // HOW. It TRANSPILES AND EXECUTES the real modules under plain node, with
@@ -147,8 +168,12 @@ let mirror0 = 0;
 const client0 = load('api/client.ts', CLIENT_STUBS, { fetch: fakeFetch });
 client0.setOnVerificationRequired(() => { mirror0 += 1; });
 const nav0 = [];
+const trace0 = [];
 const gate0 = load('state/usePaywallGate.ts', {
   zustand: { create: makeZustandCreate() },
+  '@react-native-async-storage/async-storage': { default: { getItem: async () => null, setItem: async () => {} } },
+  './tradeSearchTrace': { openSearchId: () => 's0', failFirstCard: (id, reason) => trace0.push([id, reason]) },
+  '../utils/firstCardEvent': load('utils/firstCardEvent.ts', {}),
   '../api/client': client0,
   './useFeatureFlags': { useFeatureFlags: { getState: () => ({ flags: flags0 }) } },
   './subscriptionSession': subSession,
@@ -187,6 +212,7 @@ check('0a. flags off [executed]: each gate answer opens NOTHING, is not held, is
       assert(e instanceof client0.ApiError && e.status === status && JSON.stringify(e.body) === JSON.stringify(body)
         && e.message === (body.message || body.error), `${at}: not main's ApiError`);
       eq(mirror0, status === 403 ? 1 : 0, `${at}: the banner mirror (main-identical)`);
+      eq(trace0.length, 0, `${at}: an R2b was settled`);
     }
   }
 });
@@ -224,8 +250,9 @@ check('0d. flags off: the router itself opens nothing for any signal (belt and b
   nav0.length = 0;
   const before = gate0.usePaywallGate.getState().verifySeq;
   for (const sig of [{ action: 'paywall', gate: 'lapsed', kind: 'find' }, { action: 'verify', gate: null, kind: 'send' }, { action: 'verify_mismatch' }]) {
-    eq(gate0.handleGateSignal(sig), undefined, `${sig.action}: no hold`);
+    eq(gate0.handleGateSignal(sig, '/api/trades/generate'), undefined, `${sig.action}: no hold`);
   }
+  eq(trace0.length, 0, 'no R2b settle');
   eq(nav0.length, 0, 'navigated');
   eq(gate0.usePaywallGate.getState().verifySeq, before, 'opened the sheet');
 });
@@ -398,7 +425,9 @@ check('2a. [shape] the gate routing, router and sheet read no entitlement field'
     'components/VerifySheet.tsx': strip(read('components/VerifySheet.tsx')),
   };
   for (const [name, s] of Object.entries(files)) {
-    const hit = s.match(/useEntitlements|getEntitlements|entitlement|founder|\.pro\b|\bpro:|\bsources\b|expires_at/i);
+    // `\bfounder\b`: the entitlement field, not the FounderWelcome route
+    // name the M3 trigger hold names (§9d).
+    const hit = s.match(/useEntitlements|getEntitlements|entitlement|\bfounder\b|\.pro\b|\bpro:|\bsources\b|expires_at/i);
     assert(!hit, `${name} reads "${hit && hit[0]}"`);
   }
 });
@@ -425,7 +454,21 @@ function makeZustandCreate() {
 const session = { user: { user_id: '12345', account_only: false }, isDemo: false, verification: null };
 let seamHandler = null;
 let gateReader = null;
+// M2: the offer trigger's once-per-user memory lives in AsyncStorage.
+const storage = new Map();
+const storageWrites = [];
+const fakeStorage = {
+  getItem: async (k) => (storage.has(k) ? storage.get(k) : null),
+  setItem: async (k, v) => { storageWrites.push([k, v]); storage.set(k, v); },
+};
+// M2: the gate listener settles the open search's R2b (the trace is faked
+// here; check-trade-first-card-events §10 runs it against the real trace).
+let traceOpen = null;
+const traceCalls = [];
 const gateMod = load('state/usePaywallGate.ts', {
+  '@react-native-async-storage/async-storage': { default: fakeStorage },
+  './tradeSearchTrace': { openSearchId: () => traceOpen, failFirstCard: (id, reason) => traceCalls.push([id, reason]) },
+  '../utils/firstCardEvent': load('utils/firstCardEvent.ts', {}),
   zustand: { create: makeZustandCreate() },
   '../api/client': { setOnProRequired: (fn) => { seamHandler = fn; }, setPaywallGateOn: (fn) => { gateReader = fn; } },
   './useFeatureFlags': { useFeatureFlags: { getState: () => ({ flags: { 'monetize.paywall': true } }) } },
@@ -694,6 +737,11 @@ const sdk = {
     this.calls.push(['eligibility', ids.join(',')]);
     return this.eligibility;
   },
+  // M3 (§9e): Settings' display-only read of the active plan.
+  customerInfo: null,
+  products: {},
+  async getCustomerInfo() { this.calls.push(['customerInfo', this.appUserId]); return this.customerInfo; },
+  async getProducts(ids) { this.calls.push(['products', ids.join(',')]); return ids.map((id) => this.products[id]).filter(Boolean); },
 };
 process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY = 'appl_test';
 const purchases = load('api/purchases.ts', { 'react-native-purchases': { default: sdk } });
@@ -827,11 +875,12 @@ check('6c. [shape] testIDs kept + the scope\'s added; paywall_viewed carries gat
   assert(/track\('paywall_viewed', \{\s*source,\s*platform: 'ios',\s*\.\.\.\(gate \? \{ gate \} : \{\}\),\s*\.\.\.\(kind \? \{ kind \} : \{\}\),/.test(s),
     'paywall_viewed {source, platform, gate?, kind?}');
 });
-check('6d. [shape] an unverified session never sees the paywall (backstop → the sheet)', () => {
+check('6d. [shape] an unverified session never sees the paywall (backstop → the sheet, through M3\'s one D9 route)', () => {
   const s = strip(read('screens/PaywallScreen.tsx'));
   assert(/const unverified = useSession\(\(s\) => isUnverifiedSession\(s\)\);/.test(s), 'unverified read (the router\'s predicate, demo included)');
   assert(/if \(!paywallOn \|\| unverified\) return null;/.test(s), 'renders nothing while unverified');
-  assert(/openVerify\(\)/.test(s), 'opens the VerifySheet');
+  assert(/useEffect\(\(\) => \{\s*if \(!paywallOn \|\| !unverified\) return;\s*verifyFirst\(\);\s*\}, \[paywallOn, unverified, verifyFirst\]\);/.test(s),
+    'the backstop opens the VerifySheet through verifyFirst (§9b)');
 });
 check('6f. R28.9 [shape]: an unverified session fetches nothing subscription-specific — the config, offerings and eligibility queries all wait on `!unverified` (release-lead QA S2d)', () => {
   const s = strip(read('screens/PaywallScreen.tsx'));
@@ -900,6 +949,1118 @@ check('7a. generateTrades / getTradeStatus pass `background` through to the clie
   eq(calls[0][2] && calls[0][2].background, true, 'generateTrades');
   eq(calls[1][2] && calls[1][2].background, true, 'getTradeStatus');
   eq(calls[2][2], undefined, 'default stays user-initiated');
+});
+
+// ═══ 8. M2 — the deck (D2, D4, D5, D16, D19) ═════════════════════════════
+// Scope guard items 2 and 5; the background set; the offer trigger; the
+// preview end card; no raw error for a gate answer; the Send pre-check; Win
+// Now. What runs under node is EXECUTED (the API defaults, the coordinator,
+// the offer memory, the Send pre-check, Win Now's error copy); what lives in
+// a screen's closures is pinned by shape, and says so ("[shape]").
+const crypto = require('crypto');
+function astOf(rel) {
+  const text = read(rel);
+  return { text, sf: ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true, rel.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS) };
+}
+function findNodes(root, pred) {
+  const out = [];
+  (function v(n) { if (pred(n)) out.push(n); ts.forEachChild(n, v); })(root);
+  return out;
+}
+/** One top-level function out of a file, transpiled and evaluated with its
+ *  free names supplied: the real code, without the file's other imports. */
+function extractFn(rel, name, deps) {
+  const { sf } = astOf(rel);
+  const node = findNodes(sf, (n) => ts.isFunctionDeclaration(n) && n.name?.text === name)[0];
+  if (!node) throw new Error(`${rel}: function ${name} not found`);
+  const js = ts.transpileModule(node.getText(sf).replace(/^export\s+/, ''), {
+    compilerOptions: { target: ts.ScriptTarget.ES2019 },
+  }).outputText;
+  const names = Object.keys(deps);
+  // eslint-disable-next-line no-new-func
+  return new Function(...names, `${js}\nreturn ${name};`)(...names.map((n) => deps[n]));
+}
+const TRADES = 'screens/TradesScreen.tsx';
+
+check('8a. D2 [executed]: api/trades — a PAGED status call (the P2 prefetch) and a shop pass are background by default; every other call stays user-initiated unless flagged', async () => {
+  const calls = [];
+  const trades = load('api/trades.ts', {
+    './client': {
+      api: {
+        post: async (p, b, opts) => { calls.push(['post', p, opts]); return { status: 'running', cards: [] }; },
+        get: async (p, opts) => { calls.push(['get', p, opts]); return { status: 'running', cards: [] }; },
+      },
+    },
+  });
+  const card = { trade_id: 't1', give_player_ids: [], receive_player_ids: [] };
+  await trades.getTradeStatus('j', { deck: 'd', cursor: 30 });
+  await trades.getTradeStatus('j');
+  await trades.getTradeStatus('j', { deck: 'd', cursor: 30 }, { background: false });
+  await trades.swipeTrade(card, 'pass', undefined, 'shop');
+  await trades.swipeTrade(card, 'like', undefined, 'deck');
+  await trades.swipeTrade(card, 'pass');
+  eq(calls[0][2] && calls[0][2].background, true, 'a paged status call');
+  eq(calls[1][2], undefined, 'an unpaged status call');
+  eq(calls[2][2] && calls[2][2].background, false, 'an explicit flag wins');
+  eq(calls[3][2] && calls[3][2].background, true, "a 'shop' pass");
+  eq(calls[4][2], undefined, 'a deck swipe is user-initiated');
+  eq(calls[5][2], undefined, 'a surface-less swipe is user-initiated');
+});
+
+// The pinned background set: every `background: true` in mobile/src code is
+// here. A new background caller fails 8b until it is added (D2).
+const BACKGROUND_SET = [
+  ['api/trades.ts', /request: \{ background\?: boolean \} \| undefined = page \? \{ background: true \} : undefined,/,
+    "P2's next-page prefetch (TradesScreen.fetchNextPage's paged getTradeStatus)"],
+  ['api/trades.ts', /request: \{ background\?: boolean \} \| undefined = surface === 'shop' \? \{ background: true \} : undefined,/,
+    "the Shop's held-Undo pass (ShopOffersBody.commitDismiss)"],
+  ['state/devicePageStore.ts', /res = await generateTrades\(target\.request, \{\}, \{ background: true \}\);/, 'refreshDevicePage'],
+  ['hooks/usePresentationDeck.ts', /void run\(\{ background: true \}\);/, "usePresentationDeck's mount effect"],
+  ['hooks/usePresentationDeck.ts', /await getTradeStatus\(job\.job_id, undefined, \{ background: true \}\)/, "usePresentationDeck's poll"],
+  [TRADES, /if \(vars\.auto \|\| vars\.research\) \{\s*return generateTrades\(request, \{ searchId: vars\.searchId \}, \{ background: true \}\);\s*\}/,
+    'the first-run auto-start, its silent retry and the automatic re-search (#525)'],
+  [TRADES, /await getTradeStatus\(job\.job_id, undefined, \{ background: true \}\)/, "the deck's legacy status poll"],
+  ['components/StandingOfferSheet.tsx', /\.\.\.\(sourceTradeId \? \{ source_trade_id: sourceTradeId \} : \{\}\),\s*\}, \{ background: true \}\);/,
+    "the standing-offer post (QA P2-3: nothing may present over the sheet's RN Modal)"],
+  ['api/overhaul.ts', /request: \{ background\?: boolean \} = \{ background: true \},/,
+    "the active-overhaul probe (TradesScreen's getActiveOverhaul query, every mount)"],
+];
+check('8b. D2 [shape]: the pinned background set; nothing else in mobile/src is background; the callers the API defaults cover still match them', () => {
+  const want = {};
+  for (const [rel, re, what] of BACKGROUND_SET) {
+    assert(re.test(strip(read(rel))), `${what} (${rel}) lost its background flag`);
+    want[rel] = (want[rel] || 0) + 1;
+  }
+  for (const f of walk(SRC)) {
+    const rel = path.relative(SRC, f).split(path.sep).join('/');
+    const n = (strip(fs.readFileSync(f, 'utf8')).match(/background: true/g) || []).length;
+    eq(n, want[rel] || 0, `\`background: true\` in ${rel} (add a new background caller to BACKGROUND_SET)`);
+  }
+  const code = strip(read(TRADES));
+  assert(/await getTradeStatus\(snap\.job_id, \{ deck: snap\.deck_id, cursor: requested \}\)/.test(code),
+    'the prefetch is a paged getTradeStatus call (the default makes it background)');
+  assert(/return generateTrades\(request, \{ searchId: vars\.searchId \}\);/.test(code),
+    "a tap's generate stays user-initiated");
+  const shopCallers = walk(SRC).filter((f) => /swipeTrade\([^;]*'shop'\)/.test(strip(fs.readFileSync(f, 'utf8'))));
+  eq(shopCallers.map((f) => path.basename(f)).join(','), 'ShopOffersBody.tsx', "the only 'shop' pass caller");
+  const shop = strip(read('components/ShopOffersBody.tsx'));
+  const commit = shop.slice(shop.indexOf('function commitDismiss('), shop.indexOf('function flushPendingDismiss('));
+  assert(/swipeTrade\(ideaToCard\(idea, leagueId\), 'pass', signal, 'shop'\)/.test(commit), "…and it is commitDismiss, the Undo window's commit");
+  assert(/refresh: run,/.test(strip(read('hooks/usePresentationDeck.ts'))), 'pull-to-refresh stays user-initiated (run with no flag)');
+  // D16 (c): Win Now's job poll is the search tap's own continuation: its 402
+  // opens the paywall, so it is deliberately NOT background.
+  assert(/getWinNowJob = \(jobId: string, signal\?: AbortSignal\) =>\s*api\.get<WinNowJob>\(`\/api\/win-now\/jobs\/\$\{encodeURIComponent\(jobId\)\}`, \{signal\}\);/.test(read('api/winNow.ts')),
+    'the Win Now job poll is user-initiated');
+});
+
+check('8c. scope guard 5 [executed]: `paywall_offer` sits directly after `guide_step`; the tour hold and a held slot refuse it', () => {
+  const coord = load('state/useInterruptCoordinator.ts', {
+    react: { useEffect() {}, useRef: (v) => ({ current: v }) },
+    zustand: { create: makeZustandCreate() },
+    './useFeatureFlags': { useFlag: () => true },
+    '../api/events': { track: () => {} },
+  });
+  const order = Object.entries(coord.SURFACE_PRIORITY).sort((a, b) => a[1] - b[1]).map(([k]) => k);
+  eq(order.slice(0, 2).join(','), 'guide_step,paywall_offer', 'priority order');
+  eq(coord.SURFACE_PRIORITY.paywall_offer, coord.SURFACE_PRIORITY.guide_step + 1, 'directly after');
+  eq(new Set(Object.values(coord.SURFACE_PRIORITY)).size, order.length, 'distinct priorities');
+  const store = coord.useInterruptCoordinator;
+  store.getState().beginTourHold();
+  eq(store.getState().claim('paywall_offer'), false, 'refused during the tour hold');
+  store.getState().endTourHold();
+  eq(store.getState().claim('guide_step'), true, 'the guide claims');
+  eq(store.getState().claim('paywall_offer'), false, 'never over the guide');
+  store.getState().release('guide_step');
+  eq(store.getState().claim('paywall_offer'), true, 'a free slot grants');
+  eq(coord.isInterruptBusy(store.getState()), true, 'and root modals self-defer while it is held');
+  store.getState().release('paywall_offer');
+});
+
+check('8d. D4 / ux §1 [executed]: the trigger opens Paywall {source} at most ONCE per user (remembered per user); shut until the memory is read; never for an unverified session; resolves once the paywall is gone', async () => {
+  let route = 'Trades';
+  const listeners = new Set();
+  const navs = [];
+  const nav = {
+    isReady: () => true,
+    navigate: (name, params) => { navs.push([name, params]); route = name; listeners.forEach((l) => l()); },
+    getCurrentRoute: () => ({ name: route }),
+    addListener: (_t, cb) => { listeners.add(cb); return () => listeners.delete(cb); },
+    reset() {},
+  };
+  gateMod.installPaywallGate(nav);
+  try {
+    session.verification = { session_verified: true };
+    eq(gateMod.offerTriggerOpen('u1'), false, 'an unread memory is shut');
+    eq(gateMod.openOfferTrigger('first_opinion', 'u1'), null, 'nothing opens before the read');
+    await gateMod.hydrateOfferShown('u1');
+    eq(gateMod.offerTriggerOpen('u1'), true, 'read, never shown');
+    const closed = gateMod.openOfferTrigger('first_opinion', 'u1');
+    assert(closed && typeof closed.then === 'function', 'opened');
+    eq(JSON.stringify(navs[0]), JSON.stringify(['Paywall', { source: 'first_opinion' }]), 'the trigger variant (no gate, no kind)');
+    eq(JSON.stringify(storageWrites[storageWrites.length - 1]), JSON.stringify(['ftf_paywall_offer_shown_u1', '1']), 'remembered under the user');
+    eq(gateMod.openOfferTrigger('left_deck', 'u1'), null, 'never twice for the user');
+    let resolved = false;
+    closed.then(() => { resolved = true; });
+    await tick();
+    eq(resolved, false, 'held while the paywall is up');
+    route = 'Trades';
+    listeners.forEach((l) => l());
+    await tick();
+    eq(resolved, true, 'resolved once it is gone (the caller releases its slot)');
+    await gateMod.hydrateOfferShown('u2');
+    eq(gateMod.offerTriggerOpen('u2'), true, 'per user, not per device');
+    storage.set('ftf_paywall_offer_shown_u3', '1');
+    await gateMod.hydrateOfferShown('u3');
+    eq(gateMod.offerTriggerOpen('u3'), false, 'a relaunch remembers');
+    session.verification = { session_verified: false };
+    const seq = gateMod.usePaywallGate.getState().verifySeq;
+    eq(gateMod.openOfferTrigger('left_deck', 'u2'), null, 'unverified: no trigger');
+    eq(gateMod.usePaywallGate.getState().verifySeq, seq, '…and no VerifySheet from it');
+    eq(gateMod.offerTriggerOpen('u2'), true, 'not spent');
+  } finally {
+    session.verification = null;
+    gateMod.installPaywallGate(fakeNav);
+  }
+});
+
+check('8e. D4 [shape]: first_opinion fires only on the swipe mutation\'s SERVER ACK, after its stale-action guard; left_deck on a tab switch or Back after a card showed; eligible only flag + enforcing + verified + not entitled; it claims the slot', () => {
+  const { text, sf } = astOf(TRADES);
+  const swipe = findNodes(sf, (n) => ts.isCallExpression(n) && n.expression.getText(sf) === 'useMutation'
+    && n.arguments[0] && /swipeTrade\(card, decision, signal, 'deck'\)/.test(n.arguments[0].getText(sf)))[0];
+  assert(swipe, 'the swipe mutation');
+  const prop = (name) => swipe.arguments[0].properties.find((p) => p.name && p.name.getText(sf) === name);
+  assert(/if \(!ctx \|\| !actionCanUpdateScreen\(ctx\.action\)\) return;\s*requestPaywallOffer\('first_opinion'\);/.test(strip(prop('onSuccess').getText(sf))),
+    'onSuccess, right after the stale-action guard');
+  for (const name of ['mutationFn', 'onMutate', 'onError']) assert(!prop(name).getText(sf).includes('PaywallOffer'), `${name} must not trigger`);
+  const code = strip(text);
+  eq((code.match(/requestPaywallOffer\('first_opinion'\)/g) || []).length, 1, 'one first_opinion site');
+  assert(/navigation\.addListener\('blur', \(\) => \{\s*if \(tabKey\(\) !== ownTab\) requestPaywallOffer\('left_deck'\);/.test(code), 'left_deck on a tab switch');
+  assert(/navigation\.addListener\('beforeRemove', \(e: any\) => \{\s*const type = e\?\.data\?\.action\?\.type;\s*if \(type !== 'RESET' && type !== 'REPLACE'\) setTimeout\(\(\) => presentPaywallOffer\('left_deck'\), 0\);/.test(code),
+    'left_deck on Back, after the Back applies (never a reset / replace)');
+  eq((code.match(/if \(source === 'left_deck' && !offerCardSeenRef\.current\) return/g) || []).length, 2, 'left_deck only after a card showed');
+  assert(/const sessionUnverified = useSession\(\(s\) => isUnverifiedSession\(s\)\);/.test(code)
+    && /const offerEligible = paywallOn && payEnforcing && !payEntitled && !sessionUnverified;/.test(code), 'eligibility');
+  assert(/if \(!slot\.claim\('paywall_offer'\)\) return false;\s*const closed = openOfferTrigger\(source, uid\);/.test(code), 'claims the slot, then opens');
+  assert(/void closed\.then\(\(\) => useInterruptCoordinator\.getState\(\)\.release\('paywall_offer'\)\);/.test(code), 'holds it until the paywall is gone');
+  assert(/if \(!offerSource \|\| toast\) return;/.test(code), 'waits for the toast to clear');
+  assert(!/navigate\(\s*'Paywall'/.test(code), 'Trades never navigates to Paywall itself');
+  assert(/useEffect\(\(\) => \{\s*if \(wasFocusedRef\.current && !navFocused\) failDeckSearch\('abandoned'\);\s*wasFocusedRef\.current = navFocused;/.test(code),
+    "trades-eng's R2b abandoned effect is untouched (adj. 2)");
+});
+
+// The P30 render (DeckEndCard's final return), byte-for-byte as #363 shipped
+// it. trades-eng owns it: a deliberate P30 change updates this hash.
+const P30_RETURN_SHA256 = '0367d26a38d5a1958e2c9355c2d5e501e022f971c299cfb7e85dcfeeec3f28dd';
+check('8f. D5 [shape]: DeckEndCard\'s preview_end branch (eyebrow, mon.lock.find, ONE Primary) is an if-return BEFORE the byte-for-byte P30 render; mounted only from the 402 end, ahead of the error variants', () => {
+  const { sf } = astOf('components/TradeDeckStates.tsx');
+  const fn = findNodes(sf, (n) => ts.isFunctionDeclaration(n) && n.name?.text === 'DeckEndCard')[0];
+  const sts = fn.body.statements;
+  const iff = sts[sts.length - 2];
+  const ret = sts[sts.length - 1];
+  assert(ts.isIfStatement(iff) && iff.expression.getText(sf) === 'previewEnd' && ts.isReturnStatement(ret), 'if (previewEnd) { return … } then P30');
+  eq(crypto.createHash('sha256').update(ret.getText(sf)).digest('hex'), P30_RETURN_SHA256, 'the P30 render is byte-for-byte');
+  const branch = iff.getText(sf);
+  eq((branch.match(/<Button\b/g) || []).length, 1, 'one action');
+  assert(/testID="deck-end-paywall-cta"/.test(branch) && /variant="primary"/.test(branch), 'the Primary, deck-end-paywall-cta');
+  assert(/label=\{previewEnd\.verify \? MON\['mon\.verify\.continue'\] : MON\['mon\.pay\.see_plans'\]\}/.test(branch), 'See plans, or Continue');
+  assert(/<Text variant="heading">\{MON\['mon\.preview\.page_end'\]\}<\/Text>/.test(branch)
+    && /<Text variant="bodySm" style=\{styles\.endBody\}>\{MON\['mon\.lock\.find'\]\}<\/Text>/.test(branch), 'the eyebrow and the line');
+  assert(!/onLike|onPass|tally|count|price|\$\d|free/i.test(branch.replace(/MON\['[^']+'\]/g, '')), 'no Like/Pass, count, price or "free"');
+  eq(copy.MON['mon.preview.page_end'], "That's the first page.", 'mon.preview.page_end');
+  eq(copy.MON['mon.pay.see_plans'], 'See plans', 'mon.pay.see_plans');
+  eq(copy.MON['mon.verify.continue'], 'Continue', 'mon.verify.continue');
+  eq(copy.MON['mon.lock.find'], 'Finding trades needs a subscription.', 'mon.lock.find');
+  const code = strip(read(TRADES));
+  const GATE_BRANCH = ') : pagedWithCards && deckGateEnd && (!rawTopCard || showDeckEndCard) ? (';
+  const endAt = code.indexOf(GATE_BRANCH);
+  const errAt = code.indexOf(') : pagedWithCards && deckEnd ? (');
+  assert(endAt > -1 && errAt > endAt, 'the end card precedes the offline / MoreError branch');
+  assert(/\) : pagedWithCards && deckGateEnd && \(!rawTopCard \|\| showDeckEndCard\) \? \(\s*<DeckEndCard\s+minHeight=\{topCardH\}\s+previewEnd=\{\{ verify: deckGateEnd\.verify \|\| sessionUnverified, onPress: handleDeckGateEndPress \}\}\s*\/>/.test(code),
+    'the mount');
+  assert(/void openPaywall\(\{ source: 'preview_end' \}\);/.test(code), 'See plans opens the paywall, source preview_end');
+});
+
+check('8f2. trades-eng follow-up 1 [shape]: a 402 end never shows P30 — the gate branch sits AHEAD of `showDeckEndCard` and takes every slot P30 would (only past the last card otherwise); P30\'s own pinned lines unchanged', () => {
+  const code = strip(read(TRADES));
+  const gateAt = code.indexOf(') : pagedWithCards && deckGateEnd && (!rawTopCard || showDeckEndCard) ? (');
+  const p30At = code.indexOf(') : showDeckEndCard ? (');
+  const quickAt = code.indexOf('<QuickSetPromptCard');
+  assert(quickAt > -1 && gateAt > quickAt && p30At > gateAt, 'QuickSet prompt → the 402 end → P30, in that order');
+  eq((code.match(/\) : showDeckEndCard \? \(/g) || []).length, 1, 'one P30 branch');
+  assert(/const showDeckEndCard = pagedWithCards && \(endLatched \|\| deckEnd === 'end'\);/.test(code), "trades-eng's showDeckEndCard (4f) is untouched");
+});
+
+check('8f3. trades-eng follow-up 2 [shape]: a gate answer at the landing never pushes the deck (a deck the deadline pushed is popped back); an empty pushed deck never sits behind the paywall; every other fork outcome unchanged', () => {
+  const code = strip(read(TRADES));
+  const fork = code.slice(code.indexOf('function pushWithFirstPage('), code.indexOf('function handleInlineFindATrade('));
+  assert(/generateTrades\(request, \{ searchId: fork\.searchId \}\)\s*\.then\(\(snapshot\) => go\(adoptablePage\(snapshot\)\s*\? \{ request, snapshot, validatedAt: Date\.now\(\), deviceKey \}\s*: undefined\)\)\s*\.catch\(\(e\) => \{\s*const gate = gateSignalFor\(e, '\/api\/trades\/generate'\);\s*if \(!gate \|\| gate\.action === 'verify_mismatch'\) throw e;[\s\S]*?\}\)\s*\.catch\(\(\) => go\(\)\);/.test(fork),
+    'the gate catch sits between .then and the verbatim .catch(() => go())');
+  const gateCatch = fork.slice(fork.indexOf(".catch((e) => {"), fork.indexOf('.catch(() => go());'));
+  assert(!/\bgo\(/.test(gateCatch) && !/pushDeck\(/.test(gateCatch), 'the gate path never pushes');
+  assert(/const deckPushed = pushed && resultsPushPendingRef\.current;[\s\S]*if \(deckPushed && mountedRef\.current\) popToLanding\(\);\s*pushed = true;/.test(gateCatch),
+    'a deck the deadline already pushed is popped back; then nothing else pushes');
+  assert(/failFirstCard\(fork\.searchId, gateFailureReason\(gate\)\);/.test(gateCatch), 'R2b paywall / verify from the gate signal');
+  // the pushed deck's own 402 (anchored, offline or deadline pushes) pops an empty deck back
+  eq((code.match(/if \(isResultsPushed && deckRef\.current\.length === 0\) popToLanding\(\);/g) || []).length, 2, 'generate and fair-sweep 402s on an empty pushed deck pop to the landing');
+});
+
+check('8f4. trades-eng follow-up 3 [shape]: deck_buffer_empty does not fire at a gated preview\'s capped end; trades-eng\'s pinned guard line unchanged', () => {
+  const code = strip(read(TRADES));
+  assert(/if \(!pagedWithCards \|\| !rawTopCard \|\| !job \|\| unseen > 0 \|\| deckFullyDelivered\(job\)\) return;\s*if \(deckGateEndRef\.current\) return;\s*const searchId = deckSearchRef\.current\?\.id \?\? job\.search_id;[\s\S]{0,200}reportDeckBufferEmpty\(searchId/.test(code),
+    'the gate end returns before reportDeckBufferEmpty');
+});
+
+check('8g. D16 (a) [executed + shape]: the end card\'s Continue → the VerifySheet, chosen by the server\'s verify answer or session_verified alone, never an entitlement', () => {
+  const sig = (status, body) => client.gateSignalFor(new client.ApiError(status, body), '/api/trades/status');
+  eq(sig(402, { error: 'pro_required', gate: 'preview_used' }).action, 'paywall', '402 preview_used → See plans');
+  eq(sig(402, { error: 'pro_required', gate: 'verify_required' }).action, 'verify', '402 verify_required → Continue');
+  eq(sig(403, { error: 'verification_required' }).action, 'verify', '403 verification_required → Continue');
+  eq(sig(500, { error: 'boom' }), null, 'a 500 is not an end');
+  const code = strip(read(TRADES));
+  const fnText = (name) => { const at = code.indexOf(`function ${name}(`); return code.slice(at, code.indexOf('\n  }\n', at)); };
+  const press = fnText('handleDeckGateEndPress');
+  assert(/if \(deckGateEnd\?\.verify \|\| sessionUnverified\) \{\s*void openVerify\(\{ onVerified: resumeDeckPages \}\);\s*return;\s*\}\s*void openPaywall\(\{ source: 'preview_end' \}\);/.test(press),
+    'Continue → openVerify (then the pages resume and the server decides); else See plans');
+  assert(/const signal = gateSignalFor\(e, '\/api\/trades\/status'\);\s*if \(!signal \|\| signal\.action === 'verify_mismatch'\) return false;\s*setGateEnd\(\{ verify: signal\.action === 'verify', revalidation \}\);/.test(fnText('noteDeckGateEnd')),
+    'the end records the server\'s verify answer');
+  for (const [name, s] of [['handleDeckGateEndPress', press], ['noteDeckGateEnd', fnText('noteDeckGateEnd')]]) {
+    assert(!/payEntitled|payEnforcing|useEntitlements|entitle|\.pro\b/.test(s), `${name} reads an entitlement`);
+  }
+});
+
+check('8q. D19 + #525 [shape]: the automatic re-search\'s 402 ends the deck in the preview end card (never DeckMoreErrorCard); resume runs the re-search again', () => {
+  const code = strip(read(TRADES));
+  const from = code.search(/if \(e instanceof ApiError && e\.isProRequired\) \{\s*failDeckSearch\(gateFailureReason\(gateSignalFor\(e, '\/api\/trades\/generate'\)\)\);/);
+  assert(from > -1, 'the generate 402 branch');
+  const branch = code.slice(from, code.indexOf('\n        return;\n      }', from));
+  assert(/if \(vars\?\.research\) \{\s*setGateEnd\(\{\s*verify: gateSignalFor\(e, '\/api\/trades\/generate'\)\?\.action === 'verify',\s*revalidation: false,\s*research: true,\s*\}\);\s*\}/.test(branch),
+    'the 402 branch records the re-search\'s end (verify from the server\'s answer)');
+  const at = code.indexOf('function resumeDeckPages(');
+  const resume = code.slice(at, code.indexOf('\n  }\n', at));
+  assert(/if \(end\.research\) \{\s*dispatchGenerate\(\{ repeat: true \}, undefined,\s*\{ searchId: autoResearchSearchId\(deckSearchRef\.current\?\.id, isSearchOpen\) \}\);\s*\} else if \(end\.revalidation\) revalidateDevicePage\(\);/.test(resume),
+    'resume re-runs the re-search (no R1, the open trace or none)');
+  const gateAt = code.indexOf(') : pagedWithCards && deckGateEnd && (!rawTopCard || showDeckEndCard) ? (');
+  const errAt = code.indexOf('<DeckMoreErrorCard');
+  assert(gateAt > -1 && errAt > gateAt, 'the preview end card outranks DeckMoreErrorCard');
+});
+
+check('8h. D19 [shape]: a 402 never reaches a deck error variant or the swipe toast — each failure path checks the gate before its error write', () => {
+  const { text, sf } = astOf(TRADES);
+  const code = strip(text);
+  const before = (hay, gate, ...writes) => {
+    const g = hay.search(gate);
+    assert(g > -1, `gate check ${gate}`);
+    for (const w of writes) { const at = hay.indexOf(w); assert(at === -1 || at > g, `${w} precedes the gate check`); }
+  };
+  const mutation = (re) => {
+    const m = findNodes(sf, (n) => ts.isCallExpression(n) && n.expression.getText(sf) === 'useMutation' && n.arguments[0] && re.test(n.arguments[0].getText(sf)))[0];
+    return strip(m.arguments[0].properties.find((p) => p.name && p.name.getText(sf) === 'onError').getText(sf));
+  };
+  // a Find a trade (generate): no toast, no deck-failure card, no auto retry
+  before(mutation(/return generateTrades\(request/), /if \(e instanceof ApiError && e\.isProRequired\) \{\s*failDeckSearch\(gateFailureReason\(gateSignalFor\(e, '\/api\/trades\/generate'\)\)\);/, 'setToast(', 'setDeckFailure(', "autoGenRef.current = 'retrying'");
+  // a swipe: the card is restored FIRST, then no toast
+  const swipeErr = mutation(/swipeTrade\(card, decision, signal, 'deck'\)/);
+  before(swipeErr, /if \(err instanceof ApiError && err\.isProRequired\) return;/, 'setToast(');
+  assert(swipeErr.indexOf('return cur - 1') < swipeErr.search(/err\.isProRequired\) return;/), 'the existing swipe-failure recovery restores the card first');
+  // the fair sweep
+  const fair = code.slice(code.indexOf('await getFairPackages('), code.indexOf('setFairDeck(false);\n    } finally'));
+  before(fair, /if \(e instanceof ApiError && e\.isProRequired\) \{\s*failDeckSearch\(gateFailureReason\(gateSignalFor\(e, '\/api\/trades\/fair-packages'\)\)\);\s*setFairDeck\(false\);[^}]*return;/, 'setDeckFailure(');
+  // the legacy poll: no "Network hiccup" toast, no poll_abandoned card
+  assert(/\} catch \(e\) \{\s*if \(cancelled\) return;\s*if \(e instanceof ApiError && e\.isProRequired\) \{\s*setJob\(null\);\s*return;\s*\}\s*failures \+= 1;/.test(code), 'the legacy poll');
+  // the page path: the deck's terminal state, never MoreError
+  const fetchNext = code.slice(code.indexOf('async function fetchNextPage('), code.indexOf('\n  }\n', code.indexOf('async function fetchNextPage(')));
+  assert(/if \(deckGateEndRef\.current\) return;/.test(fetchNext), 'no page is asked after the end');
+  assert(/\} catch \(e\) \{\s*if \(!mountedRef\.current \|\| pageLoopRef\.current !== loop\) return;\s*if \(noteDeckGateEnd\(e\)\) \{\s*setPagePhase\('idle'\);\s*return;\s*\}\s*loop\.failures \+= 1;/.test(fetchNext),
+    'the page fetch: the end, before a failure is counted');
+  // the device deck's revalidation: no refresh-failed line (trades-eng's handler stays verbatim behind it)
+  assert(/\.catch\(\(e\) => \{\s*if \(mountedRef\.current && seq === deviceRevalidationRef\.current && noteDeckGateEnd\(e, true\)\) \{\s*setDevicePhase\('done'\);\s*return;\s*\}\s*throw e;\s*\}\)\s*\.catch\(\(\) => \{\s*if \(mountedRef\.current && seq === deviceRevalidationRef\.current\) setDevicePhase\('failed'\);/.test(code),
+    'the revalidation');
+});
+
+check('8i. D16 GRANTED [executed]: the Send pre-check — dark unless flag + enforcing; unverified → the VerifySheet only (whatever the account holds); verified, not entitled → the paywall {gate, send}; after a verify → re-read, then the paywall or the CONFIRM step, never a send', async () => {
+  const st = { flag: true, enforcing: true, pro: false, unverified: false, refreshed: 0 };
+  const opened = [];
+  let onVerified = null;
+  const pre = extractFn('components/SendInSleeperButton.tsx', 'sendPreCheck', {
+    useFeatureFlags: { getState: () => ({ flags: { 'monetize.paywall': st.flag } }) },
+    useEntitlements: { getState: () => ({ enforcing: st.enforcing, pro: st.pro, refresh: async () => { st.refreshed += 1; } }) },
+    isUnverifiedSession: () => st.unverified,
+    openVerify: (o) => { opened.push('verify'); onVerified = o && o.onVerified; return Promise.resolve('dismissed'); },
+    openPaywall: (p) => { opened.push(JSON.stringify(p)); },
+  });
+  let confirms = 0;
+  const confirm = () => { confirms += 1; };
+  const SEND = JSON.stringify({ source: 'gate', kind: 'send' });
+  st.flag = false; eq(pre(confirm), false, 'flag off: nothing'); st.flag = true;
+  st.enforcing = false; eq(pre(confirm), false, 'not enforcing: nothing'); st.enforcing = true;
+  st.pro = true; eq(pre(confirm), false, 'entitled: the send goes on'); st.pro = false;
+  opened.length = 0;
+  eq(pre(confirm), true, 'locked'); eq(opened.join('|'), SEND, 'the send variant, before any confirm');
+  st.unverified = true; st.pro = true; opened.length = 0;
+  eq(pre(confirm), true, 'unverified stops'); eq(opened.join('|'), 'verify', 'the sheet only, though the account "holds" pro');
+  st.unverified = false; st.pro = false; opened.length = 0;
+  onVerified(); await tick(); await tick();
+  eq(st.refreshed, 1, 're-read after verifying'); eq(opened.join('|'), SEND, 'not entitled → the paywall'); eq(confirms, 0, 'no confirm');
+  st.unverified = true; pre(confirm); st.unverified = false; st.pro = true;
+  onVerified(); await tick(); await tick();
+  eq(confirms, 1, 'entitled → the confirm step, once (it still waits for the user\'s tap)');
+});
+
+check('8j. D16 GRANTED [shape]: the pre-check runs first on every Send tap — the router and the MFL/ESPN twins it renders (their confirm is reached through their own tap) — and a verify resumes with `proceed`, the whole unchanged tap (hand-off, link check, the confirm alert), never a propose', () => {
+  const IDLE = "state !== 'idle'";
+  const IDLE_NOT_SENDING = "state !== 'idle' \\|\\| sendState === 'in_flight' \\|\\| sendState === 'sent'";
+  const tap = (call, deps, guard = IDLE) => new RegExp(`const onPress = useCallback\\(\\(\\) => \\{\\s*if \\(${guard}\\) return;\\s*if \\(${call}\\(\\(\\) => \\{ void proceed\\(\\); \\}\\)\\) return;\\s*void proceed\\(\\);\\s*\\}, \\[${deps}\\]\\);`);
+  const router = strip(read('components/SendInSleeperButton.tsx'));
+  assert(tap('sendPreCheck', 'state, proceed').test(router), 'router: the pre-check, then proceed');
+  eq((router.match(/sendPreCheck=\{sendPreCheck\}/g) || []).length, 2, 'the router hands it to both twins');
+  const fnSrc = router.slice(router.indexOf('export function sendPreCheck('), router.indexOf('interface Props'));
+  assert(!/propose|doPropose|Alert/.test(fnSrc), 'the pre-check itself never sends or confirms');
+  const twins = {
+    'components/SendInMflButton.tsx': /const proceed = useCallback\(async \(\) => \{\s*const live = getSendRecord\(sendKey\)\?\.state;\s*if \(live === 'in_flight' \|\| live === 'sent'\) return;\s*haptics\.pickup\(\);\s*if \(!leagueId \|\| !theirUserId\) \{\s*openMfl\(\);\s*return;\s*\}[\s\S]*?await getMflLinkStatus\(\)[\s\S]*?\{ text: 'Sign in', onPress: openSignIn \}/,
+    'components/SendInEspnButton.tsx': /const proceed = useCallback\(async \(\) => \{\s*const live = getSendRecord\(sendKey\)\?\.state;\s*if \(live === 'in_flight' \|\| live === 'sent'\) return;\s*haptics\.pickup\(\);\s*if \(!leagueId \|\| !theirUserId\) \{\s*openEspn\(\);\s*return;\s*\}[\s\S]*?await getEspnLinkStatus\(\)/,
+  };
+  assert(/const proceed = useCallback\(async \(\) => \{\s*recordGuideReceipt\(GUIDE_RECEIPTS\.sendAttempted\);\s*track\('sleeper_send_attempted'[\s\S]*?openInSleeper\(\);[\s\S]*?await getSleeperLinkStatus\(\)/.test(router),
+    'router: proceed is the whole unchanged tap');
+  for (const rel of ['components/SendInSleeperButton.tsx', 'components/SendInMflButton.tsx', 'components/SendInEspnButton.tsx']) {
+    const s = strip(read(rel));
+    if (twins[rel]) {
+      // Main's send registry (#539): the twins' tap also refuses while this
+      // trade is in flight or sent.
+      assert(tap('sendPreCheck\\?\\.', 'state, sendState, sendPreCheck, proceed', IDLE_NOT_SENDING).test(s), `${rel}: the pre-check, then proceed (never straight to confirmSend)`);
+      assert(twins[rel].test(s), `${rel}: proceed is the whole unchanged tap (hand-off, link check, sign-in)`);
+      assert(!/from '\.\/SendInSleeperButton'/.test(s), `${rel}: takes it as a prop (no import cycle)`);
+    }
+    assert(!/sendPreCheck\??\.?\(\(\) => \{ void confirmSend\(\); \}\)/.test(s), `${rel}: no continuation skips to confirmSend`);
+    const confirmFn = s.slice(s.indexOf('const confirmSend = useCallback('), s.indexOf('const proceed = useCallback('));
+    const direct = /\{ text: 'Send', onPress: \(\) => \{ void doPropose\(\); \} \}/.test(confirmFn);
+    const viaRegistry = /\{ text: 'Send', onPress: send \}/.test(confirmFn)
+      && /const send = \(\) => \{\s*const now = getSendRecord\(sendKey\);\s*if \(now === shown\) void doPropose\(\);/.test(confirmFn);
+    assert(direct || viaRegistry, `${rel}: confirmSend's alert gates the propose`);
+  }
+});
+
+check('8k. D16 (c) [executed]: Win Now maps a 402 / verify 403 to no line (the gate opened the paywall or the sheet), never "HTTP 402"; other errors keep their copy', () => {
+  const errorCopy = extractFn('screens/WinNowScreen.tsx', 'errorCopy', {});
+  const actionErrorCopy = extractFn('screens/WinNowScreen.tsx', 'actionErrorCopy', { gateSignalFor: client.gateSignalFor, errorCopy });
+  const E = (status, body) => new client.ApiError(status, body);
+  eq(errorCopy(E(402, { error: 'pro_required', gate: 'lapsed' })), 'HTTP 402', '(why: the raw fallback)');
+  eq(actionErrorCopy(E(402, { error: 'pro_required', gate: 'lapsed' })), '', '402');
+  eq(actionErrorCopy(E(402, { error: 'pro_required', gate: 'verify_required' })), '', '402 verify_required');
+  eq(actionErrorCopy(E(403, { error: 'verification_required' })), '', '403');
+  eq(actionErrorCopy(E(500, { message: 'Engine busy' })), 'Engine busy', 'other errors keep their copy');
+  const s = strip(read('screens/WinNowScreen.tsx'));
+  eq((s.match(/setMessage\(actionErrorCopy\(error\)\)/g) || []).length, 4, 'search, job poll, Edit & evaluate, Like/Pass');
+  eq((s.match(/setMessage\(errorCopy\(/g) || []).length, 0, 'no action maps through the raw copy');
+  assert(!/HTTP 402/.test(s), 'no "HTTP 402" string');
+});
+
+check('8l. D16 (c) [shape]: Win Now\'s pre-check is on "Find Win Now trades" only (verify on session_verified, then the server decides); the standings and controls never read it; the Win Now entries are never gated', () => {
+  const s = strip(read('screens/WinNowScreen.tsx'));
+  assert(/const search = async \(afterVerify\?: unknown\) => \{\s*if \(!canSearch \|\| busy \|\| seasonStale\(baseline\?\.meta\)\) return;\s*if \(afterVerify !== true && findLocked\(\)\) return;\s*const request = begin\(\);/.test(s),
+    'the pre-check runs on the tap, before any request');
+  assert(/const findLocked = \(\): boolean => \{\s*if \(!paywallOn \|\| !payEnforcing\) return false;\s*if \(isUnverifiedSession\(\)\) \{\s*void openVerify\(\{ onVerified: \(\) => setSearchAfterVerify\(true\) \}\);\s*return true;\s*\}\s*if \(payEntitled\) return false;\s*void openPaywall\(\{ source: 'gate', kind: 'find' \}\);\s*return true;\s*\};/.test(s),
+    'unverified → the sheet; verified, not entitled → mon.lock.find');
+  eq((s.match(/findLocked\(\)/g) || []).length, 1, 'one call: the search');
+  eq((s.match(/\b(paywallOn|payEnforcing|payEntitled)\b/g) || []).length, 6, 'the paywall state is read by the pre-check alone (3 reads + 3 uses)');
+  assert(/if \(!searchAfterVerify \|\| !focused \|\| !canSearch \|\| busy\) return;\s*setSearchAfterVerify\(false\);\s*void search\(true\);/.test(s), 'after a verify: the search once, unchecked (D18)');
+  assert(/<Action id="win-now\.search" primary label=\{busy \? 'Working…' : 'Find Win Now trades'\} onPress=\{search\} disabled=\{busy \|\| !canSearch\} \/>/.test(s), 'the search control is unchanged');
+  for (const [rel, id] of [['screens/LeagueSummaryScreen.tsx', 'league-summary\\.win-now'], [TRADES, 'trades\\.win-now']]) {
+    assert(new RegExp(`testID="${id}" accessibilityRole="button" onPress=\\{\\(\\) => navigation\\.navigate\\('WinNow'\\)\\}`).test(strip(read(rel))),
+      `${rel}: the entry navigates straight to Win Now`);
+  }
+  assert(!/usePaywallGate|openPaywall|sendPreCheck|useEntitlements/.test(strip(read('screens/LeagueSummaryScreen.tsx'))), 'League Summary has no paywall code');
+});
+
+check('8m. paywall_viewed: M2 opens the paywall with sources first_opinion | left_deck | preview_end, all in the registered closed set', () => {
+  const tax = fs.readFileSync(path.join(ROOT, '..', 'backend', 'analytics_taxonomy.py'), 'utf8');
+  assert(/first_opinion \| left_deck \| gate \| settings \| preview_end \| unknown/.test(tax), 'the taxonomy comment lists the sources');
+  const gate = strip(read('state/usePaywallGate.ts'));
+  assert(/export type OfferTriggerSource = 'first_opinion' \| 'left_deck';/.test(gate) && /nav\.navigate\('Paywall', \{ source \}\);/.test(gate), 'the trigger sources');
+  assert(/openPaywall\(\{ source: 'preview_end' \}\)/.test(strip(read(TRADES))), 'the end card source');
+  eq(copy.headlineFor('left_deck'), "There's a full deck behind this page.", 'the trigger headline');
+  assert(copy.offerBodyFor('first_opinion', false) && copy.offerBodyFor('left_deck', true), 'the trigger body');
+});
+
+check('8n. head-eng grant (b) [executed]: the active-overhaul probe is background — a 402 of any gate or the verify 403 opens NOTHING and RESOLVES {active:null}; a 500 still throws; getOverhaul / getOffers stay user-initiated', async () => {
+  const overhaul = load('api/overhaul.ts', {
+    './client': { apiRequest: client.apiRequest, gateSignalFor: client.gateSignalFor },
+    './trades': { normalizeTradeCard: (c) => c },
+    // #527's send timeout (main): the real module; the probe never sends.
+    './sendOutcome': load('api/sendOutcome.ts', { './client': { ApiError: client.ApiError } }),
+  });
+  const gated = [
+    [402, { error: 'pro_required', gate: 'preview_used' }],
+    [402, { error: 'pro_required', gate: 'lapsed' }],
+    [402, { error: 'pro_required', gate: 'verify_required' }],
+    [402, { error: 'pro_required' }],
+    [403, { error: 'verification_required' }],
+  ];
+  for (const [status, body] of gated) {
+    reset();
+    responses.push({ status, body });
+    const r = await overhaul.getActiveOverhaul('L1');
+    eq(JSON.stringify(r), JSON.stringify({ active: null }), `${status} ${body.gate || body.error}: resolves {active:null}`);
+    eq(signals.length, 0, `${status} ${body.gate || body.error}: opens nothing`);
+  }
+  reset();
+  responses.push({ status: 500, body: { error: 'boom' } });
+  const e5 = await rejects(overhaul.getActiveOverhaul('L1'));
+  eq(e5.status, 500, 'a 500 still throws');
+  reset();
+  responses.push({ status: 402, body: { error: 'pro_required', gate: 'lapsed' } });
+  await rejects(overhaul.getOverhaul('o1'));
+  eq(signals.length, 1, 'getOverhaul is user-initiated (tapping in opens the paywall)');
+  reset();
+  responses.push({ status: 402, body: { error: 'pro_required', gate: 'lapsed' } });
+  await rejects(overhaul.getOffers('o1'));
+  eq(signals.length, 1, 'getOffers is user-initiated');
+  assert(/queryFn: \(\) => getActiveOverhaul\(leagueId!\),/.test(strip(read(TRADES))), "TradesScreen's probe line is untouched (the defaults do it)");
+});
+
+check('8o. trades-eng P3 [executed]: the gate listener settles R2b only for a SEARCH route (generate, fair-packages); another find route (an overhaul) never; the client hands the listener the pathname', async () => {
+  traceOpen = 's1';
+  traceCalls.length = 0;
+  const find = { action: 'paywall', gate: 'lapsed', kind: 'find' };
+  gateMod.handleGateSignal(find, '/api/overhauls/o1');
+  gateMod.handleGateSignal(find, '/api/overhauls/o1/offers');
+  gateMod.handleGateSignal(find, '/api/win-now/search');
+  gateMod.handleGateSignal(find);
+  eq(traceCalls.length, 0, 'no search route, no R2b');
+  gateMod.handleGateSignal(find, '/api/trades/generate');
+  gateMod.handleGateSignal({ action: 'verify', gate: 'verify_required', kind: 'find' }, '/api/trades/fair-packages');
+  eq(JSON.stringify(traceCalls), JSON.stringify([['s1', 'paywall'], ['s1', 'verify']]), 'the search routes settle it');
+  traceOpen = null;
+  const paths = [];
+  client.setOnProRequired((s, p) => { paths.push(p); });
+  try {
+    reset();
+    responses.push({ status: 402, body: { error: 'pro_required', gate: 'lapsed' } });
+    await rejects(client.api.post('https://api.test/api/trades/generate?x=1', {}));
+    eq(paths[0], '/api/trades/generate', 'the listener gets the pathname');
+  } finally {
+    client.setOnProRequired((s) => { signals.push(s); return handlerReturn(s); });
+  }
+});
+
+// ═══ 9. M3 — account surfaces (D9, D10, design §4.1/§5, copy §9.4–9.6) ═══
+// What runs under node is EXECUTED: the router's verify-then-return, the
+// club window and the once-per-user welcome memory, the copy helpers (the
+// status line, the join date, the invitee template), and the purchases
+// display read. What lives in a screen's JSX or closures is pinned by
+// shape, and says so ("[shape]").
+const PAYWALL = 'screens/PaywallScreen.tsx';
+const WELCOME = 'screens/FounderWelcomeScreen.tsx';
+const SUBS = 'components/SubscriptionSection.tsx';
+const ACCOUNT_DATA = 'screens/settings/sections/AccountDataSection.tsx';
+const DELETE_LINE = "Deleting your account doesn't cancel an active subscription. To stop future charges, cancel it in your Apple ID settings first.";
+/** The body of `const <name> = useCallback(<arrow>, …)` in a file. */
+function callbackBody(rel, name) {
+  const { sf } = astOf(rel);
+  const decl = findNodes(sf, (n) => ts.isVariableDeclaration(n) && n.name.getText(sf) === name
+    && n.initializer && ts.isCallExpression(n.initializer) && n.initializer.expression.getText(sf) === 'useCallback')[0];
+  if (!decl) throw new Error(`${rel}: useCallback ${name} not found`);
+  return { sf, body: decl.initializer.arguments[0].body };
+}
+/** One top-level function declaration's source text, comments out. */
+function fnText(rel, name) {
+  const { sf } = astOf(rel);
+  const node = findNodes(sf, (n) => ts.isFunctionDeclaration(n) && n.name?.text === name)[0];
+  if (!node) throw new Error(`${rel}: function ${name} not found`);
+  return strip(node.getText(sf));
+}
+const NO_ENTITLEMENT = /useEntitlements|getEntitlements|entitlement|\bfounder\b|\.pro\b|\bpro\b|\bsources\b|expires_at|getActivePro/i;
+
+check('9a. D9 [executed]: verifyThenReturn opens the sheet only; on `verified` the SAME paywall comes back (variant + plan) and nothing is bought; Cancel / a new sign-in open nothing more', async () => {
+  navCalls.length = 0;
+  session.verification = { session_verified: false };
+  const back = { source: 'gate', gate: 'preview_used', kind: 'send', plan: 'ftf_pro_monthly' };
+  let held = gateMod.verifyThenReturn(back);
+  eq(gateMod.usePaywallGate.getState().verifyOpen, true, 'the sheet is up');
+  eq(navCalls.length, 0, 'no paywall while unverified');
+  session.verification = { session_verified: true };
+  gateMod.settleVerify('verified');
+  eq(await held, 'verified', 'outcome');
+  eq(JSON.stringify(navCalls), JSON.stringify([['Paywall', back]]), 'the same paywall, same plan');
+  for (const outcome of ['dismissed', 'signed_in']) {
+    navCalls.length = 0;
+    session.verification = { session_verified: false };
+    held = gateMod.verifyThenReturn(back);
+    gateMod.settleVerify(outcome);
+    eq(await held, outcome, outcome);
+    eq(navCalls.length, 0, `${outcome}: nothing reopens`);
+  }
+  navCalls.length = 0;
+  session.verification = { session_verified: true };
+  gateMod.openPaywall({ source: 'settings' });
+  eq(JSON.stringify(navCalls[0]), JSON.stringify(['Paywall', { source: 'settings' }]), 'no plan → none passed');
+  session.verification = null;
+  assert(!NO_ENTITLEMENT.test(fnText('state/usePaywallGate.ts', 'verifyThenReturn')), '[shape] verifyThenReturn reads a subscription field');
+});
+
+check('9b. D9 [shape]: the purchase button and Restore check the session FIRST and route an unverified one to the one verify route; Apple\'s sheet / the restore come after; that route reads the session only and pre-selects the plan', () => {
+  for (const [name, sdkCall] of [['onPurchase', 'purchasePackage('], ['onRestore', 'restorePurchases(']]) {
+    const { sf, body } = callbackBody(PAYWALL, name);
+    const first = body.statements[0];
+    assert(first && /^if \(isUnverifiedSession\(\)\) \{\s*verifyFirst\(\);\s*return;\s*\}$/.test(strip(first.getText(sf)).trim()),
+      `${name}: its FIRST statement must be the unverified check → verifyFirst; return`);
+    const text = strip(body.getText(sf));
+    assert(text.indexOf(sdkCall) > text.indexOf('verifyFirst();'), `${name}: ${sdkCall} precedes the check`);
+  }
+  const vf = callbackBody(PAYWALL, 'verifyFirst');
+  const route = strip(vf.body.getText(vf.sf));
+  assert(/if \(leavingForVerify\.current\) return;\s*leavingForVerify\.current = true;/.test(route), 'once per mount (the backstop and a tap never both pop the stack)');
+  assert(/const back = \{\s*source,\s*\.\.\.\(gate \? \{ gate \} : \{\}\),\s*\.\.\.\(kind \? \{ kind \} : \{\}\),\s*\.\.\.\(selectedId \? \{ plan: selectedId \} : \{\}\),\s*\};\s*dismiss\(\);\s*setTimeout\(\(\) => void verifyThenReturn\(back\), 450\);/.test(route),
+    'close this modal, then the sheet; on verified the same variant with the selected plan');
+  assert(!NO_ENTITLEMENT.test(route), 'the D9 route reads a subscription field');
+  assert(!/purchasePackage|restorePurchases/.test(route), 'the D9 route buys or restores');
+  const code = strip(read(PAYWALL));
+  eq((code.match(/verifyThenReturn\(/g) || []).length, 1, 'one route to the sheet from the paywall');
+  assert(!/\bopenVerify\(/.test(code), 'no second path to the sheet');
+  assert(/const pick = plans\.find\(\(p\) => p\.product\.product_id === planParam\)\s*\?\? plans\.find\(\(p\) => p\.period === 'annual'\)/.test(code), 'the carried plan is pre-selected');
+});
+
+check('9c. D10 [executed]: the welcome only inside the club window (server open AND before closes_at on this clock); once per user, remembered first; unreadable storage never shows it', async () => {
+  const open = extractFn(WELCOME, 'clubWindowOpen', {});
+  const CUT = '2027-01-01T00:00:00Z';
+  const before = Date.parse('2026-12-31T23:59:00Z');
+  eq(open({ open: true, closes_at: CUT }, before), true, 'in the window');
+  eq(open({ open: true, closes_at: CUT }, Date.parse(CUT)), false, 'at the cut-off');
+  eq(open({ open: true, closes_at: CUT }, Date.parse('2027-01-01T00:01:00Z')), false, 'a cached open:true after the cut-off');
+  eq(open({ open: false, closes_at: CUT }, before), false, 'server says closed');
+  eq(open({ open: true }, before), false, 'no closes_at');
+  eq(open({ open: true, closes_at: 'soon' }, before), false, 'unreadable closes_at');
+  eq(open(undefined, before), false, 'no club (older server)');
+  const store = new Map();
+  const writes = [];
+  let broken = false;
+  const fakeAS = {
+    getItem: async (k) => { if (broken) throw new Error('io'); return store.has(k) ? store.get(k) : null; },
+    setItem: async (k, v) => { writes.push(k); store.set(k, v); },
+  };
+  const prefix = (read(WELCOME).match(/const WELCOME_SHOWN_KEY_PREFIX = '([^']+)';/) || [])[1];
+  eq(prefix, 'ftf_founder_welcome_shown_', 'the per-user key');
+  const claim = extractFn(WELCOME, 'claimFounderWelcome', { AsyncStorage: fakeAS, WELCOME_SHOWN_KEY_PREFIX: prefix });
+  eq(await claim('u1'), true, 'first time');
+  eq(writes[0], 'ftf_founder_welcome_shown_u1', 'remembered under the user');
+  eq(await claim('u1'), false, 'never twice');
+  eq(await claim('u2'), true, 'per user, not per device');
+  eq(await claim(''), false, 'no user');
+  broken = true;
+  eq(await claim('u3'), false, 'unreadable storage → no welcome');
+});
+
+check('9d. D10 / design §4.1 [shape + executed]: only a SUCCESSFUL purchase opens it (never Restore), replacing the paywall; the §9.5 keys verbatim, the ram\'s `celebrate`, one Primary (founder-welcome-back), a Reduce-Motion-static stagger, title focus; no confetti or countdown; the trigger\'s slot is held through it', async () => {
+  const pb = callbackBody(PAYWALL, 'onPurchase');
+  const buy = strip(pb.body.getText(pb.sf));
+  const at = buy.search(/if \(clubWindowOpen\(config\?\.club, Date\.now\(\)\) && \(await claimFounderWelcome\(userId\)\)\) \{\s*navigation\.replace\('FounderWelcome', \{\s*period: selected\.period,\s*since: activeProFrom\(result\.customerInfo\)\?\.since \?\? new Date\(\)\.toISOString\(\),\s*\}\);\s*return;\s*\}\s*dismiss\(\);/);
+  assert(at > -1, 'the window check + the once claim → replace with FounderWelcome, else close');
+  assert(at > buy.indexOf("track('paywall_purchase_completed'") && at > buy.indexOf('await purchasePackage('), 'only after Apple\'s sheet succeeded');
+  const rb = callbackBody(PAYWALL, 'onRestore');
+  assert(!/FounderWelcome|clubWindowOpen|claimFounderWelcome/.test(strip(rb.body.getText(rb.sf))), 'a Restore never welcomes');
+  eq((strip(read(PAYWALL)).match(/'FounderWelcome'/g) || []).length, 1, 'one way in');
+  eq(copy.MON['mon.club.welcome_title'], 'Welcome, Founding GM.', 'welcome_title');
+  eq(copy.welcomeBody('annual'), 'Your plan is at the Founder price: $24.99 a year. Keep this price on your plan while your subscription stays active. From January 1, 2027, new members pay $34.99 a year or $6.99 a month.', 'welcome_body (annual)');
+  eq(copy.welcomeBody('monthly'), 'Your plan is at the Founder price: $4.99 a month. Keep this price on your plan while your subscription stays active. From January 1, 2027, new members pay $34.99 a year or $6.99 a month.', 'welcome_body (monthly)');
+  eq(copy.MON['mon.club.since'], 'Founding GM since {join date}', 'since');
+  eq(copy.MON['mon.club.back'], 'Back to my trades', 'back');
+  const w = strip(read(WELCOME));
+  assert(/\{MON\['mon\.club\.welcome_title'\]\}/.test(w) && /\{welcomeBody\(period\)\}/.test(w) && /clubSince\(route\?\.params\?\.since\)/.test(w), 'title, body (plan variant), since');
+  assert(/<Button testID="founder-welcome-back" label=\{MON\['mon\.club\.back'\]\} onPress=\{back\} \/>/.test(w), 'the one Primary');
+  eq((w.match(/<Button\b/g) || []).length, 1, 'one action');
+  assert(/navigation\.goBack\(\)/.test(w), 'Back returns to the same card');
+  assert(/<RamAvatar pose="celebrate"/.test(w) && fs.existsSync(path.join(ROOT, 'assets/mascot/ram/celebrate@3x.png')), 'the ram\'s celebrate pose');
+  assert(/<ChalkText variant="data">\{since\.date\}<\/ChalkText>/.test(w), 'the date in Plex Mono');
+  assert(/const ITEMS = 6;/.test(w) && /Animated\.stagger\(\s*40,/.test(w) && /outputRange: \[8, 0\]/.test(w), '≤6 items, 40 ms apart, an 8 px rise');
+  assert(/new Animated\.Value\(reduceMotion \? 1 : 0\)/.test(w) && /if \(reduceMotion\) \{\s*items\.forEach\(\(v\) => v\.setValue\(1\)\);\s*return;\s*\}/.test(w), 'static under Reduce Motion');
+  assert(/AccessibilityInfo\.setAccessibilityFocus\(node\)/.test(w) && /ref=\{titleRef\}/.test(w), 'VoiceOver starts on the title');
+  assert(!/confetti|countdown|days? left|ends? soon|last chance|expires|FeedbackFAB|welcome_tester|kept_home|LinearGradient|BlurView/i.test(w), 'no confetti, countdown, FAB, tester title or kept-price line');
+  assert(!/closes_at/.test(w.replace(fnText(WELCOME, 'clubWindowOpen'), '')), 'closes_at is read only to decide, never rendered');
+  const nav = strip(read('navigation/RootNav.tsx'));
+  eq((nav.match(/name="FounderWelcome"/g) || []).length, 1, 'registered once');
+  assert(/name="FounderWelcome"\s*component=\{FounderWelcomeScreen\}\s*options=\{\{ presentation: 'fullScreenModal', headerShown: false, gestureEnabled: false \}\}/.test(nav), 'a full-screen modal (no FAB, #188)');
+  // executed: the trigger's interrupt slot is held through the welcome
+  let route = 'Trades';
+  const listeners = new Set();
+  const nav2 = {
+    isReady: () => true,
+    navigate: (name) => { route = name; listeners.forEach((l) => l()); },
+    getCurrentRoute: () => ({ name: route }),
+    addListener: (_t, cb) => { listeners.add(cb); return () => listeners.delete(cb); },
+    reset() {},
+  };
+  gateMod.installPaywallGate(nav2);
+  try {
+    session.verification = { session_verified: true };
+    await gateMod.hydrateOfferShown('w1');
+    const closed = gateMod.openOfferTrigger('first_opinion', 'w1');
+    let resolved = false;
+    closed.then(() => { resolved = true; });
+    route = 'FounderWelcome'; listeners.forEach((l) => l()); await tick();
+    eq(resolved, false, 'held while the welcome is up');
+    route = 'Trades'; listeners.forEach((l) => l()); await tick();
+    eq(resolved, true, 'released once it is gone');
+  } finally {
+    session.verification = null;
+    gateMod.installPaywallGate(fakeNav);
+  }
+});
+
+check('9e. design §5 / R28.9 3f [shape + executed]: Settings › Subscription — flag-gated, NOT enforcing-gated; unverified → ONE row (Verify this session first → the sheet), decided with no subscription read; member / Founding GM / non-member rows and their testIDs; no trial state, no date but the join date', async () => {
+  const sub = strip(read(SUBS));
+  const main = fnText(SUBS, 'SubscriptionSection');
+  assert(/const paywallOn = useFlag\('monetize\.paywall'\);/.test(main) && /if \(!paywallOn \|\| state === 'unknown'\) return null;/.test(main), 'self-gated on monetize.paywall; unknown renders nothing');
+  assert(!/enforcing/.test(sub), 'never gated on enforcing (Restore stays reachable once the flag is on)');
+  assert(/const state = useSession\(subscriptionSessionState\);/.test(main), 'the session decides, through the one predicate');
+  assert(/<View testID="settings-subscription-row">[\s\S]*\{state === 'unverified' \|\| state === 'demo' \? <UnverifiedRow \/> : <VerifiedRows \/>\}/.test(main), 'the container, then the branch');
+  for (const [name, t] of [['SubscriptionSection', main], ['UnverifiedRow', fnText(SUBS, 'UnverifiedRow')], ['subscriptionSessionState', fnText('state/subscriptionSession.ts', 'subscriptionSessionState')]]) {
+    assert(!NO_ENTITLEMENT.test(t), `${name} reads a subscription field`);
+  }
+  const un = fnText(SUBS, 'UnverifiedRow');
+  eq((un.match(/<LinkRow\b/g) || []).length, 1, 'ONE row');
+  assert(/title=\{MON\['mon\.verify\.title'\]\}/.test(un) && /onPress=\{\(\) => void openVerify\(\)\}/.test(un), 'Verify this session first → the sheet');
+  assert(!/restore|see_plans|sub_status|Manage|club|FOUNDER/i.test(un), 'no Restore, See plans, status or club line');
+  eq(copy.MON['mon.verify.title'], 'Verify this session first', 'the row reuses mon.verify.title');
+  const ver = fnText(SUBS, 'VerifiedRows');
+  assert(/if \(!loaded\) return restoreRows;/.test(ver), 'never guesses before the entitlements answer');
+  assert(/if \(!pro\) \{\s*return \(\s*<>\s*<LinkRow\s*testID="settings-subscription-see-plans"\s*title=\{MON\['mon\.pay\.see_plans'\]\}\s*onPress=\{\(\) => void openPaywall\(\{ source: 'settings' \}\)\}\s*\/>\s*\{restoreRows\}/.test(ver),
+    'non-member: See plans → the paywall (source settings: it emits paywall_viewed) + Restore');
+  assert(/<ManageSubscriptionLink \/>\s*\{restoreRows\}\s*<\/>\s*\);\s*\}$/.test(ver), 'member: Manage + Restore last');
+  // The member status block (update 1; §9j pins that it's off for the binary).
+  const st = fnText(SUBS, 'MemberStatus');
+  assert(/testID="settings-subscription-status"/.test(st) && /\{status\}/.test(st) && /subStatus\(period, price, founder\)/.test(st), 'member: the status line');
+  assert(/founder\s*\?\s*FOUNDER_PRICE\[period\]/.test(st), 'a Founding GM\'s line carries the Founder price');
+  assert(/testID="settings-subscription-since"[\s\S]*<ChalkText variant="data">\{since\.date\}<\/ChalkText>[\s\S]*\{FOUNDER_TAG\}/.test(st), 'Founding GM since {date} (Plex Mono) with the FounderTag trailing');
+  assert(/\{keptSettings\(period\)\}/.test(st) && /\{MON\['mon\.club\.lapse'\]\}/.test(st), 'kept_settings + lapse');
+  assert(/const since = founder \? clubSince\(active\?\.since\) : null;/.test(st), 'the club lines are for members of the club only');
+  assert(/testID = 'settings-subscription-manage'/.test(sub) && /'https:\/\/apps\.apple\.com\/account\/subscriptions'/.test(sub), 'Manage subscription → Apple\'s page');
+  assert(/testID="settings-subscription-restore"/.test(sub), 'Restore');
+  const restore = ver.slice(ver.indexOf('const onRestore'), ver.indexOf('const restoreRows'));
+  assert(/const state = subscriptionSessionState\(useSession\.getState\(\)\);\s*if \(state !== 'verified'\) \{\s*if \(state === 'unverified' \|\| state === 'demo'\) void openVerify\(\);\s*return;\s*\}/.test(restore)
+    && restore.indexOf('subscriptionSessionState') < restore.indexOf('restorePurchases('),
+    'Restore checks the session (the render\'s own predicate) before restoring');
+  assert(/track\('paywall_restore', \{ restored \}\)/.test(restore), 'Restore tracks the registered event');
+  assert(/useSession\.subscribe\(\(s, prev\) => \{\s*if \(prev\.verification\?\.session_verified === false && s\.verification\?\.session_verified === true\) \{\s*void useEntitlements\.getState\(\)\.refresh\(\);/.test(strip(read('state/useEntitlements.ts'))),
+    'a session that turns verified re-reads its (no longer blanked) entitlements');
+  assert(!/trial|expir|periodType|latestPurchase|renew|countdown|days? left|ends? soon|closes_at|toLocaleDateString|getMonth|Date\(/i.test(sub),
+    'no trial state, no expiry/renewal, no date but the join date (formatted by clubSince)');
+  eq(copy.subStatus('annual', '$24.99', true), 'Founding GM · Fleeced Pro Annual · $24.99/year', 'sub_status (member)');
+  eq(copy.subStatus('monthly', '$4.99', false), 'Fleeced Pro Monthly · $4.99/month', 'sub_status (non-club)');
+  eq(copy.keptSettings('annual'), 'Founder price: $24.99 a year. Keep this price on your plan while your subscription stays active.', 'kept_settings (annual)');
+  eq(copy.keptSettings('monthly'), 'Founder price: $4.99 a month. Keep this price on your plan while your subscription stays active.', 'kept_settings (monthly)');
+  eq(copy.MON['mon.club.lapse'], 'If you switch plans or your subscription ends, you may lose the Founder price.', 'lapse');
+  eq(copy.MON['mon.pay.manage'], 'Manage subscription', 'manage');
+  eq(JSON.stringify(copy.FOUNDER_PRICE), JSON.stringify({ annual: '$24.99', monthly: '$4.99' }), 'the Founder prices the legal lines name');
+  const since = copy.clubSince('2026-11-06T12:00:00Z');
+  eq(`${since.lead} ${since.date}`, 'Founding GM since November 6, 2026', 'since (a join date)');
+  eq(copy.clubSince(null), null, 'no date → no line');
+  eq(copy.clubSince('not a date'), null, 'an unreadable date → no line');
+  eq(copy.periodFromStore('P1Y'), 'annual', 'P1Y');
+  eq(copy.periodFromStore('P1M'), 'monthly', 'P1M');
+  eq(copy.periodFromStore('P1W'), null, 'P1W');
+  // executed: the display read waits for THIS user's identity
+  const before = sdk.calls.length;
+  eq(await purchases.getActivePro('someone-else'), null, 'identity not this user → nothing');
+  assert(!sdk.calls.slice(before).some((c) => c[0] === 'customerInfo'), 'no CustomerInfo read for another identity');
+  sdk.customerInfo = { entitlements: { active: { pro: { productIdentifier: 'ftf_pro_annual', originalPurchaseDate: '2026-11-06T12:00:00Z', expirationDate: '2026-12-06T12:00:00Z', periodType: 'TRIAL' } } } };
+  sdk.products = { ftf_pro_annual: { identifier: 'ftf_pro_annual', subscriptionPeriod: 'P1Y', priceString: '$24.99' } };
+  eq(JSON.stringify(await purchases.getActivePro('u2')),
+    JSON.stringify({ productId: 'ftf_pro_annual', since: '2026-11-06T12:00:00Z', period: 'P1Y', priceString: '$24.99' }),
+    'the plan, the join date and the price; no expiry or trial field passes through');
+  sdk.customerInfo = { entitlements: { active: {} } };
+  eq(await purchases.getActivePro('u2'), null, 'no active pro → nothing');
+  sdk.customerInfo = null;
+  sdk.products = {};
+});
+
+check('9f. legal R28.21 5a–5d + ux-lead 2026-10-29 [executed + shape]: the delete-account dialog in BOTH Settings screens — legal\'s body + sub-note from ONE module for EVERYONE (no flag on the message); flag off → [Cancel, Continue], flag on → [Cancel, Manage subscription (Apple\'s page, nothing else), Continue (the unchanged confirm)], the button keyed on the flag alone; no subscription, demo or verification read; the old section line is gone', () => {
+  const BODY = 'This permanently deletes your rankings, comparison history, trade activity, notifications, push tokens, and any stored Sleeper, ESPN or MFL sign-in or connection from our servers. Trade matches shared with leaguemates are anonymized on your side. This cannot be undone.';
+  const del = load('copy/deleteAccount.ts', {});
+  eq(del.DELETE_ACCOUNT_BODY, BODY, 'the body, verbatim');
+  eq(del.DELETE_ACCOUNT_SUB_NOTE, DELETE_LINE, 'the sub-note (legal\'s mz.delete.sub_note), verbatim');
+  assert(!/\b(import|require)\b/.test(strip(read('copy/deleteAccount.ts'))), 'the copy module has zero imports');
+  for (const [rel, flag] of [[ACCOUNT_DATA, 'paywallOn'], ['screens/SettingsScreen.tsx', 'paywallEnabled']]) {
+    const { sf } = astOf(rel);
+    const fn = findNodes(sf, (n) => ts.isFunctionDeclaration(n) && n.name?.text === 'confirmDeleteAccount')[0];
+    assert(fn, `${rel}: confirmDeleteAccount`);
+    const call = findNodes(fn, (n) => ts.isCallExpression(n) && n.expression.getText(sf) === 'Alert.alert')[0];
+    const [title, message, buttons] = call.arguments;
+    eq(title.getText(sf), "'Delete account?'", `${rel}: the title, a literal`);
+    eq(message.getText(sf), "DELETE_ACCOUNT_BODY + '\\n\\n' + DELETE_ACCOUNT_SUB_NOTE", `${rel}: body, a blank line, the sub-note`);
+    assert(ts.isArrayLiteralExpression(buttons) && buttons.elements.length === 3, `${rel}: Cancel, the flag-keyed Manage slot, Continue`);
+    const [cancel, manage, cont] = buttons.elements.map((e) => strip(e.getText(sf)).replace(/\s+/g, ' ').trim());
+    eq(cancel, "{ text: 'Cancel', style: 'cancel' }", `${rel}: 1. Cancel`);
+    eq(manage, `...(${flag} ? [{ text: MON['mon.pay.manage'], onPress: openAppleSubscriptions }] : [])`,
+      `${rel}: 2. Manage subscription (default style; only Apple\'s page), present only while the flag is on`);
+    assert(/^\{ text: 'Continue', style: 'destructive', onPress: \(\) => Alert\.alert\( 'Are you absolutely sure\?',/.test(cont)
+      && /text: 'Delete everything', style: 'destructive', onPress: \(\) => void performDeleteAccount\(\)/.test(cont),
+    `${rel}: 3. Continue (destructive) → the unchanged "Are you absolutely sure?" confirm`);
+    // The flag is read ONCE, at the component's top level (rules of hooks).
+    const flagReads = findNodes(sf, (n) => ts.isVariableDeclaration(n) && n.name.getText(sf) === flag);
+    assert(flagReads.length === 1 && /^useFlag\('monetize\.paywall'\)$/.test(flagReads[0].initializer.getText(sf)), `${rel}: ${flag} = useFlag('monetize.paywall')`);
+    // EXECUTED: the real function text, with Alert stubbed, flag off and on.
+    const shown = [];
+    const opened = [];
+    const runWith = (on) => {
+      const confirm = extractFn(rel, 'confirmDeleteAccount', {
+        Alert: { alert: (...a) => shown.push(a) },
+        DELETE_ACCOUNT_BODY: del.DELETE_ACCOUNT_BODY,
+        DELETE_ACCOUNT_SUB_NOTE: del.DELETE_ACCOUNT_SUB_NOTE,
+        MON: copy.MON,
+        openAppleSubscriptions: () => opened.push('apple'),
+        performDeleteAccount: () => { throw new Error('deleted from the first alert'); },
+        [flag]: on,
+      });
+      shown.length = 0;
+      confirm();
+      return shown[0];
+    };
+    const off = runWith(false);
+    eq(off[0], 'Delete account?', `${rel}: title`);
+    eq(off[1], `${BODY}\n\n${DELETE_LINE}`, `${rel}: flag off, the message still carries the sub-note`);
+    eq(JSON.stringify(off[2].map((b) => [b.text, b.style || 'default'])), JSON.stringify([['Cancel', 'cancel'], ['Continue', 'destructive']]),
+      `${rel}: flag off → exactly [Cancel, Continue]`);
+    const on = runWith(true);
+    eq(on[1], off[1], `${rel}: flag on, the same message (no flag condition on it)`);
+    eq(JSON.stringify(on[2].map((b) => [b.text, b.style || 'default'])),
+      JSON.stringify([['Cancel', 'cancel'], ['Manage subscription', 'default'], ['Continue', 'destructive']]),
+      `${rel}: flag on → [Cancel, Manage subscription, Continue]`);
+    on[2][1].onPress();
+    eq(JSON.stringify(opened), JSON.stringify(['apple']), `${rel}: Manage subscription opens Apple's page, nothing else`);
+    eq(shown.length, 1, `${rel}: Manage subscription opens no second alert`);
+    on[2][2].onPress();
+    eq(shown[1] && shown[1][0], 'Are you absolutely sure?', `${rel}: Continue opens the unchanged confirm, with no subscription check`);
+    const body = strip(fn.getText(sf));
+    const hit = body.match(/useFlag|useEntitlements|entitlement|getActivePro|purchases|restorePurchases|paywall-config|isDemo|verification|isUnverified|\.pro\b|founder/i);
+    assert(!hit, `${rel}: confirmDeleteAccount reads "${hit && hit[0]}" (the button keys on the flag alone; legal 5c)`);
+    eq((body.match(new RegExp(`\\b${flag}\\b`, 'g')) || []).length, 1, `${rel}: the flag is used once, for the Manage button only`);
+    const t = strip(read(rel));
+    assert(/import \{ DELETE_ACCOUNT_BODY, DELETE_ACCOUNT_SUB_NOTE \} from '(\.\.\/)+copy\/deleteAccount';/.test(t), `${rel}: the strings come from copy/deleteAccount`);
+    assert(/import \{ openAppleSubscriptions \} from '(\.\.\/)+components\/SubscriptionSection';/.test(t), `${rel}: the one opener`);
+    assert(!t.includes(DELETE_LINE) && !t.includes('any stored Sleeper connection'), `${rel}: no inline copy of the line, no old body`);
+  }
+  eq(copy.MON['mon.pay.manage'], 'Manage subscription', 'the button label');
+  const a = strip(read(ACCOUNT_DATA));
+  assert(!/settings\.delete-subscription-note|ManageSubscriptionLink|settings\.delete-manage-subscription/.test(a), 'the section-level note and link are gone (the dialog replaces them)');
+  eq((a.match(/SubscriptionSection|openAppleSubscriptions|deleteAccount'|monetize\.paywall/g) || []).length, 5, 'the M3 hunk in AccountDataSection: the opener\'s import (2), the copy import, the flag read and the dialog\'s one opener');
+  // the opener: executed, and the Settings row uses it
+  const url = (read(SUBS).match(/const APPLE_SUBSCRIPTIONS_URL = '([^']+)';/) || [])[1];
+  eq(url, 'https://apps.apple.com/account/subscriptions', "Apple's subscription page");
+  const opened = [];
+  const open = extractFn(SUBS, 'openAppleSubscriptions', {
+    Linking: { openURL: (u) => { opened.push(u); return Promise.resolve(); } },
+    APPLE_SUBSCRIPTIONS_URL: url,
+  });
+  open();
+  eq(JSON.stringify(opened), JSON.stringify([url]), 'openAppleSubscriptions opens that page, once, and nothing else');
+  assert(/onPress=\{openAppleSubscriptions\}/.test(fnText(SUBS, 'ManageSubscriptionLink')), 'ManageSubscriptionLink uses the same opener');
+  eq((strip(read(SUBS)).match(/Linking\.openURL\(/g) || []).length, 1, 'one place opens Apple\'s page');
+});
+
+check('9g. copy §9.6 [executed + shape]: the invitee eyebrow and board line — trigger variant only, only with BOTH values; never a raw {inviter} / {league}', () => {
+  const C = copy.inviteeContext;
+  eq(C('jdoe', 'Dynasty Degenerates'), 'jdoe invited you to Dynasty Degenerates.', 'both values');
+  for (const [a, b] of [[null, 'L'], ['jdoe', null], ['', 'L'], ['jdoe', '  '], [undefined, undefined]]) {
+    eq(C(a, b), null, `missing value ${JSON.stringify([a, b])} → nothing`);
+  }
+  eq(C('$&x', 'y$1'), '$&x invited you to y$1.', 'values are inserted literally');
+  eq(copy.MON['mon.invitee.board'], "Ranking doesn't need a subscription, and your board shapes the trades your leaguemates see.", 'board verbatim');
+  const code = strip(read(PAYWALL));
+  assert(/const trigger = source === 'first_opinion' \|\| source === 'left_deck';\s*const invitee = trigger \? inviteeContext\(invitedBy, invitedLeagueName\) : null;/.test(code), 'trigger variant only, both values');
+  assert(/\{invitee \? \(\s*<ChalkText variant="label" testID="paywall-invitee-context">\s*\{invitee\}\s*<\/ChalkText>\s*\) : null\}\s*<ChalkText variant="display" testID="paywall-headline">/.test(code), 'the eyebrow, directly above the headline');
+  assert(/\{body \? \([\s\S]{0,200}\) : null\}\s*\{invitee \? \(\s*<ChalkText variant="bodySm" testID="paywall-invitee-board">\s*\{MON\['mon\.invitee\.board'\]\}/.test(code), 'the board line, under the body');
+  for (const f of walk(SRC)) {
+    const rel = path.relative(SRC, f).split(path.sep).join('/');
+    let t = strip(fs.readFileSync(f, 'utf8'));
+    if (rel === 'copy/monetization.ts') {
+      t = t.replace("'mon.invitee.context': '{inviter} invited you to {league}.',", '')
+        .replace("MON['mon.invitee.context'].replace('{inviter}', () => who).replace('{league}', () => where)", '');
+    }
+    // `${league}` is a JS interpolation, not the template's placeholder.
+    assert(!/mon\.invitee\.context|(^|[^$])\{(inviter|league)\}/.test(t), `${rel}: the raw template or a raw placeholder`);
+  }
+});
+
+check('9h. not in this build: the Home mark (mon.club.mark_a11y), the kept-price Home line (mon.club.kept_home), the tester title; the FounderTag only on the paywall, the welcome and Settings', () => {
+  const allowed = new Set([PAYWALL, WELCOME, SUBS, 'copy/monetization.ts']);
+  for (const f of walk(SRC)) {
+    const t = strip(fs.readFileSync(f, 'utf8'));
+    const rel = path.relative(SRC, f).split(path.sep).join('/');
+    assert(!/mark_a11y|kept_home|welcome_tester|You kept the Founder price|New members now pay/.test(t), `${rel}: a later-update line`);
+    if (!allowed.has(rel)) assert(!/FOUNDER_TAG|FOUNDING GM/.test(t), `${rel}: the FounderTag outside the paywall, welcome and Settings`);
+  }
+  for (const k of ['mon.club.kept_home', 'mon.club.mark_a11y', 'mon.club.welcome_tester']) assert(!(k in copy.MON), `${k} in the copy module`);
+});
+
+check('9i. B8 #1 [executed]: the Settings tip row is data-driven — shown only when the cached config offers tips; unknown / empty → hidden; read from the cache, never fetched', () => {
+  const TIPS = 'state/useTipsOffered.ts';
+  const offered = extractFn(TIPS, 'tipsOffered', {});
+  eq(offered(undefined), false, 'unknown config → hidden');
+  eq(offered({ enabled: false }), false, 'paywall off (no tips key) → hidden');
+  eq(offered({ enabled: true, tips: [] }), false, 'tips: [] (launch) → hidden');
+  eq(offered({ enabled: true, tips: null }), false, 'malformed → hidden');
+  eq(offered({ enabled: true, tips: [{ product_id: 'ftf_tip_199', display_price: '$1.99' }] }), true, 'tips offered → shown');
+  eq(offered(null), false, 'null config → hidden');
+  eq(offered({}), false, '{} → hidden');
+  assert(!/useTipsOffered|tipsOffered/.test(strip(read(SUBS))), 'the hook left SubscriptionSection');
+  // The HOOK itself, run against a stubbed useQuery (release-lead's #526 QA
+  // P2-1): every hidden case, not just the shown one, so a hook that returns
+  // true for an unknown config or `!!data` fails here. P3-3: a crash in the
+  // hook (or in loading it) is a NAMED failure, never a throw past the check.
+  let opts = null;
+  let cached;
+  let hook;
+  try {
+    hook = extractFn(TIPS, 'useTipsOffered', {
+      useQuery: (o) => { opts = o; return { data: cached }; },
+      getPaywallConfig: () => { throw new Error('the hook fetched the paywall config'); },
+      tipsOffered: offered,
+    });
+  } catch (e) {
+    throw new Error(`useTipsOffered could not be loaded: ${e && e.message}`);
+  }
+  const run = (data) => {
+    cached = data;
+    opts = null;
+    let out;
+    try {
+      out = hook();
+    } catch (e) {
+      throw new Error(`useTipsOffered crashed on cached data ${JSON.stringify(data)}: ${e && e.message}`);
+    }
+    assert(opts, `useTipsOffered did not call useQuery (cached data ${JSON.stringify(data)})`);
+    eq(opts.enabled, false, `useQuery got enabled: false (cached data ${JSON.stringify(data)}): a cache subscription that never fetches`);
+    eq(JSON.stringify(opts.queryKey), JSON.stringify(['paywall-config', 'ios']), 'the paywall config cache key');
+    return out;
+  };
+  eq(run(undefined), false, 'hook: data undefined (nothing cached) → hidden');
+  eq(run(null), false, 'hook: data null → hidden');
+  eq(run({}), false, 'hook: data {} → hidden');
+  eq(run({ tips: [] }), false, 'hook: data {tips: []} (launch) → hidden');
+  eq(run({ enabled: false }), false, 'hook: paywall off → hidden');
+  eq(run({ tips: [{ product_id: 'ftf_tip_499' }] }), true, 'hook: tips offered → shown');
+});
+
+check('9i2. the hub\'s zero-network rule (release-lead\'s #526 QA P3-1) [shape]: neither Settings screen fetches the paywall config — no useQuery / prefetchQuery / fetchQuery for it, no getPaywallConfig — and its only access is the `enabled: false` hook', () => {
+  for (const rel of ['screens/settings/SettingsHubScreen.tsx', 'screens/SettingsScreen.tsx']) {
+    const t = strip(read(rel));
+    const hit = t.match(/paywall-config|getPaywallConfig|(prefetchQuery|fetchQuery|ensureQueryData)\s*\([^)]*paywall/);
+    assert(!hit, `${rel}: reads the paywall config itself ("${hit && hit[0]}")`);
+    eq((t.match(/useTipsOffered\(\)/g) || []).length, 1, `${rel}: one useTipsOffered() call, its only access`);
+    assert(/import \{ useTipsOffered \} from '(\.\.\/)+state\/useTipsOffered';/.test(t), `${rel}: the hook comes from state/useTipsOffered`);
+  }
+  const hookSrc = strip(read('state/useTipsOffered.ts'));
+  eq((hookSrc.match(/useQuery</g) || []).length, 1, 'the hook has one query');
+  assert(/enabled: false,/.test(hookSrc) && !/prefetchQuery|fetchQuery|ensureQueryData|refetch/.test(hookSrc), 'the hook only subscribes (enabled: false), never fetches');
+});
+
+check('9j. B8 [shape]: the 11-06 binary ships Settings › Subscription WITHOUT the member status block (STATUS_ROWS_AT_LAUNCH = false), never reads RevenueCat for it, and keeps Restore reachable for every verified session (member, non-member, entitlements still loading)', () => {
+  const sub = strip(read(SUBS));
+  assert(/export const STATUS_ROWS_AT_LAUNCH: boolean = false;/.test(sub), 'the update-1 switch is OFF');
+  const ver = fnText(SUBS, 'VerifiedRows');
+  eq((sub.match(/<MemberStatus\b/g) || []).length, 1, 'one mount of the status block');
+  assert(/\{STATUS_ROWS_AT_LAUNCH \? <MemberStatus active=\{active\} founder=\{founder\} \/> : null\}/.test(ver), 'the status block renders only behind the switch');
+  for (const id of ['settings-subscription-status', 'settings-subscription-since']) {
+    assert(!ver.includes(id) && fnText(SUBS, 'MemberStatus').includes(id), `${id} lives only in the switched-off block`);
+  }
+  assert(!/FOUNDER_TAG|keptSettings|mon\.club\.lapse|subStatus/.test(ver), 'no status line, tag, kept-price or lapse outside the block');
+  eq((sub.match(/getActivePro\(/g) || []).length, 1, 'one RevenueCat display read');
+  assert(/useEffect\(\(\) => \{\s*if \(!STATUS_ROWS_AT_LAUNCH \|\| !pro \|\| !userId \|\| !idReady\) \{\s*setActive\(null\);\s*return;\s*\}\s*let alive = true;\s*void getActivePro\(userId\)/.test(ver),
+    'getActivePro is never called while the switch is off');
+  // Restore on every verified path (once identity is ready, §9k): still
+  // loading, non-member, member.
+  assert(/if \(!loaded\) return restoreRows;/.test(ver), 'loading → Restore');
+  assert(/if \(!pro\) \{\s*return \(\s*<>[\s\S]*?\{restoreRows\}\s*<\/>\s*\);\s*\}/.test(ver), 'non-member → See plans + Restore');
+  assert(/<ManageSubscriptionLink \/>\s*\{restoreRows\}\s*<\/>\s*\);\s*\}$/.test(ver), 'member → Manage + Restore');
+  assert(/testID="settings-subscription-restore"/.test(ver.slice(ver.indexOf('const restoreRows'), ver.indexOf('if (!loaded)'))), 'restoreRows is the Restore row');
+});
+
+check('9k. head-eng 2026-10-28 [executed + shape]: unknown verification renders NOTHING (no Restore, ever); session_verified false → only the Verify row; an Apple/Google-first account-only session proves itself from its own fields; Restore only once RevenueCat\'s identity is this verified user', () => {
+  // The ONE predicate now lives in state/subscriptionSession (#474, head-eng
+  // 2026-10-29), shared with RevenueCat's identity rule and the paywall.
+  const st = load('state/subscriptionSession.ts', {}).subscriptionSessionState;
+  const S = (verification, user, isDemo = false) => st({ isDemo, verification, user });
+  // a cold start: verification null, a username session → nothing
+  eq(S(null, { user_id: '123456789' }), 'unknown', 'cold-start username session → unknown');
+  eq(S(null, null), 'unknown', 'no user yet → unknown');
+  eq(S(null, { user_id: 'entry:espn:{SWID}', account_only: true }), 'unknown', 'an ESPN/MFL entry session is account_only but NOT provider-proven → unknown');
+  eq(S(null, { user_id: 'acct_9' }), 'unknown', 'an acct_ key without account_only → unknown');
+  eq(S(null, { user_id: '123', account_only: true }), 'unknown', 'account_only without the acct_ key → unknown');
+  // the server said
+  eq(S({ session_verified: false }, { user_id: '123' }), 'unverified', 'session_verified false → the Verify row');
+  eq(S({ session_verified: false }, { user_id: 'acct_9', account_only: true }), 'unverified', 'the server wins over the account-only rule');
+  eq(S({ session_verified: true }, { user_id: '123' }), 'verified', 'session_verified true → verified');
+  // proven by its own fields
+  eq(S(null, { user_id: 'acct_9', account_only: true }), 'verified', 'Apple-first, no league, verification null → verified');
+  eq(S(null, { user_id: 'demo_user_ab12' }, true), 'demo', 'a demo → demo (strict: the Verify row, no RevenueCat)');
+  const main = fnText(SUBS, 'SubscriptionSection');
+  assert(/if \(!paywallOn \|\| state === 'unknown'\) return null;\s*return \(\s*<View testID="settings-subscription-row">/.test(main), 'unknown → NOTHING (no banner, no rows): the return precedes the container');
+  assert(/\{state === 'unverified' \|\| state === 'demo' \? <UnverifiedRow \/> : <VerifiedRows \/>\}/.test(main), "'unverified' or 'demo' → only the Verify row; 'verified' → the verified rows");
+  const ver = fnText(SUBS, 'VerifiedRows');
+  assert(/const restoreRows = idReady \? \(\s*<>\s*<LinkRow\s*testID="settings-subscription-restore"/.test(ver) && /\) : null;\s*if \(!loaded\) return restoreRows;/.test(ver),
+    'Restore renders only once identity is ready (no row before that)');
+  assert(/const \[idReady, setIdReady\] = useState\(\(\) => isIdentityReady\(userId\)\);/.test(ver) && /return onIdentityChange\(\(\) => setIdReady\(isIdentityReady\(userId\)\)\);/.test(ver),
+    'idReady tracks RevenueCat\'s identity for THIS user');
+  const subsSrc = strip(read(SUBS));
+  eq((subsSrc.match(/subscriptionSessionState\(/g) || []).length, 1, 'the shared predicate, read by the tap (and by the render via useSession)');
+  assert(/import \{ customerInfoApplies, subscriptionSessionState \} from '\.\.\/state\/subscriptionSession';/.test(subsSrc)
+    && !/function subscriptionSessionState/.test(subsSrc), 'imported from state/subscriptionSession, no local copy');
+  const tap = subsSrc.slice(subsSrc.indexOf('const onRestore = async'), subsSrc.indexOf('restorePurchases(userId)'));
+  assert(/if \(state === 'unverified' \|\| state === 'demo'\) void openVerify\(\);\s*return;/.test(tap)
+    && /if \(!customerInfoApplies\(useSession\.getState\(\), currentIdentityUserId\(\)\)\) \{\s*setRestoreLine\(MON\['mon\.pay\.error'\]\);\s*return;\s*\}/.test(tap),
+    'Restore: unverified or demo → the sheet; RevenueCat not this user → the error line, before restorePurchases');
+  assert(!/isUnverifiedSession|session_verified/.test(main + ver), 'no second copy of the rule in the render or the tap');
+});
+check('9l. release-lead round-3 P3 [executed]: Settings › Subscription Restore re-checks the session before noting CustomerInfo; a session or user change while the restore is out skips the note, the server refresh still runs', async () => {
+  // VerifiedRows itself, transpiled from the file and run under a fake React
+  // (hooks as plain calls, JSX as element objects), its Restore row pressed.
+  const { sf } = astOf(SUBS);
+  const node = findNodes(sf, (n) => ts.isFunctionDeclaration(n) && n.name?.text === 'VerifiedRows')[0];
+  assert(node, 'VerifiedRows not found');
+  const js = ts.transpileModule(node.getText(sf), {
+    compilerOptions: { target: ts.ScriptTarget.ES2019, jsx: ts.JsxEmit.React },
+    fileName: 'VerifiedRows.tsx',
+  }).outputText;
+  const findId = (n, id) => {
+    if (!n || typeof n !== 'object') return null;
+    if (Array.isArray(n)) { for (const c of n) { const f = findId(c, id); if (f) return f; } return null; }
+    if (n.props && n.props.testID === id) return n;
+    return n.props ? findId(n.props.children, id) : null;
+  };
+  // §10's session swaps: control, unverified, another user, another verified user RevenueCat moved to.
+  for (const [name, swap, noted] of SWAPS) {
+    const state = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
+    const ctl = { rcId: '111' };
+    const out = deferred();
+    const notes = [];
+    const refreshes = [];
+    const lines = [];
+    const hook = (sel) => sel(state);
+    hook.getState = () => state;
+    const deps = {
+      React: { createElement: (type, props, ...children) => ({ type, props: { ...(props || {}), children } }), Fragment: 'Fragment' },
+      useState: (init) => [typeof init === 'function' ? init() : init, (v) => lines.push(v)],
+      useEffect: () => {},
+      useSession: hook,
+      useEntitlements: (sel) => sel({ loaded: false, pro: false, founder: false,
+        noteCustomerInfo: (p) => notes.push(p), refresh: async () => { refreshes.push(1); } }),
+      isIdentityReady: () => true, onIdentityChange: () => () => {}, getActivePro: async () => null,
+      STATUS_ROWS_AT_LAUNCH: false,
+      subscriptionSessionState: subSession.subscriptionSessionState,
+      customerInfoApplies: subSession.customerInfoApplies,
+      currentIdentityUserId: () => ctl.rcId,
+      openVerify: () => {}, openPaywall: () => {},
+      MON: copy.MON,
+      restorePurchases: () => out.promise,
+      hasProEntitlement: (info) => !!(info && info.entitlements && info.entitlements.active.pro),
+      track: () => {},
+      LinkRow: 'LinkRow', ChalkText: 'ChalkText', ManageSubscriptionLink: 'ManageSubscriptionLink', MemberStatus: 'MemberStatus',
+      styles: {},
+    };
+    const names = Object.keys(deps);
+    // eslint-disable-next-line no-new-func
+    const VerifiedRows = new Function(...names, `${js}\nreturn VerifiedRows;`)(...names.map((n) => deps[n]));
+    const row = findId(VerifiedRows(), 'settings-subscription-restore');
+    assert(row, `${name}: the Restore row rendered`);
+    row.props.onPress();
+    await settleAll();
+    swap(state, ctl);
+    out.resolve(PRO_INFO);
+    await settleAll();
+    eq(JSON.stringify(notes), JSON.stringify(noted ? [true] : []), `${name}: noteCustomerInfo`);
+    eq(refreshes.length, 1, `${name}: the server refresh`);
+    assert(lines.includes(copy.MON['mon.pay.restore_ok']), `${name}: the rest of the flow is unchanged (restore_ok line)`);
+  }
+});
+
+check('8p. QA P1-1 [executed + shape]: flags off, the deck / landing / Win Now / R2b gate paths are today\'s — each derives the gate from gateSignalFor (null while off)', () => {
+  const V403 = { error: 'verification_required' };
+  const off = (status, body, p) => client0.gateSignalFor(new client0.ApiError(status, body), p);
+  eq(off(403, V403, '/api/trades/status'), null, 'noteDeckGateEnd: a 403 is no end (today\'s page failure path)');
+  eq(off(403, V403, '/api/trades/generate'), null, 'the landing fork: a 403 pushes as today');
+  const pure = load('utils/firstCardEvent.ts', {});
+  eq(pure.gateFailureReason(off(403, V403, '/api/trades/generate')), 'error', 'R2b: today\'s error');
+  const errorCopy = extractFn('screens/WinNowScreen.tsx', 'errorCopy', {});
+  const offCopy = extractFn('screens/WinNowScreen.tsx', 'actionErrorCopy', { gateSignalFor: client0.gateSignalFor, errorCopy });
+  const e403 = new client0.ApiError(403, V403, 'verification_required');
+  eq(offCopy(e403), errorCopy(e403), 'Win Now, off: today\'s error line for a 403');
+  assert(offCopy(e403) !== '', 'Win Now, off: not blanked');
+  const onCopy = extractFn('screens/WinNowScreen.tsx', 'actionErrorCopy', { gateSignalFor: client.gateSignalFor, errorCopy });
+  eq(onCopy(new client.ApiError(403, V403, 'verification_required')), '', 'Win Now, on: no line (the sheet opened)');
+  const code = strip(read(TRADES));
+  const fnText = (name) => { const at = code.indexOf(`function ${name}(`); return code.slice(at, code.indexOf('\n  }\n', at)); };
+  assert(/const signal = gateSignalFor\(e, '\/api\/trades\/status'\);/.test(fnText('noteDeckGateEnd')), 'noteDeckGateEnd reads gateSignalFor');
+  assert(/\.catch\(\(e\) => \{\s*const gate = gateSignalFor\(e, '\/api\/trades\/generate'\);/.test(code), 'the landing fork reads gateSignalFor');
+  eq((code.match(/\.isVerificationRequired\b/g) || []).length, 1, 'TradesScreen: only main\'s swipe-toast copy reads isVerificationRequired');
+  const win = strip(read('screens/WinNowScreen.tsx'));
+  assert(!/isVerificationRequired|isProRequired/.test(win), 'WinNowScreen reads no gate field directly');
+});
+
+check('8r. QA P2-3 [executed + shape]: the standing-offer post\'s gate answer shows no raw text, hides the sheet, and opens the paywall / VerifySheet only after the Modal is gone (then onClose, nothing recorded); flags off, today\'s catch', async () => {
+  const SHEET = 'components/StandingOfferSheet.tsx';
+  const code = strip(read(SHEET));
+  const at = code.indexOf('async function handleConfirm(');
+  const confirm = code.slice(at, code.indexOf('\n  }\n', at));
+  const gateBranch = confirm.slice(confirm.indexOf("const signal = gateSignalFor(e, '/api/trades/standing-offer');"), confirm.indexOf('return;\n      }') + 7);
+  assert(/const signal = gateSignalFor\(e, '\/api\/trades\/standing-offer'\);\s*if \(signal && signal\.action !== 'verify_mismatch'\) \{\s*setSubmitting\(false\);\s*pendingGateRef\.current = signal;\s*setGateClosing\(true\);\s*setTimeout\(openGateAfterDismiss, 1000\);\s*return;\s*\}/.test(confirm),
+    'the gate branch: submitting reset, the sheet hidden, the open deferred');
+  assert(!/setError|openPaywall|openVerify|onSkip|onPosted|track\(/.test(gateBranch), 'the gate branch shows no text, opens nothing yet, records nothing');
+  assert(/return;\s*\}\s*setError\(e\?\.message \|\| 'Could not post that standing offer'\);\s*setSubmitting\(false\);\s*\}/.test(confirm),
+    "flags off (gateSignalFor null): today's catch, byte-identical");
+  assert(/<Modal\s+visible=\{visible && !gateClosing\}\s+transparent\s+animationType="slide"\s+onRequestClose=\{onSkip\}\s+onDismiss=\{openGateAfterDismiss\}\s*>/.test(code),
+    'the Modal hides on the gate and its onDismiss runs the open');
+  eq((code.match(/\bopenPaywall\(|\bopenVerify\(/g) || []).length, 2, 'the only opens are in openGateAfterDismiss');
+  assert(/onClose=\{\(\) => setStandingOfferPrompt\(null\)\}/.test(strip(read(TRADES))), 'TradesScreen: onClose only clears the prompt');
+  // EXECUTED: the after-dismiss open, once, in order: onClose, then the gate.
+  const calls = [];
+  const pendingGateRef = { current: { action: 'paywall', gate: 'lapsed', kind: 'send' } };
+  const open = extractFn(SHEET, 'openGateAfterDismiss', {
+    pendingGateRef,
+    onClose: () => calls.push('onClose'),
+    openPaywall: (p) => calls.push(`paywall:${JSON.stringify(p)}`),
+    openVerify: () => calls.push('verify'),
+  });
+  open();
+  open();
+  eq(calls.join(' | '), `onClose | paywall:${JSON.stringify({ source: 'gate', gate: 'lapsed', kind: 'send' })}`, 'onDismiss then the backup timer: one close, one paywall');
+  calls.length = 0;
+  pendingGateRef.current = { action: 'verify', gate: null, kind: 'send' };
+  open();
+  eq(calls.join(' | '), 'onClose | verify', 'a verify answer opens the VerifySheet');
+  // Flags off: no gate answer at all, so the catch takes today's path.
+  eq(client0.gateSignalFor(new client0.ApiError(402, { error: 'pro_required', gate: 'lapsed' }), '/api/trades/standing-offer'), null, 'off: 402');
+  eq(client0.gateSignalFor(new client0.ApiError(403, { error: 'verification_required' }), '/api/trades/standing-offer'), null, 'off: 403');
+});
+check('8s. release-lead round-3 P3 [executed]: the ROUTER\'s own demo exclusion: in demo openOfferTrigger opens nothing (null, no navigate, no VerifySheet, not spent), even with a verified answer; a verified session still opens', async () => {
+  let route = 'Trades';
+  const navs = [];
+  const nav = {
+    isReady: () => true,
+    navigate: (name, params) => { navs.push([name, params]); route = name; },
+    getCurrentRoute: () => ({ name: route }),
+    addListener: () => () => {},
+    reset() {},
+  };
+  gateMod.installPaywallGate(nav);
+  const saved = { ...session };
+  try {
+    await gateMod.hydrateOfferShown('u8s');
+    eq(gateMod.offerTriggerOpen('u8s'), true, 'read, never shown');
+    Object.assign(session, { user: { user_id: 'demo_user_ab12' }, isDemo: true, verification: { session_verified: true } });
+    const seq = gateMod.usePaywallGate.getState().verifySeq;
+    for (const source of ['first_opinion', 'left_deck']) {
+      eq(gateMod.openOfferTrigger(source, 'u8s'), null, `demo, ${source}: returns null`);
+    }
+    eq(navs.length, 0, 'demo: navigated');
+    eq(gateMod.usePaywallGate.getState().verifySeq, seq, 'demo: opened the VerifySheet');
+    eq(gateMod.offerTriggerOpen('u8s'), true, 'demo: the once-only offer was spent');
+    Object.assign(session, { user: { user_id: '12345' }, isDemo: false, verification: { session_verified: true } });
+    const closed = gateMod.openOfferTrigger('first_opinion', 'u8s');
+    assert(closed && typeof closed.then === 'function', 'a verified session still opens');
+    eq(JSON.stringify(navs[0]), JSON.stringify(['Paywall', { source: 'first_opinion' }]), 'verified: the trigger variant');
+  } finally {
+    Object.assign(session, saved);
+    gateMod.installPaywallGate(fakeNav);
+  }
 });
 
 // ═══ 10. RC identity — RevenueCat identifies ONLY verified sessions ═══════
@@ -1195,6 +2356,10 @@ function mountPaywall({ state, rcId, ready = false, ctl = { rcId, ready }, plan 
   hook.getState = () => state;
   const gate = load('state/usePaywallGate.ts', {
     zustand: { create: makeZustandCreate() },
+    // #488's router imports (the offer memory, R2b): inert here.
+    '@react-native-async-storage/async-storage': { default: { getItem: async () => null, setItem: async () => {} } },
+    './tradeSearchTrace': { openSearchId: () => null, failFirstCard: () => {} },
+    '../utils/firstCardEvent': load('utils/firstCardEvent.ts', {}),
     '../api/client': { setOnProRequired: () => {}, setPaywallGateOn: () => {} },
     './useFeatureFlags': { useFeatureFlags: { getState: () => ({ flags: { 'monetize.paywall': true } }) } },
     './subscriptionSession': subSession,
@@ -1244,7 +2409,15 @@ function mountPaywall({ state, rcId, ready = false, ctl = { rcId, ready }, plan 
     '../state/useFeatureFlags': { useFlag: () => true },
     '../state/useSession': { useSession: hook, syncPurchasesIdentity: (s) => { syncs.push(s); } },
     '../state/subscriptionSession': subSession,
-    '../state/usePaywallGate': { isUnverifiedSession: gate.isUnverifiedSession, openVerify: () => { verifies.push(1); } },
+    // #495 M3 (D9): the hand-off is verifyThenReturn (the sheet, then this
+    // paywall again); either one counts as the VerifySheet here.
+    '../state/usePaywallGate': {
+      isUnverifiedSession: gate.isUnverifiedSession,
+      openVerify: () => { verifies.push(1); },
+      verifyThenReturn: () => { verifies.push(1); },
+    },
+    // #495 M3: the Founding GMs welcome, never reached from these cases.
+    './FounderWelcomeScreen': { claimFounderWelcome: async () => false, clubWindowOpen: () => false },
     '../api/events': { track: (name, props) => { events.push([name, props]); } },
     '../copy/monetization': copy,
   };
@@ -1353,20 +2526,32 @@ check('10n. PaywallScreen Purchase runs ONLY when customerInfoApplies, even for 
   cta.props.onPress();
   for (let i = 0; i < 6; i += 1) await tick();
   eq(JSON.stringify(ok.buys), JSON.stringify([['ftf_pro_annual', '111']]), 'verified + matching identity: purchasePackage');
-  const cases = [
-    ['verified, then UNVERIFIED (same user, RevenueCat still that user)', (st) => { st.verification = V(false); }, '111'],
-    ['verified, RevenueCat is ANOTHER user (no logIn lands)', () => {}, '999'],
-  ];
-  for (const [name, after, rcId] of cases) {
+  // Verified, but RevenueCat is ANOTHER user (no logIn lands): the identity
+  // guard refuses with the existing error status.
+  {
+    const name = 'verified, RevenueCat is ANOTHER user (no logIn lands)';
     const state = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
-    const m = mountPaywall({ state, rcId, ready: true, plan: true });
-    after(state);
+    const m = mountPaywall({ state, rcId: '999', ready: true, plan: true });
     m.find('paywall-purchase-cta').props.onPress();
     for (let i = 0; i < 6; i += 1) await tick();
     eq(m.buys.length, 0, `${name}: purchasePackage calls`);
     assert(m.sets.includes('error'), `${name}: the refusal is the existing error status`);
     assert(m.events.some(([n, p]) => n === 'paywall_purchase_failed' && p.user_cancelled === false),
       `${name}: tracked as an identity-not-ready failure`);
+  }
+  // Verified, then UNVERIFIED (same user, RevenueCat still that user): #495's
+  // D9 runs first, so the tap goes to the verify route (the VerifySheet, then
+  // this paywall again), never Apple's sheet. Still no purchase.
+  {
+    const name = 'verified, then UNVERIFIED (same user, RevenueCat still that user)';
+    const state = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
+    const m = mountPaywall({ state, rcId: '111', ready: true, plan: true });
+    state.verification = V(false);
+    m.find('paywall-purchase-cta').props.onPress();
+    for (let i = 0; i < 6; i += 1) await tick();
+    for (const fn of m.timers) fn();
+    eq(m.buys.length, 0, `${name}: purchasePackage calls`);
+    assert(m.verifies.length >= 1, `${name}: the D9 verify route`);
   }
 });
 check('10o. Restore WAITS for a verified session\'s in-flight logIn (whenIdentityReady), then re-checks; unverified / unknown are refused at once, with no wait', async () => {
@@ -1393,7 +2578,9 @@ check('10o. Restore WAITS for a verified session\'s in-flight logIn (whenIdentit
   eq(JSON.stringify(m2.waits), JSON.stringify(['111']), 'timed out: it did wait');
   eq(m2.restores.length, 0, 'timed out: no restore');
   assert(m2.sets.includes('error'), 'timed out: the error status');
-  // Unknown, and verified-then-unverified: refused at once, never waiting.
+  // Unknown, and verified-then-unverified: never waiting, never restoring.
+  // Unknown is refused with the error status; unverified takes #495's D9
+  // verify route first (the VerifySheet, then this paywall again).
   const unknown = { user: sleeperUser('111'), isDemo: false, verification: null };
   const flipped = { user: sleeperUser('111'), isDemo: false, verification: V(true) };
   for (const [name, state, after] of [['unknown', unknown, () => {}], ['unverified', flipped, (st) => { st.verification = V(false); }]]) {
@@ -1402,9 +2589,11 @@ check('10o. Restore WAITS for a verified session\'s in-flight logIn (whenIdentit
     after(state);
     mm.find('paywall-restore').props.onPress();
     await settle();
+    for (const fn of mm.timers) fn();
     eq(mm.waits.length, 0, `${name}: waited for an identity`);
     eq(mm.restores.length, 0, `${name}: restorePurchases calls`);
-    assert(mm.sets.includes('error'), `${name}: refused with the error status`);
+    if (name === 'unknown') assert(mm.sets.includes('error'), `${name}: refused with the error status`);
+    else assert(mm.verifies.length >= 1, `${name}: the D9 verify route`);
   }
 });
 
