@@ -194,7 +194,9 @@ def test_decline_succeeds_and_persists(harness):
     # Partner already accepted; my decline completes the match as 'declined'.
     match_id = _insert_match(engine, league_id=ACTIVE_LEAGUE, a_decision="accept")
 
-    resp = _post(client, token, match_id, "decline")
+    with patch.object(server, "record_match_disposition",
+                      wraps=server.record_match_disposition) as disposition:
+        resp = _post(client, token, match_id, "decline")
 
     assert resp.status_code == 200, resp.get_data(as_text=True)
     body = resp.get_json()
@@ -204,6 +206,9 @@ def test_decline_succeeds_and_persists(harness):
     # the partner's accept (one signal) + my decline, one per (give, receive)
     # pair (BL-004): 1 + 2 x 2
     assert save_swipes.call_count == 5
+    # The likes are read on the board the signals are saved to (#462 QA P3-1).
+    saved = {c.kwargs["scoring_format"] for c in save_swipes.call_args_list}
+    assert saved == {disposition.call_args.kwargs["scoring_format"]}
 
 
 # ---------------------------------------------------------------------------
