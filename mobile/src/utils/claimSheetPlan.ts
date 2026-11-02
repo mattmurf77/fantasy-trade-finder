@@ -129,6 +129,10 @@ export interface Plan {
   reread?: boolean;
   markPending?: boolean;
   scrollToDrop?: boolean;
+  /** Moves or claims went off server-side (404 feature_disabled, 14, a 10e
+   *  that lands on the hand-off): the hosts' cached capability is stale, so
+   *  invalidate it as refreshList does (QA P3-3). */
+  staleCapability?: boolean;
 }
 
 /** State 11 with nothing sent: offline at the tap, or a consent GET that
@@ -174,7 +178,7 @@ export function planFailure(f: MoveFailure, copy: CopyFns, sent: { faabClaimNoBi
   });
   switch (f.state) {
     case 'handoff': // 404 feature_disabled: moves are off; nothing was sent.
-      return { view: { step: 'handoff', line: copy.slot('unavailable_line') } };
+      return { staleCapability: true, view: { step: 'handoff', line: copy.slot('unavailable_line') } };
     case 'connect':
       if (!canConnect) return { view: { step: 'unsupported' } };
       return { connect: 'not_linked', trackConnect: 'not_linked', view: connectView('connect', 'not_linked', said, copy, false) };
@@ -205,7 +209,7 @@ export function planFailure(f: MoveFailure, copy: CopyFns, sent: { faabClaimNoBi
     case 'kind_changed':
       return { reread: true };
     case 'claims_off': // 14: the hand-off, bid and drop kept.
-      return { view: { step: 'handoff', line: said ?? copy.slot('unavailable_line') } };
+      return { staleCapability: true, view: { step: 'handoff', line: said ?? copy.slot('unavailable_line') } };
     case 'not_sent': // 11: nothing was sent; the same named CTA retries.
       return { view: { step: 'ready', ctaNotice: { text: said ?? copy.slot('not_sent_line') ?? '', tone: 'neg' } } };
     case 'player_taken':
@@ -267,7 +271,7 @@ export function planKindChanged(
     copy: CopyFns;
     faab: boolean;
   },
-): { move: FaMoveCapability | null; row: FaMoveRow; view: SheetView } {
+): { move: FaMoveCapability | null; row: FaMoveRow; view: SheetView; staleCapability: boolean } {
   const freshRow = fresh?.free_agents?.find((r) => r.player_id === ctx.playerId);
   const row: FaMoveRow = {
     move_kind: freshRow?.move_kind ?? (ctx.kind === 'add' ? 'claim' : 'add'),
@@ -286,7 +290,9 @@ export function planKindChanged(
         : row.move_kind === 'claim' && ctx.faab
           ? { step: 'ready', bidNotice: notice }
           : { step: 'ready', ctaNotice: notice };
-  return { move, row, view };
+  // The per-row claims-off path (a claim while claims are off) or a held row:
+  // the cached capability no longer says what the server will do (QA P3-3).
+  return { move, row, view, staleCapability: view.step === 'handoff' };
 }
 
 /** Back from the connect screen. A failed or timed-out re-read goes on as

@@ -101,6 +101,9 @@
 //       has_bid false for an empty field                                   [executed + AST]
 //   B11 rule 1's visible line; rule 2's 10e add → claim (the line above the
 //       field, VoiceOver focus, no keyboard focus); rule 5's 400 → Ready   [executed + AST]
+// Round 9 (release-lead's delta QA of 53f94665):
+//   P3-3 404 feature_disabled, 14 and a 10e that lands on the hand-off
+//        invalidate the cached capability                                [executed + AST]
 // Round 5 (head-eng's design note; legal R28.26 / R28.27):
 //   B1  a working button keeps full brightness with its spinner, takes no
 //       tap (#364's Button: `loading`, not `disabled`)                     [executed + AST]
@@ -1620,6 +1623,32 @@ process.on('exit', () => {
       expect(/const request = \{[\s\S]*?\.\.\.sel\.request,[\s\S]*?\};\s*const outcome = await attemptMove\(\{ move, surface: analyticsSurface, request \}\);/.test(send)
         && /await applyOutcome\(outcome, echo, faabClaimWithoutBid\(request, !!faab\)\);/.test(send), 'judged on the request actually sent');
       expect(/const plan = planFailure\(outcome\.failure, copy, \{ faabClaimNoBid \}\);/.test(declText(claim, 'applyOutcome')), 'applyOutcome passes it on');
+    });
+  }
+
+  // ── Round 9 (release-lead's delta QA of 53f94665): P3-3 ──────────────────
+  {
+    const h = harness();
+    const P = h.plan;
+    await check('P3-3 moves or claims turned off server-side invalidate the cached capability (404 feature_disabled, 14, a 10e that lands on the hand-off)', () => {
+      const cp = P.copyFns(SUBMIT, { add: 'A', league: 'L' });
+      const plan = (st, code) => P.planFailure(h.faMove.classifyMoveError(apiErr(h, st, { error: code })), cp);
+      eq([plan(404, 'feature_disabled').staleCapability, plan(422, 'waiver_claim_unsupported').staleCapability], [true, true], 'moves off, claims off');
+      const others = [[409, 'sleeper_not_linked'], [409, 'consent_required'], [422, 'roster_full_drop_required'], [422, 'waiver_bid_over_budget'],
+        [502, 'sleeper_write_failed'], [400, 'bad_request'], [409, 'move_kind_changed']];
+      eq(others.filter(([st, c]) => plan(st, c).staleCapability), [], 'no other outcome flags it');
+      const ctx = { move: SUBMIT, kind: 'add', said: 'x', connect: null, playerId: 'p', copy: cp, faab: true };
+      const k = (move, row) => P.planKindChanged({ move, free_agents: [{ player_id: 'p', ...row }] }, ctx);
+      const off = k({ ...SUBMIT, claims: false }, { move_kind: 'claim' });
+      eq([off.view.step, off.staleCapability], ['handoff', true], 'the per-row claims-off path');
+      eq(k(SUBMIT, { move_kind: 'claim', move_mode: 'handoff' }).staleCapability, true, 'a held row');
+      eq(k(SUBMIT, { move_kind: 'claim' }).staleCapability, false, 'a plain add → claim keeps it');
+      expect(/if \(plan\.staleCapability\) void invalidateCapabilities\(queryClient\);/.test(declText(claim, 'apply')), 'apply() invalidates it');
+      expect(/setRowMove\(next\.row\);\s*if \(next\.staleCapability\) void invalidateCapabilities\(queryClient\);/.test(declText(claim, 'applyOutcome')),
+        'the 10e path invalidates it');
+    });
+    await check('P3-1 (documented): the list gate\'s comment says an ESPN / MFL focus routes even its Sleeper leagues legacy', () => {
+      expect(/Deliberate \(QA P3-1\): an ESPN \/ MFL focus is never prefetched/.test(declText(fa, 'prefetchListCapabilities')), 'the comment at the gate');
     });
   }
 

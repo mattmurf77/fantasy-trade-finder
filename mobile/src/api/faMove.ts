@@ -720,6 +720,7 @@ export function prefetchListCapabilities(
   isSleeper: (leagueId: string) => boolean,
 ): string[] {
   const focus = focusId ? qc.getQueryData<LeagueCapability>(faMoveCapabilityKey(focusId)) : undefined;
+  // Deliberate (QA P3-1): an ESPN / MFL focus is never prefetched, so its Sleeper leagues route legacy too (dark fan-out: one read).
   if (!isSubmitCapability(focus?.move)) return [];
   const free = rows.filter((r) => r.status === 'free_agent').map((r) => r.league_id);
   const ids = [...free.filter(isSleeper), ...free.filter((id) => !isSleeper(id))].slice(0, FA_MOVE_LIST_PREFETCH_MAX);

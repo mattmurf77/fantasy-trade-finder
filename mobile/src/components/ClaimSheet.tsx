@@ -621,6 +621,7 @@ export default function ClaimSheet({
     });
     setMove(next.move);
     setRowMove(next.row);
+    if (next.staleCapability) void invalidateCapabilities(queryClient);
     show(next.view);
   }
 
@@ -636,6 +637,8 @@ export default function ClaimSheet({
     }
     // F12: a terminal result refreshes the list, drop list, FAAB and capability.
     if (plan.refresh) refreshList();
+    // Moves or claims went off: Usage Trends' cached capability is stale too.
+    if (plan.staleCapability) void invalidateCapabilities(queryClient);
     // State 9: the host's row reads "Claim pending" for the app session.
     if (plan.markPending) markClaimPending(leagueId, row.player_id);
     if (plan.trackConnect) trackConnectShown(move, plan.trackConnect, analyticsSurface);
