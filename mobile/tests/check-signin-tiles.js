@@ -13,8 +13,9 @@
 //      accessibilityRole "radio", accessibilityState { selected: on },
 //      accessibilityLabel tile.a11y, disabled while any sign-in or the demo is
 //      busy, and onPress exactly `() => selectEntryPlatform(p)`.
-//   3. PLATFORM_TILE has exactly sleeper / espn / mfl, each with a non-empty
-//      name, line and a11y label, and no "soon" / "coming" / "unavailable".
+//   3. PLATFORM_TILE has exactly sleeper / espn / mfl, word for word as
+//      marketing-lead's copy §6 addendum 16 (the dim lines and the VoiceOver
+//      labels), and no "soon" / "coming" / "unavailable".
 //   4. The tile's styles match the spec: flex 1, minHeight 64, ink-1, the
 //      lineStrongA11y border, radii.md; selected adds only the ice border;
 //      the tick is 3×14 ice at top 8 / right 8; the name is type.title chalk,
@@ -130,7 +131,7 @@ check('2. each tile is a radio with its label, state, testID, busy guard and one
     '`on` must be entryPlatform === p and `tile` PLATFORM_TILE[p]');
 });
 
-check('3. PLATFORM_TILE: sleeper, espn and mfl, each fully worded, nothing "coming soon"', () => {
+check('3. PLATFORM_TILE: sleeper, espn and mfl, word for word as marketing\'s addendum 16', () => {
   const decl = findAll(sf, (n) => ts.isVariableDeclaration(n) && n.name.getText(sf) === 'PLATFORM_TILE')[0];
   expect(decl && ts.isObjectLiteralExpression(decl.initializer), 'no PLATFORM_TILE object literal');
   const entries = decl.initializer.properties.map((p) => [p.name.getText(sf),
@@ -143,7 +144,16 @@ check('3. PLATFORM_TILE: sleeper, espn and mfl, each fully worded, nothing "comi
       `PLATFORM_TILE.${k} is ${JSON.stringify(v)}, want non-empty name, line and a11y strings`);
     expect(!/soon|coming|unavailable|not available/i.test(Object.values(v).join(' ')),
       `PLATFORM_TILE.${k} promises a later platform: ${JSON.stringify(v)}`);
-    expect(v.a11y.startsWith(v.name + ','), `PLATFORM_TILE.${k}.a11y should start with its name: ${v.a11y}`);
+  }
+  // marketing-lead copy §6 addendum 16 (#570): an SE tile's line fits about
+  // 10 characters; VoiceOver has no width limit.
+  const FINAL = {
+    sleeper: { name: 'Sleeper', line: 'Username', a11y: 'Sleeper, sign in with your username, no password needed' },
+    espn: { name: 'ESPN', line: 'Sign in', a11y: 'ESPN, sign in with your ESPN account or a league ID' },
+    mfl: { name: 'MFL', line: 'Sign in', a11y: 'MyFantasyLeague, sign in with your account or a league ID' },
+  };
+  for (const [k, v] of entries) {
+    expect(same(v, FINAL[k]), `PLATFORM_TILE.${k} is ${JSON.stringify(v)}, want ${JSON.stringify(FINAL[k])}`);
   }
 });
 

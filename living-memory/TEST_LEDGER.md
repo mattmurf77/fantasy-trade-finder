@@ -325,6 +325,7 @@ Gates: full (`docs/plans/prelaunch-onboarding/scope-signin-three-tiles.md`). No 
 - **Kept green:** `check-landing-platform-options`, `check-espn-signin-flag`, `check-signin-apple-parity` (9), `check-guide-script`, `check-signin-identity-labels`, `tsc --noEmit`, `testid-lint`.
 - **Code-walk:** in the scope §3 (tile → `selectEntryPlatform` → panel → entry sheet → `entryPlatformMint` → `/api/entry/platform`; no tile under `landing.platform_options` OFF).
 - **TestFlight:** the 7-step SE checklist in the scope §3, for the 11-07 window, before ask 16.
+- **Final words (head-eng relay, 11-01; marketing-lead copy §6 addendum 16):** the dim lines are unchanged ("Username" / "Sign in" / "Sign in"). The VoiceOver labels are now "Sleeper, sign in with your username, no password needed" · "ESPN, sign in with your ESPN account or a league ID" · "MyFantasyLeague, sign in with your account or a league ID". Guard pin 3 now pins all nine strings exactly (the old starts-with-its-name rule doesn't fit MFL's label). Sabotage 5/5 red on the words; the structure set is still 14/14.
 
 ## 2026-10-29 — G3-e: `deck_outcomes.user_id`; account deletion and export also match an outcome by its owner
 

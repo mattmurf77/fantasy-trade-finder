@@ -56,15 +56,15 @@ const TEST_APPLE_SUB = testLaunchArg('FTFTestAppleSub');
 export type EntryPlatformIntent = 'espn' | 'mfl';
 
 /** The landing's platform tiles (operator 11-01: "three tiles. Sleeper espn
- *  mfl"; design-lead's spec). Name, the dim line under it, and the radio's
- *  spoken label. The lines are placeholders until marketing's words land
- *  (head-eng → head-bizops). */
+ *  mfl"; design-lead's spec). Name, the dim line under it (an SE tile fits
+ *  about 10 characters), and the radio's spoken label. Words: marketing-lead,
+ *  copy §6 addendum 16. */
 const PLATFORM_TILE: Record<'sleeper' | EntryPlatformIntent, {
   name: string; line: string; a11y: string;
 }> = {
-  sleeper: { name: 'Sleeper', line: 'Username', a11y: 'Sleeper, sign in with your username' },
-  espn: { name: 'ESPN', line: 'Sign in', a11y: 'ESPN, sign in with your ESPN account' },
-  mfl: { name: 'MFL', line: 'Sign in', a11y: 'MFL, sign in with your MyFantasyLeague account' },
+  sleeper: { name: 'Sleeper', line: 'Username', a11y: 'Sleeper, sign in with your username, no password needed' },
+  espn: { name: 'ESPN', line: 'Sign in', a11y: 'ESPN, sign in with your ESPN account or a league ID' },
+  mfl: { name: 'MFL', line: 'Sign in', a11y: 'MyFantasyLeague, sign in with your account or a league ID' },
 };
 
 interface Props {
