@@ -349,8 +349,9 @@ def test_add_without_drop_into_open_slot(h):
 def test_partial_is_stated_exactly(h):
     h.platform.mode = "partial"
     body = h.post().get_json()
-    assert body["result"] == "partial" and body["title"] == "Partly done"
-    assert body["lines"] == ["Aaron Add added in Dummy League.", "Drew Drop was not dropped."]
+    assert body["result"] == "partial" and body["title"] == "Part of this move was made"
+    assert body["lines"] == ["Aaron Add added in Dummy League.", "Drew Drop was not dropped.",
+                             "Check your roster in Sleeper."]
     # The roster follows what the platform reported: A on, B still there.
     assert h.stored_roster() == [DROP, KEEP, ADD]
 

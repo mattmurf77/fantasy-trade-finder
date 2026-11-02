@@ -208,14 +208,13 @@ def test_approved_slots_verbatim():
     assert final["waiver_line_no_drop"] == ("This places a waiver claim for {add}. "
                                             "Sleeper processes it on its waiver schedule.")
     assert final["bid_line"] == "Bid: {bid}"
-    drafts = copy._SLEEPER_SLOTS_DRAFT
-    assert drafts["cta_claim_no_bid"] == "Claim {add}"
-    assert drafts["cta_claim_drop_no_bid"] == "Claim {add}, drop {drop}"
+    assert final["cta_claim_no_bid"] == "Claim {add}"
+    assert final["cta_claim_drop_no_bid"] == "Claim {add}, drop {drop}"
     # A no-drop / no-bid form never names the missing half.
     for key in ("waiver_line_no_drop", "cta_claim_no_bid"):
-        assert "{drop}" not in {**final, **drafts}[key]
+        assert "{drop}" not in final[key]
     for key in ("waiver_line", "waiver_line_no_drop", "cta_claim_no_bid", "cta_claim_drop_no_bid"):
-        assert "{bid}" not in {**final, **drafts}[key]
+        assert "{bid}" not in final[key]
 
 
 def test_templates_never_write_their_own_dollar_sign():
@@ -223,7 +222,100 @@ def test_templates_never_write_their_own_dollar_sign():
     for key, text in {**copy._SLEEPER_SLOTS_FINAL, **copy._SLEEPER_SLOTS_DRAFT}.items():
         assert "${" not in text, key
     assert copy._SLEEPER_SLOTS_FINAL["bid_line"] == "Bid: {bid}"
-    assert copy._SLEEPER_SLOTS_DRAFT["cta_claim"] == "Claim {add} for {bid}"
+    assert copy._SLEEPER_SLOTS_FINAL["cta_claim"] == "Claim {add} for {bid}"
+
+
+# marketing-lead addendum 17 §B (2026-11-01), word for word. "Keep" rows are
+# pinned by test_approved_slots_verbatim and the route tests.
+FINAL_SLOTS_CHANGED = {
+    "window_line": "Roster moves: on until {date}",
+    "verify_line": "Verify your Sleeper sign-in to make moves from here.",
+    "not_sent_line": "Couldn't reach Sleeper right now, so nothing was sent.",
+    "unknown_body": ("Couldn't confirm whether this move reached Sleeper. Check your roster and "
+                     "claims in Sleeper before you make it again."),
+    "unavailable_line": ("Moves from Fleeced aren't available right now. You can still make this "
+                         "move in Sleeper."),
+}
+FINAL_SLOTS_KEPT = {
+    "header_add": "Add {name}", "header_claim": "Claim {name}", "cta_add": "Add {add}",
+    "cta_add_drop": "Add {add}, drop {drop}", "cta_claim": "Claim {add} for {bid}",
+    "cta_claim_drop": "Claim {add} for {bid}, drop {drop}", "league_line": "In {league}",
+    "turn_off": "Turn off", "open_platform": "Open in Sleeper to claim",
+    "handoff_footer": "You'll finish this move in Sleeper.",
+    "other_account_line": ("The Sleeper account you connected isn't in {league}. Connect the "
+                           "one that owns your team."),
+    "still_sending": "Still sending to Sleeper…",
+}
+UNCONFIRMED = ("Couldn't confirm whether this move reached Sleeper. Check your roster and claims "
+               "in Sleeper before you make it again.")
+FINAL_MESSAGES = {   # (key, fmt) → the Sleeper text
+    ("feature_disabled", ()): ("Moves from Fleeced aren't available right now, so nothing was "
+                               "sent. You can still make this move in Sleeper."),
+    ("unconfigured", ()): ("Moves from Fleeced aren't available right now, so nothing was sent. "
+                           "You can still make this move in Sleeper."),
+    ("bad_request", ()): "Nothing was sent. Close this and start the move again.",
+    ("verification_required", ()): ("Nothing was sent. Verify your Sleeper sign-in to make "
+                                    "moves from here."),
+    ("expired", ()): ("Your Sleeper sign-in has expired, so nothing was sent. Sign in again to "
+                      "make moves from here."),
+    ("consent_required", ()): "Nothing was sent. Agree to roster moves to make this move.",
+    ("roster_full_drop_required", ()): ("Your roster is full, so nothing was sent. Pick a player "
+                                        "to drop."),
+    ("asset_not_owned", (("drop", "B"),)): ("B is no longer on your roster, so nothing was sent. "
+                                            "Pick another player to drop."),
+    ("player_unavailable", (("add", "A"),)): "A is no longer a free agent, so nothing was sent.",
+    ("waiver_bid_over_budget", (("remaining", 80),)): (
+        "Your bid is more than the $80 you have left, so nothing was sent. Lower it to make "
+        "the claim."),
+    ("move_kind_changed", (("add", "A"),)): ("A's waiver status changed, so nothing was sent. "
+                                             "The button now shows the right move."),
+    ("waiver_claim_unsupported", (("add", "A"),)): (
+        "A is on waivers, and waiver claims can't be made from here right now, so nothing was "
+        "sent. Claim in Sleeper instead."),
+    ("write_failed", ()): ("Sleeper didn't accept this move, so nothing changed. You can still "
+                           "try it in Sleeper."),
+    ("outcome_unknown", ()): UNCONFIRMED,
+    ("internal_error", ()): UNCONFIRMED,
+    ("move_in_progress", (("add", "A"),)): ("A recent move for A isn't confirmed yet. Check your "
+                                            "roster in Sleeper before you make it again."),
+    ("move_in_progress_pending_claim", (("add", "A"),)): (
+        "A claim for A is already pending in Sleeper. Check your claims there before you make "
+        "another."),
+}
+
+
+def test_marketing_final_part_b_verbatim():
+    final = copy._SLEEPER_SLOTS_FINAL
+    for key, text in {**FINAL_SLOTS_CHANGED, **FINAL_SLOTS_KEPT}.items():
+        assert final[key] == text, key
+    assert copy._SLEEPER_SLOTS_DRAFT == {}                   # nothing left awaiting words
+    for (key, fmt), text in FINAL_MESSAGES.items():
+        assert copy.message(key, "sleeper", **dict(fmt)) == text, key
+    assert copy.row_line("unconfirmed", "sleeper") == (
+        "A recent move for this player isn't confirmed. Check Sleeper before you make it again.")
+    assert copy.row_line("pending_claim", "sleeper") == (
+        "A claim for this player is already pending in Sleeper.")
+    # One "$" in what the user sees: the server fills {remaining} with it,
+    # the client fills {bid} with its own.
+    assert copy.message("waiver_bid_over_budget", "sleeper", remaining=80).count("$") == 1
+
+
+def test_handoff_now_serves_every_final_slot(h):
+    h.flags.discard("sleeper.send_add_drop")
+    assert set(cap(h)[0]["copy"]) == CONTRACT_COPY_KEYS
+
+
+def test_no_we_our_or_try_again_where_the_outcome_is_unknown_or_in_progress():
+    """State 12 and the double-move block: never "we" / "our", never "try
+    again" (G16, the 8e frame)."""
+    import re
+    texts = [copy._SLEEPER_SLOTS_FINAL["unknown_title"], copy._SLEEPER_SLOTS_FINAL["unknown_body"],
+             copy.UNKNOWN_TITLE, copy.row_line("unconfirmed", "sleeper"),
+             copy.row_line("pending_claim", "sleeper")]
+    texts += [copy.message(k, "sleeper", add="A") for k in (
+        "outcome_unknown", "internal_error", "move_in_progress", "move_in_progress_pending_claim")]
+    for text in texts:
+        assert not re.search(r"\b(we|our|us)\b|try again", text, re.IGNORECASE), text
 
 
 def test_never_the_false_sleeper_line():
@@ -251,7 +343,7 @@ def test_blocked_row_is_handed_off_with_a_line(h, result, status, kind, reason):
     if reason == "pending_claim":
         assert "already pending" in rows[ADD]["move_line"]
     else:
-        assert "wasn't confirmed" in rows[ADD]["move_line"]
+        assert "isn't confirmed" in rows[ADD]["move_line"]
 
 
 def test_block_lifts_from_the_row_at_15_minutes(h):

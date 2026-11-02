@@ -17,18 +17,16 @@ Three kinds of string live here:
     invalidates every older grant. v1 while claims are refused; v2 is
     required, in the same release, before claims are enabled (R15.8 D5).
   * **`move.copy` slots** (contract §7). `_SLEEPER_SLOTS_FINAL` holds the
-    strings legal or marketing already approved (G2, G7, G8, G20, and 8i's
-    title reused for G16); they are served whenever the capability is.
-    `_SLEEPER_SLOTS_DRAFT` holds PLACEHOLDER DRAFTS written by platforms-eng
-    so every slot has something to review. They are NOT approved copy:
-    marketing's words replace them (via head-product), and until then they
-    are served only in `submit` mode, which cannot happen before the
-    post-capture commit and the operator's flip. In `handoff` mode the client
-    falls back to its own neutral wording for every missing slot.
+    approved strings: legal's (G7, G8), the approved G2 / G20 / 8i lines, and
+    marketing-lead's final Part B (`marketing-lead-copy.md` addendum 17 §B,
+    2026-11-01). They are served whenever the capability is.
+    `_SLEEPER_SLOTS_DRAFT` holds any slot still awaiting approved words; such
+    a slot is served only in `submit` mode (in `handoff` the client uses its
+    own neutral fallback). Today it is empty: every slot is final.
   * **Result and refusal messages** (`message`, `result_copy`), returned in
-    the move route's `title` / `lines` / `message`. Drafts except where
-    marked (the 8c / 8i / I-2 lines reused verbatim from the trade send).
-    Reached only through the move route, which 404s until the flip.
+    the move route's `title` / `lines` / `message`. Final (addendum 17 §B,
+    and the 8c / 8i / I-2 lines reused verbatim from the trade send). The one
+    remaining draft, the MFL/ESPN withdrawal notice, is marked where it is.
 
 Straight apostrophes, as R15.8 writes them. Templates use `{add}`, `{drop}`,
 `{bid}`, `{league}`, `{date}`, `{name}`, `{cta}` for the CLIENT to fill
@@ -152,6 +150,30 @@ def withdrawal_notice(platform: str) -> str:
 _SLEEPER_SLOTS_FINAL = {
     # G2, approved (s351.connect, consent.md :78).
     "connect_line": "Connect your Sleeper sign-in to make moves from here.",
+    # marketing-lead addendum 17 §B (final, 2026-11-01). "Keep" rows keep the
+    # words the drafts already had.
+    "header_add": "Add {name}",                                         # G24
+    "header_claim": "Claim {name}",                                     # G24
+    "cta_add": "Add {add}",                                             # G6
+    "cta_add_drop": "Add {add}, drop {drop}",                           # G6
+    "cta_claim": "Claim {add} for {bid}",                               # G6
+    "cta_claim_drop": "Claim {add} for {bid}, drop {drop}",             # G6
+    "cta_claim_no_bid": "Claim {add}",                                  # G6, priority waivers
+    "cta_claim_drop_no_bid": "Claim {add}, drop {drop}",                # G6, priority waivers
+    "league_line": "In {league}",                                       # G22
+    "window_line": "Roster moves: on until {date}",                     # G9 (= Settings' line)
+    "turn_off": "Turn off",
+    "open_platform": "Open in Sleeper to claim",                        # #509's button
+    "handoff_footer": "You'll finish this move in Sleeper.",            # G1
+    "verify_line": "Verify your Sleeper sign-in to make moves from here.",  # G3
+    "other_account_line": ("The Sleeper account you connected isn't in {league}. "
+                           "Connect the one that owns your team."),     # F3
+    "not_sent_line": "Couldn't reach Sleeper right now, so nothing was sent.",  # G15 (8c)
+    "unknown_body": ("Couldn't confirm whether this move reached Sleeper. Check your roster "
+                     "and claims in Sleeper before you make it again."),  # G16
+    "unavailable_line": ("Moves from Fleeced aren't available right now. You can still make "
+                         "this move in Sleeper."),                     # F4
+    "still_sending": "Still sending to Sleeper…",                       # state 7
     # G7, legal-final (R15.8 D10(b)).
     "finality": "Final on Sleeper. Fleeced can't undo it.",
     # G8, legal-final (R15.1 :766), in its forms (contract §7): with a drop,
@@ -168,32 +190,9 @@ _SLEEPER_SLOTS_FINAL = {
     "unknown_title": "Check before resending",
 }
 
-_SLEEPER_SLOTS_DRAFT = {
-    # PLACEHOLDER DRAFTS (platforms-eng, 2026-11-01). NOT approved copy:
-    # marketing-lead's words replace every one (scope §G). Served only in
-    # `submit` mode.
-    "header_add": "Add {name}",                                         # G24
-    "header_claim": "Claim {name}",                                     # G24
-    "cta_add": "Add {add}",                                             # G6
-    "cta_add_drop": "Add {add}, drop {drop}",                           # G6
-    "cta_claim": "Claim {add} for {bid}",                               # G6
-    "cta_claim_drop": "Claim {add} for {bid}, drop {drop}",             # G6
-    "cta_claim_no_bid": "Claim {add}",                                  # G6, priority waivers
-    "cta_claim_drop_no_bid": "Claim {add}, drop {drop}",                # G6, priority waivers
-    "league_line": "In {league}",                                       # G22
-    "window_line": "Adds authorized until {date}",                      # G9 (consent.md :115)
-    "turn_off": "Turn off",                                             # G9
-    "open_platform": "Open in Sleeper to claim",                        # #509's CTA
-    "handoff_footer": "You'll finish this move in Sleeper.",            # G1
-    "verify_line": "Your Sleeper connection needs a quick check before you make moves from here.",  # G3
-    "other_account_line": ("The Sleeper account you connected isn't in {league}. "
-                           "Connect the one that owns your team."),     # F3
-    "not_sent_line": "Couldn't reach Sleeper, so nothing was sent.",    # G15
-    "unknown_body": ("We couldn't confirm whether this move reached Sleeper. Check your "
-                     "roster in Sleeper before you try again."),        # G16
-    "unavailable_line": "Moves from Fleeced aren't available right now.",  # F4
-    "still_sending": "Still sending to Sleeper…",                       # state 7
-}
+# Slots still awaiting approved words: marked DRAFT here, served only in
+# `submit` mode. Empty since addendum 17 §B made every slot final.
+_SLEEPER_SLOTS_DRAFT: dict[str, str] = {}
 
 # Keys the client knows (contract §7); a test pins both dicts against it.
 MOVE_COPY_KEYS = frozenset({
@@ -216,9 +215,9 @@ def move_copy(platform: str, *, include_drafts: bool) -> dict:
     return out
 
 
-# Per-row override lines (scope §B6(b)). DRAFTS.
-ROW_LINE_UNCONFIRMED = ("A recent move for this player wasn't confirmed. Check {platform} "
-                        "before you try again.")
+# Per-row override lines (scope §B6(b)). Final (addendum 17 §B).
+ROW_LINE_UNCONFIRMED = ("A recent move for this player isn't confirmed. Check {platform} "
+                        "before you make it again.")
 ROW_LINE_PENDING_CLAIM = "A claim for this player is already pending in {platform}."
 
 
@@ -229,44 +228,53 @@ def row_line(reason: str, platform: str) -> str:
 
 # ── Refusal and failure messages (the move route's `message` / `title`) ──────
 # Keyed by the code SUFFIX (contract §4); `{platform}` is the display name.
-# DRAFT unless marked. Never a "try again" where the outcome is unknown.
+# Final: marketing-lead addendum 17 §B (2026-11-01), "Keep" rows unchanged.
+# Never "we" / "our", and never a "try again" where the outcome is unknown or
+# a move is in progress (pinned). `{remaining}` is filled HERE, so its "$" is
+# written here; `{bid}` in the slots is the client's and carries its own.
+_UNAVAILABLE = ("Moves from Fleeced aren't available right now, so nothing was sent. "
+                "You can still make this move in {platform}.")
+_UNCONFIRMED = ("Couldn't confirm whether this move reached {platform}. Check your roster "
+                "and claims in {platform} before you make it again.")
 _MESSAGES = {
-    "feature_disabled": "Moves from Fleeced aren't available right now.",
-    "bad_request": "Something about this move didn't look right, so nothing was sent.",
-    "verification_required": ("Verify your {platform} connection to make moves from here. "
-                              "Nothing was sent."),
+    "feature_disabled": _UNAVAILABLE,                                   # G14, one line for both
+    "bad_request": "Nothing was sent. Close this and start the move again.",
+    "verification_required": ("Nothing was sent. Verify your {platform} sign-in to make moves "
+                              "from here."),
     "not_linked": "Connect your {platform} sign-in to make moves from here.",   # G2 (Sleeper: approved)
     "not_linked_other_account": ("The {platform} account you connected isn't in {league}. "
                                  "Connect the one that owns your team. Nothing was sent."),
-    "expired": ("Your {platform} connection needs a quick check before you make moves from "
-                "here. Nothing was sent."),
-    "consent_required": "Agree to roster moves to make this move. Nothing was sent.",
-    "roster_full_drop_required": "Your roster is full. Pick a player to drop. Nothing was sent.",
-    "asset_not_owned": "{drop} is no longer on your roster, so nothing was sent.",
-    "player_unavailable": "{add} was just picked up, so nothing was sent.",
+    "expired": ("Your {platform} sign-in has expired, so nothing was sent. Sign in again to "
+                "make moves from here."),
+    "consent_required": "Nothing was sent. Agree to roster moves to make this move.",
+    "roster_full_drop_required": ("Your roster is full, so nothing was sent. Pick a player to "
+                                  "drop."),                             # 10a
+    "asset_not_owned": ("{drop} is no longer on your roster, so nothing was sent. Pick another "
+                        "player to drop."),                             # 10b
+    "player_unavailable": "{add} is no longer a free agent, so nothing was sent.",  # 10c
     "player_already_yours": "{add} is already on your roster, so nothing was sent.",
     "waiver_bid_over_budget": ("Your bid is more than the ${remaining} you have left, so "
-                               "nothing was sent."),
-    "move_kind_changed": ("{add}'s status changed in {platform}, so nothing was sent. Check "
-                          "the button before you tap again."),
-    "waiver_claim_unsupported": ("{add} is on waivers, and claims from Fleeced aren't on yet. "
-                                 "Nothing was sent. Claim in {platform} instead."),   # G18
+                               "nothing was sent. Lower it to make the claim."),  # 10d
+    "move_kind_changed": ("{add}'s waiver status changed, so nothing was sent. The button now "
+                          "shows the right move."),                     # 10e
+    "waiver_claim_unsupported": ("{add} is on waivers, and waiver claims can't be made from "
+                                 "here right now, so nothing was sent. Claim in {platform} "
+                                 "instead."),                           # G18
     "rejected": ("{platform} turned down Fleeced's connection, so nothing changed. Connect "
                  "again to make moves."),                                           # G17
     # 8c/8d (marketing addendum 10), verbatim: the trade send's not-sent line.
     "write_failed_network": ("Couldn't reach {platform} right now, so nothing was sent. "
                              "Try again in a moment."),
-    # R15.1's rejection line (G13 draft, consent.md :769).
-    "write_failed": "{platform} didn't accept this move, so nothing changed. Try again in {platform}.",
-    "unconfigured": "Moves from Fleeced aren't available right now.",              # G14
-    "outcome_unknown": ("We couldn't confirm whether this move reached {platform}. Check your "
-                        "roster in {platform} before you try again."),              # G16 body
-    "move_in_progress": ("A recent move for {add} wasn't confirmed yet. Check {platform} "
-                         "before you try again."),
+    # G13 (10f): R15.1's rejection line with 8a's ending; legal OKs it.
+    "write_failed": ("{platform} didn't accept this move, so nothing changed. You can still "
+                     "try it in {platform}."),
+    "unconfigured": _UNAVAILABLE,                                       # G14 (10g)
+    "outcome_unknown": _UNCONFIRMED,                                    # G16 (state 12)
+    "move_in_progress": ("A recent move for {add} isn't confirmed yet. Check your roster in "
+                         "{platform} before you make it again."),
     "move_in_progress_pending_claim": ("A claim for {add} is already pending in {platform}. "
-                                       "Check {platform} before you try again."),
-    "internal_error": ("Something went wrong on our side, so we can't confirm this move. "
-                       "Check {platform} before you try again."),
+                                       "Check your claims there before you make another."),
+    "internal_error": _UNCONFIRMED,             # to the user, a 500 is an unknown outcome
 }
 
 
@@ -288,9 +296,10 @@ UNKNOWN_TITLE = "Check before resending"
 
 def result_copy(*, status: str, result: str, platform: str, add: str, drop: str | None,
                 league: str, added: list[str], dropped: list[str], bid: int | None) -> tuple[str, list[str]]:
-    """(title, lines) for a 200. DRAFTS (G10/G11; R15.1's success line is the
-    model). Says exactly what the platform reported: a claim is "submitted",
-    never "added"; a partial names each half as reported (K-F6)."""
+    """(title, lines) for a 200. Final (addendum 17 §B; R15.1's success line).
+    Says exactly what the platform reported: a claim is "submitted", never
+    "added"; a partial names each half as reported, then says where to look
+    (K-F6)."""
     label = PLATFORM_LABEL.get(platform, platform)
     if status == "pending":
         lines = [f"Your claim for {add} was submitted in {league}"
@@ -304,7 +313,8 @@ def result_copy(*, status: str, result: str, platform: str, add: str, drop: str 
         lines.append(f"{add} added in {league}." if added else f"{add} was not added.")
         if drop:
             lines.append(f"{drop} dropped." if dropped else f"{drop} was not dropped.")
-        return "Partly done", lines
+        lines.append(f"Check your roster in {label}.")
+        return "Part of this move was made", lines
     if drop:
         return "Done", [f"{add} added, {drop} dropped in {league}."]
     return "Done", [f"{add} added in {league}."]
