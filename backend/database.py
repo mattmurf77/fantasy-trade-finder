@@ -2702,7 +2702,8 @@ platform_write_consents_table = Table("platform_write_consents", metadata,
     Column("trigger_attempt_id", String),                    # grants: the move's attempt_id
     Column("withdrawn_at",       String),                    # withdrawals: server UTC
     Column("withdrawn_via",      String),                    # settings | disconnect |
-                                                             # credential_expired | credential_rejected
+                                                             # credential_expired |
+                                                             # credential_rejected | relink
     Column("recorded_at",        String, nullable=False),    # row insert time, server UTC
     Index("ix_platform_write_consents_user", "user_id", "platform"),
 )

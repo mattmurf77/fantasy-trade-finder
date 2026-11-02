@@ -39,16 +39,42 @@ def _hash(text: dict) -> str:
 
 # A version is never edited in place: changed wording is a NEW copy_version
 # (and a new row here). If one of these fails, revert the text, don't re-pin.
+# Each hash covers EVERY field of the version's consent block (R28.26 2a):
+# title, body, checkbox_label, this_move, button_label and links. Re-pinned
+# once, 11-01, when `links` moved inside each version (nothing had shipped).
 PINNED = {
-    ("sleeper", V1, "en-US"): "f4e500eb1528c6ce425dbdd8a2ce4757fc2b5e7a12a263157b5961024c283527",
-    ("sleeper", V2, "en-US"): "38e5e2064bc84de07202bc57649d49bc668c554901be90316a6e6fb1fc2395ee",
+    ("sleeper", V1, "en-US"): "c9a41eaa22b7767fc82ad436190f69ebb18bd902f595f1e9c8a9bb9bbab7773d",
+    ("sleeper", V2, "en-US"): "498e6f994ba1dbee75d0881da9d67e8746d230f7d157a50960aff0b8e497cc3a",
+    # DRAFT (legal R28.27): pinned too, so a draft is also never edited in place.
+    ("mfl", copy.MFL_ROSTER_MOVES_V1, "en-US"):
+        "6fec0497b341ec37f190cbd600c227a2a8b5d244cb898a4adec27c3fd2b4b015",
+    ("mfl", copy.MFL_ROSTER_MOVES_V2, "en-US"):
+        "4e16f4f632959f1a350220eecd308f60f0e8275d323121f2239da94d74dc53e6",
+    ("espn", copy.ESPN_ROSTER_MOVES_V1, "en-US"):
+        "7478aebb94333d22dd556b90d6c432b350f3796a24008ec8e7c43ecc8ea0b97e",
+    ("espn", copy.ESPN_ROSTER_MOVES_V2, "en-US"):
+        "b61dcee3345528c3b2866d685a7d8154701bb92edd4fcb40a8258c2110e9de72",
 }
+BLOCK_FIELDS = {"title", "body", "checkbox_label", "this_move", "button_label", "links"}
 
 
 def test_texts_are_pinned_by_hash():
     assert set(copy.CONSENT_TEXTS) == set(PINNED)
     for key, digest in PINNED.items():
         assert _hash(copy.CONSENT_TEXTS[key]) == digest, key
+
+
+def test_the_hash_covers_every_field_the_block_shows():
+    """Every field the served block carries (besides copy_version / locale,
+    which are the key, and reason, which is per request) lives in the hashed
+    per-version text, so editing ANY of them in place breaks the pin."""
+    for key, text in copy.CONSENT_TEXTS.items():
+        assert set(text) == BLOCK_FIELDS, key
+    block = copy.consent_block("sleeper", reason="first")
+    assert set(block) - {"copy_version", "locale", "reason"} == BLOCK_FIELDS
+    text = copy.CONSENT_TEXTS[("sleeper", V1, "en-US")]
+    assert {f: (list(block[f]) if f in ("body", "links") else block[f]) for f in BLOCK_FIELDS} \
+        == {f: (list(text[f]) if f in ("body", "links") else text[f]) for f in BLOCK_FIELDS}
 
 
 def test_v1_is_r15_8_verbatim():
@@ -68,6 +94,8 @@ def test_v1_is_r15_8_verbatim():
                           "for the next 7 days.",
         "this_move": "This move: {cta} in {league}.",
         "button_label": "Make the move",
+        "links": ({"label": "Terms", "url": "https://fantasy-trade-finder.onrender.com/terms"},
+                  {"label": "Privacy", "url": "https://fantasy-trade-finder.onrender.com/privacy"}),
     }
 
 
@@ -450,3 +478,129 @@ def test_consent_and_moves_in_export(h):
 def test_both_tables_are_private_tables():
     assert {"platform_write_consents", "platform_write_moves"} <= set(
         accounts._ADDITIONAL_PRIVATE_TABLES)
+
+
+# ---------------------------------------------------------------------------
+# Per-platform versions (legal R28.27 item 3): MFL and ESPN, DRAFT
+# ---------------------------------------------------------------------------
+
+MFL_V1, MFL_V2 = copy.MFL_ROSTER_MOVES_V1, copy.MFL_ROSTER_MOVES_V2
+ESPN_V1, ESPN_V2 = copy.ESPN_ROSTER_MOVES_V1, copy.ESPN_ROSTER_MOVES_V2
+DRAFTS = {("mfl", MFL_V1), ("mfl", MFL_V2), ("espn", ESPN_V1), ("espn", ESPN_V2)}
+
+
+def test_mfl_and_espn_have_their_own_versions_marked_draft():
+    assert copy.DRAFT_CONSENT_VERSIONS == {v for _, v in DRAFTS}
+    for platform, version in DRAFTS:
+        assert version.startswith(f"{platform}-roster-moves-v")
+        text = copy.CONSENT_TEXTS[(platform, version, "en-US")]
+        joined = " ".join([text["title"], *text["body"], text["checkbox_label"]])
+        label = copy.PLATFORM_LABEL[platform]
+        assert "Sleeper" not in joined and label in text["title"]   # written per platform
+        unofficial = [b for b in text["body"] if "unofficial" in b]
+        # MFL documents its import API: no unofficial-connection bullet. ESPN keeps it.
+        assert unofficial == ([] if platform == "mfl" else
+                              ["This uses an unofficial ESPN connection, so it could stop "
+                               "working at any time."])
+    assert copy.CONSENT_TEXTS[("mfl", MFL_V1, "en-US")]["body"] == [
+        "Fleeced will add and drop players in your MFL leagues for you, using the MFL sign-in "
+        "you connected.",
+        "Moves are final on MFL. Fleeced can't undo them, and a player you drop can be picked "
+        "up by another team.",
+        "Your OK lasts 7 days. You'll still confirm every move. Turn it off any time in "
+        "Settings › Leagues › Stop roster moves."]
+    assert copy.CONSENT_TEXTS[("espn", ESPN_V2, "en-US")]["checkbox_label"] == (
+        "I authorize Fleeced to add and drop players and place waiver claims in my ESPN "
+        "leagues for the next 7 days.")
+    assert copy.WITHDRAWAL_NOTICES[("mfl", MFL_V2)] == (
+        "Roster moves in MFL are off. Fleeced won't add or drop players or place waiver claims "
+        "there until you agree again. Moves already made stay in MFL.")
+    assert copy.PLATFORM_SLOTS_DRAFT["espn"]["finality"] == "Final on ESPN. Fleeced can't undo it."
+    assert "${" not in json.dumps(copy.PLATFORM_SLOTS_DRAFT)
+
+
+def _draft_strings():
+    """Every DRAFT string, less any that a final text shares word for word
+    (the window bullet, "Make the move", "Bid: {bid}")."""
+    out = set()
+    for platform, version in DRAFTS:
+        text = copy.CONSENT_TEXTS[(platform, version, "en-US")]
+        out |= {text["title"], *text["body"], text["checkbox_label"],
+                copy.WITHDRAWAL_NOTICES[(platform, version)]}
+    for slots in copy.PLATFORM_SLOTS_DRAFT.values():
+        out |= set(slots.values())
+    final = set()
+    for (platform, version, _), text in copy.CONSENT_TEXTS.items():
+        if version not in copy.DRAFT_CONSENT_VERSIONS:
+            final |= {text["title"], *text["body"], text["checkbox_label"], text["this_move"],
+                      text["button_label"]}
+    final |= set(copy._SLEEPER_SLOTS_FINAL.values())
+    assert len(out - final) >= 20                              # not vacuous
+    return out - final
+
+
+def _strings(obj):
+    """Every string value in a decoded JSON body, recursively."""
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            yield from _strings(v)
+    elif isinstance(obj, (list, tuple)):
+        for v in obj:
+            yield from _strings(v)
+
+
+def test_draft_texts_are_never_served(h, monkeypatch):
+    """Nothing DRAFT reaches a client: not the consent GET or DELETE for MFL /
+    ESPN, not the capability on an MFL / ESPN league, and not even when
+    CURRENT_CONSENT_VERSION points at a draft by mistake."""
+    from backend.tests.test_fa_move_route import MFL_LEAGUE, add_league
+    served = set()
+    for platform in ("mfl", "espn", "sleeper"):
+        served |= set(_strings(_get(h, platform).get_json()))
+        served |= set(_strings(_delete(h, platform).get_json()))
+    for platform, lid in (("mfl", MFL_LEAGUE), ("espn", "61205")):
+        add_league(h.engine, lid, platform)
+        served |= set(_strings(server._fa_move_capability(h.sess, lid, None)))
+    for platform, version in DRAFTS:
+        monkeypatch.setitem(copy.CURRENT_CONSENT_VERSION, platform, version)
+        assert copy.consent_block(platform) is None
+        assert copy.withdrawal_notice(platform) == "Roster moves are off."
+        assert not copy.has_consent_text(platform, version, "en-US")
+        served |= set(_strings(_get(h, platform).get_json()))
+        served |= set(_strings(_delete(h, platform).get_json()))
+    assert "Let Fleeced make roster moves in Sleeper?" in served   # the probe sees real text
+    assert not served & _draft_strings(), served & _draft_strings()
+    # The neutral notice served for a platform without final text is R15.2.6's
+    # own first sentence.
+    assert WITHDRAWAL_NOTICE.startswith(copy.withdrawal_notice("mfl"))
+
+
+def test_a_draft_version_is_never_accepted_as_consent(h):
+    r = h.post(consent={"copy_version": MFL_V1, "locale": "en-US"})
+    assert r.status_code == 409 and _err(r)["error"] == "consent_required"
+    assert [c for c in h.consents() if c["kind"] == "grant"] == []
+
+
+def test_grants_never_cross_platforms(h):
+    """R28.27: an MFL (or ESPN) grant never covers Sleeper, and the reverse,
+    even for the same account id and an identical version string."""
+    for platform in ("mfl", "espn"):
+        db_module.record_platform_write_grant(
+            user_id=USER, platform=platform, platform_user_id=SLEEPER_UID, copy_version=V1,
+            locale="en-US", consented_at=h.now, client_platform=None, app_version=None,
+            trigger_attempt_id=None)
+    assert _active(h, h.now) is None                          # no Sleeper grant
+    r = h.post(consent=_ABSENT)
+    assert r.status_code == 409 and _err(r)["error"] == "consent_required"
+    sleeper = _grant(h)
+    for platform in ("mfl", "espn"):
+        got = db_module.active_platform_write_grant(USER, platform, SLEEPER_UID, V1, h.now)
+        assert got is not None and got["platform"] == platform
+        assert got["consent_id"] != sleeper["consent_id"]
+    db_module.withdraw_platform_write_grants(USER, "sleeper", "settings", h.now)
+    for platform in ("mfl", "espn"):                          # untouched by Sleeper's withdrawal
+        assert db_module.active_platform_write_grant(USER, platform, SLEEPER_UID, V1, h.now)
+    assert db_module.active_platform_write_grant(USER, "mfl", SLEEPER_UID, MFL_V1, h.now) is None
+

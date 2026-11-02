@@ -613,7 +613,7 @@ def test_after_send_failure_is_outcome_unknown_and_never_retried(h, mode):
     assert h.events_named("fa_move_write_succeeded") == []
 
 
-@pytest.mark.parametrize("mode", ["connect_refused", "dns", "no_route", "http_429"])
+@pytest.mark.parametrize("mode", ["connect_refused", "dns", "no_route"])
 def test_connect_phase_failure_is_not_sent(h, mode):
     h.platform.mode = mode
     r = h.post()
@@ -628,7 +628,7 @@ def test_connect_phase_failure_is_not_sent(h, mode):
     assert h.post(consent=_ABSENT).status_code == 200
 
 
-@pytest.mark.parametrize("mode", ["refused", "http_400"])
+@pytest.mark.parametrize("mode", ["refused", "http_400", "http_429"])   # Sleeper answered
 def test_platform_refusal_is_write_failed_without_kind(h, mode):
     h.platform.mode = mode
     r = h.post()
@@ -1112,19 +1112,59 @@ def test_a_demo_session_is_refused(h, verified):
     _no_write(h)
 
 
-def test_relinking_sleeper_withdraws_open_consent(h, monkeypatch):
-    """P3, R15.2.5: re-consent after a reconnect."""
+STORED = _jwt(exp_offset=3600)
+
+
+def _link(h, monkeypatch, token):
     from unittest.mock import MagicMock
     monkeypatch.setattr(sleeper_write, "verify_token_live", MagicMock(return_value={"raw": {}}))
-    assert h.post().status_code == 200                      # a grant now exists
-    r = h.client.post("/api/sleeper/link", headers={"X-Session-Token": TOKEN,
-                                                    "Content-Type": "application/json"},
-                      data=json.dumps({"token": _jwt()}))
+    return h.client.post("/api/sleeper/link", headers={"X-Session-Token": TOKEN,
+                                                       "Content-Type": "application/json"},
+                         data=json.dumps({"token": token}))
+
+
+def _store_and_consent(h, sleeper_user_id=SLEEPER_UID):
+    db_module.upsert_sleeper_credential(USER, sleeper_user_id,
+                                        sleeper_write.encrypt_token(STORED), None)
+    db_module.record_platform_write_grant(
+        user_id=USER, platform="sleeper", platform_user_id=sleeper_user_id, copy_version=V1,
+        locale="en-US", consented_at=h.now, client_platform=None, app_version=None,
+        trigger_attempt_id=None)
+
+
+def test_relinking_with_a_new_token_withdraws_as_relink(h, monkeypatch):
+    """P3 + round 5 (legal R28.26 2f): a link that CHANGES the stored token
+    ends open consent, recorded as `relink` (non-touching: a side effect)."""
+    _store_and_consent(h)
+    r = _link(h, monkeypatch, _jwt(exp_offset=7200))          # a fresh capture
     assert r.status_code == 200, r.get_json()
-    assert [c["withdrawn_via"] for c in h.consents() if c["kind"] == "withdrawal"] == ["disconnect"]
+    assert [c["withdrawn_via"] for c in h.consents() if c["kind"] == "withdrawal"] == ["relink"]
     (ev,) = h.events_named("fa_move_consent_withdrawn")
-    assert ev[2]["props"] == {"via": "disconnect", "league_platform": "sleeper"}
-    h.rosters = _rosters(mine=(KEEP, ADD))
-    r = h.post(add_player_id="7777", drop_player_id=ADD, consent=_ABSENT)
+    assert ev[2]["props"] == {"via": "relink", "league_platform": "sleeper"}
+    assert ev[2]["touch_user"] is False
+    r = h.post(consent=_ABSENT)
     assert r.status_code == 409 and _err(r)["consent"]["reason"] == "withdrawn"
+
+
+def test_relinking_another_sleeper_user_withdraws(h, monkeypatch):
+    _store_and_consent(h, sleeper_user_id="999000999000999000")  # a legacy row, another account
+    assert _link(h, monkeypatch, STORED).status_code == 200      # same token, another user
+    assert [c["withdrawn_via"] for c in h.consents() if c["kind"] == "withdrawal"] == ["relink"]
+
+
+def test_a_replay_of_the_stored_token_withdraws_nothing(h, monkeypatch):
+    """The client re-posts the STORED token at session start
+    (maybeReplaySleeperVerification, #126): no row, no event, grant intact."""
+    _store_and_consent(h)
+    assert _link(h, monkeypatch, STORED).status_code == 200
+    assert [c for c in h.consents() if c["kind"] == "withdrawal"] == []
+    assert h.events_named("fa_move_consent_withdrawn") == []
+    assert server._fa_move_grant(USER, "sleeper", SLEEPER_UID, h.now) is not None
+    assert h.post(consent=_ABSENT).status_code == 200            # still consented
+
+
+def test_a_first_link_withdraws_nothing(h, monkeypatch):
+    db_module.delete_sleeper_credential(USER, withdrawn_via="disconnect")
+    assert _link(h, monkeypatch, STORED).status_code == 200
+    assert h.consents() == [] and h.events_named("fa_move_consent_withdrawn") == []
 

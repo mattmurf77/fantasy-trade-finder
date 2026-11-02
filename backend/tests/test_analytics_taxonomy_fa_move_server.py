@@ -76,7 +76,7 @@ def test_emitted_props_are_exactly_the_granted_ones(h):
             assert props["surface"] in ("free_agents", "usage_trends")      # never None
         if name == "fa_move_consent_withdrawn":
             assert props["via"] in ("settings", "disconnect", "credential_expired",
-                                    "credential_rejected")
+                                    "credential_rejected", "relink")
         if name == "fa_move_write_succeeded":
             assert props["result"] in ("accepted", "partial")          # F4
             assert props["move_kind"] in ("add", "claim")              # C5

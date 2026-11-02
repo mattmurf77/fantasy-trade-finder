@@ -495,14 +495,16 @@ def _post_graphql_write(op: str, token: str, body: dict, *, timeout: int, _opene
     failure by backend/write_outcome.py's rules (the ESPN/MFL adapters'):
 
       * 401/403, or an auth-worded GraphQL error → SleeperAuthError;
-      * a definite connect-phase failure (`request_never_sent`) or a 429
-        throttle → kind 'network': nothing was processed, a retry is safe;
+      * a definite connect-phase failure (`request_never_sent`) → kind
+        'network': provably nothing was sent, a retry is safe;
       * a timeout / reset / RemoteDisconnected after the request was written,
         a URLError urllib can't place before the send, an HTTP 5xx, or a 2xx
         that isn't readable JSON with a `data` object → kind OUTCOME_UNKNOWN:
         the move may exist, so the caller must never retry;
-      * any other 4xx, or GraphQL `errors[]` on a 200 → kind 'error': Sleeper
-        refused it.
+      * any other 4xx (a 429 included: Sleeper answered, so something was
+        sent), or GraphQL `errors[]` on a 200 → kind 'error': Sleeper refused
+        it. Its wording is "nothing changed", never "nothing was sent" (legal
+        R28.27: only a code decided before any platform call says that).
     Sleeper's own text rides `detail` for the log only (truncated to 500,
     `docs/integrations/sleeper.md` §6); the token is never logged.
     """
@@ -535,10 +537,6 @@ def _post_graphql_write(op: str, token: str, body: dict, *, timeout: int, _opene
             if e.code >= 500:
                 raise SleeperWriteError(f"Sleeper returned HTTP {e.code}", kind=unknown,
                                         detail=raw[:500])
-            if e.code == 429:
-                # A throttle is a definite "not processed" (mfl_write's rule).
-                raise SleeperWriteError("Sleeper throttled the request", kind="network",
-                                        detail=raw[:500])
             raise SleeperWriteError(f"Sleeper returned HTTP {e.code}", detail=raw[:500])
         except urllib.error.URLError as e:
             if _write_outcome.request_never_sent(e):
@@ -563,6 +561,11 @@ def _post_graphql_write(op: str, token: str, body: dict, *, timeout: int, _opene
             detail = str(msg).strip()[:500] if msg else dump
             if any(w in dump.lower() for w in ("auth", "unauth", "token", "forbidden", "login")):
                 raise SleeperAuthError("Sleeper auth error", detail=detail)
+            # THE CAPTURE maps Sleeper's error strings here (roster full, player
+            # taken, locked, ...). Any code produced AFTER the call is a platform
+            # refusal and takes platform-refusal wording ("nothing changed"),
+            # never "nothing was sent", even where it reuses a pre-call code's
+            # name (legal R28.27; pinned by test_fa_move_capability.py).
             raise SleeperWriteError("Sleeper GraphQL error", detail=detail)
         if not isinstance(parsed, dict) or not isinstance(parsed.get("data"), dict):
             raise SleeperWriteError("unreadable response from Sleeper", kind=unknown,

@@ -318,6 +318,95 @@ def test_no_we_our_or_try_again_where_the_outcome_is_unknown_or_in_progress():
         assert not re.search(r"\b(we|our|us)\b|try again", text, re.IGNORECASE), text
 
 
+# ---------------------------------------------------------------------------
+# Legal R28.27: "nothing was sent" only for codes decided before any platform
+# call; a platform refusal says "nothing changed"; an unknown outcome neither.
+# ---------------------------------------------------------------------------
+
+PRE_CALL = {"feature_disabled", "bad_request", "verification_required", "not_linked",
+            "expired", "consent_required", "roster_full_drop_required", "asset_not_owned",
+            "player_unavailable", "waiver_bid_over_budget", "move_kind_changed",
+            "waiver_claim_unsupported", "unconfigured", "write_failed+network",
+            "write_failed+roster_read"}
+PLATFORM_REFUSAL = {"rejected", "write_failed"}            # write_failed with NO kind
+UNKNOWN = {"outcome_unknown", "internal_error", "move_in_progress"}
+
+
+def _raised_codes_and_messages():
+    """(code class key, message key) for every `_fa_move_error(...)` the D1
+    routes can raise, read from the source (AST): the code with `{platform}_`
+    stripped, `+kind` when the call passes one, and the `_fa_copy.message`
+    key of its message (a variable key resolves to the keys it can hold)."""
+    import ast, inspect, textwrap
+    pairs = set()
+    for fn in (server._fa_move_core, server._fa_move_write_failure,
+               server._fa_move_consent_step, server._fa_move_consent_required,
+               server.league_free_agents_move_route, server.platform_write_consent_route):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_fa_move_error"):
+                continue
+            arg = node.args[0]
+            code = (arg.value if isinstance(arg, ast.Constant)
+                    else arg.values[-1].value.lstrip("_"))
+            kind = next((k.value.value for k in node.keywords if k.arg == "kind"), None)
+            msg = node.args[2]
+            assert isinstance(msg, ast.Call) and getattr(msg.func, "attr", None) == "message", code
+            key = msg.args[0]
+            keys = ([key.value] if isinstance(key, ast.Constant)
+                    else ["move_in_progress", "move_in_progress_pending_claim"])
+            for k in keys:
+                pairs.add((code + (f"+{kind}" if kind else ""), k))
+    return pairs
+
+
+def test_every_raised_code_has_a_wording_class():
+    codes = {code for code, _ in _raised_codes_and_messages()}
+    assert codes == PRE_CALL | PLATFORM_REFUSAL | UNKNOWN, codes ^ (PRE_CALL | PLATFORM_REFUSAL | UNKNOWN)
+
+
+def _text(key):
+    return copy.message(key, "sleeper", add="A", drop="B", league="L", remaining=5).lower()
+
+
+def test_pre_call_refusals_may_say_nothing_was_sent():
+    for code, key in _raised_codes_and_messages():
+        if code in PRE_CALL:
+            assert "nothing changed" not in _text(key), (code, key)
+
+
+def test_platform_refusals_say_nothing_changed_never_nothing_was_sent():
+    seen = set()
+    for code, key in _raised_codes_and_messages():
+        if code in PLATFORM_REFUSAL:
+            seen.add(code)
+            assert "nothing changed" in _text(key), (code, key)
+            assert "nothing was sent" not in _text(key), (code, key)
+    assert seen == PLATFORM_REFUSAL
+
+
+def test_unknown_outcomes_say_neither():
+    for code, key in _raised_codes_and_messages():
+        if code in UNKNOWN:
+            assert "nothing was sent" not in _text(key) and "nothing changed" not in _text(key)
+    body = copy._SLEEPER_SLOTS_FINAL["unknown_body"].lower()
+    assert "nothing was sent" not in body and "nothing changed" not in body
+
+
+def test_a_partial_result_says_neither():
+    title, lines = copy.result_copy(status="complete", result="partial", platform="sleeper",
+                                    add="A", drop="B", league="L", added=["1"], dropped=[],
+                                    bid=None)
+    text = " ".join([title, *lines]).lower()
+    assert "nothing was sent" not in text and "nothing changed" not in text
+
+
+def test_nothing_was_sent_appears_only_in_pre_call_messages():
+    for code, key in _raised_codes_and_messages():
+        if "nothing was sent" in _text(key):
+            assert code in PRE_CALL, (code, key)
+
+
 def test_never_the_false_sleeper_line():
     """Scope state 1: the neutral fallback is never "Sleeper doesn't allow
     apps to submit claims"; nor may the server say so."""

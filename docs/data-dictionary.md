@@ -1639,7 +1639,7 @@ Expo push tokens. Composite uniqueness via `device_token` PK + indexed `user_id`
 
 Interim home; folds into the auth epic's `linked_sources` when that lands.
 
-**Deleting a row ends roster-move consent.** `delete_sleeper_credential(user_id, *, withdrawn_via)` deletes the row and, in the same transaction, appends a `platform_write_consents` withdrawal for every open Sleeper grant (`withdrawn_via` is required: `disconnect` | `credential_expired` | `credential_rejected`). Server callers go through `server._drop_sleeper_credential`. A (re-)link (`POST /api/sleeper/link`) ends any open grant first too (`disconnect`, R15.2.5). Account deletion deletes both consent tables outright instead (R15.8 D12).
+**Deleting a row ends roster-move consent.** `delete_sleeper_credential(user_id, *, withdrawn_via)` deletes the row and, in the same transaction, appends a `platform_write_consents` withdrawal for every open Sleeper grant (`withdrawn_via` is required: `disconnect` | `credential_expired` | `credential_rejected`). Server callers go through `server._drop_sleeper_credential`. A link that changes the stored credential (`POST /api/sleeper/link` with another token or another Sleeper user) ends any open grant first, as `relink` (legal R28.26 2f); a replay of the stored token withdraws nothing. Account deletion deletes both consent tables outright instead (R15.8 D12).
 
 ---
 
@@ -1663,7 +1663,7 @@ D1 free-agent moves ([contract](plans/sleeper-fa-write/contract.md); legal R15.3
 | `client_platform`, `app_version` | str | Grants: the `X-Device` / `X-App-Version` headers |
 | `trigger_attempt_id` | str | Grants: the `attempt_id` of the move the tick was given for |
 | `withdrawn_at` | str | Withdrawals: server UTC |
-| `withdrawn_via` | str | Withdrawals: `settings` \| `disconnect` \| `credential_expired` \| `credential_rejected` |
+| `withdrawn_via` | str | Withdrawals: `settings` \| `disconnect` (the user's own choice) \| `credential_expired` \| `credential_rejected` \| `relink` (side effects) |
 | `recorded_at` | str | Row insert time, server UTC |
 
 User-keyed: deleted with the account and included in the export (`accounts._ADDITIONAL_PRIVATE_TABLES`).

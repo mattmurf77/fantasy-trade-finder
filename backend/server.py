@@ -24810,13 +24810,16 @@ def sleeper_link():
     withdrawn = 0
     try:
         ciphertext = _sleeper_write.encrypt_token(token)
-        # D1, R15.2.5: re-consent after a reconnect. A (re-)link replaces the
-        # credential, so it first ends any open roster-move consent (via
-        # 'disconnect', the granted closed set's reconnect value; a first link
-        # has none open). Withdraw BEFORE the upsert: if the withdrawal fails,
-        # nothing is stored; if the store fails, the user just re-consents.
-        withdrawn = _fa_db.withdraw_platform_write_grants(
-            user_id, "sleeper", "disconnect", _fa_move_now())
+        # D1, R15.2.5 / legal R28.26 2f: re-consent after a re-link, recorded as
+        # `relink`. Only when the stored credential actually CHANGES (another
+        # token, or another Sleeper user): the client silently re-posts the
+        # STORED token at session start (maybeReplaySleeperVerification, #126),
+        # and that replay must never end a grant. Withdraw BEFORE the upsert:
+        # if the withdrawal fails nothing is stored; if the store fails, the
+        # user just re-consents. Neither token is ever logged.
+        if _sleeper_credential_changes(user_id, token, sleeper_user_id):
+            withdrawn = _fa_db.withdraw_platform_write_grants(
+                user_id, "sleeper", "relink", _fa_move_now())
         upsert_sleeper_credential(user_id, sleeper_user_id, ciphertext, expires_at)
     except _sleeper_write.SleeperWriteError:
         return jsonify({"error": "sleeper_unconfigured"}), 503
@@ -24826,7 +24829,8 @@ def sleeper_link():
     finally:
         if withdrawn:
             _fa_move_event(user_id, "fa_move_consent_withdrawn",
-                           {"via": "disconnect", "league_platform": "sleeper"})
+                           {"via": "relink", "league_platform": "sleeper"},
+                           touch_user=False)       # a side effect of the link (F2)
 
     if proven_live:
         # Claim matches + oracle passed → this session controls the account.
@@ -36681,6 +36685,24 @@ def _drop_sleeper_credential(user_id: str, via: str) -> int:
     return withdrawn
 
 
+def _sleeper_credential_changes(user_id: str, token: str, sleeper_user_id) -> bool:
+    """True when storing `token` would change the user's stored Sleeper
+    credential: there is one, and it holds another token or another Sleeper
+    user. A replay of the stored token is not a change. A stored token that
+    can't be decrypted counts as a change (its grant can't be tied to it).
+    Constant-time compare; neither token is ever logged."""
+    cred = get_sleeper_credential(user_id)
+    if not cred:
+        return False
+    if str(cred.get("sleeper_user_id") or "") != str(sleeper_user_id or ""):
+        return True
+    try:
+        stored = _sleeper_write.decrypt_token(cred["token_encrypted"])
+    except _sleeper_write.SleeperWriteError:
+        return True
+    return not hmac.compare_digest(stored.encode("utf-8"), str(token).encode("utf-8"))
+
+
 def _sleeper_cred_expired(cred: dict, now: datetime) -> bool:
     """`GET /api/sleeper/link`'s `expired`: the stored expiry is past."""
     try:
@@ -36991,7 +37013,10 @@ def _fa_move_preflight_over_budget(t0: float) -> bool:
 
 def _fa_move_write_failure(kind, platform: str) -> tuple[dict, int, str]:
     """(body, status, result) for a failed platform write, by
-    write_outcome.py's kind (contract §4):
+    write_outcome.py's kind (contract §4). Wording (legal R28.27): only a
+    failure decided before any byte reached the platform ('network' =
+    `request_never_sent`, 'config') may say "nothing was sent"; a platform
+    refusal says "nothing changed"; an unknown outcome says neither:
       outcome_unknown → 502 `{p}_outcome_unknown` (state 12), result 'unknown'
       network         → 502 `{p}_write_failed` + kind 'network' (11, not sent)
       config          → 503 `{p}_unconfigured` (10g), nothing sent

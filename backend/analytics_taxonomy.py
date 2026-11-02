@@ -935,9 +935,11 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     #   fa_move_consent_recorded  — surface, copy_version, league_platform.
     #     NON_INTENT. `surface` ∈ free_agents | usage_trends from the request,
     #     ABSENT when the request has none (G2: absent, never null).
-    #   fa_move_consent_withdrawn — via (settings | disconnect |
-    #     credential_expired | credential_rejected), league_platform.
-    #     NON_INTENT; the two credential_* (system) rows are non-touching (F2).
+    #   fa_move_consent_withdrawn — via, league_platform. NON_INTENT. `via` has
+    #     5 values: settings | disconnect, the user's own choice; and
+    #     credential_expired | credential_rejected | relink, side effects
+    #     (written non-touching, F2). `relink` (legal R28.26 2f, 11-01): a
+    #     Sleeper link that CHANGES the stored credential, never a replay of it.
     #   fa_move_write_succeeded   — move_kind (add | claim, C5), has_drop,
     #     has_bid, result (accepted | partial), attempt_id, league_platform.
     #     INTENT. Only on a 200 (F4); league_id rides the envelope column.
