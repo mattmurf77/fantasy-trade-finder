@@ -10,6 +10,7 @@ import { getPaywallConfig, type PaywallTip } from '../api/billing';
 import {
   currentIdentityUserId,
   getTipProducts,
+  isPaymentPending,
   isUserCancelled,
   PurchaseIdentityError,
   purchaseTip,
@@ -56,6 +57,7 @@ export default function TipJarScreen({ navigation, route }: any) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [thanked, setThanked] = useState(false);
+  const [pending, setPending] = useState(false);
 
   const dismiss = useCallback(() => {
     if (navigation?.canGoBack?.()) navigation.goBack();
@@ -116,9 +118,10 @@ export default function TipJarScreen({ navigation, route }: any) {
       if (busy) return;
       const productId = option.tip.product_id;
       setError(null);
+      setPending(false);
       track('paywall_purchase_initiated', { product_id: productId, source });
       if (!option.product) {
-        setError('Tips aren’t available on this build yet. Thanks for the thought!');
+        setError('Couldn’t load tips right now. Try again later.');
         track('paywall_purchase_failed', { product_id: productId, user_cancelled: false });
         return;
       }
@@ -132,7 +135,7 @@ export default function TipJarScreen({ navigation, route }: any) {
         }
         const result = await purchaseTip(option.product);
         if (!result) {
-          setError('Tips aren’t available on this build yet. Thanks for the thought!');
+          setError('Couldn’t load tips right now. Try again later.');
           track('paywall_purchase_failed', { product_id: productId, user_cancelled: false });
           return;
         }
@@ -143,8 +146,11 @@ export default function TipJarScreen({ navigation, route }: any) {
       } catch (err) {
         const cancelled = isUserCancelled(err);
         track('paywall_purchase_failed', { product_id: productId, user_cancelled: cancelled });
-        if (!cancelled) {
-          setError('That didn’t go through. You haven’t been charged.');
+        if (isPaymentPending(err)) {
+          // Ask to Buy / a bank check: not an error, and no thank-you yet.
+          setPending(true);
+        } else if (!cancelled) {
+          setError('The App Store didn’t finish the tip. Check your connection and try again.');
         }
       } finally {
         setBusy(false);
@@ -181,17 +187,16 @@ export default function TipJarScreen({ navigation, route }: any) {
               Thank you.
             </ChalkText>
             <ChalkText variant="body" style={styles.thanksBody}>
-              Tips keep Fleeced independent — every one goes straight into
-              building the tool.
+              Your tip helps keep Fleeced going.
             </ChalkText>
             <Button testID="tipjar-done" label="Done" onPress={dismiss} style={styles.cta} />
           </View>
         ) : (
           <>
             <ChalkText variant="body" style={styles.lede}>
-              Fleeced is built by one person. If it’s earned a spot in your
-              league routine, a tip helps keep it going. A tip unlocks
-              nothing — it’s just a thank-you.
+              One person builds Fleeced. If the app has earned a spot in your
+              league routine, a tip helps keep it going. A tip unlocks nothing.
+              It’s just a thank-you.
             </ChalkText>
 
             {configQuery.isLoading ? (
@@ -225,6 +230,12 @@ export default function TipJarScreen({ navigation, route }: any) {
               <View style={styles.loading}>
                 <ActivityIndicator color={ice.base} />
               </View>
+            ) : null}
+
+            {pending ? (
+              <ChalkText variant="bodySm" style={styles.emptyNote}>
+                Waiting for approval. The tip goes through once it’s approved.
+              </ChalkText>
             ) : null}
 
             {error ? (

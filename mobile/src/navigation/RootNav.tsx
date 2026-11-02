@@ -58,6 +58,7 @@ import VerifySheet from '../components/VerifySheet';
 import Toast from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useFlag, useFeatureFlags } from '../state/useFeatureFlags';
+import { WarmPaywallConfig } from '../state/useWarmPaywallConfig';
 import {
   getLinkingV2,
   flushPendingNavIntents,
@@ -639,6 +640,9 @@ export default function RootNav({ booted }: { booted: boolean }) {
                   authed screen, App Store builds included (#354 D-5).
                   Settings → Help & about → Your feedback opens the inbox. */}
               <FeedbackFAB activeScreen={activeScreen} />
+              {/* Tip jar C1: keeps the paywall config warm for the Settings
+                  tip row (state/useWarmPaywallConfig.ts). Renders nothing. */}
+              <WarmPaywallConfig />
             </>
           )}
         </Stack.Screen>
