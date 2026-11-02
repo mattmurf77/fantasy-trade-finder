@@ -265,12 +265,47 @@ def values_snapshot_id(conn, fmt: str, league_id: str, pool: Mapping, *,
 
 
 def snapshot_ids(conn, fmt: str, league_id: str, pool: Mapping, *,
-                 pick_source: str, generation=None) -> tuple[str, str]:
-    """``(rfp1, vsn1)`` from one read of each input: members, picks, draft state."""
+                 pick_source: str, generation=None, parts: dict | None = None) -> tuple[str, str]:
+    """``(rfp1, vsn1)`` from one read of each input: members, picks, draft state.
+
+    ``parts`` (a job's kickoff): filled from the same read with ``picks_key``
+    (``picks_key``), and, when it carries ``member_rows``, ``expected_fp``
+    (``expected_fp``) (#484 QA P2-1)."""
     lid = str(league_id)
     picks = _read_picks(conn, lid, pick_source)
-    fp, _owners = _roster_fp(_read_members(conn, lid), picks, _read_drafted(conn, lid))
+    drafted = _read_drafted(conn, lid)
+    fp, _owners = _roster_fp(_read_members(conn, lid), picks, drafted)
+    if parts is not None:
+        parts["picks_key"] = picks_key(picks, drafted)
+        if parts.get("member_rows"):
+            parts["expected_fp"] = _roster_fp(_stored_member_rows(parts["member_rows"]),
+                                              picks, drafted)[0]
     return fp, _values_snapshot_id(fmt, pool, picks, generation)
+
+
+def picks_key(picks, drafted: bool = False) -> str:
+    """rfp1's pick and draft-state part: the rfp1 of no members with these pick
+    rows and this draft verdict. Two equal keys mean the same picks and draft
+    state, as the stamp hashes them (#486 QA P3-5)."""
+    return _roster_fp((), picks, drafted)[0]
+
+
+def _stored_member_rows(member_rows) -> list:
+    """``[{user_id, player_ids}]`` (the rows session init writes) as
+    ``replace_espn_league_members`` stores them, in ``_read_members``' shape."""
+    return [(str(m["user_id"]), json.dumps(m.get("player_ids", [])), None)
+            for m in member_rows if m.get("user_id")]
+
+
+def expected_fp(conn, league_id: str, member_rows, *, pick_source: str) -> str:
+    """The rfp1 the league's stored rows will have once ``member_rows`` replace
+    its members (``[{user_id, player_ids}]``, the rows session init writes,
+    stored as ``replace_espn_league_members`` stores them), with its pick rows
+    and draft state as they are now. Equal to a stamp only when that stamp
+    hashes exactly these members and these picks (#484 QA P1-1)."""
+    lid = str(league_id)
+    return _roster_fp(_stored_member_rows(member_rows), _read_picks(conn, lid, pick_source),
+                      _read_drafted(conn, lid))[0]
 
 
 # ── on_roster_change: platforms-eng notifies, trades-eng reacts ───────────────

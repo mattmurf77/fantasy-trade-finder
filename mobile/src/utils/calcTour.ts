@@ -226,7 +226,7 @@ function endTour(reason: 'finished' | 'abandoned'): void {
 }
 
 /** Which builder actually renders for a slot. Only `n23` varies: its
- *  "Passwords never leave your phone" sentence is true on Sleeper and false
+ *  "We never see your password" sentence is true on Sleeper and false
  *  on MFL (password POSTed to /api/mfl/auth-link) and ESPN (espn_s2/SWID
  *  stored server-side), so off-Sleeper leagues get `n23b` instead. */
 function beatIdFor(id: BeatId): string {

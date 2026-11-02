@@ -101,8 +101,8 @@ Indirect, every flag state:
        `db.get_league_scoring`; then
        `_sync_sleeper_owned_picks(…, rosters=, meta=)` (`:237`), where `None` means picks failed (R10);
     4. `record_outcome(league_id, started, members_ok=, picks_ok=)` (`:244`).
-  - **PR-B seam:** `_refresh_league` is the one internal refresh both this kick and PR-B extend with the stamp and
-    `on_roster_change`. No stamp yet.
+  - **PR-B seam (BUILT 2026-10-27, B.3 step 7):** the stamp hangs off `record_outcome`, which both this kick
+    (`_refresh_league`) and the session-init daemon call, so both refreshes stamp and hook on their own threads.
   - **Repeated failures:** closed by the retry cooldown above. A league whose reads keep failing (5xx, timeouts; the
     circuit only catches 429s) is kicked at most once per `retry_after_s`, instead of on every tap past the bound.
 
@@ -186,6 +186,32 @@ league_roster_state
    - **Concurrency:** session init and foreground (or two league members) can run two daemons at once. The CAS
      makes the stored fp single-valued. A double hook call is possible and accepted (trades-eng debounces).
    - The first-ever stamp calls the hook with `old_fp=None` (§Q1).
+   - **As built (PR-B, 2026-10-27).** Simpler than the sketch above, same contract:
+     - **Where:** `roster_refresh.record_outcome` calls `stamp(league_id)` right after `mark_league_roster_fresh`
+       commits (`roster_refresh.py:83`). Both refreshes reach it: the session-init daemon (`server.py:27046`,
+       after members, picks and draft status) and the P41 kick (`_refresh_league`). A `stale` outcome (a failed
+       read, `write_failed`, `picks_unavailable`) or a failed state write never stamps.
+     - **`stamp`** (`roster_refresh.py:95-132`): read the stored `roster_fp` (`old`); compute `new` =
+       `roster_snapshot.roster_snapshot(conn, lid, pick_source=server._pick_read_source()).fp` (`:118`), the
+       serve's function and pick source (lazy `server` import, the `_refresh_league` pattern); `new == old` → no
+       write, no hook (`:119`); else `database.cas_league_roster_fp(lid, old, new)` (`:121`, `database.py:9302`):
+       one `UPDATE … SET roster_fp=:new WHERE league_id=:lid AND roster_fp = :old` (`IS NULL` for the first
+       stamp), committed before it returns, touching no other column.
+     - **Lost CAS:** no hook and no retry. The winner stamped the rows it read and fired its own hook; the
+       serve recomputes from rows either way.
+     - **No state row:** the UPDATE matches nothing, so no stamp. `record_outcome` always writes the row first.
+     - **Hook** (`:129`): `roster_snapshot.on_roster_change(lid, old, new)` after the CAS transaction has committed
+       and returned its connection. `roster_refresh` holds no lock there (`_inflight_lock` guards only the
+       in-flight set), and `on_roster_change` releases its registry lock before calling handlers (A3). Wrapped:
+       an exception is logged (`on_roster_change failed`) and never reaches the refresh.
+     - **Fingerprint failure** (a read error, the pick-source call, the CAS write): logged as
+       `roster fp stamp failed`, `roster_fp` left as stored, no hook, and the recorded outcome stays `fresh`.
+     - **Non-Sleeper leagues:** never stamped by this PR. `maybe_refresh_async` no-ops on
+       `is_linked_platform_league` and the session-init daemon calls `record_outcome` only when
+       `not _platform_linked`. The B.6 stamps on the other writers are **not in PR-B** (a follow-up; the serve
+       recomputes the fp from rows, so correctness holds).
+     - **Thread:** `record_outcome` runs only on the session-init daemon (`session-init-bg-writes`) and the kick
+       thread (`roster-refresh-<id>`). The request thread calls only `record_failure`, which never stamps.
 
 **Platform guard.** Steps 1–7's Sleeper path runs only when `not is_linked_platform_league(league_id)`.
 `session_input.py:42` already branches on it before the `isdigit()` Sleeper branch (`:53`). Never infer platform
@@ -411,6 +437,30 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
   **Moved out of PR-A:**
   - `test_tap_path_no_sleeper.py` (the AC-L3 guard) needs B.4's switches, which are trades-eng's S0-serve (§Q7).
   - The fingerprint and hook cases go to PR-B.
+
+  **PR-B (built 2026-10-27, branch `feat/s0-roster-fp-stamp`):**
+
+  | File | Tests | Pins |
+  |---|---|---|
+  | `backend/tests/test_roster_fp_stamp.py` (new, 18) | `test_first_stamp_writes_rfp1_and_calls_the_hook_with_old_none`, `test_stamp_follows_the_platform_pick_source_when_assign_tradeable_is_off` (#470 QA P3: flag off, a member-asserted row; the stamp equals the serve and differs from `'any'`; red with `'any'` hard-coded), `test_changed_roster_calls_the_hook_with_old_and_new`, `test_unchanged_roster_stamps_nothing_and_makes_no_call`, `test_lost_cas_makes_no_hook_call[first_stamp\|restamp]`, `test_stamp_without_a_state_row_writes_nothing`, `test_handler_exception_is_swallowed_and_logged`, `test_hook_raising_never_escapes_the_refresh`, `test_failed_refresh_does_not_stamp[members\|picks]`, `test_failed_read_and_failed_state_write_do_not_stamp`, `test_failed_kick_read_does_not_stamp`, `test_fp_error_keeps_the_stored_fp_and_the_fresh_outcome[fingerprint\|pick_source]`, `test_linked_platform_league_is_never_refreshed_so_never_stamped`, `test_a3_hook_runs_unlocked_outside_any_transaction_on_the_kick_thread`, `test_session_init_stamps_and_hooks_on_its_daemon_thread` | The first stamp is `rfp1:` + 32 hex, equal to the serve's `_trade_roster_snapshot(lid).fp`, computed with `server._pick_read_source()`; hook `(lid, None, fp)`. A change hooks `(old, new)`; no change makes no CAS and no `on_roster_change` call at all. A rival stamp between the read and the CAS keeps the rival's value, and no hook fires. Handler and hook exceptions are logged and the outcome stays `fresh`. A failed refresh, a failed state write, an fp error and a linked-platform league never stamp. **A3**, on a file-backed SQLite (QueuePool), inside the handler: `pool.checkedout() == 0`, `_inflight_lock` and `roster_snapshot._lock` both acquire non-blocking, and a second connection inserts and commits. The thread is `roster-refresh-<id>` (kick) or `session-init-bg-writes` (session init, a real thread the request joins), never the request thread |
+  | `backend/tests/test_roster_refresh_state.py` (1 assertion) | `test_success_marks_fresh_and_never_stores_none_ids` | `roster_fp` is now `rfp1:…` after a session-init success (it was pinned NULL until PR-B) |
+
+  **Sabotage, each red then restored byte-identical:**
+  1. The hook inside the CAS transaction (CAS inlined in `stamp`, hook before commit) → the A3 test fails on
+     `checked_out: 1` and on the second connection's write (`OperationalError`, database locked).
+  2. The hook under `_inflight_lock` → the A3 test fails on `inflight_lock: False`.
+  3. The CAS condition dropped (`WHERE league_id` only) → both `test_lost_cas_makes_no_hook_call` cases fail:
+     the rival's value is overwritten.
+  4. The `new == old` early return dropped → `test_unchanged_roster_stamps_nothing_and_makes_no_call` fails: one
+     `on_roster_change` call. (The spy replaces `on_roster_change` itself, because that function drops equal fps
+     before any handler, so a handler-level spy would stay green.)
+
+  **PR-B suites:** the targeted set (the new file plus `test_roster_refresh_state`, `test_roster_refresh_async`,
+  `test_roster_snapshot`, `test_trade_freshness_roster`, `test_traded_picks_unavailable`,
+  `test_session_init_sleeper_calls`, `test_trade_roster_floor_kick`, `test_server_module_shape`,
+  `test_co_owner_rosters`, `test_i1_serve_filter`, `test_trade_page_store`, `test_trade_pages_p2`,
+  `test_trade_fingerprint_reads_unlocked`, `test_sleeper_backoff`): **493 passed**. Full suite
+  (`python3 -m pytest backend/tests -q`, local Python 3.14): **9208 passed, 2 skipped, 0 failed**, exit 0, 35m37s.
 - [x] **Full suite:** `python3 -m pytest backend/tests -q` on `build/s0-roster-refresh`. Local Python 3.14.4 (CI is
   3.12.3). After the circuit + state commits: **7763 passed, 1 skipped**, exit 0, 882 s. After the replace commit
   (`9d998886`): **7766 passed, 1 skipped**, exit 0, 691 s. Stage C, after R10 (`2a05ca80`) and fresh|stale-only
@@ -479,10 +529,10 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
 | `docs/api-reference.md` | **n/a in v1** | No route added and no contract changed. The 503 is unchanged. If C (the device page) needs `roster_fp` on the session-init response, that's a proposed additive field (§Q9) and gets a row then |
-| `docs/data-dictionary.md` | **Updated (PR-A)** | New `league_roster_state` section + TOC row; the `league_members.roster_data` note (reserve/IR + taxi included, nulls dropped). The replace commit adds the "Sleeper leagues are replace-synced" sentence to the `league_members` intro |
+| `docs/data-dictionary.md` | **Updated (PR-A, PR-B)** | New `league_roster_state` section + TOC row; the `league_members.roster_data` note (reserve/IR + taxi included, nulls dropped). The replace commit adds the "Sleeper leagues are replace-synced" sentence to the `league_members` intro. PR-B: the `roster_fp` row says it is stamped (`rfp1`, CAS) and the section intro names `cas_league_roster_fp` |
 | `docs/integrations/sleeper.md` | **Updated (PR-A)** | §4: the G-004 row and a new 429 row; new §4.1 (the circuit: rule, fail fast, no retries, never a clobber amplifier, fixture `__headers__`, log line); §5.2 hand-down and the **≤ 8 / ≤ 7** per-init budget; §6.1 safe-to-log (window, strikes, league id, status 429; `league_roster_state` enums) |
 | `docs/runbook.md` | **Updated (PR-A)** | New "Sleeper 429 / circuit open (S0, 2026-10-20)" + TOC row |
-| `docs/architecture.md` | **Owed (head-eng owns; not edited per the Stage B rules)** | Exact text to add under the session-init data flow: "**Roster refresh (S0).** Session init's authoritative Sleeper read (rosters, users, league meta; `session_input.resolve_session_input`) is the league's roster refresh. Its rosters and meta are handed to the background daemon (no second read) and the meta seeds `_FA_LEAGUE_META_CACHE`. The daemon replace-syncs Sleeper `league_members`, syncs owned picks and draft state, then `roster_refresh.record_outcome` writes `league_roster_state` (`fresh`). A failed read writes `stale` + `last_error_code` and never touches the rows: the state row holds only `fresh` \| `stale`, and "missing" (no cards) is derived by trades-eng's `roster_snapshot` from absent `league_members` rows (fingerprint contract v0.3 §3). `roster_refresh.maybe_refresh_async` re-runs the same Sleeper segment as a single-flight background kick when a league is past the roster bound (P41). Every server-side Sleeper read passes one per-process 429 circuit (`backend/sleeper_http.py`): one strike per throttling episode, fail fast while open, no in-line retries." |
+| `docs/architecture.md` | **Updated (PR-B)**: the "Roster refresh and fingerprint stamp (S0)" paragraph under Data flow, which carries the PR-A text below plus the stamp → CAS → hook flow. Was: **Owed (head-eng owns; not edited per the Stage B rules)** | Exact text to add under the session-init data flow: "**Roster refresh (S0).** Session init's authoritative Sleeper read (rosters, users, league meta; `session_input.resolve_session_input`) is the league's roster refresh. Its rosters and meta are handed to the background daemon (no second read) and the meta seeds `_FA_LEAGUE_META_CACHE`. The daemon replace-syncs Sleeper `league_members`, syncs owned picks and draft state, then `roster_refresh.record_outcome` writes `league_roster_state` (`fresh`). A failed read writes `stale` + `last_error_code` and never touches the rows: the state row holds only `fresh` \| `stale`, and "missing" (no cards) is derived by trades-eng's `roster_snapshot` from absent `league_members` rows (fingerprint contract v0.3 §3). `roster_refresh.maybe_refresh_async` re-runs the same Sleeper segment as a single-flight background kick when a league is past the roster bound (P41). Every server-side Sleeper read passes one per-process 429 circuit (`backend/sleeper_http.py`): one strike per throttling episode, fail fast while open, no in-line retries." |
 | `living-memory/LLD.md` | **Owed (living-memory is not edited here)** | Exact invariants to add: "(1) Every server-side Sleeper read goes through `sleeper_http.guard` (directly or via `_sleeper_get`); no in-line retries or sleeps. (2) A replace-style writer fed by a fail-soft Sleeper read skips while `sleeper_http.is_open()`. (3) Session init reads Sleeper rosters and meta once; daemon consumers take the handed payload. (4) `league_roster_state` is written only via `roster_refresh`; a failure never writes `league_members` or `draft_picks`. (5) `league_members` writers drop null/empty player ids (G-004). (6) Sleeper `league_members` is replace-synced from the authoritative snapshot; an empty snapshot is refused (G-015)." |
 | `living-memory/CHANGELOG.md`, `TEST_LEDGER.md` | **Owed at merge (release-lead's scribe)** | CHANGELOG: "S0 PR-A: Sleeper 429 circuit; `league_roster_state`; per-init Sleeper budget ≤ 10 → ≤ 8; Sleeper `league_members` replace-synced." TEST_LEDGER: the §3 tests and the full-suite counts |
 | `living-memory/HLD.md` | n/a | No new client, service or major flow. The refresh rides session init |
@@ -509,8 +559,10 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
      - The session-init diff is ~25 lines in `server.py` (`:22198-22207`, `:22613`, `:22805`, `:22839-22847`,
        `:22877`, `:22944-22946`, `:22958-22964`). engagement-eng (O8) edits the same region.
   2. **S0-serve (trades-eng):** `roster_snapshot`, the hook registry, freshness, I-1, and the B.4 switches.
-  3. **PR-B (platforms-eng, small):** step 7: compute fp → CAS → `on_roster_change`; the B.6 stamps on the
-     platforms-eng-owned writers; `test_roster_refresh_state.py`'s hook cases.
+  3. **PR-B (platforms-eng, small): BUILT 2026-10-27** on `feat/s0-roster-fp-stamp`, cut from `origin/main`
+     after S0-serve landed. Step 7: compute fp → CAS → `on_roster_change` (B.3, "As built"), tests in the new
+     `test_roster_fp_stamp.py`. **Not in it:** the B.6 stamps on the other platforms-eng-owned writers (a
+     follow-up, scoped out by platforms-eng's brief). No API, schema, flag or analytics change.
   - All three are built in parallel. PR-B is rebased on S0-serve right before merge. One coordinated PR would
     double the review surface in `server.py`'s session-init region, which engagement-eng (O8) is also editing.
 

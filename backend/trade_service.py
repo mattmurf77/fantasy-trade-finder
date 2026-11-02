@@ -474,7 +474,7 @@ _DEFAULT_CFG: dict[str, float] = {
     # ceiling on a job: the CONSENSUS per-pair path carries a 1.0s deadline,
     # but `trade_optimizer.generate_pair_trades_v3` explicitly has none
     # ("No deadline, no iteration budget", trade_optimizer.py:231), so a slow
-    # league would otherwise run to `server._JOB_HARD_TIMEOUT` (60s). Checked
+    # league would otherwise run to `server._JOB_HARD_TIMEOUT` (300s). Checked
     # per opponent, so the budget bounds when the sweep STOPS starting new
     # pairs, not the pair already in flight. <= 0 disables the rail.
     # Read only when the flag is on — flag-off never evaluates it.
@@ -5219,7 +5219,7 @@ class TradeService:
                 break
             # …and ON, the count no longer bounds the job, so a wall-clock
             # rail does instead (§3.5): the v3 pair path has no deadline of
-            # its own, and `_JOB_HARD_TIMEOUT` at 60s is not a ceiling anyone
+            # its own, and `_JOB_HARD_TIMEOUT` (300s, a stuck-job backstop) is not a ceiling anyone
             # should be relying on. Checked between opponents; <= 0 disables.
             if FLAGS.trade_full_sweep and _c("full_sweep_budget_s") > 0 \
                     and time.monotonic() - _sweep_t0 > _c("full_sweep_budget_s"):
