@@ -702,6 +702,17 @@ check('4o. D10 / scope §3.6: no countdown, days-left, ends-soon or trial-end da
     assert(!hit, `${f}: "${hit && hit[0]}"`);
   }
 });
+check('4p. legal R28.26 5c: the new-member price starts "in January 2027", never "January 1, 2027"', () => {
+  // The US price switches 2027-01-02 04:00Z (11 pm ET on Jan 1, #522), so
+  // "From January 1" was untrue for most of that day. "By December 31, 2026"
+  // stays as the Founder guarantee.
+  eq(copy.MON['mon.pay.founder.new'],
+    'Starting in January 2027, new members pay $34.99 a year or $6.99 a month.',
+    'mon.pay.founder.new verbatim');
+  for (const [k, v] of Object.entries(copy.MON)) {
+    assert(!/January 1\b/.test(String(v)), `${k} still names January 1: ${v}`);
+  }
+});
 
 // ═══ 5. api/purchases.ts — identity-ready gate + eligibility, executed ════
 const sdk = {

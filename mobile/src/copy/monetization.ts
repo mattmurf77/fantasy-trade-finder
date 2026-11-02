@@ -68,7 +68,7 @@ export const MON = {
   'mon.club.join': 'Join the Founding GMs.',
   'mon.pay.founder.price':
     'Founder price: $24.99 a year or $4.99 a month when you subscribe by December 31, 2026.',
-  'mon.pay.founder.new': 'From January 1, 2027, new members pay $34.99 a year or $6.99 a month.',
+  'mon.pay.founder.new': 'Starting in January 2027, new members pay $34.99 a year or $6.99 a month.',
   'mon.pay.founder.keep': 'Keep this price on your plan while your subscription stays active.',
   'mon.pay.founder.lapse':
     'If you switch plans or your subscription ends, you may lose the Founder price.',
