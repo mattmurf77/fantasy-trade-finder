@@ -219,7 +219,12 @@ def _repair_side_tables(job: dict) -> int:
     write-time map (database.live_deletion_token), is caught here: other
     users' taste for the person and their standing offers' team lists, and,
     as the deletion NULLs them, `trade_proposals` (id and valuation),
-    `trade_impressions` and `bad_trade_flags` targets."""
+    `trade_impressions` and `bad_trade_flags` targets. A mutual match a swipe
+    minted after the commit from a token map read before it (release-lead's
+    #562 QA P2-1) gets the deletion's own treatment: its side becomes the
+    placeholder and `match_valuation_json` goes, and the person's own inbox
+    rows are deleted (the notification scan then redacts the other side's,
+    match_partner_deleted)."""
     ids = sorted(job["ids"])
     with db.engine.begin() as conn:
         counts = scrub_side_tables(conn, set(ids), job["token"])
@@ -231,6 +236,13 @@ def _repair_side_tables(job: dict) -> int:
             target_user_id=None)).rowcount or 0
         n += conn.execute(update(f).where(f.c.target_user_id.in_(ids)).values(
             target_user_id=None, target_username=None)).rowcount or 0
+        m = db.trade_matches_table
+        n += conn.execute(update(m).where(m.c.user_a_id.in_(ids)).values(
+            user_a_id=_PLACEHOLDER, match_valuation_json=None)).rowcount or 0
+        n += conn.execute(update(m).where(m.c.user_b_id.in_(ids)).values(
+            user_b_id=_PLACEHOLDER, match_valuation_json=None)).rowcount or 0
+        nt = db.notifications_table
+        n += conn.execute(delete(nt).where(nt.c.user_id.in_(ids))).rowcount or 0
     return n
 
 
@@ -961,7 +973,7 @@ def _redact_page_rows(row_ids, job: dict) -> int:
                 pages, evidence = row["pages_blob"], row["evidence_blob"]
                 league = row["league_id"]
                 if league not in names_by_league:
-                    names_by_league[league] = _GradingContext(conn, job).names(league)
+                    names_by_league[league] = _GradingContext(conn, job).names_where_traced(league)
                 try:
                     new_pages = pages
                     if isinstance(pages, dict) and isinstance(pages.get("cards"), list):
@@ -1038,6 +1050,7 @@ class _GradingContext:
         names = job.get("names") or {}
         self.by_league = {lg: set(ns) for lg, ns in (names.get("leagues") or {}).items()}
         self.every = {n for ns in self.by_league.values() for n in ns} | set(names.get("usernames") or ())
+        self.leagues = set(job.get("leagues") or ())
         self._taken: dict[str, set] = {}
         self._partners: dict[str, object] = {}
 
@@ -1053,6 +1066,15 @@ class _GradingContext:
                     m.c.league_id == league_id, m.c.user_id.notin_(sorted(self.ids))))
                 for n in row if n}
         return mine - self._taken[league_id]
+
+    def names_where_traced(self, league_id: str) -> set:
+        """names(), but only in a league the person's traces were captured in
+        (their names there, or a league in the job's `leagues`: memberships,
+        roster history, imports). Elsewhere a "(from <name>)" can't be theirs,
+        so a same-name stranger is never relabelled (#562 QA P3-4)."""
+        if league_id in self.by_league or league_id in self.leagues:
+            return self.names(league_id)
+        return set()
 
     def deck_partner(self, impression_id) -> object:
         """A current-arm card's deck row partner (features_json), for cards
@@ -1325,7 +1347,9 @@ def _scan_notifications(job: dict, after: str, budget: "_Budget") -> tuple[str |
         if sides is None or row["user_id"] not in sides:
             return None
         other = sides.user_b_id if sides.user_a_id == row["user_id"] else sides.user_a_id
-        return other == _PLACEHOLDER
+        # A raw id of the person counts too: a match raced past the commit,
+        # before this pass's repair reached it (#562 QA P2-1).
+        return other == _PLACEHOLDER or other in ids
     changed, cursor = 0, int(after or 0)
     while budget.take():
         with db.engine.begin() as conn:
@@ -1416,7 +1440,7 @@ def _scan_overhaul_offers(job: dict, after: str, budget: "_Budget") -> tuple[str
                 card = _loads(r.card_json)
                 if not isinstance(card, dict):
                     continue
-                new = _relabel_card(card, ctx.names(r.league_id))
+                new = _relabel_card(card, ctx.names_where_traced(r.league_id))
                 if new != card:
                     changed += conn.execute(update(o).where(o.c.id == r.id).values(
                         card_json=json.dumps(new))).rowcount or 0

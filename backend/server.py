@@ -6163,6 +6163,14 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
     row.update(impression_id=impression_id, served_at=card["served_at"], is_ghost=0,
                features_json=json.dumps(features), assets_json=None, valuation_json=None,
                evidence_tier="viewed", delivered_at=state.delivered_at(index) or now)
+    # Legal R28.26 #10: a pack the scrub hasn't reached yet still names the
+    # person; while the deletion's job lives the row takes its token, as
+    # _redacted_held_row does for the snapshot path (#562 QA P3-5).
+    partner = features.get("partner_user_id")
+    token = live_deletion_token(partner) if partner is not None else None
+    if token and partner != token:
+        from . import deletion_scrub as _scrub
+        row = _scrub.redact_row(row, {partner}, token)
     key = str(index)
 
     def record(add: bool) -> None:
@@ -26060,6 +26068,9 @@ def create_standing_offer_route():
         return jsonify({"error": "team_user_ids must be current league members",
                         "invalid": invalid}), 400
 
+    # Legal R28.26 #10: a team whose manager's account deletion is still being
+    # scrubbed is stored as the deletion's token, never the real id.
+    team_user_ids = [live_deletion_token(t) or t for t in team_user_ids]
     try:
         offer = create_standing_offer(
             user_id         = g_user_id,

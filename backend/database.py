@@ -7270,7 +7270,9 @@ def league_pick_seasons(*, league_id: str, round: int = 1) -> list[int]:
 # clears the cache when it commits, so this process sees its own deletion at
 # once.
 _DELETION_TOKENS_TTL_S = 5.0
-_deletion_tokens_cache: dict = {"at": 0.0, "map": {}}
+# `gen` counts clears: a read that began before a clear never installs its
+# (pre-commit) map after it (release-lead's #562 QA P3-1).
+_deletion_tokens_cache: dict = {"at": 0.0, "map": {}, "gen": 0}
 _deletion_tokens_lock = threading.Lock()
 
 
@@ -7282,6 +7284,7 @@ def live_deletion_tokens() -> dict:
     with _deletion_tokens_lock:
         if now - _deletion_tokens_cache["at"] < _DELETION_TOKENS_TTL_S:
             return _deletion_tokens_cache["map"]
+        gen = _deletion_tokens_cache["gen"]
     try:
         t = deletion_scrub_jobs_table
         with engine.connect() as conn:
@@ -7299,13 +7302,17 @@ def live_deletion_tokens() -> dict:
         with _deletion_tokens_lock:
             return _deletion_tokens_cache["map"]
     with _deletion_tokens_lock:
-        _deletion_tokens_cache.update(at=now, map=mapping)
+        if _deletion_tokens_cache["gen"] == gen:
+            _deletion_tokens_cache.update(at=now, map=mapping)
+        # else a clear landed during the read: return what was read, cache
+        # nothing, and the next call reads again.
     return mapping
 
 
 def clear_deletion_tokens_cache() -> None:
     with _deletion_tokens_lock:
         _deletion_tokens_cache["at"] = 0.0
+        _deletion_tokens_cache["gen"] += 1
 
 
 def live_deletion_token(user_id) -> str | None:
