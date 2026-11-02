@@ -214,7 +214,12 @@ How the code meets it today:
     config=meta["config"])` refits from it with no live read.
   - An eval pins `value_model.SCORE_CONFIG`, the V-vector (`value_model_v_like`,
     `value_model_v_propose`), on `EvalRun.config` and in its run record. A
-    scorer that reads no configuration records `config: null`.
+    scorer that reads no configuration records `config: {}`, explicitly
+    empty (models-lead R6.3: `null` couldn't tell "read nothing" from "not
+    recorded"). Every run and record also carries `model_config_sha256` (the
+    live model_config at run time, whatever the scorer read), `code_sha`
+    (`RENDER_GIT_COMMIT`, else `git rev-parse HEAD`, else `unknown`), and the
+    read's `as_of` and `settle_lag_days`, beside `exclusion_rule_version`.
     `get_scorer("value_model", config=run.config)` builds the scorer with it
     as a constructor argument, and `replay.evaluate` with that scorer replays
     the run with no live read. The pin is never held in thread or global state.

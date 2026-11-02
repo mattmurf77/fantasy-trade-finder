@@ -94,12 +94,14 @@ def run_all(
     read = {"window_days": window_days, "source": "nightly", "seed": seed,
             "until": until, "as_of": as_of, "settle_lag_days": settle_lag_days}
     baseline = evaluate(get_scorer(baseline_name, config=config), decks,
-                        ess_min=ess_min, bootstrap=bootstrap, seed=seed)
+                        ess_min=ess_min, bootstrap=bootstrap, seed=seed,
+                        as_of=as_of, settle_lag_days=settle_lag_days)
     runs = [baseline]
     for name in due:
         try:
             run = evaluate(get_scorer(name, seed=seed, config=config), decks,
-                           ess_min=ess_min, bootstrap=bootstrap, seed=seed)
+                           ess_min=ess_min, bootstrap=bootstrap, seed=seed,
+                           as_of=as_of, settle_lag_days=settle_lag_days)
         except Exception as e:
             stats["errors"] += 1
             append_run({
