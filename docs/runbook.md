@@ -82,6 +82,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
   - [Orphaned-overhaul sweep (legal R28.22 d2, 2026-10-29)](#orphaned-overhaul-sweep-legal-r2822-d2-2026-10-29)
 - [Migration DDL never blocks boot](#migration-ddl-never-blocks-boot)
 - [Feature flags](#feature-flags)
+- [Free-agent moves kill switch (`sleeper.send_add_drop`, D1)](#free-agent-moves-kill-switch-sleepersend_add_drop-d1)
 - [Trade engine flags + kill switch](#trade-engine-flags-kill-switch)
 - [Runtime tuning](#runtime-tuning)
 - [Presentment-rules tripwire (`trade.presentment_rules`, G6 2026-08-16)](#presentment-rules-tripwire-tradepresentment_rules-g6-2026-08-16)
@@ -466,6 +467,18 @@ How it works now (`backend/database.py`, `_SchemaSnapshot` / `_run_guarded_ddl`)
 - `POST /api/feature-flags/reload` to re-read without restart, OR
 - Set `FTF_FLAGS` env var for process-level overrides.
 - Don't roll back `account.settings_hub` after the 11-06 build: the flat Settings fallback deletes without the LEG-S6 Apple code (#446).
+
+---
+
+## Free-agent moves kill switch (`sleeper.send_add_drop`, D1)
+
+The app makes Sleeper free-agent moves on the user's behalf only while `sleeper.send_add_drop` is on **and** the captured shapes are in the code (`sleeper_write.FA_MOVE_SHAPES_CAPTURED`). A move has no undo, so the lever is the env var, not the file:
+
+- **Kill it:** on Render, set `FTF_FLAGS` to include `"sleeper.send_add_drop": false` (merge with whatever `FTF_FLAGS` already holds; it is one JSON object) and let the service restart. `FTF_FLAGS` beats `config/features.json`, so no deploy and no build. `POST /api/feature-flags/reload` re-reads it without a restart.
+- **What users see:** `POST /api/league/free-agents/move` answers 404 `feature_disabled`; the next `GET /api/league/free-agents` says `move.mode: 'handoff'`, so the claim sheet offers "Open in Sleeper to claim" (state 1). A sheet already open falls to the hand-off on its next tap (the 404). Nothing in flight is cancelled: a move already sent stays in Sleeper.
+- **What it doesn't touch:** consent and move records stay (append-only, R15.3); grants keep their own 7-day clocks. `/api/platform-write-consent` never follows the flag, so Settings › Leagues › Stop roster moves still works while moves are off (it needs a verified session, like the move itself). Trade sends (`trade.send_in_sleeper`) are unaffected.
+- **The flip on** is the operator's, under D6 for launch (`docs/plans/sleeper-fa-write/scope.md` §5): `FTF_FLAGS` with `true`, then the scope's TestFlight checklist straight after, and back to `false` on any failure.
+- **Reading the records** (support, a disputed move): `platform_write_moves` by `attempt_id` (two rows: `sent`, then `result`; a `sent` row with no `result` or `result = 'unknown'` means the outcome was never confirmed, so check the user's Sleeper transactions), and `platform_write_consents` for the grant that covered it (`consent_id`). Neither holds a token.
 
 ---
 

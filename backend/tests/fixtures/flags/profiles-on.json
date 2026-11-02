@@ -50,6 +50,7 @@
   "trade.send_in_sleeper": true,
   "trade.send_in_mfl": true,
   "sleeper.trade_block": true,
+  "sleeper.send_add_drop": false,
   "trade.block_boost": true,
   "picks.owned_sync": true,
   "picks.rank_year_labels": true,

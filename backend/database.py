@@ -2661,6 +2661,82 @@ sleeper_credentials_table = Table("sleeper_credentials", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# platform_write_consents / platform_write_moves — D1 free-agent moves
+# (docs/plans/sleeper-fa-write/; legal-lead R15.3; consent.md §4.3 with the
+# launch scope's §2 deltas). Approved by the operator 2026-11-01.
+# ---------------------------------------------------------------------------
+#
+# The evidence record for moves Fleeced makes in a user's platform league on
+# their behalf. BOTH TABLES ARE APPEND-ONLY: rows are inserted, never updated.
+#   * A consent grant is one row (kind 'grant'); ending it is a NEW row (kind
+#     'withdrawal') whose `refers_to` names the grant. Validity is computed at
+#     read time (`active_platform_write_grant`): the latest grant for (user,
+#     platform, platform_user_id), at the current copy version, with no
+#     withdrawal, inside its rolling 7 × 24 h window from the server's own
+#     consent timestamp.
+#   * A move is two rows under the client's `attempt_id`: phase 'sent',
+#     written BEFORE the platform call, then phase 'result'. Unique on
+#     (user_id, attempt_id, phase), so one tap can never send twice. The id
+#     is OPAQUE and per user (contract §3): the client may mint it from
+#     Math.random, so another user's identical id is a different move.
+# Neither table ever stores a token or credential. User-keyed: both join
+# account deletion and export through accounts._ADDITIONAL_PRIVATE_TABLES
+# (R15.8 D12: deleted with the account). New tables, so metadata.create_all
+# creates them, constraints and indexes included, on both dialects; no
+# _migrate_db rows.
+
+platform_write_consents_table = Table("platform_write_consents", metadata,
+    Column("consent_id",         String, primary_key=True),  # uuid4 hex
+    Column("kind",               String, nullable=False),    # grant | withdrawal
+    Column("refers_to",          String),                    # withdrawal: the grant's consent_id
+    Column("user_id",            String, nullable=False),    # FTF user id
+    Column("platform",           String, nullable=False),    # sleeper | mfl | espn
+    Column("platform_user_id",   String),                    # the platform account moves are made as
+    Column("league_scope",       String),                    # grants: 'all_linked' (R15.8 D11)
+    Column("copy_version",       String),                    # grants: the text shown (fa_move_copy)
+    Column("locale",             String),                    # grants: 'en-US'
+    Column("consented_at",       String),                    # grants: server UTC
+    Column("expires_at",         String),                    # grants: consented_at + 7 × 24 h
+    Column("client_platform",    String),                    # X-Device header
+    Column("app_version",        String),                    # X-App-Version header
+    Column("trigger_attempt_id", String),                    # grants: the move's attempt_id
+    Column("withdrawn_at",       String),                    # withdrawals: server UTC
+    Column("withdrawn_via",      String),                    # settings | disconnect |
+                                                             # credential_expired |
+                                                             # credential_rejected | relink
+    Column("recorded_at",        String, nullable=False),    # row insert time, server UTC
+    Index("ix_platform_write_consents_user", "user_id", "platform"),
+)
+
+platform_write_moves_table = Table("platform_write_moves", metadata,
+    Column("id",                      Integer, primary_key=True, autoincrement=True),
+    Column("attempt_id",              String, nullable=False),  # client id, one per tap; opaque
+    Column("phase",                   String, nullable=False),  # sent | result
+    Column("user_id",                 String, nullable=False),  # FTF user id
+    Column("platform",                String, nullable=False),  # sleeper | mfl | espn
+    Column("platform_user_id",        String),                  # the account the move was made as
+    Column("league_id",               String, nullable=False),
+    Column("consent_id",              String),                  # the grant that covered it
+    Column("move_kind",               String),                  # add | claim
+    Column("add_player_ids",          Text),                    # JSON list (FTF / Sleeper ids)
+    Column("drop_player_ids",         Text),                    # JSON list
+    Column("faab_bid",                Integer),                 # claims
+    Column("sent_at",                 String),                  # server UTC, before the platform call
+    Column("result",                  String),                  # result rows: accepted | rejected |
+                                                                # partial | error | unknown
+    Column("status",                  String),                  # result rows on 200: complete | pending
+    Column("platform_transaction_id", String),                  # when the platform returns one
+    Column("error_code",              String),                  # result rows on a refusal
+    Column("response_status",         Integer),                 # result rows: the HTTP status answered
+    Column("response_json",           Text),                    # result rows: the body answered, replayed
+                                                                # for a repeat of the same attempt_id
+    Column("recorded_at",             String, nullable=False),  # row insert time, server UTC
+    UniqueConstraint("user_id", "attempt_id", "phase",
+                     name="uq_platform_write_moves_user_attempt_phase"),
+    Index("ix_platform_write_moves_user_league", "user_id", "league_id"),
+)
+
+# ---------------------------------------------------------------------------
 # espn_credentials_table — encrypted ESPN session cookies (league linking #101)
 # ---------------------------------------------------------------------------
 #
@@ -14925,15 +15001,236 @@ def get_sleeper_credential(user_id: str) -> dict | None:
     }
 
 
-def delete_sleeper_credential(user_id: str) -> None:
-    """Remove a user's stored Sleeper token (disconnect / dead-token cleanup)."""
+def delete_sleeper_credential(user_id: str, *, withdrawn_via: str) -> int:
+    """Remove a user's stored Sleeper token (disconnect / dead-token cleanup).
+
+    D1 (consent.md §4.4, R15.2.5): every deletion of the credential also ends
+    any open Sleeper roster-move consent, in the SAME transaction, so a
+    reconnect always means re-consent. `withdrawn_via` is required on purpose
+    (a new caller must say why): 'disconnect' | 'credential_expired' |
+    'credential_rejected'. Account deletion does not come through here: it
+    deletes the consent rows outright (R15.8 D12). Returns the number of
+    withdrawal rows appended (0 when no grant was open)."""
     if not user_id:
-        return
+        return 0
     with engine.begin() as conn:
         conn.execute(
             delete(sleeper_credentials_table)
             .where(sleeper_credentials_table.c.user_id == user_id)
         )
+        return withdraw_platform_write_grants(
+            user_id, "sleeper", withdrawn_via, datetime.now(timezone.utc), conn=conn)
+
+
+# ---------------------------------------------------------------------------
+# D1 free-agent moves — consent + move records (platform_write_consents /
+# platform_write_moves). Append-only: nothing here ever UPDATEs or DELETEs a
+# row of either table (account deletion is the only delete, in accounts.py).
+# Times are aware UTC datetimes in, ISO strings at rest; validity is computed
+# in Python from the (few) rows of one user and platform.
+# ---------------------------------------------------------------------------
+
+PLATFORM_WRITE_CONSENT_WINDOW = timedelta(days=7)   # R15.2.3: rolling 7 × 24 h
+
+
+def _parse_utc(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def platform_write_consent_rows(user_id: str, platform: str, *, conn=None) -> list[dict]:
+    """Every consent row (grants and withdrawals) of one user on one platform."""
+    t = platform_write_consents_table
+    stmt = select(t).where(t.c.user_id == str(user_id), t.c.platform == str(platform))
+    if conn is not None:
+        return [dict(r._mapping) for r in conn.execute(stmt)]
+    with engine.connect() as c:
+        return [dict(r._mapping) for r in c.execute(stmt)]
+
+
+def record_platform_write_grant(*, user_id: str, platform: str, platform_user_id: str,
+                                copy_version: str, locale: str, consented_at: datetime,
+                                client_platform: str | None, app_version: str | None,
+                                trigger_attempt_id: str | None) -> dict:
+    """Append a grant and COMMIT it before returning, so a caller can make the
+    platform call only after the grant exists (R15.8, "also required").
+    Returns the row as stored."""
+    import uuid as _uuid
+    row = {
+        "consent_id": _uuid.uuid4().hex,
+        "kind": "grant",
+        "refers_to": None,
+        "user_id": str(user_id),
+        "platform": str(platform),
+        "platform_user_id": str(platform_user_id),
+        "league_scope": "all_linked",
+        "copy_version": str(copy_version),
+        "locale": str(locale),
+        "consented_at": consented_at.isoformat(),
+        "expires_at": (consented_at + PLATFORM_WRITE_CONSENT_WINDOW).isoformat(),
+        "client_platform": client_platform,
+        "app_version": app_version,
+        "trigger_attempt_id": trigger_attempt_id,
+        "withdrawn_at": None,
+        "withdrawn_via": None,
+        "recorded_at": _now(),
+    }
+    with engine.begin() as conn:
+        conn.execute(insert(platform_write_consents_table).values(**row))
+    return row
+
+
+def _open_grants(rows: list[dict], now: datetime) -> list[dict]:
+    """Grants no withdrawal refers to and still inside their window."""
+    withdrawn = {r["refers_to"] for r in rows if r["kind"] == "withdrawal"}
+    out = []
+    for r in rows:
+        exp = _parse_utc(r.get("expires_at"))
+        if r["kind"] == "grant" and r["consent_id"] not in withdrawn and exp and now < exp:
+            out.append(r)
+    return out
+
+
+def active_platform_write_grant(user_id: str, platform: str, platform_user_id: str | None,
+                                copy_version: str | None, now: datetime) -> dict | None:
+    """The grant that authorizes a move right now, or None (consent.md §4.2.3).
+
+    Valid when ALL hold: it is the LATEST grant for (user, platform,
+    platform_user_id); its copy_version is the server's current one (a bump
+    invalidates every older grant); no withdrawal refers to it; and
+    now < expires_at (consented_at + 7 × 24 h). Moves never extend it."""
+    if not user_id or not platform_user_id or not copy_version:
+        return None
+    rows = platform_write_consent_rows(user_id, platform)
+    grants = [r for r in rows if r["kind"] == "grant"
+              and str(r.get("platform_user_id") or "") == str(platform_user_id)]
+    if not grants:
+        return None
+    latest = max(grants, key=lambda r: (_parse_utc(r["consented_at"]) or datetime.min.replace(
+        tzinfo=timezone.utc), r["recorded_at"]))
+    if latest.get("copy_version") != copy_version:
+        return None
+    open_ids = {g["consent_id"] for g in _open_grants(rows, now)}
+    return latest if latest["consent_id"] in open_ids else None
+
+
+def platform_write_consent_reason(user_id: str, platform: str, platform_user_id: str | None,
+                                  copy_version: str | None, now: datetime) -> str | None:
+    """Why consent must be asked now (contract §2 `reason`), from the records
+    of (user, platform, platform_user_id): 'first' (no grant for this account),
+    'withdrawn' (its latest grant was withdrawn), 'version' (made at another
+    copy_version), 'lapsed' (past its 7 days), in that order of precedence.
+    None when that grant is still valid, or when the account isn't known."""
+    if not user_id or not platform_user_id:
+        return None
+    rows = platform_write_consent_rows(user_id, platform)
+    grants = [r for r in rows if r["kind"] == "grant"
+              and str(r.get("platform_user_id") or "") == str(platform_user_id)]
+    if not grants:
+        return "first"
+    latest = max(grants, key=lambda r: (_parse_utc(r["consented_at"]) or datetime.min.replace(
+        tzinfo=timezone.utc), r["recorded_at"]))
+    if any(r["kind"] == "withdrawal" and r["refers_to"] == latest["consent_id"] for r in rows):
+        return "withdrawn"
+    if latest.get("copy_version") != copy_version:
+        return "version"
+    exp = _parse_utc(latest.get("expires_at"))
+    if exp is None or now >= exp:
+        return "lapsed"
+    return None
+
+
+def withdraw_platform_write_grants(user_id: str, platform: str, via: str, now: datetime,
+                                   *, conn=None) -> int:
+    """Append one withdrawal row for each open grant of (user, platform), any
+    platform account. Idempotent: a second call finds nothing open and appends
+    nothing. Returns the number of rows appended."""
+    import uuid as _uuid
+
+    def _run(c) -> int:
+        open_ = _open_grants(platform_write_consent_rows(user_id, platform, conn=c), now)
+        stamp = now.isoformat()
+        for g in open_:
+            c.execute(insert(platform_write_consents_table).values(
+                consent_id=_uuid.uuid4().hex, kind="withdrawal", refers_to=g["consent_id"],
+                user_id=str(user_id), platform=str(platform),
+                platform_user_id=g.get("platform_user_id"), league_scope=g.get("league_scope"),
+                withdrawn_at=stamp, withdrawn_via=str(via), recorded_at=_now()))
+        return len(open_)
+
+    if not user_id:
+        return 0
+    if conn is not None:
+        return _run(conn)
+    with engine.begin() as c:
+        return _run(c)
+
+
+def platform_write_move_rows(user_id: str, attempt_id: str) -> list[dict]:
+    """Both rows (or just 'sent', or none) of one user's attempt_id. Scoped per
+    user: an attempt_id is opaque and only unique within a user (contract §3)."""
+    t = platform_write_moves_table
+    with engine.connect() as conn:
+        return [dict(r._mapping) for r in conn.execute(
+            select(t).where(t.c.user_id == str(user_id), t.c.attempt_id == str(attempt_id)))]
+
+
+def recent_platform_write_moves(user_id: str, league_id: str, since: datetime) -> list[dict]:
+    """Every move row of (user, league) whose attempt was sent at or after
+    `since`, both phases, for the double-move block (scope §B6)."""
+    t = platform_write_moves_table
+    with engine.connect() as conn:
+        rows = [dict(r._mapping) for r in conn.execute(
+            select(t).where(t.c.user_id == str(user_id), t.c.league_id == str(league_id)))]
+    recent = {r["attempt_id"] for r in rows
+              if r["phase"] == "sent" and (_parse_utc(r.get("sent_at")) or since) >= since}
+    return [r for r in rows if r["attempt_id"] in recent]
+
+
+def record_platform_write_move(row: dict) -> int | None:
+    """Append one move row ('sent' or 'result') and return its row id (ids
+    grow with insert order: the double-move race check compares them). None
+    when that (user_id, attempt_id, phase) already exists: for 'sent', a
+    concurrent duplicate of the same tap got there first and must not send."""
+    from sqlalchemy.exc import IntegrityError
+    values = dict(row)
+    values.setdefault("recorded_at", _now())
+    try:
+        with engine.begin() as conn:
+            res = conn.execute(insert(platform_write_moves_table).values(**values))
+            return int(res.inserted_primary_key[0])
+    except IntegrityError:
+        return None
+
+
+def set_league_member_roster(league_id: str, member_user_id: str, player_ids: list) -> bool:
+    """Replace ONE stored member's roster (D1 K-F5, scope §B10): after a
+    completed free-agent move the route saves the user's new roster before it
+    answers, so the next trade search no longer offers the dropped player.
+    UPDATE only: a league with no stored row for that member is left alone
+    (the next session-start refresh writes it). True when a row changed."""
+    t = league_members_table
+    with engine.begin() as conn:
+        res = conn.execute(update(t).where(
+            t.c.league_id == str(league_id), t.c.user_id == str(member_user_id)
+        ).values(roster_data=json.dumps([str(p) for p in player_ids]), updated_at=_now()))
+    return (res.rowcount or 0) == 1
+
+
+def get_league_platform(league_id: str) -> str | None:
+    """The leagues row's `platform` ('sleeper' when the column is NULL), or None
+    when no row exists. Same reading as `is_linked_platform_league`."""
+    with engine.connect() as conn:
+        row = conn.execute(select(leagues_table.c.platform).where(
+            leagues_table.c.sleeper_league_id == str(league_id))).fetchone()
+    if not row:
+        return None
+    return str(row.platform or "sleeper").lower()
 
 
 # ---------------------------------------------------------------------------

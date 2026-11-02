@@ -40,6 +40,7 @@ The HTTP call is injectable via `_opener` so tests never touch the network.
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
 import re
@@ -47,6 +48,8 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+
+from . import write_outcome as _write_outcome
 
 SLEEPER_GRAPHQL_URL = "https://sleeper.com/graphql"
 _HTTP_TIMEOUT = 15
@@ -423,3 +426,165 @@ def reject_trade(token: str, league_id, transaction_id, leg: int = 1, *, _opener
     )
     body = {"operationName": "reject_trade", "variables": {}, "query": query}
     return _post_graphql("reject_trade", token, body, _opener=_opener)
+
+
+# ---------------------------------------------------------------------------
+# D1 free-agent moves (docs/plans/sleeper-fa-write/): add, add+drop, and (under
+# R15.8 D5) waiver claims, made on the user's behalf.
+#
+# ⚠️ THE SHAPES ARE NOT CAPTURED YET (capture.md §2, Q1–Q8: operator-driven
+# capture pending). Nothing below may guess one. Until the capture commit
+# fills `build_fa_move_body` / `read_fa_move_result` and flips the two
+# constants below:
+#   * `fa_move` refuses before building or sending anything (kind 'config');
+#   * the server's capability answers `handoff` and its move route 404s, so
+#     `fa_move` is never even reached (server._fa_move_live).
+# What IS built: the request type, the outcome-classified transport (the
+# backend/write_outcome.py rules, which `_post_graphql` above predates), and
+# the timeout table the 76 s worst case is pinned against.
+# ---------------------------------------------------------------------------
+
+FA_MOVE_SHAPES_CAPTURED = False   # add / add+drop (capture Q1, Q2)
+FA_CLAIM_SHAPE_CAPTURED = False   # waiver claim (capture Q3); claims also need consent v2
+
+# Per-call socket timeouts on the move's write path, in call order. One
+# GraphQL write today; the capture commit appends any call it adds. Contract
+# §5: the write path's timeouts sum to ≤ 46 s, so with the server's 30 s
+# preflight budget the worst case stays 76 s (server.FA_MOVE_SERVER_WORST_CASE_S,
+# pinned by test_fa_move_route.py).
+FA_MOVE_WRITE_TIMEOUTS_S: tuple[int, ...] = (_HTTP_TIMEOUT,)
+
+
+@dataclass
+class FaMoveRequest:
+    league_id: str
+    roster_id: int                  # the user's roster, resolved server-side (never the client's)
+    add_player_id: str              # Sleeper player id
+    drop_player_id: str | None      # None = no drop (an open slot)
+    move_kind: str                  # 'add' | 'claim': exactly what the CTA named (D10)
+    faab_bid: int | None = None     # claims on FAAB leagues only
+
+
+def fa_move_captured(move_kind: str) -> bool:
+    """True when the shapes this move needs are in the code."""
+    if move_kind == "claim":
+        return FA_MOVE_SHAPES_CAPTURED and FA_CLAIM_SHAPE_CAPTURED
+    return FA_MOVE_SHAPES_CAPTURED
+
+
+def build_fa_move_body(req: FaMoveRequest) -> tuple[str, dict]:
+    """(operationName, GraphQL body) for the move. FILLED BY THE CAPTURE
+    (capture.md Q1–Q3, Q6): op name, full mutation string, whether ids are
+    inlined or variables, how the drop and the bid ride. Until then there is
+    no shape to build, so this refuses."""
+    raise SleeperWriteError("free-agent move shapes are not captured", kind="config")
+
+
+def read_fa_move_result(req: FaMoveRequest, node) -> dict:
+    """Read the write's `data[op]` node into
+    {status: 'complete'|'pending', result: 'accepted'|'partial',
+     transaction_id: str|None, added: [ids], dropped: [ids], raw: node}.
+    FILLED BY THE CAPTURE (Q7, Q7a). A 2xx it can't read as success MUST raise
+    SleeperWriteError(kind=OUTCOME_UNKNOWN): the move may have landed."""
+    raise SleeperWriteError("free-agent move result shape is not captured",
+                            kind=_write_outcome.OUTCOME_UNKNOWN)
+
+
+def _post_graphql_write(op: str, token: str, body: dict, *, timeout: int, _opener=None):
+    """POST one GraphQL write and return its `data[op]` node, classifying every
+    failure by backend/write_outcome.py's rules (the ESPN/MFL adapters'):
+
+      * 401/403, or an auth-worded GraphQL error → SleeperAuthError;
+      * a definite connect-phase failure (`request_never_sent`) → kind
+        'network': provably nothing was sent, a retry is safe;
+      * a timeout / reset / RemoteDisconnected after the request was written,
+        a URLError urllib can't place before the send, an HTTP 5xx, or a 2xx
+        that isn't readable JSON with a `data` object → kind OUTCOME_UNKNOWN:
+        the move may exist, so the caller must never retry;
+      * any other 4xx (a 429 included: Sleeper answered, so something was
+        sent), or GraphQL `errors[]` on a 200 → kind 'error': Sleeper refused
+        it. Its wording is "nothing changed", never "nothing was sent" (legal
+        R28.27: only a code decided before any platform call says that).
+    Sleeper's own text rides `detail` for the log only (truncated to 500,
+    `docs/integrations/sleeper.md` §6); the token is never logged.
+    """
+    if not token:
+        raise SleeperAuthError("no Sleeper token available")
+    data = json.dumps(body).encode("utf-8")
+    request = urllib.request.Request(SLEEPER_GRAPHQL_URL, data=data, method="POST")
+    request.add_header("content-type", "application/json")
+    request.add_header("x-sleeper-graphql-op", op)
+    request.add_header("authorization", token)          # raw, no "Bearer " (see _post_graphql)
+    for _hk, _hv in _BROWSER_HEADERS.items():
+        request.add_header(_hk, _hv)
+
+    opener = _opener or urllib.request.urlopen
+    from . import api_observability as _api_obs
+    unknown = _write_outcome.OUTCOME_UNKNOWN
+    with _api_obs.observe_call("sleeper", f"graphql.{op}", method="POST",
+                               active=_opener is None) as _ob:
+        try:
+            with opener(request, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            try:
+                raw = e.read().decode("utf-8")
+            except Exception:
+                raw = ""
+            if e.code in (401, 403):
+                raise SleeperAuthError(f"Sleeper rejected the token (HTTP {e.code})",
+                                       detail=raw[:500])
+            if e.code >= 500:
+                raise SleeperWriteError(f"Sleeper returned HTTP {e.code}", kind=unknown,
+                                        detail=raw[:500])
+            raise SleeperWriteError(f"Sleeper returned HTTP {e.code}", detail=raw[:500])
+        except urllib.error.URLError as e:
+            if _write_outcome.request_never_sent(e):
+                raise SleeperWriteError("network error contacting Sleeper", kind="network",
+                                        detail=str(e))
+            raise SleeperWriteError("no definitive answer from Sleeper", kind=unknown,
+                                    detail=str(e))
+        except (OSError, http.client.HTTPException, UnicodeDecodeError) as e:
+            raise SleeperWriteError("no definitive answer from Sleeper", kind=unknown,
+                                    detail=f"{type(e).__name__}: {e}")
+
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            raise SleeperWriteError("non-JSON response from Sleeper", kind=unknown,
+                                    detail=raw[:500])
+        errors = parsed.get("errors") if isinstance(parsed, dict) else None
+        if errors:
+            dump = json.dumps(errors)[:500]
+            first = errors[0] if isinstance(errors, list) and errors else None
+            msg = first.get("message") if isinstance(first, dict) else None
+            detail = str(msg).strip()[:500] if msg else dump
+            if any(w in dump.lower() for w in ("auth", "unauth", "token", "forbidden", "login")):
+                raise SleeperAuthError("Sleeper auth error", detail=detail)
+            # THE CAPTURE maps Sleeper's error strings here (roster full, player
+            # taken, locked, ...). Any code produced AFTER the call is a platform
+            # refusal and takes platform-refusal wording ("nothing changed"),
+            # never "nothing was sent", even where it reuses a pre-call code's
+            # name (legal R28.27; pinned by test_fa_move_capability.py).
+            raise SleeperWriteError("Sleeper GraphQL error", detail=detail)
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("data"), dict):
+            raise SleeperWriteError("unreadable response from Sleeper", kind=unknown,
+                                    detail=raw[:500])
+        _ob.ok(status=200, response_bytes=len(raw))
+        return parsed["data"].get(op)
+
+
+def fa_move(token: str, req: FaMoveRequest, *, _opener=None) -> dict:
+    """Make one free-agent move. Returns `read_fa_move_result`'s dict.
+
+    Raises SleeperAuthError (token refused), or SleeperWriteError whose `kind`
+    is 'config' (nothing sent: shapes not captured), 'network' (nothing
+    sent), 'error' (Sleeper refused) or OUTCOME_UNKNOWN (may have landed;
+    never retry). Until the capture lands it refuses BEFORE building or
+    sending anything."""
+    if not fa_move_captured(req.move_kind):
+        raise SleeperWriteError("free-agent move shapes are not captured", kind="config")
+    op, body = build_fa_move_body(req)
+    node = _post_graphql_write(op, token, body, timeout=FA_MOVE_WRITE_TIMEOUTS_S[0],
+                               _opener=_opener)
+    return read_fa_move_result(req, node)

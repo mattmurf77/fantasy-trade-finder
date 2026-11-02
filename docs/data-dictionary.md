@@ -133,6 +133,8 @@ counterparty board disclosure or client analytics event is added.
 - [`identity_links`](#identity_links)
 - [`device_tokens`](#device_tokens)
 - [`sleeper_credentials`](#sleeper_credentials)
+- [`platform_write_consents`](#platform_write_consents)
+- [`platform_write_moves`](#platform_write_moves)
 - [`espn_credentials`](#espn_credentials)
 - [`mfl_credentials`](#mfl_credentials)
 
@@ -1636,6 +1638,64 @@ Expo push tokens. Composite uniqueness via `device_token` PK + indexed `user_id`
 | `created_at`, `updated_at` | str | |
 
 Interim home; folds into the auth epic's `linked_sources` when that lands.
+
+**Deleting a row ends roster-move consent.** `delete_sleeper_credential(user_id, *, withdrawn_via)` deletes the row and, in the same transaction, appends a `platform_write_consents` withdrawal for every open Sleeper grant (`withdrawn_via` is required: `disconnect` | `credential_expired` | `credential_rejected`). Server callers go through `server._drop_sleeper_credential`. A link that changes the stored credential (`POST /api/sleeper/link` with another token or another Sleeper user) ends any open grant first, as `relink` (legal R28.26 2f); a replay of the stored token withdraws nothing. Account deletion deletes both consent tables outright instead (R15.8 D12).
+
+---
+
+## `platform_write_consents`
+
+D1 free-agent moves ([contract](plans/sleeper-fa-write/contract.md); legal R15.3; flag `sleeper.send_add_drop`). The user's authorization for Fleeced to make roster moves in their platform league, and every end of it. **Append-only:** rows are inserted, never updated or deleted (except by account deletion). A grant is one row; ending it is a new `withdrawal` row whose `refers_to` names the grant. Never holds a token or credential. Written by `record_platform_write_grant` (the move route, committed before any platform call) and `withdraw_platform_write_grants` (Settings, disconnect, credential expiry or rejection); read by `active_platform_write_grant`.
+
+**Validity is computed at read time:** the latest grant for (user, platform, `platform_user_id`) is valid while its `copy_version` equals the server's current one (`fa_move_copy.CURRENT_CONSENT_VERSION`), no withdrawal refers to it, and now < `expires_at`. Moves never extend it. Keyed by user and platform account, never by league (R15.8 D11).
+
+| Column | Type | Notes |
+|---|---|---|
+| `consent_id` | str PK | uuid4 hex |
+| `kind` | str | `grant` \| `withdrawal` |
+| `refers_to` | str | Withdrawals: the grant's `consent_id` |
+| `user_id` | str | FTF user id (indexed with `platform`) |
+| `platform` | str | `sleeper` \| `mfl` \| `espn` (required) |
+| `platform_user_id` | str | The platform account the moves are made as (Sleeper: the credential's `sleeper_user_id`) |
+| `league_scope` | str | Grants: always `all_linked` (per account, R15.8 D11) |
+| `copy_version`, `locale` | str | Grants: the text shown, e.g. `sleeper-roster-moves-v1` / `en-US`; the words live in `backend/fa_move_copy.py` under that version |
+| `consented_at`, `expires_at` | str | Grants: server UTC; `expires_at` = `consented_at` + 7 × 24 h |
+| `client_platform`, `app_version` | str | Grants: the `X-Device` / `X-App-Version` headers |
+| `trigger_attempt_id` | str | Grants: the `attempt_id` of the move the tick was given for |
+| `withdrawn_at` | str | Withdrawals: server UTC |
+| `withdrawn_via` | str | Withdrawals: `settings` \| `disconnect` (the user's own choice) \| `credential_expired` \| `credential_rejected` \| `relink` (side effects) |
+| `recorded_at` | str | Row insert time, server UTC |
+
+User-keyed: deleted with the account and included in the export (`accounts._ADDITIONAL_PRIVATE_TABLES`).
+
+---
+
+## `platform_write_moves`
+
+D1 free-agent moves. The record of each move Fleeced sent to a platform for the user (legal R15.3). **Append-only, two rows per move** under the client's `attempt_id`: phase `sent`, written **before** the platform call, then phase `result`. Unique on (`user_id`, `attempt_id`, `phase`), so one tap can never send twice; the id is opaque and only unique per user (another user's identical id is a different move); a repeat of an `attempt_id` replays the `result` row's `response_json`. A move refused before the write (no consent, roster full, player taken, …) writes no row. Never holds a token. Written by `record_platform_write_move`; read by `platform_write_move_rows` (idempotency) and `recent_platform_write_moves` (the double-move block: a `sent` row with no result or `result = 'unknown'` under 15 minutes old, or a pending claim under 24 h, blocks a new move for that player; after inserting its own `sent` row a request re-reads, and an earlier-inserted (lower `id`) move of the player that still blocks makes it record its own 409 `result` and never send, which makes the block atomic).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `attempt_id` | str | Client id, one per tap: opaque, 8–64 of `[A-Za-z0-9._-]` (UUID-shaped, never parsed as one); joins the `fa_move_*` events |
+| `phase` | str | `sent` \| `result` |
+| `user_id` | str | FTF user id (indexed with `league_id`) |
+| `platform` | str | `sleeper` \| `mfl` \| `espn` |
+| `platform_user_id` | str | The account the move was made as |
+| `league_id` | str | |
+| `consent_id` | str | The grant that covered it |
+| `move_kind` | str | `add` \| `claim` |
+| `add_player_ids`, `drop_player_ids` | text | JSON lists of FTF (Sleeper) player ids |
+| `faab_bid` | int | Claims on FAAB leagues |
+| `sent_at` | str | Server UTC, taken before the platform call |
+| `result` | str | `result` rows: `accepted` \| `partial` \| `rejected` (the platform refused) \| `error` (nothing done: not sent, token refused, unconfigured) \| `unknown` (outcome unknown; never retried) |
+| `status` | str | `result` rows on a 200: `complete` \| `pending` (a claim) |
+| `platform_transaction_id` | str | When the platform returns one |
+| `error_code` | str | `result` rows on a refusal: the route's code |
+| `response_status`, `response_json` | int, text | `result` rows: the HTTP status and body answered |
+| `recorded_at` | str | Row insert time, server UTC |
+
+User-keyed: deleted with the account and included in the export (`accounts._ADDITIONAL_PRIVATE_TABLES`).
 
 ---
 
