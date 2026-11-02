@@ -566,33 +566,65 @@ let tipJarMount = null; // check 10's harness, reused by 11
     const STATE_NAMES = [...s.matchAll(/const \[(\w+), set\w+\] = useState\b/g)].map((m) => m[1]);
     // opts.purchaseImpl: what purchaseTip returns (default: never settles).
     // opts.tapState: the session the tap sees (default: the render's).
-    // opts.runEffects: run each effect during the render (11 needs them).
+    // opts.runEffects: run effects after each render the way React does, on
+    //   the first render and when their deps change. useCallback and useMemo
+    //   memoize on deps too, so a re-render with the same inputs re-runs
+    //   nothing (11 needs this).
     // opts.noTap: render only.
+    // opts.flag: monetize.paywall (default on).
+    // opts.stack: the root stack's route keys, bottom to top (default Main,
+    //   Settings, this sheet). The fake navigator applies a targeted POP
+    //   (source + target) to its own state; goBack() pops the TOP route,
+    //   like React Navigation's untargeted goBack.
+    // m.rerender(state, flag) renders again with the same hooks.
+    const SHEET = 'TipJar-1';
+    const same = (x, y) => !!x && !!y && x.length === y.length && x.every((v, i) => Object.is(v, y[i]));
     const mount = (state, rcId, opts = {}) => {
       const buys = [];
       const events = [];
       const sets = [];
       const queries = [];
-      let dismissed = 0;
+      const actions = [];
+      let dismissCalls = 0;
       let cur = state;
+      let flagOn = opts.flag !== false;
       let nState = 0;
+      let slot = 0;
+      const slots = [];
+      const due = [];
       const React = {
         createElement: (type, props, ...children) => ({ type, props: { ...(props || {}), children } }),
         Fragment: 'Fragment',
         useState: (init) => { const k = STATE_NAMES[nState++]; return [init, (v) => sets.push([k, v])]; },
-        useEffect: opts.runEffects ? (fn) => { fn(); } : () => {},
-        useCallback: (fn) => fn,
-        useMemo: (fn) => fn(),
+        useEffect: (fn, deps) => {
+          const i = slot++;
+          if (!opts.runEffects) return;
+          if (!slots[i] || !same(slots[i].deps, deps)) { slots[i] = { deps }; due.push(fn); }
+        },
+        useCallback: (fn, deps) => {
+          const i = slot++;
+          if (slots[i] && same(slots[i].deps, deps)) return slots[i].value;
+          slots[i] = { deps, value: fn };
+          return fn;
+        },
+        useMemo: (fn, deps) => {
+          const i = slot++;
+          if (slots[i] && same(slots[i].deps, deps)) return slots[i].value;
+          slots[i] = { deps, value: fn() };
+          return slots[i].value;
+        },
       };
       const hook = (sel) => sel(cur);
       hook.getState = () => cur;
       const tokens = new Proxy({}, { get: () => 1 });
+      const CFG = { enabled: true, tips: [TIP] };
+      const PRODUCTS = [{ identifier: TIP.product_id, priceString: '$1.99' }];
       const screen = loadTs('src/screens/TipJarScreen.tsx', {
         react: { __esModule: true, default: React, ...React },
         'react-native': { ActivityIndicator: 'ActivityIndicator', Pressable: 'Pressable', ScrollView: 'ScrollView', StyleSheet: { create: (x) => x }, View: 'View' },
         'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
         '@tanstack/react-query': { useQuery: (q) => { queries.push(q); return { isLoading: false,
-          data: q.queryKey[0] === 'paywall-config' ? { enabled: true, tips: [TIP] } : [{ identifier: TIP.product_id, priceString: '$1.99' }] }; } },
+          data: q.queryKey[0] === 'paywall-config' ? CFG : PRODUCTS }; } },
         '../components/chalkline/Text': { __esModule: true, default: 'ChalkText' },
         '../components/chalkline': { Button: 'Button', Icon: 'Icon' },
         '../theme/chalkline': { chalk: tokens, ice: tokens, ink: tokens, radii: tokens, semantic: tokens, space: tokens },
@@ -604,12 +636,33 @@ let tipJarMount = null; // check 10's harness, reused by 11
           PurchaseIdentityError: class PurchaseIdentityError extends Error {},
           purchaseTip: (p) => { buys.push(p.identifier); return opts.purchaseImpl ? opts.purchaseImpl(p) : new Promise(() => {}); },
         },
-        '../state/useFeatureFlags': { useFlag: () => true },
+        '../state/useFeatureFlags': { useFlag: () => flagOn },
         '../state/useSession': { useSession: hook },
         '../state/subscriptionSession': subSession,
         '../api/events': { track: (n, p) => { events.push([n, p]); } },
       }, true);
-      const tree = screen.default({ navigation: { canGoBack: () => true, goBack() { dismissed += 1; } }, route: { params: { source: 'settings' } } });
+      let navState = { key: 'root-stack', routes: (opts.stack || ['Main-0', 'Settings-0', SHEET]).map((key) => ({ key })) };
+      const navigation = {
+        getState: () => { dismissCalls += 1; return navState; },
+        dispatch: (a) => {
+          actions.push(a);
+          if (a.type === 'POP' && a.target === navState.key && navState.routes.some((r) => r.key === a.source)) {
+            navState = { ...navState, routes: navState.routes.filter((r) => r.key !== a.source) };
+          }
+        },
+        canGoBack: () => navState.routes.length > 1,
+        goBack: () => { actions.push({ type: 'GO_BACK' }); navState = { ...navState, routes: navState.routes.slice(0, -1) }; },
+        navigate: (name) => { actions.push({ type: 'NAVIGATE', name }); },
+      };
+      const props = { navigation, route: { key: SHEET, params: { source: 'settings' } } };
+      const render = () => {
+        nState = 0;
+        slot = 0;
+        const t = screen.default(props);
+        due.splice(0).forEach((fn) => fn());
+        return t;
+      };
+      let tree = render();
       const find = (n, id) => {
         if (!n || typeof n !== 'object') return null;
         if (Array.isArray(n)) { for (const c of n) { const f = find(c, id); if (f) return f; } return null; }
@@ -620,8 +673,15 @@ let tipJarMount = null; // check 10's harness, reused by 11
       if ('tapState' in opts) cur = opts.tapState;
       const pressed = option && !opts.noTap ? option.props.onPress() : null;
       const setTo = (k, pred) => sets.some(([key, v]) => key === k && pred(v));
-      return { tree, option, buys, events, sets, setTo, pressed, queries, dismissed };
+      return {
+        get tree() { return tree; },
+        get dismissed() { return dismissCalls; },
+        stack: () => navState.routes.map((r) => r.key),
+        rerender: (next, flag) => { cur = next; if (flag !== undefined) flagOn = flag; tree = render(); return tree; },
+        option, buys, events, sets, setTo, pressed, queries, actions,
+      };
     };
+    mount.SHEET = SHEET;
     tipJarMount = mount;
     const named = ['busy', 'error', 'thanked', 'pending'].every((k) => STATE_NAMES.includes(k));
     const wrong = [];
@@ -664,26 +724,82 @@ let tipJarMount = null; // check 10's harness, reused by 11
   }
 }
 
-// 11 — EXECUTED: the screen is verified-only (release-lead #575 QA, before the
-//      paywall_tips_enabled flip). Under 10's harness with effects run: a
-//      verified session fetches config + products, tracks paywall_viewed and
-//      renders; demo, unverified and unknown fetch nothing (both queries
-//      disabled), track nothing, dismiss and render null.
+// 11 — EXECUTED: the screen is verified-only, and leaves by removing ITS OWN
+//      route (release-lead #575 QA, before the paywall_tips_enabled flip;
+//      #583 QA P3-1/P3-2). Under 10's harness with React-style effects, a
+//      fake root stack and exact counts of dismiss() calls:
+//      11a fresh mount: verified fetches config + products, tracks one
+//          paywall_viewed and renders; demo, unverified and unknown enable
+//          neither query, track nothing, render null and dismiss exactly once.
+//      11b a drop while the sheet is open (verified → each other state):
+//          exactly one dismiss, TipJar popped (Settings stays), the new
+//          render null and its queries disabled; the same state again re-runs
+//          nothing.
+//      11c monetize.paywall off: exactly one dismiss for verified AND for
+//          unverified (the session guard stays out of it).
+//      11d TipJar under SignIn (pushed on session expiry): a drop removes
+//          TipJar, and SignIn on top is untouched.
+//      11e TipJar already gone: no navigator action. 11f TipJar at the stack's
+//          root: navigate('Main').
 {
-  const name = '11. TipJarScreen is verified-only: demo, unverified and unknown fetch nothing, track nothing, dismiss and render null; verified fetches and renders';
+  const name = '11. TipJarScreen is verified-only and dismisses its own route: fresh mounts, a drop while open, flag off, under SignIn, gone, root (exact counts)';
   if (!tipJarMount) {
     bad(name, 'check 10 harness unavailable');
   } else {
     const wrong = [];
+    const V = SESSIONS[0][1];
+    const SHEET = tipJarMount.SHEET;
+    const uid = (st) => st.user.user_id;
+    const fx = { runEffects: true, noTap: true };
+    const BASE = ['Main-0', 'Settings-0'];
+    const eqStack = (m, want) => JSON.stringify(m.stack()) === JSON.stringify(want);
+    // 11a
     for (const [label, state, want] of SESSIONS) {
-      const m = tipJarMount(state, state.user.user_id, { runEffects: true, noTap: true });
+      const m = tipJarMount(state, uid(state), fx);
       const cfg = m.queries.find((q) => q.queryKey[0] === 'paywall-config');
       const prod = m.queries.find((q) => q.queryKey[0] === 'tip-products');
-      const viewed = m.events.some(([n]) => n === 'paywall_viewed');
+      const views = m.events.filter(([n]) => n === 'paywall_viewed').length;
       const got = { rendered: m.tree !== null, cfg: !!(cfg && cfg.enabled), prod: !!(prod && prod.enabled),
-        viewed, dismissed: m.dismissed > 0 };
-      const exp = { rendered: want, cfg: want, prod: want, viewed: want, dismissed: !want };
-      for (const k of Object.keys(exp)) if (got[k] !== exp[k]) wrong.push(`${label}: ${k}=${got[k]}`);
+        views, dismissed: m.dismissed, popped: eqStack(m, BASE) };
+      const exp = { rendered: want, cfg: want, prod: want, views: want ? 1 : 0, dismissed: want ? 0 : 1, popped: !want };
+      for (const k of Object.keys(exp)) if (got[k] !== exp[k]) wrong.push(`11a ${label}: ${k}=${got[k]}`);
+    }
+    // 11b
+    for (const [label, state] of SESSIONS.slice(1)) {
+      const m = tipJarMount(V, uid(V), fx);
+      const before = m.queries.length;
+      m.rerender(state);
+      const after = m.queries.slice(before);
+      if (m.tree !== null) wrong.push(`11b ${label}: still renders`);
+      if (m.dismissed !== 1) wrong.push(`11b ${label}: dismiss() x${m.dismissed}`);
+      if (!eqStack(m, BASE)) wrong.push(`11b ${label}: stack ${m.stack().join('>')}`);
+      if (after.some((q) => q.enabled)) wrong.push(`11b ${label}: a query still enabled after the drop`);
+      if (m.events.filter(([n]) => n === 'paywall_viewed').length !== 1) wrong.push(`11b ${label}: views changed`);
+      m.rerender(state);
+      if (m.dismissed !== 1) wrong.push(`11b ${label}: the same state again re-ran dismiss() (x${m.dismissed})`);
+    }
+    // 11c
+    for (const [label, state] of [SESSIONS[0], SESSIONS[2]]) {
+      const m = tipJarMount(state, uid(state), { ...fx, flag: false });
+      if (m.dismissed !== 1) wrong.push(`11c flag off, ${label}: dismiss() x${m.dismissed}`);
+      if (m.tree !== null) wrong.push(`11c flag off, ${label}: renders`);
+      if (m.queries.some((q) => q.enabled)) wrong.push(`11c flag off, ${label}: a query enabled`);
+    }
+    // 11d
+    {
+      const m = tipJarMount(V, uid(V), { ...fx, stack: [...BASE, SHEET, 'SignIn-0'] });
+      m.rerender(SESSIONS[2][1]);
+      if (!eqStack(m, [...BASE, 'SignIn-0'])) wrong.push(`11d under SignIn: stack ${m.stack().join('>')}`);
+      if (m.actions.some((x) => x.type === 'GO_BACK')) wrong.push('11d under SignIn: untargeted goBack');
+    }
+    // 11e / 11f
+    {
+      const gone = tipJarMount(SESSIONS[2][1], '111', { ...fx, stack: BASE });
+      if (gone.actions.length !== 0) wrong.push(`11e gone: actions ${JSON.stringify(gone.actions)}`);
+      const root = tipJarMount(SESSIONS[2][1], '111', { ...fx, stack: [SHEET] });
+      if (JSON.stringify(root.actions) !== JSON.stringify([{ type: 'NAVIGATE', name: 'Main' }])) {
+        wrong.push(`11f root: actions ${JSON.stringify(root.actions)}`);
+      }
     }
     if (wrong.length === 0) ok(name);
     else bad(name, wrong.join('; '));

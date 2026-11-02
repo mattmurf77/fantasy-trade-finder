@@ -62,10 +62,18 @@ export default function TipJarScreen({ navigation, route }: any) {
   const [thanked, setThanked] = useState(false);
   const [pending, setPending] = useState(false);
 
+  // Removes THIS route wherever it sits. A screen-level goBack() carries no
+  // target, so the stack pops whatever is on top: with SignIn pushed over
+  // this sheet on session expiry, a later drop would pop SignIn and leave a
+  // blank sheet. Already gone: nothing to do. The stack's root: go to Main.
+  const routeKey: string | undefined = route?.key;
   const dismiss = useCallback(() => {
-    if (navigation?.canGoBack?.()) navigation.goBack();
+    const st = navigation?.getState?.();
+    const at = st ? st.routes.findIndex((r: { key: string }) => r.key === routeKey) : -1;
+    if (at > 0) navigation.dispatch({ type: 'POP', payload: { count: 1 }, source: routeKey, target: st.key });
+    else if (at === -1 && st) return;
     else navigation?.navigate?.('Main');
-  }, [navigation]);
+  }, [navigation, routeKey]);
 
   // Self-guard, PaywallScreen convention: route registered unconditionally,
   // screen refuses while the flag is off.
