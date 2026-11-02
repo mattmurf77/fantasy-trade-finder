@@ -1501,6 +1501,24 @@ Gates: full (schema/API/flag/analytics surfaces; no express). Mobile client only
     - S2: `planNotSent` reading the fallback only. S3: Turn off undimmed. S4: `consentLinks` back to `/terms/i`. S5: the stale comment restored.
     - Re-checked: X5b (the mount prefetch dropped) and F12 (the FA-list invalidation dropped).
   - **Gate:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 139 of 139 exit 0 (`check-paywall-gate` 109 of 109, `check-update-gate` 44 of 44); `check-fa-move` 101 of 101. The backend is untouched this round.
+- **Round 8 (same day): scope §B11, no unchosen $0 claim.** A build requirement on #579 for the 11-06 binary. Sources: `plan/fa-moves-launch` @ `973f8854` (§B11, states 6 and 10e, note (d), F18, G25 and G26) and contract `a7a2a8f4` (§3 `faab_bid`, §4's 400 exception, §7's `{bid}` rule and `bid_needed_line`).
+  - **Rule 6:** `moveSelection` reads an empty FAAB field as no bid (`bid: null`, no `faab_bid`, never 0), and its `needsBid` is the CTA gate. `has_bid` is false for an empty field, and no amount is logged.
+  - **Rule 1:**
+    - The named CTA and the consent step's Make the move are both disabled while `needsBid`, and `send()` refuses too.
+    - The label is the no-amount slot ("Claim A" / "Claim A, drop B"), with the hint "Enter a bid to claim" (`bid_hint`) and no live region.
+    - A visible line under the field: the server's `bid_needed_line`, else "Enter a bid. $0 is allowed." Both strings are PENDING MARKETING (G25, G26).
+    - A typed `0` enables "Claim A for $0".
+  - **Rule 2:** on 10e add → claim on a FAAB league, `planKindChanged` puts the line directly above the empty field as `bidNotice`, and VoiceOver focus goes there. The bid input has no ref or `autoFocus`, and nothing calls `.focus()`.
+  - **Rule 3:** the bid is written only by the field, so a typed bid survives claim → add → claim, and an add never sends it.
+  - **Rule 5:** a 400 `bad_request` to a FAAB claim sent without `faab_bid` (judged on the request sent, `faabClaimWithoutBid`) returns to Ready with rule 1's line focused. There is no refresh, retry or error screen; any other 400 is still the neutral panel.
+  - **`check-fa-move`:** 110 passed, 0 failed. New: F18 ×6 and B11 ×3, executed against `utils/claimSheetPlan.ts`, with an executed `attemptMove` for `has_bid`. T7 changed: an empty FAAB bid is no bid.
+  - **Sabotage, 16, each red then restored (the unsabotaged copy green):**
+    - F18: `input.bid === '' ? 0` restored; `needsBid` never true; the named CTA ungated; Make the move ungated; `send()`'s guard dropped; the hint dropped; the CTA made a live region; the bid cleared on a 10e flip; an add sending the typed bid.
+    - Rule 1: the visible line dropped; the line reading the fallback only.
+    - Rule 2: the 10e line kept above the CTA; the bid field set to `autoFocus`; the line moved below the field.
+    - Rule 5: the 400 shown as the neutral panel; the sheet never flagging a no-bid claim.
+  - **Docs:** the code-walk has a new §B11 section, with citations remapped from `a7a2a8f4`. `testflight-additions.md` has a B11 row: an add flipped to a claim on a FAAB league, an empty field, a disabled no-amount CTA, and a typed 0 enabling "for $0". The `utils/`, `components/` and `api/` CLAUDE.md rows and `tests/README` are updated.
+  - **Gate:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 139 of 139 exit 0 (`check-paywall-gate` 109 of 109, `check-update-gate` 44 of 44); `check-fa-move` 110 of 110. The backend is untouched (the server's 400 is the server PR's).
 
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 
