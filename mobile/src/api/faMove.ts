@@ -48,6 +48,8 @@ export type MoveCopyKey =
   | 'window_line'
   | 'turn_off'
   | 'do_in_platform'
+  // Reserved and unread in this binary: the hand-off CTA keeps #509's approved
+  // literal "Open in Sleeper to claim", which check-sleeper-handoff S2 pins.
   | 'open_platform'
   | 'handoff_footer'
   | 'connect_line'
@@ -170,8 +172,11 @@ export const FA_MOVE_TIMEOUT_MS = (FA_MOVE_SERVER_WORST_CASE_S + FA_MOVE_TIMEOUT
 /** State 7's "still sending" line appears this long after the tap. */
 export const FA_MOVE_STILL_SENDING_MS = 8_000;
 
-export function getConsent(platform: LeaguePlatform): Promise<ConsentStatus> {
-  return apiRequest<ConsentStatus>(`${CONSENT_PATH}?platform=${encodeURIComponent(platform)}`);
+export function getConsent(
+  platform: LeaguePlatform,
+  opts: { quietStatuses?: readonly number[] } = {},
+): Promise<ConsentStatus> {
+  return apiRequest<ConsentStatus>(`${CONSENT_PATH}?platform=${encodeURIComponent(platform)}`, opts);
 }
 
 export async function withdrawConsent(platform: LeaguePlatform): Promise<ConsentWithdrawal> {
@@ -253,7 +258,9 @@ export function faMoveGate(input: {
   if (connect !== 'ok' && !CONNECTABLE.includes(move.league_platform as LeaguePlatform)) {
     return 'unsupported';
   }
-  if (input.row?.move_mode === 'handoff') return 'handoff';
+  // Any per-row move_mode holds the row in hand-off, not only exactly
+  // 'handoff' ('HANDOFF', say): the conservative reading.
+  if (input.row?.move_mode != null) return 'handoff';
   // §B7: a waiver player while claims are off is a hand-off (state 14),
   // whether or not the server set the row's override.
   if (input.row?.move_kind === 'claim' && move.claims !== true) return 'handoff';
@@ -289,8 +296,9 @@ export function rowMoveFields(move: unknown, row: FaMoveRow | null | undefined):
 }
 
 /** Valid until a moment strictly after `nowMs`. */
-export function consentValidAt(until: string | null | undefined, nowMs: number): boolean {
-  if (!until) return false;
+export function consentValidAt(until: unknown, nowMs: number): boolean {
+  // Only an ISO string counts: a number (or anything else) is not a grant.
+  if (typeof until !== 'string' || !until) return false;
   const t = Date.parse(until);
   return Number.isFinite(t) && t > nowMs;
 }
@@ -335,12 +343,15 @@ export function readConsentBlock(raw: unknown): ConsentBlock | null {
  *  as PaywallScreen's openLegal builds them (the API origin serves the web
  *  app, so the pages live at the API base; no second base URL). */
 export function consentLinks(block: ConsentBlock): ConsentLink[] {
-  if (block.links && block.links.length) return block.links;
+  // Per link: Terms and Privacy are always both present, the server's valid
+  // one when it sent one, else the app's own. Any other valid server link
+  // follows them.
   const base = getBaseUrl();
-  return [
-    { label: FA_MOVE_FALLBACK_COPY.terms_link, url: `${base}/terms` },
-    { label: FA_MOVE_FALLBACK_COPY.privacy_link, url: `${base}/privacy` },
-  ];
+  const sent = block.links ?? [];
+  const named = (re: RegExp) => sent.find((l) => re.test(l.label) || re.test(l.url));
+  const terms = named(/terms/i) ?? { label: FA_MOVE_FALLBACK_COPY.terms_link, url: `${base}/terms` };
+  const privacy = named(/privacy/i) ?? { label: FA_MOVE_FALLBACK_COPY.privacy_link, url: `${base}/privacy` };
+  return [terms, privacy, ...sent.filter((l) => l !== terms && l !== privacy)];
 }
 
 /** What a consent GET at the tap leads to. NetInfo is read first: offline
@@ -375,12 +386,17 @@ export async function fetchConsentStep(platform: LeaguePlatform): Promise<Consen
   return block ? { kind: 'consent', block } : { kind: 'unavailable' };
 }
 
+/** Settings' consent read answers these as "no row", every visit while
+ *  dark (404) or unverified (403): not failures worth an event. */
+export const CONSENT_QUIET_STATUSES: readonly number[] = [403, 404];
+
 /** Settings' read (contract §2): 200 with `valid: false` when there's no
  *  grant. A 404 (an older server) and a 403 `verification_required` (the
  *  route needs a verified session) read as `valid: false` too: no row. */
 export async function readConsentStatus(platform: LeaguePlatform): Promise<ConsentStatus> {
   try {
-    return await getConsent(platform);
+    // Routine on a dark or unverified visit, so no api_request_failed for them.
+    return await getConsent(platform, { quietStatuses: CONSENT_QUIET_STATUSES });
   } catch (err) {
     if (err instanceof ApiError && (err.status === 404 || err.isVerificationRequired)) {
       return { platform, valid: false, until: null, status_line: null, stop_label: null };
@@ -612,8 +628,6 @@ export function isMoveOutcomeUnknown(err: unknown): boolean {
 /** The sheet's own re-reads (after Connect, on 10e) give up after this, so
  *  the sheet never stays busy offline; the server's 409s are the net. */
 export const FA_MOVE_REREAD_WAIT_MS = 5_000;
-/** How long a host waits for a league's capability before routing as today. */
-export const FA_MOVE_CAPABILITY_WAIT_MS = 3_000;
 
 /** `p`'s value, or undefined if it rejects or takes longer than `ms`. */
 export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
@@ -632,19 +646,47 @@ export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined
   });
 }
 
-/** A host's pre-read of one league's capability and one row's D1 fields
- *  (Usage Trends, before it switches league and opens the sheet). A plain
- *  call, outside the query cache: the sheet reads its own list after the
- *  switch. Only `move` and the tapped row's fields are used. */
-export async function readMoveCapability(
-  leagueId: string,
-  playerId: string,
-  waitMs: number = FA_MOVE_CAPABILITY_WAIT_MS,
-): Promise<{ move: FaMoveCapability | null; row: FaMoveRow }> {
-  const data = await withTimeout(getFreeAgents(leagueId, 'ALL'), waitMs);
+// ── A host's prefetched capability (Usage Trends) ─────────────────────────
+// Usage Trends prefetches each listed league's capability in the background
+// when an availability list opens, so an Add tap can route by it without
+// waiting; an Add whose league isn't cached routes exactly as #509 did. Its
+// own key, never the sheet's ['free-agents', …]: the sheet reads its own list
+// after the league switch.
+
+export function faMoveCapabilityKey(leagueId: string): readonly unknown[] {
+  return ['fa-move-capability', leagueId];
+}
+export const FA_MOVE_CAPABILITY_STALE_MS = 60_000;
+
+/** One league's capability, kept as `move` plus each row's move_* fields
+ *  only (the cache holds nothing else of the list). */
+export interface LeagueCapability {
+  move: FaMoveCapability | null;
+  rows: Record<string, FaMoveRow>;
+}
+
+export async function readLeagueCapability(leagueId: string): Promise<LeagueCapability> {
+  const data = await getFreeAgents(leagueId, 'ALL');
   const move = capabilityOrNull(data?.move);
-  const tapped = data?.free_agents?.find((r) => r.player_id === playerId);
-  return { move, row: rowMoveFields(move, tapped) };
+  const rows: Record<string, FaMoveRow> = {};
+  if (move) {
+    for (const r of data?.free_agents ?? []) {
+      const f = rowMoveFields(move, r);
+      const kept = Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined)) as FaMoveRow;
+      if (Object.keys(kept).length) rows[r.player_id] = kept;
+    }
+  }
+  return { move, rows };
+}
+
+/** At the Add tap: the cached capability and this row's fields, or none
+ *  (then the host routes the legacy way, at once). */
+export function capabilityForRow(
+  cached: LeagueCapability | null | undefined,
+  playerId: string,
+): { move: FaMoveCapability | null; row: FaMoveRow } {
+  const move = capabilityOrNull(cached?.move);
+  return { move, row: move ? cached?.rows?.[playerId] ?? {} : {} };
 }
 
 // ── Analytics (scope §1, C1–C6) ─────────────────────────────────────────────
@@ -793,6 +835,11 @@ export const FA_MOVE_FALLBACK_COPY = {
   verify_line: 'Verify your {platform} sign-in to make moves from here.',
   other_account_line: "That {platform} account isn't in {league}. Connect the one that owns your team.",
   not_sent_line: "Couldn't reach {platform} right now, so nothing was sent.",
+  // State 11 when Fleeced's own server didn't answer (offline at the tap, a
+  // consent GET with no answer): not the platform's fault, so no platform
+  // named. not_sent_line stays for the server's {p}_write_failed + network.
+  // PENDING MARKETING (platforms-eng is telling them).
+  offline_line: "Couldn't connect right now, so nothing was sent.",
   unknown_title: 'Check before resending',
   unknown_body: "Couldn't confirm whether this move reached {platform}. Check your roster and claims in {platform} before you make it again.",
   unavailable_line: "Moves from Fleeced aren't available right now. You can still make this move in {platform}.",

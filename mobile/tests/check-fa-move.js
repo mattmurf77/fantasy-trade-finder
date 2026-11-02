@@ -72,6 +72,14 @@
 //       (Verify), the move route's plan, never F4's hand-off              [executed + AST]
 //   Y3  fa_move_connect_shown records an unknown connect value as
 //       `unknown` (analytics-lead); the UI still shows the connect step    [executed + AST]
+// Round 6 (release-lead's QA of c3449e15):
+//   Q1  Settings' consent GET: 403 / 404 emit no api_request_failed (the
+//       client's opt-in quietStatuses); a 500 still does                   [executed]
+//   X5  (rewritten) Usage Trends prefetches each listed league's capability;
+//       the Add tap never waits: cached → by it, uncached → legacy at once [executed + AST]
+//   P3.1–P3.8 the double-tap guard, numeric consent_until, any move_mode,
+//       the neutral panel, open_platform reserved, per-link Terms/Privacy,
+//       the offline line, the accessibility announcements                 [executed + AST]
 // Round 5 (head-eng's design note; legal R28.26 / R28.27):
 //   B1  a working button keeps full brightness with its spinner, takes no
 //       tap (#364's Button: `loading`, not `disabled`)                     [executed + AST]
@@ -267,6 +275,7 @@ function harness() {
   const requests = [];
   const events = [];
   const writes = [];
+  const apiFailures = [];
   let responder = () => new Promise(() => {}); // never answers
   let net = { isConnected: true };
   // Math.random is counted (Hermes has no Web Crypto, so the attempt id
@@ -279,7 +288,7 @@ function harness() {
     'expo-device': { DeviceType: { TABLET: 2, DESKTOP: 3 } },
     'expo-secure-store': { getItemAsync: async () => 'synthetic-token', setItemAsync: async () => {}, deleteItemAsync: async () => {} },
     'react-native': { Platform: { OS: 'ios' }, AppState: { addEventListener: () => {} } },
-    './events': { track: () => {} }, // the client's own api_request_failed
+    './events': { track: (name, props) => { if (name === 'api_request_failed') apiFailures.push(props); } }, // the client's own
   };
   const fetch = (url, opts) => {
     log.push('fetch');
@@ -302,7 +311,7 @@ function harness() {
   }), time, { Math: countingMath });
   const plan = load(PLAN, only({ '../api/faMove': faMove }), time);
   return {
-    time, log, requests, events, writes, client, faMove, plan,
+    time, log, requests, events, writes, apiFailures, client, faMove, plan,
     rands: () => rands,
     respond: (fn) => { responder = fn; },
     setNet: (s) => { net = s; },
@@ -412,8 +421,8 @@ process.on('exit', () => {
     const ut = read(USAGE_TRENDS);
     expect(/if \(platform !== 'sleeper' && !faMoveOpensSheet\(cap\.move, cap\.row\)\) \{\s*explainNoAdd\(platform\);\s*return;\s*\}/.test(ut),
       'UsageTrendsScreen doAdd');
-    expect(/move=\{claim\.move\}/.test(ut) && /readMoveCapability\(lgId, p\.player_id\)/.test(ut),
-      'Usage Trends reads the capability and passes it');
+    expect(/move=\{claim\.move\}/.test(ut) && /capabilityForRow\(/.test(ut) && /getQueryData<LeagueCapability>\(faMoveCapabilityKey\(lgId\)\)/.test(ut),
+      'Usage Trends routes by the cached capability and passes it');
   });
 
   // ── F3 ───────────────────────────────────────────────────────────────────
@@ -783,7 +792,7 @@ process.on('exit', () => {
     expect(cancels.length === 1 && cancels[0].attrs.disabled === '{busy}' && cancels[0].attrs.onPress === '{requestClose}', 'Cancel');
     expect(/\{view\.step === 'result' \? null : \(\s*<Button label="Cancel"/.test(claimText), 'Cancel hides only on results');
     expect(/accessibilityState=\{\{ disabled: inactive, busy: loading \}\}/.test(read(BUTTON)), 'Button: loading → busy');
-    expect(/setTimeout\(\(\) => setStillSending\(true\), FA_MOVE_STILL_SENDING_MS\)/.test(claimText)
+    expect(/setTimeout\(\(\) => \{\s*setStillSending\(true\);[\s\S]*?\}, FA_MOVE_STILL_SENDING_MS\)/.test(claimText)
       && /export const FA_MOVE_STILL_SENDING_MS = 8_000;/.test(faText), 'the still-sending timer');
     const ready = actionBranches(claim).ready.getText(claim);
     expect(/\{stillSending \? <Text[^>]*>\{slot\('still_sending'\)\}<\/Text> : null\}/.test(ready), 'the still-sending line');
@@ -822,7 +831,8 @@ process.on('exit', () => {
     const M = h.faMove;
     await check('L1 links: the block\'s own when it sends them; else the app\'s Terms and Privacy at the API base', () => {
       const own = M.readConsentBlock({ ...BLOCK, links: [{ label: 'Terms', url: 'https://legal.example/terms' }] });
-      eq(M.consentLinks(own), [{ label: 'Terms', url: 'https://legal.example/terms' }], 'server links');
+      eq(M.consentLinks(own), [{ label: 'Terms', url: 'https://legal.example/terms' },
+        { label: 'Privacy', url: `${h.client.getBaseUrl()}/privacy` }], 'server Terms, the app\'s Privacy (per link)');
       eq(M.consentLinks(M.readConsentBlock(BLOCK)), [
         { label: 'Terms', url: `${h.client.getBaseUrl()}/terms` },
         { label: 'Privacy', url: `${h.client.getBaseUrl()}/privacy` },
@@ -991,29 +1001,37 @@ process.on('exit', () => {
     });
   }
   {
-    await check('X5 Usage Trends\' pre-read: a plain call, bounded at 3 s, giving only move and the tapped row', async () => {
+    await check('X5 Usage Trends\' prefetch: one plain read per league, kept as move + the rows\' move_* fields only', async () => {
       const h = harness();
-      h.respond(() => response(200, { move: SUBMIT, free_agents: [{ player_id: 'p1', name: 'A', move_kind: 'claim', move_line: 'x', extra: 1 }], roster_capacity: {} }));
-      const out = await h.faMove.readMoveCapability('L1', 'p1');
-      eq(out, { move: SUBMIT, row: { move_kind: 'claim', move_line: 'x' } }, 'capability + row');
+      h.respond(() => response(200, { move: SUBMIT, roster_capacity: {}, free_agents: [
+        { player_id: 'p1', name: 'A', value: 1, move_kind: 'claim', move_line: 'x' }, { player_id: 'p2', name: 'B', value: 2 }] }));
+      const cap = await h.faMove.readLeagueCapability('L1');
+      eq(cap, { move: SUBMIT, rows: { p1: { move_kind: 'claim', move_line: 'x' } } }, 'kept');
       eq(h.requests.map((r) => r.url), ['https://example.invalid/api/league/free-agents?league_id=L1'], 'one plain read');
-      const slow = harness();
-      const run = watch(slow.faMove.readMoveCapability('L1', 'p1'));
-      await slow.time.advance(2_999);
-      expect(run.state === 'pending', 'gave up before 3 s');
-      await slow.time.advance(1);
-      eq(run.value, { move: null, row: {} }, 'no answer in 3 s → legacy');
       const old = harness();
       old.respond(() => response(200, { free_agents: [{ player_id: 'p1', move_mode: 'handoff', move_line: 'x' }] }));
-      eq(await old.faMove.readMoveCapability('L1', 'p1'), { move: null, row: {} }, 'today\'s server: nothing used');
+      eq(await old.faMove.readLeagueCapability('L1'), { move: null, rows: {} }, 'today\'s server: nothing kept');
+      eq([h.faMove.faMoveCapabilityKey('L1'), h.faMove.FA_MOVE_CAPABILITY_STALE_MS], [['fa-move-capability', 'L1'], 60000], 'its own key, 60 s');
     });
-    await check('X5 Usage Trends never touches the sheet\'s cache, and shows the tapped Add busy while it reads', () => {
+    await check('X5 the Add tap never waits: a cached submit capability routes to submit, an uncached one routes legacy at once', () => {
+      const h = harness();
+      const espn = { ...SUBMIT, league_platform: 'espn' };
+      const cached = h.faMove.capabilityForRow({ move: espn, rows: { p1: { move_kind: 'add' } } }, 'p1');
+      expect(h.faMove.faMoveOpensSheet(cached.move, cached.row), 'cached submit opens the in-app flow');
+      const none = h.faMove.capabilityForRow(undefined, 'p1');
+      eq([none, h.faMove.faMoveOpensSheet(none.move, none.row)], [{ move: null, row: {} }, false], 'uncached → legacy');
+      const doAdd = declText(parse(USAGE_TRENDS), 'doAdd');
+      const firstAwait = doAdd.indexOf('await ');
+      expect(doAdd.indexOf('getQueryData<LeagueCapability>(faMoveCapabilityKey(lgId))') > 0
+        && doAdd.indexOf('getQueryData') < firstAwait, 'the cache is read before any await');
+      eq(doAdd.match(/await [\w.]+\(/g), ['await closeSheetFirst(', 'await switchTo('], '#509\'s awaits only');
+      expect(!/fetchQuery|ensureQueryData|readLeagueCapability|prefetchQuery/.test(doAdd), 'doAdd reads the capability');
       const ut = read(USAGE_TRENDS);
-      expect(!/fetchQuery|setQueryData|queryKey: \['free-agents', lgId/.test(ut), 'the sheet\'s key is written');
-      expect(/setAdding\(\{ playerId: p\.player_id, leagueId: lgId \}\);[\s\S]*finally \{\s*setAdding\(null\);\s*\}/.test(declText(parse(USAGE_TRENDS), 'doAdd')),
-        'busy from the tap to the routing');
+      expect(/queryClient\.prefetchQuery\(\{\s*queryKey: faMoveCapabilityKey\(r\.league_id\),\s*queryFn: \(\) => readLeagueCapability\(r\.league_id\),\s*staleTime: FA_MOVE_CAPABILITY_STALE_MS,/.test(ut)
+        && (ut.match(/prefetchCapabilities\(leagueRowsFor\(p\)\);/g) || []).length === 2, 'prefetched when the sheet opens and when a row expands');
+      expect(!/queryKey: \['free-agents', lgId|setQueryData/.test(ut), 'the sheet\'s key is written');
       for (const f of ['src/components/UsageTrendCard.tsx', 'src/components/UsageStatsTable.tsx', 'src/components/UsageLeagueList.tsx']) {
-        expect(/<ActivityIndicator size="small"/.test(read(f)) && /busy: (adding|addingLeagueId === row\.league_id)/.test(read(f)), `${f}: no busy Add`);
+        expect(!/\badding\b|addingLeagueId|ActivityIndicator/.test(read(f)), `${f} still has the busy wait`);
       }
     });
   }
@@ -1075,7 +1093,7 @@ process.on('exit', () => {
       try { await h.faMove.readConsentStatus('sleeper'); } catch { threw = true; }
       expect(threw, 'a 500 was read as valid: false');
       const row = declText(parse(SETTINGS_LEAGUES), 'RosterMovesRow');
-      expect(/\} catch \{\s*setFailed\(true\);\s*\}/.test(row) && /\{failed \? \(\s*<Text[^>]*>\s*\{FA_MOVE_FALLBACK_COPY\.stop_failed\}/.test(row),
+      expect(/\} catch \{\s*setFailed\(true\);[^}]*\}/.test(row) && /\{failed \? \(\s*<Text[^>]*>\s*\{FA_MOVE_FALLBACK_COPY\.stop_failed\}/.test(row),
         'the failure line');
       eq(read(FA_MOVE).match(/stop_failed: "([^"]+)"/)[1], "Couldn't turn off roster moves. Try again.", 'the neutral string (marketing A3.9)');
     });
@@ -1263,7 +1281,7 @@ process.on('exit', () => {
       const wrong = rows.filter(([state, t]) => /nothing was sent/i.test(t) !== (state === 'not_sent'));
       eq(wrong, [], '[state, text] where "nothing was sent" is wrong or missing');
       const keys = Object.entries(h.faMove.FA_MOVE_FALLBACK_COPY).filter(([, v]) => /nothing was sent/i.test(v)).map(([k]) => k);
-      eq(keys, ['not_sent_line'], 'fallbacks that say "nothing was sent"');
+      eq(keys, ['not_sent_line', 'offline_line'], 'fallbacks that say "nothing was sent" (both state 11)');
       for (const st of ['platform_refused', 'rejected']) expect(rows.some(([s]) => s === st), `${st} not covered`);
     });
   }
@@ -1301,6 +1319,85 @@ process.on('exit', () => {
     await check('Z1 the Usage Trends availability footer is A1\'s line', () => {
       expect(/Add opens a quick check before the move\. Trade opens the trade finder in that league\./.test(read('src/components/UsageLeagueList.tsx')),
         'UsageLeagueList footer');
+    });
+  }
+
+  // ── Review round 6 (release-lead's QA): Q1, P3.1–P3.8 ───────────────────
+  {
+    await check('Q1 Settings\' consent GET: a 403 or 404 emits no api_request_failed; a 500 still does; other calls unchanged', async () => {
+      const h = harness();
+      let next = 0;
+      const answers = [[404, '<html>'], [403, { error: 'verification_required' }], [500, { error: 'internal_error' }], [404, '<html>']];
+      h.respond(() => response(...answers[next++]));
+      await h.faMove.readConsentStatus('sleeper');
+      await h.faMove.readConsentStatus('sleeper');
+      eq(h.apiFailures.length, 0, 'events after a 404 and a 403');
+      try { await h.faMove.readConsentStatus('sleeper'); } catch { /* the 500 rejects */ }
+      eq(h.apiFailures.map((e) => e.status), [500], 'a 500 is still a failure');
+      try { await h.faMove.getConsent('sleeper'); } catch { /* the control 404 rejects */ }
+      eq(h.apiFailures.map((e) => e.status), [500, 404], 'without the opt-in, a 404 is reported as before');
+      eq([...h.faMove.CONSENT_QUIET_STATUSES], [403, 404], 'the quiet set');
+      expect(/const quiet = err instanceof ApiError && !!opts\.quietStatuses\?\.includes\(err\.status\);\s*if \(!quiet\) \{\s*_reportApiFailure\(/.test(read('src/api/client.ts')),
+        'api/client.ts skips the event for the listed statuses only');
+    });
+  }
+  {
+    const h = harness();
+    const cp = h.plan.copyFns(SUBMIT, { league: 'L', name: 'A' });
+    await check('P3.1 openConsent is guarded by a ref: a same-frame double tap can\'t fire two GETs or two sends', () => {
+      const t = declText(claim, 'openConsent');
+      expect(/if \(!isSubmitCapability\(m\) \|\| consentInFlightRef\.current\) return;\s*consentInFlightRef\.current = true;\s*try \{/.test(t)
+        && /\} finally \{\s*consentInFlightRef\.current = false;\s*\}/.test(t), 'the guard');
+      expect(/if \(!isSubmitCapability\(move\) \|\| sendingRef\.current\) return;\s*sendingRef\.current = true;/.test(declText(claim, 'send')),
+        'send sets its ref before its first await');
+    });
+    await check('P3.2 / P3.3 a numeric consent_until is not a grant; any per-row move_mode holds the row in hand-off', () => {
+      eq([h.faMove.consentValidAt(4102444800000, 0), h.faMove.consentValidAt('2099-01-01T00:00:00Z', 0), h.faMove.consentValidAt(null, 0)],
+        [false, true, false], 'consentValidAt');
+      const g = (row) => h.faMove.faMoveGate({ move: SUBMIT, row, consentValid: true, ticked: false });
+      eq([g({ move_mode: 'HANDOFF' }), g({ move_mode: '' }), g({ move_mode: 'handoff' }), g({ move_mode: null }), g({})],
+        ['handoff', 'handoff', 'handoff', 'submit', 'submit'], 'move_mode');
+    });
+    await check('P3.4 a 400 or an unknown 4xx is the neutral panel: the server\'s words, dim, no "wasn\'t made" title, no retry', () => {
+      for (const [st, body] of [[400, { error: 'bad_request', message: 'That request was malformed.' }], [418, { error: 'teapot', message: 'Short and stout.' }]]) {
+        const v = h.plan.planFailure(h.faMove.classifyMoveError(apiErr(h, st, body)), cp).view;
+        eq([v.step, v.kind, v.title, v.lines], ['result', 'neutral', body.message, []], `${st}`);
+      }
+      const titled = h.plan.planFailure(h.faMove.classifyMoveError(apiErr(h, 400, { error: 'bad_request', title: 'T', message: 'M' })), cp).view;
+      eq([titled.title, titled.lines], ['T', ['M']], 'server title + message');
+      const bare = h.plan.planFailure(h.faMove.classifyMoveError(apiErr(h, 400, { error: 'bad_request' })), cp).view;
+      expect(!/wasn't made/.test(bare.title) && bare.title === cp.slot('unavailable_line'), `bare 400 title: ${bare.title}`);
+      expect(/view\.kind !== 'neutral';/.test(claimText), 'the panel\'s lines are dim, not --neg');
+    });
+    await check('P3.5 / P3.6 open_platform is reserved and unread; Terms and Privacy are both always present, per link', () => {
+      expect(/Reserved and unread in this binary[\s\S]{0,160}\| 'open_platform'/.test(faText), 'the comment');
+      expect(!/slot\('open_platform'\)|copy\??\.open_platform/.test(claimText), 'the slot is read');
+      const base = h.client.getBaseUrl();
+      const L = (links) => h.faMove.consentLinks(h.faMove.readConsentBlock({ ...BLOCK, links })).map((l) => l.url);
+      eq(L([{ label: 'Privacy', url: 'https://legal.example/privacy' }, { label: 'Terms', url: 'javascript:x' }]),
+        [`${base}/terms`, 'https://legal.example/privacy'], 'a bad Terms link → the app\'s Terms');
+      eq(L([{ label: 'Terms', url: 'https://legal.example/terms' }, { label: 'Privacy', url: 'https://legal.example/privacy' }]),
+        ['https://legal.example/terms', 'https://legal.example/privacy'], 'both valid → the server\'s');
+      eq(L(undefined), [`${base}/terms`, `${base}/privacy`], 'none → the app\'s');
+    });
+    await check('P3.7 offline / no answer from Fleeced says "Couldn\'t connect right now…"; the platform\'s 502 keeps "Couldn\'t reach {platform}…"', () => {
+      eq(h.faMove.FA_MOVE_FALLBACK_COPY.offline_line, "Couldn't connect right now, so nothing was sent.", 'offline_line');
+      eq(h.plan.planNotSent(cp).view.ctaNotice.text, "Couldn't connect right now, so nothing was sent.", 'state 11, nothing reached Fleeced');
+      const net = h.plan.planFailure(h.faMove.classifyMoveError(apiErr(h, 502, { error: 'sleeper_write_failed', kind: 'network' })), cp).view;
+      eq(net.ctaNotice.text, "Couldn't reach Sleeper right now, so nothing was sent.", 'state 11, the platform unreachable');
+    });
+    await check('P3.8 accessibility: "Still sending…" and stop_failed are announced; Turn off is its own button; 10d refocuses the bid error', () => {
+      expect(/setStillSending\(true\);[\s\S]{0,120}AccessibilityInfo\.announceForAccessibility\(slot\('still_sending'\)/.test(claimText), 'still sending');
+      expect(/setFailed\(true\);[\s\S]{0,120}AccessibilityInfo\.announceForAccessibility\(FA_MOVE_FALLBACK_COPY\.stop_failed\)/.test(read(SETTINGS_LEAGUES)), 'stop_failed');
+      const ready = actionBranches(claim).ready;
+      const turnOff = jsxMounts(claim, 'Pressable', ready).filter((m) => m.attrs.onPress === '{turnOff}');
+      expect(turnOff.length === 1 && turnOff[0].attrs.accessibilityRole === '"button"', 'Turn off is a Pressable button');
+      let nestedPress = 0;
+      walk(ready, (n) => { if ((ts.isJsxOpeningElement(n) || ts.isJsxSelfClosingElement(n)) && n.tagName.getText(claim) === 'Text'
+        && n.attributes.properties.some((a) => ts.isJsxAttribute(a) && a.name.getText(claim) === 'onPress')) nestedPress += 1; });
+      eq(nestedPress, 0, 'Text with onPress in the ready block');
+      expect(/<Text ref=\{bidErrorRef\}/.test(claimText) && /if \(budgetSeq === 0 \|\| !bidTooHigh\) return;[\s\S]*?setAccessibilityFocus\(node\)[\s\S]*?\[budgetSeq, bidTooHigh\]/.test(claimText)
+        && /setBudgetSeq\(\(n\) => n \+ 1\);/.test(declText(claim, 'apply')), '10d refocus');
     });
   }
 

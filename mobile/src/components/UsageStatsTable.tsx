@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Icon, Text } from './chalkline';
 import { UsageLeagueList, type UsageLeagueRow } from './UsageLeagueList';
@@ -94,10 +94,6 @@ export interface UsageStatsRowProps {
   onRerank: () => void;
   onLeagueAdd: (leagueId: string) => void;
   onLeagueTrade: (leagueId: string) => void;
-  /** D1: this row's Add is waiting on the league's capability (≤ 3 s). */
-  adding?: boolean;
-  /** D1: the league whose Add, in the expanded list, is waiting. */
-  addingLeagueId?: string | null;
 }
 
 export function UsageStatsRow({
@@ -114,8 +110,6 @@ export function UsageStatsRow({
   onRerank,
   onLeagueAdd,
   onLeagueTrade,
-  adding = false,
-  addingLeagueId = null,
 }: UsageStatsRowProps) {
   const block = player[metric];
   const id = player.player_id;
@@ -162,13 +156,11 @@ export function UsageStatsRow({
               testID={`usage-trends.action.${id}`}
               accessibilityRole="button"
               accessibilityLabel={`Add ${player.name}`}
-              accessibilityState={{ disabled: adding, busy: adding }}
-              disabled={adding}
               onPress={onAdd}
               hitSlop={ICON_SLOP}
               style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
             >
-              {adding ? <ActivityIndicator size="small" color={chalk.base} /> : <Icon name="plus" size={16} color={chalk.base} />}
+              <Icon name="plus" size={16} color={chalk.base} />
             </Pressable>
           ) : focusStatus === 'rostered' ? (
             <Pressable
@@ -209,7 +201,7 @@ export function UsageStatsRow({
       </View>
       {expanded ? (
         <View style={styles.expand} testID={`usage-trends.expand.${id}`}>
-          <UsageLeagueList player={player} rows={leagueRows} onAdd={onLeagueAdd} onTrade={onLeagueTrade} addingLeagueId={addingLeagueId} compact />
+          <UsageLeagueList player={player} rows={leagueRows} onAdd={onLeagueAdd} onTrade={onLeagueTrade} compact />
         </View>
       ) : null}
     </View>

@@ -138,6 +138,8 @@ function RosterMovesRow({ platform }: { platform: LeaguePlatform }) {
       queryClient.invalidateQueries({ queryKey: ['free-agents'] });
     } catch {
       setFailed(true);
+      // iOS ignores accessibilityLiveRegion, so say it.
+      AccessibilityInfo.announceForAccessibility(FA_MOVE_FALLBACK_COPY.stop_failed);
     } finally {
       setStopping(false);
     }

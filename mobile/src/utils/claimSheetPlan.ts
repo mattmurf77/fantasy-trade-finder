@@ -128,9 +128,10 @@ export interface Plan {
 }
 
 /** State 11 with nothing sent: offline at the tap, or a consent GET that
- *  never got an answer. The same named CTA is the retry. */
+ *  never got an answer. Fleeced's own server wasn't reached, so the line
+ *  names no platform. The same named CTA is the retry. */
 export function planNotSent(copy: CopyFns): Plan {
-  return { view: { step: 'ready', ctaNotice: { text: copy.slot('not_sent_line') ?? '', tone: 'neg' } } };
+  return { view: { step: 'ready', ctaNotice: { text: copy.fallback('offline_line') ?? '', tone: 'neg' } } };
 }
 
 /** 8 / 9. A pending claim also marks the host's row for the session. */
@@ -198,8 +199,19 @@ export function planFailure(f: MoveFailure, copy: CopyFns): Plan {
     case 'player_taken':
     case 'platform_refused':
     case 'unavailable':
-    case 'neutral':
       return result(f.state);
+    case 'neutral':
+      // Contract §4: a 400 or an unrecognised 4xx is the neutral panel: the
+      // server's own words, no retry, no "wasn't made" refusal title.
+      return {
+        refresh: true,
+        view: {
+          step: 'result',
+          kind: 'neutral',
+          title: f.title ?? said ?? copy.slot('unavailable_line') ?? '',
+          lines: f.title && said ? [said] : [],
+        },
+      };
     case 'rejected': // 13: the server dropped the credential.
       return canConnect ? { connect: 'not_linked', ...result('rejected') } : { refresh: true, view: { step: 'unsupported' } };
     case 'unknown': {

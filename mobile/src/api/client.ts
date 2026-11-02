@@ -378,6 +378,10 @@ export interface RequestOptions {
   timeoutMs?: number;
   // State-owned identity fence. No store import belongs in this layer.
   beforeDispatch?: () => void;
+  // Statuses that are an expected answer for this call, not a failure: no
+  // api_request_failed event for them. Opt-in per call; the rejection is
+  // unchanged. (D1: Settings' consent read, whose 404 / 403 is routine.)
+  quietStatuses?: readonly number[];
 }
 
 // ── Universal API-failure observability (tracking plan addendum 2026-07-19) ──
@@ -484,13 +488,16 @@ export async function apiRequest<T = unknown>(
   try {
     return await runWithDeadline(signal => _apiRequestInner<T>(path, {...opts, signal, deadlineAt}), deadlineAt, opts.signal);
   } catch (err) {
-    _reportApiFailure(
-      path,
-      opts.method || 'GET',
-      err,
-      _clockMs() - startedAt,
-      _leftForegroundCount !== foregroundEpoch,
-    );
+    const quiet = err instanceof ApiError && !!opts.quietStatuses?.includes(err.status);
+    if (!quiet) {
+      _reportApiFailure(
+        path,
+        opts.method || 'GET',
+        err,
+        _clockMs() - startedAt,
+        _leftForegroundCount !== foregroundEpoch,
+      );
+    }
     throw err;
   } finally {
     _noteWrite(path, opts.method || 'GET');

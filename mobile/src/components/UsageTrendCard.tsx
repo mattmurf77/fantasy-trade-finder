@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Rect } from 'react-native-svg';
 
 import { Icon, PositionBadge, Text } from './chalkline';
@@ -99,8 +99,6 @@ export interface UsageTrendCardProps {
   onTrade: () => void;
   onRerank: () => void;
   onAvailability: () => void;
-  /** D1: this player's Add is waiting on the league's capability (≤ 3 s). */
-  adding?: boolean;
 }
 
 export default function UsageTrendCard({
@@ -115,7 +113,6 @@ export default function UsageTrendCard({
   onTrade,
   onRerank,
   onAvailability,
-  adding = false,
 }: UsageTrendCardProps) {
   const latest = weeks.length ? weeks[weeks.length - 1] : null;
   const known = leagueStatuses.filter((s) => s !== 'unknown');
@@ -149,12 +146,10 @@ export default function UsageTrendCard({
             testID={`usage-trends.action.${id}`}
             accessibilityRole="button"
             accessibilityLabel={`Add ${player.name}`}
-            accessibilityState={{ disabled: adding, busy: adding }}
-            disabled={adding}
             onPress={onAdd}
             style={({ pressed }) => [styles.btn, pressed && styles.pressed]}
           >
-            {adding ? <ActivityIndicator size="small" color={chalk.base} /> : <Icon name="plus" size={16} color={chalk.base} />}
+            <Icon name="plus" size={16} color={chalk.base} />
             <Text style={styles.btnText}>Add</Text>
           </Pressable>
         ) : focusStatus === 'rostered' ? (

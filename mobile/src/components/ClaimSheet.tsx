@@ -242,11 +242,14 @@ export default function ClaimSheet({
   // Hidden, not destroyed, while the connect screen is up (contract §6).
   const [hidden, setHidden] = useState(false);
   const [serverRemaining, setServerRemaining] = useState<number | null>(null);
+  // Bumped on each 10d, so the bid error takes VoiceOver focus every time.
+  const [budgetSeq, setBudgetSeq] = useState(0);
   const [requireDrop, setRequireDrop] = useState(false);
   const [pinned, setPinned] = useState(true);
 
   const mountedRef = useRef(true);
   const sendingRef = useRef(false);
+  const consentInFlightRef = useRef(false);
   const awaitingConnectRef = useRef(false);
   // The consent pair from a Make the move that never left the phone
   // (offline): the retry sends it again, with no second consent step.
@@ -255,6 +258,7 @@ export default function ClaimSheet({
   const shownVersionRef = useRef<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const focusRef = useRef<View>(null);
+  const bidErrorRef = useRef<React.ElementRef<typeof Text>>(null);
   const dropYRef = useRef(0);
 
   const busy = sending || loadingConsent;
@@ -333,7 +337,11 @@ export default function ClaimSheet({
       setStillSending(false);
       return;
     }
-    const t = setTimeout(() => setStillSending(true), FA_MOVE_STILL_SENDING_MS);
+    const t = setTimeout(() => {
+      setStillSending(true);
+      // iOS: say it, since the line appears without focus moving.
+      AccessibilityInfo.announceForAccessibility(slot('still_sending') ?? '');
+    }, FA_MOVE_STILL_SENDING_MS);
     return () => clearTimeout(t);
   }, [sending]);
 
@@ -346,6 +354,17 @@ export default function ClaimSheet({
     }, 150);
     return () => clearTimeout(t);
   }, [viewSeq]);
+
+  // 10d: VoiceOver focus to the bid error each time the server's budget
+  // answer changes it.
+  useEffect(() => {
+    if (budgetSeq === 0 || !bidTooHigh) return;
+    const t = setTimeout(() => {
+      const node = bidErrorRef.current ? findNodeHandle(bidErrorRef.current) : null;
+      if (node != null) AccessibilityInfo.setAccessibilityFocus(node);
+    }, 150);
+    return () => clearTimeout(t);
+  }, [budgetSeq, bidTooHigh]);
 
   // A connect step at open is shown, so it is counted (C1: submit only).
   useEffect(() => {
@@ -454,31 +473,38 @@ export default function ClaimSheet({
   // Verify, the same plan as the move route's 403. Only another server
   // failure or an incomplete block is F4's hand-off.
   async function openConsent(sendIfValid: boolean, m: FaMoveCapability | null = move) {
-    if (!isSubmitCapability(m)) return;
-    setLoadingConsent(true);
-    const step = await fetchConsentStep(m.league_platform);
-    if (!mountedRef.current) return;
-    setLoadingConsent(false);
-    switch (step.kind) {
-      case 'offline':
-      case 'not_sent':
-        if (sendIfValid) apply(planNotSent(copy));
-        else show({ step: 'ready' });
-        return;
-      case 'valid':
-        setConsentOverride(true);
-        if (sendIfValid) await send(null, true);
-        else show({ step: 'ready' });
-        return;
-      case 'verify':
-        apply(planFailure({ state: 'verify', errorCode: 'verification_required', status: 403, message: step.message }, copy));
-        return;
-      case 'consent':
-        showConsent(step.block, m);
-        return;
-      case 'unavailable':
-        show({ step: 'handoff', line: slot('unavailable_line') });
-        return;
+    // One consent read at a time: a same-frame double tap (state not yet
+    // busy) can't fire two GETs, or two sends after them.
+    if (!isSubmitCapability(m) || consentInFlightRef.current) return;
+    consentInFlightRef.current = true;
+    try {
+      setLoadingConsent(true);
+      const step = await fetchConsentStep(m.league_platform);
+      if (!mountedRef.current) return;
+      setLoadingConsent(false);
+      switch (step.kind) {
+        case 'offline':
+        case 'not_sent':
+          if (sendIfValid) apply(planNotSent(copy));
+          else show({ step: 'ready' });
+          return;
+        case 'valid':
+          setConsentOverride(true);
+          if (sendIfValid) await send(null, true);
+          else show({ step: 'ready' });
+          return;
+        case 'verify':
+          apply(planFailure({ state: 'verify', errorCode: 'verification_required', status: 403, message: step.message }, copy));
+          return;
+        case 'consent':
+          showConsent(step.block, m);
+          return;
+        case 'unavailable':
+          show({ step: 'handoff', line: slot('unavailable_line') });
+          return;
+      }
+    } finally {
+      consentInFlightRef.current = false;
     }
   }
 
@@ -597,7 +623,10 @@ export default function ClaimSheet({
     if (plan.consentOverride !== undefined) setConsentOverride(plan.consentOverride);
     if (plan.requireDrop) setRequireDrop(true);
     if (plan.clearDrop) setDropId(null);
-    if (plan.serverRemaining !== undefined) setServerRemaining(plan.serverRemaining);
+    if (plan.serverRemaining !== undefined) {
+      setServerRemaining(plan.serverRemaining);
+      setBudgetSeq((n) => n + 1);
+    }
     // F12: a terminal result refreshes the list, drop list, FAAB and capability.
     if (plan.refresh) refreshList();
     // State 9: the host's row reads "Claim pending" for the app session.
@@ -696,7 +725,7 @@ export default function ClaimSheet({
         ) : null}
       </View>
       {bidTooHigh ? (
-        <Text style={sheetStyles.bidError}>
+        <Text ref={bidErrorRef} style={sheetStyles.bidError}>
           That's more than your ${remaining!.toLocaleString('en-US')}{' '}
           remaining — lower the bid.
         </Text>
@@ -855,17 +884,23 @@ export default function ClaimSheet({
         ))}
         <Text style={sheetStyles.dimLine}>{slot('finality')}</Text>
         {windowOpen ? (
-          <Text style={sheetStyles.dimLine}>
-            {slot('window_line', { date: windowDateText(move?.consent_until) })}
-            {' · '}
-            <Text
-              style={sheetStyles.inlineLink}
-              accessibilityRole="link"
-              onPress={busy ? undefined : turnOff}
-            >
-              {slot('turn_off')}
+          <View style={sheetStyles.windowRow}>
+            <Text style={sheetStyles.dimLine}>
+              {slot('window_line', { date: windowDateText(move?.consent_until) })}
+              {' · '}
             </Text>
-          </Text>
+            {/* Its own accessible button, not nested text (VoiceOver). */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={slot('turn_off') ?? undefined}
+              accessibilityState={{ disabled: busy }}
+              disabled={busy}
+              onPress={turnOff}
+              hitSlop={8}
+            >
+              <Text style={[sheetStyles.dimLine, sheetStyles.inlineLink]}>{slot('turn_off')}</Text>
+            </Pressable>
+          </View>
         ) : null}
         {doInSleeper}
       </>
@@ -1004,7 +1039,8 @@ export default function ClaimSheet({
       </View>
     );
   } else if (view.step === 'result') {
-    const neg = view.kind !== 'added' && view.kind !== 'pending' && view.kind !== 'unknown';
+    // Refusals in --neg; 8, 9, 12 and the neutral panel (contract §4) dim.
+    const neg = view.kind !== 'added' && view.kind !== 'pending' && view.kind !== 'unknown' && view.kind !== 'neutral';
     body = (
       <View style={sheetStyles.result}>
         {view.kind === 'added' ? <Icon name="check" size={24} color={chalk.base} /> : null}
@@ -1279,6 +1315,7 @@ const sheetStyles = StyleSheet.create({
   // Refusals are --neg text, never a fill.
   negLine: { ...type.bodySm, color: semantic.neg },
   inlineLink: { color: chalk.base, textDecorationLine: 'underline' },
+  windowRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
   linksRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm },
   linkText: { ...type.bodySm, color: chalk.dim, textDecorationLine: 'underline' },
   thisMove: { ...type.bodySm, color: chalk.base, fontStyle: 'italic' },
