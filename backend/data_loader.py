@@ -215,6 +215,22 @@ _ktc_fetched_at: float = 0.0
 KTC_BLEND_WEIGHT_DEFAULT = 0.5
 TEP_TE_UPLIFT_DEFAULT = 1.18
 
+# S5 (models-lead launch plan): the blend fails soft, so a KTC page change
+# would silently move every user's values to DP-only, or blend in garbage
+# that still parses. Each blend checks its own health and prints one
+# `KTC-BLEND-DEGRADED` line when it's off (a Render log alert keys on it;
+# runbook § KTC consensus blend). It only reports: the blend still runs as
+# before, and the lever stays ktc_blend_weight = 0.
+#   unavailable — KTC returned nothing (fetch or parse failure): DP-only
+#   thin        — fewer than KTC_MIN_MATCHED pool players matched
+#   disagrees   — KTC's ordering vs DP's over the matched players has a
+#                 Spearman rank correlation below KTC_MIN_RANK_CORR
+KTC_MIN_MATCHED = 50
+KTC_MIN_RANK_CORR = 0.7
+# The last blend's health per format: {fmt: {"state", "matched", "rank_corr",
+# "checked_at"}}, state "ok" or one of the reasons above.
+KTC_BLEND_STATUS: dict[str, dict] = {}
+
 
 def _blend_config() -> tuple[float, float]:
     """(ktc_blend_weight, tep_te_uplift) from model_config, defaults on any
@@ -396,6 +412,54 @@ def _ktc_consensus() -> dict[str, dict]:
         return _ktc_cache
 
 
+def _rank_corr(xs: list[float], ys: list[float]) -> float:
+    """Spearman's rank correlation (average ranks on ties); 0.0 when either
+    side is constant."""
+    def ranks(v):
+        order = sorted(range(len(v)), key=v.__getitem__)
+        r = [0.0] * len(v)
+        i = 0
+        while i < len(order):
+            j = i
+            while j + 1 < len(order) and v[order[j + 1]] == v[order[i]]:
+                j += 1
+            for k in range(i, j + 1):
+                r[order[k]] = (i + j) / 2
+            i = j + 1
+        return r
+    rx, ry = ranks(xs), ranks(ys)
+    mx, my = sum(rx) / len(rx), sum(ry) / len(ry)
+    cov = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    vx = sum((a - mx) ** 2 for a in rx)
+    vy = sum((b - my) ** 2 for b in ry)
+    return cov / math.sqrt(vx * vy) if vx and vy else 0.0
+
+
+def _record_blend_health(fmt: str, n_ktc: int, matched: list, value_map: dict) -> None:
+    """S5: record this blend's health in KTC_BLEND_STATUS and print the
+    KTC-BLEND-DEGRADED line when it isn't ok (see KTC_MIN_MATCHED)."""
+    corr = (_rank_corr([v for _, v in matched], [value_map[k] for k, _ in matched])
+            if len(matched) >= KTC_MIN_MATCHED else None)
+    if not n_ktc:
+        state = "unavailable"
+    elif len(matched) < KTC_MIN_MATCHED:
+        state = "thin"
+    elif corr < KTC_MIN_RANK_CORR:
+        state = "disagrees"
+    else:
+        state = "ok"
+    KTC_BLEND_STATUS[fmt] = {"state": state, "matched": len(matched),
+                             "rank_corr": None if corr is None else round(corr, 3),
+                             "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    if state != "ok":
+        print(f"🚨 KTC-BLEND-DEGRADED fmt={fmt} reason={state} "
+              f"matched={len(matched)}/{len(value_map)} ktc_rows={n_ktc} "
+              f"rank_corr={'n/a' if corr is None else f'{corr:.3f}'}: "
+              + ("consensus seeds are DP-only for this format"
+                 if state != "disagrees" else "blended anyway; check KTC's page")
+              + "; kill switch ktc_blend_weight=0 (runbook § KTC consensus blend)")
+
+
 def _apply_consensus_blend(
     fmt: str,
     elo_map: dict[str, float],
@@ -420,6 +484,7 @@ def _apply_consensus_blend(
             if k in ktc and ktc[k]["pos"] == pos_map.get(k)
             and fmt in ktc[k]["values"]
         ]
+        _record_blend_health(fmt, len(ktc), matched, value_map)
         if matched:
             # Rank-normalize KTC onto the DP value curve, then weighted-avg.
             curve = sorted(value_map.values(), reverse=True)
