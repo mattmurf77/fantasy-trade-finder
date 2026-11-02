@@ -30,13 +30,14 @@ REPO = Path(__file__).resolve().parents[2]
 
 # ── Item 6: the flag ────────────────────────────────────────────────────────
 
-def test_the_packed_evidence_flag_is_registered_and_off():
+def test_the_packed_evidence_flag_is_registered_and_on():
     """The 3-touch mirror (FLAG_KEYS, config/features.json, the release
-    fixture). It ships off; it goes on before trade.first_page_store (R2.4 §3)."""
+    fixture). The code default stays off; features.json turns it on, with
+    trade.first_page_store, in #551's one-step flip."""
     features = json.loads((REPO / "config/features.json").read_text())
     release = json.loads((REPO / "backend/tests/fixtures/flags/release.json").read_text())
     assert "trade.packed_evidence" in FLAG_KEYS and DEFAULT_FLAGS["trade.packed_evidence"] is False
-    assert features["trade.packed_evidence"] is False
+    assert features["trade.packed_evidence"] is True
     assert release["trade.packed_evidence"] == features["trade.packed_evidence"]
 
 
@@ -276,6 +277,7 @@ def restart():
     server._deck_live_stamped.clear()
     server._deck_held.clear()                              # U4: a new process held none of them
     server._deck_evicted_at.clear()
+    server._deck_f5_dropped.clear()
 
 
 def test_s8_the_first_delivery_writes_the_first_30_the_ghosts_and_one_pack_of_every_card(deferred):
@@ -370,6 +372,53 @@ def test_r42_after_a_restart_a_stored_card_upgrades_from_the_blob(deferred):
     assert "give_value_band" in json.loads(got["features_json"])
     assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {"restart_split": 0, "evicted_split": 0, "other": 0}
     assert [o["impression_id"] for o in outcomes(engine)] == [contract.card_impression_id(job_id, 50)]
+
+
+@pytest.mark.parametrize("w0_past_30", [True, False])
+def test_c1_a_deck_that_wont_pack_gets_no_row_past_30_and_eval_reads_a_lost_pack(
+        deferred, monkeypatch, caplog, w0_past_30):
+    """S8's C1 hold when pack_run refuses a deck (it doesn't pack exactly; the
+    S1-S8 package): no pack and no row past the first 30 at any delivery, so
+    never a full_interim one; the refusal logged at ERROR; each serve's
+    withdrawals still recorded. Eval reads the deck as in flight for 25 h,
+    then as incomplete_deck (a lost pack), never as a complete 30-card deck.
+    Without a never-delivered withdrawal past 30, the rows hold no index hole,
+    so the lost-pack rule alone excludes the deck (#552 QA P2-1)."""
+    from datetime import datetime, timedelta
+    from backend.eval import data as eval_data
+    client, engine, _ = deferred
+
+    def refuse(*a, **k):
+        raise ValueError("synthetic: the deck doesn't pack exactly")
+    monkeypatch.setattr(evidence_pack, "pack_run", refuse)
+    job_id, served, ghosts, ev, _ = packed_deck(120, ghost_every=9)
+    with caplog.at_level("ERROR"):
+        status(client, job_id, 0)
+        own_all_but(engine, *((3, 40) if w0_past_30 else (3,)))
+        status(client, job_id, 0)                          # card 3: served before, withdrawn
+        status(client, job_id, 30)                         # mine40's card (index 36): never delivered (W0)
+    written = rows(engine)
+    assert rows(engine, PACKS) == []
+    assert max(r["card_index"] for r in written if not r["is_ghost"]) < 30
+    assert {r["evidence_tier"] for r in written if not r["is_ghost"]} == {"first30"}
+    assert any("doesn't pack exactly; no pack written" in r.getMessage() and r.levelname == "ERROR"
+               for r in caplog.records)
+    # (card_index, served_before): card 3 served before; mine40's card (the
+    # ghosts put it at 36) never delivered
+    assert sorted((r["card_index"], r["served_before"])
+                  for r in rows(engine, db_module.deck_card_withdrawals_table)) == (
+        [(3, 1), (36, 0)] if w0_past_30 else [(3, 1)])
+    served_at = datetime.fromisoformat(written[0]["served_at"])
+
+    def read(hours):
+        [deck] = eval_data.load_decks(engine=engine,
+                                      as_of=(served_at + timedelta(hours=hours)).isoformat())
+        return deck.exclusion
+    for hours, exclusion in ((1, eval_data.IN_FLIGHT), (26, eval_data.INCOMPLETE_DECK)):
+        assert read(hours) == exclusion, hours
+    if not w0_past_30:       # the control: without the lost-pack rule, a complete 30-card deck
+        monkeypatch.setattr(eval_data, "PACK_REQUIRED_SINCE", None)
+        assert read(26) is None
 
 
 def test_s8_an_upgrade_past_the_recorded_deliveries_writes_no_delivery(deferred, monkeypatch, caplog):
@@ -930,6 +979,36 @@ def test_p2_1_the_first_delivery_wins_and_ghosts_stay_null(deferred, prepared_ok
     assert ghost_ids
     db_module.stamp_live_deliveries(job_id, UID, LEAGUE, ghost_ids, "2026-10-27T00:00:00+00:00")
     assert all(r["delivered_at"] is None for r in rows(engine) if r["is_ghost"])
+
+
+def test_the_live_stamp_reports_a_deck_with_no_evidence(deferred, prepared_ok):
+    """A delivery of a deck with no row at all (and so, on this path, no pack)
+    says so; one with rows, or one delivering nothing, doesn't."""
+    client, engine, _ = deferred
+    job_id, _ids = live_deck(60)
+    status(client, job_id, 0)
+    sent = [r["impression_id"] for r in rows(engine) if not r["is_ghost"]][:3]
+    at = "2026-10-27T00:00:00+00:00"
+    assert db_module.stamp_live_deliveries(job_id, UID, LEAGUE, sent, at) is True
+    assert db_module.stamp_live_deliveries("no-such-deck", UID, LEAGUE, ["no-such-deck:0"], at) is False
+    assert db_module.stamp_live_deliveries("no-such-deck", UID, LEAGUE, [], at) is True
+
+
+@pytest.mark.parametrize("has_rows", [True, False])
+def test_a_live_stamp_on_a_deck_with_no_evidence_is_logged(monkeypatch, caplog, has_rows):
+    """The count for the read: an ERROR line per such delivery, with the
+    card count and no user id."""
+    monkeypatch.setattr(db_module, "stamp_live_deliveries", lambda *a, **k: has_rows)
+    with caplog.at_level("ERROR"):
+        server._deck_live_stamp("deck-x", "u-secret", "lg", {"deck-x:0", "deck-x:1"}, {},
+                                "2026-10-27T00:00:00+00:00")
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    if has_rows:
+        assert not errors
+    else:
+        assert errors == ["deck-evidence deck-x: 2 delivered cards of a deck with no evidence "
+                          "(no rows, no pack); eval can't see them"]
+        assert "u-secret" not in errors[0]
 
 
 def test_p2_1_v5_reads_a_live_decks_delivered_positions_from_its_stamps(deferred, prepared_ok):

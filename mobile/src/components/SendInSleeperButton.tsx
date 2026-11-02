@@ -15,8 +15,10 @@ import SendInMflButton from './SendInMflButton';
 import SendInEspnButton from './SendInEspnButton';
 import { haptics } from '../utils/haptics';
 import { maybeRequestReview } from '../utils/ratingPrompt';
-import { useFlag } from '../state/useFeatureFlags';
+import { useFlag, useFeatureFlags } from '../state/useFeatureFlags';
 import { useSession } from '../state/useSession';
+import { useEntitlements } from '../state/useEntitlements';
+import { isUnverifiedSession, openPaywall, openVerify } from '../state/usePaywallGate';
 import {
   proposeTradeToSleeper,
   getSleeperLinkStatus,
@@ -52,6 +54,38 @@ import { GUIDE_RECEIPTS } from './analystScript';
 //   • unlinked → "Connect Sleeper first" heads-up → login webview; on return we
 //                re-check the link and tell them whether it worked so they can
 //                tap Send again. The user always presses the SAME button.
+
+/** #393 M2 (D16 GRANTED) — the Send pre-check, on the tap and BEFORE any
+ *  confirm step. The router calls it for Sleeper, and passes it to the MFL
+ *  and ESPN twins, which call it from their own tap handlers (the router
+ *  renders them, so their confirm is never reached through its tap). True =
+ *  it opened the paywall or the VerifySheet and the tap stops there; the
+ *  server's 402 stays the backstop. Dark unless `monetize.paywall` is on AND
+ *  the server enforces.
+ *  - Unverified: the VerifySheet, on session_verified alone (R28.9). Once
+ *    verified, the entitlements are re-read and this runs again: not entitled
+ *    → the paywall; entitled → `resume`, the button's `proceed` (the rest of
+ *    the tap, exactly as a fresh one: hand-off, link check, then its own
+ *    "Send this trade?" confirm). Nothing is ever sent without the user's tap
+ *    on that confirm (D16 a).
+ *  - Verified and not entitled: the paywall's send variant. */
+export function sendPreCheck(resume: () => void): boolean {
+  if (!useFeatureFlags.getState().flags['monetize.paywall']) return false;
+  if (!useEntitlements.getState().enforcing) return false;
+  if (isUnverifiedSession()) {
+    void openVerify({
+      onVerified: () => {
+        void useEntitlements.getState().refresh().then(() => {
+          if (!sendPreCheck(resume)) resume();
+        });
+      },
+    });
+    return true;
+  }
+  if (useEntitlements.getState().pro) return false;
+  void openPaywall({ source: 'gate', kind: 'send' });
+  return true;
+}
 
 interface Props {
   leagueId: string;
@@ -379,8 +413,10 @@ export default function SendInSleeperButton({
     );
   }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, doPropose]);
 
-  const onPress = useCallback(async () => {
-    if (state !== 'idle') return;
+  // The tap past the pre-check, unchanged. A tap resumed after a verify runs
+  // it exactly as a fresh one: the attempt event, the no-target hand-off,
+  // the link-status check, then the "Send this trade?" confirm.
+  const proceed = useCallback(async () => {
     // P0-7 — the ATTEMPT leg. Fired in the HANDLER, never at render:
     // after P0-6 a non-Sleeper mount renders a copy affordance rather
     // than a send button, so a mount-time impression event would conflate
@@ -436,7 +472,15 @@ export default function SendInSleeperButton({
         ],
       );
     }
-  }, [state, leagueId, theirUserId, openInSleeper, confirmSend, goConnect]);
+  }, [leagueId, theirUserId, openInSleeper, confirmSend, goConnect]);
+
+  // #393 M2 (D16): the paywall / verify pre-check, before anything else;
+  // after a verify it resumes with `proceed`, the same as a fresh tap.
+  const onPress = useCallback(() => {
+    if (state !== 'idle') return;
+    if (sendPreCheck(() => { void proceed(); })) return;
+    void proceed();
+  }, [state, proceed]);
 
   // Platform routing (see header). An MFL league with `trade.send_in_mfl` ON
   // delegates to the MFL twin — one mount point, so the reconnect/confirm/
@@ -456,6 +500,7 @@ export default function SendInSleeperButton({
         compact={compact}
         style={style}
         surface={surface}
+        sendPreCheck={sendPreCheck}
       />
     );
   }
@@ -475,6 +520,7 @@ export default function SendInSleeperButton({
         compact={compact}
         style={style}
         surface={surface}
+        sendPreCheck={sendPreCheck}
       />
     );
   }
