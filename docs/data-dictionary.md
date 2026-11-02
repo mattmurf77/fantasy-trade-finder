@@ -1568,7 +1568,7 @@ Append-only log of meaningful user actions. Hot reads use the denormalized `user
 | `event_type` | str | see taxonomy below |
 | `occurred_at` | str | ISO UTC |
 | `league_id`, `session_id` | str | `session_id` is a 77-character domain-separated analytics digest; never a bearer token. |
-| `device_type` | str | `iphone` / `ipad` / `macos` / `web` / `extension` |
+| `device_type` | str, nullable | `iphone` / `ipad` / `macos` / `android` (mobile's `X-Device`) / `web` / `extension`, or NULL. **`overhaul_generation_completed`, `overhaul_batch_reconciled` and `win_now_objective_selected`** resolve it in `backend/client_device.py` (`event_device_type`): the `X-Device` header, stripped, else `X-Source` (lowercased) if it is `web` or `extension`, else **NULL**. Every other writer (the ingest, and server events that spread `g.device_info`) stores `X-Device` as sent, else NULL. NULL means no client identified itself, never another client's name (G-068 rule, extended to these stamps by head-eng 2026-10-31). Before that fix the three events stored `web` whenever `X-Device` was absent, which meant web *or* unidentified. analytics-lead's read-only prod count (2026-10-31) found none stored that way: 5 `overhaul_generation_completed` rows, all `iphone`, and 0 of the other two. So the pre-fix reading applies to no row. No backfill. |
 | `os_version`, `app_version` | str | |
 | `source` | str | `mobile` / `web` / `api` / `cron` |
 | `props` | JSON text | event-specific extras |

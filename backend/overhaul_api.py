@@ -32,6 +32,7 @@ from flask import jsonify, request
 from . import overhaul_service as service
 from . import overhaul_store as store
 from . import ownership_copy
+from .client_device import event_device_type
 from .feature_flags import is_enabled
 
 log = logging.getLogger(__name__)
@@ -129,7 +130,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
     def fire(sess, name, props):
         try:
             record_event(str(sess["user_id"]), name, source="api", league_id=str(sess["league"].league_id),
-                         device_type=request.headers.get("X-Device") or "web", props=props)
+                         device_type=event_device_type(request.headers), props=props)
         except Exception as exc:  # pragma: no cover — analytics must never break the route
             log.warning("record_event(%s) failed: %s", name, exc)
 
