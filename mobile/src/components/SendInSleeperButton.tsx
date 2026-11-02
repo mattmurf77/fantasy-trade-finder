@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Linking, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { Alert, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Button from './chalkline/Button';
 import { chalk, space, type } from '../theme/chalkline';
 import { copyText } from '../utils/clipboard';
+import { openInSleeperApp } from '../utils/sleeperHandoff';
 import {
   formatTradeForClipboard,
   resolveSendPlatform,
@@ -41,8 +42,8 @@ import { GUIDE_RECEIPTS } from './analystScript';
 //     import API — previously this button WRONGLY rendered on MFL leagues
 //     and a tap would have fired at Sleeper's API and failed)
 //   • espn with `espn.send` ON → SendInEspnButton (ESPN's lm-api-writes
-//     transactions endpoint; the flag ships OFF and absent from
-//     config/features.json until the auth probe clears, per D-026)
+//     transactions endpoint; `espn.send` graduated ON 2026-08-12 once the
+//     D-026 auth probe cleared)
 //   • mfl/espn with their flags OFF, fleaflicker → the P0-6
 //     fallback: a stated reason (NO_SEND_REASON) plus a "Copy trade"
 //     action — never null; the send path itself is unreachable there.
@@ -239,11 +240,11 @@ export default function SendInSleeperButton({
     return unsub;
   }, [navigation]);
 
+  // No target → open the Sleeper app itself (`sleeper://`, at the deepest
+  // proven rung; utils/sleeperHandoff). Not installed → the Get Sleeper
+  // alert, never a silent no-op.
   const openInSleeper = useCallback(() => {
-    const url = /^\d+$/.test(leagueId)
-      ? `https://sleeper.com/leagues/${leagueId}`
-      : 'https://sleeper.com';
-    Linking.openURL(url).catch(() => {});
+    void openInSleeperApp({ target: 'trade', leagueId, surface: 'send_button' });
   }, [leagueId]);
 
   const goConnect = useCallback(() => {
@@ -505,9 +506,8 @@ export default function SendInSleeperButton({
   }
 
   // ESPN twin, same routing law: the flag lives IN the condition so an ESPN
-  // league with `espn.send` OFF (today: everywhere — the flag is absent from
-  // config/features.json until the auth probe clears) falls through to the
-  // P0-6 fallback below, never to a null.
+  // league with `espn.send` OFF falls through to the P0-6 fallback below,
+  // never to a null.
   if (platform === 'espn' && espnEnabled) {
     return (
       <SendInEspnButton

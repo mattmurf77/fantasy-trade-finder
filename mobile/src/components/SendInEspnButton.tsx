@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Alert, Linking, ViewStyle } from 'react-native';
+import { Alert, ViewStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Button from './chalkline/Button';
 import { haptics } from '../utils/haptics';
+import { openPlatform } from '../utils/openExternal';
 import { maybeRequestReview } from '../utils/ratingPrompt';
 import { useFlag } from '../state/useFeatureFlags';
 import { getEspnLinkStatus, proposeTradeToEspn } from '../api/sendInEspn';
@@ -27,10 +28,8 @@ import type { SendSurface } from '../utils/tradeText';
 // Copy-trade fallback there instead); the internal null below is
 // defense-in-depth for a direct mount, never the user-visible flag-off path.
 //
-// `espn.send` ships OFF and ABSENT from config/features.json until the
-// server-side auth probe clears (D-026 + the live-capture doc) — so this
-// component is dark everywhere today; building it flag-complete means the
-// graduation is a config flip, not a client release.
+// `espn.send` graduated ON 2026-08-12 once the server-side auth probe
+// cleared (D-026 + the live-capture doc); the flag stays the rollback lever.
 //
 // Differences from the twins, deliberate:
 //   • Sleeper-style LAZY auth (send-auth gap fix, 2026-08-11): an up-front
@@ -105,8 +104,15 @@ export default function SendInEspnButton({
   // (same mechanism as the Sleeper twin's awaitingLinkRef).
   const awaitingLinkRef = useRef(false);
 
+  // Same URL as before; utils/openExternal adds the re-tap lock and an
+  // alert if it can't open, instead of a silent catch.
   const openEspn = useCallback(() => {
-    Linking.openURL('https://fantasy.espn.com').catch(() => {});
+    void openPlatform({
+      platform: 'espn',
+      httpsUrl: 'https://fantasy.espn.com',
+      surface: 'send_button',
+      appMissing: 'https',
+    });
   }, []);
 
   // ACCOUNT sign-in (send-auth lazy flow): in-flow push to the existing
