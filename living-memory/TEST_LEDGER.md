@@ -121,6 +121,23 @@ Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook
   - the kill without the limit.
 - **Suites:** all `test_eval_*` plus `test_evidence_pack.py` and `test_deck_value_model.py`, on main @ `9370670e`: 481 passed.
 
+## 2026-10-27 — `POST /api/events` transport guard: a chunked body is capped before it is parsed, 413 (#360 pattern)
+
+Gates: a transport-only guard asked for by head-eng (via platforms-eng); no analytics-lead review, because nothing accepted, dropped, scrubbed or deduped changes. No schema, event, prop, flag or knob change; the only contract delta is one new status (413) for a body no shipped client sends, documented in `docs/api-reference.md`. No scope block (head-eng's brief set the doc list: api-reference + this entry). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The gap:** `MAX_CONTENT_LENGTH` (128 KiB) was checked against `request.content_length` only. A chunked body has none, so it read as 0 and the whole body was read and parsed.
+- **The fix:** in `analytics_ingest.ingest_request`, after the existing check and before `get_json`, a per-request `max_content_length = cap + 1` and a `get_data`; over the cap (or a `RequestEntityTooLarge`) is 413 `{error: "too_large", limit}`. The cap + 1 is #360's: Werkzeug's limited stream truncates silently at the limit and raises only past it. The cap number does not move.
+- **Kept on purpose:** a declared `Content-Length` over the cap still answers 200 `batch_rejected:too_large` (the documented always-200 purge signal, `docs/api-reference.md`, LLD §2.1), pinned by a new test. The brief asked for 413 there too; that is a one-branch change if analytics-lead agrees to retire the 200.
+- **Backend:** `test_events_api.py` is now 51 tests (6 new):
+  - a small chunked body is unchanged;
+  - a Content-Length over the cap keeps its 200 disposition and the body is never read;
+  - a chunked 1 MiB body is 413, nothing is stored, and at most cap + 1 bytes are read;
+  - the boundary: exactly 131,072 bytes chunked is accepted, 131,073 is 413;
+  - the largest legitimate batch (50 envelopes, 2 000-char props, about 109 KB) lands whole by Content-Length and chunked.
+- **Suites run:** the 12 files that exercise the route (`test_events_api`, `test_outcome_ingest_security`, `test_analytics_p0`, `test_time_to_suggestion_events`, `test_swipe_guard_blocked`, `test_deck_signal_v2`, `test_deck_taste`, `test_analytics_taxonomy_384`, `test_analytics_taxonomy_home_hub`, `test_api_observability`, `test_invite_links`, `test_owner_generator_routes`) → 249 passed. The full suite is left to CI.
+- **Sabotage (1), red then restored:** the cap block removed → the chunked-1-MiB test and the boundary test go red (200, not 413; the whole body read); the four others stay green.
+- **Not covered:** a real gunicorn chunked request (the test client sets `wsgi.input_terminated`, as gunicorn does); no network.
+
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
 Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

@@ -24,6 +24,7 @@ db.ingest_engine to the same engine (two sqlite:///:memory: engines are
 different databases), and patches analytics_ingest.is_enabled (the pipeline
 imports the name directly).
 """
+import io
 import json
 import time
 from unittest.mock import patch
@@ -271,6 +272,113 @@ def test_oversize_batch_rejected(harness):
     assert r.status_code == 200
     assert r.get_json()["disposition"] == "batch_rejected:too_many"
     assert len(_rows(engine)) == 0
+
+
+# ── (f2) transport guard: body size cap, Content-Length AND chunked ────────
+# analytics_ingest.MAX_CONTENT_LENGTH (128 KiB) was only ever checked against
+# Content-Length, so a chunked body (no Content-Length) was read whole. The
+# cap now also bounds the read itself (PR #360's pattern): a chunked body over
+# the cap is 413 and at most cap + 1 bytes are read; exactly the cap is
+# accepted. A Content-Length over the cap keeps its documented always-200
+# `batch_rejected:too_large` purge signal (docs/api-reference.md, LLD §2.1).
+
+CAP = ingest.MAX_CONTENT_LENGTH
+
+
+def _body_of(n, events=None):
+    """A valid {"events": [...]} body of EXACTLY n bytes (ignored `pad` key)."""
+    doc = {"events": events if events is not None else [_envelope(0)], "pad": ""}
+    doc["pad"] = "x" * (n - len(json.dumps(doc)))
+    raw = json.dumps(doc).encode("utf-8")
+    assert len(raw) == n
+    return raw
+
+
+class _CountingStream(io.BytesIO):
+    """Records how many body bytes the server actually read."""
+    taken = 0
+
+    def read(self, size=-1):
+        out = super().read(size)
+        self.taken += len(out)
+        return out
+
+    def readinto(self, buf):
+        n = super().readinto(buf)
+        self.taken += n or 0
+        return n
+
+
+_HEADERS = {"Content-Type": "application/json", "X-Device-Id": DEVICE}
+
+
+def _post_raw(client, raw):
+    return client.post("/api/events", data=raw, headers=_HEADERS)
+
+
+def _post_chunked(client, raw=None, stream=None):
+    """No Content-Length: the WSGI server marks the input as terminated."""
+    return client.post("/api/events", input_stream=stream or io.BytesIO(raw),
+                       headers={**_HEADERS, "Transfer-Encoding": "chunked"},
+                       environ_overrides={"wsgi.input_terminated": True})
+
+
+def test_chunked_body_under_the_cap_is_unchanged(harness):
+    client, engine = harness
+    r = _post_chunked(client, json.dumps({"events": [_envelope(0)]}).encode())
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["accepted"] == 1 and body["disposition"] == "ok"
+    assert len(_rows(engine)) == 1
+
+
+def test_content_length_over_the_cap_keeps_its_200_purge_signal(harness):
+    """Unchanged contract: declared-too-big is a 200 disposition, answered
+    before ANY read of the body."""
+    client, engine = harness
+    with patch.object(server.app.request_class, "get_data",
+                      side_effect=AssertionError("body read before the size check")):
+        r = _post_raw(client, _body_of(CAP + 1))
+    assert r.status_code == 200
+    assert r.get_json()["disposition"] == "batch_rejected:too_large"
+    assert len(_rows(engine)) == 0
+
+
+def test_chunked_body_over_the_cap_is_413_and_the_read_is_bounded(harness):
+    client, engine = harness
+    stream = _CountingStream(_body_of(1 << 20))
+    r = _post_chunked(client, stream=stream)
+    assert r.status_code == 413
+    assert r.get_json() == {"error": "too_large", "limit": CAP}
+    assert len(_rows(engine)) == 0                         # nothing parsed
+    assert stream.taken <= CAP + 1                         # never the whole 1 MiB
+
+
+def test_cap_boundary_exactly_the_cap_is_accepted_one_more_is_413(harness):
+    client, engine = harness
+    assert CAP == 131_072
+    at_cap = _post_chunked(client, _body_of(CAP))
+    assert at_cap.status_code == 200 and at_cap.get_json()["accepted"] == 1
+    over = _post_chunked(client, _body_of(CAP + 1))
+    assert over.status_code == 413 and over.get_json()["error"] == "too_large"
+    assert len(_rows(engine)) == 1
+
+
+@pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
+def test_largest_legitimate_batch_still_passes(harness, chunked):
+    """BATCH_MAX (50) envelopes, each with props at the clients' 2 048-byte
+    truncation: the biggest batch a shipped client can send. It must sit
+    under the cap with room to spare and land whole."""
+    client, engine = harness
+    events = [_envelope(i, props={"tab": "t" * 2000}) for i in range(ingest.MAX_BATCH)]
+    raw = json.dumps({"events": events}).encode("utf-8")
+    assert 100_000 < len(raw) < CAP * 0.95                 # big, yet comfortably under
+    r = _post_chunked(client, raw) if chunked else _post_raw(client, raw)
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["accepted"] == 50 and body["dropped"] == 0 and body["disposition"] == "ok"
+    _assert_invariant(body, 50)
+    assert len(_rows(engine)) == 50
 
 
 # ── (g) rate limit → accepted-and-dropped, never 429 ───────────────────────
