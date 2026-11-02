@@ -538,6 +538,7 @@ const SESSIONS = [
   }
 }
 
+const asyncChecks = []; // awaited before the report (10's pending case)
 let tipJarMount = null; // check 10's harness, reused by 11
 
 // 10 — EXECUTED: the tip purchase refuses unless customerInfoApplies (round-3
@@ -545,17 +546,28 @@ let tipJarMount = null; // check 10's harness, reused by 11
 //      as element objects) and a tip is pressed. A refusal is the screen's
 //      existing failure path: no purchaseTip, paywall_purchase_failed
 //      tracked, "The App Store didn't finish the tip" shown. The refusal throws before
-//      any await, so it lands synchronously. Since the screen itself shows
-//      only for a verified session (11), each refused case renders verified
-//      and the session changes before the tap: the purchase re-reads it.
+//      any await, so it lands synchronously. Refusals set neither the
+//      thank-you nor the pending note. 10b (async): a verified tip that
+//      StoreKit defers (RevenueCat code "20", Ask to Buy) tracks exactly
+//      initiated → failed {user_cancelled:false}, sets the pending note, and
+//      shows no thank-you and no error. isUserCancelled / isPaymentPending
+//      are the REAL ones from api/purchases.ts; the useState setters are
+//      named by their call order in the screen. Since the screen itself
+//      shows only for a verified session (11), each refused case renders
+//      verified and the session changes before the tap: the purchase
+//      re-reads it.
 {
   const name = '10. the tip purchase runs ONLY when customerInfoApplies (verified AND RevenueCat is this user); demo, unverified, unknown and a mismatched identity take the failure path, nothing bought';
   if (!subSession) {
     bad(name, 'typescript not resolvable');
   } else {
     const TIP = { product_id: 'ftf_tip_199', display_price: '$1.99' };
+    const realPurchases = loadTs('src/api/purchases.ts', {});
+    const STATE_NAMES = [...s.matchAll(/const \[(\w+), set\w+\] = useState\b/g)].map((m) => m[1]);
+    // opts.purchaseImpl: what purchaseTip returns (default: never settles).
     // opts.tapState: the session the tap sees (default: the render's).
     // opts.runEffects: run each effect during the render (11 needs them).
+    // opts.noTap: render only.
     const mount = (state, rcId, opts = {}) => {
       const buys = [];
       const events = [];
@@ -563,10 +575,11 @@ let tipJarMount = null; // check 10's harness, reused by 11
       const queries = [];
       let dismissed = 0;
       let cur = state;
+      let nState = 0;
       const React = {
         createElement: (type, props, ...children) => ({ type, props: { ...(props || {}), children } }),
         Fragment: 'Fragment',
-        useState: (init) => [init, (v) => sets.push(v)],
+        useState: (init) => { const k = STATE_NAMES[nState++]; return [init, (v) => sets.push([k, v])]; },
         useEffect: opts.runEffects ? (fn) => { fn(); } : () => {},
         useCallback: (fn) => fn,
         useMemo: (fn) => fn(),
@@ -585,10 +598,11 @@ let tipJarMount = null; // check 10's harness, reused by 11
         '../theme/chalkline': { chalk: tokens, ice: tokens, ink: tokens, radii: tokens, semantic: tokens, space: tokens },
         '../api/billing': { getPaywallConfig: async () => ({}) },
         '../api/purchases': {
-          currentIdentityUserId: () => rcId, getTipProducts: async () => [], isUserCancelled: () => false,
-          isPaymentPending: () => false,
+          currentIdentityUserId: () => rcId, getTipProducts: async () => [],
+          isUserCancelled: realPurchases.isUserCancelled,
+          isPaymentPending: realPurchases.isPaymentPending,
           PurchaseIdentityError: class PurchaseIdentityError extends Error {},
-          purchaseTip: (p) => { buys.push(p.identifier); return new Promise(() => {}); },
+          purchaseTip: (p) => { buys.push(p.identifier); return opts.purchaseImpl ? opts.purchaseImpl(p) : new Promise(() => {}); },
         },
         '../state/useFeatureFlags': { useFlag: () => true },
         '../state/useSession': { useSession: hook },
@@ -604,10 +618,12 @@ let tipJarMount = null; // check 10's harness, reused by 11
       };
       const option = find(tree, `tipjar-option-${TIP.product_id}`);
       if ('tapState' in opts) cur = opts.tapState;
-      if (option && !opts.noTap) option.props.onPress();
-      return { tree, option, buys, events, sets, queries, dismissed };
+      const pressed = option && !opts.noTap ? option.props.onPress() : null;
+      const setTo = (k, pred) => sets.some(([key, v]) => key === k && pred(v));
+      return { tree, option, buys, events, sets, setTo, pressed, queries, dismissed };
     };
     tipJarMount = mount;
+    const named = ['busy', 'error', 'thanked', 'pending'].every((k) => STATE_NAMES.includes(k));
     const wrong = [];
     const cases = [...SESSIONS.map(([label, state, runs]) => [label, state, state.user.user_id, runs]),
       ['verified, RevenueCat is ANOTHER user', SESSIONS[0][1], '999', false]];
@@ -617,12 +633,34 @@ let tipJarMount = null; // check 10's harness, reused by 11
       if (m.buys.length !== (runs ? 1 : 0)) wrong.push(`${label}: purchaseTip calls ${m.buys.length}`);
       if (!runs) {
         const failed = m.events.some(([n, p]) => n === 'paywall_purchase_failed' && p.user_cancelled === false);
-        const copy = m.sets.includes('The App Store didn’t finish the tip. Check your connection and try again.');
+        const copy = m.setTo('error', (v) => v === 'The App Store didn’t finish the tip. Check your connection and try again.');
         if (!failed || !copy) wrong.push(`${label}: not the existing failure path (failed=${failed} copy=${copy})`);
+        if (m.setTo('thanked', Boolean) || m.setTo('pending', Boolean)) wrong.push(`${label}: a refusal set the thank-you or the pending note`);
       }
     }
+    if (!named) wrong.push(`useState names by call order: ${JSON.stringify(STATE_NAMES)}`);
     if (wrong.length === 0) ok(name);
     else bad(name, wrong.join('; '));
+
+    const name10b = '10b. a verified tip StoreKit defers (code "20", Ask to Buy): exactly initiated → failed {user_cancelled:false}, the pending note set, no thank-you, no error, no completion';
+    asyncChecks.push((async () => {
+      const v = SESSIONS[0][1];
+      const m = mount(v, v.user.user_id, { purchaseImpl: () => Promise.reject({ code: '20' }) });
+      if (!m.option || !m.pressed) { bad(name10b, 'the tip option did not render'); return; }
+      await m.pressed;
+      const wrongB = [];
+      const names = m.events.map(([n]) => n);
+      if (JSON.stringify(names) !== JSON.stringify(['paywall_purchase_initiated', 'paywall_purchase_failed'])) wrongB.push(`events ${JSON.stringify(names)}`);
+      const fail = m.events.find(([n]) => n === 'paywall_purchase_failed');
+      if (!fail || fail[1].user_cancelled !== false || fail[1].product_id !== TIP.product_id) wrongB.push(`failed props ${JSON.stringify(fail && fail[1])}`);
+      if (m.buys.length !== 1) wrongB.push(`purchaseTip calls ${m.buys.length}`);
+      if (!m.setTo('pending', (x) => x === true)) wrongB.push('pending not set');
+      if (m.setTo('thanked', Boolean)) wrongB.push('thank-you set');
+      if (m.setTo('error', (x) => x !== null)) wrongB.push('error text set');
+      if (!named) wrongB.push(`useState names by call order: ${JSON.stringify(STATE_NAMES)}`);
+      if (wrongB.length === 0) ok(name10b);
+      else bad(name10b, wrongB.join('; '));
+    })());
   }
 }
 
@@ -652,10 +690,14 @@ let tipJarMount = null; // check 10's harness, reused by 11
   }
 }
 
-console.log(pass.map((p) => `PASS  ${p}`).join('\n'));
-if (fail.length) {
-  console.log(fail.map((f) => `FAIL  ${f}`).join('\n'));
-  console.log(`\ncheck-tipjar: ${pass.length} passed, ${fail.length} failed`);
-  process.exit(1);
-}
-console.log(`\ncheck-tipjar: ${pass.length} passed, 0 failed`);
+Promise.all(asyncChecks)
+  .catch((e) => bad('async checks', String((e && e.stack) || e)))
+  .then(() => {
+    console.log(pass.map((p) => `PASS  ${p}`).join('\n'));
+    if (fail.length) {
+      console.log(fail.map((f) => `FAIL  ${f}`).join('\n'));
+      console.log(`\ncheck-tipjar: ${pass.length} passed, ${fail.length} failed`);
+      process.exit(1);
+    }
+    console.log(`\ncheck-tipjar: ${pass.length} passed, 0 failed`);
+  });
