@@ -311,7 +311,12 @@ def run() -> int:
     #     no other page carries one.
     def strip_js_comments(src: str) -> str:
         # Strings stay (a URL's // isn't a comment); // and /* */ comments go.
-        return re.sub(r"""("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)"""
+        # A regex literal stays too, so a quote or backtick inside one (/`/g)
+        # can't throw the string matching out of step (release-lead #499 QA
+        # P3). It's recognised after = ( , : ! & | ? { } ; [ or a newline,
+        # where a / can't be division.
+        return re.sub(r"""("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`"""
+                      r"""|(?<=[=(,:!&|?{};\[\n])[ \t]*/(?![/*])(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\\\n\[])+/[a-z]*)"""
                       r"|//[^\n]*|/\*.*?\*/", lambda m: m.group(1) or "", src, flags=re.S)
 
     web_pages = {str(p.relative_to(WEB)): p.read_text(encoding="utf-8")
@@ -333,7 +338,8 @@ def run() -> int:
 
     reveal, handler = fn_body("_applyPlatformOptionsFlag"), fn_body("selectEntryPlatform")
     via_gate = (re.search(r"\bconst optionsOn\s*=\s*WEB_PLATFORM_ENTRY\s*;", reveal) is not None
-                and all(len(re.findall(r"\b" + v + r"\s*=(?!=)", reveal)) == 1
+                # `=` but not `==` or an arrow's `=>` (release-lead #499 QA P3)
+                and all(len(re.findall(r"\b" + v + r"\s*=(?![=>])", reveal)) == 1
                         and re.search(r"\bconst " + v + r"\s*=\s*optionsOn\s*&&", reveal)
                         for v in ("espnOn", "mflOn"))
                 and re.search(r"!WEB_PLATFORM_ENTRY\b", handler) is not None)

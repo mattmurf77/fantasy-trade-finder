@@ -1,3 +1,14 @@
+## 2026-11-02 — #499 QA P1: #360's summary-card copy restored after a merge reverted it; the gate's two false reds fixed
+
+Gates: full (`#499`, web copy + the web checker). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web checker plus sabotage.
+
+- **P1 (release-lead's independent QA, NO-GO at `78cb7f60`):** the merge of main at `082bc0c5` kept the branch's whole `web/js/app.js`. That silently reverted #360's shipped "Have a Fleeced account (including you)" / "Ranked" to "Have a Trade Finder account" / "Unlocked Trade Finder" (the retired name, D-057). Both lines are main's again (`0d2e9b65`). #499's own `app.js` change is now only the `WEB_PLATFORM_ENTRY` comment. Main is merged in again (`fd5390ac`, no conflicts), and the merged tree differs from main only by #499's intended changes (the components row, the harness wait, the cache-buster, that comment), checked per file.
+- **P3, the `GATE-web-espn-mfl-off` false reds:**
+  - `strip_js_comments` now keeps a regex literal (after `= ( , : ! & | ? { } ; [` or a newline), so a backtick or quote inside one (`/`/g`) can't desync the string matching;
+  - the one-assignment count ignores an arrow's `=>`.
+  - Both cases are red on the old checker and green on the new one.
+- **Sabotage:** the gate still goes red 6/6: `WEB_PLATFORM_ENTRY = true`, app.js naming the landing flag, `espnOn` not from `optionsOn`, the handler dropping the constant, `espnOn` reassigned, the ESPN chip visible. Web structure 196/196.
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
