@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Referral loop lab</title>
+<style>
+/* ── Chalkline tokens: web/css/tokens.css @ 1eb520bd, :root copied verbatim ── */
+:root {
+  /* Surfaces */
+  --ink-0: #0C0E11;
+  --ink-1: #13161B;
+  --ink-2: #1A1E25;
+  --ink-3: #232833;
+  --card: var(--ink-1);
+  --panel: var(--ink-1);
+
+  /* Lines */
+  --line: #262C35;
+  --line-strong: #59647A;
+
+  /* Text */
+  --chalk: #ECEFF4;
+  --chalk-dim: #97A1AE;
+  --chalk-faint: #626C79;
+
+  /* Accents */
+  --ice: #56D9EC;
+  --ice-press: #3FC2D6;
+  --on-ice: #071013;
+  --flare: #F0508C;
+  --flare-press: #D8437B;
+  --on-flare: #170610;
+
+  /* Status */
+  --pos: #22C55E;
+  --neg: #EF4444;
+  --warn: #F59E0B;
+  --green: var(--pos);
+  --red: var(--neg);
+  --gold: var(--warn);
+
+  /* Positions (data encodings — docs/cross-client-invariants.md) */
+  --qb: #F97316;
+  --rb: #22C55E;
+  --wr: #3B82F6;
+  --te: #A855F7;
+  --picks: #59647A;
+  --waivers: #7a7f96;
+
+  /* Pick ladder (data encodings) */
+  --firsts-4plus: #f87171;
+  --firsts-3: #e879f9;
+  --firsts-2: #fbbf24;
+  --first-1: #2dd4bf;
+  --second: #38bdf8;
+  --third: #f472b6;
+  --fourth: #a3e635;
+
+  /* Radii */
+  --r-xs: 2px;
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-pill: 999px;
+
+  /* Type */
+  --font-ui: 'Archivo', sans-serif;
+  --font-display: 'Barlow Condensed', sans-serif;
+  --font-data: 'IBM Plex Mono', monospace;
+
+  /* Motion / elevation */
+  --t-fast: 120ms ease-out;
+  --t-base: 180ms ease-out;
+  --t-sheet: 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  --shadow-sheet: 0 12px 32px rgba(0, 0, 0, 0.55);
+
+  /* Legacy aliases — pre-Chalkline rule names still in active use. */
+  --bg: var(--ink-0);
+  --surface: var(--ink-1);
+  --border: var(--line);
+  --text: var(--chalk);
+  --muted: var(--chalk-dim);
+  --accent: var(--ice);
+  --tier-firsts-4plus: #f87171;
+  --tier-firsts-3: #e879f9;
+  --tier-firsts-2: #fbbf24;
+  --tier-first-1: #2dd4bf;
+  --tier-second: #38bdf8;
+  --tier-third: #f472b6;
+  --tier-fourth: #a3e635;
+  --tier-waivers: #7a7f96;
+}
+/* Lab overrides. Labs load no web fonts, so the three font tokens gain
+   fallbacks (Arial Narrow / Helvetica Neue / Menlo). One mobile value differs
+   from tokens.css: mobile/src/theme/chalkline.ts ink.lineStrong is the legacy
+   #3D4654, and InviteLeaguematesBanner.tsx:220 reads it directly, so the
+   banner frames draw it to stay faithful to what ships. */
+:root {
+  --font-ui: 'Archivo', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-display: 'Barlow Condensed', 'Arial Narrow', 'Helvetica Neue', sans-serif;
+  --font-data: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
+  --line-strong-legacy: #3D4654;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--ink-0);color:var(--chalk);font-family:var(--font-ui);-webkit-font-smoothing:antialiased;padding:20px 16px 80px}
+.wrap{max-width:1480px;margin:0 auto}
+svg.ic{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:square;stroke-linejoin:miter}
+svg.ic.s16{width:16px;height:16px}
+svg.ic.s14{width:14px;height:14px}
+
+/* ═════ LAB CHROME: page furniture, bezels, OS bars, annotation tags. Not app UI. ═════ */
+.navbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;padding:10px 12px;background:var(--ink-1);border:1px solid var(--line);border-radius:8px;position:sticky;top:0;z-index:30}
+.navbar a,.navbar button{font:600 11px var(--font-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--chalk-dim);text-decoration:none;border:1px solid var(--line-strong);border-radius:4px;padding:6px 10px;background:none;cursor:pointer}
+.navbar a:hover,.navbar button:hover{color:var(--chalk)}
+.navbar a.rec{border-color:var(--ice);color:var(--chalk)}
+.navbar button{margin-left:auto}
+.note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;margin-bottom:20px}
+.note h1{font:700 26px/1.15 var(--font-display);letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;display:flex;align-items:center;gap:10px}
+.note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+.note p,.note li{font-size:13px;line-height:1.65;color:var(--chalk-dim);margin:0 0 8px}
+.note ul{margin:0 0 8px;padding-left:18px}
+.note b,.lede b,td b,.cap b,.flag b,.side b{color:var(--chalk);font-weight:600}
+code{font:500 12px var(--font-data);color:var(--chalk);background:var(--ink-3);padding:1px 5px;border-radius:2px;overflow-wrap:anywhere}
+a{color:var(--ice)}
+h2.sec{font:600 22px/1.2 var(--font-display);letter-spacing:.03em;text-transform:uppercase;margin:48px 0 6px;display:flex;align-items:center;gap:9px;scroll-margin-top:70px}
+h2.sec::before{content:"";width:4px;height:20px;background:var(--ice);flex:none}
+h3.sub{font:600 13px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim);margin:28px 0 8px;scroll-margin-top:70px}
+p.lede{margin:0 0 16px;font-size:13px;line-height:1.65;color:var(--chalk-dim);max-width:110ch}
+.flag{border-radius:8px;padding:12px 16px;margin:0 0 18px;font-size:13px;line-height:1.65;background:var(--ink-1);color:var(--chalk-dim)}
+.flag.warn{border:1px solid var(--warn)} .flag.ice{border:1px solid var(--ice)} .flag.plain{border:1px solid var(--line-strong)}
+.stamp{display:inline-block;font:600 11px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:2px;align-self:flex-start}
+.stamp.capture{background:var(--pos);color:var(--on-ice)}
+.stamp.recon{background:var(--warn);color:var(--on-ice)}
+.stamp.prop{background:var(--ice);color:var(--on-ice)}
+.stamp.wire{background:var(--ink-3);color:var(--chalk-dim);border:1px solid var(--line-strong)}
+.stamp.tf{background:var(--chalk-dim);color:var(--on-ice)}
+.stamp.render{background:var(--chalk);color:var(--on-ice)}
+.stamp.phase{background:var(--ink-3);color:var(--warn);border:1px solid var(--warn)}
+.stamp.notrec{background:var(--ink-3);color:var(--chalk);border:1px solid var(--line-strong)}
+.rail{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}
+.col{display:flex;flex-direction:column;gap:10px;flex:0 1 390px;min-width:0;max-width:390px}
+.col.wide{flex:1 1 640px;max-width:none}
+.col.side{flex:1 1 300px;max-width:420px}
+.cap{font:500 11px/1.6 var(--font-data);color:var(--chalk-dim);letter-spacing:.01em;margin:0}
+.side{font-size:13px;line-height:1.6;color:var(--chalk-dim);border-left:2px solid var(--warn);padding:4px 0 4px 12px;margin:0}
+.side p{margin:0 0 8px}
+table.t{border-collapse:collapse;width:100%;font-size:12.5px;line-height:1.5;margin:6px 0 16px}
+.tscroll{overflow-x:auto}
+table.t th{font:600 11px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line-strong);white-space:nowrap}
+table.t td{padding:8px 10px;border-bottom:1px solid var(--line);color:var(--chalk-dim);vertical-align:top}
+table.t td.fr{font:600 12px var(--font-data);color:var(--chalk);white-space:nowrap}
+table.t td.no{color:var(--chalk-dim);font-style:italic}
+/* annotation tag + copy marks (chrome) */
+.ann{position:absolute;top:-9px;right:8px;font:600 11px/1 var(--font-data);color:var(--warn);background:var(--ink-0);border:1px dashed var(--warn);border-radius:2px;padding:3px 5px;z-index:5;letter-spacing:.02em}
+.pcopy{outline:1px dashed var(--warn);outline-offset:2px}
+.tbd{font:500 12px/1.4 var(--font-data);color:var(--warn)}
+body.nomarks .pcopy{outline:none}
+body.nomarks .ann{display:none}
+.legendmark{display:inline-block;padding:0 4px;outline:1px dashed var(--warn);outline-offset:1px;color:var(--chalk)}
+/* phone bezel, iOS status bar, Safari bottom bar: OS chrome */
+.phone{width:100%;max-width:390px;background:var(--ink-0);border:1px solid var(--line-strong);border-radius:22px;overflow:hidden;position:relative;flex:none;display:flex;flex-direction:column}
+.status{height:47px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 22px 8px;font:600 13px var(--font-ui);color:var(--chalk);flex:none}
+.status .r{font:500 11px var(--font-data);color:var(--chalk-dim)}
+.safari{height:56px;flex:none;border-top:1px solid var(--line);background:var(--ink-2);display:flex;align-items:center;justify-content:center;padding:0 16px}
+.safari span{width:100%;height:36px;border-radius:8px;background:var(--ink-3);display:flex;align-items:center;justify-content:center;font:400 13px var(--font-ui);color:var(--chalk-dim)}
+/* component crop frame (chrome) */
+.crop{background:var(--ink-0);border:1px solid var(--line-strong);border-radius:8px;padding:16px;position:relative}
+/* desktop browser frame (chrome) + zoom control */
+.dframe{border:1px solid var(--line-strong);border-radius:8px;overflow:auto;background:var(--ink-0);max-width:100%;width:fit-content}
+.dbar{height:36px;display:flex;align-items:center;gap:10px;padding:0 12px;background:var(--ink-2);border-bottom:1px solid var(--line);font:400 12px var(--font-ui);color:var(--chalk-dim)}
+.dbar span{flex:1;height:24px;border-radius:4px;background:var(--ink-3);display:flex;align-items:center;padding:0 10px}
+.zbtn{font:600 11px var(--font-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--chalk-dim);background:none;border:1px solid var(--line-strong);border-radius:4px;padding:4px 8px;cursor:pointer}
+.dz{zoom:.55}
+.dz.full{zoom:1}
+/* iOS share sheet + chat mock: OS chrome, simplified */
+.oschrome{background:var(--ink-2);border:1px solid var(--line-strong);border-radius:8px;padding:12px 14px;position:relative}
+.oschrome .h{font:600 11px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim);margin:0 0 8px}
+.oschrome .msg{font:400 14px/21px var(--font-ui);color:var(--chalk);background:var(--ink-1);border:1px solid var(--line);border-radius:4px;padding:10px 12px;overflow-wrap:anywhere;margin:0}
+.chat{background:var(--ink-0);border:1px solid var(--line-strong);border-radius:8px;padding:14px;max-width:360px}
+.bubble{background:var(--ink-3);border-radius:8px;padding:9px 12px;font:400 14px/20px var(--font-ui);color:var(--chalk);max-width:300px;margin:0 0 6px;overflow-wrap:anywhere}
+.unfurl{width:300px;border-radius:8px;overflow:hidden;background:var(--ink-3)}
+.unfurl .meta{padding:8px 12px 10px}
+.unfurl .meta p{margin:0;font:600 13px/18px var(--font-ui);color:var(--chalk)}
+.unfurl .meta span{font:400 12px/16px var(--font-ui);color:var(--chalk-dim)}
+
+/* ═════ APP UI (proposed): the join landing, a backend-rendered Chalkline page ═════ */
+.page{flex:1;min-height:741px;display:flex;flex-direction:column;position:relative}
+.jl{padding:0 16px;display:flex;flex-direction:column;flex:1}
+.wm{display:inline-flex;align-items:center;gap:8px;font:700 22px/1 var(--font-display);letter-spacing:.04em;text-transform:uppercase;color:var(--chalk)}
+.wm i{width:3px;height:16px;background:var(--ice);flex:none}
+.wm.lg{font-size:28px}
+.wm.lg i{height:20px}
+.jl-hdr{height:56px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);margin:0 -16px;padding:0 16px}
+.jl-head{padding:28px 0 0}
+.jl-by{font:600 16px/22px var(--font-ui);color:var(--chalk);margin:0}
+.jl-lg{font:700 32px/34px var(--font-display);letter-spacing:.02em;text-transform:uppercase;color:var(--chalk);margin:4px 0 0;overflow-wrap:anywhere}
+.jl-sub{font:400 13px/18px var(--font-ui);color:var(--chalk-dim);margin:12px 0 0}
+.jl-steps{margin:24px 0 0;border-top:1px solid var(--line)}
+.jl-step{display:grid;grid-template-columns:28px 1fr;gap:12px;padding:16px 0;border-bottom:1px solid var(--line)}
+.jl-step .num{font:500 13px/44px var(--font-data);color:var(--chalk-dim)}
+.jl-step .num.t{line-height:21px}
+.jl-step .sb{display:flex;flex-direction:column;gap:8px;min-width:0}
+.help{font:400 13px/18px var(--font-ui);color:var(--chalk-dim);margin:0}
+.body{font:400 14px/21px var(--font-ui);color:var(--chalk);margin:0}
+.btn{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;border-radius:4px;font:600 14px var(--font-ui);padding:0 16px;text-decoration:none;border:1px solid transparent}
+.btn.pri{background:var(--ice);color:var(--on-ice)}
+.btn.sec{border-color:var(--line-strong);color:var(--chalk)}
+.btn.inline{display:inline-flex;align-self:flex-start}
+.jl-alt{padding:16px 0 0}
+.tlink{display:inline-flex;align-items:center;min-height:44px;font:600 14px var(--font-ui);color:var(--ice);text-decoration:underline;text-underline-offset:3px}
+.jnote{display:flex;gap:8px;align-items:flex-start;background:var(--ink-2);border:1px solid var(--line);border-radius:8px;padding:12px;margin:24px 0 0}
+.jnote::before{content:"";width:3px;height:14px;background:var(--ice);flex:none;margin-top:2px}
+.jnote p{margin:0;font:600 13px/18px var(--font-ui);color:var(--chalk)}
+.jl-foot{margin-top:auto;display:flex;gap:20px;padding:16px 0 8px}
+.jl-foot a{display:inline-flex;align-items:center;min-height:44px;font:400 13px var(--font-ui);color:var(--chalk-dim);text-decoration:none}
+/* desktop landing */
+.desk{width:1280px;min-height:800px;background:var(--ink-0);display:flex;flex-direction:column;position:relative}
+.jd-hdr{height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 60px;border-bottom:1px solid var(--line)}
+.jd-hdr a{display:inline-flex;align-items:center;min-height:44px;font:400 13px var(--font-ui);color:var(--chalk-dim);text-decoration:none}
+.jd-main{width:560px;margin:96px auto 0;display:flex;flex-direction:column}
+.jd-main .jl-lg{font-size:48px;line-height:50px}
+.jd-main .jl-sub{font-size:14px;line-height:21px}
+.jd-main .btn.pri{align-self:flex-start;margin-top:32px;padding:0 24px}
+.jd-main .help{margin-top:10px}
+.jd-main .rule{border-top:1px solid var(--line);margin:28px 0 4px}
+.jd-foot{margin-top:auto;display:flex;gap:24px;padding:24px 60px;border-top:1px solid var(--line)}
+.jd-foot a{display:inline-flex;align-items:center;min-height:44px;font:400 13px var(--font-ui);color:var(--chalk-dim);text-decoration:none}
+
+/* ═════ BEFORE panes: renders stored in before/ (P22) ═════ */
+img.shot{display:block;width:100%;max-width:390px;height:auto;border:1px solid var(--line-strong);border-radius:8px}
+img.shot.desk-shot{max-width:1280px}
+img.shot.og-shot{max-width:600px}
+
+/* ═════ MOBILE invite surfaces (React Native, reconstructed from source) ═════ */
+.m-banner{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;background:var(--ink-2);border:1px solid var(--line)}
+.m-banner>i{width:3px;height:14px;background:var(--ice);align-self:flex-start;margin-top:2px;flex:none}
+.m-banner .tc{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.m-banner .t{font:600 13px/18px var(--font-ui);color:var(--chalk);margin:0}
+.m-banner .d{font:400 13px/18px var(--font-ui);color:var(--chalk-dim);margin:0}
+.m-inv{min-height:36px;min-width:44px;padding:0 12px;display:flex;align-items:center;justify-content:center;border-radius:4px;border:1px solid var(--line-strong-legacy);font:600 14px var(--font-ui);color:var(--chalk);flex:none}
+.busy{opacity:.45}
+.spin{width:16px;height:16px;flex:none}
+.spin circle{fill:none;stroke-width:2}
+.m-tick{display:flex;align-items:center;gap:8px;margin:0 0 8px}
+.m-tick i{width:3px;height:14px;background:var(--ice);flex:none}
+.m-tick span{font:600 11px/14px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+.m-card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.m-proof{font:600 16px/22px var(--font-ui);color:var(--chalk);margin:0}
+.m-bsm{font:400 13px/18px var(--font-ui);color:var(--chalk-dim);margin:0}
+
+/* ═════ PHASE 2 "Your invites" (proposed; mobile, root-stack push) ═════ */
+.navhdr{height:44px;display:flex;align-items:center;justify-content:center;position:relative;border-bottom:1px solid var(--line);flex:none}
+.navhdr .t{font:600 17px var(--font-display);letter-spacing:.09em;text-transform:uppercase;color:var(--chalk)}
+.navhdr .back{position:absolute;left:4px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:var(--ice)}
+.scr{padding:16px 16px 96px;position:relative;flex:1}
+.lbl{font:600 11px/14px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim);margin:24px 0 8px}
+.lbl .tbd{text-transform:none;letter-spacing:0}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.stile{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:12px;min-height:96px;display:flex;flex-direction:column;gap:4px}
+.stile .k{font:600 11px/14px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+.stile .n{font:600 22px/26px var(--font-data);font-variant-numeric:tabular-nums;color:var(--chalk);margin-top:auto}
+.stile .s{font:500 11px/14px var(--font-data);color:var(--chalk-dim);display:flex;gap:6px}
+.stile.sk .n,.stile.sk .s{background:var(--ink-2);color:transparent;border-radius:2px}
+.ltile{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:12px;min-height:58px;display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.ltile .tb{flex:1;min-width:0}
+.ltile .tt{font:600 16px/22px var(--font-ui);color:var(--chalk);margin:0}
+.ltile .dd{font:400 13px/18px var(--font-ui);color:var(--chalk-dim);margin:2px 0 0}
+.ltile .dd .mono{font-family:var(--font-data);color:var(--chalk)}
+.ltile .chev{color:var(--chalk-dim)}
+.plat{font:600 11px/1 var(--font-ui);letter-spacing:.06em;border:1px solid var(--line-strong);color:var(--chalk-dim);padding:2px 5px;border-radius:2px;flex:none}
+.fab{position:absolute;right:14px;bottom:34px;width:52px;height:52px;border-radius:8px;background:var(--ink-1);border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center;color:var(--chalk);z-index:4}
+.mini{display:flex;flex-direction:column;gap:10px;flex:0 1 300px;min-width:0}
+
+/* ═════ OG CARD (proposed, 1200×630 static) ═════ */
+.ogz{zoom:.5;border:2px solid var(--line-strong);width:fit-content;max-width:100%}
+.ogt{zoom:.25}
+.og{width:1200px;height:630px;background:var(--ink-0);position:relative;overflow:hidden;display:flex}
+.og .txt{display:flex;flex-direction:column;justify-content:center;padding:0 80px;flex:1;min-width:0}
+.og .ogwm{display:flex;align-items:center;gap:28px;font:700 168px/1 var(--font-display);letter-spacing:.04em;text-transform:uppercase;color:var(--chalk)}
+.og .ogwm i{width:14px;height:128px;background:var(--ice);flex:none}
+.og .ogline{font:600 56px/1.15 var(--font-ui);color:var(--chalk-dim);margin:28px 0 0 42px}
+.og .rule{position:absolute;left:80px;right:80px;bottom:72px;border-top:2px solid var(--line)}
+.og.ii .ogwm{font-size:148px;gap:24px}
+.og.ii .ogwm i{width:12px;height:112px}
+.og.ii .ogline{font-size:52px;margin-left:36px}
+.og .rambox{width:384px;height:384px;margin:123px 80px 0 0;background:var(--ink-1);border:2px solid var(--line);border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center}
+.ram{width:288px;height:288px;background:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASAAAAEgCAMAAAAjXV6yAAADAFBMVEVZmLBcj6JnVlshGSJxV1yjmapRWWI2XGnkWZtoWGaGqrX9ZehYIlhgJiegzN1UeIyWaWWWsdJcrMm5J4fhIKFii6hjipeIcXFlrMNXNzUqNVCMm615tMUvDi5Z+vqrWIM5dpE0EDGnzdZjJSiDLTE7d61aqvlleJRYIkfhzOM6hqU0YnjNqKs6do7/f39lwt4/v7+ms7bGsMrFW1kpDik0cpX/qqrLD3ykWqQrW3x+wdGmgHx5QTyQw9CiKluEcnJjQDv/f/+q/6q/v/9VqlWZzMxTPEOqqlWAYoBCf6BiOUZONTeBvc8/ncX//38AAABTqMaN1+xIl7ZnuNSoWFOTR0dvw9xzyeKs5vaNOExsKC6yZVl2NDdDiKlbtNE7h6mZVE6FOjk2eJmFzOP7+/6lSVSzR2qNQz0saY+LhZmZ4va2VmhXGSbFd2d80ep4NUPm2Of///+2aGV6dYqrOmqFeo45fKHP9Px+fn7y5/RqWnCm2e2KKVLVyNZZJSrHV3a3c2iOZ2+Wlah4KUSGxtx1RktsZHir//+up7dIeqRmGy3I7PlQoL1XWG6vKHB0GEj6V85JdZlGaZBTVVVVqqpXFRt/v791a4JKncD8N8eJG1XLKIRlq8qRjKE9kbTESXf7RszMuMnEZ2sA//+omamPx9aHWmaTc3f1Jrf7ZM1///+syOv9J8XOhHZ3VFqjPFn9GcaqqqrDKHvCaluxiZC2tsbSWITLqbNyp7ix8v6dN2HX1OomXIqYJWVnipVSRlCKytvPR4dpSmjHNnuU0+QAAP+FaIdumacvJyvSyufuSKxlHB3RNYtvtMlVeYiqqv+YGWZNZnCyu+p2prSq2eVPanWqVVXrVazY0dtqmbFODRZPYnqsGG5/f//kapJYRFBROEgxNzfi09vYZYfyOLPEcl1VVapxtcyTpLh7t8lbMzc6gZ4zSFFal6qJt8WJu8niytT0GLSxrMmQxNFLOkSpfIpthJjNF5F/AH8Af3/MlJXQhoN/v/9NmbV1l6QPGRSsKF5KAAABAHRSTlOcW10RpOojIP/fZf8ME95M6//b///zNamtVBWucaQD9Z3dqPb/CQMe///WV/9lAvUEGP//ZdgD/wP/n/30d/93SgIDBAMFTAOwtImLoP8CAP7+/v7+/v7+/v7+/v7+/v7+/v7+/////v7+/v////7+/wH+/v/9/v4C//39//7+///8/f/9/f4D/v7//v7+/////v8FA/8E/v7////+/v7/////Af6w/vn//wL////7//8D/////v//cP////7/NCzN//7/1AH6SRH/////sS4D/xj/VNEmA//+/v/+/wL///8R/////wPL+Ir8/hV1cIz///+VJ////wIC//8E0DoLKFYGVAAAN39JREFUeNrtnQd8FGX6+DeEEMJJVax39rvT83r53e93d7/27312dne2zE62ZNkkJJu2KYT0TbIQUoAAkRgCGErCoSBNEBEUwRNBERVPFBSwt7OXO8/ye57nfWd2Ngl+/hvYwHnzKum7M/Odp77v8z5jEozxtcNkIDAAGYAMQAYgA5AByABkADKGAcgAZAAyABmADEAGIAOQMQxABiADkAHIAGQAMgAZgIxhADIAGYAMQAYgA5AByABkADKGAcgAZAAyABmADEAGIAOQMQxABiADkAHIAGQAMgAZgIxhADIAGYAMQAYgA5ABaJjxUMnzz1eOxiWsfr5y9eq/KUBL5s6dq31TUlLyeJI4VcJxSrTv5s5NynFM5/6k1S8XHz6crmHSXcm5EZvYca78fnqM0uOrL2RAqzcThi/veWPtAw/sF6udzklHr79+woSnGaPV544OHefSp769di0cRxT373/ggd98+yl2nCUXKqASvKfjvv3hftG5c6eTxs5ZNJxHr5+wGP/ia3WgsvIfNi+mT5WLv/bvPocPbz/1m0l4HHagPDbESe8+dSXK0eoLENDqWwUhdcLaaufOPJENpzaQU9v1E1IB0fNnev0fuQ7+mH97Zh2G4zy1VszbGXt/OGIeQcIv1z4Ff3Xr6gsNEJz2uH8+6tyJJ1tYWKjnQyfuREH68OkzSRGKzLgxl40dA58uo0/DI0I8T7+xn94xNvB25PFjwQ3a/+1xdEIXEKD1hGenU4yN+EugAYiu3zPcqVf+P0EYc9lAZMpAJGPswLaGSGTKv55m1IbchsO/EUGXRHgvvQDpDpgHvydESy4cQKAd74jOPFE/nMMOhujx+JdvBjxp2xrcPiknR5IkH45IBKTovw8KHwRhz4ciHcZJpk0nQDpCYiEi/PY5MkWmcyI+X+7fGY8nXoDaYpcCiN4ForpTrywR7r+s4bdTfDYf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") center/contain no-repeat}
+.og.iii .txt{justify-content:flex-start;padding-top:64px}
+.og.iii .ogwm{font-size:64px;gap:14px}
+.og.iii .ogwm i{width:6px;height:50px}
+.og.iii .lgn{font:700 112px/1 var(--font-display);letter-spacing:.02em;text-transform:uppercase;color:var(--chalk);margin:40px 0 0}
+.og.iii .ogline{margin:20px 0 0;font-size:48px}
+.og.iii .tbd{font-size:48px;line-height:1.15;white-space:nowrap}
+.og.iii .rambox{width:300px;height:300px;margin:200px 80px 0 0}
+.og.iii .ram{width:240px;height:240px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Chalkline icon set, verbatim paths from mobile/src/components/chalkline/Icon.tsx (20x20, 1.75 stroke, square caps) -->
+    <symbol id="i-cl" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></symbol>
+    <symbol id="i-cr" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></symbol>
+    <symbol id="i-cd" viewBox="0 0 20 20"><path d="M4 8l6 6 6-6"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></symbol>
+    <symbol id="i-reload" viewBox="0 0 20 20"><path d="M16 5v4h-4M16.2 9a6.3 6.3 0 10-1.6 6.4"/></symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+<nav class="navbar" aria-label="Sections">
+  <a href="#landing" class="rec">1 · Join landing, option A (current)</a>
+  <a href="#before-web">1.0 · Today, flag off</a>
+  <a href="#matrix">1.1 · State matrix</a>
+  <a href="#option-b">2 · Option B</a>
+  <a href="#og">3 · OG card</a>
+  <a href="#invite">4 · Invite banner and card</a>
+  <a href="#your-invites">5 · Your invites (Phase 2)</a>
+  <a href="#copy">6 · Copy register</a>
+  <a href="#checks">7 · Checks</a>
+  <a href="#questions">8 · Open questions</a>
+  <button type="button" id="marks">Hide copy marks</button>
+</nav>
+
+<section class="note">
+  <h1>Referral loop lab</h1>
+  <p><b>Question:</b> what should the invite join landing, its OG card and the invite surfaces look like, per device and state?</p>
+  <p><b>Binding docs:</b> <code>docs/plans/referral-loop/</code> (<code>prd.md</code>, <code>scope.md</code>, <code>loop-audit.md</code>), on <code>growth-pm</code>'s branch <code>plan/referral-loop</code> at <code>cb54e24c</code>. <b>Not yet on main</b> (read with <code>git show cb54e24c:docs/plans/referral-loop/prd.md</code>). Sections drawn against: §4 J1–J4, §5 (CTA options; A device-aware is recommended, the operator has not decided: D-1), FR-3, FR-4, FR-7, FR-11, FR-18, §8.2 (join path; flag <code>growth.join_landing</code>), §8.5 (impact v2), §13 (<code>design-lead</code>'s row). Verdicts belong in those docs, not on this page.</p>
+  <p><b>Current candidate:</b> <a href="#landing">§1, option A</a> (device-aware landing). Option B is drawn for comparison only, in <a href="#option-b">§2</a>.</p>
+  <p><b>Before-pane results</b> (W2 rule, <code>mockups/CLAUDE.md</code> on <code>skill/mockup-lab</code>; procedure steps (a)–(f) run 2026-10-15 at <code>678834ab</code>):</p>
+  <div class="tscroll"><table class="t">
+    <tr><th>Surface</th><th>Commands and result</th><th>Outcome</th></tr>
+    <tr><td><b>Join path, flag off</b> (302 into the web landing <code>/</code>)</td><td><code>git ls-files -- screens/web/</code> → only <code>screens/web/README.md</code>: <b>no capture of the web landing exists.</b> Under head-product's decision P22 (2026-10-15) a local render may serve for web pages. Served this worktree's <code>origin/main</code> checkout (<code>678834a</code>; the branch adds only <code>mockups/</code>) with <code>python3 -c "from backend.server import app; app.run(host='127.0.0.1', port=5093)"</code>, <code>DATABASE_URL</code> pointed at a scratch SQLite file, no prod, no secrets read. Shots: headless Chrome at 390×844 (device scale 2, page in a 390px frame) and 1280×800; the after-Verify state from the in-app browser pane at 390×844. No real user data on screen: the only handle is the invented <code>dana_dynasty</code>. Route and capture code read at <code>678834ab</code>: <code>backend/server.py:12596-12624</code>, <code>web/js/app.js:300, :323-350, :6385-6416</code>, <code>web/js/browser-auth.js:5, :45</code>.</td><td><b>Local render (P22)</b>, 3 frames in §1.0, stored in <code>before/</code></td></tr>
+    <tr><td><b>Invite banner</b> (<code>trades</code> screen, cold start)</td><td>(a) <code>python3 -c "…['screens']['trades']…" trades</code> → sources <code>TradesScreen.tsx</code>, <code>SkeletonTradeCard.tsx</code>, <code>Toast.tsx</code>, <code>TradeCard.tsx</code>; all 7 captures <code>2026-08-10T23:42:47+00:00</code>. All paths tracked (<code>git ls-files</code>). Added from the screen's imports: <code>InviteLeaguematesBanner.tsx</code>, chalkline <code>TickLabel/Button/Card/Text/Meter/Icon/index</code>, <code>theme/chalkline.ts</code>. (b) <code>git log --oneline --since=2026-08-10T23:42:47+00:00 -- &lt;those 13 files&gt;</code> → <b>52 commits</b>: <code>TradesScreen.tsx</code> 40 (latest <code>4913ad0c</code>), <code>TradeCard.tsx</code> 18, <code>InviteLeaguematesBanner.tsx</code> 3 (<code>2b63511f</code> notif inbox phase 1, <code>830d0df9</code> one share path P1-5, <code>f7473b9e</code> P0-3 invite loop client), <code>Icon.tsx</code> 2, <code>chalkline.ts</code> 2 (<code>6ff61e44</code> + its revert <code>0e35ae2a</code>), <code>Toast.tsx</code> 1.</td><td><b>(d) Changed: reconstruction from source.</b> The <code>trades/*.png</code> captures are not embedded</td></tr>
+    <tr><td><b>Invite card</b> (<code>league</code> screen, League Home)</td><td>(a) <code>… league</code> → sources <code>LeagueScreen.tsx</code>, <code>LeagueProgressModule.tsx</code>; earliest capture <code>2026-08-10T15:03:04+00:00</code>, latest <code>2026-08-10T22:48:52+00:00</code>. Added: <code>InviteLeaguematesCard.tsx</code>, <code>InviteLeaguematesBanner.tsx</code> (<code>shareInvite</code>), <code>utils/inviteSocialProof.ts</code>, chalkline primitives, <code>chalkline.ts</code>. (b) <code>git log --oneline --since=2026-08-10T15:03:04+00:00 -- &lt;11 files&gt;</code> → <b>10 commits</b>: <code>0e35ae2a</code>, <code>6ff61e44</code>, <code>988fa2d6</code>, <code>7057d861</code>, <code>2b63511f</code>, <code>3ade8f28</code>, <code>830d0df9</code>, <code>cb5cc7de</code>, <code>f7473b9e</code>, <code>b904ff22</code>. The card itself was <b>added on 2026-08-11 in <code>3ade8f28</code></b>, after every <code>league</code> capture: <b>no capture of the card exists.</b></td><td><b>(d) Changed and never captured: reconstruction from source</b></td></tr>
+  </table></div>
+  <p><b>OG card today:</b> the invite path has no <code>og:image</code>; the nearest shipped card is drawn with <code>backend/og_image.py</code> from invented inputs (no DB, no network) and labelled "og_image.py render" (P22), in §3. (e) No operator TestFlight screenshots were supplied; none were requested. (f) Every app frame carries exactly one provenance stamp. Sources read at <code>678834ab</code> (<code>origin/main</code>, 2026-10-15).</p>
+  <p><b>Tokens:</b> the <code>:root</code> block of <code>web/css/tokens.css</code> @ <code>1eb520bd</code>, copied verbatim; font tokens gain fallbacks (no web fonts load, so Barlow Condensed renders as Arial Narrow or Helvetica Neue here). Mobile difference noted: <code>chalkline.ts</code> <code>ink.lineStrong</code> = <code>#3D4654</code> (legacy) vs <code>--line-strong</code> <code>#59647A</code>.</p>
+  <p><b>Copy marks:</b> a <span class="legendmark">dashed amber outline</span> marks PROPOSED COPY (new or changed words; the words are <code>marketing-lead</code>'s, not final). <span class="tbd">[copy: marketing-lead]</span> marks a slot where the PRD has no string; nothing is invented. Every string is listed with its source in <a href="#copy">§6</a>. The nav button hides the marks to see the clean design.</p>
+  <p><b>Sample data invented, no real handles.</b> League "Gridiron Syndicate" (Sleeper, 12 teams, id <code>1048259361527984128</code>); inviter display name <code>dana_dynasty</code>; invite id <code>Qm7x2Kp9LwZr</code>.</p>
+  <p><b>Design only. Not shipped code.</b> Nothing here is evidence of app behavior (D-056). No network requests; the ram sprite is embedded as a data URI.</p>
+</section>
+
+<!-- ═══════════════════════════════ 1 · JOIN LANDING, OPTION A ═══════════════════════════════ -->
+<h2 class="sec" id="landing">1 · Join landing, option A: device-aware (current candidate)</h2>
+<p class="lede">FR-7: with <code>growth.join_landing</code> on, <code>GET /app/league/join/&lt;league_id&gt;</code> renders a backend page instead of the 302 (§8.2). It names the league and the inviter (display name resolved server-side from <code>t</code>, FR-11), carries the device-aware CTA from §5 option A, the re-tap step, and an optional <code>dtf://</code> button. It does not reuse the off-Chalkline <code>/s/*</code> chrome. The flag defaults to <b>false</b> (PRD §11), so today's 302 below is what every invitee sees until rollout step 5.</p>
+
+<h3 class="sub" id="before-web">1.0 · Today, flag off: the 302 lands on the web landing <code>/</code></h3>
+<p class="lede"><code>league_join_redirect</code> (<code>server.py:12620-12624</code>) sends <code>/?league=&lt;id&gt;</code>, plus <code>&amp;ref=&lt;u&gt;</code> when the link carried one (every link today does: <code>InviteLeaguematesBanner.tsx:56-65</code>). <code>captureReferralFromUrl</code> stores both and appends "Invited by @&lt;ref&gt;" to the auth card (<code>app.js:6390-6416</code>). The three frames below are <b>local renders</b> of that landing under head-product's decision P22 (2026-10-15): the app served from this worktree's <code>origin/main</code> checkout (<code>678834a</code>) on <code>127.0.0.1</code>, SQLite in a scratch file, no prod, no secrets, opened at <code>/?league=1048259361527984128&amp;ref=dana_dynasty</code> (invented). Live flags from <code>config/features.json</code>: the Sleeper/ESPN/MFL chip row shows; smart-start and the demo link are off.</p>
+<div class="rail">
+  <div class="col">
+    <span class="stamp render">Local render · origin/main 678834a · 2026-10-15</span>
+    <img class="shot" src="before/web-landing--390--local-render-678834a.png" width="390" alt="Local render of the web landing at 390 by 844, invited by dana_dynasty">
+    <p class="cap"><b>W1 · 390×844, first screen.</b> Headless Chrome at device scale 2, the page in a 390px-wide frame so its media queries see a phone width. Order at ≤960px: header, auth card, illustration, connect (<code>styles.css:5040-5047, :5104-5124</code>). "Invited by @dana_dynasty" is the green banner (<code>app.js:6415</code>, <code>styles.css:2703-2713</code>). <code>showAuthScreen</code> relabels the button "Verify with Sleeper →" on load (<code>app.js:300</code>), so it wraps to its own row. The Safari chrome is not part of the render.</p>
+  </div>
+  <div class="col">
+    <span class="stamp render">Local render · origin/main 678834a · 2026-10-15</span>
+    <img class="shot" src="before/web-landing--390--after-verify--local-render-678834a.png" width="390" alt="Local render after typing an invented username and tapping Verify: the extension error">
+    <p class="cap"><b>W2 · 390×844, after tapping Verify</b> with an invented username, in the in-app browser pane at 390×844 (no extension installed). <code>handleLogin</code> calls the extension bridge unconditionally (<code>app.js:334</code>); it times out after 2 s (<code>browser-auth.js:45</code>) and shows <code>browser-auth.js:5</code>. A phone cannot install the desktop extension: this is loop-audit break H3a. The button keeps focus after the tap, hence its lighter fill.</p>
+  </div>
+  <div class="col wide">
+    <span class="stamp render">Local render · origin/main 678834a · 2026-10-15</span>
+    <img class="shot desk-shot" src="before/web-landing--1280--local-render-678834a.png" width="1280" alt="Local render of the web landing at 1280 by 800">
+    <p class="cap"><b>W3 · 1280×800, first screen</b> (headless Chrome, device scale 1, scaled to fit). Desktop with the Fleeced extension is the only path that completes today; ESPN/MFL chips open a mobile-only panel ("Browser sign-in is not available for this platform yet", <code>app.js:1264</code>).</p>
+  </div>
+</div>
+
+<h3 class="sub" id="matrix">1.1 · State matrix: state × device → frame</h3>
+<p class="lede">Device class comes from the user agent (§8.2, AC-7c). iPadOS Safari presents a desktop user agent, so iPads get the desktop frame and its "On an iPhone or iPad?" line (J2). "Valid" means <code>token_status = valid</code> (§8.3).</p>
+<div class="tscroll"><table class="t">
+  <tr><th>State</th><th>iPhone · <code>IOS_INSTALL_URL</code> set</th><th>iPhone · unset</th><th>Desktop (incl. iPadOS)</th><th>Android / other</th></tr>
+  <tr><td><b>Valid invite, league name known</b></td><td class="fr">A1</td><td class="fr">A2</td><td class="fr">A3</td><td class="fr">A4</td></tr>
+  <tr><td><b>Expired or unknown <code>t</code></b>, or no <code>t</code> at all (mint failed, or a legacy <code>ref</code>-only link: the landing never echoes <code>ref</code>, AC-7b)</td><td class="fr">A5</td><td>A2 with A5's neutral headline (not drawn)</td><td>A3 with A5's neutral headline (not drawn)</td><td>A4 with A5's neutral headline (not drawn)</td></tr>
+  <tr><td><b>League name unknown</b> (ESPN/MFL/Fleaflicker league, since names come from the Sleeper public API only unless D-10; or the lookup failed)</td><td class="fr">A6</td><td>A2 with A6's fallback (not drawn)</td><td>A3 with A6's fallback (not drawn)</td><td>A4 with A6's fallback (not drawn)</td></tr>
+  <tr><td><b>Both unknown</b></td><td colspan="4">Headline line 1 only, "A leaguemate invited you"; no league line (not drawn)</td></tr>
+  <tr><td><b>Desktop, <code>IOS_INSTALL_URL</code> unset</b></td><td>n/a</td><td>n/a</td><td>A3 <b>without</b> the "On an iPhone or iPad?" line: its click-through 404s when unset (§8.2), so the line would be a dead link (not drawn)</td><td>n/a</td></tr>
+  <tr><td><b>Already joined</b></td><td colspan="4"><b>Already joined: not a landing state (no auth); handled in-app, J4 — growth-pm, 2026-10-15.</b> No frame.</td></tr>
+  <tr><td><b>App installed</b> (universal link)</td><td colspan="4">Never reaches the landing: AASA resolves before any HTTP request (<code>server.py:12600-12602</code>). In-app J3. No frame.</td></tr>
+  <tr><td><b>Link-preview fetcher</b> (iMessage, Slack, …)</td><td colspan="4">Reads only the page head: OG tags and the static card in <a href="#og">§3</a>. Records <code>unfurled_at</code>, not an open (FR-8).</td></tr>
+  <tr><td><b>Flag off</b> (<code>growth.join_landing</code> false, the default)</td><td colspan="4">Today's 302 into <code>/</code> on every device: W1–W3 in §1.0.</td></tr>
+</table></div>
+
+<h3 class="sub">1.2 · Frames</h3>
+<div class="rail">
+  <div class="col">
+    <span class="stamp prop">Proposed · A1 · iPhone · install link set · valid invite</span>
+    <div class="phone" aria-label="A1">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="page"><div class="jl">
+        <header class="jl-hdr"><span class="wm"><i></i>FLEECED</span></header>
+        <div class="jl-head">
+          <div class="pcopy"><p class="jl-by">dana_dynasty invited you to</p><h1 class="jl-lg">Gridiron Syndicate</h1></div>
+          <p class="jl-sub pcopy">Fleeced finds trades where both sides come out ahead.</p>
+        </div>
+        <div class="jl-steps">
+          <div class="jl-step"><span class="num">01</span><div class="sb"><a class="btn pri pcopy">Get the iOS beta</a><p class="help pcopy">Installs through Apple's TestFlight app.</p></div></div>
+          <div class="jl-step"><span class="num t">02</span><div class="sb"><p class="body pcopy">Installed? Go back to the chat and tap the invite again to join Gridiron Syndicate.</p></div></div>
+        </div>
+        <div class="jl-alt"><a class="btn sec pcopy">Open in the app</a></div>
+        <footer class="jl-foot"><a class="pcopy">FAQ</a><a class="pcopy">Privacy</a><a class="pcopy">Terms</a></footer>
+      </div></div>
+      <div class="safari"><span>fantasy-trade-finder.onrender.com</span></div>
+    </div>
+    <p class="cap"><b>A1.</b> Primary → <code>/app/league/join/&lt;id&gt;/go/ios?t=…</code> → 302 to <code>IOS_INSTALL_URL</code> (recorded as <code>invite_landing_cta</code>). Secondary → <code>dtf://app/league/join/&lt;id&gt;?t=…</code>, direct, not recorded. Ice: wordmark tick + primary (2). Targets ≥44px.</p>
+  </div>
+
+  <div class="col">
+    <span class="stamp prop">Proposed · A2 · iPhone · install link unset</span>
+    <div class="phone" aria-label="A2">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="page"><div class="jl">
+        <header class="jl-hdr"><span class="wm"><i></i>FLEECED</span></header>
+        <div class="jl-head">
+          <div class="pcopy"><p class="jl-by">dana_dynasty invited you to</p><h1 class="jl-lg">Gridiron Syndicate</h1></div>
+          <p class="jl-sub pcopy">Fleeced finds trades where both sides come out ahead.</p>
+        </div>
+        <div class="jnote"><p><span class="tbd">[copy: marketing-lead]</span> <span class="tbd">honest note: the iOS beta has no public link yet</span></p></div>
+        <div class="jl-alt" style="padding-top:24px"><a class="btn sec pcopy">Open in the app</a></div>
+        <footer class="jl-foot"><a class="pcopy">FAQ</a><a class="pcopy">Privacy</a><a class="pcopy">Terms</a></footer>
+      </div></div>
+      <div class="safari"><span>fantasy-trade-finder.onrender.com</span></div>
+    </div>
+    <p class="cap"><b>A2.</b> No install button, so no dead button (§5, AC-7c). No re-tap step: there is nothing to install. The PRD has no string for this note (the Android note says "runs on iPhone", which is wrong on an iPhone). Today's web landing has a "Request TestFlight access →" link to <code>/contact.html</code> (<code>index.html:266</code>); whether this state offers it is a <code>growth-pm</code> call. Ice: tick + note tick (2).</p>
+  </div>
+
+  <div class="col">
+    <span class="stamp prop">Proposed · A4 · Android or other phone</span>
+    <div class="phone" aria-label="A4">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="page"><div class="jl">
+        <header class="jl-hdr"><span class="wm"><i></i>FLEECED</span></header>
+        <div class="jl-head">
+          <div class="pcopy"><p class="jl-by">dana_dynasty invited you to</p><h1 class="jl-lg">Gridiron Syndicate</h1></div>
+          <p class="jl-sub pcopy">Fleeced finds trades where both sides come out ahead.</p>
+        </div>
+        <div class="jnote"><p class="pcopy">Fleeced runs on iPhone and desktop web for now.</p></div>
+        <footer class="jl-foot"><a class="pcopy">FAQ</a><a class="pcopy">Privacy</a><a class="pcopy">Terms</a></footer>
+      </div></div>
+      <div class="safari"><span>fantasy-trade-finder.onrender.com</span></div>
+    </div>
+    <p class="cap"><b>A4.</b> <code>gp.join.android_note</code>. <b>No web button</b>: a phone cannot sign in on the web (J2, §5). No action at all; the open is still recorded (FR-8). Ice: tick + note tick (2). The status and Safari bars stand in for any phone browser.</p>
+  </div>
+
+  <div class="col">
+    <span class="stamp prop">Proposed · A5 · iPhone · expired or unknown invite</span>
+    <div class="phone" aria-label="A5">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="page"><div class="jl">
+        <header class="jl-hdr"><span class="wm"><i></i>FLEECED</span></header>
+        <div class="jl-head">
+          <div><p class="jl-by pcopy">A leaguemate invited you</p><h1 class="jl-lg">Gridiron Syndicate</h1></div>
+          <p class="jl-sub pcopy">Fleeced finds trades where both sides come out ahead.</p>
+        </div>
+        <div class="jl-steps">
+          <div class="jl-step"><span class="num">01</span><div class="sb"><a class="btn pri pcopy">Get the iOS beta</a><p class="help pcopy">Installs through Apple's TestFlight app.</p></div></div>
+          <div class="jl-step"><span class="num t">02</span><div class="sb"><p class="body pcopy">Installed? Go back to the chat and tap the invite again to join Gridiron Syndicate.</p></div></div>
+        </div>
+        <div class="jl-alt"><a class="btn sec pcopy">Open in the app</a></div>
+        <footer class="jl-foot"><a class="pcopy">FAQ</a><a class="pcopy">Privacy</a><a class="pcopy">Terms</a></footer>
+      </div></div>
+      <div class="safari"><span>fantasy-trade-finder.onrender.com</span></div>
+    </div>
+    <p class="cap"><b>A5.</b> FR-11's degraded string. No inviter name (only a <code>valid</code> id names one, §8.2), no error colour, no "expired" message: the invitee can still install and join, and league match may still credit (FR-14). FR-11's string has no league slot, so the league sits on line 2 without "to"; a "…to {league}" version needs <code>marketing-lead</code>.</p>
+  </div>
+
+  <div class="col">
+    <span class="stamp prop">Proposed · A6 · iPhone · league name unknown</span>
+    <div class="phone" aria-label="A6">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="page"><div class="jl">
+        <header class="jl-hdr"><span class="wm"><i></i>FLEECED</span></header>
+        <div class="jl-head">
+          <div class="pcopy"><p class="jl-by">dana_dynasty invited you to</p><h1 class="jl-lg">their league</h1></div>
+          <p class="jl-sub pcopy">Fleeced finds trades where both sides come out ahead.</p>
+        </div>
+        <div class="jl-steps">
+          <div class="jl-step"><span class="num">01</span><div class="sb"><a class="btn pri pcopy">Get the iOS beta</a><p class="help pcopy">Installs through Apple's TestFlight app.</p></div></div>
+          <div class="jl-step"><span class="num t">02</span><div class="sb"><p class="body pcopy">Installed? Go back to the chat and tap the invite again to join their league.</p></div></div>
+        </div>
+        <div class="jl-alt"><a class="btn sec pcopy">Open in the app</a></div>
+        <footer class="jl-foot"><a class="pcopy">FAQ</a><a class="pcopy">Privacy</a><a class="pcopy">Terms</a></footer>
+      </div></div>
+      <div class="safari"><span>fantasy-trade-finder.onrender.com</span></div>
+    </div>
+    <p class="cap"><b>A6.</b> The fallback "their league" is the app's own (<code>SignInScreen.tsx:230</code>), reused in both <code>{league}</code> slots. This is the common ESPN/MFL case while D-10 stays "no". <code>marketing-lead</code> to confirm the fallback reads well on line 2.</p>
+  </div>
+</div>
+
+<div class="rail" style="margin-top:24px">
+  <div class="col wide">
+    <span class="stamp prop">Proposed · A3 · Desktop · valid invite (iPads land here too)</span>
+    <div class="dframe">
+      <div class="dbar"><span>fantasy-trade-finder.onrender.com/app/league/join/1048259361527984128?t=Qm7x2Kp9LwZr</span><button type="button" class="zbtn" data-z="a3">100%</button></div>
+      <div class="dz" id="a3">
+        <div class="desk" aria-label="A3">
+          <header class="jd-hdr"><span class="wm lg"><i></i>FLEECED</span><a class="pcopy">Questions? Read the FAQ ↗</a></header>
+          <main class="jd-main">
+            <div class="pcopy"><p class="jl-by">dana_dynasty invited you to</p><h1 class="jl-lg">Gridiron Syndicate</h1></div>
+            <p class="jl-sub pcopy">Fleeced finds trades where both sides come out ahead.</p>
+            <a class="btn pri pcopy">Open the web app</a>
+            <p class="help pcopy">Sign-in uses the Fleeced extension for Chrome or Edge.</p>
+            <div class="rule"></div>
+            <a class="tlink pcopy">On an iPhone or iPad?</a>
+          </main>
+          <footer class="jd-foot"><a class="pcopy">FAQ</a><a class="pcopy">Privacy</a><a class="pcopy">Terms</a></footer>
+        </div>
+      </div>
+    </div>
+    <p class="cap"><b>A3 · 1280×800</b> (55%). Primary → <code>…/go/web?t=…</code> → <code>/?league=&lt;id&gt;&amp;t=&lt;id&gt;</code> (FR-9), then the extension sign-in and league auto-select. Help line in chalk-dim. The "On an iPhone or iPad?" line → <code>…/go/ios</code> (hidden when <code>IOS_INSTALL_URL</code> is unset, matrix row 5). Ice: tick, primary, text link (3). One ice primary.</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ 2 · OPTION B ═══════════════════════════════ -->
+<h2 class="sec" id="option-b">2 · Option B (not recommended): "Open the web app" on every device</h2>
+<p class="lede">§5 option B (status quo direction, D-173 Companion): the landing exists, but every device gets the web CTA. Drawn so the operator sees why A is recommended. Option C is B until the App Store listing, so it looks like B.</p>
+<div class="rail">
+  <div class="col">
+    <span class="stamp notrec">Option B (not recommended) · B1 · iPhone</span>
+    <div class="phone" aria-label="B1">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="page"><div class="jl">
+        <header class="jl-hdr"><span class="wm"><i></i>FLEECED</span></header>
+        <div class="jl-head">
+          <div class="pcopy"><p class="jl-by">dana_dynasty invited you to</p><h1 class="jl-lg">Gridiron Syndicate</h1></div>
+          <p class="jl-sub pcopy">Fleeced finds trades where both sides come out ahead.</p>
+        </div>
+        <div style="margin-top:28px;position:relative"><span class="ann">strands every phone</span><a class="btn pri pcopy">Open the web app</a></div>
+        <p class="help pcopy" style="margin-top:10px">Sign-in uses the Fleeced extension for Chrome or Edge.</p>
+        <footer class="jl-foot"><a class="pcopy">FAQ</a><a class="pcopy">Privacy</a><a class="pcopy">Terms</a></footer>
+      </div></div>
+      <div class="safari"><span>fantasy-trade-finder.onrender.com</span></div>
+    </div>
+  </div>
+  <div class="col side">
+    <div class="side">
+      <p><b>Where the iPhone tap goes.</b> <code>/?league=…&amp;t=…</code> loads the web landing (W1). The invitee enters a Sleeper username and taps Verify. Two seconds later the page says "Install or reload the Fleeced browser extension, then refresh this page and try again." (<code>browser-auth.js:5, :45</code>; W2).</p>
+      <p>A phone cannot install a desktop extension, and ESPN/MFL web sign-in is "not available … yet" (<code>app.js:1262-1266</code>). <b>Every phone invitee stops here</b>, on every platform. There is no install step, so the loop gets no new iPhone users from a chat link (PRD §5, loop-audit break 1).</p>
+      <p>Under A, the same tap installs the beta (A1), and league match recovers credit even without the re-tap (FR-14).</p>
+      <p>The help line names Chrome or Edge on a phone where neither can run the extension: the copy itself admits the dead end.</p>
+    </div>
+  </div>
+  <div class="col wide">
+    <span class="stamp notrec">Option B (not recommended) · B2 · Desktop</span>
+    <div class="dframe">
+      <div class="dbar"><span>fantasy-trade-finder.onrender.com/app/league/join/1048259361527984128?t=Qm7x2Kp9LwZr</span><button type="button" class="zbtn" data-z="b2">100%</button></div>
+      <div class="dz" id="b2">
+        <div class="desk" aria-label="B2">
+          <header class="jd-hdr"><span class="wm lg"><i></i>FLEECED</span><a class="pcopy">Questions? Read the FAQ ↗</a></header>
+          <main class="jd-main">
+            <div class="pcopy"><p class="jl-by">dana_dynasty invited you to</p><h1 class="jl-lg">Gridiron Syndicate</h1></div>
+            <p class="jl-sub pcopy">Fleeced finds trades where both sides come out ahead.</p>
+            <a class="btn pri pcopy">Open the web app</a>
+            <p class="help pcopy">Sign-in uses the Fleeced extension for Chrome or Edge.</p>
+          </main>
+          <footer class="jd-foot"><a class="pcopy">FAQ</a><a class="pcopy">Privacy</a><a class="pcopy">Terms</a></footer>
+        </div>
+      </div>
+    </div>
+    <p class="cap"><b>B2.</b> Desktop is the same as A3 minus the iOS line. B only differs from A on phones, which is where invites travel.</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ 3 · OG CARD ═══════════════════════════════ -->
+<h2 class="sec" id="og">3 · OG card v1: static 1200×630</h2>
+<p class="lede">§13: v1 is a static branded card. Today <code>/</code> has <b>no <code>og:image</code></b> (<code>web/index.html:6-14</code>), and the existing renderer, <code>backend/og_image.py</code>, draws a navy vertical gradient (<code>:155-167</code>) in Arial/Helvetica/DejaVu (<code>:93-101</code>) with an old-brand footer "Fantasy Trade Finder · fantasy-trade-finder.onrender.com" (<code>:171</code>); none of it carries over. Each card is shown at 50% and at ~300px wide inside an iMessage-style preview (chat bubble = OS chrome). All text is ≥48px at 1200 wide. Wordmark and lines render in fallback fonts here; the shipped PNG would be exported once with the real Barlow Condensed and Archivo.</p>
+
+<div class="rail" style="margin-bottom:24px">
+  <div class="col wide">
+    <span class="stamp render">og_image.py render · 678834a · 2026-10-15</span>
+    <img class="shot og-shot" src="before/og-trade-package--og_image-py-678834a.png" width="1200" alt="Today's share card from og_image.py, invented players">
+    <p class="cap"><b>Today, for context.</b> The invite path has no card at all, so this is the nearest one that ships: the <code>/s/p</code> share card, drawn by <code>og_image._render_trade_card_png</code> with invented inputs (two players, fairness 94, title "Trade Package"), no DB, no network. Navy gradient, rounded translucent panels, system font, and the old-brand footer. Rendered on macOS, where the first font candidate is Arial Bold: the swap glyph draws as a missing-glyph box and the 96px verdict overlaps the bar. Render's Linux host falls through to DejaVu, so glyph coverage and metrics there may differ.</p>
+  </div>
+</div>
+
+<div class="rail">
+  <div class="col wide">
+    <span class="stamp prop">Proposed · OG (i) · wordmark only</span>
+    <div class="ogz"><div class="og">
+      <div class="txt"><div class="ogwm"><i></i>FLEECED</div><div class="ogline pcopy">Dynasty Trade Finder</div></div>
+      <div class="rule"></div>
+    </div></div>
+    <p class="cap"><b>(i)</b> Wordmark 168px Barlow Condensed caps with the ice tick (brand.md signature move 1, scaled); one Archivo 600 line at 56px in chalk-dim. The line is the shipped name's descriptor (<code>og:site_name</code> "Fleeced: Dynasty Trade Finder", <code>index.html:10</code>, D-057). One ice element.</p>
+  </div>
+  <div class="col">
+    <span class="stamp prop">Proposed · OG (i) at thumbnail scale</span>
+    <div class="chat">
+      <div class="bubble pcopy">Join me on Fleeced to find trades we both like → https://fantasy-trade-finder.onrender.com/app/league/join/1048259361527984128?t=Qm7x2Kp9LwZr</div>
+      <div class="unfurl"><div class="ogt"><div class="og">
+        <div class="txt"><div class="ogwm"><i></i>FLEECED</div><div class="ogline">Dynasty Trade Finder</div></div>
+        <div class="rule"></div>
+      </div></div><div class="meta"><p class="tbd">[og:title: marketing-lead]</p><span>fantasy-trade-finder.onrender.com</span></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="rail" style="margin-top:24px">
+  <div class="col wide">
+    <span class="stamp prop">Proposed · OG (ii) · wordmark + ram (recommended)</span>
+    <div class="ogz"><div class="og ii">
+      <div class="txt"><div class="ogwm"><i></i>FLEECED</div><div class="ogline pcopy">Dynasty Trade Finder</div></div>
+      <div class="rambox"><div class="ram" role="img" aria-label="Fleeced the ram, neutral pose"></div></div>
+      <div class="rule"></div>
+    </div></div>
+    <p class="cap"><b>(ii)</b> Same type block (wordmark 148px, line 52px) beside the real sprite <code>mobile/assets/mascot/ram/neutral@3x.png</code> (288×288, <code>7ac7869e</code>), embedded as a data URI at native size in a 384px ink-1 box with a hairline. The mascot's painted shading and glowing eyes stay inside its box (brand.md mascot exemption); no glow or gradient touches the card.</p>
+  </div>
+  <div class="col">
+    <span class="stamp prop">Proposed · OG (ii) at thumbnail scale</span>
+    <div class="chat">
+      <div class="bubble pcopy">Join me on Fleeced to find trades we both like → https://fantasy-trade-finder.onrender.com/app/league/join/1048259361527984128?t=Qm7x2Kp9LwZr</div>
+      <div class="unfurl"><div class="ogt"><div class="og ii">
+        <div class="txt"><div class="ogwm"><i></i>FLEECED</div><div class="ogline">Dynasty Trade Finder</div></div>
+        <div class="rambox"><div class="ram"></div></div>
+        <div class="rule"></div>
+      </div></div><div class="meta"><p class="tbd">[og:title: marketing-lead]</p><span>fantasy-trade-finder.onrender.com</span></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="rail" style="margin-top:24px">
+  <div class="col wide">
+    <span class="stamp phase">Phase 2 / not v1 · OG (iii) · league name as dynamic text</span>
+    <div class="ogz"><div class="og iii">
+      <div class="txt"><div class="ogwm"><i></i>FLEECED</div><div class="lgn">Gridiron Syndicate</div><div class="ogline"><span class="tbd">[copy: marketing-lead]</span></div></div>
+      <div class="rambox"><div class="ram"></div></div>
+      <div class="rule"></div>
+    </div></div>
+    <p class="cap"><b>(iii) Exploratory, not v1.</b> League name at 112px; wordmark at 64px; the placeholder line at 48px. Needs a per-league server render, so it inherits D-10 (Sleeper names only, ESPN/MFL fall back to (ii)), a cache policy, and Chalkline fonts that <code>og_image.py</code> does not load today. The inviter's name is deliberately left off an image any unfurler can fetch.</p>
+  </div>
+  <div class="col">
+    <div class="flag ice" style="margin-top:28px">
+      <b>Recommendation: (ii), wordmark + ram.</b>
+      <p style="margin:8px 0 0">The ram is the app icon. An iPhone invitee goes from this preview to TestFlight to the home screen, and the ram is the one shape that appears at all three steps. At ~300px the wordmark falls to ~37px and the line to ~13px, but the ram still reads as a shape. (i) is the fallback if the mascot exemption is not wanted on a link card. (iii) waits for Phase 2.</p>
+      <p style="margin:8px 0 0">Not verified: how each chat app crops a 1.91:1 card. If a client crops to a centre square, (ii)'s ram and wordmark both lose their edges. That needs a device check, not a guess.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ 4 · INVITE BANNER + CARD ═══════════════════════════════ -->
+<h2 class="sec" id="invite">4 · Invite banner and card after FR-3/FR-4: same construction, copy changed only</h2>
+<p class="lede">FR-3 changes the <b>share text</b> (<code>InviteLeaguematesBanner.tsx:132</code>), which appears in the OS share sheet, not on the banner or card. It ships with the ledger flag off too. FR-4 adds <code>invite_cta_shown</code> on the Trades banner and passes the real league <code>platform</code>; it changes no pixels. So the on-screen banner and card are <b>unchanged</b>. One state is new: FR-1's mint wait (up to 2 s) before the sheet opens, drawn as <i>busy</i> because the skill requires every state the change touches. Crops show the component region only; the rest of each screen is not drawn.</p>
+
+<h3 class="sub">4.1 · Today (reconstructions)</h3>
+<div class="rail">
+  <div class="col">
+    <span class="stamp recon">Reconstruction from source, not a capture</span>
+    <div class="crop" aria-label="Trades cold-start banner, today">
+      <div class="m-banner"><i></i><div class="tc"><p class="t">0 of 11 league-mates have ranked</p><p class="d">Ideas below are fair-value estimates. Real trade matches unlock when league-mates rank their players.</p></div><span class="m-inv">Invite</span></div>
+    </div>
+    <p class="cap"><b>Banner · idle</b> · <code>TradesScreen.tsx:7051-7057</code> mounts it when no leaguemate has ranked (<code>:570-571</code>). Construction <code>InviteLeaguematesBanner.tsx:158-228</code>: ink-2, hairline, ice tick, body-sm; Invite is a composed Pressable, <b>36pt tall with no hitSlop</b> (<code>:213</code>) and a <code>#3D4654</code> border (legacy <code>ink.lineStrong</code>, <code>:220</code>).</p>
+  </div>
+  <div class="col">
+    <span class="stamp recon">Reconstruction from source, not a capture</span>
+    <div class="crop" aria-label="League Home invite card, today">
+      <div class="m-tick"><i></i><span>Grow your league</span></div>
+      <div class="m-card">
+        <p class="m-proof">7 of your 11 leaguemates haven't joined yet</p>
+        <p class="m-bsm">More boards to trade against means sharper suggestions — and more trades that actually happen.</p>
+        <span class="btn sec">Invite leaguemates</span>
+      </div>
+    </div>
+    <p class="cap"><b>Card · idle</b> · <code>LeagueScreen.tsx:603-608</code>, under the hero and above the day-one action row. <code>InviteLeaguematesCard.tsx:88-106</code>: TickLabel, Card, social proof (<code>inviteSocialProof.ts:60</code>), <code>INVITE_RATIONALE</code> (<code>:25-26</code>), secondary Button at 44pt with the <code>#59647A</code> border (<code>visual.chalkline_cleanup</code> true). Renders nothing until the summary lands or when everyone joined.</p>
+  </div>
+  <div class="col">
+    <span class="stamp recon">Reconstruction from source, not a capture</span>
+    <div class="oschrome" aria-label="Share text today">
+      <p class="h">iOS share sheet · message (OS chrome, simplified)</p>
+      <p class="msg">Join me on Dynasty Trade Finder to find trades in Gridiron Syndicate → https://fantasy-trade-finder.onrender.com/?league=1048259361527984128&amp;ref=dana_dynasty</p>
+    </div>
+    <p class="cap"><b>Share text · today</b> · <code>InviteLeaguematesBanner.tsx:129-133</code>; URL from <code>buildInviteUrl</code> (<code>:56-65</code>) with <code>growth.invite_join_link</code> false. Old brand (D-057) and a raw username in every link (loop-audit H2).</p>
+  </div>
+</div>
+
+<h3 class="sub">4.2 · After FR-3/FR-4 (and FR-1's wait)</h3>
+<div class="rail">
+  <div class="col">
+    <span class="stamp prop">Proposed · banner · idle (no on-screen change)</span>
+    <div class="crop">
+      <div class="m-banner"><i></i><div class="tc"><p class="t">0 of 11 league-mates have ranked</p><p class="d">Ideas below are fair-value estimates. Real trade matches unlock when league-mates rank their players.</p></div><span class="m-inv">Invite</span></div>
+    </div>
+    <span class="stamp prop" style="margin-top:8px">Proposed · banner · busy (FR-1 mint, ≤2 s)</span>
+    <div class="crop">
+      <div class="m-banner"><i></i><div class="tc"><p class="t">0 of 11 league-mates have ranked</p><p class="d">Ideas below are fair-value estimates. Real trade matches unlock when league-mates rank their players.</p></div><span class="m-inv busy" aria-label="Invite, busy"><svg class="spin" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" stroke="var(--line)"/><circle cx="8" cy="8" r="6" stroke="var(--chalk)" stroke-dasharray="10 28"/></svg></span></div>
+    </div>
+    <p class="cap"><b>Busy</b> borrows the chalkline Button's own <code>loading</code> treatment (<code>Button.tsx:73-75, :150</code>: the label becomes a spinner in the label colour, 45% opacity, <code>busy</code> a11y state), drawn static. The banner's Pressable has no loading state today, so the builder adds one. FR-4 is invisible: <code>invite_cta_shown</code> on mount, real <code>platform</code>.</p>
+  </div>
+  <div class="col">
+    <span class="stamp prop">Proposed · card · idle (no on-screen change)</span>
+    <div class="crop">
+      <div class="m-tick"><i></i><span>Grow your league</span></div>
+      <div class="m-card">
+        <p class="m-proof">7 of your 11 leaguemates haven't joined yet</p>
+        <p class="m-bsm">More boards to trade against means sharper suggestions — and more trades that actually happen.</p>
+        <span class="btn sec">Invite leaguemates</span>
+      </div>
+    </div>
+    <span class="stamp prop" style="margin-top:8px">Proposed · card · busy (FR-1 mint, ≤2 s)</span>
+    <div class="crop">
+      <div class="m-tick"><i></i><span>Grow your league</span></div>
+      <div class="m-card">
+        <p class="m-proof">7 of your 11 leaguemates haven't joined yet</p>
+        <p class="m-bsm">More boards to trade against means sharper suggestions — and more trades that actually happen.</p>
+        <span class="btn sec busy" aria-label="Invite leaguemates, busy"><svg class="spin" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" stroke="var(--line)"/><circle cx="8" cy="8" r="6" stroke="var(--chalk)" stroke-dasharray="10 28"/></svg></span>
+      </div>
+    </div>
+    <p class="cap"><b>Card busy</b> is the existing <code>Button loading</code> prop, so it needs no new construction.</p>
+  </div>
+  <div class="col">
+    <span class="stamp prop">Proposed · share text (FR-3, FR-2)</span>
+    <div class="oschrome">
+      <p class="h">iOS share sheet · message (OS chrome, simplified)</p>
+      <p class="msg"><span class="pcopy">Join me on Fleeced to find trades we both like →</span> https://fantasy-trade-finder.onrender.com/app/league/join/1048259361527984128?t=Qm7x2Kp9LwZr</p>
+    </div>
+    <p class="cap"><b>PROPOSED COPY</b> <code>gp.invite.msg</code>, the version without the league name (~140 characters). URL shown with <code>growth.referral_ledger</code> and <code>growth.invite_join_link</code> on and a successful mint (§7.2). With the ledger flag off the URL stays today's <code>/?league=…&amp;ref=…</code> byte for byte (AC-1a); FR-3's words ship either way. The web modal's message (<code>web/js/app.js:5834</code>) changes the same way.</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ 5 · YOUR INVITES (PHASE 2) ═══════════════════════════════ -->
+<h2 class="sec" id="your-invites">5 · Phase 2 — exploratory: "Your invites"</h2>
+<p class="lede">The inviter-facing view of <code>/api/invite/impact</code> v2 (§8.5, FR-21, Phase 2 §12). One direction, built as tiles per <code>hub-tiles.md</code>: a hero chosen from the user's state above a grid of equal tiles, every number in Plex Mono. <b>No K-factor, no milestone badges, no emoji</b> (the v1 badges carry emoji and are removed, §8.5). Drawn as a root-stack push, so it mounts its own FeedbackFAB (#188). The entry point is <code>engagement-pm</code>'s call. With <code>invite.k_factor_dashboard</code> off (the default) the payload is zeroed and this page has no entry point.</p>
+<div class="rail">
+  <div class="col">
+    <span class="stamp phase">Phase 2 — exploratory · populated</span>
+    <div class="phone" aria-label="Your invites, populated">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="navhdr"><span class="back"><svg class="ic"><use href="#i-cl"/></svg></span><span class="t pcopy">Your invites</span></div>
+      <div class="scr">
+        <div class="m-card">
+          <p class="m-proof pcopy">7 of your 11 leaguemates haven't joined yet</p>
+          <p class="m-bsm pcopy">More boards to trade against means sharper suggestions — and more trades that actually happen.</p>
+          <span class="btn pri pcopy">Invite leaguemates</span>
+        </div>
+        <p class="lbl"><span class="tbd">[copy: marketing-lead]</span></p>
+        <div class="grid2">
+          <div class="stile"><span class="k pcopy">Links created</span><span class="n">14</span><span class="s"><span>+6</span><span class="pcopy">30d</span></span></div>
+          <div class="stile"><span class="k pcopy">Opened</span><span class="n">9</span><span class="s"><span>+4</span><span class="pcopy">30d</span></span></div>
+          <div class="stile"><span class="k pcopy">Joined</span><span class="n">3</span><span class="s"><span>+2</span><span class="pcopy">30d</span></span></div>
+          <div class="stile"><span class="k pcopy">Activated</span><span class="n">2</span><span class="s"><span>+1</span><span class="pcopy">30d</span></span></div>
+        </div>
+        <p class="m-bsm" style="margin-top:8px"><span class="tbd">[copy: marketing-lead]</span> <span class="tbd">what "Activated" counts</span></p>
+        <p class="lbl"><span class="tbd">[copy: marketing-lead]</span></p>
+        <div class="ltile"><div class="tb"><p class="tt">Gridiron Syndicate</p><p class="dd"><span class="mono">3</span> <span class="pcopy">joined</span> · <span class="mono">2</span> <span class="pcopy">activated</span></p></div><span class="plat">SLEEPER</span><svg class="ic s16 chev"><use href="#i-cr"/></svg></div>
+        <div class="ltile"><div class="tb"><p class="tt">Taxi Squad Tuesdays</p><p class="dd"><span class="tbd">[copy: marketing-lead]</span> <span class="tbd">no joins yet</span></p></div><span class="plat">ESPN</span><svg class="ic s16 chev"><use href="#i-cr"/></svg></div>
+      </div>
+      <div class="fab"><svg class="ic"><use href="#i-flag"/></svg></div>
+    </div>
+    <p class="cap"><b>Populated.</b> Hero = the League Home card's own sentence, rationale and label (<code>inviteSocialProof.ts</code>, <code>InviteLeaguematesCard.tsx:99</code>), promoted to primary because inviting is this page's one job. Tiles = <code>totals</code>, with <code>last_30_days</code> as "+N 30d" (the TileStats "30d" label). Count tiles are not pressable: the payload carries no names, by design. League tiles (<code>leagues[]</code>) tap through to that league's League Home, where the invite lives. Ice: back + hero CTA (2).</p>
+  </div>
+  <div class="mini">
+    <span class="stamp phase">Phase 2 — exploratory · loading</span>
+    <div class="crop">
+      <div class="grid2">
+        <div class="stile sk"><span class="k pcopy">Links created</span><span class="n">00</span><span class="s">+0 30d</span></div>
+        <div class="stile sk"><span class="k pcopy">Opened</span><span class="n">00</span><span class="s">+0 30d</span></div>
+        <div class="stile sk"><span class="k pcopy">Joined</span><span class="n">00</span><span class="s">+0 30d</span></div>
+        <div class="stile sk"><span class="k pcopy">Activated</span><span class="n">00</span><span class="s">+0 30d</span></div>
+      </div>
+    </div>
+    <p class="cap">Static ink-2 skeleton in the number slots, no shimmer. Labels render at once; no fabricated 0.</p>
+    <span class="stamp phase">Phase 2 — exploratory · empty (no links yet)</span>
+    <div class="crop">
+      <div class="m-card">
+        <p class="m-proof pcopy">7 of your 11 leaguemates haven't joined yet</p>
+        <span class="btn pri pcopy">Invite leaguemates</span>
+      </div>
+      <div class="m-card" style="margin-top:12px"><p class="m-bsm"><span class="tbd">[copy: marketing-lead]</span> <span class="tbd">setup prompt in place of the four tiles</span></p></div>
+    </div>
+    <p class="cap">Setup prompt replaces the tiles (hub-tiles: "a setup prompt in place of the preview when data is missing"). The hero stays.</p>
+    <span class="stamp phase">Phase 2 — exploratory · error</span>
+    <div class="crop">
+      <div class="m-card" style="flex-direction:row;align-items:center;justify-content:space-between;min-height:56px;padding:8px 12px">
+        <span class="m-bsm pcopy">Couldn’t load</span>
+        <span class="btn inline pcopy" style="color:var(--chalk-dim);padding:0 8px"><svg class="ic s14"><use href="#i-reload"/></svg>Retry</span>
+      </div>
+    </div>
+    <p class="cap">Reuses the Home StatusRow error words and Retry affordance (<code>StatusRow.tsx:76, :89-92</code>). Not red: it is a load failure, not a destructive state.</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ 6 · COPY REGISTER ═══════════════════════════════ -->
+<h2 class="sec" id="copy">6 · Copy register</h2>
+<p class="lede">Every string on a proposed frame, with its source. Quoted PRD strings are <code>marketing-lead</code>'s proposals (PRD §4: "None is final"). Strings reused from current source were confirmed with <code>git grep -n -F</code> at <code>678834ab</code>. Before frames (§1.0, §4.1) carry source strings only, cited in their captions.</p>
+<div class="tscroll"><table class="t">
+  <tr><th>String</th><th>Frames</th><th>Source</th><th>Status</th></tr>
+  <tr><td>"{display name} invited you to {league}"</td><td>A1–A3, A6, B1, B2</td><td>PRD FR-11 / AC-11 (SignIn and LeaguePicker string), reused as the landing headline</td><td>PROPOSED COPY; landing reuse needs <code>marketing-lead</code>'s yes</td></tr>
+  <tr><td>"A leaguemate invited you"</td><td>A5</td><td>PRD AC-11 degrade</td><td>PROPOSED COPY; a "…to {league}" form is <span class="tbd">[copy: marketing-lead]</span></td></tr>
+  <tr><td>"their league" (fallback)</td><td>A6</td><td><code>mobile/src/screens/SignInScreen.tsx:230</code></td><td>PROPOSED COPY (reuse)</td></tr>
+  <tr><td>"Fleeced finds trades where both sides come out ahead."</td><td>A1–A6, B1, B2</td><td><code>web/index.html:75</code></td><td>PROPOSED COPY (reuse); the PRD has no landing value line</td></tr>
+  <tr><td>"Get the iOS beta"</td><td>A1, A5, A6</td><td><code>gp.join.cta.A_ios</code> (PRD J2)</td><td>PROPOSED COPY</td></tr>
+  <tr><td>"Installs through Apple's TestFlight app."</td><td>A1, A5, A6</td><td><code>gp.join.cta.A_ios_help</code></td><td>PROPOSED COPY</td></tr>
+  <tr><td>"Installed? Go back to the chat and tap the invite again to join {leagueName}."</td><td>A1, A5, A6</td><td><code>gp.join.retap</code></td><td>PROPOSED COPY</td></tr>
+  <tr><td>"Open in the app"</td><td>A1, A2, A5, A6</td><td>PRD J2 (no key)</td><td>PROPOSED COPY</td></tr>
+  <tr><td>"Open the web app"</td><td>A3, B1, B2</td><td><code>gp.join.cta.A_desktop</code></td><td>PROPOSED COPY</td></tr>
+  <tr><td>"Sign-in uses the Fleeced extension for Chrome or Edge."</td><td>A3, B1, B2</td><td><code>gp.join.cta.A_desktop_help</code></td><td>PROPOSED COPY</td></tr>
+  <tr><td>"On an iPhone or iPad?"</td><td>A3</td><td>PRD J2 (no key)</td><td>PROPOSED COPY</td></tr>
+  <tr><td>"Fleeced runs on iPhone and desktop web for now."</td><td>A4</td><td><code>gp.join.android_note</code></td><td>PROPOSED COPY</td></tr>
+  <tr><td>iPhone, install link unset: the honest note</td><td>A2</td><td>none in the PRD</td><td class="tbd">[copy: marketing-lead]</td></tr>
+  <tr><td>"Questions? Read the FAQ ↗", "FAQ", "Privacy", "Terms"</td><td>A1–A6, B1, B2</td><td><code>web/index.html:54, :288, :290-291</code></td><td>PROPOSED COPY (reuse)</td></tr>
+  <tr><td>"Dynasty Trade Finder" (OG line)</td><td>OG (i), (ii)</td><td><code>web/index.html:10</code> <code>og:site_name</code> "Fleeced: Dynasty Trade Finder" (D-057)</td><td>PROPOSED COPY (reuse); see open question 6</td></tr>
+  <tr><td>OG (iii) line; <code>og:title</code></td><td>OG (iii); previews</td><td>PRD: <code>og:title</code> carries the league name when known (AC-7b); no words</td><td class="tbd">[copy: marketing-lead]</td></tr>
+  <tr><td>"Join me on Fleeced to find trades we both like → {url}"</td><td>§4.2 share text; §3 previews</td><td><code>gp.invite.msg</code> (PRD J1, FR-3)</td><td>PROPOSED COPY</td></tr>
+  <tr><td>Banner and card on-screen strings ("0 of {total} league-mates have ranked", "Ideas below…", "Invite", "Grow your league", the social proof, the rationale, "Invite leaguemates")</td><td>§4.2</td><td><code>InviteLeaguematesBanner.tsx:163-168, :178</code>; <code>InviteLeaguematesCard.tsx:90, :99</code>; <code>inviteSocialProof.ts:25-26, :60</code></td><td>Unchanged source</td></tr>
+  <tr><td>"Your invites"</td><td>§5</td><td>PRD §3 non-goal 10 and §12 (the surface's name)</td><td>PROPOSED COPY</td></tr>
+  <tr><td>"Links created", "Opened", "Joined", "Activated"; "joined", "activated"</td><td>§5</td><td>PRD FR-21 ("links created → opened → joined → activated"), §8.5 keys</td><td>PROPOSED COPY</td></tr>
+  <tr><td>Hero sentence, rationale, "Invite leaguemates"</td><td>§5</td><td><code>inviteSocialProof.ts</code>, <code>InviteLeaguematesCard.tsx:99</code></td><td>PROPOSED COPY (reuse on a new surface)</td></tr>
+  <tr><td>"30d"</td><td>§5</td><td><code>mobile/src/components/TileStats.tsx:67</code></td><td>PROPOSED COPY (reuse)</td></tr>
+  <tr><td>"Couldn’t load", "Retry"</td><td>§5 error</td><td><code>mobile/src/components/home/StatusRow.tsx:76, :91</code></td><td>PROPOSED COPY (reuse)</td></tr>
+  <tr><td>Section labels, "Activated" explainer, empty-state prompt, zero-join league line</td><td>§5</td><td>none in the PRD</td><td class="tbd">[copy: marketing-lead]</td></tr>
+  <tr><td>Inviter bell rows (FR-18 <code>gp.push.joined_inbox_title</code> / <code>_body</code>; FR-19 activation row)</td><td>not drawn</td><td>outside this lab's brief; the construction (NotificationRow) does not change</td><td>words with <code>marketing-lead</code></td></tr>
+</table></div>
+
+<!-- ═══════════════════════════════ 7 · CHECKS ═══════════════════════════════ -->
+<h2 class="sec" id="checks">7 · Checks</h2>
+<h3 class="sub">7.1 · Self-check against the nine prohibitions (<code>docs/design/design-system.md</code>)</h3>
+<p class="lede">Applies to app UI inside frames (the proposed landing, OG cards, mobile crops, Your invites). Lab chrome (bezels, OS bars, stamps, annotation tags, chat and share-sheet mocks) is marked in the stylesheet and kept out of the frames.</p>
+<div class="tscroll"><table class="t">
+  <tr><th>#</th><th>Prohibition</th><th>Result</th></tr>
+  <tr><td class="fr">1</td><td>No emoji in UI</td><td>Pass. Icons are Chalkline SVG paths copied from <code>Icon.tsx</code>; arrows (→ ↗) are typographic and come from source strings.</td></tr>
+  <tr><td class="fr">2</td><td>No gradients</td><td>Pass. The only shading is the ram sprite's own paint, inside its box (mascot exemption, brand.md).</td></tr>
+  <tr><td class="fr">3</td><td>No blur, glass, translucent surfaces</td><td>Pass. Every surface is a solid ink step. The busy state's 45% opacity is the shipped disabled treatment (<code>Button.tsx:150</code>), not a surface.</td></tr>
+  <tr><td class="fr">4</td><td>No Inter, Roboto or system stack</td><td>Pass. Barlow Condensed, Archivo, IBM Plex Mono, with lab-only fallbacks (Arial Narrow, Helvetica Neue, Menlo).</td></tr>
+  <tr><td class="fr">5</td><td>No radius over 8px except specced pills</td><td>Pass in app UI: cards and notes 8, buttons 4, chips 2, no pills. The 22px phone bezel is chrome.</td></tr>
+  <tr><td class="fr">6</td><td>Ice for actions, flare for information only</td><td>Pass. Ice: wordmark tick, one primary per frame, the desktop text link, note ticks, the back chevron; at most 3 per frame. No flare in any proposed frame. Flare appears only in the before pane (the shipped <code>#8</code> highlights).</td></tr>
+  <tr><td class="fr">7</td><td>No hover lift</td><td>Pass. No transforms in app UI.</td></tr>
+  <tr><td class="fr">8</td><td>No box-shadow except sheets</td><td>Pass. None used.</td></tr>
+  <tr><td class="fr">9</td><td>No new hues</td><td>Pass for proposals: tokens only. The banner frames draw the legacy <code>#3D4654</code> from <code>chalkline.ts</code> because that is what ships (finding F2 in §8).</td></tr>
+</table></div>
+<p class="lede">Also checked: content text is chalk or chalk-dim, never chalk-faint (chalk-faint appears only as the input placeholder in the before pane); type floor 11px; Barlow Condensed never below 16px in app UI; targets ≥44px on proposed controls.</p>
+
+<h3 class="sub">7.2 · <code>design-review</code> mechanical sweep</h3>
+<p class="lede">Run over this lab's added lines with <code>origin/skill/design-review:.claude/skills/design-review/references/sweep.md</code>, output in <code>/tmp/design-review-referral-loop/</code>, uncommitted mode against the merge base (851 non-comment added lines). 39 hits, none in a proposed frame; every one triaged below. Zero hits for S1, S1b, S3, S3b, S5b, S6b, S8, S9, S10b, S12.</p>
+<div class="tscroll"><table class="t">
+  <tr><th>Rule</th><th>Hits</th><th>Triage</th></tr>
+  <tr><td class="fr">S2</td><td>5</td><td>Cleared: prose. Captions, the self-check and this table name the word "gradient"; no CSS gradient exists.</td></tr>
+  <tr><td class="fr">S4</td><td>1</td><td>Cleared: prose. The self-check row names the banned families.</td></tr>
+  <tr><td class="fr">S5</td><td>1</td><td>Cleared: lab chrome. The 22px phone bezel (<code>.phone</code>), as in <code>home-engagement/</code>. App UI stays at 8/4/2.</td></tr>
+  <tr><td class="fr">S6</td><td>6</td><td>Cleared: unchanged construction. <code>--line-strong-legacy: #3D4654</code> reproduces what <code>InviteLeaguematesBanner.tsx:220</code> ships, in the before and the copy-only after frames; the other 5 are prose. Raised as finding F2.</td></tr>
+  <tr><td class="fr">S7</td><td>3</td><td>Cleared: the verbatim <code>tokens.css</code> <code>--shadow-sheet</code> definition (never used here) and two prose rows.</td></tr>
+  <tr><td class="fr">S10a</td><td>3</td><td>Cleared: the verbatim flare token definitions. No proposed frame uses flare.</td></tr>
+  <tr><td class="fr">S11</td><td>16 refs</td><td>Cleared by code-walk per frame: A1, A2, A4–A6, B1, B2 = 2 ice each; A3 = 3; each OG card = 1; banner and card crops = 1 (the tick); Your invites = 2. The rest are lab chrome (nav, section ticks, stamps, links).</td></tr>
+  <tr><td class="fr">S13</td><td>19</td><td>Cleared: the verbatim position, pick-ladder and tier-alias token definitions. No position or tier colour is used outside the render images.</td></tr>
+</table></div>
+<p class="lede">Not visible to the sweep: desktop frames and OG thumbnails are shown scaled (55% and 25%), so their text renders under 11px in the preview only; the 100% button and the 1200px source sizes are the real ones.</p>
+
+<!-- ═══════════════════════════════ 8 · OPEN QUESTIONS ═══════════════════════════════ -->
+<h2 class="sec" id="questions">8 · Open questions and findings</h2>
+<div class="flag plain">
+  <p style="margin:0 0 8px"><b>For growth-pm</b></p>
+  <ul style="margin:0 0 8px;padding-left:18px">
+    <li>A2 (iPhone, install link unset): should the honest note offer today's "Request TestFlight access →" link to <code>/contact.html</code> (<code>index.html:266</code>), or nothing?</li>
+    <li>The optional <code>dtf://</code> button: on an iPhone without the app, Safari shows an "address is invalid" alert. Keep it, or show it only after the install step? (Also a <code>ux-lead</code> flow question.)</li>
+    <li>Desktop with the install link unset: confirm the "On an iPhone or iPad?" line hides (its click-through 404s, §8.2).</li>
+    <li>Should a desktop invitee see what Fleeced does (for example today's "We find the differences" illustration) beside the CTA? FR-7 does not list it, so A3 leaves it out.</li>
+  </ul>
+  <p style="margin:0 0 8px"><b>For marketing-lead</b></p>
+  <ul style="margin:0 0 8px;padding-left:18px">
+    <li>Every <span class="tbd">[copy: marketing-lead]</span> slot in §6, plus whether FR-11's sentence works as the landing headline and the "their league" fallback reads on line 2.</li>
+    <li>6 · The OG line reuses "Dynasty Trade Finder" from the shipped name. AC-3 bans that phrase in invite share text as an old brand; on a card under FLEECED it is the shipped descriptor. Confirm or replace.</li>
+    <li>The banner says "league-mates" (<code>InviteLeaguematesBanner.tsx:163, :166-167</code>) and the card says "leaguemates": outside FR-3's scope, noted.</li>
+  </ul>
+  <p style="margin:0 0 8px"><b>For design-lead / the operator</b></p>
+  <ul style="margin:0 0 8px;padding-left:18px">
+    <li>OG recommendation (ii) uses the mascot exemption on a link card; confirm the exemption covers it.</li>
+    <li>Wordmark: the web header ships <code>FLEECED.</code> with an ice period (<code>styles.css:4991-4992</code>); brand.md's direction is an ice tick before the word. The lab uses the tick on the landing and OG cards. Pick one.</li>
+    <li>F1 · Before pane, shipped: on phones the landing hides the <code>WR</code> label but keeps the WR-blue rail (<code>styles.css:5111</code>), so position colour is the only encoding (accessibility floor).</li>
+    <li>F2 · Shipped: the Trades banner's Invite button is 36pt with no hitSlop and draws the legacy <code>#3D4654</code> border (2.03:1). FR-3/FR-4 are copy-only, so the after frames keep it; fixing it in the same build is a small, separate call.</li>
+  </ul>
+</div>
+
+</div><!-- /wrap -->
+<script>
+  // Lab chrome only: toggles copy marks and desktop zoom. No network.
+  (function () {
+    var b = document.getElementById('marks');
+    b.addEventListener('click', function () {
+      var off = document.body.classList.toggle('nomarks');
+      b.textContent = off ? 'Show copy marks' : 'Hide copy marks';
+    });
+    document.querySelectorAll('.zbtn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var el = document.getElementById(btn.getAttribute('data-z'));
+        var full = el.classList.toggle('full');
+        btn.textContent = full ? '55%' : '100%';
+      });
+    });
+  })();
+</script>
+</body>
+</html>
