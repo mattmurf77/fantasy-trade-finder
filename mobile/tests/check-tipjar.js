@@ -538,39 +538,48 @@ const SESSIONS = [
   }
 }
 
+let tipJarMount = null; // check 10's harness, reused by 11
+
 // 10 — EXECUTED: the tip purchase refuses unless customerInfoApplies (round-3
 //      P3). TipJarScreen runs under a fake React (hooks as plain calls, JSX
 //      as element objects) and a tip is pressed. A refusal is the screen's
 //      existing failure path: no purchaseTip, paywall_purchase_failed
 //      tracked, "The App Store didn't finish the tip" shown. The refusal throws before
-//      any await, so it lands synchronously.
+//      any await, so it lands synchronously. Since the screen itself shows
+//      only for a verified session (11), each refused case renders verified
+//      and the session changes before the tap: the purchase re-reads it.
 {
   const name = '10. the tip purchase runs ONLY when customerInfoApplies (verified AND RevenueCat is this user); demo, unverified, unknown and a mismatched identity take the failure path, nothing bought';
   if (!subSession) {
     bad(name, 'typescript not resolvable');
   } else {
     const TIP = { product_id: 'ftf_tip_199', display_price: '$1.99' };
-    const mount = (state, rcId) => {
+    // opts.tapState: the session the tap sees (default: the render's).
+    // opts.runEffects: run each effect during the render (11 needs them).
+    const mount = (state, rcId, opts = {}) => {
       const buys = [];
       const events = [];
       const sets = [];
+      const queries = [];
+      let dismissed = 0;
+      let cur = state;
       const React = {
         createElement: (type, props, ...children) => ({ type, props: { ...(props || {}), children } }),
         Fragment: 'Fragment',
         useState: (init) => [init, (v) => sets.push(v)],
-        useEffect: () => {},
+        useEffect: opts.runEffects ? (fn) => { fn(); } : () => {},
         useCallback: (fn) => fn,
         useMemo: (fn) => fn(),
       };
-      const hook = (sel) => sel(state);
-      hook.getState = () => state;
+      const hook = (sel) => sel(cur);
+      hook.getState = () => cur;
       const tokens = new Proxy({}, { get: () => 1 });
       const screen = loadTs('src/screens/TipJarScreen.tsx', {
         react: { __esModule: true, default: React, ...React },
         'react-native': { ActivityIndicator: 'ActivityIndicator', Pressable: 'Pressable', ScrollView: 'ScrollView', StyleSheet: { create: (x) => x }, View: 'View' },
         'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
-        '@tanstack/react-query': { useQuery: ({ queryKey }) => ({ isLoading: false,
-          data: queryKey[0] === 'paywall-config' ? { enabled: true, tips: [TIP] } : [{ identifier: TIP.product_id, priceString: '$1.99' }] }) },
+        '@tanstack/react-query': { useQuery: (q) => { queries.push(q); return { isLoading: false,
+          data: q.queryKey[0] === 'paywall-config' ? { enabled: true, tips: [TIP] } : [{ identifier: TIP.product_id, priceString: '$1.99' }] }; } },
         '../components/chalkline/Text': { __esModule: true, default: 'ChalkText' },
         '../components/chalkline': { Button: 'Button', Icon: 'Icon' },
         '../theme/chalkline': { chalk: tokens, ice: tokens, ink: tokens, radii: tokens, semantic: tokens, space: tokens },
@@ -586,7 +595,7 @@ const SESSIONS = [
         '../state/subscriptionSession': subSession,
         '../api/events': { track: (n, p) => { events.push([n, p]); } },
       }, true);
-      const tree = screen.default({ navigation: { canGoBack: () => true, goBack() {} }, route: { params: { source: 'settings' } } });
+      const tree = screen.default({ navigation: { canGoBack: () => true, goBack() { dismissed += 1; } }, route: { params: { source: 'settings' } } });
       const find = (n, id) => {
         if (!n || typeof n !== 'object') return null;
         if (Array.isArray(n)) { for (const c of n) { const f = find(c, id); if (f) return f; } return null; }
@@ -594,14 +603,16 @@ const SESSIONS = [
         return n.props ? find(n.props.children, id) : null;
       };
       const option = find(tree, `tipjar-option-${TIP.product_id}`);
-      if (option) option.props.onPress();
-      return { option, buys, events, sets };
+      if ('tapState' in opts) cur = opts.tapState;
+      if (option && !opts.noTap) option.props.onPress();
+      return { tree, option, buys, events, sets, queries, dismissed };
     };
+    tipJarMount = mount;
     const wrong = [];
     const cases = [...SESSIONS.map(([label, state, runs]) => [label, state, state.user.user_id, runs]),
       ['verified, RevenueCat is ANOTHER user', SESSIONS[0][1], '999', false]];
     for (const [label, state, rcId, runs] of cases) {
-      const m = mount(state, rcId);
+      const m = mount(SESSIONS[0][1], rcId, { tapState: state });
       if (!m.option) { wrong.push(`${label}: the tip option did not render`); continue; }
       if (m.buys.length !== (runs ? 1 : 0)) wrong.push(`${label}: purchaseTip calls ${m.buys.length}`);
       if (!runs) {
@@ -609,6 +620,32 @@ const SESSIONS = [
         const copy = m.sets.includes('The App Store didn’t finish the tip. Check your connection and try again.');
         if (!failed || !copy) wrong.push(`${label}: not the existing failure path (failed=${failed} copy=${copy})`);
       }
+    }
+    if (wrong.length === 0) ok(name);
+    else bad(name, wrong.join('; '));
+  }
+}
+
+// 11 — EXECUTED: the screen is verified-only (release-lead #575 QA, before the
+//      paywall_tips_enabled flip). Under 10's harness with effects run: a
+//      verified session fetches config + products, tracks paywall_viewed and
+//      renders; demo, unverified and unknown fetch nothing (both queries
+//      disabled), track nothing, dismiss and render null.
+{
+  const name = '11. TipJarScreen is verified-only: demo, unverified and unknown fetch nothing, track nothing, dismiss and render null; verified fetches and renders';
+  if (!tipJarMount) {
+    bad(name, 'check 10 harness unavailable');
+  } else {
+    const wrong = [];
+    for (const [label, state, want] of SESSIONS) {
+      const m = tipJarMount(state, state.user.user_id, { runEffects: true, noTap: true });
+      const cfg = m.queries.find((q) => q.queryKey[0] === 'paywall-config');
+      const prod = m.queries.find((q) => q.queryKey[0] === 'tip-products');
+      const viewed = m.events.some(([n]) => n === 'paywall_viewed');
+      const got = { rendered: m.tree !== null, cfg: !!(cfg && cfg.enabled), prod: !!(prod && prod.enabled),
+        viewed, dismissed: m.dismissed > 0 };
+      const exp = { rendered: want, cfg: want, prod: want, viewed: want, dismissed: !want };
+      for (const k of Object.keys(exp)) if (got[k] !== exp[k]) wrong.push(`${label}: ${k}=${got[k]}`);
     }
     if (wrong.length === 0) ok(name);
     else bad(name, wrong.join('; '));

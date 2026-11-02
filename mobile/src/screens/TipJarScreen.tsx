@@ -18,7 +18,7 @@ import {
 } from '../api/purchases';
 import { useFlag } from '../state/useFeatureFlags';
 import { useSession } from '../state/useSession';
-import { customerInfoApplies } from '../state/subscriptionSession';
+import { customerInfoApplies, subscriptionSessionState } from '../state/subscriptionSession';
 import { track } from '../api/events';
 
 // TIP JAR — "support the platform" consumables (operator request 2026-08-28).
@@ -53,6 +53,9 @@ interface TipOption {
 export default function TipJarScreen({ navigation, route }: any) {
   const source: string = route?.params?.source ?? 'unknown';
   const paywallOn = useFlag('monetize.paywall');
+  // Tips are a verified-only surface, like the Settings row that opens this
+  // screen: demo, unverified and unknown fetch nothing here and leave.
+  const verified = useSession((s) => subscriptionSessionState(s) === 'verified');
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,10 +73,16 @@ export default function TipJarScreen({ navigation, route }: any) {
     if (!paywallOn) dismiss();
   }, [paywallOn, dismiss]);
 
+  // Same self-guard for the session: a direct navigate, or a session that
+  // stops being verified while the sheet is open (sign-out, a user change).
+  useEffect(() => {
+    if (paywallOn && !verified) dismiss();
+  }, [paywallOn, verified, dismiss]);
+
   const configQuery = useQuery({
     queryKey: ['paywall-config', 'ios'],
     queryFn: () => getPaywallConfig('ios'),
-    enabled: paywallOn,
+    enabled: paywallOn && verified,
     staleTime: 5 * 60_000,
   });
   const config = configQuery.data;
@@ -88,7 +97,7 @@ export default function TipJarScreen({ navigation, route }: any) {
   const productsQuery = useQuery({
     queryKey: ['tip-products', tips.map((t) => t.product_id).join(',')],
     queryFn: () => getTipProducts(tips.map((t) => t.product_id)),
-    enabled: paywallOn && tips.length > 0,
+    enabled: paywallOn && verified && tips.length > 0,
     staleTime: 5 * 60_000,
   });
 
@@ -109,9 +118,9 @@ export default function TipJarScreen({ navigation, route }: any) {
   );
 
   useEffect(() => {
-    if (!paywallOn) return;
+    if (!paywallOn || !verified) return;
     track('paywall_viewed', { source: 'tip_jar', platform: 'ios' });
-  }, [paywallOn]);
+  }, [paywallOn, verified]);
 
   const onTip = useCallback(
     async (option: TipOption) => {
@@ -159,7 +168,7 @@ export default function TipJarScreen({ navigation, route }: any) {
     [busy, source],
   );
 
-  if (!paywallOn) return null;
+  if (!paywallOn || !verified) return null;
 
   return (
     <SafeAreaView style={styles.root} testID="tipjar-screen" edges={['top', 'bottom']}>
