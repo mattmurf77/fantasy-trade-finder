@@ -390,7 +390,10 @@ export async function generateTrades(
 export async function getTradeStatus(
   jobId: string,
   page?: { deck?: string; cursor: number },
-  request?: { background?: boolean },
+  // #393 M2 (D2, trades-eng adj. 3): a PAGED call is P2's next-page
+  // prefetch, so it is background by default (a 402 opens nothing; the deck
+  // shows the preview end card). The legacy poll passes it explicitly.
+  request: { background?: boolean } | undefined = page ? { background: true } : undefined,
 ): Promise<PagedTradeJobSnapshot> {
   const paged = page
     ? `&deck=${encodeURIComponent(page.deck || jobId)}`
@@ -656,6 +659,10 @@ export async function swipeTrade(
   decision: 'like' | 'pass',
   signal?: SwipeSignal,
   surface?: SwipeSurface,
+  // #393 M2 (D2): a 'shop' pass is the Shop's held-Undo commit
+  // (ShopOffersBody.commitDismiss, its only caller), never a tap of its own,
+  // so it is background by default: its 402 opens nothing.
+  request: { background?: boolean } | undefined = surface === 'shop' ? { background: true } : undefined,
 ) {
   // FB-46: echo the card context so the server can reconstruct the card
   // when its in-memory deck was lost (Render deploy / session re-init)
@@ -670,7 +677,7 @@ export async function swipeTrade(
     target_username:    card.opponent_username || undefined,
     ...(surface ? { surface } : {}),
     ...(signal ?? {}),
-  });
+  }, request);
 }
 
 // POST /api/trades/flag — "this is a bad trade" (feedback #85). Distinct
@@ -988,8 +995,8 @@ export async function createStandingOffer(body: {
   seasons: number[];
   team_user_ids: string[];
   source_trade_id?: string;
-}): Promise<{ status: string; offer: StandingOffer }> {
-  const res = await api.post<any>('/api/trades/standing-offer', body);
+}, request?: { background?: boolean }): Promise<{ status: string; offer: StandingOffer }> {
+  const res = await api.post<any>('/api/trades/standing-offer', body, request);
   return {
     status: String(res?.status ?? 'ok'),
     offer: normalizeStandingOffer(res?.offer),

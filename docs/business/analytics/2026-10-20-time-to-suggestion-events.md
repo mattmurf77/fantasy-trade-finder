@@ -18,7 +18,7 @@ shipped (G-031); the emitters ship in #363.
 2. **Where the time goes:** `serve_source` (device / page / cached / joined / fresh), and on the server,
    `first_publish_ms`.
 3. **How fresh the shown deck was:** `freshness_state` on the client, `oldest_input_age_s` on the server.
-4. **What failed:** R2b's `reason`. Every R2b counts as > 200 ms in the p95 (T2).
+4. **What failed:** R2b's `reason`. Every R2b counts as > 200 ms in the p95 (T2), except `paywall` and `verify`, which the p95 excludes (T2 as amended).
 
 ## Events
 
@@ -27,7 +27,7 @@ shipped (G-031); the emitters ship in #363.
 | `find_trades_tapped` (**widened**, R1) | INTENT (unchanged) | existing `source`, `mode`, plus **`search_id`** (a client UUID). `source` values are listed exactly in "R1 `source` values" below | **At the tap** on every search-starting control (#339 table A), no longer at dispatch on the push path | mobile |
 | `calc_find_a_trade_tapped` (**widened**, R1) | INTENT (unchanged) | existing, plus **`search_id`** | At the tap (already, `utils/canvasSearch.ts:52-61`) | mobile |
 | `trade_first_card_shown` (**new**, R2) | **NON_INTENT** | `search_id`; `ms_from_tap` (int, a **monotonic** client clock: `performance.now()` deltas, as `api/client.ts` `_clockMs()` uses); `entry_point`; `search_type` (`organic` \| `pinned` \| `fair_sweep`); `launch_state` (`cold_launch` \| `first_tap` \| `repeat_tap`); **`network_type`** (`wifi` \| `cellular` \| `offline` \| `unknown`); `serve_source` (`device` \| `page` \| `cached` \| `joined` \| `fresh`); `freshness_state` (`fresh` \| `updating`); `job_id`; `card_index` | **Exactly at AC-L1's frame (T1):** the first frame where a real card is ≥ 50% visible with Like and Pass enabled. Once per `search_id` | mobile |
-| `trade_first_card_failed` (**new**, R2b) | **NON_INTENT** | `search_id`, `ms_from_tap`, `reason` (`empty` \| `error` \| `abandoned` \| `timeout`), plus R2's `entry_point`, `search_type`, `launch_state`, `network_type`, `serve_source` | Instead of R2: **exactly one of R2/R2b per `search_id`**. `abandoned` fires on unmount or blur, or when the app leaves `active`, before a card (T4). **`timeout` = 10,000 ms** from the tap with no card. §3 of the readout checks that threshold against the observed tail (ruling 30) | mobile |
+| `trade_first_card_failed` (**new**, R2b) | **NON_INTENT** | `search_id`, `ms_from_tap`, `reason` (`empty` \| `error` \| `abandoned` \| `timeout` \| `paywall` \| `verify`; see "R2b gate reasons" below), plus R2's `entry_point`, `search_type`, `launch_state`, `network_type`, `serve_source` | Instead of R2: **exactly one of R2/R2b per `search_id`**. `abandoned` fires on unmount or blur, or when the app leaves `active`, before a card (T4). **`timeout` = 10,000 ms** from the tap with no card. §3 of the readout checks that threshold against the observed tail (ruling 30) | mobile |
 | `deck_buffer_empty` (**new**, granted in ruling 30) | **NON_INTENT** | `search_id`, `deck_id`, `cards_seen`, `ms_since_first_card`, `network_type` | The user reaches the last ready card while the deck is still building and no next page is local. That's an AC-L4 failure. At most once per `search_id` | mobile |
 | `deck_i1_check` (**new**, S0's C-a readout; analytics-lead's pre-grant, 2026-10-26, with models-lead's R2.4 addendum (ii)) | **NON_INTENT** | `job_key` (sha256 of the job id, first 12 hex: the readout de-duplicates by it); `mode` (`strict` \| `lenient`); `status` (`fresh` \| `stale` \| `unknown` \| `missing`); `outcome` (the `[i1] serve` line's: `served`, `served_lenient`, `unchecked_c_e`, or a gate miss, `_held` when held); `age_bucket` (the roster snapshot's age: `under_5m` (inside the 300 s roster bound) \| `5m_to_1h` \| `1h_to_24h` (inside the 24 h import bound) \| `over_24h` \| `none`); `cards`, `kept`; `dropped_cards` (distinct cards with a moved asset); `dropped_give_player`, `dropped_give_pick`, `dropped_receive_player`, `dropped_receive_pick` (cards per side × asset type: a card that moved on both sides counts once in `dropped_cards` and once per side here); `unchecked_generic`, `unchecked_pick_owner`. **No league id, no raw job id, no player ids**: the league rides the row's `league_id` column | Each serve that ran the I-1 check (the `[i1] serve` log point: the job views, legacy and paged, and the page-store serve) **with newly served cards: one row per such serve, each card counted once per job** in the process (by `impression_id`, else `trade_id`), its counts over those new cards only. A repeat poll records nothing; a replace (re-sorted) serve records its cards not yet counted; a legacy cumulative body counts only once the job is complete, and then only the cards no page counted (#419 QA P3). None at `trade_i1_mode` 0, under the admin gate-miss hook, or when the roster read fails. Owner = the viewer; written non-touching (`touch_user=False`) off the request thread after the response | server |
 | `trades_generated` (**widened**, R3) | as today | existing (`count`, `gen_ms`, `engine_version`, `lanes`, `deck_source`), plus **`first_publish_ms`**, **`serve_source`** (`page` \| `cached` \| `joined` \| `fresh` \| `prepared`), **`oldest_input_age_s`** (seconds since the oldest of: the roster refresh and the value snapshot; null if unknown), and the echoed **`search_id`** | **Binding (analytics-lead's condition): exactly one per user-visible deck, whatever `serve_source`.** A page serve emits it at serve. **A pre-build that is never served emits none** (a job log line only). **Calibration's `grading_refresh` decks emit none** (Calibration has its own events; ruling 30), so R3 stays "exactly one per user-visible trade deck" and the funnel and PFO queries need no exclusion. `deck_source` keeps its meaning; `serve_source` is a separate dimension | server |
@@ -83,6 +83,14 @@ sets `source = "replenish"` at `:24142`), so they **can't be separated from real
 - **No reader filter change is needed** going forward: after the merge no grading-only deck emits, so the readers are
   correct as written. Pre-merge history can't be corrected; the relabel isn't retroactive.
 
+## R2b gate reasons (analytics-lead's grant, 2026-10-27; #393 M2)
+
+- R2b `reason`: `empty | error | abandoned | timeout | paywall | verify`. `paywall` = a 402 pro_required with any gate except verify_required. `verify` = a 402 gate=verify_required, or a 403 verification_required on a gated route (client gateSignalFor). Both fire when the gate answer arrives, before the paywall or VerifySheet shows.
+- No new props: no `gate` or `kind` on R2b. A send never produces R2b. The class stays NON_INTENT.
+- **Seams:**
+  1. Builds before the first one carrying these values report gate-ended searches as `error`, including today's 403 verify path. Segment R2b reasons by `app_version`, not by date.
+  2. At the 11-18 enforcement flip, `paywall` appears once is_enforcing() is on; web also needs `paywall_web_enforce_enabled`.
+
 ## Classes and funnel
 
 - **R1 stays INTENT:** a hand-off tap is a user action.
@@ -96,7 +104,7 @@ sets `source = "replenish"` at `:24142`), so they **can't be separated from real
 ## Readout conditions (from analytics-lead; T1–T7)
 
 - **T1:** the R2 frame (above).
-- **T2:** p95 is taken over R2 ∪ R2b.
+- **T2:** p95 is taken over R2 ∪ R2b. **Amended 2026-10-27 (analytics-lead):** AC-L1's p95 is over R2 ∪ R2b EXCLUDING `paywall` and `verify`. Gate outcomes are product gates, not latency, and are reported as their own rows.
 - **T3:** `cold_launch` is its own row.
 - **T4:** backgrounding gives `abandoned`.
 - **T5:** don't exclude tester devices from the AC-L1 query.

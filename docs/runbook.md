@@ -71,6 +71,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Local dev](#local-dev)
 - [Deploy (Render)](#deploy-render)
 - [DB connections and background threads across fork](#db-connections-and-background-threads-across-fork)
+- [Server error alerts (Sentry)](#server-error-alerts-sentry)
 - [Pre-ship simulator gate (2026-08-08)](#pre-ship-simulator-gate-2026-08-08)
   - [Risk-tier matrix (operator-owned; deviations are decisions, recorded in the feature's scope block)](#risk-tier-matrix-operator-owned-deviations-are-decisions-recorded-in-the-features-scope-block)
   - [Evidence](#evidence)
@@ -78,6 +79,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
   - [Screen library (capture freshness)](#screen-library-capture-freshness)
   - [Failure symptom / lever](#failure-symptom-lever)
 - [Database](#database)
+  - [Orphaned-overhaul sweep (legal R28.22 d2, 2026-10-29)](#orphaned-overhaul-sweep-legal-r2822-d2-2026-10-29)
 - [Migration DDL never blocks boot](#migration-ddl-never-blocks-boot)
 - [Feature flags](#feature-flags)
 - [Trade engine flags + kill switch](#trade-engine-flags-kill-switch)
@@ -256,6 +258,68 @@ backend increment. Physical-device checks and the three-second KPI remain separa
 
 ---
 
+## Server error alerts (Sentry)
+
+GNG-1 (error alerts) and SUP-M7 (`feedback_received`): `backend/error_alerts.py`, [scope](plans/server-error-alerts/scope.md). **Dark until `SENTRY_DSN` is set.** With no DSN, the SDK is never initialized or even imported.
+
+**What becomes an event, once on:**
+- **Every ERROR+ log line.** That covers:
+  - route exceptions (the generic `handle_unexpected_error` logs them with the stack);
+  - the `_cleanup_loop` step guards;
+  - `daily-tick: step … raised`;
+  - every other `log.error` / `log.exception` / `log.critical` (about 177 call sites scanned);
+  - gunicorn's own ERROR lines in the master (`--preload` imports the app there).
+  - `log.warning` never alerts.
+- **`http_5xx`:** a 5xx response that produced no event of its own (no ERROR log on the way to it), tagged `route` / `status` / `method`. A 500 is never counted twice, and 4xx never reports.
+  - **Never for a 501:** that's our "not available for this platform or basis" answer, not a fault.
+  - **At most one per route and status per worker per hour.** About 37 handled-5xx returns log no ERROR (a Sleeper outage's 503s, a platform write's 502s), so without the cap an outage would be one event per request. Sentry is the alarm; the request count is in the Render access log.
+- **`feedback_received`** (info level): one per new `POST /api/feedback` note, tagged only `feedback_id` and `kind` (bug / polish / idea). The note itself stays in our DB; read it with `GET /api/feedback/admin` or the `feedback` skill.
+
+**What an event contains: an allowlist (legal R28.23).** `scrub_event` builds every event from this list and drops everything else, unknown fields included. If building it fails, the event isn't sent.
+- **The SDK's own fields:** event id, time, level, logger name, release, environment, SDK and module versions, the fingerprint, and the transaction (the Flask endpoint's function name). Not the server's host name.
+- **The request:** the method and the **Flask route pattern** (`/s/trade/<match_id>`), never the real path or query. Outside a request, there's no request at all.
+- **The error:** its exception type and module, and the stack frames as file, function and line only: no locals, no source lines, and no absolute paths. **Never the exception's message**, which can carry a username or SQL `[parameters: …]`.
+- **The log line:** its **template** (`"lookup failed for %s"`), and only from a logger we control: `backend.*`, `trade_finder`, `ftf.*` and `gunicorn.error`. Any other logger's template becomes `[Filtered]`, though its logger name and level still go, so the alert fires and says where it came from.
+  - **Every parameter is `[Filtered]`, numbers included**, because a `match_id` is a `/s/trade/` link code. Counts and timings stay in the Render logs.
+  - A pattern scrub also runs over the template as a second layer.
+  - A logged object that isn't a string (`log.error(exc)`, whose "template" would be the exception's text) becomes `[Filtered]`.
+  - Our templates are kept constant by a CI test that needs no SDK (`test_error_log_templates.py`, over `backend/` and `scripts/`).
+- **Messages:** `http_5xx` and `feedback_received` only; anything else becomes `[Filtered]`.
+- **Tags:** `route`, `status`, `method`, `feedback_id` and `kind` only.
+- **Contexts:** the Python runtime and the OS.
+- **Never sent:** users, IPs, headers, cookies, request bodies, extras, breadcrumbs (they're off), log parameters, frame locals, source code lines, third-party log templates, tracing, profiling, SQL queries, and log lines as Sentry Logs.
+  - **No trace ids or baggage** (legal R28.23 condition 3): a caller can set them with `sentry-trace` / `baggage` headers, and the SDK would copy them into the event and its envelope header.
+  - **No release-health sessions:** with no error, nothing is sent at all.
+- **Detail lives in the Render logs; Sentry locates.** An event tells you which error, in which code, on which route, and how often. To see the actual values, look up the same minute in the Render logs.
+
+**Before turning it on (both gates):**
+1. **MUST, privacy page:** set `SENTRY_DSN` only once the privacy page with legal's R28.23 lines is **live** in production. Those lines ship in #373 (onboarding-eng). Legal cleared backend Sentry on that condition. Until then, the page names Sentry for the mobile app only.
+2. **Volume:** release-lead counts prod ERROR lines per day (Render logs, `[ERROR]`; 0 in 48 h on 10-29 → 10-31) and the 5xx rate (the access log), and checks both against the Sentry plan's event quota. `http_5xx` is capped as above; an ERROR-log storm isn't capped in code, so keep Sentry's spike protection on.
+
+**Turning it on (operator only; agents never handle the DSN):**
+1. Create a Sentry project with the Python / Flask platform.
+2. **In that project's Settings → Security & Privacy, keep these ON** (legal R28.23 condition 5, a second layer the operator controls):
+   - **Data Scrubber**;
+   - **Use Default Scrubbers**;
+   - **Prevent Storing of IP Addresses**. Legal's Q11 asks whether this is on; tell legal it is.
+3. Copy the project's DSN. In the Render dashboard → the web service → Environment, add `SENTRY_DSN`, and optionally `SENTRY_ENVIRONMENT` (default `production`). Render redeploys.
+   - It goes in the dashboard, not `render.yaml`. [Render ignores render.yaml envVars](#render-ignores-renderyaml-envvars-on-the-dashboard-created-web-service-2026-07-19) on this service, and the DSN is never committed.
+   - `RENDER_GIT_COMMIT` (set by Render) becomes the release.
+4. **First hour:** trigger nothing on purpose. Watch the Sentry issue stream for:
+   - the volume you expected from the gate-2 count;
+   - one issue per distinct error;
+   - **open three events.** Each request should be a route pattern, with no real path or `?`; the log message should be a template with `[Filtered]` parameters only; and there should be no exception message, user, IP or headers.
+   - The boot log has **no** `error_alerts: Sentry init failed` line. That line means a malformed DSN, and alerts are off.
+
+**Suggested alert rules (in Sentry):**
+- **A new issue is created → email** the operator. This is the main alert.
+- **`message` equals `feedback_received` → email.** Send it per event while volume is low, or as an hourly or daily digest once it isn't.
+- **Optional:** an issue tagged `route` seen more than N times in 1 h → email, for a route that has started failing hard.
+
+**Turning it off:** delete `SENTRY_DSN` in the Render dashboard. The redeploy that follows starts with alerts dark, and no code change is needed.
+
+---
+
 ## Pre-ship simulator gate (2026-08-08)
 
 > **RETIRED (2026-08-15, D-056 — extending D-P1-08).** Maestro/simulator work is retired
@@ -344,6 +408,15 @@ Prereq: `brew install pngquant` (the runner falls back to `sips` downscale with 
 - **Prod:** Postgres via `DATABASE_URL`. Take a Render snapshot before destructive changes.
 - **Schema source of truth:** `backend/database.py`.
 - **Migrations:** No migration tool. `_migrate_db()` in `database.py` applies idempotent additive ALTERs and seeds `model_config` defaults via INSERT OR IGNORE on every startup. For destructive changes, write a one-off script and run it manually.
+
+### Orphaned-overhaul sweep (legal R28.22 d2, 2026-10-29)
+
+A background DELETE in the cleanup loop. It runs once per process, on the first tick, 5 minutes after boot (`server._sweep_orphaned_overhauls_once` → `accounts.delete_orphaned_overhauls`).
+- **What it removes:** team overhauls whose owner account no longer exists, with their offers, roadmaps, attempts and reservations, and child rows whose overhaul is already gone. These are accounts deleted, or entry users purged, before account deletion covered overhauls (#540).
+  - An owner is **live** while a `users` row, a durable `sessions` row, or an `accounts` row (as the `acct_` alias or the bound Sleeper id) names their `account_user_id`.
+  - An overhaul is also swept when its owner's `users` row was created more than an hour after it, which means a new account under a reused id. The exception is an owner with a durable session or `accounts` row no newer than the overhaul: they were live when they made it, and their `users` row only landed late.
+- **Logs:** a success logs `Deleted N overhaul(s) whose owner account no longer exists, and M row(s) under them`, and logs nothing when there's nothing to do. A failure logs `orphaned-overhaul sweep failed (<ErrorClass>); retried next tick` and tries again next tick. Neither ever carries ids: the failure line logs the class only, because a DB error's text holds the statement's parameters.
+- **If it misbehaves:** set `FTF_DISABLE_CLEANUP_LOOP=1` to stop the whole loop (tests do), or revert #540. Rows already swept are gone. They're data the owner asked to delete, so there's nothing to restore.
 
 ---
 

@@ -1,5 +1,9 @@
 """Synthetic-only regression coverage for the current account-deletion schema."""
+import inspect
+import io
 import json
+import re
+import tokenize
 
 import pytest
 from cryptography.fernet import Fernet
@@ -556,3 +560,326 @@ def test_pick_assignment_order_keeps_a_public_sleeper_id_and_anonymizes_the_alia
     counts = accounts.delete_user_data(UID)
     assert json.loads(_orders(engine)["lg"])["order"] == [UID, accounts.DELETED_USER_PLACEHOLDER, OTHER]
     assert counts["pick_assignment_order_anonymized"] == 1
+
+
+# ── Team overhaul (keys the owner as account_user_id, the rest by overhaul_id) ──
+
+OVERHAUL_CHILDREN = (db.overhaul_offers_table, db.overhaul_roadmaps_table,
+                     db.overhaul_attempts_table, db.overhaul_reservations_table)
+OWNER_NAME = "owner-display-name"
+PLACEHOLDER = accounts.DELETED_USER_PLACEHOLDER
+
+
+def _overhaul(conn, overhaul_id, account_user_id, league_user_id):
+    seed(conn, db.overhauls_table, overhaul_id, overhaul_id=overhaul_id,
+         account_user_id=account_user_id, league_user_id=league_user_id)
+
+
+def _children(conn, overhaul_id, *, offer_id=None):
+    seed(conn, db.overhaul_offers_table, overhaul_id, overhaul_id=overhaul_id,
+         offer_id=offer_id or "of-" + overhaul_id, package_hash="h-" + overhaul_id)
+    seed(conn, db.overhaul_roadmaps_table, overhaul_id, overhaul_id=overhaul_id)
+    seed(conn, db.overhaul_attempts_table, overhaul_id, overhaul_id=overhaul_id,
+         attempt_id="at-" + overhaul_id, batch_id="b-" + overhaul_id)
+    seed(conn, db.overhaul_reservations_table, overhaul_id, overhaul_id=overhaul_id)
+
+
+def _named_offer(conn, offer_id, counterparty, decision, name=OWNER_NAME):
+    """An offer in OTHER's overhaul, built on the owner's private data."""
+    card = {"offer_id": offer_id, "target_user_id": counterparty, "target_username": name,
+            "give": [{"id": "p1"}], "receive": [{"id": "p2"}], "fairness_score": 0.9,
+            "mismatch_score": 7.0, "composite_score": 7.0,
+            "model_arm": "owner_v2_bilateral", "selection_coverage": "full", "basis": "divergence",
+            "reasons": ["Other manager’s preferences are unknown; fit uses market and team context."],
+            "likes_you": True,
+            "match_context": {"owner_benefits": ["outlook"], "counterparty_benefits": ["need"],
+                              "counterparty_preference_evidence": "known",
+                              "opponent_outlook": "rebuilder",
+                              "support_kind": "interpretable_support_not_probability"}}
+    evidence = {"viewer": {"benefits": ["outlook"]}, "counterparty": {"outgoing_personal": 1234},
+                "assets": [{"id": "p2", "counterparty_personal": 1500}], "preference_priority": 2}
+    seed(conn, db.overhaul_offers_table, offer_id, overhaul_id="ovh-other", offer_id=offer_id,
+         package_hash="sha1-" + offer_id, counterparty_user_id=counterparty,
+         counterparty_username=name, card_json=json.dumps(card),
+         evidence_json=json.dumps(evidence), decision=decision)
+
+
+def test_overhauls_deleted_and_offers_naming_the_owner_scrubbed(engine):
+    neighbour = UID + "-2"            # another person whose id starts with the owner's
+    with engine.begin() as conn:
+        _overhaul(conn, "ovh-own", UID, UID)
+        _overhaul(conn, "ovh-alias", ALIAS, ALIAS)    # a platform league: its own id (session_input.py:58)
+        _overhaul(conn, "ovh-other", OTHER, OTHER)
+        for oid in ("ovh-own", "ovh-alias"):
+            _children(conn, oid)
+        _children(conn, "ovh-other", offer_id="of-unrelated")
+        _named_offer(conn, "of-sleeper", UID, "pass")
+        _named_offer(conn, "of-alias", ALIAS, "undecided")
+        _named_offer(conn, "of-liked", UID, "like")
+        _named_offer(conn, "of-neighbour", neighbour, "undecided", name="neighbour-name")
+        seed(conn, db.overhaul_attempts_table, "sent", overhaul_id="ovh-other",
+             attempt_id="at-sent", batch_id="b-sent", offer_id="of-sleeper")
+        blocked = {"code": "counterparty_asset_not_owned", "offer_id": "of-sleeper", "assets": ["p2"],
+                   "message": f"Player Two is no longer on {OWNER_NAME}’s roster, so nothing was sent. "
+                              "Find a new trade."}
+        own_side = {"code": "asset_not_owned", "offer_id": "of-sleeper", "assets": ["p1"],
+                    "message": "Player One is no longer on your roster, so nothing was sent. Find a new trade."}
+        other_team = {"code": "counterparty_asset_not_owned", "offer_id": "of-unrelated", "assets": ["p9"],
+                      "message": "Player Nine is no longer on Another Team’s roster, so nothing was sent. "
+                                 "Find a new trade."}
+        conn.execute(db.overhaul_roadmaps_table.update().where(
+            db.overhaul_roadmaps_table.c.overhaul_id == "ovh-other").values(
+            summary_json=json.dumps({"counterparties": [UID, "unrelated", ALIAS, neighbour],
+                                     "score": 3}),
+            compat_json=json.dumps({"blockers": [blocked, own_side, other_team]})))
+    before = {r["offer_id"]: dict(r) for r in rows(engine, db.overhaul_offers_table)}
+    counts = accounts.delete_user_data(UID)
+
+    assert [r["overhaul_id"] for r in rows(engine, db.overhauls_table)] == ["ovh-other"]
+    for tbl in OVERHAUL_CHILDREN:
+        assert {r["overhaul_id"] for r in rows(engine, tbl)} == {"ovh-other"}, tbl.name
+    assert counts["overhauls_deleted"] == 2
+    assert counts["overhaul_offers_counterparty_anonymized"] == 3
+    offers = {r["offer_id"]: dict(r) for r in rows(engine, db.overhaul_offers_table)}
+    assert offers["of-unrelated"] == before["of-unrelated"]
+    assert offers["of-neighbour"] == before["of-neighbour"]       # exact ids, never a prefix
+    for oid in ("of-sleeper", "of-alias", "of-liked"):
+        offer = offers[oid]
+        assert offer["counterparty_user_id"] == PLACEHOLDER
+        assert offer["counterparty_username"] == PLACEHOLDER
+        assert offer["evidence_json"] is None
+        assert offer["decision"] == before[oid]["decision"]
+        assert json.loads(offer["card_json"]) == {
+            "offer_id": oid, "target_user_id": PLACEHOLDER, "target_username": PLACEHOLDER,
+            "give": [{"id": "p1"}], "receive": [{"id": "p2"}], "fairness_score": 0.9,
+            # legal's blended-scalar test: surplus_margin (mismatch_score) is
+            # nulled on every card of the partner, and composite_score, its
+            # copy on the owner arms, with it.
+            "mismatch_score": None, "composite_score": None,
+            "model_arm": "owner_v2_bilateral", "selection_coverage": "full", "basis": "divergence",
+            "match_context": {"owner_benefits": ["outlook"],
+                              "support_kind": "interpretable_support_not_probability"}}
+    # A passed offer keeps the hash that stops it coming back; an undecided one
+    # gets a fresh one, so regeneration can't revive the scrubbed row.
+    assert offers["of-sleeper"]["package_hash"] == "sha1-of-sleeper"
+    assert offers["of-liked"]["package_hash"] == "sha1-of-liked"
+    assert offers["of-alias"]["package_hash"].startswith("redacted_")
+    # A liked or undecided offer is retired the native way: stale is never sent
+    # (the placeholder resolves to no roster), and a refresh rebuilds it.
+    assert {oid: offers[oid]["availability"] for oid in ("of-sleeper", "of-alias", "of-liked")} == {
+        "of-sleeper": "fresh", "of-alias": "stale", "of-liked": "stale"}
+    assert {r["attempt_id"] for r in rows(engine, db.overhaul_attempts_table)} == {"at-ovh-other", "at-sent"}
+    roadmap = rows(engine, db.overhaul_roadmaps_table)[0]
+    assert json.loads(roadmap["summary_json"]) == {
+        "counterparties": [PLACEHOLDER, "unrelated", PLACEHOLDER, neighbour], "score": 3}
+    # The scrubbed offer's counterparty-side blocker no longer names the team
+    # (QA P2-1); its own-side blocker and another offer's are untouched.
+    assert json.loads(roadmap["compat_json"]) == {"blockers": [
+        dict(blocked, message="A player in this trade is no longer on the other manager’s roster, "
+                              "so nothing was sent. Find a new trade."),
+        own_side, other_team]}
+    assert counts["overhaul_roadmaps_counterparty_anonymized"] == 1
+    # Nothing that names the owner is left in any overhaul table (the
+    # neighbour's own id aside).
+    residue = json.dumps([dict(r) for t in (db.overhauls_table, *OVERHAUL_CHILDREN)
+                          for r in rows(engine, t) if r.get("offer_id") != "of-neighbour"], default=str)
+    for marker in (UID, ALIAS, OWNER_NAME, "sha1-of-alias", "1234", "1500"):
+        assert not re.search(re.escape(marker) + r"(?![-\w])", residue), marker
+
+
+def test_deleting_a_sleeper_coowner_leaves_the_primary_owners_offers_alone(engine):
+    """A Sleeper co-owner's overhaul carries the roster's PRIMARY owner as
+    league_user_id (session_input.py:99). Deleting the co-owner must not touch
+    offers naming that live person (release-lead #540 QA P1)."""
+    co, primary = "co-owner", "primary-owner"
+    with engine.begin() as conn:
+        for uid in (co, primary):
+            conn.execute(insert(db.users_table).values(sleeper_user_id=uid))
+        _overhaul(conn, "ovh-co", co, primary)
+        _children(conn, "ovh-co")
+        _overhaul(conn, "ovh-primary", primary, primary)
+        _children(conn, "ovh-primary")
+        _overhaul(conn, "ovh-other", OTHER, OTHER)
+        seed(conn, db.overhaul_offers_table, "to-primary", overhaul_id="ovh-other",
+             offer_id="to-primary", package_hash="h-to-primary", counterparty_user_id=primary,
+             counterparty_username="Primary's team", decision="undecided",
+             card_json=json.dumps({"target_user_id": primary, "mismatch_score": 3.0}))
+        seed(conn, db.overhaul_roadmaps_table, "rm-other", overhaul_id="ovh-other",
+             summary_json=json.dumps({"counterparties": [primary]}))
+    before = {t.name: [dict(r) for r in rows(engine, t)] for t in (db.overhauls_table, *OVERHAUL_CHILDREN)}
+    counts = accounts.delete_user_data(co)
+    after = {t.name: [dict(r) for r in rows(engine, t)] for t in (db.overhauls_table, *OVERHAUL_CHILDREN)}
+    assert counts["overhauls_deleted"] == 1
+    assert counts["overhaul_offers_counterparty_anonymized"] == 0
+    for name, rows_before in before.items():
+        assert [r for r in rows_before if r["overhaul_id"] != "ovh-co"] == after[name], name
+
+
+def test_a_minted_id_in_other_overhauls_snapshots_and_recovery_becomes_the_placeholder(engine):
+    """ESPN/MFL grids can key a snapshot's rosters, and name a recovery pick's
+    holder, by the importer's Fleeced-minted id: that names the person, so it
+    goes (as in draft_picks). Platform ids stay."""
+    deleted = "entry:espn:{5EED0000-AAAA-BBBB-CCCC-DDDDEEEEFFFF}"
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id=deleted))
+        _overhaul(conn, "ovh-espn", OTHER, OTHER)
+        _overhaul(conn, "ovh-sleeper", OTHER, OTHER)
+        ovh = db.overhauls_table
+        conn.execute(ovh.update().where(ovh.c.overhaul_id == "ovh-espn").values(
+            snapshot_json=json.dumps({"season": 2026, "my_roster_id": 3,
+                                      "rosters": {OTHER: ["p1"], deleted: ["p2", "pk_1"], UID: ["p3"],
+                                                  deleted + "-2": ["p4"]}}),   # a neighbouring entry id
+            recovery_json=json.dumps({"state": "missing_with_known_holder", "pick_id": "pk_1",
+                                      "holder_user_id": deleted, "holder_username": "Their Team"})))
+        conn.execute(ovh.update().where(ovh.c.overhaul_id == "ovh-sleeper").values(
+            snapshot_json=json.dumps({"rosters": {OTHER: ["p1"], UID: ["p3"]}}),
+            recovery_json=json.dumps({"holder_user_id": UID, "holder_username": "pub"})))
+    before = {r["overhaul_id"]: dict(r) for r in rows(engine, db.overhauls_table)}
+    counts = accounts.delete_user_data(deleted)
+    after = {r["overhaul_id"]: dict(r) for r in rows(engine, db.overhauls_table)}
+    assert json.loads(after["ovh-espn"]["snapshot_json"]) == {
+        "season": 2026, "my_roster_id": 3,
+        "rosters": {OTHER: ["p1"], UID: ["p3"], deleted + "-2": ["p4"], PLACEHOLDER: ["p2", "pk_1"]}}
+    assert json.loads(after["ovh-espn"]["recovery_json"]) == {
+        "state": "missing_with_known_holder", "pick_id": "pk_1",
+        "holder_user_id": PLACEHOLDER, "holder_username": PLACEHOLDER}
+    assert after["ovh-sleeper"] == before["ovh-sleeper"]
+    assert counts["overhaul_snapshots_anonymized"] == 1
+    # Deleting the Sleeper-keyed user leaves their public Sleeper id in others'
+    # snapshots (platform data, as on Sleeper pick grids).
+    assert accounts.delete_user_data(UID)["overhaul_snapshots_anonymized"] == 0
+    assert {r["overhaul_id"]: dict(r) for r in rows(engine, db.overhauls_table)}["ovh-sleeper"] \
+        == before["ovh-sleeper"]
+
+
+def test_export_carries_own_overhauls_without_private_evidence(engine):
+    with engine.begin() as conn:
+        _overhaul(conn, "ovh-own", UID, UID)
+        _overhaul(conn, "ovh-other", OTHER, OTHER)
+        _children(conn, "ovh-other")
+        _children(conn, "ovh-own")
+        conn.execute(db.overhaul_offers_table.update().where(
+            db.overhaul_offers_table.c.overhaul_id == "ovh-own").values(
+            counterparty_user_id=OTHER, evidence_json=json.dumps({"counterparty": {"x": 1}}),
+            card_json=json.dumps({"target_user_id": OTHER, "reasons": ["r"],
+                                  "match_context": {"owner_benefits": ["a"],
+                                                    "counterparty_benefits": ["b"]}})))
+    tables = accounts.export_user_data(UID)["tables"]
+    assert [r["overhaul_id"] for r in tables["overhauls"]] == ["ovh-own"]
+    for tbl in OVERHAUL_CHILDREN:
+        assert [r["overhaul_id"] for r in tables[tbl.name]] == ["ovh-own"], tbl.name
+    offer = tables["overhaul_offers"][0]
+    assert "evidence_json" not in offer
+    assert json.loads(offer["card_json"]) == {"target_user_id": OTHER,
+                                              "match_context": {"owner_benefits": ["a"]}}
+
+
+def _code_without_comments(source):
+    return " ".join(t.string for t in tokenize.generate_tokens(io.StringIO(source).readline)
+                    if t.type != tokenize.COMMENT)
+
+
+# A column that can name a person: a user id under any name, an owner, a
+# counterparty, holder, seller, recipient, partner, member or author, a
+# username, or a *_by (release-lead #540 QA P3: owner_id, counterparty and
+# holder escaped a *user_id*-only scan).
+_PERSON_COLUMN = re.compile(r"user_id|owner|counterparty|holder|seller|recipient|partner|member"
+                            r"|author|username|(^|_)by$")
+
+
+def test_every_table_with_a_user_id_column_is_handled_in_accounts():
+    """The overhaul gap: a table with a column that can name a person
+    (_PERSON_COLUMN) that accounts.py never names in code (comments stripped)
+    escapes deletion and export alike. Name it there: delete it, anonymize it,
+    or keep it with a reason."""
+    code = _code_without_comments(inspect.getsource(accounts))
+    unnamed = [t.name for t in db.metadata.sorted_tables
+               if any(_PERSON_COLUMN.search(c.name) for c in t.columns)
+               and not re.search(rf"\b{t.name}_table\b|[\"']{t.name}[\"']", code)]
+    assert unnamed == []
+
+
+# ── Legal R28.22 d2: overhauls whose owner account no longer exists ──────────
+
+def test_orphaned_overhauls_are_deleted_and_live_owners_kept(engine, caplog):
+    made = "2026-09-10T00:00:00+00:00"
+    with engine.begin() as conn:
+        def owned(oid, account, league, created_at="not-a-time"):
+            seed(conn, db.overhauls_table, oid, overhaul_id=oid, account_user_id=account,
+                 league_user_id=league, created_at=created_at)
+            _children(conn, oid)
+        # Gone: no users row, durable session or accounts row names the owner.
+        owned("ovh-orphan", "deleted-before-the-fix", "deleted-before-the-fix")
+        conn.execute(insert(db.users_table).values(sleeper_user_id="deleted-before-the-fix-2"))  # a prefix neighbour
+        owned("ovh-entry-orphan", "entry:mfl:61408.f0003", "entry:mfl:61408.f0003")
+        owned("ovh-coowner-orphan", "gone-coowner", UID)   # its league id is a live primary owner
+        # Gone too: a new account under a reused id, created long after the overhaul.
+        conn.execute(insert(db.users_table).values(sleeper_user_id="resigned",
+                                                   created_at="2026-10-20T00:00:00+00:00"))
+        owned("ovh-resigned", "resigned", "resigned", made)
+        # Live.
+        owned("ovh-live", UID, UID)                                    # a users row
+        owned("ovh-live-coowner", OTHER, "absent-primary")             # liveness is the owner's, not the league id's
+        owned("ovh-session-only", "session-only", "session-only")      # a durable session
+        seed(conn, db.sessions_table, "session-only", user_id="session-only")
+        conn.execute(insert(db.accounts_table).values(account_id="live-acct", created_at="2026-09-04"))
+        owned("ovh-acct", accounts.account_user_id("live-acct"), accounts.account_user_id("live-acct"))
+        conn.execute(insert(db.accounts_table).values(account_id="bound", sleeper_user_id="bound-sleeper",
+                                                      created_at="2026-09-04"))
+        owned("ovh-bound", "bound-sleeper", "bound-sleeper")           # moved by a bind, users row gone
+        conn.execute(insert(db.users_table).values(sleeper_user_id="fresh-user",
+                                                   created_at="2026-09-10T00:10:00+00:00"))
+        owned("ovh-fresh", "fresh-user", "fresh-user", made)           # the background users-row write
+        # Live although their users row landed late (its best-effort writes
+        # failed): an older durable session, or an older account (QA case 994).
+        late = "2026-10-20T00:00:00+00:00"
+        conn.execute(insert(db.users_table).values(sleeper_user_id="late-row", created_at=late))
+        seed(conn, db.sessions_table, "late-row", user_id="late-row", created_at="2026-09-01T00:00:00+00:00")
+        owned("ovh-late-session", "late-row", "late-row", made)
+        conn.execute(insert(db.accounts_table).values(account_id="early", created_at="2026-09-01"))
+        conn.execute(insert(db.users_table).values(sleeper_user_id=accounts.account_user_id("early"),
+                                                   created_at=late))
+        owned("ovh-late-acct", accounts.account_user_id("early"), accounts.account_user_id("early"), made)
+        # A newer session doesn't vouch for an old plan: a real re-signup.
+        conn.execute(insert(db.users_table).values(sleeper_user_id="resigned-2", created_at=late))
+        seed(conn, db.sessions_table, "resigned-2", user_id="resigned-2", created_at=late)
+        owned("ovh-resigned-2", "resigned-2", "resigned-2", made)
+        # Child rows whose overhaul is already gone.
+        _children(conn, "ovh-ghost")
+    kept = {"ovh-live", "ovh-live-coowner", "ovh-session-only", "ovh-acct", "ovh-bound", "ovh-fresh",
+            "ovh-late-session", "ovh-late-acct"}
+    with caplog.at_level("DEBUG"):
+        counts = accounts.delete_orphaned_overhauls()
+    assert counts == {"overhauls": 5, "child_rows": 5 * 4 + 4}
+    assert {r["overhaul_id"] for r in rows(engine, db.overhauls_table)} == kept
+    for tbl in OVERHAUL_CHILDREN:
+        assert {r["overhaul_id"] for r in rows(engine, tbl)} == kept, tbl.name
+    assert "ovh-" not in caplog.text                                   # counts only, never ids
+    assert accounts.delete_orphaned_overhauls() == {"overhauls": 0, "child_rows": 0}   # idempotent
+
+
+def test_the_orphan_sweep_runs_once_per_process_and_logs_only_a_count(monkeypatch, caplog):
+    from backend import server
+    calls = []
+    monkeypatch.setattr(server, "_orphaned_overhauls_swept", False)
+
+    def fail_then_count():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("[SQL: DELETE ...] [parameters: ('ovh_secret_1', 'ovh_secret_2')]")
+        return {"overhauls": 3, "child_rows": 7}
+    monkeypatch.setattr(accounts, "delete_orphaned_overhauls", fail_then_count)
+    with caplog.at_level("DEBUG"):
+        for _ in range(3):
+            server._sweep_orphaned_overhauls_once()
+    assert len(calls) == 2                       # a failure retries; a success ends it
+    assert "orphaned-overhaul sweep failed (RuntimeError)" in caplog.text
+    assert "ovh_secret" not in caplog.text       # a DB error's parameters never reach the log
+    assert ("Deleted 3 overhaul(s) whose owner account no longer exists, and 7 row(s) under them"
+            in caplog.text)
+
+
+def test_the_cleanup_loop_runs_the_orphan_sweep():
+    from backend import server
+    loop = _code_without_comments(inspect.getsource(server._cleanup_loop))
+    assert "_sweep_orphaned_overhauls_once ( )" in loop

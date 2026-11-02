@@ -1261,6 +1261,7 @@ Plan of record: [00-platform-foundation.md](plans/monetization/00-platform-found
 - **Only user-initiated calls open anything.** A call made with `background: true` (a poll, a prefetch, an auto-start) gets the rejection and opens nothing.
 - **A session the server reported unverified** (`verification.session_verified === false`, not a demo) never sees the paywall or the trial offer: every paywall entry routes to the VerifySheet. After verifying, the original non-send call is sent once more and the server decides; a send is never re-sent without a fresh tap.
 - **Web:** the 402 handler and the continue-on-iPhone state are onboarding-eng / eng-web's (not M1); the same `gate` enum applies.
+- **The Founding GMs window and `founder`** (#393 M3, iOS; S1 `club {name, closes_at, open}` on `/api/paywall/config`, `founder` on `/api/me/entitlements`). The one-time welcome shows only after a successful purchase while `club.open === true` **and** the device clock is before `closes_at` (a config cached before the cut-off can't welcome a purchase after it); once per user (AsyncStorage `ftf_founder_welcome_shown_<user_id>`). `closes_at` decides; it is never rendered (no countdown). `founder` is **display only** (Settings › Subscription's club lines), never a gate or routing input, and a blanked (unverified) response reads as not a member. Settings › Subscription shows an unverified session one row, "Verify this session first", whatever the account holds (R28.9 3f).
 
 ### Roster coverage semantics (2026-09-04; dark)
 
