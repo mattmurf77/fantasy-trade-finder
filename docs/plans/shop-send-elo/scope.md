@@ -112,6 +112,7 @@ The rest is unchanged:
 
 - **CI green:** `backend-tests`, `mobile-typecheck`, `testid-lint`.
 - **Evidence recorded:** TEST_LEDGER.
+- **O3, a release precondition for BL-001's knob, not a merge gate** (head-eng / models-lead, 11-01). Before release-lead writes `bakeoff_freeze_trade_k = 0`, `test_a_generic_pick_takes_no_signal_from_a_shop_send` must run and pass on a sha carrying **both #389 and #577**, and its sabotage (`pick_values.strip_generic_pick_pair` made the identity) must go red. Until #389 merges it skips here. It was verified on 11-01 against #389's diff in a throwaway worktree: it passed, and went red with the strip disabled. models-lead needs no R-G entry for #577: Elo is at parity with the queue, and a sent but unliked card trains nothing.
 - **Order:** after #574, which carries the client tag. There is no binary dependency: until this lands, the tag is ledgered as `deck`.
 - **Deploy before the 11-06 binary reaches users** (analytics-lead's condition). #574 also passes the Shop idea's impression, so without this PR's allow-list every Shop send lands in `trade_proposals` as `deck` and inflates the deck's confirmed sends. Shop sends would also emit no `trade_proposed`; if the binary reaches users first, that needs a SERIES_BREAKS row dated that day. analytics-lead's confirmed-send read is `trade_proposals WHERE source = 'shop'`, which needs `trade.valuation_telemetry` on (it is, via env, since 09-05).
 - **Merge hold:** none left. analytics-lead's `props.decision` answer is on record.
