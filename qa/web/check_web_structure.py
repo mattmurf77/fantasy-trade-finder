@@ -19,6 +19,8 @@ import argparse
 import json
 import re
 import sys
+from datetime import datetime
+from html import unescape
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -334,6 +336,788 @@ def run() -> int:
             "hardcoded 2024-era roster rendered before the API responds")
     r.check("HYG-excluded-documented", set(EXCLUDED) <= set(EXCLUDED),
             f"{len(EXCLUDED)} pages excluded with reasons")
+
+    # ── POL: launch policy, contact and FAQ pages (#354 M7, P28, SUP-M4) ─
+    # Text: legal-lead-drafts.md Parts 1-3 (privacy, terms), Part 5 (R28:
+    # terms §14 subscriptions and the privacy RevenueCat lines) and
+    # marketing-lead-copy.md (§1b c1-c8, §2 FAQ). Both are agent-org working
+    # files (docs/plans/org-bringup/leads/), not tracked in this repo, so the
+    # strings pinned below are the repo's copy of legal's text; changes to
+    # them come through legal-lead. One support address,
+    # written with an ASCII @, always a real mailto. The placeholder check is
+    # meant to fail until [OPERATOR NAME], Part 5's {…} fill values and its
+    # ⟪VERIFY⟫ mark are resolved: it is the merge blocker for publishing
+    # unfinished legal text. POL-effective-date pins the filled date.
+    SUPPORT_EMAIL = "fleecedapp@gmail.com"
+    POLICY = ("privacy.html", "terms.html")
+    SUPPORT_PAGES = ("privacy.html", "terms.html", "contact.html", "faq.html")
+    MAILTO_A = re.compile(r'<a\b[^>]*href=["\']mailto:' + re.escape(SUPPORT_EMAIL)
+                          + r'["\'][^>]*>\s*' + re.escape(SUPPORT_EMAIL) + r'\s*</a>', re.I)
+    # Bracketed placeholders and review tags: [OPERATOR NAME], [EFFECTIVE DATE],
+    # [DEPLOY DATE], [STATE], [PRO], [M11 ALT], [APP STORE URL], and the copy
+    # file's [new] / [R10 …] / [R22.1 edit …] / [goes live …] / [legal …] tags.
+    PLACEHOLDER = re.compile(r"\[(?:[A-Z][A-Z0-9 _/.-]*|new|goes live[^\]]*|R\d[^\]]*|legal[^\]]*)\]")
+    # Legal Part 5's fill values: {December 31, 2026}, {$4.99 a month or …}.
+    # No visible text on these pages uses braces otherwise; styles and scripts
+    # are stripped by visible().
+    FILL = re.compile(r"\{[^{}]+\}")
+    BLOCK_TAG = re.compile(r"</?(?:p|li|ul|ol|h[1-6]|div|details|summary|section|main|form|br)\b[^>]*>", re.I)
+
+    def visible(page: str) -> str:
+        """Head text + body text a reader can see: no comments, styles or scripts."""
+        src = strip_comments(all_sources[page])
+        return strip_style_and_script(head_of(src) + body_of(src))
+
+    # Every page the binary links to (App Review taps Terms and Privacy, and the
+    # FAQ and contact pages are linked from them), not only the two policies:
+    # #549's sweep missed faq.html's "native iOS app is in TestFlight beta"
+    # (release-lead #549 QA P2; head-eng 2026-10-31).
+    for page in SUPPORT_PAGES:
+        text = visible(page)
+        bad = [label for label, pat in (
+            ('"Fantasy Trade Finder"', r"Fantasy\s+Trade\s+Finder"),
+            ('"hobby"', r"\bhobby\b"),
+            ('"beta"', r"\bbeta\b"),
+        ) if re.search(pat, text, flags=re.I)]
+        r.check(f"POL-no-stale-claims[{page}]", not bad,
+                f"found {', '.join(bad)} (M7-AC1, D-12: the allow-list is empty)" if bad else "none")
+
+    # Reading links on the policy pages are chalk + underline, the same rule as
+    # contact's `.status a` and FAQ's `.faq-body a` (design-lead, #354 PR 3 link
+    # styles). Ice is for actions: no link selector or inline link style may set
+    # an ice `color` (an ice hover underline, text-decoration-color, is allowed).
+    ICE = re.compile(r"var\(\s*--(?:ice|ice-press|accent)\s*\)|#56d9ec|#3fc2d6", re.I)
+    LINK_SEL = re.compile(r"(?:^|[\s>+~])a(?:[:.\[#][^\s>+~]*)?$")
+    COLOR_DECL = re.compile(r"(?:^|;)\s*color\s*:\s*([^;]+)", re.I)
+    def link_styles(page: str):
+        css = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", strip_comments(all_sources[page]), re.S | re.I))
+        rules = [(sel.strip(), decl) for sels, decl in re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+                 for sel in sels.split(",")]
+        body = body_of(all_sources[page])
+        # A rule styles a link when its last compound names `a`, or a class
+        # some <a> on the page carries (release-lead #373 QA P3).
+        a_classes = {c for m in re.findall(r"<a\b[^>]*\bclass=[\"']([^\"']*)", body, re.I) for c in m.split()}
+        def styles_link(sel: str) -> bool:
+            last = re.split(r"[\s>+~]+", sel.strip())[-1]
+            return bool(LINK_SEL.search(sel)) or any(
+                re.search(r"\." + re.escape(c) + r"(?![\w-])", last) for c in a_classes)
+        ice_links = [sel for sel, decl in rules if styles_link(sel)
+                     and any(ICE.search(v) for v in COLOR_DECL.findall(decl))]
+        inline = [m for m in re.findall(r"<a\b[^>]*\bstyle=[\"']([^\"']*)", body, re.I)
+                  if any(ICE.search(v) for v in COLOR_DECL.findall(m))]
+        inline += [m for m in re.findall(r"<font\b[^>]*\bcolor=[\"']?([^\"'\s>]*)", body, re.I) if ICE.search(m)]
+        return rules, ice_links, inline
+
+    for page in POLICY:
+        rules, ice_links, inline = link_styles(page)
+        base = [decl for sel, decl in rules if sel == "a"]
+        base_ok = len(base) == 1 \
+            and any(re.search(r"var\(\s*--(?:chalk|text)\s*\)", v) for v in COLOR_DECL.findall(base[0])) \
+            and re.search(r"text-decoration\s*:\s*underline", base[0], re.I)
+        r.check(f"POL-reading-links-chalk[{page}]", base_ok and not ice_links and not inline,
+                ("ice-coloured link rule(s): " + ", ".join(ice_links) if ice_links else
+                 f"{len(inline)} inline ice link style(s)" if inline else
+                 "the base `a` rule is not chalk + underline") if not (base_ok and not ice_links and not inline)
+                else "reading links chalk + underline, no ice text links")
+
+    # The FAQ and contact pages have no base `a` rule, but their links follow
+    # the same rule: no ice text colour (design-lead, #373 QA P3-6, the FAQ
+    # footer's mailto).
+    for page in ("faq.html", "contact.html"):
+        _, ice_links, inline = link_styles(page)
+        r.check(f"POL-no-ice-links[{page}]", not ice_links and not inline,
+                ("ice-coloured link rule(s): " + ", ".join(ice_links) if ice_links else
+                 f"{len(inline)} inline ice link style(s)") if (ice_links or inline)
+                else "no ice text links")
+
+    for page in SUPPORT_PAGES:
+        raw = all_sources[page]
+        r.check(f"POL-no-fullwidth-at[{page}]", "\uff20" not in raw,
+                f"{raw.count(chr(0xFF20))}× U+FF20 (full-width @) — the address must use ASCII @"
+                if "\uff20" in raw else "none")
+
+        text = visible(page)
+        marks = sorted(set(PLACEHOLDER.findall(text)) | set(FILL.findall(text))
+                       | {m for m in ("⟪", "⟫") if m in text})
+        r.check(f"POL-no-placeholders[{page}]", not marks,
+                "unfilled placeholder / editorial mark: " + ", ".join(marks) if marks else "none")
+
+        body = strip_style_and_script(strip_comments(body_of(raw)))
+        hrefs = re.findall(r'href=["\']mailto:([^"\'?]*)', body, flags=re.I)
+        wrong = [h for h in hrefs if h != SUPPORT_EMAIL]
+        leftover = MAILTO_A.sub("", body)
+        bare = len(re.findall(re.escape(SUPPORT_EMAIL), leftover, flags=re.I))
+        anchors = len(MAILTO_A.findall(body))
+        need = 2 if page == "contact.html" else 1
+        r.check(f"POL-mailto[{page}]", not wrong and bare == 0 and anchors >= need,
+                (f"mailto to another address: {wrong}" if wrong else
+                 f"{bare} visible {SUPPORT_EMAIL} not inside its mailto link" if bare else
+                 f"{anchors} mailto link(s), want ≥ {need}") if (wrong or bare or anchors < need)
+                else f"{anchors} mailto link(s), every visible address linked")
+
+        missing = []
+        for seg in BLOCK_TAG.split(body):
+            if re.search(r"contact[\s-]form", re.sub(r"<[^>]+>", "", seg), flags=re.I) \
+                    and not re.search(r'href=["\']/contact\.html["\']', seg):
+                missing.append(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", seg)).strip()[:60])
+        r.check(f"POL-contact-form-linked[{page}]", not missing,
+                "\"contact form\" without a /contact.html link: " + " | ".join(missing)
+                if missing else "every mention links /contact.html")
+
+    privacy_text = visible("privacy.html")
+    r.check("POL-no-settings-feedback[privacy.html]",
+            not re.search(r"Settings\s*(?:→|&rarr;|->)\s*feedback", privacy_text, flags=re.I),
+            'still points at "Settings → feedback" (M7-AC4)')
+
+    # Legal Part 5 (R28). Pinned per section, so a paste that drops, moves or
+    # renumbers a subscription disclosure goes red.
+    def plain(fragment: str) -> str:
+        text = unescape(re.sub(r"<[^>]+>", " ", fragment)).replace("’", "'")
+        return re.sub(r"\s+", " ", text).strip()
+
+    def numbered(page: str) -> list[tuple[str, str]]:
+        """(number, html) per numbered <h2>, each running to the next <h2>."""
+        body = strip_style_and_script(strip_comments(body_of(all_sources[page])))
+        parts = re.split(r"(<h2\b[^>]*>.*?</h2>)", body, flags=re.S | re.I)
+        out = []
+        for i in range(1, len(parts) - 1, 2):
+            m = re.match(r"(\d+)\.", plain(parts[i]))
+            if m:
+                out.append((m.group(1), parts[i] + parts[i + 1]))
+        return out
+
+    terms_secs = numbered("terms.html")
+    s14 = dict(terms_secs).get("14", "")
+    s14_text = plain(s14)
+    subs = [int(n) for n in re.findall(r"<strong>\s*14\.(\d+)\b", s14)]
+    problems = []
+    if [n for n, _ in terms_secs] != [str(n) for n in range(1, 15)]:
+        problems.append(f"sections {[n for n, _ in terms_secs]}, want 1-14 in order")
+    if not s14_text.startswith("14. Subscriptions, free trial and billing"):
+        problems.append('no "14. Subscriptions, free trial and billing" heading')
+    if subs != list(range(1, 12)):
+        problems.append(f"§14 subsections {subs}, want 1-11 in order (14.11 Tips, legal R28.26)")
+    problems += [f'§14 lacks "{t}"' for t in (
+        "Deleting the app or your Fleeced account does not cancel your subscription",
+        "reportaproblem.apple.com",
+        "Media Services Terms",
+    ) if t not in s14_text]
+    if s14_text.count("at least 24 hours before") < 2:
+        problems.append('"at least 24 hours before" not in both 14.3 (trial) and 14.4 (renewal)')
+    r.check("POL-terms-subscriptions[terms.html]", not problems,
+            "; ".join(problems) if problems else "§14 with 14.1-14.11 and the cancel/refund/Apple lines")
+
+    priv = dict(numbered("privacy.html"))
+    item = re.search(r"<li>\s*<strong>Subscriptions and purchases\.</strong>(.*?)</li>",
+                     priv.get("1", ""), flags=re.S)
+    providers = re.search(r"Service providers that process data for us:.*?<ul>(.*?)</ul>",
+                          priv.get("4", ""), flags=re.S)
+    problems = [label for label, ok in (
+        ('§1 "Subscriptions and purchases" item naming RevenueCat',
+         bool(item) and "RevenueCat" in item.group(1)),
+        ("RevenueCat in the §4 service providers",
+         bool(providers) and "<strong>RevenueCat:</strong>" in providers.group(1)),
+        ('§5 "Subscription and purchase records" line',
+         "Subscription and purchase records:" in plain(priv.get("5", ""))),
+        ("§6 \"doesn't cancel an active subscription\" line",
+         "doesn't cancel an active subscription" in plain(priv.get("6", ""))),
+    ) if not ok]
+    r.check("POL-privacy-revenuecat[privacy.html]", not problems,
+            "missing: " + "; ".join(problems) if problems else "RevenueCat in §1, §4, §5 and §6")
+
+    # R28.9: service providers (RevenueCat among them) may process data outside
+    # the US, so the old US-only processing sentence must not come back.
+    us_only = re.search(r"We and our service providers process data in the United States",
+                        plain(visible("privacy.html")), flags=re.I)
+    r.check("POL-no-us-only-processing[privacy.html]", not us_only,
+            'still says "We and our service providers process data in the United States" (R28.9)'
+            if us_only else "none")
+
+    # Legal R28.12 row 1, R28.15 (2026-10-26) and R28.16 (2026-10-27), pinned
+    # word for word. Each sentence must appear verbatim in the page's rendered
+    # text, whitespace-normalized: block tags become a space and inline tags
+    # (<strong>, <a>) vanish, so "email <a …>fleecedapp@gmail.com</a>." reads
+    # as it renders. The text is hard-coded from the rulings' tables and
+    # legal-lead-drafts.md Parts 1-2; any edit to it comes back through
+    # legal-lead.
+    def render_text(html: str) -> str:
+        text = re.sub(r"<[^>]+>", "", BLOCK_TAG.sub(" ", html))
+        return re.sub(r"\s+", " ", unescape(text).replace("’", "'")).strip()
+
+    def rendered(page: str) -> str:
+        return render_text(strip_style_and_script(strip_comments(body_of(all_sources[page]))))
+
+    R28_15 = {
+        "privacy.html": (
+            # R28.16 added "the first time you use it" to R28.15's sentence.
+            ('§1 "How you sign in" lead',
+             'You can sign in with Apple, with your Sleeper username, or, where available, with your '
+             'ESPN or MyFantasyLeague (MFL) login. Each method creates a Fleeced account with an '
+             'internal account ID the first time you use it. You can also connect ESPN and MFL leagues '
+             'after you sign in (see "Platform connections" below). Depending on the method, we store:'),
+            ("§1 ESPN sub-item",
+             "ESPN: your ESPN member ID (called SWID), which identifies your account. You log in on "
+             "ESPN's own page inside the app, and we check the login with ESPN (see \"Platform "
+             'connections" below).'),
+            ("§1 MFL sub-item",
+             "MFL: your MFL username, which identifies your account. Your MFL password is used once "
+             'to sign in to MFL and is never stored (see "Platform connections" below).'),
+            ("§5 SWID clause",
+             "Platform connections (Sleeper, ESPN, MFL): the sign-in tokens, cookies and sessions are "
+             "kept encrypted (except ESPN's SWID cookie, your member ID, which is stored as is) until "
+             "any of these happens:"),
+            ("§6 request line",
+             "Tell us how you sign in (Apple, Sleeper, ESPN or MFL) and how to find your account: your "
+             "Sleeper or MFL username, your ESPN league ID and team name, or the email on your Apple ID."),
+        ),
+        "terms.html": (
+            ("§2 sign-in paragraph",
+             "You can sign in with Apple, with a Sleeper username, or, where available, with your ESPN "
+             "or MyFantasyLeague login. You can also connect ESPN and MyFantasyLeague leagues after you "
+             "sign in."),
+            ("§14.1 subscribe line",
+             "To subscribe, you need a verified account: Sign in with Apple, a verified Sleeper "
+             "sign-in, or, where available, an ESPN or MFL sign-in."),
+        ),
+        "contact.html": (
+            ("c3",
+             "To find your account, say how you sign in (Apple, Sleeper, ESPN or MFL) and your Sleeper "
+             "or MFL username, or for ESPN your league ID and team name. Requests are acted on only "
+             "when they can be verified, so send this while signed in, or email fleecedapp@gmail.com."),
+        ),
+        "faq.html": (
+            ("Q6 MFL storage",
+             "Your password goes to MFL to sign you in. It's never stored. Your MFL username and the "
+             "encrypted session MFL returns are kept."),
+        ),
+    }
+    for page, sentences in R28_15.items():
+        text = rendered(page)
+        missing = [label for label, s in sentences if " ".join(s.split()) not in text]
+        r.check(f"POL-r28-15[{page}]", not missing,
+                "not verbatim (legal R28.15): " + "; ".join(missing) if missing
+                else f"{len(sentences)} R28.15 sentence(s) verbatim")
+
+    # R28.16, from the approved ESPN/MFL sign-in design: ESPN sign-in keeps only
+    # the SWID; cookies (ESPN) and the session (MFL) are kept only on import;
+    # the cross-check against another member's SWID is disclosed; disconnecting
+    # deletes the import credential and the sign-in identity stays until account
+    # deletion. Terms §2 gains "first controller wins".
+    R28_16 = {
+        "privacy.html": (
+            ('§1 "League data" ESPN sign-ins',
+             "We use leaguemates' data only to run trade discovery and league features for members of "
+             'that league, and to confirm ESPN sign-ins (see "Platform connections" below).'),
+            ("§1 ESPN lead",
+             "ESPN. You log in on ESPN's own page inside the app; we never see your password."),
+            ("§1 ESPN sign-in",
+             "Signing in with ESPN: we use ESPN's sign-in cookies to confirm that your login owns the "
+             "team you pick, and we keep only your ESPN member ID (called SWID) to recognize you next "
+             "time. To confirm ownership, we may also check your cookies against another league "
+             "member's ESPN member ID, which members of that league can see. Nothing from that check "
+             "is kept."),
+            ("§1 ESPN import",
+             "Importing an ESPN league (after you sign in, or when you connect ESPN in Settings → "
+             "Leagues): we keep two ESPN sign-in cookies, espn_s2 (stored encrypted) and SWID (your "
+             "ESPN member ID, stored as is). We use them to import your ESPN leagues, to send trades "
+             "you approve and, where available, to make free-agent moves you start and confirm after "
+             "authorizing them."),
+            ("§1 ESPN disconnect",
+             "You can disconnect in Settings → Leagues, which deletes both cookies. If ESPN is how you "
+             "sign in, your ESPN member ID stays as your sign-in until you delete your account."),
+            ("§1 MFL lead",
+             "MFL. If you sign in with or connect MFL using your MFL username and password, your "
+             "password passes through our server to MFL's sign-in once, to start a session. We never "
+             "store it."),
+            ("§1 MFL sign-in",
+             "Signing in with MFL: we keep your MFL username to recognize you next time."),
+            ("§1 MFL import",
+             "Importing an MFL league (after you sign in, or when you connect MFL in Settings → "
+             "Leagues): we also keep the session MFL returns, encrypted, and use it to read your "
+             "leagues, to send trades you approve and, where available, to make free-agent moves you "
+             "start and confirm after authorizing them."),
+            ("§1 MFL disconnect",
+             "You can disconnect in Settings → Leagues, which deletes the stored session. If MFL is how "
+             "you sign in, your MFL username stays as your sign-in until you delete your account."),
+        ),
+        "terms.html": (
+            ("§2 first controller wins",
+             "An ESPN or MyFantasyLeague login opens one Fleeced account: the first one it was used to "
+             "sign in to. It stays with that account until the account is deleted. Anyone who signs in "
+             "with that login can use that account, so don't share it."),
+        ),
+    }
+    for page, sentences in R28_16.items():
+        text = rendered(page)
+        missing = [label for label, s in sentences if " ".join(s.split()) not in text]
+        r.check(f"POL-r28-16[{page}]", not missing,
+                "not verbatim (legal R28.16): " + "; ".join(missing) if missing
+                else f"{len(sentences)} R28.16 sentence(s) verbatim")
+
+    # R28.17 A2 (2026-10-27): privacy §5's platform-connection list gains a
+    # fourth removal trigger (legal-lead-drafts.md Part 1, §5), which covers
+    # the credential cleanup for verified entry users and D6's removals. Pinned
+    # as the run from the third trigger through the list's closing line, so it
+    # stays IN the "until any of these happens" list.
+    R28_17_SECTION5 = (
+        "until any of these happens: you disconnect (they're deleted immediately); your account is "
+        "deleted; we find that the platform has expired or rejected them; we remove them to protect "
+        "the owner of that platform login, for example because they were stored without proof that "
+        "the login was yours, or because the login's owner asked us to. An expired connection we "
+        "haven't used again stays stored until one of those happens.")
+    r.check("POL-r28-17[privacy.html]", R28_17_SECTION5 in rendered("privacy.html"),
+            "§5 platform connections: the fourth removal trigger isn't verbatim in the list (legal R28.17 A2)"
+            if R28_17_SECTION5 not in rendered("privacy.html")
+            else "§5 fourth removal trigger verbatim, inside the list")
+
+    # Legal R28.19's floor (2026-10-27): shipped instead of R28.20's text if
+    # the 365-day prune or the deletion redaction isn't live at deploy
+    # (head-eng confirms). §5 is unchanged. Pinned as rendered runs, so each
+    # line stays in its list and position.
+    R28_19 = (
+        ("§6 anonymized: sent proposals",
+         "trade matches keep the other side's record, with your identifier replaced by a deleted-user "
+         "placeholder; references to you in other users' sent trade proposals and \"bad trade\" flags "
+         "are cleared; feedback you sent"),
+        ("§6 may remain: suggestions already shown",
+         "Email us to have it removed; trade suggestions already shown to other users, which stay in "
+         "their records and can include your platform user ID, the players you held and the values the "
+         "suggestion used. They're deleted when that user deletes their account; public league records "
+         "on Sleeper, ESPN or MFL"),
+    )
+    priv = rendered("privacy.html")
+    priv_secs = {n: render_text(h) for n, h in numbered("privacy.html")}
+
+    # From R28.19 on, each pinned run appears exactly once on the page, inside
+    # the section its label's "§N" names (release-lead #373 QA P3): a plain
+    # `in` let a duplicated line, or a line moved to another section along
+    # with its neighbour, stay green. Runs carry a neighbour's words for
+    # position, so a copy of the line alone wouldn't repeat the whole run:
+    # every clause of 25+ characters must be on the page once, too.
+    # Clauses legal repeats word for word across lines (§5's retention
+    # formula), so they're never unique; the runs' other clauses still are.
+    SHARED_CLAUSES = {"kept while your account exists, and deleted with it."}
+
+    def once(label: str, s: str) -> bool:
+        s = " ".join(s.split())
+        sec = priv_secs.get(re.match(r"§(\d+)", label).group(1), "")
+        clauses = [c for c in re.split(r"(?<=[.;:])\s+", s) if len(c) >= 25 and c not in SHARED_CLAUSES]
+        return priv.count(s) == 1 and sec.count(s) == 1 and all(priv.count(c) == 1 for c in clauses)
+
+    missing19 = [label for label, s in R28_19 if not once(label, s)]
+    stale19 = "on other users' trade decks" in priv
+    r.check("POL-r28-19[privacy.html]", not missing19 and not stale19,
+            ("not verbatim (legal R28.19): " + "; ".join(missing19)) if missing19 else
+            "the false \"references to you on other users' trade decks… are cleared\" line is still there"
+            if stale19 else f"{len(R28_19)} R28.19 runs verbatim; the false trade-decks line gone")
+
+    # Legal R28.23 (2026-10-31). Item 2: server error reports (Sentry) in
+    # privacy §1-§4, word for word; the operator sets SENTRY_DSN only after
+    # this text is live. The §1 bullet is pinned with the end of the app
+    # Sentry bullet so it stays right after it.
+    R28_23_SENTRY = (
+        ("§1 server error reports bullet",
+         "Sentry may also record the IP address a report came from. Server error reports (Sentry). "
+         "When our server hits an error, it sends Sentry a report so we can fix it: the type of "
+         "request and the address it went to, the error and where in our code it happened, and "
+         "related lines from our server's logs. Before a report is sent, names, IDs and link codes "
+         "are taken out of the address, and personal details are taken out of the log lines. If that "
+         "can't be done, the report isn't sent. Server reports don't include your account or "
+         "platform user ID, your username, your IP address, sign-in details or the content of what "
+         "you send us. When someone sends feedback, Sentry also gets an alert with the feedback's "
+         "reference number and severity, not its text."),
+        ("§2 no-trackers line",
+         "The only third party that receives diagnostic data is Sentry, for app crashes and "
+         "performance and for server errors."),
+        ("§3 purposes line",
+         "To keep the Service working and improve it: crash and error reports, feedback, activity "
+         "events and server monitoring."),
+        ("§4 Sentry line",
+         "Sentry: receives crash and performance reports from the iOS app and error reports from "
+         "our server, as described above."),
+    )
+    stale23 = ("is Sentry, for crashes and performance.", "improve it: crash reports,",
+               "from the iOS app, as described above.")
+    missing23 = [label for label, s in R28_23_SENTRY if not once(label, s)]
+    old23 = [s for s in stale23 if s in priv]
+    r.check("POL-r28-23-sentry[privacy.html]", not missing23 and not old23,
+            ("not verbatim (legal R28.23 item 2): " + "; ".join(missing23)) if missing23 else
+            ("app-only Sentry line still there: " + "; ".join(old23)) if old23 else
+            f"{len(R28_23_SENTRY)} R28.23 Sentry lines verbatim")
+
+    # R28.23 item 3b: the share-link lines in §3, §5 and §6 come in two
+    # versions. The new one is true only once #362 is live (unguessable trade
+    # links; a sharer's matched-trade link is deleted with their account).
+    # Exactly one version ships, the one matching prod at this page's deploy;
+    # head-eng confirms which. The swap flips SHARE_362_LIVE with the text.
+    # Each version's markers are phrases only it uses; none may show while the
+    # other version ships, so a half-done swap or an early claim fails too.
+    SHARE_362_LIVE = True
+    R28_23_SHARE_MARKERS = {
+        True: ("hard to guess", "no set end date", "stops working", "which stop working",
+               "other shared trade pages"),
+        False: ("view a shared page, and shared pages",
+                "they stay available with your account link removed; email us",
+                "removed; shared trade pages stay available"),
+    }
+    R28_23_SHARE = {
+        True: (
+            ("§3 shared pages",
+             "Anyone with the link can view a shared page. Links use random codes that are hard to "
+             "guess, but anyone you send one to can pass it on. Shared pages stay available so links "
+             "keep working (see section 5)."),
+            ("§5 shared pages",
+             "Shared trade pages and share snapshots: kept with no set end date, so links keep "
+             "working. A link you shared to a matched trade stops working if you delete your account; "
+             "the other manager's own link to that trade isn't affected. Other shared pages stay "
+             "available with your account link removed. Email us to remove one."),
+            ("§6 removes",
+             "free-agent move authorizations and records; links you shared to matched trades, which "
+             "stop working. What is anonymized instead,"),
+            ("§6 anonymized",
+             "note text removed; other shared trade pages stay available, with your account link "
+             "removed;"),
+        ),
+        False: (
+            ("§3 shared pages",
+             "Anyone with the link can view a shared page, and shared pages stay available so links "
+             "keep working (see section 5)."),
+            ("§5 shared pages",
+             "Shared trade pages and share snapshots: kept so links keep working. If you delete your "
+             "account, they stay available with your account link removed; email us to remove one."),
+            ("§6 removes",
+             "free-agent move authorizations and records. What is anonymized instead,"),
+            ("§6 anonymized",
+             "note text removed; shared trade pages stay available, with your account link removed;"),
+        ),
+    }
+    want = [label for label, s in R28_23_SHARE[SHARE_362_LIVE] if not once(label, s)]
+    other = [m for m in R28_23_SHARE_MARKERS[not SHARE_362_LIVE] if m in priv]
+    version = "#362 live" if SHARE_362_LIVE else "#362 not live"
+    r.check("POL-r28-23-share[privacy.html]", not want and not other,
+            (f"not verbatim ({version} version, legal R28.23 3b): " + "; ".join(want)) if want else
+            ("the other version's line is also there: " + "; ".join(other)) if other else
+            f"share lines verbatim ({version} version)")
+
+    # Legal R28.22 / drafts trigger "S18 lands": #540 deletes and exports the
+    # user's own team overhauls, so privacy §6's two "not yet" overhaul
+    # sentences are gone and must not come back (local/373-r28-20-full still
+    # carries them).
+    # Legal dropped both with nothing in their place, so §6 doesn't mention
+    # overhauls at all (§1's "team-overhaul plans you create" stays), and the
+    # exact sentences can't come back anywhere (release-lead QA P3).
+    stale_ovh = [t for t in ("aren't yet removed by in-app deletion",
+                             "Team-overhaul plans are not yet included") if t in priv]
+    stale_ovh += [c.strip() for c in re.findall(r"[^.;:]*overhaul[^.;:]*", priv_secs.get("6", ""), re.I)]
+    r.check("POL-overhaul-covered[privacy.html]", not stale_ovh,
+            "§6 still mentions overhaul plans: " + "; ".join(stale_ovh) if stale_ovh
+            else "§6 has no overhaul line")
+
+    # Legal R28.25 row 5 (2026-11-01), a MUST for 11-06: privacy §3 says a
+    # leaguemate in the in-league calculator sees a numeric read of your
+    # board. Pinned with the "raw ranking list" sentence before it, so it
+    # stays right after that line. If the read ever goes direction-only,
+    # legal drops "and by how much" (a re-open trigger), and this pin moves
+    # with that text.
+    R28_25_CALC = (
+        "but it does influence which trade suggestions your leaguemates see. In the in-league trade "
+        "calculator, a leaguemate who builds a trade with you can see how it scores by your rankings: "
+        "whether it gains or loses value for you, and by how much. They can't see your ranking list, "
+        "but trying many trades could hint at how you value players.")
+    calc_ok = once("§3", R28_25_CALC)
+    r.check("POL-r28-25-calculator[privacy.html]", calc_ok,
+            "§3 calculator line not verbatim once, in §3, after the raw-ranking line (legal R28.25 row 5)"
+            if not calc_ok else "§3 calculator line verbatim once, in §3, after the raw-ranking line")
+
+    # Legal R28.26 (2026-11-01), word for word from legal-lead-drafts.md
+    # Parts 1-2. Free-agent moves go in "where available" form whatever the
+    # flag (no second notice before the D1 flip); tips; and QA (a)-(c). Each
+    # privacy run is once(): once on the page, in its section.
+    terms = rendered("terms.html")
+    R28_26_PRIVACY = (
+        ("§1 error messages",
+         "Error messages are scrubbed of personal data and shortened before we store them."),
+        ("§1 Sleeper token",
+         "to submit or withdraw trade proposals. Where available, we also use it to make free-agent "
+         "moves (adding and dropping players, and placing waiver claims) that you start and confirm, "
+         "after you've authorized them in the app within the last 7 days."),
+        ("§1 free-agent records",
+         "Free-agent move authorizations and records (where available). When you authorize Fleeced to "
+         "make free-agent moves for you, we record when, for which platform account, which version of "
+         "the wording you saw, the app version you used, and when the authorization ends or you turn it "
+         "off. For each move, we record what was sent (the players, the kind of move and any waiver "
+         "bid), when, and the platform's response. We keep these to show the move was yours and to help "
+         "if something goes wrong. They never include your platform password or sign-in token."),
+        ("§1 subscriptions and tips",
+         "Subscriptions and purchases. If you subscribe or leave a tip, Apple handles the payment; we "
+         "never see your card or billing details. We and our subscription service provider, RevenueCat, "
+         "receive your subscription status, plan, trial, purchase and renewal dates, any tips, and "
+         "transaction identifiers from Apple"),
+        ("§1 local storage",
+         "if you arrived through an invite link, the inviter's Sleeper username and league. It also "
+         "keeps the website's settings and display state there, such as your scoring format, trades "
+         "you've queued and notices you've dismissed."),
+        ("§3 free-agent moves",
+         "send trade proposals you approve and, where available, make free-agent moves you start and "
+         "confirm;"),
+        ("§4 Sleeper",
+         "With your opt-in, we send your trade proposals and, where available, free-agent moves you "
+         "approve to Sleeper."),
+        ("§4 ESPN",
+         "ESPN: with your connection, we read your ESPN leagues and send trade proposals and, where "
+         "available, free-agent moves you approve."),
+        ("§4 MFL",
+         "MyFantasyLeague (MFL): with your connection, we read your MFL leagues and send trade proposals "
+         "and, where available, free-agent moves you approve."),
+        ("§4 Apple",
+         "If you subscribe or leave a tip, Apple processes the payment and gives us and RevenueCat the "
+         "records of your purchase."),
+        ("§5 free-agent records",
+         "Free-agent move authorizations and records: kept while your account exists, and deleted with "
+         "it. Turning off moves, or disconnecting the platform, ends the authorization at once; the "
+         "records of past moves stay until your account is deleted."),
+        ("§6 removes free-agent records",
+         "stored Sleeper, ESPN and MFL connections, and free-agent move authorizations and records;"),
+        ("§6 turn off free-agent moves",
+         "free-agent moves (where available): Settings → Leagues → Stop roster moves, shown while moves "
+         "are on. Disconnecting the platform also stops them. Moves already made stay on the platform;"),
+    )
+    R28_26_TERMS = (
+        ("§2 responsibility",
+         "You're responsible for activity under your account, including every trade proposal and "
+         "free-agent move sent at your direction."),
+        ("§5 title and 5.1", "5. Sending trades and free-agent moves to your league platforms 5.1 Trade proposals."),
+        ("§5.2",
+         "5.2 Free-agent moves (where available). Fleeced can add and drop players, and place waiver "
+         "claims, for you in leagues on platforms you've connected. It does so only when you start a "
+         "move and confirm it, after you've authorized Fleeced in the app. Your authorization lasts 7 "
+         "days, and you can withdraw it at any time in Settings. Fleeced never makes a move on its own. "
+         "A move is final on the platform. Fleeced can't undo it, and a player you drop may be claimed "
+         "by another team. A waiver claim runs on the platform's schedule and spends any bid you set. "
+         "The platform decides how and when a move is processed, for example under your league's "
+         "waiver rules. If the app can't confirm whether a move reached the platform, it says so. Check "
+         "your roster on the platform before trying again. The unofficial-connection risks in 5.1 apply "
+         "to free-agent moves too. 5.3 Platform terms."),
+        ("§11",
+         "That includes trade proposals and free-agent moves sent through it, and a platform rejecting, "
+         "delaying or processing them differently."),
+        ("§14.8",
+         "Starting in January 2027, new subscribers pay $6.99 a month or $34.99 a year."),
+        ("§14.11",
+         "14.11 Tips. Where available, you can leave an optional tip in the iPhone app. A tip is a "
+         "one-time payment through Apple. It doesn't buy or unlock any feature, content or benefit, and "
+         "it doesn't change your subscription. Refunds are handled by Apple (§14.6)."),
+    )
+    miss26 = [label for label, s in R28_26_PRIVACY if not once(label, s)]
+    # Terms runs are scoped like once(): once on the page AND in the section
+    # their label's "§N" names (release-lead #373 QA P3-1).
+    terms_secs = {n: render_text(h) for n, h in numbered("terms.html")}
+    def terms_once(label: str, s: str) -> bool:
+        s = " ".join(s.split())
+        sec = terms_secs.get(re.match(r"§(\d+)", label).group(1), "")
+        return terms.count(s) == 1 and sec.count(s) == 1
+    miss26 += [f"terms {label}" for label, s in R28_26_TERMS if not terms_once(label, s)]
+    stale26 = [t for t in ("before they leave your device", "From January 1, 2027", "5.2 Platform terms")
+               if t in priv or t in terms]
+    # The whole source, head included (title, meta description, alt text),
+    # and the landing too (release-lead #373 QA P3-2).
+    stale26 += [f"\"donation\" on {pg}" for pg in SUPPORT_PAGES + ("index.html",)
+                 if re.search(r"donat", strip_comments(all_sources[pg]), re.I)]
+    r.check("POL-r28-26[privacy|terms]", not miss26 and not stale26,
+            ("not verbatim once (legal R28.26): " + "; ".join(miss26)) if miss26 else
+            ("superseded text still there: " + "; ".join(stale26)) if stale26 else
+            f"{len(R28_26_PRIVACY)} privacy + {len(R28_26_TERMS)} terms R28.26 runs verbatim")
+
+    # R28.26 item 1, M11: which text ships depends on prod at this page's
+    # deploy. (b), M11_ENTRY_LIVE, while landing.platform_options is ON in
+    # prod and #430 isn't deployed or legacy unverified entry:* accounts
+    # remain: privacy §6's item, privacy §1's last "How you sign in" sentence
+    # and Terms §2's sentence, all together. (a) otherwise: no item, and
+    # Terms §2 keeps "Only sign in with, and connect, …". release-lead
+    # confirms prod; the swap flips M11_ENTRY_LIVE with the text.
+    M11_ENTRY_LIVE = True
+    M11 = {
+        True: (
+            ("§6 unconfirmed-team accounts",
+             "Accounts started from an ESPN or MFL team that isn't confirmed as yours. If you started by "
+             "choosing your team in an ESPN or MFL league (where available), and the app shows your "
+             "account as not verified, Delete account and Download my data don't work for it in the app, "
+             "because the account could hold data that belongs to the team's real owner. Signing out ends "
+             "it on your device. To ask us to delete it, email fleecedapp@gmail.com. You'll be asked to "
+             "show that the team is yours; if that can't be done, nothing is deleted."),
+            ("§1 how you sign in, last sentence",
+             "is never stored (see \"Platform connections\" below). Where available, you can also start "
+             "by choosing your team in an ESPN or MFL league. Until the team is confirmed as yours, that "
+             "account is unverified. Its account ID is built from the league and team or, for an ESPN "
+             "team, from the team owner's ESPN member ID. League data."),
+        ),
+        False: (),
+    }
+    M11_TERMS = {
+        True: "Only sign in with, connect, or choose teams and accounts you own or are authorized to use.",
+        False: "Only sign in with, and connect, accounts you own or are authorized to use.",
+    }
+    M11_MARKERS = {True: ("isn't confirmed as yours", "start by choosing your team", "choose teams and accounts"),
+                   False: ("Only sign in with, and connect,",)}
+    want11 = [label for label, s in M11[M11_ENTRY_LIVE] if not once(label, s)]
+    # (b)'s §6 item is a top-level §6 item, not nested under "What may
+    # remain" (release-lead #373 QA P3-3): one <ul> deep in the section.
+    if M11_ENTRY_LIVE:
+        sec6 = dict(numbered("privacy.html")).get("6", "")
+        k = sec6.find("<strong>Accounts started from an ESPN or MFL team")
+        if k < 0 or sec6[:k].count("<ul") - sec6[:k].count("</ul") != 1:
+            want11.append("§6 item not top-level in §6")
+    if terms.count(M11_TERMS[M11_ENTRY_LIVE]) != 1:
+        want11.append("terms §2 sentence")
+    other11 = [m for m in M11_MARKERS[not M11_ENTRY_LIVE] if m in priv or m in terms]
+    v11 = "(b) entry live" if M11_ENTRY_LIVE else "(a) omitted"
+    r.check("POL-r28-26-m11[privacy|terms]", not want11 and not other11,
+            (f"M11 {v11}: not verbatim once: " + "; ".join(want11)) if want11 else
+            (f"M11 {v11}: the other option's text is there: " + "; ".join(other11)) if other11 else
+            f"M11 {v11}: verbatim, all together")
+
+    # release-lead #373 QA P3-1: the other support pages each keep at least
+    # one link to the privacy policy.
+    for page in ("terms.html", "faq.html", "contact.html"):
+        body = strip_comments(body_of(all_sources[page]))
+        links = len(re.findall(r'<a\b[^>]*\bhref=["\']/privacy["\']', body))
+        r.check(f"POL-privacy-linked[{page}]", links >= 1,
+                "no link to /privacy" if not links else f"{links} link(s) to /privacy")
+
+    # head-eng 2026-10-27 (#360 follow-up b): a rate-limited (429) or any other
+    # failed send must still leave a way to send a data request, so the
+    # contact form's ONE error path is c7 (marketing-lead-copy §1, approved
+    # R22.1), which names the support email as a mailto link. Every non-2xx
+    # throws into that catch; no status-specific branch may bypass it.
+    contact_js = "\n".join(re.findall(r"<script\b[^>]*>(.*?)</script>",
+                                      strip_comments(all_sources["contact.html"]), flags=re.S | re.I))
+    then = re.search(r"fetch\('/api/feedback', \{.*?\}\)\s*\.then\(function \(res\) \{(.*?)\n\s*\}\)\s*\.catch\(function \(\) \{(.*?)\n\s*\}\);",
+                     contact_js, flags=re.S)
+    c7_ok = bool(then) and (
+        re.match(r"\s*if \(!res\.ok\) throw new Error\(", then.group(1)) is not None
+        and "res.status ===" not in then.group(1) and "429" not in contact_js
+        and re.search(r"""setStatus\('err', "Couldn't send\. Try again in a minute, or email ", '\.'\);""",
+                      then.group(2)) is not None
+        and re.search(r"var SUPPORT_EMAIL = 'fleecedapp@gmail\.com';", contact_js) is not None
+        and re.search(r"a\.href = 'mailto:' \+ SUPPORT_EMAIL;", contact_js) is not None)
+    r.check("POL-contact-c7[contact.html]", c7_ok,
+            "the send path isn't: every non-2xx (429 included) → the c7 line with the support email link"
+            if not c7_ok else "every failed send (429 included) shows c7 with the support email link")
+
+    # R28.12 row 1: "Fleeced" is the Service, so the operator is "the developer
+    # of Fleeced", and "we"/"us" attach to the operator, not the definition.
+    OPERATOR = {
+        "privacy.html": ('Fleeced: Dynasty Trade Finder ("Fleeced" or "the Service")',
+                         'It is operated by the developer of Fleeced ("we", "us").',
+                         "The Service is operated by the developer of Fleeced."),
+        "terms.html": ('Fleeced: Dynasty Trade Finder ("Fleeced" or "the Service")',
+                       'The Service is operated by the developer of Fleeced ("we", "us").',
+                       "The Service is operated by the developer of Fleeced."),
+    }
+    for page, sentences in OPERATOR.items():
+        text = rendered(page)
+        missing = [s for s in sentences if s not in text]
+        self_run = re.findall(r"\boperated by Fleeced\b[^.]*\.?", text)
+        r.check(f"POL-operator[{page}]", not missing and not self_run,
+                ('says "operated by Fleeced" (the Service operating itself): ' + " | ".join(self_run)
+                 if self_run else "not verbatim (legal R28.12 row 1): " + " | ".join(missing))
+                if (missing or self_run) else 'operated by "the developer of Fleeced", never by "Fleeced"')
+
+    EFFECTIVE = re.compile(r"Effective date:\s*([A-Z][a-z]+ \d{1,2}, \d{4})\b")
+    dates = {}
+    for page in POLICY:
+        m = EFFECTIVE.search(plain(visible(page)))
+        try:
+            dates[page] = (m.group(1), datetime.strptime(m.group(1), "%B %d, %Y").date()) if m else None
+        except ValueError:
+            dates[page] = None
+    real = all(dates.values())
+    same = real and len({d for _, d in dates.values()}) == 1
+    r.check("POL-effective-date", same,
+            (f"same date on both pages: {dates[POLICY[0]][0]}" if same else
+             "dates differ: " + ", ".join(f"{p} {v[0]}" for p, v in dates.items()) if real else
+             "no real \"Effective date: <Month> <D>, <YYYY>\" on: "
+             + ", ".join(p for p, v in dates.items() if not v)))
+
+    contact = all_sources["contact.html"]
+    cbody = strip_style_and_script(strip_comments(body_of(contact)))
+    form_at = cbody.find("<form")
+    data_at = cbody.find(">Data requests</h2>")
+    first = MAILTO_A.search(cbody)
+    in_data = MAILTO_A.search(cbody, data_at) if data_at >= 0 else None
+    r.check("POL-contact-mailto-placement",
+            bool(first) and form_at >= 0 and first.start() < form_at and bool(in_data),
+            "want one mailto before the <form> and one in the Data requests section (P28-AC1)")
+    fields = (len(re.findall(r"<input\b", cbody, flags=re.I)),
+              len(re.findall(r"<select\b", cbody, flags=re.I)),
+              len(re.findall(r"<textarea\b", cbody, flags=re.I)))
+    r.check("POL-contact-no-new-field", fields == (0, 1, 1),
+            f"inputs/selects/textareas = {fields}; want exactly the topic select and the "
+            "message textarea, no email input (P28-R2, P28-AC3)")
+    script = "".join(re.findall(r"<script\b[^>]*>(.*?)</script>", contact, flags=re.S | re.I))
+    html_sinks = [s for s in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write")
+                  if s in script]
+    dom_built = ("createElement('a')" in script or 'createElement("a")' in script) \
+        and "textContent" in script
+    in_script = script.count(SUPPORT_EMAIL)
+    r.check("POL-contact-status-dom", not html_sinks and dom_built and in_script == 1,
+            (f"status lines use {html_sinks}" if html_sinks else
+             "status links not built with createElement('a') + textContent" if not dom_built else
+             f"the address is written {in_script}× in the script; want the one SUPPORT_EMAIL constant")
+            if (html_sinks or not dom_built or in_script != 1) else
+            "status links built from DOM nodes and one constant")
+    r.check("POL-contact-send-reenabled", script.count("btn.disabled = false") >= 2,
+            "Send must be re-enabled after a successful send too (P28-R7)")
+
+    faq = all_sources["faq.html"]
+    faq_text = visible("faq.html")
+    r.check("POL-faq-no-speed", not re.search(r"I AM SPEED", faq_text, flags=re.I),
+            'the "I AM SPEED" question is back')
+    r.check("POL-faq-no-testflight", "testflight" not in faq_text.lower(),
+            "the FAQ names TestFlight")
+    release = re.findall(r'href="(https://github\.com/[^"]+/releases/[^"]+)"', all_sources["index.html"])
+    faq_release = re.findall(r'href="(https://github\.com/[^"]+/releases/[^"]+)"', faq)
+    r.check("POL-faq-extension-link", bool(release) and set(faq_release) == {release[0]},
+            f"FAQ extension link {faq_release} != index.html's {release[:1]}")
+
+    # Q5/Q6 first paragraphs: marketing's OA-8 text (marketing-lead-copy.md §2;
+    # §1g rows 3-4, FIXED), which legal R28.15 row 7 treats as the live
+    # pre-launch Q5/Q6: sign in with Apple or Sleeper, then link the league.
+    # Neither may say "choose ESPN" / "choose MFL" (the old sign-in chips). At
+    # the 11-18 flip, R28.15 row 7's release sentences replace these.
+    OA8 = (
+        ("Q5", "How do I connect an ESPN league?",
+         "In the iPhone app, sign in with Apple or Sleeper, then go to Settings → Leagues → Link an "
+         "ESPN league and sign in on ESPN's own page inside the app. Your ESPN password stays on "
+         "ESPN's sign-in page, and the app lists your leagues."),
+        ("Q6", "How do I connect an MFL league?",
+         "In the iPhone app, sign in with Apple or Sleeper, then go to Settings → Leagues → Link an "
+         "MFL league. Sign in with your MFL username and password, or enter a league ID or a "
+         "myfantasyleague.com league URL."),
+    )
+
+    def inline_text(fragment: str) -> str:
+        text = unescape(re.sub(r"<[^>]+>", "", fragment)).replace("’", "'")
+        return re.sub(r"\s+", " ", text).strip()
+
+    faq_items = {inline_text(s): b for s, b in re.findall(
+        r'<summary>(.*?)</summary>\s*<div class="faq-body">(.*?)</div>',
+        strip_comments(faq), flags=re.S)}
+    problems = []
+    for label, question, want in OA8:
+        if question not in faq_items:
+            problems.append(f'{label} "{question}" not found')
+            continue
+        first = re.search(r"<p\b[^>]*>(.*?)</p>", faq_items[question], flags=re.S)
+        lead = inline_text(first.group(1)) if first else ""
+        if " ".join(want.split()) not in lead:
+            problems.append(f"{label} first paragraph is not marketing's OA-8 text")
+        chose = re.findall(r"\bchoose\s+(?:ESPN|MFL)\b", lead, flags=re.I)
+        if chose:
+            problems.append(f'{label} first paragraph says "{chose[0]}"')
+    r.check("POL-faq-oa8", not problems,
+            "; ".join(problems) if problems
+            else 'Q5/Q6 open with "sign in with Apple or Sleeper, then … Link an ESPN/MFL league"')
 
     return r.report(), r
 
