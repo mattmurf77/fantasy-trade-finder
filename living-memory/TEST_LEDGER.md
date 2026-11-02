@@ -6,6 +6,13 @@ Gates: `docs/plans/value-bar-scale/scope.md` (the B2 bullet; evidence and checkl
 - **Guard:** `mobile/tests/check-value-bar-b2.js`, 11 checks. It executes the component's own decision lines on 8 cases and pins the `worth` fallback and the Even nub. It fails 9 on `e70ad147`.
 - **Render:** `renders/before-after-b2-317.png`. `render.py` gains a `b2` switch, and the earlier two sheets regenerate byte-identically. The render's Even end label now matches the app: no colour when Even.
 - **Runs:** `tsc --noEmit` is clean, all 136 suites pass (this branch has no #574), testid-lint is green, and `test_value_bar_scale.py` passes 3.
+- **release-lead's B2 QA (GO-with-notes) at 955f83c3:**
+  - **P2-1:** one exported predicate, `valueBarIsEven(favors, gap)`, feeds the bar and the deck card's VoiceOver summary, so VoiceOver says "Even." where the bar does.
+  - **P3-2:** the guard now has 21 checks. It executes the predicate on 9 cases (0.7 firsts added) and pins every consumer to `even`. Breaking the winner label, the VoiceOver summary, or the predicate's B2 term each goes red (2, 1 and 3 failures).
+  - **P3-3/4:** checklist step 6 has concrete values (about 300 vs 250, both under 2,400), the expected "(≈ 0.0 firsts)", and VoiceOver.
+  - **P3-5:** the B2 rule is recorded in cross-client-invariants and `components.md` as an app-plus-image invariant.
+  - **P4:** 0.058, not "about 0.05". On `e70ad147` the guard's failures were structural; the behaviour discriminators are the two no-pick-under-one-first cases.
+  - **P3-1 (eveners under an Even bar) is Product's call**, not changed here.
 
 ## 2026-10-31 — The value bar, release-lead's #567 delta QA (GO-with-notes): the example test's indent, renders R1–R4, checklist wording
 

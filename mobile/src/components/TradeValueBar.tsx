@@ -69,6 +69,23 @@ function shortPick(label: string): string {
   return `${article} ${core}`;
 }
 
+/**
+ * The bar's Even state, the one predicate every reader shares (the bar, the
+ * deck card's VoiceOver summary): `favors` 'even' or absent, or the B2 rule
+ * (Product P112, 11-02; the share image does the same, #564): a null
+ * pick_equivalent under one first is the server's negligible floor (under half
+ * the smallest generic pick, 0.058 firsts today), so it reads Even, never
+ * "≈ 0.0 mid 1sts". Its body is plain JS: check-value-bar-b2.js executes it.
+ */
+export function valueBarIsEven(
+  favors: TradeValueBarProps['favors'] | undefined,
+  gap: CalcGap | null | undefined,
+): boolean {
+  const pick = gap ? gap.pick_equivalent : null;
+  const firsts = gap ? Math.abs(gap.firsts) : 0;
+  return favors === 'even' || favors == null || (!pick && firsts < 1);
+}
+
 export default function TradeValueBar({
   giveValue: _giveValue,
   receiveValue: _receiveValue,
@@ -82,12 +99,9 @@ export default function TradeValueBar({
 
   const firsts = Math.abs(gap.firsts);
   const pick = gap.pick_equivalent;
-  // B2 rule (Product P112, 11-02; the share image does the same, #564): the
-  // "≈ N mid 1sts" form shows only at a gap of at least one first. A null
-  // pick below that is the server's negligible floor (under half the smallest
-  // generic pick), so it reads as Even, never "≈ 0.0 mid 1sts".
-  const negligible = !pick && firsts < 1;
-  const even = favors === 'even' || favors == null || negligible;
+  // Every Even/lean reading below (headline, margin, fill, ends, Why?) comes
+  // from `even`, never raw `favors`; the B2 rule is inside the predicate.
+  const even = valueBarIsEven(favors, gap);
   const youWin = favors === 'receive';
   const clamped = Math.min(1, firsts); // ±1 base-first half-scale
   const frac = even ? 0 : youWin ? clamped : -clamped; // + = toward "You win" (right)

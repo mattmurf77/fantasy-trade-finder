@@ -376,6 +376,11 @@ The pick-denominated **TradeValueBar** (feedback #157) is the universal trade ve
 
 Deck cards **omit** all four when rebuilt from client echo (server-restart FB-46 path); clients gate the bar on `give_value`/`receive_value` being present.
 
+**The B2 rule: when the bar reads Even** (Product P112, 11-02; the app and the share image together, from the 11-06 binary). The bar reads **Even**, with the centred nub, the even wording and no lean, when `favors` is `even` or absent, **or** when `pick_equivalent` is null and `|gap.firsts|` < 1. That last case is the server's negligible floor: under half the smallest generic pick, 0.058 firsts today. A null pick above that range (over 1.25 of the largest pick) is "≈ N mid 1sts", always ≥ 1 first. A lean with a pick label leans, however small.
+- **App:** `TradeValueBar.tsx` `valueBarIsEven`, also used by the deck card's VoiceOver summary (`TradesScreen.tsx` `tradeA11ySummary`), pinned by `mobile/tests/check-value-bar-b2.js`.
+- **Share image:** the same rule (#564, league-eng); there B3 is "About even in value".
+- **Update both together.**
+
 **The ±2nd landmark** sits at the Mid 2nd / Mid 1st value ratio over `GENERIC_PICK_SEEDS` (`elo_to_value`). That's **0.287** today: mobile `TradeValueBar.tsx` `SECOND_IN_FIRSTS`, and the web landing miniature's 35.65% / 64.35% (`web/css/styles.css` `.lp-market-*`). The share card's bar computes the same ratio server-side (#564). `backend/tests/test_value_bar_scale.py` pins the app constant to the seeds; it had drifted to 0.57, which put a fill reading "≈ a Late 1st" on the "2nd" tick.
 
 **Locations to update together:** `backend/server.py` (`_value_verdict_payload`, `trade_evaluate_route`, `trade_card_to_dict`), the card-construction sites in `backend/trade_service.py` + `backend/trade_optimizer.py` (stamp `give_value`/`receive_value`), `mobile/src/components/TradeValueBar.tsx` + `TradeCard.tsx`, `mobile/src/api/trades.ts` + `mobile/src/api/calc.ts` + `mobile/src/shared/types.ts`.

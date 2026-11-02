@@ -56,6 +56,7 @@ import {
 import { posColor } from '../theme/colors';
 import { TickLabel, Button, Meter, Icon, Card } from '../components/chalkline';
 import TradeCardComp, { type DispositionReasons } from '../components/TradeCard';
+import { valueBarIsEven } from '../components/TradeValueBar';
 import DeclineReasonPanel from '../components/DeclineReasonPanel';
 import SendInSleeperButton from '../components/SendInSleeperButton';
 import Toast from '../components/Toast';
@@ -584,10 +585,12 @@ const subscribeOnline = (cb: () => void) => onlineManager.subscribe(cb);
 const readOnline = () => onlineManager.isOnline();
 
 // VoiceOver label for the fronted card's header (ux-lead U1): partner, give,
-// get, verdict — in TradeValueBar's own verdict words.
+// get, verdict — in TradeValueBar's own verdict words, from the bar's own
+// Even predicate when the bar is drawn (a B2 card reads Even, as its bar does).
 function tradeA11ySummary(card: TradeCard): string {
   const names = (ps: Player[]) => ps.map((p) => p.name).join(', ') || 'nothing';
-  const verdict = card.favors === 'receive' ? ' You win.'
+  const verdict = card.gap && valueBarIsEven(card.favors, card.gap) ? ' Even.'
+    : card.favors === 'receive' ? ' You win.'
     : card.favors === 'give' ? ' They win.'
     : card.favors === 'even' ? ' Even.'
     : '';
