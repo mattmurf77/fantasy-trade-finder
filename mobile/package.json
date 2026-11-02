@@ -71,6 +71,7 @@
     "test:matches-calc-handoff": "node tests/check-matches-calc-handoff.js",
     "test:matches-counts": "node tests/check-matches-counts.js",
     "test:matches-league-param": "node tests/check-matches-league-param.js",
+    "test:matches-push-scroll": "node tests/check-matches-push-scroll.js",
     "test:matches-tile-league-param": "node tests/check-matches-tile-league-param.js",
     "test:member-entered-marker": "node tests/check-member-entered-marker.js",
     "test:mock-draft-modes": "node tests/check-mock-draft-modes.js",
