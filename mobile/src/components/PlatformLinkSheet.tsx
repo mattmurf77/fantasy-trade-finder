@@ -544,14 +544,7 @@ export default function PlatformLinkSheet({
               </Text>
               {/* v2.1 — entry mode only: signing in is a first-class option
                   ABOVE the league-id field, mirroring the ESPN sheet. */}
-              {entry && mflAuthBlock ? (
-                <>
-                  {mflAuthBlock}
-                  <Text style={[type.bodySm, styles.skipNote]}>
-                    or enter a league ID below
-                  </Text>
-                </>
-              ) : null}
+              {entry && mflAuthBlock ? mflAuthBlock : null}
               <TextInput
                 testID="platform-link.input"
                 style={styles.field}

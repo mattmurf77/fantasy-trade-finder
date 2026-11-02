@@ -55,6 +55,19 @@ const TEST_APPLE_SUB = testLaunchArg('FTFTestAppleSub');
  *  auto-opened (#130 `espnLink` / its `mflLink` twin). */
 export type EntryPlatformIntent = 'espn' | 'mfl';
 
+/** The landing's platform tiles (operator 11-01: "three tiles. Sleeper espn
+ *  mfl"; design-lead's spec). Name, the dim line under it (an SE tile fits
+ *  about 10 characters), and the radio's spoken label. Words: marketing-lead,
+ *  copy §6 addendum 16 (revised 11-02: no "or a league ID"; under the
+ *  verified sign-in an ID alone is refused). */
+const PLATFORM_TILE: Record<'sleeper' | EntryPlatformIntent, {
+  name: string; line: string; a11y: string;
+}> = {
+  sleeper: { name: 'Sleeper', line: 'Username', a11y: 'Sleeper, sign in with your username, no password needed' },
+  espn: { name: 'ESPN', line: 'Sign in', a11y: 'ESPN, sign in with your ESPN account' },
+  mfl: { name: 'MFL', line: 'Sign in', a11y: 'MyFantasyLeague, sign in with your MFL account' },
+};
+
 interface Props {
   onSignedIn: (platformIntent?: EntryPlatformIntent) => void;
   /** Called when the user opts into the seeded demo session. Bundle 8 sends
@@ -652,35 +665,33 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 {inviteHeadline}
               </Text>
             ) : null}
-            {/* Landing platform options — Sleeper · ESPN · MFL entry chips.
+            {/* Landing platform tiles — Sleeper · ESPN · MFL, equal width,
+                one per live platform (platformChips; never a dead tile).
                 Sleeper (default) leaves the form below untouched; ESPN/MFL
-                swap it for the explainer + Apple panel further down. */}
+                swap it for the explainer + link panel further down. */}
             {platformPickerShown ? (
-              <View style={styles.platformRow}>
+              <View style={styles.platformRow} accessibilityRole="radiogroup">
                 {platformChips.map((p) => {
                   const on = entryPlatform === p;
+                  const tile = PLATFORM_TILE[p];
                   return (
                     <Pressable
                       key={p}
                       testID={`signin.platform-${p}`}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Use ${
-                        p === 'sleeper' ? 'Sleeper' : p === 'espn' ? 'ESPN' : 'MyFantasyLeague'
-                      }`}
+                      accessibilityRole="radio"
+                      accessibilityLabel={tile.a11y}
                       accessibilityState={{ selected: on }}
                       onPress={() => selectEntryPlatform(p)}
                       disabled={busy || demoBusy || appleBusy}
                       style={({ pressed }) => [
-                        styles.platformChip,
-                        on && styles.platformChipOn,
-                        pressed && !on && styles.platformChipPressed,
+                        styles.platformTile,
+                        on && styles.platformTileOn,
+                        pressed && !on && styles.platformTilePressed,
                       ]}
                     >
-                      <ChalkText
-                        style={[styles.platformChipText, on && styles.platformChipTextOn]}
-                      >
-                        {p === 'sleeper' ? 'Sleeper' : p === 'espn' ? 'ESPN' : 'MFL'}
-                      </ChalkText>
+                      {on ? <View style={styles.platformTileTick} /> : null}
+                      <ChalkText style={styles.platformTileName}>{tile.name}</ChalkText>
+                      <ChalkText style={styles.platformTileLine}>{tile.line}</ChalkText>
                     </Pressable>
                   );
                 })}
@@ -714,8 +725,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               <View testID="signin.platform-panel">
                 <ChalkText style={styles.platformExplainer}>
                   {entryPlatform === 'espn'
-                    ? 'ESPN dynasty leagues are supported. Sign in to ESPN and we’ll find your leagues, or enter a league ID — no extra account needed.'
-                    : 'MyFantasyLeague dynasty leagues are supported. Sign in with MFL and we’ll find your leagues, or enter a league ID — no extra account needed.'}
+                    ? 'ESPN dynasty leagues are supported. Sign in to ESPN.'
+                    : 'MyFantasyLeague dynasty leagues are supported. Sign in to MFL.'}
                 </ChalkText>
                 {/* Guide spotlight target — collapsable={false} so the
                     wrapper survives view-flattening and stays measurable,
@@ -1029,10 +1040,12 @@ const styles = StyleSheet.create({
   },
   // Teardown 06-03 — account-only session-expired re-auth notice.
   // Informational (not an error): dim chalk, sits above the Apple portal.
+  // 5pt under space.md so the returning-user landing fits an iPhone SE with
+  // the tiles (652 → 647pt; design-lead's #570 render).
   reauthNotice: {
     ...type.bodySm,
     color: chalk.dim,
-    marginBottom: space.md,
+    marginBottom: space.md - 5,
   },
   // P0-3 — invited banner. Same slot, same rhythm as reauthNotice: no new
   // visual pattern, no accent beyond the existing ones.
@@ -1061,33 +1074,38 @@ const styles = StyleSheet.create({
     marginTop: -space.xs,
     marginBottom: space.sm,
   },
-  // ── Landing platform options (Sleeper · ESPN · MFL entry chips) ────────
-  // Outline chips matching hintRow's border treatment; selected = ice, the
-  // one action accent Chalkline allows.
+  // ── Landing platform tiles (Sleeper · ESPN · MFL; design-lead's spec) ──
+  // Equal ink-1 tiles on the a11y line. Selected = the ice border plus a 3×14
+  // ice tick (the PlayerCard selected construction); the name stays chalk.
   platformRow: {
     flexDirection: 'row',
     gap: space.sm,
     marginBottom: space.md,
   },
-  platformChip: {
+  platformTile: {
     flex: 1,
-    minHeight: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: ink.lineStrong,
-    borderRadius: radii.sm,
+    minHeight: 64,
+    paddingVertical: 10,
     paddingHorizontal: space.md,
+    justifyContent: 'center',
+    gap: 2,
+    backgroundColor: ink.ink1,
+    borderWidth: 1,
+    borderColor: ink.lineStrongA11y,
+    borderRadius: radii.md,
   },
-  platformChipOn: { borderColor: ice.base },
-  platformChipPressed: { backgroundColor: ink.ink3 },
-  platformChipText: {
-    ...type.bodySm,
-    fontFamily: fonts.uiSemi,
-    color: chalk.dim,
+  platformTileOn: { borderColor: ice.base },
+  platformTilePressed: { backgroundColor: ink.ink3 },
+  platformTileTick: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 3,
+    height: 14,
+    backgroundColor: ice.base,
   },
-  platformChipTextOn: { color: chalk.base },
+  platformTileName: { ...type.title, color: chalk.base },
+  platformTileLine: { ...type.bodySm, color: chalk.dim },
   platformExplainer: {
     ...type.bodySm,
     color: chalk.dim,
