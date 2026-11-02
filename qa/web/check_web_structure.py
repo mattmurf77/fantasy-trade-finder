@@ -505,7 +505,7 @@ def run() -> int:
     if s14_text.count("at least 24 hours before") < 2:
         problems.append('"at least 24 hours before" not in both 14.3 (trial) and 14.4 (renewal)')
     r.check("POL-terms-subscriptions[terms.html]", not problems,
-            "; ".join(problems) if problems else "§14 with 14.1-14.10 and the cancel/refund/Apple lines")
+            "; ".join(problems) if problems else "§14 with 14.1-14.11 and the cancel/refund/Apple lines")
 
     priv = dict(numbered("privacy.html"))
     item = re.search(r"<li>\s*<strong>Subscriptions and purchases\.</strong>(.*?)</li>",
@@ -909,10 +909,20 @@ def run() -> int:
          "it doesn't change your subscription. Refunds are handled by Apple (§14.6)."),
     )
     miss26 = [label for label, s in R28_26_PRIVACY if not once(label, s)]
-    miss26 += [f"terms {label}" for label, s in R28_26_TERMS if terms.count(" ".join(s.split())) != 1]
+    # Terms runs are scoped like once(): once on the page AND in the section
+    # their label's "§N" names (release-lead #373 QA P3-1).
+    terms_secs = {n: render_text(h) for n, h in numbered("terms.html")}
+    def terms_once(label: str, s: str) -> bool:
+        s = " ".join(s.split())
+        sec = terms_secs.get(re.match(r"§(\d+)", label).group(1), "")
+        return terms.count(s) == 1 and sec.count(s) == 1
+    miss26 += [f"terms {label}" for label, s in R28_26_TERMS if not terms_once(label, s)]
     stale26 = [t for t in ("before they leave your device", "From January 1, 2027", "5.2 Platform terms")
                if t in priv or t in terms]
-    stale26 += [f"\"donation\" on {pg}" for pg in SUPPORT_PAGES if re.search(r"donat", rendered(pg), re.I)]
+    # The whole source, head included (title, meta description, alt text),
+    # and the landing too (release-lead #373 QA P3-2).
+    stale26 += [f"\"donation\" on {pg}" for pg in SUPPORT_PAGES + ("index.html",)
+                 if re.search(r"donat", strip_comments(all_sources[pg]), re.I)]
     r.check("POL-r28-26[privacy|terms]", not miss26 and not stale26,
             ("not verbatim once (legal R28.26): " + "; ".join(miss26)) if miss26 else
             ("superseded text still there: " + "; ".join(stale26)) if stale26 else
@@ -950,6 +960,13 @@ def run() -> int:
     M11_MARKERS = {True: ("isn't confirmed as yours", "start by choosing your team", "choose teams and accounts"),
                    False: ("Only sign in with, and connect,",)}
     want11 = [label for label, s in M11[M11_ENTRY_LIVE] if not once(label, s)]
+    # (b)'s §6 item is a top-level §6 item, not nested under "What may
+    # remain" (release-lead #373 QA P3-3): one <ul> deep in the section.
+    if M11_ENTRY_LIVE:
+        sec6 = dict(numbered("privacy.html")).get("6", "")
+        k = sec6.find("<strong>Accounts started from an ESPN or MFL team")
+        if k < 0 or sec6[:k].count("<ul") - sec6[:k].count("</ul") != 1:
+            want11.append("§6 item not top-level in §6")
     if terms.count(M11_TERMS[M11_ENTRY_LIVE]) != 1:
         want11.append("terms §2 sentence")
     other11 = [m for m in M11_MARKERS[not M11_ENTRY_LIVE] if m in priv or m in terms]

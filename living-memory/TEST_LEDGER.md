@@ -1,3 +1,56 @@
+## 2026-11-01 — #373: legal R28.26 pasted (free-agent moves "where available", tips, QA (a)–(c), M11 option (b)), all pinned
+
+Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.
+
+- **What (word for word from `legal-lead-drafts.md` Parts 1–2; relayed by head-eng's round 3b via the coordinator):**
+  - free-agent moves, "where available": privacy §1 (the Sleeper token sentence, the ESPN/MFL import lines, a new records item), §3, §4 (Sleeper, ESPN, MFL), §5 and §6 (removes; turn off). Terms §2, §5 (retitled; new 5.2; old 5.2 becomes 5.3) and §11;
+  - tips: privacy §1 and §4 ("or leave a tip", "any tips", "records of your purchase"); Terms new §14.11. Never "donation";
+  - QA (a) "before we store them", (b) the local-storage list, (c) §14.8 "Starting in January 2027".
+- **M11: option (b)**, the §6 unconfirmed-team item, the §1 "How you sign in" last sentence and the Terms §2 sentence. That's because `landing.platform_options` is ON on `main` and ask 12 hasn't been executed (legal R28.26; launch-readiness-product.md:601); release-lead confirms prod. `POL-r28-26-m11` pins whichever option `M11_ENTRY_LIVE` names and fails on any marker of the other. Option (a) is ready as local `local/373-m11-a`.
+- **Pins:** `POL-r28-26` (13 privacy runs via `once()`, 6 Terms runs once each; no "before they leave your device", "From January 1, 2027", "5.2 Platform terms", or "donat" on any support page) and `POL-r28-26-m11`.
+  - Updated for the new text: R28.15's Terms §2 pin (its last sentence moved to the M11 pin), R28.16's ESPN/MFL import lines, R28.23's §6 removes anchor (both versions), and `POL-terms-subscriptions` (14.1–14.11).
+  - `once()` exempts legal's repeated retention clause, "kept while your account exists, and deleted with it."
+- **Sabotage 25/25 red:** each line reverted or removed; the §5 line and the M11 item duplicated; tip → donation (privacy, Terms, FAQ); §5.3 back to 5.2; the M11 Terms text half-swapped; the M11 flag flipped alone. The earlier sets re-run red (one skip on an anchor R28.26 changed). Every pinned string was checked against the drafts.
+- **Suites:** web structure 253/253.
+- **Not in #373:** legal's SHOULD on other surfaces saying "January 1, 2027". The app's paywall (`mobile/src/copy/monetization.ts:71`) says "From January 1, 2027"; flagged to head-eng.
+- **release-lead independent QA at `b6117afa`: GO-with-notes; P3s taken.** (1) The Terms R28.26 runs are once in their `numbered("terms.html")` section too. (2) The "donat" scan reads the whole source (title, meta description, alt text) of the support pages and `index.html`. (3) M11 (b)'s §6 item must be top-level in §6, one `<ul>` deep. (4) The §14 pass message now says 14.1–14.11. (5) This file's #373 entries are back at the top. Sabotage 5/5 red: §11's sentence moved into §10; "donation" in the FAQ `<title>`, its meta description and `index.html`; the M11 item nested under "What may remain". The R28.26 sets are still 15/15 and 8/8, and the option (a) swap still passes 253/253.
+
+## 2026-11-01 — #373: privacy §6's two "not yet" team-overhaul sentences dropped (#540 deletes and exports overhauls)
+
+Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.
+
+- **Legal's trigger "S18 lands"** (drafts Part 4.2, R28.22): drop each sentence once its half is live. `#540` deletes the user's own overhauls and exports them, so both go:
+  - "team-overhaul plans you created, which aren't yet removed by in-app deletion…" (§6 What may remain);
+  - "Team-overhaul plans are not yet included; email us for a copy." (§6 Export).
+  - Pushed only after `#540` was on main; `#373` deploys after it.
+- **Pins:** `POL-overhaul-covered` fails if either sentence comes back (`local/373-r28-20-full` still carries both). `POL-r28-19`'s position anchor moves to the inviter line's "Email us to have it removed;", the item now before it.
+- **Sabotage:** 4/4 red: each sentence back, one reworded, and the R28.19 item removed.
+- **Suites:** web structure 249/249.
+- **Delta-QA P3s (GO-with-notes at `904e4732`):**
+  - `POL-overhaul-covered` now also fails on ANY overhaul mention in §6, not just the two exact sentences. §1's "team-overhaul plans you create" stays.
+  - The ice-link rule now also catches class-only selectors (any class an `<a>` on the page carries) and `<font color>`. That covers `POL-reading-links-chalk` and `POL-no-ice-links`.
+  - One explicit exception, pending design-lead: faq's pre-existing `.back-link:hover` (privacy and terms' `.back` stays chalk).
+  - **design-lead chose (b):** faq's `.back-link:hover` is now chalk with an ice underline only (`color: var(--text); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 2px`). At rest it's unchanged (`--muted`, no underline). The exception is gone, so no web link has ice text. Sabotage 6/6 red: hover ice again, hover ice with the underline kept, ice at rest, a class-only rule, `<font color>`, and `.back-link:focus`. The operator's approval of design-lead's render is pending, not a hold.
+  - Sabotage 7/7 red: a reworded overhaul line in §6's may-remain and export lists; a class-only ice rule; `<font color>` ice in a link; the exception widened to `.back-link` and to `.back-link:focus`. The earlier sets still go red.
+  - One missing blank line before an H2 is fixed.
+- **Also, the FAQ footer links (design-lead, #373 QA P3-6; the operator's approval of the render is pending, not a hold):** the three inline `style="color: …"` attributes are gone. One `.faq-footer a` rule makes them chalk and underlined; the ice appears only on the hover underline. The new `POL-no-ice-links[faq|contact]` extends the existing no-ice-link rule to those two pages. Sabotage 4/4 red: the rule coloured ice, the hover coloured ice, an inline ice link on contact, and the pre-fix FAQ file. Web structure 251/251.
+
+## 2026-11-01 — #373 QA P1-1: legal R28.25's §3 calculator line pinned; /privacy links pinned (P3-1)
+
+Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.
+
+- **P1-1 (legal R28.25 row 5, a MUST for 11-06):** privacy §3 gains the in-league calculator bullet right after the "raw ranking list" line, word for word from `legal-lead-drafts.md` Part 1 §3. `POL-r28-25-calculator` pins it together with the line before it, so it stays in place.
+- **P3-1:** `POL-privacy-linked[terms|faq|contact]`: each page keeps at least one `/privacy` link.
+- **P3-2:** `qa/web/check_web_structure.py` is back to mode 100755. The swap commit, built with `git commit-tree`, had set it to 100644.
+- **P3-7:** the checker's source comment now says the legal and marketing working files aren't tracked in the repo.
+- **Sabotage:** 8/8 red: the bullet removed, moved below the "like" line, "and by how much" dropped, a word changed, the second sentence dropped, and every `/privacy` link dropped on terms, faq and contact.
+- **Suites:** web structure 248/248 (244 + 4).
+- **Delta-QA P3 (GO-with-notes at `b9de0166`): pinned once, in its section.** Before this, the R28.19, R28.23 and R28.25 pins were a plain `in`, so a duplicated line, or a line moved to another section with its neighbour, stayed green.
+  - `once()` now requires each run to appear exactly once on the page and inside the section its label's "§N" names (`numbered()`).
+  - Runs carry a neighbour's words to fix their position, so every clause of 25+ characters must also be on the page once. Without this, a copy of the bullet alone would pass. No clause repeats on today's page.
+  - Sabotage 10/10 red: the calculator bullet duplicated in place, copied into §4, and moved into §4 together with the raw-ranking line; the server bullet, the §2 line, the §5 share line and the §6 anonymized item each duplicated; the §4 Sentry line and the §6 removes item copied into §5; the R28.19 sent-proposals item duplicated.
+  - The earlier sets re-run red: 5/5, 8/8 and 1/1. Web structure 248/248.
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -79,21 +132,6 @@ Gates: head-eng's relay of legal R28.23 (G3-e accepted on three conditions), con
 - **Sabotages, 2/2 red:** the owner-column delete removed; working keys not resolved.
 - **Condition 1, by code** (no prod read from trades-eng): a deck without rows exists only in deferred-evidence mode. That mode is admitted only with `trade.first_page_store` on (the `job["evidence_mode"] = "deferred"` branch of the job kickoff), and the flag is off in prod. So #535's shape can't have occurred, and the read-only count is release-lead's to run.
 - **Suites:** `test_account_deletion_coverage.py` and `test_deck_outcome_owner.py` pass.
-## 2026-11-01 — #373: legal R28.26 pasted (free-agent moves "where available", tips, QA (a)–(c), M11 option (b)), all pinned
-
-Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.
-
-- **What (word for word from `legal-lead-drafts.md` Parts 1–2; relayed by head-eng's round 3b via the coordinator):**
-  - free-agent moves, "where available": privacy §1 (the Sleeper token sentence, the ESPN/MFL import lines, a new records item), §3, §4 (Sleeper, ESPN, MFL), §5 and §6 (removes; turn off). Terms §2, §5 (retitled; new 5.2; old 5.2 becomes 5.3) and §11;
-  - tips: privacy §1 and §4 ("or leave a tip", "any tips", "records of your purchase"); Terms new §14.11. Never "donation";
-  - QA (a) "before we store them", (b) the local-storage list, (c) §14.8 "Starting in January 2027".
-- **M11: option (b)**, the §6 unconfirmed-team item, the §1 "How you sign in" last sentence and the Terms §2 sentence. That's because `landing.platform_options` is ON on `main` and ask 12 hasn't been executed (legal R28.26; launch-readiness-product.md:601); release-lead confirms prod. `POL-r28-26-m11` pins whichever option `M11_ENTRY_LIVE` names and fails on any marker of the other. Option (a) is ready as local `local/373-m11-a`.
-- **Pins:** `POL-r28-26` (13 privacy runs via `once()`, 6 Terms runs once each; no "before they leave your device", "From January 1, 2027", "5.2 Platform terms", or "donat" on any support page) and `POL-r28-26-m11`.
-  - Updated for the new text: R28.15's Terms §2 pin (its last sentence moved to the M11 pin), R28.16's ESPN/MFL import lines, R28.23's §6 removes anchor (both versions), and `POL-terms-subscriptions` (14.1–14.11).
-  - `once()` exempts legal's repeated retention clause, "kept while your account exists, and deleted with it."
-- **Sabotage 25/25 red:** each line reverted or removed; the §5 line and the M11 item duplicated; tip → donation (privacy, Terms, FAQ); §5.3 back to 5.2; the M11 Terms text half-swapped; the M11 flag flipped alone. The earlier sets re-run red (one skip on an anchor R28.26 changed). Every pinned string was checked against the drafts.
-- **Suites:** web structure 253/253.
-- **Not in #373:** legal's SHOULD on other surfaces saying "January 1, 2027". The app's paywall (`mobile/src/copy/monetization.ts:71`) says "From January 1, 2027"; flagged to head-eng.
 
 ## 2026-10-29 — Addendum G2 and G3 in eval, plus addendum H's H-a1 and H-a2: the response boundary, F4's four buckets, explained #535 orphans
 
@@ -136,42 +174,6 @@ Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook
   - the kill without the limit.
 - **Suites:** all `test_eval_*` plus `test_evidence_pack.py` and `test_deck_value_model.py`, on main @ `9370670e`: 481 passed.
 
-## 2026-11-01 — #373: privacy §6's two "not yet" team-overhaul sentences dropped (#540 deletes and exports overhauls)
-
-Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.
-
-- **Legal's trigger "S18 lands"** (drafts Part 4.2, R28.22): drop each sentence once its half is live. `#540` deletes the user's own overhauls and exports them, so both go:
-  - "team-overhaul plans you created, which aren't yet removed by in-app deletion…" (§6 What may remain);
-  - "Team-overhaul plans are not yet included; email us for a copy." (§6 Export).
-  - Pushed only after `#540` was on main; `#373` deploys after it.
-- **Pins:** `POL-overhaul-covered` fails if either sentence comes back (`local/373-r28-20-full` still carries both). `POL-r28-19`'s position anchor moves to the inviter line's "Email us to have it removed;", the item now before it.
-- **Sabotage:** 4/4 red: each sentence back, one reworded, and the R28.19 item removed.
-- **Suites:** web structure 249/249.
-- **Delta-QA P3s (GO-with-notes at `904e4732`):**
-  - `POL-overhaul-covered` now also fails on ANY overhaul mention in §6, not just the two exact sentences. §1's "team-overhaul plans you create" stays.
-  - The ice-link rule now also catches class-only selectors (any class an `<a>` on the page carries) and `<font color>`. That covers `POL-reading-links-chalk` and `POL-no-ice-links`.
-  - One explicit exception, pending design-lead: faq's pre-existing `.back-link:hover` (privacy and terms' `.back` stays chalk).
-  - **design-lead chose (b):** faq's `.back-link:hover` is now chalk with an ice underline only (`color: var(--text); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 2px`). At rest it's unchanged (`--muted`, no underline). The exception is gone, so no web link has ice text. Sabotage 6/6 red: hover ice again, hover ice with the underline kept, ice at rest, a class-only rule, `<font color>`, and `.back-link:focus`. The operator's approval of design-lead's render is pending, not a hold.
-  - Sabotage 7/7 red: a reworded overhaul line in §6's may-remain and export lists; a class-only ice rule; `<font color>` ice in a link; the exception widened to `.back-link` and to `.back-link:focus`. The earlier sets still go red.
-  - One missing blank line before an H2 is fixed.
-- **Also, the FAQ footer links (design-lead, #373 QA P3-6; the operator's approval of the render is pending, not a hold):** the three inline `style="color: …"` attributes are gone. One `.faq-footer a` rule makes them chalk and underlined; the ice appears only on the hover underline. The new `POL-no-ice-links[faq|contact]` extends the existing no-ice-link rule to those two pages. Sabotage 4/4 red: the rule coloured ice, the hover coloured ice, an inline ice link on contact, and the pre-fix FAQ file. Web structure 251/251.
-
-## 2026-11-01 — #373 QA P1-1: legal R28.25's §3 calculator line pinned; /privacy links pinned (P3-1)
-
-Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.
-
-- **P1-1 (legal R28.25 row 5, a MUST for 11-06):** privacy §3 gains the in-league calculator bullet right after the "raw ranking list" line, word for word from `legal-lead-drafts.md` Part 1 §3. `POL-r28-25-calculator` pins it together with the line before it, so it stays in place.
-- **P3-1:** `POL-privacy-linked[terms|faq|contact]`: each page keeps at least one `/privacy` link.
-- **P3-2:** `qa/web/check_web_structure.py` is back to mode 100755. The swap commit, built with `git commit-tree`, had set it to 100644.
-- **P3-7:** the checker's source comment now says the legal and marketing working files aren't tracked in the repo.
-- **Sabotage:** 8/8 red: the bullet removed, moved below the "like" line, "and by how much" dropped, a word changed, the second sentence dropped, and every `/privacy` link dropped on terms, faq and contact.
-- **Suites:** web structure 248/248 (244 + 4).
-- **Delta-QA P3 (GO-with-notes at `b9de0166`): pinned once, in its section.** Before this, the R28.19, R28.23 and R28.25 pins were a plain `in`, so a duplicated line, or a line moved to another section with its neighbour, stayed green.
-  - `once()` now requires each run to appear exactly once on the page and inside the section its label's "§N" names (`numbered()`).
-  - Runs carry a neighbour's words to fix their position, so every clause of 25+ characters must also be on the page once. Without this, a copy of the bullet alone would pass. No clause repeats on today's page.
-  - Sabotage 10/10 red: the calculator bullet duplicated in place, copied into §4, and moved into §4 together with the raw-ranking line; the server bullet, the §2 line, the §5 share line and the §6 anonymized item each duplicated; the §4 Sentry line and the §6 removes item copied into §5; the R28.19 sent-proposals item duplicated.
-  - The earlier sets re-run red: 5/5, 8/8 and 1/1. Web structure 248/248.
-
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
 Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -185,6 +187,7 @@ Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_
 - **Sabotages, 2/2 red:** I-1's drops ignored on the page path; the withhold ignored on the page path.
 - **Suites:** force-supersede, I-1 serve filter, page store and packed evidence: 317 passed on main and 317 passed on a flags-on copy of `ops/200ms-flip` (with failure 1's fix).
 - **Full backend suite, flags on** (`ops/200ms-flip` @ `8080663e` plus this branch's three test files): 10,055 passed, 2 skipped, 0 failed.
+
 ## 2026-10-31 — #373: legal R28.23's server-Sentry lines pasted; the share lines pinned as two versions (#362 live ships)
 
 Gates: full (`#373`, legal text only). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the web structure checker plus sabotage.
@@ -375,6 +378,7 @@ Gates: head-eng's check 3, from release-lead's prod sweep: "Purged 500 expired d
 - **The backlog's size and age** need a read-only prod query (release-lead): the oldest `created_at`, the count past 14 and past 30 days, and rows written a day.
 - **Tests:** `test_deck_diagnostics.py`. A call drains up to `max_batches` and stops at a short batch (one read, counted); the loop passes the ceiling.
 - **Sabotages:** 3/3 red (one batch only, no short-batch stop, the loop without the ceiling).
+
 ## 2026-10-29 — Mobile async guards fail when a check hangs (check-win-now-recovery passed 7 of 39 silently)
 
 Gates: engagement-eng's report (release-lead's #488 QA found it). Test harness only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the suites themselves.
@@ -422,6 +426,7 @@ Gates: full (an additive schema change). Scope block: `docs/plans/trade-time-to-
   - Added QA's `test_three_paths_one_run` (onboarding-eng's ask): one outcome reachable only by its row, one only by a pack contract id, one only by `user_id`. Each is exported once, all are deleted in one run, and another user's outcome past the pack's `card_count` stays.
   - 4/4 sabotages fail it: either path dropped from export or from deletion.
   - The 39 test files touching `deck_outcomes`, retention, purge and deletion coverage: 1555 passed.
+
 ## 2026-10-29 — Exit guards on three async mobile check suites (platforms-eng; head-eng ask from trades-eng's #546 finding)
 
 Test-only (`mobile/tests/`), no app code. D-056 posture. `check-espn-cookies.js`, `check-send-timeout.js` and `check-vault-subsumes-legacy.js` had no exit guard: an `await` that never settles, or an early `return`, let the event loop drain and node exit 0 mid-run, so a green run wasn't evidence.
@@ -437,6 +442,7 @@ Test-only (`mobile/tests/`), no app code. D-056 posture. `check-espn-cookies.js`
 
   (A throw already exits 1 via the unhandled rejection; the guard is what catches the return and the hang.)
 - **Not here:** #539's new `check-send-registry.js` has the same gap; it gets the guard on #539 or right after it merges (release-lead's call).
+
 ## 2026-10-29 — Exit guards on three async mobile suites (head-eng's ask, from trades-eng's #546 finding)
 
 Test-only: no app code, no user-visible change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
@@ -553,6 +559,7 @@ Gates: eval code only (`backend/eval/{data,replay,scorers,contract,persistence,f
   - The clean run: 205.
 - **Eval-related suites** (`test_eval_*`, `test_value_model*`, packed and deferred evidence, blind grade, scorecard, the new redaction tests): 811 passed.
 - **B-DK-6 with a coerced ±inf** (release-lead's #515 QA): it stays audited. The null can only lower the audit's count below the filter's, so a served card's verdict can't flip; QA saw mismatches on dropped cards only.
+
 ## 2026-10-29 — #525 re-QA: a new search answered with inputs_changed is read afresh (P1-1r); checklist paths
 
 Gates: release-lead's #525 re-QA at `2546963b`. Every earlier fix was verified by their harness; this is the one residual, plus the checklist. Same PR (11-06 binary). D-056: `FTF_SKIP_SIM_GATE=1` posture.
@@ -631,6 +638,7 @@ Gates: release-lead's #470 QA P2-1 follow-up; analytics-lead's grant of option (
   - the error card not hidden (10j);
   - the re-search through a tap path (10h).
 - **TestFlight:** the scope's §3 checklist (6 steps, two devices), for the operator on the 11-06 build. Not yet run.
+
 ## 2026-10-29 — Team overhaul in account deletion and export (head-eng's ask; trades-eng found the gap)
 
 Full gates (scope `docs/plans/team-overhaul/scope-account-deletion.md`). Server only, no schema, not flag-gated. D-056: `FTF_SKIP_SIM_GATE=1` posture.
@@ -663,6 +671,7 @@ Gates: a value change to the merged #494 (`bef9f5db`), as its own PR off main (`
 - **Change:** `_PAYWALL_PRICE_RISE_AT` = `datetime(2027, 1, 2, 4, 0, tzinfo=utc)` (was 2027-01-01 08:00Z, LA midnight). Per monetization-pm, citing Apple's start-times table, a change scheduled for 2027-01-01 starts in the US at 2027-01-01 04:00Z (11 pm ET on Dec 31), which breaks Terms §14.8; a 2027-01-02 schedule starts at 2027-01-02 04:00Z (11 pm ET / 8 pm PT on Jan 1). Apple's table renders its times client-side, so the 04:00Z figure is not independently checked here; monetization-pm's setup §3d records the time App Store Connect shows, and the constant moves if it differs. The comment block, api-reference row and cross-client-invariants SKU rows + fallback bullet say the same.
 - **Tests (`test_paywall_config.py`, 43):** both sides of the new instant (`2027-01-02T03:59:59Z` old, `04:00:00Z` new); the Jan-1 schedule's US start (`2027-01-01T04:00Z`) and the previous LA-midnight instant (`2027-01-01T08:00Z`) now serve the old prices; the constant equals 23:00 Jan 1 New York and 20:00 Jan 1 Los Angeles via `zoneinfo`, and the last second of Dec 31 in Honolulu is before it; time-zone instants (NY 23:00 Dec 31 old, LA midnight Jan 1 old, NY 22:59:59 Jan 1 old, NY 23:00 Jan 1 new, LA 20:00 Jan 1 new, Paris 00:30 Jan 1 old). 43 passed.
 - **Sabotage, each red then restored:** the old 2027-01-01 08:00Z instant → 6 red; a Jan-1 schedule's 2027-01-01 04:00Z → 9 red.
+
 ## 2026-10-29 — #521 QA P3s: the drafted-league retry, the retry lock-free, no retry on a pool timeout; deck pipeline v8
 
 Gates: release-lead's #521 QA (GO-with-notes), P3-1 to P3-3. Follows #521. P3-4 (the PR body) is fixed on #521 itself. No route, schema, flag or event change. Deck pipeline v8, digest `f7ed33e6ab94af03`; models-eng classifies. Only stored pages carry the version, and `trade.first_page_store` is off in prod, so nothing is invalidated there. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -678,6 +687,7 @@ Gates: release-lead's #521 QA (GO-with-notes), P3-1 to P3-3. Follows #521. P3-4 
   - the timeout retried (draft / picks);
   - `_is_pool_timeout` always False.
 - **Suites:** freshness-roster, digest, page store, p2, filter inputs, deferred evidence: 437 passed.
+
 ## 2026-10-29 — #523 QA: account rights reach pruned decks' outcomes; id-bounded legacy delete; P3s
 
 Gates: release-lead's #523 QA (GO-with-notes to merge dark; "fix two things in this PR"). Same PR, still dark (cap 0). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -772,6 +782,7 @@ Gates: release-lead's #530 QA (GO-with-notes), three P3 test gaps and a docstrin
 - **Docstring:** `_trade_rebase_job_current` no longer says P1 rejects a None stamp "on any read". The head is stricter than P1: `_trade_fingerprints_match` keeps a running None-stamp job on a failed read, and at mode 0. Here it kicks.
 - **Sabotages:** QA's Q1 (None guard on complete jobs only), Q5 (signature dropped on the failed path), Q6 (missing keeps the old shortcut) and Q7 (missing compared as an ok read) are now red in the suite (2, 4, 6 and 4 tests). The original four (TE1–TE4) are still red.
 - **Evidence:** `test_trade_pages_p2.py` (128), `test_trade_page_store.py`, `test_trade_freshness_roster.py` and the digest: 314 passed.
+
 ## 2026-10-28 — The repeat cap re-applied to the displayed order at a serve (models-lead addendum D3)
 
 Gates: models-lead's ruling D3 (a disposition cut that pulls a deferred card into the displayed first 30 counts as a B-DK-7 violation; the fix is to re-apply the cap after serve-time withdrawals, cuts and I-1 at mode 2), via head-eng ("build it now", after #489 and #492). Not flip-gating; due before the launch-week freeze. It adds one optional run key to the pack header, `display_moves`, agreed with models-eng. models-eng's #501 is the reader, and either PR can merge first. No route, schema, flag, knob or event change. No pipeline bump: it is a serve-time order, `deck_quality.py` is untouched, and the digest test passes unchanged. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -1021,6 +1032,7 @@ Gates: release-lead's #489 delta QA, P3-1 to P3-3. Tests, docs and three small s
   - a second worker draft read;
   - the exit drain without a restart;
   - no after-write flush. Its first form, a log assertion, stayed green in the full file because another test's idle worker logged the shared counter; it's now pinned by the call on the test's own queue.
+
 ## 2026-10-28 — Rebase case 2's failed-read path runs every other check (#520 QA P3s)
 
 Gates: release-lead's #520 QA, P3-1 to P3-3, on main after #520 merged (flag-dark behind `trade.first_page_store`). No route, schema, flag or knob change; serve path only, no pipeline change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -1037,6 +1049,7 @@ Gates: release-lead's #520 QA, P3-1 to P3-3, on main after #520 merged (flag-dar
   - a failed read kicking (2 red);
   - no None-stamp guard;
   - the epoch check after the shortcut (4 red; one of QA's two green probes).
+
 ## 2026-10-28 — One retry inside the job's picks and draft-context reads (#487 QA P3-3, models-eng); deck pipeline v7
 
 Gates: release-lead's #487 QA P3-3 (owner-exclusive forfeits on a transient first picks-read failure: 0 owner cards, where main re-read and served 348), and models-eng's ruling and v7 shape. Stacked on #515 (v6). No route, schema, flag or knob change. `DECK_PIPELINE_VERSION` 6 → 7 (`facf9a9f34b7529a`): only `_run_trade_job`'s two memos changed. models-eng reviews. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -1076,6 +1089,7 @@ Full gates (scope `docs/plans/prelaunch-onboarding/scope-account-only-verificati
   - **Sabotage 11/11 red:** QA's P1 reverted, demo looked up, an extra top-level key, an extra key in the unverified answer, the query user_id answered, X-User-Id looked up, a 401-path probe, plus round 1's 4 re-run.
 - **Mobile:** `check-account-only-verification.js`, 5 AST pins (pin 3 is now unawaited; pin 5 is the `setUser` reset). **Sabotage:** 7/7 red in round 1, and 5/5 on the new and changed pins. tsc clean; `check-win-now-recovery` passes.
 - **Runs:** see the PR (the full `check-*.js` loop, testid-lint, backend suites).
+
 ## 2026-10-28 — Settings tip row: hidden unless the cached paywall config offers tips (B8 gate, off main)
 
 Gates: head-eng's extraction of #495's B8 tip-row gate after release-lead's #494 QA (with `monetize.paywall` on, a binary without the gate shows "Support Fleeced · Tip jar", which opens an empty sheet now that the server serves `tips: []`). Branch `fix/settings-tip-row-gate`. User-visible (a row hides); no route, schema, flag or analytics change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is the structural suite, an executed check, a sabotage pass, tsc, testid-lint and a code walk.
@@ -1096,6 +1110,7 @@ Gates: head-eng's extraction of #495's B8 tip-row gate after release-lead's #494
   - `tsc --noEmit`: exit 0, clean.
   - `testid-lint OK`.
 - **TestFlight (operator):** with `monetize.paywall` on and the server serving `tips: []`, open Settings. Neither the hub (`account.settings_hub` on) nor the flat Settings (off) shows a "Support Fleeced" row, and "Fleeced Pro" still shows on both. Older installed builds without this gate still show the empty sheet (accepted by head-eng).
+
 ## 2026-10-28 — B5 launch copy, trades-eng's items 1, 3, 4 (marketing-lead addendum 10)
 
 **Gates:**
@@ -2284,6 +2299,7 @@ DECISIONS → Home renumbered D-198, TEST_LEDGER, nav README — all kept both s
 the merged tree: `tsc --noEmit` clean; `check-home-tab` 34/34; `check-blind-grading` pass;
 `check-canvas-results`, `check-rank-nav-exit` pass; testid-lint OK; release.json mirror tests
 3/3. Full pytest left to hosted CI on PR #309.
+
 ## 2026-10-08 — ESPN picks fix (#314) live; operator's ESPN Calibration deck built
 
 - CI 4/4 green on head `3aa730c7`; merged as `4de823ad`; Render `dep-db3qilqd0e5s73b6tgfg` live 2026-10-08.
@@ -2372,6 +2388,7 @@ into `feat/value-core-engine`, lead-reviewed. Local Python 3.14 (no 3.12 here; C
   separate variant budget).
 Evidence delta: unit + e2e tests and the WP3 [code-walk](../docs/plans/value-core-engine/code-walk.md); no mobile change,
 so no TestFlight checklist is due until the flag is flipped.
+
 ## 2026-10-05b — SQLAlchemy pin (PR #311) and production deploy of #310 + #311
 
 Branch `fix/pin-sqlalchemy-2-0` from `origin/main` `85428813`. Hosted CI 4/4 green
