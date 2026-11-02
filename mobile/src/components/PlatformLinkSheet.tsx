@@ -47,15 +47,23 @@ interface Props {
    *  SignInScreen hosts this sheet with NO session). Preview goes through
    *  the sessionless /api/entry/platform; picking a franchise MINTS the
    *  entry session first (delivered via onEntrySession), then runs the
-   *  canonical import under the fresh token. v2.1: the `mfl.auth_link`
-   *  username/password path is available here too, routed through the
-   *  sessionless `auth_leagues` action and SINGLE-select (the franchise is
-   *  already known, so a league tap mints directly).
+   *  canonical /api/mfl/link import under the fresh token — but that path
+   *  has no login, so the proof-based server refuses its mint with a
+   *  readable proof_required. v2.1: the `mfl.auth_link` username/password
+   *  path lists leagues through the sessionless `auth_leagues` action and is
+   *  SINGLE-select (the franchise is already known): a league tap mints with
+   *  the login as proof, then /api/mfl/auth-link → /api/mfl/auth-import.
    *  Default off — linked flow byte-identical. */
   entry?: boolean;
   /** Entry mode only: the minted session's user, delivered BEFORE the
-   *  import runs so the host can pin it into useSession. */
-  onEntrySession?: (user: { user_id: string; display_name: string }) => void;
+   *  import runs so the host can pin it into useSession. `account_only` /
+   *  `username` are forwarded from the mint (absent from older servers). */
+  onEntrySession?: (user: {
+    user_id: string;
+    display_name: string;
+    account_only?: boolean;
+    username?: string;
+  }) => void;
 }
 
 const LABEL: Record<LinkPlatform, string> = { mfl: 'MFL', fleaflicker: 'Fleaflicker' };
@@ -92,9 +100,10 @@ export default function PlatformLinkSheet({
   // The password lives in component state just long enough to make the ONE
   // auth-link call (our backend uses it for MFL's login and never stores it);
   // it is cleared the moment the call returns and never logged or echoed.
-  // v2.1: entry mode gets the sign-in path too — routed through the
-  // SESSIONLESS /api/entry/platform `auth_leagues` action instead of
-  // /api/mfl/auth-link (which requires the session entry doesn't have yet).
+  // v2.1: entry mode gets the sign-in path too — the league list comes from
+  // the SESSIONLESS /api/entry/platform `auth_leagues` action (no session
+  // exists yet); /api/mfl/auth-link runs only after the league tap's mint
+  // (see mflEntryPickLeague and entryMflPassRef).
   const mflAuthEnabled = useFlag('mfl.auth_link') && platform === 'mfl';
   const [showMflAuth, setShowMflAuth] = useState(false);
   const [mflUser, setMflUser] = useState('');
@@ -103,11 +112,23 @@ export default function PlatformLinkSheet({
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [authResult, setAuthResult] = useState<MflAuthImportResult | null>(null);
   // Entry mode only: the password, held OUTSIDE React state (never rendered,
-  // never in `dirty`, never logged) for exactly one more use — the
-  // best-effort re-store of the MFL credential under the freshly minted
-  // session, so "Send in MFL" works later. Dropped the moment that call is
-  // made, on reset, and whenever the flow leaves the sign-in path.
+  // never in `dirty`, never logged) for the league tap that follows: the
+  // mint (the login is the proof of team ownership), then mflAuthLink, which
+  // stores the MFL cookie the import reads private leagues with. Dropped once
+  // mflAuthLink succeeds, on reset, and whenever the flow leaves the sign-in
+  // path.
   const entryMflPassRef = useRef<string>('');
+  // Entry mode only: how far the league tap got (mint → auth-link → import),
+  // so a retry resumes at the failed step instead of re-minting without the
+  // password. Account-level, not per league: the minted session and the
+  // stored MFL cookie serve any league this login can see.
+  const entryMflMintedRef = useRef(false);
+  const entryMflAuthLinkedRef = useRef(false);
+  function clearEntryMflSignIn() {
+    entryMflPassRef.current = '';
+    entryMflMintedRef.current = false;
+    entryMflAuthLinkedRef.current = false;
+  }
 
   // Teardown PRD 01-01 audit hit (same hazard as EspnLinkSheet), flag
   // `ux.sheet_guard`: OFF — every close resets (backdrop tap wipes typed
@@ -136,7 +157,7 @@ export default function PlatformLinkSheet({
     setShowMflAuth(false);
     setMflUser('');
     setMflPass('');
-    entryMflPassRef.current = '';
+    clearEntryMflSignIn();
     setAuthLeagues(null);
     setSelected({});
     setAuthResult(null);
@@ -248,9 +269,10 @@ export default function PlatformLinkSheet({
     setBusyTeamId(teamId);
     setError(null);
     try {
-      // Entry mode: the claim MINTS the session first (deterministic
-      // entry:mfl:… id; the api fn stores the token), hands the user to the
-      // host, then the canonical import below runs under the fresh token.
+      // Entry mode (league-ID path): the claim MINTS the session first (the
+      // api fn stores the token), hands the user to the host, then the
+      // canonical /api/mfl/link import below runs under it. No login rides
+      // this mint, so the proof-based server refuses it (proof_required).
       if (entry) {
         const minted = await entryPlatformMint({
           platform: 'mfl',
@@ -261,6 +283,8 @@ export default function PlatformLinkSheet({
         onEntrySession?.({
           user_id: minted.user_id,
           display_name: minted.display_name,
+          account_only: minted.account_only,
+          username: minted.username,
         });
       }
       const res = await linkPlatformLeague({
@@ -320,7 +344,7 @@ export default function PlatformLinkSheet({
         setMflPass(''); // transient — done with it the moment the call returns
         setAuthLeagues(leagues);
         if (leagues.length === 0) {
-          entryMflPassRef.current = '';
+          clearEntryMflSignIn();
           setError(`No MFL leagues found for ${year}.`);
         } else {
           entryMflPassRef.current = pass;
@@ -342,7 +366,7 @@ export default function PlatformLinkSheet({
       }
     } catch (e: any) {
       setMflPass('');
-      entryMflPassRef.current = '';
+      clearEntryMflSignIn();
       if (e instanceof ApiError && (e.body as any)?.error === 'mfl_bad_credentials') {
         setError("MFL didn't accept that username and password.");
       } else if (e instanceof ApiError && e.isVerificationRequired) {
@@ -356,10 +380,14 @@ export default function PlatformLinkSheet({
   }
 
   // v2.1 entry mode: ONE tap = the whole door. myleagues already told us the
-  // user's franchise in this league, so there is no team-claim step —
-  // mint → hand the session to the host → canonical import under the fresh
-  // token. Deliberately NOT the multi-select /api/mfl/auth-import path: that
-  // is a session-scoped BULK import, and entry claims exactly one league.
+  // user's franchise in this league, so there is no team-claim step. Three
+  // steps, each skipped on a retry once it has succeeded:
+  //   1. mint, with the login as the proof of ownership → a VERIFIED session,
+  //      handed to the host;
+  //   2. mflAuthLink stores the MFL cookie under it (required, not
+  //      best-effort: the import reads private leagues with that cookie);
+  //   3. mflAuthImport of exactly this one league (never the default-ALL
+  //      bulk import), the same calls as the non-entry mflImportSelected.
   async function mflEntryPickLeague(lg: MflAuthLeague) {
     if (!lg.franchise_id || busyTeamId !== null) return;
     const franchiseId = lg.franchise_id;
@@ -367,42 +395,51 @@ export default function PlatformLinkSheet({
     setBusyTeamId(lg.league_id);
     setError(null);
     try {
-      const minted = await entryPlatformMint({
-        platform: 'mfl',
-        leagueInput: lg.league_id,
-        year: yr,
-        teamId: franchiseId,
-      });
-      onEntrySession?.({
-        user_id: minted.user_id,
-        display_name: minted.display_name,
-      });
-      const res = await linkPlatformLeague({
-        platform,
-        leagueInput: lg.league_id,
-        year: yr,
-        teamId: franchiseId,
-      });
-      // Best-effort, non-blocking: now that a session exists, re-store the
-      // MFL credential under it so "Send in MFL" works later. The league is
-      // already imported at this point, so a failure here costs a nicety,
-      // never the entry — swallowed silently. The password is dropped first,
-      // so it cannot outlive this one call.
-      const pass = entryMflPassRef.current;
-      entryMflPassRef.current = '';
-      if (pass) {
-        try {
-          await mflAuthLink(mflUser.trim(), pass, yr);
-        } catch {
-          /* credential storage is optional here — ignore */
-        }
+      if (!entryMflMintedRef.current) {
+        // Read, not cleared: step 2 still needs the password.
+        const minted = await entryPlatformMint({
+          platform: 'mfl',
+          leagueInput: lg.league_id,
+          year: yr,
+          teamId: franchiseId,
+          username: mflUser.trim(),
+          password: entryMflPassRef.current,
+        });
+        entryMflMintedRef.current = true;
+        onEntrySession?.({
+          user_id: minted.user_id,
+          display_name: minted.display_name,
+          account_only: minted.account_only,
+          username: minted.username,
+        });
       }
-      if (!isPlatformPreview(res)) {
-        setSummary(res);
-        setStep('done');
+      if (!entryMflAuthLinkedRef.current) {
+        await mflAuthLink(mflUser.trim(), entryMflPassRef.current, yr);
+        entryMflAuthLinkedRef.current = true;
+        entryMflPassRef.current = ''; // only once the cookie is stored
       }
+      const res = await mflAuthImport([lg.league_id], yr);
+      if (!res.imported.some((i) => i.league_id === lg.league_id)) {
+        // A per-league failure comes back in a 200. Stay on the list so a
+        // retry tap re-runs only the import.
+        const failed = res.failed.find((f) => f.league_id === lg.league_id);
+        setError(failed?.message || 'Import failed — try again.');
+        return;
+      }
+      setAuthResult(res);
+      setStep('auth-done');
     } catch (e: any) {
-      setError(e?.message || 'Import failed — try again.');
+      if (e instanceof ApiError && (e.body as any)?.error === 'mfl_auth_expired') {
+        clearEntryMflSignIn();
+        setAuthLeagues(null);
+        setStep('input');
+        setError('Your MFL sign-in expired — sign in again.');
+      } else if (e instanceof ApiError && e.isVerificationRequired) {
+        // Same copy as pickTeam: a message-less 403 never shows a raw code.
+        setError('Verify your account to link a league.');
+      } else {
+        setError(e?.message || 'Import failed — try again.');
+      }
     } finally {
       setBusyTeamId(null);
     }
@@ -518,6 +555,8 @@ export default function PlatformLinkSheet({
       ) : null}
     </>
   ) : null;
+  // Entry mode offers only the MFL sign-in when it's available (#421/#430).
+  const entrySignInOnly = !!(entry && mflAuthBlock);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={requestClose}>
@@ -544,40 +583,40 @@ export default function PlatformLinkSheet({
               </Text>
               {/* v2.1 — entry mode only: signing in is a first-class option
                   ABOVE the league-id field, mirroring the ESPN sheet. */}
-              {entry && mflAuthBlock ? (
+              {entry && mflAuthBlock ? mflAuthBlock : null}
+              {/* Entry mode with the sign-in block: no league-ID path. The
+                  proof-based mint (#430) refuses an ID on its own, so the
+                  field and its Continue could only fail (#570 QA P3). */}
+              {!entrySignInOnly ? (
                 <>
-                  {mflAuthBlock}
-                  <Text style={[type.bodySm, styles.skipNote]}>
-                    or enter a league ID below
-                  </Text>
+                  <TextInput
+                    testID="platform-link.input"
+                    style={styles.field}
+                    value={input}
+                    onChangeText={setInput}
+                    placeholder={
+                      platform === 'mfl'
+                        ? 'MFL league ID or league URL'
+                        : 'Fleaflicker league ID or URL'
+                    }
+                    placeholderTextColor={chalk.dim}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!busy}
+                  />
+                  {platform === 'mfl' ? (
+                    <TextInput
+                      testID="platform-link.year"
+                      style={styles.field}
+                      value={year}
+                      onChangeText={setYear}
+                      placeholder="Season year (e.g. 2026)"
+                      placeholderTextColor={chalk.dim}
+                      keyboardType="number-pad"
+                      editable={!busy}
+                    />
+                  ) : null}
                 </>
-              ) : null}
-              <TextInput
-                testID="platform-link.input"
-                style={styles.field}
-                value={input}
-                onChangeText={setInput}
-                placeholder={
-                  platform === 'mfl'
-                    ? 'MFL league ID or league URL'
-                    : 'Fleaflicker league ID or URL'
-                }
-                placeholderTextColor={chalk.dim}
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!busy}
-              />
-              {platform === 'mfl' ? (
-                <TextInput
-                  testID="platform-link.year"
-                  style={styles.field}
-                  value={year}
-                  onChangeText={setYear}
-                  placeholder="Season year (e.g. 2026)"
-                  placeholderTextColor={chalk.dim}
-                  keyboardType="number-pad"
-                  editable={!busy}
-                />
               ) : null}
 
               {!entry ? mflAuthBlock : null}
@@ -642,13 +681,15 @@ export default function PlatformLinkSheet({
               {error ? (
                 <Text testID="platform-link.error" style={styles.error}>{error}</Text>
               ) : null}
-              <Button
-                testID="platform-link.continue"
-                label={busy ? 'Fetching league…' : 'Continue'}
-                onPress={() => fetchPreview()}
-                disabled={busy}
-                style={styles.cta}
-              />
+              {!entrySignInOnly ? (
+                <Button
+                  testID="platform-link.continue"
+                  label={busy ? 'Fetching league…' : 'Continue'}
+                  onPress={() => fetchPreview()}
+                  disabled={busy}
+                  style={styles.cta}
+                />
+              ) : null}
             </>
           ) : null}
 
