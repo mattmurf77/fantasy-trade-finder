@@ -120,6 +120,8 @@ function sessionHarness() {
     '../api/client': h.client, '../api/auth': auth, '../api/winNow': winNow,
     '../api/league': {connectLeague: (...args) => providers.connect(...args)},
     '../api/sleeper': sleeper, '../api/purchases': {initPurchases: async () => {}},
+    // useSession's purchases identity bridge reads the pure predicate module.
+    './subscriptionSession': load('src/state/subscriptionSession.ts', name => { throw Error(`unexpected subscriptionSession import ${name}`); }, h.time),
     '../observability/sentry': {setUser: () => {}},
     './queryClient': {seedLeagueSessionCaches: (id, seed) => seeds.push({id, seed}), queryClient: {invalidateQueries: input => invalidations.push(input)}},
     '../api/rankings': {getActiveScoringFormat: async () => '1qb_ppr'},
@@ -149,6 +151,11 @@ function mountWinNow(h) {
     '../components/chalkline/Text': {}, '../components/FeedbackFAB': {},
     '../state/useSession': h.state, '../state/useFeatureFlags': {useFlag: name => name !== 'outlook.championship_probabilities'},
     '../api/winNow': h.winNow,
+    // #393 M2: the paywall's three imports. Dark here, as with
+    // monetize.paywall off: no gate answer, no enforcement, no pre-check.
+    '../api/client': {gateSignalFor: () => null},
+    '../state/useEntitlements': {useEntitlements: Object.assign(sel => sel({enforcing: false, pro: false}), {getState: () => ({enforcing: false, pro: false})})},
+    '../state/usePaywallGate': {isUnverifiedSession: () => false, openPaywall: () => {}, openVerify: () => {}},
     '../utils/winNow': {seasonStale: () => false},
     '../theme/chalkline': {ink: {}, chalk: {}, ice: {}, space: {}, radii: {}, type: {}},
   };
