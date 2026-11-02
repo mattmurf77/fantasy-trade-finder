@@ -555,6 +555,8 @@ export default function PlatformLinkSheet({
       ) : null}
     </>
   ) : null;
+  // Entry mode offers only the MFL sign-in when it's available (#421/#430).
+  const entrySignInOnly = !!(entry && mflAuthBlock);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={requestClose}>
@@ -580,40 +582,40 @@ export default function PlatformLinkSheet({
               </Text>
               {/* v2.1 — entry mode only: signing in is a first-class option
                   ABOVE the league-id field, mirroring the ESPN sheet. */}
-              {entry && mflAuthBlock ? (
+              {entry && mflAuthBlock ? mflAuthBlock : null}
+              {/* Entry mode with the sign-in block: no league-ID path. The
+                  proof-based mint (#430) refuses an ID on its own, so the
+                  field and its Continue could only fail (#570 QA P3). */}
+              {!entrySignInOnly ? (
                 <>
-                  {mflAuthBlock}
-                  <Text style={[type.bodySm, styles.skipNote]}>
-                    or enter a league ID below
-                  </Text>
+                  <TextInput
+                    testID="platform-link.input"
+                    style={styles.field}
+                    value={input}
+                    onChangeText={setInput}
+                    placeholder={
+                      platform === 'mfl'
+                        ? 'MFL league ID or league URL'
+                        : 'Fleaflicker league ID or URL'
+                    }
+                    placeholderTextColor={chalk.dim}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!busy}
+                  />
+                  {platform === 'mfl' ? (
+                    <TextInput
+                      testID="platform-link.year"
+                      style={styles.field}
+                      value={year}
+                      onChangeText={setYear}
+                      placeholder="Season year (e.g. 2026)"
+                      placeholderTextColor={chalk.dim}
+                      keyboardType="number-pad"
+                      editable={!busy}
+                    />
+                  ) : null}
                 </>
-              ) : null}
-              <TextInput
-                testID="platform-link.input"
-                style={styles.field}
-                value={input}
-                onChangeText={setInput}
-                placeholder={
-                  platform === 'mfl'
-                    ? 'MFL league ID or league URL'
-                    : 'Fleaflicker league ID or URL'
-                }
-                placeholderTextColor={chalk.dim}
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!busy}
-              />
-              {platform === 'mfl' ? (
-                <TextInput
-                  testID="platform-link.year"
-                  style={styles.field}
-                  value={year}
-                  onChangeText={setYear}
-                  placeholder="Season year (e.g. 2026)"
-                  placeholderTextColor={chalk.dim}
-                  keyboardType="number-pad"
-                  editable={!busy}
-                />
               ) : null}
 
               {!entry ? mflAuthBlock : null}
@@ -678,13 +680,15 @@ export default function PlatformLinkSheet({
               {error ? (
                 <Text testID="platform-link.error" style={styles.error}>{error}</Text>
               ) : null}
-              <Button
-                testID="platform-link.continue"
-                label={busy ? 'Fetching league…' : 'Continue'}
-                onPress={() => fetchPreview()}
-                disabled={busy}
-                style={styles.cta}
-              />
+              {!entrySignInOnly ? (
+                <Button
+                  testID="platform-link.continue"
+                  label={busy ? 'Fetching league…' : 'Continue'}
+                  onPress={() => fetchPreview()}
+                  disabled={busy}
+                  style={styles.cta}
+                />
+              ) : null}
             </>
           ) : null}
 

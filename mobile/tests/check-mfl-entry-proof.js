@@ -755,4 +755,39 @@ for (const rel of ['src/components/PlatformLinkSheet.tsx', 'src/components/EspnL
   );
 }
 
+// ── (e) entry mode offers no league-ID path beside the sign-in ────────────
+// #430's proof-based mint refuses an MFL league ID on its own, so in entry
+// mode (with the sign-in block available) the ID field, the season field
+// and their Continue would only fail (#570 QA P3). Each renders behind
+// `!entrySignInOnly`, and `entrySignInOnly` is `!!(entry && mflAuthBlock)`.
+{
+  const sheetSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'components', 'PlatformLinkSheet.tsx'), 'utf8');
+  const sheet = parse('src/components/PlatformLinkSheet.tsx');
+  const decl = findAll(sheet, (n) =>
+    ts.isVariableDeclaration(n) && n.name.getText() === 'entrySignInOnly')[0];
+  const init = decl && decl.initializer ? decl.initializer.getText().replace(/\s+/g, '') : '';
+  assert(init === '!!(entry&&mflAuthBlock)',
+    '(e) entrySignInOnly is !!(entry && mflAuthBlock)', init || 'missing');
+  for (const id of ['platform-link.input', 'platform-link.year', 'platform-link.continue']) {
+    const els = findAll(sheet, (n) =>
+      (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) &&
+      n.attributes.properties.some((a) => ts.isJsxAttribute(a) && a.name.getText() === 'testID' &&
+        !!a.initializer && a.initializer.getText() === `"${id}"`));
+    const ungated = els.filter((el) => {
+      for (let p = el.parent; p; p = p.parent) {
+        if (ts.isConditionalExpression(p) &&
+            p.condition.getText().replace(/\s+/g, '') === '!entrySignInOnly' &&
+            p.whenTrue.pos <= el.pos && el.end <= p.whenTrue.end) return false;
+      }
+      return true;
+    });
+    assert(els.length >= 1 && ungated.length === 0,
+      `(e) ${id} renders only when !entrySignInOnly`,
+      `${els.length} found, ${ungated.length} ungated`);
+  }
+  assert(!/or enter a league ID/i.test(sheetSrc),
+    '(e) the sheet has no "or enter a league ID" line', 'found');
+}
+
 process.exit(failures ? 1 : 0);

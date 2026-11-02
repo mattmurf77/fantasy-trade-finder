@@ -1,3 +1,12 @@
+## 2026-11-01 — #421: entry mode drops the MFL league-ID path (#570 QA P3, via release-lead)
+
+Gates: release-lead's ask, folded into frozen #421 for a delta re-check. Client only; no route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is the structural suite.
+
+- **Change:** `PlatformLinkSheet.tsx`. In entry mode, when the MFL sign-in block is available (`entrySignInOnly = !!(entry && mflAuthBlock)`), the league-ID field, the season field and their Continue don't render. #430's proof-based mint refuses an ID on its own, so that path could only fail. The "or enter a league ID below" line goes too, the same edit #570 makes. With the sign-in block unavailable (`mfl.auth_link` off), the sheet is unchanged.
+- **Pins:** `check-mfl-entry-proof.js` (e): the `entrySignInOnly` initializer; `platform-link.input`, `.year` and `.continue` each render only inside a `!entrySignInOnly ? … : null` branch; no "or enter a league ID" text. 61 PASS.
+- **Sabotage:** `.continue` ungated → (e) red (exit 1); restored → exit 0.
+- **Gate:** `npx tsc --noEmit` 0; testid-lint OK; 118/118 `check-*.js`.
+
 ## 2026-10-26 — MFL entry sign-in sends the login with the team-claim mint (proof-based sign-in, client half)
 
 Not express. Scope: platforms-eng's ESPN/MFL sign-in design §3 ("Client: the 11-06 binary"), onboarding-eng's review addition (forward `account_only` / `username`), the private-league follow-up (the entry sign-in path imports through the stored MFL cookie), and release-lead's QA notes on #421 @ `935eb2fd` (GO-with-notes: one P2, three P3s). Mobile only, draft PR #421 (`feat/mfl-signin-proof-client`). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
