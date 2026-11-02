@@ -87,7 +87,7 @@ free_agents[i].move_line:  string                     // optional; the server's 
   add_player_id:   string,          // FTF canonical (Sleeper) id
   drop_player_id?: string,
   move_kind:       "add" | "claim", // what the CTA named
-  faab_bid?:       number,          // claims only
+  faab_bid?:       number,          // a FAAB claim only, and only when the user typed one (0 is a real choice); never sent for an add or an empty field
   consent?:        { copy_version: string, locale: string },  // only from the consent step
   attempt_id:      string,          // one per tap; see the rule below
   surface?:        "free_agents" | "usage_trends"  // the sheet's host; the server records it on fa_move_consent_recorded and ignores any other value
@@ -138,7 +138,7 @@ Platform codes are `{platform}_<suffix>`. The client maps by **suffix**, so MFL 
 | Status | Code | State |
 |---|---|---|
 | 404 | `feature_disabled` | 1 Hand-off |
-| 400 | `bad_request` | 12-style neutral failure panel, no retry (a client bug; never shown in practice) |
+| 400 | `bad_request` | 12-style neutral failure panel, no retry (a client bug; never shown in practice). **One exception (scope §B11 rule 5):** the server answers 400 `bad_request` to a FAAB claim with no `faab_bid`, and **never defaults it to 0**. If the request was such a claim, the client returns to Ready in claim mode with the empty field and `bid_needed_line`: no retry button, no error screen |
 | 403 | `verification_required` | 4 Verify |
 | 409 | `{p}_not_linked` | 3 Connect |
 | 409 | `{p}_expired` | 4 Verify |
@@ -182,7 +182,7 @@ Any other 4xx with an unrecognised code: the 12-style panel with the server's `m
 
 Every slot is optional. Missing → the client's neutral fallback (never consent text, never "Sleeper doesn't allow apps to submit claims"). Templates use `{add}`, `{drop}`, `{bid}`, `{league}`, `{date}`, `{name}`, `{cta}`; the client fills them and leaves any unknown placeholder as is.
 
-- **`{bid}` is filled with the dollar sign**, e.g. `$7`, so server templates never add their own `$`. An empty bid on a claim fills as `$0`.
+- **`{bid}` is filled with the dollar sign**, e.g. `$7`, so server templates never add their own `$`. **An empty bid never fills** (scope §B11): a FAAB claim with an empty field disables the CTA and names it with the no-amount slot (`cta_claim_no_bid` / `cta_claim_drop_no_bid`), never "for $0". A typed `0` fills as `$0`.
 - **`{date}` is a short local date with no time**, e.g. `Nov 8`.
 - **A slot whose known placeholder has no value** (e.g. `{drop}` on an add with no drop) isn't shown; the client uses its fallback for that slot instead. Server templates for the drop variants live in `cta_add_drop` / `cta_claim_drop`, so this shouldn't arise.
 
@@ -198,6 +198,7 @@ Every slot is optional. Missing → the client's neutral fallback (never consent
 | `waiver_line` | a claim **with** a drop, under the CTA | R15.1 (`:766`): "This places a waiver claim for {add} (dropping {drop} if it clears). Sleeper processes it on its waiver schedule." |
 | `waiver_line_no_drop` | a claim **without** a drop | the same sentence with no parenthetical |
 | `bid_line` | under the waiver line, **only when the claim has a bid** | R15.1: "Bid: {bid}" |
+| `bid_needed_line` | under an **empty** FAAB bid field on a claim (states 6 and 10e; scope §B11 rule 1). Always visible, not only a VoiceOver hint | G25, pending marketing. Client fallback: `Enter a bid. $0 is allowed.` |
 | `window_line` | inside a consent window | `Adds authorized until {date}` |
 | `turn_off` | the window line's action | `Turn off` |
 | `do_in_platform` | every submit step | `Do it in Sleeper instead` |
