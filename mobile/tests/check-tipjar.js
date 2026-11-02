@@ -133,12 +133,12 @@ const beServer = read(BE_SERVER);
 
 // 5b/5c/5d — marketing addendum 15: final strings verbatim, old strings gone,
 //     the pending branch ahead of the generic failure. Comments are stripped
-//     and whitespace collapsed (JSX text wraps), so the held "one person"
-//     lede in its comment is not copy yet.
+//     and whitespace collapsed (JSX text wraps). The lede's "One person
+//     builds Fleeced." is in: the operator confirmed it on 2026-11-02.
 {
   const flat = s.replace(/\s+/g, ' ');
   const want = [
-    ['lede', 'If the app has earned a spot in your league routine, a tip helps keep it going. A tip unlocks nothing. It’s just a thank-you.', 1],
+    ['lede', 'One person builds Fleeced. If the app has earned a spot in your league routine, a tip helps keep it going. A tip unlocks nothing. It’s just a thank-you.', 1],
     ['thank-you body', 'Your tip helps keep Fleeced going.', 1],
     ['C2 (no product, no result)', "setError('Couldn’t load tips right now. Try again later.')", 2],
     ['purchase failure', "setError('The App Store didn’t finish the tip. Check your connection and try again.')", 1],

@@ -183,14 +183,10 @@ export default function TipJarScreen({ navigation, route }: any) {
           </View>
         ) : (
           <>
-            {/* Held until the operator confirms "one person" (marketing
-                addendum 15 row 3). If confirmed, the lede becomes:
-                One person builds Fleeced. If the app has earned a spot in
-                your league routine, a tip helps keep it going. A tip unlocks
-                nothing. It’s just a thank-you. */}
             <ChalkText variant="body" style={styles.lede}>
-              If the app has earned a spot in your league routine, a tip helps
-              keep it going. A tip unlocks nothing. It’s just a thank-you.
+              One person builds Fleeced. If the app has earned a spot in your
+              league routine, a tip helps keep it going. A tip unlocks nothing.
+              It’s just a thank-you.
             </ChalkText>
 
             {configQuery.isLoading ? (
