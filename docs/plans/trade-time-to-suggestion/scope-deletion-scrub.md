@@ -91,7 +91,7 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
 - The page store's cards keep serving through S0's I-1 check, and what that does depends on the mode.
   - **At `trade_i1_mode` 2** the person's `league_members` rows are gone, so a card receiving their assets fails I-1 and is withdrawn, never served.
   - **At prod's mode 1, I-1 doesn't withdraw it.** A deck already in memory when the deletion lands holds the person's real id and keeps serving until the scrub job ends. Stage 2 (#559) narrows this: it revokes in-process jobs at the deletion and drops redacted cards in every mode.
-  - **Eval is safe either way:** redacted cards are counted, never audited (G-a4 to G-a6). Whether the window is acceptable is with legal.
+  - **Eval is safe either way** (models-lead addendum Q): replay, e(k) and calibration exclude redacted decks; the B-DK audit and G3's joins keep them; the fit drops redacted cards. Whether the window is acceptable is with legal.
 
 ## 1. Analytics scope
 
