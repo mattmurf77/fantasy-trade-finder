@@ -45,6 +45,11 @@ Gates: full (schema/API/flag/analytics surfaces; no express). Mobile client only
   - **`check-fa-move`:** 80 passed, 0 failed (Z1 ×2 new: every changed string and the confirmed ones verbatim, filled forms, marketing's no-"we"/"failed"/"error"/"try again" rules; the A1 footer). X8's expected string updated.
   - **Sabotage, each red then restored (2; the unsabotaged copy green):** `window_line` reverted to "Moves authorized until {date}"; the footer reverted to "quick claim check".
   - **Gate re-run:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 122 of 122 exit 0.
+- **platforms-eng round 5 (same day; head-eng's design note, legal R28.26 / R28.27):**
+  - **Built:** (1) a working button keeps full brightness with its spinner and takes no tap: the named CTA and Make the move take `loading={busy}`, never `disabled` for busy, and #364's Button rule is ported verbatim (`dafa7e8f` + `8421283f` on `build/referral-binary`: only `disabled` dims; `loading` keeps the label's box and centres the spinner), so every `loading` site on this branch stops dimming too, as on #364; (2) "In {league}" always beside the named CTA, from the server's `league_line` or the fallback, with the host passing its league name (`leagueName` prop); no league to name, no named CTA; (3) "nothing was sent" only in state 11 (already true; now pinned). The analytics addendum gains `fa_move_consent_withdrawn.via`'s five values (`relink` only on a different token or user); the backend test lists only the four client events, so there's no `via` row to update.
+  - **`check-fa-move`:** 84 passed, 0 failed (B1 ×2, executed against the real Button with a stub React; B2; B3, a table over every failure state's fallback text). F8 updated for the busy rule.
+  - **Sabotage, each red then restored (4; the unsabotaged copy green):** B1a the named CTA dimmed while busy; B1b the Button dimming on `loading` again; B2 the league line from the server slot only; B3 a refusal fallback saying "Nothing was sent."
+  - **Gate re-run:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 122 of 122 exit 0; the taxonomy pytest selection 178 passed.
 
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 

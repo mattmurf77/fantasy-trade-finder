@@ -49,6 +49,7 @@ export default function FreeAgentsScreen() {
   const navigation = useNavigation<any>();
   const [filter, setFilter] = useState<PositionFilter>('ALL');
   const leagueId = useSession((s) => s.league?.league_id);
+  const leagueName = useSession((s) => s.league?.league_name);
   const isDemo = useSession((s) => s.isDemo);
   // S4 PRD-05 (ux.empty_state_ctas): the no-league state gets the action
   // its copy describes. Flag off: copy-only, as before.
@@ -234,6 +235,7 @@ export default function FreeAgentsScreen() {
           dropCandidates={query.data?.drop_candidates}
           move={claimMove}
           refetch={async () => (await query.refetch()).data}
+          leagueName={leagueName ?? null}
           onClose={() => setClaimTarget(null)}
         />
       ) : null}

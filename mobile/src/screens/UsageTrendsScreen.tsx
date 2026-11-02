@@ -113,7 +113,12 @@ export default function UsageTrendsScreen() {
   const [selectedWeeks, setSelectedWeeks] = useState<number[] | null>(null);
   const { width: screenWidth } = useWindowDimensions();
   // D1: `move` is the league's capability as read at the Add tap.
-  const [claim, setClaim] = useState<{ target: ClaimTarget; leagueId: string; move: FaMoveCapability | null } | null>(null);
+  const [claim, setClaim] = useState<{
+    target: ClaimTarget;
+    leagueId: string;
+    leagueName: string | null;
+    move: FaMoveCapability | null;
+  } | null>(null);
   // D1: the Add whose capability read is running (up to 3 s), shown busy.
   const [adding, setAdding] = useState<{ playerId: string; leagueId: string } | null>(null);
 
@@ -311,6 +316,8 @@ export default function UsageTrendsScreen() {
     setClaim({
       target: { player_id: p.player_id, name: p.name, position: p.position, team: p.team, ...cap.row },
       leagueId: lgId,
+      // The tapped league's name, for the named CTA's "In {league}" (R28.26).
+      leagueName: (leagues ?? []).find((l) => l.league_id === lgId)?.name ?? null,
       move: cap.move,
     });
   };
@@ -711,6 +718,7 @@ export default function UsageTrendsScreen() {
           dropCandidates={faQuery.data?.drop_candidates}
           move={claim.move}
           refetch={async () => (await faQuery.refetch()).data}
+          leagueName={claim.leagueName}
           onClose={() => setClaim(null)}
         />
       ) : null}

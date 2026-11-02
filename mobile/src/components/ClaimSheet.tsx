@@ -186,6 +186,7 @@ export default function ClaimSheet({
   dropCandidates,
   move: openedWith,
   refetch,
+  leagueName: hostLeagueName,
   onClose,
 }: {
   row: ClaimTarget;
@@ -200,16 +201,20 @@ export default function ClaimSheet({
   move?: FaMoveCapability | null;
   /** D1: re-reads the host's FA list (after Connect, and on 10e). */
   refetch?: () => Promise<FreeAgentsResponse | undefined>;
+  /** D1: the host's name for this league. The named CTA names it (R28.26,
+   *  D10(a)); absent, the session's league list is asked. */
+  leagueName?: string | null;
   onClose: () => void;
 }) {
   const navigation = useNavigation<any>();
   const queryClient = useQueryClient();
   const { height: windowHeight } = useWindowDimensions();
-  const leagueName = useSession(
+  const sessionLeagueName = useSession(
     (s) =>
       (s.leagues ?? []).find((l) => l.league_id === leagueId)?.name ??
       (s.league?.league_id === leagueId ? s.league.league_name : null),
   );
+  const leagueName = hostLeagueName || sessionLeagueName || null;
 
   const [bid, setBid] = useState('');
   const [dropId, setDropId] = useState<string | null>(null);
@@ -819,19 +824,25 @@ export default function ClaimSheet({
   if (view.step === 'handoff') {
     actionBlock = handoffBlock;
   } else if (view.step === 'ready') {
+    // R28.26 / D10(a): the league is named beside the named CTA in every step
+    // that shows it: the server's league_line, else "In {league}" with the
+    // host's league name. A move whose league can't be named gets no named
+    // CTA (the hand-off instead).
     const leagueLine = slot('league_line');
-    actionBlock = (
+    actionBlock = !leagueLine ? handoffBlock : (
       <>
         {focusLine(view.ctaNotice?.text, view.ctaNotice?.tone === 'neg' ? sheetStyles.negLine : sheetStyles.chalkLine)}
-        {leagueLine ? <Text style={sheetStyles.dimLine}>{leagueLine}</Text> : null}
+        <Text style={sheetStyles.dimLine}>{leagueLine}</Text>
         {needsDrop ? <Text style={sheetStyles.dimLine}>{fallback('drop_to_make_room')}</Text> : null}
-        {/* D10: the label names the move; it wraps, never truncates. */}
+        {/* D10: the label names the move; it wraps, never truncates. While
+            busy it keeps full brightness with its spinner and takes no tap
+            (#364's busy rule: `loading`, not `disabled`). */}
         <Button
           testID="fa-claim.make-move"
           label={ctaLabel}
           variant="primary"
-          loading={sending}
-          disabled={busy || needsDrop || (kind === 'claim' && bidTooHigh)}
+          loading={busy}
+          disabled={needsDrop || (kind === 'claim' && bidTooHigh)}
           onPress={() => void onNamedCta()}
           style={sheetStyles.namedCta}
         />
@@ -896,8 +907,8 @@ export default function ClaimSheet({
           testID="fa-claim.make-move"
           label={view.block.button_label}
           variant="primary"
-          loading={sending}
-          disabled={!ticked || busy}
+          loading={busy}
+          disabled={!ticked}
           accessibilityHint={ticked ? undefined : fallback('tick_hint') ?? undefined}
           onPress={() => void send(consentEcho(view.block), false)}
         />

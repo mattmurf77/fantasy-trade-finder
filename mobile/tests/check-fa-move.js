@@ -72,6 +72,12 @@
 //       (Verify), the move route's plan, never F4's hand-off              [executed + AST]
 //   Y3  fa_move_connect_shown records an unknown connect value as
 //       `unknown` (analytics-lead); the UI still shows the connect step    [executed + AST]
+// Round 5 (head-eng's design note; legal R28.26 / R28.27):
+//   B1  a working button keeps full brightness with its spinner, takes no
+//       tap (#364's Button: `loading`, not `disabled`)                     [executed + AST]
+//   B2  "In {league}" beside the named CTA in every step that shows it,
+//       with the server slot absent, from the host's league name          [executed + AST]
+//   B3  "nothing was sent" only in state 11 (and F4), never 10f or 13      [executed table]
 // Round 4 (marketing-lead's final copy, addendum 17 §A):
 //   Z1  every changed fallback verbatim (A3.1–A3.9), the confirmed ones
 //       (A2, G22, G23, the bid line), and the Usage Trends footer (A1)     [executed + text]
@@ -571,13 +577,12 @@ process.on('exit', () => {
   await check('F8 Make the move is disabled until ticked; the named CTA is loading and disabled while sending', () => {
     const consent = actionBranches(claim).consent;
     const make = jsxMounts(claim, 'Button', consent).filter((m) => m.attrs.testID === '"fa-claim.make-move"');
-    expect(make.length === 1 && /!ticked/.test(make[0].attrs.disabled || '') && /busy/.test(make[0].attrs.disabled),
-      `consent Make the move disabled=${make[0] && make[0].attrs.disabled}`);
+    expect(make.length === 1 && /!ticked/.test(make[0].attrs.disabled || '') && make[0].attrs.loading === '{busy}',
+      `consent Make the move disabled=${make[0] && make[0].attrs.disabled} loading=${make[0] && make[0].attrs.loading}`);
     expect(make[0].attrs.onPress === '{() => void send(consentEcho(view.block), false)}', 'Make the move sends the echo');
     const ready = actionBranches(claim).ready;
     const cta = jsxMounts(claim, 'Button', ready).filter((m) => m.attrs.testID === '"fa-claim.make-move"');
-    expect(cta.length === 1 && cta[0].attrs.loading === '{sending}' && /busy/.test(cta[0].attrs.disabled),
-      'the named CTA');
+    expect(cta.length === 1 && cta[0].attrs.loading === '{busy}', 'the named CTA is loading (inactive) while busy');
     expect(/const busy = sending \|\| loadingConsent;/.test(claimText), 'busy covers sending');
   });
 
@@ -1171,6 +1176,95 @@ process.on('exit', () => {
       expect(/reason: connectShownReason\(override \?\? move\?\.connect\)/.test(declText(claim, 'trackConnectShown')), 'the sheet records through it');
       const cp = h.plan.copyFns({ ...SUBMIT, connect: 'banana' }, { league: 'L', name: 'A' });
       eq(h.plan.initialView({ ...SUBMIT, connect: 'banana' }, {}, cp).step, 'connect', 'the UI is the plain connect step');
+    });
+  }
+
+  // ── Review round 5: B1, B2, B3 ───────────────────────────────────────────
+  {
+    // The real chalkline Button, rendered with a stub React that returns the
+    // element tree (no React Native).
+    function loadButton() {
+      const out = ts.transpileModule(read(BUTTON), {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React },
+      }).outputText;
+      const el = (type, props, ...children) => ({ type, props: { ...(props || {}), children } });
+      const React = { createElement: el, Fragment: 'Fragment' };
+      const token = new Proxy({}, { get: () => new Proxy({}, { get: () => 8 }) });
+      const mod = { exports: {} };
+      new Function('module', 'exports', 'require', out)(mod, mod.exports, (n) => {
+        if (n === 'react') return { default: React, ...React };
+        if (n === 'react-native') {
+          return { ActivityIndicator: 'ActivityIndicator', Pressable: 'Pressable', View: 'View',
+            StyleSheet: { create: (o) => o, absoluteFillObject: { position: 'absolute' } } };
+        }
+        if (n === '../../theme/chalkline') return token;
+        if (n === '../../state/useFeatureFlags') return { useFlag: () => false };
+        if (n === './Text') return { default: 'Text' };
+        if (n === './Icon') return { default: 'Icon' };
+        throw new Error(`Button gained an import: ${n}`);
+      });
+      return mod.exports.default;
+    }
+    const flat = (a) => (Array.isArray(a) ? a.flatMap(flat) : [a]);
+    await check('B1 the Button: `loading` is inactive and busy at full brightness; only `disabled` dims (#364)', () => {
+      const Button = loadButton();
+      const render = (props) => {
+        const e = Button({ label: 'Add A', onPress: () => {}, ...props });
+        return { e, dim: flat(e.props.style({ pressed: false })).some((x) => x && x.opacity === 0.45) };
+      };
+      const busy = render({ loading: true });
+      expect(busy.e.props.disabled === true && busy.e.props.accessibilityState.busy === true, 'loading takes no tap and is busy');
+      expect(busy.dim === false, 'loading dims the button');
+      expect(render({ disabled: true }).dim === true && render({ disabled: true, loading: true }).dim === true, 'disabled must dim');
+      expect(render({}).dim === false && render({}).e.props.disabled === false, 'idle');
+    });
+    await check('B1 the named CTA and Make the move are busy through `loading` only, never the disabled dim', () => {
+      const ready = jsxMounts(claim, 'Button', actionBranches(claim).ready).filter((m) => m.attrs.testID === '"fa-claim.make-move"');
+      const make = jsxMounts(claim, 'Button', actionBranches(claim).consent).filter((m) => m.attrs.testID === '"fa-claim.make-move"');
+      for (const [name, m] of [['named CTA', ready[0]], ['Make the move', make[0]]]) {
+        expect(m && m.attrs.loading === '{busy}' && !/busy|sending/.test(m.attrs.disabled || ''), `${name}: loading=${m && m.attrs.loading} disabled=${m && m.attrs.disabled}`);
+      }
+      expect(/if \(busy\) return;/.test(declText(claim, 'onNamedCta')) && /sendingRef\.current\) return;/.test(declText(claim, 'send')),
+        'taps stay ignored while busy');
+    });
+  }
+  {
+    const h = harness();
+    await check('B2 "In {league}" beside the named CTA with the server slot absent, from the host\'s league name', () => {
+      eq(h.plan.copyFns({ ...SUBMIT, copy: {} }, { league: 'Dynasty Bros', name: 'A' }).slot('league_line'), 'In Dynasty Bros', 'fallback filled');
+      eq(h.plan.copyFns({ ...SUBMIT, copy: { league_line: 'League: {league}' } }, { league: 'Dynasty Bros', name: 'A' }).slot('league_line'),
+        'League: Dynasty Bros', 'the server slot when sent');
+      eq(h.plan.copyFns({ ...SUBMIT, copy: {} }, { league: null, name: 'A' }).slot('league_line'), null, 'no league, no line');
+      const ready = actionBranches(claim).ready.getText(claim);
+      expect(/const leagueLine = slot\('league_line'\);/.test(ready) && /actionBlock = !leagueLine \? handoffBlock : \(/.test(ready)
+        && /<Text style=\{sheetStyles\.dimLine\}>\{leagueLine\}<\/Text>/.test(ready), 'the ready step always names the league, or shows no named CTA');
+      expect(/const leagueName = hostLeagueName \|\| sessionLeagueName \|\| null;/.test(claimText), 'the host\'s name first');
+      expect(/leagueName=\{leagueName \?\? null\}/.test(read(FREE_AGENTS)) && /leagueName=\{claim\.leagueName\}/.test(read(USAGE_TRENDS))
+        && /leagueName: \(leagues \?\? \[\]\)\.find\(\(l\) => l\.league_id === lgId\)\?\.name \?\? null,/.test(read(USAGE_TRENDS)), 'both hosts pass it');
+    });
+    await check('B3 "nothing was sent" only in state 11; never 10f or 13, in any fallback the client shows', () => {
+      const cp = h.plan.copyFns(SUBMIT, { league: 'L', name: 'A' });
+      const text = (v) => (v ? [v.title, ...(v.lines || []), v.line, v.ctaNotice && v.ctaNotice.text, v.dropNotice && v.dropNotice.text].filter(Boolean).join(' | ') : '');
+      const cases = [[404, 'feature_disabled'], [400, 'bad_request'], [403, 'verification_required'], [409, 'sleeper_not_linked'],
+        [409, 'sleeper_expired'], [409, 'consent_required'], [422, 'roster_full_drop_required'], [422, 'asset_not_owned'],
+        [422, 'player_unavailable'], [422, 'waiver_bid_over_budget'], [422, 'waiver_claim_unsupported'], [409, 'sleeper_rejected'],
+        [502, 'sleeper_write_failed'], [502, 'sleeper_write_failed', 'network'], [502, 'sleeper_write_failed', 'roster_read'],
+        [503, 'sleeper_unconfigured'], [502, 'sleeper_outcome_unknown'], [409, 'move_in_progress'], [500, 'internal_error'], [418, 'teapot']];
+      const rows = [];
+      for (const [st, code, kind] of cases) {
+        const f = h.faMove.classifyMoveError(apiErr(h, st, { error: code, ...(kind ? { kind } : {}) }));
+        rows.push([f.state, text(h.plan.planFailure(f, cp).view)]);
+      }
+      for (const f of [h.faMove.classifyMoveError(apiErr(h, 0, null, true)), h.faMove.classifyMoveError(new TypeError('x'))]) {
+        rows.push([f.state, text(h.plan.planFailure(f, cp).view)]);
+      }
+      rows.push(['kind_changed', text(h.plan.planKindChanged(undefined, { move: SUBMIT, kind: 'add', said: null, connect: null, playerId: 'p', copy: cp }).view)]);
+      rows.push(['not_sent', text(h.plan.planNotSent(cp).view)]); // offline at the tap
+      const wrong = rows.filter(([state, t]) => /nothing was sent/i.test(t) !== (state === 'not_sent'));
+      eq(wrong, [], '[state, text] where "nothing was sent" is wrong or missing');
+      const keys = Object.entries(h.faMove.FA_MOVE_FALLBACK_COPY).filter(([, v]) => /nothing was sent/i.test(v)).map(([k]) => k);
+      eq(keys, ['not_sent_line'], 'fallbacks that say "nothing was sent"');
+      for (const st of ['platform_refused', 'rejected']) expect(rows.some(([s]) => s === st), `${st} not covered`);
     });
   }
 
