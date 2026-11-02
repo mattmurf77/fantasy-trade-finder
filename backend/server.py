@@ -22018,8 +22018,8 @@ def _record_shop_send_signal(sess, *, league_id, their_user_id, give_ids,
                     scoring_format = _active_format(sess),
                 )
             except Exception as swipe_err:
-                log.warning("shop send: swipe persist failed (row and event kept): %s",
-                            swipe_err)
+                log.warning("shop send: swipe persist failed (row and event kept) "
+                            "user=%s trade=%s: %s", g_user_id, trade_id, swipe_err)
             record_event(
                 g_user_id,
                 "trade_proposed",

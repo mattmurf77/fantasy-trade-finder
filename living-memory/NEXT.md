@@ -59,6 +59,7 @@ Product logged both on 2026-11-01 as fine for launch (release-lead's #577 QA, P3
 
 1. **A sent package stays out of the sender's deck until the proposal resolves, or for at least 30 days.** Today a Shop send's `decision = "send"` row is decided only through the D-067 discovery keys' 7-day like window. The pre-#574 Shop like sat in Awaiting and was excluded by R4 for as long as it was live. *Why:* without this, a trade the user already sent on the platform can come back to their deck after a week.
 2. **A later calculator ✓ of a package already sent adds no second Elo update.** `find_live_trade_like` reads likes only, so the queue route doesn't see the send row's shared `calcq_` id. The ✓ should still record its like and card, without the Elo. *Why:* head-product's "no double count" covers send then queue, not just queue then send.
+3. **If analytics-lead wants "the event mirrors the row" on `calc_queue` too** (release-lead's #577 QA, pre-existing): the queue route (`server.py`, `queue_trade_for_opponent`) fires `trade_proposed` inside the same `try` as its swipe persist, so a raised `save_trade_swipes` drops the event although the like row is written. That's the opposite of the Shop send, which fires on the row. *Why:* it's analytics-lead's call whether `calc_queue` should match.
 
 ## 2026-10-15 — Daily tick dies at the 120 s worker timeout every day: move its inline work off the request thread
 

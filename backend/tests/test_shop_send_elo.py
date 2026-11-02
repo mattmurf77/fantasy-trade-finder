@@ -29,6 +29,7 @@ route refuses a non-numeric one before anything else).
 """
 
 import json
+import logging
 from unittest.mock import patch
 
 import pytest
@@ -425,12 +426,17 @@ def test_sending_to_yourself_records_nothing_even_when_you_are_a_member(monkeypa
         gen.close()
 
 
-def test_the_event_follows_the_row_even_if_the_swipe_persist_fails(world):
+def test_the_event_follows_the_row_even_if_the_swipe_persist_fails(world, caplog):
     """Once the send row commits, `trade_proposed` fires: a failed
-    `save_trade_swipes` loses only that signal's replay, never the event."""
+    `save_trade_swipes` loses only that signal's replay, never the event. The
+    WARNING names the user and the trade, so eng can replay the lost swipe."""
     _client, engine, sess, service, _tsvc, _league = world
+    caplog.set_level(logging.WARNING, logger="trade_finder")
     with patch.object(server, "save_trade_swipes", side_effect=RuntimeError("db blip")):
         _send(sess)
+    trade_id = server._calc_queue_trade_id(ME, LEAGUE, OPP, GIVE, RECV)
+    assert [r.getMessage() for r in caplog.records if "swipe persist failed" in r.getMessage()] == [
+        f"shop send: swipe persist failed (row and event kept) user={ME} trade={trade_id}: db blip"]
     assert [r.decision for r in _rows(engine)] == ["send"]
     assert len(_proposed(server.record_event)) == 1
     assert len(_memory(service)) == 1 and _swipes(engine) == []

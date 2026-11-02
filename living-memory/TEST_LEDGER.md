@@ -34,6 +34,7 @@ Gates: the scope block `docs/plans/shop-send-elo/scope.md`. Analytics: `trade_pr
   - Docs: `user_events.source` gains `shop_send` (and the existing `calc_queue`); `trade_proposals.source` gains the pre-existing `overhaul`.
   - `test_shop_send_elo.py` now has 61 tests (60 pass and 1 skips until #389). There are 33 sabotages, all RED: 6 new, and the 2 double-filtered readers break both layers.
   - **Full backend suite at 84c041b2:** 10,353 passed, 4 skipped (14 m 38 s).
+  - **release-lead's GO (9ea0c709), P3:** the swipe-failure WARNING now names the user and the trade, and a caplog assertion pins it. The queue route's inverse (no event when its swipe persist raises) is logged in NEXT.md for analytics-lead.
   - **Acks on record (11-01):** Product confirms the Elo half is per tap, refusals included. analytics-lead acked (a), that `trade_proposed{send}` counts chosen sends, not confirmed ones, and (b), keep the `traded` hunk. Two P3s are logged for Update 1 in NEXT.md: the 30-day/until-resolved deck exclusion, and no second Elo from a later calculator ✓.
 - **Full backend suite at 961c15be:** 10,348 passed, 4 skipped (19 m 47 s). An earlier run had 6 failures; all were `inspect.getsource` tests broken by my editing `server.py` mid-run, and all pass in isolation on both the branch and the base. After merging #574's ed2b314b (no backend logic), the targeted rerun passes: `test_shop_send_elo` + `test_calc_trade_queue` 95, and the taxonomy/analytics/flags/config subset 355.
 
