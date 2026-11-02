@@ -93,6 +93,14 @@
 //   S3  Turn off dims while sending, at the Button's disabled opacity      [AST]
 //   S4  consentLinks takes Terms / Privacy by exact label only             [executed]
 //   S5  Settings' comment matches the client                               [text]
+// Round 8 (scope §B11 on plan/fa-moves-launch @ 973f8854; contract a7a2a8f4):
+//   F18 no unchosen $0 claim, executed against claimSheetPlan: an empty
+//       field → bid: null, no faab_bid; a FAAB claim without a bid →
+//       disabled, the no-amount label; a typed 0 → "for $0", enabled; an
+//       add never carries faab_bid; a bid kept while hidden comes back;
+//       has_bid false for an empty field                                   [executed + AST]
+//   B11 rule 1's visible line; rule 2's 10e add → claim (the line above the
+//       field, VoiceOver focus, no keyboard focus); rule 5's 400 → Ready   [executed + AST]
 // Round 5 (head-eng's design note; legal R28.26 / R28.27):
 //   B1  a working button keeps full brightness with its spinner, takes no
 //       tap (#364's Button: `loading`, not `disabled`)                     [executed + AST]
@@ -946,11 +954,11 @@ process.on('exit', () => {
   {
     const h = harness();
     const M = h.faMove;
-    await check('T7 contract §7: {bid} is "$N" (an empty FAAB bid is $0); {date} short, no time; a missing known placeholder falls back', () => {
+    await check('T7 contract §7: {bid} is "$N" (an empty FAAB bid never fills: §B11); {date} short, no time; a missing known placeholder falls back', () => {
       eq([M.bidText(7), M.bidText(0)], ['$7', '$0'], 'bidText');
       const sel = h.plan.moveSelection({ rowName: 'A', kind: 'claim', dropId: null, candidates: [], faab: true, bid: '',
         copy: undefined, platform: 'sleeper' });
-      eq([sel.bid, sel.ctaLabel, sel.request.faab_bid], [0, 'Claim A for $0', 0], 'an empty FAAB bid is $0');
+      eq([sel.bid, sel.ctaLabel, 'faab_bid' in sel.request], [null, 'Claim A', false], 'an empty FAAB bid is no bid');
       const d = M.windowDateText('2026-11-08T15:00:00Z');
       expect(/^[A-Z][a-z]{2} \d{1,2}$/.test(d), `{date} = ${d}`);
       eq(M.moveCopy({ waiver_line: 'Bid {bid}' }, 'waiver_line', { bid: '$7' }, 'sleeper'), 'Bid $7', 'server template, filled');
@@ -1497,6 +1505,121 @@ process.on('exit', () => {
     await check('S5 Settings\' comment describes today\'s client (quietStatuses, background)', () => {
       const t = read(SETTINGS_LEAGUES);
       expect(!/This client has no request option/.test(t) && /`quietStatuses`/.test(t) && /`background` call/.test(t), 'the comment');
+    });
+  }
+
+  // ── Round 8: scope §B11, no unchosen $0 claim (F18; rules 1, 2, 3, 5) ────
+  {
+    const h = harness();
+    const P = h.plan;
+    const pick = (o) => P.moveSelection({ rowName: 'A', kind: 'claim', dropId: null, candidates: [{ id: 'b1', name: 'B' }],
+      faab: true, bid: '', copy: undefined, platform: 'sleeper', ...o });
+    await check('F18 an empty field → bid: null and no faab_bid in the request, never 0', () => {
+      for (const o of [{}, { dropId: 'b1' }, { copy: { cta_claim: 'C {add} {bid}' } }]) {
+        const sel = pick(o);
+        eq([sel.bid, 'faab_bid' in sel.request, sel.needsBid], [null, false, true], JSON.stringify(o));
+      }
+    });
+    await check('F18 a FAAB claim with bid === null → the CTA is disabled and named with no amount (no "$0" anywhere)', () => {
+      const plain = pick({});
+      const drop = pick({ dropId: 'b1' });
+      eq([plain.ctaLabel, drop.ctaLabel], ['Claim A', 'Claim A, drop B'], 'the no-amount labels');
+      const served = pick({ copy: { cta_claim_no_bid: 'CLAIM {add}', cta_claim: 'CLAIM {add} FOR {bid}' } });
+      eq(served.ctaLabel, 'CLAIM A', 'the server\'s no-amount slot');
+      const all = [plain, drop, served].flatMap((s) => [s.ctaLabel, ...s.waiverLines]).join(' | ');
+      expect(!/\$0|\$/.test(all), `an amount shown: ${all}`);
+      const named = jsxMounts(claim, 'Button').filter((m) => m.attrs.testID === '"fa-claim.make-move"');
+      eq(named.length, 2, 'the named CTA and Make the move');
+      for (const m of named) expect(/sel\.needsBid/.test(m.attrs.disabled), `disabled = ${m.attrs.disabled}`);
+      expect(/^\{sel\.needsBid \? fallback\('bid_hint'\) \?\? undefined : undefined\}$/.test(named[0].attrs.accessibilityHint), 'the named CTA\'s hint');
+      expect(/sel\.needsBid \? fallback\('bid_hint'\)/.test(named[1].attrs.accessibilityHint), 'Make the move\'s hint, once ticked');
+      expect(named.every((m) => !('accessibilityLiveRegion' in m.attrs)), 'the CTA is not a live region');
+      eq(h.faMove.FA_MOVE_FALLBACK_COPY.bid_hint, 'Enter a bid to claim', 'the hint (G26)');
+      const send = declText(claim, 'send');
+      expect(send.indexOf('if (sel.needsBid) return;') > 0 && send.indexOf('if (sel.needsBid) return;') < send.indexOf('attemptMove('),
+        'send() never sends a FAAB claim without a bid');
+    });
+    await check('F18 a typed 0 → "for $0", enabled, sent as 0; the label follows the typing', () => {
+      const zero = pick({ bid: '0' });
+      eq([zero.ctaLabel, zero.needsBid, zero.request.faab_bid, zero.waiverLines.includes('Bid: $0')], ['Claim A for $0', false, 0, true], 'typed 0');
+      eq(['', '1', '12', ''].map((b) => pick({ bid: b }).ctaLabel), ['Claim A', 'Claim A for $1', 'Claim A for $12', 'Claim A'], 'as the user types and clears');
+      expect(/const bidTooHigh = bidNum != null && remaining != null && bidNum > remaining;/.test(claimText), 'a spent budget needs no special case ($0 of $0 is allowed)');
+    });
+    await check('F18 an add never carries faab_bid; a priority-waiver claim has none and needs none', () => {
+      for (const bid of ['', '0', '7']) {
+        const add = pick({ kind: 'add', bid });
+        eq([add.ctaLabel, add.bid, 'faab_bid' in add.request, add.needsBid], ['Add A', null, false, false], `add, field "${bid}"`);
+      }
+      const pw = pick({ faab: false });
+      eq([pw.ctaLabel, pw.needsBid, 'faab_bid' in pw.request], ['Claim A', false, false], 'a priority-waiver claim');
+    });
+    await check('F18 a bid kept while hidden comes back on claim → add → claim (rule 3); nothing clears it', () => {
+      const typed = '5';
+      const seq = ['claim', 'add', 'claim'].map((kind) => pick({ kind, bid: typed }));
+      eq(seq.map((s) => [s.ctaLabel, s.request.faab_bid]), [['Claim A for $5', 5], ['Add A', undefined], ['Claim A for $5', 5]], 'claim → add → claim');
+      eq((claimText.match(/\bsetBid\(/g) || []).length, 1, 'setBid calls (only the field\'s own onChangeText)');
+      expect(/const bidApplies = view\.step === 'handoff' \|\| kind === 'claim';/.test(claimText), 'the field hides on an add, its state kept');
+      const flip = P.planKindChanged({ free_agents: [{ player_id: 'p', move_kind: 'add' }] },
+        { move: SUBMIT, kind: 'claim', said: 'Now an add.', connect: null, playerId: 'p', copy: P.copyFns(SUBMIT, { add: 'A' }), faab: true });
+      eq([flip.row.move_kind, flip.view], ['add', { step: 'ready', ctaNotice: { text: 'Now an add.', tone: 'chalk' } }], '10e claim → add: the line above "Add A"');
+    });
+    await check('F18 has_bid is false for an empty field, and an empty field never logs 0', async () => {
+      const t = harness();
+      t.respond(() => response(200, { status: 'pending', move_kind: 'claim', result: 'accepted', league_platform: 'sleeper', attempt_id: 'x', title: 't', lines: [] }));
+      await t.faMove.attemptMove({ move: SUBMIT, surface: 'free_agents', request: { ...REQ, ...pick({}).request } });
+      const ev = t.events.find((e) => e.name === 'fa_move_write_attempted');
+      eq([ev.props.has_bid, Object.values(ev.props).includes(0), 'faab_bid' in t.requests[0].body], [false, false, false], 'empty field');
+      const z = harness();
+      z.respond(() => response(200, { status: 'pending', move_kind: 'claim', result: 'accepted', league_platform: 'sleeper', attempt_id: 'x', title: 't', lines: [] }));
+      await z.faMove.attemptMove({ move: SUBMIT, surface: 'free_agents', request: { ...REQ, ...pick({ bid: '0' }).request } });
+      eq([z.events.find((e) => e.name === 'fa_move_write_attempted').props.has_bid, z.requests[0].body.faab_bid], [true, 0], 'a typed 0 is a bid');
+    });
+    await check('B11 rule 1: the visible line under the empty field (the server\'s bid_needed_line, else the fallback), on the steps that send', () => {
+      expect(/\| 'bid_line'\s*\| 'bid_needed_line'/.test(faText), 'MoveCopyKey lists bid_needed_line');
+      eq(h.faMove.FA_MOVE_FALLBACK_COPY.bid_needed_line, 'Enter a bid. $0 is allowed.', 'the fallback (G25)');
+      expect(/PENDING MARKETING \(G25\)/.test(faText) && /PENDING MARKETING \(G26\)/.test(faText), 'both marked pending marketing');
+      eq(P.copyFns({ ...SUBMIT, copy: { bid_needed_line: 'Server: bid?' } }, {}).slot('bid_needed_line'), 'Server: bid?', 'server slot first');
+      expect(/const bidNeeded = sel\.needsBid && \(view\.step === 'ready' \|\| view\.step === 'consent'\);/.test(claimText), 'when it shows');
+      const sec = declText(claim, 'bidSection');
+      expect(/\{bidNeeded \? \(\s*<View ref=\{view\.step === 'ready' && view\.bidNeededFocus \? focusRef : undefined\} accessible>\s*<Text style=\{sheetStyles\.chalkLine\}>\{slot\('bid_needed_line'\)\}<\/Text>/.test(sec),
+        'a visible Text under the field');
+      expect(sec.indexOf('testID="fa-claim.bid"') < sec.indexOf("slot('bid_needed_line')"), 'under the field');
+    });
+    await check('B11 rule 2: 10e add → claim on a FAAB league → Ready, claim mode, the line directly above the field with VoiceOver focus; no keyboard focus', () => {
+      const cp = P.copyFns(SUBMIT, { add: 'A' });
+      const ctx = { move: SUBMIT, kind: 'add', said: 'A went on waivers.', connect: null, playerId: 'p', copy: cp };
+      const fresh = { free_agents: [{ player_id: 'p', move_kind: 'claim' }] };
+      const r = P.planKindChanged(fresh, { ...ctx, faab: true });
+      eq([r.row.move_kind, r.view], ['claim', { step: 'ready', bidNotice: { text: 'A went on waivers.', tone: 'chalk' } }], 'FAAB: above the field');
+      eq(P.planKindChanged(fresh, { ...ctx, faab: false }).view, { step: 'ready', ctaNotice: { text: 'A went on waivers.', tone: 'chalk' } }, 'priority waiver: no change (rule 4)');
+      eq(P.planKindChanged(undefined, { ...ctx, faab: true }).view.bidNotice.text, 'A went on waivers.', 'a failed re-read still flips to the claim');
+      expect(!('bid' in r) && pick({}).ctaLabel === 'Claim A', 'the field stays as it was (empty after an add): "Claim A", disabled');
+      const sec = declText(claim, 'bidSection');
+      const at = (re) => sec.search(re);
+      const order = [at(/<TickLabel>FAAB BID<\/TickLabel>/), at(/\{bidNotice \? \(\s*<View ref=\{focusRef\} accessible>/), at(/<View style=\{sheetStyles\.bidRow\}>/), at(/testID="fa-claim\.bid"/)];
+      expect(order.every((x, i) => x >= 0 && (i === 0 || x > order[i - 1])), `label, line, field: ${order}`);
+      expect(/const bidNotice = view\.step === 'ready' \? view\.bidNotice : undefined;/.test(claimText), 'from the ready view');
+      expect(/\{header\}\s*\{body\}/.test(claimText) && /\{bidSection\}\s*\{dropSection\}/.test(claimText), 'the field (body) comes before the pinned CTA');
+      expect(/focusLine\(view\.ctaNotice\?\.text/.test(claimText) && !/view\.bidNotice\?\.text/.test(claimText), 'the action block shows only ctaNotice: one line, one focus target');
+      expect(/if \(viewSeq === 0\) return;[\s\S]{0,200}findNodeHandle\(focusRef\.current\)[\s\S]{0,80}setAccessibilityFocus\(node\)/.test(claimText), 'a new step focuses focusRef');
+      const input = jsxMounts(claim, 'TextInput').filter((m) => m.attrs.testID === '"fa-claim.bid"');
+      expect(input.length === 1 && !('autoFocus' in input[0].attrs) && !('ref' in input[0].attrs), 'the bid input takes no programmatic focus');
+      expect(!/\.focus\(\)/.test(claimText), 'a .focus() call in ClaimSheet');
+      expect(/faab: !!faab,\s*\}\);\s*setMove\(next\.move\);/.test(claimText), 'the sheet tells planKindChanged the league is FAAB');
+    });
+    await check('B11 rule 5: a 400 bad_request to a FAAB claim sent without faab_bid → Ready, claim mode, empty field + rule 1\'s line; no retry, no error screen', () => {
+      eq([P.faabClaimWithoutBid({ move_kind: 'claim' }, true), P.faabClaimWithoutBid({ move_kind: 'claim', faab_bid: 0 }, true),
+        P.faabClaimWithoutBid({ move_kind: 'add' }, true), P.faabClaimWithoutBid({ move_kind: 'claim' }, false)], [true, false, false, false], 'which requests');
+      const cp = P.copyFns(SUBMIT, { add: 'A' });
+      const bad = h.faMove.classifyMoveError(apiErr(h, 400, { error: 'bad_request', message: 'faab_bid required' }));
+      eq(P.planFailure(bad, cp, { faabClaimNoBid: true }), { view: { step: 'ready', bidNeededFocus: true } }, 'back to Ready, nothing refreshed');
+      eq(P.planFailure(bad, cp).view.kind, 'neutral', 'any other 400 is still the neutral panel');
+      eq(P.planFailure(h.faMove.classifyMoveError(apiErr(h, 422, { error: 'player_unavailable' })), cp, { faabClaimNoBid: true }).view.kind,
+        'player_taken', 'other codes unchanged');
+      const send = declText(claim, 'send');
+      expect(/const request = \{[\s\S]*?\.\.\.sel\.request,[\s\S]*?\};\s*const outcome = await attemptMove\(\{ move, surface: analyticsSurface, request \}\);/.test(send)
+        && /await applyOutcome\(outcome, echo, faabClaimWithoutBid\(request, !!faab\)\);/.test(send), 'judged on the request actually sent');
+      expect(/const plan = planFailure\(outcome\.failure, copy, \{ faabClaimNoBid \}\);/.test(declText(claim, 'applyOutcome')), 'applyOutcome passes it on');
     });
   }
 

@@ -78,6 +78,7 @@ import {
   actionBlockPinned,
   copyFns,
   dropListShown,
+  faabClaimWithoutBid,
   initialView,
   moveSelection,
   planFailure,
@@ -304,6 +305,10 @@ export default function ClaimSheet({
   });
   const ctaLabel = sel.ctaLabel;
   const needsDrop = (openSlots === 0 || requireDrop) && !sel.drop;
+  // §B11 rule 1: a FAAB claim with an empty field disables every send (the
+  // named CTA, Make the move) and shows a visible line under the field, on
+  // the steps that send. A typed 0 is a bid.
+  const bidNeeded = sel.needsBid && (view.step === 'ready' || view.step === 'consent');
 
   useEffect(
     () => () => {
@@ -560,32 +565,31 @@ export default function ClaimSheet({
       ticked: echo ? ticked : false,
     });
     if (step !== 'submit' && step !== 'submit_with_consent') return;
+    // §B11: never a FAAB claim without a bid (the buttons are disabled too).
+    if (sel.needsBid) return;
     if (!isSubmitCapability(move) || sendingRef.current) return;
     sendingRef.current = true;
     setSending(true);
-    const outcome = await attemptMove({
-      move,
-      surface: analyticsSurface,
-      // Exactly what the CTA named (the selection), plus the consent echo.
-      request: {
-        league_id: leagueId,
-        add_player_id: row.player_id,
-        ...sel.request,
-        ...(echo ? { consent: echo } : {}),
-      },
-    });
+    // Exactly what the CTA named (the selection), plus the consent echo.
+    const request = {
+      league_id: leagueId,
+      add_player_id: row.player_id,
+      ...sel.request,
+      ...(echo ? { consent: echo } : {}),
+    };
+    const outcome = await attemptMove({ move, surface: analyticsSurface, request });
     if (!mountedRef.current) return;
     // Busy until the outcome is shown: 10e's re-read must not leave the old
     // CTA tappable.
     try {
-      await applyOutcome(outcome, echo);
+      await applyOutcome(outcome, echo, faabClaimWithoutBid(request, !!faab));
     } finally {
       sendingRef.current = false;
       setSending(false);
     }
   }
 
-  async function applyOutcome(outcome: AttemptOutcome, echo: ConsentEcho | null) {
+  async function applyOutcome(outcome: AttemptOutcome, echo: ConsentEcho | null, faabClaimNoBid: boolean) {
     if (!outcome.sent) {
       // Offline at the tap (F17): state 11, nothing sent. A consent the user
       // gave goes with the retry, since it never reached the server.
@@ -598,7 +602,7 @@ export default function ClaimSheet({
       apply(planResponse(outcome.response, copy));
       return;
     }
-    const plan = planFailure(outcome.failure, copy);
+    const plan = planFailure(outcome.failure, copy, { faabClaimNoBid });
     if (!plan.reread) {
       apply(plan);
       return;
@@ -613,6 +617,7 @@ export default function ClaimSheet({
       connect,
       playerId: row.player_id,
       copy,
+      faab: !!faab,
     });
     setMove(next.move);
     setRowMove(next.row);
@@ -702,10 +707,20 @@ export default function ClaimSheet({
   );
 
   // FAAB bid — only for FAAB leagues; priority-waiver leagues get the
-  // honest one-liner instead. An in-app add has no bid (note (d)).
+  // honest one-liner instead. An in-app add has no bid (note (d)); its
+  // typed bid stays in state while hidden (§B11 rule 3). Nothing here ever
+  // takes keyboard focus by itself: the number pad would cover the CTA.
+  const bidNotice = view.step === 'ready' ? view.bidNotice : undefined;
   const bidSection = !bidApplies ? null : faab ? (
     <View style={sheetStyles.section}>
       <TickLabel>FAAB BID</TickLabel>
+      {/* §B11 rule 2: 10e add → claim. The line sits directly above the
+          field and takes VoiceOver focus; then the field, then the CTA. */}
+      {bidNotice ? (
+        <View ref={focusRef} accessible>
+          <Text style={sheetStyles.chalkLine}>{bidNotice.text}</Text>
+        </View>
+      ) : null}
       <View style={sheetStyles.bidRow}>
         <Text style={sheetStyles.bidCurrency}>$</Text>
         <TextInput
@@ -731,6 +746,13 @@ export default function ClaimSheet({
           That's more than your ${remaining!.toLocaleString('en-US')}{' '}
           remaining — lower the bid.
         </Text>
+      ) : null}
+      {/* §B11 rule 1: visible, not only a VoiceOver hint. Rule 5's return
+          to Ready puts focus here. */}
+      {bidNeeded ? (
+        <View ref={view.step === 'ready' && view.bidNeededFocus ? focusRef : undefined} accessible>
+          <Text style={sheetStyles.chalkLine}>{slot('bid_needed_line')}</Text>
+        </View>
       ) : null}
     </View>
   ) : waivers?.type === 'rolling' || waivers?.type === 'reverse_standings' ? (
@@ -868,12 +890,15 @@ export default function ClaimSheet({
         {/* D10: the label names the move; it wraps, never truncates. While
             busy it keeps full brightness with its spinner and takes no tap
             (#364's busy rule: `loading`, not `disabled`). */}
+        {/* §B11: with an empty FAAB bid the CTA is disabled and names the
+            claim with no amount (sel.ctaLabel); it is not a live region. */}
         <Button
           testID="fa-claim.make-move"
           label={ctaLabel}
           variant="primary"
           loading={busy}
-          disabled={needsDrop || (kind === 'claim' && bidTooHigh)}
+          disabled={needsDrop || (kind === 'claim' && bidTooHigh) || sel.needsBid}
+          accessibilityHint={sel.needsBid ? fallback('bid_hint') ?? undefined : undefined}
           onPress={() => void onNamedCta()}
           style={sheetStyles.namedCta}
         />
@@ -947,8 +972,10 @@ export default function ClaimSheet({
           label={view.block.button_label}
           variant="primary"
           loading={busy}
-          disabled={!ticked}
-          accessibilityHint={ticked ? undefined : fallback('tick_hint') ?? undefined}
+          disabled={!ticked || sel.needsBid}
+          accessibilityHint={
+            !ticked ? fallback('tick_hint') ?? undefined : sel.needsBid ? fallback('bid_hint') ?? undefined : undefined
+          }
           onPress={() => void send(consentEcho(view.block), false)}
         />
         {stillSending ? <Text style={sheetStyles.dimLine}>{slot('still_sending')}</Text> : null}

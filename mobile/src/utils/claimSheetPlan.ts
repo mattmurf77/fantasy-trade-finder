@@ -45,7 +45,11 @@ export type ResultKind =
 export type SheetView =
   | { step: 'handoff'; line: string | null } // 1, 14, F4
   | { step: 'unsupported' } // MFL / ESPN with no in-app path here: NO_ADD_REASON
-  | { step: 'ready'; ctaNotice?: Notice; dropNotice?: Notice } // 6, with 10a/10b/10e/11 inline
+  // 6, with 10a/10b/10e/11 inline. `bidNotice`: 10e add → claim on a FAAB
+  // league, the line directly above the (empty) bid field, with focus
+  // (§B11 rule 2). `bidNeededFocus`: focus goes to rule 1's line under the
+  // field (rule 5's return to Ready).
+  | { step: 'ready'; ctaNotice?: Notice; dropNotice?: Notice; bidNotice?: Notice; bidNeededFocus?: boolean }
   | { step: 'connect'; verify: boolean; line: string | null; backedOut: boolean } // 3, 4
   | { step: 'consent'; block: ConsentBlock; termsChanged: boolean } // 5
   | { step: 'result'; kind: ResultKind; title: string; lines: string[] }; // 8, 9, 10c, 10f, 10g, 12, 13
@@ -151,8 +155,15 @@ export function planResponse(res: MoveResponse, copy: CopyFns): Plan {
   };
 }
 
-/** Every failure state (contract §4) → what the sheet shows and does. */
-export function planFailure(f: MoveFailure, copy: CopyFns): Plan {
+/** §B11 rule 5: the request was a FAAB claim with no `faab_bid` (an empty
+ *  field), which the server answers 400 `bad_request`. */
+export function faabClaimWithoutBid(request: Pick<MoveRequest, 'move_kind' | 'faab_bid'>, faab: boolean): boolean {
+  return request.move_kind === 'claim' && faab && request.faab_bid == null;
+}
+
+/** Every failure state (contract §4) → what the sheet shows and does.
+ *  `sent.faabClaimNoBid`: the request was a FAAB claim sent with no bid. */
+export function planFailure(f: MoveFailure, copy: CopyFns, sent: { faabClaimNoBid?: boolean } = {}): Plan {
   const said = f.message ?? null;
   // MFL has no connect screen in this binary (contract §6): never a button
   // that does nothing, so its connect / verify / rejected are `unsupported`.
@@ -202,6 +213,13 @@ export function planFailure(f: MoveFailure, copy: CopyFns): Plan {
     case 'unavailable':
       return result(f.state);
     case 'neutral':
+      // §B11 rule 5 (contract §4's exception): the server refuses a FAAB
+      // claim with no bid, and never defaults it to 0. Nothing was sent, so
+      // the sheet returns to Ready in claim mode: the empty field and rule
+      // 1's line (with focus), the CTA disabled. No retry, no error screen.
+      if (f.errorCode === 'bad_request' && sent.faabClaimNoBid) {
+        return { view: { step: 'ready', bidNeededFocus: true } };
+      }
       // Contract §4: a 400 or an unrecognised 4xx is the neutral panel: the
       // server's own words, no retry, no "wasn't made" refusal title.
       return {
@@ -234,10 +252,21 @@ export function planFailure(f: MoveFailure, copy: CopyFns): Plan {
 
 /** 10e after the re-read: the row's corrected move_kind (or the other one
  *  when the re-read failed), the fresh capability when it has one, and a
- *  line saying why the CTA changed. */
+ *  line saying why the CTA changed. An add that became a claim on a FAAB
+ *  league puts that line directly above the bid field, which shows empty
+ *  (§B11 rule 2); otherwise it sits above the CTA. The bid is never cleared
+ *  or set here: a bid typed before a claim → add comes back (rule 3). */
 export function planKindChanged(
   fresh: FaListLike | undefined,
-  ctx: { move: FaMoveCapability | null; kind: MoveKind; said: string | null; connect: string | null; playerId: string; copy: CopyFns },
+  ctx: {
+    move: FaMoveCapability | null;
+    kind: MoveKind;
+    said: string | null;
+    connect: string | null;
+    playerId: string;
+    copy: CopyFns;
+    faab: boolean;
+  },
 ): { move: FaMoveCapability | null; row: FaMoveRow; view: SheetView } {
   const freshRow = fresh?.free_agents?.find((r) => r.player_id === ctx.playerId);
   const row: FaMoveRow = {
@@ -248,8 +277,15 @@ export function planKindChanged(
   const move = isSubmitCapability(fresh?.move) ? (fresh!.move as FaMoveCapability) : ctx.move;
   const line = ctx.said ?? ctx.copy.fallback('refusal_title') ?? '';
   const step = faMoveGate({ move, row, connect: ctx.connect, consentValid: false, ticked: false });
+  const notice: Notice = { text: line, tone: 'chalk' };
   const view: SheetView =
-    step === 'handoff' ? { step: 'handoff', line } : step === 'unsupported' ? { step: 'unsupported' } : { step: 'ready', ctaNotice: { text: line, tone: 'chalk' } };
+    step === 'handoff'
+      ? { step: 'handoff', line }
+      : step === 'unsupported'
+        ? { step: 'unsupported' }
+        : row.move_kind === 'claim' && ctx.faab
+          ? { step: 'ready', bidNotice: notice }
+          : { step: 'ready', ctaNotice: notice };
   return { move, row, view };
 }
 
@@ -269,7 +305,10 @@ export function resumeAfterConnect(
 }
 
 /** The drop and bid the CTA names, and the request sends: ONE source, so a
- *  drop that left the candidates (a refresh) is neither named nor sent. */
+ *  drop that left the candidates (a refresh) is neither named nor sent.
+ *  §B11: an empty bid field is NO bid, never $0. A FAAB claim without one
+ *  `needsBid`: the CTA is disabled and named with the no-amount slot, and
+ *  no `faab_bid` is sent. A typed `0` is a real choice ("for $0"). */
 export function moveSelection(input: {
   rowName: string;
   kind: MoveKind;
@@ -282,17 +321,21 @@ export function moveSelection(input: {
 }): {
   drop: { id: string; name: string } | null;
   bid: number | null;
+  /** The CTA gate (§B11 rule 6): a FAAB claim with an empty field. */
+  needsBid: boolean;
   ctaLabel: string;
   waiverLines: string[];
   request: Pick<MoveRequest, 'drop_player_id' | 'move_kind' | 'faab_bid'>;
 } {
   const drop = (input.dropId && input.candidates.find((c) => c.id === input.dropId)) || null;
-  // Contract §7: an empty bid on a FAAB claim is $0; a priority-waiver claim has none.
-  const bid = input.kind === 'claim' && input.faab ? (input.bid === '' ? 0 : Number(input.bid)) : null;
+  // Contract §7 / §B11: a FAAB claim's bid is what was typed (0 included);
+  // an empty field has none. An add or a priority-waiver claim never has one.
+  const bid = input.kind === 'claim' && input.faab && input.bid !== '' ? Number(input.bid) : null;
   const vars = { add: input.rowName, drop: drop?.name ?? null, bid: bid != null ? bidText(bid) : null };
   return {
     drop,
     bid,
+    needsBid: input.kind === 'claim' && input.faab && bid === null,
     ctaLabel: moveCtaLabel(input.copy, input.kind, vars, input.platform),
     waiverLines: input.kind === 'claim' ? waiverLines(input.copy, vars, input.platform) : [],
     request: {

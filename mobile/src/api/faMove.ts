@@ -47,6 +47,7 @@ export type MoveCopyKey =
   | 'waiver_line'
   | 'waiver_line_no_drop'
   | 'bid_line'
+  | 'bid_needed_line'
   | 'window_line'
   | 'turn_off'
   | 'do_in_platform'
@@ -889,6 +890,10 @@ export const FA_MOVE_FALLBACK_COPY = {
   waiver_line: 'This places a waiver claim for {add} (dropping {drop} if it clears). {platform} processes it on its waiver schedule.',
   waiver_line_no_drop: 'This places a waiver claim for {add}. {platform} processes it on its waiver schedule.',
   bid_line: 'Bid: {bid}',
+  // Scope §B11 rule 1 (G25): the visible line under an EMPTY FAAB bid field
+  // on a claim, while the CTA is disabled. A contract §7 slot: the server's
+  // bid_needed_line wins when sent. PENDING MARKETING (G25).
+  bid_needed_line: 'Enter a bid. $0 is allowed.',
   window_line: 'Roster moves: on until {date}',
   turn_off: 'Turn off',
   do_in_platform: 'Do it in {platform} instead',
@@ -917,6 +922,9 @@ export const FA_MOVE_FALLBACK_COPY = {
   drop_to_make_room: 'Drop a player to make room',
   not_now: 'Not now',
   tick_hint: 'Tick the box to make the move',
+  // §B11 rule 1 (G26): the disabled no-amount claim CTA's VoiceOver hint.
+  // PENDING MARKETING (G26).
+  bid_hint: 'Enter a bid to claim',
   // The consent step's links when the block carries none (R15.8: "Terms · Privacy").
   terms_link: 'Terms',
   privacy_link: 'Privacy',
