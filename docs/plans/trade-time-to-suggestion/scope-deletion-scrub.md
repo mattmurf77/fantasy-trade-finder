@@ -110,7 +110,7 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
   - **What a revoked deck still writes:** an outcome on one of its cards that the client already holds writes a full row, as any outcome does. The scrub's grace pass redacts it.
   - Another process's jobs and sessions aren't reached. Prod runs one (`render.yaml`: `--workers 1`); with more, they'd keep them until they leave memory. Their stored decks are the scrub's.
 - A stored page's redacted cards are dropped by the serve rules above, whatever the I-1 mode.
-- **The pre-scrub window** (release-lead's re-QA P3): between the deletion's commit and the scrub's page-store league pass, a stored page still holds the person's cards with their id, so a serve in that window can deliver them. The kick starts the scrub off the request, so the window is about 0.1 s; if the kick fails, it's up to one cleanup tick (5 min).
+- **The pre-scrub window** (release-lead's re-QA P3): between the deletion's commit and the scrub's page-store league pass, a stored page still holds the person's cards with their id, so a serve in that window can deliver them. The kick starts the scrub off the request, so the window is about 0.1 s; if the kick fails, it's up to one cleanup tick (5 min). I-1 doesn't close it at prod's `trade_i1_mode` 1; only mode 2 would withdraw such a card. Eval is safe either way: redacted cards are counted, never audited (G-a4 to G-a6). Whether the window is acceptable is with legal.
 
 ## 1. Analytics scope
 
