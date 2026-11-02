@@ -13,7 +13,13 @@
   - the web landing miniature's ticks move from 21.5 / 78.5% to 35.65 / 64.35%;
   - a backend test pins both to `elo_to_value(Mid 2nd) / elo_to_value(Mid 1st)`, the same source the share card's bar computes from server-side (#564).
 - **Not the API route:** adding `second_in_firsts` to every served `gap` would change every card's JSON and the byte-identical goldens, for a static tick.
-- The bar's fill, copy and `gap.firsts` are unchanged; only where the ±2nd ticks and labels sit moves.
+- The bar's fill, copy and `gap.firsts` are unchanged; only where the ±2nd ticks and labels sit moves. The B2 rule below is the one exception.
+- **The B2 rule** (Product P112, 11-02; head-eng round 3b; the share image does the same in #564, league-eng):
+  - The "≈ N mid 1sts" form shows only at a gap of **at least one first**.
+  - A null `pick_equivalent` below that is the server's negligible floor (under half the smallest generic pick, about 0.05 firsts today), so the bar reads **Even**: the centred nub, the "Even" headline, "Within a rounding error — N apart", and the even "Why?". Before, it read "You win by +40 · ≈ 0.0 mid 1sts" with a sliver.
+  - A lean **with** a pick label is unchanged, however small, and so is a no-pick gap of one first or more ("≈ 1.8 mid 1sts").
+  - It is one condition in `TradeValueBar.tsx` (`negligible = !pick && firsts < 1`, folded into `even`), so every mount gets it: deck cards, the calculator, Matches, the League example and Shop.
+  - **Not changed, for design:** the Even line's existing "(≈ 0.0 firsts)" tail, which the Even state already showed whenever `gap.firsts` was non-zero.
 - **The League "Works right now" example** (`LeagueScreen.tsx` `EXAMPLE_GAP`, every user with no matches sees it) was the clients' only static gap. It said "a Mid 2nd (≈ 0.6 firsts)" at 380, which with the new tick fills far past it. It's now what the server would send for a Mid 2nd gap: 607, 0.29 firsts, pick value 606.5 (release-lead's #567 QA P2-1).
 - **What this doesn't cover:**
   - **A live prod `elo_value_k` change** moves the server's values, and so #564's share-card bar and its snapshots, but not the app's constant or the web miniature, with CI green: the pin reads the code's seeds and curve, not prod's `model_config`. If `elo_value_k` is ever changed live, this constant must follow by hand.
@@ -35,12 +41,15 @@
   - Each case's copy and fill come from the server's own `_pick_gap_equivalent`. They're mocks, not device captures (D-056).
   - The first render (release-lead's #567 QA P2-2) was a geometry sketch: the wrong colours and fonts, bright ticks, and a "+1,840 · ≈ a Late 1st" reading the server would call a Mid 1st. Redrawn.
   - The second (delta QA R1–R4) skipped the wrap's 8pt gap before the scale row and the end row (16pt short), drew the middle scale labels level with "±1st" (they sit 3pt lower: the 12pt middle row is centred in the 18pt row), put the League bar on `ink1` with 16pt padding, and gave the deck card "They win". Fixed against release-lead's react-native-web measurements.
+- [x] **The B2 guard:** `mobile/tests/check-value-bar-b2.js` (`npm run test:value-bar-b2`), 11 checks. It **executes** `TradeValueBar.tsx`'s own decision lines on 8 cases: a 40-point lean with no pick reads Even; a negative lean under one first reads Even; exactly one first and 1.4 firsts with no pick lean; a lean with a pick label leans, even a small one; `favors` even or null reads Even. It also pins "mid 1sts" as `worth`'s only no-pick fallback, and the nub for Even. It fails 9 on #567's previous head `e70ad147`.
+- [x] **The B2 before/after**, for the operator's design review: `renders/before-after-b2-317.png`, drawn by the same `render.py` (now with a `b2` switch; the two earlier sheets regenerate byte-identically). Three cases at 317pt: a 40-point no-pick lean (before "You win by +40 · ≈ 0.0 mid 1sts" with a sliver; after Even with the nub); a 1.8-firsts no-pick gap, unchanged; a Mid 2nd, unchanged.
 - [x] **Manual TestFlight checklist** (operator, 11-06 binary). The cue for steps 1–3: each ±2nd tick sits about a third of the way from Even to the end of the bar. The old build had it past halfway.
   1. **Calculator**, a trade whose gap reads "an Early 2nd" (0.35–0.56 firsts): the fill ends clearly past the +2nd (or −2nd) tick. The old build stopped short of it.
   2. **A trade reading "a Mid 2nd":** the fill ends at about the 2nd tick.
   3. **A "They win" trade:** the fill grows left, in amber, against the −2nd tick the same way. And **a deck card's value bar** shows the ticks in the same place.
   4. **League tab, "Works right now" example card.** It shows only in a league with 0 mutual and 0 awaiting matches; switch to one first (or a fresh league). It reads "You win by +607 · a Mid 2nd (≈ 0.3 firsts)", and the fill ends on the +2nd tick.
   5. **iPhone Settings → Accessibility → Display & Text Size → Larger Text at its largest standard size**, back on the same League example (same league as step 4): the bar and its labels still render. "−2nd" and "+2nd" will crowd or overlap "Even" at this size: a **known regression of this change** (it started at 2.41 before, 1.21 now), with the label-frame fix as a design follow-up above. Note how bad it looks for design.
+  6. **B2: a near-even trade with no pick label.** In the calculator, build a trade between two low-value players a few dozen points apart that still isn't "Even" (for example two deep-bench players about 40 apart). The bar reads **Even** with the centred nub and "Within a rounding error — N apart". It never says "≈ 0.0 mid 1sts". A gap of a Mid 2nd still leans, and a very lopsided trade (over 1.25 Early 1sts) still reads "≈ N mid 1sts".
   - **Web, not TestFlight** (it ships with the Render deploy): the landing page's step 03 view, "Real offers", shows the miniature's ±2nd ticks about a third of the way from Even.
 - `testID`s added/renamed: none.
 

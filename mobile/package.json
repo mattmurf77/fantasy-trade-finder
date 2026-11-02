@@ -123,6 +123,7 @@
     "test:tier-move-placement": "node tests/check-tier-move-placement.js",
     "test:tour-suppression": "node tests/check-tour-suppression.js",
     "test:trade-text": "node tests/check-trade-text.js",
+    "test:value-bar-b2": "node tests/check-value-bar-b2.js",
     "test:trades-banner-region": "node tests/check-trades-banner-region.js",
     "test:trade-pages": "node tests/check-trade-pages.js",
     "test:device-first-page": "node tests/check-device-first-page.js",

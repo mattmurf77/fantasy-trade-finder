@@ -1,3 +1,12 @@
+## 2026-11-01 — The value bar's B2 rule (Product P112, head-eng round 3b): under one first with no pick label reads Even (#567, 11-06 binary)
+
+Gates: `docs/plans/value-bar-scale/scope.md` (the B2 bullet; evidence and checklist step 6). This is a design change, so a before/after goes to the operator; design review runs alongside release. No schema, flag, route or analytics change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change:** `TradeValueBar.tsx` folds `negligible = !pick && firsts < 1` into `even`. A null `pick_equivalent` under one first, the server's negligible floor, reads Even (the nub, "Even", "Within a rounding error"), never "≈ 0.0 mid 1sts". A lean with a pick label and a no-pick gap of one first or more are unchanged. The share image does the same in #564 (league-eng).
+- **Guard:** `mobile/tests/check-value-bar-b2.js`, 11 checks. It executes the component's own decision lines on 8 cases and pins the `worth` fallback and the Even nub. It fails 9 on `e70ad147`.
+- **Render:** `renders/before-after-b2-317.png`. `render.py` gains a `b2` switch, and the earlier two sheets regenerate byte-identically. The render's Even end label now matches the app: no colour when Even.
+- **Runs:** `tsc --noEmit` is clean, all 136 suites pass (this branch has no #574), testid-lint is green, and `test_value_bar_scale.py` passes 3.
+
 ## 2026-10-31 — The value bar, release-lead's #567 delta QA (GO-with-notes): the example test's indent, renders R1–R4, checklist wording
 
 - **P2, the test:** `^\s*(value|firsts)` also matched `pick_equivalent.value: 606.5`, which shadowed the top-level `value`, so the value users see was never checked. It now reads the top level at its two-space indent and requires both keys. A top-level 380 or 9999, or `firsts` 0.6, fails it; all three were green before.

@@ -80,15 +80,20 @@ export default function TradeValueBar({
   const [whyOpen, setWhyOpen] = useState(false);
   if (!gap) return null;
 
-  const even = favors === 'even' || favors == null;
-  const youWin = favors === 'receive';
   const firsts = Math.abs(gap.firsts);
+  const pick = gap.pick_equivalent;
+  // B2 rule (Product P112, 11-02; the share image does the same, #564): the
+  // "≈ N mid 1sts" form shows only at a gap of at least one first. A null
+  // pick below that is the server's negligible floor (under half the smallest
+  // generic pick), so it reads as Even, never "≈ 0.0 mid 1sts".
+  const negligible = !pick && firsts < 1;
+  const even = favors === 'even' || favors == null || negligible;
+  const youWin = favors === 'receive';
   const clamped = Math.min(1, firsts); // ±1 base-first half-scale
   const frac = even ? 0 : youWin ? clamped : -clamped; // + = toward "You win" (right)
 
   const winner = even ? null : youWin ? youLabel : themLabel;
   const fillColor = even ? ice.base : youWin ? semantic.pos : semantic.warn;
-  const pick = gap.pick_equivalent;
 
   // Fill geometry: center = even. Positive fraction grows right from the center;
   // negative grows left toward it. Even shows a small centered nub.

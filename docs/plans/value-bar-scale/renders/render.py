@@ -96,7 +96,7 @@ def short_pick(label_):
     return ("an " if core[0] in "AEIOU" else "a ") + core
 
 
-def bar(W, favors, gap, second_in_firsts, them="They", surface="deck"):
+def bar(W, favors, gap, second_in_firsts, them="They", surface="deck", b2=True):
     """One TradeValueBar, W pt of bar, in the surface it sits in: a deck card
     (ink1, 16pt padding), or the League example card's lower half (ink0, 12pt
     padding inside a 1pt ink.line border, the bar under a hairline with 10pt
@@ -110,12 +110,14 @@ def bar(W, favors, gap, second_in_firsts, them="They", surface="deck"):
     if league:                                            # exValueBar's hairline
         d.rectangle((x0, y, x0 + W * S - 1, y + S - 1), fill=LINE)
         y += S + 10 * S
-    even = favors in ("even", None)
+    firsts = abs(gap["firsts"])
+    pick = gap["pick_equivalent"]
+    # B2 rule (TradeValueBar `negligible`): under 1 first with no pick label
+    # reads Even. b2=False draws #567's head before it.
+    even = favors in ("even", None) or (b2 and not pick and firsts < 1)
     you_win = favors == "receive"
     fill_c = ICE if even else POS if you_win else WARN
-    firsts = abs(gap["firsts"])
     frac = 0 if even else min(1, firsts) * (1 if you_win else -1)
-    pick = gap["pick_equivalent"]
     winner = None if even else "You" if you_win else them
 
     label(d, x0, y, "Dynasty value swing", DIM)
@@ -132,8 +134,10 @@ def bar(W, favors, gap, second_in_firsts, them="They", surface="deck"):
         x += text(d, x, y, "by ", UI(13), DIM, 18)
         x += text(d, x, y, ("+" if you_win else "−") + f"{round(gap['value']):,}", DATA(13), fill_c, 18)
         x += text(d, x, y, "  ·  ", UI(13), DIM, 18)
-        x += text(d, x, y, short_pick(pick["label"]), UI_SEMI(13), FIRST_1, 18)
-        text(d, x, y, f" (≈ {firsts:.1f} firsts)", UI(13), DIM, 18)
+        worth = short_pick(pick["label"]) if pick else f"≈ {firsts:.1f} mid 1sts"
+        x += text(d, x, y, worth, UI_SEMI(13), FIRST_1, 18)
+        if pick:                                          # worthTail
+            text(d, x, y, f" (≈ {firsts:.1f} firsts)", UI(13), DIM, 18)
     y += 18 * S + 8 * S                                   # wrap gap
 
     y += 8 * S                                            # track marginTop
@@ -165,7 +169,7 @@ def bar(W, favors, gap, second_in_firsts, them="They", surface="deck"):
     them_end = f"{them} win"
     label(d, x0, y, them_end, fill_c if winner == them else DIM)
     yw = width(d, "YOU WIN", UI_SEMI(11), 0.88)
-    label(d, x0 + tw - yw, y, "You win", fill_c if you_win else DIM)
+    label(d, x0 + tw - yw, y, "You win", fill_c if you_win and not even else DIM)
     y += 14 * S + 8 * S                                   # wrap gap
     wy = y + 9 * S                                        # "Why?" row, minHeight 32
     label(d, x0, wy, "Why?", DIM)
@@ -180,17 +184,20 @@ def bar(W, favors, gap, second_in_firsts, them="They", surface="deck"):
     return img
 
 
-def sheet(name, W, cases, them="They", surface="deck"):
-    """Rows of cases, a before (0.57) and an after (0.287) column each."""
-    cols = [("Before (main): ±2nd tick at 0.57", 0.57), ("After (#567): ±2nd tick at 0.287", 0.287)]
-    tiles = [[bar(W, favors, gap_b if i == 0 else gap_a, second, them, surface)
-              for i, (_, second) in enumerate(cols)]
+TICK_COLS = [("Before (main): ±2nd tick at 0.57", 0.57, True),
+             ("After (#567): ±2nd tick at 0.287", 0.287, True)]
+
+
+def sheet(name, W, cases, them="They", surface="deck", cols=TICK_COLS):
+    """Rows of cases, a before and an after column each (title, tick, B2 rule)."""
+    tiles = [[bar(W, favors, gap_b if i == 0 else gap_a, second, them, surface, b2)
+              for i, (_, second, b2) in enumerate(cols)]
              for _, favors, gap_b, gap_a in cases]
     m, top, gap_x, row_h = 16 * S, 34 * S, 32 * S, 26 * S
     tw, th = tiles[0][0].width, max(t.height for row in tiles for t in row)
     out = Image.new("RGB", (2 * m + 2 * tw + gap_x, top + len(cases) * (th + row_h) + 22 * S), INK0)
     d = ImageDraw.Draw(out)
-    for i, (title, _) in enumerate(cols):
+    for i, (title, *_) in enumerate(cols):
         label(d, m + i * (tw + gap_x), 12 * S, title, DIM)
     y = top
     for (caption, *_), row in zip(cases, tiles):
@@ -228,4 +235,22 @@ sheet("before-after-283.png", 283, [
     ("League \"Works right now\" example: \"a Mid 2nd\", ending on the +2nd tick after",
      "receive", old_example, new_example),
 ], surface="league")
+# B2 rule (Product P112, 11-02): a lean with no pick label shows "≈ N mid
+# 1sts" only at a gap of at least one first; under that it reads Even.
+mid_1st = elo_to_value(GENERIC_PICK_SEEDS[(1, "Mid")])
+tiny = {"value": 40, "firsts": round(40 / mid_1st, 2), "pick_equivalent": None}
+# Past 1.25x the largest generic pick, _pick_gap_equivalent has no label.
+big = gap_for(round(1.3 * max(elo_to_value(v) for v in GENERIC_PICK_SEEDS.values())))
+assert big["pick_equivalent"] is None and abs(big["firsts"]) >= 1
+sheet("before-after-b2-317.png", 317, [
+    ("A low-value trade 40 apart (no pick label: under half the smallest pick)",
+     "receive", tiny, tiny),
+    (f"@mike_dynasty wins by {big['firsts']:.1f} firsts (no single pick fits): unchanged",
+     "give", big, big),
+    ("You win by a Mid 2nd (a pick label): unchanged",
+     "receive", gap_for(mid_2nd), gap_for(mid_2nd)),
+], them="@mike_dynasty", cols=[
+    ("Before (#567 @ e70ad147): a lean, \"≈ 0.0 mid 1sts\"", 0.287, False),
+    ("After (B2 rule): under 1 first, no pick label → Even", 0.287, True),
+])
 print("ok")
