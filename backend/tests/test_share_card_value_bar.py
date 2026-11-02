@@ -971,6 +971,36 @@ def test_a_package_with_an_owned_pick_drops_the_player_count(world):
     assert _package_lines(html) == [f"A dynasty trade package. {PKG_NO_BAR}"] * 4
 
 
+@pytest.mark.parametrize("give, recv, lead", [
+    (["vb_wr1", "vb_rb1", "vb_te1", "vb_qb1"],                       # 4 for 4
+     ["vb_wr2", "vb_rb2", "vb_wr3", "vb_m2a"], "An 8-player dynasty trade package."),
+    (["vb_wr1", "vb_rb1", "vb_te1", "vb_qb1", "vb_wr2"],             # 5 for 3
+     ["vb_rb2", "vb_wr3", "vb_m2a"], "An 8-player dynasty trade package."),
+    (["vb_te1", "vb_wr2"], ["vb_qb1"], "A 3-player dynasty trade package."),
+    # Eight ids with a pick among them: count-free, so no "An" either.
+    (["vb_wr1", "vb_rb1", "vb_te1", "vb_qb1", "generic_pick_2_mid"],
+     ["vb_wr2", "vb_rb2", "vb_wr3"], "A dynasty trade package."),
+])
+def test_an_8_player_package_reads_an(world, give, recv, lead):
+    """Marketing's approved template: "An 8-player dynasty trade package."
+    Every other count keeps "A {n}-player"; a pick package stays count-free.
+    Both variants (snapshot or not), every description tag and the <p>."""
+    with_bar = _share_package(world, give, recv, scoring_format="1qb_ppr")
+    bare = _share_package(world, give, recv)
+    assert _package_snapshot(with_bar) is not None and _package_snapshot(bare) is None
+    with patch.object(server, "is_enabled", SHARE_ON):
+        page = {sid: world.get(f"/s/p/{sid}").get_data(as_text=True)
+                for sid in (with_bar, bare)}
+    assert _package_lines(page[with_bar]) == [f"{lead} {PKG_WITH_BAR}"] * 4
+    assert _package_lines(page[bare]) == [f"{lead} {PKG_NO_BAR}"] * 4
+
+
+def test_count_article_is_an_only_for_8_in_the_package_range():
+    """/s/p counts run 1-10 (five a side): only 8 takes "An"."""
+    assert {n: server._count_article(n) for n in range(1, 11)} == \
+        {n: ("An" if n == 8 else "A") for n in range(1, 11)}
+
+
 # ---------------------------------------------------------------------------
 # 7. The sharer's private board and settings never move a snapshot
 # ---------------------------------------------------------------------------

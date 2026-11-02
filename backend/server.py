@@ -31747,6 +31747,15 @@ def create_share_trade_route():
     })
 
 
+def _count_article(n: int) -> str:
+    """The article before a spoken count: "An" when the number is said with a
+    vowel sound (eight, eleven, eighteen, eighty-...), else "A". /s/p only
+    passes 1-10 (`_SHARE_PACKAGE_SIDE_MAX` per side), so only 8 reads "An",
+    as marketing's approved template has it ("An 8-player dynasty trade
+    package."; head-bizops via head-eng, 2026-11-01)."""
+    return "An" if str(n).startswith("8") or n in (11, 18) else "A"
+
+
 @app.route("/s/p/<short_id>")
 def share_package_page(short_id):
     """Public OG landing page for a shared package (flag growth.share_landing)."""
@@ -31768,7 +31777,7 @@ def share_package_page(short_id):
     # either side the line drops the count. `pick_labels` is the card's own
     # pick detection (`_share_pick_labels`, the PK chip's source).
     lead = ("A dynasty trade package." if card["pick_labels"]
-            else f"A {n}-player dynasty trade package.")
+            else f"{_count_article(n)} {n}-player dynasty trade package.")
     if card["verdict"] is not None:
         description = (f"{lead} See the give/get "
                        "breakdown and how the values compare in draft-pick terms. "
