@@ -3487,6 +3487,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("bakeoff_include_baseline",    0.0, "bake-off roster bit: 1 = arm A (baseline) generates; 0 = out (default)"),
     ("bakeoff_include_challenger",  1.0, "bake-off roster bit: 1 = arm D (challenger) generates; 0 = out"),
     ("bakeoff_include_gen_v2",      1.0, "bake-off roster bit: 1 = arm C (gen_v2) generates; 0 = out"),
+    # BL-001 — MATCHES trade_service._DEFAULT_CFG and the inline fallback in
+    # bakeoff_runner.elo_freeze_mult (all three are 1.0; G-064).
+    ("bakeoff_freeze_trade_k",      1.0, "BL-001 bake-off Channel 1: 1 = trade-card like/pass K frozen to 0 while trade.bakeoff is on (default; any value > 0 freezes); 0 = swipes learn at trade_k_like/trade_k_pass x fit with the flag still on. Forward-only: stored k_factor is never rewritten, so setting 1 again stops future learning but does not revert boards"),
     # OPERATOR RULING 2026-08-21 (batch-wide): ghosts are ruled out
     # entirely, so the SEED default is 0 — a fresh DB must not start
     # ghosting. <=0 disables ghosting inside the flag.
