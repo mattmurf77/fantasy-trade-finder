@@ -1219,6 +1219,8 @@ def test_the_adapter_refuses_while_uncaptured_even_with_a_working_builder(monkey
 @pytest.mark.parametrize("message,auth", [
     ("Only the author of this league can add players.", False),
     ("The commissioner has locked rosters; authority is limited.", False),
+    ("You have no tokens of value left.", False),                    # round 7
+    ("You are not authorized to make this move.", False),            # a permission refusal
     ("Your token is invalid.", True), ("Unauthorized", True), ("Please log in again.", True),
     ("Forbidden", True), ("auth required", True),
 ])
@@ -1268,3 +1270,49 @@ def test_relink_withdrawal_and_swap_are_one_transaction(h, monkeypatch, failing)
     assert [c for c in h.consents() if c["kind"] == "withdrawal"] == []
     assert db_module.get_sleeper_credential(USER) == before   # the old credential, untouched
     assert h.events_named("fa_move_consent_withdrawn") == []
+
+
+# ---------------------------------------------------------------------------
+# Round 7 (release-lead's delta QA of #578 @ 8948e884)
+# ---------------------------------------------------------------------------
+
+def test_the_claim_takes_its_lock_in_the_same_transaction_as_check_and_insert():
+    """Structural pin CI runs (the Postgres race test is opt-in): in
+    `claim_platform_write_move` the `pg_advisory_xact_lock(_FA_MOVE_LOCK_CLASS,
+    ...)` call, the block check (`blocked(...)`) and the `sent` insert are all
+    inside ONE `with engine.begin()`, the lock first. Sabotage: drop the lock,
+    or take it in a `with engine.begin()` of its own."""
+    import ast
+    import inspect
+    import textwrap
+    tree = ast.parse(textwrap.dedent(inspect.getsource(db_module.claim_platform_write_move)))
+
+    def _is_begin(item):
+        call = item.context_expr
+        return (isinstance(call, ast.Call) and getattr(call.func, "attr", None) == "begin"
+                and getattr(call.func.value, "id", None) == "engine")
+    withs = [n for n in ast.walk(tree) if isinstance(n, ast.With) and any(map(_is_begin, n.items))]
+    assert len(withs) == 1, f"{len(withs)} engine.begin() blocks"
+    (block,) = withs
+
+    def _lock(n):
+        return (isinstance(n, ast.JoinedStr) and any(
+                    isinstance(v, ast.Constant) and "pg_advisory_xact_lock(" in v.value
+                    for v in n.values)
+                and any(isinstance(v, ast.FormattedValue)
+                        and getattr(v.value, "id", None) == "_FA_MOVE_LOCK_CLASS"
+                        for v in n.values))
+
+    def _check(n):
+        return isinstance(n, ast.Call) and getattr(n.func, "id", None) == "blocked"
+
+    def _insert(n):
+        return (isinstance(n, ast.Call) and getattr(n.func, "id", None) == "insert"
+                and n.args and getattr(n.args[0], "id", None) == "platform_write_moves_table")
+    inside = list(ast.walk(block))
+    found = {name: [n.lineno for n in inside if pred(n)]
+             for name, pred in (("lock", _lock), ("check", _check), ("insert", _insert))}
+    assert all(found.values()), found
+    assert found["lock"][0] < min(found["check"]) and found["lock"][0] < min(found["insert"]), found
+    assert min(found["check"]) < min(found["insert"]), found
+

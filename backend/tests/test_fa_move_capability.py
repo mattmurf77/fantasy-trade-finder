@@ -24,18 +24,19 @@ from backend.tests.test_fa_move_route import (  # noqa: F401  (h is a fixture)
     _jwt, _rosters, _seed_move, add_league, h,
 )
 
-def _contract_copy_keys() -> set[str]:
+def _contract_copy_keys(text: str | None = None) -> set[str]:
     """The `move.copy` keys from contract.md §7's table, parsed, so this list
     can't drift from the contract again (round 6: it missed offline_line)."""
     import pathlib, re
-    text = (pathlib.Path(__file__).resolve().parents[2]
-            / "docs/plans/sleeper-fa-write/contract.md").read_text(encoding="utf-8")
+    if text is None:
+        text = (pathlib.Path(__file__).resolve().parents[2]
+                / "docs/plans/sleeper-fa-write/contract.md").read_text(encoding="utf-8")
     table = text.split("`move.copy` keys:", 1)[1].split("Result and refusal text", 1)[0]
     keys = set()
     for line in table.splitlines():
         cells = line.split("|")
         if len(cells) > 2 and "`" in cells[1]:
-            keys |= set(re.findall(r"`([a-z_]+)`", cells[1]))
+            keys |= set(re.findall(r"`([a-z0-9_]+)`", cells[1]))
     return keys
 
 
@@ -196,6 +197,14 @@ def test_copy_keys_are_the_contracts():
     assert set(copy._SLEEPER_SLOTS_FINAL) | set(copy._SLEEPER_SLOTS_DRAFT) == SERVED_KEYS
     assert not set(copy._SLEEPER_SLOTS_FINAL) & set(copy._SLEEPER_SLOTS_DRAFT)
     assert not copy.UNSERVED_KEYS & (set(copy._SLEEPER_SLOTS_FINAL) | set(copy._SLEEPER_SLOTS_DRAFT))
+
+
+def test_the_contract_parser_keeps_keys_with_digits():
+    """Round 7: `[a-z0-9_]+`, so a future key such as `cta_claim_2` is read."""
+    table = ("`move.copy` keys:\n\n| Key | Used in | Example |\n|---|---|---|\n"
+             "| `cta_claim_2`, `line_v2` | x | y |\n| `plain_key` | x | y |\n\n"
+             "Result and refusal text comes from the response.")
+    assert _contract_copy_keys(table) == {"cta_claim_2", "line_v2", "plain_key"}
 
 
 @pytest.mark.parametrize("flag_on", [True, False])
@@ -373,12 +382,15 @@ def _raised_codes_and_messages():
                     else arg.values[-1].value.lstrip("_"))
             kind = next((k.value.value for k in node.keywords if k.arg == "kind"), None)
             msg = node.args[2]
-            assert isinstance(msg, ast.Call) and getattr(msg.func, "attr", None) == "message", code
-            key = msg.args[0]
-            keys = ([key.value] if isinstance(key, ast.Constant)
-                    else ["move_in_progress", "move_in_progress_pending_claim"])
-            for k in keys:
-                pairs.add((code + (f"+{kind}" if kind else ""), k))
+            calls = [msg.body, msg.orelse] if isinstance(msg, ast.IfExp) else [msg]
+            for call in calls:
+                assert (isinstance(call, ast.Call)
+                        and getattr(call.func, "attr", None) == "message"), code
+                key = call.args[0]
+                keys = ([key.value] if isinstance(key, ast.Constant)
+                        else ["move_in_progress", "move_in_progress_pending_claim"])
+                for k in keys:
+                    pairs.add((code + (f"+{kind}" if kind else ""), k))
     return pairs
 
 

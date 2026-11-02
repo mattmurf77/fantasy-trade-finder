@@ -397,6 +397,15 @@ def test_the_consent_routes_403_has_its_own_line(h):
         assert "nothing was sent" not in msg.lower()
 
 
+def test_the_consent_403_for_an_unknown_platform_names_none(h):
+    """Round 7: never "Verify your the platform sign-in"."""
+    h.sess["verified"] = False
+    for platform in ("bogus", None):
+        r = _get(h, platform)
+        assert r.status_code == 403
+        assert _err(r)["message"] == "Verify your sign-in to see or change roster moves."
+
+
 def test_the_consent_route_checks_both_denials():
     """Structural twin (sabotage: drop either denial)."""
     src = inspect.getsource(server.platform_write_consent_route)

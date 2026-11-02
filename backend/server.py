@@ -36874,8 +36874,11 @@ def platform_write_consent_route():
     denial = (_verified_write_denial(sess) if request.method == "DELETE"
               else _verified_read_denial(sess))
     if denial is not None:
-        body, status = _fa_move_error("verification_required", 403, _fa_copy.message(
-            "consent_verification_required", request.args.get("platform") or "sleeper"))
+        asked = request.args.get("platform") or ""
+        body, status = _fa_move_error("verification_required", 403, (
+            _fa_copy.message("consent_verification_required", asked)
+            if asked in _FA_MOVE_PLATFORMS
+            else _fa_copy.message("consent_verification_required_any")))
         return jsonify(body), status
     platform = request.args.get("platform") or ""
     if platform not in _FA_MOVE_PLATFORMS:

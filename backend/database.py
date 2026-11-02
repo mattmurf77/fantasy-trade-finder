@@ -16717,8 +16717,9 @@ class TradeShareRateLimited(Exception):
 
 
 # Advisory-lock class id for the trade-share mint (Postgres two-int form:
-# this constant + hashtext(user_id)). Nothing else in the app takes advisory
-# locks; the constant keeps the key space its own if something ever does.
+# this constant + hashtext(user_id)). The only other advisory lock in the app
+# is the D1 move claim's, `_FA_MOVE_LOCK_CLASS` (8009). Each class keeps its
+# own key space; a new lock takes a new class.
 _TRADE_SHARE_LOCK_CLASS = 8008
 
 

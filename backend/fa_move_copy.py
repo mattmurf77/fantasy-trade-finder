@@ -387,6 +387,8 @@ _MESSAGES = {
     # The consent routes' 403 (head-eng): nothing is ever sent from them, so no
     # "Nothing was sent". DRAFT wording; the client shows its own line anyway.
     "consent_verification_required": "Verify your {platform} sign-in to see or change roster moves.",
+    # The same 403 when the request names no known platform: platform-free.
+    "consent_verification_required_any": "Verify your sign-in to see or change roster moves.",
     "not_linked": "Connect your {platform} sign-in to make moves from here.",   # G2 (Sleeper: approved)
     "not_linked_other_account": ("The {platform} account you connected isn't in {league}. "
                                  "Connect the one that owns your team. Nothing was sent."),

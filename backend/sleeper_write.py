@@ -454,10 +454,15 @@ FA_CLAIM_SHAPE_CAPTURED = False   # waiver claim (capture Q3); claims also need 
 # pinned by test_fa_move_route.py).
 FA_MOVE_WRITE_TIMEOUTS_S: tuple[int, ...] = (_HTTP_TIMEOUT,)
 
-# Auth words in a GraphQL error dump, matched as whole words.
+# Auth words in a GraphQL error dump, matched as whole words, read as "the
+# token is dead" (SleeperAuthError: the credential is deleted and consent
+# withdrawn). Deliberately NOT here: "author"/"authority" (no match as whole
+# words), "tokens" ("You have no tokens of value left." is a refusal), and
+# "authorized" as in "not authorized" (a permission refusal, not a dead
+# token; "unauthorized" stays). Settled for real by the capture's error list.
 _FA_AUTH_WORDS = re.compile(
     r"\b(?:auth|unauth|unauthori[sz]ed|unauthenticated|authenticat(?:e|ed|ion)|"
-    r"authori[sz]ation|token|tokens|forbidden|login|log\s+in|jwt)\b", re.IGNORECASE)
+    r"authori[sz]ation|token|forbidden|login|log\s+in|jwt)\b", re.IGNORECASE)
 
 
 @dataclass
@@ -564,8 +569,9 @@ def _post_graphql_write(op: str, token: str, body: dict, *, timeout: int, _opene
             first = errors[0] if isinstance(errors, list) and errors else None
             msg = first.get("message") if isinstance(first, dict) else None
             detail = str(msg).strip()[:500] if msg else dump
-            # Whole words only: "author" or "tokens of value" in a refusal is not
-            # an auth failure (the trade path's substring scan, above, predates this).
+            # Whole words only (_FA_AUTH_WORDS): "author", "authority", "tokens of
+            # value" and "not authorized" are refusals, not a dead token (the
+            # trade path's substring scan, above, predates this).
             if _FA_AUTH_WORDS.search(dump):
                 raise SleeperAuthError("Sleeper auth error", detail=detail)
             # TODO(capture): GraphQL `errors[]` on a 200 that ALSO carries a
