@@ -38,11 +38,12 @@ def _match(engine, *, a_decision="decline", b_decision=None) -> int:
             user_a_decision=a_decision, user_b_decision=b_decision)).inserted_primary_key[0]
 
 
-def _swipe(engine, user, winner, loser, k, at="2026-10-26T00:00:00", kind="trade"):
+def _swipe(engine, user, winner, loser, k, at="2026-10-26T00:00:00", kind="trade",
+           fmt="1qb_ppr"):
     with engine.begin() as conn:
         conn.execute(insert(swipe_decisions_table).values(
             user_id=user, winner_player_id=winner, loser_player_id=loser,
-            decision_type=kind, k_factor=k, created_at=at, scoring_format="1qb_ppr"))
+            decision_type=kind, k_factor=k, created_at=at, scoring_format=fmt))
 
 
 def _decline_ks(result, user) -> dict:
@@ -68,6 +69,19 @@ def test_a_decline_nets_minus_12_at_any_like_k(eng, like_k):
     for k in ks.values():
         assert like_k - k == pytest.approx(-12.0)        # the net, in K
     assert result["outcome"] == "declined"
+
+
+@pytest.mark.parametrize("fmt, k", [("1qb_ppr", 20.0), ("sf_tep", 12.0)])
+def test_the_like_is_read_on_the_board_the_decline_is_saved_to(eng, fmt, k):
+    """#462 QA P3-1: a 1qb like at K 8, then a later sf_tep like at K 0 on the
+    same pair. Each board's decline nets its own like (1qb: 12 + 8; sf_tep:
+    12 + 0), never the other board's later one. A legacy NULL row reads as
+    1qb_ppr."""
+    _swipe(eng, A, "r1", "g1", 8.0, at="2026-10-25T00:00:00", fmt=None)
+    _swipe(eng, A, "r1", "g1", 0.0, at="2026-10-26T00:00:00", fmt="sf_tep")
+    ks = _decline_ks(db_module.record_match_disposition(_match(eng), B, "accept",
+                                                        scoring_format=fmt), A)
+    assert ks[("g1", "r1")] == k
 
 
 def test_each_pair_takes_its_own_likes_k_and_none_reads_0(eng):

@@ -44,7 +44,7 @@ See `docs/data-dictionary.md` for the full 22-table dictionary. Core tables: `us
 
 ### Ranking System Details
 
-- **Elo K-factors** (defaults in `model_config`, runtime-tunable): rank decisions K=32, trade likes K=8, trade passes K=4, trade accepts K=20, trade decline corrections K=20
+- **Elo K-factors** (defaults in `model_config`, runtime-tunable): rank decisions K=32, trade likes K=8, trade passes K=4, trade accepts K=20, trade declines K=12 + the declined pair's like K (nets −12; BL-004)
 - **Tiers:** an 8-tier pick-value ladder anchored to draft-pick equivalents (`firsts_4plus`, `firsts_3`, `firsts_2`, `first_1`, `second`, `third`, `fourth`, `waivers`), banded per `(scoring_format, position)` in `backend/tier_config.json` and served to clients via `GET /api/tier-config`. This replaced the old elite/starter/bench taxonomy
 - **Outlook:** the old team-outlook Elo multipliers are gone; outlook is now a now/future valuation blend inside the v2 trade engine, and positional preferences are a hard filter on candidate packages
 - **Trade decisions feed back into rankings:** likes/passes/accepts/declines update Elo with smaller K-factors

@@ -11596,13 +11596,18 @@ _K_ACCEPT             = lambda: get_config().get("trade_k_accept",             2
 _K_DECLINE_NET        = lambda: get_config().get("trade_k_decline_net",        12.0)
 
 
-def _decline_signals(conn, user_id: str, give: list, receive: list) -> list[dict]:
+def _decline_signals(conn, user_id: str, give: list, receive: list,
+                     scoring_format: str | None = None) -> list[dict]:
     """A decliner's correction, one signal per (give, receive) pair (BL-004):
     winner=give, loser=receive at K = trade_k_decline_net + the K the user's
     'Interested' swipe on that pair was stored with (swipe_decisions: winner
     = the receive id, loser = the give id, decision_type 'trade'; the latest
     such row, 0 when there is none). So a decline nets -trade_k_decline_net
-    at any like K: frozen (0), half K or full K, and whatever fit_mult did."""
+    in K at any like K: frozen (0), half K or full K, and whatever fit_mult
+    did. `scoring_format` (the board the decline is saved to; a legacy NULL
+    row reads as DEFAULT_SCORING) limits the like to that board; None reads
+    any. Only the latest like on a pair is netted: an earlier like on the
+    same pair, at a K since changed, keeps its own."""
     sd = swipe_decisions_table
     net = _K_DECLINE_NET()
     signals = []
@@ -11610,14 +11615,16 @@ def _decline_signals(conn, user_id: str, give: list, receive: list) -> list[dict
         for receive_id in receive:
             if give_id == receive_id:
                 continue
+            q = select(sd.c.k_factor).where(
+                sd.c.user_id == user_id,
+                sd.c.winner_player_id == receive_id,
+                sd.c.loser_player_id == give_id,
+                sd.c.decision_type == "trade",
+            )
+            if scoring_format is not None:
+                q = q.where(func.coalesce(sd.c.scoring_format, DEFAULT_SCORING) == scoring_format)
             liked = conn.execute(
-                select(sd.c.k_factor).where(
-                    sd.c.user_id == user_id,
-                    sd.c.winner_player_id == receive_id,
-                    sd.c.loser_player_id == give_id,
-                    sd.c.decision_type == "trade",
-                ).order_by(sd.c.created_at.desc(), sd.c.id.desc()).limit(1)
-            ).scalar()
+                q.order_by(sd.c.created_at.desc(), sd.c.id.desc()).limit(1)).scalar()
             signals.append({
                 "user_id":       user_id,
                 "winner_ids":    [give_id],
@@ -11670,6 +11677,7 @@ def record_match_disposition(
     match_id: int,
     user_id: str,
     decision: str,
+    scoring_format: str | None = None,
 ) -> dict:
     """
     Record a user's accept/decline decision on a trade match.
@@ -11697,8 +11705,9 @@ def record_match_disposition(
     Both accept   → for each user: winner=receive, loser=give, K=20
     Any decline   → for each decliner, per (give, receive) pair:
                     winner=give, loser=receive, K = 12 + the K the like on
-                    that pair was stored with, so the net is −12 at any like
-                    K (BL-004, _decline_signals)
+                    that pair was stored with on `scoring_format`'s board
+                    (the board the caller saves the signals to), so the net
+                    is −12 in K at any like K (BL-004, _decline_signals)
     """
     now = _now()
 
@@ -11790,7 +11799,8 @@ def record_match_disposition(
                     "decision_type": "disposition",
                 })
             else:
-                elo_signals.extend(_decline_signals(conn, row.user_a_id, a_give, a_receive))
+                elo_signals.extend(_decline_signals(conn, row.user_a_id, a_give, a_receive,
+                                                    scoring_format))
 
             # Build ELO signal for user_b
             if b_dec == "accept":
@@ -11802,7 +11812,8 @@ def record_match_disposition(
                     "decision_type": "disposition",
                 })
             else:
-                elo_signals.extend(_decline_signals(conn, row.user_b_id, b_give, b_receive))
+                elo_signals.extend(_decline_signals(conn, row.user_b_id, b_give, b_receive,
+                                                    scoring_format))
 
     # F3 (deck.fatigue) — additive context for the decline-suppression hook:
     # the package from the CALLER's perspective plus the partner's current

@@ -10,6 +10,13 @@
 - **Now:** `database._decline_signals` gives a decliner one correction per (give, receive) pair, at K = `trade_k_decline_net` (12) + the K the user's like on that pair was stored with (`swipe_decisions`, the latest `trade` row with winner = receive and loser = give; 0 when none). So like + decline nets −12 at every like K.
 - **Accept is unchanged.**
 - **models-lead's bar:** the net decline effect is −12 ± 1 at every like K, as a unit test.
+  - **What holds exactly:** the net in K is −12 at every like K, and the unit tests pin it.
+  - **What holds only approximately (release-lead's QA, 2026-11-02; for models-lead's R-G):** the Elo result of like + decline equals a single K-12 decline within 1 Elo only for near-equal ratings and packages up to 2×2. At full K a 3×3 package is off by 1.57. A 200-point rating gap is off by 3.9 (1×1) to 10.4 (3×3). When the give player is rated about 200 above, like + decline leaves the received player up 1.0–1.7. At full K that's identical to main; at K 0 it's exact; at K 4 it's better than main except in that case. The board test covers 1×1 at equal ratings.
+- **The like is looked up on the decline's board:** the caller's active scoring format, which is where the route saves the signals (a legacy NULL row reads as `1qb_ppr`). Without it, a 1qb like at K 8 and a later sf_tep like at K 0 would net the 1qb board −4.
+- **Residuals, recorded:**
+  - only the latest like on a pair is netted, which matters only if K changed between two likes on one pair (for example across BL-001);
+  - the route saves each per-pair signal in its own `save_trade_swipes` call, so a DB failure mid-loop can persist part of a correction (before, one call per decliner could already split the two users);
+  - `trade_k_decline_correction` is no longer read: if prod's value had been tuned away from 20, that tuning is dropped (release-lead can check it read-only on the operator's word).
 - **Sign-off:** models-lead's packet signs before merge (this is a model change).
 
 ---
@@ -24,8 +31,8 @@
 
 - New/changed tables or columns: none.
 - New/changed feature flags: none.
-- New `model_config` keys: **`trade_k_decline_net`** = 12.0 (DB-seeded, `_MODEL_CONFIG_DEFAULTS`, mirrored in `ranking_service._DEFAULT_CFG`) → `docs/config-reference.md` § Match-decline correction. `trade_k_decline_correction` stays registered but unused.
-  - **Rollback:** a code revert restores the fixed 20. The knob scales the net without a deploy.
+- New `model_config` keys: **`trade_k_decline_net`** = 12.0 (DB-seeded, `_MODEL_CONFIG_DEFAULTS`) → `docs/config-reference.md` § Match-decline correction. It's not mirrored in `ranking_service._DEFAULT_CFG`: nothing there reads it, and that module is engine-hashed, so touching it would cold every stored page once (release-lead's QA P2). `trade_k_decline_correction` stays registered but unused.
+  - **Rollback:** only a code revert restores the fixed 20. The knob changes the net without a deploy.
 
 ## 3. Evidence scope
 
