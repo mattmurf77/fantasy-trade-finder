@@ -13,7 +13,9 @@
 //   - the timing path reads Date.now() (wall clock) instead of the
 //     monotonic performance.now().
 // What it does: EXECUTES utils/firstCardEvent.ts and state/tradeSearchTrace.ts
-// (requires stubbed) and pins every table-A tap site by source shape.
+// (requires stubbed) and pins every table-A tap site by source shape. §10
+// (#393 M2, analytics-lead's grant) runs R2b `paywall` / `verify` end to end
+// through the real api/client and paywall router.
 // HONEST LABEL (G-035): the trace's rules are executed; that the screens call
 // them at the right frame is pinned by shape — the TestFlight two-device
 // session (§9.6) and the Testing readout are the runtime proof.
@@ -193,8 +195,8 @@ console.log('check-trade-first-card-events:');
 
 // ── 4. The request carries the tap's id ───────────────────────────────────
 {
-  check('4a. dispatchGenerate sends the claimed tap id as /generate\'s search_id (else a fresh one for untapped dispatches), and the deck now answers that search',
-    /const claimed = claimPendingSearch\(\);\s*deckSearchRef\.current = claimed \? \{ id: claimed, keys: new Set\(\) \} : null;\s*generateMutation\.mutate\(\{ \.\.\.vars, searchId: claimed \?\? uuidv4\(\) \}, mutateOpts\);/.test(trades));
+  check('4a. dispatchGenerate sends the claimed tap id as /generate\'s search_id (else a fresh one for untapped dispatches; the automatic re-search its open id or none, section 11), and the deck now answers that search',
+    /const claimed = research \? research\.searchId : claimPendingSearch\(\);\s*deckSearchRef\.current = claimed \? \{ id: claimed, keys: new Set\(\) \} : null;\s*generateMutation\.mutate\(\s*\{\s*\.\.\.vars,\s*searchId: research \? research\.searchId \?\? undefined : claimed \?\? uuidv4\(\),\s*research: !!research,\s*\},\s*mutateOpts\);/.test(trades));
   check('4b. the landing\'s page-1 request uses the canvas tap\'s id; the adopting deck claims it; a cancelled push drops it',
     /generateTrades\(request, \{ searchId: fork\.searchId \}\)/.test(trades)
       && /claimSearch\(adopted\?\.snapshot\.search_id\);/.test(trades)
@@ -394,5 +396,338 @@ function freshTraceWithTimers() {
       && /\}\): string \{\s*pruneSettledTraces\(\);/.test(traceCode));
 }
 
-console.log(failures ? `check-trade-first-card-events: ${failures} FAILED` : 'check-trade-first-card-events: all passed');
-process.exit(failures ? 1 : 0);
+// ── 11. The automatic re-search on inputs_changed (analytics-lead, option (a), 2026-10-28) ──
+// (§11, not §10: #488's §10 ends in an async exit, so this section runs before it.)
+// A deck the server revoked for an input change re-searches once by itself:
+// no R1, no new search_id (the open trace's, else none), no R2b, at most once.
+{
+  const pages = load('utils/tradePages.ts', {});
+  const R = (evs, type) => evs.filter((e) => e.type === type);
+  const begin = (h, source) => h.mod.beginTradeSearch({ source, mode: 'deck', searchType: 'organic', screen: 'Trades' });
+
+  // (i) inputs_changed AFTER R2: the trace is settled.
+  {
+    const h = freshTraceWithTimers();
+    const id = begin(h);
+    h.mod.claimPendingSearch();
+    h.mod.reportFirstCardShown(id, { cardIndex: 0 });
+    const before = h.events.length;
+    let state = 'idle';
+    state = pages.autoResearchOnJobError(state, 'inputs_changed');
+    const sent = pages.autoResearchSearchId(id, h.mod.isSearchOpen);
+    check('11a. EXECUTED (i): after R2, an inputs_changed is recovered (no deckFailure) and the re-search carries no search_id',
+      state === 'pending' && sent === null);
+    check('11b. EXECUTED (i): the re-search fires no R1 and no R2/R2b',
+      h.events.length === before && R(h.events, 'find_trades_tapped').length === 1
+        && R(h.events, 'trade_first_card_shown').length === 1 && R(h.events, 'trade_first_card_failed').length === 0);
+  }
+
+  // (ii) inputs_changed BEFORE the first card: the trace is still open.
+  {
+    const h = freshTraceWithTimers();
+    const id = begin(h);
+    h.mod.claimPendingSearch();
+    // the revoked deck's first response, then an ordinary later one (first wins)
+    h.mod.noteFirstResponse(id, { serve_source: 'page', freshness_state: 'fresh', status: 'complete', cardCount: 30, job_id: 'revoked' });
+    h.mod.noteFirstResponse(id, { serve_source: 'fresh', freshness_state: 'updating', status: 'running', cardCount: 0, job_id: 'other' });
+    const keptFirst = h.mod.traceFor(id).jobId === 'revoked' && h.mod.traceFor(id).serveSource === 'page';
+    const state = pages.autoResearchOnJobError('idle', 'inputs_changed');
+    const sent = pages.autoResearchSearchId(id, h.mod.isSearchOpen);
+    h.tick(1500);                                     // the rebuild
+    // the re-search's answer replaces it while the trace is open (analytics-lead)
+    h.mod.noteFirstResponse(sent, { serve_source: 'fresh', freshness_state: 'fresh', status: 'running', cardCount: 0, job_id: 'rebuilt' }, { replace: true });
+    h.mod.reportFirstCardShown(sent, { cardIndex: 0 });  // the rebuilt deck's first card
+    const r2 = R(h.events, 'trade_first_card_shown');
+    // a settled trace never changes, replace or not
+    h.mod.noteFirstResponse(id, { serve_source: 'page', freshness_state: 'stale', status: 'complete', cardCount: 1, job_id: 'late' }, { replace: true });
+    check('11c. EXECUTED (ii): before the first card, the re-search reuses the open search_id',
+      state === 'pending' && sent === id);
+    check('11d. EXECUTED (ii): no R2b, and exactly one R2 with the original search_id, timed from the original tap',
+      R(h.events, 'trade_first_card_failed').length === 0 && r2.length === 1
+        && r2[0].props.search_id === id && r2[0].props.ms_from_tap >= 1500
+        && R(h.events, 'find_trades_tapped').length === 1);
+    check('11m. EXECUTED (ii): R2 names the re-search\'s response (job_id, serve_source, freshness_state), not the revoked one',
+      r2.length === 1 && r2[0].props.job_id === 'rebuilt' && r2[0].props.serve_source === 'fresh'
+        && r2[0].props.freshness_state === 'fresh');
+    check('11n. EXECUTED: an ordinary later response never overwrites the first, and a settled trace never changes',
+      keptFirst && h.mod.traceFor(id).jobId === 'rebuilt' && h.mod.traceFor(id).freshnessState === 'fresh');
+  }
+
+  // (iii) a failed re-search: the error card, then Try again (a real tap) is one R1.
+  {
+    const h = freshTraceWithTimers();
+    const outcome = pages.autoResearchOnJobError('used', 'job_failed');
+    const shows = !pages.autoResearchHidesError('used', 'job_failed', false);
+    begin(h, 'deck_error_retry');
+    const r1 = R(h.events, 'find_trades_tapped');
+    check('11e. EXECUTED (iii): a failed re-search is today\'s failure, the error card shows, and Try again is one R1 deck_error_retry',
+      outcome === 'fail' && shows && r1.length === 1 && r1[0].props.source === 'deck_error_retry');
+  }
+
+  // (iv) at most one: a second inputs_changed in the same search fails.
+  check('11f. EXECUTED (iv): no second automatic re-search; once used, an inputs_changed shows the error card',
+    pages.autoResearchOnJobError('used', 'inputs_changed') === 'fail'
+      && !pages.autoResearchHidesError('used', 'inputs_changed', false)
+      && pages.autoResearchHidesError('used', 'inputs_changed', true)       // only while it's in flight
+      && pages.autoResearchHidesError('pending', 'inputs_changed', false)
+      && pages.autoResearchOnJobError('idle', 'job_failed') === 'fail');
+
+  // (c2) #525 QA P1-1: the re-search failed (or a second inputs_changed came),
+  // then Try again's request fails. The revoked job stays; only an ANSWER
+  // resets the budget, so the error card stays visible instead of an
+  // endless empty slot. A Try again that is answered starts a new budget.
+  {
+    let state = 'used';                               // the one re-search ran
+    const tryAgainInFlight = { research: false };     // Try again: not the re-search
+    const hiddenWhileTryAgain = pages.autoResearchHidesError(state, 'inputs_changed', tryAgainInFlight.research);
+    // its POST fails: no answer, so autoResearchAfterAnswer never runs
+    const hiddenAfterFailure = pages.autoResearchHidesError(state, 'inputs_changed', false);
+    const answered = pages.autoResearchAfterAnswer(state, false);
+    const researchAnswered = pages.autoResearchAfterAnswer('used', true);
+    check('11l. EXECUTED (c2): a failed Try again after a used re-search leaves the error card visible; only an answer resets the budget',
+      !hiddenWhileTryAgain && !hiddenAfterFailure && answered === 'idle' && researchAnswered === 'used'
+        && pages.autoResearchAfterAnswer('pending', false) === 'idle');
+  }
+
+  // (N3/N3b) #525 QA P1-1r: a Try again (or a tap while a re-search is
+  // pending) whose OWN answer is inputs_changed again, on a deck already
+  // holding a revoked job. Its answer resets the budget; the effects must
+  // read the new job (its job_id changed, status/error didn't), so the new
+  // search gets its one re-search and then the error card, never an endless
+  // empty slot.
+  {
+    for (const before of ['used', 'pending']) {
+      let state = pages.autoResearchAfterAnswer(before, false);            // the tap's answer lands
+      const newJobRead = pages.autoResearchOnJobError(state, 'inputs_changed');
+      state = newJobRead === 'pending' ? 'pending' : state;               // the mirror, re-run by job_id
+      const hiddenWhilePending = pages.autoResearchHidesError(state, 'inputs_changed', false);
+      state = 'used';                                                       // the auto effect, re-run by job_id
+      const secondError = pages.autoResearchOnJobError(state, 'inputs_changed');
+      const shownAfter = !pages.autoResearchHidesError(state, 'inputs_changed', false);
+      check(`11p. EXECUTED (N3, from '${before}'): a new search answered with inputs_changed gets one re-search, then the error card`,
+        newJobRead === 'pending' && hiddenWhilePending && secondError === 'fail' && shownAfter);
+    }
+  }
+  check('11q. both effects re-run on a new job_id, not only on status/error (P1-1r)',
+    /\}, \[job\?\.job_id, job\?\.status, job\?\.error\]\);/.test(trades)
+      && /\}, \[rawTopCard\?\.trade_id, job\?\.job_id, job\?\.status, job\?\.error\]\);/.test(trades)
+      && trades.indexOf("if (autoResearchOnJobError(autoResearchRef.current, job.error) === 'pending')")
+        < trades.indexOf('}, [job?.job_id, job?.status, job?.error]);'));
+
+  // The screen calls them where the rules say (by shape).
+  const effect = trades.slice(trades.indexOf("if (job?.status !== 'error') return;"), trades.indexOf("if (job?.status !== 'error') return;") + 600);
+  check('11g. the job-error mirror returns before deckFailure when the inputs_changed is recovered (no R2b)',
+    /if \(autoResearchOnJobError\(autoResearchRef\.current, job\.error\) === 'pending'\) \{\s*autoResearchRef\.current = 'pending';\s*return;\s*\}/.test(effect)
+      && effect.indexOf("autoResearchRef.current = 'pending'") < effect.indexOf('setDeckFailure('));
+  const auto = trades.slice(trades.indexOf("if (autoResearchRef.current !== 'pending' || rawTopCard"), trades.indexOf("if (autoResearchRef.current !== 'pending' || rawTopCard") + 500);
+  check('11h. the re-search runs once no card is left, through dispatchGenerate with the open id or none, never a tap path',
+    auto.length > 0 && /autoResearchRef\.current = 'used';/.test(auto)
+      && /dispatchGenerate\(\{ repeat: true \}, undefined,\s*\{ searchId: autoResearchSearchId\(deckSearchRef\.current\?\.id, isSearchOpen\) \}\);/.test(auto)
+      && !/beginTradeSearch|handleFindTrades|track\(/.test(auto));
+  check('11i. dispatchGenerate mints no search_id for the re-search and never resets the budget itself; a new search\'s ANSWER does (onSuccess)',
+    /searchId: research \? research\.searchId \?\? undefined : claimed \?\? uuidv4\(\),\s*research: !!research,/.test(trades)
+      && !/if \(!research\) autoResearchRef\.current = 'idle';/.test(trades)
+      && /onSuccess: \(snapshot, vars, ctx\) => \{\s*if \(\s*applyJobResult\(snapshot, [^)]*\) === null\s*\) \{\s*return;\s*\}\s*autoResearchRef\.current = autoResearchAfterAnswer\(autoResearchRef\.current, !!vars\.research\);/.test(trades)
+      && /setJob\(null\);[\s\S]{0,600}autoResearchRef\.current = 'idle';\s*let claimedFair = claimPendingSearch\(\);/.test(trades));   // the sweep clears the job as it resets
+  check('11j. the deck end hides the error card only while the RE-SEARCH is in flight (decided at render); offline it shows the Offline card',
+    /const deckEnd = deckEndRaw === 'error' && autoResearchHidesError\(\s*autoResearchRef\.current, job\?\.error,\s*generateMutation\.isPending && !!generateMutation\.variables\?\.research\)\s*\? \(online \? 'pending' : 'offline'\)\s*: deckEndRaw;/.test(trades));
+  check('11o. only the re-search\'s answer replaces the trace\'s first response',
+    /noteFirstResponse\(ds\.id, \{[\s\S]{0,260}?job_id: snapshot\.job_id,\s*\}, \{ replace: !!vars\.research \}\);/.test(trades)
+      && (trades.match(/\{ replace: /g) || []).length === 1);
+  check('11k. Try again stays a real tap: R1 deck_error_retry through handleFindTrades',
+    /if \(jobRef\.current\?\.status === 'error'\) \{\s*handleFindTrades\('deck_error_retry'\);/.test(trades));
+}
+
+// ── 10. R2b `paywall` / `verify` (analytics-lead's grant; #393 M2) ────────
+// The reason comes from api/client's gateSignalFor (never a re-parse of the
+// response) through utils/firstCardEvent.gateFailureReason, and is sent the
+// moment the gate answer ARRIVES: by the paywall router's gate listener
+// (state/usePaywallGate.handleGateSignal), before the paywall or the
+// VerifySheet shows. Otherwise the verify hold would turn it into `timeout`,
+// `abandoned`, or an R2 whose ms_from_tap includes the sheet. A background
+// call skips the listener, so the deck settles it with the same mapping.
+// EXECUTED end to end: the real client (scripted fetch) → the real router →
+// the real trace; each case must give exactly one R2b and no R2.
+{
+  const r = pure.gateFailureReason;
+  check('10a. EXECUTED: the mapping — paywall / verify from the gate signal; no signal, the wrong-account link and any send are error',
+    r({ action: 'paywall', gate: 'preview_used', kind: 'find' }) === 'paywall'
+      && r({ action: 'paywall', gate: null, kind: 'find' }) === 'paywall'
+      && r({ action: 'verify', gate: 'verify_required', kind: 'find' }) === 'verify'
+      && r({ action: 'verify', gate: null, kind: 'find' }) === 'verify'
+      && r(null) === 'error' && r(undefined) === 'error'
+      && r({ action: 'verify_mismatch' }) === 'error'
+      && r({ action: 'paywall', gate: 'lapsed', kind: 'send' }) === 'error');
+}
+
+function loadMain(rel, requireMap, globals = {}) {
+  const js = ts.transpileModule(read(rel), { compilerOptions: {
+    target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS } }).outputText;
+  const mod = { exports: {} };
+  const req = (name) => {
+    if (!(name in requireMap)) throw new Error(`${rel}: unexpected require ${name}`);
+    return requireMap[name];
+  };
+  const names = Object.keys(globals);
+  // eslint-disable-next-line no-new-func
+  new Function('module', 'exports', 'require', ...names, js)(mod, mod.exports, req, ...names.map((n) => globals[n]));
+  return mod.exports;
+}
+
+const gateFlags = { 'monetize.paywall': true };
+async function gateScenarios() {
+  // The real client against a scripted fetch.
+  const responses = [];
+  const fetchStub = async () => {
+    const res = responses.shift();
+    if (!res) throw new Error('unscripted fetch');
+    return { status: res.status, ok: res.status >= 200 && res.status < 300, text: async () => JSON.stringify(res.body) };
+  };
+  const client = loadMain('api/client.ts', {
+    'expo-constants': { default: { expoConfig: { version: '1.22.0', extra: { apiBaseUrl: 'https://api.test' } } } },
+    'expo-device': { deviceType: 1, DeviceType: { UNKNOWN: 0, PHONE: 1, TABLET: 2, DESKTOP: 3 }, osVersion: '18.0' },
+    'expo-secure-store': { getItemAsync: async (k) => (k === 'ftf.sessionToken' ? 'tok-1' : null), setItemAsync: async () => {}, deleteItemAsync: async () => {} },
+    'react-native': { AppState: { addEventListener: () => ({ remove() {} }) }, Platform: { OS: 'ios' } },
+    './events': { track: () => {} },
+  }, { fetch: fetchStub });
+  // One trace module and one router per run; the router's trace is the real one.
+  let h = null;
+  const traceProxy = {
+    openSearchId: () => h.mod.openSearchId(),
+    failFirstCard: (id, reason) => h.mod.failFirstCard(id, reason),
+  };
+  const session = { user: { user_id: '12345', account_only: false }, isDemo: false, verification: { session_verified: true } };
+  const zustandCreate = (init) => {
+    let state;
+    const setState = (p) => { state = Object.assign({}, state, typeof p === 'function' ? p(state) : p); };
+    state = init(setState, () => state);
+    const hook = (sel) => (sel ? sel(state) : state);
+    hook.getState = () => state;
+    hook.setState = setState;
+    return hook;
+  };
+  const gate = loadMain('state/usePaywallGate.ts', {
+    '@react-native-async-storage/async-storage': { default: { getItem: async () => null, setItem: async () => {} } },
+    zustand: { create: zustandCreate },
+    '../api/client': client,
+    './useSession': { useSession: { getState: () => session } },
+    // The gate's switch (monetize.paywall): on for these scenarios, then off
+    // for the flags-off case below (release-lead QA P1-1).
+    './useFeatureFlags': { useFeatureFlags: { getState: () => ({ flags: gateFlags }) } },
+    './tradeSearchTrace': traceProxy,
+    '../utils/firstCardEvent': pure,
+    // The one subscription-session predicate (#474 RC identity): zero imports.
+    './subscriptionSession': loadMain('state/subscriptionSession.ts', {}),
+  });
+  gate.installPaywallGate({
+    isReady: () => true, navigate: () => {}, getCurrentRoute: () => ({ name: 'Trades' }),
+    addListener: () => () => {}, reset: () => {},
+  });
+  const settle = async () => { for (let i = 0; i < 6; i += 1) await new Promise((res) => setImmediate(res)); };
+  const outcomes = (id) => h.events.filter((e) => (e.type === 'trade_first_card_failed' || e.type === 'trade_first_card_shown') && e.props.search_id === id);
+  // One search: tap, dispatch, the scripted answer(s), then the deck's own
+  // later attempts to settle it (an R2 for a card, the blur, the timer).
+  async function run(scripted, opts = {}) {
+    h = freshTraceWithTimers();
+    const id = h.mod.beginTradeSearch({ mode: 'deck', searchType: 'organic', screen: 'Trades' });
+    responses.length = 0;
+    responses.push(...scripted);
+    const p = client.api.post(opts.path || '/api/trades/generate', { search_id: id }, opts.background ? { background: true } : undefined)
+      .then((v) => ({ ok: v }), (e) => ({ err: e }));
+    await settle();
+    if (opts.duringHold) await opts.duringHold();
+    const res = await p;
+    // The deck's own settling, in the app's order: its failure path (the (b)
+    // mapping for a gate error, else the existing deckFailure → error), an R2
+    // for a card a verified retry brings, the blur, then the 10 s timer.
+    if (res.err) (opts.deck || ((sid) => h.mod.failFirstCard(sid, 'error')))(id, res.err);
+    if (res.ok) h.mod.reportFirstCardShown(id, { cardIndex: 0 });
+    h.mod.failFirstCard(id, 'abandoned');
+    h.tick(20_000);
+    const out = outcomes(id);
+    return { id, out, retried: !!res.ok, reasons: out.map((e) => (e.type === 'trade_first_card_shown' ? 'R2' : e.props.reason)).join(',') };
+  }
+  const deckPath = (id, err) => h.mod.failFirstCard(id, pure.gateFailureReason(client.gateSignalFor(err, '/api/trades/generate')));
+  const cases = [];
+  cases.push(['402 preview_used → paywall', await run([{ status: 402, body: { error: 'pro_required', gate: 'preview_used' } }]), 'paywall']);
+  cases.push(['402 verify_required → verify', await run([{ status: 402, body: { error: 'pro_required', gate: 'verify_required' } }],
+    { duringHold: () => gate.settleVerify('dismissed') }), 'verify']);
+  cases.push(['403 verification_required on /api/trades/generate → verify', await run([{ status: 403, body: { error: 'verification_required' } }],
+    { duringHold: () => gate.settleVerify('dismissed') }), 'verify']);
+  cases.push(['a held VerifySheet, verified, retried and showing cards → verify (no timeout, no abandoned, no R2)', await run([
+    { status: 403, body: { error: 'verification_required' } },
+    { status: 200, body: { job_id: 'j1', status: 'complete', cards: [] } },
+  ], { duringHold: async () => { h.tick(20_000); gate.settleVerify('verified'); await settle(); } }), 'verify', true]);
+  cases.push(['a 500 → error', await run([{ status: 500, body: { error: 'boom' } }]), 'error']);
+  cases.push(['a non-gate 403 (forbidden) → error', await run([{ status: 403, body: { error: 'forbidden' } }]), 'error']);
+  cases.push(['a 403 verification_required off a gated route → error', await run([{ status: 403, body: { error: 'verification_required' } }],
+    { path: '/api/rankings/save' }), 'error']);
+  cases.push(['a background 402 while a search is open → paywall (the deck settles it)',
+    await run([{ status: 402, body: { error: 'pro_required', gate: 'preview_used' } }], { background: true, deck: deckPath }), 'paywall']);
+  cases.push(['402 with no gate (an older server) → paywall', await run([{ status: 402, body: { error: 'pro_required' } }]), 'paywall']);
+  // Flags off (release-lead QA P1-1): main's R2b. The listener settles
+  // nothing (no sheet opens, nothing is held); the deck's existing failure
+  // path reports `error`, exactly as today.
+  gateFlags['monetize.paywall'] = false;
+  cases.push(['flags off: a 403 verification_required on /api/trades/generate → error (today\'s R2b)',
+    await run([{ status: 403, body: { error: 'verification_required' } }]), 'error']);
+  gateFlags['monetize.paywall'] = true;
+  for (const [name, res, want, retried] of cases) {
+    check(`10b. EXECUTED: ${name}`, res.out.length === 1 && res.reasons === want && (!retried || res.retried),
+      `got [${res.reasons}]${retried && !res.retried ? ', and the call was not retried' : ''}`);
+  }
+  // A send never touches R2b (the trace stays open for the deck).
+  h = freshTraceWithTimers();
+  const sid = h.mod.beginTradeSearch({ mode: 'deck', searchType: 'organic', screen: 'Trades' });
+  responses.length = 0;
+  responses.push({ status: 402, body: { error: 'pro_required', gate: 'lapsed' } });
+  await client.api.post('/api/trades/propose', {}).catch(() => {});
+  check('10c. EXECUTED: a send-kind gate answer never settles the open search', h.mod.isSearchOpen(sid) && outcomes(sid).length === 0);
+  // trades-eng P3: another FIND route's gate answer (tapping into an
+  // overhaul) is not the search's answer. It settles nothing; the search
+  // later gets its own R2 or R2b.
+  for (const [label, own, want] of [
+    ['its own card → R2', { status: 200, body: { job_id: 'j1', status: 'complete', cards: [] } }, 'R2'],
+    ['its own 402 → paywall', { status: 402, body: { error: 'pro_required', gate: 'preview_used' } }, 'paywall'],
+  ]) {
+    h = freshTraceWithTimers();
+    const oid = h.mod.beginTradeSearch({ mode: 'deck', searchType: 'organic', screen: 'Trades' });
+    responses.length = 0;
+    responses.push({ status: 402, body: { error: 'pro_required', gate: 'lapsed' } });
+    await client.api.get('/api/overhauls/o1').catch(() => {});
+    responses.push({ status: 402, body: { error: 'pro_required', gate: 'lapsed' } });
+    await client.api.get('/api/overhauls/o1/offers?decision=undecided').catch(() => {});
+    const untouched = h.mod.isSearchOpen(oid) && outcomes(oid).length === 0;
+    responses.push(own);
+    const r = await client.api.post('/api/trades/generate', { search_id: oid }).then((v) => ({ ok: v }), (e) => ({ err: e }));
+    if (r.ok) h.mod.reportFirstCardShown(oid, { cardIndex: 0 });
+    h.mod.failFirstCard(oid, 'abandoned');
+    h.tick(20_000);
+    const got = outcomes(oid).map((e) => (e.type === 'trade_first_card_shown' ? 'R2' : e.props.reason)).join(',');
+    check(`10g. EXECUTED: a gated getOverhaul / getOffers while a search is open settles nothing; ${label}`,
+      untouched && got === want, `open after the overhaul 402s: ${untouched}; got [${got}]`);
+  }
+}
+
+{
+  const gateSrc = stripComments(read('state/usePaywallGate.ts'));
+  check('10d. the router sends R2b FIRST in the gate listener, for a SEARCH route\'s find answer only, before it opens anything',
+    /export function handleGateSignal\(signal: GateSignal, path\?: string\): Promise<GateOutcome> \| void \{\s*if \(!paywallGateOn\(\)\) return;\s*if \(signal\.action !== 'verify_mismatch' && signal\.kind === 'find' && !!path && SEARCH_PATHS\.has\(path\)\) \{\s*const open = openSearchId\(\);\s*if \(open\) failFirstCard\(open, gateFailureReason\(signal\)\);\s*\}\s*if \(signal\.action === 'paywall'\)/.test(gateSrc)
+      && /const SEARCH_PATHS: ReadonlySet<string> = new Set\(\['\/api\/trades\/generate', '\/api\/trades\/fair-packages'\]\);/.test(gateSrc)
+      && /outcome = _onProRequired\(signal, _pathname\(path\)\);/.test(stripComments(read('api/client.ts'))));
+  const deckR2b = trades.match(/failDeckSearch\(gateFailureReason\(gateSignalFor\(e, '\/api\/trades\/(generate|fair-packages)'\)\)\);/g) || [];
+  check('10e. the deck settles a gate error with the same mapping (generate and the fair sweep), never a bare error',
+    deckR2b.length === 2 && /failFirstCard\(fork\.searchId, gateFailureReason\(gate\)\);/.test(trades));
+  check('10f. the trace exposes the one open search (a newer tap abandons every older one)',
+    /export function openSearchId\(\): string \| null \{/.test(traceCode));
+}
+
+gateScenarios()
+  .catch((e) => {
+    failures++;
+    console.log(`  ✗ 10b. EXECUTED: the gate scenarios threw\n      ${e && e.stack ? e.stack : e}`);
+  })
+  .then(() => {
+    console.log(failures ? `check-trade-first-card-events: ${failures} FAILED` : 'check-trade-first-card-events: all passed');
+    process.exit(failures ? 1 : 0);
+  });

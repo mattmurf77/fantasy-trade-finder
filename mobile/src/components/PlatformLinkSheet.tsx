@@ -538,8 +538,9 @@ export default function PlatformLinkSheet({
           {step === 'input' ? (
             <>
               <Text style={[type.bodySm, styles.sub]}>
-                Read-only import: we read team names and rosters — we never post
-                or change anything in {LABEL[platform]}.
+                Imports team names and rosters. Nothing is posted
+                to {LABEL[platform]} unless you sign in and send a trade you
+                approve.
               </Text>
               {/* v2.1 — entry mode only: signing in is a first-class option
                   ABOVE the league-id field, mirroring the ESPN sheet. */}
@@ -713,10 +714,12 @@ export default function PlatformLinkSheet({
                 </Text>
               ) : null}
               <Text style={[type.bodySm, styles.readOnlyNote]}>
-                {LABEL[platform]} leagues are read-only imports. Rankings, tiers,
-                and trios fully work today; trade features come later.
+                {LABEL[platform]} leagues import team names and rosters. Rankings,
+                tiers, trios and trade ideas all work. Nothing is posted
+                to {LABEL[platform]} unless you sign in and send a trade you
+                approve.
                 {platform === 'mfl' && summary.future_picks_stored
-                  ? ' Future draft picks were saved for upcoming pick-inclusive trades.'
+                  ? ' Future draft picks were saved, so trades can include them.'
                   : ''}
               </Text>
               <Button
@@ -874,8 +877,9 @@ export default function PlatformLinkSheet({
                 ))}
               </ScrollView>
               <Text style={[type.bodySm, styles.readOnlyNote]}>
-                MFL leagues are read-only imports. Rankings, tiers, and trios
-                fully work today; trade features come later.
+                MFL leagues import team names and rosters. Rankings, tiers,
+                trios and trade ideas all work. Nothing is posted to MFL
+                unless you sign in and send a trade you approve.
               </Text>
               <Button
                 testID="platform-link.mfl-open"

@@ -440,7 +440,7 @@ function Standing({ data }: { data: TeamReviewResponse }) {
           <View style={styles.rowBetween}>
             <ChalkText style={styles.kicker}>Playoff outlook</ChalkText>
             <ChalkText style={styles.ribbon}>
-              {o.beta ? 'PROJECTED · BETA' : 'PROJECTED'}
+              PROJECTED
             </ChalkText>
           </View>
           <ChalkText style={[styles.band, { color: BAND_COLOR[o.band] }]}>
