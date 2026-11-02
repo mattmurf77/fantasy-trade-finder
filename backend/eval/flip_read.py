@@ -75,7 +75,10 @@ The G-table (a barred G prints PASS or FAIL):
        Bar: other == 0. Reported, never barred (addendum C4): row gone, the
        misses whose pack recorded a stored count above the card while its
        page row was gone, with how many are named (C4 (d1)'s sub-count) and
-       the (d1) split; and the U4-R4 sum over the window, indicative only.
+       the (d1) split; the U4-R4 sum over the window, indicative only; and
+       the packs whose per-card miss map (run["upgrade_miss_cards"]) does not
+       tally to their upgrade_misses, the writer's invariant (a pack without
+       the map, from before #439, isn't checked).
   G8   withdrawal_conflict decks. Bar 0.
   G9   no_delivery_evidence decks with any outcome (a missed delivered_at
        stamp, B3). Bar 0. The no_delivery_evidence total is reported too.
@@ -296,8 +299,10 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
 
     misses = _sum_counts(d.upgrade_misses for d in decks if d.exclusion != PACK_INTEGRITY)
     gone = _row_gone(packs, skip={d.deck_job_id for d in pack_integrity})
+    off_map = _miss_map_mismatches(packs, skip={d.deck_job_id for d in pack_integrity})
     g7 = {"upgrade_misses": misses, "row_gone": gone["total"], "row_gone_named": gone["named"],
           "row_gone_split": gone["split"],
+          "miss_map_mismatch": len(off_map), "miss_map_mismatch_ids": off_map[:LIST_CAP],
           # Addendum C4: the U4-R4 sum over this window is indicative only; the
           # 7-day ceiling is read weekly. Never part of G7's status.
           "indicative": _ceiling(_named_misses(misses), _viewed(decks), U4_R4_CEILING),
@@ -343,6 +348,35 @@ def _viewed(decks) -> int:
     """The U4-R4 denominator: viewed non-ghost cards (a viewed outcome joined by
     impression_id, never a row's existence)."""
     return sum(1 for d in decks for c in d.cards if not c.is_ghost and c.viewed)
+
+
+def _miss_map_mismatches(packs, skip=()) -> list[str]:
+    """The run_ids whose per-card miss map doesn't tally to their counts:
+    Counter(run["upgrade_miss_cards"].values()) against run["upgrade_misses"]
+    read as the loader reads it (data._upgrade_misses), zero causes dropped.
+    The writer keeps the counts as the map's tally (#439), so any entry here
+    is a writer defect. Reported under G7, never barred. A pack without the
+    map (written before #439) isn't checked; one in `skip` (failing
+    integrity) or unreadable is G1's."""
+    off = []
+    for job, (_served_at, header_json) in sorted(packs.items()):
+        if job in skip:
+            continue
+        try:
+            run = json.loads(header_json)["run"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        if not isinstance(run, dict) or not isinstance(run.get("upgrade_miss_cards"), dict):
+            continue
+        try:
+            counts = data._upgrade_misses(run)
+        except (TypeError, ValueError):
+            off.append(job)
+            continue
+        tally = Counter(run["upgrade_miss_cards"].values())
+        if {c: n for c, n in counts.items() if n} != dict(tally):
+            off.append(job)
+    return off
 
 
 def _row_gone(packs, skip=()) -> dict:
@@ -689,6 +723,11 @@ def render(r: FlipRead) -> str:
                  f"stored count above the card while its page row was gone; "
                  f"{g7['row_gone_named']} of them with a named cause (U4 option A's guard); "
                  f"{_pairs(g7['row_gone_split'])}.")
+    lines.append(f"G7 (not barred) packs whose per-card miss map doesn't tally to their "
+                 f"upgrade_misses (a writer defect, #439's invariant): "
+                 f"{g7['miss_map_mismatch']}"
+                 + (f" ({', '.join(g7['miss_map_mismatch_ids'])})" if g7["miss_map_mismatch_ids"]
+                    else "") + ".")
     lines.append(_ceiling_line("G7 (not barred) indicative U4-R4 over this window, named misses "
                                "/ viewed cards", g7["indicative"])
                  + "; indicative only, the 7-day ceiling is read with --weekly.")

@@ -379,6 +379,32 @@ def test_g7_row_gone_reads_any_other_why_as_unsplit():
     assert r.g7["row_gone_split"] == {"replaced": 0, "no_row": 0, "unsplit": 3}
 
 
+def test_g7_reports_packs_whose_miss_map_does_not_tally_without_barring_them():
+    """#439's writer invariant: upgrade_misses is the per-card map's tally. A
+    pack that breaks it is listed under G7, never barred; a pack without the
+    map (before #439) isn't checked; zero causes don't count; a legacy int
+    reads as `other`; a pack failing integrity is G1's."""
+    db = make_db()
+    _packed(db, "ok", upgrade_misses={"restart_split": 1, "evicted_split": 0, "other": 0},
+            upgrade_miss_cards={"7": "restart_split"})
+    _packed(db, "legacy", upgrade_misses=1, upgrade_miss_cards={"8": "other"})
+    _packed(db, "nomap", upgrade_misses={"restart_split": 3})
+    _packed(db, "off", upgrade_misses={"restart_split": 2, "other": 0},
+            upgrade_miss_cards={"6": "restart_split", "7": "evicted_split"})
+    _packed(db, "bad", upgrade_misses={"restart_split": 9}, upgrade_miss_cards={})
+    with db.eng.begin() as conn:
+        conn.execute(db.packs.update().where(db.packs.c.run_id == "bad")
+                     .values(checksum="0" * 64))
+    r = flip_read(db.eng, since=SINCE, as_of=EARLY)
+    assert (r.g7["miss_map_mismatch"], r.g7["miss_map_mismatch_ids"]) == (1, ["off"])
+    assert r.g7["status"] == FAIL                     # only "legacy"'s other=1 bars it
+    assert ("G7 (not barred) packs whose per-card miss map doesn't tally to their "
+            "upgrade_misses (a writer defect, #439's invariant): 1 (off).") in render(r)
+    assert fr._miss_map_mismatches(
+        {"x": (SERVED, json.dumps({"run": {"upgrade_misses": "garbage",
+                                           "upgrade_miss_cards": {}}}))}) == ["x"]
+
+
 def test_g7_reports_the_u4_r4_sum_over_the_window_as_indicative_only():
     """Addendum C4: over the 24 h window the U4-R4 sum (named causes / viewed
     cards) is indicative; it never changes G7's status, which bars other only."""
