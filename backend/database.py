@@ -3183,6 +3183,11 @@ grading_cards_table = Table("grading_cards", metadata,
     Column("skipped",    Integer, nullable=False, server_default="0"),
     Column("tags_json",  Text,    nullable=False, server_default="[]"),
     Column("graded_at",  String),                       # ISO UTC of the latest answer
+    # HIDDEN, never served: the card's partner (league_members.user_id), so an
+    # account deletion's scrub finds the person's cards by id (#562 QA P1-2: a
+    # built session keeps no partner ids anywhere else). NULL on cards built
+    # before it; the scrub traces those another way.
+    Column("partner_user_id", String),
     UniqueConstraint("session_id", "position", name="uq_grading_card_position"),
     Index("ix_grading_cards_session", "session_id"),
 )
@@ -3207,6 +3212,8 @@ deletion_scrub_jobs_table = Table("deletion_scrub_jobs", metadata,
     Column("claimed_until",    String),                      # ISO UTC lease; NULL = free
     Column("last_error",       String),                      # an exception class name, never a message
     Column("scan_json",        Text),                        # an unfinished pass's scan cursor; NULL between passes
+    Column("partner_names_json", Text),                      # {leagues: {league_id: [names]}, usernames: [..]}
+    Column("escalated_at",     String),                      # ISO UTC; set once past RETRY_LIMIT (legal R28.26 #8)
     Index("ix_deletion_scrub_jobs_deleted", "deleted_at"),
 )
 
@@ -4035,6 +4042,13 @@ def _migrate_db() -> None:
         ("overhaul_attempts",  "provider_status",           "VARCHAR"),
         # ── G3-e (legal R28.22): an outcome's owner, for deletion and export.
         ("deck_outcomes",      "user_id",                   "VARCHAR"),
+        # ── the deletion scrub, stage 3: the person's names per league (a
+        # Calibration card names its partner by display name).
+        ("deletion_scrub_jobs", "partner_names_json",       "TEXT"),
+        # ── legal R28.26 #8: a job past 30 days is kept and marked escalated.
+        ("deletion_scrub_jobs", "escalated_at",             "VARCHAR"),
+        # ── #562 QA P1-2: a Calibration card's partner, for the scrub.
+        ("grading_cards",      "partner_user_id",           "VARCHAR"),
     ]
     # Only missing columns get an ALTER, each in its own transaction so a
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -4046,6 +4060,10 @@ def _migrate_db() -> None:
 
     # #258 — entity-decode MFL names stored before #210's import-time cleaning
     _backfill_mfl_name_entities()
+
+    # #562 re-QA P2-B — Calibration cards built before grading_cards.
+    # partner_user_id get it while their deck rows and names are still live.
+    backfill_grading_card_partners()
 
     # P0-1 (audit 2026-08-09) — users who completed a Quick Set board before
     # the point-of-use ranking_method writes shipped are stuck on the trio
@@ -4415,6 +4433,123 @@ def _backfill_dual_format() -> None:
                     print(f"[backfill] user {row.sleeper_user_id} update failed: {e}")
     except Exception as e:
         print(f"[backfill] users JSON rewrite failed: {e}")
+
+
+_BACKFILL_CHUNK = 500
+
+
+def backfill_grading_card_partners() -> int:
+    """#562 re-QA P2-B: give Calibration cards built before
+    grading_cards.partner_user_id their partner, so an account deletion's
+    scrub finds them by id. A current-arm card takes its deck row's partner
+    (arms_json.current.impression_id → features_json.partner_user_id). Any
+    other takes the one member of the session's league whose shown name
+    (display name, else username, else id, as blind_grading.build_catalog
+    names a partner) equals its partner_name and whose roster holds the
+    card's received players, at least one (a name alone can be someone else's
+    after a rename). Ambiguous, unknown or pick-only stays NULL, for the
+    scrub's own fallbacks.
+
+    Deck rows prune at 90 days and names change, so it runs at boot, on NULL
+    rows only (idempotent). It runs from _migrate_db, so during a Render build
+    too, against prod while the old instance serves (#562 delta QA): chunks of
+    _BACKFILL_CHUNK cards, each its own transaction, on Postgres under SET
+    LOCAL lock_timeout and statement_timeout, with one deck-row lookup per
+    chunk. A chunk that fails is skipped and logged by class; the next boot
+    retries it. It never raises. Returns the rows actually written."""
+    gc, gs = grading_cards_table, grading_sessions_table
+    imp, m = deck_impressions_table, league_members_table
+
+    def timeouts(conn):
+        if _ddl_is_postgres():
+            _execute_ddl(conn, f"SET LOCAL lock_timeout = '{_DDL_LOCK_TIMEOUT}'")
+            _execute_ddl(conn, f"SET LOCAL statement_timeout = '{_DDL_STATEMENT_TIMEOUT}'")
+    try:
+        with engine.begin() as conn:  # the first read waits no longer than a chunk (#562 QA P3)
+            timeouts(conn)
+            pending = conn.execute(select(gc.c.card_id).where(gc.c.partner_user_id.is_(None))
+                                   .order_by(gc.c.card_id)).scalars().all()
+    except Exception as err:          # never blocks boot; the scrub keeps its fallbacks
+        log.warning("grading_cards partner backfill failed: %s", type(err).__name__)
+        return 0
+    members: dict = {}                # league_id -> [(user_id, shown name, roster ids)]
+    filled = failed = 0
+    first_error = None
+    for i in range(0, len(pending), _BACKFILL_CHUNK):
+        try:
+            with engine.begin() as conn:
+                timeouts(conn)
+                rows = conn.execute(select(gc.c.card_id, gc.c.arms_json, gc.c.trade_json,
+                                           gs.c.league_id, gs.c.user_id)
+                                    .join(gs, gs.c.session_id == gc.c.session_id)
+                                    .where(gc.c.card_id.in_(pending[i:i + _BACKFILL_CHUNK]),
+                                           gc.c.partner_user_id.is_(None))).mappings().all()
+                cards = []
+                for row in rows:
+                    try:
+                        arms, trade = json.loads(row["arms_json"]), json.loads(row["trade_json"])
+                    except (TypeError, ValueError):
+                        continue
+                    current = arms.get("current") if isinstance(arms, dict) else None
+                    impression = (current.get("impression_id")
+                                  if isinstance(current, dict) else None)
+                    cards.append((row["card_id"], row["league_id"], row["user_id"],
+                                  impression if isinstance(impression, str) else None,
+                                  trade if isinstance(trade, dict) else {}))
+                wanted = sorted({c[3] for c in cards if c[3]})
+                deck_partner = {}
+                for impression_id, raw in (conn.execute(select(imp.c.impression_id, imp.c.features_json)
+                                                        .where(imp.c.impression_id.in_(wanted))).all()
+                                           if wanted else ()):
+                    try:
+                        features = json.loads(raw) if raw else None
+                    except (TypeError, ValueError):
+                        features = None
+                    if isinstance(features, dict) and features.get("partner_user_id"):
+                        deck_partner[impression_id] = str(features["partner_user_id"])
+                new_leagues = sorted({c[1] for c in cards} - set(members))
+                for league in new_leagues:
+                    members[league] = []
+                for league, uid, display, username, roster in (conn.execute(select(
+                        m.c.league_id, m.c.user_id, m.c.display_name, m.c.username, m.c.roster_data)
+                        .where(m.c.league_id.in_(new_leagues))).all() if new_leagues else ()):
+                    try:
+                        held = {str(p) for p in (json.loads(roster) if roster else [])}
+                    except (TypeError, ValueError):
+                        held = set()
+                    members[league].append((str(uid), display or username or str(uid), held))
+                written = 0
+                for card_id, league, viewer, impression, trade in cards:
+                    partner = deck_partner.get(impression) if impression else None
+                    name = trade.get("partner_name")
+                    receive = trade.get("receive")
+                    if partner is None and isinstance(name, str) and isinstance(receive, list):
+                        players = {str(a.get("id")) for a in receive
+                                   if isinstance(a, dict) and a.get("position") != "PICK"}
+                        # At least one received player, all on that roster: a
+                        # pick-only card has no roster evidence and stays NULL.
+                        # Never the session's own user (a build never pairs a
+                        # viewer with themselves).
+                        owners = [uid for uid, shown, held in members.get(league, ())
+                                  if shown == name and players and players <= held
+                                  and uid != viewer]
+                        if len(owners) == 1:
+                            partner = owners[0]
+                    if partner is not None:
+                        res = conn.execute(gc.update().where(gc.c.card_id == card_id,
+                                                             gc.c.partner_user_id.is_(None))
+                                           .values(partner_user_id=partner))
+                        written += res.rowcount or 0
+            filled += written             # counted once its chunk committed
+        except Exception as err:          # never blocks boot; skipped until the next boot
+            failed += 1
+            first_error = first_error or type(err).__name__
+    if failed:
+        log.warning("grading_cards partner backfill: %d chunks failed (first: %s); retried next boot",
+                    failed, first_error)
+    if filled or failed:
+        log.info("grading_cards partner backfill: %d cards, %d chunks failed", filled, failed)
+    return filled
 
 
 def _backfill_mfl_name_entities() -> None:
@@ -7123,6 +7258,63 @@ def league_pick_seasons(*, league_id: str, round: int = 1) -> list[int]:
 # Trade impressions (Tier 2 work item 2.4 — training-data pipeline)
 # ---------------------------------------------------------------------------
 
+# ── Legal R28.26 #10 (MUST): no write after a deletion re-creates the id ────
+#
+# While a deletion's scrub job row lives (normally 6-30 h; deletion_scrub), a
+# write that would store one of its ids as a trade's partner stores the
+# deletion's token instead, or NULL where the deletion itself NULLs that
+# column. That covers a card a client still holds from before the deletion.
+# During that window a card built AFTER the deletion that names the person as
+# a non-user leaguemate (legal (vii)) is mapped too: over-redaction, on the
+# private side. Cached in-process for _DELETION_TOKENS_TTL_S; the delete route
+# clears the cache when it commits, so this process sees its own deletion at
+# once.
+_DELETION_TOKENS_TTL_S = 5.0
+_deletion_tokens_cache: dict = {"at": 0.0, "map": {}}
+_deletion_tokens_lock = threading.Lock()
+
+
+def live_deletion_tokens() -> dict:
+    """{deleted id: token} over every live deletion_scrub_jobs row. A read
+    failure returns the last map (empty before any read): never raises on a
+    write path."""
+    now = time.monotonic()
+    with _deletion_tokens_lock:
+        if now - _deletion_tokens_cache["at"] < _DELETION_TOKENS_TTL_S:
+            return _deletion_tokens_cache["map"]
+    try:
+        t = deletion_scrub_jobs_table
+        with engine.connect() as conn:
+            rows = conn.execute(select(t.c.token, t.c.partner_ids_json)).all()
+        mapping = {}
+        for token, raw in rows:
+            try:
+                ids = json.loads(raw) if raw else []
+            except (TypeError, ValueError):
+                continue
+            for pid in ids if isinstance(ids, list) else ():
+                mapping[str(pid)] = token
+    except Exception as err:      # the class only: a DB error's text may quote an id
+        log.warning("live_deletion_tokens: read failed: %s", type(err).__name__)
+        with _deletion_tokens_lock:
+            return _deletion_tokens_cache["map"]
+    with _deletion_tokens_lock:
+        _deletion_tokens_cache.update(at=now, map=mapping)
+    return mapping
+
+
+def clear_deletion_tokens_cache() -> None:
+    with _deletion_tokens_lock:
+        _deletion_tokens_cache["at"] = 0.0
+
+
+def live_deletion_token(user_id) -> str | None:
+    """The live deletion token for one id, or None."""
+    if user_id is None:
+        return None
+    return live_deletion_tokens().get(str(user_id))
+
+
 def log_trade_impressions(user_id: str, league_id: str, cards: list) -> None:
     """
     Batch-insert one trade_impressions row per card in deck order.
@@ -7144,13 +7336,16 @@ def log_trade_impressions(user_id: str, league_id: str, cards: list) -> None:
     shown_at = datetime.now(timezone.utc).isoformat()
     rows = []
     try:
+        tokens = live_deletion_tokens()
         for pos, card in enumerate(cards):
             give = _f(card, "give_player_ids") or []
             recv = _f(card, "receive_player_ids") or []
+            target = _f(card, "target_user_id")
             rows.append({
                 "user_id":            user_id,
                 "league_id":          league_id,
-                "target_user_id":     _f(card, "target_user_id"),
+                # R28.26 #10: NULL, as the deletion NULLs this column.
+                "target_user_id":     None if str(target) in tokens else target,
                 "give_player_ids":    json.dumps(list(give)),
                 "receive_player_ids": json.dumps(list(recv)),
                 "basis":              _f(card, "basis", "divergence"),

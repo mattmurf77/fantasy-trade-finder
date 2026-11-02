@@ -1,3 +1,166 @@
+## 2026-11-01 — The deletion scrub, legal R28.26 (#7, #8, #9, #10) and models-lead addendum Q on #562; §0.4 docs on #557 / #559
+
+Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md`, whose rows this entry adds to. Schema: one column, `deletion_scrub_jobs.escalated_at` (boot migration listed; data-dictionary). No flags. D-056: `FTF_SKIP_SIM_GATE=1` posture; backend only.
+
+- **#8, the poison job is kept** (`_escalate` replaces `_abandon`): kept, stamped `escalated_at` once, retried, and logged daily by its own job id, age, `stuck_at` and error class, never the person's ids. `_finish` still deletes it after a hand fix. The runbook gains "tell head-bizops the same day" and "pause by holding the lease", replacing "delete its row".
+- **#9 (MUST), the grader export:** `accounts._export_grading_arms` strips every arm's `gain_partner` and `reasons`, for every partner, and withholds an arms blob that doesn't parse. The keys are pinned equal to the scrub's.
+- **#7, pick labels:** `_relabel_card` relabels "(from <name>)" on every page-store card (give/receive names, plus `narrative`, `reasons`, `standing_offer_reason`, `rationale`). The new `_scan_overhaul_offers`, appended to `_SCANS`, does the same for other users' `overhaul_offers.card_json`.
+- **#10 (MUST), held-card writes:** `database.live_deletion_token`, cached 5 s and cleared by the delete route, maps a live job's ids to its token. It's applied to:
+  - the swipe and pass-reason cards;
+  - the queue and dismiss events;
+  - flags, proposals and `trade_impressions` (NULL);
+  - the taste update;
+  - `_redacted_held_row`.
+  
+  Every pass re-runs the side-table scrub (`_repair_side_tables`, with an idempotent taste merge). `_deleted_partner_ids` is pruned after its window, with a last purge.
+- **Tests:**
+  - `test_deletion_scrub_held_writes.py`, 13 tests (new): the lookup and cache; held swipe, queue and flag routes; proposals; the taste helper and the live outcome path; `trade_impressions`; the raced-write repair; the prune; held upgrade rows.
+  - stage 3: escalation ×2, relabelling ×3.
+  - account coverage: the export strip and the key pin.
+- **Runs:**
+  - SQLite: 160 passed, 19 PG-only skipped.
+  - **Postgres 18** (`FTF_TEST_PG_URL`): 190 passed, 1 skipped, across every scrub file plus account coverage.
+  - **Full backend suite** at `2a19ca9b`: 10,404 passed, 22 skipped (the Postgres-only cases among them).
+- **Sabotage:** 22 single-rule breaks, all RED: #8 ×3, #9 ×3, #7 ×4, #10 ×12. Two were fixed along the way: the swipe pattern matched pass-reason too, and the taste mapping needed the live-path test.
+- **Docs:** §0.4's wording by mode, and addendum Q's eval sentence (#557 `485cef6e`, #559 `bf0df9d0`).
+
+## 2026-11-01 — Deletion scrub stage 3: release-lead's final #562 QA (GO-with-notes, stack cleared), test gaps closed
+
+- **P3-1:** the timeout spy also counts `connect()`. `begin()` opens one connection of its own, so a bare-connection first read shows up as an extra one, and the begins must equal the chunks plus one.
+- **P3-2:** the 1,500-match test uses one counterparty per match and probes match 2200 (cp1200), past the first 500 ids.
+- **P3-3:** the broken engine raises on `begin()` too, and the test asserts the "partner backfill failed: RuntimeError" warning.
+- **P3-4, in part:** the notification scan never writes an unchanged row. A row already showing the placeholder is skipped.
+- **Docstring:** the nit is fixed.
+- **Sabotages:** release-lead's three survivors (a bare first read, only the first 500 match ids, a re-raise on a dead engine) are red now, and the 47 still are.
+- **Not taken:** P3-5 (a `match_id` ≥ 2^63 is synthetic) and P3-6 (batching the counterparty lookups, about 45 s at 2,000 counterparties, off the request).
+
+## 2026-11-01 — Deletion scrub stage 3, release-lead's #562 delta QA at ec018bc2 (GO-with-notes, P3s only)
+
+- **The backfill:**
+  - Its first read now runs in a transaction under the same `SET LOCAL` timeouts. A held lock made it wait 12 s; it could have waited forever.
+  - It never fills the session's own user (QA's case c).
+  - `trade_json.receive` must be a list, so a scalar no longer sinks its chunk on every boot.
+  - Failed chunks are summarised in one warning.
+  - The SET LOCALs go through `_execute_ddl`, which a SQLite-run test can spy on, so CI guards them too.
+- **The notification scan:** it no longer ORs two SQL terms per captured match id. It reads the notifications of the person's matches' counterparties instead. QA timed 2,000 ids at 102 s on Postgres, and 600+ broke SQLite's expression limit. The redundant `match_id in match_ids` and `or deleted_side` are gone. The chunk re-select's `IS NULL` stays, to avoid re-filling.
+- **Docs:** the scope's residual now says a wrong name fill needs the players to have moved, and that traded or pick-only cards stay NULL. The `capture_names` and `redact_notification` docstrings are fixed.
+- **New tests:**
+  - every backfill transaction sets both timeouts, on SQLite via the spy;
+  - the viewer is never filled, and a scalar receive is skipped with 0 chunks failed;
+  - a person with 1,500 matches is scanned on SQLite;
+  - the non-ASCII notification goes to a recipient with no match, so only the escaped term finds it.
+- **Sabotages, 47/47 red, with Postgres:**
+  - the 42 from last round, with moved anchors updated;
+  - the first read without timeouts;
+  - the viewer allowed;
+  - receive not checked for a list;
+  - a SQL term per match id again;
+  - no counterparty rows.
+- **Runs:** the related and migration suites with Postgres, 905 passed.
+
+## 2026-11-01 — Deletion scrub stage 3, release-lead's #562 delta QA (GO-with-notes): the boot backfill hardened, match ids captured
+
+- **The backfill** (release-lead: it runs from `_migrate_db`, so during a Render build too, against prod while the old instance serves):
+  - **Chunks:** 500 cards, each its own transaction.
+  - **Timeouts on Postgres:** `SET LOCAL lock_timeout` 3 s and `statement_timeout` 30 s (the `_run_guarded_ddl` values).
+  - **Lookups:** one batched deck-row lookup per chunk.
+  - **Counts:** the rows actually updated (`rowcount`), added only after the chunk commits.
+  - **Failures:** a failed chunk is skipped, logged by class, and retried at the next boot. It never raises.
+  - **The roster guard (QA's optional):** a name fill needs the card's received players, at least one and all of them, on that member's roster, so after a rename "Jared" can't fill u9. A pick-only card stays NULL.
+- **Notifications:** the person's `trade_matches` ids are captured at deletion, in `partner_names_json.match_ids`, before their side becomes the placeholder. A notification on one of their matches, sent to a side, takes the placeholder whatever partner name it used: a name never captured ("KimFive") or one since changed.
+- **Docs:** scope:76's diagnostics now read 14 days. The backfill's build-time behaviour and the match-id capture are in the scope and the data dictionary.
+- **New tests:**
+  - `init_db` runs the backfill;
+  - only `partner_user_id` changes (grades, tags, positions kept);
+  - one deck lookup per chunk;
+  - the log has counts and no ids;
+  - a failed commit isn't counted and its chunk is retried;
+  - no database returns 0;
+  - Postgres sets both timeouts per chunk;
+  - the roster guard;
+  - the "Twin" ambiguity on its own;
+  - the SQLite-visible P2-B case ("Zed" in L6);
+  - `_stuck_at`'s version check;
+  - KimFive on a captured match, and a non-side recipient left alone.
+- **Sabotages, 42/42 red, with Postgres:**
+  - last round's 30;
+  - the backfill re-raising, logging an id, not called at boot, clearing a grade, counting before commit, looking up per card, without timeouts on PG, without the roster guard;
+  - the recipient-is-a-side guard dropped;
+  - match ids not captured;
+  - the match row still asking for a known name;
+  - `_stuck_at`'s version check dropped.
+- **Runs:** the related and migration suites with Postgres, 900 passed.
+
+## 2026-11-01 — Deletion scrub stage 3, release-lead's #562 re-QA (GO-with-notes): failed sessions, older cards on Postgres, match-row notifications
+
+Gates: release-lead's re-QA at 03d35f63. No new schema beyond `grading_cards.partner_user_id`; a boot backfill fills it. No flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest on SQLite and Postgres.
+
+- **P2-A (a regression from the last round):** the scan's session pass took only `building` sessions. A failed or retired session keeps its building source, so the source kept the raw id. It now takes any session whose source names an id.
+- **P2-B:**
+  - The scan's prefilter now looks at every NULL-partner card. The deck row isn't visible to SQL, and LIKE is case-sensitive on Postgres, so on PG these cards were never traced.
+  - A boot backfill, `database.backfill_grading_card_partners`, gives older cards their partner while deck rows and names are live: the current arm's deck row, else the one league member shown by `partner_name`. An ambiguous or unknown name stays NULL.
+  - The scope states the narrower residual left after this.
+- **P3s:**
+  - **Notifications:** a match notification's `trade_matches` row decides who its partner is (deletion set the person's side to the placeholder). A leaguemate whose display name is their username is no longer redacted, and a copy in a league they had left is.
+  - **Docs:** the data-dictionary, scope and `capture_names` drift is fixed.
+  - `_stuck_at` ignores an older-version cursor.
+- **Postgres:** `test_deletion_scrub_calibration.py` is parametrized over SQLite and Postgres (`FTF_TEST_PG_URL`; CI runs SQLite). Run locally against Postgres.app on 127.0.0.1, both pass.
+- **New tests:**
+  - a failed and a building session in a league they left;
+  - older current-arm cards with no captured name (only the deck row finds them);
+  - the backfill: names while live, the deck row alone (L3), an ambiguous "Twin" left NULL, idempotent;
+  - the scan's cutoff and owner;
+  - the left-league collision guard (u5 "kim");
+  - two match-row notifications.
+- **Sabotages, 30/30 red, run against Postgres too:**
+  - the 20 from last round, with P2-4 now a proper no-op instead of an IndentationError;
+  - P2-A building-only, P2-B no NULL term (red on PG);
+  - the backfill without its deck-row step, without its name step, or taking an ambiguous name;
+  - the match row ignored;
+  - S-Q12 and S-Q19 on the scan, N1 the left-league guard, F1 no scan session pass.
+- **Runs:** the related suites with Postgres, 883 passed.
+
+## 2026-11-01 — Deletion scrub stage 3, release-lead's #562 QA (NO-GO, 2 Calibration P1s): fixed on the real build path
+
+Gates: release-lead's #562 QA. Schema: `grading_cards.partner_user_id` (hidden, nullable; added to existing tables at boot; data dictionary updated). No flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P1-2:** a built Calibration session keeps no partner ids (`final_source`), so the id match never fired on real data.
+  - `build_session` and `add_fit_arms` now write each card's partner to `grading_cards.partner_user_id`, and the scrub matches it.
+  - Older cards (the column NULL) are traced by the current arm's deck row, by a raw id shown as the name, or by one of the person's names in that league that no remaining member uses (QA P3: u4's display "kim").
+  - The league pass covers the captured leagues and the fallback scan (cards, joined to their session) only leagues they had left, so each is tested on its own.
+- **P1-1:** every arm of a redacted card loses `gain_partner` and `reasons`.
+- **P2-2 notifications:**
+  - display names are matched for recipients who shared a league;
+  - "@<id>" in titles becomes the placeholder;
+  - names are matched as `json.dumps` escapes them.
+- **P2-3:** `db_done_at` is the pass's start, kept in its cursor, so a pass across the grace isn't the grace pass.
+- **P2-4:** traded-pick labels "(from <their name>)" take the placeholder.
+- **P2-5:**
+  - the abandon line adds `stuck_at`;
+  - the data dictionary, runbook, module docstring and D-209 now describe the 30-day stop and its residue.
+- **P3:** diagnostics past the 14-day retention (not 30) that name the person are deleted.
+- **Tests:**
+  - `test_deletion_scrub_calibration.py`, 6 tests on the real `start_session` / `build_session` / `add_fit_arms` path (world adapted from QA's harness): the stored partner; every card by id (renamed, left league, nameless); older cards by deck row, raw id or a free name, with u4 kept; a left league by the scan; the cutoff and the owner filter; a stage-2 job re-run.
+  - In the stage 3 tests: the notification cases (a display name for a leaguemate and a stranger, the id-only "@<id>", "renée"), the straddle pass, and the 20-day diagnostic.
+- **Sabotages, 20/20 red:**
+  - QA's five gaps: Q1 no Calibration league pass, B4 no id match, Q7 `SCRUB_VERSION` 2, Q12 cutoff, Q19 owner;
+  - the deck-row trace, the raw-id name, the name match, the collision guard;
+  - the arm fields, the pick labels, the scan, the building source;
+  - notifications for any recipient, never by display name, without "@<id>", without escapes;
+  - the pass's end as `db_done_at`, 30-day diagnostics, and no `_abandon`.
+- **Runs:** the deletion, Calibration, evidence, page store, I-1, withdrawals and privacy suites, 867 passed.
+- **Open:** P2-1's solve-back is with legal (release-lead). Legal is to confirm the 30-day stop (head-eng). A card built before the column, outside the current arm, whose partner was renamed can't be traced; that's testers only.
+
+## 2026-10-31 — Deletion scrub stage 3: a job stops after 30 days (legal (ix)), from release-lead's #559 delta QA
+
+Gates: release-lead's #559 delta QA, which noted that a permanently poisoned row never sets `db_version`, so `_finish` never deletes its job and the ids are held for good. No schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The rule:** past `RETRY_LIMIT` (30 days from `deleted_at`), the tick's `_abandon` deletes the job's row and logs `[scrub] abandoned jobs=<n> after_days=30 last_errors={<class>: <n>}` at ERROR. It logs counts and classes only, never ids. A younger unfinished job keeps retrying and alerting. This is trades-eng's reading of legal (ix), for legal to confirm through head-eng; it's in the scope.
+- **The scope** also states the release order: #557, #559 and #562 ship together. Rows are deleted only once #562's `COMPLETE` and `_abandon` are deployed.
+- **Test:** `test_a_job_unfinished_after_30_days_is_deleted_and_eng_told`. Two stuck jobs (their leases held), 31 and 29 days old, go through the real tick: the 31-day one is deleted, the line is exact, and no id is in the log.
+- **Sabotages, 3/3 red:** no `_abandon` in the tick, a 60-day limit, and the abandon line carrying ids.
+- **Runs:** the stage 3, scrub and packs suites, 71 passed.
+
 ## 2026-10-31 — Deletion scrub stage 2, release-lead's #559 delta QA (GO-with-notes): two P3s
 
 - **The shared `try`:** the purge and the revoke now each have their own `try`, purge first. In release-lead's probe a raising revoke had skipped the purge, so `GET /api/trades` still served the deleter's cards. Tests: a raising revoke still purges, and a raising purge still revokes.
@@ -42,6 +205,63 @@ Gates: release-lead's #559 NO-GO (P1, P2, P3s). P1: models-lead's J4 moves from 
   - **The page-store scan decodes every row:** noted, not changed.
 - **Sabotages, 6/6 red:** the revoke call (count faked), the running-job arm, the J4 drop, the in-process reload, the held-row redaction, and the page-card roster rule.
 - **Runs:** `test_deletion_scrub_packs.py` 18 and `test_deletion_scrub.py` 36 pass. The deletion, deferred/packed evidence, page store, I-1 serve filter, withdrawals and session-race suites: 601 passed.
+## 2026-10-31 — Deletion scrub: other users' notifications and events (head-eng, 10-31)
+
+Gates: head-eng's ruling on the two stores release-lead's #557 QA found (add both; legal gets an FYI), in #562. No new table; `partner_names_json` now holds `{leagues, usernames}` (new in #562, so no migration of its shape). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **`notifications`:** a match / disposition notification naming the person by username (unique) in `metadata_json.partner_username` takes the placeholder there and as `@name` in the title and body. Ids in the metadata take the token. A display name is never matched, since it could be another user's username.
+- **`user_events`:** ids in other users' `props` take the token.
+- Both are fallback scans in bounded pages, renewing the lease.
+- **Tests (`test_deletion_scrub_stage3.py`):**
+  - five notifications: two of the person's by username, another partner's, one whose username equals the person's display name (untouched), and one with the person's id;
+  - two events.
+- **Sabotages, 5/5 red:** no notifications scan; no events scan; display names matched; the title kept; the metadata username kept.
+- **Suites:** the three scrub files pass.
+
+## 2026-10-31 — Deletion scrub: models-lead addendum J4 (a redacted card never serves) and J2 (item 5's tests)
+
+Gates: head-eng's relay of models-lead addendum J (11-01), on #562. It touches the serve path: `_roster_serve_rules` drops a token-target card, and a new withdrawal reason, `partner_deleted`. That comes to models-lead as an R-G entry, with the pack codec's, before merge. No schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **J4, head-eng's option (b):** `_roster_serve_rules`, which /generate, /status (legacy and paged) and the page-store serve share, drops any card whose `target_user_id` is a redaction token, ahead of I-1 and in every mode. At prod's mode 1, I-1 alone would have served it while a stale page rebuilds. `_withdrawal_reasons` records it as `partner_deleted`, counted apart from `i1_dropped`. Stage 2's page-view filter moves into the shared rules. The `redact_page_card` docstring is fixed.
+- **Tests (`test_deletion_scrub_stage3.py`):**
+  - the serve rules drop a redacted card in modes 0, 1 and 2;
+  - the reasons are `partner_deleted`, `i1_dropped` and `disposition_cut`;
+  - **end to end at mode 1:** a real stored deck whose card the scrub rewrote serves every other card, and that one leaves as a never-delivered withdrawal with reason `partner_deleted`;
+  - **J2:** item 5 is identical in rows, the page store's evidence, packs and page cards;
+  - **G-a2's unpack test:** `unpack(redacted)` equals `unpack(original)` with items 1–5 written out apart from the scrub's code, the other cards are bit-identical, and a null float round-trips.
+- **Sabotages, 2/2 red:** no J4 drop; the reason left as `i1_dropped`.
+- **Suites:** the three scrub files, 49 passed; every serve-path, I-1, page-store and evidence suite, 1,122 passed.
+- **Scope fixes:**
+  - "Replay already counts redacted cards apart (G-a4 to G-a6)" is struck. J1's `partner_redacted` exclusion is models-eng's PR C.
+  - The fixture replay line now reads "non-redacted **decks**", with redacted decks excluded, not compared.
+
+## 2026-10-31 — Deletion scrub stage 3: Calibration cards, overdue diagnostics, value_core's blended scores, the narrative; COMPLETE
+
+Gates: the scope block `scope-deletion-scrub.md` (legal R28.22 f's trace, c3 #7 and #13); `SCRUB_VERSION` 3, `COMPLETE`. Schema: `deletion_scrub_jobs.partner_names_json`, added to existing tables at boot. No flag, no event, no route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The trace:** `features.presentation` is partner-free (indexes and player counts). The narrative's second sentence frames a card in the partner's declared window, so it goes from a redacted page card. value_core's `outlook = (viewer + partner) / 2` with the viewer's side kept fails the solve-back test, so `scores.outlook`, `scores.priority` and `effective` go. `value` and `rank` stay.
+- **`backend/tests/test_deletion_scrub_stage3.py`, 8 tests:**
+  - the person's names per league are captured at deletion;
+  - the narrative goes from a redacted page card;
+  - value_core's blended scores go and `value` and `rank` stay;
+  - other users' Calibration cards take the placeholder, by the source's current arm and by name, and the source is tokenized, with grades kept;
+  - a session in a league the person left is found by the fallback scan, and its value-core card is matched by any of their names;
+  - an overdue diagnostic naming them is deleted, and a young one isn't;
+  - a job is deleted only once its grace pass and the model store are done;
+  - boot adds the names column to an existing jobs table.
+- **A real fix the tests found:** with `COMPLETE` on, `_finish` would have deleted a job before its grace pass ran. It now requires `db_done_at` at or past the grace time. Two stage-1 tests were updated for `COMPLETE`.
+- **Sabotages, 10/10 red:**
+  - narrative kept;
+  - value_core scores kept;
+  - names not captured;
+  - no provenance match;
+  - no grading scan;
+  - no diagnostics scan;
+  - the diagnostics age ignored;
+  - finish before the grace pass;
+  - no boot migration;
+  - a left league's names unused.
+- **Suites:** the three scrub files, 44 passed; every deletion, scrub, tick and Calibration suite, 1,371 passed; **the full backend suite** at `60f13dd0`: 10,218 passed, 2 skipped, 0 failed.
 
 ## 2026-10-31 — Deletion scrub stage 2: packs through the codec, the cached writer state, the page store (legal R28.22, G-a1 to G-a3)
 
@@ -126,6 +346,7 @@ Gates: release-lead's #557 QA @ `cbbb80f3`. No new table, flag, event or route c
   - a config-reference row for `FTF_DISABLE_DELETION_SCRUB_KICK`.
 - **Not fixed here, named:** `prepared_runtime.owner_evaluation.snapshot_json` is latent while `prepared_trade_inventory_enabled` is 0, and goes with the prepared-adoption work. `notifications` and `user_events.props.partner_user_id` went to head-eng and legal.
 - **Tests:** `test_deletion_scrub.py`, 32 passed.
+- **The full backend suite at the top of the stack** (#562 @ `fa6fc57e`, carrying #557's QA fixes and J4/J2): 10,230 passed, 2 skipped, 0 failed.
 - **Sabotages, 11/11 red:**
   - bilateral kept;
   - `counterparty_preference` kept;

@@ -459,9 +459,13 @@ def test_a_finished_job_is_deleted_only_once_every_stage_is_built(engine, monkey
     from backend.eval import redaction
     monkeypatch.setattr(redaction, "redact_model_store", lambda tokens: 0)
     delete_and_scrub(engine)
-    later = datetime.fromisoformat(job(engine)["deleted_at"]) + scrub.IN_FLIGHT_GRACE
+    deleted = datetime.fromisoformat(job(engine)["deleted_at"])
+    scrub.tick(deleted + timedelta(hours=1))
+    assert job(engine)["model_done_at"] is not None          # kept: the grace pass hasn't run
+    monkeypatch.setattr(scrub, "COMPLETE", False)
+    later = deleted + scrub.IN_FLIGHT_GRACE
     scrub.tick(later)
-    assert job(engine)["model_done_at"] is not None                # kept: COMPLETE is False
+    assert job(engine)["db_done_at"] >= later.isoformat()    # kept: a stage still unbuilt
     monkeypatch.setattr(scrub, "COMPLETE", True)
     assert scrub.tick(later)[1]["finished"] == 1
     assert read(engine, db.deletion_scrub_jobs_table) == []
@@ -469,7 +473,10 @@ def test_a_finished_job_is_deleted_only_once_every_stage_is_built(engine, monkey
 
 def test_unfinished_past_24h_is_counted_at_error_without_ids(engine, monkeypatch, caplog):
     from backend.eval import redaction
-    monkeypatch.setattr(redaction, "redact_model_store", lambda tokens: 0)
+
+    def busy(tokens):                         # the model store keeps the job unfinished
+        raise RuntimeError("the store kept changing")
+    monkeypatch.setattr(redaction, "redact_model_store", busy)
     accounts.delete_user_data(DEL)
     deleted = datetime.fromisoformat(job(engine)["deleted_at"])
     caplog.set_level(logging.INFO, logger="trade_finder")

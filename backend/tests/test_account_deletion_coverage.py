@@ -883,3 +883,30 @@ def test_the_cleanup_loop_runs_the_orphan_sweep():
     from backend import server
     loop = _code_without_comments(inspect.getsource(server._cleanup_loop))
     assert "_sweep_orphaned_overhauls_once ( )" in loop
+
+
+def test_the_graders_calibration_export_carries_no_partner_fields(engine):
+    """Legal R28.26 #9 (MUST): every arm loses `gain_partner` and `reasons`,
+    for every partner, live or deleted. The grader's grade, tags and
+    `gain_viewer` stay; an arms blob that doesn't parse is withheld."""
+    arms = {"value_core": {"gain_viewer": 0.4, "gain_partner": 1.4,
+                           "reasons": ["fits their rebuild"], "engine_version": "v"},
+            "fit_a": {"gain_partner": 0.2, "rank": 3}}
+    with engine.begin() as conn:
+        seed(conn, db.grading_cards_table, "c1", card_id="c1", user_id=UID,
+             arms_json=json.dumps(arms), trade_json="{}", grade=5,
+             tags_json=json.dumps(["value"]))
+        seed(conn, db.grading_cards_table, "c2", card_id="c2", user_id=UID,
+             arms_json="not json {gain_partner", trade_json="{}")
+    rows = {r["card_id"]: r for r in accounts.export_user_data(UID)["tables"]["grading_cards"]}
+    assert json.loads(rows["c1"]["arms_json"]) == {
+        "value_core": {"gain_viewer": 0.4, "engine_version": "v"}, "fit_a": {"rank": 3}}
+    assert rows["c1"]["grade"] == 5 and json.loads(rows["c1"]["tags_json"]) == ["value"]
+    assert rows["c2"]["arms_json"] is None
+    exported = json.dumps(accounts.export_user_data(UID))
+    assert "gain_partner" not in exported and "fits their rebuild" not in exported
+
+
+def test_the_export_strips_the_same_arm_keys_the_scrub_removes():
+    from backend import deletion_scrub
+    assert accounts._GRADING_ARM_PARTNER_KEYS == deletion_scrub._GRADING_ARM_KEYS_REMOVED

@@ -2106,12 +2106,13 @@ One row per card in a session, in shuffled order.
 | `session_id` | str, not null | Soft ref to `grading_sessions` |
 | `user_id` | str, not null | = the session's `user_id` (account id), for deletion / export coverage |
 | `position` | int, not null | 1-based, assigned **after** the shuffle. `UniqueConstraint(session_id, position)` = `uq_grading_card_position` |
-| `arms_json` | text (JSON), not null | **HIDDEN** `{arm: provenance}`, arm ∈ `current` \| `value_core` \| `fit_a` \| `fit_b`: `current` → `{impression_id, card_index, model_arm}`; `value_core` → `{deck_position, reasons}`; `fit_a` / `fit_b` (folded in after the build by `blind_grading.add_fit_arms`, 2026-10-09) → `{deck_position, gain_viewer, gain_partner}`. A trade both engines produced has **both** keys — one card, credited to both arms (a **shared card**) |
+| `arms_json` | text (JSON), not null | **HIDDEN** `{arm: provenance}`, arm ∈ `current` \| `value_core` \| `fit_a` \| `fit_b`: `current` → `{impression_id, card_index, model_arm}`; `value_core` → `{deck_position, reasons}`; `fit_a` / `fit_b` (folded in after the build by `blind_grading.add_fit_arms`, 2026-10-09) → `{deck_position, gain_viewer, gain_partner}`. A trade both engines produced has **both** keys — one card, credited to both arms (a **shared card**) **In the account export, every arm loses `gain_partner` and `reasons`**, for every partner, live or deleted (legal R28.26 #9, MUST: Calibration is blind, so the grader never saw them; `accounts._export_grading_arms`). An `arms_json` that doesn't parse is exported as null. |
 | `trade_json` | text (JSON), not null | The neutral payload, served verbatim as `card.trade`: `{partner_name, give: [...], receive: [...]}`, each asset exactly `{id, name, position, nfl_team, age, value}`, sides sorted by (−value, name, id). The only producer is `blind_grading.neutral_trade`, which is never given an arm; values come from one consensus catalog (players `elo_to_value(consensus_elo)` from `player_value_history`, picks `draft_picks.pool_value`) |
 | `grade` | int | 1..5; NULL = unanswered or skipped |
 | `skipped` | int, not null, server default `0` | `1` ⇒ `grade IS NULL` and `tags_json = '[]'` |
 | `tags_json` | text (JSON), not null, server default `[]` | De-duplicated subset of the seven tags in `blind_grading.TAGS` ([cross-client-invariants § Calibration tags and scale](cross-client-invariants.md#calibration-tags-and-scale)), in `TAGS` order |
 | `graded_at` | str | ISO UTC of the latest answer — a re-grade overwrites |
+| `partner_user_id` | str | **HIDDEN**, never served: the card's partner (`league_members.user_id`), written by `build_session` and `add_fit_arms`, so an account deletion's scrub finds the person's cards by id (a built session keeps no partner ids anywhere else). NULL on cards built before it (#562) until the boot backfill (`database.backfill_grading_card_partners`: the current arm's deck row, else the one league member, never the session's own user, shown by `partner_name` whose roster holds the card's received players; chunked, under lock and statement timeouts on Postgres); the scrub traces any still NULL by deck row, raw id or name. The scrub sets it to the redaction token |
 
 Index: `ix_grading_cards_session` (`session_id`). Invariants: `grade IS NOT NULL ⇒ skipped = 0`; a session is `completed` ⇔ every card has `grade IS NOT NULL OR skipped = 1`, flipped in the same transaction as the last answer (`answer_grading_card`); an answer against a non-`open` session is rejected (409 `session_completed`), never written.
 
@@ -2125,7 +2126,7 @@ Calibration adds **no** event (scope waiver, plan D9); the tables above are the 
 
 The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scrub.py`; scope `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md`).
 - **Lifecycle:** one row per account deletion, inserted in `accounts._delete_user_data`'s own transaction, so a committed deletion always has its scrub and a rolled-back one has none. The row is deleted when the scrub of other users' decks is done (legal (ix)).
-- **Retention:** it's kept while any scrub stage is unbuilt (`deletion_scrub.COMPLETE` false), so later stages re-run it (`SCRUB_VERSION`). Past 24 h unfinished, it's retried and counted at ERROR, up to 30 days, and never abandoned.
+- **Retention:** it's deleted once its grace pass and the model store are done (`deletion_scrub.COMPLETE` since stage 3; before that, rows were kept so later stages re-ran them through `SCRUB_VERSION`). Past 24 h unfinished, it's retried and counted at ERROR. Past 30 days (`RETRY_LIMIT`) it's **kept**: marked `escalated_at`, still retried, and logged at ERROR every day by its own job id and where it stands (`deletion_scrub._escalate`; legal R28.26 #8). It's deleted only once a pass completes, after eng fixes the poison row by hand.
 - **Privacy:** it holds the deleted user's ids only for that time. It's never exported (its subject is gone), and no id from it is ever logged.
 
 | Column | Type | Notes |
@@ -2136,11 +2137,13 @@ The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scr
 | `league_ids_json` | text (JSON), not null | The leagues their traces may be in, read before the deletion removes their rows: memberships, imported leagues, roster history, their own decks. They drive the fast league pass. A fallback scan of each whole store then finds the rest (a league the person left) |
 | `deleted_at` | str, not null | ISO UTC. The DB pass touches decks served up to `deleted_at` + 6 h (`IN_FLIGHT_GRACE`: a deck built before the deletion carries its first delivery as `served_at`), never later ones |
 | `db_version` | int, not null, default 0 | The `SCRUB_VERSION` of the last full DB pass; older re-runs |
-| `db_done_at` | str | ISO UTC of the last full DB pass. One more runs once the grace has passed |
+| `db_done_at` | str | ISO UTC of the **start** of the last full DB pass (it covers what was written before it began; a pass that ran across the grace isn't the grace pass, #562 QA P2-3). One more runs once the grace has passed |
 | `model_done_at` | str | ISO UTC the value-model store was redacted (the daily tick's `deletion_scrub` step, before the refit) |
 | `attempts` | int, not null, default 0 | Lease claims |
 | `claimed_until` | str | ISO UTC lease (10 min), taken by compare-and-swap; NULL = free |
 | `last_error` | str | The last failure's exception class, never its message |
+| `partner_names_json` | text (JSON) | `{leagues: {league_id: [display names, usernames]}, usernames: [...], match_ids: [...]}` (their `trade_matches` ids, before the deletion puts the placeholder on their side), read before the deletion removes the person's `league_members` and `users` rows. Used where a row names its partner only by name: an older Calibration card (before `grading_cards.partner_user_id`), a traded-pick label, a notification. A name a remaining member of that league uses is never matched on a card. A notification's match row decides who its partner is; without one, usernames (unique) match anywhere and display names only for a recipient who shared a league. As private as the ids, and never logged. Added to existing tables at boot (`_migrate_db`) |
+| `escalated_at` | str | ISO UTC, set once when the job passes 30 days unfinished (`RETRY_LIMIT`; legal R28.26 #8). The row stays and is retried; the daily tick logs it by job id |
 | `scan_json` | text (JSON) | An unfinished DB pass's state: the league pass's counts, which fallback scan is running, and its keyset cursor. The next run resumes from it. NULL between passes |
 
 Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.
@@ -2158,6 +2161,19 @@ Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.
 - **`trade_page_store` (stage 2):**
   - **A redacted page card:** its target takes the token and the placeholder name, and it loses `likes_you`, `standing_offer_reason`, `reasons`, `rationale`, `fit`, `breaker` and `match_context.opponent_outlook`. `mismatch_score` / `composite_score` are nulled, and it never serves again (withdrawn at serve).
   - **`evidence_blob`:** its rows and candidate set are redacted as above, `trade_impressions[].target_user_id` is NULLed, and `run_meta.filter_inputs` is redacted as a pack run.
+- **Stage 3:**
+  - **Other users' Calibration sessions:**
+    - A building, failed or retired session's hidden `source_json` takes the token.
+    - The person's cards are found by `grading_cards.partner_user_id` (older cards by the boot backfill, their deck row, a raw id, or a name no remaining member uses). They take the placeholder as `partner_name` and the token as `partner_user_id`, and every arm loses `gain_partner` and `reasons`. Grades are kept.
+    - On any card, a traded-pick label "(from <their name>)" takes the placeholder.
+  - A diagnostic past the 14-day retention naming them is deleted.
+  - A redacted page card also loses its `narrative`.
+  - A redacted value_core card loses `scores.outlook`, `scores.priority` and `effective`.
+  - **Other users' `notifications`** naming them in `metadata_json.partner_username`, matched as stored (JSON escapes included):
+    - a match notification when its `trade_matches` row's other side is the placeholder;
+    - otherwise by username anywhere, by display name for a recipient who shared a league, or by a raw id.
+    The name takes the placeholder there and as `@name` in the title and body, so does any `@<id>`, and ids in the metadata take the token.
+  - **Other users' `user_events`:** ids in `props` take the token.
 - **Kept:** hashes (`trade_hash` and the rest, legal (viii)).
 - **In the deletion transaction:** other users' `user_taste` `partner:<id>` rows become one `partner:<token>` row each (two aliases' weights summed). Standing offers' `team_user_ids` take the token. `trade_matches.match_valuation_json` is cleared when either side is the person.
 
