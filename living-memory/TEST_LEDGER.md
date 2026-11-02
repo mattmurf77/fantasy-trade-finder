@@ -1,3 +1,57 @@
+## 2026-11-01 — The value bar's B2 rule (Product P112, head-eng round 3b): under one first with no pick label reads Even (#567, 11-06 binary)
+
+Gates: `docs/plans/value-bar-scale/scope.md` (the B2 bullet; evidence and checklist step 6). This is a design change, so a before/after goes to the operator; design review runs alongside release. No schema, flag, route or analytics change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change:** `TradeValueBar.tsx` folds `negligible = !pick && firsts < 1` into `even`. A null `pick_equivalent` under one first, the server's negligible floor, reads Even (the nub, "Even", "Within a rounding error"), never "≈ 0.0 mid 1sts". A lean with a pick label and a no-pick gap of one first or more are unchanged. The share image does the same in #564 (league-eng).
+- **Guard:** `mobile/tests/check-value-bar-b2.js`, 11 checks. It executes the component's own decision lines on 8 cases and pins the `worth` fallback and the Even nub. It fails 9 on `e70ad147`.
+- **Render:** `renders/before-after-b2-317.png`. `render.py` gains a `b2` switch, and the earlier two sheets regenerate byte-identically. The render's Even end label now matches the app: no colour when Even.
+- **Runs:** `tsc --noEmit` is clean, all 136 suites pass (this branch has no #574), testid-lint is green, and `test_value_bar_scale.py` passes 3.
+- **release-lead's B2 QA (GO-with-notes) at 955f83c3:**
+  - **P2-1:** one exported predicate, `valueBarIsEven(favors, gap)`, feeds the bar and the deck card's VoiceOver summary, so VoiceOver says "Even." where the bar does.
+  - **P3-2:** the guard now has 21 checks. It executes the predicate on 9 cases (0.7 firsts added) and pins every consumer to `even`. Breaking the winner label, the VoiceOver summary, or the predicate's B2 term each goes red (2, 1 and 3 failures).
+  - **P3-3/4:** checklist step 6 has concrete values (about 300 vs 250, both under 2,400), the expected "(≈ 0.0 firsts)", and VoiceOver.
+  - **P3-5:** the B2 rule is recorded in cross-client-invariants and `components.md` as an app-plus-image invariant.
+  - **P4:** 0.058, not "about 0.05". On `e70ad147` the guard's failures were structural; the behaviour discriminators are the two no-pick-under-one-first cases.
+  - **P3-1 (eveners under an Even bar) is Product's call**, not changed here.
+
+## 2026-10-31 — The value bar, release-lead's #567 delta QA (GO-with-notes): the example test's indent, renders R1–R4, checklist wording
+
+- **P2, the test:** `^\s*(value|firsts)` also matched `pick_equivalent.value: 606.5`, which shadowed the top-level `value`, so the value users see was never checked. It now reads the top level at its two-space indent and requires both keys. A top-level 380 or 9999, or `firsts` 0.6, fails it; all three were green before.
+- **Renders:**
+  - **R1:** the wrap's 8pt gap before the scale row and the end row. The mock was 16pt short.
+  - **R2:** the middle scale labels sit 3pt lower: the 12pt middle row is centred in the 18pt row.
+  - **R3:** the League bar is on the example card, `ink0` with 12pt padding, under its hairline, inside the 1pt border.
+  - **R4:** the 317 sheet is a deck card, with "@mike_dynasty win" as TradeCard passes the handle. The calculator's 309pt bar draws the same.
+  - **Optional:** an Even case shows the centred nub. Re-running `render.py` reproduces both PNGs.
+- **Checklist and scope:**
+  - steps 4–5 say to switch to a league with 0 mutual and 0 awaiting matches;
+  - step 5 and the scope call the label crowding what it is, a regression of this change (it started at text scale 2.41 before, 1.21 now at 283pt), with the design follow-up;
+  - the stale #564 "still 0.57" note is removed, since #564's 30ef8349 dropped that line.
+- **Runs:** `test_value_bar_scale.py` 3 passed.
+
+## 2026-10-31 — The value bar, release-lead's #567 QA (GO-with-notes): the League example, renders from the app's tokens, a checklist that discriminates
+
+Gates: release-lead's #567 QA, with three P2s before the 11-06 binary. Client-only plus a backend test; no schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **P2-1:** the League "Works right now" example (`LeagueScreen.tsx` `EXAMPLE_GAP`), the clients' only static gap, said "a Mid 2nd (≈ 0.6 firsts)" at 380 and filled far past the new tick. It's now 607, 0.29 firsts, pick value 606.5: what the server sends for a Mid 2nd gap. `test_the_league_example_gap_is_a_mid_2nd_at_todays_values` pins it to the seeds. Main's fixture fails it.
+- **P2-2:** `renders/render.py` draws `TradeValueBar` from its styles at 317pt and 283pt: `before-after-317.png` (an Early 2nd "You win", a Mid 2nd "They win") and `before-after-283.png` (the League example). It uses the app's tokens and fonts, `semantic.pos` / `semantic.warn`, `ink.line` ticks on the `ink3` rail, and the Plex Mono labels in their inset frame (8.6pt inboard). The gaps come from the server's `_pick_gap_equivalent`. The old geometry sketch `before-after.png` is removed.
+- **P2-3:** the checklist is rewritten so a step can catch the old build. Step 1 is now an Early 2nd (past the tick now, short of it before), with the "about a third of the way" cue. It adds They-win, the League example, and the largest standard text size. The web miniature is noted as a Render-deploy check, not TestFlight.
+- **P3s:**
+  - `docs/design/components.md`'s "≈0.57" and "21.5%/78.5%" are fixed, and the file is now in the docs table;
+  - the scope notes that a live `elo_value_k` change wouldn't move the app's constant;
+  - the scope notes the label crowding at large text (a design follow-up);
+- **Runs:** `test_value_bar_scale.py` 3 passed.
+
+## 2026-10-31 — The value bar's ±2nd landmark at today's Mid 2nd / Mid 1st (0.57 → 0.287)
+
+Gates: the scope block `docs/plans/value-bar-scale/scope.md` (head-eng, for the 11-06 binary). A constant and a CSS position; no route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **`backend/tests/test_value_bar_scale.py`, 2 tests:**
+  - the app's `SECOND_IN_FIRSTS` equals `elo_to_value(Mid 2nd) / elo_to_value(Mid 1st)` over `GENERIC_PICK_SEEDS` (0.2865), within 0.005. **Main's 0.57 fails it.**
+  - the web landing miniature's four landmark positions sit at 50 ∓ 0.287 × 50%.
+- **Render:** `docs/plans/value-bar-scale/renders/before-after.png`, a geometry mock for the operator's design review.
+- **TestFlight:** the operator's 4-step checklist in the scope.
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
