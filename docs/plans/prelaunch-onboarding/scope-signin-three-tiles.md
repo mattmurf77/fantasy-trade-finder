@@ -22,7 +22,8 @@ The landing's platform chips (`SignInScreen.tsx` `platformRow` / `platformChip`)
 - **No dead tiles:** a platform that isn't live has no tile, never a disabled or "coming soon" one (design-lead's recommendation). With only Sleeper live, the row is hidden and the landing is the plain username form, as today.
 
 **Launch gating (platforms-eng's sizing, 11-01; head-eng's hard rule):** the ESPN and MFL tiles must sit on #430's verified `acct_*` claim, never on today's mint of unverified `entry:*` sessions (M11).
-- The lever is `landing.platform_options`, OFF in prod (operator ask 12) until #430 (+ #477, #478, #518) is deployed and the purge (ask 17) has run.
+- The lever is `landing.platform_options`. **It's TRUE on `main` and in prod today:** the operator's ask 12 (turn it OFF until #430, #477, #478 and #518 are deployed and the purge, ask 17, has run) hasn't been executed. Until it is, a binary with this change shows Sleeper + MFL tiles, and the MFL tile mints an unverified `entry:*` session, exactly as today's MFL chip does, only more prominently. Ask 12 should land before the 11-06 binary reaches testers (head-eng is routing it to the operator).
+- `espn.signin` isn't in `FLAG_KEYS` on `main`, so the server never sends it and the app reads it as off: **before #430 deploys, the landing is two tiles (Sleeper, MFL) at most.**
 - Then ask 16 turns it ON, with `espn.signin` only if the operator's R1 check (ask 15) is PAIR_BOUND.
 - The MFL tile also needs #421 (MFL entry sign-in, client half) in the 11-06 binary; without it, MFL sign-in is dead.
 - This build adds no flag.
@@ -59,7 +60,11 @@ The landing's platform chips (`SignInScreen.tsx` `platformRow` / `platformChip`)
   5. The sheets mint only through `entryPlatformMint` (`EspnLinkSheet.tsx:365`, `PlatformLinkSheet.tsx:255`, `:370`) → `POST /api/entry/platform` (`platformEntry.ts:155`). Every other call in that file goes to the same route (`:42`, `:57`, `:81`, `:105`).
   6. On the server that route is 404 while `landing.platform_options` or the platform's link flag is off (`server.py` `entry_platform`, the `is_enabled("landing.platform_options")` check). #430 makes it prove ownership and mint a verified `acct_*` account (its `check-landing-platform-options` V2.6 pins "the mint never creates an `entry:*` id").
   7. The tiles change none of steps 2 to 6: the diff touches only the row's markup and styles, and `PLATFORM_TILE`.
-- [x] **Manual TestFlight checklist** (8 steps; operator, on an iPhone SE, on the binary carrying this, in a test window with `landing.platform_options` on; `espn.signin` on for steps 2 and 4):
+- [x] **Manual TestFlight checklist** (8 steps; the operator, on an iPhone SE, on the binary carrying this):
+  - **Which state is reachable when.** Before #430 deploys, only the two-tile state exists (step 5 is the default; steps 1, 2 and 4's ESPN parts can't be reached). After #430 deploys, with `espn.signin` on, steps 1–4 apply.
+  - **Flag flips are prod-wide** (every user sees them), so they go in the 11-07 test window. Only **release-lead** flips, on the operator's word, through `config/features.json` or `FTF_FLAGS` plus `POST /api/feature-flags/reload`. The tester then **force-quits and relaunches** the app so it re-reads the flags.
+  - Step 5 after #430: release-lead sets `espn.signin` false, the tester relaunches, then release-lead restores it. Step 6: release-lead sets `landing.platform_options` false (this is ask 12 itself if it hasn't run), the tester relaunches.
+  - **Step 7's state (the longest landing):** sign in with a Sleeper username only (don't verify with the Sleeper login). That session is unverified and kept only in server memory, so it ends after 4 hours idle or at the next server deploy. Reopen the app after that: it lands on the sign-in screen with "Your session expired — sign in again…" and "Continue as @you".
   1. Fresh install. Expect three equal tiles, Sleeper, ESPN and MFL, each with its name and a dim line. Sleeper is selected (ice border and a short ice tick at the top right), and the username form is below.
   2. Tap ESPN. Expect the ice border and tick to move to ESPN, the username form to be replaced by the ESPN explainer and "Link your ESPN league →", and "or" plus Continue with Apple to still be below.
   3. Tap MFL. Expect the same, with the MFL panel. Tap Sleeper. Expect the username form back.
@@ -80,6 +85,7 @@ The landing's platform chips (`SignInScreen.tsx` `platformRow` / `platformChip`)
 | `living-memory/HLD.md` | n/a | no new module, client or flow; the entry flow is unchanged |
 | `docs/cross-client-invariants.md` | n/a | mobile-only styling; no shared constant, enum or colour |
 | `docs/glossary.md` | n/a | no new domain term |
+| `docs/design/components.md` | updated | Badges & chips: **PlatformTiles** (app) / **PlatformChips** (web, until parity) — the tile spec, `espn.signin` in the live-platform rule (release-lead #570 QA P2-3) |
 | ADR or `DECISIONS.md` entry | n/a | the design call is design-lead's spec (this file), on the operator's ask; no architectural choice |
 
 ## 5. Ship gate declaration
