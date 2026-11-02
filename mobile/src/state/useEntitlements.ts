@@ -148,6 +148,7 @@ export const useEntitlements = create<EntitlementState>((set, get) => ({
 }));
 
 let _listenerBound = false;
+let _verifyEdgeBound = false;
 
 /** Boot hook (App.tsx): hydrate the cache, ask the server, and subscribe to
  *  RevenueCat's CustomerInfo pushes so a renewal or a purchase made outside
@@ -159,6 +160,19 @@ export function initEntitlements(): void {
     .loadCached()
     .then(() => useEntitlements.getState().refresh())
     .catch(() => {});
+  // #393 M3: a session that turns verified re-reads. While it was unverified
+  // the server blanked every subscription field (R28.9), so the cached answer
+  // is that blank one, and Settings › Subscription would show a member the
+  // non-subscriber rows. Only the unverified → verified edge: boot's first
+  // mirror (null → verified) is the fetch above.
+  if (!_verifyEdgeBound) {
+    _verifyEdgeBound = true;
+    useSession.subscribe((s, prev) => {
+      if (prev.verification?.session_verified === false && s.verification?.session_verified === true) {
+        void useEntitlements.getState().refresh();
+      }
+    });
+  }
   // A different user (sign-out, a switch) never keeps the last user's answer
   // (release-lead QA P3): the not-entitled defaults, the device cache dropped,
   // the server asked again. Boot's null → user hydrate isn't a change, so the
