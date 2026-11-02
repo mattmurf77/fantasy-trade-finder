@@ -581,18 +581,23 @@ def test_the_exit_drain_is_registered_with_atexit():
 
 def test_a_burst_s_tail_is_logged_once_the_drops_stop(fresh_queue, monkeypatch, caplog):
     """P3-5: drops counted after the last warning are logged by the worker's
-    idle tick once the minute (0.2 s here) has passed, with no later drop."""
+    idle tick once the minute (0.2 s here) has passed, with no later drop.
+    It waits on the record itself, never the counter: the worker zeroes the
+    counter under the lock and logs after releasing it (#519 QA P3-2)."""
     monkeypatch.setattr(server, "_I1_EVENT_DROP_WARN_EVERY_S", 0.2)
     monkeypatch.setattr(server, "_i1_event_dropped", 2)
     monkeypatch.setattr(server, "_i1_event_drop_warned_at", time.monotonic())
     written = []
+
+    def warned():
+        return [r.getMessage() for r in caplog.records if "queue full" in r.getMessage()]
     with caplog.at_level("WARNING"):
         server._i1_event_enqueue(_lease(), lambda: written.append("w"))
         deadline = time.monotonic() + 3
-        while server._i1_event_dropped and time.monotonic() < deadline:
+        while not warned() and time.monotonic() < deadline:
             time.sleep(0.02)
-    assert [r.getMessage() for r in caplog.records if "queue full" in r.getMessage()] == \
-        ["deck_i1_check queue full (10): dropped 2 emits since the last warning"]
+        time.sleep(0.25)                  # past one more interval: still exactly one warning
+    assert warned() == ["deck_i1_check queue full (10): dropped 2 emits since the last warning"]
 
 
 def test_the_exit_drain_restarts_a_dead_worker_with_writes_behind_it(fresh_queue, monkeypatch):

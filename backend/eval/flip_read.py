@@ -6,7 +6,7 @@ models-lead rules on it.
 
     python3 -m backend.eval.flip_read --db URL --since ISO [--until ISO]
         [--as-of ISO] [--allow-postgres-readonly] [--weekly] [--json]
-        [--i1-mode {0,1,2}]
+        [--i1-mode {0,1,2}] [--no-evidence-log PATH]
 
 The window is decks served in [since, until) and at or before as_of
 (as_of defaults to now minus STAMP_SETTLE, until to none), read through
@@ -22,7 +22,10 @@ as_of as given; only the CLI reads the clock.
 The G-table (a barred G prints PASS or FAIL):
 
   G1   pack integrity: pack_integrity decks among the decks with a pack row,
-       retired or not. Bar 0.
+       retired or not, plus packs whose WHOLE run["display_moves"] (moves past
+       as_of too) breaks the writer's contract (data.display_moves_problem;
+       models-lead F1: the loader checks only delivered moves, so a malformed
+       later move fails here at once). Bar 0.
   G2   no unexplained gaps: incomplete_deck decks among the FINAL packed
        decks and EVERY pack-less deck (A3). A packed deck is final when its
        pack retired by as_of or was served more than 25 h
@@ -51,7 +54,24 @@ The G-table (a barred G prints PASS or FAIL):
        recommendation (B3 (f4)) prints when G1 fails or G3 has orphans (lost
        data); an outcome on a ghost row is a serve bug and goes back to
        models-lead.
-  G7   upgrade misses (U4-R2), every cause summed over the loaded packs.
+       #535's decks (models-lead addendum G3): a delivered deck with no rows
+       and no pack logs `deck-evidence <deck_job_id>: n delivered cards of a
+       deck with no evidence`; release-lead copies every such line in the
+       window into the read (G3-a), passed as --no-evidence-log. An orphan is
+       explained (G3-b, as corrected by I3-a) when its impression id's run
+       equals a captured deck_job_id, whatever its index: #535's n counts the
+       cards sent, so a deck with a cut or a drop sends an index at or past
+       it. Those decks (no_evidence_decks_explained) and outcomes
+       (explained_orphans) are reported and don't FAIL; the outcomes at or
+       past the deck's logged count (its lines summed) are counted apart
+       (explained_past_count) and don't FAIL alone either. Any other orphan
+       FAILs and recommends the kill (G3-c), and so do explained outcomes
+       above 1% of the window's outcomes on packed-admitted decks (a pack row
+       or tiered rows, the explained ones included; G3-d). With any #535 deck
+       in the lines, the read says trades-eng closes the path before the
+       launch-week freeze, and mode 2 waits for that fix (G3-d).
+  G7   upgrade misses (U4-R2), every cause summed over the loaded packs but
+       pack_integrity decks (G1's; row gone skips them too).
        Bar: other == 0. Reported, never barred (addendum C4): row gone, the
        misses whose pack recorded a stored count above the card while its
        page row was gone, with how many are named (C4 (d1)'s sub-count) and
@@ -125,7 +145,7 @@ from urllib.parse import unquote, unquote_plus
 from sqlalchemy import Integer, String, Text, column, create_engine, event, func, inspect, select, table
 
 from backend.database import deck_impressions_table, deck_outcomes_table
-from backend.eval import data
+from backend.eval import data, evidence_pack
 from backend.eval.data import (
     CALIBRATION_REFRESH, IN_FLIGHT, IN_FLIGHT_WINDOW, INCOMPLETE_DECK, NO_DELIVERY_EVIDENCE,
     PACK_INTEGRITY, PACK_TABLE, PARTIAL_RUN_TIER, UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT,
@@ -156,7 +176,8 @@ PASS, FAIL, INSUFFICIENT, REPORT = "PASS", "FAIL", "INSUFFICIENT", "REPORT"
 _PACK_ROWS = table(PACK_TABLE, column("run_id", String), column("served_at", String),
                    column("header_json", Text), column("card_count", Integer))
 _WITHDRAWAL_ROWS = table(WITHDRAWALS_TABLE, column("reason", String),
-                         column("first_withdrawn_at", String))
+                         column("first_withdrawn_at", String), column("deck_job_id", String),
+                         column("card_index", Integer), column("served_before", Integer))
 
 
 class ReadOnlyViolation(RuntimeError):
@@ -240,21 +261,26 @@ class FlipRead:
 
 
 def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
-              i1_mode: int = 1) -> FlipRead:
+              i1_mode: int = 1, no_evidence: dict | None = None) -> FlipRead:
     """The G-table (module doc) for decks served in [since, until), at or
     before as_of, and outcomes and withdrawals in the same window, with
-    trade_i1_mode `i1_mode` in effect over it (G10)."""
+    trade_i1_mode `i1_mode` in effect over it (G10). `no_evidence`: #535's
+    decks (parse_no_evidence_log of the read's captured lines; G3-a)."""
     decks = load_decks(engine=engine, since=since, until=until, as_of=as_of)
     in_flight_from = (datetime.fromisoformat(as_of) - IN_FLIGHT_WINDOW).isoformat()
     with engine.connect() as conn:
         packs = _pack_rows(conn, since, until, as_of)
-        g3 = _g3(conn, decks, _outcome_ids(conn, since, until, as_of))
+        g3 = _g3(conn, decks, _outcome_ids(conn, since, until, as_of), set(packs),
+                 no_evidence)
         withdrawals = _withdrawals_by_reason(conn, since, until, as_of)
+        w0 = _w0_indexes(conn, list(packs))
 
     pack_integrity = [d for d in decks if d.exclusion == PACK_INTEGRITY]
+    malformed = _malformed_moves(packs, skip={d.deck_job_id for d in pack_integrity}, w0=w0)
     g1 = {"pack_decks": len(packs), "pack_integrity": len(pack_integrity),
-          "ids": [d.deck_job_id for d in pack_integrity][:LIST_CAP],
-          "status": FAIL if pack_integrity else PASS}
+          "display_moves_malformed": len(malformed),
+          "ids": ([d.deck_job_id for d in pack_integrity] + malformed)[:LIST_CAP],
+          "status": FAIL if pack_integrity or malformed else PASS}
 
     trades = [d for d in decks if d.exclusion != CALIBRATION_REFRESH]
     final_packed = [d for d in trades if d.deck_job_id in packs
@@ -268,7 +294,7 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
           "insufficient": len(final_packed) < MIN_FINAL_DECKS,
           "status": FAIL if incomplete else PASS}
 
-    misses = _sum_counts(d.upgrade_misses for d in decks)
+    misses = _sum_counts(d.upgrade_misses for d in decks if d.exclusion != PACK_INTEGRITY)
     gone = _row_gone(packs, skip={d.deck_job_id for d in pack_integrity})
     g7 = {"upgrade_misses": misses, "row_gone": gone["total"], "row_gone_named": gone["named"],
           "row_gone_split": gone["split"],
@@ -368,17 +394,24 @@ def _final(deck, pack, as_of: str, in_flight_from: str) -> bool:
     return data._pack_state(run, -1, served_at, as_of, in_flight_from)[0]
 
 
-def _g3(conn, decks, outcome_ids: list[str]) -> dict:
+def _g3(conn, decks, outcome_ids: list[str], packed=frozenset(),
+        no_evidence: dict | None = None) -> dict:
+    """G3 (module doc). `packed`: the run_ids with a pack row in the window;
+    `no_evidence`: #535's decks, deck_job_id -> delivered cards (None: no
+    lines given)."""
     loaded = {c.impression_id for d in decks for c in d.cards if not c.is_ghost}
     ghosts = {c.impression_id for d in decks for c in d.cards if c.is_ghost}
     jobs = {d.deck_job_id for d in decks}
-    joined = 0
+    admitted = {d.deck_job_id for d in decks if d.deck_job_id in packed or any(
+        c.evidence_tier is not None for c in d.cards if not c.is_ghost)}
+    joined = joined_admitted = 0
     on_ghost: list[str] = []           # never shown, so a ghost reached a client
     orphans: list[str] = []
     elsewhere: list[str] = []          # their deck was not loaded: check the evidence
     for iid in outcome_ids:
         if iid in loaded:
             joined += 1
+            joined_admitted += _run_of(iid)[0] in admitted
         elif iid in ghosts:
             on_ghost.append(iid)
         elif _run_of(iid)[0] in jobs:  # its deck is in the window, the card is not
@@ -388,11 +421,26 @@ def _g3(conn, decks, outcome_ids: list[str]) -> dict:
     found, ghost_rows = _joins_elsewhere(conn, set(elsewhere))
     on_ghost += [iid for iid in elsewhere if iid in ghost_rows]
     orphans += [iid for iid in elsewhere if iid not in found and iid not in ghost_rows]
+    delivered = no_evidence or {}
+
+    def no_evidence_card(iid) -> bool:        # G3-b (I3-a): a captured deck, any index
+        return _run_of(iid)[0] in delivered
+
+    explained = [iid for iid in orphans if no_evidence_card(iid)]
+    unexplained = [iid for iid in orphans if not no_evidence_card(iid)]
+    past_count = sum(1 for iid in explained                      # a cut or a drop before it
+                     if _run_of(iid)[1] >= delivered[_run_of(iid)[0]])
+    admitted_outcomes = joined_admitted + len(explained)
+    over_limit = len(explained) * 100 > admitted_outcomes                          # G3-d
     return {"outcomes": len(outcome_ids), "joined": joined,
             "joined_outside_window": sum(1 for iid in elsewhere if iid in found),
             "on_ghost": len(on_ghost), "ghost_ids": sorted(set(on_ghost))[:LIST_CAP],
-            "orphans": len(orphans), "ids": sorted(set(orphans))[:LIST_CAP],
-            "status": FAIL if orphans or on_ghost else PASS}
+            "orphans": len(unexplained), "ids": sorted(set(unexplained))[:LIST_CAP],
+            "explained_orphans": len(explained), "explained_past_count": past_count,
+            "no_evidence_decks_explained": len({_run_of(iid)[0] for iid in explained}),
+            "packed_admitted_outcomes": admitted_outcomes, "explained_over_limit": over_limit,
+            "no_evidence_decks": None if no_evidence is None else len(no_evidence),
+            "status": FAIL if unexplained or on_ghost or over_limit else PASS}
 
 
 def _run_of(impression_id: str) -> tuple[str | None, int | None]:
@@ -439,6 +487,40 @@ def _pack_rows(conn, since, until, as_of) -> dict[str, tuple[str, str]]:
     return {r.run_id: (r.served_at, r.header_json) for r in conn.execute(q)}
 
 
+def _malformed_moves(packs: dict, skip=(), w0=None) -> list[str]:
+    """G1 (F1): the run_ids, sorted, whose pack header's whole
+    run["display_moves"] breaks the writer's contract, past as_of included
+    (data.display_moves_problem; `w0`: run_id -> its served_before=0
+    indexes, from _w0_indexes). A pack in `skip` (already pack_integrity)
+    or with an unreadable header or deliveries is the loader's."""
+    out = []
+    for run_id, (_served_at, header) in packs.items():
+        head = data._json_dict(header) or {}
+        run, card_count = head.get("run"), head.get("card_count")
+        if run_id in skip or not isinstance(run, dict) or type(card_count) is not int:
+            continue
+        try:
+            evidence_pack.check_deliveries(run, card_count)
+        except evidence_pack.PackIntegrityError:
+            continue
+        if data.display_moves_problem(run, card_count, (w0 or {}).get(run_id, frozenset())):
+            out.append(run_id)
+    return sorted(out)
+
+
+def _w0_indexes(conn, run_ids: list[str]) -> dict[str, set[int]]:
+    """run_id -> the card_indexes of its served_before=0 withdrawals, every
+    one recorded (G1 checks the whole header, past as_of too)."""
+    if not run_ids or not inspect(conn).has_table(WITHDRAWALS_TABLE):
+        return {}
+    w, out = _WITHDRAWAL_ROWS, {}
+    for chunk in _chunks(sorted(run_ids)):
+        for run_id, index in conn.execute(select(w.c.deck_job_id, w.c.card_index).where(
+                w.c.deck_job_id.in_(chunk), w.c.served_before == 0)):
+            out.setdefault(run_id, set()).add(index)
+    return out
+
+
 def _outcome_ids(conn, since, until, as_of) -> list[str]:
     """The impression_id of every outcome acted in the window, by as_of."""
     out = deck_outcomes_table
@@ -474,6 +556,23 @@ def _sum_counts(dicts) -> dict[str, int]:
     return dict(sorted(total.items()))
 
 
+# #535's line (server._deck_live_stamp, at ERROR): a delivered deck with no
+# rows and no pack, which eval can't see. release-lead copies every one in a
+# read's window into the read (models-lead G3-a); the B-DK audit counts those
+# decks (G-b4) and G3 attributes their orphans (G3-b).
+_NO_EVIDENCE_LINE = re.compile(
+    r"deck-evidence (\S+): (\d+) delivered cards? of a deck with no evidence")
+
+
+def parse_no_evidence_log(text: str) -> dict[str, int]:
+    """deck_job_id -> its delivered cards, summed over its #535 lines in
+    `text` (a deck logs one line per delivery; other text is ignored)."""
+    out: dict[str, int] = {}
+    for run_id, n in _NO_EVIDENCE_LINE.findall(text):
+        out[run_id] = out.get(run_id, 0) + int(n)
+    return out
+
+
 def _chunks(items: list, size: int = 500):
     for i in range(0, len(items), size):
         yield items[i:i + size]
@@ -491,7 +590,7 @@ def weekly_read(engine, *, as_of: str) -> dict:
         packs = _pack_rows(conn, since, None, as_of)
     packed = set(packs)
 
-    misses = _sum_counts(d.upgrade_misses for d in decks)
+    misses = _sum_counts(d.upgrade_misses for d in decks if d.exclusion != PACK_INTEGRITY)
     causes = {cause: n for cause, n in misses.items() if cause in U4_R4_CAUSES}
     viewed = _viewed(decks)
     gone = _row_gone(packs, skip={d.deck_job_id for d in decks if d.exclusion == PACK_INTEGRITY})
@@ -535,7 +634,8 @@ def render(r: FlipRead) -> str:
         "",
         "| G | what | result | bar | status |",
         "|---|---|---|---|---|",
-        f"| G1 | pack_integrity decks / decks with a pack row | {g1['pack_integrity']} / "
+        f"| G1 | pack_integrity decks (+ malformed display moves) / decks with a pack row "
+        f"| {g1['pack_integrity']} (+ {g1['display_moves_malformed']}) / "
         f"{g1['pack_decks']} | 0 | {g1['status']} |",
         f"| G2 | incomplete_deck / Trades decks read (final packed + every pack-less) "
         f"| {g2['incomplete']} / {g2['final_packed_decks'] + g2['packless_decks']} "
@@ -555,7 +655,7 @@ def render(r: FlipRead) -> str:
         "",
     ]
     if g1["ids"]:
-        lines.append(f"G1 pack_integrity decks: {', '.join(g1['ids'])}")
+        lines.append(f"G1 pack_integrity or malformed-display-moves decks: {', '.join(g1['ids'])}")
     if g2["ids"]:
         lines.append("G2 incomplete decks (each must coincide with a restart or the kill): "
                      + ", ".join(f"{job} (served {at})" for job, at in g2["ids"]))
@@ -567,6 +667,20 @@ def render(r: FlipRead) -> str:
     if g3["ghost_ids"]:
         lines.append("G3 outcomes on a ghost row (ghosts are never shown: a ghost reached "
                      f"a client): {', '.join(g3['ghost_ids'])}")
+    if g3["no_evidence_decks"] is None:
+        lines.append("G3 #535 lines: none given (--no-evidence-log); no orphan can be "
+                     "explained (models-lead G3-a).")
+    else:
+        lines.append(
+            f"G3 explained: no-evidence deck (models-lead G3-b): {g3['explained_orphans']} "
+            f"outcomes on {g3['no_evidence_decks_explained']} decks (past the logged count: "
+            f"{g3['explained_past_count']}), of "
+            f"{g3['packed_admitted_outcomes']} outcomes on packed-admitted decks"
+            + (" (above 1%: G3 FAILs, G3-d)" if g3["explained_over_limit"] else "") + ".")
+        if g3["no_evidence_decks"]:
+            lines.append(f"#535: {g3['no_evidence_decks']} delivered decks with no rows and no "
+                         "pack in the lines: trades-eng closes the path before the launch-week "
+                         "freeze, and mode 2 waits for that fix (models-lead G3-d).")
     if g8["ids"]:
         lines.append(f"G8 withdrawal_conflict decks: {', '.join(g8['ids'])}")
     if g9["ids"]:
@@ -586,7 +700,7 @@ def render(r: FlipRead) -> str:
     # B3 (f4): the kill is for lost data, unreadable packs (G1) or outcomes that
     # join no card (G3 orphans). An outcome on a ghost row is a serve bug (a
     # ghost reached a client), not lost data: it goes back to models-lead.
-    if g1["status"] == FAIL or g3["orphans"]:
+    if g1["status"] == FAIL or g3["orphans"] or g3["explained_over_limit"]:
         lines.append("G1 failed or G3 has orphans: models-lead recommends the kill "
                      "(first_page_store_enabled 0) at once; the operator decides via "
                      "release-lead (B3 (f4)).")
@@ -726,6 +840,11 @@ def main(argv=None) -> int:
                          "loader-included decks with delivery evidence (a pack, or rows "
                          "with delivered_at)")
     ap.add_argument("--json", action="store_true", help="print one JSON object")
+    ap.add_argument("--no-evidence-log",
+                    help="a text file of every #535 log line in the window ('deck-evidence "
+                         "<deck_job_id>: n delivered cards of a deck with no evidence'), as "
+                         "release-lead captures them (models-lead G3-a); G3 explains an "
+                         "orphan only against these")
     ap.add_argument("--i1-mode", type=int, choices=(0, 1, 2), default=1,
                     help="the trade_i1_mode the window ran under (default 1, the launch "
                          "value): at 0 or 1 any i1_dropped withdrawal fails G10; at 2 it is "
@@ -749,8 +868,12 @@ def _run(args) -> int:
         return 2
     as_of = _settled_as_of(args.as_of, "flip_read")
     try:
+        no_evidence = None
+        if args.no_evidence_log:
+            with open(args.no_evidence_log, encoding="utf-8") as fh:
+                no_evidence = parse_no_evidence_log(fh.read())
         result = flip_read(eng, since=args.since, as_of=as_of, until=args.until,
-                           i1_mode=args.i1_mode)
+                           i1_mode=args.i1_mode, no_evidence=no_evidence)
         if args.weekly:
             result.weekly = weekly_read(eng, as_of=as_of)
     except ReadOnlyViolation as e:
