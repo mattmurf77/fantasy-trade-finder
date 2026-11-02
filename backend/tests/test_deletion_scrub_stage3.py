@@ -492,3 +492,61 @@ def test_give_side_pick_labels_are_relabelled_too():
             "receive": []}
     out = scrub.redact_page_card(card, {DEL}, "redacted:t", {"Del Name"})
     assert out["give"][0]["name"] == f"2026 2nd (from {PLACEHOLDER})"
+
+
+# ── #562 delta QA: relabels by traced league, through the scans (N08, N09, N11)
+
+def _page_in(engine, league, deck):
+    with engine.begin() as conn:
+        conn.execute(insert(db.trade_page_store_table).values(
+            user_id=VIEWER, league_id=league, scoring_format="1qb_ppr", request_scope="organic",
+            roster_fp="r", values_snapshot_id="v", engine_version="e", config_signature="c",
+            experiment_digest="d", deck_job_id=deck, built_at=EARLY,
+            expires_at="2999-01-01T00:00:00+00:00", card_count=1,
+            pages_blob={"v": 1, "opponents_total": 1, "cards": [_label_card(OTHER, "Del Name")]},
+            evidence_blob=None, stored_bytes=1, state="ready"))
+
+
+def _offer_in(engine, league, n):
+    from backend.tests.test_account_deletion_coverage import seed
+    with engine.begin() as conn:
+        seed(conn, db.overhauls_table, f"ovh_{n}", overhaul_id=f"ovh_{n}", account_user_id=VIEWER,
+             league_user_id=VIEWER, league_id=league)
+        seed(conn, db.overhaul_offers_table, f"ofr_{n}", offer_id=f"ofr_{n}", overhaul_id=f"ovh_{n}",
+             counterparty_user_id=OTHER, card_json=json.dumps(_label_card(OTHER, "Del Name")))
+
+
+def test_a_stranger_in_a_league_the_person_never_joined_keeps_their_label(engine):
+    """N08/N09: the page-store and overhaul scans use the traced-league rule,
+    so a same-name stranger elsewhere is never relabelled; and N11: a league
+    traced only by roster history counts as theirs."""
+    name_people(engine)
+    with engine.begin() as conn:
+        conn.execute(insert(db.league_roster_history_table).values(
+            league_id="league-history", team_key="t", team_key_quality="strong",
+            platform="sleeper", owner_user_id=DEL, **_roster_history_extras()))
+    for n, league in enumerate(("league-never-joined", "league-history")):
+        _page_in(engine, league, f"deck-{n}")
+        _offer_in(engine, league, n)
+    accounts.delete_user_data(DEL)
+    scrub.run_pending()
+    pages = {r["league_id"]: r["pages_blob"]["cards"][0]["receive"][0]["name"]
+             for r in read(engine, db.trade_page_store_table)}
+    offers = {r["overhaul_id"]: json.loads(r["card_json"])["receive"][0]["name"]
+              for r in read(engine, db.overhaul_offers_table)}
+    assert pages["league-never-joined"] == "2027 1st (from Del Name)"
+    assert offers["ovh_0"] == "2027 1st (from Del Name)"
+    assert pages["league-history"] == f"2027 1st (from {PLACEHOLDER})"
+    assert offers["ovh_1"] == f"2027 1st (from {PLACEHOLDER})"
+
+
+def _roster_history_extras():
+    """The roster-history row's other required columns, filled synthetically."""
+    out = {}
+    for col in db.league_roster_history_table.columns:
+        if col.nullable or col.primary_key or col.default is not None or col.server_default is not None:
+            continue
+        if col.name in ("league_id", "team_key", "team_key_quality", "platform"):
+            continue
+        out[col.name] = 1 if "INT" in str(col.type).upper() else "x"
+    return out

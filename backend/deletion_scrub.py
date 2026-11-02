@@ -227,6 +227,20 @@ def _repair_side_tables(job: dict) -> int:
     match_partner_deleted)."""
     ids = sorted(job["ids"])
     with db.engine.begin() as conn:
+        # A raced match's id joins the job's match_ids (here, and on the row
+        # for later runs), so the notification scan looks at its other side's
+        # rows whatever name they used, an uncaptured one included (#562
+        # delta QA P3-B).
+        m = db.trade_matches_table
+        raced = sorted(conn.execute(select(m.c.id).where(
+            or_(m.c.user_a_id.in_(ids), m.c.user_b_id.in_(ids)))).scalars())
+        if raced:
+            names = job.setdefault("names", {}) if isinstance(job.get("names"), dict) else {}
+            job["names"] = names
+            names["match_ids"] = sorted(set(names.get("match_ids") or ()) | set(raced))
+            jt = db.deletion_scrub_jobs_table
+            conn.execute(update(jt).where(jt.c.job_id == job["job_id"]).values(
+                partner_names_json=json.dumps(names)))
         counts = scrub_side_tables(conn, set(ids), job["token"])
         p, i, f = db.trade_proposals_table, db.trade_impressions_table, db.bad_trade_flags_table
         n = sum(counts.values())

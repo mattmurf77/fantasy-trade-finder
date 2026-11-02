@@ -248,6 +248,73 @@ def test_a_held_upgrade_row_takes_a_live_deletions_token_before_the_pack_is_reda
 
 # ── release-lead's #562 QA: P2-1, the P3s and the test gaps ─────────────────
 
+@pytest.mark.parametrize("side", ["user_a", "user_b"])
+def test_a_raced_match_is_repaired_whichever_side_names_the_person(engine, side):
+    """#562 delta QA N15: the person can be either side of a raced match."""
+    accounts.delete_user_data(DEL)
+    m = db.trade_matches_table
+    a, b = (DEL, VIEWER) if side == "user_a" else (VIEWER, DEL)
+    with engine.begin() as conn:
+        match_id = conn.execute(insert(m).values(
+            league_id=LEAGUE, user_a_id=a, user_b_id=b, user_a_give="[]", user_a_receive="[]",
+            match_valuation_json="{}")).inserted_primary_key[0]
+    scrub.run_pending()
+    with engine.connect() as conn:
+        row = conn.execute(select(m).where(m.c.id == match_id)).mappings().one()
+    assert row[f"{side}_id"] == accounts.DELETED_USER_PLACEHOLDER
+    assert row["match_valuation_json"] is None
+
+
+def test_a_raced_match_naming_the_person_by_an_uncaptured_name_is_redacted(engine):
+    """#562 delta QA P3-B: the scrub never captured "oldname" (a rename). The
+    repair adds the raced match to the job's match_ids, so the scan looks at
+    the viewer's rows and the match row says the partner is deleted."""
+    from backend.tests.test_deletion_scrub_stage3 import name_people, notification
+    name_people(engine)
+    accounts.delete_user_data(DEL)
+    m = db.trade_matches_table
+    with engine.begin() as conn:
+        match_id = conn.execute(insert(m).values(
+            league_id=LEAGUE, user_a_id=VIEWER, user_b_id=DEL, user_a_give="[]",
+            user_a_receive="[]")).inserted_primary_key[0]
+        notification(conn, "Trade match with @oldname", {"partner_username": "oldname",
+                                                         "match_id": match_id})
+    scrub.run_pending()
+    notes = [n for n in read(engine, db.notifications_table) if str(match_id) in n["metadata_json"]]
+    assert notes and "oldname" not in json.dumps(notes)
+    assert match_id in json.loads(job(engine)["partner_names_json"])["match_ids"]
+
+
+def test_a_raced_match_landing_mid_pass_is_judged_by_its_raw_side(engine, monkeypatch):
+    """#562 delta QA N05: the match lands after this pass's repair step and
+    before its notification scan, so the scan sees a raw-id side; that side
+    counts as deleted (match_partner_deleted's `other in ids`)."""
+    from backend.tests.test_deletion_scrub_stage3 import name_people, notification
+    name_people(engine)
+    accounts.delete_user_data(DEL)
+    m = db.trade_matches_table
+    landed = {}
+
+    def repair_then_land(job):
+        n = scrub._repair_side_tables(job)
+        with engine.begin() as conn:
+            landed["id"] = conn.execute(insert(m).values(
+                league_id=LEAGUE, user_a_id=VIEWER, user_b_id=DEL, user_a_give="[]",
+                user_a_receive="[]")).inserted_primary_key[0]
+            notification(conn, "Trade match with @deluser", {"partner_username": "deluser",
+                                                             "match_id": landed["id"]})
+        return n
+    monkeypatch.setattr(scrub, "_STORES", tuple(
+        (name, repair_then_land if fn is scrub._repair_side_tables else fn)
+        for name, fn in scrub._STORES))
+    with engine.begin() as conn:                  # one pass only: no grace yet
+        conn.execute(db.deletion_scrub_jobs_table.update().values(db_done_at=None))
+    scrub.run_pending()
+    notes = [n for n in read(engine, db.notifications_table)
+             if str(landed["id"]) in n["metadata_json"]]
+    assert notes and "deluser" not in json.dumps(notes)
+
+
 def test_a_match_raced_past_the_commit_is_repaired_by_the_next_pass(engine):
     """P2-1: a swipe that read the token map before the commit mints a match
     and both notifications after it. The next pass puts the placeholder on the
