@@ -66,6 +66,11 @@ os.environ.setdefault("FTF_DP_VALUES_FILE", str(_PLAYER_SNAPSHOT))
 # flakes on long runs. The server skips the thread when this is "1"; prod never
 # sets it.
 os.environ.setdefault("FTF_DISABLE_CLEANUP_LOOP", "1")
+# The deletion route kicks the scrub on a daemon thread, which would outlive a
+# route test's engine (#557 CI: "Set changed size during iteration" in the
+# pool's dispose). Tests drive deletion_scrub.run_pending directly; prod
+# never sets this.
+os.environ.setdefault("FTF_DISABLE_DELETION_SCRUB_KICK", "1")
 
 
 @pytest.fixture(autouse=True)
