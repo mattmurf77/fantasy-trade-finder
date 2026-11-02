@@ -3213,6 +3213,7 @@ deletion_scrub_jobs_table = Table("deletion_scrub_jobs", metadata,
     Column("last_error",       String),                      # an exception class name, never a message
     Column("scan_json",        Text),                        # an unfinished pass's scan cursor; NULL between passes
     Column("partner_names_json", Text),                      # {leagues: {league_id: [names]}, usernames: [..]}
+    Column("escalated_at",     String),                      # ISO UTC; set once past RETRY_LIMIT (legal R28.26 #8)
     Index("ix_deletion_scrub_jobs_deleted", "deleted_at"),
 )
 
@@ -4044,6 +4045,8 @@ def _migrate_db() -> None:
         # ── the deletion scrub, stage 3: the person's names per league (a
         # Calibration card names its partner by display name).
         ("deletion_scrub_jobs", "partner_names_json",       "TEXT"),
+        # ── legal R28.26 #8: a job past 30 days is kept and marked escalated.
+        ("deletion_scrub_jobs", "escalated_at",             "VARCHAR"),
         # ── #562 QA P1-2: a Calibration card's partner, for the scrub.
         ("grading_cards",      "partner_user_id",           "VARCHAR"),
     ]

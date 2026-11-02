@@ -15,7 +15,8 @@ loses them. This module then works the row:
     models-eng #542): eval.redaction.redact_model_store with the tokens;
   * the row is deleted once both are done (legal (ix)). Past ALERT_AFTER it
     is kept and retried, and the tick logs a count at ERROR; past RETRY_LIMIT
-    (30 days) it is deleted anyway and logged as abandoned (_abandon). Before
+    (30 days) it is still kept and retried, marked escalated, and logged every
+    day by its own job id and where it stands (_escalate; legal R28.26 #8). Before
     every stage was built (COMPLETE, true since stage 3) rows were kept, so a
     later SCRUB_VERSION re-ran them.
 
@@ -1526,33 +1527,34 @@ def kick() -> None:
     threading.Thread(target=run, name="deletion-scrub", daemon=True).start()
 
 
-def _abandon(now: datetime) -> int:
-    """Legal (ix): a job retries for up to 30 days. Past that its row, which
-    holds the ids, is deleted, and eng is told at ERROR by count, last error
-    class and where each job stood (a store's scan, the grace pass or the
-    model store), never ids. What it leaves: a store row the scrub could not
-    rewrite (a poison row) still names the person, and a job stuck mid-pass
-    leaves that store's rest and every later store, and the model store,
-    unscanned. With the ids gone, eng can't find those rows by id; the 24 h
-    alert asked for a fix every day of the 30 (#559 delta QA; legal to
-    confirm this reading of (ix) through head-eng)."""
+def _escalate(now: datetime) -> int:
+    """Legal R28.26 #8 (R28.20 (ix)): a job is never dropped unfinished. Its
+    row holds the ids, and it's the only way to find a store row the scrub
+    couldn't rewrite (a poison row) that still names the person. Past
+    RETRY_LIMIT (30 days) the job is marked escalated once (`escalated_at`)
+    and stays: the passes keep retrying it, and _finish deletes it once a
+    pass completes after eng fixes the row by hand. Every tick (daily) logs
+    each escalated job at ERROR: its own job id (the first 8 characters, as
+    every scrub log), its age, where it stands (a store's scan, the DB pass,
+    or the grace pass / model store) and its last error class. Never the
+    person's ids. head-bizops is told the same day (runbook § Deletion scrub),
+    because the deletion has missed privacy §6's 30 days. Returns how many
+    jobs are escalated."""
     if not COMPLETE:
         return 0
     t = db.deletion_scrub_jobs_table
     with db.engine.begin() as conn:
         rows = [r for r in conn.execute(select(t.c.job_id, t.c.deleted_at, t.c.last_error,
-                                               t.c.scan_json, t.c.db_version, t.c.db_done_at)).all()
+                                               t.c.scan_json, t.c.db_version, t.c.db_done_at,
+                                               t.c.escalated_at)).all()
                 if datetime.fromisoformat(r.deleted_at) < now - RETRY_LIMIT]
-        if rows:
-            conn.execute(delete(t).where(t.c.job_id.in_([r.job_id for r in rows])))
-    if rows:
-        errors, stuck = {}, {}
-        for r in rows:
-            errors[r.last_error or "none"] = errors.get(r.last_error or "none", 0) + 1
-            where = _stuck_at(r)
-            stuck[where] = stuck.get(where, 0) + 1
-        log.error("[scrub] abandoned jobs=%d after_days=%d last_errors=%s stuck_at=%s",
-                  len(rows), RETRY_LIMIT.days, errors, stuck)
+        new = [r.job_id for r in rows if r.escalated_at is None]
+        if new:
+            conn.execute(update(t).where(t.c.job_id.in_(new)).values(escalated_at=_iso(now)))
+    for r in rows:
+        log.error("[scrub] escalated job=%s days=%d stuck_at=%s last_error=%s",
+                  r.job_id[:8], (now - datetime.fromisoformat(r.deleted_at)).days,
+                  _stuck_at(r), r.last_error or "none")
     return len(rows)
 
 
@@ -1626,7 +1628,7 @@ def _tick(now: datetime) -> tuple[str, dict]:
                 conn.execute(update(t).where(t.c.job_id.in_([r["job_id"] for r in ready]))
                              .values(model_done_at=_iso(now)))
     detail["finished"] = _finish(now)
-    detail["abandoned"] = _abandon(now)
+    detail["escalated"] = _escalate(now)
     with db.engine.connect() as conn:
         left = conn.execute(select(t.c.deleted_at)).scalars().all()
     old = [datetime.fromisoformat(d) for d in left

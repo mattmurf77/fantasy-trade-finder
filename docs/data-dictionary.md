@@ -2126,7 +2126,7 @@ Calibration adds **no** event (scope waiver, plan D9); the tables above are the 
 
 The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scrub.py`; scope `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md`).
 - **Lifecycle:** one row per account deletion, inserted in `accounts._delete_user_data`'s own transaction, so a committed deletion always has its scrub and a rolled-back one has none. The row is deleted when the scrub of other users' decks is done (legal (ix)).
-- **Retention:** it's deleted once its grace pass and the model store are done (`deletion_scrub.COMPLETE` since stage 3; before that, rows were kept so later stages re-ran them through `SCRUB_VERSION`). Past 24 h unfinished, it's retried and counted at ERROR. Past 30 days (`RETRY_LIMIT`) it's deleted anyway, ids and all, and logged at ERROR as abandoned, with counts, error classes and where each job stood (`deletion_scrub._abandon`; trades-eng's reading of (ix), legal to confirm). What that leaves: a poison row still naming the person, and a stuck pass's unscanned stores.
+- **Retention:** it's deleted once its grace pass and the model store are done (`deletion_scrub.COMPLETE` since stage 3; before that, rows were kept so later stages re-ran them through `SCRUB_VERSION`). Past 24 h unfinished, it's retried and counted at ERROR. Past 30 days (`RETRY_LIMIT`) it's **kept**: marked `escalated_at`, still retried, and logged at ERROR every day by its own job id and where it stands (`deletion_scrub._escalate`; legal R28.26 #8). It's deleted only once a pass completes, after eng fixes the poison row by hand.
 - **Privacy:** it holds the deleted user's ids only for that time. It's never exported (its subject is gone), and no id from it is ever logged.
 
 | Column | Type | Notes |
@@ -2143,6 +2143,7 @@ The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scr
 | `claimed_until` | str | ISO UTC lease (10 min), taken by compare-and-swap; NULL = free |
 | `last_error` | str | The last failure's exception class, never its message |
 | `partner_names_json` | text (JSON) | `{leagues: {league_id: [display names, usernames]}, usernames: [...], match_ids: [...]}` (their `trade_matches` ids, before the deletion puts the placeholder on their side), read before the deletion removes the person's `league_members` and `users` rows. Used where a row names its partner only by name: an older Calibration card (before `grading_cards.partner_user_id`), a traded-pick label, a notification. A name a remaining member of that league uses is never matched on a card. A notification's match row decides who its partner is; without one, usernames (unique) match anywhere and display names only for a recipient who shared a league. As private as the ids, and never logged. Added to existing tables at boot (`_migrate_db`) |
+| `escalated_at` | str | ISO UTC, set once when the job passes 30 days unfinished (`RETRY_LIMIT`; legal R28.26 #8). The row stays and is retried; the daily tick logs it by job id |
 | `scan_json` | text (JSON) | An unfinished DB pass's state: the league pass's counts, which fallback scan is running, and its keyset cursor. The next run resumes from it. NULL between passes |
 
 Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.

@@ -274,39 +274,76 @@ def test_other_users_events_naming_the_person_take_the_token(engine):
 
 
 
-def test_a_job_unfinished_after_30_days_is_deleted_and_eng_told(engine, caplog, monkeypatch):
-    """Legal (ix): retries run for up to 30 days. A job that never finishes (a
-    poison row never sets db_version, so _finish never deletes it) has its row,
-    the ids, deleted past 30 days, with an ERROR by count and error class only.
-    A younger unfinished job keeps retrying and alerting (#559 delta QA)."""
+def _stuck_pair(engine, now):
+    """Two deletions, both unfinished and held by another runner (as a poison
+    row leaves a job unfinished for good): one 31 days old, one 29."""
     accounts.delete_user_data(DEL)
     t = db.deletion_scrub_jobs_table
-    now = datetime.now(timezone.utc)
     with engine.begin() as conn:
         conn.execute(insert(db.users_table).values(sleeper_user_id="second-person"))
     accounts.delete_user_data("second-person")
     with engine.begin() as conn:
         rows = conn.execute(select(t.c.job_id).order_by(t.c.job_id)).scalars().all()
         old, young = sorted(rows)
-        # Both stuck: another runner holds them, so this tick's pass can't
-        # finish them (as a poison row leaves a job unfinished for good).
         conn.execute(update(t).where(t.c.job_id == old).values(
             deleted_at=(now - timedelta(days=31)).isoformat(), last_error="row_failures",
             claimed_until="9999-01-01"))
         conn.execute(update(t).where(t.c.job_id == young).values(
             deleted_at=(now - timedelta(days=29)).isoformat(), last_error="row_failures",
             claimed_until="9999-01-01"))
+    return old, young
+
+
+def test_a_job_unfinished_after_30_days_is_kept_escalated_and_alerted_daily(engine, caplog, monkeypatch):
+    """Legal R28.26 #8 (R28.20 (ix)): a job is never dropped unfinished, because
+    its row is the only way to find a poison row that still names the person.
+    Past 30 days it's kept, stamped `escalated_at` once, and every tick logs it
+    at ERROR by its own job id, age, where it stands and its error class, never
+    the person's ids. A younger unfinished job isn't escalated."""
+    now = datetime.now(timezone.utc)
+    old, young = _stuck_pair(engine, now)
+    t = db.deletion_scrub_jobs_table
     from backend.eval import redaction
     monkeypatch.setattr(redaction, "redact_model_store", lambda tokens: 0)
     caplog.set_level(logging.ERROR, logger="trade_finder")
     _, detail = scrub.tick(now)                   # the daily tick's step
-    assert detail["abandoned"] == 1
+    assert detail["escalated"] == 1
+    with engine.connect() as conn:
+        rows = {r.job_id: r for r in conn.execute(select(t)).all()}
+    assert set(rows) == {old, young}              # nothing deleted
+    assert rows[old].escalated_at == now.isoformat()
+    assert rows[young].escalated_at is None
+    lines = [r.getMessage() for r in caplog.records if "escalated" in r.getMessage()]
+    assert lines == [f"[scrub] escalated job={old[:8]} days=31 stuck_at=db_pass last_error=row_failures"]
+    assert DEL not in caplog.text and "second-person" not in caplog.text
+    assert "abandoned" not in caplog.text
+
+    # The next day: alerted again, the first stamp kept.
+    caplog.clear()
+    _, detail = scrub.tick(now + timedelta(days=1))
+    assert detail["escalated"] == 1
+    with engine.connect() as conn:
+        assert conn.execute(select(t.c.escalated_at).where(t.c.job_id == old)).scalar() == now.isoformat()
+    assert [r.getMessage() for r in caplog.records if "escalated" in r.getMessage()] == [
+        f"[scrub] escalated job={old[:8]} days=32 stuck_at=db_pass last_error=row_failures"]
+
+
+def test_an_escalated_job_still_finishes_once_the_row_is_fixed(engine, monkeypatch):
+    """The escalated row is still worked: once eng fixes the poison row (here,
+    the lease another runner held is released), the next pass completes it and
+    _finish deletes it as any finished job."""
+    now = datetime.now(timezone.utc)
+    old, young = _stuck_pair(engine, now)
+    t = db.deletion_scrub_jobs_table
+    from backend.eval import redaction
+    monkeypatch.setattr(redaction, "redact_model_store", lambda tokens: 0)
+    scrub.tick(now)
+    with engine.begin() as conn:
+        conn.execute(update(t).where(t.c.job_id == old).values(claimed_until=None, last_error=None))
+    scrub.run_pending()                           # the pass completes; the job finishes
+    scrub.tick(now)
     with engine.connect() as conn:
         assert conn.execute(select(t.c.job_id)).scalars().all() == [young]
-    (line,) = [r.getMessage() for r in caplog.records if "abandoned" in r.getMessage()]
-    assert line == ("[scrub] abandoned jobs=1 after_days=30 last_errors={'row_failures': 1} "
-                    "stuck_at={'db_pass': 1}")
-    assert DEL not in caplog.text and "second-person" not in caplog.text
 
 
 def test_a_pass_that_straddles_the_grace_is_not_the_grace_pass(engine, monkeypatch):
