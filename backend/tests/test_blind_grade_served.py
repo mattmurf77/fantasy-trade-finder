@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from sqlalchemy import MetaData, create_engine, event, insert
+from sqlalchemy import MetaData, create_engine, event, insert, update
 
 from backend import database as db
 from backend.eval import blind_grade
@@ -151,6 +151,20 @@ def test_markets_are_read_from_either_valuation_shape(prod):
     put_deck(fake, "T", 2, served_at=_ago(2), delivered=range(2), snapshot=[0])
     sides = [(c["give"][0]["market"], c["receive"][0]["market"]) for c in served()["cards"]]
     assert sides == [(1000.0, 1100.0), (1001.0, 1101.0)]
+
+
+def test_a_snapshot_side_that_is_not_a_list_reads_as_no_market(prod):
+    # #455 QA P3: {"give": 5} or {"give": true} once raised a TypeError here.
+    fake = prod()
+    put_deck(fake, "T", 2, served_at=_ago(2), delivered=range(2), snapshot=[0, 1])
+    with fake.eng.begin() as conn:
+        for i, sides in ((0, {"give": 5, "receive": True}), (1, {"give": {"id": "T-g1"}})):
+            conn.execute(update(db.deck_impressions_table).where(
+                db.deck_impressions_table.c.deck_job_id == "T",
+                db.deck_impressions_table.c.card_index == i,
+            ).values(valuation_json=json.dumps({"assets": sides})))
+    sides = [(c["give"][0]["market"], c["receive"][0]["market"]) for c in served()["cards"]]
+    assert sides == [(None, None), (None, None)]
 
 
 def test_top_n_is_by_displayed_position_after_never_delivered_withdrawals(prod):

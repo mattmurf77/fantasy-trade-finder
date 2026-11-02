@@ -236,6 +236,7 @@ damaged clone, `git -c merge.autoStash=false merge …` got past the stash failu
 - **Cause:** numeric league ids are not Sleeper-exclusive. Routes and the session-init daemon both branched on `league_id.isdigit()`, so a numeric MFL id (league 62846) was fed into the Sleeper grid sync, whose empty REPLACE deleted the rows.
 - **Fix:** `database.is_linked_platform_league()` reads the DB membership snapshot. Applied at both sites — `52be577` (routes) and `0106aba` (daemon).
 - **Prevention:** never infer platform from id shape. The link is recorded in the DB; ask it.
+- **Later instance, fixed 2026-10-27:** the daemon's `market.trade_capture` block still gated on `isdigit()` alone, so each init on a linked league made up to 18 Sleeper `transactions` reads. It now also checks `_platform_linked`.
 
 ### G-015 — an empty `roster_ids` grid silently wipes picks through a REPLACE-sync
 - **Symptom:** a league's owned draft picks vanish with no error anywhere.
@@ -401,7 +402,8 @@ signal until the session is re-initialised (~2 Elo points on the affected pair a
 - **Cause:** the client gated on `league_id.isdigit()` as a proxy for "this is a Sleeper league". Sleeper ids are numeric — but so are MFL's and Fleaflicker's. The predicate tests the wrong property.
 - **Fix:** gate on the league's **platform**, not the shape of its id (P0-6, `resolveSendPlatform`). Backend equivalent: `backend/server.py:12336`.
 - **Prevention:** **this is the third instance of the same bug class in this repo** — see G-014, feedback #200 and #220. Any `isdigit()` / numeric-shape test standing in for "Sleeper" is wrong. There is a platform field; use it.
-- **Related:** the propose route still lacks an `is_linked_platform_league` guard — see [`NEXT.md`](NEXT.md).
+- **Related:** the propose route now has the `is_linked_platform_league` guard (I-2's NEXT.md 0f guard, `backend/server.py` around :23556), so a linked-platform league is refused before any Sleeper call.
+- **Fixed 2026-10-27:** the session-init trade-capture site (`market.trade_capture`) now skips linked-platform leagues, so no Sleeper `transactions` read carries an MFL, ESPN or Fleaflicker id. See G-014.
 
 ### G-031 — a client `track()` name absent from the taxonomy is counted and dropped in silence
 - **Symptom:** instrumentation looks correct in the client, `POST /api/events` returns **200**, and the dashboard has no rows. No client error, no server error, no log line anyone reads.

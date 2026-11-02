@@ -9,6 +9,7 @@ flag-off parity.
 import json
 
 import pytest
+from sqlalchemy import insert
 
 import backend.server as srv
 import backend.database as db
@@ -16,7 +17,8 @@ import backend.trade_service as ts
 from backend.pick_values import (pick_pool_value, market_pick_pool_value,
                                  priced_pool_value,
                                  GENERIC_PICK_SEEDS, YEAR_DISCOUNT)
-from backend.draft_status import PICK_HORIZON_CLASSES
+from backend.draft_status import PICK_HORIZON_CLASSES, sleeper_verdict
+from backend.roster_snapshot import roster_snapshot
 
 # #355 — a league carries PICK_HORIZON_CLASSES (3) rookie classes anchored to
 # the first UNDRAFTED class, not a fixed current_season+3. These grid sizes were
@@ -497,6 +499,207 @@ def test_daemon_step_flaked_drafts_without_verdict_keeps_current_season(
             _patch_sleeper_reads_for_sync(monkeypatch, drafts=[])
             rows = srv._sync_sleeper_owned_picks(_LEAGUE, {}, "1qb_ppr")
             assert rows is not None and any(r["season"] == 2026 for r in rows), status
+    finally:
+        db.set_league_draft_status(_LEAGUE, None, None)
+
+
+# ── #470 QA P3-2 — an empty `/drafts` read keeps the prior exclusion ───────
+# Init A's live read excludes the current season. Init B's read flakes to []
+# while the cached #207 verdict doesn't (yet) say `drafted` (it refreshes on
+# its own cadence and can be cheap-skipped). B used to re-populate the season
+# and the next good read removed it again; each flip moved the league's rfp1.
+# The league's own prior platform grid is now the corroboration.
+
+_COMPLETE_2026 = [{"draft_id": "d1", "status": "complete",
+                   "season": "2026", "type": "linear"}]
+_PRE_DRAFT_2026 = [{"draft_id": "d1", "status": "pre_draft",
+                    "season": "2026", "type": "linear"}]
+
+
+def _sync_seasons(monkeypatch, drafts):
+    _patch_sleeper_reads_for_sync(monkeypatch, drafts=drafts)
+    rows = srv._sync_sleeper_owned_picks(_LEAGUE, {}, "1qb_ppr")
+    assert rows is not None
+    assert sorted({p["season"] for p in db.load_draft_picks(_LEAGUE)}) == \
+        sorted({r["season"] for r in rows})
+    return sorted({r["season"] for r in rows})
+
+
+def _rfp1(league_id):
+    with db.engine.connect() as conn:
+        return roster_snapshot(conn, league_id,
+                               pick_source=db.PICK_SOURCE_PLATFORM).fp
+
+
+@pytest.fixture
+def _no_cached_verdict(_clean_league):
+    db.set_league_draft_status(_LEAGUE, None, None)   # no-op without a row
+    yield _LEAGUE
+    db.set_league_draft_status(_LEAGUE, None, None)
+
+
+def test_flaked_drafts_after_a_complete_read_keeps_the_season_excluded(
+        _no_cached_verdict, monkeypatch):
+    assert _sync_seasons(monkeypatch, _COMPLETE_2026) == [2027, 2028, 2029]
+    assert _sync_seasons(monkeypatch, []) == [2027, 2028, 2029]
+
+
+def test_flip_sequence_keeps_the_roster_fingerprint_stable(
+        _no_cached_verdict, monkeypatch):
+    """complete → flake → complete → flake: one rfp1 throughout. RED before
+    the fix: each flake re-populated 2026 and moved the fingerprint."""
+    fps = []
+    for drafts in (_COMPLETE_2026, [], _COMPLETE_2026, []):
+        _sync_seasons(monkeypatch, drafts)
+        fps.append(_rfp1(_LEAGUE))
+    assert len(set(fps)) == 1, fps
+
+
+def test_flaked_drafts_keeps_a_prior_grid_that_carries_the_season(
+        _no_cached_verdict, monkeypatch):
+    assert _sync_seasons(monkeypatch, _PRE_DRAFT_2026) == [2026, 2027, 2028]
+    assert _sync_seasons(monkeypatch, []) == [2026, 2027, 2028]
+
+
+def test_flaked_drafts_on_a_first_sync_includes_the_season(
+        _no_cached_verdict, monkeypatch):
+    """D-089 unchanged: no prior platform rows means no corroboration."""
+    assert db.load_draft_picks(_LEAGUE) == []
+    assert _sync_seasons(monkeypatch, []) == [2026, 2027, 2028]
+
+
+def test_prior_grid_read_error_falls_back_to_including_the_season(
+        _no_cached_verdict, monkeypatch):
+    """A failed prior-grid read is no corroboration: an empty read with no
+    verdict includes the season (D-089), even over a grid that excludes it."""
+    assert _sync_seasons(monkeypatch, _COMPLETE_2026) == [2027, 2028, 2029]
+
+    def _read_fails(*a, **k):
+        raise RuntimeError("draft_picks read failed")
+    monkeypatch.setattr(srv, "load_draft_pick_seasons", _read_fails)
+    assert _sync_seasons(monkeypatch, []) == [2026, 2027, 2028]
+
+
+def test_prior_grid_season_reader_reads_platform_rows_only(_clean_league):
+    """The season-only reader uses `load_draft_picks`'s platform predicate: a
+    user-asserted row's season is not in it, and any other source raises."""
+    _seed_grid(_LEAGUE)                                   # 2026..2028
+    with db.engine.begin() as conn:
+        conn.execute(insert(db.draft_picks_table).values(
+            pick_id=db.make_pick_id(_LEAGUE, 2031, 1, "9"), league_id=_LEAGUE,
+            season=2031, round=1, source=db.PICK_SOURCE_USER))
+    try:
+        assert db.load_draft_pick_seasons(_LEAGUE) == {2026, 2027, 2028}
+        with pytest.raises(ValueError):
+            db.load_draft_pick_seasons(_LEAGUE, source=db.PICK_SOURCE_ANY)
+    finally:
+        db.replace_draft_picks(_LEAGUE, [], preserve_source=db.PICK_SOURCE_USER)
+
+
+def _sync_seasons_with_verdict(monkeypatch, status, confidence):
+    db.set_league_draft_status(_LEAGUE, status, confidence)
+    return _sync_seasons(monkeypatch, [])
+
+
+def test_always_empty_drafts_stays_excluded_after_not_drafted_known_limitation(
+        _clean_league, monkeypatch):
+    """ACCEPTED LIMITATION (P3-3; #483 QA P3-1, option (b)). `/drafts` always
+    reads empty. A cached `drafted` excluded 2026; after the verdict flips to
+    `not_drafted`, the prior grid still holds 2026 excluded, until a non-empty
+    `/drafts` read or the season rolls over. Trusting `not_drafted` here
+    re-opens the fp flip for startup-complete / rookie-pending leagues (the
+    next test). A change to this pin changes that trade-off: see D-189."""
+    db.upsert_league(league_id=_LEAGUE, user_id="u1", name="Sleeper Test",
+                     season="2026", user_player_ids=[], opponent_rosters=[])
+    try:
+        assert _sync_seasons_with_verdict(monkeypatch, "drafted", "high") == \
+            [2027, 2028, 2029]
+        assert _sync_seasons_with_verdict(monkeypatch, "not_drafted", "high") == \
+            [2027, 2028, 2029]
+    finally:
+        db.set_league_draft_status(_LEAGUE, None, None)
+
+
+# A completed startup draft and a pending rookie draft, both season 2026.
+_STARTUP_DONE_ROOKIE_PENDING_2026 = [
+    {"draft_id": "s1", "status": "complete", "season": "2026", "type": "snake",
+     "settings": {"rounds": 25}, "last_picked": 1},
+    {"draft_id": "r1", "status": "pre_draft", "season": "2026",
+     "type": "linear", "settings": {"rounds": 4}},
+]
+
+
+def test_startup_complete_rookie_pending_flake_keeps_season_and_fp(
+        _clean_league, monkeypatch):
+    """#483 QA P3-1. #207's detector reads this shape `not_drafted`/high (the
+    rookie-shaped draft is pending), while the shape-blind
+    `completed_draft_seasons` excludes 2026. A flake must keep 2026 excluded
+    and rfp1 stable. RED with the P3-3 verdict gate: each flake re-included
+    2026."""
+    verdict = sleeper_verdict(_STARTUP_DONE_ROOKIE_PENDING_2026, 2026)
+    assert (verdict.status, verdict.confidence) == ("not_drafted", "high")
+    db.upsert_league(league_id=_LEAGUE, user_id="u1", name="Sleeper Test",
+                     season="2026", user_player_ids=[], opponent_rosters=[])
+    try:
+        db.set_league_draft_status(_LEAGUE, verdict.status, verdict.confidence)
+        fps = []
+        for drafts in (_STARTUP_DONE_ROOKIE_PENDING_2026, [],
+                       _STARTUP_DONE_ROOKIE_PENDING_2026, []):
+            assert _sync_seasons(monkeypatch, drafts) == [2027, 2028, 2029]
+            fps.append(_rfp1(_LEAGUE))
+        assert len(set(fps)) == 1, fps
+    finally:
+        db.set_league_draft_status(_LEAGUE, None, None)
+
+
+def test_always_empty_drafts_keeps_the_exclusion_on_an_unknown_verdict(
+        _clean_league, monkeypatch):
+    """An `unknown` verdict is no answer, so the prior grid still holds."""
+    db.upsert_league(league_id=_LEAGUE, user_id="u1", name="Sleeper Test",
+                     season="2026", user_player_ids=[], opponent_rosters=[])
+    try:
+        assert _sync_seasons_with_verdict(monkeypatch, "drafted", "high") == \
+            [2027, 2028, 2029]
+        assert _sync_seasons_with_verdict(monkeypatch, "unknown", "low") == \
+            [2027, 2028, 2029]
+    finally:
+        db.set_league_draft_status(_LEAGUE, None, None)
+
+
+def test_live_drafts_read_still_wins_in_both_directions(
+        _no_cached_verdict, monkeypatch):
+    """The prior grid is consulted only on an EMPTY read: a live answer
+    re-includes an excluded season (pre_draft) and excludes an included one
+    (complete), as before."""
+    assert _sync_seasons(monkeypatch, _COMPLETE_2026) == [2027, 2028, 2029]
+    assert _sync_seasons(monkeypatch, _PRE_DRAFT_2026) == [2026, 2027, 2028]
+    assert _sync_seasons(monkeypatch, _COMPLETE_2026) == [2027, 2028, 2029]
+
+
+def test_season_rollover_ends_the_sticky_exclusion(
+        _no_cached_verdict, monkeypatch):
+    """A grid that excluded 2026 carries 2027, so once Sleeper's season is
+    2027 an empty read includes the new current season."""
+    assert _sync_seasons(monkeypatch, _COMPLETE_2026) == [2027, 2028, 2029]
+    _patch_sleeper_reads_for_sync(monkeypatch, drafts=[])
+    monkeypatch.setattr(srv, "_fetch_sleeper_league_meta",
+                        lambda lid: {"season": "2027", "total_rosters": 2,
+                                     "settings": {"draft_rounds": 4}})
+    rows = srv._sync_sleeper_owned_picks(_LEAGUE, {}, "1qb_ppr")
+    assert sorted({r["season"] for r in rows}) == [2027, 2028, 2029]
+
+
+def test_cached_drafted_verdict_still_excludes_a_season_the_grid_carries(
+        _clean_league, monkeypatch):
+    """The D-189 cached-verdict path is unchanged and runs first: a positive
+    `drafted` excludes the season even when the prior grid carries it."""
+    db.upsert_league(league_id=_LEAGUE, user_id="u1", name="Sleeper Test",
+                     season="2026", user_player_ids=[], opponent_rosters=[])
+    try:
+        db.set_league_draft_status(_LEAGUE, None, None)
+        assert _sync_seasons(monkeypatch, _PRE_DRAFT_2026) == [2026, 2027, 2028]
+        db.set_league_draft_status(_LEAGUE, "drafted", "high")
+        assert _sync_seasons(monkeypatch, []) == [2027, 2028, 2029]
     finally:
         db.set_league_draft_status(_LEAGUE, None, None)
 
