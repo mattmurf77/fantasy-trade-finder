@@ -15,6 +15,9 @@
 //      cancel / failure branches all track paywall_purchase_failed.
 //   5. The copy states a tip unlocks nothing ("unlocks nothing"), so App
 //      Review and the user read the same promise the code keeps.
+//      5b-5d (marketing addendum 15): each final string verbatim, the old
+//      strings gone, and the payment-pending branch ahead of the generic
+//      failure (a pending payment is neither an error nor a thank-you).
 //   6. No FeedbackFAB in the modal (#188 exception).
 //   7. purchases.ts stays the ONLY react-native-purchases importer, and the
 //      tip helpers keep the configured-guard before any SDK call.
@@ -126,6 +129,43 @@ const beServer = read(BE_SERVER);
 {
   if (/unlocks\s*\n?\s*nothing/i.test(s)) ok('5. copy states a tip unlocks nothing');
   else bad('5. copy states a tip unlocks nothing', 'promise copy missing');
+}
+
+// 5b/5c/5d — marketing addendum 15: final strings verbatim, old strings gone,
+//     the pending branch ahead of the generic failure. Comments are stripped
+//     and whitespace collapsed (JSX text wraps), so the held "one person"
+//     lede in its comment is not copy yet.
+{
+  const flat = s.replace(/\s+/g, ' ');
+  const want = [
+    ['lede', 'If the app has earned a spot in your league routine, a tip helps keep it going. A tip unlocks nothing. It’s just a thank-you.', 1],
+    ['thank-you body', 'Your tip helps keep Fleeced going.', 1],
+    ['C2 (no product, no result)', "setError('Couldn’t load tips right now. Try again later.')", 2],
+    ['purchase failure', "setError('The App Store didn’t finish the tip. Check your connection and try again.')", 1],
+    ['payment pending', 'Waiting for approval. The tip goes through once it’s approved.', 1],
+  ];
+  const wrongCopy = want.filter(([, text, n]) => flat.split(text).length - 1 !== n)
+    .map(([name, , n]) => `${name} (want ${n})`);
+  if (wrongCopy.length === 0) ok('5b. addendum 15 strings verbatim: lede, thank-you body, C2 at both sites, failure, pending');
+  else bad('5b. addendum 15 strings verbatim: lede, thank-you body, C2 at both sites, failure, pending',
+    `missing or miscounted: ${wrongCopy.join('; ')}`);
+
+  const gone = [/on this build yet/i, /You haven[’']t been charged/i, /Tips keep Fleeced independent/i, /built by one person/i, /donat/i];
+  const left = gone.filter((re) => re.test(flat)).map(String);
+  if (left.length === 0) ok('5c. old tip-jar strings gone (on this build yet, haven’t been charged, independent, built by one person) and no "donation" (legal R28.26)');
+  else bad('5c. old tip-jar strings gone', `still present: ${left.join(', ')}`);
+
+  const catchAt = s.indexOf('} catch (err) {');
+  const pendAt = s.indexOf('if (isPaymentPending(err)) {', catchAt);
+  const elseAt = s.indexOf('} else if (!cancelled) {', pendAt);
+  const failAt = s.indexOf("setError('The App Store didn’t finish the tip.", elseAt);
+  const branch = pendAt > -1 && elseAt > pendAt ? s.slice(pendAt, elseAt) : '';
+  const ordered = catchAt > -1 && pendAt > catchAt && elseAt > pendAt && failAt > elseAt
+    && /setPending\(true\)/.test(branch) && !/setError|setThanked/.test(branch)
+    && /import \{[^}]*\bisPaymentPending\b[^}]*\} from '\.\.\/api\/purchases';/.test(s);
+  if (ordered) ok('5d. catch: isPaymentPending → pending note (no error, no thank-you) BEFORE the generic failure');
+  else bad('5d. catch: isPaymentPending → pending note (no error, no thank-you) BEFORE the generic failure',
+    `catch=${catchAt} pending=${pendAt} else=${elseAt} failure=${failAt}`);
 }
 
 // 6 — no FeedbackFAB (modal exception, #188)
