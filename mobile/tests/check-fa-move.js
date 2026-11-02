@@ -67,11 +67,14 @@
 //   X12 contract §7's claim/waiver slots by bid and drop; `surface` sent
 // Round 3 (contract 3248995b: both consent routes need a verified session):
 //   Y1  Settings: a GET 403 verification_required is valid: false (no row);
-//       a DELETE 403 keeps the row with the "Couldn't turn it off" line   [executed + AST]
+//       a DELETE 403 keeps the row with the "Couldn't turn off" line       [executed + AST]
 //   Y2  the sheet: a consent GET 403 verification_required is state 4
 //       (Verify), the move route's plan, never F4's hand-off              [executed + AST]
 //   Y3  fa_move_connect_shown records an unknown connect value as
 //       `unknown` (analytics-lead); the UI still shows the connect step    [executed + AST]
+// Round 4 (marketing-lead's final copy, addendum 17 §A):
+//   Z1  every changed fallback verbatim (A3.1–A3.9), the confirmed ones
+//       (A2, G22, G23, the bid line), and the Usage Trends footer (A1)     [executed + text]
 //
 // HONEST LABEL (G-035): the [AST] checks prove wirings are present, not
 // behavior; no React tree is rendered here. The [executed] checks run the
@@ -1069,7 +1072,7 @@ process.on('exit', () => {
       const row = declText(parse(SETTINGS_LEAGUES), 'RosterMovesRow');
       expect(/\} catch \{\s*setFailed\(true\);\s*\}/.test(row) && /\{failed \? \(\s*<Text[^>]*>\s*\{FA_MOVE_FALLBACK_COPY\.stop_failed\}/.test(row),
         'the failure line');
-      eq(read(FA_MOVE).match(/stop_failed: "([^"]+)"/)[1], "Couldn't turn it off. Try again.", 'the neutral string');
+      eq(read(FA_MOVE).match(/stop_failed: "([^"]+)"/)[1], "Couldn't turn off roster moves. Try again.", 'the neutral string (marketing A3.9)');
     });
   }
   {
@@ -1168,6 +1171,42 @@ process.on('exit', () => {
       expect(/reason: connectShownReason\(override \?\? move\?\.connect\)/.test(declText(claim, 'trackConnectShown')), 'the sheet records through it');
       const cp = h.plan.copyFns({ ...SUBMIT, connect: 'banana' }, { league: 'L', name: 'A' });
       eq(h.plan.initialView({ ...SUBMIT, connect: 'banana' }, {}, cp).step, 'connect', 'the UI is the plain connect step');
+    });
+  }
+
+  // ── Review round 4: Z1 ───────────────────────────────────────────────────
+  {
+    const h = harness();
+    // marketing-lead-copy.md addendum 17 §A, "Final text", verbatim.
+    const FINAL = {
+      finality: "Final on {platform}. Fleeced can't undo it.", // A3.1 (legal D10(b))
+      waiver_line: 'This places a waiver claim for {add} (dropping {drop} if it clears). {platform} processes it on its waiver schedule.', // A3.2 (R15.1)
+      waiver_line_no_drop: 'This places a waiver claim for {add}. {platform} processes it on its waiver schedule.', // A3.2
+      window_line: 'Roster moves: on until {date}', // A3.3
+      verify_line: 'Verify your {platform} sign-in to make moves from here.', // A3.4
+      not_sent_line: "Couldn't reach {platform} right now, so nothing was sent.", // A3.5
+      unknown_body: "Couldn't confirm whether this move reached {platform}. Check your roster and claims in {platform} before you make it again.", // A3.6
+      unavailable_line: "Moves from Fleeced aren't available right now. You can still make this move in {platform}.", // A3.7
+      result_added: 'Done', // A3.8
+      stop_failed: "Couldn't turn off roster moves. Try again.", // A3.9
+      // Confirmed as written:
+      handoff_footer: "You'll finish this move in {platform}.", // A2
+      league_line: 'In {league}', // A3.10, G22
+      not_connected: "{platform} isn't connected", // A3.10, G23
+      bid_line: 'Bid: {bid}', // legal's R15.1
+    };
+    await check('Z1 marketing\'s final fallbacks, verbatim (A2, A3.1–A3.10, the bid line)', () => {
+      for (const [key, text] of Object.entries(FINAL)) eq(h.faMove.FA_MOVE_FALLBACK_COPY[key], text, key);
+      eq(h.faMove.fallbackCopy('finality', {}, 'sleeper'), "Final on Sleeper. Fleeced can't undo it.", 'finality, filled');
+      eq(h.faMove.waiverLines(undefined, { add: 'A', drop: 'B', bid: '$7' }, 'sleeper'),
+        ['This places a waiver claim for A (dropping B if it clears). Sleeper processes it on its waiver schedule.', 'Bid: $7'], 'the claim lines, filled');
+      eq(h.faMove.moveCopy(undefined, 'window_line', { date: 'Nov 8' }, 'sleeper'), 'Roster moves: on until Nov 8', 'window, filled');
+      const banned = Object.values(h.faMove.FA_MOVE_FALLBACK_COPY).filter((v) => /\bwe\b|\bour\b|failed|error|try again/i.test(v) && v !== FINAL.stop_failed);
+      eq(banned, [], 'marketing\'s rules (no "we", "failed", "error", or "try again" where the outcome is unknown)');
+    });
+    await check('Z1 the Usage Trends availability footer is A1\'s line', () => {
+      expect(/Add opens a quick check before the move\. Trade opens the trade finder in that league\./.test(read('src/components/UsageLeagueList.tsx')),
+        'UsageLeagueList footer');
     });
   }
 

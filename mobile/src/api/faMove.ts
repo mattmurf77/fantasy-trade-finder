@@ -766,7 +766,9 @@ const PLATFORM_NAME: Record<LeaguePlatform, string> = { sleeper: 'Sleeper', mfl:
 // The neutral fallbacks (G21), ONE constant (F4). Platform-free: `{platform}`
 // is filled with the league platform's name, here only, never in a server
 // template. Never consent text, never "Sleeper doesn't allow apps to submit
-// claims". PENDING MARKETING (§G G21–G24).
+// claims". Final copy: marketing-lead addendum 17 §A (A2, A3.1–A3.10); the
+// finality, waiver and bid lines are legal's (D10(b), R15.1) with the
+// platform filled in. Pinned verbatim by tests/check-fa-move.js (Z1).
 export const FA_MOVE_FALLBACK_COPY = {
   header_add: 'Add {name}',
   header_claim: 'Claim {name}',
@@ -777,27 +779,27 @@ export const FA_MOVE_FALLBACK_COPY = {
   cta_claim_no_bid: 'Claim {add}',
   cta_claim_drop_no_bid: 'Claim {add}, drop {drop}',
   league_line: 'In {league}',
-  finality: "Final once it's made. Fleeced can't undo it.",
-  waiver_line: "This is a waiver claim for {add}, dropping {drop} if it clears. It runs on your league's waiver schedule.",
-  waiver_line_no_drop: "This is a waiver claim for {add}. It runs on your league's waiver schedule.",
+  finality: "Final on {platform}. Fleeced can't undo it.",
+  waiver_line: 'This places a waiver claim for {add} (dropping {drop} if it clears). {platform} processes it on its waiver schedule.',
+  waiver_line_no_drop: 'This places a waiver claim for {add}. {platform} processes it on its waiver schedule.',
   bid_line: 'Bid: {bid}',
-  window_line: 'Moves authorized until {date}',
+  window_line: 'Roster moves: on until {date}',
   turn_off: 'Turn off',
   do_in_platform: 'Do it in {platform} instead',
   open_platform: 'Open in {platform} to claim',
   open_in_platform: 'Open in {platform}',
   handoff_footer: "You'll finish this move in {platform}.",
   connect_line: 'Connect your {platform} sign-in to make moves from here.',
-  verify_line: 'Your {platform} connection needs a quick check before you make moves.',
+  verify_line: 'Verify your {platform} sign-in to make moves from here.',
   other_account_line: "That {platform} account isn't in {league}. Connect the one that owns your team.",
-  not_sent_line: "Couldn't reach {platform}, so nothing was sent.",
+  not_sent_line: "Couldn't reach {platform} right now, so nothing was sent.",
   unknown_title: 'Check before resending',
-  unknown_body: "We couldn't confirm whether this move reached {platform}. Check your roster and claims in {platform} before you try again.",
-  unavailable_line: "Moves from Fleeced aren't available right now.",
+  unknown_body: "Couldn't confirm whether this move reached {platform}. Check your roster and claims in {platform} before you make it again.",
+  unavailable_line: "Moves from Fleeced aren't available right now. You can still make this move in {platform}.",
   still_sending: 'Still sending…',
-  not_connected: "{platform} isn't connected.",
+  not_connected: "{platform} isn't connected",
   terms_changed: 'The terms changed. Read them again before you tick the box.',
-  result_added: 'Move made',
+  result_added: 'Done',
   result_pending: 'Claim submitted',
   refusal_title: "This move wasn't made",
   drop_to_make_room: 'Drop a player to make room',
@@ -813,7 +815,7 @@ export const FA_MOVE_FALLBACK_COPY = {
   // no other platform's opener).
   held_line: "This move can't be made from Fleeced right now. Check {platform}.",
   // Settings, when DELETE fails (contract §2): the grant stays in force.
-  stop_failed: "Couldn't turn it off. Try again.",
+  stop_failed: "Couldn't turn off roster moves. Try again.",
 } satisfies Record<MoveCopyKey, string> & Record<string, string>;
 export type FallbackKey = keyof typeof FA_MOVE_FALLBACK_COPY;
 

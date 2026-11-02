@@ -41,6 +41,10 @@ Gates: full (schema/API/flag/analytics surfaces; no express). Mobile client only
   - **`check-fa-move`:** 78 passed, 0 failed (Y1, Y2, Y3 new). `test_analytics_taxonomy_fa_move.py`: 9 passed (the connect-reason set pinned against the client's `CONNECT_SHOWN_REASONS`).
   - **Sabotage, each red then restored (5; the unsabotaged copy green):** Y1a the GET 403 not read as `valid: false`; Y1b a failed DELETE hiding the row (X8 red too); Y2 the consent GET 403 sent to F4; Y3 an unknown connect recorded as `not_linked`; and `FA_MOVE_PATH` renamed in `api/faMove.ts` only → `check-device-first-page` 1k red.
   - **Gate re-run:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 122 of 122 exit 0 (`check-device-first-page` 37 ✓); the taxonomy pytest selection 178 passed.
+- **platforms-eng round 4 (same day): marketing-lead's final copy, addendum 17 §A.** `FA_MOVE_FALLBACK_COPY` takes A3.1–A3.9 verbatim (`finality`, `waiver_line`, `waiver_line_no_drop`, `window_line`, `verify_line`, `not_sent_line`, `unknown_body`, `unavailable_line`, `result_added` "Done", `stop_failed` "Couldn't turn off roster moves. Try again."), G23 reads `{platform} isn't connected` (A3.10); `handoff_footer` (A2), `league_line` (G22) and legal's `bid_line` "Bid: {bid}" stay as written. The Usage Trends availability footer is A1's preferred line.
+  - **`check-fa-move`:** 80 passed, 0 failed (Z1 ×2 new: every changed string and the confirmed ones verbatim, filled forms, marketing's no-"we"/"failed"/"error"/"try again" rules; the A1 footer). X8's expected string updated.
+  - **Sabotage, each red then restored (2; the unsabotaged copy green):** `window_line` reverted to "Moves authorized until {date}"; the footer reverted to "quick claim check".
+  - **Gate re-run:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 122 of 122 exit 0.
 
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 
