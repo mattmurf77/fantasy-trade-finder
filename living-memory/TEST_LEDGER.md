@@ -1519,6 +1519,13 @@ Gates: full (schema/API/flag/analytics surfaces; no express). Mobile client only
     - Rule 5: the 400 shown as the neutral panel; the sheet never flagging a no-bid claim.
   - **Docs:** the code-walk has a new §B11 section, with citations remapped from `a7a2a8f4`. `testflight-additions.md` has a B11 row: an add flipped to a claim on a FAAB league, an empty field, a disabled no-amount CTA, and a typed 0 enabling "for $0". The `utils/`, `components/` and `api/` CLAUDE.md rows and `tests/README` are updated.
   - **Gate:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 139 of 139 exit 0 (`check-paywall-gate` 109 of 109, `check-update-gate` 44 of 44); `check-fa-move` 110 of 110. The backend is untouched (the server's 400 is the server PR's).
+- **Round 9 (same day; release-lead's delta QA of `53f94665`, GO-with-notes; P2-A and P3-1 verified fixed):**
+  - **QA P3-3, fixed.** A plan's new `staleCapability` invalidates `['fa-move-capability']`, the same invalidation `refreshList` does, without refreshing the list. It is set on three outcomes: a 404 `feature_disabled`, state 14's 422 `waiver_claim_unsupported`, and a 10e whose re-read lands on the hand-off (a claim while claims are off, or a held row). Before, a stale `submit` capability lasted up to 5 minutes.
+  - **QA P3-1, documented; behaviour unchanged.** A session focused on an ESPN or MFL league never gets Usage Trends' in-app route, even for its Sleeper leagues. That is deliberate: it keeps the dark fan-out at one read. It is now stated in a comment at the list gate and in the code-walk.
+  - **QA P3-2, documented.** Failed capability reads aren't cached, so a list open re-reads up to the cap of 6. Noted in the code-walk.
+  - **`testflight-additions.md`:** UT1's wait is now about 10 seconds. New rows: UT2, an in-app Add on another Sleeper league from the availability list; UT3, Turn off → Stop roster moves → back → Add opens the hand-off, with no "on until".
+  - **`check-fa-move`:** 112 passed, 0 failed. P3-3 is executed through `planFailure` / `planKindChanged`, with an AST check on both call sites; P3-1's comment is pinned.
+  - **Sabotage, each red then restored (the unsabotaged copy green):** `apply()` ignoring `staleCapability`; the 10e path ignoring it; claims-off not flagged.
 
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 
