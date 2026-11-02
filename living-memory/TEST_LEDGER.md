@@ -121,6 +121,22 @@ Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook
   - the kill without the limit.
 - **Suites:** all `test_eval_*` plus `test_evidence_pack.py` and `test_deck_value_model.py`, on main @ `9370670e`: 481 passed.
 
+## 2026-10-27 — Session-init test isolation (no real Sleeper requests) + the daemon trusts the resolved platform (stacked on #460)
+
+Full gates, platforms-eng lead (follow-up to #460 QA). Server change is hardening only, no API or schema change; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/session-init-test-isolation`, stacked on `fix/trade-capture-platform-guard` (#460), because the six `_platform_linked` blocks and the harness it tests live there.
+
+- **(a) The gap:** `test_co_owner_rosters.py`'s five session-init tests run the daemon inline and mocked only `_sleeper_get`. The trade sweep (`fetch_week_transactions`, 18 legs on a first backfill) and the trade-block GraphQL read (`fetch_league_players`) bypass it, so each test made 19 real requests to `api.sleeper.app` and `sleeper.com` (95 in all; live wherever CI has network). Both are mocked in that fixture now.
+- **Survey:** the 33 test files that mention session init (875 tests), run under a socket-blocking plugin that logs every non-loopback attempt per test: 95 attempts, all in `test_co_owner_rosters.py`, none elsewhere. No other session-init file has the gap.
+- **The guard:** `no_real_network` in `backend/tests/conftest.py` (opt-in). It records any non-loopback lookup or connect and fails the test at teardown, because the daemon and fetchers swallow the raise. The four files that run the daemon inline opt in with `pytestmark`: `test_co_owner_rosters`, `test_session_init_sleeper_calls`, `test_players_refresh`, `test_account_only_harness`. Not made suite-wide: the other ~360 of the 403 test files were not surveyed.
+- **Harness fix:** `test_session_init_sleeper_calls.py`'s fake `_sleeper_get` raised `AssertionError` for any URL it did not know, and production code catches that, so a Sleeper read for another league id was invisible to `calls == {}`. It is now tallied as `unexpected GET <path>` before it raises.
+- **(b) Hardening (`backend/server.py`, session-init daemon):** `_platform_linked` is now `authoritative["platform"] != "sleeper" or is_linked_platform_league(league_id)`, so a `leagues` row that vanishes between the request and the daemon no longer flips the six `_platform_linked` blocks to Sleeper. Three Sleeper-bound steps did not use `_platform_linked` and relied on a second row read, so they got guards: the `_league_meta()` fetch, the trade-block sync, and `_refresh_league_draft_status` (still runs for a linked league whose row agrees). Behaviour for intact Sleeper and linked leagues is unchanged.
+- **Tests (`test_session_init_sleeper_calls.py`, 10):** new `test_vanished_leagues_row_still_makes_no_sleeper_calls` for MFL and ESPN (the row is deleted just before the daemon starts; asserts `calls == {}`, with the premise asserted inside the hook) and `test_linked_league_still_refreshes_draft_status` (the control).
+- **Sabotage, red then restored:**
+  - guard fixture: the two mocks removed from the `test_co_owner_rosters` fixture → 5 errors at teardown, `attempted real outbound network (19 attempts): {'lookup sleeper.com': 1, 'lookup api.sleeper.app': 18}`;
+  - each of the four hardening hunks reverted alone → both vanished-row tests red every time: the `_platform_linked` line (`rosters`, `graphql`, `transactions: 18`, unexpected `meta` and `traded_picks` GETs), the `_league_meta` short-circuit (`unexpected GET <id>`), the trade-block guard (`graphql`, `rosters`), the draft-status guard (`draft_status: 1`).
+- **Targeted:** the 33 session-init files plus `test_market_data_readiness`, `test_owned_picks`, `test_trade_block`, `test_block_boost`, `test_sleeper_backoff` → 978 passed, and zero non-loopback attempts logged by the blocking plugin.
+- **Not run:** the full suite (CI runs it).
+
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
 Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
