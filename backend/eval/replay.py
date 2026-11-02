@@ -298,8 +298,14 @@ def code_sha() -> str:
 def scorer_config(scorer) -> dict:
     """What an EvalRun records as the scorer's config (R6.3): the pinned
     record a configured scorer (`takes_config`) read, or {} for one that reads
-    none. A configured scorer always holds its pin (get_scorer)."""
-    return scorer.config if getattr(scorer, "takes_config", False) else {}
+    none. A configured scorer always holds its pin (get_scorer); one without
+    it raises rather than record {} as if it read nothing."""
+    if not getattr(scorer, "takes_config", False):
+        return {}
+    if not getattr(scorer, "config", None):
+        raise ValueError(f"scorer {getattr(scorer, 'name', scorer)!r} takes a config "
+                         "but holds no pin (build it with get_scorer(name, config=...))")
+    return scorer.config
 
 
 # ---------------------------------------------------------------------------
@@ -765,7 +771,9 @@ def main(argv=None) -> int:
                     help="without --as-of: read decks served before now minus this lag "
                          "(or --until), with as_of = the window's last served_at plus "
                          f"the lag, so late outcomes are in (default {DEFAULT_SETTLE_LAG_DAYS:g})")
-    ap.add_argument("--config", help="a recorded run's `config` (JSON) to replay it under; "
+    ap.add_argument("--config", help="a recorded run's `config` (JSON) to replay it under, "
+                                     "from a configured scorer's record (a record whose "
+                                     "config is {} read none: there is nothing to replay); "
                                      "default: pin the live model_config once for this run")
     ap.add_argument("--user", help="restrict to one user_id")
     ap.add_argument("--league", help="restrict to one league_id")

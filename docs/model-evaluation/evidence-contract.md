@@ -222,7 +222,10 @@ How the code meets it today:
     read's `as_of` and `settle_lag_days`, beside `exclusion_rule_version`.
     `get_scorer("value_model", config=run.config)` builds the scorer with it
     as a constructor argument, and `replay.evaluate` with that scorer replays
-    the run with no live read. The pin is never held in thread or global state.
+    the run with no live read. Only a configured scorer's record has a config
+    to replay: passing a `{}` config (`--config '{}'`) makes `value_model`
+    fail on every deck, and a configured scorer built without its pin raises
+    rather than record `{}`. The pin is never held in thread or global state.
     The replay CLI and the nightly pin once and share that one pin across every
     scorer in the run.
   - Live serving still reads the V-vector live, by design (F6 PRD §2: strategy
