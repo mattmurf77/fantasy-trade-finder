@@ -30,8 +30,8 @@ from backend.eval.data import (
     CALIBRATION_REFRESH, IN_FLIGHT, INCOMPLETE_DECK, NO_DELIVERY_EVIDENCE, WITHDRAWAL_CONFLICT,
 )
 from backend.eval.flip_read import (
-    FAIL, INSUFFICIENT, PASS, REPORT, ReadOnlyViolation, flip_read, main, read_only_engine,
-    render, weekly_read,
+    FAIL, INSUFFICIENT, LIST_CAP, PASS, REPORT, ReadOnlyViolation, flip_read, main,
+    read_only_engine, render, weekly_read,
 )
 from backend.tests.test_eval_pack_reader import SERVED, _deck_cards, _row, pack_table, write_deck
 from backend.tests.test_eval_refresh_and_live_columns import _bare_impressions
@@ -400,9 +400,43 @@ def test_g7_reports_packs_whose_miss_map_does_not_tally_without_barring_them():
     assert r.g7["status"] == FAIL                     # only "legacy"'s other=1 bars it
     assert ("G7 (not barred) packs whose per-card miss map doesn't tally to their "
             "upgrade_misses (a writer defect, #439's invariant): 1 (off).") in render(r)
+    # A direct call only: end to end the loader raises on unreadable counts first.
     assert fr._miss_map_mismatches(
         {"x": (SERVED, json.dumps({"run": {"upgrade_misses": "garbage",
                                            "upgrade_miss_cards": {}}}))}) == ["x"]
+
+
+def _miss_map_pack(off: bool, **cards):
+    """A pack header whose map tallies to its counts, or (off) doesn't."""
+    run = {"upgrade_misses": {"restart_split": 1},
+           "upgrade_miss_cards": cards or {"7": "evicted_split" if off else "restart_split"}}
+    return SERVED, json.dumps({"run": run})
+
+
+def test_g7_miss_map_ids_are_sorted_and_a_cause_that_cant_be_tallied_is_listed():
+    """#466 QA P3s: the ids come out sorted whatever the pack order, and a map
+    cause that isn't hashable is listed, never an exit 4."""
+    packs = {job: _miss_map_pack(True) for job in ("m3", "m1", "m2")}
+    packs["ok"] = _miss_map_pack(False)
+    packs["unhashable"] = _miss_map_pack(True, **{"7": ["restart_split"]})
+    assert fr._miss_map_mismatches(packs) == ["m1", "m2", "m3", "unhashable"]
+
+
+def test_g7_miss_map_mismatches_are_capped_in_the_list_and_never_bar_g7():
+    """#466 QA P3s: LIST_CAP + 1 off packs are all counted, LIST_CAP listed;
+    G7 and the overall status are the same as with every map tallying."""
+    runs = {}
+    for off in (False, True):
+        db = make_db()
+        for i in range(LIST_CAP + 1):
+            _packed(db, f"p{i:02d}", upgrade_misses={"restart_split": 1},
+                    upgrade_miss_cards={"7": "evicted_split" if off else "restart_split"})
+        runs[off] = flip_read(db.eng, since=SINCE, as_of=EARLY)
+    r = runs[True]
+    assert r.g7["miss_map_mismatch"] == LIST_CAP + 1
+    assert r.g7["miss_map_mismatch_ids"] == [f"p{i:02d}" for i in range(LIST_CAP)]
+    assert (r.g7["status"], r.overall) == (runs[False].g7["status"], runs[False].overall)
+    assert r.g7["status"] == PASS and runs[False].g7["miss_map_mismatch"] == 0
 
 
 def test_g7_reports_the_u4_r4_sum_over_the_window_as_indicative_only():

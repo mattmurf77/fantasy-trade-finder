@@ -357,7 +357,10 @@ def _miss_map_mismatches(packs, skip=()) -> list[str]:
     The writer keeps the counts as the map's tally (#439), so any entry here
     is a writer defect. Reported under G7, never barred. A pack without the
     map (written before #439) isn't checked; one in `skip` (failing
-    integrity) or unreadable is G1's."""
+    integrity) or with an unreadable header is G1's. Counts this can't read,
+    or a map cause that can't be tallied (not hashable), are listed here;
+    end to end the loader raises on unreadable counts first
+    (data._upgrade_misses), so only a direct call sees that case."""
     off = []
     for job, (_served_at, header_json) in sorted(packs.items()):
         if job in skip:
@@ -370,10 +373,10 @@ def _miss_map_mismatches(packs, skip=()) -> list[str]:
             continue
         try:
             counts = data._upgrade_misses(run)
+            tally = Counter(run["upgrade_miss_cards"].values())
         except (TypeError, ValueError):
             off.append(job)
             continue
-        tally = Counter(run["upgrade_miss_cards"].values())
         if {c: n for c, n in counts.items() if n} != dict(tally):
             off.append(job)
     return off
