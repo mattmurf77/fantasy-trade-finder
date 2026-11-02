@@ -299,34 +299,77 @@ def run() -> int:
 
     # ── GATE: the web's ESPN/MFL chips stay off (head-eng 2026-10-27) ────
     # landing.platform_options now means the APP's proof-based ESPN/MFL
-    # sign-in, and the web has none until after launch. So no web script reads
-    # that flag, app.js's gate constant is false, both the chip reveal and the
-    # chip handler go through it, and the markup ships the chips hidden.
-    flag_read = r"FTF_FLAG\(\s*['\"`]landing\.platform_options"
-    reads = [f"js/{p.name}" for p in sorted((WEB / "js").glob("*.js"))
-             if re.search(flag_read, p.read_text(encoding="utf-8"))]
-    reads += [p for p in PAGES if re.search(flag_read, all_sources[p])]
-    consts = re.findall(r"\bconst WEB_PLATFORM_ENTRY\s*=\s*(\w+)\s*;", app_js)
+    # sign-in, and the web has none until after launch. Hardened per
+    # release-lead's #491 QA (P3-1):
+    #   - no web script names that flag at all (comments stripped): no
+    #     FTF_FLAG('…'), FTF_FLAGS['…'], destructuring or key in a variable;
+    #   - exactly one WEB_PLATFORM_ENTRY declaration anywhere, `const … = false`;
+    #   - the reveal derives espnOn / mflOn from optionsOn, assigned once each,
+    #     and selectEntryPlatform refuses through the constant;
+    #   - the ESPN/MFL chips exist once, on index.html only, hidden (the class
+    #     TOKEN), as does their row; no other platform chip ships visible, and
+    #     no other page carries one.
+    def strip_js_comments(src: str) -> str:
+        # Strings stay (a URL's // isn't a comment); // and /* */ comments go.
+        return re.sub(r"""("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)"""
+                      r"|//[^\n]*|/\*.*?\*/", lambda m: m.group(1) or "", src, flags=re.S)
+
+    web_pages = {str(p.relative_to(WEB)): p.read_text(encoding="utf-8")
+                 for p in sorted(WEB.rglob("*.html"))
+                 if str(p.relative_to(WEB)) not in EXCLUDED}
+    scripts = {f"js/{p.relative_to(WEB / 'js')}": strip_js_comments(p.read_text(encoding="utf-8"))
+               for p in sorted((WEB / "js").rglob("*.js"))}
+    for page, html in web_pages.items():
+        inline = re.findall(r"<script\b[^>]*>(.*?)</script>", strip_comments(html), flags=re.S | re.I)
+        scripts[page] = strip_js_comments("\n".join(inline))
+    names_flag = [n for n, src in scripts.items() if "landing.platform_options" in src]
+    decls = [(n, kind, val.strip()) for n, src in scripts.items()
+             for kind, val in re.findall(r"\b(const|let|var)\s+WEB_PLATFORM_ENTRY\b\s*=?\s*([^;\n]*)", src)]
+    app_code = scripts["js/app.js"]
 
     def fn_body(name: str) -> str:
-        m = re.search(r"\n([ \t]*)function " + name + r"\([^)]*\)\s*\{(.*?)\n\1\}", app_js, flags=re.S)
+        m = re.search(r"\n([ \t]*)function " + name + r"\([^)]*\)\s*\{(.*?)\n\1\}", app_code, flags=re.S)
         return m.group(2) if m else ""
 
-    via_gate = (re.search(r"\bconst optionsOn\s*=\s*WEB_PLATFORM_ENTRY\s*;",
-                          fn_body("_applyPlatformOptionsFlag")) is not None
-                and re.search(r"!WEB_PLATFORM_ENTRY\b", fn_body("selectEntryPlatform")) is not None)
-    tags = {i: re.search(r'<[a-z]+\b[^>]*\bid="' + i + r'"[^>]*>', idx)
-            for i in ("platform-row", "platform-chip-espn", "platform-chip-mfl")}
-    shown = [i for i, m in tags.items()
-             if not (m and re.search(r'\bclass="[^"]*\bhidden\b', m.group(0)))]
-    ok = not reads and consts == ["false"] and via_gate and not shown
+    reveal, handler = fn_body("_applyPlatformOptionsFlag"), fn_body("selectEntryPlatform")
+    via_gate = (re.search(r"\bconst optionsOn\s*=\s*WEB_PLATFORM_ENTRY\s*;", reveal) is not None
+                and all(len(re.findall(r"\b" + v + r"\s*=(?!=)", reveal)) == 1
+                        and re.search(r"\bconst " + v + r"\s*=\s*optionsOn\s*&&", reveal)
+                        for v in ("espnOn", "mflOn"))
+                and re.search(r"!WEB_PLATFORM_ENTRY\b", handler) is not None)
+
+    def tags_of(html: str) -> list[tuple[str, list[str]]]:
+        out = []
+        for tag in re.findall(r"<[a-zA-Z][^>]*>", strip_comments(html)):
+            tid = re.search(r'\bid="([^"]*)"', tag)
+            cls = re.search(r'\bclass="([^"]*)"', tag)
+            out.append((tid.group(1) if tid else "", cls.group(1).split() if cls else []))
+        return out
+
+    chip_problems = []
+    for page, html in web_pages.items():
+        tags = tags_of(html)
+        chips = [(i, c) for i, c in tags
+                 if i.startswith("platform-chip-") or i == "platform-row" or "cb-platform-chip" in c]
+        if page != "index.html":
+            if chips:
+                chip_problems.append(f"{page} carries a platform chip")
+            continue
+        for want in ("platform-row", "platform-chip-espn", "platform-chip-mfl"):
+            n = sum(1 for i, _ in chips if i == want)
+            if n != 1:
+                chip_problems.append(f"{n}× #{want}")
+        chip_problems += [f"#{i or '(no id)'} isn't hidden" for i, c in chips
+                          if i != "platform-chip-sleeper" and "hidden" not in c]
+    ok = (not names_flag and [(k, v) for _, k, v in decls] == [("const", "false")]
+          and via_gate and not chip_problems)
     r.check("GATE-web-espn-mfl-off[index.html]", ok,
-            (f"reads landing.platform_options: {', '.join(reads)}" if reads else
-             f"app.js WEB_PLATFORM_ENTRY is {consts or 'missing'}; want one const, false"
-             if consts != ["false"] else
-             "the chip reveal or selectEntryPlatform doesn't go through WEB_PLATFORM_ENTRY"
-             if not via_gate else
-             f"not hidden in the markup: {', '.join(shown)}")
+            (f"names landing.platform_options: {', '.join(names_flag)}" if names_flag else
+             f"WEB_PLATFORM_ENTRY declarations: {decls or 'none'}; want one const, false"
+             if [(k, v) for _, k, v in decls] != [("const", "false")] else
+             "the chip reveal (espnOn / mflOn from optionsOn) or selectEntryPlatform doesn't go "
+             "through WEB_PLATFORM_ENTRY" if not via_gate else
+             "; ".join(chip_problems))
             if not ok else "web ESPN/MFL chips hard-off; landing.platform_options is the app's flag")
 
     tiers = read("positional-tiers.html")
