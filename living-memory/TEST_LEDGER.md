@@ -1,3 +1,28 @@
+## 2026-11-01 — The deletion scrub, legal R28.26 (#7, #8, #9, #10) and models-lead addendum Q on #562; §0.4 docs on #557 / #559
+
+Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md`, whose rows this entry adds to. Schema: one column, `deletion_scrub_jobs.escalated_at` (boot migration listed; data-dictionary). No flags. D-056: `FTF_SKIP_SIM_GATE=1` posture; backend only.
+
+- **#8, the poison job is kept** (`_escalate` replaces `_abandon`): kept, stamped `escalated_at` once, retried, and logged daily by its own job id, age, `stuck_at` and error class, never the person's ids. `_finish` still deletes it after a hand fix. The runbook gains "tell head-bizops the same day" and "pause by holding the lease", replacing "delete its row".
+- **#9 (MUST), the grader export:** `accounts._export_grading_arms` strips every arm's `gain_partner` and `reasons`, for every partner, and withholds an arms blob that doesn't parse. The keys are pinned equal to the scrub's.
+- **#7, pick labels:** `_relabel_card` relabels "(from <name>)" on every page-store card (give/receive names, plus `narrative`, `reasons`, `standing_offer_reason`, `rationale`). The new `_scan_overhaul_offers`, appended to `_SCANS`, does the same for other users' `overhaul_offers.card_json`.
+- **#10 (MUST), held-card writes:** `database.live_deletion_token`, cached 5 s and cleared by the delete route, maps a live job's ids to its token. It's applied to:
+  - the swipe and pass-reason cards;
+  - the queue and dismiss events;
+  - flags, proposals and `trade_impressions` (NULL);
+  - the taste update;
+  - `_redacted_held_row`.
+  
+  Every pass re-runs the side-table scrub (`_repair_side_tables`, with an idempotent taste merge). `_deleted_partner_ids` is pruned after its window, with a last purge.
+- **Tests:**
+  - `test_deletion_scrub_held_writes.py`, 13 tests (new): the lookup and cache; held swipe, queue and flag routes; proposals; the taste helper and the live outcome path; `trade_impressions`; the raced-write repair; the prune; held upgrade rows.
+  - stage 3: escalation ×2, relabelling ×3.
+  - account coverage: the export strip and the key pin.
+- **Runs:**
+  - SQLite: 160 passed, 19 PG-only skipped.
+  - **Postgres 18** (`FTF_TEST_PG_URL`): 190 passed, 1 skipped, across every scrub file plus account coverage.
+- **Sabotage:** 22 single-rule breaks, all RED: #8 ×3, #9 ×3, #7 ×4, #10 ×12. Two were fixed along the way: the swipe pattern matched pass-reason too, and the taste mapping needed the live-path test.
+- **Docs:** §0.4's wording by mode, and addendum Q's eval sentence (#557 `485cef6e`, #559 `bf0df9d0`).
+
 ## 2026-11-01 — Deletion scrub stage 3: release-lead's final #562 QA (GO-with-notes, stack cleared), test gaps closed
 
 - **P3-1:** the timeout spy also counts `connect()`. `begin()` opens one connection of its own, so a bare-connection first read shows up as an extra one, and the begins must equal the chunks plus one.
