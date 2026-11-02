@@ -31,10 +31,16 @@ export interface WhatsNewEntry {
 
 // version → entry. ONE entry per release, matching app.json's `version`.
 const WHATS_NEW: Record<string, WhatsNewEntry> = {
-  // Placeholder for the teardown-remediation branch — replace the copy
-  // when the branch's release notes are settled.
-  '1.9.1': {
-    headline: 'New: search your boards — find any player on Tiers and Overall Ranks.',
+  // D-13 (#354): the launch release's slot carries the policy-change notice,
+  // not a feature note. legal-lead's text, verbatim (drafts Part 5.2, which
+  // supersedes R26.1 now the policies carry subscription terms): no trailing
+  // period (contract above); the inner ". " is legal's. Tap opens Settings ›
+  // Help & about, where the Privacy Policy and Terms rows live. ux.whats_new
+  // holds it back until the new policy pages are live (scope-d13-policy-notice
+  // §5). A version bump moves this key with it: tests/check-whats-new.js.
+  '1.22.0': {
+    headline: "We've updated our Privacy Policy and Terms of Use, including subscription terms. Tap to read them",
+    route: 'SettingsAbout',
   },
 };
 
@@ -48,6 +54,12 @@ const APP_VERSION: string | null = Constants.expoConfig?.version ?? null;
  */
 export function useWhatsNew(): { entry: WhatsNewEntry | null; dismiss: () => void } {
   const enabled = useFlag('ux.whats_new');
+  // Legal R28.22 P2-2 (MUST, 11-06; replaces B7): both policy pages promise
+  // to announce material changes in the app, so nothing marks the notice
+  // seen at sign-in or boot. Every signed-in user, a fresh sign-in included
+  // (any session start, the username Continue too), gets the tip, and only
+  // the tip's own tap (`dismiss`, after it has shown) stores it as seen.
+  // tests/check-whats-new.js 8.
   // undefined = AsyncStorage not hydrated yet — render nothing until the
   // read lands so an already-seen tip never flashes on mount.
   const [seenVersion, setSeenVersion] = useState<string | null | undefined>(undefined);

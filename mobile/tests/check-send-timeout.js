@@ -210,6 +210,17 @@ function firstCatchIf(sf, tryStmt) {
   return first;
 }
 
+// An await that never settles, or an early return, would let the event loop
+// drain and node exit 0 mid-run: an unfinished run fails instead
+// (the check-device-first-page pattern; mobile/tests/README.md § Writing one).
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-send-timeout did not finish (a check hung or returned early): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 (async () => {
   // ════ A. The constant is the server worst case ═══════════════════════════
   const espnWrite = readBackend('espn_write.py');
@@ -631,6 +642,7 @@ function firstCatchIf(sf, tryStmt) {
     expect(/^method === 'GET' && /.test(init), `canRetry = ${init}`);
   });
 
+  finished = true;
   console.log(failures === 0
     ? `\nAll send-timeout checks passed (${passed}).`
     : `\n${failures} check(s) failed, ${passed} passed.`);

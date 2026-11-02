@@ -522,6 +522,7 @@ export default function LeagueScreen() {
           <CoachMark
             testID="league.whats-new"
             text={whatsNew.headline}
+            accessibilityHint="Opens Help & about."
             onDismiss={() => {
               tapAction('whats_new');
               dismissWhatsNew();

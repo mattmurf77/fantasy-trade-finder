@@ -70,6 +70,16 @@ const ids = (cs) => cs.map((c) => c.trade_id);
 const trades = read('screens/TradesScreen.tsx');
 const code = stripComments(trades);
 
+// A check that awaits something that never settles would let the event loop
+// drain and node exit 0 mid-run: an unfinished run fails instead.
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-trade-pages did not finish (a check hung): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 (async () => {
   console.log('check-trade-pages:');
 
@@ -339,6 +349,7 @@ const code = stripComments(trades);
       'applyPage builds the job through nextDeckJob');
   });
 
+  finished = true;
   console.log(failures ? `check-trade-pages: ${failures} FAILED` : 'check-trade-pages: all passed');
   process.exit(failures ? 1 : 0);
 })();
