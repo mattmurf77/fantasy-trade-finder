@@ -160,22 +160,36 @@ export function dropPendingSearch(searchId: string): void {
   failFirstCard(searchId, 'abandoned');
 }
 
+/** The search still waiting for its first card, if any (a newer tap
+ *  abandons every older one, so there is at most one). The paywall router's
+ *  gate listener settles it with R2b `paywall` / `verify` (#393 M2). */
+export function openSearchId(): string | null {
+  let open: string | null = null;
+  for (const t of traces.values()) if (!t.settled) open = t.searchId;
+  return open;
+}
+
 export function isSearchOpen(searchId: string | null | undefined): boolean {
   const t = searchId ? traces.get(searchId) : undefined;
   return !!t && !t.settled;
 }
 
 /** The search's FIRST response (generate, an adopted page, a fair sweep):
- *  what R2/R2b report as serve_source, freshness_state and job_id. */
+ *  what R2/R2b report as serve_source, freshness_state and job_id. First
+ *  wins, except `replace`: the automatic re-search's answer (#525) replaces
+ *  it while the trace is still open, so R2 names the job and source that
+ *  produced the first card, not the revoked one (analytics-lead). A settled
+ *  trace never changes. */
 export function noteFirstResponse(searchId: string | null | undefined, first: {
   serve_source?: string;
   freshness_state?: string;
   status: 'running' | 'complete' | 'error';
   cardCount: number;
   job_id?: string;
-}): void {
+}, opts?: { replace?: boolean }): void {
   const t = searchId ? traces.get(searchId) : undefined;
-  if (!t || t.serveSource !== undefined) return;
+  if (!t) return;
+  if (t.serveSource !== undefined && !(opts?.replace && !t.settled)) return;
   t.serveSource = inferServeSource(first);
   t.freshnessState = first.freshness_state;
   t.jobId = first.job_id || undefined;
@@ -214,8 +228,8 @@ export function reportFirstCardShown(searchId: string, o: { cardIndex: number })
   }, 'Trades');
 }
 
-/** R2b — instead of R2: empty | error | abandoned | timeout. Once per
- *  search_id, and never after an R2. */
+/** R2b — instead of R2: empty | error | abandoned | timeout | paywall |
+ *  verify. Once per search_id, and never after an R2. */
 export function failFirstCard(searchId: string, reason: FirstCardFailure): void {
   const t = traces.get(searchId);
   if (!t || t.settled) return;
