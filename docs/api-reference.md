@@ -1398,6 +1398,8 @@ First-party client-event ingestion — [tracking plan v2 §S2](business/analytic
 
 **Identity:** `X-Device-Id` header preferred (body `device_id` accepted for v0 binaries). A recognized `X-Session-Token` attributes rows to that `user_id`; a dead/absent token falls back silently to `user_id = 'device:<device_id>'` (never 4xx — server sessions are wiped on deploy, so this is routine). Server stamps `occurred_at` (server time), device headers, and `source`.
 
+**Source:** the body may also carry top-level `source` (closed set `mobile` | `web` | `extension`) for transports that can't set headers (`navigator.sendBeacon`). An `X-Source` header in the same set wins over it. Values outside the set are ignored on both channels, so no client can claim a server source. With neither, a body `platform` of `web`/`extension` names the client, then an `X-Device` header means `mobile`; otherwise `source` is stored NULL (G-068, 2026-10-31). Column semantics: [data-dictionary `user_events.source`](data-dictionary.md#user_events).
+
 **Response — always `200` for content** `{ accepted, deduped, rejected: [{index, reason}], dropped, disposition }`:
 - **Accounting invariant:** `accepted + deduped + len(rejected) == N` on any committed transaction. Server-side drops (rate-limit, unknown-type, PII, oversize) count as `accepted` ("accepted-and-dropped"); `dropped` is observability only.
 - `disposition`: `"ok"` | `"disabled"` (flag `analytics.ingest` off — clients RETAIN their queue) | `"batch_rejected:too_many"` (>50) | `"batch_rejected:too_large"` (>128 KiB).
