@@ -34,7 +34,7 @@
 //   8. The returning-user landing fits an iPhone SE with the tiles: the
 //      session-expired notice's marginBottom is space.md - 5 (652 → 647pt).
 //   9. The entry sheets a tile opens (EspnLinkSheet / PlatformLinkSheet in
-//      entry mode) don't offer "or enter a league ID" either (marketing
+//      entry mode) don't offer "or … league ID" in any wording either (marketing
 //      addendum 16, 11-02): the verified sign-in refuses an ID alone. Both
 //      clauses were entry-only; Settings' link mode never showed them.
 //
@@ -244,10 +244,15 @@ check('8. the session-expired notice leaves the returning-user landing on one SE
     `styles.reauthNotice.marginBottom is ${n && n.marginBottom}, want space.md - 5`);
 });
 
-check('9. the entry sheets the tiles open offer no "or enter a league ID"', () => {
+check('9. the entry sheets the tiles open offer no "or … league ID" alternative', () => {
+  // Any "or" offering a league ID, reworded or not ("or enter a league ID",
+  // "Or use a league ID"; release-lead #570 QA P3-1). Link mode's own labels
+  // ("MFL league ID or league URL") put the "or" after the ID, so they pass.
+  const OR_ID = /\bor\b[^.\n<>{}'"`]{0,40}\bleague ID\b/i;
   for (const rel of ['src/components/EspnLinkSheet.tsx', 'src/components/PlatformLinkSheet.tsx']) {
     const src = stripComments(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
-    expect(!/or enter a league ID/i.test(src), `${rel} still says "or enter a league ID"`);
+    const m = src.match(OR_ID);
+    expect(!m, `${rel} still offers a league ID as an alternative: "${m && m[0]}"`);
   }
 });
 
