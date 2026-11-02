@@ -120,6 +120,7 @@ import {
   FIRST_CARD_TIMEOUT_MS,
   searchTypeOf,
   visibleFraction,
+  gateFailureReason,
   type FirstCardFailure,
   type R1Source,
 } from '../utils/firstCardEvent';
@@ -127,6 +128,10 @@ import {
 // Pure, zero runtime imports (tests/check-trade-pages.js runs them).
 import {
   deckCardKey,
+  autoResearchAfterAnswer,
+  autoResearchHidesError,
+  autoResearchOnJobError,
+  autoResearchSearchId,
   deckEndState,
   deckFullyDelivered,
   isPagedEnvelope,
@@ -138,6 +143,7 @@ import {
   pageRetryDelayMs,
   unseenCount,
   wantsNextPage,
+  type AutoResearchState,
   type PageFetchPhase,
 } from '../utils/tradePages';
 import StandingOfferSheet from '../components/StandingOfferSheet';
@@ -183,9 +189,24 @@ import {
 import SwapSuggestSheet from '../components/SwapSuggestSheet';
 import { getProgress } from '../api/rankings';
 import { track, msSinceOpen } from '../api/events';
-import { ApiError, getBaseUrl } from '../api/client';
-import { resolveShareUrl } from '../utils/shareLinks';
-import { useInterruptSlot, useMutedDuringTour } from '../state/useInterruptCoordinator';
+import { ApiError, gateSignalFor, getBaseUrl } from '../api/client';
+import {
+  resolveShareUrl,
+  resolveTradeShareUrl,
+  TRADE_SHARE_PACKAGE_TIMEOUT_MS,
+} from '../utils/shareLinks';
+import { useInterruptSlot, useMutedDuringTour, useInterruptCoordinator } from '../state/useInterruptCoordinator';
+// #393 M2 — the paywall's deck pieces (the offer trigger, the preview end card).
+import { useEntitlements } from '../state/useEntitlements';
+import {
+  hydrateOfferShown,
+  offerTriggerOpen,
+  isUnverifiedSession,
+  openOfferTrigger,
+  openPaywall,
+  openVerify,
+  type OfferTriggerSource,
+} from '../state/usePaywallGate';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
 import TeamReviewEntryCard from '../components/TeamReviewEntryCard';
 import OverhaulEntryCard from '../components/OverhaulEntryCard';
@@ -756,6 +777,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // adopted page's), the job it ran, and the keys of the cards it delivered:
   // only a fronted card FROM THIS SET can be the search's first card (an
   // in-place search appends behind older cards that are still showing).
+  // The automatic re-search after an input change (utils/tradePages
+  // AutoResearchState): one per search, reset by every new search.
+  const autoResearchRef = useRef<AutoResearchState>('idle');
   const deckSearchRef = useRef<{ id: string; jobId?: string; keys: Set<string> } | null>(
     adopted?.snapshot.search_id
       ? {
@@ -2240,7 +2264,9 @@ export default function TradesScreen({ navigation, route }: any) {
     // `force` (item 7) skips the
     // server's complete-fresh job cache — used by the post-Quick-Set
     // regeneration, whose board change doesn't alter the cache key.
-    mutationFn: (vars: { auto?: boolean; force?: boolean; repeat?: boolean; searchId?: string }) => {
+    mutationFn: (vars: {
+      auto?: boolean; force?: boolean; repeat?: boolean; searchId?: string; research?: boolean;
+    }) => {
       // Pins are read from the store (not the render closure) so a
       // pin-then-generate in the same tick (#186 keep-side) always sends
       // the fresh lists.
@@ -2278,8 +2304,15 @@ export default function TradesScreen({ navigation, route }: any) {
       canvasSelectionRef.current = null;
       // 200 ms path (E2): page 1 under the dispatch's client search id
       // (minted in dispatchGenerate, never saved into the request above, so
-      // a repeat is a new search).
-      return generateTrades(request, vars.searchId ? { searchId: vars.searchId } : undefined);
+      // a repeat is a new search). Always paged: the automatic re-search,
+      // which carries no search id once its trace settled, gets page 1 too
+      // (#525 QA P2-1), never the legacy body.
+      // #393 M2 (D2): the first-run auto-start, its silent retry and the
+      // automatic re-search (#525) are background: their 402 opens nothing.
+      if (vars.auto || vars.research) {
+        return generateTrades(request, { searchId: vars.searchId }, { background: true });
+      }
+      return generateTrades(request, { searchId: vars.searchId });
     },
     // #330 R-10 — stamp the dispatch-time epoch; onSuccess/onError compare
     // it against the current one and drop stale results entirely.
@@ -2287,12 +2320,15 @@ export default function TradesScreen({ navigation, route }: any) {
     // epoch, so an answer from before it must bind ITS key, not the newer
     // dispatch's (the save effect then writes nothing under the new key).
     onMutate: () => ({ epoch: deckEpochRef.current, deviceKey }),
-    onSuccess: (snapshot, _vars, ctx) => {
+    onSuccess: (snapshot, vars, ctx) => {
       if (
         applyJobResult(snapshot, ctx?.epoch ?? deckEpochRef.current, deckEpochRef.current) === null
       ) {
         return; // stale epoch — a reset intervened; nothing is applied
       }
+      // A new search's answer starts a new re-search budget (only the answer:
+      // see autoResearchAfterAnswer).
+      autoResearchRef.current = autoResearchAfterAnswer(autoResearchRef.current, !!vars.research);
       setJob(snapshot);
       setDeckFailure(null); // P0-2 — covers the auto + force + inline callers
       // C — the answer is the server's: its scope and validation time feed
@@ -2313,7 +2349,7 @@ export default function TradesScreen({ navigation, route }: any) {
           status: snapshot.status,
           cardCount: snapshot.cards.length,
           job_id: snapshot.job_id,
-        });
+        }, { replace: !!vars.research });   // the re-search's answer: R2 names its job
         noteSearchCards(snapshot.job_id, snapshot.cards);
         if (snapshot.status === 'complete' && snapshot.cards.length === 0) failFirstCard(ds.id, 'empty');
       }
@@ -2347,6 +2383,34 @@ export default function TradesScreen({ navigation, route }: any) {
       if (
         applyJobResult(e, ctx?.epoch ?? deckEpochRef.current, deckEpochRef.current) === null
       ) {
+        return;
+      }
+      // #393 M2 (D19): a 402 (the paywall's, or its verify_required) is never
+      // a deck error or a toast. A user-initiated one already opened the
+      // paywall or the VerifySheet (api/client); the background auto-start's
+      // opens nothing and is not retried, so the deck rests on Find a Trade.
+      // R2b still records the failed search.
+      if (e instanceof ApiError && e.isProRequired) {
+        // R2b paywall / verify (analytics-lead's grant): a user-initiated
+        // answer was settled on arrival by the gate listener; this covers a
+        // background one.
+        failDeckSearch(gateFailureReason(gateSignalFor(e, '/api/trades/generate')));
+        if (vars?.auto) {
+          autoGenRef.current = 'failed';
+          setAutoGenFailed(true);
+        }
+        // #525 (D19): the automatic re-search continues this deck, so its 402
+        // ends the deck as a page's does: the preview end card (resumed by
+        // running the re-search again), never "Couldn't load more trades.".
+        if (vars?.research) {
+          setGateEnd({
+            verify: gateSignalFor(e, '/api/trades/generate')?.action === 'verify',
+            revalidation: false,
+            research: true,
+          });
+        }
+        // trades-eng's grant: never an empty pushed deck behind the paywall.
+        if (isResultsPushed && deckRef.current.length === 0) popToLanding();
         return;
       }
       if (vars?.auto) {
@@ -2401,12 +2465,19 @@ export default function TradesScreen({ navigation, route }: any) {
   //                                      the host is live, routed anyway (the
   //                                      rule is every site, no exceptions)
   //   6. handleSuppressionUndo         — F3 deck-note undo (deck-tree, ditto)
+  //   8. the automatic re-search       — an inputs_changed deck, once no
+  //                                      card is left (analytics-lead (a)):
+  //                                      no R1, its open search id or none
   //   7. QuickSet regen focus effect   — board-change forced regen (its
   //                                      inline clear kills the old session
   //                                      first — see the effect)
+  //   9. resumeDeckPages               — the re-search's preview end (#393
+  //                                      M2 D19), resumed by a purchase or a
+  //                                      verify: the re-search again, no R1
   function dispatchGenerate(
     vars: { auto?: boolean; force?: boolean; repeat?: boolean },
     mutateOpts?: Parameters<typeof generateMutation.mutate>[1],
+    research?: { searchId: string | null },
   ) {
     lastFairRequestRef.current = null;
     if (canvasResultsLive) {
@@ -2419,9 +2490,19 @@ export default function TradesScreen({ navigation, route }: any) {
     // 200 ms path — every dispatch is a search with a client search id (E2
     // `search_id`, echoed): the tap's, when a search-starting control began
     // one (R1), else a fresh one (a regeneration, the first-run auto-start).
-    const claimed = claimPendingSearch();
+    // The automatic re-search (`research`) claims nothing and mints nothing:
+    // it carries its search's open trace id, else none. Every other dispatch
+    // is a new search: its re-search budget starts again when its answer
+    // lands (onSuccess), never here.
+    const claimed = research ? research.searchId : claimPendingSearch();
     deckSearchRef.current = claimed ? { id: claimed, keys: new Set() } : null;
-    generateMutation.mutate({ ...vars, searchId: claimed ?? uuidv4() }, mutateOpts);
+    generateMutation.mutate(
+      {
+        ...vars,
+        searchId: research ? research.searchId ?? undefined : claimed ?? uuidv4(),
+        research: !!research,
+      },
+      mutateOpts);
   }
 
   // Poll while a job is running. Self-scheduling setTimeout loop with
@@ -2457,7 +2538,8 @@ export default function TradesScreen({ navigation, route }: any) {
     const tick = async () => {
       if (cancelled) return;
       try {
-        const next = await getTradeStatus(job.job_id);
+        // #393 M2 (D2): status polling is background (a 402 opens nothing).
+        const next = await getTradeStatus(job.job_id, undefined, { background: true });
         if (cancelled) return;
         if (applyJobResult(next, tickEpoch, deckEpochRef.current) === null) return;
         failures = 0;
@@ -2489,8 +2571,14 @@ export default function TradesScreen({ navigation, route }: any) {
         if (!cancelled && next.status === 'running') {
           setTimeout(tick, nextDelay);
         }
-      } catch {
+      } catch (e) {
         if (cancelled) return;
+        // #393 M2 (D19): the server gated this job: stop polling quietly, no
+        // toast and no error card (the cards already held stay).
+        if (e instanceof ApiError && e.isProRequired) {
+          setJob(null);
+          return;
+        }
         failures += 1;
         if (failures >= MAX_POLL_FAILURES) {
           setToast({
@@ -2530,12 +2618,20 @@ export default function TradesScreen({ navigation, route }: any) {
   // the retry tick (job still 'error', deckFailure just cleared).
   useEffect(() => {
     if (job?.status !== 'error') return;
+    // An input change revoked the deck: recovered by the automatic re-search
+    // (the effect beside deckEnd), never a deckFailure, so never an R2b.
+    if (autoResearchOnJobError(autoResearchRef.current, job.error) === 'pending') {
+      autoResearchRef.current = 'pending';
+      return;
+    }
     // #339 item 12 — S0's roster check couldn't run: the NAMED error state
     // (GateErrorCard), never the generic "server may still be waking up".
     setDeckFailure(isRosterCheckError(job.error)
       ? { kind: 'roster_check', message: GATE_ROSTER_CHECK_FAILED_LINE }
       : { kind: 'job_error', message: jobErrorCopy(job.error) });
-  }, [job?.status, job?.error]);
+    // job_id too: a new search whose own answer is the same error (an
+    // inputs_changed again) must be read afresh (#525 QA P1-1r).
+  }, [job?.job_id, job?.status, job?.error]);
 
   // #330 R-6 — scoped-empty derivation, at COMPLETION time. Both zero-card
   // paths funnel through `job` (instant cache-hit onSuccess and the polled
@@ -2760,6 +2856,9 @@ export default function TradesScreen({ navigation, route }: any) {
         commitLocalPass(vars.passAttempt);
       }
       if (!ctx || !actionCanUpdateScreen(ctx.action)) return;
+      // #393 M2 (D4): the server acknowledged a like or pass: the offer's
+      // first-opinion trigger (never the optimistic advance).
+      requestPaywallOffer('first_opinion');
       // S7 PRD-01 (growth.share_landing): a like that completes a mutual
       // match returns { matched: true, match_id } — remember the match id
       // so shareLikedTrade can point at the /s/trade/<match_id> landing
@@ -2838,6 +2937,9 @@ export default function TradesScreen({ navigation, route }: any) {
           setPassRetryVersion((n) => n + 1);
         }
         queryClient.invalidateQueries({ queryKey: ['liked-trades', leagueId] });
+        // #393 M2 (D19): a 402 opened the paywall or the VerifySheet
+        // (api/client). The card is back on top above; no failure toast.
+        if (err instanceof ApiError && err.isProRequired) return;
         // No Retry action on either branch. The guard is cleared just above, so
         // the card's own ✕/✓ now re-POSTS *and* advances the deck — strictly
         // more than a Retry button could do, which would re-POST while leaving
@@ -3814,6 +3916,23 @@ export default function TradesScreen({ navigation, route }: any) {
       .then((snapshot) => go(adoptablePage(snapshot)
         ? { request, snapshot, validatedAt: Date.now(), deviceKey }
         : undefined))
+      // #393 M2 (trades-eng's grant): a gate answer (a 402, or a verify 403
+      // the sheet didn't clear) never pushes the deck. api/client already
+      // opened the paywall or the sheet over the landing, which is where the
+      // user stays when it closes; a deck the deadline already pushed is
+      // popped back under it. Every other outcome falls through, unchanged.
+      .catch((e) => {
+        const gate = gateSignalFor(e, '/api/trades/generate');
+        if (!gate || gate.action === 'verify_mismatch') throw e;
+        // go() pushed (the deadline) iff it ran and the push is still pending.
+        const deckPushed = pushed && resultsPushPendingRef.current;
+        clearTimeout(deadline);
+        resultsPushPendingRef.current = false;
+        failFirstCard(fork.searchId, gateFailureReason(gate));
+        dropPendingSearch(fork.searchId);
+        if (deckPushed && mountedRef.current) popToLanding();
+        pushed = true;
+      })
       .catch(() => go());
   }
 
@@ -4216,6 +4335,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // R1 — the sweep's search began at its tap (forkCanvasSearch or
     // handleFindTrades); this claims it. A sweep with no tap behind it (the
     // dormant #402 browse retry) begins its own, with this source.
+    autoResearchRef.current = 'idle';   // a new search: its own re-search budget
     let claimedFair = claimPendingSearch();
     if (!claimedFair) {
       beginTradeSearch({ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' });
@@ -4253,6 +4373,15 @@ export default function TradesScreen({ navigation, route }: any) {
       setFairDeck(true);
     } catch (e: any) {
       if (deckEpochRef.current !== epoch) return;
+      // #393 M2 (D19): a 402 already opened the paywall or the VerifySheet
+      // (api/client); no deck-failure card. R2b still records it.
+      if (e instanceof ApiError && e.isProRequired) {
+        failDeckSearch(gateFailureReason(gateSignalFor(e, '/api/trades/fair-packages')));
+        setFairDeck(false);
+        // trades-eng's grant: never an empty pushed deck behind the paywall.
+        if (isResultsPushed && deckRef.current.length === 0) popToLanding();
+        return;
+      }
       // The existing deck-failure copy, verbatim — a fair sweep that fails is
       // a failed search, and the P0-2 card is where the app says so.
       setDeckFailure({
@@ -4688,6 +4817,9 @@ export default function TradesScreen({ navigation, route }: any) {
   async function fetchNextPage() {
     const snap = jobRef.current;
     if (!snap || typeof snap.cursor !== 'number') return;
+    // #393 M2 (D19): the server ended this deck's pages with a 402; nothing
+    // more is asked until a purchase or a verify clears it.
+    if (deckGateEndRef.current) return;
     const loop = pageLoopRef.current;
     const epoch = deckEpochRef.current;
     const forJob = snap.job_id;
@@ -4696,6 +4828,9 @@ export default function TradesScreen({ navigation, route }: any) {
     setPagePhase((p) => (p === 'idle' ? 'loading' : p));
     let backoff = false;
     try {
+      // #393 M2 (D2, trades-eng adj. 3): background — a paged status call is
+      // the prefetch, so api/trades.getTradeStatus sends it `background`; a
+      // 402 never opens a modal under the thumb.
       const next = await getTradeStatus(snap.job_id, { deck: snap.deck_id, cursor: requested });
       if (!mountedRef.current || pageLoopRef.current !== loop) return;
       if (applyJobResult(next, epoch, deckEpochRef.current) === null) return;
@@ -4706,8 +4841,14 @@ export default function TradesScreen({ navigation, route }: any) {
       backoff = isPagedEnvelope(next) && needsBackoff(next, requested);
       loop.attempt = nextRetryAttempt(loop.attempt, backoff, added);
       setPagePhase(backoff ? 'retrying' : 'idle');
-    } catch {
+    } catch (e) {
       if (!mountedRef.current || pageLoopRef.current !== loop) return;
+      // #393 M2 (D5, D19): a 402 (or the verify 403) is the deck's terminal
+      // state, never an error: the end card shows past the last held card.
+      if (noteDeckGateEnd(e)) {
+        setPagePhase('idle');
+        return;
+      }
       loop.failures += 1;
       loop.attempt += 1;
       backoff = true;
@@ -4777,9 +4918,29 @@ export default function TradesScreen({ navigation, route }: any) {
   const endPhase: PageFetchPhase = devicePhase === 'running' ? 'loading'
     : devicePhase === 'failed' ? 'failed'
     : pagePhase;
-  const deckEnd = pagedWithCards && !rawTopCard && job
+  const deckEndRaw = pagedWithCards && !rawTopCard && job
     ? deckEndState({ ...job, phase: endPhase, online })
     : null;
+  // An `inputs_changed` being recovered shows nothing, never the error card
+  // (decided at render, so the card never flashes before the effect below);
+  // offline, the Offline card, as the re-search waits for the network
+  // (#525 QA P3).
+  const deckEnd = deckEndRaw === 'error' && autoResearchHidesError(
+    autoResearchRef.current, job?.error,
+    generateMutation.isPending && !!generateMutation.variables?.research)
+    ? (online ? 'pending' : 'offline')
+    : deckEndRaw;
+  // The automatic re-search: once the user has no card left to see, the one
+  // pending `inputs_changed` re-runs the search in place, as Try again would,
+  // without its tap (no R1) and without a new search_id.
+  useEffect(() => {
+    if (autoResearchRef.current !== 'pending' || rawTopCard || job?.status !== 'error') return;
+    autoResearchRef.current = 'used';
+    setScopedEmpty(null);
+    dispatchGenerate({ repeat: true }, undefined,
+      { searchId: autoResearchSearchId(deckSearchRef.current?.id, isSearchOpen) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawTopCard?.trade_id, job?.job_id, job?.status, job?.error]);   // job_id: P1-1r
   useEffect(() => {
     if (deckEnd === 'end') setEndLatched(true);
   }, [deckEnd]);
@@ -4851,6 +5012,16 @@ export default function TradesScreen({ navigation, route }: any) {
         validatedAtRef.current = Date.now();
         applyPage(next, { revalidation: true });
         setDevicePhase('done');
+      })
+      // #393 M2 (D19): the tap's 402 opened the paywall (api/client). It is no
+      // refresh failure: the held cards stay with no refresh-failed line, and
+      // their end is the preview end card. Anything else falls through.
+      .catch((e) => {
+        if (mountedRef.current && seq === deviceRevalidationRef.current && noteDeckGateEnd(e, true)) {
+          setDevicePhase('done');
+          return;
+        }
+        throw e;
       })
       .catch(() => {
         if (mountedRef.current && seq === deviceRevalidationRef.current) setDevicePhase('failed');
@@ -4954,6 +5125,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // Once per search_id (the trace dedupes).
   useEffect(() => {
     if (!pagedWithCards || !rawTopCard || !job || unseen > 0 || deckFullyDelivered(job)) return;
+    // #393 M2 (trades-eng): a gated preview's capped end (the 402 is in) is
+    // not the buffer running dry.
+    if (deckGateEndRef.current) return;
     const searchId = deckSearchRef.current?.id ?? job.search_id;
     if (!searchId) return;
     reportDeckBufferEmpty(searchId, { deckId: job.deck_id ?? job.job_id, cardsSeen: deckIdx + 1 });
@@ -5098,6 +5272,158 @@ export default function TradesScreen({ navigation, route }: any) {
       (e) => e.id !== player.id && !(e.ids ?? []).includes(player.id),
     );
   }, [suggestQuery.data, suggestTarget, topCard]);
+
+  // ── #393 M2 — the paywall in the deck (D4, D5, D19; engagement-eng) ──────
+  // Dark unless `monetize.paywall` is on AND the server is enforcing
+  // (useEntitlements.enforcing). Two pieces:
+  //
+  // 1. THE OFFER AS AN INTERRUPT (D4, ux-lead §1). The trigger variant of the
+  //    paywall opens as a MODAL over Trades, so the deck (position, fronted
+  //    card, loaded pages) is kept and Close returns to the same card. At most
+  //    once per user (usePaywallGate's memory), only for a verified,
+  //    non-entitled session, at the first of:
+  //      first_opinion — the server ACKNOWLEDGED a like or pass
+  //                      (swipeMutation.onSuccess, never the optimistic
+  //                      advance), once its toast has cleared;
+  //      left_deck     — after a card showed, the user leaves the deck: a tab
+  //                      switch, or Back off a pushed deck. A root-stack push
+  //                      over Trades (Send's connect, a sheet) isn't leaving.
+  //    It claims the `paywall_offer` interrupt slot (directly after the
+  //    guide) imperatively, like the guide does, and holds it until the
+  //    paywall is gone: never over the guide or another surface, never during
+  //    the tour hold, and no root modal presents over it.
+  //
+  // 2. THE PREVIEW END (D5, D19). A next-page fetch (background) or a device
+  //    deck's revalidation answered 402 (or the verify 403): the deck's
+  //    TERMINAL state, never an error. Past the last held card the slot shows
+  //    DeckEndCard's `previewEnd` variant ("That's the first page." /
+  //    mon.lock.find / See plans → the paywall, source `preview_end`). An
+  //    unverified session's button is Continue → the VerifySheet (D16 a): the
+  //    choice reads the server's answer and session_verified only, never an
+  //    entitlement. A purchase (entitled) or a verify resumes the pages.
+  const paywallOn = useFlag('monetize.paywall');
+  const payEnforcing = useEntitlements((s) => s.enforcing);
+  const payEntitled = useEntitlements((s) => s.pro);
+  // Demo counts as unverified on every subscription surface (head-eng
+  // 2026-10-29, demo strict): no offer trigger, and the end card's button is
+  // Continue → the VerifySheet. One predicate (state/subscriptionSession).
+  const sessionUnverified = useSession((s) => isUnverifiedSession(s));
+  const offerEligible = paywallOn && payEnforcing && !payEntitled && !sessionUnverified;
+  const offerGateRef = useRef({ eligible: offerEligible, userId });
+  offerGateRef.current = { eligible: offerEligible, userId };
+  const offerCardSeenRef = useRef(false);
+  const [offerSource, setOfferSource] = useState<OfferTriggerSource | null>(null);
+  const offerSlotSurface = useInterruptCoordinator((s) => s.activeSurface);
+  const offerSlotTourHold = useInterruptCoordinator((s) => s.tourHold);
+  useEffect(() => {
+    if (userId) void hydrateOfferShown(userId);
+  }, [userId]);
+  useEffect(() => {
+    if (rawTopCard) offerCardSeenRef.current = true;
+  }, [rawTopCard?.trade_id]);
+  function requestPaywallOffer(source: OfferTriggerSource) {
+    const { eligible, userId: uid } = offerGateRef.current;
+    if (!eligible || !offerTriggerOpen(uid)) return;
+    if (source === 'left_deck' && !offerCardSeenRef.current) return;
+    setOfferSource((cur) => cur ?? source);
+  }
+  /** True when the request is settled (opened, or no longer applies); false
+   *  while the slot is busy, to retry when it frees. */
+  function presentPaywallOffer(source: OfferTriggerSource): boolean {
+    const { eligible, userId: uid } = offerGateRef.current;
+    if (!eligible || !uid || !offerTriggerOpen(uid)) return true;
+    if (source === 'left_deck' && !offerCardSeenRef.current) return true;
+    const slot = useInterruptCoordinator.getState();
+    if (!slot.claim('paywall_offer')) return false;
+    const closed = openOfferTrigger(source, uid);
+    if (!closed) {
+      slot.release('paywall_offer');
+      return true;
+    }
+    void closed.then(() => useInterruptCoordinator.getState().release('paywall_offer'));
+    return true;
+  }
+  useEffect(() => {
+    if (!offerSource || toast) return;
+    if (presentPaywallOffer(offerSource)) setOfferSource(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offerSource, toast, offerSlotSurface, offerSlotTourHold]);
+  // left_deck — this effect's own listeners (R2b's focus effect is not
+  // touched). A tab switch changes the tab navigator's focused route; a
+  // root-stack push over Trades doesn't. Back off a pushed deck removes this
+  // screen, so it tries once, right after the Back applies, rather than wait
+  // on state that unmounts; a reset or replace (sign-out, a deep link) is not
+  // the user leaving.
+  useEffect(() => {
+    if (!navigation?.addListener) return undefined;
+    const tabKey = () => {
+      const tabs = navigation.getParent?.()?.getState?.();
+      return tabs?.routes?.[tabs.index]?.key;
+    };
+    let ownTab = tabKey();
+    const offs = [
+      navigation.addListener('focus', () => {
+        ownTab = tabKey();
+      }),
+      navigation.addListener('blur', () => {
+        if (tabKey() !== ownTab) requestPaywallOffer('left_deck');
+      }),
+      navigation.addListener('beforeRemove', (e: any) => {
+        const type = e?.data?.action?.type;
+        // After the Back has applied: never a navigate inside its dispatch.
+        if (type !== 'RESET' && type !== 'REPLACE') setTimeout(() => presentPaywallOffer('left_deck'), 0);
+      }),
+    ];
+    return () => offs.forEach((off: () => void) => off());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigation]);
+
+  const [deckGateEnd, setDeckGateEnd] = useState<{
+    /** The Continue → VerifySheet variant: the server answered verify. */
+    verify: boolean;
+    /** It was a device deck's revalidation (resume revalidates again). */
+    revalidation: boolean;
+    /** It was the automatic re-search (#525; resume runs it again). */
+    research?: boolean;
+  } | null>(null);
+  const deckGateEndRef = useRef(deckGateEnd);
+  function setGateEnd(end: typeof deckGateEnd) {
+    deckGateEndRef.current = end;
+    setDeckGateEnd(end);
+  }
+  /** A gated answer on the deck's page path ends the deck; true if it did. */
+  function noteDeckGateEnd(e: unknown, revalidation = false): boolean {
+    const signal = gateSignalFor(e, '/api/trades/status');
+    if (!signal || signal.action === 'verify_mismatch') return false;
+    setGateEnd({ verify: signal.action === 'verify', revalidation });
+    return true;
+  }
+  // A new search starts with no end.
+  useEffect(() => {
+    setGateEnd(null);
+  }, [job?.job_id]);
+  function resumeDeckPages() {
+    const end = deckGateEndRef.current;
+    if (!end) return;
+    setGateEnd(null);
+    if (end.research) {
+      dispatchGenerate({ repeat: true }, undefined,
+        { searchId: autoResearchSearchId(deckSearchRef.current?.id, isSearchOpen) });
+    } else if (end.revalidation) revalidateDevicePage();
+    else setPageKick((k) => k + 1);
+  }
+  useEffect(() => {
+    if (payEntitled) resumeDeckPages();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payEntitled]);
+  function handleDeckGateEndPress() {
+    haptics.selection();
+    if (deckGateEnd?.verify || sessionUnverified) {
+      void openVerify({ onVerified: resumeDeckPages });
+      return;
+    }
+    void openPaywall({ source: 'preview_end' });
+  }
 
   // ── S4 PRD-04 (ux.prompt_arbiter): one-surface arbiter ───────────────
   // At most ONE instructional/promotional surface at a time on this screen.
@@ -6192,10 +6518,13 @@ export default function TradesScreen({ navigation, route }: any) {
     const ref = user?.username ? `ref=${encodeURIComponent(user.username)}` : '';
     let landing = false;
     let url: string;
+    // O8: a mutual match shares a server-minted /s/trade/<token> link; null
+    // (mint failed) falls through to the package rung below, then the root.
+    const tradeUrl = shareLandingOn && matchId ? await resolveTradeShareUrl(matchId) : null;
     if (!shareLandingOn) {
       url = 'https://fantasy-trade-finder.onrender.com';
-    } else if (matchId) {
-      url = `${getBaseUrl()}/s/trade/${matchId}${ref ? `?${ref}` : ''}`;
+    } else if (tradeUrl) {
+      url = `${tradeUrl}${ref ? `?${ref}` : ''}`;
       landing = true;
     } else {
       const resolved = await resolveShareUrl({
@@ -6207,6 +6536,8 @@ export default function TradesScreen({ navigation, route }: any) {
         surface: 'trades_liked',
         hasPickAssets:
           c.give_players.some(isPickAsset) || c.receive_players.some(isPickAsset),
+        // A trade mint already failed (matchId): bound this rung too.
+        timeoutMs: matchId ? TRADE_SHARE_PACKAGE_TIMEOUT_MS : undefined,
         onOutcome: (outcome, give_n, receive_n) =>
           track(
             'share_package_created',
@@ -9525,6 +9856,16 @@ export default function TradesScreen({ navigation, route }: any) {
               onAccept={() => acceptQuicksetPrompt('prompt')}
               onDismiss={snoozeQuicksetPrompt}
             />
+          ) : pagedWithCards && deckGateEnd && (!rawTopCard || showDeckEndCard) ? (
+            // #393 M2 (D5, D19) — the server ended this deck's pages with a
+            // 402: the preview end card, past the last held card. One button:
+            // See plans → the paywall, or (unverified) Continue → verify.
+            // AHEAD of P30 (trades-eng): a 402 end never shows "You've seen
+            // every trade"; wherever P30 would show, this shows instead.
+            <DeckEndCard
+              minHeight={topCardH}
+              previewEnd={{ verify: deckGateEnd.verify || sessionUnverified, onPress: handleDeckGateEndPress }}
+            />
           ) : showDeckEndCard ? (
             // P30 — the honest end of a paged deck, in the card slot: only on
             // the server's `pool_exhausted` with nothing in flight or
@@ -10487,6 +10828,9 @@ export default function TradesScreen({ navigation, route }: any) {
           members={standingOfferMembers}
           memberFirstsBySeason={standingOfferFirstsByOwner}
           onSkip={skipStandingOfferPrompt}
+          // #393 (release-lead QA P2-3): the gate stopped the post. Close with
+          // nothing recorded: no skip event, no snooze, no toast.
+          onClose={() => setStandingOfferPrompt(null)}
           onPosted={(offer) => {
             setStandingOfferPrompt(null);
             queryClient.invalidateQueries({ queryKey: ['standing-offers', leagueId] });

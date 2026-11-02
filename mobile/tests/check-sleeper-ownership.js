@@ -161,6 +161,17 @@ async function formTest(mode) {
   assert.equal(calls.filter(c => c[0] === 'persist').length, mode === 'unverified' ? 0 : 1);
   assert.equal(calls.at(-1)[0], 'done');
 }
+// An async suite whose run returns early, throws past its handler, or awaits
+// something that never settles would let node exit 0 mid-run: an unfinished
+// run fails instead (check-device-first-page's pattern; trades-eng, #546).
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-sleeper-ownership did not finish (a check returned early, threw or hung): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 (async () => {
   captureTest();
   await staleAuthResponseTest('init');
@@ -176,5 +187,6 @@ async function formTest(mode) {
   const auth = source('src/api/auth.ts').split('export async function sessionInit')[1];
   assert(auth.indexOf('await maybeReplaySleeperVerification') < auth.indexOf('api.post'));
   assert(source('src/navigation/RootNav.tsx').includes('sleeperconnect.close'));
+  finished = true;
   console.log('PASS Sleeper ownership capture, origin, merge, persistence, cancellation and init ordering');
 })().catch(error => { console.error(error); process.exitCode = 1; });
