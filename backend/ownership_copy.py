@@ -26,6 +26,11 @@ N_UNNAMED_PLAYERS = "{n} players in this trade"
 ROSTER_READ_FAILED = (
     "Couldn’t confirm rosters with {platform} right now, so nothing was sent. "
     "Try again in a moment.")
+# Overhaul's per-asset send blockers: the shipped sentences, with the asset
+# named (`asset_sentence`), never its raw id.
+POOL_VIOLATION = "{asset} is outside your eligible pool."
+ASSET_RESERVED_BY_OFFER = "{asset} is reserved by a live offer."
+GIVE_OVERLAP = "{asset} is in two packages."
 
 
 def roster_read_failed(platform: str) -> str:
@@ -33,6 +38,14 @@ def roster_read_failed(platform: str) -> str:
     failed (platforms-pm R3). `platform` is the display name: "Sleeper",
     "MFL", "ESPN"."""
     return ROSTER_READ_FAILED.format(platform=platform)
+
+
+def asset_sentence(template: str, asset, names) -> str:
+    """One of overhaul's per-asset blocker sentences (`POOL_VIOLATION`,
+    `ASSET_RESERVED_BY_OFFER`, `GIVE_OVERLAP`) about `asset`, named from
+    `names` (id -> display name), else `ONE_UNNAMED_PLAYER`: never a raw id."""
+    name = (names or {}).get(str(asset))
+    return template.format(asset=str(name) if name else ONE_UNNAMED_PLAYER)
 
 
 def refusal_message(side: str, assets, names, counterparty_name=None) -> str:
