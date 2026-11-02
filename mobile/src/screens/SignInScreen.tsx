@@ -724,8 +724,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               <View testID="signin.platform-panel">
                 <ChalkText style={styles.platformExplainer}>
                   {entryPlatform === 'espn'
-                    ? 'ESPN dynasty leagues are supported. Sign in to ESPN and we’ll find your leagues, or enter a league ID — no extra account needed.'
-                    : 'MyFantasyLeague dynasty leagues are supported. Sign in with MFL and we’ll find your leagues, or enter a league ID — no extra account needed.'}
+                    ? 'ESPN dynasty leagues are supported. Sign in to ESPN, or enter a league ID.'
+                    : 'MyFantasyLeague dynasty leagues are supported. Sign in with MFL and we’ll find your leagues, or enter a league ID.'}
                 </ChalkText>
                 {/* Guide spotlight target — collapsable={false} so the
                     wrapper survives view-flattening and stays measurable,
@@ -1039,10 +1039,12 @@ const styles = StyleSheet.create({
   },
   // Teardown 06-03 — account-only session-expired re-auth notice.
   // Informational (not an error): dim chalk, sits above the Apple portal.
+  // 5pt under space.md so the returning-user landing fits an iPhone SE with
+  // the tiles (652 → 647pt; design-lead's #570 render).
   reauthNotice: {
     ...type.bodySm,
     color: chalk.dim,
-    marginBottom: space.md,
+    marginBottom: space.md - 5,
   },
   // P0-3 — invited banner. Same slot, same rhythm as reauthNotice: no new
   // visual pattern, no accent beyond the existing ones.

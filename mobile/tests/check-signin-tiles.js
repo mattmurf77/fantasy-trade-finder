@@ -26,6 +26,12 @@
 //      route is POST /api/entry/platform (#430 makes it prove ownership and
 //      mint a verified acct_* account). SignInScreen calls no /api/entry
 //      route itself.
+//   7. The ESPN/MFL panel explainers claim nothing the door can't keep
+//      (head-eng, from design-lead's #570 render): ESPN's has no "we'll find
+//      your leagues" (ESPN sign-in only works for private-league owners), and
+//      neither says "no extra account needed" (some MFL paths go to Apple).
+//   8. The returning-user landing fits an iPhone SE with the tiles: the
+//      session-expired notice's marginBottom is space.md - 5 (652 → 647pt).
 //
 // Run: node tests/check-signin-tiles.js
 
@@ -202,6 +208,27 @@ check('6. the ESPN/MFL door mints only through POST /api/entry/platform', () => 
   expect(routes.length > 0 && routes.every((r) => r === '/api/entry/platform'),
     `platformEntry.ts calls ${[...new Set(routes)].join(', ')}, want only /api/entry/platform`);
   expect(!/\/api\/entry/.test(stripComments(text)), 'SignInScreen calls an /api/entry route itself');
+});
+
+check('7. the ESPN/MFL explainers claim only what the door does', () => {
+  const ESPN = 'ESPN dynasty leagues are supported. Sign in to ESPN, or enter a league ID.';
+  const MFL = 'MyFantasyLeague dynasty leagues are supported. Sign in with MFL and we’ll find your leagues, or enter a league ID.';
+  const panel = findAll(sf, (n) => ts.isJsxOpeningElement(n) && attrText(n, 'testID') === 'signin.platform-panel')[0];
+  expect(panel, 'no signin.platform-panel');
+  const cond = findAll(panel.parent, (n) => ts.isConditionalExpression(n)
+    && n.condition.getText(sf) === "entryPlatform === 'espn'")[0];
+  expect(cond && ts.isStringLiteral(cond.whenTrue) && ts.isStringLiteral(cond.whenFalse),
+    "the explainer is not `entryPlatform === 'espn' ? '…' : '…'`");
+  expect(cond.whenTrue.text === ESPN, `the ESPN explainer is "${cond.whenTrue.text}", want "${ESPN}"`);
+  expect(cond.whenFalse.text === MFL, `the MFL explainer is "${cond.whenFalse.text}", want "${MFL}"`);
+  const strings = findAll(sf, (n) => ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)).map((n) => n.text);
+  expect(!strings.some((t) => /no extra account/i.test(t)), 'a string still says "no extra account"');
+});
+
+check('8. the session-expired notice leaves the returning-user landing on one SE screen', () => {
+  const n = styleProps('reauthNotice');
+  expect(n && n.marginBottom === 'space.md - 5',
+    `styles.reauthNotice.marginBottom is ${n && n.marginBottom}, want space.md - 5`);
 });
 
 console.log(failures === 0
