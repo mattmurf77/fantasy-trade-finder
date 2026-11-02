@@ -694,7 +694,8 @@ def validate_prepare(*, selected, packages, offers_by_id, my_roster_ids, my_pick
                 slot = len(blockers) if slot is None else slot
             prior = recv_owner.get(a)
             if prior is not None and prior != pkg_id:
-                blockers.append(_item("receive_overlap", f"{a} is requested by two packages.", pkg_id, offer["offer_id"]))
+                blockers.append(_item("receive_overlap", ownership_copy.asset_sentence(
+                    ownership_copy.RECEIVE_OVERLAP, a, names), pkg_id, offer["offer_id"]))
             recv_owner.setdefault(a, pkg_id)
             if a not in incoming:
                 incoming.append(a)

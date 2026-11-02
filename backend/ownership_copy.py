@@ -31,6 +31,7 @@ ROSTER_READ_FAILED = (
 POOL_VIOLATION = "{asset} is outside your eligible pool."
 ASSET_RESERVED_BY_OFFER = "{asset} is reserved by a live offer."
 GIVE_OVERLAP = "{asset} is in two packages."
+RECEIVE_OVERLAP = "{asset} is requested by two packages."
 
 
 def roster_read_failed(platform: str) -> str:
@@ -42,7 +43,7 @@ def roster_read_failed(platform: str) -> str:
 
 def asset_sentence(template: str, asset, names) -> str:
     """One of overhaul's per-asset blocker sentences (`POOL_VIOLATION`,
-    `ASSET_RESERVED_BY_OFFER`, `GIVE_OVERLAP`) about `asset`, named from
+    `ASSET_RESERVED_BY_OFFER`, `GIVE_OVERLAP`, `RECEIVE_OVERLAP`) about `asset`, named from
     `names` (id -> display name), else `ONE_UNNAMED_PLAYER`: never a raw id."""
     name = (names or {}).get(str(asset))
     return template.format(asset=str(name) if name else ONE_UNNAMED_PLAYER)

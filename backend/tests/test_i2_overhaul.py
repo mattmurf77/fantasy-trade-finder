@@ -312,12 +312,26 @@ def test_give_overlap_names_the_asset():
     _no_raw_ids(_messages(receipt, "give_overlap")[0], ["4046"])
 
 
+def test_receive_overlap_names_the_asset():
+    """#459 QA P2: the asset two packages both ask for is named, never its id."""
+    a = _offer("o_a", ["4046"], ["7777"], "o1", {"4046": "Josh Allen", "7777": "Puka Nacua"})
+    b = _offer("o_b", ["9509"], ["7777"], "o1", {"9509": "Bijan Robinson", "7777": "Puka Nacua"})
+    receipt = _validate([a, b], mine=["4046", "9509"], pool=["4046", "9509"])
+    assert _messages(receipt, "receive_overlap") == ["Puka Nacua is requested by two packages."]
+    c = _offer("o_c", ["9509"], ["7777"], "o1", {"9509": "Bijan Robinson"})       # no name for it
+    receipt = _validate([a, c], mine=["4046", "9509"], pool=["4046", "9509"])
+    assert _messages(receipt, "receive_overlap") == [
+        "A player in this trade is requested by two packages."]
+    _no_raw_ids(_messages(receipt, "receive_overlap")[0], ["7777"])
+
+
 def test_no_overhaul_blocker_shows_a_raw_id():
-    """Every blocker a mixed failing receipt carries reads without an id."""
+    """Every blocker a mixed failing receipt carries reads without an id,
+    receive_overlap included."""
     a = _offer("o_a", ["4046", "9509"], ["X1"], "o1", {"4046": "Josh Allen", "9509": "Bijan Robinson"})
-    b = _offer("o_b", ["9509"], ["X2"], "o2", {"9509": "Bijan Robinson"})
+    b = _offer("o_b", ["9509"], ["X1"], "o1", {"9509": "Bijan Robinson"})
     receipt = _validate([a, b], mine=["9509"], pool=["9509"], reserved=["9509"])
-    assert {"asset_not_owned", "pool_violation", "asset_reserved", "give_overlap"} <= {
-        bl["code"] for bl in receipt["blockers"]}
+    assert {"asset_not_owned", "pool_violation", "asset_reserved", "give_overlap",
+            "receive_overlap"} <= {bl["code"] for bl in receipt["blockers"]}
     for bl in receipt["blockers"]:
-        _no_raw_ids(bl["message"], ["4046", "9509"])
+        _no_raw_ids(bl["message"], ["4046", "9509", "X1"])
