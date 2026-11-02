@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-01
 **Entry point:** direct ask. The operator's design review, 11-01, via head-product → head-eng: "For sign in it should have three tiles. Sleeper espn mfl"
-**Builder:** onboarding-eng (spec: design-lead; render: [`signin-three-tiles-render.png`](signin-three-tiles-render.png))
+**Builder:** onboarding-eng (spec: design-lead; render: [`signin-three-tiles-render.png`](signin-three-tiles-render.png), design-lead's as-built render of `db5bd224` through react-native-web at SE 375×667, three tiles and two tiles (ESPN off), not a device capture)
 **Operator sign-off on waivers:** not needed (no waivers). Open item: the operator's approval of the look (three tiles and the two-tile ESPN-off state). The words are final: marketing-lead's copy §6 addendum 16.
 
 ---
