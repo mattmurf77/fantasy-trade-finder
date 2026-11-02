@@ -58,13 +58,14 @@ export type EntryPlatformIntent = 'espn' | 'mfl';
 /** The landing's platform tiles (operator 11-01: "three tiles. Sleeper espn
  *  mfl"; design-lead's spec). Name, the dim line under it (an SE tile fits
  *  about 10 characters), and the radio's spoken label. Words: marketing-lead,
- *  copy §6 addendum 16. */
+ *  copy §6 addendum 16 (revised 11-02: no "or a league ID"; under the
+ *  verified sign-in an ID alone is refused). */
 const PLATFORM_TILE: Record<'sleeper' | EntryPlatformIntent, {
   name: string; line: string; a11y: string;
 }> = {
   sleeper: { name: 'Sleeper', line: 'Username', a11y: 'Sleeper, sign in with your username, no password needed' },
-  espn: { name: 'ESPN', line: 'Sign in', a11y: 'ESPN, sign in with your ESPN account or a league ID' },
-  mfl: { name: 'MFL', line: 'Sign in', a11y: 'MyFantasyLeague, sign in with your account or a league ID' },
+  espn: { name: 'ESPN', line: 'Sign in', a11y: 'ESPN, sign in with your ESPN account' },
+  mfl: { name: 'MFL', line: 'Sign in', a11y: 'MyFantasyLeague, sign in with your MFL account' },
 };
 
 interface Props {
@@ -724,8 +725,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               <View testID="signin.platform-panel">
                 <ChalkText style={styles.platformExplainer}>
                   {entryPlatform === 'espn'
-                    ? 'ESPN dynasty leagues are supported. Sign in to ESPN, or enter a league ID.'
-                    : 'MyFantasyLeague dynasty leagues are supported. Sign in with MFL and we’ll find your leagues, or enter a league ID.'}
+                    ? 'ESPN dynasty leagues are supported. Sign in to ESPN.'
+                    : 'MyFantasyLeague dynasty leagues are supported. Sign in to MFL.'}
                 </ChalkText>
                 {/* Guide spotlight target — collapsable={false} so the
                     wrapper survives view-flattening and stays measurable,

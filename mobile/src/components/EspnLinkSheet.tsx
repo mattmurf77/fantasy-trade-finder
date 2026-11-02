@@ -468,9 +468,6 @@ export default function EspnLinkSheet({
                   We’ll find your leagues — no league ID needed. We never see
                   your password.
                 </Text>
-                <Text style={[type.bodySm, styles.cookieHint]}>
-                  or enter a league ID
-                </Text>
               </>
             ) : null}
             {/* League picker (flag `espn.league_picker`): once we know the

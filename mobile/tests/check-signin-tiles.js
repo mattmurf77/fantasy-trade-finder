@@ -27,11 +27,16 @@
 //      mint a verified acct_* account). SignInScreen calls no /api/entry
 //      route itself.
 //   7. The ESPN/MFL panel explainers claim nothing the door can't keep
-//      (head-eng, from design-lead's #570 render): ESPN's has no "we'll find
-//      your leagues" (ESPN sign-in only works for private-league owners), and
-//      neither says "no extra account needed" (some MFL paths go to Apple).
+//      (marketing addendum 16 row 3, 11-02): exactly "… Sign in to ESPN." and
+//      "… Sign in to MFL.". No "league ID" (the verified sign-in refuses an ID
+//      alone), no "we'll find", and nothing on the screen says "no extra
+//      account" (some MFL paths go to Apple).
 //   8. The returning-user landing fits an iPhone SE with the tiles: the
 //      session-expired notice's marginBottom is space.md - 5 (652 → 647pt).
+//   9. The entry sheets a tile opens (EspnLinkSheet / PlatformLinkSheet in
+//      entry mode) don't offer "or enter a league ID" either (marketing
+//      addendum 16, 11-02): the verified sign-in refuses an ID alone. Both
+//      clauses were entry-only; Settings' link mode never showed them.
 //
 // Run: node tests/check-signin-tiles.js
 
@@ -96,6 +101,11 @@ const styleProps = (name) => {
       : [q.name.getText(sf), ts.isPropertyAssignment(q) ? q.initializer.getText(sf) : '...']))) : null;
 };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const PLATFORM_TILE_LABELS = () => {
+  const decl = findAll(sf, (n) => ts.isVariableDeclaration(n) && n.name.getText(sf) === 'PLATFORM_TILE')[0];
+  return Object.fromEntries((decl ? decl.initializer.properties : []).map((p) => [p.name.getText(sf),
+    p.initializer.properties.map((q) => (ts.isStringLiteral(q.initializer) ? q.initializer.text : '')).join(' | ')]));
+};
 
 const rows = findAll(sf, (n) => ts.isJsxOpeningElement(n) && tagName(n) === 'View'
   && attrText(n, 'style') === 'styles.platformRow');
@@ -151,12 +161,12 @@ check('3. PLATFORM_TILE: sleeper, espn and mfl, word for word as marketing\'s ad
     expect(!/soon|coming|unavailable|not available/i.test(Object.values(v).join(' ')),
       `PLATFORM_TILE.${k} promises a later platform: ${JSON.stringify(v)}`);
   }
-  // marketing-lead copy §6 addendum 16 (#570): an SE tile's line fits about
-  // 10 characters; VoiceOver has no width limit.
+  // marketing-lead copy §6 addendum 16 (#570; labels revised 11-02): an SE
+  // tile's line fits about 10 characters; VoiceOver has no width limit.
   const FINAL = {
     sleeper: { name: 'Sleeper', line: 'Username', a11y: 'Sleeper, sign in with your username, no password needed' },
-    espn: { name: 'ESPN', line: 'Sign in', a11y: 'ESPN, sign in with your ESPN account or a league ID' },
-    mfl: { name: 'MFL', line: 'Sign in', a11y: 'MyFantasyLeague, sign in with your account or a league ID' },
+    espn: { name: 'ESPN', line: 'Sign in', a11y: 'ESPN, sign in with your ESPN account' },
+    mfl: { name: 'MFL', line: 'Sign in', a11y: 'MyFantasyLeague, sign in with your MFL account' },
   };
   for (const [k, v] of entries) {
     expect(same(v, FINAL[k]), `PLATFORM_TILE.${k} is ${JSON.stringify(v)}, want ${JSON.stringify(FINAL[k])}`);
@@ -211,8 +221,8 @@ check('6. the ESPN/MFL door mints only through POST /api/entry/platform', () => 
 });
 
 check('7. the ESPN/MFL explainers claim only what the door does', () => {
-  const ESPN = 'ESPN dynasty leagues are supported. Sign in to ESPN, or enter a league ID.';
-  const MFL = 'MyFantasyLeague dynasty leagues are supported. Sign in with MFL and we’ll find your leagues, or enter a league ID.';
+  const ESPN = 'ESPN dynasty leagues are supported. Sign in to ESPN.';
+  const MFL = 'MyFantasyLeague dynasty leagues are supported. Sign in to MFL.';
   const panel = findAll(sf, (n) => ts.isJsxOpeningElement(n) && attrText(n, 'testID') === 'signin.platform-panel')[0];
   expect(panel, 'no signin.platform-panel');
   const cond = findAll(panel.parent, (n) => ts.isConditionalExpression(n)
@@ -223,12 +233,22 @@ check('7. the ESPN/MFL explainers claim only what the door does', () => {
   expect(cond.whenFalse.text === MFL, `the MFL explainer is "${cond.whenFalse.text}", want "${MFL}"`);
   const strings = findAll(sf, (n) => ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)).map((n) => n.text);
   expect(!strings.some((t) => /no extra account/i.test(t)), 'a string still says "no extra account"');
+  const tiles = Object.values(PLATFORM_TILE_LABELS());
+  expect(![cond.whenTrue.text, cond.whenFalse.text, ...tiles].some((t) => /league ID|we(’|')ll find/i.test(t)),
+    'an explainer or tile label still offers a league ID or says "we\'ll find"');
 });
 
 check('8. the session-expired notice leaves the returning-user landing on one SE screen', () => {
   const n = styleProps('reauthNotice');
   expect(n && n.marginBottom === 'space.md - 5',
     `styles.reauthNotice.marginBottom is ${n && n.marginBottom}, want space.md - 5`);
+});
+
+check('9. the entry sheets the tiles open offer no "or enter a league ID"', () => {
+  for (const rel of ['src/components/EspnLinkSheet.tsx', 'src/components/PlatformLinkSheet.tsx']) {
+    const src = stripComments(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+    expect(!/or enter a league ID/i.test(src), `${rel} still says "or enter a league ID"`);
+  }
 });
 
 console.log(failures === 0

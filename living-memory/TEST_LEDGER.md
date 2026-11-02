@@ -332,6 +332,10 @@ Gates: full (`docs/plans/prelaunch-onboarding/scope-signin-three-tiles.md`). No 
   - New pins 7 and 8. Sabotage 6/6 red: each clause put back, "no extra account" moved to another string, the margin back to `space.md`, and `space.sm` (only 4pt).
   - Earlier sets: the 14 `SignInScreen.tsx` structure mutations and 5/5 words. tsc clean, all 136 check-*.js pass, testid-lint OK. **Total: 26 sabotages** (15 structure, 5 words, 6 fixes).
 - **release-lead QA at `cf636ae2`: GO-with-notes.** Taken here: P2-3 (`docs/design/components.md` now describes the app tiles and keeps the web chips until parity, with `espn.signin`); P2-4 (the checklist's preamble says which state is reachable before and after #430, who flips flags prod-wide with a relaunch, and how to produce step 7's expired-session state); the scope's prod-state line (`landing.platform_options` is TRUE today; ask 12 pending); and this entry's counts. Waiting: P2-1, the "or a league ID" wording (marketing, via head-eng), then P2-2, design-lead's re-render.
+- **P2-1 done: marketing addendum 16, revised 11-02** (head-bizops → head-eng, delivered by the coordinator): "or a league ID" is withdrawn. The labels are "ESPN, sign in with your ESPN account" · "MyFantasyLeague, sign in with your MFL account" (Sleeper's is unchanged). The explainers are "ESPN dynasty leagues are supported. Sign in to ESPN." · "MyFantasyLeague dynasty leagues are supported. Sign in to MFL.", replacing the 3e trim.
+  - The sheets' entry-only "or enter a league ID" clause (`EspnLinkSheet`, `PlatformLinkSheet`) is removed too. Entry mode refuses an ID alone under the verified sign-in; link mode never showed it. Removal only.
+  - Web (`web/index.html:211`, `:236`, `:243`) is left for the web-parity follow-up.
+  - Pins 3 and 7 updated, plus a new pin 9. Sabotage 7/7: each label, each explainer and each sheet clause put back. Total: 33. Still waiting on P2-2, design-lead's re-render.
 
 ## 2026-10-29 — G3-e: `deck_outcomes.user_id`; account deletion and export also match an outcome by its owner
 
