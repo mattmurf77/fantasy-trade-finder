@@ -36,7 +36,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, TickLabel } from '../../components/chalkline';
 import FeedbackFAB from '../../components/FeedbackFAB';
 import Toast from '../../components/Toast';
-import { FA_MOVE_FALLBACK_COPY, readConsentStatus, withdrawConsent, type LeaguePlatform } from '../../api/faMove';
+import {
+  invalidateCapabilities,
+  readConsentStatus,
+  withdrawConsent,
+  FA_MOVE_FALLBACK_COPY,
+  type LeaguePlatform,
+} from '../../api/faMove';
 import { isEspnLeague } from '../../api/espn';
 import { isMflLeague } from '../../api/platformLink';
 import { useSession } from '../../state/useSession';
@@ -97,8 +103,9 @@ export default function SettingsLeaguesScreen({ navigation }: any) {
 // D1 — Stop roster moves (scope §C state 15; consent.md §4.4). Shown only
 // while the consent GET says a grant is active (contract §2: 200 with
 // `valid: false` when there's none; a 404 is an older server, read the same
-// way; any other error shows nothing). This client has no request option
-// that keeps that 404 out of api_request_failed.
+// way; any other error shows nothing). The read asks the client to keep a
+// 403 / 404 quiet (`quietStatuses`, no api_request_failed) and is a
+// `background` call, so a refusal opens no paywall or VerifySheet.
 // One tap, no dialog (K-F7). The server's withdrawal notice (R15.2.6)
 // replaces the row verbatim and takes VoiceOver focus; the row goes. A
 // failed DELETE keeps the row (the grant stays in force) with a line saying so.
@@ -134,8 +141,10 @@ function RosterMovesRow({ platform }: { platform: LeaguePlatform }) {
       setStopped(true);
       setNotice(typeof out?.notice === 'string' && out.notice ? out.notice : null);
       queryClient.invalidateQueries({ queryKey: ['platform-write-consent', platform] });
-      // The claim sheet's capability (consent_until) rides on the FA read.
+      // The claim sheet's capability (consent_until) rides on the FA read,
+      // and Usage Trends keeps its own prefetched copy.
       queryClient.invalidateQueries({ queryKey: ['free-agents'] });
+      void invalidateCapabilities(queryClient);
     } catch {
       setFailed(true);
       // iOS ignores accessibilityLiveRegion, so say it.

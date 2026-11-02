@@ -26,13 +26,12 @@ import { ApiError } from '../api/client';
 import { track } from '../api/events';
 import { getFreeAgents } from '../api/league';
 import {
+  capabilityAtTap,
   capabilityForRow,
-  faMoveCapabilityKey,
   faMoveOpensSheet,
-  readLeagueCapability,
-  FA_MOVE_CAPABILITY_STALE_MS,
+  prefetchLeagueCapability,
+  prefetchListCapabilities,
   type FaMoveCapability,
-  type LeagueCapability,
 } from '../api/faMove';
 import { getUsageTrends, type UsageMetric, type UsagePlayer } from '../api/usageTrends';
 import { useFlag } from '../state/useFeatureFlags';
@@ -151,15 +150,12 @@ export default function UsageTrendsScreen() {
   // D1: the focused league's capability, prefetched once in the background
   // on mount and when the focused league changes, so the card's own Add can
   // route by it. A real Sleeper league session only (never demo or local, and
-  // not with no league). Same trimmed fetch and 60 s staleTime as the list
-  // prefetch; nothing on the Add path waits for it.
+  // not with no league). Same trimmed fetch, 60 s staleTime and no retry as
+  // the list prefetch; nothing on the Add path waits for it. While dark (or
+  // with moves off) this is the visit's only capability read.
   useEffect(() => {
     if (!enabled || !focusId || resolveAddPlatform(focusId, isDemo) !== 'sleeper') return;
-    void queryClient.prefetchQuery({
-      queryKey: faMoveCapabilityKey(focusId),
-      queryFn: () => readLeagueCapability(focusId),
-      staleTime: FA_MOVE_CAPABILITY_STALE_MS,
-    });
+    void prefetchLeagueCapability(queryClient, focusId);
   }, [enabled, focusId, isDemo, queryClient]);
   const faQuery = useQuery({
     queryKey: ['free-agents', claim?.leagueId, 'ALL'],
@@ -311,33 +307,26 @@ export default function UsageTrendsScreen() {
     navigation.navigate('Main', { screen: 'Trades', params: { screen: 'TradesHome' } });
   };
 
-  // D1: each listed league's capability, prefetched in the background when an
-  // availability list opens (the sheet, or an expanded row), under its own
-  // key with a 60 s staleTime; the cache keeps only `move` and the rows'
-  // move_* fields. Leagues where Add shows only.
+  // D1: the listed leagues' capabilities, prefetched in the background when an
+  // availability list opens (the sheet, or an expanded row), each under its
+  // own key (60 s staleTime, no retry); the cache keeps only `move` and the
+  // rows' move_* fields. Only once the focused league's cached capability
+  // says `submit` (dark or moves off: no list reads), then at most six of
+  // the leagues where Add shows, Sleeper first (release-lead P2-A).
   const prefetchCapabilities = (rows: UsageLeagueRow[]) => {
     if (isDemo) return;
-    for (const r of rows) {
-      if (r.status !== 'free_agent') continue;
-      void queryClient.prefetchQuery({
-        queryKey: faMoveCapabilityKey(r.league_id),
-        queryFn: () => readLeagueCapability(r.league_id),
-        staleTime: FA_MOVE_CAPABILITY_STALE_MS,
-      });
-    }
+    prefetchListCapabilities(queryClient, focusId, rows, (id) => resolveAddPlatform(id, isDemo) === 'sleeper');
   };
 
   const doAdd = async (p: UsagePlayer, lgId: string) => {
     trackAction('add', p, lgId);
     const platform = resolveAddPlatform(lgId, isDemo);
     // D1 (scope §B1): the server's capability first, but only if it's already
-    // cached; the tap never waits for it. Uncached (or today's server) routes
-    // exactly as #509: Sleeper opens the sheet in hand-off, the rest get the
-    // alert. The sheet still reads its own list after the switch.
-    const cap = capabilityForRow(
-      isDemo ? undefined : queryClient.getQueryData<LeagueCapability>(faMoveCapabilityKey(lgId)),
-      p.player_id,
-    );
+    // cached, fresh (under 5 minutes) and not invalidated since; the tap never
+    // waits for it. Otherwise (or on today's server) it routes exactly as
+    // #509: Sleeper opens the sheet in hand-off, the rest get the alert. The
+    // sheet still reads its own list after the switch.
+    const cap = capabilityForRow(isDemo ? undefined : capabilityAtTap(queryClient, lgId), p.player_id);
     await closeSheetFirst();
     if (platform !== 'sleeper' && !faMoveOpensSheet(cap.move, cap.row)) {
       explainNoAdd(platform);

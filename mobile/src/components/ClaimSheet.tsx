@@ -53,6 +53,7 @@ import {
   faMoveGate,
   fetchConsentStep,
   fillTemplate,
+  invalidateCapabilities,
   isSubmitCapability,
   moveCopy,
   rowMoveFields,
@@ -413,9 +414,12 @@ export default function ClaimSheet({
   }
 
   // F12: a terminal result refreshes the FA list, drop list, FAAB and the
-  // capability together (all one read), on both hosts' keys.
+  // capability together (all one read), on both hosts' keys. Usage Trends'
+  // prefetched capabilities go stale too, so its next Add routes legacy
+  // until they're read again.
   function refreshList() {
     void queryClient.invalidateQueries({ queryKey: ['free-agents', leagueId] });
+    void invalidateCapabilities(queryClient);
   }
 
   function requestClose() {
@@ -887,7 +891,8 @@ export default function ClaimSheet({
               {slot('window_line', { date: windowDateText(move?.consent_until) })}
               {' · '}
             </Text>
-            {/* Its own accessible button, not nested text (VoiceOver). */}
+            {/* Its own accessible button, not nested text (VoiceOver); dims
+                while sending, like Cancel and "Do it in Sleeper instead". */}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={slot('turn_off') ?? undefined}
@@ -895,6 +900,7 @@ export default function ClaimSheet({
               disabled={busy}
               onPress={turnOff}
               hitSlop={8}
+              style={busy ? sheetStyles.linkDisabled : undefined}
             >
               <Text style={[sheetStyles.dimLine, sheetStyles.inlineLink]}>{slot('turn_off')}</Text>
             </Pressable>
@@ -1313,6 +1319,8 @@ const sheetStyles = StyleSheet.create({
   // Refusals are --neg text, never a fill.
   negLine: { ...type.bodySm, color: semantic.neg },
   inlineLink: { color: chalk.base, textDecorationLine: 'underline' },
+  // The chalkline Button's disabled opacity, for the Turn off link.
+  linkDisabled: { opacity: 0.45 },
   windowRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
   linksRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm },
   linkText: { ...type.bodySm, color: chalk.dim, textDecorationLine: 'underline' },

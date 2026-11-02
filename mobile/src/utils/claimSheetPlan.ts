@@ -129,9 +129,10 @@ export interface Plan {
 
 /** State 11 with nothing sent: offline at the tap, or a consent GET that
  *  never got an answer. Fleeced's own server wasn't reached, so the line
- *  names no platform. The same named CTA is the retry. */
+ *  names no platform: the `offline_line` slot, else its fallback. The same
+ *  named CTA is the retry. */
 export function planNotSent(copy: CopyFns): Plan {
-  return { view: { step: 'ready', ctaNotice: { text: copy.fallback('offline_line') ?? '', tone: 'neg' } } };
+  return { view: { step: 'ready', ctaNotice: { text: copy.slot('offline_line') ?? '', tone: 'neg' } } };
 }
 
 /** 8 / 9. A pending claim also marks the host's row for the session. */

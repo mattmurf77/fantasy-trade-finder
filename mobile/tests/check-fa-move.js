@@ -82,6 +82,17 @@
 //   P3.1–P3.8 the double-tap guard, numeric consent_until, any move_mode,
 //       the neutral panel, open_platform reserved, per-link Terms/Privacy,
 //       the offline line, the accessibility announcements                 [executed + AST]
+// Round 7 (release-lead's delta QA of ff175836), on the app's own QueryClient
+// (src/state/queryClient.ts, query-core's timers on the fake clock):
+//   P2A Usage Trends' list prefetch only once the focused league says
+//       submit, at most six leagues, Sleeper first; no retries anywhere:
+//       dark → one read a visit                                            [executed + AST]
+//   S1  a stale capability routes legacy: invalidated (Stop roster moves,
+//       a terminal sheet result) or older than 5 minutes                   [executed + AST]
+//   S2  offline_line is a server slot, then the fallback                   [executed]
+//   S3  Turn off dims while sending, at the Button's disabled opacity      [AST]
+//   S4  consentLinks takes Terms / Privacy by exact label only             [executed]
+//   S5  Settings' comment matches the client                               [text]
 // Round 5 (head-eng's design note; legal R28.26 / R28.27):
 //   B1  a working button keeps full brightness with its spinner, takes no
 //       tap (#364's Button: `loading`, not `disabled`)                     [executed + AST]
@@ -111,6 +122,23 @@ try {
   console.error('typescript not resolvable — run `npm install` in mobile/ first.');
   process.exit(2);
 }
+
+// The app's QueryClient runs on @tanstack/query-core (the class react-query
+// re-exports), its timers on each harness's fake clock (round 7, P2-A).
+let qcore;
+try {
+  qcore = require('@tanstack/query-core');
+} catch {
+  console.error('@tanstack/query-core not resolvable — run `npm install` in mobile/ first.');
+  process.exit(2);
+}
+let qClock = null;
+qcore.timeoutManager.setTimeoutProvider({
+  setTimeout: (fn, ms) => qClock.setTimeout(fn, ms),
+  clearTimeout: (id) => qClock.clearTimeout(id),
+  setInterval: () => { throw new Error('query-core asked for an interval'); },
+  clearInterval: () => {},
+});
 
 const ROOT = process.env.FTF_MOBILE_TEST_ROOT || path.resolve(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -319,6 +347,15 @@ function harness() {
     setNet: (s) => { net = s; },
   };
 }
+// The app's own QueryClient (src/state/queryClient.ts: retry 1, 30 s stale,
+// 30 min gc), loaded fresh on a harness, so a prefetch runs the real
+// readLeagueCapability through the real client under the fake clock.
+function queryHarness() {
+  const h = harness();
+  qClock = h.time;
+  const mod = load('src/state/queryClient.ts', only({ '@tanstack/react-query': qcore }), h.time);
+  return { ...h, qc: mod.queryClient };
+}
 function watch(p) {
   const s = { state: 'pending', value: undefined };
   p.then((v) => { s.state = 'resolved'; s.value = v; }, (e) => { s.state = 'rejected'; s.value = e; });
@@ -423,7 +460,7 @@ process.on('exit', () => {
     const ut = read(USAGE_TRENDS);
     expect(/if \(platform !== 'sleeper' && !faMoveOpensSheet\(cap\.move, cap\.row\)\) \{\s*explainNoAdd\(platform\);\s*return;\s*\}/.test(ut),
       'UsageTrendsScreen doAdd');
-    expect(/move=\{claim\.move\}/.test(ut) && /capabilityForRow\(/.test(ut) && /getQueryData<LeagueCapability>\(faMoveCapabilityKey\(lgId\)\)/.test(ut),
+    expect(/move=\{claim\.move\}/.test(ut) && /capabilityForRow\(isDemo \? undefined : capabilityAtTap\(queryClient, lgId\), p\.player_id\)/.test(ut),
       'Usage Trends routes by the cached capability and passes it');
   });
 
@@ -1024,12 +1061,12 @@ process.on('exit', () => {
       eq([none, h.faMove.faMoveOpensSheet(none.move, none.row)], [{ move: null, row: {} }, false], 'uncached → legacy');
       const doAdd = declText(parse(USAGE_TRENDS), 'doAdd');
       const firstAwait = doAdd.indexOf('await ');
-      expect(doAdd.indexOf('getQueryData<LeagueCapability>(faMoveCapabilityKey(lgId))') > 0
-        && doAdd.indexOf('getQueryData') < firstAwait, 'the cache is read before any await');
+      expect(doAdd.indexOf('capabilityAtTap(queryClient, lgId)') > 0
+        && doAdd.indexOf('capabilityAtTap') < firstAwait, 'the cache is read before any await');
       eq(doAdd.match(/await [\w.]+\(/g), ['await closeSheetFirst(', 'await switchTo('], '#509\'s awaits only');
       expect(!/fetchQuery|ensureQueryData|readLeagueCapability|prefetchQuery/.test(doAdd), 'doAdd reads the capability');
       const ut = read(USAGE_TRENDS);
-      expect(/queryClient\.prefetchQuery\(\{\s*queryKey: faMoveCapabilityKey\(r\.league_id\),\s*queryFn: \(\) => readLeagueCapability\(r\.league_id\),\s*staleTime: FA_MOVE_CAPABILITY_STALE_MS,/.test(ut)
+      expect(/prefetchListCapabilities\(queryClient, focusId, rows, \(id\) => resolveAddPlatform\(id, isDemo\) === 'sleeper'\);/.test(ut)
         && (ut.match(/prefetchCapabilities\(leagueRowsFor\(p\)\);/g) || []).length === 2, 'prefetched when the sheet opens and when a row expands');
       expect(!/queryKey: \['free-agents', lgId|setQueryData/.test(ut), 'the sheet\'s key is written');
       for (const f of ['src/components/UsageTrendCard.tsx', 'src/components/UsageStatsTable.tsx', 'src/components/UsageLeagueList.tsx']) {
@@ -1326,17 +1363,142 @@ process.on('exit', () => {
 
   await check('X5b the focused league\'s capability is prefetched on mount (Sleeper only, never demo, local or no league), and no tap waits for it', () => {
     const sf = parse(USAGE_TRENDS);
-    const effects = calls(sf, 'useEffect').map((c) => c.getText(sf)).filter((t) => /prefetchQuery/.test(t));
+    const effects = calls(sf, 'useEffect').map((c) => c.getText(sf)).filter((t) => /prefetch/i.test(t));
     eq(effects.length, 1, 'mount prefetch effects');
     const t = effects[0];
     expect(/if \(!enabled \|\| !focusId \|\| resolveAddPlatform\(focusId, isDemo\) !== 'sleeper'\) return;/.test(t), 'the Sleeper-session guard');
-    expect(/queryKey: faMoveCapabilityKey\(focusId\),\s*queryFn: \(\) => readLeagueCapability\(focusId\),\s*staleTime: FA_MOVE_CAPABILITY_STALE_MS,/.test(t),
-      'the same key, trimmed fetch and 60 s staleTime');
+    expect(/\n\s*void prefetchLeagueCapability\(queryClient, focusId\);/.test(t) && !/await/.test(t),
+      'fire and forget, through the shared helper (key, trimmed fetch, 60 s, no retry: P2A executes it)');
     expect(/\}, \[enabled, focusId, isDemo, queryClient\]\)$/.test(t), 'reruns when the focused league changes');
-    expect(/^void queryClient\.prefetchQuery|\n\s*void queryClient\.prefetchQuery\(/.test(t) && !/await/.test(t), 'fire and forget');
+    expect(!/prefetchQuery|getQueryData/.test(read(USAGE_TRENDS)), 'the screen touches the capability cache only through faMove\'s helpers');
     const doAdd = declText(sf, 'doAdd');
     eq(doAdd.match(/await [\w.]+\(/g), ['await closeSheetFirst(', 'await switchTo('], 'the Add path waits for nothing new');
   });
+
+  // ── Review round 7 (release-lead's delta QA): P2A, S1–S5 ────────────────
+  {
+    // 14 leagues: the focused Sleeper league S0, six more Sleeper, three ESPN,
+    // three MFL (all with the player free), and one where he's rostered.
+    const ROWS = [
+      ...['S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6'].map((id) => ({ league_id: id, status: 'free_agent' })),
+      ...['E1', 'E2', 'E3', 'M1', 'M2', 'M3'].map((id) => ({ league_id: id, status: 'free_agent' })),
+      { league_id: 'R1', status: 'rostered' },
+    ];
+    const isS = (id) => id.startsWith('S');
+    const lg = (url) => new URL(url).searchParams.get('league_id');
+    const reads = (q) => q.requests.map((r) => lg(r.url));
+    const page = (move) => response(200, { ...(move ? { move } : {}), free_agents: [{ player_id: 'p1', name: 'A', value: 1 }] });
+    // The visit: the mount prefetch for S0, then an availability list opens.
+    // Driven by the fake clock, never awaited: a retry would wait on it.
+    async function visit(focusMove, respond = () => page(focusMove)) {
+      const q = queryHarness();
+      q.respond((url) => respond(lg(url)));
+      void q.faMove.prefetchLeagueCapability(q.qc, 'S0');
+      await q.time.advance(10);
+      const asked = q.faMove.prefetchListCapabilities(q.qc, 'S0', ROWS, isS);
+      await q.time.advance(60_000); // any retry would have fired
+      return { q, asked };
+    }
+    await check('P2A dark, or a handoff / unsupported focus: one read per visit (the mount prefetch), none from the list', async () => {
+      for (const [label, move] of [['dark', null], ['handoff', { ...SUBMIT, mode: 'handoff' }],
+        ['unsupported', { ...SUBMIT, mode: 'unsupported' }]]) {
+        const { q, asked } = await visit(move);
+        eq([asked, reads(q)], [[], ['S0']], label);
+      }
+      const { q, asked } = await visit(null, () => response(500, { error: 'internal_error' }));
+      eq([asked, reads(q)], [[], ['S0']], 'a failed mount prefetch: one read, no retry, and no list reads');
+    });
+    await check('P2A a submit focus: at most six list leagues, Sleeper first, one read each, no retries', async () => {
+      const { q, asked } = await visit(SUBMIT, (id) => (id === 'S0' ? page(SUBMIT) : response(500, { error: 'internal_error' })));
+      eq(asked, ['S0', 'S1', 'S2', 'S3', 'S4', 'S5'], 'the six asked for');
+      eq(reads(q), ['S0', 'S1', 'S2', 'S3', 'S4', 'S5'], 'reads (S0 still fresh from the mount; each failure read once)');
+      const few = queryHarness();
+      few.respond(() => page(SUBMIT));
+      await few.faMove.prefetchLeagueCapability(few.qc, 'S0');
+      const mixed = [{ league_id: 'E1', status: 'free_agent' }, { league_id: 'S0', status: 'free_agent' },
+        { league_id: 'M1', status: 'free_agent' }, { league_id: 'S1', status: 'free_agent' }, { league_id: 'E2', status: 'free_agent' },
+        { league_id: 'E3', status: 'free_agent' }, { league_id: 'M2', status: 'free_agent' }, { league_id: 'M3', status: 'rostered' }];
+      eq(few.faMove.prefetchListCapabilities(few.qc, 'S0', mixed, isS), ['S0', 'S1', 'E1', 'M1', 'E2', 'E3'], 'Sleeper first, then the rest, capped');
+      eq(few.faMove.prefetchListCapabilities(few.qc, undefined, mixed, isS), [], 'no focused league: nothing');
+      eq(few.faMove.FA_MOVE_LIST_PREFETCH_MAX, 6, 'the cap');
+    });
+    await check('P2A the screen: the mount prefetch and the list prefetch go through the two helpers; Settings / demo untouched', () => {
+      const ut = read(USAGE_TRENDS);
+      const list = declText(parse(USAGE_TRENDS), 'prefetchCapabilities');
+      expect(/^\(rows: UsageLeagueRow\[\]\) => \{\s*if \(isDemo\) return;\s*prefetchListCapabilities\(queryClient, focusId, rows, \(id\) => resolveAddPlatform\(id, isDemo\) === 'sleeper'\);\s*\}$/.test(list),
+        `prefetchCapabilities = ${list.slice(0, 160)}`);
+      eq((ut.match(/prefetchLeagueCapability\(/g) || []).length, 1, 'mount prefetch calls');
+      const helper = declText(fa, 'prefetchLeagueCapability');
+      expect(/queryKey: faMoveCapabilityKey\(leagueId\),\s*queryFn: \(\) => readLeagueCapability\(leagueId\),\s*staleTime: FA_MOVE_CAPABILITY_STALE_MS,\s*retry: false,/.test(helper),
+        'one key, the trimmed fetch, 60 s, retry: false');
+    });
+
+    await check('S1 a stale capability at the Add tap routes legacy: invalidated, or older than 5 minutes', async () => {
+      const q = queryHarness();
+      q.respond(() => page(SUBMIT));
+      await q.faMove.prefetchLeagueCapability(q.qc, 'S1');
+      const at = q.qc.getQueryState(q.faMove.faMoveCapabilityKey('S1')).dataUpdatedAt;
+      const tap = (now) => q.faMove.capabilityAtTap(q.qc, 'S1', now);
+      const MAX = q.faMove.FA_MOVE_CAPABILITY_MAX_AGE_MS;
+      eq(MAX, 300_000, '5 minutes');
+      eq([!!tap(at), !!tap(at + MAX), !!tap(at + MAX + 1)], [true, true, false], 'fresh, at 5 min, past 5 min');
+      eq(tap(at)?.move?.mode, 'submit', 'routes by the cached capability');
+      eq(q.faMove.capabilityAtTap(q.qc, 'S9', at), undefined, 'uncached');
+      const before = q.requests.length;
+      await q.faMove.invalidateCapabilities(q.qc);
+      await q.time.advance(60_000);
+      eq(tap(at), undefined, 'invalidated → legacy');
+      eq(q.requests.length, before, 'invalidating re-reads nothing (no fan-out)');
+      eq(q.faMove.capabilityForRow(tap(at), 'p1'), { move: null, row: {} }, 'and the host routes legacy');
+      await q.faMove.prefetchLeagueCapability(q.qc, 'S1');
+      eq(q.requests.length, before + 1, 'the next prefetch re-reads it');
+      const now2 = q.qc.getQueryState(q.faMove.faMoveCapabilityKey('S1')).dataUpdatedAt;
+      eq(tap(now2)?.move?.mode, 'submit', 'and it routes by it again');
+    });
+    await check('S1 invalidated on Stop roster moves and on every terminal sheet result; the tap reads through capabilityAtTap', () => {
+      expect(/void queryClient\.invalidateQueries\(\{ queryKey: \['free-agents', leagueId\] \}\);\s*void invalidateCapabilities\(queryClient\);/.test(declText(claim, 'refreshList')),
+        'ClaimSheet refreshList');
+      const stop = declText(parse(SETTINGS_LEAGUES), 'stop');
+      const tryPart = stop.slice(stop.indexOf('try {'), stop.indexOf('} catch'));
+      expect(/const out = await withdrawConsent\(platform\);[\s\S]*void invalidateCapabilities\(queryClient\);/.test(tryPart), 'Settings stop(), after the DELETE succeeds');
+      expect(!/invalidateCapabilities/.test(stop.slice(stop.indexOf('} catch'))), 'a failed Stop invalidates nothing');
+      expect(/invalidateQueries\(\{ queryKey: FA_MOVE_CAPABILITY_ROOT \}\)/.test(declText(fa, 'invalidateCapabilities')), 'the whole prefix');
+    });
+  }
+  {
+    const h = harness();
+    const cp = h.plan.copyFns(SUBMIT, { name: 'A', add: 'A', league: 'L' });
+    await check('S2 offline_line is a server slot: the server\'s words first, then the fallback (contract §7)', () => {
+      const served = h.plan.copyFns({ ...SUBMIT, copy: { offline_line: 'Server: no connection, nothing sent.' } }, { add: 'A' });
+      eq(h.plan.planNotSent(served).view.ctaNotice.text, 'Server: no connection, nothing sent.', 'server slot');
+      eq(h.plan.planNotSent(cp).view.ctaNotice.text, "Couldn't connect right now, so nothing was sent.", 'fallback');
+      expect(/\| 'not_sent_line'\s*\| 'offline_line'/.test(faText), 'MoveCopyKey lists offline_line');
+      expect(/PENDING MARKETING/.test(faText), 'the pending-marketing note stays');
+    });
+    await check('S3 Turn off dims while sending, at the chalkline Button\'s disabled opacity', () => {
+      const ready = actionBranches(claim).ready;
+      const turnOff = jsxMounts(claim, 'Pressable', ready).filter((m) => m.attrs.onPress === '{turnOff}');
+      eq(turnOff.map((m) => [m.attrs.disabled, m.attrs.style]), [['{busy}', '{busy ? sheetStyles.linkDisabled : undefined}']], 'Turn off');
+      const mine = /linkDisabled: \{ opacity: ([\d.]+) \}/.exec(claimText);
+      const btn = /\n  disabled: \{ opacity: ([\d.]+) \}/.exec(read(BUTTON));
+      expect(mine && btn && mine[1] === btn[1], `opacity ${mine && mine[1]} vs Button ${btn && btn[1]}`);
+    });
+    await check('S4 consentLinks: a server link takes Fleeced\'s Terms / Privacy slot only by its exact label', () => {
+      const base = h.client.getBaseUrl();
+      const L = (links) => h.faMove.consentLinks(h.faMove.readConsentBlock({ ...BLOCK, links })).map((l) => [l.label, l.url]);
+      eq(L([{ label: 'Sleeper terms', url: 'https://sleeper.example/terms' }, { label: 'Privacy policy', url: 'https://x.example/privacy' }]),
+        [['Terms', `${base}/terms`], ['Privacy', `${base}/privacy`],
+          ['Sleeper terms', 'https://sleeper.example/terms'], ['Privacy policy', 'https://x.example/privacy']], 'near misses follow');
+      eq(L([{ label: ' TERMS ', url: 'https://legal.example/t' }, { label: 'privacy', url: 'https://legal.example/p' }]),
+        [[' TERMS ', 'https://legal.example/t'], ['privacy', 'https://legal.example/p']], 'trimmed, any case');
+      eq(L([{ label: 'Read', url: 'https://legal.example/terms' }]),
+        [['Terms', `${base}/terms`], ['Privacy', `${base}/privacy`], ['Read', 'https://legal.example/terms']], 'a URL alone takes no slot');
+    });
+    await check('S5 Settings\' comment describes today\'s client (quietStatuses, background)', () => {
+      const t = read(SETTINGS_LEAGUES);
+      expect(!/This client has no request option/.test(t) && /`quietStatuses`/.test(t) && /`background` call/.test(t), 'the comment');
+    });
+  }
 
   // ── Review round 6 (release-lead's QA): Q1, P3.1–P3.8 ───────────────────
   {

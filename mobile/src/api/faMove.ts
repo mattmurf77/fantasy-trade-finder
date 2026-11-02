@@ -18,6 +18,8 @@
 
 import NetInfo from '@react-native-community/netinfo';
 
+import type { QueryClient } from '@tanstack/react-query';
+
 import { apiRequest, ApiError, getBaseUrl } from './client';
 import { track } from './events';
 import type { FreeAgentsResponse } from './league';
@@ -56,6 +58,7 @@ export type MoveCopyKey =
   | 'verify_line'
   | 'other_account_line'
   | 'not_sent_line'
+  | 'offline_line'
   | 'unknown_title'
   | 'unknown_body'
   | 'unavailable_line'
@@ -344,13 +347,15 @@ export function readConsentBlock(raw: unknown): ConsentBlock | null {
  *  app, so the pages live at the API base; no second base URL). */
 export function consentLinks(block: ConsentBlock): ConsentLink[] {
   // Per link: Terms and Privacy are always both present, the server's valid
-  // one when it sent one, else the app's own. Any other valid server link
-  // follows them.
+  // one when it sent one, else the app's own. A server link takes Fleeced's
+  // slot only by its exact label ("Terms" / "Privacy", trimmed, any case),
+  // so a "Sleeper terms" link can't stand in for Fleeced's. Any other valid
+  // server link follows them.
   const base = getBaseUrl();
   const sent = block.links ?? [];
-  const named = (re: RegExp) => sent.find((l) => re.test(l.label) || re.test(l.url));
-  const terms = named(/terms/i) ?? { label: FA_MOVE_FALLBACK_COPY.terms_link, url: `${base}/terms` };
-  const privacy = named(/privacy/i) ?? { label: FA_MOVE_FALLBACK_COPY.privacy_link, url: `${base}/privacy` };
+  const named = (label: string) => sent.find((l) => l.label.trim().toLowerCase() === label);
+  const terms = named('terms') ?? { label: FA_MOVE_FALLBACK_COPY.terms_link, url: `${base}/terms` };
+  const privacy = named('privacy') ?? { label: FA_MOVE_FALLBACK_COPY.privacy_link, url: `${base}/privacy` };
   return [terms, privacy, ...sent.filter((l) => l !== terms && l !== privacy)];
 }
 
@@ -648,16 +653,22 @@ export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined
 }
 
 // ── A host's prefetched capability (Usage Trends) ─────────────────────────
-// Usage Trends prefetches each listed league's capability in the background
-// when an availability list opens, so an Add tap can route by it without
-// waiting; an Add whose league isn't cached routes exactly as #509 did. Its
-// own key, never the sheet's ['free-agents', …]: the sheet reads its own list
-// after the league switch.
+// Usage Trends prefetches the focused league's capability in the background
+// on mount, and the listed leagues' when an availability list opens (only
+// once the focused league says `submit`), so an Add tap can route by it
+// without waiting; an Add whose league isn't cached routes exactly as #509
+// did. Its own key, never the sheet's ['free-agents', …]: the sheet reads
+// its own list after the league switch.
 
+export const FA_MOVE_CAPABILITY_ROOT: readonly unknown[] = ['fa-move-capability'];
 export function faMoveCapabilityKey(leagueId: string): readonly unknown[] {
-  return ['fa-move-capability', leagueId];
+  return [...FA_MOVE_CAPABILITY_ROOT, leagueId];
 }
 export const FA_MOVE_CAPABILITY_STALE_MS = 60_000;
+/** At the Add tap, a cached capability older than this routes legacy. */
+export const FA_MOVE_CAPABILITY_MAX_AGE_MS = 5 * 60_000;
+/** An opened availability list prefetches at most this many leagues. */
+export const FA_MOVE_LIST_PREFETCH_MAX = 6;
 
 /** One league's capability, kept as `move` plus each row's move_* fields
  *  only (the cache holds nothing else of the list). */
@@ -683,6 +694,53 @@ export async function readLeagueCapability(leagueId: string): Promise<LeagueCapa
     }
   }
   return { move, rows };
+}
+
+/** One background read of a league's capability into its own key: 60 s
+ *  staleTime and no retry (the app's default is one), so a failed prefetch
+ *  costs one read and leaves that league's Add on the legacy route. */
+export function prefetchLeagueCapability(qc: QueryClient, leagueId: string): Promise<void> {
+  return qc.prefetchQuery({
+    queryKey: faMoveCapabilityKey(leagueId),
+    queryFn: () => readLeagueCapability(leagueId),
+    staleTime: FA_MOVE_CAPABILITY_STALE_MS,
+    retry: false,
+  });
+}
+
+/** An opened availability list (release-lead P2-A): nothing unless the
+ *  focused league's cached capability is `submit`, so a dark server or moves
+ *  turned off cost no list reads; then at most FA_MOVE_LIST_PREFETCH_MAX of
+ *  the free-agent leagues, Sleeper first. Returns the leagues it asked for. */
+export function prefetchListCapabilities(
+  qc: QueryClient,
+  focusId: string | undefined,
+  rows: ReadonlyArray<{ league_id: string; status: string }>,
+  isSleeper: (leagueId: string) => boolean,
+): string[] {
+  const focus = focusId ? qc.getQueryData<LeagueCapability>(faMoveCapabilityKey(focusId)) : undefined;
+  if (!isSubmitCapability(focus?.move)) return [];
+  const free = rows.filter((r) => r.status === 'free_agent').map((r) => r.league_id);
+  const ids = [...free.filter(isSleeper), ...free.filter((id) => !isSleeper(id))].slice(0, FA_MOVE_LIST_PREFETCH_MAX);
+  for (const id of ids) void prefetchLeagueCapability(qc, id);
+  return ids;
+}
+
+/** The cached capability an Add tap may route by: present, not invalidated
+ *  (Stop roster moves or a terminal sheet result since) and at most 5
+ *  minutes old. Anything else is undefined: the tap routes legacy at once. */
+export function capabilityAtTap(qc: QueryClient, leagueId: string, now: number = Date.now()): LeagueCapability | undefined {
+  const state = qc.getQueryState<LeagueCapability>(faMoveCapabilityKey(leagueId));
+  if (!state?.data || state.isInvalidated) return undefined;
+  if (now - state.dataUpdatedAt > FA_MOVE_CAPABILITY_MAX_AGE_MS) return undefined;
+  return state.data;
+}
+
+/** Stop roster moves, and every terminal sheet result: each league's cached
+ *  capability may be out of date (consent rides on it). Marks them stale
+ *  only; nothing is re-read until the next prefetch. */
+export function invalidateCapabilities(qc: QueryClient): Promise<void> {
+  return qc.invalidateQueries({ queryKey: FA_MOVE_CAPABILITY_ROOT });
 }
 
 /** At the Add tap: the cached capability and this row's fields, or none
@@ -844,6 +902,7 @@ export const FA_MOVE_FALLBACK_COPY = {
   // State 11 when Fleeced's own server didn't answer (offline at the tap, a
   // consent GET with no answer): not the platform's fault, so no platform
   // named. not_sent_line stays for the server's {p}_write_failed + network.
+  // A contract §7 slot like the rest: the server's offline_line wins when sent.
   // PENDING MARKETING (platforms-eng is telling them).
   offline_line: "Couldn't connect right now, so nothing was sent.",
   unknown_title: 'Check before resending',
