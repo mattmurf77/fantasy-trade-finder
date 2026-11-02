@@ -74,18 +74,20 @@ def test_failed_generation_discards_stage_without_publishing_or_deleting_user_ro
 
 
 def test_cleanup_distinguishes_persistent_preparation_from_interactive_stalls():
+    limit = server._JOB_HARD_TIMEOUT
     assert not server._trade_job_stalled({"status": "running", "started_at": 0.,
-        "source": "prepared_inventory"}, 301.)
-    assert server._trade_job_stalled({"status": "running", "started_at": 0.}, 61.)
-    assert not server._trade_job_stalled({"status": "complete", "started_at": 0.}, 301.)
+        "source": "prepared_inventory"}, 2. * limit + 1)
+    assert server._trade_job_stalled({"status": "running", "started_at": 0.}, limit + 1.)
+    assert not server._trade_job_stalled({"status": "complete", "started_at": 0.}, 2. * limit + 1)
 
 
 def test_only_durable_adoption_progress_refreshes_the_existing_stall_timer():
+    limit = server._JOB_HARD_TIMEOUT
     job = {"status": "running", "started_at": 0., "prepared_inventory_id": "synthetic"}
-    assert server._trade_job_stalled(job, 61.)
-    job["prepared_progress_at"] = 60.
-    assert not server._trade_job_stalled(job, 119.)
-    assert server._trade_job_stalled(job, 121.)
+    assert server._trade_job_stalled(job, limit + 1.)
+    job["prepared_progress_at"] = float(limit)
+    assert not server._trade_job_stalled(job, 2. * limit - 1)
+    assert server._trade_job_stalled(job, 2. * limit + 1)
 
 
 def test_dark_cache_keeps_bounded_retention_without_starting_generation(monkeypatch):

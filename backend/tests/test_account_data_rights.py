@@ -123,6 +123,12 @@ def test_export_happy_path_matches_deletion_matrix(client):
             league_id="lg1", user_a_id="other_uid", user_b_id=UID,
             user_a_give="[]", user_a_receive="[]", status="pending",
         ))
+        for creator, tok in ((UID, "SHARE_TOKEN_MINE_0000000"),
+                             ("other_uid", "SHARE_TOKEN_THEIRS_00000")):
+            conn.execute(insert(db_module.trade_share_tokens_table).values(
+                token=tok, match_id=1, created_by=creator,
+                created_at="2026-10-20T00:00:00+00:00",
+            ))
 
     r = c.get("/api/account/export", headers=_h(token))
     assert r.status_code == 200, r.get_data(as_text=True)
@@ -140,7 +146,7 @@ def test_export_happy_path_matches_deletion_matrix(client):
         "notification_queue", "user_events", "wrapped_events",
         "sleeper_credentials", "league_members", "leagues",
         "bad_trade_flags", "trade_impressions", "app_feedback",
-        "trade_matches", "accounts", "linked_identities",
+        "trade_matches", "accounts", "linked_identities", "trade_share_tokens",
     }
     assert expected <= set(tables.keys())
 
@@ -152,6 +158,12 @@ def test_export_happy_path_matches_deletion_matrix(client):
     # Encrypted Sleeper credential is never exported.
     assert len(tables["sleeper_credentials"]) == 1
     assert "token_encrypted" not in tables["sleeper_credentials"][0]
+    # Build O8: the user's own trade share links, without the bearer token.
+    shares = tables["trade_share_tokens"]
+    assert [(s["created_by"], s["match_id"]) for s in shares] == [(UID, 1)]
+    assert "token" not in shares[0]
+    exported = json.dumps(archive)
+    assert "SHARE_TOKEN_MINE" not in exported and "SHARE_TOKEN_THEIRS" not in exported
 
 
 # ---------------------------------------------------------------------------

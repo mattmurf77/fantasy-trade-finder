@@ -119,6 +119,17 @@ def test_deadline_blocks_trades_while_season_projection_remains_possible():
     assert league["completed_weeks"] == 2
 
 
+@pytest.mark.parametrize("wins", [7, 8])
+def test_completed_regular_season_refuses_with_postseason_copy(wins):
+    actor, _, rosters, _, fetch, _ = source_fixture()
+    for r in rosters:
+        r["settings"].update(wins=wins, losses=7)
+    with pytest.raises(service.Unavailable) as info:
+        service.load_league(actor, fetch)
+    assert info.value.reason == "postseason_in_progress_unsupported"
+    assert info.value.message == "This league's regular season is over. Win Now works only before the fantasy playoffs begin."
+
+
 def forecast_bundle_seams(monkeypatch, *, kickoff=None, captured=None):
     actor, _, _, _, fetch, _ = source_fixture()
     league, buyer, meta = service.load_league(actor, fetch)

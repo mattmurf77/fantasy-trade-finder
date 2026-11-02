@@ -24,7 +24,7 @@ import {
   IBMPlexMono_500Medium,
   IBMPlexMono_600SemiBold,
 } from '@expo-google-fonts/ibm-plex-mono';
-import RootNav from './src/navigation/RootNav';
+import RootNav, { navigationRef } from './src/navigation/RootNav';
 import UpdateGateScreen, { APP_VERSION_INT } from './src/screens/UpdateGateScreen';
 import { shouldBlockForUpdate } from './src/utils/appVersion';
 import { useSession } from './src/state/useSession';
@@ -36,6 +36,7 @@ import {
 } from './src/state/useOnboardingState';
 import { useFeedback } from './src/state/useFeedback';
 import { initEntitlements, useEntitlements } from './src/state/useEntitlements';
+import { installPaywallGate } from './src/state/usePaywallGate';
 import {
   hydrateQuicksetProgress,
   refreshQuicksetProgress,
@@ -52,6 +53,11 @@ import { handleDeepLink } from './src/utils/deepLinks';
 // Initialize observability as early as possible so even crashes during
 // bootstrap are captured. No-ops cleanly when no DSN is configured.
 initSentry();
+
+// #393 M1 — the paywall gate: api/client.ts hands every user-initiated 402
+// `pro_required` and gated 403 `verification_required` to this router, which
+// opens the Paywall modal or the VerifySheet. Wired once, before any request.
+installPaywallGate(navigationRef);
 
 // INIT-07 — AsyncStorage persister for cold-cache restoration. Queries
 // whose first key segment is in the allow-list below are dehydrated to

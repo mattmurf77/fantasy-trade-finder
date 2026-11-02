@@ -36,7 +36,7 @@ from backend.database import deck_impressions_table, deck_outcomes_table
 from backend.eval.bdk_audit import (
     FAIL, INCOMPLETE, NOT_AUDITABLE, PASS, ReadOnlyViolation, audit, main, render,
 )
-from backend.eval.contract import card_impression_id
+from backend.eval.contract import REDACTED_PARTNER_PREFIX, card_impression_id
 from backend.tests.test_eval_pack_reader import SERVED, _card, _deck_cards, _row, pack_table
 from backend.tests.test_eval_withdrawals_and_paging import (
     DB, _after, act, make_db, put_pack, withdraw, withdrawals_table,
@@ -99,7 +99,8 @@ def filter_record(market: dict, *, positions=None, **over) -> dict:
             "qb_te": {}, "protected": [], **over}
 
 
-def deck(db: DB, job, n, special=None, *, skip=(), viewed=(), served_at=SERVED, record=None):
+def deck(db: DB, job, n, special=None, *, skip=(), viewed=(), served_at=SERVED, record=None,
+         deliveries=None):
     """Rows for 0..n-1 not in `skip`: a clean card unless `special` maps the
     index to a row; a viewed outcome per index in `viewed`. `record` (a dict
     of filter_record keywords; {} for none): also a pack of all n cards,
@@ -119,7 +120,8 @@ def deck(db: DB, job, n, special=None, *, skip=(), viewed=(), served_at=SERVED, 
         if market is None:
             market = {a: v for r in rows for a, v in eval_data.valuation_markets(
                 eval_data._json_dict(r.get("valuation_json"))).items()}
-        put_pack(db, job, _deck_cards(job, n), card_count=n, deliveries=[[n - 1, served_at]],
+        put_pack(db, job, _deck_cards(job, n), card_count=n,
+                 deliveries=deliveries or [[n - 1, served_at]],
                  served_at=served_at, filter_inputs=filter_record(market, **record))
 
 
@@ -386,16 +388,18 @@ def test_a_repeat_breach_of_protected_cards_only_is_explained():
     assert [(e["deck_job_id"], e["over_cap_protected"]) for e in t["examples"]] == [
         ("bad", [False])]
     assert (t["explained_protected"], t["explained_short_deck"]) == (1, 0)
-    assert "1 (explained: 1 by protected cards, 0 by a short deck)" in render(r)
+    assert "1 (explained: 1 by protected cards, 0 by a short deck, 0 by a response boundary)" in render(r)
 
 
 def test_the_repeat_window_is_by_displayed_position():
     """A never-delivered withdrawal at index 2 moves card W up to displayed
     position W - 1, inside the window: X there is a fourth appearance. (The
-    deck has a card past it, so it isn't a short deck.)"""
+    deck has a card past it, so it isn't a short deck. Its rows are an S1b
+    partial run, so G-b4 audits it from rows.)"""
     db = make_db()
-    deck(db, "w", W + 2, {**{i: with_x("w", i) for i in (10, 11, 12)}, W: with_x("w", W)},
-         skip={2})
+    special = {**{i: with_x("w", i) for i in (10, 11, 12)}, W: with_x("w", W)}
+    deck(db, "w", W + 2, {i: {**special.get(i, row("w", i)), "evidence_tier": "partial_run"}
+                          for i in range(W + 2) if i != 2}, skip={2})
     withdraw(db, "w", 2, 0, reason="disposition_cut")
     t = run(db).rules["repeat"]
     assert t["violations"] == 1 and t["audited"] == W
@@ -421,7 +425,7 @@ def test_a_short_deck_served_as_the_filter_ordered_it_is_explained():
     assert [(e["deck_job_id"], e["why"]) for e in t["explained_examples"]] == [
         ("short", "short_deck")]
     text = render(r)
-    assert "0 (explained: 0 by protected cards, 1 by a short deck)" in text
+    assert "0 (explained: 0 by protected cards, 1 by a short deck, 0 by a response boundary)" in text
     assert "short asset X at card_index 0, 1, 2, 9, 10, 11 (short_deck, over-cap" in text
 
 
@@ -469,8 +473,13 @@ def test_a_pack_less_batch_with_a_never_delivered_withdrawal_is_not_a_short_deck
     withdraw(db, "w0", 5, 0, reason="disposition_cut")
     (d,) = [d for d in eval_data.load_decks(engine=db.eng, since=SINCE, as_of=AS_OF)]
     assert (len(d.cards), d.withdrawn_removed) == (W - 1, 1)
+    rows = ba._full_rows(db.eng.connect(), [c.impression_id for c in d.cards])
+    assert not ba._short_deck(d, rows, lambda ids: {}, False, lambda deck, c, row: row[3])
+    # A live-evidence deck with a cut in its window isn't checked at all (G-b4):
+    # never explained, and B-DK-7 can't PASS on it.
     t = run(db).rules["repeat"]
-    assert (t["violations"], t["explained_short_deck"]) == (1, 0)
+    assert (t["explained_short_deck"], t["after_cut"]["live_evidence"], t["status"]) == (
+        0, 1, NOT_AUDITABLE)
 
 
 def test_a_pack_less_short_deck_in_flight_is_not_explained(monkeypatch):
@@ -876,3 +885,274 @@ def test_help_documents_the_exit_codes(capsys):
     for line in ("0  PASS", "1  FAIL", "2  a refused database or a ReadOnlyViolation",
                  "3  INCOMPLETE", "4  an unexpected error"):
         assert line in out
+
+
+# ---------------------------------------------------------------------------
+# #503 QA follow-ups; models-lead F3 / F4; #515's market_coerced
+# ---------------------------------------------------------------------------
+
+def _clean_market(job, idx):
+    return {a: v for i in idx for side in shape(None, job, i) for a, v in side.items()}
+
+
+def test_a_card_holding_a_coerced_value_is_not_auditable_for_breakup_and_filler():
+    """#515: the filter saw NaN/inf there, recorded null and listed in
+    market_coerced. Breakup and filler read it order-dependently, so they
+    can't be checked; B-DK-6 reads it as None and still checks the card."""
+    db = make_db()
+    give, receive = shape("breakup", "d", 1)
+    market = {**_clean_market("d", (0,)), **dict.fromkeys(give), **receive}
+    deck(db, "d", 2, {1: row("d", 1, give, receive)},
+         record={"market": market, "market_coerced": sorted(give)})
+    r = run(db)
+    for name in ("breakup", "filler"):
+        assert (r.rules[name]["audited"], r.rules[name]["not_auditable"]) == (1, 1), name
+    assert r.rules["redundant"]["audited"] == 2 and r.filter_inputs == {"recorded": 1}
+
+
+@pytest.mark.parametrize("over", [
+    {"market": {"d-g0": "2000"}},             # #503 QA P3-2: a string crashed the read
+    {"market": {"d-g0": True}},               # and a bool read as 1.0
+    {"market_coerced": "d-g0"},
+    {"market_coerced": [5]},
+], ids=["string", "bool", "coerced_not_list", "coerced_not_str"])
+def test_a_record_with_a_malformed_value_is_record_failed(over):
+    db = make_db()
+    deck(db, "d", 2, record=over)
+    r = run(db)
+    assert r.filter_inputs == {"record_failed": 1}
+    assert r.rules["breakup"]["status"] == NOT_AUDITABLE
+
+
+def test_an_asset_with_a_market_but_no_position_is_not_auditable():
+    """#503 QA P3-1: coverage needs both halves of the record."""
+    db = make_db()
+    market = _clean_market("d", (0, 1))
+    positions = dict.fromkeys(market, "WR")
+    del positions["d-r1"]
+    deck(db, "d", 2, record={"market": market, "position": positions})
+    for name in ("breakup", "filler", "redundant"):
+        t = run(db).rules[name]
+        assert (t["audited"], t["not_auditable"]) == (1, 1), name
+
+
+def test_exemptions_are_split_by_deck_type():
+    """models-lead F3: a protected card is exempt with or without a record;
+    the split shows how much of a PASS rests on each."""
+    db = make_db()
+    deck(db, "rec", 2, record={"protected": [th(1)]})
+    deck(db, "row", 2, {1: row("row", 1, likes_you=True)})
+    r = run(db)
+    for name in ("breakup", "filler", "redundant"):
+        assert r.rules[name]["protected_by_deck"] == {"recorded": 1, "no_record": 1}, name
+    assert "B-DK-4..6 exempt (protected) cards by deck (F3): recorded 1, no record 1." in render(r)
+
+
+def test_live_evidence_decks_cut_inside_the_window_are_counted_not_checked():
+    """models-lead F4: D3's serve-time re-cap runs only on packed decks, so a
+    live-evidence deck with a never-delivered withdrawal in its first W
+    cards is counted, never certified; one cut past W, or a packed deck, is
+    not."""
+    db = make_db()
+    deck(db, "cut", W + 2)
+    withdraw(db, "cut", 5, 0, reason="disposition_cut")
+    deck(db, "late", W + 2)
+    withdraw(db, "late", W + 1, 0, reason="disposition_cut")
+    deck(db, "packed", W + 2, record={})
+    withdraw(db, "packed", 5, 0, reason="disposition_cut")
+    r = run(db)
+    assert r.rules["repeat"]["after_cut_not_checked"] == 1
+    assert r.rules["repeat"]["after_cut"] == {"audited_packed": 1, "audited_rows": 0,
+                                              "live_evidence": 1, "no_evidence": None}
+    assert ("not checked, live evidence 1 (F4: n > 0 goes to head-eng); not checked, no rows "
+            "and no pack not read (no --no-evidence-log)") in render(r)
+
+
+REDACTED = f"{REDACTED_PARTNER_PREFIX}9f0c"
+
+
+@pytest.mark.parametrize("record", [{}, None], ids=["recorded", "no_record"])
+def test_a_redacted_partner_s_cards_are_not_auditable_for_b_dk_4_to_6(record):
+    """head-eng 2026-10-29, models-lead H1: the deletion scrub drops a
+    redacted partner's hashes from filter_inputs.protected and its qb_te
+    entry (and may clear its rows' likes_you), so its cards' protection and
+    holdings are unknown: not auditable for B-DK-4..6, never a violation and
+    never a pass. Card 1 trips breakup."""
+    db = make_db()
+    deck(db, "r", W, {1: row("r", 1, *shape("breakup", "r", 1), partner_user_id=REDACTED)},
+         record=record)
+    r = run(db)
+    for name in ("breakup", "filler", "redundant"):
+        t = r.rules[name]
+        assert (t["violations"] or 0, t["protected"]) == (0, 0), name
+        assert t["not_auditable_by_cause"].get("redacted") == 1, name
+    assert r.rules["breakup"]["not_auditable"] == (1 if record is not None else W)
+    assert r.redacted_cards == 1 and r.overall == INCOMPLETE
+    assert r.incomplete_from_redaction_only is (record is not None)
+    out = render(r)
+    assert ("Redacted partners (account deletion): 1 of 30 audit-set cards (3.3%). Not "
+            "auditable for B-DK-4..6") in out
+    assert "INCOMPLETE from redaction only: " + ("yes" if record is not None else "no") in out
+
+
+def test_a_redacted_card_still_counts_toward_the_cap():
+    """models-lead H-a1, the defect: X on cards 0-3 and card 1 redacted. Card
+    3 is X's real fourth copy on a fully checkable card, so B-DK-7 FAILs."""
+    db = make_db()
+    deck(db, "r", W, {**{i: with_x("r", i) for i in (0, 2, 3)},
+                      1: with_x("r", 1, partner_user_id=REDACTED)}, record={})
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["status"], t["not_auditable"]) == (1, FAIL, 0)
+    assert t["examples"][0]["card_indexes"] == [0, 1, 2, 3]
+
+
+@pytest.mark.parametrize("protected_after", [False, True], ids=["alone", "beside_protected"])
+def test_a_redacted_over_cap_card_is_unknown_never_explained(protected_after):
+    """H-a1: when X's only unprotected-or-unknown over-cap copy is the
+    redacted card 3, its verdict is unknown: not a violation, never explained
+    as protected (even beside a protected over-cap copy at 4), and its deck
+    incomplete for redaction (H-a2)."""
+    db = make_db()
+    special = {**{i: with_x("r", i) for i in (0, 1, 2)},
+               3: with_x("r", 3, partner_user_id=REDACTED)}
+    if protected_after:
+        special[4] = with_x("r", 4, likes_you=True)
+    deck(db, "r", W, special)
+    r = run(db)
+    t = r.rules["repeat"]
+    assert (t["violations"], t["explained"], t["status"]) == (0, 0, INCOMPLETE)
+    assert (t["not_auditable_by_cause"], t["incomplete_decks_by_cause"]) == (
+        {"redacted": 1}, {"redacted": 1})
+    assert "B-DK-7 repeat: 1 decks have an unchecked window card, by cause: redacted=1." in (
+        render(r))
+
+
+def test_only_the_token_marks_a_redacted_partner():
+    """A partner id that merely contains the prefix is audited as usual, and
+    a deck without redacted cards prints no redaction line."""
+    db = make_db()
+    deck(db, "p", 2, {1: row("p", 1, *shape("breakup", "p", 1),
+                             partner_user_id=f"x{REDACTED_PARTNER_PREFIX}1")}, record={})
+    r = run(db)
+    assert (r.rules["breakup"]["violations"], r.redacted_cards) == (1, 0)
+    assert "Redacted partners" not in render(r)
+
+
+# ---------------------------------------------------------------------------
+# models-lead addendum G2: the response boundary (G-b1), its line (G-b2) and
+# F4's four buckets (G-b4); G-b5's fixture for each bucket and each outcome.
+# ---------------------------------------------------------------------------
+
+def _boundary_deck(db, job="b", *, cut=True, skip=(), x_at=(4, 5, 6, W), last=W):
+    """40 packed cards in three responses: 0..19, 20..`last`, `last`+1..39.
+    X is on `x_at`; the filter deferred its fourth copy to card W, just past
+    the window. With `cut`, a never-delivered withdrawal at card 2 pulls card
+    W up to position W - 1, and response 2 (20..W) has no clean card left
+    after it to fill the window: D3 can do no better inside the boundary."""
+    deck(db, job, 40, {i: with_x(job, i) for i in x_at}, skip={2, *skip} if cut else skip,
+         record={}, deliveries=[[19, SERVED], [last, SERVED], [39, SERVED]])
+    if cut:
+        withdraw(db, job, 2, 0, reason="disposition_cut")
+
+
+def test_g_b1_a_boundary_breach_is_explained_only_with_both_proofs():
+    """The explained outcome: a recorded cut before the over-cap card, inside
+    the window, and its own response is a fixed point of the cap."""
+    db = make_db()
+    _boundary_deck(db)
+    r = run(db)
+    t = r.rules["repeat"]
+    assert (t["violations"], t["explained_boundary"], t["boundary_decks"]) == (0, 1, 1)
+    assert t["status"] == PASS and t["packed_decks"] == 1
+    assert t["after_cut"]["audited_packed"] == 1
+    assert [e["card_indexes"] for e in t["boundary_examples"]] == [[4, 5, 6, W]]
+    out = render(r)
+    assert out.splitlines()[0].startswith(
+        "B-DK-7 PASS with 1 breaches explained by a response boundary on 1 decks (100.0% of "
+        "audited packed decks)")
+    assert "0 (explained: 0 by protected cards, 0 by a short deck, 1 by a response boundary)" in out
+    assert "B-DK-7 response boundary (models-lead G-b1): 1 breaches on 1 decks, 100.0% of 1" in out
+
+
+def test_g_b1_no_recorded_cut_is_a_violation():
+    """The no-cut outcome: X's fourth copy at card W - 1, at the end of its
+    response (20..W - 1, a fixed point), but nothing recorded pulled it in:
+    the build order already broke the cap, a serve bug or a filter bug."""
+    db = make_db()
+    _boundary_deck(db, cut=False, x_at=(4, 5, 6, W - 1), last=W - 1)
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_boundary"], t["status"]) == (1, 0, FAIL)
+
+
+def test_g_b1_a_missing_row_is_a_violation():
+    """The missing-row outcome: card 25, inside the over-cap card's response,
+    has no full row, so the re-run can't be shown to be a fixed point."""
+    db = make_db()
+    _boundary_deck(db, skip={25})
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_boundary"], t["status"]) == (1, 0, FAIL)
+    assert t["not_auditable_by_cause"] == {"no_full_row": 1}
+
+
+def test_g_b1_a_response_with_a_clean_card_left_is_a_violation():
+    """D3 should have moved the over-cap card behind a later clean card of its
+    own response; served where it is, the re-run isn't a fixed point."""
+    db = make_db()
+    _boundary_deck(db, x_at=(4, 5, 6, W - 1))      # card W, clean, still in response 2
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_boundary"]) == (1, 0)
+
+
+def test_g_b4_every_deck_with_a_cut_lands_in_exactly_one_bucket():
+    """audited packed (D3), audited from rows (an S1b partial run), not
+    checked live evidence (F4's trigger, its cards unchecked), and #535's
+    decks from the read's captured log lines."""
+    db = make_db()
+    deck(db, "packed", W + 2, skip={5}, record={})
+    deck(db, "rows", W + 2, {i: {**row("rows", i), "evidence_tier": "partial_run"}
+                             for i in range(W + 2) if i != 5}, skip={5})
+    deck(db, "live", W + 2, {1: row("live", 1, *shape("breakup", "live", 1))}, skip={5})
+    deck(db, "nocut", W + 2, skip={W + 1})
+    for job, i in (("packed", 5), ("rows", 5), ("live", 5), ("nocut", W + 1)):
+        withdraw(db, job, i, 0, reason="disposition_cut")
+    log = ("ERROR deck-evidence ghost1: 4 delivered cards of a deck with no evidence (no rows, no "
+           "pack); eval can't see them\nERROR deck-evidence ghost1: 1 delivered card of a deck "
+           "with no evidence\n")
+    r = run(db, no_evidence=fr.parse_no_evidence_log(log))
+    t = r.rules["repeat"]
+    assert t["after_cut"] == {"audited_packed": 1, "audited_rows": 1, "live_evidence": 1,
+                              "no_evidence": 1}
+    assert t["after_cut_not_checked"] == 1
+    assert (t["not_auditable_by_cause"], t["incomplete_decks_by_cause"]) == (
+        {"live_cut": W}, {"live_cut": 1})
+    assert fr.parse_no_evidence_log(log) == {"ghost1": 5}
+    assert ("audited, packed 1 (D3 re-caps them); audited from rows, no pack 1 (S1b partial "
+            "runs, lost or in-flight packs: D3 didn't run, so a breach is a violation); not "
+            "checked, live evidence 1 (F4: n > 0 goes to head-eng); not checked, no rows and no "
+            "pack 1 (#535's lines).") in render(r)
+
+
+def test_the_cli_reads_the_captured_no_evidence_lines(tmp_path, capsys):
+    path, log = tmp_path / "audit.db", tmp_path / "535.log"
+    db = _file_db(path)
+    deck(db, "d", 3, record={})
+    db.eng.dispose()
+    log.write_text("deck-evidence gone: 2 delivered cards of a deck with no evidence\n",
+                   encoding="utf-8")
+    assert _cli(path, "--json", "--no-evidence-log", str(log)) == 0
+    assert json.loads(capsys.readouterr().out)["rules"]["repeat"]["after_cut"][
+        "no_evidence"] == 1
+
+
+def test_h_a2_says_why_a_rule_is_incomplete():
+    """Every rule's unchecked cards by cause, B-DK-7's incomplete decks by
+    cause, and whether redaction alone made the read INCOMPLETE."""
+    db = make_db()
+    deck(db, "d", 3, {1: row("d", 1, full=False)}, record={})
+    r = run(db)
+    assert r.rules["breakup"]["not_auditable_by_cause"] == {"no_full_row": 1}
+    assert r.rules["repeat"]["incomplete_decks_by_cause"] == {"no_full_row": 1}
+    assert r.overall == INCOMPLETE and r.incomplete_from_redaction_only is False
+    out = render(r)
+    assert "Not auditable, by cause (models-lead H-a2): B-DK-4 breakup no_full_row=1;" in out
+    assert "INCOMPLETE from redaction only: no" in out
