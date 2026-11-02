@@ -31136,6 +31136,18 @@ def og_trade_card(token):
     return _png_response(png, status=status)
 
 
+# C3 (Product's pre-launch review, 2026-10-27): Safari's App Store smart
+# banner on the /s/* share landings, live once the app is. IOS_INSTALL_URL is
+# the App Store listing URL (…/id<digits>), set at the 11-18 T0; unset or
+# without an app id, there's no banner. Only the digits are ever emitted.
+_APP_STORE_ID_RE = re.compile(r"/id(\d{6,12})(?:[/?#]|$)")
+
+
+def _apple_itunes_meta() -> str:
+    m = _APP_STORE_ID_RE.search(os.environ.get("IOS_INSTALL_URL", "").strip())
+    return f'  <meta name="apple-itunes-app" content="app-id={m.group(1)}">\n' if m else ""
+
+
 def _absolute_url(path: str) -> str:
     """Absolutise a root-relative path ("/og/...") against this request's host.
 
@@ -31175,7 +31187,7 @@ def _share_html(
   <title>{esc(title)} · Fleeced: Dynasty Trade Finder</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex">
-  <meta name="description" content="{esc(description)}">
+{_apple_itunes_meta()}  <meta name="description" content="{esc(description)}">
   <meta property="og:type" content="website">
   <meta property="og:title" content="{esc(title)}">
   <meta property="og:description" content="{esc(description)}">
