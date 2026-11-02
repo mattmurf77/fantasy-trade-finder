@@ -9,7 +9,8 @@ persists through) and read by `server._assignment_first_season` through the
 shared `_current_season_picks_visible` predicate. Only `drafted` moves the
 grid. Every other verdict is byte-identical to before (the #228 fail-safe).
 
-The spent class is HIDDEN, never deleted, and seeded prices stay relative to
+The spent class is HIDDEN, not deleted (bar the two seeder exceptions in the
+scope doc §2: fewer rounds, a flip back), and seeded prices stay relative to
 the league season.
 
 Real routes, in-memory SQLite (the live DB is never opened). Harness mirrors

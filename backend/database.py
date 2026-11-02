@@ -13094,9 +13094,12 @@ def seed_pick_grid(
     `current_season`, which is byte-identical to the behavior before it
     existed. Prices stay relative to `current_season`, so a pick seeded one
     class later is still priced by its real years out. Existing rows of the
-    skipped classes `[current_season, first_season)` are carried verbatim and
-    never deleted: the grid only hides them, so they come back if the
-    verdict flips.
+    skipped classes `[current_season, first_season)` are carried verbatim:
+    the grid only hides them, so they come back if the verdict flips. Two
+    saves still delete rows, because the carry box is bounded: lowering
+    `rounds` drops the higher rounds from the hidden classes too, and a
+    re-save after a flip back drops the class past the window (2030 once
+    `first_season` is 2026 again).
     """
     from . import draft_status
 
@@ -13192,7 +13195,8 @@ def seed_pick_grid(
     # the season horizon is an explicit user action rather than a silent drop.
     carried = 0
     season_set = set(seasons)
-    # C5 — the skipped classes are hidden, never deleted: carry them too.
+    # C5 — carry the skipped classes too, so the grid only hides them. The
+    # round bound below still applies to them.
     season_set |= set(range(int(current_season), first))
     for pick_id, prior in existing.items():
         if pick_id in generated:

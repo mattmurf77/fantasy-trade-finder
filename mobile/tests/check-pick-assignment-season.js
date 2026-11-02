@@ -14,12 +14,15 @@
 //     only way back into setup once a board is seeded, and re-saving setup
 //     is how a drafted grid seeds its 4th class.
 //
-// So three wirings are pinned:
+// So four wirings are pinned:
 //   1. `api/pickAssignment.ts` declares `current_season` on the GET payload.
 //   2. The screen's `currentSeason` reads `data.current_season` FIRST, with
 //      `seasons[0]` only as the fallback for an older server.
 //   3. The edit-order link's gate keys on the FIRST VISIBLE tab
 //      (`data.seasons[0]`), never on `isFutureSeasonTab`.
+//   4. The edit-order Pressable carries `hitSlop` (C5 design review): its
+//      32pt minHeight needs the slop to reach the 44pt touch floor, and it
+//      is now the only way back into setup on a drafted grid.
 //
 // HONEST LABEL (G-035): this proves the PRESENCE of those exact wirings in
 // source text (comments stripped). It does not render the screen or prove
@@ -91,6 +94,18 @@ assert(
   !!gate && !/isFutureSeasonTab/.test(cond),
   'edit-order gate does not key on isFutureSeasonTab',
   cond || 'missing',
+);
+
+// ── 4. The edit-order link keeps its touch-floor hitSlop. ──────────────────
+// The opening tag ends at the first `>` followed by a child element, which
+// skips the `=>` inside its `style` callback.
+const opening = screen.match(
+  /<Pressable\s+testID="pick-assignment\.edit-order"([\s\S]*?)>\s*</,
+);
+assert(
+  !!opening && /\bhitSlop\s*=\s*\{/.test(opening[1]),
+  'edit-order Pressable carries `hitSlop`',
+  opening ? squash(opening[1]) : 'missing',
 );
 
 if (failures) {

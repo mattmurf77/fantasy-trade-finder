@@ -48,12 +48,50 @@
   row before the replace. The DELETE has already freed every id, nothing
   reads `draft_picks.id` across reseeds, and the served grid doesn't include
   it.
-- **The shared predicate ignores confidence.**
-  `draft_status.current_year_picks_visible` returns False for any `drafted`
-  status, whatever the confidence. That's safe today because the detector
-  only writes `drafted` at MEDIUM or HIGH (`backend/draft_status.py:284`,
-  `:362`, `:365`, `:374`, `:430`, `:432`, `:436`). LOW only comes with
-  `unknown`. The predicate is shared and was left unchanged.
+- **Any positive drafted verdict moves the grid, at any confidence.**
+  `draft_status.current_year_picks_visible` (through
+  `_current_season_picks_visible`) returns False for any `drafted` status,
+  whatever the confidence, so a drafted/LOW verdict would move the grid too.
+  No writer produces drafted/LOW today: the detector writes `drafted` only at
+  MEDIUM or HIGH (`backend/draft_status.py:284`, `:362`, `:365`, `:374`,
+  `:430`, `:432`, `:436`), and LOW only comes with `unknown`. The predicate is
+  shared and was left unchanged, not forked.
+- **Known gaps from release-lead's QA (2026-11-01).** Line numbers are on
+  this branch after the main merge.
+  - **(a) The "another season's row" guard can't fire from a route.**
+    `_assignment_first_season` keeps `season` when the leagues row is for
+    another season, but `_assignment_league` (`backend/server.py:23004`)
+    takes `season` from that same row. And `leagues.season` is never
+    refreshed after the first link: `upsert_espn_league` writes it on insert
+    (`backend/database.py:15155`), and its re-link update refreshes
+    `espn_season` (`:15178`) but not `season`. So after the 2027 rookie
+    draft the row still says 2026 with a drafted verdict, and the grid keeps
+    showing the spent 2027 class. This is a pre-existing seam. It needs a
+    follow-up before the 2027 draft.
+  - **(b) The ESPN heuristic can read drafted from waiver pickups.** ESPN's
+    verdict is the rookies-on-rosters heuristic alone (`detect` →
+    `_fall_back`, `backend/draft_status.py:469`). It reads drafted/MEDIUM
+    once ≥ N rookies sit on ≥ N/2 teams (`:284`), and waiver pickups before
+    an off-platform rookie draft can cross that bar. That hides the 2026
+    class with no recourse in the app. It isn't live until May 2027; revisit
+    before then.
+  - **(c) "Hidden, not deleted" has two exceptions.** `seed_pick_grid`'s
+    carry box is bounded (`backend/database.py:13200`–`:13207`):
+    - lowering `rounds` on a drafted league deletes the hidden 2026 rows for
+      the dropped rounds (the round bound, `:13207`, applies to carried
+      rows too);
+    - a re-save after a flip back to not-drafted drops the extra 2030 class,
+      which is outside the season box (`:13200`, `:13205`) once
+      `first_season` is 2026 again.
+  - **(d) Pick-correction links dead-end for spent 2026 picks.**
+    `openPickCorrection(..., 2026)` (`mobile/src/components/MemberEnteredMarker.tsx:69`)
+    names a pick and season the grid no longer shows, so the screen falls
+    back to the first tab, 2027 (`mobile/src/screens/PickAssignmentScreen.tsx:361`),
+    and a PUT on that pick would get `404 pick_not_found`. The links come
+    from the priced readers, which still surface 2026 picks, so this folds
+    into follow-up (b), the priced-reads cleanup.
+  - **(e) Old binaries show positions ("1.08") on 2027.** Cosmetic, and
+    already listed above under "Fielded builds".
 
 ## 3. Evidence scope
 
@@ -63,15 +101,17 @@
   declaration reads `data.current_season` first; (3) the
   `pick-assignment.edit-order` link's gate is
   `season?.season === data.seasons[0]?.season` and does not reference
-  `isFutureSeasonTab`. It is labeled honestly (G-035): it proves the wiring
-  is present, not runtime behavior.
+  `isFutureSeasonTab`; (4) that link's `Pressable` carries `hitSlop` (the
+  44pt touch floor from the design review). It is labeled honestly (G-035):
+  it proves the wiring is present, not runtime behavior.
 
   | Guard sabotage | Result |
   |---|---|
-  | g1: revert `currentSeason` to `data.seasons[0]?.season ?? null` | red (1 of 7 checks) |
-  | g2: restore the old `!isFutureSeasonTab` gate | red (2 of 7) |
-  | g3: drop `current_season` from the type | red (1 of 7) |
-  | restored (`cmp`-identical to the fixed copies) | green (7 of 7) |
+  | g1: revert `currentSeason` to `data.seasons[0]?.season ?? null` | red (1 of 8 checks) |
+  | g2: restore the old `!isFutureSeasonTab` gate | red (2 of 8) |
+  | g3: drop `current_season` from the type | red (1 of 8) |
+  | g4: remove the edit-order `hitSlop` | red (1 of 8) |
+  | restored (`cmp`-identical to the fixed copies) | green (8 of 8) |
 
 - [x] **Unit tests:** new `backend/tests/test_pick_assignment_drafted_class.py`,
   20 cases (13 C5 + 7 P2-1). It uses the real routes and an in-memory SQLite DB, and sets the
@@ -114,7 +154,9 @@
   verdict is NULL. P2-1 changed one C5 assert: D4 had pinned 48 of 64 and now
   pins 48 of 48. Every assert of `total` on a full 4-class grid (D1–D3, D5,
   `test_pick_assignment.py:589`) is unchanged and passes.
-- [x] **Code-walk proof** (line numbers on `fix/espn-grid-drafted-class`):
+- [x] **Code-walk proof** (line numbers on `fix/espn-grid-drafted-class` at
+  `95fe8190`, before the main merge; the merge shifted `server.py` and
+  `database.py` down by 500–650 lines):
   1. Verdict. `backend/server.py:23935` `_refresh_league_draft_status` →
      `_detect_league_draft_status` (`:23834`) → `draft_status.detect`
      (`backend/draft_status.py:453`). For ESPN that is the rookies-on-rosters
@@ -154,19 +196,61 @@
      `reseed: false` (`:544`) and seeds 2030 on a drafted league.
   8. `npx tsc --noEmit` was not run locally: there is no `mobile/node_modules`
      in this worktree or the main checkout (G-022). CI's `mobile-typecheck`
-     runs it, along with every `check-*.js` guard.
+     runs it, along with every `check-*.js` guard. Run 2026-11-01 after the
+     main merge, with `node_modules` linked: `tsc --noEmit` clean, all 136
+     `check-*.js` suites green, `testid-lint.sh` OK.
 - [x] **Manual TestFlight checklist.** Run on an ESPN league whose 2026 rookie
-  draft is done, after the backend deploy and a build that includes commit 2:
+  draft is done, after the backend deploy and a build that includes commit 2.
+  - **Precondition for steps 1–4.** Before the run, release-lead confirms
+    `leagues.draft_status = 'drafted'` for the test league with a read-only
+    prod read, which needs the operator's word first. If the row isn't
+    `drafted`, the grid is unchanged by design and steps 1–4 prove nothing.
+  - **Steps 3–4, S2 and S4 are real writes** to the league's shared grid.
+    Leaguemates will see them.
+  - **Steps 1–4 also check two progress readouts:** the grid's progress line,
+    and the Draft Room's assignment row (`draft-room.assign-progress`), which
+    must read "Edit the draft picks", not "Continue assigning". The figures
+    assume P2-1 (commit B) ships and no member has joined since the grid was
+    seeded: the two numbers are equal, rounds × teams × the classes shown
+    (the 4-team test league reads 48 of 48 for 3 classes, 64 of 64 for 4).
+    Without P2-1 they read one class short (48 of 64), and the Draft Room
+    says "Continue assigning".
+
   1. League → Pick assignments: there is no 2026 tab, the first tab is 2027,
-     and the tabs run 2027–2029.
+     and the tabs run 2027–2029. Progress reads 3 classes, both numbers
+     equal (e.g. 144 of 144 for 4 rounds × 12 teams). Draft Room row: "Edit
+     the draft picks".
   2. 2027 tab: slot labels read "1st", "2nd", …, never positions like "1.08".
+     Progress and the Draft Room row are as in step 1.
   3. On the 2027 tab, tap the "N rounds · Linear/Snake order — change" link
      and save the order unchanged. A 2030 tab appears, and 2027–2029
-     assignments are unchanged.
-  4. Reassign one 2027 pick: it saves and the new owner shows.
-  5. A league whose draft isn't done (or a Sleeper/MFL league) is unchanged.
-  6. On a league whose draft isn't done, the "change" link shows only on the
-     current-season (2026) tab and not on the 2027–2029 tabs.
+     assignments are unchanged. Progress reads 4 classes, both numbers equal
+     (e.g. 192 of 192). Draft Room row: "Edit the draft picks".
+  4. Reassign one 2027 pick: it saves and the new owner shows. Progress
+     numbers stay equal (only the "· N traded" count may move). Draft Room
+     row: "Edit the draft picks".
+  5. *Not runnable in November* (there's no ESPN league whose 2026 rookie
+     draft is still ahead); covered by D1–D3 and the guard. A league whose
+     draft isn't done (or a Sleeper/MFL league) is unchanged.
+  6. *Not runnable in November,* for the same reason; covered by D1–D3 and
+     guard check 3. On a league whose draft isn't done, the "change" link
+     shows only on the current-season (2026) tab and not on the 2027–2029
+     tabs.
+
+  **Seeder fix (the PR's separate QA item).** Run after step 3, so the raise
+  doesn't also seed 2030 and blur step 3.
+  - S1. Before saving, note one traded or reassigned pick (season, round,
+    original team, owner), e.g. the step 4 pick.
+  - S2. Open the "change" link, raise rounds by one (4 → 5) and save. It
+    saves without an error, and round 5 appears on every visible tab
+    (2027–2030). The hidden 2026 class gets no round 5, since it isn't
+    generated.
+  - S3. The S1 pick and every other existing assignment are unchanged.
+  - S4. Restore rounds 5 → 4 and save. This deletes round 5 on every
+    visible class, including any round-5 reassignment made in between. Lowering rounds
+    also deletes hidden 2026 rows for any dropped round the class had, as in
+    §2 (c). Here 2026 never had a round 5, so no 2026 row goes; a drop below
+    the original 4 would delete them.
 - [ ] **WAIVED:** n/a.
 - `testID`s added/renamed: none. `pick-assignment.edit-order` is unchanged;
   only its gate moved.

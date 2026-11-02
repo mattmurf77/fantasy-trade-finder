@@ -342,9 +342,11 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
   );
 
   // ── Season selection ─────────────────────────────────────────────────
-  // Default to the CURRENT season (the payload's first, ascending) with
-  // the other three collapsed behind tabs. A correction deep link wins,
-  // because it names the exact slot the user came here to fix.
+  // Default to the payload's FIRST class (ascending): the current season,
+  // or season + 1 once the rookie draft reads drafted (C5), with the rest
+  // behind tabs. A correction deep link wins, because it names the exact
+  // slot the user came here to fix; one for a hidden class lands on the
+  // first tab.
   useEffect(() => {
     if (!data || data.seasons.length === 0) return;
     setActiveSeason((prev) => {

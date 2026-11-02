@@ -23021,9 +23021,17 @@ def _assignment_first_season(league_id: str, season: int) -> int:
     `season`. The signal is the CACHED verdict on the leagues row
     (`get_league_draft_context` → `status` / `confidence`), read through the
     shared `_current_season_picks_visible` predicate; for ESPN that verdict
-    comes from the rookies-on-rosters heuristic. The #228 fail-safe holds:
-    unknown, not_drafted, low confidence, no row, a row for another season or
-    a DB error all keep `season`. No calendar backstop.
+    comes from the rookies-on-rosters heuristic. That predicate ignores
+    confidence: ANY positive `drafted` verdict moves the grid, at any
+    confidence, low included. No writer produces drafted/low today (the
+    detector writes `drafted` only at medium or high). The #228 fail-safe
+    holds: unknown, not_drafted, never checked, no row, a row for another
+    season or a DB error all keep `season`. No calendar backstop.
+
+    The "another season" case cannot arise from a route today:
+    `_assignment_league` takes `season` from the same leagues row, and
+    `leagues.season` is never refreshed after the first link (scope doc §2,
+    known gap (a)).
 
     The grid only (C5 scope a): the Draft Room's `_assignment_grid` and every
     priced `load_draft_picks(source=user)` reader are untouched.
@@ -23047,7 +23055,8 @@ def pick_assignments_route():
     """GET /api/league/pick-assignments?league_id=&season=
 
     The whole grid: `settings` (rounds / order_type / order), `seasons[]`
-    (current + 3, ascending), `progress` and `seeded`. 192 slots is
+    (every stored class from `_assignment_first_season` on, ascending:
+    normally 4), `progress` and `seeded`. 192 slots is
     ~40 KB and one round-trip beats four, so this never paginates; the client
     defaults to the first season and collapses the rest.
 
@@ -23217,7 +23226,8 @@ def pick_assignments_order_route():
 
     C5: once the league's rookie draft reads drafted, the seeded classes start
     at season + 1 (`_assignment_first_season`). Prices stay relative to the
-    league season, and the spent class's rows are kept, only hidden.
+    league season, and the spent class's rows are kept and hidden, except in
+    the two cases `seed_pick_grid` names (fewer rounds; a flip back).
 
     `rounds` is USER-SETTABLE (operator decision 2), clamped server-side to
     1..ROOKIE_MAX_ROUNDS. That clamp is the conservation bound's only lever,
