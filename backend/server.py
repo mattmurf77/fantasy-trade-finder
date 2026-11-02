@@ -6265,14 +6265,18 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
             with ev.lock:
                 ev.pending_withdrawals = {**held_withdrawals, **ev.pending_withdrawals}
         return
-    (first, first_diag), (rest, rest_diag), candidate_set, upgrades = _deck_plan(plan_input)
-    for row in (*first, *rest):   # F2: one served_at per deck, its first delivery
-        row["served_at"] = served_at or row["served_at"]
-    if candidate_set is not None and ev.packed:
-        candidate_set = _pack_candidate_set(candidate_set)
     shrunk = False
     withdrawals_written = not withdrawals
     try:
+        # Inside the try (#472 QA P3-1): the covered ids are already taken from
+        # ev.pending, so a planning failure must still settle them (finally),
+        # or every outcome on them waits out F4's timeout, and must still put
+        # the held withdrawals back.
+        (first, first_diag), (rest, rest_diag), candidate_set, upgrades = _deck_plan(plan_input)
+        for row in (*first, *rest):   # F2: one served_at per deck, its first delivery
+            row["served_at"] = served_at or row["served_at"]
+        if candidate_set is not None and ev.packed:
+            candidate_set = _pack_candidate_set(candidate_set)
         if first or candidate_set is not None or upgrades or (withdrawals and not packed_path):
             # Stage 1 and partial runs: the rows' transaction carries the withdrawals.
             _db.save_deck_evidence(first, candidate_set=candidate_set, diagnostics=first_diag,

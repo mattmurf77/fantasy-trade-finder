@@ -357,3 +357,75 @@ def test_a_delivery_racing_a_writes_plan_keeps_its_boundary(shared_db, monkeypat
     run = unpack(pack_of(engine, job_id))[0]
     assert [d[0] for d in run["deliveries"]] == [29, 59]
     assert sorted(r["card_index"] for r in rows(engine) if not r["is_ghost"]) == list(range(30))
+
+
+# ── #472 QA: the write lock around every input, inputs insulated, plan failure
+
+@pytest.mark.parametrize("kind", ["packed", "stage1"])
+def test_every_input_is_taken_under_the_evidence_write_lock(deferred, monkeypatch, kind):
+    """P3-2: the reference argument holds only because every blob and plan
+    input is taken inside the _deck_evidence_write_lock section that encodes
+    and writes it. Moving one out is a stale-blob bug no byte test sees."""
+    client, _engine, _ = deferred
+    job_id, _served, _ghosts, ev, _players = build(kind)
+    owned = {"blob": [], "plan": []}
+    real_blob, real_plan = server._DeckEvidence.blob_input, server._DeckEvidence.plan_input
+
+    def blob_input(self, *args, **kwargs):
+        owned["blob"].append(server._deck_evidence_write_lock._is_owned())
+        return real_blob(self, *args, **kwargs)
+
+    def plan_input(self, *args, **kwargs):
+        owned["plan"].append(server._deck_evidence_write_lock._is_owned())
+        return real_plan(self, *args, **kwargs)
+    monkeypatch.setattr(server._DeckEvidence, "blob_input", blob_input)
+    monkeypatch.setattr(server._DeckEvidence, "plan_input", plan_input)
+    assert server._store_trade_page(job_id)
+    assert deck_ids(status(client, job_id, 0).get_json())   # the first delivery
+    assert owned["blob"] and owned["plan"], owned
+    assert all(owned["blob"]) and all(owned["plan"]), owned
+
+
+@pytest.mark.parametrize("kind", ["stage1", "packed", "archive"])
+def test_a_taken_input_is_insulated_from_later_writers(kind):
+    """P3-2: after an input is taken, what writers do to `ev` (replace a row,
+    add or replace a snapshot, a ghost, run_meta or the candidate set) never
+    changes the bytes or the plan built from it."""
+    ev = hand_built(kind)
+    with ev.lock:
+        blob_in, plan_in = ev.blob_input(), ev.plan_input()
+    before_blob, before_plan = server._deck_blob(blob_in), server._deck_plan(plan_in)
+    with ev.lock:
+        ev.diagnostics["d-a"] = server._pack_row({"snapshot_id": "d-a", "payload_json": "{}"})
+        ev.diagnostics["d-new"] = server._pack_row({"snapshot_id": "d-new", "payload_json": "{}"})
+        ev.rows["deck-hand:0"] = (0, server._pack_row({"impression_id": "deck-hand:0", "x": 1}))
+        ev.rows.pop("deck-hand:1", None)
+        ev.ghosts["g-2"] = {"impression_id": "g-2", "is_ghost": 1, "features_json": "{}"}
+        ev.run_meta["values_snapshot_id"] = "changed"
+        ev.candidate_set = {"candidate_set_id": "cs-2"}
+        ev.generated = {"league_id": "L2"}
+    assert server._deck_blob(blob_in) == before_blob
+    assert server._deck_plan(plan_in) == before_plan
+
+
+def test_a_plan_that_raises_still_settles_its_ids_and_keeps_the_withdrawals(deferred, monkeypatch):
+    """P3-1: the covered ids leave ev.pending before planning, so a planning
+    failure must still settle them (or every outcome on them waits out F4) and
+    put the held withdrawals back for the next delivery."""
+    client, _engine, _ = deferred
+    job_id, _served, _ghosts, ev, _players = build("stage1")
+    with ev.lock:
+        ev.pending = {f"{job_id}:0", f"{job_id}:1"}
+        ev.delivered = set(ev.pending)
+        ev.delivered_at = {iid: "2026-10-27T00:01:00+00:00" for iid in ev.delivered}
+        ev.pending_withdrawals = {f"{job_id}:9": (0, "2026-10-27T00:01:00+00:00", "i1_dropped")}
+    settled = []
+    monkeypatch.setattr(server, "_deck_evidence_settle", lambda ids: settled.extend(ids))
+
+    def boom(_plan_input):
+        raise RuntimeError("plan failed")
+    monkeypatch.setattr(server, "_deck_plan", boom)
+    with server._deck_evidence_write_lock:
+        server._deck_evidence_flush(ev)               # never raises
+    assert sorted(settled) == [f"{job_id}:0", f"{job_id}:1"]
+    assert f"{job_id}:9" in ev.pending_withdrawals
