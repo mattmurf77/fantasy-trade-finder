@@ -77,6 +77,8 @@
 //       client's opt-in quietStatuses); a 500 still does                   [executed]
 //   X5  (rewritten) Usage Trends prefetches each listed league's capability;
 //       the Add tap never waits: cached → by it, uncached → legacy at once [executed + AST]
+//   X5b (round 6b) it also prefetches the focused league once, on mount and
+//       on a focus change, for a real Sleeper league only; no tap waits    [AST]
 //   P3.1–P3.8 the double-tap guard, numeric consent_until, any move_mode,
 //       the neutral panel, open_platform reserved, per-link Terms/Privacy,
 //       the offline line, the accessibility announcements                 [executed + AST]
@@ -1321,6 +1323,20 @@ process.on('exit', () => {
         'UsageLeagueList footer');
     });
   }
+
+  await check('X5b the focused league\'s capability is prefetched on mount (Sleeper only, never demo, local or no league), and no tap waits for it', () => {
+    const sf = parse(USAGE_TRENDS);
+    const effects = calls(sf, 'useEffect').map((c) => c.getText(sf)).filter((t) => /prefetchQuery/.test(t));
+    eq(effects.length, 1, 'mount prefetch effects');
+    const t = effects[0];
+    expect(/if \(!enabled \|\| !focusId \|\| resolveAddPlatform\(focusId, isDemo\) !== 'sleeper'\) return;/.test(t), 'the Sleeper-session guard');
+    expect(/queryKey: faMoveCapabilityKey\(focusId\),\s*queryFn: \(\) => readLeagueCapability\(focusId\),\s*staleTime: FA_MOVE_CAPABILITY_STALE_MS,/.test(t),
+      'the same key, trimmed fetch and 60 s staleTime');
+    expect(/\}, \[enabled, focusId, isDemo, queryClient\]\)$/.test(t), 'reruns when the focused league changes');
+    expect(/^void queryClient\.prefetchQuery|\n\s*void queryClient\.prefetchQuery\(/.test(t) && !/await/.test(t), 'fire and forget');
+    const doAdd = declText(sf, 'doAdd');
+    eq(doAdd.match(/await [\w.]+\(/g), ['await closeSheetFirst(', 'await switchTo('], 'the Add path waits for nothing new');
+  });
 
   // ── Review round 6 (release-lead's QA): Q1, P3.1–P3.8 ───────────────────
   {

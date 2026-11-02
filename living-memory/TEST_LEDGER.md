@@ -56,6 +56,7 @@ Gates: full (schema/API/flag/analytics surfaces; no express). Mobile client only
   - **`check-fa-move`:** 91 passed, 0 failed (Q1, the rewritten X5 ×2, P3.1–P3.8 ×6 new; F2, F16, L1, X8 and B3 updated for the new behaviour).
   - **Sabotage, each red then restored (9; the unsabotaged copy green):** Q1 the client reporting every status; X5 awaiting the read at the Add tap; P3.1 no openConsent guard; P3.2 a numeric `consent_until` accepted; P3.3 only exact `'handoff'`; P3.4 the neutral panel as a refusal; P3.6 one bad link dropping Terms; P3.7 offline saying "Couldn't reach Sleeper"; P3.8 "Still sending…" not announced.
   - **Gate re-run:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 122 of 122 exit 0 (`check-usage-trends` passing with the components back to #509's shape); the taxonomy pytest selection 178 passed.
+- **Round 6b (same day):** Usage Trends also prefetches the focused league's capability once, on mount and when the focused league changes, into the same `['fa-move-capability', id]` cache (same trimmed fetch, 60 s staleTime), for a real Sleeper league session only (never demo, local or no league). Nothing on the Add path waits. `check-fa-move` 92 passed, 0 failed (X5b new). Sabotage: the mount prefetch dropped → X5b red, then restored; the unsabotaged copy green. Gate: `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 122 of 122 exit 0.
 
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 

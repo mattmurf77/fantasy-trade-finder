@@ -148,6 +148,19 @@ export default function UsageTrendsScreen() {
     // A new week selection keeps the current list on screen while it loads.
     placeholderData: keepPreviousData,
   });
+  // D1: the focused league's capability, prefetched once in the background
+  // on mount and when the focused league changes, so the card's own Add can
+  // route by it. A real Sleeper league session only (never demo or local, and
+  // not with no league). Same trimmed fetch and 60 s staleTime as the list
+  // prefetch; nothing on the Add path waits for it.
+  useEffect(() => {
+    if (!enabled || !focusId || resolveAddPlatform(focusId, isDemo) !== 'sleeper') return;
+    void queryClient.prefetchQuery({
+      queryKey: faMoveCapabilityKey(focusId),
+      queryFn: () => readLeagueCapability(focusId),
+      staleTime: FA_MOVE_CAPABILITY_STALE_MS,
+    });
+  }, [enabled, focusId, isDemo, queryClient]);
   const faQuery = useQuery({
     queryKey: ['free-agents', claim?.leagueId, 'ALL'],
     queryFn: () => getFreeAgents(claim!.leagueId, 'ALL'),
