@@ -19,6 +19,7 @@ import {
   getOverhaul,
   prepareSend,
   sendBatch,
+  sendBatchAllRefused,
   type OverhaulView,
   type Offer,
   type PrepareView,
@@ -173,13 +174,16 @@ export default function OverhaulSummaryScreen() {
       tied_package_count: pv.races.length,
     });
     try {
-      await sendBatch(overhaulId, {
+      const sent = await sendBatch(overhaulId, {
         prepare_token: pv.prepare_token,
         summary_hash: pv.summary_hash,
         version: roadmap.version,
         idempotency_key: prepared.idempotencyKey,
       }, pv.counts.offers);
-      haptics.success();
+      // 200 even when every offer was refused: the plan's attempt rows carry the
+      // reasons, so navigation is unchanged, but the haptic must not say "sent".
+      if (sendBatchAllRefused(sent)) haptics.warning();
+      else haptics.success();
       invalidate();
       navigation.replace('OverhaulPlan', { overhaulId });
     } catch (e) {
