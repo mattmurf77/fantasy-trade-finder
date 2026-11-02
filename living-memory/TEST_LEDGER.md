@@ -1,3 +1,22 @@
+## 2026-11-02 — #583 TipJar verified-only guard + targeted dismiss (release-lead QA P3s)
+
+Gates: release-lead's independent QA of #583 at `6dd2225c` (GO-with-notes; the knob-flip precondition), P3-1 to P4. Stacked on #575. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is structural plus executed checks, a code walk, and TestFlight steps.
+
+- **P3-1, the dismiss pops its own route:** `TipJarScreen` dismissed with an untargeted `goBack()`, which pops the TOP route. On session expiry `useSession` pushes SignIn over the sheet, so a later drop popped SignIn and left a blank sheet. Now it's a targeted `POP` (`source` = this route, `target` = the stack). It does nothing if the route is already gone, and navigates to `Main` at the root. `PaywallScreen` has the same pattern; that's a separate follow-up.
+- **P3-2, `check-tipjar` 11 rebuilt:** the harness runs effects the way React does (only on the first render and when deps change, with `useCallback`/`useMemo` memoized on deps) and drives a fake root stack whose `goBack` pops the top. It asserts exact counts:
+  - 11a: fresh mounts per session;
+  - 11b: a drop while open (verified → demo, unverified or unknown) dismisses exactly once, Settings stays, the queries go off, and the same state again re-runs nothing;
+  - 11c: flag off dismisses exactly once, verified or not;
+  - 11d: under SignIn, TipJar is removed and SignIn stays;
+  - 11e: when TipJar is gone, there are no actions;
+  - 11f: at the root, `navigate('Main')`.
+- **Sabotages, 14/14 red:** a mount-only session effect (11b); dropping `paywallOn &&` (11c, dismiss x2); the old untargeted goBack (11a/11d); a POP without target (11a); no already-gone return (11e); the six guard mutants (11); the purchase guard and refusal→pending (10); pending→thank-you (5d + 10b).
+- **Suites:** `check-tipjar` 23/23, all 135 `check-*.js`, `tsc --noEmit` clean, testid-lint OK.
+- **P3-3, TestFlight:**
+  - Open Support Fleeced, tap ✕, and you land on Settings.
+  - Open it, background the app for about a minute and come back, and the sheet stays.
+  - The runtime evidence for the session guard is check 11 plus the PR's code walk, because a session can't be made to lose verification inside the sheet on TestFlight.
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
