@@ -23,6 +23,7 @@ import io
 import json
 import logging
 import re
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Iterable, Optional
 
 try:
@@ -754,6 +755,14 @@ def _short_pick(label: str) -> str:
     return ("an " if re.match(r"[AEIOU]", core, re.I) else "a ") + core
 
 
+def _to_fixed_1(x: float) -> str:
+    """JS `x.toFixed(1)` for non-negative x, as TradeValueBar.tsx prints its
+    firsts: half up on the float's EXACT binary value, so 2.25 -> "2.3"
+    (Python's f"{x:.1f}" rounds that tie to even, "2.2") and 1.15 -> "1.1"
+    (stored as 1.1499...). Decimal(x) is built from the float, not str(x)."""
+    return str(Decimal(x).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+
+
 # Which label line the bar shows: Product's final rule (legal R28.27).
 #   B1 "≈ a Mid 2nd in value"     a generic pick fits the gap, at any size
 #   B2 "≈ 1.4 Mid 1sts in value"  no pick fits and the gap is 1 first or more
@@ -809,7 +818,7 @@ def value_bar_label(verdict: dict) -> tuple[str, str, str]:
     if branch == VB_B1:
         return "≈ ", _short_pick(gap["pick_equivalent"]["label"]), " in value"
     if branch == VB_B2:
-        return "≈ ", f"{abs(float(gap['firsts'])):.1f} Mid 1sts", " in value"
+        return "≈ ", f"{_to_fixed_1(abs(float(gap['firsts'])))} Mid 1sts", " in value"
     return "", "About even", " in value"
 
 

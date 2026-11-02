@@ -9,15 +9,18 @@ stacked on #564 (test_share_card_value_bar.py holds the bar itself).
 
 Pins:
   1. B1 whenever a pick fits, including at 1 first or more.
-  2. B2 only at 1 first or more with no pick.
+  2. B2 only at 1 first or more with no pick; its number rounds as the
+     app's JS toFixed(1) does (half up on the exact binary value).
   3. B3 below 1 first with no pick: the ice nub, no lean, "about even" alt.
   4. Legal condition 1 (property): over a 0-3 firsts sweep, "About even"
-     never covers a gap `_pick_gap_equivalent` fits a pick to.
+     never covers a gap `_pick_gap_equivalent` fits a pick to, and the fit
+     has no hole from its floor (half the smallest pick) up to 1 first.
   5. Legal condition 2 (property): whenever the label is "About even", the
      fill is the centre mark.
   6. The OPEN even-band-with-pick case (favors even, a pick label) keeps
      today's "About even" + centre mark, pinned as such until it is decided.
-  7. Parity with the app's B2 guard (#567, mobile/tests/check-value-bar-b2.js).
+  7. Parity with the app's B2 guard (#567, mobile/tests/check-value-bar-b2.js,
+     all 9 cases at 46751c05).
   8. Legal (f): a traded owned pick reads "2026 1st", never "(from ...)".
 """
 import json
@@ -181,6 +184,33 @@ def test_b2_only_at_one_first_or_more_with_no_pick(favors, firsts, text):
     assert (og_image.value_bar_branch(v) == og_image.VB_B2) == (firsts >= 1.0)
 
 
+# The app prints B2's number with JS `firsts.toFixed(1)` (TradeValueBar.tsx:102).
+# toFixed picks the n for which n / 10 - x is closest to zero, and the LARGER n
+# on a tie (ECMAScript Number.prototype.toFixed), on x's EXACT binary value: half
+# up for x >= 0. Python's f"{x:.1f}" also works on the exact value but breaks a
+# true tie to even. The exact doubles, and what each gives:
+#   2.25 = 2.25 exactly, a true tie              toFixed "2.3"   (:.1f "2.2")
+#   1.15 = 1.149999999999999911182158029987...   toFixed "1.1"   (below the tie)
+#   2.35 = 2.350000000000000088817841970012...   toFixed "2.4"   (above the tie)
+#   1.0  = 1 exactly                             toFixed "1.0"
+#   4.95 = 4.950000000000000177635683940025...   toFixed "5.0"   (above the tie)
+# Checked in node 2026-11-01: (2.25).toFixed(1) "2.3", (1.15).toFixed(1) "1.1",
+# (2.35).toFixed(1) "2.4", (1).toFixed(1) "1.0", (4.95).toFixed(1) "5.0".
+TO_FIXED_1 = [(2.25, "2.3"), (1.15, "1.1"), (2.35, "2.4"), (1.0, "1.0"), (4.95, "5.0")]
+
+
+@pytest.mark.parametrize("favors", ["give", "receive"])
+@pytest.mark.parametrize("firsts, want", TO_FIXED_1)
+def test_b2_rounds_its_firsts_like_the_apps_to_fixed(favors, firsts, want):
+    """The helper, the drawn label and the alt text all print `want`."""
+    assert og_image._to_fixed_1(firsts) == want
+    v = _verdict(favors, firsts)
+    text = f"≈ {want} Mid 1sts in value"
+    assert _text(v) == text
+    assert _draw_bar(v)[0] == text
+    assert f", {text}. Estimate" in _alt(v), _alt(v)
+
+
 def test_b2_sweep_no_pick_reads_mid_1sts_exactly_from_one_first():
     for f in SWEEP:
         for favors in ("give", "receive"):
@@ -247,6 +277,23 @@ def test_legal_condition_1_about_even_never_covers_a_gap_a_pick_fits():
     assert fitted > 150 and over_one > 50, (fitted, over_one)
 
 
+def test_legal_condition_1_the_pick_fit_has_no_hole_up_to_one_first():
+    """The sweep above skips every gap with no pick, so a hole in the fit
+    would pass it (release-lead QA P3-1: a hole at 0.78-0.95 firsts passed
+    the whole suite). Every gap from the fit's floor, half the smallest
+    generic pick's value computed as `_pick_gap_equivalent` computes it, up
+    to 1.0 first, in 0.001-first steps, gets a pick. (Today the fit runs
+    ~0.058-1.774 firsts.)"""
+    floor = min(_e2v(seed) for seed in server.GENERIC_PICK_SEEDS.values()) * 0.5
+    assert 0 < floor < MID_1ST, floor / MID_1ST
+    step = 0.001 * MID_1ST
+    gaps = [floor + i * step for i in range(int((MID_1ST - floor) / step) + 1)]
+    gaps.append(MID_1ST)
+    holes = [round(g / MID_1ST, 3) for g in gaps
+             if server._pick_gap_equivalent(g)["pick_equivalent"] is None]
+    assert not holes, (len(holes), holes[0], holes[-1])
+
+
 def test_legal_condition_2_about_even_always_draws_the_centre_mark():
     """Every verdict across `favors` (give, receive, even, missing) x gaps
     0-3 firsts x (the real pick fit, no pick): when the drawn label is
@@ -301,7 +348,8 @@ def test_open_question_even_band_with_a_pick_keeps_todays_about_even_and_centre_
 
 
 # ---------------------------------------------------------------------------
-# 7. Parity with the app (#567 @ 955f83c3, mobile/tests/check-value-bar-b2.js)
+# 7. Parity with the app (#567 @ 46751c05, mobile/tests/check-value-bar-b2.js,
+#    its 9 cases)
 # ---------------------------------------------------------------------------
 
 MID_2ND_LABEL = "Mid 2nd Round Pick"
@@ -311,6 +359,8 @@ APP_B2_CASES = [
      "receive", 0.02, None, True, ABOUT_EVEN),
     ("a negative lean under 1 first with no pick label reads Even",
      "give", -0.4, None, True, ABOUT_EVEN),
+    ("0.7 firsts with no pick label reads Even (between 0.5 and 1)",
+     "receive", 0.7, None, True, ABOUT_EVEN),
     ("exactly 1 first with no pick label leans",
      "receive", 1.0, None, False, "≈ 1.0 Mid 1sts in value"),
     ("1.4 firsts with no pick label leans",
