@@ -153,7 +153,7 @@ check('17 all fields present → the exact five-line block',
   'To: @tdickens\n' +
   "I send: Justin Jefferson, 2027 1st\n" +
   "I get: Ja'Marr Chase, Jaxon Smith-Njigba\n" +
-  '(Built with Fantasy Trade Finder)');
+  '(Built with Fleeced)');
 
 check('18 leagueName absent → bare "Trade proposal", no dash, no trailing space',
   formatTradeForClipboard({ ...FULL, leagueName: undefined }).split('\n')[0],
@@ -167,7 +167,7 @@ check('20 opponentUsername absent → no "To:" line, other four survive',
   'Trade proposal — QA ESPN League\n' +
   "I send: Justin Jefferson, 2027 1st\n" +
   "I get: Ja'Marr Chase, Jaxon Smith-Njigba\n" +
-  '(Built with Fantasy Trade Finder)');
+  '(Built with Fleeced)');
 
 // 21–23: the id fallback. Ids in the paste are ugly but correct and
 // actionable; an empty side is neither.
@@ -195,7 +195,7 @@ check('24 multi-asset join is ", " with no trailing comma',
 // zero-length. No mount can reach this today; the helper is total anyway.
 check('25 both sides empty → 3 lines, never an empty string',
   formatTradeForClipboard({ opponentUsername: 'tdickens' }),
-  'Trade proposal\nTo: @tdickens\n(Built with Fantasy Trade Finder)');
+  'Trade proposal\nTo: @tdickens\n(Built with Fleeced)');
 
 // 26–28: shape invariants over a spread of inputs.
 const SAMPLES = [
@@ -218,7 +218,7 @@ check('28 always opens "Trade proposal" and closes with the footer',
   SAMPLES.every((s) => {
     const lines = formatTradeForClipboard(s).split('\n');
     return lines[0].startsWith('Trade proposal')
-      && lines[lines.length - 1] === '(Built with Fantasy Trade Finder)';
+      && lines[lines.length - 1] === '(Built with Fleeced)';
   }), true);
 
 // 29 (#309): the action clause survives the copy fix — every reason still

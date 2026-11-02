@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fleeced — Dynasty Trade Finder</title>
-  <meta name="description" content="Rank your dynasty players, compare boards with your leaguemates, and find trades where both sides come out ahead. Free. Works with Sleeper, ESPN, and MyFantasyLeague.">
+  <title>Fleeced: Dynasty Trade Finder</title>
+  <meta name="description" content="Rank your dynasty players, compare boards with leaguemates, and find trades built to work for both sides. Works with Sleeper, ESPN and MyFantasyLeague.">
   <link rel="canonical" href="https://fantasy-trade-finder.onrender.com/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Fleeced: Dynasty Trade Finder">
-  <meta property="og:title" content="Fleeced — Dynasty Trade Finder">
-  <meta property="og:description" content="Rank your dynasty players, compare boards with your leaguemates, and find trades where both sides come out ahead. Free. Works with Sleeper, ESPN, and MyFantasyLeague.">
+  <meta property="og:title" content="Fleeced: Dynasty Trade Finder">
+  <meta property="og:description" content="Rank your players on Fleeced and see trades built to work for both sides. Works with Sleeper, ESPN and MFL.">
   <meta property="og:url" content="https://fantasy-trade-finder.onrender.com/">
   <meta name="twitter:card" content="summary">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -72,12 +72,12 @@
           then finds trades where both sides come out ahead. No more "Hey! What do you want for X player?"
         </p>
 
-        <p class="cb-sub lp-mobile-copy">Fleeced finds trades where both sides come out ahead.</p>
+        <p class="cb-sub lp-mobile-copy">Rank your players, then see trades built to work for both sides.</p>
 
         <div class="lp-step-picker" role="group" aria-label="Explore how Fleeced works">
           <button type="button" data-landing-step="1" aria-pressed="false" aria-controls="landing-step-content"><span>01</span>Your rankings, in draft pick value</button>
-          <button type="button" data-landing-step="2" aria-pressed="true" aria-controls="landing-step-content"><span>02</span>We compare your board with leaguemates</button>
-          <button type="button" data-landing-step="3" aria-pressed="false" aria-controls="landing-step-content"><span>03</span>We match you leaguemates</button>
+          <button type="button" data-landing-step="2" aria-pressed="true" aria-controls="landing-step-content"><span>02</span>Your board, compared with leaguemates'</button>
+          <button type="button" data-landing-step="3" aria-pressed="false" aria-controls="landing-step-content"><span>03</span>Trades you both like</button>
         </div>
         <p class="lp-format-note">Rank players by rookie draft pick value. Built for your dynasty league.</p>
       </div>
@@ -103,7 +103,9 @@
         <a href="/ranking-method.html">How rankings work <span aria-hidden="true">→</span></a>
       </div>
         <!-- Connect — platform chips + per-platform entry.
-             Landing platform options (flag landing.platform_options): the web
+             The ESPN/MFL chips are HARD-OFF on web (app.js WEB_PLATFORM_ENTRY,
+             head-eng 2026-10-27; landing.platform_options is the app's flag), so
+             only the Sleeper door shows. Originally the web
              mirror of mobile SignInScreen's Sleeper · ESPN · MFL chip row and
              the D-164 sessionless entry (docs/plans/landing-platform-options/
              scope.md §V3). Sleeper (default) is the username door, untouched;
@@ -188,8 +190,8 @@
                behind the secondary link, which is where they lived before. -->
           <div class="cb-entry-panel hidden" id="entry-espn">
             <p class="cb-entry-explainer">
-              ESPN dynasty leagues are supported. Read-only: we read team names and rosters,
-              and never post or change anything in ESPN.
+              ESPN dynasty leagues are supported. The website only reads your league.
+              Trades you approve can be sent to ESPN from the iPhone app.
             </p>
             <button class="cb-go-btn cb-go-btn-block hidden" id="espn-signin-btn" type="button" onclick="toggleEspnCookies()">Sign in to ESPN &#8594;</button>
             <p class="cb-entry-sub hidden" id="espn-signin-hint">We&#8217;ll find your leagues &mdash; no league ID needed. We never see your password.</p>
@@ -328,7 +330,7 @@
   <!-- Ranking method selection — shown after league selection for new users -->
   <div class="ranking-method-screen hidden" id="ranking-method-screen">
     <div class="rm-header">
-      <div class="rm-logo">Dynasty <span>Trade Finder</span></div>
+      <div class="rm-logo">Fleeced</div>
       <div class="rm-title">How do you want to set your rankings?</div>
       <div class="rm-subtitle">Your rankings power every trade suggestion. Pick the method that works best for you.</div>
     </div>
@@ -376,7 +378,7 @@
 
   <header>
     <div class="logo">
-      Dynasty <span>Trade Finder</span>
+      Fleeced
       <span class="demo-chip hidden" id="demo-chip">DEMO MODE</span>
     </div>
     <div class="header-right">
@@ -724,7 +726,7 @@
   ════════════════════════════════════════════════════ -->
   <section class="view" id="view-win-now" aria-labelledby="win-now-title">
     <div class="win-now-wrap">
-      <button type="button" class="tab" onclick="switchView('trades')">Back to Trade Finder</button>
+      <button type="button" class="tab" onclick="switchView('trades')">Back to Find a Trade</button>
       <h2 id="win-now-title">Season projections &amp; Win Now</h2>
       <p>Improve this season while keeping dynasty sacrifice within your limit. Forecasts are estimates, not guarantees.</p>
       <div id="win-now-controls"></div>
@@ -981,7 +983,7 @@
           <div class="league-roster-titleblock">
             <div class="league-roster-title"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg> Leaguemates</div>
             <div class="league-roster-sub">
-              Who has and hasn't joined Trade Finder yet.
+              Who has and hasn't joined Fleeced yet.
             </div>
           </div>
           <button class="invite-btn league-roster-invite-btn"
@@ -1001,7 +1003,7 @@
         <div class="leaguemates-header">
           <div class="leaguemates-title"><svg class="icon icon-sm" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></svg> Leaguemates</div>
           <div class="leaguemates-sub">
-            Who's joined Trade Finder and how far along they are.
+            Who's joined Fleeced and how far along they are.
           </div>
         </div>
         <div class="leaguemates-list" id="leaguemates-list">

@@ -123,6 +123,7 @@ def deferred_deck(n, *, ghost_every=0, job_id=None, store=True, complete=True, p
         job_id = job_id or archive_id(False)               # deterministic, not a C8 deck
         job.update(job_id=job_id, append_only=True)
         server._trade_jobs[job_id] = job
+        server._note_deck_held(job_id)                     # as the kickoff notes the real id
         server._trade_jobs_by_key[job["key"]] = job_id
     cards, players = synthetic_cards(n + (n // ghost_every if ghost_every else 0))
     final = cards
@@ -1247,13 +1248,16 @@ def test_the_budget_rule_keeps_exactly_the_snapshots_not_yet_written(deferred, m
 
 # ── Once the job has left the process ───────────────────────────────────────
 
-def test_s1b_a_truncated_lost_job_deck_is_written_as_a_partial_run(deferred):
+@pytest.mark.parametrize("packed", [False, True])
+def test_s1b_a_truncated_lost_job_deck_is_written_as_a_partial_run(deferred, packed):
     """Its first delivery came after the job left the process, and the job held
     cards past the 90 stored ones: they are gone, so replay must never take the
     deck as whole. Its delivered cards, ghosts and candidate set are written,
-    every row 'partial_run'; the undelivered stored cards wait in the blob."""
+    every row 'partial_run'; the undelivered stored cards wait in the blob.
+    The same under trade.packed_evidence (S1 (b) in packed mode, the S1-S8
+    package): a partial run never writes a pack."""
     client, engine, _ = deferred
-    job_id, served, ghosts, _, _ = deferred_deck(120, ghost_every=9)
+    job_id, served, ghosts, _, _ = deferred_deck(120, ghost_every=9, packed=packed)
     assert stored()["evidence_blob"]["truncated"] is True
     server._trade_jobs.clear()                             # restart, or the 4 h job eviction
     server._trade_jobs_by_key.clear()
@@ -1267,6 +1271,7 @@ def test_s1b_a_truncated_lost_job_deck_is_written_as_a_partial_run(deferred):
     assert sorted(r["card_index"] for r in stored()["evidence_blob"]["rows"]) == list(range(30, 90))
     page2 = {c["impression_id"] for c in status(client, job_id, 30).get_json()["cards"]}
     assert {tiers(engine)[iid] for iid in page2} == {"partial_run"}
+    assert rows(engine, db_module.deck_evidence_packs_table) == []
 
 
 def test_s1b_an_untruncated_lost_job_deck_keeps_its_tiers(deferred):

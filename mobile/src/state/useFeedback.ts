@@ -255,28 +255,28 @@ export const useFeedback = create<FeedbackState>((set, get) => ({
   },
 }));
 
-// Format the inbox as a markdown blob the user can paste back into chat
-// after sharing. Grouped by screen so the result is scannable.
-export function formatFeedbackAsMarkdown(items: FeedbackItem[]): string {
+// Format the inbox as a markdown blob the user can share. A plain list,
+// newest first, with each note's status: no `## {screen}` grouping, because
+// `screen` is an internal route name (#354 D-6; the server copy keeps it for
+// triage). `statusLabel` is the inbox's chip text (FeedbackInboxScreen's
+// STATUS_LABEL, the one copy of those labels); a note with no status yet
+// shows none.
+export function formatFeedbackAsMarkdown(
+  items: FeedbackItem[],
+  statusLabel: (status: FeedbackStatus) => string,
+): string {
   if (items.length === 0) return '_No feedback recorded yet._';
   const date = new Date().toISOString().slice(0, 10);
-  const byScreen = new Map<string, FeedbackItem[]>();
-  for (const it of items) {
-    const arr = byScreen.get(it.screen) || [];
-    arr.push(it);
-    byScreen.set(it.screen, arr);
-  }
-  let out = `# DTF Mobile Feedback — ${date}\n\n`;
-  for (const [screen, list] of byScreen) {
-    out += `## ${screen}\n\n`;
-    for (const it of list) {
-      const stamp = it.created_at.slice(11, 16); // HH:MM (UTC; rough is fine)
-      const sev =
-        it.severity === 'bug'    ? 'Bug'    :
-        it.severity === 'polish' ? 'Polish' :
-                                   'Idea';
-      out += `- **${sev}** _(${stamp})_\n  ${it.text.replace(/\n/g, '\n  ')}\n\n`;
-    }
+  const newestFirst = [...items].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  let out = `# Fleeced feedback — ${date}\n\n`;
+  for (const it of newestFirst) {
+    const stamp = it.created_at.slice(11, 16); // HH:MM (UTC; rough is fine)
+    const sev =
+      it.severity === 'bug'    ? 'Broken' :
+      it.severity === 'polish' ? 'Tweak'  :
+                                 'Idea';
+    const status = it.status ? ` · ${statusLabel(it.status)}` : '';
+    out += `- **${sev}** _(${stamp})_${status}\n  ${it.text.replace(/\n/g, '\n  ')}\n\n`;
   }
   return out;
 }
