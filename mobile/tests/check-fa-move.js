@@ -1353,7 +1353,7 @@ process.on('exit', () => {
       try { await h.faMove.getConsent('sleeper'); } catch { /* the control 404 rejects */ }
       eq(h.apiFailures.map((e) => e.status), [500, 404], 'without the opt-in, a 404 is reported as before');
       eq([...h.faMove.CONSENT_QUIET_STATUSES], [403, 404], 'the quiet set');
-      expect(/const quiet = err instanceof ApiError && !!opts\.quietStatuses\?\.includes\(err\.status\);\s*if \(!quiet\) \{\s*_reportApiFailure\(/.test(read('src/api/client.ts')),
+      expect(/const quiet = err instanceof ApiError && !!opts\.quietStatuses\?\.includes\(err\.status\);\s*if \(!quiet\) _reportApiFailure\(/.test(read('src/api/client.ts')),
         'api/client.ts skips the event for the listed statuses only');
     });
   }

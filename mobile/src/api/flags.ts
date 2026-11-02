@@ -1,5 +1,6 @@
 import { api, getDeviceId } from './client';
 import type { FlagMap } from '../shared/types';
+import { appStoreLiveOrUnset, minVersionOrOff } from '../utils/appVersion';
 
 // GET /api/feature-flags — fetched at boot and on the ≥30-min foreground
 // refetch (analytics-platform §4.6b). Mirrors the web's window.FTF_FLAGS
@@ -28,6 +29,20 @@ export type FlagProvenance = Record<string, { experiment: string; variant: strin
 let _provenance: FlagProvenance = {};
 export function flagProvenance(): FlagProvenance { return _provenance; }
 
+/** B8 minimum-version gate — the top-level `app_min_version` int (0 = off)
+ *  from the last SUCCESSFUL fetch, normalized by `minVersionOrOff` (missing
+ *  or malformed → 0). Written on the success path only, like `_provenance`,
+ *  and never persisted: a failed fetch cannot raise it, and a cold start
+ *  that cannot reach the server reads 0 (fails open). */
+let _appMinVersion = 0;
+export function fetchedAppMinVersion(): number { return _appMinVersion; }
+
+/** B8 Update target — the top-level `app_store_live` (1 App Store,
+ *  0 TestFlight, -1 unset) from the last SUCCESSFUL fetch, normalized by
+ *  `appStoreLiveOrUnset`. Same success-path-only, never-persisted rule. */
+let _appStoreLive = -1;
+export function fetchedAppStoreLive(): number { return _appStoreLive; }
+
 export async function loadFeatureFlags(
   opts: { throwOnError?: boolean } = {},
 ): Promise<FlagMap> {
@@ -42,6 +57,8 @@ export async function loadFeatureFlags(
       flags: FlagMap;
       experiments?: Record<string, string>;
       configs?: Record<string, { flags?: FlagMap } & Record<string, unknown>>;
+      app_min_version?: unknown;
+      app_store_live?: unknown;
     }>('/api/feature-flags', headers ? { headers } : undefined);
     const base = res?.flags || {};
     // Experiment overlays (FR-35): a running experiment variant may carry
@@ -70,6 +87,8 @@ export async function loadFeatureFlags(
     // Success path only: a failed fetch leaves the previous map intact,
     // matching revalidateFlags' "keep cached flags" contract.
     _provenance = provenance;
+    _appMinVersion = minVersionOrOff(res?.app_min_version);
+    _appStoreLive = appStoreLiveOrUnset(res?.app_store_live);
     return merged;
   } catch (err) {
     if (opts.throwOnError) throw err;

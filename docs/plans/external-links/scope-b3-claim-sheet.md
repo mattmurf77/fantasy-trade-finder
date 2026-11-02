@@ -2,8 +2,8 @@
 
 **Date:** 2026-10-27
 **Entry point:** direct ask. The league-eng row of `docs/plans/external-links/scope.md` § "Deferred to other leads", building on PR #379 (`build/open-external-helper` @ `04eae95b`). The spec is the #351 PRD (`origin/plan/sleeper-fa-deeplink:docs/plans/sleeper-fa-deeplink/prd.md`) §3.2, §4.1, §4.2, §4.4, AC-1/2/9/10, guards S1/S2/S8/S9, §7.2 code-walks A and B, TestFlight rows 13/14.
-**Builder:** eng-mobile worker for league-eng (task `b3-eng-mobile-1`; commit 3: task `b3-eng-mobile-3`; commit 4: task `b3-eng-mobile-4`), branch `build/b3-claim-handoff`
-**Operator sign-off on waivers:** pending. Waiver to surface: §1 analytics (c), the same waiver #379 carries.
+**Builder:** eng-mobile worker for league-eng (task `b3-eng-mobile-1`; commit 3: task `b3-eng-mobile-3`; commit 4: task `b3-eng-mobile-4`), branch `build/b3-claim-handoff`; `hasDrop`: task `b3-eng-mobile-5`, branch `build/b3-hasdrop`
+**Operator sign-off on waivers:** none left to surface. §1 analytics (c) was this doc's only waiver, and it was stale; on 2026-10-28 it became (b), `sleeper_handoff_resolved` (#528).
 
 ## Contents
 
@@ -14,15 +14,17 @@
 - [4. Docs scope](#4-docs-scope-mandatory--hld--lld--api)
 - [5. Ship gate declaration](#5-ship-gate-declaration)
 - [2026-10-28 — design-lead review](#2026-10-28--design-lead-review)
+- [2026-10-28 — hasDrop (#528)](#2026-10-28--hasdrop-528)
 - [Copy for design-lead](#copy-for-design-lead)
 - [2026-11-01 — pinned CTA footer](#2026-11-01--pinned-cta-footer)
 - [Known risk](#known-risk)
+- [2026-10-29 — S9 re-baseline to #385 (LEG-M10)](#2026-10-29--s9-re-baseline-to-385-leg-m10)
 
 ---
 
 ## What ships
 
-Four commits. Commits 2, 3 and 4 are droppable together: commit 3 reworks commit 2's steps block to design-lead's review ([2026-10-28 — design-lead review](#2026-10-28--design-lead-review)), and commit 4 adds one drop-row string from the same review.
+Four commits. Commits 2, 3 and 4 are droppable together: commit 3 reworks commit 2's steps block to design-lead's review ([2026-10-28 — design-lead review](#2026-10-28--design-lead-review)), and commit 4 adds one drop-row string from the same review. A fifth change, `hasDrop` on the CTA's hand-off, needs #528 and ships on its own branch: [2026-10-28 — hasDrop (#528)](#2026-10-28--hasdrop-528).
 
 | Commit | File | Change |
 |---|---|---|
@@ -45,9 +47,8 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
 
 ## 1. Analytics scope
 
-- [ ] **(a) New events specced:** none.
-- [x] **(b) Existing events cover part of it:** Usage Trends' `usage_trends_action {action: 'add'}` still fires on the Add tap (`UsageTrendsScreen.tsx:286`), before the sheet opens. Nothing fires on the claim sheet's CTA, before or after this change.
-- [x] **(c) WAIVED, pending analytics-lead's grant.** `surface` feeds no event. `ExternalTarget.surface` is carried into `openPlatform` so that, once analytics-lead grants `external_link_opened` (or #351's `sleeper_handoff_resolved`) and registers it in `backend/analytics_taxonomy.py` + `analytics_queries.NON_INTENT_EVENTS`, the emitter goes inside `openPlatform` with no call-site change. Not granted, so nothing fires. The PRD's `hasDrop` property exists only for that event, so it isn't passed.
+- [ ] **(a) New events specced:** none. #509 registers no event and makes no taxonomy change: `backend/analytics_taxonomy.py` and `analytics_queries.NON_INTENT_EVENTS` are untouched.
+- [x] **(b) Existing event covers it: `sleeper_handoff_resolved` (#528); this PR passes `hasDrop`.** analytics-lead granted the event as INTENT on 2026-10-20, so it has no `NON_INTENT_EVENTS` row. #528 emits it inside `openInSleeperApp` (`trackHandoff`), so the claim sheet's CTA fires it once per hand-off, with `surface` (`free_agents` / `usage_trends`, from the hosts' `surface` prop, H1), `target: 'add'`, `rung` and `outcome`, and no emitter at the call site. The CTA passes `hasDrop: dropId != null`, which the event sends as `has_drop`: whether the user picked a drop on the sheet. See [2026-10-28 — hasDrop (#528)](#2026-10-28--hasdrop-528). Usage Trends' `usage_trends_action {action: 'add'}` still fires on the Add tap (`UsageTrendsScreen.tsx:286`), before the sheet opens (unchanged).
 
 ## 2. Schema & flag scope
 
@@ -62,7 +63,7 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
   - `check-sleeper-handoff.js`, new checks. All are AST checks that prove wirings, not behavior (G-035); no claim-sheet code is executed.
     - **S1:** `ClaimSheet.tsx`, `FreeAgentsScreen.tsx` and `UsageTrendsScreen.tsx` hold no `sleeper.com/leagues` string or template literal, and no `Linking.openURL` whose argument mentions Sleeper.
     - **S2 (ClaimSheet half):** `ClaimSheet.tsx` imports `openInSleeperApp` from `../utils/sleeperHandoff`. There is exactly one `fa-claim.open-sleeper` Button, its label is still "Open in Sleeper to claim", and its `onPress` is `openSleeper`. `openSleeper` calls `openInSleeperApp({ target: 'add', … })` with `leagueId`, `playerId: row.player_id` and `surface`.
-    - **S9:** the eight `NO_ADD_REASON` strings, evaluated from the AST, equal the `04eae95b` strings copied into the guard. `explainNoAdd` and `resolveAddPlatform` are byte-identical to `04eae95b`.
+    - **S9:** the eight `NO_ADD_REASON` strings, evaluated from the AST, equal the strings copied into the guard. `explainNoAdd` and `resolveAddPlatform` are byte-identical to `04eae95b`. The four titles and `local`'s body are `04eae95b`'s. From the 2026-10-29 re-baseline on, the espn / mfl / fleaflicker bodies are #385's (LEG-M10): see [2026-10-29 — S9 re-baseline to #385 (LEG-M10)](#2026-10-29--s9-re-baseline-to-385-leg-m10).
     - **H1** (the b3 brief's, not a PRD id): Free Agents mounts `ClaimSheet` with `surface="free_agents"` and `leagueName={leagueName}`, where `leagueId` and `leagueName` both read `useSession` → `s.league`. Usage Trends mounts it with `surface="usage_trends"` and the exact `leagueName` expression above, so the session name is used only when the claim league is the session league.
     - **H2** (the b3 brief's): in `FreeAgentsScreen`, the `query.isLoading` conditional sits inside the `query.isError` conditional's false branch.
     - *(Removed 2026-11-01 with the steps; S2's continued block now guards their absence.)* **S8** (commit 2): `ClaimSheet.tsx` renders exactly one `fa-claim.steps` element, after the drop section and before the CTA. It **renders** (as `{…}` children, so a mention inside a condition doesn't count) `row.name`, the selected drop (a const that looks `dropId` up in `candidates`) and `leagueName`, and carries the "…so you can paste it into search." disclosure. `openSleeper` passes `clipboardText: row.name`.
@@ -117,7 +118,7 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
   3. Mount `:679-692`: `leagueId={claim.leagueId}`; `:684` `leagueName` = the claim league's own name from `leagueMeta` (`:151`, the session's league list), else the session `league_name` (`:95`) only when `claim.leagueId === leagueId` (`:94`), else `null`; `:685` `surface="usage_trends"`. `faQuery` (`:135-141`) loads that league's capacity, waivers and drop candidates.
   4. Then A4–A11, with `surface: 'usage_trends'`. The steps block names the claim league, which for a non-focused league is the one FTF just switched to.
 
-  **C. Non-Sleeper invariance.** `ClaimSheet.tsx` `resolveAddPlatform`, `NO_ADD_REASON` and `explainNoAdd` (`:59-104`): no content change (S9). Free Agents' `onAdd` and Usage Trends' `doAdd` are unchanged.
+  **C. Non-Sleeper invariance.** `ClaimSheet.tsx` `resolveAddPlatform`, `NO_ADD_REASON` and `explainNoAdd` (`:59-104`): #509 makes no content change (S9). With #385 merged, the three platform bodies are #385's LEG-M10 strings, which reach #509 through main, not through this PR. Free Agents' `onAdd` and Usage Trends' `doAdd` are unchanged.
 
 - [x] **Manual TestFlight checklist** (for the operator, on the build that carries this branch; adapted from #351 PRD rows 13, 14 and 16). Run the commit-1 variant if commits 2 and 3 are dropped, the steps variant if they ship. Rows 6–9 are the steps variant at commit 3 (numbered rows; adapted from PRD rows 13/14); row 10 is new at commit 4. Rows 6 and 7 gained a step each from ux-lead's flow re-check (2026-10-28, via head-eng).
 
@@ -177,6 +178,39 @@ design-lead reviewed commit 2: **approve with 4 changes**. Commit 3 implements t
 4. **Copy:** step verbs must eventually match Sleeper's real button labels from the #351 device label capture (§7.3, not recorded yet), and the words are marketing's. The block carries `COPY: draft, pending marketing + Sleeper label capture (#351 §7.3)`; the null-league fallback carries its own pending-marketing marker. `clipboardText: row.name` stays on the CTA.
 
 A later SHOULD from the same review, the empty drop list, is commit 4: see [Copy for design-lead](#copy-for-design-lead). The strings quoted above are the review-time drafts; the final ones are marketing addendum 12 (commit 5).
+
+## 2026-10-28 — hasDrop (#528)
+
+**What it does.** `openSleeper` (`ClaimSheet.tsx:152-166`) now passes `hasDrop: dropId != null` in its `openInSleeperApp({ … })` call (`:164`). Nothing else in the call or the file changes: no copy, no testID, no new event. #528 (`feat/sleeper-handoff-resolved` @ `b2e50fac`, platforms-eng) adds the optional `hasDrop?: boolean` to `openInSleeperApp` (`sleeperHandoff.ts:108-109`) and emits `sleeper_handoff_resolved` from its settle seam (`:119` → `trackHandoff` `:132-149`). `has_drop` is attached only on a `target: 'add'` hand-off whose surface isn't `send_button`, and only when a boolean is passed (`:145-146`). A claim-sheet hand-off from Free Agents or Usage Trends now carries `has_drop: true` when a drop is selected on the sheet, else `has_drop: false` (room on the roster, or a full roster with no pick). head-eng's ruling: the sheet's drop selection (`dropId`, `useState<string | null>`, `:134`) is the source, not `dropName` or `dropStep`.
+
+**Why it's on its own branch.** `hasDrop` exists only in #528's signature, and #528 is a draft, stacked on #379 like #509. #509 must not depend on it. Without #528's `hasDrop?: boolean`, `tsc` rejects the prop (below). So `build/b3-hasdrop` is cut from #509's head `02d867d7`, merges #528 at `b2e50fac` (merge `0655d6a1`), and adds one commit: this change, H3 and this section.
+
+**How it ships.** As the one commit, never the merge, once both #509 and #528 are in. It rides with whichever lands second:
+- **#528 lands first:** cherry-pick the commit onto #509.
+- **#509 lands first:** a follow-up PR after #509, carrying the commit on a base that has #528.
+
+**Guard: H3** (`check-sleeper-handoff.js`, an AST check next to S2's ClaimSheet half; it proves the wiring, not behaviour, G-035). `openSleeper` holds exactly one `openInSleeperApp(…)` call. Its object argument has exactly one `hasDrop` property assignment, and its value is `dropId != null`, whitespace-insensitive. `dropId !== null` is accepted only while `dropId`'s `useState` type argument is `string | null`, so it can't be undefined. `check-sleeper-handoff-event.js` (#528) executes the `has_drop` rules themselves (E1, E8). Sabotage, continuing §3's table (applied, guard run, restored byte-identical with `cmp`, green after):
+
+| # | Sabotage | Red |
+|---|---|---|
+| 23 | `hasDrop` removed from the call | H3 (only) |
+| 24 | `hasDrop: true` | H3 (only) |
+| 25 | `hasDrop: dropName != null` | H3 (only) |
+| 26 | `hasDrop: dropId !== null` (equivalent while the type is `string \| null`) | none: green, as intended |
+| 27 | 26, plus `dropId` widened to `useState<string \| null \| undefined>` | H3 (only) |
+
+**Commands run** (from `mobile/`, with `NODE_PATH` at another checkout's `node_modules`, same `package-lock.json`, G-022):
+
+| Command | Result |
+|---|---|
+| `node tests/check-sleeper-handoff.js` | 88 PASS, 0 FAIL (87 + H3) |
+| `node tests/check-sleeper-handoff-event.js` | 60 PASS, 0 FAIL |
+| `node tests/check-external-links.js` | 48 PASS, 0 FAIL |
+| `node tests/check-usage-trends.js` | 76 PASS, 0 FAIL |
+| `node tests/check-send-button-platform.js` | 32 PASS, 0 FAIL |
+| `bash scripts/testid-lint.sh` | `testid-lint OK` |
+| `tsc --noEmit`, a scratch copy of `mobile/` with a borrowed `node_modules` | exit 0 |
+| the same, with `hasDrop?: boolean` removed from `openInSleeperApp`'s parameter type | exit 2: one error, `ClaimSheet.tsx(164,7)` TS2353, `'hasDrop' does not exist in type …`. So this branch needs #528. |
 
 ## Copy for design-lead
 
@@ -315,3 +349,39 @@ Sabotage:
 ## Known risk
 
 At the `bare` rung Sleeper reopens its **last-viewed league** (PRD C2), not the claim league. A user with several Sleeper leagues can land in the wrong one and add the player there. The old https link had the same end state on iPhone (Safari → Sleeper's home, #351 F3), so this is not a regression, but it is not fixed either. **Without commits 2 and 3, nothing on the sheet tells the user which league to pick.** The steps block's row 1 names the league, or tells the user to open the league they're claiming in when the name is unknown. A deeper rung (`players_tab` or `league`) fixes it only once a device test proves Sleeper honours the league path.
+
+## 2026-10-29 — S9 re-baseline to #385 (LEG-M10)
+
+**Why.** #385 (LEG-M10, an 11-06 MUST, QA passed; release-lead) replaces the espn / mfl / fleaflicker `body` strings in `ClaimSheet.tsx`'s `NO_ADD_REASON`. The old `04eae95b` bodies ("…with read-only access, so Fantasy Trade Finder can’t make roster moves there…") are false copy and must not return. S9 pinned them, so main + #385 + #509 failed exactly three checks: `S9 NO_ADD_REASON.espn.body` / `.mfl.body` / `.fleaflicker.body verbatim` (reproduced on `build/b3-s9-385` @ `46083d12`, guard exit 1, 3 FAIL).
+
+**What changes.** Only `check-sleeper-handoff.js` S9: the three platform bodies in `EXPECTED_REASONS` become #385's strings, byte for byte, with straight apostrophes:
+- espn: "Roster moves for this ESPN league can't be made from Fleeced. Open the ESPN Fantasy app to add this player."
+- mfl: "Roster moves for this MFL league can't be made from Fleeced. Open MFL to add this player."
+- fleaflicker: "Roster moves for this Fleaflicker league can't be made from Fleeced. Open Fleaflicker to add this player."
+
+The titles, `local`, `explainNoAdd` and `resolveAddPlatform` stay pinned to `04eae95b`. `ClaimSheet.tsx` doesn't change: #509 still makes no content change to the non-Sleeper paths. The bodies come from #385, through main.
+
+**Why it's on its own branch.** #509's base is #379, which doesn't have #385. Re-baselining S9 on #509 now would turn #509 red against its own base. Merging #385 into #509 isn't an option either: #385's head carries a full main merge (`b1a16282`), which would pull most of main into #509's diff. `build/b3-s9-385` is #509 @ `91f60d23` plus a merge of #385 @ `b1a16282` (`46083d12`), the combination that was red, with the re-baseline as one commit on top.
+
+**How it ships.** As the one commit, never the merge, together with `2eb1bf83` (hasDrop), when #509 takes main after #385, #379 and #528 have landed: merge main into #509 (S9 then goes red until this lands), cherry-pick this commit, then cherry-pick `2eb1bf83`. Each touches separate hunks of the guard and of this file.
+
+**Sabotage** (on `ClaimSheet.tsx`, applied, guard run, restored byte for byte):
+
+| # | Sabotage | Red |
+|---|---|---|
+| 28 | espn's body back to the `04eae95b` text ("…with read-only access…") | S9 espn.body (only) |
+| 29 | mfl's `can't` → curly `can’t` | S9 mfl.body (only) |
+| 30 | fleaflicker's body without its final `.` | S9 fleaflicker.body (only) |
+| 31 | espn's title, one character changed (`ESPN` → `ESPM`) | S9 espn.title (only) |
+
+**Commands run** (from `mobile/`, with `NODE_PATH` at another checkout's `node_modules`, same `package-lock.json`, G-022):
+
+| Command | Result |
+|---|---|
+| `node tests/check-sleeper-handoff.js`, before the re-baseline | exit 1: 84 PASS, 3 FAIL (the three S9 bodies) |
+| `node tests/check-sleeper-handoff.js`, after | 87 PASS, 0 FAIL |
+| `node tests/check-external-links.js` | 48 PASS, 0 FAIL |
+| `node tests/check-usage-trends.js` | 76 PASS, 0 FAIL |
+| `node tests/check-send-button-platform.js` | 32 PASS, 0 FAIL |
+| `bash scripts/testid-lint.sh` | `testid-lint OK` |
+| `tsc --noEmit`, a scratch copy of `mobile/` with a borrowed `node_modules` | exit 0 |

@@ -726,8 +726,10 @@ export async function getPowerRankings(
 //
 // Every odds figure is a PROJECTION, not a settled fact. `meta.beta` /
 // `meta.is_preseason` mark the numbers provisional; the UI labels the whole
-// layer "Projected · preseason · beta" and NEVER shows a bare authoritative
-// percentage — `playoff_pct` renders as a three-band chip whose keys,
+// layer "Projected" ("Projected · preseason" before week 1; no "beta", App
+// Review 2.2), `meta.beta` still withholds win-loss records through week 5,
+// and the UI NEVER shows a bare authoritative percentage — `playoff_pct`
+// renders as a three-band chip whose keys,
 // thresholds and colors are a cross-client invariant (see
 // docs/cross-client-invariants.md § "Playoff outlook bands"). Percentages are
 // 0..1 fractions. Teams arrive pre-sorted by `odds.playoff_pct` descending —

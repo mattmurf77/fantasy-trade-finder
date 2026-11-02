@@ -32,6 +32,7 @@ import { appleSignIn, deleteAccount, getAccount } from '../api/auth';
 // (its surface is this inline card, not a modal); the picker mounts the
 // sheet. The 409 two-boards Alert lives in that component.
 import { LinkSleeperForm } from '../components/LinkSleeperSheet';
+import { identityLabel } from './settings/identityLabels';
 import { ApiError } from '../api/client';
 import { setRankingMethod } from '../api/rankings';
 import { getSleeperLinkStatus, unlinkSleeper } from '../api/sendInSleeper';
@@ -49,7 +50,12 @@ import { track } from '../api/events';
 import SteerSlider from '../components/SteerSlider';
 import { useSession, type RankMethodPref } from '../state/useSession';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
-import { useEntitlements } from '../state/useEntitlements';
+import SubscriptionSection from '../components/SubscriptionSection';
+import { openAppleSubscriptions } from '../components/SubscriptionSection';
+import { DELETE_ACCOUNT_BODY, DELETE_ACCOUNT_SUB_NOTE } from '../copy/deleteAccount';
+import { MON } from '../copy/monetization';
+import { useTipsOffered } from '../state/useTipsOffered';
+import { subscriptionSessionState } from '../state/subscriptionSession';
 import { guideToggleTitle, guideToggleDescriptionOff } from '../utils/mascotCopy';
 import { useOnboardingState } from '../state/useOnboardingState';
 import { useGuide } from '../state/useGuide';
@@ -107,6 +113,12 @@ export default function SettingsScreen({ navigation }: any) {
   // the paywall stays reachable whichever `account.settings_hub` state the
   // build runs in — exactly one of the two ever mounts.
   const paywallEnabled          = useFlag('monetize.paywall');
+  // B8 #1: the tip row also needs the server to offer tips (a cache
+  // subscription that never fetches; unknown → hidden).
+  const tipsOffered             = useTipsOffered();
+  // A tip is a purchase: only for an exactly-verified session (demo,
+  // unverified and unknown never see the row; state/subscriptionSession).
+  const sessionVerified         = useSession((s) => subscriptionSessionState(s) === 'verified');
   // (The pick-pricing segmented control and its `trade.slot_pricing` flag
   // read were REMOVED 2026-08-21, D-144 — pick pricing is no longer a
   // setting. See TradeValuesSection.tsx, which owns this block in v2.)
@@ -115,9 +127,6 @@ export default function SettingsScreen({ navigation }: any) {
   // failure there never blocks or reverts the slider. With settings v2 on,
   // the pref also applies IMMEDIATELY (S6B-07: "next launch" made the
   // setting look broken) by resetting the mounted Rank stack.
-  // Entitlement state for the Pro row — zustand, already in memory, no query.
-  const proLoaded = useEntitlements((s) => s.loaded);
-  const isPro     = useEntitlements((s) => s.pro);
   const rankingPref    = useSession((s) => s.rankingMethodPref);
   const setRankingPref = useSession((s) => s.setRankingMethodPref);
   // #187 — The Analyst guided-tour opt-out, surfaced as a Settings toggle
@@ -600,12 +609,10 @@ export default function SettingsScreen({ navigation }: any) {
   function confirmDeleteAccount() {
     Alert.alert(
       'Delete account?',
-      'This permanently deletes your rankings, comparison history, trade activity, ' +
-        'notifications, push tokens, and any stored Sleeper connection from our ' +
-        'servers. Trade matches shared with leaguemates are anonymized on your side. ' +
-        'This cannot be undone.',
+      DELETE_ACCOUNT_BODY + '\n\n' + DELETE_ACCOUNT_SUB_NOTE,
       [
         { text: 'Cancel', style: 'cancel' },
+        ...(paywallEnabled ? [{ text: MON['mon.pay.manage'], onPress: openAppleSubscriptions }] : []),
         {
           text: 'Continue',
           style: 'destructive',
@@ -1038,48 +1045,31 @@ export default function SettingsScreen({ navigation }: any) {
     </>
   ) : null;
 
-  // Subscription entry point (iap-enablement, flag `monetize.paywall`). One
-  // row, one destination — the flag gates the row, never the Paywall route.
-  // The status value is only stated once some source has answered; printing
-  // "Free" before the entitlements fetch lands would read as a downgrade to
-  // every subscriber who opened Settings too fast.
-  const proSection = paywallEnabled ? (
+  // Settings › Subscription (#393 M3): engagement-eng's self-contained
+  // section (the TimingReadoutRow precedent). It gates itself on
+  // `monetize.paywall` and carries its own "Subscription" banner. The tip-jar
+  // row shows only while the server offers tips (B8 #1; `tips: []` at
+  // launch); the TipJar route stays.
+  const proSection = (
     <>
-      <View style={styles.section}>
-        <TickLabel>Subscription</TickLabel>
-      </View>
-      <Pressable
-        testID="settings-pro-row"
-        accessibilityRole="button"
-        accessibilityLabel={
-          proLoaded ? `Fleeced Pro. ${isPro ? 'Pro' : 'Free'}` : 'Fleeced Pro'
-        }
-        onPress={() => navigation.navigate?.('Paywall', { source: 'settings' })}
-        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={styles.rowKey}>Fleeced Pro</Text>
-          {proLoaded ? (
-            <Text style={styles.rowSub}>{isPro ? 'Pro' : 'Free'}</Text>
-          ) : null}
-        </View>
-        <Icon name="chevron-right" color={chalk.dim} size={16} />
-      </Pressable>
-      <Pressable
-        testID="settings-tip-row"
-        accessibilityRole="button"
-        accessibilityLabel="Support Fleeced. Tip jar"
-        onPress={() => navigation.navigate?.('TipJar', { source: 'settings' })}
-        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={styles.rowKey}>Support Fleeced</Text>
-          <Text style={styles.rowSub}>Tip jar</Text>
-        </View>
-        <Icon name="chevron-right" color={chalk.dim} size={16} />
-      </Pressable>
+      <SubscriptionSection />
+      {paywallEnabled && tipsOffered && sessionVerified ? (
+        <Pressable
+          testID="settings-tip-row"
+          accessibilityRole="button"
+          accessibilityLabel="Support Fleeced. Tip jar"
+          onPress={() => navigation.navigate?.('TipJar', { source: 'settings' })}
+          style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowKey}>Support Fleeced</Text>
+            <Text style={styles.rowSub}>Tip jar</Text>
+          </View>
+          <Icon name="chevron-right" color={chalk.dim} size={16} />
+        </Pressable>
+      ) : null}
     </>
-  ) : null;
+  );
 
   // Sleeper-sending status/disconnect row (flag `account.sleeper_disconnect`).
   // Hidden entirely when the link status can't be read (feature dark / error).
@@ -1226,16 +1216,20 @@ export default function SettingsScreen({ navigation }: any) {
       ) : null}
       {accountsEnabled && !isDemo ? (
         <>
-          {identities.map((ident) => (
-            <View key={ident.provider} style={styles.kvRow}>
-              <Text style={styles.rowKey}>
-                {ident.provider === 'apple' ? 'Signed in with Apple' : 'Signed in with Google'}
-              </Text>
-              <Text style={styles.kvValue}>
-                {ident.linked_at ? new Date(ident.linked_at).toLocaleDateString() : 'Linked'}
-              </Text>
-            </View>
-          ))}
+          {identities.map((ident) => {
+            // Shared label map (./settings/identityLabels). An unknown provider gets
+            // no row: a wrong label is worse than none.
+            const label = identityLabel(ident.provider);
+            if (!label) return null;
+            return (
+              <View key={ident.provider} style={styles.kvRow}>
+                <Text style={styles.rowKey}>{label}</Text>
+                <Text style={styles.kvValue}>
+                  {ident.linked_at ? new Date(ident.linked_at).toLocaleDateString() : 'Linked'}
+                </Text>
+              </View>
+            );
+          })}
           {/* Link Apple — shown for any session with no Apple identity
               (Sleeper sessions included). Official HIG component, white
               variant on dark, same construction as SignInScreen. Gated on

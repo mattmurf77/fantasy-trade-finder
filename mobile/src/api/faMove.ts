@@ -20,7 +20,7 @@ import NetInfo from '@react-native-community/netinfo';
 
 import { apiRequest, ApiError, getBaseUrl } from './client';
 import { track } from './events';
-import { getFreeAgents } from './league';
+import type { FreeAgentsResponse } from './league';
 
 // ── Wire types (contract §1–§3) ─────────────────────────────────────────────
 
@@ -174,7 +174,7 @@ export const FA_MOVE_STILL_SENDING_MS = 8_000;
 
 export function getConsent(
   platform: LeaguePlatform,
-  opts: { quietStatuses?: readonly number[] } = {},
+  opts: { quietStatuses?: readonly number[]; background?: boolean } = {},
 ): Promise<ConsentStatus> {
   return apiRequest<ConsentStatus>(`${CONSENT_PATH}?platform=${encodeURIComponent(platform)}`, opts);
 }
@@ -396,7 +396,8 @@ export const CONSENT_QUIET_STATUSES: readonly number[] = [403, 404];
 export async function readConsentStatus(platform: LeaguePlatform): Promise<ConsentStatus> {
   try {
     // Routine on a dark or unverified visit, so no api_request_failed for them.
-    return await getConsent(platform, { quietStatuses: CONSENT_QUIET_STATUSES });
+    // Not a tap either, so a refusal opens no paywall or VerifySheet.
+    return await getConsent(platform, { quietStatuses: CONSENT_QUIET_STATUSES, background: true });
   } catch (err) {
     if (err instanceof ApiError && (err.status === 404 || err.isVerificationRequired)) {
       return { platform, valid: false, until: null, status_line: null, stop_label: null };
@@ -666,7 +667,12 @@ export interface LeagueCapability {
 }
 
 export async function readLeagueCapability(leagueId: string): Promise<LeagueCapability> {
-  const data = await getFreeAgents(leagueId, 'ALL');
+  // A prefetch, never a tap: `background` keeps a 402 / 403 from opening the
+  // paywall or the VerifySheet (the same read league.ts's getFreeAgents makes).
+  const data = await apiRequest<FreeAgentsResponse>(
+    `/api/league/free-agents?league_id=${encodeURIComponent(leagueId)}`,
+    { background: true },
+  );
   const move = capabilityOrNull(data?.move);
   const rows: Record<string, FaMoveRow> = {};
   if (move) {

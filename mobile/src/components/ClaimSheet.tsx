@@ -122,23 +122,20 @@ const NO_ADD_REASON: Record<Exclude<AddPlatform, 'sleeper'>, { title: string; bo
   espn: {
     title: "Can't add in ESPN leagues yet",
     body:
-      'This league is imported from ESPN with read-only access, so ' +
-      'Fantasy Trade Finder can’t make roster moves there. Open the ' +
-      'ESPN Fantasy app to add this player.',
+      "Roster moves for this ESPN league can't be made from Fleeced. " +
+      'Open the ESPN Fantasy app to add this player.',
   },
   mfl: {
     title: "Can't add in MFL leagues yet",
     body:
-      'This league is linked to MyFantasyLeague with read-only access, so ' +
-      'Fantasy Trade Finder can’t make roster moves there. Open MFL ' +
-      'to add this player.',
+      "Roster moves for this MFL league can't be made from Fleeced. " +
+      'Open MFL to add this player.',
   },
   fleaflicker: {
     title: "Can't add in Fleaflicker leagues yet",
     body:
-      'This league is linked to Fleaflicker with read-only access, so ' +
-      'Fantasy Trade Finder can’t make roster moves there. Open ' +
-      'Fleaflicker to add this player.',
+      "Roster moves for this Fleaflicker league can't be made from " +
+      'Fleeced. Open Fleaflicker to add this player.',
   },
   local: {
     title: "Can't add in this league",
@@ -432,7 +429,8 @@ export default function ClaimSheet({
     // Opens the Sleeper app (`sleeper://`, the deepest proven rung; today
     // `bare`, so Sleeper's last-viewed screen). Not installed → the Get
     // Sleeper alert, never silent. The hand-off: the user finishes in Sleeper.
-    void openInSleeperApp({ target: 'add', leagueId, playerId: row.player_id, surface });
+    // `hasDrop` feeds #528's sleeper_handoff_resolved `has_drop` (a drop picked).
+    void openInSleeperApp({ target: 'add', leagueId, playerId: row.player_id, surface, hasDrop: dropId != null });
   };
 
   // The consent step's legal links (R15.8 "Terms · Privacy"), through the

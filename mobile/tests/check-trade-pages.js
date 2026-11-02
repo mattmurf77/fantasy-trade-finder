@@ -70,6 +70,16 @@ const ids = (cs) => cs.map((c) => c.trade_id);
 const trades = read('screens/TradesScreen.tsx');
 const code = stripComments(trades);
 
+// A check that awaits something that never settles would let the event loop
+// drain and node exit 0 mid-run: an unfinished run fails instead.
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-trade-pages did not finish (a check hung): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 (async () => {
   console.log('check-trade-pages:');
 
@@ -210,11 +220,11 @@ const code = stripComments(trades);
   });
 
   // ── 5. The screen wires all of the above ───────────────────────────────
-  await check('5a. every dispatch is a paged search with its own client search id', () => {
-    ok(/return generateTrades\(request, vars\.searchId \? \{ searchId: vars\.searchId \} : undefined\);/.test(code),
-      'mutationFn passes the dispatch search id');
-    ok(/const claimed = claimPendingSearch\(\);[\s\S]{0,200}?generateMutation\.mutate\(\{ \.\.\.vars, searchId: claimed \?\? uuidv4\(\) \}, mutateOpts\);/.test(code),
-      'dispatchGenerate carries the tap\'s search id (R1), else mints one');
+  await check('5a. every dispatch is a paged search; each but the automatic re-search has its own client search id', () => {
+    ok(/return generateTrades\(request, \{ searchId: vars\.searchId \}\);/.test(code),
+      'mutationFn always pages (page 1), the dispatch search id when it has one (#525 QA P2-1)');
+    ok(/const claimed = research \? research\.searchId : claimPendingSearch\(\);[\s\S]{0,300}?generateMutation\.mutate\(\s*\{\s*\.\.\.vars,\s*searchId: research \? research\.searchId \?\? undefined : claimed \?\? uuidv4\(\),\s*research: !!research,\s*\},\s*mutateOpts\);/.test(code),
+      'dispatchGenerate carries the tap\'s search id (R1), else mints one (the automatic re-search: its open id or none)');
   });
   await check('5b. pages are fetched by deck + cursor, merged through mergeDeckPage at the fronted card', () => {
     ok(/getTradeStatus\(snap\.job_id, \{ deck: snap\.deck_id, cursor: requested \}\)/.test(code), 'status call');
@@ -339,6 +349,7 @@ const code = stripComments(trades);
       'applyPage builds the job through nextDeckJob');
   });
 
+  finished = true;
   console.log(failures ? `check-trade-pages: ${failures} FAILED` : 'check-trade-pages: all passed');
   process.exit(failures ? 1 : 0);
 })();
