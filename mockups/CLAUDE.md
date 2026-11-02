@@ -6,6 +6,8 @@ it as current app behavior. Live design truth is [`docs/design/`](../docs/design
 [`web/style-guide.html`](../web/style-guide.html); current app behavior is
 [`screens/`](../screens/CLAUDE.md).
 
+To build a lab, use `/mockup-lab`.
+
 ## Index
 
 Every lab answers one design question and then freezes. "Status" is about the lab, not the
@@ -39,29 +41,62 @@ rejected — read it for reasoning, never for current UI.
 Labs with their own `README.md` are linked above; the rest are self-describing —
 open `index.html`.
 
-## ⚠ Unresolved: the embed rule vs the screen-library freeze
+## The before-pane rule (operator decision W2, 2026-10-15)
 
-**Read this before the rule below it — they are in conflict, and no operator decision has
-resolved it.**
+> Embed the screen's real capture only when one exists and `git log` shows the screen's source unchanged since 2026-08-11. Otherwise use a labelled reconstruction from source that names the files changed since then. TestFlight screenshots the operator supplies may also serve as before-panes. They're stored in the mockup's folder, never in `screens/`. Never present a reconstruction as a capture. D-056 stays intact.
 
-- **The rule (below, unchanged):** a mockup revising an existing screen must embed that screen's real capture from `screens/` as its "current" pane.
-- **The freeze:** operator decision **D-056** (2026-08-15, Active) retired the simulator entirely, screen captures included. [`screens/`](../screens/CLAUDE.md) is frozen at **2026-08-11** and there is no process to refresh it.
-- **The consequence:** for any screen changed after 2026-08-11, or any screen that never had a capture, the rule is **unsatisfiable** — and "request a capture run", the escape hatch the rule was written with, is now out of policy.
+The rule is quoted verbatim; never reword it. It resolves the conflict that this file
+used to carry as "⚠ Unresolved: the embed rule vs the screen-library freeze", which labs
+built before 2026-10-15 still cite. Those labs followed an interim posture, and some of
+them embed captures this rule would now reject. Treat them as history.
 
-**Interim working posture** until an operator resolves this — do all three:
+**Procedure.** The full version, with commands, is in
+[`.claude/skills/mockup-lab/references/before-pane.md`](../.claude/skills/mockup-lab/references/before-pane.md).
 
-1. **Embed a real capture whenever one exists.** For the ~32 captured surfaces, an 2026-08-11 capture is still exact ground truth for that build and still beats drawing from memory. This covers most work.
-2. **When no usable capture exists, reconstruct from source and label it.** Check `git log` on the screen's source files against the capture date, state on the page and in the deliverable which files moved since, and mark every reconstructed frame as a reconstruction. `mockups/candidates-300/` already does exactly this ("Every 'Proposed' and drill-in frame is a reconstruction, not a capture").
-3. **Never present a reconstruction as a capture, and never silently skip the "current" pane.** The #256/#257 failure below is what happens when the current state is invented; the freeze does not make that safer, it makes it likelier.
+1. Find the screen's dir in [`screens/manifest.json`](../screens/manifest.json). Take its
+   `source` list (bare paths, each confirmed with `git ls-files`) plus the shared
+   components the screen file imports.
+2. Run `git log --oneline --since=<captured_at> -- <files>`, passing the earliest
+   `captured_at` whole. A commit that landed between the capture and 2026-08-11 counts
+   too. Never pass a bare date: git fills in the current time of day.
+3. If there are no commits, embed the capture (mechanics below). A change and its revert
+   also count as unchanged, but only once an empty `git diff` from the capture's build to
+   `HEAD` proves it.
+4. If there are commits, or no capture exists, reconstruct from source.
+5. A TestFlight screenshot the operator supplies may serve as the before pane instead.
+6. Never present a reconstruction as a capture.
 
-**This needs an operator call:** either the embed rule is formally relaxed to
-"embed-if-captured, else labelled reconstruction", or screen captures get an exemption
-from D-056. Do not resolve it yourself.
+**Labelling.** Every app frame carries exactly one provenance stamp:
 
-## The one hard rule: embed the real capture
+- "Real capture · <date> build"
+- "TestFlight screenshot · <version> (<build>) · <date>"
+- "Local render · origin/main <sha7> · <date>"
+- "og_image.py render · <sha7> · <date>"
+- "Reconstruction from source, not a capture"
+- "Proposed"
+- "Wireframe"
 
-Any mockup revising an **existing** screen must show that screen's actual capture as
-its "current"/"before" pane — not a redrawn approximation, not a reading of source:
+A reconstruction's provenance note names the source files and commits changed since the
+capture, or says that no capture exists, and gives the sha that was read.
+`mockups/candidates-300/` is the model ("Every 'Proposed' and drill-in frame is a
+reconstruction, not a capture"). A capture of a screen whose source has changed is not
+embedded at all.
+
+**Operator TestFlight screenshots** live in the lab's own folder, at
+`mockups/<lab>/before/`, and never in `screens/`. Each one is labelled with its version,
+build number and date. Ask the operator before committing real leaguemate handles.
+
+**Web pages and OG images (decision P22, 2026-10-15):** a local render of the current
+page from origin/main, labelled with sha and date, or the PNG `og_image.py` produces,
+counts as a real before-pane, stored in the lab folder, never in `screens/`. Procedure:
+the skill's `before-pane.md` (g).
+
+Build labs with the `mockup-lab` skill (`/mockup-lab`).
+
+## Embedding a capture (when the before-pane rule allows it)
+
+When the rule above says to embed, the "before" pane shows that screen's actual capture,
+not a redrawn approximation:
 
 ```html
 <!-- from mockups/<project>/index.html — two levels deep, so ../../ reaches the repo root -->
@@ -74,17 +109,17 @@ uses exactly `../../screens/mobile/…`. A top-level `mockups/x.html` uses `../s
 one level deeper (`mockups/<project>/sub/x.html`) needs `../../../`. Count the depth; a
 broken `<img>` silently degrades the mockup back into a from-memory drawing.
 
-~~Missing capture, or stale? Request `mobile/scripts/screen-capture.sh --screen <x>`
-before designing.~~ **No longer available** — see the freeze section above. Say so in the
-deliverable and fall back to a labelled reconstruction.
-See [`screens/CLAUDE.md`](../screens/CLAUDE.md).
+The library is frozen under D-056, so never request or run a capture. See
+[`screens/CLAUDE.md`](../screens/CLAUDE.md).
 
 **Why this rule exists (#256/#257):** the TradesHome full-sheet mockups carried
 placeholder copy invented from memory — lane pills labelled "Win-now moves" when the
 shipped screen said "Team-fit moves" / "Value moves" — and the divergence had to be
 caught and corrected by operator decision at build time
 (`docs/feedback/items/257-edit-full-sheet/status.md`, decision Q3). Embedding the real
-capture makes that class of drift impossible.
+capture makes that class of drift impossible. Where no current capture exists, the guard
+is a reconstruction drawn from source with its copy taken from source strings, and the
+label is what keeps it honest.
 
 ## Housekeeping
 
