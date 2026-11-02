@@ -1141,7 +1141,8 @@ def test_g_b4_every_deck_with_a_cut_lands_in_exactly_one_bucket():
     assert ("audited, packed 1 (D3 re-caps them); audited from rows, no pack 1 (S1b partial "
             "runs, lost or in-flight packs: D3 didn't run, so a breach is a violation); not "
             "checked, live evidence 1 (F4: n > 0 goes to head-eng); not checked, no rows and no "
-            "pack 1 (#535's lines).") in render(r)
+            "pack 1 (#535's lines; an upper bound: every captured #535 deck, cut or "
+            "not).") in render(r)
 
 
 def test_the_cli_reads_the_captured_no_evidence_lines(tmp_path, capsys):

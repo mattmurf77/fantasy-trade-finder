@@ -113,7 +113,9 @@ four buckets (models-lead G-b4), each counted in `after_cut`:
                   bucket: n > 0 goes to head-eng;
   no_evidence     #535's decks (no rows, no pack), from the read's captured
                   log lines (--no-evidence-log; G3-a): eval can't see them,
-                  so their cuts are unknown; None when no lines were given.
+                  so their cuts are unknown and every captured deck counts,
+                  cut or not, an upper bound (models-lead I3, M3); None when
+                  no lines were given.
 
 A card whose partner is a redaction token (contract.REDACTED_PARTNER_PREFIX,
 the account-deletion scrub's) has unknown protection, and for B-DK-6 unknown
@@ -824,14 +826,15 @@ def render(r: BdkAudit) -> str:
         lines.append("INCOMPLETE from redaction only: "
                      + ("yes" if r.incomplete_from_redaction_only else "no"))
     ac = rp["after_cut"]
-    no_evidence = "not read (no --no-evidence-log)" if ac["no_evidence"] is None else ac[
-        "no_evidence"]
+    no_evidence = ("not read (no --no-evidence-log)" if ac["no_evidence"] is None else
+                   f"{ac['no_evidence']} (#535's lines; an upper bound: every captured #535 "
+                   "deck, cut or not)")
     lines.append(
         f"B-DK-7 decks with a serve-time cut in their first {REPEAT_WINDOW} (models-lead G-b4): "
         f"audited, packed {ac['audited_packed']} (D3 re-caps them); audited from rows, no pack "
         f"{ac['audited_rows']} (S1b partial runs, lost or in-flight packs: D3 didn't run, so a "
         f"breach is a violation); not checked, live evidence {ac['live_evidence']} (F4: n > 0 "
-        f"goes to head-eng); not checked, no rows and no pack {no_evidence} (#535's lines).")
+        f"goes to head-eng); not checked, no rows and no pack {no_evidence}.")
     lines.append(
         f"B-DK-7 response boundary (models-lead G-b1): {rp['explained_boundary']} breaches on "
         f"{rp['boundary_decks']} decks, {_share(rp['boundary_decks'], rp['packed_decks'])} of "
