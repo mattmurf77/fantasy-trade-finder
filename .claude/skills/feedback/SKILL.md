@@ -73,6 +73,7 @@ skill's files too — the skill is expected to improve itself each run.
    `declined` (or "verify on current build, then `fixed`"). A dup of an
    *open* item → fold into the canonical item's group; both get status
    updates together from here on.
+   Model-output complaints (a bad trade card, outlook/window, Win Now, values, tiers or rankings): classify with `references/model-surface-triage.md` before grouping.
 4. Present **one triage table**: the fetched columns plus **work type**
    (bug / polish / feature — start from `severity`, re-classify from the
    full text), **platforms** (mobile / web / backend), and **group**. Group
