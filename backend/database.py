@@ -2425,7 +2425,7 @@ user_events_table = Table("user_events", metadata,
     Column("occurred_at",  String,  nullable=False),    # ISO UTC (server receive time)
     Column("league_id",    String),
     Column("session_id",   String),
-    Column("device_type",  String),                     # 'iphone' | 'ipad' | 'macos' | 'web' | 'extension'
+    Column("device_type",  String),                     # 'iphone' | 'ipad' | 'macos' | 'android' | 'web' | 'extension' · NULL = no X-Device header
     Column("os_version",   String),                     # '17.4' | '18.1' | etc.
     Column("app_version",  String),                     # '1.2.3'
     Column("source",       String),                     # client: 'mobile' | 'web' | 'extension' (ingest) · server: 'api' | 'server' | 'calc_queue' · NULL = client unidentified (G-068)

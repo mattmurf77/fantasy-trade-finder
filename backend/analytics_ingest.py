@@ -328,7 +328,10 @@ MISSING_EVENT_SOURCE = None
 def _resolve_event_source(headers, body: dict, device_info: dict) -> str | None:
     """First match wins: X-Source header in the closed set → body `source` in
     the closed set → body `platform` web/extension → an X-Device header (only
-    the mobile SDK sends one) → MISSING_EVENT_SOURCE."""
+    the mobile SDK sends one) → MISSING_EVENT_SOURCE. Rule 3 (body platform)
+    runs before rule 4 (X-Device), so a request carrying both X-Device and body
+    `platform: "web"` lands web; no client sends that pair (mobile sends no body
+    platform, web sends no X-Device)."""
     header = (headers.get("X-Source") or "").strip().lower()
     if header in CLIENT_EVENT_SOURCES:
         return header
