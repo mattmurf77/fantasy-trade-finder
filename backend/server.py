@@ -91,7 +91,8 @@ from .database import (
     upsert_user, upsert_league,
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
-    load_recent_league_likes, find_live_trade_like, log_trade_impressions,
+    load_recent_league_likes, find_live_trade_like, find_prior_trade_signal,
+    log_trade_impressions,
     load_trade_interest_history, load_trade_card_source_likes,
     # #362 standing offers
     create_standing_offer, load_standing_offers, load_user_standing_offers,
@@ -21914,6 +21915,135 @@ def queue_trade_for_opponent():
                     "trade_id": trade_id})
 
 
+# The propose routes' closed `source` set, recorded as `trade_proposals.source`.
+# Absent or unknown is "deck" (every client before #574 sends nothing). `shop`
+# (#531): the Shop tile's send, the one source that also records the kept Elo
+# half (_record_shop_send_signal). Cross-client value set:
+# docs/cross-client-invariants.md.
+_PROPOSE_SOURCES = ("deck", "match", "calculator", "shop")
+
+
+def _propose_source(body: dict) -> str:
+    source = body.get("source")
+    return source if source in _PROPOSE_SOURCES else "deck"
+
+
+def _record_shop_send_signal(sess, *, league_id, their_user_id, give_ids,
+                             receive_ids) -> None:
+    """#531 — the Elo half of a Shop send, once per package.
+
+    head-product (11-01) kept the Elo signal for Shop sends after #574 swapped
+    the tile's queue button for the platform send router: the queue's Elo half
+    WITHOUT the deck card. So this writes no like. A `trade_decisions` row with
+    `decision = "send"` is the once-only anchor (head-eng 11-01): every reader
+    that must not see it — the likes-you mirror, match detection, Awaiting,
+    like/pass counts — filters `decision IN ('like', 'pass')`.
+
+    Called by the three propose routes BEFORE the platform call when the body
+    says `source: "shop"`. A send is intent, so the signal never waits on the
+    platform's outcome (analytics-lead: timed to the write, not the result).
+
+    The bar to record is the queue route's D-170 bar: the session's league and
+    a counterparty this session resolves to a league-mate who isn't the
+    caller. Anything else records nothing and changes nothing about the send.
+
+    Elo goes through exactly the queue route's path: the same
+    `fit_congruence_mult` (a hand-built package has no `lane_shift`, so 1.0),
+    the bake-off `elo_freeze_mult`, `record_trade_signal` and
+    `save_trade_swipes` at `trade_k_like`. A signal-layer rule there, such as
+    #389's generic-pick strip, applies here unchanged.
+
+    Once only: `find_prior_trade_signal` skips the row, the Elo and the event
+    when this package already has a send row (a repeat tap) or a live like
+    (the deck, the calculator, or a pre-#574 Shop queue). The probe and the
+    write share the per-user `service._lock`, so two taps in this process
+    can't both pass it. `trade_proposed` fires iff the row is written.
+
+    Never raises: the user's real proposal must not fail on Elo bookkeeping.
+    """
+    try:
+        g_user_id = sess.get("user_id")
+        g_league = sess.get("league")
+        service = sess.get("service")
+        if not (g_user_id and g_league and service):
+            return
+        if not league_id or league_id != g_league.league_id:
+            return
+        give_ids = [str(p) for p in give_ids]
+        receive_ids = [str(p) for p in receive_ids]
+        if not give_ids or not receive_ids:
+            return
+        opponent = {m.user_id: m for m in g_league.members}.get(
+            str(their_user_id or ""))
+        if opponent is None or opponent.user_id == _league_user_id(sess):
+            return
+        trade_id = _calc_queue_trade_id(g_user_id, league_id, opponent.user_id,
+                                        give_ids, receive_ids)
+        fit_mult = _trade_service_mod.fit_congruence_mult(None, "like")
+        fit_mult = _bakeoff.elo_freeze_mult(fit_mult)
+        from .ranking_service import _c as _rs_c
+        with service._lock:
+            if find_prior_trade_signal(g_user_id, league_id, trade_id,
+                                       give_ids, receive_ids,
+                                       target_user_id=opponent.user_id):
+                return
+            # In-memory first, ungated on the DB write, as the queue route
+            # does (D-073): the probe above is the once-only guard.
+            service.record_trade_signal(
+                winner_ids = receive_ids,
+                loser_ids  = give_ids,
+                decision   = "like",
+                fit_mult   = fit_mult,
+            )
+            wrote = save_trade_decision(
+                user_id            = g_user_id,
+                league_id          = league_id,
+                trade_id           = trade_id,
+                give_player_ids    = give_ids,
+                receive_player_ids = receive_ids,
+                decision           = "send",
+            )
+            if not wrote:
+                return
+            # The row is committed, so the event below must fire whatever
+            # happens to the swipe persist (analytics-lead: the event mirrors
+            # the row). A lost swipe write costs only the replay of this one
+            # signal, which the in-memory board already holds.
+            try:
+                save_trade_swipes(
+                    user_id        = g_user_id,
+                    winner_ids     = receive_ids,
+                    loser_ids      = give_ids,
+                    k_factor       = _rs_c("trade_k_like") * fit_mult,
+                    scoring_format = _active_format(sess),
+                )
+            except Exception as swipe_err:
+                log.warning("shop send: swipe persist failed (row and event kept) "
+                            "user=%s trade=%s: %s", g_user_id, trade_id, swipe_err)
+            record_event(
+                g_user_id,
+                "trade_proposed",
+                league_id = league_id,
+                source    = "shop_send",
+                props     = {
+                    # analytics-lead 11-01: the event mirrors the row, so a
+                    # Shop send is "send", never "like". trade_proposed's
+                    # closed set is like | send.
+                    "decision": "send",
+                    "trade_id": trade_id,
+                    "give":     give_ids,
+                    "receive":  receive_ids,
+                    "target":   opponent.user_id,
+                    # Propose-label spine — server-stamped from the propose
+                    # body's validated `source`.
+                    "source":   "shop",
+                },
+                **(getattr(g, "device_info", {}) or {}),
+            )
+    except Exception as err:
+        log.warning("shop send: Elo half skipped (send continues): %s", err)
+
+
 # ---------------------------------------------------------------------------
 # Decline-reason capture (flag feedback.decline_reasons)
 # docs/plans/decline-reason-capture/SPEC.md
@@ -24949,11 +25079,14 @@ def propose_trade_to_sleeper():
 
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
+    source = _propose_source(body)
+    if source == "shop":
+        _record_shop_send_signal(sess, league_id=league_id, their_user_id=their_user_id,
+                                 give_ids=give, receive_ids=receive)
     payload, status = _sleeper_propose_core(
         sess, league_id=league_id, their_user_id=their_user_id, give_ids=give, receive_ids=receive,
         proposal_event_id=uuid.uuid4().hex,
-        source=(body.get("source") if body.get("source") in
-                ("deck", "match", "calculator") else "deck"),
+        source=source,
         impression_id=body.get("impression_id"), their_roster_id=their_roster_id_in)
     return jsonify(payload), status
 
@@ -38518,16 +38651,23 @@ def propose_trade_to_mfl():
         return jsonify({"error": "verification_required"}), 403
 
     body = request.get_json(force=True) or {}
+    league_id = str(body.get("league_id") or "").strip()
+    give = [str(p) for p in (body.get("give_player_ids") or [])]
+    receive = [str(p) for p in (body.get("receive_player_ids") or [])]
+    source = _propose_source(body)
+    if source == "shop":
+        _record_shop_send_signal(sess, league_id=league_id,
+                                 their_user_id=body.get("their_user_id"),
+                                 give_ids=give, receive_ids=receive)
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
     payload, status = _mfl_propose_core(
-        sess, league_id=str(body.get("league_id") or "").strip(),
+        sess, league_id=league_id,
         their_user_id=body.get("their_user_id"),
-        give_ids=[str(p) for p in (body.get("give_player_ids") or [])],
-        receive_ids=[str(p) for p in (body.get("receive_player_ids") or [])],
+        give_ids=give,
+        receive_ids=receive,
         proposal_event_id=uuid.uuid4().hex,
-        source=(body.get("source") if body.get("source") in
-                ("deck", "match", "calculator") else "deck"),
+        source=source,
         impression_id=body.get("impression_id"),
         their_franchise_id=body.get("their_franchise_id"),
         give_pick_assets=[str(p) for p in (body.get("give_pick_assets") or [])],
@@ -39125,16 +39265,23 @@ def propose_trade_to_espn():
         return jsonify({"error": "verification_required"}), 403
 
     body = request.get_json(force=True) or {}
+    league_id = str(body.get("league_id") or "").strip()
+    give = [str(p) for p in (body.get("give_player_ids") or [])]
+    receive = [str(p) for p in (body.get("receive_player_ids") or [])]
+    source = _propose_source(body)
+    if source == "shop":
+        _record_shop_send_signal(sess, league_id=league_id,
+                                 their_user_id=body.get("their_user_id"),
+                                 give_ids=give, receive_ids=receive)
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
     payload, status = _espn_propose_core(
-        sess, league_id=str(body.get("league_id") or "").strip(),
+        sess, league_id=league_id,
         their_user_id=body.get("their_user_id"),
-        give_ids=[str(p) for p in (body.get("give_player_ids") or [])],
-        receive_ids=[str(p) for p in (body.get("receive_player_ids") or [])],
+        give_ids=give,
+        receive_ids=receive,
         proposal_event_id=uuid.uuid4().hex,
-        source=(body.get("source") if body.get("source") in
-                ("deck", "match", "calculator") else "deck"),
+        source=source,
         impression_id=body.get("impression_id"),
         their_team_id=body.get("their_team_id"), comments=body.get("comments"))
     return jsonify(payload), status
