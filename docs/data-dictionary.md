@@ -966,7 +966,7 @@ Constraints and indexes: unique `uq_trade_deck_lineage_deck` on `(user_id, deck_
 | `card_index` | int, not null | the card's **build** index (the index in its contract `impression_id`; a live-mode deck's, from its row) |
 | `user_id` | str, not null | the deck's owner (deletion/export key) |
 | `league_id` | str, not null | |
-| `reason` | str, not null | `i1_dropped` (S0's I-1: a give asset the viewer no longer holds, or a receive asset its partner no longer holds) or `disposition_cut` (models-lead B4: the serve's disposition projection, `server._project_trade_dispositions`, cut it because the user already acted on it elsewhere). Eval removes both the same way and counts them by reason; the reason never gates |
+| `reason` | str, not null | `i1_dropped` (S0's I-1: a give asset the viewer no longer holds, or a receive asset its partner no longer holds) or `partner_deleted` (models-lead J4: the card's partner deleted their account, its target is the deletion scrub's redaction token, and the serve rules drop it in every I-1 mode) or `disposition_cut` (models-lead B4: the serve's disposition projection, `server._project_trade_dispositions`, cut it because the user already acted on it elsewhere). Eval removes them all the same way and counts them by reason. Only G10's mode-1 rule reads one (`i1_dropped`) |
 | `first_withdrawn_at` | str, not null | ISO UTC of the withdrawing serve |
 | `served_before` | int, not null | exactly 1 when an earlier response had delivered the card (in process: its id was in the deck's delivered set at the withdrawing serve; after a restart: its row has a `delivered_at`, or its `card_index` is at or below its pack's last delivery boundary, read fresh; a live-mode deck: its row's `delivered_at` before this serve's stamp, in the same transaction), else exactly 0 |
 | `impression_id` | str, nullable | `contract.card_impression_id(deck_job_id, card_index)`; a live-mode deck's row id (uuid4) |
@@ -2145,12 +2145,19 @@ The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scr
 
 Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.
 
-**What a redacted card holds** (stage 1: `deck_impressions` and `deck_candidate_sets`):
+**What a redacted card holds** (stage 1: `deck_impressions` and `deck_candidate_sets`; stage 2 adds `deck_evidence_packs` and `trade_page_store`, below):
 - **Which cards:** every card whose partner is a deleted id is treated the same way, in every store (R28.22 b2). Any other row naming the id gets the token in its place.
 - **`deck_impressions`:** `features_json.partner_user_id`, `partner:<id>` taste attrs and owner-request member ids become the token. These are removed: `likes_you`, `standing_offer`, `standing_offer_reason`, `breaker`, `breaker_shadow`, `negmem.exempt`, the partner's side of `fit` / `fit_diag` (`them`, `aggregate`, `bucket`, `lenses.them`), `roster_evaluation.teams[<id>]` and its `mutual_benefit`, and the owner request's partner board, sources and preferences.
 - **Nulled:** `surplus_margin`, the `base_score` / `final_score` / `source_like_impression_id` columns. In `valuation_json`, the partner's board and the values blending it are removed (`partner_board`, `mutual`, `counterparty`, `preference_priority`, the floors, assets' partner values and `counterparty_preference`, the bilateral `bilateral` and `term_efficiency`, `windows.partner`, `detail.outlook.partner`, `core.throwin.recipient_value`), every id takes the token, and the market and the viewer's own stay. These fail legal's solve-back test (scope §1.3).
 - **`deck_candidate_sets`:** the member's `partner` becomes the token and its `base_score` is nulled, in `candidates_packed` through the codec and in legacy `candidates_json`. `set_hash` is unchanged.
 - **The owner request (on any row naming the person) and other users' `bakeoff_runs.config_json` (`owner_request` or, for owner-selected runs, the top-level `input`), with `arms_json` / `agreement_json` / `groups_json` tokenized and an owner arm's `pools[<id>]` removed:** the frozen owner input loses the person's member board (`elo`, `board_updated_at`) and their `opponent_sources`, `manager_preferences`, `opponent_outlooks` and `inferred_outlooks` entries. Any other id becomes the token.
+- **`deck_evidence_packs` (stage 2):** rewritten only through the codec (`unpack_run`, the four changes, `pack_run`; G-a3), by CAS on the checksum.
+  - **Cards:** a redacted card's `partner_user_id` takes the token, `likes_you` is removed and `surplus_margin` / `base_score` / `final_score` are nulled. `partner:<id>` taste attrs take the token on any card.
+  - **Run:** `run.filter_inputs.qb_te[<id>]` and the person's protected hashes go, and `run.redacted_at` is added.
+  - **Unchanged:** `card_count`, `PACK_VERSION` and the other cards. A writer's cached copy reloads before writing (`server._fresh_pack_state`).
+- **`trade_page_store` (stage 2):**
+  - **A redacted page card:** its target takes the token and the placeholder name, and it loses `likes_you`, `standing_offer_reason`, `reasons`, `rationale`, `fit`, `breaker` and `match_context.opponent_outlook`. `mismatch_score` / `composite_score` are nulled, and it never serves again (withdrawn at serve).
+  - **`evidence_blob`:** its rows and candidate set are redacted as above, `trade_impressions[].target_user_id` is NULLed, and `run_meta.filter_inputs` is redacted as a pack run.
 - **Kept:** hashes (`trade_hash` and the rest, legal (viii)).
 - **In the deletion transaction:** other users' `user_taste` `partner:<id>` rows become one `partner:<token>` row each (two aliases' weights summed). Standing offers' `team_user_ids` take the token. `trade_matches.match_valuation_json` is cleared when either side is the person.
 

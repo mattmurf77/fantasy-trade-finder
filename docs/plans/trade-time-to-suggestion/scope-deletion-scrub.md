@@ -66,7 +66,7 @@ The rows to touch are found per captured league and per viewer (the league's mem
 | | header: the partner's hashes leave `run.filter_inputs.protected`; `run.redacted_at` is added (G-a3's four changes) | | |
 | `deck_candidate_sets` | packed (`pack_candidates`) or legacy `candidates_json` member `partner` | — | `base_score` |
 | `bakeoff_runs` (other users'; found by legal f's trace, 10-31, so a correction to the c3 list's "partner-free") | any id in `config_json`, `arms_json`, `agreement_json` and `groups_json` (#557 QA P1-3); an owner arm's `diagnostics.pools[<id>]` (that member's preference-ordered assets) goes. Fallback scan only: a league pass over megabyte rows isn't bounded | the owner engine's frozen `input` holds every league member's board, sources, preferences and declared and inferred outlooks, under `owner_request` (organic runs) or at the top level (owner-selected runs: fair packages, asset ideas; #557 QA P1-2); the person's member loses `elo` / `board_updated_at`, and their `opponent_sources`, `manager_preferences`, `opponent_outlooks` and `inferred_outlooks` entries go | — |
-| `trade_page_store` | `pages_blob` `target_user_id` (→ token) and `target_username` (→ placeholder); `evidence_blob` rows, the same as `deck_impressions`; `run_meta.filter_inputs` the same as the pack header | the same as rows, plus `reasons` that quote the partner, and v2 `rationale.counterparty.timeline` when declared | the same as rows |
+| `trade_page_store` (stage 2) | `pages_blob` `target_user_id` (→ token) and `target_username` (→ the placeholder); `evidence_blob` rows and ghosts, the same as `deck_impressions`; its candidate set; `trade_impressions[].target_user_id` → NULL (as deletion does to the table); `run_meta.filter_inputs` the same as the pack run; any other id mention → token | a redacted page card loses `likes_you`, `standing_offer_reason`, `reasons`, `rationale`, `fit`, `breaker` and `match_context.opponent_outlook`; a page card's `roster_evaluation` (stored when `trade.roster_protection` is on) loses the deleted ids' `teams` entries on any card, and `mutual_benefit` on a redacted card, as a deck row does (#559 QA); the narrative is stage 3's trace | `mismatch_score`, `composite_score` (and the row's scores) |
 | `user_taste` (other users) | attribute `partner:<id>` → `partner:<token>`; two aliases of the person merge into one row (weights summed). In the deletion transaction | — | — |
 | `standing_offers` (other users) | `team_user_ids`, in the deletion transaction | — | — |
 | `grading_cards` (other users) | — | `trade_json.partner_name` → placeholder (stage 3: the cards hold a display name, not an id, so finding them needs the trace) | — |
@@ -76,22 +76,38 @@ The rows to touch are found per captured league and per viewer (the league's mem
 
 Already handled by deletion today, untouched: `trade_proposals`, `trade_impressions`, `bad_trade_flags` (NULL), `prepared_trade_*` (deleted), `trade_matches` ids.
 
-### 0.3 Packs: the codec path and the writers' cached state
+### 0.3 Packs: the codec path and the writers' cached state (stage 2, built)
 
-- **Each pack:** unpack, apply the four changes to the matching cards, then pack with the same `run` plus `redacted_at`. The row is written by CAS on the stored checksum. `card_count`, `PACK_VERSION` and every non-redacted card are unchanged; G-a2 tests that bit for bit.
-- **The writer's cached state must not undo it.** `_deck_pack_commit`'s CAS-miss path re-reads only the stored `run` and re-renders from its cached prefix. After a scrub, that would write the old partner dictionary back, with a checksum that no longer matches `cards_blob`.
-  - **The fix:** on a miss whose stored `run.redacted_at` differs from the cached state's, rebuild the state from the row (`_load_pack_state`) and re-apply the pending delta (new deliveries, counted misses) before retrying.
-  - The scrub also evicts the deck from this process's `_deck_pack_states`.
-  - A test drives the race.
+- **Each pack:** `deletion_scrub.redact_pack` runs `unpack_run`, the four changes, then `pack_run(run, cards, card_count=same)`. The four changes:
+  - a redacted card's `partner_user_id` takes the token, `likes_you` is removed and its blended scores are nulled;
+  - `partner:<id>` taste attrs take the token on any card;
+  - `run.filter_inputs.qb_te[<id>]` and the protected hashes of the person's cards go;
+  - `run.redacted_at` is added.
+  - The row is written by CAS on the stored checksum, and a miss re-reads and redoes. `card_count`, `PACK_VERSION` and every non-redacted card are unchanged, which G-a2's tests check bit for bit and through eval's own reader.
+- **The writer's cached state can neither undo nor leak around it** (head-eng's ruling 2): `server._fresh_pack_state`.
+  - A cached `_PackState` whose stored header changed outside its run (only the codec rewrites the dictionaries) reloads from the row in place. Its pending run changes merge onto the stored run, where the stored keys win, `redacted_at` among them. That runs on `_deck_pack_commit`'s CAS miss and before every upgrade.
+  - An upgrade's row from a deck's build-time snapshot takes the pack's token (`_redacted_held_row`): the redacted pack card names the token where the snapshot names the person, which gives the mapping with no id kept.
+  - Tests drive the race, the stale cache and the held row.
+- **A redacted card never serves, in any I-1 mode** (models-lead addendum J4, head-eng's option (b); moved from stage 3 into stage 2 so #559 merges on its own, release-lead's #559 QA P1). At prod's `trade_i1_mode` 1, I-1 alone would serve it while a stale page rebuilds.
+  - `_roster_serve_rules`, which /generate, /status (legacy and paged) and the page-store serve share, drops any card whose target is a redaction token before I-1.
+  - It's recorded as a withdrawal with its own reason, `partner_deleted`, counted apart so G10's mode-1 rule on `i1_dropped` stays clean. `served_before` is 1 when an earlier response had delivered the card (a deck served before the deletion, or one built after it within the 6 h grace), else 0.
+  - It runs before `deck_i1_check`, so a redacted card is in neither of that event's `cards` / `kept` counts.
 
 ### 0.4 Decks in flight at deletion
 
 - A live job's `_DeckEvidence` holds unwritten rows from its build-time snapshot. A delivery after the scrub writes them, and with them the old id and the c2 fields.
 - **The tick's second DB pass rewrites them.** The window is at most until that tick.
-- The page store's cards keep serving through S0's I-1 check, and what that does depends on the mode.
-  - **At `trade_i1_mode` 2** the person's `league_members` rows are gone, so a card receiving their assets fails I-1 and is withdrawn, never served.
-  - **At prod's mode 1, I-1 doesn't withdraw it.** A deck already in memory when the deletion lands holds the person's real id and keeps serving until the scrub job ends. Stage 2 (#559) narrows this: it revokes in-process jobs at the deletion and drops redacted cards in every mode.
-  - **Eval is safe either way** (models-lead addendum Q): replay, e(k) and calibration exclude redacted decks; the B-DK audit and G3's joins keep them; the fit drops redacted cards. Whether the window is acceptable is with legal.
+- **Jobs held in this process are revoked when the deletion commits** (release-lead's #559 QA P2). The scrub rewrites stored decks, never an in-memory job, which at `trade_i1_mode` 0 or 1 would keep serving the person's original cards (their id, name and reasons) until it left memory.
+  - The delete route reads the person's leagues before the deletion removes their rows (`_deletion_scrub_leagues`). After it commits, `_revoke_trade_jobs_naming` revokes every job whose cards name a deleted id (dicts or `TradeCard` objects) and every job still running in one of those leagues (it may yet publish such cards): superseded, cards cleared, a running one errored. The next request builds a fresh deck. The response's `deleted` counts gain `trade_jobs_revoked`.
+  - **The reason is the neutral `inputs_changed`** (release-lead's re-QA P2-a). A running job's error reaches its owner, a leaguemate. Mobile retries `inputs_changed` on its own; `partner_deleted` would show a dead-end error card, and web would toast the raw code, telling them someone deleted their account. A revoked complete job already reported `inputs_changed`.
+  - **Each session's TradeService card store is purged too** (re-QA P2-b). It's shared with the session's trade jobs and served by `GET /api/trades` with no expiry, so it kept the person's cards (id, name, narrative) after the revoke and the scrub. `_purge_session_trade_cards` removes every card whose partner is a deleted id from every session's services, every format's; the counts gain `trade_cards_purged`. A job still running at the deletion writes its cards straight into that store, after the purge, so `GET /api/trades` also hides a card naming a deleted id that was built before that id's window closes, an hour after the deletion (`_deleted_partner_ids`, twelve job hard-timeouts).
+    - A card built after the window comes from a search started after the deletion, from public league data (legal (vii): the person is now a non-user leaguemate), and it serves. That includes a re-signup with the same platform id, and another person on a slot-keyed entry id (release-lead's delta QA P3: hiding them for the life of the process over-filtered).
+  - Both run after the commit, each in its own `try`: one failing never skips the other (delta QA P3), and a failure is logged by class and never turns a committed deletion into a 500.
+  - **Cost:** the revoke holds `_trade_jobs_lock` for O(jobs × cards), measured by release-lead at 61–67 ms for 2,000 jobs × 150 cards and 0.34–0.75 s for 5,000 × 200. The purge holds `_sessions_lock` only to list the sessions. Fine at today's volume; revisit if the job registry grows past a few thousand.
+  - **What a revoked deck still writes:** an outcome on one of its cards that the client already holds writes a full row, as any outcome does. The scrub's grace pass redacts it.
+  - Another process's jobs and sessions aren't reached. Prod runs one (`render.yaml`: `--workers 1`); with more, they'd keep them until they leave memory. Their stored decks are the scrub's.
+- A stored page's redacted cards are dropped by the serve rules above, whatever the I-1 mode.
+- **The pre-scrub window** (release-lead's re-QA P3): between the deletion's commit and the scrub's page-store league pass, a stored page still holds the person's cards with their id, so a serve in that window can deliver them. The kick starts the scrub off the request, so the window is about 0.1 s; if the kick fails, it's up to one cleanup tick (5 min). I-1 doesn't close it at prod's `trade_i1_mode` 1; only mode 2 would withdraw such a card. Eval is safe either way (models-lead addendum Q): replay, e(k) and calibration exclude redacted decks; the B-DK audit and G3's joins keep them; the fit drops redacted cards. Whether the window is acceptable is with legal.
 
 ## 1. Analytics scope
 

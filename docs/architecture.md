@@ -956,4 +956,6 @@ Native cold launch and foreground resume initialize the restored league without 
 - **DB pass:** started by the route, retried by `_cleanup_loop` under a lease, and run once more after a 6 h in-flight grace. It finds other users' deck rows and candidate sets per league and viewer, then scans each whole store in bounded, resumable pages for leagues the person had left. It redacts each card whose partner is the person: the token, their account's fields removed, the blended scores nulled.
 - **Model pass:** the daily tick's `deletion_scrub` step, before `value_model_refit`.
 
-The job row is deleted when both are done. Packs, the page store and the traced stores are later stages: `SCRUB_VERSION` re-runs kept jobs when one lands.
+- **Stage 2 adds packs and the page store.** Packs go through the codec, and the evidence writer's cached pack state reloads when the stored one was rewritten (`server._fresh_pack_state`). A redacted page card is withdrawn at serve.
+
+The job row is deleted when both are done. The traced stores are stage 3: `SCRUB_VERSION` re-runs kept jobs when a stage lands.

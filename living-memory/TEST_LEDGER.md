@@ -1,3 +1,87 @@
+## 2026-10-31 — Deletion scrub stage 2, release-lead's #559 delta QA (GO-with-notes): two P3s
+
+- **The shared `try`:** the purge and the revoke now each have their own `try`, purge first. In release-lead's probe a raising revoke had skipped the purge, so `GET /api/trades` still served the deleter's cards. Tests: a raising revoke still purges, and a raising purge still revokes.
+- **Over-filter:** `_deleted_partner_ids` maps each deleted id to the end of its window, an hour after the deletion (twelve `_JOB_HARD_TIMEOUT`s). `GET /api/trades` hides a card naming the id only if it was built before then; an unreadable `created_at` counts as before. A card built after the window comes from a search started after the deletion, from public league data, and it serves. That covers a re-signup and another person on a slot-keyed entry id. The late-writer test now also serves a card built after the window and hides one with an unreadable time.
+- **Sabotages, 16/16 red:** the 13 from the re-QA (the serve-filter anchor updated), plus no window, an unreadable time that serves, and the purge and revoke back in one `try` with the revoke first.
+- **Runs:** `test_deletion_scrub_packs.py` 22 passed.
+
+## 2026-10-31 — Deletion scrub stage 2, release-lead's #559 re-QA: neutral revoke reason, session card purge
+
+Gates: release-lead's re-QA, GO-with-notes on #557 (b62fb21e) and on #559 (8412a475), with two P2s to fix before #559 merges. Route: `DELETE /api/account`'s `deleted` counts gain `trade_cards_purged`, and `GET /api/trades` drops cards whose partner deleted their account in this process. Both are noted in api-reference. No schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P2-a:** a running job revoked by a deletion now errors with `inputs_changed`, not `partner_deleted`. Its owner is a leaguemate: mobile retries `inputs_changed` on its own, and web would have toasted the raw code.
+- **P2-b:** each session's TradeService card store was a second in-process holder. It's shared with the session's jobs, and `GET /api/trades` serves it with no expiry. The fix:
+  - `_purge_session_trade_cards` removes the person's cards from every session's services, every format's;
+  - the deleted ids go in `_deleted_partner_ids`, which `GET /api/trades` filters on, catching a still-running job that writes after the purge;
+  - the revoke and purge run in a `try` after the commit, so a failure there never makes a committed deletion a 500;
+  - `conftest` clears the set for every test.
+- **P3s:**
+  - a test for the revoke's TradeCard-object branch;
+  - `octet_length` pinned with multibyte rows: about 40 characters but 100 bytes each, so each row is its own batch under a 120-byte cap;
+  - the SQLite >= 3.43 floor recorded in DEPENDENCIES;
+  - the withdrawal wording: `served_before` can be 1, and the drop runs before `deck_i1_check`;
+  - in the scope: the pre-scrub window (about 0.1 s, up to one 5-min tick if the kick fails), the revoke's cost, and what a revoked deck still writes;
+  - the R-G entry's two wording errors fixed and its three omissions added.
+- **Tests:**
+  - the revoke test now covers TradeCard objects and asserts `inputs_changed` (4 jobs, 3 revoked);
+  - `test_deletion_purges_every_sessions_trade_cards_naming_the_person`;
+  - `test_get_trades_never_serves_a_card_written_after_the_purge`;
+  - `test_bakeoff_batches_count_stored_bytes_not_characters`.
+- **Sabotages, 13/13 red:** the six from the QA round, plus the reason left as `i1_dropped`, the revoke reason `partner_deleted`, the TradeCard-object branch, a purge that pops nothing, a purge that skips `trade_svcs`, the serve filter removed, and `octet_length` back to `length()`.
+- **Runs:** the deletion, evidence, page store, I-1, withdrawals, session-race, card-privacy, bilateral-route and prepared-trade suites: 672 passed.
+
+## 2026-10-31 — Deletion scrub stage 2, release-lead's #559 QA: partner_deleted moves in, live jobs revoked, page roster_evaluation
+
+Gates: release-lead's #559 NO-GO (P1, P2, P3s). P1: models-lead's J4 moves from #562 into #559, so #559 merges on its own. Route: `DELETE /api/account`'s `deleted` counts gain `trade_jobs_revoked` (additive; api-reference updated). Serve path: `_roster_serve_rules` drops a token-target card in every I-1 mode, and the withdrawal reason `partner_deleted` (data dictionary updated). No schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P1, J4 (from #562's ddd84fde):** the serve rules drop a redacted card before I-1 in modes 0, 1 and 2; `_withdrawal_reasons` records `partner_deleted`, apart from `i1_dropped` and `disposition_cut`; stage 2's page-view filter is folded into the shared rules. Its tests and G-a2's unpack test move into `test_deletion_scrub_packs.py`.
+- **P2:** the delete route reads the person's leagues before the deletion (`_deletion_scrub_leagues`), and after it commits revokes every in-process job whose cards name a deleted id or that is still running in one of those leagues (`_revoke_trade_jobs_naming`). Test: three jobs through the real route; the naming job and the running one are revoked, another league's is untouched.
+- **P3s:**
+  - **QA1:** an in-process packed deck (`deferred_deck(packed=True)`), partner deleted and scrubbed, then a first view past 30: the upgrade reloads the pack and writes the viewed row with the token, no `likes_you`, null scores, and no id.
+  - **Page `roster_evaluation`:** `redact_page_card` applies the deck row's rule (`_redact_roster`, shared): the deleted ids' `teams` entries go on any card, `mutual_benefit` on a redacted one.
+  - **The page-store scan decodes every row:** noted, not changed.
+- **Sabotages, 6/6 red:** the revoke call (count faked), the running-job arm, the J4 drop, the in-process reload, the held-row redaction, and the page-card roster rule.
+- **Runs:** `test_deletion_scrub_packs.py` 18 and `test_deletion_scrub.py` 36 pass. The deletion, deferred/packed evidence, page store, I-1 serve filter, withdrawals and session-race suites: 601 passed.
+
+## 2026-10-31 — Deletion scrub stage 2: packs through the codec, the cached writer state, the page store (legal R28.22, G-a1 to G-a3)
+
+Gates: the scope block `scope-deletion-scrub.md` §0.3 (head-eng's ruling 2, 10-31); `SCRUB_VERSION` 2. No schema change past stage 1's table, no flag, no event, no route contract change; one serve rule (a redacted page card is withdrawn). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **`backend/tests/test_deletion_scrub_packs.py`, 12 tests:**
+  - **Packs:**
+    - a pack is rewritten through the codec with exactly the four changes;
+    - non-redacted cards are bit-identical, directly and through `eval.data.load_decks` (G-a2);
+    - a pack in a league the person left is found by the scan;
+    - a second run changes nothing;
+    - a pack that names nobody deleted is byte-identical;
+    - a concurrent header update makes the scrub redo on the new row, keeping that update.
+  - **The cached writer state:**
+    - a writer's commit after a scrub keeps the scrub, and the pack still unpacks;
+    - a stale cached state reloads once, and a plain header update doesn't reload it;
+    - a held row's upgrade takes the pack's token.
+  - **The page store:**
+    - its cards and evidence are redacted, and `stored_bytes` is recomputed;
+    - a page row in a left league is found by the scan;
+    - a redacted card never serves and leaves as a withdrawal.
+- **Sabotages, 16/16 red:**
+  - the commit ignores the scrub;
+  - the state never reloads;
+  - the held row isn't redacted;
+  - the old card index is kept;
+  - `likes_you`, the scores, `qb_te`, `protected` or `redacted_at` kept in packs (one sabotage each);
+  - no pack CAS;
+  - no pack scan;
+  - page cards kept;
+  - a token card served;
+  - blob rows kept;
+  - blob `trade_impressions` kept;
+  - no page scan.
+- **Suites:**
+  - stage 1's `test_deletion_scrub.py` still passes;
+  - every pack-writer and page-store suite (17 files): 898 passed;
+  - **the full backend suite** at `3e7dcf3e`: 10,207 passed, 2 skipped, 0 failed;
+  - after stage 1's `bakeoff_runs` update was merged in (`77d55a47`): both scrub files (36) and every evidence, page-store and deletion suite, 1,442 passed.
+
 ## 2026-10-31 — Deletion scrub: main's #540 merged in; deletion_scrub_jobs named as kept with a reason
 
 #540 (on main) added a person-column scan to `test_account_deletion_coverage`: every table with a column that can name a person must be named in `accounts.py`. `deletion_scrub_jobs.partner_ids_json` matched, so the merged branch failed it. The table is now in `accounts._KEPT_WITH_REASON`: the deletion's own record, holding the resolved ids until the scrub finishes, then deleted. Not exported, because the person is gone. Before the fix it failed with `['deletion_scrub_jobs']`. The deletion-coverage and scrub suites pass 98. The API reference's DELETE row and daily-tick count were merged by hand: main's overhaul text plus the scrub paragraph, with ten tick steps.

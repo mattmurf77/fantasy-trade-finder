@@ -2935,6 +2935,99 @@ _DIAG_PURGE_MAX_BATCHES = 20
 _DIAG_PURGE_BATCH = 500
 
 
+def _deletion_scrub_leagues(user_ids) -> set:
+    """The leagues a person's traces may sit in (deletion_scrub's capture),
+    read before the deletion removes their rows; empty on a failed read."""
+    try:
+        from . import database as _db, deletion_scrub as _deletion_scrub
+        with _db.engine.connect() as conn:
+            return set(_deletion_scrub.capture_leagues(conn, user_ids))
+    except Exception as err:          # the class only: a DB error's text quotes its ids
+        log.error("deletion scrub league read failed: %s", type(err).__name__)
+        return set()
+
+
+def _revoke_trade_jobs_naming(user_ids, league_ids) -> int:
+    """Account deletion (#559 QA P2): the scrub rewrites stored decks, never a
+    job held in this process, which at trade_i1_mode 0 or 1 would keep
+    serving the person's original cards (their id, name and reasons) until
+    it leaves memory. So every job whose cards name a deleted id is revoked,
+    and so is every job still running in one of their leagues (it may yet
+    publish such cards). The next request builds a fresh deck. Returns the
+    count. Another instance's jobs age out within its retention.
+
+    The reason is the neutral "inputs_changed", never "partner_deleted": a
+    running job's error reaches its owner, a leaguemate (mobile retries
+    inputs_changed on its own; web would toast the raw code), and must not
+    tell them someone deleted their account (#559 re-QA P2-a)."""
+    ids, leagues = set(user_ids), set(league_ids)
+    revoked = 0
+    with _trade_jobs_lock:
+        for job in _trade_jobs.values():
+            names = any((c.get("target_user_id") if isinstance(c, Mapping)
+                         else getattr(c, "target_user_id", None)) in ids
+                        for c in job.get("cards") or ())
+            running = (job.get("status") == "running"
+                       and (job.get("key") or (None, None))[1] in leagues)
+            if (names or running) and not _trade_job_revoked(job):
+                _revoke_trade_job_locked(job, "inputs_changed")
+                revoked += 1
+    return revoked
+
+
+# Account deletion (#559 re-QA P2-b): the ids deleted in this process, each
+# with the time until which a card naming it is hidden. Each session's
+# TradeService card store (shared with its trade jobs) keeps the cards it
+# generated, and GET /api/trades serves them with no expiry, so a deletion
+# purges them, and GET /api/trades hides any card built before that time: a
+# job still running at the deletion builds and writes cards from the board it
+# read before it. The window is an hour, twelve _JOB_HARD_TIMEOUTs; a card
+# built after it comes from a search started after the deletion, from public
+# league data (legal (vii)), and serves (#559 delta QA P3). Never pruned:
+# deletions are rare, and a restart clears the stores it guards. Prod runs one
+# process (render.yaml: --workers 1).
+_DELETED_PARTNER_WINDOW = timedelta(hours=1)
+_deleted_partner_ids: dict = {}
+
+
+def _built_before_partner_deleted(card) -> bool:
+    """True for a card naming a deleted id that was built before its window
+    closed; an unreadable `created_at` counts as before."""
+    until = _deleted_partner_ids.get(getattr(card, "target_user_id", None))
+    if until is None:
+        return False
+    try:
+        return datetime.fromisoformat(card.created_at) < until
+    except (AttributeError, TypeError, ValueError):
+        return True
+
+
+def _purge_session_trade_cards(user_ids) -> int:
+    """Remove every card whose partner is a deleted id from every session's
+    trade services' card stores (and the module default's). Returns the
+    count. Late writers are caught by `_deleted_partner_ids` at serve."""
+    ids = set(user_ids)
+    until = datetime.now(timezone.utc) + _DELETED_PARTNER_WINDOW
+    _deleted_partner_ids.update(dict.fromkeys(ids, until))
+    with _sessions_lock:
+        sessions = list(_sessions.values())
+    services = {id(trade_service): trade_service}
+    for sess in sessions:
+        for svc in (sess.get("trade_svc"), *(sess.get("trade_svcs") or {}).values()):
+            if svc is not None:
+                services[id(svc)] = svc
+    purged = 0
+    for svc in services.values():
+        store = getattr(svc, "_trade_cards", None)
+        if not isinstance(store, dict):
+            continue
+        for trade_id, card in list(store.items()):
+            if getattr(card, "target_user_id", None) in ids:
+                store.pop(trade_id, None)
+                purged += 1
+    return purged
+
+
 def _kick_deletion_scrub() -> None:
     """The deletion route's start of the scrub; never raises (the account is
     already deleted, and the cleanup loop retries the job)."""
@@ -4009,8 +4102,16 @@ def _roster_serve_rules(cards, league_id: str, viewer_id: str, ref: str, *, snap
     a roster_snapshot the caller already read (P1), else one is read here.
     `report`: filled with the serve's `deck_i1_check` props when the check
     ran (_roster_serve_check); left empty otherwise (mode 0, the admin hook,
-    a failed read), so those serves emit nothing.
+    a failed read), so those serves emit nothing. A card whose partner is a
+    deletion scrub's redaction token is dropped first, in every mode.
     """
+    # The deletion scrub's redacted cards (the partner deleted their account;
+    # the target is a redaction token) never serve, in any mode, ahead of
+    # I-1 (models-lead addendum J4, head-eng's option (b)). The caller records
+    # them as withdrawals, reason "partner_deleted" (served_before 1 when an
+    # earlier response had delivered the card, else 0).
+    if cards:
+        cards = [c for c in cards if not _redacted_target(c)]
     mode = _trade_i1_mode()
     forced = _gate_miss_test(league_id) if cards else None
     block = past_bound = None
@@ -5524,11 +5625,61 @@ def _deck_pack_commit(run_id: str, state, withdrawals=()) -> bool:
         if row is None:
             log.warning("deck-evidence %s: pack row missing; header not written", run_id)
             return False
+        if _fresh_pack_state(state, run_id):  # the deletion scrub rewrote it: reloaded, merged
+            continue
         stored_run = json.loads(row["header_json"])["run"]
         state.header["run"] = _merge_pack_runs(stored_run, state.run, state.base_run)
         state.checksum, state.base_run = row["checksum"], stored_run
     log.error("[evidence] pack header CAS gave up after %d tries job=%s", _PACK_CAS_RETRIES, run_id)
     return False
+
+
+def _fresh_pack_state(state, run_id: str) -> bool:
+    """The deletion scrub (legal R28.20 (ii)) rewrites a pack's cards and its
+    header dictionaries through the codec (deletion_scrub.redact_pack). A
+    state cached before that would write the old dictionaries back on its
+    next header update, with a checksum over the old cards (an unreadable
+    pack), and would upgrade a card from its old copy. So when the stored
+    header differs from this state's outside its run, the state is reloaded
+    from the row in place, and its pending run changes are merged onto the
+    stored run (_merge_pack_runs: the stored keys, redacted_at among them,
+    win). True when it reloaded. A plain header update elsewhere changes only
+    the run, and is left to the caller's CAS merge."""
+    from . import database as _db
+    row = _db.load_deck_evidence_pack_header(run_id)
+    if row is None or row["checksum"] == state.checksum:
+        return False
+    header = json.loads(row["header_json"])
+    if ({k: v for k, v in header.items() if k != "run"}
+            == {k: v for k, v in state.header.items() if k != "run"}):
+        return False
+    fresh = _load_pack_state(run_id, state.user_id)
+    if fresh is None:
+        return False
+    pending, base = state.run, state.base_run
+    state.header, state.cards, state.prefix = fresh.header, fresh.cards, fresh.prefix
+    state.__dict__.pop("by_index", None)     # _deck_pack_card's index of the old cards
+    state.header["run"] = _merge_pack_runs(fresh.run, pending, base)
+    state.checksum, state.base_run = fresh.checksum, copy.deepcopy(fresh.base_run)
+    log.info("[evidence] pack state reloaded after a redaction job=%s", run_id)
+    return True
+
+
+def _redacted_held_row(row: dict, state, index: int) -> dict:
+    """An upgrade's row from a deck's build-time snapshot, after the deletion
+    scrub redacted that card in the pack: the pack's card names the token
+    where the snapshot names the person, so the row gets the same redaction
+    (the token gives the mapping for this card; no id is kept anywhere)."""
+    from . import deletion_scrub as _scrub
+    from .eval.contract import REDACTED_PARTNER_PREFIX
+    token = _deck_pack_card(state, index).get("partner_user_id")
+    features = row.get("features_json")
+    features = json.loads(features) if isinstance(features, str) else (features or {})
+    partner = features.get("partner_user_id")
+    if (not isinstance(token, str) or not token.startswith(REDACTED_PARTNER_PREFIX)
+            or partner is None or partner == token):
+        return row
+    return _scrub.redact_row(row, {partner}, token)
 
 
 def _deck_evidence_cover(ev: _DeckEvidence, ids, at: str, *, prior_known: bool = True) -> None:
@@ -5638,11 +5789,13 @@ def _deck_evidence_upgrade(impression_id: str, acting_user_id: str) -> bool:
             held = ev.rows.get(impression_id)
             last = ev.deliveries[-1][0] if ev.deliveries else -1
             row = diag = None
+            _fresh_pack_state(ev.pack, deck_job_id)      # the deletion scrub's rewrite
             if held is not None:
                 row = {**_unpack_row(held[1]), "evidence_tier": "viewed",
                        "served_at": ev.served_at,
                        "delivered_at": (ev.delivered_at.get(impression_id)
                                         or ev.pack.delivered_at(index) or now)}
+                row = _redacted_held_row(row, ev.pack, index)
                 diag = ev.closure([row])
         _deck_pack_flush_header(ev)           # condition 4: a pending delivery lands first
         if index > last:
@@ -5680,6 +5833,7 @@ def _deck_upgrade_stored(deck_job_id: str, impression_id: str, index: int, user_
 def _deck_upgrade_stored_locked(state, deck_job_id: str, impression_id: str, index: int,
                                 user_id: str, now: str) -> bool:
     from . import database as _db
+    _fresh_pack_state(state, deck_job_id)    # a cached state from before a deletion scrub
     if any(w["card_index"] == index and not w["served_before"]
            for w in _db.load_deck_withdrawals(deck_job_id)):
         return False                          # W0: never shown, never upgraded
@@ -5705,6 +5859,7 @@ def _deck_upgrade_stored_locked(state, deck_job_id: str, impression_id: str, ind
     card = _deck_pack_card(state, index)
     row = {**_unpack_row(held[1]), "evidence_tier": "viewed", "served_at": card["served_at"],
            "delivered_at": state.delivered_at(index) or now}
+    row = _redacted_held_row(row, state, index)
     _db.save_deck_evidence([row], diagnostics=stored.closure([row]), deck_job_id=deck_job_id)
     return True
 
@@ -5945,6 +6100,7 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
     run["upgrade_miss_row_gone"] with the miss), and `row_gone_why` its split
     (run["upgrade_miss_row_gone_why"], only with a row-gone entry)."""
     from . import database as _db
+    _fresh_pack_state(state, deck_job_id)    # never build the row from a pre-scrub copy
     card = _deck_pack_card(state, index)
     stored, stored_from = _deck_stored_count_from(stored_count, state.run, stored_from)
     cause = _upgrade_miss_cause(deck_job_id, index, stored, state.delivered_at(index) is not None)
@@ -6724,11 +6880,14 @@ def _disposition_cut(before: list, after: list) -> list:
 
 def _withdrawal_reasons(withdrawn=(), cut=()) -> dict:
     """{impression_id: reason} for a serve's withdrawals: I-1's drops
-    ("i1_dropped") and the disposition projection's cuts ("disposition_cut",
-    models-lead B4). The same sticky drop, served_before and transaction rules
-    apply to both; eval removes both and counts them by reason."""
-    reasons = {c["impression_id"]: "i1_dropped" for c in withdrawn
-               if isinstance(c.get("impression_id"), str)}
+    ("i1_dropped"), the deletion scrub's redacted cards ("partner_deleted",
+    models-lead J4: dropped by the serve rules in every mode, counted apart so
+    G10's mode-1 rule on "i1_dropped" stays clean) and the disposition
+    projection's cuts ("disposition_cut", models-lead B4). The same sticky
+    drop, served_before and transaction rules apply to all three; eval
+    removes them and counts them by reason."""
+    reasons = {c["impression_id"]: ("partner_deleted" if _redacted_target(c) else "i1_dropped")
+               for c in withdrawn if isinstance(c.get("impression_id"), str)}
     reasons.update((c["impression_id"], "disposition_cut") for c in cut
                    if isinstance(c.get("impression_id"), str))
     return reasons
@@ -7060,6 +7219,15 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
     if i1_report:                         # off-thread, each card once per deck
         _emit_deck_i1_check(user_id, league_id, row["deck_job_id"], i1_report)
     return out, past_bound
+
+
+def _redacted_target(card) -> bool:
+    """A card (a stored dict or a TradeCard) whose partner is a deletion
+    scrub's redaction token."""
+    from .eval.contract import REDACTED_PARTNER_PREFIX
+    target = (card.get("target_user_id") if isinstance(card, Mapping)
+              else getattr(card, "target_user_id", None))
+    return str(target or "").startswith(REDACTED_PARTNER_PREFIX)
 
 
 def _trade_page_stale(row: dict, snap, vsn=None) -> bool:
@@ -21172,6 +21340,8 @@ def get_trades():
     g_players     = sess["players"]
     league_id = request.args.get("league_id") or None
     cards = trade_service.get_pending_trades(user_id=g_user_id, league_id=league_id)
+    # A card a still-running job wrote after a deletion's purge (#559 re-QA P2-b).
+    cards = [card for card in cards if not _built_before_partner_deleted(card)]
     pending_owner_config = dict(_trade_service_mod._cfg)
     pending_exemptions = _significance_exemptions_for(trade_service)
     cards = _pending_owner_cards(cards, pending_owner_config, pending_exemptions)
@@ -33880,6 +34050,8 @@ def delete_account_route():
                     revoke_err)
     try:
         with _accounts.deletion_scope(user_id, sess.get("account_id")) as (user_ids, account_ids):
+            # Read before the deletion removes them: the live jobs to revoke.
+            scrub_leagues = _deletion_scrub_leagues(user_ids)
             with _session_restore_lock:
                 with _sessions_lock:
                     counts = _accounts.delete_user_data(
@@ -33894,7 +34066,19 @@ def delete_account_route():
         return jsonify({"error": "deletion_failed"}), 500
     # The scrub of other users' decks (legal R28.20 (ii)): its job committed
     # with the deletion; start it off the request. The cleanup loop retries,
-    # so a failed start never fails the deletion (#557 QA P3).
+    # so a failed start never fails the deletion (#557 QA P3). In-memory jobs
+    # and session card stores never see the scrub, so the ones that name the
+    # person are purged and revoked here, each on its own (one failing never
+    # skips the other, #559 delta QA P3), logged and never a 500 for a
+    # deletion that committed.
+    try:
+        counts["trade_cards_purged"] = _purge_session_trade_cards(user_ids)
+    except Exception as err:          # the class only: its text may quote ids
+        log.error("delete_account: session card purge failed: %s", type(err).__name__)
+    try:
+        counts["trade_jobs_revoked"] = _revoke_trade_jobs_naming(user_ids, scrub_leagues)
+    except Exception as err:
+        log.error("delete_account: trade job revoke failed: %s", type(err).__name__)
     _kick_deletion_scrub()
     log.info("delete_account: user %s deleted (%s)", user_id, counts)
     return jsonify({"ok": True, "deleted": counts,
