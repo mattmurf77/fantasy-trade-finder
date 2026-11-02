@@ -770,11 +770,15 @@ def test_p1_t1_every_declared_prop_survives_the_round_trip(harness):
         "invite_cta_tapped":     {"surface": "members_overlay",
                                   "not_joined": 1, "total_mates": 10,
                                   "platform": "fleaflicker"},
-        # The two MODIFIED rows — the dangerous half of T1.
+        # The two MODIFIED rows — the dangerous half of T1. invite_shared
+        # was widened again by the referral loop (PR #350): + invite_id,
+        # + mint_outcome.
         "invite_shared":         {"league_id": "123456789012345678",
                                   "surface": "trades_banner",
                                   "not_joined": None, "total_mates": None,
-                                  "platform": "sleeper"},
+                                  "platform": "sleeper",
+                                  "invite_id": "Ab3dEf6hIj9k",
+                                  "mint_outcome": "ok"},
         "trade_card_shared":     {"trade_id": "t-42", "channel": "imessage",
                                   "landing": True, "surface": "trades_liked"},
     }

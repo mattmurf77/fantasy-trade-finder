@@ -230,7 +230,7 @@ values plus a client-only `error` for a request that never got an answer.
 
 ## Notification type strings
 
-`notifications.type` (the in-app bell inbox) — **nine values, and the failure mode is silent:**
+`notifications.type` (the in-app bell inbox) — **eleven values, and the failure mode is silent:**
 
 | Value | Written by | Mobile glyph | Tap target |
 |---|---|---|---|
@@ -238,6 +238,7 @@ values plus a client-only `error` for a request that never got an answer.
 | `trade_accepted` | match disposition | `check` / pos | Matches |
 | `trade_declined` | match disposition | `x` / neg | Matches |
 | `referral_joined` | session_init, first session with `invited_by` | `plus` / **flare** | League |
+| `referral_activated` | referral ledger activation (FR-17/FR-19): the invitee's first stage-7 event within 14 d of `joined_at`, `growth.referral_ledger` on; inbox only (push is Phase 2) | `trade` / **flare** | Trades |
 | `league_member_joined` | session_init peer fanout, **coalesced 1/league/day** | `plus` / ice | League |
 | `league_member_unlocked_trades` | first board unlock | `rank` / ice | League |
 | `match_expiring` | 15-min cron | `match` / warn | Matches |
@@ -669,7 +670,7 @@ the reference), `mobile/src/api/sleeper.ts` (`ownsRoster`), `web/js/app.js`
 
 ## Invite URL format — a two-client contract
 
-The invite URL is emitted by mobile (`mobile/src/utils/deepLinks.ts` `buildInviteUrl`) and parsed by **both** web (`web/js/app.js` `captureReferralFromUrl()`) and mobile (`deepLinks.ts`). Two forms are accepted:
+The invite URL is emitted by mobile (`mobile/src/components/InviteLeaguematesBanner.tsx` `buildInviteUrl`, called only from `shareInvite`) and parsed by **both** web (`web/js/app.js` `captureReferralFromUrl()`) and mobile (`mobile/src/utils/deepLinks.ts`). Two forms are accepted:
 
 | Form | Emitted when | Parsed |
 |---|---|---|
@@ -679,6 +680,36 @@ The invite URL is emitted by mobile (`mobile/src/utils/deepLinks.ts` `buildInvit
 **The legacy form is parsed forever and is not deprecated.** Links already shared live in group chats, screenshots and pinned messages indefinitely; a parser removal would silently break every one of them. `ref` is optional in both forms (mobile omits it when the username is unknown — FB #239), which is why the AASA `components` matcher must match on `league` alone.
 
 **Ordering rule:** the reader, the mobile route, the server 302 and the AASA claim are all **unflagged and ship first**; only the emitter is flagged. Apple's AASA CDN cache (~24 h) makes the reverse order actively worse than shipping nothing. See [config-reference § `growth.invite_join_link`](config-reference.md#flags-p0-remediation-2026-08-11-mobile-ux-audit-plans).
+
+**Ledger forms (referral loop, PRD §7.2).** With `growth.referral_ledger` on, `shareInvite` mints an invite id (`POST /api/invite/token`, 2 s deadline) and the link carries `t` and **never `ref`**. A failed mint drops `t` and still omits `ref`. Flag off, the two forms above are emitted byte for byte:
+
+| `growth.referral_ledger` | `growth.invite_join_link` | Mint | Emitted URL |
+|---|---|---|---|
+| on | off | ok | `/?league=<league_id>&t=<invite_id>` |
+| on | off | failed | `/?league=<league_id>` |
+| on | on | ok | `/app/league/join/<league_id>?t=<invite_id>` |
+| on | on | failed | `/app/league/join/<league_id>` |
+
+The AASA claims already match all four (path `/app/league/join/*`; the legacy matcher keys on `league` alone). Mobile reads `t` from both forms (`deepLinks.ts` `handleDeepLink`, `LeagueJoinScreen.tsx`); the web and server readers land with FR-9 and D-1. Both clients keep parsing `ref` forever (D-028). Pinned by `mobile/tests/check-invite-links.js`.
+
+---
+
+## Invite id `t` — the shape rule
+
+The public invite id minted per share (PRD §7.1). The shape is **`^[A-Za-z0-9_-]{8,64}$`** (`INVITE_ID_RE`); the server mints 12 URL-safe characters (`secrets.token_urlsafe(9)`, 72 bits). A value outside the shape is ignored, never stored or forwarded.
+
+| Where | Name |
+|---|---|
+| Links | `t` |
+| API bodies and event props | `invite_id` |
+| Mobile invite intent (`useSession`, 14-day TTL) | `inviteId` |
+| Web localStorage | `ftf_invite_id` |
+
+**One copy per client.** Mobile: `mobile/src/utils/inviteId.ts` (`INVITE_ID_RE`, `isInviteId`), the only definition in `mobile/src` (pinned by `mobile/tests/check-invite-links.js`). The server and web copies land with D-1 and FR-9.
+
+**It is an identifier, not a credential (analytics addendum C3).** It names an invite and grants no access; it must never become an auth or session credential, and no event prop key carrying it may contain `token` (ingest drops such keys silently, C1). `backend/analytics_ingest.py` `_EVENT_ID_RE` happens to use the same pattern for event ids; the two are unrelated.
+
+**Locations to change together:** `mobile/src/utils/inviteId.ts`, the server's join-route and session-init validation (D-1), web `captureReferralFromUrl()` (FR-9).
 
 ---
 

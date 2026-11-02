@@ -58,6 +58,7 @@
     "test:usage-trends": "node tests/check-usage-trends.js",
     "test:update-gate": "node tests/check-update-gate.js",
     "test:inline-home": "node tests/check-inline-home.js",
+    "test:invite-links": "node tests/check-invite-links.js",
     "test:invite-social-proof": "node tests/check-invite-social-proof.js",
     "test:iphone-only": "node tests/check-iphone-only.js",
     "test:keychain-accessible": "node tests/check-keychain-accessible.js",

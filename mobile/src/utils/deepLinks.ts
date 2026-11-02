@@ -4,6 +4,7 @@ import { useSession } from '../state/useSession';
 import { useFeatureFlags } from '../state/useFeatureFlags';
 import { track } from '../api/events';
 import { navigationRef } from '../navigation/RootNav';
+import { isInviteId } from './inviteId';
 
 // ── Bundle 8 + teardown PRD 01-04: Deep link handling ─────────────────────
 // Legacy (flag `ux.deeplink_router_v2` OFF — the shipping default):
@@ -316,7 +317,11 @@ const V2_RANK_KINDS = new Set(['finish_ranking']);
 // Trades tab (hub home when trades.finder_hub is on, the deck otherwise —
 // where the pre-generated deck is served from the job cache). Inert while
 // the backend flag is off: the kind is never pushed.
-const V2_TRADE_KINDS = new Set(['deck_replenished']);
+// `referral_activated` (referral loop FR-19, inbox only): an invitee the
+// user brought in weighed in on their first trade. Trades, NOT League —
+// the join row (`referral_joined`) keeps League. Inert until the server
+// posts it.
+const V2_TRADE_KINDS = new Set(['deck_replenished', 'referral_activated']);
 
 export type NotificationTab = 'Matches' | 'League' | 'Rank' | 'Trades';
 
@@ -402,6 +407,12 @@ export function handleDeepLink(url: string | null | undefined): void {
     useSession.getState().setInvitedBy(refStr);
   }
 
+  // FR-10 — the invite id `t`, as received. Only a well-formed value
+  // (utils/inviteId) is ever stored; anything else is ignored.
+  const t = parsed.queryParams?.t;
+  const tStr = Array.isArray(t) ? t[0] : t;
+  const inviteId = isInviteId(tStr) ? tStr : null;
+
   // Invited league: ?league=<id> (P0-3). The invite URL mobile has emitted
   // since FB #239 is `<base>/?league=<id>&ref=<u>` — a bare-path URL, so the
   // v2 short-circuit below returns before anything reads it and the league
@@ -428,6 +439,8 @@ export function handleDeepLink(url: string | null | undefined): void {
       league_id:  leagueId,
       has_ref:    !!(typeof refStr === 'string' && refStr.trim()),
       format:     'legacy',
+      // FR-10 / #350 — the well-formed `t` as received, else omitted.
+      ...(inviteId ? { invite_id: inviteId } : {}),
       auth_state: !st.user
         ? 'signed_out'
         : st.user.account_only
@@ -439,6 +452,38 @@ export function handleDeepLink(url: string | null | undefined): void {
   }
 
   const path = (parsed.path || '').replace(/^\/+/, '');
+
+  // FR-10 — capture `t` on EITHER invite form: `/?league=<id>&t=` (above)
+  // or `/app/league/join/<id>?t=`. LeagueJoinScreen also captures the path
+  // form's `t`; setInviteId is last-write-wins, so the overlap is harmless,
+  // and it keeps the id when the v2 router is off and that screen never
+  // mounts. Never on a non-invite link.
+  const isJoinPath = /^app\/league\/join\/[^/]+/i.test(path);
+  if (inviteId && (isJoinPath || (typeof lgStr === 'string' && lgStr.trim()))) {
+    useSession.getState().setInviteId(inviteId);
+  }
+
+  // B4 — `share_link_opened` (#350 grant, INTENT, the twin of
+  // invite_link_opened): a NON-league link opened the app. `/s/trade/<id>`
+  // → trade, `/s/p/<id>` → package, a bare `/?ref=` → ref_root. `has_ref`,
+  // never the username (C9). No league is in these links, so a signed-in
+  // user is never "verified a member" of one: `authed_non_member`, the same
+  // not-verified bucket LeagueJoinScreen uses.
+  if (!(typeof lgStr === 'string' && lgStr.trim())) {
+    const hasRef = !!(typeof refStr === 'string' && refStr.trim());
+    const kind = /^s\/trade\/[^/]+\/?$/i.test(path) ? 'trade'
+      : /^s\/p\/[^/]+\/?$/i.test(path) ? 'package'
+      : !path && hasRef ? 'ref_root'
+      : null;
+    if (kind) {
+      const st = useSession.getState();
+      track('share_link_opened', {
+        kind,
+        has_ref:    hasRef,
+        auth_state: !st.user ? 'signed_out' : st.user.account_only ? 'account_only' : 'authed_non_member',
+      });
+    }
+  }
 
   if (useFeatureFlags.getState().flags['ux.deeplink_router_v2']) {
     // Bare open / referral-only URL (no path) — nothing to route, no toast.

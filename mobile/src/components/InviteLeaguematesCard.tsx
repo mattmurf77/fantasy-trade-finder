@@ -4,6 +4,7 @@ import { View, StyleSheet } from 'react-native';
 import { chalk, space, type, fonts } from '../theme/chalkline';
 import { TickLabel, Button, Card, Text } from './chalkline';
 import { inviteSocialProof, INVITE_RATIONALE } from '../utils/inviteSocialProof';
+import { useInviteBusy, INVITE_BUSY_LABEL } from './InviteLeaguematesBanner';
 
 // P1-5 (audit A-14) — the promoted league invite on League Home.
 //
@@ -74,6 +75,9 @@ export default function InviteLeaguematesCard({
   summaryArrived,
   onShare,
 }: Props) {
+  // ux-lead #364 change 1: the Invite button's busy state is shareInvite's
+  // guard. Read before the early returns below (rules of hooks).
+  const inviteBusy = useInviteBusy();
   // L1 — no data yet. No skeleton, no em dash, no placeholder: an invite
   // card that appears with a fabricated number is worse than one that
   // appears a beat late.
@@ -99,6 +103,8 @@ export default function InviteLeaguematesCard({
             label="Invite leaguemates"
             variant="secondary"
             onPress={onShare}
+            loading={inviteBusy}
+            accessibilityLabel={inviteBusy ? INVITE_BUSY_LABEL : undefined}
           />
         </View>
       </Card>
