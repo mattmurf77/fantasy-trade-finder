@@ -8,13 +8,17 @@ import { Button, Icon } from '../components/chalkline';
 import { chalk, ice, ink, radii, semantic, space } from '../theme/chalkline';
 import { getPaywallConfig, type PaywallTip } from '../api/billing';
 import {
+  currentIdentityUserId,
   getTipProducts,
   isPaymentPending,
   isUserCancelled,
+  PurchaseIdentityError,
   purchaseTip,
   type PurchasesStoreProduct,
 } from '../api/purchases';
 import { useFlag } from '../state/useFeatureFlags';
+import { useSession } from '../state/useSession';
+import { customerInfoApplies } from '../state/subscriptionSession';
 import { track } from '../api/events';
 
 // TIP JAR — "support the platform" consumables (operator request 2026-08-28).
@@ -123,6 +127,12 @@ export default function TipJarScreen({ navigation, route }: any) {
       }
       setBusy(true);
       try {
+        // A tip is a purchase on RevenueCat's identity: only while this
+        // session is verified AND RevenueCat is its user (demo, unverified and
+        // unknown never). A refusal is the failure path below; nothing bought.
+        if (!customerInfoApplies(useSession.getState(), currentIdentityUserId())) {
+          throw new PurchaseIdentityError();
+        }
         const result = await purchaseTip(option.product);
         if (!result) {
           setError('Couldn’t load tips right now. Try again later.');

@@ -49,6 +49,7 @@ import PickAssignmentScreen from '../screens/PickAssignmentScreen';
 import RecordPicksScreen from '../screens/RecordPicksScreen';
 import PaywallScreen from '../screens/PaywallScreen';
 import TipJarScreen from '../screens/TipJarScreen';
+import FounderWelcomeScreen from '../screens/FounderWelcomeScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import AnalystGuide from '../components/AnalystGuide';
@@ -211,7 +212,13 @@ type AuthStack = {
   // per entry point (`first_opinion | left_deck | gate | settings |
   // preview_end`). A locked action (#393 M1) also passes the 402's `gate`
   // and `kind` ('find' | 'send'), which pick the headline.
-  Paywall: { source: string; gate?: string; kind?: 'find' | 'send' };
+  // `plan` (#393 M3, D9): the plan to pre-select when the paywall comes back
+  // after a verify.
+  Paywall: { source: string; gate?: string; kind?: 'find' | 'send'; plan?: string };
+  // #393 M3 — the Founding GMs welcome, once, after a purchase in the club
+  // window (screens/FounderWelcomeScreen.tsx). `period` picks the body's
+  // plan variant; `since` is the join date (ISO).
+  FounderWelcome: { period: 'annual' | 'monthly'; since?: string };
   // Tip jar (same flag, same dark posture). Money with NO entitlement — see
   // screens/TipJarScreen.tsx.
   TipJar: { source: string };
@@ -759,6 +766,15 @@ export default function RootNav({ booted }: { booted: boolean }) {
           name="TipJar"
           component={TipJarScreen}
           options={{ presentation: 'modal', headerShown: false }}
+        />
+        {/* #393 M3 — the Founding GMs welcome. The paywall REPLACES itself
+            with it after a purchase in the club window, so its one button
+            returns to the same card. A full-screen MODAL (no FeedbackFAB,
+            #188), no swipe-dismiss: Back to my trades is the way out. */}
+        <Stack.Screen
+          name="FounderWelcome"
+          component={FounderWelcomeScreen}
+          options={{ presentation: 'fullScreenModal', headerShown: false, gestureEnabled: false }}
         />
         <Stack.Screen
           name="FeedbackInbox"
