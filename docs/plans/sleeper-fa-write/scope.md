@@ -205,6 +205,40 @@ The Settings › Leagues "Stop roster moves" row shows only while a grant is act
   - A Like on that card may still record (AC-6b is post-launch).
   - Removing the card in place comes with strict mode.
 
+**B11. No unchosen $0 claim.** This is `head-product`'s product view (2026-11-01), confirmed with edits by `ux-lead` (11-01; a recommendation, pending the operator's approval). **The app never submits a $0 claim the user didn't choose.**
+- **Trigger.** design-lead rendered #579's real code @ `c3449e15`. When an add becomes a claim (409 `move_kind_changed`, state 10e), the sheet named a $0 bid if none was typed.
+- **Cause, on #579** (`origin/feat/fa-moves-client` @ `c3449e15`):
+  - `mobile/src/utils/claimSheetPlan.ts:277-278` turns an empty field into `0`, and `:288` sends `faab_bid: 0`;
+  - `docs/plans/sleeper-fa-write/contract.md:185` says "An empty bid on a claim fills as `$0`".
+
+  The field is hidden on submit adds (ux-lead A4), so it is always empty after 10e.
+- **Rule 1: any FAAB claim with an empty bid field.**
+  - The CTA is **disabled**.
+  - A **visible** inline line sits under the field (intent: "Enter a bid. $0 is allowed."; §G G25). A VoiceOver hint alone isn't enough, for the same reason as state 5.
+  - While disabled, the CTA names the claim **with no amount** ("Claim A" / "Claim A, drop B"), never "for $0". Its VoiceOver hint is "enter a bid to claim".
+  - **A typed `0` is a real choice.** The CTA then reads "Claim A for $0" and is enabled. The label updates as the user types.
+  - The CTA is **not** a live region.
+  - A spent budget (remaining $0) needs no special case.
+- **Rule 2: 10e, add → claim.**
+  - The sheet stays inline in Ready, in claim mode, with the FAAB field showing and empty.
+  - **VoiceOver focus goes to the 10e line** (`setAccessibilityFocus`).
+  - The bid TextInput **never** gets keyboard focus programmatically, because the number pad would cover the pinned CTA.
+  - Reading order: the 10e line, the empty field, then the disabled CTA. The line sits directly above the field.
+- **Rule 3: 10e, claim → add.**
+  - The field hides, and the CTA reads "Add A" (a fresh tap).
+  - Any typed bid is **kept in component state while hidden**, so a flip back restores it.
+  - **`faab_bid` is never sent with an add.**
+- **Rule 4: priority-waiver leagues.** No change.
+- **Rule 5: server safety net.**
+  - A FAAB claim with no `faab_bid` gets **400 `bad_request`**. That's an existing code, so C3 stays at 21. **The server never defaults to 0.**
+  - The client never sends `faab_bid` for an empty field, so this should be unreachable.
+  - If it does happen, nothing was sent. The sheet returns to Ready in claim mode with the empty field and rule 1's line: no retry button and no error screen.
+- **Rule 6: build requirement on #579** (`platforms-eng`; #579's files are theirs, so nothing is edited here).
+  - `moveSelection` returns `bid: null` for an empty field and omits `faab_bid`.
+  - The CTA gate is `kind === 'claim' && faab && bid === null` → disabled.
+  - `contract.md:185` changes to "an empty bid never fills; the disabled claim CTA uses the no-amount label".
+  - **Analytics:** `has_bid` is false for an empty field, and an empty field never logs 0.
+
 ## C. States
 
 **For `ux-lead` and `design-lead`.** This is the full set the **11-06 binary must carry**, including claims and the `{platform}_*` suffix mapping, so that claims, MFL and ESPN can light up with no build.
@@ -231,7 +265,7 @@ The Settings › Leagues "Stop roster moves" row shows only while a grant is act
 | 3 | **Connect** | Pre-tap `move.connect='not_linked'` or `'other_account'`, or any unknown `connect` value; or 409 `{platform}_not_linked` (including an account that isn't in this league, **[pm]**) | A connect step in the sheet, saying why: "Connect your Sleeper sign-in to make moves from here" (`s351.connect`, approved).<br>For `other_account` (ux-lead F3), a line says that account isn't in {League}, so connect the one that owns your team | **Connect** opens the platform's connect screen. The sheet is hidden, not destroyed.<br>After a real connect, it comes back **at the next step needed**: Consent (5) if missing, else Ready (6). Bid and drop are intact, and it **never auto-sends** (consent.md `:84-88`).<br>A cancelled or failed sign-in returns to 3 with bid and drop intact (ux-lead F2).<br>**Do it in Sleeper instead** | `connect_shown {reason: not_linked \| other_account}` (`other_account` granted 11-01, §1) | Stays (hidden while connecting) |
 | 4 | **Verify** | `move.connect='expired'` / `'unverified'`, or 409 `{platform}_expired`, or 403 `verification_required` | The same step, with **Verify** | As 3 | `connect_shown {reason: expired \| unverified}` | Stays |
 | 5 | **Consent needed** (first / lapsed / version / withdrawn) | At the tap, `move.consent_until` is null or past → consent `GET` (text + `copy_version`). Safety net: 409 `consent_required` (carries the same) | The consent step: the server's text for (platform, `copy_version`, locale). v1 is legal-final now (consent.md §4.1); v2 once claims are on. "This move: {CTA label} in {League}." sits above an **unticked** box. Make the move is disabled until it's ticked.<br>**ux-lead A5:**<ul><li>the "This move" line uses the same string and source as state 6's CTA;</li><li>Make the move sits directly under the box, and both are on screen together on an SE;</li><li>ticking never sends;</li><li>the disabled button has a VoiceOver hint.</li></ul>**F5:** a 409 `consent_required` carrying a new `copy_version` re-shows the new text **unticked**, with a "terms changed" line. The tick never carries over | **Make the move** (a fresh tap; sends `consent: {copy_version, locale}`); **Not now** (back to the sheet with bid and drop intact); **Do it in Sleeper instead** | `consent_shown {reason}`; on Make the move, `write_attempted {consent_ticked: true}`; server `consent_recorded` | Stays |
-| 6 | **Ready** | `mode='submit'`, connected, consent valid | **The named CTA is the per-move confirmation (D10)**: "Add A, drop B" / "Add A" / "Claim A for $N, drop B", matching the row's `move_kind`. The league is on or beside it. The finality line is always under it. A claim also shows the waiver line and bid. Inside a window: "Adds authorized until {date}" + **Turn off**.<br>**ux-lead:**<ul><li>roster full (`open_slots === 0`) with no drop picked → the CTA is **disabled**, with "Drop a player to make room" (#509's line). 10a is only the safety net;</li><li>a long CTA wraps to two lines and never truncates a name;</li><li>the bid follows note (d);</li><li>#509's pinned-CTA conditions carry over.</li></ul> | CTA; Do it in Sleeper instead; Cancel. **Turn off** closes the sheet and opens Settings › Leagues | none until the tap | Open |
+| 6 | **Ready** | `mode='submit'`, connected, consent valid | **The named CTA is the per-move confirmation (D10)**: "Add A, drop B" / "Add A" / "Claim A for $N, drop B", matching the row's `move_kind`. The league is on or beside it. The finality line is always under it. A claim also shows the waiver line and bid. Inside a window: "Adds authorized until {date}" + **Turn off**.<br>**ux-lead:**<ul><li>roster full (`open_slots === 0`) with no drop picked → the CTA is **disabled**, with "Drop a player to make room" (#509's line). 10a is only the safety net;</li><li>a long CTA wraps to two lines and never truncates a name;</li><li>the bid follows note (d);</li><li>**a FAAB claim with an empty bid** (§B11): the CTA is disabled and reads "Claim A" / "Claim A, drop B", never "for $0". A visible line under the field asks for a bid and says $0 is allowed. A typed `0` enables "Claim A for $0";</li><li>#509's pinned-CTA conditions carry over.</li></ul> | CTA; Do it in Sleeper instead; Cancel. **Turn off** closes the sheet and opens Settings › Leagues | none until the tap | Open |
 | 7 | **Submitting** | CTA tapped (and online, §B5) | CTA loading, and disabled from tap to result (D10(f)).<br>**Not dismissible** (ux-lead A1): the backdrop, Cancel and the Modal close request do nothing while sending. Cancel shows disabled, not hidden. design-lead agrees: backdrop taps, swipe-down and Android back are ignored until the result or the client timeout, and the CTA uses #364's `loading` state.<br>At ~8 s a "still sending" line appears, and the CTA stays busy (`accessibilityState` busy). The client timeout leads to 12 | none | `write_attempted` | Open |
 | 8 | **Added** | 200, `status: complete` | Says exactly what the platform reports: A added, B dropped, in {League}. A partial result is stated as reported (R15.1 `:767-771`, K-F6). Focus moves to the result title, which is announced | **Done** | server `write_succeeded {move_kind: add, result: accepted \| partial}` | Done closes. Refresh (note b). The held trade page is discarded automatically and the server has already saved the new roster (§B10), so the next search drops B. Cards already on screen keep B until then: the display half of W-AC-L5 the operator waived, the same as a drop made in Sleeper. A send including B is refused by the live roster read (`server.py:24697`); a Like may still record (AC-6b post-launch). In-place removal comes with strict mode |
 | 9 | **Waiver pending** | 200, `status: pending` | "Claim submitted" for A, bid $N, dropping B **if it clears**, run on the league's waiver schedule (say when, if the server knows). **Never "added".** No cancel line until capture Q7b is verified (R15.8 `:874`) | **Done** | server `write_succeeded {move_kind: claim, result: accepted}` | Done closes. Refresh; the row reads "claim pending" for the session (consent.md §5). The server blocks a second claim on that player (§B6) |
@@ -239,7 +273,7 @@ The Settings › Leagues "Stop roster moves" row shows only while a grant is act
 | 10b | **Rejected: drop gone** | 422 `asset_not_owned` | B (named) is no longer on your roster. The stale selection is cleared | Pick again | as 10a | Stays. Drop list refreshed |
 | 10c | **Rejected: player taken** | 422 `player_unavailable` | A was just picked up | **Done** (no retry) | as 10a | Closes. Refresh |
 | 10d | **Rejected: over budget** | 422 `waiver_bid_over_budget` (+ `remaining`) | The inline bid error, showing the server's remaining. The user's bid is kept, and the CTA stays disabled until it's fixed | Lower the bid | as 10a | Stays. FAAB from the body |
-| 10e | **Rejected: changed** | 409 `move_kind_changed` | A went on (or off) waivers. A line says why the CTA's label changed and that nothing was sent, and focus moves to it | Review the corrected CTA | as 10a | Stays. Re-reads the FA list |
+| 10e | **Rejected: changed** | 409 `move_kind_changed` | A went on (or off) waivers. A line says why the CTA's label changed and that nothing was sent, and focus moves to it.<br>**Add → claim** (§B11): the sheet stays inline in Ready, in claim mode, with the FAAB field showing and **empty**. The CTA is disabled with the no-amount label. VoiceOver focus goes to the 10e line (`setAccessibilityFocus`), and the bid field never gets keyboard focus. Reading order: line, field, CTA.<br>**Claim → add:** the field hides, and the CTA reads "Add A". A typed bid is kept in state while hidden, and `faab_bid` is never sent | Review the corrected CTA. Enter a bid (a claim) or tap the add | as 10a | Stays. Re-reads the FA list |
 | 10f | **Rejected by the platform** | 502 `{platform}_write_failed` (the platform refused; `detail` is its sentence) | The reason in plain words. Nothing changed (R15.1 rejection line) | **No retry.** Open in Sleeper (secondary); Done | as 10a | Closes on Done |
 | 10g | **Unavailable** | 503 `{platform}_unconfigured` | Moves aren't available right now | Open in Sleeper; Done. No retry | as 10a | Closes on Done |
 | 11 | **Not sent** | 502 `{platform}_write_failed` with `kind: network` from a definite connect-phase failure (`request_never_sent`), or a pre-write read failure (`kind: roster_read`); or **offline at the tap** (NetInfo; nothing is sent, §B5) | A `--neg` line, "nothing was sent" (couldn't reach Sleeper), above **the same named CTA** | **The same named CTA**, the only retry anywhere. **[pm]** This is design-lead's form, not a "Try again" label: it keeps D10's named per-move confirmation, which is the conservative reading. It goes to legal's ~11-04 pass (via `head-bizops`) as a confirmation, not a blocker. ux-lead's A3 conditions hold:<ul><li>It's a fresh tap with a new `attempt_id`.</li><li>Consent isn't asked again, because it was committed before the platform call.</li><li>**Do it in Sleeper instead** sits beside it.</li></ul> | `write_failed {error_code: write_failed, kind: network \| roster_read}` (C6). **[pm]** None when offline at the tap: no attempt, so no `attempt_id` | Stays |
@@ -260,7 +294,7 @@ The Settings › Leagues "Stop roster moves" row shows only while a grant is act
 - **(c) Codes map by suffix.** `_not_linked`, `_expired`, `_rejected`, `_unconfigured`, `_write_failed` and `_outcome_unknown` map by suffix, so MFL and ESPN need no build.
 - **(d) The FAAB field: answered by ux-lead A4.**
   - `submit` + add: **hidden**. An add spends no FAAB, and the CTA carries no bid.
-  - `submit` + claim: **shown**, and in the CTA.
+  - `submit` + claim: **shown**, and in the CTA. **Empty means no bid, never $0** (§B11): the CTA is disabled until a bid, including `0`, is typed.
   - Hand-off (the mode, the per-row override, or state 14): **shown on FAAB leagues**, as today (`ClaimSheet.tsx:189-229`). On state 14's 422 path it is shown empty and unfocused.
   - design-lead's mockup follows this. A4 settles design-lead's open note.
 - **(e) Everywhere** (ux-lead and design-lead agree). VoiceOver focus moves to each new step's title, and results are announced. Each step replaces the sheet's content rather than stacking.
@@ -425,6 +459,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
 
   | F16 | **State 7 is not dismissible** (ux-lead A1). While sending, the backdrop, Cancel and the Modal `onRequestClose` are no-ops. Cancel renders disabled, not hidden. The CTA carries `accessibilityState` busy. The ~8 s "still sending" line is wired | Let `onRequestClose` close the sheet mid-send |
   | F17 | **Offline at the tap is state 11, and nothing is sent** (ux-lead A3/F6, [pm]). NetInfo is read before the move call. Offline → state 11 with **no request, no `attempt_id` minted, and no `fa_move_write_*` event**. Executed against a stubbed NetInfo | Send anyway and map status 0 to state 12 |
+  | F18 | **No unchosen $0 claim** (§B11), executed against `claimSheetPlan`:<ul><li>an empty field → `bid: null` and no `faab_bid` in the request, never `0`;</li><li>a FAAB claim with `bid === null` → the CTA is disabled with the no-amount label (no "$0");</li><li>a typed `0` → "for $0" and enabled;</li><li>an add never carries `faab_bid`;</li><li>a bid kept while hidden comes back on claim → add → claim;</li><li>`has_bid` is false for an empty field</li></ul> | Restore `input.bid === '' ? 0` |
 
   - **Plus the held-page path:** an assertion in `mobile/tests/check-device-first-page.js` that `discardsDevicePages('/api/league/free-agents/move')` is true. It goes in the claim-sheet PR, reviewed by `trades-eng` (§B10). Sabotage: drop the path from `discardsDevicePages`.
 
@@ -444,6 +479,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
       - on `status: complete`, the new roster (B off, A on) is saved **before** the response is returned;
       - `roster_refresh.stamp` runs **off the request thread** (sabotage: call it inline);
       - **no roster write** on a pending, failed or outcome-unknown move.
+    - **No unchosen $0 claim (§B11):** a FAAB claim without `faab_bid` → 400 `bad_request`, with no opener call and no move row. The server never defaults the bid to 0.
     - **The double-move block (§B6, ux-lead F1):**
       - a new `attempt_id` for the same (user, league, add player) gets 409 `move_in_progress`, with **no opener call**, in two cases: while a `sent` row has no `result`, and while `result = 'unknown'` is under 15 min old;
       - it is allowed again at 15 min, or once a later result is recorded;
@@ -508,7 +544,10 @@ Sizing is platforms-eng's (sizing `:37-39`).
   | FA4 | Roster full | Open the sheet | The CTA is **disabled until a drop is picked** |
   | FA5 | Not connected | Connect → cancel the sign-in; then Connect for real | Cancel: back on the connect step with bid and drop intact. Real connect: back **on the consent step** |
   | FA6 | Connected, consent valid | Tap; during Submitting, tap the backdrop and Cancel | Nothing closes. The still-sending line shows at ~8 s |
+  | FA7 | FAAB league, claims on, `submit` + claim mode (§B11) | Open a waiver player's sheet; type `0`; then clear the field | On open: the CTA is **disabled**, the visible "enter a bid" line shows, and there is **no "$0" anywhere**. Type `0`: "Claim A for $0", enabled. Clear it: disabled again |
   | AX1 | **The largest accessibility text size** (design-lead) | Open the sheet on add/drop and on a claim; scroll | The pinned block has joined the end of the scroll. The CTA is **fully readable and reachable by scrolling**, and **nothing is truncated** |
+
+  **10e can't be staged on TestFlight.** Its proof is guard F18 plus a file:line code-walk in #579 (`platforms-eng`).
 
   **For launch, T14 and T15 supersede consent.md's step 29** (`:475`). There is no in-place card-removal step: cards already on screen keep B until the next search (§B10). `trades-pm` is asking `head-product` to update PRD step L4b to match.
 
@@ -562,7 +601,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
 
 - **Simulator-gate tier: WAIVED.** D-056 retired the tier matrix. `FTF_SKIP_SIM_GATE=1` is the standing posture, with the evidence in §3 named in its place.
 - **CI green** on the pushed sha: `backend-tests`, `mobile-typecheck` (which runs every `check-*.js`, including `check-fa-move.js`), and `maestro-testid-lint`.
-- **The 11-06 binary gate (client, dark).** F1–F17 and the `check-device-first-page.js` assertion pass, and the code-walk is written. It needs no flag or server change to ship.
+- **The 11-06 binary gate (client, dark).** F1–F18 and the `check-device-first-page.js` assertion pass, and the code-walk is written. It needs no flag or server change to ship.
 - **D6, restated for launch.** The flip needs **all** of these:
   1. **Legal's launch minimum folded in.** LEG-L12 as `legal-lead` scopes it for launch (`legal-lead.md:421`), arriving via `head-bizops` ~11-04: the consent copy (v1; v2 before claims), the R15.3 tables, and the privacy and terms text, live.
   2. **The capture recorded** in `capture.md`, redacted (AC-19).
@@ -572,7 +611,7 @@ Sizing is platforms-eng's (sizing `:37-39`).
 
   #351's P31 device tests gate #509's hand-off merge, not this flip. **The flip itself is the operator's.** The TestFlight checklist runs straight after it, and the flag goes back off on any failure.
 - **Claims** need, in addition, D5: the current copy at v2 **and** the claim shape captured.
-- **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the F1–F17 sabotages (applied and reverted), the backend tests, the code-walk, the T1–T15, FA1–FA6 and AX1 outcomes, and `FTF_SKIP_SIM_GATE=1`.
+- **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the F1–F18 sabotages (applied and reverted), the backend tests, the code-walk, the T1–T15, FA1–FA7 and AX1 outcomes, and `FTF_SKIP_SIM_GATE=1`.
 - **Express lane declared by the operator?** No. Schema, API and flag surfaces are all touched, so full gates apply.
 
 ## E. Platform scope
@@ -659,6 +698,8 @@ Sizing is platforms-eng's (sizing `:37-39`).
 | G22 | 6 | Client fallback: "In {League}" | Names the league beside the CTA (D10(a)) when the server line is missing | needed (design-lead) |
 | G23 | 3 | Client fallback: "Sleeper isn't connected" | Shown after backing out of connect (consent.md `:88`) | needed (design-lead) |
 | G24 | 1, 6 | Sheet header by `move_kind` | Today it reads "Claim {name}" even for an add. On `submit` + add it should probably be "Add {name}" | needed (design-lead's flag; marketing's word) |
+| G25 | 6, 10e | Inline line under an empty FAAB bid field on a claim (§B11) | Ask for a bid, and say $0 is allowed. Draft intent: "Enter a bid. $0 is allowed." It must be visible, not only a VoiceOver hint | needed (marketing); **a neutral client fallback is needed for the binary** |
+| G26 | 6, 10e | Disabled claim CTA, no amount (§B11) | Names the claim with no amount, "Claim A" / "Claim A, drop B", never "for $0". VoiceOver hint: enter a bid to claim | needed (marketing); **a neutral client fallback is needed for the binary** |
 
 ## H. Risks
 
