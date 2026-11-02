@@ -1,3 +1,22 @@
+## 2026-10-31 — Redacted decks in eval (models-lead addendum J1/J2, and G-a5): the `partner_redacted` exclusion, the fit, what the scrub cleared
+
+Gates: eval code (`backend/eval/{data,replay,persistence,calibration,flip_read,bdk_audit}.py`) plus `backend/value_model.py`, the runbook and the evidence contract. No route, schema, event, flag or knob change. Eval rules go to version 7. **`value_model.py` is engine-hashed, so merging moves `engine_version` once:** release-lead lands it after the 24 h read closes, at a low-traffic hour, before the operator's device runs and before 11-10 (head-eng; models-lead I5, J1). It goes to models-lead as an R-G entry before merge. It supersedes this PR's first build (G-a6's 1% test), which J1 made moot.
+
+- **J1, the loader (`eval/data`):** `LoggedCard.partner_redacted` (the frozen `partner_user_id` is a redaction token, on rows, packed cards and ghosts). A deck holding one is `partner_redacted`, below every integrity reason and below `partial_run`. Only the token marks a deck; a null score on an unredacted card keeps today's path. `LoggedDeck.redacted_at` is the pack run's stamp.
+- **Who skips the deck:** replay (`EvalRun.partner_redacted_decks`, its cards in `excluded`), e(k) and calibration. **Who keeps it:** the B-DK audit (its short-deck rule reads it as unexcluded), G3's joins, and the flip read's checks (the B4 weekly ceiling, and the exclusion report lists it).
+- **The fit:** `build_training_rows` and replay's `_fit_rows` never take a redacted card. `meta["exclusions"]` = `{"partner_redacted": n}`.
+- **The trigger:** `data.partner_redacted_share`; the replay report prints the excluded share and, above 5%, that a gate read goes to models-lead first.
+- **G-a5 (`replay`, `persistence`):** the redacted cards, those lacking `likes_you` (an upper bound), the decks with a pack `redacted_at`, and those redacted since the previous persisted read of the same window.
+- **Tests:** `test_eval_partner_redacted.py`, 20:
+  - J1: the mark and the exclusion, nothing dropped; only the token marks (a nulled score on a clean card doesn't, nor an id merely containing the prefix); a redacted ghost marks; `incomplete_deck` and `partial_run` win; the 5% boundary.
+  - J2: for each of the 5 registered scorers, the clean deck's estimates are bit-identical across the scrub (`repr` of every metric) and e(k) too; the redacted deck is excluded and counted and never scored. Calibration leaves it out. The flip read joins its outcomes and reads B4 the same.
+  - The fit: no redacted card is a training row (both heads, and `_fit_rows`), and the fit equals one on the decks without those cards.
+  - G-a5: the counts, the run, record and report lines, the previous read, and the CLI.
+  - `test_eval_bdk_audit.py` +1: a short deck holding a redacted card is still explained.
+  - Pins moved to version 7 and the new key: `test_eval_pack_reader.py`, `test_eval_refresh_and_live_columns.py`, `test_eval_withdrawals_and_paging.py`, `test_eval_flip_read.py`, `test_eval_calibration.py`.
+- **models-lead M2 (a) and M3 (2026-11-01):** `blind_grade` skips `partner_redacted` decks (counted in `skipped_decks_by_reason`; a new test in `test_blind_grade_served.py`, whose three other count pins gain the key), and the B-DK no-evidence count is labelled an upper bound (#543's P2; one pin). Two more sabotages, each red: `blind_grade` grades redacted decks; the label dropped.
+- **Sabotage, each red then restored (11):** the loader never marks; replay scores the deck (nulls as 0); the fit keeps redacted cards; `_fit_rows` keeps them; partial-run decks marked; calibration keeps the deck; B4 drops it; the flip report drops the reason; the gate at exactly 5%; the B-DK short-deck rule refuses it; ghosts don't mark.
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

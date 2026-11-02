@@ -479,13 +479,14 @@ def test_the_v5_exclusion_counts_cover_every_reason_and_the_removals_by_reason()
     assert r.decks == 4
     assert r.exclusions == {"calibration_refresh": 1, "pack_integrity": 0,
                             "withdrawal_conflict": 0, "in_flight": 0, "incomplete_deck": 0,
-                            "no_delivery_evidence": 1, "none": 2}
+                            "no_delivery_evidence": 1, "partner_redacted": 0, "none": 2}
     assert r.partial_run_decks == 1
     assert r.withdrawn_removed_by_reason == {"disposition_cut": 1, "i1_dropped": 1}
     assert ("v5 exclusions (decks): calibration_refresh=1, pack_integrity=0, "
             "withdrawal_conflict=0, in_flight=0, incomplete_deck=0, no_delivery_evidence=1, "
-            "none=2; partial_run decks (replay): 1; withdrawn_removed_by_reason "
-            "(every loaded deck): disposition_cut=1, i1_dropped=1") in render(r)
+            "partner_redacted=0, none=2; partial_run decks (replay): 1; "
+            "withdrawn_removed_by_reason (every loaded deck): disposition_cut=1, "
+            "i1_dropped=1") in render(r)
 
 
 # ---------------------------------------------------------------------------

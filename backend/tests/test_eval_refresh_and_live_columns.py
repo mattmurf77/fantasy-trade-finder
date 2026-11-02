@@ -141,12 +141,12 @@ def test_replay_excludes_a_refresh_deck_whole_and_counts_it():
 
     text = render_report([run], run)
     assert "calibration_refresh=20" in text and "calibration_refresh_decks=1" in text
-    assert "Exclusion rules: version 6." in text
+    assert "Exclusion rules: version 7." in text
     record = run_record(run, run)
     assert record["calibration_refresh_decks"] == 1
     assert record["excluded"]["calibration_refresh"] == 20
-    assert EXCLUSION_RULE_VERSION == 6
-    assert run.exclusion_rule_version == 6 and record["exclusion_rule_version"] == 6
+    assert EXCLUSION_RULE_VERSION == 7
+    assert run.exclusion_rule_version == 7 and record["exclusion_rule_version"] == 7
 
 
 def test_calibration_excludes_refresh_deck_cards():

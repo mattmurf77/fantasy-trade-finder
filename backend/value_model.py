@@ -541,6 +541,20 @@ MIN_PROPOSE_POS = 3
 
 _POSITION_NORM = 10.0   # displayed position / this, clipped to [0,1] — train-only
 
+# The fit's named exclusion for cards whose partner deleted their account (the
+# loader's LoggedCard.partner_redacted; eval.data.PARTNER_REDACTED). The
+# scrub strips likes_you and nulls surplus_margin on every such card, which
+# would read as no like and no surplus, so no redacted card is an honest
+# training row (models-lead addendum J1, superseding G-a6's 1% test).
+PARTNER_REDACTED = "partner_redacted"
+
+
+def _trainable(c):
+    """A card's frozen block when the fit reads the card (viewed, not
+    undone, with a block), else None."""
+    f = c.features if c.features is not None else c.features_compact
+    return f if c.viewed and not c.undone else None
+
 
 def build_training_rows(decks) -> tuple[list[dict], list[dict]]:
     """LoggedDecks → (like_rows, propose_rows), each row =
@@ -556,13 +570,15 @@ def build_training_rows(decks) -> tuple[list[dict], list[dict]]:
     features_json, else its compact block (a narrow row, or a packed card
     whose outcomes joined by id, R4.2 U2), so a viewed card trains the same
     whether or not it was upgraded to a full row.
+
+    A card the loader marks partner_redacted is never a row (PARTNER_REDACTED).
     """
     like_rows: list[dict] = []
     propose_rows: list[dict] = []
     for deck in decks:
         for c in deck.cards:
-            f = c.features if c.features is not None else c.features_compact
-            if not c.viewed or c.undone or f is None:
+            f = _trainable(c)
+            if f is None or c.partner_redacted:
                 continue
             row = {
                 "f": f,
@@ -616,8 +632,11 @@ def train_model(decks, *, as_of: datetime, config: dict | None = None) -> ValueM
     pinned now. Either way it is recorded in meta["config"] (R5.2 (a)), so
     a re-fit on the same corpus, as_of and config is bit-identical.
     Returns None when the like head lacks MIN_LIKE_ROWS/MIN_LIKE_POS — no
-    model is better than a fake one."""
+    model is better than a fake one. meta["exclusions"] names the
+    partner_redacted cards the fit read past (PARTNER_REDACTED) and their n."""
     config = config if config is not None else pin_config(FIT_CONFIG)
+    redacted = sum(1 for d in decks for c in d.cards
+                   if c.partner_redacted and _trainable(c) is not None)
     like_rows, propose_rows = build_training_rows(decks)
     n_like_pos = int(sum(r["y"] for r in like_rows))
     if len(like_rows) < MIN_LIKE_ROWS or n_like_pos < MIN_LIKE_POS:
@@ -666,6 +685,7 @@ def train_model(decks, *, as_of: datetime, config: dict | None = None) -> ValueM
         "calib_frac": calib_frac, "l2": l2, "l2_cat": l2_cat,
         "propose_head": "lr" if model.propose_head else "constant",
         "config": config,
+        "exclusions": {PARTNER_REDACTED: redacted},
     }
     return model
 

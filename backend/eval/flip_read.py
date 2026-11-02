@@ -148,8 +148,8 @@ from backend.database import deck_impressions_table, deck_outcomes_table
 from backend.eval import data, evidence_pack
 from backend.eval.data import (
     CALIBRATION_REFRESH, IN_FLIGHT, IN_FLIGHT_WINDOW, INCOMPLETE_DECK, NO_DELIVERY_EVIDENCE,
-    PACK_INTEGRITY, PACK_TABLE, PARTIAL_RUN_TIER, UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT,
-    WITHDRAWALS_TABLE, load_decks,
+    PACK_INTEGRITY, PACK_TABLE, PARTIAL_RUN_TIER, PARTNER_REDACTED, UPGRADE_MISS_OTHER,
+    WITHDRAWAL_CONFLICT, WITHDRAWALS_TABLE, load_decks,
 )
 
 # A3: fewer final packed decks than this and G2 reads INSUFFICIENT (extend to 48 h).
@@ -169,7 +169,7 @@ WEEK = timedelta(days=7)
 STAMP_SETTLE = timedelta(minutes=5)
 LIST_CAP = 20                   # ids listed per G
 LOADER_EXCLUSIONS = (CALIBRATION_REFRESH, PACK_INTEGRITY, WITHDRAWAL_CONFLICT, IN_FLIGHT,
-                     INCOMPLETE_DECK, NO_DELIVERY_EVIDENCE)
+                     INCOMPLETE_DECK, NO_DELIVERY_EVIDENCE, PARTNER_REDACTED)
 PASS, FAIL, INSUFFICIENT, REPORT = "PASS", "FAIL", "INSUFFICIENT", "REPORT"
 
 # Only the columns the direct queries read.
@@ -595,7 +595,7 @@ def weekly_read(engine, *, as_of: str) -> dict:
     viewed = _viewed(decks)
     gone = _row_gone(packs, skip={d.deck_job_id for d in decks if d.exclusion == PACK_INTEGRITY})
 
-    evidenced = [d for d in decks if d.exclusion is None and (
+    evidenced = [d for d in decks if d.exclusion in (None, PARTNER_REDACTED) and (
         d.deck_job_id in packed or any(not c.is_ghost and data._delivered_by(c.delivered_at, as_of)
                                        for c in d.cards))]
     cuts = sum(d.withdrawn_removed_by_reason.get(DISPOSITION_CUT, 0) for d in evidenced)
