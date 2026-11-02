@@ -24817,6 +24817,14 @@ def sleeper_link():
 
     if proven_live:
         # Claim matches + oracle passed → this session controls the account.
+        # Load the history a username-only sign-in deferred (R28.17) BEFORE
+        # verifying; on failure stay unverified so a retry hydrates.
+        try:
+            _hydrate_session_history(sess)
+        except Exception:
+            log.exception("sleeper_link: history load failed for %s — "
+                          "verify refused (retryable)", user_id)
+            return _verify_retry_response()
         sess["verified"] = True
         sess["verified_via"] = "sleeper"
         _attach_presession_feedback(sess)
@@ -31480,9 +31488,95 @@ def og_package_card(short_id):
 # full frontend Sleeper-fetch flow, and (b) we don't need the trade service
 # or opponent-member hydration for read-only badge injection.
 
+def _extension_ranking_services(user_id: str, load_history: bool = True,
+                                strict: bool = False) -> dict:
+    """One RankingService per scoring format for `user_id`.
+
+    `load_history` replays the user's swipes and restores their tier
+    overrides (the eager build). `strict` re-raises a history-load failure
+    instead of logging it and carrying on; only `_hydrate_session_history`
+    sets it, because a verify must never complete on a half-loaded board.
+    """
+    new_services: dict = {}
+    for fmt in SCORING_FORMATS:
+        fmt_pool, fmt_seed = _get_universal_pool(fmt)
+        svc = RankingService(
+            players           = fmt_pool,
+            matchup_generator = matchup_gen,
+            seed_ratings      = fmt_seed,
+        )
+        svc._user_id = user_id
+        svc._scoring_format = fmt
+        if load_history:
+            try:
+                historical = load_swipe_decisions(user_id=user_id, scoring_format=fmt)
+                if historical:
+                    svc.replay_from_db(historical)
+            except Exception as e:
+                if strict:
+                    raise
+                log.warning("  [%s] extension replay failed: %s", fmt, e)
+            try:
+                # See server.py:4022 for why we no longer filter overrides
+                # through the current pool — the filter destroys data.
+                overrides = load_tier_overrides(user_id=user_id, scoring_format=fmt)
+                svc._elo_overrides = {pid: float(elo) for pid, elo in overrides.items()}
+                svc._elo_override_at = load_tier_override_stamps(
+                    user_id=user_id, scoring_format=fmt)          # F2
+            except Exception as e:
+                if strict:
+                    raise
+                log.warning("  [%s] extension override restore failed: %s", fmt, e)
+        new_services[fmt] = svc
+    return new_services
+
+
+def _hydrate_session_history(sess) -> None:
+    """Load the history a `load_history=False` session skipped (R28.17).
+
+    Call immediately before an in-place `sess["verified"] = True`. A no-op
+    for eagerly built sessions and for one already hydrated. Single-flight
+    on the session's own lock, re-checking `_history_pending` on the live
+    session, because `replay_from_db` appends and must run exactly once.
+
+    The history goes into FRESH services that are swapped in only after
+    every format loaded. On any failure this raises and the session is left
+    exactly as it was — pristine services, `_history_pending` still set —
+    so a retry replays once. The caller must refuse the verify: a verified
+    session with empty services lets /api/tiers/save overwrite the user's
+    persisted pins with an empty board.
+    """
+    live = getattr(sess, "_source", sess)   # a _RequestSession view → live dict
+    lock = live.get("_history_lock")
+    if lock is None:
+        return
+    with lock:
+        if not live.get("_history_pending"):
+            return
+        services = _extension_ranking_services(live["user_id"], strict=True)
+        with _sessions_lock:
+            live["services"] = services
+            live["service"] = (services.get(live.get("active_format"))
+                               or services[DEFAULT_SCORING])
+            live.pop("_history_pending", None)
+    # The caller's request view keeps its pre-swap services; neither verify
+    # route reads services after verifying, and the next request's view is
+    # built from the live session.
+
+
+def _verify_retry_response():
+    """Retryable refusal of an in-place verify whose history load failed.
+    The session stays unverified and still pending, so a retry hydrates."""
+    return jsonify({
+        "error": "verify_retry",
+        "message": "We couldn't finish signing you in. Try again in a moment.",
+    }), 503, {"Retry-After": "5"}
+
+
 def _extension_build_session(user_id: str, username: str,
                              display_name: str, avatar: str | None,
-                             token: str | None = None) -> tuple[str, dict]:
+                             token: str | None = None,
+                             load_history: bool = True) -> tuple[str, dict]:
     """Build a user-scoped session for the browser extension.
 
     `token` re-registers the session under an existing bearer token —
@@ -31495,6 +31589,13 @@ def _extension_build_session(user_id: str, username: str,
     RankingService per scoring_format with swipes + tier overrides
     replayed, so switching leagues on sleeper.com just picks the right
     service instantly.
+
+    `load_history=False` (only the UNVERIFIED username sign-in and the
+    entry mint pass it — legal R28.17) skips the swipe replay and override
+    restore so the response time can't reveal whether the user has FTF
+    history. The session is marked `_history_pending`, and the in-place
+    verify routes hydrate it with `_hydrate_session_history` before they
+    set `verified`. Every other caller stays eager.
 
     Returns (token, session_payload).
     """
@@ -31526,32 +31627,7 @@ def _extension_build_session(user_id: str, username: str,
         log.warning("  extension auth: upsert_user failed: %s", e)
 
     # Build RankingServices per format with replayed swipes + tier overrides
-    new_services: dict = {}
-    for fmt in SCORING_FORMATS:
-        fmt_pool, fmt_seed = _get_universal_pool(fmt)
-        svc = RankingService(
-            players           = fmt_pool,
-            matchup_generator = matchup_gen,
-            seed_ratings      = fmt_seed,
-        )
-        svc._user_id = user_id
-        svc._scoring_format = fmt
-        try:
-            historical = load_swipe_decisions(user_id=user_id, scoring_format=fmt)
-            if historical:
-                svc.replay_from_db(historical)
-        except Exception as e:
-            log.warning("  [%s] extension replay failed: %s", fmt, e)
-        try:
-            # See server.py:4022 for why we no longer filter overrides
-            # through the current pool — the filter destroys data.
-            overrides = load_tier_overrides(user_id=user_id, scoring_format=fmt)
-            svc._elo_overrides = {pid: float(elo) for pid, elo in overrides.items()}
-            svc._elo_override_at = load_tier_override_stamps(
-                user_id=user_id, scoring_format=fmt)          # F2
-        except Exception as e:
-            log.warning("  [%s] extension override restore failed: %s", fmt, e)
-        new_services[fmt] = svc
+    new_services = _extension_ranking_services(user_id, load_history=load_history)
 
     payload = {
         "user_id":       user_id,
@@ -31567,6 +31643,9 @@ def _extension_build_session(user_id: str, username: str,
         "extension":     True,
         "last_active":   time.time(),
     }
+    if not load_history:
+        payload["_history_pending"] = True
+        payload["_history_lock"] = threading.Lock()   # hydrate single-flight
     token = token or secrets.token_urlsafe(32)
     with _sessions_lock:
         _sessions[token] = payload
@@ -31627,13 +31706,16 @@ def extension_auth():
     except Exception as e:
         log.info("extension_auth: leagues fetch failed (non-fatal): %s", e)
 
-    # Mint session immediately
+    # Mint session immediately. Unverified, so history waits for the verify
+    # (R28.17: loading it here made the response time reveal whether this
+    # username has FTF history).
     try:
         token, payload = _extension_build_session(
             user_id=user_id,
             username=username,
             display_name=display_name,
             avatar=avatar,
+            load_history=False,
         )
     except Exception as e:
         log.exception("extension_auth: session build failed")
@@ -31892,11 +31974,13 @@ def entry_platform():
         display_name = franchise["name"] or f"Franchise {franchise_id}"
 
     try:
+        # Unverified mint: history waits for the verify (R28.17).
         token, payload = _extension_build_session(
             user_id=entry_uid,
             username="",
             display_name=display_name,
             avatar=None,
+            load_history=False,
         )
     except Exception as e:
         log.error("entry_platform: session build failed: %s", e)
@@ -37694,6 +37778,15 @@ def mfl_auth_link():
     # @_gate_unverified_write already 403s an unverified session whenever a
     # verified controller exists, so this path can only mint the FIRST
     # controller (first-verified-wins, same as the Sleeper path).
+    # Deferred history (R28.17) loads before verifying, as in sleeper_link.
+    # Defensive today: the write gate above means only already-verified
+    # (never pending) sessions reach this line.
+    try:
+        _hydrate_session_history(sess)
+    except Exception:
+        log.exception("mfl_auth_link: history load failed for %s — "
+                      "verify refused (retryable)", user_id)
+        return _verify_retry_response()
     sess["verified"] = True
     sess["verified_via"] = "mfl_login"
     _attach_presession_feedback(sess)

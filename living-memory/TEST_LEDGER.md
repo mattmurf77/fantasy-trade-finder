@@ -121,6 +121,21 @@ Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook
   - the kill without the limit.
 - **Suites:** all `test_eval_*` plus `test_evidence_pack.py` and `test_deck_value_model.py`, on main @ `9370670e`: 481 passed.
 
+## 2026-10-28 — Sign-in timing fix: history loads at verification, not at sign-in (legal R28.17 condition 4)
+
+Full gates, not express (platforms-eng; shape approved by head-eng 2026-10-27). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest. Branch `fix/signin-history-deferral`, not merged. Scope: `docs/plans/signin-timing-fix/scope.md`.
+
+- **Change:** `/api/extension/auth` and the `/api/entry/platform` mint build with `load_history=False` (no swipe replay, no override restore; session `_history_pending` + a per-session lock). `sleeper_link` (proven live) and `mfl_auth_link` call `_hydrate_session_history` just before `verified` flips. A failed load → 503 `verify_retry` + `Retry-After: 5`, still unverified, still pending. Hydration builds fresh services and swaps them in only when every format loaded, so a partial failure leaves nothing half-replayed.
+- **New `backend/tests/test_signin_history_deferral.py`: 15 passed.** Covers no loader calls at either unverified sign-in; equal loader and SQL-statement counts at `/api/extension/auth` for a username with history and one without; hydrate-before-verify ordering (`sleeper_link` route and the `mfl_auth_link` body); no double replay on a second link or a concurrent hydrate; `/api/extension/rankings` after auth + link == an eager build; restore, account and default builds still eager; the eager build still swallows load errors; head-eng's 503 condition with a second-format failure, then a retry with exactly one replay.
+- **Sabotage, each red then restored from the commit:**
+  1. the failure path clears `_history_pending` and flips `verified` (both routes) → **2 red** (`test_hydration_failure_refuses_verify_with_retryable_503`, `test_mfl_body_hydration_failure_refuses_verify`);
+  2. hydration swallows load errors like the eager path (`strict=False`) → the same 2 red;
+  3. the `_history_pending` re-check under the lock removed → 2 red (`test_second_link_does_not_replay_again`, `test_concurrent_hydration_replays_once`).
+- **Changed pre-existing test:** `test_entry_platform_route.py`'s fake `_extension_builder` accepts the new `load_history` kwarg (5 mint tests failed with a TypeError before; signature change only).
+- **Targeted neighbours:** `test_entry_platform_route`, `test_verified_sessions`, `test_mfl_auth_link_route`, `test_persistent_sessions`, `test_account_first`, `test_accounts`, `test_private_session_ownership`, `test_feedback_attach_on_verify`, `test_user_data_lifecycle`, `test_deletion_session_races`, `test_link_status_routes`, `test_verified_reads`, `test_sleeper_write_route` → 231 passed, 5 failed (the fake's TypeError); after the fix `test_entry_platform_route` 25/25, and the full suite below covers all 13 files.
+- **Full suite** (`python3 -m pytest backend/tests -q -p no:cacheprovider`, no `-x`): **9,429 passed, 2 skipped, 0 failed** in 41:40. No wall-clock flake this run.
+- **Operator TestFlight check** after merge: the 5-step checklist in the scope's §3 (a username with history signs in verified and sees its own boards in both formats; a pin change survives a relaunch; a username without history signs in as before).
+
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
 Gates: release-lead's flags-on run of #551 (`ops/200ms-flip`, both `trade.first_page_store` and `trade.packed_evidence` on) failed 3 tests. Failure 1 (the packed-evidence mirror pin) is fixed on `ops/200ms-flip` itself. This entry covers 2 and 3. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
