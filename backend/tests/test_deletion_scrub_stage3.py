@@ -484,3 +484,11 @@ def test_overhaul_offers_relabel_picks_naming_the_person(engine):
     assert offers["ofr_1"]["narrative"] == f"2027 1st (from {PLACEHOLDER}) comes back for depth."
     assert offers["ofr_2"] == {"receive": [{"name": "Joe"}]}
     assert "Del Name" not in json.dumps(offers)
+
+
+def test_give_side_pick_labels_are_relabelled_too():
+    """Gap L06: a traded pick the viewer sends can name the person too."""
+    card = {"target_user_id": OTHER, "give": [{"id": "p", "name": "2026 2nd (from Del Name)"}],
+            "receive": []}
+    out = scrub.redact_page_card(card, {DEL}, "redacted:t", {"Del Name"})
+    assert out["give"][0]["name"] == f"2026 2nd (from {PLACEHOLDER})"

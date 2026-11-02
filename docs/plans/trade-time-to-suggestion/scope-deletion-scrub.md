@@ -123,6 +123,14 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
   - **Taste and upgrades:** the taste update keys `partner:<token>`. An upgrade row written before its pack is redacted takes the live token (`_redacted_held_row`), which closes the grace scan's cursor-order gap.
   - **Every pass re-runs the side-table scrub** (`_repair_side_tables` in `_STORES`): taste, standing offers, and the three NULLed columns. That catches a write that raced the commit. The taste merge is idempotent.
   - **Over-redaction, on the private side:** during the window, a card built after the deletion that names the person as a non-user leaguemate (vii) is mapped too.
+  - **Also mapped since release-lead's #562 QA:**
+    - a standing offer's team list (the token);
+    - a team-overhaul offer naming the partner, which isn't minted while the job lives (refused; the flag is off);
+    - an upgrade row built from a pack the scrub hasn't reached;
+    - a match raced past the commit, together with the person's own inbox, repaired by the next pass (P2-1).
+  - **The token cache counts its clears,** so a read that began before the delete route's clear never installs its pre-commit map (P3-1).
+  - **The new page-store and overhaul relabels** touch only leagues the person was traced in (P3-4).
+  - **Known over-redaction:** a re-signup with the same id while the job lives is written as the token, like any write naming that id (P3-7).
   - **After the job row is gone** (6–30 h), a held card with no owned impression can't be told apart from such a card. That's head-eng's and legal's call (option (a) accept or (b) refuse impression-less FB-46 swipes; group notes `trades-eng-scrub-r28-26-plan.md`).
   - **`_deleted_partner_ids`** (#559's in-process set) is pruned once an id's 1 h window closes, after one last purge of the session stores, so no deleted id stays in memory beyond what it guards.
 - **The pre-scrub window** (release-lead's re-QA P3): between the deletion's commit and the scrub's page-store league pass, a stored page still holds the person's cards with their id, so a serve in that window can deliver them. The kick starts the scrub off the request, so the window is about 0.1 s; if the kick fails, it's up to one cleanup tick (5 min). I-1 doesn't close it at prod's `trade_i1_mode` 1; only mode 2 would withdraw such a card. Eval is safe either way (models-lead addendum Q): replay, e(k) and calibration exclude redacted decks; the B-DK audit and G3's joins keep them; the fit drops redacted cards. Whether the window is acceptable is with legal.
@@ -207,5 +215,5 @@ Already handled by deletion today, untouched: `trade_proposals`, `trade_impressi
   2. packs through the codec, the CAS fix, the page store and the in-flight pass;
   3. the traced items (f), `grading_cards` and diagnostics (built: #559's follow-up). It sets `COMPLETE`. The trace found `features.presentation` partner-free (indexes and player counts only); the narrative goes from a redacted page card, and value_core's blended scores go (§1.3).
   - Packs and the page store are empty in prod until the flip (`trade.packed_evidence` off). PR 2 lands before the flip.
-- **The three ship together, #557 → #559 → #562, in one release** (release-lead's plan). The job rows that hold the deleted ids are only deleted once #562 sets `COMPLETE` (`_finish`) and the 30-day stop (`_abandon`). Deployed alone, #557 or #559 would keep every deletion's row until #562 deployed. The merge waits on the flip's 24 h read, models-lead's R-G and the operator's go.
+- **The three ship together, #557 → #559 → #562, in one release** (release-lead's plan). The job rows that hold the deleted ids are only deleted once #562 sets `COMPLETE` (`_finish`); past 30 days a job is escalated, never deleted (`_escalate`, legal R28.26 #8). Deployed alone, #557 or #559 would keep every deletion's row until #562 deployed. The merge waits on the flip's 24 h read, models-lead's R-G and the operator's go.
 - Express lane declared by the operator? No.

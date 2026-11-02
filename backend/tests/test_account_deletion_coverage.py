@@ -910,3 +910,13 @@ def test_the_graders_calibration_export_carries_no_partner_fields(engine):
 def test_the_export_strips_the_same_arm_keys_the_scrub_removes():
     from backend import deletion_scrub
     assert accounts._GRADING_ARM_PARTNER_KEYS == deletion_scrub._GRADING_ARM_KEYS_REMOVED
+
+
+@pytest.mark.parametrize("raw", ['["a", "b"]', '{"value_core": ["gain_partner"]}', '"s"', "null"])
+def test_a_wrong_shape_arms_blob_is_withheld_from_the_export(engine, raw):
+    """Gap E04: arms_json that parses but isn't {arm: {...}} is withheld."""
+    with engine.begin() as conn:
+        seed(conn, db.grading_cards_table, "c3", card_id="c3", user_id=UID,
+             arms_json=raw, trade_json="{}")
+    (row,) = accounts.export_user_data(UID)["tables"]["grading_cards"]
+    assert row["arms_json"] is None

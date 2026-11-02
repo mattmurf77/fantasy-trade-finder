@@ -244,3 +244,129 @@ def test_a_held_upgrade_row_takes_a_live_deletions_token_before_the_pack_is_reda
     out = server._redacted_held_row(dict(row), None, 0)
     assert json.loads(out["features_json"])["partner_user_id"] == TOKEN
     assert DEL not in json.dumps(out)
+
+
+# ── release-lead's #562 QA: P2-1, the P3s and the test gaps ─────────────────
+
+def test_a_match_raced_past_the_commit_is_repaired_by_the_next_pass(engine):
+    """P2-1: a swipe that read the token map before the commit mints a match
+    and both notifications after it. The next pass puts the placeholder on the
+    match side, drops its valuation, deletes the person's own inbox rows, and
+    redacts the viewer's notification (its match's other side is a raw id)."""
+    from backend.tests.test_deletion_scrub_stage3 import name_people, notification
+    name_people(engine)
+    accounts.delete_user_data(DEL)
+    m = db.trade_matches_table
+    with engine.begin() as conn:                      # written after the commit
+        match_id = conn.execute(insert(m).values(
+            league_id=LEAGUE, user_a_id=VIEWER, user_b_id=DEL, user_a_give="[]",
+            user_a_receive="[]", match_valuation_json=json.dumps({"partner_board": {}}))
+        ).inserted_primary_key[0]
+        notification(conn, "Trade match with @deluser",
+                     {"partner_username": "deluser", "match_id": match_id})
+        notification(conn, "Trade match with @viewer", {"match_id": match_id}, user=DEL)
+    scrub.run_pending()
+    with engine.connect() as conn:
+        row = conn.execute(select(m).where(m.c.id == match_id)).mappings().one()
+    assert row["user_b_id"] == accounts.DELETED_USER_PLACEHOLDER
+    assert row["match_valuation_json"] is None
+    notes = read(engine, db.notifications_table)
+    assert all(n["user_id"] != DEL for n in notes)
+    raced = [n for n in notes if n["user_id"] == VIEWER and str(match_id) in n["metadata_json"]]
+    assert raced and "deluser" not in json.dumps(raced)
+
+
+def test_a_read_that_began_before_a_clear_never_installs_its_map(engine, monkeypatch):
+    """P3-1: the delete route's clear lands while a read is in flight. That
+    read's (pre-commit) map is returned but not cached; the next call reads."""
+    real = db.engine
+
+    class ClearsMidRead:
+        def connect(self):
+            db.clear_deletion_tokens_cache()          # the route's clear, mid-read
+            return real.connect()
+    monkeypatch.setattr(db, "engine", ClearsMidRead())
+    assert db.live_deletion_token(DEL) is None
+    assert db._deletion_tokens_cache["at"] == 0.0     # not installed
+    monkeypatch.setattr(db, "engine", real)
+    with engine.begin() as conn:
+        _job_row(conn, [DEL])
+    assert db.live_deletion_token(DEL) == TOKEN       # the next call reads again
+
+
+def test_the_cache_expires_after_its_ttl(engine, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(db.time, "monotonic", lambda: clock[0])
+    assert db.live_deletion_token(DEL) is None        # cached empty
+    with engine.begin() as conn:
+        conn.execute(insert(db.deletion_scrub_jobs_table).values(
+            job_id="c" * 32, token=TOKEN, partner_ids_json=json.dumps([DEL]),
+            league_ids_json="[]", deleted_at=datetime.now(timezone.utc).isoformat()))
+    clock[0] += 4.9
+    assert db.live_deletion_token(DEL) is None        # still cached
+    clock[0] += 0.2
+    assert db.live_deletion_token(DEL) == TOKEN       # past 5 s: re-read
+
+
+def test_a_relabel_only_touches_leagues_the_person_was_traced_in(engine):
+    """P3-4: in a league their traces were never captured in, a "(from
+    <name>)" can't be theirs: a same-name stranger's label is left alone."""
+    from backend.tests.test_deletion_scrub_stage3 import name_people
+    name_people(engine)
+    accounts.delete_user_data(DEL)
+    with engine.connect() as conn:
+        ctx = scrub._GradingContext(conn, job_dict(engine))
+        assert "Del Name" in ctx.names_where_traced(LEAGUE)
+        assert ctx.names_where_traced("league-never-joined") == set()
+        assert "Del Name" in ctx.names("league-never-joined")   # Calibration's rule, unchanged
+
+
+def job_dict(engine):
+    return scrub._job(job(engine))
+
+
+def test_a_held_dismiss_writes_the_token_and_a_held_card_takes_the_placeholder(routes):
+    """Gaps H04 and H19: awaiting/dismiss's partner_id, and the held card's
+    name (the placeholder, never the old username)."""
+    client, engine, sess, *_ = routes
+    with engine.begin() as conn:
+        _job_row(conn, [tcq.OPP])
+
+    class Card:
+        target_user_id, target_username = tcq.OPP, "opp"
+    card = Card()
+    server._redact_held_card_partner(card)
+    assert (card.target_user_id, card.target_username) == (TOKEN, accounts.DELETED_USER_PLACEHOLDER)
+    import inspect
+    src = inspect.getsource(server.dismiss_awaiting_trade)
+    assert '"partner_id": live_deletion_token(partner_id) or str(partner_id)' in src
+
+
+def test_a_held_pass_reason_card_takes_the_token(routes, monkeypatch):
+    """Gap H02: the reasoned pass's card, rebuilt from the body, is mapped."""
+    client, engine, *_ = routes
+    import backend.feature_flags as ff
+    ff._flags_cache = {**ff._flags_cache, "feedback.decline_reasons": True}
+    with engine.begin() as conn:
+        _job_row(conn, [tcq.OPP])
+    res = _post(client, "/api/trades/pass-reason", {
+        "trade_id": "held0003", "reason": "value", "league_id": tcq.LEAGUE,
+        "give_player_ids": ["g1"], "receive_player_ids": ["r1"],
+        "target_user_id": tcq.OPP, "target_username": "opp"})
+    assert res.status_code < 300, res.get_data(as_text=True)
+    calls = json.dumps([c.kwargs for c in server.record_event.call_args_list], default=str)
+    assert tcq.OPP not in calls
+
+
+def test_the_routes_and_loops_wire_the_map_in(engine):
+    """Gaps H14 and H17, and the paths that are flag- or pack-gated (P3-2,
+    P3-5): pinned by source, each a single line a refactor could drop."""
+    import inspect
+    delete_src = inspect.getsource(server.delete_account_route)
+    assert delete_src.index("clear_deletion_tokens_cache()") < delete_src.index("_purge_session_trade_cards(user_ids)")
+    assert "_prune_deleted_partner_ids()" in inspect.getsource(server._cleanup_loop)
+    assert "team_user_ids = [live_deletion_token(t) or t for t in team_user_ids]" in \
+        inspect.getsource(server.create_standing_offer_route)
+    assert "row = _scrub.redact_row(row, {partner}, token)" in inspect.getsource(server._deck_upgrade_from_pack)
+    from backend import overhaul_api
+    assert "if live_deletion_token(card.target_user_id):" in inspect.getsource(overhaul_api)

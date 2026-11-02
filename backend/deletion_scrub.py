@@ -56,8 +56,8 @@ COMPLETE = True
 LEASE = timedelta(minutes=10)
 IN_FLIGHT_GRACE = timedelta(hours=6)
 ALERT_AFTER = timedelta(hours=24)
-# Legal (ix): an unfinished job retries for up to 30 days, then its row (the
-# ids) is deleted and eng told (_abandon).
+# Legal R28.26 #8 (R28.20 (ix)): past 30 days an unfinished job is kept,
+# marked escalated and alerted daily by its own id (_escalate); never deleted.
 RETRY_LIMIT = timedelta(days=30)
 _BATCH = 200
 # The fallback scans: rows per keyset page, and pages per run (one run per
