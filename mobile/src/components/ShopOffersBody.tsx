@@ -566,6 +566,9 @@ export default function ShopOffersBody({
     // refetch so the card reappears rather than staying invisibly
     // un-dismissed (the S-9 honesty rule MatchesScreen states for the
     // same shape) — the one legal subtraction from the suppression set.
+    // #393 M2 (D2): background — the undo window's own commit, not a tap, so
+    // api/trades.swipeTrade sends a 'shop' pass `background` (a 402 opens
+    // nothing).
     swipeTrade(ideaToCard(idea, leagueId), 'pass', signal, 'shop').catch(() => {
       setSuppressed((s) => {
         const n = new Set(s);

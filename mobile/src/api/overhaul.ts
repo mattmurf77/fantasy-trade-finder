@@ -11,7 +11,7 @@
 // overhaul surface writes league preferences, player tiers, or swipe/taste
 // learning. Likes here are assembly input, not Elo signal.
 
-import { apiRequest } from './client';
+import { apiRequest, gateSignalFor } from './client';
 import { overhaulSendTimeoutMs } from './sendOutcome';
 import { normalizeTradeCard } from './trades';
 import type { TradeCard } from '../shared/types';
@@ -324,8 +324,25 @@ function normalizeOverhaulView(raw: any): OverhaulView {
 export async function getActiveOverhaul(
   leagueId: string,
   signal?: AbortSignal,
+  // #393 M2 (head-eng grant (b)): the active-overhaul probe runs on every
+  // Trades mount, a request the user didn't make, so it is background by
+  // default: a 402 (or the verify 403) opens no paywall and no VerifySheet.
+  // GET /api/overhauls stays gated; getOverhaul / getOffers stay
+  // user-initiated (tapping in opens the paywall).
+  request: { background?: boolean } = { background: true },
 ): Promise<{ active: OverhaulView | null }> {
-  const res: any = await apiRequest(`${BASE}?league_id=${enc(leagueId)}`, { signal });
+  let res: any;
+  try {
+    res = await apiRequest(`${BASE}?league_id=${enc(leagueId)}`, { signal, ...request });
+  } catch (e) {
+    // A gate answer (a 402 of any gate, or the verify 403) RESOLVES to no
+    // active overhaul (trades-eng): Trades shows no overhaul entry, and the
+    // probe's query neither retries it nor sits in an error state. Decided
+    // by api/client's gateSignalFor, never a re-parse; every other error
+    // throws exactly as before.
+    if (gateSignalFor(e, BASE)) return { active: null };
+    throw e;
+  }
   return { ...res, active: res?.active ? normalizeOverhaulView(res.active) : null };
 }
 
