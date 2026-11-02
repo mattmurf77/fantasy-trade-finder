@@ -17,6 +17,12 @@
 - **(ix), as legal R28.26 #8 settled it (11-01):** the job row holding the ids is deleted when the scrub finishes, **and never before**. Past 24 h unfinished, it keeps retrying and alerts eng with a count. Past 30 days it is **kept and escalated** (below). Ids never go to logs, Sentry or the audit line.
 - **R28.22 e:** `trade_matches.match_valuation_json` is scrubbed in both directions. When the deleted user was `user_a`, the second liker, their own board and preference values go too.
 - **R28.22 f:** before ship, trace `owner_generation`, the slim `bakeoff_run` / `presentation` records and the narrative text. Any username or display name of the deleted user in stored text becomes the placeholder.
+- **Traded-pick labels (legal R28.26 #7, confirming R28.22 (f)):** a pick's label can name its original owner ("2027 1st (from Kim K.)"). The person's names in those labels become the placeholder in every stored copy, on every card whoever its partner is:
+  - Calibration `trade_json`;
+  - every `trade_page_store` card's give/receive names, plus `narrative`, `reasons`, `standing_offer_reason` and `rationale` text that repeats a label (`_relabel_card`, the person's names per league less any a remaining member uses);
+  - other users' `overhaul_offers.card_json` (`_scan_overhaul_offers`, the last fallback scan).
+
+  Deck rows, packs, candidate sets, bake-off runs, `shared_packages` and `trade_share_tokens` hold ids and values only. The share image can't draw such a label (owned picks have no players row; league-eng confirms #573/#564 never pass `original_username`). `draft_picks.original_username` is public Sleeper league data and stays, so labels built after the deletion are the non-user-leaguemate case (vii).
 - **#523 (d1):** the deletion and export fix stays unconditional, never behind the prune's switch.
 
 ---

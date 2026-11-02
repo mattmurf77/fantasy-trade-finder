@@ -819,15 +819,54 @@ _PAGE_CARD_KEYS_NULLED = ("mismatch_score", "composite_score", "surplus_margin",
                           "base_score", "final_score")
 
 
-def redact_page_card(card: dict, ids, token: str) -> dict:
+# Text a stored card can repeat a pick label in (a narrative's received asset,
+# a value-core reason, a standing offer's "you hold a {label}").
+_CARD_TEXT_KEYS = ("narrative", "reasons", "standing_offer_reason", "rationale")
+
+
+def _relabel_text(value, names: set):
+    """Every "(from <name>)" for one of the person's names, in any string of
+    `value` (a str, or lists and dicts of them), becomes the placeholder."""
+    if isinstance(value, str):
+        if "(from " in value:
+            for name in names:
+                value = value.replace(f"(from {name})", f"(from {_PLACEHOLDER})")
+        return value
+    if isinstance(value, list):
+        return [_relabel_text(v, names) for v in value]
+    if isinstance(value, dict):
+        return {k: _relabel_text(v, names) for k, v in value.items()}
+    return value
+
+
+def _relabel_card(card: dict, names) -> dict:
+    """Legal R28.26 #7 / R28.22 (f): a traded pick's label names its original
+    owner ("2027 1st (from Kim)"). On EVERY stored card, the person's names
+    in its give/receive labels, and in text that repeats a label, become the
+    placeholder, whoever the card's partner is."""
+    if not names:
+        return card
+    out = dict(card)
+    for side in ("give", "receive"):
+        if side in out:
+            out[side] = _relabel_picks(out[side], names)
+    for key in _CARD_TEXT_KEYS:
+        if key in out:
+            out[key] = _relabel_text(out[key], names)
+    return out
+
+
+def redact_page_card(card: dict, ids, token: str, names=frozenset()) -> dict:
     """One stored page card. Its target becomes the token and the placeholder
     name, and the partner's fields go. It never serves again: the serve rules
     drop a token-target card in every I-1 mode, before I-1, and record it as
     a withdrawal, reason "partner_deleted", served_before 1 when an earlier
     response had delivered it, else 0 (server.
     _roster_serve_rules; models-lead addendum J4: at prod's mode 1, I-1
-    alone would serve it)."""
+    alone would serve it). `names`: the person's names in the card's league,
+    for the traded-pick labels on any card (_relabel_card)."""
     ids = set(ids)
+    card = _relabel_card(card, names)
     # The roster evidence a page card carries when trade.roster_protection is
     # on (server._card_to_dict), redacted as on a deck row.
     card = _redact_roster(card, ids, card.get("target_user_id") in ids)
@@ -882,6 +921,7 @@ def _redact_page_rows(row_ids, job: dict) -> int:
     ids, token = set(job["ids"]), job["token"]
     t = db.trade_page_store_table
     changed = 0
+    names_by_league: dict = {}
     for row_id in row_ids:
         _renew(job)
         for _attempt in range(5):
@@ -890,10 +930,14 @@ def _redact_page_rows(row_ids, job: dict) -> int:
                 if row is None:
                     break
                 pages, evidence = row["pages_blob"], row["evidence_blob"]
+                league = row["league_id"]
+                if league not in names_by_league:
+                    names_by_league[league] = _GradingContext(conn, job).names(league)
                 try:
                     new_pages = pages
                     if isinstance(pages, dict) and isinstance(pages.get("cards"), list):
-                        new_pages = {**pages, "cards": [redact_page_card(c, ids, token)
+                        new_pages = {**pages, "cards": [redact_page_card(c, ids, token,
+                                                                         names_by_league[league])
                                                         if isinstance(c, dict) else c
                                                         for c in pages["cards"]]}
                     new_evidence = (redact_evidence_blob(evidence, ids, token)
@@ -1317,6 +1361,39 @@ _STORES = (
     ("trade_page_store", _scrub_page_store),
     ("grading_cards", _scrub_grading),
 )
+# ── Team overhaul offers (overhaul_offers.card_json) ────────────────────────
+
+def _scan_overhaul_offers(job: dict, after: str, budget: "_Budget") -> tuple[str | None, int]:
+    """Legal R28.26 #7: another user's overhaul offer card can label a traded
+    pick with the person as its original owner. Offers whose card has a
+    "(from " label get the person's names in that overhaul's league relabelled
+    (_relabel_card). The deletion itself already rewrote the offers where the
+    person is the counterparty (accounts)."""
+    o, h = db.overhaul_offers_table, db.overhauls_table
+    changed = 0
+    cursor = int(after or 0)
+    while budget.take():
+        with db.engine.begin() as conn:
+            rows = conn.execute(select(o.c.id, o.c.card_json, h.c.league_id).select_from(
+                o.join(h, o.c.overhaul_id == h.c.overhaul_id)).where(
+                o.c.id > cursor, o.c.card_json.like("%(from %"),
+            ).order_by(o.c.id).limit(_SCAN_BATCH)).all()
+            if not rows:
+                return None, changed
+            ctx = _GradingContext(conn, job)
+            for r in rows:
+                card = _loads(r.card_json)
+                if not isinstance(card, dict):
+                    continue
+                new = _relabel_card(card, ctx.names(r.league_id))
+                if new != card:
+                    changed += conn.execute(update(o).where(o.c.id == r.id).values(
+                        card_json=json.dumps(new))).rowcount or 0
+            cursor = rows[-1].id
+        _renew(job)
+    return str(cursor), changed
+
+
 _SCANS = (
     ("deck_impressions", _scan_impressions),
     ("deck_candidate_sets", _scan_candidate_sets),
@@ -1327,6 +1404,7 @@ _SCANS = (
     ("deck_diagnostic_snapshots", _scan_diagnostics),
     ("notifications", _scan_notifications),
     ("user_events", _scan_user_events),
+    ("overhaul_offers", _scan_overhaul_offers),     # appended: cursors index this tuple
 )
 
 

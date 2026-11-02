@@ -417,3 +417,70 @@ def test_a_person_with_many_matches_is_scanned_without_a_term_per_match(engine):
     assert scrub.run_pending() == 1
     rows = sorted(read(engine, db.notifications_table), key=lambda r: r["id"])
     assert [r["title"] for r in rows] == [f"Trade match with @{PLACEHOLDER}", "Trade match with @Someone"]
+
+
+# ── Legal R28.26 #7 / R28.22 (f): traded-pick labels in every stored copy ────
+
+def _label_card(target, name):
+    return {"target_user_id": target, "target_username": "o",
+            "give": [{"id": "g", "name": "Some Player"}],
+            "receive": [{"id": "p1", "name": f"2027 1st (from {name})"},
+                        {"id": "p2", "name": "2028 2nd (from Other Name)"}],
+            "narrative": f"2027 1st (from {name}) comes back for depth.",
+            "standing_offer_reason": f"you hold a 2027 1st (from {name})",
+            "reasons": [f"2027 1st (from {name}) is a premium pick"]}
+
+
+def test_any_page_card_relabels_a_pick_naming_the_person():
+    """On another partner's card too: the person's names in pick labels, and in
+    text repeating a label, become the placeholder. Other names stay."""
+    out = scrub.redact_page_card(_label_card(OTHER, "Del Name"), {DEL}, "redacted:t",
+                                 {"Del Name", "deluser"})
+    assert [a["name"] for a in out["receive"]] == [
+        f"2027 1st (from {PLACEHOLDER})", "2028 2nd (from Other Name)"]
+    assert out["narrative"] == f"2027 1st (from {PLACEHOLDER}) comes back for depth."
+    assert out["standing_offer_reason"] == f"you hold a 2027 1st (from {PLACEHOLDER})"
+    assert out["reasons"] == [f"2027 1st (from {PLACEHOLDER}) is a premium pick"]
+    assert out["target_user_id"] == OTHER
+    # No names given (a caller that doesn't pass them): unchanged.
+    assert scrub.redact_page_card(_label_card(OTHER, "Del Name"), {DEL}, "redacted:t") == \
+        _label_card(OTHER, "Del Name")
+
+
+def test_the_page_store_relabels_picks_on_other_users_cards(engine):
+    name_people(engine)
+    pages = {"v": 1, "opponents_total": 1, "cards": [_label_card(OTHER, "Del Name")]}
+    with engine.begin() as conn:
+        conn.execute(insert(db.trade_page_store_table).values(
+            user_id=VIEWER, league_id=LEAGUE, scoring_format="1qb_ppr", request_scope="organic",
+            roster_fp="r", values_snapshot_id="v", engine_version="e", config_signature="c",
+            experiment_digest="d", deck_job_id="deck-labels", built_at=EARLY,
+            expires_at="2999-01-01T00:00:00+00:00", card_count=1, pages_blob=pages,
+            evidence_blob=None, stored_bytes=1, state="ready"))
+    accounts.delete_user_data(DEL)
+    scrub.run_pending()
+    (row,) = read(engine, db.trade_page_store_table)
+    card = row["pages_blob"]["cards"][0]
+    assert [a["name"] for a in card["receive"]] == [
+        f"2027 1st (from {PLACEHOLDER})", "2028 2nd (from Other Name)"]
+    assert "Del Name" not in json.dumps(row["pages_blob"])
+
+
+def test_overhaul_offers_relabel_picks_naming_the_person(engine):
+    from backend.tests.test_account_deletion_coverage import seed
+    name_people(engine)
+    card = _label_card(OTHER, "Del Name")
+    with engine.begin() as conn:
+        seed(conn, db.overhauls_table, "ovh_1", overhaul_id="ovh_1", account_user_id=VIEWER,
+             league_user_id=VIEWER, league_id=LEAGUE)
+        seed(conn, db.overhaul_offers_table, "ofr_1", offer_id="ofr_1", overhaul_id="ovh_1",
+             counterparty_user_id=OTHER, card_json=json.dumps(card))
+        seed(conn, db.overhaul_offers_table, "ofr_2", offer_id="ofr_2", overhaul_id="ovh_1",
+             counterparty_user_id=OTHER, card_json=json.dumps({"receive": [{"name": "Joe"}]}))
+    accounts.delete_user_data(DEL)
+    scrub.run_pending()
+    offers = {r["offer_id"]: json.loads(r["card_json"]) for r in read(engine, db.overhaul_offers_table)}
+    assert offers["ofr_1"]["receive"][0]["name"] == f"2027 1st (from {PLACEHOLDER})"
+    assert offers["ofr_1"]["narrative"] == f"2027 1st (from {PLACEHOLDER}) comes back for depth."
+    assert offers["ofr_2"] == {"receive": [{"name": "Joe"}]}
+    assert "Del Name" not in json.dumps(offers)
