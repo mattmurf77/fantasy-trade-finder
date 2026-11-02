@@ -61,9 +61,12 @@ def test_overhaul_device_type_resolution(api, world, headers, expected):
     ({"X-Source": "extension"}, "extension", "extension"),
     ({"X-Device": "iphone"}, "iphone", "ios"),
     ({"X-Device": "android"}, "android", "android"),
+    ({"X-Device": "IPHONE"}, "IPHONE", "ios"),
+    ({"X-Device": "Android"}, "Android", "android"),
     ({"X-Source": "server"}, None, None),
 ], ids=["headerless", "x-source-web", "x-source-extension", "x-device-iphone",
-        "x-device-android", "x-source-server"])
+        "x-device-android", "x-device-iphone-upper", "x-device-android-mixed",
+        "x-source-server"])
 def test_win_now_search_stamps(harness, headers, device_type, platform):
     r = harness.client.post("/api/win-now/search", json=evaluate_body(), headers=headers)
     assert r.status_code == 202, r.get_json()

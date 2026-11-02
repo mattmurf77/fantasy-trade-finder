@@ -32,17 +32,21 @@ def declared_source(headers):
 
 def event_device_type(headers):
     """`device_type` for a server-written `user_events` row. First match wins:
-    the `X-Device` header, stripped (stored as sent, the value
-    `g.device_info["device_type"]` holds), then a declared `X-Source`, then
-    MISSING_DEVICE_TYPE."""
+    the `X-Device` header, which this helper strips and otherwise stores as
+    sent, then a declared `X-Source`, then MISSING_DEVICE_TYPE.
+    `g.device_info["device_type"]` (server.py) stores the header as sent,
+    unstripped; HTTP servers trim surrounding whitespace, so the two agree in
+    practice."""
     device = str(headers.get("X-Device") or "").strip()
     return device or declared_source(headers) or MISSING_DEVICE_TYPE
 
 
 def device_platform(device_type):
-    """Client platform for a resolved device_type: ios | android | web | extension, else None."""
-    if device_type in _IOS_DEVICES:
+    """Client platform for a resolved device_type: ios | android | web | extension, else None.
+    Case-insensitive, like the flags `platform` attribute and the ingest."""
+    device = str(device_type or "").strip().lower()
+    if device in _IOS_DEVICES:
         return "ios"
-    if device_type in ("android", "web", "extension"):
-        return device_type
+    if device in ("android", "web", "extension"):
+        return device
     return None
