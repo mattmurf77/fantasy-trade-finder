@@ -998,7 +998,7 @@ export default function MatchesScreen() {
       if (hiddenAwareMatches === null || matchesQuery.isError || matchesQuery.isPaused) return;
       // Dismissed, or gone for any other reason: the Mutual list at its top
       // (never under a finger) or its empty state, nothing marked, plus the
-      // not-found line — which ships as null (no line).
+      // not-found line ("This trade is no longer available.", a Toast held ~4 s).
       endMark();
       if (!a.dragged) matchesListRef.current?.scrollToOffset({ offset: 0, animated: true });
       const line = notFoundToast(MATCH_NOT_FOUND_LINE);

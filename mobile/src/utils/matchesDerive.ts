@@ -83,13 +83,13 @@ export function indexForMatch(
 /**
  * R2 (ux-states §7 "When the match isn't there") — the not-found line, shown
  * when an arrival's match is missing after one refetch (dismissed, or gone
- * for any other reason; it never guesses why). Its words go to marketing
- * through head-product (~11-03), so it SHIPS AS `null`: no line, and the
- * arrival just shows the Mutual list. The swap is this one constant.
- *   Working words (ux-lead, NOT approved — never ship them as-is):
- *   "We couldn't find that match. It may have been cleared."
+ * for any other reason; it never guesses why). Never on a failed or offline
+ * fetch. The words are marketing's already-approved string, reused
+ * (org-bringup leads/marketing-lead-copy.md:735; picked by head-bizops,
+ * 2026-11-01) — the same line as the deck's withdrawn card
+ * (components/TradeDeckStates.tsx WITHDRAWN_REASON). `null` would mean no line.
  */
-export const MATCH_NOT_FOUND_LINE: string | null = null;
+export const MATCH_NOT_FOUND_LINE: string | null = 'This trade is no longer available.';
 
 /** ~4 s, so a whole line can be read (§7). */
 export const NOT_FOUND_HOLD_MS = 4000;

@@ -42,7 +42,9 @@ whatever state it's in (§7 R9), so a mark is the only thing that can say which 
   `notif.tap_routing_v2` (ON) produces. With that flag off, the legacy tap drops `match_id` (`RootNav.tsx:373-379`), so
   nothing changes.
 - New env vars / `model_config` keys: none. The not-found line is the code constant `MATCH_NOT_FOUND_LINE`
-  (`utils/matchesDerive.ts:92`), shipped `null`.
+  (`utils/matchesDerive.ts:92`): "This trade is no longer available.", marketing's already-approved string, reused
+  (org-bringup `leads/marketing-lead-copy.md:735`; picked by head-bizops, 2026-11-01). It is the same string as the
+  deck's withdrawn card (`TradeDeckStates.tsx` `WITHDRAWN_REASON`), so no new copy ships.
 
 ## 3. Evidence scope
 
@@ -52,7 +54,8 @@ whatever state it's in (§7 R9), so a mark is the only thing that can say which 
   - **Executed** (`utils/matchesDerive.ts`, transpiled and run under node):
     - `indexForMatch`;
     - `notFoundToast`: null → no line; a string → exactly that string, held 4 s;
-    - the shipped `MATCH_NOT_FOUND_LINE === null`;
+    - `MATCH_NOT_FOUND_LINE` is exactly "This trade is no longer available.", and a not-found arrival's toast is exactly
+      that line (`notFoundToast(MATCH_NOT_FOUND_LINE)`); it matches `WITHDRAWN_REASON`;
     - `clampOffset`: floors at 0, caps at the content end;
     - `scrollFailureJump`: the list's top padding + index × average − `viewOffset`, clamped; nothing measured (a fresh
       mount, average 0) → no jump;
@@ -186,7 +189,8 @@ whatever state it's in (§7 R9), so a mark is the only thing that can say which 
 - Otherwise:
   - `endMark()` runs, so nothing is marked;
   - the list scrolls to the top unless the user dragged (`:1003`);
-  - `notFoundToast(MATCH_NOT_FOUND_LINE)` returns `null`, so no Toast shows (`:1005`).
+  - `notFoundToast(MATCH_NOT_FOUND_LINE)` shows the Toast "This trade is no longer available.", neutral, held ~4 s
+    (`:1005`).
 
 ### §7 coverage
 
@@ -205,8 +209,8 @@ whatever state it's in (§7 R9), so a mark is the only thing that can say which 
 | Expired | Can't happen (head-product's v1 ruling 2). n/a |
 | Offline (paused) or fetch failed, with the id not cached | code + check (P-6a). TestFlight 7a (paused), 7b (failed) |
 | Offline with the id cached | code: found in the cache, no refetch. TestFlight only |
-| Mutual empty | code: the empty state; the line is `null`. TestFlight only |
-| The not-found line | the constant, shipped `null`, plus check (U-2a to U-2c, P-6). The words go to marketing (~11-03) |
+| Mutual empty | code: the empty state, plus the not-found line. TestFlight only |
+| The not-found line | the constant ("This trade is no longer available.", marketing-lead-copy.md:735), plus check (U-2a to U-2f, P-6) |
 | No arrival, no change (tab press, League tiles, re-arrival probes) | code: no `match_id` means no effect; a done `ts` never replays. TestFlight 10 |
 
 ### Manual TestFlight checklist
@@ -244,10 +248,11 @@ This follows ux-states §7, with release-lead's QA additions on #568.
    outlined (the one refetch found it), and nothing else shows.
 6. **Dismissed:**
    - **6a.** Dismiss a match and wait past Undo. Tap its old notification in the TopBar inbox. The Mutual list shows at
-     its top, nothing is outlined, and **no line shows**: `MATCH_NOT_FOUND_LINE` ships `null` until marketing's words
-     land.
-   - **6b.** Dismiss a match, and **during the Undo window** tap its inbox row. Same as 6a: the top, nothing outlined, no
-     line. Then tap Undo: the card comes back, unmarked, and the list doesn't jump.
+     its top, nothing is outlined, and the toast **"This trade is no longer available."** shows for about 4 s. With
+     VoiceOver on, it's read.
+   - **6b.** Dismiss a match, and **during the Undo window** tap its inbox row. Same as 6a: the top, nothing outlined,
+     and the toast "This trade is no longer available.". It replaces the Undo toast, which is accepted and rare, so Undo
+     is no longer offered and the dismiss completes.
 7. **Offline.** Airplane mode pauses queries rather than failing them (NetInfo → `onlineManager`, `App.tsx:254-266`),
    so it never shows the error state.
    - **7a. Paused:**
@@ -310,8 +315,8 @@ a device capture).
 - **TestFlight:** the steps above, run by the operator or release-lead QA, with the outcome logged in TEST_LEDGER.
 - **Express lane:** no. The full gates apply, kept lean for a bug fix.
 - **Open edges:**
-  - The not-found line ships `null`. Marketing's words (~11-03) are a one-constant swap.
-  - When the line is set, it replaces an Undo toast that's showing at that moment.
+  - The not-found line can replace an Undo toast that's showing at that moment (TestFlight 6b). Accepted: it's rare,
+    and the dismiss still completes.
   - **No tail overshoot on iOS.** Fabric's `scrollTo` clamps to the content bounds, so a tail row's `scrollToIndex`
     target never passes the end, and no band shows. `endClamp`'s pull-back is kept only as a guard and never fires on an
     iPhone. The estimate jump is also clamped up front.

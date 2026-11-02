@@ -111,8 +111,12 @@ const {
 eq('U-2a notFoundToast(null) → null: no line renders', notFoundToast(null), null);
 eq('U-2b notFoundToast(string) → exactly that string, held ~4 s, neutral tone',
   notFoundToast('Some words.'), { msg: 'Some words.', holdMs: 4000 });
-eq('U-2c MATCH_NOT_FOUND_LINE SHIPS AS null (marketing owns the words, ~11-03)',
-  MATCH_NOT_FOUND_LINE, null);
+eq('U-2c MATCH_NOT_FOUND_LINE is marketing\'s approved string, exactly (marketing-lead-copy.md:735; head-bizops 2026-11-01)',
+  MATCH_NOT_FOUND_LINE, 'This trade is no longer available.');
+eq('U-2e a not-found arrival shows exactly that line, held ~4 s (the executed notFoundToast(MATCH_NOT_FOUND_LINE))',
+  notFoundToast(MATCH_NOT_FOUND_LINE), { msg: 'This trade is no longer available.', holdMs: 4000 });
+assert(/export const WITHDRAWN_REASON = 'This trade is no longer available\.';/.test(read('src/components/TradeDeckStates.tsx')),
+  'U-2f it is the same reused string as the deck\'s withdrawn card (TradeDeckStates WITHDRAWN_REASON)');
 eq('U-2d NOT_FOUND_HOLD_MS is the §7 ~4 s', NOT_FOUND_HOLD_MS, 4000);
 eq('U-3a clampOffset floors at 0', clampOffset(-12, 500), 0);
 eq('U-3b clampOffset passes an in-range offset', clampOffset(240, 500), 240);
