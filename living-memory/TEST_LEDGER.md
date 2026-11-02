@@ -21,6 +21,19 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
   - SQLite: 160 passed, 19 PG-only skipped.
   - **Postgres 18** (`FTF_TEST_PG_URL`): 190 passed, 1 skipped, across every scrub file plus account coverage.
   - **Full backend suite** at `2a19ca9b`: 10,404 passed, 22 skipped (the Postgres-only cases among them).
+- **release-lead's #562 QA (GO-with-notes at `1b695bb0`), fixed:**
+  - **P2-1:** a raced match is repaired each pass (side → placeholder, no valuation, the person's own inbox deleted), and a raw-id side counts as deleted for the notification scan.
+  - **P3-1:** the token cache has a clear generation.
+  - **P3-2:** standing offers are mapped, and overhaul mints refused.
+  - **P3-4:** the new relabels are scoped to traced leagues.
+  - **P3-5:** the pack-fallback upgrade is mapped.
+  - **P3-3:** the test gaps (H02, H04, H14, H16, H17, H19, L06, E04).
+  - **P3-6:** stale docs.
+  - **Tests:** held writes 20, stage 3 +1, account coverage +4.
+  - **Sabotage:** 31 cases, all RED (9 new).
+  - **Postgres 18:** 203 passed, 1 skipped.
+  - **Full suite at `b825a896`:** 10,416 passed, 22 skipped.
+  - **Cross-PR rule:** whichever of #562 and #577 merges second wraps #577's Shop `trade_proposed` target in `live_deletion_token`.
 - **Sabotage:** 22 single-rule breaks, all RED: #8 ×3, #9 ×3, #7 ×4, #10 ×12. Two were fixed along the way: the swipe pattern matched pass-reason too, and the taste mapping needed the live-path test.
 - **Docs:** §0.4's wording by mode, and addendum Q's eval sentence (#557 `485cef6e`, #559 `bf0df9d0`).
 
