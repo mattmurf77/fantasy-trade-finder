@@ -1,3 +1,18 @@
+## 2026-11-02 — #479 QA P3s: the no_real_network guard hardened; three daemon-running files opt in
+
+Gates: release-lead's independent QA of #479 @ `9b446c85` (GO-with-notes), P3-2 to P3-4. Tests and test docs only; no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is pytest.
+
+- **P3-2, the guard (`conftest.py`):**
+  - `_is_loopback` treats only `None`, `""`, `localhost`, `0.0.0.0` and loopback IP literals (`ipaddress`) as loopback, so a hostname like `127.evil.example` is blocked; bytes hosts are decoded first.
+  - It now also patches `gethostbyname`, `gethostbyname_ex`, `connect_ex` and UDP `sendto`.
+  - AF_UNIX paths pass through.
+  - New `test_no_real_network_guard.py` (10 tests): every blocked path raises and records; loopback names and IPs and AF_UNIX pass.
+- **P3-3:** `test_roster_refresh_state.py`, `test_trade_fingerprint_reads_unlocked.py` and `test_roster_fp_stamp.py` run the daemon inline, so they opt in.
+- **P3-4:** `backend/tests/CLAUDE.md` § Hermeticity documents the fixture.
+- **Sabotages:** the old `startswith("127.")` loopback check → red; `sendto` left unpatched → red; both restored.
+- **Runs:** the guard and the 7 opted-in files, 124 passed; the session-init / roster / fingerprint area (`-k`), 595 passed, 1 skipped.
+- **P3-1 not taken here:** the daemon's `upsert_league` re-creating a deleted row with platform NULL, which also leaves an account-deletion retention gap. It's pre-existing server behaviour, offered as its own follow-up.
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
