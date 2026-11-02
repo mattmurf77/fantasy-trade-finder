@@ -14,6 +14,7 @@ Gates: eval code (`backend/eval/{data,replay,persistence,calibration,flip_read,b
   - G-a5: the counts, the run, record and report lines, the previous read, and the CLI.
   - `test_eval_bdk_audit.py` +1: a short deck holding a redacted card is still explained.
   - Pins moved to version 7 and the new key: `test_eval_pack_reader.py`, `test_eval_refresh_and_live_columns.py`, `test_eval_withdrawals_and_paging.py`, `test_eval_flip_read.py`, `test_eval_calibration.py`.
+- **models-lead M2 (a) and M3 (2026-11-01):** `blind_grade` skips `partner_redacted` decks (counted in `skipped_decks_by_reason`; a new test in `test_blind_grade_served.py`, whose three other count pins gain the key), and the B-DK no-evidence count is labelled an upper bound (#543's P2; one pin). Two more sabotages, each red: `blind_grade` grades redacted decks; the label dropped.
 - **Sabotage, each red then restored (11):** the loader never marks; replay scores the deck (nulls as 0); the fit keeps redacted cards; `_fit_rows` keeps them; partial-run decks marked; calibration keeps the deck; B4 drops it; the flip report drops the reason; the gate at exactly 5%; the B-DK short-deck rule refuses it; ghosts don't mark.
 
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
