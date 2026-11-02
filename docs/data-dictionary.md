@@ -222,6 +222,7 @@ counterparty board disclosure or client analytics event is added.
 - [`referrals`](#referrals)
 - [`affiliate_clicks`](#affiliate_clicks)
 - [`shared_packages`](#shared_packages)
+- [`trade_share_tokens`](#trade_share_tokens)
 
 ---
 
@@ -1734,6 +1735,20 @@ One row per provider identity. Keyed on the provider's stable `sub` claim — **
 
 ---
 
+## `trade_share_tokens`
+
+**Build O8 (2026-10-20), minted under flag `growth.share_landing`.** The only way `/s/trade/<token>` and `/og/trade/<token>.png` reach a `trade_matches` row. Those routes used to take the sequential `trade_matches.id`, so walking the ids exposed every mutual match. `POST /api/share/trade` mints a row for a party to the match; the mint is idempotent per (match, sharer), so each party holds at most one live token per match (on Postgres a per-user advisory lock serialises mints; on SQLite a concurrent race can leave two, which is harmless). **Retention:** no TTL; a link lives until `revoked_at` is set, the match row is gone, or the sharer deletes their account (`accounts.delete_user_data` deletes rows by `created_by`). Created by `metadata.create_all` on fresh and existing databases, like `shared_packages`. **Privacy:** `match_id` and `created_by` never leave the server — not in a URL, a response or a rendered page; the token is a bearer secret. The app never logs a token; the host's request log records request paths, so `/s/trade/<token>` and `/og/trade/<token>.png` requests carry it there (`docs/runbook.md` § Trade share links).
+
+| Column | Type | Notes |
+|---|---|---|
+| `token` | str PK | `secrets.token_urlsafe(16)`: 22 URL-safe chars, 128 bits |
+| `match_id` | int, not null | `trade_matches.id` (no FK, like the other match-keyed tables). Indexed (`ix_trade_share_tokens_match`) |
+| `created_by` | str, not null | Sharer's session `user_id`. Part of `ix_trade_share_tokens_creator (created_by, created_at)`, the 30/hour mint-limit count |
+| `created_at` | str, not null | ISO UTC mint time |
+| `revoked_at` | str, nullable | ISO UTC; NULL = live. Set it to revoke a link (it then gets the generic expired page). Nothing in v1 writes it; see `docs/runbook.md` § Trade share links |
+
+---
+
 ## `notification_prefs`
 
 Per-user push notification preferences. Buckets (`trade_matches` / `weekly_digest` / `reengagement`) map kinds → user-facing toggle in `get_pref_bucket()` in the push dispatcher.
@@ -2167,15 +2182,15 @@ Five additive tables for the durable multi-trade plan ([BUILD-CONTRACT §4](plan
 
 ### `overhauls`
 
-One row per planning session. `overhaul_id` (`ovh_` + 12 hex) unique. Columns: `account_user_id` (= `sess.user_id`), `league_user_id` (= `_league_user_id(sess)`, the roster identity), `league_id`, `platform`, `scoring_format`, `status` (`setup|reviewing|assembled|executing|complete|archived`), `revision` (bumps on every settings PUT), `client_key` (create idempotency within account + league — **added beyond the contract's column list** because the contract requires create idempotency and nothing else could hold the key), `settings_json` (OverhaulSettings §5.1), `snapshot_json` (§5.2, refreshed on generate / prepare-send / refresh; also carries `my_roster_id` and `rosters` per user), `recovery_json` (RecoveryRequirement §5.3), `generation_json` (last run summary incl. `exhausted_subsets`), `selected_roadmap_id`, `created_at`, `updated_at`. Indexes `(account_user_id, league_id)`, `(league_id, status)`.
+One row per planning session. `overhaul_id` (`ovh_` + 12 hex) unique. Columns: `account_user_id` (= `sess.user_id`), `league_user_id` (= `_league_user_id(sess)`, the roster identity), `league_id`, `platform`, `scoring_format`, `status` (`setup|reviewing|assembled|executing|complete|archived`), `revision` (bumps on every settings PUT), `client_key` (create idempotency within account + league — **added beyond the contract's column list** because the contract requires create idempotency and nothing else could hold the key), `settings_json` (OverhaulSettings §5.1), `snapshot_json` (§5.2, refreshed on generate / prepare-send / refresh; also carries `my_roster_id` and `rosters` per user), `recovery_json` (RecoveryRequirement §5.3), `generation_json` (last run summary incl. `exhausted_subsets`), `selected_roadmap_id`, `created_at`, `updated_at`. Indexes `(account_user_id, league_id)`, `(league_id, status)`. **Account deletion** removes a user's own rows (and every child row). In other users' rows, a deleted user's Fleeced-minted id (`entry:*`, `acct_*`) keying `snapshot_json.rosters` or held in `recovery_json.holder_user_id` (with `holder_username`) becomes `deleted_user`; public platform ids stay. **Orphan sweep** (legal R28.22 d2; `accounts.delete_orphaned_overhauls`, run once per process from the cleanup loop; runbook § Orphaned-overhaul sweep): overhauls whose `account_user_id` is named by no `users` row, durable `sessions` row or `accounts` row (as the `acct_` alias or the bound Sleeper id), or whose owner's `users` row was created more than an hour after the overhaul (a new account under a reused id; not when a durable session or `accounts` row for that owner is no newer than the overhaul), are deleted with every child row, and so are child rows whose overhaul is gone; the log carries counts only.
 
 ### `overhaul_offers`
 
-One generated exchange with one counterparty. `offer_id` (`ovh_` + 12 hex) unique; `overhaul_id`; `revision` it was generated under; `package_hash` = sha1 of `platform|league|seller|counterparty|sorted give|sorted receive`; `counterparty_user_id`, `counterparty_username`; `give_ids_json`, `receive_ids_json` (mixed player + FTF pick ids); `card_json` (the public `trade_card_to_dict` payload plus `offer_id`); **`evidence_json` — PRIVATE**: `OwnerDecisionContext.as_dict()` and never returned to any client; `is_recovery` (1 when the receive side targets the user's own next-season first); `decision` (`like|pass|undecided`), `decided_at`, `decision_client_key` (decisions idempotency — **added beyond the contract's column list** for the same reason as `client_key`); `availability` (`fresh|stale`); `created_at`. **Unique `(overhaul_id, package_hash)`** — regeneration cannot resurrect a passed exact offer.
+One generated exchange with one counterparty. `offer_id` (`ovh_` + 12 hex) unique; `overhaul_id`; `revision` it was generated under; `package_hash` = sha1 of `platform|league|seller|counterparty|sorted give|sorted receive`; `counterparty_user_id`, `counterparty_username`; `give_ids_json`, `receive_ids_json` (mixed player + FTF pick ids); `card_json` (the public `trade_card_to_dict` payload plus `offer_id`); **`evidence_json` — PRIVATE**: `OwnerDecisionContext.as_dict()` and never returned to any client; `is_recovery` (1 when the receive side targets the user's own next-season first); `decision` (`like|pass|undecided`), `decided_at`, `decision_client_key` (decisions idempotency — **added beyond the contract's column list** for the same reason as `client_key`); `availability` (`fresh|stale`); `created_at`. **Unique `(overhaul_id, package_hash)`** — regeneration cannot resurrect a passed exact offer. **Account deletion** (`accounts._delete_user_data`): an offer in another user's overhaul that names the deleted user (any id in their scope) keeps its package and decision; `counterparty_user_id` / `counterparty_username` and the card's `target_user_id` / `target_username` become `deleted_user`, the card loses the counterparty's Fleeced-derived fields, `mismatch_score` / `composite_score` become null, `evidence_json` becomes NULL, a liked or undecided offer's `availability` becomes `stale`, and an undecided offer's `package_hash` becomes `redacted_` + 32 hex (a liked or passed one keeps its hash). The deleted user's own overhauls go with all five tables' rows. The export omits `evidence_json`.
 
 ### `overhaul_roadmaps`
 
-Immutable rows; a priorities write inserts a new `version` and flips the previous row's `is_current` to 0. `roadmap_id` (`rm_` + 12 hex), `overhaul_id`, `version`, `revision`, `packages_json` (Package[] §5.5 — `status` stored as `open`, recomputed at read time from attempts), `compat_json` (ValidationReceipt §5.6), `summary_json` (`outgoing_ids, incoming_ids, counterparties, unused_eligible_ids, score, diversity_key` + `rank`, `recovery_resolved`), `is_current`, `created_at`. Unique `(roadmap_id, version)`.
+Immutable rows; a priorities write inserts a new `version` and flips the previous row's `is_current` to 0. `roadmap_id` (`rm_` + 12 hex), `overhaul_id`, `version`, `revision`, `packages_json` (Package[] §5.5 — `status` stored as `open`, recomputed at read time from attempts), `compat_json` (ValidationReceipt §5.6), `summary_json` (`outgoing_ids, incoming_ids, counterparties, unused_eligible_ids, score, diversity_key` + `rank`, `recovery_resolved`), `is_current`, `created_at`. Unique `(roadmap_id, version)`. **Account deletion:** in another user's roadmap, `summary_json.counterparties` entries naming the deleted user become `deleted_user`, and a `compat_json` `counterparty_asset_not_owned` item on a scrubbed offer gets `ownership_copy`'s unnamed message (it named the team).
 
 ### `overhaul_attempts`
 

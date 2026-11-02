@@ -248,6 +248,17 @@ function arrow(sf, name) {
   return fn;
 }
 
+// An await that never settles, or an early return, would let the event loop
+// drain and node exit 0 mid-run: an unfinished run fails instead
+// (the check-device-first-page pattern; mobile/tests/README.md § Writing one).
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-send-registry did not finish (a check hung or returned early): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 (async () => {
   // ════ R1. The key ═══════════════════════════════════════════════════════
   await check('R1a. key: order-insensitive on both sides; platform, league and counterparty scoped; picks count; no collisions', () => {
@@ -712,6 +723,7 @@ function arrow(sf, name) {
     }
   });
 
+  finished = true;
   console.log(failures === 0
     ? `\nAll send-registry checks passed (${passed}).`
     : `\n${failures} check(s) failed, ${passed} passed.`);

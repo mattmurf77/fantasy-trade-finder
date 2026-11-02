@@ -30,6 +30,7 @@ import pytest
 from sqlalchemy import create_engine, select, text
 
 import backend.database as db_module
+import backend.feature_flags as ff
 import backend.server as server
 from backend.database import deck_impressions_table, metadata
 from backend.ranking_service import Player, RankingService
@@ -205,7 +206,17 @@ def _run_one_job_synchronously():
     )
 
 
-def test_control_a_normal_job_does_write_impressions(live):
+@pytest.fixture()
+def flags_off(monkeypatch):
+    """The job writes impressions only with packed evidence off: with it on
+    they wait for delivery (#370), so these tests pin both flags off rather
+    than read features.json. The supersede fence still matters there, on a
+    flags-off rollback (#555 QA P3-2)."""
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": False,
+                                             "trade.packed_evidence": False})
+
+
+def test_control_a_normal_job_does_write_impressions(live, flags_off):
     """The control. Without it, the assertion below could pass because the
     harness never writes impressions at all."""
     _, engine = live
@@ -214,7 +225,7 @@ def test_control_a_normal_job_does_write_impressions(live):
     assert _impression_count(engine) > 0
 
 
-def test_a_superseded_job_writes_no_impressions(live):
+def test_a_superseded_job_writes_no_impressions(live, flags_off):
     """THE regression guard. The worker keeps running — nothing can stop it —
     but a deck nobody will ever see must leave no trace in the corpus.
 

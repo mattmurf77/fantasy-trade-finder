@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -25,6 +25,8 @@ import { Icon } from './chalkline';
 import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
 import { createStandingOffer, type StandingOffer } from '../api/trades';
+import { gateSignalFor, type GateSignal } from '../api/client';
+import { openPaywall, openVerify } from '../state/usePaywallGate';
 
 // #362 — the post-like standing-offer sheet.
 // Approved design: mockups/standing-offer-362/index.html §2 (honor its §6
@@ -110,6 +112,9 @@ export interface StandingOfferSheetProps {
   defaultSelection?: StandingOfferDefaultSelection;
   onPosted: (offer: StandingOffer) => void;
   onSkip: () => void;
+  /** #393 (release-lead QA P2-3): close with nothing recorded (no skip
+   *  event, no snooze, no toast). Used only when the gate stops a post. */
+  onClose: () => void;
 }
 
 export default function StandingOfferSheet({
@@ -127,8 +132,31 @@ export default function StandingOfferSheet({
   defaultSelection = STANDING_OFFER_DEFAULT_SELECTION,
   onPosted,
   onSkip,
+  onClose,
 }: StandingOfferSheetProps) {
   const [seasons, setSeasons] = useState<number[]>([]);
+  // #393 (release-lead QA P2-3) — a gate answer to the post. The paywall or
+  // VerifySheet can't present over this RN <Modal>, so the post goes
+  // `background` (the client opens nothing) and the sheet hides itself
+  // first; the gate opens only once the Modal is gone. The parent mounts the
+  // sheet only while its prompt is set, so clearing the prompt would UNMOUNT
+  // the Modal, and an unmounted Modal never calls onDismiss (RN 0.81
+  // Modal.js: onDismiss runs on iOS when `visible` goes false on a mounted
+  // Modal). Hence: visible → false here, onDismiss → onClose() → the open.
+  // A timer backs it up (Android has no onDismiss). No interrupt slot: like
+  // every locked-action paywall, this answers the user's own tap.
+  const [gateClosing, setGateClosing] = useState(false);
+  const pendingGateRef = useRef<GateSignal | null>(null);
+  function openGateAfterDismiss() {
+    const signal = pendingGateRef.current;
+    if (!signal) return;
+    pendingGateRef.current = null;
+    onClose();
+    if (signal.action === 'verify') void openVerify();
+    else if (signal.action === 'paywall') {
+      void openPaywall({ source: 'gate', gate: signal.gate ?? undefined, kind: 'send' });
+    }
+  }
   const [teams, setTeams] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -221,7 +249,7 @@ export default function StandingOfferSheet({
         seasons: [...seasons].sort((a, b) => a - b),
         team_user_ids: teams,
         ...(sourceTradeId ? { source_trade_id: sourceTradeId } : {}),
-      });
+      }, { background: true });
       track(
         'standing_offer_posted',
         {
@@ -235,6 +263,16 @@ export default function StandingOfferSheet({
       haptics.success();
       onPosted(res.offer);
     } catch (e: any) {
+      // #393: a gate answer (gate on only; null while monetize.paywall is
+      // off): no raw text. Hide the sheet; the gate opens after it's gone.
+      const signal = gateSignalFor(e, '/api/trades/standing-offer');
+      if (signal && signal.action !== 'verify_mismatch') {
+        setSubmitting(false);
+        pendingGateRef.current = signal;
+        setGateClosing(true);
+        setTimeout(openGateAfterDismiss, 1000);
+        return;
+      }
       // The create route validates round → season horizon → membership and
       // reports only the FIRST failure, so the server's message is the only
       // honest thing to show; do not synthesize a cause.
@@ -247,7 +285,13 @@ export default function StandingOfferSheet({
     teams.length === 1 ? 'Broadcast to 1 team' : `Broadcast to ${teams.length} teams`;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onSkip}>
+    <Modal
+      visible={visible && !gateClosing}
+      transparent
+      animationType="slide"
+      onRequestClose={onSkip}
+      onDismiss={openGateAfterDismiss}
+    >
       <Pressable
         style={styles.backdrop}
         onPress={onSkip}
