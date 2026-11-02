@@ -1389,6 +1389,33 @@ Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b2-flag
     - P3-3: the entry sheet should close when the chips flag is withdrawn.
     - Both are in `SignInScreen.tsx`, which #443 and #507 are changing, so they're logged for that stack.
 
+## 2026-10-28 — `sleeper_handoff_resolved` emitter (#351 grant G1–G7; stacked on #379)
+
+Gates: full (no express). Branch `feat/sleeper-handoff-resolved`, cut from #379's head `b362b4f8`. Scope: `docs/plans/external-links/scope.md` §1(a). Addendum: `docs/business/analytics/2026-10-28-sleeper-handoff-events.md`. The event is new and INTENT: registered in `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS` in the same commit as the emitter, with no `NON_INTENT_EVENTS` row. No route, schema or flag change. D-056: `FTF_SKIP_SIM_GATE=1` posture. The evidence is the guard, pytest, and the code walk in scope §1(a) and the addendum's G3 section.
+
+- **Mobile** (from `mobile/`):
+  - `npx tsc --noEmit`: exit 0.
+  - `tests/check-*.js`: 122/122 pass.
+  - New `check-sleeper-handoff-event.js` (`npm run test:sleeper-handoff-event`): 60 PASS, 0 FAIL. It executes the real helper with stubbed `Linking.openURL` (resolve / reject / deferred) and `track` (E1–E11).
+  - `check-sleeper-handoff.js`: 42 PASS. Its stub now accepts `../api/events`.
+  - `check-external-links.js`: 49 PASS. That is the same count as on `b362b4f8`; scope §3's "51" predates `ae375019`.
+  - `scripts/testid-lint.sh`: OK.
+- **Backend:**
+  - New `test_analytics_taxonomy_sleeper_handoff.py`: 7 passed (membership, namespace disjointness, exact prop row, no device `platform` / identity prop, INTENT and not WAT, `external_link_opened` unregistered, an ingest round trip with `has_drop` absent on trade / send_button rows).
+  - Targeted with `test_analytics_p0`, `test_analytics_taxonomy_384`, `test_analytics_taxonomy_home_hub`, `test_events_api` and `test_time_to_suggestion_events`: 104 passed. Full suite not run locally (machine loaded); CI runs it.
+- **Sabotage, each red then restored (md5-verified):**
+  - (a) `has_drop: null` on every trade row: 7 FAIL (E1 ×6, E8).
+  - (b) emit on `unspecified`: 4 FAIL (E5).
+  - (c1) emit after `await openPlatform` (after the D2 alert): 3 FAIL (E11 callback, E3 order, E4: the in-flight re-tap now emits twice).
+  - (c2) emit after an `await` inside the callback: 2 FAIL (E11, E3).
+  - (d) the name added to `NON_INTENT_EVENTS`: pytest red, 1 failed (`test_is_intent_and_not_wat`).
+  - `check-sleeper-handoff.js` and `check-external-links.js` stayed green under (a)–(c2), as expected: the event isn't theirs.
+- **Manual TestFlight check** (operator, with `analytics.client_events` on):
+  - Free agents → a Sleeper-league player → Add → **Open in Sleeper to claim**, with and without a drop picked. Needs league-eng's #509; until then nothing on this stack fires `free_agents`.
+  - Expect one `sleeper_handoff_resolved` row per tap: `surface=free_agents`, `target=add`, `rung=bare`, `outcome=app`, and `has_drop` true / false.
+  - Repeat with Sleeper offloaded: `outcome=not_installed`, and the alert still shows.
+  - A fast double tap: still one row.
+
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 
 Gates: QA follow-ups to #486 (stacked on it). No route, schema, event, flag or knob change. `DECK_PIPELINE_VERSION` 3 → 4:
