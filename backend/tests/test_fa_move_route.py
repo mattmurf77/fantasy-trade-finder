@@ -706,17 +706,35 @@ def test_in_flight_duplicate_is_move_in_progress(h):
     assert h.platform.calls == []
 
 
-def test_a_concurrent_duplicate_loses_the_sent_row_race(h, monkeypatch):
-    """Two requests with one attempt_id that both pass step 7: the unique
-    (attempt_id, phase) constraint lets one write; the other never sends."""
-    real = db_module.record_platform_write_move
-    attempt = str(uuid.uuid4())
+_REAL_CLAIM = db_module.claim_platform_write_move
 
-    def _racing(row):
-        if row["phase"] == "sent":
-            real({**row})                      # the twin request got there first
-        return real(row)
-    monkeypatch.setattr(db_module, "record_platform_write_move", _racing)
+
+def _claim_with(monkeypatch, *, before=None, inside=None, after=None):
+    """Wrap database.claim_platform_write_move: `before` runs before it,
+    `inside` after its block check has read and before its insert (a racer
+    that slipped in between: the SQLite case), `after` once it returned."""
+    def _claim(row, blocked, *, since):
+        if before:
+            before(row)
+
+        def _blocked(rows):
+            out = blocked(rows)
+            if inside:
+                inside(row)
+            return out
+        result = _REAL_CLAIM(row, _blocked, since=since)
+        if after:
+            after(row)
+        return result
+    monkeypatch.setattr(db_module, "claim_platform_write_move", _claim)
+
+
+def test_a_concurrent_duplicate_loses_the_sent_row_race(h_file, monkeypatch):
+    """Two requests with one attempt_id that both pass step 7: the unique
+    (user, attempt_id, phase) key lets one write; the other never sends."""
+    h = h_file
+    attempt = str(uuid.uuid4())
+    _claim_with(monkeypatch, inside=lambda row: db_module.record_platform_write_move(dict(row)))
     r = h.post(attempt_id=attempt)
     assert r.status_code == 409 and _err(r)["error"] == "move_in_progress"
     assert h.platform.calls == []
@@ -954,36 +972,44 @@ def _rival_sent_row(h, attempt="rival-attempt-01"):
             "drop_player_ids": "[]", "sent_at": h.now.isoformat()}
 
 
-def test_double_move_race_loses_to_an_earlier_insert(h, monkeypatch):
-    """P2-1: two taps with DIFFERENT attempt_ids for one player both pass the
-    step-7b check; the later insert re-reads, finds the earlier unresolved
-    `sent` row, records its own 409 and never calls the platform."""
-    real = db_module.record_platform_write_move
-
-    def _racing(row):
-        if row["phase"] == "sent" and row["attempt_id"] != "rival-attempt-01":
-            real(_rival_sent_row(h))           # the other tap inserted first
-        return real(row)
-    monkeypatch.setattr(db_module, "record_platform_write_move", _racing)
+def test_double_move_race_loses_to_an_earlier_commit(h_file, monkeypatch):
+    """P2-1 (round 6): another tap's `sent` row committed after this one's
+    step 7b but before its claim: the claim's block check (one transaction,
+    under the Postgres lock) refuses, and nothing of this attempt is written."""
+    h = h_file
+    _claim_with(monkeypatch, before=lambda row: db_module.record_platform_write_move(
+        _rival_sent_row(h)))
     attempt = "loser-attempt-01"
+    r = h.post(attempt_id=attempt)
+    assert r.status_code == 409 and _err(r)["error"] == "move_in_progress"
+    assert h.platform.calls == [] and h.moves(attempt) == []
+    monkeypatch.setattr(db_module, "claim_platform_write_move", _REAL_CLAIM)
+    assert h.post(attempt_id=attempt).get_json() == r.get_json()     # still blocked, no call
+    assert h.platform.calls == []
+
+
+def test_sqlite_race_between_check_and_insert_is_settled_by_the_reread(h_file, monkeypatch):
+    """The SQLite (local dev) path: no advisory lock, so a rival can insert
+    between the claim's check and its insert. The post-insert re-read finds
+    the earlier (lower id) unresolved row; this one records its own 409."""
+    h = h_file
+    _claim_with(monkeypatch, inside=lambda row: db_module.record_platform_write_move(
+        _rival_sent_row(h)))
+    attempt = "loser-attempt-02"
     r = h.post(attempt_id=attempt)
     assert r.status_code == 409 and _err(r)["error"] == "move_in_progress"
     assert h.platform.calls == []
     (mine,) = [m for m in h.moves(attempt) if m["phase"] == "result"]
     assert mine["result"] == "error" and mine["error_code"] == "move_in_progress"
+    monkeypatch.setattr(db_module, "claim_platform_write_move", _REAL_CLAIM)
     assert h.post(attempt_id=attempt).get_json() == r.get_json()     # replayed, still no call
     assert h.platform.calls == []
 
 
-def test_a_later_insert_does_not_block_the_earlier_one(h, monkeypatch):
-    real = db_module.record_platform_write_move
-
-    def _racing(row):
-        out = real(row)
-        if row["phase"] == "sent" and row["attempt_id"] != "rival-attempt-01":
-            real(_rival_sent_row(h))           # the other tap inserted just after
-        return out
-    monkeypatch.setattr(db_module, "record_platform_write_move", _racing)
+def test_a_later_insert_does_not_block_the_earlier_one(h_file, monkeypatch):
+    h = h_file
+    _claim_with(monkeypatch, after=lambda row: db_module.record_platform_write_move(
+        _rival_sent_row(h)))
     assert h.post().status_code == 200
     assert len(h.platform.calls) == 1
 
@@ -1168,3 +1194,77 @@ def test_a_first_link_withdraws_nothing(h, monkeypatch):
     assert _link(h, monkeypatch, STORED).status_code == 200
     assert h.consents() == [] and h.events_named("fa_move_consent_withdrawn") == []
 
+
+
+# ---------------------------------------------------------------------------
+# Round 6 (release-lead's QA of #578 @ 52a69234)
+# ---------------------------------------------------------------------------
+
+def test_the_adapter_refuses_while_uncaptured_even_with_a_working_builder(monkeypatch):
+    """P3-1: `fa_move`'s own capture check, pinned alone: a builder and reader
+    that WOULD succeed still never get a request out while uncaptured."""
+    monkeypatch.setattr(sleeper_write, "build_fa_move_body", _fake_build)
+    monkeypatch.setattr(sleeper_write, "read_fa_move_result", _fake_read)
+    for shapes, claim_shape, kind in ((False, False, "add"), (False, True, "claim"),
+                                      (True, False, "claim")):
+        monkeypatch.setattr(sleeper_write, "FA_MOVE_SHAPES_CAPTURED", shapes)
+        monkeypatch.setattr(sleeper_write, "FA_CLAIM_SHAPE_CAPTURED", claim_shape)
+        platform = Platform()
+        req = sleeper_write.FaMoveRequest(LEAGUE, 3, ADD, DROP, kind, 5 if kind == "claim" else None)
+        with pytest.raises(sleeper_write.SleeperWriteError) as ei:
+            sleeper_write.fa_move("tok", req, _opener=platform.opener)
+        assert ei.value.kind == "config" and platform.calls == [], (shapes, claim_shape, kind)
+
+
+@pytest.mark.parametrize("message,auth", [
+    ("Only the author of this league can add players.", False),
+    ("The commissioner has locked rosters; authority is limited.", False),
+    ("Your token is invalid.", True), ("Unauthorized", True), ("Please log in again.", True),
+    ("Forbidden", True), ("auth required", True),
+])
+def test_the_auth_word_scan_matches_whole_words(h, message, auth):
+    """P3-2: "author" or "authority" in a refusal is a refusal, not a token
+    rejection (which would delete the credential and withdraw consent)."""
+    Platform.BEHAVIOURS["custom"] = lambda: _Resp(json.dumps(
+        {"errors": [{"message": message}]}).encode())
+    try:
+        h.platform.mode = "custom"
+        body = h.post().get_json()
+    finally:
+        Platform.BEHAVIOURS.pop("custom")
+    assert body["error"] == ("sleeper_rejected" if auth else "sleeper_write_failed")
+    assert (db_module.get_sleeper_credential(USER) is None) is auth
+
+
+def test_a_faab_claim_with_no_bid_is_bad_request(h, monkeypatch):
+    """P3-4, scope §B11 rule 5: never defaulted to 0; 0 itself is a real bid;
+    a priority-waiver claim needs none."""
+    _claims_on(monkeypatch)
+    h.platform.mode = "pending"
+    for bid in (_ABSENT, None):
+        r = h.post(move_kind="claim", faab_bid=bid)
+        assert r.status_code == 400 and _err(r)["error"] == "bad_request"
+    assert h.platform.calls == []
+    r = h.post(move_kind="claim", faab_bid=0)
+    assert r.status_code == 200
+    assert json.loads(h.platform.calls[0][0].data)["variables"]["bid"] == 0
+
+
+def _relink_failing(monkeypatch, target):
+    def _boom(*a, **k):
+        raise RuntimeError("db write failed")
+    monkeypatch.setattr(db_module, target, _boom)
+
+
+@pytest.mark.parametrize("failing", ["_upsert_sleeper_credential", "withdraw_platform_write_grants"])
+def test_relink_withdrawal_and_swap_are_one_transaction(h, monkeypatch, failing):
+    """P3-3, legal R28.26 2f: the withdrawal and the credential swap land
+    together or not at all."""
+    _store_and_consent(h)
+    before = db_module.get_sleeper_credential(USER)
+    _relink_failing(monkeypatch, failing)
+    r = _link(h, monkeypatch, _jwt(exp_offset=9000))
+    assert r.status_code == 500
+    assert [c for c in h.consents() if c["kind"] == "withdrawal"] == []
+    assert db_module.get_sleeper_credential(USER) == before   # the old credential, untouched
+    assert h.events_named("fa_move_consent_withdrawn") == []

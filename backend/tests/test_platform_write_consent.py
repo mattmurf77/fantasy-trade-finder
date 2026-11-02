@@ -387,6 +387,16 @@ def test_no_session_is_401(h):
         assert method("/api/platform-write-consent?platform=sleeper").status_code == 401
 
 
+def test_the_consent_routes_403_has_its_own_line(h):
+    """Round 6 P3-6: nothing is ever sent from these routes, so the 403 never
+    says "Nothing was sent"."""
+    h.sess["verified"] = False
+    for r in (_get(h), _delete(h)):
+        msg = _err(r)["message"]
+        assert msg == "Verify your Sleeper sign-in to see or change roster moves."
+        assert "nothing was sent" not in msg.lower()
+
+
 def test_the_consent_route_checks_both_denials():
     """Structural twin (sabotage: drop either denial)."""
     src = inspect.getsource(server.platform_write_consent_route)

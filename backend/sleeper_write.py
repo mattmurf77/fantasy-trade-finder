@@ -454,6 +454,11 @@ FA_CLAIM_SHAPE_CAPTURED = False   # waiver claim (capture Q3); claims also need 
 # pinned by test_fa_move_route.py).
 FA_MOVE_WRITE_TIMEOUTS_S: tuple[int, ...] = (_HTTP_TIMEOUT,)
 
+# Auth words in a GraphQL error dump, matched as whole words.
+_FA_AUTH_WORDS = re.compile(
+    r"\b(?:auth|unauth|unauthori[sz]ed|unauthenticated|authenticat(?:e|ed|ion)|"
+    r"authori[sz]ation|token|tokens|forbidden|login|log\s+in|jwt)\b", re.IGNORECASE)
+
 
 @dataclass
 class FaMoveRequest:
@@ -559,8 +564,14 @@ def _post_graphql_write(op: str, token: str, body: dict, *, timeout: int, _opene
             first = errors[0] if isinstance(errors, list) and errors else None
             msg = first.get("message") if isinstance(first, dict) else None
             detail = str(msg).strip()[:500] if msg else dump
-            if any(w in dump.lower() for w in ("auth", "unauth", "token", "forbidden", "login")):
+            # Whole words only: "author" or "tokens of value" in a refusal is not
+            # an auth failure (the trade path's substring scan, above, predates this).
+            if _FA_AUTH_WORDS.search(dump):
                 raise SleeperAuthError("Sleeper auth error", detail=detail)
+            # TODO(capture): GraphQL `errors[]` on a 200 that ALSO carries a
+            # non-null `data[op]` may mean the move partly or wholly happened;
+            # it must read as OUTCOME_UNKNOWN, never as refused (G13 / G17).
+            # The capture shows whether Sleeper ever answers that way.
             # THE CAPTURE maps Sleeper's error strings here (roster full, player
             # taken, locked, ...). Any code produced AFTER the call is a platform
             # refusal and takes platform-refusal wording ("nothing changed"),

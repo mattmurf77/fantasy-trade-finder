@@ -24,13 +24,23 @@ from backend.tests.test_fa_move_route import (  # noqa: F401  (h is a fixture)
     _jwt, _rosters, _seed_move, add_league, h,
 )
 
-CONTRACT_COPY_KEYS = {
-    "header_add", "header_claim", "cta_add", "cta_add_drop", "cta_claim", "cta_claim_drop",
-    "cta_claim_no_bid", "cta_claim_drop_no_bid", "league_line", "finality", "waiver_line",
-    "waiver_line_no_drop", "bid_line", "window_line", "turn_off", "do_in_platform",
-    "open_platform", "handoff_footer", "connect_line", "verify_line", "other_account_line",
-    "not_sent_line", "unknown_title", "unknown_body", "unavailable_line", "still_sending",
-}
+def _contract_copy_keys() -> set[str]:
+    """The `move.copy` keys from contract.md §7's table, parsed, so this list
+    can't drift from the contract again (round 6: it missed offline_line)."""
+    import pathlib, re
+    text = (pathlib.Path(__file__).resolve().parents[2]
+            / "docs/plans/sleeper-fa-write/contract.md").read_text(encoding="utf-8")
+    table = text.split("`move.copy` keys:", 1)[1].split("Result and refusal text", 1)[0]
+    keys = set()
+    for line in table.splitlines():
+        cells = line.split("|")
+        if len(cells) > 2 and "`" in cells[1]:
+            keys |= set(re.findall(r"`([a-z_]+)`", cells[1]))
+    return keys
+
+
+CONTRACT_COPY_KEYS = _contract_copy_keys()
+SERVED_KEYS = CONTRACT_COPY_KEYS - copy.UNSERVED_KEYS
 
 
 def cap(h, league_id=LEAGUE, live=None):
@@ -180,9 +190,21 @@ def test_consent_until_null_after_lapse_bump_or_other_account(h, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_copy_keys_are_the_contracts():
+    assert len(CONTRACT_COPY_KEYS) >= 28 and {"offline_line", "bid_needed_line"} <= CONTRACT_COPY_KEYS
     assert copy.MOVE_COPY_KEYS == CONTRACT_COPY_KEYS
-    assert set(copy._SLEEPER_SLOTS_FINAL) | set(copy._SLEEPER_SLOTS_DRAFT) == CONTRACT_COPY_KEYS
+    # Every key has server words, except the ones deliberately left out.
+    assert set(copy._SLEEPER_SLOTS_FINAL) | set(copy._SLEEPER_SLOTS_DRAFT) == SERVED_KEYS
     assert not set(copy._SLEEPER_SLOTS_FINAL) & set(copy._SLEEPER_SLOTS_DRAFT)
+    assert not copy.UNSERVED_KEYS & (set(copy._SLEEPER_SLOTS_FINAL) | set(copy._SLEEPER_SLOTS_DRAFT))
+
+
+@pytest.mark.parametrize("flag_on", [True, False])
+def test_unserved_keys_never_reach_the_payload(h, flag_on):
+    """Round 6: offline_line and bid_needed_line are left out in every mode
+    (the client's fallback shows) until their final words exist."""
+    if not flag_on:
+        h.flags.discard("sleeper.send_add_drop")
+    assert not set(cap(h)[0]["copy"]) & copy.UNSERVED_KEYS
 
 
 def test_handoff_serves_no_draft_copy(h):
@@ -193,7 +215,7 @@ def test_handoff_serves_no_draft_copy(h):
 
 
 def test_submit_serves_every_slot(h):
-    assert set(cap(h)[0]["copy"]) == CONTRACT_COPY_KEYS
+    assert set(cap(h)[0]["copy"]) == SERVED_KEYS
 
 
 def test_approved_slots_verbatim():
@@ -302,7 +324,7 @@ def test_marketing_final_part_b_verbatim():
 
 def test_handoff_now_serves_every_final_slot(h):
     h.flags.discard("sleeper.send_add_drop")
-    assert set(cap(h)[0]["copy"]) == CONTRACT_COPY_KEYS
+    assert set(cap(h)[0]["copy"]) == SERVED_KEYS
 
 
 def test_no_we_our_or_try_again_where_the_outcome_is_unknown_or_in_progress():

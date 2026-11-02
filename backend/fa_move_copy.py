@@ -305,14 +305,21 @@ _SLEEPER_SLOTS_FINAL = {
 # `submit` mode. Empty since addendum 17 §B made every slot final.
 _SLEEPER_SLOTS_DRAFT: dict[str, str] = {}
 
-# Keys the client knows (contract §7); a test pins both dicts against it.
+# Keys the client knows (contract §7). A test derives the contract's list
+# from contract.md and pins this set to it.
 MOVE_COPY_KEYS = frozenset({
     "header_add", "header_claim", "cta_add", "cta_add_drop", "cta_claim", "cta_claim_drop",
     "cta_claim_no_bid", "cta_claim_drop_no_bid", "league_line", "finality", "waiver_line",
-    "waiver_line_no_drop", "bid_line", "window_line", "turn_off", "do_in_platform",
-    "open_platform", "handoff_footer", "connect_line", "verify_line", "other_account_line",
-    "not_sent_line", "unknown_title", "unknown_body", "unavailable_line", "still_sending",
+    "waiver_line_no_drop", "bid_line", "bid_needed_line", "window_line", "turn_off",
+    "do_in_platform", "open_platform", "handoff_footer", "connect_line", "verify_line",
+    "other_account_line", "not_sent_line", "unknown_title", "unknown_body", "unavailable_line",
+    "still_sending", "offline_line",
 })
+# Contract keys the server deliberately leaves OUT of the payload: their final
+# words aren't written yet (G25 `bid_needed_line`; `offline_line`), and the
+# client has a fallback for each. Omitted rather than served as drafts, so no
+# unapproved words reach a user in any mode.
+UNSERVED_KEYS = frozenset({"bid_needed_line", "offline_line"})
 
 
 # MFL / ESPN slots: DRAFT (legal R28.27 item 3), written per platform. Never
@@ -377,6 +384,9 @@ _MESSAGES = {
     "bad_request": "Nothing was sent. Close this and start the move again.",
     "verification_required": ("Nothing was sent. Verify your {platform} sign-in to make moves "
                               "from here."),
+    # The consent routes' 403 (head-eng): nothing is ever sent from them, so no
+    # "Nothing was sent". DRAFT wording; the client shows its own line anyway.
+    "consent_verification_required": "Verify your {platform} sign-in to see or change roster moves.",
     "not_linked": "Connect your {platform} sign-in to make moves from here.",   # G2 (Sleeper: approved)
     "not_linked_other_account": ("The {platform} account you connected isn't in {league}. "
                                  "Connect the one that owns your team. Nothing was sent."),

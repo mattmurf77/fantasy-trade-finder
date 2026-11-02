@@ -14939,6 +14939,28 @@ def upsert_sleeper_credential(user_id: str, sleeper_user_id: str | None,
     """Insert or replace the Sleeper link for a user (one row per user_id)."""
     if not user_id or not token_encrypted:
         raise ValueError("user_id and token_encrypted are required")
+    with engine.begin() as conn:
+        _upsert_sleeper_credential(conn, user_id, sleeper_user_id, token_encrypted, expires_at)
+
+
+def relink_sleeper_credential(user_id: str, sleeper_user_id: str | None,
+                              token_encrypted: str, expires_at: str | None, *,
+                              withdraw: bool, now: datetime) -> int:
+    """D1 (legal R28.26 2f): store a (re-)linked Sleeper credential and, when
+    `withdraw`, end every open Sleeper roster-move grant as `relink`, in ONE
+    transaction: either both land or neither does. Returns the number of
+    withdrawal rows appended."""
+    if not user_id or not token_encrypted:
+        raise ValueError("user_id and token_encrypted are required")
+    with engine.begin() as conn:
+        withdrawn = (withdraw_platform_write_grants(user_id, "sleeper", "relink", now, conn=conn)
+                     if withdraw else 0)
+        _upsert_sleeper_credential(conn, user_id, sleeper_user_id, token_encrypted, expires_at)
+    return withdrawn
+
+
+def _upsert_sleeper_credential(conn, user_id: str, sleeper_user_id: str | None,
+                               token_encrypted: str, expires_at: str | None) -> None:
     now = _now()
     payload = {
         "user_id":         user_id,
@@ -14948,31 +14970,30 @@ def upsert_sleeper_credential(user_id: str, sleeper_user_id: str | None,
         "created_at":      now,
         "updated_at":      now,
     }
-    with engine.begin() as conn:
-        # keep created_at stable across re-links
-        existing = conn.execute(
-            select(sleeper_credentials_table.c.created_at)
-            .where(sleeper_credentials_table.c.user_id == user_id)
-        ).fetchone()
-        if existing and existing[0]:
-            payload["created_at"] = existing[0]
-        if DATABASE_URL.startswith("sqlite"):
-            conn.execute(text(
-                "INSERT OR REPLACE INTO sleeper_credentials "
-                "(user_id, sleeper_user_id, token_encrypted, expires_at, created_at, updated_at) "
-                "VALUES (:user_id, :sleeper_user_id, :token_encrypted, :expires_at, :created_at, :updated_at)"
-            ), payload)
-        else:
-            conn.execute(text(
-                "INSERT INTO sleeper_credentials "
-                "(user_id, sleeper_user_id, token_encrypted, expires_at, created_at, updated_at) "
-                "VALUES (:user_id, :sleeper_user_id, :token_encrypted, :expires_at, :created_at, :updated_at) "
-                "ON CONFLICT (user_id) DO UPDATE SET "
-                "sleeper_user_id = EXCLUDED.sleeper_user_id, "
-                "token_encrypted = EXCLUDED.token_encrypted, "
-                "expires_at = EXCLUDED.expires_at, "
-                "updated_at = EXCLUDED.updated_at"
-            ), payload)
+    # keep created_at stable across re-links
+    existing = conn.execute(
+        select(sleeper_credentials_table.c.created_at)
+        .where(sleeper_credentials_table.c.user_id == user_id)
+    ).fetchone()
+    if existing and existing[0]:
+        payload["created_at"] = existing[0]
+    if DATABASE_URL.startswith("sqlite"):
+        conn.execute(text(
+            "INSERT OR REPLACE INTO sleeper_credentials "
+            "(user_id, sleeper_user_id, token_encrypted, expires_at, created_at, updated_at) "
+            "VALUES (:user_id, :sleeper_user_id, :token_encrypted, :expires_at, :created_at, :updated_at)"
+        ), payload)
+    else:
+        conn.execute(text(
+            "INSERT INTO sleeper_credentials "
+            "(user_id, sleeper_user_id, token_encrypted, expires_at, created_at, updated_at) "
+            "VALUES (:user_id, :sleeper_user_id, :token_encrypted, :expires_at, :created_at, :updated_at) "
+            "ON CONFLICT (user_id) DO UPDATE SET "
+            "sleeper_user_id = EXCLUDED.sleeper_user_id, "
+            "token_encrypted = EXCLUDED.token_encrypted, "
+            "expires_at = EXCLUDED.expires_at, "
+            "updated_at = EXCLUDED.updated_at"
+        ), payload)
 
 
 def get_sleeper_credential(user_id: str) -> dict | None:
@@ -15180,16 +15201,60 @@ def platform_write_move_rows(user_id: str, attempt_id: str) -> list[dict]:
             select(t).where(t.c.user_id == str(user_id), t.c.attempt_id == str(attempt_id)))]
 
 
-def recent_platform_write_moves(user_id: str, league_id: str, since: datetime) -> list[dict]:
+def recent_platform_write_moves(user_id: str, league_id: str, since: datetime, *,
+                                conn=None) -> list[dict]:
     """Every move row of (user, league) whose attempt was sent at or after
-    `since`, both phases, for the double-move block (scope §B6)."""
+    `since`, both phases, for the double-move block (scope §B6). `conn`: read
+    inside the caller's transaction (the locked claim)."""
     t = platform_write_moves_table
-    with engine.connect() as conn:
-        rows = [dict(r._mapping) for r in conn.execute(
-            select(t).where(t.c.user_id == str(user_id), t.c.league_id == str(league_id)))]
+    stmt = select(t).where(t.c.user_id == str(user_id), t.c.league_id == str(league_id))
+    if conn is not None:
+        rows = [dict(r._mapping) for r in conn.execute(stmt)]
+    else:
+        with engine.connect() as c:
+            rows = [dict(r._mapping) for r in c.execute(stmt)]
     recent = {r["attempt_id"] for r in rows
               if r["phase"] == "sent" and (_parse_utc(r.get("sent_at")) or since) >= since}
     return [r for r in rows if r["attempt_id"] in recent]
+
+
+# Advisory-lock class for the D1 move claim (Postgres two-int form: this
+# constant + hashtext(user|league|add player)); its own key space, next to
+# the trade-share mint's 8008.
+_FA_MOVE_LOCK_CLASS = 8009
+
+
+def claim_platform_write_move(row: dict, blocked, *, since: datetime) -> tuple[int | None, str | None]:
+    """Check the double-move block and insert a move's `sent` row in ONE
+    transaction. On Postgres a transaction-level advisory lock keyed on
+    (user, league, add player) serialises racing taps for that player: the
+    later one waits until the earlier commits, then sees its row. SQLite
+    (local dev only) gets the plain transaction, as the trade-share mint does;
+    the caller's post-insert re-read covers it there.
+
+    `blocked(rows)` decides from that (user, league)'s move rows sent at or
+    after `since` (both phases) and returns a reason or None. Returns
+    (row id, None) when inserted, (None, reason) when blocked (nothing
+    written), (None, None) when this (user, attempt_id) already has a `sent`
+    row."""
+    from sqlalchemy.exc import IntegrityError
+    values = dict(row)
+    values.setdefault("recorded_at", _now())
+    add = (json.loads(values.get("add_player_ids") or "[]") or [""])[0]
+    key = f"{values['user_id']}|{values['league_id']}|{add}"
+    try:
+        with engine.begin() as conn:
+            if conn.dialect.name == "postgresql":
+                conn.execute(text(f"SELECT pg_advisory_xact_lock({_FA_MOVE_LOCK_CLASS}, "
+                                  "hashtext(:key))"), {"key": key})
+            reason = blocked(recent_platform_write_moves(
+                values["user_id"], values["league_id"], since, conn=conn))
+            if reason:
+                return None, reason
+            res = conn.execute(insert(platform_write_moves_table).values(**values))
+            return int(res.inserted_primary_key[0]), None
+    except IntegrityError:
+        return None, None
 
 
 def record_platform_write_move(row: dict) -> int | None:

@@ -24811,16 +24811,15 @@ def sleeper_link():
     try:
         ciphertext = _sleeper_write.encrypt_token(token)
         # D1, R15.2.5 / legal R28.26 2f: re-consent after a re-link, recorded as
-        # `relink`. Only when the stored credential actually CHANGES (another
+        # `relink`, in the SAME transaction as the credential swap (both land or
+        # neither). Only when the stored credential actually CHANGES (another
         # token, or another Sleeper user): the client silently re-posts the
         # STORED token at session start (maybeReplaySleeperVerification, #126),
-        # and that replay must never end a grant. Withdraw BEFORE the upsert:
-        # if the withdrawal fails nothing is stored; if the store fails, the
-        # user just re-consents. Neither token is ever logged.
-        if _sleeper_credential_changes(user_id, token, sleeper_user_id):
-            withdrawn = _fa_db.withdraw_platform_write_grants(
-                user_id, "sleeper", "relink", _fa_move_now())
-        upsert_sleeper_credential(user_id, sleeper_user_id, ciphertext, expires_at)
+        # and that replay must never end a grant. Neither token is ever logged.
+        withdrawn = _fa_db.relink_sleeper_credential(
+            user_id, sleeper_user_id, ciphertext, expires_at,
+            withdraw=_sleeper_credential_changes(user_id, token, sleeper_user_id),
+            now=_fa_move_now())
     except _sleeper_write.SleeperWriteError:
         return jsonify({"error": "sleeper_unconfigured"}), 503
     except Exception:
@@ -36754,6 +36753,14 @@ def _fa_move_blocks(user_id: str, league_id: str, now: datetime, *,
     pre-write reads may predate it. A failed move never blocks."""
     rows = _fa_db.recent_platform_write_moves(user_id, league_id,
                                               now - _FA_MOVE_PENDING_CLAIM_BLOCK)
+    return _fa_move_block_reasons(rows, now, before_id=before_id, checked_at=checked_at)
+
+
+def _fa_move_block_reasons(rows: list[dict], now: datetime, *, before_id: int | None = None,
+                           checked_at: datetime | None = None) -> dict[str, str]:
+    """`_fa_move_blocks`' rule over move rows already read (both phases of
+    each attempt). Pure, so the locked claim in step 12 can apply it to rows
+    read inside its own transaction."""
     by_attempt: dict[str, dict] = {}
     for r in rows:
         by_attempt.setdefault(r["attempt_id"], {})[r["phase"]] = r
@@ -36867,8 +36874,8 @@ def platform_write_consent_route():
     denial = (_verified_write_denial(sess) if request.method == "DELETE"
               else _verified_read_denial(sess))
     if denial is not None:
-        body, status = _fa_move_error("verification_required", 403,
-                                      _fa_copy.message("verification_required"))
+        body, status = _fa_move_error("verification_required", 403, _fa_copy.message(
+            "consent_verification_required", request.args.get("platform") or "sleeper"))
         return jsonify(body), status
     platform = request.args.get("platform") or ""
     if platform not in _FA_MOVE_PLATFORMS:
@@ -37189,8 +37196,11 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
             return _fa_move_error(f"{platform}_write_failed", 502,
                                   _fa_copy.message("write_failed_roster_read", platform),
                                   kind="roster_read")
-        if waivers.get("type") == "faab" and bid is not None and (
-                bid > budget or bid > remaining):
+        if waivers.get("type") == "faab" and bid is None:
+            # Scope §B11 rule 5: never default an empty bid to 0 (0 is a real,
+            # typed choice). The client returns to Ready with bid_needed_line.
+            return _fa_move_error("bad_request", 400, _fa_copy.message("bad_request", platform))
+        if waivers.get("type") == "faab" and (bid > budget or bid > remaining):
             left = max(int(remaining), 0)
             return _fa_move_error("waiver_bid_over_budget", 422, _fa_copy.message(
                 "waiver_bid_over_budget", platform, remaining=left), remaining=left)
@@ -37210,16 +37220,33 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
               "add_player_ids": json.dumps([add_id]),
               "drop_player_ids": json.dumps([drop_id] if drop_id else []),
               "faab_bid": bid}
-    sent_id = _fa_db.record_platform_write_move(
-        {**record, "phase": "sent", "sent_at": _fa_move_now().isoformat()})
+    # The double-move block is re-checked and the `sent` row inserted in ONE
+    # transaction under a Postgres advisory lock on (user, league, add player)
+    # (database.claim_platform_write_move, the trade-share lock's pattern):
+    # step 7b and the insert are otherwise two steps, and a Postgres id is
+    # assigned at INSERT but visible only at COMMIT, so racing taps could both
+    # pass. Under the lock the later tap waits for the earlier one's commit and
+    # then sees its row.
+    claim_now = _fa_move_now()
+    sent_id, rival = _fa_db.claim_platform_write_move(
+        {**record, "phase": "sent", "sent_at": claim_now.isoformat()},
+        lambda rows: _fa_move_block_reasons(
+            rows, claim_now, checked_at=now).get(add_id),
+        since=claim_now - _FA_MOVE_PENDING_CLAIM_BLOCK)
+    if rival:
+        key = "move_in_progress_pending_claim" if rival == "pending_claim" else "move_in_progress"
+        return _fa_move_error("move_in_progress", 409,
+                              _fa_copy.message(key, platform, add=add_name),
+                              title=_fa_copy.UNKNOWN_TITLE)
     if not sent_id:
         return _fa_move_error("move_in_progress", 409,
                               _fa_copy.message("move_in_progress", platform, add=add_name),
                               title=_fa_copy.UNKNOWN_TITLE)
-    # 12b. The double-move block, made atomic: step 7b and the insert above are
-    # two steps, so two taps (different attempt_ids, same player) can both pass
-    # 7b. Re-read after the insert: an earlier-inserted (lower id) move of this
-    # player that still blocks wins; this one records its 409 and never sends.
+    # 12b. SQLite (local dev) takes no advisory lock, so a race there can still
+    # get two taps past the claim. Its writes commit in id order, so a re-read
+    # settles it: an earlier-inserted (lower id) move of this player that still
+    # blocks, or that landed after this request's check, wins; this one records
+    # its 409 and never sends. On Postgres the lock already decided it.
     rival = _fa_move_blocks(user_id, league_id, _fa_move_now(), before_id=sent_id,
                             checked_at=now).get(add_id)
     if rival:
