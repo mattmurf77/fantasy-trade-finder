@@ -1,3 +1,12 @@
+## 2026-11-03 — KTC scraper: the page's `ktc-players` JSON element (the 10-29 break)
+
+Gates: `backend/data_loader.py` (`parse_ktc_players`) plus the runbook. No route, schema, event, flag, knob or engine-hashed module (`data_loader.py` isn't in `_ENGINE_CODE_MODULES`). **Merge only once `ktc_blend_weight = 0` is pinned in prod** (models-lead addendum R2, on the operator's word in release-lead's session). Otherwise this switches the blend back on unannounced at the next pool build.
+
+- **The cause:** KTC moved its player list from the `var playersArray = [...]` literal into `<script type="application/json" id="ktc-players">`, which the page reads with `JSON.parse`. The literal regex found nothing.
+- **The fix:** read the element first, and the literal as a fallback. The live page on 2026-11-03 (one read-only GET, not committed) parses to 464 players (70 QB, 128 RB, 188 WR, 78 TE). The fields are the same: `oneQBValues.value`, `superflexValues.tep.value`, `playerID`, `mflid`, `position`.
+- **Tests:** `test_ktc_blend.py`, 16 (+3). The current page's skeleton is used verbatim around the legacy fixture's entries, so no new KTC data is committed: decoy JSON before and after, a non-list element, and the real `_ktc_consensus` path (cache reset) matching the legacy rows.
+- **Sabotage, each red then restored (3):** the literal only (main's code, which reproduces the break); any JSON script without the id check; no list check.
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
