@@ -28,7 +28,7 @@
 
 | Product id | Price (US) | Reference name (internal, ≤64) | Display name (≤30) | Description (≤45) |
 |---|---|---|---|---|
-| `ftf_tip_199` | $1.99 | `Tip 1.99` | **Small Tip** (default; marketing may replace) | **A one-time tip. It unlocks nothing.** (35) |
+| `ftf_tip_199` | $1.99 | `Tip 1.99` | **Small Tip** (final, marketing §6 addendum 15) | **A one-time tip. No features or content.** (39; final, marketing + legal R28.27) |
 | `ftf_tip_499` | $4.99 | `Tip 4.99` | **Medium Tip** | same |
 | `ftf_tip_999` | $9.99 | `Tip 9.99` | **Large Tip** | same |
 
@@ -81,7 +81,7 @@
 - **2.5.19 (no dormant features):** at knob 0 the row is hidden and the route stays registered, the same posture #526 shipped for the 11-06 binary.
 - **Review notes, one per tip:**
 
-  > Optional tip to support the developer. Consumable. It unlocks no content, features or
+  > Optional tip to support the developer. Consumable. It buys no features, content or
   > benefits, and the app grants nothing on purchase. To find it: sign in first (Sign in with
   > Apple works), then Settings › Subscription › Support Fleeced. Demo mode shows no purchase flow.
 
@@ -158,7 +158,7 @@ Written for the setup doc's format (📱 phone / 💻 computer, `[verify on scre
 | TJ1 | App Store Connect → **Apps** → Fleeced → **Monetization** → **In-App Purchases** → **+** | Type **Consumable**. Reference Name **`Tip 1.99`**. Product ID **`ftf_tip_199`**, exactly: **it can't be changed or reused later** → **Create** | |
 | TJ2 | On it: **Price Schedule** → add a price **[verify on screen]** | United States **$1.99**; let Apple fill the other countries | |
 | TJ3 | **Availability** | The same countries as the app | |
-| TJ4 | **App Store Localization** → English (U.S.) | Display Name and Description from marketing (defaults: **Small Tip** / **A one-time tip. It unlocks nothing.**) | |
+| TJ4 | **App Store Localization** → English (U.S.) | Display Name and Description, final (marketing §6 addendum 15, legal R28.27): **Small Tip** / **A one-time tip. No features or content.** | |
 | TJ5 | **Review Information** → Review Notes | Paste the review note in plan §1 ("Optional tip to support the developer…"). The screenshot comes in TJ10 | |
 | TJ6 | **Tax category** **[verify on screen]** | Leave Apple's default | |
 | TJ7 | Repeat TJ1–TJ6 | **`Tip 4.99`** / **`ftf_tip_499`** / **$4.99** / **Medium Tip**, then **`Tip 9.99`** / **`ftf_tip_999`** / **$9.99** / **Large Tip** | |
