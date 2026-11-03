@@ -274,6 +274,12 @@ INSERTs the owner's row; every later member of that league only refreshes
 are **not** stored here — see `league_members` for the authoritative
 per-`(league, user)` roster.
 
+Session init's background daemon (2026-11-03) only updates a row it found
+at its start, so a row an account deletion removed meanwhile is never
+re-created, and it never inserts an imported (ESPN/MFL/Fleaflicker) league's
+row. It inserts only on a Sleeper league's first init, with
+`platform = 'sleeper'`, under the caller's users-row lock.
+
 | Column | Type | Notes |
 |---|---|---|
 | `sleeper_league_id` | str PK | |
@@ -284,7 +290,7 @@ per-`(league, user)` roster.
 | `opponent_data` | JSON text | `[{user_id, username, player_ids}]` — importer-owner's snapshot; write-once, not read back |
 | `default_scoring` | str | `'1qb_ppr'` / `'sf_tep'` (null → `'1qb_ppr'`) |
 | `total_rosters` | int | Sleeper's `total_rosters` (TRUE team count incl. ownerless rosters; FB #41). Written by session_init's meta fetch; null for local leagues / pre-migration rows |
-| `platform` | str | League source: NULL reads as `'sleeper'`; `'espn'` (flag `espn.link`), `'mfl'` (flag `mfl.link`), `'fleaflicker'` (flag `fleaflicker.link`). For every non-Sleeper platform the PK column holds the **platform-native** league id — the plans chose a platform column over magic-prefix ids ([ESPN §2](plans/espn-league-linking-plan-2026-07-11.md) / [multi-platform](plans/multi-platform-linking-plan-2026-07-17.md)) |
+| `platform` | str | League source: NULL reads as `'sleeper'` (session init writes `'sleeper'` on a Sleeper league's first insert since 2026-11-03; older Sleeper rows stay NULL); `'espn'` (flag `espn.link`), `'mfl'` (flag `mfl.link`), `'fleaflicker'` (flag `fleaflicker.link`). For every non-Sleeper platform the PK column holds the **platform-native** league id — the plans chose a platform column over magic-prefix ids ([ESPN §2](plans/espn-league-linking-plan-2026-07-11.md) / [multi-platform](plans/multi-platform-linking-plan-2026-07-17.md)) |
 | `espn_season` | int | ESPN `seasonId` used at import — the re-sync key (`/api/espn/import`). NULL for non-ESPN rows |
 | `espn_auth` | str | `'public'` / `'cookie'` — how the ESPN league was read; `'cookie'` re-syncs decrypt the importer's `espn_credentials` row |
 | `espn_my_team_id` | int | The linking user's ESPN team id — binds their `league_members` row to their real FTF `user_id` across re-syncs |
@@ -357,7 +363,7 @@ The guard is not a distributed lock — two genuinely simultaneous requests on s
 
 ## `league_members`
 
-Members of every league `session_init` has seen. Uniqueness enforced via `(league_id, user_id)`. **Sleeper leagues are replace-synced (S0, 2026-10-20):** each session init writes the authoritative snapshot from its Sleeper read with `replace_league_members_snapshot` (delete-then-insert in one transaction; an empty snapshot is refused, G-015), so rows of managers who left are removed (G-075). Rows are keyed by the roster's canonical `owner_id` (ADR-012): one row per roster, co-owners included. Sleeper rows are also refreshed server-side by `server._refresh_sleeper_members` (Sleeper `/rosters` + `/users`, same row shape, still an upsert) when the admin targeted pre-generation runs with `refresh_rosters` (2026-10-09); otherwise a league's rows only change when a member opens it in the app.
+Members of every league `session_init` has seen. Uniqueness enforced via `(league_id, user_id)`. **Sleeper leagues are replace-synced (S0, 2026-10-20):** each session init writes the authoritative snapshot from its Sleeper read with `write_session_init_members` (delete-then-insert in one transaction under the caller's users-row lock; an empty snapshot is refused, G-015), so rows of managers who left are removed (G-075). A row that was there when the init's daemon started and is gone by its write (an account deletion) is not re-created by that init (2026-11-03); session init only updates an imported league's rows. Rows are keyed by the roster's canonical `owner_id` (ADR-012): one row per roster, co-owners included. Sleeper rows are also refreshed server-side by `server._refresh_sleeper_members` (Sleeper `/rosters` + `/users`, same row shape, still an upsert) when the admin targeted pre-generation runs with `refresh_rosters` (2026-10-09); otherwise a league's rows only change when a member opens it in the app.
 
 For ESPN-imported leagues (`espn.link`), rows are written by `replace_espn_league_members` (delete-then-insert snapshot): the linking user's team carries their real FTF `user_id`; every other team gets a synthetic `espn:{SWID}` (fallback `espn:{league_id}.t{team_id}`) id. Synthetic ids must never reach push/notification paths (same class as unlinked Sleeper members). `roster_data` always holds **Sleeper** player ids — ESPN ids are crosswalked at import (`backend/espn_service.py`).
 

@@ -1,3 +1,27 @@
+## 2026-11-03 — Session init: the daemon never re-creates rows an account deletion removed
+
+Gates: head-eng's spec, from release-lead's QA of #479. Server only: no route, schema, flag or analytics event change (`record_event` and `upsert_user` / `upsert_league` gain opt-in keywords; defaults unchanged). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **New `backend/tests/test_session_init_deleted_mid_daemon.py`, 31.** It uses `test_session_init_sleeper_calls`'s harness (in-memory SQLite, every Sleeper call faked, the daemon inline) under a local `no_real_network` guard, a copy of #479's conftest fixture, which isn't on main yet. The deletion is injected by wrapping the daemon's own calls.
+  - **Own deletion, 20:** the caller's account is deleted at 5 points (as the daemon thread starts; after its start read, `upsert_user`, `upsert_league`, `league_synced`), on 4 leagues (Sleeper first init, Sleeper re-init, MFL, ESPN). It runs `accounts._delete_user_data`, the DB transaction alone: in one process the lifecycle lease already holds a deletion until the daemon ends, so this is another process's deletion (a rolling deploy). Afterwards there's no users, leagues or league_members row for the user or league, and a scan of every text column of every table finds nothing naming the user or the session's analytics key that wasn't there right after the deletion (there was nothing).
+  - **No users row, 1:** the daemon writes nothing, and inserts no users row.
+  - **The importer's deletion, 6:** the leaguemate who imported the league is deleted through the public `delete_user_data` (the lease is per account, so the caller's daemon isn't drained), before or after the daemon's start read, on MFL, ESPN and Sleeper. The `leagues` row and the importer's `league_members` row aren't re-created, so a linked league never comes back with a NULL platform, and for MFL/ESPN nothing names the importer. One exception, which the test pins: the Sleeper case whose rows were already gone when the daemon started is, to the daemon, a first init. It rebuilds both from Sleeper's public read, owned by the caller and with platform `'sleeper'`, as the deletion matrix says the next init would.
+  - **Normal inits, 4:** a first init creates the rows with platform `'sleeper'`; a re-init updates the name and rosters (importer, platform and `created_at` kept); MFL and ESPN keep their platform and have their rows updated.
+- **Sabotages, 7/7 red, then restored with `git checkout`:**
+  - `_lock_live_user` a no-op (insert again): 19 red;
+  - `upsert_league` insert-anyway (`only_if_exists=False`): 5 red;
+  - the members start-state filter dropped: 1 red (Sleeper importer);
+  - a platform league replaced, not update-only: 2 red;
+  - `record_event` without `require_user`: 4 red;
+  - `_platform_linked` from the DB only: 2 red;
+  - platform dropped on insert: 3 red.
+- **Existing harnesses:** `test_roster_refresh_state` (also used by `test_roster_fp_stamp` and `test_traded_picks_unavailable`) and `test_session_init_sleeper_calls` now seed the users row the session mint writes. `test_co_owner_rosters` and one `test_roster_refresh_state` test patch the renamed members writer, `write_session_init_members`.
+- **Suites:**
+  - `-k "session_init or roster or co_owner or players_refresh or account_only or fingerprint or deletion or delete"`: 775 passed, 1 skipped (baseline 744 + 31 new);
+  - `test_account_deletion_coverage.py`: 62 passed;
+  - the 20 other files that drive `/api/session/init` or the changed writers: 662 passed.
+  - Local Python 3.14.4; the full suite was not run (platforms-eng runs it).
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
