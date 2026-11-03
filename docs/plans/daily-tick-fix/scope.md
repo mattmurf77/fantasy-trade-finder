@@ -122,8 +122,12 @@ self-renewal fix land."
     - single-flight: a second `start()` while a run is in flight returns `False` and starts nothing;
     - the lock is released after a raising run.
   - **New route tests** (in `test_daily_tick_runner.py` or a sibling file that imports `server`):
-    - with every step stubbed to sleep about 2 s, `POST /api/cron/daily-tick` returns 202 `{ok: true, started:
-      true}` in well under 1 s, and all 9 steps then run in order;
+    - with every step stubbed to block on a gate the test opens only after the response, `POST
+      /api/cron/daily-tick` returns 202 `{ok: true, started: true}` while the run is still in flight (lock held, no
+      step finished, runner parked in step 1), and all 9 steps then run in order. **Ordering, not wall-clock**
+      (2026-11-03, #506 P3): the earlier `elapsed < 10.0` bound flaked on loaded runners and missed holds under
+      10 s. Sabotage: an inline `wait()` or an inline `run()` in the handler turns it red; a bare `sleep(3)` does
+      not (see Known limits);
     - without `X-Cron-Secret`, it is still rejected before any thread starts;
     - **replenishment guard (deferred, 2026-10-23):** with `deck.replenishment` off, and again with it ON and the
       clock past `replenish_weekday`, the tick runs, `_run_weekly_replenishment` is never called (spy), the flag is
@@ -204,6 +208,10 @@ self-renewal fix land."
 - **A hung step blocks the steps after it,** and single-flight then blocks the next day's run. Every network call in
   the steps already carries a timeout (`_sleeper_get(url, 20)`, Expo, the platform clients). A second tick while a
   run is in flight logs a warning with that run's age, so it is visible. Restarting the worker clears it.
+- **The 202 test can't see a hold that never touches the run** (a bare sleep, or slow I/O before `start()`). At the
+  response the run is live and blocked whether the handler took 0 s or 3 s, so only a clock could tell, and a
+  wall-clock bound flakes on loaded CI runners (why #506 exists). It catches every hold that depends on the run (an
+  inline step, a join, a wait on a step) at any length, which is the failure the 202 contract is about.
 - **A worker restart mid-run** (deploy at 13:30, OOM) loses the rest of that run. Each step is idempotent and the
   weekday gates are `>=`, so the next day retries. The permanent-loss writers go first.
 - **CPU:** the run shares the web worker's CPU with the 200 ms tap path for its duration (the free instance when this was written; since #376/#398 the `standard` plan with `--threads 4`, one GIL). Steps 1–6 are mostly
