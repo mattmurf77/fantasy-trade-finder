@@ -138,11 +138,9 @@ export default function RankScreen() {
   const gestureEnabled = useFlag('swipe.gesture_audit');
   // Teardown flags (default false — flag off is byte-identical):
   // S4 PRD-02 unlock-copy fixes ride the outlook-inline flag; S3 PRD-02
-  // gives the long-press info sheet a visible ⓘ twin; S2 PRD-04 ride-along
-  // promotes content-carrying faint text to dim.
+  // gives the long-press info sheet a visible ⓘ twin.
   const unlockCopyOn = useFlag('ux.outlook_inline_default');
   const menuOn = useFlag('ux.player_context_menu');
-  const cleanupOn = useFlag('visual.chalkline_cleanup');
 
   // FB #80 — explicit format switch from the header toggle. On failure the
   // local state is untouched (the toggle stays where it was) — just toast.
@@ -442,11 +440,6 @@ export default function RankScreen() {
           </View>
         ) : null}
 
-        {/* S2 PRD-04 ride-along: content-carrying hint faint → dim. */}
-        <Text style={[styles.modeHint, cleanupOn && styles.modeHintDim]}>
-          Trios · tap Rank below for more modes
-        </Text>
-
         {/* FB #80 — SF/1QB scoring-format toggle. Defaults to the selected
             league's detected format (useLeagueFormatDefault in RootNav);
             tapping here is an explicit in-session override so trios rank
@@ -599,6 +592,24 @@ export default function RankScreen() {
             position={position}
             flush
           />
+        ) : trioQuery.isError ? (
+          /* B6 — the error branch must come BEFORE the skeleton: a failed
+             /api/trio leaves `trio` undefined, so `isLoading || !trio` used to
+             catch it first and show the skeleton forever, with no Retry.
+             Plain isError, with no `!trio` (P2-1): every Trios refetch replaces
+             the trio, so a failed one after a submit must not hand back the
+             just-ranked trio as rankable (a re-rank double-counts on the
+             server). While a refetch is pending the held trio stays disabled
+             (isRefetchingTrio). Fixed copy, never the raw error text. */
+          <View style={styles.centered}>
+            <Text style={styles.errorText}>Could not load next trio</Text>
+            <Button
+              variant="ghost"
+              compact
+              label="Try again"
+              onPress={() => trioQuery.refetch()}
+            />
+          </View>
         ) : trioQuery.isLoading || !trio ? (
           // Three skeleton cards keep the page shape stable during the
           // /api/trio round-trip (Mobile #M1). Mirrors the static-fill
@@ -612,20 +623,6 @@ export default function RankScreen() {
                 <View style={styles.skeletonMeta} />
               </View>
             ))}
-          </View>
-        ) : trioQuery.isError ? (
-          <View style={styles.centered}>
-            <Text style={styles.errorText}>
-              {trioQuery.error instanceof Error
-                ? trioQuery.error.message
-                : 'Could not load next trio'}
-            </Text>
-            <Button
-              variant="ghost"
-              compact
-              label="Try again"
-              onPress={() => trioQuery.refetch()}
-            />
           </View>
         ) : (
           <View style={styles.cards}>
@@ -918,13 +915,6 @@ const styles = StyleSheet.create({
   },
   streakNum: { ...type.data, color: chalk.base },
   streakLabel: { ...type.bodySm, color: chalk.dim },
-  modeHint: {
-    ...type.bodySm,
-    color: chalk.faint,
-    textAlign: 'center',
-    marginTop: -space.xs,
-  },
-  modeHintDim: { color: chalk.dim },
   // S3 PRD-02 — trio card wrapper hosts the absolute ⓘ twin.
   // #243: each wrap is one third of the 3-up row.
   trioCardWrap: { flex: 1, position: 'relative' },

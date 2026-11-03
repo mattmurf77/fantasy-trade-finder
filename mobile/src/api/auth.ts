@@ -163,12 +163,12 @@ export async function linkSleeperUsername(
 export interface AccountInfo {
   ok: boolean;
   sleeper_user_id: string;
-  verified_via: 'sleeper' | 'apple' | 'google' | null;
+  verified_via: 'sleeper' | 'apple' | 'google' | 'mfl_login' | 'espn' | null;
   account: {
     account_id: string;
     sleeper_user_id: string | null;
     created_at: string;
-    identities: Array<{ provider: 'apple' | 'google'; linked_at: string }>;
+    identities: Array<{ provider: 'apple' | 'google' | 'espn' | 'mfl'; linked_at: string }>;
   } | null;
   /** P2.6 — session is keyed to an account with no linked Sleeper source. */
   account_only?: boolean;
@@ -377,8 +377,34 @@ export async function sessionInit(body: SessionInitBody, control: SessionInitCon
 }
 
 // GET /api/session/ping — session liveness check. 401 → token expired.
-export async function sessionPing(): Promise<{ ok: true }> {
+// Also carries `verification`, the same field session/init returns.
+export async function sessionPing(): Promise<{
+  ok: true;
+  user_id?: string;
+  verification?: SessionVerification;
+}> {
   return api.get('/api/session/ping');
+}
+
+/** Record the server's verification state for a session that never reaches
+ *  session/init: an account-only session (Apple-first, no league) pins the
+ *  NO_LEAGUE_ID sentinel, so revalidateSession and initLeagueSession skip it,
+ *  and `verification` would otherwise stay null for good (head-eng
+ *  2026-10-28; #495's Restore row reads it). The answer is recorded only if
+ *  the same user is still signed in when it lands. A failure (offline,
+ *  expired) keeps the current state, like revalidateSession. */
+export async function refreshVerification(): Promise<void> {
+  const { useSession } = require('../state/useSession');
+  const askedFor = useSession.getState().user?.user_id ?? null;
+  if (!askedFor) return;
+  try {
+    const res = await sessionPing();
+    if (!res?.verification || res.user_id !== askedFor) return;
+    if (useSession.getState().user?.user_id !== askedFor) return;
+    useSession.getState().setVerification(res.verification);
+  } catch {
+    // Offline or expired: keep the current state.
+  }
 }
 
 // ── Helper: initialize a session for a specific league ─────────────────

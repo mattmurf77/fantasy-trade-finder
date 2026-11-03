@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projection ribbons</title>
+<!-- Same Google Fonts request as web/style-guide.html:9 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* Tokens copied from mobile/src/theme/chalkline.ts */
+  :root {
+    --ink-0: #0C0E11;        /* ink.ink0  :23 screen background */
+    --ink-1: #13161B;        /* ink.ink1  :24 cards, panels */
+    --line: #262C35;         /* ink.line  :27 hairlines */
+    --line-strong: #3D4654;  /* ink.lineStrong :28 (page chrome only) */
+    --chalk: #ECEFF4;        /* chalk.base :38 */
+    --chalk-dim: #97A1AE;    /* chalk.dim  :39 */
+    --chalk-faint: #626C79;  /* chalk.faint :40 */
+    --warn: #F59E0B;         /* semantic.warn :60 */
+    --r-xs: 2px;             /* radii.xs :80 */
+    --r-md: 8px;             /* radii.md :82 */
+    --font-ui: 'Archivo', sans-serif;  /* fonts.uiSemi :91 = Archivo_600SemiBold */
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--ink-0); }
+  body {
+    color: var(--chalk);
+    font: 400 14px/21px var(--font-ui);
+    padding: 20px 24px 18px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- page chrome (not app UI) ---------- */
+  .page-title { font: 600 16px/22px var(--font-ui); color: var(--chalk); }
+  .page-sub { font: 400 13px/18px var(--font-ui); color: var(--chalk-dim); margin-top: 2px; }
+  .grid {
+    display: grid;
+    grid-template-columns: 393px 393px;
+    column-gap: 24px;
+    margin-top: 14px;
+  }
+  .colhead {
+    font: 600 11px/14px var(--font-ui); letter-spacing: 0.88px; text-transform: uppercase;
+    color: var(--chalk-dim); padding-bottom: 6px;
+  }
+  .rowlabel {
+    grid-column: 1 / -1;
+    font: 400 13px/18px var(--font-ui); color: var(--chalk-dim);
+    margin: 12px 0 6px;
+  }
+  .rowlabel b { font-weight: 600; color: var(--chalk); }
+  .rowlabel code { font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 12px; color: var(--chalk-faint); }
+  /* A pane = the phone screen at 393pt wide (iPhone capture width 1178px / 3),
+     with the screens' shared space.lg (16) horizontal padding. The dashed frame
+     is page chrome only. */
+  .pane {
+    width: 393px;
+    background: var(--ink-0);
+    border: 1px dashed var(--line-strong);
+    padding: 10px 15px;   /* 16 minus the 1px dashed frame */
+  }
+  .foot {
+    margin-top: 16px;
+    font: 400 12px/17px var(--font-ui); color: var(--chalk-faint);
+  }
+  .foot b { color: var(--chalk-dim); font-weight: 600; }
+
+  /* ---------- app UI, from the component StyleSheets ---------- */
+
+  /* type.label (chalkline.ts:115-122) */
+  .t-label {
+    font-family: var(--font-ui); font-weight: 600;
+    font-size: 11px; line-height: 14px;
+    letter-spacing: 0.88px; text-transform: uppercase;
+    color: var(--chalk-dim);
+    white-space: nowrap;
+  }
+
+  /* Trade card: TradeCard.tsx:1058 card + CardImpactBlock.tsx:220 wrap */
+  .tc-card {
+    background: var(--ink-1); border: 1px solid var(--line);
+    border-radius: var(--r-md); padding: 12px;
+  }
+  .cib-wrap { border-top: 1px solid var(--line); padding-top: 12px; }
+  .cib-head { display: flex; flex-direction: row; align-items: center; justify-content: space-between; } /* :243 */
+  .cib-kicker { letter-spacing: 1px; margin-bottom: 4px; }               /* :226-232 */
+  .cib-ribbon {                                                         /* :244-253 */
+    color: var(--warn); border: 1px solid var(--warn); border-radius: var(--r-xs);
+    padding: 1px 5px; letter-spacing: 0.8px;
+  }
+
+  /* Team review: TeamReviewScreen.tsx:1330 card, :1334 kicker, :1342 rowBetween, :1343 ribbon */
+  .tr-card {
+    background: var(--ink-1); border: 1px solid var(--line);
+    border-radius: var(--r-md); padding: 12px;
+  }
+  .tr-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
+  .tr-kicker { letter-spacing: 1px; }
+  .tr-ribbon {
+    color: var(--warn); border: 1px solid var(--warn); border-radius: var(--r-xs);
+    padding: 1px 5px;   /* letterSpacing stays type.label's 0.88 */
+  }
+
+  /* League Summary: LeagueSummaryScreen.tsx:3626 oddsHead, :3632 betaRibbon, :3640 betaRibbonText;
+     TickLabel.tsx:26-35 (3x14 tick, gap space.sm, type.label text) */
+  .ls-head { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
+  .tick-label { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+  .tick { width: 3px; height: 14px; background: var(--warn); }
+  .ls-ribbon {
+    align-self: flex-start;
+    border: 1px solid var(--warn); border-radius: var(--r-xs);
+    padding: 2px 6px;
+  }
+  /* RN: the Text inside the View is its own 14px line box, so the ribbon is 14 + 2*2 + 2*1 = 20 tall */
+  .ls-ribbon .t-label { display: block; color: var(--warn); }
+</style>
+</head>
+<body>
+  <div class="page-title">Projection ribbons, before and after (PR #549)</div>
+  <div class="page-sub">The word &ldquo;beta&rdquo; comes out of three playoff-outlook ribbons (App Review 2.2). Nothing else changes.</div>
+
+  <div class="grid">
+    <div class="colhead">Before</div>
+    <div class="colhead">After</div>
+
+    <!-- 1. Trade card -->
+    <div class="rowlabel"><b>1 &middot; Trade card, Playoff outlook block</b> (when <code>impact.beta</code>) &nbsp;<code>CardImpactBlock.tsx:182</code></div>
+    <div class="pane">
+      <div class="tc-card"><div class="cib-wrap">
+        <div class="cib-head">
+          <span class="t-label cib-kicker">Playoff outlook</span>
+          <span class="t-label cib-ribbon">PROJECTED &middot; BETA</span>
+        </div>
+      </div></div>
+    </div>
+    <div class="pane">
+      <div class="tc-card"><div class="cib-wrap">
+        <div class="cib-head">
+          <span class="t-label cib-kicker">Playoff outlook</span>
+          <span class="t-label cib-ribbon">PROJECTED</span>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- 2. Team review -->
+    <div class="rowlabel"><b>2 &middot; Team review, Playoff outlook card</b> (when <code>o.beta</code>) &nbsp;<code>TeamReviewScreen.tsx:442</code></div>
+    <div class="pane">
+      <div class="tr-card">
+        <div class="tr-row">
+          <span class="t-label tr-kicker">Playoff outlook</span>
+          <span class="t-label tr-ribbon">PROJECTED &middot; BETA</span>
+        </div>
+      </div>
+    </div>
+    <div class="pane">
+      <div class="tr-card">
+        <div class="tr-row">
+          <span class="t-label tr-kicker">Playoff outlook</span>
+          <span class="t-label tr-ribbon">PROJECTED</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3a. League Summary, preseason -->
+    <div class="rowlabel"><b>3a &middot; League Summary, Season outlook, preseason</b> (week 0) &nbsp;<code>LeagueSummaryScreen.tsx:3083</code></div>
+    <div class="pane">
+      <div class="ls-head">
+        <div class="tick-label"><div class="tick"></div><span class="t-label">Season outlook</span></div>
+        <div class="ls-ribbon"><span class="t-label">Projected &middot; preseason &middot; beta</span></div>
+      </div>
+    </div>
+    <div class="pane">
+      <div class="ls-head">
+        <div class="tick-label"><div class="tick"></div><span class="t-label">Season outlook</span></div>
+        <div class="ls-ribbon"><span class="t-label">Projected &middot; preseason</span></div>
+      </div>
+    </div>
+
+    <!-- 3b. League Summary, weeks 1-5 -->
+    <div class="rowlabel"><b>3b &middot; League Summary, Season outlook, weeks 1&ndash;5</b> (from week 6 it already read &ldquo;Projected&rdquo;)</div>
+    <div class="pane">
+      <div class="ls-head">
+        <div class="tick-label"><div class="tick"></div><span class="t-label">Season outlook</span></div>
+        <div class="ls-ribbon"><span class="t-label">Projected &middot; beta</span></div>
+      </div>
+    </div>
+    <div class="pane">
+      <div class="ls-head">
+        <div class="tick-label"><div class="tick"></div><span class="t-label">Season outlook</span></div>
+        <div class="ls-ribbon"><span class="t-label">Projected</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <b>Mockup from the component styles (D-056: no simulator); text is the only change.</b><br>
+    A reconstruction, not a capture. The 2026-08-11 screen library has no frame of these ribbons: the trade-card block and Team review shipped 2026-08-19, and Season outlook was flag-dark (<code>outlook.odds</code> off) when League Summary was captured. Panes are 393pt wide; only the ribbon row of each surface is drawn.
+  </div>
+</body>
+</html>

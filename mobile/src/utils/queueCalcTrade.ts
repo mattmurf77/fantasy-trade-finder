@@ -96,8 +96,8 @@ export async function queueCalcTrade(args: {
       alreadyQueued: !!res?.already_queued,
       toast: {
         msg: res?.already_queued
-          ? `Already queued for @${args.opponent.name}.`
-          : `Queued for @${args.opponent.name} — it'll show in their suggestions.`,
+          ? `It's already in @${args.opponent.name}'s Fleeced deck.`
+          : `It's waiting in @${args.opponent.name}'s Fleeced deck.`,
         tone: 'success',
       },
     };

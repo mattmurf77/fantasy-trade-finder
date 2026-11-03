@@ -522,6 +522,7 @@ export default function LeagueScreen() {
           <CoachMark
             testID="league.whats-new"
             text={whatsNew.headline}
+            accessibilityHint="Opens Help & about."
             onDismiss={() => {
               tapAction('whats_new');
               dismissWhatsNew();
@@ -586,8 +587,9 @@ export default function LeagueScreen() {
               </View>
               {isEspn ? (
                 <Text style={[type.bodySm, styles.espnNote]}>
-                  ESPN read-only import — rankings, tiers, and trios fully
-                  work; trade features for ESPN leagues come later.
+                  ESPN league: rankings, tiers, trios and trade ideas all
+                  work. Nothing is posted to ESPN unless you send a trade you
+                  approve.
                 </Text>
               ) : null}
             </Card>
