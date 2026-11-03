@@ -339,6 +339,11 @@ Gates: full (`docs/plans/prelaunch-onboarding/scope-signin-three-tiles.md`). No 
 - **release-lead round-2 QA at `c8fa1db7`/`8d0a4eeb`: GO-with-notes.** P2-2 is done (design-lead's re-render, plus the A/B spacing image for the operator).
   - Taken: P3-1, pin 9 now matches any "or … league ID" wording, not just one literal phrase (sabotage 2/2: "Or use a league ID" and "or paste your league ID"); P3-4, components.md's ESPN entry row notes the app dropped the divider; P3-6, the PR body's step count.
   - Routed to owners: P3-2, the MFL entry sheet still shows the league-ID field right under sign-in (#421 / platforms-eng); P3-3, "We'll find your leagues" in both sheets (marketing, via head-eng); P3-5, web (the parity follow-up).
+- **head-eng Round 4b (11-03, from head-product's calls on design-lead's renders):**
+  - The ESPN entry sheet hides its league-ID field and Continue until ESPN cookies are known: `entryNeedsSignIn = entry && webviewCapture && !(espnS2 && swid)`, a contained conditional, so no "or" divider fallback is needed. Link mode is unchanged.
+  - The MFL sheet heading is "Link an MFL league".
+  - New pins 10 and 11. Sabotage 5/5 red: the gate ignoring cookies, the field ungated, Continue ungated, the gate applying in link mode, the typo back.
+  - The scope's checklist gains step 9.
 
 ## 2026-10-29 — G3-e: `deck_outcomes.user_id`; account deletion and export also match an outcome by its owner
 

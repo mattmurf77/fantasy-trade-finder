@@ -37,6 +37,12 @@
 //      entry mode) don't offer "or … league ID" in any wording either (marketing
 //      addendum 16, 11-02): the verified sign-in refuses an ID alone. Both
 //      clauses were entry-only; Settings' link mode never showed them.
+//  10. In entry mode with the in-app ESPN sign-in, the ESPN sheet shows no
+//      league-ID field or Continue until ESPN cookies are known (head-eng
+//      Round 4b; #421 does the same for MFL): `entryNeedsSignIn` is exactly
+//      entry && webviewCapture && no cookies, and gates both.
+//  11. The MFL/Fleaflicker sheet's heading reads "Link an MFL league" /
+//      "Link a Fleaflicker league" (head-eng Round 4b, the grammar fix).
 //
 // Run: node tests/check-signin-tiles.js
 
@@ -254,6 +260,24 @@ check('9. the entry sheets the tiles open offer no "or … league ID" alternativ
     const m = src.match(OR_ID);
     expect(!m, `${rel} still offers a league ID as an alternative: "${m && m[0]}"`);
   }
+});
+
+check('10. the ESPN entry sheet hides the league-ID field until ESPN cookies are known', () => {
+  const src = stripComments(fs.readFileSync(path.join(ROOT, 'src/components/EspnLinkSheet.tsx'), 'utf8'));
+  expect(/const entryNeedsSignIn = !!\(entry && webviewCapture && !\(espnS2\.trim\(\) && swid\.trim\(\)\)\);/.test(src),
+    'entryNeedsSignIn is not exactly entry && webviewCapture && no ESPN cookies');
+  expect(/\{!entryNeedsSignIn \? \(\s*<TextInput\s+testID="espn-link\.input"/.test(src),
+    'the ESPN league-ID field (espn-link.input) is not gated on !entryNeedsSignIn');
+  expect(/\{!showingPicker && !entryNeedsSignIn \? \(\s*<Button\s+testID="espn-link\.continue"/.test(src),
+    'the ESPN Continue (espn-link.continue) is not gated on !showingPicker && !entryNeedsSignIn');
+  expect((src.match(/testID="espn-link\.input"/g) || []).length === 1, 'more than one espn-link.input');
+});
+
+check('11. the MFL sheet heading says "Link an MFL league"', () => {
+  const src = stripComments(fs.readFileSync(path.join(ROOT, 'src/components/PlatformLinkSheet.tsx'), 'utf8'));
+  expect(/>Link \{platform === 'mfl' \? 'an' : 'a'\} \{LABEL\[platform\]\} league</.test(src),
+    "the heading isn't Link {platform === 'mfl' ? 'an' : 'a'} {LABEL[platform]} league");
+  expect(!/>Link a \{LABEL\[platform\]\} league</.test(src), 'the heading still reads "Link a {LABEL[platform]} league"');
 });
 
 console.log(failures === 0

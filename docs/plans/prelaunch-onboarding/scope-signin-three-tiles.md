@@ -19,6 +19,7 @@ The landing's platform chips (`SignInScreen.tsx` `platformRow` / `platformChip`)
 - **Two fixes from design-lead's as-built render (head-eng, 11-01):**
   - **SE fit:** the session-expired notice's bottom margin is `space.md - 5`, so the returning-user landing is 647pt, the SE's full height: the Terms line no longer needs a scroll.
   - **Explainers claim only what the door does** (marketing addendum 16 row 3, 11-02, replacing head-eng's 3e trim): ESPN "ESPN dynasty leagues are supported. Sign in to ESPN." · MFL "MyFantasyLeague dynasty leagues are supported. Sign in to MFL." No league ID, no "we'll find your leagues" (the no-"we" rule; discovery can fall back to asking for an ID), no "no extra account needed" (some MFL paths go to Apple).
+  - **The ESPN entry sheet hides its league-ID field and Continue until ESPN cookies are known** (head-eng Round 4b, from head-product's call on design-lead's render; #421 does the same for MFL). Under #430 an ESPN claim is proven by those cookies, so an ID is useful only once they're known; before that, "We'll find your leagues — no league ID needed" no longer sits above an ID field. The MFL sheet's heading becomes "Link an MFL league" (a grammar fix). Whichever of #421 and #570 merges second keeps #421's MFL block.
   - **The entry sheets a tile opens** drop their entry-only "or enter a league ID" clause (`EspnLinkSheet.tsx`, `PlatformLinkSheet.tsx`), removal only. Settings › link a league never showed it, so the link-mode sheets are unchanged. The web landing has the same clause (`web/index.html:211`, plus the MFL panel's `:236`/`:243`); that's the web-parity follow-up, not this PR.
 - **No dead tiles:** a platform that isn't live has no tile, never a disabled or "coming soon" one (design-lead's recommendation). With only Sleeper live, the row is hidden and the landing is the plain username form, as today.
 
@@ -50,9 +51,11 @@ The landing's platform chips (`SignInScreen.tsx` `platformRow` / `platformChip`)
   6. the ESPN/MFL door mints only through `platformEntry.ts`, whose every route is `POST /api/entry/platform`. SignInScreen calls no `/api/entry` route itself;
   7. the ESPN and MFL explainers are exactly marketing's 11-02 strings; no explainer or tile label offers a league ID or says "we'll find"; and no string on the screen says "no extra account";
   8. the session-expired notice's `marginBottom` is `space.md - 5`;
-  9. neither entry sheet a tile opens (`EspnLinkSheet`, `PlatformLinkSheet`) says "or enter a league ID".
+  9. neither entry sheet a tile opens (`EspnLinkSheet`, `PlatformLinkSheet`) offers "or … league ID" in any wording;
+  10. in entry mode with the in-app ESPN sign-in, the ESPN sheet shows no league-ID field or Continue until ESPN cookies are known (`entryNeedsSignIn`);
+  11. the MFL sheet's heading reads "Link an MFL league" (and "Link a Fleaflicker league").
 
-  Sabotage 33/33 red (15 on the structure, 5 on the 11-01 words, 6 on the SE fit and the 3e trim, 7 on the 11-02 words and the sheets). The guards already on this screen stay green: `check-landing-platform-options` (the row's gates and per-platform flags), `check-espn-signin-flag`, `check-signin-apple-parity` (9), `check-guide-script` and `check-signin-identity-labels`. #421's `platformEntry.ts` keeps every route on `/api/entry/platform`, so pin 6 holds after it merges.
+  Sabotage 40/40 red (5 on the ESPN entry gate and the MFL heading, 2 on pin 9's wider match; 15 on the structure, 5 on the 11-01 words, 6 on the SE fit and the 3e trim, 7 on the 11-02 words and the sheets). The guards already on this screen stay green: `check-landing-platform-options` (the row's gates and per-platform flags), `check-espn-signin-flag`, `check-signin-apple-parity` (9), `check-guide-script` and `check-signin-identity-labels`. #421's `platformEntry.ts` keeps every route on `/api/entry/platform`, so pin 6 holds after it merges.
 - [x] **Unit tests:** none. No backend change.
 - [x] **Code-walk proof** (no tile reaches any mint but `/api/entry/platform`, and none renders when its flag is off):
   1. The tiles are `platformChips.map` (`SignInScreen.tsx:673`) inside the radiogroup row (`:672`), rendered only under `platformPickerShown` (`:670`).
@@ -62,7 +65,7 @@ The landing's platform chips (`SignInScreen.tsx` `platformRow` / `platformChip`)
   5. The sheets mint only through `entryPlatformMint` (`EspnLinkSheet.tsx:365`, `PlatformLinkSheet.tsx:255`, `:370`) → `POST /api/entry/platform` (`platformEntry.ts:155`). Every other call in that file goes to the same route (`:42`, `:57`, `:81`, `:105`).
   6. On the server that route is 404 while `landing.platform_options` or the platform's link flag is off (`server.py` `entry_platform`, the `is_enabled("landing.platform_options")` check). #430 makes it prove ownership and mint a verified `acct_*` account (its `check-landing-platform-options` V2.6 pins "the mint never creates an `entry:*` id").
   7. The tiles change none of steps 2 to 6: the diff touches only the row's markup and styles, and `PLATFORM_TILE`.
-- [x] **Manual TestFlight checklist** (8 steps; the operator, on an iPhone SE, on the binary carrying this):
+- [x] **Manual TestFlight checklist** (9 steps; the operator, on an iPhone SE, on the binary carrying this):
   - **Which state is reachable when.** Before #430 deploys, only the two-tile state exists (step 5 is the default; steps 1, 2 and 4's ESPN parts can't be reached). After #430 deploys, with `espn.signin` on, steps 1–4 apply.
   - **Flag flips are prod-wide** (every user sees them), so they go in the 11-07 test window. Only **release-lead** flips, on the operator's word, through `config/features.json` or `FTF_FLAGS` plus `POST /api/feature-flags/reload`. The tester then **force-quits and relaunches** the app so it re-reads the flags.
   - Step 5 after #430: release-lead sets `espn.signin` false, the tester relaunches, then release-lead restores it. Step 6: release-lead sets `landing.platform_options` false (this is ask 12 itself if it hasn't run), the tester relaunches.
@@ -75,6 +78,7 @@ The landing's platform chips (`SignInScreen.tsx` `platformRow` / `platformChip`)
   6. With `landing.platform_options` off. Expect no tiles: the plain username form, as on main before this.
   7. Sign out with an expired session (the returning-user notice showing). Expect the whole landing, down to "By signing in you agree to the Terms…", on one SE screen without scrolling.
   8. Select ESPN, then MFL. Expect exactly "ESPN dynasty leagues are supported. Sign in to ESPN." and "MyFantasyLeague dynasty leagues are supported. Sign in to MFL." Tap each panel's link button: the sheet shows no "or enter a league ID".
+  9. (After #430, with `espn.signin` on.) ESPN → "Link your ESPN league →". Expect "Sign in to ESPN" and "We'll find your leagues…" with **no league-ID field and no Continue** below them. Sign in: the picker shows your leagues, and "Don't see it? Enter a league ID instead" brings the field back. MFL → the sheet's title reads **"Link an MFL league"**.
 - testIDs added/renamed: none (`signin.platform-sleeper|espn|mfl` kept). `testid-lint` OK.
 
 ## 4. Docs scope (MANDATORY — HLD / LLD / API)
