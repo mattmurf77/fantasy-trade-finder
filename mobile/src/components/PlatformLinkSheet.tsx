@@ -105,7 +105,10 @@ export default function PlatformLinkSheet({
   // exists yet); /api/mfl/auth-link runs only after the league tap's mint
   // (see mflEntryPickLeague and entryMflPassRef).
   const mflAuthEnabled = useFlag('mfl.auth_link') && platform === 'mfl';
-  const [showMflAuth, setShowMflAuth] = useState(false);
+  // Entry mode opens the sign-in form by default: it's the only way forward
+  // there (#430 refuses a league ID on its own; head-product, design-lead's
+  // #570 render). The Settings link sheet keeps it collapsed.
+  const [showMflAuth, setShowMflAuth] = useState(!!entry);
   const [mflUser, setMflUser] = useState('');
   const [mflPass, setMflPass] = useState('');
   const [authLeagues, setAuthLeagues] = useState<MflAuthLeague[] | null>(null);
@@ -154,7 +157,7 @@ export default function PlatformLinkSheet({
     setError(null);
     setPreview(null);
     setSummary(null);
-    setShowMflAuth(false);
+    setShowMflAuth(!!entry);
     setMflUser('');
     setMflPass('');
     clearEntryMflSignIn();
@@ -546,7 +549,7 @@ export default function PlatformLinkSheet({
           <Button
             testID="platform-link.mfl-signin"
             label={busy ? 'Signing in…' : 'Sign in & find my leagues'}
-            variant="secondary"
+            variant={entry ? 'primary' : 'secondary'}
             compact
             onPress={() => { void mflSignIn(); }}
             disabled={busy}

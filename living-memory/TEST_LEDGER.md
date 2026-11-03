@@ -1,3 +1,15 @@
+## 2026-11-03 — #421: the MFL entry sheet opens the sign-in by default, with an ice primary button
+
+Gates: head-eng's ask (head-product's call on design-lead's #570 render), folded into #421 for the 11-06 binary. **It's a visible design change, so it needs the operator's design yes before merge.** Client only; no route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is the structural suite.
+
+- **Change:** `PlatformLinkSheet.tsx`, entry mode only.
+  - `showMflAuth` starts as `!!entry` and resets to it, so the sign-in form is open by default (it's the only way forward there).
+  - The "Sign in & find my leagues" button is `variant={entry ? 'primary' : 'secondary'}`, the ice primary per `docs/design/components.md`.
+  - The Settings link sheet is unchanged (collapsed, secondary).
+- **Pins:** `check-mfl-entry-proof.js` (f): the state initializer, every non-toggle reset, and the button variant. 64 PASS.
+- **Sabotages:** the default back to `false` → (f) red; the variant back to `"secondary"` → (f) red; restored → exit 0.
+- **Gate:** `npx tsc --noEmit` 0; testid-lint OK; 136/136 `check-*.js`.
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

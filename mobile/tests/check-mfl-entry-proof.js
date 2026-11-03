@@ -790,4 +790,33 @@ for (const rel of ['src/components/PlatformLinkSheet.tsx', 'src/components/EspnL
     '(e) the sheet has no "or enter a league ID" line', 'found');
 }
 
+// ── (f) entry mode opens the MFL sign-in, with an ice primary button ──────
+// The sign-in is the entry sheet's only way forward, so it starts open (and
+// re-opens on a reset), and its button is the primary variant (ice). The
+// Settings link sheet (entry false) keeps it collapsed and secondary.
+{
+  const sheet = parse('src/components/PlatformLinkSheet.tsx');
+  const stateDecl = findAll(sheet, (n) =>
+    ts.isVariableDeclaration(n) && ts.isArrayBindingPattern(n.name) &&
+    n.name.elements.some((e) => e.getText() === 'showMflAuth'))[0];
+  const init = stateDecl && stateDecl.initializer && ts.isCallExpression(stateDecl.initializer)
+    ? stateDecl.initializer.arguments.map((a) => a.getText()).join(',') : '';
+  assert(init === '!!entry', '(f) showMflAuth starts as !!entry (open in entry mode)', init || 'missing');
+  const resets = callsTo(sheet, 'setShowMflAuth').filter((c) =>
+    c.arguments[0] && !ts.isArrowFunction(c.arguments[0]));
+  const badResets = resets.filter((c) => c.arguments[0].getText() !== '!!entry');
+  assert(resets.length >= 1 && badResets.length === 0,
+    '(f) every non-toggle setShowMflAuth(...) resets to !!entry',
+    `${resets.length} resets, ${badResets.map((c) => c.arguments[0].getText()).join(' ')}`);
+  const btn = findAll(sheet, (n) =>
+    (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) &&
+    n.attributes.properties.some((a) => ts.isJsxAttribute(a) && a.name.getText() === 'testID' &&
+      !!a.initializer && a.initializer.getText() === '"platform-link.mfl-signin"'))[0];
+  const variant = btn && btn.attributes.properties.find((a) =>
+    ts.isJsxAttribute(a) && a.name.getText() === 'variant');
+  const vText = variant && variant.initializer ? variant.initializer.getText().replace(/\s+/g, '') : '';
+  assert(vText === "{entry?'primary':'secondary'}",
+    "(f) the MFL sign-in button is primary (ice) in entry mode, secondary in Settings", vText || 'missing');
+}
+
 process.exit(failures ? 1 : 0);
