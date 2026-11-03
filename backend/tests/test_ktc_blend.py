@@ -31,8 +31,9 @@ These tests pin:
   7. Copy-level (#124 value_rank remap): a 1QB→SF-TEP copy no longer
      demotes the top TEs below their 1QB tier.
   8. S5 health: each blend records its state in KTC_BLEND_STATUS and prints
-     one KTC-BLEND-DEGRADED line when KTC is unavailable, thin, or
-     disagrees with DP's ordering, and still blends exactly as before.
+     one KTC-BLEND-DEGRADED line when KTC is unavailable, thin, partial
+     (coverage below KTC_MIN_COVERAGE) or disagrees with DP's ordering. The
+     first three stay DP-only (models-lead addendum R5); disagrees blends.
 """
 import json
 from pathlib import Path
@@ -295,12 +296,19 @@ def _blend_1qb(monkeypatch, ktc):
 
 def test_a_healthy_blend_is_ok_and_silent(monkeypatch, capsys):
     """The real 2026-07-17 data: 441 matched, KTC and DP orderings agree
-    (rank correlation 0.935, well above the 0.7 floor)."""
-    _blend_1qb(monkeypatch, _KTC)
+    (rank correlation 0.935, well above the 0.7 floor), and it clears every
+    coverage floor with margin: still clear with each floor raised 10%."""
+    before, after = _blend_1qb(monkeypatch, _KTC)
     status = dl.KTC_BLEND_STATUS["1qb_ppr"]
-    assert (status["state"], status["matched"]) == ("ok", 441)
+    assert (status["state"], status["matched"], status["short"]) == ("ok", 441, [])
     assert status["rank_corr"] >= 0.9 > dl.KTC_MIN_RANK_CORR
+    assert after != before                                    # blended
     assert "KTC-BLEND-DEGRADED" not in capsys.readouterr().out
+    elo, val, pos = _dp_maps("1qb_ppr")
+    matched = [(k, 0.0) for k in val if k in _KTC and _KTC[k]["pos"] == pos.get(k)]
+    monkeypatch.setattr(dl, "KTC_MIN_COVERAGE",
+                        {k: v * 1.1 for k, v in dl.KTC_MIN_COVERAGE.items()})
+    assert dl._coverage_short(matched, val, pos) == []
 
 
 def test_unavailable_ktc_is_flagged_and_dp_only(monkeypatch, capsys):
@@ -312,14 +320,41 @@ def test_unavailable_ktc_is_flagged_and_dp_only(monkeypatch, capsys):
     assert "consensus seeds are DP-only" in out and "ktc_blend_weight=0" in out
 
 
-def test_a_thin_match_is_flagged(monkeypatch, capsys):
-    """A page change that still parses but matches few pool players."""
+def test_a_thin_match_is_flagged_and_dp_only(monkeypatch, capsys):
+    """A page change that still parses but matches few pool players: the
+    blend doesn't run (models-lead R5), so the line's "DP-only" is true."""
     few = dict(list(_KTC.items())[:dl.KTC_MIN_MATCHED - 1])
-    _blend_1qb(monkeypatch, few)
+    before, after = _blend_1qb(monkeypatch, few)
+    assert after == before
     status = dl.KTC_BLEND_STATUS["1qb_ppr"]
     assert (status["state"], status["rank_corr"]) == ("thin", None)
     assert status["matched"] < dl.KTC_MIN_MATCHED
-    assert "reason=thin" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "reason=thin" in out and "consensus seeds are DP-only" in out
+
+
+def _half(ktc):
+    import random
+    keys = sorted(ktc)
+    return {k: ktc[k] for k in random.Random(0).sample(keys, len(keys) // 2)}
+
+
+@pytest.mark.parametrize("subset, short", [
+    (lambda k: {n: r for n, r in k.items() if r["pos"] == "WR"}, ["overall", "QB", "RB", "TE"]),
+    (lambda k: {n: r for n, r in k.items() if r["pos"] == "QB"}, ["overall", "RB", "WR", "TE"]),
+    (_half, None),
+], ids=["wr_only", "qb_only", "random_half"])
+def test_a_partial_match_is_flagged_and_dp_only(monkeypatch, capsys, subset, short):
+    """models-lead R5's coverage gate, on QA's three subsets: each has 50+
+    matches, but covers too little of the pool (or of a position) for the
+    rank-normalization onto the whole pool's curve to be right."""
+    before, after = _blend_1qb(monkeypatch, subset(_KTC))
+    status = dl.KTC_BLEND_STATUS["1qb_ppr"]
+    assert status["state"] == "partial" and status["matched"] >= dl.KTC_MIN_MATCHED
+    assert "overall" in status["short"] and (short is None or status["short"] == short)
+    assert after == before
+    out = capsys.readouterr().out
+    assert "reason=partial" in out and "consensus seeds are DP-only" in out
 
 
 def test_an_ordering_that_disagrees_with_dp_is_flagged_but_still_blended(monkeypatch, capsys):

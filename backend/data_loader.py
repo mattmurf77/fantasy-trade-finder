@@ -219,14 +219,24 @@ TEP_TE_UPLIFT_DEFAULT = 1.18
 # would silently move every user's values to DP-only, or blend in garbage
 # that still parses. Each blend checks its own health and prints one
 # `KTC-BLEND-DEGRADED` line when it's off (a Render log alert keys on it;
-# runbook § KTC consensus blend). It only reports: the blend still runs as
-# before, and the lever stays ktc_blend_weight = 0.
+# runbook § KTC consensus blend). The lever stays ktc_blend_weight = 0.
 #   unavailable — KTC returned nothing (fetch or parse failure): DP-only
-#   thin        — fewer than KTC_MIN_MATCHED pool players matched
+#   thin        — fewer than KTC_MIN_MATCHED pool players matched: DP-only
+#   partial     — the matched players cover less of the pool than
+#                 KTC_MIN_COVERAGE, overall or for a position: DP-only
 #   disagrees   — KTC's ordering vs DP's over the matched players has a
-#                 Spearman rank correlation below KTC_MIN_RANK_CORR
+#                 Spearman rank correlation below KTC_MIN_RANK_CORR: blended
+#                 anyway (the page parses; only the ordering looks wrong)
+# thin and partial keep the blend off (models-lead addendum R5): the
+# rank-normalization maps the matched set onto the top of the WHOLE pool's DP
+# curve, which is only right when the matched set covers most of the pool.
 KTC_MIN_MATCHED = 50
 KTC_MIN_RANK_CORR = 0.7
+# R5's floors, about 85% of the last healthy fetch's coverage, rounded down:
+# 2026-07-17 (the blend fixtures) matched 441/633 = 0.697 overall, QB 0.747,
+# RB 0.699, WR 0.748, TE 0.562, in both formats.
+KTC_MIN_COVERAGE = {"overall": 0.59, "QB": 0.63, "RB": 0.59, "WR": 0.63, "TE": 0.47}
+_KTC_BLENDS = ("ok", "disagrees")       # the states in which the blend runs
 # The last blend's health per format: {fmt: {"state", "matched", "rank_corr",
 # "checked_at"}}, state "ok" or one of the reasons above.
 KTC_BLEND_STATUS: dict[str, dict] = {}
@@ -435,29 +445,51 @@ def _rank_corr(xs: list[float], ys: list[float]) -> float:
     return cov / math.sqrt(vx * vy) if vx and vy else 0.0
 
 
-def _record_blend_health(fmt: str, n_ktc: int, matched: list, value_map: dict) -> None:
-    """S5: record this blend's health in KTC_BLEND_STATUS and print the
-    KTC-BLEND-DEGRADED line when it isn't ok (see KTC_MIN_MATCHED)."""
+def _coverage_short(matched: list, value_map: dict, pos_map: dict) -> list[str]:
+    """The KTC_MIN_COVERAGE floors the matched players miss: "overall", and
+    each of QB, RB, WR, TE whose pool players are covered below its floor (a
+    position with no pool players is skipped)."""
+    keys = {k for k, _ in matched}
+    short = (["overall"] if len(keys) < KTC_MIN_COVERAGE["overall"] * len(value_map) else [])
+    for pos in ("QB", "RB", "WR", "TE"):
+        pool = [k for k in value_map if pos_map.get(k) == pos]
+        if pool and sum(1 for k in pool if k in keys) < KTC_MIN_COVERAGE[pos] * len(pool):
+            short.append(pos)
+    return short
+
+
+def _record_blend_health(fmt: str, n_ktc: int, matched: list, value_map: dict,
+                         pos_map: dict) -> str:
+    """S5: record this blend's health in KTC_BLEND_STATUS, print the
+    KTC-BLEND-DEGRADED line when it isn't ok, and return the state (the
+    blend runs only in _KTC_BLENDS; see KTC_MIN_MATCHED)."""
     corr = (_rank_corr([v for _, v in matched], [value_map[k] for k, _ in matched])
             if len(matched) >= KTC_MIN_MATCHED else None)
+    short = _coverage_short(matched, value_map, pos_map) if corr is not None else []
     if not n_ktc:
         state = "unavailable"
     elif len(matched) < KTC_MIN_MATCHED:
         state = "thin"
+    elif short:
+        state = "partial"
     elif corr < KTC_MIN_RANK_CORR:
         state = "disagrees"
     else:
         state = "ok"
     KTC_BLEND_STATUS[fmt] = {"state": state, "matched": len(matched),
+                             "coverage": round(len(matched) / len(value_map), 3),
+                             "short": short,
                              "rank_corr": None if corr is None else round(corr, 3),
                              "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     if state != "ok":
         print(f"🚨 KTC-BLEND-DEGRADED fmt={fmt} reason={state} "
               f"matched={len(matched)}/{len(value_map)} ktc_rows={n_ktc} "
-              f"rank_corr={'n/a' if corr is None else f'{corr:.3f}'}: "
-              + ("consensus seeds are DP-only for this format"
-                 if state != "disagrees" else "blended anyway; check KTC's page")
+              f"rank_corr={'n/a' if corr is None else f'{corr:.3f}'}"
+              + (f" short={','.join(short)}" if short else "") + ": "
+              + ("blended anyway; check KTC's page" if state in _KTC_BLENDS
+                 else "consensus seeds are DP-only for this format")
               + "; kill switch ktc_blend_weight=0 (runbook § KTC consensus blend)")
+    return state
 
 
 def _apply_consensus_blend(
@@ -484,8 +516,7 @@ def _apply_consensus_blend(
             if k in ktc and ktc[k]["pos"] == pos_map.get(k)
             and fmt in ktc[k]["values"]
         ]
-        _record_blend_health(fmt, len(ktc), matched, value_map)
-        if matched:
+        if _record_blend_health(fmt, len(ktc), matched, value_map, pos_map) in _KTC_BLENDS:
             # Rank-normalize KTC onto the DP value curve, then weighted-avg.
             curve = sorted(value_map.values(), reverse=True)
             matched.sort(key=lambda t: (-t[1], -value_map[t[0]], t[0]))
