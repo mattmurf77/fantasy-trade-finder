@@ -104,6 +104,7 @@ import { track } from '../api/events';
 import { readErrorCopy } from '../utils/verification';
 import { haptics } from '../utils/haptics';
 import { tickerWindow } from '../utils/tickerWindow';
+import { realName, teamLabel } from '../utils/teamLabel';
 import {
   filterPool,
   POOL_POSITIONS,
@@ -507,8 +508,14 @@ export default function MockDraftScreen({ route, navigation }: any = {}) {
   // to its own honest placeholder rather than a raw id.
   const ownerNames = useMemo(() => {
     const m = new Map<string, string>();
-    for (const o of state?.order ?? []) {
-      if (o.owner_user_id) m.set(o.owner_user_id, ownerNameOf(o.owner_username, o.owner_user_id));
+    const order = state?.order ?? [];
+    for (const o of order) {
+      if (o.owner_user_id) {
+        m.set(
+          o.owner_user_id,
+          ownerNameOf(o.owner_username, o.owner_user_id, ownSlotOf(order, o.owner_user_id)),
+        );
+      }
     }
     return m;
   }, [state?.order]);
@@ -1065,7 +1072,12 @@ function Recap({
       // Same ladder as the on-the-clock card (D-16). The recap's rail is the
       // second site: fixing only the clock would leave a finished MFL mock
       // still printing raw franchise ids down every round.
-      if (o.owner_user_id) m.set(o.owner_user_id, ownerNameOf(o.owner_username, o.owner_user_id));
+      if (o.owner_user_id) {
+        m.set(
+          o.owner_user_id,
+          ownerNameOf(o.owner_username, o.owner_user_id, ownSlotOf(state.order, o.owner_user_id)),
+        );
+      }
     }
     return m;
   }, [state.order]);
@@ -1170,40 +1182,37 @@ function resolveUserOwnerId(state: MockDraftState | null): string | null {
   return own != null ? String(own) : null;
 }
 
-/** `mfl:<league>.f<franchise>` — the synthetic member id the backend mints
- *  for every MFL franchise that is not the linked user
- *  (`server.py:_MOCK_MFL_MEMBER_RE`). Kept in step with that regex, not
- *  broadened: a name is only invented for an id whose shape says what it is. */
-const MFL_MEMBER_RE = /^mfl:.*\.f(\w+)$/;
-
 /** An owner's display name, never a machine id (D-16).
  *
- *  The backend now resolves this through `league_members`
+ *  The backend resolves this through `league_members`
  *  (`username → display_name → session username → "Team <fid>"`,
  *  `server.py:_mock_owner_name`) and OMITS the key rather than emitting an
  *  empty string, so `owner_username` is a real name on almost every row and
- *  this fallback rarely fires. It still exists because the last resort it
- *  replaces was `String(roster_id)`, which on an MFL league renders
- *  `mfl:62846.f0003` — a raw synthetic id printed at the top of the board.
+ *  this fallback rarely fires. When it does, the label is the shared one
+ *  (`utils/teamLabel`, the labels the server writes): `Team <fid>` for an MFL
+ *  franchise, the same convention the backend's last rung uses, else
+ *  `Team <slot>` for the owner's own slot, else `Unnamed team`. An ESPN
+ *  (`espn:`) or `acct_` id, or a blank, is never rendered.
  *
- *  The `Team <fid>` string is the SAME convention the backend's last rung and
- *  G1's Draft Room hydration use (`draft_board_service._hydrate_mfl_picks`
- *  tier 3, `f"Player {mfl_pid}"`, is that convention for the *player* half).
- *  Two adjacent surfaces naming one franchise two ways is the whole defect —
- *  so this is the shipped convention re-used, not a second one invented.
- *
- *  Non-MFL ids fall through to the shipped behaviour: a Sleeper roster id is
- *  a number the user has at least seen before, and inventing a name for it
- *  would be a change to the Sleeper path that D-16 does not authorise. */
-function ownerNameOf(username: string | null | undefined, ownerId: unknown): string {
-  const name = String(username ?? '').trim();
-  if (name && !name.includes('mfl:')) return name;
+ *  One path stays as shipped: a nameless Sleeper owner (an all-digit id)
+ *  still renders that id, because D-16 did not authorise a change to the
+ *  Sleeper path. That id is the owner's Sleeper USER id
+ *  (`server.py:_mock_owner_ids`), not a roster id; raised with draft-eng
+ *  2026-11-03 rather than changed here. */
+function ownerNameOf(
+  username: string | null | undefined,
+  ownerId: unknown,
+  slot?: number | null,
+): string {
   const id = String(ownerId ?? '');
-  const match = MFL_MEMBER_RE.exec(id);
-  // The fid exactly as it appears in the id, zero-padding intact — the
-  // backend pads the same way, so the two cannot render "Team 3" vs "Team 0003".
-  if (match) return `Team ${match[1]}`;
-  return id;
+  if (/^\d+$/.test(id) && !realName([username], id)) return id;
+  return teamLabel([username], id, slot);
+}
+
+/** The slot a mock team picks from in its own right: the slot of a row it
+ *  owns that was not traded to it. */
+function ownSlotOf(order: MockDraftState['order'], ownerId: string): number | null {
+  return order.find((r) => r.owner_user_id === ownerId && !r.is_traded)?.slot ?? null;
 }
 
 function emptyCopy(reason: string | null): string {

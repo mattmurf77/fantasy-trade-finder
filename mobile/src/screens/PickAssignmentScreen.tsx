@@ -108,6 +108,7 @@ import {
 } from '../api/pickAssignment';
 import { getLeagueMembers } from '../api/league';
 import { relativeTime } from '../utils/relativeTime';
+import { assignmentSlots, teamLabel } from '../utils/teamLabel';
 import { haptics } from '../utils/haptics';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
@@ -406,6 +407,28 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
     [teams],
   );
 
+  /** The setup list's members, as leaguemates may see them: a real name,
+   *  else the grid's name (server-healed, #497), else `Team <slot>`. The
+   *  slot comes from the server's order and grid (`assignmentSlots`), so
+   *  two nameless members never read alike and a label never follows a
+   *  drag. Never the member id. */
+  const setupMembers: TeamRef[] | null = useMemo(() => {
+    const members = membersQuery.data?.members;
+    if (!members) return null;
+    const slots = assignmentSlots(
+      [...(data?.settings.order ?? []), ...members.map((m) => m.user_id)],
+      data?.seasons.flatMap((s) => s.slots) ?? [],
+    );
+    return members.map((m) => ({
+      user_id: m.user_id,
+      name: teamLabel(
+        [m.display_name, m.username, teamNameOf(m.user_id)],
+        m.user_id,
+        slots.get(m.user_id),
+      ),
+    }));
+  }, [membersQuery.data, data, teamNameOf]);
+
   /** Every deviation across ALL four seasons — the review summary. The
    *  cross-season scope is the point: a 2029 first that changed hands is
    *  exactly the slot nobody would scroll to. Contested and orphaned rows
@@ -636,12 +659,7 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
         // so passing them straight through can never overwrite a saved one.
         suggestedOrder={data.suggested_order}
         suggestedOrderSeason={data.suggested_order_season}
-        members={
-          membersQuery.data?.members?.map((m) => ({
-            user_id: m.user_id,
-            name: m.display_name || m.username || m.user_id,
-          })) ?? teams
-        }
+        members={setupMembers ?? teams}
         loadingMembers={membersQuery.isLoading}
         saving={seedMutation.isPending}
         onCancel={data.seeded ? () => setSetupOpen(false) : undefined}
