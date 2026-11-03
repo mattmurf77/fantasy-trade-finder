@@ -36,6 +36,10 @@
 //       alias, default or namespace import of that module); and the
 //       global-object rule sees through `(…)`, `as`, `!`, `satisfies`.
 //       Declared residual: `track(` with a variable that holds a secret.
+//       Round 4: any non-literal element access on a global object fails,
+//       `eval(` / `Function(` / `new Function(` are banned, and the generic
+//       keywords (pass, body, res, minted) match identifiers only, so a
+//       string literal like `step: 'minted'` stays green.
 //   (d) EspnLinkSheet.tsx + PlatformLinkSheet.tsx: every onEntrySession(...)
 //       call forwards `account_only` and `username` from the mint response,
 //       and both prop types declare them as optional additions.
@@ -240,22 +244,28 @@ if (mint) {
 const SINK_CALLEE = /^(track|captureException|(console|AsyncStorage|SecureStore|Sentry)\.\w+)$/;
 const SINK_ROOTS = new Set(['track', 'captureException', 'console', 'AsyncStorage', 'SecureStore', 'Sentry']);
 const GLOBAL_OBJECTS = new Set(['globalThis', 'window', 'global', 'self']);
+// Credential-named terms match anywhere in an argument's text (a string
+// naming one is suspicious enough to fail).
 const LEAK_TERMS = [
   /password/i,
   /mflPass/,
-  /\bpass\b/,
   /entryMflPassRef/,
   /espnS2/i,
   /espn_s2/i,
   /swid/i,
-  /\bbody\b/,
   /^args$/, // the whole mint args object (carries the password)
   /\.\.\.\s*args\b/,
   // The mint response carries the session token (2026-10-26 QA delta).
   /session_token/i,
-  /\bminted\b/,
-  /\bres\b/,
 ];
+// Generic words match IDENTIFIERS only (round 4): `minted.user_id` or a
+// `pass` variable fails, but a string literal such as `step: 'minted'` or
+// `kind: 'body'` does not.
+const LEAK_IDENTIFIERS = new Set(['pass', 'body', 'res', 'minted']);
+function argLeaks(arg) {
+  if (LEAK_TERMS.some((re) => re.test(arg.getText()))) return true;
+  return findAll(arg, (n) => ts.isIdentifier(n) && LEAK_IDENTIFIERS.has(n.text)).length > 0;
+}
 
 // A sink root may only be CALLED directly: `track(…)` or `console.log(…)` /
 // `console?.log(…)` / `console['log'](…)`. Any other expression use is an
@@ -347,6 +357,37 @@ function globalSinkAccess(sf) {
     );
   });
 }
+// Round 4: a computed key on a global object can name anything
+// (`globalThis['con' + 'sole']`, `window[k]`), so any NON-literal element
+// access on globalThis / window / global / self fails, after unwrapping.
+function globalComputedAccess(sf) {
+  return findAll(sf, (n) => {
+    if (!ts.isElementAccessExpression(n)) return false;
+    const obj = unwrapExpr(n.expression);
+    if (!ts.isIdentifier(obj) || !GLOBAL_OBJECTS.has(obj.text)) return false;
+    const key = unwrapExpr(n.argumentExpression);
+    return !(ts.isStringLiteralLike(key) || ts.isNumericLiteral(key));
+  });
+}
+// Round 4: dynamic code can reach any sink by string, so `eval(`,
+// `Function(` and `new Function(` are banned — any value use of `eval` or
+// `Function` (direct, aliased, `(0, eval)(…)`), and `eval` / `Function`
+// read off a global object. `Function` as a TYPE is not a use.
+const DYNAMIC_CODE = new Set(['eval', 'Function']);
+function dynamicCodeUses(sf) {
+  return findAll(sf, (n) => {
+    if (ts.isIdentifier(n) && DYNAMIC_CODE.has(n.text)) return !isNonUsePosition(n);
+    if (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) {
+      const obj = unwrapExpr(n.expression);
+      if (!ts.isIdentifier(obj) || !GLOBAL_OBJECTS.has(obj.text)) return false;
+      const name = ts.isPropertyAccessExpression(n)
+        ? n.name.text
+        : ts.isStringLiteralLike(n.argumentExpression) && n.argumentExpression.text;
+      return DYNAMIC_CODE.has(name);
+    }
+    return false;
+  });
+}
 
 // Module-level routes to a sink (round-3 QA, 2026-10-27). The storage and
 // crash-report SDKs (names as in mobile/package.json) may not be imported,
@@ -433,9 +474,7 @@ for (const [rel, sf] of Object.entries(sinkFiles)) {
     sf,
     (n) => ts.isCallExpression(n) && SINK_CALLEE.test(calleeText(n)),
   );
-  const leaky = sinks.filter((c) =>
-    c.arguments.some((a) => LEAK_TERMS.some((re) => re.test(a.getText()))),
-  );
+  const leaky = sinks.filter((c) => c.arguments.some(argLeaks));
   assert(
     leaky.length === 0,
     `${path.basename(rel)}: no track/console/storage/crash-report call mentions a credential, a body or the mint response`,
@@ -452,6 +491,18 @@ for (const [rel, sf] of Object.entries(sinkFiles)) {
     globals.length === 0,
     `${path.basename(rel)}: no sink reached through globalThis / window / global / self`,
     globals.map((n) => n.getText().slice(0, 80)).join(' | '),
+  );
+  const computed = globalComputedAccess(sf);
+  assert(
+    computed.length === 0,
+    `${path.basename(rel)}: no non-literal element access on globalThis / window / global / self`,
+    computed.map((n) => n.getText().slice(0, 80)).join(' | '),
+  );
+  const dyn = dynamicCodeUses(sf);
+  assert(
+    dyn.length === 0,
+    `${path.basename(rel)}: no eval( / Function( / new Function(`,
+    dyn.map((n) => n.parent.getText().slice(0, 80)).join(' | '),
   );
   const banned = bannedSinkUses(sf);
   assert(
