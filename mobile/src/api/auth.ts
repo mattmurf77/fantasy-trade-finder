@@ -163,12 +163,12 @@ export async function linkSleeperUsername(
 export interface AccountInfo {
   ok: boolean;
   sleeper_user_id: string;
-  verified_via: 'sleeper' | 'apple' | 'google' | null;
+  verified_via: 'sleeper' | 'apple' | 'google' | 'mfl_login' | 'espn' | null;
   account: {
     account_id: string;
     sleeper_user_id: string | null;
     created_at: string;
-    identities: Array<{ provider: 'apple' | 'google'; linked_at: string }>;
+    identities: Array<{ provider: 'apple' | 'google' | 'espn' | 'mfl'; linked_at: string }>;
   } | null;
   /** P2.6 — session is keyed to an account with no linked Sleeper source. */
   account_only?: boolean;
@@ -184,13 +184,27 @@ export async function getAccount(): Promise<AccountInfo> {
 // Always available (not flag-gated). Deletes the user's data per the
 // privacy policy; the backend also invalidates every session server-side,
 // so the caller must sign out locally on success.
+//
+// LEG-S6 (#354): `appleAuthorizationCode`, a fresh Sign in with Apple code,
+// goes up as `apple_authorization_code` so the server can revoke Sign in with
+// Apple (accounts.revoke_apple_tokens). Without a code this is the plain,
+// body-less DELETE, and the server deletes either way.
 export interface DeleteAccountResponse {
   ok: boolean;
   deleted: Record<string, number>;
+  /** True only when Apple confirmed the Sign in with Apple revocation. */
+  apple_revoked?: boolean;
 }
 
-export async function deleteAccount(): Promise<DeleteAccountResponse> {
-  return apiRequest<DeleteAccountResponse>('/api/account', { method: 'DELETE' });
+export async function deleteAccount(
+  opts: { appleAuthorizationCode?: string | null } = {},
+): Promise<DeleteAccountResponse> {
+  return apiRequest<DeleteAccountResponse>('/api/account', {
+    method: 'DELETE',
+    ...(opts.appleAuthorizationCode
+      ? { body: { apple_authorization_code: opts.appleAuthorizationCode } }
+      : {}),
+  });
 }
 
 // POST /api/session/init — full app session. Called after the user picks
@@ -258,6 +272,14 @@ async function requireSameSession(token: string | null): Promise<void> {
   }
 }
 
+// Time to trade suggestion (R2 `launch_state`, T3): a search tapped before
+// this process's first session-init completed is a `cold_launch`. Process
+// lifetime, in memory; set once a /api/session/init response is accepted.
+let _sessionInitCompleted = false;
+export function sessionInitCompletedThisProcess(): boolean {
+  return _sessionInitCompleted;
+}
+
 export async function sessionInit(body: SessionInitBody, control: SessionInitControl): Promise<SessionInitResponse> {
   control.assertCurrent();
   const sessionToken = control.token;
@@ -280,6 +302,7 @@ export async function sessionInit(body: SessionInitBody, control: SessionInitCon
       deadlineAt: control.deadlineAt, beforeDispatch: () => { control.assertCurrent(); control.onDispatch(); }}));
   await requireSameSession(sessionToken);
   control.assertCurrent();
+  _sessionInitCompleted = true;
   // Mirror the server's verified-session state into the store so the
   // verify banner reacts to every init/revalidate. Loaded inline to avoid
   // a circular import (same pattern as consumeInvitedBy below).
@@ -354,8 +377,34 @@ export async function sessionInit(body: SessionInitBody, control: SessionInitCon
 }
 
 // GET /api/session/ping — session liveness check. 401 → token expired.
-export async function sessionPing(): Promise<{ ok: true }> {
+// Also carries `verification`, the same field session/init returns.
+export async function sessionPing(): Promise<{
+  ok: true;
+  user_id?: string;
+  verification?: SessionVerification;
+}> {
   return api.get('/api/session/ping');
+}
+
+/** Record the server's verification state for a session that never reaches
+ *  session/init: an account-only session (Apple-first, no league) pins the
+ *  NO_LEAGUE_ID sentinel, so revalidateSession and initLeagueSession skip it,
+ *  and `verification` would otherwise stay null for good (head-eng
+ *  2026-10-28; #495's Restore row reads it). The answer is recorded only if
+ *  the same user is still signed in when it lands. A failure (offline,
+ *  expired) keeps the current state, like revalidateSession. */
+export async function refreshVerification(): Promise<void> {
+  const { useSession } = require('../state/useSession');
+  const askedFor = useSession.getState().user?.user_id ?? null;
+  if (!askedFor) return;
+  try {
+    const res = await sessionPing();
+    if (!res?.verification || res.user_id !== askedFor) return;
+    if (useSession.getState().user?.user_id !== askedFor) return;
+    useSession.getState().setVerification(res.verification);
+  } catch {
+    // Offline or expired: keep the current state.
+  }
 }
 
 // ── Helper: initialize a session for a specific league ─────────────────

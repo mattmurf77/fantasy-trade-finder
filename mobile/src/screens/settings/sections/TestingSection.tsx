@@ -1,4 +1,5 @@
-// Settings § Testing — Test feedback + Test stages (operator QA surface).
+// Settings § Testing — Test stages (operator QA surface). The feedback inbox
+// row that used to sit here moved to AboutSection (#354 BL-10, D-3).
 //
 // Lifted verbatim from SettingsScreen.tsx (origin/main) `testingSection` at
 // :1086-1118, plus:
@@ -37,7 +38,6 @@ export interface TestingSectionProps extends SettingsSectionProps {
 }
 
 export default function TestingSection({
-  navigate,
   navigateWithoutDismiss,
 }: TestingSectionProps) {
   // Operator QA tool (server also allowlist-gates the spawn route). The
@@ -50,19 +50,6 @@ export default function TestingSection({
       <View style={styles.section}>
         <TickLabel>Testing</TickLabel>
       </View>
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => navigate('FeedbackInbox')}
-        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={styles.rowKey}>Test feedback</Text>
-          <Text style={styles.rowSub}>
-            Review and share notes you captured with the floating button.
-          </Text>
-        </View>
-        <Icon name="chevron-right" color={chalk.dim} size={16} />
-      </Pressable>
       {stageUsersEnabled ? (
         <Pressable
           testID="settings.test-stages"

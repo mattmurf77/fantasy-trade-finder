@@ -4352,7 +4352,7 @@
 
     /* ─────────────────────────────────────────────────────────────
        Landing platform options — Sleeper · ESPN · MFL entry chips + the
-       ESPN/MFL entry panels (flag: landing.platform_options). Mirrors
+       ESPN/MFL entry panels (hard-off on web: WEB_PLATFORM_ENTRY in app.js). Mirrors
        mobile SignInScreen's platformChip: 36px, 1px --line-strong, radius
        --r-sm, transparent; selected = ice border + chalk text (ice = the
        action color, ADR-005). Rows reuse the league-item construction.

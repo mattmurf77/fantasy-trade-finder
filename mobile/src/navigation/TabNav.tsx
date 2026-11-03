@@ -468,14 +468,19 @@ function TradesStackNav() {
         // it), so "backing out" pops to the landing per ruling 4. A
         // param-less TradeDeck (the `app/trades/finder` deep link) keeps
         // its historical headerless render.
+        // 200 ms path (ux-lead U1, AC-L2): Find a trade is an INSTANT route —
+        // `animation: 'none'` on push and on pop, so the deck arrives with no
+        // motion and Back leaves the same way. The stack and its back
+        // control are unchanged (D-171 rulings 2–4).
         <TradesStack.Screen
           name="TradeDeck"
           component={TradesScreen}
-          options={({ route, navigation }) =>
-            (route.params as any)?.resultsPush
+          options={({ route, navigation }) => ({
+            ...((route.params as any)?.resultsPush
               ? subScreenOptions('Trade ideas', 'TradesHome')({ navigation })
-              : { headerShown: false }
-          }
+              : { headerShown: false }),
+            animation: 'none',
+          })}
         />
       ) : null}
       {/* Presentation v2 — registered unconditionally (see the import

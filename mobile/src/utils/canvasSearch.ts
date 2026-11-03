@@ -1,4 +1,6 @@
 import { track } from '../api/events';
+import { beginTradeSearch } from '../state/tradeSearchTrace';
+import { searchTypeOf } from './firstCardEvent';
 import type { CalcPlayer } from '../data/calcTypes';
 
 // ── The canvas fork (D-153), owned in ONE place (D-158, Wave B0) ─────────
@@ -20,9 +22,14 @@ import type { CalcPlayer } from '../data/calcTypes';
 // points price the same canvas differently — the exact class of drift D-153
 // removed from the server side by sharing `eval_consensus_package`.
 //
-// NO NEW EVENT: `calc_find_a_trade_tapped` and its four registered props are
-// unchanged; only the `screen` label differs between the hosts, which is why
-// it is a parameter rather than a constant.
+// NO NEW EVENT: `calc_find_a_trade_tapped` keeps its four registered props;
+// only the `screen` label differs between the hosts, which is why it is a
+// parameter rather than a constant.
+//
+// Time to trade suggestion (R1, addendum v2): the canvas tap IS the search
+// start, so the fork begins the search trace here, at the tap — one client
+// `search_id` for `find_trades_tapped {source: 'calculator'}` and for this
+// row — and returns it, so the request and the first card carry it too.
 
 export interface CanvasSearchFork {
   /** The D-153 verdict, and the value reported as `path`. */
@@ -36,6 +43,8 @@ export interface CanvasSearchFork {
    *  path. `null` on `model`, so a caller cannot accidentally anchor an
    *  empty canvas. */
   anchor: { giveIds: string[]; receiveIds: string[] } | null;
+  /** R1's client search id, minted at this tap (state/tradeSearchTrace). */
+  searchId: string;
 }
 
 export function forkCanvasSearch(
@@ -49,6 +58,12 @@ export function forkCanvasSearch(
   const giveIds = opts.give.map((p) => p.id);
   const receiveIds = opts.receive.map((p) => p.id);
   const fair = giveIds.length > 0;
+  const searchId = beginTradeSearch({
+    source: 'calculator',
+    mode: 'deck',
+    searchType: searchTypeOf({ fair, giveIds, receiveIds, opponentId: opts.opponent?.userId }),
+    screen,
+  });
   track(
     'calc_find_a_trade_tapped',
     {
@@ -56,6 +71,7 @@ export function forkCanvasSearch(
       give_count: opts.give.length,
       receive_count: opts.receive.length,
       has_partner: !!opts.opponent,
+      search_id: searchId,
     },
     screen,
   );
@@ -65,6 +81,7 @@ export function forkCanvasSearch(
     receiveIds,
     opponent: opts.opponent,
     anchor: fair ? { giveIds, receiveIds } : null,
+    searchId,
   };
 }
 

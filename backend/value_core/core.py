@@ -4,10 +4,12 @@ Enumerates 1-3 x 1-3 packages between the viewer and each partner and keeps the
 fair ones: a premium-adjusted consensus-market ratio inside the band, plus the
 hard rules, applied in REJECT_CODES order. It sees market values, rosters,
 roster rules, untouchables and pins; a board only for throw-ins and a team window
-only for the picks_for_players rule; the redundant rule reads lineup slots. No logging, no I/O, no flag or config reads.
+only for the picks_for_players rule; the redundant rule reads lineup slots. No I/O, no flag or config reads.
+The only log line is the safety ceiling's ERROR (find_fair_trades): work is count-bounded, never clock-bounded.
 """
 from __future__ import annotations
 
+import logging
 import math
 import time
 from bisect import bisect_left, bisect_right
@@ -28,12 +30,14 @@ from .types import (
 )
 
 __all__ = [
-    "TIME_BUDGET_S", "MAX_CHECKS_PER_PARTNER", "MAX_PACKAGE_SIZE", "MAX_THROWIN_OPTIONS",
+    "SAFETY_CEILING_S", "MAX_CHECKS_PER_PARTNER", "MAX_PACKAGE_SIZE", "MAX_THROWIN_OPTIONS",
     "PREMIUM_EXPONENT", "RATIO_TOL", "REJECT_CODES", "THROWIN_MIN_COMPARISONS", "effective_band",
     "stud_premium", "throwin_ok", "evaluate_trade", "find_fair_trades",
 ]
 
-TIME_BUDGET_S = 8.0
+log = logging.getLogger(__name__)
+
+SAFETY_CEILING_S = 30.0   # not a budget: only pathology reaches it (the check caps bound the work)
 MAX_CHECKS_PER_PARTNER = 40_000
 MAX_PACKAGE_SIZE = 3
 MAX_THROWIN_OPTIONS = 3   # qualifying throw-ins tried per side, per candidate pair (best recipient surplus first)
@@ -387,11 +391,15 @@ def evaluate_trade(snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig, 
 
 
 def find_fair_trades(snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig, *,
-                     time_budget_s: float = TIME_BUDGET_S,
+                     safety_ceiling_s: float = SAFETY_CEILING_S,
                      max_checks_per_partner: int = MAX_CHECKS_PER_PARTNER,
                      ) -> tuple[list[FairTrade], CoreDiagnostics]:
     """The unranked fair pool for the viewer against every partner (or request.partner_team_id).
-    Deterministic: same inputs -> same list, same order. Never raises for an empty result.
+    Deterministic: same inputs -> same list, same order, regardless of machine load. The work
+    is bounded by counts (max_checks_per_partner per check kind per partner, then
+    cfg.max_per_partner), never by the clock. safety_ceiling_s is not a budget: it only marks
+    pathology. If it fires, enumeration stops, diag.safety_ceiling_hit and diag.budget_exhausted
+    are set, an ERROR is logged, and the pool is partial. Never raises for an empty result.
     Raises ValueError only when request.viewer_team_id is not in snapshot.teams."""
     started = time.perf_counter()
     viewer_id = request.viewer_team_id
@@ -430,9 +438,9 @@ def find_fair_trades(snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig
                 t.give, t.receive)
 
     out: list[FairTrade] = []
-    for pid in partners:
-        if time.perf_counter() - started > time_budget_s:
-            diag.budget_exhausted = True
+    for done, pid in enumerate(partners):   # done = partners completed before this one
+        if time.perf_counter() - started > safety_ceiling_s:
+            diag.budget_exhausted = diag.safety_ceiling_hit = True
             break
         P = _packages(ctx, _candidates(ctx, snapshot.teams[pid], request.not_interested_ids,
                                        request.pinned_receive_ids, cfg.max_assets_per_side))
@@ -503,8 +511,8 @@ def find_fair_trades(snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig
                             stop = True
                             break
                         continue
-                    if sum(checks.values()) % 1000 == 0 and time.perf_counter() - started > time_budget_s:
-                        diag.budget_exhausted = stop = True
+                    if sum(checks.values()) % 1000 == 0 and time.perf_counter() - started > safety_ceiling_s:
+                        diag.budget_exhausted = diag.safety_ceiling_hit = stop = True
                         break
                     diag.pairs_checked += 1
                     reason, ratio, premium, side = _judge(ctx, v, p, gg, rr)
@@ -526,6 +534,10 @@ def find_fair_trades(snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig
         if diag.budget_exhausted:
             break
 
+    if diag.safety_ceiling_hit:
+        log.error("value-core: safety ceiling %.0f s hit; stopped with %d/%d partners done, "
+                  "%d pairs checked. The pool is partial. The core is count-bounded, so this is "
+                  "pathology, not load.", safety_ceiling_s, done, len(partners), diag.pairs_checked)
     out.sort(key=lambda t: (t.partner_team_id,) + cap_key(t))
     diag.elapsed_ms = int((time.perf_counter() - started) * 1000)
     return out, diag

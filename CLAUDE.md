@@ -17,7 +17,7 @@ Bias toward caution over speed; use judgment for trivial tasks.
 
 ## Stack
 
-- **Backend:** Python 3.12 / Flask (`backend/`), SQLAlchemy Core, 182 routes in `server.py`, 58 tables in `database.py`. SQLite at `data/trade_finder.db` locally; Postgres in prod via `DATABASE_URL`
+- **Backend:** Python 3.12 / Flask (`backend/`), SQLAlchemy Core, 182 routes in `server.py`, 97 tables in `database.py`. SQLite at `data/trade_finder.db` locally; Postgres in prod via `DATABASE_URL`
 - **Web frontend:** Vanilla HTML/CSS/JS in `web/` — no framework, no build step; Flask serves it as static
 - **Mobile:** React Native 0.81 + Expo SDK 54 (TypeScript) in `mobile/`; 31 screens; EAS → TestFlight
 - **Browser extension:** Chrome/Edge MV3 in `extension/`

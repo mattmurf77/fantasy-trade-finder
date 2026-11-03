@@ -17,6 +17,12 @@ Modules:
   nightly     — run_all(): re-run every registered scorer on the trailing
                 window (idempotent per day); server cron hook is a HANDOFF,
                 not wired here
+  flip_read   — the model-side 24 h read after the 200 ms flip (G1-G3,
+                G7-G10, the weekly U4-R4 / B4 ceilings), read-only
+                (python3 -m backend.eval.flip_read --help)
+  bdk_audit   — the B-DK-4..7 production audit: served violations of
+                deck.quality_filters' rules against a bar of 0, read-only
+                (python3 -m backend.eval.bdk_audit --help)
   synth       — synthetic logged-data generator for demos + the CLI
                 end-to-end check
 

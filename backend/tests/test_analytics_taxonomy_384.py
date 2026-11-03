@@ -52,9 +52,12 @@ _PROPS: dict[str, dict] = {
     # W6-B (D-153): `path` replaced `include_players`. The toggle it named is
     # gone — the canvas is always the anchor — so the prop now reports which
     # fork the tap actually took (`fair` = canvas anchored, `model` = empty).
+    # R1 (time to suggestion, addendum v2; analytics-lead grant): + the tap's
+    # client `search_id`, shared with its find_trades_tapped {source: calculator}.
     "calc_find_a_trade_tapped":     {"path": "fair",
                                      "give_count": 2, "receive_count": 1,
-                                     "has_partner": False},
+                                     "has_partner": False,
+                                     "search_id": "6f1c2d3e-0000-4000-8000-000000000000"},
     # Deck (screen 'Trades').
     "deck_back_to_calculator":      {"pin_count": 3},
     "deck_unpin_retry":             {"pin_count": 1},
@@ -149,8 +152,10 @@ def test_384_mints_no_duplicate_of_a_shipped_event():
     for shipped in ("find_trades_tapped", "trade_pass_layer1",
                     "trade_pass_layer2", "prompt_shown"):
         assert shipped in tax.ALLOWED_CLIENT_EVENTS
+    # R1 widening (time to suggestion, addendum v2; analytics-lead grant):
+    # + `search_id`. `source` and `mode` keep their meanings.
     assert tax.CLIENT_EVENT_PROPS["find_trades_tapped"] == frozenset(
-        {"source", "mode"})
+        {"source", "mode", "search_id"})
     # `prompt_deferred` is the twin of `prompt_shown`, not a replacement.
     assert tax.CLIENT_EVENT_PROPS["prompt_shown"] == frozenset({"surface"})
 

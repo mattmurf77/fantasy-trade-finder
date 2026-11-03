@@ -32,8 +32,13 @@ Three responsibilities:
    captured `sleeper_trades` row not yet linked, find the best-matching
    logged suggestion by the documented asset-set similarity rule and write
    one `suggestion_trade_links` row. `was_recommended` counts only NON-ghost
-   (actually rendered) matches; the best ghost match is linked separately —
-   ghost_impression_id hits are the incrementality read.
+   matches that were shown: viewed or first 30 (R-U6a); the best ghost match
+   is linked separately —
+   ghost_impression_id hits are the incrementality read. Eligible cards
+   (R-U6a, models-lead R3; `database._evidence_shown`): a row written at
+   build (legacy, flag off), or a deferred/packed deck's card in the first 30
+   or acted on (a first outcome joined by impression_id). An acted-on card
+   with no full row can't be matched: each pass logs those per run, by cause.
 
 Similarity rule (D-scope-5, also in docs/glossary.md):
   same unordered manager pair, served_at ≤ traded_at ≤ served_at + lookback
@@ -60,6 +65,7 @@ from datetime import datetime, timedelta, timezone
 from .database import (
     load_impressions_for_matching,
     load_unlinked_league_trades,
+    load_viewed_without_full_row,
     save_suggestion_trade_links,
 )
 from .feature_flags import is_enabled
@@ -296,8 +302,10 @@ def fetch_league_roster_map(
     for k, v in _HEADERS.items():
         request.add_header(k, v)
     opener = _opener or urllib.request.urlopen
-    with opener(request, timeout=timeout) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
+    from . import sleeper_http as _sleeper_http   # S0 — the shared 429 circuit
+    with _sleeper_http.guard(league_id):
+        with opener(request, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
     out: dict[str, str] = {}
     for r in payload if isinstance(payload, list) else []:
         rid, owner = r.get("roster_id"), r.get("owner_id")
@@ -383,6 +391,7 @@ def match_league_trades(
     lookback = timedelta(days=match_lookback_days())
     now_iso = datetime.now(timezone.utc).isoformat()
     links: list[dict] = []
+    windows: list[tuple[str, str]] = []
     for tr in trades:
         traded_at = _parse_iso(tr.get("traded_at")) or _parse_iso(tr.get("synced_at"))
         link = {
@@ -402,6 +411,7 @@ def match_league_trades(
         if sides is not None and traded_at is not None:
             since = (traded_at - lookback).isoformat()
             until = traded_at.isoformat()
+            windows.append((since, until))
             imps = load_impressions_for_matching(league_id, since, until)
             # Best candidate per pool (D-scope-5): exact beats partial, then
             # highest overlap, then most recent served_at. ISO timestamps
@@ -434,7 +444,29 @@ def match_league_trades(
                     "ghost_overlap_score": overlap,
                 })
         links.append(link)
+    if windows:
+        _log_viewed_without_full_row(league_id, min(w[0] for w in windows),
+                                     max(w[1] for w in windows))
     return save_suggestion_trade_links(links)
+
+
+def _log_viewed_without_full_row(league_id: str, since: str, until: str) -> None:
+    """models-lead R3: report, never silently drop, the acted-on cards this
+    pass couldn't match because they have no full row. One line per run, over
+    the pass's lookback windows; best-effort, never fails the pass."""
+    try:
+        runs = load_viewed_without_full_row(league_id=league_id, since_iso=since,
+                                            until_iso=until)
+    except Exception as e:
+        log.warning("suggestion telemetry: viewed-without-full-row read failed for %s: %s",
+                    league_id, e)
+        return
+    for run_id, counts in sorted(runs.items()):
+        # U4-R2: `other` must be zero, so a non-zero one is an ERROR; the named causes are expected.
+        level = logging.ERROR if counts["other"] else logging.WARNING
+        log.log(level, "[matcher] viewed without full row league=%s run=%s restart_split=%d "
+                "evicted_split=%d other=%d", league_id, run_id, counts["restart_split"],
+                counts["evicted_split"], counts["other"])
 
 
 def _score_impression(

@@ -35,8 +35,8 @@ why). Base URL builder: `mfl_service.export_url(host, year, type_, league_id)`
 | 2 | Login (authenticated flow, #177) | `https://api.myfantasyleague.com/{year}/login` | POST | body `USERNAME`, `PASSWORD`, `XML=1` | `mfl_service.py:187` `login()`; called from `server.py:20095` (`mfl_auth_link`) |
 | 3 | List the signed-in user's leagues | `https://api.myfantasyleague.com/{year}/export?TYPE=myleagues&YEAR={year}&FRANCHISE_NAMES=1&JSON=1` | GET | `TYPE=myleagues`, `YEAR`, `FRANCHISE_NAMES=1`, `JSON=1` + `Cookie: MFL_USER_ID=…` | `mfl_service.py:227` `fetch_my_leagues()`; called from `server.py:20097` (`mfl_auth_link`), `server.py:20158` (`mfl_auth_import`) |
 | 4 | League metadata (franchises, starters/lineup config) | `https://{host}/{year}/export?TYPE=league&L={id}&JSON=1` | GET | `TYPE=league` | `mfl_service.fetch_league_bundle()` (part of the 5-export bundle) and `fetch_scoring_inputs()` — both call the shared `_fetch_one` |
-| 5 | Rosters | `https://{host}/{year}/export?TYPE=rosters&L={id}&JSON=1` | GET | `TYPE=rosters` | `fetch_league_bundle()` only |
-| 6 | Future draft picks (owned-pick ledger) | `https://{host}/{year}/export?TYPE=futureDraftPicks&L={id}&JSON=1` | GET | `TYPE=futureDraftPicks` | `fetch_league_bundle()` (link/import time) AND standalone `mfl_service.py:388` `fetch_future_draft_picks()` (refresh cadence, §5) |
+| 5 | Rosters | `https://{host}/{year}/export?TYPE=rosters&L={id}&JSON=1` | GET | `TYPE=rosters` | `fetch_league_bundle()`; standalone `fetch_rosters()` for `/api/trades/validate`'s MFL branch; and since I-2 (2026-10-26) **at send** in `server._mfl_propose_core` (`POST /api/trades/propose-mfl` + the team-overhaul send). That read is the player-ownership check: one read, only when the trade carries players, called with `raise_auth=True` so a dead cookie (401/403) → 409 `mfl_auth_expired` with the credential dropped. Any other failure (an MflError degraded to `{}`, a body without `rosters`, or a transport error such as timeout, reset, `IncompleteRead` or `BadStatusLine`) → 502 `mfl_unavailable` `kind:"network"`, nothing sent |
+| 6 | Future draft picks (owned-pick ledger) | `https://{host}/{year}/export?TYPE=futureDraftPicks&L={id}&JSON=1` | GET | `TYPE=futureDraftPicks` | `fetch_league_bundle()` (link/import time) AND standalone `mfl_service.py:388` `fetch_future_draft_picks()` (refresh cadence, §5); and since I-2 (2026-10-26) **at send** in `server._mfl_propose_core`. That read is the live pick-ownership check (the stored snapshot stays the existence check), made once and only when the trade carries FTF picks. Its failures map the same way as row 5: `raise_auth=True`, so 401/403 → 409 `mfl_auth_expired`; anything else → 502 `mfl_unavailable` |
 | 7 | Players DB (id → name/position) | `https://{host}/{year}/export?TYPE=players&L={id}&JSON=1` | GET | `TYPE=players` | `fetch_league_bundle()` only — best-effort (degrades to `{}`) |
 | 8 | League rules (scoring config, for format detection #201) | `https://{host}/{year}/export?TYPE=rules&L={id}&JSON=1` | GET | `TYPE=rules` | `fetch_league_bundle()` (best-effort) and `fetch_scoring_inputs()` (best-effort) |
 | 9 | Draft results (draft-completion signal, #207) | `https://{host}/{year}/export?TYPE=draftResults&L={id}&JSON=1` | GET | `TYPE=draftResults` | `mfl_service.py:357` `fetch_draft_results()`; called from `server.py:11793` (`_detect_league_draft_status`, MFL branch, function starts `server.py:11745`) and `draft_board_service.py:311` (`PlatformFetchers.mfl_draft_results`) |
@@ -484,12 +484,40 @@ scope block §"v1 limitations").
 
 ### Error modes
 
-`MflWriteError` (`kind`: `'auth' | 'network' | 'error' | 'input'`) +
-`MflWriteAuthError`. Route mapping (`POST /api/trades/propose-mfl`): full
-table in [docs/api-reference.md](../api-reference.md) § Send in MFL —
-notably 422 `mfl_asset_unmapped` (crosswalk hard block, `unmapped[]` listed),
-409 `mfl_auth_expired` (credential dropped), 502 `mfl_write_failed`
-(carries `kind`/`detail`; HTTP 429 throttling surfaces as `kind: "network"`).
+`MflWriteError` (`kind`: `'auth' | 'network' | 'error' | 'input' |
+'outcome_unknown'`) + `MflWriteAuthError`. Route mapping
+(`POST /api/trades/propose-mfl`): full table in
+[docs/api-reference.md](../api-reference.md) § Send in MFL — notably 422
+`mfl_asset_unmapped` (crosswalk hard block, `unmapped[]` listed), 409
+`mfl_auth_expired` (credential dropped), 502 `mfl_write_failed` (nothing sent;
+carries `kind`; HTTP 429 throttling surfaces as `kind: "network"`) and 502
+`mfl_outcome_unknown` (C10, below).
+
+**Before vs. after the send (C10, 2026-10-27; `backend/write_outcome.py`).**
+The import is a GET, and urllib wraps only the connect and the request write
+in `URLError`. A `URLError` whose reason is a DNS failure, a refused
+connection or no route is **not sent** → `kind: "network"` →
+`mfl_write_failed`. Anything raised after the request went out (read timeout,
+reset, `RemoteDisconnected`, `IncompleteRead`), any 5xx, a `URLError` timeout
+or reset (conservative: urllib can't say whether it was the connect or the
+write), or a 200 body that is empty or neither success nor `<error>` (the
+body shape is still TODO(live-verify)) is `kind: "outcome_unknown"` →
+`mfl_outcome_unknown`: the import may have landed, so the user is told to
+check MFL and nothing retries. `POST /api/trades/respond-mfl` shares the
+adapter and the same mapping (`mfl_write_failed` / `mfl_outcome_unknown`),
+with "this response … nothing changed" copy instead of "this trade … nothing
+was sent".
+
+**Logging (C10).** MFL's raw body (`MflWriteError.detail`, ≤500 chars) is
+written to ONE `WARNING` line on the `trade_finder` logger
+(`mfl propose|respond write-failed [<kind>] <message>: <body>` or
+`mfl propose|respond auth-rejected: <body>`) after `_provider_body_for_log` flattens
+whitespace, masks `MFL_USER_ID=` values, SWID-shaped GUIDs and long opaque
+blobs, and truncates to 300 characters. It is never a response field on the
+propose or respond route: `detail` and `message` are plain copy. This is the one place
+the §6 "no raw bodies in a persistent sink" caution is relaxed, deliberately:
+an error body is the only evidence of why MFL refused a send, and it is
+masked and capped first.
 
 ### Rate limits / hygiene
 

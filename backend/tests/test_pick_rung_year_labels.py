@@ -16,6 +16,7 @@ Flask test client + in-memory SQLite + an injected fake ranking service — no
 network, no universal pool build.
 """
 import json
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -55,6 +56,8 @@ def _human():
 class _FakeService:
     """Minimal stand-in for RankingService — the relabel runs on the
     serialized dicts, so the ranking math is irrelevant here."""
+
+    _lock = threading.RLock()
 
     def __init__(self, players):
         self._players = players

@@ -11,8 +11,11 @@
 //   espn_pick_unsupported                  → hard block: picks can't be sent
 //   espn_asset_unmapped                    → hard block, nothing was sent
 //   verification_required | feature_disabled | espn_write_failed | bad_request
+//   espn_outcome_unknown, or our timeout / no answer → isSendOutcomeUnknown
+//                                          (api/sendOutcome.ts): check ESPN, no retry
 
 import { api, apiRequest } from './client';
+import { PLATFORM_SEND_TIMEOUT_MS } from './sendOutcome';
 
 export interface EspnLinkStatus {
   /** True only for a credential that PASSED a live authenticated ESPN read
@@ -80,5 +83,8 @@ export interface ProposeEspnTradeResult {
 export async function proposeTradeToEspn(
   payload: ProposeEspnTradePayload,
 ): Promise<ProposeEspnTradeResult> {
-  return api.post<ProposeEspnTradeResult>('/api/trades/propose-espn', payload);
+  // The server's worst case outlives the default 15 s timeout (api/sendOutcome.ts).
+  return api.post<ProposeEspnTradeResult>('/api/trades/propose-espn', payload, {
+    timeoutMs: PLATFORM_SEND_TIMEOUT_MS,
+  });
 }

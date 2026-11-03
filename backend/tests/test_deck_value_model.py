@@ -47,6 +47,7 @@ from backend.eval.synth import build_synthetic_db
 from backend.trade_service import TradeCard
 
 LEAGUE = "league_f6"
+AS_OF = datetime(2026, 10, 24, tzinfo=timezone.utc)   # train_model's explicit clock
 ME = "user_me"
 OPP = "user_opp"
 
@@ -129,7 +130,7 @@ def _auc(pairs):
 
 def _trained_model(tmp_path, persist=True):
     decks, _ = _synth_decks(tmp_path, n_decks=150, seed=11, name="train.db")
-    model = vm.train_model(decks)
+    model = vm.train_model(decks, as_of=AS_OF)
     assert model is not None
     if persist:
         vm.append_model(model)
@@ -201,7 +202,7 @@ def test_heads_beat_random_auc_on_heldout(tmp_path, mem_engine):
     decks, _ = _synth_decks(tmp_path)
     split = decks[int(len(decks) * 0.8)].served_at
     train, heldout = split_decks(decks, split)
-    model = vm.train_model(train)
+    model = vm.train_model(train, as_of=AS_OF)
     assert model is not None
     assert model.meta["n_like_rows"] >= vm.MIN_LIKE_ROWS
 
@@ -216,7 +217,7 @@ def test_calibration_within_tolerance_on_heldout(tmp_path, mem_engine):
     decks, _ = _synth_decks(tmp_path)
     split = decks[int(len(decks) * 0.8)].served_at
     train, heldout = split_decks(decks, split)
-    model = vm.train_model(train)
+    model = vm.train_model(train, as_of=AS_OF)
     rows, _ = vm.build_training_rows(heldout)
     pairs = [(model.p_like(r["f"], r["user_id"]), r["y"]) for r in rows]
     table = reliability_table(pairs)
@@ -230,7 +231,7 @@ def test_calibration_within_tolerance_on_heldout(tmp_path, mem_engine):
 
 def test_insufficient_labels_declines_to_train(tmp_path, mem_engine):
     decks, _ = _synth_decks(tmp_path, n_decks=2, seed=3, name="tiny.db")
-    assert vm.train_model(decks) is None
+    assert vm.train_model(decks, as_of=AS_OF) is None
 
 
 def test_monolith_log_odds_correction():

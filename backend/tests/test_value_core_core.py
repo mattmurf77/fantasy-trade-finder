@@ -4,8 +4,10 @@ Acceptance tests from docs/plans/value-core-engine/specs.md section 5.1; the
 implementation spec is lld.md section 4.
 """
 import dataclasses
+import logging
 import math
 from itertools import combinations
+from types import SimpleNamespace
 
 import pytest
 
@@ -59,7 +61,8 @@ def stud(a1, a2):
 
 
 def test_public_api():
-    assert set(core.__all__) == {"TIME_BUDGET_S", "MAX_CHECKS_PER_PARTNER", "MAX_PACKAGE_SIZE",
+    # TIME_BUDGET_S -> SAFETY_CEILING_S on purpose: the core is count-bounded, never clock-bounded (G-065)
+    assert set(core.__all__) == {"SAFETY_CEILING_S", "MAX_CHECKS_PER_PARTNER", "MAX_PACKAGE_SIZE",
                                  "MAX_THROWIN_OPTIONS", "PREMIUM_EXPONENT", "RATIO_TOL",
                                  "REJECT_CODES", "THROWIN_MIN_COMPARISONS", "effective_band",
                                  "stud_premium", "throwin_ok",
@@ -324,14 +327,36 @@ def test_per_partner_cap_spreads_headliner_pairs():
     assert diag.truncated_partners == 1
 
 
-def test_check_cap_and_budget():
+def test_check_cap():
     s = two_team()
     _, diag = find_fair_trades(s, Request("V"), CFG10, max_checks_per_partner=50)
     assert diag.pairs_checked <= 50
     assert diag.truncated_partners == 1
+    assert not diag.budget_exhausted and not diag.safety_ceiling_hit
 
-    _, diag = find_fair_trades(s, Request("V"), CFG10, time_budget_s=0.0)
-    assert diag.budget_exhausted is True
+
+@pytest.mark.parametrize("jump_after, pairs_checked", [(1, 0), (2, 999)])
+def test_safety_ceiling_marks_pathology(monkeypatch, caplog, jump_after, pairs_checked):
+    """The core's clock jumps past SAFETY_CEILING_S after `jump_after` reads. Read 1 is the
+    start, read 2 the partner-loop check, read 3 the check-loop check at 1,000 checks, so
+    the two cases cover both places the ceiling is checked."""
+    reads = []
+
+    def perf_counter():
+        reads.append(1)
+        return 0.0 if len(reads) <= jump_after else core.SAFETY_CEILING_S + 1.0
+    monkeypatch.setattr(core, "time", SimpleNamespace(perf_counter=perf_counter))
+    with caplog.at_level(logging.ERROR, logger=core.__name__):
+        trades, diag = find_fair_trades(two_team(), Request("V"), CFG10)
+    assert diag.safety_ceiling_hit is True and diag.budget_exhausted is True
+    assert diag.pairs_checked == pairs_checked
+    if pairs_checked == 0:
+        assert trades == [] and diag.partners == 0
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR and r.name == core.__name__]
+    assert len(errors) == 1
+    msg = errors[0].getMessage()
+    assert "safety ceiling 30 s hit" in msg
+    assert "0/1 partners done" in msg and f"{pairs_checked} pairs checked" in msg
 
 
 def test_deterministic():

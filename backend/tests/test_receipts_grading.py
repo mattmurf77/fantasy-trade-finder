@@ -30,7 +30,8 @@ about honesty and an unproved honesty claim is worse than no claim.
        dedup-by-earliest, min-n gating, the all-windows payload, flag-off
        404s, `n == len(rows used)`, and the Wilson triple 3/5 →
        [0.231, 0.882].
-  T-10 append-only — no UPDATE/DELETE path exists for `receipts_` tables.
+  T-10 append-only — no UPDATE/DELETE path exists for `receipts_` tables
+       (static half: test_receipts_append_only.py, AST over backend/ + scripts/).
 
 Harness: isolated in-memory SQLite (`backend/tests/CLAUDE.md` pattern 1) plus
 the Flask client + injected session (pattern 2). No network, no dev DB.
@@ -836,6 +837,35 @@ def test_t9_ghost_rows_are_excluded_at_the_QUEUE_layer(engine):
     assert _grade_for(served, window) is not None
 
 
+def _set_features(iid: str, features_json) -> None:
+    i = db_module.deck_impressions_table
+    with db_module.engine.begin() as conn:
+        conn.execute(i.update().where(i.c.impression_id == iid).values(features_json=features_json))
+
+
+def test_s4_calibrations_refresh_decks_never_enter_the_queue(engine):
+    """ADR-025 S4: a "grading_refresh" deck (Calibration's targeted refresh)
+    was never shown in Trades, so it is never a receipt, in either JSON form;
+    other deck sources, and a NULL features_json, stay gradeable."""
+    serve_date, window = _days_ago(30), 28
+    _pool([serve_date, rs._shift(serve_date, window)],
+          {"p1": 1000.0, "p2": 1200.0})
+    refresh = _impression(served_days_ago=30, features={"deck_source": "grading_refresh"})
+    compact = _impression(served_days_ago=30)
+    _set_features(compact, '{"deck_source":"grading_refresh","basis":"consensus"}')
+    replenish = _impression(served_days_ago=30, features={"deck_source": "replenish"})
+    pull = _impression(served_days_ago=30)
+    bare = _impression(served_days_ago=30)
+    _set_features(bare, None)
+    queued = {r["impression_id"] for r in db_module.load_receipts_queue(
+        window, rs.GRADER_VERSION, [serve_date], 100)}
+    assert queued == {replenish, pull, bare}
+    assert db_module.count_receipts_queue(window, rs.GRADER_VERSION, [serve_date]) == 3
+    rs.run_grading(trigger="cron")
+    assert _grade_for(refresh, window) is None and _grade_for(compact, window) is None
+    assert _grade_for(replenish, window) is not None
+
+
 def test_t9_ghost_rows_are_excluded_at_the_ROUTE_layer_too(engine):
     """Layer two, defence in depth. Even if a ghost grade somehow existed —
     an older grader version, a hand-inserted row — the read filters it."""
@@ -1061,22 +1091,41 @@ def test_t9_cron_route_rejects_a_nonsense_batch(client):
     assert res.status_code == 400
 
 
-def test_t9_daily_tick_payload_is_byte_identical_while_grading_is_dark(
-        client, monkeypatch):
-    """The daily-tick guard must be INVISIBLE while dark.
+def test_t9_daily_tick_does_not_start_grading_while_dark(client, monkeypatch):
+    """The daily-tick receipts step must be INERT while dark.
 
-    The tick's response payload is a contract other tests pin
-    (test_deck_replenishment.py). Adding a `receipts_grade_started: false` key
-    to every flag-off tick would be a payload change shipped by a dark
-    feature — the exact thing the `_run_weekly_replenishment` convention
-    exists to prevent. The counter appears only once grading is ON."""
-    from backend import server
-    c, _token, _server = client
+    The tick answers 202 `{ok, started}` and runs its steps on a runner
+    thread (docs/plans/daily-tick-fix/scope.md). With `receipts.grading` off
+    its receipts step (step 3) must log `skipped` and never reach
+    `run_grading`, so a dark grader writes nothing from the tick.
+
+    The run is joined before the test ends, so no runner thread outlives the
+    patches. StaticPool engine: the runner thread must see the same
+    in-memory DB (the default pool hands each thread a fresh, empty one)."""
+    from sqlalchemy.pool import StaticPool
+    from backend import api_observability as api_obs
+    from backend import daily_tick
+    c, _token, server = client
+    shared = create_engine("sqlite:///:memory:", poolclass=StaticPool,
+                           connect_args={"check_same_thread": False})
+    metadata.create_all(shared)
+    monkeypatch.setattr(db_module, "engine", shared)
     monkeypatch.setattr(ff, "_flags_cache", dict(ff.DEFAULT_FLAGS))
     monkeypatch.setattr(server, "load_all_signed_up_users", lambda: [])
+    # Its after_request write would share the StaticPool connection with
+    # the runner thread.
+    monkeypatch.setattr(api_obs, "is_enabled", lambda k: False)
+    calls = []
+    monkeypatch.setattr(rs, "run_grading",
+                        lambda **kw: calls.append(kw) or {"ok": True})
     res = c.post("/api/cron/daily-tick", headers={"X-Cron-Secret": "x"})
-    assert res.status_code == 200
-    assert "receipts_grade_started" not in res.get_json()
+    assert res.status_code == 202
+    assert res.get_json() == {"ok": True, "started": True}
+    results = daily_tick.wait(30)
+    assert results is not None, "daily-tick run did not finish"
+    step = {r.key: r for r in results}["receipts_grade"]
+    assert (step.outcome, step.detail) == ("skipped", "flag off")
+    assert calls == []                              # grading never started
 
 
 def test_t9_admin_route_404s_while_grading_is_dark(client, monkeypatch):
@@ -1091,35 +1140,8 @@ def test_t9_admin_route_404s_while_grading_is_dark(client, monkeypatch):
 # T-10 — append-only. Proves HLD D-3 mechanically.
 # ---------------------------------------------------------------------------
 
-RECEIPTS_TABLES = ("receipts_grades", "receipts_grade_runs")
-
-
-def test_t10_no_update_or_delete_path_exists_for_receipts_tables():
-    """Forbidden operation 4, enforced by grep rather than by intention.
-
-    "We can't move the goalposts" has to be MECHANICAL. If an UPDATE or
-    DELETE against a receipts table ever compiles, the append-only claim is
-    marketing. Both the service and the database helpers are scanned."""
-    offenders = []
-    for name in ("receipts_service.py", "database.py"):
-        for i, line in enumerate((REPO / "backend" / name).read_text()
-                                 .splitlines(), 1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
-            for table in RECEIPTS_TABLES:
-                token = f"{table}_table"
-                if token in line and (".update(" in line or ".delete(" in line):
-                    offenders.append(f"{name}:{i}: {stripped}")
-            if ("receipts" in line.lower()
-                    and ("UPDATE receipts" in line or "DELETE FROM receipts" in line)):
-                offenders.append(f"{name}:{i}: {stripped}")
-    assert offenders == [], (
-        "an UPDATE/DELETE path against a receipts table exists:\n"
-        + "\n".join(offenders)
-        + "\nCorrections are a grader_version bump plus a regrade, with the "
-          "old rows retained. Editing a grade destroys the audit trail that "
-          "makes the preregistration claim checkable.")
+# The static half lives in test_receipts_append_only.py: it parses every
+# backend/ and scripts/ file (AST-based since #544's QA, release-lead P1-1).
 
 
 def test_t10_regrading_never_mutates_an_existing_row(engine):

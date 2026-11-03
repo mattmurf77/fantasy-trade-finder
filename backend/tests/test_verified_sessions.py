@@ -21,6 +21,7 @@ mocked).
 import base64
 import io
 import json
+import threading
 import time
 import urllib.error
 from unittest.mock import MagicMock, patch
@@ -397,6 +398,8 @@ def test_first_verified_wins_across_live_sessions(client):
 # ---------------------------------------------------------------------------
 
 class _StubService:
+    _lock = threading.RLock()
+
     def __init__(self):
         self.reset_calls = []
         self._elo_overrides = {"123": 1600.0}

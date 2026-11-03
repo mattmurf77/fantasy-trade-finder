@@ -83,9 +83,11 @@ def fetch_league_players(league_id: str, *, _opener=None, timeout: int = 15) -> 
     # sites (docs/integrations/sleeper.md §6.3); routed through the shared
     # wrapper idiom here. Real network path only (`_opener` = tests).
     from . import api_observability as _api_obs
-    with _api_obs.observe_call("sleeper", "graphql.league_players",
-                               method="POST", active=_opener is None,
-                               league_id=league_id) as _ob:
+    from . import sleeper_http as _sleeper_http   # S0 — the shared 429 circuit
+    with _sleeper_http.guard(league_id), \
+            _api_obs.observe_call("sleeper", "graphql.league_players",
+                                  method="POST", active=_opener is None,
+                                  league_id=league_id) as _ob:
         with opener(request, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8")
         payload = json.loads(raw)
@@ -105,9 +107,11 @@ def _fetch_rosters(league_id: str, *, _opener=None, timeout: int = 15) -> list[d
     opener = _opener or urllib.request.urlopen
     # obs.api_events — `_sleeper_get` bypass site #2 (sleeper.md §6.3).
     from . import api_observability as _api_obs
-    with _api_obs.observe_call("sleeper", "league.rosters",
-                               active=_opener is None,
-                               league_id=league_id) as _ob:
+    from . import sleeper_http as _sleeper_http   # S0 — the shared 429 circuit
+    with _sleeper_http.guard(league_id), \
+            _api_obs.observe_call("sleeper", "league.rosters",
+                                  active=_opener is None,
+                                  league_id=league_id) as _ob:
         with opener(request, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8")
         rows = json.loads(raw)

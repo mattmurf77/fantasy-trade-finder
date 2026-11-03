@@ -12,7 +12,11 @@ import {
   setOnSessionExpired,
   setOnVerificationRequired,
 } from '../api/client';
-import { initLeagueSession, startDemoSession as apiStartDemoSession } from '../api/auth';
+import {
+  initLeagueSession,
+  refreshVerification,
+  startDemoSession as apiStartDemoSession,
+} from '../api/auth';
 import type { LeagueLite } from '../api/auth';
 import { getSeasonProjections } from '../api/winNow';
 import { createLeagueSessionLifecycle, LEAGUE_ATTEMPT_MS } from './leagueSession';
@@ -20,8 +24,10 @@ import type { InitCause, LeagueContext } from './leagueSession';
 import { connectLeague as apiConnectLeague } from '../api/league';
 import { getLeagues } from '../api/sleeper';
 import { initPurchases } from '../api/purchases';
+import { purchasesIdentityTarget } from './subscriptionSession';
 import { setUser as sentrySetUser } from '../observability/sentry';
 import { queryClient, seedLeagueSessionCaches } from './queryClient';
+import { clearDevicePages } from './devicePageStore';
 import { getActiveScoringFormat } from '../api/rankings';
 import type { LeagueSummary, ScoringFormat } from '../shared/types';
 
@@ -252,6 +258,18 @@ interface SessionState {
   signOut: () => Promise<void>;
 }
 
+/** Purchases identity bridge (iap-enablement). RevenueCat identifies ONLY a
+ *  verified session (head-eng 2026-10-29, release-lead QA P2-5): the one
+ *  caller of `initPurchases`, it configures on the first verified working key
+ *  of the launch and `logIn`s on any later one. An unverified, unknown or
+ *  demo session gets NOTHING: no configure, no logIn, no anonymous id. Run
+ *  wherever the user or the verification changes, after the state is current;
+ *  fire-and-forget and fully no-op without an SDK key (api/purchases.ts). */
+export function syncPurchasesIdentity(s: SessionState): void {
+  const id = purchasesIdentityTarget(s);
+  if (id) void initPurchases(id);
+}
+
 export const useSession = create<SessionState>((set, get) => ({
   user: null,
   league: null,
@@ -332,9 +350,12 @@ export const useSession = create<SessionState>((set, get) => ({
     // Purchases identity bridge (iap-enablement). A RESTORED session is the
     // other half of the sign-in path below: RevenueCat must be configured with
     // the same working key the backend resolves entitlements against, or a
-    // webhook lands on an app-user-id nothing here knows. Fire-and-forget and
-    // fully no-op without an SDK key — see api/purchases.ts.
-    if (user?.user_id) void initPurchases(user.user_id);
+    // webhook lands on an app-user-id nothing here knows. Verification is
+    // in-memory, so a restored Sleeper session is unknown here and configures
+    // once session_init reports it verified (setVerification); a restored
+    // account-only `acct_` session is verified by construction and configures
+    // now. See syncPurchasesIdentity.
+    syncPurchasesIdentity(get());
   },
 
   setRankingMethodPref: async (m) => {
@@ -348,6 +369,9 @@ export const useSession = create<SessionState>((set, get) => ({
 
   setVerification: (v) => {
     set({ verification: v });
+    // A session that verifies mid-launch identifies RevenueCat NOW (the first
+    // moment it may). Turning false does nothing: never logOut.
+    syncPurchasesIdentity(get());
   },
 
   dismissVerifyBanner: () => {
@@ -358,8 +382,15 @@ export const useSession = create<SessionState>((set, get) => ({
     const { user, league, isDemo } = get();
     if (!user || !league || isDemo) return;
     // The sentinel has no league to initialize. Account-only identities may
-    // still own a real imported ESPN/MFL/Fleaflicker league.
-    if (league.league_id === NO_LEAGUE_ID) return;
+    // still own a real imported ESPN/MFL/Fleaflicker league. Session init is
+    // where every other session gets `verification`, so the sentinel asks
+    // the server for it directly (head-eng 2026-10-28). Not awaited: callers
+    // chain foreground work on this (TradesScreen's device-page refresh), and
+    // the answer lands in the store on its own.
+    if (league.league_id === NO_LEAGUE_ID) {
+      void refreshVerification();
+      return;
+    }
     try {
       // Reuses the verified token. Consumers join this exact in-flight work;
       // a lost server context can force reconciliation past this throttle.
@@ -383,7 +414,16 @@ export const useSession = create<SessionState>((set, get) => ({
   setUser: async (u) => {
     leagueSessions.invalidate();
     const generation = leagueSessions.currentGeneration();
-    set({user: u, switching: false});
+    // 200 ms path C — an account switch (a re-auth as someone else, with no
+    // sign-out between) drops the previous account's device-held trade pages.
+    const previous = get().user;
+    if (previous && previous.user_id !== u?.user_id) void clearDevicePages();
+    // A different user_id (an expiry then someone else's sign-in, or the
+    // link-Sleeper re-key) starts from unknown verification: the previous
+    // user's answer never carries over. Every writer runs after this.
+    set(previous?.user_id === u?.user_id
+      ? {user: u, switching: false}
+      : {user: u, switching: false, verification: null});
     if (u) await AsyncStorage.setItem(SU_KEY, JSON.stringify(u));
     else   await AsyncStorage.removeItem(SU_KEY);
     if (generation !== leagueSessions.currentGeneration() || get().user !== u) return;
@@ -393,16 +433,19 @@ export const useSession = create<SessionState>((set, get) => ({
     // No-op when Sentry isn't initialized. Cleared on sign-out.
     sentrySetUser(u ? { id: u.user_id } : null);
     // Purchases identity bridge (iap-enablement): configure on the first
-    // working key of the launch, `Purchases.logIn(userId)` on any later one.
-    // This is the sign-in half; bootstrap() covers the restored-session half.
+    // verified working key of the launch, `Purchases.logIn(userId)` on any
+    // later one. This is the sign-in half; bootstrap() covers the
+    // restored-session half. A typed Sleeper sign-in starts from unknown
+    // verification (above), so it reaches RevenueCat only when setVerification
+    // reports it verified; an account-only `acct_` sign-in does so here.
     //
-    // The null branch is deliberately EMPTY. Signing out of FTF is not signing
+    // A null user is deliberately a no-op. Signing out of FTF is not signing
     // out of the App Store account that owns the subscription, and
     // `Purchases.logOut()` would swap RevenueCat onto a fresh anonymous
     // app-user-id whose purchases then have to be aliased back — so we never
-    // call it (RevenueCat's own guidance). The next sign-in calls logIn with a
-    // real working key, which is the correct identity move.
-    if (u?.user_id) void initPurchases(u.user_id);
+    // call it (RevenueCat's own guidance). The next verified sign-in calls
+    // logIn with a real working key, which is the correct identity move.
+    syncPurchasesIdentity(get());
   },
 
   setLeague: async (lg, guard) => {
@@ -577,6 +620,11 @@ export const useSession = create<SessionState>((set, get) => ({
       AsyncStorage.setItem(SU_KEY, JSON.stringify(demoUser)),
       AsyncStorage.setItem(SL_KEY, JSON.stringify(demoLeague)),
     ]);
+    // 200 ms path C (onboarding-eng A1): a demo bypasses setUser, so a demo
+    // started while another account is still in the store (SignIn after an
+    // expiry that kept the user) drops that account's device-held trade pages.
+    const previous = get().user;
+    if (previous && previous.user_id !== demoUser.user_id) void clearDevicePages();
     set({
       user:     demoUser,
       league:   demoLeague,
@@ -584,6 +632,9 @@ export const useSession = create<SessionState>((set, get) => ({
       isDemo:   true,
     });
     sentrySetUser({ id: demoUser.user_id });   // pseudonymous id only (PRD OQ-1)
+    // Demo gets NO RevenueCat (strict, head-eng 2026-10-29): the helper's one
+    // `'verified'` comparison makes this a no-op while `isDemo` is set.
+    syncPurchasesIdentity(get());
   },
 
   connectLeague: async (sleeperUrl) => {
@@ -669,6 +720,8 @@ export const useSession = create<SessionState>((set, get) => ({
       // P0-3 — an invite intent belongs to the session that captured it.
       AsyncStorage.removeItem(INVITE_KEY),
       clearSessionToken(),
+      // 200 ms path C — the device-held trade pages belong to this account.
+      clearDevicePages(),
     ]);
     if (generation !== leagueSessions.currentGeneration() || get().user) return;
     _inviteTs = 0;

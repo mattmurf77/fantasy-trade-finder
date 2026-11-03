@@ -28,6 +28,7 @@ import { getFreeAgents } from '../api/league';
 import { getUsageTrends, type UsageMetric, type UsagePlayer } from '../api/usageTrends';
 import { useFlag } from '../state/useFeatureFlags';
 import { useFinderTargets } from '../state/useFinderTargets';
+import { beginTradeSearch, dropPendingSearch, handoffDeckMode } from '../state/tradeSearchTrace';
 import { NO_LEAGUE_ID, useSession } from '../state/useSession';
 import { readErrorCopy } from '../utils/verification';
 import {
@@ -252,8 +253,22 @@ export default function UsageTrendsScreen() {
     trackAction('trade', p, lgId);
     const lg = data?.leagues.find((l) => l.league_id === lgId);
     const ownerKey = lg?.rosters[p.player_id];
+    // R1 (time to suggestion, addendum v2): the tap starts the search only
+    // when the hand-off will run one — it needs the owning partner (the
+    // deck's auto-run gate); without one it lands on the builder.
+    const searchId = ownerKey && !ownerKey.startsWith('roster:')
+      ? beginTradeSearch({
+          source: 'usage_trends',
+          mode: handoffDeckMode(1),
+          searchType: 'pinned',
+          screen: 'UsageTrends',
+        })
+      : null;
     await closeSheetFirst();
-    if (!(await switchTo(lgId))) return;
+    if (!(await switchTo(lgId))) {
+      if (searchId) dropPendingSearch(searchId);
+      return;
+    }
     const store = useFinderTargets.getState();
     store.setSide('give', []);
     store.setSide('receive', [{ id: p.player_id, name: p.name, position: p.position, team: p.team }]);
