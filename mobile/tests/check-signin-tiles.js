@@ -43,6 +43,10 @@
 //      entry && webviewCapture && no cookies, and gates both.
 //  11. The MFL/Fleaflicker sheet's heading reads "Link an MFL league" /
 //      "Link a Fleaflicker league" (head-eng Round 4b, the grammar fix).
+//  12. The ESPN sheet's input step scrolls inside its 88% sheet (design-lead's
+//      render, release-lead #570): one ScrollView (espn-link.input-scroll,
+//      flexGrow 0 / flexShrink 1, taps handled) holds the league-ID field, the
+//      cookie fields and Continue; Cancel stays outside it, always in view.
 //
 // Run: node tests/check-signin-tiles.js
 
@@ -278,6 +282,26 @@ check('11. the MFL sheet heading says "Link an MFL league"', () => {
   expect(/>Link \{platform === 'mfl' \? 'an' : 'a'\} \{LABEL\[platform\]\} league</.test(src),
     "the heading isn't Link {platform === 'mfl' ? 'an' : 'a'} {LABEL[platform]} league");
   expect(!/>Link a \{LABEL\[platform\]\} league</.test(src), 'the heading still reads "Link a {LABEL[platform]} league"');
+});
+
+check('12. the ESPN sheet\'s input step scrolls, with Cancel outside the scroller', () => {
+  const src = stripComments(fs.readFileSync(path.join(ROOT, 'src/components/EspnLinkSheet.tsx'), 'utf8'));
+  const open = src.search(/<ScrollView\s+testID="espn-link\.input-scroll"\s+style=\{styles\.stepScroll\}\s+contentContainerStyle=\{styles\.stepBody\}\s+keyboardShouldPersistTaps="handled"\s*>/);
+  expect(open >= 0, 'no espn-link.input-scroll ScrollView (stepScroll / stepBody / taps handled)');
+  expect(/step === 'input' \? \(\s*<ScrollView\s+testID="espn-link\.input-scroll"/.test(src),
+    "the input step isn't the scroller itself");
+  const team = src.indexOf("{step === 'team' && preview ? (");
+  const close = src.lastIndexOf('</ScrollView>', team);
+  expect(close > open, 'the input scroller does not close before the team step');
+  for (const id of ['espn-link.input', 'espn-link.s2-input', 'espn-link.swid-input', 'espn-link.continue']) {
+    const at = src.indexOf(`testID="${id}"`);
+    expect(at > open && at < close, `${id} is not inside the input scroller`);
+  }
+  const cancel = src.indexOf('label="Cancel"');
+  expect(cancel > team, 'Cancel moved inside a step (it must stay outside the scroller)');
+  const st = src.match(/stepScroll:\s*\{([^}]*)\}/);
+  expect(st && /flexGrow:\s*0/.test(st[1]) && /flexShrink:\s*1/.test(st[1]),
+    `styles.stepScroll is ${st && st[1]}, want flexGrow 0 and flexShrink 1`);
 });
 
 console.log(failures === 0

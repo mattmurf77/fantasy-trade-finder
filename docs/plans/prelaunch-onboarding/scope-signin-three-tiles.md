@@ -78,7 +78,7 @@ The landing's platform chips (`SignInScreen.tsx` `platformRow` / `platformChip`)
   6. With `landing.platform_options` off. Expect no tiles: the plain username form, as on main before this.
   7. Sign out with an expired session (the returning-user notice showing). Expect the whole landing, down to "By signing in you agree to the Terms…", on one SE screen without scrolling.
   8. Select ESPN, then MFL. Expect exactly "ESPN dynasty leagues are supported. Sign in to ESPN." and "MyFantasyLeague dynasty leagues are supported. Sign in to MFL." Tap each panel's link button: the sheet shows no "or enter a league ID".
-  9. (After #430, with `espn.signin` on.) ESPN → "Link your ESPN league →". Expect "Sign in to ESPN" and "We'll find your leagues…" with **no league-ID field and no Continue** below them. Sign in: the picker shows your leagues, and "Don't see it? Enter a league ID instead" brings the field back. MFL → the sheet's title reads **"Link an MFL league"**.
+  9. (After #430, with `espn.signin` on.) ESPN → "Link your ESPN league →". Expect "Sign in to ESPN" and "We'll find your leagues…" with **no league-ID field and no Continue** below them. Sign in: the picker shows your leagues, and "Don't see it? Enter a league ID instead" brings the field back. MFL → the sheet's title reads **"Link an MFL league"**. ESPN → tap "Private league? Paste your ESPN cookies" on an SE: the sheet scrolls, so the SWID field and Continue are reachable, and Cancel stays at the bottom (also from Settings › Leagues › link an ESPN league).
 - testIDs added/renamed: none (`signin.platform-sleeper|espn|mfl` kept). `testid-lint` OK.
 
 ## 4. Docs scope (MANDATORY — HLD / LLD / API)

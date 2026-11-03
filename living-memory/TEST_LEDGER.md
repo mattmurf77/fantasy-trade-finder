@@ -344,6 +344,9 @@ Gates: full (`docs/plans/prelaunch-onboarding/scope-signin-three-tiles.md`). No 
   - The MFL sheet heading is "Link an MFL league".
   - New pins 10 and 11. Sabotage 5/5 red: the gate ignoring cookies, the field ungated, Continue ungated, the gate applying in link mode, the typo back.
   - The scope's checklist gains step 9.
+- **The ESPN sheet's input step scrolls** (release-lead, from design-lead's render at `0e5fd18c` + #421; the bug exists on main): `EspnLinkSheet` had no ScrollView, so with the private section open on an iPhone SE the SWID field and Continue ran ~156pt past the screen.
+  - The input step is now a `ScrollView` (`espn-link.input-scroll`, `flexGrow 0 / flexShrink 1`, taps handled) inside the 88% sheet. Cancel stays outside it. Settings' link sheet uses the same component, so it gets the fix too.
+  - Pin 12; sabotage 3/3 (the scroller removed, unable to shrink, taps not handled). tsc clean, 136/136 check-*.js, testid-lint OK.
 
 ## 2026-10-29 — G3-e: `deck_outcomes.user_id`; account deletion and export also match an outcome by its owner
 

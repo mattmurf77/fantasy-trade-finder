@@ -451,7 +451,15 @@ export default function EspnLinkSheet({
         <Text style={type.heading} accessibilityRole="header">Link an ESPN league</Text>
 
         {step === 'input' ? (
-          <>
+          // The input step scrolls inside the 88% sheet: with the private
+          // section open on an iPhone SE, the SWID field and Continue ran
+          // ~156pt past the screen (design-lead's render; release-lead #570).
+          <ScrollView
+            testID="espn-link.input-scroll"
+            style={styles.stepScroll}
+            contentContainerStyle={styles.stepBody}
+            keyboardShouldPersistTaps="handled"
+          >
             <Text style={[type.bodySm, styles.sub]}>
               Imports team names and rosters. Nothing is posted to ESPN unless
               you sign in and send a trade you approve.
@@ -644,7 +652,7 @@ export default function EspnLinkSheet({
                 style={styles.cta}
               />
             ) : null}
-          </>
+          </ScrollView>
         ) : null}
 
         {step === 'team' && preview ? (
@@ -784,6 +792,10 @@ const styles = StyleSheet.create({
   cta: { marginTop: space.sm },
   cancel: { marginTop: space.xs },
   teamList: { maxHeight: 340 },
+  // The input step's scroller: shrinks within the sheet's maxHeight, and keeps
+  // the sheet's child spacing on its own content.
+  stepScroll: { flexGrow: 0, flexShrink: 1 },
+  stepBody: { gap: space.sm },
   teamRow: {
     flexDirection: 'row',
     alignItems: 'center',
