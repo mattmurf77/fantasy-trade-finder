@@ -16420,7 +16420,8 @@ def ingest_client_events_route():
     """POST /api/events — batched first-party client-event ingestion (LLD §2.1).
 
     Always 200 for content: rate-limit / unknown-type / PII / oversize are
-    "accepted-and-dropped", never a 4xx/429. Response
+    "accepted-and-dropped", never a 4xx/429. The one non-200 is the transport
+    guard: a chunked body over the 128 KiB cap is a 413. Response
     {accepted, deduped, rejected, dropped, disposition} with the accounting
     invariant accepted + deduped + len(rejected) == N on committed txns.
     Flag gate `analytics.ingest` (server acceptance) — off → "disabled" 200,

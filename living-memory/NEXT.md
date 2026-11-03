@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-11-03 — Body-size guards: one shared helper for /api/events and /api/feedback (follow-up to #490)](#2026-11-03--body-size-guards-one-shared-helper-for-apievents-and-apifeedback-follow-up-to-490)
 - [2026-10-15 — Daily tick dies at the 120 s worker timeout every day: move its inline work off the request thread](#2026-10-15--daily-tick-dies-at-the-120-s-worker-timeout-every-day-move-its-inline-work-off-the-request-thread)
 - [2026-10-12 — Usage Trends: run both TestFlight checklists on 1.21.2 (165), then the two design calls](#2026-10-12--usage-trends-run-both-testflight-checklists-on-1212-165-then-the-two-design-calls)
 - [2026-10-10 — Home hub: run the TestFlight checklist on 1.20.0, then the two follow-ups](#2026-10-10--home-hub-run-the-testflight-checklist-on-1200-then-the-two-follow-ups)
@@ -49,6 +50,13 @@
 - [2026-08-11 — P0 remediation status + deferrals](#2026-08-11--p0-remediation-status--deferrals)
 - [2026-08-08 — Priority Queue](#2026-08-08--priority-queue)
 - [Queue Hygiene Rules](#queue-hygiene-rules)
+
+---
+
+## 2026-11-03 — Body-size guards: one shared helper for /api/events and /api/feedback (follow-up to #490)
+
+1. **Fold the two chunked-body guards into one helper.** #490 caps a chunked `POST /api/events` body with the same per-request `max_content_length` (cap + 1) pattern #360 added for `POST /api/feedback`, as a second copy. A shared helper keeps the next route from growing a third. *Why now:* not launch-blocking; do it after 11-18, when both are on main.
+2. **If client-side props truncation is wanted, file it with analytics-lead.** No client truncates props today (#490 QA, 2026-11-03); the server drops an envelope whose props exceed 4,096 bytes. *Why now:* only if a real event starts nearing that.
 
 ---
 

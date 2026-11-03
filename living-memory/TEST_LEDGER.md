@@ -1,3 +1,13 @@
+## 2026-11-03 — #490 QA P3s: the ingest cap's rationale and the "never a 4xx" claims corrected
+
+Gates: head-eng's relay of release-lead's QA of #490 @ `a703d624` (GO-with-notes), P3-1 to P3-4. Comments, docstrings and docs only; no behaviour change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is pytest.
+
+- **P3-1:** the cap's rationale no longer cites a 2,048-byte client props truncation (no client implements one). Fixed in `analytics_ingest.py`'s cap note, the `MAX_PROPS_BYTES` and envelope-drop comments, `test_events_api.py`'s largest-batch docstring, and the `docs/api-reference.md` cap paragraph. The analytics plan's `lld.md` gets dated correction notes rather than a rewrite.
+- **P3-2:** "never a 4xx" now names the one exception (a chunked body over the cap is a 413) in `analytics_ingest.py`'s contract, the `/api/events` route docstring and the analytics LLD's §2.1 response line.
+- **P3-3:** the shared helper with #360's feedback guard is a `living-memory/NEXT.md` follow-up, along with optional client truncation via analytics-lead.
+- **P3-4:** main merged clean (fresh CI on current main).
+- **Runs:** `test_events_api.py` and `test_analytics_p0.py`, 75 passed.
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

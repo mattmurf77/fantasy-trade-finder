@@ -366,9 +366,9 @@ def test_cap_boundary_exactly_the_cap_is_accepted_one_more_is_413(harness):
 
 @pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
 def test_largest_legitimate_batch_still_passes(harness, chunked):
-    """BATCH_MAX (50) envelopes, each with props at the clients' 2 048-byte
-    truncation: the biggest batch a shipped client can send. It must sit
-    under the cap with room to spare and land whole."""
+    """BATCH_MAX (50) envelopes, each with ~2 KB of props: far more than any
+    shipped event carries (no client truncates props, but none comes near
+    this). It must sit under the cap with room to spare and land whole."""
     client, engine = harness
     events = [_envelope(i, props={"tab": "t" * 2000}) for i in range(ingest.MAX_BATCH)]
     raw = json.dumps({"events": events}).encode("utf-8")

@@ -9,7 +9,10 @@ the session identity) delegating to `ingest_request()` here.
 Contract highlights (LLD §2.1):
   • Always 200 for content — rate limiting, unknown types, PII scrubs and
     oversized props are "accepted-and-dropped" (counted in `accepted` and
-    the observability-only `dropped` field), never a 4xx/429.
+    the observability-only `dropped` field), never a 4xx/429. The one
+    non-200 is the transport guard: a CHUNKED body over MAX_CONTENT_LENGTH
+    is a 413 with nothing parsed (a Content-Length over it stays the 200
+    `batch_rejected:too_large`).
   • Accounting invariant (KD-2 / I-3): on any committed transaction,
     accepted + deduped + len(rejected) == len(events). The ONLY sum-short
     case is a whole-txn failure → {"accepted":0,"deduped":0,"rejected":[]}.
@@ -144,14 +147,15 @@ MAX_BATCH = 50
 MAX_CONTENT_LENGTH = 131_072      # 128 KiB, checked pre-read (never a Flask
                                   # MAX_CONTENT_LENGTH — that's app-global and
                                   # would break feedback screenshots)
-# Why 128 KiB (transport-guard note, 2026-10-27): the largest legitimate
-# POST is a full BATCH_MAX (50) batch whose props are at the clients' own
-# 2 048-byte truncation, ~2.4 KB per envelope with ids/ts/screen = ~120 KB; a
-# typical batch (20 events, a few hundred bytes of props) is under 10 KB.
+# Why 128 KiB (transport-guard note, 2026-10-27; corrected 2026-11-03 after
+# #490 QA): no shipped client truncates props, but no shipped event's props
+# come near the 4 096-byte MAX_PROPS_BYTES either. A typical batch (20 events,
+# a few hundred bytes of props each) is under 10 KB, and a full BATCH_MAX (50)
+# batch at ~2 KB of props per envelope is ~120 KB, still under the cap.
 # The number is the shipped contract (`batch_rejected:too_large`, docs/
 # api-reference.md); this guard applies the SAME cap to a chunked body, it
 # does not move it, so nothing that was parsed before is rejected now.
-MAX_PROPS_BYTES = 4_096           # client truncates at 2 048 — the margin is the point
+MAX_PROPS_BYTES = 4_096           # per envelope; larger props → accepted-and-dropped (no client truncates)
 MAX_PROPS_KEYS = 40
 MAX_PROPS_DEPTH = 3
 CLIENT_TS_CLAMP_S = 48 * 3600     # |server − client| beyond this → props.ts_suspect
@@ -453,7 +457,7 @@ def ingest_request(session_user_id: str | None, *, on_accepted=None):
                 props.pop(k, None)
 
         # Oversized/over-deep props → whole envelope accepted-and-dropped
-        # (client truncates at 2 048 B; hitting this means a client bug).
+        # (no shipped event's props come near this; hitting it means a client bug).
         if (len(props) > MAX_PROPS_KEYS
                 or not _props_depth_ok(props)
                 or len(json.dumps(props)) > MAX_PROPS_BYTES):
