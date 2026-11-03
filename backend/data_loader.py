@@ -300,29 +300,46 @@ def _compress_qb_1qb_values(
 
 
 # The page's player list: the `ktc-players` JSON element (current pages), else
-# the `var playersArray = [...]` literal (pages before ~2026-10-29).
+# the `var playersArray = [...]` literal (pages before ~2026-10-29). The id is
+# its own attribute (never `data-id`), quoted or not, any case.
 _KTC_PLAYERS_ELEMENT = re.compile(
-    r"<script\b[^>]*\bid=[\"']ktc-players[\"'][^>]*>(.*?)</script>", re.S)
+    r"<script\b[^>]*?\sid\s*=\s*(?:\"ktc-players\"|'ktc-players'|ktc-players(?=[\s>]))"
+    r"[^>]*>(.*?)</script>", re.S | re.I)
 _KTC_PLAYERS_LITERAL = re.compile(r"var\s+playersArray\s*=\s*(\[.*?\]);", re.S)
 
 
 def parse_ktc_players(html: str) -> list[dict]:
     """Extract the embedded player list from KTC rankings-page HTML: the
     `ktc-players` JSON element, else the legacy `var playersArray = [...]`
-    literal (module comment above).
+    literal (module comment above). An element that doesn't read as a
+    non-empty player list falls through to the literal.
 
     Returns the raw player dicts filtered to real players (KTC also lists
     rookie draft picks under position "RDP" — excluded; the pool's generic
-    picks are seeded separately). Raises on parse failure (callers treat
-    any exception as "KTC unavailable")."""
-    m = _KTC_PLAYERS_ELEMENT.search(html) or _KTC_PLAYERS_LITERAL.search(html)
-    if not m:
-        raise ValueError("playersArray not found in KTC page "
-                         "(no ktc-players element, no playersArray literal)")
-    players = json.loads(m.group(1))
-    if not isinstance(players, list):
-        raise ValueError("KTC player list is not a JSON array")
-    return [p for p in players if isinstance(p, dict) and p.get("position") in VALID_POSITIONS]
+    picks are seeded separately). Raises when neither shape yields a player
+    (callers treat any exception as "KTC unavailable", and log it)."""
+    problems = []
+    for shape, pattern in (("ktc-players element", _KTC_PLAYERS_ELEMENT),
+                           ("playersArray literal", _KTC_PLAYERS_LITERAL)):
+        m = pattern.search(html)
+        if not m:
+            continue
+        try:
+            players = json.loads(m.group(1))
+        except ValueError:
+            problems.append(f"{shape} isn't JSON")
+            continue
+        if not isinstance(players, list):
+            problems.append(f"{shape} isn't a JSON array")
+            continue
+        kept = [p for p in players if isinstance(p, dict) and p.get("position") in VALID_POSITIONS]
+        if not kept:
+            problems.append(f"{shape} holds no players")
+            continue
+        return kept
+    raise ValueError("playersArray not found in KTC page ("
+                     + ("; ".join(problems) or "no ktc-players element, no playersArray literal")
+                     + ")")
 
 
 def _fetch_ktc_html(timeout: int = 15) -> str:
