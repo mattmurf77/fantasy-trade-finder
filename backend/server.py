@@ -1420,9 +1420,19 @@ _ANCHOR_VIA = ("anchors", "draft_room")
 #
 # THE CACHE IS THE PERFORMANCE DESIGN. Within one deck the baseline is
 # identical for all ~30 cards, so `_outlook_impact_baseline` computes the
-# LeagueState + baseline sim ONCE per (league, basis, completed_weeks) and each
-# card re-sims only the with-trade half (~112 ms at DELTA_SIM_COUNT). Without
-# this the 30-card deck would pay 60 simulations instead of 31.
+# LeagueState + baseline sim ONCE per key and each card re-sims only the
+# with-trade half (~112 ms at DELTA_SIM_COUNT). Without this the 30-card deck
+# would pay 60 simulations instead of 31.
+#
+# The key is (league, basis, format, board owner, pool generation): every
+# input the bundle reads off the CALLING session, so no caller is served
+# another's. Format is per session and per request, never per league. The
+# board owner is the ACCOUNT id on `basis=personal` (co-owners of one roster
+# rank separately; backend/CLAUDE.md § Identity) and None otherwise. The pool
+# generation is the one the session's seed and players were built from: until
+# its next session init, a session that predates a players-refresh still
+# prices the players that refresh dropped. Consensus callers in one league,
+# format and generation still share one entry, which is the point.
 _OUTLOOK_IMPACT_CACHE: dict[tuple, tuple[float, object, dict]] = {}
 _OUTLOOK_IMPACT_LOCK = threading.Lock()
 _OUTLOOK_IMPACT_TTL = 900.0   # 15 min — the live week's TTL, same reasoning
@@ -1440,7 +1450,12 @@ def _outlook_impact_baseline(league_id: str, basis: str, sess: dict):
     if platform != "sleeper":
         return None
 
-    key = (league_id, basis)
+    # Every session-derived input below is in the key; see the cache comment.
+    fmt = _active_format(sess)
+    board_owner = (sess.get("user_id")
+                   if basis == "personal" and sess.get("service") is not None
+                   else None)
+    key = (league_id, basis, fmt, board_owner, sess.get("pool_generation"))
     now = time.time()
     with _OUTLOOK_IMPACT_LOCK:
         hit = _OUTLOOK_IMPACT_CACHE.get(key)
@@ -1450,7 +1465,6 @@ def _outlook_impact_baseline(league_id: str, basis: str, sess: dict):
     from . import outlook as outlook_pkg
     from .outlook.trade_delta import DELTA_SIM_COUNT, resim_baseline
 
-    fmt = _active_format(sess)
     captured: dict = {}
     state = outlook_pkg.build_league_state(
         league_id, platform=platform, fetch=_outlook_sleeper_fetch(captured))
