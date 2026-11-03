@@ -11,7 +11,8 @@
 // overhaul surface writes league preferences, player tiers, or swipe/taste
 // learning. Likes here are assembly input, not Elo signal.
 
-import { apiRequest } from './client';
+import { apiRequest, gateSignalFor } from './client';
+import { overhaulSendTimeoutMs } from './sendOutcome';
 import { normalizeTradeCard } from './trades';
 import type { TradeCard } from '../shared/types';
 
@@ -323,8 +324,25 @@ function normalizeOverhaulView(raw: any): OverhaulView {
 export async function getActiveOverhaul(
   leagueId: string,
   signal?: AbortSignal,
+  // #393 M2 (head-eng grant (b)): the active-overhaul probe runs on every
+  // Trades mount, a request the user didn't make, so it is background by
+  // default: a 402 (or the verify 403) opens no paywall and no VerifySheet.
+  // GET /api/overhauls stays gated; getOverhaul / getOffers stay
+  // user-initiated (tapping in opens the paywall).
+  request: { background?: boolean } = { background: true },
 ): Promise<{ active: OverhaulView | null }> {
-  const res: any = await apiRequest(`${BASE}?league_id=${enc(leagueId)}`, { signal });
+  let res: any;
+  try {
+    res = await apiRequest(`${BASE}?league_id=${enc(leagueId)}`, { signal, ...request });
+  } catch (e) {
+    // A gate answer (a 402 of any gate, or the verify 403) RESOLVES to no
+    // active overhaul (trades-eng): Trades shows no overhaul entry, and the
+    // probe's query neither retries it nor sits in an error state. Decided
+    // by api/client's gateSignalFor, never a re-parse; every other error
+    // throws exactly as before.
+    if (gateSignalFor(e, BASE)) return { active: null };
+    throw e;
+  }
   return { ...res, active: res?.active ? normalizeOverhaulView(res.active) : null };
 }
 
@@ -420,11 +438,18 @@ export async function prepareSend(
   });
 }
 
+// One request sends the whole batch, offer by offer, server-side, so the
+// timeout scales with the batch's offer count (api/sendOutcome.ts).
 export async function sendBatch(
   overhaulId: string,
   body: { prepare_token: string; summary_hash: string; version: number; idempotency_key: string },
+  offerCount: number,
 ): Promise<SendResult> {
-  return apiRequest(`${BASE}/${enc(overhaulId)}/send`, { method: 'POST', body });
+  return apiRequest(`${BASE}/${enc(overhaulId)}/send`, {
+    method: 'POST',
+    body,
+    timeoutMs: overhaulSendTimeoutMs(offerCount),
+  });
 }
 
 // Throttled server-side to one call per 15 s per overhaul: a second call inside the window is 429 `rate_limited`.

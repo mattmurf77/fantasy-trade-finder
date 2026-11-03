@@ -84,7 +84,7 @@ class PlayoffFormat(Protocol):
 
 ## Gating & off-season (load-bearing)
 - Feature flag **`outlook.odds`** (default **false**, dark). Endpoint 404/403s when off; UI hides the layer.
-- **Preseason** (`completed_weeks == 0`, true today — July 2026): `meta.is_preseason = meta.beta = true`; `auto` source = `roster_value`; **UI labels every number "Projected · preseason · beta"** and shows the source caption. No hard "86% playoff odds" preseason.
+- **Preseason** (`completed_weeks == 0`, true today — July 2026): `meta.is_preseason = meta.beta = true`; `auto` source = `roster_value`; **UI labels every number "Projected · preseason · beta"** and shows the source caption. *(2026-10-31, #549: the word "beta" is no longer shown, per App Review 2.2. The ribbon reads "Projected · preseason" before week 1 and "Projected" after. `meta.beta` still withholds win-loss numbers through week 5.)* No hard "86% playoff odds" preseason.
 - Redraft basis stays 501 (separate redraft-VALUE gap — Dependency A, not built here). The odds engine is basis-agnostic: it runs on dynasty roster value as the preseason strength prior, and on trailing scores in-season.
 
 ## UI (mobile, `LeagueSummaryScreen.tsx`)

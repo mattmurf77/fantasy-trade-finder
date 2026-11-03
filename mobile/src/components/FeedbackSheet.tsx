@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Linking,
 } from 'react-native';
 import Constants from 'expo-constants';
 import {
@@ -27,18 +28,20 @@ import { Button } from './chalkline';
 import { useFeedback, type FeedbackSeverity } from '../state/useFeedback';
 import { FEEDBACK_TEXT_MAX } from '../api/feedback';
 import { useFlag } from '../state/useFeatureFlags';
+import { SUPPORT_EMAIL } from '../utils/supportContact';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   // Best-effort label of the screen the user was on when they opened the
-  // sheet. Auto-filled by the FAB; the user can override before saving.
+  // sheet. Auto-filled by the FAB and submitted as-is: there is no visible
+  // Screen field (#354 D-6), because the value is an internal route name.
   defaultScreen: string;
 }
 
 const SEVERITY_OPTIONS: { value: FeedbackSeverity; label: string }[] = [
-  { value: 'bug',    label: 'Bug'    },
-  { value: 'polish', label: 'Polish' },
+  { value: 'bug',    label: 'Broken' },
+  { value: 'polish', label: 'Tweak'  },
   { value: 'idea',   label: 'Idea'   },
 ];
 
@@ -61,7 +64,7 @@ function overflowMessage(length: number): string {
 // says "saved, not sent" — the item IS still in AsyncStorage and retrySync()
 // will re-attempt it, so telling the user it was lost would be wrong.
 const SAVE_FAILED_MESSAGE =
-  'Saved on this device, but not sent yet. Nothing is lost — retry it from Settings → Testing → Test feedback.';
+  'Saved on this device but not sent yet. It retries the next time you open the app, so no need to send it again.';
 
 // Modal-based bottom sheet for capturing a single feedback note. Keyboard-
 // avoiding so the text area doesn't get hidden on smaller phones.
@@ -100,8 +103,8 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
       // Stale notice from a previous attempt — never greet a fresh open with it.
       setSaveFailed(false);
       if (guardOn && text.trim()) {
-        // Draft restore: keep note + severity + screen override. Only
-        // backfill the screen field if the user blanked it.
+        // Draft restore: keep note + severity, and the screen the draft
+        // started on (backfilled if it is somehow blank).
         if (!screen.trim()) setScreen(defaultScreen);
       } else {
         setScreen(defaultScreen);
@@ -174,11 +177,26 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
       >
         <View style={styles.sheet}>
           <View style={styles.grabber} />
-          <Text style={styles.title} accessibilityRole="header">Capture feedback</Text>
-          <Text style={styles.sub}>Saved on this device. Share or export from Settings.</Text>
+          <Text style={styles.title} accessibilityRole="header">Send feedback</Text>
+          {/* f3. Only the address is tappable (design-lead #354 change 5): a
+              nested link in chalk with an underline, not ice, which the sheet
+              keeps for Send and the active chip. The Settings path stays plain
+              text, since this is a modal. */}
+          <Text style={styles.sub}>
+            No replies here. Track each note in Settings › Help & about › Your feedback, or email{' '}
+            <Text
+              style={styles.subLink}
+              accessibilityRole="link"
+              accessibilityHint="Opens Mail"
+              onPress={() => Linking.openURL('mailto:' + SUPPORT_EMAIL)}
+            >
+              {SUPPORT_EMAIL}
+            </Text>
+            {' '}for a reply.
+          </Text>
 
           <ScrollView keyboardShouldPersistTaps="handled">
-            <Text style={styles.label}>Severity</Text>
+            <Text style={styles.label}>What's this about?</Text>
             <View style={styles.sevRow}>
               {SEVERITY_OPTIONS.map((opt) => {
                 const active = severity === opt.value;
@@ -188,7 +206,7 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
                     testID={`feedback.severity.${opt.value}`}
                     accessibilityRole="radio"
                     accessibilityState={{ selected: active, checked: active }}
-                    accessibilityLabel={`Severity: ${opt.label}`}
+                    accessibilityLabel={`Feedback type: ${opt.label}`}
                     onPress={() => setSeverity(opt.value)}
                     style={({ pressed }) => [
                       styles.sevChip,
@@ -203,18 +221,6 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
                 );
               })}
             </View>
-
-            <Text style={styles.label}>Screen</Text>
-            <TextInput
-              value={screen}
-              onChangeText={setScreen}
-              accessibilityLabel="Screen"
-              style={styles.screenInput}
-              placeholder="e.g. Trades / Tiers / Rank-Trios"
-              placeholderTextColor={chalk.faint}
-              autoCorrect={false}
-              autoCapitalize="none"
-            />
 
             <Text style={styles.label}>Note</Text>
             <TextInput
@@ -263,7 +269,7 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
             <Button
               testID="feedback.save-btn"
               variant="primary"
-              label="Save"
+              label="Send"
               onPress={onSave}
               loading={saving}
               disabled={!noteLength || overLimit}
@@ -300,6 +306,7 @@ const styles = StyleSheet.create({
   },
   title: { ...type.heading },
   sub:   { ...type.bodySm, marginBottom: space.md },
+  subLink: { color: chalk.base, textDecorationLine: 'underline' },
   label: { ...type.label, marginTop: space.md, marginBottom: 6 },
 
   sevRow: { flexDirection: 'row', gap: space.sm },
@@ -321,17 +328,6 @@ const styles = StyleSheet.create({
   sevText:       { fontFamily: fonts.uiSemi, fontSize: 14, color: chalk.dim },
   sevTextActive: { color: ice.base },
 
-  screenInput: {
-    backgroundColor: ink.ink2,
-    borderWidth: 1,
-    borderColor: ink.lineStrong,
-    borderRadius: radii.sm,
-    minHeight: 44,
-    padding: space.md,
-    color: chalk.base,
-    fontFamily: fonts.ui,
-    fontSize: 14,
-  },
   noteInput: {
     backgroundColor: ink.ink2,
     borderWidth: 1,

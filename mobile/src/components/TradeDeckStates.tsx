@@ -9,6 +9,9 @@
 //     ruling 13 / D14 (EmptyState in the card frame; one Primary, one
 //     Secondary; the D-171 tally as one chalk-dim line; no Like/Pass; no
 //     count, no third action, no "new trades" notice).
+//     Its `previewEnd` variant (#393 M2; design-lead monetization §2): the
+//     free page's end, when the server answered the next page with a 402.
+//     An explicit branch; the P30 render below it is unchanged.
 //   - DeckOfflineCard / DeckMoreErrorCard: ux-lead U3 rows 3a and 3b (one
 //     honest static line in the card rect, Retry as a Secondary).
 //   - DeckRefreshFailedLine: PRD #339 §5.4 "Refresh failed" (design-lead 3
@@ -27,6 +30,7 @@ import { AccessibilityInfo, ActivityIndicator, StyleSheet, View, findNodeHandle 
 import { Button, Card, Icon, Text } from './chalkline';
 import { chalk, fonts, ice, ink, radii, space } from '../theme/chalkline';
 import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
+import { MON } from '../copy/monetization';
 
 // P30 copy: marketing-lead's copy file, rows p30.* (final, 2026-10-23).
 export const DECK_END_TITLE = "You've seen every trade for now.";
@@ -123,6 +127,15 @@ export function WithdrawnTradeCard({ minHeight, onNext }: { minHeight?: number |
   );
 }
 
+/** #393 M2 — the preview end: set ONLY when the server answered the deck's
+ *  next page with a 402 (TradesScreen's `deckGateEnd`). */
+export interface DeckPreviewEnd {
+  /** An unverified session: the button is Continue and opens the
+   *  VerifySheet (D16 a). Otherwise See plans opens the paywall. */
+  verify: boolean;
+  onPress: () => void;
+}
+
 /** P30 — the honest end of the deck, in the card slot. Rendered only when
  *  the server said `pool_exhausted` and nothing is in flight or retrying
  *  (utils/tradePages.deckEndState), then held in place (TradesScreen's
@@ -132,6 +145,7 @@ export function DeckEndCard({
   tally,
   onAdjust,
   onHome,
+  previewEnd,
 }: {
   minHeight?: number | null;
   /** D-171 ruling 4's end-of-deck tally (head-eng D14b), one chalk-dim line
@@ -140,9 +154,45 @@ export function DeckEndCard({
   onAdjust: () => void;
   /** Absent when the app has no Home tab (`nav.home_tab` off). */
   onHome?: () => void;
+  previewEnd?: undefined;
+} | {
+  minHeight?: number | null;
+  tally?: undefined;
+  onAdjust?: undefined;
+  onHome?: undefined;
+  /** #393 M2 — the preview_end variant (design-lead monetization §2, ux-lead
+   *  "The deck during the free page"): eyebrow `mon.preview.page_end`, the
+   *  line `mon.lock.find`, ONE Primary. No Like/Pass, no tally, no price, no
+   *  "free". VoiceOver focus moves to its two lines, as for P30. */
+  previewEnd: DeckPreviewEnd;
 }) {
   const copyRef = useRef<View>(null);
   useFocusOnMount(copyRef);
+  if (previewEnd) {
+    return (
+      <View testID="trades.deck-end-paywall">
+        <Card style={minHeight ? { minHeight } : undefined}>
+          <View
+            ref={copyRef}
+            accessible
+            accessibilityLabel={`${MON['mon.preview.page_end']} ${MON['mon.lock.find']}`}
+          >
+            <Text variant="heading">{MON['mon.preview.page_end']}</Text>
+            <Text variant="bodySm" style={styles.endBody}>{MON['mon.lock.find']}</Text>
+          </View>
+          <View style={styles.endActions}>
+            <Button
+              testID="deck-end-paywall-cta"
+              label={previewEnd.verify ? MON['mon.verify.continue'] : MON['mon.pay.see_plans']}
+              variant="primary"
+              onPress={previewEnd.onPress}
+              style={styles.fullWidth}
+            />
+          </View>
+        </Card>
+      </View>
+    );
+  }
   return (
     <View testID="trades.deck-end">
       <Card style={minHeight ? { minHeight } : undefined}>
