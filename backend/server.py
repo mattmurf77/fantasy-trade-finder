@@ -28172,9 +28172,12 @@ def session_init():
                                 or is_linked_platform_league(league_id))
             # What exists at the start. An account deletion can remove these
             # rows while this runs, so they are only ever updated, never
-            # re-created. Each write below holds the account's users-row lock
-            # (database._lock_live_user) and stops at AccountGone. The users
-            # row is never inserted here (the session mint writes it); only a
+            # re-created. The users, leagues, user_events (both events),
+            # league_members and roster-history writes each hold the
+            # account's users-row lock (database._lock_live_user), and the
+            # first to find it gone (AccountGone) stops the daemon. The other
+            # writes are league-level public Sleeper data. The users row is
+            # never inserted here (the session mint writes it); only a
             # Sleeper league's first init inserts: its leagues row, and the
             # league_members rows of managers new since the start.
             _league_existed, _members_existed = league_row_and_member_ids(league_id)
@@ -28225,6 +28228,8 @@ def session_init():
                         require_user = True,
                         **_ev_info,
                     )
+                except AccountGone:
+                    raise
                 except Exception as _ev_err:
                     log.warning("  record_event failed: %s", _ev_err)
 
@@ -28243,6 +28248,8 @@ def session_init():
                         require_user = True,
                         **_ev_info,
                     )
+                except AccountGone:
+                    raise
                 except Exception as _ev_err:
                     log.warning("  record_event(league_synced) failed: %s", _ev_err)
 
@@ -28564,12 +28571,18 @@ def session_init():
             # short pick_ids array, invisible until December. Sleeper-only
             # here (platform leagues snapshot at their import/refresh
             # routes with native team keys). Own transaction; best-effort.
+            # Under the caller's users-row lock (#587). A leaguemate deleted
+            # meanwhile still gets their team's row, from Sleeper's public
+            # roster, as any member's next sync would write it.
             try:
                 if (is_enabled("market.roster_history")
                         and str(league_id).isdigit()
                         and not _platform_linked):
                     _sleeper_roster_history_on_sync(
-                        league_id, all_members_for_db, _rh_roster_rows)
+                        league_id, all_members_for_db, _rh_roster_rows,
+                        live_user=user_id)
+            except AccountGone:
+                log.info("  account gone: session/init writes stopped (bg)")
             except Exception as rh_err:
                 log.warning("  roster-history snapshot failed (continuing): %s", rh_err)
         except Exception:
@@ -29679,12 +29692,14 @@ def _roster_snapshot_weekday_gate() -> int:
 
 
 def _do_league_history_snapshot(league_id: str, platform: str,
-                                teams: list[dict], source: str) -> dict:
+                                teams: list[dict], source: str, *,
+                                live_user: str | None = None) -> dict:
     """Shared trigger tail: format + pool + priced picks in, both history
     tables written. The value contract lives here: team_value comes out of
     compute_power_rankings' consensus basis via the SAME
     _power_picks_by_owner pricing the Power Rankings screen uses, so the
-    two can never disagree about a team."""
+    two can never disagree about a team. `live_user`: both writes run under
+    that account's users-row lock (AccountGone when it's gone)."""
     from . import roster_history as _rh
     fmt = get_league_scoring(league_id) or "1qb_ppr"
     pool_players, seed = _get_universal_pool(fmt)
@@ -29694,15 +29709,16 @@ def _do_league_history_snapshot(league_id: str, platform: str,
         league_id, platform, fmt, teams, source,
         seed=seed, players_meta=players_meta,
         picks_by_owner=picks_by_owner,
-        pick_read_source=_pick_read_source())
-    board_stats = _rh.snapshot_league_boards(league_id, source)
+        pick_read_source=_pick_read_source(), live_user=live_user)
+    board_stats = _rh.snapshot_league_boards(league_id, source, live_user=live_user)
     log.info("roster-history: league=%s platform=%s source=%s rosters=%s boards=%s",
              league_id, platform, source, stats, board_stats)
     return {"rosters": stats, "boards": board_stats}
 
 
 def _sleeper_roster_history_on_sync(league_id: str, members: list[dict],
-                                    roster_rows: list | None) -> None:
+                                    roster_rows: list | None, *,
+                                    live_user: str | None = None) -> None:
     """Writer A, Sleeper half. `members` is the client-posted membership
     (ownerless teams already dropped — which is exactly why these rows are
     source='sync' and yield to 'weekly'); `roster_rows` is the shared v1
@@ -29734,7 +29750,7 @@ def _sleeper_roster_history_on_sync(league_id: str, members: list[dict],
                           "member_user_id": uid,
                           "player_ids": m.get("player_ids") or [],
                           "starter_ids": None})
-    _do_league_history_snapshot(league_id, "sleeper", teams, "sync")
+    _do_league_history_snapshot(league_id, "sleeper", teams, "sync", live_user=live_user)
 
 
 def _platform_roster_history_on_sync(league_id: str, platform: str,

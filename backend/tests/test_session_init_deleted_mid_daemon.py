@@ -9,9 +9,12 @@ Sleeper, and its next init is a 503 `league_data_unavailable`), and its
 The daemon now reads what exists at its start; those rows are only updated.
 The `users` row is never inserted (the session mint writes it), and only a
 Sleeper league's first init inserts: its `leagues` row, with the platform, and
-the `league_members` rows of managers new since the start. Each write holds
-the account's users-row lock (`database._lock_live_user`) and stops at
-`AccountGone`.
+the `league_members` rows of managers new since the start. The users, leagues,
+both user_events, league_members and roster-history writes each hold the
+account's users-row lock (`database._lock_live_user`); the first to find the
+row gone (`AccountGone`) stops the daemon. A structural test pins the lock as
+the first statement of its write's own transaction; the opt-in Postgres twin
+(test_session_init_deleted_pg.py) runs the interleavings on real threads.
 
 Two deletions are injected between the daemon's start read and its writes (or
 later), by wrapping the daemon's own calls:
@@ -28,6 +31,8 @@ Harness: test_session_init_sleeper_calls's (in-memory SQLite, every Sleeper
 call faked, the daemon inline), with a users row for U, as the mint writes it.
 """
 
+import ast
+import pathlib
 import socket
 
 import pytest
@@ -103,11 +108,20 @@ def _members(league_id):
     return {m["user_id"]: m for m in db_module.load_league_members(league_id)}
 
 
+# The deletion scrub's job row (#562) names the deleted ids on purpose, and is
+# kept until the scrub finishes: deletion's own bookkeeping, never a row the
+# daemon writes. Excluded by name, so this holds with or without #562.
+_SCAN_EXCLUDED = {"deletion_scrub_jobs"}
+
+
 def _rows_naming(needle):
-    """Every row, in every table, with a text column containing `needle`."""
+    """Every row, in every table but _SCAN_EXCLUDED, with a text column
+    containing `needle`."""
     found = []
     with db_module.engine.connect() as conn:
         for table in db_module.metadata.sorted_tables:
+            if table.name in _SCAN_EXCLUDED:
+                continue
             cols = [c for c in table.columns if isinstance(c.type, String)]
             if cols:
                 found += [(table.name, repr(tuple(r))) for r in conn.execute(select(table).where(
@@ -138,7 +152,8 @@ def _delete_at(monkeypatch, point, delete):
         monkeypatch.setattr(server.threading, "Thread", _DeleteFirst)
         return ran
     name = {"start": "league_row_and_member_ids", "user": "upsert_user",
-            "league": "upsert_league", "events": "record_event"}[point]
+            "league": "upsert_league", "events": "record_event",
+            "members": "write_session_init_members"}[point]
     real = getattr(server, name)
 
     def hooked(*a, **kw):
@@ -194,6 +209,47 @@ def test_own_deletion_mid_daemon_is_never_undone(harness, monkeypatch, league, p
     # users/leagues/league_members row, no user_events row, nothing else.
     assert _rows_naming(USER_ID) == after_delete
     assert _rows_naming(db_module.analytics_session_id(TOKEN)) == []
+
+
+@pytest.mark.parametrize("league", ["sleeper_first_init", "sleeper_reinit"])
+def test_own_deletion_after_the_members_write(harness, monkeypatch, league):
+    """The league syncs that follow the members write: the roster-history
+    snapshot (league_roster_history, league_board_history) holds the lock as
+    well, so it writes nothing naming U (release-lead's #587 QA, g). The
+    owned-pick sync does write U's Sleeper draft_picks again: public Sleeper
+    data, which the deletion matrix keeps."""
+    client, _calls = harness
+    if league == "sleeper_reinit":
+        _seed_league(LEAGUE_ID, USER_ID)
+    ran = _delete_at(monkeypatch, "members", lambda: accounts._delete_user_data(USER_ID))
+
+    assert _init(client, LEAGUE_ID).status_code == 200
+    assert ran and ran[0][USER_ID] == []
+
+    assert _user(USER_ID) is None and _league(LEAGUE_ID) is None
+    assert USER_ID not in _members(LEAGUE_ID)
+    left = _rows_naming(USER_ID)
+    assert {t for t, _r in left} <= {"draft_picks"}, left
+
+
+def test_the_first_write_to_find_the_account_gone_stops_the_daemon(harness, monkeypatch):
+    """record_event re-raises AccountGone under require_user, so a deletion
+    just before the first event ends the daemon there: no second event, no
+    members write, no roster history, no Sleeper call past the request's."""
+    client, calls = harness
+    _seed_league(LEAGUE_ID, USER_ID)
+    tried = []
+    for name in ("record_event", "write_session_init_members", "_sleeper_roster_history_on_sync"):
+        real = getattr(server, name)
+        monkeypatch.setattr(server, name, lambda *a, _n=name, _real=real, **kw: (
+            tried.append(_n), _real(*a, **kw))[1])
+    ran = _delete_at(monkeypatch, "league", lambda: accounts._delete_user_data(USER_ID))
+
+    assert _init(client, LEAGUE_ID).status_code == 200
+    assert ran
+
+    assert tried == ["record_event"]
+    assert set(calls) == {"meta", "users", "rosters"}   # the request's read, nothing after
 
 
 def test_without_a_users_row_the_daemon_writes_nothing(harness, monkeypatch):
@@ -307,3 +363,62 @@ def test_a_linked_league_keeps_its_platform(harness, league_id, platform):
     members = _members(league_id)
     assert set(members) == {USER_ID, OPP_ID}
     assert all(m["updated_at"] for m in members.values())   # updated, not re-inserted
+
+
+# ---------------------------------------------------------------------------
+# Where the lock sits (structural; the behavior tests above can't tell)
+# ---------------------------------------------------------------------------
+
+# Every database.py writer that takes the users-row lock. A writer added to
+# or dropped from this set fails the test until it's listed here.
+_GUARDED_WRITERS = {"upsert_user", "upsert_league", "record_event", "write_session_init_members",
+                    "upsert_roster_snapshots", "upsert_board_snapshots"}
+
+
+def _called(func):
+    return getattr(func, "id", None) or getattr(func, "attr", None)
+
+
+def _opening_lock(with_node):
+    """The `_lock_live_user` call that opens this `with` block, directly or as
+    the first statement of a leading `if` (`if require_user:`), or None."""
+    first = with_node.body[0]
+    if isinstance(first, ast.If) and not first.orelse:
+        first = first.body[0]
+    if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Call)
+            and _called(first.value.func) == "_lock_live_user"):
+        return first.value
+    return None
+
+
+def test_every_users_row_lock_opens_the_transaction_that_writes():
+    """`_lock_live_user(conn, …)` must be the first statement inside the
+    `with <engine>.begin() as conn:` block that also makes the write, and on
+    that block's own `conn`. After a write it locks too late; alone in its own
+    transaction it's released before the write. On SQLite, run one at a time,
+    neither shows (release-lead's #587 QA), so this reads the source."""
+    tree = ast.parse(pathlib.Path(db_module.__file__).read_text())
+    guarded, bad = set(), []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef) or fn.name == "_lock_live_user":
+            continue
+        locks = [n for n in ast.walk(fn)
+                 if isinstance(n, ast.Call) and _called(n.func) == "_lock_live_user"]
+        if not locks:
+            continue
+        guarded.add(fn.name)
+        opened_by = {id(_opening_lock(w)): w for w in ast.walk(fn) if isinstance(w, ast.With)}
+        for call in locks:
+            w = opened_by.get(id(call))
+            item = w.items[0] if w is not None and len(w.items) == 1 else None
+            ok = (item is not None
+                  and isinstance(item.context_expr, ast.Call)
+                  and _called(item.context_expr.func) == "begin"
+                  and isinstance(item.optional_vars, ast.Name)
+                  and isinstance(call.args[0], ast.Name)
+                  and call.args[0].id == item.optional_vars.id
+                  and len(w.body) > 1)                  # the write is in the same block
+            if not ok:
+                bad.append(f"{fn.name} (database.py:{call.lineno})")
+    assert not bad, f"users-row lock not opening its write's transaction: {bad}"
+    assert guarded == _GUARDED_WRITERS

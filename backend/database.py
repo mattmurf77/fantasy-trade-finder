@@ -4870,7 +4870,8 @@ def record_event(
     `bind`: the engine to write through, default this module's. A background
     writer passes the one it captured on the request thread.
     `require_user` (the session-init daemon): no row unless the users row
-    exists, held under its lock (_lock_live_user) until the row commits.
+    exists, held under its lock (_lock_live_user) until the row commits;
+    with no row it raises AccountGone, the one failure not swallowed.
 
     Always inserts a new row — never overwrites prior events. The denorm
     columns on `users` are pointers to the most recent event of each type
@@ -4937,6 +4938,8 @@ def record_event(
             # SELECT (eliminates a separate read transaction + race window).
             if event_type in _RANK_STREAK_EVENTS:
                 streak_result = _recompute_streak_on_rank_event(conn, user_id, tz)
+    except AccountGone:
+        raise   # only under require_user: the caller stops there
     except Exception as e:
         print(f"[record_event] {user_id}/{event_type} failed: {e}")
         return None
@@ -9950,6 +9953,16 @@ def write_session_init_members(league_id: str, members: list[dict], *, user_id: 
     refused (G-015) and returns False. Otherwise (a linked platform league,
     whose rows only its link and refresh routes create) existing rows are
     updated and none is inserted. Returns True once written.
+
+    The replace takes the rows still there from its own DELETE (RETURNING),
+    so a leaguemate's deletion that reached their row first, committed or
+    still in flight, is never undone.
+    Known limit on Postgres (READ COMMITTED; release-lead's #587 QA, d1): a
+    leaguemate's deletion that reaches their row after this DELETE locked it
+    waits, then can't see the row re-inserted here, which survives it.
+    Closing that takes a shared lock on every member's users row. Not done:
+    the row is public Sleeper membership, which any member's next init
+    writes again (the deletion matrix).
     """
     now = _now()
     rows = [{"league_id": str(league_id), "user_id": str(m["user_id"]),
@@ -9969,9 +9982,8 @@ def write_session_init_members(league_id: str, members: list[dict], *, user_id: 
                     username=r["username"], display_name=r["display_name"],
                     roster_data=r["roster_data"], updated_at=now))
             return True
-        here = set(conn.execute(select(t.c.user_id).where(
-            t.c.league_id == str(league_id))).scalars())
-        conn.execute(delete(t).where(t.c.league_id == str(league_id)))
+        here = set(conn.execute(delete(t).where(t.c.league_id == str(league_id))
+                                .returning(t.c.user_id)).scalars())
         rows = [r for r in rows if r["user_id"] in here or r["user_id"] not in existed]
         if rows:
             conn.execute(insert(t), rows)
@@ -14303,8 +14315,11 @@ def load_elo_history(
 # player_value_history accessors (backlog #57 / #17)
 # ---------------------------------------------------------------------------
 
-def upsert_roster_snapshots(rows: list[dict]) -> dict:
+def upsert_roster_snapshots(rows: list[dict], *, live_user: str | None = None) -> dict:
     """One league's snapshot batch, one transaction (ADR-011).
+
+    `live_user` (the session-init daemon): the write runs under that
+    account's users-row lock (_lock_live_user), AccountGone when it's gone.
 
     PRECEDENCE, NOT RECENCY. 'weekly' rows are server-fetched (every team,
     orphans included); 'sync' rows are client-posted (ownerless rosters
@@ -14330,6 +14345,8 @@ def upsert_roster_snapshots(rows: list[dict]) -> dict:
         return stats
     t = league_roster_history_table
     with engine.begin() as conn:
+        if live_user:
+            _lock_live_user(conn, live_user)
         for row in rows:
             existing = conn.execute(
                 select(t.c.id, t.c.source, t.c.roster_hash).where(
@@ -14433,17 +14450,19 @@ def latest_value_snapshot_date(scoring_format: str,
         return None
 
 
-def upsert_board_snapshots(rows: list[dict]) -> dict:
+def upsert_board_snapshots(rows: list[dict], *, live_user: str | None = None) -> dict:
     """league_board_history batch upsert (C5/C6). Same transaction-per-batch
     shape as upsert_roster_snapshots; precedence is simpler because every
     trigger reads the SAME local member_rankings rows — 'sync' and 'weekly'
     carry identical content, so either may refresh the period. 'backfill'
-    is insert-only."""
+    is insert-only. `live_user`: as upsert_roster_snapshots."""
     stats = {"inserted": 0, "updated": 0, "skipped": 0}
     if not rows:
         return stats
     t = league_board_history_table
     with engine.begin() as conn:
+        if live_user:
+            _lock_live_user(conn, live_user)
         for row in rows:
             existing = conn.execute(
                 select(t.c.id).where(
