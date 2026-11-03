@@ -35,7 +35,7 @@ Gates: release-lead's #587 QA, P2 and P3-1..4. Server only, as round 1: no route
   - the two new files: 35 passed, 8 skipped (PG unset);
   - the session-init `-k` selection: 779 passed, 9 skipped (round 1's 775 + 4; the 8 skips are the opt-in file);
   - `test_account_deletion_coverage.py`: 62 passed.
-  - Local Python 3.14.4; the full suite was not run (platforms-eng runs it).
+  - **Full suite at `4863c4bb`** (platforms-eng, Python 3.14.4): **10328 passed, 11 skipped**, 12:49. The 8 new skips are the opt-in PG file.
 
 ## 2026-11-03 — Session init: the daemon never re-creates rows an account deletion removed
 
