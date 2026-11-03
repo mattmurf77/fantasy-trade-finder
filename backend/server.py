@@ -88,7 +88,7 @@ from .data_loader import (load_consensus_maps, seed_elo_for_players,
                           normalise_name)
 from .database import (
     init_db,
-    upsert_user, upsert_league,
+    upsert_user, upsert_league, AccountGone,
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
     load_recent_league_likes, find_live_trade_like, log_trade_impressions,
@@ -131,7 +131,8 @@ from .database import (
     replenish_week_done, log_deck_replenish,
     set_feedback_status, list_feedback_for_user, FEEDBACK_STATUSES, FEEDBACK_SEVERITIES,
     upsert_league_members, upsert_member_rankings,
-    replace_league_members_snapshot,   # S0 — authoritative Sleeper membership
+    # The session-init daemon's start read and its guarded members write
+    league_row_and_member_ids, write_session_init_members,
     load_member_rankings, load_league_members, get_ranking_coverage,
     find_mirror_like, save_trade_policy_shadow, save_trade_proposal,
     # FB-147 — Sleeper trade-block snapshot (read side; sync lives in
@@ -28164,8 +28165,19 @@ def session_init():
 
         try:
             # Platform-link state is a DB fact that nothing in this daemon
-            # writes, so every guard below reads it once.
-            _platform_linked = is_linked_platform_league(league_id)
+            # writes, so every guard below reads it once. The request's
+            # platform counts too: a linked league whose row an account
+            # deletion removed since then is still never treated as Sleeper.
+            _platform_linked = (authoritative["platform"] != "sleeper"
+                                or is_linked_platform_league(league_id))
+            # What exists at the start. An account deletion can remove these
+            # rows while this runs, so they are only ever updated, never
+            # re-created. Each write below holds the account's users-row lock
+            # (database._lock_live_user) and stops at AccountGone. The users
+            # row is never inserted here (the session mint writes it); only a
+            # Sleeper league's first init inserts: its leagues row, and the
+            # league_members rows of managers new since the start.
+            _league_existed, _members_existed = league_row_and_member_ids(league_id)
 
             # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE
             # upsert_user runs so we can emit a one-time referral-receipt
@@ -28184,6 +28196,7 @@ def session_init():
                     display_name=display_name,
                     avatar=avatar,
                     invited_by=invited_by,
+                    require_user=True,
                 )
                 upsert_league(
                     league_id        = league_id,
@@ -28192,6 +28205,9 @@ def session_init():
                     season           = "2026",
                     user_player_ids  = new_user_roster,
                     opponent_rosters = opponent_rosters,
+                    platform         = authoritative["platform"],
+                    require_user     = True,
+                    only_if_exists   = _league_existed or _platform_linked,
                 )
                 log.info("  ✅ user + league upserted in DB (bg)")
 
@@ -28206,6 +28222,7 @@ def session_init():
                         league_id  = league_id,
                         session_id = token,
                         source     = "api",
+                        require_user = True,
                         **_ev_info,
                     )
                 except Exception as _ev_err:
@@ -28223,6 +28240,7 @@ def session_init():
                         source     = "api",
                         props      = {"league_id": league_id,
                                       "platform": "sleeper"},
+                        require_user = True,
                         **_ev_info,
                     )
                 except Exception as _ev_err:
@@ -28347,6 +28365,9 @@ def session_init():
                         log.info("  ℹ️  league scoring auto-detect deferred — Sleeper meta unavailable")
                 except Exception as e:
                     log.warning("  league scoring auto-detect failed (continuing): %s", e)
+            except AccountGone:
+                log.info("  account gone: session/init writes stopped (bg)")
+                return
             except Exception as db_err:
                 log.warning("  DB upsert failed (continuing): %s", db_err)
 
@@ -28355,20 +28376,22 @@ def session_init():
             try:
                 all_members_for_db = _session_member_rows(
                     league_user_id, league_display_name, user_player_ids, opponent_rosters)
-                if _s0_raw and not _platform_linked:
-                    # S0 — the request thread's Sleeper read is the complete,
-                    # authoritative membership: replace, so departed managers'
-                    # rows go (G-075). Refuses an empty snapshot (G-015).
-                    _s0_members_ok = replace_league_members_snapshot(
-                        league_id, all_members_for_db)
-                else:
-                    upsert_league_members(league_id=league_id, members=all_members_for_db)
-                    _s0_members_ok = True
+                # S0 — a Sleeper league's read (request thread) is the complete,
+                # authoritative membership: replace, so departed managers' rows
+                # go (G-075). Refuses an empty snapshot (G-015). A platform
+                # league's rows are only updated.
+                _s0_members_ok = write_session_init_members(
+                    league_id, all_members_for_db, user_id=user_id,
+                    existed=_members_existed,
+                    replace=bool(_s0_raw) and not _platform_linked)
                 log.info("  ✅ league_members written (%d members)", len(all_members_for_db))
                 # Roster changed → drop cached _league_members projections
                 # so the next /api/league/members call rebuilds the
                 # join-status list. (Picked up from PR #63 #B4 cache.)
                 _invalidate_league_members_cache(league_id)
+            except AccountGone:
+                log.info("  account gone: session/init writes stopped (bg)")
+                return
             except Exception as db_err:
                 log.warning("  league_members upsert failed (continuing): %s", db_err)
 

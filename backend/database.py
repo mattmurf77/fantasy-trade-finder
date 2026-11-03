@@ -4859,6 +4859,7 @@ def record_event(
     tz:          str | None = None,
     touch_user:  bool = True,
     bind=None,
+    require_user: bool = False,
 ) -> dict | None:
     """Append one row to user_events AND bump the matching users.last_*_at
     column (and device snapshot columns) in a single transaction.
@@ -4868,6 +4869,8 @@ def record_event(
     `deck_i1_check`), which must not move `last_active_at` or `events_count`.
     `bind`: the engine to write through, default this module's. A background
     writer passes the one it captured on the request thread.
+    `require_user` (the session-init daemon): no row unless the users row
+    exists, held under its lock (_lock_live_user) until the row commits.
 
     Always inserts a new row — never overwrites prior events. The denorm
     columns on `users` are pointers to the most recent event of each type
@@ -4886,6 +4889,8 @@ def record_event(
     streak_result: dict | None = None
     try:
         with (bind if bind is not None else engine).begin() as conn:
+            if require_user:
+                _lock_live_user(conn, user_id)
             conn.execute(
                 insert(user_events_table).values(
                     user_id     = user_id,
@@ -5588,19 +5593,49 @@ def list_config() -> list[dict]:
 # User operations
 # ---------------------------------------------------------------------------
 
+class AccountGone(Exception):
+    """A write that needs the account's users row found none: the account
+    was deleted (or never written). Nothing was written."""
+
+
+def _lock_live_user(conn, user_id: str) -> None:
+    """Lock `user_id`'s users row for the rest of this transaction, or raise
+    AccountGone. Must be the transaction's first statement.
+
+    Account deletion locks the same row FOR UPDATE before it deletes anything
+    (accounts._delete_user_data), so a write made under this lock either
+    commits first, and the deletion then removes it, or sees the row gone.
+    FOR KEY SHARE doesn't block ordinary updates of the row (record_event's).
+    SQLite takes its write lock first instead (win_now_store._lock_live_user).
+    """
+    if conn.dialect.name == "sqlite":
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
+    if conn.execute(select(users_table.c.sleeper_user_id)
+                    .where(users_table.c.sleeper_user_id == user_id)
+                    .with_for_update(read=True, key_share=True)).first() is None:
+        raise AccountGone()
+
+
 def upsert_user(
     sleeper_user_id: str,
     username: str = "",
     display_name: str = "",
     avatar: str | None = None,
     invited_by: str | None = None,
+    *,
+    require_user: bool = False,
 ) -> None:
     """Insert a new user or update their display fields if they already exist.
 
     `invited_by` is only set on INSERT — repeat logins never overwrite the
     original referrer, so referral attribution is immutable once recorded.
+
+    `require_user` (the session-init daemon): update only, under the row's
+    lock; with no row it raises AccountGone and inserts nothing.
     """
     with engine.begin() as conn:
+        if require_user:
+            _lock_live_user(conn, sleeper_user_id)
         existing = conn.execute(
             select(users_table).where(
                 users_table.c.sleeper_user_id == sleeper_user_id
@@ -6326,6 +6361,10 @@ def upsert_league(
     season: str,
     user_player_ids: list[str],
     opponent_rosters: list[dict],
+    *,
+    platform: str | None = None,
+    require_user: bool = False,
+    only_if_exists: bool = False,
 ) -> None:
     """Insert or refresh a league record.
 
@@ -6344,6 +6383,12 @@ def upsert_league(
     `opponent_data` therefore hold only the importer-owner's initial
     snapshot (kept for provenance; not read back anywhere) and are never
     overwritten by other members.
+
+    `platform` is written on INSERT only. The session-init daemon passes
+    `require_user` (the write runs under `user_id`'s users-row lock, and
+    raises AccountGone when that row is gone) and, for a row it found at its
+    start or a platform league's, `only_if_exists`: update only, so a row an
+    account deletion removed in between is never re-created.
     """
     roster_json   = json.dumps(user_player_ids)
     opponent_json = json.dumps(opponent_rosters)
@@ -6358,9 +6403,17 @@ def upsert_league(
         "opponent_data":     opponent_json,
         "created_at":        now,
         "updated_at":        now,
+        "platform":          platform,
     }
 
     with engine.begin() as conn:
+        if require_user:
+            _lock_live_user(conn, user_id)
+        if only_if_exists:
+            conn.execute(update(leagues_table)
+                         .where(leagues_table.c.sleeper_league_id == league_id)
+                         .values(name=name, updated_at=now))
+            return
         # Single atomic upsert on the PK — race-safe against two members of
         # the same league hitting session_init concurrently (both would
         # otherwise SELECT-miss then INSERT, and the loser would crash).
@@ -9870,6 +9923,58 @@ def replace_league_members_snapshot(league_id: str, members: list[dict]) -> bool
     if not rows:
         return False
     replace_espn_league_members(league_id, rows)
+    return True
+
+
+def league_row_and_member_ids(league_id: str) -> tuple[bool, set[str]]:
+    """Whether the league's `leagues` row exists, and its league_members user
+    ids: what the session-init daemon finds at its start."""
+    with engine.connect() as conn:
+        league = conn.execute(select(leagues_table.c.sleeper_league_id).where(
+            leagues_table.c.sleeper_league_id == str(league_id))).first() is not None
+        ids = set(conn.execute(select(league_members_table.c.user_id).where(
+            league_members_table.c.league_id == str(league_id))).scalars())
+    return league, ids
+
+
+def write_session_init_members(league_id: str, members: list[dict], *, user_id: str,
+                               existed: set[str], replace: bool) -> bool:
+    """The session-init daemon's league_members write. It runs under
+    `user_id`'s users-row lock (_lock_live_user: AccountGone, nothing written,
+    when the account is gone) and never re-creates a row that was there when
+    the daemon started (`existed`) and is gone now.
+
+    `replace` (a Sleeper league's S0 read, complete and authoritative): the
+    league's rows become the snapshot, so departed managers' rows go (G-075)
+    and a manager with no row at the start gets one; an empty snapshot is
+    refused (G-015) and returns False. Otherwise (a linked platform league,
+    whose rows only its link and refresh routes create) existing rows are
+    updated and none is inserted. Returns True once written.
+    """
+    now = _now()
+    rows = [{"league_id": str(league_id), "user_id": str(m["user_id"]),
+             "username": m.get("username", ""),
+             "display_name": m.get("display_name") or m.get("username", ""),
+             "roster_data": json.dumps(m.get("player_ids", [])), "updated_at": now}
+            for m in members or [] if m.get("user_id")]
+    if replace and not rows:
+        return False
+    t = league_members_table
+    with engine.begin() as conn:
+        _lock_live_user(conn, user_id)
+        if not replace:
+            for r in rows:
+                conn.execute(update(t).where(t.c.league_id == r["league_id"],
+                                             t.c.user_id == r["user_id"]).values(
+                    username=r["username"], display_name=r["display_name"],
+                    roster_data=r["roster_data"], updated_at=now))
+            return True
+        here = set(conn.execute(select(t.c.user_id).where(
+            t.c.league_id == str(league_id))).scalars())
+        conn.execute(delete(t).where(t.c.league_id == str(league_id)))
+        rows = [r for r in rows if r["user_id"] in here or r["user_id"] not in existed]
+        if rows:
+            conn.execute(insert(t), rows)
     return True
 
 

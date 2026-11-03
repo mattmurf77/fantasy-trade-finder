@@ -307,10 +307,9 @@ def init_client(monkeypatch, rosters):
         captured["league_id"] = league_id
         captured["members"] = members
 
-    monkeypatch.setattr(server, "upsert_league_members", _capture)
-    # S0 — a Sleeper league's authoritative snapshot is written by replace.
-    monkeypatch.setattr(server, "replace_league_members_snapshot",
-                        lambda league_id, members: (_capture(league_id, members), True)[1])
+    # The daemon's one league_members write (S0 replace for a Sleeper league).
+    monkeypatch.setattr(server, "write_session_init_members",
+                        lambda league_id, members, **kw: (_capture(league_id, members), True)[1])
     # Everything else the daemon touches is best-effort and already wrapped in
     # try/except upstream; neuter the writes so the test needs no live DB or
     # network. Anything NOT neutered here fails soft and is logged, exactly as
