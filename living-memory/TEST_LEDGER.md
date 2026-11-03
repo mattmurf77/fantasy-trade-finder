@@ -20,7 +20,8 @@ Gates: head-eng's spec, from release-lead's QA of #479. Server only: no route, s
   - `-k "session_init or roster or co_owner or players_refresh or account_only or fingerprint or deletion or delete"`: 775 passed, 1 skipped (baseline 744 + 31 new);
   - `test_account_deletion_coverage.py`: 62 passed;
   - the 20 other files that drive `/api/session/init` or the changed writers: 662 passed.
-  - Local Python 3.14.4; the full suite was not run (platforms-eng runs it).
+  - **Full suite at `a19aabfe`** (platforms-eng, Python 3.14.4): **10324 passed, 3 skipped**, 14:50.
+  - **Not verified:** real Postgres row locking. The tests run on SQLite; on Postgres only the guard's compile to `FOR KEY SHARE` was checked. That's for QA on PG.
 
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
