@@ -31,12 +31,12 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import delete, insert, or_, select, update
 
 from . import database as db
 from . import user_data_lifecycle
@@ -615,17 +615,50 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #
 #   ALSO DELETE newer private tables in _ADDITIONAL_PRIVATE_TABLES,
 #            durable sessions, account-linked billing (including raw payloads),
-#            own deck impressions/outcomes, identity links, linked anonymous
-#            device events/assignments, and private ranking sets/entries.
+#            own deck impressions/outcomes (outcomes also by their own
+#            user_id, G3-e), identity links, linked anonymous
+#            device events/assignments, private ranking sets/entries, and
+#            trade_share_tokens the user minted (created_by).
 #            Resolve acct_<account_id> aliases before removing identity rows.
 #   ALSO ANONYMIZE shared packages, public ranking authors, referral sides,
 #            affiliate attribution, recorded-pick authors, trade-block owners,
 #            strong roster-history owners and suggestion impression links.
 #            Weak user-keyed roster history is deleted. Other identified
 #            users' events/identity links on a shared device are preserved.
+#            Platform pick grids (draft_picks.platform set and not 'sleeper',
+#            i.e. MFL/ESPN): owner_user_id / original_user_id → the
+#            DELETED_USER_PLACEHOLDER where they name a deleted id, and that
+#            side's owner_username / original_username → "Team <slot>" (the
+#            writers' own fallback; the placeholder if no slot is known). There
+#            the importer's own picks carry their FLEECED id (entry:*, acct_*;
+#            server._sync_mfl_owned_picks) and their name, and nothing re-syncs
+#            the grid once they are gone. The row itself stays: other members
+#            rely on it.
+#            recorded_picks.picking_team_id → the placeholder where it is a
+#            deleted Fleeced-minted id (entry:*, acct_*; no platform column).
+#            pick_assignment_changed events (OTHER users'): old_owner /
+#            new_owner / actor → the placeholder where they are a deleted
+#            Fleeced-minted id; the audit trail stays readable.
+#            leagues.pick_assignment_settings.order (any row, incl. other
+#            importers'): a deleted Fleeced-minted id → the placeholder in
+#            place, so other owners' slot positions don't shift.
+#            Team overhaul: own overhauls (account_user_id) are deleted with
+#            their offers, roadmaps, attempts and reservations. In OTHER
+#            users' overhauls an offer naming this user (or their league
+#            member id) keeps its package and history; its counterparty id and
+#            name, and the card's target id and name, → the placeholder; the
+#            card loses the counterparty's Fleeced-derived fields; its
+#            evidence_json → NULL; a liked or undecided one goes stale, and
+#            an undecided one's package_hash is re-minted. Those overhauls'
+#            roadmap summaries list the placeholder instead, and a
+#            Fleeced-minted id (entry:*, acct_*) keying their snapshot
+#            rosters or holding their recovery pick → the placeholder.
 #   KEEP     player_value_history + model_config (not user-keyed),
-#            draft_picks (public league pick grid other members rely on;
-#            re-synced from Sleeper), players.
+#            draft_picks on Sleeper grids (and legacy rows with no platform),
+#            ids and usernames alike, and recorded_picks.picking_team_id
+#            holding a Sleeper id: public Sleeper data other members rely on,
+#            re-synced from Sleeper. Platform grids keep the row, never the
+#            deleted person's id or name (ANONYMIZE above). players.
 # ---------------------------------------------------------------------------
 
 def _user_data_scope(conn, user_id: str, account_id: str | None = None):
@@ -658,6 +691,124 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "grading_sessions", "grading_cards", "trade_page_store", "trade_deck_lineage",
     "deck_card_withdrawals", "deck_evidence_packs",
 )
+
+# Team overhaul (BUILD-CONTRACT §4) keys its owner as `account_user_id`, and
+# the rest by `overhaul_id`, so none of it fits the user_id loop above.
+_OVERHAUL_CHILD_TABLES = ("overhaul_offers", "overhaul_roadmaps", "overhaul_attempts",
+                          "overhaul_reservations")
+# Public-card fields drawn from the counterparty's own Fleeced account (legal
+# R28.20 c2; trade_card_to_dict): the generators' reasons (the bilateral arm's
+# says whether the other manager has preferences), and the deck-card fields
+# the shared serializer can carry.
+_OVERHAUL_CARD_PARTNER_KEYS = ("reasons", "likes_you", "standing_offer_reason", "breaker",
+                               "fit", "roster_evaluation", "rationale", "narrative")
+
+
+def _overhaul_card_without_partner_fields(card: dict) -> dict:
+    """An overhaul offer's public card minus the counterparty's Fleeced-derived
+    fields: the keys above, and match_context's `counterparty*` keys (the owner
+    arms' benefits and preference evidence) and `opponent_outlook` (the
+    narrative arms', which can be the partner's declared outlook)."""
+    out = {k: v for k, v in card.items() if k not in _OVERHAUL_CARD_PARTNER_KEYS}
+    if isinstance(out.get("match_context"), dict):
+        out["match_context"] = {k: v for k, v in out["match_context"].items()
+                                if not k.startswith("counterparty") and k != "opponent_outlook"}
+    return out
+
+
+# A scrubbed card's id and name, and its blended scalars under legal's test
+# (R28.22 b, b2; every card of the partner alike). On the owner arms
+# `mismatch_score` (the deck's surplus_margin) and `composite_score` (its
+# base_score) are the same number, the card's presentation rank
+# (trade_gen_owner.py:649-650, trade_gen_bilateral.py:517): surplus_margin is
+# nulled, so its copy goes with it. `fit` (and fit.aggregate) is already
+# dropped above; no final_score is stored on an overhaul card.
+_OVERHAUL_REDACTED_CARD_VALUES = {"target_user_id": DELETED_USER_PLACEHOLDER,
+                                  "target_username": DELETED_USER_PLACEHOLDER,
+                                  "mismatch_score": None, "composite_score": None}
+
+
+# A users row created this long after an overhaul is a new account under a
+# reused id (deleted before overhauls were covered, then signed up again),
+# not the overhaul's owner. The margin covers session_init's users-row write,
+# which runs in a background thread after its response (server.py:27838-27920).
+_OVERHAUL_RESIGNUP_MARGIN = timedelta(hours=1)
+
+
+def delete_orphaned_overhauls() -> dict[str, int]:
+    """Legal R28.22 d2: overhauls whose owner account no longer exists (deleted,
+    or purged as an entry user, before deletion covered overhauls) go with every
+    row under them, and so do child rows whose overhaul is already gone.
+
+    An owner is live while ANY of these names their account_user_id: a users
+    row, a durable session row (the strongest signal: a signed-in user's
+    session/init can return before its background users-row write lands), or an
+    accounts row (as the acct_ alias, or as the bound Sleeper id:
+    migrate_board_data deletes the from-id's users row on a bind). Deletion
+    removes all of them. An overhaul is also orphaned when its owner's users row
+    was created more than _OVERHAUL_RESIGNUP_MARGIN after it (release-lead #540
+    QA P2-2), unless a durable session or accounts row for that owner is no
+    newer than the overhaul: that owner was live when they made it (a users
+    row can land late when its best-effort writes fail; QA re-QA P3). Deletion
+    removes both, so a real re-signup never has one older than its old plans.
+    Returns counts only; callers log only those."""
+    ovh, users, sessions, accts = (db.overhauls_table, db.users_table, db.sessions_table,
+                                   db.accounts_table)
+    counts = {"overhauls": 0, "child_rows": 0}
+    with db.engine.begin() as conn:
+        ids = set(conn.execute(select(ovh.c.overhaul_id).where(
+            ~ovh.c.account_user_id.in_(select(users.c.sleeper_user_id)),
+            ~ovh.c.account_user_id.in_(select(sessions.c.user_id)),
+            ~ovh.c.account_user_id.in_(select(ACCOUNT_USER_PREFIX + accts.c.account_id)),
+            ~ovh.c.account_user_id.in_(select(accts.c.sleeper_user_id).where(
+                accts.c.sleeper_user_id.isnot(None))))).scalars())
+        for oid, owner, made, joined in conn.execute(
+                select(ovh.c.overhaul_id, ovh.c.account_user_id, ovh.c.created_at, users.c.created_at)
+                .join(users, users.c.sleeper_user_id == ovh.c.account_user_id)
+                .where(users.c.created_at.isnot(None))).all():
+            made_at, joined_at = _parse_utc(made), _parse_utc(joined)
+            if made_at is None or joined_at is None or joined_at - made_at <= _OVERHAUL_RESIGNUP_MARGIN:
+                continue
+            anchors = list(conn.execute(select(sessions.c.created_at).where(
+                sessions.c.user_id == owner)).scalars()) + list(conn.execute(
+                select(accts.c.created_at).where(
+                    (ACCOUNT_USER_PREFIX + accts.c.account_id == owner)
+                    | (accts.c.sleeper_user_id == owner))).scalars())
+            if any(t is not None and t <= made_at for t in map(_parse_utc, anchors)):
+                continue
+            ids.add(oid)
+        ids = sorted(ids)
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            for name in _OVERHAUL_CHILD_TABLES:
+                tbl = getattr(db, name + "_table")
+                counts["child_rows"] += conn.execute(
+                    delete(tbl).where(tbl.c.overhaul_id.in_(chunk))).rowcount or 0
+            counts["overhauls"] += conn.execute(
+                delete(ovh).where(ovh.c.overhaul_id.in_(chunk))).rowcount or 0
+        for name in _OVERHAUL_CHILD_TABLES:
+            tbl = getattr(db, name + "_table")
+            counts["child_rows"] += conn.execute(delete(tbl).where(
+                ~tbl.c.overhaul_id.in_(select(ovh.c.overhaul_id)))).rowcount or 0
+    return counts
+
+
+def _parse_utc(raw):
+    """An ISO timestamp as an aware UTC datetime (a bare date or naive time is
+    UTC); None when it doesn't parse."""
+    try:
+        value = datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _loads_dict(raw):
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 @contextmanager
@@ -768,19 +919,37 @@ def _delete_user_data(sleeper_user_id: str,
 
         impressions = select(db.deck_impressions_table.c.impression_id).where(
             db.deck_impressions_table.c.user_id.in_(user_ids))
+        # A packed card's outcomes are keyed by its contract id, with or
+        # without a row: the evidence prune deletes a packed deck's rows at 90
+        # days and keeps its outcomes with the pack (#523 QA P1-1, E-b4).
+        contract_ids = db.deck_pack_contract_ids(conn, user_ids)
+        chunks = [contract_ids[k:k + 500] for k in range(0, len(contract_ids), 500)]
         res = conn.execute(delete(db.deck_outcomes_table).where(
             db.deck_outcomes_table.c.impression_id.in_(impressions)))
-        counts["deck_outcomes_deleted"] = res.rowcount or 0
+        counts["deck_outcomes_deleted"] = (res.rowcount or 0) + sum(
+            conn.execute(delete(db.deck_outcomes_table).where(
+                db.deck_outcomes_table.c.impression_id.in_(chunk))).rowcount or 0
+            for chunk in chunks)
         # Shared executed-trade records keep their aggregate classification,
         # but cannot retain links to deleted private suggestions.
         links = db.suggestion_trade_links_table
         for col in ("matched_impression_id", "ghost_impression_id"):
             res = conn.execute(update(links).where(links.c[col].in_(impressions))
                                .values({col: None}))
-            counts["suggestion_trade_links_" + col + "_anonymized"] = res.rowcount or 0
+            # Contract ids are only ever non-ghost cards' (a ghost keeps its
+            # uuid4), so only the matched column can hold one; neither column
+            # is indexed, so the ghost pass would scan for nothing.
+            counts["suggestion_trade_links_" + col + "_anonymized"] = (res.rowcount or 0) + (sum(
+                conn.execute(update(links).where(links.c[col].in_(chunk))
+                             .values({col: None})).rowcount or 0
+                for chunk in chunks) if col == "matched_impression_id" else 0)
         _del("deck_impressions", db.deck_impressions_table)
         for name in _ADDITIONAL_PRIVATE_TABLES:
             _del(name, getattr(db, name + "_table"))
+        # G3-e (legal R28.22): outcomes by their own user_id too, after the
+        # row and pack paths above, so this count is the outcomes only it
+        # reached.
+        _del("deck_outcomes_by_owner", db.deck_outcomes_table)
 
         # Another manager owns their confirmed-send record. Preserve its
         # package/provider history, but remove deleted-counterparty attribution
@@ -790,6 +959,111 @@ def _delete_user_data(sleeper_user_id: str,
             proposals.c.target_user_id.in_(user_ids)).values(
                 target_user_id=None, valuation_json=None))
         counts["trade_proposals_counterparty_anonymized"] = res.rowcount or 0
+
+        # Team overhaul: the user's own overhauls go with every row under them.
+        # In OTHER users' overhauls, an offer naming them as the counterparty
+        # keeps its package, decision and send history, but the id and name
+        # become the placeholder, the card loses the counterparty's
+        # Fleeced-derived fields, and the frozen evidence (both sides' private
+        # boards) goes, as trade_proposals.valuation_json above. A liked or
+        # undecided offer goes stale, the native retirement: a stale offer is
+        # never sent (the placeholder resolves to no roster) and a refresh
+        # rebuilds against current rosters. An undecided one also gets a fresh
+        # package_hash, so regeneration can't revive the scrubbed row by hash;
+        # a liked or passed one keeps its hash, which is what stops a passed
+        # package coming back. An offer names its counterparty by league member
+        # id: on ESPN/MFL that's the user's own id (session_input.py:58), on
+        # Sleeper the roster's owner, so user_ids is the whole set. NOT their
+        # overhauls' league_user_id: a Sleeper co-owner's is the roster's
+        # PRIMARY owner, another live person (release-lead #540 QA P1).
+        ovh = db.overhauls_table
+        own = select(ovh.c.overhaul_id).where(ovh.c.account_user_id.in_(user_ids))
+        named_ids = set(user_ids)
+        for name in _OVERHAUL_CHILD_TABLES:
+            tbl = getattr(db, name + "_table")
+            res = conn.execute(delete(tbl).where(tbl.c.overhaul_id.in_(own)))
+            counts[name + "_deleted"] = res.rowcount or 0
+        res = conn.execute(delete(ovh).where(ovh.c.account_user_id.in_(user_ids)))
+        counts["overhauls_deleted"] = res.rowcount or 0
+        offers = db.overhaul_offers_table
+        named = conn.execute(select(offers.c.id, offers.c.offer_id, offers.c.overhaul_id,
+                                    offers.c.card_json, offers.c.decision).where(
+            offers.c.counterparty_user_id.in_(named_ids))).all()
+        for row in named:
+            card = _loads_dict(row.card_json)
+            values = dict(
+                counterparty_user_id=DELETED_USER_PLACEHOLDER,
+                counterparty_username=DELETED_USER_PLACEHOLDER,
+                card_json=json.dumps(dict(_overhaul_card_without_partner_fields(card),
+                                          **_OVERHAUL_REDACTED_CARD_VALUES)
+                                     if card is not None else {}),
+                evidence_json=None)
+            if row.decision != "pass":
+                values["availability"] = "stale"
+            if row.decision == "undecided":
+                values["package_hash"] = "redacted_" + secrets.token_hex(16)
+            conn.execute(update(offers).where(offers.c.id == row.id).values(**values))
+        counts["overhaul_offers_counterparty_anonymized"] = len(named)
+        # Their roadmaps list each package's counterparty id in the summary, and
+        # a stored ownership blocker on a scrubbed offer names the team in its
+        # message (release-lead #540 QA P2-1): it becomes the shared copy's
+        # unnamed form, the same sentence a nameless counterparty gets.
+        from .ownership_copy import refusal_message
+        scrubbed_offers = {r.offer_id for r in named}
+        roadmaps = db.overhaul_roadmaps_table
+        touched = 0
+        for row in conn.execute(select(roadmaps.c.id, roadmaps.c.summary_json, roadmaps.c.compat_json)
+                                .where(roadmaps.c.overhaul_id.in_({r.overhaul_id for r in named}))).all():
+            values = {}
+            summary = _loads_dict(row.summary_json)
+            cps = summary.get("counterparties") if summary is not None else None
+            if isinstance(cps, list) and {str(c) for c in cps} & named_ids:
+                summary["counterparties"] = [DELETED_USER_PLACEHOLDER if str(c) in named_ids else c
+                                             for c in cps]
+                values["summary_json"] = json.dumps(summary)
+            compat = _loads_dict(row.compat_json)
+            hits = [item for items in (compat or {}).values() if isinstance(items, list)
+                    for item in items if isinstance(item, dict)
+                    and item.get("code") == "counterparty_asset_not_owned"
+                    and item.get("offer_id") in scrubbed_offers]
+            for item in hits:
+                assets = item.get("assets") if isinstance(item.get("assets"), list) else []
+                item["message"] = refusal_message("receive", assets, {}, None)
+            if hits:
+                values["compat_json"] = json.dumps(compat)
+            if values:
+                conn.execute(update(roadmaps).where(roadmaps.c.id == row.id).values(**values))
+                touched += 1
+        counts["overhaul_roadmaps_counterparty_anonymized"] = touched
+        # Their snapshots key `rosters` by league member id and pick owner, and
+        # their recovery names a pick's holder. On ESPN/MFL grids those can be
+        # this user's Fleeced-minted id (entry:*, acct_*; the same rule as
+        # recorded_picks below), which then becomes the placeholder. Platform
+        # ids stay.
+        minted = {u for u in user_ids if u.startswith("entry:") or is_account_user_id(u)}
+        snapshots = 0
+        if minted:
+            for row in conn.execute(select(ovh.c.id, ovh.c.snapshot_json, ovh.c.recovery_json).where(
+                    or_(*[col.contains(m, autoescape=True) for m in minted
+                          for col in (ovh.c.snapshot_json, ovh.c.recovery_json)]))).all():
+                values = {}
+                snapshot = _loads_dict(row.snapshot_json)
+                rosters = snapshot.get("rosters") if snapshot is not None else None
+                if isinstance(rosters, dict) and set(rosters) & minted:
+                    kept = {k: v for k, v in rosters.items() if k not in minted}
+                    kept[DELETED_USER_PLACEHOLDER] = list(kept.get(DELETED_USER_PLACEHOLDER) or []) + [
+                        a for k in sorted(set(rosters) & minted) for a in rosters[k] or []]
+                    snapshot["rosters"] = kept
+                    values["snapshot_json"] = json.dumps(snapshot)
+                recovery = _loads_dict(row.recovery_json)
+                if recovery is not None and recovery.get("holder_user_id") in minted:
+                    recovery.update(holder_user_id=DELETED_USER_PLACEHOLDER,
+                                    holder_username=DELETED_USER_PLACEHOLDER)
+                    values["recovery_json"] = json.dumps(recovery)
+                if values:
+                    conn.execute(update(ovh).where(ovh.c.id == row.id).values(**values))
+                    snapshots += 1
+        counts["overhaul_snapshots_anonymized"] = snapshots
 
         # Preserve published ranking snapshots and other users' adoptions;
         # remove attribution and freeform author metadata. Private sets have
@@ -819,6 +1093,121 @@ def _delete_user_data(sleeper_user_id: str,
             tbl = getattr(db, name + "_table")
             res = conn.execute(update(tbl).where(tbl.c[col].in_(user_ids)).values(**values))
             counts[name + "_" + col + "_anonymized"] = res.rowcount or 0
+        # Platform (non-Sleeper) pick grids hold the importer's Fleeced id as
+        # the owner of their own picks. `platform` is the LEAGUE's provenance,
+        # written by every draft_picks writer; Sleeper grids and legacy NULL
+        # rows keep their public Sleeper ids untouched.
+        # The writers also fill owner_username / original_username from the
+        # member's own name (server._sync_mfl_owned_picks, the assignment
+        # seeder), so each scrubbed side's name becomes those writers' own
+        # fallback, "Team <slot>". The original side's slot is the row's
+        # original_roster_id. The owner side's is the same when the person is
+        # on both sides (their own pick); otherwise it's their one slot in that
+        # league (their own original picks, aliases included), else the
+        # placeholder.
+        picks = db.draft_picks_table
+        platform_grid = picks.c.platform.isnot(None) & (picks.c.platform != "sleeper")
+        named = conn.execute(select(
+            picks.c.id, picks.c.league_id, picks.c.owner_user_id,
+            picks.c.original_user_id, picks.c.original_roster_id).where(
+            platform_grid,
+            picks.c.owner_user_id.in_(user_ids) | picks.c.original_user_id.in_(user_ids),
+        )).all()
+        own_slots: dict[str, set] = {}
+        for r in named:
+            if r.original_user_id in user_ids and r.original_roster_id:
+                own_slots.setdefault(r.league_id, set()).add(str(r.original_roster_id))
+
+        def _team(slot) -> str:
+            return f"Team {slot}" if slot else DELETED_USER_PLACEHOLDER
+
+        # One UPDATE per distinct set of new values, not per row: a person's
+        # rows share a handful of slots, and this runs inside the deletion
+        # transaction.
+        batches: dict[tuple, list] = {}
+        for r in named:
+            values = {}
+            if r.original_user_id in user_ids:
+                values.update(original_user_id=DELETED_USER_PLACEHOLDER,
+                              original_username=_team(r.original_roster_id))
+            if r.owner_user_id in user_ids:
+                slots = own_slots.get(r.league_id, set())
+                slot = (r.original_roster_id if r.original_user_id in user_ids
+                        else next(iter(slots)) if len(slots) == 1 else None)
+                values.update(owner_user_id=DELETED_USER_PLACEHOLDER, owner_username=_team(slot))
+            batches.setdefault(tuple(sorted(values.items())), []).append(r.id)
+        for key, ids in batches.items():
+            for i in range(0, len(ids), 500):
+                conn.execute(update(picks).where(picks.c.id.in_(ids[i:i + 500])).values(**dict(key)))
+        counts["draft_picks_owner_anonymized"] = len(named)
+        # recorded_picks.picking_team_id (a league_members.user_id) has no
+        # platform column to apply the rule above with, so it is anonymized
+        # only where it holds a Fleeced-minted id (entry:*, acct_*), which
+        # exists nowhere but here and names the person. Public Sleeper ids
+        # stay, as on Sleeper grids (#452 D2).
+        minted = [u for u in user_ids if u.startswith("entry:") or is_account_user_id(u)]
+        recorded = db.recorded_picks_table
+        res = conn.execute(update(recorded).where(recorded.c.picking_team_id.in_(minted))
+                           .values(picking_team_id=DELETED_USER_PLACEHOLDER))
+        counts["recorded_picks_picking_team_id_anonymized"] = res.rowcount or 0
+        # pick_assignment_changed is the pick grid's audit trail (contested
+        # derivation and the runbook's grid reconstruction read it). OTHER
+        # users' events can name this user as old_owner / new_owner / actor.
+        # A Fleeced-minted id there names the person, so it becomes the
+        # placeholder, matching the grid rows above; public Sleeper ids stay,
+        # as on Sleeper grids (#452 QA P2).
+        events_tbl = db.user_events_table
+        minted_set = set(minted)
+        scrubbed = 0
+        if minted:
+            rows = conn.execute(select(events_tbl.c.id, events_tbl.c.props).where(
+                events_tbl.c.event_type == "pick_assignment_changed",
+                or_(*[events_tbl.c.props.contains(m, autoescape=True) for m in minted]),
+            )).all()
+            for event_id, raw in rows:
+                try:
+                    props = json.loads(raw or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if not isinstance(props, dict):   # a malformed row must not abort the deletion
+                    continue
+                hits = [k for k in ("old_owner", "new_owner", "actor") if props.get(k) in minted_set]
+                if hits:
+                    for k in hits:
+                        props[k] = DELETED_USER_PLACEHOLDER
+                    conn.execute(update(events_tbl).where(events_tbl.c.id == event_id)
+                                 .values(props=json.dumps(props)))
+                    scrubbed += 1
+        counts["pick_assignment_events_anonymized"] = scrubbed
+        # leagues.pick_assignment_settings.order lists every member's id in
+        # slot order (seed_pick_grid), including on rows OTHER users imported.
+        # A Fleeced-minted id there names the person (an entry:espn:{SWID}
+        # carries a third party's SWID, R28.16). It becomes the placeholder in
+        # place, so the other owners' slot positions don't shift; public
+        # Sleeper ids stay, as on Sleeper grids (#452 QA round 3).
+        leagues_tbl = db.leagues_table
+        orders = 0
+        if minted:
+            rows = conn.execute(select(leagues_tbl.c.sleeper_league_id,
+                                       leagues_tbl.c.pick_assignment_settings).where(
+                or_(*[leagues_tbl.c.pick_assignment_settings.contains(m, autoescape=True)
+                      for m in minted]))).all()
+            for league_id, raw in rows:
+                try:
+                    settings = json.loads(raw or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                order = settings.get("order") if isinstance(settings, dict) else None
+                if not isinstance(order, list):
+                    continue
+                anonymized = [DELETED_USER_PLACEHOLDER if o in minted_set else o for o in order]
+                if anonymized != order:
+                    settings["order"] = anonymized
+                    conn.execute(update(leagues_tbl)
+                                 .where(leagues_tbl.c.sleeper_league_id == league_id)
+                                 .values(pick_assignment_settings=json.dumps(settings)))
+                    orders += 1
+        counts["pick_assignment_order_anonymized"] = orders
         # Weak roster keys embed the user ID; strong keys are public team slots.
         history = db.league_roster_history_table
         res = conn.execute(delete(history).where(history.c.owner_user_id.in_(user_ids),
@@ -861,6 +1250,9 @@ def _delete_user_data(sleeper_user_id: str,
         _del("leagues", db.leagues_table)
         _del("bad_trade_flags", db.bad_trade_flags_table)
         _del("trade_impressions", db.trade_impressions_table)
+        # Trade share links this user minted die with the account (build O8);
+        # the other party's own tokens for the same match are untouched.
+        _del("trade_share_tokens", db.trade_share_tokens_table, "created_by")
 
         # Shared rows — anonymize the deleted side, keep the counterparty's
         # record (incl. status + both decisions) intact.
@@ -973,6 +1365,9 @@ _EXPORT_TABLES: tuple = (
     ("mfl_credentials", "mfl_credentials_table", "user_id", ("cookie_encrypted",)),
     ("deck_impressions", "deck_impressions_table", "user_id", ()),
     ("shared_packages", "shared_packages_table", "user_id", ()),
+    # The share token is a bearer capability for a public link: omitted like
+    # referrals.invite_token; match_id + timestamps carry the user's history.
+    ("trade_share_tokens", "trade_share_tokens_table", "created_by", ("token",)),
     ("affiliate_clicks", "affiliate_clicks_table", "user_id", ()),
     ("trade_block", "trade_block_table", "user_id", ()),
     ("rank_sets", "rank_sets_table", "owner_user_id", ()),
@@ -986,6 +1381,7 @@ _EXPORT_TABLES: tuple = (
     ("prepared_trade_targets", "prepared_trade_targets_table", "user_id",
      ("lease_token", "payload_json")),
     ("prepared_trade_participants", "prepared_trade_participants_table", "user_id", ()),
+    ("overhauls", "overhauls_table", "account_user_id", ()),
 )
 
 _EXPORT_TABLES += tuple(
@@ -1104,14 +1500,42 @@ def export_user_data(sleeper_user_id: str,
             select(db.experiment_assignments_table).where(
                 db.experiment_assignments_table.c.unit_id.in_(
                     user_ids | acct_ids | anonymous_ids | devices))).fetchall())
-        impression_ids = [r["impression_id"] for r in tables["deck_impressions"]]
-        tables["deck_outcomes"] = _rows_as_dicts(conn.execute(
-            select(db.deck_outcomes_table).where(
-                db.deck_outcomes_table.c.impression_id.in_(impression_ids))).fetchall())
+        # Through the rows, and through the packs' contract ids: a packed
+        # card's outcomes outlive its row (#523 QA P1-1).
+        impression_ids = list(dict.fromkeys(
+            [r["impression_id"] for r in tables["deck_impressions"]]
+            + db.deck_pack_contract_ids(conn, user_ids)))
+        tables["deck_outcomes"] = [
+            row for k in range(0, len(impression_ids), 500)
+            for row in _rows_as_dicts(conn.execute(
+                select(db.deck_outcomes_table).where(
+                    db.deck_outcomes_table.c.impression_id.in_(impression_ids[k:k + 500]))
+                .order_by(db.deck_outcomes_table.c.id)).fetchall())]
+        # G3-e: and by the outcome's own user_id, each row once.
+        outcomes = db.deck_outcomes_table
+        known = {r["id"] for r in tables["deck_outcomes"]}
+        tables["deck_outcomes"] += [r for r in _rows_as_dicts(conn.execute(
+            select(outcomes).where(outcomes.c.user_id.in_(user_ids))).fetchall())
+            if r["id"] not in known]
+        tables["deck_outcomes"].sort(key=lambda r: r["id"])
         rank_set_ids = [r["id"] for r in tables["rank_sets"]]
         tables["rank_set_entries"] = _rows_as_dicts(conn.execute(
             select(db.rank_set_entries_table).where(
                 db.rank_set_entries_table.c.rank_set_id.in_(rank_set_ids))).fetchall())
+        # The rows under the user's own overhauls. An offer's evidence_json
+        # (both sides' private boards, "never on the wire") is left out, and
+        # its card goes out without the counterparty's Fleeced-derived fields
+        # (R28.20 c2), the same fields deletion scrubs.
+        overhaul_ids = [r["overhaul_id"] for r in tables["overhauls"]]
+        for name in _OVERHAUL_CHILD_TABLES:
+            tbl = getattr(db, name + "_table")
+            tables[name] = _rows_as_dicts(conn.execute(
+                select(tbl).where(tbl.c.overhaul_id.in_(overhaul_ids)).order_by(tbl.c.id)).fetchall(),
+                ("evidence_json",) if name == "overhaul_offers" else ())
+        for row in tables["overhaul_offers"]:
+            card = _loads_dict(row["card_json"])
+            row["card_json"] = (json.dumps(_overhaul_card_without_partner_fields(card))
+                                if card is not None else None)
 
     return out
 

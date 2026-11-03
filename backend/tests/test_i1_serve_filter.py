@@ -23,6 +23,7 @@ import pytest
 from sqlalchemy import create_engine, delete, insert, text, update
 
 import backend.database as db_module
+import backend.feature_flags as ff
 import backend.server as server
 from backend import roster_snapshot, trade_service as ts
 from backend.database import (draft_picks_table, league_members_table,
@@ -428,8 +429,13 @@ def test_withhold_is_rechecked_on_every_poll(live, gates_on):
     assert {c["trade_id"] for c in body["cards"]} == SERVABLE and "wait_reason" not in body
 
 
-def test_paged_withhold_holds_the_cursor(live, gates_on):
+def test_paged_withhold_holds_the_cursor(live, gates_on, monkeypatch):
+    """The in-memory deck's paged cursor. The flags are pinned off: with the
+    page store on, the cursor reads the stored deck (the job's real cards, not
+    the CARDS swapped in here), pinned by test_trade_page_store's twin."""
     client, engine, _ = live
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": False,
+                                             "trade.packed_evidence": False})
     job = _complete_job_with_cards()
     _roster_state(engine, status="stale", refreshed_ago=600)
     resp = client.get(f"/api/trades/status?job_id={job['job_id']}&cursor=0",
