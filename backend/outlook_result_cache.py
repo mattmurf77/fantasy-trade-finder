@@ -35,6 +35,9 @@ never cached.
 
 Hit/miss/coalesced/error counters live in `OUTLOOK_RESULTS.stats` and go to the
 debug log only; they are never part of an API response.
+
+Account deletion calls `purge_callers()` with the deleted user's ids, which
+drops their personal entries (key slot [3]) at once instead of after the TTL.
 """
 
 from __future__ import annotations
@@ -121,6 +124,17 @@ class OutlookResultCache:
             self._entries.clear()
             for k in self.stats:
                 self.stats[k] = 0
+
+    def purge_callers(self, user_ids) -> int:
+        """Drop every stored entry keyed on one of `user_ids` (slot [3], set
+        only for basis=personal); returns how many. An empty id is skipped:
+        it is the slot every shared entry holds."""
+        ids = {u for u in user_ids if u}
+        with self._lock:
+            doomed = [k for k in self._entries if k[3] in ids]
+            for k in doomed:
+                del self._entries[k]
+        return len(doomed)
 
     def get_or_compute(self, key: tuple, compute: Callable[[], dict]) -> dict:
         """The stored value for `key`, computing it once if absent or expired.

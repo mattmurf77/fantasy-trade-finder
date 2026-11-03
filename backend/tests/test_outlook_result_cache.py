@@ -3,7 +3,7 @@
 The engine is pure and seeded, so a stored result must be exactly what an
 uncached `run_outlook` returns for the same inputs. These tests pin that, the
 key's coverage of every input, per-caller `is_you`, single-flight, the bounds,
-and that errors are never stored. Unit tests drive the real `run_outlook` on
+that errors are never stored, and the account-deletion purge. Unit tests drive the real `run_outlook` on
 small crafted leagues; the route tests reuse `test_outlook_route_cache.py`'s
 fake Sleeper.
 """
@@ -142,6 +142,12 @@ MUTATIONS = {
     "model_cfg": lambda i: i["model_cfg"].__setitem__("outlook_seed", 7.0),
     "playoff_seed_type": lambda i: i.__setitem__("playoff_seed_type", 0),
     "strength_source": lambda i: i.__setitem__("strength_source", "blended"),
+    # The key's leading slots, which the digest doesn't cover (release-lead QA
+    # on #512). The personal request has an empty caller id, so its slot [3]
+    # matches the consensus base and only `basis` tells the two apart.
+    "league_id": lambda i: i.__setitem__("league_id", "LG-OTHER"),
+    "scoring_format": lambda i: i.__setitem__("scoring_format", "sf_tep"),
+    "basis": lambda i: i.update(basis="personal", user_id=""),
 }
 
 
@@ -320,6 +326,21 @@ def test_an_error_is_not_cached_and_the_next_call_recomputes(exc):
 
 
 # ---------------------------------------------------------------------------
+# 7 — account deletion purges the deleted callers' personal entries
+# ---------------------------------------------------------------------------
+
+def test_purge_callers_drops_only_those_callers_personal_entries():
+    cache = orc.OutlookResultCache()
+    personal = {you: orc.make_key(**_inputs(basis="personal", user_id=you))
+                for you in ("u1", "u2", "u3")}
+    shared = orc.make_key(**_inputs(user_id="u1"))
+    for key in [*personal.values(), shared]:
+        cache.get_or_compute(key, lambda: {"teams": []})
+    assert cache.purge_callers({"u1", "u3", ""}) == 2
+    assert list(cache._entries) == [personal["u2"], shared]
+
+
+# ---------------------------------------------------------------------------
 # Route level — through the Flask test client
 # ---------------------------------------------------------------------------
 
@@ -381,3 +402,35 @@ def test_route_restamps_is_you_for_a_second_caller_on_a_hit(client):
     for t in a["teams"] + b["teams"]:
         t.pop("is_you")
     assert a == b
+
+
+def test_route_computes_uncached_when_the_key_cannot_be_built(client, caplog):
+    """release-lead QA on #512: `make_key` raising on a non-JSON input made the
+    route 500. It now answers what an uncached run returns, stores nothing,
+    and logs one warning."""
+    import backend.outlook as outlook_pkg
+    fake, _log = _fake_sleeper()
+    real, seen = outlook_pkg.run_outlook, []
+
+    def spy(*a, **k):
+        seen.append((a, k))
+        return real(*a, **k)
+
+    def unhashable(**_):
+        raise TypeError("outlook result cache cannot hash object")
+
+    with patch.object(server, "is_enabled", lambda k: k == "outlook.odds"), \
+         patch.object(server, "_sleeper_get", fake), \
+         patch.object(server, "_get_universal_pool", lambda fmt: ([], {})), \
+         patch.object(outlook_pkg, "run_outlook", spy), \
+         patch.object(orc, "make_key", unhashable), \
+         caplog.at_level("WARNING"):
+        r = client.get(f"/api/league/outlook?league_id={LEAGUE_ID}",
+                       headers={"X-Session-Token": TOKENS["u1"]})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    [(a, k)] = seen
+    want = real(*a, **{**k, "you_user_id": "u1"})   # the pre-cache route's call
+    assert r.get_json() == json.loads(json.dumps(want))
+    assert _you(r.get_json()) == ["u1"]
+    assert not orc.OUTLOOK_RESULTS._entries
+    assert caplog.text.count("result cache key failed") == 1
