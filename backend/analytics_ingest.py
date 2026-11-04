@@ -9,7 +9,10 @@ the session identity) delegating to `ingest_request()` here.
 Contract highlights (LLD §2.1):
   • Always 200 for content — rate limiting, unknown types, PII scrubs and
     oversized props are "accepted-and-dropped" (counted in `accepted` and
-    the observability-only `dropped` field), never a 4xx/429.
+    the observability-only `dropped` field), never a 4xx/429. The one
+    non-200 is the transport guard: a CHUNKED body over MAX_CONTENT_LENGTH
+    is a 413 with nothing parsed (a Content-Length over it stays the 200
+    `batch_rejected:too_large`).
   • Accounting invariant (KD-2 / I-3): on any committed transaction,
     accepted + deduped + len(rejected) == len(events). The ONLY sum-short
     case is a whole-txn failure → {"accepted":0,"deduped":0,"rejected":[]}.
@@ -39,6 +42,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import OperationalError
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from . import database as db
 from .analytics_taxonomy import ALLOWED_CLIENT_EVENTS, CLIENT_EVENT_PROPS
@@ -143,7 +147,15 @@ MAX_BATCH = 50
 MAX_CONTENT_LENGTH = 131_072      # 128 KiB, checked pre-read (never a Flask
                                   # MAX_CONTENT_LENGTH — that's app-global and
                                   # would break feedback screenshots)
-MAX_PROPS_BYTES = 4_096           # client truncates at 2 048 — the margin is the point
+# Why 128 KiB (transport-guard note, 2026-10-27; corrected 2026-11-03 after
+# #490 QA): no shipped client truncates props, but no shipped event's props
+# come near the 4 096-byte MAX_PROPS_BYTES either. A typical batch (20 events,
+# a few hundred bytes of props each) is under 10 KB, and a full BATCH_MAX (50)
+# batch at ~2 KB of props per envelope is ~120 KB, still under the cap.
+# The number is the shipped contract (`batch_rejected:too_large`, docs/
+# api-reference.md); this guard applies the SAME cap to a chunked body, it
+# does not move it, so nothing that was parsed before is rejected now.
+MAX_PROPS_BYTES = 4_096           # per envelope; larger props → accepted-and-dropped (no client truncates)
 MAX_PROPS_KEYS = 40
 MAX_PROPS_DEPTH = 3
 CLIENT_TS_CLAMP_S = 48 * 3600     # |server − client| beyond this → props.ts_suspect
@@ -336,6 +348,28 @@ def ingest_request(session_user_id: str | None, *, on_accepted=None):
     # forever-unparseable batch is the bug.
     if (request.content_length or 0) > MAX_CONTENT_LENGTH:
         return _respond(0, 0, [], 0, "batch_rejected:too_large")
+    # 2b — the same cap for a CHUNKED body. It has no Content-Length, so the
+    # check above reads it as 0 and the whole body used to be read and
+    # parsed. Cap the read itself with a per-request max_content_length —
+    # the transport-guard pattern of PR #360 (POST /api/feedback,
+    # server.py FEEDBACK_MAX_BODY_BYTES); unify with it if a shared helper
+    # lands. Werkzeug's limited stream returns the first `limit` bytes and
+    # raises only on a read PAST the limit, so a limit of exactly the cap
+    # would hand back a silently truncated body; limit cap + 1 and check the
+    # length instead: at most cap + 1 bytes are ever read, exactly the cap
+    # is accepted. 413, not the 200 above: the 200 is the documented purge
+    # signal for a client that DECLARED an oversized batch; no shipped client
+    # sends chunked, so this is only ever a non-client transport (and both
+    # clients purge any non-5xx non-OK status, so a 413 never retry-storms).
+    request.max_content_length = MAX_CONTENT_LENGTH + 1
+    try:
+        raw_body = request.get_data(cache=True)
+    except RequestEntityTooLarge:
+        raw_body = None
+    if raw_body is None or len(raw_body) > MAX_CONTENT_LENGTH:
+        resp = jsonify({"error": "too_large", "limit": MAX_CONTENT_LENGTH})
+        resp.status_code = 413
+        return resp
 
     # 3 — parse. Empty/absent events → legal no-op (sum 0 == 0).
     body = request.get_json(force=True, silent=True) or {}
@@ -423,7 +457,7 @@ def ingest_request(session_user_id: str | None, *, on_accepted=None):
                 props.pop(k, None)
 
         # Oversized/over-deep props → whole envelope accepted-and-dropped
-        # (client truncates at 2 048 B; hitting this means a client bug).
+        # (no shipped event's props come near this; hitting it means a client bug).
         if (len(props) > MAX_PROPS_KEYS
                 or not _props_depth_ok(props)
                 or len(json.dumps(props)) > MAX_PROPS_BYTES):

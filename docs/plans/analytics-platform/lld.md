@@ -36,7 +36,7 @@ Request headers: `X-Device-Id` (string ≤64; required for pre-auth), `X-Session
 } ] }
 ```
 
-Response — always `200` for content (FR-9/11/KD-2); `500` only on unhandled bug (client treats as network failure → requeue):
+Response — always `200` for content (FR-9/11/KD-2); `500` only on unhandled bug (client treats as network failure → requeue). *(2026-11-03, #490: one transport exception, a chunked body over the 128 KiB cap is a `413` with nothing parsed.)*
 
 ```json
 { "accepted": 7, "deduped": 2,
@@ -47,7 +47,7 @@ Response — always `200` for content (FR-9/11/KD-2); `500` only on unhandled bu
 
 **Accounting invariant (KD-2, normative):** on any committed transaction `accepted + deduped + len(rejected) == len(events)`. Server-side drops (rate-limit, unknown-type/prop, PII-scrub, oversized `props`) count as **`accepted`** ("accepted-and-dropped") + their health counter. Whole-txn failure is the only sum-short case: `{"accepted":0,"deduped":0,"rejected":[]}`, still 200. `rejected` reasons (closed enum): `bad_envelope | bad_event_id | bad_seq | no_identity`. Client purge rule: `rejected` → purge always; sum == N → purge batch; sum < N → requeue non-rejected; **`batch_rejected:*` dispositions override the sum-short rule → purge whole batch** (§4.6); `disabled` → retain (§4.6). Empty `events:[]` → legal no-op (sum 0==0). The `dropped` field is **observability only** (= accepted-and-dropped count, present on every response incl. `disabled`/`batch_rejected:*` where it is 0 — v0 binaries never parse the body, §1.1); it plays no part in the sum invariant or purge rule. Identity: header `X-Device-Id` preferred; the v0 body `device_id` fallback is kept per §1.1.
 
-**Size caps (checked before body parse where possible):** `len(events) > 50` → `disposition:"batch_rejected:too_many"` (purge); `Content-Length > 131072` (128 KiB) → `"batch_rejected:too_large"` checked pre-read (purge — requeueing a forever-unparseable batch is the bug). Do **not** set Flask `MAX_CONTENT_LENGTH` (app-global; would break feedback screenshots). Per-envelope `props` > 4096 B → accepted-and-dropped + counter (client truncates at 2048 B, so this counter ≈ 0 or there's a client bug — that margin is the point).
+**Size caps (checked before body parse where possible):** `len(events) > 50` → `disposition:"batch_rejected:too_many"` (purge); `Content-Length > 131072` (128 KiB) → `"batch_rejected:too_large"` checked pre-read (purge — requeueing a forever-unparseable batch is the bug). Do **not** set Flask `MAX_CONTENT_LENGTH` (app-global; would break feedback screenshots). Per-envelope `props` > 4096 B → accepted-and-dropped + counter (client truncates at 2048 B, so this counter ≈ 0 or there's a client bug — that margin is the point). *(Correction, 2026-11-03, #490 QA: no shipped client truncates props; the 2048 B client truncation described here was never built. The server's 4096 B per-envelope drop is the only limit.)*
 
 ### 2.2 `GET /api/feature-flags` (extended; FR-35/KD-6)
 
@@ -380,7 +380,7 @@ All in `analytics_queries.py` on `ro_engine`; every query takes explicit window 
 
 ### 5.3 Unbounded-resource guards
 
-Batch 50 / 128 KiB pre-parse · `props` 4096 B server, 2048 B client · `targeting_json` 8192 B, depth ≤4, ≤32 predicates · client queue 500 (critical drop-last) · rate-limiter dict 10 000 entries · CSV export 50 000 rows · JSON report 5 000 rows · health counters plain ints (no per-device server maps beyond the bounded limiter) · transitions in a separate append-only table (no blob growth).
+Batch 50 / 128 KiB pre-parse · `props` 4096 B server, 2048 B client (never built, see §2.1's 2026-11-03 correction) · `targeting_json` 8192 B, depth ≤4, ≤32 predicates · client queue 500 (critical drop-last) · rate-limiter dict 10 000 entries · CSV export 50 000 rows · JSON report 5 000 rows · health counters plain ints (no per-device server maps beyond the bounded limiter) · transitions in a separate append-only table (no blob growth).
 
 ### 5.4 PRD edge-case map (E-1..E-15)
 
