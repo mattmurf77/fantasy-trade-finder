@@ -689,6 +689,7 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "rank_set_adoptions", "accuracy_scores", "mock_drafts", "receipts_grades",
     "trade_proposals", "trade_policy_shadow", "deck_diagnostic_snapshots",
     "grading_sessions", "grading_cards", "trade_page_store", "trade_deck_lineage",
+    "paywall_previews",
     "deck_card_withdrawals", "deck_evidence_packs",
     # D1 free-agent moves: the R15.3 consent and move records, deleted with
     # the account (R15.8 D12) and exported while it exists.

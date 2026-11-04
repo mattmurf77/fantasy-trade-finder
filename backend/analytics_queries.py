@@ -362,8 +362,8 @@ NON_INTENT_EVENTS = frozenset({
     #   paywall_purchase_initiated / _completed / _failed — the purchase
     #     itself is a real decision, but it is NOT OURS TO COUNT: the
     #     authoritative row is the server-fired `entitlement_granted` the
-    #     RevenueCat webhook writes (INTENT, and it cannot be spoofed by a
-    #     client). These three are the UI echo used to reconcile against it
+    #     RevenueCat webhook writes (it cannot be spoofed by a client; NON_INTENT
+    #     since C8, below). These three are the UI echo used to reconcile against it
     #     — admitting them would double-count every purchaser's user-day
     #     and, worse, let a client mint one for a purchase that never
     #     cleared the store. `_failed` is a defect signal, not a decision.
@@ -380,6 +380,11 @@ NON_INTENT_EVENTS = frozenset({
     "paywall_purchase_completed",
     "paywall_purchase_failed",
     "paywall_restore",
+    # paywall_gate_hit (C8 §B, 2026-10-27, added in the SAME commit as its
+    # emitter): the server's 402 at a gated route, a system outcome of a
+    # request the user already made, never a choice. Props: gate,
+    # route_family, enforced.
+    "paywall_gate_hit",
     # Home hub (flag `nav.home_hub`, 2026-10-10), added in the SAME commit
     # that registered them (docs/plans/home-engagement/scope.md §1).
     #   home_tile_tapped — NAVIGATION, the `tab_selected` class. Home is the
@@ -436,6 +441,11 @@ NON_INTENT_EVENTS = frozenset({
     # `fa_move_write_succeeded` is deliberately ABSENT and stays INTENT.
     "fa_move_consent_recorded",
     "fa_move_consent_withdrawn",
+    # entitlement_granted (C8, 2026-10-28, registered in the SAME commit):
+    # grant() also fires for manual, comp, bulk, Founders, referral and
+    # group-unlock grants, none of them the recipient acting. INTENT would
+    # mint a user-day for every recipient of a bulk grant.
+    "entitlement_granted",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

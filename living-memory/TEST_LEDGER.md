@@ -39,6 +39,44 @@ platform path eager. Generic-pick learning activation still needs #389 and
 the combined Shop signal check. No production probe, model gate or device
 check was performed.
 
+## 2026-11-04 — Combined paywall stack: #394/#395/#397/#473/#465/#508/#514
+
+Integrated the seven original PR heads in dependency order, retaining each head in merge ancestry. The combined branch includes main `af57e59c`. Server config and measurement merge after unverified-request hardening, retaining isolated sandbox billing lanes, the one live enforcement predicate, verified-only founder lookup, one price-rise instant (2027-01-02 04:00 UTC), durable preview windows and both server measurement events.
+
+- **Targeted validation on the complete combined tree:** entitlements, sandbox safety, global gate/route completeness, preview persistence, unverified no-read decisions, config/founder view, both C8 events, account deletion, missing-DDL migration safety and constant log templates — **857 passed in 24.55s**, Python 3.14.4, production DB environment variables unset. One existing Python 3.14 invalid-escape SyntaxWarning arose while the log-template guard parsed source; no failing tests. `git diff --check` passes.
+- **Integration correction:** current #362 token share routes remain explicitly free in the route table; its stale match-id names are removed. Conflicts preserve current prices and extension privacy wording, the owner-outcome migration and account-data deletion coverage. No new subscription behavior was invented beyond the seven scoped PRs.
+- **Dark defaults verified from source:** `monetize.entitlements`, `monetize.paywall` and `monetize.pro` remain false; both `paywall_enforce_enabled` and `paywall_web_enforce_enabled` have one seed, 0. No production configuration, credential or feature switch was read or written.
+- Full GitHub CI on this combined head is still required. Purchase, exact-binary/min-version, manual device, provider configuration and activation checks remain separate; no full local suite, simulator, StoreKit or production validation was run.
+
+## 2026-11-04 — #473 integration: unverified no-read decisions and durable preview windows
+
+Restacked hardening onto the reviewed preview integration. Kept the hardened preview-reason description, current min-version defaults, both additive migrations (`paywall_previews.window_trade_ids` and `deck_outcomes.user_id`) and the token-sharing route classification correction. No enforcement setting changed.
+
+- **Targeted validation:** unverified gate, preview persistence, gate/rule coverage, entitlement resolution, sandbox billing safety, account deletion and missing-DDL migration safety — **688 passed in 20.01s**, Python 3.14.4, production DB environment variables unset. `git diff --check` passes.
+- Existing privacy probes verify that unverified requests take the uniform account-auth 403 or verify-required 402 before preview/entitlement reads, and deck requests while enforcement is dark do not write paywall state. Preview tests verify held-card swipes after the live job disappears, cross-deck refusal, served-window caps across stored/page/rebase paths, and the additive column migration. Sandbox billing lane behavior remains green.
+- No full local suite or production/device test was run. GitHub CI must pass on the eventual combined integration head before merge; enforcement stays off until runtime prerequisites are separately verified.
+
+## 2026-11-04 — #397 integration: first-page preview preserves current account deletion
+
+Restacked the existing preview PR onto reviewed server gate `ff6b23a7` (which includes reviewed billing safety and main `af57e59c`). Conflict resolution preserves both `paywall_previews` in the private account-data registry and main's packed-evidence/withdrawal entries; the preview knob is kept alongside the current minimum-version defaults. The current token-sharing free-route fix is retained.
+
+- **Targeted validation:** preview, gate, complete route allowlist, entitlement resolution, sandbox billing safety and account deletion coverage — **551 passed in 15.62s**, Python 3.14.4 with production DB environment variables unset. `git diff --check` passes.
+- The existing served-first-page claim, cross-job denial, verified entitlement behavior and account-data coverage remain tested. This intermediate PR must remain dark until #473's stronger unverified/no-read policy and persistent preview window are integrated. No full local suite, device purchase or production check was performed; new-head GitHub CI remains required.
+
+## 2026-11-04 — #395 integration: classify current token-based sharing as free
+
+Integrated reviewed billing foundation `5d6e4cc4` and current main `af57e59c` into the global paywall gate. Both enforcement knobs remain 0; this is a dark merge, not an enforcement flip. Existing billing sandbox isolation and main's minimum-version defaults, current prices and extension privacy wording are retained.
+
+- **Integration failure found and corrected:** `test_paywall_gate_allowlist.py` initially failed two checks because #362 replaced the match-id sharing rules and added the token mint. `ROUTES` now explicitly classifies `POST /api/share/trade`, `GET /s/trade/<token>` and `GET /og/trade/<token>.png` as free, with no stale `<match_id>` entries. This preserves existing free sharing; the gate's fallback was already free. API reference documents the three rules and the updated 167-free-route count.
+- **Targeted validation:** paywall gate, complete route allowlist, entitlement resolution, billing safety and paywall config — **502 passed in 11.24s**, Python 3.14.4, production DB environment variables unset. `git diff --check` passes. Existing guards verify the dark early exit, live enforce predicate, unverified empty entitlements and sandbox isolation.
+- **Activation remains held:** the preview allowance and #473 unverified/history hardening must land, and the compatible client/minimum-version gate must be live before enforcement. No production reads/writes or full local suite were run; GitHub CI on this new head remains the full pre-merge gate.
+
+## 2026-11-04 — #394 current-main integration: billing safety remains dark
+
+Merged main `fd5390ac` into the billing-safety branch (`671c68ca`) without changing its billing behavior. Resolved the adjacent `model_config` seed conflict by preserving both the off-by-default `paywall_enforce_enabled` knob and main's minimum-version defaults. API documentation keeps main's current prices and the extension's no-entitlement privacy contract, and records the shared enforcement predicate plus isolated sandbox billing lane. Existing ledger entries from both branches are retained.
+
+- **Targeted validation:** `python3 -m pytest backend/tests/test_entitlements_billing_safety.py backend/tests/test_entitlements.py backend/tests/test_paywall_config.py backend/tests/test_account_deletion_coverage.py backend/tests/test_universal_links.py -q` — **234 passed in 7.33s**, Python 3.14.4. Production DB environment variables were unset for the run; all tests used fixture databases. `git diff --check` passes.
+- No flags or production settings changed. The `paywall_enforce_enabled` seed remains 0, and all monetization flags remain false. No full local suite, simulator, purchase, App Store or production validation was run; GitHub CI on the integration commit remains the pre-merge full gate.
 ## 2026-11-02 — `landing.platform_options` OFF (operator ask 12) until #430's verified sign-in; main matches prod
 
 Gates: full (`docs/plans/landing-platform-options/scope-ask12-off.md`; a feature-flag surface). No route, schema or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the suites below plus a code-walk.
@@ -913,6 +951,14 @@ Full gates, not express (platforms-eng; shape approved by head-eng 2026-10-27). 
 - **Targeted neighbours:** `test_entry_platform_route`, `test_verified_sessions`, `test_mfl_auth_link_route`, `test_persistent_sessions`, `test_account_first`, `test_accounts`, `test_private_session_ownership`, `test_feedback_attach_on_verify`, `test_user_data_lifecycle`, `test_deletion_session_races`, `test_link_status_routes`, `test_verified_reads`, `test_sleeper_write_route` → 231 passed, 5 failed (the fake's TypeError); after the fix `test_entry_platform_route` 25/25, and the full suite below covers all 13 files.
 - **Full suite** (`python3 -m pytest backend/tests -q -p no:cacheprovider`, no `-x`): **9,429 passed, 2 skipped, 0 failed** in 41:40. No wall-clock flake this run.
 - **Operator TestFlight check** after merge: the 5-step checklist in the scope's §3 (a username with history signs in verified and sees its own boards in both formats; a pin change survives a relaunch; a username without history signs in as before).
+## 2026-10-28 — C8 §A: `entitlement_granted` registered server-fired + NON_INTENT, written non-touching
+
+Full gates, not express (scope: `docs/plans/c8-paywall-analytics/scope.md`; analytics-lead's C8 spec, 2026-10-27). Backend only; D-056: `FTF_SKIP_SIM_GATE=1` posture. Branch `feat/c8-entitlement-granted` off `main` @ `44619b73`.
+
+- **Change:** `entitlement_granted` joins `analytics_taxonomy.SERVER_FIRED_EVENTS` and `analytics_queries.NON_INTENT_EVENTS` in one commit (the import-time disjointness assert holds); `entitlements.grant()` writes it with `touch_user=False`. Props unchanged.
+- **New `test_entitlement_granted_event.py` (3):** both memberships and not client-registered; exact props (`entitlement`, `source`, `expires_at`); `users.last_active_at` and `events_count` unchanged after `grant()`.
+- **Sabotage:** drop `touch_user=False` → `test_grant_does_not_touch_the_recipient` red (1 failed, 2 passed); restored.
+- **Targeted:** every backend test file matching analytics / entitle / event / taxonomy / intent / metric / funnel / DAU / retention / founder / referral / monetization / paywall / subscription: 287 passed, 0 failed. The full suite runs in CI (`backend-tests`).
 
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
@@ -2847,6 +2893,104 @@ Full gates. Completes I-2, the launch condition for the 200 ms waiver W-AC-L5. S
 - **Not covered:**
   - An offer that was staled for ownership but whose assets have since come back keeps today's `offer_stale` 409 with no `detail`.
   - `pool_violation`, `asset_reserved` and the overlap blocker messages still name raw ids (outside I-2).
+## 2026-10-28 — C8 §B: `paywall_gate_hit` server event (dark)
+
+Full gates (scope addendum `docs/plans/c8-paywall-analytics/scope-gate-hit.md`). Branch `feat/c8-paywall-gate-hit`, cut from `feat/paywall-hardening` @ `b214ce12` (#473). D-056: `FTF_SKIP_SIM_GATE=1` posture. Dark: the event fires only on an enforced 402, and `paywall_enforce_enabled` is 0.
+
+- **Change:** the gate hook records `paywall_gate_hit` (props `gate`, `route_family`, `enforced`) for each 402 it sends, capped in process to one per (user, gate, route_family) per UTC day, non-touching, inside a `try/except` that never changes the 402. Registered in `SERVER_FIRED_EVENTS` and `NON_INTENT_EVENTS` in the same commit. `record_event` gains `touch_user`/`bind` from #419's hunk, byte-identical to `main`.
+- **Targeted (828 passed, 0 failed, 8:29 under load ~40):** `test_paywall_gate_hit` (53, new), `test_paywall_gate` (329), `test_paywall_gate_unverified` (110), `test_paywall_preview` (46, the P3-4 `test_p34_*` dark no-write tests included), `test_paywall_gate_allowlist` (7), `test_paywall_config` (15), `test_analytics_p0` (24), `_p2` (15), `_p3` (22), `_stats` (56), `_taxonomy_384` (11), `_taxonomy_home_hub` (6), `_token_safety` (7), `test_entitlements` (52), `test_entitlements_billing_safety` (75). The full suite runs in CI on the push.
+- **Sabotage on `test_paywall_gate_hit` (53), each red then restored:**
+  - S1: `try/except` dropped and `record_event` raises → 1 red (the byte-identical 402 test: the request answers 500);
+  - S2: the cap dropped → 1 red (the per-day cap test; the bounded and thread tests call the cap directly);
+  - S3: `/api/trades/fair-packages` mapped to `other` → 3 red (the closed set, that rule's mapping cell, the spec mapping);
+  - S4: `touch_user=True` → 1 red (the `users` row test).
+
+## 2026-10-28 — #473 K0: `preview_used` only once the preview was spent (else `never_trialed`)
+
+Full gates (scope addendum `docs/plans/monetization-launch/scope-addendum-paywall-hardening.md` item (e)). Branch `feat/paywall-hardening`, a fast-forward on `e23abecd` (no re-sync of the held stack). D-056: `FTF_SKIP_SIM_GATE=1` posture. Dark: `paywall_enforce_enabled` is 0.
+
+- **Change:** `paywall_gate._preview()` answers 402 `preview_used` only when the user's `paywall_previews` row exists; with no row (knob 0, `GET /api/trades`, a swipe or a page-2 cursor before page 1) it is `never_trialed`. `gate_reason` follows the same rule. head-eng 2026-10-28, from analytics-lead's K0 alarm ("any 402 `preview_used` to a user never served a card" would have fired for every new non-entitled user on day 1).
+- **Pinned both ways:** `test_get_trades_pending_view_is_not_the_preview` and `test_knob_zero_blocks_the_first_request` (no row → `never_trialed`; a spent row → `preview_used`); `test_never_entitled_reason_is_preview_used_only_once_spent` (new, `gate_reason`).
+- **Sabotage:** `_preview` answers `preview_used` regardless of the row → both K0 tests red (2 failed, 2 passed); restored.
+- **Restated (11 tests that encoded the old reason, no row → `never_trialed`):** the gate matrix's `never` deck cells (2), `test_other_gated_routes_block_never_entitled[GET-/api/trades/status]`, `test_decide_pure_matches_hook`, the swipe/pass-reason "nothing served yet" probe (2), the pending-view and knob-0 tests, `test_r289_after_verifying_resolves_normally` (NEW), and the P3-3 default-knob stored/live cells (2).
+- **Runs:** both files in full with the fix applied: 363 passed, 11 failed (exactly the restated set). After restating: `test_paywall_gate` matrix/decide/other-gated/reason subset 294 passed; the restated `test_paywall_preview` subset 11 passed. The full suite runs in CI on the push.
+
+## 2026-10-27 — Paywall hardening: R28.14 unverified settle, durable preview window (P3-1), every deck path (P3-3), no write while dark (P3-4) (dark)
+
+Full gates (scope addendum `docs/plans/monetization-launch/scope-addendum-paywall-hardening.md`). Branch `feat/paywall-hardening`, stacked on #397 @ `83e5eb4b`. It merges dark: `paywall_enforce_enabled` is 0. D-056: `FTF_SKIP_SIM_GATE=1` posture. Schema: one nullable column, `paywall_previews.window_trade_ids` (head-eng's grant, `migration_cols`).
+
+- **Backend:** 1038 targeted tests pass (every `*paywall*` / `*entitlement*` / `*gate*` file, the gate completeness test included, plus `test_account_deletion_coverage`, `test_verified_sessions`, `test_verified_reads`, `test_trade_pages_p2`, `test_trade_page_store`, `test_trade_page_flag_off`, `test_trade_responses_small`, `test_trade_status_lock`).
+  - `test_paywall_gate_unverified` (110, new), `test_paywall_gate` (328), `test_paywall_gate_allowlist` (7), `test_paywall_preview` (46), `test_paywall_config` (15);
+  - `test_entitlements` (52), `test_entitlements_billing_safety` (75), `test_account_deletion_coverage` (35).
+  - Full suite (`python3 -m pytest backend/tests -q`): 9130 passed, 2 skipped, 0 failed (9132 collected), 34:13. The `test_ranking_service_threads` flake didn't fire.
+- **(a) R28.14 CI proof (legal condition b):** every gated rule in `ROUTES` (32) × mobile and web (knob 1) × four account states (no history, a `paywall_previews` row, active pro, lapsed pro) = 64 cases, 256 responses. Status, body bytes and headers (Date excluded) are identical within each case. 10 rules answer the route's own 403 `verification_required` and 22 answer 402 `verify_required` (pinned). Zero preview, entitlement or ledger reads (spies plus SQL capture), and no `paywall_previews` write.
+- **Sabotage, each red then restored:**
+  - (a) S1: the entitlement read moved above the verified check → 75 red, all 64 byte-identical cases among them;
+  - (a) S2: the unverified `_preview` path restored → 5 red;
+  - (b) the swipe check ignores the stored window → 7 red; the `migration_cols` row dropped → the migration test red;
+  - (d) the hook keys on `classify()` instead of `applies()` → 4 red.
+- **(b) P3-1:** a window persists across the job's eviction. A stored-window card is allowed and one outside gets 402, the live window decides while the job is held, and a pre-column row fails closed. `_migrate_db` adds the column to an old table (idempotent). The export carries the column.
+- **(c) P3-3:** the preview runs on every `DECK_PATHS` entry (stored, live, rebased_row, rebased_job), with a 4-page window and with the default knob.
+- **(d) P3-4:** flags off, and flags on with knob 0. Every deck route plus the P1 and P2 serves produce zero `paywall_previews` statements and no billing write, and `record_preview` is never called.
+
+## 2026-10-26 — Paywall one-page deck preview + uniform verify_required (legal R28.9) + first-page-store leak fix (#397) (dark)
+
+Full gates. It merges dark: `paywall_enforce_enabled` is 0, and `paywall_preview_pages` defaults to 1 (code fallback 1, G-064). D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** 828 targeted tests pass after the #369 merge, including `test_trade_pages_p2` (103) (683 before it).
+  - `test_paywall_preview` (24), `test_paywall_gate` (326), `test_paywall_gate_allowlist` (7);
+  - the entitlements files (90), `test_account_deletion_coverage` (34);
+  - E2's `test_trade_responses_small` (61) and `test_trade_status_lock` (3);
+  - #368's `test_trade_page_store` (120) and `test_trade_page_flag_off` (3);
+  - `test_paywall_config` (15).
+- **Sabotage, each red then restored:**
+  - job kickoff consumes the preview;
+  - the knob fallback is set to 0;
+  - the unverified response depends on entitlement (5 red, R28.9 (i) and (ii) included);
+  - the first-page-store leak test was red before the fix (`557973da`).
+- **R28.9:** an unverified session is decided without reading entitlements (a spy proves it).
+  - (i) Payer, free and trial-expired accounts get identical status, headers and body.
+  - (ii) A granted account behaves like a brand-new one, including the preview end.
+  - (iii) After verifying, the result resolves normally.
+- **#369 deck-id paging (`b555d28a`):** `/status?deck=D&cursor=K` (`_trade_deck_status`) had bypassed the preview helpers. It now serves through `_serve_deck_status`: capped to the preview window of the serving deck, consumed against that deck, a rebase after the preview is spent → 402, and the R28.9 reason passed through.
+  - Tests: page 2 by deck id / another deck / a rebase → 402; entitled users are unaffected; an unverified session gets the preview, then `verify_required`. Bypassing the helper turns 3 red.
+  - Known gap: if D's stored row is rebuilt by a newer deck AND D's job is gone, swipes on D's page-1 cards return 402 (it needs a store plus lineage restart).
+- **Consumption** is recorded only when cards are served: in `_serve_trade_job`, and for #368's store in `_serve_stored_trade_page`. Warm-up and cron decks never consume it. The `paywall_previews` table is covered by account deletion and export.
+
+## 2026-10-26 — Global server paywall gate (#395): one before_request, C2 trade-only, 402 pro_required (dark)
+
+Full gates. It merges dark: both knobs are 0 and the flags are off. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** `test_paywall_gate.py` (326) and `test_paywall_gate_allowlist.py` (7) pass; with them, the entitlements files pass.
+  - The allowlist test checks that every Flask rule is classified. `main`'s `/api/admin/trades/gate-miss-test` was added as never_gate.
+  - Also covered: an unverified session's empty entitlement view, and the `BILLING-UNKNOWN-USER` log.
+- **Sabotage, each red then restored:**
+  - delete a table row;
+  - mark `DELETE /api/account` gated;
+  - set the web-knob fallback to 1;
+  - remove the not-enforcing early-out (a spy catches it);
+  - drop the verified check;
+  - re-expose `sources` to unverified sessions;
+  - remove the unknown-user log.
+- **release-lead QA:** GO-with-notes. 512 gated requests at real defaults gave 0 × 402 and 0 SQL, at about 1.8 µs per request.
+- **Flip preconditions (not merge):**
+  - #397 must be live (the uniform `verify_required`, R28.9);
+  - the 1.22.0 client must handle 402 (1.21.x shows the raw `pro_required`).
+
+## 2026-10-26 — Entitlements billing safety (#394): sandbox cap, sandbox lane, perpetual guard, enforce = flags ∧ knob (dark)
+
+Full gates. It merges dark: every `monetize.*` flag is off and `paywall_enforce_enabled` is 0. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** `test_entitlements_billing_safety.py` has 75 tests. With `test_entitlements`, `test_paywall_config`, `test_account_deletion_coverage` and `test_universal_links`, 177 passed.
+- **Sabotage, each red then restored:**
+  - sandbox cap → 19;
+  - perpetual guard → 2;
+  - enforce rule → 4;
+  - G-064 fallback set to 1 → 2;
+  - `/api/me/entitlements` line → 1;
+  - **sandbox reaching production rows → 30.**
+- **The P2 fix (release-lead QA):** sandbox events touch only `granted_by = 'sandbox:*'` rows. Every event type is tested, and a production founder lifetime and a production annual stay byte-unchanged.
+- **release-lead QA:** GO-with-notes. A real-defaults run sent 512 gated requests and got 0 × 402 and 0 SQL. No DDL.
 
 ## 2026-10-26 — I-2 (3/4): ESPN send-time player ownership + validate routing + 0f guard (stacked on #412)
 
