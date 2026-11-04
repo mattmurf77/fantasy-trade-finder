@@ -622,4 +622,3 @@ def test_grants_never_cross_platforms(h):
     for platform in ("mfl", "espn"):                          # untouched by Sleeper's withdrawal
         assert db_module.active_platform_write_grant(USER, platform, SLEEPER_UID, V1, h.now)
     assert db_module.active_platform_write_grant(USER, "mfl", SLEEPER_UID, MFL_V1, h.now) is None
-

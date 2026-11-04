@@ -1,3 +1,35 @@
+## 2026-11-04 — Integrated D1 / tip / share launch candidate
+
+Base main `af57e59c`; original head ancestry retained for #379 `025aefd1`,
+#528 `de50f861`, #509 `77044992`, #579 `bfeadcff`, #578 `2195444c`,
+#575 `8247623f`, #583 `55365200`, #576 `30f39a5d`, #564 `1d48b47f`,
+#581 `57d6477b`, #573 `3beb3a6a`; includes privacy #592 `59daef9c` and
+paywall #590 `7bb7ff86` foundations. Original heads are merge ancestors,
+not locally squashed. Scope: `docs/plans/launch-d1-tip-share-integration.md`.
+
+- Integrated backend target run (18 files): **1100 passed, 3 skipped in
+  39.73 s**. Consent, capability, move/idempotence/provider failures, paywall
+  config/gate/allowlist, share snapshots/B2 labels/links/tokens, D1/handoff
+  analytics, alias-aware account deletion, scrub core/stage3 and Shop Elo.
+  Skips: two optional PostgreSQL D1 races, one existing Shop generic-pick
+  guard awaiting #389. Both PG cases then **passed in 3.03 s**, on disposable
+  local socket-only PostgreSQL with injected fake provider and synthetic data.
+- Mobile guards: external links, Sleeper handoff/event, D1 **115/115**,
+  tip **23/23**, paywall **109/109**, Shop **33/33**, trade text, share-token
+  fallback **19/19**. NODE_PATH used the existing dependency worktree; an
+  external preload redirects only D1's hardcoded absolute Zustand require.
+  No assertions changed or dependencies copied.
+- Added explicit FREE classification for roster-move/consent endpoints,
+  pinned in route completeness tests. Their own security and consent gates
+  remain. All source feature values unchanged except a new false
+  `sleeper.send_add_drop`; tip knob default remains 0. Combined diff whitespace
+  check passes. No full local suite, device/simulator, provider write, capture,
+  purchase, production setting change, remote write or activation performed.
+
+Full GitHub CI remains required. Provider-shape/consent/device proof and tip
+product/identity activation gates remain outstanding, as documented in source
+scopes; this evidence only clears the tested code integration.
+
 ## 2026-11-04 — Privacy/Shop launch integration batch (local candidate)
 
 Base: main `af57e59c`. Preserved every actual GitHub PR head as an ancestor,

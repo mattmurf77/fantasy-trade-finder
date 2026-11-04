@@ -1315,4 +1315,3 @@ def test_the_claim_takes_its_lock_in_the_same_transaction_as_check_and_insert():
     assert all(found.values()), found
     assert found["lock"][0] < min(found["check"]) and found["lock"][0] < min(found["insert"]), found
     assert min(found["check"]) < min(found["insert"]), found
-

@@ -27,6 +27,8 @@ Owner interview implementation **first wave live; experimental policy on; iOS up
 Database storage incident **service recovered; storage fix validating 2026-09-15**:
 [status](db-storage-reduction/status.md), [scope](db-storage-reduction/scope.md).
 
+Launch roster-move/tip/share integration **local candidate; CI pending**: [scope and evidence](launch-d1-tip-share-integration.md). Requires privacy #592 and paywall #590 foundations; activation remains dark.
+
 ## Status legend
 
 | Status | Means |

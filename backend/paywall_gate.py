@@ -216,6 +216,10 @@ ROUTES = {
     ("GET", "/api/league/coverage"): FREE,
     ("GET", "/api/league/format-stats"): FREE,
     ("GET", "/api/league/free-agents"): FREE,
+    # Roster management keeps its own verified/consent/kill-switch gates.
+    ("POST", "/api/league/free-agents/move"): FREE,
+    ("GET", "/api/platform-write-consent"): FREE,
+    ("DELETE", "/api/platform-write-consent"): FREE,
     ("GET", "/api/league/invite-meta"): FREE,
     ("GET", "/api/league/member-unlock-states"): FREE,
     ("GET", "/api/league/members"): FREE,
