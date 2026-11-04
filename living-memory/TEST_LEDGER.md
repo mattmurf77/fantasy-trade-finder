@@ -1,3 +1,25 @@
+## 2026-11-04 — Final combined launch candidate pre-CI verification
+
+Root integrated regression after the shared platform-helper correction:
+**1303 passed, 2 PostgreSQL-only skips in 54.17s** across18 targeted files.
+Covers real first-init/referral flows, deletion/alias leases, proven platform
+sign-in, paywall/entitlement contracts, Shop Elo, token shares, model signal
+stripping/evidence locks, both outlook caches, and D1 consent/moves. No full
+local backend suite was run; all external sockets were blocked.
+
+The new4-case cross-league first-init regression failed4/4 before the helper
+repair and passes after. Independent first-init PostgreSQL verification:
+**14 passed, 1 SQLite-DDL-only skip**. AST audit160 core backend modules found
+zero duplicate top-level definitions or parse errors. Prior full client sweep
+covers154 guards, TypeScript and255 web structural checks.
+
+Actual main now1a40bd00 after green #592; the candidate was resynced with
+that merge without runtime changes. Existing feature values match main;
+new referral/D1 flags are false, and parent landing/monetization flags stay
+false. espn.signin is newly registered true but requires the disabled parent
+landing flag. No production setting changed. Final exact-head GitHub CI
+must pass all four jobs before the remaining candidate lands.
+
 ## 2026-11-04 — Canonical league-platform helper across D1 and referral init
 
 The combined stack defined get_league_platform twice: D1's later helper
