@@ -175,7 +175,7 @@ def api(world):
         priced_pick_value=lambda row, order, fmt: 0.0, elo_to_value=lambda e: e - 1000.0,
         sleeper_credential=lambda uid: {"token_encrypted": "tok", "sleeper_user_id": uid},
         sleeper_write=SimpleNamespace(decrypt_token=lambda t: t, is_expired=lambda t: False),
-        record_event=lambda uid, name, **kw: world.events.append((name, kw.get("props"))),
+        record_event=lambda uid, name, **kw: world.events.append((name, kw.get("props"), kw.get("device_type"))),
         fetch_json=fetch_json)
 
     players = [_player(p) for p in MY_PLAYERS] + [_player(x) for r in OPPONENTS.values() for x in r]

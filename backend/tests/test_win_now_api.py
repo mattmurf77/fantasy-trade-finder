@@ -227,7 +227,7 @@ def test_search_persists_viewer_objective_and_bounds_pending_work(harness):
     inputs = json.loads(store.get_job(job_id, "alice")["input_json"])
     assert inputs["actor"]["league_user_id"] == "sleeper_alice"
     assert inputs["params"]["objective"] == "playoffs"
-    assert harness.events[0][1]["props"]["platform"] == "web"
+    assert harness.events[0][1]["props"]["platform"] is None  # no client signal (G-068)
     assert harness.wakeups
     assert harness.client.post("/api/win-now/search", json=evaluate_body()).status_code == 202
     assert harness.client.post("/api/win-now/search", json=evaluate_body()).status_code == 429
