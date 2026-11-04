@@ -479,8 +479,10 @@ assert(
 );
 
 // ── 7. flag registered on both sides ─────────────────────────────────────
+// Registered either way: it's OFF from 2026-11-02 (ask 12) until #430 is
+// live, then back ON (ask 16). The value is the operator's, not this guard's.
 assert(
-  /"landing\.platform_options": true/.test(features),
+  /"landing\.platform_options": (true|false),/.test(features),
   'config/features.json carries landing.platform_options',
 );
 assert(
