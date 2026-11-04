@@ -67,6 +67,8 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 
 ## Table of Contents
 
+- [EAS build archive secret exclusions](#eas-build-archive-secret-exclusions)
+
 - [Independent offline model scorecard](#independent-offline-model-scorecard)
 - [Local dev](#local-dev)
 - [Deploy (Render)](#deploy-render)
@@ -1811,3 +1813,16 @@ update.
   days unused (privacy §5). Until then, ops-support closes any request about
   such an account with D4.
 
+
+## EAS build archive secret exclusions
+
+The root `.easignore` repeats tracked `.gitignore` patterns for local credentials,
+environment files, signing material, databases and QA scratch data. EAS stops
+using `.gitignore` when `.easignore` exists. Keep sensitive file patterns
+unanchored so nested local files are excluded too.
+
+Before an EAS build, run `cd mobile && npm run test:easignore`; CI also runs that
+guard. Its coverage check reads tracked ignore rules, not credential contents.
+An exclusion change protects future uploads only. Previously exposed credentials
+need their own authorized rotation; this guard neither reads nor rotates them.
+See [O9 scope and evidence](plans/eas-build-secret-exclusions.md).
