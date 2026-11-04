@@ -1,3 +1,20 @@
+## 2026-11-04 — D1/tip/share child resync after current main
+
+Merged reviewed privacy parent `d4a5a4bd`, which retains latest main
+`787b9fc4`; only the additive test ledger conflicted. Original feature and
+foundation ancestry remain. Updated billing foundation will be integrated
+separately; this entry does not claim that later integration tested.
+
+- Focused ten-file backend rerun: **629 passed in 29.06 s**, covering consent,
+  move capability/route, paywall config/route completeness, share snapshots,
+  B2 labels/links/tokens and alias-aware account deletion.
+- Guards: D1 **115/115**, tip **23/23**, paywall **110/110**, share text
+  **109/109**, share-token fallback **19/19**. Existing read-only dependency
+  worktree and external absolute-Zustand redirect used as before.
+- Combined diff whitespace check passes. Runtime feature values match latest
+  main except new `sleeper.send_add_drop: false`; no knob or activation changed.
+  Full GitHub CI remains required; no full local suite or remote write.
+
 ## 2026-11-04 — Privacy/Shop resync with latest main `787b9fc4`
 
 Merged latest main as a parent, preserving both histories and every original
