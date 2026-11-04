@@ -221,8 +221,10 @@ const V2_CONFIG = { screens: V2_SCREENS } as any;
 // instead of Safari/the App Store when it's installed. Those are web-first
 // URLs with no screen of their own, so map them onto existing routes here
 // rather than in V2_SCREENS (a screen can only own one path):
-//   /s/trade/<match_id> → app/matches/<match_id>  (match share landing)
+//   /s/trade/<token>    → app/matches             (match share landing)
 //   /s/p/<short_id>     → app/trades              (package share landing)
+// The /s/trade segment is an opaque share token (build O8), not a match id,
+// so it is dropped rather than handed to Matches as `match_id`.
 // Applied in BOTH resolution paths: react-navigation's `linking` config
 // (cold start) via the getStateFromPath override below, and _routePathV2
 // (warm-start url events through handleDeepLink).
@@ -231,8 +233,7 @@ export function rewriteUniversalPath(pathWithQuery: string): string {
   const rawPath = qi === -1 ? pathWithQuery : pathWithQuery.slice(0, qi);
   const suffix = qi === -1 ? '' : pathWithQuery.slice(qi);
   const path = rawPath.replace(/^\/+/, '').replace(/\/+$/, '');
-  const trade = /^s\/trade\/([^/?#]+)$/i.exec(path);
-  if (trade) return `app/matches/${trade[1]}${suffix}`;
+  if (/^s\/trade\/[^/?#]+$/i.test(path)) return `app/matches${suffix}`;
   if (/^s\/p\/[^/?#]+$/i.test(path)) return `app/trades${suffix}`;
   return pathWithQuery;
 }

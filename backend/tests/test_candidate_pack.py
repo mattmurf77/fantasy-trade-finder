@@ -16,7 +16,7 @@ from dataclasses import replace
 from hashlib import sha256
 
 import pytest
-from sqlalchemy import Column, Integer, LargeBinary, MetaData, create_engine, insert
+from sqlalchemy import Column, Integer, LargeBinary, MetaData, Table, create_engine, insert
 
 from backend.database import deck_candidate_sets_table, deck_impressions_table
 from backend.eval import evidence_pack as ep
@@ -191,10 +191,16 @@ def _snapshot(path, sets, *, form):
     new writer's rows: candidates_json stays NOT NULL and holds ''),
     "legacy" (no packed columns)."""
     md = MetaData()
-    cands = deck_candidate_sets_table.to_metadata(md)
-    if form != "legacy":
-        cands.append_column(Column("candidates_packed", LargeBinary))
-        cands.append_column(Column("cand_pack_version", Integer))
+    packed_columns = ("candidates_packed", "cand_pack_version")
+    if form == "legacy":        # the schema before the packed columns (S8 added them)
+        cands = Table(deck_candidate_sets_table.name, md, *[
+            Column(c.name, c.type, primary_key=c.primary_key, nullable=c.nullable)
+            for c in deck_candidate_sets_table.columns if c.name not in packed_columns])
+    else:
+        cands = deck_candidate_sets_table.to_metadata(md)
+        if "candidates_packed" not in cands.c:       # before S8's schema
+            cands.append_column(Column("candidates_packed", LargeBinary))
+            cands.append_column(Column("cand_pack_version", Integer))
     assert not cands.c.candidates_json.nullable
     imps = deck_impressions_table.to_metadata(md)
     eng = create_engine(f"sqlite:///{path}")
@@ -207,6 +213,8 @@ def _snapshot(path, sets, *, form):
                 row = {**row, "candidates_json": "",
                        "candidates_packed": packed.candidates_packed,
                        "cand_pack_version": packed.cand_pack_version}
+            elif form == "legacy":   # the writer's rows carry the (NULL) packed columns now
+                row = {k: v for k, v in row.items() if k not in packed_columns}
             conn.execute(insert(cands).values(**row))
         conn.execute(insert(imps).values(
             impression_id="i1", user_id="u", league_id="lg", deck_job_id="job-1",

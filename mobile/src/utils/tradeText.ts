@@ -102,7 +102,7 @@ export function formatTradeForClipboard(input: {
     opponent ? `To: @${opponent}` : '',
     give.length > 0 ? `I send: ${give.join(', ')}` : '',
     receive.length > 0 ? `I get: ${receive.join(', ')}` : '',
-    '(Built with Fantasy Trade Finder)',
+    '(Built with Fleeced)',
   ];
   return lines.filter(Boolean).join('\n');
 }
