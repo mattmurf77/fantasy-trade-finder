@@ -33963,6 +33963,14 @@ def delete_account_route():
                               or s.get("account_id") in account_ids]:
                         _sessions[t]["_revoked"] = True
                         _sessions.pop(t, None)
+            # Personal outlook results are keyed on the caller's working id
+            # (release-lead QA on #512); best-effort, like the Apple revoke.
+            try:
+                from .outlook_result_cache import OUTLOOK_RESULTS
+                OUTLOOK_RESULTS.purge_callers(user_ids)
+            except Exception as purge_err:
+                log.warning("delete_account: outlook result purge errored (continuing): %s",
+                            purge_err)
     except Exception:
         log.exception("delete_account: deletion failed for %s", user_id)
         return jsonify({"error": "deletion_failed"}), 500
@@ -36267,17 +36275,41 @@ def league_outlook_route():
                 p = players_meta.get(pid)
                 player_pos[pid] = getattr(p, "position", None) or "?"
 
-        payload = outlook_pkg.run_outlook(
-            state,
-            player_value=player_value,
-            player_pos=player_pos,
-            model_cfg=get_config(),
-            basis=basis,
-            scoring_format=fmt,
-            you_user_id=g_user_id,
-            playoff_seed_type=_outlook_captured.get("playoff_seed_type"),
-        )
-        return jsonify(payload)
+        # Result cache (backend/outlook_result_cache.py): keyed on a hash of
+        # every input run_outlook reads, so any roster/record/schedule change
+        # misses. Computed caller-independent (you_user_id=""); `for_caller`
+        # stamps `is_you` per request.
+        from . import outlook_result_cache as _outlook_results
+        from .outlook import config as _outlook_cfg
+        model_cfg = get_config()
+        seed_type = _outlook_captured.get("playoff_seed_type")
+        def _compute() -> dict:
+            return outlook_pkg.run_outlook(
+                state,
+                player_value=player_value,
+                player_pos=player_pos,
+                model_cfg=model_cfg,
+                basis=basis,
+                scoring_format=fmt,
+                you_user_id="",
+                playoff_seed_type=seed_type,
+            )
+
+        try:
+            key = _outlook_results.make_key(
+                league_id=league_id, basis=basis, scoring_format=fmt,
+                user_id=g_user_id, state=state, player_value=player_value,
+                player_pos=player_pos, model_cfg=model_cfg,
+                playoff_seed_type=seed_type,
+                strength_source=_outlook_cfg.get_strength_source(None))
+        except Exception as key_err:
+            # An input the key can't hash: answer uncached rather than 500.
+            log.warning("league/outlook: result cache key failed, computing uncached: %s",
+                        key_err)
+            shared = _compute()
+        else:
+            shared = _outlook_results.OUTLOOK_RESULTS.get_or_compute(key, _compute)
+        return jsonify(_outlook_results.for_caller(shared, g_user_id))
     except NotImplementedError as e:
         return jsonify({"error": "not_supported", "message": str(e)}), 501
     except Exception as e:

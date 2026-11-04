@@ -99,6 +99,17 @@ def _u4_ledger_guard_state():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _outlook_result_cache_clean():
+    """GET /api/league/outlook results are cached in-process, so without a
+    reset a test that spies on `run_outlook` through the route could be served
+    an earlier test's result. Only touched once something imported it."""
+    cache = sys.modules.get("backend.outlook_result_cache")
+    if cache is not None:
+        cache.OUTLOOK_RESULTS.clear()
+    yield
+
+
 def _drain_deck_i1_checks():
     server = sys.modules.get("backend.server")
     if server is not None and hasattr(server, "_drain_deck_i1_checks"):
