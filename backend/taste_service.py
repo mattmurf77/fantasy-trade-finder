@@ -60,6 +60,7 @@ import math
 from datetime import datetime, timezone
 
 from .database import (
+    live_deletion_token,
     load_deck_impression,
     load_user_taste,
     replace_user_taste_prior,
@@ -311,6 +312,20 @@ def _reward_for(action: str, dwell_ms=None) -> float:
     return reward
 
 
+def _redact_partner_attrs(attrs) -> list[str]:
+    """Legal R28.26 #10: a deleted partner's attr keys the deletion's token
+    while its scrub job lives, as the scrub's own user_taste rewrite does,
+    never the real id."""
+    out = set()
+    for attr in attrs:
+        if attr.startswith("partner:"):
+            token = live_deletion_token(attr[len("partner:"):])
+            if token:
+                attr = f"partner:{token}"
+        out.add(attr)
+    return sorted(out)
+
+
 def update_taste_from_outcome(impression_id: str, action: str, dwell_ms=None) -> None:
     """Synchronous taste update riding an F1 outcome write (the minute-level
     Monolith sync miniaturized to one SQL transaction at FTF QPS).
@@ -330,7 +345,7 @@ def update_taste_from_outcome(impression_id: str, action: str, dwell_ms=None) ->
             features = json.loads(imp.get("features_json") or "{}")
         except (json.JSONDecodeError, TypeError):
             features = {}
-        attrs = attrs_from_features(features)
+        attrs = _redact_partner_attrs(attrs_from_features(features))
         if not attrs:
             return
 

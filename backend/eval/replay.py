@@ -87,6 +87,15 @@ Exclusions (counted per reason and printed — never silently dropped):
                    a pack has no delivered_at on any row, so nothing says
                    which cards were served — whole deck out; decks in
                    EvalRun.no_delivery_evidence_decks
+  partner_redacted a card's partner deleted their account (data module doc;
+                   models-lead addendum J1): the scrub nulled its blended
+                   scores, which a scorer would read as 0 and sink, moving
+                   every other card's counterfactual rank — whole deck out,
+                   never scored; decks in EvalRun.partner_redacted_decks.
+                   Below every reason above. The report prints the
+                   excluded share of the window (data.partner_redacted_share):
+                   above PARTNER_REDACTED_GATE_PCT %, a read used for a gate
+                   goes to models-lead before it's used
   missing_scorer_inputs
                    any card in the deck has neither features_json nor a
                    compact block (C7 (iv)) — whole deck out, counted by
@@ -130,6 +139,18 @@ counts the distinct tokens among the loaded cards' partner_user_id, every
 deck loaded, so a refit that differs across a deletion is explained. A
 count only: eval never resolves a token, and treats that partner as unknown.
 
+What the scrub cleared (models-lead G-a5), every deck loaded:
+redacted_cards, the cards the loader marks partner_redacted (ghosts aside);
+redacted_cards_lacking, per C2_CARD_FIELDS field, those lacking it. Legal's
+uniformity rule strips the field from every redacted card, true or not, so
+this is an upper bound and the true number is unknowable by design. Redacted
+decks are excluded (partner_redacted), not compared; a replay difference on
+a clean deck is a defect (J2). redacted_at_decks
+counts the decks whose pack carries a redacted_at, and
+redacted_since_previous_read those redacted after the previous persisted
+read of the same window (persistence.previous_read_at; None without one):
+re-reads at one as_of stay stable only between redactions.
+
 EXCLUSION_RULE_VERSION is stamped on every EvalRun and persisted record;
 verdict() and render_report() say so when runs graded under different rules
 are compared (R2.5 (2)). The model_config a scorer reads is pinned, passed
@@ -158,15 +179,21 @@ from backend.eval.data import (
     NO_DELIVERY_EVIDENCE,
     PACK_INTEGRITY,
     PARTIAL_RUN_TIER,
+    PARTNER_REDACTED,
+    PARTNER_REDACTED_GATE_PCT,
     UPGRADE_MISS_OTHER,
     WITHDRAWAL_CONFLICT,
     LoggedDeck,
     card_dict,
     last_served_at,
     load_decks,
+    partner_redacted_share,
     split_decks,
 )
 from backend.eval.scorers import get_scorer, registered_names
+
+# Legal's c2 card fields the deletion scrub removes from a redacted card (G-a5).
+C2_CARD_FIELDS = ("likes_you",)
 
 # Defaults — env-overridable (documented in docs/config-reference.md §F8).
 DEFAULT_ESS_MIN = float(os.environ.get("EVAL_ESS_MIN", "100"))
@@ -180,7 +207,7 @@ EXCLUSION_REASONS = (
     "null_propensity", "never_viewed", "undo_reversed",
     "calibration_refresh", "partial_run", "in_flight", "pack_integrity",
     "withdrawal_conflict", "incomplete_deck", "no_delivery_evidence",
-    "missing_scorer_inputs", "scorer_error",
+    "partner_redacted", "missing_scorer_inputs", "scorer_error",
 )
 
 # The eval rules a run was graded under (models-lead R2.5 (2), R5.2 (d)):
@@ -211,8 +238,13 @@ EXCLUSION_REASONS = (
 #      positions (so e(k) and the logged-position term read where each card
 #      was shown), and a move record breaking the writer's contract is
 #      pack_integrity; the logged scorer ranks by displayed position.
+#   7  6, plus partner_redacted (models-lead addendum J1): a deck holding a
+#      card whose partner deleted their account (its blended scores nulled
+#      by the scrub) is excluded whole from replay, e(k) and calibration,
+#      below every integrity reason; trainable scorers never fit on a
+#      redacted card.
 # Estimates graded under different versions are not comparable.
-EXCLUSION_RULE_VERSION = 6
+EXCLUSION_RULE_VERSION = 7
 # R5.2 (b): a read whose labels must be complete settles them this long
 # after the window's last served deck (late views, proposes days later).
 DEFAULT_SETTLE_LAG_DAYS = 7.0
@@ -251,6 +283,13 @@ class EvalRun:
     withdrawn_removed_by_reason: dict = field(default_factory=dict)  # the same by reason, sorted
     upgrade_misses: dict = field(default_factory=dict)  # cause -> count, every loaded pack (U4-R2)
     redacted_partners: int = 0       # distinct redaction tokens among loaded cards' partners (E-b5)
+    redacted_cards: int = 0          # partner_redacted cards, every deck loaded (G-a5)
+    redacted_cards_lacking: dict = field(default_factory=dict)  # c2 field -> redacted cards lacking it
+    redacted_at_decks: int = 0       # decks whose pack carries a redacted_at (G-a5)
+    redacted_since_previous_read: int | None = None  # of those, redacted after previous_read_at
+    previous_read_at: str | None = None  # recorded_at of the previous read of this window
+    partner_redacted_decks: int = 0  # decks excluded as partner_redacted (J1)
+    partner_redacted_share: dict = field(default_factory=dict)  # data.partner_redacted_share
     exposure_positions: int = 0      # positions with an estimated e(k)
     metrics: dict = field(default_factory=dict)    # metric -> MetricEstimate
     eval_start: str | None = None
@@ -274,6 +313,23 @@ def redacted_partners(decks: list[LoggedDeck]) -> int:
                 for p in [((c.features if c.features is not None else c.features_compact)
                            or {}).get("partner_user_id")]
                 if isinstance(p, str) and p.startswith(REDACTED_PARTNER_PREFIX)})
+
+
+def redaction_counts(decks: list[LoggedDeck], previous_read_at: str | None = None) -> dict:
+    """G-a5 over every deck loaded (module doc)."""
+    cards = [c for d in decks for c in d.cards if not c.is_ghost and c.partner_redacted]
+    redacted_at = [d.redacted_at for d in decks if d.redacted_at]
+    return {
+        "redacted_cards": len(cards),
+        "redacted_cards_lacking": {
+            name: sum(1 for c in cards if name not in (
+                (c.features if c.features is not None else c.features_compact) or {}))
+            for name in C2_CARD_FIELDS},
+        "redacted_at_decks": len(redacted_at),
+        "redacted_since_previous_read": None if previous_read_at is None else sum(
+            1 for at in redacted_at if at > previous_read_at),
+        "previous_read_at": previous_read_at,
+    }
 
 
 def exposure_curve(decks: list[LoggedDeck]) -> dict[int, float]:
@@ -339,7 +395,8 @@ def _reward(card, metric: str) -> float:
 def _fit_rows(decks: list[LoggedDeck]) -> list[dict]:
     """A trainable scorer's rows: every card of every train deck but a
     calibration_refresh deck's (never shown in Trades; the loader already
-    removed never-delivered withdrawals)."""
+    removed never-delivered withdrawals), and never a partner_redacted card
+    (its blended scores are nulled; card-level, as in the fit, J1)."""
     return [
         {
             "card": card_dict(c),
@@ -349,6 +406,7 @@ def _fit_rows(decks: list[LoggedDeck]) -> list[dict]:
             "dwell_ms": c.dwell_ms,
         }
         for d in decks if d.exclusion != CALIBRATION_REFRESH for c in d.cards
+        if not c.partner_redacted
     ]
 
 
@@ -361,13 +419,15 @@ def evaluate(
     bootstrap: int = DEFAULT_BOOTSTRAP,
     seed: int = 0,
     curve: dict[int, float] | None = None,
+    previous_read_at: str | None = None,
 ) -> EvalRun:
     """Replay `decks` under `scorer`. Enforces the time-ordered protocol:
     a fit-capable scorer requires eval_start, is fitted on pre-split decks
     only, and is evaluated on post-split decks only. The scorer's pinned
     model_config (`scorer.config`, set by get_scorer(name, config=...);
     R5.2 (a)) is recorded on EvalRun.config, so building the scorer with
-    the recorded config replays the run."""
+    the recorded config replays the run. `previous_read_at`: the previous
+    persisted read of the same window, for G-a5's redacted_since_previous_read."""
     fit_capable = hasattr(scorer, "fit")
     if fit_capable and not eval_start:
         raise ValueError(
@@ -404,6 +464,9 @@ def evaluate(
             misses[cause] = misses.get(cause, 0) + n
     run.upgrade_misses = dict(sorted(misses.items()))
     run.redacted_partners = redacted_partners(decks)
+    for name, value in redaction_counts(decks, previous_read_at).items():
+        setattr(run, name, value)
+    run.partner_redacted_share = partner_redacted_share(eval_decks)
 
     # weights/rewards per deck (bootstrap clusters)
     clusters: list[dict] = []   # {"w": [...], "r_like": [...], "r_propose": [...]}
@@ -436,6 +499,10 @@ def evaluate(
         if deck.exclusion == NO_DELIVERY_EVIDENCE:
             run.excluded["no_delivery_evidence"] += len(deck.cards)
             run.no_delivery_evidence_decks += 1
+            continue
+        if deck.exclusion == PARTNER_REDACTED:
+            run.excluded["partner_redacted"] += len(deck.cards)
+            run.partner_redacted_decks += 1
             continue
         if any(c.features is None and c.features_compact is None
                for c in deck.cards):
@@ -642,6 +709,7 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
             f"withdrawal_conflict_decks={run.withdrawal_conflict_decks} "
             f"incomplete_decks={run.incomplete_decks} "
             f"no_delivery_evidence_decks={run.no_delivery_evidence_decks} "
+            f"partner_redacted_decks={run.partner_redacted_decks} "
             f"withdrawn_removed_cards={run.withdrawn_removed_cards} "
             f"withdrawn_removed_by_reason={json.dumps(run.withdrawn_removed_by_reason, sort_keys=True)} "
             f"upgrade_misses={json.dumps(run.upgrade_misses, sort_keys=True)} "
@@ -666,7 +734,27 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
         f"exposure curve floor {EXPOSURE_FLOOR}, Laplace +1/+2 smoothing).")
     note = rule_version_note(r.exclusion_rule_version for r in [baseline, *runs])
     lines.append(note or f"Exclusion rules: version {baseline.exclusion_rule_version}.")
+    lines.extend(_redaction_lines(baseline))
     return "\n".join(lines)
+
+
+def _redaction_lines(run: EvalRun) -> list[str]:
+    """G-a5 and J1's share (module doc): the same for every scorer, printed once."""
+    lacking = "; ".join(f"lacking {name}: {n}" for name, n in run.redacted_cards_lacking.items())
+    since = ("no previous read of this window" if run.previous_read_at is None else
+             f"{run.redacted_since_previous_read} of them since the previous read of this "
+             f"window ({run.previous_read_at})")
+    share = run.partner_redacted_share
+    pct = 100 * share["decks"] / share["window_decks"] if share["window_decks"] else 0.0
+    return [
+        f"G-a5 redaction (every deck loaded): redacted cards {run.redacted_cards}; {lacking} "
+        f"(an upper bound on what the scrub removed); decks with a pack redacted_at "
+        f"{run.redacted_at_decks}, {since}. Redacted decks are excluded, not compared.",
+        f"partner_redacted (J1): {share['decks']} of {share['window_decks']} decks in the "
+        f"window excluded ({pct:.1f}%)"
+        + (f"; above {PARTNER_REDACTED_GATE_PCT}%: a read used for a gate goes to models-lead "
+           "before it's used." if share["over_gate"] else "."),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -762,20 +850,23 @@ def main(argv=None) -> int:
         print(f"SELF-CHECK {'PASS' if ok else 'FAIL'}")
         return 0 if ok else 1
 
+    from backend.eval.persistence import previous_read_at
+    previous = previous_read_at(db=args.db, since=args.since, until=until, as_of=as_of)
     scorer_names = args.scorer or ["base_score", "random"]
     # One pin for every scorer in the run: a recorded one to replay, else live now.
     config = (json.loads(args.config) if args.config
               else _value_model.pin_config(_value_model.SCORE_CONFIG))
     baseline = evaluate(get_scorer(args.baseline, config=config), decks,
                         eval_start=args.eval_start, ess_min=args.ess_min,
-                        bootstrap=args.bootstrap, seed=args.seed)
+                        bootstrap=args.bootstrap, seed=args.seed, previous_read_at=previous)
     runs = [baseline]
     for name in scorer_names:
         if name == args.baseline:
             continue
         runs.append(evaluate(get_scorer(name, seed=args.seed, config=config), decks,
                              eval_start=args.eval_start, ess_min=args.ess_min,
-                             bootstrap=args.bootstrap, seed=args.seed))
+                             bootstrap=args.bootstrap, seed=args.seed,
+                             previous_read_at=previous))
     report = render_report(runs, baseline)
     print(report)
 

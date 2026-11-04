@@ -631,7 +631,7 @@ trade_decisions_table = Table("trade_decisions", metadata,
     Column("trade_id",           String),
     Column("give_player_ids",    Text,    nullable=False),    # JSON array
     Column("receive_player_ids", Text,    nullable=False),    # JSON array
-    Column("decision",           String,  nullable=False),    # 'like' | 'pass'
+    Column("decision",           String,  nullable=False),    # 'like' | 'pass' | 'send' (#531 Shop send: Elo anchor, never a like)
     Column("created_at",         String),
     # #318 — awaiting-dismiss. ISO UTC when the user retracted this like from
     # the "Awaiting them" list; NULL = live. A retracted like is invisible to
@@ -867,7 +867,7 @@ trade_proposals_table = Table("trade_proposals", metadata,
     Column("target_user_id",          String),
     Column("provider",                String,  nullable=False),   # sleeper|espn|mfl
     Column("provider_transaction_id", String),
-    Column("source",                  String),   # deck | match | calculator
+    Column("source",                  String),   # deck | match | calculator | shop (server._PROPOSE_SOURCES; unknown = deck) | overhaul (overhaul_api)
     Column("give_asset_ids",          Text,    nullable=False),   # JSON, FINAL
     Column("receive_asset_ids",       Text,    nullable=False),   # JSON, FINAL
     Column("origin_trade_hash",       String),
@@ -1341,7 +1341,7 @@ deck_card_withdrawals_table = Table("deck_card_withdrawals", metadata,
     Column("card_index",         Integer, nullable=False),   # the build index
     Column("user_id",            String,  nullable=False),
     Column("league_id",          String,  nullable=False),
-    Column("reason",             String,  nullable=False),   # 'i1_dropped' | 'disposition_cut'
+    Column("reason",             String,  nullable=False),   # 'i1_dropped' | 'partner_deleted' | 'disposition_cut'
     Column("first_withdrawn_at", String,  nullable=False),   # ISO UTC
     Column("served_before",      Integer, nullable=False),   # 0/1
     Column("impression_id",      String),                    # contract.card_impression_id
@@ -3269,8 +3269,38 @@ grading_cards_table = Table("grading_cards", metadata,
     Column("skipped",    Integer, nullable=False, server_default="0"),
     Column("tags_json",  Text,    nullable=False, server_default="[]"),
     Column("graded_at",  String),                       # ISO UTC of the latest answer
+    # HIDDEN, never served: the card's partner (league_members.user_id), so an
+    # account deletion's scrub finds the person's cards by id (#562 QA P1-2: a
+    # built session keeps no partner ids anywhere else). NULL on cards built
+    # before it; the scrub traces those another way.
+    Column("partner_user_id", String),
     UniqueConstraint("session_id", "position", name="uq_grading_card_position"),
     Index("ix_grading_cards_session", "session_id"),
+)
+
+# Deletion scrub (legal R28.20 (ii), R28.22; backend/deletion_scrub.py): one
+# row per account deletion, inserted in the deletion's own transaction, so a
+# committed deletion always has its scrub. It holds the deleted user's ids and
+# their leagues only until the scrub of other users' decks finishes (legal
+# (ix): deleted then; past 24 h it keeps retrying, up to 30 days, and alerts
+# with a count). The token is random and no mapping to the ids is kept once
+# the row goes. Never exported (its subject is gone) and never logged.
+deletion_scrub_jobs_table = Table("deletion_scrub_jobs", metadata,
+    Column("job_id",           String,  primary_key=True),   # uuid4 hex
+    Column("token",            String,  nullable=False),     # redacted:<uuid4 hex>
+    Column("partner_ids_json", Text,    nullable=False),     # JSON list: the resolved ids
+    Column("league_ids_json",  Text,    nullable=False),     # JSON list, captured at deletion
+    Column("deleted_at",       String,  nullable=False),     # ISO UTC; decks built after are untouched
+    Column("db_version",       Integer, nullable=False, server_default="0"),  # SCRUB_VERSION last run
+    Column("db_done_at",       String),                      # ISO UTC of the last full DB pass
+    Column("model_done_at",    String),                      # ISO UTC; the model store, in the daily tick
+    Column("attempts",         Integer, nullable=False, server_default="0"),
+    Column("claimed_until",    String),                      # ISO UTC lease; NULL = free
+    Column("last_error",       String),                      # an exception class name, never a message
+    Column("scan_json",        Text),                        # an unfinished pass's scan cursor; NULL between passes
+    Column("partner_names_json", Text),                      # {leagues: {league_id: [names]}, usernames: [..]}
+    Column("escalated_at",     String),                      # ISO UTC; set once past RETRY_LIMIT (legal R28.26 #8)
+    Index("ix_deletion_scrub_jobs_deleted", "deleted_at"),
 )
 
 # Default values seeded on first run.  Only inserted if the key doesn't
@@ -4107,6 +4137,13 @@ def _migrate_db() -> None:
         # NULL, which draws no bar (a pre-snapshot share has no stored value).
         ("trade_share_tokens", "value_snapshot",            "TEXT"),
         ("shared_packages",    "value_snapshot",            "TEXT"),
+        # ── the deletion scrub, stage 3: the person's names per league (a
+        # Calibration card names its partner by display name).
+        ("deletion_scrub_jobs", "partner_names_json",       "TEXT"),
+        # ── legal R28.26 #8: a job past 30 days is kept and marked escalated.
+        ("deletion_scrub_jobs", "escalated_at",             "VARCHAR"),
+        # ── #562 QA P1-2: a Calibration card's partner, for the scrub.
+        ("grading_cards",      "partner_user_id",           "VARCHAR"),
     ]
     # Only missing columns get an ALTER, each in its own transaction so a
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -4118,6 +4155,10 @@ def _migrate_db() -> None:
 
     # #258 — entity-decode MFL names stored before #210's import-time cleaning
     _backfill_mfl_name_entities()
+
+    # #562 re-QA P2-B — Calibration cards built before grading_cards.
+    # partner_user_id get it while their deck rows and names are still live.
+    backfill_grading_card_partners()
 
     # P0-1 (audit 2026-08-09) — users who completed a Quick Set board before
     # the point-of-use ranking_method writes shipped are stuck on the trio
@@ -4487,6 +4528,123 @@ def _backfill_dual_format() -> None:
                     print(f"[backfill] user {row.sleeper_user_id} update failed: {e}")
     except Exception as e:
         print(f"[backfill] users JSON rewrite failed: {e}")
+
+
+_BACKFILL_CHUNK = 500
+
+
+def backfill_grading_card_partners() -> int:
+    """#562 re-QA P2-B: give Calibration cards built before
+    grading_cards.partner_user_id their partner, so an account deletion's
+    scrub finds them by id. A current-arm card takes its deck row's partner
+    (arms_json.current.impression_id → features_json.partner_user_id). Any
+    other takes the one member of the session's league whose shown name
+    (display name, else username, else id, as blind_grading.build_catalog
+    names a partner) equals its partner_name and whose roster holds the
+    card's received players, at least one (a name alone can be someone else's
+    after a rename). Ambiguous, unknown or pick-only stays NULL, for the
+    scrub's own fallbacks.
+
+    Deck rows prune at 90 days and names change, so it runs at boot, on NULL
+    rows only (idempotent). It runs from _migrate_db, so during a Render build
+    too, against prod while the old instance serves (#562 delta QA): chunks of
+    _BACKFILL_CHUNK cards, each its own transaction, on Postgres under SET
+    LOCAL lock_timeout and statement_timeout, with one deck-row lookup per
+    chunk. A chunk that fails is skipped and logged by class; the next boot
+    retries it. It never raises. Returns the rows actually written."""
+    gc, gs = grading_cards_table, grading_sessions_table
+    imp, m = deck_impressions_table, league_members_table
+
+    def timeouts(conn):
+        if _ddl_is_postgres():
+            _execute_ddl(conn, f"SET LOCAL lock_timeout = '{_DDL_LOCK_TIMEOUT}'")
+            _execute_ddl(conn, f"SET LOCAL statement_timeout = '{_DDL_STATEMENT_TIMEOUT}'")
+    try:
+        with engine.begin() as conn:  # the first read waits no longer than a chunk (#562 QA P3)
+            timeouts(conn)
+            pending = conn.execute(select(gc.c.card_id).where(gc.c.partner_user_id.is_(None))
+                                   .order_by(gc.c.card_id)).scalars().all()
+    except Exception as err:          # never blocks boot; the scrub keeps its fallbacks
+        log.warning("grading_cards partner backfill failed: %s", type(err).__name__)
+        return 0
+    members: dict = {}                # league_id -> [(user_id, shown name, roster ids)]
+    filled = failed = 0
+    first_error = None
+    for i in range(0, len(pending), _BACKFILL_CHUNK):
+        try:
+            with engine.begin() as conn:
+                timeouts(conn)
+                rows = conn.execute(select(gc.c.card_id, gc.c.arms_json, gc.c.trade_json,
+                                           gs.c.league_id, gs.c.user_id)
+                                    .join(gs, gs.c.session_id == gc.c.session_id)
+                                    .where(gc.c.card_id.in_(pending[i:i + _BACKFILL_CHUNK]),
+                                           gc.c.partner_user_id.is_(None))).mappings().all()
+                cards = []
+                for row in rows:
+                    try:
+                        arms, trade = json.loads(row["arms_json"]), json.loads(row["trade_json"])
+                    except (TypeError, ValueError):
+                        continue
+                    current = arms.get("current") if isinstance(arms, dict) else None
+                    impression = (current.get("impression_id")
+                                  if isinstance(current, dict) else None)
+                    cards.append((row["card_id"], row["league_id"], row["user_id"],
+                                  impression if isinstance(impression, str) else None,
+                                  trade if isinstance(trade, dict) else {}))
+                wanted = sorted({c[3] for c in cards if c[3]})
+                deck_partner = {}
+                for impression_id, raw in (conn.execute(select(imp.c.impression_id, imp.c.features_json)
+                                                        .where(imp.c.impression_id.in_(wanted))).all()
+                                           if wanted else ()):
+                    try:
+                        features = json.loads(raw) if raw else None
+                    except (TypeError, ValueError):
+                        features = None
+                    if isinstance(features, dict) and features.get("partner_user_id"):
+                        deck_partner[impression_id] = str(features["partner_user_id"])
+                new_leagues = sorted({c[1] for c in cards} - set(members))
+                for league in new_leagues:
+                    members[league] = []
+                for league, uid, display, username, roster in (conn.execute(select(
+                        m.c.league_id, m.c.user_id, m.c.display_name, m.c.username, m.c.roster_data)
+                        .where(m.c.league_id.in_(new_leagues))).all() if new_leagues else ()):
+                    try:
+                        held = {str(p) for p in (json.loads(roster) if roster else [])}
+                    except (TypeError, ValueError):
+                        held = set()
+                    members[league].append((str(uid), display or username or str(uid), held))
+                written = 0
+                for card_id, league, viewer, impression, trade in cards:
+                    partner = deck_partner.get(impression) if impression else None
+                    name = trade.get("partner_name")
+                    receive = trade.get("receive")
+                    if partner is None and isinstance(name, str) and isinstance(receive, list):
+                        players = {str(a.get("id")) for a in receive
+                                   if isinstance(a, dict) and a.get("position") != "PICK"}
+                        # At least one received player, all on that roster: a
+                        # pick-only card has no roster evidence and stays NULL.
+                        # Never the session's own user (a build never pairs a
+                        # viewer with themselves).
+                        owners = [uid for uid, shown, held in members.get(league, ())
+                                  if shown == name and players and players <= held
+                                  and uid != viewer]
+                        if len(owners) == 1:
+                            partner = owners[0]
+                    if partner is not None:
+                        res = conn.execute(gc.update().where(gc.c.card_id == card_id,
+                                                             gc.c.partner_user_id.is_(None))
+                                           .values(partner_user_id=partner))
+                        written += res.rowcount or 0
+            filled += written             # counted once its chunk committed
+        except Exception as err:          # never blocks boot; skipped until the next boot
+            failed += 1
+            first_error = first_error or type(err).__name__
+    if failed:
+        log.warning("grading_cards partner backfill: %d chunks failed (first: %s); retried next boot",
+                    failed, first_error)
+    if filled or failed:
+        log.info("grading_cards partner backfill: %d cards, %d chunks failed", filled, failed)
+    return filled
 
 
 def _backfill_mfl_name_entities() -> None:
@@ -4954,6 +5112,7 @@ def record_event(
     tz:          str | None = None,
     touch_user:  bool = True,
     bind=None,
+    require_user: bool = False,
 ) -> dict | None:
     """Append one row to user_events AND bump the matching users.last_*_at
     column (and device snapshot columns) in a single transaction.
@@ -4963,6 +5122,9 @@ def record_event(
     `deck_i1_check`), which must not move `last_active_at` or `events_count`.
     `bind`: the engine to write through, default this module's. A background
     writer passes the one it captured on the request thread.
+    `require_user` (the session-init daemon): no row unless the users row
+    exists, held under its lock (_lock_live_user) until the row commits;
+    with no row it raises AccountGone, the one failure not swallowed.
 
     Always inserts a new row — never overwrites prior events. The denorm
     columns on `users` are pointers to the most recent event of each type
@@ -4981,6 +5143,8 @@ def record_event(
     streak_result: dict | None = None
     try:
         with (bind if bind is not None else engine).begin() as conn:
+            if require_user:
+                _lock_live_user(conn, user_id)
             conn.execute(
                 insert(user_events_table).values(
                     user_id     = user_id,
@@ -5027,6 +5191,8 @@ def record_event(
             # SELECT (eliminates a separate read transaction + race window).
             if event_type in _RANK_STREAK_EVENTS:
                 streak_result = _recompute_streak_on_rank_event(conn, user_id, tz)
+    except AccountGone:
+        raise   # only under require_user: the caller stops there
     except Exception as e:
         print(f"[record_event] {user_id}/{event_type} failed: {e}")
         return None
@@ -5683,19 +5849,49 @@ def list_config() -> list[dict]:
 # User operations
 # ---------------------------------------------------------------------------
 
+class AccountGone(Exception):
+    """A write that needs the account's users row found none: the account
+    was deleted (or never written). Nothing was written."""
+
+
+def _lock_live_user(conn, user_id: str) -> None:
+    """Lock `user_id`'s users row for the rest of this transaction, or raise
+    AccountGone. Must be the transaction's first statement.
+
+    Account deletion locks the same row FOR UPDATE before it deletes anything
+    (accounts._delete_user_data), so a write made under this lock either
+    commits first, and the deletion then removes it, or sees the row gone.
+    FOR KEY SHARE doesn't block ordinary updates of the row (record_event's).
+    SQLite takes its write lock first instead (win_now_store._lock_live_user).
+    """
+    if conn.dialect.name == "sqlite":
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
+    if conn.execute(select(users_table.c.sleeper_user_id)
+                    .where(users_table.c.sleeper_user_id == user_id)
+                    .with_for_update(read=True, key_share=True)).first() is None:
+        raise AccountGone()
+
+
 def upsert_user(
     sleeper_user_id: str,
     username: str = "",
     display_name: str = "",
     avatar: str | None = None,
     invited_by: str | None = None,
+    *,
+    require_user: bool = False,
 ) -> None:
     """Insert a new user or update their display fields if they already exist.
 
     `invited_by` is only set on INSERT — repeat logins never overwrite the
     original referrer, so referral attribution is immutable once recorded.
+
+    `require_user` (the session-init daemon): update only, under the row's
+    lock; with no row it raises AccountGone and inserts nothing.
     """
     with engine.begin() as conn:
+        if require_user:
+            _lock_live_user(conn, sleeper_user_id)
         existing = conn.execute(
             select(users_table).where(
                 users_table.c.sleeper_user_id == sleeper_user_id
@@ -6421,6 +6617,10 @@ def upsert_league(
     season: str,
     user_player_ids: list[str],
     opponent_rosters: list[dict],
+    *,
+    platform: str | None = None,
+    require_user: bool = False,
+    only_if_exists: bool = False,
 ) -> None:
     """Insert or refresh a league record.
 
@@ -6439,6 +6639,12 @@ def upsert_league(
     `opponent_data` therefore hold only the importer-owner's initial
     snapshot (kept for provenance; not read back anywhere) and are never
     overwritten by other members.
+
+    `platform` is written on INSERT only. The session-init daemon passes
+    `require_user` (the write runs under `user_id`'s users-row lock, and
+    raises AccountGone when that row is gone) and, for a row it found at its
+    start or a platform league's, `only_if_exists`: update only, so a row an
+    account deletion removed in between is never re-created.
     """
     roster_json   = json.dumps(user_player_ids)
     opponent_json = json.dumps(opponent_rosters)
@@ -6453,9 +6659,17 @@ def upsert_league(
         "opponent_data":     opponent_json,
         "created_at":        now,
         "updated_at":        now,
+        "platform":          platform,
     }
 
     with engine.begin() as conn:
+        if require_user:
+            _lock_live_user(conn, user_id)
+        if only_if_exists:
+            conn.execute(update(leagues_table)
+                         .where(leagues_table.c.sleeper_league_id == league_id)
+                         .values(name=name, updated_at=now))
+            return
         # Single atomic upsert on the PK — race-safe against two members of
         # the same league hitting session_init concurrently (both would
         # otherwise SELECT-miss then INSERT, and the loser would crash).
@@ -6847,7 +7061,10 @@ class TradeInterestHistory:
                 continue
             row["_order"] = (stamp, row["id"]) if stamp is not None else None
             self.rows.append(row)
-            barrier = (self.passes if row["decision"] == "pass" or stamp is None else
+            # An unknown stamp is a barrier only on a like/pass row; a #531
+            # `send` row is never a pass.
+            barrier = (self.passes if row["decision"] == "pass" or (
+                           stamp is None and row["decision"] in ("like", "pass")) else
                        self.withdrawn if row.get("retracted_at") else None)
             if barrier is not None:
                 order = row["_order"]
@@ -6871,7 +7088,10 @@ class TradeInterestHistory:
         now = now or datetime.now(timezone.utc)
         mixed, passes = set(), set()
         for row in self.rows:
-            if row["user_id"] != user_id or row["decision"] not in ("like", "pass"):
+            # A #531 Shop `send` is decided like a like (7-day window, never a
+            # pass), as the pre-#574 Shop queue's like row was: the deck
+            # doesn't re-serve a package the user just sent on the platform.
+            if row["user_id"] != user_id or row["decision"] not in ("like", "pass", "send"):
                 continue
             is_pass = row["decision"] == "pass"
             stamp = row["_order"][0] if row["_order"] is not None else None
@@ -7032,6 +7252,38 @@ def find_live_trade_like(user_id: str, league_id: str, trade_id: str,
     if row is None:
         return None
     return {"id": row["id"], "created_at": row["created_at"]}
+
+
+def find_prior_trade_signal(user_id: str, league_id: str, trade_id: str,
+                            give_player_ids: list, receive_player_ids: list,
+                            target_user_id: str | None = None) -> bool:
+    """#531 Shop send — has this user already put an Elo signal on this exact
+    package? Read-only.
+
+    True when either holds:
+      * a `decision = "send"` row with this deterministic `trade_id` (a repeat
+        Shop send; once per package, unbounded in time), or
+      * a still-live like of the same give set and receive set, whatever its
+        `trade_id`: a calculator or pre-#574 Shop queue (`calcq_`, the same id)
+        or a deck like (an 8-hex id). "Live" is `find_live_trade_like`'s rule:
+        not retracted, and not renewed by a later pass.
+    """
+    if not (user_id and league_id and trade_id):
+        return False
+    give, recv = frozenset(give_player_ids), frozenset(receive_player_ids)
+    history = load_trade_interest_history(
+        [league_id], user_ids=[user_id, target_user_id] if target_user_id else [user_id])
+    for row in history.rows:
+        if row["user_id"] != user_id:
+            continue
+        if row["decision"] == "send" and row["trade_id"] == trade_id:
+            return True
+        if (row["decision"] == "like" and not row.get("retracted_at")
+                and frozenset(row["give_player_ids"]) == give
+                and frozenset(row["receive_player_ids"]) == recv
+                and not history.renewable(row, target_user_id)):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -7195,6 +7447,70 @@ def league_pick_seasons(*, league_id: str, round: int = 1) -> list[int]:
 # Trade impressions (Tier 2 work item 2.4 — training-data pipeline)
 # ---------------------------------------------------------------------------
 
+# ── Legal R28.26 #10 (MUST): no write after a deletion re-creates the id ────
+#
+# While a deletion's scrub job row lives (normally 6-30 h; deletion_scrub), a
+# write that would store one of its ids as a trade's partner stores the
+# deletion's token instead, or NULL where the deletion itself NULLs that
+# column. That covers a card a client still holds from before the deletion.
+# During that window a card built AFTER the deletion that names the person as
+# a non-user leaguemate (legal (vii)) is mapped too: over-redaction, on the
+# private side. Cached in-process for _DELETION_TOKENS_TTL_S; the delete route
+# clears the cache when it commits, so this process sees its own deletion at
+# once.
+_DELETION_TOKENS_TTL_S = 5.0
+# `gen` counts clears: a read that began before a clear never installs its
+# (pre-commit) map after it (release-lead's #562 QA P3-1).
+_deletion_tokens_cache: dict = {"at": 0.0, "map": {}, "gen": 0}
+_deletion_tokens_lock = threading.Lock()
+
+
+def live_deletion_tokens() -> dict:
+    """{deleted id: token} over every live deletion_scrub_jobs row. A read
+    failure returns the last map (empty before any read): never raises on a
+    write path."""
+    now = time.monotonic()
+    with _deletion_tokens_lock:
+        if now - _deletion_tokens_cache["at"] < _DELETION_TOKENS_TTL_S:
+            return _deletion_tokens_cache["map"]
+        gen = _deletion_tokens_cache["gen"]
+    try:
+        t = deletion_scrub_jobs_table
+        with engine.connect() as conn:
+            rows = conn.execute(select(t.c.token, t.c.partner_ids_json)).all()
+        mapping = {}
+        for token, raw in rows:
+            try:
+                ids = json.loads(raw) if raw else []
+            except (TypeError, ValueError):
+                continue
+            for pid in ids if isinstance(ids, list) else ():
+                mapping[str(pid)] = token
+    except Exception as err:      # the class only: a DB error's text may quote an id
+        log.warning("live_deletion_tokens: read failed: %s", type(err).__name__)
+        with _deletion_tokens_lock:
+            return _deletion_tokens_cache["map"]
+    with _deletion_tokens_lock:
+        if _deletion_tokens_cache["gen"] == gen:
+            _deletion_tokens_cache.update(at=now, map=mapping)
+        # else a clear landed during the read: return what was read, cache
+        # nothing, and the next call reads again.
+    return mapping
+
+
+def clear_deletion_tokens_cache() -> None:
+    with _deletion_tokens_lock:
+        _deletion_tokens_cache["at"] = 0.0
+        _deletion_tokens_cache["gen"] += 1
+
+
+def live_deletion_token(user_id) -> str | None:
+    """The live deletion token for one id, or None."""
+    if user_id is None:
+        return None
+    return live_deletion_tokens().get(str(user_id))
+
+
 def log_trade_impressions(user_id: str, league_id: str, cards: list) -> None:
     """
     Batch-insert one trade_impressions row per card in deck order.
@@ -7216,13 +7532,16 @@ def log_trade_impressions(user_id: str, league_id: str, cards: list) -> None:
     shown_at = datetime.now(timezone.utc).isoformat()
     rows = []
     try:
+        tokens = live_deletion_tokens()
         for pos, card in enumerate(cards):
             give = _f(card, "give_player_ids") or []
             recv = _f(card, "receive_player_ids") or []
+            target = _f(card, "target_user_id")
             rows.append({
                 "user_id":            user_id,
                 "league_id":          league_id,
-                "target_user_id":     _f(card, "target_user_id"),
+                # R28.26 #10: NULL, as the deletion NULLs this column.
+                "target_user_id":     None if str(target) in tokens else target,
                 "give_player_ids":    json.dumps(list(give)),
                 "receive_player_ids": json.dumps(list(recv)),
                 "basis":              _f(card, "basis", "divergence"),
@@ -9965,6 +10284,67 @@ def replace_league_members_snapshot(league_id: str, members: list[dict]) -> bool
     if not rows:
         return False
     replace_espn_league_members(league_id, rows)
+    return True
+
+
+def league_row_and_member_ids(league_id: str) -> tuple[bool, set[str]]:
+    """Whether the league's `leagues` row exists, and its league_members user
+    ids: what the session-init daemon finds at its start."""
+    with engine.connect() as conn:
+        league = conn.execute(select(leagues_table.c.sleeper_league_id).where(
+            leagues_table.c.sleeper_league_id == str(league_id))).first() is not None
+        ids = set(conn.execute(select(league_members_table.c.user_id).where(
+            league_members_table.c.league_id == str(league_id))).scalars())
+    return league, ids
+
+
+def write_session_init_members(league_id: str, members: list[dict], *, user_id: str,
+                               existed: set[str], replace: bool) -> bool:
+    """The session-init daemon's league_members write. It runs under
+    `user_id`'s users-row lock (_lock_live_user: AccountGone, nothing written,
+    when the account is gone) and never re-creates a row that was there when
+    the daemon started (`existed`) and is gone now.
+
+    `replace` (a Sleeper league's S0 read, complete and authoritative): the
+    league's rows become the snapshot, so departed managers' rows go (G-075)
+    and a manager with no row at the start gets one; an empty snapshot is
+    refused (G-015) and returns False. Otherwise (a linked platform league,
+    whose rows only its link and refresh routes create) existing rows are
+    updated and none is inserted. Returns True once written.
+
+    The replace takes the rows still there from its own DELETE (RETURNING),
+    so a leaguemate's deletion that reached their row first, committed or
+    still in flight, is never undone.
+    Known limit on Postgres (READ COMMITTED; release-lead's #587 QA, d1): a
+    leaguemate's deletion that reaches their row after this DELETE locked it
+    waits, then can't see the row re-inserted here, which survives it.
+    Closing that takes a shared lock on every member's users row. Not done:
+    the row is public Sleeper membership, which any member's next init
+    writes again (the deletion matrix).
+    """
+    now = _now()
+    rows = [{"league_id": str(league_id), "user_id": str(m["user_id"]),
+             "username": m.get("username", ""),
+             "display_name": m.get("display_name") or m.get("username", ""),
+             "roster_data": json.dumps(m.get("player_ids", [])), "updated_at": now}
+            for m in members or [] if m.get("user_id")]
+    if replace and not rows:
+        return False
+    t = league_members_table
+    with engine.begin() as conn:
+        _lock_live_user(conn, user_id)
+        if not replace:
+            for r in rows:
+                conn.execute(update(t).where(t.c.league_id == r["league_id"],
+                                             t.c.user_id == r["user_id"]).values(
+                    username=r["username"], display_name=r["display_name"],
+                    roster_data=r["roster_data"], updated_at=now))
+            return True
+        here = set(conn.execute(delete(t).where(t.c.league_id == str(league_id))
+                                .returning(t.c.user_id)).scalars())
+        rows = [r for r in rows if r["user_id"] in here or r["user_id"] not in existed]
+        if rows:
+            conn.execute(insert(t), rows)
     return True
 
 
@@ -14293,8 +14673,11 @@ def load_elo_history(
 # player_value_history accessors (backlog #57 / #17)
 # ---------------------------------------------------------------------------
 
-def upsert_roster_snapshots(rows: list[dict]) -> dict:
+def upsert_roster_snapshots(rows: list[dict], *, live_user: str | None = None) -> dict:
     """One league's snapshot batch, one transaction (ADR-011).
+
+    `live_user` (the session-init daemon): the write runs under that
+    account's users-row lock (_lock_live_user), AccountGone when it's gone.
 
     PRECEDENCE, NOT RECENCY. 'weekly' rows are server-fetched (every team,
     orphans included); 'sync' rows are client-posted (ownerless rosters
@@ -14320,6 +14703,8 @@ def upsert_roster_snapshots(rows: list[dict]) -> dict:
         return stats
     t = league_roster_history_table
     with engine.begin() as conn:
+        if live_user:
+            _lock_live_user(conn, live_user)
         for row in rows:
             existing = conn.execute(
                 select(t.c.id, t.c.source, t.c.roster_hash).where(
@@ -14423,17 +14808,19 @@ def latest_value_snapshot_date(scoring_format: str,
         return None
 
 
-def upsert_board_snapshots(rows: list[dict]) -> dict:
+def upsert_board_snapshots(rows: list[dict], *, live_user: str | None = None) -> dict:
     """league_board_history batch upsert (C5/C6). Same transaction-per-batch
     shape as upsert_roster_snapshots; precedence is simpler because every
     trigger reads the SAME local member_rankings rows — 'sync' and 'weekly'
     carry identical content, so either may refresh the period. 'backfill'
-    is insert-only."""
+    is insert-only. `live_user`: as upsert_roster_snapshots."""
     stats = {"inserted": 0, "updated": 0, "skipped": 0}
     if not rows:
         return stats
     t = league_board_history_table
     with engine.begin() as conn:
+        if live_user:
+            _lock_live_user(conn, live_user)
         for row in rows:
             existing = conn.execute(
                 select(t.c.id).where(

@@ -88,10 +88,11 @@ from .data_loader import (load_consensus_maps, seed_elo_for_players,
                           normalise_name)
 from .database import (
     init_db,
-    upsert_user, upsert_league,
+    upsert_user, upsert_league, AccountGone,
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
-    load_recent_league_likes, find_live_trade_like, log_trade_impressions,
+    load_recent_league_likes, find_live_trade_like, find_prior_trade_signal,
+    log_trade_impressions, live_deletion_token, clear_deletion_tokens_cache,
     load_trade_interest_history, load_trade_card_source_likes,
     # #362 standing offers
     create_standing_offer, load_standing_offers, load_user_standing_offers,
@@ -131,7 +132,8 @@ from .database import (
     replenish_week_done, log_deck_replenish,
     set_feedback_status, list_feedback_for_user, FEEDBACK_STATUSES, FEEDBACK_SEVERITIES,
     upsert_league_members, upsert_member_rankings,
-    replace_league_members_snapshot,   # S0 — authoritative Sleeper membership
+    # The session-init daemon's start read and its guarded members write
+    league_row_and_member_ids, write_session_init_members,
     load_member_rankings, load_league_members, get_ranking_coverage,
     find_mirror_like, save_trade_policy_shadow, save_trade_proposal,
     # FB-147 — Sleeper trade-block snapshot (read side; sync lives in
@@ -2935,12 +2937,163 @@ _DIAG_PURGE_MAX_BATCHES = 20
 _DIAG_PURGE_BATCH = 500
 
 
+def _deletion_scrub_leagues(user_ids) -> set:
+    """The leagues a person's traces may sit in (deletion_scrub's capture),
+    read before the deletion removes their rows; empty on a failed read."""
+    try:
+        from . import database as _db, deletion_scrub as _deletion_scrub
+        with _db.engine.connect() as conn:
+            return set(_deletion_scrub.capture_leagues(conn, user_ids))
+    except Exception as err:          # the class only: a DB error's text quotes its ids
+        log.error("deletion scrub league read failed: %s", type(err).__name__)
+        return set()
+
+
+def _revoke_trade_jobs_naming(user_ids, league_ids) -> int:
+    """Account deletion (#559 QA P2): the scrub rewrites stored decks, never a
+    job held in this process, which at trade_i1_mode 0 or 1 would keep
+    serving the person's original cards (their id, name and reasons) until
+    it leaves memory. So every job whose cards name a deleted id is revoked,
+    and so is every job still running in one of their leagues (it may yet
+    publish such cards). The next request builds a fresh deck. Returns the
+    count. Another instance's jobs age out within its retention.
+
+    The reason is the neutral "inputs_changed", never "partner_deleted": a
+    running job's error reaches its owner, a leaguemate (mobile retries
+    inputs_changed on its own; web would toast the raw code), and must not
+    tell them someone deleted their account (#559 re-QA P2-a)."""
+    ids, leagues = set(user_ids), set(league_ids)
+    revoked = 0
+    with _trade_jobs_lock:
+        for job in _trade_jobs.values():
+            names = any((c.get("target_user_id") if isinstance(c, Mapping)
+                         else getattr(c, "target_user_id", None)) in ids
+                        for c in job.get("cards") or ())
+            running = (job.get("status") == "running"
+                       and (job.get("key") or (None, None))[1] in leagues)
+            if (names or running) and not _trade_job_revoked(job):
+                _revoke_trade_job_locked(job, "inputs_changed")
+                revoked += 1
+    return revoked
+
+
+# Account deletion (#559 re-QA P2-b): the ids deleted in this process, each
+# with the time until which a card naming it is hidden. Each session's
+# TradeService card store (shared with its trade jobs) keeps the cards it
+# generated, and GET /api/trades serves them with no expiry, so a deletion
+# purges them, and GET /api/trades hides any card built before that time: a
+# job still running at the deletion builds and writes cards from the board it
+# read before it. The window is an hour, twelve _JOB_HARD_TIMEOUTs; a card
+# built after it comes from a search started after the deletion, from public
+# league data (legal (vii)), and serves (#559 delta QA P3). Pruned once the
+# window closes (_prune_deleted_partner_ids, the cleanup loop): the stores are
+# purged of that id once more, for any late writer, and the id is dropped, so
+# no deleted id stays in memory past what it guards. Prod runs one process
+# (render.yaml: --workers 1).
+_DELETED_PARTNER_WINDOW = timedelta(hours=1)
+_deleted_partner_ids: dict = {}
+
+
+def _built_before_partner_deleted(card) -> bool:
+    """True for a card naming a deleted id that was built before its window
+    closed; an unreadable `created_at` counts as before."""
+    until = _deleted_partner_ids.get(getattr(card, "target_user_id", None))
+    if until is None:
+        return False
+    try:
+        return datetime.fromisoformat(card.created_at) < until
+    except (AttributeError, TypeError, ValueError):
+        return True
+
+
+def _purge_session_trade_cards(user_ids) -> int:
+    """Remove every card whose partner is a deleted id from every session's
+    trade services' card stores (and the module default's). Returns the
+    count. Late writers are caught by `_deleted_partner_ids` at serve."""
+    ids = set(user_ids)
+    until = datetime.now(timezone.utc) + _DELETED_PARTNER_WINDOW
+    _deleted_partner_ids.update(dict.fromkeys(ids, until))
+    return _purge_card_stores(ids)
+
+
+def _prune_deleted_partner_ids(now=None) -> int:
+    """Drop the ids whose window has closed, after purging the stores of
+    them once more (a job still running at the deletion wrote within it).
+    Returns how many were dropped."""
+    now = now or datetime.now(timezone.utc)
+    done = [pid for pid, until in list(_deleted_partner_ids.items()) if until <= now]
+    if done:
+        _purge_card_stores(set(done))
+        for pid in done:
+            _deleted_partner_ids.pop(pid, None)
+    return len(done)
+
+
+def _redact_held_card_partner(card) -> None:
+    """Legal R28.26 #10 (MUST): a card a client still holds from before its
+    partner deleted their account never writes the real id into a new row.
+    While the deletion's scrub job lives (database.live_deletion_token), the
+    card's partner becomes the token and its name the placeholder before any
+    write: the decision event's target, a mutual-match check (a token has no
+    likes, so none), a notification."""
+    token = live_deletion_token(getattr(card, "target_user_id", None))
+    if token:
+        card.target_user_id = token
+        card.target_username = "deleted_user"   # accounts.DELETED_USER_PLACEHOLDER
+
+
+def _purge_card_stores(ids) -> int:
+    """Remove every card naming one of `ids` from every session's trade
+    services' card stores (and the module default's)."""
+    with _sessions_lock:
+        sessions = list(_sessions.values())
+    services = {id(trade_service): trade_service}
+    for sess in sessions:
+        for svc in (sess.get("trade_svc"), *(sess.get("trade_svcs") or {}).values()):
+            if svc is not None:
+                services[id(svc)] = svc
+    purged = 0
+    for svc in services.values():
+        store = getattr(svc, "_trade_cards", None)
+        if not isinstance(store, dict):
+            continue
+        for trade_id, card in list(store.items()):
+            if getattr(card, "target_user_id", None) in ids:
+                store.pop(trade_id, None)
+                purged += 1
+    return purged
+
+
+def _kick_deletion_scrub() -> None:
+    """The deletion route's start of the scrub; never raises (the account is
+    already deleted, and the cleanup loop retries the job)."""
+    try:
+        from . import deletion_scrub as _deletion_scrub
+        _deletion_scrub.kick()
+    except Exception as err:          # the class only: a DB error's text quotes its ids
+        log.error("deletion scrub start failed: %s", type(err).__name__)
+
+
+def _cleanup_deletion_scrub() -> None:
+    """The cleanup loop's scrub step: every due job's DB pass; never raises."""
+    try:
+        from . import deletion_scrub as _deletion_scrub
+        _deletion_scrub.run_pending()
+    except Exception as err:          # the class only: a DB error's text quotes its ids
+        log.error("deletion scrub pass failed: %s", type(err).__name__)
+
+
 def _cleanup_loop() -> None:
     """Background thread: evict stale sessions + stuck/old trade jobs."""
     while True:
         time.sleep(300)  # check every 5 min
 
         _sweep_orphaned_overhauls_once()
+
+        try:
+            _prune_deleted_partner_ids()
+        except Exception as err:      # the class only: its text may quote ids
+            log.error("cleanup: deleted-id prune failed: %s", type(err).__name__)
 
         # Sessions — 4hr inactivity. This is a MEMORY sweep only: persisted
         # (verified, flag-on) sessions keep their durable row and rebuild on
@@ -2993,6 +3146,10 @@ def _cleanup_loop() -> None:
                          if purged >= _DIAG_PURGE_MAX_BATCHES * _DIAG_PURGE_BATCH else "")
         except Exception:
             log.exception("deck-diagnostic retention failed")
+
+        # The deletion scrub (legal R28.20 (ii)): any job whose DB pass is
+        # due, under its lease (a crash, a raise, or the in-flight grace).
+        _cleanup_deletion_scrub()
 
         # Deck-evidence retention (legal R28.20 (iii)): dark until
         # deck_evidence_retention_days is set; one bounded pass per tick.
@@ -3986,8 +4143,16 @@ def _roster_serve_rules(cards, league_id: str, viewer_id: str, ref: str, *, snap
     a roster_snapshot the caller already read (P1), else one is read here.
     `report`: filled with the serve's `deck_i1_check` props when the check
     ran (_roster_serve_check); left empty otherwise (mode 0, the admin hook,
-    a failed read), so those serves emit nothing.
+    a failed read), so those serves emit nothing. A card whose partner is a
+    deletion scrub's redaction token is dropped first, in every mode.
     """
+    # The deletion scrub's redacted cards (the partner deleted their account;
+    # the target is a redaction token) never serve, in any mode, ahead of
+    # I-1 (models-lead addendum J4, head-eng's option (b)). The caller records
+    # them as withdrawals, reason "partner_deleted" (served_before 1 when an
+    # earlier response had delivered the card, else 0).
+    if cards:
+        cards = [c for c in cards if not _redacted_target(c)]
     mode = _trade_i1_mode()
     forced = _gate_miss_test(league_id) if cards else None
     block = past_bound = None
@@ -5501,11 +5666,69 @@ def _deck_pack_commit(run_id: str, state, withdrawals=()) -> bool:
         if row is None:
             log.warning("deck-evidence %s: pack row missing; header not written", run_id)
             return False
+        if _fresh_pack_state(state, run_id):  # the deletion scrub rewrote it: reloaded, merged
+            continue
         stored_run = json.loads(row["header_json"])["run"]
         state.header["run"] = _merge_pack_runs(stored_run, state.run, state.base_run)
         state.checksum, state.base_run = row["checksum"], stored_run
     log.error("[evidence] pack header CAS gave up after %d tries job=%s", _PACK_CAS_RETRIES, run_id)
     return False
+
+
+def _fresh_pack_state(state, run_id: str) -> bool:
+    """The deletion scrub (legal R28.20 (ii)) rewrites a pack's cards and its
+    header dictionaries through the codec (deletion_scrub.redact_pack). A
+    state cached before that would write the old dictionaries back on its
+    next header update, with a checksum over the old cards (an unreadable
+    pack), and would upgrade a card from its old copy. So when the stored
+    header differs from this state's outside its run, the state is reloaded
+    from the row in place, and its pending run changes are merged onto the
+    stored run (_merge_pack_runs: the stored keys, redacted_at among them,
+    win). True when it reloaded. A plain header update elsewhere changes only
+    the run, and is left to the caller's CAS merge."""
+    from . import database as _db
+    row = _db.load_deck_evidence_pack_header(run_id)
+    if row is None or row["checksum"] == state.checksum:
+        return False
+    header = json.loads(row["header_json"])
+    if ({k: v for k, v in header.items() if k != "run"}
+            == {k: v for k, v in state.header.items() if k != "run"}):
+        return False
+    fresh = _load_pack_state(run_id, state.user_id)
+    if fresh is None:
+        return False
+    pending, base = state.run, state.base_run
+    state.header, state.cards, state.prefix = fresh.header, fresh.cards, fresh.prefix
+    state.__dict__.pop("by_index", None)     # _deck_pack_card's index of the old cards
+    state.header["run"] = _merge_pack_runs(fresh.run, pending, base)
+    state.checksum, state.base_run = fresh.checksum, copy.deepcopy(fresh.base_run)
+    log.info("[evidence] pack state reloaded after a redaction job=%s", run_id)
+    return True
+
+
+def _redacted_held_row(row: dict, state, index: int) -> dict:
+    """An upgrade's row from a deck's build-time snapshot, after the deletion
+    scrub redacted that card in the pack: the pack's card names the token
+    where the snapshot names the person, so the row gets the same redaction
+    (the token gives the mapping for this card; no id is kept anywhere)."""
+    from . import deletion_scrub as _scrub
+    from .eval.contract import REDACTED_PARTNER_PREFIX
+    token = _deck_pack_card(state, index).get("partner_user_id")
+    features = row.get("features_json")
+    features = json.loads(features) if isinstance(features, str) else (features or {})
+    partner = features.get("partner_user_id")
+    if partner is None:
+        return row
+    if not isinstance(token, str) or not token.startswith(REDACTED_PARTNER_PREFIX):
+        # The pack isn't redacted yet (the scrub's pass hasn't reached it, or
+        # its grace scan's cursor passed this row's id): while the deletion's
+        # job lives, its token (legal R28.26 #10).
+        token = live_deletion_token(partner)
+        if not token:
+            return row
+    if partner == token:
+        return row
+    return _scrub.redact_row(row, {partner}, token)
 
 
 def _deck_evidence_cover(ev: _DeckEvidence, ids, at: str, *, prior_known: bool = True) -> None:
@@ -5615,11 +5838,13 @@ def _deck_evidence_upgrade(impression_id: str, acting_user_id: str) -> bool:
             held = ev.rows.get(impression_id)
             last = ev.deliveries[-1][0] if ev.deliveries else -1
             row = diag = None
+            _fresh_pack_state(ev.pack, deck_job_id)      # the deletion scrub's rewrite
             if held is not None:
                 row = {**_unpack_row(held[1]), "evidence_tier": "viewed",
                        "served_at": ev.served_at,
                        "delivered_at": (ev.delivered_at.get(impression_id)
                                         or ev.pack.delivered_at(index) or now)}
+                row = _redacted_held_row(row, ev.pack, index)
                 diag = ev.closure([row])
         _deck_pack_flush_header(ev)           # condition 4: a pending delivery lands first
         if index > last:
@@ -5657,6 +5882,7 @@ def _deck_upgrade_stored(deck_job_id: str, impression_id: str, index: int, user_
 def _deck_upgrade_stored_locked(state, deck_job_id: str, impression_id: str, index: int,
                                 user_id: str, now: str) -> bool:
     from . import database as _db
+    _fresh_pack_state(state, deck_job_id)    # a cached state from before a deletion scrub
     if any(w["card_index"] == index and not w["served_before"]
            for w in _db.load_deck_withdrawals(deck_job_id)):
         return False                          # W0: never shown, never upgraded
@@ -5682,6 +5908,7 @@ def _deck_upgrade_stored_locked(state, deck_job_id: str, impression_id: str, ind
     card = _deck_pack_card(state, index)
     row = {**_unpack_row(held[1]), "evidence_tier": "viewed", "served_at": card["served_at"],
            "delivered_at": state.delivered_at(index) or now}
+    row = _redacted_held_row(row, state, index)
     _db.save_deck_evidence([row], diagnostics=stored.closure([row]), deck_job_id=deck_job_id)
     return True
 
@@ -5922,6 +6149,7 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
     run["upgrade_miss_row_gone"] with the miss), and `row_gone_why` its split
     (run["upgrade_miss_row_gone_why"], only with a row-gone entry)."""
     from . import database as _db
+    _fresh_pack_state(state, deck_job_id)    # never build the row from a pre-scrub copy
     card = _deck_pack_card(state, index)
     stored, stored_from = _deck_stored_count_from(stored_count, state.run, stored_from)
     cause = _upgrade_miss_cause(deck_job_id, index, stored, state.delivered_at(index) is not None)
@@ -5936,6 +6164,14 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
     row.update(impression_id=impression_id, served_at=card["served_at"], is_ghost=0,
                features_json=json.dumps(features), assets_json=None, valuation_json=None,
                evidence_tier="viewed", delivered_at=state.delivered_at(index) or now)
+    # Legal R28.26 #10: a pack the scrub hasn't reached yet still names the
+    # person; while the deletion's job lives the row takes its token, as
+    # _redacted_held_row does for the snapshot path (#562 QA P3-5).
+    partner = features.get("partner_user_id")
+    token = live_deletion_token(partner) if partner is not None else None
+    if token and partner != token:
+        from . import deletion_scrub as _scrub
+        row = _scrub.redact_row(row, {partner}, token)
     key = str(index)
 
     def record(add: bool) -> None:
@@ -6701,11 +6937,14 @@ def _disposition_cut(before: list, after: list) -> list:
 
 def _withdrawal_reasons(withdrawn=(), cut=()) -> dict:
     """{impression_id: reason} for a serve's withdrawals: I-1's drops
-    ("i1_dropped") and the disposition projection's cuts ("disposition_cut",
-    models-lead B4). The same sticky drop, served_before and transaction rules
-    apply to both; eval removes both and counts them by reason."""
-    reasons = {c["impression_id"]: "i1_dropped" for c in withdrawn
-               if isinstance(c.get("impression_id"), str)}
+    ("i1_dropped"), the deletion scrub's redacted cards ("partner_deleted",
+    models-lead J4: dropped by the serve rules in every mode, counted apart so
+    G10's mode-1 rule on "i1_dropped" stays clean) and the disposition
+    projection's cuts ("disposition_cut", models-lead B4). The same sticky
+    drop, served_before and transaction rules apply to all three; eval
+    removes them and counts them by reason."""
+    reasons = {c["impression_id"]: ("partner_deleted" if _redacted_target(c) else "i1_dropped")
+               for c in withdrawn if isinstance(c.get("impression_id"), str)}
     reasons.update((c["impression_id"], "disposition_cut") for c in cut
                    if isinstance(c.get("impression_id"), str))
     return reasons
@@ -7037,6 +7276,15 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
     if i1_report:                         # off-thread, each card once per deck
         _emit_deck_i1_check(user_id, league_id, row["deck_job_id"], i1_report)
     return out, past_bound
+
+
+def _redacted_target(card) -> bool:
+    """A card (a stored dict or a TradeCard) whose partner is a deletion
+    scrub's redaction token."""
+    from .eval.contract import REDACTED_PARTNER_PREFIX
+    target = (card.get("target_user_id") if isinstance(card, Mapping)
+              else getattr(card, "target_user_id", None))
+    return str(target or "").startswith(REDACTED_PARTNER_PREFIX)
 
 
 def _trade_page_stale(row: dict, snap, vsn=None) -> bool:
@@ -10733,6 +10981,10 @@ def _record_trade_proposal(*, sess, provider: str, user_id: str,
             log.warning("proposal valuation snapshot failed (non-fatal): %s",
                         snap_err)
 
+        # Legal R28.26 #10: a deleted partner's proposal row keeps no id and
+        # no valuation, as the deletion itself leaves existing rows.
+        if live_deletion_token(target_user_id):
+            target_user_id, valuation_json = None, None
         _pid, created = save_trade_proposal({
             "proposal_event_id":       proposal_event_id,
             "impression_id":           impression_id,
@@ -21223,6 +21475,8 @@ def get_trades():
     g_players     = sess["players"]
     league_id = request.args.get("league_id") or None
     cards = trade_service.get_pending_trades(user_id=g_user_id, league_id=league_id)
+    # A card a still-running job wrote after a deletion's purge (#559 re-QA P2-b).
+    cards = [card for card in cards if not _built_before_partner_deleted(card)]
     pending_owner_config = dict(_trade_service_mod._cfg)
     pending_exemptions = _significance_exemptions_for(trade_service)
     cards = _pending_owner_cards(cards, pending_owner_config, pending_exemptions)
@@ -21375,6 +21629,7 @@ def swipe_trade():
                 raise
             log.info("swipe: reconstructed card %s from payload context (FB-46)", trade_id)
             card = trade_service.record_decision(trade_id=trade_id, decision=decision)
+        _redact_held_card_partner(card)   # legal R28.26 #10, before any write
 
         # Fit-congruence weighting (D-060): scale the swipe's Elo K by how
         # surprising it is given the user's window. The card carries the
@@ -21970,7 +22225,8 @@ def queue_trade_for_opponent():
                     "trade_id": trade_id,
                     "give":     card.give_player_ids,
                     "receive":  card.receive_player_ids,
-                    "target":   opponent.user_id,
+                    # R28.26 #10: a deleted partner's id is the token.
+                    "target":   live_deletion_token(opponent.user_id) or opponent.user_id,
                     # Propose-label spine — server-stamped: the ✓ cell is the
                     # calculator, no client declaration needed. Keeps
                     # props.source one closed enum across both emitters.
@@ -21986,6 +22242,135 @@ def queue_trade_for_opponent():
              g_user_id, trade_id, opponent.user_id, league_id)
     return jsonify({"queued": True, "already_queued": False,
                     "trade_id": trade_id})
+
+
+# The propose routes' closed `source` set, recorded as `trade_proposals.source`.
+# Absent or unknown is "deck" (every client before #574 sends nothing). `shop`
+# (#531): the Shop tile's send, the one source that also records the kept Elo
+# half (_record_shop_send_signal). Cross-client value set:
+# docs/cross-client-invariants.md.
+_PROPOSE_SOURCES = ("deck", "match", "calculator", "shop")
+
+
+def _propose_source(body: dict) -> str:
+    source = body.get("source")
+    return source if source in _PROPOSE_SOURCES else "deck"
+
+
+def _record_shop_send_signal(sess, *, league_id, their_user_id, give_ids,
+                             receive_ids) -> None:
+    """#531 — the Elo half of a Shop send, once per package.
+
+    head-product (11-01) kept the Elo signal for Shop sends after #574 swapped
+    the tile's queue button for the platform send router: the queue's Elo half
+    WITHOUT the deck card. So this writes no like. A `trade_decisions` row with
+    `decision = "send"` is the once-only anchor (head-eng 11-01): every reader
+    that must not see it — the likes-you mirror, match detection, Awaiting,
+    like/pass counts — filters `decision IN ('like', 'pass')`.
+
+    Called by the three propose routes BEFORE the platform call when the body
+    says `source: "shop"`. A send is intent, so the signal never waits on the
+    platform's outcome (analytics-lead: timed to the write, not the result).
+
+    The bar to record is the queue route's D-170 bar: the session's league and
+    a counterparty this session resolves to a league-mate who isn't the
+    caller. Anything else records nothing and changes nothing about the send.
+
+    Elo goes through exactly the queue route's path: the same
+    `fit_congruence_mult` (a hand-built package has no `lane_shift`, so 1.0),
+    the bake-off `elo_freeze_mult`, `record_trade_signal` and
+    `save_trade_swipes` at `trade_k_like`. A signal-layer rule there, such as
+    #389's generic-pick strip, applies here unchanged.
+
+    Once only: `find_prior_trade_signal` skips the row, the Elo and the event
+    when this package already has a send row (a repeat tap) or a live like
+    (the deck, the calculator, or a pre-#574 Shop queue). The probe and the
+    write share the per-user `service._lock`, so two taps in this process
+    can't both pass it. `trade_proposed` fires iff the row is written.
+
+    Never raises: the user's real proposal must not fail on Elo bookkeeping.
+    """
+    try:
+        g_user_id = sess.get("user_id")
+        g_league = sess.get("league")
+        service = sess.get("service")
+        if not (g_user_id and g_league and service):
+            return
+        if not league_id or league_id != g_league.league_id:
+            return
+        give_ids = [str(p) for p in give_ids]
+        receive_ids = [str(p) for p in receive_ids]
+        if not give_ids or not receive_ids:
+            return
+        opponent = {m.user_id: m for m in g_league.members}.get(
+            str(their_user_id or ""))
+        if opponent is None or opponent.user_id == _league_user_id(sess):
+            return
+        trade_id = _calc_queue_trade_id(g_user_id, league_id, opponent.user_id,
+                                        give_ids, receive_ids)
+        fit_mult = _trade_service_mod.fit_congruence_mult(None, "like")
+        fit_mult = _bakeoff.elo_freeze_mult(fit_mult)
+        from .ranking_service import _c as _rs_c
+        with service._lock:
+            if find_prior_trade_signal(g_user_id, league_id, trade_id,
+                                       give_ids, receive_ids,
+                                       target_user_id=opponent.user_id):
+                return
+            # In-memory first, ungated on the DB write, as the queue route
+            # does (D-073): the probe above is the once-only guard.
+            service.record_trade_signal(
+                winner_ids = receive_ids,
+                loser_ids  = give_ids,
+                decision   = "like",
+                fit_mult   = fit_mult,
+            )
+            wrote = save_trade_decision(
+                user_id            = g_user_id,
+                league_id          = league_id,
+                trade_id           = trade_id,
+                give_player_ids    = give_ids,
+                receive_player_ids = receive_ids,
+                decision           = "send",
+            )
+            if not wrote:
+                return
+            # The row is committed, so the event below must fire whatever
+            # happens to the swipe persist (analytics-lead: the event mirrors
+            # the row). A lost swipe write costs only the replay of this one
+            # signal, which the in-memory board already holds.
+            try:
+                save_trade_swipes(
+                    user_id        = g_user_id,
+                    winner_ids     = receive_ids,
+                    loser_ids      = give_ids,
+                    k_factor       = _rs_c("trade_k_like") * fit_mult,
+                    scoring_format = _active_format(sess),
+                )
+            except Exception as swipe_err:
+                log.warning("shop send: swipe persist failed (row and event kept) "
+                            "user=%s trade=%s: %s", g_user_id, trade_id, swipe_err)
+            record_event(
+                g_user_id,
+                "trade_proposed",
+                league_id = league_id,
+                source    = "shop_send",
+                props     = {
+                    # analytics-lead 11-01: the event mirrors the row, so a
+                    # Shop send is "send", never "like". trade_proposed's
+                    # closed set is like | send.
+                    "decision": "send",
+                    "trade_id": trade_id,
+                    "give":     give_ids,
+                    "receive":  receive_ids,
+                    "target":   live_deletion_token(opponent.user_id) or opponent.user_id,
+                    # Propose-label spine — server-stamped from the propose
+                    # body's validated `source`.
+                    "source":   "shop",
+                },
+                **(getattr(g, "device_info", {}) or {}),
+            )
+    except Exception as err:
+        log.warning("shop send: Elo half skipped (send continues): %s", err)
 
 
 # ---------------------------------------------------------------------------
@@ -22258,6 +22643,8 @@ def trade_pass_reason():
                 g_user_id, league_id or "")
         except Exception:
             card = None
+    if card is not None:
+        _redact_held_card_partner(card)   # legal R28.26 #10, before any write
 
     try:
         state = upsert_trade_pass_reason(
@@ -22435,6 +22822,10 @@ def flag_bad_trade():
         target_user_id  = str(body["target_user_id"]) if body.get("target_user_id") else None
         target_username = str(body["target_username"]) if body.get("target_username") else None
 
+    # Legal R28.26 #10: a deleted partner's id and name are NULL here, as the
+    # deletion itself NULLs this table's existing rows.
+    if live_deletion_token(target_user_id):
+        target_user_id = target_username = None
     try:
         result = save_bad_trade_flag(
             user_id            = g_user_id,
@@ -24907,6 +25298,14 @@ def sleeper_link():
 
     if proven_live:
         # Claim matches + oracle passed → this session controls the account.
+        # Load the history a username-only sign-in deferred (R28.17) BEFORE
+        # verifying; on failure stay unverified so a retry hydrates.
+        try:
+            _hydrate_session_history(sess)
+        except Exception:
+            log.exception("sleeper_link: history load failed for %s — "
+                          "verify refused (retryable)", user_id)
+            return _verify_retry_response()
         sess["verified"] = True
         sess["verified_via"] = "sleeper"
         _attach_presession_feedback(sess)
@@ -25039,11 +25438,14 @@ def propose_trade_to_sleeper():
 
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
+    source = _propose_source(body)
+    if source == "shop":
+        _record_shop_send_signal(sess, league_id=league_id, their_user_id=their_user_id,
+                                 give_ids=give, receive_ids=receive)
     payload, status = _sleeper_propose_core(
         sess, league_id=league_id, their_user_id=their_user_id, give_ids=give, receive_ids=receive,
         proposal_event_id=uuid.uuid4().hex,
-        source=(body.get("source") if body.get("source") in
-                ("deck", "match", "calculator") else "deck"),
+        source=source,
         impression_id=body.get("impression_id"), their_roster_id=their_roster_id_in)
     return jsonify(payload), status
 
@@ -25740,7 +26142,8 @@ def dismiss_awaiting_trade():
                 "awaiting_trade_dismissed",
                 league_id = str(league_id),
                 source    = "api",
-                props     = {"partner_id": str(partner_id),
+                # R28.26 #10: a deleted partner's id is the token.
+                props     = {"partner_id": live_deletion_token(partner_id) or str(partner_id),
                              "dismissed_likes": dismissed},
                 **(getattr(g, "device_info", {}) or {}),
             )
@@ -25896,6 +26299,9 @@ def create_standing_offer_route():
         return jsonify({"error": "team_user_ids must be current league members",
                         "invalid": invalid}), 400
 
+    # Legal R28.26 #10: a team whose manager's account deletion is still being
+    # scrubbed is stored as the deletion's token, never the real id.
+    team_user_ids = [live_deletion_token(t) or t for t in team_user_ids]
     try:
         offer = create_standing_offer(
             user_id         = g_user_id,
@@ -28249,13 +28655,29 @@ def session_init():
             nonlocal _meta_fetched, _meta_payload
             if not _meta_fetched:
                 _meta_fetched = True
-                _meta_payload = _s0_raw.get("meta") or _fetch_sleeper_league_meta(league_id)
+                _meta_payload = _s0_raw.get("meta") or (
+                    None if _platform_linked
+                    else _fetch_sleeper_league_meta(league_id))
             return _meta_payload
 
         try:
             # Platform-link state is a DB fact that nothing in this daemon
-            # writes, so every guard below reads it once.
-            _platform_linked = is_linked_platform_league(league_id)
+            # writes, so every guard below reads it once. The request's
+            # platform counts too: a linked league whose row an account
+            # deletion removed since then is still never treated as Sleeper.
+            _platform_linked = (authoritative["platform"] != "sleeper"
+                                or is_linked_platform_league(league_id))
+            # What exists at the start. An account deletion can remove these
+            # rows while this runs, so they are only ever updated, never
+            # re-created. The users, leagues, user_events (both events),
+            # league_members and roster-history writes each hold the
+            # account's users-row lock (database._lock_live_user), and the
+            # first to find it gone (AccountGone) stops the daemon. The other
+            # writes are league-level public Sleeper data. The users row is
+            # never inserted here (the session mint writes it); only a
+            # Sleeper league's first init inserts: its leagues row, and the
+            # league_members rows of managers new since the start.
+            _league_existed, _members_existed = league_row_and_member_ids(league_id)
 
             # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE
             # upsert_user runs so we can emit a one-time referral-receipt
@@ -28274,6 +28696,7 @@ def session_init():
                     display_name=display_name,
                     avatar=avatar,
                     invited_by=invited_by,
+                    require_user=True,
                 )
                 upsert_league(
                     league_id        = league_id,
@@ -28282,6 +28705,9 @@ def session_init():
                     season           = "2026",
                     user_player_ids  = new_user_roster,
                     opponent_rosters = opponent_rosters,
+                    platform         = authoritative["platform"],
+                    require_user     = True,
+                    only_if_exists   = _league_existed or _platform_linked,
                 )
                 log.info("  ✅ user + league upserted in DB (bg)")
 
@@ -28296,8 +28722,11 @@ def session_init():
                         league_id  = league_id,
                         session_id = token,
                         source     = "api",
+                        require_user = True,
                         **_ev_info,
                     )
+                except AccountGone:
+                    raise
                 except Exception as _ev_err:
                     log.warning("  record_event failed: %s", _ev_err)
 
@@ -28313,8 +28742,11 @@ def session_init():
                         source     = "api",
                         props      = {"league_id": league_id,
                                       "platform": "sleeper"},
+                        require_user = True,
                         **_ev_info,
                     )
+                except AccountGone:
+                    raise
                 except Exception as _ev_err:
                     log.warning("  record_event(league_synced) failed: %s", _ev_err)
 
@@ -28437,6 +28869,9 @@ def session_init():
                         log.info("  ℹ️  league scoring auto-detect deferred — Sleeper meta unavailable")
                 except Exception as e:
                     log.warning("  league scoring auto-detect failed (continuing): %s", e)
+            except AccountGone:
+                log.info("  account gone: session/init writes stopped (bg)")
+                return
             except Exception as db_err:
                 log.warning("  DB upsert failed (continuing): %s", db_err)
 
@@ -28445,20 +28880,22 @@ def session_init():
             try:
                 all_members_for_db = _session_member_rows(
                     league_user_id, league_display_name, user_player_ids, opponent_rosters)
-                if _s0_raw and not _platform_linked:
-                    # S0 — the request thread's Sleeper read is the complete,
-                    # authoritative membership: replace, so departed managers'
-                    # rows go (G-075). Refuses an empty snapshot (G-015).
-                    _s0_members_ok = replace_league_members_snapshot(
-                        league_id, all_members_for_db)
-                else:
-                    upsert_league_members(league_id=league_id, members=all_members_for_db)
-                    _s0_members_ok = True
+                # S0 — a Sleeper league's read (request thread) is the complete,
+                # authoritative membership: replace, so departed managers' rows
+                # go (G-075). Refuses an empty snapshot (G-015). A platform
+                # league's rows are only updated.
+                _s0_members_ok = write_session_init_members(
+                    league_id, all_members_for_db, user_id=user_id,
+                    existed=_members_existed,
+                    replace=bool(_s0_raw) and not _platform_linked)
                 log.info("  ✅ league_members written (%d members)", len(all_members_for_db))
                 # Roster changed → drop cached _league_members projections
                 # so the next /api/league/members call rebuilds the
                 # join-status list. (Picked up from PR #63 #B4 cache.)
                 _invalidate_league_members_cache(league_id)
+            except AccountGone:
+                log.info("  account gone: session/init writes stopped (bg)")
+                return
             except Exception as db_err:
                 log.warning("  league_members upsert failed (continuing): %s", db_err)
 
@@ -28493,7 +28930,7 @@ def session_init():
             # flake just leaves the previous snapshot in place. No-op for
             # non-Sleeper league ids (ESPN/demo) and when the flag is off.
             try:
-                if is_enabled("sleeper.trade_block"):
+                if is_enabled("sleeper.trade_block") and not _platform_linked:
                     from .trade_block_service import sync_league_trade_block
                     _n_blk = sync_league_trade_block(league_id, rosters=_rh_roster_rows)
                     _invalidate_trade_block_cache(league_id)
@@ -28561,8 +28998,13 @@ def session_init():
             # is what /api/rankings + /api/trio relabel the generic pick
             # rungs from. Cheap-skipped against the cached checked_at, and
             # self-contained failure handling inside the helper, so it can
-            # never affect the syncs above.
-            _refresh_league_draft_status(league_id)
+            # never affect the syncs above. It reads the platform from the
+            # leagues row, so a row that vanished and was re-created
+            # platform-less (see _platform_linked) would read as Sleeper and
+            # spend Sleeper reads on another platform's league: skip it until
+            # the row agrees with the platform the request resolved.
+            if authoritative["platform"] == "sleeper" or is_linked_platform_league(league_id):
+                _refresh_league_draft_status(league_id)
 
             # ── S0: record this init's Sleeper roster refresh ─────────
             # After members, picks and draft state are committed. Never raises.
@@ -28631,12 +29073,22 @@ def session_init():
             # short pick_ids array, invisible until December. Sleeper-only
             # here (platform leagues snapshot at their import/refresh
             # routes with native team keys). Own transaction; best-effort.
+            # Under the caller's users-row lock (#587), which covers the caller
+            # only. A leaguemate deleted mid-snapshot still gets a roster-
+            # history row: public Sleeper data, which any member's next sync
+            # writes again. They can also keep a league_board_history row,
+            # which is private: their board is read before the write commits,
+            # and nothing re-syncs it away. The weekly sweep has the same
+            # race. It's a known gap with its own fix, not this lock's.
             try:
                 if (is_enabled("market.roster_history")
                         and str(league_id).isdigit()
                         and not _platform_linked):
                     _sleeper_roster_history_on_sync(
-                        league_id, all_members_for_db, _rh_roster_rows)
+                        league_id, all_members_for_db, _rh_roster_rows,
+                        live_user=user_id)
+            except AccountGone:
+                log.info("  account gone: session/init writes stopped (bg)")
             except Exception as rh_err:
                 log.warning("  roster-history snapshot failed (continuing): %s", rh_err)
         except Exception:
@@ -29746,12 +30198,14 @@ def _roster_snapshot_weekday_gate() -> int:
 
 
 def _do_league_history_snapshot(league_id: str, platform: str,
-                                teams: list[dict], source: str) -> dict:
+                                teams: list[dict], source: str, *,
+                                live_user: str | None = None) -> dict:
     """Shared trigger tail: format + pool + priced picks in, both history
     tables written. The value contract lives here: team_value comes out of
     compute_power_rankings' consensus basis via the SAME
     _power_picks_by_owner pricing the Power Rankings screen uses, so the
-    two can never disagree about a team."""
+    two can never disagree about a team. `live_user`: both writes run under
+    that account's users-row lock (AccountGone when it's gone)."""
     from . import roster_history as _rh
     fmt = get_league_scoring(league_id) or "1qb_ppr"
     pool_players, seed = _get_universal_pool(fmt)
@@ -29761,15 +30215,16 @@ def _do_league_history_snapshot(league_id: str, platform: str,
         league_id, platform, fmt, teams, source,
         seed=seed, players_meta=players_meta,
         picks_by_owner=picks_by_owner,
-        pick_read_source=_pick_read_source())
-    board_stats = _rh.snapshot_league_boards(league_id, source)
+        pick_read_source=_pick_read_source(), live_user=live_user)
+    board_stats = _rh.snapshot_league_boards(league_id, source, live_user=live_user)
     log.info("roster-history: league=%s platform=%s source=%s rosters=%s boards=%s",
              league_id, platform, source, stats, board_stats)
     return {"rosters": stats, "boards": board_stats}
 
 
 def _sleeper_roster_history_on_sync(league_id: str, members: list[dict],
-                                    roster_rows: list | None) -> None:
+                                    roster_rows: list | None, *,
+                                    live_user: str | None = None) -> None:
     """Writer A, Sleeper half. `members` is the client-posted membership
     (ownerless teams already dropped — which is exactly why these rows are
     source='sync' and yield to 'weekly'); `roster_rows` is the shared v1
@@ -29801,7 +30256,7 @@ def _sleeper_roster_history_on_sync(league_id: str, members: list[dict],
                           "member_user_id": uid,
                           "player_ids": m.get("player_ids") or [],
                           "starter_ids": None})
-    _do_league_history_snapshot(league_id, "sleeper", teams, "sync")
+    _do_league_history_snapshot(league_id, "sleeper", teams, "sync", live_user=live_user)
 
 
 def _platform_roster_history_on_sync(league_id: str, platform: str,
@@ -30462,8 +30917,19 @@ def _daily_tick_steps() -> list:
         S("reengagement",      _daily_tick_reengagement),
         S("replenishment",     _daily_tick_replenishment),
         S("eval_nightly",      _daily_tick_eval_nightly),
+        # Before the refit, never beside it (models-eng #542): the model
+        # store's redaction takes no lock against the refit's append.
+        S("deletion_scrub",    _daily_tick_deletion_scrub),
         S("value_model_refit", _daily_tick_value_model_refit),
     ]
+
+
+def _daily_tick_deletion_scrub(now: datetime):
+    """daily-tick step: the deletion scrub's due DB passes, the model store
+    for every job whose DB pass is current, finished jobs deleted, and the
+    unfinished past 24 h counted at ERROR (legal R28.20 (ii), (ix))."""
+    from . import deletion_scrub as _deletion_scrub
+    return _deletion_scrub.tick(now)
 
 
 def _daily_tick_rookie_monitor(now: datetime):
@@ -31848,9 +32314,95 @@ def og_package_card(short_id):
 # full frontend Sleeper-fetch flow, and (b) we don't need the trade service
 # or opponent-member hydration for read-only badge injection.
 
+def _extension_ranking_services(user_id: str, load_history: bool = True,
+                                strict: bool = False) -> dict:
+    """One RankingService per scoring format for `user_id`.
+
+    `load_history` replays the user's swipes and restores their tier
+    overrides (the eager build). `strict` re-raises a history-load failure
+    instead of logging it and carrying on; only `_hydrate_session_history`
+    sets it, because a verify must never complete on a half-loaded board.
+    """
+    new_services: dict = {}
+    for fmt in SCORING_FORMATS:
+        fmt_pool, fmt_seed = _get_universal_pool(fmt)
+        svc = RankingService(
+            players           = fmt_pool,
+            matchup_generator = matchup_gen,
+            seed_ratings      = fmt_seed,
+        )
+        svc._user_id = user_id
+        svc._scoring_format = fmt
+        if load_history:
+            try:
+                historical = load_swipe_decisions(user_id=user_id, scoring_format=fmt)
+                if historical:
+                    svc.replay_from_db(historical)
+            except Exception as e:
+                if strict:
+                    raise
+                log.warning("  [%s] extension replay failed: %s", fmt, e)
+            try:
+                # See server.py:4022 for why we no longer filter overrides
+                # through the current pool — the filter destroys data.
+                overrides = load_tier_overrides(user_id=user_id, scoring_format=fmt)
+                svc._elo_overrides = {pid: float(elo) for pid, elo in overrides.items()}
+                svc._elo_override_at = load_tier_override_stamps(
+                    user_id=user_id, scoring_format=fmt)          # F2
+            except Exception as e:
+                if strict:
+                    raise
+                log.warning("  [%s] extension override restore failed: %s", fmt, e)
+        new_services[fmt] = svc
+    return new_services
+
+
+def _hydrate_session_history(sess) -> None:
+    """Load the history a `load_history=False` session skipped (R28.17).
+
+    Call immediately before an in-place `sess["verified"] = True`. A no-op
+    for eagerly built sessions and for one already hydrated. Single-flight
+    on the session's own lock, re-checking `_history_pending` on the live
+    session, because `replay_from_db` appends and must run exactly once.
+
+    The history goes into FRESH services that are swapped in only after
+    every format loaded. On any failure this raises and the session is left
+    exactly as it was — pristine services, `_history_pending` still set —
+    so a retry replays once. The caller must refuse the verify: a verified
+    session with empty services lets /api/tiers/save overwrite the user's
+    persisted pins with an empty board.
+    """
+    live = getattr(sess, "_source", sess)   # a _RequestSession view → live dict
+    lock = live.get("_history_lock")
+    if lock is None:
+        return
+    with lock:
+        if not live.get("_history_pending"):
+            return
+        services = _extension_ranking_services(live["user_id"], strict=True)
+        with _sessions_lock:
+            live["services"] = services
+            live["service"] = (services.get(live.get("active_format"))
+                               or services[DEFAULT_SCORING])
+            live.pop("_history_pending", None)
+    # The caller's request view keeps its pre-swap services; neither verify
+    # route reads services after verifying, and the next request's view is
+    # built from the live session.
+
+
+def _verify_retry_response():
+    """Retryable refusal of an in-place verify whose history load failed.
+    The session stays unverified and still pending, so a retry hydrates."""
+    return jsonify({
+        "error": "verify_retry",
+        "message": "We couldn't finish signing you in. Try again in a moment.",
+    }), 503, {"Retry-After": "5"}
+
+
 def _extension_build_session(user_id: str, username: str,
                              display_name: str, avatar: str | None,
-                             token: str | None = None) -> tuple[str, dict]:
+                             token: str | None = None,
+                             load_history: bool = True) -> tuple[str, dict]:
     """Build a user-scoped session for the browser extension.
 
     `token` re-registers the session under an existing bearer token —
@@ -31863,6 +32415,13 @@ def _extension_build_session(user_id: str, username: str,
     RankingService per scoring_format with swipes + tier overrides
     replayed, so switching leagues on sleeper.com just picks the right
     service instantly.
+
+    `load_history=False` (only the UNVERIFIED username sign-in and the
+    entry mint pass it — legal R28.17) skips the swipe replay and override
+    restore so the response time can't reveal whether the user has FTF
+    history. The session is marked `_history_pending`, and the in-place
+    verify routes hydrate it with `_hydrate_session_history` before they
+    set `verified`. Every other caller stays eager.
 
     Returns (token, session_payload).
     """
@@ -31894,32 +32453,7 @@ def _extension_build_session(user_id: str, username: str,
         log.warning("  extension auth: upsert_user failed: %s", e)
 
     # Build RankingServices per format with replayed swipes + tier overrides
-    new_services: dict = {}
-    for fmt in SCORING_FORMATS:
-        fmt_pool, fmt_seed = _get_universal_pool(fmt)
-        svc = RankingService(
-            players           = fmt_pool,
-            matchup_generator = matchup_gen,
-            seed_ratings      = fmt_seed,
-        )
-        svc._user_id = user_id
-        svc._scoring_format = fmt
-        try:
-            historical = load_swipe_decisions(user_id=user_id, scoring_format=fmt)
-            if historical:
-                svc.replay_from_db(historical)
-        except Exception as e:
-            log.warning("  [%s] extension replay failed: %s", fmt, e)
-        try:
-            # See server.py:4022 for why we no longer filter overrides
-            # through the current pool — the filter destroys data.
-            overrides = load_tier_overrides(user_id=user_id, scoring_format=fmt)
-            svc._elo_overrides = {pid: float(elo) for pid, elo in overrides.items()}
-            svc._elo_override_at = load_tier_override_stamps(
-                user_id=user_id, scoring_format=fmt)          # F2
-        except Exception as e:
-            log.warning("  [%s] extension override restore failed: %s", fmt, e)
-        new_services[fmt] = svc
+    new_services = _extension_ranking_services(user_id, load_history=load_history)
 
     payload = {
         "user_id":       user_id,
@@ -31935,6 +32469,9 @@ def _extension_build_session(user_id: str, username: str,
         "extension":     True,
         "last_active":   time.time(),
     }
+    if not load_history:
+        payload["_history_pending"] = True
+        payload["_history_lock"] = threading.Lock()   # hydrate single-flight
     token = token or secrets.token_urlsafe(32)
     with _sessions_lock:
         _sessions[token] = payload
@@ -31995,13 +32532,16 @@ def extension_auth():
     except Exception as e:
         log.info("extension_auth: leagues fetch failed (non-fatal): %s", e)
 
-    # Mint session immediately
+    # Mint session immediately. Unverified, so history waits for the verify
+    # (R28.17: loading it here made the response time reveal whether this
+    # username has FTF history).
     try:
         token, payload = _extension_build_session(
             user_id=user_id,
             username=username,
             display_name=display_name,
             avatar=avatar,
+            load_history=False,
         )
     except Exception as e:
         log.exception("extension_auth: session build failed")
@@ -32260,11 +32800,13 @@ def entry_platform():
         display_name = franchise["name"] or f"Franchise {franchise_id}"
 
     try:
+        # Unverified mint: history waits for the verify (R28.17).
         token, payload = _extension_build_session(
             user_id=entry_uid,
             username="",
             display_name=display_name,
             avatar=None,
+            load_history=False,
         )
     except Exception as e:
         log.error("entry_platform: session build failed: %s", e)
@@ -34214,6 +34756,8 @@ def delete_account_route():
                     revoke_err)
     try:
         with _accounts.deletion_scope(user_id, sess.get("account_id")) as (user_ids, account_ids):
+            # Read before the deletion removes them: the live jobs to revoke.
+            scrub_leagues = _deletion_scrub_leagues(user_ids)
             with _session_restore_lock:
                 with _sessions_lock:
                     counts = _accounts.delete_user_data(
@@ -34226,6 +34770,23 @@ def delete_account_route():
     except Exception:
         log.exception("delete_account: deletion failed for %s", user_id)
         return jsonify({"error": "deletion_failed"}), 500
+    # The scrub of other users' decks (legal R28.20 (ii)): its job committed
+    # with the deletion; start it off the request. The cleanup loop retries,
+    # so a failed start never fails the deletion (#557 QA P3). In-memory jobs
+    # and session card stores never see the scrub, so the ones that name the
+    # person are purged and revoked here, each on its own (one failing never
+    # skips the other, #559 delta QA P3), logged and never a 500 for a
+    # deletion that committed.
+    clear_deletion_tokens_cache()     # R28.26 #10: map this deletion's ids at once
+    try:
+        counts["trade_cards_purged"] = _purge_session_trade_cards(user_ids)
+    except Exception as err:          # the class only: its text may quote ids
+        log.error("delete_account: session card purge failed: %s", type(err).__name__)
+    try:
+        counts["trade_jobs_revoked"] = _revoke_trade_jobs_naming(user_ids, scrub_leagues)
+    except Exception as err:
+        log.error("delete_account: trade job revoke failed: %s", type(err).__name__)
+    _kick_deletion_scrub()
     log.info("delete_account: user %s deleted (%s)", user_id, counts)
     return jsonify({"ok": True, "deleted": counts,
                     "apple_revoked": apple_revoked})
@@ -38936,6 +39497,15 @@ def mfl_auth_link():
     # @_gate_unverified_write already 403s an unverified session whenever a
     # verified controller exists, so this path can only mint the FIRST
     # controller (first-verified-wins, same as the Sleeper path).
+    # Deferred history (R28.17) loads before verifying, as in sleeper_link.
+    # Defensive today: the write gate above means only already-verified
+    # (never pending) sessions reach this line.
+    try:
+        _hydrate_session_history(sess)
+    except Exception:
+        log.exception("mfl_auth_link: history load failed for %s — "
+                      "verify refused (retryable)", user_id)
+        return _verify_retry_response()
     sess["verified"] = True
     sess["verified_via"] = "mfl_login"
     _attach_presession_feedback(sess)
@@ -39760,16 +40330,23 @@ def propose_trade_to_mfl():
         return jsonify({"error": "verification_required"}), 403
 
     body = request.get_json(force=True) or {}
+    league_id = str(body.get("league_id") or "").strip()
+    give = [str(p) for p in (body.get("give_player_ids") or [])]
+    receive = [str(p) for p in (body.get("receive_player_ids") or [])]
+    source = _propose_source(body)
+    if source == "shop":
+        _record_shop_send_signal(sess, league_id=league_id,
+                                 their_user_id=body.get("their_user_id"),
+                                 give_ids=give, receive_ids=receive)
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
     payload, status = _mfl_propose_core(
-        sess, league_id=str(body.get("league_id") or "").strip(),
+        sess, league_id=league_id,
         their_user_id=body.get("their_user_id"),
-        give_ids=[str(p) for p in (body.get("give_player_ids") or [])],
-        receive_ids=[str(p) for p in (body.get("receive_player_ids") or [])],
+        give_ids=give,
+        receive_ids=receive,
         proposal_event_id=uuid.uuid4().hex,
-        source=(body.get("source") if body.get("source") in
-                ("deck", "match", "calculator") else "deck"),
+        source=source,
         impression_id=body.get("impression_id"),
         their_franchise_id=body.get("their_franchise_id"),
         give_pick_assets=[str(p) for p in (body.get("give_pick_assets") or [])],
@@ -40367,16 +40944,23 @@ def propose_trade_to_espn():
         return jsonify({"error": "verification_required"}), 403
 
     body = request.get_json(force=True) or {}
+    league_id = str(body.get("league_id") or "").strip()
+    give = [str(p) for p in (body.get("give_player_ids") or [])]
+    receive = [str(p) for p in (body.get("receive_player_ids") or [])]
+    source = _propose_source(body)
+    if source == "shop":
+        _record_shop_send_signal(sess, league_id=league_id,
+                                 their_user_id=body.get("their_user_id"),
+                                 give_ids=give, receive_ids=receive)
     # Request-local ledger id; a fresh client retry creates a fresh id.
     # This does not provide cross-request provider-send idempotency.
     payload, status = _espn_propose_core(
-        sess, league_id=str(body.get("league_id") or "").strip(),
+        sess, league_id=league_id,
         their_user_id=body.get("their_user_id"),
-        give_ids=[str(p) for p in (body.get("give_player_ids") or [])],
-        receive_ids=[str(p) for p in (body.get("receive_player_ids") or [])],
+        give_ids=give,
+        receive_ids=receive,
         proposal_event_id=uuid.uuid4().hex,
-        source=(body.get("source") if body.get("source") in
-                ("deck", "match", "calculator") else "deck"),
+        source=source,
         impression_id=body.get("impression_id"),
         their_team_id=body.get("their_team_id"), comments=body.get("comments"))
     return jsonify(payload), status

@@ -35,6 +35,9 @@ import backend.sleeper_http as sh
 from backend.database import metadata
 from backend.tests import test_roster_refresh_state as refresh
 
+# Runs the session-init daemon inline, so no real network (#479 QA P3-3).
+pytestmark = pytest.mark.usefixtures("no_real_network")
+
 LID = "1338231586314780672"
 RIVAL = "rfp1:" + "c" * 32
 T = db_module.league_roster_state_table

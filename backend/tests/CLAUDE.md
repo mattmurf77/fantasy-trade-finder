@@ -100,6 +100,7 @@ other modules depend on it.
 ## Hermeticity
 
 Nothing in the suite touches the network, and nothing reads or writes `data/trade_finder.db`.
+Files that run the session-init daemon inline also opt into `conftest.py`'s **`no_real_network`** fixture (`pytestmark = pytest.mark.usefixtures("no_real_network")`): any non-loopback lookup, connect, `connect_ex` or UDP `sendto` fails the test at teardown, even when the code under test swallows the error (pinned by `test_no_real_network_guard.py`).
 The seams:
 
 | Boundary | How tests neutralize it |
