@@ -48,8 +48,10 @@ would turn the blend on, and its id matching calls
 env seam. `test_ktc_blend` pins its own KTC data explicitly.
 """
 
+import ipaddress
 import os
 import pathlib
+import socket
 import sys
 
 import pytest
@@ -66,6 +68,11 @@ os.environ.setdefault("FTF_DP_VALUES_FILE", str(_PLAYER_SNAPSHOT))
 # flakes on long runs. The server skips the thread when this is "1"; prod never
 # sets it.
 os.environ.setdefault("FTF_DISABLE_CLEANUP_LOOP", "1")
+# The deletion route kicks the scrub on a daemon thread, which would outlive a
+# route test's engine (#557 CI: "Set changed size during iteration" in the
+# pool's dispose). Tests drive deletion_scrub.run_pending directly; prod
+# never sets this.
+os.environ.setdefault("FTF_DISABLE_DELETION_SCRUB_KICK", "1")
 
 
 @pytest.fixture(autouse=True)
@@ -96,6 +103,130 @@ def _u4_ledger_guard_state():
     if server is not None and hasattr(server, "_ledger_guard_young"):
         server._ledger_guard_young = {"held": 0, "evicted": 0}
         server._ledger_guard_warned_at = float("-inf")
+    yield
+
+
+_LOOPBACK_NAMES = {None, "", "localhost", "0.0.0.0"}
+
+
+def _is_loopback(host) -> bool:
+    """True for loopback only: the names above, or an IP literal that is a
+    loopback address. A hostname that merely starts with "127." is NOT
+    loopback (#479 QA P3-2); bytes hosts are decoded first."""
+    if isinstance(host, (bytes, bytearray)):
+        host = bytes(host).decode("ascii", "replace")
+    if host in _LOOPBACK_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(str(host).split("%", 1)[0]).is_loopback
+    except ValueError:
+        return False
+
+
+@pytest.fixture()
+def no_real_network():
+    """Opt-in guard: the test FAILS if anything tries to reach a non-loopback host.
+
+    Why a failure at teardown and not just a raise at the call site: the
+    session-init daemon, the trade-capture sweep and the other Sleeper fetchers
+    wrap every upstream read in `except Exception` and carry on (a flake must
+    never break a user's init), so a raised connection error is swallowed and
+    the test would pass while still having hit the network. The attempt is
+    recorded here and asserted when the test ends. The raise stays, so the code
+    under test sees an ordinary connection failure instead of a live reply.
+
+    Patches `socket.getaddrinfo`, `gethostbyname` and `gethostbyname_ex` (every
+    hostname lookup: urllib, requests, http.client), and `socket.socket.connect`,
+    `connect_ex` and `sendto` (literal-IP URLs, UDP, and anything that skips the
+    lookup). AF_UNIX paths pass through. Loopback stays open, so Flask's test client and any
+    local fixture server are unaffected. Restored by hand rather than through
+    `monkeypatch`, like the ledger guard above, so it does not reorder the
+    test's own monkeypatch teardown.
+
+    Used via `pytestmark = pytest.mark.usefixtures("no_real_network")` in the
+    test files that run the session-init daemon inline. It returns the list of
+    attempts for a test that wants to assert on them.
+    """
+    attempts: list[str] = []
+    real_getaddrinfo = socket.getaddrinfo
+    real_gethostbyname = socket.gethostbyname
+    real_gethostbyname_ex = socket.gethostbyname_ex
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+    real_sendto = socket.socket.sendto
+
+    def _blocked_getaddrinfo(host, *args, **kwargs):
+        if _is_loopback(host):
+            return real_getaddrinfo(host, *args, **kwargs)
+        attempts.append(f"lookup {host}")
+        raise OSError(f"no_real_network: blocked lookup of {host!r}")
+
+    def _blocked_lookup(real):
+        def _lookup(host, *args, **kwargs):
+            if _is_loopback(host):
+                return real(host, *args, **kwargs)
+            attempts.append(f"lookup {host}")
+            raise OSError(f"no_real_network: blocked lookup of {host!r}")
+        return _lookup
+
+    def _inet_host(address):
+        # AF_UNIX addresses are paths (str / bytes), never the network: None.
+        return address[0] if isinstance(address, tuple) and address else None
+
+    def _blocked_connect(self, address):
+        host = _inet_host(address)
+        if host is None or _is_loopback(host):
+            return real_connect(self, address)
+        attempts.append(f"connect {address}")
+        raise OSError(f"no_real_network: blocked connect to {address!r}")
+
+    def _blocked_connect_ex(self, address):
+        host = _inet_host(address)
+        if host is None or _is_loopback(host):
+            return real_connect_ex(self, address)
+        attempts.append(f"connect {address}")
+        raise OSError(f"no_real_network: blocked connect_ex to {address!r}")
+
+    def _blocked_sendto(self, data, *args):
+        address = args[-1] if args else None
+        host = _inet_host(address)
+        if host is None or _is_loopback(host):
+            return real_sendto(self, data, *args)
+        attempts.append(f"sendto {address}")
+        raise OSError(f"no_real_network: blocked sendto {address!r}")
+
+    socket.getaddrinfo = _blocked_getaddrinfo
+    socket.gethostbyname = _blocked_lookup(real_gethostbyname)
+    socket.gethostbyname_ex = _blocked_lookup(real_gethostbyname_ex)
+    socket.socket.connect = _blocked_connect
+    socket.socket.connect_ex = _blocked_connect_ex
+    socket.socket.sendto = _blocked_sendto
+    try:
+        yield attempts
+    finally:
+        socket.getaddrinfo = real_getaddrinfo
+        socket.gethostbyname = real_gethostbyname
+        socket.gethostbyname_ex = real_gethostbyname_ex
+        socket.socket.connect = real_connect
+        socket.socket.connect_ex = real_connect_ex
+        socket.socket.sendto = real_sendto
+    if attempts:
+        counts = {a: attempts.count(a) for a in dict.fromkeys(attempts)}
+        pytest.fail(
+            "test attempted real outbound network (%d attempts): %s. Mock the "
+            "fetcher (e.g. trade_block_service.fetch_league_players, "
+            "sleeper_trades_service.fetch_week_transactions) instead."
+            % (len(attempts), counts), pytrace=False)
+
+@pytest.fixture(autouse=True)
+def _deleted_partner_ids_clear():
+    """Account deletion's in-process set of deleted ids (#559 re-QA P2-b), which
+    GET /api/trades filters on, starts empty in every test: a deletion test
+    would otherwise hide a later test's cards for the same id. Only once
+    `backend.server` is imported; no `monkeypatch`, as above."""
+    server = sys.modules.get("backend.server")
+    if server is not None and hasattr(server, "_deleted_partner_ids"):
+        server._deleted_partner_ids.clear()
     yield
 
 

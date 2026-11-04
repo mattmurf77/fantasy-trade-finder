@@ -206,6 +206,7 @@ counterparty board disclosure or client analytics event is added.
   - [`grading_sessions`](#grading_sessions)
   - [`grading_cards`](#grading_cards)
   - [`tab_selected` values (`user_events`)](#tab_selected-values-user_events)
+- [`deletion_scrub_jobs`](#deletion_scrub_jobs) — the deletion scrub's work rows (legal R28.20 (ii))
 - [Experiment engine tables (analytics platform P3)](#experiment-engine-tables-analytics-platform-p3)
   - [`experiment_layers`](#experiment_layers)
   - [`experiments`](#experiments)
@@ -274,6 +275,12 @@ INSERTs the owner's row; every later member of that league only refreshes
 are **not** stored here — see `league_members` for the authoritative
 per-`(league, user)` roster.
 
+Session init's background daemon (2026-11-03) only updates a row it found
+at its start, so a row an account deletion removed meanwhile is never
+re-created, and it never inserts an imported (ESPN/MFL/Fleaflicker) league's
+row. It inserts only on a Sleeper league's first init, with
+`platform = 'sleeper'`, under the caller's users-row lock.
+
 | Column | Type | Notes |
 |---|---|---|
 | `sleeper_league_id` | str PK | |
@@ -284,7 +291,7 @@ per-`(league, user)` roster.
 | `opponent_data` | JSON text | `[{user_id, username, player_ids}]` — importer-owner's snapshot; write-once, not read back |
 | `default_scoring` | str | `'1qb_ppr'` / `'sf_tep'` (null → `'1qb_ppr'`) |
 | `total_rosters` | int | Sleeper's `total_rosters` (TRUE team count incl. ownerless rosters; FB #41). Written by session_init's meta fetch; null for local leagues / pre-migration rows |
-| `platform` | str | League source: NULL reads as `'sleeper'`; `'espn'` (flag `espn.link`), `'mfl'` (flag `mfl.link`), `'fleaflicker'` (flag `fleaflicker.link`). For every non-Sleeper platform the PK column holds the **platform-native** league id — the plans chose a platform column over magic-prefix ids ([ESPN §2](plans/espn-league-linking-plan-2026-07-11.md) / [multi-platform](plans/multi-platform-linking-plan-2026-07-17.md)) |
+| `platform` | str | League source: NULL reads as `'sleeper'` (session init writes `'sleeper'` on a Sleeper league's first insert since 2026-11-03; older Sleeper rows stay NULL); `'espn'` (flag `espn.link`), `'mfl'` (flag `mfl.link`), `'fleaflicker'` (flag `fleaflicker.link`). For every non-Sleeper platform the PK column holds the **platform-native** league id — the plans chose a platform column over magic-prefix ids ([ESPN §2](plans/espn-league-linking-plan-2026-07-11.md) / [multi-platform](plans/multi-platform-linking-plan-2026-07-17.md)) |
 | `espn_season` | int | ESPN `seasonId` used at import — the re-sync key (`/api/espn/import`). NULL for non-ESPN rows |
 | `espn_auth` | str | `'public'` / `'cookie'` — how the ESPN league was read; `'cookie'` re-syncs decrypt the importer's `espn_credentials` row |
 | `espn_my_team_id` | int | The linking user's ESPN team id — binds their `league_members` row to their real FTF `user_id` across re-syncs |
@@ -335,7 +342,7 @@ High-level trade card decisions — audit trail.
 | `trade_id` | str | |
 | `give_player_ids` | JSON text | array |
 | `receive_player_ids` | JSON text | array |
-| `decision` | str | `'like'` / `'pass'` |
+| `decision` | str | `'like'` / `'pass'` / `'send'`. **`send`** (#531, D-210) is a Shop send's once-only Elo anchor, written by `server._record_shop_send_signal` with the queue's deterministic `calcq_` `trade_id`. It is **never a like**: every like/pass reader filters `decision IN ('like', 'pass')` (likes-you, matches, Awaiting, counts, analytics `traded`, the offline replay). The one exception is the deck's D-067 discovery keys, where a send is decided like a like (7-day window, never a pass). There is no CHECK constraint, and the column stays a plain string. |
 | `created_at` | str | |
 | `impression_id` | str, nullable | The `deck_impressions` row this decision came from, **validated for ownership** by `server._owned_impression_id` before it is written — a client-supplied id is untrusted input and an unvalidated one would let a client attribute its decision to somebody else's card. NULL while `trade.valuation_telemetry` is off and on every pre-2026-09-04 row. This table is the older audit log and had no reliable impression key, which is exactly why a mutual match could not name the two impressions that produced it. |
 | `trade_concept_id` | str, nullable | Canonical, perspective-independent id for the package (`trade_policy.trade_concept_id`). Same nullability rules. |
@@ -357,7 +364,7 @@ The guard is not a distributed lock — two genuinely simultaneous requests on s
 
 ## `league_members`
 
-Members of every league `session_init` has seen. Uniqueness enforced via `(league_id, user_id)`. **Sleeper leagues are replace-synced (S0, 2026-10-20):** each session init writes the authoritative snapshot from its Sleeper read with `replace_league_members_snapshot` (delete-then-insert in one transaction; an empty snapshot is refused, G-015), so rows of managers who left are removed (G-075). Rows are keyed by the roster's canonical `owner_id` (ADR-012): one row per roster, co-owners included. Sleeper rows are also refreshed server-side by `server._refresh_sleeper_members` (Sleeper `/rosters` + `/users`, same row shape, still an upsert) when the admin targeted pre-generation runs with `refresh_rosters` (2026-10-09); otherwise a league's rows only change when a member opens it in the app.
+Members of every league `session_init` has seen. Uniqueness enforced via `(league_id, user_id)`. **Sleeper leagues are replace-synced (S0, 2026-10-20):** each session init writes the authoritative snapshot from its Sleeper read with `write_session_init_members` (delete-then-insert in one transaction under the caller's users-row lock; an empty snapshot is refused, G-015), so rows of managers who left are removed (G-075). A row that was there when the init's daemon started and is gone by its write (an account deletion) is not re-created by that init (2026-11-03), except in one Postgres interleaving, a public-data limit documented on `write_session_init_members`; session init only updates an imported league's rows. Rows are keyed by the roster's canonical `owner_id` (ADR-012): one row per roster, co-owners included. Sleeper rows are also refreshed server-side by `server._refresh_sleeper_members` (Sleeper `/rosters` + `/users`, same row shape, still an upsert) when the admin targeted pre-generation runs with `refresh_rosters` (2026-10-09); otherwise a league's rows only change when a member opens it in the app.
 
 For ESPN-imported leagues (`espn.link`), rows are written by `replace_espn_league_members` (delete-then-insert snapshot): the linking user's team carries their real FTF `user_id`; every other team gets a synthetic `espn:{SWID}` (fallback `espn:{league_id}.t{team_id}`) id. Synthetic ids must never reach push/notification paths (same class as unlinked Sleeper members). `roster_data` always holds **Sleeper** player ids — ESPN ids are crosswalked at import (`backend/espn_service.py`).
 
@@ -846,7 +853,7 @@ The durable record of a **confirmed provider send**. Scope block: `docs/plans/pe
 | `target_user_id` | str, nullable | |
 | `provider` | str | `sleeper` / `espn` / `mfl` |
 | `provider_transaction_id` | str, nullable | The second idempotency key, deduped in `save_trade_proposal` by select-then-insert rather than a partial unique index — most sends legitimately have none, so the constraint would have to be `UNIQUE … WHERE NOT NULL`, and `_migrate_db` cannot add indexes to existing tables, so it would exist on fresh databases and silently not in production. |
-| `source` | str | `deck` / `match` / `calculator` |
+| `source` | str | `deck` / `match` / `calculator` / `shop` / `overhaul`. The propose body's validated `source` (`server._PROPOSE_SOURCES`; absent or unknown is `deck`); `shop` (#531) is sent only by the Shop tile's send. `overhaul` is stamped server-side by the team-overhaul send (`overhaul_api.py`), never from a body. |
 | `give_asset_ids`, `receive_asset_ids` | JSON text | The **final** package actually sent. |
 | `origin_trade_hash` | str, nullable | The originating impression's `trade_hash`. |
 | `final_trade_hash` | str | Hash of the package that was sent. |
@@ -965,7 +972,7 @@ Constraints and indexes: unique `uq_trade_deck_lineage_deck` on `(user_id, deck_
 | `card_index` | int, not null | the card's **build** index (the index in its contract `impression_id`; a live-mode deck's, from its row) |
 | `user_id` | str, not null | the deck's owner (deletion/export key) |
 | `league_id` | str, not null | |
-| `reason` | str, not null | `i1_dropped` (S0's I-1: a give asset the viewer no longer holds, or a receive asset its partner no longer holds) or `disposition_cut` (models-lead B4: the serve's disposition projection, `server._project_trade_dispositions`, cut it because the user already acted on it elsewhere). Eval removes both the same way and counts them by reason; the reason never gates |
+| `reason` | str, not null | `i1_dropped` (S0's I-1: a give asset the viewer no longer holds, or a receive asset its partner no longer holds) or `partner_deleted` (models-lead J4: the card's partner deleted their account, its target is the deletion scrub's redaction token, and the serve rules drop it in every I-1 mode) or `disposition_cut` (models-lead B4: the serve's disposition projection, `server._project_trade_dispositions`, cut it because the user already acted on it elsewhere). Eval removes them all the same way and counts them by reason. Only G10's mode-1 rule reads one (`i1_dropped`) |
 | `first_withdrawn_at` | str, not null | ISO UTC of the withdrawing serve |
 | `served_before` | int, not null | exactly 1 when an earlier response had delivered the card (in process: its id was in the deck's delivered set at the withdrawing serve; after a restart: its row has a `delivered_at`, or its `card_index` is at or below its pack's last delivery boundary, read fresh; a live-mode deck: its row's `delivered_at` before this serve's stamp, in the same transaction), else exactly 0 |
 | `impression_id` | str, nullable | `contract.card_impression_id(deck_job_id, card_index)`; a live-mode deck's row id (uuid4) |
@@ -1570,7 +1577,7 @@ Append-only log of meaningful user actions. Hot reads use the denormalized `user
 | `league_id`, `session_id` | str | `session_id` is a 77-character domain-separated analytics digest; never a bearer token. |
 | `device_type` | str | `iphone` / `ipad` / `macos` / `web` / `extension` |
 | `os_version`, `app_version` | str | |
-| `source` | str | `mobile` / `web` / `api` / `cron` |
+| `source` | str | `mobile` / `web` / `api` / `cron`. Server-fired trade rows also use `calc_queue` (the queue route's `trade_proposed`) and `shop_send` (#531, D-210: the propose routes' Shop-send `trade_proposed`) |
 | `props` | JSON text | event-specific extras |
 | `event_id` | str, unique (nullable) | client-generated UUID — idempotent retries / dedup ([tracking plan v2 §S1](business/analytics/2026-07-17-tracking-plan-v2.md)) |
 | `device_id` | str, indexed | stable per-install anon id (`dev_` + UUID) — pre-signin attribution |
@@ -1587,7 +1594,7 @@ The envelope columns (`event_id` … `experiments`) are nullable and only popula
 **event_type taxonomy** (registry: `backend/analytics_taxonomy.py` — client and server namespaces are disjoint, asserted at import):
 - Session: `signup`, `login`, `logout`, `app_open`
 - Ranking: `trio_swipe`, `tier_save` (streak event since the P0 cutover; `props.via` ∈ `tiers`/`quickset`), `ranking_complete_first_time`, `ranking_method_changed`, `ranking_reorder` (streak event since #152), `anchor_answered` (streak event since #152), `quickset_completed` (`position, players_placed, duration_ms, skipped` — fires per `via:'quickset'`-tagged tier commit, NOT per completed position; dark until the 2026-08-24 mobile fix first sent the tag, and current clients pass neither `duration_ms` nor `skipped` → null; see the [2026-08-24 addendum](business/analytics/2026-08-24-quickset-via-gap.md)), `quickrank_completed` (`position, players_ranked, duration_ms, skipped`), `swipe` (cutover twin of the legacy wrapped writer: `count, scoring_format`). Streak-qualifying set = `_RANK_STREAK_EVENTS` in `backend/database.py`: `trio_swipe`, `tier_save`, `ranking_complete_first_time`, `anchor_answered`, `ranking_reorder` — also the event set the "Ranks" leaderboard counts.
-- Trade: `match_viewed`, `match_swiped`, `trade_proposed`, `counter_sent`, `trade_accepted`, `trade_declined`, `trade_ratified`, `trade_match` (cutover twin: `match_id, partner_id, give, receive`), `trades_generated` (`count, gen_ms, engine_version, lanes`; `engine_version` ∈ `v1` / `v2` / `v3` / `value_core`, and a value-core job sends `lanes: {}`), `calc_trade_evaluated` (`verdict, asset_count, mode` — WAT north-star input; fires for pre-auth `device:` identities too), **`sleeper_send_succeeded`** (P0-7, 2026-08-11 — `give_n, receive_n, pick_n, from_deck, transaction_id`; `source:"api"`, `league_id` set; fired by `_record_send_success` on a successful `POST /api/trades/propose`. **Server-fired only** — it is the north-star SEND leg (`WAT_LIVE`, funnel stage 8, `FEATURE_VERTICALS["send_in_sleeper"]`) and a client-forgeable success would sit next to `trade_ratified`. The counterparty's user id deliberately never rides in props. Its two siblings `sleeper_send_attempted` / `sleeper_send_failed` are **client**-fired and, like every client event, are documented via `analytics_taxonomy.py` + the [P0-7 addendum](business/analytics/2026-08-11-p0-7-addendum.md) rather than in this list — the same treatment `guide_*` and `draft_room_*` got)
+- Trade: `match_viewed`, `match_swiped`, `trade_proposed` (`props.decision` ∈ `like` | `send`; `send` = a #531 Shop send's Elo half, one per `trade_decisions` `send` row, D-210), `counter_sent`, `trade_accepted`, `trade_declined`, `trade_ratified`, `trade_match` (cutover twin: `match_id, partner_id, give, receive`), `trades_generated` (`count, gen_ms, engine_version, lanes`; `engine_version` ∈ `v1` / `v2` / `v3` / `value_core`, and a value-core job sends `lanes: {}`), `calc_trade_evaluated` (`verdict, asset_count, mode` — WAT north-star input; fires for pre-auth `device:` identities too), **`sleeper_send_succeeded`** (P0-7, 2026-08-11 — `give_n, receive_n, pick_n, from_deck, transaction_id`; `source:"api"`, `league_id` set; fired by `_record_send_success` on a successful `POST /api/trades/propose`. **Server-fired only** — it is the north-star SEND leg (`WAT_LIVE`, funnel stage 8, `FEATURE_VERTICALS["send_in_sleeper"]`) and a client-forgeable success would sit next to `trade_ratified`. The counterparty's user id deliberately never rides in props. Its two siblings `sleeper_send_attempted` / `sleeper_send_failed` are **client**-fired and, like every client event, are documented via `analytics_taxonomy.py` + the [P0-7 addendum](business/analytics/2026-08-11-p0-7-addendum.md) rather than in this list — the same treatment `guide_*` and `draft_room_*` got)
 - Engagement: `push_sent`, `push_opened`, `notif_pref_changed`, `league_synced`, `wrapped_viewed`, `feedback_submitted`, `asset_pref_added`, `asset_pref_removed`
 - API observability (flag `obs.api_events`, `backend/api_observability.py`): `api_call` (one outbound external HTTP call) and `api_request` (one inbound `/api/*` request). Written under the constant `user_id = 'system:api'` (never a real user; the session user rides in `props.user` on inbound rows), `platform = 'server'`, `screen` = `{service}.{endpoint}` / route pattern. Prop specs: `OBS_EVENT_PROPS` in `backend/analytics_taxonomy.py`. Successes are 1-in-N sampled (`props.sample_n`); errors always full. Aged out after `FTF_OBS_RETENTION_DAYS` (default 30) — the only `user_events` rows with a retention purge.
 - Client-fired (via `POST /api/events` only, allowlisted in `ALLOWED_CLIENT_EVENTS` in `backend/analytics_taxonomy.py`): see [cross-client-invariants.md](cross-client-invariants.md) — the allowlist is a cross-client contract.
@@ -2105,18 +2112,76 @@ One row per card in a session, in shuffled order.
 | `session_id` | str, not null | Soft ref to `grading_sessions` |
 | `user_id` | str, not null | = the session's `user_id` (account id), for deletion / export coverage |
 | `position` | int, not null | 1-based, assigned **after** the shuffle. `UniqueConstraint(session_id, position)` = `uq_grading_card_position` |
-| `arms_json` | text (JSON), not null | **HIDDEN** `{arm: provenance}`, arm ∈ `current` \| `value_core` \| `fit_a` \| `fit_b`: `current` → `{impression_id, card_index, model_arm}`; `value_core` → `{deck_position, reasons}`; `fit_a` / `fit_b` (folded in after the build by `blind_grading.add_fit_arms`, 2026-10-09) → `{deck_position, gain_viewer, gain_partner}`. A trade both engines produced has **both** keys — one card, credited to both arms (a **shared card**) |
+| `arms_json` | text (JSON), not null | **HIDDEN** `{arm: provenance}`, arm ∈ `current` \| `value_core` \| `fit_a` \| `fit_b`: `current` → `{impression_id, card_index, model_arm}`; `value_core` → `{deck_position, reasons}`; `fit_a` / `fit_b` (folded in after the build by `blind_grading.add_fit_arms`, 2026-10-09) → `{deck_position, gain_viewer, gain_partner}`. A trade both engines produced has **both** keys — one card, credited to both arms (a **shared card**) **In the account export, every arm loses `gain_partner` and `reasons`**, for every partner, live or deleted (legal R28.26 #9, MUST: Calibration is blind, so the grader never saw them; `accounts._export_grading_arms`). An `arms_json` that doesn't parse is exported as null. |
 | `trade_json` | text (JSON), not null | The neutral payload, served verbatim as `card.trade`: `{partner_name, give: [...], receive: [...]}`, each asset exactly `{id, name, position, nfl_team, age, value}`, sides sorted by (−value, name, id). The only producer is `blind_grading.neutral_trade`, which is never given an arm; values come from one consensus catalog (players `elo_to_value(consensus_elo)` from `player_value_history`, picks `draft_picks.pool_value`) |
 | `grade` | int | 1..5; NULL = unanswered or skipped |
 | `skipped` | int, not null, server default `0` | `1` ⇒ `grade IS NULL` and `tags_json = '[]'` |
 | `tags_json` | text (JSON), not null, server default `[]` | De-duplicated subset of the seven tags in `blind_grading.TAGS` ([cross-client-invariants § Calibration tags and scale](cross-client-invariants.md#calibration-tags-and-scale)), in `TAGS` order |
 | `graded_at` | str | ISO UTC of the latest answer — a re-grade overwrites |
+| `partner_user_id` | str | **HIDDEN**, never served: the card's partner (`league_members.user_id`), written by `build_session` and `add_fit_arms`, so an account deletion's scrub finds the person's cards by id (a built session keeps no partner ids anywhere else). NULL on cards built before it (#562) until the boot backfill (`database.backfill_grading_card_partners`: the current arm's deck row, else the one league member, never the session's own user, shown by `partner_name` whose roster holds the card's received players; chunked, under lock and statement timeouts on Postgres); the scrub traces any still NULL by deck row, raw id or name. The scrub sets it to the redaction token |
 
 Index: `ix_grading_cards_session` (`session_id`). Invariants: `grade IS NOT NULL ⇒ skipped = 0`; a session is `completed` ⇔ every card has `grade IS NOT NULL OR skipped = 1`, flipped in the same transaction as the last answer (`answer_grading_card`); an answer against a non-`open` session is rejected (409 `session_completed`), never written.
 
 ### `tab_selected` values (`user_events`)
 
 Calibration adds **no** event (scope waiver, plan D9); the tables above are the record and the admin report is the readout. The existing client event `tab_selected {tab, from_tab, refocus, intercepted}` (NON_INTENT) gains the value **`calibration`** in `tab` and `from_tab`, from `trackTab('calibration', …)`; `tab` is a free string, so the taxonomy is unchanged. **`draft` / `from_tab: "draft"` stop arriving while `draft.tab` is false** (off since 2026-10-02): a dashboard reading `tab = 'draft'` reads zero from that date — a real behavior change, not data loss. `screen_viewed` / `screen_left` gain the `screen` value `CalibrationHome`.
+
+---
+
+## `deletion_scrub_jobs`
+
+The deletion scrub's work rows (legal R28.20 (ii), R28.22; `backend/deletion_scrub.py`; scope `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md`).
+- **Lifecycle:** one row per account deletion, inserted in `accounts._delete_user_data`'s own transaction, so a committed deletion always has its scrub and a rolled-back one has none. The row is deleted when the scrub of other users' decks is done (legal (ix)).
+- **Retention:** it's deleted once its grace pass and the model store are done (`deletion_scrub.COMPLETE` since stage 3; before that, rows were kept so later stages re-ran them through `SCRUB_VERSION`). Past 24 h unfinished, it's retried and counted at ERROR. Past 30 days (`RETRY_LIMIT`) it's **kept**: marked `escalated_at`, still retried, and logged at ERROR every day by its own job id and where it stands (`deletion_scrub._escalate`; legal R28.26 #8). It's deleted only once a pass completes, after eng fixes the poison row by hand.
+- **Privacy:** it holds the deleted user's ids only for that time. It's never exported (its subject is gone), and no id from it is ever logged.
+
+| Column | Type | Notes |
+|---|---|---|
+| `job_id` | str PK | uuid4 hex. Logs show its first 8 characters |
+| `token` | str, not null | `redacted:<uuid4 hex>`, random, one per deletion, the same in every store (glossary: redaction token) |
+| `partner_ids_json` | text (JSON), not null | The deleted user's resolved ids (`accounts._user_data_scope`: aliases, account working keys) |
+| `league_ids_json` | text (JSON), not null | The leagues their traces may be in, read before the deletion removes their rows: memberships, imported leagues, roster history, their own decks. They drive the fast league pass. A fallback scan of each whole store then finds the rest (a league the person left) |
+| `deleted_at` | str, not null | ISO UTC. The DB pass touches decks served up to `deleted_at` + 6 h (`IN_FLIGHT_GRACE`: a deck built before the deletion carries its first delivery as `served_at`), never later ones |
+| `db_version` | int, not null, default 0 | The `SCRUB_VERSION` of the last full DB pass; older re-runs |
+| `db_done_at` | str | ISO UTC of the **start** of the last full DB pass (it covers what was written before it began; a pass that ran across the grace isn't the grace pass, #562 QA P2-3). One more runs once the grace has passed |
+| `model_done_at` | str | ISO UTC the value-model store was redacted (the daily tick's `deletion_scrub` step, before the refit) |
+| `attempts` | int, not null, default 0 | Lease claims |
+| `claimed_until` | str | ISO UTC lease (10 min), taken by compare-and-swap; NULL = free |
+| `last_error` | str | The last failure's exception class, never its message |
+| `partner_names_json` | text (JSON) | `{leagues: {league_id: [display names, usernames]}, usernames: [...], match_ids: [...]}` (their `trade_matches` ids, before the deletion puts the placeholder on their side), read before the deletion removes the person's `league_members` and `users` rows. Used where a row names its partner only by name: an older Calibration card (before `grading_cards.partner_user_id`), a traded-pick label, a notification. A name a remaining member of that league uses is never matched on a card. A notification's match row decides who its partner is; without one, usernames (unique) match anywhere and display names only for a recipient who shared a league. As private as the ids, and never logged. Added to existing tables at boot (`_migrate_db`) |
+| `escalated_at` | str | ISO UTC, set once when the job passes 30 days unfinished (`RETRY_LIMIT`; legal R28.26 #8). The row stays and is retried; the daily tick logs it by job id |
+| `scan_json` | text (JSON) | An unfinished DB pass's state: the league pass's counts, which fallback scan is running, and its keyset cursor. The next run resumes from it. NULL between passes |
+
+Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.
+
+**What a redacted card holds** (stage 1: `deck_impressions` and `deck_candidate_sets`; stage 2 adds `deck_evidence_packs` and `trade_page_store`, below):
+- **Which cards:** every card whose partner is a deleted id is treated the same way, in every store (R28.22 b2). Any other row naming the id gets the token in its place.
+- **`deck_impressions`:** `features_json.partner_user_id`, `partner:<id>` taste attrs and owner-request member ids become the token. These are removed: `likes_you`, `standing_offer`, `standing_offer_reason`, `breaker`, `breaker_shadow`, `negmem.exempt`, the partner's side of `fit` / `fit_diag` (`them`, `aggregate`, `bucket`, `lenses.them`), `roster_evaluation.teams[<id>]` and its `mutual_benefit`, and the owner request's partner board, sources and preferences.
+- **Nulled:** `surplus_margin`, the `base_score` / `final_score` / `source_like_impression_id` columns. In `valuation_json`, the partner's board and the values blending it are removed (`partner_board`, `mutual`, `counterparty`, `preference_priority`, the floors, assets' partner values and `counterparty_preference`, the bilateral `bilateral` and `term_efficiency`, `windows.partner`, `detail.outlook.partner`, `core.throwin.recipient_value`), every id takes the token, and the market and the viewer's own stay. These fail legal's solve-back test (scope §1.3).
+- **`deck_candidate_sets`:** the member's `partner` becomes the token and its `base_score` is nulled, in `candidates_packed` through the codec and in legacy `candidates_json`. `set_hash` is unchanged.
+- **The owner request (on any row naming the person) and other users' `bakeoff_runs.config_json` (`owner_request` or, for owner-selected runs, the top-level `input`), with `arms_json` / `agreement_json` / `groups_json` tokenized and an owner arm's `pools[<id>]` removed:** the frozen owner input loses the person's member board (`elo`, `board_updated_at`) and their `opponent_sources`, `manager_preferences`, `opponent_outlooks` and `inferred_outlooks` entries. Any other id becomes the token.
+- **`deck_evidence_packs` (stage 2):** rewritten only through the codec (`unpack_run`, the four changes, `pack_run`; G-a3), by CAS on the checksum.
+  - **Cards:** a redacted card's `partner_user_id` takes the token, `likes_you` is removed and `surplus_margin` / `base_score` / `final_score` are nulled. `partner:<id>` taste attrs take the token on any card.
+  - **Run:** `run.filter_inputs.qb_te[<id>]` and the person's protected hashes go, and `run.redacted_at` is added.
+  - **Unchanged:** `card_count`, `PACK_VERSION` and the other cards. A writer's cached copy reloads before writing (`server._fresh_pack_state`).
+- **`trade_page_store` (stage 2):**
+  - **A redacted page card:** its target takes the token and the placeholder name, and it loses `likes_you`, `standing_offer_reason`, `reasons`, `rationale`, `fit`, `breaker` and `match_context.opponent_outlook`. `mismatch_score` / `composite_score` are nulled, and it never serves again (withdrawn at serve).
+  - **`evidence_blob`:** its rows and candidate set are redacted as above, `trade_impressions[].target_user_id` is NULLed, and `run_meta.filter_inputs` is redacted as a pack run.
+- **Stage 3:**
+  - **Other users' Calibration sessions:**
+    - A building, failed or retired session's hidden `source_json` takes the token.
+    - The person's cards are found by `grading_cards.partner_user_id` (older cards by the boot backfill, their deck row, a raw id, or a name no remaining member uses). They take the placeholder as `partner_name` and the token as `partner_user_id`, and every arm loses `gain_partner` and `reasons`. Grades are kept.
+    - On any card, a traded-pick label "(from <their name>)" takes the placeholder.
+  - A diagnostic past the 14-day retention naming them is deleted.
+  - A redacted page card also loses its `narrative`.
+  - A redacted value_core card loses `scores.outlook`, `scores.priority` and `effective`.
+  - **Other users' `notifications`** naming them in `metadata_json.partner_username`, matched as stored (JSON escapes included):
+    - a match notification when its `trade_matches` row's other side is the placeholder;
+    - otherwise by username anywhere, by display name for a recipient who shared a league, or by a raw id.
+    The name takes the placeholder there and as `@name` in the title and body, so does any `@<id>`, and ids in the metadata take the token.
+  - **Other users' `user_events`:** ids in `props` take the token.
+- **Kept:** hashes (`trade_hash` and the rest, legal (viii)).
+- **In the deletion transaction:** other users' `user_taste` `partner:<id>` rows become one `partner:<token>` row each (two aliases' weights summed). Standing offers' `team_user_ids` take the token. `trade_matches.match_valuation_json` is cleared when either side is the person.
 
 ---
 

@@ -609,3 +609,7 @@ A unique allocation of currently available players meeting the existing dynasty 
 **Attempt** — One send of one offer inside one batch (`overhaul_attempts`), with a cross-client state enum (`queued … stale`), a state source (server / provider / ownership refresh / user-reported) and, for Sleeper, the `provider_transaction_id`. Accepted is derived from ownership change on refresh, never asserted by the client.
 
 **Recovery (Priority 1: Recover your first)** — For `blow_it_up`, the exact-identity requirement to own the user's **own original** next-season (league season + 1) first-round pick; when a league-mate holds it, a targeted search against that holder produces `is_recovery` offers. Advisory: it never blocks other sends.
+
+## Redaction token
+
+The random `redacted:<32 hex>` that stands in for a deleted user's partner id in OTHER users' deck records after an account deletion (legal R28.20 (ii)). There is one per deletion, the same in every store, and no mapping to the id is kept once the scrub's job row is gone. A card whose partner is a redaction token is a **redacted card**: it also loses every field taken from the deleted user's account, and its blended scores are null. Readers treat its partner as unknown, never as a person to identify (legal (viii)). The prefix is `eval.contract.REDACTED_PARTNER_PREFIX`. Code: `backend/deletion_scrub.py`.

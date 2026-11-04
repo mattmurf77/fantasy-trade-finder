@@ -67,7 +67,9 @@ MFL_MY_LEAGUES = [
 
 
 def _fake_extension_builder(user_id, username, display_name, avatar,
-                            token=None):
+                            token=None, load_history=True):
+    # load_history: the entry mint passes False (R28.17); history deferral
+    # itself is covered by test_signin_history_deferral.py.
     tok = token or f"entry-sess-{user_id}"
     payload = {"user_id": user_id, "username": username,
                "display_name": display_name,

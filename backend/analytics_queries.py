@@ -338,7 +338,9 @@ NON_INTENT_EVENTS = frozenset({
     # stopped being true with #402 rev-3: the ShopAsset window's ✓ queue
     # tap reaches it canvas-free — but that path opens with `shop_opened`,
     # which is INTENT, so the user-day is still already counted on every
-    # route to this event. QA-B F4, comment-only.)
+    # route to this event. QA-B F4, comment-only. From the 11-06 binary the
+    # Shop tile sends on the platform instead (#531 follow-up), so ShopAsset
+    # rows of this event stop there.)
     "calc_tour_started",
     "calc_tour_ended",
     "calc_tour_beat_missing",
@@ -1514,8 +1516,10 @@ def _product_op(conn, key, val):
             "HAVING COUNT(DISTINCT league_id) >= :n"), {"n": n}).scalars().all()
         return set(rows)
     if key == "traded":
+        # like/pass only: a #531 Shop `send` row is not a trade opinion.
         rows = conn.execute(text(
-            "SELECT DISTINCT user_id FROM trade_decisions")).scalars().all()
+            "SELECT DISTINCT user_id FROM trade_decisions "
+            "WHERE decision IN ('like', 'pass')")).scalars().all()
         return set(rows)
     if key == "liked_trades_min":
         try:
