@@ -26391,8 +26391,10 @@ def disposition_trade_match(match_id):
 
     When both parties have decided:
       • Both accept  → K=20 ELO boost for each user's received players
-      • Any decline  → K=20 corrective ELO signal for each decliner,
-                       which nets to ≈ −12 after the original +8 nudge
+      • Any decline  → a corrective ELO signal per (give, receive) pair for
+                       each decliner, at K = trade_k_decline_net (12) + the K
+                       that pair's like was stored with, so like + decline
+                       nets −12 in K at any like K (BL-004)
 
     The ELO signals are:
       1. Applied immediately to the in-memory RankingService for the caller.
@@ -26432,9 +26434,10 @@ def disposition_trade_match(match_id):
 
     try:
         result = record_match_disposition(
-            match_id = match_id,
-            user_id  = g_user_id,
-            decision = decision,
+            match_id       = match_id,
+            user_id        = g_user_id,
+            decision       = decision,
+            scoring_format = _active_format(sess),   # the board the signals are saved to
         )
 
         if result["status"] == "not_found":
