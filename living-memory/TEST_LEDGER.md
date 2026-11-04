@@ -707,6 +707,19 @@ Gates: as in #472's PR body; post-flip and flag-on only. D-056: `FTF_SKIP_SIM_GA
 - **Sabotage:** 4 new, all RED: the plan outside the `try`, the store's input outside the write lock, `diagnostics` by reference, `run_meta` by reference.
 - **Runs:** `test_evidence_lock_holds.py` 18 passed; the full backend suite 10,311 passed, 3 skipped.
 - **P2-1:** models-lead's R-G entry is in the group notes (`trades-eng-472-rg-entry.md`). Merge waits on it.
+## 2026-11-03 — #467: the KTC blend's thin floor and coverage gate (models-lead addendum R5)
+
+Gates: `backend/data_loader.py` (not engine-hashed), its tests and the runbook. No route, schema, event, flag or knob. A model change: models-lead's R5 asked for it, and it goes back for an R-G check.
+
+- **Thin:** below `KTC_MIN_MATCHED` (50) matched rows, the blend doesn't run, so the alert line's "DP-only" is now true (QA's P2).
+- **Partial:** a coverage gate, `KTC_MIN_COVERAGE`, overall 0.59 and QB 0.63, RB 0.59, WR 0.63, TE 0.47. That's about 85% of the 2026-07-17 healthy fetch (0.697 overall), rounded down. Below any floor the format stays DP-only, with alert reason `partial` (QA's P3).
+- **`disagrees` still blends,** as before.
+- **Tests:** `test_ktc_blend.py`, 22.
+  - The healthy 07-17 fetch blends and clears every floor even when each is raised 10%.
+  - Thin is DP-only.
+  - QA's WR-only, QB-only and random-half subsets each go `partial` and stay DP-only.
+  - `test_qb_1qb_cap.py`'s 2-player blend test lowers the thin floor for itself, since it tests the cap's order.
+- **Loader suites (47 files, in batches):** 1281 passed, 1 skipped.
 
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
