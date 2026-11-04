@@ -1,3 +1,35 @@
+## 2026-11-04 — Full-CI co-owner fixture correction after first-init integration
+
+Full GitHub CI for PR #597 at `0eed6296`, run `41920497707`, **failed**:
+**3 failed, 12558 passed, 39 skipped in 1722.53s**. All failures were
+`test_co_owner_rosters.py`'s inline-daemon member-capture assertions
+(`test_session_init_co_owner_writes_one_row_per_roster`,
+`test_session_init_sole_owner_is_unchanged`, and
+`test_session_init_without_league_user_id_defaults_to_the_caller`). The local
+three-test reproduction was **3 failed, 30 deselected in 1.12s**, with the
+same `KeyError: captured["members"]`.
+
+The fixture installed verified co-owner/sole-owner sessions into an empty
+users table while mocking the old user writes. Real `_extension_build_session`
+persists the users row before returning its token; `_account_build_session`
+delegates to it. The real first-init live-user guard correctly refused the
+impossible fixture state and stopped its daemon before the member capture.
+This is a fixture integration mismatch, not a production roster regression.
+
+- **Surgical correction:** seed just those two scratch users through real
+  `db.upsert_user` before installing the synthetic verified sessions. All
+  co-owner, canonical league identity, one-row-per-roster, sole-owner and
+  legacy-client assertions are unchanged. The real first-init transaction,
+  eligibility and deletion checks still execute; no runtime source, guard,
+  feature flag or production state changed.
+- **Verification:** whole co-owner, first-init, referral-ledger,
+  deleted-mid-daemon and platform-sign-in files — **344 passed, 2 skipped in
+  26.07s**. The skips are the existing optional PG deletion-interleaving cases,
+  already independently exercised on the reviewed core. Whitespace check passes.
+- This targeted correction does not turn the failed full run green. A fresh
+  full GitHub CI run on the new commit remains required before merge. No full
+  local suite, remote write, live provider call or production action occurred.
+
 ## 2026-11-04 — Final combined launch candidate pre-CI verification
 
 Root integrated regression after the shared platform-helper correction:
