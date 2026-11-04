@@ -1,3 +1,11 @@
+## 2026-11-04 — #365 N12/N4 launch integration: square icon and privacy manifest
+
+Full gates. Scope: `docs/plans/app-store-launch/scope-n12-n4-icon-privacy.md`. Reviewed PR head `0ea4bc22` independently, then merged current main `af57e59c` without feature conflicts. No icon, manifest, scope or guard changes were needed during integration. D-056: no simulator run; the automated evidence and code-walk are below.
+
+- **Automated, rerun on the integrated tree:** `node mobile/tests/check-app-icon.js` passes (Expo/native icons byte-identical, 1024×1024 RGB, no alpha or white corners); `node mobile/tests/check-privacy-manifest.js` passes (Resources membership, four required-reason categories, 13 collected types, tracking off); `plutil -lint mobile/ios/DTFDynastyTradeFinder/PrivacyInfo.xcprivacy` passes. `git diff --check` passes.
+- **Code-walk:** only the two icon PNGs, privacy manifest, their two guards and npm scripts change. The manifest stays in the existing native Resources phase; the guard checks that registration and that pod privacy aggregation is not disabled. Purchase History is declared with App Functionality and Analytics alongside the other 12 scoped types. No application flow, flag, API, schema or analytics emitter changes.
+- **Remaining ship evidence:** GitHub CI must pass on this integration head. The scope's next-build checklist (home-screen/Store icon and no ITMS-91053 processing email) remains owed; no device build or App Store processing was performed here.
+
 ## 2026-11-02 — `landing.platform_options` OFF (operator ask 12) until #430's verified sign-in; main matches prod
 
 Gates: full (`docs/plans/landing-platform-options/scope-ask12-off.md`; a feature-flag surface). No route, schema or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the suites below plus a code-walk.
