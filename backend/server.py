@@ -92,7 +92,7 @@ from .database import (
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
     load_recent_league_likes, find_live_trade_like, find_prior_trade_signal,
-    log_trade_impressions,
+    log_trade_impressions, live_deletion_token, clear_deletion_tokens_cache,
     load_trade_interest_history, load_trade_card_source_likes,
     # #362 standing offers
     create_standing_offer, load_standing_offers, load_user_standing_offers,
@@ -2985,9 +2985,11 @@ def _revoke_trade_jobs_naming(user_ids, league_ids) -> int:
 # job still running at the deletion builds and writes cards from the board it
 # read before it. The window is an hour, twelve _JOB_HARD_TIMEOUTs; a card
 # built after it comes from a search started after the deletion, from public
-# league data (legal (vii)), and serves (#559 delta QA P3). Never pruned:
-# deletions are rare, and a restart clears the stores it guards. Prod runs one
-# process (render.yaml: --workers 1).
+# league data (legal (vii)), and serves (#559 delta QA P3). Pruned once the
+# window closes (_prune_deleted_partner_ids, the cleanup loop): the stores are
+# purged of that id once more, for any late writer, and the id is dropped, so
+# no deleted id stays in memory past what it guards. Prod runs one process
+# (render.yaml: --workers 1).
 _DELETED_PARTNER_WINDOW = timedelta(hours=1)
 _deleted_partner_ids: dict = {}
 
@@ -3011,6 +3013,38 @@ def _purge_session_trade_cards(user_ids) -> int:
     ids = set(user_ids)
     until = datetime.now(timezone.utc) + _DELETED_PARTNER_WINDOW
     _deleted_partner_ids.update(dict.fromkeys(ids, until))
+    return _purge_card_stores(ids)
+
+
+def _prune_deleted_partner_ids(now=None) -> int:
+    """Drop the ids whose window has closed, after purging the stores of
+    them once more (a job still running at the deletion wrote within it).
+    Returns how many were dropped."""
+    now = now or datetime.now(timezone.utc)
+    done = [pid for pid, until in list(_deleted_partner_ids.items()) if until <= now]
+    if done:
+        _purge_card_stores(set(done))
+        for pid in done:
+            _deleted_partner_ids.pop(pid, None)
+    return len(done)
+
+
+def _redact_held_card_partner(card) -> None:
+    """Legal R28.26 #10 (MUST): a card a client still holds from before its
+    partner deleted their account never writes the real id into a new row.
+    While the deletion's scrub job lives (database.live_deletion_token), the
+    card's partner becomes the token and its name the placeholder before any
+    write: the decision event's target, a mutual-match check (a token has no
+    likes, so none), a notification."""
+    token = live_deletion_token(getattr(card, "target_user_id", None))
+    if token:
+        card.target_user_id = token
+        card.target_username = "deleted_user"   # accounts.DELETED_USER_PLACEHOLDER
+
+
+def _purge_card_stores(ids) -> int:
+    """Remove every card naming one of `ids` from every session's trade
+    services' card stores (and the module default's)."""
     with _sessions_lock:
         sessions = list(_sessions.values())
     services = {id(trade_service): trade_service}
@@ -3055,6 +3089,11 @@ def _cleanup_loop() -> None:
         time.sleep(300)  # check every 5 min
 
         _sweep_orphaned_overhauls_once()
+
+        try:
+            _prune_deleted_partner_ids()
+        except Exception as err:      # the class only: its text may quote ids
+            log.error("cleanup: deleted-id prune failed: %s", type(err).__name__)
 
         # Sessions — 4hr inactivity. This is a MEMORY sweep only: persisted
         # (verified, flag-on) sessions keep their durable row and rebuild on
@@ -5678,8 +5717,16 @@ def _redacted_held_row(row: dict, state, index: int) -> dict:
     features = row.get("features_json")
     features = json.loads(features) if isinstance(features, str) else (features or {})
     partner = features.get("partner_user_id")
-    if (not isinstance(token, str) or not token.startswith(REDACTED_PARTNER_PREFIX)
-            or partner is None or partner == token):
+    if partner is None:
+        return row
+    if not isinstance(token, str) or not token.startswith(REDACTED_PARTNER_PREFIX):
+        # The pack isn't redacted yet (the scrub's pass hasn't reached it, or
+        # its grace scan's cursor passed this row's id): while the deletion's
+        # job lives, its token (legal R28.26 #10).
+        token = live_deletion_token(partner)
+        if not token:
+            return row
+    if partner == token:
         return row
     return _scrub.redact_row(row, {partner}, token)
 
@@ -6117,6 +6164,14 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
     row.update(impression_id=impression_id, served_at=card["served_at"], is_ghost=0,
                features_json=json.dumps(features), assets_json=None, valuation_json=None,
                evidence_tier="viewed", delivered_at=state.delivered_at(index) or now)
+    # Legal R28.26 #10: a pack the scrub hasn't reached yet still names the
+    # person; while the deletion's job lives the row takes its token, as
+    # _redacted_held_row does for the snapshot path (#562 QA P3-5).
+    partner = features.get("partner_user_id")
+    token = live_deletion_token(partner) if partner is not None else None
+    if token and partner != token:
+        from . import deletion_scrub as _scrub
+        row = _scrub.redact_row(row, {partner}, token)
     key = str(index)
 
     def record(add: bool) -> None:
@@ -10926,6 +10981,10 @@ def _record_trade_proposal(*, sess, provider: str, user_id: str,
             log.warning("proposal valuation snapshot failed (non-fatal): %s",
                         snap_err)
 
+        # Legal R28.26 #10: a deleted partner's proposal row keeps no id and
+        # no valuation, as the deletion itself leaves existing rows.
+        if live_deletion_token(target_user_id):
+            target_user_id, valuation_json = None, None
         _pid, created = save_trade_proposal({
             "proposal_event_id":       proposal_event_id,
             "impression_id":           impression_id,
@@ -21496,6 +21555,7 @@ def swipe_trade():
                 raise
             log.info("swipe: reconstructed card %s from payload context (FB-46)", trade_id)
             card = trade_service.record_decision(trade_id=trade_id, decision=decision)
+        _redact_held_card_partner(card)   # legal R28.26 #10, before any write
 
         # Fit-congruence weighting (D-060): scale the swipe's Elo K by how
         # surprising it is given the user's window. The card carries the
@@ -22091,7 +22151,8 @@ def queue_trade_for_opponent():
                     "trade_id": trade_id,
                     "give":     card.give_player_ids,
                     "receive":  card.receive_player_ids,
-                    "target":   opponent.user_id,
+                    # R28.26 #10: a deleted partner's id is the token.
+                    "target":   live_deletion_token(opponent.user_id) or opponent.user_id,
                     # Propose-label spine — server-stamped: the ✓ cell is the
                     # calculator, no client declaration needed. Keeps
                     # props.source one closed enum across both emitters.
@@ -22508,6 +22569,8 @@ def trade_pass_reason():
                 g_user_id, league_id or "")
         except Exception:
             card = None
+    if card is not None:
+        _redact_held_card_partner(card)   # legal R28.26 #10, before any write
 
     try:
         state = upsert_trade_pass_reason(
@@ -22685,6 +22748,10 @@ def flag_bad_trade():
         target_user_id  = str(body["target_user_id"]) if body.get("target_user_id") else None
         target_username = str(body["target_username"]) if body.get("target_username") else None
 
+    # Legal R28.26 #10: a deleted partner's id and name are NULL here, as the
+    # deletion itself NULLs this table's existing rows.
+    if live_deletion_token(target_user_id):
+        target_user_id = target_username = None
     try:
         result = save_bad_trade_flag(
             user_id            = g_user_id,
@@ -25985,7 +26052,8 @@ def dismiss_awaiting_trade():
                 "awaiting_trade_dismissed",
                 league_id = str(league_id),
                 source    = "api",
-                props     = {"partner_id": str(partner_id),
+                # R28.26 #10: a deleted partner's id is the token.
+                props     = {"partner_id": live_deletion_token(partner_id) or str(partner_id),
                              "dismissed_likes": dismissed},
                 **(getattr(g, "device_info", {}) or {}),
             )
@@ -26141,6 +26209,9 @@ def create_standing_offer_route():
         return jsonify({"error": "team_user_ids must be current league members",
                         "invalid": invalid}), 400
 
+    # Legal R28.26 #10: a team whose manager's account deletion is still being
+    # scrubbed is stored as the deletion's token, never the real id.
+    team_user_ids = [live_deletion_token(t) or t for t in team_user_ids]
     try:
         offer = create_standing_offer(
             user_id         = g_user_id,
@@ -34338,6 +34409,7 @@ def delete_account_route():
     # person are purged and revoked here, each on its own (one failing never
     # skips the other, #559 delta QA P3), logged and never a 500 for a
     # deletion that committed.
+    clear_deletion_tokens_cache()     # R28.26 #10: map this deletion's ids at once
     try:
         counts["trade_cards_purged"] = _purge_session_trade_cards(user_ids)
     except Exception as err:          # the class only: its text may quote ids

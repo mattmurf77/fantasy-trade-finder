@@ -1451,6 +1451,32 @@ def _export_evidence_pack(row: dict) -> None:
         row["pack_error"] = str(e)
 
 
+# Calibration (legal R28.26 #9, MUST): a grader's own cards are exported
+# without any arm's partner fields. Calibration is blind (blind_grading: the
+# grader sees `neutral_trade`, never the arms), so `gain_partner` ("they rank
+# X at 1.4x market") and `reasons` ("fits their rebuild") were never shown to
+# the grader; exporting them would show a live partner's private board for
+# the first time. Every partner, live or deleted, as the overhaul export does
+# (R28.20 c2). The grades, tags and `gain_viewer` stay. The same keys the
+# deletion scrub removes from a redacted card (deletion_scrub.
+# _GRADING_ARM_KEYS_REMOVED, pinned equal by test).
+_GRADING_ARM_PARTNER_KEYS = ("gain_partner", "reasons")
+
+
+def _export_grading_arms(raw):
+    """A grading card's `arms_json` for the export: each arm minus its
+    partner fields. Anything that doesn't parse as {arm: {…}} is withheld
+    (None), never passed through as text that could still hold them."""
+    try:
+        arms = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(arms, dict) or not all(isinstance(v, dict) for v in arms.values()):
+        return None
+    return json.dumps({arm: {k: v for k, v in prov.items() if k not in _GRADING_ARM_PARTNER_KEYS}
+                       for arm, prov in arms.items()}, sort_keys=True)
+
+
 def _export_deck_features(raw):
     """Remove only prepared recovery evidence; retain the existing text contract."""
     if not isinstance(raw, str):
@@ -1494,6 +1520,9 @@ def export_user_data(sleeper_user_id: str,
             elif key == "deck_evidence_packs":
                 for row in tables[key]:
                     _export_evidence_pack(row)
+            elif key == "grading_cards":
+                for row in tables[key]:
+                    row["arms_json"] = _export_grading_arms(row["arms_json"])
 
         for name, predicate, omit in (
             ("trade_matches", db.trade_matches_table.c.user_a_id.in_(user_ids)
