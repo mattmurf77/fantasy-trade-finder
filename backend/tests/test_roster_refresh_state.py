@@ -28,6 +28,9 @@ import backend.suggestion_telemetry as sugg_tel
 import backend.trade_block_service as tb_service
 from backend.database import metadata
 
+# Runs the session-init daemon inline, so no real network (#479 QA P3-3).
+pytestmark = pytest.mark.usefixtures("no_real_network")
+
 LEAGUE_ID = "1338231586314780672"
 USER_ID = "460238423161040896"
 OPP_ID = "733459678624915456"
@@ -53,6 +56,8 @@ def harness(monkeypatch, tmp_path):
                            poolclass=StaticPool)
     metadata.create_all(engine)
     monkeypatch.setattr(db_module, "engine", engine)
+    # The session mint writes the users row; the daemon never inserts one.
+    db_module.upsert_user(USER_ID)
 
     # The shipped cassette seam: …/v1/<path> → <dir>/<path>.json.
     monkeypatch.setattr(server, "_SLEEPER_FIXTURES_DIR", str(tmp_path))
@@ -322,13 +327,14 @@ def test_platform_league_rows_are_not_replaced_by_session_init(harness, monkeypa
         {"user_id": "mfl:62846.f0003", "username": "Third", "player_ids": []},
     ])
     called = []
-    monkeypatch.setattr(server, "replace_league_members_snapshot",
-                        lambda *a, **kw: called.append(a) or True)
+    real_write = server.write_session_init_members
+    monkeypatch.setattr(server, "write_session_init_members",
+                        lambda *a, **kw: called.append(kw["replace"]) or real_write(*a, **kw))
     resp = client.post("/api/session/init", content_type="application/json",
                        headers={"X-Session-Token": TOKEN},
                        data=json.dumps({"user_id": USER_ID, "league_id": mfl}))
     assert resp.status_code == 200
-    assert called == []
+    assert called == [False]
     assert len(db_module.load_league_members(mfl)) == 3
 
 
