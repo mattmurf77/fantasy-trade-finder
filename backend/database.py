@@ -2425,10 +2425,10 @@ user_events_table = Table("user_events", metadata,
     Column("occurred_at",  String,  nullable=False),    # ISO UTC (server receive time)
     Column("league_id",    String),
     Column("session_id",   String),
-    Column("device_type",  String),                     # 'iphone' | 'ipad' | 'macos' | 'web' | 'extension'
+    Column("device_type",  String),                     # 'iphone' | 'ipad' | 'macos' | 'android' | 'web' | 'extension' · NULL = no X-Device header
     Column("os_version",   String),                     # '17.4' | '18.1' | etc.
     Column("app_version",  String),                     # '1.2.3'
-    Column("source",       String),                     # 'mobile' | 'web' | 'api' | 'cron'
+    Column("source",       String),                     # client: 'mobile' | 'web' | 'extension' (ingest) · server: 'api' | 'server' | 'calc_queue' | 'shop_send' · NULL = client unidentified (G-068)
     Column("props",        Text),                       # JSON — event-specific extras
     Column("event_id",     String),                     # client UUID — idempotent retries / dedup (unique index below)
     Column("device_id",    String),                     # stable per-install anon id ('dev_' + UUID)
@@ -13452,6 +13452,7 @@ def seed_pick_grid(
     scoring_format: str = "1qb_ppr",
     platform: str = "espn",
     reseed: bool = False,
+    first_season: int | None = None,
 ) -> dict:
     """Write the PRISTINE grid: every team owns its own picks, every season.
 
@@ -13468,6 +13469,17 @@ def seed_pick_grid(
     str(i+1)` off the passed member list; that silently re-points every
     `pick_id`'s "original team" the moment the roster changes, so this
     preserves the established mapping instead.)
+
+    `first_season` (C5) is the first class generated; `None` means
+    `current_season`, which is byte-identical to the behavior before it
+    existed. Prices stay relative to `current_season`, so a pick seeded one
+    class later is still priced by its real years out. Existing rows of the
+    skipped classes `[current_season, first_season)` are carried verbatim:
+    the grid only hides them, so they come back if the verdict flips. Two
+    saves still delete rows, because the carry box is bounded: lowering
+    `rounds` drops the higher rounds from the hidden classes too, and a
+    re-save after a flip back drops the class past the window (2030 once
+    `first_season` is 2026 again).
     """
     from . import draft_status
 
@@ -13513,7 +13525,8 @@ def seed_pick_grid(
         used.add(str(next_slot))
 
     now = _now()
-    seasons = list(range(int(current_season), int(current_season) + seasons_ahead + 1))
+    first = int(current_season) if first_season is None else int(first_season)
+    seasons = list(range(first, first + seasons_ahead + 1))
     rows: list[dict] = []
     seeded = reseeded_over = skipped = 0
     generated: set[str] = set()
@@ -13562,6 +13575,9 @@ def seed_pick_grid(
     # the season horizon is an explicit user action rather than a silent drop.
     carried = 0
     season_set = set(seasons)
+    # C5 — carry the skipped classes too, so the grid only hides them. The
+    # round bound below still applies to them.
+    season_set |= set(range(int(current_season), first))
     for pick_id, prior in existing.items():
         if pick_id in generated:
             continue
@@ -13575,6 +13591,10 @@ def seed_pick_grid(
         rows.append(prior)
         carried += 1
 
+    # Kept rows carry their surrogate `id` and generated rows have none, but
+    # one bulk INSERT needs one key set ("a value is required for bind
+    # parameter 'id'"). The DELETE frees every id, so drop it from all rows.
+    rows = [{k: v for k, v in r.items() if k != "id"} for r in rows]
     replace_draft_picks(league_id, rows, preserve_source=PICK_SOURCE_USER)
     _invalidate_contested(league_id)
     return {"seeded": seeded, "reseeded_over": reseeded_over,
@@ -13705,6 +13725,45 @@ def assign_draft_pick(league_id: str, pick_id: str, owner_user_id: str,
         if result.rowcount == 0:
             return ("stale", _read())           # re-read INSIDE the txn
         return ("ok", _read())
+
+
+def pick_slot_team_name(rows, user_id: str) -> str:
+    """The assignment writers' name for a nameless member (#497): `Team <slot>`.
+
+    The slot is the member's `original_roster_id` on any of `rows` they
+    originally own; `Unnamed team` when they own none (a member added after
+    the grid was seeded has no slot yet). Never the user id.
+    """
+    uid = str(user_id or "")
+    slot = next((str(r.get("original_roster_id") or "") for r in rows
+                 if str(r.get("original_user_id") or "") == uid
+                 and r.get("original_roster_id")), "")
+    return f"Team {slot}" if slot else "Unnamed team"
+
+
+def pick_team_name(row: dict, side: str, rows=()) -> str | None:
+    """`row["<side>_username"]` as a client may see it; `side` is `original`
+    or `owner` (#497 QA P2).
+
+    Asserted rows stored before #497 can hold `Team <that side's user id>`
+    ("Team espn:{1A2B…}") or a blank name, and nothing rewrites them: a PUT
+    rewrites only `owner_username`, and `original_username` changes only on a
+    reseed, which drops recorded reassignments. So every client-facing reader
+    heals here at read time; no stored row is written.
+
+    A user-source name is replaced when it is blank or equals
+    `Team <the row's <side>_user_id>`, by the writers' own fallback
+    (`pick_slot_team_name`): the original side's slot is the row's own, the
+    owner side's is read off `rows`, the league's asserted rows. Real names,
+    "Team Rocket", a correct `Team <slot>` and every platform row pass through.
+    """
+    stored = row.get(f"{side}_username")
+    if row.get("source") != PICK_SOURCE_USER:
+        return stored
+    uid = str(row.get(f"{side}_user_id") or "")
+    if str(stored or "").strip() and not (uid and stored == f"Team {uid}"):
+        return stored
+    return pick_slot_team_name([row] if side == "original" else rows, uid)
 
 
 # ---------------------------------------------------------------------------

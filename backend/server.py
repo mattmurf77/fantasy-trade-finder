@@ -164,6 +164,7 @@ from .database import (
     load_draft_pick_seasons,
     # draft-extensions W3 M-A — user-asserted pick ownership (ADR-010)
     make_pick_id, seed_pick_grid, assign_draft_pick,
+    pick_slot_team_name, pick_team_name,
     contested_pick_ids, orphaned_pick_ids, invalidate_pick_assignment_cache,
     load_pick_assignment_settings, save_pick_assignment_settings,
     # D-090 — resolved current-season draft order, for real-slot pick labels
@@ -1422,12 +1423,37 @@ _ANCHOR_VIA = ("anchors", "draft_room")
 #
 # THE CACHE IS THE PERFORMANCE DESIGN. Within one deck the baseline is
 # identical for all ~30 cards, so `_outlook_impact_baseline` computes the
-# LeagueState + baseline sim ONCE per (league, basis, completed_weeks) and each
-# card re-sims only the with-trade half (~112 ms at DELTA_SIM_COUNT). Without
-# this the 30-card deck would pay 60 simulations instead of 31.
+# LeagueState + baseline sim ONCE per key and each card re-sims only the
+# with-trade half (~112 ms at DELTA_SIM_COUNT). Without this the 30-card deck
+# would pay 60 simulations instead of 31.
+#
+# The key is (league, basis, format, board owner, pool generation): every
+# input the bundle reads off the CALLING session, so no caller is served
+# another's. Format is per session and per request, never per league. The
+# board owner is the ACCOUNT id on `basis=personal` (co-owners of one roster
+# rank separately; backend/CLAUDE.md § Identity) and None otherwise. The pool
+# generation is the one the session's seed and players were built from: until
+# its next session init, a session that predates a players-refresh still
+# prices the players that refresh dropped. Consensus callers in one league,
+# format and generation still share one entry, which is the point.
 _OUTLOOK_IMPACT_CACHE: dict[tuple, tuple[float, object, dict]] = {}
 _OUTLOOK_IMPACT_LOCK = threading.Lock()
+# Active computation tickets let deletion prevent a late personal-cache refill.
+_OUTLOOK_IMPACT_PENDING: dict[object, tuple] = {}
 _OUTLOOK_IMPACT_TTL = 900.0   # 15 min — the live week's TTL, same reasoning
+
+
+def _purge_outlook_impact_callers(user_ids) -> int:
+    """Drop personal baselines and invalidate their in-progress cache writes."""
+    ids = {u for u in user_ids if u}
+    with _OUTLOOK_IMPACT_LOCK:
+        doomed = [k for k in _OUTLOOK_IMPACT_CACHE if k[3] in ids]
+        for key in doomed:
+            del _OUTLOOK_IMPACT_CACHE[key]
+        for ticket, key in list(_OUTLOOK_IMPACT_PENDING.items()):
+            if key[3] in ids:
+                del _OUTLOOK_IMPACT_PENDING[ticket]
+    return len(doomed)
 
 
 def _outlook_impact_baseline(league_id: str, basis: str, sess: dict):
@@ -1442,65 +1468,76 @@ def _outlook_impact_baseline(league_id: str, basis: str, sess: dict):
     if platform != "sleeper":
         return None
 
-    key = (league_id, basis)
+    # Every session-derived input below is in the key; see the cache comment.
+    fmt = _active_format(sess)
+    board_owner = (sess.get("user_id")
+                   if basis == "personal" and sess.get("service") is not None
+                   else None)
+    key = (league_id, basis, fmt, board_owner, sess.get("pool_generation"))
     now = time.time()
     with _OUTLOOK_IMPACT_LOCK:
         hit = _OUTLOOK_IMPACT_CACHE.get(key)
         if hit and (now - hit[0]) < _OUTLOOK_IMPACT_TTL:
             return hit[2]
+        ticket = object()
+        _OUTLOOK_IMPACT_PENDING[ticket] = key
 
-    from . import outlook as outlook_pkg
-    from .outlook.trade_delta import DELTA_SIM_COUNT, resim_baseline
+    try:
+        from . import outlook as outlook_pkg
+        from .outlook.trade_delta import DELTA_SIM_COUNT, resim_baseline
 
-    fmt = _active_format(sess)
-    captured: dict = {}
-    state = outlook_pkg.build_league_state(
-        league_id, platform=platform, fetch=_outlook_sleeper_fetch(captured))
-    if not state.teams:
-        return None
+        captured: dict = {}
+        state = outlook_pkg.build_league_state(
+            league_id, platform=platform, fetch=_outlook_sleeper_fetch(captured))
+        if not state.teams:
+            return None
 
-    pool_players, seed = _get_universal_pool(fmt)
-    svc_seed = getattr(sess.get("service"), "_seed", None) or {}
-    if svc_seed:
-        seed = {**svc_seed, **seed}
-    players_meta = {p.id: p for p in pool_players}
-    for p in (sess.get("players") or []):
-        players_meta.setdefault(p.id, p)
-    e2v = _trade_service_mod.elo_to_value
+        pool_players, seed = _get_universal_pool(fmt)
+        svc_seed = getattr(sess.get("service"), "_seed", None) or {}
+        if svc_seed:
+            seed = {**svc_seed, **seed}
+        players_meta = {p.id: p for p in pool_players}
+        for p in (sess.get("players") or []):
+            players_meta.setdefault(p.id, p)
+        e2v = _trade_service_mod.elo_to_value
 
-    board_elo = None
-    if basis == "personal" and sess.get("service") is not None:
-        board_elo = {rp.player.id: rp.elo
-                     for rp in sess["service"].get_rankings(position=None).rankings}
+        board_elo = None
+        if basis == "personal" and sess.get("service") is not None:
+            board_elo = {rp.player.id: rp.elo
+                         for rp in sess["service"].get_rankings(position=None).rankings}
 
-    def _value_of(pid: str) -> float:
-        if board_elo is not None and pid in board_elo:
-            return e2v(board_elo[pid])
-        if pid in seed:
-            return e2v(seed[pid])
-        return 0.0
+        def _value_of(pid: str) -> float:
+            if board_elo is not None and pid in board_elo:
+                return e2v(board_elo[pid])
+            if pid in seed:
+                return e2v(seed[pid])
+            return 0.0
 
-    player_value: dict[str, float] = {}
-    player_pos: dict[str, str] = {}
-    for t in state.teams:
-        for raw_pid in t.player_ids:
-            pid = str(raw_pid)
-            if pid in player_value:
-                continue
-            player_value[pid] = round(_value_of(pid), 1)
-            pm = players_meta.get(pid)
-            player_pos[pid] = getattr(pm, "position", None) or "?"
+        player_value: dict[str, float] = {}
+        player_pos: dict[str, str] = {}
+        for t in state.teams:
+            for raw_pid in t.player_ids:
+                pid = str(raw_pid)
+                if pid in player_value:
+                    continue
+                player_value[pid] = round(_value_of(pid), 1)
+                pm = players_meta.get(pid)
+                player_pos[pid] = getattr(pm, "position", None) or "?"
 
-    seed_type = captured.get("playoff_seed_type")
-    baseline = resim_baseline(
-        state, player_value=player_value, player_pos=player_pos,
-        model_cfg=get_config(), basis=basis, scoring_format=fmt,
-        playoff_seed_type=seed_type, n_sims=DELTA_SIM_COUNT)
+        seed_type = captured.get("playoff_seed_type")
+        baseline = resim_baseline(
+            state, player_value=player_value, player_pos=player_pos,
+            model_cfg=get_config(), basis=basis, scoring_format=fmt,
+            playoff_seed_type=seed_type, n_sims=DELTA_SIM_COUNT)
 
-    bundle = (state, baseline, player_value, player_pos, seed_type, fmt)
-    with _OUTLOOK_IMPACT_LOCK:
-        _OUTLOOK_IMPACT_CACHE[key] = (now, key, bundle)
-    return bundle
+        bundle = (state, baseline, player_value, player_pos, seed_type, fmt)
+        with _OUTLOOK_IMPACT_LOCK:
+            if ticket in _OUTLOOK_IMPACT_PENDING:
+                _OUTLOOK_IMPACT_CACHE[key] = (now, key, bundle)
+        return bundle
+    finally:
+        with _OUTLOOK_IMPACT_LOCK:
+            _OUTLOOK_IMPACT_PENDING.pop(ticket, None)
 
 
 def _trade_outlook_impact(league_id: str, caller_user_id: str,
@@ -16672,7 +16709,8 @@ def ingest_client_events_route():
     """POST /api/events — batched first-party client-event ingestion (LLD §2.1).
 
     Always 200 for content: rate-limit / unknown-type / PII / oversize are
-    "accepted-and-dropped", never a 4xx/429. Response
+    "accepted-and-dropped", never a 4xx/429. The one non-200 is the transport
+    guard: a chunked body over the 128 KiB cap is a 413. Response
     {accepted, deduped, rejected, dropped, disposition} with the accounting
     invariant accepted + deduped + len(rejected) == N on committed txns.
     Flag gate `analytics.ingest` (server acceptance) — off → "disabled" 200,
@@ -18980,6 +19018,8 @@ def get_league_picks():
             priced = _priced_pick_value(p, slot_order, fmt)
             value = round(priced, 1) if priced > 0 else None
             return {**p, "pool_value": value,
+                    "original_username": pick_team_name(p, "original"),
+                    "owner_username": pick_team_name(p, "owner", raw),
                     "label": _owned_pick_label(p, slot_order),
                     "tier": _pick_tier(value),
                     **_pick_wire_source(p, tradeable)}
@@ -19021,8 +19061,9 @@ def _owned_pick_label(p: dict, slot_order: dict | None = None) -> str:
     unit = (pick_slots.slot_suffix(rnd, slot) if slot
             else _PICK_ORDINALS.get(rnd, str(p.get("round"))))
     base = f"{season} {unit}"
-    if p.get("is_traded") and p.get("original_username"):
-        return f"{base} (from {p['original_username']})"
+    original = pick_team_name(p, "original")
+    if p.get("is_traded") and original:
+        return f"{base} (from {original})"
     return base
 
 
@@ -19088,6 +19129,10 @@ def _pick_labels_by_id(asset_ids) -> dict[str, str]:
                     # league below.
                     draft_picks_table.c.league_id,
                     draft_picks_table.c.original_roster_id,
+                    # #497 QA P2 — what `pick_team_name` heals an asserted
+                    # row's stored name from.
+                    draft_picks_table.c.source,
+                    draft_picks_table.c.original_user_id,
                 ).where(draft_picks_table.c.pick_id.in_(owned_ids))
             ).fetchall()
         orders: dict[str, dict | None] = {}
@@ -19102,6 +19147,8 @@ def _pick_labels_by_id(asset_ids) -> dict[str, str]:
                 "is_traded":          m["is_traded"],
                 "original_username":  m["original_username"],
                 "original_roster_id": m["original_roster_id"],
+                "source":             m["source"],
+                "original_user_id":   m["original_user_id"],
             }, orders[lg])
     except Exception as e:
         # Display-only enrichment — a lookup failure must never fail the
@@ -23102,6 +23149,13 @@ def _assignment_members(league_id: str) -> tuple[list[str], dict[str, str]]:
 
     Ordered deterministically by user_id so a never-configured league still
     seeds the same grid twice.
+
+    The names dict holds ONLY members with a real name (`username` →
+    `display_name`, the #289 rule). A nameless member is absent, never
+    mapped to their id: an id (`espn:{SWID}`, `acct_*`) is not a name and
+    would be served to every other league member. Callers fall back to the
+    slot label (`Team <original_roster_id>`) — `seed_pick_grid` does so on
+    its own, the PUT route via `_assignment_owner_name`.
     """
     try:
         rows = load_league_members(str(league_id))
@@ -23115,9 +23169,26 @@ def _assignment_members(league_id: str) -> tuple[list[str], dict[str, str]]:
         if not uid:
             continue
         ids.append(uid)
-        names[uid] = (m.get("username") or m.get("display_name") or f"Team {uid}")
+        name = str(m.get("username") or m.get("display_name") or "").strip()
+        if name:
+            names[uid] = name
     ids.sort()
     return ids, names
+
+
+def _assignment_owner_name(names: dict[str, str], rows: list[dict],
+                           owner: str) -> str:
+    """The `owner_username` an assignment PUT stores. Never the user id.
+
+    The member's real name when they have one; else their slot label,
+    `Team <original_roster_id>`, read off any grid row they originally own;
+    else `Unnamed team` (a member added after the grid was seeded has no
+    slot yet). The fallback is `pick_slot_team_name`, the one the read-time
+    guard (`pick_team_name`) heals with, so a healed read matches this write.
+    """
+    if owner in names:
+        return names[owner]
+    return pick_slot_team_name(rows, owner)
 
 
 def _assignment_settings(league_id: str, member_ids: list[str]) -> dict:
@@ -23143,7 +23214,8 @@ def _assignment_settings(league_id: str, member_ids: list[str]) -> dict:
     return {"rounds": rounds, "order_type": order_type, "order": order}
 
 
-def _assignment_slots(league_id: str, settings: dict) -> list[dict]:
+def _assignment_slots(league_id: str, settings: dict,
+                      first_season: int | None = None) -> list[dict]:
     """Every asserted slot for a league, annotated for the client.
 
     `include_contested=True`: this surface is exactly where a contested or
@@ -23151,9 +23223,14 @@ def _assignment_slots(league_id: str, settings: dict) -> list[dict]:
     it. The rows are still withheld from every priced payload, by the row
     filter inside `load_draft_picks` (never by nulling `pool_value`, which
     `_power_picks_by_owner` would silently re-derive).
+
+    `first_season` (C5, `_assignment_first_season`) HIDES rows of earlier
+    seasons from the grid; it never deletes them. `None` = every row.
     """
     rows = load_draft_picks(league_id=str(league_id), source=PICK_SOURCE_USER,
                             include_contested=True)
+    if first_season is not None:
+        rows = [r for r in rows if int(r.get("season") or 0) >= first_season]
     if not rows:
         return []
     contested = contested_pick_ids(str(league_id))
@@ -23169,9 +23246,9 @@ def _assignment_slots(league_id: str, settings: dict) -> list[dict]:
             "slot":               slot_by_user.get(orig_user),
             "original_roster_id": str(r.get("original_roster_id") or ""),
             "original_user_id":   orig_user or None,
-            "original_username":  r.get("original_username"),
+            "original_username":  pick_team_name(r, "original"),
             "owner_user_id":      str(r.get("owner_user_id") or "") or None,
-            "owner_username":     r.get("owner_username"),
+            "owner_username":     pick_team_name(r, "owner", rows),
             "is_traded":          bool(r.get("is_traded")),
             "source":             r.get("source") or PICK_SOURCE_USER,
             "assigned_by":        r.get("assigned_by"),
@@ -23319,11 +23396,19 @@ def _espn_suggested_order(league_id: str, member_ids: list[str]) -> dict | None:
 
 def _assignment_payload(league_id: str, settings: dict,
                         slots: list[dict], member_count: int) -> dict:
+    """`progress.total` counts the classes the payload SHOWS (C5 P2-1).
+
+    A drafted grid seeded before the draft shows 3 classes until setup is
+    re-saved, and a flip back after that re-save shows 5, so a fixed
+    4-class total would read "48 of 64" (the Draft Room's "Continue
+    assigning" with nothing left) or "80 of 64". An unseeded grid has no
+    classes yet and keeps the 4-class figure.
+    """
     seasons: dict[int, list[dict]] = {}
     for s in slots:
         seasons.setdefault(s["season"], []).append(s)
-    total = (int(settings["rounds"]) * max(member_count, 0)
-             * (_ASSIGNMENT_SEASONS_AHEAD + 1))
+    classes = len(seasons) or (_ASSIGNMENT_SEASONS_AHEAD + 1)
+    total = int(settings["rounds"]) * max(member_count, 0) * classes
     return {
         "league_id": str(league_id),
         "settings":  settings,
@@ -23363,9 +23448,9 @@ def _assignment_grid(league_id: str, season: int):
             "round":             int(r.get("round") or 0),
             "slot":              slot_by_user.get(str(r.get("original_user_id") or "")),
             "owner_user_id":     r.get("owner_user_id"),
-            "owner_username":    r.get("owner_username"),
+            "owner_username":    pick_team_name(r, "owner", rows),
             "original_user_id":  r.get("original_user_id"),
-            "original_username": r.get("original_username"),
+            "original_username": pick_team_name(r, "original"),
             "is_traded":         bool(r.get("is_traded")),
         })
         at = r.get("assigned_at")
@@ -23391,15 +23476,56 @@ def _assignment_league(sess: dict, league_id: str):
     return None, ({"error": "league_not_found"}, 404)
 
 
+def _assignment_first_season(league_id: str, season: int) -> int:
+    """The first class the pick-assignment GRID shows (C5).
+
+    `season + 1` once the league's `season` rookie draft is past, else
+    `season`. The signal is the CACHED verdict on the leagues row
+    (`get_league_draft_context` → `status` / `confidence`), read through the
+    shared `_current_season_picks_visible` predicate; for ESPN that verdict
+    comes from the rookies-on-rosters heuristic. That predicate ignores
+    confidence: ANY positive `drafted` verdict moves the grid, at any
+    confidence, low included. No writer produces drafted/low today (the
+    detector writes `drafted` only at medium or high). The #228 fail-safe
+    holds: unknown, not_drafted, never checked, no row, a row for another
+    season or a DB error all keep `season`. No calendar backstop.
+
+    The "another season" case cannot arise from a route today:
+    `_assignment_league` takes `season` from the same leagues row, and
+    `leagues.season` is never refreshed after the first link (scope doc §2,
+    known gap (a)).
+
+    The grid only (C5 scope a): the Draft Room's `_assignment_grid` and every
+    priced `load_draft_picks(source=user)` reader are untouched.
+    """
+    try:
+        ctx = get_league_draft_context(league_id)
+        if (ctx and ctx.get("season") is not None
+                and int(ctx["season"]) == int(season)
+                and not _current_season_picks_visible(ctx.get("status"),
+                                                      ctx.get("confidence"))):
+            return int(season) + 1
+    except Exception:
+        log.warning("pick-assignment: draft-context read failed for %s",
+                    league_id, exc_info=True)
+    return int(season)
+
+
 @app.route("/api/league/pick-assignments", methods=["GET"])
 @_gate_unverified_read
 def pick_assignments_route():
     """GET /api/league/pick-assignments?league_id=&season=
 
     The whole grid: `settings` (rounds / order_type / order), `seasons[]`
-    (always current + 3, ascending), `progress` and `seeded`. 192 slots is
+    (every stored class from `_assignment_first_season` on, ascending:
+    normally 4), `progress` and `seeded`. 192 slots is
     ~40 KB and one round-trip beats four, so this never paginates; the client
-    defaults to the current season and collapses the rest.
+    defaults to the first season and collapses the rest.
+
+    C5: once the league's rookie draft reads drafted, `seasons[]` starts at
+    season + 1 (`_assignment_first_season`). The additive `current_season`
+    is the league's season either way, so the client can tell a future class
+    from the current one.
 
     `slots[].assigned_at` is ALSO the optimistic-concurrency token the PUT
     below carries back. It is `null` on a never-assigned row.
@@ -23427,8 +23553,10 @@ def pick_assignments_route():
         return jsonify({"error": "not_in_league"}), 403
 
     settings = _assignment_settings(league_id, member_ids)
-    slots = _assignment_slots(league_id, settings)
+    slots = _assignment_slots(league_id, settings,
+                              first_season=_assignment_first_season(league_id, season))
     payload = _assignment_payload(league_id, settings, slots, len(member_ids))
+    payload["current_season"] = int(season)
 
     # ESPN auto-derived round-1 order — a DEFAULT for the setup step, only
     # while the league has no stored order of its own. `_assignment_settings`
@@ -23503,10 +23631,15 @@ def pick_assignment_put_route(pick_id: str):
                              include_contested=True)
     prior_row = next((r for r in prior if str(r.get("pick_id")) == str(pick_id)), None)
     prior_owner = str(prior_row.get("owner_user_id") or "") if prior_row else ""
+    # C5 — a pick of the drafted class is not on the grid, so it gets the
+    # same answer as any other pick that isn't, before anything is written.
+    first = _assignment_first_season(league_id, season)
+    if prior_row and int(prior_row["season"]) < first:
+        return jsonify({"error": "pick_not_found"}), 404
 
     outcome, row = assign_draft_pick(
         league_id=league_id, pick_id=str(pick_id), owner_user_id=owner,
-        owner_username=names.get(owner, f"Team {owner}"), actor_user_id=actor,
+        owner_username=_assignment_owner_name(names, prior, owner), actor_user_id=actor,
         if_assigned_at=token)
 
     if outcome == "not_found":
@@ -23515,7 +23648,7 @@ def pick_assignment_put_route(pick_id: str):
     settings = _assignment_settings(league_id, member_ids)
     if outcome == "stale":
         # The WHOLE current row, so the conflict UI needs no second read.
-        current = _assignment_slots(league_id, settings)
+        current = _assignment_slots(league_id, settings, first_season=first)
         current = next((s for s in current if s["pick_id"] == str(pick_id)), None)
         return jsonify({"error": "stale_assignment", "current": current}), 409
 
@@ -23533,7 +23666,7 @@ def pick_assignment_put_route(pick_id: str):
     })
     invalidate_pick_assignment_cache(league_id)
 
-    slots = _assignment_slots(league_id, settings)
+    slots = _assignment_slots(league_id, settings, first_season=first)
     updated = next((s for s in slots if s["pick_id"] == str(pick_id)), None)
     payload = _assignment_payload(league_id, settings, slots, len(member_ids))
     return jsonify({"ok": True, "slot": updated,
@@ -23552,6 +23685,11 @@ def pick_assignments_order_route():
     board tractable: a league with three trades leaves 189 slots untouched and
     the three float into the client's "Traded picks" review. Re-running
     without `reseed` preserves every edited slot verbatim.
+
+    C5: once the league's rookie draft reads drafted, the seeded classes start
+    at season + 1 (`_assignment_first_season`). Prices stay relative to the
+    league season, and the spent class's rows are kept and hidden, except in
+    the two cases `seed_pick_grid` names (fewer rounds; a flip back).
 
     `rounds` is USER-SETTABLE (operator decision 2), clamped server-side to
     1..ROOKIE_MAX_ROUNDS. That clamp is the conservation bound's only lever,
@@ -23619,10 +23757,12 @@ def pick_assignments_order_route():
     # slot label, so the cached order must not survive it.
     _invalidate_slot_order(league_id)
 
+    first = _assignment_first_season(league_id, season)
     result = seed_pick_grid(
         league_id=league_id, member_user_ids=settings["order"],
         user_id_to_name=names, actor_user_id=actor,
         current_season=int(season), rounds=settings["rounds"],
+        first_season=first,
         seasons_ahead=_ASSIGNMENT_SEASONS_AHEAD,
         scoring_format=_active_format(sess),
         platform=str(getattr(g_league, "platform", None)
@@ -23630,7 +23770,7 @@ def pick_assignments_order_route():
                      or "espn").lower(),
         reseed=bool(body.get("reseed")))
 
-    slots = _assignment_slots(league_id, settings)
+    slots = _assignment_slots(league_id, settings, first_season=first)
     payload = _assignment_payload(league_id, settings, slots, len(member_ids))
     return jsonify({"ok": True, "seeded": result["seeded"],
                     "reseeded_over": result["reseeded_over"],
@@ -27657,6 +27797,12 @@ def league_format_stats_route():
 # Sleeper API Proxy Routes
 # ---------------------------------------------------------------------------
 
+def _sleeper_upstream_unavailable(code: int) -> bool:
+    """True when a Sleeper HTTPError means "Sleeper can't serve us right now"
+    (5xx outage, 429 rate limit, 403 block) rather than "not found" (M10)."""
+    return code >= 500 or code in (403, 429)
+
+
 @app.route("/api/sleeper/user/<path:username>")
 def sleeper_user(username):
     """Validate a Sleeper username and return basic user info.
@@ -27739,11 +27885,12 @@ def sleeper_user(username):
         return jsonify(data)
 
     except urllib.error.HTTPError as e:
-        # Only a 4xx means the user genuinely doesn't exist. A 5xx is a
-        # Sleeper outage — telling the user "User not found" sends them down
-        # a dead end of retyping a correct username. Surface it as 503 so the
-        # client can show a "try again shortly" message instead.
-        if e.code >= 500:
+        # Only a plain 4xx means the user genuinely doesn't exist. A 5xx,
+        # 429 or 403 is Sleeper being unavailable to us — telling the user
+        # "User not found" sends them down a dead end of retyping a correct
+        # username. Surface it as 503 so the client can show a "try again
+        # shortly" message instead.
+        if _sleeper_upstream_unavailable(e.code):
             log.warning("  Sleeper HTTPError %s — upstream unavailable", e.code)
             return jsonify({"error": "sleeper_unavailable",
                             "message": "Sleeper is unavailable — try again shortly."}), 503
@@ -27841,9 +27988,9 @@ def sleeper_rosters(league_id):
         log.info("  returned %s rosters", len(data) if isinstance(data, list) else "non-list")
         return jsonify(data or [])
     except urllib.error.HTTPError as e:
-        # 4xx → the league doesn't exist on Sleeper; 5xx → Sleeper outage.
-        # Don't leak the raw upstream error string to the client.
-        if e.code >= 500:
+        # 4xx → the league doesn't exist on Sleeper; 5xx/429/403 → Sleeper
+        # unavailable. Don't leak the raw upstream error string to the client.
+        if _sleeper_upstream_unavailable(e.code):
             log.warning("  rosters: Sleeper %s — upstream unavailable", e.code)
             return jsonify({"error": "sleeper_unavailable",
                             "message": "Sleeper is unavailable — try again shortly."}), 503
@@ -30794,9 +30941,11 @@ def cron_hourly_tick():
 def cron_daily_tick():
     """Once per day (Render cron `notif-daily-tick`). Authenticates, starts
     ONE single-flight runner thread (`backend/daily_tick.py`) and returns
-    **202 `{"ok": true, "started": <bool>}` at once**. Never inline: one sync
-    gunicorn worker (`--timeout 120`, render.yaml) serves every request, and
-    the inline tick was killed at 120 s every day (runbook § Cron schedule).
+    **202 `{"ok": true, "started": <bool>}` at once**. Never inline: one
+    gunicorn worker (render.yaml) serves every request. Under the old sync
+    worker the inline tick was killed at the 120 s timeout every day (runbook
+    § Cron schedule); under `--threads 4` (#398) it would hold a request
+    thread and the GIL for minutes.
     `started: false` means a run is already in flight (single-flight, not a
     queue).
 
@@ -32664,6 +32813,7 @@ def feature_flags_route():
     # evaluator module doesn't exist yet; fail-open to empty, never 500).
     try:
         from . import experiments as _exp
+        from .client_device import declared_source
         device_id = (request.headers.get("X-Device-Id") or "").strip() or None
         token = request.headers.get("X-Session-Token", "")
         account_unit = None
@@ -32677,7 +32827,8 @@ def feature_flags_route():
         # target platform/app_version/os — the only attrs available pre-auth.
         info = getattr(g, "device_info", {}) or {}
         header_attrs = {
-            "platform": (str(request.headers.get("X-Source") or "").strip()
+            # G-068: only a declared client (web | extension) passes through.
+            "platform": (declared_source(request.headers)
                          or ("ios" if (info.get("device_type") or "").lower()
                              in ("iphone", "ipad", "macos") else None)),
             "app_version": info.get("app_version"),
@@ -34399,6 +34550,21 @@ def delete_account_route():
                               or s.get("account_id") in account_ids]:
                         _sessions[t]["_revoked"] = True
                         _sessions.pop(t, None)
+            # Baselines and full results independently retain personal boards.
+            # Purge every account alias and cancel late in-flight cache writes.
+            try:
+                _purge_outlook_impact_callers(user_ids)
+            except Exception as purge_err:
+                log.warning("delete_account: outlook baseline purge errored (continuing): %s",
+                            type(purge_err).__name__)
+            # Personal outlook results are keyed on the caller's working id
+            # (release-lead QA on #512); best-effort, like the Apple revoke.
+            try:
+                from .outlook_result_cache import OUTLOOK_RESULTS
+                OUTLOOK_RESULTS.purge_callers(user_ids)
+            except Exception as purge_err:
+                log.warning("delete_account: outlook result purge errored (continuing): %s",
+                            purge_err)
     except Exception:
         log.exception("delete_account: deletion failed for %s", user_id)
         return jsonify({"error": "deletion_failed"}), 500
@@ -36720,17 +36886,41 @@ def league_outlook_route():
                 p = players_meta.get(pid)
                 player_pos[pid] = getattr(p, "position", None) or "?"
 
-        payload = outlook_pkg.run_outlook(
-            state,
-            player_value=player_value,
-            player_pos=player_pos,
-            model_cfg=get_config(),
-            basis=basis,
-            scoring_format=fmt,
-            you_user_id=g_user_id,
-            playoff_seed_type=_outlook_captured.get("playoff_seed_type"),
-        )
-        return jsonify(payload)
+        # Result cache (backend/outlook_result_cache.py): keyed on a hash of
+        # every input run_outlook reads, so any roster/record/schedule change
+        # misses. Computed caller-independent (you_user_id=""); `for_caller`
+        # stamps `is_you` per request.
+        from . import outlook_result_cache as _outlook_results
+        from .outlook import config as _outlook_cfg
+        model_cfg = get_config()
+        seed_type = _outlook_captured.get("playoff_seed_type")
+        def _compute() -> dict:
+            return outlook_pkg.run_outlook(
+                state,
+                player_value=player_value,
+                player_pos=player_pos,
+                model_cfg=model_cfg,
+                basis=basis,
+                scoring_format=fmt,
+                you_user_id="",
+                playoff_seed_type=seed_type,
+            )
+
+        try:
+            key = _outlook_results.make_key(
+                league_id=league_id, basis=basis, scoring_format=fmt,
+                user_id=g_user_id, state=state, player_value=player_value,
+                player_pos=player_pos, model_cfg=model_cfg,
+                playoff_seed_type=seed_type,
+                strength_source=_outlook_cfg.get_strength_source(None))
+        except Exception as key_err:
+            # An input the key can't hash: answer uncached rather than 500.
+            log.warning("league/outlook: result cache key failed, computing uncached: %s",
+                        key_err)
+            shared = _compute()
+        else:
+            shared = _outlook_results.OUTLOOK_RESULTS.get_or_compute(key, _compute)
+        return jsonify(_outlook_results.for_caller(shared, g_user_id))
     except NotImplementedError as e:
         return jsonify({"error": "not_supported", "message": str(e)}), 501
     except Exception as e:

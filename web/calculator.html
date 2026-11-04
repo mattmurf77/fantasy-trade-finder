@@ -269,8 +269,10 @@
         $('basis-note').textContent = '';
         return;
       }
+      // favors 'receive' = you get more back (you win), 'give' = they do, as the
+      // app's value bar reads it (cross-client-invariants § Trade value-verdict).
       var favorsTxt = d.favors === 'even' || !d.favors ? 'Even both ways'
-        : (d.favors === 'give' ? 'Favors you' : 'Favors them');
+        : (d.favors === 'receive' ? 'Favors you' : 'Favors them');
       var pct = Math.round(Math.max(0, Math.min(1, d.fairness == null ? 1 : d.fairness)) * 100);
 
       var html = '<div class="verdict-head"><span class="verdict-label v-' + esc(v) + '">' + esc(v) + '</span>' +

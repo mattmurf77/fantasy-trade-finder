@@ -10,6 +10,8 @@
 
 ## Table of Contents
 - [2026-11-01 — Shop send (#574 / #577): two Update 1 follow-ups](#2026-11-01--shop-send-574--577-two-update-1-follow-ups)
+
+- [2026-11-03 — Body-size guards: one shared helper for /api/events and /api/feedback (follow-up to #490)](#2026-11-03--body-size-guards-one-shared-helper-for-apievents-and-apifeedback-follow-up-to-490)
 - [2026-10-15 — Daily tick dies at the 120 s worker timeout every day: move its inline work off the request thread](#2026-10-15--daily-tick-dies-at-the-120-s-worker-timeout-every-day-move-its-inline-work-off-the-request-thread)
 - [2026-10-12 — Usage Trends: run both TestFlight checklists on 1.21.2 (165), then the two design calls](#2026-10-12--usage-trends-run-both-testflight-checklists-on-1212-165-then-the-two-design-calls)
 - [2026-10-10 — Home hub: run the TestFlight checklist on 1.20.0, then the two follow-ups](#2026-10-10--home-hub-run-the-testflight-checklist-on-1200-then-the-two-follow-ups)
@@ -60,6 +62,13 @@ Product logged both on 2026-11-01 as fine for launch (release-lead's #577 QA, P3
 1. **A sent package stays out of the sender's deck until the proposal resolves, or for at least 30 days.** Today a Shop send's `decision = "send"` row is decided only through the D-067 discovery keys' 7-day like window. The pre-#574 Shop like sat in Awaiting and was excluded by R4 for as long as it was live. *Why:* without this, a trade the user already sent on the platform can come back to their deck after a week.
 2. **A later calculator ✓ of a package already sent adds no second Elo update.** `find_live_trade_like` reads likes only, so the queue route doesn't see the send row's shared `calcq_` id. The ✓ should still record its like and card, without the Elo. *Why:* head-product's "no double count" covers send then queue, not just queue then send.
 3. **If analytics-lead wants "the event mirrors the row" on `calc_queue` too** (release-lead's #577 QA, pre-existing): the queue route (`server.py`, `queue_trade_for_opponent`) fires `trade_proposed` inside the same `try` as its swipe persist, so a raised `save_trade_swipes` drops the event although the like row is written. That's the opposite of the Shop send, which fires on the row. *Why:* it's analytics-lead's call whether `calc_queue` should match.
+
+## 2026-11-03 — Body-size guards: one shared helper for /api/events and /api/feedback (follow-up to #490)
+
+1. **Fold the two chunked-body guards into one helper.** #490 caps a chunked `POST /api/events` body with the same per-request `max_content_length` (cap + 1) pattern #360 added for `POST /api/feedback`, as a second copy. A shared helper keeps the next route from growing a third. *Why now:* not launch-blocking; do it after 11-18, when both are on main.
+2. **If client-side props truncation is wanted, file it with analytics-lead.** No client truncates props today (#490 QA, 2026-11-03); the server drops an envelope whose props exceed 4,096 bytes. *Why now:* only if a real event starts nearing that.
+
+---
 
 ## 2026-10-15 — Daily tick dies at the 120 s worker timeout every day: move its inline work off the request thread
 

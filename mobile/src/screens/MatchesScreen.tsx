@@ -7,15 +7,28 @@ import {
   RefreshControl,
   Pressable,
   ScrollView,
+  Animated,
+  Easing,
+  AccessibilityInfo,
+  findNodeHandle,
+  type ViewToken,
+  type NativeSyntheticEvent,
+  type NativeScrollEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
+import {
+  useFocusEffect,
+  useIsFocused,
+  useNavigation,
+  useRoute,
+  type RouteProp,
+} from '@react-navigation/native';
 import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
 import { getBaseUrl } from '../api/client';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
+import { ink, chalk, ice, flare, semantic, space, radii, type, fonts, duration } from '../theme/chalkline';
 import { Button, Badge, Icon } from '../components/chalkline';
 import TradeCardComp from '../components/TradeCard';
 import Toast from '../components/Toast';
@@ -52,6 +65,13 @@ import {
   awaitingHiddenKey,
   matchRowKey,
   awaitingRowKey,
+  indexForMatch,
+  MATCH_NOT_FOUND_LINE,
+  notFoundToast,
+  clampOffset,
+  scrollFailureJump,
+  alreadyInView,
+  endClamp,
 } from '../utils/matchesDerive';
 import { readErrorCopy } from '../utils/verification';
 import {
@@ -65,6 +85,62 @@ import type { TradeMatch, AwaitingTrade, Player } from '../shared/types';
 // Triage undo (S3 PRD-03, flag ux.swipe_undo): how long a dismiss's archive
 // POST is held (and the Undo toast shown) before committing.
 const UNDO_HOLD_MS = 5000;
+
+// R2 (ux-states §7 "The mark", design-lead's spec 2026-11-01) — the arrival
+// mark: a 2pt flare outline round the WHOLE Mutual row (league badge, header
+// and card), absolutely positioned so nothing moves. Flare because it is an
+// informational highlight (ADR-005), not an action (the card has no ice
+// button: Send in Sleeper is a secondary button); never a fill, tint,
+// shadow or glow. One constant, so a revision is one change.
+export const ARRIVAL_MARK = {
+  style: {
+    position: 'absolute',
+    top: -6,
+    left: -6,
+    right: -6,
+    bottom: -6,
+    borderWidth: 2,
+    borderColor: flare.base,
+    borderRadius: radii.md,
+  },
+  holdMs: 2000,
+  fadeMs: duration.fast, // --t-fast, 120 ms ease-out
+} as const;
+// A programmatic scroll that moves nothing (the row is already at its
+// target offset) emits no onMomentumScrollEnd, so the mark has a fallback.
+const ARRIVAL_SETTLE_FALLBACK_MS = 600;
+// onScrollToIndexFailed's retry delay, once the jump before it has laid out.
+const ARRIVAL_RETRY_MS = 250;
+// The row lands this far below the list's top edge, so the scroll view
+// doesn't clip the mark's −6pt top stroke (release-lead QA P2-1).
+const ARRIVAL_VIEW_OFFSET = space.sm; // 8pt, as design-lead's render
+// The Mutual list's top padding (styles.list). The arrival math reads it:
+// row 0's top sits here, and the estimate jump starts from it.
+const MATCHES_LIST_PAD = space.lg;
+// onScrollToIndexFailed retries at most this many times, so an arrival can
+// never loop. On a fresh mount nothing is measured yet (average 0), so the
+// first failure has no estimate to jump to and just waits ARRIVAL_RETRY_MS
+// for the first cells to lay out. Each later failure jumps to the estimate
+// (padding + index × the measured average − viewOffset); the list renders
+// the window round it, so the next retry usually finds the row measured.
+// The second or third try normally lands; 4 bounds a list whose heights vary
+// enough that the estimate keeps missing. Past it, the last jump stands and
+// the fallback marks.
+const ARRIVAL_MAX_TRIES = 4;
+
+// Every producer of Matches' route params: League home's tiles (FB-91 /
+// #307: segment, at, leagueId), N6.1 (guidedArrival), and R2 arrivals from
+// routeNotificationTap (match_id, src, ts — strings when the v2 path router
+// parsed them from the URL, a number for ts on the imperative fallback).
+type MatchesRouteParams = {
+  segment?: string;
+  at?: number;
+  leagueId?: string;
+  guidedArrival?: string;
+  match_id?: string | number;
+  src?: string;
+  ts?: string | number;
+} | undefined;
 
 type LeagueFilter = string | 'all';
 // #362 — round → ordinal, for the standing-offer rows. v1 only ever writes
@@ -187,7 +263,7 @@ export default function MatchesScreen() {
   // unaffected by construction. Keying on `at` preserves the re-tap
   // contract: tile → manually toggle the chip to "All" → tile again still
   // rescopes, because `at` changed even though leagueId didn't (S-10).
-  const route = useRoute<any>();
+  const route = useRoute<RouteProp<{ Matches: MatchesRouteParams }, 'Matches'>>();
   // ── Guided Onboarding v2 (flag onboarding.guide_v2) ──────────────────
   // `N6.1`'s primary CTA navigates here as `{segment:'awaiting', at,
   // guidedArrival:'n6.1'}` — the chain marker that (a) sources the
@@ -751,6 +827,289 @@ export default function MatchesScreen() {
       : filterVisible(awaitingQuery.data, 'all', hiddenKeys, awaitingRowKey)),
     [awaitingQuery.data, hiddenKeys],
   );
+
+  // ── R2 (ux-states §7): arriving with a match_id ──────────────────────
+  // A push tap, a TopBar inbox tap and (later) the action banner all land
+  // here as `{ match_id, src: 'push', ts }` (utils/deepLinks
+  // routeNotificationTap). With ux.deeplink_router_v2 on, the params come
+  // from the path route `matches/:match_id?`, so `ts` is a string. Before
+  // this nothing read match_id, so "@Alex accepted your trade" landed on
+  // the list, not the trade. A tab press or League home's tiles carry no
+  // match_id, so they never scroll, mark or show the not-found line.
+  //
+  // Every match_id is a trade_matches row, in every status, and only the
+  // Mutual list holds them (GET /api/trades/matches/all → matchesQuery →
+  // visibleMatches). Awaiting is keyed league:trade_id; Standing is offers.
+  const arrivalMatchId =
+    route.params?.match_id != null ? String(route.params.match_id) : null;
+  const arrivalTs = route.params?.ts != null ? String(route.params.ts) : null;
+  // One arrival per `ts`: a re-focus, a re-render or a later tab press with
+  // the same params never replays it; a new tap (a new ts) does.
+  const arrivalDoneTsRef = useRef<string | null>(null);
+  const arrivalRef = useRef<{
+    ts: string;
+    refetched: boolean;
+    dragged: boolean;
+    trustView: boolean;
+    mutualShown: boolean;
+  } | null>(null);
+  // Ends the arrival in flight: its ts counts as done, so nothing replays it.
+  const finishArrival = useCallback(() => {
+    const a = arrivalRef.current;
+    if (a) arrivalDoneTsRef.current = a.ts;
+    arrivalRef.current = null;
+  }, []);
+  // Rows fully on screen — a row already in view doesn't scroll. Stable
+  // refs: FlatList forbids swapping these on the fly.
+  const fullyVisibleRef = useRef<ReadonlySet<string>>(new Set());
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 100 }).current;
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      fullyVisibleRef.current = new Set(viewableItems.map((v) => String(v.key)));
+    },
+  ).current;
+  // The Mutual list's content and viewport heights, to clamp an estimate.
+  const listContentHRef = useRef(0);
+  const listViewportHRef = useRef(0);
+  const listScrollYRef = useRef(0);
+  const scrollTriesRef = useRef(0);
+  const endClampedRef = useRef(false);
+  const ignoreSettleRef = useRef(false);
+  // The mark: pending until the scroll settles, then shown for holdMs.
+  // Keyed on the arrival's ts. The timers live here, not in the row, so
+  // scrolling the row out of the render window doesn't cancel them.
+  const [mark, setMark] = useState<{ matchId: string; ts: string; shown: boolean } | null>(null);
+  const markRef = useRef<{ ts: string; shown: boolean } | null>(null);
+  const markOpacity = useRef(new Animated.Value(1)).current;
+  const markHeaderRef = useRef<React.ElementRef<typeof Text> | null>(null);
+  const markTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const clearMarkTimers = useCallback(() => {
+    clearTimeout(markTimerRef.current);
+    clearTimeout(settleTimerRef.current);
+    clearTimeout(retryTimerRef.current);
+    markOpacity.stopAnimation();
+  }, [markOpacity]);
+  const endMark = useCallback(() => {
+    clearMarkTimers();
+    markRef.current = null;
+    setMark(null);
+  }, [clearMarkTimers]);
+  const showMark = useCallback((ts: string) => {
+    const m = markRef.current;
+    if (!m || m.ts !== ts || m.shown) return;
+    m.shown = true;
+    clearTimeout(settleTimerRef.current);
+    markOpacity.setValue(1); // full opacity, no fade-in
+    setMark((cur) => (cur && cur.ts === ts ? { ...cur, shown: true } : cur));
+    markTimerRef.current = setTimeout(() => {
+      AccessibilityInfo.isReduceMotionEnabled()
+        .catch(() => false)
+        .then((reduceMotion) => {
+          if (markRef.current?.ts !== ts) return; // ended or replaced meanwhile
+          if (reduceMotion) {
+            endMark(); // the same hold, then gone with no fade
+            return;
+          }
+          Animated.timing(markOpacity, {
+            toValue: 0,
+            duration: ARRIVAL_MARK.fadeMs,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }).start(({ finished }) => {
+            if (finished && markRef.current?.ts === ts) endMark();
+          });
+        });
+    }, ARRIVAL_MARK.holdMs);
+  }, [markOpacity, endMark]);
+  // (Re)arm the fallback that shows a pending mark when no settle comes.
+  const armSettleFallback = useCallback((ts: string) => {
+    clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = setTimeout(() => showMark(ts), ARRIVAL_SETTLE_FALLBACK_MS);
+  }, [showMark]);
+  // Screen unmount: clear every timer, so nothing sets state afterwards.
+  useEffect(() => () => {
+    clearMarkTimers();
+    markRef.current = null;
+  }, [clearMarkTimers]);
+  // The row went (Dismiss, a league chip that hides it, a segment change):
+  // the mark goes with it and its timer is cleared.
+  useEffect(() => {
+    if (mark && (segment !== 'mutual' || indexForMatch(visibleMatches, mark.matchId) < 0)) {
+      endMark();
+    }
+  }, [mark, segment, visibleMatches, endMark]);
+  // §7 step 6 — with VoiceOver on, focus moves to the marked row's header
+  // ("New match with @…"). The mark itself is never announced.
+  useEffect(() => {
+    if (!mark?.shown) return;
+    const node = markHeaderRef.current ? findNodeHandle(markHeaderRef.current) : null;
+    if (node != null) AccessibilityInfo.setAccessibilityFocus(node);
+  }, [mark?.shown, mark?.ts]);
+
+  useEffect(() => {
+    const pending = arrivalRef.current;
+    if (!isFocused) {
+      // Leaving the tab after Mutual rendered cancels the arrival and the
+      // mark: a later visit must never scroll, mark or re-chip for it.
+      if (pending?.mutualShown) finishArrival();
+      if (markRef.current) endMark();
+      return;
+    }
+    if (!arrivalMatchId || !arrivalTs) return;
+    if (arrivalDoneTsRef.current === arrivalTs) return;
+    let a = pending;
+    if (!a || a.ts !== arrivalTs) {
+      // 1. Land — Mutual at once (the segment survives between visits).
+      a = arrivalRef.current = {
+        ts: arrivalTs,
+        refetched: false,
+        dragged: false,
+        trustView: segment === 'mutual',
+        mutualShown: false,
+      };
+      setSegment('mutual');
+    } else if (a.mutualShown && segment !== 'mutual') {
+      // The user picked Awaiting or Standing mid-wait: that's a cancel.
+      finishArrival();
+      endMark();
+      return;
+    }
+    if (segment === 'mutual') a.mutualShown = true;
+    // 2. Find — wait while the list loads (skeleton) or a refetch runs.
+    if (matchesQuery.isFetching) return;
+    // Look in the whole list: every league, minus pending-dismiss rows.
+    const loadedIndex =
+      hiddenAwareMatches === null ? -1 : indexForMatch(hiddenAwareMatches, arrivalMatchId);
+    if (loadedIndex < 0) {
+      // A new-match push usually beats the list's 15 s cache: refetch once
+      // and look again when it lands.
+      if (!a.refetched && !matchesQuery.isPaused) {
+        a.refetched = true;
+        a.trustView = false;
+        void matchesQuery.refetch();
+        return;
+      }
+      finishArrival();
+      // The fetch failed or is paused offline: the error (or empty) state
+      // shows, and nobody knows the match is gone, so no line. The arrival
+      // has ended, so a later pull to refresh never jumps to it.
+      if (hiddenAwareMatches === null || matchesQuery.isError || matchesQuery.isPaused) return;
+      // Dismissed, or gone for any other reason: the Mutual list at its top
+      // (never under a finger) or its empty state, nothing marked, plus the
+      // not-found line ("This trade is no longer available.", a Toast held ~4 s).
+      endMark();
+      if (!a.dragged) matchesListRef.current?.scrollToOffset({ offset: 0, animated: true });
+      const line = notFoundToast(MATCH_NOT_FOUND_LINE);
+      if (line) setToast(line);
+      return;
+    }
+    // 3. Chip — set it to All only when it hides the row.
+    const index = indexForMatch(visibleMatches, arrivalMatchId);
+    if (index < 0) {
+      a.trustView = false;
+      setFilterLeagueId('all');
+      return;
+    }
+    if (segment !== 'mutual') return; // step 1's switch hasn't rendered yet
+    const { dragged, trustView } = a;
+    finishArrival();
+    clearMarkTimers();
+    markRef.current = { ts: arrivalTs, shown: false };
+    setMark({ matchId: arrivalMatchId, ts: arrivalTs, shown: false });
+    // 4. Scroll — dropped if the user dragged first (the list never moves
+    // under a finger), skipped if the row is already fully in view. Either
+    // way the mark (5) shows straight away; otherwise once the scroll settles.
+    const inView = trustView && alreadyInView(
+      index,
+      arrivalMatchId,
+      index > 0 ? visibleMatches[index - 1].match_id : null,
+      fullyVisibleRef.current,
+      listScrollYRef.current,
+      MATCHES_LIST_PAD,
+      ARRIVAL_VIEW_OFFSET,
+    );
+    if (dragged || inView) {
+      showMark(arrivalTs);
+      return;
+    }
+    scrollTriesRef.current = 0;
+    endClampedRef.current = false;
+    ignoreSettleRef.current = false;
+    armSettleFallback(arrivalTs);
+    matchesListRef.current?.scrollToIndex({
+      index,
+      animated: true,
+      viewPosition: 0,
+      viewOffset: ARRIVAL_VIEW_OFFSET,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFocused, arrivalMatchId, arrivalTs, segment, hiddenAwareMatches, visibleMatches,
+      matchesQuery.isFetching, matchesQuery.isPaused, matchesQuery.isError]);
+
+  // Rows vary in height and there's no getItemLayout, so a row not yet
+  // measured can't be scrolled to. Jump to the clamped estimate (none on a
+  // fresh mount, where nothing is measured yet) so the window renders round
+  // it, then retry after layout — at most ARRIVAL_MAX_TRIES times.
+  const onArrivalScrollFailed = useCallback(
+    (info: { index: number; averageItemLength: number }) => {
+      const list = matchesListRef.current;
+      if (!list) return;
+      scrollTriesRef.current += 1;
+      const willRetry = scrollTriesRef.current <= ARRIVAL_MAX_TRIES;
+      // A stepping jump's own momentum-end isn't the settle; the last one's is.
+      ignoreSettleRef.current = willRetry;
+      const contentH = listContentHRef.current;
+      const viewportH = listViewportHRef.current;
+      const maxOffset = contentH > 0 && viewportH > 0 ? contentH - viewportH : null;
+      const jump = scrollFailureJump(info, MATCHES_LIST_PAD, ARRIVAL_VIEW_OFFSET, maxOffset);
+      if (jump != null) list.scrollToOffset({ offset: jump, animated: false });
+      if (!willRetry) return; // the last jump stands; its settle (or the fallback) marks
+      retryTimerRef.current = setTimeout(() => {
+        ignoreSettleRef.current = false;
+        const ts = markRef.current?.ts;
+        if (ts) armSettleFallback(ts);
+        try {
+          matchesListRef.current?.scrollToIndex({
+            index: info.index,
+            animated: true,
+            viewPosition: 0,
+            viewOffset: ARRIVAL_VIEW_OFFSET,
+          });
+        } catch {
+          // the list changed under the retry (a dismiss): stay put
+        }
+      }, ARRIVAL_RETRY_MS);
+    },
+    [armSettleFallback],
+  );
+  const onArrivalSettle = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const m = markRef.current;
+      if (!m || m.shown || ignoreSettleRef.current) return;
+      const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+      const end = endClamp(contentOffset.y, contentSize.height, layoutMeasurement.height);
+      if (end != null && !endClampedRef.current) {
+        // A tail row's target ran past the content end: pull back to the end,
+        // then mark when that settles. Fabric's scrollTo already clamps on
+        // iOS, so this is a guard, not a path iPhones take (see endClamp).
+        endClampedRef.current = true;
+        armSettleFallback(m.ts);
+        matchesListRef.current?.scrollToOffset({ offset: end, animated: true });
+        return;
+      }
+      showMark(m.ts);
+    },
+    [showMark, armSettleFallback],
+  );
+  // A drag mid-arrival drops the coming scroll and any pending retry.
+  const onArrivalDrag = useCallback(() => {
+    if (arrivalRef.current) arrivalRef.current.dragged = true;
+    clearTimeout(retryTimerRef.current);
+    ignoreSettleRef.current = false;
+  }, []);
+
   const matchCounts = useMemo(
     () => countsByLeague(hiddenAwareMatches ?? undefined),
     [hiddenAwareMatches],
@@ -1233,6 +1592,21 @@ export default function MatchesScreen() {
             contentContainerStyle={styles.list}
             data={visibleMatches}
             keyExtractor={(m) => m.match_id}
+            extraData={mark}
+            onScrollToIndexFailed={onArrivalScrollFailed}
+            onMomentumScrollEnd={onArrivalSettle}
+            onScrollBeginDrag={onArrivalDrag}
+            viewabilityConfig={viewabilityConfig}
+            onViewableItemsChanged={onViewableItemsChanged}
+            onContentSizeChange={(_w, h) => {
+              listContentHRef.current = h;
+            }}
+            onLayout={(e) => {
+              listViewportHRef.current = e.nativeEvent.layout.height;
+            }}
+            onScroll={(e) => {
+              listScrollYRef.current = e.nativeEvent.contentOffset.y;
+            }}
             refreshControl={
               <RefreshControl
                 refreshing={isFetching}
@@ -1252,7 +1626,10 @@ export default function MatchesScreen() {
                 <View style={styles.matchHeader}>
                   <View style={styles.matchLabelRow}>
                     <Icon name="match" size={16} color={semantic.pos} />
-                    <Text style={styles.matchLabel}>
+                    <Text
+                      ref={mark?.matchId === item.match_id ? markHeaderRef : undefined}
+                      style={styles.matchLabel}
+                    >
                       New match with @{item.counterparty_username}
                     </Text>
                   </View>
@@ -1310,6 +1687,17 @@ export default function MatchesScreen() {
                     />
                   }
                 />
+                {/* R2 arrival mark (§7) — last child, so it draws over the
+                    row; touches pass through to the card's buttons. */}
+                {mark?.shown && mark.matchId === item.match_id ? (
+                  <Animated.View
+                    key={mark.ts}
+                    pointerEvents="none"
+                    accessible={false}
+                    importantForAccessibility="no-hide-descendants"
+                    style={[ARRIVAL_MARK.style, { opacity: markOpacity }]}
+                  />
+                ) : null}
               </View>
             )}
             ItemSeparatorComponent={() => <View style={{ height: space.lg }} />}
@@ -1814,7 +2202,7 @@ const styles = StyleSheet.create({
   },
   chipCountActive: { color: chalk.base },
 
-  list: { padding: space.lg, paddingBottom: 96 },
+  list: { padding: MATCHES_LIST_PAD, paddingBottom: 96 },
   leagueBadgeRow: { flexDirection: 'row', paddingHorizontal: space.xs },
   matchHeader: {
     flexDirection: 'row',

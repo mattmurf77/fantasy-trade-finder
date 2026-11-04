@@ -47,10 +47,10 @@ def _step_lines(caplog):
 @pytest.fixture(autouse=True)
 def _no_leftover_run():
     """Each test starts with the module lock free and leaves it free."""
-    daily_tick.wait(5)
+    daily_tick.wait(30)
     assert not daily_tick._lock.locked()
     yield
-    daily_tick.wait(5)
+    daily_tick.wait(30)
     assert not daily_tick._lock.locked()
 
 
@@ -110,7 +110,7 @@ def test_start_runs_on_one_daemon_thread_and_wait_returns_the_results():
         return "ok"
 
     assert daily_tick.start([Step("a", fn)], NOW, log=LOG) is True
-    results = daily_tick.wait(5)
+    results = daily_tick.wait(30)
     assert [(r.key, r.outcome) for r in results] == [("a", "ok")]
     assert seen == [("daily-tick-runner", True, False)]
 
@@ -122,7 +122,7 @@ def test_second_start_while_in_flight_returns_false_and_starts_nothing(caplog):
 
     def blocking(now):
         first.append(1)
-        assert release.wait(5)
+        assert release.wait(30)
         return "ok"
 
     def never(now):
@@ -138,7 +138,7 @@ def test_second_start_while_in_flight_returns_false_and_starts_nothing(caplog):
                    for w in warnings)
     finally:
         release.set()
-    results = daily_tick.wait(5)
+    results = daily_tick.wait(30)
     assert [r.key for r in results] == ["slow"]
     assert first == [1] and second == []           # the second run never started
 
@@ -146,10 +146,10 @@ def test_second_start_while_in_flight_returns_false_and_starts_nothing(caplog):
 def test_lock_is_released_after_a_raising_step():
     ran = []
     assert daily_tick.start([_boom("b", ran)], NOW, log=LOG) is True
-    assert daily_tick.wait(5)[0].outcome == "error"
+    assert daily_tick.wait(30)[0].outcome == "error"
     assert not daily_tick._lock.locked()
     assert daily_tick.start([_recording("next", ran)], NOW, log=LOG) is True
-    assert daily_tick.wait(5)[0].key == "next"
+    assert daily_tick.wait(30)[0].key == "next"
     assert ran == ["b", "next"]
 
 
@@ -166,11 +166,11 @@ def test_lock_is_released_even_when_a_run_escapes_step_isolation(monkeypatch):
     monkeypatch.setattr(threading, "excepthook",
                         lambda args: escaped.append(args.exc_type))
     assert daily_tick.start([Step("abort", abort)], NOW, log=LOG) is True
-    assert daily_tick.wait(5) is None                # no results: the run aborted
+    assert daily_tick.wait(30) is None                # no results: the run aborted
     assert escaped == [_Abort]
     assert not daily_tick._lock.locked()
     assert daily_tick.start([Step("ok", lambda now: "ok")], NOW, log=LOG) is True
-    assert daily_tick.wait(5)[0].outcome == "ok"
+    assert daily_tick.wait(30)[0].outcome == "ok"
 
 
 def test_runner_module_does_not_import_server():

@@ -1,3 +1,21 @@
+## 2026-11-04 — Root privacy + fixes integration resolution
+
+Merged fixes parent `6f92b4c4` after reviewed privacy `d4a5a4bd` on latest
+main `787b9fc4`, preserving full ancestry. Additive conflicts keep network,
+deleted-partner and outlook-cache fixtures; both account-deletion test groups;
+ten-step scrub-before-refit runner with ordering-based response test; both
+source/event and mobile guard documentation; and both ledger/NEXT histories.
+Auto-merged deletion route retains alias leases/session revocation, independent
+baseline/result cache purges, and async scrub launch/in-memory job revocation.
+
+- Ten focused backend files: **240 passed, 1 skipped in 9.71 s** after final
+  fixture-yield cleanup. Covers account deletion, both outlook cache contracts,
+  daily tick route/runner, user-data leases/session races, network guard,
+  held scrub writes and Shop signals. Remaining skip awaits #389's generic
+  pick layer in the model batch. No full local suite or production action.
+- Combined whitespace check passes. No runtime flag or knob changes. Full
+  CI remains required after all remaining reviewed parent batches join.
+
 ## 2026-11-04 — Privacy/Shop resync with latest main `787b9fc4`
 
 Merged latest main as a parent, preserving both histories and every original
@@ -13,6 +31,97 @@ No runtime feature values differ from current main. No activation or remote writ
 - Diff whitespace check against current main passes. Full GitHub CI remains
   required on the final pushed candidate; no full local suite was run.
 
+## 2026-11-04 — Launch-fixes batch rebased by merge onto actual main787b9fc4
+
+Merged actual main `787b9fc4` into reviewed fixes head `5fd88f5c`, retaining both ancestries. Resolution is additive ledger history and mobile guard-index entries only: main's share-text guard plus the fixes batch's B2/web-Favors guards all remain listed. Main's changelog, binary assets, privacy manifest, archive exclusions and public share copy are retained without custom code edits.
+
+- Integrated targeted backend run: cache key/purge/deletion leases, value bar, events/source, Sleeper retry, pick-grid names/season and daily tick — **319 passed in 9.85s**, scratch SQLite with outbound socket/urllib blocked.
+- Web checker **198/198**; ten mobile guards pass: no-raw-id-labels, pick-assignment-season, mock-lifecycle, value-bar-b2, matches-push-scroll, web-calc-favors, share-text, app-icon, privacy-manifest and easignore.
+- `git diff --check` passes. No runtime defaults, flags, knobs or production data changed. No full local suite or device test; final combined remote CI remains required.
+
+## 2026-11-04 — Independent launch-fixes integration and outlook privacy completion
+
+User authorization: merge the pending launch PRs to main, with independent subagent review. Prepared locally from main `af57e59c`; remote CI and merge are handled by the coordinator. D-056: no simulator or Maestro runs; targeted backend tests use `FTF_SKIP_SIM_GATE=1`, with database URL variables unset. Feature flags, enforcement knobs, numeric defaults, production settings and credentials are unchanged.
+
+- **Original PR ancestry retained:** #497 `b1d44b30`, #586 `cd765b22`, #510 `67ad0020`, #567 `46751c05`, #490 `35b3b644`, #554 `7f12aa85`, #558 `efc659a9`, #506 `b8b9ecc4`, #585 `2157e702`, #568 `bd2e415a`, #512 `4eb281f5`, #392 `4a773b35`. The unpublished baseline-key fix `f2e759b7` is a separate identifiable merge. Additive scope/index/ledger and mobile test-registration conflicts preserve both sides; overlapping pick-grid code merged without a semantic conflict.
+- **Independent cache review:** `f2e759b7` prevents cross-caller, cross-format and cross-pool baseline reuse while preserving consensus sharing. #512 alone does not fix that cache. Deletion now independently purges both personal caches for every working/account alias. Short-lived baseline tickets and result-flight cacheability prevent already-running computations from refilling purged entries; consensus/other-user entries stay warm. Baseline tickets clean up on exceptions. No permanent deleted-user identifiers are retained.
+- **Discriminating regression:** on unmodified #512 code, the deterministic blocked-compute personal purge test fails because the private result is reinserted; its consensus control passes (1 failed, 1 passed). Both pass with the fix. Additional tests cover baseline in-flight purge, shared retention, failure cleanup, both caches on account deletion, and failure independence.
+- **Cache/deletion verification:** `test_outlook_impact_baseline_key.py`, `test_outlook_result_cache.py`, `test_account_deletion_coverage.py`: **109 passed**. Includes the new privacy regressions and existing alias/deletion coverage.
+- **Related backend verification:** `test_pick_assignment_names.py`, `test_pick_assignment_drafted_class.py`, `test_espn_draft_order.py`, `test_value_bar_scale.py`, `test_events_api.py`, `test_analytics_p0.py`, `test_events_source.py`, `test_device_type_source.py`, `test_daily_tick_runner.py`, `test_daily_tick_route.py`, `test_launch_qa_fixes.py`, `test_win_now_api.py`, `test_overhaul_api.py`, `test_outlook_route_cache.py`, `test_outlook_trade_delta.py`, `test_team_review.py`: **374 passed**. Covers Sleeper 429/403 retryable 503 behavior, draft-grid source/season/name handling, bounded ingest and explicit client source, shared value-bar semantics, and adjacent route behavior.
+- **Mobile/web verification:** `check-no-raw-id-labels.js`, `check-pick-assignment-season.js`, `check-mock-lifecycle.js`, `check-value-bar-b2.js` (21 checks), `check-matches-push-scroll.js` (97 checks), `check-web-calc-favors.js` (7 checks): all pass using existing read-only TypeScript dependencies. `qa/web/check_web_structure.py`: **198/198**. Python compilation and `git diff --check` pass.
+- **Independent privacy review clarification:** a suspected pre-registration deletion window is already blocked for supported HTTP callers by `_acquire_user_data_lease` (request admission through teardown) and `accounts.deletion_scope` (drains all aliases before deletion/purge). `_RequestSession` copies scalar values, so a callback reading that snapshot would not observe source revocation; no callback or artificial lease-bypassing route defense is added. Existing cache-level registered-compute cancellation tests assert the cache's direct purge contract, not a reproducible normal-HTTP pre-registration race. Recheck of the three cache/deletion suites plus `test_user_data_lifecycle.py` and `test_deletion_session_races.py`: **119 passed**. Lifecycle coverage includes draining authorized HTTP writes and rejecting queued/late work after deletion.
+- **Remaining delivery evidence:** full GitHub CI on the combined batch is required before merge. Existing TestFlight/browser/device checklists remain deployment verification; this local review does not claim they were run.
+
+## 2026-11-03 — The web calculator's "Favors you / them" label, the right way round (head-eng round 4; web only)
+
+Gates: `docs/plans/web-calc-favors-label/scope.md`. No schema, flag, route or analytics change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change:** `web/calculator.html` maps `favors: 'receive'` → "Favors you" and `'give'` → "Favors them", as the app's value bar and the page's own gap line read it. It had been inverted since #263.
+- **Guard:** `mobile/tests/check-web-calc-favors.js`, 7 checks, executing the page's own expression. It fails 2 on main (`fd5390ac`).
+- **Browser:** not run (see the scope).
+
+## 2026-11-03 — #490 QA P3s: the ingest cap's rationale and the "never a 4xx" claims corrected
+
+Gates: head-eng's relay of release-lead's QA of #490 @ `a703d624` (GO-with-notes), P3-1 to P3-4. Comments, docstrings and docs only; no behaviour change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is pytest.
+
+- **P3-1:** the cap's rationale no longer cites a 2,048-byte client props truncation (no client implements one). Fixed in `analytics_ingest.py`'s cap note, the `MAX_PROPS_BYTES` and envelope-drop comments, `test_events_api.py`'s largest-batch docstring, and the `docs/api-reference.md` cap paragraph. The analytics plan's `lld.md` gets dated correction notes rather than a rewrite.
+- **P3-2:** "never a 4xx" now names the one exception (a chunked body over the cap is a 413) in `analytics_ingest.py`'s contract, the `/api/events` route docstring and the analytics LLD's §2.1 response line.
+- **P3-3:** the shared helper with #360's feedback guard is a `living-memory/NEXT.md` follow-up, along with optional client truncation via analytics-lead.
+- **P3-4:** main merged clean (fresh CI on current main).
+- **Runs:** `test_events_api.py` and `test_analytics_p0.py`, 75 passed.
+## 2026-11-01 — The value bar's B2 rule (Product P112, head-eng round 3b): under one first with no pick label reads Even (#567, 11-06 binary)
+
+Gates: `docs/plans/value-bar-scale/scope.md` (the B2 bullet; evidence and checklist step 6). This is a design change, so a before/after goes to the operator; design review runs alongside release. No schema, flag, route or analytics change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change:** `TradeValueBar.tsx` folds `negligible = !pick && firsts < 1` into `even`. A null `pick_equivalent` under one first, the server's negligible floor, reads Even (the nub, "Even", "Within a rounding error"), never "≈ 0.0 mid 1sts". A lean with a pick label and a no-pick gap of one first or more are unchanged. The share image does the same in #564 (league-eng).
+- **Guard:** `mobile/tests/check-value-bar-b2.js`, 11 checks. It executes the component's own decision lines on 8 cases and pins the `worth` fallback and the Even nub. It fails 9 on `e70ad147`.
+- **Render:** `renders/before-after-b2-317.png`. `render.py` gains a `b2` switch, and the earlier two sheets regenerate byte-identically. The render's Even end label now matches the app: no colour when Even.
+- **Runs:** `tsc --noEmit` is clean, all 136 suites pass (this branch has no #574), testid-lint is green, and `test_value_bar_scale.py` passes 3.
+- **release-lead's B2 QA (GO-with-notes) at 955f83c3:**
+  - **P2-1:** one exported predicate, `valueBarIsEven(favors, gap)`, feeds the bar and the deck card's VoiceOver summary, so VoiceOver says "Even." where the bar does.
+  - **P3-2:** the guard now has 21 checks. It executes the predicate on 9 cases (0.7 firsts added) and pins every consumer to `even`. Breaking the winner label, the VoiceOver summary, or the predicate's B2 term each goes red (2, 1 and 3 failures).
+  - **P3-3/4:** checklist step 6 has concrete values (about 300 vs 250, both under 2,400), the expected "(≈ 0.0 firsts)", and VoiceOver.
+  - **P3-5:** the B2 rule is recorded in cross-client-invariants and `components.md` as an app-plus-image invariant.
+  - **P4:** 0.058, not "about 0.05". On `e70ad147` the guard's failures were structural; the behaviour discriminators are the two no-pick-under-one-first cases.
+  - **P3-1 (eveners under an Even bar) is Product's call**, not changed here.
+
+## 2026-10-31 — The value bar, release-lead's #567 delta QA (GO-with-notes): the example test's indent, renders R1–R4, checklist wording
+
+- **P2, the test:** `^\s*(value|firsts)` also matched `pick_equivalent.value: 606.5`, which shadowed the top-level `value`, so the value users see was never checked. It now reads the top level at its two-space indent and requires both keys. A top-level 380 or 9999, or `firsts` 0.6, fails it; all three were green before.
+- **Renders:**
+  - **R1:** the wrap's 8pt gap before the scale row and the end row. The mock was 16pt short.
+  - **R2:** the middle scale labels sit 3pt lower: the 12pt middle row is centred in the 18pt row.
+  - **R3:** the League bar is on the example card, `ink0` with 12pt padding, under its hairline, inside the 1pt border.
+  - **R4:** the 317 sheet is a deck card, with "@mike_dynasty win" as TradeCard passes the handle. The calculator's 309pt bar draws the same.
+  - **Optional:** an Even case shows the centred nub. Re-running `render.py` reproduces both PNGs.
+- **Checklist and scope:**
+  - steps 4–5 say to switch to a league with 0 mutual and 0 awaiting matches;
+  - step 5 and the scope call the label crowding what it is, a regression of this change (it started at text scale 2.41 before, 1.21 now at 283pt), with the design follow-up;
+  - the stale #564 "still 0.57" note is removed, since #564's 30ef8349 dropped that line.
+- **Runs:** `test_value_bar_scale.py` 3 passed.
+
+## 2026-10-31 — The value bar, release-lead's #567 QA (GO-with-notes): the League example, renders from the app's tokens, a checklist that discriminates
+
+Gates: release-lead's #567 QA, with three P2s before the 11-06 binary. Client-only plus a backend test; no schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **P2-1:** the League "Works right now" example (`LeagueScreen.tsx` `EXAMPLE_GAP`), the clients' only static gap, said "a Mid 2nd (≈ 0.6 firsts)" at 380 and filled far past the new tick. It's now 607, 0.29 firsts, pick value 606.5: what the server sends for a Mid 2nd gap. `test_the_league_example_gap_is_a_mid_2nd_at_todays_values` pins it to the seeds. Main's fixture fails it.
+- **P2-2:** `renders/render.py` draws `TradeValueBar` from its styles at 317pt and 283pt: `before-after-317.png` (an Early 2nd "You win", a Mid 2nd "They win") and `before-after-283.png` (the League example). It uses the app's tokens and fonts, `semantic.pos` / `semantic.warn`, `ink.line` ticks on the `ink3` rail, and the Plex Mono labels in their inset frame (8.6pt inboard). The gaps come from the server's `_pick_gap_equivalent`. The old geometry sketch `before-after.png` is removed.
+- **P2-3:** the checklist is rewritten so a step can catch the old build. Step 1 is now an Early 2nd (past the tick now, short of it before), with the "about a third of the way" cue. It adds They-win, the League example, and the largest standard text size. The web miniature is noted as a Render-deploy check, not TestFlight.
+- **P3s:**
+  - `docs/design/components.md`'s "≈0.57" and "21.5%/78.5%" are fixed, and the file is now in the docs table;
+  - the scope notes that a live `elo_value_k` change wouldn't move the app's constant;
+  - the scope notes the label crowding at large text (a design follow-up);
+- **Runs:** `test_value_bar_scale.py` 3 passed.
+
+## 2026-10-31 — The value bar's ±2nd landmark at today's Mid 2nd / Mid 1st (0.57 → 0.287)
+
+Gates: the scope block `docs/plans/value-bar-scale/scope.md` (head-eng, for the 11-06 binary). A constant and a CSS position; no route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **`backend/tests/test_value_bar_scale.py`, 2 tests:**
+  - the app's `SECOND_IN_FIRSTS` equals `elo_to_value(Mid 2nd) / elo_to_value(Mid 1st)` over `GENERIC_PICK_SEEDS` (0.2865), within 0.005. **Main's 0.57 fails it.**
+  - the web landing miniature's four landmark positions sit at 50 ∓ 0.287 × 50%.
+- **Render:** `docs/plans/value-bar-scale/renders/before-after.png`, a geometry mock for the operator's design review.
+- **TestFlight:** the operator's 4-step checklist in the scope.
 ## 2026-11-04 — O9 EAS build archive exclusions
 
 Integrated `985d767a` onto main `fd5390ac`, resolving only the package-script
@@ -935,6 +1044,23 @@ Full gates, not express (platforms-eng; shape approved by head-eng 2026-10-27). 
 - **Targeted neighbours:** `test_entry_platform_route`, `test_verified_sessions`, `test_mfl_auth_link_route`, `test_persistent_sessions`, `test_account_first`, `test_accounts`, `test_private_session_ownership`, `test_feedback_attach_on_verify`, `test_user_data_lifecycle`, `test_deletion_session_races`, `test_link_status_routes`, `test_verified_reads`, `test_sleeper_write_route` → 231 passed, 5 failed (the fake's TypeError); after the fix `test_entry_platform_route` 25/25, and the full suite below covers all 13 files.
 - **Full suite** (`python3 -m pytest backend/tests -q -p no:cacheprovider`, no `-x`): **9,429 passed, 2 skipped, 0 failed** in 41:40. No wall-clock flake this run.
 - **Operator TestFlight check** after merge: the 5-step checklist in the scope's §3 (a username with history signs in verified and sees its own boards in both formats; a pin change survives a relaunch; a username without history signs in as before).
+
+## 2026-10-27 — `POST /api/events` transport guard: a chunked body is capped before it is parsed, 413 (#360 pattern)
+
+Gates: a transport-only guard asked for by head-eng (via platforms-eng); no analytics-lead review, because nothing accepted, dropped, scrubbed or deduped changes. No schema, event, prop, flag or knob change; the only contract delta is one new status (413) for a body no shipped client sends, documented in `docs/api-reference.md`. No scope block (head-eng's brief set the doc list: api-reference + this entry). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The gap:** `MAX_CONTENT_LENGTH` (128 KiB) was checked against `request.content_length` only. A chunked body has none, so it read as 0 and the whole body was read and parsed.
+- **The fix:** in `analytics_ingest.ingest_request`, after the existing check and before `get_json`, a per-request `max_content_length = cap + 1` and a `get_data`; over the cap (or a `RequestEntityTooLarge`) is 413 `{error: "too_large", limit}`. The cap + 1 is #360's: Werkzeug's limited stream truncates silently at the limit and raises only past it. The cap number does not move.
+- **Kept on purpose:** a declared `Content-Length` over the cap still answers 200 `batch_rejected:too_large` (the documented always-200 purge signal, `docs/api-reference.md`, LLD §2.1), pinned by a new test. The brief asked for 413 there too; that is a one-branch change if analytics-lead agrees to retire the 200.
+- **Backend:** `test_events_api.py` is now 51 tests (6 new):
+  - a small chunked body is unchanged;
+  - a Content-Length over the cap keeps its 200 disposition and the body is never read;
+  - a chunked 1 MiB body is 413, nothing is stored, and at most cap + 1 bytes are read;
+  - the boundary: exactly 131,072 bytes chunked is accepted, 131,073 is 413;
+  - the largest legitimate batch (50 envelopes, 2 000-char props, about 109 KB) lands whole by Content-Length and chunked.
+- **Suites run:** the 12 files that exercise the route (`test_events_api`, `test_outcome_ingest_security`, `test_analytics_p0`, `test_time_to_suggestion_events`, `test_swipe_guard_blocked`, `test_deck_signal_v2`, `test_deck_taste`, `test_analytics_taxonomy_384`, `test_analytics_taxonomy_home_hub`, `test_api_observability`, `test_invite_links`, `test_owner_generator_routes`) → 249 passed. The full suite is left to CI.
+- **Sabotage (1), red then restored:** the cap block removed → the chunked-1-MiB test and the boundary test go red (200, not 413; the whole body read); the four others stay green.
+- **Not covered:** a real gunicorn chunked request (the test client sets `wsgi.input_terminated`, as gunicorn does); no network.
 
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 
