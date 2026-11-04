@@ -308,6 +308,11 @@ def init_client(monkeypatch, rosters):
                         lambda lid, week, *, _opener=None, timeout=15: [])
     monkeypatch.setattr(tb_service, "fetch_league_players",
                         lambda lid, *, _opener=None, timeout=15: [])
+    # Real auth minting persists a users row before handing out its token.
+    # Keep that prerequisite real: first-init's live-user/deletion guard must
+    # run normally before the daemon reaches the captured league-member write.
+    for uid in (CO_OWNER, SOLE_OWNER):
+        db.upsert_user(sleeper_user_id=uid)
     # Authentication is established before selecting a league. Each test
     # client chooses which proven identity to exercise via the header.
     sessions = {uid: {"user_id": uid, "verified": True, "verified_via": "sleeper"}

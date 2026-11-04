@@ -1,3 +1,10 @@
+## 2026-11-04 — Held parser child updated with final co-owner fixture prerequisite
+
+Merged exact revised launch parent `e7fb895ff9fbfc5d6acbeceaa4defc929a18c428` into held parser candidate `8048cfb7`, preserving original #584 head `61e8248c`. The only resolution is additive ledger history. Parent's co-owner fixture now persists real user rows before creating its verified sessions, so first-init's existing live-user/deletion guard runs normally; no runtime code or assertion was weakened.
+
+- Offline co-owner + parser/KTC blend-health/DP consensus/QB-cap/universal-pool/subprocess-harness target: **154 passed in 16.07s**, scratch SQLite with external Python network calls blocked also in child processes. `git diff --check` passes.
+- Config flags/defaults and database knob seeds remain byte-identical to revised parent `e7fb895f`; source KTC default stays 0.5. The production weight-zero approval/read-back remains pending. This child is still HOLD for main merge/deployment; no runtime write, production probe, push or change to root #597/main occurred.
+
 ## 2026-11-04 — #584 parser readiness candidate; production pin still PENDING
 
 **HOLD main merge/deployment until the user approves the production `ktc_blend_weight = 0` pin and its read-back is verified.** This is preparatory code integration only. No production setting, secret, live KTC page, platform API or running model was read or changed. The source default remains 0.5; no flag/knob default is changed here. Restoring blending later is a separate runtime decision.
@@ -6,6 +13,37 @@ Fresh isolated candidate starts from actual main `1a40bd00`, includes final laun
 
 - Targeted offline parser/KTC blend-health/DP consensus/QB-cap/universal-pool/subprocess-harness run: **121 passed in 16.42s** across seven files. Python network connections and urllib calls were blocked also in subprocesses; all data came from synthetic or committed fixtures. This includes malformed/empty/no-player element refusal and legacy fallback, exact element-id decoys/tag variants/preference, retained `value` fields, thin/partial DP-only gates and weight-zero no-fetch/byte-identity behavior.
 - `git diff --check` passes. Feature config/default flags and database knob seeds are byte-identical to the final launch candidate. No full local suite or deployment/device proof was run; full CI on a draft child PR may be prepared while the production approval/read-back remains pending.
+## 2026-11-04 — Full-CI co-owner fixture correction after first-init integration
+
+Full GitHub CI for PR #597 at `0eed6296`, run `41920497707`, **failed**:
+**3 failed, 12558 passed, 39 skipped in 1722.53s**. All failures were
+`test_co_owner_rosters.py`'s inline-daemon member-capture assertions
+(`test_session_init_co_owner_writes_one_row_per_roster`,
+`test_session_init_sole_owner_is_unchanged`, and
+`test_session_init_without_league_user_id_defaults_to_the_caller`). The local
+three-test reproduction was **3 failed, 30 deselected in 1.12s**, with the
+same `KeyError: captured["members"]`.
+
+The fixture installed verified co-owner/sole-owner sessions into an empty
+users table while mocking the old user writes. Real `_extension_build_session`
+persists the users row before returning its token; `_account_build_session`
+delegates to it. The real first-init live-user guard correctly refused the
+impossible fixture state and stopped its daemon before the member capture.
+This is a fixture integration mismatch, not a production roster regression.
+
+- **Surgical correction:** seed just those two scratch users through real
+  `db.upsert_user` before installing the synthetic verified sessions. All
+  co-owner, canonical league identity, one-row-per-roster, sole-owner and
+  legacy-client assertions are unchanged. The real first-init transaction,
+  eligibility and deletion checks still execute; no runtime source, guard,
+  feature flag or production state changed.
+- **Verification:** whole co-owner, first-init, referral-ledger,
+  deleted-mid-daemon and platform-sign-in files — **344 passed, 2 skipped in
+  26.07s**. The skips are the existing optional PG deletion-interleaving cases,
+  already independently exercised on the reviewed core. Whitespace check passes.
+- This targeted correction does not turn the failed full run green. A fresh
+  full GitHub CI run on the new commit remains required before merge. No full
+  local suite, remote write, live provider call or production action occurred.
 
 ## 2026-11-04 — Final combined launch candidate pre-CI verification
 
