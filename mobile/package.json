@@ -80,6 +80,7 @@
     "test:mock-ownership-caption": "node tests/check-mock-ownership-caption.js",
     "test:mock-user-not-in-draft": "node tests/check-mock-user-not-in-draft.js",
     "test:no-beta-copy": "node tests/check-no-beta-copy.js",
+    "test:no-raw-id-labels": "node tests/check-no-raw-id-labels.js",
     "test:notif-glyphs": "node tests/check-notif-glyphs.js",
     "test:offer-prefill-330": "node tests/check-offer-prefill-330.js",
     "test:offer-prefill-330-unit": "node tests/check-offer-prefill-330-unit.js",

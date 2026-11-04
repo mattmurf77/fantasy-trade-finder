@@ -136,6 +136,7 @@ import { track } from '../api/events';
 import { readErrorCopy } from '../utils/verification';
 import { haptics } from '../utils/haptics';
 import { TIER_LABEL, tierForElo } from '../utils/tierBands';
+import { teamLabel } from '../utils/teamLabel';
 import { useAppActive } from '../hooks/useAppActive';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
@@ -1194,6 +1195,19 @@ function BoardSection({ board }: { board: DraftBoard }) {
     return m;
   }, [board.picks]);
 
+  // Each owner's own slot, for the `Team <slot>` label of an owner with no
+  // name. `slot` is the ORIGINAL owner's, so it is read off a row the owner
+  // originally holds.
+  const ownSlotByUser = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of board.order) {
+      if (s.original_user_id && s.slot != null && !m.has(s.original_user_id)) {
+        m.set(s.original_user_id, s.slot);
+      }
+    }
+    return m;
+  }, [board.order]);
+
   if (!board.order.length) {
     // A complete draft with no order still has its picks — show those.
     if (!board.picks.length) return null;
@@ -1226,7 +1240,13 @@ function BoardSection({ board }: { board: DraftBoard }) {
             <Text style={draftRow.slotCell}>{slotLabel(slot)}</Text>
             <View style={draftRow.orderMain}>
               <Text style={draftRow.ownerText} numberOfLines={1}>
-                {slot.owner_username ?? slot.owner_user_id ?? 'Unassigned'}
+                {slot.owner_user_id || slot.owner_username?.trim()
+                  ? teamLabel(
+                      [slot.owner_username],
+                      slot.owner_user_id,
+                      ownSlotByUser.get(slot.owner_user_id ?? ''),
+                    )
+                  : 'Unassigned'}
                 {slot.is_traded ? (
                   <Text style={draftRow.tradedTag}>
                     {'  '}from {slot.original_username ?? '—'}

@@ -26,6 +26,7 @@ Helpers with **no React**. The annotated map — including which values are cros
 | `sessionRerank.ts` | F4 session re-rank math (flag `deck.session_rerank`) |
 | `shareLinks.ts` | Share-package URLs for a built trade |
 | `supportContact.ts` | `SUPPORT_EMAIL`, the one support address (#354 BL10-R7); every mobile use imports it |
+| `teamLabel.ts` | A team's label for leaguemates: its real name, else `Team <fid>` (MFL) / `Team <slot>` / `Unnamed team`, never a member id; plus the pick-assignment slot rule |
 | `testRouteEntry.ts` | Launch-argument test-route entry (`FTFTestRoute`), used by the operator QA path |
 | `tickerWindow.ts` | #322/#325 — the mock-draft ticker's ascending last-`depth` window |
 | `tierBands.ts` | Elo/value → tier key + label (8-tier pick ladder, #117); holds the server tier-config cache |
@@ -38,7 +39,7 @@ Helpers with **no React**. The annotated map — including which values are cros
 
 - **No React, ever.** No hooks, no components, no `useState`.
 - **Two tiers of import discipline, and the file header tells you which one you're in.**
-  - *Node-testable* (16) — no runtime import outside `utils/`, so `../../tests/check-*.js` can transpile and run the file under plain `node`: `applyJobResult`, `espnNavPolicy`, `feedbackBadge`, `inviteSocialProof`, `leagueUnlocks`, `matchesDerive`, `mockPool`, `playerValue`, `rankPresets`, `relativeTime`, `sessionRerank`, `tickerWindow`, `tierBands`, `tradeText`, plus `anchorRows` and `firstSessionMoment` (which import only a sibling in this folder). Adding an import from `../api/`, `react-native`, or a package **breaks that file's guard**. Type-only imports are always fine.
+  - *Node-testable* (17) — no runtime import outside `utils/`, so `../../tests/check-*.js` can transpile and run the file under plain `node`: `applyJobResult`, `espnNavPolicy`, `feedbackBadge`, `inviteSocialProof`, `leagueUnlocks`, `matchesDerive`, `mockPool`, `playerValue`, `rankPresets`, `relativeTime`, `sessionRerank`, `teamLabel`, `tickerWindow`, `tierBands`, `tradeText`, plus `anchorRows` and `firstSessionMoment` (which import only a sibling in this folder). Adding an import from `../api/`, `react-native`, or a package **breaks that file's guard**. Type-only imports are always fine.
   - *Everything else* (11) pulls in `../api/`, `../data/`, or a native module — `canvasSearch`, `clipboard`, `deepLinks`, `espnCookies`, `haptics`, `queueCalcTrade`, `ratingPrompt`, `shareLinks`, `testRouteEntry`, `tradeCalcMath`, `verification` — and is not node-testable.
 - **A cross-client value is a contract.** `anchorRows`'s keys, `tierBands`'s bands, `playerValue`'s curve, and the notification-type glyph set each have a counterpart in `backend/` or in the web/extension clients, listed in [docs/cross-client-invariants.md](../../../docs/cross-client-invariants.md). A copied table here is a silent mis-valuation, not a layout bug — which is exactly why `anchorRows.ts` was extracted the moment a second surface asked the same question.
 
