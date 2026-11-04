@@ -999,11 +999,16 @@ def test_a_paged_withhold_on_the_stored_deck_holds_the_cursor_then_serves_i1s_su
     """test_i1_serve_filter's paged withhold with the flags on (#551): the
     cursor reads the real stored deck. A stale roster past its bound withholds
     it with the cursor held; once fresh, exactly the stored cards that pass I-1
-    on the stored rosters serve, and at least one card is dropped."""
+    on the stored rosters serve, and at least one card is dropped. The
+    in-memory job's cards are swapped after the store, so a serve from the job
+    instead of the stored deck can't pass; and a cursor past 0 is checked too
+    (#555 QA P3-1)."""
     client, engine, _ = p1
     monkeypatch.setitem(server._trade_service_mod._cfg, "trade_gate_miss_mode", 1.0)
     job_id = run_job()
     deck = stored()["pages_blob"]["cards"]
+    with server._trade_jobs_lock:            # published lists are replaced, never mutated
+        server._trade_jobs[job_id]["cards"] = [page_card(i) for i in range(len(deck))]
     owner = {pid: uid for uid, roster in STORED_ROSTERS.items() for pid in roster}
     owner.update(STORED_PICKS)
     assert {a["id"] for c in deck for a in c["give"] + c["receive"]} <= owner.keys()
@@ -1011,16 +1016,23 @@ def test_a_paged_withhold_on_the_stored_deck_holds_the_cursor_then_serves_i1s_su
                  if all(owner[a["id"]] == UID for a in c["give"])
                  and all(owner[a["id"]] == c["target_user_id"] for a in c["receive"])}
     assert survivors and len(survivors) < len(deck)      # I-1 has a card to drop
+    # A cursor past 0 whose slice still has a card for I-1 to drop.
+    later = next(k for k in range(1, len(deck)) if set(ids(deck[k:])) - survivors)
     _roster_state(engine, status="stale", refreshed_ago=600)
-    body = status(client, job_id, 0).get_json()
-    assert body["serve_source"] == "page"
-    assert (body["cards"], body["cursor"], body["total_ready"], body["wait_reason"]) == (
-        [], 0, 0, "roster_check")
+    for cursor in (0, later):
+        body = status(client, job_id, cursor).get_json()
+        assert body["serve_source"] == "page"
+        assert (body["cards"], body["cursor"], body["total_ready"], body["wait_reason"]) == (
+            [], cursor, 0, "roster_check")
     _roster_state(engine, status="fresh", refreshed_ago=5)
-    body = status(client, job_id, 0).get_json()
-    assert body["serve_source"] == "page" and "wait_reason" not in body
-    assert {c["trade_id"] for c in body["cards"]} == survivors
-    assert body["cursor"] == len(deck)
+    # The later cursor first: a serve at 0 would withdraw its drops, and the
+    # sticky drop (C-b) would then hide them from the later one either way.
+    for cursor in (later, 0):
+        body = status(client, job_id, cursor).get_json()
+        assert body["serve_source"] == "page" and "wait_reason" not in body
+        assert {c["trade_id"] for c in body["cards"]} == survivors & set(ids(deck[cursor:]))
+        assert body["cursor"] == len(deck)
+
 
 def test_status_for_another_users_job_is_not_served_from_the_store(p1, spawned):
     client, _, sess = p1

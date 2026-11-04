@@ -31,7 +31,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
 
 from cryptography.hazmat.primitives import hashes
@@ -642,6 +642,17 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #            leagues.pick_assignment_settings.order (any row, incl. other
 #            importers'): a deleted Fleeced-minted id → the placeholder in
 #            place, so other owners' slot positions don't shift.
+#            Team overhaul: own overhauls (account_user_id) are deleted with
+#            their offers, roadmaps, attempts and reservations. In OTHER
+#            users' overhauls an offer naming this user (or their league
+#            member id) keeps its package and history; its counterparty id and
+#            name, and the card's target id and name, → the placeholder; the
+#            card loses the counterparty's Fleeced-derived fields; its
+#            evidence_json → NULL; a liked or undecided one goes stale, and
+#            an undecided one's package_hash is re-minted. Those overhauls'
+#            roadmap summaries list the placeholder instead, and a
+#            Fleeced-minted id (entry:*, acct_*) keying their snapshot
+#            rosters or holding their recovery pick → the placeholder.
 #   KEEP     player_value_history + model_config (not user-keyed),
 #            draft_picks on Sleeper grids (and legacy rows with no platform),
 #            ids and usernames alike, and recorded_picks.picking_team_id
@@ -680,6 +691,124 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "grading_sessions", "grading_cards", "trade_page_store", "trade_deck_lineage",
     "deck_card_withdrawals", "deck_evidence_packs",
 )
+
+# Team overhaul (BUILD-CONTRACT §4) keys its owner as `account_user_id`, and
+# the rest by `overhaul_id`, so none of it fits the user_id loop above.
+_OVERHAUL_CHILD_TABLES = ("overhaul_offers", "overhaul_roadmaps", "overhaul_attempts",
+                          "overhaul_reservations")
+# Public-card fields drawn from the counterparty's own Fleeced account (legal
+# R28.20 c2; trade_card_to_dict): the generators' reasons (the bilateral arm's
+# says whether the other manager has preferences), and the deck-card fields
+# the shared serializer can carry.
+_OVERHAUL_CARD_PARTNER_KEYS = ("reasons", "likes_you", "standing_offer_reason", "breaker",
+                               "fit", "roster_evaluation", "rationale", "narrative")
+
+
+def _overhaul_card_without_partner_fields(card: dict) -> dict:
+    """An overhaul offer's public card minus the counterparty's Fleeced-derived
+    fields: the keys above, and match_context's `counterparty*` keys (the owner
+    arms' benefits and preference evidence) and `opponent_outlook` (the
+    narrative arms', which can be the partner's declared outlook)."""
+    out = {k: v for k, v in card.items() if k not in _OVERHAUL_CARD_PARTNER_KEYS}
+    if isinstance(out.get("match_context"), dict):
+        out["match_context"] = {k: v for k, v in out["match_context"].items()
+                                if not k.startswith("counterparty") and k != "opponent_outlook"}
+    return out
+
+
+# A scrubbed card's id and name, and its blended scalars under legal's test
+# (R28.22 b, b2; every card of the partner alike). On the owner arms
+# `mismatch_score` (the deck's surplus_margin) and `composite_score` (its
+# base_score) are the same number, the card's presentation rank
+# (trade_gen_owner.py:649-650, trade_gen_bilateral.py:517): surplus_margin is
+# nulled, so its copy goes with it. `fit` (and fit.aggregate) is already
+# dropped above; no final_score is stored on an overhaul card.
+_OVERHAUL_REDACTED_CARD_VALUES = {"target_user_id": DELETED_USER_PLACEHOLDER,
+                                  "target_username": DELETED_USER_PLACEHOLDER,
+                                  "mismatch_score": None, "composite_score": None}
+
+
+# A users row created this long after an overhaul is a new account under a
+# reused id (deleted before overhauls were covered, then signed up again),
+# not the overhaul's owner. The margin covers session_init's users-row write,
+# which runs in a background thread after its response (server.py:27838-27920).
+_OVERHAUL_RESIGNUP_MARGIN = timedelta(hours=1)
+
+
+def delete_orphaned_overhauls() -> dict[str, int]:
+    """Legal R28.22 d2: overhauls whose owner account no longer exists (deleted,
+    or purged as an entry user, before deletion covered overhauls) go with every
+    row under them, and so do child rows whose overhaul is already gone.
+
+    An owner is live while ANY of these names their account_user_id: a users
+    row, a durable session row (the strongest signal: a signed-in user's
+    session/init can return before its background users-row write lands), or an
+    accounts row (as the acct_ alias, or as the bound Sleeper id:
+    migrate_board_data deletes the from-id's users row on a bind). Deletion
+    removes all of them. An overhaul is also orphaned when its owner's users row
+    was created more than _OVERHAUL_RESIGNUP_MARGIN after it (release-lead #540
+    QA P2-2), unless a durable session or accounts row for that owner is no
+    newer than the overhaul: that owner was live when they made it (a users
+    row can land late when its best-effort writes fail; QA re-QA P3). Deletion
+    removes both, so a real re-signup never has one older than its old plans.
+    Returns counts only; callers log only those."""
+    ovh, users, sessions, accts = (db.overhauls_table, db.users_table, db.sessions_table,
+                                   db.accounts_table)
+    counts = {"overhauls": 0, "child_rows": 0}
+    with db.engine.begin() as conn:
+        ids = set(conn.execute(select(ovh.c.overhaul_id).where(
+            ~ovh.c.account_user_id.in_(select(users.c.sleeper_user_id)),
+            ~ovh.c.account_user_id.in_(select(sessions.c.user_id)),
+            ~ovh.c.account_user_id.in_(select(ACCOUNT_USER_PREFIX + accts.c.account_id)),
+            ~ovh.c.account_user_id.in_(select(accts.c.sleeper_user_id).where(
+                accts.c.sleeper_user_id.isnot(None))))).scalars())
+        for oid, owner, made, joined in conn.execute(
+                select(ovh.c.overhaul_id, ovh.c.account_user_id, ovh.c.created_at, users.c.created_at)
+                .join(users, users.c.sleeper_user_id == ovh.c.account_user_id)
+                .where(users.c.created_at.isnot(None))).all():
+            made_at, joined_at = _parse_utc(made), _parse_utc(joined)
+            if made_at is None or joined_at is None or joined_at - made_at <= _OVERHAUL_RESIGNUP_MARGIN:
+                continue
+            anchors = list(conn.execute(select(sessions.c.created_at).where(
+                sessions.c.user_id == owner)).scalars()) + list(conn.execute(
+                select(accts.c.created_at).where(
+                    (ACCOUNT_USER_PREFIX + accts.c.account_id == owner)
+                    | (accts.c.sleeper_user_id == owner))).scalars())
+            if any(t is not None and t <= made_at for t in map(_parse_utc, anchors)):
+                continue
+            ids.add(oid)
+        ids = sorted(ids)
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            for name in _OVERHAUL_CHILD_TABLES:
+                tbl = getattr(db, name + "_table")
+                counts["child_rows"] += conn.execute(
+                    delete(tbl).where(tbl.c.overhaul_id.in_(chunk))).rowcount or 0
+            counts["overhauls"] += conn.execute(
+                delete(ovh).where(ovh.c.overhaul_id.in_(chunk))).rowcount or 0
+        for name in _OVERHAUL_CHILD_TABLES:
+            tbl = getattr(db, name + "_table")
+            counts["child_rows"] += conn.execute(delete(tbl).where(
+                ~tbl.c.overhaul_id.in_(select(ovh.c.overhaul_id)))).rowcount or 0
+    return counts
+
+
+def _parse_utc(raw):
+    """An ISO timestamp as an aware UTC datetime (a bare date or naive time is
+    UTC); None when it doesn't parse."""
+    try:
+        value = datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _loads_dict(raw):
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 @contextmanager
@@ -830,6 +959,111 @@ def _delete_user_data(sleeper_user_id: str,
             proposals.c.target_user_id.in_(user_ids)).values(
                 target_user_id=None, valuation_json=None))
         counts["trade_proposals_counterparty_anonymized"] = res.rowcount or 0
+
+        # Team overhaul: the user's own overhauls go with every row under them.
+        # In OTHER users' overhauls, an offer naming them as the counterparty
+        # keeps its package, decision and send history, but the id and name
+        # become the placeholder, the card loses the counterparty's
+        # Fleeced-derived fields, and the frozen evidence (both sides' private
+        # boards) goes, as trade_proposals.valuation_json above. A liked or
+        # undecided offer goes stale, the native retirement: a stale offer is
+        # never sent (the placeholder resolves to no roster) and a refresh
+        # rebuilds against current rosters. An undecided one also gets a fresh
+        # package_hash, so regeneration can't revive the scrubbed row by hash;
+        # a liked or passed one keeps its hash, which is what stops a passed
+        # package coming back. An offer names its counterparty by league member
+        # id: on ESPN/MFL that's the user's own id (session_input.py:58), on
+        # Sleeper the roster's owner, so user_ids is the whole set. NOT their
+        # overhauls' league_user_id: a Sleeper co-owner's is the roster's
+        # PRIMARY owner, another live person (release-lead #540 QA P1).
+        ovh = db.overhauls_table
+        own = select(ovh.c.overhaul_id).where(ovh.c.account_user_id.in_(user_ids))
+        named_ids = set(user_ids)
+        for name in _OVERHAUL_CHILD_TABLES:
+            tbl = getattr(db, name + "_table")
+            res = conn.execute(delete(tbl).where(tbl.c.overhaul_id.in_(own)))
+            counts[name + "_deleted"] = res.rowcount or 0
+        res = conn.execute(delete(ovh).where(ovh.c.account_user_id.in_(user_ids)))
+        counts["overhauls_deleted"] = res.rowcount or 0
+        offers = db.overhaul_offers_table
+        named = conn.execute(select(offers.c.id, offers.c.offer_id, offers.c.overhaul_id,
+                                    offers.c.card_json, offers.c.decision).where(
+            offers.c.counterparty_user_id.in_(named_ids))).all()
+        for row in named:
+            card = _loads_dict(row.card_json)
+            values = dict(
+                counterparty_user_id=DELETED_USER_PLACEHOLDER,
+                counterparty_username=DELETED_USER_PLACEHOLDER,
+                card_json=json.dumps(dict(_overhaul_card_without_partner_fields(card),
+                                          **_OVERHAUL_REDACTED_CARD_VALUES)
+                                     if card is not None else {}),
+                evidence_json=None)
+            if row.decision != "pass":
+                values["availability"] = "stale"
+            if row.decision == "undecided":
+                values["package_hash"] = "redacted_" + secrets.token_hex(16)
+            conn.execute(update(offers).where(offers.c.id == row.id).values(**values))
+        counts["overhaul_offers_counterparty_anonymized"] = len(named)
+        # Their roadmaps list each package's counterparty id in the summary, and
+        # a stored ownership blocker on a scrubbed offer names the team in its
+        # message (release-lead #540 QA P2-1): it becomes the shared copy's
+        # unnamed form, the same sentence a nameless counterparty gets.
+        from .ownership_copy import refusal_message
+        scrubbed_offers = {r.offer_id for r in named}
+        roadmaps = db.overhaul_roadmaps_table
+        touched = 0
+        for row in conn.execute(select(roadmaps.c.id, roadmaps.c.summary_json, roadmaps.c.compat_json)
+                                .where(roadmaps.c.overhaul_id.in_({r.overhaul_id for r in named}))).all():
+            values = {}
+            summary = _loads_dict(row.summary_json)
+            cps = summary.get("counterparties") if summary is not None else None
+            if isinstance(cps, list) and {str(c) for c in cps} & named_ids:
+                summary["counterparties"] = [DELETED_USER_PLACEHOLDER if str(c) in named_ids else c
+                                             for c in cps]
+                values["summary_json"] = json.dumps(summary)
+            compat = _loads_dict(row.compat_json)
+            hits = [item for items in (compat or {}).values() if isinstance(items, list)
+                    for item in items if isinstance(item, dict)
+                    and item.get("code") == "counterparty_asset_not_owned"
+                    and item.get("offer_id") in scrubbed_offers]
+            for item in hits:
+                assets = item.get("assets") if isinstance(item.get("assets"), list) else []
+                item["message"] = refusal_message("receive", assets, {}, None)
+            if hits:
+                values["compat_json"] = json.dumps(compat)
+            if values:
+                conn.execute(update(roadmaps).where(roadmaps.c.id == row.id).values(**values))
+                touched += 1
+        counts["overhaul_roadmaps_counterparty_anonymized"] = touched
+        # Their snapshots key `rosters` by league member id and pick owner, and
+        # their recovery names a pick's holder. On ESPN/MFL grids those can be
+        # this user's Fleeced-minted id (entry:*, acct_*; the same rule as
+        # recorded_picks below), which then becomes the placeholder. Platform
+        # ids stay.
+        minted = {u for u in user_ids if u.startswith("entry:") or is_account_user_id(u)}
+        snapshots = 0
+        if minted:
+            for row in conn.execute(select(ovh.c.id, ovh.c.snapshot_json, ovh.c.recovery_json).where(
+                    or_(*[col.contains(m, autoescape=True) for m in minted
+                          for col in (ovh.c.snapshot_json, ovh.c.recovery_json)]))).all():
+                values = {}
+                snapshot = _loads_dict(row.snapshot_json)
+                rosters = snapshot.get("rosters") if snapshot is not None else None
+                if isinstance(rosters, dict) and set(rosters) & minted:
+                    kept = {k: v for k, v in rosters.items() if k not in minted}
+                    kept[DELETED_USER_PLACEHOLDER] = list(kept.get(DELETED_USER_PLACEHOLDER) or []) + [
+                        a for k in sorted(set(rosters) & minted) for a in rosters[k] or []]
+                    snapshot["rosters"] = kept
+                    values["snapshot_json"] = json.dumps(snapshot)
+                recovery = _loads_dict(row.recovery_json)
+                if recovery is not None and recovery.get("holder_user_id") in minted:
+                    recovery.update(holder_user_id=DELETED_USER_PLACEHOLDER,
+                                    holder_username=DELETED_USER_PLACEHOLDER)
+                    values["recovery_json"] = json.dumps(recovery)
+                if values:
+                    conn.execute(update(ovh).where(ovh.c.id == row.id).values(**values))
+                    snapshots += 1
+        counts["overhaul_snapshots_anonymized"] = snapshots
 
         # Preserve published ranking snapshots and other users' adoptions;
         # remove attribution and freeform author metadata. Private sets have
@@ -1147,6 +1381,7 @@ _EXPORT_TABLES: tuple = (
     ("prepared_trade_targets", "prepared_trade_targets_table", "user_id",
      ("lease_token", "payload_json")),
     ("prepared_trade_participants", "prepared_trade_participants_table", "user_id", ()),
+    ("overhauls", "overhauls_table", "account_user_id", ()),
 )
 
 _EXPORT_TABLES += tuple(
@@ -1287,6 +1522,20 @@ def export_user_data(sleeper_user_id: str,
         tables["rank_set_entries"] = _rows_as_dicts(conn.execute(
             select(db.rank_set_entries_table).where(
                 db.rank_set_entries_table.c.rank_set_id.in_(rank_set_ids))).fetchall())
+        # The rows under the user's own overhauls. An offer's evidence_json
+        # (both sides' private boards, "never on the wire") is left out, and
+        # its card goes out without the counterparty's Fleeced-derived fields
+        # (R28.20 c2), the same fields deletion scrubs.
+        overhaul_ids = [r["overhaul_id"] for r in tables["overhauls"]]
+        for name in _OVERHAUL_CHILD_TABLES:
+            tbl = getattr(db, name + "_table")
+            tables[name] = _rows_as_dicts(conn.execute(
+                select(tbl).where(tbl.c.overhaul_id.in_(overhaul_ids)).order_by(tbl.c.id)).fetchall(),
+                ("evidence_json",) if name == "overhaul_offers" else ())
+        for row in tables["overhaul_offers"]:
+            card = _loads_dict(row["card_json"])
+            row["card_json"] = (json.dumps(_overhaul_card_without_partner_fields(card))
+                                if card is not None else None)
 
     return out
 

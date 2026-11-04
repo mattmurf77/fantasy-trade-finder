@@ -1019,9 +1019,14 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                           "network_type", "serve_source",
                                           "freshness_state", "job_id",
                                           "card_index"}),
-    # R2b — instead of R2. `reason` empty | error | abandoned (unmount, blur,
-    # or the app leaving `active` before a card, T4) | timeout (10,000 ms
-    # from the tap). Every R2b counts as > 200 ms in the p95 (T2).
+    # R2b — instead of R2. `reason` is the closed set empty | error |
+    # abandoned (unmount, blur, or the app leaving `active` before a card,
+    # T4) | timeout (10,000 ms from the tap) | paywall | verify. Every R2b
+    # counts as > 200 ms in the p95 (T2), except paywall / verify, which the
+    # AC-L1 p95 excludes (product gates, reported as their own rows).
+    # paywall = a 402 pro_required with any gate but verify_required; verify
+    # = a 402 gate=verify_required or a 403 verification_required on a gated
+    # route (the client's gateSignalFor; analytics-lead's grant, #393 M2).
     "trade_first_card_failed": frozenset({"search_id", "ms_from_tap", "reason",
                                           "entry_point", "search_type",
                                           "launch_state", "network_type",
@@ -1740,9 +1745,13 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # discipline of the 2026-08-13 backlog sweep. `surface` is the
     # InterruptSurface enum, identical to `prompt_shown.surface`
     # (quickset_prompt | coach_mark | apple_banner | outlook_banner |
-    # guide_step). `blocked_by` is the refusal reason: the literal 'tour'
-    # for a calc-tour hold, otherwise the InterruptSurface currently
-    # holding the slot. One row per deferral episode, not per retry.
+    # guide_step | paywall_offer). `blocked_by` is the refusal reason: the
+    # literal 'tour' for a calc-tour hold, otherwise the InterruptSurface
+    # currently holding the slot. One row per deferral episode, not per retry.
+    # `paywall_offer` (#393 M2) appears only as `blocked_by`, while the
+    # paywall offer holds the slot: the offer claims it imperatively (as the
+    # guide does), so it never emits prompt_shown and is never itself the
+    # `surface` of a deferral.
     "prompt_deferred":             frozenset({"surface", "blocked_by"}),
     # ── Paywall funnel (IAP enablement, 2026-08-28) ──────────────────────
     # `source` is the paywall ENTRY POINT — the `gate` string of the 402 that
@@ -1770,7 +1779,19 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # them. `restored` (bool) is whether Restore Purchases actually found an
     # entitlement; a false-heavy series is the "I paid and it's gone"
     # support ticket before it is filed.
-    "paywall_viewed":              frozenset({"source", "platform"}),
+    #
+    # paywall_viewed, #393 (analytics-lead's grant; registered with the M1
+    # emitter, PaywallScreen.tsx): `source` is the CLOSED set
+    #   first_opinion | left_deck | gate | settings | preview_end | unknown
+    # (first_opinion / left_deck = the offer trigger after the first opinion
+    # or on leaving the deck; gate = a locked action's 402 or a pre-check;
+    # preview_end = the free page's end card; settings = Settings › See plans).
+    # `gate` is the 402's reason, verbatim from the server's closed enum
+    #   preview_used | trial_expired | lapsed | never_trialed
+    # (verify_required never reaches the paywall: it opens the VerifySheet).
+    # `kind` is the locked action's family, find | send, which picks the
+    # headline. Both ride ONLY when a locked action opened the paywall.
+    "paywall_viewed":              frozenset({"source", "platform", "gate", "kind"}),
     "paywall_purchase_initiated":  frozenset({"product_id", "source"}),
     "paywall_purchase_completed":  frozenset({"product_id", "source"}),
     "paywall_purchase_failed":     frozenset({"product_id", "user_cancelled"}),
