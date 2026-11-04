@@ -697,6 +697,16 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
   - `test_daily_tick_route.py`: ten steps.
   - `test_purge_entry_users.py`: `user_taste.attr`, the derived `partner:<id>` key, listed as not a user column.
 - **Suites:** every test touching deletion, export or the tick (17 files): 909 passed before those two updates, and both pass after them (68). **The full backend suite at `671dd526`** (main `fabfe92c` merged): 10,195 passed, 2 skipped, 0 failed.
+## 2026-11-02 — #472, the evidence lock-hold fix: release-lead's QA (GO-with-notes at 90098f89), addressed
+
+Gates: as in #472's PR body; post-flip and flag-on only. D-056: `FTF_SKIP_SIM_GATE=1` posture; backend only.
+
+- **P2-2:** main is merged in (`9b5fcbbf`, clean), so CI and the run below are on today's main, including #517 and #551.
+- **P3-1:** the flush's plan, the `served_at` loop and `_pack_candidate_set` run inside the `try` whose `finally` settles the covered ids and restores the held withdrawals. A test makes the plan raise.
+- **P3-2:** a test pins every `blob_input` and `plan_input` under `_deck_evidence_write_lock` (store and first delivery, packed and stage 1). Another pins a taken input against writers' changes, for both bytes and plan.
+- **Sabotage:** 4 new, all RED: the plan outside the `try`, the store's input outside the write lock, `diagnostics` by reference, `run_meta` by reference.
+- **Runs:** `test_evidence_lock_holds.py` 18 passed; the full backend suite 10,311 passed, 3 skipped.
+- **P2-1:** models-lead's R-G entry is in the group notes (`trades-eng-472-rg-entry.md`). Merge waits on it.
 
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
