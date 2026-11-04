@@ -681,6 +681,7 @@ export default function UsageTrendsScreen() {
           key={`${claim.leagueId}:${claim.target.player_id}`}
           row={claim.target}
           leagueId={claim.leagueId}
+          surface="usage_trends"
           capacity={faQuery.data?.roster_capacity}
           waivers={faQuery.data?.waivers}
           dropCandidates={faQuery.data?.drop_candidates}

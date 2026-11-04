@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Pressable,
   Alert,
-  Linking,
   Modal,
   ScrollView,
   TextInput,
@@ -34,6 +33,8 @@ import type {
 } from '../api/league';
 import { isEspnLeague } from '../api/espn';
 import { isMflLeague, isFleaflickerLeague } from '../api/platformLink';
+import { openInSleeperApp } from '../utils/sleeperHandoff';
+import type { ExternalSurface } from '../utils/openExternal';
 
 // #179 claim sheet + the "where can an Add happen" resolver, shared by the
 // Free Agents finder and Usage Trends (moved out of FreeAgentsScreen
@@ -47,8 +48,7 @@ export type ClaimTarget = Pick<FreeAgentRow, 'player_id' | 'name' | 'position' |
 // #179 — where an "Add" can actually be executed. Sleeper publishes no
 // write API for roster moves, so the honest Sleeper flow is the claim-
 // preparation sheet (ClaimSheet below): FAAB bid + budget, drop selection,
-// then a deep-link into the league's players page in the Sleeper app/site
-// (same pragmatic pattern as the trade-propose deep-link in TradesScreen).
+// then a hand-off to the Sleeper app (utils/sleeperHandoff, #351).
 // Platform-linked leagues (ESPN / MFL / Fleaflicker) are read-only imports
 // today — no write path, so the Add affordance renders dimmed and explains
 // why on tap. 'local' covers demo/local leagues that exist nowhere outside
@@ -103,11 +103,12 @@ export function explainNoAdd(addPlatform: Exclude<AddPlatform, 'sleeper'>) {
 // limits). Sleeper publishes NO write API, so FTF PREPARES the claim —
 // FAAB bid sizing against the caller's live budget, drop selection from
 // the value-ascending candidate list when the roster is full — and the CTA
-// hands off to Sleeper's players page (same deep-link target as the old
-// alert flow) where the user executes it.
+// hands off to the Sleeper app (utils/sleeperHandoff) where the user
+// executes it.
 export default function ClaimSheet({
   row,
   leagueId,
+  surface = 'unspecified',
   capacity,
   waivers,
   dropCandidates,
@@ -115,6 +116,8 @@ export default function ClaimSheet({
 }: {
   row: ClaimTarget;
   leagueId: string;
+  /** Which host opened the sheet, for the hand-off's ExternalTarget.surface. */
+  surface?: ExternalSurface;
   capacity: FreeAgentRosterCapacity | null | undefined;
   waivers: FreeAgentWaivers | null | undefined;
   dropCandidates: FreeAgentDropCandidates | null | undefined;
@@ -136,9 +139,12 @@ export default function ClaimSheet({
   const showDropList = openSlots !== null ? openSlots === 0 : candidates.length > 0;
 
   const openSleeper = () => {
-    // Lands on the league's Players (available players) surface — Sleeper
-    // has no public write API, so the claim itself happens in Sleeper.
-    Linking.openURL(`https://sleeper.com/leagues/${leagueId}/players`).catch(() => {});
+    // Opens the Sleeper app (`sleeper://`, the deepest proven rung; today
+    // `bare`, so Sleeper's last-viewed screen). Not installed → the Get
+    // Sleeper alert, never silent. Sleeper has no public write API, so the
+    // claim itself happens in Sleeper.
+    // `hasDrop` feeds #528's sleeper_handoff_resolved `has_drop` (a drop picked).
+    void openInSleeperApp({ target: 'add', leagueId, playerId: row.player_id, surface, hasDrop: dropId != null });
   };
 
   return (

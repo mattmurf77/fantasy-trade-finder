@@ -62,8 +62,6 @@ const APP_STORE_SLEEPER = 'https://apps.apple.com/app/id987367543';
 //    new code. Owners per eng-external-links §4 "Phase-2 call-site
 //    switches"; rows 21–25 have no owner yet ("app-shell, unassigned").
 const LEGACY = [
-  { owner: 'league-eng', file: 'src/components/ClaimSheet.tsx', call: 'openURL',
-    arg: '`https://sleeper.com/leagues/${leagueId}/players`' },
   { owner: 'trades-eng', file: 'src/state/useTradeQueue.ts', call: 'canOpenURL', arg: 'url' },
   { owner: 'trades-eng', file: 'src/state/useTradeQueue.ts', call: 'openURL', arg: 'url' },
   { owner: 'draft-eng', file: 'src/screens/DraftRoomScreen.tsx', call: 'openURL',

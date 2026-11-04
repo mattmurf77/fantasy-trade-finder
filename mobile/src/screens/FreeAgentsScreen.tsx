@@ -133,10 +133,6 @@ export default function FreeAgentsScreen() {
             />
           ) : null}
         </View>
-      ) : query.isLoading ? (
-        <View style={styles.centerFill}>
-          <ActivityIndicator color={ice.base} />
-        </View>
       ) : query.isError ? (
         <View style={styles.centerFill}>
           <Text style={styles.errorText}>
@@ -149,6 +145,10 @@ export default function FreeAgentsScreen() {
               : readErrorCopy(query.error, "Couldn't load free agents.")}
           </Text>
           <Button label="Try again" variant="ghost" compact onPress={() => query.refetch()} />
+        </View>
+      ) : query.isLoading ? (
+        <View style={styles.centerFill}>
+          <ActivityIndicator color={ice.base} />
         </View>
       ) : (
         <FlatList
@@ -211,6 +211,7 @@ export default function FreeAgentsScreen() {
           key={claimTarget.player_id}
           row={claimTarget}
           leagueId={leagueId}
+          surface="free_agents"
           capacity={query.data?.roster_capacity}
           waivers={query.data?.waivers}
           dropCandidates={query.data?.drop_candidates}
