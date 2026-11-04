@@ -1,3 +1,11 @@
+## 2026-11-04 — Paywall stack refreshed onto actual main 787b9fc4
+
+Merged main `787b9fc4` (binary-safety #589) into the reviewed `7bb7ff86` paywall batch without squashing. Only the additive test-ledger insertion conflicted; both histories remain, and main's changelog merged unchanged. No paywall source, flags, defaults or feature behavior changed during resolution.
+
+- Targeted current-tree verification: billing sandbox safety, global route allowlist, unverified no-read policy, paywall config and durable preview windows — **310 passed in 7.66s**.
+- `mobile/tests/check-paywall-gate.js` — **110 passed**, including main's honest founder-price date copy. Existing TypeScript installation used read-only through `NODE_PATH`.
+- `git diff --check` passes. Main `787b9fc4` and the original seven PR heads remain merge ancestors. Monetization flags and enforcement knobs remain off. No production or remote action performed; full CI on this refreshed head remains the merge gate.
+
 ## 2026-11-04 — O9 EAS build archive exclusions
 
 Integrated `985d767a` onto main `fd5390ac`, resolving only the package-script
