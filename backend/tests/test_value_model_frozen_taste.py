@@ -19,6 +19,7 @@ import json
 import math
 import struct
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -243,7 +244,10 @@ def test_config_is_pinned_and_recorded_and_replays_after_live_config_changes(wor
     assert vm.model_config_sha256() != pin["model_config_sha256"]
 
     assert vm.train_model(decks, as_of=world["as_of"], config=pin).to_dict() == model.to_dict()
-    assert repr(replay(run.config)) == repr(run)
+    replayed = replay(run.config)
+    # Bit-identical but for R6.3's live model_config SHA, which records the change.
+    assert replayed.model_config_sha256 == vm.model_config_sha256() != run.model_config_sha256
+    assert repr(replace(replayed, model_config_sha256=run.model_config_sha256)) == repr(run)
     # Without the records, the live change shows.
     assert vm.train_model(decks, as_of=world["as_of"]).to_dict() != model.to_dict()
     live = replay()

@@ -222,10 +222,15 @@ def test_nightly_with_a_settle_lag_grades_settled_decks_as_of_last_served_plus_l
         write_deck(eng, packs, _deck_cards(job, 30, served_at=at), full=range(30),
                    served_at=at, viewed=range(0, 30, 2))
 
+    runs, evaluate = [], nightly.evaluate
+    monkeypatch.setattr(nightly, "evaluate",
+                        lambda *a, **k: runs.append(evaluate(*a, **k)) or runs[-1])
     stats = nightly.run_all(window_days=30, engine=eng, ess_min=1, bootstrap=20, seed=1,
                             settle_lag_days=7)
     assert stats["errors"] == 0
     as_of = (datetime.fromisoformat(served["settled"]) + timedelta(days=7)).isoformat()
+    # On each run, not only the record: run_record's `extra` would mask a drop (#458 QA).
+    assert runs and all((r.as_of, r.settle_lag_days) == (as_of, 7) for r in runs)
     for record in load_runs():
         assert record["as_of"] == as_of and record["settle_lag_days"] == 7
         assert record["n_total"] == 2 * 30                       # "fresh" isn't settled yet
@@ -233,4 +238,5 @@ def test_nightly_with_a_settle_lag_grades_settled_decks_as_of_last_served_plus_l
             assert set(record["config"]["values"]) == set(vm.SCORE_CONFIG)
             assert len(record["config"]["model_config_sha256"]) == 64
         else:
-            assert record["config"] is None
+            assert record["config"] == {}                         # R6.3: read none
+        assert len(record["model_config_sha256"]) == 64 and record["code_sha"]
