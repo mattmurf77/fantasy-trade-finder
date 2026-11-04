@@ -19,3 +19,27 @@
 /mockups/
 /screens/
 mobile/ios/build/
+#
+# LOCAL-ONLY FILES. Once this file exists, eas-cli stops reading every
+# .gitignore ("if .easignore exists, .gitignore files are not used", eas-cli
+# vcs/local.js) and copies the working tree into the archive, so anything
+# gitignored but not listed here is uploaded to EAS. `eas build:inspect --stage
+# archive` proved it on 2026-10-15 for secrets.local.env, data/*.db, .env files,
+# signing files and the qa scratch DBs. Every secret, credential, DB and env
+# pattern from any .gitignore is repeated below; mobile/tests/check-easignore.js
+# fails CI when one goes missing. These file globs stay unanchored, like their
+# .gitignore originals, so they match at any depth. Unlike the bare directory
+# names warned about above, they can't collide with app source.
+secrets.local.env*
+.env
+.env.local
+.env.*.local
+.xcode.env.local
+*.db
+*.p12
+*.key
+*.jks
+*.mobileprovision
+/data/
+/qa/sim-runs/
+/qa/**/scratch*/

@@ -1,3 +1,19 @@
+## 2026-11-04 — O9 EAS build archive exclusions
+
+Integrated `985d767a` onto main `fd5390ac`, resolving only the package-script
+context conflict while preserving current scripts. The change repeats sensitive
+tracked ignore patterns in `.easignore` and adds the existing static guard.
+Scope: `docs/plans/eas-build-secret-exclusions.md`. No runtime, schema, API, flags
+or analytics-event change. No archive, secret, EAS environment or production
+setting was read; no build or rotation performed.
+
+- `node mobile/tests/check-easignore.js`: all 14 sensitive patterns covered.
+- Negative controls: removing `secrets.local.env*` and anchoring `*.db` each fail;
+  both mutations restored, final guard passes.
+- `node --check mobile/tests/check-easignore.js`: syntax valid.
+- `bash mobile/scripts/testid-lint.sh`: passed (`testid-lint OK`).
+- Exact-head GitHub CI: pending; local checks are not merge or release evidence.
+
 ## 2026-11-04 — #365 N12/N4 launch integration: square icon and privacy manifest
 
 Full gates. Scope: `docs/plans/app-store-launch/scope-n12-n4-icon-privacy.md`. Reviewed PR head `0ea4bc22` independently, then merged current main `af57e59c` without feature conflicts. No icon, manifest, scope or guard changes were needed during integration. D-056: no simulator run; the automated evidence and code-walk are below.
@@ -5,6 +21,7 @@ Full gates. Scope: `docs/plans/app-store-launch/scope-n12-n4-icon-privacy.md`. R
 - **Automated, rerun on the integrated tree:** `node mobile/tests/check-app-icon.js` passes (Expo/native icons byte-identical, 1024×1024 RGB, no alpha or white corners); `node mobile/tests/check-privacy-manifest.js` passes (Resources membership, four required-reason categories, 13 collected types, tracking off); `plutil -lint mobile/ios/DTFDynastyTradeFinder/PrivacyInfo.xcprivacy` passes. `git diff --check` passes.
 - **Code-walk:** only the two icon PNGs, privacy manifest, their two guards and npm scripts change. The manifest stays in the existing native Resources phase; the guard checks that registration and that pod privacy aggregation is not disabled. Purchase History is declared with App Functionality and Analytics alongside the other 12 scoped types. No application flow, flag, API, schema or analytics emitter changes.
 - **Remaining ship evidence:** GitHub CI must pass on this integration head. The scope's next-build checklist (home-screen/Store icon and no ITMS-91053 processing email) remains owed; no device build or App Store processing was performed here.
+
 ## 2026-11-04 — #580 launch integration: honest new-member price date
 
 Lean legal wording alignment, as scoped in the PR: no schema, API, flag, analytics or pricing behavior change. Independently reviewed PR head `dcb51f22`, then merged current main `af57e59c` without feature conflicts. The change remains limited to three display strings and their guard assertions.
