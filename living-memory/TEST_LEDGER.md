@@ -1,3 +1,21 @@
+## 2026-11-04 — Model launch stack integration (local candidate)
+
+Retains exact source heads #389, #374, #462, #493, #472 and #467 on the
+privacy/Shop #592 foundation. No KTC parser #584, feature flag or production
+configuration change is included. Freeze seed/default remains 1. KTC remains
+operational at the existing production blend weight 0.5; this path is not dark.
+
+- Offline targeted integration: **247 passed, 5 skipped in 14.24s** across
+  generic-pick learning, model guardrails/replay, freeze golden behavior,
+  net decline, taste concurrency, evidence locks, KTC blend/cap, scrub held
+  writes, Shop signals and freeze defaults. External sockets were blocked.
+- Independent reviewer: **132 passed, 5 optional PostgreSQL skips**, then
+  **5/5 passed** on a disposable socket-only PostgreSQL synthetic cluster.
+  Confirmed deletion-token mapping, generic-pick stripping, immutable packed
+  evidence and evidence-write serialization remain intact.
+- No full local suite, production writes, provider requests or simulator run.
+  Full exact-head GitHub CI remains mandatory before main. D-056 posture.
+
 ## 2026-11-04 — Privacy/Shop launch integration batch (local candidate)
 
 Base: main `af57e59c`. Preserved every actual GitHub PR head as an ancestor,
