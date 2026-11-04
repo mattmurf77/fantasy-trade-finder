@@ -261,3 +261,63 @@ export function deckEndState(s: PageEnvelope & {
   if (s.phase === 'retrying' || s.phase === 'failed') return 'error';
   return 'pending';
 }
+
+/** The automatic re-search after an input change (analytics-lead's option (a),
+ *  2026-10-28; release-lead's #470 QA P2-1). The server revokes a deck whose
+ *  inputs moved (a roster change, a ranking edit): its next page comes back
+ *  `status: 'error'`, `error: 'inputs_changed'`. Instead of "Couldn't load
+ *  more trades." the deck re-searches once, by itself, when the user has no
+ *  card left to see. It is not a tap (no R1 `find_trades_tapped`, no new
+ *  `source`), it mints no search_id, and it is not a failure (no deckFailure,
+ *  so no R2b `error`). One per search: a second `inputs_changed`, or a failed
+ *  re-search, falls to today's error card, whose Try again is a real tap.
+ *  - 'idle': no re-search yet in this search (a new search's answer resets
+ *    it: autoResearchAfterAnswer);
+ *  - 'pending': an `inputs_changed` waits for the user's last card;
+ *  - 'used': the one re-search ran. */
+export type AutoResearchState = 'idle' | 'pending' | 'used';
+
+/** The state once a generate answer lands: any search but the re-search
+ *  itself starts a new budget. Only the ANSWER resets it, never the
+ *  dispatch: a Try again whose request fails leaves the revoked job on
+ *  screen, and an 'idle' there would hide its error card for good (#525 QA
+ *  P1-1). */
+export function autoResearchAfterAnswer(
+  state: AutoResearchState,
+  research: boolean,
+): AutoResearchState {
+  return research ? state : 'idle';
+}
+
+/** A job error's next state: `inputs_changed` with none used is recovered
+ *  ('pending'); anything else is today's failure ('fail'). */
+export function autoResearchOnJobError(
+  state: AutoResearchState,
+  error: string | null | undefined,
+): 'pending' | 'fail' {
+  return state === 'idle' && error === 'inputs_changed' ? 'pending' : 'fail';
+}
+
+/** Whether the deck's error state is being recovered, so the deck end shows
+ *  nothing (never the error card) while it is: an `inputs_changed` not yet
+ *  re-searched, or the re-search in flight (`researchInFlight`: the re-search
+ *  itself, never another dispatch). Read at render time, so the error card
+ *  never flashes for a frame before the state moves. */
+export function autoResearchHidesError(
+  state: AutoResearchState,
+  error: string | null | undefined,
+  researchInFlight: boolean,
+): boolean {
+  return state === 'used' ? researchInFlight : error === 'inputs_changed';
+}
+
+/** The search_id the re-search sends: the search's own while its trace is
+ *  still open (no first card yet: R2 then fires once, on the rebuilt deck's
+ *  first card, timed from the original tap); none once it settled, so no
+ *  trace is opened and no R2/R2b can be orphaned. Never a fresh one. */
+export function autoResearchSearchId(
+  deckSearchId: string | null | undefined,
+  isOpen: (searchId: string) => boolean,
+): string | null {
+  return deckSearchId && isOpen(deckSearchId) ? deckSearchId : null;
+}

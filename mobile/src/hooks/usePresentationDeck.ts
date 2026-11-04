@@ -63,7 +63,9 @@ export default function usePresentationDeck(leagueId: string | null | undefined)
   const [progress, setProgress] = useState<RankingProgress | undefined>(undefined);
   const epochRef = useRef(0);
 
-  const run = useCallback(async () => {
+  // #393 M2 (D2): the mount effect and its poll are background (a 402 opens
+  // nothing); pull-to-refresh (`refresh`, no argument) stays user-initiated.
+  const run = useCallback(async (request?: { background?: boolean }) => {
     if (!leagueId) return;
     const epoch = ++epochRef.current;
     setLoading(true);
@@ -73,7 +75,7 @@ export default function usePresentationDeck(leagueId: string | null | undefined)
       const t = fairnessThresholdFor(fairnessOnFromPref(raw));
       if (epoch !== epochRef.current) return;
       setThreshold(t);
-      const snap = await generateTrades({ league_id: leagueId, fairness_threshold: t });
+      const snap = await generateTrades({ league_id: leagueId, fairness_threshold: t }, undefined, request);
       if (epoch !== epochRef.current) return;
       setJob(snap);
       if (snap.status === 'error') setError(snap.error || 'Could not build trade ideas.');
@@ -87,7 +89,7 @@ export default function usePresentationDeck(leagueId: string | null | undefined)
 
   useEffect(() => {
     setJob(null);
-    void run();
+    void run({ background: true });
   }, [run]);
 
   // Board progress — the honest denominator behind the confidence cap. An
@@ -118,7 +120,7 @@ export default function usePresentationDeck(leagueId: string | null | undefined)
     const tick = async () => {
       if (cancelled) return;
       try {
-        const next = await getTradeStatus(job.job_id);
+        const next = await getTradeStatus(job.job_id, undefined, { background: true });
         if (cancelled || epoch !== epochRef.current) return;
         failures = 0;
         // Reset the backoff on real progress; otherwise widen it so a stalled

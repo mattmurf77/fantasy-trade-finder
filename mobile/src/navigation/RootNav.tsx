@@ -49,10 +49,12 @@ import PickAssignmentScreen from '../screens/PickAssignmentScreen';
 import RecordPicksScreen from '../screens/RecordPicksScreen';
 import PaywallScreen from '../screens/PaywallScreen';
 import TipJarScreen from '../screens/TipJarScreen';
+import FounderWelcomeScreen from '../screens/FounderWelcomeScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import AnalystGuide from '../components/AnalystGuide';
 import VerifyAccountBanner from '../components/VerifyAccountBanner';
+import VerifySheet from '../components/VerifySheet';
 import Toast from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useFlag, useFeatureFlags } from '../state/useFeatureFlags';
@@ -206,8 +208,16 @@ type AuthStack = {
   // Registered UNCONDITIONALLY like every other flag-gated route; the screen
   // self-guards on the flag and pops when it is off. `source` names what sent
   // the user here and rides every paywall_* event, so conversion can be read
-  // per entry point; in this build the only source is 'settings'.
-  Paywall: { source: string };
+  // per entry point (`first_opinion | left_deck | gate | settings |
+  // preview_end`). A locked action (#393 M1) also passes the 402's `gate`
+  // and `kind` ('find' | 'send'), which pick the headline.
+  // `plan` (#393 M3, D9): the plan to pre-select when the paywall comes back
+  // after a verify.
+  Paywall: { source: string; gate?: string; kind?: 'find' | 'send'; plan?: string };
+  // #393 M3 — the Founding GMs welcome, once, after a purchase in the club
+  // window (screens/FounderWelcomeScreen.tsx). `period` picks the body's
+  // plan variant; `since` is the join date (ISO).
+  FounderWelcome: { period: 'annual' | 'monthly'; since?: string };
   // Tip jar (same flag, same dark posture). Money with NO entitlement — see
   // screens/TipJarScreen.tsx.
   TipJar: { source: string };
@@ -625,11 +635,9 @@ export default function RootNav({ booted }: { booted: boolean }) {
                 onVerify={() => navigation.navigate('SleeperConnect')}
               />
               <PushPrimingModal />
-              {/* In-app feedback capture (TestFlight). Floats above the
-                  tab bar on every authed screen. Settings → Test feedback
-                  exposes the inbox + share button. Remove this <FeedbackFAB />
-                  line (and the matching Settings row) when the app graduates
-                  to a public App Store release. */}
+              {/* In-app feedback capture. Floats above the tab bar on every
+                  authed screen, App Store builds included (#354 D-5).
+                  Settings → Help & about → Your feedback opens the inbox. */}
               <FeedbackFAB activeScreen={activeScreen} />
             </>
           )}
@@ -755,17 +763,46 @@ export default function RootNav({ booted }: { booted: boolean }) {
           component={TipJarScreen}
           options={{ presentation: 'modal', headerShown: false }}
         />
+        {/* #393 M3 — the Founding GMs welcome. The paywall REPLACES itself
+            with it after a purchase in the club window, so its one button
+            returns to the same card. A full-screen MODAL (no FeedbackFAB,
+            #188), no swipe-dismiss: Back to my trades is the way out. */}
+        <Stack.Screen
+          name="FounderWelcome"
+          component={FounderWelcomeScreen}
+          options={{ presentation: 'fullScreenModal', headerShown: false, gestureEnabled: false }}
+        />
         <Stack.Screen
           name="FeedbackInbox"
           component={FeedbackInboxScreen}
-          options={{
+          options={({ navigation }) => ({
             presentation: 'modal',
             headerShown: true,
-            title: 'Test feedback',
-            headerTitle: () => <HeaderTitle>Test feedback</HeaderTitle>,
+            title: 'Your feedback',
+            headerTitle: () => <HeaderTitle>Your feedback</HeaderTitle>,
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
-          }}
+            // #354 ux item 4 / #130: a modal carries an explicit header close
+            // control (docs/design/components.md, Sheets/modals): the Icon
+            // Button variant — 32×32, radius sm, `x` in chalk-dim, pressed
+            // = ink-3 fill — in headerRight. Swipe-dismiss alone isn't
+            // discoverable, and the inbox is public now.
+            headerRight: () => (
+              <Pressable
+                testID="feedback-inbox.close"
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                hitSlop={6}
+                onPress={() => navigation.goBack()}
+                style={({ pressed }) => [
+                  { width: 32, height: 32, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+                  pressed && { backgroundColor: ink.ink3 },
+                ]}
+              >
+                <Icon name="x" size={16} color={chalk.dim} />
+              </Pressable>
+            ),
+          })}
         />
         {/* #142/#144 — League rankings, pushed from the League tab's
             "League rankings" Explore row. Standard (non-modal) push; explicit
@@ -1190,6 +1227,10 @@ export default function RootNav({ booted }: { booted: boolean }) {
           not just the authed tabs. Renders null unless a step is active;
           native sheets/alerts still render above it (system modals win). */}
       <AnalystGuide />
+      {/* #393 M1 — the VerifySheet. Container-level so it covers root-stack
+          pushes as well as the tabs; renders nothing until the paywall gate
+          (state/usePaywallGate) opens it. */}
+      <VerifySheet />
       {/* PRD 01-04: unroutable-deep-link fallback toast (v2 router only).
           Renders null while not visible — inert with the flag off. */}
       <Toast

@@ -32,6 +32,16 @@ function check(name, fn) { fn(); count++; console.log(`PASS ${name}`); }
 const card = { trade_id: 'offer', impression_id: 'i1', league_id: 'L',
   opponent_user_id: 'P', give_player_ids: ['a'], receive_player_ids: ['b'] };
 
+// A check that awaits something that never settles would let the event loop
+// drain and node exit 0 mid-run: an unfinished run fails instead.
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-owner-offer-signals did not finish (a check hung): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 (async () => {
   check('500ms visible dwell required; prefetched/hidden does not count', () => {
     const c = pure.createOfferExposureClock(); c.setCard(card, 0);
@@ -345,5 +355,6 @@ const card = { trade_id: 'offer', impression_id: 'i1', league_id: 'L',
       assert.equal(writes[2].body.trade_id, 'offer::edited');
     });
   }
+  finished = true;
   console.log(`${count} owner offer signal checks passed`);
 })().catch(e => { console.error(e); process.exitCode = 1; });
