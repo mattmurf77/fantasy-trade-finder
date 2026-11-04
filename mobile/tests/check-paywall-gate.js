@@ -1024,6 +1024,10 @@ const BACKGROUND_SET = [
     "the standing-offer post (QA P2-3: nothing may present over the sheet's RN Modal)"],
   ['api/overhaul.ts', /request: \{ background\?: boolean \} = \{ background: true \},/,
     "the active-overhaul probe (TradesScreen's getActiveOverhaul query, every mount)"],
+  ['api/faMove.ts', /getConsent\(platform, \{ quietStatuses: CONSENT_QUIET_STATUSES, background: true \}\)/,
+    "D1: Settings' roster-moves consent read (readConsentStatus, every Leagues visit)"],
+  ['api/faMove.ts', /`\/api\/league\/free-agents\?league_id=\$\{encodeURIComponent\(leagueId\)\}`,\s*\{ background: true \},/,
+    "D1: the move-capability prefetch (readLeagueCapability, Usage Trends)"],
 ];
 check('8b. D2 [shape]: the pinned background set; nothing else in mobile/src is background; the callers the API defaults cover still match them', () => {
   const want = {};
@@ -1771,6 +1775,10 @@ check('9g. copy §9.6 [executed + shape]: the invitee eyebrow and board line —
   for (const f of walk(SRC)) {
     const rel = path.relative(SRC, f).split(path.sep).join('/');
     let t = strip(fs.readFileSync(f, 'utf8'));
+    // D1's free-agent move client fills its own server-copy templates, whose
+    // vocabulary includes {league} (docs/plans/sleeper-fa-write/contract.md
+    // §7). Only the invitee template and {inviter} stay banned there.
+    if (rel === 'api/faMove.ts') t = t.replace(/\{league\}/g, '');
     if (rel === 'copy/monetization.ts') {
       t = t.replace("'mon.invitee.context': '{inviter} invited you to {league}.',", '')
         .replace("MON['mon.invitee.context'].replace('{inviter}', () => who).replace('{league}', () => where)", '');

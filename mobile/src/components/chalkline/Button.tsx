@@ -15,13 +15,16 @@ interface Props {
   compact?: boolean; // 36px instead of 44px
   /** Optional leading Chalkline icon (16px, label-colored). */
   icon?: IconName;
-  /** Replaces the label with a spinner; implies disabled. */
+  /** A centred spinner over the label, which stays in layout invisible so
+   *  the button keeps its size; inactive but not dimmed. */
   loading?: boolean;
   style?: ViewStyle;
   testID?: string;   // UI-test harness id (registry: mobile/src/components/CLAUDE.md)
   /** Spoken label when the visible one is ambiguous out of context
    *  ("Retry" → "Retry refreshing trades"). Unset = the visible label. */
   accessibilityLabel?: string;
+  /** What happens, or why nothing can yet ("Tick the box to make the move"). */
+  accessibilityHint?: string;
 }
 
 // Chalkline button set (docs/design/components.md → Buttons).
@@ -37,6 +40,7 @@ export default function Button({
   style,
   testID,
   accessibilityLabel,
+  accessibilityHint,
 }: Props) {
   // a11y.text_scaling (S2 PRD-01): fixed height → minHeight + padding so the
   // label can wrap/grow at large OS text sizes. Flag off = fixed height,
@@ -59,6 +63,7 @@ export default function Button({
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled: inactive, busy: loading }}
       hitSlop={compact && touchPolish ? { top: 4, bottom: 4 } : undefined}
       style={({ pressed }) => [
@@ -70,22 +75,34 @@ export default function Button({
           backgroundColor: pressed ? v.bgPressed : v.bg,
           borderColor,
         },
-        inactive && styles.disabled,
+        // Only `disabled` dims; `loading` stays inactive but undimmed
+        // (design-lead #364).
+        disabled && styles.disabled,
         style,
       ]}
     >
-      {({ pressed }) =>
-        loading ? (
-          <ActivityIndicator size="small" color={v.text} />
-        ) : (
-          <View style={styles.content}>
+      {({ pressed }) => {
+        const content = (
+          <View style={loading ? [styles.content, styles.hidden] : styles.content}>
             {icon ? <Icon name={icon} size={16} color={pressed ? v.textPressed : v.text} /> : null}
             <Text scale="body" style={[styles.label, { color: pressed ? v.textPressed : v.text }]}>
               {label}
             </Text>
           </View>
-        )
-      }
+        );
+        if (!loading) return content;
+        // design-lead #364: `loading` keeps the label's box (no width jump)
+        // and centres the spinner over it, in the label colour. Inactive, so
+        // there is never a pressed fill.
+        return (
+          <>
+            {content}
+            <View style={styles.spinner}>
+              <ActivityIndicator size="small" color={v.text} />
+            </View>
+          </>
+        );
+      }}
     </Pressable>
   );
 }
@@ -153,4 +170,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   disabled: { opacity: 0.45 },
+  hidden: { opacity: 0 },
+  spinner: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

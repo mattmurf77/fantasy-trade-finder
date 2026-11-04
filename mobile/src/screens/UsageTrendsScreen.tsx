@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Button, Icon, Text, TickLabel } from '../components/chalkline';
 import ClaimSheet, { explainNoAdd, resolveAddPlatform, type ClaimTarget } from '../components/ClaimSheet';
@@ -25,6 +25,14 @@ import { chalk, fonts, ice, ink, radii, scrim, shadowSheet, space, type } from '
 import { ApiError } from '../api/client';
 import { track } from '../api/events';
 import { getFreeAgents } from '../api/league';
+import {
+  capabilityAtTap,
+  capabilityForRow,
+  faMoveOpensSheet,
+  prefetchLeagueCapability,
+  prefetchListCapabilities,
+  type FaMoveCapability,
+} from '../api/faMove';
 import { getUsageTrends, type UsageMetric, type UsagePlayer } from '../api/usageTrends';
 import { useFlag } from '../state/useFeatureFlags';
 import { useFinderTargets } from '../state/useFinderTargets';
@@ -111,7 +119,14 @@ export default function UsageTrendsScreen() {
   // the last four completed weeks.
   const [selectedWeeks, setSelectedWeeks] = useState<number[] | null>(null);
   const { width: screenWidth } = useWindowDimensions();
-  const [claim, setClaim] = useState<{ target: ClaimTarget; leagueId: string } | null>(null);
+  // D1: `move` is the league's capability as cached at the Add tap.
+  const [claim, setClaim] = useState<{
+    target: ClaimTarget;
+    leagueId: string;
+    leagueName: string | null;
+    move: FaMoveCapability | null;
+  } | null>(null);
+  const queryClient = useQueryClient();
 
   // The Free Agents link pushes `{ownership:'free_agents'}`; honour it on a
   // re-push into an already-mounted screen too.
@@ -132,6 +147,16 @@ export default function UsageTrendsScreen() {
     // A new week selection keeps the current list on screen while it loads.
     placeholderData: keepPreviousData,
   });
+  // D1: the focused league's capability, prefetched once in the background
+  // on mount and when the focused league changes, so the card's own Add can
+  // route by it. A real Sleeper league session only (never demo or local, and
+  // not with no league). Same trimmed fetch, 60 s staleTime and no retry as
+  // the list prefetch; nothing on the Add path waits for it. While dark (or
+  // with moves off) this is the visit's only capability read.
+  useEffect(() => {
+    if (!enabled || !focusId || resolveAddPlatform(focusId, isDemo) !== 'sleeper') return;
+    void prefetchLeagueCapability(queryClient, focusId);
+  }, [enabled, focusId, isDemo, queryClient]);
   const faQuery = useQuery({
     queryKey: ['free-agents', claim?.leagueId, 'ALL'],
     queryFn: () => getFreeAgents(claim!.leagueId, 'ALL'),
@@ -282,16 +307,39 @@ export default function UsageTrendsScreen() {
     navigation.navigate('Main', { screen: 'Trades', params: { screen: 'TradesHome' } });
   };
 
+  // D1: the listed leagues' capabilities, prefetched in the background when an
+  // availability list opens (the sheet, or an expanded row), each under its
+  // own key (60 s staleTime, no retry); the cache keeps only `move` and the
+  // rows' move_* fields. Only once the focused league's cached capability
+  // says `submit` (dark or moves off: no list reads), then at most six of
+  // the leagues where Add shows, Sleeper first (release-lead P2-A).
+  const prefetchCapabilities = (rows: UsageLeagueRow[]) => {
+    if (isDemo) return;
+    prefetchListCapabilities(queryClient, focusId, rows, (id) => resolveAddPlatform(id, isDemo) === 'sleeper');
+  };
+
   const doAdd = async (p: UsagePlayer, lgId: string) => {
     trackAction('add', p, lgId);
     const platform = resolveAddPlatform(lgId, isDemo);
+    // D1 (scope §B1): the server's capability first, but only if it's already
+    // cached, fresh (under 5 minutes) and not invalidated since; the tap never
+    // waits for it. Otherwise (or on today's server) it routes exactly as
+    // #509: Sleeper opens the sheet in hand-off, the rest get the alert. The
+    // sheet still reads its own list after the switch.
+    const cap = capabilityForRow(isDemo ? undefined : capabilityAtTap(queryClient, lgId), p.player_id);
     await closeSheetFirst();
-    if (platform !== 'sleeper') {
+    if (platform !== 'sleeper' && !faMoveOpensSheet(cap.move, cap.row)) {
       explainNoAdd(platform);
       return;
     }
     if (!(await switchTo(lgId))) return;
-    setClaim({ target: { player_id: p.player_id, name: p.name, position: p.position, team: p.team }, leagueId: lgId });
+    setClaim({
+      target: { player_id: p.player_id, name: p.name, position: p.position, team: p.team, ...cap.row },
+      leagueId: lgId,
+      // The tapped league's name, for the named CTA's "In {league}" (R28.26).
+      leagueName: (leagues ?? []).find((l) => l.league_id === lgId)?.name ?? null,
+      move: cap.move,
+    });
   };
 
   const doRerank = (p: UsagePlayer) => {
@@ -384,6 +432,7 @@ export default function UsageTrendsScreen() {
             onRerank={() => doRerank(p)}
             onAvailability={() => {
               reportAvailability(p);
+              prefetchCapabilities(leagueRowsFor(p));
               setSheetPlayer(p);
             }}
           />
@@ -401,7 +450,10 @@ export default function UsageTrendsScreen() {
         expanded={open}
         leagueRows={open ? leagueRowsFor(p) : []}
         onToggle={() => {
-          if (!open) reportAvailability(p);
+          if (!open) {
+            reportAvailability(p);
+            prefetchCapabilities(leagueRowsFor(p));
+          }
           setExpanded(open ? null : p.player_id);
         }}
         onAdd={() => focusId && doAdd(p, focusId)}
@@ -685,6 +737,9 @@ export default function UsageTrendsScreen() {
           capacity={faQuery.data?.roster_capacity}
           waivers={faQuery.data?.waivers}
           dropCandidates={faQuery.data?.drop_candidates}
+          move={claim.move}
+          refetch={async () => (await faQuery.refetch()).data}
+          leagueName={claim.leagueName}
           onClose={() => setClaim(null)}
         />
       ) : null}

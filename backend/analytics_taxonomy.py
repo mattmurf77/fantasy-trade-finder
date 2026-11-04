@@ -757,6 +757,19 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # FA add is not a trade opinion, and send_button's trade intent is
     # already counted by sleeper_send_attempted.
     "sleeper_handoff_resolved",
+    # ── D1 free-agent moves, 2026-11-01 (granted by analytics-lead with
+    # C1–C6) ────────────────────────────────────────────────────────────────
+    # Scope: docs/plans/sleeper-fa-write/scope.md §1 (plan/fa-moves-launch).
+    # Addendum: docs/business/analytics/2026-11-01-fa-move-events.md.
+    # Registered in the SAME commit as the emitters (mobile/src/api/faMove.ts
+    # trackFaMove / attemptMove), which ship dark in the 11-06 binary: they
+    # fire only when the server's capability says `move.mode = 'submit'`
+    # (C1). The two exposures land in analytics_queries.NON_INTENT_EVENTS in
+    # this commit; the two write events stay INTENT. The three server-fired
+    # siblings (fa_move_consent_recorded / _consent_withdrawn /
+    # _write_succeeded) are registered by the server PR, with their emitters.
+    "fa_move_connect_shown", "fa_move_consent_shown",
+    "fa_move_write_attempted", "fa_move_write_failed",
 })
 
 # ---------------------------------------------------------------------------
@@ -1851,6 +1864,42 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # user_events COLUMN, never a prop.
     "sleeper_handoff_resolved":    frozenset({"surface", "target", "rung",
                                               "outcome", "has_drop"}),
+    # ── D1 free-agent moves (2026-11-01, scope.md §1; addendum
+    # 2026-11-01-fa-move-events.md). Every row carries `league_platform` ∈
+    # sleeper | mfl | espn (P2, C1: always present, never null — the client
+    # emits only in `submit` mode, where it is set). NEVER a prop named
+    # `platform`: that is the device-platform column. Values are carried by
+    # this comment and the addendum (this registry constrains KEYS):
+    #   `surface` ∈ free_agents | usage_trends — the claim sheet's host.
+    #   connect_shown `reason` ∈ not_linked | expired | unverified |
+    #     other_account | unknown (`unknown` = a connect value outside the
+    #     closed set; the UI still shows the plain connect step).
+    #   consent_shown `reason` ∈ first | lapsed | version | withdrawn.
+    #   write_failed `error_code` is CLOSED, 21 values, platform-free (C2/C3):
+    #     feature_disabled | bad_request | verification_required |
+    #     not_linked | expired | unconfigured | consent_required |
+    #     roster_full_drop_required | asset_not_owned | player_unavailable |
+    #     waiver_bid_over_budget | waiver_claim_unsupported |
+    #     move_kind_changed | rejected | write_failed | outcome_unknown |
+    #     move_in_progress | internal_error | network | timeout | unknown.
+    #     "Couldn't confirm" = outcome_unknown | internal_error | timeout |
+    #     network, or unknown with status >= 500 or 200-299 (a 2xx the
+    #     client couldn't read); unknown with a 4xx stays out. "Repeat tap
+    #     blocked" = move_in_progress (C4, widened by analytics-lead in
+    #     round 3). `status` is the HTTP status, 0 for the client's timer and
+    #     for no answer at all.
+    #   write_failed `kind` ∈ network | roster_read, ONLY when the response
+    #     body carries one (C6): state 11 "not sent" vs 10f "refused".
+    # An offline tap sends nothing and records nothing, `attempted` included
+    # (no attempt_id is minted), so network/0 always means a request went out.
+    "fa_move_connect_shown":   frozenset({"surface", "reason", "league_platform"}),
+    "fa_move_consent_shown":   frozenset({"surface", "reason", "league_platform"}),
+    "fa_move_write_attempted": frozenset({"surface", "has_drop", "has_bid",
+                                          "consent_ticked", "attempt_id",
+                                          "league_platform"}),
+    "fa_move_write_failed":    frozenset({"surface", "error_code", "status",
+                                          "attempt_id", "league_platform",
+                                          "kind"}),
 }
 
 

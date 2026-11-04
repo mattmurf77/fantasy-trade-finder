@@ -548,6 +548,10 @@ export interface RequestOptions {
   timeoutMs?: number;
   // State-owned identity fence. No store import belongs in this layer.
   beforeDispatch?: () => void;
+  // Statuses that are an expected answer for this call, not a failure: no
+  // api_request_failed event for them. Opt-in per call; the rejection is
+  // unchanged. (D1: Settings' consent read, whose 404 / 403 is routine.)
+  quietStatuses?: readonly number[];
   // A call the user didn't make with a tap (a poll, a prefetch, an
   // auto-start). Its 402 / 403 opens no paywall and no VerifySheet; the
   // caller just gets the rejection. Default false: user-initiated.
@@ -658,13 +662,9 @@ export async function apiRequest<T = unknown>(
   try {
     return await runWithDeadline(signal => _apiRequestInner<T>(path, {...opts, signal, deadlineAt}), deadlineAt, opts.signal);
   } catch (err) {
-    _reportApiFailure(
-      path,
-      opts.method || 'GET',
-      err,
-      _clockMs() - startedAt,
-      _leftForegroundCount !== foregroundEpoch,
-    );
+    // `quietStatuses`: an expected status for this call reports nothing.
+    const quiet = err instanceof ApiError && !!opts.quietStatuses?.includes(err.status);
+    if (!quiet) _reportApiFailure(path, opts.method || 'GET', err, _clockMs() - startedAt, _leftForegroundCount !== foregroundEpoch);
     // Gate off (or a background call): thrown right here, exactly as today,
     // with no extra async hop before the caller's own retry/backoff runs
     // (trades-eng: check-win-now-recovery T3's fake clock depends on it).

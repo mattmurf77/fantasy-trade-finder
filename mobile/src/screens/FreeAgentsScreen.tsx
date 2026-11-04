@@ -24,14 +24,12 @@ import {
   type,
 } from '../theme/chalkline';
 import { Button, Icon } from '../components/chalkline';
-import ClaimSheet, {
-  explainNoAdd,
-  resolveAddPlatform,
-  type AddPlatform,
-} from '../components/ClaimSheet';
+import ClaimSheet, { explainNoAdd, resolveAddPlatform } from '../components/ClaimSheet';
 import FeedbackFAB from '../components/FeedbackFAB';
 import PlayerCard from '../components/PlayerCard';
 import { getFreeAgents, type FreeAgentRow } from '../api/league';
+import { faMoveOpensSheet, FA_MOVE_FALLBACK_COPY, type FaMoveCapability } from '../api/faMove';
+import { isClaimPending, useClaimsPending } from '../state/claimsPending';
 import { ApiError } from '../api/client';
 import { readErrorCopy } from '../utils/verification';
 import { useSession } from '../state/useSession';
@@ -51,6 +49,7 @@ export default function FreeAgentsScreen() {
   const navigation = useNavigation<any>();
   const [filter, setFilter] = useState<PositionFilter>('ALL');
   const leagueId = useSession((s) => s.league?.league_id);
+  const leagueName = useSession((s) => s.league?.league_name);
   const isDemo = useSession((s) => s.isDemo);
   // S4 PRD-05 (ux.empty_state_ctas): the no-league state gets the action
   // its copy describes. Flag off: copy-only, as before.
@@ -76,15 +75,29 @@ export default function FreeAgentsScreen() {
   const consensusOnly = !!query.data && !query.data.user_has_rankings;
   // #179 — Add affordance context (platform + Sleeper claim-sheet data).
   const addPlatform = resolveAddPlatform(leagueId, isDemo);
-  // Sleeper leagues: Add opens the claim-preparation sheet for this row.
+  // D1: the server's move capability for this league, from the same read.
+  // Absent on today's server, and then every Add routes exactly as before.
+  const move = query.data?.move ?? null;
+  // Add opens the claim sheet when the capability's in-app move flow covers
+  // this row (any platform, no build), else as today: Sleeper leagues get
+  // the hand-off sheet, the rest the honest no-write-path explanation.
   const [claimTarget, setClaimTarget] = useState<FreeAgentRow | null>(null);
+  // The capability as it was at the tap; the sheet holds it from there.
+  const [claimMove, setClaimMove] = useState<FaMoveCapability | null>(null);
+  // D1 state 9: claims submitted this app session (empty unless the server
+  // answered `submit`, so the rows are unchanged on today's server).
+  const pendingClaims = useClaimsPending((s) => s.keys);
   const onAdd = useCallback(
     (row: FreeAgentRow) => {
       if (!leagueId) return;
-      if (addPlatform === 'sleeper') setClaimTarget(row);
-      else explainNoAdd(addPlatform);
+      if (faMoveOpensSheet(move, row) || addPlatform === 'sleeper') {
+        setClaimMove(move);
+        setClaimTarget(row);
+      } else {
+        explainNoAdd(addPlatform);
+      }
     },
-    [leagueId, addPlatform],
+    [leagueId, addPlatform, move],
   );
 
   return (
@@ -200,12 +213,17 @@ export default function FreeAgentsScreen() {
             </View>
           }
           renderItem={({ item }) => (
-            <FreeAgentRowCard row={item} addPlatform={addPlatform} onAdd={onAdd} />
+            <FreeAgentRowCard
+              row={item}
+              canAdd={faMoveOpensSheet(move, item) || addPlatform === 'sleeper'}
+              claimPending={isClaimPending(pendingClaims, leagueId, item.player_id)}
+              onAdd={onAdd}
+            />
           )}
         />
       )}
       {/* #179 claim sheet — keyed by player so bid/drop state resets per
-          claim. Only ever mounted for Sleeper leagues (onAdd gates). */}
+          claim. Mounted only where onAdd routes to it. */}
       {claimTarget && leagueId ? (
         <ClaimSheet
           key={claimTarget.player_id}
@@ -215,6 +233,9 @@ export default function FreeAgentsScreen() {
           capacity={query.data?.roster_capacity}
           waivers={query.data?.waivers}
           dropCandidates={query.data?.drop_candidates}
+          move={claimMove}
+          refetch={async () => (await query.refetch()).data}
+          leagueName={leagueName ?? null}
           onClose={() => setClaimTarget(null)}
         />
       ) : null}
@@ -228,23 +249,25 @@ export default function FreeAgentsScreen() {
 
 // One FA row: dense PlayerCard (60px two-line) — line 2 carries the drop
 // suggestion; right cluster = positional FA rank over the caller-board value.
-// #179: rightSlot carries the Add affordance — secondary for Sleeper leagues
-// (deep-link hand-off), ghost/dim for platforms with no write path (tap
-// explains why).
+// #179: rightSlot carries the Add affordance — secondary where Add opens the
+// claim sheet (the Sleeper hand-off, or D1's in-app move), ghost/dim for
+// platforms with no write path (tap explains why).
 function FreeAgentRowCard({
   row,
-  addPlatform,
+  canAdd,
+  claimPending,
   onAdd,
 }: {
   row: FreeAgentRow;
-  addPlatform: AddPlatform;
+  canAdd: boolean;
+  /** D1 state 9: a claim for this player was submitted this session. */
+  claimPending: boolean;
   onAdd: (row: FreeAgentRow) => void;
 }) {
   const drop = row.drop_suggestion;
   // S2 PRD-04 ride-along (visual.chalkline_cleanup): "No drop worth making"
   // is content, not a placeholder — faint → dim.
   const cleanupOn = useFlag('visual.chalkline_cleanup');
-  const canDeepLink = addPlatform === 'sleeper';
   return (
     <View style={styles.rowWrap}>
       <PlayerCard
@@ -266,13 +289,17 @@ function FreeAgentRowCard({
           <Button
             testID={`free-agents.add.${row.player_id}`}
             label="Add"
-            variant={canDeepLink ? 'secondary' : 'ghost'}
+            variant={canAdd ? 'secondary' : 'ghost'}
             compact
             onPress={() => onAdd(row)}
           />
         }
         statsSlot={
-          drop ? (
+          claimPending ? (
+            <Text style={styles.dropLine} numberOfLines={1}>
+              {FA_MOVE_FALLBACK_COPY.claim_pending}
+            </Text>
+          ) : drop ? (
             <Text style={styles.dropLine} numberOfLines={1}>
               Drop: {drop.name}{' '}
               <Text style={styles.dropDelta}>

@@ -46,6 +46,7 @@
     "test:espn-signin-flag": "node tests/check-espn-signin-flag.js",
     "test:espn-wrong-account": "node tests/check-espn-wrong-account.js",
     "test:external-links": "node tests/check-external-links.js",
+    "test:fa-move": "node tests/check-fa-move.js",
     "test:fairness-default": "node tests/check-fairness-default.js",
     "test:feedback-badge": "node tests/check-feedback-badge.js",
     "test:feedback-capture": "node tests/check-feedback-capture.js",

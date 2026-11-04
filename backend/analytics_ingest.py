@@ -187,8 +187,11 @@ _NUMERIC_ID_PROPS = frozenset({"league_id"})
 # onto one "[scrubbed]" id and break the one-R2/R2b-per-search_id rule.
 # They skip the numeric-run rule ONLY when the whole value is id-shaped
 # (a hyphenated uuid or 32 hex chars), so free text under these keys is
-# still scrubbed (analytics-lead's hardening note).
-_HEX_ID_PROPS = frozenset({"search_id", "job_id", "deck_id"})
+# still scrubbed (analytics-lead's hardening note). D1 free-agent moves
+# (2026-11-01): `attempt_id`, the client uuid4 minted once per tap, joins
+# fa_move_write_attempted / _failed to the server's _write_succeeded, and a
+# scrubbed one would merge unrelated attempts the same way.
+_HEX_ID_PROPS = frozenset({"search_id", "job_id", "deck_id", "attempt_id"})
 _HEX_ID_RE = re.compile(r"[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}"
                         r"-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}")
 
