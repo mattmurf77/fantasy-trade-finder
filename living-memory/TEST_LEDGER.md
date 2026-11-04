@@ -1,3 +1,50 @@
+## 2026-11-04 — Privacy/Shop resync with latest main `787b9fc4`
+
+Merged latest main as a parent, preserving both histories and every original
+privacy/Shop PR head. Only additive runbook/ledger/test-index documentation
+conflicts needed resolution; both histories and Shop/share guard entries remain.
+No runtime feature values differ from current main. No activation or remote write.
+
+- Targeted nine-file integrated rerun: **279 passed, 1 skipped in 22.42 s**;
+  covers sign-in budgets/history/deletion, Shop signals, held deletion writes,
+  packs/stage3, partner-redacted model reads and account deletion. The known
+  Shop generic-pick skip awaits #389 in the model batch.
+- Executed guards: Shop send **33/33**, share text **109/109**.
+- Diff whitespace check against current main passes. Full GitHub CI remains
+  required on the final pushed candidate; no full local suite was run.
+
+## 2026-11-04 — O9 EAS build archive exclusions
+
+Integrated `985d767a` onto main `fd5390ac`, resolving only the package-script
+context conflict while preserving current scripts. The change repeats sensitive
+tracked ignore patterns in `.easignore` and adds the existing static guard.
+Scope: `docs/plans/eas-build-secret-exclusions.md`. No runtime, schema, API, flags
+or analytics-event change. No archive, secret, EAS environment or production
+setting was read; no build or rotation performed.
+
+- `node mobile/tests/check-easignore.js`: all 14 sensitive patterns covered.
+- Negative controls: removing `secrets.local.env*` and anchoring `*.db` each fail;
+  both mutations restored, final guard passes.
+- `node --check mobile/tests/check-easignore.js`: syntax valid.
+- `bash mobile/scripts/testid-lint.sh`: passed (`testid-lint OK`).
+- Exact-head GitHub CI: pending; local checks are not merge or release evidence.
+
+## 2026-11-04 — #365 N12/N4 launch integration: square icon and privacy manifest
+
+Full gates. Scope: `docs/plans/app-store-launch/scope-n12-n4-icon-privacy.md`. Reviewed PR head `0ea4bc22` independently, then merged current main `af57e59c` without feature conflicts. No icon, manifest, scope or guard changes were needed during integration. D-056: no simulator run; the automated evidence and code-walk are below.
+
+- **Automated, rerun on the integrated tree:** `node mobile/tests/check-app-icon.js` passes (Expo/native icons byte-identical, 1024×1024 RGB, no alpha or white corners); `node mobile/tests/check-privacy-manifest.js` passes (Resources membership, four required-reason categories, 13 collected types, tracking off); `plutil -lint mobile/ios/DTFDynastyTradeFinder/PrivacyInfo.xcprivacy` passes. `git diff --check` passes.
+- **Code-walk:** only the two icon PNGs, privacy manifest, their two guards and npm scripts change. The manifest stays in the existing native Resources phase; the guard checks that registration and that pod privacy aggregation is not disabled. Purchase History is declared with App Functionality and Analytics alongside the other 12 scoped types. No application flow, flag, API, schema or analytics emitter changes.
+- **Remaining ship evidence:** GitHub CI must pass on this integration head. The scope's next-build checklist (home-screen/Store icon and no ITMS-91053 processing email) remains owed; no device build or App Store processing was performed here.
+
+## 2026-11-04 — #580 launch integration: honest new-member price date
+
+Lean legal wording alignment, as scoped in the PR: no schema, API, flag, analytics or pricing behavior change. Independently reviewed PR head `dcb51f22`, then merged current main `af57e59c` without feature conflicts. The change remains limited to three display strings and their guard assertions.
+
+- **Automated, rerun on the integrated tree:** `node mobile/tests/check-paywall-gate.js` — **110 passed, 0 failed**. The checked-in guard used TypeScript from the existing `mobile-deps` dependency installation through `NODE_PATH`; no dependencies were changed. `git diff --check` passes.
+- **Code-walk:** `mon.pay.founder.new`, `mon.club.welcome_body.annual` and `.monthly` say "Starting in January 2027" instead of claiming the higher price applies from January 1. This matches the merged server's January 2, 2027 04:00 UTC price-rise instant without changing it. Founder eligibility still says "by December 31, 2026"; all amounts, SKU ids and purchase/enforcement behavior are unchanged. Guard 4p rejects day-specific January 1 copy in every MON string; 9d verifies both welcome bodies.
+- **Remaining ship evidence:** GitHub CI must pass on this integration head. The PR's post-build checklist (paywall wording plus annual/monthly sandbox-purchase welcome) remains owed. No device, purchase, App Store or production checks were performed here.
+
 ## 2026-11-04 — Integrated D1 / tip / share launch candidate
 
 Base main `af57e59c`; original head ancestry retained for #379 `025aefd1`,
@@ -767,6 +814,43 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
   - `test_daily_tick_route.py`: ten steps.
   - `test_purge_entry_users.py`: `user_taste.attr`, the derived `partner:<id>` key, listed as not a user column.
 - **Suites:** every test touching deletion, export or the tick (17 files): 909 passed before those two updates, and both pass after them (68). **The full backend suite at `671dd526`** (main `fabfe92c` merged): 10,195 passed, 2 skipped, 0 failed.
+
+## 2026-10-31 — C2, release-lead's #566 QA and re-QA (GO-with-notes): renders redrawn, checklist fixed, guard by meaning
+
+Gates: the C2 scope (`docs/plans/share-text-c2/scope.md`). Client-only; no schema, flag, event or route change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the structural guard plus the operator's TestFlight checklist.
+
+- **P2-2, the renders:** `renders/render.py` now draws both before/after PNGs from the code:
+  - `TierBadge`'s pick-value ladder labels (uppercased by `type.label`) in `chalk.base`, with a 1px border in the tier's colour. The first draw had cyan "ELITE" / "STARTER" badges.
+  - `PositionChip` the same way;
+  - **picks as each host builds them** (release-lead's re-QA P2-A). The calculator's pick is a generic rung: an RB chip, "Late 1st Round Pick" and a "1 1ST" badge. The in-league pick is an owned league pick: a PICK chip, "2027 2nd" and its number (today's SF TEP price, 434), with the `/?ref=` URL (no mint). The second draw had an impossible "PICK 2027 Mid 1st 2,117" row in the calculator;
+  - main's TOTALs are the evaluation's package values (`_consensus_packages`), not the rows' sum, and its calculator verdict comes from `_fairness_v3`;
+  - **every asset keyed by a real-shaped id** (re-check P2-1). The third draw passed display names to the package math, so the generic pick missed #427's first-round exemption: 8,600 and "fair" where main gives 8,870 and "even". Now the calculator pane's 9,119 / 8,151, "Verdict: fair · Side A sends more" (ratio 0.894), and the in-league 6,079 / 7,336, match main's math for those ids;
+  - the wordmark and the URL footer in both panes. The first draw had no footer.
+- **P2-3, the checklist:** steps 2 and 5 now read the message body sent with the image in Messages (there's no capture toggle on iOS). Step 1 adds the footer and the unchanged on-screen verdict; a calculator pick shows its stand-in chip and tier badge. Step 4 adds a league pick, which shows its number with the `/?ref=` link. Step 3 notes the link preview's "% fair" is #511's.
+- **P3, the guard (`check-share-text.js`):**
+  - It now bans `.verdict`, `point_ratio`, `give_value` / `receive_value`, `favors`, "fair" (with "Unfair", `/fair/i`), "even", a win (with an ASCII "Win-win"), "total", `.reduce(` and "%" in every share region. They're matched with comments stripped, so C2's comments can name what it removed.
+  - Not covered: a verdict read into a variable outside the scanned regions and passed in under a neutral name (that needs data flow).
+  - It scans the card's render body, which must render the line it's given exactly once.
+  - The card's style key `verdict` is now `valueLine`, and the stale "verdict" comments are fixed (`ShareTradeImage.tsx`, `TradeCalculatorScreen.tsx` ×2, `InLeagueCalculator.tsx`).
+- **Runs:**
+  - The guard passes 109/109 here and fails 31 against main's share code.
+  - **Sabotages, 11/11 red:**
+    - release-lead's first four bypasses: a bare `evalQuery.data?.verdict` in the text share, "`${…}% fair`" in the in-league fallback, the verdict in the caption, a hard-coded "Verdict: fair" in the card;
+    - "Fair" alone in the card, and `point_ratio` as a prop;
+    - the re-QA's: an "Unfair", "Even trade" or "You win" caption, an ASCII "Win-win" in the text share, and a total summed in the card.
+  - All 135 `check-*.js` suites pass; `tsc --noEmit` is clean and testid-lint is green.
+
+## 2026-10-31 — C2: shared trades state "Package value" only (remove-only share text)
+
+Gates: the scope block `docs/plans/share-text-c2/scope.md`. head-bizops's decision under the launch-roadmap approval, routed by head-eng for the 11-06 binary. Client copy removal only: no route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture. The evidence is the structural guard plus the TestFlight checklist in the scope (§3).
+
+- **`mobile/tests/check-share-text.js` (`npm run test:share-text`), 53 checks pass:**
+  - `SHARE_VALUE_LINE` is "Package value";
+  - the share image has no TOTAL row and takes no totals;
+  - in each `<ShareTradeImage … />` and the calculator's `shareTrade` text, no "(ratio ", "Verdict: ", win / board line, "Consensus: " / "Consensus verdict|read", "sends more", or verdict function remains, and each states `SHARE_VALUE_LINE`.
+  - **Against main's share code it fails 19.**
+- **Suites:** all 135 `mobile/tests/check-*.js` pass; `tsc --noEmit` is clean.
+- **TestFlight:** the operator's 5-step checklist, on the 11-06 binary.
 
 ## 2026-11-01 — D1 free-agent moves server, dark until the Sleeper capture (`sleeper.send_add_drop`)
 
