@@ -4,6 +4,7 @@ Set FTF_FIRST_INIT_PG_URL only to an explicitly provisioned disposable PG
 cluster to run these same cases there. Every case owns a fresh private schema.
 """
 from concurrent.futures import ThreadPoolExecutor
+import json
 import os
 import threading
 import uuid
@@ -220,3 +221,32 @@ def test_pg_referrer_deletion_after_candidate_read_cannot_credit_tombstone(engin
     assert not _rows(engine, db.notifications_table)
     assert not any(r["event_type"] == "referral_attributed"
                    for r in _rows(engine, db.user_events_table))
+
+
+@pytest.mark.parametrize("stored_platform, expected", [
+    ("MFL", "mfl"), ("espn", "espn"), (None, "sleeper"), ("missing-row", None),
+])
+def test_cross_league_first_init_shares_d1_platform_lookup(engine, stored_platform, expected):
+    """The D1 lookup remains lowercase/None-aware while referral attribution
+    borrows its first-init connection and reports the credited league."""
+    other_league = "87654321"
+    db.upsert_user(USER)
+    with engine.begin() as conn:
+        if stored_platform != "missing-row":
+            conn.execute(insert(db.leagues_table).values(
+                sleeper_league_id=other_league, user_id=REFERRER,
+                platform=stored_platform))
+        conn.execute(insert(db.league_members_table).values(
+            league_id=other_league, user_id=USER, username="New User",
+            roster_data="[]"))
+    # This is the exact behavior the free-agent capability uses; absent
+    # metadata stays distinguishable from a stored Sleeper/default league.
+    assert db.get_league_platform(other_league) == expected
+    token = db.create_referral_invite(REFERRER, other_league, "league_home")["invite_id"]
+    assert _initialize(token)[0] is True
+    (event,) = [r for r in _rows(engine, db.user_events_table)
+                if r["event_type"] == "referral_attributed"]
+    props = json.loads(event["props"])
+    assert props["league_id"] == other_league
+    assert props["league_platform"] == (expected or "sleeper")
+    assert _rows(engine, db.referrals_table)[0]["referred_user_id"] == USER

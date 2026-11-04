@@ -1,3 +1,27 @@
+## 2026-11-04 — Canonical league-platform helper across D1 and referral init
+
+The combined stack defined get_league_platform twice: D1's later helper
+shadowed the referral helper's optional-connection signature, so cross-league
+first-init attribution raised TypeError and rolled back. Retained one canonical
+connection-aware helper with D1's lowercase platform, NULL→Sleeper, and
+missing-row→None semantics; referral attribution owns its existing missing-row
+Sleeper fallback. No auth, consent, flag or public response change.
+
+- Added four actual shared-transaction cross-league referral cases: uppercase
+  MFL, ESPN, stored NULL, and no league row. All **4 failed before the fix** at
+  the unexpected conn keyword and pass afterward, while pinning the D1 return
+  behavior and attributed platform/event/credit.
+- Referral ledger, first-init attribution, consent, FA capability and FA move
+  route targets: **353 passed, 2 PostgreSQL-only skips in 19.19 s**.
+- Same first-init file on disposable socket-only PostgreSQL: **14 passed,
+  1 SQLite-DDL-only skip in 4.98 s**. Synthetic schemas only; cluster stopped.
+- AST audit of all **160** tracked non-test backend Python modules against
+  main `787b9fc4`: no top-level duplicate function/class definitions and no
+  parse errors in either current tree or baseline. Audit artifact is local
+  `/private/tmp/fleeced-core-definition-duplicate-audit.json`.
+- Whitespace check passes. No full local suite, production change or remote
+  write. Parent's separate CHANGELOG/HANDOFF/NEXT edits were not staged.
+
 ## 2026-11-04 — Complete launch candidate client verification
 
 Candidate through `cd489abd`: complete mobile structural sweep ran **154**

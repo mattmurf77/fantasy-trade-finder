@@ -177,7 +177,7 @@ def _attribute(*, user_id, league_id, league_platform, invite_id, invited_by,
 
     notified = _post_joined_row(credited, user_id, new_username, conn=conn)
     platform = (league_platform if str(credited["league_id"]) == league_id
-                else db.get_league_platform(credited["league_id"], conn=conn))
+                else (db.get_league_platform(credited["league_id"], conn=conn) or "sleeper"))
     db.record_event(
         str(credited["referrer_user_id"]), "referral_attributed",
         league_id=str(credited["league_id"]), source="api",

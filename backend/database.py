@@ -15170,17 +15170,16 @@ def get_user_names(user_id: str, *, conn=None) -> dict | None:
     return dict(row._mapping) if row else None
 
 
-def get_league_platform(league_id: str, *, conn=None) -> str:
-    """The `leagues.platform` of a stored league ('sleeper' when unset or
-    unknown): the platform-linked leagues carry espn / mfl / fleaflicker."""
-    supplied_conn = conn
-    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
-        row = conn.execute(
-            select(leagues_table.c.platform)
-            .where(leagues_table.c.sleeper_league_id == str(league_id))
-            .limit(1)
-        ).fetchone()
-    return (row.platform if row and row.platform else "sleeper")
+def get_league_platform(league_id: str, *, conn=None) -> str | None:
+    """The stored league's lowercase platform (NULL defaults to Sleeper),
+    or None when no row exists. Referral first-init can borrow its transaction;
+    free-agent capability preserves missing metadata as a distinct result."""
+    with (nullcontext(conn) if conn is not None else engine.connect()) as db_conn:
+        row = db_conn.execute(select(leagues_table.c.platform).where(
+            leagues_table.c.sleeper_league_id == str(league_id))).fetchone()
+    if not row:
+        return None
+    return str(row.platform or "sleeper").lower()
 
 
 # ---------------------------------------------------------------------------
@@ -16277,17 +16276,6 @@ def set_league_member_roster(league_id: str, member_user_id: str, player_ids: li
             t.c.league_id == str(league_id), t.c.user_id == str(member_user_id)
         ).values(roster_data=json.dumps([str(p) for p in player_ids]), updated_at=_now()))
     return (res.rowcount or 0) == 1
-
-
-def get_league_platform(league_id: str) -> str | None:
-    """The leagues row's `platform` ('sleeper' when the column is NULL), or None
-    when no row exists. Same reading as `is_linked_platform_league`."""
-    with engine.connect() as conn:
-        row = conn.execute(select(leagues_table.c.platform).where(
-            leagues_table.c.sleeper_league_id == str(league_id))).fetchone()
-    if not row:
-        return None
-    return str(row.platform or "sleeper").lower()
 
 
 # ---------------------------------------------------------------------------
