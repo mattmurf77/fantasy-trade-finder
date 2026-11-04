@@ -776,6 +776,9 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "grading_sessions", "grading_cards", "trade_page_store", "trade_deck_lineage",
     "paywall_previews",
     "deck_card_withdrawals", "deck_evidence_packs",
+    # D1 free-agent moves: the R15.3 consent and move records, deleted with
+    # the account (R15.8 D12) and exported while it exists.
+    "platform_write_consents", "platform_write_moves",
 )
 
 # Tables that name a person and are neither deleted nor exported here, each

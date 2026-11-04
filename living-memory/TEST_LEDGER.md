@@ -1,3 +1,28 @@
+## 2026-11-04 — Root D1 / tip / share integration on reviewed launch stack
+
+Merged feature child `06daccb5` onto root `4b20948b`, retaining full histories
+of the refreshed privacy, fixes, paywall, platforms, model and web parents.
+Resolved snapshot/helper signature conflicts without reverting the web's
+device-aware CTA, private/Vary headers, noindex policy or App Store banner.
+The optional stored-bar alt text coexists with those web behaviors. Preserved
+both pick chip forms, snapshot schema, tip knob/config, auth/consent gates,
+FREE move/consent route classifications, Shop deletion tokens and C2 app
+share wording (`SHARE_VALUE_LINE`, "Package value", Fleeced branding).
+Both calculator consumers still use that constant, with no verdict/totals.
+Documentation/ledger conflicts retain both initiatives and evidence.
+
+- Fourteen focused backend files: **750 passed in 30.13 s**, no skips. D1
+  consent/capability/move, paywall config/allowlist, stored share bar/B2/links/
+  package/token ownership, account deletion, Shop Elo+generic-strip+redaction,
+  held scrub writes and value-bar scale all pass together.
+- Executed C2 share-text guard: **109/109**. Python merge modules compile;
+  whitespace check passes. Source flag delta is only the new false
+  `sleeper.send_add_drop`; no knob, production action, provider call or
+  activation occurred. Parent owns all final mobile guards/TypeScript/CI.
+- Existing referral first-init issue remains assigned to the isolated billing
+  correction; this merge does not weaken deleted-user guards or pretend the
+  six old impossible-fixture referral E2Es validate that path.
+
 ## 2026-11-04 — Combined web/referral + verified-platform/privacy/paywall integration
 
 Integrated reviewed web/referral `a7599178` into root candidate `79761775` (main `787b9fc4`, privacy, fixes, paywall, verified platform sign-in and model parents). Preserved both referral signup props and `require_user=True`/AccountGone handling, additive record_event platform metadata and live-user guard, sign-in platform tiles and inviter headline helper, source attribution, all guard registrations and both evidence histories. App tile docs coexist with web's hard-off entry rule. Existing flags stay unchanged; the only new source flags are `growth.join_landing:false` and `growth.referral_ledger:false`.
@@ -24,6 +49,23 @@ baseline/result cache purges, and async scrub launch/in-memory job revocation.
   pick layer in the model batch. No full local suite or production action.
 - Combined whitespace check passes. No runtime flag or knob changes. Full
   CI remains required after all remaining reviewed parent batches join.
+
+## 2026-11-04 — D1/tip/share child resync after current main
+
+Merged reviewed privacy parent `d4a5a4bd`, which retains latest main
+`787b9fc4`; only the additive test ledger conflicted. Original feature and
+foundation ancestry remain. Updated billing foundation will be integrated
+separately; this entry does not claim that later integration tested.
+
+- Focused ten-file backend rerun: **629 passed in 29.06 s**, covering consent,
+  move capability/route, paywall config/route completeness, share snapshots,
+  B2 labels/links/tokens and alias-aware account deletion.
+- Guards: D1 **115/115**, tip **23/23**, paywall **110/110**, share text
+  **109/109**, share-token fallback **19/19**. Existing read-only dependency
+  worktree and external absolute-Zustand redirect used as before.
+- Combined diff whitespace check passes. Runtime feature values match latest
+  main except new `sleeper.send_add_drop: false`; no knob or activation changed.
+  Full GitHub CI remains required; no full local suite or remote write.
 
 ## 2026-11-04 — Privacy/Shop resync with latest main `787b9fc4`
 
@@ -148,6 +190,7 @@ Preserves original heads for #350 → #364 → #386 → #390 → #371/#387 → #
 - **Paywall/referral boundary:** added explicit FREE classifications for `POST /api/invite/token` and `GET /app/league/join/<league_id>/go/<cta>`, plus exact referral/share route pins and four actual hook cases (two routes × native/web) while enforcing for a never-entitled user. Route-owned flag/membership checks remain covered in referral tests. In a separate process, changing both classifications to GATED made all five new boundary cases fail; restored source **5 passed in 1.12s**.
 - **Web:** `python3 qa/web/check_web_structure.py` — **253/253**. Approved conservative retention floor and M11 legacy-account conditional remain; policy correctly reflects #362 token sharing and #540 deletion coverage. No premature retention or purge claim added.
 - **Mobile:** TypeScript `tsc --noEmit -p mobile/tsconfig.json` passes using the existing isolated dependency tree. All nine relevant structural suites pass: invite-links, signin-inviter, session-init-invite-id, share-trade-token, notif-glyphs, entry-session-identity, onboarding-flag-defaults, paywall-gate and paywall. No simulator or full local suite was run. Full remote CI on this combined head is required, including #391's previously failing standalone backend lane; these targeted results do not replace that gate.
+
 ## 2026-11-04 — Paywall stack refreshed onto actual main 787b9fc4
 
 Merged main `787b9fc4` (binary-safety #589) into the reviewed `7bb7ff86` paywall batch without squashing. Only the additive test-ledger insertion conflicted; both histories remain, and main's changelog merged unchanged. No paywall source, flags, defaults or feature behavior changed during resolution.
@@ -231,6 +274,38 @@ operational at the existing production blend weight 0.5; this path is not dark.
 - No full local suite, production writes, provider requests or simulator run.
   Full exact-head GitHub CI remains mandatory before main. D-056 posture.
 
+## 2026-11-04 — Integrated D1 / tip / share launch candidate
+
+Base main `af57e59c`; original head ancestry retained for #379 `025aefd1`,
+#528 `de50f861`, #509 `77044992`, #579 `bfeadcff`, #578 `2195444c`,
+#575 `8247623f`, #583 `55365200`, #576 `30f39a5d`, #564 `1d48b47f`,
+#581 `57d6477b`, #573 `3beb3a6a`; includes privacy #592 `59daef9c` and
+paywall #590 `7bb7ff86` foundations. Original heads are merge ancestors,
+not locally squashed. Scope: `docs/plans/launch-d1-tip-share-integration.md`.
+
+- Integrated backend target run (18 files): **1100 passed, 3 skipped in
+  39.73 s**. Consent, capability, move/idempotence/provider failures, paywall
+  config/gate/allowlist, share snapshots/B2 labels/links/tokens, D1/handoff
+  analytics, alias-aware account deletion, scrub core/stage3 and Shop Elo.
+  Skips: two optional PostgreSQL D1 races, one existing Shop generic-pick
+  guard awaiting #389. Both PG cases then **passed in 3.03 s**, on disposable
+  local socket-only PostgreSQL with injected fake provider and synthetic data.
+- Mobile guards: external links, Sleeper handoff/event, D1 **115/115**,
+  tip **23/23**, paywall **109/109**, Shop **33/33**, trade text, share-token
+  fallback **19/19**. NODE_PATH used the existing dependency worktree; an
+  external preload redirects only D1's hardcoded absolute Zustand require.
+  No assertions changed or dependencies copied.
+- Added explicit FREE classification for roster-move/consent endpoints,
+  pinned in route completeness tests. Their own security and consent gates
+  remain. All source feature values unchanged except a new false
+  `sleeper.send_add_drop`; tip knob default remains 0. Combined diff whitespace
+  check passes. No full local suite, device/simulator, provider write, capture,
+  purchase, production setting change, remote write or activation performed.
+
+Full GitHub CI remains required. Provider-shape/consent/device proof and tip
+product/identity activation gates remain outstanding, as documented in source
+scopes; this evidence only clears the tested code integration.
+
 ## 2026-11-04 — Privacy/Shop launch integration batch (local candidate)
 
 Base: main `af57e59c`. Preserved every actual GitHub PR head as an ancestor,
@@ -271,6 +346,7 @@ before MFL's first verification flip when adding #477, and keep #430's proven
 platform path eager. Generic-pick learning activation still needs #389 and
 the combined Shop signal check. No production probe, model gate or device
 check was performed.
+
 
 
 ## 2026-11-04 — Combined paywall stack: #394/#395/#397/#473/#465/#508/#514
@@ -1117,6 +1193,68 @@ Gates: the scope block `docs/plans/share-text-c2/scope.md`. head-bizops's decisi
   - **Against main's share code it fails 19.**
 - **Suites:** all 135 `mobile/tests/check-*.js` pass; `tsc --noEmit` is clean.
 - **TestFlight:** the operator's 5-step checklist, on the 11-06 binary.
+
+## 2026-11-01 — D1 free-agent moves server, dark until the Sleeper capture (`sleeper.send_add_drop`)
+
+Gates: full (no express). Scope block: `docs/plans/sleeper-fa-write/scope.md` on `plan/fa-moves-launch`; wire contract `docs/plans/sleeper-fa-write/contract.md`. Schema (`platform_write_consents`, `platform_write_moves`), API (`POST /api/league/free-agents/move`, `GET`/`DELETE /api/platform-write-consent`, the additive `move` capability on `GET /api/league/free-agents`), flag (`sleeper.send_add_drop`, default false, server-only) and three server events, all operator-approved 2026-11-01 (scope §F1). D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is pytest. No Sleeper, ESPN or MFL call anywhere: public reads stubbed, the write run through the real `sleeper_write.fa_move` with an injected `_opener`. The capture hasn't happened, so `build_fa_move_body` / `read_fa_move_result` are a test double of a captured op and `FA_MOVE_SHAPES_CAPTURED` is forced on in the harness; shipped, it is false, so the capability says `handoff` and the move route 404s.
+
+- **Tests, 230 in four new files** (counts at `f85b391d`):
+  - `test_fa_move_route.py` (136): the §B3 order of checks, behavioural (21 pre-write refusals, each `detail == message` and **0** opener calls, no `sent` row) and in source order; a client `platform` ignored; the grant and the `sent` row both exist when the platform is called, and the grant survives a refusal; outcome classification (10 after-send cases → 502 `sleeper_outcome_unknown`, one call, `result = unknown`; connect-phase failures and a 429 → `kind: network`; a refusal → `write_failed` with no `kind`; a token rejection → `sleeper_rejected` + credential deleted + `credential_rejected` withdrawal, non-touching); idempotency, per user (a repeat replays the body and status with one call; an in-flight duplicate and a lost `sent`-row race are 409 `move_in_progress`; two users sending the same id each get their own move; the id is opaque, e.g. `loc-mrpy6qog-2t72t6-1a2b3c4d`, and 8 malformed ids are 400); the double-move block (blocks at 14 min, lifts at 15, a recorded result lifts it, a pending claim blocks until 24 h, per player); D5 (a claim refused under v1, without the shape, or both; accepted only with v2 + the shape, as `pending`, never "added"); the 76 s pin (30 + write-path timeouts ≤ 46, and the opener only sees the pinned timeouts); the preflight budget (30.0 s sends, 30.5 s doesn't); K-F5 (the roster saved on the request thread, the stamp on another; no roster write on pending, refused, unknown, not-sent or rejected).
+  - `test_fa_move_capability.py` (43): `mode` per platform and flag (Sleeper off / on-uncaptured → `handoff`, on + captured → `submit`, MFL / ESPN / Fleaflicker / local → `unsupported`); `FTF_FLAGS` beats the file both ways; `claims` only under D5; `connect` (not_linked, other_account, unknown rosters, expired, unverified, co-owner ok); `consent_until`; copy keys == contract §7, approved slots verbatim, no template writes its own `$` (the client's `{bid}` carries it), no draft served in `handoff`; the per-row override; through the route, and `move` omitted when the capability fails.
+  - `test_platform_write_consent.py` (45): v1/v2 verbatim against R15.8 and pinned by sha256 (the old S22); the window (valid at 7 d − 1 min, not at 7 d; moves don't extend it); bound to the platform account; a version bump invalidates; the latest grant decides; **no UPDATE or DELETE of either table on any path** (a cursor listener across grant, move, unknown outcome, Settings and disconnect); no token in any record; the GET/DELETE routes (never flag-gated: with every flag off GET answers and DELETE records a withdrawal; 400 platform, 401 without a session, bodies, idempotent DELETE; an unverified session carrying another user's id can neither withdraw nor read the grant (403 `verification_required`, round 3), whatever `auth.enforce_verified_writes` says); the block's `links` (Terms, Privacy) and `reason` (first, lapsed, version, withdrawn; absent while valid or with no credential; on the 409 too); withdrawals from disconnect, trade-send expiry and rejection, and the move route's expiry; a structural pin that every credential deletion goes through `_drop_sleeper_credential`; export carries both tables.
+  - `test_analytics_taxonomy_fa_move_server.py` (6): the three server events registered server-side only, the class split, exact emitted props (never `platform`; `league_platform` always set), `write_succeeded` never on a failure, C3's 21 codes pinned against the routes' `_fa_move_error` codes (AST), and the flag's parity (FLAG_KEYS, default false, `features.json` / `release.json` false, nothing in `mobile/src` reads it).
+  - `test_account_deletion_coverage.py`: both tables picked up through the tuple (2 new parametrized cases, pass).
+- **Sabotages, 35 run, each restored (34 red; the 35th is now caught only together with a second layer, below):** the write moved above consent (the source-order test and the `no_consent` / `stale_copy_version` refusals); `roster_refresh.stamp` called inline; the `attempt_id` lookup removed; the preflight budget disabled; the roster written on any 200 (pending included); v1 edited in place (hash pin); the write path at 50 s; the 15-min block at 0; a 5xx read as a refusal; disconnect skipping the withdrawal; drafts served in `handoff`; `fa_move_write_succeeded` made NON_INTENT; a prop named `platform`; claims allowed under v1; the consent check not refusing; `withdrawn` read as `lapsed`; a template writing its own `$`; the consent block without `links`; the verified gate put back on DELETE; `surface` never recorded; the bid put back inside `waiver_line`; the global (`attempt_id`, `phase`) unique key restored; the consent routes flag-gated again; `attempt_id` parsed as a UUID.
+- **platforms-eng review, round 1 (contract §2/§3/§7 updated):** DELETE `/api/platform-write-consent` is session-only (R15.2.6); the request's optional `surface` (`free_agents` | `usage_trends`, else null) is recorded on `fa_move_consent_recorded`; R15.1's claim copy is served in its four forms (`waiver_line`, `waiver_line_no_drop`, `bid_line`, `cta_claim_no_bid`, `cta_claim_drop_no_bid`). Re-run: the four D1 files (167) and the adjacent suites (`test_sleeper_write_route`, `test_sleeper_write`, `test_free_agents_route`, `test_free_agents`, `test_verified_sessions`, `test_verified_reads`, `test_account_deletion_coverage`, `test_analytics_p0`, `test_events_api`, `test_c10_send_failures`: 348) pass.
+- **platforms-eng review, round 2 (contract §2/§3 updated):** `attempt_id` is opaque (8–64 of `[A-Za-z0-9._-]`, never a UUID parse) and unique per (user, `attempt_id`, `phase`); the consent routes never follow a kill switch. Re-run: the four D1 files (179) and the adjacent suites plus `test_seed_ui_test_db` (424) pass; all 24 sabotages re-run red.
+- **Round 3 (head-eng's security check of #578, and analytics-lead's G2):** the consent routes need a **verified** session (403 `verification_required`; an unverified session carrying the victim's id can neither forge a withdrawal nor read the grant, with `auth.enforce_verified_writes` on or off); the double-move block is atomic (a re-read after the `sent` insert: an earlier-inserted move of the player that still blocks, or that landed after this request's check, wins; tested with an injected earlier insert, a later one, and two real threads on a file DB, 8/8 stable); FAAB fails closed (unknown type / budget / remaining → `roster_read`; bid bounded by budget and remaining; NaN / ±inf / strings / bools / negatives / fractions → 400); player ids `[0-9]{1,12}` or a 2–4 letter DEF code; `isascii()` on the league id; the grant re-checked before the `sent` row; demo sessions refused; a Sleeper (re-)link withdraws open grants (`disconnect`); `fa_move_consent_recorded` omits `surface` when absent or unknown. **Round-3 sabotages, 11/11 red:** the consent-route denials dropped; the post-insert re-read skipped; FAAB failing open; no grant re-check; player ids unvalidated; demo sessions let through; the re-link keeping the grant; non-ASCII digits read as Sleeper; `surface: None` emitted; a landed rival ignored by the race check; a non-finite bid reaching `int()`. Round 2's "verified gate back on DELETE" sabotage is retired (now required). **"The consent check not refusing" (step 9 alone) now stays green**, because the round-3 re-check before the `sent` row still refuses; with both layers off it is red. Re-run: the four D1 files (213) and the adjacent suites plus `test_seed_ui_test_db` (424) pass.
+- **Round 4 (`0bdc9df3`, marketing's final copy, addendum 17 §B):** every slot and message takes the final text (legal-final lines untouched); `feature_disabled`/`unconfigured` and `outcome_unknown`/`internal_error` share one line each; the partial result is titled "Part of this move was made" with "Check your roster in {platform}."; no draft Sleeper slot is left. Pins: verbatim on every changed and kept line, and no "we"/"our"/"us"/"try again" in any unknown-outcome or in-progress text. Sabotage: the old "We couldn't… try again" line restored → red.
+- **Round 5 (`f85b391d`, legal R28.26 / R28.27):** a Sleeper (re-)link withdraws with its own `via: relink`, only when the stored credential changes (a different token or Sleeper user; constant-time compare, nothing logged), never on the session-start replay of the stored token (analytics-lead's condition); "nothing was sent" only on codes decided before any platform call, tested per class (pre-call, platform refusal, partial, unknown) against the routes' codes, and a Sleeper 429 is now a platform refusal ("nothing changed", no retry); each consent version's hash covers every block field (links moved into the versioned text; v1/v2 re-pinned once, nothing shipped); MFL and ESPN v1/v2 consent texts, withdrawal notices and finality/waiver/bid lines as DRAFT versions with separate grants, never served or accepted. Sabotages, 7/7 red: re-link as `disconnect`; `rejected` saying "nothing was sent"; a v1 field edited in place; the shared links edited in place; withdrawal on every link; a draft served; `http_429` back in the not-sent cases.
+- **Fixed on the way:** the harness first used a `StaticPool` in-memory engine, and `test_add_drop_with_consent_completes` failed 2 times in ~10 runs while the full suite ran beside it: the process's first request starts `win-now-resume` (`recover_interrupted_jobs`), which shared the one connection. The default per-thread pool fixed it (10/10 clean runs of the four files afterwards, with the full suite running beside them).
+- **Full suite** (`python3 -m pytest backend/tests -q -x`) at `df6b01e2`: **10454 passed, 3 skipped**, 17:41. After round 2, at `d394508e`: **10474 passed, 3 skipped**, 15:38. After rounds 3–5, at `f85b391d`: **10525 passed, 3 skipped**, 26:08 (platforms-eng's run, the worktree idle). An earlier platforms-eng run at `0bdc9df3` stopped on `test_platform_write_consent.py::test_the_consent_route_checks_both_denials` only because round-5 edits to `server.py` landed mid-run and shifted the line numbers `inspect.getsource` reads; the idle run passed it. An earlier run (at `4065d4e4`, with other test loops running beside it) stopped on `test_prepared_trade_chunk_review.py::test_real_first_prefix_action_does_not_revoke_unrelated_prepared_suffix[like]` (`prepared paged adoption unavailable (ValueError)`, its `inputs_changed` freshness check under load): untouched by this change, and the file passes 3/3 in isolation (9 passed each). A pre-existing load-sensitive flake.
+- **Round 6 (release-lead's QA of #578 @ `52a69234`, GO with notes):**
+  - **P2-1, the double-move block on Postgres.** The lower-id re-read missed a move whose INSERT had its id but hadn't committed (QA: 5/5 with a trigger delaying one INSERT). Fix: `database.claim_platform_write_move` checks the block and inserts the `sent` row in one transaction under `pg_advisory_xact_lock(8009, hashtext(user|league|add player))`, the trade-share mint's pattern; the later tap waits for the earlier commit, sees its row and gets 409 with nothing written. SQLite (local dev) takes no lock, as in that precedent, and keeps the post-insert re-read (its writes commit in id order). New `test_fa_move_pg_race.py` (2, from QA's scratch test), opt-in on `FTF_FA_MOVE_TEST_POSTGRES_URL` (a disposable socket-only Postgres under `/private/tmp`, its own schema per test; skipped otherwise): the commit-order inversion and a preflight race each make exactly **one** platform call. Run against Postgres 18.3 (Postgres.app, local, socket-only): 2 passed, 3/3 stable.
+  - **P3:** the adapter's capture check pinned alone (a working fake builder still never sends while uncaptured); the move transport's auth scan uses whole words ("author", "authority" are refusals), with a TODO for a 200 carrying both `errors[]` and `data[op]` (outcome unknown, not refused); a re-link's withdrawal and credential swap are one transaction (`relink_sleeper_credential`: a failure in either leaves neither); a FAAB claim with no `faab_bid` is 400 `bad_request`, never 0 (0 is valid; priority waivers need none); `offline_line` and `bid_needed_line` join `MOVE_COPY_KEYS` and are **omitted** from the payload (no final words yet; the client's fallbacks show), and the test's key list is parsed from contract.md §7; the consent routes' 403 has its own line, without "Nothing was sent".
+  - **Tests:** `test_fa_move_route.py` 148, `test_fa_move_capability.py` 45, `test_platform_write_consent.py` 46, `test_analytics_taxonomy_fa_move_server.py` 6, `test_account_deletion_coverage.py` 64, `test_fa_move_pg_race.py` 2 (with Postgres; 2 skipped without). All pass. Full suite: run by platforms-eng.
+  - **Sabotages: all 48 re-run, 48 red** (the earlier rounds' set with stale anchors refreshed; "drafts served in hand-off" and the single-layer consent sabotage retired, both explained in rounds 4–5). Round 6's 8: the advisory lock dropped (Postgres race red); the claim's block check skipped; the adapter's capture check removed; the auth scan back to substrings; the re-link in two transactions; an empty FAAB bid defaulted to 0; `offline_line` served; the consent 403 saying "Nothing was sent".
+  - **Full suite at `0096ec2b`** (platforms-eng's run, the worktree idle): **10540 passed, 5 skipped**, 17:57. The 2 new skips are `test_fa_move_pg_race.py`, which runs only with `FTF_FA_MOVE_TEST_POSTGRES_URL`; it passed 3/3 against a local Postgres 18.3.
+- **Round 7 (release-lead's delta QA of #578 @ `8948e884`, GO with notes; the P2-1 lock verified on PG 18, 5/5 + QA's 13 cases):**
+  - **A structural pin CI runs:** an AST test that `claim_platform_write_move` makes the `pg_advisory_xact_lock(_FA_MOVE_LOCK_CLASS, …)` call inside its ONE `with engine.begin()`, before the block check (`blocked(…)`) and the `sent` insert (the Postgres race test is opt-in, so CI never ran it).
+  - The move transport's auth words: `tokens` dropped ("You have no tokens of value left." is a refusal), "not authorized" stays a refusal (a permission refusal, not a dead token), comment and regex now agree; both probes tested. The capture TODO stays.
+  - The contract §7 key parser reads `[a-z0-9_]+` (tested on a synthetic table with digit keys).
+  - Nits: the advisory-lock comment names the move claim's class 8009; the consent 403 for an unknown platform reads "Verify your sign-in to see or change roster moves." (tested); the data dictionary says `sent` rows come from `claim_platform_write_move`.
+  - **Tests:** `test_fa_move_route.py` 151, `test_fa_move_capability.py` 46, `test_platform_write_consent.py` 47, `test_analytics_taxonomy_fa_move_server.py` 6, `test_account_deletion_coverage.py` 64. All pass. Full suite: run by platforms-eng.
+  - **Sabotages, 6/6 red (run without Postgres, as CI):** the claim's lock dropped; the lock taken in its own `with engine.begin()`; `tokens` back in the auth words; `authorized` read as auth; the key parser dropping digits; the consent 403 naming an unknown platform.
+- **Owed after the capture:** golden bodies and the result reader in `sleeper_write` (+ `test_sleeper_write.py`), `FA_MOVE_SHAPES_CAPTURED` / `FA_CLAIM_SHAPE_CAPTURED`, waiver status pre-tap (`_fa_move_actual_kind`, per-row `move_kind`), captured error strings → codes; then `docs/integrations/sleeper.md` §1.2 / §3.3 / §4, `docs/architecture.md`, `living-memory/HLD.md`, the DECISIONS entry superseding D-019, and the TestFlight checklist T1–T15, FA1–FA6, AX1 after the operator's flip.
+
+## 2026-11-02 — #583 TipJar verified-only guard + targeted dismiss (release-lead QA P3s)
+
+Gates: release-lead's independent QA of #583 at `6dd2225c` (GO-with-notes; the knob-flip precondition), P3-1 to P4. Stacked on #575. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is structural plus executed checks, a code walk, and TestFlight steps.
+
+- **P3-1, the dismiss pops its own route:** `TipJarScreen` dismissed with an untargeted `goBack()`, which pops the TOP route. On session expiry `useSession` pushes SignIn over the sheet, so a later drop popped SignIn and left a blank sheet. Now it's a targeted `POP` (`source` = this route, `target` = the stack). It does nothing if the route is already gone, and navigates to `Main` at the root. `PaywallScreen` has the same pattern; that's a separate follow-up.
+- **P3-2, `check-tipjar` 11 rebuilt:** the harness runs effects the way React does (only on the first render and when deps change, with `useCallback`/`useMemo` memoized on deps) and drives a fake root stack whose `goBack` pops the top. It asserts exact counts:
+  - 11a: fresh mounts per session;
+  - 11b: a drop while open (verified → demo, unverified or unknown) dismisses exactly once, Settings stays, the queries go off, and the same state again re-runs nothing;
+  - 11c: flag off dismisses exactly once, verified or not;
+  - 11d: under SignIn, TipJar is removed and SignIn stays;
+  - 11e: when TipJar is gone, there are no actions;
+  - 11f: at the root, `navigate('Main')`.
+- **Sabotages, 14/14 red:** a mount-only session effect (11b); dropping `paywallOn &&` (11c, dismiss x2); the old untargeted goBack (11a/11d); a POP without target (11a); no already-gone return (11e); the six guard mutants (11); the purchase guard and refusal→pending (10); pending→thank-you (5d + 10b).
+- **Suites:** `check-tipjar` 23/23, all 135 `check-*.js`, `tsc --noEmit` clean, testid-lint OK.
+- **P3-3, TestFlight:**
+  - Open Support Fleeced, tap ✕, and you land on Settings.
+  - Open it, background the app for about a minute and come back, and the sheet stays.
+  - The runtime evidence for the session guard is check 11 plus the PR's code walk, because a session can't be made to lose verification inside the sheet on TestFlight.
+
+## 2026-11-01 — A shared package's OG card names the calculator's generic picks (release-lead's #566 follow-up)
+
+Gates: the scope block `docs/plans/share-landing-generic-picks/scope.md`. Server-only (`og_image.render_package_card`); no schema, flag, event or route contract change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest plus a real render.
+
+- **The bug:** the live calculator shares its 12 generic pick rungs, which aren't `players` rows, so the `/s/p` card drew "Unknown player".
+- **The fix:** `generic_pick_*` ids, parsed by the shared `parse_generic_pick_id`, get `generic_pick_label` ("Mid 1st Round Pick") and the "PK" chip on chalk-dim, aligned with open #564 (same parser, label, chip and constants; on #564 plus #573, #564's four changed test files, this PR's test included, pass 175, and release-lead's three-file set passes 141). Any other unknown id is unchanged, including `generic_pick_1_mid_x`. Sabotages: a lenient parse, the old grey chip, and no lookup are each red.
+- **Test:** `test_og_package_card_names_the_calculators_generic_picks`, through `/og/p`: two picks named, an unknown id still "Unknown player". It's red on main's code.
+- **Render:** `before-after.png`, from the real renderer.
+- **Runs:** `test_share_link_previews.py` passes.
 
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
@@ -2683,6 +2821,155 @@ Gates: these are QA P3s on #491 (full gates, scope `docs/plans/landing-platform-
   - checker 196/196;
   - the same with #456 merged in: GATE passes, and the only failures are the 2 deliberate App Store URL blockers;
   - `node --check` passes on both JS files.
+
+## 2026-10-28 — `sleeper_handoff_resolved` emitter (#351 grant G1–G7; stacked on #379)
+
+Gates: full (no express). Branch `feat/sleeper-handoff-resolved`, cut from #379's head `b362b4f8`. Scope: `docs/plans/external-links/scope.md` §1(a). Addendum: `docs/business/analytics/2026-10-28-sleeper-handoff-events.md`. The event is new and INTENT: registered in `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS` in the same commit as the emitter, with no `NON_INTENT_EVENTS` row. No route, schema or flag change. D-056: `FTF_SKIP_SIM_GATE=1` posture. The evidence is the guard, pytest, and the code walk in scope §1(a) and the addendum's G3 section.
+
+- **Mobile** (from `mobile/`):
+  - `npx tsc --noEmit`: exit 0.
+  - `tests/check-*.js`: 122/122 pass.
+  - New `check-sleeper-handoff-event.js` (`npm run test:sleeper-handoff-event`): 60 PASS, 0 FAIL. It executes the real helper with stubbed `Linking.openURL` (resolve / reject / deferred) and `track` (E1–E11).
+  - `check-sleeper-handoff.js`: 42 PASS. Its stub now accepts `../api/events`.
+  - `check-external-links.js`: 49 PASS. That is the same count as on `b362b4f8`; scope §3's "51" predates `ae375019`.
+  - `scripts/testid-lint.sh`: OK.
+- **Backend:**
+  - New `test_analytics_taxonomy_sleeper_handoff.py`: 7 passed (membership, namespace disjointness, exact prop row, no device `platform` / identity prop, INTENT and not WAT, `external_link_opened` unregistered, an ingest round trip with `has_drop` absent on trade / send_button rows).
+  - Targeted with `test_analytics_p0`, `test_analytics_taxonomy_384`, `test_analytics_taxonomy_home_hub`, `test_events_api` and `test_time_to_suggestion_events`: 104 passed. Full suite not run locally (machine loaded); CI runs it.
+- **Sabotage, each red then restored (md5-verified):**
+  - (a) `has_drop: null` on every trade row: 7 FAIL (E1 ×6, E8).
+  - (b) emit on `unspecified`: 4 FAIL (E5).
+  - (c1) emit after `await openPlatform` (after the D2 alert): 3 FAIL (E11 callback, E3 order, E4: the in-flight re-tap now emits twice).
+  - (c2) emit after an `await` inside the callback: 2 FAIL (E11, E3).
+  - (d) the name added to `NON_INTENT_EVENTS`: pytest red, 1 failed (`test_is_intent_and_not_wat`).
+  - `check-sleeper-handoff.js` and `check-external-links.js` stayed green under (a)–(c2), as expected: the event isn't theirs.
+- **Manual TestFlight check** (operator, with `analytics.client_events` on):
+  - Free agents → a Sleeper-league player → Add → **Open in Sleeper to claim**, with and without a drop picked. Needs league-eng's #509; until then nothing on this stack fires `free_agents`.
+  - Expect one `sleeper_handoff_resolved` row per tap: `surface=free_agents`, `target=add`, `rung=bare`, `outcome=app`, and `has_drop` true / false.
+  - Repeat with Sleeper offloaded: `outcome=not_installed`, and the alert still shows.
+  - A fast double tap: still one row.
+
+## 2026-11-01 — D1 free-agent moves: the dark client for the 11-06 binary (`feat/fa-moves-client`, on #509 @ `d14b7308`)
+
+Gates: full (schema/API/flag/analytics surfaces; no express). Mobile client only, plus the four client events' registration; the server (route, consent routes, tables, capability, `sleeper.send_add_drop`) is a separate PR. Ships dark: it renders only from the server's `move` capability, so on today's server the sheet and both hosts route as on `d14b7308` (code-walk §Dark-safety names the one timing difference: Usage Trends reads the FA list before routing, capped at 3 s). D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is below, the code-walk (`docs/plans/sleeper-fa-write/code-walk.md`) and the scope's TestFlight rows T1–T15 / FA1–FA6 / AX1 after the flip.
+
+- **New suite `mobile/tests/check-fa-move.js`** (`npm run test:fa-move`): 45 passed, 0 failed. Pins F1–F17 of the scope's §3; executed where the scope says executed (the gate's truth table, outcome-unknown recognition, F15's per-trigger `(error_code, status)` table through the real `api/client.ts` under a fake clock, F17 with a stubbed NetInfo, F6's 91 s timeout, F9's one `attempt_id` per tap, F13's `_noteWrite`).
+- **Sabotage, each red then restored (18 in `check-fa-move`, run against a scratch copy of `mobile/src` via `FTF_MOBILE_TEST_ROOT`; the unsabotaged copy green):**
+  - F1 read `flags['sleeper.send_add_drop']` in ClaimSheet → F1 red;
+  - F2 return `submit` for unticked + lapsed → F2 red;
+  - F3 a Try again button on state 12 → F3 red;
+  - F4 hard-code `` `Add ${row.name}` `` as the CTA label → F4 red;
+  - F5 map only `sleeper_*` suffixes → F5 (and F14) red;
+  - F6 drop `timeoutMs` (the 15 s default) → both F6 checks red;
+  - F7 call `attemptMove` straight from the CTA's `onPress` → F7 red;
+  - F8 initialise the box `true` → F8 red;
+  - F9 mint the id once at module load (not per tap) → F9 red;
+  - F10 re-add a `fa-claim.steps` View → F10 (and the dark-safety check) red;
+  - F11 bake v1's checkbox sentence into `faMove.ts` → F11 red;
+  - F12 drop the `['free-agents', leagueId]` invalidation → F12 red;
+  - F13 send the move with a bare `fetch` → both F13 checks red (plus F6, F9, F11, F14, F15);
+  - F14 send the raw `sleeper_write_failed` as `error_code` → F14 (and F5, F15) red;
+  - F15 emit with `league_platform: null` outside `submit` → F15 red; map a timeout to `unknown` → F15's timeout row red;
+  - F16 `onRequestClose={onClose}` → F16 red;
+  - F17 skip the NetInfo read (send anyway) → F17 red.
+- **Other sabotages, red then restored (real files backed up and copied back):** `discardsDevicePages` without the move path → `check-device-first-page` 1k red; a `KeyboardAvoidingView` in ClaimSheet's hand-off render → `check-sleeper-handoff` S2 red; `fa_move_consent_shown` left out of `NON_INTENT_EVENTS` → `test_fa_move_class_split` red; `attempt_id` out of `_HEX_ID_PROPS` → the ingest test red (its uuid has a 16-digit run).
+- **Edited guards:** `check-device-first-page.js` 1k gains the move-path assertion (trades-eng reviews); `check-sleeper-handoff.js` S2's no-`KeyboardAvoidingView` half now covers the hand-off render (`if (!submitLayout)`) only, since D1's pinned action block is design-lead's spec for the in-app layout.
+- **All mobile suites:** every `tests/check-*.js`, 122 of 122 exit 0 (`check-device-first-page` 37 ✓, `check-sleeper-handoff` 69/0, `check-usage-trends` 76, `check-settings-ia` 27). `npx tsc --noEmit` 0 errors. `scripts/testid-lint.sh` OK.
+- **Backend:** new `backend/tests/test_analytics_taxonomy_fa_move.py`, 8 passed (names, exact props, `league_platform` and never `platform`, `kind` only on write_failed, two NON_INTENT and two INTENT and none WAT, C3's 21 values against the client's `FA_MOVE_ERROR_CODES`, ingest end to end). `pytest backend/tests/test_analytics_taxonomy_fa_move.py backend/tests -k "taxonomy or analytics"`: 177 passed. `-k "event or ingest or intent or scrub or pii"`: 206 passed.
+- **Not run:** the full backend suite (the server is untouched beyond the taxonomy, `NON_INTENT_EVENTS` and `_HEX_ID_PROPS`); any device or TestFlight row (dark until the flip).
+- **platforms-eng review, round 1 (same day, on `fedd1495`, the committed contract):**
+  - **Built:** legal's links row on the consent step (the block's `links`, else the app's Terms and Privacy from `getBaseUrl()` as PaywallScreen's `openLegal` builds them, opened through `openPlatform` with no catch); the block's `reason` wins for `fa_move_consent_shown`; "Claim pending" on the Free Agents row after a state-9 result (new in-memory `mobile/src/state/claimsPending.ts`, keyed by league + player; Usage Trends not done, a layout call for design-lead); the code checked against contract §7's fill rules (it already matched).
+  - **`check-fa-move`:** 52 passed, 0 failed (7 new: L1 ×2, R1 ×2, P1 ×2, T7).
+  - **New sabotages, each red then restored (10; the unsabotaged copy green):** the links row dropped (L1); a hard-coded base URL in `consentLinks` (L1); a `.catch` on the link open (L1); the block's links ignored (L1); the block's reason ignored (R1); the claim marked on any result, the mark dropped, "Claim pending" on every row (P1, each); `{bid}` without `$`, `{date}` with a time (T7, each). The original 18 F1–F17 sabotages re-run on the new code: all 18 still red.
+  - **Gate re-run:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 122 of 122 exit 0 (`check-sleeper-handoff` 69 PASS, `check-external-links` 48 PASS, untouched); the taxonomy pytest selection 177 passed.
+- **platforms-eng review, round 2 (same day, an independent review; contract `7052d2d7` / `41c1443e`):**
+  - **Fixed:** (1) `attempt_id` minted in `faMove.ts` as a v4-shaped id (`crypto.getRandomValues`, else `Math.random`; `_queue.ts` untouched); (2) a 10a the client didn't foresee shows the drop list, the server's message with focus, and refreshes; (3) one selection (`moveSelection`) feeds the CTA, "This move" and the request, so a drop a refresh removed is neither named nor sent; (4) NetInfo before the consent GET, and a GET with no answer is state 11, not F4; (5) Usage Trends pre-reads with a plain bounded call outside the sheet's cache, showing the tapped Add busy; (6) the pin decision measures the block's content and has hysteresis; (7) MFL's connect / verify / rejected show `NO_ADD_REASON` in the sheet, held non-Sleeper rows show the server's line, `EspnConnect` opens without `reason: 'send'`; (8) Settings reads a 404 as `valid: false` (no client option keeps that 404 out of `api_request_failed`) and keeps the row with a line when DELETE fails; (9) "terms changed" on `reason: 'version'`; (10) an absent or unknown mode ignores `move.copy` and every row's move_*; (11) every in-sheet re-read raced against 5 s, a failed one after Connect goes on; (12) contract §7's no-bid claim slots, `waiver_line` / `waiver_line_no_drop`, `bid_line`, and `surface` on the request. The sheet's decisions moved to the pure `mobile/src/utils/claimSheetPlan.ts` so they execute in the suite.
+  - **`check-fa-move`:** 75 passed, 0 failed (23 new, X1–X12, executed wherever a behaviour is involved; the pins that moved with the code now execute it).
+  - **Sabotage, one per fix, each red then restored (12; the unsabotaged copy green):** X1 the `loc-` id; X2 the drop list by open slots only; X3 the request's drop from `dropId`; X4 no NetInfo before the consent GET; X5 an unbounded pre-read; X6 no hysteresis; X7 MFL connect shown as a Connect step; X8 a 404 thrown; X9 `reason` ignored; X10 an unknown mode used; X11 an unbounded re-read; X12 no `surface`. The earlier 28 (F1–F17, L1, R1, P1, T7) re-run on the new code, two retargeted where the code moved (F9's mint, P1's mark): all 28 still red.
+  - **Gate re-run:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 122 of 122 exit 0 (`check-usage-trends` and `check-sleeper-handoff` untouched and passing); the taxonomy pytest selection 177 passed.
+- **platforms-eng review, round 3 (same day; contract `3248995b`: both consent routes need a verified session):**
+  - **Fixed:** Settings reads a consent GET 403 `verification_required` as `valid: false` (no row), and a DELETE 403 keeps the row with "Couldn't turn it off. Try again."; the sheet sends a consent GET 403 `verification_required` to state 4 (Verify) through the move route's own plan, never the F4 hand-off. analytics-lead's fix: an unknown `connect` value is recorded as `fa_move_connect_shown.reason = 'unknown'` (UI unchanged); the taxonomy comment, the addendum (plus the widened C4 read, server-authored `consent_shown.reason`, joins on (`user_id`, `attempt_id`)) and the backend test row follow. trades-eng's K-F5 GO: `docs/cross-client-invariants.md` lists the move path among the device-page discard triggers, and `check-device-first-page` 1k pins devicePage's `FA_MOVE_PATH` equal to `api/faMove.ts`'s.
+  - **`check-fa-move`:** 78 passed, 0 failed (Y1, Y2, Y3 new). `test_analytics_taxonomy_fa_move.py`: 9 passed (the connect-reason set pinned against the client's `CONNECT_SHOWN_REASONS`).
+  - **Sabotage, each red then restored (5; the unsabotaged copy green):** Y1a the GET 403 not read as `valid: false`; Y1b a failed DELETE hiding the row (X8 red too); Y2 the consent GET 403 sent to F4; Y3 an unknown connect recorded as `not_linked`; and `FA_MOVE_PATH` renamed in `api/faMove.ts` only → `check-device-first-page` 1k red.
+  - **Gate re-run:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 122 of 122 exit 0 (`check-device-first-page` 37 ✓); the taxonomy pytest selection 178 passed.
+- **platforms-eng round 4 (same day): marketing-lead's final copy, addendum 17 §A.** `FA_MOVE_FALLBACK_COPY` takes A3.1–A3.9 verbatim (`finality`, `waiver_line`, `waiver_line_no_drop`, `window_line`, `verify_line`, `not_sent_line`, `unknown_body`, `unavailable_line`, `result_added` "Done", `stop_failed` "Couldn't turn off roster moves. Try again."), G23 reads `{platform} isn't connected` (A3.10); `handoff_footer` (A2), `league_line` (G22) and legal's `bid_line` "Bid: {bid}" stay as written. The Usage Trends availability footer is A1's preferred line.
+  - **`check-fa-move`:** 80 passed, 0 failed (Z1 ×2 new: every changed string and the confirmed ones verbatim, filled forms, marketing's no-"we"/"failed"/"error"/"try again" rules; the A1 footer). X8's expected string updated.
+  - **Sabotage, each red then restored (2; the unsabotaged copy green):** `window_line` reverted to "Moves authorized until {date}"; the footer reverted to "quick claim check".
+  - **Gate re-run:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 122 of 122 exit 0.
+- **platforms-eng round 5 (same day; head-eng's design note, legal R28.26 / R28.27):**
+  - **Built:** (1) a working button keeps full brightness with its spinner and takes no tap: the named CTA and Make the move take `loading={busy}`, never `disabled` for busy, and #364's Button rule is ported verbatim (`dafa7e8f` + `8421283f` on `build/referral-binary`: only `disabled` dims; `loading` keeps the label's box and centres the spinner), so every `loading` site on this branch stops dimming too, as on #364; (2) "In {league}" always beside the named CTA, from the server's `league_line` or the fallback, with the host passing its league name (`leagueName` prop); no league to name, no named CTA; (3) "nothing was sent" only in state 11 (already true; now pinned). The analytics addendum gains `fa_move_consent_withdrawn.via`'s five values (`relink` only on a different token or user); the backend test lists only the four client events, so there's no `via` row to update.
+  - **`check-fa-move`:** 84 passed, 0 failed (B1 ×2, executed against the real Button with a stub React; B2; B3, a table over every failure state's fallback text). F8 updated for the busy rule.
+  - **Sabotage, each red then restored (4; the unsabotaged copy green):** B1a the named CTA dimmed while busy; B1b the Button dimming on `loading` again; B2 the league line from the server slot only; B3 a refusal fallback saying "Nothing was sent."
+  - **Gate re-run:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 122 of 122 exit 0; the taxonomy pytest selection 178 passed.
+- **platforms-eng round 6 (same day; release-lead's independent QA of #579 @ `c3449e15`, GO-with-notes):**
+  - **P2, fixed:** (1) Settings' consent GET opts into a new `quietStatuses` option on the shared client (`[403, 404]`), so a dark or unverified visit emits no `api_request_failed`; other calls and a 500 are unchanged. (2) Usage Trends never waits at the Add tap: each listed league's capability is prefetched in the background when an availability list opens (sheet or expanded row), under `['fa-move-capability', id]` with a 60 s staleTime, kept as `move` + the rows' move_* fields; the tap routes from the cache, else the #509 way at once. The round-2 busy spinner is removed from the three row components.
+  - **P3s, fixed:** the `openConsent` ref guard; a non-string `consent_until` is no grant; any per-row `move_mode` holds the row; a 400 / unknown 4xx is the neutral panel (server words, dim, no "wasn't made" title); `open_platform` commented as reserved and unread; consent links per link (Terms and Privacy always both present); `offline_line` "Couldn't connect right now, so nothing was sent." when Fleeced wasn't reached (`not_sent_line` kept for the platform's 502 + network; marketing to be told); "Still sending…" and `stop_failed` announced, Turn off its own button, the 10d bid error refocused. `docs/plans/sleeper-fa-write/testflight-additions.md` adds T9 (airplane mode after "Still sending…"), T10 (post-launch), UT1, DT1 and AX2.
+  - **`check-fa-move`:** 91 passed, 0 failed (Q1, the rewritten X5 ×2, P3.1–P3.8 ×6 new; F2, F16, L1, X8 and B3 updated for the new behaviour).
+  - **Sabotage, each red then restored (9; the unsabotaged copy green):** Q1 the client reporting every status; X5 awaiting the read at the Add tap; P3.1 no openConsent guard; P3.2 a numeric `consent_until` accepted; P3.3 only exact `'handoff'`; P3.4 the neutral panel as a refusal; P3.6 one bad link dropping Terms; P3.7 offline saying "Couldn't reach Sleeper"; P3.8 "Still sending…" not announced.
+  - **Gate re-run:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js` on the pre-merge branch, 122 of 122 exit 0 (`check-usage-trends` passing with the components back to #509's shape; 139 after the merge, below); the taxonomy pytest selection 178 passed.
+- **Round 6b (same day):** Usage Trends also prefetches the focused league's capability once, on mount and when the focused league changes, into the same `['fa-move-capability', id]` cache (same trimmed fetch, 60 s staleTime), for a real Sleeper league session only (never demo, local or no league). Nothing on the Add path waits. `check-fa-move` 92 passed, 0 failed (X5b new). Sabotage: the mount prefetch dropped → X5b red, then restored; the unsabotaged copy green. Gate: `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js` on the pre-merge branch, 122 of 122 exit 0 (139 after the merge, below).
+- **The merge with #509's sync (`ff175836`, platforms-eng):**
+  - **What it merged:** #509's sync `77044992`, which carries #528, #379 and main `fd5390ac`. Every conflict was resolved as a union: `api/client.ts` (#579's `quietStatuses` and main's `background`), ClaimSheet, check-sleeper-handoff's header, `analytics_taxonomy` and this ledger, the `api/` and `utils/` CLAUDE.md rows and `tests/README`.
+  - **Release-lead's P1-1, fixed:**
+    - `check-paywall-gate` 9g: `api/faMove.ts` may hold its own `{league}` (contract §7); `{inviter}` and the invitee template stay banned there.
+    - 8b: faMove's two non-tap reads, Settings' consent read and the capability prefetch, pass `background: true` and join `BACKGROUND_SET`.
+    - 2a: the quiet guard is one guarded `_reportApiFailure` call, and `check-fa-move` Q1's shape pin follows it.
+  - **Gate (platforms-eng's run):** every `tests/check-*.js`, 139 of 139 exit 0; `check-fa-move` 92 of 92; `check-paywall-gate` 109 of 109, with the 9g sabotage (an `{inviter}` in `faMove.ts`) red; `npx tsc --noEmit` 0 errors.
+- **Round 7 (same day; release-lead's delta QA of `ff175836`, GO-with-notes):**
+  - **P2-A, fixed (before the 11-06 cut): the list prefetch no longer fans out while dark.**
+    - **Before:** opening an availability list read every free-agent league's capability, ESPN and MFL included: 13 reads for 14 leagues, each a live Sleeper rosters GET on the server, and each failure retried once.
+    - **Now:** the list prefetch (`prefetchListCapabilities`) reads nothing unless the focused league's cached capability is `submit`, then at most 6 leagues, Sleeper first. Both prefetches go through `prefetchLeagueCapability` with `retry: false`. Dark, or with moves off, a visit makes one read: the focused league's, on mount.
+  - **P3s, fixed:**
+    - **A stale capability:** `['fa-move-capability']` is invalidated on Settings' Stop roster moves (only after the DELETE succeeds) and on every terminal sheet result (in `refreshList`). The Add tap's `capabilityAtTap` ignores an entry that's invalidated or more than 5 minutes old (`dataUpdatedAt`) and routes legacy.
+    - **`offline_line`** is a `MoveCopyKey`: the server slot first, then the fallback. The PENDING MARKETING note stays.
+    - **Turn off** dims while sending, at the chalkline Button's disabled opacity.
+    - **`consentLinks`** fills Fleeced's Terms and Privacy slots by exact label (trimmed, any case) only.
+    - **Settings' stale comment** is updated (`quietStatuses` and `background` exist now).
+    - **`testflight-additions.md`:** UT1 runs on a slow Network Link Conditioner profile with an immediate Add tap, which must open the hand-off at once. AX2(b) loads Settings before the network goes off.
+    - **`code-walk.md`:** remapped from `4c5a9d47`, with the `client.ts` citations now `:660`, `:661`, `:666`, `:674` and `:712`, and a new section on the two `background: true` reads and 9g's narrowing.
+  - **`check-fa-move`:** 101 passed, 0 failed. New: P2A ×3, S1 ×2, S2, S3, S4 and S5. Updated for the helpers: F2, X5 and X5b. P2A and S1 run on the app's own QueryClient (`src/state/queryClient.ts`, whose default is `retry: 1`) through `@tanstack/query-core`, with query-core's timers on the fake clock, so a retry the code allowed would fire.
+  - **Sabotage, 16, each red then restored (the unsabotaged copy green):**
+    - P2A: the submit gate removed; `retry: false` dropped; the six-league cap dropped; Sleeper-first dropped; the screen prefetching the list itself, ungated.
+    - S1: the 5-minute age ignored; `isInvalidated` ignored; the tap reading `getQueryData` again; the sheet's invalidation dropped; Settings' invalidation dropped.
+    - S2: `planNotSent` reading the fallback only. S3: Turn off undimmed. S4: `consentLinks` back to `/terms/i`. S5: the stale comment restored.
+    - Re-checked: X5b (the mount prefetch dropped) and F12 (the FA-list invalidation dropped).
+  - **Gate:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 139 of 139 exit 0 (`check-paywall-gate` 109 of 109, `check-update-gate` 44 of 44); `check-fa-move` 101 of 101. The backend is untouched this round.
+- **Round 8 (same day): scope §B11, no unchosen $0 claim.** A build requirement on #579 for the 11-06 binary. Sources: `plan/fa-moves-launch` @ `973f8854` (§B11, states 6 and 10e, note (d), F18, G25 and G26) and contract `a7a2a8f4` (§3 `faab_bid`, §4's 400 exception, §7's `{bid}` rule and `bid_needed_line`).
+  - **Rule 6:** `moveSelection` reads an empty FAAB field as no bid (`bid: null`, no `faab_bid`, never 0), and its `needsBid` is the CTA gate. `has_bid` is false for an empty field, and no amount is logged.
+  - **Rule 1:**
+    - The named CTA and the consent step's Make the move are both disabled while `needsBid`, and `send()` refuses too.
+    - The label is the no-amount slot ("Claim A" / "Claim A, drop B"), with the hint "Enter a bid to claim" (`bid_hint`) and no live region.
+    - A visible line under the field: the server's `bid_needed_line`, else "Enter a bid. $0 is allowed." Both strings are PENDING MARKETING (G25, G26).
+    - A typed `0` enables "Claim A for $0".
+  - **Rule 2:** on 10e add → claim on a FAAB league, `planKindChanged` puts the line directly above the empty field as `bidNotice`, and VoiceOver focus goes there. The bid input has no ref or `autoFocus`, and nothing calls `.focus()`.
+  - **Rule 3:** the bid is written only by the field, so a typed bid survives claim → add → claim, and an add never sends it.
+  - **Rule 5:** a 400 `bad_request` to a FAAB claim sent without `faab_bid` (judged on the request sent, `faabClaimWithoutBid`) returns to Ready with rule 1's line focused. There is no refresh, retry or error screen; any other 400 is still the neutral panel.
+  - **`check-fa-move`:** 110 passed, 0 failed. New: F18 ×6 and B11 ×3, executed against `utils/claimSheetPlan.ts`, with an executed `attemptMove` for `has_bid`. T7 changed: an empty FAAB bid is no bid.
+  - **Sabotage, 16, each red then restored (the unsabotaged copy green):**
+    - F18: `input.bid === '' ? 0` restored; `needsBid` never true; the named CTA ungated; Make the move ungated; `send()`'s guard dropped; the hint dropped; the CTA made a live region; the bid cleared on a 10e flip; an add sending the typed bid.
+    - Rule 1: the visible line dropped; the line reading the fallback only.
+    - Rule 2: the 10e line kept above the CTA; the bid field set to `autoFocus`; the line moved below the field.
+    - Rule 5: the 400 shown as the neutral panel; the sheet never flagging a no-bid claim.
+  - **Docs:** the code-walk has a new §B11 section, with citations remapped from `a7a2a8f4`. `testflight-additions.md` has a B11 row: an add flipped to a claim on a FAAB league, an empty field, a disabled no-amount CTA, and a typed 0 enabling "for $0". The `utils/`, `components/` and `api/` CLAUDE.md rows and `tests/README` are updated.
+  - **Gate:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 139 of 139 exit 0 (`check-paywall-gate` 109 of 109, `check-update-gate` 44 of 44); `check-fa-move` 110 of 110. The backend is untouched (the server's 400 is the server PR's).
+- **Round 9 (same day; release-lead's delta QA of `53f94665`, GO-with-notes; P2-A and P3-1 verified fixed):**
+  - **QA P3-3, fixed.** A plan's new `staleCapability` invalidates `['fa-move-capability']`, the same invalidation `refreshList` does, without refreshing the list. It is set on three outcomes: a 404 `feature_disabled`, state 14's 422 `waiver_claim_unsupported`, and a 10e whose re-read lands on the hand-off (a claim while claims are off, or a held row). Before, a stale `submit` capability lasted up to 5 minutes.
+  - **QA P3-1, documented; behaviour unchanged.** A session focused on an ESPN or MFL league never gets Usage Trends' in-app route, even for its Sleeper leagues. That is deliberate: it keeps the dark fan-out at one read. It is now stated in a comment at the list gate and in the code-walk.
+  - **QA P3-2, documented.** Failed capability reads aren't cached, so a list open re-reads up to the cap of 6. Noted in the code-walk.
+  - **`testflight-additions.md`:** UT1's wait is now about 10 seconds. New rows: UT2, an in-app Add on another Sleeper league from the availability list; UT3, Turn off → Stop roster moves → back → Add opens the hand-off, with no "on until".
+  - **`check-fa-move`:** 112 passed, 0 failed. P3-3 is executed through `planFailure` / `planKindChanged`, with an AST check on both call sites; P3-1's comment is pinned.
+  - **Sabotage, each red then restored (the unsabotaged copy green):** `apply()` ignoring `staleCapability`; the 10e path ignoring it; claims-off not flagged.
+- **Round 10 (2026-11-02; release-lead's delta QA of `0168d383`, CONDITIONAL GO, one P2 before the 11-06 binary):**
+  - **P2-B, fixed.** The path was a FAAB claim, not linked, empty bid → Connect → back. It opened the consent step, which replaces the bid field, so rule 1's line never showed, and Make the move sat disabled with only a VoiceOver hint.
+    - The connect return now asks a pure `connectReturnStep`: a FAAB claim with an empty field resumes at **Ready** with the line. With a bid in hand, it goes to consent as before.
+    - `onNamedCta` returns first while a bid is needed, and `needsBidFor` is the one gate, which `moveSelection` uses too. So consent is only entered with a bid.
+    - `bidLineShown` shows the line on Ready only. The dead `|| view.step === 'consent'` branch is gone.
+  - **P3-1, pinned.** The bid line lives only in the bid section's FAAB branch: `bid_needed_line` appears once in ClaimSheet, inside `faab ? …`.
+  - **P3-2 and P3-3, left as is.** Each has one line in the code-walk's known limits: the digits-only filter is #509's; rule 5 needs the client to know the league is FAAB.
+  - **Docs.** The code-walk's false "on the steps that send" claim is corrected, citations remapped. `testflight-additions.md` has a B11b row: not connected, empty bid → Connect → sign in → back on Ready with the line → type a bid → CTA → consent → tick → Make the move enabled.
+  - **`check-fa-move`:** 115 passed, 0 failed. New: P2-B ×3, executed through `connectReturnStep` / `bidLineShown` / `needsBidFor`, including an exhaustive connect × consent × kind × FAAB × field table. The rule 1 pin's regex is replaced by the executed `bidLineShown` plus the P3-1 branch pin. B1 follows the new guard.
+  - **Sabotage, 5, each red then restored (the unsabotaged copy green):** the plan going to consent regardless; the sheet going to consent regardless; the named CTA's bid guard dropped; the line on consent again; the line rendered in the priority-waiver branch. Re-checked after the `needsBidFor` refactor: round 8's `input.bid === '' ? 0`, an add sending the bid, and the line dropped, all still red.
+  - **Gate:** `npx tsc --noEmit` 0 errors; `testid-lint` OK; every `tests/check-*.js`, 139 of 139 exit 0 (`check-paywall-gate` 109 of 109, `check-sleeper-handoff` passing); `check-fa-move` 115 of 115. The backend is untouched.
 
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 

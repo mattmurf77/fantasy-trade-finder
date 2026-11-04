@@ -11,8 +11,13 @@ Covers:
       the ids have to match the RevenueCat offering the client purchases)
   (d) session auth — no token → 401 (same layer as /api/me/entitlements)
   (e) ?platform=ios|web|extension accepted; unknown value degrades to ios
-  (f) tips — not served at launch (`tips: []`; the SKUs are not submitted
-      to App Store Connect); the restorable list holds only tip products
+  (f) tip jar (tip-jar plan §3 S1) — `tips` is the three ftf_tip_ SKUs
+      only while model_config `paywall_tips_enabled` is exactly 1 AND the
+      resolved platform is `ios` AND the session is verified and not demo
+      (an unverified or demo session gets []); `[]` at the seeded default 0, on web and
+      extension, and for any other knob value (2, NaN, garbage, a missing
+      row, a failed read); read live per request; flag off still serves
+      `{"enabled": false}` alone; the list holds only tip products
   (g) the Founding GMs club (#393 scope §2 item 3, recommendation §(b)):
       `club` open before closes_at and closed from it on, with the clock
       frozen on both sides; founder vs standard `display_price`;
@@ -31,18 +36,22 @@ Covers:
 
 Flask client + injected session, flags forced via a patched
 server.is_enabled — the two harness patterns from backend/tests/CLAUDE.md.
-The clock is frozen by patching server._paywall_now, the one clock the
-route reads. No DB rows are needed: the route is static config and
-touches no table.
+The route's one table read is the tip knob (model_config), so every test
+runs against an isolated in-memory DB (autouse `mem_engine`); an empty
+table falls back to the seed list, i.e. the knob's default 0.
 """
 
 import pathlib
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_CEILING, Decimal
+from unittest.mock import patch
 
 import pytest
+from sqlalchemy import create_engine, insert
 
+import backend.database as db_module
 import backend.server as server
+from backend.database import metadata, model_config_table
 
 TOKEN = "paywall-test-token"
 USER = "paywall_user_1"
@@ -73,12 +82,26 @@ DROPPED_FEATURES = ("engine_knobs", "extension_overlays", "ad_free",
                     "unlimited_leagues", "portfolio")
 
 
+@pytest.fixture(autouse=True)
+def mem_engine():
+    """Hermetic model_config: the route reads the tip knob live, and must
+    never read the local data/trade_finder.db."""
+    eng = create_engine("sqlite:///:memory:",
+                        connect_args={"check_same_thread": False})
+    metadata.create_all(eng)
+    with patch.object(db_module, "engine", eng):
+        yield eng
+
+
 @pytest.fixture()
 def client():
+    """A VERIFIED, non-demo session, so the tip tests isolate the knob and
+    the platform; the session leg has its own tests in (f)."""
     server.app.config["TESTING"] = True
     c = server.app.test_client()
     with server._sessions_lock:
-        server._sessions[TOKEN] = {"user_id": USER, "last_active": 0.0}
+        server._sessions[TOKEN] = {"user_id": USER, "last_active": 0.0,
+                                   "verified": True}
     try:
         yield c
     finally:
@@ -222,11 +245,34 @@ def test_unknown_platform_degrades_to_ios(client, monkeypatch):
 
 # ── (f) tip jar ────────────────────────────────────────────────────────────
 
+TIP_KNOB = "paywall_tips_enabled"
+TIPS = [
+    {"product_id": "ftf_tip_199", "display_price": "$1.99"},
+    {"product_id": "ftf_tip_499", "display_price": "$4.99"},
+    {"product_id": "ftf_tip_999", "display_price": "$9.99"},
+]
+
+
+def _set_tip_knob(eng, value):
+    """Write the knob row straight to the table (no reload_config), so a
+    changed answer proves the read is live. None deletes the row and leaves
+    another one, so get_config() serves DB rows rather than the seed list
+    and the missing key hits the helper's inline fallback (G-064)."""
+    with eng.begin() as conn:
+        conn.execute(model_config_table.delete()
+                     .where(model_config_table.c.key == TIP_KNOB))
+        if value is None:
+            conn.execute(model_config_table.delete()
+                         .where(model_config_table.c.key == "vet_age"))
+            conn.execute(insert(model_config_table).values(key="vet_age", value=27))
+        else:
+            conn.execute(insert(model_config_table).values(key=TIP_KNOB, value=value))
+
+
 @pytest.mark.parametrize("now", [BEFORE, AFTER])
 def test_tips_empty_at_launch(client, monkeypatch, now):
-    """#393: the tip SKUs are not submitted to App Store Connect, so the
-    config serves `tips: []`, in or after the club window, and no tip id or
-    price leaks."""
+    """At the seeded default (knob 0) the config serves `tips: []` and no
+    tip id or price leaks."""
     _flags(monkeypatch, "monetize.paywall")
     _freeze(monkeypatch, now)
     r = _get(client)
@@ -234,12 +280,109 @@ def test_tips_empty_at_launch(client, monkeypatch, now):
     assert "ftf_tip" not in r.get_data(as_text=True)
 
 
+def test_tip_knob_seeded_zero():
+    assert [v for k, v, _ in db_module._MODEL_CONFIG_DEFAULTS
+            if k == TIP_KNOB] == [0]
+
+
+@pytest.mark.parametrize("query", ["?platform=ios", "", "?platform=nintendo"])
+def test_tips_served_on_ios_when_knob_is_1(client, monkeypatch, mem_engine, query):
+    """Knob 1 + the RESOLVED platform ios (explicit, the default, or an
+    unknown value degraded to ios) → exactly the three SKUs, in order."""
+    _flags(monkeypatch, "monetize.paywall")
+    _set_tip_knob(mem_engine, 1.0)
+    body = _get(client, query).get_json()
+    assert body["platform"] == "ios"
+    assert body["tips"] == TIPS
+
+
+@pytest.mark.parametrize("session, served", [
+    ({"verified": True}, True),
+    ({}, False),                                    # never verified
+    ({"verified": False}, False),
+    ({"verified": True, "is_demo": True}, False),   # demo, even if stamped
+    ({"is_demo": True}, False),
+])
+def test_tips_need_a_verified_non_demo_session(client, monkeypatch, mem_engine,
+                                               session, served):
+    """Defence in depth behind #495's verified-only Settings row: knob 1
+    + ios still serves [] to an unverified or demo session (the same
+    predicate as _session_verification)."""
+    _flags(monkeypatch, "monetize.paywall")
+    _set_tip_knob(mem_engine, 1.0)
+    with server._sessions_lock:
+        server._sessions[TOKEN] = {"user_id": USER, "last_active": 0.0,
+                                   **session}
+    r = _get(client, "?platform=ios")
+    assert r.status_code == 200
+    assert r.get_json()["tips"] == (TIPS if served else [])
+    if not served:
+        assert "ftf_tip" not in r.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("platform", ["web", "extension"])
+def test_no_tips_off_ios_even_when_knob_is_1(client, monkeypatch, mem_engine,
+                                             platform):
+    """Web and the extension have no in-app purchase (plan §1)."""
+    _flags(monkeypatch, "monetize.paywall")
+    _set_tip_knob(mem_engine, 1.0)
+    r = _get(client, f"?platform={platform}")
+    assert r.get_json()["tips"] == []
+    assert "ftf_tip" not in r.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("value", [0.0, 2.0, -1.0, 0.5, 1.0001, None])
+def test_no_tips_unless_knob_is_exactly_1(client, monkeypatch, mem_engine, value):
+    """0, 2, any other number and a missing row (None) all serve []."""
+    _flags(monkeypatch, "monetize.paywall")
+    _set_tip_knob(mem_engine, value)
+    assert _get(client, "?platform=ios").get_json()["tips"] == []
+
+
+@pytest.mark.parametrize("value", ["abc", "", None, float("nan"), float("inf")])
+def test_no_tips_for_a_garbage_knob(client, monkeypatch, value):
+    """Values the Float column can't hold, injected at the read."""
+    _flags(monkeypatch, "monetize.paywall")
+    monkeypatch.setattr(server, "get_config", lambda: {TIP_KNOB: value})
+    assert _get(client, "?platform=ios").get_json()["tips"] == []
+
+
+def test_no_tips_when_the_knob_read_fails(client, monkeypatch):
+    def boom():
+        raise RuntimeError("db down")
+    _flags(monkeypatch, "monetize.paywall")
+    monkeypatch.setattr(server, "get_config", boom)
+    r = _get(client, "?platform=ios")
+    assert r.status_code == 200
+    assert r.get_json()["tips"] == []
+
+
+def test_tip_knob_read_live_per_request(client, monkeypatch, mem_engine):
+    """No cache and no reload: flipping the stored row flips the next
+    response, so 0 is a deploy-free kill switch."""
+    _flags(monkeypatch, "monetize.paywall")
+    for value, expected in [(1.0, TIPS), (0.0, []), (1.0, TIPS), (2.0, [])]:
+        _set_tip_knob(mem_engine, value)
+        assert _get(client, "?platform=ios").get_json()["tips"] == expected
+
+
+@pytest.mark.parametrize("query", ["", "?platform=ios", "?platform=web",
+                                   "?platform=extension"])
+def test_flag_off_ignores_the_tip_knob(client, monkeypatch, mem_engine, query):
+    """`monetize.paywall` off → `{"enabled": false}` and nothing else, knob
+    or not."""
+    _flags(monkeypatch)
+    _set_tip_knob(mem_engine, 1.0)
+    r = _get(client, query)
+    assert r.get_json() == {"enabled": False}
+    assert "ftf_tip" not in r.get_data(as_text=True)
+
+
 def test_restorable_tip_skus_are_tip_products():
-    """`_PAYWALL_TIPS` is the list to restore if tips come back (only by a
-    reviewed change). Every SKU in it must hit the projector's
-    no-entitlement guard — a tip id drifting out of the ftf_tip_ prefix
-    would grant Pro — and none claims entitlement fields: a tip buys
-    nothing."""
+    """`_PAYWALL_TIPS` is the list served behind the knob. Every SKU in it
+    must hit the projector's no-entitlement guard — a tip id drifting out
+    of the ftf_tip_ prefix would grant Pro — and none claims entitlement
+    fields: a tip buys nothing."""
     from backend import entitlements as entl
     assert [t["product_id"] for t in server._PAYWALL_TIPS] == [
         "ftf_tip_199", "ftf_tip_499", "ftf_tip_999"]

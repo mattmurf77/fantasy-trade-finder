@@ -18988,10 +18988,112 @@ def trade_evaluate_route():
         return _trade_evaluate_impl(_mode)
 
 
+# ── The consensus verdict: ONE code path for evaluate and the share card ───
+# docs/plans/share-card-value-bar/scope.md. `_trade_evaluate_impl` prices and
+# judges a trade through these three helpers, and the share mints
+# (`_share_value_snapshot`) call `_consensus_verdict` too, so the card's
+# stored bar and the calculator's verdict can't drift. None of them reads a
+# session or a member board: the price is the universal-pool consensus plus
+# the league's owned-pick prices, under whatever stud-tax / pick-pricing pin
+# the caller set (evaluate: the caller's mode; the share mint: market).
+
+def _consensus_pricing(fmt: str, league_id: str | None = None):
+    """The consensus value function for `fmt` (and `league_id`'s owned picks).
+
+    Returns (pool_players, seed, pick_vals, pick_rows, seed_value):
+      pool_players  the universal pool's players for `fmt`
+      seed          universal-pool seed Elo: players and generic picks
+      pick_vals     league-owned pick_id -> priced value (value space)
+      pick_rows     the owned-pick rows priced, in load order
+      seed_value    pid -> value: the owned-pick price, else
+                    elo_to_value(seed.get(pid, 1500))
+    """
+    _pool_players, seed = _get_universal_pool(fmt)
+    e2v = _trade_service_mod.elo_to_value
+
+    # #158 — league-scoped owned picks (e.g. "2027 1st") are NOT in the
+    # universal-pool `seed`, so they'd otherwise be silently dropped. When a
+    # league_id rides along, resolve each owned pick_id to its pool_value
+    # (already in elo_to_value units, so it composes directly with player
+    # values). Generic picks (generic_pick_*) still resolve via `seed`.
+    #
+    # The price is resolved at READ time under the pricing mode pinned by
+    # the caller (trade_evaluate_route, alongside the #215 stud-tax pin; the
+    # share card pins the same default). Since D-144 that is always
+    # `market_slots`, and the waterfall is the pick's OWN slot price when
+    # D-090 resolves one → the round curve → the stored ladder value. The
+    # stored column is never written — pricing is read-time in every mode.
+    #
+    # W3 M-C (S1) — the read opts into asserted rows behind
+    # `picks.assign_tradeable` (`_pick_read_source`).
+    league_pick_vals: dict[str, float] = {}
+    league_pick_rows: list[dict] = []
+    if league_id and league_id != "league_demo":
+        try:
+            # D-144 per-slot pricing needs the league's resolved draft
+            # order. Looked up ONCE per request (it is DB-backed with a
+            # 60s cache), never per pick — same discipline as the deck
+            # lane's lookup in `_owned_pick_assets`.
+            _slot_order = _league_slot_order(league_id)
+            for _p in load_draft_picks(league_id=league_id,
+                                       source=_pick_read_source()):
+                league_pick_vals[_p["pick_id"]] = _priced_pick_value(
+                    _p, _slot_order, fmt)
+                league_pick_rows.append(_p)
+        except Exception as _lp_err:
+            log.warning("evaluate: owned-pick load failed (continuing): %s", _lp_err)
+
+    def seed_value(pid: str) -> float:
+        if pid in league_pick_vals:
+            return league_pick_vals[pid]        # already in value space
+        return e2v(seed.get(pid, 1500.0))
+
+    return _pool_players, seed, league_pick_vals, league_pick_rows, seed_value
+
+
+def _consensus_split(give_ids, recv_ids, seed, pick_vals):
+    """(give, recv, dropped): each side's ids the consensus can price, and
+    every id it can't (the engine's graceful-drop rule)."""
+    give    = [p for p in give_ids if p in seed or p in pick_vals]
+    recv    = [p for p in recv_ids if p in seed or p in pick_vals]
+    dropped = [p for p in list(give_ids) + list(recv_ids)
+               if p not in seed and p not in pick_vals]
+    return give, recv, dropped
+
+
+def _consensus_verdict(give_ids, recv_ids, fmt: str, league_id: str | None = None,
+                       *, pricing=None, fairness_threshold: float = 0.75) -> dict | None:
+    """The consensus value verdict for one trade, or None when either side
+    is empty after unpriceable ids are dropped.
+
+    Returns `_value_verdict_payload`'s shape ({give_value, receive_value,
+    favors, gap}) plus `point_ratio`, `fairness` (the `_fairness_v3` gate at
+    `fairness_threshold`) and `dropped_ids`. `even` is `point_ratio >= 0.95`,
+    evaluate's rule. Pure over its inputs: no session, no member board.
+    `pricing` is a `_consensus_pricing` result the caller already holds
+    (evaluate passes its own, so the league's picks load once).
+    """
+    from .trade_optimizer import _consensus_packages, _fairness_v3
+
+    if pricing is None:
+        pricing = _consensus_pricing(fmt, league_id)
+    _pool, seed, pick_vals, _rows, seed_value = pricing
+    give, recv, dropped = _consensus_split(give_ids, recv_ids, seed, pick_vals)
+    if not give or not recv:
+        return None
+    gv, rv = _consensus_packages(give, recv, seed_value)
+    give_value, receive_value = round(gv, 1), round(rv, 1)
+    fairness, point_ratio, _gv, _rv = _fairness_v3(
+        give, recv, seed_value, None, fairness_threshold)
+    out = _value_verdict_payload(give_value, receive_value, point_ratio >= 0.95)
+    out.update(point_ratio=point_ratio, fairness=fairness, dropped_ids=dropped)
+    return out
+
+
 def _trade_evaluate_impl(stud_tax_mode: str):
     """The /api/trade/evaluate body — runs inside the caller's stud-tax
     mode context (see trade_evaluate_route)."""
-    from .trade_optimizer import _consensus_packages, _fairness_v3
+    from .trade_optimizer import _consensus_packages
 
     body = request.get_json(silent=True) or {}
     give_raw = body.get("give_player_ids") or []
@@ -19028,49 +19130,21 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         caller_user_id = _mode_b_sess.get("user_id")
 
     try:
-        _pool_players, seed = _get_universal_pool(fmt)
+        # The consensus pricing and verdict are shared with the og share card
+        # (`_consensus_pricing` / `_consensus_verdict`, docs/plans/
+        # share-card-value-bar/scope.md), so the two can never drift.
+        _pricing = _consensus_pricing(fmt, league_id)
+        _pool_players, seed, league_pick_vals, _league_pick_rows, seed_value = _pricing
         e2v = _trade_service_mod.elo_to_value
 
-        # #158 — league-scoped owned picks (e.g. "2027 1st") are NOT in the
-        # universal-pool `seed`, so they'd otherwise be silently dropped. When a
-        # league_id rides along, resolve each owned pick_id to its pool_value
-        # (already in elo_to_value units, so it composes directly with player
-        # values). Generic picks (generic_pick_*) still resolve via `seed`.
-        #
-        # The price is resolved at READ time under the pricing mode pinned for
-        # this request by trade_evaluate_route, alongside the #215 stud-tax
-        # pin. Since D-144 that is always `market_slots`, and the waterfall is
-        # the pick's OWN slot price when D-090 resolves one → the round curve
-        # → the stored ladder value. The stored column is never written —
-        # pricing is read-time in every mode.
-        #
-        # W3 M-C (S1) — the read opts into asserted rows behind
-        # `picks.assign_tradeable`, and each priced pick entry carries its
-        # provenance + season so the client can badge it and deep-link the
-        # correction. Flag off ⇒ the platform-only default and no new keys.
-        league_pick_vals: dict[str, float] = {}
-        league_pick_meta: dict[str, dict] = {}
+        # W3 M-C (S1) — each priced pick entry carries its provenance + season
+        # so the client can badge it and deep-link the correction. Flag off ⇒
+        # the platform-only default and no new keys.
         _tradeable = _asserted_picks_tradeable()
-        if league_id and league_id != "league_demo":
-            try:
-                # D-144 per-slot pricing needs the league's resolved draft
-                # order. Looked up ONCE per request (it is DB-backed with a
-                # 60s cache), never per pick — same discipline as the deck
-                # lane's lookup in `_owned_pick_assets`.
-                _slot_order = _league_slot_order(league_id)
-                for _p in load_draft_picks(league_id=league_id,
-                                           source=_pick_read_source()):
-                    league_pick_vals[_p["pick_id"]] = _priced_pick_value(
-                        _p, _slot_order, fmt)
-                    league_pick_meta[_p["pick_id"]] = _pick_wire_source(
-                        _p, _tradeable, with_season=True)
-            except Exception as _lp_err:
-                log.warning("evaluate: owned-pick load failed (continuing): %s", _lp_err)
-
-        def seed_value(pid: str) -> float:
-            if pid in league_pick_vals:
-                return league_pick_vals[pid]        # already in value space
-            return e2v(seed.get(pid, 1500.0))
+        league_pick_meta: dict[str, dict] = {
+            _p["pick_id"]: _pick_wire_source(_p, _tradeable, with_season=True)
+            for _p in _league_pick_rows
+        }
 
         # #277 — tier walked off the RAW seed Elo via the canonical
         # band-walk (same convention as /api/trade/values; never derived
@@ -19080,10 +19154,8 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         _evener_tier = (lambda pid, pos:
                         RankingService.tier_for_elo(seed.get(pid, 1500.0), pos, fmt))
 
-        give    = [p for p in give_raw if p in seed or p in league_pick_vals]
-        recv    = [p for p in recv_raw if p in seed or p in league_pick_vals]
-        dropped = [p for p in give_raw + recv_raw
-                   if p not in seed and p not in league_pick_vals]
+        give, recv, dropped = _consensus_split(give_raw, recv_raw, seed,
+                                               league_pick_vals)
 
         per_player = [
             {"player_id": pid, "side": side, "value": round(seed_value(pid), 1),
@@ -19098,20 +19170,22 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         # as generic-pick equivalents ("≈ a Mid 2nd") so the delta is an
         # actionable counteroffer instead of an abstract number. `favors` +
         # `gap` are built by the shared _value_verdict_payload helper (the same
-        # one the deck cards use, so the two verdicts can never drift).
+        # one the deck cards use, so the two verdicts can never drift), via
+        # `_consensus_verdict` (the same call the og share card makes).
         gap = None
-        if give or recv:
-            gv, rv = _consensus_packages(give, recv, seed_value)
-            give_value, receive_value = round(gv, 1), round(rv, 1)
-        if give and recv:
-            fairness, point_ratio, _gv, _rv = _fairness_v3(
-                give, recv, seed_value, None, thr)
+        _cv = _consensus_verdict(give_raw, recv_raw, fmt, league_id,
+                                 pricing=_pricing, fairness_threshold=thr)
+        if _cv is not None:                 # both sides priced
+            give_value, receive_value = _cv["give_value"], _cv["receive_value"]
+            fairness, point_ratio = _cv["fairness"], _cv["point_ratio"]
             even = point_ratio >= 0.95
             verdict = ("even" if even
                        else "fair" if fairness is not None else "unfair")
-            _vp = _value_verdict_payload(give_value, receive_value, even)
-            favors = _vp["favors"]
-            gap = _vp["gap"]
+            favors = _cv["favors"]
+            gap = _cv["gap"]
+        elif give or recv:                  # one-sided: package values only
+            gv, rv = _consensus_packages(give, recv, seed_value)
+            give_value, receive_value = round(gv, 1), round(rv, 1)
 
         result = {
             "scoring_format":     fmt,
@@ -25912,7 +25986,8 @@ def sleeper_link():
         denial = _verified_write_denial(sess)
         if denial is not None:
             return denial
-        delete_sleeper_credential(user_id)
+        # D1: disconnecting also withdraws any open roster-move consent.
+        _drop_sleeper_credential(user_id, "disconnect")
         return jsonify({"connected": False})
 
     if request.method == "GET":
@@ -25976,14 +26051,29 @@ def sleeper_link():
 
     exp = _sleeper_write.token_expiry(token)
     expires_at = datetime.fromtimestamp(exp, tz=timezone.utc).isoformat() if exp else None
+    withdrawn = 0
     try:
         ciphertext = _sleeper_write.encrypt_token(token)
-        upsert_sleeper_credential(user_id, sleeper_user_id, ciphertext, expires_at)
+        # D1, R15.2.5 / legal R28.26 2f: re-consent after a re-link, recorded as
+        # `relink`, in the SAME transaction as the credential swap (both land or
+        # neither). Only when the stored credential actually CHANGES (another
+        # token, or another Sleeper user): the client silently re-posts the
+        # STORED token at session start (maybeReplaySleeperVerification, #126),
+        # and that replay must never end a grant. Neither token is ever logged.
+        withdrawn = _fa_db.relink_sleeper_credential(
+            user_id, sleeper_user_id, ciphertext, expires_at,
+            withdraw=_sleeper_credential_changes(user_id, token, sleeper_user_id),
+            now=_fa_move_now())
     except _sleeper_write.SleeperWriteError:
         return jsonify({"error": "sleeper_unconfigured"}), 503
     except Exception:
         log.exception("sleeper_link store failed")
         return jsonify({"error": "store_failed"}), 500
+    finally:
+        if withdrawn:
+            _fa_move_event(user_id, "fa_move_consent_withdrawn",
+                           {"via": "relink", "league_platform": "sleeper"},
+                           touch_user=False)       # a side effect of the link (F2)
 
     if proven_live:
         # Claim matches + oracle passed → this session controls the account.
@@ -26182,7 +26272,7 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
     except _sleeper_write.SleeperWriteError:
         return {"error": "sleeper_unconfigured"}, 503
     if _sleeper_write.is_expired(token):
-        delete_sleeper_credential(user_id)
+        _drop_sleeper_credential(user_id, "credential_expired")   # D1: + consent withdrawal
         return {"error": "sleeper_expired"}, 409
 
     # Resolve BOTH rosters server-authoritatively from one public rosters fetch:
@@ -26331,7 +26421,7 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         # `sleeper_expired`, which is a time-expiry the client CAN fix by
         # reconnecting) plus a short detail so we can see WHY Sleeper says no.
         log.warning("sleeper propose auth-rejected: %s", getattr(e, "detail", None))
-        delete_sleeper_credential(user_id)
+        _drop_sleeper_credential(user_id, "credential_rejected")  # D1: + consent withdrawal
         return {
             "error": "sleeper_rejected",
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
@@ -32357,7 +32447,7 @@ def og_tier_card(pos, username):
 
 from .database import (  # noqa: E402
     create_trade_share_token, resolve_trade_share_token,
-    TradeShareRateLimited,
+    TradeShareRateLimited, load_trade_match_sides,
 )
 
 # token_urlsafe(16) → exactly 22 chars of the URL-safe base64 alphabet.
@@ -32377,9 +32467,197 @@ def _resolve_trade_share(token) -> dict | None:
         return None
 
 
+# ---------------------------------------------------------------------------
+# The value bar on the og share cards (docs/plans/share-card-value-bar/
+# scope.md; models-lead K-a2). The verdict is computed ONCE, at share time,
+# by `_consensus_verdict` (the same call /api/trade/evaluate makes) in market
+# stud-tax mode, never from the sharer's private board or session, and stored
+# on the share's own row as `value_snapshot`. The card and the share page
+# draw ONLY from that snapshot: a view never prices. A share with no
+# snapshot (any share made before this) draws no bar. The words on the bar
+# live in og_image (marketing addendum 14); this side decides bar or no bar,
+# and names the draft picks.
+# ---------------------------------------------------------------------------
+
+_SHARE_BAR_FORMATS = ("1qb_ppr", "sf_tep")
+_SNAPSHOT_FAVORS = ("give", "receive", "even")
+
+# An owned pick's id is database.make_pick_id's
+# `{league}_{season}_{round}_{original_roster}`.
+_OWNED_PICK_ID_RE = re.compile(r"^(.+?)_(\d{4})_(\d{1,2})_(.+)$")
+
+
+def _share_bar_format(raw) -> str | None:
+    """A share's scoring format, only when it names a real one."""
+    return raw if raw in _SHARE_BAR_FORMATS else None
+
+
+def _value_bar_date(d) -> str:
+    """A date -> "Nov 13, 2026" (B4: three-letter month, no leading zero,
+    four-digit year)."""
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def _share_pick_labels(asset_ids) -> dict[str, str]:
+    """Card labels for the draft-pick ids among `asset_ids`: a pick is never
+    a players row, so without a label the card drew "Unknown player".
+
+    Generic rungs use `generic_pick_label` ("Mid 1st Round Pick"); owned
+    picks use `_owned_pick_label` on the season and round in the pick's own
+    id ("2026 1st"), so the label survives the pick's row leaving
+    draft_picks after its draft. The original owner's name is left off on
+    purpose: it is a leaguemate's username, on a public image."""
+    labels: dict[str, str] = {}
+    for aid in {str(a) for a in (asset_ids or []) if a}:
+        parsed = parse_generic_pick_id(aid)
+        if parsed is not None:
+            labels[aid] = generic_pick_label(*parsed)
+            continue
+        m = _OWNED_PICK_ID_RE.match(aid)
+        if m:
+            labels[aid] = _owned_pick_label(
+                {"season": int(m.group(2)), "round": int(m.group(3))})
+    return labels
+
+
+def _share_value_snapshot(give_ids, recv_ids, fmt, league_id=None) -> str | None:
+    """The share-time value snapshot for one share, as the JSON text its row
+    stores, or None (NULL: no bar). Called by the two mints, never by a view.
+
+    Mode A consensus only: `_consensus_verdict` under market stud tax and the
+    default pick pricing (an outer pin, a test or harness, is kept: the
+    entry-point convention), with `league_id`'s owned picks priced (K-a7).
+    None (K-a6) when the format is unknown, either side is empty, any id
+    can't be priced, a side values at 0 or less, or anything raises (logged
+    by error type only). Unpriced ids are never dropped to store one anyway.
+
+    It holds exactly {v, favors, firsts, label, format, league_id,
+    computed_at, second_in_firsts, pool: {snapshot, version}}: never a
+    board, client-sent values, player values or totals, usernames, player
+    ids, or gap.value points.
+      firsts            |gap| in Mid 1sts (the fill length, the B2 label)
+      label             gap.pick_equivalent.label, or None (B1 vs B2)
+      second_in_firsts  Mid 2nd / Mid 1st over the generic-pick values at
+                        mint: where the +/-2nd ticks go
+      computed_at       ISO UTC; the card's date is its UTC date
+      pool.snapshot     roster_snapshot's vsn1 for (format, league): a hash
+                        of the consensus seed and the league's pick rows
+      pool.version      the pricing that produced it (Mode A evaluate, the
+                        stud-tax mode, the pick-pricing mode)
+    """
+    if fmt not in _SHARE_BAR_FORMATS:
+        return None
+    give = [str(x) for x in (give_ids or []) if x]
+    recv = [str(x) for x in (recv_ids or []) if x]
+    if not give or not recv:
+        return None
+    ts = _trade_service_mod
+    try:
+        stud_mode = ts.pinned_stud_tax_mode() or ts.STUD_TAX_DEFAULT
+        pick_mode = ts.pinned_pick_pricing_mode() or ts.pick_pricing_mode_for_user(None)
+        with ts.stud_tax_override(stud_mode), ts.pick_pricing_override(pick_mode):
+            v = _consensus_verdict(give, recv, fmt, league_id or None)
+        if (v is None or v["dropped_ids"]
+                or v["give_value"] <= 0 or v["receive_value"] <= 0):
+            return None
+        e2v = ts.elo_to_value
+        second_in_firsts = (e2v(GENERIC_PICK_SEEDS[(2, "Mid")])
+                            / e2v(GENERIC_PICK_SEEDS[(1, "Mid")]))
+        from . import roster_snapshot
+        from .database import engine as _engine
+        with _engine.connect() as conn:
+            vsn = roster_snapshot.values_snapshot_id(
+                conn, fmt, league_id or "", g_universal_by_format.get(fmt) or {},
+                pick_source=_pick_read_source(), generation=pool_generation())
+        pick = v["gap"].get("pick_equivalent")
+        snapshot = {
+            "v":                1,
+            "favors":           v["favors"],
+            "firsts":           v["gap"]["firsts"],
+            "label":            pick["label"] if pick else None,
+            "format":           fmt,
+            "league_id":        league_id or None,
+            "computed_at":      datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "second_in_firsts": second_in_firsts,
+            "pool": {"snapshot": vsn,
+                     "version": f"evaluate-mode-a/{stud_mode}/{pick_mode}"},
+        }
+    except Exception as e:
+        log.warning("share value snapshot failed (stored NULL): %s", type(e).__name__)
+        return None
+    return json.dumps(snapshot, sort_keys=True)
+
+
+def _value_bar_from_snapshot(raw) -> dict | None:
+    """{verdict, as_of, scoring_format} for the renderer from a share row's
+    `value_snapshot`, or None (no bar) for NULL or anything malformed. Reads
+    the snapshot only: it never prices. `as_of` is `computed_at`'s UTC date,
+    the day the values were computed. `second_in_firsts` is required (a
+    number with 0 < x < 1): the ticks have no default fraction, so a
+    snapshot without one is malformed."""
+    if not raw:
+        return None
+    try:
+        snap = json.loads(raw)
+        if not isinstance(snap, dict) or snap.get("v") != 1:
+            return None
+        favors, firsts, label = snap["favors"], snap["firsts"], snap.get("label")
+        fmt, second_in_firsts = snap["format"], snap.get("second_in_firsts")
+        if (favors not in _SNAPSHOT_FAVORS or fmt not in _SHARE_BAR_FORMATS
+                or isinstance(firsts, bool) or not isinstance(firsts, (int, float))
+                or firsts < 0 or not (label is None or isinstance(label, str))
+                or not _og_image.valid_second_in_firsts(second_in_firsts)):
+            return None
+        computed = datetime.fromisoformat(snap["computed_at"])
+        if computed.tzinfo is None:
+            return None
+        as_of = _value_bar_date(computed.astimezone(timezone.utc).date())
+    except (ValueError, TypeError, KeyError):
+        return None
+    return {"verdict": {"favors": favors,
+                        "gap": {"firsts": firsts,
+                                "pick_equivalent": {"label": label} if label else None},
+                        "second_in_firsts": second_in_firsts},
+            "as_of": as_of, "scoring_format": fmt}
+
+
+def _share_card_kwargs(give_ids, recv_ids, value_snapshot) -> dict:
+    """The renderer kwargs for one share card: the bar from the row's stored
+    snapshot (or none) and the pick labels. Never prices."""
+    bar = (_value_bar_from_snapshot(value_snapshot) if _og_image is not None
+           else None) or {}
+    return {
+        "verdict":        bar.get("verdict"),
+        "as_of":          bar.get("as_of"),
+        "scoring_format": bar.get("scoring_format"),
+        "pick_labels":    _share_pick_labels(list(give_ids or []) + list(recv_ids or [])),
+    }
+
+
+def _match_side_ids(match: dict) -> tuple[list, list]:
+    """user_a_give / user_a_receive of a trade_matches row (JSON text) as
+    lists; ([], []) when malformed."""
+    try:
+        give = json.loads(match.get("user_a_give") or "[]")
+        recv = json.loads(match.get("user_a_receive") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        return [], []
+    if not isinstance(give, list) or not isinstance(recv, list):
+        return [], []
+    return give, recv
+
+
+def _trade_share_card_kwargs(match: dict) -> dict:
+    """`_share_card_kwargs` for a resolved trade share: the lists the card
+    draws as YOU GIVE (user_a_give) and YOU GET (user_a_receive), already
+    oriented to the sharer, and the token's stored snapshot."""
+    give, recv = _match_side_ids(match)
+    return _share_card_kwargs(give, recv, match.get("value_snapshot"))
+
+
 @app.route("/og/trade/<token>.png")
 def og_trade_card(token):
-    """Render a shared trade's give/get card as a 1200x630 PNG (no fairness number since #511).
+    """Render a shared trade's give/get and value bar as a 1200x630 PNG.
 
     A hit renders from the row the token resolves to; every miss returns
     the same generic "expired" PNG, status 200.
@@ -32390,7 +32668,8 @@ def og_trade_card(token):
     if match is None:
         return _png_response(_og_image.render_expired_trade_card())
     try:
-        png, status = _og_image.render_trade_card(match)
+        png, status = _og_image.render_trade_card(
+            match, **_trade_share_card_kwargs(match))
     except Exception as e:
         log.error("og_trade_card error (match %s): %s", match.get("id"), e)
         png = _og_image.render_placeholder_card("Share card unavailable", str(e)[:80])
@@ -32433,6 +32712,7 @@ def _share_html(
     cta_text: str,
     share_kind: str,
     noindex: bool = False,
+    image_alt: str | None = None,
 ) -> "Response":
     """Minimal HTML wrapper with OG tags + small human-readable body.
 
@@ -32443,6 +32723,7 @@ def _share_html(
     the request. The CTA element is _share_cta_html's (referral loop D-1): it
     can vary by device, so the response is private + Vary: User-Agent and a
     shared cache never hands the desktop copy to an iPhone.
+    `image_alt` adds the stored value bar description as og:image:alt.
     """
     # Escape minimal HTML special chars — we never render user-controlled
     # HTML inside any attribute, so basic replacement is sufficient.
@@ -32452,6 +32733,8 @@ def _share_html(
 
     # Unfurlers need an absolute image URL; the visible <img> stays relative.
     og_image_url = _absolute_url(image_url)
+    alt_meta = (f'\n  <meta property="og:image:alt" content="{esc(image_alt)}">'
+                if image_alt else "")
 
     cta_html = _share_cta_html(cta_text=cta_text, share_kind=share_kind)
     html = f"""<!doctype html>
@@ -32467,7 +32750,7 @@ def _share_html(
   <meta property="og:description" content="{esc(description)}">
   <meta property="og:image" content="{esc(og_image_url)}">
   <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
+  <meta property="og:image:height" content="630">{alt_meta}
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{esc(title)}">
   <meta name="twitter:description" content="{esc(description)}">
@@ -32549,7 +32832,8 @@ def share_trade_page(token):
     """
     if _og_image is None:
         return _og_unavailable_response()
-    if _resolve_trade_share(token) is None:
+    match = _resolve_trade_share(token)
+    if match is None:
         return _share_html(
             title=_og_image.TRADE_LINK_EXPIRED_TITLE,
             description=_og_image.TRADE_LINK_EXPIRED_BODY,
@@ -32559,7 +32843,15 @@ def share_trade_page(token):
             noindex=True,
         )
     title = "Trade Match"
-    description = "A dynasty fantasy trade. See the give/get breakdown."
+    # The line matches the image: a comparison is promised only when the
+    # card draws the bar (marketing addendum 14 A1).
+    card = _trade_share_card_kwargs(match)
+    if card["verdict"] is not None:
+        description = ("A dynasty fantasy trade. See the give/get breakdown and how "
+                       "the values compare in draft-pick terms. Values are an "
+                       "estimate from market consensus, not a guarantee.")
+    else:
+        description = "A dynasty fantasy trade. See the give/get breakdown."
     image_url = f"/og/trade/{token}.png"
     return _share_html(
         title=title,
@@ -32567,6 +32859,8 @@ def share_trade_page(token):
         image_url=image_url,
         cta_text="Find your next trade",
         share_kind="trade",
+        image_alt=_og_image.value_bar_alt(card["verdict"], card["as_of"],
+                                          card["scoring_format"]),
     )
 
 
@@ -32608,7 +32902,8 @@ def create_share_package_route():
     """POST /api/share/package — snapshot an arbitrary give/receive package
     for a public share landing. 404 while `growth.share_landing` is dark.
 
-    Body: {"give_player_ids": [...], "receive_player_ids": [...]}
+    Body: {"give_player_ids": [...], "receive_player_ids": [...],
+           "scoring_format"?: "1qb_ppr" | "sf_tep"}
     → {ok, short_id, url: "/s/p/<id>", og_image: "/og/p/<id>.png"}
     Demo sessions are refused (shared demo user would pool the rate limit
     and demo shares are disabled client-side anyway).
@@ -32640,9 +32935,17 @@ def create_share_package_route():
         return jsonify({"error": "rate_limited",
                         "message": "Too many shares — try again later."}), 429
 
+    # Optional `scoring_format` (1qb_ppr / sf_tep; anything else is ignored):
+    # with it, the share-time value snapshot (K-a2) is stored and the card
+    # draws the value bar; without it (the app doesn't send it yet) no bar.
+    # There's no league, so only generic picks can be priced.
+    fmt = _share_bar_format(body.get("scoring_format"))
+    value_snapshot = _share_value_snapshot(give, receive, fmt) if fmt else None
+
     for _ in range(4):   # token_urlsafe(6) collisions are ~impossible; belt+braces
         short_id = secrets.token_urlsafe(6)
-        if create_shared_package(short_id, user_id, give, receive):
+        if create_shared_package(short_id, user_id, give, receive,
+                                 value_snapshot=value_snapshot):
             return jsonify({
                 "ok": True,
                 "short_id": short_id,
@@ -32699,9 +33002,35 @@ def create_share_trade_route():
     if match_id is None:
         return jsonify({"error": "not_found"}), 404
 
+    # The share-time value snapshot (K-a2), priced on the SHARER's side (the
+    # lists swap for user_b, as resolve_trade_share_token draws them), in the
+    # league's format with its owned picks (K-a7). Only a party's share is
+    # priced; the mint below still decides every 404. It is stored on a NEW
+    # token only: a re-share keeps the snapshot its token was minted with.
+    value_snapshot = None
+    try:
+        sides = load_trade_match_sides(match_id)
+    except Exception as e:
+        log.warning("share/trade: match read for the value snapshot failed: %s",
+                    type(e).__name__)
+        sides = None
+    if sides is not None and user_id in (sides["user_a_id"], sides["user_b_id"]):
+        give, recv = _match_side_ids(sides)
+        if user_id == sides["user_b_id"]:
+            give, recv = recv, give
+        league_id = str(sides.get("league_id") or "")
+        try:
+            fmt = get_league_scoring(league_id) if league_id else None
+        except Exception as e:
+            log.warning("share/trade: league format lookup failed (no snapshot): %s",
+                        type(e).__name__)
+            fmt = None
+        value_snapshot = _share_value_snapshot(give, recv, fmt, league_id)
+
     try:
         token = create_trade_share_token(match_id, user_id,
-                                         hourly_limit=_TRADE_SHARE_HOURLY_LIMIT)
+                                         hourly_limit=_TRADE_SHARE_HOURLY_LIMIT,
+                                         value_snapshot=value_snapshot)
     except TradeShareRateLimited:
         return jsonify({"error": "rate_limited",
                         "message": "Too many shares — try again later."}), 429
@@ -32720,6 +33049,15 @@ def create_share_trade_route():
     })
 
 
+def _count_article(n: int) -> str:
+    """The article before a spoken count: "An" when the number is said with a
+    vowel sound (eight, eleven, eighteen, eighty-...), else "A". /s/p only
+    passes 1-10 (`_SHARE_PACKAGE_SIDE_MAX` per side), so only 8 reads "An",
+    as marketing's approved template has it ("An 8-player dynasty trade
+    package."; head-bizops via head-eng, 2026-11-01)."""
+    return "An" if str(n).startswith("8") or n in (11, 18) else "A"
+
+
 @app.route("/s/p/<short_id>")
 def share_package_page(short_id):
     """Public OG landing page for a shared package (flag growth.share_landing)."""
@@ -32733,12 +33071,31 @@ def share_package_page(short_id):
     if pkg is None:
         return jsonify({"error": "not_found"}), 404
     n = len(pkg["give_ids"]) + len(pkg["receive_ids"])
+    # Bar or no bar comes from the package's stored value snapshot (K-a2),
+    # so the line under the image never promises a comparison it lacks.
+    card = _share_card_kwargs(pkg["give_ids"], pkg["receive_ids"],
+                              pkg.get("value_snapshot"))
+    # A draft pick isn't a player (marketing addendum 14 A2): with one on
+    # either side the line drops the count. `pick_labels` is the card's own
+    # pick detection (`_share_pick_labels`, the PK chip's source).
+    lead = ("A dynasty trade package." if card["pick_labels"]
+            else f"{_count_article(n)} {n}-player dynasty trade package.")
+    if card["verdict"] is not None:
+        description = (f"{lead} See the give/get "
+                       "breakdown and how the values compare in draft-pick terms. "
+                       "Values are an estimate from market consensus, not a guarantee.")
+    else:
+        description = f"{lead} See the give/get breakdown."
+    image_url = f"/og/p/{short_id}.png"
     return _share_html(
         title="Trade Package",
-        description=f"A {n}-player dynasty trade package. See the give/get breakdown.",
-        image_url=f"/og/p/{short_id}.png",
+        description=description,
+        image_url=image_url,
         cta_text="Build your own trade",
         share_kind="package",
+        image_alt=(_og_image.value_bar_alt(card["verdict"], card["as_of"],
+                                           card["scoring_format"])
+                   if _og_image is not None else None),
     )
 
 
@@ -32750,7 +33107,16 @@ def og_package_card(short_id):
     if _og_image is None:
         return _og_unavailable_response()
     try:
-        png, status = _og_image.render_package_card(short_id)
+        kwargs = {}
+        try:
+            pkg = load_shared_package(short_id)
+        except Exception as e:
+            log.warning("og_package_card: package lookup failed: %s", type(e).__name__)
+            pkg = None
+        if pkg is not None:
+            kwargs = _share_card_kwargs(pkg["give_ids"], pkg["receive_ids"],
+                                        pkg.get("value_snapshot"))
+        png, status = _og_image.render_package_card(short_id, **kwargs)
     except Exception as e:
         log.error("og_package_card error (%s): %s", short_id, e)
         png = _og_image.render_placeholder_card("Share card unavailable", str(e)[:80])
@@ -38646,6 +39012,15 @@ def league_free_agents_route():
           # priced on their board, value-ASCENDING (least valuable first),
           # capped at 8; untouchables (asset_prefs) never appear, and the
           # count tells the sheet they were withheld.
+        "move": {"mode": "submit"|"handoff"|"unsupported", "claims": bool,
+                 "league_platform": "sleeper"|"mfl"|"espn"|null,
+                 "connect": "ok"|"not_linked"|"expired"|"unverified"|"other_account",
+                 "consent_until": "<ISO-8601 UTC>"|null, "copy": {...}}
+          # D1 free-agent moves (docs/plans/sleeper-fa-write/contract.md §1),
+          # additive: `_fa_move_capability`. Omitted when it can't be computed
+          # (= legacy). Each free_agents[i] then also carries `move_kind`
+          # ("add"|"claim"|null; null = the server can't tell) and, under the
+          # double-move block, `move_mode: "handoff"` + `move_line`.
       }
 
     Errors: 503 rosters_unavailable when NO roster source yielded a single
@@ -38736,6 +39111,7 @@ def league_free_agents_route():
                         "for %s (continuing on session rosters): %s",
                         league_id, e)
 
+        live_rosters = None      # D1 capability: the live read, when it succeeded
         is_sleeper_league = False
         try:
             is_sleeper_league = (league_id.isdigit()
@@ -38749,6 +39125,7 @@ def league_free_agents_route():
                 live = _sleeper_get(
                     f"https://api.sleeper.app/v1/league/{league_id}/rosters"
                 ) or []
+                live_rosters = live if isinstance(live, list) else None
                 from .sleeper_roster import owns_roster as _owns
                 for r in live:
                     ids = [str(pid) for pid in (r.get("players") or [])]
@@ -38833,7 +39210,24 @@ def league_free_agents_route():
             position     = position,
             tier_fn      = fa_tier_fn,
         )
+        # D1 free-agent moves (contract §1): the additive `move` capability and
+        # per-row `move_kind` (null until the capture says how to read waiver
+        # status, Q8) plus the double-move block's `move_mode`/`move_line`
+        # override. Best-effort: on any failure `move` is omitted, which the
+        # client reads as legacy behaviour (exactly an older server).
+        extra = {}
+        try:
+            move, row_moves = _fa_move_capability(sess, league_id, live_rosters)
+        except Exception as cap_err:
+            log.warning("free-agents: move capability failed for %s (omitted): %s",
+                        league_id, cap_err)
+        else:
+            extra["move"] = move
+            for fa_row in free_agents:
+                fa_row["move_kind"] = None
+                fa_row.update(row_moves.get(str(fa_row.get("player_id")), {}))
         return jsonify({
+            **extra,
             "league_id":         league_id,
             "scoring_format":    fmt,
             "position":          position or "ALL",
@@ -38849,6 +39243,827 @@ def league_free_agents_route():
     except Exception as e:
         log.error("league/free-agents error: %s", e)
         return jsonify({"error": "internal_error"}), 500
+
+
+# ─── D1 free-agent moves (docs/plans/sleeper-fa-write/contract.md) ─────────
+# The app makes a free-agent move in the user's platform league on their
+# behalf: a capability on GET /api/league/free-agents tells the client what
+# it may do (`move`), GET/DELETE /api/platform-write-consent carry the R15
+# consent, and POST /api/league/free-agents/move makes the move. The wire
+# contract is fixed for the 11-06 binary: contract.md wins on wire details,
+# scope.md (plan/fa-moves-launch) on product behaviour.
+#
+# Sleeper's write shapes are NOT captured yet. Until the capture commit sets
+# sleeper_write.FA_MOVE_SHAPES_CAPTURED, `_fa_move_live` is False even with
+# `sleeper.send_add_drop` on, so the capability answers `handoff` and the move
+# route answers 404 `feature_disabled` (state 1, the hand-off), the same thing
+# the capability already told the client. Nothing here can send.
+from . import database as _fa_db          # noqa: E402
+from . import fa_move_copy as _fa_copy    # noqa: E402
+
+_FA_MOVE_PLATFORMS = ("sleeper", "mfl", "espn")
+# The claim sheet's hosts (contract §3 `surface`), recorded on
+# fa_move_consent_recorded; any other value is recorded as null.
+_FA_MOVE_SURFACES = ("free_agents", "usage_trends")
+# Contract §3: `attempt_id` is opaque, 8–64 of [A-Za-z0-9._-], unique per user.
+_FA_MOVE_ATTEMPT_ID_RE = re.compile(r"[A-Za-z0-9._-]{8,64}")
+# Player ids (FTF canonical = Sleeper): ASCII digits, or a team-defense code.
+_FA_MOVE_PLAYER_ID_RE = re.compile(r"[0-9]{1,12}|[A-Z]{2,4}")
+# Each platform's server-only kill switch. MFL and ESPN add theirs in Update 1.
+_FA_MOVE_FLAGS = {"sleeper": "sleeper.send_add_drop"}
+
+# Contract §5: request receipt to response is at most 76 s. A 30 s preflight
+# budget, checked immediately before the platform write (the
+# `_SEND_PREFLIGHT_BUDGET_S` pattern, its own constant so a trade-send change
+# can't move the binary's timeout), plus the write path's own socket timeouts
+# (sleeper_write.FA_MOVE_WRITE_TIMEOUTS_S, ≤ 46 s). Nothing after the write
+# touches the network: the roster save is a DB write and the fingerprint stamp
+# runs off the request thread. test_fa_move_route.py pins the sum. The client
+# timeout is (76 + 15) × 1000 ms.
+FA_MOVE_SERVER_WORST_CASE_S = 76
+_FA_MOVE_PREFLIGHT_BUDGET_S = 30
+_FA_MOVE_WRITE_PATH_MAX_S = FA_MOVE_SERVER_WORST_CASE_S - _FA_MOVE_PREFLIGHT_BUDGET_S  # 46
+
+# Scope §B6's double-move block: a recent unconfirmed move, or a pending claim.
+_FA_MOVE_UNCONFIRMED_BLOCK = timedelta(minutes=15)
+_FA_MOVE_PENDING_CLAIM_BLOCK = timedelta(hours=24)   # the next waiver run isn't known yet
+
+_fa_move_now = lambda: datetime.now(timezone.utc)    # noqa: E731 — tests inject
+_fa_move_clock = time.monotonic                      # tests inject
+
+
+def _fa_move_any_flag_on() -> bool:
+    """Scope §B3 step 2: the move route exists only while any platform's
+    `*.send_add_drop` is on. The consent routes never follow it (contract §2)."""
+    return any(is_enabled(key) for key in _FA_MOVE_FLAGS.values())
+
+
+def _fa_move_league_platform(league_id) -> str:
+    """The league's platform from its league row, never from the client:
+    'sleeper' | 'mfl' | 'espn' | 'fleaflicker', or 'local' for a non-numeric
+    (local / demo) league. A numeric id with no league row is Sleeper, the
+    same reading as `is_linked_platform_league` (the free-agents route)."""
+    lid = str(league_id or "").strip()
+    if not (lid.isascii() and lid.isdigit()):
+        return "local"
+    return _fa_db.get_league_platform(lid) or "sleeper"
+
+
+def _fa_move_live(platform: str) -> bool:
+    """The platform can make moves now: its kill switch is on AND its captured
+    write shapes are in the code. The capability's `submit` and the move
+    route's step 6 both read this, so they can't disagree."""
+    flag = _FA_MOVE_FLAGS.get(platform)
+    if not flag or not is_enabled(flag):
+        return False
+    if platform == "sleeper":
+        return bool(_sleeper_write.FA_MOVE_SHAPES_CAPTURED)
+    return False
+
+
+def _fa_move_claims_enabled(platform: str) -> bool:
+    """R15.8 D5: claims need the current consent copy at v2 AND the claim
+    shape captured. Until both hold, `claims: false` and a claim is 422
+    `waiver_claim_unsupported` (the hand-off)."""
+    return (platform == "sleeper" and _fa_move_live(platform)
+            and bool(_sleeper_write.FA_CLAIM_SHAPE_CAPTURED)
+            and _fa_copy.CURRENT_CONSENT_VERSION.get(platform)
+            == _fa_copy.SLEEPER_ROSTER_MOVES_V2)
+
+
+def _fa_move_actual_kind(league_id: str, add_player_id: str) -> str | None:
+    """'add' (a free agent) or 'claim' (on waivers), or None when the server
+    can't tell. Always None until the capture says how Sleeper marks a player
+    on waivers (capture.md Q8): `move_kind` is then null on every row, and
+    `move_kind_changed` can't fire."""
+    return None
+
+
+def _fa_move_error(code: str, status: int, msg: str, **extra) -> tuple[dict, int]:
+    """Contract §3's error body: `detail` == `message`, both server-authored."""
+    body = {"error": code, "message": msg, "detail": msg}
+    body.update({k: v for k, v in extra.items() if v is not None})
+    return body, status
+
+
+def _fa_move_event(user_id: str, name: str, props: dict, *, league_id=None,
+                   touch_user: bool = True) -> None:
+    """One D1 server event (scope §1). Never raises: a move or a withdrawal is
+    never undone by an analytics write."""
+    try:
+        device = _device_info_from_request() if has_request_context() else {}
+        record_event(str(user_id), name, league_id=league_id, source="api", props=props,
+                     device_type=device.get("device_type"),
+                     app_version=device.get("app_version"), touch_user=touch_user)
+    except Exception as err:
+        log.warning("record_event(%s) failed: %s", name, err)
+
+
+def _drop_sleeper_credential(user_id: str, via: str) -> int:
+    """Delete the caller's stored Sleeper token, ending any open Sleeper
+    roster-move consent in the same transaction (consent.md §4.4: disconnect,
+    expiry and rejection each append a withdrawal, so a reconnect always means
+    re-consent). Every Sleeper-credential deletion in this module goes through
+    here. Fires `fa_move_consent_withdrawn` when a grant was open; the system
+    withdrawals (`credential_*`) are non-touching (consent.md §6 F2)."""
+    withdrawn = delete_sleeper_credential(user_id, withdrawn_via=via)
+    if withdrawn:
+        _fa_move_event(user_id, "fa_move_consent_withdrawn",
+                       {"via": via, "league_platform": "sleeper"},
+                       touch_user=via not in ("credential_expired", "credential_rejected"))
+    return withdrawn
+
+
+def _sleeper_credential_changes(user_id: str, token: str, sleeper_user_id) -> bool:
+    """True when storing `token` would change the user's stored Sleeper
+    credential: there is one, and it holds another token or another Sleeper
+    user. A replay of the stored token is not a change. A stored token that
+    can't be decrypted counts as a change (its grant can't be tied to it).
+    Constant-time compare; neither token is ever logged."""
+    cred = get_sleeper_credential(user_id)
+    if not cred:
+        return False
+    if str(cred.get("sleeper_user_id") or "") != str(sleeper_user_id or ""):
+        return True
+    try:
+        stored = _sleeper_write.decrypt_token(cred["token_encrypted"])
+    except _sleeper_write.SleeperWriteError:
+        return True
+    return not hmac.compare_digest(stored.encode("utf-8"), str(token).encode("utf-8"))
+
+
+def _sleeper_cred_expired(cred: dict, now: datetime) -> bool:
+    """`GET /api/sleeper/link`'s `expired`: the stored expiry is past."""
+    try:
+        exp = datetime.fromisoformat(str(cred.get("expires_at")))
+    except (TypeError, ValueError):
+        return False
+    return (exp if exp.tzinfo else exp.replace(tzinfo=timezone.utc)) <= now
+
+
+def _sleeper_connect_state(sess, cred, live_rosters, now: datetime) -> str:
+    """Contract §1 `connect` for a Sleeper league: not_linked (no stored
+    token) → other_account (the connected account owns no roster in this
+    league, ux-lead F3; only when a live rosters read is in hand) → expired
+    (`GET /api/sleeper/link`'s rule) → unverified (this session hasn't proven
+    ownership, the move route's 403) → ok."""
+    if not cred:
+        return "not_linked"
+    from .sleeper_roster import owns_roster
+    puid = str(cred.get("sleeper_user_id") or "")
+    if live_rosters and not any(owns_roster(r, puid) for r in live_rosters):
+        return "other_account"
+    if _sleeper_cred_expired(cred, now):
+        return "expired"
+    if not (sess.get("verified") or _synthetic_demo_session(sess)):
+        return "unverified"
+    return "ok"
+
+
+def _fa_move_grant(user_id: str, platform: str, platform_user_id, now: datetime):
+    """The open grant at the platform's CURRENT copy version, or None."""
+    return _fa_db.active_platform_write_grant(
+        user_id, platform, str(platform_user_id or ""),
+        _fa_copy.CURRENT_CONSENT_VERSION.get(platform), now)
+
+
+def _fa_move_blocks(user_id: str, league_id: str, now: datetime, *,
+                    before_id: int | None = None,
+                    checked_at: datetime | None = None) -> dict[str, str]:
+    """Scope §B6's double-move block for (user, league): add-player id →
+    'unconfirmed' (a move sent < 15 min ago with no result yet, or with
+    result 'unknown') or 'pending_claim' (a claim the platform holds as
+    pending, < 24 h old: the league's next waiver run isn't known yet, and no
+    later result is ever recorded for it today).
+
+    The post-insert race check passes `before_id` (only moves whose `sent` row
+    was inserted before that row id) and `checked_at` (when this request
+    passed step 7b): a move of the player that LANDED (accepted / partial)
+    and was sent at or after `checked_at` blocks too, because this request's
+    pre-write reads may predate it. A failed move never blocks."""
+    rows = _fa_db.recent_platform_write_moves(user_id, league_id,
+                                              now - _FA_MOVE_PENDING_CLAIM_BLOCK)
+    return _fa_move_block_reasons(rows, now, before_id=before_id, checked_at=checked_at)
+
+
+def _fa_move_block_reasons(rows: list[dict], now: datetime, *, before_id: int | None = None,
+                           checked_at: datetime | None = None) -> dict[str, str]:
+    """`_fa_move_blocks`' rule over move rows already read (both phases of
+    each attempt). Pure, so the locked claim in step 12 can apply it to rows
+    read inside its own transaction."""
+    by_attempt: dict[str, dict] = {}
+    for r in rows:
+        by_attempt.setdefault(r["attempt_id"], {})[r["phase"]] = r
+    out: dict[str, str] = {}
+    for phases in by_attempt.values():
+        sent, done = phases.get("sent"), phases.get("result")
+        if sent is None or (before_id is not None and int(sent["id"]) >= before_id):
+            continue
+        try:
+            sent_at = datetime.fromisoformat(str(sent["sent_at"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+        age = now - (sent_at if sent_at.tzinfo else sent_at.replace(tzinfo=timezone.utc))
+        reason = None
+        if done is None or done.get("result") == "unknown":
+            if age < _FA_MOVE_UNCONFIRMED_BLOCK:
+                reason = "unconfirmed"
+        elif (checked_at is not None and done.get("result") in ("accepted", "partial")
+              and sent_at.replace(tzinfo=sent_at.tzinfo or timezone.utc) >= checked_at):
+            reason = "unconfirmed"
+        elif done.get("status") == "pending" and done.get("result") in ("accepted", "partial"):
+            if age < _FA_MOVE_PENDING_CLAIM_BLOCK:
+                reason = "pending_claim"
+        if reason:
+            for pid in json.loads(sent.get("add_player_ids") or "[]"):
+                if out.get(str(pid)) != "unconfirmed":
+                    out[str(pid)] = reason
+    return out
+
+
+def _fa_move_capability(sess, league_id: str, live_rosters) -> tuple[dict, dict]:
+    """Contract §1: the `move` capability for this league, plus the per-row
+    overrides ({player_id: {move_mode, move_line}}) of the double-move block.
+
+    `mode`: Sleeper → 'submit' when `_fa_move_live`, else 'handoff' (flag off,
+    or the shapes not captured); MFL and ESPN (until Update 1), Fleaflicker
+    and local leagues → 'unsupported'. `claims` only under R15.8 D5. Draft
+    copy is served only in 'submit' mode (fa_move_copy's docstring)."""
+    platform = _fa_move_league_platform(league_id)
+    if platform != "sleeper":
+        return {"mode": "unsupported", "claims": False,
+                "league_platform": platform if platform in _FA_MOVE_PLATFORMS else None,
+                "connect": "not_linked", "consent_until": None, "copy": {}}, {}
+    user_id = str(sess.get("user_id") or "")
+    now = _fa_move_now()
+    mode = "submit" if _fa_move_live(platform) else "handoff"
+    cred = get_sleeper_credential(user_id)
+    grant = _fa_move_grant(user_id, platform, cred.get("sleeper_user_id"), now) if cred else None
+    rows = {pid: {"move_mode": "handoff", "move_line": _fa_copy.row_line(reason, platform)}
+            for pid, reason in _fa_move_blocks(user_id, str(league_id), now).items()}
+    return {
+        "mode": mode,
+        "claims": _fa_move_claims_enabled(platform),
+        "league_platform": platform,
+        "connect": _sleeper_connect_state(sess, cred, live_rosters, now),
+        "consent_until": grant["expires_at"] if grant else None,
+        "copy": _fa_copy.move_copy(platform, include_drafts=(mode == "submit")),
+    }, rows
+
+
+def _fa_move_date_label(iso: str | None) -> str:
+    """{date} in Settings' "Roster moves: on until {date}" (contract §2, filled
+    by the server), as "Nov 8". The request carries no time zone, so the
+    expiry is read in US Pacific: the westernmost mainland zone, so the date
+    shown is never later than the user's own (under-promise, never over)."""
+    try:
+        when = datetime.fromisoformat(str(iso))
+    except (TypeError, ValueError):
+        return ""
+    try:
+        from zoneinfo import ZoneInfo
+        local = when.astimezone(ZoneInfo("America/Los_Angeles"))
+    except Exception:
+        local = when.astimezone(timezone(timedelta(hours=-8)))
+    return f"{local:%b} {local.day}"
+
+
+@app.route("/api/platform-write-consent", methods=["GET", "DELETE"])
+def platform_write_consent_route():
+    """D1 roster-move consent for one platform (contract §2; consent.md §4.4).
+
+    GET    ?platform=sleeper → {platform, valid, until, consent, status_line,
+           stop_label}. `consent` is the current version's text to show if the
+           user must consent now (null when the platform has none), with
+           `links` (legal's Terms · Privacy row) and, when the stored
+           credential's account is known and no grant is open, `reason`
+           (first | lapsed | version | withdrawn); `until`,
+           `status_line` and `stop_label` are null unless a grant is open. A
+           grant is valid for (user, platform, the stored credential's account)
+           only, so no credential means not valid.
+    DELETE ?platform=sleeper → {platform, valid: false, notice}: appends a
+           withdrawal (`via: settings`) for every open grant. One tap, no
+           confirm; idempotent (a repeat appends nothing, same body). `notice`
+           is R15.2.6's text, verbatim.
+    Both need a VERIFIED session (head-eng's security check; contract §2): an
+    unverified session can carry another user's id (a username-only sign-in),
+    so it could forge a withdrawal into the append-only record or read whether
+    someone consented. GET → `_verified_read_denial`, DELETE →
+    `_verified_write_denial`, both 403 `verification_required`. Withdrawal is
+    still as easy as consent: a grant is only ever made from a verified
+    session (the move route's step 3). NEITHER follows a kill switch: GET
+    always answers, and DELETE always works, so a user can withdraw while
+    moves are switched off (only the move route and the capability follow
+    `*.send_add_drop`). 401 without a session; 400 bad_request for a
+    `platform` outside sleeper | mfl | espn. Never returns a token.
+    """
+    sess = _require_session()
+    user_id = str(sess.get("user_id") or "")
+    if not user_id:
+        raise _SessionExpired()
+    denial = (_verified_write_denial(sess) if request.method == "DELETE"
+              else _verified_read_denial(sess))
+    if denial is not None:
+        asked = request.args.get("platform") or ""
+        body, status = _fa_move_error("verification_required", 403, (
+            _fa_copy.message("consent_verification_required", asked)
+            if asked in _FA_MOVE_PLATFORMS
+            else _fa_copy.message("consent_verification_required_any")))
+        return jsonify(body), status
+    platform = request.args.get("platform") or ""
+    if platform not in _FA_MOVE_PLATFORMS:
+        body, status = _fa_move_error("bad_request", 400, _fa_copy.message("bad_request"))
+        return jsonify(body), status
+    now = _fa_move_now()
+
+    if request.method == "DELETE":
+        if _fa_db.withdraw_platform_write_grants(user_id, platform, "settings", now):
+            _fa_move_event(user_id, "fa_move_consent_withdrawn",
+                           {"via": "settings", "league_platform": platform})
+        return jsonify({"platform": platform, "valid": False,
+                        "notice": _fa_copy.withdrawal_notice(platform)})
+
+    grant = reason = None
+    if platform == "sleeper":
+        cred = get_sleeper_credential(user_id)
+        if cred:
+            grant = _fa_move_grant(user_id, platform, cred.get("sleeper_user_id"), now)
+            reason = _fa_db.platform_write_consent_reason(
+                user_id, platform, str(cred.get("sleeper_user_id") or ""),
+                _fa_copy.CURRENT_CONSENT_VERSION.get(platform), now)
+    until = grant["expires_at"] if grant else None
+    return jsonify({
+        "platform": platform,
+        "valid": grant is not None,
+        "until": until,
+        "consent": _fa_copy.consent_block(platform, reason=reason),
+        "status_line": (_fa_copy.STATUS_LINE.format(date=_fa_move_date_label(until))
+                        if grant else None),
+        "stop_label": _fa_copy.STOP_LABEL if grant else None,
+    })
+
+
+def _fa_move_parse_body(body) -> dict | None:
+    """Contract §3's request, validated; None → 400 bad_request. A client
+    `platform` field is never read (scope §B3)."""
+    if not isinstance(body, dict):
+        return None
+
+    def _id(value):
+        if isinstance(value, bool) or not isinstance(value, (str, int)):
+            return None
+        text = str(value).strip()
+        return text if text and len(text) <= 64 else None
+
+    league_id, add_id = _id(body.get("league_id")), _id(body.get("add_player_id"))
+    raw_drop = body.get("drop_player_id")
+    drop_id = None if raw_drop in (None, "") else _id(raw_drop)
+    kind, attempt_id = body.get("move_kind"), body.get("attempt_id")
+    if not league_id or not add_id or (raw_drop not in (None, "") and not drop_id):
+        return None
+    # Sleeper player ids are digits; a team defense is its 2–4 letter code.
+    if not all(_FA_MOVE_PLAYER_ID_RE.fullmatch(p) for p in (add_id, drop_id) if p):
+        return None
+    if drop_id == add_id or kind not in ("add", "claim"):
+        return None
+    # Opaque, never parsed as a UUID (contract §3): the client's is UUID-shaped
+    # but may come from Math.random (Hermes has no Web Crypto).
+    if not isinstance(attempt_id, str) or not _FA_MOVE_ATTEMPT_ID_RE.fullmatch(attempt_id):
+        return None
+    bid = None
+    if kind == "claim" and body.get("faab_bid") is not None:   # an add spends no FAAB
+        raw_bid = body.get("faab_bid")
+        if isinstance(raw_bid, bool) or not isinstance(raw_bid, (int, float)):
+            return None
+        # NaN and ±inf are 400s, never a 500 from int(); whole dollars only.
+        if not math.isfinite(raw_bid) or raw_bid < 0 or raw_bid != int(raw_bid):
+            return None
+        bid = int(raw_bid)
+    surface = body.get("surface")       # optional; any other value is ignored (contract §3)
+    surface = surface if surface in _FA_MOVE_SURFACES else None
+    consent = body.get("consent")
+    if consent is not None:
+        if (not isinstance(consent, dict) or not isinstance(consent.get("copy_version"), str)
+                or not isinstance(consent.get("locale"), str)):
+            return None
+        consent = {"copy_version": consent["copy_version"], "locale": consent["locale"]}
+    return {"league_id": league_id, "add_player_id": add_id, "drop_player_id": drop_id,
+            "move_kind": kind, "faab_bid": bid, "consent": consent, "attempt_id": attempt_id,
+            "surface": surface}
+
+
+def _fa_move_consent_required(user_id: str, platform: str, platform_user_id: str,
+                              now: datetime) -> tuple[dict, int]:
+    """409 `consent_required` with the current consent block and, when known,
+    why it's asked (contract §2 `reason`)."""
+    reason = _fa_db.platform_write_consent_reason(
+        user_id, platform, platform_user_id, _fa_copy.CURRENT_CONSENT_VERSION.get(platform), now)
+    return _fa_move_error("consent_required", 409, _fa_copy.message("consent_required", platform),
+                          consent=_fa_copy.consent_block(platform, reason=reason))
+
+
+def _fa_move_consent_step(user_id: str, platform: str, platform_user_id: str,
+                          req: dict, now: datetime):
+    """Scope §B3 step 9. Returns (refusal, grant): a refusal is 409
+    `consent_required` carrying the current consent block (contract §4,
+    state 5). A body carrying `consent` at the CURRENT version appends a grant
+    and COMMITS it before returning, so it exists before any platform call
+    (R15.8); a stale version or an unknown locale appends nothing."""
+    block = _fa_copy.consent_block(platform)
+    current = _fa_copy.CURRENT_CONSENT_VERSION.get(platform)
+
+    def _required():
+        return _fa_move_consent_required(user_id, platform, platform_user_id, now)
+
+    shown = req["consent"]
+    if shown is not None:
+        if (block is None or shown["copy_version"] != current
+                or not _fa_copy.has_consent_text(platform, shown["copy_version"],
+                                                 shown["locale"])):
+            return _required(), None
+        device = _device_info_from_request()
+        grant = _fa_db.record_platform_write_grant(
+            user_id=user_id, platform=platform, platform_user_id=platform_user_id,
+            copy_version=current, locale=shown["locale"], consented_at=now,
+            client_platform=device.get("device_type"), app_version=device.get("app_version"),
+            trigger_attempt_id=req["attempt_id"])
+        # analytics-lead's G2 rule: `surface` is absent, never null, when the
+        # request has none (or an unknown one).
+        props = {"copy_version": current, "league_platform": platform}
+        if req["surface"]:
+            props["surface"] = req["surface"]
+        _fa_move_event(user_id, "fa_move_consent_recorded", props,
+                       league_id=req["league_id"])
+        return None, grant
+    grant = _fa_move_grant(user_id, platform, platform_user_id, now)
+    return (None, grant) if grant is not None else (_required(), None)
+
+
+def _fa_move_preflight_over_budget(t0: float) -> bool:
+    """True when the pre-write phase that started at `t0` is past
+    `_FA_MOVE_PREFLIGHT_BUDGET_S`: the write must not START, or it could land
+    after the client gave up (contract §5)."""
+    elapsed = _fa_move_clock() - t0
+    if elapsed <= _FA_MOVE_PREFLIGHT_BUDGET_S:
+        return False
+    log.warning("fa move: pre-flight took %.1fs, past the %ds budget; nothing sent",
+                elapsed, _FA_MOVE_PREFLIGHT_BUDGET_S)
+    return True
+
+
+def _fa_move_write_failure(kind, platform: str) -> tuple[dict, int, str]:
+    """(body, status, result) for a failed platform write, by
+    write_outcome.py's kind (contract §4). Wording (legal R28.27): only a
+    failure decided before any byte reached the platform ('network' =
+    `request_never_sent`, 'config') may say "nothing was sent"; a platform
+    refusal says "nothing changed"; an unknown outcome says neither:
+      outcome_unknown → 502 `{p}_outcome_unknown` (state 12), result 'unknown'
+      network         → 502 `{p}_write_failed` + kind 'network' (11, not sent)
+      config          → 503 `{p}_unconfigured` (10g), nothing sent
+      anything else   → 502 `{p}_write_failed`, NO kind (10f, the platform refused)."""
+    if kind == _write_outcome.OUTCOME_UNKNOWN:
+        body, status = _fa_move_error(f"{platform}_outcome_unknown", 502,
+                                      _fa_copy.message("outcome_unknown", platform),
+                                      title=_fa_copy.UNKNOWN_TITLE)
+        return body, status, "unknown"
+    if kind == "network":
+        body, status = _fa_move_error(f"{platform}_write_failed", 502,
+                                      _fa_copy.message("write_failed_network", platform),
+                                      kind="network")
+        return body, status, "error"
+    if kind == "config":
+        body, status = _fa_move_error(f"{platform}_unconfigured", 503,
+                                      _fa_copy.message("unconfigured", platform))
+        return body, status, "error"
+    body, status = _fa_move_error(f"{platform}_write_failed", 502,
+                                  _fa_copy.message("write_failed", platform))
+    return body, status, "rejected"
+
+
+def _fa_move_stamp_async(league_id: str) -> threading.Thread:
+    """K-F5 (scope §B10): `roster_refresh.stamp` OFF the request thread
+    (roster_snapshot.on_roster_change's call contract), after the new roster
+    is committed. The stamp moves the league's fingerprint, so a deck built on
+    the old roster stops matching, and cancels the league's old deck jobs."""
+    thread = threading.Thread(target=_roster_refresh.stamp, args=(str(league_id),),
+                              name="fa-move-stamp", daemon=True)
+    thread.start()
+    return thread
+
+
+def _fa_move_core(sess, body) -> tuple[dict, int]:
+    """POST /api/league/free-agents/move after the route's own steps 1–2
+    (test mode, any kill switch). The order of checks is scope §B3's and is
+    pinned (test_fa_move_route.py), source order included:
+
+       3 session + `_verified_write_denial` → 4 body → 5 league platform (the
+       league row; a client value is ignored) → 6 that platform's kill switch
+       → 7 `attempt_id` lookup, then the double-move block → 8 credential →
+       9 consent, committed before any platform call → 10 pre-write reads
+       (rosters, ownership, availability, roster room) → 11 the claim gate,
+       the `move_kind` check, the FAAB check → the preflight budget →
+       12 the `sent` row, then the write → 13 the `result` row → on
+       `complete`, the roster save → event → response (the stamp starts off
+       the request thread).
+    """
+    t0 = _fa_move_clock()
+    user_id = str(sess.get("user_id") or "")
+    # 3. A verified session (the hard write gate). `_verified_write_denial`
+    # lets a synthetic demo session through; a demo session never makes a
+    # platform move, so it is refused here with the same code.
+    if (not user_id or sess.get("is_demo") or _synthetic_demo_session(sess)
+            or _verified_write_denial(sess) is not None):
+        return _fa_move_error("verification_required", 403,
+                              _fa_copy.message("verification_required"))
+    # 4. The body.
+    req = _fa_move_parse_body(body)
+    if req is None:
+        return _fa_move_error("bad_request", 400, _fa_copy.message("bad_request"))
+    league_id, attempt_id = req["league_id"], req["attempt_id"]
+    add_id, drop_id, kind, bid = (req["add_player_id"], req["drop_player_id"],
+                                  req["move_kind"], req["faab_bid"])
+    # 5. The platform, from the league row.
+    platform = _fa_move_league_platform(league_id)
+    # 6. That platform's kill switch (and its captured shapes).
+    if not _fa_move_live(platform):
+        return _fa_move_error("feature_disabled", 404,
+                              _fa_copy.message("feature_disabled", platform))
+    now = _fa_move_now()
+    # 7. The attempt_id, per user: a repeat returns the recorded answer, or 409
+    # while the first is still in flight. It never writes twice. Another user's
+    # identical id is a different move (contract §3).
+    prior = _fa_db.platform_write_move_rows(user_id, attempt_id)
+    if prior:
+        done = next((r for r in prior if r["phase"] == "result"), None)
+        if done is not None and done.get("response_json"):
+            return json.loads(done["response_json"]), int(done.get("response_status") or 200)
+        return _fa_move_error("move_in_progress", 409,
+                              _fa_copy.message("move_in_progress", platform),
+                              title=_fa_copy.UNKNOWN_TITLE)
+    # 7b. The double-move block (§B6): a new tap for the same player. `now`
+    # is also when this check passed (the post-insert race check, 12b).
+    block = _fa_move_blocks(user_id, league_id, now).get(add_id)
+    if block:
+        names = _player_names_by_id([add_id])
+        key = "move_in_progress_pending_claim" if block == "pending_claim" else "move_in_progress"
+        return _fa_move_error("move_in_progress", 409,
+                              _fa_copy.message(key, platform, add=names.get(add_id)),
+                              title=_fa_copy.UNKNOWN_TITLE)
+    # 8. The credential.
+    cred = get_sleeper_credential(user_id)
+    if not cred:
+        return _fa_move_error(f"{platform}_not_linked", 409,
+                              _fa_copy.message("not_linked", platform))
+    try:
+        token = _sleeper_write.decrypt_token(cred["token_encrypted"])
+    except _sleeper_write.SleeperWriteError:
+        return _fa_move_error(f"{platform}_unconfigured", 503,
+                              _fa_copy.message("unconfigured", platform))
+    if _sleeper_write.is_expired(token):
+        _drop_sleeper_credential(user_id, "credential_expired")
+        return _fa_move_error(f"{platform}_expired", 409, _fa_copy.message("expired", platform))
+    platform_user_id = str(cred.get("sleeper_user_id") or "")
+    # 9. Consent: a grant is committed here, before any platform call.
+    refusal, grant = _fa_move_consent_step(user_id, platform, platform_user_id, req, now)
+    if refusal is not None:
+        return refusal
+    # 10. Pre-write reads, under the preflight budget. Nothing is sent if any
+    # of them fails or refuses.
+    rosters = _fetch_league_rosters(league_id)
+    if rosters is None:
+        return _fa_move_error(f"{platform}_write_failed", 502,
+                              _fa_copy.message("write_failed_roster_read", platform),
+                              kind="roster_read")
+    from .sleeper_roster import find_user_roster
+    mine = find_user_roster(rosters, platform_user_id)
+    league_name = _fa_league_meta(league_id).get("name") or None
+    names = _player_names_by_id([p for p in (add_id, drop_id) if p])
+    add_name, drop_name = names.get(add_id), names.get(drop_id) if drop_id else None
+    try:
+        roster_id = int(mine.get("roster_id")) if mine is not None else None
+    except (TypeError, ValueError):
+        roster_id = None
+    if roster_id is None:
+        # [pm] ux-lead F3: the connected account owns no team here. Reuses
+        # `{p}_not_linked` with its own message; no new code.
+        return _fa_move_error(f"{platform}_not_linked", 409, _fa_copy.message(
+            "not_linked_other_account", platform, league=league_name))
+    my_players = [str(p) for p in (mine.get("players") or []) if p not in (None, "")]
+    held = set(my_players)
+    if add_id in held:
+        return _fa_move_error("player_unavailable", 422, _fa_copy.message(
+            "player_already_yours", platform, add=add_name))
+    rostered = {str(p) for r in rosters if isinstance(r, dict)
+                for p in (r.get("players") or []) if p not in (None, "")}
+    if add_id in rostered:
+        return _fa_move_error("player_unavailable", 422, _fa_copy.message(
+            "player_unavailable", platform, add=add_name))
+    if drop_id and drop_id not in held:
+        return _fa_move_error("asset_not_owned", 422, _fa_copy.message(
+            "asset_not_owned", platform, drop=drop_name))
+    limit = _sleeper_roster_limit(league_id)
+    if not drop_id and limit is not None and len(held) >= limit:
+        # Only when capacity is KNOWN; otherwise Sleeper decides (consent.md §3).
+        return _fa_move_error("roster_full_drop_required", 422,
+                              _fa_copy.message("roster_full_drop_required", platform))
+    # 11. The claim gate (D5), then the move_kind check (D10: never send a
+    # different kind than the button named), then a claim's FAAB.
+    actual = _fa_move_actual_kind(league_id, add_id)
+    if (kind == "claim" or actual == "claim") and not _fa_move_claims_enabled(platform):
+        return _fa_move_error("waiver_claim_unsupported", 422, _fa_copy.message(
+            "waiver_claim_unsupported", platform, add=add_name))
+    if actual is not None and actual != kind:
+        return _fa_move_error("move_kind_changed", 409, _fa_copy.message(
+            "move_kind_changed", platform, add=add_name))
+    if kind == "claim":
+        # FAAB fails closed: a claim on a FAAB league (or one whose waiver type
+        # can't be read) whose remaining budget is unknown is refused as a
+        # read failure, nothing sent; a bid is bounded to 0..budget and to
+        # what's left.
+        waivers = _sleeper_waivers(league_id, (mine.get("settings") or {}).get(
+            "waiver_budget_used")) or {}
+        faab = waivers.get("faab") or {}
+        remaining, budget = faab.get("remaining"), faab.get("budget")
+        if waivers.get("type") is None or (waivers.get("type") == "faab" and (
+                remaining is None or budget is None)):
+            return _fa_move_error(f"{platform}_write_failed", 502,
+                                  _fa_copy.message("write_failed_roster_read", platform),
+                                  kind="roster_read")
+        if waivers.get("type") == "faab" and bid is None:
+            # Scope §B11 rule 5: never default an empty bid to 0 (0 is a real,
+            # typed choice). The client returns to Ready with bid_needed_line.
+            return _fa_move_error("bad_request", 400, _fa_copy.message("bad_request", platform))
+        if waivers.get("type") == "faab" and (bid > budget or bid > remaining):
+            left = max(int(remaining), 0)
+            return _fa_move_error("waiver_bid_over_budget", 422, _fa_copy.message(
+                "waiver_bid_over_budget", platform, remaining=left), remaining=left)
+    if _fa_move_preflight_over_budget(t0):
+        return _fa_move_error(f"{platform}_write_failed", 502,
+                              _fa_copy.message("write_failed_roster_read", platform),
+                              kind="roster_read")
+    # The grant again, right before the `sent` row: a withdrawal (Settings,
+    # disconnect, re-link) during the preflight stops the move.
+    if _fa_move_grant(user_id, platform, platform_user_id, _fa_move_now()) is None:
+        return _fa_move_consent_required(user_id, platform, platform_user_id, _fa_move_now())
+    # 12. The `sent` row BEFORE the platform call, unique on (user, attempt_id,
+    # 'sent'): a concurrent duplicate of this tap loses here and never sends.
+    record = {"attempt_id": attempt_id, "user_id": user_id, "platform": platform,
+              "platform_user_id": platform_user_id, "league_id": league_id,
+              "consent_id": grant["consent_id"], "move_kind": kind,
+              "add_player_ids": json.dumps([add_id]),
+              "drop_player_ids": json.dumps([drop_id] if drop_id else []),
+              "faab_bid": bid}
+    # The double-move block is re-checked and the `sent` row inserted in ONE
+    # transaction under a Postgres advisory lock on (user, league, add player)
+    # (database.claim_platform_write_move, the trade-share lock's pattern):
+    # step 7b and the insert are otherwise two steps, and a Postgres id is
+    # assigned at INSERT but visible only at COMMIT, so racing taps could both
+    # pass. Under the lock the later tap waits for the earlier one's commit and
+    # then sees its row.
+    claim_now = _fa_move_now()
+    sent_id, rival = _fa_db.claim_platform_write_move(
+        {**record, "phase": "sent", "sent_at": claim_now.isoformat()},
+        lambda rows: _fa_move_block_reasons(
+            rows, claim_now, checked_at=now).get(add_id),
+        since=claim_now - _FA_MOVE_PENDING_CLAIM_BLOCK)
+    if rival:
+        key = "move_in_progress_pending_claim" if rival == "pending_claim" else "move_in_progress"
+        return _fa_move_error("move_in_progress", 409,
+                              _fa_copy.message(key, platform, add=add_name),
+                              title=_fa_copy.UNKNOWN_TITLE)
+    if not sent_id:
+        return _fa_move_error("move_in_progress", 409,
+                              _fa_copy.message("move_in_progress", platform, add=add_name),
+                              title=_fa_copy.UNKNOWN_TITLE)
+    # 12b. SQLite (local dev) takes no advisory lock, so a race there can still
+    # get two taps past the claim. Its writes commit in id order, so a re-read
+    # settles it: an earlier-inserted (lower id) move of this player that still
+    # blocks, or that landed after this request's check, wins; this one records
+    # its 409 and never sends. On Postgres the lock already decided it.
+    rival = _fa_move_blocks(user_id, league_id, _fa_move_now(), before_id=sent_id,
+                            checked_at=now).get(add_id)
+    if rival:
+        key = "move_in_progress_pending_claim" if rival == "pending_claim" else "move_in_progress"
+        payload, status = _fa_move_error("move_in_progress", 409,
+                                         _fa_copy.message(key, platform, add=add_name),
+                                         title=_fa_copy.UNKNOWN_TITLE)
+        _fa_db.record_platform_write_move({
+            **record, "phase": "result", "result": "error", "error_code": "move_in_progress",
+            "response_status": status, "response_json": json.dumps(payload)})
+        return payload, status
+    fa_req = _sleeper_write.FaMoveRequest(
+        league_id=league_id, roster_id=roster_id, add_player_id=add_id,
+        drop_player_id=drop_id, move_kind=kind, faab_bid=bid)
+    reported = None
+    try:
+        reported = _sleeper_write.fa_move(token, fa_req)
+    except _sleeper_write.SleeperAuthError as e:
+        log.warning("fa move auth-rejected: %s", _provider_body_for_log(getattr(e, "detail", None)))
+        try:
+            _drop_sleeper_credential(user_id, "credential_rejected")
+        except Exception:
+            log.exception("fa move: dropping the rejected credential failed")
+        payload, status = _fa_move_error(f"{platform}_rejected", 409,
+                                         _fa_copy.message("rejected", platform))
+        result = "error"
+    except _sleeper_write.SleeperWriteError as e:
+        log.warning("fa move write-failed [%s]: %s", e.kind,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        payload, status, result = _fa_move_write_failure(e.kind, platform)
+    except Exception:
+        # A bug after the sent row: the move may have gone out. Never a retry.
+        log.exception("fa move: unexpected error during the platform write")
+        payload, status, result = _fa_move_write_failure(_write_outcome.OUTCOME_UNKNOWN, platform)
+    if reported is not None:
+        move_status, result = reported.get("status"), reported.get("result")
+        if move_status not in ("complete", "pending") or result not in ("accepted", "partial"):
+            log.warning("fa move: unreadable adapter result %r; outcome unknown",
+                        {k: reported.get(k) for k in ("status", "result")})
+            payload, status, result = _fa_move_write_failure(_write_outcome.OUTCOME_UNKNOWN,
+                                                             platform)
+            reported = None
+    added = dropped = []
+    if reported is not None:
+        fallback = result == "accepted"
+        added = [str(p) for p in (reported.get("added")
+                                  or ([add_id] if fallback else []))]
+        dropped = [str(p) for p in (reported.get("dropped")
+                                    or ([drop_id] if fallback and drop_id else []))]
+        title, lines = _fa_copy.result_copy(
+            status=move_status, result=result, platform=platform,
+            add=add_name or "This player", drop=(drop_name or "That player") if drop_id else None,
+            league=league_name or "your league", added=added, dropped=dropped, bid=bid)
+        payload = {"status": move_status, "move_kind": kind, "result": result,
+                   "league_platform": platform, "attempt_id": attempt_id,
+                   "title": title, "lines": lines}
+        if reported.get("transaction_id"):
+            payload["platform_transaction_id"] = str(reported["transaction_id"])
+        status = 200
+    # 13. The `result` row: the answer a repeat of this attempt_id replays.
+    try:
+        _fa_db.record_platform_write_move({
+            **record, "phase": "result", "result": result,
+            "status": payload.get("status") if status == 200 else None,
+            "platform_transaction_id": payload.get("platform_transaction_id"),
+            "error_code": None if status == 200 else payload.get("error"),
+            "response_status": status, "response_json": json.dumps(payload)})
+    except Exception:
+        log.exception("fa move: the result row failed (attempt %s)", attempt_id)
+    stamp = False
+    if status == 200 and payload["status"] == "complete":
+        # K-F5: save the new roster (dropped off, added on) BEFORE answering,
+        # because the phone drops its held trade page when this request ends.
+        # Pending, failed and outcome-unknown moves never touch the roster.
+        try:
+            new_roster = ([p for p in my_players if p not in set(dropped)]
+                          + [p for p in added if p not in held])
+            stamp = _fa_db.set_league_member_roster(
+                league_id, str(mine.get("owner_id") or platform_user_id), new_roster)
+            if stamp:
+                _invalidate_league_members_cache(league_id)
+        except Exception:
+            log.exception("fa move: roster save failed (league %s)", league_id)
+            stamp = False
+    if status == 200:
+        _fa_move_event(user_id, "fa_move_write_succeeded", {
+            "move_kind": kind, "has_drop": bool(drop_id), "has_bid": bid is not None,
+            "result": result, "attempt_id": attempt_id, "league_platform": platform,
+        }, league_id=league_id)
+    if stamp:
+        _fa_move_stamp_async(league_id)
+    return payload, status
+
+
+@app.route("/api/league/free-agents/move", methods=["POST"])
+def league_free_agents_move_route():
+    """D1: make one free-agent move in the user's league (contract §3).
+
+    Body {league_id, add_player_id, drop_player_id?, move_kind: add|claim,
+    faab_bid? (claims), consent?: {copy_version, locale}, attempt_id (one per
+    tap; opaque, 8–64 of [A-Za-z0-9._-], unique per user), surface?
+    (free_agents|usage_trends)}. 200 {status: complete|pending, move_kind, result:
+    accepted|partial, league_platform, attempt_id, title, lines,
+    platform_transaction_id?}; a repeat of an attempt_id returns its recorded
+    answer. Every error body is {error, message, detail == message, title?,
+    kind?, remaining?, consent?}; the codes and states are contract §4. Order
+    of checks: `_fa_move_core`. Steps 1–2 here: test mode fails closed (599),
+    and 404 `feature_disabled` while every `*.send_add_drop` is off.
+    """
+    if _TEST_MODE:
+        # Fail closed: there is no legitimate automated move.
+        return jsonify({"error": "test_mode_move_disabled"}), 599
+    if not _fa_move_any_flag_on():
+        body, status = _fa_move_error("feature_disabled", 404,
+                                      _fa_copy.message("feature_disabled"))
+        return jsonify(body), status
+    sess = _require_session()
+    try:
+        body, status = _fa_move_core(sess, request.get_json(silent=True))
+    except Exception:
+        log.exception("free-agent move failed")
+        body, status = _fa_move_error("internal_error", 500, _fa_copy.message("internal_error"),
+                                      title=_fa_copy.UNKNOWN_TITLE)
+    return jsonify(body), status
 
 
 # ─── Usage Trends (docs/plans/usage-trends/scope.md) ───────────────────────
@@ -39465,14 +40680,31 @@ def _paywall_products(now: datetime) -> list:
 # Tip jar (operator request 2026-08-28): consumable "support the platform"
 # SKUs. Money with NO entitlement — entitlements.is_tip_product() short-
 # circuits the projector, so a tip can never grant `pro`. Guideline 3.1.1:
-# in-app tips to the developer must be IAP. NOT SERVED at launch (#393, as
-# #465 does): the tip SKUs are not being submitted to App Store Connect, so
-# the route sends `tips: []`. This list is what to restore if they are.
+# in-app tips to the developer must be IAP. SERVED BEHIND A KNOB (tip-jar
+# plan §3 S1, docs/plans/tip-jar/plan.md): the route sends this list only
+# while model_config `paywall_tips_enabled` is exactly 1, the resolved
+# platform is `ios` and the session is verified and not demo; otherwise
+# `tips: []`. The knob defaults to 0 and
+# release-lead sets it to 1 once the three products exist in App Store
+# Connect; setting it back to 0 is the deploy-free kill switch.
 _PAYWALL_TIPS = [
     {"product_id": "ftf_tip_199", "display_price": "$1.99"},
     {"product_id": "ftf_tip_499", "display_price": "$4.99"},
     {"product_id": "ftf_tip_999", "display_price": "$9.99"},
 ]
+
+
+def _paywall_tips_enabled() -> bool:
+    """model_config `paywall_tips_enabled` == 1, read live on every request
+    through get_config() (no cache), so setting it to 0 hides the tips with
+    no deploy. Anything but exactly 1 is off: 0, 2, NaN, a non-number, a
+    missing row or a failed read (the inline fallback matches the 0 seed,
+    G-064)."""
+    try:
+        return float(get_config().get("paywall_tips_enabled", 0.0)) == 1.0
+    except Exception:
+        return False
+
 
 _PAYWALL_PLATFORMS = ("ios", "web", "extension")
 
@@ -39499,12 +40731,15 @@ def paywall_config():
     new-subscriber prices at _PAYWALL_PRICE_RISE_AT, the same instant
     `club.open` turns false: both come from one _paywall_now() read.
     """
-    _require_session()
+    sess = _require_session()
     if not is_enabled("monetize.paywall"):
         return jsonify({"enabled": False})
     platform = request.args.get("platform", "ios")
     if platform not in _PAYWALL_PLATFORMS:
         platform = "ios"
+    # Same predicate as _session_verification: an unverified or demo
+    # session is the unverified answer.
+    session_verified = bool(sess.get("verified")) and not sess.get("is_demo")
     now = _paywall_now()   # read once: club.open and the prices flip together
     return jsonify({
         "enabled": True,
@@ -39520,13 +40755,17 @@ def paywall_config():
         "trial_eligible": True,
         # Always true: there is no non-dismissible mode (#393 scope §2).
         "dismissible": True,
-        # Tip-jar consumables: none at launch (#393 recommendation §(b):
-        # the SKUs are not submitted to App Store Connect, three fewer IAPs
-        # on a first review; _PAYWALL_TIPS stays the list to restore). A tip
-        # would still grant nothing (entitlements.is_tip_product). Rides
-        # monetize.paywall: tips are purchase UI, and the flag's contract is
-        # "no purchase UI anywhere" when off.
-        "tips": [],
+        # Tip-jar consumables: served behind the `paywall_tips_enabled` knob
+        # (exactly 1), on `ios` only (the one platform with in-app
+        # purchase), and only to a verified, non-demo session (defence in
+        # depth behind #495's verified-only Settings row); otherwise [].
+        # See _PAYWALL_TIPS. A tip grants nothing
+        # (entitlements.is_tip_product). Rides monetize.paywall too: tips
+        # are purchase UI, and the flag's contract is "no purchase UI
+        # anywhere" when off.
+        "tips": (_PAYWALL_TIPS
+                 if platform == "ios" and session_verified
+                 and _paywall_tips_enabled() else []),
     })
 
 

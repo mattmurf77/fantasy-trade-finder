@@ -61,6 +61,10 @@ def test_deck_routes_are_gated():
 
 PINNED_NOT_GATED = [
     ("DELETE", "/api/account"),
+    ("GET", "/api/league/free-agents"),
+    ("POST", "/api/league/free-agents/move"),
+    ("GET", "/api/platform-write-consent"),
+    ("DELETE", "/api/platform-write-consent"),
     ("GET", "/api/account/export"),
     ("GET", "/api/me/entitlements"),
     ("GET", "/api/paywall/config"),

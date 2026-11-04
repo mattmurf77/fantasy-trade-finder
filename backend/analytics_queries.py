@@ -440,6 +440,22 @@ NON_INTENT_EVENTS = frozenset({
     # its emitter): a server-fired outcome of each served page, on background
     # polls too. The serve's request already reflects the user's intent.
     "deck_i1_check",
+    # ── D1 free-agent moves, 2026-11-01 — added in the SAME commit as the
+    # emitters (mobile/src/api/faMove.ts; scope.md §1, granted with C1–C6).
+    # Both are EXPOSURES: a step the sheet showed, not a choice the user made.
+    # The decision is the named-CTA tap, `fa_move_write_attempted`, which
+    # stays INTENT with `fa_move_write_failed`.
+    "fa_move_connect_shown",
+    "fa_move_consent_shown",
+
+# ── D1 free-agent moves (2026-11-01, granted NON_INTENT by analytics-lead,
+    # consent.md §6) — added in the SAME commit as the server emitters. Both
+    # consent events are a ledger, not a decision: a grant always arrives in
+    # the same request as the INTENT fa_move_write_attempted, and withdrawals
+    # include system ones (an expired or rejected token). One name, one class.
+    # `fa_move_write_succeeded` is deliberately ABSENT and stays INTENT.
+    "fa_move_consent_recorded",
+    "fa_move_consent_withdrawn",
     # entitlement_granted (C8, 2026-10-28, registered in the SAME commit):
     # grant() also fires for manual, comp, bulk, Founders, referral and
     # group-unlock grants, none of them the recipient acting. INTENT would
