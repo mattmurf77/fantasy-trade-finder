@@ -355,8 +355,8 @@ export default function PickAnchorScreen() {
       {anchorRequired != null ? (
         <Text testID="anchors.unlock-hint" style={styles.unlockHint}>
           {anchorUnlocked
-            ? 'Trade Finder unlocked'
-            : `${Math.min(anchorCount, anchorRequired)} / ${anchorRequired} toward unlocking Trade Finder`}
+            ? 'Your board now prices your trades'
+            : `${Math.min(anchorCount, anchorRequired)} / ${anchorRequired} toward board-priced trades`}
         </Text>
       ) : null}
 

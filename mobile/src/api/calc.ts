@@ -350,11 +350,15 @@ export async function evaluateTradeInLeague(
  *
  *  A 404 is deliberately NOT distinguished from `failed`: the caller already
  *  checked the flag, so a 404 means client/server flag disagreement — an
- *  operational fault, not a product state. */
+ *  operational fault, not a product state.
+ *
+ *  `timeoutMs` caps this one request (apiRequest's per-call timeout);
+ *  omitted = the default 15 s. A timeout comes back as `failed`. */
 export async function createSharePackage(
   givePlayerIds: string[],
   receivePlayerIds: string[],
   signal?: AbortSignal,
+  timeoutMs?: number,
 ): Promise<
   | { outcome: 'ok'; short_id: string; url: string; og_image: string }
   | { outcome: 'rate_limited' | 'demo' | 'failed' }
@@ -368,6 +372,7 @@ export async function createSharePackage(
     }>('/api/share/package', {
       method: 'POST',
       signal,
+      timeoutMs,
       body: { give_player_ids: givePlayerIds, receive_player_ids: receivePlayerIds },
     });
     if (!r?.ok || !r.url || !r.short_id) return { outcome: 'failed' };

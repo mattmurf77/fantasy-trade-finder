@@ -48,6 +48,12 @@ class Lease:
     generation: int
     revision: int
 
+    def deleting(self) -> bool:
+        """True while the user's deletion holds new work: `active()` would wait.
+        A queue worker serving many users checks this instead of waiting."""
+        with self.state.condition:
+            return self.state.deleting
+
     @contextmanager
     def active(self):
         state = self.state

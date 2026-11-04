@@ -141,6 +141,17 @@ check('null bag skipped', pickEspnCookies([null, undefined, bag('s2', '{z}')]), 
 check('all empty → null', pickEspnCookies([]), null);
 
 // ── readEspnCookies polls BOTH domains and returns null when store empty ──
+// An await that never settles, or an early return, would let the event loop
+// drain and node exit 0 mid-run: an unfinished run fails instead
+// (the check-device-first-page pattern; mobile/tests/README.md § Writing one).
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-espn-cookies did not finish (a check hung or returned early): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 (async () => {
   const res = await readEspnCookies();
   check('empty store → null', res, null);
@@ -210,6 +221,7 @@ check('all empty → null', pickEspnCookies([]), null);
     true,
   );
 
+  finished = true;
   if (failures > 0) {
     console.error(`\n${failures} check(s) failed.`);
     process.exit(1);

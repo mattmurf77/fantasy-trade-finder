@@ -173,7 +173,7 @@ FlatList viewability), `detail_expanded`/`calc_opened` engagement bits (expanded
   round-only pairing). **exact** = both sides fully pair off; **partial** =
   matched/max(|suggested|,|executed|) ≥ 0.5 AND ≥1 asset matched on each side.
   Best candidate: exact > highest overlap > most recent. `was_recommended` counts
-  only non-ghost (actually rendered) matches; the best ghost match is linked
+  only non-ghost matches that were shown: viewed or first 30 (R-U6a); the best ghost match is linked
   separately (`ghost_impression_id`) — that column IS the incrementality read.
   2-team trades only in v1; multi-team trades are linked with `match_type='none'`
   and stay in the ratio denominator.

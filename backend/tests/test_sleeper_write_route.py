@@ -688,7 +688,7 @@ def test_propose_failure_fires_no_trade_sent(client):
 def test_propose_roster_fetch_failure_degrades_gracefully(client):
     """A transient rosters-fetch failure must not 500 — it degrades to a
     structured refusal, never an unhandled crash. Since I-2 (platforms-pm R3)
-    that refusal is the readable 502 `sleeper_write_failed`, `kind: "network"`
+    that refusal is the readable 502 `sleeper_write_failed`, `kind: "roster_read"`
     (nothing sent), no longer the misleading 400 `roster_not_found`; the full
     matrix is in test_i2_sleeper_ownership.py."""
     c, token = client
@@ -699,7 +699,7 @@ def test_propose_roster_fetch_failure_degrades_gracefully(client):
             "give_player_ids": ["1"], "receive_player_ids": ["2"]}))
     body = r.get_json()
     assert r.status_code == 502 and body["error"] == "sleeper_write_failed"
-    assert body["kind"] == "network" and body["detail"] == body["message"]
+    assert body["kind"] == "roster_read" and body["detail"] == body["message"]
 
 
 def test_link_get_reports_expired_flag(client):

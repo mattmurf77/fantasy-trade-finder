@@ -539,13 +539,15 @@ MIN_LIKE_POS = 5
 MIN_PROPOSE_ROWS = 20
 MIN_PROPOSE_POS = 3
 
-_POSITION_NORM = 10.0   # card_index / this, clipped to [0,1] — train-only
+_POSITION_NORM = 10.0   # displayed position / this, clipped to [0,1] — train-only
 
 
 def build_training_rows(decks) -> tuple[list[dict], list[dict]]:
     """LoggedDecks → (like_rows, propose_rows), each row =
     {"f": features_json-shaped dict, "y": 0/1, "user_id", "served_at",
-     "position": card_index/_POSITION_NORM}.
+     "position": position/_POSITION_NORM}, where position is the card's
+    displayed position (LoggedCard.position: card_index less the recorded
+    never-delivered withdrawals below it, the slot the user was shown).
 
     like head:    viewed ∧ ¬undone ∧ (liked ∨ passed), y = liked.
     propose head: viewed ∧ ¬undone ∧ liked,            y = proposed.
@@ -567,7 +569,7 @@ def build_training_rows(decks) -> tuple[list[dict], list[dict]]:
                 "user_id": c.user_id,
                 "partner": f.get("partner_user_id"),
                 "served_at": c.served_at,
-                "position": _clip(c.card_index / _POSITION_NORM, 0.0, 1.0),
+                "position": _clip(c.position / _POSITION_NORM, 0.0, 1.0),
             }
             if c.liked or c.passed:
                 like_rows.append({**row, "y": 1.0 if c.liked else 0.0})
