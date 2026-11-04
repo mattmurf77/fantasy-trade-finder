@@ -1125,36 +1125,40 @@ LOW_SHARE_FLAG = 0.70
 
 # R-U6b (analytics-lead, 2026-10-26): at the packed-evidence flip, receipts
 # move to viewed-or-first-30 cards (R-U6a; database._evidence_shown), so volume
-# and win-share denominators change. The flip day (UTC, "YYYY-MM-DD") stays
-# None until the flip; the scribe fills it in at the flip. While None, no
-# caveat (the #418 SERIES_BREAKS pattern, analytics_queries.py).
-RECEIPTS_SERIES_BREAK_DAY: str | None = None
+# and win-share denominators change. The flip day is database's
+# PACKED_EVIDENCE_FLIP_DAY, the one value the scribe sets at the flip, shared
+# with the endorsement ratio's caveat. While None, no caveat (the #418
+# SERIES_BREAKS pattern, analytics_queries.py).
 RECEIPTS_SERIES_BREAK_DETAIL = ("U6/R-U6a: receipts move to viewed-or-first-30 cards at the "
                                 "packed-evidence flip")
 
 
 def _receipts_series_break_caveats(rows: list[dict]) -> list[dict]:
     """A `series_break` caveat when the break day is set and the serve dates
-    the metrics read span it (inclusive: the break day itself is mixed)."""
-    day = RECEIPTS_SERIES_BREAK_DAY
+    the metrics read span it (inclusive: the break day itself is mixed). The
+    day is read through database.packed_evidence_flip_day (a malformed value:
+    no caveat, one warning)."""
+    day = db.packed_evidence_flip_day()
     days = [str(r["served_at"])[:10] for r in rows if r.get("served_at")]
     if day is None or not days or not min(days) <= day <= max(days):
         return []
-    return [{"code": "series_break", "scope": "receipts",
+    return [{"code": db.SERIES_BREAK_CAVEAT, "scope": "receipts",
              "detail": RECEIPTS_SERIES_BREAK_DETAIL, "day": day}]
 
 
 def _viewed_without_full_row(league_id: str | None) -> dict:
     """models-lead R3: acted-on cards receipts can't grade because they have
     no full row, reported (never silently dropped): totals by cause and the
-    runs (decks) they sit in. Every retained row, the league filter applied."""
+    runs (decks) they sit in. Every retained row, the league filter applied.
+    The causes are the writer's, from each run's pack (U4-R2)."""
+    causes = db.VIEWED_WITHOUT_FULL_ROW_CAUSES
     try:
         runs = db.load_viewed_without_full_row(league_id=league_id)
     except Exception as e:
         log.warning("receipts metrics: viewed-without-full-row read failed: %s", e)
-        return {"restart_split": None, "other": None, "runs": None, "unavailable": True}
-    return {"restart_split": sum(c["restart_split"] for c in runs.values()),
-            "other": sum(c["other"] for c in runs.values()), "runs": len(runs)}
+        return {**dict.fromkeys(causes), "runs": None, "unavailable": True}
+    return {**{cause: sum(c[cause] for c in runs.values()) for cause in causes},
+            "runs": len(runs)}
 
 
 def admin_metrics(*, window: int | None = None,

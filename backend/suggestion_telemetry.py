@@ -32,7 +32,8 @@ Three responsibilities:
    captured `sleeper_trades` row not yet linked, find the best-matching
    logged suggestion by the documented asset-set similarity rule and write
    one `suggestion_trade_links` row. `was_recommended` counts only NON-ghost
-   (actually rendered) matches; the best ghost match is linked separately —
+   matches that were shown: viewed or first 30 (R-U6a); the best ghost match
+   is linked separately —
    ghost_impression_id hits are the incrementality read. Eligible cards
    (R-U6a, models-lead R3; `database._evidence_shown`): a row written at
    build (legacy, flag off), or a deferred/packed deck's card in the first 30
@@ -461,10 +462,11 @@ def _log_viewed_without_full_row(league_id: str, since: str, until: str) -> None
                     league_id, e)
         return
     for run_id, counts in sorted(runs.items()):
-        # U4-R2: `other` must be zero, so a non-zero one is an ERROR; restart_split alone is expected.
+        # U4-R2: `other` must be zero, so a non-zero one is an ERROR; the named causes are expected.
         level = logging.ERROR if counts["other"] else logging.WARNING
-        log.log(level, "[matcher] viewed without full row league=%s run=%s restart_split=%d other=%d",
-                league_id, run_id, counts["restart_split"], counts["other"])
+        log.log(level, "[matcher] viewed without full row league=%s run=%s restart_split=%d "
+                "evicted_split=%d other=%d", league_id, run_id, counts["restart_split"],
+                counts["evicted_split"], counts["other"])
 
 
 def _score_impression(

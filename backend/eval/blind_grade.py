@@ -10,7 +10,10 @@ CardSet JSON: {"variant": str, "source": "value_core_bench" | "served",
                           "give": [{"id","name","position","market"}],
                           "receive": [{"id","name","position","market"}],
                           "reasons": [str]}],
-               "skipped_no_row": int}      # served sets only
+               "skipped_no_row": int,      # served sets only
+               "leagues_without_deck": [str],   # served: no gradeable Trades deck in the lookback
+               "leagues_with_no_cards": [str],  # served: a deck found, 0 gradeable cards
+               "skipped_decks_by_reason": {str: int}}  # served: every ungradeable deck in the lookback
 
 ``served_card_set`` is the only production touch: a read-only read of the
 incumbent's served decks, asserting ``transaction_read_only = on`` first.
@@ -168,7 +171,13 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
     then assets_json, valuation_json and features_json are read for exactly
     those impression_ids. A chosen card without a full row (a packed-only
     card, or a row without assets_json) is skipped and counted in
-    "skipped_no_row", never replaced by a later card.
+    "skipped_no_row", never replaced by a later card. A league with no such
+    deck is named in "leagues_without_deck", and one whose deck yields no
+    gradeable card (every chosen card skipped, or none to choose) in
+    "leagues_with_no_cards": neither is a silent 0 cards. Every deck skipped
+    for one of those three exclusions, in every league and older than the
+    chosen deck too, is counted by exclusion in "skipped_decks_by_reason"
+    (models-lead C5).
 
     Every read runs on the engine prod_analytics._connect_readonly returns,
     whose connections all open with default_transaction_read_only=on; the
@@ -192,16 +201,25 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
     since = (datetime.now(timezone.utc) - SERVED_LOOKBACK).isoformat()
     cards: list[dict] = []
     skipped = 0
+    without_deck: list[str] = []
+    no_cards: list[str] = []
+    # models-lead C5: every ungradeable deck in the lookback is counted by reason,
+    # so a skip is never silent (pack_integrity / withdrawal_conflict are also
+    # G1 / G8 signals).
+    skipped_decks = dict.fromkeys(sorted(ungradeable), 0)
     try:
         with engine.connect() as conn:
             if conn.execute(text("SHOW transaction_read_only")).scalar() != "on":
                 raise ValueError("read-only connection required: transaction_read_only is not on")
             for league_id in league_ids:
-                decks = [d for d in eval_data.load_decks(engine=engine, since=since,
-                                                         user_id=str(user_id),
-                                                         league_id=str(league_id))
-                         if d.exclusion not in ungradeable]
-                if not decks:
+                loaded = eval_data.load_decks(engine=engine, since=since,
+                                              user_id=str(user_id), league_id=str(league_id))
+                for d in loaded:
+                    if d.exclusion in ungradeable:
+                        skipped_decks[d.exclusion] += 1
+                decks = [d for d in loaded if d.exclusion not in ungradeable]
+                if not decks:     # named, never a silent 0 cards (runbook §Blind grade)
+                    without_deck.append(str(league_id))
                     continue
                 deck = max(decks, key=lambda d: (d.served_at, d.deck_job_id))
                 chosen = sorted((c for c in deck.cards if not c.is_ghost),
@@ -224,12 +242,13 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
                         continue
                     assets = json.loads(r["assets_json"])
                     valuation = json.loads(r["valuation_json"]) if r["valuation_json"] else {}
-                    markets = {str(a.get("id")): a.get("market")
-                               for a in (valuation.get("assets") or []) if isinstance(a, dict)}
+                    markets = eval_data.valuation_markets(valuation)
                     features = json.loads(r["features_json"]) if r["features_json"] else {}
                     parsed.append(([str(i) for i in assets.get("give") or []],
                                    [str(i) for i in assets.get("receive") or []],
                                    features.get("partner_user_id"), markets))
+                if not parsed:    # a deck, but nothing to grade: named too
+                    no_cards.append(str(league_id))
                 ids = sorted({a for give, receive, _, _ in parsed for a in give + receive})
                 players = {}
                 if ids:
@@ -249,7 +268,9 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
                              for give, receive, partner, markets in parsed)
     finally:
         engine.dispose()
-    return {"variant": variant, "source": "served", "cards": cards, "skipped_no_row": skipped}
+    return {"variant": variant, "source": "served", "cards": cards, "skipped_no_row": skipped,
+            "leagues_without_deck": without_deck, "leagues_with_no_cards": no_cards,
+            "skipped_decks_by_reason": skipped_decks}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -288,7 +309,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise SystemExit(f"served failed: {type(exc).__name__}") from None
         write_private_json(args.output, card_set)
         print(json.dumps({"cards": len(card_set["cards"]), "leagues": len(args.league),
-                          "skipped_no_row": card_set["skipped_no_row"]}))
+                          "skipped_no_row": card_set["skipped_no_row"],
+                          "leagues_without_deck": card_set["leagues_without_deck"],
+                          "leagues_with_no_cards": card_set["leagues_with_no_cards"],
+                          "skipped_decks_in_lookback_by_reason":
+                              card_set["skipped_decks_by_reason"]}))
     elif args.command == "export":
         card_sets = [json.loads(path.read_text()) for path in args.cards]
         print(json.dumps(export(card_sets, per_variant=args.per_variant, seed=args.seed,

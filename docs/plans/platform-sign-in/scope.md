@@ -197,3 +197,8 @@ The mint's refusal `message`s are the **final 14-row set** from marketing-lead (
   - MFL **accepts** the same username in a different case → MFL is case-insensitive, and lower-casing is correct. No change.
   - MFL **rejects** it → MFL is case-sensitive. **Before ask 16**, switch the `mfl` branch of `platform_subject` to trim-only (case-preserving), together with the D6 conflict comparison in `platform_identity_in_use`, which goes through the same normaliser.
 - The same rule is written as a code comment at `accounts.platform_subject`.
+
+
+## Main integration (2026-11-04)
+
+The #430 resync with main `fd5390ac` retains main's feedback throttle and its trusted-hop IP helper, shared with the sign-in limiter. The duplicate helper/constant copy from the sign-in block is removed; top-level shape and shared-policy tests guard it. The SQLAlchemy import retains both platform lookup `func` and account-deletion `or_`. No proof, identity, limiter budget, feature-flag, schema, API or event contract changes in this integration. Targeted offline validation and the two RED sabotages are recorded in TEST_LEDGER.

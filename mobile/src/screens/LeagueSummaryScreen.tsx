@@ -2767,13 +2767,14 @@ function sourceCaption(src: string): string {
   return STRENGTH_SOURCE_CAPTION[src] ?? 'Projected from team strength';
 }
 
-// The load-bearing honesty label. Weeks 0–5 this reads
-// "Projected · preseason · beta"; from week 6 `meta.beta` is false and the
-// ribbon shortens to "Projected" — never a bare authoritative percentage.
+// The load-bearing honesty label. Before week 1 this reads
+// "Projected · preseason"; otherwise it reads "Projected" — never a bare
+// authoritative percentage. `meta.beta` no longer touches the label: it still
+// hides win-loss records through week 5 (`showRecords`), and the word "beta"
+// is never shown (App Review 2.2).
 function betaRibbonLabel(meta: OutlookMeta): string {
   const parts = ['Projected'];
   if (meta.is_preseason) parts.push('preseason');
-  if (meta.beta) parts.push('beta');
   return parts.join(' · ');
 }
 
