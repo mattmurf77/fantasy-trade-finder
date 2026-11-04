@@ -175,9 +175,10 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
     deck is named in "leagues_without_deck", and one whose deck yields no
     gradeable card (every chosen card skipped, or none to choose) in
     "leagues_with_no_cards": neither is a silent 0 cards. Every deck skipped
-    for one of those three exclusions, in every league and older than the
-    chosen deck too, is counted by exclusion in "skipped_decks_by_reason"
-    (models-lead C5).
+    for one of those four exclusions (calibration_refresh, pack_integrity,
+    withdrawal_conflict, partner_redacted), in every league and older than
+    the chosen deck too, is counted by exclusion in "skipped_decks_by_reason"
+    (models-lead C5, M2 (a)).
 
     Every read runs on the engine prod_analytics._connect_readonly returns,
     whose connections all open with default_transaction_read_only=on; the
@@ -188,9 +189,12 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
     # Never graded: Calibration's refresh (not a Trades deck), and a deck whose
     # evidence contradicts itself (pack_integrity, withdrawal_conflict). The
     # loader stops before removing such a deck's never-delivered withdrawals,
-    # so its top N could hold cards nobody saw.
+    # so its top N could hold cards nobody saw. Nor a deck holding a card
+    # whose partner deleted their account (partner_redacted): its partner is
+    # a token and their inputs are gone, so "would I send this?" and the
+    # partner tags can't be judged fairly (models-lead addendum M2 (a)).
     ungradeable = {eval_data.CALIBRATION_REFRESH, eval_data.PACK_INTEGRITY,
-                   eval_data.WITHDRAWAL_CONFLICT}
+                   eval_data.WITHDRAWAL_CONFLICT, eval_data.PARTNER_REDACTED}
     from backend.tools import prod_analytics
 
     # load_decks drops an empty user or league filter: never read beyond the seat.

@@ -69,6 +69,8 @@ export interface ProposeEspnTradePayload {
   comments?: string;
   // F1 signal spine (flag deck.signal_v2) — same contract as the other sends.
   impression_id?: string;
+  // #531 — same contract as the Sleeper send: 'shop' only from the Shop tile.
+  source?: 'shop';
 }
 
 export interface ProposeEspnTradeResult {

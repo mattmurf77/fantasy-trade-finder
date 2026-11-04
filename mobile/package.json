@@ -112,6 +112,7 @@
     "test:settings-testids": "node tests/check-settings-testids.js",
     "test:share-trade-token": "node tests/check-share-trade-token.js",
     "test:shop-deck": "node tests/check-shop-deck.js",
+    "test:shop-send": "node tests/check-shop-send.js",
     "test:single-pin-actions": "node tests/check-single-pin-actions.js",
     "test:standing-offer-362": "node tests/check-standing-offer-362.js",
     "test:standings-order": "node tests/check-standings-order.js",

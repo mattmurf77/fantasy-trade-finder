@@ -56,6 +56,7 @@
 - [Deferred evidence: write what the serve sends, after S0's rules (2026-10-26, ADR-025 stage 1, #370)](#deferred-evidence-write-what-the-serve-sends-after-s0s-rules-2026-10-26-adr-025-stage-1-370)
 - [Packed evidence: the pack at first delivery, header-only updates, full row on view (2026-10-27, ADR-025 stage 2, S8)](#packed-evidence-the-pack-at-first-delivery-header-only-updates-full-row-on-view-2026-10-27-adr-025-stage-2-s8)
 - [P1 page store: stamps, S0's serve rules, the deck pipeline guard (2026-10-26, trade.first_page_store)](#p1-page-store-stamps-s0s-serve-rules-the-deck-pipeline-guard-2026-10-26-tradefirst_page_store)
+- [Deletion scrub: a work row in the deletion's transaction, two phases, one rule per field (2026-10-31, legal R28.20 (ii))](#deletion-scrub-a-work-row-in-the-deletions-transaction-two-phases-one-rule-per-field-2026-10-31-legal-r2820-ii)
 
 ---
 
@@ -134,7 +135,7 @@ See [`../docs/data-dictionary.md`](../docs/data-dictionary.md) for full schema. 
 - **`roster`** — user-league-player ownership
 - **`elo_rating`** — per-user-per-player Elo with history
 - **`swipe_decisions`** — pairwise comparison events (powers ranking)
-- **`trade_decisions`** — like/pass on generated trade cards
+- **`trade_decisions`** — like/pass on generated trade cards, plus `send` (#531, D-210): a Shop send's once-only Elo anchor, never a like. Readers that mean like/pass filter `decision IN ('like', 'pass')`; a new reader must too
 - **`trade_card`** — cached generated trade cards
 - **`trade_match`** — mutual-like matches between users
 - **`notification`** — inbox events
@@ -807,7 +808,7 @@ and [scope/evidence](../docs/plans/budget-scalability/implementation.md).
 
 ## Ownership and telemetry invariants
 
-Private reads/writes depend on proof on the current session, never the grace flag or absence of a verified controller. Session initialization cannot change account identity and accepts only server-resolved roster snapshots. New Sleeper source binding proves source ownership before inspecting either board. Recommendation labels require a verified actor, valid owned impression and accepted validated ingestion. Analytics stores domain-separated identifiers instead of bearer tokens. Deletion resolves aliases, drains concurrent account work, revokes durable sessions transactionally and invalidates queued work. Version 2 export covers the expanded private scope while omitting credential material. The work gate assumes the deployed single-worker topology; see [ADR-017](../docs/adr/adr-017-account-deletion-work-leases.md). Browser verification uses the explicit extension bridge restricted to the production web origin.
+Private reads/writes depend on proof on the current session, never the grace flag or absence of a verified controller. Session initialization cannot change account identity and accepts only server-resolved roster snapshots. New Sleeper source binding proves source ownership before inspecting either board. Recommendation labels require a verified actor, valid owned impression and accepted validated ingestion. Analytics stores domain-separated identifiers instead of bearer tokens. Deletion resolves aliases, drains concurrent account work, revokes durable sessions transactionally and invalidates queued work. Version 2 export covers the expanded private scope while omitting credential material. The work gate assumes the deployed single-worker topology; see [ADR-017](../docs/adr/adr-017-account-deletion-work-leases.md). A writer that must also hold across processes (a rolling deploy's two containers), or against another account's deletion, which the per-account gate doesn't drain, guards in the DB: `database._lock_live_user` takes the account's users row (FOR KEY SHARE, against deletion's FOR UPDATE) as its transaction's first statement and raises `AccountGone` when the row is gone. The session-init daemon (2026-11-03) uses it for every users, leagues, league_members, user_events and roster-history write, and the first `AccountGone` stops it. It only updates rows it found at its start, never inserts a users row, and inserts only a Sleeper league's first-init rows. The lock must open the same `with ….begin() as conn:` block that writes; a structural test in `test_session_init_deleted_mid_daemon.py` pins that. Its Postgres twin, opt-in, is `test_session_init_deleted_pg.py`. Browser verification uses the explicit extension bridge restricted to the production web origin.
 
 ## Exact source interest and durable pass state
 
@@ -978,3 +979,15 @@ Flag `trade.packed_evidence`, which `trade.first_page_store` requires (P1's AND)
   - A new evidence table belongs in `_delete_deck`'s list.
   - **Account export and deletion reach a packed deck's outcomes by contract id** (`database.deck_pack_contract_ids`, every `<run_id>:<k>` under the pack's `card_count`), not only through the user's rows. The full-row bound deletes those rows and keeps the outcomes, so a rows-only path would export none of them and leave them forever (#523 QA P1-1, E-b4). The same ids unlink `suggestion_trade_links`.
 - **Retirement and exit:** the cleanup loop retires a deck's pack (superseded, revoked, 24 h, or about to be evicted), wrapped like its other steps (a DB error must never kill that thread); a retirement that didn't land is undone in memory so the next tick retries it; `_deck_evidence_drain` joins in-flight evidence writes at exit. Stage 1's `full_interim` path still runs for a deck with `packed` false, which the AND makes unreachable in production; it goes in a follow-up.
+
+## Deletion scrub: a work row in the deletion's transaction, two phases, one rule per field (2026-10-31, legal R28.20 (ii))
+
+`backend/deletion_scrub.py`; scope `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md`.
+- **Work that must outlive a request but never be lost is a row written in the triggering transaction.** That's the deletion, with a lease taken by compare-and-swap, so two runners never work one row. A crash, a raise or a deploy just leaves the row for the cleanup loop.
+- **No id leaves through a log, the tick's detail or an exception's text.** Catch, and log `type(err).__name__`, never `log.exception`: a DB error quotes its parameters.
+- **One rule per field, applied to every card of the partner in every store (R28.22 b2):** `redact_features` / `redact_valuation` / `_redact_member`. A new store calls the same functions and bumps `SCRUB_VERSION`. A new partner-derived field goes into those rules. Fields are **removed**, never set False (G-a1). Blended scores that solve back are nulled.
+- **Finding the rows is two passes:** the league pass (indexed, by the leagues captured at deletion), then a fallback keyset scan of the whole store, bounded per run and resumable from `scan_json`. The scan catches a league the person had left. A new store needs both.
+- **Packs change only through the codec, and a cached copy never wins over the stored one.** `server._fresh_pack_state` reloads a `_PackState` whose stored header changed outside its run, before a header CAS retry and before every upgrade. A row written from a deck's build-time snapshot takes the pack card's token (`_redacted_held_row`). A new writer that builds rows or headers from a cached pack goes through the same check.
+- **A card whose partner is a redaction token never serves** (`_redacted_target`, in the page serve after S0's rules). It's recorded as a withdrawal.
+- **The model store is redacted only in the daily tick, before the refit,** and only for jobs whose DB pass is current. So the refit trains on scrubbed rows.
+- **A deck's rows carry its first delivery as `served_at`.** So "built before the deletion" is approximated by a grace (6 h): decks served up to then are scrubbed, later ones never.

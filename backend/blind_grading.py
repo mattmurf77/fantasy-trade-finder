@@ -172,6 +172,7 @@ def add_fit_arms(*, session_id: str, server: ServerInputs, ros_points: Mapping[s
     answered = [c for c in existing if c["grade"] is not None or c["skipped"]]
     moving = [c["card_id"] for c in existing if not (c["grade"] is not None or c["skipped"])]
     inserts = [{"card_id": new_id(), "session_id": session_id, "user_id": row["user_id"],
+                "partner_user_id": m["partner_id"],
                 "arms_json": json.dumps(m["arms"], sort_keys=True),
                 "trade_json": json.dumps(neutral_trade(m["partner_id"], m["give"], m["receive"],
                                                        catalog), sort_keys=True),
@@ -254,7 +255,7 @@ def build_session(*, session_id: str, server: ServerInputs, engine: Callable | N
         vc, vc_meta = run_value_core(inputs, seat=seat, server=server, engine=engine)
         order = shuffle_cards(merge_cards([*current, *vc]), int(row["seed"]))
         cards = [{"card_id": new_id(), "session_id": session_id, "user_id": row["user_id"],
-                  "position": pos,
+                  "position": pos, "partner_user_id": m["partner_id"],
                   "arms_json": json.dumps(m["arms"], sort_keys=True),
                   "trade_json": json.dumps(neutral_trade(m["partner_id"], m["give"], m["receive"],
                                                          catalog), sort_keys=True),

@@ -4,7 +4,7 @@ docs/plans/daily-tick-fix/scope.md §3 (route tests) and the code-walk at
 docs/plans/daily-tick-fix/code-walk.md. Pins:
 
   • the POST answers 202 `{ok: true, started: true}` before any step has
-    finished, then all nine steps run in table order on the runner thread;
+    finished, then all ten steps run in table order on the runner thread;
   • a second POST while a run is in flight answers `started: false`;
   • a missing/wrong X-Cron-Secret is rejected before any thread starts;
   • a raising step never stops the steps after it;
@@ -42,7 +42,7 @@ URL = "/api/cron/daily-tick"
 HDR = {"X-Cron-Secret": "x"}
 STEP_KEYS = ["roster_snapshot", "usage_trends", "receipts_grade",
              "rookie_monitor", "players_guard", "reengagement",
-             "replenishment", "eval_nightly", "value_model_refit"]
+             "replenishment", "eval_nightly", "deletion_scrub", "value_model_refit"]
 NOW = datetime(2026, 10, 22, 13, 30, tzinfo=timezone.utc)   # a Thursday
 
 
@@ -102,10 +102,10 @@ def _clock_at(fixed):
 
 
 # ---------------------------------------------------------------------------
-# The route: 202 at once, nine steps in order, single-flight, auth first
+# The route: 202 at once, ten steps in order, single-flight, auth first
 # ---------------------------------------------------------------------------
 
-def test_post_returns_202_at_once_then_runs_all_nine_steps_in_order(client):
+def test_post_returns_202_at_once_then_runs_all_ten_steps_in_order(client):
     """Every step blocks until the test opens a gate AFTER the response is in
     hand, so the 202 provably does not wait on any step (stronger than a
     sleep, and costs no wall-clock time)."""
@@ -133,7 +133,7 @@ def test_post_returns_202_at_once_then_runs_all_nine_steps_in_order(client):
         results = daily_tick.wait(30)
 
     assert [res.key for res in results] == STEP_KEYS
-    assert [res.outcome for res in results] == ["ok"] * 9
+    assert [res.outcome for res in results] == ["ok"] * len(STEP_KEYS)
     assert [k for k, _, _ in ran] == STEP_KEYS
     assert {name for _, name, _ in ran} == {"daily-tick-runner"}
     assert {now for _, _, now in ran} == {NOW}   # the handler's clock, to every step
@@ -156,7 +156,7 @@ def test_second_post_while_a_run_is_in_flight_answers_started_false(client):
             assert r.get_json() == {"ok": True, "started": False}
         finally:
             gate.set()
-        assert len(daily_tick.wait(30)) == 9
+        assert len(daily_tick.wait(30)) == len(STEP_KEYS)
 
 
 def test_missing_or_wrong_secret_is_rejected_and_starts_no_thread(client):
@@ -173,7 +173,7 @@ def test_missing_or_wrong_secret_is_rejected_and_starts_no_thread(client):
         r = c.post(URL, headers={"X-Cron-Secret": "s3cret"})
         assert r.status_code == 202
         start.assert_called_once()
-        assert len(daily_tick.wait(30)) == 9
+        assert len(daily_tick.wait(30)) == len(STEP_KEYS)
 
 
 def test_a_raising_step_never_stops_the_steps_after_it(client, caplog):
