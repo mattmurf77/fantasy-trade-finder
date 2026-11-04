@@ -1,3 +1,11 @@
+## 2026-11-04 — Web/referral batch refreshed with main 787b9fc4 and paywall parent
+
+Merged the refreshed reviewed paywall parent `b7dcc4e2` into existing web/referral head `36a2f961`, preserving both ancestry chains without squashing. Main `787b9fc4` is included. Additive ledger and mobile script-registration conflicts retain both histories/guards. A comment-only ShareTradeImage overlap keeps main's constant Package value/privacy description and the referral branch's existing branded mark. Main's #566 share privacy implementation, #580 price wording, icon/manifest and EAS exclusions remain intact; no referral/paywall source, flags or configuration changed during resolution.
+
+- Targeted backend: route allowlist/referral enforcement boundaries, invite links/meta, join landing, share previews/tokens and referral ledger — **379 passed in 22.32s**.
+- Focused mobile checks: `check-share-text.js` **109 passed**; `check-share-trade-token.js` **19 passed**. Web structure **253/253**.
+- `git diff --check` passes; backend/config are unchanged from the reviewed web/referral candidate. No feature activation, production action, network fetch or remote write. Full GitHub CI on this refreshed combined head remains required.
+
 ## 2026-11-04 — Combined web/referral launch integration on the paywall stack
 
 Preserves original heads for #350 → #364 → #386 → #390 → #371/#387 → #373/#499/#504/#505/#391/#565, main `af57e59c` and reviewed paywall stack `7bb7ff86` as merge ancestors. #456 is deliberately excluded until November 18. Kept main's #362 random token links and #511 sharer orientation, absolute preview metadata, noindex headers and removal of public fairness numbers. Referral and monetization flags remain dark, including `growth.join_landing`, `growth.referral_ledger`, `growth.referral` and `landing.platform_options`; no production action occurred.
