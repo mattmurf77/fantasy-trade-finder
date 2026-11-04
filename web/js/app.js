@@ -1033,7 +1033,11 @@
     // ESPN/MFL sign-in, and the web has no proof-based sign-in until after
     // launch. A web build that adds one turns this on; never read the
     // landing flag here (qa/web/check_web_structure.py GATE-web-espn-mfl-off).
-    // Declared before _applyLandingFlags(), which runs the chip reveal at once.
+    // Declared before the immediate _applyLandingFlags() call below, so the
+    // constant is initialized when the reveal first runs. That first call can
+    // still end in a caught TDZ on `_entryPlatformSel` (declared further down;
+    // pre-existing and harmless: the chips are already set by then, and the
+    // reveal runs again on 'ftf:flags-ready').
     const WEB_PLATFORM_ENTRY = false;
 
     // Reveal flag-gated landing surfaces once the flag fetch completes.
