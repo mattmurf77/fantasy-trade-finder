@@ -894,6 +894,17 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # for an impression. NON-INTENT (impression class) — classified in
     # analytics_queries.NON_INTENT_EVENTS in this same commit.
     "standing_offer_card_shown",
+    # paywall_gate_hit (C8 §B, analytics-lead 2026-10-27; registered in the
+    # SAME commit as its emitter, server._emit_paywall_gate_hit): one per 402
+    # the paywall gate's before_request hook sends, capped in-process to the
+    # first per (user_id, gate, route_family) per UTC day; owner = the
+    # session's user, written non-touching. NON_INTENT (system outcome).
+    # Props, closed sets only: gate (the 402 body's: preview_used |
+    # never_trialed | trial_expired | lapsed | verify_required), route_family
+    # (paywall_gate.route_family: deck | send | matches | calculator | shop |
+    # overhaul | win_now | other), enforced (bool, always true: nothing is
+    # written while dark). No path params, ids or prices.
+    "paywall_gate_hit",
     # ── Receipts grading job, 2026-08-21 (docs/plans/receipts/, PRD DR-9) ──
     # Registered in the SAME commit as its emitter
     # (`receipts_service._emit_run_event`), the house rule this file's
@@ -1002,6 +1013,18 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # type), unchecked_generic, unchecked_pick_owner. No league id, no raw job
     # id, no player ids.
     "deck_i1_check",
+    # ── C8, 2026-10-28 (analytics-lead's C8 spec §A) ──────────────────────
+    # entitlement_granted — written by entitlements.grant() since the
+    # monetization foundation but never registered here, so every
+    # taxonomy-driven read missed it. Fired for webhook projections AND for
+    # manual / comp / bulk / Founders / referral / group-unlock grants, none
+    # of which is the recipient acting in a session: NON_INTENT (classified
+    # in analytics_queries in this same commit) and written non-touching
+    # (touch_user=False). A renewal on an existing row never calls grant(),
+    # so this is the first grant per (user, product) plus manual and promo
+    # grants. Props, exactly: entitlement (pro | ad_free), source
+    # (entitlements.VALID_SOURCES), expires_at.
+    "entitlement_granted",
 })
 
 # ---------------------------------------------------------------------------

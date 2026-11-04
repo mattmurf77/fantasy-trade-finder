@@ -2895,6 +2895,24 @@ subscription_events_table = Table("subscription_events", metadata,
     Index("ix_subscription_events_user", "user_id"),
 )
 
+# Paywall deck preview (backend/paywall_gate.py): one row per never-entitled
+# user once the first page of their first deck has been SERVED to them by
+# /api/trades/generate or /status. Warm-up and cron-built jobs never write it.
+# Created by metadata.create_all on both dialects; window_trade_ids (P3-1,
+# 2026-10-27) is additive, so it also has a migration_cols row.
+# Private: deleted and exported via accounts._ADDITIONAL_PRIVATE_TABLES.
+paywall_previews_table = Table("paywall_previews", metadata,
+    Column("user_id",         String,  primary_key=True),  # working key (sleeper id or acct_*),
+                                                            # as entitlements keys it
+    Column("deck_key",        String,  nullable=False),    # the trade job_id whose page(s) were served
+    Column("pages_served",    Integer, nullable=False),    # highest preview page served (1..paywall_preview_pages)
+    Column("first_served_at", String,  nullable=False),
+    Column("updated_at",      String,  nullable=False),
+    Column("window_trade_ids", Text),                      # JSON list: the window's trade ids at the last
+                                                            # serve; the swipe check's fallback once the job
+                                                            # is gone (P3-1). NULL on pre-P3-1 rows
+)
+
 # Give-get referral program (foundation §5). Fraud control is structural:
 # rewards only for verified co-members of the referrer's real Sleeper league,
 # one reward per unique referred user ever (uq below), activation-gated.
@@ -3632,6 +3650,9 @@ _MODEL_CONFIG_DEFAULTS = [
     # force_supersedes_running pattern), never cached: a flip lands on the
     # next mint with no restart. Not a trade or ranking input.
     ("referral_mint_enabled",     1.0,  "referral loop L7: exactly 1 = POST /api/invite/token mints while growth.referral_ledger is on; any other value = 404 not_found (clients fall back to the league-only link). Kill: scripts/set_knob.py referral_mint_enabled 0"),
+    ("paywall_enforce_enabled",   0.0,  "monetization kill knob: exactly 1 lets entitlements.check_pro enforce (402) when monetize.entitlements AND monetize.paywall are both on; 0 = observe only. Read live per request, so 0 stops enforcement without a deploy; a missing row reads as 0"),
+    ("paywall_web_enforce_enabled", 0.0, "web paywall knob: exactly 1 lets the global gate (paywall_gate.py) 402 web requests too, while entitlements.is_enforcing(); 0 = only the native app (X-Device iphone/ipad/macos/android) is gated. Read live per request; a missing row reads as 0"),
+    ("paywall_preview_pages",       1.0, "paywall deck preview: pages (trade_page_size cards each) of a never-entitled user's FIRST deck served free while enforcing; 0 = no preview (402 at the first deck request: never_trialed until a preview row exists, then preview_used). Read live per request; a missing row reads as 1"),
     # ── Minimum-version gate (B8, head-eng ruling 35) ────────────────────
     # Served as the top-level int `app_min_version` on GET /api/feature-flags
     # (server._app_min_version). Encoding major*10000 + minor*100 + patch
@@ -4043,6 +4064,11 @@ def _migrate_db() -> None:
         ("referrals",          "share_token",               "VARCHAR"),
         ("referrals",          "surface",                   "VARCHAR"),
         ("referrals",          "attribution_method",        "VARCHAR"),
+        # Paywall deck preview P3-1 (2026-10-27): the preview window's trade
+        # ids, so a swipe on a held page-1 card survives the job's 4 h
+        # retention and a deploy. NULL on earlier rows (no backfill: the swipe
+        # check reads the live job first, and NULL is an empty window).
+        ("paywall_previews",   "window_trade_ids",          "TEXT"),
         # ── G3-e (legal R28.22): an outcome's owner, for deletion and export.
         ("deck_outcomes",      "user_id",                   "VARCHAR"),
     ]

@@ -2855,6 +2855,7 @@ def _gate_unverified_write(fn):
                 if denial is not None:
                     return denial
         return fn(*args, **kwargs)
+    _wrapper._unverified_gates = getattr(fn, "_unverified_gates", frozenset()) | {"write"}
     return _wrapper
 
 
@@ -2894,7 +2895,18 @@ def _gate_unverified_read(fn):
                 if denial is not None:
                     return denial
         return fn(*args, **kwargs)
+    _wrapper._unverified_gates = getattr(fn, "_unverified_gates", frozenset()) | {"read"}
     return _wrapper
+
+
+def _route_answers_unverified(endpoint: str | None, method: str) -> bool:
+    """True when the view wears the verified gate for this method
+    (@_gate_unverified_write for a mutating method, @_gate_unverified_read
+    otherwise), so it answers an unverified session 403 itself. Read off the
+    live view (the decorators mark it; functools.wraps carries the mark up
+    any wrapping), so a removed decorator reads False, never stale."""
+    gates = getattr(app.view_functions.get(endpoint or ""), "_unverified_gates", frozenset())
+    return ("write" if method in _MUTATING_METHODS else "read") in gates
 
 
 def _trade_job_stalled(job, now):
@@ -20557,7 +20569,8 @@ def generate_trades():
             presentation_capture=presentation_capture, opponents_total=opponents_total,
             search_id=search_id)
         if served is not None:
-            return jsonify({**served, "deck_id": served["job_id"]})
+            return _serve_stored_trade_page(g_user_id, {**served, "deck_id": served["job_id"]},
+                                            page_row)
     with _trade_jobs_lock:
         existing_id = (_trade_jobs_by_key.get(key)
                        if not _any_pinned and not presentation_uncached
@@ -20601,12 +20614,10 @@ def generate_trades():
                 _trade_jobs_by_key.pop(key, None)
 
     if reuse_snapshot is not None:
-        if paged:
-            out = _trade_job_page_view(reuse_snapshot, 0, search_id)
-            return jsonify({**out, "deck_id": out["job_id"]} if deck_named else out)
         # Published card lists are replaced, never mutated in place. Capture
         # their reference under the lock and do the expensive copy outside it.
-        return jsonify(_trade_job_public_view(copy.deepcopy(reuse_snapshot)))
+        return _serve_trade_job(g_user_id, reuse_snapshot, paged, 0, search_id,
+                                deck_named=deck_named)
 
     # Kick off a fresh job. No locks held during the worker spawn so we
     # don't accidentally serialize parallel users.
@@ -20631,10 +20642,7 @@ def generate_trades():
     )
     with _trade_jobs_lock:
         snapshot = dict(_trade_jobs[job_id])
-    if paged:
-        out = _trade_job_page_view(snapshot, 0, search_id)
-        return jsonify({**out, "deck_id": out["job_id"]} if deck_named else out)
-    return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
+    return _serve_trade_job(g_user_id, snapshot, paged, 0, search_id, deck_named=deck_named)
 
 
 @app.route("/api/trades/asset-ideas", methods=["POST"])
@@ -21647,7 +21655,9 @@ def trade_job_status():
             return jsonify({"error": "invalid_deck",
                             "message": "deck must be 1-64 characters of A-Z a-z 0-9 _ -"}), 400
         body = _trade_deck_status(sess, request.headers.get("X-Session-Token", ""), deck, int(cursor))
-        return jsonify(body) if body is not None else (jsonify({"error": "job not found"}), 404)
+        if body is None:
+            return jsonify({"error": "job not found"}), 404
+        return _serve_deck_status(sess["user_id"], body)
     page_row = None
     if (cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled()
             and _trade_i1_mode()):      # at trade_i1_mode 0 the store isn't read: the job path
@@ -21657,7 +21667,8 @@ def trade_job_status():
         except Exception as err:
             log.warning("trade-page read failed for job %s: %s", job_id, err)
         if page_row is not None and int(cursor) < page_row["card_count"]:
-            return jsonify(_trade_page_status_view(page_row, int(cursor), sess))
+            return _serve_stored_trade_page(
+                sess["user_id"], _trade_page_status_view(page_row, int(cursor), sess), page_row)
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
         if not job and page_row is not None:
@@ -21671,9 +21682,9 @@ def trade_job_status():
         # Published card lists are replaced, never mutated in place. Capture
         # their reference under the lock and do the expensive copy outside it.
         snapshot = dict(job)
-    if cursor is not None and _trade_paged_responses_on():
-        return jsonify(_trade_job_page_view(snapshot, int(cursor)))
-    return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
+    return _serve_trade_job(sess["user_id"], snapshot,
+                            cursor is not None and _trade_paged_responses_on(),
+                            int(cursor) if cursor is not None else 0)
 
 
 def _pending_owner_cards(cards, config, exemptions):
@@ -37542,6 +37553,170 @@ def _require_pro(fn):
     return wrapper
 
 
+from . import paywall_gate as _paywall_gate
+
+
+@app.before_request
+def _paywall_gate_hook():
+    """Global paywall gate: 402 pro_required on the rules backend/paywall_gate.py
+    marks gated. A rule that isn't gated, or a server that isn't enforcing,
+    returns before the session or any entitlement is read. No session → the
+    route's own auth answers. Pro counts only on a verified session; an
+    unverified one is settled before any preview or entitlement read (the
+    route's own 403 where it wears the verified gate, else 402
+    verify_required). A failed entitlement read fails open. A request allowed
+    under the deck preview leaves g.paywall_preview for _serve_trade_job to
+    cap and record. Each 402 also records paywall_gate_hit (C8 §B, analytics
+    only)."""
+    rule = request.url_rule.rule if request.url_rule is not None else ""
+    if not _paywall_gate.applies(rule, request.method):
+        return None
+    sess = _get_session(request.headers.get("X-Session-Token", "")) or {}
+    try:
+        result = _paywall_gate.verdict(
+            rule, request.method, sess.get("user_id"),
+            _paywall_gate.is_mobile_request(request.headers),
+            bool(sess.get("verified") or _synthetic_demo_session(sess)),
+            demo=_synthetic_demo_session(sess),
+            route_verifies=_route_answers_unverified(request.endpoint, request.method),
+            ask=_paywall_deck_ask(sess.get("user_id")))
+    except Exception:
+        log.exception("paywall gate failed open: %s %s", request.method, rule)
+        return None
+    if isinstance(result, _paywall_gate.Preview):
+        g.paywall_preview = result
+        return None
+    if result is None:
+        return None
+    _emit_paywall_gate_hit(sess.get("user_id"), rule, result[1])
+    return jsonify(result[1]), result[0]
+
+
+def _emit_paywall_gate_hit(user_id: str | None, rule: str, body: dict) -> None:
+    """C8 §B: record paywall_gate_hit for the 402 the hook is sending
+    (paywall_gate.record_gate_hit). Analytics only: a failure is logged by
+    exception type and swallowed, never blocking or changing the 402."""
+    try:
+        _paywall_gate.record_gate_hit(
+            user_id, body["gate"], rule,
+            is_mobile=_paywall_gate.is_mobile_request(request.headers),
+            **_device_info_from_request())
+    except Exception as e:
+        log.warning("paywall_gate_hit not recorded: %s", type(e).__name__)
+
+
+def _paywall_deck_ask(user_id):
+    """The request facts the deck preview decides on (paywall_gate.DeckAsk).
+    The deck is /status's `deck` (P2, #369) when trade_job_status honours it,
+    else its `job_id`."""
+    cursor = request.args.get("cursor")
+    body = (request.get_json(silent=True) or {}) if request.method == "POST" else {}
+    trade_id = body.get("trade_id") if isinstance(body, dict) else None
+    deck = (request.args.get("deck")
+            if (cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled()
+                and _trade_i1_mode())
+            else None)
+    return _paywall_gate.DeckAsk(
+        page_size=_trade_page_size(),
+        job_id=deck or request.args.get("job_id"),
+        cursor=int(cursor) if cursor is not None and re.fullmatch(r"[0-9]{1,9}", cursor) else None,
+        trade_id=trade_id if isinstance(trade_id, str) else None,
+        page_trade_ids=lambda job_id, limit: _paywall_page_trade_ids(user_id, job_id, limit))
+
+
+def _paywall_page_trade_ids(user_id, job_id: str, limit: int) -> set | None:
+    """Trade ids among the deck's first `limit` raw cards (the preview window):
+    the live job's, plus the P1 stored page built by that job (a page-served
+    deck may have no job in this process). None when neither exists: the
+    deck is gone from this process, and the swipe check falls back to the
+    window paywall_previews recorded (P3-1)."""
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        cards = (job or {}).get("cards") or []
+        ids = {c.get("trade_id") for c in cards[:limit] if isinstance(c, dict)}
+    held = job is not None
+    if user_id and _trade_page_store_enabled():
+        from . import database as _db
+        row = _db.load_trade_page_for_job(user_id, job_id)
+        held = held or row is not None
+        ids |= _stored_window_ids(row, limit)
+    return ids if held else None
+
+
+def _stored_window_ids(row, limit: int) -> set:
+    """Trade ids among a P1 stored page row's first `limit` raw cards."""
+    pages = (row or {}).get("pages_blob")
+    cards = pages.get("cards") if isinstance(pages, Mapping) else None
+    return {c.get("trade_id") for c in (cards or [])[:limit] if isinstance(c, dict)}
+
+
+def _serve_stored_trade_page(user_id: str, out: dict, row: dict):
+    """The deck preview on a P1 stored-page response (#368: _serve_trade_page
+    and _trade_page_status_view build it, not _serve_trade_job). Under
+    g.paywall_preview, keep only cards inside the window of the stored raw
+    list, hold the cursor at the window's end, and record the preview when a
+    card is served. Otherwise the body is unchanged."""
+    preview = g.get("paywall_preview")
+    if preview is None:
+        return jsonify(out)
+    window = _stored_window_ids(row, preview.limit)
+    out = {**out, "cards": [c for c in out["cards"] if c.get("trade_id") in window],
+           "cursor": min(out["cursor"], preview.limit),
+           "total_ready": min(out["total_ready"], preview.limit)}
+    if out["cards"] and not _paywall_gate.record_preview(
+            user_id, out["job_id"], preview.pages_for(out["cursor"]), window):
+        return jsonify({"error": "pro_required", "gate": _paywall_gate.PREVIEW_USED}), 402
+    return jsonify(out)
+
+
+def _serve_deck_status(user_id: str, out: dict):
+    """The deck preview on P2's /status?deck=D&cursor=K response (#369:
+    _trade_deck_status builds it from D's stored pages, D's job, or a rebase
+    onto the scope's newer deck). Under g.paywall_preview, keep only cards
+    inside the window of the deck that served them (`deck_id`, else `job_id`),
+    hold the cursor at the window's end, and record the preview against that
+    deck: a rebase onto another deck after the preview is spent is a different
+    deck, so the claim fails and the answer is 402. Otherwise unchanged."""
+    preview = g.get("paywall_preview")
+    if preview is None or not out.get("cards"):
+        return jsonify(out)
+    served = out.get("deck_id") or out["job_id"]
+    window = _paywall_page_trade_ids(user_id, served, preview.limit) or set()
+    out = {**out, "cards": [c for c in out["cards"] if c.get("trade_id") in window],
+           "cursor": min(out["cursor"], preview.limit),
+           "total_ready": min(out["total_ready"], preview.limit)}
+    if out["cards"] and not _paywall_gate.record_preview(
+            user_id, served, preview.pages_for(out["cursor"]), window):
+        return jsonify({"error": "pro_required", "gate": _paywall_gate.PREVIEW_USED}), 402
+    return jsonify(out)
+
+
+def _serve_trade_job(user_id: str, snapshot: dict, paged: bool, cursor: int = 0,
+                     search_id=None, *, deck_named: bool = False):
+    """The /generate and /status response for a job snapshot. Under the deck
+    preview (g.paywall_preview, set by _paywall_gate_hook) the job's raw cards
+    are capped to the preview window, and a response that serves cards records
+    the preview: this is the only consumption point, so warm-up and cron-built
+    jobs never consume it. Otherwise byte-identical to the views. `deck_named`
+    (P2, #369): a paged organic /generate names its deck (`deck_id`)."""
+    preview = g.get("paywall_preview")
+    if preview is not None:
+        snapshot = {**snapshot, "cards": (snapshot.get("cards") or [])[:preview.limit]}
+    if paged:
+        out = _trade_job_page_view(snapshot, cursor, search_id)
+        if deck_named:
+            out = {**out, "deck_id": out["job_id"]}
+    else:
+        out = _trade_job_public_view(copy.deepcopy(snapshot))
+    if preview is not None and out.get("cards"):
+        raw_end = out["cursor"] if paged else len(snapshot["cards"])
+        window = {c.get("trade_id") for c in snapshot["cards"] if isinstance(c, dict)}
+        if not _paywall_gate.record_preview(user_id, snapshot["job_id"],
+                                            preview.pages_for(raw_end), window):
+            return jsonify({"error": "pro_required", "gate": _paywall_gate.PREVIEW_USED}), 402
+    return jsonify(out)
+
+
 @app.route("/api/me/entitlements", methods=["GET"])
 def me_entitlements():
     """Client bootstrap: resolved entitlement state + enforcement posture.
@@ -37550,10 +37725,22 @@ def me_entitlements():
     gives it a `pro` bool today: POST /api/extension/auth's payload has no
     `pro` field, and the extension reads no entitlement state anywhere.
     `pro` is intentionally not in that payload: the unverified sign-in path
-    never reads entitlement state (legal R28.17)."""
+    never reads entitlement state (legal R28.17).
+
+    An unverified session gets the empty entitlement view (every field
+    blank/false, `founder` included), as the paywall gate treats it: an
+    unverified username-only session shares the subscriber's user_id.
+    `enforcing` is server state. `founder`: pro from a subscription that
+    started before the club closes, i.e. before the price rise
+    (_PAYWALL_PRICE_RISE_AT via _paywall_club_closes_at();
+    entitlements.is_founder)."""
     sess = _require_session()
-    out = entl.get_entitlements(sess["user_id"])
-    out["enforcing"] = is_enabled("monetize.entitlements")
+    if sess.get("verified") or _synthetic_demo_session(sess):
+        out = entl.get_entitlements(sess["user_id"])
+        out["founder"] = entl.is_founder(sess["user_id"], _paywall_club_closes_at())
+    else:
+        out = entl.empty_entitlements()
+    out["enforcing"] = entl.is_enforcing()
     return jsonify(out)
 
 
@@ -37567,30 +37754,39 @@ _PAYWALL_PAGES = [
     {"id": "value_recap", "kind": "trades_found",
      "title": "Your league has trades waiting",
      "body_ref": "matches_preview"},
-    {"id": "feature_grid", "kind": "features",
-     "features": ["unlimited_leagues", "portfolio", "engine_knobs",
-                  "extension_overlays", "ad_free"]},
+    # The truthful grid (#393 scope §2 item 3, 5c): empty at launch. No
+    # earlier key names a delivered gated feature (portfolio is free, there
+    # is no league cap). The value lines come from the client's copy; a
+    # client renders the grid only when the list is non-empty.
+    {"id": "feature_grid", "kind": "features", "features": []},
     {"id": "plans", "kind": "purchase"},
 ]
+
+# The Founding GMs club (#393 recommendation §(b)). It closes at the price
+# rise below, so it has no date of its own.
+_PAYWALL_CLUB_NAME = "Founding GMs"
 
 # No `trial_days` (#393, operator 2026-10-25): the trial is Apple's 1-month
 # intro offer, and a day count is the wrong claim ("1 month", never
 # "30 days"). Older clients render "N days free" only when trial_days > 0,
 # so dropping the key drops the claim; newer ones read StoreKit's offer.
+# `trial_period` names that offer (Apple has no 30-day duration); a client
+# keys "free" copy off StoreKit intro eligibility, never a server duration.
 _PAYWALL_PRODUCTS = [
-    {"product_id": "ftf_pro_monthly", "period": "monthly", "hero": False},
+    {"product_id": "ftf_pro_monthly", "period": "monthly",
+     "trial_period": "1 month", "hero": False},
     {"product_id": "ftf_pro_annual", "period": "annual",
-     "hero": True, "badge": "best_value"},
+     "trial_period": "1 month", "hero": True, "badge": "best_value"},
 ]
 
-# Fallback price copy (#393, operator 2026-10-25): $4.99/mo and $24.99/yr,
-# rising to $6.99 / $34.99 for NEW subscribers at _PAYWALL_PRICE_RISE_AT.
-# Existing subscribers keep their price through App Store price
-# preservation, which this table does not model. Each entry is (before the
-# rise, from the rise on). per_month_equiv is the annual price / 12 rounded
-# UP to the cent, matching legal's #393 R28.8 #2 copy, "$2.09/month"
-# (24.99 / 12 = 2.0825; 34.99 / 12 = 2.9158): rounding down would
-# understate the annual price.
+# Fallback price copy (#393, operator 2026-10-25): $4.99/mo and $24.99/yr
+# (the Founding GM prices), rising to $6.99 / $34.99 for NEW subscribers at
+# _PAYWALL_PRICE_RISE_AT. Existing subscribers keep their price through App
+# Store price preservation, which this table does not model. Each entry is
+# (before the rise, from the rise on). per_month_equiv is the annual price
+# / 12 rounded UP to the cent, matching legal's #393 R28.8 #2 copy,
+# "$2.09/month" (24.99 / 12 = 2.0825; 34.99 / 12 = 2.9158): rounding down
+# would understate the annual price.
 #
 # The rise is an INSTANT: 2027-01-02 04:00 UTC (11 pm ET / 8 pm PT on
 # Jan 1). That is App Store Connect's US start time for a price change
@@ -37603,8 +37799,15 @@ _PAYWALL_PRODUCTS = [
 # through most of Jan 1.
 # FALLBACK ONLY: StoreKit's localized price is authoritative, and this
 # instant only decides which strings the server shows when StoreKit is
-# unavailable. monetization-pm records the start time App Store Connect
-# shows (setup §3d); if the two differ, move this constant to match.
+# unavailable. It must equal the App Store Connect scheduled price change:
+# monetization-pm records the start time App Store Connect shows (setup
+# §3d), and if the two differ, moves this constant to match (a reviewed
+# deploy, never a knob or config).
+#
+# THE ONE INSTANT (head-eng, 2026-10-27): the Founding GMs club closes at
+# the price rise. Everything else derives from this constant: the price
+# window, `club.closes_at` and `club.open` on /api/paywall/config, and
+# `founder` on /api/me/entitlements. Hold no second copy of it.
 _PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 2, 4, 0, tzinfo=timezone.utc)
 _PAYWALL_PRICES = {
     "ftf_pro_monthly": ({"display_price": "$4.99"},
@@ -37617,6 +37820,12 @@ _PAYWALL_PRICES = {
 def _paywall_now() -> datetime:
     """The clock the paywall config reads. Tests monkeypatch this."""
     return datetime.now(timezone.utc)
+
+
+def _paywall_club_closes_at() -> str:
+    """`club.closes_at` and is_founder's cut-off: _PAYWALL_PRICE_RISE_AT as
+    an ISO-8601 UTC string with a Z suffix, the shape the config serves."""
+    return _PAYWALL_PRICE_RISE_AT.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _paywall_products(now: datetime) -> list:
@@ -37661,7 +37870,9 @@ def paywall_config():
     StoreKit-localized price from the RevenueCat offering for the matching
     `product_id`; these strings are US-English list prices and know nothing
     about the user's storefront, currency, or an active promotional offer.
-    They switch to the new-subscriber prices at _PAYWALL_PRICE_RISE_AT.
+    They are the founder prices while `club.open` and switch to the
+    new-subscriber prices at _PAYWALL_PRICE_RISE_AT, the same instant
+    `club.open` turns false: both come from one _paywall_now() read.
     """
     _require_session()
     if not is_enabled("monetize.paywall"):
@@ -37669,22 +37880,27 @@ def paywall_config():
     platform = request.args.get("platform", "ios")
     if platform not in _PAYWALL_PLATFORMS:
         platform = "ios"
+    now = _paywall_now()   # read once: club.open and the prices flip together
     return jsonify({
         "enabled": True,
         "platform": platform,
+        "club": {"name": _PAYWALL_CLUB_NAME, "closes_at": _paywall_club_closes_at(),
+                 "open": now < _PAYWALL_PRICE_RISE_AT},
         "pages": _PAYWALL_PAGES,
-        "products": _paywall_products(_paywall_now()),
+        "products": _paywall_products(now),
         # Store-managed: the server never mints trials (pro-subscription
         # LLD §6). True until the client reads real per-Apple-ID
         # eligibility off the RevenueCat offering — this field is the
         # "we offer a trial on this SKU" claim, not a per-user promise.
         "trial_eligible": True,
+        # Always true: there is no non-dismissible mode (#393 scope §2).
         "dismissible": True,
-        # Tip-jar consumables: none at launch (the SKUs are not submitted to
-        # App Store Connect; see _PAYWALL_TIPS). A tip would still grant
-        # nothing (entitlements.is_tip_product). Rides monetize.paywall: tips
-        # are purchase UI, and the flag's contract is "no purchase UI anywhere"
-        # when off.
+        # Tip-jar consumables: none at launch (#393 recommendation §(b):
+        # the SKUs are not submitted to App Store Connect, three fewer IAPs
+        # on a first review; _PAYWALL_TIPS stays the list to restore). A tip
+        # would still grant nothing (entitlements.is_tip_product). Rides
+        # monetize.paywall: tips are purchase UI, and the flag's contract is
+        # "no purchase UI anywhere" when off.
         "tips": [],
     })
 
