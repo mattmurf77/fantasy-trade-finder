@@ -431,8 +431,9 @@ def test_load_decks_reads_features_compact_when_the_column_exists():
 
     md = MetaData()
     imp = deck_impressions_table.to_metadata(md)
-    imp.append_column(Column("features_compact", Text))
-    imp.append_column(Column("evidence_tier", Text))
+    for name in ("features_compact", "evidence_tier"):   # add only what the schema lacks
+        if name not in imp.c:
+            imp.append_column(Column(name, Text))
     deck_outcomes_table.to_metadata(md)
     eng = create_engine("sqlite:///:memory:",
                         connect_args={"check_same_thread": False})

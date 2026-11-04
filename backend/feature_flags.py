@@ -999,6 +999,7 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade.bakeoff",
     "trade.prepared_inventory",  # capability; default-dark audited numeric rollout
     "trade.first_page_store",    # P1 200 ms path: server-held first pages (scope-eng-200ms §2); OFF = today
+    "trade.packed_evidence",     # ADR-025 stage 2: packed deck evidence (S8); turned on BEFORE the store (R2.4 §3)
     # ── Trade-suggestion presentation v2 (docs/plans/trade-presentation-v2/) ──
     # CLIENT-ONLY. No route reads this key; it is registered here so the
     # features-json-keys-known guard accepts it and so /api/flags serves it

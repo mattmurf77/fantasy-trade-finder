@@ -47,7 +47,8 @@ import backend.server as server
 from backend import accounts, roster_snapshot
 from backend.database import draft_picks_table, league_members_table, metadata
 from backend.tests.test_i1_serve_filter import (  # noqa: F401  (fixture)
-    KEY, LEAGUE, OPP, PK_MINE, PK_OPP, THIRD, TOKEN, UID, live)
+    KEY, LEAGUE, OPP, PK_MINE, PK_OPP, STORED_PICKS, STORED_ROSTERS, THIRD, TOKEN, UID,
+    _roster_state, live)
 from backend.tests.test_trade_fingerprint_reads_unlocked import (  # noqa: F401  (fixture)
     PLATFORM_LEAGUE, PLATFORM_USER, INIT_TOKEN, init_harness)
 
@@ -85,9 +86,24 @@ def p1(live, monkeypatch):
     monkeypatch.setattr(server, "_trade_jobs_by_key", {})
     monkeypatch.setattr(server, "_trade_input_epochs", {})
     monkeypatch.setattr(server, "_experiment_digest_memo", collections.OrderedDict())
+    monkeypatch.setattr(server, "_deck_withdrawn_cache", {})   # C-b sticky drops, per process
+    monkeypatch.setattr(server, "_deck_live_stamped", {})      # live decks' stamped ids (#417 P2-1)
+    # F4's awaited ids, per test: a test that stubs the evidence thread out
+    # leaves its delivery's ids pending forever (#419 QA: the F4 test failed
+    # after the page suites).
+    monkeypatch.setattr(server, "_deck_evidence_pending", {})
+    monkeypatch.setattr(server, "_deck_evicted_at", collections.OrderedDict())   # U4: evicted here
+    monkeypatch.setattr(server, "_deck_held", collections.OrderedDict())         # U4: built here
+    monkeypatch.setattr(server, "_deck_f5_dropped", collections.OrderedDict())   # D1: F5 dropped here
+    # Cached pack states, per test: the tests reuse deck ids (deck-0000), and a
+    # state left by an earlier test carries its CAS checksum and counted misses.
+    monkeypatch.setattr(server, "_deck_pack_states", {})
     # The code default (ruling 19: 50), not a model_config row a local DB
     # seeded earlier (seeds are insert-if-absent).
     monkeypatch.delitem(server._trade_service_mod._cfg, "trade_prefetch_remaining", raising=False)
+    # Flag on, organic jobs defer their evidence to delivery (ADR-025 stage 1).
+    # Write it inline, never on a thread that could outlive this test's engine.
+    monkeypatch.setattr(server, "_start_deck_evidence_thread", lambda *, target, args: target(*args))
     # Production's knob values, whatever a local DB seeded.
     for knob, value in (("first_page_store_enabled", 1.0), ("trade_paged_responses", 1.0),
                         ("trade_i1_mode", 2.0), ("trade_gate_miss_mode", 0.0)):
@@ -134,7 +150,7 @@ def build_page():
 
 
 def stored():
-    return db_module.load_trade_page(UID, LEAGUE, "1qb_ppr", SCOPE)
+    return db_module.load_trade_page(UID, LEAGUE, "1qb_ppr", SCOPE, evidence=True)
 
 
 def set_row(engine, **values):
@@ -171,8 +187,13 @@ def test_a_complete_organic_job_stores_its_first_pages_with_its_stamps(p1):
     assert row["card_count"] == PAGES == 90
     assert row["pages_blob"] == {"v": 1, "opponents_total": job["opponents_total"],
                                  "cards": job["cards"][:PAGES]}
-    assert row["stored_bytes"] == len(db_module.CompressedJSON.encode(row["pages_blob"]))
-    assert row["evidence_blob"] is None and row["last_served_at"] is None
+    # ADR-025 stage 1: the deferred deck's unwritten evidence rides along (the
+    # replaced cards are not the deck's, so only its candidate set is left).
+    evidence = row["evidence_blob"]
+    assert evidence["deck_job_id"] == job_id and evidence["rows"] == []
+    assert row["stored_bytes"] == (len(db_module.CompressedJSON.encode(row["pages_blob"]))
+                                   + len(db_module.CompressedJSON.encode(evidence)))
+    assert row["last_served_at"] is None
     assert row["built_at"] <= db_module.page_store_iso(time.time())
     assert row["expires_at"] == min(db_module.page_store_iso(
         datetime.fromisoformat(c["expires_at"]).timestamp()) for c in job["cards"][:PAGES])
@@ -516,14 +537,16 @@ def test_other_requests_never_read_the_store(p1, spawned, statements, body):
     assert not [s for s in page_queries(statements) if s.startswith("SELECT")]
 
 
-def test_the_serve_path_reads(p1, spawned, statements):
+def test_the_serve_path_reads(p1, spawned, statements, monkeypatch):
     """The page serve's own statements: one page read; one S0 roster snapshot
     (league_members, draft_picks, leagues, league_roster_state) shared by the
     fingerprint compare and S0's serve check, plus the vsn1 pick read; the
     disposition read; one last_served_at write. Everything else is
     /generate's existing preamble (session touch, preference/outlook reads).
+    The delivery's evidence write runs on its own thread (not run here).
     """
     client, _, _ = p1
+    monkeypatch.setattr(server, "_start_deck_evidence_thread", lambda **kw: None)
     build_page()
     statements.clear()
     assert generate(client, page=1).get_json()["serve_source"] == "page"
@@ -969,6 +992,46 @@ def test_status_page_goes_through_s0_after_a_roster_move(p1, spawned, monkeypatc
     body = status(client, job_id, 30).get_json()
     assert (body["status"], body["error"], body["cards"]) == ("error", "roster_check_unavailable", [])
     assert (body["cursor"], body["total_ready"]) == (30, 0)       # the cursor holds
+
+
+def test_a_paged_withhold_on_the_stored_deck_holds_the_cursor_then_serves_i1s_survivors(
+        p1, spawned, monkeypatch):
+    """test_i1_serve_filter's paged withhold with the flags on (#551): the
+    cursor reads the real stored deck. A stale roster past its bound withholds
+    it with the cursor held; once fresh, exactly the stored cards that pass I-1
+    on the stored rosters serve, and at least one card is dropped. The
+    in-memory job's cards are swapped after the store, so a serve from the job
+    instead of the stored deck can't pass; and a cursor past 0 is checked too
+    (#555 QA P3-1)."""
+    client, engine, _ = p1
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_gate_miss_mode", 1.0)
+    job_id = run_job()
+    deck = stored()["pages_blob"]["cards"]
+    with server._trade_jobs_lock:            # published lists are replaced, never mutated
+        server._trade_jobs[job_id]["cards"] = [page_card(i) for i in range(len(deck))]
+    owner = {pid: uid for uid, roster in STORED_ROSTERS.items() for pid in roster}
+    owner.update(STORED_PICKS)
+    assert {a["id"] for c in deck for a in c["give"] + c["receive"]} <= owner.keys()
+    survivors = {c["trade_id"] for c in deck
+                 if all(owner[a["id"]] == UID for a in c["give"])
+                 and all(owner[a["id"]] == c["target_user_id"] for a in c["receive"])}
+    assert survivors and len(survivors) < len(deck)      # I-1 has a card to drop
+    # A cursor past 0 whose slice still has a card for I-1 to drop.
+    later = next(k for k in range(1, len(deck)) if set(ids(deck[k:])) - survivors)
+    _roster_state(engine, status="stale", refreshed_ago=600)
+    for cursor in (0, later):
+        body = status(client, job_id, cursor).get_json()
+        assert body["serve_source"] == "page"
+        assert (body["cards"], body["cursor"], body["total_ready"], body["wait_reason"]) == (
+            [], cursor, 0, "roster_check")
+    _roster_state(engine, status="fresh", refreshed_ago=5)
+    # The later cursor first: a serve at 0 would withdraw its drops, and the
+    # sticky drop (C-b) would then hide them from the later one either way.
+    for cursor in (later, 0):
+        body = status(client, job_id, cursor).get_json()
+        assert body["serve_source"] == "page" and "wait_reason" not in body
+        assert {c["trade_id"] for c in body["cards"]} == survivors & set(ids(deck[cursor:]))
+        assert body["cursor"] == len(deck)
 
 
 def test_status_for_another_users_job_is_not_served_from_the_store(p1, spawned):

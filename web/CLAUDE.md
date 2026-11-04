@@ -8,14 +8,14 @@ Flask backend (`run.py`), so a page is live the moment the file exists.
 
 | File | Shipped? | What it is |
 |---|---|---|
-| `index.html` | yes | Single-page app entry — Dynasty Rankings. Only page that links out to `faq`, `league-rankings`, `positional-tiers`. Landing offers **Sleeper · ESPN · MFL** entry (flag `landing.platform_options`, 2026-09-03 — [scope §V3](../docs/plans/landing-platform-options/scope.md)); entry users (`entry:` ids) read leagues from `/api/{espn,mfl}/leagues`, never the Sleeper proxies |
+| `index.html` | yes | Single-page app entry — Dynasty Rankings. Only page that links out to `faq`, `league-rankings`, `positional-tiers`. Landing offers **Sleeper** only: the ESPN/MFL chips are hard-off on web (`WEB_PLATFORM_ENTRY` in `js/app.js`, head-eng 2026-10-27; they ran off `landing.platform_options` from 2026-09-03 — [scope §V3](../docs/plans/landing-platform-options/scope.md)); entry users (`entry:` ids) read leagues from `/api/{espn,mfl}/leagues`, never the Sleeper proxies |
 | `league-rankings.html` | yes | Per-league ranking view. Dark — `league.power_rankings` is false, so the route 401s and the nav link is hidden |
 | `positional-tiers.html` | yes | Positional tier boards |
 | `player.html` | yes | Player profile. Dark — `players.profile_pages` is false, so it renders a sign-in prompt and fires no requests |
 | `profile.html` | yes | Public profile, served at `/u/<username>`. Dark — `profiles.public_pages` is false |
 | `ranking-method.html` | yes | "Set your rankings" explainer. **Not linked from any web page** — it is reached from the mobile app (`mobile/src/screens/TradesScreen.tsx` `readMoreUrl`), so do not delete it. Static content only; its tiles were fake controls until 2026-08-19 |
 | `faq.html` | yes | FAQ |
-| `robots.txt` / `sitemap.xml` | yes | Crawler directives. Templates, operator pages and share landings are `Disallow`-ed |
+| `robots.txt` / `sitemap.xml` | yes | Crawler directives. Templates and operator pages are `Disallow`-ed. Share landings (`/s/`, `/og/`) are crawlable on purpose so link unfurlers can fetch them, and kept out of indexes by `noindex` (meta + `X-Robots-Tag`) in `backend/server.py` |
 | `contact.html` | yes | Contact + data requests. Posts to the public `POST /api/feedback` (`screen=web-contact`, or `web-contact-data-request` with a `[DATA REQUEST]` text prefix). The only route a web visitor has to a deletion/access request — both legal docs link here |
 | `404.html` | yes | HTML not-found page. Served by the `404` errorhandler in `backend/server.py` for browser navigation; `/api/*` and `/og/*` keep returning JSON |
 | `privacy.html` / `terms.html` | yes | Legal pages (App Store / Play listing links point here) |

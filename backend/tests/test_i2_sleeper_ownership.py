@@ -12,7 +12,7 @@ against the live rosters read it already makes, before any provider write:
   * a receive player off the counterparty's roster → 422 `counterparty_asset_not_owned`
   * IR / taxi players are listed in `players`, so they count as owned
   * the rosters READ failing (exception, None or non-list body, the open 429
-    circuit) → 502 `sleeper_write_failed`, `kind: "network"` (R3). It used to
+    circuit) → 502 `sleeper_write_failed`, `kind: "roster_read"` (R3). It used to
     be the misleading 400 `roster_not_found`, which now stays only for a
     SUCCESSFUL read that genuinely lacks the caller's roster.
 
@@ -322,7 +322,7 @@ def test_refusal_helper_is_platform_neutral():
 def test_failed_rosters_read_blocks_with_readable_502(client, getter):
     r, fake, _ = _send(client, ["100"], ["200"], getter=getter())
     assert r.status_code == 502, r.get_data(as_text=True)
-    assert r.get_json() == {"error": "sleeper_write_failed", "kind": "network",
+    assert r.get_json() == {"error": "sleeper_write_failed", "kind": "roster_read",
                             "message": R3_COPY, "detail": R3_COPY}
     fake.assert_not_called()
 
@@ -337,7 +337,7 @@ def test_open_429_circuit_blocks_the_send_without_a_read(client, monkeypatch):
 
     r, fake, _ = _send(client, ["100"], ["200"], getter=server._sleeper_get, arm=arm)
     assert r.status_code == 502, r.get_data(as_text=True)
-    assert r.get_json()["kind"] == "network" and r.get_json()["detail"] == R3_COPY
+    assert r.get_json()["kind"] == "roster_read" and r.get_json()["detail"] == R3_COPY
     unguarded.assert_not_called()                  # the real circuit refused the read
     fake.assert_not_called()
 

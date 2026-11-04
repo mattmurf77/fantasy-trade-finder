@@ -134,10 +134,29 @@ def test_success_marks_fresh_and_never_stores_none_ids(harness):
     state = db_module.get_league_roster_state(LEAGUE_ID)
     assert state["status"] == "fresh"
     assert state["last_error_code"] is None
-    assert state["refreshed_at"] and state["roster_fp"] is None   # PR-B fills the fp
+    assert state["refreshed_at"] and state["roster_fp"].startswith("rfp1:")   # PR-B's stamp
     assert json.loads(_members()[USER_ID]) == ["p1"]               # G-004: no "None", no ""
     # The meta read seeded the trade paths' 15-min meta cache.
     assert server._FA_LEAGUE_META_CACHE[LEAGUE_ID][1] == META
+
+
+def test_the_session_and_its_pregen_carry_the_read_the_daemon_commits(harness, monkeypatch):
+    """#470 QA P2-2: the session, and the pre-gen's session context, carry this
+    init's Sleeper read start, the `refreshed_at` its daemon writes, so the
+    roster-change handler keeps the deck built on that read. A later init
+    replaces it."""
+    client, _put = harness
+    kicked = []
+    monkeypatch.setattr(server, "_kickoff_trade_job", lambda **kw: kicked.append(kw))
+    reads = []
+    for _ in range(2):
+        assert _init(client).status_code == 200
+        read = db_module.get_league_roster_state(LEAGUE_ID)["refreshed_at"]
+        with server._sessions_lock:
+            assert server._sessions[TOKEN]["roster_fetch_started_at"] == read
+        assert kicked[-1]["session_context"]["roster_fetch_started_at"] == read
+        reads.append(read)
+    assert reads[0] < reads[1]
 
 
 def test_failure_with_no_prior_rows_is_stale_never_missing(harness):
@@ -311,3 +330,43 @@ def test_platform_league_rows_are_not_replaced_by_session_init(harness, monkeypa
     assert resp.status_code == 200
     assert called == []
     assert len(db_module.load_league_members(mfl)) == 3
+
+
+def test_the_session_s_read_rows_hash_to_what_its_daemon_wrote(harness):
+    """#484 QA P1-1: `roster_read_rows` comes from the same builder as the
+    daemon's members write, so its expected fp is the stored rows' rfp1."""
+    client, _put = harness
+    assert _init(client).status_code == 200
+    with server._sessions_lock:
+        rows = server._sessions[TOKEN]["roster_read_rows"]
+    from backend import roster_snapshot
+    with db_module.engine.connect() as conn:
+        expected = roster_snapshot.expected_fp(conn, LEAGUE_ID, rows,
+                                               pick_source=server._pick_read_source())
+    assert expected == server._trade_current_fingerprints(LEAGUE_ID, "1qb_ppr")[0]
+
+
+def test_the_pregen_passes_the_session_read_to_its_freshness_checks(harness, monkeypatch):
+    """#484 QA P3-4: session init's pre-gen check hands the new read to both
+    freshness checks (an existing job under the key makes it ask)."""
+    client, _put = harness
+    assert _init(client).status_code == 200
+    key = server._trade_job_key(USER_ID, LEAGUE_ID, "1qb_ppr")
+    parked = {"job_id": "j-pregen-site", "key": key, "status": "complete"}
+    seen = []
+    monkeypatch.setattr(server, "_trade_running_policy_matches",
+                        lambda *a, **k: seen.append(("running", k.get("session_read"))) or False)
+    monkeypatch.setattr(server, "_trade_job_is_fresh",
+                        lambda *a, **k: seen.append(("fresh", k.get("session_read"))) or False)
+    with server._trade_jobs_lock:
+        server._trade_jobs[parked["job_id"]] = parked
+        server._trade_jobs_by_key[key] = parked["job_id"]
+    try:
+        assert _init(client).status_code == 200
+        with server._sessions_lock:
+            read = server._sessions[TOKEN]["roster_fetch_started_at"]
+        assert read and seen == [("running", read), ("fresh", read)]
+    finally:
+        with server._trade_jobs_lock:
+            server._trade_jobs.pop(parked["job_id"], None)
+            server._trade_jobs_by_key.pop(key, None)

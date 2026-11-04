@@ -462,13 +462,16 @@ def test_mobile_captions_cover_every_implemented_strength_source():
 
 
 def test_mobile_ribbon_composes_the_lld_preseason_label():
-    """"Projected · preseason · beta" is composed from meta.is_preseason /
-    meta.beta — the load-bearing honesty label, on BOTH sides."""
+    """The ribbon is composed as "Projected · preseason" from
+    meta.is_preseason. Since #549 (App Review 2.2, 2026-10-31) meta.beta adds
+    no word to the label, but it still hides win-loss records through week 5."""
     screen = (REPO / "mobile/src/screens/LeagueSummaryScreen.tsx").read_text()
     ribbon = screen.split("function betaRibbonLabel", 1)[1].split("\n}", 1)[0]
     assert "'Projected'" in ribbon
     assert "meta.is_preseason" in ribbon and "'preseason'" in ribbon
-    assert "meta.beta" in ribbon and "'beta'" in ribbon
+    assert "'beta'" not in ribbon, "the ribbon must not show the word beta"
+    assert "meta.beta" not in ribbon, "meta.beta must not shape the ribbon label"
+    assert "showRecords = !meta.beta" in screen, "beta must still hide records"
     assert "league-summary.odds.beta-ribbon" in screen
     assert "league-summary.odds.source" in screen
 

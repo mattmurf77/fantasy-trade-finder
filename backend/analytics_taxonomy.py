@@ -738,6 +738,13 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     #                                       over a payload already in memory)
     "usage_trends_action", "usage_trends_availability_opened",
     "usage_trends_view_changed",
+    # ── Minimum-version gate (B8, 2026-10-24; head-eng ruling 35 + the
+    # analytics-lead B8 grant). Registered in the SAME commit as the emitters
+    # (mobile/src/screens/UpdateGateScreen.tsx); both land in
+    # analytics_queries.NON_INTENT_EVENTS in this same commit.
+    #   update_gate_shown  — once per gate show, after the flag fetch resolves
+    #   update_gate_tapped — the Update tap (opens the App Store listing)
+    "update_gate_shown", "update_gate_tapped",
 })
 
 # ---------------------------------------------------------------------------
@@ -895,6 +902,24 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # allowlist's prop filter, and the import-time completeness check below
     # is scoped to ALLOWED_CLIENT_EVENTS.
     "receipts_grade_run",
+    # ── S0's I-1 serve check, 2026-10-27 (analytics-lead's pre-grant, the
+    # 2026-10-26 report §2 (a); models-lead R2.4 addendum (ii)) — registered
+    # in the SAME commit as its emitter (server._emit_deck_i1_check).
+    # The C-a readout's data path: one row per job serve page that ran the
+    # check (the `[i1] serve` log point), deduped per (job, page) in-process;
+    # trade_i1_mode 0 runs no check and emits nothing. Owner = the viewer,
+    # written non-touching (touch_user=False) off the request thread; the
+    # league rides the row's `league_id` column. NON_INTENT (classified in
+    # analytics_queries in this same commit): a system outcome of a serve.
+    # Props, exactly: job_key (sha256(job_id)[:12], to de-duplicate by job),
+    # mode (strict | lenient), status (fresh | stale | unknown | missing),
+    # outcome (the log's), age_bucket (under_5m | 5m_to_1h | 1h_to_24h |
+    # over_24h | none), cards, kept, dropped_cards (distinct cards with a
+    # moved asset), dropped_give_player, dropped_give_pick,
+    # dropped_receive_player, dropped_receive_pick (cards per side x asset
+    # type), unchecked_generic, unchecked_pick_owner. No league id, no raw job
+    # id, no player ids.
+    "deck_i1_check",
 })
 
 # ---------------------------------------------------------------------------
@@ -994,9 +1019,14 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                           "network_type", "serve_source",
                                           "freshness_state", "job_id",
                                           "card_index"}),
-    # R2b — instead of R2. `reason` empty | error | abandoned (unmount, blur,
-    # or the app leaving `active` before a card, T4) | timeout (10,000 ms
-    # from the tap). Every R2b counts as > 200 ms in the p95 (T2).
+    # R2b — instead of R2. `reason` is the closed set empty | error |
+    # abandoned (unmount, blur, or the app leaving `active` before a card,
+    # T4) | timeout (10,000 ms from the tap) | paywall | verify. Every R2b
+    # counts as > 200 ms in the p95 (T2), except paywall / verify, which the
+    # AC-L1 p95 excludes (product gates, reported as their own rows).
+    # paywall = a 402 pro_required with any gate but verify_required; verify
+    # = a 402 gate=verify_required or a 403 verification_required on a gated
+    # route (the client's gateSignalFor; analytics-lead's grant, #393 M2).
     "trade_first_card_failed": frozenset({"search_id", "ms_from_tap", "reason",
                                           "entry_point", "search_type",
                                           "launch_state", "network_type",
@@ -1165,12 +1195,14 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # Matches non-match send row, NOT 'suggested').
     "sleeper_send_attempted":  frozenset({"surface", "give_n", "receive_n",
                                           "from_deck", "has_target"}),
-    # `error_code` is a CLOSED enum: the 15 server codes of
+    # `error_code` is a CLOSED enum: the 17 server codes of
     # /api/trades/propose (incl. #413's sleeper_pick_unmapped |
     # sleeper_pick_not_owned and #428's sleeper_pick_untradable) plus
-    # network | timeout | unknown. 18 values, forever (17 → 18 on
-    # 2026-09-08). `kind` is SleeperWriteError.kind, present only on
-    # sleeper_rejected / sleeper_write_failed.
+    # network | timeout | unknown. 20 values, forever (18 → 20 on
+    # 2026-10-26, I-2 #411 asset_not_owned | counterparty_asset_not_owned).
+    # `kind` is SleeperWriteError.kind, present only on
+    # sleeper_rejected / sleeper_write_failed — or `roster_read` (I-2 R3):
+    # the live rosters read failed, so nothing was sent; not a write failure.
     "sleeper_send_failed":     frozenset({"surface", "error_code", "status",
                                           "kind", "give_n", "receive_n",
                                           "from_deck"}),
@@ -1713,9 +1745,13 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # discipline of the 2026-08-13 backlog sweep. `surface` is the
     # InterruptSurface enum, identical to `prompt_shown.surface`
     # (quickset_prompt | coach_mark | apple_banner | outlook_banner |
-    # guide_step). `blocked_by` is the refusal reason: the literal 'tour'
-    # for a calc-tour hold, otherwise the InterruptSurface currently
-    # holding the slot. One row per deferral episode, not per retry.
+    # guide_step | paywall_offer). `blocked_by` is the refusal reason: the
+    # literal 'tour' for a calc-tour hold, otherwise the InterruptSurface
+    # currently holding the slot. One row per deferral episode, not per retry.
+    # `paywall_offer` (#393 M2) appears only as `blocked_by`, while the
+    # paywall offer holds the slot: the offer claims it imperatively (as the
+    # guide does), so it never emits prompt_shown and is never itself the
+    # `surface` of a deferral.
     "prompt_deferred":             frozenset({"surface", "blocked_by"}),
     # ── Paywall funnel (IAP enablement, 2026-08-28) ──────────────────────
     # `source` is the paywall ENTRY POINT — the `gate` string of the 402 that
@@ -1743,7 +1779,19 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # them. `restored` (bool) is whether Restore Purchases actually found an
     # entitlement; a false-heavy series is the "I paid and it's gone"
     # support ticket before it is filed.
-    "paywall_viewed":              frozenset({"source", "platform"}),
+    #
+    # paywall_viewed, #393 (analytics-lead's grant; registered with the M1
+    # emitter, PaywallScreen.tsx): `source` is the CLOSED set
+    #   first_opinion | left_deck | gate | settings | preview_end | unknown
+    # (first_opinion / left_deck = the offer trigger after the first opinion
+    # or on leaving the deck; gate = a locked action's 402 or a pre-check;
+    # preview_end = the free page's end card; settings = Settings › See plans).
+    # `gate` is the 402's reason, verbatim from the server's closed enum
+    #   preview_used | trial_expired | lapsed | never_trialed
+    # (verify_required never reaches the paywall: it opens the VerifySheet).
+    # `kind` is the locked action's family, find | send, which picks the
+    # headline. Both ride ONLY when a locked action opened the paywall.
+    "paywall_viewed":              frozenset({"source", "platform", "gate", "kind"}),
     "paywall_purchase_initiated":  frozenset({"product_id", "source"}),
     "paywall_purchase_completed":  frozenset({"product_id", "source"}),
     "paywall_purchase_failed":     frozenset({"product_id", "user_cancelled"}),
@@ -1767,6 +1815,13 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # Projected is the only path that runs the outlook simulation, so this
     # row is also the denominator for that request's cost.
     "standings_segment_changed":   frozenset({"segment"}),
+    # ── Minimum-version gate (B8, 2026-10-24) ────────────────────────────
+    # Both props are version INTS (major*10000 + minor*100 + patch, see
+    # docs/cross-client-invariants.md): `min_version` is the served
+    # app_min_version, `app_version_int` the build's own. No version string,
+    # no ids, no device platform (a user_events COLUMN, never a prop).
+    "update_gate_shown":           frozenset({"min_version", "app_version_int"}),
+    "update_gate_tapped":          frozenset({"min_version", "app_version_int"}),
 }
 
 

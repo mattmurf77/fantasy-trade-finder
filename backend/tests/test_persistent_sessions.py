@@ -280,8 +280,8 @@ def test_account_deletion_deletes_every_durable_row_for_user(env):
                       _flags("auth.persistent_sessions")):
         server._persist_session_if_eligible(TOKEN, sess)
         db_module.persist_session("second-device-token", user_id=SLEEPER_UID)
-        with patch.object(server._accounts, "has_apple_identity",
-                          return_value=False):
+        with patch.object(server._accounts, "apple_identity_subjects",
+                          return_value=set()):
             r = env.delete("/api/account",
                            headers={"X-Session-Token": TOKEN})
     assert r.status_code == 200

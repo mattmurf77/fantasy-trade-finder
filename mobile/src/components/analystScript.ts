@@ -623,7 +623,8 @@ export const S = {
   // is the stable WRAPPER the deck mounts the router in, `trades.send-btn`;
   // the overlay scrolls it into view before it draws the ring.
   //
-  // TWO BEATS, one slot. The password sentence is true on Sleeper (the JWT is
+  // TWO BEATS, one slot. The password sentence ("We never see your password.",
+  // legal-lead's wording, Q6 = Yes, 2026-10-23) is true on Sleeper (the JWT is
   // captured in a WebView and kept on-device) and FALSE elsewhere: MFL POSTs
   // the password to /api/mfl/auth-link and ESPN stores espn_s2/SWID
   // server-side. The operator vouched for the Sleeper claim only, so the
@@ -632,8 +633,8 @@ export const S = {
   n23: (): GuideStep => ({
     id: 'n23', screen: 'Trades', pose: 'neutral', advance: 'cta',
     ctas: [NEXT], target: 'trades.send-btn',
-    line: 'Sending goes straight to your league. Passwords never leave your phone.',
-    degradeLine: 'Sending a trade goes straight to your league. Passwords stay on your phone.',
+    line: 'Sending goes straight to your league. We never see your password.',
+    degradeLine: 'Sending a trade goes straight to your league. We never see your password.',
     maxDisplayCount: 3,
     retireAfter: 'never', // reason: part of the re-runnable walkthrough; capped, not retired.
     adoptionEvent: 'sleeper_send_attempted',

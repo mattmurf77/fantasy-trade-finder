@@ -404,10 +404,14 @@ export default function EspnConnectScreen() {
         </View>
         <Text style={type.bodySm}>
           {sendMode
-            ? 'Those two cookies are stored encrypted and used only for ' +
-              'actions you take here — like sending a trade you built. '
-            : 'Those two cookies are stored encrypted and used only to read ' +
-              'this league — read-only, we never post or change anything. '}
+            ? 'Two ESPN sign-in cookies are kept: espn_s2 (encrypted) and ' +
+              "SWID (your ESPN member ID). They're used to import your " +
+              'leagues and to send trades you approve. Disconnect any time ' +
+              'in Settings. '
+            : 'Two ESPN sign-in cookies are kept: espn_s2 (encrypted) and ' +
+              "SWID (your ESPN member ID). They're used to import your " +
+              'leagues and to send trades you approve. Disconnect any time ' +
+              'in Settings. '}
           <Text
             style={styles.learnMore}
             accessibilityRole="link"

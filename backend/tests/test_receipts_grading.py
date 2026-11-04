@@ -30,7 +30,8 @@ about honesty and an unproved honesty claim is worse than no claim.
        dedup-by-earliest, min-n gating, the all-windows payload, flag-off
        404s, `n == len(rows used)`, and the Wilson triple 3/5 →
        [0.231, 0.882].
-  T-10 append-only — no UPDATE/DELETE path exists for `receipts_` tables.
+  T-10 append-only — no UPDATE/DELETE path exists for `receipts_` tables
+       (static half: test_receipts_append_only.py, AST over backend/ + scripts/).
 
 Harness: isolated in-memory SQLite (`backend/tests/CLAUDE.md` pattern 1) plus
 the Flask client + injected session (pattern 2). No network, no dev DB.
@@ -836,6 +837,35 @@ def test_t9_ghost_rows_are_excluded_at_the_QUEUE_layer(engine):
     assert _grade_for(served, window) is not None
 
 
+def _set_features(iid: str, features_json) -> None:
+    i = db_module.deck_impressions_table
+    with db_module.engine.begin() as conn:
+        conn.execute(i.update().where(i.c.impression_id == iid).values(features_json=features_json))
+
+
+def test_s4_calibrations_refresh_decks_never_enter_the_queue(engine):
+    """ADR-025 S4: a "grading_refresh" deck (Calibration's targeted refresh)
+    was never shown in Trades, so it is never a receipt, in either JSON form;
+    other deck sources, and a NULL features_json, stay gradeable."""
+    serve_date, window = _days_ago(30), 28
+    _pool([serve_date, rs._shift(serve_date, window)],
+          {"p1": 1000.0, "p2": 1200.0})
+    refresh = _impression(served_days_ago=30, features={"deck_source": "grading_refresh"})
+    compact = _impression(served_days_ago=30)
+    _set_features(compact, '{"deck_source":"grading_refresh","basis":"consensus"}')
+    replenish = _impression(served_days_ago=30, features={"deck_source": "replenish"})
+    pull = _impression(served_days_ago=30)
+    bare = _impression(served_days_ago=30)
+    _set_features(bare, None)
+    queued = {r["impression_id"] for r in db_module.load_receipts_queue(
+        window, rs.GRADER_VERSION, [serve_date], 100)}
+    assert queued == {replenish, pull, bare}
+    assert db_module.count_receipts_queue(window, rs.GRADER_VERSION, [serve_date]) == 3
+    rs.run_grading(trigger="cron")
+    assert _grade_for(refresh, window) is None and _grade_for(compact, window) is None
+    assert _grade_for(replenish, window) is not None
+
+
 def test_t9_ghost_rows_are_excluded_at_the_ROUTE_layer_too(engine):
     """Layer two, defence in depth. Even if a ghost grade somehow existed —
     an older grader version, a hand-inserted row — the read filters it."""
@@ -1110,35 +1140,8 @@ def test_t9_admin_route_404s_while_grading_is_dark(client, monkeypatch):
 # T-10 — append-only. Proves HLD D-3 mechanically.
 # ---------------------------------------------------------------------------
 
-RECEIPTS_TABLES = ("receipts_grades", "receipts_grade_runs")
-
-
-def test_t10_no_update_or_delete_path_exists_for_receipts_tables():
-    """Forbidden operation 4, enforced by grep rather than by intention.
-
-    "We can't move the goalposts" has to be MECHANICAL. If an UPDATE or
-    DELETE against a receipts table ever compiles, the append-only claim is
-    marketing. Both the service and the database helpers are scanned."""
-    offenders = []
-    for name in ("receipts_service.py", "database.py"):
-        for i, line in enumerate((REPO / "backend" / name).read_text()
-                                 .splitlines(), 1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
-            for table in RECEIPTS_TABLES:
-                token = f"{table}_table"
-                if token in line and (".update(" in line or ".delete(" in line):
-                    offenders.append(f"{name}:{i}: {stripped}")
-            if ("receipts" in line.lower()
-                    and ("UPDATE receipts" in line or "DELETE FROM receipts" in line)):
-                offenders.append(f"{name}:{i}: {stripped}")
-    assert offenders == [], (
-        "an UPDATE/DELETE path against a receipts table exists:\n"
-        + "\n".join(offenders)
-        + "\nCorrections are a grader_version bump plus a regrade, with the "
-          "old rows retained. Editing a grade destroys the audit trail that "
-          "makes the preregistration claim checkable.")
+# The static half lives in test_receipts_append_only.py: it parses every
+# backend/ and scripts/ file (AST-based since #544's QA, release-lead P1-1).
 
 
 def test_t10_regrading_never_mutates_an_existing_row(engine):
