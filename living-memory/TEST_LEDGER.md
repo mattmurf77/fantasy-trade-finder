@@ -69,6 +69,13 @@ Gates: full (`#499`, web copy + the web checker). No route, schema, flag or even
   - Both cases are red on the old checker and green on the new one.
 - **Sabotage:** the gate still goes red 6/6: `WEB_PLATFORM_ENTRY = true`, app.js naming the landing flag, `espnOn` not from `optionsOn`, the handler dropping the constant, `espnOn` reassigned, the ESPN chip visible. Web structure 196/196.
 
+## 2026-11-02 — #504 QA P3: the smart banner's App Store id is read only from an https://apps.apple.com URL
+
+Gates: full (`#504`). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest plus sabotage.
+
+- **What (release-lead's #504 light-QA P3):** `_APP_STORE_ID_RE` is anchored to `https://apps.apple.com/…/id<digits>` and `.match`ed from the start of `IOS_INSTALL_URL`. Before, it took `/id<digits>` from any host (`https://evil.com/id123456` gave 123456). That was harmless since release-lead sets the variable, but it's tighter now. `docs/config-reference.md`'s row says so.
+- **Tests:** `test_share_package.py` 25 passed. It rejects another host, a look-alike host (`apps.apple.com.evil.com`), apple.com only inside the query, and http; it accepts `/app/id…` with no country or slug, and a `?mt=8` query.
+- **Sabotage 3/3 red:** the old unanchored pattern, `.search` for `.match`, and `https?` allowed.
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -1359,6 +1366,15 @@ Full gates (head-eng's routing of legal R28.22, Product agrees; scope `docs/plan
 - **TestFlight:** the scope's 6-step P2-2 checklist replaces B7's 3 steps.
 - **2026-10-29, release-lead delta QA @ `d318d180`: GO-with-notes.** An executed harness across 21 states shows the tip until its own tap (the same harness fails 17/21 on B7). **P2 (doc), fixed:** the checklist now says "the League tab, then League home" (LeagueHome sub-route), names both Apple entries (#507's button or the text link), and step 4 needs a device that never ran 1.22.0. The P3s (pin 8's indirect writes; no crediting the device ack to the first signed-in account) go to P2-3.
 - **Runs:** see the PR.
+
+## 2026-10-27 — C3 (server half): the App Store smart banner on the /s/* share landings
+
+Full gates (head-eng's ask, from Product's pre-launch review; scope `docs/plans/prelaunch-onboarding/scope-c3-smart-banner.md`). Server only; inert until `IOS_INSTALL_URL` is set at the 11-18 T0.
+
+- **The change:** `_share_html` emits `<meta name="apple-itunes-app" content="app-id=<digits>">` when `IOS_INSTALL_URL` carries an App Store `/id<6–12 digits>`. Otherwise there's no banner; only the digits are emitted.
+- **Tests:** `test_share_package.py`, 3 new tests (5 cases) on a real `/s/p/` landing. **Sabotage 3/3 red,** restored byte-identical.
+- **Runs:** see the PR.
+- **The static `index.html` half** rides #456.
 
 ## 2026-10-27 — Session-init trade capture skips linked-platform leagues (G-030)
 
