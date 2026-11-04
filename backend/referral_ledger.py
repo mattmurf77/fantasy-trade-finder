@@ -79,7 +79,7 @@ STAGE7_EVENTS: frozenset[str] = frozenset(
 class FirstSession:
     """What the session-init daemon needs back from attribution.
 
-    invited_by       the users.invited_by value upsert_user stores on INSERT:
+    invited_by       the users.invited_by value a claimed first init may fill:
                      the referrer's username when the ledger credited
                      someone (FR-13 step 5, server-derived), else the
                      client's legacy value, unverified (FR-15).
@@ -96,12 +96,41 @@ class FirstSession:
     legacy_notify: bool
 
 
+
+def initialize_first_session(*, user_id: str, league_id: str,
+                             league_platform: str, invite_id: str | None,
+                             invited_by: str | None, new_username: str,
+                             session_id: str, device_info: dict) -> tuple[bool, FirstSession]:
+    """Commit a positive first-init claim, attribution and signup together.
+
+    Fresh auth inserts explicitly opt in. Legacy rows remain ineligible;
+    neither missing events nor timestamps can make an existing user new.
+    Unexpected DB failures roll everything back and preserve pending=1.
+    The daemon's subsequent league writes/peer pushes stay best-effort.
+    """
+    with db.first_init_transaction(user_id) as (conn, first):
+        ref = attribute_first_session(
+            is_new_user=first, user_id=user_id, league_id=league_id,
+            league_platform=league_platform, invite_id=invite_id,
+            invited_by=invited_by, new_username=new_username, conn=conn)
+        if first:
+            db.set_first_init_inviter(conn, user_id, ref.invited_by)
+        # first_init_transaction already owns the live-user lock; borrowing
+        # its connection avoids a nested SQLite BEGIN and keeps errors strict.
+        db.record_event(user_id, "signup" if first else "app_open",
+                        league_id=league_id, session_id=session_id, source="api",
+                        props=ref.signup_props, conn=conn, **device_info)
+    return first, ref
+
+
 def attribute_first_session(*, is_new_user: bool, user_id: str, league_id: str,
                             league_platform: str, invite_id: str | None,
                             invited_by: str | None,
-                            new_username: str) -> FirstSession:
-    """FR-13–FR-16 + FR-18, run by the session-init daemon BEFORE upsert_user
-    (so a credit's server-derived invited_by lands on the INSERT).
+                            new_username: str, conn=None) -> FirstSession:
+    """FR-13–FR-16 + FR-18 attribution for a positively identified first init.
+
+    initialize_first_session borrows one live-user transaction and fills an
+    empty inviter on the auth-minted row; it never recreates a missing user.
 
     Flag off → exactly today's behaviour: the client's invited_by, no props,
     the legacy referral_joined path. Flag on and an existing user → no
@@ -109,8 +138,9 @@ def attribute_first_session(*, is_new_user: bool, user_id: str, league_id: str,
     token (`invite_id`, the well-formed id from the body), else §7.5 league
     match, else nothing; the `signup` props say which.
 
-    NEVER raises: any failure is logged and degrades to "not attributed"
-    (with the flag on, the legacy row still never fires, FR-15).
+    The default compatibility call logs failures and degrades to not attributed
+    (with the flag on, the legacy row still never fires, FR-15). An explicitly
+    supplied conn instead propagates errors so its owner can roll back.
     """
     try:
         if not feature_flags.is_enabled(LEDGER_FLAG):
@@ -119,33 +149,35 @@ def attribute_first_session(*, is_new_user: bool, user_id: str, league_id: str,
             return FirstSession(invited_by, None, None, False)
         return _attribute(user_id=str(user_id), league_id=str(league_id),
                           league_platform=league_platform, invite_id=invite_id,
-                          invited_by=invited_by, new_username=new_username)
+                          invited_by=invited_by, new_username=new_username, conn=conn)
     except Exception:
+        if conn is not None:
+            raise
         log.exception("referral attribution failed (continuing)")
         return FirstSession(invited_by, None, None, False)
 
 
 def _attribute(*, user_id, league_id, league_platform, invite_id, invited_by,
-               new_username) -> FirstSession:
+               new_username, conn=None) -> FirstSession:
     # A repeat first session (the users INSERT failed after an earlier
     # credit) finds its own row: report it, credit and notify nothing again.
-    prior = db.get_referral_for_referred(user_id)
+    prior = db.get_referral_for_referred(user_id, conn=conn)
     if prior is not None:
-        return _result(prior, prior.get("attribution_method") or "token", None)
+        return _result(prior, prior.get("attribution_method") or "token", None, conn=conn)
 
     credited, miss = None, None
     if invite_id:
-        credited, miss = _credit_by_token(invite_id, user_id, league_id)
+        credited, miss = _credit_by_token(invite_id, user_id, league_id, conn=conn)
     if credited is None:
-        credited = _credit_by_league_match(league_id, user_id, invited_by)
+        credited = _credit_by_league_match(league_id, user_id, invited_by, conn=conn)
     if credited is None:
         props = {"attribution": "legacy_ref" if invited_by else "none",
                  "attribution_miss": miss}
         return FirstSession(invited_by, props, None, False)
 
-    notified = _post_joined_row(credited, user_id, new_username)
+    notified = _post_joined_row(credited, user_id, new_username, conn=conn)
     platform = (league_platform if str(credited["league_id"]) == league_id
-                else db.get_league_platform(credited["league_id"]))
+                else db.get_league_platform(credited["league_id"], conn=conn))
     db.record_event(
         str(credited["referrer_user_id"]), "referral_attributed",
         league_id=str(credited["league_id"]), source="api",
@@ -156,12 +188,12 @@ def _attribute(*, user_id, league_id, league_platform, invite_id, invited_by,
                "league_platform":    platform,
                "notified":           notified},
         platform="server", touch_user=False,
-    )
-    return _result(credited, credited["attribution_method"], miss)
+        conn=conn)
+    return _result(credited, credited["attribution_method"], miss, conn=conn)
 
 
-def _result(row: dict, method: str, miss: str | None) -> FirstSession:
-    names = db.get_user_names(str(row["referrer_user_id"])) or {}
+def _result(row: dict, method: str, miss: str | None, conn=None) -> FirstSession:
+    names = db.get_user_names(str(row["referrer_user_id"]), conn=conn) or {}
     return FirstSession(
         invited_by=names.get("username") or None,
         signup_props={"attribution": method, "attribution_miss": miss},
@@ -170,13 +202,17 @@ def _result(row: dict, method: str, miss: str | None) -> FirstSession:
     )
 
 
-def _credit_by_token(invite_id: str, user_id: str, league_id: str):
+def _credit_by_token(invite_id: str, user_id: str, league_id: str, conn=None):
     """§7.4 steps 1–4. Returns (credited row | None, miss | None)."""
     from .server import _invite_status      # the join landing's 30-day rule
-    row = db.get_referral_by_invite_token(invite_id)
+    row = db.get_referral_by_invite_token(invite_id, conn=conn)
     # Only a live minted row: its share_token IS the id (a sibling's token
     # can't match INVITE_ID_RE; a deleted referrer's share_token is NULLed).
     if row is None or row.get("share_token") != invite_id:
+        return None, "unknown"
+    # Deletion locks users before tombstoning referrals. Take the same
+    # order before any credit-row lock, and reject a stale pre-delete read.
+    if conn is not None and not db.lock_referral_inviter(conn, str(row["referrer_user_id"])):
         return None, "unknown"
     row_league = str(row["league_id"])
     if _invite_status(row, row_league) != "valid":
@@ -185,15 +221,15 @@ def _credit_by_token(invite_id: str, user_id: str, league_id: str):
         return None, "unknown"
     # Step 3: the session's league was proven by resolve_session_input; any
     # other league is checked against the league_members snapshot.
-    if row_league != league_id and not db.league_has_member(row_league, user_id):
+    if row_league != league_id and not db.league_has_member(row_league, user_id, conn=conn):
         return None, "not_member"
-    if not db.claim_referral(row["id"], user_id, "token"):
-        if db.insert_referral_sibling(row, user_id) is None:
+    if not db.claim_referral(row["id"], user_id, "token", conn=conn):
+        if db.insert_referral_sibling(row, user_id, conn=conn) is None:
             return None, None   # this exact pair already exists: credited elsewhere
-    return db.get_referral_for_referred(user_id), None
+    return db.get_referral_for_referred(user_id, conn=conn), None
 
 
-def _credit_by_league_match(league_id: str, user_id: str, invited_by: str | None):
+def _credit_by_league_match(league_id: str, user_id: str, invited_by: str | None, conn=None):
     """§7.5. Candidates opened within 14 days, minted within 30, pending,
     unclaimed, referrer ≠ invitee. A legacy invited_by naming a candidate's
     referrer wins the tie; else the latest open."""
@@ -202,18 +238,20 @@ def _credit_by_league_match(league_id: str, user_id: str, invited_by: str | None
     cands = db.league_match_candidates(
         league_id, user_id,
         opened_since=(now - timedelta(days=LEAGUE_MATCH_OPEN_DAYS)).isoformat(),
-        created_since=(now - timedelta(days=_INVITE_ID_VALID_DAYS)).isoformat())
+        created_since=(now - timedelta(days=_INVITE_ID_VALID_DAYS)).isoformat(), conn=conn)
     if invited_by:
         named = [c for c in cands
                  if (c.get("referrer_username") or "").lower() == invited_by.lower()]
         cands = named + [c for c in cands if c not in named]
     for cand in cands:          # newest open first; the next one if a race is lost
-        if db.claim_referral(cand["id"], user_id, "league_match"):
-            return db.get_referral_for_referred(user_id)
+        if conn is not None and not db.lock_referral_inviter(conn, str(cand["referrer_user_id"])):
+            continue
+        if db.claim_referral(cand["id"], user_id, "league_match", conn=conn):
+            return db.get_referral_for_referred(user_id, conn=conn)
     return None
 
 
-def _post_joined_row(credited: dict, user_id: str, new_username: str) -> bool:
+def _post_joined_row(credited: dict, user_id: str, new_username: str, conn=None) -> bool:
     """FR-18: one referral_joined bell row for the inviter, title != body.
     Route unchanged (League). True when the row was written."""
     try:
@@ -228,9 +266,11 @@ def _post_joined_row(credited: dict, user_id: str, new_username: str) -> bool:
                       "new_username": new_username,
                       "league_id":    str(credited["league_id"]),
                       "referral_id":  credited["id"]},
-        )
+            conn=conn)
         return True
     except Exception as e:
+        if conn is not None:
+            raise
         log.warning("referral_joined row failed (continuing): %s", e)
         return False
 

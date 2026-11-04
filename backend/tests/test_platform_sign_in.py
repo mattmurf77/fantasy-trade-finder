@@ -65,6 +65,8 @@ import backend.server as server
 from backend.database import metadata
 
 # The real service functions, captured before any fixture patches them.
+REAL_EXTENSION_BUILD_SESSION = server._extension_build_session
+REAL_ACCOUNT_BUILD_SESSION = server._account_build_session
 REAL_FETCH_LEAGUE = es.fetch_league
 REAL_MFL_LOGIN = mfl.login
 REAL_MFL_MY_LEAGUES = mfl.fetch_my_leagues
@@ -2526,3 +2528,36 @@ def test_integrated_paywall_keeps_verified_platform_mint_free(env, platform):
         response = _espn_claim(env) if platform == "espn" else _mfl_claim(env)
     assert response.status_code == 200, response.get_json()
     assert response.get_json()["verified"] is True
+
+
+@pytest.mark.parametrize("platform", ["espn", "mfl"])
+def test_real_verified_platform_mint_marks_first_init_pending(env, monkeypatch, platform):
+    monkeypatch.setattr(server, "_load_sleeper_cache", lambda: {})
+    monkeypatch.setattr(server, "_ensure_universal_pools", lambda: None)
+    pools = {fmt: {"players": [], "seed": {}} for fmt in server.SCORING_FORMATS}
+    monkeypatch.setattr(server, "g_universal_by_format", pools)
+    monkeypatch.setattr(server, "g_universal_players", [])
+    # Restore before env's nested patch exits; monkeypatch teardown would
+    # otherwise resurrect that fixture's fake builder into later modules.
+    with patch.object(server, "_extension_build_session", REAL_EXTENSION_BUILD_SESSION), \
+         patch.object(server, "_account_build_session", REAL_ACCOUNT_BUILD_SESSION):
+        response = _espn_claim(env) if platform == "espn" else _mfl_claim(env)
+    assert response.status_code == 200, response.get_json()
+    payload = response.get_json()
+    assert payload["verified"] is True
+    uid = payload["user_id"]
+    with env.engine.connect() as conn:
+        assert conn.execute(select(db_module.users_table.c.first_init_pending).where(
+            db_module.users_table.c.sleeper_user_id == uid)).scalar_one() == 1
+    from backend import referral_ledger
+    # The authenticated import will supply its proven league to this exact
+    # first-init transaction. Neither auth builder pre-consumes the marker.
+    first, _ = referral_ledger.initialize_first_session(
+        user_id=uid, league_id=payload["league_id"], league_platform=platform,
+        invite_id=None, invited_by=None, new_username=payload["display_name"],
+        session_id=payload["session_token"], device_info={})
+    assert first is True
+    assert referral_ledger.initialize_first_session(
+        user_id=uid, league_id=payload["league_id"], league_platform=platform,
+        invite_id=None, invited_by=None, new_username=payload["display_name"],
+        session_id=payload["session_token"], device_info={})[0] is False

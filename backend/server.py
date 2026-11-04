@@ -29378,27 +29378,19 @@ def session_init():
             # league_members rows of managers new since the start.
             _league_existed, _members_existed = league_row_and_member_ids(league_id)
 
-            # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE
-            # upsert_user runs so we can emit a one-time referral-receipt
-            # notification on the referred user's first session.
-            # upsert_user only applies `invited_by` on INSERT, so this is
-            # also our only window to attribute the join.
-            _is_new_user = False
-            try:
-                _is_new_user = not user_exists(user_id)
-            except Exception as _check_err:
-                log.warning("  referral receipt: user_exists check failed (%s)", _check_err)
-            # Referral loop L7 (FR-13–FR-16, FR-18): ledger attribution, before the INSERT. Never raises.
-            _ref = _referral_ledger.attribute_first_session(is_new_user=_is_new_user, user_id=user_id, league_id=league_id, league_platform=authoritative["platform"], invite_id=_invite_id_from(body.get("invite_id")), invited_by=invited_by, new_username=username or display_name or user_id)
             try:
                 upsert_user(
-                    sleeper_user_id=user_id,
-                    username=username,
-                    display_name=display_name,
-                    avatar=avatar,
-                    invited_by=_ref.invited_by,
-                    require_user=True,
-                )
+                    sleeper_user_id=user_id, username=username,
+                    display_name=display_name, avatar=avatar, require_user=True)
+                # Minting already created this user. Only its explicit durable
+                # pending marker can identify a first initialized session.
+                _is_new_user, _ref = _referral_ledger.initialize_first_session(
+                    user_id=user_id, league_id=league_id,
+                    league_platform=authoritative["platform"],
+                    invite_id=_invite_id_from(body.get("invite_id")),
+                    invited_by=invited_by,
+                    new_username=username or display_name or user_id,
+                    session_id=token, device_info=_ev_info)
                 upsert_league(
                     league_id        = league_id,
                     user_id          = user_id,
@@ -29411,26 +29403,6 @@ def session_init():
                     only_if_exists   = _league_existed or _platform_linked,
                 )
                 log.info("  ✅ user + league upserted in DB (bg)")
-
-                # User-event log: signup on first session, app_open
-                # thereafter. Fires after upsert_user so the row is
-                # guaranteed to exist for the FK-style update inside
-                # record_event().
-                try:
-                    record_event(
-                        user_id,
-                        "signup" if _is_new_user else "app_open",
-                        league_id  = league_id,
-                        session_id = token,
-                        source     = "api",
-                        props      = _ref.signup_props,
-                        require_user = True,
-                        **_ev_info,
-                    )
-                except AccountGone:
-                    raise
-                except Exception as _ev_err:
-                    log.warning("  record_event failed: %s", _ev_err)
 
                 # Tracking plan v2 §S3 — league_synced into user_events.
                 # Sole writer since the analytics P0 cutover (the legacy
