@@ -648,7 +648,7 @@ process.on('exit', () => {
     const succNames = ['applyJobResult', 'deckEpochRef', 'setJob', 'setDeckFailure', 'deckScopeRef', 'lastModelRequestRef',
       'devicePageScope', 'deckKeyRef', 'validatedAtRef', 'deckSearchRef', 'noteFirstResponse', 'noteSearchCards',
       'failFirstCard', 'useFinderTargets', 'scopedOpponent', 'canvasResultsLive', 'setToast', 'modelZeroCopy',
-      'deviceKey'];
+      'deviceKey', 'autoResearchRef', 'autoResearchAfterAnswer'];
     const mkMutate = compile(`module.exports = function (env) { const { ${mutateNames.join(', ')} } = env; return ${onMutate}; };`);
     const mkSuccess = compile(`module.exports = function (env) { const { ${succNames.join(', ')} } = env; return ${onSuccess}; };`);
     const KX = D.devicePageKey('u1', 'L1', '1qb_ppr');
@@ -661,6 +661,7 @@ process.on('exit', () => {
       devicePageScope: D.devicePageScope, deckSearchRef: { current: null }, noteFirstResponse: () => {}, noteSearchCards: () => {},
       failFirstCard: () => {}, useFinderTargets: { getState: () => ({ pinnedGive: [], pinnedReceive: [] }) }, scopedOpponent: null,
       canvasResultsLive: false, setToast: () => {}, modelZeroCopy: () => '',
+      autoResearchRef: { current: 'idle' }, autoResearchAfterAnswer: (state, research) => (research ? state : 'idle'),
       deviceKey: KY }; // the screen's key when the answers land (after the switch)
     const ctxX = mkMutate({ deckEpochRef, deviceKey: KX })();   // dispatch under format X
     const ctxY = mkMutate({ deckEpochRef, deviceKey: KY })();   // the switch, then a dispatch under Y

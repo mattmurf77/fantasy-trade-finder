@@ -61,6 +61,13 @@ INJECTED_CARD_INPUTS = frozenset({
     "partner_user_id", "taste_pref_long", "taste_pref_short",
 })
 INJECTED_KEYS = INJECTED_COMPUTED_KEYS | INJECTED_CARD_INPUTS
+# Account deletion (legal R28.20, models-lead E-b1): a deleted user's platform
+# id in other users' records becomes one random token per deleted user with
+# this prefix (agreed with trades-eng's scrub). Eval counts the tokens
+# (replay.redacted_partners, E-b5) and never resolves one: such a partner is
+# unknown, and no hash that embeds the partner (trade_hash and the like) is
+# used to work out whose it was.
+REDACTED_PARTNER_PREFIX = "redacted:"
 # Frozen with the block, read by no scorer: the card's taste attributes.
 FROZEN_PROVENANCE_KEYS = frozenset({"taste_attrs"})
 
@@ -70,7 +77,7 @@ FROZEN_INPUT_KEYS = COMPACT_KEYS | INJECTED_CARD_INPUTS | FROZEN_PROVENANCE_KEYS
 
 # The logged columns card_dict merges into every card (backend/eval/data.py).
 LOGGED_POLICY_KEYS = frozenset({
-    "card_index", "propensity", "base_score", "final_score",
+    "card_index", "position", "propensity", "base_score", "final_score",
 })
 IDENTITY_KEYS = frozenset({
     "impression_id", "deck_job_id", "user_id", "league_id", "trade_hash",
@@ -80,7 +87,7 @@ IDENTITY_KEYS = frozenset({
 # Per registered scorer (backend/eval/scorers.py): the logged policy
 # columns it may read. Every registered scorer needs an entry.
 PERMITTED_LOGGED = {
-    "logged": frozenset({"card_index"}),
+    "logged": frozenset({"position"}),
     "production": frozenset({"final_score", "base_score"}),
     "base_score": frozenset({"base_score"}),
     "random": frozenset(),

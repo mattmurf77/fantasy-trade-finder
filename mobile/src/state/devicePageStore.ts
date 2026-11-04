@@ -174,7 +174,8 @@ export async function refreshDevicePage(target: DevicePageTarget, now = Date.now
   const startKeyEpoch = keyEpochs.get(target.key) ?? 0;
   let res: PagedTradeJobSnapshot;
   try {
-    res = await generateTrades(target.request, {});
+    // #393 M2 (D2): a background refresh; its 402 opens nothing.
+    res = await generateTrades(target.request, {}, { background: true });
   } catch {
     return;
   } finally {

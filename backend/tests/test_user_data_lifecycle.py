@@ -96,7 +96,7 @@ def data_env(tmp_path, monkeypatch):
     db.metadata.create_all(engine)
     monkeypatch.setattr(db, 'engine', engine)
     monkeypatch.setattr(server, 'is_enabled', lambda key: False)
-    monkeypatch.setattr(accounts, 'has_apple_identity', lambda *a, **kw: False)
+    monkeypatch.setattr(accounts, 'apple_identity_subjects', lambda *a, **kw: set())
     uid, token = uuid.uuid4().hex, uuid.uuid4().hex
     with engine.begin() as conn:
         conn.execute(insert(db.users_table).values(sleeper_user_id=uid))

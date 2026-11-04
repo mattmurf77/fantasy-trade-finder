@@ -233,6 +233,24 @@ def test_validate_other_linked_platform_never_reaches_sleeper(client):
     fetch.assert_not_called()
 
 
+def test_validate_espn_send_alone_still_reaches_the_espn_branch(client):
+    # Sleeper send and MFL send both off: the route gate must still open for
+    # espn.send, or ESPN's pre-send validate 404s.
+    fetch = MagicMock(return_value=_raw())
+    r = _validate(client, fetch=fetch, flags=("espn.send",))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json() == {"ok": True, "checked": True, "warnings": []}
+    fetch.assert_called_once()                                   # the live-roster read
+
+
+def test_validate_all_send_flags_off_is_feature_disabled(client):
+    fetch = MagicMock(side_effect=AssertionError("no ESPN read either"))
+    r = _validate(client, fetch=fetch, flags=())                 # all three off
+    assert r.status_code == 404
+    assert r.get_json() == {"error": "feature_disabled"}
+    fetch.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # NEXT.md 0f: a linked-platform id never reaches Sleeper through the propose core
 # ---------------------------------------------------------------------------
