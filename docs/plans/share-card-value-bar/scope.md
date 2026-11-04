@@ -164,3 +164,62 @@ release-lead: GO-with-notes at `27d4be73`. The merge is verified, `/s/p` matches
 - A one-sided, one-id package reads "A 1-player dynasty trade package." (pre-existing; marketing's template).
 - **#567 conflict in `cross-client-invariants.md`** (whichever of #564 or #567 lands second): keep #567's "±2nd landmark" paragraph, keep #564's Locations list (a superset) and the first two sentences of #564's card paragraph. #564 no longer states the app constant; #567 owns that.
 - **Merge gates:** models-lead M6 and the operator's K4 (via head-eng), then the operator's own go for the schema change, after #511 (merged). Merge in a quiet window (`MIGRATION_LOCK_BUSY` on a held lock).
+
+## 2026-11-01 — B2 label rule (follow-up PR stacked on #564; ships with #567 in the 11-06 binary)
+
+**Rule** (Product, final; legal R28.27; head-eng). Shipped together with trades-eng's app half, #567 @ `46751c05`: `negligible = !pick && firsts < 1` folded into `even`. One function, `og_image.value_bar_branch(verdict)`, decides the branch, and the label, fill and alt text all read it:
+- **B1** "≈ {a Mid 2nd} in value" whenever a generic pick fits the gap and `favors` leans. That holds even at a gap of 1 first or more (`card-win` is 1.59 firsts and reads "an Early 1st").
+- **B2** "≈ {N} Mid 1sts in value" only with no pick and `abs(firsts) >= 1.0` (raw, as in #567).
+- **B3** "About even in value" with the ice centre mark, otherwise. That covers no pick and under 1 first, and the even band (`favors` even, ratio ≥ 0.95) with no pick.
+
+**Legal R28.27:**
+- **Condition 1:** "About even" never covers a gap a pick fits when `favors` leans. It's tested as a property over 0–3 firsts in 0.01 steps, through the real `_pick_gap_equivalent` and snapshot reader.
+- **Condition 2:** whenever the label is "About even", the only fill is the centre mark. It's tested as a property over 61 gaps × 4 `favors` values × pick or no pick.
+
+**Legal (f):** a traded owned pick (`is_traded`, `original_username`) renders "2026 1st", with no "(from …)", on the card and the page. The control is the app's own label, "2026 1st (from tradedfromleaguemate)".
+
+**App parity:** all 9 cases of `mobile/tests/check-value-bar-b2.js` @ `46751c05` are mirrored (the 9th, 0.7 firsts with no pick, reads Even), including the label and the exact fill box.
+
+**What changes on real cards:** only "B2 below 1 first" becomes "About even".
+- In the measured trades: 37 1QB and 14 SF 1-for-1 pairs, all low-value pairs near #100 (e.g. Wan'Dale Robinson for Davante Adams, ratio 0.905, 0.05 firsts: "≈ 0.1 Mid 1sts" before, "About even" now). See [before](renders/card-b2-sliver-before.png) and [after](renders/card-b2-sliver-after.png).
+- No 2-for-2 or 3-for-1 label changed. `card-even`, `card-win` and `card-picks` are byte-identical.
+
+**OPEN (for models-lead and legal, via head-eng; not decided here): the even band with a fitting pick.**
+- A snapshot can be `favors` even (ratio ≥ 0.95; models-lead M7: centre mark only) and still carry a pick label. R28.27 condition 1, read literally, would show B1 there. But the snapshot stores no lean direction for an even trade, and the app (#567) also shows Even in this case.
+- That branch is kept as today's behaviour ("About even" + centre mark), isolated as `VB_OPEN_EVEN_BAND_WITH_PICK`, and pinned by `test_open_question_even_band_with_a_pick_keeps_todays_about_even_and_centre_mark`.
+- Measured on the pinned DP export (top 100 per format; 1-for-1 exhaustive, 2-for-2 and 3-for-1 50k samples each), even trades that also fit a pick are:
+
+| Shape | 1QB | SF |
+|---|---|---|
+| 1-for-1 | 20% | 33% |
+| 2-for-2 | 61% | 64% |
+| 3-for-1 | 57% | 58% |
+
+  - Mostly a Late 4th, then Late, Mid and Early 3rds; Mid and Late 2nds appear only in 2-for-2. The largest even gap is 0.41 firsts (an Early 2nd).
+  - #564's own `card-even` (Chase for Bijan, ratio 0.959, 0.18 firsts, a Mid 3rd) is one of these.
+  - Applying condition 1 to the even band would flip about 60% of even multi-player cards to a pick label, and would need a stored lean direction.
+
+**Evidence:** `test_share_card_b2_rule.py` (45) + `test_share_card_value_bar.py` (95) + `test_share_link_previews.py` (36) + `test_trade_share_tokens.py` (18): 194 passed.
+Sabotage, each caught:
+- B2 below 1 first: 11 red.
+- "About even" when a pick fits: 20 red.
+- "About even" for small picks only: 4 red.
+- An "About even" label with a lean fill: 6 red.
+
+### #581 QA (release-lead, 2026-11-02): GO-with-notes at `7fcf5e98`
+
+- **Confirmed:**
+  - only `og_image.py` code changes, and #564 + #581 onto main `fd5390ac` is clean;
+  - the rule matches legal R28.27 #4, and the 1.0 boundary uses the server's 2-dp firsts, the same number the app reads;
+  - the pick fit covers 0.058–1.774 firsts with 0 holes;
+  - app parity against #567 @ `46751c05` over 5,193 grid and real snapshots has 0 disagreements;
+  - renders and tokens are byte-identical apart from the intended change;
+  - legal (f) is clean, 9 sabotage groups went red, and CI is 4/4.
+- **P3s:**
+  - **Fixed:** (1) a no-hole test, so every gap from half the smallest generic pick up to 1 first gets a pick; (2) B2's one decimal now rounds like JS `toFixed(1)`, half up on the exact binary value, so 2.25 shows "2.3"; (4) the 9th parity case, citing #567 @ `46751c05`.
+  - **(3), for whichever of #567 or #581 lands second:** three places in #567 credit #564 for the image half of B2, but it's #581: `docs/cross-client-invariants.md:381`, `TradeValueBar.tsx:75` and `check-value-bar-b2.js:7`.
+- **Merge mechanics:**
+  1. After #564 squash-merges, retarget #581 to main.
+  2. Sync without a forced `--merge-base` (G-076).
+  3. Push so CI re-runs against main (G-078).
+  4. Merge only on the operator's explicit word, after #564.
