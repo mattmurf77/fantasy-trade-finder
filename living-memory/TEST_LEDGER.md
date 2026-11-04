@@ -1335,6 +1335,20 @@ Gates: the scope block `docs/plans/share-landing-generic-picks/scope.md`. Server
 - **Test:** `test_og_package_card_names_the_calculators_generic_picks`, through `/og/p`: two picks named, an unknown id still "Unknown player". It's red on main's code.
 - **Render:** `before-after.png`, from the real renderer.
 - **Runs:** `test_share_link_previews.py` passes.
+## 2026-11-03 — KTC scraper: the page's `ktc-players` JSON element (the 10-29 break)
+
+Gates: `backend/data_loader.py` (`parse_ktc_players`) plus the runbook. No route, schema, event, flag, knob or engine-hashed module (`data_loader.py` isn't in `_ENGINE_CODE_MODULES`). **Merge only once `ktc_blend_weight = 0` is pinned in prod** (models-lead addendum R2, on the operator's word in release-lead's session). Otherwise this switches the blend back on unannounced at the next pool build.
+
+- **The cause:** KTC moved its player list from the `var playersArray = [...]` literal into `<script type="application/json" id="ktc-players">`, which the page reads with `JSON.parse`. The literal regex found nothing.
+- **The fix:** read the element first, and the literal as a fallback. The live page on 2026-11-03 (one read-only GET, not committed) parses to 464 players (70 QB, 128 RB, 188 WR, 78 TE). The fields are the same: `oneQBValues.value`, `superflexValues.tep.value`, `playerID`, `mflid`, `position`.
+- **Tests:** `test_ktc_blend.py`, 24 (+11). The current page's skeleton is used verbatim around the legacy fixture's entries, so no new KTC data is committed:
+  - decoy JSON before and after, including a `data-id="ktc-players"` element;
+  - four tag spellings (both quotes, unquoted, uppercase with spaces);
+  - both shapes on one page (the element wins);
+  - unreadable, empty and no-player elements, which fail loudly alone and fall back to a literal;
+  - the real `_ktc_consensus` path (cache reset) with `blendValue`/`vftValue` decoys in every entry, matching the legacy rows.
+- **QA P3-4:** `test_test_support.py`'s children no longer make a live KTC GET; they get the fixture.
+- **Sabotage, each red then restored (9):** the literal only (main's code, which reproduces the break); any JSON script without the id check; no list check; literal first; prefer `blendValue`; `data-id` matching; no fallback on bad JSON; an empty list accepted; case-sensitive.
 
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 

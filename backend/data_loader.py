@@ -149,7 +149,10 @@ DP_PARAM_TO_FORMAT = {v: k for k, v in DP_SCORING_PARAM.items()}
 # KeepTradeCut consensus blend (#145) + sf_tep TE premium uplift (#148)
 # ---------------------------------------------------------------------------
 # KTC has no official API. The dynasty-rankings page embeds its full top-500
-# player list as a `var playersArray = [...]` literal in the HTML; each entry
+# player list in the HTML: since at least 2026-10-29 as a JSON element
+# (`<script type="application/json" id="ktc-players">[...]</script>`, which
+# the page reads with `var playersArray = JSON.parse(...)`), before that as a
+# `var playersArray = [...]` literal. parse_ktc_players reads both. Each entry
 # carries BOTH formats (oneQBValues / superflexValues) plus TE-premium
 # variants (tep/tepp/teppp), so ONE polite GET per boot (24h in-memory TTL)
 # serves both format builds. This is an unsanctioned surface — expect it to
@@ -322,18 +325,47 @@ def _compress_qb_1qb_values(
     return out
 
 
+# The page's player list: the `ktc-players` JSON element (current pages), else
+# the `var playersArray = [...]` literal (pages before ~2026-10-29). The id is
+# its own attribute (never `data-id`), quoted or not, any case.
+_KTC_PLAYERS_ELEMENT = re.compile(
+    r"<script\b[^>]*?\sid\s*=\s*(?:\"ktc-players\"|'ktc-players'|ktc-players(?=[\s>]))"
+    r"[^>]*>(.*?)</script>", re.S | re.I)
+_KTC_PLAYERS_LITERAL = re.compile(r"var\s+playersArray\s*=\s*(\[.*?\]);", re.S)
+
+
 def parse_ktc_players(html: str) -> list[dict]:
-    """Extract the embedded playersArray from KTC rankings-page HTML.
+    """Extract the embedded player list from KTC rankings-page HTML: the
+    `ktc-players` JSON element, else the legacy `var playersArray = [...]`
+    literal (module comment above). An element that doesn't read as a
+    non-empty player list falls through to the literal.
 
     Returns the raw player dicts filtered to real players (KTC also lists
     rookie draft picks under position "RDP" — excluded; the pool's generic
-    picks are seeded separately). Raises on parse failure (callers treat
-    any exception as "KTC unavailable")."""
-    m = re.search(r"var\s+playersArray\s*=\s*(\[.*?\]);", html, re.S)
-    if not m:
-        raise ValueError("playersArray not found in KTC page")
-    players = json.loads(m.group(1))
-    return [p for p in players if p.get("position") in VALID_POSITIONS]
+    picks are seeded separately). Raises when neither shape yields a player
+    (callers treat any exception as "KTC unavailable", and log it)."""
+    problems = []
+    for shape, pattern in (("ktc-players element", _KTC_PLAYERS_ELEMENT),
+                           ("playersArray literal", _KTC_PLAYERS_LITERAL)):
+        m = pattern.search(html)
+        if not m:
+            continue
+        try:
+            players = json.loads(m.group(1))
+        except ValueError:
+            problems.append(f"{shape} isn't JSON")
+            continue
+        if not isinstance(players, list):
+            problems.append(f"{shape} isn't a JSON array")
+            continue
+        kept = [p for p in players if isinstance(p, dict) and p.get("position") in VALID_POSITIONS]
+        if not kept:
+            problems.append(f"{shape} holds no players")
+            continue
+        return kept
+    raise ValueError("playersArray not found in KTC page ("
+                     + ("; ".join(problems) or "no ktc-players element, no playersArray literal")
+                     + ")")
 
 
 def _fetch_ktc_html(timeout: int = 15) -> str:
