@@ -1,3 +1,19 @@
+## 2026-11-04 — O9 EAS build archive exclusions
+
+Integrated `985d767a` onto main `fd5390ac`, resolving only the package-script
+context conflict while preserving current scripts. The change repeats sensitive
+tracked ignore patterns in `.easignore` and adds the existing static guard.
+Scope: `docs/plans/eas-build-secret-exclusions.md`. No runtime, schema, API, flags
+or analytics-event change. No archive, secret, EAS environment or production
+setting was read; no build or rotation performed.
+
+- `node mobile/tests/check-easignore.js`: all 14 sensitive patterns covered.
+- Negative controls: removing `secrets.local.env*` and anchoring `*.db` each fail;
+  both mutations restored, final guard passes.
+- `node --check mobile/tests/check-easignore.js`: syntax valid.
+- `bash mobile/scripts/testid-lint.sh`: passed (`testid-lint OK`).
+- Exact-head GitHub CI: pending; local checks are not merge or release evidence.
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
