@@ -578,6 +578,27 @@ def test_og_package_card_caps_a_side_at_two_names_plus_n_more(env, n):
     assert (x, y) == (60 + 24, 175 + 70 + 2 * 66 + 6)     # third row, give side
 
 
+def test_og_package_card_names_the_calculators_generic_picks(env):
+    """The live calculator's pool holds 12 generic pick rungs that aren't
+    players rows; a shared package holding one drew "Unknown player". They
+    draw the calculator's label and the "PK" chip on chalk-dim (#564's look);
+    an id the shared parser rejects (a round that doesn't exist, an extra
+    part) still says "Unknown player"."""
+    with db_module.engine.begin() as conn:
+        conn.execute(insert(db_module.players_table).values(
+            player_id="np1", full_name="Avery Firstman", position="WR", search_rank=50))
+    assert db_module.create_shared_package(
+        "pkgPicks", USER_A, ["np1", "generic_pick_1_mid_x"],
+        ["generic_pick_1_mid", "generic_pick_2_late", "generic_pick_9_mid"])
+    _, calls = _spied_get(env, "/og/p/pkgPicks.png")
+    drawn = [text for _, text, _ in _texts(calls)]
+    assert "Mid 1st Round Pick" in drawn and "Late 2nd Round Pick" in drawn, drawn
+    assert drawn.count("PK") == 2 and drawn.count("Unknown player") == 2, drawn
+    fills = [kw.get("fill") for name, args, kw in calls if name == "rounded_rectangle"]
+    assert og_image.PICK_CHIP_FILL == (151, 161, 174)        # chalk-dim, #564's chip
+    assert fills.count((151, 161, 174)) == 2, fills
+
+
 # ---------------------------------------------------------------------------
 # 9. Share-page descriptions promise no fairness read (addendum 14 Part A)
 # ---------------------------------------------------------------------------
