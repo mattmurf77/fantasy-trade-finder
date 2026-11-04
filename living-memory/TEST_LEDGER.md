@@ -1,3 +1,12 @@
+## 2026-11-04 — Combined paywall stack: #394/#395/#397/#473/#465/#508/#514
+
+Integrated the seven original PR heads in dependency order, retaining each head in merge ancestry. The combined branch includes main `af57e59c`. Server config and measurement merge after unverified-request hardening, retaining isolated sandbox billing lanes, the one live enforcement predicate, verified-only founder lookup, one price-rise instant (2027-01-02 04:00 UTC), durable preview windows and both server measurement events.
+
+- **Targeted validation on the complete combined tree:** entitlements, sandbox safety, global gate/route completeness, preview persistence, unverified no-read decisions, config/founder view, both C8 events, account deletion, missing-DDL migration safety and constant log templates — **857 passed in 24.55s**, Python 3.14.4, production DB environment variables unset. One existing Python 3.14 invalid-escape SyntaxWarning arose while the log-template guard parsed source; no failing tests. `git diff --check` passes.
+- **Integration correction:** current #362 token share routes remain explicitly free in the route table; its stale match-id names are removed. Conflicts preserve current prices and extension privacy wording, the owner-outcome migration and account-data deletion coverage. No new subscription behavior was invented beyond the seven scoped PRs.
+- **Dark defaults verified from source:** `monetize.entitlements`, `monetize.paywall` and `monetize.pro` remain false; both `paywall_enforce_enabled` and `paywall_web_enforce_enabled` have one seed, 0. No production configuration, credential or feature switch was read or written.
+- Full GitHub CI on this combined head is still required. Purchase, exact-binary/min-version, manual device, provider configuration and activation checks remain separate; no full local suite, simulator, StoreKit or production validation was run.
+
 ## 2026-11-04 — #473 integration: unverified no-read decisions and durable preview windows
 
 Restacked hardening onto the reviewed preview integration. Kept the hardened preview-reason description, current min-version defaults, both additive migrations (`paywall_previews.window_trade_ids` and `deck_outcomes.user_id`) and the token-sharing route classification correction. No enforcement setting changed.
@@ -1952,6 +1961,18 @@ Full gates. Completes I-2, the launch condition for the 200 ms waiver W-AC-L5. S
 - **Not covered:**
   - An offer that was staled for ownership but whose assets have since come back keeps today's `offer_stale` 409 with no `detail`.
   - `pool_violation`, `asset_reserved` and the overlap blocker messages still name raw ids (outside I-2).
+## 2026-10-28 — C8 §B: `paywall_gate_hit` server event (dark)
+
+Full gates (scope addendum `docs/plans/c8-paywall-analytics/scope-gate-hit.md`). Branch `feat/c8-paywall-gate-hit`, cut from `feat/paywall-hardening` @ `b214ce12` (#473). D-056: `FTF_SKIP_SIM_GATE=1` posture. Dark: the event fires only on an enforced 402, and `paywall_enforce_enabled` is 0.
+
+- **Change:** the gate hook records `paywall_gate_hit` (props `gate`, `route_family`, `enforced`) for each 402 it sends, capped in process to one per (user, gate, route_family) per UTC day, non-touching, inside a `try/except` that never changes the 402. Registered in `SERVER_FIRED_EVENTS` and `NON_INTENT_EVENTS` in the same commit. `record_event` gains `touch_user`/`bind` from #419's hunk, byte-identical to `main`.
+- **Targeted (828 passed, 0 failed, 8:29 under load ~40):** `test_paywall_gate_hit` (53, new), `test_paywall_gate` (329), `test_paywall_gate_unverified` (110), `test_paywall_preview` (46, the P3-4 `test_p34_*` dark no-write tests included), `test_paywall_gate_allowlist` (7), `test_paywall_config` (15), `test_analytics_p0` (24), `_p2` (15), `_p3` (22), `_stats` (56), `_taxonomy_384` (11), `_taxonomy_home_hub` (6), `_token_safety` (7), `test_entitlements` (52), `test_entitlements_billing_safety` (75). The full suite runs in CI on the push.
+- **Sabotage on `test_paywall_gate_hit` (53), each red then restored:**
+  - S1: `try/except` dropped and `record_event` raises → 1 red (the byte-identical 402 test: the request answers 500);
+  - S2: the cap dropped → 1 red (the per-day cap test; the bounded and thread tests call the cap directly);
+  - S3: `/api/trades/fair-packages` mapped to `other` → 3 red (the closed set, that rule's mapping cell, the spec mapping);
+  - S4: `touch_user=True` → 1 red (the `users` row test).
+
 ## 2026-10-28 — #473 K0: `preview_used` only once the preview was spent (else `never_trialed`)
 
 Full gates (scope addendum `docs/plans/monetization-launch/scope-addendum-paywall-hardening.md` item (e)). Branch `feat/paywall-hardening`, a fast-forward on `e23abecd` (no re-sync of the held stack). D-056: `FTF_SKIP_SIM_GATE=1` posture. Dark: `paywall_enforce_enabled` is 0.

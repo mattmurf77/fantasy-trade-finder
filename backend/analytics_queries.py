@@ -378,6 +378,11 @@ NON_INTENT_EVENTS = frozenset({
     "paywall_purchase_completed",
     "paywall_purchase_failed",
     "paywall_restore",
+    # paywall_gate_hit (C8 §B, 2026-10-27, added in the SAME commit as its
+    # emitter): the server's 402 at a gated route, a system outcome of a
+    # request the user already made, never a choice. Props: gate,
+    # route_family, enforced.
+    "paywall_gate_hit",
     # Home hub (flag `nav.home_hub`, 2026-10-10), added in the SAME commit
     # that registered them (docs/plans/home-engagement/scope.md §1).
     #   home_tile_tapped — NAVIGATION, the `tab_selected` class. Home is the
