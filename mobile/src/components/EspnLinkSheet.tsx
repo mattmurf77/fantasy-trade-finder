@@ -143,6 +143,12 @@ export default function EspnLinkSheet({
   // row already calls fetchPreview directly) whenever it has rows to show
   // and the user hasn't asked for manual entry instead.
   const showingPicker = leaguePicker && !useManualEntry && !!myLeagues && myLeagues.length > 0;
+  // Entry mode with the in-app ESPN sign-in: no league-ID field (or its
+  // Continue) until ESPN cookies are known, captured or pasted. The
+  // proof-based mint (#430) refuses an ID on its own, and "We'll find your
+  // leagues — no league ID needed" shouldn't sit above an ID field (#570;
+  // #421 does the same for MFL). Linked mode is unchanged.
+  const entryNeedsSignIn = !!(entry && webviewCapture && !(espnS2.trim() && swid.trim()));
 
   function reset() {
     setStep('input');
@@ -454,7 +460,15 @@ export default function EspnLinkSheet({
         <Text style={type.heading} accessibilityRole="header">Link an ESPN league</Text>
 
         {step === 'input' ? (
-          <>
+          // The input step scrolls inside the 88% sheet: with the private
+          // section open on an iPhone SE, the SWID field and Continue ran
+          // ~156pt past the screen (design-lead's render; release-lead #570).
+          <ScrollView
+            testID="espn-link.input-scroll"
+            style={styles.stepScroll}
+            contentContainerStyle={styles.stepBody}
+            keyboardShouldPersistTaps="handled"
+          >
             <Text style={[type.bodySm, styles.sub]}>
               Imports team names and rosters. Nothing is posted to ESPN unless
               you sign in and send a trade you approve.
@@ -476,9 +490,6 @@ export default function EspnLinkSheet({
                 <Text style={[type.bodySm, styles.cookieHint]}>
                   We’ll find your leagues — no league ID needed. We never see
                   your password.
-                </Text>
-                <Text style={[type.bodySm, styles.cookieHint]}>
-                  or enter a league ID
                 </Text>
               </>
             ) : null}
@@ -531,19 +542,21 @@ export default function EspnLinkSheet({
               </View>
             ) : (
               <>
-                <TextInput
-                  testID="espn-link.input"
-                  accessibilityLabel="ESPN league ID or league URL"
-                  style={styles.field}
-                  value={input}
-                  onChangeText={setInput}
-                  placeholder="ESPN league ID or league URL"
-                  placeholderTextColor={chalk.dim}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="default"
-                  editable={!busy}
-                />
+                {!entryNeedsSignIn ? (
+                  <TextInput
+                    testID="espn-link.input"
+                    accessibilityLabel="ESPN league ID or league URL"
+                    style={styles.field}
+                    value={input}
+                    onChangeText={setInput}
+                    placeholder="ESPN league ID or league URL"
+                    placeholderTextColor={chalk.dim}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="default"
+                    editable={!busy}
+                  />
+                ) : null}
                 {leaguePicker && myLeagues && myLeagues.length === 0 ? (
                   <Text testID="espn-link.my-leagues-empty" style={[type.bodySm, styles.cookieHint]}>
                     No fantasy football leagues found on this ESPN account.
@@ -639,7 +652,7 @@ export default function EspnLinkSheet({
             {error ? (
               <Text testID="espn-link.error" style={styles.error}>{error}</Text>
             ) : null}
-            {!showingPicker ? (
+            {!showingPicker && !entryNeedsSignIn ? (
               <Button
                 testID="espn-link.continue"
                 label={busy ? 'Fetching league…' : 'Continue'}
@@ -648,7 +661,7 @@ export default function EspnLinkSheet({
                 style={styles.cta}
               />
             ) : null}
-          </>
+          </ScrollView>
         ) : null}
 
         {step === 'team' && preview ? (
@@ -788,6 +801,10 @@ const styles = StyleSheet.create({
   cta: { marginTop: space.sm },
   cancel: { marginTop: space.xs },
   teamList: { maxHeight: 340 },
+  // The input step's scroller: shrinks within the sheet's maxHeight, and keeps
+  // the sheet's child spacing on its own content.
+  stepScroll: { flexGrow: 0, flexShrink: 1 },
+  stepBody: { gap: space.sm },
   teamRow: {
     flexDirection: 'row',
     alignItems: 'center',

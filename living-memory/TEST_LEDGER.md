@@ -361,6 +361,37 @@ Gates: engagement-eng's report (release-lead's #488 QA found it). Test harness o
   - The cause: `apiRequest`'s catch now `return`s the async `_afterGateFailure(...)` instead of `throw err`. With the gate off, that adds microtask hops before the 409 retry schedules its backoff timer. The harness's `flush()` drains 80 ticks, so the timer is scheduled after `advance()` has moved the clock past it, and it never fires.
   - Deepening `flush` to 400 completes T3. Throwing synchronously when the gate is off (`if (opts.background || !_gateIsOn()) throw err;`) runs #488's own test file 39/39.
 - **Not touched (other teams' async suites, no guard; routed to head-eng):** `check-apple-revoke-on-delete`, `check-espn-cookies`, `check-league-picker-recovery`, `check-send-timeout`, `check-sleeper-ownership`, `check-vault-subsumes-legacy`.
+## 2026-11-01 — Sign-in landing: three platform tiles (operator 11-01; design-lead's spec)
+
+Gates: full (`docs/plans/prelaunch-onboarding/scope-signin-three-tiles.md`). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the structural guard, sabotage, a code-walk and a TestFlight checklist.
+
+- **What:** the landing's Sleeper / ESPN / MFL chips are now equal tiles: ink-1, the a11y border, the name with a dim line under it, the ice border plus a 3×14 tick when selected. They form a radiogroup of radios. The flags, the selection and the entry flow are unchanged. A tile shows only for a live platform (never a dead one).
+- **Guard:** `check-signin-tiles.js`, 6 AST pins: the row and its gate; each tile's role, state, label, busy guard and single handler; `PLATFORM_TILE`; the spec's styles, with ice only on the selected border and the tick; the tick only on the selected tile; the door minting only through `POST /api/entry/platform`. **Sabotage 15/15 red** (14 on `SignInScreen.tsx`, 1 on `platformEntry.ts`).
+- **Kept green:** `check-landing-platform-options`, `check-espn-signin-flag`, `check-signin-apple-parity` (9), `check-guide-script`, `check-signin-identity-labels`, `tsc --noEmit`, `testid-lint`.
+- **Code-walk:** in the scope §3 (tile → `selectEntryPlatform` → panel → entry sheet → `entryPlatformMint` → `/api/entry/platform`; no tile under `landing.platform_options` OFF).
+- **TestFlight:** the 8-step SE checklist in the scope §3, for the 11-07 window, before ask 16.
+- **Final words (head-eng relay, 11-01; marketing-lead copy §6 addendum 16):** the dim lines are unchanged ("Username" / "Sign in" / "Sign in"). The VoiceOver labels are now "Sleeper, sign in with your username, no password needed" · "ESPN, sign in with your ESPN account or a league ID" · "MyFantasyLeague, sign in with your account or a league ID". Guard pin 3 now pins all nine strings exactly (the old starts-with-its-name rule doesn't fit MFL's label). Sabotage 5/5 red on the words; the structure set's 14 `SignInScreen.tsx` mutations are still red.
+- **Two fixes (head-eng relay, 11-01, from design-lead's as-built render):**
+  - The session-expired notice's `marginBottom` is `space.md - 5`, so the returning-user landing fits an SE (652 → 647pt).
+  - The ESPN explainer drops "and we'll find your leagues" and "— no extra account needed"; the MFL explainer drops "— no extra account needed".
+  - New pins 7 and 8. Sabotage 6/6 red: each clause put back, "no extra account" moved to another string, the margin back to `space.md`, and `space.sm` (only 4pt).
+  - Earlier sets: the 14 `SignInScreen.tsx` structure mutations and 5/5 words. tsc clean, all 136 check-*.js pass, testid-lint OK. **Total: 26 sabotages** (15 structure, 5 words, 6 fixes).
+- **release-lead QA at `cf636ae2`: GO-with-notes.** Taken here: P2-3 (`docs/design/components.md` now describes the app tiles and keeps the web chips until parity, with `espn.signin`); P2-4 (the checklist's preamble says which state is reachable before and after #430, who flips flags prod-wide with a relaunch, and how to produce step 7's expired-session state); the scope's prod-state line (`landing.platform_options` is TRUE today; ask 12 pending); and this entry's counts. Waiting: P2-1, the "or a league ID" wording (marketing, via head-eng), then P2-2, design-lead's re-render.
+- **P2-1 done: marketing addendum 16, revised 11-02** (head-bizops → head-eng, delivered by the coordinator): "or a league ID" is withdrawn. The labels are "ESPN, sign in with your ESPN account" · "MyFantasyLeague, sign in with your MFL account" (Sleeper's is unchanged). The explainers are "ESPN dynasty leagues are supported. Sign in to ESPN." · "MyFantasyLeague dynasty leagues are supported. Sign in to MFL.", replacing the 3e trim.
+  - The sheets' entry-only "or enter a league ID" clause (`EspnLinkSheet`, `PlatformLinkSheet`) is removed too. Entry mode refuses an ID alone under the verified sign-in; link mode never showed it. Removal only.
+  - Web (`web/index.html:211`, `:236`, `:243`) is left for the web-parity follow-up.
+  - Pins 3 and 7 updated, plus a new pin 9. Sabotage 7/7: each label, each explainer and each sheet clause put back. Total: 33. Still waiting on P2-2, design-lead's re-render.
+- **release-lead round-2 QA at `c8fa1db7`/`8d0a4eeb`: GO-with-notes.** P2-2 is done (design-lead's re-render, plus the A/B spacing image for the operator).
+  - Taken: P3-1, pin 9 now matches any "or … league ID" wording, not just one literal phrase (sabotage 2/2: "Or use a league ID" and "or paste your league ID"); P3-4, components.md's ESPN entry row notes the app dropped the divider; P3-6, the PR body's step count.
+  - Routed to owners: P3-2, the MFL entry sheet still shows the league-ID field right under sign-in (#421 / platforms-eng); P3-3, "We'll find your leagues" in both sheets (marketing, via head-eng); P3-5, web (the parity follow-up).
+- **head-eng Round 4b (11-03, from head-product's calls on design-lead's renders):**
+  - The ESPN entry sheet hides its league-ID field and Continue until ESPN cookies are known: `entryNeedsSignIn = entry && webviewCapture && !(espnS2 && swid)`, a contained conditional, so no "or" divider fallback is needed. Link mode is unchanged.
+  - The MFL sheet heading is "Link an MFL league".
+  - New pins 10 and 11. Sabotage 5/5 red: the gate ignoring cookies, the field ungated, Continue ungated, the gate applying in link mode, the typo back.
+  - The scope's checklist gains step 9.
+- **The ESPN sheet's input step scrolls** (release-lead, from design-lead's render at `0e5fd18c` + #421; the bug exists on main): `EspnLinkSheet` had no ScrollView, so with the private section open on an iPhone SE the SWID field and Continue ran ~156pt past the screen.
+  - The input step is now a `ScrollView` (`espn-link.input-scroll`, `flexGrow 0 / flexShrink 1`, taps handled) inside the 88% sheet. Cancel stays outside it. Settings' link sheet uses the same component, so it gets the fix too.
+  - Pin 12; sabotage 3/3 (the scroller removed, unable to shrink, taps not handled). tsc clean, 136/136 check-*.js, testid-lint OK.
 
 ## 2026-10-29 — G3-e: `deck_outcomes.user_id`; account deletion and export also match an outcome by its owner
 

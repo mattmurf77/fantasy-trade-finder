@@ -575,7 +575,7 @@ export default function PlatformLinkSheet({
       >
         <View style={styles.sheet}>
           <View style={styles.grabber} />
-          <Text style={type.heading} accessibilityRole="header">Link a {LABEL[platform]} league</Text>
+          <Text style={type.heading} accessibilityRole="header">Link {platform === 'mfl' ? 'an' : 'a'} {LABEL[platform]} league</Text>
 
           {step === 'input' ? (
             <>
