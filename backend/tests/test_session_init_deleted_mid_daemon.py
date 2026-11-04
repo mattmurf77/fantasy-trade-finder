@@ -40,6 +40,7 @@ from sqlalchemy import String, or_, select
 
 import backend.accounts as accounts
 import backend.database as db_module
+import backend.roster_history as roster_history
 import backend.server as server
 from backend.tests import test_session_init_sleeper_calls as calls_t
 
@@ -232,6 +233,36 @@ def test_own_deletion_after_the_members_write(harness, monkeypatch, league):
     assert {t for t, _r in left} <= {"draft_picks"}, left
 
 
+def test_own_deletion_between_the_board_read_and_its_write(harness, monkeypatch):
+    """The board snapshot reads every member's board (member_rankings), then
+    writes league_board_history, a private table, under the caller's lock.
+    The caller deleted between the read and the write leaves no board row
+    (release-lead's #587 QA, round 3)."""
+    client, _calls = harness
+    with db_module.engine.begin() as conn:
+        conn.execute(db_module.member_rankings_table.insert().values(
+            user_id=USER_ID, league_id=LEAGUE_ID, player_id="p1", elo=1550.0,
+            updated_at="2026-11-03T00:00:00+00:00", scoring_format="1qb_ppr"))
+    real, read = roster_history.load_member_boards_for_league, []
+
+    def read_then_delete(league_id):
+        boards = real(league_id)
+        read.append(boards)
+        accounts._delete_user_data(USER_ID)
+        return boards
+
+    monkeypatch.setattr(roster_history, "load_member_boards_for_league", read_then_delete)
+
+    assert _init(client, LEAGUE_ID).status_code == 200
+
+    assert [b["user_id"] for b in read[0]] == [USER_ID]   # the write had a board to write
+    t = db_module.league_board_history_table
+    with db_module.engine.connect() as conn:
+        assert conn.execute(select(t)).first() is None
+    left = _rows_naming(USER_ID)
+    assert {t for t, _r in left} <= {"draft_picks"}, left
+
+
 def test_the_first_write_to_find_the_account_gone_stops_the_daemon(harness, monkeypatch):
     """record_event re-raises AccountGone under require_user, so a deletion
     just before the first event ends the daemon there: no second event, no
@@ -391,12 +422,84 @@ def _opening_lock(with_node):
     return None
 
 
+_WRITE_FUNCS = {"insert", "update", "delete", "dialect_insert", "pg_insert"}
+
+
+def _table_aliases(fn):
+    """Local names bound to a table in `fn`: `t = league_members_table`."""
+    return {n.targets[0].id: n.value.id for n in ast.walk(fn)
+            if isinstance(n, ast.Assign) and len(n.targets) == 1
+            and isinstance(n.targets[0], ast.Name) and isinstance(n.value, ast.Name)
+            and n.value.id.endswith("_table")}
+
+
+def _kind(statement, aliases):
+    """("write" | "read" | None, tables) for what a `conn.execute(...)` runs:
+    insert/update/delete (function or `table.update()` form) or a select."""
+    resolve = lambda name: aliases.get(name, name)   # noqa: E731
+    e = statement
+    while isinstance(e, ast.Call):
+        f = e.func
+        if isinstance(f, ast.Name):
+            if f.id in _WRITE_FUNCS and e.args and isinstance(e.args[0], ast.Name):
+                return "write", {resolve(e.args[0].id)}
+            if f.id == "select":
+                return "read", {resolve(n.value.id) if isinstance(n, ast.Attribute) else resolve(n.id)
+                                for a in e.args for n in ast.walk(a)
+                                if (isinstance(n, ast.Attribute) and n.attr == "c"
+                                    and isinstance(n.value, ast.Name))
+                                or (isinstance(n, ast.Name) and resolve(n.id).endswith("_table"))}
+            return None, set()
+        if not isinstance(f, ast.Attribute):
+            break
+        if f.attr in ("insert", "update", "delete") and isinstance(f.value, ast.Name):
+            return "write", {resolve(f.value.id)}
+        e = f.value
+    return None, set()
+
+
+def _db_calls(node, conn):
+    """Calls that use the transaction, in source order: `conn.execute(...)`,
+    `conn.exec_driver_sql(...)`, or any call handed `conn`."""
+    calls = [c for c in ast.walk(node) if isinstance(c, ast.Call) and (
+        (isinstance(c.func, ast.Attribute) and isinstance(c.func.value, ast.Name)
+         and c.func.value.id == conn and c.func.attr in ("execute", "exec_driver_sql"))
+        or any(isinstance(a, ast.Name) and a.id == conn for a in c.args))]
+    return sorted(calls, key=lambda c: (c.lineno, c.col_offset))
+
+
+def _first_after_lock_is_the_write(w, call, aliases):
+    """The block's first use of `conn` after the lock writes, or reads a table
+    the same block writes (an upsert's own existence check). Anything else
+    sits between the lock and the write."""
+    conn = w.items[0].optional_vars.id
+    lead = w.body[0]
+    rest = (lead.body[1:] if isinstance(lead, ast.If) else []) + w.body[1:]
+    written = set()
+    for c in _db_calls(w, conn):
+        kind, tables = _kind(c.args[0], aliases) if c.args else (None, set())
+        if kind == "write" and _called(c.func) == "execute":
+            written |= tables
+    for statement in rest:
+        calls = _db_calls(statement, conn)
+        if calls:
+            first = calls[0]
+            if _called(first.func) != "execute":
+                return False
+            kind, tables = _kind(first.args[0], aliases)
+            return kind == "write" or (kind == "read" and bool(tables) and tables <= written)
+    return False
+
+
 def test_every_users_row_lock_opens_the_transaction_that_writes():
     """`_lock_live_user(conn, …)` must be the first statement inside the
     `with <engine>.begin() as conn:` block that also makes the write, and on
     that block's own `conn`. After a write it locks too late; alone in its own
-    transaction it's released before the write. On SQLite, run one at a time,
-    neither shows (release-lead's #587 QA), so this reads the source."""
+    transaction it's released before the write. The block's next use of
+    `conn` must be the write (or the upsert's read of the table it writes),
+    so nothing unrelated runs under the lock first. On SQLite, run one at a
+    time, none of this shows (release-lead's #587 QA), so this reads the
+    source."""
     tree = ast.parse(pathlib.Path(db_module.__file__).read_text())
     guarded, bad = set(), []
     for fn in ast.walk(tree):
@@ -408,6 +511,7 @@ def test_every_users_row_lock_opens_the_transaction_that_writes():
             continue
         guarded.add(fn.name)
         opened_by = {id(_opening_lock(w)): w for w in ast.walk(fn) if isinstance(w, ast.With)}
+        aliases = _table_aliases(fn)
         for call in locks:
             w = opened_by.get(id(call))
             item = w.items[0] if w is not None and len(w.items) == 1 else None
@@ -419,6 +523,30 @@ def test_every_users_row_lock_opens_the_transaction_that_writes():
                   and call.args[0].id == item.optional_vars.id
                   and len(w.body) > 1)                  # the write is in the same block
             if not ok:
-                bad.append(f"{fn.name} (database.py:{call.lineno})")
-    assert not bad, f"users-row lock not opening its write's transaction: {bad}"
+                bad.append(f"{fn.name} (database.py:{call.lineno}): not opening its write's block")
+            elif not _first_after_lock_is_the_write(w, call, aliases):
+                bad.append(f"{fn.name} (database.py:{call.lineno}): its next statement isn't the write")
+    assert not bad, f"users-row lock out of place: {bad}"
     assert guarded == _GUARDED_WRITERS
+
+
+def test_the_lock_runs_on_the_transaction_it_is_handed():
+    """`_lock_live_user` runs its SELECT … FOR KEY SHARE (and SQLite's BEGIN
+    IMMEDIATE) on the `conn` it's passed: never on `engine` or a connection of
+    its own, which would hold the lock outside the writer's transaction."""
+    tree = ast.parse(pathlib.Path(db_module.__file__).read_text())
+    fn = next(f for f in ast.walk(tree)
+              if isinstance(f, ast.FunctionDef) and f.name == "_lock_live_user")
+    conn = fn.args.args[0].arg
+    uses = [c for c in ast.walk(fn) if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+            and c.func.attr in ("execute", "exec_driver_sql", "connect", "begin", "raw_connection")]
+    assert uses and all(isinstance(c.func.value, ast.Name) and c.func.value.id == conn
+                        and c.func.attr in ("execute", "exec_driver_sql") for c in uses), \
+        [ast.unparse(c.func) for c in uses]
+    assert not [n for n in ast.walk(fn) if isinstance(n, ast.Name) and n.id == "engine"]
+    key_share = [c for c in uses if c.func.attr == "execute" and any(
+        isinstance(n, ast.Call) and _called(n.func) == "with_for_update"
+        and {k.arg: getattr(k.value, "value", None) for k in n.keywords}
+        == {"read": True, "key_share": True}
+        for n in ast.walk(c))]
+    assert key_share, "no SELECT … FOR KEY SHARE run on the passed conn"

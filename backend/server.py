@@ -28571,9 +28571,13 @@ def session_init():
             # short pick_ids array, invisible until December. Sleeper-only
             # here (platform leagues snapshot at their import/refresh
             # routes with native team keys). Own transaction; best-effort.
-            # Under the caller's users-row lock (#587). A leaguemate deleted
-            # meanwhile still gets their team's row, from Sleeper's public
-            # roster, as any member's next sync would write it.
+            # Under the caller's users-row lock (#587), which covers the caller
+            # only. A leaguemate deleted mid-snapshot still gets a roster-
+            # history row: public Sleeper data, which any member's next sync
+            # writes again. They can also keep a league_board_history row,
+            # which is private: their board is read before the write commits,
+            # and nothing re-syncs it away. The weekly sweep has the same
+            # race. It's a known gap with its own fix, not this lock's.
             try:
                 if (is_enabled("market.roster_history")
                         and str(league_id).isdigit()
