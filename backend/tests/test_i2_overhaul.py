@@ -13,7 +13,13 @@ R8) and AC-6a. Stacked on I-2 PRs 1–3 (#411–#413).
     offer and side, named from the offer's card. No serial comma, a count when
     a name is missing, never a raw id ("You no longer own 4046." is gone).
   * /send's re-check 409 on an ownership blocker carries `detail` ==
-    `message`, which OverhaulSummaryScreen's errorDetail(e) shows.
+    `message`, which OverhaulSummaryScreen's errorDetail(e) shows. It is a
+    send refusal, so it keeps the send-time copy ("…, so nothing was sent.").
+  * Post-launch follow-up: the PREPARE receipt (nothing attempted yet) uses
+    the receipt variant, the send-time sentence minus "so nothing was sent".
+    Only /prepare-send does; /send, /assemble's stored compat and every
+    attempts[].error.message keep the send-time copy. The wording is
+    marketing's final copy (§6 addendum 9, 2026-10-27).
   * A per-offer core 422 inside a 200 batch reaches `attempts[].error.message`
     on both the /send response and GET /api/overhauls/{id} (OverhaulPlanScreen
     reads the latter).
@@ -28,6 +34,7 @@ from backend.tests import test_overhaul_api as ovh_t
 from backend.tests import test_overhaul_service as svc_t
 
 TAIL = ", so nothing was sent. Find a new trade."
+RECEIPT_TAIL = ". Find a new trade."
 
 
 @pytest.fixture(autouse=True)
@@ -112,7 +119,7 @@ def _offer(oid, give, recv, cp, names, username=None):
     return o
 
 
-def _receipt(offers, *, mine, rosters, pool=None):
+def _receipt(offers, *, mine, rosters, pool=None, **kw):
     by_id = {o["offer_id"]: o for o in offers}
     packages = [{"package_id": f"p{o['offer_id']}", "give_ids": o["give_ids"],
                  "tiers": [{"tier": 1, "offer_ids": [o["offer_id"]]}]} for o in offers]
@@ -120,7 +127,7 @@ def _receipt(offers, *, mine, rosters, pool=None):
         selected=list(by_id), packages=packages, offers_by_id=by_id, my_roster_ids=mine,
         my_pick_ids=[], pool=pool if pool is not None else [a for o in offers for a in o["give_ids"]],
         rosters=rosters, reserved_asset_ids=[], capacity=None, recovery={}, package_states={},
-        checked_at="t", is_pick=svc_t._is_pick)
+        checked_at="t", is_pick=svc_t._is_pick, **kw)
 
 
 def _no_raw_ids(message, ids):
@@ -159,6 +166,43 @@ def test_receive_blocker_names_the_team_or_the_other_manager():
     _no_raw_ids(msgs["o_b"], ["8137", "o2"])
 
 
+def test_receipt_copy_gives_the_variant_for_both_sides_and_send_time_stays_the_default():
+    names = {"4046": "Josh Allen", "9509": "Bijan Robinson", "8136": "Rachaad White"}
+    named = _offer("o_a", ["4046", "9509"], ["X1"], "o1", names)
+    recv = _offer("o_b", ["A2"], ["8136"], "o2", dict(names, A2="Al Two"), username="Dolphins Den")
+    anon = _offer("o_c", ["A3"], ["8137"], "o3", {"A3": "Al Three"})
+    kw = dict(mine=["A2", "A3"], rosters={"o1": ["X1"], "o2": [], "o3": []})
+    offers = [named, recv, anon]
+    as_receipt = {(b["offer_id"], b["code"]): b["message"]
+                  for b in _receipt(offers, receipt_copy=True, **kw)["blockers"] if b.get("assets")}
+    assert as_receipt == {
+        ("o_a", "asset_not_owned"):
+            "Josh Allen and Bijan Robinson are no longer on your roster" + RECEIPT_TAIL,
+        ("o_b", "counterparty_asset_not_owned"):
+            "Rachaad White is no longer on Dolphins Den’s roster" + RECEIPT_TAIL,
+        ("o_c", "counterparty_asset_not_owned"):
+            "A player in this trade is no longer on the other manager’s roster" + RECEIPT_TAIL}
+    assert not any("nothing was sent" in m for m in as_receipt.values())
+    as_send = {(b["offer_id"], b["code"]): b["message"]
+               for b in _receipt(offers, **kw)["blockers"] if b.get("assets")}
+    assert as_send == {k: v[:-len(RECEIPT_TAIL)] + TAIL for k, v in as_receipt.items()}
+
+
+def test_receipt_variant_keeps_the_pick_and_count_fallbacks():
+    pick, pick2, player = "L1_2027_1_3", "L1_2028_2_5", "4046"
+    one = _offer("o_a", [pick], ["X1"], "o1", {})
+    two = _offer("o_b", [pick, pick2], ["X2"], "o2", {})
+    mixed = _offer("o_c", [pick, player], ["X3"], "o3", {})
+    receipt = _receipt([one, two, mixed], mine=[], rosters={"o1": ["X1"], "o2": ["X2"], "o3": ["X3"]},
+                       receipt_copy=True)
+    msgs = {b["offer_id"]: b["message"] for b in receipt["blockers"] if b["code"] == "asset_not_owned"}
+    assert msgs == {
+        "o_a": "A draft pick in this trade is no longer on your roster" + RECEIPT_TAIL,
+        "o_b": "2 draft picks in this trade are no longer on your roster" + RECEIPT_TAIL,
+        "o_c": "2 of the players and picks in this trade are no longer on your roster" + RECEIPT_TAIL}
+    _no_raw_ids(" ".join(msgs.values()), [pick, pick2, player])
+
+
 def test_ownership_blocker_keeps_its_place_before_the_same_assets_pool_blocker():
     o = _offer("o_a", ["4046"], ["X1"], "o1", {"4046": "Josh Allen"})
     receipt = _receipt([o], mine=[], rosters={"o1": ["X1"]}, pool=[])
@@ -173,7 +217,53 @@ def test_prepare_receipt_shows_the_readable_blocker(api, world):
     receipt = r.get_json()["receipt"]
     assert receipt["ok"] is False
     msgs = {b["message"] for b in receipt["blockers"] if b["code"] == "asset_not_owned"}
-    assert msgs == {"PA is no longer on your roster" + TAIL}   # the harness card names "A" as "PA"
+    # The harness card names "A" as "PA". A prepare receipt has attempted
+    # nothing, so it has no "so nothing was sent".
+    assert msgs == {"PA is no longer on your roster" + RECEIPT_TAIL}
+
+
+def test_prepare_receipt_counterparty_blocker_uses_the_receipt_variant(api, world):
+    oid, rm = _assembled(api)
+    world.rosters["o3"].remove("X3")              # the receive side moved before prepare
+    r = _prepare(api, oid, rm)
+    assert r.status_code == 200, r.get_json()
+    msgs = {b["message"] for b in r.get_json()["receipt"]["blockers"]
+            if b["code"] == "counterparty_asset_not_owned"}
+    # The harness card names X3 "PX3" and its manager's username is "O3".
+    assert msgs == {"PX3 is no longer on O3’s roster" + RECEIPT_TAIL}
+
+
+def test_prepare_says_the_receipt_wording_where_send_keeps_the_send_time_wording(api, world):
+    """The same moved assets, read two ways: /prepare-send reports before
+    anything is attempted, /send refuses an attempt. Both sides."""
+    oid, rm, prep = ovh_t._tie_then_prepare(api, world)
+    world.rosters[ovh_t.USER].remove("A")         # give side moved after prepare
+    world.rosters["o3"].remove("X3")              # receive side moved after prepare
+    overhaul_api._REFRESH_AT.clear()
+    assert api.post(f"/api/overhauls/{oid}/refresh", json={}, headers=ovh_t._h()).status_code == 200
+
+    # The receipt, for the same offers as before (the default selection would
+    # skip the offers /refresh just staled).
+    selected = [i for p in rm["packages"] for i in p["tiers"][0]["offer_ids"]]
+    again = api.post(f"/api/overhauls/{oid}/roadmaps/{rm['roadmap_id']}/prepare-send",
+                     json={"version": rm["version"], "offer_ids": selected}, headers=ovh_t._h())
+    assert again.status_code == 200, again.get_json()
+    blockers = again.get_json()["receipt"]["blockers"]
+    give = {b["message"] for b in blockers if b["code"] == "asset_not_owned" and b.get("assets")}
+    recv = {b["message"] for b in blockers if b["code"] == "counterparty_asset_not_owned"}
+    assert give == {"PA is no longer on your roster" + RECEIPT_TAIL}
+    assert recv == {"PX3 is no longer on O3’s roster" + RECEIPT_TAIL}
+
+    sent = api.post(f"/api/overhauls/{oid}/send", headers=ovh_t._h(), json={   # the send re-check
+        "prepare_token": prep["prepare_token"], "summary_hash": prep["summary_hash"],
+        "version": rm["version"], "idempotency_key": "i2-two-wordings"})
+    assert sent.status_code == 409, sent.get_json()
+    body = sent.get_json()
+    assert body["detail"] == body["message"]
+    assert body["detail"].endswith(TAIL), body["detail"]
+    # The receipt echoed in the 409 is the send-time one too.
+    assert all(b["message"].endswith(TAIL) for b in body["receipt"]["blockers"]
+               if b.get("assets")), body["receipt"]["blockers"]
 
 
 # ---------------------------------------------------------------------------

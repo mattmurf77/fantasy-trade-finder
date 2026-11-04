@@ -596,12 +596,15 @@ def _card_names(offer) -> dict:
     return out
 
 
-def _ownership_item(side, moved, names, team, package_id, offer_id):
-    """I-2 (R4): an ownership blocker in the shared send-time copy. `assets`
-    (the moved ids, as in the propose cores' 422 body) is what marks it as an
-    ownership blocker; "This package already completed." shares its code."""
+def _ownership_item(side, moved, names, team, package_id, offer_id, *, receipt_copy=False):
+    """I-2 (R4): an ownership blocker in the shared send-time copy, or, with
+    `receipt_copy`, the prepare-receipt variant (nothing attempted yet).
+    `assets` (the moved ids, as in the propose cores' 422 body) is what marks
+    it as an ownership blocker; "This package already completed." shares its
+    code."""
     code = "asset_not_owned" if side == "give" else "counterparty_asset_not_owned"
-    item = _item(code, ownership_copy.refusal_message(side, moved, names, team), package_id, offer_id)
+    item = _item(code, ownership_copy.refusal_message(side, moved, names, team, receipt=receipt_copy),
+                 package_id, offer_id)
     item["assets"] = list(moved)
     return item
 
@@ -617,8 +620,13 @@ def _item(code, message, package_id=None, offer_id=None):
 
 def validate_prepare(*, selected, packages, offers_by_id, my_roster_ids, my_pick_ids, pool,
                      rosters, reserved_asset_ids, capacity, recovery, package_states,
-                     legality=None, checked_at, is_pick) -> dict:
+                     legality=None, checked_at, is_pick, receipt_copy=False) -> dict:
     """Build the ValidationReceipt (§5.6) for a chosen set of offers.
+
+    `receipt_copy` picks the wording of the ownership blockers: False (the
+    default) is the send-time copy ("…, so nothing was sent."); True is the
+    prepare-receipt variant, for the one caller whose receipt reports before
+    anything was attempted (`/prepare-send`).
 
     `selected` are offer ids; `packages` the roadmap's Package[]; `rosters`
     maps user_id -> asset ids (players + picks) from the snapshot;
@@ -678,7 +686,8 @@ def validate_prepare(*, selected, packages, offers_by_id, my_roster_ids, my_pick
             if a not in outgoing:
                 outgoing.append(a)
         if moved:
-            blockers.insert(slot, _ownership_item("give", moved, names, None, pkg_id, offer["offer_id"]))
+            blockers.insert(slot, _ownership_item("give", moved, names, None, pkg_id, offer["offer_id"],
+                                                  receipt_copy=receipt_copy))
         cp = str(offer.get("counterparty_user_id") or "")
         cp_roster = rosters.get(cp) if isinstance(rosters, dict) else None
         moved, slot = [], None
@@ -698,7 +707,7 @@ def validate_prepare(*, selected, packages, offers_by_id, my_roster_ids, my_pick
         if moved:
             blockers.insert(slot, _ownership_item("receive", moved, names,
                                                   offer.get("counterparty_username") or None,
-                                                  pkg_id, offer["offer_id"]))
+                                                  pkg_id, offer["offer_id"], receipt_copy=receipt_copy))
     for pkg_id, offers in by_package.items():
         seen = set()
         for o in offers:
