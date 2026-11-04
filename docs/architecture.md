@@ -742,7 +742,7 @@ External scheduler (Render cron) hits four endpoints:
 |---|---|---|
 | `POST /api/cron/realtime-tick` | every 1–5 min | Drain `notification_queue` rows whose `deliver_after` has passed |
 | `POST /api/cron/hourly-tick` | hourly | Bundle drain + quiet-hours summary push at user's local 8am |
-| `POST /api/cron/daily-tick` | once daily (13:30 UTC) | 202 at once; a single-flight runner thread then runs nine steps serially: roster snapshots, Usage Trends store, receipts grading, rookie class-load monitor, player-cache guard, re-engagement scans, deck replenishment (deferred: a hard skip since 2026-10-23), eval nightly, value-model refit (see *Daily-tick runner* below) |
+| `POST /api/cron/daily-tick` | once daily (13:30 UTC) | 202 at once; a single-flight runner thread then runs ten steps serially: roster snapshots, Usage Trends store, receipts grading, rookie class-load monitor, player-cache guard, re-engagement scans, deck replenishment (deferred: a hard skip since 2026-10-23), eval nightly, value-model refit (see *Daily-tick runner* below) |
 | `POST /api/cron/value-snapshot` | once daily | Upsert consensus value of every universal-pool player into `player_value_history` (#57). Kept separate from `daily-tick` so a push-scan failure can't stop history collection. **NOT provisioned in `render.yaml`** — a dedicated `value-snapshot-daily` cron was added 2026-07-26 and reverted the same day (`1e50d3e`, broke blueprint sync). The **operative mechanism is `hourly-tick`'s idempotent fallback guard** (shared `_write_daily_value_snapshots`), which writes today's snapshot whenever a format is missing — cadence is guaranteed by the existing hourly cron alone. (This row previously claimed the dedicated cron existed; corrected 2026-08-14 as part of ADR-011 — the runbook § value-snapshot monitoring had the truth all along.) |
 | `POST /api/cron/roster-snapshot` | none (manual/external lever) | ADR-011 Writer C: force the weekly league-state snapshot sweep by hand (daemon + budget, idempotent per `period_key` via the existing `'weekly'` rows). Nothing schedules it — the scheduled path is a weekday-gated pass inside `daily-tick` (Writer B), and the on-sync writer (A) needs no scheduler at all. When a cron migration lands, provisioning this route is a one-line workflow addition. |
 
@@ -763,7 +763,8 @@ External scheduler (Render cron) hits four endpoints:
   | 6 | `reengagement` | the winback / finish_ranking / season_start user scan | per-kind caps in `_send_typed_push` |
   | 7 | `replenishment` | **deferred (2026-10-23):** hard skip, `detail=deferred: C2`; `_run_weekly_replenishment(now)` is not called | none: the flag is not read. Re-enabled = `deck.replenishment`; `replenish_weekday` `>=` gate, after C2 and the self-renewal fix |
   | 8 | `eval_nightly` | `eval.nightly.run_all(window_days=30)` | none (idempotent per UTC day) |
-  | 9 | `value_model_refit` | `_value_model.nightly_refit(now=now)` | `deck.value_model` |
+  | 9 | `deletion_scrub` | `deletion_scrub.tick(now)`: due DB passes, the model store's redaction, finished jobs deleted, the 24 h count | none (every deletion has a job); before the refit, never beside it |
+  | 10 | `value_model_refit` | `_value_model.nightly_refit(now=now)` | `deck.value_model` |
 
   Steps 1, 2, 3 and 5 are inline entries (`_daily_tick_<key>`) beside their async wrappers: same gates, same lock or single-flight, same body, so the dedicated `/api/cron/roster-snapshot`, `/usage-trends-refresh`, `/receipts-grade` and `/players-refresh` routes are unchanged.
 - **In-process by design.** The rejected alternative (A) was running the steps in the cron service's own process. It is deferred, as a post-launch follow-up once the helpers are extracted out of `server.py`, for two reasons. Three steps are tied to web-process state: the players guard (the on-disk cache plus `_pool_generation`), replenishment (`_sessions` plus `_trade_jobs`) and the refit (the served `models.jsonl`). And importing `server.py` runs `init_db()` and starts `_cleanup_loop` and the Win Now worker.
@@ -943,3 +944,16 @@ See [latency investigation](plans/trade-search-latency/README.md).
 ### App-open trade preparation
 
 Native cold launch and foreground resume initialize the restored league without blocking the initial screen. `api/auth.sessionInit` reads the shared saved fairness preference and sends `trade_fairness_threshold`. The server starts its existing background trade worker immediately after authoritative league/session assembly; installed clients that omit the field use 0.5, matching the native default. Startup retries failed jobs, preserves active searches and matching fresh work, and replaces completed jobs with mismatched fairness/shape settings. Preparation is independent of onboarding flags; native startup sends no duplicate generate request. Find a Trade adopts matching running/completed jobs; different fairness or shape must not inherit an incompatible running warm-up. Existing targeted searches and forced ranking/preference refreshes retain their regeneration paths. Full owner safety and durable evidence gates remain before cards appear. Warm-up does not guarantee three-second generation or preserve decks across backend restarts.
+
+## Account deletion's scrub of other users' decks (legal R28.20 (ii), 2026-10-31)
+
+`accounts._delete_user_data` deletes the person's own rows in one transaction. In that same transaction:
+- it reads the leagues their traces may sit in (memberships, imported leagues, roster history, their own decks);
+- it inserts a `deletion_scrub_jobs` row with a random token;
+- it gives the small stores that token: other users' `user_taste` for the person, and standing-offer team lists. It clears `trade_matches.match_valuation_json` on either side.
+
+`backend/deletion_scrub.py` then works the job off the request:
+- **DB pass:** started by the route, retried by `_cleanup_loop` under a lease, and run once more after a 6 h in-flight grace. It finds other users' deck rows and candidate sets per league and viewer, then scans each whole store in bounded, resumable pages for leagues the person had left. It redacts each card whose partner is the person: the token, their account's fields removed, the blended scores nulled.
+- **Model pass:** the daily tick's `deletion_scrub` step, before `value_model_refit`.
+
+The job row is deleted when both are done. Packs, the page store and the traced stores are later stages: `SCRUB_VERSION` re-runs kept jobs when one lands.
