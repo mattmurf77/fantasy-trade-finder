@@ -70,7 +70,7 @@ export const MON = {
   'mon.club.join': 'Join the Founding GMs.',
   'mon.pay.founder.price':
     'Founder price: $24.99 a year or $4.99 a month when you subscribe by December 31, 2026.',
-  'mon.pay.founder.new': 'From January 1, 2027, new members pay $34.99 a year or $6.99 a month.',
+  'mon.pay.founder.new': 'Starting in January 2027, new members pay $34.99 a year or $6.99 a month.',
   'mon.pay.founder.keep': 'Keep this price on your plan while your subscription stays active.',
   'mon.pay.founder.lapse':
     'If you switch plans or your subscription ends, you may lose the Founder price.',
@@ -81,9 +81,9 @@ export const MON = {
   // Home line and mark) are later updates, not this build.
   'mon.club.welcome_title': 'Welcome, Founding GM.',
   'mon.club.welcome_body.annual':
-    'Your plan is at the Founder price: $24.99 a year. Keep this price on your plan while your subscription stays active. From January 1, 2027, new members pay $34.99 a year or $6.99 a month.',
+    'Your plan is at the Founder price: $24.99 a year. Keep this price on your plan while your subscription stays active. Starting in January 2027, new members pay $34.99 a year or $6.99 a month.',
   'mon.club.welcome_body.monthly':
-    'Your plan is at the Founder price: $4.99 a month. Keep this price on your plan while your subscription stays active. From January 1, 2027, new members pay $34.99 a year or $6.99 a month.',
+    'Your plan is at the Founder price: $4.99 a month. Keep this price on your plan while your subscription stays active. Starting in January 2027, new members pay $34.99 a year or $6.99 a month.',
   'mon.club.since': 'Founding GM since {join date}',
   'mon.club.back': 'Back to my trades',
   'mon.club.kept_settings.annual':

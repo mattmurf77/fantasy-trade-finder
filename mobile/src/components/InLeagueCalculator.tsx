@@ -30,7 +30,7 @@ import SendInSleeperButton from './SendInSleeperButton';
 import OutlookBiasReceipt, { outlookDisplayName } from './OutlookBiasReceipt';
 import TradeDnaSheet from './TradeDnaSheet';
 import LeagueSwitcherSheet from './LeagueSwitcherSheet';
-import ShareTradeImage, { type ShareAsset } from './ShareTradeImage';
+import ShareTradeImage, { SHARE_VALUE_LINE, type ShareAsset } from './ShareTradeImage';
 import { Badge, Button, Card, Icon, Text as ChalkText, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
@@ -1571,7 +1571,7 @@ export default function InLeagueCalculator({
               renders above the verdict (see the D-303-1 comment there).
               Share + Clear deliberately stay here. */}
           {/* Share-as-image (DynastyDealer teardown 2026-07-26): render the
-              verdict to a PNG for the native share sheet; text fallback. */}
+              trade to a PNG for the native share sheet; text fallback. */}
           {bothSides && ev ? (
             <ShareTradeImage
               caption={`vs @${opponent?.username ?? 'them'} · ${FORMAT_LABEL[format]}`}
@@ -1579,9 +1579,7 @@ export default function InLeagueCalculator({
               receiveTitle="You receive"
               sendAssets={shareAssets(giveIds)}
               receiveAssets={shareAssets(receiveIds)}
-              sendTotal={ev.give_value}
-              receiveTotal={ev.receive_value}
-              verdictLine={shareVerdictLine(ev, opponent?.username ?? 'them')}
+              verdictLine={SHARE_VALUE_LINE}
               giveIds={giveIds}
               receiveIds={receiveIds}
               surface="calc_in_league"
@@ -1596,8 +1594,7 @@ export default function InLeagueCalculator({
                 `Trade idea vs @${opponent?.username ?? 'them'} (Fleeced · ${FORMAT_LABEL[format]})`,
                 `I send: ${giveIds.map((id) => playerById[id]?.name ?? id).join(', ')}`,
                 `I get: ${receiveIds.map((id) => playerById[id]?.name ?? id).join(', ')}`,
-                `Consensus: ${Math.round(ev.give_value).toLocaleString()} vs ${Math.round(ev.receive_value).toLocaleString()}`,
-                shareVerdictLine(ev, opponent?.username ?? 'them'),
+                SHARE_VALUE_LINE,
               ].join('\n')}
             />
           ) : null}
@@ -1773,20 +1770,6 @@ export default function InLeagueCalculator({
       />
     </View>
   );
-}
-
-// One-line verdict for the share card / text fallback — mirrors the
-// LeagueVerdict headline's logic, compressed.
-function shareVerdictLine(ev: CalcEvaluationInLeague, oppName: string): string {
-  if (ev.basis === 'divergence') {
-    if (ev.mutual_gain) return 'Win–win by both boards';
-    if (ev.your_value_delta > 0 && ev.their_value_delta <= 0)
-      return `Wins by my board — @${oppName} likely disagrees`;
-    if (ev.your_value_delta <= 0 && ev.their_value_delta > 0)
-      return `@${oppName} wins this one by their board`;
-    return 'Roughly even by both boards';
-  }
-  return ev.verdict ? `Consensus verdict: ${ev.verdict}` : 'Consensus read';
 }
 
 // In-league verdict. #204: the shared pick-denominated TradeValueBar is the
