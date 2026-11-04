@@ -706,8 +706,14 @@ def init_env(env, monkeypatch):
     _add_user(env, PEER, "peer")
     for uid in (REFERRER, PEER):
         _add_member(env, LEAGUE, uid)
-    monkeypatch.setitem(server._sessions, INVITEE_TOKEN,
-                        {"user_id": INVITEE, "verified": True})
+    # Real auth builder: the users row already exists before a token can
+    # initialize a league. Its INSERT alone positively marks first-init.
+    monkeypatch.setitem(server._sessions, INVITEE_TOKEN, {})
+    _, minted = server._extension_build_session(
+        user_id=INVITEE, username="newbie", display_name="newbie", avatar=None,
+        token=INVITEE_TOKEN, load_history=False)
+    minted["verified"] = True  # the platform/Sleeper proof's stamp
+    assert _user(env, INVITEE)["first_init_pending"] == 1
     return pushes
 
 
@@ -1110,3 +1116,78 @@ def test_join_row_title_fallback_never_shows_an_id(env):
     assert n["type"] == "referral_joined"
     assert n["title"] == "Someone you invited joined Fleeced."
     assert INVITEE not in n["title"] and n["title"] != n["body"]
+
+
+def test_real_account_session_builder_creates_positive_eligibility(env, init_env, monkeypatch):
+    uid, token = "acct_fresh-first-init", "fresh-account-init-token"
+    monkeypatch.setitem(server._sessions, token, {})
+    _, minted = server._account_build_session(uid, "Fresh account", token=token)
+    assert minted["account_only"] is True
+    assert _user(env, uid)["first_init_pending"] == 1
+    # A later mint/restore of the same working key is an ordinary update.
+    with env.begin() as conn:
+        conn.execute(users_table.update().where(users_table.c.sleeper_user_id == uid)
+                     .values(first_init_pending=0))
+    server._account_build_session(uid, "Fresh account", token=token)
+    assert _user(env, uid)["first_init_pending"] == 0
+
+
+@pytest.mark.parametrize("legacy", [None, 0])
+def test_real_minted_init_never_recredits_existing_users(env, init_env, legacy):
+    with env.begin() as conn:
+        conn.execute(users_table.update().where(users_table.c.sleeper_user_id == INVITEE)
+                     .values(first_init_pending=legacy, invited_by="original"))
+    _mint_row(env, T1)
+    _init(invite_id=T1)
+    assert _user(env, INVITEE)["invited_by"] == "original"
+    assert _rows(env)[0]["referred_user_id"] is None
+    assert not _events(env, "signup")
+    assert len(_events(env, "app_open")) == 1
+
+
+def test_real_minted_init_rolls_back_then_retries_same_invite(env, init_env, monkeypatch):
+    _mint_row(env, T1)
+    real = db_module.record_event
+
+    def fail_after_signup(user_id, event_type, **kw):
+        result = real(user_id, event_type, **kw)
+        if event_type == "signup":
+            raise RuntimeError("synthetic failure after signup insert")
+        return result
+
+    monkeypatch.setattr(db_module, "record_event", fail_after_signup)
+    _init(invite_id=T1)
+    assert _user(env, INVITEE)["first_init_pending"] == 1
+    assert _rows(env)[0]["referred_user_id"] is None
+    assert not _events(env, "signup")
+    assert not _notifs(env, REFERRER)
+    monkeypatch.setattr(db_module, "record_event", real)
+    _init(invite_id=T1)
+    assert _user(env, INVITEE)["first_init_pending"] == 0
+    assert len(_events(env, "signup")) == 1
+    assert len(_events(env, "referral_attributed")) == 1
+
+
+def test_deleted_real_minted_user_is_not_recreated_by_held_first_init(env, init_env, monkeypatch):
+    callbacks = []
+    parent_thread = server.threading.Thread
+
+    class HoldFirstInit(parent_thread):
+        def start(self):
+            if self.name == "session-init-bg-writes":
+                callbacks.append(self.run)
+                return
+            super().start()
+
+    monkeypatch.setattr(server.threading, "Thread", HoldFirstInit)
+    _mint_row(env, T1)
+    _init(invite_id=T1)
+    assert len(callbacks) == 1
+    assert _user(env, INVITEE)["first_init_pending"] == 1
+    response = _client().delete("/api/account", headers={"X-Session-Token": INVITEE_TOKEN})
+    assert response.status_code == 200, response.get_json()
+    callbacks[0]()
+    assert _user(env, INVITEE) is None
+    assert _rows(env)[0]["referred_user_id"] is None
+    assert not _events(env, "signup")
+    assert not _notifs(env, REFERRER)

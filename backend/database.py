@@ -19,6 +19,7 @@ import os
 import threading
 import time
 import zlib
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 
 try:
@@ -490,6 +491,7 @@ users_table = Table("users", metadata,
                                           #   {"1qb_ppr": ["RB","WR"], "sf_tep": []}
     Column("tier_overrides",  Text),     # JSON — dual-format shape:
                                           #   {"1qb_ppr": {pid: elo}, "sf_tep": {pid: elo}}
+    Column("first_init_pending", Integer),  # 1 only on a fresh auth INSERT; legacy NULL is ineligible
     Column("invited_by",      String),   # sleeper username of referrer (null = direct)
     Column("unlocked_formats", Text),    # JSON list — which formats the user has
                                           # unlocked trade finder in, e.g. ["1qb_ppr"]
@@ -4022,6 +4024,7 @@ def _migrate_db() -> None:
         # League tile can show the league's true team count.
         ("leagues",            "total_rosters",         "INTEGER"),
         ("users",              "invited_by",            "VARCHAR"),
+        ("users",              "first_init_pending",     "INTEGER"),
         ("users",              "unlocked_formats",      "TEXT"),
         # #111 — per-user pick-value scale for the anchor wizard
         ("users",              "anchor_scale",          "TEXT"),
@@ -5192,6 +5195,7 @@ def record_event(
     touch_user:  bool = True,
     bind=None,
     require_user: bool = False,
+    conn=None,
 ) -> dict | None:
     """Append one row to user_events AND bump the matching users.last_*_at
     column (and device snapshot columns) in a single transaction.
@@ -5218,16 +5222,18 @@ def record_event(
     rank-class event (so callers don't need a follow-up SELECT). Returns
     None for non-rank events or when logging fails.
 
-    Failures are logged and swallowed — event logging must never break the
-    surrounding business logic.
+    Default failures are logged and swallowed. With an explicitly supplied
+    `conn`, the caller owns the transaction/live-user guard and errors propagate
+    so a first-init failure rolls back its marker, attribution and signup.
     """
+    supplied_conn = conn
     if not user_id or not event_type:
         return None
     now = _now()
     streak_result: dict | None = None
     extra: dict = {"platform": platform} if platform is not None else {}
     try:
-        with (bind if bind is not None else engine).begin() as conn:
+        with (nullcontext(supplied_conn) if supplied_conn is not None else (bind if bind is not None else engine).begin()) as conn:
             if require_user:
                 _lock_live_user(conn, user_id)
             conn.execute(
@@ -5280,6 +5286,8 @@ def record_event(
     except AccountGone:
         raise   # only under require_user: the caller stops there
     except Exception as e:
+        if supplied_conn is not None:
+            raise
         print(f"[record_event] {user_id}/{event_type} failed: {e}")
         return None
     return streak_result
@@ -5958,6 +5966,32 @@ def _lock_live_user(conn, user_id: str) -> None:
         raise AccountGone()
 
 
+@contextmanager
+def first_init_transaction(user_id: str):
+    """Borrow (conn, first) under a live-user guard; rollback restores eligibility.
+
+    Only upsert_user's actual INSERT sets pending=1. Legacy NULL and consumed
+    0 are never inferred new from missing activity/history. Conditional UPDATE
+    serializes competing inits on both supported dialects.
+    """
+    with engine.begin() as conn:
+        _lock_live_user(conn, user_id)
+        first = conn.execute(update(users_table).where(
+            users_table.c.sleeper_user_id == user_id,
+            users_table.c.first_init_pending == 1,
+        ).values(first_init_pending=0)).rowcount == 1
+        yield conn, first
+
+
+def set_first_init_inviter(conn, user_id: str, invited_by: str | None) -> None:
+    """Called only by the winner in first_init_transaction; existing credit wins."""
+    if invited_by:
+        conn.execute(update(users_table).where(
+            users_table.c.sleeper_user_id == user_id,
+            users_table.c.invited_by.is_(None),
+        ).values(invited_by=invited_by))
+
+
 def upsert_user(
     sleeper_user_id: str,
     username: str = "",
@@ -5969,8 +6003,10 @@ def upsert_user(
 ) -> None:
     """Insert a new user or update their display fields if they already exist.
 
-    `invited_by` is only set on INSERT — repeat logins never overwrite the
-    original referrer, so referral attribution is immutable once recorded.
+    This helper sets `invited_by` only on INSERT. The claimed first-init
+    transaction may fill an empty inviter on that fresh row; repeat logins
+    never overwrite attribution. Only this helper's actual INSERT sets the
+    positive first_init_pending marker; updates leave legacy NULL/consumed 0.
 
     `require_user` (the session-init daemon): update only, under the row's
     lock; with no row it raises AccountGone and inserts nothing.
@@ -5997,6 +6033,7 @@ def upsert_user(
                 "display_name":    display_name,
                 "avatar":          avatar,
                 "created_at":      _now(),
+                "first_init_pending": 1,
             }
             if invited_by:
                 values["invited_by"] = invited_by
@@ -14273,6 +14310,7 @@ def create_notification(
     title:    str,
     body:     str,
     metadata: dict | None = None,
+    conn=None,
 ) -> dict:
     """
     Insert a new notification for a user.
@@ -14290,6 +14328,7 @@ def create_notification(
     -------
     Dict with the inserted row data including the new id.
     """
+    supplied_conn = conn
     row = {
         "user_id":       user_id,
         "type":          type_,
@@ -14299,7 +14338,7 @@ def create_notification(
         "is_read":       0,
         "created_at":    _now(),
     }
-    with engine.begin() as conn:
+    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.begin()) as conn:
         result = conn.execute(insert(notifications_table).values(**row))
         row["id"] = result.inserted_primary_key[0]
     return row
@@ -14810,14 +14849,28 @@ def get_user_by_username(username: str) -> dict | None:
     return dict(row._mapping) if row else None
 
 
-def get_referral_by_invite_token(invite_token: str) -> dict | None:
+
+def lock_referral_inviter(conn, user_id: str) -> bool:
+    """First-init credit locks user BEFORE referral rows, like deletion.
+
+    The owning first-init transaction already holds SQLite's write lock.
+    On PG, KEY SHARE waits for an in-progress deletion and then returns
+    false for its missing user; it protects a live inviter until commit.
+    """
+    return conn.execute(select(users_table.c.sleeper_user_id).where(
+        users_table.c.sleeper_user_id == user_id,
+    ).with_for_update(read=True, key_share=True)).first() is not None
+
+
+def get_referral_by_invite_token(invite_token: str, *, conn=None) -> dict | None:
     """The `referrals` row for an invite id (`t`, = invite_token), plus the
     referrer's users.display_name as `referrer_display_name` (None without a
     users row). Read-only; None when no row matches. Referral loop D-1."""
+    supplied_conn = conn
     if not invite_token:
         return None
     r, u = referrals_table, users_table
-    with engine.connect() as conn:
+    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
         row = conn.execute(
             select(r, u.c.display_name.label("referrer_display_name"))
             .select_from(r.outerjoin(u, u.c.sleeper_user_id == r.c.referrer_user_id))
@@ -14893,13 +14946,14 @@ def load_notifications(user_id: str, unread_only: bool = False) -> list[dict]:
 # Referral loop L7 — the ledger's SQL (rules: backend/referral_ledger.py)
 # ---------------------------------------------------------------------------
 
-def league_has_member(league_id: str, user_id: str) -> bool:
+def league_has_member(league_id: str, user_id: str, *, conn=None) -> bool:
     """True when `league_members` holds `user_id` for `league_id`: the DB
     membership snapshot every session init writes and that platform leagues
     are resolved from (session_input.resolve_session_input)."""
+    supplied_conn = conn
     if not league_id or not user_id:
         return False
-    with engine.connect() as conn:
+    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
         row = conn.execute(
             select(league_members_table.c.user_id)
             .where(league_members_table.c.league_id == str(league_id))
@@ -14950,48 +15004,52 @@ def create_referral_invite(referrer_user_id: str, league_id: str,
     raise RuntimeError("could not mint a unique invite id")
 
 
-def get_referral_for_referred(user_id: str, status: str | None = None) -> dict | None:
+def get_referral_for_referred(user_id: str, status: str | None = None, *, conn=None) -> dict | None:
     """The ledger row crediting `user_id` (a user is credited at most once
     ever, §7.6), optionally only in `status`. Served by ix_referrals_referred."""
+    supplied_conn = conn
     if not user_id:
         return None
     r = referrals_table
     q = select(r).where(r.c.referred_user_id == user_id)
     if status is not None:
         q = q.where(r.c.status == status)
-    with engine.connect() as conn:
+    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
         row = conn.execute(q.order_by(r.c.id).limit(1)).fetchone()
     return dict(row._mapping) if row else None
 
 
-def claim_referral(referral_id: int, referred_user_id: str, method: str) -> bool:
+def claim_referral(referral_id: int, referred_user_id: str, method: str, *, conn=None) -> bool:
     """§7.4 step 4 / §7.5: credit a `pending`, unclaimed row to the invitee.
     One conditional UPDATE, so two concurrent first sessions can't both
     claim it. False when the row was already claimed (or isn't pending), or
     when uq_referral_pair refuses a second row for this (referrer, referred)."""
+    supplied_conn = conn
     from sqlalchemy.exc import IntegrityError
     r = referrals_table
     try:
-        with engine.begin() as conn:
-            return conn.execute(
-                update(r)
-                .where(r.c.id == referral_id)
-                .where(r.c.referred_user_id.is_(None))
-                .where(r.c.status == "pending")
-                .values(referred_user_id=referred_user_id, status="joined",
-                        joined_at=_now(), attribution_method=method)
-            ).rowcount == 1
+        with (nullcontext(supplied_conn) if supplied_conn is not None else engine.begin()) as conn:
+            with conn.begin_nested():
+                return conn.execute(
+                    update(r)
+                    .where(r.c.id == referral_id)
+                    .where(r.c.referred_user_id.is_(None))
+                    .where(r.c.status == "pending")
+                    .values(referred_user_id=referred_user_id, status="joined",
+                            joined_at=_now(), attribution_method=method)
+                ).rowcount == 1
     except IntegrityError:
         return False
 
 
-def insert_referral_sibling(parent: dict, referred_user_id: str) -> int | None:
+def insert_referral_sibling(parent: dict, referred_user_id: str, *, conn=None) -> int | None:
     """§7.6: a further joiner through an already-claimed id gets its own
     `joined` row — same referrer, league, surface and created_at (the link's
     mint time), share_token = the parent's id, and a fresh unique
     invite_token `<share_token>~<6 random>` that is never emitted or linked.
     Returns the new id, or None when uq_referral_pair already holds this
     (referrer, referred) pair."""
+    supplied_conn = conn
     import secrets
     from sqlalchemy.exc import IntegrityError
     r = referrals_table
@@ -15007,10 +15065,11 @@ def insert_referral_sibling(parent: dict, referred_user_id: str) -> int | None:
             attribution_method="token",
         )
         try:
-            with engine.begin() as conn:
-                return conn.execute(insert(r).values(**values)).inserted_primary_key[0]
+            with (nullcontext(supplied_conn) if supplied_conn is not None else engine.begin()) as conn:
+                with conn.begin_nested():
+                    return conn.execute(insert(r).values(**values)).inserted_primary_key[0]
         except IntegrityError:
-            with engine.connect() as conn:
+            with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
                 pair = conn.execute(
                     select(r.c.id)
                     .where(r.c.referrer_user_id == parent["referrer_user_id"])
@@ -15022,14 +15081,15 @@ def insert_referral_sibling(parent: dict, referred_user_id: str) -> int | None:
 
 
 def league_match_candidates(league_id: str, invitee_user_id: str, *,
-                            opened_since: str, created_since: str) -> list[dict]:
+                            opened_since: str, created_since: str, conn=None) -> list[dict]:
     """§7.5 candidates in the invitee's first-session league: minted rows
     (share_token set), `pending`, unclaimed, opened since `opened_since`,
     created since `created_since`, referrer ≠ invitee. Newest open first;
     each carries the referrer's users.username as `referrer_username` (the
     legacy invited_by tie-breaker). Served by ix_referrals_league_status."""
+    supplied_conn = conn
     r, u = referrals_table, users_table
-    with engine.connect() as conn:
+    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
         rows = conn.execute(
             select(r, u.c.username.label("referrer_username"))
             .select_from(r.outerjoin(u, u.c.sleeper_user_id == r.c.referrer_user_id))
@@ -15097,11 +15157,12 @@ def merge_into_unread_referral_join(user_id: str, referral_id: int, *,
     return False
 
 
-def get_user_names(user_id: str) -> dict | None:
+def get_user_names(user_id: str, *, conn=None) -> dict | None:
     """{username, display_name} of a users row, or None without one."""
+    supplied_conn = conn
     if not user_id:
         return None
-    with engine.connect() as conn:
+    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
         row = conn.execute(
             select(users_table.c.username, users_table.c.display_name)
             .where(users_table.c.sleeper_user_id == user_id)
@@ -15109,10 +15170,11 @@ def get_user_names(user_id: str) -> dict | None:
     return dict(row._mapping) if row else None
 
 
-def get_league_platform(league_id: str) -> str:
+def get_league_platform(league_id: str, *, conn=None) -> str:
     """The `leagues.platform` of a stored league ('sleeper' when unset or
     unknown): the platform-linked leagues carry espn / mfl / fleaflicker."""
-    with engine.connect() as conn:
+    supplied_conn = conn
+    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
         row = conn.execute(
             select(leagues_table.c.platform)
             .where(leagues_table.c.sleeper_league_id == str(league_id))
