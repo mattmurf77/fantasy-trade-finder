@@ -84,9 +84,9 @@ export default function SendInMflButton({
   onSent,
   compact,
   style,
-  // Carried for P0-7 parity (see Props); intentionally unread until MFL
-  // attempt/failure events are registered in the taxonomy.
-  surface: _surface,
+  // Carried for P0-7 parity (see Props). No MFL attempt/failure events
+  // are registered yet; the one read is doPropose's #531 Shop tag.
+  surface,
   sendPreCheck,
 }: Props) {
   const enabled = useFlag('trade.send_in_mfl');
@@ -127,6 +127,7 @@ export default function SendInMflButton({
         give_player_ids: givePlayerIds,
         receive_player_ids: receivePlayerIds,
         impression_id: impressionId,
+        ...(surface === 'shop' ? { source: 'shop' as const } : {}),
       });
       settleSend(sendKey, 'sent');
       haptics.success();
@@ -204,7 +205,7 @@ export default function SendInMflButton({
         );
       }
     }
-  }, [sendKey, leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, onSent, openSignIn, goReconnect, openMfl]);
+  }, [sendKey, leagueId, theirUserId, givePlayerIds, receivePlayerIds, impressionId, surface, onSent, openSignIn, goReconnect, openMfl]);
 
   // #180-parity pre-flight — the shared /api/trades/validate branches to a
   // fresh MFL rosters export server-side. Never throws; findings are
