@@ -41,6 +41,14 @@
   - `send_default_pii` is **deprecated** in 2.72.0, in favour of `data_collection`. It's still honoured (only a DeprecationWarning). Revisit on the 3.x upgrade.
 - **Bumping it later:** re-run `backend/tests/test_error_alerts.py`, which pins the init options, the scrub, and the one-event counts.
 
+### Backend: SQLite version floor for `octet_length()` (the deletion scrub)
+
+| Package | Version | Changed | Why |
+|---|---|---|---|
+| SQLite (the library Python links) | `>= 3.43` (a floor, nothing pinned) | `feat/trades-deletion-scrub` (#557) | `deletion_scrub._bakeoff_batches` sizes rows with `octet_length()`, which SQLite added in 3.43.0. On an older SQLite the scrub's bakeoff pass raises "no such function". Postgres has it. CI's Ubuntu Python has 3.45, local macOS 3.50; prod is Postgres. Pinned by `test_bakeoff_batches_count_stored_bytes_not_characters`. |
+
+---
+
 ## 2026-10-26
 
 ### Backend: `gunicorn` pinned to the version prod runs
@@ -181,6 +189,7 @@
 - **Two file locations** — `data/trade_finder.db` (canonical) AND `trade_finder.db` at repo root (legacy duplicate). Code currently reads from `data/`; root file is residual. Cleanup pending — see [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) Q-001.
 - **No migration framework.** Schema changes require manual ALTER or DROP/CREATE in `database.py`. Don't ship schema changes without coordinating with anyone else who has a local DB.
 - **WAL mode not enabled.** Concurrent reader/writer access can lock — single-process for now.
+- **Version floor 3.43** for `octet_length()` (the deletion scrub; see 2026-10-31 above).
 - **Postgres-swappable** via `DATABASE_URL` env var. Untested in production; will need at least one full run-through before relying on it.
 
 ### macOS port 5000

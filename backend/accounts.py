@@ -777,6 +777,16 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "deck_card_withdrawals", "deck_evidence_packs",
 )
 
+# Tables that name a person and are neither deleted nor exported here, each
+# with its reason (test_account_deletion_coverage's person-column scan).
+_KEPT_WITH_REASON = {
+    # The deletion's own record: its row holds the resolved ids only until
+    # the scrub of OTHER users' stores finishes, and is then deleted
+    # (deletion_scrub.enqueue below; legal R28.20 (ii), (ix)). Not the
+    # person's data to export: they're gone.
+    "deletion_scrub_jobs": "the deletion scrub's job, deleted when it finishes",
+}
+
 # Team overhaul (BUILD-CONTRACT §4) keys its owner as `account_user_id`, and
 # the rest by `overhaul_id`, so none of it fits the user_id loop above.
 _OVERHAUL_CHILD_TABLES = ("overhaul_offers", "overhaul_roadmaps", "overhaul_attempts",
@@ -973,6 +983,17 @@ def _delete_user_data(sleeper_user_id: str,
         # in this same transaction; stale generation/adoption tokens then fail.
         from .prepared_trade_store import delete_for_users as delete_prepared_for_users
         counts.update(delete_prepared_for_users(conn, user_ids))
+        # Legal R28.20 (ii) / R28.22: the scrub of this person's traces in
+        # OTHER users' decks. Its job row (a random token, the ids, and the
+        # leagues, read before the deletes below remove them) commits with
+        # this deletion; the route kicks the deck stores off the request and
+        # the cleanup loop retries them (backend/deletion_scrub.py). The small
+        # stores take the same token here.
+        from . import deletion_scrub
+        token = deletion_scrub.enqueue(conn, user_ids,
+                                       deletion_scrub.capture_leagues(conn, user_ids))
+        counts["deletion_scrub_jobs_enqueued"] = 1
+        counts.update(deletion_scrub.scrub_side_tables(conn, user_ids, token))
         # Revoke durable tokens in this transaction. A failure must roll back
         # the deletion, never return success with restorable credentials.
         for name in ("sessions", "entitlements", "subscription_events"):
@@ -1340,17 +1361,19 @@ def _delete_user_data(sleeper_user_id: str,
         _del("trade_share_tokens", db.trade_share_tokens_table, "created_by")
 
         # Shared rows — anonymize the deleted side, keep the counterparty's
-        # record (incl. status + both decisions) intact.
+        # record (incl. status + both decisions) intact. The match-time
+        # valuation holds both sides' boards (user_a's own as the viewer,
+        # user_b's as the partner), so it goes either way (legal R28.22 e).
         res = conn.execute(
             update(db.trade_matches_table)
             .where(db.trade_matches_table.c.user_a_id.in_(user_ids))
-            .values(user_a_id=DELETED_USER_PLACEHOLDER)
+            .values(user_a_id=DELETED_USER_PLACEHOLDER, match_valuation_json=None)
         )
         n = res.rowcount or 0
         res = conn.execute(
             update(db.trade_matches_table)
             .where(db.trade_matches_table.c.user_b_id.in_(user_ids))
-            .values(user_b_id=DELETED_USER_PLACEHOLDER)
+            .values(user_b_id=DELETED_USER_PLACEHOLDER, match_valuation_json=None)
         )
         counts["trade_matches_anonymized"] = n + (res.rowcount or 0)
 
@@ -1513,6 +1536,32 @@ def _export_evidence_pack(row: dict) -> None:
         row["pack_error"] = str(e)
 
 
+# Calibration (legal R28.26 #9, MUST): a grader's own cards are exported
+# without any arm's partner fields. Calibration is blind (blind_grading: the
+# grader sees `neutral_trade`, never the arms), so `gain_partner` ("they rank
+# X at 1.4x market") and `reasons` ("fits their rebuild") were never shown to
+# the grader; exporting them would show a live partner's private board for
+# the first time. Every partner, live or deleted, as the overhaul export does
+# (R28.20 c2). The grades, tags and `gain_viewer` stay. The same keys the
+# deletion scrub removes from a redacted card (deletion_scrub.
+# _GRADING_ARM_KEYS_REMOVED, pinned equal by test).
+_GRADING_ARM_PARTNER_KEYS = ("gain_partner", "reasons")
+
+
+def _export_grading_arms(raw):
+    """A grading card's `arms_json` for the export: each arm minus its
+    partner fields. Anything that doesn't parse as {arm: {…}} is withheld
+    (None), never passed through as text that could still hold them."""
+    try:
+        arms = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(arms, dict) or not all(isinstance(v, dict) for v in arms.values()):
+        return None
+    return json.dumps({arm: {k: v for k, v in prov.items() if k not in _GRADING_ARM_PARTNER_KEYS}
+                       for arm, prov in arms.items()}, sort_keys=True)
+
+
 def _export_deck_features(raw):
     """Remove only prepared recovery evidence; retain the existing text contract."""
     if not isinstance(raw, str):
@@ -1556,6 +1605,9 @@ def export_user_data(sleeper_user_id: str,
             elif key == "deck_evidence_packs":
                 for row in tables[key]:
                     _export_evidence_pack(row)
+            elif key == "grading_cards":
+                for row in tables[key]:
+                    row["arms_json"] = _export_grading_arms(row["arms_json"])
 
         for name, predicate, omit in (
             ("trade_matches", db.trade_matches_table.c.user_a_id.in_(user_ids)

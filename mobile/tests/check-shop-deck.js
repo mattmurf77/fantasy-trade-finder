@@ -765,25 +765,21 @@ for (const rel of [BODY_REL, MODE_REL]) {
         : `third arg: ${txt(body, calls[0].arguments[2])}`,
     );
   }
-  // The ✓'s calc_trade_queued rides queueCalcTrade's screen arg — honest
-  // about where the tap happened.
-  const fnLike = functionNamed(body, 'handleLike');
-  const screenProp =
-    fnLike &&
-    findAll(
-      body,
-      (n) =>
-        ts.isPropertyAssignment(n) &&
-        n.name.getText(body) === 'screen' &&
-        ts.isStringLiteral(n.initializer) &&
-        n.initializer.text === 'ShopAsset' &&
-        n.getStart(body) >= fnLike.getStart(body) &&
-        n.getEnd() <= fnLike.getEnd(),
-    )[0];
+  // The tile's send reports surface 'shop' on the send events, honest
+  // about where the tap happened (#531 follow-up: the platform send router
+  // replaced the deck queue, so calc_trade_queued no longer fires here).
+  const surfaceAttr = findAll(
+    body,
+    (n) =>
+      ts.isJsxAttribute(n) &&
+      n.name.getText(body) === 'surface' &&
+      n.initializer && ts.isStringLiteral(n.initializer) &&
+      n.initializer.text === 'shop',
+  );
   assert(
-    !!screenProp,
-    "h5d: the like's queueCalcTrade call reports screen 'ShopAsset'",
-    'calc_trade_queued would otherwise claim a screen the user is not on',
+    surfaceAttr.length === 1,
+    "h5d: the tile's SendInSleeperButton reports surface 'shop'",
+    'the send funnel would otherwise claim a mount the user is not on',
   );
 }
 
@@ -791,24 +787,27 @@ for (const rel of [BODY_REL, MODE_REL]) {
 
 {
   const sf = parse(BODY_REL);
-  const like = jsxHandler(sf, 'shop.like-btn');
   const dismiss = jsxHandler(sf, 'shop.dismiss-btn');
-  assert(
-    !!like && /handleLike/.test(like) && !/handleDismiss/.test(like),
-    'i1: shop.like-btn dispatches handleLike',
-    like || 'button or onPress not found',
+  // #531 follow-up: the primary action is the platform send router, not a
+  // queue (check-shop-send.js pins its props).
+  const routers = findAll(
+    sf,
+    (n) => (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) &&
+      n.tagName.getText(sf) === 'SendInSleeperButton',
   );
   assert(
-    !!dismiss && /handleDismiss/.test(dismiss) && !/handleLike/.test(dismiss),
+    routers.length === 1 && !/shop\.like-btn/.test(sf.getFullText()),
+    'i1: the tile\'s primary action is SendInSleeperButton (the old queue button is gone)',
+    `found ${routers.length} router mount(s)`,
+  );
+  assert(
+    !!dismiss && /handleDismiss/.test(dismiss),
     'i2: shop.dismiss-btn dispatches handleDismiss (uncrossed)',
     dismiss || 'button or onPress not found',
   );
-  const fnLike = functionNamed(sf, 'handleLike');
   assert(
-    !!fnLike &&
-      referencesIdentifier(sf, fnLike, 'queueCalcTrade') &&
-      !referencesIdentifier(sf, fnLike, 'swipeTrade'),
-    'i3: the like reaches queueCalcTrade (never swipeTrade)',
+    !/\bqueueCalcTrade\s*\(/.test(sf.getFullText()),
+    'i3: nothing in the Shop body calls queueCalcTrade (send-only, no deck queue)',
   );
   // The real POST lives in commitDismiss, with the literal 'pass'.
   const fnCommit = functionNamed(sf, 'commitDismiss');

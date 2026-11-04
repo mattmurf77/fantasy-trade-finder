@@ -670,6 +670,12 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
                 if not same_model(public_card, identity):
                     gen["pool_rejections"] += 1
                     continue
+                # Legal R28.26 #10: never mint an offer naming a partner whose
+                # account deletion's scrub is still running (refused, not
+                # stored); the deletion already retired their existing offers.
+                from .database import live_deletion_token
+                if live_deletion_token(card.target_user_id):
+                    continue
                 h = offer_cache_hash(canonical, identity, epoch)
                 if h in known:
                     prior = by_hash.pop(h, None)

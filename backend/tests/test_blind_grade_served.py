@@ -20,6 +20,7 @@ from backend import database as db
 from backend.eval import blind_grade
 from backend.eval import data as eval_data
 from backend.eval import evidence_pack as ep
+from backend.eval.contract import REDACTED_PARTNER_PREFIX
 from backend.tests.test_eval_pack_reader import _card, _row, insert_pack, pack_table
 from backend.tests.test_eval_withdrawals_and_paging import withdrawals_table
 from backend.tools import prod_analytics
@@ -78,19 +79,22 @@ def prod(monkeypatch):
 
 
 def put_deck(prod: Prod, job: str, n: int, *, served_at: str, rows=None, tier="first30",
-             delivered=(), no_assets=(), w0=(), w1=(), source=None, snapshot=(), league="lg"):
+             delivered=(), no_assets=(), w0=(), w1=(), source=None, snapshot=(), league="lg",
+             redacted=()):
     """A deck of n built cards: full rows (assets and valuation) for `rows`
     (default every index not in w0), `tier` and delivered_at on the indexes
     in `delivered`, no assets_json on `no_assets`, deck_source `source`,
     valuation_json in the personal-market snapshot's shape on `snapshot` (the
-    value core's elsewhere), in `league`, and withdrawals: w0 served_before=0,
-    w1 served_before=1."""
+    value core's elsewhere), in `league`, a redaction token as the partner on
+    `redacted`, and withdrawals: w0 served_before=0, w1 served_before=1."""
     rows = [i for i in range(n) if i not in w0] if rows is None else rows
     out = []
     for i in rows:
         card = {**_card(job, i, served_at=served_at), "league_id": league}
         if source is not None:
             card["deck_source"] = source
+        if i in redacted:
+            card["partner_user_id"] = f"{REDACTED_PARTNER_PREFIX}aa11"
         out.append({**_row(card), "evidence_tier": tier,
                     "delivered_at": served_at if i in delivered else None,
                     "assets_json": None if i in no_assets else json.dumps(
@@ -213,6 +217,7 @@ def test_a_chosen_card_without_a_full_row_is_skipped_and_counted(prod, tmp_path,
                                                    "skipped_decks_in_lookback_by_reason": {
                                                        "calibration_refresh": 0,
                                                        "pack_integrity": 0,
+                                                       "partner_redacted": 0,
                                                        "withdrawal_conflict": 0}}
 
 
@@ -252,7 +257,25 @@ def test_a_deck_whose_evidence_contradicts_itself_is_not_graded(prod):
     # models-lead C5: the skip is counted by reason, never silent
     assert card_set["skipped_decks_by_reason"] == {"calibration_refresh": 0,
                                                    "pack_integrity": 0,
+                                                   "partner_redacted": 0,
                                                    "withdrawal_conflict": 1}
+
+
+def test_a_deck_holding_a_redacted_partners_card_is_not_graded(prod):
+    """models-lead M2 (a): a card whose partner deleted their account has a
+    token for a partner and lost the partner's inputs, so it can't be graded
+    fairly. The newer deck holding one is skipped whole (live evidence, so the
+    loader reaches the partner_redacted mark) and counted; the older clean deck
+    is graded."""
+    fake = prod()
+    put_deck(fake, "T", 4, served_at=_ago(3), delivered=range(4))
+    put_deck(fake, "R", 4, served_at=_ago(1), tier=None, delivered=range(4), redacted=[2])
+    card_set = served()
+    assert shown(card_set) == ["T-g0", "T-g1", "T-g2", "T-g3"]
+    assert card_set["skipped_decks_by_reason"] == {"calibration_refresh": 0,
+                                                   "pack_integrity": 0,
+                                                   "partner_redacted": 1,
+                                                   "withdrawal_conflict": 0}
 
 
 def test_skipped_decks_are_counted_in_every_league_older_ones_too(prod, tmp_path, capsys):
@@ -281,7 +304,8 @@ def test_skipped_decks_are_counted_in_every_league_older_ones_too(prod, tmp_path
                              "--league", "lg", "--league", "lg2", "--output", str(out)]) == 0
     card_set = json.loads(out.read_text())
     assert shown(card_set) == ["T-g0", "T-g1", "T-g2", "U-g0", "U-g1", "U-g2"]
-    counts = {"calibration_refresh": 3, "pack_integrity": 1, "withdrawal_conflict": 0}
+    counts = {"calibration_refresh": 3, "pack_integrity": 1, "partner_redacted": 0,
+              "withdrawal_conflict": 0}
     assert card_set["skipped_decks_by_reason"] == counts
     assert json.loads(capsys.readouterr().out)["skipped_decks_in_lookback_by_reason"] == counts
 
@@ -317,7 +341,8 @@ def test_a_league_whose_deck_yields_no_gradeable_card_is_named(prod, tmp_path, c
         "cards": 0, "leagues": 2, "skipped_no_row": 3, "leagues_without_deck": ["empty-league"],
         "leagues_with_no_cards": ["lg"],
         "skipped_decks_in_lookback_by_reason": {"calibration_refresh": 0, "pack_integrity": 0,
-                                    "withdrawal_conflict": 0}}
+                                                "partner_redacted": 0,
+                                                "withdrawal_conflict": 0}}
 
 
 def test_the_prod_engine_opens_every_connection_read_only(monkeypatch):

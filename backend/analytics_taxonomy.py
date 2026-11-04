@@ -665,9 +665,12 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # selection settling into a fetch (rev-3: the row filters all three
     # modes), and `shop_dismiss_undone` the Undo tap inside the held
     # window — its sibling `swipe_undone` is likewise not in the
-    # non-intent set. The window's like reuses `calc_trade_queued` (screen
-    # 'ShopAsset') and its dismiss lands as the server-fired `match_swiped`
-    # — neither needs registration here.
+    # non-intent set. The window's send (#531 follow-up, from the 11-06
+    # binary) is the platform send router, whose `sleeper_send_attempted` /
+    # `_failed` events carry surface 'shop' (`_succeeded` carries none);
+    # before that binary its ✓ reused `calc_trade_queued` (screen
+    # 'ShopAsset'), which Shop no longer fires. Its dismiss lands as
+    # the server-fired `match_swiped`. None of these needs registration here.
     "shop_opened", "shop_mode_selected", "shop_positions_selected",
     "shop_dismiss_undone",
     # The #384-local pass overlay (plan.md W2 — this page only; the shipped
@@ -775,13 +778,20 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # session, so no DAU seam is expected.
     "rankings_import_applied",
     # Trades
+    # trade_proposed `props.decision` is a closed set: 'like' | 'send'.
+    # 'send' (#531, D-210, 2026-11-01) is a Shop send's Elo half, fired by the
+    # propose routes once per `trade_decisions` row with decision 'send'.
+    # match_swiped stays 'pass'. WAT, first opinion and the opinions count
+    # read the event type, so a Shop send counts in each.
     # trade_proposed / match_swiped props gained `source` (2026-08-29,
     # propose-label spine — docs/plans/three-model-bakeoff/
     # scope-propose-label.md): which surface produced the disposition.
     # Closed enum 'deck' | 'browse' | 'today' | 'shop' (client-declared via
     # the swipe body's `surface` field, server-validated against
-    # server._SWIPE_SURFACES) | 'calculator' (server-stamped on the
-    # /api/trades/queue emitter) | null (pre-surface client / unknown —
+    # server._SWIPE_SURFACES; 'shop' is also server-stamped on a Shop send's
+    # Elo-half trade_proposed by the propose routes, #531) | 'calculator'
+    # (server-stamped on the /api/trades/queue emitter) | null (pre-surface
+    # client / unknown —
     # never a raw passthrough; the NULL-`platform` lesson says null must
     # mean "old client", not "we trusted a string").
     "trade_proposed", "match_swiped", "match_viewed", "match_dismissed",
@@ -1190,9 +1200,10 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "league_team_opened":      frozenset({"via", "rank", "basis", "subset",
                                           "filter_count"}),
     "league_home_action_tapped": frozenset({"action"}),
-    # `surface` ∈ deck | match | awaiting | calculator — the four
+    # `surface` ∈ deck | match | awaiting | calculator | shop — the five
     # SendInSleeperButton mounts (P0-6 SEND_SURFACES; 'awaiting' is the
-    # Matches non-match send row, NOT 'suggested').
+    # Matches non-match send row, NOT 'suggested'; 'shop' is the ShopAsset
+    # window's tile, #531's follow-up, 2026-11-01).
     "sleeper_send_attempted":  frozenset({"surface", "give_n", "receive_n",
                                           "from_deck", "has_target"}),
     # `error_code` is a CLOSED enum: the 17 server codes of

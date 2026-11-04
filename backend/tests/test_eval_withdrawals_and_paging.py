@@ -304,10 +304,10 @@ def test_removed_cards_are_reported_and_recorded_and_the_version_is_6():
     assert sum(run.excluded.values()) + run.n_included == run.n_total   # not an exclusion
     text = render_report([run], run)
     assert f"withdrawn_removed_cards={removed}" in text and "WARNING" not in text
-    assert "Exclusion rules: version 6." in text
+    assert "Exclusion rules: version 7." in text
     record = run_record(run, run)
     assert record["withdrawn_removed_cards"] == removed
-    assert EXCLUSION_RULE_VERSION == 6 == run.exclusion_rule_version == record[
+    assert EXCLUSION_RULE_VERSION == 7 == run.exclusion_rule_version == record[
         "exclusion_rule_version"]
 
 
@@ -1040,7 +1040,7 @@ def test_eval_run_sums_upgrade_misses_over_every_loaded_deck_and_flags_other():
     assert "ERROR U4-R2" not in text
     record = run_record(run, run)
     assert record["upgrade_misses"] == expected and list(record["upgrade_misses"]) == sorted(expected)
-    assert record["exclusion_rule_version"] == EXCLUSION_RULE_VERSION == 6
+    assert record["exclusion_rule_version"] == EXCLUSION_RULE_VERSION == 7
 
     put_deck(db, "lost_row", 10, rows=range(5))
     put_pack(db, "lost_row", _deck_cards("lost_row", 10)[5:], card_count=10,

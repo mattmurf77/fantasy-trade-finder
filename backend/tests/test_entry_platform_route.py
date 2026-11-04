@@ -75,7 +75,7 @@ MFL_MY_LEAGUES = [
 
 
 def _fake_extension_builder(user_id, username, display_name, avatar,
-                            token=None):
+                            token=None, load_history=True):
     tok = token or f"entry-sess-{user_id}-{time.time_ns()}"
     payload = {"user_id": user_id, "username": username,
                "display_name": display_name,

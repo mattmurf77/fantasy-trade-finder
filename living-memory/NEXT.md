@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on](#2026-11-02--web-landing-update-1-cut-the-espnmfl-panels-or-enter-a-league-id-and-no-extra-account-needed-before-web-entry-ever-turns-on)
+- [2026-11-01 — Shop send (#574 / #577): two Update 1 follow-ups](#2026-11-01--shop-send-574--577-two-update-1-follow-ups)
 - [2026-10-15 — Daily tick dies at the 120 s worker timeout every day: move its inline work off the request thread](#2026-10-15--daily-tick-dies-at-the-120-s-worker-timeout-every-day-move-its-inline-work-off-the-request-thread)
 - [2026-10-12 — Usage Trends: run both TestFlight checklists on 1.21.2 (165), then the two design calls](#2026-10-12--usage-trends-run-both-testflight-checklists-on-1212-165-then-the-two-design-calls)
 - [2026-10-10 — Home hub: run the TestFlight checklist on 1.20.0, then the two follow-ups](#2026-10-10--home-hub-run-the-testflight-checklist-on-1200-then-the-two-follow-ups)
@@ -57,6 +58,13 @@
 
 1. **Cut the clauses, removal only** (head-eng, 11-02, from release-lead's #570 QA P3-5): `web/index.html` `#espn-or` ("or enter a league ID"), the MFL explainer's "…or enter a league ID — no extra account needed." and the MFL sign-in block's "or enter a league ID" divider. Match the app's #570 wording: "ESPN dynasty leagues are supported. Sign in to ESPN." · "MyFantasyLeague dynasty leagues are supported. Sign in to MFL." *Why not now:* nobody can see them. `#entry-espn` / `#entry-mfl` open only through `selectEntryPlatform`, which returns early while `WEB_PLATFORM_ENTRY = false` (`web/js/app.js`, pinned by `GATE-web-espn-mfl-off`). Even with it true, an ESPN/MFL pick goes to the "use the app" step, never the panel. *Why before Update 1:* both claims are false under #430/#421 (an ID alone is refused; some MFL paths go to Apple), and web parity with the app's tiles is the operator's preference.
 2. **With it, the web tiles** (app parity with #570), and marketing's call on "We'll find your leagues" (`#espn-signin-hint`, and the app sheets' copy, pending via head-eng).
+## 2026-11-01 — Shop send (#574 / #577): two Update 1 follow-ups
+
+Product logged both on 2026-11-01 as fine for launch (release-lead's #577 QA, P3-3). The context is in [`docs/plans/shop-send-elo/scope.md`](../docs/plans/shop-send-elo/scope.md) and D-210.
+
+1. **A sent package stays out of the sender's deck until the proposal resolves, or for at least 30 days.** Today a Shop send's `decision = "send"` row is decided only through the D-067 discovery keys' 7-day like window. The pre-#574 Shop like sat in Awaiting and was excluded by R4 for as long as it was live. *Why:* without this, a trade the user already sent on the platform can come back to their deck after a week.
+2. **A later calculator ✓ of a package already sent adds no second Elo update.** `find_live_trade_like` reads likes only, so the queue route doesn't see the send row's shared `calcq_` id. The ✓ should still record its like and card, without the Elo. *Why:* head-product's "no double count" covers send then queue, not just queue then send.
+3. **If analytics-lead wants "the event mirrors the row" on `calc_queue` too** (release-lead's #577 QA, pre-existing): the queue route (`server.py`, `queue_trade_for_opponent`) fires `trade_proposed` inside the same `try` as its swipe persist, so a raised `save_trade_swipes` drops the event although the like row is written. That's the opposite of the Shop send, which fires on the row. *Why:* it's analytics-lead's call whether `calc_queue` should match.
 
 ## 2026-10-15 — Daily tick dies at the 120 s worker timeout every day: move its inline work off the request thread
 
