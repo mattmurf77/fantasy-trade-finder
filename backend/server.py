@@ -37005,12 +37005,18 @@ def me_entitlements():
     `pro` field, and the extension reads no entitlement state anywhere.
     `pro` is intentionally not in that payload: the unverified sign-in path
     never reads entitlement state (legal R28.17).
+
     An unverified session gets the empty entitlement view (every field
-    blank/false), as the paywall gate treats it: an unverified username-only
-    session shares the subscriber's user_id. `enforcing` is server state."""
+    blank/false, `founder` included), as the paywall gate treats it: an
+    unverified username-only session shares the subscriber's user_id.
+    `enforcing` is server state. `founder`: pro from a subscription that
+    started before the club closes, i.e. before the price rise
+    (_PAYWALL_PRICE_RISE_AT via _paywall_club_closes_at();
+    entitlements.is_founder)."""
     sess = _require_session()
     if sess.get("verified") or _synthetic_demo_session(sess):
         out = entl.get_entitlements(sess["user_id"])
+        out["founder"] = entl.is_founder(sess["user_id"], _paywall_club_closes_at())
     else:
         out = entl.empty_entitlements()
     out["enforcing"] = entl.is_enforcing()
@@ -37027,30 +37033,39 @@ _PAYWALL_PAGES = [
     {"id": "value_recap", "kind": "trades_found",
      "title": "Your league has trades waiting",
      "body_ref": "matches_preview"},
-    {"id": "feature_grid", "kind": "features",
-     "features": ["unlimited_leagues", "portfolio", "engine_knobs",
-                  "extension_overlays", "ad_free"]},
+    # The truthful grid (#393 scope §2 item 3, 5c): empty at launch. No
+    # earlier key names a delivered gated feature (portfolio is free, there
+    # is no league cap). The value lines come from the client's copy; a
+    # client renders the grid only when the list is non-empty.
+    {"id": "feature_grid", "kind": "features", "features": []},
     {"id": "plans", "kind": "purchase"},
 ]
+
+# The Founding GMs club (#393 recommendation §(b)). It closes at the price
+# rise below, so it has no date of its own.
+_PAYWALL_CLUB_NAME = "Founding GMs"
 
 # No `trial_days` (#393, operator 2026-10-25): the trial is Apple's 1-month
 # intro offer, and a day count is the wrong claim ("1 month", never
 # "30 days"). Older clients render "N days free" only when trial_days > 0,
 # so dropping the key drops the claim; newer ones read StoreKit's offer.
+# `trial_period` names that offer (Apple has no 30-day duration); a client
+# keys "free" copy off StoreKit intro eligibility, never a server duration.
 _PAYWALL_PRODUCTS = [
-    {"product_id": "ftf_pro_monthly", "period": "monthly", "hero": False},
+    {"product_id": "ftf_pro_monthly", "period": "monthly",
+     "trial_period": "1 month", "hero": False},
     {"product_id": "ftf_pro_annual", "period": "annual",
-     "hero": True, "badge": "best_value"},
+     "trial_period": "1 month", "hero": True, "badge": "best_value"},
 ]
 
-# Fallback price copy (#393, operator 2026-10-25): $4.99/mo and $24.99/yr,
-# rising to $6.99 / $34.99 for NEW subscribers at _PAYWALL_PRICE_RISE_AT.
-# Existing subscribers keep their price through App Store price
-# preservation, which this table does not model. Each entry is (before the
-# rise, from the rise on). per_month_equiv is the annual price / 12 rounded
-# UP to the cent, matching legal's #393 R28.8 #2 copy, "$2.09/month"
-# (24.99 / 12 = 2.0825; 34.99 / 12 = 2.9158): rounding down would
-# understate the annual price.
+# Fallback price copy (#393, operator 2026-10-25): $4.99/mo and $24.99/yr
+# (the Founding GM prices), rising to $6.99 / $34.99 for NEW subscribers at
+# _PAYWALL_PRICE_RISE_AT. Existing subscribers keep their price through App
+# Store price preservation, which this table does not model. Each entry is
+# (before the rise, from the rise on). per_month_equiv is the annual price
+# / 12 rounded UP to the cent, matching legal's #393 R28.8 #2 copy,
+# "$2.09/month" (24.99 / 12 = 2.0825; 34.99 / 12 = 2.9158): rounding down
+# would understate the annual price.
 #
 # The rise is an INSTANT: 2027-01-02 04:00 UTC (11 pm ET / 8 pm PT on
 # Jan 1). That is App Store Connect's US start time for a price change
@@ -37063,8 +37078,15 @@ _PAYWALL_PRODUCTS = [
 # through most of Jan 1.
 # FALLBACK ONLY: StoreKit's localized price is authoritative, and this
 # instant only decides which strings the server shows when StoreKit is
-# unavailable. monetization-pm records the start time App Store Connect
-# shows (setup §3d); if the two differ, move this constant to match.
+# unavailable. It must equal the App Store Connect scheduled price change:
+# monetization-pm records the start time App Store Connect shows (setup
+# §3d), and if the two differ, moves this constant to match (a reviewed
+# deploy, never a knob or config).
+#
+# THE ONE INSTANT (head-eng, 2026-10-27): the Founding GMs club closes at
+# the price rise. Everything else derives from this constant: the price
+# window, `club.closes_at` and `club.open` on /api/paywall/config, and
+# `founder` on /api/me/entitlements. Hold no second copy of it.
 _PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 2, 4, 0, tzinfo=timezone.utc)
 _PAYWALL_PRICES = {
     "ftf_pro_monthly": ({"display_price": "$4.99"},
@@ -37077,6 +37099,12 @@ _PAYWALL_PRICES = {
 def _paywall_now() -> datetime:
     """The clock the paywall config reads. Tests monkeypatch this."""
     return datetime.now(timezone.utc)
+
+
+def _paywall_club_closes_at() -> str:
+    """`club.closes_at` and is_founder's cut-off: _PAYWALL_PRICE_RISE_AT as
+    an ISO-8601 UTC string with a Z suffix, the shape the config serves."""
+    return _PAYWALL_PRICE_RISE_AT.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _paywall_products(now: datetime) -> list:
@@ -37121,7 +37149,9 @@ def paywall_config():
     StoreKit-localized price from the RevenueCat offering for the matching
     `product_id`; these strings are US-English list prices and know nothing
     about the user's storefront, currency, or an active promotional offer.
-    They switch to the new-subscriber prices at _PAYWALL_PRICE_RISE_AT.
+    They are the founder prices while `club.open` and switch to the
+    new-subscriber prices at _PAYWALL_PRICE_RISE_AT, the same instant
+    `club.open` turns false: both come from one _paywall_now() read.
     """
     _require_session()
     if not is_enabled("monetize.paywall"):
@@ -37129,22 +37159,27 @@ def paywall_config():
     platform = request.args.get("platform", "ios")
     if platform not in _PAYWALL_PLATFORMS:
         platform = "ios"
+    now = _paywall_now()   # read once: club.open and the prices flip together
     return jsonify({
         "enabled": True,
         "platform": platform,
+        "club": {"name": _PAYWALL_CLUB_NAME, "closes_at": _paywall_club_closes_at(),
+                 "open": now < _PAYWALL_PRICE_RISE_AT},
         "pages": _PAYWALL_PAGES,
-        "products": _paywall_products(_paywall_now()),
+        "products": _paywall_products(now),
         # Store-managed: the server never mints trials (pro-subscription
         # LLD §6). True until the client reads real per-Apple-ID
         # eligibility off the RevenueCat offering — this field is the
         # "we offer a trial on this SKU" claim, not a per-user promise.
         "trial_eligible": True,
+        # Always true: there is no non-dismissible mode (#393 scope §2).
         "dismissible": True,
-        # Tip-jar consumables: none at launch (the SKUs are not submitted to
-        # App Store Connect; see _PAYWALL_TIPS). A tip would still grant
-        # nothing (entitlements.is_tip_product). Rides monetize.paywall: tips
-        # are purchase UI, and the flag's contract is "no purchase UI anywhere"
-        # when off.
+        # Tip-jar consumables: none at launch (#393 recommendation §(b):
+        # the SKUs are not submitted to App Store Connect, three fewer IAPs
+        # on a first review; _PAYWALL_TIPS stays the list to restore). A tip
+        # would still grant nothing (entitlements.is_tip_product). Rides
+        # monetize.paywall: tips are purchase UI, and the flag's contract is
+        # "no purchase UI anywhere" when off.
         "tips": [],
     })
 
