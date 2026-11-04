@@ -37,7 +37,8 @@ Hit/miss/coalesced/error counters live in `OUTLOOK_RESULTS.stats` and go to the
 debug log only; they are never part of an API response.
 
 Account deletion calls `purge_callers()` with the deleted user's ids, which
-drops their personal entries (key slot [3]) at once instead of after the TTL.
+drops their personal entries (key slot [3]) at once instead of after the TTL,
+and prevents already-running computations from refilling those entries.
 """
 
 from __future__ import annotations
@@ -99,9 +100,10 @@ def for_caller(payload: dict, you_user_id: str) -> dict:
 
 class _Flight:
     """One in-progress computation that other threads can wait on."""
-    __slots__ = ("done", "value", "error")
+    __slots__ = ("done", "value", "error", "cacheable")
 
     def __init__(self):
+        self.cacheable = True
         self.done = threading.Event()
         self.value = None
         self.error: BaseException | None = None
@@ -128,12 +130,16 @@ class OutlookResultCache:
     def purge_callers(self, user_ids) -> int:
         """Drop every stored entry keyed on one of `user_ids` (slot [3], set
         only for basis=personal); returns how many. An empty id is skipped:
-        it is the slot every shared entry holds."""
+        it is the slot every shared entry holds. In-flight personal computations
+        may finish for their existing request, but cannot refill this cache."""
         ids = {u for u in user_ids if u}
         with self._lock:
             doomed = [k for k in self._entries if k[3] in ids]
             for k in doomed:
                 del self._entries[k]
+            for key, flight in self._inflight.items():
+                if key[3] in ids:
+                    flight.cacheable = False
         return len(doomed)
 
     def get_or_compute(self, key: tuple, compute: Callable[[], dict]) -> dict:
@@ -173,10 +179,11 @@ class OutlookResultCache:
             raise
         else:
             with self._lock:
-                self._entries[key] = (self._clock(), flight.value)
-                self._entries.move_to_end(key)
-                while len(self._entries) > self._max:
-                    self._entries.popitem(last=False)
+                if flight.cacheable:
+                    self._entries[key] = (self._clock(), flight.value)
+                    self._entries.move_to_end(key)
+                    while len(self._entries) > self._max:
+                        self._entries.popitem(last=False)
             return flight.value
         finally:
             with self._lock:

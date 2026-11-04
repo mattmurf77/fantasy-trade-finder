@@ -940,3 +940,36 @@ def test_the_cleanup_loop_runs_the_orphan_sweep():
     from backend import server
     loop = _code_without_comments(inspect.getsource(server._cleanup_loop))
     assert "_sweep_orphaned_overhauls_once ( )" in loop
+
+
+def test_route_purges_both_outlook_caches_for_all_aliases(engine, monkeypatch):
+    from backend import server
+    from backend.outlook_result_cache import OUTLOOK_RESULTS
+    baseline = {}
+    for who in (UID, ALIAS, OTHER, None):
+        key = ("league", "personal" if who else "consensus", "1qb_ppr", who, 7)
+        baseline[key] = (0, key, object())
+    monkeypatch.setattr(server, "_OUTLOOK_IMPACT_CACHE", baseline)
+    for who in (UID, ALIAS, OTHER):
+        _outlook_entry("personal", who)
+    shared = _outlook_entry("consensus", UID)
+    response = _delete_as_owner(monkeypatch)
+    assert response.status_code == 200
+    assert {key[3] for key in baseline} == {OTHER, None}
+    assert {key[3] for key in OUTLOOK_RESULTS._entries} == {OTHER, ""}
+    assert shared in OUTLOOK_RESULTS._entries
+
+
+def test_failed_baseline_purge_still_purges_full_results(engine, monkeypatch, caplog):
+    from backend import server
+    from backend.outlook_result_cache import OUTLOOK_RESULTS
+    _outlook_entry("personal", UID)
+
+    def boom(_ids):
+        raise RuntimeError("synthetic baseline purge failure")
+
+    monkeypatch.setattr(server, "_purge_outlook_impact_callers", boom)
+    response = _delete_as_owner(monkeypatch)
+    assert response.status_code == 200
+    assert not any(key[3] == UID for key in OUTLOOK_RESULTS._entries)
+    assert "outlook baseline purge errored (continuing)" in caplog.text

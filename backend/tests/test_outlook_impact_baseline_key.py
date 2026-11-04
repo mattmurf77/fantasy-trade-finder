@@ -229,3 +229,50 @@ def test_consensus_callers_in_one_league_and_format_share_one_baseline(monkeypat
     assert len(sims) == 1, "the baseline must be computed once per league"
     assert second is first
     assert len(server._OUTLOOK_IMPACT_CACHE) == 1
+
+
+def test_purge_drops_personal_baselines_only():
+    a, b = _sess("acctA"), _sess("acctB")
+    _baseline(a, "personal")
+    kept = _baseline(b, "personal")
+    shared = _baseline(a)
+    assert server._purge_outlook_impact_callers({"acctA", ""}) == 1
+    assert _baseline(b, "personal") is kept
+    assert _baseline(b) is shared
+    assert {key[3] for key in server._OUTLOOK_IMPACT_CACHE} == {"acctB", None}
+
+
+@pytest.mark.parametrize("basis", ["personal", "consensus"])
+def test_deletion_during_baseline_compute_cannot_refill_personal_cache(monkeypatch, basis):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    started, release = Event(), Event()
+    real = trade_delta.resim_baseline
+
+    def blocked(*a, **kw):
+        started.set()
+        assert release.wait(5), "test did not release simulation"
+        return real(*a, **kw)
+
+    monkeypatch.setattr(trade_delta, "resim_baseline", blocked)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_baseline, _sess("acctA"), basis)
+        try:
+            assert started.wait(5)
+            server._purge_outlook_impact_callers({"acctA"})
+        finally:
+            release.set()
+        assert future.result(timeout=5) is not None
+    assert bool(server._OUTLOOK_IMPACT_CACHE) == (basis == "consensus")
+    assert not server._OUTLOOK_IMPACT_PENDING
+
+
+def test_failed_baseline_compute_releases_ticket(monkeypatch):
+    def fail(*a, **kw):
+        raise RuntimeError("synthetic simulation failure")
+
+    monkeypatch.setattr(trade_delta, "resim_baseline", fail)
+    with pytest.raises(RuntimeError):
+        _baseline(_sess("acctA"), "personal")
+    assert not server._OUTLOOK_IMPACT_PENDING
+    assert not server._OUTLOOK_IMPACT_CACHE

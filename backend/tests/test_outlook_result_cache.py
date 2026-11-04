@@ -434,3 +434,28 @@ def test_route_computes_uncached_when_the_key_cannot_be_built(client, caplog):
     assert _you(r.get_json()) == ["u1"]
     assert not orc.OUTLOOK_RESULTS._entries
     assert caplog.text.count("result cache key failed") == 1
+
+
+@pytest.mark.parametrize("basis", ["personal", "consensus"])
+def test_deletion_during_compute_cannot_refill_personal_cache(basis):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    cache = orc.OutlookResultCache()
+    key = orc.make_key(**_inputs(basis=basis, user_id="u1"))
+    started, release = Event(), Event()
+
+    def blocked():
+        started.set()
+        assert release.wait(5), "test did not release simulation"
+        return {"teams": []}
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(cache.get_or_compute, key, blocked)
+        try:
+            assert started.wait(5)
+            cache.purge_callers({"u1", ""})
+        finally:
+            release.set()
+        assert future.result(timeout=5) == {"teams": []}
+    assert bool(cache._entries) == (basis == "consensus")
+    assert not cache._inflight

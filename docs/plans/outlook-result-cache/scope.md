@@ -83,3 +83,8 @@
 - **Evidence recorded:** the tests and timing above. The `living-memory/TEST_LEDGER.md` entry is left to whoever merges, to avoid living-memory conflicts across concurrent branches.
 - **TestFlight verification:** none (waived above).
 - Express lane declared by the operator? **No.**
+
+
+## Launch integration — 2026-11-04
+
+Paired with the independent baseline-key fix `f2e759b7`. Deleting an account purges both result and baseline caches for every account alias. `purge_callers` also marks matching result computations non-cacheable under the same lock used to store entries, preventing a late refill after deletion. Shared consensus results and other callers are retained. A deterministic blocked-compute test reproduces the race on the original #512 code (personal fails; consensus passes) and passes after the fix. Both purge hooks remain independent best-effort operations so either failure does not prevent the other hook or change the deletion response.

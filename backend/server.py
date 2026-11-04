@@ -1436,7 +1436,22 @@ _ANCHOR_VIA = ("anchors", "draft_room")
 # format and generation still share one entry, which is the point.
 _OUTLOOK_IMPACT_CACHE: dict[tuple, tuple[float, object, dict]] = {}
 _OUTLOOK_IMPACT_LOCK = threading.Lock()
+# Active computation tickets let deletion prevent a late personal-cache refill.
+_OUTLOOK_IMPACT_PENDING: dict[object, tuple] = {}
 _OUTLOOK_IMPACT_TTL = 900.0   # 15 min — the live week's TTL, same reasoning
+
+
+def _purge_outlook_impact_callers(user_ids) -> int:
+    """Drop personal baselines and invalidate their in-progress cache writes."""
+    ids = {u for u in user_ids if u}
+    with _OUTLOOK_IMPACT_LOCK:
+        doomed = [k for k in _OUTLOOK_IMPACT_CACHE if k[3] in ids]
+        for key in doomed:
+            del _OUTLOOK_IMPACT_CACHE[key]
+        for ticket, key in list(_OUTLOOK_IMPACT_PENDING.items()):
+            if key[3] in ids:
+                del _OUTLOOK_IMPACT_PENDING[ticket]
+    return len(doomed)
 
 
 def _outlook_impact_baseline(league_id: str, basis: str, sess: dict):
@@ -1462,58 +1477,65 @@ def _outlook_impact_baseline(league_id: str, basis: str, sess: dict):
         hit = _OUTLOOK_IMPACT_CACHE.get(key)
         if hit and (now - hit[0]) < _OUTLOOK_IMPACT_TTL:
             return hit[2]
+        ticket = object()
+        _OUTLOOK_IMPACT_PENDING[ticket] = key
 
-    from . import outlook as outlook_pkg
-    from .outlook.trade_delta import DELTA_SIM_COUNT, resim_baseline
+    try:
+        from . import outlook as outlook_pkg
+        from .outlook.trade_delta import DELTA_SIM_COUNT, resim_baseline
 
-    captured: dict = {}
-    state = outlook_pkg.build_league_state(
-        league_id, platform=platform, fetch=_outlook_sleeper_fetch(captured))
-    if not state.teams:
-        return None
+        captured: dict = {}
+        state = outlook_pkg.build_league_state(
+            league_id, platform=platform, fetch=_outlook_sleeper_fetch(captured))
+        if not state.teams:
+            return None
 
-    pool_players, seed = _get_universal_pool(fmt)
-    svc_seed = getattr(sess.get("service"), "_seed", None) or {}
-    if svc_seed:
-        seed = {**svc_seed, **seed}
-    players_meta = {p.id: p for p in pool_players}
-    for p in (sess.get("players") or []):
-        players_meta.setdefault(p.id, p)
-    e2v = _trade_service_mod.elo_to_value
+        pool_players, seed = _get_universal_pool(fmt)
+        svc_seed = getattr(sess.get("service"), "_seed", None) or {}
+        if svc_seed:
+            seed = {**svc_seed, **seed}
+        players_meta = {p.id: p for p in pool_players}
+        for p in (sess.get("players") or []):
+            players_meta.setdefault(p.id, p)
+        e2v = _trade_service_mod.elo_to_value
 
-    board_elo = None
-    if basis == "personal" and sess.get("service") is not None:
-        board_elo = {rp.player.id: rp.elo
-                     for rp in sess["service"].get_rankings(position=None).rankings}
+        board_elo = None
+        if basis == "personal" and sess.get("service") is not None:
+            board_elo = {rp.player.id: rp.elo
+                         for rp in sess["service"].get_rankings(position=None).rankings}
 
-    def _value_of(pid: str) -> float:
-        if board_elo is not None and pid in board_elo:
-            return e2v(board_elo[pid])
-        if pid in seed:
-            return e2v(seed[pid])
-        return 0.0
+        def _value_of(pid: str) -> float:
+            if board_elo is not None and pid in board_elo:
+                return e2v(board_elo[pid])
+            if pid in seed:
+                return e2v(seed[pid])
+            return 0.0
 
-    player_value: dict[str, float] = {}
-    player_pos: dict[str, str] = {}
-    for t in state.teams:
-        for raw_pid in t.player_ids:
-            pid = str(raw_pid)
-            if pid in player_value:
-                continue
-            player_value[pid] = round(_value_of(pid), 1)
-            pm = players_meta.get(pid)
-            player_pos[pid] = getattr(pm, "position", None) or "?"
+        player_value: dict[str, float] = {}
+        player_pos: dict[str, str] = {}
+        for t in state.teams:
+            for raw_pid in t.player_ids:
+                pid = str(raw_pid)
+                if pid in player_value:
+                    continue
+                player_value[pid] = round(_value_of(pid), 1)
+                pm = players_meta.get(pid)
+                player_pos[pid] = getattr(pm, "position", None) or "?"
 
-    seed_type = captured.get("playoff_seed_type")
-    baseline = resim_baseline(
-        state, player_value=player_value, player_pos=player_pos,
-        model_cfg=get_config(), basis=basis, scoring_format=fmt,
-        playoff_seed_type=seed_type, n_sims=DELTA_SIM_COUNT)
+        seed_type = captured.get("playoff_seed_type")
+        baseline = resim_baseline(
+            state, player_value=player_value, player_pos=player_pos,
+            model_cfg=get_config(), basis=basis, scoring_format=fmt,
+            playoff_seed_type=seed_type, n_sims=DELTA_SIM_COUNT)
 
-    bundle = (state, baseline, player_value, player_pos, seed_type, fmt)
-    with _OUTLOOK_IMPACT_LOCK:
-        _OUTLOOK_IMPACT_CACHE[key] = (now, key, bundle)
-    return bundle
+        bundle = (state, baseline, player_value, player_pos, seed_type, fmt)
+        with _OUTLOOK_IMPACT_LOCK:
+            if ticket in _OUTLOOK_IMPACT_PENDING:
+                _OUTLOOK_IMPACT_CACHE[key] = (now, key, bundle)
+        return bundle
+    finally:
+        with _OUTLOOK_IMPACT_LOCK:
+            _OUTLOOK_IMPACT_PENDING.pop(ticket, None)
 
 
 def _trade_outlook_impact(league_id: str, caller_user_id: str,
@@ -33984,6 +34006,13 @@ def delete_account_route():
                               or s.get("account_id") in account_ids]:
                         _sessions[t]["_revoked"] = True
                         _sessions.pop(t, None)
+            # Baselines and full results independently retain personal boards.
+            # Purge every account alias and cancel late in-flight cache writes.
+            try:
+                _purge_outlook_impact_callers(user_ids)
+            except Exception as purge_err:
+                log.warning("delete_account: outlook baseline purge errored (continuing): %s",
+                            type(purge_err).__name__)
             # Personal outlook results are keyed on the caller's working id
             # (release-lead QA on #512); best-effort, like the Apple revoke.
             try:
