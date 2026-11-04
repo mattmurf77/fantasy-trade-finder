@@ -202,3 +202,5 @@ The mint's refusal `message`s are the **final 14-row set** from marketing-lead (
 ## Main integration (2026-11-04)
 
 The #430 resync with main `fd5390ac` retains main's feedback throttle and its trusted-hop IP helper, shared with the sign-in limiter. The duplicate helper/constant copy from the sign-in block is removed; top-level shape and shared-policy tests guard it. The SQLAlchemy import retains both platform lookup `func` and account-deletion `or_`. No proof, identity, limiter budget, feature-flag, schema, API or event contract changes in this integration. Targeted offline validation and the two RED sabotages are recorded in TEST_LEDGER.
+
+Follow-up resync with main `af57e59c` preserves #582's `landing.platform_options=false` in features.json and release/profiles-on/onboarding-v2 fixtures. No activation is bundled with #430. The focused backend/flag-mirror suites passed 347 tests offline before the final push.
