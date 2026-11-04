@@ -1,3 +1,27 @@
+## 2026-11-03 — #587 round 3: release-lead's QA of `e3e7f9fe` (GO with notes, nothing blocking)
+
+Gates: release-lead's round-3 notes. Tests and wording only: no app code, route, schema, flag or event change (the daemon's only diff is a comment). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Reword (a P3 that predates #587; its fix is its own PR):**
+  - The daemon's roster-history comment and the round-2 note below both called a mid-snapshot-deleted leaguemate's leftover "public Sleeper roster". That's true for `league_roster_history` only.
+  - `league_board_history` is private (`accounts._ADDITIONAL_PRIVATE_TABLES`) and no sync removes it, so a leaguemate deleted between `snapshot_league_boards`' board read and the board write's commit can keep a row. The weekly sweep has the same race, with no lock.
+  - Both texts are corrected. Not fixed here.
+- **P4 pins, `test_session_init_deleted_mid_daemon.py` 35 → 37:**
+  - (a) `test_own_deletion_between_the_board_read_and_its_write`: seeds the caller's `member_rankings`, so `upsert_board_snapshots` reaches its lock, and deletes the caller right after `load_member_boards_for_league`. No `league_board_history` row is written, and nothing names the caller but Sleeper `draft_picks`.
+  - (b) New `test_the_lock_runs_on_the_transaction_it_is_handed`: `_lock_live_user` runs its `BEGIN IMMEDIATE` and `SELECT … FOR KEY SHARE` on the `conn` it's passed, never `engine`, `connect()` or `begin()`.
+  - (c) The structural test now also requires that, after the lock, the block's first use of `conn` is the write, or the upsert's read of the table that same block writes. That read is the existence check in `upsert_user` and the two snapshot upserts; the other three writers' first use is the write.
+- **Sabotages, round 3, 3/3 red on SQLite, then restored from `26b4a550`:**
+  - the boards write without `live_user`: (a) red;
+  - `_lock_live_user` on `engine.connect()`: (b) red;
+  - an unrelated `leagues` read between the lock and the members write: (c) red.
+  - Round 2's structural sabotages, re-run: lock after a write in `upsert_league` (9 red) and in `record_event` (2 red), and lock in its own transaction (1 red), are still red.
+  - The Postgres file wasn't re-run: its server was stopped after round 2, and nothing it covers changed.
+- **Suites:**
+  - the two D1-area files: 37 passed, 8 skipped (PG unset);
+  - the session-init `-k` selection: 781 passed, 9 skipped (779 + 2);
+  - `test_account_deletion_coverage.py`: 62 passed.
+  - Local Python 3.14.4; the full suite was not run (platforms-eng runs it).
+
 ## 2026-11-03 — #587 round 2: release-lead's QA (Postgres 18.3, real threads; GO with notes)
 
 Gates: release-lead's #587 QA, P2 and P3-1..4. Server only, as round 1: no route, schema, flag or analytics event change (`upsert_roster_snapshots` / `upsert_board_snapshots` and the roster-history helpers gain an opt-in `live_user`; `record_event` now re-raises `AccountGone` under `require_user`). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -8,7 +32,8 @@ Gates: release-lead's #587 QA, P2 and P3-1..4. Server only, as round 1: no route
 - **P3-1:** `write_session_init_members` takes the rows still there from its own `DELETE … RETURNING`, so a leaguemate's deletion that reached their row first is never undone (QA d2).
   - The other order (QA d1) is a documented Postgres limit, in the docstring and pinned by a test: the re-inserted row is public Sleeper membership, and closing it needs a shared lock on every member's users row.
 - **P3-2:** the roster-history snapshot (`league_roster_history`, `league_board_history`) runs under the caller's users-row lock, and `AccountGone` ends it.
-  - A leaguemate deleted meanwhile still gets their team's row from Sleeper's public roster, as their next sync would write it.
+  - The lock covers the caller only. A leaguemate deleted mid-snapshot still gets a `league_roster_history` row: public Sleeper data, which their next sync writes again.
+  - They can also keep a `league_board_history` row, which is private (`accounts._ADDITIONAL_PRIVATE_TABLES`) and which no sync removes, because their board is read before the write commits. The weekly sweep has the same race, unlocked. Corrected in round 3; the fix is its own PR.
   - The owned-pick sync's Sleeper `draft_picks` naming the caller are public data the matrix keeps.
 - **P3-3:** `record_event` re-raises `AccountGone` (only under `require_user`), and the daemon's event blocks let it through. The first guarded write to find the account gone stops the daemon: users, leagues, either event, members or roster history.
 - **Tests, `test_session_init_deleted_mid_daemon.py` 31 → 35:**
