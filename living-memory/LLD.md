@@ -134,7 +134,7 @@ See [`../docs/data-dictionary.md`](../docs/data-dictionary.md) for full schema. 
 - **`roster`** — user-league-player ownership
 - **`elo_rating`** — per-user-per-player Elo with history
 - **`swipe_decisions`** — pairwise comparison events (powers ranking)
-- **`trade_decisions`** — like/pass on generated trade cards
+- **`trade_decisions`** — like/pass on generated trade cards, plus `send` (#531, D-210): a Shop send's once-only Elo anchor, never a like. Readers that mean like/pass filter `decision IN ('like', 'pass')`; a new reader must too
 - **`trade_card`** — cached generated trade cards
 - **`trade_match`** — mutual-like matches between users
 - **`notification`** — inbox events

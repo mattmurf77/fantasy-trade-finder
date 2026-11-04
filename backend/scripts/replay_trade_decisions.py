@@ -169,7 +169,9 @@ def load_decisions() -> dict[tuple[str, str], list[dict]]:
     """{(user_id, league_id): [decision rows]} with give/receive decoded."""
     out: dict[tuple[str, str], list[dict]] = defaultdict(list)
     with engine.connect() as conn:
-        rows = conn.execute(select(trade_decisions_table)).fetchall()
+        # like/pass only: a #531 Shop `send` row is not a deck decision.
+        rows = conn.execute(select(trade_decisions_table).where(
+            trade_decisions_table.c.decision.in_(("like", "pass")))).fetchall()
     for r in rows:
         d = dict(r._mapping)
         try:

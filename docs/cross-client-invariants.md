@@ -548,6 +548,11 @@ Canonical client-declared set: `deck` · `browse` · `today` · `shop`.
 - `calculator` is a **server-stamped** fifth member, written only by
   `POST /api/trades/queue`'s emitter — clients never send it on the swipe
   body.
+- `shop` is also **server-stamped** on the `trade_proposed` a Shop send's
+  Elo half fires (#531, D-210). The propose routes write it when the
+  propose body carries `source: "shop"`, which the three mobile send routers
+  set only for `surface === 'shop'`. It is the same value as the Shop ✕'s
+  swipe, so `props.source = 'shop'` now covers both Shop dispositions.
 - Mobile senders: `TradesScreen`'s swipe mutation (`deck` — the whole
   advance() spine, including merged-canvas cell dispositions),
   `usePresentationSignals.dispatch` (`today` / `browse` by mounted screen),
