@@ -56,6 +56,12 @@ fixtures live in `backend/tests/fixtures/`.
 
 These read public endpoints and write only local captures. Re-run only to refresh/extend fixtures.
 
+## Operator checks — network, read-only, write nothing
+
+| Script | Purpose |
+|---|---|
+| `espn_pair_check.py` | Open risk R1 for platform sign-in: does ESPN bind `espn_s2` to the SWID? Four reads of one PRIVATE league (both cookies / anonymous / `espn_s2` + another member's SWID / `espn_s2` + a random SWID) with the operator's own cookies from the environment only (`ESPN_CHECK_S2` / `ESPN_CHECK_SWID` / `ESPN_CHECK_LEAGUE` / `ESPN_CHECK_SEASON`; the operator exports them from `secrets.local.env` with `set -a; . ./secrets.local.env; set +a`). Standard library only, GETs to ESPN only, writes no files. Prints HTTP statuses and `PAIR_BOUND` / `PAIR_NOT_BOUND` / `INCONCLUSIVE` only — never a cookie value. head-eng reviews it before it is run. [scope](../docs/plans/platform-sign-in/scope.md) |
+
 ## Database storage maintenance
 
 `compact_deck_diagnostics.py` is read-only by default; `--apply` requires a

@@ -133,6 +133,8 @@ counterparty board disclosure or client analytics event is added.
 - [`identity_links`](#identity_links)
 - [`device_tokens`](#device_tokens)
 - [`sleeper_credentials`](#sleeper_credentials)
+- [`platform_write_consents`](#platform_write_consents)
+- [`platform_write_moves`](#platform_write_moves)
 - [`espn_credentials`](#espn_credentials)
 - [`mfl_credentials`](#mfl_credentials)
 
@@ -219,6 +221,7 @@ counterparty board disclosure or client analytics event is added.
 
 - [Monetization platform foundation](#monetization-platform-foundation)
 - [`entitlements`](#entitlements)
+- [`paywall_previews`](#paywall_previews)
 - [`subscription_events`](#subscription_events)
 - [`referrals`](#referrals)
 - [`affiliate_clicks`](#affiliate_clicks)
@@ -241,7 +244,8 @@ Sleeper user identities + denormalized hot-read activity columns.
 | `ranking_method` | str | `null` / `'trio'` / `'manual'` / `'tiers'` / **`'anchor'`** (2026-07-10, Pick Anchor wizard) / **`'quickset'`** (#119, 2026-07-12) — all five accepted by `POST /api/ranking-method` (canonical list: `database.RANKING_METHODS`, mirrored in [cross-client-invariants § Ranking method strings](cross-client-invariants.md#ranking-method-strings)). **Write semantics (P0-1, 2026-08-11) — the column is unchanged; who writes it is not.** It is now written **implicitly at first use** by four save routes — `/api/tiers/save` (`'tiers'`/`'quickset'`), `/api/rank3` (`'trio'`), `/api/rankings/reorder` (`'manual'`), `/api/anchor/save` (`'anchor'`) — via `database.set_ranking_method_if_unset`, a single conditional `UPDATE`. **First-use wins** (last-use-wins can re-lock a user, since `get_rankings_progress`'s unlock rule is method-dependent); the one exception is `'anchor'`, which a completeness-marking tiers/quickset save may overwrite (`allow_over=("anchor",)`) because `'anchor'` can never satisfy any unlock branch. **Subset boards write nothing:** rookie-scope tier saves, `via:'rookie_ranks'` reorders and `via:'draft_room'` anchors. **One-time backfill:** `database.backfill_ranking_method_from_tiers()` runs inside `_migrate_db()` at every Flask boot and tags the pre-fix cohort — `ranking_method` NULL/empty **and** all four of QB/RB/WR/TE saved in `tiers_saved` for ≥1 scoring format — as **`'quickset'`** (a labelling assumption: which flow they actually used is not recoverable). Users with a *partial* tier board are excluded so the method switch can never re-lock them. Idempotent by predicate, chunked at 500, never raises. It also **pre-seeds `unlocked_formats`** with every qualifying format — that is fan-out suppression, not cosmetics (see that column). Ops detail: [runbook § Quick Set unlock backfill](runbook.md) |
 | `tiers_saved` | JSON text | Per-format: `{"1qb_ppr": ["RB","WR"], "sf_tep": []}` |
 | `tier_overrides` | JSON text | Per-format: `{"1qb_ppr": {pid: elo}, "sf_tep": {pid: elo}}`. Values are raw Elo — tier keys are never stored, so neither the 2026-07-11 pick-value tier-ladder migration nor the 2026-07-12 8-tier revision (#117) needed **any data pass**: existing overrides re-bucket through the new `tier_config.json` band walk on read. **Sibling key `__pre_rookie_scope__` (rookie-draft M2, 2026-08-06):** a one-time snapshot of the whole blob, `{v:1, taken_at, reason, formats:{fmt:{pid:elo}}}`, taken before the user's first rookie-**scoped** tier save. This column is wholesale-overwritten with no history and a scoped save writes only part of the board, so the snapshot is the recovery path ([runbook § Rookie-scope board restore](runbook.md); API `take_/load_/restore_tier_override_snapshot`). **Preservation rule — load-bearing:** `_parse_per_format_json` deliberately narrows to `SCORING_FORMATS`, so any writer that round-trips this column MUST merge non-format keys back via `_parse_extra_keys` (`{**extras, **all_overrides}`, extras first so a format key can never be shadowed) or it silently deletes them. `reset_user_rankings` sets the column to NULL and therefore drops the snapshot with the board — correct, but it means the restore path does not survive a self-service reset. **Sibling key `__override_at__` (F2, 2026-08-18):** `{fmt: {pid: iso8601}}` — when each override was written, so a ranking swipe recorded *after* a pin can release it (`ranking_service._pin_release`, knob `pin_unpin_on_newer_swipe`). Deliberately a sibling key rather than changing the per-format value shape to `{pid: {elo, at}}`: no migration, no risk to `load_tier_overrides`' float cast, and every existing reader of the column (`og_image`, `accounts`, the snapshot/restore path) is untouched. Written by `save_tier_overrides(..., stamps=)` (omitting `stamps` preserves what is stored, and the map is always pruned to pids present in `overrides`); read by `load_tier_override_stamps`. A pid with an override but **no** stamp is a **legacy pin** — 2,735 such entries existed across 5 users at ship — and `pin_legacy_at_epoch` decides whether it is permanent (default) or releasable. `restore_tier_overrides_from_snapshot` clears the restored format's stamps, since the snapshot predates F2 and holds no write times. |
-| `invited_by` | str | Referrer's Sleeper username |
+| `first_init_pending` | int, nullable | Positive first-init eligibility: `upsert_user` sets 1 only on a genuine new users INSERT; ordinary updates never reset it. Additive migration leaves all legacy rows NULL/ineligible. The first initialized league session conditionally claims 1→0 under the live-user lock; attribution, an empty invited_by fill and signup commit together or roll back together. No timestamp/event-absence inference or backfill. Deleted/exported with its users row. |
+| `invited_by` | str | Referrer's username, set on INSERT or filled only when NULL by the positively claimed first-init transaction; later logins never overwrite it. With `growth.referral_ledger` on and a ledger credit (referral loop L7) it is the credited referrer's `users.username`, server-derived; otherwise the client's legacy `invited_by`, unverified, which credits and notifies no one while the flag is on (FR-15) and is used only as the league-match tie-breaker |
 | `unlocked_formats` | JSON text | Formats the user has unlocked Trade Finder in. Monotonic floor — an entry is never removed, so a method change can never subtract an unlock. **P0-1 backfill pre-seed (2026-08-11):** `backfill_ranking_method_from_tiers()` writes the qualifying formats here in the *same* `UPDATE` that sets `ranking_method`. This is **fan-out suppression, not cosmetics** — the unlock ladder fires a push when a format transitions from locked to unlocked, and the backfill flips a whole cohort at once; pre-seeding means the transition has already happened by the time anything reads it, so no retroactive notification burst is sent. Permanent consequence: those users never get the "Trade Finder unlocked" push for the format they were backfilled into |
 | `anchor_scale` | JSON text | Per-format pick-value scale (1.5.4 #111): `{"1qb_ppr": 3, "sf_tep": 2}` — "a top-tier asset is worth N firsts" (N ∈ 2/3/4). Absent key = default 4 since the #117 re-derivation (2026-07-12; = the plain `m × base` anchor math). Stored values keep their semantics across the re-derivation — only the neutral point moved. Read/written by `load_anchor_scale` / `save_anchor_scale` via `/api/anchor/scale`. |
 | `last_active_at` | str | denormalized from `user_events` for hot reads |
@@ -258,7 +262,7 @@ Sleeper user identities + denormalized hot-read activity columns.
 | `events_count` | int | |
 | `last_device_type`, `last_os_version`, `last_app_version` | str | most recent client snapshot |
 | `verified_at` | str | ISO — when this user record was last proven controlled (account-auth plan P1/P2) |
-| `verified_via` | str | `'sleeper'` / `'apple'` / `'google'` — the proof source; NULL = never verified (username-only) |
+| `verified_via` | str | `'sleeper'` / `'apple'` / `'google'` / `'mfl_login'` / `'espn'` — the proof source; NULL = never verified (username-only). `'mfl_login'` = an MFL login (`/api/mfl/auth-link`, or the MFL sign-in at `/api/entry/platform`); `'espn'` = the ESPN cookie-pair sign-in proof at `/api/entry/platform` |
 | `profile_public` | int | Public-profile opt-in (teardown 06-04, flag `profiles.user_toggle`): 1 = user opted into `/u/<username>` exposure; NULL/0 = private. Checked by the public profile routes IN ADDITION to the global `profiles.public_pages` flag; managed via GET/PUT `/api/profile/visibility` |
 | `stud_tax_mode` | str | #214/#215 — per-user stud-tax mode: `'market'` (retuned default; NULL/unknown reads as market) / `'heavy'` (pre-#214 legacy adjustment math) / `'off'` (no crown premium or package-depth discount). Managed via GET/PUT `/api/settings/stud-tax`; read by `trade_service.stud_tax_mode_for_user` for `/api/trade/evaluate` + deck generation |
 | `pick_pricing_mode` | str | ⚠️ **DEAD DATA since 2026-08-21 (D-146) — written by nothing, read by nothing.** (Unrelated but adjacent: `draft_picks.pool_value` is still written and still holds the LADDER price; every surface reprices it at read time since D-148 — Q-026 CLOSED.) Every row still says `'tier_ladder'` (or NULL); ignore it. It was **M6b**'s per-user draft-pick pricing mode, managed via GET/PUT `/api/settings/pick-pricing` and read by `trade_service.pick_pricing_mode_for_user`. The operator ruled market pricing *"not an opt-in or even an option to flip"*, so the resolver now returns `'market_slots'` unconditionally without touching this column, the PUT is 410 Gone, and the GET serves the fixed state rather than echoing this value back. **The column is deliberately NOT dropped** (additive-schema rule — never drop a column): keeping it means a restore of the per-user axis, if one is ever authorised, needs no migration, and it costs one unread VARCHAR. `db.get_pick_pricing_mode` / `set_pick_pricing_mode` still exist and still round-trip; nothing in production calls them. Pinned by `test_db_accessors_survive_as_dead_data` and `test_m6b_02_the_stored_column_is_no_longer_read` |
@@ -1148,7 +1152,7 @@ Unique: `uq_deck_replenish_week` on `(user_id, league_id, iso_week)`.
 
 ## `user_taste`
 
-TikTok-discovery **F5 trade-taste vectors** (flag `deck.taste_vectors`, `docs/plans/tiktok-discovery/prds/F5-taste-vectors.md`). Per-user decayed attribute-preference weights — the Monolith long/short interest split without embeddings. One lazily-created row per (user, attribute key), updated synchronously on every F1 `deck_outcomes` write (`w[a] ← w[a]·exp(−Δt/τ) + r(action)`, attrs read from the impression's frozen `features_json.taste_attrs`) and GC'd on read/update when **both** decayed weights fall below `taste_epsilon` — so the table stays bounded per user by the attribute-space cardinality (~50 fixed keys + one per league-mate + priors). Rows whose `attr` carries the `prior:` prefix hold the **board-derived prior** (2026-07-26 PRD amendment): rewritten wholesale by `replace_user_taste_prior` on every board save (rank3, tiers/save, copy-from-format, anchor/save, rankings/reorder), never touched by outcome updates, folded into the effective long vector at read time. User-scoped by design (no `league_id`): taste follows the manager; partner attrs are global user ids. All math lives in `backend/taste_service.py`.
+TikTok-discovery **F5 trade-taste vectors** (flag `deck.taste_vectors`, `docs/plans/tiktok-discovery/prds/F5-taste-vectors.md`). Per-user decayed attribute-preference weights — the Monolith long/short interest split without embeddings. One lazily-created row per (user, attribute key), updated synchronously on every F1 `deck_outcomes` write (`w[a] ← w[a]·exp(−Δt/τ) + r(action)`, attrs read from the impression's frozen `features_json.taste_attrs`; one upsert on the primary key, `merge_user_taste_rows`: a row another outcome wrote since this one's read gets this reward added rather than replaced, so two concurrent swipes both count) and GC'd on read/update when **both** decayed weights fall below `taste_epsilon` — so the table stays bounded per user by the attribute-space cardinality (~50 fixed keys + one per league-mate + priors). Rows whose `attr` carries the `prior:` prefix hold the **board-derived prior** (2026-07-26 PRD amendment): rewritten wholesale by `replace_user_taste_prior` on every board save (rank3, tiers/save, copy-from-format, anchor/save, rankings/reorder), never touched by outcome updates, folded into the effective long vector at read time. User-scoped by design (no `league_id`): taste follows the manager; partner attrs are global user ids. All math lives in `backend/taste_service.py`.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -1303,7 +1307,7 @@ The original seven engine read sites were `_roster_eveners`, `_user_pick_share`,
 
 In-app bell inbox. **Not a push mirror** — `_send_typed_push` has never written a row here, and rows are written beside a push at the call site, never inside the dispatcher (see `docs/cross-client-invariants.md` § Notification type strings for why, and `living-memory/LLD.md`).
 
-Nine `type` values, a cross-client enum: `trade_match`, `trade_accepted`, `trade_declined`, `referral_joined`, `league_member_joined`, `league_member_unlocked_trades`, `match_expiring`, `deck_replenished`, `counter_offer`.
+Ten `type` values, a cross-client enum: `trade_match`, `trade_accepted`, `trade_declined`, `referral_joined`, `league_member_joined`, `league_member_unlocked_trades`, `match_expiring`, `deck_replenished`, `counter_offer`, `referral_activated` (referral loop L7, FR-19: the inviter's inbox-only row when their invitee activates; written by `referral_ledger.maybe_activate_referral`, or folded into the still-unread `referral_joined` row for the same `referral_id` by `merge_into_unread_referral_join`, ux-lead R-F7; both clients route it to Trades).
 
 | Column | Type | Notes |
 |---|---|---|
@@ -1575,9 +1579,9 @@ Append-only log of meaningful user actions. Hot reads use the denormalized `user
 | `event_type` | str | see taxonomy below |
 | `occurred_at` | str | ISO UTC |
 | `league_id`, `session_id` | str | `session_id` is a 77-character domain-separated analytics digest; never a bearer token. |
-| `device_type` | str | `iphone` / `ipad` / `macos` / `web` / `extension` |
+| `device_type` | str, nullable | `iphone` / `ipad` / `macos` / `android` (mobile's `X-Device`) / `web` / `extension`, or NULL. **`overhaul_generation_completed`, `overhaul_batch_reconciled` and `win_now_objective_selected`** resolve it in `backend/client_device.py` (`event_device_type`): the `X-Device` header, stripped, else `X-Source` (lowercased) if it is `web` or `extension`, else **NULL**. Every other writer (the ingest, and server events that spread `g.device_info`) stores `X-Device` as sent, else NULL. NULL means no client identified itself, never another client's name (G-068 rule, extended to these stamps by head-eng 2026-10-31). Before that fix the three events stored `web` whenever `X-Device` was absent, which meant web *or* unidentified. analytics-lead's read-only prod count (2026-10-31) found none stored that way: 5 `overhaul_generation_completed` rows, all `iphone`, and 0 of the other two. So the pre-fix reading applies to no row. No backfill. |
 | `os_version`, `app_version` | str | |
-| `source` | str | `mobile` / `web` / `api` / `cron`. Server-fired trade rows also use `calc_queue` (the queue route's `trade_proposed`) and `shop_send` (#531, D-210: the propose routes' Shop-send `trade_proposed`) |
+| `source` | str, nullable | Which writer produced the row. **Client values** (only via `POST /api/events`): `mobile` / `web` / `extension` (`extension` is accepted and has 0 rows today). **Server values** (`record_event()`, never via `/api/events`): `api` / `server` / `calc_queue` / `shop_send`. There is no `cron`. Ingest resolves it in order (`_resolve_event_source` in `backend/analytics_ingest.py`): an `X-Source` header in the client set, else body `source` in the client set, else body `platform` `web`/`extension`, else `mobile` when an `X-Device` header is present (only the mobile SDK sends one), else **NULL**. NULL means no client identified itself (from the G-068 fix, 2026-10-31, on), never another client's name. A claimed `api`/`server`/`calc_queue`/anything else, by header or body, falls through. **Pre-fix rows:** before the fix a missing header landed `mobile`, so web's `sendBeacon` page-hide flushes were filed under `mobile`. Read pre-fix rows with `platform='web'` as web whatever their `source`. No backfill was run. |
 | `props` | JSON text | event-specific extras |
 | `event_id` | str, unique (nullable) | client-generated UUID — idempotent retries / dedup ([tracking plan v2 §S1](business/analytics/2026-07-17-tracking-plan-v2.md)) |
 | `device_id` | str, indexed | stable per-install anon id (`dev_` + UUID) — pre-signin attribution |
@@ -1590,6 +1594,8 @@ Append-only log of meaningful user actions. Hot reads use the denormalized `user
 Indexes: `(user_id, occurred_at)`, `(event_type, occurred_at)`, **full** unique `event_id` (`ix_user_events_event_id` — NULLS-DISTINCT on both dialects, so unlimited server-fired NULL rows coexist; conflict-ignore inserts must target it *without* `index_where`), `(device_id, occurred_at)` (`ix_user_events_device_occurred` — replaced the single-column `ix_user_events_device_id`, dropped at the analytics P0 migration).
 
 The envelope columns (`event_id` … `experiments`) are nullable and only populated by `POST /api/events` (client batches, `insert_client_events()`); server-fired `record_event()` rows leave them NULL. Pre-auth client events store `user_id = 'device:<device_id>'` — resolve through `identity_links`.
+
+**`platform = 'server'`** on server-fired rows whose emitter passes `record_event(..., platform="server")`. Since referral loop D-1 (2026-10-15) these are `invite_landing_opened` and `invite_landing_cta`; every other server-fired row still leaves `platform` NULL. The same two emitters pass `touch_user=False`, so their row is the only write: no `users` denorm bump (`last_active_at`, `events_count`, pointer columns) and no streak step. Their `user_id` is the referrer of the referrals row the invite id `t` names (any status); with no row, the user a legacy `ref` resolves to; else `'system:invite'`.
 
 **event_type taxonomy** (registry: `backend/analytics_taxonomy.py` — client and server namespaces are disjoint, asserted at import):
 - Session: `signup`, `login`, `logout`, `app_open`
@@ -1644,6 +1650,64 @@ Expo push tokens. Composite uniqueness via `device_token` PK + indexed `user_id`
 
 Interim home; folds into the auth epic's `linked_sources` when that lands.
 
+**Deleting a row ends roster-move consent.** `delete_sleeper_credential(user_id, *, withdrawn_via)` deletes the row and, in the same transaction, appends a `platform_write_consents` withdrawal for every open Sleeper grant (`withdrawn_via` is required: `disconnect` | `credential_expired` | `credential_rejected`). Server callers go through `server._drop_sleeper_credential`. A link that changes the stored credential (`POST /api/sleeper/link` with another token or another Sleeper user) ends any open grant first, as `relink` (legal R28.26 2f); a replay of the stored token withdraws nothing. Account deletion deletes both consent tables outright instead (R15.8 D12).
+
+---
+
+## `platform_write_consents`
+
+D1 free-agent moves ([contract](plans/sleeper-fa-write/contract.md); legal R15.3; flag `sleeper.send_add_drop`). The user's authorization for Fleeced to make roster moves in their platform league, and every end of it. **Append-only:** rows are inserted, never updated or deleted (except by account deletion). A grant is one row; ending it is a new `withdrawal` row whose `refers_to` names the grant. Never holds a token or credential. Written by `record_platform_write_grant` (the move route, committed before any platform call) and `withdraw_platform_write_grants` (Settings, disconnect, credential expiry or rejection); read by `active_platform_write_grant`.
+
+**Validity is computed at read time:** the latest grant for (user, platform, `platform_user_id`) is valid while its `copy_version` equals the server's current one (`fa_move_copy.CURRENT_CONSENT_VERSION`), no withdrawal refers to it, and now < `expires_at`. Moves never extend it. Keyed by user and platform account, never by league (R15.8 D11).
+
+| Column | Type | Notes |
+|---|---|---|
+| `consent_id` | str PK | uuid4 hex |
+| `kind` | str | `grant` \| `withdrawal` |
+| `refers_to` | str | Withdrawals: the grant's `consent_id` |
+| `user_id` | str | FTF user id (indexed with `platform`) |
+| `platform` | str | `sleeper` \| `mfl` \| `espn` (required) |
+| `platform_user_id` | str | The platform account the moves are made as (Sleeper: the credential's `sleeper_user_id`) |
+| `league_scope` | str | Grants: always `all_linked` (per account, R15.8 D11) |
+| `copy_version`, `locale` | str | Grants: the text shown, e.g. `sleeper-roster-moves-v1` / `en-US`; the words live in `backend/fa_move_copy.py` under that version |
+| `consented_at`, `expires_at` | str | Grants: server UTC; `expires_at` = `consented_at` + 7 × 24 h |
+| `client_platform`, `app_version` | str | Grants: the `X-Device` / `X-App-Version` headers |
+| `trigger_attempt_id` | str | Grants: the `attempt_id` of the move the tick was given for |
+| `withdrawn_at` | str | Withdrawals: server UTC |
+| `withdrawn_via` | str | Withdrawals: `settings` \| `disconnect` (the user's own choice) \| `credential_expired` \| `credential_rejected` \| `relink` (side effects) |
+| `recorded_at` | str | Row insert time, server UTC |
+
+User-keyed: deleted with the account and included in the export (`accounts._ADDITIONAL_PRIVATE_TABLES`).
+
+---
+
+## `platform_write_moves`
+
+D1 free-agent moves. The record of each move Fleeced sent to a platform for the user (legal R15.3). **Append-only, two rows per move** under the client's `attempt_id`: phase `sent`, written **before** the platform call, then phase `result`. Unique on (`user_id`, `attempt_id`, `phase`), so one tap can never send twice; the id is opaque and only unique per user (another user's identical id is a different move); a repeat of an `attempt_id` replays the `result` row's `response_json`. A move refused before the write (no consent, roster full, player taken, …) writes no row. Never holds a token. `sent` rows are written by `claim_platform_write_move` (the locked block check + insert), `result` rows by `record_platform_write_move`; read by `platform_write_move_rows` (idempotency) and `recent_platform_write_moves` (the double-move block: a `sent` row with no result or `result = 'unknown'` under 15 minutes old, or a pending claim under 24 h, blocks a new move for that player; the block check and the `sent` insert run in one transaction under a Postgres advisory lock on (user, league, add player), `database.claim_platform_write_move`, so the block is atomic; on SQLite, local dev only, a post-insert re-read by lower `id` settles a race instead).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `attempt_id` | str | Client id, one per tap: opaque, 8–64 of `[A-Za-z0-9._-]` (UUID-shaped, never parsed as one); joins the `fa_move_*` events |
+| `phase` | str | `sent` \| `result` |
+| `user_id` | str | FTF user id (indexed with `league_id`) |
+| `platform` | str | `sleeper` \| `mfl` \| `espn` |
+| `platform_user_id` | str | The account the move was made as |
+| `league_id` | str | |
+| `consent_id` | str | The grant that covered it |
+| `move_kind` | str | `add` \| `claim` |
+| `add_player_ids`, `drop_player_ids` | text | JSON lists of FTF (Sleeper) player ids |
+| `faab_bid` | int | Claims on FAAB leagues |
+| `sent_at` | str | Server UTC, taken before the platform call |
+| `result` | str | `result` rows: `accepted` \| `partial` \| `rejected` (the platform refused) \| `error` (nothing done: not sent, token refused, unconfigured) \| `unknown` (outcome unknown; never retried) |
+| `status` | str | `result` rows on a 200: `complete` \| `pending` (a claim) |
+| `platform_transaction_id` | str | When the platform returns one |
+| `error_code` | str | `result` rows on a refusal: the route's code |
+| `response_status`, `response_json` | int, text | `result` rows: the HTTP status and body answered |
+| `recorded_at` | str | Row insert time, server UTC |
+
+User-keyed: deleted with the account and included in the export (`accounts._ADDITIONAL_PRIVATE_TABLES`).
+
 ---
 
 ## `espn_credentials`
@@ -1653,7 +1717,7 @@ ESPN league linking (`espn.link`, [plan](plans/espn-league-linking-plan-2026-07-
 | Column | Type | Notes |
 |---|---|---|
 | `user_id` | str PK | FTF user_id (one ESPN cookie pair per user) |
-| `swid` | str | Braced GUID — doubles as the user's ESPN member id in league payloads; plaintext |
+| `swid` | str | Braced GUID — doubles as the user's ESPN member id in league payloads; plaintext. Stored **as captured** (braced or bare, any case); platform sign-in's D6 conflict check compares it through `accounts.platform_subject` (braced, upper-cased) on both sides |
 | `espn_s2_encrypted` | text | **Fernet ciphertext** of the `espn_s2` cookie — never plaintext, never logged |
 | `expires_hint_at` | str | ISO UTC guess (~1yr community consensus; undocumented). NULL = unknown — 401s drive reconnect |
 | `verified_at` | str | ISO UTC of the last live authenticated ESPN read that PROVED this pair (credential-honesty fix, 2026-08-12). Means EXACTLY ONE THING: the **server** observed a successful **authenticated** read using this pair — never "the client captured cookies", "the user looked signed in", or "ESPN answered 200". Stamped by both `/api/espn/link` store paths; the credential-only path proves it via `server._espn_verify_credential` (authenticated read of a linked private league, else a fan-profile probe that returned account data — result asserted, not just exception-free). **Identity binding (#321, 2026-08-16):** since this release the stamp additionally implies the pair's SWID passed the membership assertion (owns the caller's bound team, or the check was conclusively inconclusive — zero-false-reject posture); a conclusive mismatch discovered later (team-binding step, re-sync) NULLs the stamp in place (`clear_espn_credential_verification`, row kept). **One-time invalidation migration (2026-08-16, `_evict_prerelease_espn_verified_stamps`):** every stamp `< 2026-08-17T06:00:00+00:00` (the release cutoff) was nulled at deploy — **no pre-identity-binding stamp is identity-trustworthy** — so NULL now also means "evicted pending an identity-bound re-sign-in", not only "never proven". NULL → `GET /api/espn/link` reports not connected. **Do not widen:** a device-reported "looks connected" signal needs its own column |
@@ -1670,7 +1734,7 @@ MFL authenticated linking (#177, `mfl.auth_link`). Encrypted MFL session cookies
 | Column | Type | Notes |
 |---|---|---|
 | `user_id` | str PK | FTF user_id (one MFL link per user) |
-| `mfl_username` | str | MFL login handle — identifier only (for "connected as" display), not a secret |
+| `mfl_username` | str | MFL login handle — identifier only (for "connected as" display), not a secret. Stored as typed; platform sign-in's D6 conflict check compares it trimmed + lower-cased on both sides |
 | `cookie_encrypted` | text | **Fernet ciphertext** of `MFL_USER_ID=<value>` — never plaintext, never logged |
 | `year` | int | Season the cookie was minted for |
 | `created_at`, `updated_at` | str | |
@@ -1697,14 +1761,14 @@ Identity-anchor layer above the app's working key (`sleeper_user_id`) — accoun
 
 ## `linked_identities`
 
-One row per provider identity. Keyed on the provider's stable `sub` claim — **never** on email (Apple only returns email on first authorization).
+One row per provider identity. Keyed on the provider's stable `sub` claim — **never** on email (Apple only returns email on first authorization). Since platform sign-in (2026-10-26) a proven ESPN/MFL team claim at `POST /api/entry/platform` also anchors an account here (`accounts.PLATFORM_PROVIDERS`; deliberately outside `accounts.PROVIDERS`, which stays the Apple/Google `/api/auth/*` set). No CHECK constraint, so no DDL.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | int PK | autoincrement |
 | `account_id` | str, not null | → `accounts.account_id` |
-| `provider` | str, not null | `'apple'` / `'google'` |
-| `provider_subject` | str, not null | Provider's stable `sub`; unique per provider (`uq_linked_identity`) |
+| `provider` | str, not null | `'apple'` / `'google'` / `'espn'` / `'mfl'` |
+| `provider_subject` | str, not null | Provider's stable `sub`; unique per provider (`uq_linked_identity`). `espn`: the canonical braced SWID, upper-cased. `mfl`: the MFL login username, trimmed and lower-cased (first controller wins — the row never moves) |
 | `email_hash` | str | SHA-256 hex of the normalized provider email; raw email is never stored |
 | `linked_at` | str | ISO UTC |
 
@@ -1719,7 +1783,7 @@ One row per provider identity. Keyed on the provider's stable `sub` claim — **
 | `token_hash` | str PK | **SHA-256 hex of the bearer token** — the raw token is never stored (a DB leak must not yield live credentials) |
 | `user_id` | str, not null | Sleeper user id or `acct_<account_id>` working key. Indexed (`ix_sessions_user`) for the delete-all-for-user eviction paths |
 | `account_id` | str | → `accounts.account_id` when the session is account-anchored |
-| `verified_via` | str | `'sleeper'` / `'apple'` / `'google'` — re-stamped onto the rebuilt session |
+| `verified_via` | str | `'sleeper'` / `'apple'` / `'google'` / `'mfl_login'` / `'espn'` — re-stamped onto the rebuilt session |
 | `account_only` | int | 0/1 — 1 = `acct_*` session with no Sleeper source (rebuilds as the empty-sentinel-league account session) |
 | `username` | str | Snapshot for rebuild; falls back to the `users` profile when null |
 | `display_name` | str | Snapshot for rebuild |
@@ -1739,6 +1803,7 @@ One row per provider identity. Keyed on the provider's stable `sub` claim — **
 | `give_ids` | text, not null | JSON `list[str]` of player ids (≤5) |
 | `receive_ids` | text, not null | JSON `list[str]` of player ids (≤5) |
 | `created_at` | str, not null | ISO UTC |
+| `value_snapshot` | text, nullable | The share-time value snapshot (models-lead K-a2; see [value_snapshot](#value_snapshot-share-time-value-json) below). Written once, by `POST /api/share/package`, only when the body carries `scoring_format`; there's no league, so only generic picks price. NULL = the card draws no value bar. Added in place by `_migrate_db` (`migration_cols`), no default, no backfill: every older row reads NULL. **Anonymized with the row:** it holds values, labels and the date only, so account deletion's `user_id` → placeholder rewrite leaves nothing personal |
 
 ---
 
@@ -1753,6 +1818,26 @@ One row per provider identity. Keyed on the provider's stable `sub` claim — **
 | `created_by` | str, not null | Sharer's session `user_id`. Part of `ix_trade_share_tokens_creator (created_by, created_at)`, the 30/hour mint-limit count |
 | `created_at` | str, not null | ISO UTC mint time |
 | `revoked_at` | str, nullable | ISO UTC; NULL = live. Set it to revoke a link (it then gets the generic expired page). Nothing in v1 writes it; see `docs/runbook.md` § Trade share links |
+| `value_snapshot` | text, nullable | The share-time value snapshot (models-lead K-a2; see below). Written once, on a NEW token, by `POST /api/share/trade`: priced on the sharer's side (the lists swap for user_b), in the league's format, with the league's owned picks. A re-share returns the token with the snapshot it was minted with; a token minted before the column existed stays NULL. NULL = no value bar. Added in place by `_migrate_db` (`migration_cols`), no default, no backfill. Deleted with the row when the sharer deletes their account; exported with the user's other `trade_share_tokens` columns (only `token` is omitted) |
+
+### `value_snapshot` (share-time value JSON)
+
+The og share card (`/og/trade/<token>.png`, `/og/p/<short_id>.png`) and its share page draw the value bar **only** from this snapshot; a view never prices (`server._value_bar_from_snapshot`). Written by `server._share_value_snapshot` from Mode A consensus only: `_consensus_verdict` (the call `POST /api/trade/evaluate` makes) in market stud-tax mode. It is NULL (K-a6) when any asset can't be priced, a side is empty or values at 0 or less, or the computation raises. Shape (`v` 1):
+
+| Field | Meaning |
+|---|---|
+| `v` | `1`, the shape version |
+| `favors` | `give` \| `receive` \| `even`, oriented to the sharer: `receive` = the YOU GET column has more value |
+| `firsts` | the gap in generic Mid 1sts (`gap.firsts`, non-negative): the fill length, and the "≈ 1.4 Mid 1sts" label |
+| `label` | `gap.pick_equivalent.label` (e.g. "Early 2nd Round Pick"), or null when no single pick fits |
+| `format` | `1qb_ppr` \| `sf_tep` |
+| `league_id` | the match's league (trade shares); null for packages |
+| `computed_at` | ISO UTC mint time; the card's date is its UTC date |
+| `second_in_firsts` | Mid 2nd / Mid 1st over the generic-pick values at mint: where the ±2nd ticks go. Required, a number with 0 < x < 1; there is no default fraction, so a snapshot without a valid one is malformed and draws no bar |
+| `pool.snapshot` | `roster_snapshot`'s `vsn1` for (format, league): a hash of the consensus seed and the league's pick rows that priced it |
+| `pool.version` | the pricing that produced it: `evaluate-mode-a/<stud-tax mode>/<pick-pricing mode>`, today `evaluate-mode-a/market/market_slots` |
+
+**Never stored:** a member's board or rankings, client-sent values, player values, package totals or `gap.value` points, usernames or user ids, player ids.
 
 ---
 
@@ -1880,10 +1965,22 @@ Single source of truth for paid access. Writers: billing webhook projector, refe
 | `product_id` | str | Store SKU (`ftf_pro_annual`, `ftf_season_pass_2026`, `ftf_founder`, …) |
 | `status` | str, not null | `active` (default) \| `expired` \| `revoked` \| `refunded` — revoke/refund flip status, never delete |
 | `starts_at` / `expires_at` | str | ISO UTC; `expires_at` NULL = perpetual (founder, manual perpetual) |
-| `granted_by` | str | `'operator'` on manual grants; webhook event id otherwise |
+| `granted_by` | str | `'operator'` on manual grants; webhook event id otherwise. A `sandbox:` prefix (`sandbox:<event_id>`) marks a sandbox-lane row: production billing events never touch such rows, and sandbox events touch only them |
 | `note` | str | Operator note on manual grants |
 | `metadata` | JSON text | Store payloads (original_transaction_id, stripe sub id, referral id) |
 | `created_at` / `updated_at` | str | ISO UTC |
+
+## `paywall_previews`
+
+The deck preview's consumption record (`backend/paywall_gate.py`, 2026-10-25). One row per never-entitled user, on a verified session, once a `/api/trades/generate` or `/status` response has served cards from their first deck while the paywall gate enforces. Warm-up and cron-built jobs never write it, and unverified sessions never do (R28.14). Created by `metadata.create_all` (both dialects); `window_trade_ids` also has a `_migrate_db` `migration_cols` row (additive, 2026-10-27). **Private:** deleted and exported with the account (`accounts._ADDITIONAL_PRIVATE_TABLES`, every alias; the export carries every column, `window_trade_ids` included).
+
+| Column | Type | Notes |
+|---|---|---|
+| `user_id` | str PK | Working key (sleeper id or `acct_*`), the session user_id entitlements resolve by |
+| `deck_key` | str, not null | The trade job's `job_id` whose preview page(s) were served: "the first deck" |
+| `pages_served` | int, not null | Highest preview page served (1..`paywall_preview_pages`); only grows |
+| `first_served_at` / `updated_at` | str, not null | ISO UTC |
+| `window_trade_ids` | text (JSON list), nullable | P3-1 (2026-10-27): the trade ids of the deck's preview window (its first `paywall_preview_pages` × `trade_page_size` raw cards) at the last serve, sorted; rewritten when a later serve of the same deck sees a different window. The swipe / pass-reason check reads it only once the process no longer holds the deck (job evicted after 4 h, or a deploy). NULL on rows written before the column (read as an empty window); trade ids, not credentials |
 
 ## `subscription_events`
 
@@ -1910,12 +2007,23 @@ Give-get program state (foundation §5). Fraud controls are structural: `uq_refe
 | `id` | int PK | |
 | `referrer_user_id` | str, not null, indexed | |
 | `referred_user_id` | str, indexed | NULL until invitee identified |
-| `league_id` | str, not null | The shared Sleeper league |
+| `league_id` | str, not null | The shared league, any platform (Sleeper, ESPN, MFL, Fleaflicker id as the clients know it). Indexed with `status` (`ix_referrals_league_status`) |
 | `invite_token` | str UNIQUE | Carried by share-card deep links (`/join/<token>`) |
 | `status` | str, not null | `pending` → `joined` → `activated` → `rewarded` \| `rejected` \| `expired` |
 | `qualifying_event` | str | e.g. `'matchups_completed>=25'` |
 | `reward_entitlement_id` | int | → `entitlements.id` |
 | `created_at` / `joined_at` / `activated_at` / `rewarded_at` | str | Lifecycle timestamps |
+| `opened_at` | str | Referral loop D-1 (FR-8). ISO UTC of the **first** human open of the join landing carrying this row's `invite_token` as `t`. First write wins (`COALESCE`). NULL until then |
+| `last_opened_at` | str | ISO UTC of the latest human open of the join landing |
+| `open_count` | int, `server_default 0` | Human landing opens, `COALESCE(open_count, 0) + 1` per open |
+| `unfurled_at` | str | ISO UTC of the **first** link-preview fetch (iMessage, Slack, Discord, WhatsApp, …; an empty user agent counts). First write wins. Preview fetches never touch the three open columns |
+| `share_token` | str, indexed (`ix_referrals_share_token`) | Referral loop L7 (§7.1, §7.6). The invite id in the link (`t`, `invite_id` in API bodies and event props): `secrets.token_urlsafe(9)`, 12 URL-safe chars. **= `invite_token` on a minted row**; on a group-chat **sibling** row it is the parent's id while the sibling's own `invite_token` is `<share_token>~<6 random>` (never emitted, never a link). "Joins per share" = rows grouped by `share_token`. NULL on rows written before L7, and **NULLed on the referrer's rows when the referrer deletes their account** (the link stops crediting; `uq_referral_token` keeps `invite_token`). A bearer id for a public link, so account export omits it (as `invite_token`) |
+| `surface` | str | `InviteSurface` at mint: `league_home` \| `matches_empty` \| `trades_banner` \| `members_overlay` \| `notif_empty` \| `web_invite` (closed; `referral_ledger.INVITE_SURFACES`). A sibling copies its parent's |
+| `attribution_method` | str | `token` (§7.4) \| `league_match` (§7.5); NULL while `pending` |
+
+The four landing columns are written only by `record_referral_landing_open()`: one atomic `UPDATE … WHERE invite_token = :t` (served by `uq_referral_token`; no new index), from `GET /app/league/join/<id>` while `growth.referral_ledger` is on and `t` is well-formed, and only when the row's `league_id` is the path's league (`invite_status` valid or expired): a `t` pasted into another league's path never stamps the row, because the league-match fallback reads `opened_at`. A HEAD request writes nothing. Added through `_migrate_db`'s `migration_cols` as well as the table, so existing databases gain them on boot.
+
+**The ledger (referral loop L7, PRD §7, §9; all behind `growth.referral_ledger`).** Writers, all in `backend/database.py` and driven by `backend/referral_ledger.py`: **mint** `create_referral_invite()` (`POST /api/invite/token`): one `pending` row, `referrer_user_id` = the session user, `invite_token` = `share_token` = the new id, `surface`, `created_at`. **Credit** at a NEW user's first session init (`referral_ledger.attribute_first_session`): `claim_referral()` is one conditional `UPDATE … WHERE id = :id AND referred_user_id IS NULL AND status = 'pending'` → `referred_user_id`, `status 'joined'`, `joined_at`, `attribution_method`; when the minted row is already claimed, `insert_referral_sibling()` adds the §7.6 sibling (`status 'joined'`, same referrer / league / `surface` / `created_at`, `share_token` = the parent's). `uq_referral_pair` keeps one row per (referrer, referred), and a referred user is credited at most once ever. **Activation** `activate_referral()`: `joined → activated`, `activated_at`, `qualifying_event` (`trade_proposed` \| `match_swiped`, stage 7 of `analytics_queries.FUNNEL_STAGES`), one conditional `UPDATE … WHERE status = 'joined'`. `expired` is derived on read (`created_at` + 30 d), never written. The ledger's server events, `referral_attributed` and `referral_activated` (owner = the referrer), are written with `platform = 'server'` and `touch_user=False`, like the D-1 landing events. Both new indexes are declared on the table and created by an explicit `CREATE INDEX IF NOT EXISTS` in `_migrate_db` (an existing table gets no new index from `create_all`); both dialects, idempotent.
 
 ## `affiliate_clicks`
 

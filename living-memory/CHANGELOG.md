@@ -11,11 +11,12 @@
 
 ---
 
-## 2026-11-04 — Launch merge execution: quarantine and binary safety integration
+## 2026-11-04 — Launch integration with independent review
 
-- Merged #582 as `af57e59c`: the legacy platform-entry flag defaults off while verified sign-in is integrated. Production overrides were not inspected.
-- Prepared a history-preserving integration of #365, #566, #580 and #588 after independent subagent review. Combined local guards pass: icon, 13-type privacy manifest, share text (109), paywall wording/gate (110), and all 14 EAS sensitive ignore patterns; plist lint passes. GitHub CI remains the pre-main gate.
-- Billing and platform conflict resolutions are under CI/review. #456 stays held until November 18 at the operator's explicit direction. No build, key rotation, paid-feature activation or store release was performed.
+- #582 merged as `af57e59c`; binary safety #589 merged as `787b9fc4` with four CI checks and main CI green. Privacy/Shop #592 merged as `1a40bd00` after its four exact-head CI checks. This includes #365/#566/#580 and EAS secret exclusions #588.
+- The history-preserving `codex/launch-reviewed-integration` candidate joins privacy/Shop, launch fixes/caches, paid server, proven platform sign-in, models, web/referrals and gated moves/tips/shares. Full exact-head GitHub CI is the merge gate; inspect the branch's PR state for delivery. No installed build or deployment is claimed.
+- Cross-stack repairs cover FREE route classification, deleted Shop targets, personal cache isolation/late-fill invalidation and durable atomic first-init referral attribution. Independent concurrency/deletion checks passed on SQLite/PostgreSQL; client verification covers 154 guards, TypeScript and 255 web checks. Details: [TEST_LEDGER](TEST_LEDGER.md).
+- #456 is held until 2026-11-18; #443 is superseded. #584 requires the separately approved/read-back KTC zero-weight pin (observed 0.5). No production config, build, feature activation or provider write was performed.
 
 ## 2026-10-21 — Usage Trends week 6 loaded by hand (daily tick still dead)
 

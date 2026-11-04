@@ -482,24 +482,37 @@ if (entryCall) {
 //
 // Behavioural, not structural: the ladder is real logic, so it is lifted out
 // of the screen, transpiled and CALLED. A pattern match here would pass on a
-// ladder that returned the id unchanged.
+// ladder that returned the id unchanged. The ladder's labels come from the
+// shared helper `utils/teamLabel.ts` (zero runtime imports), which is
+// transpiled too and handed in; `check-no-raw-id-labels.js` owns its cases.
 
 const ownerFn = fnNamed(mockSrc, 'ownerNameOf');
-const mflRe = findAll(
-  mockSrc,
-  (n) => ts.isVariableDeclaration(n) && n.name.getText() === 'MFL_MEMBER_RE',
-)[0];
-assert(!!ownerFn && !!mflRe, 'MockDraftScreen declares the owner-name ladder');
+assert(!!ownerFn, 'MockDraftScreen declares the owner-name ladder');
 
-if (ownerFn && mflRe) {
-  const snippet = `const ${mflRe.getText()};\n${ownerFn.getText()}\nreturn ownerNameOf;`;
+const teamLabelMod = { exports: {} };
+{
+  const js = ts.transpileModule(
+    fs.readFileSync(path.join(__dirname, '..', 'src/utils/teamLabel.ts'), 'utf8'),
+    { compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS } },
+  ).outputText;
+  // eslint-disable-next-line no-new-func
+  new Function('module', 'exports', 'require', js)(teamLabelMod, teamLabelMod.exports, () => {
+    throw new Error('utils/teamLabel.ts must not require anything at runtime');
+  });
+}
+
+if (ownerFn) {
+  const snippet = `${ownerFn.getText()}\nreturn ownerNameOf;`;
   const js = ts.transpileModule(snippet, {
     compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.None },
   }).outputText;
   let ownerNameOf;
   try {
     // eslint-disable-next-line no-new-func
-    ownerNameOf = new Function(js)();
+    ownerNameOf = new Function('realName', 'teamLabel', js)(
+      teamLabelMod.exports.realName,
+      teamLabelMod.exports.teamLabel,
+    );
   } catch (e) {
     fail('ownerNameOf is evaluable in isolation', String(e));
   }
@@ -512,7 +525,7 @@ if (ownerFn && mflRe) {
       ['   ', 'mfl:62846.f0012', 'Team 0012', 'whitespace is not a name'],
       [undefined, 'mfl:62846.f0003', 'Team 0003', 'undefined behaves as absent'],
       ['mfl:62846.f0003', 'mfl:62846.f0003', 'Team 0003', 'a session username that IS the raw id is filtered, not trusted'],
-      [null, '867530912', '867530912', 'a Sleeper roster id keeps the shipped fallback — D-16 is the MFL half'],
+      [null, '867530912', '867530912', 'a Sleeper owner id (a Sleeper USER id) keeps the shipped fallback — D-16 is the MFL half'],
     ];
     let bad = [];
     for (const [name, id, want, why] of cases) {

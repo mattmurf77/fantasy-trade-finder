@@ -35,9 +35,10 @@ import {
 } from '../state/guideTargets';
 import { S as GUIDE } from '../components/analystScript';
 import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
-import { fetchInviteMeta } from '../api/league';
+import { fetchInviteMeta, type InviteMeta } from '../api/league';
 import { getLastUsername, getSessionToken, setLastUsername } from '../api/client';
 import { testLaunchArg } from '../utils/testRouteEntry';
+import { isInviteId } from '../utils/inviteId';
 import EspnLinkSheet from '../components/EspnLinkSheet';
 import PlatformLinkSheet from '../components/PlatformLinkSheet';
 
@@ -54,6 +55,57 @@ const TEST_APPLE_SUB = testLaunchArg('FTFTestAppleSub');
  *  carry it so RootNav can land LeaguePicker with the matching link sheet
  *  auto-opened (#130 `espnLink` / its `mflLink` twin). */
 export type EntryPlatformIntent = 'espn' | 'mfl';
+
+/** The landing's platform tiles (operator 11-01: "three tiles. Sleeper espn
+ *  mfl"; design-lead's spec). Name, the dim line under it (an SE tile fits
+ *  about 10 characters), and the radio's spoken label. Words: marketing-lead,
+ *  copy §6 addendum 16 (revised 11-02: no "or a league ID"; under the
+ *  verified sign-in an ID alone is refused). */
+const PLATFORM_TILE: Record<'sleeper' | EntryPlatformIntent, {
+  name: string; line: string; a11y: string;
+}> = {
+  sleeper: { name: 'Sleeper', line: 'Username', a11y: 'Sleeper, sign in with your username, no password needed' },
+  espn: { name: 'ESPN', line: 'Sign in', a11y: 'ESPN, sign in with your ESPN account' },
+  mfl: { name: 'MFL', line: 'Sign in', a11y: 'MyFantasyLeague, sign in with your MFL account' },
+};
+
+/** P0-3 + referral FR-11 (AC-11) — the invited banner's headline, in priority
+ *  order. `inviter` is the invite-meta response of a call that carried the
+ *  invite id `t`, else null; it is the ONLY source of an inviter display
+ *  name, so the name is always server-resolved and never read from a URL.
+ *  `inviteIdSent` is true when a well-formed `t` is (or was) sent.
+ *
+ *    (a) legacy `?ref=` captured  → today's line, unchanged
+ *    (b) server named the inviter → "{name} invited you to {league | their league}"
+ *    (c) `t` sent, no name for ANY reason (an older server, any status, a
+ *        failed or timed-out call) → "A leaguemate invited you[ to {league}]"
+ *    (d) no well-formed `t`       → today's lines, unchanged
+ *
+ *  Pure, no free variables: tests/check-signin-inviter.js lifts and runs it. */
+function inviteHeadlineFor(
+  invitedBy: string | null,
+  invitedLeagueName: string | null,
+  inviteIdSent: boolean,
+  inviter: InviteMeta | null,
+): string | null {
+  if (invitedBy) {
+    return `@${invitedBy} invited you to ${invitedLeagueName || 'their league'} — ` +
+      "sign in and we'll take you straight there.";
+  }
+  const name = inviter?.inviter_display_name;
+  if (typeof name === 'string' && name.trim()) {
+    return `${name.trim()} invited you to ${invitedLeagueName || 'their league'} — ` +
+      "sign in and we'll take you straight there.";
+  }
+  if (inviteIdSent) {
+    return `A leaguemate invited you${invitedLeagueName ? ` to ${invitedLeagueName}` : ''} — ` +
+      "sign in and we'll take you straight there.";
+  }
+  return invitedLeagueName
+    ? `You were invited to ${invitedLeagueName} — ` +
+      "sign in and we'll take you straight there."
+    : null;
+}
 
 interface Props {
   onSignedIn: (platformIntent?: EntryPlatformIntent) => void;
@@ -243,6 +295,14 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   const invitedBy = useSession((s) => s.invitedBy);
   const invitedLeagueId = useSession((s) => s.invitedLeagueId);
   const invitedLeagueName = useSession((s) => s.invitedLeagueName);
+  // FR-11 — the invite id `t`, PEEKED: session init consumes it (B3), never
+  // this screen. A selector, so an id captured while SignIn is up still asks.
+  const inviteId = useSession((s) => s.inviteId);
+  // FR-11 — the response of the call that carried `t`. Component state only.
+  const [inviterMeta, setInviterMeta] = useState<InviteMeta | null>(null);
+  // Exactly when the effect below sends `t` (fetchInviteMeta drops a
+  // malformed one), so a failed call still reads as an invite.
+  const inviteIdSent = !!invitedLeagueId && isInviteId(inviteId);
 
   // Resolve the invited league's name ONCE, for the banner. The result is
   // cached into the persisted invite intent so the LeaguePicker companion
@@ -251,26 +311,28 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // CALL SITE; adding another one turns a passing tier-1 sim run red.
   // Never throws, never blocks the form, and has no loading or error state:
   // a missing name is a copy fallback, not a failure the user should see.
+  // FR-11: with `t` it also runs when the league name is already cached (the
+  // cache holds no inviter name). The cached name is read, not a dep, so
+  // caching it from this very response never re-asks.
   useEffect(() => {
     const id = invitedLeagueId;
-    if (!id || invitedLeagueName) return;
+    if (!id || (useSession.getState().invitedLeagueName && !inviteId)) return;
+    setInviterMeta(null); // a different invite: the old answer no longer applies
     let alive = true;
-    void fetchInviteMeta(id).then((meta) => {
-      if (!alive || !meta?.league_name) return;
+    void fetchInviteMeta(id, inviteId).then((meta) => {
+      if (!alive || !meta) return;
+      if (inviteId) setInviterMeta(meta);
+      if (!meta.league_name) return;
       void useSession.getState().setInvitedLeagueName(meta.league_name);
     });
     return () => {
       alive = false;
     };
-  }, [invitedLeagueId, invitedLeagueName]);
+  }, [invitedLeagueId, inviteId]);
 
-  const inviteHeadline = invitedBy
-    ? `@${invitedBy} invited you to ${invitedLeagueName || 'their league'} — ` +
-      "sign in and we'll take you straight there."
-    : invitedLeagueName
-    ? `You were invited to ${invitedLeagueName} — ` +
-      "sign in and we'll take you straight there."
-    : null;
+  const inviteHeadline = inviteHeadlineFor(
+    invitedBy, invitedLeagueName, inviteIdSent, inviterMeta,
+  );
 
   useEffect(() => {
     getLastUsername().then((last) => {
@@ -652,35 +714,33 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 {inviteHeadline}
               </Text>
             ) : null}
-            {/* Landing platform options — Sleeper · ESPN · MFL entry chips.
+            {/* Landing platform tiles — Sleeper · ESPN · MFL, equal width,
+                one per live platform (platformChips; never a dead tile).
                 Sleeper (default) leaves the form below untouched; ESPN/MFL
-                swap it for the explainer + Apple panel further down. */}
+                swap it for the explainer + link panel further down. */}
             {platformPickerShown ? (
-              <View style={styles.platformRow}>
+              <View style={styles.platformRow} accessibilityRole="radiogroup">
                 {platformChips.map((p) => {
                   const on = entryPlatform === p;
+                  const tile = PLATFORM_TILE[p];
                   return (
                     <Pressable
                       key={p}
                       testID={`signin.platform-${p}`}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Use ${
-                        p === 'sleeper' ? 'Sleeper' : p === 'espn' ? 'ESPN' : 'MyFantasyLeague'
-                      }`}
+                      accessibilityRole="radio"
+                      accessibilityLabel={tile.a11y}
                       accessibilityState={{ selected: on }}
                       onPress={() => selectEntryPlatform(p)}
                       disabled={busy || demoBusy || appleBusy}
                       style={({ pressed }) => [
-                        styles.platformChip,
-                        on && styles.platformChipOn,
-                        pressed && !on && styles.platformChipPressed,
+                        styles.platformTile,
+                        on && styles.platformTileOn,
+                        pressed && !on && styles.platformTilePressed,
                       ]}
                     >
-                      <ChalkText
-                        style={[styles.platformChipText, on && styles.platformChipTextOn]}
-                      >
-                        {p === 'sleeper' ? 'Sleeper' : p === 'espn' ? 'ESPN' : 'MFL'}
-                      </ChalkText>
+                      {on ? <View style={styles.platformTileTick} /> : null}
+                      <ChalkText style={styles.platformTileName}>{tile.name}</ChalkText>
+                      <ChalkText style={styles.platformTileLine}>{tile.line}</ChalkText>
                     </Pressable>
                   );
                 })}
@@ -714,8 +774,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               <View testID="signin.platform-panel">
                 <ChalkText style={styles.platformExplainer}>
                   {entryPlatform === 'espn'
-                    ? 'ESPN dynasty leagues are supported. Sign in to ESPN and we’ll find your leagues, or enter a league ID — no extra account needed.'
-                    : 'MyFantasyLeague dynasty leagues are supported. Sign in with MFL and we’ll find your leagues, or enter a league ID — no extra account needed.'}
+                    ? 'ESPN dynasty leagues are supported. Sign in to ESPN.'
+                    : 'MyFantasyLeague dynasty leagues are supported. Sign in to MFL.'}
                 </ChalkText>
                 {/* Guide spotlight target — collapsable={false} so the
                     wrapper survives view-flattening and stays measurable,
@@ -1029,10 +1089,12 @@ const styles = StyleSheet.create({
   },
   // Teardown 06-03 — account-only session-expired re-auth notice.
   // Informational (not an error): dim chalk, sits above the Apple portal.
+  // 5pt under space.md so the returning-user landing fits an iPhone SE with
+  // the tiles (652 → 647pt; design-lead's #570 render).
   reauthNotice: {
     ...type.bodySm,
     color: chalk.dim,
-    marginBottom: space.md,
+    marginBottom: space.md - 5,
   },
   // P0-3 — invited banner. Same slot, same rhythm as reauthNotice: no new
   // visual pattern, no accent beyond the existing ones.
@@ -1061,33 +1123,38 @@ const styles = StyleSheet.create({
     marginTop: -space.xs,
     marginBottom: space.sm,
   },
-  // ── Landing platform options (Sleeper · ESPN · MFL entry chips) ────────
-  // Outline chips matching hintRow's border treatment; selected = ice, the
-  // one action accent Chalkline allows.
+  // ── Landing platform tiles (Sleeper · ESPN · MFL; design-lead's spec) ──
+  // Equal ink-1 tiles on the a11y line. Selected = the ice border plus a 3×14
+  // ice tick (the PlayerCard selected construction); the name stays chalk.
   platformRow: {
     flexDirection: 'row',
     gap: space.sm,
     marginBottom: space.md,
   },
-  platformChip: {
+  platformTile: {
     flex: 1,
-    minHeight: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: ink.lineStrong,
-    borderRadius: radii.sm,
+    minHeight: 64,
+    paddingVertical: 10,
     paddingHorizontal: space.md,
+    justifyContent: 'center',
+    gap: 2,
+    backgroundColor: ink.ink1,
+    borderWidth: 1,
+    borderColor: ink.lineStrongA11y,
+    borderRadius: radii.md,
   },
-  platformChipOn: { borderColor: ice.base },
-  platformChipPressed: { backgroundColor: ink.ink3 },
-  platformChipText: {
-    ...type.bodySm,
-    fontFamily: fonts.uiSemi,
-    color: chalk.dim,
+  platformTileOn: { borderColor: ice.base },
+  platformTilePressed: { backgroundColor: ink.ink3 },
+  platformTileTick: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 3,
+    height: 14,
+    backgroundColor: ice.base,
   },
-  platformChipTextOn: { color: chalk.base },
+  platformTileName: { ...type.title, color: chalk.base },
+  platformTileLine: { ...type.bodySm, color: chalk.dim },
   platformExplainer: {
     ...type.bodySm,
     color: chalk.dim,

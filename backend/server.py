@@ -164,6 +164,7 @@ from .database import (
     load_draft_pick_seasons,
     # draft-extensions W3 M-A — user-asserted pick ownership (ADR-010)
     make_pick_id, seed_pick_grid, assign_draft_pick,
+    pick_slot_team_name, pick_team_name,
     contested_pick_ids, orphaned_pick_ids, invalidate_pick_assignment_cache,
     load_pick_assignment_settings, save_pick_assignment_settings,
     # D-090 — resolved current-season draft order, for real-slot pick labels
@@ -271,6 +272,7 @@ from . import api_observability as _api_obs   # obs.api_events — inbound/outbo
 from . import error_alerts as _error_alerts     # GNG-1 — Sentry error alerts, dark until SENTRY_DSN
 from . import sleeper_http as _sleeper_http   # S0 — per-process Sleeper 429 circuit
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
+from . import referral_ledger as _referral_ledger   # referral loop L7 (growth.referral_ledger)
 from types import SimpleNamespace   # proposal-time policy shim (see
                                    # _record_trade_proposal)
 from . import trade_policy as _trade_policy   # personal-market policy — the ONE
@@ -1422,12 +1424,37 @@ _ANCHOR_VIA = ("anchors", "draft_room")
 #
 # THE CACHE IS THE PERFORMANCE DESIGN. Within one deck the baseline is
 # identical for all ~30 cards, so `_outlook_impact_baseline` computes the
-# LeagueState + baseline sim ONCE per (league, basis, completed_weeks) and each
-# card re-sims only the with-trade half (~112 ms at DELTA_SIM_COUNT). Without
-# this the 30-card deck would pay 60 simulations instead of 31.
+# LeagueState + baseline sim ONCE per key and each card re-sims only the
+# with-trade half (~112 ms at DELTA_SIM_COUNT). Without this the 30-card deck
+# would pay 60 simulations instead of 31.
+#
+# The key is (league, basis, format, board owner, pool generation): every
+# input the bundle reads off the CALLING session, so no caller is served
+# another's. Format is per session and per request, never per league. The
+# board owner is the ACCOUNT id on `basis=personal` (co-owners of one roster
+# rank separately; backend/CLAUDE.md § Identity) and None otherwise. The pool
+# generation is the one the session's seed and players were built from: until
+# its next session init, a session that predates a players-refresh still
+# prices the players that refresh dropped. Consensus callers in one league,
+# format and generation still share one entry, which is the point.
 _OUTLOOK_IMPACT_CACHE: dict[tuple, tuple[float, object, dict]] = {}
 _OUTLOOK_IMPACT_LOCK = threading.Lock()
+# Active computation tickets let deletion prevent a late personal-cache refill.
+_OUTLOOK_IMPACT_PENDING: dict[object, tuple] = {}
 _OUTLOOK_IMPACT_TTL = 900.0   # 15 min — the live week's TTL, same reasoning
+
+
+def _purge_outlook_impact_callers(user_ids) -> int:
+    """Drop personal baselines and invalidate their in-progress cache writes."""
+    ids = {u for u in user_ids if u}
+    with _OUTLOOK_IMPACT_LOCK:
+        doomed = [k for k in _OUTLOOK_IMPACT_CACHE if k[3] in ids]
+        for key in doomed:
+            del _OUTLOOK_IMPACT_CACHE[key]
+        for ticket, key in list(_OUTLOOK_IMPACT_PENDING.items()):
+            if key[3] in ids:
+                del _OUTLOOK_IMPACT_PENDING[ticket]
+    return len(doomed)
 
 
 def _outlook_impact_baseline(league_id: str, basis: str, sess: dict):
@@ -1442,65 +1469,76 @@ def _outlook_impact_baseline(league_id: str, basis: str, sess: dict):
     if platform != "sleeper":
         return None
 
-    key = (league_id, basis)
+    # Every session-derived input below is in the key; see the cache comment.
+    fmt = _active_format(sess)
+    board_owner = (sess.get("user_id")
+                   if basis == "personal" and sess.get("service") is not None
+                   else None)
+    key = (league_id, basis, fmt, board_owner, sess.get("pool_generation"))
     now = time.time()
     with _OUTLOOK_IMPACT_LOCK:
         hit = _OUTLOOK_IMPACT_CACHE.get(key)
         if hit and (now - hit[0]) < _OUTLOOK_IMPACT_TTL:
             return hit[2]
+        ticket = object()
+        _OUTLOOK_IMPACT_PENDING[ticket] = key
 
-    from . import outlook as outlook_pkg
-    from .outlook.trade_delta import DELTA_SIM_COUNT, resim_baseline
+    try:
+        from . import outlook as outlook_pkg
+        from .outlook.trade_delta import DELTA_SIM_COUNT, resim_baseline
 
-    fmt = _active_format(sess)
-    captured: dict = {}
-    state = outlook_pkg.build_league_state(
-        league_id, platform=platform, fetch=_outlook_sleeper_fetch(captured))
-    if not state.teams:
-        return None
+        captured: dict = {}
+        state = outlook_pkg.build_league_state(
+            league_id, platform=platform, fetch=_outlook_sleeper_fetch(captured))
+        if not state.teams:
+            return None
 
-    pool_players, seed = _get_universal_pool(fmt)
-    svc_seed = getattr(sess.get("service"), "_seed", None) or {}
-    if svc_seed:
-        seed = {**svc_seed, **seed}
-    players_meta = {p.id: p for p in pool_players}
-    for p in (sess.get("players") or []):
-        players_meta.setdefault(p.id, p)
-    e2v = _trade_service_mod.elo_to_value
+        pool_players, seed = _get_universal_pool(fmt)
+        svc_seed = getattr(sess.get("service"), "_seed", None) or {}
+        if svc_seed:
+            seed = {**svc_seed, **seed}
+        players_meta = {p.id: p for p in pool_players}
+        for p in (sess.get("players") or []):
+            players_meta.setdefault(p.id, p)
+        e2v = _trade_service_mod.elo_to_value
 
-    board_elo = None
-    if basis == "personal" and sess.get("service") is not None:
-        board_elo = {rp.player.id: rp.elo
-                     for rp in sess["service"].get_rankings(position=None).rankings}
+        board_elo = None
+        if basis == "personal" and sess.get("service") is not None:
+            board_elo = {rp.player.id: rp.elo
+                         for rp in sess["service"].get_rankings(position=None).rankings}
 
-    def _value_of(pid: str) -> float:
-        if board_elo is not None and pid in board_elo:
-            return e2v(board_elo[pid])
-        if pid in seed:
-            return e2v(seed[pid])
-        return 0.0
+        def _value_of(pid: str) -> float:
+            if board_elo is not None and pid in board_elo:
+                return e2v(board_elo[pid])
+            if pid in seed:
+                return e2v(seed[pid])
+            return 0.0
 
-    player_value: dict[str, float] = {}
-    player_pos: dict[str, str] = {}
-    for t in state.teams:
-        for raw_pid in t.player_ids:
-            pid = str(raw_pid)
-            if pid in player_value:
-                continue
-            player_value[pid] = round(_value_of(pid), 1)
-            pm = players_meta.get(pid)
-            player_pos[pid] = getattr(pm, "position", None) or "?"
+        player_value: dict[str, float] = {}
+        player_pos: dict[str, str] = {}
+        for t in state.teams:
+            for raw_pid in t.player_ids:
+                pid = str(raw_pid)
+                if pid in player_value:
+                    continue
+                player_value[pid] = round(_value_of(pid), 1)
+                pm = players_meta.get(pid)
+                player_pos[pid] = getattr(pm, "position", None) or "?"
 
-    seed_type = captured.get("playoff_seed_type")
-    baseline = resim_baseline(
-        state, player_value=player_value, player_pos=player_pos,
-        model_cfg=get_config(), basis=basis, scoring_format=fmt,
-        playoff_seed_type=seed_type, n_sims=DELTA_SIM_COUNT)
+        seed_type = captured.get("playoff_seed_type")
+        baseline = resim_baseline(
+            state, player_value=player_value, player_pos=player_pos,
+            model_cfg=get_config(), basis=basis, scoring_format=fmt,
+            playoff_seed_type=seed_type, n_sims=DELTA_SIM_COUNT)
 
-    bundle = (state, baseline, player_value, player_pos, seed_type, fmt)
-    with _OUTLOOK_IMPACT_LOCK:
-        _OUTLOOK_IMPACT_CACHE[key] = (now, key, bundle)
-    return bundle
+        bundle = (state, baseline, player_value, player_pos, seed_type, fmt)
+        with _OUTLOOK_IMPACT_LOCK:
+            if ticket in _OUTLOOK_IMPACT_PENDING:
+                _OUTLOOK_IMPACT_CACHE[key] = (now, key, bundle)
+        return bundle
+    finally:
+        with _OUTLOOK_IMPACT_LOCK:
+            _OUTLOOK_IMPACT_PENDING.pop(ticket, None)
 
 
 def _trade_outlook_impact(league_id: str, caller_user_id: str,
@@ -2856,6 +2894,7 @@ def _gate_unverified_write(fn):
                 if denial is not None:
                     return denial
         return fn(*args, **kwargs)
+    _wrapper._unverified_gates = getattr(fn, "_unverified_gates", frozenset()) | {"write"}
     return _wrapper
 
 
@@ -2895,7 +2934,18 @@ def _gate_unverified_read(fn):
                 if denial is not None:
                     return denial
         return fn(*args, **kwargs)
+    _wrapper._unverified_gates = getattr(fn, "_unverified_gates", frozenset()) | {"read"}
     return _wrapper
+
+
+def _route_answers_unverified(endpoint: str | None, method: str) -> bool:
+    """True when the view wears the verified gate for this method
+    (@_gate_unverified_write for a mutating method, @_gate_unverified_read
+    otherwise), so it answers an unverified session 403 itself. Read off the
+    live view (the decorators mark it; functools.wraps carries the mark up
+    any wrapping), so a removed decorator reads False, never stale."""
+    gates = getattr(app.view_functions.get(endpoint or ""), "_unverified_gates", frozenset())
+    return ("write" if method in _MUTATING_METHODS else "read") in gates
 
 
 def _trade_job_stalled(job, now):
@@ -4929,7 +4979,8 @@ def _store_trade_page_row(job_id: str) -> bool:
                     ev.stored_ids = {c.get("impression_id") for c in cards} - {None}
                     ev.truncated = len(job.get("cards") or []) > len(cards)
                     ev.pages_bytes = len(blob)
-                    evidence = ev.blob(stored_count=len(cards))
+                    evidence_input = ev.blob_input(stored_count=len(cards))
+                evidence = _deck_blob(evidence_input)   # encoded outside ev.lock
             written = False
             try:
                 written = _db.save_trade_page({
@@ -5245,19 +5296,20 @@ class _DeckEvidence:
 
     def closure(self, rows: list[dict], exclude=()) -> list[dict]:
         """Under `lock`: the held diagnostic snapshots `rows` reference, transitively."""
-        pending = set().union(*(_diagnostic_refs(json.loads(r["features_json"] or "null"))
-                                for r in rows))
-        found = {}
-        while pending:
-            sid = pending.pop()
-            if sid in self.diagnostics and sid not in found and sid not in exclude:
-                found[sid] = _unpack_row(self.diagnostics[sid])
-                pending |= _diagnostic_refs(json.loads(found[sid]["payload_json"]))
-        return list(found.values())
+        return _diagnostic_closure(self.diagnostics, rows, exclude)
 
     def plan(self):
-        """Under `lock`: ((first, its snapshots), (rest, its snapshots),
-        candidate_set, upgrades) for a write now.
+        """Under `lock`: plan_input() and _deck_plan() in one step. The flush
+        takes the input under the lock and builds the plan outside it."""
+        return _deck_plan(self.plan_input())
+
+    def plan_input(self):
+        """Under `lock`, cheaply: what _deck_plan() builds ((first, its
+        snapshots), (rest, its snapshots), candidate_set, upgrades) for a write
+        now from, by reference: each row's packed bytes with the fields it gets,
+        the ghost rows, a shallow copy of the snapshots. Everything referenced is
+        immutable or replaced, never changed in place, so the plan built from it
+        outside the lock is the one plan() built under it.
 
         Tiers by head-eng's ruling 17, ghost > first30 > delivered > archive: a
         ghost is 'ghost' (never delivered, narrow even inside the first 30); a
@@ -5279,43 +5331,39 @@ class _DeckEvidence:
         delivered = at.keys()
         for iid in self.withdrawn - delivered:   # C-b: a dropped card is never written
             self.rows.pop(iid, None)
+        diagnostics = dict(self.diagnostics)
         if self.partial:
-            first = [{**_unpack_row(packed), "evidence_tier": "partial_run", "delivered_at": at[iid]}
+            first = [(packed, {"evidence_tier": "partial_run", "delivered_at": at[iid]})
                      for iid, (_, packed) in self.rows.items() if iid in delivered]
-            first += [{**row, "evidence_tier": "partial_run", "delivered_at": None}
+            ghosts = [(row, {"evidence_tier": "partial_run", "delivered_at": None})
                       for row in self.ghosts.values()]
-            return (first, self.closure(first)), ([], []), self.candidate_set, {}
+            return first, ghosts, None, diagnostics, self.candidate_set, {}
         if self.packed:
             # R4.2's revised C3: full rows for the first 30 (C4), the ghosts
             # (C5) and, on a C8 archive deck, every card; every other card is
             # packed, its delivery in the pack. A view upgrades it later.
-            first = [{**_unpack_row(packed),
-                      "evidence_tier": "first30" if index < _EVIDENCE_FIRST_N else "archive",
-                      "delivered_at": at.get(iid)}
+            first = [(packed, {"evidence_tier": "first30" if index < _EVIDENCE_FIRST_N else "archive",
+                               "delivered_at": at.get(iid)})
                      for iid, (index, packed) in self.rows.items()
                      if index < _EVIDENCE_FIRST_N or self.archive]
-            first += [{**row, "evidence_tier": "ghost", "delivered_at": None}
+            ghosts = [(row, {"evidence_tier": "ghost", "delivered_at": None})
                       for row in self.ghosts.values()]
             upgrades = {iid: at[iid] for iid in sorted(delivered - self.marked)
                         if iid in self.written}
-            return (first, self.closure(first)), ([], []), self.candidate_set, upgrades
+            return first, ghosts, None, diagnostics, self.candidate_set, upgrades
         first, rest = [], []
         for iid, (index, packed) in self.rows.items():
             if index < _EVIDENCE_FIRST_N:
-                first.append({**_unpack_row(packed), "evidence_tier": "first30",
-                              "delivered_at": at.get(iid)})
+                first.append((packed, {"evidence_tier": "first30", "delivered_at": at.get(iid)}))
             elif iid in delivered:
-                first.append({**_unpack_row(packed), "evidence_tier": "delivered",
-                              "delivered_at": at[iid]})
+                first.append((packed, {"evidence_tier": "delivered", "delivered_at": at[iid]}))
             else:
-                rest.append({**_unpack_row(packed), "delivered_at": None,
-                             "evidence_tier": "archive" if self.archive else "full_interim"})
-        first += [{**row, "evidence_tier": "ghost", "delivered_at": None}
+                rest.append((packed, {"delivered_at": None,
+                                      "evidence_tier": "archive" if self.archive else "full_interim"}))
+        ghosts = [(row, {"evidence_tier": "ghost", "delivered_at": None})
                   for row in self.ghosts.values()]
         upgrades = {iid: at[iid] for iid in sorted(delivered - self.marked - self.rows.keys())}
-        first_diag = self.closure(first)
-        rest_diag = self.closure(rest, exclude={d["snapshot_id"] for d in first_diag})
-        return (first, first_diag), (rest, rest_diag), self.candidate_set, upgrades
+        return first, ghosts, rest, diagnostics, self.candidate_set, upgrades
 
     def wrote(self, rows: list[dict], candidate_set=None, diagnostics=(), upgrades=()) -> None:
         """Under `lock`: drop the written snapshots (the budget rule)."""
@@ -5332,36 +5380,37 @@ class _DeckEvidence:
         self.marked.update(upgrades)
 
     def blob(self, stored_count: int | None = None) -> bytes | None:
-        """Under `lock`: the page store's evidence_blob (CompressedJSON): the not
-        yet written snapshots of the stored cards, every not yet written ghost
-        row, the diagnostic snapshots and the candidate set; None once nothing
-        is left. `stored_count`: the store's count, before its row is written
-        (else the deck's)."""
+        """Under `lock`: blob_input() and _deck_blob() in one step. The store
+        and the shrink take the input under the lock and encode outside it."""
+        return _deck_blob(self.blob_input(stored_count))
+
+    def blob_input(self, stored_count: int | None = None):
+        """Under `lock`, cheaply: what _deck_blob() encodes as the page store's
+        evidence_blob, by reference (the stored cards' packed rows, the ghost
+        rows, a shallow copy of the snapshots, the held build-time writes),
+        or None once nothing is left. `stored_count`: the store's count, before
+        its row is written (else the deck's)."""
         if stored_count is None:
             stored_count = self.stored_count
-        rows = [_unpack_row(packed) for iid, (_, packed) in self.rows.items()
+        rows = [packed for iid, (_, packed) in self.rows.items()
                 if self.stored_ids is None or iid in self.stored_ids]
         held = self.trade_impressions or self.generated or self.bakeoff_slim
         if not (rows or self.ghosts or self.candidate_set or held):
             return None
-        impressions = None
-        if self.trade_impressions is not None:   # the stored cards' only
-            impressions = _unpack_row(self.trade_impressions)
-            impressions["cards"] = impressions["cards"][:stored_count]
-        from .database import CompressedJSON
-        return CompressedJSON.encode({
-            "v": _EVIDENCE_BLOB_FORMAT, "deck_job_id": self.job_id,
-            "pages_bytes": self.pages_bytes, "rows": rows,
-            "ghosts": list(self.ghosts.values()), "diagnostics": self.closure(rows),
-            "candidate_set": self.candidate_set, "trade_impressions": impressions,
-            # S5: the slim bakeoff_runs row (the full one can be megabytes).
-            "bakeoff_run": self.bakeoff_slim,
-            "generated": self.generated, "served_at": self.served_at,
-            "truncated": self.truncated,
-            # S8: the packed-mode fields a delivery after the job left needs.
-            "packed": self.packed, "page_store": self.page_store, "league_id": self.league_id,
-            "built_at": self.built_at, "run_meta": self.run_meta,
-            "pack_written": self.pack is not None, "deck_source": self.deck_source})
+        return {"rows": rows, "diagnostics": dict(self.diagnostics), "stored_count": stored_count,
+                "trade_impressions": self.trade_impressions, "fields": {
+                    "v": _EVIDENCE_BLOB_FORMAT, "deck_job_id": self.job_id,
+                    "pages_bytes": self.pages_bytes, "ghosts": list(self.ghosts.values()),
+                    "candidate_set": self.candidate_set,
+                    # S5: the slim bakeoff_runs row (the full one can be megabytes).
+                    "bakeoff_run": self.bakeoff_slim,
+                    "generated": self.generated, "served_at": self.served_at,
+                    "truncated": self.truncated,
+                    # S8: the packed-mode fields a delivery after the job left needs.
+                    "packed": self.packed, "page_store": self.page_store,
+                    "league_id": self.league_id, "built_at": self.built_at,
+                    "run_meta": dict(self.run_meta), "pack_written": self.pack is not None,
+                    "deck_source": self.deck_source}}
 
     @classmethod
     def from_row(cls, user_id: str, deck_job_id: str, row: Mapping | None, lease) -> "_DeckEvidence":
@@ -5404,6 +5453,68 @@ class _DeckEvidence:
                     ev.deliveries = [list(d) for d in ev.pack.run.get("deliveries") or []]
         ev.sealed = ev.complete = True
         return ev
+
+
+# The evidence lock (`ev.lock`) is held only to take an input by reference; the
+# decoding, planning and encoding below run outside it, so a next page's
+# delivery never waits on them (its marking takes only `ev.lock`). Their
+# results go to the DB under _deck_evidence_write_lock, as before.
+
+def _diagnostic_closure(diagnostics: Mapping, rows: list[dict], exclude=()) -> list[dict]:
+    """The diagnostic snapshots `rows` reference, transitively, from
+    `diagnostics` (a deck's held snapshots, or a copy of them)."""
+    pending = set().union(*(_diagnostic_refs(json.loads(r["features_json"] or "null"))
+                            for r in rows))
+    found = {}
+    while pending:
+        sid = pending.pop()
+        if sid in diagnostics and sid not in found and sid not in exclude:
+            found[sid] = _unpack_row(diagnostics[sid])
+            pending |= _diagnostic_refs(json.loads(found[sid]["payload_json"]))
+    return list(found.values())
+
+
+def _deck_plan(plan_input):
+    """Outside `ev.lock`: _DeckEvidence.plan_input()'s rows unpacked and their
+    snapshots closed over, as plan() always built them. A partial or packed
+    run has no `rest` (None), and no closure for it."""
+    first_rows, ghosts, rest_rows, diagnostics, candidate_set, upgrades = plan_input
+    first = [{**_unpack_row(packed), **fields} for packed, fields in first_rows]
+    first += [{**row, **fields} for row, fields in ghosts]
+    first_diag = _diagnostic_closure(diagnostics, first)
+    if rest_rows is None:
+        return (first, first_diag), ([], []), candidate_set, upgrades
+    rest = [{**_unpack_row(packed), **fields} for packed, fields in rest_rows]
+    rest_diag = _diagnostic_closure(diagnostics, rest,
+                                    exclude={d["snapshot_id"] for d in first_diag})
+    return (first, first_diag), (rest, rest_diag), candidate_set, upgrades
+
+
+def _deck_blob(blob_input) -> bytes | None:
+    """Outside `ev.lock`: _DeckEvidence.blob_input() encoded as the page
+    store's evidence_blob (CompressedJSON), byte for byte as blob() always
+    encoded it: the not yet written snapshots of the stored cards, every not
+    yet written ghost row, the diagnostic snapshots and the candidate set."""
+    if blob_input is None:
+        return None
+    rows = [_unpack_row(packed) for packed in blob_input["rows"]]
+    impressions = None
+    if blob_input["trade_impressions"] is not None:   # the stored cards' only
+        impressions = _unpack_row(blob_input["trade_impressions"])
+        impressions["cards"] = impressions["cards"][:blob_input["stored_count"]]
+    fields = blob_input["fields"]
+    from .database import CompressedJSON
+    return CompressedJSON.encode({
+        "v": fields["v"], "deck_job_id": fields["deck_job_id"],
+        "pages_bytes": fields["pages_bytes"], "rows": rows, "ghosts": fields["ghosts"],
+        "diagnostics": _diagnostic_closure(blob_input["diagnostics"], rows),
+        "candidate_set": fields["candidate_set"], "trade_impressions": impressions,
+        "bakeoff_run": fields["bakeoff_run"], "generated": fields["generated"],
+        "served_at": fields["served_at"], "truncated": fields["truncated"],
+        "packed": fields["packed"], "page_store": fields["page_store"],
+        "league_id": fields["league_id"], "built_at": fields["built_at"],
+        "run_meta": fields["run_meta"], "pack_written": fields["pack_written"],
+        "deck_source": fields["deck_source"]})
 
 
 # ── ADR-025 stage 2: the packed deck-evidence writer (S8) ────────────────────
@@ -6427,7 +6538,7 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
         if not undelivered:
             pack_input = (_deck_pack_input(ev) if ev.packed and not ev.partial and ev.pack is None
                           else None)
-            (first, first_diag), (rest, rest_diag), candidate_set, upgrades = ev.plan()
+            plan_input = ev.plan_input()      # built below, outside ev.lock
             covered, ev.pending = ev.pending, set()
             served_at = ev.served_at
             packed_path = ev.packed and not ev.partial
@@ -6440,13 +6551,18 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
             with ev.lock:
                 ev.pending_withdrawals = {**held_withdrawals, **ev.pending_withdrawals}
         return
-    for row in (*first, *rest):   # F2: one served_at per deck, its first delivery
-        row["served_at"] = served_at or row["served_at"]
-    if candidate_set is not None and ev.packed:
-        candidate_set = _pack_candidate_set(candidate_set)
     shrunk = False
     withdrawals_written = not withdrawals
     try:
+        # Inside the try (#472 QA P3-1): the covered ids are already taken from
+        # ev.pending, so a planning failure must still settle them (finally),
+        # or every outcome on them waits out F4's timeout, and must still put
+        # the held withdrawals back.
+        (first, first_diag), (rest, rest_diag), candidate_set, upgrades = _deck_plan(plan_input)
+        for row in (*first, *rest):   # F2: one served_at per deck, its first delivery
+            row["served_at"] = served_at or row["served_at"]
+        if candidate_set is not None and ev.packed:
+            candidate_set = _pack_candidate_set(candidate_set)
         if first or candidate_set is not None or upgrades or (withdrawals and not packed_path):
             # Stage 1 and partial runs: the rows' transaction carries the withdrawals.
             _db.save_deck_evidence(first, candidate_set=candidate_set, diagnostics=first_diag,
@@ -6482,8 +6598,9 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
     if shrunk and ev.pages_bytes is not None and _trade_page_store_enabled():   # P1 kill knob: no store write
         try:
             with ev.lock:
-                blob = ev.blob()
-            _db.save_trade_page_evidence(ev.user_id, ev.job_id, blob, ev.pages_bytes)
+                blob_input = ev.blob_input()
+            _db.save_trade_page_evidence(ev.user_id, ev.job_id, _deck_blob(blob_input),
+                                         ev.pages_bytes)
         except Exception:
             log.warning("deck-evidence %s: evidence_blob not shrunk", ev.job_id, exc_info=True)
     with ev.lock:
@@ -16235,10 +16352,13 @@ _feedback_rate: dict[str, collections.deque] = {}
 _feedback_anon_global: collections.deque = collections.deque()
 
 
-# _SIGNIN_TRUSTED_PROXY_HOPS, _xff_hops and _client_ip below are copied byte
-# for byte from #430 (feat/platform-sign-in, server.py). Whichever PR merges
-# second deletes its own three definitions; two would shadow each other
+# Shared trusted-proxy IP helper for public feedback and platform sign-in.
+# Keep one definition: duplicate helpers silently shadow one another
 # (test_server_module_shape).
+# How many X-Forwarded-For hops, counted from the RIGHT, our own proxies
+# append: 1 = the rightmost hop is the client as Render's proxy saw it,
+# 2 = second from the right, and so on. Pending release-lead's confirmation
+# of Render's layout (see PLATFORM-SIGNIN-XFF below).
 _SIGNIN_TRUSTED_PROXY_HOPS = 1
 
 
@@ -16672,7 +16792,8 @@ def ingest_client_events_route():
     """POST /api/events — batched first-party client-event ingestion (LLD §2.1).
 
     Always 200 for content: rate-limit / unknown-type / PII / oversize are
-    "accepted-and-dropped", never a 4xx/429. Response
+    "accepted-and-dropped", never a 4xx/429. The one non-200 is the transport
+    guard: a chunked body over the 128 KiB cap is a 413. Response
     {accepted, deduped, rejected, dropped, disposition} with the accounting
     invariant accepted + deduped + len(rejected) == N on committed txns.
     Flag gate `analytics.ingest` (server acceptance) — off → "disabled" 200,
@@ -18022,6 +18143,493 @@ def terms_page():
     return send_from_directory(app.static_folder, "terms.html")
 
 
+# ---------------------------------------------------------------------------
+# Join path — referral loop D-1: the device-aware install CTA
+# ---------------------------------------------------------------------------
+# Spec: docs/plans/referral-loop/prd.md §5, FR-7, FR-8, FR-25, §8.2 (branch
+# plan/referral-loop @ 91f1cc29), the event contract
+# docs/business/analytics/2026-10-15-referral-loop-events.md (PR #350) and
+# engagement-eng's D-1 design (§0, §0b). Helpers for GET /app/league/join/<id>,
+# its /go/<cta> click-through, and the /s/* CTA. They sit beside the route
+# rather than in a module of their own (design §0).
+import html as _html  # noqa: E402
+
+import segno as _segno  # noqa: E402  (pinned in requirements.txt; FR-7 QR)
+
+# THE invite-id pattern (contract C1). onboarding-eng's web capture reuses this
+# name; never define a second copy. Always use fullmatch: `$` alone would let a
+# trailing newline through.
+INVITE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+# An invite id is valid for credit this long after mint (PRD §7.1, assumed).
+_INVITE_ID_VALID_DAYS = 30
+
+
+def _referral_receipt_body(username: str | None, display_name: str | None) -> str:
+    """The pre-ledger invite receipt (`referral_joined`: the push and the bell
+    row, title = body). Marketing's §6 addendum 13 item 1 (2026-10-31; voice
+    only, no legal stamp): "Fleeced" as the object, "from" over "via". With no
+    name to show, the fallback line, never a raw id."""
+    name = username or display_name
+    if not name:
+        return "Someone you invited joined Fleeced."
+    return f"@{name} joined Fleeced from your invite."
+_INVITE_SYSTEM_OWNER = "system:invite"   # event owner when neither t nor ref resolves
+
+# Link-preview fetchers (#350 C4), matched case-insensitively as UA
+# substrings. iMessage presents "facebookexternalhit/1.1 Facebot
+# Twitterbot/1.0"; X's is Twitterbot. The generic tail (bot/crawler/spider/
+# preview) also catches most named ones — they are listed so the set the
+# contract names stays visible and tested.
+PREVIEW_UA_TOKENS: tuple[str, ...] = (
+    "facebookexternalhit", "facebot", "twitterbot", "slackbot",
+    "slack-imgproxy", "discordbot", "whatsapp", "telegrambot", "applebot",
+    "linkedinbot", "bot", "crawler", "spider", "preview",
+)
+
+# UA markers of a phone that is neither iOS nor Android ("Mobi" is the MDN
+# rule of thumb; Opera Mini omits it).
+_OTHER_MOBILE_UA_TOKENS: tuple[str, ...] = ("Mobi", "Opera Mini")
+
+# Every word on the landing and the /s/* CTA: marketing-lead's proposed
+# gp.join.* strings (marketing-inputs.md: §A, the lab addendum, its FR-25 table
+# and the ux-lead R-F1/R-F3 rows; the 2026-10-23 copy batch's m4.348.* and
+# m3.web.og_desc rows, as folded into PRD @ 91f1cc29), verbatim and all pending
+# the operator's approval (D-5). One dict so a copy change is one hunk. The
+# ".beta" / ".store" pairs follow the IOS_INSTALL_URL host (AC-7g).
+_JOIN_COPY = {
+    "page_title":         "{league} on Fleeced: Dynasty Trade Finder",
+    "page_title_none":    "Your league on Fleeced: Dynasty Trade Finder",
+    "og_title":           "{league}: trades that work for both sides",
+    "og_title_none":      "Dynasty trades that work for both sides",
+    "og_desc":            ("Rank your players on Fleeced and see trades built to "
+                           "work for both sides. Works with Sleeper, ESPN and MFL."),
+    "og_site":            "Fleeced: Dynasty Trade Finder",
+    "headline_both":      "{name} invited you to {league}",
+    "headline_name":      "{name} invited you to their league",
+    "headline_league":    "A leaguemate invited you to {league}",
+    "headline_none":      "A leaguemate invited you",
+    "valueprop":          ("Rank your players, then see trades in {league} where "
+                           "both sides come out ahead."),
+    "valueprop_none":     ("Rank your players, then see trades in your league "
+                           "where both sides come out ahead."),
+    "cta_ios.beta":       "Get the iOS beta",
+    "cta_ios_help.beta":  "Installs through Apple's TestFlight app.",
+    "cta_ios.store":      "Get the iPhone app",
+    "cta_ios_help.store": "Opens the App Store.",
+    "step1":              "Install Fleeced",
+    "step2":              "Tap the invite again, or rescan its code, to join {league}.",
+    "step2_none":         ("Tap the invite again, or rescan its code, to join "
+                           "your league."),
+    "ios_unset_note":     ("The iPhone beta isn't open to the public yet. Already "
+                           "have it? Tap the invite again, or rescan its code."),
+    # /s/* (FR-25): a share page carries no invite, so it promises the app.
+    "share_ios_unset_note": ("The iPhone beta isn't open to the public yet. "
+                             "Already have it? Open Fleeced."),
+    "cta_desktop":        "Open the web app",
+    "cta_desktop_help":   "Sign-in uses the Fleeced extension for Chrome or Edge.",
+    "qr_title":           "Join on your iPhone",
+    "qr_help":            "Scan with your iPhone camera. After installing, scan again to join.",
+    "qr_label":           "QR code: opens this invite on your iPhone",
+    "ipad.beta":          "On an iPad? Get the iOS beta, then tap the invite again.",
+    # growth-pm's placeholder for the store form, pending marketing-lead (D-5).
+    "ipad.store":         "On an iPad? Get the iPhone app, then tap the invite again.",
+    "ext_lead":           "Have the Fleeced extension for Chrome or Edge?",
+    "android_note":       "Available on iPhone and desktop web for now.",
+}
+
+# The desktop QR (FR-7, AC-7f; design-lead 2026-10-15): error correction M, a
+# 4-module quiet zone, whole-pixel modules of at least 4 px and at least 200 px
+# overall. A version-7+ code grows at 4 px modules; it never shrinks them.
+_QR_BORDER = 4
+_QR_MIN_MODULE_PX = 4
+_QR_MIN_TOTAL_PX = 200
+
+# /go/<cta> → the `cta` value of the invite_landing_cta event. Closed set.
+_JOIN_GO_CTAS = {"ios": "ios_install", "web": "web_app"}
+
+# AC-7g: the only hosts IOS_INSTALL_URL may point at, and the label pair each
+# one picks. Any other host (or a non-https value) is treated as unset.
+_IOS_INSTALL_HOSTS = {"testflight.apple.com": "beta", "apps.apple.com": "store"}
+
+_ios_install_url_warned = False
+
+
+def _invite_id_from(raw) -> str | None:
+    """The well-formed `t`, else None (a malformed value is ignored silently)."""
+    return raw if isinstance(raw, str) and INVITE_ID_RE.fullmatch(raw) else None
+
+
+def is_preview_fetcher(ua: str | None) -> bool:
+    """True for a link-preview fetcher. An empty UA counts too: no human
+    browser omits it, and an open recorded from one would inflate opens."""
+    s = (ua or "").strip().lower()
+    return not s or any(tok in s for tok in PREVIEW_UA_TOKENS)
+
+
+def device_class(ua: str | None) -> str:
+    """'ios' | 'android' | 'other' (any other phone) | 'desktop'.
+
+    iPadOS Safari sends a Macintosh UA by default, so it reads as desktop —
+    which is why the desktop layout also offers the iOS link.
+    """
+    s = ua or ""
+    if "iPhone" in s or "iPod" in s or "iPad" in s:
+        return "ios"
+    if "Android" in s:
+        return "android"
+    if any(tok in s for tok in _OTHER_MOBILE_UA_TOKENS):
+        return "other"
+    return "desktop"
+
+
+def ios_install_url() -> str | None:
+    """IOS_INSTALL_URL, read per request so setting or unsetting it needs no
+    deploy (PRD §5). It counts only as an https:// URL on testflight.apple.com
+    or apps.apple.com (AC-7g); any other value is treated as unset everywhere
+    and logged once per process. No install URL lives in code."""
+    global _ios_install_url_warned
+    raw = (os.environ.get("IOS_INSTALL_URL") or "").strip()
+    if _ios_install_kind(raw):
+        return raw
+    if raw and not _ios_install_url_warned:
+        _ios_install_url_warned = True
+        log.warning("IOS_INSTALL_URL is set but is not an https:// URL on "
+                    "testflight.apple.com or apps.apple.com; treating it as unset")
+    return None
+
+
+def _ios_install_kind(url: str | None) -> str | None:
+    """'beta' (testflight.apple.com) | 'store' (apps.apple.com) | None. The
+    label pair follows the host, so launch day's switch to the App Store URL
+    flips the words with no deploy and no date in code (AC-7g)."""
+    try:
+        parts = urllib.parse.urlsplit(url or "")
+    except ValueError:
+        return None
+    if parts.scheme != "https":
+        return None
+    return _IOS_INSTALL_HOSTS.get(parts.hostname or "")
+
+
+def _should_record_landing() -> bool:
+    """The single gate for both landing events (FR-8, #350 "Takes effect"):
+    the ledger flag. Every human GET of the join path records with it on,
+    with or without a `t` (R1, so Q2 is closed); /go/<cta>'s
+    invite_landing_cta uses the same gate."""
+    return is_enabled("growth.referral_ledger")
+
+
+def _invite_status(referral: dict | None, league_id: str) -> str:
+    """valid | expired | league_mismatch | unknown, derived on read (design §3).
+    An unreadable created_at reads as expired, so no name is ever shown off it."""
+    if not referral:
+        return "unknown"
+    if str(referral.get("league_id")) != league_id:
+        return "league_mismatch"
+    try:
+        created = datetime.fromisoformat(
+            str(referral.get("created_at")).replace("Z", "+00:00"))
+    except ValueError:
+        return "expired"
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - created > timedelta(days=_INVITE_ID_VALID_DAYS):
+        return "expired"
+    return "valid"
+
+
+def _resolve_invite(t: str | None, league_id: str) -> tuple[str | None, dict | None]:
+    """(invite_status, referrals row incl. referrer_display_name) for `t`;
+    (None, None) without one, with no DB read. A failed lookup reads as
+    unknown: the join path never errors on it."""
+    if t is None:
+        return None, None
+    from . import database as _db
+    try:
+        referral = _db.get_referral_by_invite_token(t)
+    except Exception as e:
+        log.warning("join: invite lookup failed (non-fatal): %s", e)
+        referral = None
+    return _invite_status(referral, league_id), referral
+
+
+def _invite_event_owner(referral: dict | None) -> str:
+    """The owner rule for both landing events (FR-8, #350): the referrer of
+    the row `t` names, whatever its status; with no row, the user the legacy
+    `ref` resolves to (by username, as session init resolves invited_by);
+    else system:invite, which has no users row (the system:receipts
+    precedent). Never fails the request."""
+    if referral:
+        return str(referral["referrer_user_id"])
+    ref = (request.args.get("ref") or "").strip()
+    if ref:
+        try:
+            user = get_user_by_username(ref)
+        except Exception as e:
+            log.warning("join: ref owner lookup failed (non-fatal): %s", e)
+            user = None
+        if user and user.get("sleeper_user_id"):
+            return str(user["sleeper_user_id"])
+    return _INVITE_SYSTEM_OWNER
+
+
+def _record_join_landing_open(t: str | None, league_id: str,
+                              status: str | None, referral: dict | None) -> None:
+    """FR-8, both join modes. The caller has checked _should_record_landing()
+    and that this is not a HEAD, and resolved (status, referral) once.
+
+    A preview fetch (C4) stamps unfurled_at only and fires nothing. A human
+    GET fires invite_landing_opened — with or without `t`; without one,
+    invite_status is null and invite_id is omitted — and stamps the open
+    columns. The row is stamped only when `t` names a row in THIS path's
+    league (valid or expired): a `t` pasted into another league's path must
+    not mark the invite opened, since §7.5's league-match fallback reads
+    opened_at. The event never moves its owner's users row (touch_user=False,
+    C6) and its props never carry the UA, IP, a username or a name (C4/C9)."""
+    from . import database as _db
+    ua = request.headers.get("User-Agent")
+    stamp_row = t is not None and status in ("valid", "expired")
+    if is_preview_fetcher(ua):
+        if stamp_row:
+            _db.record_referral_landing_open(t, "unfurl")
+        return
+    if stamp_row:
+        _db.record_referral_landing_open(t, "open")
+    props = {"league_id": league_id, "invite_status": status,
+             "device_class": device_class(ua)}
+    if t is not None:
+        props["invite_id"] = t
+    record_event(
+        _invite_event_owner(referral), "invite_landing_opened",
+        league_id=league_id, source="api", props=props,
+        platform="server", touch_user=False,
+    )
+
+
+def _qr_svg(payload: str) -> str:
+    """The desktop QR as inline SVG (FR-7, AC-7f), generated here with segno:
+    never a QR service, because the payload carries `t` and `t` must not
+    leave our server. EC M (boost off, so segno can't raise it), a 4-module
+    quiet zone, and whole-pixel modules: max(4, ceil(200 / (modules + 8)))
+    px each, so the code is at least 200 px and never below 4 px modules.
+    Dark modules are filled by the page CSS on a --chalk panel."""
+    qr = _segno.make(payload, error="m", micro=False, boost_error=False)
+    rows = [list(r) for r in qr.matrix_iter(scale=1, border=_QR_BORDER)]
+    n = len(rows)
+    module_px = max(_QR_MIN_MODULE_PX, -(-_QR_MIN_TOTAL_PX // n))
+    d = []
+    for y, row in enumerate(rows):
+        x = 0
+        while x < n:
+            if not row[x]:
+                x += 1
+                continue
+            start = x
+            while x < n and row[x]:
+                x += 1
+            d.append(f"M{start} {y}h{x - start}v1h-{x - start}z")
+    size = n * module_px
+    return (f'<svg class="qr" width="{size}" height="{size}" viewBox="0 0 {n} {n}" '
+            f'shape-rendering="crispEdges" role="img" '
+            f'aria-label="{_html.escape(_JOIN_COPY["qr_label"])}">'
+            f'<path d="{"".join(d)}"/></svg>')
+
+
+_JOIN_LANDING_CSS = """
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink-0);color:var(--chalk);font:400 14px/21px var(--font-ui)}
+main{max-width:480px;margin:0 auto;padding:32px 16px 48px}
+.wordmark{margin:0 0 32px;font:700 28px/1 var(--font-display);letter-spacing:.04em}
+.wordmark span{color:var(--ice)}
+h1{margin:0 0 12px;font:700 32px/34px var(--font-display);letter-spacing:.02em;text-transform:uppercase}
+.value{margin:0 0 24px;color:var(--chalk-dim)}
+.primary{display:flex;align-items:center;justify-content:center;min-height:44px;padding:12px 16px;border-radius:var(--r-sm);background:var(--ice);color:var(--on-ice);font:600 16px/22px var(--font-ui);text-decoration:none;transition:background-color var(--t-fast)}
+.primary:hover,.primary:active{background:var(--ice-press)}
+.help{margin:8px 0 0;color:var(--chalk-dim);font-size:13px;line-height:18px}
+.note{margin:0;color:var(--chalk)}
+.steps{list-style:none;margin:0;padding:0}
+.steps li{display:flex;gap:12px;padding:16px 0}
+.steps li:first-child{padding-top:0}
+.steps li+li{border-top:1px solid var(--line)}
+.steps li>div{flex:1}
+.marker{font:500 13px/22px var(--font-data);font-variant-numeric:tabular-nums;color:var(--chalk-dim)}
+.step-title{margin:0 0 12px;font:600 16px/22px var(--font-ui)}
+.steps p{margin:0}
+.steps .help{margin-top:8px}
+.tick-label{display:flex;align-items:center;gap:8px;margin:0 0 16px;font:600 11px/14px var(--font-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.tick-label::before{content:"";width:3px;height:14px;background:var(--ice)}
+.qr{display:block;background:var(--chalk);border-radius:var(--r-sm)}
+.qr path{fill:var(--ink-0)}
+.qr-block{margin:0 0 32px}
+.ghost{display:inline-flex;align-items:center;min-height:44px;margin-top:8px;color:var(--chalk-dim);text-decoration:underline;text-underline-offset:3px;transition:color var(--t-fast)}
+.ghost:hover{color:var(--chalk)}
+.ext-lead{margin:0 0 12px;color:var(--chalk-dim)}
+.btn-secondary{display:flex;align-items:center;justify-content:center;min-height:44px;padding:0 16px;border:1px solid var(--line-strong);border-radius:var(--r-sm);color:var(--chalk);font:600 14px/20px var(--font-ui);text-decoration:none;transition:border-color var(--t-fast)}
+.btn-secondary:hover{border-color:var(--ice)}
+a:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+"""
+
+
+def _render_join_landing(*, league_id: str, league_name: str | None,
+                         inviter_name: str | None, device: str,
+                         ios_url: str | None, t: str | None, ref: str,
+                         host: str) -> str:
+    """The FR-7 landing. Every interpolated value is HTML-escaped. The only
+    query values that reach the page are `t` (or, without one, the legacy
+    `ref`) inside the onward /go/ hrefs, URL-encoded — never as text — and
+    inside the desktop QR's payload."""
+    c, esc = _JOIN_COPY, _html.escape
+    kind = _ios_install_kind(ios_url)    # beta | store; None when unset
+    path = "/app/league/join/" + urllib.parse.quote(league_id, safe="")
+    go_ios = path + "/go/ios" + ("?" + urllib.parse.urlencode({"t": t}) if t else "")
+    # The closed contract (C4): `t`, else the inbound legacy `ref`; nothing else.
+    onward_q = ("?" + urllib.parse.urlencode({"t": t} if t else {"ref": ref})
+                if t or ref else "")
+    go_web = path + "/go/web" + onward_q
+    # Absolute URLs. Always https: there is no ProxyFix, so request.scheme
+    # reads http behind Render. The QR payload is the join URL rebuilt from
+    # the closed contract, never the raw request URL.
+    og_url = "https://" + host + path
+    qr_payload = og_url + onward_q
+    og_image = "https://" + host + "/img/og-invite.png"
+
+    if league_name:
+        page_title = c["page_title"].format(league=league_name)
+        og_title = (c["og_title"].format(league=league_name) if len(league_name) <= 27
+                    else league_name[:59] + ("…" if len(league_name) > 59 else ""))
+        value = c["valueprop"].format(league=league_name)
+        step2 = c["step2"].format(league=league_name)
+    else:
+        page_title, og_title = c["page_title_none"], c["og_title_none"]
+        value, step2 = c["valueprop_none"], c["step2_none"]
+    if inviter_name and league_name:
+        headline = c["headline_both"].format(name=inviter_name, league=league_name)
+    elif inviter_name:
+        headline = c["headline_name"].format(name=inviter_name)
+    elif league_name:
+        headline = c["headline_league"].format(league=league_name)
+    else:
+        headline = c["headline_none"]
+
+    # One primary action per device state (AC-7c). No dtf:// link anywhere.
+    if device == "ios" and ios_url:
+        # A1: a two-row step list; row 2 is text, never a link or button.
+        cta = (f'<ol class="steps">\n'
+               f'      <li><span class="marker">1</span><div>'
+               f'<h2 class="step-title">{esc(c["step1"])}</h2>'
+               f'<a class="primary" href="{esc(go_ios)}">{esc(c[f"cta_ios.{kind}"])}</a>'
+               f'<p class="help">{esc(c[f"cta_ios_help.{kind}"])}</p></div></li>\n'
+               f'      <li><span class="marker">2</span><div>'
+               f'<p>{esc(step2)}</p></div></li>\n'
+               f'    </ol>')
+    elif device == "ios":
+        cta = f'<p class="note">{esc(c["ios_unset_note"])}</p>'
+    elif device == "desktop" and ios_url:
+        # R-F3: the QR block is the primary (its ice tick is the only
+        # accent); the web app is a Secondary button. No ice-filled button.
+        cta = (f'<section class="qr-block">\n'
+               f'      <p class="tick-label">{esc(c["qr_title"])}</p>\n'
+               f'      {_qr_svg(qr_payload)}\n'
+               f'      <p class="help">{esc(c["qr_help"])}</p>\n'
+               f'      <a class="ghost" href="{esc(go_ios)}">{esc(c[f"ipad.{kind}"])}</a>\n'
+               f'    </section>\n'
+               f'    <p class="ext-lead">{esc(c["ext_lead"])}</p>\n'
+               f'    <a class="btn-secondary" href="{esc(go_web)}">{esc(c["cta_desktop"])}</a>')
+    elif device == "desktop":
+        cta = (f'<a class="primary" href="{esc(go_web)}">{esc(c["cta_desktop"])}</a>\n'
+               f'    <p class="help">{esc(c["cta_desktop_help"])}</p>')
+    else:
+        cta = f'<p class="note">{esc(c["android_note"])}</p>'
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{esc(page_title)}</title>
+  <meta name="description" content="{esc(c["og_desc"])}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{esc(c["og_site"])}">
+  <meta property="og:title" content="{esc(og_title)}">
+  <meta property="og:description" content="{esc(c["og_desc"])}">
+  <meta property="og:url" content="{esc(og_url)}">
+  <meta property="og:image" content="{esc(og_image)}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/tokens.css">
+  <style>{_JOIN_LANDING_CSS}</style>
+</head>
+<body>
+  <main>
+    <p class="wordmark">FLEECED<span>.</span></p>
+    <h1>{esc(headline)}</h1>
+    <p class="value">{esc(value)}</p>
+    {cta}
+  </main>
+</body>
+</html>"""
+
+
+def _join_landing_response(league_id: str, t: str | None, status: str,
+                           referral: dict | None) -> "Response":
+    """200 landing, `growth.join_landing` on. The inviter's name comes only
+    from a VALID `t` (status/referral resolved once by the route); the league
+    name only from Sleeper's public API (the invite-meta privacy rule).
+    Neither lookup can fail the page."""
+    inviter = referral.get("referrer_display_name") if status == "valid" else None
+    league_name = None
+    try:
+        meta = _fetch_sleeper_league_meta(league_id)
+        if meta:
+            league_name = meta.get("name") or None
+    except Exception as e:
+        log.info("join landing: league lookup failed (non-fatal): %s", e)
+    resp = make_response(_render_join_landing(
+        league_id=league_id, league_name=league_name, inviter_name=inviter,
+        device=device_class(request.headers.get("User-Agent")),
+        ios_url=ios_install_url(), t=t,
+        ref=(request.args.get("ref") or "").strip(), host=request.host,
+    ))
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+def _share_cta_html(*, cta_text: str, share_kind: str) -> str:
+    """The /s/* CTA element (FR-25). Its web href is always /?share=<kind> —
+    a closed set from the route (contract C5; AC-25's "/" is flagged upstream)
+    — so the web shell can tell a share arrival. With `growth.join_landing`
+    off every device gets that single button, with no help line and no note.
+    On, a label and help line or note per device branch: desktop keeps the
+    page's label plus the extension help line; phones never get a web button
+    (a phone can't sign in on the web). No QR on /s/* (GB-02). The iOS href
+    is the server's own config value, never user input."""
+    esc, c = _html.escape, _JOIN_COPY
+    button = (f'<a class="cta" href="{esc("/?" + urllib.parse.urlencode({"share": share_kind}))}">'
+              f'{esc(cta_text)}</a>')
+    if not is_enabled("growth.join_landing"):
+        return button
+    device = device_class(request.headers.get("User-Agent"))
+    if device == "desktop":
+        return button + f'\n    <p>{esc(c["cta_desktop_help"])}</p>'
+    if device == "ios":
+        url = ios_install_url()
+        if url:
+            kind = _ios_install_kind(url)
+            return (f'<a class="cta" href="{esc(url)}">{esc(c[f"cta_ios.{kind}"])}</a>\n'
+                    f'    <p>{esc(c[f"cta_ios_help.{kind}"])}</p>')
+        return f'<p>{esc(c["share_ios_unset_note"])}</p>'
+    return f'<p>{esc(c["android_note"])}</p>'
+
+
 @app.route("/app/league/join/<league_id>")
 def league_join_redirect(league_id):
     """Web fallback for the mobile invite deep link (P0-3).
@@ -18045,12 +18653,79 @@ def league_join_redirect(league_id):
     redirect stays a closed contract. 302, not 301: a permanent redirect
     would be cached by browsers and CDNs and outlive any future change to the
     landing page.
+
+    REFERRAL LOOP D-1 (2026-10-15). With `growth.join_landing` ON this route
+    renders the device-aware landing instead (_join_landing_response). OFF
+    keeps the 302 below unchanged, except that with `growth.referral_ledger`
+    on a well-formed `t` is forwarded too (PRD §8.2). In BOTH modes, with the
+    ledger on, every human GET records the open (FR-8), with or without `t`.
+    HEAD records nothing: Flask runs this GET view for HEAD, so the method is
+    checked here.
     """
+    t = _invite_id_from(request.args.get("t"))
+    # One referral read per request, and none without a `t`.
+    status, referral = _resolve_invite(t, str(league_id))
+    if _should_record_landing() and request.method != "HEAD":
+        _record_join_landing_open(t, str(league_id), status, referral)
+    if is_enabled("growth.join_landing"):
+        return _join_landing_response(str(league_id), t, status, referral)
     params = {"league": str(league_id)}
     ref = (request.args.get("ref") or "").strip()
     if ref:
         params["ref"] = ref
+    if t is not None and is_enabled("growth.referral_ledger"):
+        params["t"] = t
     return redirect("/?" + urllib.parse.urlencode(params), code=302)
+
+
+@app.route("/app/league/join/<league_id>/go/<cta>")
+def league_join_go(league_id, cta):
+    """The landing's recorded click-through (PRD §8.2, referral loop D-1).
+
+    404 while `growth.join_landing` is off, for any `cta` outside {ios, web},
+    and for `ios` while IOS_INSTALL_URL is unset. `ios` → 302 to exactly
+    ios_install_url(). `web` → 302 to "/?" + urlencode() of a dict built
+    here: `league`, plus `t` when well-formed, else the inbound legacy `ref`
+    — never both, never an f-string, nothing else from the query (no next /
+    url / redirect), so no request value can reach a scheme or host.
+    invite_landing_cta fires only with `growth.referral_ledger` on (#350
+    "Takes effect"), for human GETs (no HEAD, no preview fetcher, C4), with
+    FR-8's owner rule. Every response is no-store: a cached 404 would
+    outlive setting the URL.
+    """
+    league_id = str(league_id)
+    t = _invite_id_from(request.args.get("t"))
+    target = None
+    if is_enabled("growth.join_landing") and cta == "ios":
+        target = ios_install_url()
+    elif is_enabled("growth.join_landing") and cta == "web":
+        params = {"league": league_id}
+        ref = (request.args.get("ref") or "").strip()
+        if t is not None:
+            params["t"] = t
+        elif ref:
+            params["ref"] = ref
+        target = "/?" + urllib.parse.urlencode(params)
+    if target is None:
+        resp = jsonify({"error": "not_found"})
+        resp.status_code = 404
+    else:
+        ua = request.headers.get("User-Agent")
+        if (_should_record_landing() and request.method != "HEAD"
+                and not is_preview_fetcher(ua)):
+            _status, referral = _resolve_invite(t, league_id)
+            props = {"league_id": league_id, "cta": _JOIN_GO_CTAS[cta],
+                     "device_class": device_class(ua)}
+            if t is not None:
+                props["invite_id"] = t
+            record_event(
+                _invite_event_owner(referral), "invite_landing_cta",
+                league_id=league_id, source="api", props=props,
+                platform="server", touch_user=False,
+            )
+        resp = redirect(target, code=302)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 # Apple team id for Universal Links. The repo's canonical value lives in
@@ -18313,10 +18988,112 @@ def trade_evaluate_route():
         return _trade_evaluate_impl(_mode)
 
 
+# ── The consensus verdict: ONE code path for evaluate and the share card ───
+# docs/plans/share-card-value-bar/scope.md. `_trade_evaluate_impl` prices and
+# judges a trade through these three helpers, and the share mints
+# (`_share_value_snapshot`) call `_consensus_verdict` too, so the card's
+# stored bar and the calculator's verdict can't drift. None of them reads a
+# session or a member board: the price is the universal-pool consensus plus
+# the league's owned-pick prices, under whatever stud-tax / pick-pricing pin
+# the caller set (evaluate: the caller's mode; the share mint: market).
+
+def _consensus_pricing(fmt: str, league_id: str | None = None):
+    """The consensus value function for `fmt` (and `league_id`'s owned picks).
+
+    Returns (pool_players, seed, pick_vals, pick_rows, seed_value):
+      pool_players  the universal pool's players for `fmt`
+      seed          universal-pool seed Elo: players and generic picks
+      pick_vals     league-owned pick_id -> priced value (value space)
+      pick_rows     the owned-pick rows priced, in load order
+      seed_value    pid -> value: the owned-pick price, else
+                    elo_to_value(seed.get(pid, 1500))
+    """
+    _pool_players, seed = _get_universal_pool(fmt)
+    e2v = _trade_service_mod.elo_to_value
+
+    # #158 — league-scoped owned picks (e.g. "2027 1st") are NOT in the
+    # universal-pool `seed`, so they'd otherwise be silently dropped. When a
+    # league_id rides along, resolve each owned pick_id to its pool_value
+    # (already in elo_to_value units, so it composes directly with player
+    # values). Generic picks (generic_pick_*) still resolve via `seed`.
+    #
+    # The price is resolved at READ time under the pricing mode pinned by
+    # the caller (trade_evaluate_route, alongside the #215 stud-tax pin; the
+    # share card pins the same default). Since D-144 that is always
+    # `market_slots`, and the waterfall is the pick's OWN slot price when
+    # D-090 resolves one → the round curve → the stored ladder value. The
+    # stored column is never written — pricing is read-time in every mode.
+    #
+    # W3 M-C (S1) — the read opts into asserted rows behind
+    # `picks.assign_tradeable` (`_pick_read_source`).
+    league_pick_vals: dict[str, float] = {}
+    league_pick_rows: list[dict] = []
+    if league_id and league_id != "league_demo":
+        try:
+            # D-144 per-slot pricing needs the league's resolved draft
+            # order. Looked up ONCE per request (it is DB-backed with a
+            # 60s cache), never per pick — same discipline as the deck
+            # lane's lookup in `_owned_pick_assets`.
+            _slot_order = _league_slot_order(league_id)
+            for _p in load_draft_picks(league_id=league_id,
+                                       source=_pick_read_source()):
+                league_pick_vals[_p["pick_id"]] = _priced_pick_value(
+                    _p, _slot_order, fmt)
+                league_pick_rows.append(_p)
+        except Exception as _lp_err:
+            log.warning("evaluate: owned-pick load failed (continuing): %s", _lp_err)
+
+    def seed_value(pid: str) -> float:
+        if pid in league_pick_vals:
+            return league_pick_vals[pid]        # already in value space
+        return e2v(seed.get(pid, 1500.0))
+
+    return _pool_players, seed, league_pick_vals, league_pick_rows, seed_value
+
+
+def _consensus_split(give_ids, recv_ids, seed, pick_vals):
+    """(give, recv, dropped): each side's ids the consensus can price, and
+    every id it can't (the engine's graceful-drop rule)."""
+    give    = [p for p in give_ids if p in seed or p in pick_vals]
+    recv    = [p for p in recv_ids if p in seed or p in pick_vals]
+    dropped = [p for p in list(give_ids) + list(recv_ids)
+               if p not in seed and p not in pick_vals]
+    return give, recv, dropped
+
+
+def _consensus_verdict(give_ids, recv_ids, fmt: str, league_id: str | None = None,
+                       *, pricing=None, fairness_threshold: float = 0.75) -> dict | None:
+    """The consensus value verdict for one trade, or None when either side
+    is empty after unpriceable ids are dropped.
+
+    Returns `_value_verdict_payload`'s shape ({give_value, receive_value,
+    favors, gap}) plus `point_ratio`, `fairness` (the `_fairness_v3` gate at
+    `fairness_threshold`) and `dropped_ids`. `even` is `point_ratio >= 0.95`,
+    evaluate's rule. Pure over its inputs: no session, no member board.
+    `pricing` is a `_consensus_pricing` result the caller already holds
+    (evaluate passes its own, so the league's picks load once).
+    """
+    from .trade_optimizer import _consensus_packages, _fairness_v3
+
+    if pricing is None:
+        pricing = _consensus_pricing(fmt, league_id)
+    _pool, seed, pick_vals, _rows, seed_value = pricing
+    give, recv, dropped = _consensus_split(give_ids, recv_ids, seed, pick_vals)
+    if not give or not recv:
+        return None
+    gv, rv = _consensus_packages(give, recv, seed_value)
+    give_value, receive_value = round(gv, 1), round(rv, 1)
+    fairness, point_ratio, _gv, _rv = _fairness_v3(
+        give, recv, seed_value, None, fairness_threshold)
+    out = _value_verdict_payload(give_value, receive_value, point_ratio >= 0.95)
+    out.update(point_ratio=point_ratio, fairness=fairness, dropped_ids=dropped)
+    return out
+
+
 def _trade_evaluate_impl(stud_tax_mode: str):
     """The /api/trade/evaluate body — runs inside the caller's stud-tax
     mode context (see trade_evaluate_route)."""
-    from .trade_optimizer import _consensus_packages, _fairness_v3
+    from .trade_optimizer import _consensus_packages
 
     body = request.get_json(silent=True) or {}
     give_raw = body.get("give_player_ids") or []
@@ -18353,49 +19130,21 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         caller_user_id = _mode_b_sess.get("user_id")
 
     try:
-        _pool_players, seed = _get_universal_pool(fmt)
+        # The consensus pricing and verdict are shared with the og share card
+        # (`_consensus_pricing` / `_consensus_verdict`, docs/plans/
+        # share-card-value-bar/scope.md), so the two can never drift.
+        _pricing = _consensus_pricing(fmt, league_id)
+        _pool_players, seed, league_pick_vals, _league_pick_rows, seed_value = _pricing
         e2v = _trade_service_mod.elo_to_value
 
-        # #158 — league-scoped owned picks (e.g. "2027 1st") are NOT in the
-        # universal-pool `seed`, so they'd otherwise be silently dropped. When a
-        # league_id rides along, resolve each owned pick_id to its pool_value
-        # (already in elo_to_value units, so it composes directly with player
-        # values). Generic picks (generic_pick_*) still resolve via `seed`.
-        #
-        # The price is resolved at READ time under the pricing mode pinned for
-        # this request by trade_evaluate_route, alongside the #215 stud-tax
-        # pin. Since D-144 that is always `market_slots`, and the waterfall is
-        # the pick's OWN slot price when D-090 resolves one → the round curve
-        # → the stored ladder value. The stored column is never written —
-        # pricing is read-time in every mode.
-        #
-        # W3 M-C (S1) — the read opts into asserted rows behind
-        # `picks.assign_tradeable`, and each priced pick entry carries its
-        # provenance + season so the client can badge it and deep-link the
-        # correction. Flag off ⇒ the platform-only default and no new keys.
-        league_pick_vals: dict[str, float] = {}
-        league_pick_meta: dict[str, dict] = {}
+        # W3 M-C (S1) — each priced pick entry carries its provenance + season
+        # so the client can badge it and deep-link the correction. Flag off ⇒
+        # the platform-only default and no new keys.
         _tradeable = _asserted_picks_tradeable()
-        if league_id and league_id != "league_demo":
-            try:
-                # D-144 per-slot pricing needs the league's resolved draft
-                # order. Looked up ONCE per request (it is DB-backed with a
-                # 60s cache), never per pick — same discipline as the deck
-                # lane's lookup in `_owned_pick_assets`.
-                _slot_order = _league_slot_order(league_id)
-                for _p in load_draft_picks(league_id=league_id,
-                                           source=_pick_read_source()):
-                    league_pick_vals[_p["pick_id"]] = _priced_pick_value(
-                        _p, _slot_order, fmt)
-                    league_pick_meta[_p["pick_id"]] = _pick_wire_source(
-                        _p, _tradeable, with_season=True)
-            except Exception as _lp_err:
-                log.warning("evaluate: owned-pick load failed (continuing): %s", _lp_err)
-
-        def seed_value(pid: str) -> float:
-            if pid in league_pick_vals:
-                return league_pick_vals[pid]        # already in value space
-            return e2v(seed.get(pid, 1500.0))
+        league_pick_meta: dict[str, dict] = {
+            _p["pick_id"]: _pick_wire_source(_p, _tradeable, with_season=True)
+            for _p in _league_pick_rows
+        }
 
         # #277 — tier walked off the RAW seed Elo via the canonical
         # band-walk (same convention as /api/trade/values; never derived
@@ -18405,10 +19154,8 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         _evener_tier = (lambda pid, pos:
                         RankingService.tier_for_elo(seed.get(pid, 1500.0), pos, fmt))
 
-        give    = [p for p in give_raw if p in seed or p in league_pick_vals]
-        recv    = [p for p in recv_raw if p in seed or p in league_pick_vals]
-        dropped = [p for p in give_raw + recv_raw
-                   if p not in seed and p not in league_pick_vals]
+        give, recv, dropped = _consensus_split(give_raw, recv_raw, seed,
+                                               league_pick_vals)
 
         per_player = [
             {"player_id": pid, "side": side, "value": round(seed_value(pid), 1),
@@ -18423,20 +19170,22 @@ def _trade_evaluate_impl(stud_tax_mode: str):
         # as generic-pick equivalents ("≈ a Mid 2nd") so the delta is an
         # actionable counteroffer instead of an abstract number. `favors` +
         # `gap` are built by the shared _value_verdict_payload helper (the same
-        # one the deck cards use, so the two verdicts can never drift).
+        # one the deck cards use, so the two verdicts can never drift), via
+        # `_consensus_verdict` (the same call the og share card makes).
         gap = None
-        if give or recv:
-            gv, rv = _consensus_packages(give, recv, seed_value)
-            give_value, receive_value = round(gv, 1), round(rv, 1)
-        if give and recv:
-            fairness, point_ratio, _gv, _rv = _fairness_v3(
-                give, recv, seed_value, None, thr)
+        _cv = _consensus_verdict(give_raw, recv_raw, fmt, league_id,
+                                 pricing=_pricing, fairness_threshold=thr)
+        if _cv is not None:                 # both sides priced
+            give_value, receive_value = _cv["give_value"], _cv["receive_value"]
+            fairness, point_ratio = _cv["fairness"], _cv["point_ratio"]
             even = point_ratio >= 0.95
             verdict = ("even" if even
                        else "fair" if fairness is not None else "unfair")
-            _vp = _value_verdict_payload(give_value, receive_value, even)
-            favors = _vp["favors"]
-            gap = _vp["gap"]
+            favors = _cv["favors"]
+            gap = _cv["gap"]
+        elif give or recv:                  # one-sided: package values only
+            gv, rv = _consensus_packages(give, recv, seed_value)
+            give_value, receive_value = round(gv, 1), round(rv, 1)
 
         result = {
             "scoring_format":     fmt,
@@ -18980,6 +19729,8 @@ def get_league_picks():
             priced = _priced_pick_value(p, slot_order, fmt)
             value = round(priced, 1) if priced > 0 else None
             return {**p, "pool_value": value,
+                    "original_username": pick_team_name(p, "original"),
+                    "owner_username": pick_team_name(p, "owner", raw),
                     "label": _owned_pick_label(p, slot_order),
                     "tier": _pick_tier(value),
                     **_pick_wire_source(p, tradeable)}
@@ -19021,8 +19772,9 @@ def _owned_pick_label(p: dict, slot_order: dict | None = None) -> str:
     unit = (pick_slots.slot_suffix(rnd, slot) if slot
             else _PICK_ORDINALS.get(rnd, str(p.get("round"))))
     base = f"{season} {unit}"
-    if p.get("is_traded") and p.get("original_username"):
-        return f"{base} (from {p['original_username']})"
+    original = pick_team_name(p, "original")
+    if p.get("is_traded") and original:
+        return f"{base} (from {original})"
     return base
 
 
@@ -19088,6 +19840,10 @@ def _pick_labels_by_id(asset_ids) -> dict[str, str]:
                     # league below.
                     draft_picks_table.c.league_id,
                     draft_picks_table.c.original_roster_id,
+                    # #497 QA P2 — what `pick_team_name` heals an asserted
+                    # row's stored name from.
+                    draft_picks_table.c.source,
+                    draft_picks_table.c.original_user_id,
                 ).where(draft_picks_table.c.pick_id.in_(owned_ids))
             ).fetchall()
         orders: dict[str, dict | None] = {}
@@ -19102,6 +19858,8 @@ def _pick_labels_by_id(asset_ids) -> dict[str, str]:
                 "is_traded":          m["is_traded"],
                 "original_username":  m["original_username"],
                 "original_roster_id": m["original_roster_id"],
+                "source":             m["source"],
+                "original_user_id":   m["original_user_id"],
             }, orders[lg])
     except Exception as e:
         # Display-only enrichment — a lookup failure must never fail the
@@ -20254,7 +21012,8 @@ def generate_trades():
             presentation_capture=presentation_capture, opponents_total=opponents_total,
             search_id=search_id)
         if served is not None:
-            return jsonify({**served, "deck_id": served["job_id"]})
+            return _serve_stored_trade_page(g_user_id, {**served, "deck_id": served["job_id"]},
+                                            page_row)
     with _trade_jobs_lock:
         existing_id = (_trade_jobs_by_key.get(key)
                        if not _any_pinned and not presentation_uncached
@@ -20298,12 +21057,10 @@ def generate_trades():
                 _trade_jobs_by_key.pop(key, None)
 
     if reuse_snapshot is not None:
-        if paged:
-            out = _trade_job_page_view(reuse_snapshot, 0, search_id)
-            return jsonify({**out, "deck_id": out["job_id"]} if deck_named else out)
         # Published card lists are replaced, never mutated in place. Capture
         # their reference under the lock and do the expensive copy outside it.
-        return jsonify(_trade_job_public_view(copy.deepcopy(reuse_snapshot)))
+        return _serve_trade_job(g_user_id, reuse_snapshot, paged, 0, search_id,
+                                deck_named=deck_named)
 
     # Kick off a fresh job. No locks held during the worker spawn so we
     # don't accidentally serialize parallel users.
@@ -20328,10 +21085,7 @@ def generate_trades():
     )
     with _trade_jobs_lock:
         snapshot = dict(_trade_jobs[job_id])
-    if paged:
-        out = _trade_job_page_view(snapshot, 0, search_id)
-        return jsonify({**out, "deck_id": out["job_id"]} if deck_named else out)
-    return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
+    return _serve_trade_job(g_user_id, snapshot, paged, 0, search_id, deck_named=deck_named)
 
 
 @app.route("/api/trades/asset-ideas", methods=["POST"])
@@ -21344,7 +22098,9 @@ def trade_job_status():
             return jsonify({"error": "invalid_deck",
                             "message": "deck must be 1-64 characters of A-Z a-z 0-9 _ -"}), 400
         body = _trade_deck_status(sess, request.headers.get("X-Session-Token", ""), deck, int(cursor))
-        return jsonify(body) if body is not None else (jsonify({"error": "job not found"}), 404)
+        if body is None:
+            return jsonify({"error": "job not found"}), 404
+        return _serve_deck_status(sess["user_id"], body)
     page_row = None
     if (cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled()
             and _trade_i1_mode()):      # at trade_i1_mode 0 the store isn't read: the job path
@@ -21354,7 +22110,8 @@ def trade_job_status():
         except Exception as err:
             log.warning("trade-page read failed for job %s: %s", job_id, err)
         if page_row is not None and int(cursor) < page_row["card_count"]:
-            return jsonify(_trade_page_status_view(page_row, int(cursor), sess))
+            return _serve_stored_trade_page(
+                sess["user_id"], _trade_page_status_view(page_row, int(cursor), sess), page_row)
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
         if not job and page_row is not None:
@@ -21368,9 +22125,9 @@ def trade_job_status():
         # Published card lists are replaced, never mutated in place. Capture
         # their reference under the lock and do the expensive copy outside it.
         snapshot = dict(job)
-    if cursor is not None and _trade_paged_responses_on():
-        return jsonify(_trade_job_page_view(snapshot, int(cursor)))
-    return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
+    return _serve_trade_job(sess["user_id"], snapshot,
+                            cursor is not None and _trade_paged_responses_on(),
+                            int(cursor) if cursor is not None else 0)
 
 
 def _pending_owner_cards(cards, config, exemptions):
@@ -21701,6 +22458,7 @@ def swipe_trade():
                     },
                     **(getattr(g, "device_info", {}) or {}),
                 )
+                _referral_ledger.maybe_activate_referral(g_user_id, "trade_proposed" if decision == "like" else "match_swiped")   # L7 FR-17; never raises
             except Exception as ev_err:
                 log.warning("record_event(trade swipe) failed: %s", ev_err)
 
@@ -22161,6 +22919,7 @@ def queue_trade_for_opponent():
                 },
                 **(getattr(g, "device_info", {}) or {}),
             )
+            _referral_ledger.maybe_activate_referral(g_user_id, "trade_proposed")   # L7 FR-17; never raises
         except Exception as db_err:
             log.warning("DB write failed for queued trade (continuing): %s", db_err)
 
@@ -22456,6 +23215,7 @@ def _apply_reasoned_pass(sess, card, body: dict) -> None:
             },
             **(getattr(g, "device_info", {}) or {}),
         )
+        _referral_ledger.maybe_activate_referral(g_user_id, "match_swiped")   # L7 FR-17; never raises
     except Exception as err:
         log.warning("record_event(reasoned pass) failed: %s", err)
 
@@ -23102,6 +23862,13 @@ def _assignment_members(league_id: str) -> tuple[list[str], dict[str, str]]:
 
     Ordered deterministically by user_id so a never-configured league still
     seeds the same grid twice.
+
+    The names dict holds ONLY members with a real name (`username` →
+    `display_name`, the #289 rule). A nameless member is absent, never
+    mapped to their id: an id (`espn:{SWID}`, `acct_*`) is not a name and
+    would be served to every other league member. Callers fall back to the
+    slot label (`Team <original_roster_id>`) — `seed_pick_grid` does so on
+    its own, the PUT route via `_assignment_owner_name`.
     """
     try:
         rows = load_league_members(str(league_id))
@@ -23115,9 +23882,26 @@ def _assignment_members(league_id: str) -> tuple[list[str], dict[str, str]]:
         if not uid:
             continue
         ids.append(uid)
-        names[uid] = (m.get("username") or m.get("display_name") or f"Team {uid}")
+        name = str(m.get("username") or m.get("display_name") or "").strip()
+        if name:
+            names[uid] = name
     ids.sort()
     return ids, names
+
+
+def _assignment_owner_name(names: dict[str, str], rows: list[dict],
+                           owner: str) -> str:
+    """The `owner_username` an assignment PUT stores. Never the user id.
+
+    The member's real name when they have one; else their slot label,
+    `Team <original_roster_id>`, read off any grid row they originally own;
+    else `Unnamed team` (a member added after the grid was seeded has no
+    slot yet). The fallback is `pick_slot_team_name`, the one the read-time
+    guard (`pick_team_name`) heals with, so a healed read matches this write.
+    """
+    if owner in names:
+        return names[owner]
+    return pick_slot_team_name(rows, owner)
 
 
 def _assignment_settings(league_id: str, member_ids: list[str]) -> dict:
@@ -23143,7 +23927,8 @@ def _assignment_settings(league_id: str, member_ids: list[str]) -> dict:
     return {"rounds": rounds, "order_type": order_type, "order": order}
 
 
-def _assignment_slots(league_id: str, settings: dict) -> list[dict]:
+def _assignment_slots(league_id: str, settings: dict,
+                      first_season: int | None = None) -> list[dict]:
     """Every asserted slot for a league, annotated for the client.
 
     `include_contested=True`: this surface is exactly where a contested or
@@ -23151,9 +23936,14 @@ def _assignment_slots(league_id: str, settings: dict) -> list[dict]:
     it. The rows are still withheld from every priced payload, by the row
     filter inside `load_draft_picks` (never by nulling `pool_value`, which
     `_power_picks_by_owner` would silently re-derive).
+
+    `first_season` (C5, `_assignment_first_season`) HIDES rows of earlier
+    seasons from the grid; it never deletes them. `None` = every row.
     """
     rows = load_draft_picks(league_id=str(league_id), source=PICK_SOURCE_USER,
                             include_contested=True)
+    if first_season is not None:
+        rows = [r for r in rows if int(r.get("season") or 0) >= first_season]
     if not rows:
         return []
     contested = contested_pick_ids(str(league_id))
@@ -23169,9 +23959,9 @@ def _assignment_slots(league_id: str, settings: dict) -> list[dict]:
             "slot":               slot_by_user.get(orig_user),
             "original_roster_id": str(r.get("original_roster_id") or ""),
             "original_user_id":   orig_user or None,
-            "original_username":  r.get("original_username"),
+            "original_username":  pick_team_name(r, "original"),
             "owner_user_id":      str(r.get("owner_user_id") or "") or None,
-            "owner_username":     r.get("owner_username"),
+            "owner_username":     pick_team_name(r, "owner", rows),
             "is_traded":          bool(r.get("is_traded")),
             "source":             r.get("source") or PICK_SOURCE_USER,
             "assigned_by":        r.get("assigned_by"),
@@ -23319,11 +24109,19 @@ def _espn_suggested_order(league_id: str, member_ids: list[str]) -> dict | None:
 
 def _assignment_payload(league_id: str, settings: dict,
                         slots: list[dict], member_count: int) -> dict:
+    """`progress.total` counts the classes the payload SHOWS (C5 P2-1).
+
+    A drafted grid seeded before the draft shows 3 classes until setup is
+    re-saved, and a flip back after that re-save shows 5, so a fixed
+    4-class total would read "48 of 64" (the Draft Room's "Continue
+    assigning" with nothing left) or "80 of 64". An unseeded grid has no
+    classes yet and keeps the 4-class figure.
+    """
     seasons: dict[int, list[dict]] = {}
     for s in slots:
         seasons.setdefault(s["season"], []).append(s)
-    total = (int(settings["rounds"]) * max(member_count, 0)
-             * (_ASSIGNMENT_SEASONS_AHEAD + 1))
+    classes = len(seasons) or (_ASSIGNMENT_SEASONS_AHEAD + 1)
+    total = int(settings["rounds"]) * max(member_count, 0) * classes
     return {
         "league_id": str(league_id),
         "settings":  settings,
@@ -23363,9 +24161,9 @@ def _assignment_grid(league_id: str, season: int):
             "round":             int(r.get("round") or 0),
             "slot":              slot_by_user.get(str(r.get("original_user_id") or "")),
             "owner_user_id":     r.get("owner_user_id"),
-            "owner_username":    r.get("owner_username"),
+            "owner_username":    pick_team_name(r, "owner", rows),
             "original_user_id":  r.get("original_user_id"),
-            "original_username": r.get("original_username"),
+            "original_username": pick_team_name(r, "original"),
             "is_traded":         bool(r.get("is_traded")),
         })
         at = r.get("assigned_at")
@@ -23391,15 +24189,56 @@ def _assignment_league(sess: dict, league_id: str):
     return None, ({"error": "league_not_found"}, 404)
 
 
+def _assignment_first_season(league_id: str, season: int) -> int:
+    """The first class the pick-assignment GRID shows (C5).
+
+    `season + 1` once the league's `season` rookie draft is past, else
+    `season`. The signal is the CACHED verdict on the leagues row
+    (`get_league_draft_context` → `status` / `confidence`), read through the
+    shared `_current_season_picks_visible` predicate; for ESPN that verdict
+    comes from the rookies-on-rosters heuristic. That predicate ignores
+    confidence: ANY positive `drafted` verdict moves the grid, at any
+    confidence, low included. No writer produces drafted/low today (the
+    detector writes `drafted` only at medium or high). The #228 fail-safe
+    holds: unknown, not_drafted, never checked, no row, a row for another
+    season or a DB error all keep `season`. No calendar backstop.
+
+    The "another season" case cannot arise from a route today:
+    `_assignment_league` takes `season` from the same leagues row, and
+    `leagues.season` is never refreshed after the first link (scope doc §2,
+    known gap (a)).
+
+    The grid only (C5 scope a): the Draft Room's `_assignment_grid` and every
+    priced `load_draft_picks(source=user)` reader are untouched.
+    """
+    try:
+        ctx = get_league_draft_context(league_id)
+        if (ctx and ctx.get("season") is not None
+                and int(ctx["season"]) == int(season)
+                and not _current_season_picks_visible(ctx.get("status"),
+                                                      ctx.get("confidence"))):
+            return int(season) + 1
+    except Exception:
+        log.warning("pick-assignment: draft-context read failed for %s",
+                    league_id, exc_info=True)
+    return int(season)
+
+
 @app.route("/api/league/pick-assignments", methods=["GET"])
 @_gate_unverified_read
 def pick_assignments_route():
     """GET /api/league/pick-assignments?league_id=&season=
 
     The whole grid: `settings` (rounds / order_type / order), `seasons[]`
-    (always current + 3, ascending), `progress` and `seeded`. 192 slots is
+    (every stored class from `_assignment_first_season` on, ascending:
+    normally 4), `progress` and `seeded`. 192 slots is
     ~40 KB and one round-trip beats four, so this never paginates; the client
-    defaults to the current season and collapses the rest.
+    defaults to the first season and collapses the rest.
+
+    C5: once the league's rookie draft reads drafted, `seasons[]` starts at
+    season + 1 (`_assignment_first_season`). The additive `current_season`
+    is the league's season either way, so the client can tell a future class
+    from the current one.
 
     `slots[].assigned_at` is ALSO the optimistic-concurrency token the PUT
     below carries back. It is `null` on a never-assigned row.
@@ -23427,8 +24266,10 @@ def pick_assignments_route():
         return jsonify({"error": "not_in_league"}), 403
 
     settings = _assignment_settings(league_id, member_ids)
-    slots = _assignment_slots(league_id, settings)
+    slots = _assignment_slots(league_id, settings,
+                              first_season=_assignment_first_season(league_id, season))
     payload = _assignment_payload(league_id, settings, slots, len(member_ids))
+    payload["current_season"] = int(season)
 
     # ESPN auto-derived round-1 order — a DEFAULT for the setup step, only
     # while the league has no stored order of its own. `_assignment_settings`
@@ -23503,10 +24344,15 @@ def pick_assignment_put_route(pick_id: str):
                              include_contested=True)
     prior_row = next((r for r in prior if str(r.get("pick_id")) == str(pick_id)), None)
     prior_owner = str(prior_row.get("owner_user_id") or "") if prior_row else ""
+    # C5 — a pick of the drafted class is not on the grid, so it gets the
+    # same answer as any other pick that isn't, before anything is written.
+    first = _assignment_first_season(league_id, season)
+    if prior_row and int(prior_row["season"]) < first:
+        return jsonify({"error": "pick_not_found"}), 404
 
     outcome, row = assign_draft_pick(
         league_id=league_id, pick_id=str(pick_id), owner_user_id=owner,
-        owner_username=names.get(owner, f"Team {owner}"), actor_user_id=actor,
+        owner_username=_assignment_owner_name(names, prior, owner), actor_user_id=actor,
         if_assigned_at=token)
 
     if outcome == "not_found":
@@ -23515,7 +24361,7 @@ def pick_assignment_put_route(pick_id: str):
     settings = _assignment_settings(league_id, member_ids)
     if outcome == "stale":
         # The WHOLE current row, so the conflict UI needs no second read.
-        current = _assignment_slots(league_id, settings)
+        current = _assignment_slots(league_id, settings, first_season=first)
         current = next((s for s in current if s["pick_id"] == str(pick_id)), None)
         return jsonify({"error": "stale_assignment", "current": current}), 409
 
@@ -23533,7 +24379,7 @@ def pick_assignment_put_route(pick_id: str):
     })
     invalidate_pick_assignment_cache(league_id)
 
-    slots = _assignment_slots(league_id, settings)
+    slots = _assignment_slots(league_id, settings, first_season=first)
     updated = next((s for s in slots if s["pick_id"] == str(pick_id)), None)
     payload = _assignment_payload(league_id, settings, slots, len(member_ids))
     return jsonify({"ok": True, "slot": updated,
@@ -23552,6 +24398,11 @@ def pick_assignments_order_route():
     board tractable: a league with three trades leaves 189 slots untouched and
     the three float into the client's "Traded picks" review. Re-running
     without `reseed` preserves every edited slot verbatim.
+
+    C5: once the league's rookie draft reads drafted, the seeded classes start
+    at season + 1 (`_assignment_first_season`). Prices stay relative to the
+    league season, and the spent class's rows are kept and hidden, except in
+    the two cases `seed_pick_grid` names (fewer rounds; a flip back).
 
     `rounds` is USER-SETTABLE (operator decision 2), clamped server-side to
     1..ROOKIE_MAX_ROUNDS. That clamp is the conservation bound's only lever,
@@ -23619,10 +24470,12 @@ def pick_assignments_order_route():
     # slot label, so the cached order must not survive it.
     _invalidate_slot_order(league_id)
 
+    first = _assignment_first_season(league_id, season)
     result = seed_pick_grid(
         league_id=league_id, member_user_ids=settings["order"],
         user_id_to_name=names, actor_user_id=actor,
         current_season=int(season), rounds=settings["rounds"],
+        first_season=first,
         seasons_ahead=_ASSIGNMENT_SEASONS_AHEAD,
         scoring_format=_active_format(sess),
         platform=str(getattr(g_league, "platform", None)
@@ -23630,7 +24483,7 @@ def pick_assignments_order_route():
                      or "espn").lower(),
         reseed=bool(body.get("reseed")))
 
-    slots = _assignment_slots(league_id, settings)
+    slots = _assignment_slots(league_id, settings, first_season=first)
     payload = _assignment_payload(league_id, settings, slots, len(member_ids))
     return jsonify({"ok": True, "seeded": result["seeded"],
                     "reseeded_over": result["reseeded_over"],
@@ -25133,7 +25986,8 @@ def sleeper_link():
         denial = _verified_write_denial(sess)
         if denial is not None:
             return denial
-        delete_sleeper_credential(user_id)
+        # D1: disconnecting also withdraws any open roster-move consent.
+        _drop_sleeper_credential(user_id, "disconnect")
         return jsonify({"connected": False})
 
     if request.method == "GET":
@@ -25197,14 +26051,29 @@ def sleeper_link():
 
     exp = _sleeper_write.token_expiry(token)
     expires_at = datetime.fromtimestamp(exp, tz=timezone.utc).isoformat() if exp else None
+    withdrawn = 0
     try:
         ciphertext = _sleeper_write.encrypt_token(token)
-        upsert_sleeper_credential(user_id, sleeper_user_id, ciphertext, expires_at)
+        # D1, R15.2.5 / legal R28.26 2f: re-consent after a re-link, recorded as
+        # `relink`, in the SAME transaction as the credential swap (both land or
+        # neither). Only when the stored credential actually CHANGES (another
+        # token, or another Sleeper user): the client silently re-posts the
+        # STORED token at session start (maybeReplaySleeperVerification, #126),
+        # and that replay must never end a grant. Neither token is ever logged.
+        withdrawn = _fa_db.relink_sleeper_credential(
+            user_id, sleeper_user_id, ciphertext, expires_at,
+            withdraw=_sleeper_credential_changes(user_id, token, sleeper_user_id),
+            now=_fa_move_now())
     except _sleeper_write.SleeperWriteError:
         return jsonify({"error": "sleeper_unconfigured"}), 503
     except Exception:
         log.exception("sleeper_link store failed")
         return jsonify({"error": "store_failed"}), 500
+    finally:
+        if withdrawn:
+            _fa_move_event(user_id, "fa_move_consent_withdrawn",
+                           {"via": "relink", "league_platform": "sleeper"},
+                           touch_user=False)       # a side effect of the link (F2)
 
     if proven_live:
         # Claim matches + oracle passed → this session controls the account.
@@ -25403,7 +26272,7 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
     except _sleeper_write.SleeperWriteError:
         return {"error": "sleeper_unconfigured"}, 503
     if _sleeper_write.is_expired(token):
-        delete_sleeper_credential(user_id)
+        _drop_sleeper_credential(user_id, "credential_expired")   # D1: + consent withdrawal
         return {"error": "sleeper_expired"}, 409
 
     # Resolve BOTH rosters server-authoritatively from one public rosters fetch:
@@ -25552,7 +26421,7 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         # `sleeper_expired`, which is a time-expiry the client CAN fix by
         # reconnecting) plus a short detail so we can see WHY Sleeper says no.
         log.warning("sleeper propose auth-rejected: %s", getattr(e, "detail", None))
-        delete_sleeper_credential(user_id)
+        _drop_sleeper_credential(user_id, "credential_rejected")  # D1: + consent withdrawal
         return {
             "error": "sleeper_rejected",
             "detail": (str(getattr(e, "detail", "") or ""))[:200],
@@ -26391,8 +27260,10 @@ def disposition_trade_match(match_id):
 
     When both parties have decided:
       • Both accept  → K=20 ELO boost for each user's received players
-      • Any decline  → K=20 corrective ELO signal for each decliner,
-                       which nets to ≈ −12 after the original +8 nudge
+      • Any decline  → a corrective ELO signal per (give, receive) pair for
+                       each decliner, at K = trade_k_decline_net (12) + the K
+                       that pair's like was stored with, so like + decline
+                       nets −12 in K at any like K (BL-004)
 
     The ELO signals are:
       1. Applied immediately to the in-memory RankingService for the caller.
@@ -26432,9 +27303,10 @@ def disposition_trade_match(match_id):
 
     try:
         result = record_match_disposition(
-            match_id = match_id,
-            user_id  = g_user_id,
-            decision = decision,
+            match_id       = match_id,
+            user_id        = g_user_id,
+            decision       = decision,
+            scoring_format = _active_format(sess),   # the board the signals are saved to
         )
 
         if result["status"] == "not_found":
@@ -27657,6 +28529,12 @@ def league_format_stats_route():
 # Sleeper API Proxy Routes
 # ---------------------------------------------------------------------------
 
+def _sleeper_upstream_unavailable(code: int) -> bool:
+    """True when a Sleeper HTTPError means "Sleeper can't serve us right now"
+    (5xx outage, 429 rate limit, 403 block) rather than "not found" (M10)."""
+    return code >= 500 or code in (403, 429)
+
+
 @app.route("/api/sleeper/user/<path:username>")
 def sleeper_user(username):
     """Validate a Sleeper username and return basic user info.
@@ -27739,11 +28617,12 @@ def sleeper_user(username):
         return jsonify(data)
 
     except urllib.error.HTTPError as e:
-        # Only a 4xx means the user genuinely doesn't exist. A 5xx is a
-        # Sleeper outage — telling the user "User not found" sends them down
-        # a dead end of retyping a correct username. Surface it as 503 so the
-        # client can show a "try again shortly" message instead.
-        if e.code >= 500:
+        # Only a plain 4xx means the user genuinely doesn't exist. A 5xx,
+        # 429 or 403 is Sleeper being unavailable to us — telling the user
+        # "User not found" sends them down a dead end of retyping a correct
+        # username. Surface it as 503 so the client can show a "try again
+        # shortly" message instead.
+        if _sleeper_upstream_unavailable(e.code):
             log.warning("  Sleeper HTTPError %s — upstream unavailable", e.code)
             return jsonify({"error": "sleeper_unavailable",
                             "message": "Sleeper is unavailable — try again shortly."}), 503
@@ -27841,9 +28720,9 @@ def sleeper_rosters(league_id):
         log.info("  returned %s rosters", len(data) if isinstance(data, list) else "non-list")
         return jsonify(data or [])
     except urllib.error.HTTPError as e:
-        # 4xx → the league doesn't exist on Sleeper; 5xx → Sleeper outage.
-        # Don't leak the raw upstream error string to the client.
-        if e.code >= 500:
+        # 4xx → the league doesn't exist on Sleeper; 5xx/429/403 → Sleeper
+        # unavailable. Don't leak the raw upstream error string to the client.
+        if _sleeper_upstream_unavailable(e.code):
             log.warning("  rosters: Sleeper %s — upstream unavailable", e.code)
             return jsonify({"error": "sleeper_unavailable",
                             "message": "Sleeper is unavailable — try again shortly."}), 503
@@ -28589,25 +29468,19 @@ def session_init():
             # league_members rows of managers new since the start.
             _league_existed, _members_existed = league_row_and_member_ids(league_id)
 
-            # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE
-            # upsert_user runs so we can emit a one-time referral-receipt
-            # notification on the referred user's first session.
-            # upsert_user only applies `invited_by` on INSERT, so this is
-            # also our only window to attribute the join.
-            _is_new_user = False
-            try:
-                _is_new_user = not user_exists(user_id)
-            except Exception as _check_err:
-                log.warning("  referral receipt: user_exists check failed (%s)", _check_err)
             try:
                 upsert_user(
-                    sleeper_user_id=user_id,
-                    username=username,
-                    display_name=display_name,
-                    avatar=avatar,
+                    sleeper_user_id=user_id, username=username,
+                    display_name=display_name, avatar=avatar, require_user=True)
+                # Minting already created this user. Only its explicit durable
+                # pending marker can identify a first initialized session.
+                _is_new_user, _ref = _referral_ledger.initialize_first_session(
+                    user_id=user_id, league_id=league_id,
+                    league_platform=authoritative["platform"],
+                    invite_id=_invite_id_from(body.get("invite_id")),
                     invited_by=invited_by,
-                    require_user=True,
-                )
+                    new_username=username or display_name or user_id,
+                    session_id=token, device_info=_ev_info)
                 upsert_league(
                     league_id        = league_id,
                     user_id          = user_id,
@@ -28620,25 +29493,6 @@ def session_init():
                     only_if_exists   = _league_existed or _platform_linked,
                 )
                 log.info("  ✅ user + league upserted in DB (bg)")
-
-                # User-event log: signup on first session, app_open
-                # thereafter. Fires after upsert_user so the row is
-                # guaranteed to exist for the FK-style update inside
-                # record_event().
-                try:
-                    record_event(
-                        user_id,
-                        "signup" if _is_new_user else "app_open",
-                        league_id  = league_id,
-                        session_id = token,
-                        source     = "api",
-                        require_user = True,
-                        **_ev_info,
-                    )
-                except AccountGone:
-                    raise
-                except Exception as _ev_err:
-                    log.warning("  record_event failed: %s", _ev_err)
 
                 # Tracking plan v2 §S3 — league_synced into user_events.
                 # Sole writer since the analytics P0 cutover (the legacy
@@ -28665,7 +29519,7 @@ def session_init():
                 # session_init when they arrived with an invited_by
                 # attribution. Posts a bell notification to the
                 # referrer resolved-by-username.
-                if _is_new_user and invited_by:
+                if _is_new_user and invited_by and _ref.legacy_notify:
                     try:
                         referrer = get_user_by_username(invited_by)
                         if referrer and referrer.get("sleeper_user_id"):
@@ -28674,7 +29528,7 @@ def session_init():
                             push_notification(
                                 user_id=referrer_uid,
                                 type="referral_joined",
-                                body=f"@{new_username} joined Fantasy Trade Finder via your invite.",
+                                body=_referral_receipt_body(username, display_name),
                                 meta={
                                     "new_user_id":   user_id,
                                     "new_username":  new_username,
@@ -28711,13 +29565,16 @@ def session_init():
                             # three receipts that bury everything else on a
                             # recency-ordered list. The push stays
                             # per-pair; only the inbox folds.
-                            create_or_coalesce_league_join_notification(
-                                user_id      = _p["user_id"],
-                                league_id    = league_id,
-                                league_name  = league_name or "",
-                                new_username = _new_username,
-                                body         = "A new leaguemate can mean new trade matches.",
-                            )
+                            # L7 FR-20: the credited inviter already has the
+                            # referral_joined row; skip only their inbox row.
+                            if _p["user_id"] != _ref.inviter_user_id:
+                                create_or_coalesce_league_join_notification(
+                                    user_id      = _p["user_id"],
+                                    league_id    = league_id,
+                                    league_name  = league_name or "",
+                                    new_username = _new_username,
+                                    body         = "A new leaguemate can mean new trade matches.",
+                                )
                             _send_typed_push(
                                 _p["user_id"],
                                 "league_member_joined",
@@ -30301,12 +31158,11 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
         # wrong-account nudge (same `espn_reconnect` type, deduped per
         # credential episode) instead of a later mislabeled "stopped
         # working". The sync itself CONTINUES — league rosters are league
-        # truth regardless of whose credential read them.
+        # truth regardless of whose credential read them. "Owns" = any listed
+        # owner, co-owners included (_espn_binding_mismatch).
         if swid and my_tid is not None:
             _bound = next((t for t in league["teams"] if t.team_id == my_tid), None)
-            if _bound and (_bound.owner_swid or "").strip() and \
-                    _espn.canonical_swid(_bound.owner_swid).upper() != \
-                    _espn.canonical_swid(swid).upper():
+            if _espn_binding_mismatch(_bound, swid):
                 _espn_reconnect_nudge(lg, reason="wrong_account")
         teams = []
         for t in league["teams"]:
@@ -30794,9 +31650,11 @@ def cron_hourly_tick():
 def cron_daily_tick():
     """Once per day (Render cron `notif-daily-tick`). Authenticates, starts
     ONE single-flight runner thread (`backend/daily_tick.py`) and returns
-    **202 `{"ok": true, "started": <bool>}` at once**. Never inline: one sync
-    gunicorn worker (`--timeout 120`, render.yaml) serves every request, and
-    the inline tick was killed at 120 s every day (runbook § Cron schedule).
+    **202 `{"ok": true, "started": <bool>}` at once**. Never inline: one
+    gunicorn worker (render.yaml) serves every request. Under the old sync
+    worker the inline tick was killed at the 120 s timeout every day (runbook
+    § Cron schedule); under `--threads 4` (#398) it would hold a request
+    thread and the GIL for minutes.
     `started: false` means a run is already in flight (single-flight, not a
     queue).
 
@@ -31561,7 +32419,7 @@ def og_tier_card(pos, username):
 
 from .database import (  # noqa: E402
     create_trade_share_token, resolve_trade_share_token,
-    TradeShareRateLimited,
+    TradeShareRateLimited, load_trade_match_sides,
 )
 
 # token_urlsafe(16) → exactly 22 chars of the URL-safe base64 alphabet.
@@ -31581,9 +32439,197 @@ def _resolve_trade_share(token) -> dict | None:
         return None
 
 
+# ---------------------------------------------------------------------------
+# The value bar on the og share cards (docs/plans/share-card-value-bar/
+# scope.md; models-lead K-a2). The verdict is computed ONCE, at share time,
+# by `_consensus_verdict` (the same call /api/trade/evaluate makes) in market
+# stud-tax mode, never from the sharer's private board or session, and stored
+# on the share's own row as `value_snapshot`. The card and the share page
+# draw ONLY from that snapshot: a view never prices. A share with no
+# snapshot (any share made before this) draws no bar. The words on the bar
+# live in og_image (marketing addendum 14); this side decides bar or no bar,
+# and names the draft picks.
+# ---------------------------------------------------------------------------
+
+_SHARE_BAR_FORMATS = ("1qb_ppr", "sf_tep")
+_SNAPSHOT_FAVORS = ("give", "receive", "even")
+
+# An owned pick's id is database.make_pick_id's
+# `{league}_{season}_{round}_{original_roster}`.
+_OWNED_PICK_ID_RE = re.compile(r"^(.+?)_(\d{4})_(\d{1,2})_(.+)$")
+
+
+def _share_bar_format(raw) -> str | None:
+    """A share's scoring format, only when it names a real one."""
+    return raw if raw in _SHARE_BAR_FORMATS else None
+
+
+def _value_bar_date(d) -> str:
+    """A date -> "Nov 13, 2026" (B4: three-letter month, no leading zero,
+    four-digit year)."""
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def _share_pick_labels(asset_ids) -> dict[str, str]:
+    """Card labels for the draft-pick ids among `asset_ids`: a pick is never
+    a players row, so without a label the card drew "Unknown player".
+
+    Generic rungs use `generic_pick_label` ("Mid 1st Round Pick"); owned
+    picks use `_owned_pick_label` on the season and round in the pick's own
+    id ("2026 1st"), so the label survives the pick's row leaving
+    draft_picks after its draft. The original owner's name is left off on
+    purpose: it is a leaguemate's username, on a public image."""
+    labels: dict[str, str] = {}
+    for aid in {str(a) for a in (asset_ids or []) if a}:
+        parsed = parse_generic_pick_id(aid)
+        if parsed is not None:
+            labels[aid] = generic_pick_label(*parsed)
+            continue
+        m = _OWNED_PICK_ID_RE.match(aid)
+        if m:
+            labels[aid] = _owned_pick_label(
+                {"season": int(m.group(2)), "round": int(m.group(3))})
+    return labels
+
+
+def _share_value_snapshot(give_ids, recv_ids, fmt, league_id=None) -> str | None:
+    """The share-time value snapshot for one share, as the JSON text its row
+    stores, or None (NULL: no bar). Called by the two mints, never by a view.
+
+    Mode A consensus only: `_consensus_verdict` under market stud tax and the
+    default pick pricing (an outer pin, a test or harness, is kept: the
+    entry-point convention), with `league_id`'s owned picks priced (K-a7).
+    None (K-a6) when the format is unknown, either side is empty, any id
+    can't be priced, a side values at 0 or less, or anything raises (logged
+    by error type only). Unpriced ids are never dropped to store one anyway.
+
+    It holds exactly {v, favors, firsts, label, format, league_id,
+    computed_at, second_in_firsts, pool: {snapshot, version}}: never a
+    board, client-sent values, player values or totals, usernames, player
+    ids, or gap.value points.
+      firsts            |gap| in Mid 1sts (the fill length, the B2 label)
+      label             gap.pick_equivalent.label, or None (B1 vs B2)
+      second_in_firsts  Mid 2nd / Mid 1st over the generic-pick values at
+                        mint: where the +/-2nd ticks go
+      computed_at       ISO UTC; the card's date is its UTC date
+      pool.snapshot     roster_snapshot's vsn1 for (format, league): a hash
+                        of the consensus seed and the league's pick rows
+      pool.version      the pricing that produced it (Mode A evaluate, the
+                        stud-tax mode, the pick-pricing mode)
+    """
+    if fmt not in _SHARE_BAR_FORMATS:
+        return None
+    give = [str(x) for x in (give_ids or []) if x]
+    recv = [str(x) for x in (recv_ids or []) if x]
+    if not give or not recv:
+        return None
+    ts = _trade_service_mod
+    try:
+        stud_mode = ts.pinned_stud_tax_mode() or ts.STUD_TAX_DEFAULT
+        pick_mode = ts.pinned_pick_pricing_mode() or ts.pick_pricing_mode_for_user(None)
+        with ts.stud_tax_override(stud_mode), ts.pick_pricing_override(pick_mode):
+            v = _consensus_verdict(give, recv, fmt, league_id or None)
+        if (v is None or v["dropped_ids"]
+                or v["give_value"] <= 0 or v["receive_value"] <= 0):
+            return None
+        e2v = ts.elo_to_value
+        second_in_firsts = (e2v(GENERIC_PICK_SEEDS[(2, "Mid")])
+                            / e2v(GENERIC_PICK_SEEDS[(1, "Mid")]))
+        from . import roster_snapshot
+        from .database import engine as _engine
+        with _engine.connect() as conn:
+            vsn = roster_snapshot.values_snapshot_id(
+                conn, fmt, league_id or "", g_universal_by_format.get(fmt) or {},
+                pick_source=_pick_read_source(), generation=pool_generation())
+        pick = v["gap"].get("pick_equivalent")
+        snapshot = {
+            "v":                1,
+            "favors":           v["favors"],
+            "firsts":           v["gap"]["firsts"],
+            "label":            pick["label"] if pick else None,
+            "format":           fmt,
+            "league_id":        league_id or None,
+            "computed_at":      datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "second_in_firsts": second_in_firsts,
+            "pool": {"snapshot": vsn,
+                     "version": f"evaluate-mode-a/{stud_mode}/{pick_mode}"},
+        }
+    except Exception as e:
+        log.warning("share value snapshot failed (stored NULL): %s", type(e).__name__)
+        return None
+    return json.dumps(snapshot, sort_keys=True)
+
+
+def _value_bar_from_snapshot(raw) -> dict | None:
+    """{verdict, as_of, scoring_format} for the renderer from a share row's
+    `value_snapshot`, or None (no bar) for NULL or anything malformed. Reads
+    the snapshot only: it never prices. `as_of` is `computed_at`'s UTC date,
+    the day the values were computed. `second_in_firsts` is required (a
+    number with 0 < x < 1): the ticks have no default fraction, so a
+    snapshot without one is malformed."""
+    if not raw:
+        return None
+    try:
+        snap = json.loads(raw)
+        if not isinstance(snap, dict) or snap.get("v") != 1:
+            return None
+        favors, firsts, label = snap["favors"], snap["firsts"], snap.get("label")
+        fmt, second_in_firsts = snap["format"], snap.get("second_in_firsts")
+        if (favors not in _SNAPSHOT_FAVORS or fmt not in _SHARE_BAR_FORMATS
+                or isinstance(firsts, bool) or not isinstance(firsts, (int, float))
+                or firsts < 0 or not (label is None or isinstance(label, str))
+                or not _og_image.valid_second_in_firsts(second_in_firsts)):
+            return None
+        computed = datetime.fromisoformat(snap["computed_at"])
+        if computed.tzinfo is None:
+            return None
+        as_of = _value_bar_date(computed.astimezone(timezone.utc).date())
+    except (ValueError, TypeError, KeyError):
+        return None
+    return {"verdict": {"favors": favors,
+                        "gap": {"firsts": firsts,
+                                "pick_equivalent": {"label": label} if label else None},
+                        "second_in_firsts": second_in_firsts},
+            "as_of": as_of, "scoring_format": fmt}
+
+
+def _share_card_kwargs(give_ids, recv_ids, value_snapshot) -> dict:
+    """The renderer kwargs for one share card: the bar from the row's stored
+    snapshot (or none) and the pick labels. Never prices."""
+    bar = (_value_bar_from_snapshot(value_snapshot) if _og_image is not None
+           else None) or {}
+    return {
+        "verdict":        bar.get("verdict"),
+        "as_of":          bar.get("as_of"),
+        "scoring_format": bar.get("scoring_format"),
+        "pick_labels":    _share_pick_labels(list(give_ids or []) + list(recv_ids or [])),
+    }
+
+
+def _match_side_ids(match: dict) -> tuple[list, list]:
+    """user_a_give / user_a_receive of a trade_matches row (JSON text) as
+    lists; ([], []) when malformed."""
+    try:
+        give = json.loads(match.get("user_a_give") or "[]")
+        recv = json.loads(match.get("user_a_receive") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        return [], []
+    if not isinstance(give, list) or not isinstance(recv, list):
+        return [], []
+    return give, recv
+
+
+def _trade_share_card_kwargs(match: dict) -> dict:
+    """`_share_card_kwargs` for a resolved trade share: the lists the card
+    draws as YOU GIVE (user_a_give) and YOU GET (user_a_receive), already
+    oriented to the sharer, and the token's stored snapshot."""
+    give, recv = _match_side_ids(match)
+    return _share_card_kwargs(give, recv, match.get("value_snapshot"))
+
+
 @app.route("/og/trade/<token>.png")
 def og_trade_card(token):
-    """Render a shared trade's give/get card as a 1200x630 PNG (no fairness number since #511).
+    """Render a shared trade's give/get and value bar as a 1200x630 PNG.
 
     A hit renders from the row the token resolves to; every miss returns
     the same generic "expired" PNG, status 200.
@@ -31594,12 +32640,26 @@ def og_trade_card(token):
     if match is None:
         return _png_response(_og_image.render_expired_trade_card())
     try:
-        png, status = _og_image.render_trade_card(match)
+        png, status = _og_image.render_trade_card(
+            match, **_trade_share_card_kwargs(match))
     except Exception as e:
         log.error("og_trade_card error (match %s): %s", match.get("id"), e)
         png = _og_image.render_placeholder_card("Share card unavailable", str(e)[:80])
         status = 500
     return _png_response(png, status=status)
+
+
+# C3 (Product's pre-launch review, 2026-10-27): Safari's App Store smart
+# banner on the /s/* share landings, live once the app is. IOS_INSTALL_URL is
+# the App Store listing URL (https://apps.apple.com/…/id<digits>), set at the
+# 11-18 T0; unset, on another host, or without an app id, there's no banner.
+# Only the digits are ever emitted.
+_APP_STORE_ID_RE = re.compile(r"https://apps\.apple\.com/(?:[^?#]*/)?id(\d{6,12})(?:[/?#]|$)")
+
+
+def _apple_itunes_meta() -> str:
+    m = _APP_STORE_ID_RE.match(os.environ.get("IOS_INSTALL_URL", "").strip())
+    return f'  <meta name="apple-itunes-app" content="app-id={m.group(1)}">\n' if m else ""
 
 
 def _absolute_url(path: str) -> str:
@@ -31622,9 +32682,21 @@ def _share_html(
     description: str,
     image_url: str,
     cta_text: str,
-    cta_url: str,
+    share_kind: str,
+    noindex: bool = False,
+    image_alt: str | None = None,
 ) -> "Response":
-    """Minimal HTML wrapper with OG tags + small human-readable body."""
+    """Minimal HTML wrapper with OG tags + small human-readable body.
+
+    Every share landing is noindex (#511); `noindex` is retained for caller
+    compatibility. Preview image URLs are absolute for unfurlers.
+
+    `share_kind` (tiers | trade | package) comes from the calling route, never
+    the request. The CTA element is _share_cta_html's (referral loop D-1): it
+    can vary by device, so the response is private + Vary: User-Agent and a
+    shared cache never hands the desktop copy to an iPhone.
+    `image_alt` adds the stored value bar description as og:image:alt.
+    """
     # Escape minimal HTML special chars — we never render user-controlled
     # HTML inside any attribute, so basic replacement is sufficient.
     def esc(s: str) -> str:
@@ -31633,7 +32705,10 @@ def _share_html(
 
     # Unfurlers need an absolute image URL; the visible <img> stays relative.
     og_image_url = _absolute_url(image_url)
+    alt_meta = (f'\n  <meta property="og:image:alt" content="{esc(image_alt)}">'
+                if image_alt else "")
 
+    cta_html = _share_cta_html(cta_text=cta_text, share_kind=share_kind)
     html = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -31641,13 +32716,13 @@ def _share_html(
   <title>{esc(title)} · Fleeced: Dynasty Trade Finder</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex">
-  <meta name="description" content="{esc(description)}">
+{_apple_itunes_meta()}  <meta name="description" content="{esc(description)}">
   <meta property="og:type" content="website">
   <meta property="og:title" content="{esc(title)}">
   <meta property="og:description" content="{esc(description)}">
   <meta property="og:image" content="{esc(og_image_url)}">
   <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
+  <meta property="og:image:height" content="630">{alt_meta}
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{esc(title)}">
   <meta name="twitter:description" content="{esc(description)}">
@@ -31675,7 +32750,7 @@ def _share_html(
     <img src="{esc(image_url)}" alt="{esc(title)}">
     <h1>{esc(title)}</h1>
     <p>{esc(description)}</p>
-    <a class="cta" href="{esc(cta_url)}">{esc(cta_text)}</a>
+    {cta_html}
     <div class="brand">Fleeced: Dynasty Trade Finder</div>
     <div class="legal-links"><a href="/privacy">Privacy</a></div>
   </div>
@@ -31683,7 +32758,8 @@ def _share_html(
 </html>"""
     resp = make_response(html)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
-    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Cache-Control"] = "private, max-age=300"
+    resp.headers["Vary"] = "User-Agent"
     resp.headers["X-Robots-Tag"] = "noindex"
     return resp
 
@@ -31714,7 +32790,7 @@ def share_tiers_page(pos, username):
         description=description,
         image_url=image_url,
         cta_text="Build your tiers",
-        cta_url="/",
+        share_kind="tiers",
     )
 
 
@@ -31728,23 +32804,35 @@ def share_trade_page(token):
     """
     if _og_image is None:
         return _og_unavailable_response()
-    if _resolve_trade_share(token) is None:
+    match = _resolve_trade_share(token)
+    if match is None:
         return _share_html(
             title=_og_image.TRADE_LINK_EXPIRED_TITLE,
             description=_og_image.TRADE_LINK_EXPIRED_BODY,
             image_url="/og/trade/expired.png",
             cta_text="Find your next trade",
-            cta_url="/",
+            share_kind="trade",
+            noindex=True,
         )
     title = "Trade Match"
-    description = "A dynasty fantasy trade. See the give/get breakdown."
+    # The line matches the image: a comparison is promised only when the
+    # card draws the bar (marketing addendum 14 A1).
+    card = _trade_share_card_kwargs(match)
+    if card["verdict"] is not None:
+        description = ("A dynasty fantasy trade. See the give/get breakdown and how "
+                       "the values compare in draft-pick terms. Values are an "
+                       "estimate from market consensus, not a guarantee.")
+    else:
+        description = "A dynasty fantasy trade. See the give/get breakdown."
     image_url = f"/og/trade/{token}.png"
     return _share_html(
         title=title,
         description=description,
         image_url=image_url,
         cta_text="Find your next trade",
-        cta_url="/",
+        share_kind="trade",
+        image_alt=_og_image.value_bar_alt(card["verdict"], card["as_of"],
+                                          card["scoring_format"]),
     )
 
 
@@ -31786,7 +32874,8 @@ def create_share_package_route():
     """POST /api/share/package — snapshot an arbitrary give/receive package
     for a public share landing. 404 while `growth.share_landing` is dark.
 
-    Body: {"give_player_ids": [...], "receive_player_ids": [...]}
+    Body: {"give_player_ids": [...], "receive_player_ids": [...],
+           "scoring_format"?: "1qb_ppr" | "sf_tep"}
     → {ok, short_id, url: "/s/p/<id>", og_image: "/og/p/<id>.png"}
     Demo sessions are refused (shared demo user would pool the rate limit
     and demo shares are disabled client-side anyway).
@@ -31818,9 +32907,17 @@ def create_share_package_route():
         return jsonify({"error": "rate_limited",
                         "message": "Too many shares — try again later."}), 429
 
+    # Optional `scoring_format` (1qb_ppr / sf_tep; anything else is ignored):
+    # with it, the share-time value snapshot (K-a2) is stored and the card
+    # draws the value bar; without it (the app doesn't send it yet) no bar.
+    # There's no league, so only generic picks can be priced.
+    fmt = _share_bar_format(body.get("scoring_format"))
+    value_snapshot = _share_value_snapshot(give, receive, fmt) if fmt else None
+
     for _ in range(4):   # token_urlsafe(6) collisions are ~impossible; belt+braces
         short_id = secrets.token_urlsafe(6)
-        if create_shared_package(short_id, user_id, give, receive):
+        if create_shared_package(short_id, user_id, give, receive,
+                                 value_snapshot=value_snapshot):
             return jsonify({
                 "ok": True,
                 "short_id": short_id,
@@ -31877,9 +32974,35 @@ def create_share_trade_route():
     if match_id is None:
         return jsonify({"error": "not_found"}), 404
 
+    # The share-time value snapshot (K-a2), priced on the SHARER's side (the
+    # lists swap for user_b, as resolve_trade_share_token draws them), in the
+    # league's format with its owned picks (K-a7). Only a party's share is
+    # priced; the mint below still decides every 404. It is stored on a NEW
+    # token only: a re-share keeps the snapshot its token was minted with.
+    value_snapshot = None
+    try:
+        sides = load_trade_match_sides(match_id)
+    except Exception as e:
+        log.warning("share/trade: match read for the value snapshot failed: %s",
+                    type(e).__name__)
+        sides = None
+    if sides is not None and user_id in (sides["user_a_id"], sides["user_b_id"]):
+        give, recv = _match_side_ids(sides)
+        if user_id == sides["user_b_id"]:
+            give, recv = recv, give
+        league_id = str(sides.get("league_id") or "")
+        try:
+            fmt = get_league_scoring(league_id) if league_id else None
+        except Exception as e:
+            log.warning("share/trade: league format lookup failed (no snapshot): %s",
+                        type(e).__name__)
+            fmt = None
+        value_snapshot = _share_value_snapshot(give, recv, fmt, league_id)
+
     try:
         token = create_trade_share_token(match_id, user_id,
-                                         hourly_limit=_TRADE_SHARE_HOURLY_LIMIT)
+                                         hourly_limit=_TRADE_SHARE_HOURLY_LIMIT,
+                                         value_snapshot=value_snapshot)
     except TradeShareRateLimited:
         return jsonify({"error": "rate_limited",
                         "message": "Too many shares — try again later."}), 429
@@ -31898,6 +33021,15 @@ def create_share_trade_route():
     })
 
 
+def _count_article(n: int) -> str:
+    """The article before a spoken count: "An" when the number is said with a
+    vowel sound (eight, eleven, eighteen, eighty-...), else "A". /s/p only
+    passes 1-10 (`_SHARE_PACKAGE_SIDE_MAX` per side), so only 8 reads "An",
+    as marketing's approved template has it ("An 8-player dynasty trade
+    package."; head-bizops via head-eng, 2026-11-01)."""
+    return "An" if str(n).startswith("8") or n in (11, 18) else "A"
+
+
 @app.route("/s/p/<short_id>")
 def share_package_page(short_id):
     """Public OG landing page for a shared package (flag growth.share_landing)."""
@@ -31911,12 +33043,31 @@ def share_package_page(short_id):
     if pkg is None:
         return jsonify({"error": "not_found"}), 404
     n = len(pkg["give_ids"]) + len(pkg["receive_ids"])
+    # Bar or no bar comes from the package's stored value snapshot (K-a2),
+    # so the line under the image never promises a comparison it lacks.
+    card = _share_card_kwargs(pkg["give_ids"], pkg["receive_ids"],
+                              pkg.get("value_snapshot"))
+    # A draft pick isn't a player (marketing addendum 14 A2): with one on
+    # either side the line drops the count. `pick_labels` is the card's own
+    # pick detection (`_share_pick_labels`, the PK chip's source).
+    lead = ("A dynasty trade package." if card["pick_labels"]
+            else f"{_count_article(n)} {n}-player dynasty trade package.")
+    if card["verdict"] is not None:
+        description = (f"{lead} See the give/get "
+                       "breakdown and how the values compare in draft-pick terms. "
+                       "Values are an estimate from market consensus, not a guarantee.")
+    else:
+        description = f"{lead} See the give/get breakdown."
+    image_url = f"/og/p/{short_id}.png"
     return _share_html(
         title="Trade Package",
-        description=f"A {n}-player dynasty trade package. See the give/get breakdown.",
-        image_url=f"/og/p/{short_id}.png",
+        description=description,
+        image_url=image_url,
         cta_text="Build your own trade",
-        cta_url="/",
+        share_kind="package",
+        image_alt=(_og_image.value_bar_alt(card["verdict"], card["as_of"],
+                                           card["scoring_format"])
+                   if _og_image is not None else None),
     )
 
 
@@ -31928,7 +33079,16 @@ def og_package_card(short_id):
     if _og_image is None:
         return _og_unavailable_response()
     try:
-        png, status = _og_image.render_package_card(short_id)
+        kwargs = {}
+        try:
+            pkg = load_shared_package(short_id)
+        except Exception as e:
+            log.warning("og_package_card: package lookup failed: %s", type(e).__name__)
+            pkg = None
+        if pkg is not None:
+            kwargs = _share_card_kwargs(pkg["give_ids"], pkg["receive_ids"],
+                                        pkg.get("value_snapshot"))
+        png, status = _og_image.render_package_card(short_id, **kwargs)
     except Exception as e:
         log.error("og_package_card error (%s): %s", short_id, e)
         png = _og_image.render_placeholder_card("Share card unavailable", str(e)[:80])
@@ -32048,8 +33208,7 @@ def _extension_build_session(user_id: str, username: str,
     replayed, so switching leagues on sleeper.com just picks the right
     service instantly.
 
-    `load_history=False` (only the UNVERIFIED username sign-in and the
-    entry mint pass it — legal R28.17) skips the swipe replay and override
+    `load_history=False` (the UNVERIFIED username sign-in — legal R28.17) skips the swipe replay and override
     restore so the response time can't reveal whether the user has FTF
     history. The session is marked `_history_pending`, and the in-place
     verify routes hydrate it with `_hydrate_session_history` before they
@@ -32195,6 +33354,582 @@ def extension_auth():
     })
 
 
+# ---------------------------------------------------------------------------
+# Platform sign-in (proof-based ESPN/MFL team claim, 2026-10-26)
+# ---------------------------------------------------------------------------
+# The team-claim step of POST /api/entry/platform proves ownership, then signs
+# into an account anchored on the proven ESPN/MFL identity (accounts.
+# PLATFORM_PROVIDERS) — the same verified acct_* session Sign in with Apple
+# mints. Design: platforms-eng ESPN/MFL sign-in design D1-D10; scope block in
+# docs/plans/platform-sign-in/scope.md. Never log a SWID, MFL username,
+# espn_s2, password or cookie anywhere on this path: the PLATFORM-SIGNIN
+# audit line carries provider / outcome / reason / account_id / created only,
+# and no exception message from this route reaches a log or a body (the
+# entry_platform wrapper logs the exception type and code frames only).
+
+# D7 rate limits — in-process (Render runs 1 gunicorn worker x 4 threads, so a
+# lock-guarded dict is exact; state resets on deploy, acceptable for v1).
+# Both windows count CREDENTIAL failures only (QA narrowing of D7): an MFL
+# bad login (claim or auth_leagues), the ESPN sign-in cookie read refused
+# for auth (claim or my_leagues), and espn_unproven_pair. Facts about the
+# league or post-proof outcomes (espn_public_league, espn_ownerless_team,
+# wrong_account), upstream outages and input errors never count, and
+# successes never count, because carrier NAT puts many honest users behind
+# one IP. Three windows per attempt (lockout fix, head-eng re-open,
+# 2026-10-27, feat/mfl-auth-link-throttle):
+#   * per client IP — 300 / 10 min (loose on purpose, head-eng C4: a wrong
+#     proxy-hop count must never 429 real users);
+#   * per (subject, client IP) — 5 / 15 min. Keying the 5-failure lock on
+#     the PAIR means a griefer who knows a victim's SWID / MFL username can
+#     only lock their OWN IP's bucket, never the victim's;
+#   * per subject across all IPs — 30 / hour: the password-guessing
+#     ceiling, MFL ONLY (head-eng ruling, 2026-10-27). One IP can't reach
+#     it (its pair bucket caps it at 20 / hour). An ESPN claim needs an
+#     espn_s2 cookie, which can't be guessed, so for ESPN a ceiling guards
+#     nothing and only adds griefing surface. An IP with a proven MFL
+#     sign-in / good auth-link login for that subject in the last
+#     _SIGNIN_TRUSTED_IP_DAYS is EXEMPT from the ceiling (never from its pair
+#     bucket or the IP window), so the owner's usual network still gets in
+#     while someone guesses from elsewhere.
+# A PROVEN claim (or a good auth-link login) clears that subject's pair
+# bucket for the caller's IP AND the subject-wide counter; never the IP
+# window, and never another IP's pair bucket. Admission counts in-flight
+# attempts on every key, so concurrent requests can't overshoot any cap.
+_SIGNIN_IP_MAX_FAILURES = 300
+_SIGNIN_IP_WINDOW_S = 10 * 60
+# Per (subject, client IP) — the 5-failure lock.
+_SIGNIN_SUBJECT_MAX_FAILURES = 5
+_SIGNIN_SUBJECT_WINDOW_S = 15 * 60
+# Per subject, any IP — the password-guessing ceiling, for these
+# providers only (an espn_s2 can't be guessed).
+_SIGNIN_SUBJECT_CEILING_FAILURES = 30
+_SIGNIN_SUBJECT_CEILING_WINDOW_S = 60 * 60
+_SIGNIN_CEILING_PROVIDERS = ("mfl",)
+# Trusted IPs: a (subject, IP) pair with a proven MFL sign-in or a good
+# auth-link login in the last N days skips the subject-wide ceiling. Kept
+# in-process ((subject, IP) hash → last success, bounded: oldest evicted)
+# and therefore cleared on every deploy/restart — no table (no schema grant).
+_SIGNIN_TRUSTED_IP_DAYS = 30
+_SIGNIN_TRUSTED_IP_MAX_KEYS = 50_000
+# Every limiter dict evicts its OLDEST key when full (known, accepted at
+# launch scale: a flood of counted failures on distinct subjects could evict
+# a target's counters — post-launch item in the scope / runbook).
+_SIGNIN_LIMITER_MAX_KEYS = 50_000
+# Retry-After when a window is full only because of IN-FLIGHT attempts (their
+# outcome isn't known yet, so the failure-window expiry doesn't apply).
+_SIGNIN_INFLIGHT_RETRY_S = 5
+# MFL `year` range at the sessionless entry (QA hardening): checked BEFORE
+# any MFL call, so an odd year can't turn a wrong-password guess into an
+# uncounted upstream error. Upper bound = the current season + 1
+# (_MFL_DEFAULT_YEAR is the app's current-season constant).
+_SIGNIN_MFL_MIN_YEAR = 2000
+
+
+def _mfl_entry_year_refusal(raw_year):
+    """400 mfl_bad_year unless the year is an integer in 2000..season+1: a
+    year outside the range, one that can't be an integer at all (JSON
+    Infinity / -Infinity / 1e400 overflow int()), and a non-numeric one
+    (NaN, "NaN", "abc", an array or object) are all refused — the same code
+    and existing "year must be numeric" copy auth_leagues' own parse
+    answers (no new user copy). A non-numeric year used to fall through to
+    _mfl_resolve and read 400 mfl_bad_league_id (#430 round-3 P3, on
+    feat/mfl-auth-link-throttle). A missing / empty year is the default
+    season, as everywhere else."""
+    try:
+        year = int(raw_year or _MFL_DEFAULT_YEAR)
+    except (TypeError, ValueError, OverflowError):
+        year = None
+    if year is not None and \
+            _SIGNIN_MFL_MIN_YEAR <= year <= _MFL_DEFAULT_YEAR + 1:
+        return None
+    return jsonify({"error": "mfl_bad_year",
+                    "message": "year must be numeric"}), 400
+
+
+_signin_failures: dict[str, collections.deque] = {}
+_signin_inflight: dict[str, int] = {}
+# (subject, IP) pair hash → monotonic time of its last proven MFL success.
+_signin_trusted_ips: dict[str, float] = {}
+_signin_failures_lock = threading.Lock()
+# The trusted-IP clock (tests inject a fake one to cross the N-day expiry).
+_signin_trust_clock = time.monotonic
+
+# Sign-in refusal copy: the FINAL 14-row set (marketing-lead-copy.md §6
+# addendum 8, C; rows 7, 8 and 12 approved by legal R28.16). Each string is
+# defined once here, row noted per constant. Apostrophes follow the
+# codebase's user-copy convention (U+2019), except row 10, which stays
+# byte-identical to the auth_leagues / auth-link body. The link routes keep
+# their own copy (_espn_error_payload, _platform_error_payload,
+# _ESPN_WRONG_ACCOUNT_MSG) — none of these strings replaces theirs.
+_SIGNIN_PROOF_REQUIRED_MSG = {                                    # rows 1, 2
+    "espn": "Sign in to ESPN to claim your team.",
+    "mfl": "Sign in to MFL to claim your team.",
+}
+_SIGNIN_PROOF_UNAVAILABLE_MSG = {                                 # rows 3-5
+    "espn_public_league":
+        "In a public ESPN league, team ownership can’t be confirmed. "
+        "Sign in with Apple, then link your league.",
+    "espn_unproven_pair":
+        "This team can’t be confirmed as yours through ESPN. Sign in "
+        "with Apple, then link your league.",
+    "espn_ownerless_team":
+        "This team has no owner listed on ESPN, so it can’t be confirmed "
+        "as yours. Sign in with Apple, then link your league.",
+}
+_SIGNIN_ESPN_UNAVAILABLE_MSG = (                                  # row 6
+    "Couldn’t confirm this team with ESPN right now. Try again in a "
+    "few minutes, or sign in with Apple, then link your league.")
+# wrong_account, the login owns ANOTHER team in this league (row 7). Built
+# only after the proof read (ESPN cookie read / MFL login) succeeded, so it
+# names nothing the caller couldn't already see as a member (D8).
+_SIGNIN_OWNS_OTHER_TEAM_MSG = ("This {platform} login owns {team} in this "
+                               "league. Pick that team to continue.")
+# wrong_account, the login owns NO team in this league (row 8). Sign-in
+# only; the link route keeps _ESPN_WRONG_ACCOUNT_MSG.
+_SIGNIN_NOT_OWNER_MSG = {
+    "espn": "This ESPN login isn’t listed as the owner of that team. "
+            "Use the login that is, or sign in with Apple, then link your "
+            "league.",
+    "mfl": "This MFL login isn’t listed as an owner of that team. Use "
+           "the login that is, or sign in with Apple, then link your league.",
+}
+# The sign-in proof's own cookie read refused (espn_auth_required at the
+# mint only; the preview and /api/espn/* keep the cookie-paste copy). row 9
+_SIGNIN_ESPN_AUTH_REQUIRED_MSG = (
+    "This ESPN sign-in couldn’t open the league. Sign in to ESPN "
+    "again.")
+# Byte-identical to the auth_leagues / auth-link bad-login body (D8: MFL
+# keeps ONE body for every failed login; straight apostrophe).    row 10
+_SIGNIN_MFL_BAD_LOGIN_MSG = "MFL didn't accept that username and password."
+# MFL not answering during the sign-in proof (mfl_unavailable at the mint
+# only; _platform_error_payload keeps serving the other routes).   row 11
+_SIGNIN_MFL_UNAVAILABLE_MSG = (
+    "Couldn’t reach MFL right now. Try again in a few minutes, or sign "
+    "in with Apple, then link your league.")
+_SIGNIN_IDENTITY_IN_USE_MSG = {                                   # row 12
+    "espn": "This ESPN login is already connected to a Fleeced account. "
+            "Sign in the way you did before, or email fleecedapp@gmail.com "
+            "if that wasn’t you.",
+    "mfl": "This MFL login is already connected to a Fleeced account. "
+           "Sign in the way you did before, or email fleecedapp@gmail.com "
+           "if that wasn’t you.",
+}
+_SIGNIN_TOO_MANY_MSG = (                                          # row 13
+    "Too many sign-in attempts. Try again in a few minutes.")
+_SIGNIN_GENERIC_ERROR_MSG = (                                     # row 14
+    "Sign-in didn’t go through. Try again in a few minutes.")
+
+
+
+
+def _log_xff_hop_count() -> None:
+    """TEMPORARY first-deploy diagnostic — remove after release-lead
+    confirms Render's layout (and sets _SIGNIN_TRUSTED_PROXY_HOPS). Logs
+    ONLY the number of X-Forwarded-For hops and whether CF-Connecting-IP /
+    True-Client-IP are PRESENT (1/0) on a sign-in request: never an IP,
+    never a header value."""
+    log.info("PLATFORM-SIGNIN-XFF hops=%d cf=%d tci=%d", len(_xff_hops()),
+             int(bool(request.headers.get("CF-Connecting-IP"))),
+             int(bool(request.headers.get("True-Client-IP"))))
+
+
+def _signin_limit_keys(provider: str, subject: str | None) -> list[tuple]:
+    """[(key, max_failures, window_s)] for this request: the client IP;
+    with a subject, also the (subject, client IP) pair ("subip:"); and, for
+    a ceiling provider (MFL) from an IP that isn't trusted for the subject,
+    the subject across all IPs ("sub:"). Subject keys are hashes, so no
+    SWID/username sits in limiter memory either."""
+    ip = _client_ip()
+    keys = [("ip:" + ip, _SIGNIN_IP_MAX_FAILURES, _SIGNIN_IP_WINDOW_S)]
+    if subject:
+        pair = hashlib.sha256(
+            f"{provider}\0{subject}\0{ip}".encode()).hexdigest()
+        keys.append(("subip:" + pair, _SIGNIN_SUBJECT_MAX_FAILURES,
+                     _SIGNIN_SUBJECT_WINDOW_S))
+        if (provider in _SIGNIN_CEILING_PROVIDERS
+                and not _signin_ip_trusted(pair)):
+            digest = hashlib.sha256(
+                f"{provider}\0{subject}".encode()).hexdigest()
+            keys.append(("sub:" + digest, _SIGNIN_SUBJECT_CEILING_FAILURES,
+                         _SIGNIN_SUBJECT_CEILING_WINDOW_S))
+    return keys
+
+
+def _signin_ip_trusted(pair: str) -> bool:
+    """True when this (subject, IP) pair had a proven MFL success within
+    _SIGNIN_TRUSTED_IP_DAYS (an expired entry is dropped on read)."""
+    with _signin_failures_lock:
+        seen = _signin_trusted_ips.get(pair)
+        if seen is None:
+            return False
+        if _signin_trust_clock() - seen > _SIGNIN_TRUSTED_IP_DAYS * 86400:
+            _signin_trusted_ips.pop(pair, None)
+            return False
+        return True
+
+
+def _signin_trust_ip_locked(pair: str) -> None:
+    """Caller holds _signin_failures_lock. Mark the pair trusted now;
+    re-insert so dict order = recency, and evict the oldest past the cap."""
+    _signin_trusted_ips.pop(pair, None)
+    _signin_trusted_ips[pair] = _signin_trust_clock()
+    while len(_signin_trusted_ips) > _SIGNIN_TRUSTED_IP_MAX_KEYS:
+        _signin_trusted_ips.pop(next(iter(_signin_trusted_ips)))
+
+
+# The audit / log `reason` each limiter key reports when it refuses.
+_SIGNIN_LIMIT_SCOPES = {"ip": "ip_limit", "subip": "subject_limit",
+                        "sub": "subject_ceiling"}
+
+
+def _signin_full_locked(keys, now):
+    """Caller holds _signin_failures_lock. (retry_after_s, 'ip_limit' |
+    'subject_limit' | 'subject_ceiling') when any key's recorded failures
+    PLUS in-flight attempts reach its cap, else None. Sliding window over
+    the newest `cap` failure stamps."""
+    worst = None
+    for key, cap, window in keys:
+        q = _signin_failures.get(key)
+        if q is not None:
+            while q and q[0] <= now - window:
+                q.popleft()
+            if not q:
+                _signin_failures.pop(key, None)
+                q = None
+        failures = len(q) if q else 0
+        if failures + _signin_inflight.get(key, 0) >= cap:
+            wait = (max(1, math.ceil(q[0] + window - now)) if failures >= cap
+                    else _SIGNIN_INFLIGHT_RETRY_S)
+            scope = _SIGNIN_LIMIT_SCOPES[key.split(":", 1)[0]]
+            if worst is None or wait > worst[0]:
+                worst = (wait, scope)
+    return worst
+
+
+def _signin_record_failure_locked(keys, now) -> None:
+    for key, cap, _window in keys:
+        q = _signin_failures.pop(key, None) or collections.deque()
+        q.append(now)
+        while len(q) > cap:      # only the newest `cap` stamps matter
+            q.popleft()
+        _signin_failures[key] = q   # re-insert: dict order = recency
+    while len(_signin_failures) > _SIGNIN_LIMITER_MAX_KEYS:
+        _signin_failures.pop(next(iter(_signin_failures)))
+
+
+def _signin_release(audit: dict) -> None:
+    """Finish an admitted attempt — always called from entry_platform's
+    `finally`, so an exception can never leak an in-flight slot. Frees the
+    slot, records a counted credential failure, or — on a PROVEN claim /
+    good auth-link login — clears the subject's (subject, this IP) bucket
+    and its subject-wide counter (never the IP window, never another IP's
+    pair bucket). A proven MFL success also marks its (subject, IP) pair
+    trusted, exempting that IP from the subject-wide ceiling for
+    _SIGNIN_TRUSTED_IP_DAYS."""
+    trust_pair = audit.pop("_trust_pair", None)
+    keys = audit.pop("_limiter_keys", None)
+    if not keys:
+        return
+    now = time.monotonic()
+    with _signin_failures_lock:
+        for key, _cap, _window in keys:
+            left = _signin_inflight.get(key, 0) - 1
+            if left > 0:
+                _signin_inflight[key] = left
+            else:
+                _signin_inflight.pop(key, None)
+        if audit.get("_counted_failure"):
+            _signin_record_failure_locked(keys, now)
+        elif audit.get("outcome") == "proven":
+            for key, _cap, _window in keys:
+                if key.startswith(("subip:", "sub:")):
+                    _signin_failures.pop(key, None)
+            if trust_pair:
+                _signin_trust_ip_locked(trust_pair)
+
+
+def _reset_signin_limiter() -> None:
+    """Tests only: drop all limiter state."""
+    with _signin_failures_lock:
+        _signin_failures.clear()
+        _signin_inflight.clear()
+        _signin_trusted_ips.clear()
+
+
+def _signin_limit_gate(audit: dict, provider: str, subject: str | None):
+    """Admission: 429 too_many_attempts (+ Retry-After) when the caller's IP
+    or the subject is at its cap (failures + in-flight); else None, with an
+    in-flight slot held on every key until _signin_release."""
+    keys = _signin_limit_keys(provider, subject)
+    with _signin_failures_lock:
+        hit = _signin_full_locked(keys, time.monotonic())
+        if hit is None:
+            for key, _cap, _window in keys:
+                _signin_inflight[key] = _signin_inflight.get(key, 0) + 1
+            audit["_limiter_keys"] = keys
+            if provider in _SIGNIN_CEILING_PROVIDERS:
+                # A proven success on this attempt trusts its (subject, IP).
+                audit["_trust_pair"] = next(
+                    (k[len("subip:"):] for k, _c, _w in keys
+                     if k.startswith("subip:")), None)
+            return None
+    audit.update(outcome="limited", reason=hit[1])
+    resp = jsonify({"error": "too_many_attempts",
+                    "message": _SIGNIN_TOO_MANY_MSG})
+    resp.status_code = 429
+    resp.headers["Retry-After"] = str(hit[0])
+    return resp
+
+
+def _signin_refusal(audit: dict, status: int, error: str, message: str,
+                    reason: str | None = None, *,
+                    provider: str | None = None, subject: str | None = None,
+                    failed_proof: bool = False):
+    """A team-claim refusal {error, reason?, message}. `failed_proof` marks
+    a COUNTED credential failure; _signin_release records it against the
+    D7 windows (IP + subject) when the attempt finishes."""
+    if failed_proof:
+        audit["_counted_failure"] = True
+    audit.update(outcome="refused", reason=reason or error)
+    body = {"error": error}
+    if reason:
+        body["reason"] = reason
+    body["message"] = message
+    return jsonify(body), status
+
+
+def _log_platform_signin(audit: dict, resp) -> None:
+    """D9: one PLATFORM-SIGNIN line per team-claim attempt. Provider,
+    outcome, reason, and account_id + created on success — never a SWID,
+    username, cookie or password."""
+    outcome = audit.get("outcome") or "refused"
+    reason = audit.get("reason")
+    if not reason:
+        try:
+            r = resp[0] if isinstance(resp, tuple) else resp
+            body = r.get_json(silent=True) or {}
+            reason = body.get("reason") or body.get("error")
+        except Exception:
+            reason = None
+        reason = reason or "error"
+    if outcome == "proven":
+        log.info("PLATFORM-SIGNIN provider=%s outcome=proven reason=%s "
+                 "account_id=%s created=%s", audit.get("provider"), reason,
+                 audit.get("account_id"),
+                 str(bool(audit.get("created"))).lower())
+    else:
+        log.info("PLATFORM-SIGNIN provider=%s outcome=%s reason=%s",
+                 audit.get("provider"), outcome, reason)
+
+
+def _espn_signin_read(_espn, league_id: str, season: int,
+                      espn_s2: str | None, swid: str | None) -> str:
+    """One of the two extra D4 reads: 'auth' ONLY for a clean auth-required
+    answer (EspnError kind 'auth' = HTTP 401/403); 'ok' when ESPN served the
+    league; 'unavailable' for anything else — 5xx, ESPN rate-limit (429),
+    any other status, a timeout or transport error, a non-JSON body. The
+    caller refuses on 'unavailable' (fail closed, never a pass). Nothing
+    about the request or the exception message is logged. Same fetch_league
+    URL/views as the cookie read: espn_service has no lighter view, and the
+    R1 check script exercises exactly this request shape."""
+    try:
+        _espn.fetch_league(league_id, season, espn_s2=espn_s2, swid=swid)
+    except _espn.EspnError as e:
+        return "auth" if getattr(e, "kind", None) == "auth" else "unavailable"
+    except Exception as e:
+        log.warning("entry_platform: espn sign-in read failed (%s)",
+                    type(e).__name__)
+        return "unavailable"
+    return "ok"
+
+
+def _espn_signin_proof(audit: dict, _espn, league_id: str, season: int,
+                       espn_s2: str, subject: str, league: dict, team):
+    """D4 steps 3-5, run after the step-2 cookie read already succeeded.
+    Every SWID comparison goes through accounts.platform_subject (the one
+    normaliser). Returns None when proven, else the refusal response."""
+    def _refuse(error, message, reason, failed=False):
+        # `failed` = a COUNTED credential failure (D7 narrowed): only
+        # espn_unproven_pair counts here. Public/ownerless leagues are facts
+        # about the league, wrong_account comes after a proven login, and an
+        # outage is ESPN's — none of those charge the budgets.
+        return _signin_refusal(audit, 403, error, message, reason,
+                               provider="espn", subject=subject,
+                               failed_proof=failed)
+
+    def _ident(swid):
+        return _accounts.platform_subject("espn", swid)
+
+    def _unavailable():
+        # Not the caller's failure (an ESPN outage/limit), so it doesn't
+        # charge the D7 budgets — but it is never treated as a pass.
+        return _refuse("proof_unavailable", _SIGNIN_ESPN_UNAVAILABLE_MSG,
+                       "espn_unavailable")
+
+    # 3. The league must be cookie-gated: an anonymous read must need auth.
+    anon = _espn_signin_read(_espn, league_id, season, None, None)
+    if anon == "ok":
+        return _refuse("proof_unavailable",
+                       _SIGNIN_PROOF_UNAVAILABLE_MSG["espn_public_league"],
+                       "espn_public_league")
+    if anon != "auth":
+        return _unavailable()
+
+    # 4. Pair-binding control: the same espn_s2 with ANOTHER member's SWID
+    #    (from this league's own owners; never echoed or logged) must fail
+    #    auth, or ESPN isn't binding espn_s2 to the SWID and a leaguemate's
+    #    own espn_s2 + a victim's (league-visible) SWID would pass steps 2,
+    #    3 and 5. No second owner SWID → no control → refuse. The control is
+    #    a primary owner_swid exactly as ESPN listed it, and NEVER the
+    #    claimant's own (identity compare). When the claimant is a co-owner,
+    #    the claimed team's primary owner may be the control — that's fine.
+    control_swid = next(
+        (t.owner_swid for t in league["teams"]
+         if _ident(t.owner_swid) and _ident(t.owner_swid) != subject),
+        None)
+    if control_swid is None:
+        return _refuse("proof_unavailable",
+                       _SIGNIN_PROOF_UNAVAILABLE_MSG["espn_unproven_pair"],
+                       "espn_unproven_pair", failed=True)
+    control = _espn_signin_read(_espn, league_id, season, espn_s2,
+                                control_swid)
+    if control == "ok":
+        log.warning("ESPN-PAIR-UNBOUND control read with another member's "
+                    "SWID succeeded; refusing ESPN sign-in")
+        return _refuse("proof_unavailable",
+                       _SIGNIN_PROOF_UNAVAILABLE_MSG["espn_unproven_pair"],
+                       "espn_unproven_pair", failed=True)
+    if control != "auth":
+        return _unavailable()
+
+    # 5. The proven SWID must be one of the claimed team's LISTED owners —
+    #    the primary owner or a co-owner (EspnTeam.owner_swids, 2026-10-27).
+    #    The identity stays the claimant's own SWID, so each co-owner signs
+    #    into their own account.
+    def _owners(t):
+        return {_ident(s) for s in t.owner_swids} - {""}
+
+    if not _owners(team):
+        return _refuse("proof_unavailable",
+                       _SIGNIN_PROOF_UNAVAILABLE_MSG["espn_ownerless_team"],
+                       "espn_ownerless_team")
+    if subject not in _owners(team):
+        # Proof reads all succeeded, so naming the team this login owns in
+        # this league tells the caller nothing a member can't already see.
+        owned = next((t for t in league["teams"]
+                      if subject in _owners(t)), None)
+        message = (_SIGNIN_OWNS_OTHER_TEAM_MSG.format(
+                       platform="ESPN", team=owned.name)
+                   if owned is not None and owned.name
+                   else _SIGNIN_NOT_OWNER_MSG["espn"])
+        return _refuse("espn_bad_credentials", message, "wrong_account")
+    return None
+
+
+def _platform_sign_in(audit: dict, provider: str, subject: str,
+                      team_name: str, league_id: str, team_id):
+    """D3/D6: after a successful proof, sign into the account anchored on
+    (provider, subject) — creating it on first sight — and mint its verified
+    session. Same primitives as Apple's _provider_auth_response, which is
+    deliberately left untouched:
+      * identity row exists, account bound to a Sleeper user → restore that
+        user's verified session (the device-loss branch);
+      * identity row exists, unbound → the account-only acct_* session;
+      * no identity row, but the subject sits in another user's imported
+        credential → 409 platform_identity_in_use (never sign in/merge/bind);
+      * no identity row → find_or_create_account, then the acct_* session.
+    Concurrent first proofs race on uq_linked_identity: the loser re-reads
+    and signs into the winner's account."""
+    from sqlalchemy.exc import IntegrityError
+
+    verified_via = {"espn": _accounts.VERIFIED_VIA_ESPN,
+                    "mfl": _accounts.VERIFIED_VIA_MFL}[provider]
+    _hold_request_user_data(_accounts.identity_work_key(provider, subject))
+    acct = _accounts.get_account_by_identity(provider, subject)
+    if acct is None:
+        if _accounts.platform_identity_in_use(provider, subject):
+            return _signin_refusal(audit, 409, "platform_identity_in_use",
+                                   _SIGNIN_IDENTITY_IN_USE_MSG[provider])
+        try:
+            acct = _accounts.find_or_create_account(provider, subject)
+        except IntegrityError:
+            acct = _accounts.get_account_by_identity(provider, subject)
+            if acct is None:
+                raise
+    account_id = acct["account_id"]
+    acct_uid = _accounts.account_user_id(account_id)
+    _hold_request_user_data(acct_uid)
+    bound_uid = acct.get("sleeper_user_id")
+
+    try:
+        if bound_uid:
+            # Device-loss branch twin: restore the bound Sleeper user.
+            _hold_request_user_data(bound_uid)
+            profile = _accounts.get_user_profile(bound_uid) or {}
+            user_id = bound_uid
+            username = profile.get("username") or ""
+            display_name = (profile.get("display_name") or username
+                            or team_name)
+            avatar = profile.get("avatar")
+            token, payload = _extension_build_session(
+                user_id=bound_uid, username=username,
+                display_name=display_name, avatar=avatar)
+        else:
+            # A returning identity keeps its stored display name; the newly
+            # claimed team's name is only the first-sight default.
+            user_id = acct_uid
+            username = ""
+            stored = None
+            if not acct.get("created"):
+                stored = (_accounts.get_user_profile(acct_uid)
+                          or {}).get("display_name")
+            display_name = stored or team_name
+            avatar = None
+            token, payload = _account_build_session(acct_uid, display_name)
+    except Exception as e:
+        # Type only: an exception message may carry SQL parameters.
+        log.error("entry_platform: %s sign-in session build failed (%s)",
+                  provider, type(e).__name__)
+        return jsonify({"error": "session_build_failed",
+                        "message": _SIGNIN_GENERIC_ERROR_MSG}), 500
+
+    payload["verified"] = True
+    payload["verified_via"] = verified_via
+    payload["account_id"] = account_id
+    try:
+        _accounts.mark_user_verified(user_id, verified_via)
+    except Exception as e:
+        log.warning("entry_platform: mark_user_verified failed (%s)",
+                    type(e).__name__)
+    _persist_session_if_eligible(token, payload)
+    _link_device_identity(sleeper_user_id=user_id, account_id=account_id)
+    audit.update(outcome="proven", reason="ok", account_id=account_id,
+                 created=bool(acct.get("created")))
+    # A persisted (verified) session lives on the 90-day rolling idle window;
+    # only with persistence off does the 4h memory sweep bound it.
+    idle_s = (_PERSISTED_SESSION_IDLE_DAYS * 86400
+              if payload.get("_persisted_at") else 4 * 3600)
+    return jsonify({
+        "stage":         "connected",
+        "session_token": token,
+        "expires_at":    int(payload.get("last_active") or time.time()) + idle_s,
+        "user_id":       user_id,
+        "username":      username,
+        "display_name":  display_name,
+        "avatar":        avatar,
+        "platform":      provider,
+        "league_id":     league_id,
+        "team_id":       team_id,
+        "verified":      True,
+        "verified_via":  verified_via,
+        "account_id":    account_id,
+        "account_only":  not bound_uid,
+        # True = this proof created the account; False = signed into an
+        # existing one (incl. the loser of a first-proof race).
+        "account_created": bool(acct.get("created")),
+    })
+
+
 @app.route("/api/entry/platform", methods=["POST"])
 def entry_platform():
     """Sessionless ESPN/MFL entry (landing platform options v2, D-164).
@@ -32208,12 +33943,47 @@ def entry_platform():
         existing link sheets parse it unchanged. Nothing is persisted and no
         session exists yet. ESPN cookies come from the body only — there is
         no user to hold a stored credential.
-      • team_id → MINT: validate the claim and mint a session for a
-        DETERMINISTIC user id derived from the claimed team, via the same
-        _extension_build_session that backs /api/extension/auth (which also
-        creates the users row). Deterministic ids make identity durable:
-        re-claiming the same team recovers the same boards, exactly like
-        re-typing the same Sleeper username.
+      • team_id → SIGN IN (platform sign-in, 2026-10-26): PROVE the claim,
+        then sign into the account anchored on the proven identity. There
+        is no claim-only path: every claim is proven or refused.
+          ESPN (D4): the espn_s2+SWID pair is required (else 403
+          proof_required); the cookie read must succeed; an ANONYMOUS read
+          of the league must fail auth (else proof_unavailable /
+          espn_public_league); the same espn_s2 with ANOTHER member's SWID
+          must fail auth (else proof_unavailable / espn_unproven_pair +
+          WARN ESPN-PAIR-UNBOUND; no other owner SWID → the same refusal);
+          the pair's SWID must be one of the claimed team's listed owners,
+          primary or co-owner (EspnTeam.owner_swids; else 403
+          espn_bad_credentials / wrong_account, naming the team this login
+          owns in the league when there is one; ownerless →
+          proof_unavailable / espn_ownerless_team). Any answer to the
+          anonymous or control read other than a clean 401/403 → 403
+          proof_unavailable / espn_unavailable (fail closed). Identity =
+          the canonical SWID (accounts.platform_subject: braced,
+          upper-cased) — the one normaliser for every SWID comparison.
+          MFL (D5): body username+password (else 403 proof_required, before
+          any MFL call); mfl_service.login FIRST, then the league bundle is
+          read with that login's cookie (private leagues work; a login that
+          can't read the league → wrong_account); fetch_my_leagues with the
+          same cookie must list the claimed
+          (league_id, franchise_id) (bad login → 403 mfl_bad_credentials,
+          one body; not theirs → reason wrong_account, naming the
+          franchise this login owns in the league when there is one).
+          Identity = the
+          username trimmed + lower-cased; the password is used once and
+          dropped, never logged or stored.
+        Then _platform_sign_in (D3/D6): an existing linked_identities row
+        signs into its account (restoring a bound Sleeper user's session,
+        else the acct_* session); a new identity that already sits in
+        another user's imported ESPN/MFL credential → 409
+        platform_identity_in_use; otherwise find_or_create_account. The
+        session is verified (verified_via espn / mfl_login) and persisted;
+        the response adds account_created (true = new account). Failed
+        proofs are rate-limited (D7, 429 too_many_attempts + Retry-After)
+        and every claim attempt writes one PLATFORM-SIGNIN audit line (D9).
+        An unexpected exception anywhere in this route is logged by type
+        and code frames only and answered 500 internal_error with a fixed
+        message — never its text, which could carry request secrets.
 
     Plus two ACCOUNT-DISCOVERY actions (landing platform options v2.1) that
     run BEFORE either branch and are mutually exclusive with team_id /
@@ -32234,26 +34004,68 @@ def entry_platform():
     Both actions STORE NOTHING — no credential row, no users row, no
     session. They are read-only lookups against the platform, and the
     password is used for the single MFL login call and never logged or
-    echoed back.
+    echoed back. Their failed logins/reads count toward the same D7
+    failure budgets as team claims.
 
-    Id namespace — deliberately distinct from the `espn:`/`mfl:` member
-    placeholders, which are documented as never-routable (see
-    replace_espn_league_members):
-      entry:espn:<canonical SWID>       (claimed team has an owner SWID)
-      entry:espn:<league_id>.t<team_id> (ownerless team)
-      entry:mfl:<league_id>.f<franchise_id>
+    Ids: a proven claim's session is the account's `acct_<account_id>`
+    working key, or the bound Sleeper user id. The mint never creates an
+    `entry:*` id (D2) — the old deterministic entry:espn:/entry:mfl: ids and
+    the ESPN public/no-cookie claim are gone.
 
-    The route does NOT import the league. The client follows the mint with
-    the canonical POST /api/{espn,mfl}/link import under the fresh token
-    (admitted by the unverified-write grace path), which binds the claimed
-    team to the entry user and persists league/members/credentials through
-    the one existing implementation.
+    The route does NOT import the league. Since #421 the client follows the
+    mint, under the fresh token, with:
+      • ESPN: POST /api/espn/link (league + team + cookie pair);
+      • MFL:  POST /api/mfl/auth-link (stores the MFL session cookie), then
+        POST /api/mfl/auth-import for that league — so private MFL leagues
+        import too.
+    That token is already VERIFIED, so the #279 @_gate_unverified_write gate
+    admits those routes unchanged — there is no exemption and no grace path
+    for unverified sessions. The imports bind the claimed team to the
+    account's user and persist league/members/credentials through the
+    existing implementations.
 
     Errors reuse the link routes' vocabulary (espn_auth_required /
     espn_bad_credentials + wrong_account / *_bad_league_id / *_bad_team_id /
-    *_unavailable) so the sheets' error handling applies verbatim.
-    404 while `landing.platform_options` or the platform's link flag is off.
+    *_unavailable) so the sheets' error handling applies verbatim; the
+    sign-in refusals add proof_required / proof_unavailable (+ reason) /
+    mfl_bad_credentials / platform_identity_in_use (409) /
+    too_many_attempts (429). Every refusal carries a readable `message`.
+    404 while `landing.platform_options` or the platform's link flag is off,
+    and for the whole ESPN branch while `espn.signin` (the ESPN sign-in kill
+    switch) is off.
     """
+    from werkzeug.exceptions import HTTPException
+
+    audit: dict = {}
+    resp = None
+    try:
+        resp = _entry_platform(audit)
+        return resp
+    except (HTTPException, _SessionExpired):
+        raise
+    except Exception as e:
+        # This route carries espn_s2 / SWID / MFL passwords. An exception
+        # message (or a DB error's SQL parameters) can embed them, so the
+        # global handler's log.exception must never see one: log the type
+        # and the code frames only, and answer with a fixed body.
+        log.error("entry_platform: unexpected %s\n%s", type(e).__name__,
+                  "".join(traceback.format_tb(e.__traceback__, limit=-4)))
+        resp = jsonify({"error": "internal_error",
+                        "message": _SIGNIN_GENERIC_ERROR_MSG}), 500
+        return resp
+    finally:
+        # Frees any admitted limiter slot whatever happened above (counted
+        # failure / proven success / exception) — never leaks in-flight.
+        _signin_release(audit)
+        if audit.get("claim") or audit.get("action"):
+            _log_xff_hop_count()   # TEMPORARY — see _log_xff_hop_count
+        if audit.get("claim"):
+            _log_platform_signin(audit, resp)
+
+
+def _entry_platform(audit: dict):
+    """entry_platform's body. Sets audit['claim'] on a team-claim attempt
+    (the route then writes its one PLATFORM-SIGNIN line)."""
     if not is_enabled("landing.platform_options"):
         return jsonify({"error": "feature_disabled"}), 404
     body = request.get_json(force=True) or {}
@@ -32261,11 +34073,19 @@ def entry_platform():
     if platform not in ("espn", "mfl"):
         return jsonify({"error": "bad_platform",
                         "message": "platform must be 'espn' or 'mfl'."}), 400
+    # `espn.signin` kill switch: the WHOLE ESPN entry branch (my_leagues,
+    # preview, team claim) 404s before any ESPN call or limiter accounting —
+    # e.g. if the R1 pair-binding check fails. MFL entry and Settings ESPN
+    # linking (espn.link, /api/espn/*) are unaffected.
+    if platform == "espn" and not is_enabled("espn.signin"):
+        return jsonify({"error": "feature_disabled"}), 404
 
     # ── Account-discovery actions (v2.1) ────────────────────────────────────
     # Sessionless "log in instead of typing a league id". Nothing here is
     # persisted: no credential row, no users row, no session — these branches
-    # return before any _extension_build_session / upsert reached below.
+    # return before any _platform_sign_in / upsert reached below. Credential
+    # failures here (MFL bad login, ESPN pair refused) charge the D7 budgets
+    # like a failed claim.
     action = str(body.get("action") or "").strip().lower()
     if action:
         if platform == "espn":
@@ -32274,6 +34094,7 @@ def entry_platform():
                                 "message": "Unknown action for ESPN."}), 400
             if not is_enabled("espn.link") or not is_enabled("espn.league_picker"):
                 return jsonify({"error": "feature_disabled"}), 404
+            audit["action"] = action
             from . import espn_service as _espn
 
             espn_s2 = (body.get("espn_s2") or "").strip() or None
@@ -32283,9 +34104,15 @@ def entry_platform():
                     "error": "espn_cookies_incomplete",
                     "message": "Private leagues need both espn_s2 and SWID.",
                 }), 400
+            subject = _accounts.platform_subject("espn", swid)
+            limited = _signin_limit_gate(audit, "espn", subject)
+            if limited is not None:
+                return limited
             try:
                 leagues = _espn.fetch_fan_leagues(espn_s2, swid)
             except _espn.EspnError as e:
+                if getattr(e, "kind", None) == "auth":
+                    audit["_counted_failure"] = True
                 return _espn_error_response(e)
             log.info("entry_platform: espn my_leagues (sessionless) -> %d",
                      len(leagues))
@@ -32296,23 +34123,33 @@ def entry_platform():
                             "message": "Unknown action for MFL."}), 400
         if not is_enabled("mfl.link") or not is_enabled("mfl.auth_link"):
             return jsonify({"error": "feature_disabled"}), 404
+        audit["action"] = action
         from . import mfl_service as _mfl
 
         username = str(body.get("username") or "").strip()
         password = body.get("password") or ""
         try:
             year = int(body.get("year") or _MFL_DEFAULT_YEAR)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return jsonify({"error": "mfl_bad_year",
                             "message": "year must be numeric"}), 400
         if not username or not password:
             return jsonify({"error": "mfl_missing_credentials",
                             "message": "MFL username and password are required."}), 400
+        # Range check BEFORE the limiter gate: no slot, no accounting.
+        bad_year = _mfl_entry_year_refusal(body.get("year"))
+        if bad_year is not None:
+            return bad_year
+        limited = _signin_limit_gate(
+            audit, "mfl", _accounts.platform_subject("mfl", username))
+        if limited is not None:
+            return limited
         try:
             auth = _mfl.login(username, password, year)
             del password  # transient use only — never persisted, never logged
             leagues = _mfl.fetch_my_leagues(auth["cookie"], year)
         except _mfl.MflAuthError:
+            audit["_counted_failure"] = True
             return jsonify({"error": "mfl_bad_credentials",
                             "message": "MFL didn't accept that username and password."}), 403
         except _mfl.MflError as e:
@@ -32342,11 +34179,50 @@ def entry_platform():
                 "message": "Private leagues need both espn_s2 and SWID.",
             }), 400
 
+        subject = None
+        if body.get("team_id") is not None:
+            # Team claim = sign-in attempt (D4 step 1: the pair is required).
+            audit.update(claim=True, provider="espn")
+            if not (espn_s2 and swid):
+                return _signin_refusal(audit, 403, "proof_required",
+                                       _SIGNIN_PROOF_REQUIRED_MSG["espn"])
+            subject = _accounts.platform_subject("espn", swid)
+            limited = _signin_limit_gate(audit, "espn", subject)
+            if limited is not None:
+                return limited
+
         try:
             league, mapped = _espn_import_payload(league_id, season,
                                                   espn_s2, swid)
         except _espn.EspnError as e:
+            kind = getattr(e, "kind", None)
+            if subject and kind == "auth":
+                # D4 step 2 failed: ESPN rejected the pair for this league.
+                # Same error code, the sign-in's own copy (row 9); the
+                # preview and /api/espn/* keep the cookie-paste copy.
+                return _signin_refusal(audit, 403, "espn_auth_required",
+                                       _SIGNIN_ESPN_AUTH_REQUIRED_MSG,
+                                       provider="espn", subject=subject,
+                                       failed_proof=True)
+            if subject and kind not in ("not_found", "input"):
+                # ESPN not answering during the proof (5xx / parse): the
+                # same 502 espn_unavailable, with row 6's sign-in copy. Only
+                # the error KIND is logged — never the exception message
+                # (head-eng's #430 nit, carried here).
+                log.warning("espn fetch failed [%s]", kind)
+                return _signin_refusal(audit, 502, "espn_unavailable",
+                                       _SIGNIN_ESPN_UNAVAILABLE_MSG)
             return _espn_error_response(e)
+        except (OSError, http.client.HTTPException) as e:
+            # A timeout / transport failure on the sign-in's cookie read is
+            # "ESPN not answering" too (row 6). The preview re-raises to
+            # entry_platform's generic 500 internal_error (row 14's copy).
+            if not subject:
+                raise
+            log.warning("entry_platform: espn sign-in cookie read failed "
+                        "(%s)", type(e).__name__)
+            return _signin_refusal(audit, 502, "espn_unavailable",
+                                   _SIGNIN_ESPN_UNAVAILABLE_MSG)
 
         team_id = body.get("team_id")
         if team_id is None:
@@ -32378,30 +34254,93 @@ def entry_platform():
         if team is None:
             return jsonify({"error": "espn_bad_team_id",
                             "message": "That team isn't in this league."}), 400
-        # #321 parity: when the claim arrives with a live cookie pair, the
-        # pair's SWID must own the claimed team (an ownerless team is
-        # inconclusive-accept, same as the link route).
-        if espn_s2 and swid and team.owner_swid:
-            if (_espn.canonical_swid(team.owner_swid).upper()
-                    != _espn.canonical_swid(swid).upper()):
-                return jsonify({"error": "espn_bad_credentials",
-                                "reason": "wrong_account",
-                                "message": _ESPN_WRONG_ACCOUNT_MSG}), 403
-        if team.owner_swid:
-            entry_uid = f"entry:espn:{_espn.canonical_swid(team.owner_swid)}"
-        else:
-            entry_uid = f"entry:espn:{league_id}.t{team_id}"
-        display_name = team.name or f"Team {team_id}"
+        # D4 steps 3-5: cookie-gated league, pair-binding control, and #321
+        # ownership (an ownerless team is no longer inconclusive-accept).
+        refusal = _espn_signin_proof(audit, _espn, league_id, season,
+                                     espn_s2, subject, league, team)
+        if refusal is not None:
+            return refusal
+        return _platform_sign_in(audit, "espn", subject,
+                                 team.name or f"Team {team_id}",
+                                 league_id, team_id)
     else:
         if not is_enabled("mfl.link"):
             return jsonify({"error": "feature_disabled"}), 404
         from . import mfl_service as _mfl
 
+        # Year range first: no MFL call, no limiter accounting (QA hardening).
+        bad_year = _mfl_entry_year_refusal(body.get("year"))
+        if bad_year is not None:
+            return bad_year
+
+        subject = None
+        claim = (body.get("franchise_id") or body.get("team_id")) is not None
+        if claim:
+            # Team claim = sign-in attempt (D5): MFL login required, checked
+            # before ANY MFL call. The password leaves the parsed body here
+            # and lives only until the one login call below.
+            audit.update(claim=True, provider="mfl")
+            username = str(body.get("username") or "").strip()
+            password = body.pop("password", None) or ""
+            if not username or not password:
+                return _signin_refusal(audit, 403, "proof_required",
+                                       _SIGNIN_PROOF_REQUIRED_MSG["mfl"])
+            subject = _accounts.platform_subject("mfl", username)
+            limited = _signin_limit_gate(audit, "mfl", subject)
+            if limited is not None:
+                return limited
+
+        def _refuse_login(reason=None, message=_SIGNIN_MFL_BAD_LOGIN_MSG):
+            # Only a bad login (no reason) is a COUNTED credential failure;
+            # wrong_account follows a proven login and doesn't count (D7).
+            return _signin_refusal(audit, 403, "mfl_bad_credentials", message,
+                                   reason, provider="mfl", subject=subject,
+                                   failed_proof=reason is None)
+
+        def _mfl_error(e):
+            # Row 11: MFL not answering DURING THE SIGN-IN PROOF gets the
+            # sign-in's own copy, same status and error code. The preview
+            # and every other route keep _platform_error_payload's copy.
+            payload, status = _platform_error_payload(e, "mfl")
+            if claim and payload.get("error") == "mfl_unavailable":
+                payload["message"] = _SIGNIN_MFL_UNAVAILABLE_MSG
+            return jsonify(payload), status
+
         try:
+            # Parse + (public) host resolution first: a malformed league id
+            # is refused before any password is sent.
             league_id, year, host = _mfl_resolve(body)
-            raw = _mfl.fetch_league_bundle(league_id, year, host)
         except _mfl.MflError as e:
+            return _mfl_error(e)
+
+        cookie = None
+        if claim:
+            # D5, log in FIRST: the bundle is then read with the user's own
+            # cookie, so a PRIVATE league can be claimed. The cookie is used
+            # for this request only — never stored, logged or returned (the
+            # client's follow-on POST /api/mfl/auth-link stores the session,
+            # then POST /api/mfl/auth-import imports the league).
+            try:
+                try:
+                    cookie = _mfl.login(username, password, year)["cookie"]
+                finally:
+                    del password  # transient use only — never stored or logged
+            except _mfl.MflAuthError:
+                return _refuse_login()
+            except _mfl.MflError as e:
+                return _mfl_error(e)
+
+        try:
+            raw = _mfl.fetch_league_bundle(league_id, year, host, cookie=cookie)
+        except _mfl.MflAuthError as e:
+            if claim:
+                # A good login that still can't read this league holds no
+                # franchise in it.
+                return _refuse_login("wrong_account",
+                                     _SIGNIN_NOT_OWNER_MSG["mfl"])
             return _platform_error_response(e, "mfl")
+        except _mfl.MflError as e:
+            return _mfl_error(e)
 
         parsed = _mfl.parse_bundle(raw)
         mapped = _mfl.map_franchises(parsed, _shared_crosswalk())
@@ -32428,37 +34367,34 @@ def entry_platform():
         if franchise is None:
             return jsonify({"error": "mfl_bad_team_id",
                             "message": "That franchise isn't in this league."}), 400
-        entry_uid = f"entry:{_mfl_member_id(league_id, franchise_id)}"
-        display_name = franchise["name"] or f"Franchise {franchise_id}"
 
-    try:
-        # Unverified mint: history waits for the verify (R28.17).
-        token, payload = _extension_build_session(
-            user_id=entry_uid,
-            username="",
-            display_name=display_name,
-            avatar=None,
-            load_history=False,
-        )
-    except Exception as e:
-        log.error("entry_platform: session build failed: %s", e)
-        return jsonify({"error": "session_build_failed",
-                        "message": str(e)}), 500
-    _link_device_identity(sleeper_user_id=entry_uid)
-    log.info("entry_platform: minted %s session for %s (%s)",
-             platform, entry_uid, display_name)
-    return jsonify({
-        "stage":         "connected",
-        "session_token": token,
-        "expires_at":    int(payload["last_active"]) + 4 * 3600,
-        "user_id":       entry_uid,
-        "username":      "",
-        "display_name":  display_name,
-        "avatar":        None,
-        "platform":      platform,
-        "league_id":     league_id,
-        "team_id":       team_id if platform == "espn" else franchise_id,
-    })
+        # D5: the claimed (league, franchise) must be one MFL lists for this
+        # login. Nothing is stored — not even the cookie.
+        try:
+            mine = _mfl.fetch_my_leagues(cookie, year)
+        except _mfl.MflAuthError:
+            return _refuse_login()
+        except _mfl.MflError as e:
+            return _mfl_error(e)
+        in_league = [lg for lg in mine
+                     if str(lg.get("league_id") or "") == str(league_id)]
+        if not any(str(lg.get("franchise_id") or "") == franchise_id
+                   for lg in in_league):
+            # The login succeeded, so naming the franchise it owns in THIS
+            # league tells the caller nothing a member can't already see.
+            names = {fr["franchise_id"]: fr["name"]
+                     for fr in parsed["franchises"]}
+            owned = next((lg.get("franchise_name")
+                          or names.get(str(lg.get("franchise_id") or ""))
+                          for lg in in_league if lg.get("franchise_id")),
+                         None)
+            return _refuse_login(
+                "wrong_account",
+                _SIGNIN_OWNS_OTHER_TEAM_MSG.format(platform="MFL", team=owned)
+                if owned else _SIGNIN_NOT_OWNER_MSG["mfl"])
+        return _platform_sign_in(audit, "mfl", subject,
+                                 franchise["name"] or f"Franchise {franchise_id}",
+                                 league_id, franchise_id)
 
 
 @app.route("/api/extension/rankings")
@@ -32601,6 +34537,94 @@ def _compute_invite_impact(username: str, user_id: str) -> dict:
     }
 
 
+def _referral_mint_enabled() -> bool:
+    """model_config knob `referral_mint_enabled` (default 1), read per
+    request from the DB so a flip needs no restart or deploy (the
+    force_supersedes_running pattern). Exactly 1 enables."""
+    try:
+        return float(get_config().get("referral_mint_enabled", 1.0)) == 1.0
+    except Exception:
+        return True
+
+
+def _session_in_league(sess, league_id: str) -> bool:
+    """Is the session's user in `league_id`, by the source session init uses?
+    The session's own league was proven by resolve_session_input at init;
+    any other league is checked against the league_members snapshot that
+    session init persists (platform leagues are resolved from it)."""
+    league = sess.get("league")
+    if league is not None and str(getattr(league, "league_id", "")) == league_id:
+        return True
+    from . import database as _db
+    return _db.league_has_member(league_id, str(sess.get("user_id") or ""))
+
+
+@app.route("/api/invite/token", methods=["POST"])
+def mint_invite_token():
+    """POST /api/invite/token — mint a per-share invite id (referral loop
+    L7; PRD §8.1, FR-1 server half, FR-6).
+
+    Gate: `growth.referral_ledger` AND model_config `referral_mint_enabled`
+    (exactly 1, read per request). Either off → 404 not_found, checked
+    before anything else, so a dark route looks absent to every caller.
+
+    Body: {"league_id": str, "surface": InviteSurface}
+    201: {"invite_id": "<12 chars>", "league_id", "expires_at": ISO UTC,
+          created + 30 d}. Never a URL: each client builds its own (§7.2).
+    Errors: 401 session_expired · 403 verification_required (demo or
+    unverified) · 400 missing_league_id | invalid_surface · 403 not_member ·
+    429 rate_limited + retry_after_s (10 per inviter per league per UTC day,
+    until the next UTC midnight) · 500 store_failed.
+    Writes one `pending` referrals row (invite_token = share_token = the id).
+    """
+    from . import database as _db
+    if not (is_enabled("growth.referral_ledger") and _referral_mint_enabled()):
+        return jsonify({"error": "not_found"}), 404
+    sess = _require_session()
+    user_id = str(sess.get("user_id") or "")
+    if (not sess.get("verified") or sess.get("is_demo")
+            or user_id.startswith("demo_user_")):
+        return jsonify({"error": "verification_required"}), 403
+    body = request.get_json(force=True, silent=True)
+    body = body if isinstance(body, dict) else {}
+    league_id = body.get("league_id")
+    if not isinstance(league_id, str) or not league_id.strip():
+        return jsonify({"error": "missing_league_id"}), 400
+    league_id = league_id.strip()
+    surface = body.get("surface")
+    if not isinstance(surface, str) or surface not in _referral_ledger.INVITE_SURFACES:
+        return jsonify({"error": "invalid_surface"}), 400
+    try:
+        member = _session_in_league(sess, league_id)
+    except Exception as e:
+        log.warning("invite/token: membership check failed: %s", e)
+        member = False
+    if not member:
+        return jsonify({"error": "not_member"}), 403
+    try:
+        minted_today = _db.count_referral_mints_today(user_id, league_id)
+    except Exception as e:
+        log.warning("invite/token: rate-limit count failed: %s", e)
+        minted_today = 0
+    if minted_today >= _referral_ledger.MINT_DAILY_CAP:
+        now = datetime.now(timezone.utc)
+        midnight = (now + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        return jsonify({"error": "rate_limited",
+                        "retry_after_s": max(1, int((midnight - now).total_seconds()))}), 429
+    try:
+        minted = _db.create_referral_invite(user_id, league_id, surface)
+    except Exception as e:
+        log.error("invite/token: could not mint for %s: %s", user_id, e)
+        return jsonify({"error": "store_failed"}), 500
+    created = datetime.fromisoformat(minted["created_at"])
+    return jsonify({
+        "invite_id":  minted["invite_id"],
+        "league_id":  league_id,
+        "expires_at": (created + timedelta(days=_INVITE_ID_VALID_DAYS)).isoformat(),
+    }), 201
+
+
 @app.route("/api/invite/impact")
 @_gate_unverified_read
 def invite_impact_route():
@@ -32664,6 +34688,7 @@ def feature_flags_route():
     # evaluator module doesn't exist yet; fail-open to empty, never 500).
     try:
         from . import experiments as _exp
+        from .client_device import declared_source
         device_id = (request.headers.get("X-Device-Id") or "").strip() or None
         token = request.headers.get("X-Session-Token", "")
         account_unit = None
@@ -32677,7 +34702,8 @@ def feature_flags_route():
         # target platform/app_version/os — the only attrs available pre-auth.
         info = getattr(g, "device_info", {}) or {}
         header_attrs = {
-            "platform": (str(request.headers.get("X-Source") or "").strip()
+            # G-068: only a declared client (web | extension) passes through.
+            "platform": (declared_source(request.headers)
                          or ("ios" if (info.get("device_type") or "").lower()
                              in ("iphone", "ipad", "macos") else None)),
             "app_version": info.get("app_version"),
@@ -32836,6 +34862,17 @@ def league_invite_meta():
     nothing. The hourly limiter pattern needs a user id this route
     deliberately does not have. If abuse appears, the lever is
     `_fetch_sleeper_league_meta`'s upstream, not this route.
+
+    REFERRAL LOOP FR-11 (PRD §8.3). Optional query `t`, the invite id. A
+    well-formed `t` (INVITE_ID_RE) is resolved once, by the join landing's
+    own helpers (_resolve_invite → _invite_status), and the response adds
+    `invite_status` (valid | expired | unknown | league_mismatch; null when
+    `t` is absent; a malformed `t` is `unknown` with no DB read) and
+    `inviter_display_name`: the referrer's users.display_name, ONLY when the
+    status is `valid`, else null. Nothing else from the referrals or users
+    row (no username, no user id, no token) ever reaches the response, and
+    `league_name` keeps the Sleeper-only rule above. A failed lookup degrades
+    to `unknown` / null, never an error.
     """
     league_id = (request.args.get("league_id") or "").strip()
     if not league_id:
@@ -32847,10 +34884,25 @@ def league_invite_meta():
             name = meta.get("name") or None
     except Exception as e:                       # pragma: no cover - defensive
         log.info("invite-meta: lookup failed (non-fatal) league_id=%s: %s", league_id, e)
+    invite_status, inviter = None, None
+    raw_t = request.args.get("t")
+    if raw_t:
+        t = _invite_id_from(raw_t)
+        invite_status = "unknown"
+        if t is not None:
+            try:
+                invite_status, referral = _resolve_invite(t, league_id)
+                if invite_status == "valid":
+                    inviter = (referral or {}).get("referrer_display_name") or None
+            except Exception as e:               # pragma: no cover - defensive
+                log.info("invite-meta: invite lookup failed (non-fatal): %s", e)
+                invite_status, inviter = "unknown", None
     return jsonify({
         "league_id":   league_id,
         "league_name": name,
         "platform":    "sleeper" if name else None,
+        "inviter_display_name": inviter,
+        "invite_status":        invite_status,
     })
 
 
@@ -34399,6 +36451,21 @@ def delete_account_route():
                               or s.get("account_id") in account_ids]:
                         _sessions[t]["_revoked"] = True
                         _sessions.pop(t, None)
+            # Baselines and full results independently retain personal boards.
+            # Purge every account alias and cancel late in-flight cache writes.
+            try:
+                _purge_outlook_impact_callers(user_ids)
+            except Exception as purge_err:
+                log.warning("delete_account: outlook baseline purge errored (continuing): %s",
+                            type(purge_err).__name__)
+            # Personal outlook results are keyed on the caller's working id
+            # (release-lead QA on #512); best-effort, like the Apple revoke.
+            try:
+                from .outlook_result_cache import OUTLOOK_RESULTS
+                OUTLOOK_RESULTS.purge_callers(user_ids)
+            except Exception as purge_err:
+                log.warning("delete_account: outlook result purge errored (continuing): %s",
+                            purge_err)
     except Exception:
         log.exception("delete_account: deletion failed for %s", user_id)
         return jsonify({"error": "deletion_failed"}), 500
@@ -34477,6 +36544,32 @@ def session_signout():
 # ---------------------------------------------------------------------------
 
 _ESPN_DEFAULT_SEASON = 2026
+
+
+def _espn_binding_mismatch(team, swid) -> bool:
+    """The #321 team-binding identity rule, shared by every site that asks
+    "does this SWID own the bound / chosen team?": /api/espn/link's R3 check,
+    /api/espn/import's R3b re-sync, the store-time membership assertion in
+    _espn_verify_credential, and the sync sweep's R9 nudge.
+
+    True ONLY for a CONCLUSIVE mismatch: the team lists owners and the SWID
+    is none of them. "Owners" = EspnTeam.owner_swids — the primary AND every
+    co-owner (2026-10-27, feat/espn-signin-coowners), so a co-owner's own
+    pair binds; until then only the primary owner_swid counted and a
+    co-owner was refused wrong_account. Compared in the one SWID identity
+    form (espn_service.swid_identity). No team, an ownerless team or an
+    empty SWID → False (inconclusive-accept: zero false rejects). A team
+    object without owner_swids falls back to its owner_swid."""
+    from . import espn_service as _espn
+    if team is None:
+        return False
+    listed = getattr(team, "owner_swids", None)
+    if listed is None:
+        listed = (getattr(team, "owner_swid", None),)
+    owners = {_espn.swid_identity(s) for s in listed if isinstance(s, str)}
+    owners.discard("")
+    ident = _espn.swid_identity(swid) if isinstance(swid, str) else ""
+    return bool(owners and ident and ident not in owners)
 
 
 def _espn_member_id(league_id: str, team) -> str:
@@ -34699,13 +36792,13 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str,
     # WHOSE. Every linked league with a team binding is evaluated (set
     # semantics — deliberately not "first" or "newest"). At most ONE live
     # read per league, store time only; cookies ride along (public leagues
-    # ignore them, cookie-gated ones need them). ZERO FALSE REJECTS:
-    # ownerless / co-owned / missing owner_swid, purged leagues, and
-    # vanished teams are all INCONCLUSIVE-ACCEPT — and deliberately WITHOUT
-    # plan §F1's "is any team's owner" fallback (dropped in review round 1;
-    # do not restore it). No bound league at all → vacuous; the auth
-    # verdict stands.
-    target = _espn.canonical_swid(swid or "").upper()
+    # ignore them, cookie-gated ones need them). The pair's SWID must be one
+    # of each bound team's LISTED owners — the primary or a co-owner
+    # (_espn_binding_mismatch; co-owners since 2026-10-27). ZERO FALSE
+    # REJECTS: ownerless teams, purged leagues and vanished teams are all
+    # INCONCLUSIVE-ACCEPT — and deliberately WITHOUT plan §F1's "is any
+    # team's owner" fallback (dropped in review round 1; do not restore it).
+    # No bound league at all → vacuous; the auth verdict stands.
     mismatch_detail = None
     unavailable_detail = None
     for lg in linked:
@@ -34748,9 +36841,8 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str,
             fetched_teams[lid] = teams
         bound = next((t for t in teams
                       if t.team_id == lg.get("my_team_id")), None)
-        if bound is None or not (bound.owner_swid or "").strip():
-            continue   # team vanished / ownerless — inconclusive-accept
-        if target and _espn.canonical_swid(bound.owner_swid).upper() != target:
+        # Team vanished / ownerless → no mismatch (inconclusive-accept).
+        if _espn_binding_mismatch(bound, swid):
             mismatch_detail = f"league {lid} bound-team owner mismatch"
             break      # nothing outranks a conclusive mismatch
 
@@ -35013,18 +37105,20 @@ def espn_link():
 
     # ── #321 R3 — identity assertion at the team-binding step, regardless
     # of cookie provenance (pasted, captured, or the stored-credential
-    # fallback). The team list with owner_swids is already in hand from the
-    # import fetch — comparison only, no extra ESPN read. Zero false
-    # rejects: an ownerless / co-owned / owner_swid-less chosen team is
-    # INCONCLUSIVE-ACCEPT. This closes the store-then-link hole: a pair
+    # fallback). The team list is already in hand from the import fetch —
+    # comparison only, no extra ESPN read. The pair's SWID must be one of
+    # the chosen team's LISTED owners: the primary owner or any co-owner
+    # (EspnTeam.owner_swids, via _espn_binding_mismatch — since 2026-10-27,
+    # so a co-owner who signed in with ESPN can import their league; before,
+    # only the primary counted and a co-owner got wrong_account). Anyone
+    # else → 403 wrong_account. Zero false rejects: an ownerless chosen team
+    # is INCONCLUSIVE-ACCEPT. This closes the store-then-link hole: a pair
     # stored under a vacuous accept (no league yet) is re-checked the
     # moment a league gets a team binding.
     if espn_s2 and swid:
         chosen = next((t for t in league["teams"] if t.team_id == team_id), None)
-        chosen_owner = _espn.canonical_swid(chosen.owner_swid).upper() \
-            if chosen and (chosen.owner_swid or "").strip() else None
         pair_swid = _espn.canonical_swid(swid).upper()
-        if chosen_owner and pair_swid and chosen_owner != pair_swid:
+        if _espn_binding_mismatch(chosen, swid):
             # When the mismatching SWID is the STORED credential's (the
             # stored-cookie fallback, or a paste equal to the stored pair),
             # null that row's verified_at so GET status stops lying — row
@@ -35330,13 +37424,12 @@ def espn_import():
     # hand — comparison only, no extra ESPN read. Catches wrong-identity
     # rows bound BEFORE identity binding shipped, which the R10 migration
     # alone cannot identify. Only asserted for the linker's own binding
-    # (zero false rejects if another user ever re-syncs), and an ownerless
-    # / owner_swid-less bound team is inconclusive-accept.
+    # (zero false rejects if another user ever re-syncs). "Owns" = any listed
+    # owner, co-owners included (_espn_binding_mismatch); an ownerless bound
+    # team is inconclusive-accept.
     if swid and str(row.get("user_id") or "") == str(user_id):
         bound = next((t for t in league["teams"] if t.team_id == my_team_id), None)
-        pair_swid = _espn.canonical_swid(swid).upper()
-        if bound and (bound.owner_swid or "").strip() and pair_swid and \
-                _espn.canonical_swid(bound.owner_swid).upper() != pair_swid:
+        if _espn_binding_mismatch(bound, swid):
             clear_espn_credential_verification(user_id)
             log.info("espn_import: re-sync identity mismatch — stamp nulled "
                      "user=%s league=%s team=%s", user_id, league_id, my_team_id)
@@ -36720,17 +38813,41 @@ def league_outlook_route():
                 p = players_meta.get(pid)
                 player_pos[pid] = getattr(p, "position", None) or "?"
 
-        payload = outlook_pkg.run_outlook(
-            state,
-            player_value=player_value,
-            player_pos=player_pos,
-            model_cfg=get_config(),
-            basis=basis,
-            scoring_format=fmt,
-            you_user_id=g_user_id,
-            playoff_seed_type=_outlook_captured.get("playoff_seed_type"),
-        )
-        return jsonify(payload)
+        # Result cache (backend/outlook_result_cache.py): keyed on a hash of
+        # every input run_outlook reads, so any roster/record/schedule change
+        # misses. Computed caller-independent (you_user_id=""); `for_caller`
+        # stamps `is_you` per request.
+        from . import outlook_result_cache as _outlook_results
+        from .outlook import config as _outlook_cfg
+        model_cfg = get_config()
+        seed_type = _outlook_captured.get("playoff_seed_type")
+        def _compute() -> dict:
+            return outlook_pkg.run_outlook(
+                state,
+                player_value=player_value,
+                player_pos=player_pos,
+                model_cfg=model_cfg,
+                basis=basis,
+                scoring_format=fmt,
+                you_user_id="",
+                playoff_seed_type=seed_type,
+            )
+
+        try:
+            key = _outlook_results.make_key(
+                league_id=league_id, basis=basis, scoring_format=fmt,
+                user_id=g_user_id, state=state, player_value=player_value,
+                player_pos=player_pos, model_cfg=model_cfg,
+                playoff_seed_type=seed_type,
+                strength_source=_outlook_cfg.get_strength_source(None))
+        except Exception as key_err:
+            # An input the key can't hash: answer uncached rather than 500.
+            log.warning("league/outlook: result cache key failed, computing uncached: %s",
+                        key_err)
+            shared = _compute()
+        else:
+            shared = _outlook_results.OUTLOOK_RESULTS.get_or_compute(key, _compute)
+        return jsonify(_outlook_results.for_caller(shared, g_user_id))
     except NotImplementedError as e:
         return jsonify({"error": "not_supported", "message": str(e)}), 501
     except Exception as e:
@@ -36867,6 +38984,15 @@ def league_free_agents_route():
           # priced on their board, value-ASCENDING (least valuable first),
           # capped at 8; untouchables (asset_prefs) never appear, and the
           # count tells the sheet they were withheld.
+        "move": {"mode": "submit"|"handoff"|"unsupported", "claims": bool,
+                 "league_platform": "sleeper"|"mfl"|"espn"|null,
+                 "connect": "ok"|"not_linked"|"expired"|"unverified"|"other_account",
+                 "consent_until": "<ISO-8601 UTC>"|null, "copy": {...}}
+          # D1 free-agent moves (docs/plans/sleeper-fa-write/contract.md §1),
+          # additive: `_fa_move_capability`. Omitted when it can't be computed
+          # (= legacy). Each free_agents[i] then also carries `move_kind`
+          # ("add"|"claim"|null; null = the server can't tell) and, under the
+          # double-move block, `move_mode: "handoff"` + `move_line`.
       }
 
     Errors: 503 rosters_unavailable when NO roster source yielded a single
@@ -36957,6 +39083,7 @@ def league_free_agents_route():
                         "for %s (continuing on session rosters): %s",
                         league_id, e)
 
+        live_rosters = None      # D1 capability: the live read, when it succeeded
         is_sleeper_league = False
         try:
             is_sleeper_league = (league_id.isdigit()
@@ -36970,6 +39097,7 @@ def league_free_agents_route():
                 live = _sleeper_get(
                     f"https://api.sleeper.app/v1/league/{league_id}/rosters"
                 ) or []
+                live_rosters = live if isinstance(live, list) else None
                 from .sleeper_roster import owns_roster as _owns
                 for r in live:
                     ids = [str(pid) for pid in (r.get("players") or [])]
@@ -37054,7 +39182,24 @@ def league_free_agents_route():
             position     = position,
             tier_fn      = fa_tier_fn,
         )
+        # D1 free-agent moves (contract §1): the additive `move` capability and
+        # per-row `move_kind` (null until the capture says how to read waiver
+        # status, Q8) plus the double-move block's `move_mode`/`move_line`
+        # override. Best-effort: on any failure `move` is omitted, which the
+        # client reads as legacy behaviour (exactly an older server).
+        extra = {}
+        try:
+            move, row_moves = _fa_move_capability(sess, league_id, live_rosters)
+        except Exception as cap_err:
+            log.warning("free-agents: move capability failed for %s (omitted): %s",
+                        league_id, cap_err)
+        else:
+            extra["move"] = move
+            for fa_row in free_agents:
+                fa_row["move_kind"] = None
+                fa_row.update(row_moves.get(str(fa_row.get("player_id")), {}))
         return jsonify({
+            **extra,
             "league_id":         league_id,
             "scoring_format":    fmt,
             "position":          position or "ALL",
@@ -37070,6 +39215,827 @@ def league_free_agents_route():
     except Exception as e:
         log.error("league/free-agents error: %s", e)
         return jsonify({"error": "internal_error"}), 500
+
+
+# ─── D1 free-agent moves (docs/plans/sleeper-fa-write/contract.md) ─────────
+# The app makes a free-agent move in the user's platform league on their
+# behalf: a capability on GET /api/league/free-agents tells the client what
+# it may do (`move`), GET/DELETE /api/platform-write-consent carry the R15
+# consent, and POST /api/league/free-agents/move makes the move. The wire
+# contract is fixed for the 11-06 binary: contract.md wins on wire details,
+# scope.md (plan/fa-moves-launch) on product behaviour.
+#
+# Sleeper's write shapes are NOT captured yet. Until the capture commit sets
+# sleeper_write.FA_MOVE_SHAPES_CAPTURED, `_fa_move_live` is False even with
+# `sleeper.send_add_drop` on, so the capability answers `handoff` and the move
+# route answers 404 `feature_disabled` (state 1, the hand-off), the same thing
+# the capability already told the client. Nothing here can send.
+from . import database as _fa_db          # noqa: E402
+from . import fa_move_copy as _fa_copy    # noqa: E402
+
+_FA_MOVE_PLATFORMS = ("sleeper", "mfl", "espn")
+# The claim sheet's hosts (contract §3 `surface`), recorded on
+# fa_move_consent_recorded; any other value is recorded as null.
+_FA_MOVE_SURFACES = ("free_agents", "usage_trends")
+# Contract §3: `attempt_id` is opaque, 8–64 of [A-Za-z0-9._-], unique per user.
+_FA_MOVE_ATTEMPT_ID_RE = re.compile(r"[A-Za-z0-9._-]{8,64}")
+# Player ids (FTF canonical = Sleeper): ASCII digits, or a team-defense code.
+_FA_MOVE_PLAYER_ID_RE = re.compile(r"[0-9]{1,12}|[A-Z]{2,4}")
+# Each platform's server-only kill switch. MFL and ESPN add theirs in Update 1.
+_FA_MOVE_FLAGS = {"sleeper": "sleeper.send_add_drop"}
+
+# Contract §5: request receipt to response is at most 76 s. A 30 s preflight
+# budget, checked immediately before the platform write (the
+# `_SEND_PREFLIGHT_BUDGET_S` pattern, its own constant so a trade-send change
+# can't move the binary's timeout), plus the write path's own socket timeouts
+# (sleeper_write.FA_MOVE_WRITE_TIMEOUTS_S, ≤ 46 s). Nothing after the write
+# touches the network: the roster save is a DB write and the fingerprint stamp
+# runs off the request thread. test_fa_move_route.py pins the sum. The client
+# timeout is (76 + 15) × 1000 ms.
+FA_MOVE_SERVER_WORST_CASE_S = 76
+_FA_MOVE_PREFLIGHT_BUDGET_S = 30
+_FA_MOVE_WRITE_PATH_MAX_S = FA_MOVE_SERVER_WORST_CASE_S - _FA_MOVE_PREFLIGHT_BUDGET_S  # 46
+
+# Scope §B6's double-move block: a recent unconfirmed move, or a pending claim.
+_FA_MOVE_UNCONFIRMED_BLOCK = timedelta(minutes=15)
+_FA_MOVE_PENDING_CLAIM_BLOCK = timedelta(hours=24)   # the next waiver run isn't known yet
+
+_fa_move_now = lambda: datetime.now(timezone.utc)    # noqa: E731 — tests inject
+_fa_move_clock = time.monotonic                      # tests inject
+
+
+def _fa_move_any_flag_on() -> bool:
+    """Scope §B3 step 2: the move route exists only while any platform's
+    `*.send_add_drop` is on. The consent routes never follow it (contract §2)."""
+    return any(is_enabled(key) for key in _FA_MOVE_FLAGS.values())
+
+
+def _fa_move_league_platform(league_id) -> str:
+    """The league's platform from its league row, never from the client:
+    'sleeper' | 'mfl' | 'espn' | 'fleaflicker', or 'local' for a non-numeric
+    (local / demo) league. A numeric id with no league row is Sleeper, the
+    same reading as `is_linked_platform_league` (the free-agents route)."""
+    lid = str(league_id or "").strip()
+    if not (lid.isascii() and lid.isdigit()):
+        return "local"
+    return _fa_db.get_league_platform(lid) or "sleeper"
+
+
+def _fa_move_live(platform: str) -> bool:
+    """The platform can make moves now: its kill switch is on AND its captured
+    write shapes are in the code. The capability's `submit` and the move
+    route's step 6 both read this, so they can't disagree."""
+    flag = _FA_MOVE_FLAGS.get(platform)
+    if not flag or not is_enabled(flag):
+        return False
+    if platform == "sleeper":
+        return bool(_sleeper_write.FA_MOVE_SHAPES_CAPTURED)
+    return False
+
+
+def _fa_move_claims_enabled(platform: str) -> bool:
+    """R15.8 D5: claims need the current consent copy at v2 AND the claim
+    shape captured. Until both hold, `claims: false` and a claim is 422
+    `waiver_claim_unsupported` (the hand-off)."""
+    return (platform == "sleeper" and _fa_move_live(platform)
+            and bool(_sleeper_write.FA_CLAIM_SHAPE_CAPTURED)
+            and _fa_copy.CURRENT_CONSENT_VERSION.get(platform)
+            == _fa_copy.SLEEPER_ROSTER_MOVES_V2)
+
+
+def _fa_move_actual_kind(league_id: str, add_player_id: str) -> str | None:
+    """'add' (a free agent) or 'claim' (on waivers), or None when the server
+    can't tell. Always None until the capture says how Sleeper marks a player
+    on waivers (capture.md Q8): `move_kind` is then null on every row, and
+    `move_kind_changed` can't fire."""
+    return None
+
+
+def _fa_move_error(code: str, status: int, msg: str, **extra) -> tuple[dict, int]:
+    """Contract §3's error body: `detail` == `message`, both server-authored."""
+    body = {"error": code, "message": msg, "detail": msg}
+    body.update({k: v for k, v in extra.items() if v is not None})
+    return body, status
+
+
+def _fa_move_event(user_id: str, name: str, props: dict, *, league_id=None,
+                   touch_user: bool = True) -> None:
+    """One D1 server event (scope §1). Never raises: a move or a withdrawal is
+    never undone by an analytics write."""
+    try:
+        device = _device_info_from_request() if has_request_context() else {}
+        record_event(str(user_id), name, league_id=league_id, source="api", props=props,
+                     device_type=device.get("device_type"),
+                     app_version=device.get("app_version"), touch_user=touch_user)
+    except Exception as err:
+        log.warning("record_event(%s) failed: %s", name, err)
+
+
+def _drop_sleeper_credential(user_id: str, via: str) -> int:
+    """Delete the caller's stored Sleeper token, ending any open Sleeper
+    roster-move consent in the same transaction (consent.md §4.4: disconnect,
+    expiry and rejection each append a withdrawal, so a reconnect always means
+    re-consent). Every Sleeper-credential deletion in this module goes through
+    here. Fires `fa_move_consent_withdrawn` when a grant was open; the system
+    withdrawals (`credential_*`) are non-touching (consent.md §6 F2)."""
+    withdrawn = delete_sleeper_credential(user_id, withdrawn_via=via)
+    if withdrawn:
+        _fa_move_event(user_id, "fa_move_consent_withdrawn",
+                       {"via": via, "league_platform": "sleeper"},
+                       touch_user=via not in ("credential_expired", "credential_rejected"))
+    return withdrawn
+
+
+def _sleeper_credential_changes(user_id: str, token: str, sleeper_user_id) -> bool:
+    """True when storing `token` would change the user's stored Sleeper
+    credential: there is one, and it holds another token or another Sleeper
+    user. A replay of the stored token is not a change. A stored token that
+    can't be decrypted counts as a change (its grant can't be tied to it).
+    Constant-time compare; neither token is ever logged."""
+    cred = get_sleeper_credential(user_id)
+    if not cred:
+        return False
+    if str(cred.get("sleeper_user_id") or "") != str(sleeper_user_id or ""):
+        return True
+    try:
+        stored = _sleeper_write.decrypt_token(cred["token_encrypted"])
+    except _sleeper_write.SleeperWriteError:
+        return True
+    return not hmac.compare_digest(stored.encode("utf-8"), str(token).encode("utf-8"))
+
+
+def _sleeper_cred_expired(cred: dict, now: datetime) -> bool:
+    """`GET /api/sleeper/link`'s `expired`: the stored expiry is past."""
+    try:
+        exp = datetime.fromisoformat(str(cred.get("expires_at")))
+    except (TypeError, ValueError):
+        return False
+    return (exp if exp.tzinfo else exp.replace(tzinfo=timezone.utc)) <= now
+
+
+def _sleeper_connect_state(sess, cred, live_rosters, now: datetime) -> str:
+    """Contract §1 `connect` for a Sleeper league: not_linked (no stored
+    token) → other_account (the connected account owns no roster in this
+    league, ux-lead F3; only when a live rosters read is in hand) → expired
+    (`GET /api/sleeper/link`'s rule) → unverified (this session hasn't proven
+    ownership, the move route's 403) → ok."""
+    if not cred:
+        return "not_linked"
+    from .sleeper_roster import owns_roster
+    puid = str(cred.get("sleeper_user_id") or "")
+    if live_rosters and not any(owns_roster(r, puid) for r in live_rosters):
+        return "other_account"
+    if _sleeper_cred_expired(cred, now):
+        return "expired"
+    if not (sess.get("verified") or _synthetic_demo_session(sess)):
+        return "unverified"
+    return "ok"
+
+
+def _fa_move_grant(user_id: str, platform: str, platform_user_id, now: datetime):
+    """The open grant at the platform's CURRENT copy version, or None."""
+    return _fa_db.active_platform_write_grant(
+        user_id, platform, str(platform_user_id or ""),
+        _fa_copy.CURRENT_CONSENT_VERSION.get(platform), now)
+
+
+def _fa_move_blocks(user_id: str, league_id: str, now: datetime, *,
+                    before_id: int | None = None,
+                    checked_at: datetime | None = None) -> dict[str, str]:
+    """Scope §B6's double-move block for (user, league): add-player id →
+    'unconfirmed' (a move sent < 15 min ago with no result yet, or with
+    result 'unknown') or 'pending_claim' (a claim the platform holds as
+    pending, < 24 h old: the league's next waiver run isn't known yet, and no
+    later result is ever recorded for it today).
+
+    The post-insert race check passes `before_id` (only moves whose `sent` row
+    was inserted before that row id) and `checked_at` (when this request
+    passed step 7b): a move of the player that LANDED (accepted / partial)
+    and was sent at or after `checked_at` blocks too, because this request's
+    pre-write reads may predate it. A failed move never blocks."""
+    rows = _fa_db.recent_platform_write_moves(user_id, league_id,
+                                              now - _FA_MOVE_PENDING_CLAIM_BLOCK)
+    return _fa_move_block_reasons(rows, now, before_id=before_id, checked_at=checked_at)
+
+
+def _fa_move_block_reasons(rows: list[dict], now: datetime, *, before_id: int | None = None,
+                           checked_at: datetime | None = None) -> dict[str, str]:
+    """`_fa_move_blocks`' rule over move rows already read (both phases of
+    each attempt). Pure, so the locked claim in step 12 can apply it to rows
+    read inside its own transaction."""
+    by_attempt: dict[str, dict] = {}
+    for r in rows:
+        by_attempt.setdefault(r["attempt_id"], {})[r["phase"]] = r
+    out: dict[str, str] = {}
+    for phases in by_attempt.values():
+        sent, done = phases.get("sent"), phases.get("result")
+        if sent is None or (before_id is not None and int(sent["id"]) >= before_id):
+            continue
+        try:
+            sent_at = datetime.fromisoformat(str(sent["sent_at"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+        age = now - (sent_at if sent_at.tzinfo else sent_at.replace(tzinfo=timezone.utc))
+        reason = None
+        if done is None or done.get("result") == "unknown":
+            if age < _FA_MOVE_UNCONFIRMED_BLOCK:
+                reason = "unconfirmed"
+        elif (checked_at is not None and done.get("result") in ("accepted", "partial")
+              and sent_at.replace(tzinfo=sent_at.tzinfo or timezone.utc) >= checked_at):
+            reason = "unconfirmed"
+        elif done.get("status") == "pending" and done.get("result") in ("accepted", "partial"):
+            if age < _FA_MOVE_PENDING_CLAIM_BLOCK:
+                reason = "pending_claim"
+        if reason:
+            for pid in json.loads(sent.get("add_player_ids") or "[]"):
+                if out.get(str(pid)) != "unconfirmed":
+                    out[str(pid)] = reason
+    return out
+
+
+def _fa_move_capability(sess, league_id: str, live_rosters) -> tuple[dict, dict]:
+    """Contract §1: the `move` capability for this league, plus the per-row
+    overrides ({player_id: {move_mode, move_line}}) of the double-move block.
+
+    `mode`: Sleeper → 'submit' when `_fa_move_live`, else 'handoff' (flag off,
+    or the shapes not captured); MFL and ESPN (until Update 1), Fleaflicker
+    and local leagues → 'unsupported'. `claims` only under R15.8 D5. Draft
+    copy is served only in 'submit' mode (fa_move_copy's docstring)."""
+    platform = _fa_move_league_platform(league_id)
+    if platform != "sleeper":
+        return {"mode": "unsupported", "claims": False,
+                "league_platform": platform if platform in _FA_MOVE_PLATFORMS else None,
+                "connect": "not_linked", "consent_until": None, "copy": {}}, {}
+    user_id = str(sess.get("user_id") or "")
+    now = _fa_move_now()
+    mode = "submit" if _fa_move_live(platform) else "handoff"
+    cred = get_sleeper_credential(user_id)
+    grant = _fa_move_grant(user_id, platform, cred.get("sleeper_user_id"), now) if cred else None
+    rows = {pid: {"move_mode": "handoff", "move_line": _fa_copy.row_line(reason, platform)}
+            for pid, reason in _fa_move_blocks(user_id, str(league_id), now).items()}
+    return {
+        "mode": mode,
+        "claims": _fa_move_claims_enabled(platform),
+        "league_platform": platform,
+        "connect": _sleeper_connect_state(sess, cred, live_rosters, now),
+        "consent_until": grant["expires_at"] if grant else None,
+        "copy": _fa_copy.move_copy(platform, include_drafts=(mode == "submit")),
+    }, rows
+
+
+def _fa_move_date_label(iso: str | None) -> str:
+    """{date} in Settings' "Roster moves: on until {date}" (contract §2, filled
+    by the server), as "Nov 8". The request carries no time zone, so the
+    expiry is read in US Pacific: the westernmost mainland zone, so the date
+    shown is never later than the user's own (under-promise, never over)."""
+    try:
+        when = datetime.fromisoformat(str(iso))
+    except (TypeError, ValueError):
+        return ""
+    try:
+        from zoneinfo import ZoneInfo
+        local = when.astimezone(ZoneInfo("America/Los_Angeles"))
+    except Exception:
+        local = when.astimezone(timezone(timedelta(hours=-8)))
+    return f"{local:%b} {local.day}"
+
+
+@app.route("/api/platform-write-consent", methods=["GET", "DELETE"])
+def platform_write_consent_route():
+    """D1 roster-move consent for one platform (contract §2; consent.md §4.4).
+
+    GET    ?platform=sleeper → {platform, valid, until, consent, status_line,
+           stop_label}. `consent` is the current version's text to show if the
+           user must consent now (null when the platform has none), with
+           `links` (legal's Terms · Privacy row) and, when the stored
+           credential's account is known and no grant is open, `reason`
+           (first | lapsed | version | withdrawn); `until`,
+           `status_line` and `stop_label` are null unless a grant is open. A
+           grant is valid for (user, platform, the stored credential's account)
+           only, so no credential means not valid.
+    DELETE ?platform=sleeper → {platform, valid: false, notice}: appends a
+           withdrawal (`via: settings`) for every open grant. One tap, no
+           confirm; idempotent (a repeat appends nothing, same body). `notice`
+           is R15.2.6's text, verbatim.
+    Both need a VERIFIED session (head-eng's security check; contract §2): an
+    unverified session can carry another user's id (a username-only sign-in),
+    so it could forge a withdrawal into the append-only record or read whether
+    someone consented. GET → `_verified_read_denial`, DELETE →
+    `_verified_write_denial`, both 403 `verification_required`. Withdrawal is
+    still as easy as consent: a grant is only ever made from a verified
+    session (the move route's step 3). NEITHER follows a kill switch: GET
+    always answers, and DELETE always works, so a user can withdraw while
+    moves are switched off (only the move route and the capability follow
+    `*.send_add_drop`). 401 without a session; 400 bad_request for a
+    `platform` outside sleeper | mfl | espn. Never returns a token.
+    """
+    sess = _require_session()
+    user_id = str(sess.get("user_id") or "")
+    if not user_id:
+        raise _SessionExpired()
+    denial = (_verified_write_denial(sess) if request.method == "DELETE"
+              else _verified_read_denial(sess))
+    if denial is not None:
+        asked = request.args.get("platform") or ""
+        body, status = _fa_move_error("verification_required", 403, (
+            _fa_copy.message("consent_verification_required", asked)
+            if asked in _FA_MOVE_PLATFORMS
+            else _fa_copy.message("consent_verification_required_any")))
+        return jsonify(body), status
+    platform = request.args.get("platform") or ""
+    if platform not in _FA_MOVE_PLATFORMS:
+        body, status = _fa_move_error("bad_request", 400, _fa_copy.message("bad_request"))
+        return jsonify(body), status
+    now = _fa_move_now()
+
+    if request.method == "DELETE":
+        if _fa_db.withdraw_platform_write_grants(user_id, platform, "settings", now):
+            _fa_move_event(user_id, "fa_move_consent_withdrawn",
+                           {"via": "settings", "league_platform": platform})
+        return jsonify({"platform": platform, "valid": False,
+                        "notice": _fa_copy.withdrawal_notice(platform)})
+
+    grant = reason = None
+    if platform == "sleeper":
+        cred = get_sleeper_credential(user_id)
+        if cred:
+            grant = _fa_move_grant(user_id, platform, cred.get("sleeper_user_id"), now)
+            reason = _fa_db.platform_write_consent_reason(
+                user_id, platform, str(cred.get("sleeper_user_id") or ""),
+                _fa_copy.CURRENT_CONSENT_VERSION.get(platform), now)
+    until = grant["expires_at"] if grant else None
+    return jsonify({
+        "platform": platform,
+        "valid": grant is not None,
+        "until": until,
+        "consent": _fa_copy.consent_block(platform, reason=reason),
+        "status_line": (_fa_copy.STATUS_LINE.format(date=_fa_move_date_label(until))
+                        if grant else None),
+        "stop_label": _fa_copy.STOP_LABEL if grant else None,
+    })
+
+
+def _fa_move_parse_body(body) -> dict | None:
+    """Contract §3's request, validated; None → 400 bad_request. A client
+    `platform` field is never read (scope §B3)."""
+    if not isinstance(body, dict):
+        return None
+
+    def _id(value):
+        if isinstance(value, bool) or not isinstance(value, (str, int)):
+            return None
+        text = str(value).strip()
+        return text if text and len(text) <= 64 else None
+
+    league_id, add_id = _id(body.get("league_id")), _id(body.get("add_player_id"))
+    raw_drop = body.get("drop_player_id")
+    drop_id = None if raw_drop in (None, "") else _id(raw_drop)
+    kind, attempt_id = body.get("move_kind"), body.get("attempt_id")
+    if not league_id or not add_id or (raw_drop not in (None, "") and not drop_id):
+        return None
+    # Sleeper player ids are digits; a team defense is its 2–4 letter code.
+    if not all(_FA_MOVE_PLAYER_ID_RE.fullmatch(p) for p in (add_id, drop_id) if p):
+        return None
+    if drop_id == add_id or kind not in ("add", "claim"):
+        return None
+    # Opaque, never parsed as a UUID (contract §3): the client's is UUID-shaped
+    # but may come from Math.random (Hermes has no Web Crypto).
+    if not isinstance(attempt_id, str) or not _FA_MOVE_ATTEMPT_ID_RE.fullmatch(attempt_id):
+        return None
+    bid = None
+    if kind == "claim" and body.get("faab_bid") is not None:   # an add spends no FAAB
+        raw_bid = body.get("faab_bid")
+        if isinstance(raw_bid, bool) or not isinstance(raw_bid, (int, float)):
+            return None
+        # NaN and ±inf are 400s, never a 500 from int(); whole dollars only.
+        if not math.isfinite(raw_bid) or raw_bid < 0 or raw_bid != int(raw_bid):
+            return None
+        bid = int(raw_bid)
+    surface = body.get("surface")       # optional; any other value is ignored (contract §3)
+    surface = surface if surface in _FA_MOVE_SURFACES else None
+    consent = body.get("consent")
+    if consent is not None:
+        if (not isinstance(consent, dict) or not isinstance(consent.get("copy_version"), str)
+                or not isinstance(consent.get("locale"), str)):
+            return None
+        consent = {"copy_version": consent["copy_version"], "locale": consent["locale"]}
+    return {"league_id": league_id, "add_player_id": add_id, "drop_player_id": drop_id,
+            "move_kind": kind, "faab_bid": bid, "consent": consent, "attempt_id": attempt_id,
+            "surface": surface}
+
+
+def _fa_move_consent_required(user_id: str, platform: str, platform_user_id: str,
+                              now: datetime) -> tuple[dict, int]:
+    """409 `consent_required` with the current consent block and, when known,
+    why it's asked (contract §2 `reason`)."""
+    reason = _fa_db.platform_write_consent_reason(
+        user_id, platform, platform_user_id, _fa_copy.CURRENT_CONSENT_VERSION.get(platform), now)
+    return _fa_move_error("consent_required", 409, _fa_copy.message("consent_required", platform),
+                          consent=_fa_copy.consent_block(platform, reason=reason))
+
+
+def _fa_move_consent_step(user_id: str, platform: str, platform_user_id: str,
+                          req: dict, now: datetime):
+    """Scope §B3 step 9. Returns (refusal, grant): a refusal is 409
+    `consent_required` carrying the current consent block (contract §4,
+    state 5). A body carrying `consent` at the CURRENT version appends a grant
+    and COMMITS it before returning, so it exists before any platform call
+    (R15.8); a stale version or an unknown locale appends nothing."""
+    block = _fa_copy.consent_block(platform)
+    current = _fa_copy.CURRENT_CONSENT_VERSION.get(platform)
+
+    def _required():
+        return _fa_move_consent_required(user_id, platform, platform_user_id, now)
+
+    shown = req["consent"]
+    if shown is not None:
+        if (block is None or shown["copy_version"] != current
+                or not _fa_copy.has_consent_text(platform, shown["copy_version"],
+                                                 shown["locale"])):
+            return _required(), None
+        device = _device_info_from_request()
+        grant = _fa_db.record_platform_write_grant(
+            user_id=user_id, platform=platform, platform_user_id=platform_user_id,
+            copy_version=current, locale=shown["locale"], consented_at=now,
+            client_platform=device.get("device_type"), app_version=device.get("app_version"),
+            trigger_attempt_id=req["attempt_id"])
+        # analytics-lead's G2 rule: `surface` is absent, never null, when the
+        # request has none (or an unknown one).
+        props = {"copy_version": current, "league_platform": platform}
+        if req["surface"]:
+            props["surface"] = req["surface"]
+        _fa_move_event(user_id, "fa_move_consent_recorded", props,
+                       league_id=req["league_id"])
+        return None, grant
+    grant = _fa_move_grant(user_id, platform, platform_user_id, now)
+    return (None, grant) if grant is not None else (_required(), None)
+
+
+def _fa_move_preflight_over_budget(t0: float) -> bool:
+    """True when the pre-write phase that started at `t0` is past
+    `_FA_MOVE_PREFLIGHT_BUDGET_S`: the write must not START, or it could land
+    after the client gave up (contract §5)."""
+    elapsed = _fa_move_clock() - t0
+    if elapsed <= _FA_MOVE_PREFLIGHT_BUDGET_S:
+        return False
+    log.warning("fa move: pre-flight took %.1fs, past the %ds budget; nothing sent",
+                elapsed, _FA_MOVE_PREFLIGHT_BUDGET_S)
+    return True
+
+
+def _fa_move_write_failure(kind, platform: str) -> tuple[dict, int, str]:
+    """(body, status, result) for a failed platform write, by
+    write_outcome.py's kind (contract §4). Wording (legal R28.27): only a
+    failure decided before any byte reached the platform ('network' =
+    `request_never_sent`, 'config') may say "nothing was sent"; a platform
+    refusal says "nothing changed"; an unknown outcome says neither:
+      outcome_unknown → 502 `{p}_outcome_unknown` (state 12), result 'unknown'
+      network         → 502 `{p}_write_failed` + kind 'network' (11, not sent)
+      config          → 503 `{p}_unconfigured` (10g), nothing sent
+      anything else   → 502 `{p}_write_failed`, NO kind (10f, the platform refused)."""
+    if kind == _write_outcome.OUTCOME_UNKNOWN:
+        body, status = _fa_move_error(f"{platform}_outcome_unknown", 502,
+                                      _fa_copy.message("outcome_unknown", platform),
+                                      title=_fa_copy.UNKNOWN_TITLE)
+        return body, status, "unknown"
+    if kind == "network":
+        body, status = _fa_move_error(f"{platform}_write_failed", 502,
+                                      _fa_copy.message("write_failed_network", platform),
+                                      kind="network")
+        return body, status, "error"
+    if kind == "config":
+        body, status = _fa_move_error(f"{platform}_unconfigured", 503,
+                                      _fa_copy.message("unconfigured", platform))
+        return body, status, "error"
+    body, status = _fa_move_error(f"{platform}_write_failed", 502,
+                                  _fa_copy.message("write_failed", platform))
+    return body, status, "rejected"
+
+
+def _fa_move_stamp_async(league_id: str) -> threading.Thread:
+    """K-F5 (scope §B10): `roster_refresh.stamp` OFF the request thread
+    (roster_snapshot.on_roster_change's call contract), after the new roster
+    is committed. The stamp moves the league's fingerprint, so a deck built on
+    the old roster stops matching, and cancels the league's old deck jobs."""
+    thread = threading.Thread(target=_roster_refresh.stamp, args=(str(league_id),),
+                              name="fa-move-stamp", daemon=True)
+    thread.start()
+    return thread
+
+
+def _fa_move_core(sess, body) -> tuple[dict, int]:
+    """POST /api/league/free-agents/move after the route's own steps 1–2
+    (test mode, any kill switch). The order of checks is scope §B3's and is
+    pinned (test_fa_move_route.py), source order included:
+
+       3 session + `_verified_write_denial` → 4 body → 5 league platform (the
+       league row; a client value is ignored) → 6 that platform's kill switch
+       → 7 `attempt_id` lookup, then the double-move block → 8 credential →
+       9 consent, committed before any platform call → 10 pre-write reads
+       (rosters, ownership, availability, roster room) → 11 the claim gate,
+       the `move_kind` check, the FAAB check → the preflight budget →
+       12 the `sent` row, then the write → 13 the `result` row → on
+       `complete`, the roster save → event → response (the stamp starts off
+       the request thread).
+    """
+    t0 = _fa_move_clock()
+    user_id = str(sess.get("user_id") or "")
+    # 3. A verified session (the hard write gate). `_verified_write_denial`
+    # lets a synthetic demo session through; a demo session never makes a
+    # platform move, so it is refused here with the same code.
+    if (not user_id or sess.get("is_demo") or _synthetic_demo_session(sess)
+            or _verified_write_denial(sess) is not None):
+        return _fa_move_error("verification_required", 403,
+                              _fa_copy.message("verification_required"))
+    # 4. The body.
+    req = _fa_move_parse_body(body)
+    if req is None:
+        return _fa_move_error("bad_request", 400, _fa_copy.message("bad_request"))
+    league_id, attempt_id = req["league_id"], req["attempt_id"]
+    add_id, drop_id, kind, bid = (req["add_player_id"], req["drop_player_id"],
+                                  req["move_kind"], req["faab_bid"])
+    # 5. The platform, from the league row.
+    platform = _fa_move_league_platform(league_id)
+    # 6. That platform's kill switch (and its captured shapes).
+    if not _fa_move_live(platform):
+        return _fa_move_error("feature_disabled", 404,
+                              _fa_copy.message("feature_disabled", platform))
+    now = _fa_move_now()
+    # 7. The attempt_id, per user: a repeat returns the recorded answer, or 409
+    # while the first is still in flight. It never writes twice. Another user's
+    # identical id is a different move (contract §3).
+    prior = _fa_db.platform_write_move_rows(user_id, attempt_id)
+    if prior:
+        done = next((r for r in prior if r["phase"] == "result"), None)
+        if done is not None and done.get("response_json"):
+            return json.loads(done["response_json"]), int(done.get("response_status") or 200)
+        return _fa_move_error("move_in_progress", 409,
+                              _fa_copy.message("move_in_progress", platform),
+                              title=_fa_copy.UNKNOWN_TITLE)
+    # 7b. The double-move block (§B6): a new tap for the same player. `now`
+    # is also when this check passed (the post-insert race check, 12b).
+    block = _fa_move_blocks(user_id, league_id, now).get(add_id)
+    if block:
+        names = _player_names_by_id([add_id])
+        key = "move_in_progress_pending_claim" if block == "pending_claim" else "move_in_progress"
+        return _fa_move_error("move_in_progress", 409,
+                              _fa_copy.message(key, platform, add=names.get(add_id)),
+                              title=_fa_copy.UNKNOWN_TITLE)
+    # 8. The credential.
+    cred = get_sleeper_credential(user_id)
+    if not cred:
+        return _fa_move_error(f"{platform}_not_linked", 409,
+                              _fa_copy.message("not_linked", platform))
+    try:
+        token = _sleeper_write.decrypt_token(cred["token_encrypted"])
+    except _sleeper_write.SleeperWriteError:
+        return _fa_move_error(f"{platform}_unconfigured", 503,
+                              _fa_copy.message("unconfigured", platform))
+    if _sleeper_write.is_expired(token):
+        _drop_sleeper_credential(user_id, "credential_expired")
+        return _fa_move_error(f"{platform}_expired", 409, _fa_copy.message("expired", platform))
+    platform_user_id = str(cred.get("sleeper_user_id") or "")
+    # 9. Consent: a grant is committed here, before any platform call.
+    refusal, grant = _fa_move_consent_step(user_id, platform, platform_user_id, req, now)
+    if refusal is not None:
+        return refusal
+    # 10. Pre-write reads, under the preflight budget. Nothing is sent if any
+    # of them fails or refuses.
+    rosters = _fetch_league_rosters(league_id)
+    if rosters is None:
+        return _fa_move_error(f"{platform}_write_failed", 502,
+                              _fa_copy.message("write_failed_roster_read", platform),
+                              kind="roster_read")
+    from .sleeper_roster import find_user_roster
+    mine = find_user_roster(rosters, platform_user_id)
+    league_name = _fa_league_meta(league_id).get("name") or None
+    names = _player_names_by_id([p for p in (add_id, drop_id) if p])
+    add_name, drop_name = names.get(add_id), names.get(drop_id) if drop_id else None
+    try:
+        roster_id = int(mine.get("roster_id")) if mine is not None else None
+    except (TypeError, ValueError):
+        roster_id = None
+    if roster_id is None:
+        # [pm] ux-lead F3: the connected account owns no team here. Reuses
+        # `{p}_not_linked` with its own message; no new code.
+        return _fa_move_error(f"{platform}_not_linked", 409, _fa_copy.message(
+            "not_linked_other_account", platform, league=league_name))
+    my_players = [str(p) for p in (mine.get("players") or []) if p not in (None, "")]
+    held = set(my_players)
+    if add_id in held:
+        return _fa_move_error("player_unavailable", 422, _fa_copy.message(
+            "player_already_yours", platform, add=add_name))
+    rostered = {str(p) for r in rosters if isinstance(r, dict)
+                for p in (r.get("players") or []) if p not in (None, "")}
+    if add_id in rostered:
+        return _fa_move_error("player_unavailable", 422, _fa_copy.message(
+            "player_unavailable", platform, add=add_name))
+    if drop_id and drop_id not in held:
+        return _fa_move_error("asset_not_owned", 422, _fa_copy.message(
+            "asset_not_owned", platform, drop=drop_name))
+    limit = _sleeper_roster_limit(league_id)
+    if not drop_id and limit is not None and len(held) >= limit:
+        # Only when capacity is KNOWN; otherwise Sleeper decides (consent.md §3).
+        return _fa_move_error("roster_full_drop_required", 422,
+                              _fa_copy.message("roster_full_drop_required", platform))
+    # 11. The claim gate (D5), then the move_kind check (D10: never send a
+    # different kind than the button named), then a claim's FAAB.
+    actual = _fa_move_actual_kind(league_id, add_id)
+    if (kind == "claim" or actual == "claim") and not _fa_move_claims_enabled(platform):
+        return _fa_move_error("waiver_claim_unsupported", 422, _fa_copy.message(
+            "waiver_claim_unsupported", platform, add=add_name))
+    if actual is not None and actual != kind:
+        return _fa_move_error("move_kind_changed", 409, _fa_copy.message(
+            "move_kind_changed", platform, add=add_name))
+    if kind == "claim":
+        # FAAB fails closed: a claim on a FAAB league (or one whose waiver type
+        # can't be read) whose remaining budget is unknown is refused as a
+        # read failure, nothing sent; a bid is bounded to 0..budget and to
+        # what's left.
+        waivers = _sleeper_waivers(league_id, (mine.get("settings") or {}).get(
+            "waiver_budget_used")) or {}
+        faab = waivers.get("faab") or {}
+        remaining, budget = faab.get("remaining"), faab.get("budget")
+        if waivers.get("type") is None or (waivers.get("type") == "faab" and (
+                remaining is None or budget is None)):
+            return _fa_move_error(f"{platform}_write_failed", 502,
+                                  _fa_copy.message("write_failed_roster_read", platform),
+                                  kind="roster_read")
+        if waivers.get("type") == "faab" and bid is None:
+            # Scope §B11 rule 5: never default an empty bid to 0 (0 is a real,
+            # typed choice). The client returns to Ready with bid_needed_line.
+            return _fa_move_error("bad_request", 400, _fa_copy.message("bad_request", platform))
+        if waivers.get("type") == "faab" and (bid > budget or bid > remaining):
+            left = max(int(remaining), 0)
+            return _fa_move_error("waiver_bid_over_budget", 422, _fa_copy.message(
+                "waiver_bid_over_budget", platform, remaining=left), remaining=left)
+    if _fa_move_preflight_over_budget(t0):
+        return _fa_move_error(f"{platform}_write_failed", 502,
+                              _fa_copy.message("write_failed_roster_read", platform),
+                              kind="roster_read")
+    # The grant again, right before the `sent` row: a withdrawal (Settings,
+    # disconnect, re-link) during the preflight stops the move.
+    if _fa_move_grant(user_id, platform, platform_user_id, _fa_move_now()) is None:
+        return _fa_move_consent_required(user_id, platform, platform_user_id, _fa_move_now())
+    # 12. The `sent` row BEFORE the platform call, unique on (user, attempt_id,
+    # 'sent'): a concurrent duplicate of this tap loses here and never sends.
+    record = {"attempt_id": attempt_id, "user_id": user_id, "platform": platform,
+              "platform_user_id": platform_user_id, "league_id": league_id,
+              "consent_id": grant["consent_id"], "move_kind": kind,
+              "add_player_ids": json.dumps([add_id]),
+              "drop_player_ids": json.dumps([drop_id] if drop_id else []),
+              "faab_bid": bid}
+    # The double-move block is re-checked and the `sent` row inserted in ONE
+    # transaction under a Postgres advisory lock on (user, league, add player)
+    # (database.claim_platform_write_move, the trade-share lock's pattern):
+    # step 7b and the insert are otherwise two steps, and a Postgres id is
+    # assigned at INSERT but visible only at COMMIT, so racing taps could both
+    # pass. Under the lock the later tap waits for the earlier one's commit and
+    # then sees its row.
+    claim_now = _fa_move_now()
+    sent_id, rival = _fa_db.claim_platform_write_move(
+        {**record, "phase": "sent", "sent_at": claim_now.isoformat()},
+        lambda rows: _fa_move_block_reasons(
+            rows, claim_now, checked_at=now).get(add_id),
+        since=claim_now - _FA_MOVE_PENDING_CLAIM_BLOCK)
+    if rival:
+        key = "move_in_progress_pending_claim" if rival == "pending_claim" else "move_in_progress"
+        return _fa_move_error("move_in_progress", 409,
+                              _fa_copy.message(key, platform, add=add_name),
+                              title=_fa_copy.UNKNOWN_TITLE)
+    if not sent_id:
+        return _fa_move_error("move_in_progress", 409,
+                              _fa_copy.message("move_in_progress", platform, add=add_name),
+                              title=_fa_copy.UNKNOWN_TITLE)
+    # 12b. SQLite (local dev) takes no advisory lock, so a race there can still
+    # get two taps past the claim. Its writes commit in id order, so a re-read
+    # settles it: an earlier-inserted (lower id) move of this player that still
+    # blocks, or that landed after this request's check, wins; this one records
+    # its 409 and never sends. On Postgres the lock already decided it.
+    rival = _fa_move_blocks(user_id, league_id, _fa_move_now(), before_id=sent_id,
+                            checked_at=now).get(add_id)
+    if rival:
+        key = "move_in_progress_pending_claim" if rival == "pending_claim" else "move_in_progress"
+        payload, status = _fa_move_error("move_in_progress", 409,
+                                         _fa_copy.message(key, platform, add=add_name),
+                                         title=_fa_copy.UNKNOWN_TITLE)
+        _fa_db.record_platform_write_move({
+            **record, "phase": "result", "result": "error", "error_code": "move_in_progress",
+            "response_status": status, "response_json": json.dumps(payload)})
+        return payload, status
+    fa_req = _sleeper_write.FaMoveRequest(
+        league_id=league_id, roster_id=roster_id, add_player_id=add_id,
+        drop_player_id=drop_id, move_kind=kind, faab_bid=bid)
+    reported = None
+    try:
+        reported = _sleeper_write.fa_move(token, fa_req)
+    except _sleeper_write.SleeperAuthError as e:
+        log.warning("fa move auth-rejected: %s", _provider_body_for_log(getattr(e, "detail", None)))
+        try:
+            _drop_sleeper_credential(user_id, "credential_rejected")
+        except Exception:
+            log.exception("fa move: dropping the rejected credential failed")
+        payload, status = _fa_move_error(f"{platform}_rejected", 409,
+                                         _fa_copy.message("rejected", platform))
+        result = "error"
+    except _sleeper_write.SleeperWriteError as e:
+        log.warning("fa move write-failed [%s]: %s", e.kind,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        payload, status, result = _fa_move_write_failure(e.kind, platform)
+    except Exception:
+        # A bug after the sent row: the move may have gone out. Never a retry.
+        log.exception("fa move: unexpected error during the platform write")
+        payload, status, result = _fa_move_write_failure(_write_outcome.OUTCOME_UNKNOWN, platform)
+    if reported is not None:
+        move_status, result = reported.get("status"), reported.get("result")
+        if move_status not in ("complete", "pending") or result not in ("accepted", "partial"):
+            log.warning("fa move: unreadable adapter result %r; outcome unknown",
+                        {k: reported.get(k) for k in ("status", "result")})
+            payload, status, result = _fa_move_write_failure(_write_outcome.OUTCOME_UNKNOWN,
+                                                             platform)
+            reported = None
+    added = dropped = []
+    if reported is not None:
+        fallback = result == "accepted"
+        added = [str(p) for p in (reported.get("added")
+                                  or ([add_id] if fallback else []))]
+        dropped = [str(p) for p in (reported.get("dropped")
+                                    or ([drop_id] if fallback and drop_id else []))]
+        title, lines = _fa_copy.result_copy(
+            status=move_status, result=result, platform=platform,
+            add=add_name or "This player", drop=(drop_name or "That player") if drop_id else None,
+            league=league_name or "your league", added=added, dropped=dropped, bid=bid)
+        payload = {"status": move_status, "move_kind": kind, "result": result,
+                   "league_platform": platform, "attempt_id": attempt_id,
+                   "title": title, "lines": lines}
+        if reported.get("transaction_id"):
+            payload["platform_transaction_id"] = str(reported["transaction_id"])
+        status = 200
+    # 13. The `result` row: the answer a repeat of this attempt_id replays.
+    try:
+        _fa_db.record_platform_write_move({
+            **record, "phase": "result", "result": result,
+            "status": payload.get("status") if status == 200 else None,
+            "platform_transaction_id": payload.get("platform_transaction_id"),
+            "error_code": None if status == 200 else payload.get("error"),
+            "response_status": status, "response_json": json.dumps(payload)})
+    except Exception:
+        log.exception("fa move: the result row failed (attempt %s)", attempt_id)
+    stamp = False
+    if status == 200 and payload["status"] == "complete":
+        # K-F5: save the new roster (dropped off, added on) BEFORE answering,
+        # because the phone drops its held trade page when this request ends.
+        # Pending, failed and outcome-unknown moves never touch the roster.
+        try:
+            new_roster = ([p for p in my_players if p not in set(dropped)]
+                          + [p for p in added if p not in held])
+            stamp = _fa_db.set_league_member_roster(
+                league_id, str(mine.get("owner_id") or platform_user_id), new_roster)
+            if stamp:
+                _invalidate_league_members_cache(league_id)
+        except Exception:
+            log.exception("fa move: roster save failed (league %s)", league_id)
+            stamp = False
+    if status == 200:
+        _fa_move_event(user_id, "fa_move_write_succeeded", {
+            "move_kind": kind, "has_drop": bool(drop_id), "has_bid": bid is not None,
+            "result": result, "attempt_id": attempt_id, "league_platform": platform,
+        }, league_id=league_id)
+    if stamp:
+        _fa_move_stamp_async(league_id)
+    return payload, status
+
+
+@app.route("/api/league/free-agents/move", methods=["POST"])
+def league_free_agents_move_route():
+    """D1: make one free-agent move in the user's league (contract §3).
+
+    Body {league_id, add_player_id, drop_player_id?, move_kind: add|claim,
+    faab_bid? (claims), consent?: {copy_version, locale}, attempt_id (one per
+    tap; opaque, 8–64 of [A-Za-z0-9._-], unique per user), surface?
+    (free_agents|usage_trends)}. 200 {status: complete|pending, move_kind, result:
+    accepted|partial, league_platform, attempt_id, title, lines,
+    platform_transaction_id?}; a repeat of an attempt_id returns its recorded
+    answer. Every error body is {error, message, detail == message, title?,
+    kind?, remaining?, consent?}; the codes and states are contract §4. Order
+    of checks: `_fa_move_core`. Steps 1–2 here: test mode fails closed (599),
+    and 404 `feature_disabled` while every `*.send_add_drop` is off.
+    """
+    if _TEST_MODE:
+        # Fail closed: there is no legitimate automated move.
+        return jsonify({"error": "test_mode_move_disabled"}), 599
+    if not _fa_move_any_flag_on():
+        body, status = _fa_move_error("feature_disabled", 404,
+                                      _fa_copy.message("feature_disabled"))
+        return jsonify(body), status
+    sess = _require_session()
+    try:
+        body, status = _fa_move_core(sess, request.get_json(silent=True))
+    except Exception:
+        log.exception("free-agent move failed")
+        body, status = _fa_move_error("internal_error", 500, _fa_copy.message("internal_error"),
+                                      title=_fa_copy.UNKNOWN_TITLE)
+    return jsonify(body), status
 
 
 # ─── Usage Trends (docs/plans/usage-trends/scope.md) ───────────────────────
@@ -37399,6 +40365,170 @@ def _require_pro(fn):
     return wrapper
 
 
+from . import paywall_gate as _paywall_gate
+
+
+@app.before_request
+def _paywall_gate_hook():
+    """Global paywall gate: 402 pro_required on the rules backend/paywall_gate.py
+    marks gated. A rule that isn't gated, or a server that isn't enforcing,
+    returns before the session or any entitlement is read. No session → the
+    route's own auth answers. Pro counts only on a verified session; an
+    unverified one is settled before any preview or entitlement read (the
+    route's own 403 where it wears the verified gate, else 402
+    verify_required). A failed entitlement read fails open. A request allowed
+    under the deck preview leaves g.paywall_preview for _serve_trade_job to
+    cap and record. Each 402 also records paywall_gate_hit (C8 §B, analytics
+    only)."""
+    rule = request.url_rule.rule if request.url_rule is not None else ""
+    if not _paywall_gate.applies(rule, request.method):
+        return None
+    sess = _get_session(request.headers.get("X-Session-Token", "")) or {}
+    try:
+        result = _paywall_gate.verdict(
+            rule, request.method, sess.get("user_id"),
+            _paywall_gate.is_mobile_request(request.headers),
+            bool(sess.get("verified") or _synthetic_demo_session(sess)),
+            demo=_synthetic_demo_session(sess),
+            route_verifies=_route_answers_unverified(request.endpoint, request.method),
+            ask=_paywall_deck_ask(sess.get("user_id")))
+    except Exception:
+        log.exception("paywall gate failed open: %s %s", request.method, rule)
+        return None
+    if isinstance(result, _paywall_gate.Preview):
+        g.paywall_preview = result
+        return None
+    if result is None:
+        return None
+    _emit_paywall_gate_hit(sess.get("user_id"), rule, result[1])
+    return jsonify(result[1]), result[0]
+
+
+def _emit_paywall_gate_hit(user_id: str | None, rule: str, body: dict) -> None:
+    """C8 §B: record paywall_gate_hit for the 402 the hook is sending
+    (paywall_gate.record_gate_hit). Analytics only: a failure is logged by
+    exception type and swallowed, never blocking or changing the 402."""
+    try:
+        _paywall_gate.record_gate_hit(
+            user_id, body["gate"], rule,
+            is_mobile=_paywall_gate.is_mobile_request(request.headers),
+            **_device_info_from_request())
+    except Exception as e:
+        log.warning("paywall_gate_hit not recorded: %s", type(e).__name__)
+
+
+def _paywall_deck_ask(user_id):
+    """The request facts the deck preview decides on (paywall_gate.DeckAsk).
+    The deck is /status's `deck` (P2, #369) when trade_job_status honours it,
+    else its `job_id`."""
+    cursor = request.args.get("cursor")
+    body = (request.get_json(silent=True) or {}) if request.method == "POST" else {}
+    trade_id = body.get("trade_id") if isinstance(body, dict) else None
+    deck = (request.args.get("deck")
+            if (cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled()
+                and _trade_i1_mode())
+            else None)
+    return _paywall_gate.DeckAsk(
+        page_size=_trade_page_size(),
+        job_id=deck or request.args.get("job_id"),
+        cursor=int(cursor) if cursor is not None and re.fullmatch(r"[0-9]{1,9}", cursor) else None,
+        trade_id=trade_id if isinstance(trade_id, str) else None,
+        page_trade_ids=lambda job_id, limit: _paywall_page_trade_ids(user_id, job_id, limit))
+
+
+def _paywall_page_trade_ids(user_id, job_id: str, limit: int) -> set | None:
+    """Trade ids among the deck's first `limit` raw cards (the preview window):
+    the live job's, plus the P1 stored page built by that job (a page-served
+    deck may have no job in this process). None when neither exists: the
+    deck is gone from this process, and the swipe check falls back to the
+    window paywall_previews recorded (P3-1)."""
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        cards = (job or {}).get("cards") or []
+        ids = {c.get("trade_id") for c in cards[:limit] if isinstance(c, dict)}
+    held = job is not None
+    if user_id and _trade_page_store_enabled():
+        from . import database as _db
+        row = _db.load_trade_page_for_job(user_id, job_id)
+        held = held or row is not None
+        ids |= _stored_window_ids(row, limit)
+    return ids if held else None
+
+
+def _stored_window_ids(row, limit: int) -> set:
+    """Trade ids among a P1 stored page row's first `limit` raw cards."""
+    pages = (row or {}).get("pages_blob")
+    cards = pages.get("cards") if isinstance(pages, Mapping) else None
+    return {c.get("trade_id") for c in (cards or [])[:limit] if isinstance(c, dict)}
+
+
+def _serve_stored_trade_page(user_id: str, out: dict, row: dict):
+    """The deck preview on a P1 stored-page response (#368: _serve_trade_page
+    and _trade_page_status_view build it, not _serve_trade_job). Under
+    g.paywall_preview, keep only cards inside the window of the stored raw
+    list, hold the cursor at the window's end, and record the preview when a
+    card is served. Otherwise the body is unchanged."""
+    preview = g.get("paywall_preview")
+    if preview is None:
+        return jsonify(out)
+    window = _stored_window_ids(row, preview.limit)
+    out = {**out, "cards": [c for c in out["cards"] if c.get("trade_id") in window],
+           "cursor": min(out["cursor"], preview.limit),
+           "total_ready": min(out["total_ready"], preview.limit)}
+    if out["cards"] and not _paywall_gate.record_preview(
+            user_id, out["job_id"], preview.pages_for(out["cursor"]), window):
+        return jsonify({"error": "pro_required", "gate": _paywall_gate.PREVIEW_USED}), 402
+    return jsonify(out)
+
+
+def _serve_deck_status(user_id: str, out: dict):
+    """The deck preview on P2's /status?deck=D&cursor=K response (#369:
+    _trade_deck_status builds it from D's stored pages, D's job, or a rebase
+    onto the scope's newer deck). Under g.paywall_preview, keep only cards
+    inside the window of the deck that served them (`deck_id`, else `job_id`),
+    hold the cursor at the window's end, and record the preview against that
+    deck: a rebase onto another deck after the preview is spent is a different
+    deck, so the claim fails and the answer is 402. Otherwise unchanged."""
+    preview = g.get("paywall_preview")
+    if preview is None or not out.get("cards"):
+        return jsonify(out)
+    served = out.get("deck_id") or out["job_id"]
+    window = _paywall_page_trade_ids(user_id, served, preview.limit) or set()
+    out = {**out, "cards": [c for c in out["cards"] if c.get("trade_id") in window],
+           "cursor": min(out["cursor"], preview.limit),
+           "total_ready": min(out["total_ready"], preview.limit)}
+    if out["cards"] and not _paywall_gate.record_preview(
+            user_id, served, preview.pages_for(out["cursor"]), window):
+        return jsonify({"error": "pro_required", "gate": _paywall_gate.PREVIEW_USED}), 402
+    return jsonify(out)
+
+
+def _serve_trade_job(user_id: str, snapshot: dict, paged: bool, cursor: int = 0,
+                     search_id=None, *, deck_named: bool = False):
+    """The /generate and /status response for a job snapshot. Under the deck
+    preview (g.paywall_preview, set by _paywall_gate_hook) the job's raw cards
+    are capped to the preview window, and a response that serves cards records
+    the preview: this is the only consumption point, so warm-up and cron-built
+    jobs never consume it. Otherwise byte-identical to the views. `deck_named`
+    (P2, #369): a paged organic /generate names its deck (`deck_id`)."""
+    preview = g.get("paywall_preview")
+    if preview is not None:
+        snapshot = {**snapshot, "cards": (snapshot.get("cards") or [])[:preview.limit]}
+    if paged:
+        out = _trade_job_page_view(snapshot, cursor, search_id)
+        if deck_named:
+            out = {**out, "deck_id": out["job_id"]}
+    else:
+        out = _trade_job_public_view(copy.deepcopy(snapshot))
+    if preview is not None and out.get("cards"):
+        raw_end = out["cursor"] if paged else len(snapshot["cards"])
+        window = {c.get("trade_id") for c in snapshot["cards"] if isinstance(c, dict)}
+        if not _paywall_gate.record_preview(user_id, snapshot["job_id"],
+                                            preview.pages_for(raw_end), window):
+            return jsonify({"error": "pro_required", "gate": _paywall_gate.PREVIEW_USED}), 402
+    return jsonify(out)
+
+
 @app.route("/api/me/entitlements", methods=["GET"])
 def me_entitlements():
     """Client bootstrap: resolved entitlement state + enforcement posture.
@@ -37407,10 +40537,22 @@ def me_entitlements():
     gives it a `pro` bool today: POST /api/extension/auth's payload has no
     `pro` field, and the extension reads no entitlement state anywhere.
     `pro` is intentionally not in that payload: the unverified sign-in path
-    never reads entitlement state (legal R28.17)."""
+    never reads entitlement state (legal R28.17).
+
+    An unverified session gets the empty entitlement view (every field
+    blank/false, `founder` included), as the paywall gate treats it: an
+    unverified username-only session shares the subscriber's user_id.
+    `enforcing` is server state. `founder`: pro from a subscription that
+    started before the club closes, i.e. before the price rise
+    (_PAYWALL_PRICE_RISE_AT via _paywall_club_closes_at();
+    entitlements.is_founder)."""
     sess = _require_session()
-    out = entl.get_entitlements(sess["user_id"])
-    out["enforcing"] = is_enabled("monetize.entitlements")
+    if sess.get("verified") or _synthetic_demo_session(sess):
+        out = entl.get_entitlements(sess["user_id"])
+        out["founder"] = entl.is_founder(sess["user_id"], _paywall_club_closes_at())
+    else:
+        out = entl.empty_entitlements()
+    out["enforcing"] = entl.is_enforcing()
     return jsonify(out)
 
 
@@ -37424,30 +40566,39 @@ _PAYWALL_PAGES = [
     {"id": "value_recap", "kind": "trades_found",
      "title": "Your league has trades waiting",
      "body_ref": "matches_preview"},
-    {"id": "feature_grid", "kind": "features",
-     "features": ["unlimited_leagues", "portfolio", "engine_knobs",
-                  "extension_overlays", "ad_free"]},
+    # The truthful grid (#393 scope §2 item 3, 5c): empty at launch. No
+    # earlier key names a delivered gated feature (portfolio is free, there
+    # is no league cap). The value lines come from the client's copy; a
+    # client renders the grid only when the list is non-empty.
+    {"id": "feature_grid", "kind": "features", "features": []},
     {"id": "plans", "kind": "purchase"},
 ]
+
+# The Founding GMs club (#393 recommendation §(b)). It closes at the price
+# rise below, so it has no date of its own.
+_PAYWALL_CLUB_NAME = "Founding GMs"
 
 # No `trial_days` (#393, operator 2026-10-25): the trial is Apple's 1-month
 # intro offer, and a day count is the wrong claim ("1 month", never
 # "30 days"). Older clients render "N days free" only when trial_days > 0,
 # so dropping the key drops the claim; newer ones read StoreKit's offer.
+# `trial_period` names that offer (Apple has no 30-day duration); a client
+# keys "free" copy off StoreKit intro eligibility, never a server duration.
 _PAYWALL_PRODUCTS = [
-    {"product_id": "ftf_pro_monthly", "period": "monthly", "hero": False},
+    {"product_id": "ftf_pro_monthly", "period": "monthly",
+     "trial_period": "1 month", "hero": False},
     {"product_id": "ftf_pro_annual", "period": "annual",
-     "hero": True, "badge": "best_value"},
+     "trial_period": "1 month", "hero": True, "badge": "best_value"},
 ]
 
-# Fallback price copy (#393, operator 2026-10-25): $4.99/mo and $24.99/yr,
-# rising to $6.99 / $34.99 for NEW subscribers at _PAYWALL_PRICE_RISE_AT.
-# Existing subscribers keep their price through App Store price
-# preservation, which this table does not model. Each entry is (before the
-# rise, from the rise on). per_month_equiv is the annual price / 12 rounded
-# UP to the cent, matching legal's #393 R28.8 #2 copy, "$2.09/month"
-# (24.99 / 12 = 2.0825; 34.99 / 12 = 2.9158): rounding down would
-# understate the annual price.
+# Fallback price copy (#393, operator 2026-10-25): $4.99/mo and $24.99/yr
+# (the Founding GM prices), rising to $6.99 / $34.99 for NEW subscribers at
+# _PAYWALL_PRICE_RISE_AT. Existing subscribers keep their price through App
+# Store price preservation, which this table does not model. Each entry is
+# (before the rise, from the rise on). per_month_equiv is the annual price
+# / 12 rounded UP to the cent, matching legal's #393 R28.8 #2 copy,
+# "$2.09/month" (24.99 / 12 = 2.0825; 34.99 / 12 = 2.9158): rounding down
+# would understate the annual price.
 #
 # The rise is an INSTANT: 2027-01-02 04:00 UTC (11 pm ET / 8 pm PT on
 # Jan 1). That is App Store Connect's US start time for a price change
@@ -37460,8 +40611,15 @@ _PAYWALL_PRODUCTS = [
 # through most of Jan 1.
 # FALLBACK ONLY: StoreKit's localized price is authoritative, and this
 # instant only decides which strings the server shows when StoreKit is
-# unavailable. monetization-pm records the start time App Store Connect
-# shows (setup §3d); if the two differ, move this constant to match.
+# unavailable. It must equal the App Store Connect scheduled price change:
+# monetization-pm records the start time App Store Connect shows (setup
+# §3d), and if the two differ, moves this constant to match (a reviewed
+# deploy, never a knob or config).
+#
+# THE ONE INSTANT (head-eng, 2026-10-27): the Founding GMs club closes at
+# the price rise. Everything else derives from this constant: the price
+# window, `club.closes_at` and `club.open` on /api/paywall/config, and
+# `founder` on /api/me/entitlements. Hold no second copy of it.
 _PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 2, 4, 0, tzinfo=timezone.utc)
 _PAYWALL_PRICES = {
     "ftf_pro_monthly": ({"display_price": "$4.99"},
@@ -37476,6 +40634,12 @@ def _paywall_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _paywall_club_closes_at() -> str:
+    """`club.closes_at` and is_founder's cut-off: _PAYWALL_PRICE_RISE_AT as
+    an ISO-8601 UTC string with a Z suffix, the shape the config serves."""
+    return _PAYWALL_PRICE_RISE_AT.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _paywall_products(now: datetime) -> list:
     """`products[]` as served at `now` (timezone-aware; a naive datetime
     raises). Pure: same `now`, same answer. At or after
@@ -37488,14 +40652,31 @@ def _paywall_products(now: datetime) -> list:
 # Tip jar (operator request 2026-08-28): consumable "support the platform"
 # SKUs. Money with NO entitlement — entitlements.is_tip_product() short-
 # circuits the projector, so a tip can never grant `pro`. Guideline 3.1.1:
-# in-app tips to the developer must be IAP. NOT SERVED at launch (#393, as
-# #465 does): the tip SKUs are not being submitted to App Store Connect, so
-# the route sends `tips: []`. This list is what to restore if they are.
+# in-app tips to the developer must be IAP. SERVED BEHIND A KNOB (tip-jar
+# plan §3 S1, docs/plans/tip-jar/plan.md): the route sends this list only
+# while model_config `paywall_tips_enabled` is exactly 1, the resolved
+# platform is `ios` and the session is verified and not demo; otherwise
+# `tips: []`. The knob defaults to 0 and
+# release-lead sets it to 1 once the three products exist in App Store
+# Connect; setting it back to 0 is the deploy-free kill switch.
 _PAYWALL_TIPS = [
     {"product_id": "ftf_tip_199", "display_price": "$1.99"},
     {"product_id": "ftf_tip_499", "display_price": "$4.99"},
     {"product_id": "ftf_tip_999", "display_price": "$9.99"},
 ]
+
+
+def _paywall_tips_enabled() -> bool:
+    """model_config `paywall_tips_enabled` == 1, read live on every request
+    through get_config() (no cache), so setting it to 0 hides the tips with
+    no deploy. Anything but exactly 1 is off: 0, 2, NaN, a non-number, a
+    missing row or a failed read (the inline fallback matches the 0 seed,
+    G-064)."""
+    try:
+        return float(get_config().get("paywall_tips_enabled", 0.0)) == 1.0
+    except Exception:
+        return False
+
 
 _PAYWALL_PLATFORMS = ("ios", "web", "extension")
 
@@ -37518,31 +40699,45 @@ def paywall_config():
     StoreKit-localized price from the RevenueCat offering for the matching
     `product_id`; these strings are US-English list prices and know nothing
     about the user's storefront, currency, or an active promotional offer.
-    They switch to the new-subscriber prices at _PAYWALL_PRICE_RISE_AT.
+    They are the founder prices while `club.open` and switch to the
+    new-subscriber prices at _PAYWALL_PRICE_RISE_AT, the same instant
+    `club.open` turns false: both come from one _paywall_now() read.
     """
-    _require_session()
+    sess = _require_session()
     if not is_enabled("monetize.paywall"):
         return jsonify({"enabled": False})
     platform = request.args.get("platform", "ios")
     if platform not in _PAYWALL_PLATFORMS:
         platform = "ios"
+    # Same predicate as _session_verification: an unverified or demo
+    # session is the unverified answer.
+    session_verified = bool(sess.get("verified")) and not sess.get("is_demo")
+    now = _paywall_now()   # read once: club.open and the prices flip together
     return jsonify({
         "enabled": True,
         "platform": platform,
+        "club": {"name": _PAYWALL_CLUB_NAME, "closes_at": _paywall_club_closes_at(),
+                 "open": now < _PAYWALL_PRICE_RISE_AT},
         "pages": _PAYWALL_PAGES,
-        "products": _paywall_products(_paywall_now()),
+        "products": _paywall_products(now),
         # Store-managed: the server never mints trials (pro-subscription
         # LLD §6). True until the client reads real per-Apple-ID
         # eligibility off the RevenueCat offering — this field is the
         # "we offer a trial on this SKU" claim, not a per-user promise.
         "trial_eligible": True,
+        # Always true: there is no non-dismissible mode (#393 scope §2).
         "dismissible": True,
-        # Tip-jar consumables: none at launch (the SKUs are not submitted to
-        # App Store Connect; see _PAYWALL_TIPS). A tip would still grant
-        # nothing (entitlements.is_tip_product). Rides monetize.paywall: tips
-        # are purchase UI, and the flag's contract is "no purchase UI anywhere"
-        # when off.
-        "tips": [],
+        # Tip-jar consumables: served behind the `paywall_tips_enabled` knob
+        # (exactly 1), on `ios` only (the one platform with in-app
+        # purchase), and only to a verified, non-demo session (defence in
+        # depth behind #495's verified-only Settings row); otherwise [].
+        # See _PAYWALL_TIPS. A tip grants nothing
+        # (entitlements.is_tip_product). Rides monetize.paywall too: tips
+        # are purchase UI, and the flag's contract is "no purchase UI
+        # anywhere" when off.
+        "tips": (_PAYWALL_TIPS
+                 if platform == "ios" and session_verified
+                 and _paywall_tips_enabled() else []),
     })
 
 
@@ -38155,6 +41350,10 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
 def mfl_auth_link():
     """Sign in with MFL and list the user's leagues (no import yet).
 
+    POST's MFL login shares the platform sign-in's D7 failure limits (per
+    client IP, per (MFL username, IP), per MFL username across IPs; 429
+    too_many_attempts + Retry-After).
+
     GET → sign-in status, mirroring GET /api/sleeper/link (send-auth lazy
     flow, 2026-08-11): {connected, mfl_username, year}. Never returns the
     cookie. `connected` is true when an encrypted credential row exists OR
@@ -38207,22 +41406,47 @@ def mfl_auth_link():
     password = body.get("password") or ""
     try:
         year = int(body.get("year") or _MFL_DEFAULT_YEAR)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):   # JSON Infinity / 1e400
         return jsonify({"error": "mfl_bad_year",
                         "message": "year must be numeric"}), 400
     if not username or not password:
         return jsonify({"error": "mfl_missing_credentials",
                         "message": "MFL username and password are required."}), 400
 
+    # D7 limiter on this password login (feat/mfl-auth-link-throttle): the
+    # same in-process windows and keys the platform sign-in uses (the client
+    # IP, the (MFL subject, IP) pair and the MFL subject across IPs; subject
+    # = lower-cased username), so a verified session can't use this route as
+    # an unthrottled MFL password oracle. Year range and admission run
+    # BEFORE any MFL call. Only an MFL bad login counts; a good login clears
+    # the pair bucket and the subject-wide counter; outages and input errors
+    # don't count.
+    # _signin_release runs in the `finally`, so an exception never leaks the
+    # in-flight slot.
+    bad_year = _mfl_entry_year_refusal(body.get("year"))
+    if bad_year is not None:
+        return bad_year
+    from . import accounts as _accounts
+    audit: dict = {}
+    limited = _signin_limit_gate(
+        audit, "mfl", _accounts.platform_subject("mfl", username))
+    if limited is not None:
+        log.info("MFL-AUTH-LINK outcome=limited reason=%s",
+                 audit.get("reason"))
+        return limited
     try:
         auth = _mfl.login(username, password, year)
         del password  # transient use only — never persisted, never logged
         leagues = _mfl.fetch_my_leagues(auth["cookie"], year)
+        audit["outcome"] = "proven"   # good login → the subject's count clears
     except _mfl.MflAuthError:
+        audit["_counted_failure"] = True
         return jsonify({"error": "mfl_bad_credentials",
                         "message": "MFL didn't accept that username and password."}), 403
     except _mfl.MflError as e:
         return _platform_error_response(e, "mfl")
+    finally:
+        _signin_release(audit)
 
     # Store ONLY the returned cookie — encrypted at rest when the key exists,
     # otherwise session-only (fail closed: plaintext never reaches the DB).
@@ -38240,53 +41464,56 @@ def mfl_auth_link():
     if storage == "session":
         sess["mfl_cookie"] = auth["cookie"]
 
-    # ── A successful MFL login counts as session verification ────────────
-    # Operator decision (2026-08-11, Send-in-MFL follow-ups): MFL accepting
-    # the username/password THIS request carried is proof-of-person — the
-    # MFL analogue of the Sleeper-JWT oracle — so an MFL-only user (no
-    # Sleeper/Apple/Google sign-in) can pass the hard verified gate on
-    # POST /api/trades/propose-mfl. Mirrors sleeper_link's proven-live
-    # block exactly: session marked verified, users.verified_via persisted,
-    # durable row upserted. D-018 (unverified sessions keep the short
-    # expiry) is honored by construction: the 90-day rolling expiry is
-    # granted by _session_persist_eligible reading sess["verified"], so
-    # verifying here IS what flips this session from the 4h posture to the
-    # long one — nothing else to set. Squatter safety is unchanged:
-    # @_gate_unverified_write already 403s an unverified session whenever a
-    # verified controller exists, so this path can only mint the FIRST
-    # controller (first-verified-wins, same as the Sleeper path).
-    # Deferred history (R28.17) loads before verifying, as in sleeper_link.
-    # Defensive today: the write gate above means only already-verified
-    # (never pending) sessions reach this line.
-    try:
-        _hydrate_session_history(sess)
-    except Exception:
-        log.exception("mfl_auth_link: history load failed for %s — "
-                      "verify refused (retryable)", user_id)
-        return _verify_retry_response()
-    sess["verified"] = True
-    sess["verified_via"] = "mfl_login"
-    _attach_presession_feedback(sess)
-    try:
-        from . import accounts as _accounts
-        first_time = _accounts.get_user_verified_via(user_id) is None
-        if not user_exists(user_id):
-            # Login can beat session_init's background user upsert; make
-            # sure the row exists so the marker isn't dropped.
-            upsert_user(sleeper_user_id=user_id)
-        _accounts.mark_user_verified(user_id, "mfl_login")
-        if first_time:
-            log.info("AUTH-VERIFIED first verified controller user_id=%s "
-                     "via=mfl_login", user_id)
-    except Exception:
-        log.exception("persisting verified marker failed (session still "
-                      "verified in memory)")
-    # Durable session (flag auth.persistent_sessions): the session just
-    # became verified — persist it so it survives deploys/idle sweeps and
-    # picks up the verified 90d rolling expiry.
-    sess["_persisted_at"] = 0  # force the upsert past the throttle
-    _persist_session_if_eligible(
-        request.headers.get("X-Session-Token", ""), sess)
+    # ── The mfl_login marker: ONLY for a session that isn't verified yet ──
+    # verified_via records how the account was FIRST verified, not the latest
+    # platform connected (platforms-eng + onboarding-eng, 2026-10-27,
+    # feat/mfl-auth-link-throttle). Since #279, @_gate_unverified_write 403s
+    # every unverified session before this route runs, so an
+    # already-verified session (sleeper / apple / google / espn / mfl_login)
+    # keeps its sess["verified_via"], users.verified_via + verified_at and
+    # durable session row untouched here — connecting MFL only stores the
+    # MFL credential above. (Until this guard, the block re-stamped all of
+    # them to 'mfl_login'.)
+    # The one unverified caller that still reaches this point is a synthetic
+    # demo session (is_demo + demo_user_*, exempt from the #279 gate;
+    # /api/session/demo 404s while landing.try_before_sync is off). It keeps
+    # the original behaviour: verified via mfl_login in memory and on its
+    # users row (demo sessions are never persisted).
+    # Pinned by test_auth_link_keeps_a_verified_sleeper_sessions_verified_via,
+    # test_auth_link_keeps_a_verified_apple_account_sessions_verified_via and
+    # test_auth_link_verify_block_runs_for_an_unverified_demo_session.
+    if not sess.get("verified"):
+        # R28.17: strict deferred history must finish before first verification.
+        # A retry keeps the session unverified and its pristine services intact.
+        try:
+            _hydrate_session_history(sess)
+        except Exception:
+            log.exception("mfl_auth_link: history load failed for %s — "
+                          "verify refused (retryable)", user_id)
+            return _verify_retry_response()
+        sess["verified"] = True
+        sess["verified_via"] = "mfl_login"
+        _attach_presession_feedback(sess)
+        try:
+            from . import accounts as _accounts
+            first_time = _accounts.get_user_verified_via(user_id) is None
+            if not user_exists(user_id):
+                # Login can beat session_init's background user upsert; make
+                # sure the row exists so the marker isn't dropped.
+                upsert_user(sleeper_user_id=user_id)
+            _accounts.mark_user_verified(user_id, "mfl_login")
+            if first_time:
+                log.info("AUTH-VERIFIED first verified controller user_id=%s "
+                         "via=mfl_login", user_id)
+        except Exception:
+            log.exception("persisting verified marker failed (session still "
+                          "verified in memory)")
+        # Durable session (flag auth.persistent_sessions): force the upsert
+        # (a demo session is never persist-eligible, so this is a no-op for
+        # the only caller that reaches it today).
+        sess["_persisted_at"] = 0  # force the upsert past the throttle
+        _persist_session_if_eligible(
+            request.headers.get("X-Session-Token", ""), sess)
 
     log.info("mfl_auth_link: user=%s year=%s leagues=%d storage=%s",
              user_id, year, len(leagues), storage)
@@ -38317,7 +41544,7 @@ def mfl_auth_import():
     body = request.get_json(force=True) or {}
     try:
         year = int(body.get("year") or _MFL_DEFAULT_YEAR)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):   # JSON Infinity / 1e400
         return jsonify({"error": "mfl_bad_year",
                         "message": "year must be numeric"}), 400
 

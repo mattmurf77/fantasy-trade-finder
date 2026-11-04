@@ -814,6 +814,19 @@ policy_shadow_log_cap
     # would ever matter — and non-vacuously (the fixture moves without them).
     "sweetener_gap_frac",
     "sweetener_best_effort",
+
+    # ── BL-001 swipe-learning knob, 2026-10-23 ──────────────────────────────
+    # docs/plans/swipe-learning/scope.md. One knob, one disposition.
+    #
+    # WHERE IT IS READ: only `bakeoff_runner.elo_freeze_mult`, called from the
+    # three trade-swipe routes (swipe, calc queue, deferred pass-reason Elo)
+    # AFTER the card exists. No generator, gate or presentation layer reads
+    # it, so no arm can observe it inside or outside an overlay.
+    #
+    # DECISION: **EXCLUDED from MODEL_A_PROFILE.** It sets the K a swipe
+    # writes to the board, not anything an arm builds. The golden stands
+    # un-recaptured.
+    "bakeoff_freeze_trade_k",
 }
 
 

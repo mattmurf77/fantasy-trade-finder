@@ -153,7 +153,7 @@ dynasty-value badge, not this taxonomy.
 
 ## K-factors
 
-Authoritative defaults live in `model_config` (`elo_k`, `trade_k_like`, `trade_k_pass`, `trade_k_accept`, `trade_k_decline_correction`). Code reads them at runtime — don't hardcode.
+Authoritative defaults live in `model_config` (`elo_k`, `trade_k_like`, `trade_k_pass`, `trade_k_accept`, `trade_k_decline_net`). Code reads them at runtime — don't hardcode.
 
 | Decision | Default K |
 |---|---|
@@ -161,7 +161,7 @@ Authoritative defaults live in `model_config` (`elo_k`, `trade_k_like`, `trade_k
 | Trade like | 8 |
 | Trade pass | 4 |
 | Trade accept | 20 |
-| Trade decline correction | 20 |
+| Trade decline (per pair) | 12 + the K that pair's like was stored with, so the net is −12 at any like K (BL-004; `trade_k_decline_net`) |
 
 **Trade like / pass are not the final K.** Since fit-congruence weighting they are scaled at the swipe site by `fit_k_explained_mult` (0.4) or `fit_k_defying_mult` (1.0) depending on whether the swipe agrees with the user's window — so a deck pass can land at 1.6 rather than 4. The *displayed* defaults above are still the baselines; any client that shows a "signal strength" must not claim the pass K is flat. The multiplier is applied identically to the in-memory update and the persisted `swipe_decisions.k_factor` (the replay source). See [config-reference.md § Fit-congruence signal weighting](config-reference.md#fit-congruence-signal-weighting-no-flag-trade_service_default_cfg-db-seeded).
 
@@ -181,9 +181,9 @@ Allowed values: `'1qb_ppr'`, `'sf_tep'`. Null in legacy rows is treated as `'1qb
 
 ## Verified-via strings (account-auth P1/P2)
 
-`users.verified_via` / session `verified_via` / `GET /api/account`: `'sleeper'`, `'apple'`, `'google'`. NULL = never verified. Identity-provider strings double as `linked_identities.provider` values (`'apple'`, `'google'`).
+`users.verified_via` / session `verified_via` / `GET /api/account`: `'sleeper'`, `'apple'`, `'google'`, `'mfl_login'`, `'espn'`. NULL = never verified. `'mfl_login'` = an MFL login (`/api/mfl/auth-link`, or the MFL sign-in at `POST /api/entry/platform`); `'espn'` = the ESPN cookie-pair sign-in at `POST /api/entry/platform` (platform sign-in, 2026-10-26; its mint response also carries `verified_via`). Identity-provider strings double as `linked_identities.provider` values (`'apple'`, `'google'`, plus `'espn'` / `'mfl'` for platform sign-in — note the MFL identity provider is `'mfl'` while its `verified_via` is `'mfl_login'`).
 
-**Locations:** `backend/accounts.py` (`PROVIDERS`), `backend/server.py` (auth routes), `mobile/src/api/auth.ts` (`AccountInfo` / `AccountAuthResponse` types).
+**Locations:** `backend/accounts.py` (`PROVIDERS` = Apple/Google only; `PLATFORM_PROVIDERS` = ESPN/MFL), `backend/server.py` (auth routes, `_PLATFORM_SIGNIN_VERIFIED_VIA`), `mobile/src/api/auth.ts` (`AccountInfo` / `AccountAuthResponse` types).
 
 ---
 
@@ -230,7 +230,7 @@ values plus a client-only `error` for a request that never got an answer.
 
 ## Notification type strings
 
-`notifications.type` (the in-app bell inbox) — **nine values, and the failure mode is silent:**
+`notifications.type` (the in-app bell inbox) — **eleven values, and the failure mode is silent:**
 
 | Value | Written by | Mobile glyph | Tap target |
 |---|---|---|---|
@@ -238,6 +238,7 @@ values plus a client-only `error` for a request that never got an answer.
 | `trade_accepted` | match disposition | `check` / pos | Matches |
 | `trade_declined` | match disposition | `x` / neg | Matches |
 | `referral_joined` | session_init, first session with `invited_by` | `plus` / **flare** | League |
+| `referral_activated` | referral ledger activation (FR-17/FR-19): the invitee's first stage-7 event within 14 d of `joined_at`, `growth.referral_ledger` on; inbox only (push is Phase 2) | `trade` / **flare** | Trades |
 | `league_member_joined` | session_init peer fanout, **coalesced 1/league/day** | `plus` / ice | League |
 | `league_member_unlocked_trades` | first board unlock | `rank` / ice | League |
 | `match_expiring` | 15-min cron | `match` / warn | Matches |
@@ -376,7 +377,16 @@ The pick-denominated **TradeValueBar** (feedback #157) is the universal trade ve
 
 Deck cards **omit** all four when rebuilt from client echo (server-restart FB-46 path); clients gate the bar on `give_value`/`receive_value` being present.
 
-**Locations to update together:** `backend/server.py` (`_value_verdict_payload`, `trade_evaluate_route`, `trade_card_to_dict`), the card-construction sites in `backend/trade_service.py` + `backend/trade_optimizer.py` (stamp `give_value`/`receive_value`), `mobile/src/components/TradeValueBar.tsx` + `TradeCard.tsx`, `mobile/src/api/trades.ts` + `mobile/src/api/calc.ts` + `mobile/src/shared/types.ts`.
+**The B2 rule: when the bar reads Even** (Product P112, 11-02; the app and the share image together, from the 11-06 binary). The bar reads **Even**, with the centred nub, the even wording and no lean, when `favors` is `even` or absent, **or** when `pick_equivalent` is null and `|gap.firsts|` < 1. That last case is the server's negligible floor: under half the smallest generic pick, 0.058 firsts today. A null pick above that range (over 1.25 of the largest pick) is "≈ N mid 1sts", always ≥ 1 first. A lean with a pick label leans, however small.
+- **App:** `TradeValueBar.tsx` `valueBarIsEven`, also used by the deck card's VoiceOver summary (`TradesScreen.tsx` `tradeA11ySummary`), pinned by `mobile/tests/check-value-bar-b2.js`.
+- **Share image:** the same rule (#564, league-eng); there B3 is "About even in value".
+- **Update both together.**
+
+**The ±2nd landmark** sits at the Mid 2nd / Mid 1st value ratio over `GENERIC_PICK_SEEDS` (`elo_to_value`). That's **0.287** today: mobile `TradeValueBar.tsx` `SECOND_IN_FIRSTS`, and the web landing miniature's 35.65% / 64.35% (`web/css/styles.css` `.lp-market-*`). The share card's bar computes the same ratio server-side (#564). `backend/tests/test_value_bar_scale.py` pins the app constant to the seeds; it had drifted to 0.57, which put a fill reading "≈ a Late 1st" on the "2nd" tick.
+
+**Locations to update together:** `backend/server.py` (`_value_verdict_payload`, `trade_evaluate_route`, `trade_card_to_dict`, `_consensus_pricing` / `_consensus_verdict` (shared by evaluate and the share card), `_share_value_snapshot` (at share time), `_value_bar_from_snapshot` (at view, which never prices)), the card-construction sites in `backend/trade_service.py` + `backend/trade_optimizer.py` (stamp `give_value`/`receive_value`), `backend/database.py` (`trade_share_tokens.value_snapshot`, `shared_packages.value_snapshot`; see `docs/data-dictionary.md`), `backend/og_image.py` (`_draw_value_bar`, `value_bar_label`, `valid_second_in_firsts`, `SEMANTIC_POS` / `SEMANTIC_WARN` / `ICE_BASE` = the app's pos/warn/ice fill mapping), `mobile/src/components/TradeValueBar.tsx` + `TradeCard.tsx`, `mobile/src/api/trades.ts` + `mobile/src/api/calc.ts` + `mobile/src/shared/types.ts`.
+
+The og share card draws this verdict with side-neutral words (marketing addendum 14) from a stored share-time snapshot. Its ±2nd ticks come from the snapshot's required `second_in_firsts`, with no default fraction; a snapshot without one draws no bar.
 
 ---
 
@@ -674,7 +684,7 @@ the reference), `mobile/src/api/sleeper.ts` (`ownsRoster`), `web/js/app.js`
 
 ## Invite URL format — a two-client contract
 
-The invite URL is emitted by mobile (`mobile/src/utils/deepLinks.ts` `buildInviteUrl`) and parsed by **both** web (`web/js/app.js` `captureReferralFromUrl()`) and mobile (`deepLinks.ts`). Two forms are accepted:
+The invite URL is emitted by mobile (`mobile/src/components/InviteLeaguematesBanner.tsx` `buildInviteUrl`, called only from `shareInvite`) and parsed by **both** web (`web/js/app.js` `captureReferralFromUrl()`) and mobile (`mobile/src/utils/deepLinks.ts`). Two forms are accepted:
 
 | Form | Emitted when | Parsed |
 |---|---|---|
@@ -684,6 +694,36 @@ The invite URL is emitted by mobile (`mobile/src/utils/deepLinks.ts` `buildInvit
 **The legacy form is parsed forever and is not deprecated.** Links already shared live in group chats, screenshots and pinned messages indefinitely; a parser removal would silently break every one of them. `ref` is optional in both forms (mobile omits it when the username is unknown — FB #239), which is why the AASA `components` matcher must match on `league` alone.
 
 **Ordering rule:** the reader, the mobile route, the server 302 and the AASA claim are all **unflagged and ship first**; only the emitter is flagged. Apple's AASA CDN cache (~24 h) makes the reverse order actively worse than shipping nothing. See [config-reference § `growth.invite_join_link`](config-reference.md#flags-p0-remediation-2026-08-11-mobile-ux-audit-plans).
+
+**Ledger forms (referral loop, PRD §7.2).** With `growth.referral_ledger` on, `shareInvite` mints an invite id (`POST /api/invite/token`, 2 s deadline) and the link carries `t` and **never `ref`**. A failed mint drops `t` and still omits `ref`. Flag off, the two forms above are emitted byte for byte:
+
+| `growth.referral_ledger` | `growth.invite_join_link` | Mint | Emitted URL |
+|---|---|---|---|
+| on | off | ok | `/?league=<league_id>&t=<invite_id>` |
+| on | off | failed | `/?league=<league_id>` |
+| on | on | ok | `/app/league/join/<league_id>?t=<invite_id>` |
+| on | on | failed | `/app/league/join/<league_id>` |
+
+The AASA claims already match all four (path `/app/league/join/*`; the legacy matcher keys on `league` alone). Mobile reads `t` from both forms (`deepLinks.ts` `handleDeepLink`, `LeagueJoinScreen.tsx`); the web and server readers land with FR-9 and D-1. Both clients keep parsing `ref` forever (D-028). Pinned by `mobile/tests/check-invite-links.js`.
+
+---
+
+## Invite id `t` — the shape rule
+
+The public invite id minted per share (PRD §7.1). The shape is **`^[A-Za-z0-9_-]{8,64}$`** (`INVITE_ID_RE`); the server mints 12 URL-safe characters (`secrets.token_urlsafe(9)`, 72 bits). A value outside the shape is ignored, never stored or forwarded.
+
+| Where | Name |
+|---|---|
+| Links | `t` |
+| API bodies and event props | `invite_id` |
+| Mobile invite intent (`useSession`, 14-day TTL) | `inviteId` |
+| Web localStorage | `ftf_invite_id` |
+
+**One copy per client.** Mobile: `mobile/src/utils/inviteId.ts` (`INVITE_ID_RE`, `isInviteId`), the only definition in `mobile/src` (pinned by `mobile/tests/check-invite-links.js`). The server and web copies land with D-1 and FR-9.
+
+**It is an identifier, not a credential (analytics addendum C3).** It names an invite and grants no access; it must never become an auth or session credential, and no event prop key carrying it may contain `token` (ingest drops such keys silently, C1). `backend/analytics_ingest.py` `_EVENT_ID_RE` happens to use the same pattern for event ids; the two are unrelated.
+
+**Locations to change together:** `mobile/src/utils/inviteId.ts`, the server's join-route and session-init validation (D-1), web `captureReferralFromUrl()` (FR-9).
 
 ---
 
@@ -795,9 +835,34 @@ The mobile app keeps the next unseen cards of the last validated organic deck on
 | Refresh throttle | 60 s per key | Trades focus and app foreground only, never on the tap |
 | Revalidation "Updating" max | 10 s | Then the refresh-failed line (PRD §5.4 shared constraint 4) |
 
-A page is kept only from a complete, non-error, non-"updating" response carrying P2's `deck_id`. It is discarded on the client's own rankings or preference writes (every route that calls `_invalidate_trade_jobs` for one: `/api/rank3`, `/api/tiers/save`, `/api/tiers/copy-from-format`, `/api/anchor/save`, `/api/rankings/reorder`, `/api/rankings/import-apply`, `/api/league/preferences`, `/api/league/asset-prefs`), on a scoring-format switch (`/api/scoring/switch`: the organic request names no format, so a page refreshed during the switch could hold the other format's cards), on sign-out and account switch, and on any server answer for its key that can't be kept. A save of cards validated before the last such discard is refused, and a deck on screen writes back only under the key it was validated for, so a league or format switch never receives another key's cards. A route added to that server list joins `RANKING_WRITE_PATHS`.
+A page is kept only from a complete, non-error, non-"updating" response carrying P2's `deck_id`. It is discarded on the client's own rankings or preference writes (every route that calls `_invalidate_trade_jobs` for one: `/api/rank3`, `/api/tiers/save`, `/api/tiers/copy-from-format`, `/api/anchor/save`, `/api/rankings/reorder`, `/api/rankings/import-apply`, `/api/league/preferences`, `/api/league/asset-prefs`), on a scoring-format switch (`/api/scoring/switch`: the organic request names no format, so a page refreshed during the switch could hold the other format's cards), on a free-agent move (`/api/league/free-agents/move`, D1 K-F5: a completed move changes the roster, and the server saves it before answering, so the next search drops the player it dropped), on sign-out and account switch, and on any server answer for its key that can't be kept. A save of cards validated before the last such discard is refused, and a deck on screen writes back only under the key it was validated for, so a league or format switch never receives another key's cards. A route added to that server list joins `RANKING_WRITE_PATHS`.
 
-**Locations:** `mobile/src/utils/devicePage.ts` (the constants, `devicePageScope`, `RANKING_WRITE_PATHS`), `mobile/src/state/devicePageStore.ts`, P1's page scope in `backend/server.py` (#368) + the `_invalidate_trade_jobs` call sites, `mobile/tests/check-device-first-page.js`.
+**Locations:** `mobile/src/utils/devicePage.ts` (the constants, `devicePageScope`, `RANKING_WRITE_PATHS`, `FA_MOVE_PATH`, pinned equal to `mobile/src/api/faMove.ts`'s), `mobile/src/state/devicePageStore.ts`, P1's page scope in `backend/server.py` (#368) + the `_invalidate_trade_jobs` call sites, `mobile/tests/check-device-first-page.js`.
+
+---
+
+## Free-agent moves — capability enums, consent versions, codes (D1, 2026-11-01)
+
+The 11-06 binary is built against [contract.md](plans/sleeper-fa-write/contract.md) and can't change after it ships, so these strings are fixed. The client reads **no flag**; it renders from the server's `move` capability on `GET /api/league/free-agents`.
+
+| What | Values | Notes |
+|---|---|---|
+| `move.mode` | `submit` \| `handoff` \| `unsupported` | `move` absent, or any other `mode` → the client's legacy routing. The server never sends `submit` with `league_platform: null` |
+| `move.league_platform` | `sleeper` \| `mfl` \| `espn` \| `null` | The league row's platform; Fleaflicker and local leagues are `null` (and `unsupported`) |
+| `move.connect` | `ok` \| `not_linked` \| `expired` \| `unverified` \| `other_account` | Unknown values → the plain connect step, never Ready |
+| `free_agents[i].move_kind` | `add` \| `claim` \| `null` | `null` = the server can't tell (always, until the capture answers Q8); the CTA then names an add |
+| `free_agents[i].move_mode` | `handoff` (optional) | Per-row override, with `move_line` |
+| Consent `copy_version` | `sleeper-roster-moves-v1` (now) \| `sleeper-roster-moves-v2` (required before claims, R15.8 D5) | Texts live **only** on the server (`backend/fa_move_copy.py`, hash-pinned); the client echoes `{copy_version, locale}` back. A wording change is a new version. Locale `en-US` |
+| Move request `attempt_id` | opaque, 8–64 of `[A-Za-z0-9._-]` | UUID-shaped from the client (may be `Math.random`), never parsed as a UUID; idempotency is per (user, `attempt_id`) |
+| Move request `surface` (optional) | `free_agents` \| `usage_trends` | The sheet's host; recorded on `fa_move_consent_recorded.surface`; any other value → the key is absent (never null) |
+| Claim copy forms | `waiver_line` (with a drop) / `waiver_line_no_drop`; `bid_line` only when the claim has a bid; `cta_claim[_drop]` (with `{bid}`) / `cta_claim[_drop]_no_bid` | R15.1's line in its four forms, so no slot names a missing half |
+| Consent block `reason` (optional) | `first` \| `lapsed` \| `version` \| `withdrawn` | Sent when the server knows it; absent → the client infers it |
+| Copy templates | `{add}` `{drop}` `{bid}` `{league}` `{date}` `{name}` `{cta}` | The client fills them. `{bid}` is filled **with** its dollar sign (`$7`), so server templates never write `$`; `{date}` is a short date, no time |
+| Response `status` / `result` | `complete` \| `pending`; `accepted` \| `partial` | `pending` is a claim: never "added" |
+| Error codes | contract §4; platform codes are `{platform}_<suffix>` | The client maps by **suffix** (`not_linked`, `expired`, `rejected`, `unconfigured`, `write_failed`, `outcome_unknown`), so MFL and ESPN need no build. `kind` on `{p}_write_failed` is `network` \| `roster_read` (state 11, not sent) or absent (10f, the platform refused) |
+| Timing | server worst case **76 s**; client timeout (76 + 15) × 1000 = 91 000 ms | 30 s preflight budget + the write path's timeouts ≤ 46 s, pinned by `test_fa_move_route.py::test_worst_case_is_a_pinned_sum` |
+
+**Locations:** `backend/server.py` (`_fa_move_capability`, `_fa_move_core`, `platform_write_consent_route`, `FA_MOVE_SERVER_WORST_CASE_S`), `backend/fa_move_copy.py`, `backend/sleeper_write.py` (`FA_MOVE_WRITE_TIMEOUTS_S`); the claim-sheet client (11-06 binary, `faMoveGate` and the move API module).
 
 ---
 
@@ -916,7 +981,9 @@ Sign-in requests may carry `device_id` (body) or `X-Device-Id` (header) on `/api
 
 - `device_tokens.platform`: `ios`, `android`
 - `user_events.device_type`: `iphone`, `ipad`, `macos`, `web`, `extension`
-- `user_events.source`: `mobile`, `web`, `api`, `cron`
+- `user_events.source`: client-declared `mobile`, `web`, `extension` (the only values `POST /api/events` accepts, by `X-Source` header or body `source`); server-written `api`, `server`, `calc_queue`; NULL when no client identified itself (G-068, 2026-10-31). Web must declare `source: "web"` in the body as well as the header, because its `sendBeacon` flush can't set headers.
+
+**`user_events.device_type` beyond the list above** (G-068, 2026-10-31): mobile also sends `android`, and the value is **NULL** when no client identified itself, never another client's name. The server-written overhaul and Win Now rows resolve it in `backend/client_device.py`: `X-Device`, else `X-Source` `web`/`extension`, else NULL. The server never guesses `web`, so **the web's `apiFetch` (`web/js/app.js`) declares `X-Source: web` on every call** (the web app sends no `X-Device`). Pinned by `HYG-apifetch-declares-source` in `qa/web/check_web_structure.py`.
 
 ---
 
@@ -1232,11 +1299,11 @@ Plan of record: [00-platform-foundation.md](plans/monetization/00-platform-found
 
 | `product_id` | What it is | Projects to (`entitlement`, `source`) |
 |---|---|---|
-| `ftf_pro_monthly` | Pro, auto-renewing monthly; $4.99, **$6.99 for new subscribers from 2027-01-02 04:00 UTC** (App Store Connect's US start for the 2027-01-02 change); Apple 1-month intro trial | `pro`, `apple_iap` |
-| `ftf_pro_annual` | Pro, auto-renewing annual (hero SKU); $24.99, **$34.99 for new subscribers from 2027-01-02 04:00 UTC** (App Store Connect's US start for the 2027-01-02 change); Apple 1-month intro trial | `pro`, `apple_iap` |
+| `ftf_pro_monthly` | Pro, auto-renewing monthly. **$4.99** (Founding GM price) while the club is open → **$6.99** for new subscribers from the price rise (`club.closes_at`, 2027-01-02 04:00 UTC, App Store Connect's US start for the 2027-01-02 change). Intro offer: Apple's 1-month free trial (`trial_period` `"1 month"`) | `pro`, `apple_iap` |
+| `ftf_pro_annual` | Pro, auto-renewing annual (hero SKU). **$24.99** (Founding GM price, `per_month_equiv` $2.09) while the club is open → **$34.99** (`per_month_equiv` $2.92) for new subscribers from the price rise. `per_month_equiv` is the annual price / 12 **rounded up** to the cent (legal's approved copy). Intro offer: Apple's 1-month free trial | `pro`, `apple_iap` |
 | `ftf_founder` | Founder Lifetime, non-renewing; `expires_at` NULL = perpetual | `pro`, `founder_iap` |
 | `ftf_season_pass_2026` | Season pass, year-labeled (`ftf_rookie_pass_*` is the rookie-season variant) | `pro`, `season_pass_iap` |
-| `ftf_tip_199` / `ftf_tip_499` / `ftf_tip_999` | Tip jar, consumable ($1.99/$4.99/$9.99) — money with **NO entitlement**: `entitlements.is_tip_product()` stores the webhook event and grants nothing. **Not served at launch:** the config's `tips` array is `[]` because these SKUs are not submitted to App Store Connect (`_PAYWALL_TIPS` keeps the list to restore, `{product_id, display_price}` only). A tip SKU **must** keep the `ftf_tip_` prefix — drifting out of it hands the tipper Pro via the default mapping (pinned by `mobile/tests/check-tipjar.js` §9 + `backend/tests/test_paywall_config.py`) | *(none)* |
+| `ftf_tip_199` / `ftf_tip_499` / `ftf_tip_999` | Tip jar, consumable ($1.99/$4.99/$9.99) — money with **NO entitlement**: `entitlements.is_tip_product()` stores the webhook event and grants nothing. **Served behind `paywall_tips_enabled`:** the config's `tips` array is `_PAYWALL_TIPS` (`{product_id, display_price}` only) while model_config `paywall_tips_enabled` is exactly 1 **and** the resolved platform is `ios` **and** the session is verified and not demo; otherwise `[]` (default 0; web, extension, unverified and demo always `[]`). release-lead sets the knob to 1 once the SKUs exist in App Store Connect ([tip-jar plan](plans/tip-jar/plan.md) §3 S1). A tip SKU **must** keep the `ftf_tip_` prefix — drifting out of it hands the tipper Pro via the default mapping (pinned by `mobile/tests/check-tipjar.js` §9 + `backend/tests/test_paywall_config.py`) | *(none)* |
 
 **Tolerated aliases.** The 2026-08-27 IAP runbook named divergent App Store Connect ids. The canonical names above win (foundation doc), but `backend/entitlements._product_mapping` additionally accepts `founder_lifetime*` → `founder_iap` and `season_pass_*` → `season_pass_iap` so either ASC choice reconciles without a deploy. `pro_monthly_499` / `pro_annual_3499` need no alias — they fall through to the `apple_iap` default like any unrecognised subscription SKU. Aliases are a **reconciliation safety net, not a second vocabulary**: the paywall config, the client, and the docs use the `ftf_*` ids only. Conflict record: [iap-enablement/scope.md](plans/monetization/iap-enablement/scope.md) § "Surfaced conflict".
 
@@ -1248,15 +1315,18 @@ Plan of record: [00-platform-foundation.md](plans/monetization/00-platform-found
 
 - Page `id` / `kind` pairs, rendered in array order: `value_recap`/`trades_found`, `feature_grid`/`features`, `plans`/`purchase`.
 - `body_ref`: `matches_preview` — the client substitutes 2–3 matches it has **already fetched**; the config route never recomputes trades.
-- Feature keys (page 2): `unlimited_leagues`, `portfolio`, `engine_knobs`, `extension_overlays`, `ad_free`.
+- Feature keys (page 2): **none at launch, `features: []`** (#393 scope §2 item 3, "5c"; the page object stays). The grid may list only delivered gated features, and none of the earlier keys names one: `engine_knobs`, `extension_overlays` and `ad_free` aren't delivered, `portfolio` is free, and there is no league cap behind `unlimited_leagues`. A client renders the grid only when the list is non-empty (1.21.x does) and skips an unknown key; the paywall's value lines come from the client's copy (`mon.pay.*`). Product may later add real gated-feature keys, each with its copy, in the same change.
 - Product `badge`: `best_value` (the only value today). `period`: `monthly` | `annual`. `hero`: exactly one product carries it.
+- Product `trial_period`: `"1 month"` on both SKUs (Apple's 1-month intro offer; Apple has no 30-day duration). **`trial_days` is removed** (#393, 2026-10-27): a 1.21.x or older client renders "N days free" only when `trial_days > 0`, so its absence means no trial line. A client shows "free" copy only from StoreKit intro eligibility, never from a server duration.
+- **`club`** `{name, closes_at, open}` and the dated fallback prices (#393, operator 2026-10-25): `name` is `"Founding GMs"`. **One instant, `server._PAYWALL_PRICE_RISE_AT` = 2027-01-02 04:00:00 UTC** (11 pm ET / 8 pm PT on Jan 1: App Store Connect's US start time for the price change scheduled for 2027-01-02, operator-approved 2026-10-28; a Jan-1 schedule would start at 11 pm ET on Dec 31 and break Terms §14.8's Founder price "by December 31, 2026"), not a knob or config: it **must equal App Store Connect's scheduled price change** (fallback only: StoreKit's price is authoritative; monetization-pm records the start time App Store Connect shows, setup §3d, and the constant moves if they differ), so it moves only with a reviewed deploy (head-eng 2026-10-27: the club closes at the price rise; no second copy of the date). `closes_at` is that instant, `"2027-01-02T04:00:00Z"`; `open` is `now < closes_at`; **`club.open` flips with the price rise**, both from one clock read per request. While `open`, the Founding GM prices: monthly `$4.99`, annual `$24.99` / `per_month_equiv` `$2.09`; from `closes_at` on, `$6.99` and `$34.99` / `$2.92` (pinned both sides: `2027-01-02T03:59:59Z` old, `04:00:00Z` new). `per_month_equiv` is the annual price / 12 rounded **up** to the cent. Existing subscribers keep their price through App Store price preservation; the config only describes what a new subscriber pays. The offer is the one place the trial terms and `closes_at` are shown. `GET /api/me/entitlements` `founder` (bool) uses the same cut-off: pro through a subscription whose ledger `INITIAL_PURCHASE` (first purchase or intro-trial start) predates `closes_at`; false on an unverified session.
+- `tips`: `[]` at launch. `dismissible`: always `true` (no non-dismissible mode).
 - `?platform=`: `ios` | `web` | `extension`; echoed back as `platform`. Unknown values degrade to `ios` rather than 400.
 - **Fallback prices are dated (#393, operator 2026-10-25).** Before `_PAYWALL_PRICE_RISE_AT`, the **instant 2027-01-02 04:00:00 UTC** (11 pm ET / 8 pm PT on Jan 1: App Store Connect's US start time for the price change scheduled for 2027-01-02, operator-approved 2026-10-28; a Jan-1 schedule would start at 11 pm ET on Dec 31 and break Terms §14.8's Founder price "by December 31, 2026"), the config serves monthly `$4.99` and annual `$24.99` / `per_month_equiv` `$2.09`; from that instant on, `$6.99` and `$34.99` / `$2.92` (pinned both sides: `2027-01-02T03:59:59Z` old, `04:00:00Z` new). Fallback only: StoreKit's price is authoritative; monetization-pm records the start time App Store Connect shows (setup §3d), and the constant moves if they differ. `per_month_equiv` is the annual price / 12 rounded **up** to the cent. Existing subscribers keep their price through App Store price preservation; the config only describes what a new subscriber pays.
 - **No `trial_days`.** Products carry no trial day count: the trial is Apple's 1-month intro offer (always "1 month", never "30 days"). Older clients render "N days free" only when `trial_days > 0`, so the absent key shows no trial claim; newer clients read the offer from StoreKit.
 - **`display_price` / `per_month_equiv` are FALLBACK COPY.** On iOS the client renders the StoreKit-localized price from the matching RevenueCat offering; the server strings are US-English list prices that know nothing about storefront, currency, or promotional offers. `trial_eligible` is a claim about the SKU, not a per-Apple-ID promise — real eligibility is store-managed.
 
 **Paywall analytics event names** (client-fired; registered in `backend/analytics_taxonomy.py` and all five classified NON_INTENT in `analytics_queries.NON_INTENT_EVENTS`): `paywall_viewed` {`source`, `platform`, `gate`, `kind`}, `paywall_purchase_initiated` {`product_id`, `source`}, `paywall_purchase_completed` {`product_id`, `source`}, `paywall_purchase_failed` {`product_id`, `user_cancelled`}, `paywall_restore` {`restored`}. `platform` is the config **variant** rendered, not the device platform (that is a `user_events` column derived server-side). Conversion truth is the server-fired `entitlement_granted` row, never these echoes.
-- **`paywall_viewed.source`** (#393, a CLOSED set; analytics-lead's grant): `first_opinion` | `left_deck` | `gate` | `settings` | `preview_end` (plus `unknown` for an unlabeled push). `first_opinion` / `left_deck` = the offer trigger after the first opinion or on leaving the deck; `gate` = a locked action (a 402 or a pre-check); `preview_end` = the free page's end card; `settings` = Settings › See plans. `source` is no longer the 402's `gate` string: that rides in its own prop.
+- **`paywall_viewed.source`** (#393, a CLOSED set; analytics-lead's grant): `first_opinion` | `left_deck` | `gate` | `settings` | `preview_end` | `tip_jar` (plus `unknown` for an unlabeled push). `first_opinion` / `left_deck` = the offer trigger after the first opinion or on leaving the deck; `gate` = a locked action (a 402 or a pre-check); `preview_end` = the free page's end card; `settings` = Settings › See plans; `tip_jar` = the tip jar (`TipJarScreen`, Settings › Subscription › Support Fleeced). `source` is no longer the 402's `gate` string: that rides in its own prop.
 - **`paywall_viewed.gate`** = the 402's reason, verbatim (the enum below, minus `verify_required`, which never reaches the paywall). **`paywall_viewed.kind`** = `find` | `send`, the locked action's family. Both ride ONLY when a locked action opened the paywall.
 
 **Paywall gate answers and the client's routing** (#393; server #394/#395/#397, client M1 `mobile/src/api/client.ts` + `state/usePaywallGate.ts`). Every client keys off these strings, never off a subscription field:

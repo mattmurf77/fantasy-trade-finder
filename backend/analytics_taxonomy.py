@@ -741,6 +741,19 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     #                                       over a payload already in memory)
     "usage_trends_action", "usage_trends_availability_opened",
     "usage_trends_view_changed",
+    # ── Referral loop v1, launch binary (2026-10-23) ─────────────────────
+    # Grant: analytics-lead, PR #350
+    # (docs/business/analytics/2026-10-15-referral-loop-events.md), P18.
+    # Registered in the SAME commit as its emitter (C7, G-031):
+    # mobile/src/utils/deepLinks.ts handleDeepLink, when a NON-league link
+    # (`/s/trade/<id>`, `/s/p/<id>`, a bare `/?ref=`) opens the app.
+    # INTENT, deliberately absent from NON_INTENT_EVENTS: its twin
+    # `invite_link_opened` is INTENT and twins land on the same side.
+    # Anonymous openers are stripped by device_exclusion() either way.
+    # The four referral SERVER names (invite_landing_opened,
+    # invite_landing_cta, referral_attributed, referral_activated) are NOT
+    # here: they land in SERVER_FIRED_EVENTS with their emitters (D-1).
+    "share_link_opened",
     # ── Minimum-version gate (B8, 2026-10-24; head-eng ruling 35 + the
     # analytics-lead B8 grant). Registered in the SAME commit as the emitters
     # (mobile/src/screens/UpdateGateScreen.tsx); both land in
@@ -748,6 +761,31 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     #   update_gate_shown  — once per gate show, after the flag fetch resolves
     #   update_gate_tapped — the Update tap (opens the App Store listing)
     "update_gate_shown", "update_gate_tapped",
+    # ── Sleeper app hand-off, 2026-10-28 (#351 / #379) ───────────────────
+    # Grant: analytics-lead, 2026-10-20, G1–G7 (widened @ 8b63ef10).
+    # Addendum: docs/business/analytics/2026-10-28-sleeper-handoff-events.md.
+    # Registered in the SAME commit as the emitter
+    # (mobile/src/utils/sleeperHandoff.ts, trackHandoff). INTENT, so NO
+    # analytics_queries.NON_INTENT_EVENTS row: every firing follows a
+    # deliberate CTA tap, on the Free Agents claim sheet it is the only
+    # record of that tap, and the outcome of a deliberate act stays INTENT,
+    # failure included (the sleeper_send_* precedent). NOT a WAT event: an
+    # FA add is not a trade opinion, and send_button's trade intent is
+    # already counted by sleeper_send_attempted.
+    "sleeper_handoff_resolved",
+    # ── D1 free-agent moves, 2026-11-01 (granted by analytics-lead with
+    # C1–C6) ────────────────────────────────────────────────────────────────
+    # Scope: docs/plans/sleeper-fa-write/scope.md §1 (plan/fa-moves-launch).
+    # Addendum: docs/business/analytics/2026-11-01-fa-move-events.md.
+    # Registered in the SAME commit as the emitters (mobile/src/api/faMove.ts
+    # trackFaMove / attemptMove), which ship dark in the 11-06 binary: they
+    # fire only when the server's capability says `move.mode = 'submit'`
+    # (C1). The two exposures land in analytics_queries.NON_INTENT_EVENTS in
+    # this commit; the two write events stay INTENT. The three server-fired
+    # siblings (fa_move_consent_recorded / _consent_withdrawn /
+    # _write_succeeded) are registered by the server PR, with their emitters.
+    "fa_move_connect_shown", "fa_move_consent_shown",
+    "fa_move_write_attempted", "fa_move_write_failed",
 })
 
 # ---------------------------------------------------------------------------
@@ -891,6 +929,17 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # for an impression. NON-INTENT (impression class) — classified in
     # analytics_queries.NON_INTENT_EVENTS in this same commit.
     "standing_offer_card_shown",
+    # paywall_gate_hit (C8 §B, analytics-lead 2026-10-27; registered in the
+    # SAME commit as its emitter, server._emit_paywall_gate_hit): one per 402
+    # the paywall gate's before_request hook sends, capped in-process to the
+    # first per (user_id, gate, route_family) per UTC day; owner = the
+    # session's user, written non-touching. NON_INTENT (system outcome).
+    # Props, closed sets only: gate (the 402 body's: preview_used |
+    # never_trialed | trial_expired | lapsed | verify_required), route_family
+    # (paywall_gate.route_family: deck | send | matches | calculator | shop |
+    # overhaul | win_now | other), enforced (bool, always true: nothing is
+    # written while dark). No path params, ids or prices.
+    "paywall_gate_hit",
     # ── Receipts grading job, 2026-08-21 (docs/plans/receipts/, PRD DR-9) ──
     # Registered in the SAME commit as its emitter
     # (`receipts_service._emit_run_event`), the house rule this file's
@@ -912,6 +961,75 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # allowlist's prop filter, and the import-time completeness check below
     # is scoped to ALLOWED_CLIENT_EVENTS.
     "receipts_grade_run",
+    # ── Referral loop D-1, 2026-10-15 (docs/plans/referral-loop/prd.md FR-7,
+    # FR-8, §8.2, §10). Grant: analytics-lead 2026-10-15, conditions C1–C9.
+    # Registered in the SAME commit as their emitters (server.py
+    # `_record_join_landing_open` and `league_join_go`).
+    #
+    # SERVER-fired: no client runs on the join landing, so only the route
+    # sees an open from someone without the app, and a client-forgeable open
+    # would feed the league-match fallback (§7.5). Never in
+    # ALLOWED_CLIENT_EVENTS — the disjointness assert below would raise.
+    #
+    # Owner: the referrer of the referrals row `t` names (any status); with
+    # no row, the user a legacy `ref` resolves to (by username); else
+    # user_id="system:invite" (no users row). Written with platform="server"
+    # and touch_user=False: the owner did nothing, so their
+    # users.last_active_at / events_count and streak never move (C6).
+    #
+    # NON_INTENT in analytics_queries (that row lands in this same commit):
+    # admitting them would mint a user-day for an inviter out of someone
+    # else's tap.
+    #
+    # Both fire only while growth.referral_ledger is on (#350 "Takes
+    # effect"), for human GETs only (C4: never HEAD, never a link-preview
+    # fetcher in server.PREVIEW_UA_TOKENS, never an empty UA).
+    #
+    # Props (no UA string, IP, username, display name or league name — C4,
+    # C9; no key contains "token" — C1; no "platform" prop — the column
+    # carries 'server'). Server-fired names need no CLIENT_EVENT_PROPS row,
+    # so the props are documented here and pinned at the writer by
+    # tests/test_analytics_taxonomy_referral_loop.py:
+    #   invite_landing_opened  invite_id? (the well-formed `t`), league_id,
+    #                          invite_status valid|expired|league_mismatch|
+    #                          unknown, or null without a `t`; device_class
+    #                          ios|android|desktop|other. Every human GET of
+    #                          the join path, landing or 302 mode.
+    #   invite_landing_cta     invite_id?, league_id, cta ios_install|web_app,
+    #                          device_class. GET /app/league/join/<id>/go/<cta>
+    #                          (the route also needs growth.join_landing).
+    "invite_landing_opened",
+    "invite_landing_cta",
+    # ── Referral loop L7, 2026-10-24 (prd.md FR-13–FR-17, §7, §10). Same
+    # grant (analytics-lead PR #350, C1–C9), registered in the SAME commit as
+    # each emitter (backend/referral_ledger.py). Owner: the REFERRER, while
+    # the invitee is the one acting; written with platform="server" and
+    # touch_user=False (C6), and NON_INTENT in analytics_queries for the
+    # invite_landing_* reason above. No invitee id (C2), no username (C9),
+    # no key containing "token" (C1). Server-fired, so the props live here
+    # and are pinned at the writer by tests/test_referral_ledger.py:
+    #   referral_attributed  invite_id (the share id `t` = share_token, never
+    #                        a sibling's invite_token), referral_id
+    #                        (referrals.id), league_id, attribution_method
+    #                        token|league_match, league_platform
+    #                        sleeper|espn|mfl|fleaflicker, notified (bool:
+    #                        the FR-18 bell row was written). At a NEW
+    #                        user's first session init, ledger credit only.
+    #   referral_activated   invite_id, referral_id, league_id,
+    #                        days_to_activate (int 0–14), notified (bool:
+    #                        the FR-19 row was written or merged). The
+    #                        invitee's first stage-7 event (C5: read from
+    #                        analytics_queries.FUNNEL_STAGES, today
+    #                        trade_proposed | match_swiped) within 14 days of
+    #                        joined_at; never trades_generated.
+    #
+    # `signup` (above, owner = the new user, class unchanged) gains two props
+    # while growth.referral_ledger is on (FR-16): attribution
+    # token|league_match|legacy_ref|none and attribution_miss
+    # unknown|expired|not_member|null. A signup row with no props predates
+    # the flag (pre-instrumentation), not `none`.
+    "referral_attributed",
+    "referral_activated",
     # ── S0's I-1 serve check, 2026-10-27 (analytics-lead's pre-grant, the
     # 2026-10-26 report §2 (a); models-lead R2.4 addendum (ii)) — registered
     # in the SAME commit as its emitter (server._emit_deck_i1_check).
@@ -930,6 +1048,43 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # type), unchecked_generic, unchecked_pick_owner. No league id, no raw job
     # id, no player ids.
     "deck_i1_check",
+    # ── D1 free-agent moves, 2026-11-01 (granted by analytics-lead with
+    # C1-C6: docs/plans/sleeper-fa-write/scope.md §1 on plan/fa-moves-launch;
+    # consent.md §6 F1-F5). The three SERVER halves, registered in the SAME
+    # commit as their emitters (server._fa_move_core, the consent route and
+    # every Sleeper-credential deletion). The four client halves
+    # (fa_move_connect_shown, _consent_shown, _write_attempted,
+    # _write_failed) are registered by the client PR with their emitters.
+    # Never a prop named `platform` (that is the device column, the NULL-
+    # `platform` incident): the league's platform rides `league_platform`
+    # ('sleeper' | 'mfl' | 'espn', always set, C1). Telemetry only: the
+    # platform_write_consents / platform_write_moves rows are the R15.3 record
+    # of truth, never these (F1). Props, exactly:
+    #   fa_move_consent_recorded  — surface, copy_version, league_platform.
+    #     NON_INTENT. `surface` ∈ free_agents | usage_trends from the request,
+    #     ABSENT when the request has none (G2: absent, never null).
+    #   fa_move_consent_withdrawn — via, league_platform. NON_INTENT. `via` has
+    #     5 values: settings | disconnect, the user's own choice; and
+    #     credential_expired | credential_rejected | relink, side effects
+    #     (written non-touching, F2). `relink` (legal R28.26 2f, 11-01): a
+    #     Sleeper link that CHANGES the stored credential, never a replay of it.
+    #   fa_move_write_succeeded   — move_kind (add | claim, C5), has_drop,
+    #     has_bid, result (accepted | partial), attempt_id, league_platform.
+    #     INTENT. Only on a 200 (F4); league_id rides the envelope column.
+    "fa_move_consent_recorded", "fa_move_consent_withdrawn",
+    "fa_move_write_succeeded",
+    # ── C8, 2026-10-28 (analytics-lead's C8 spec §A) ──────────────────────
+    # entitlement_granted — written by entitlements.grant() since the
+    # monetization foundation but never registered here, so every
+    # taxonomy-driven read missed it. Fired for webhook projections AND for
+    # manual / comp / bulk / Founders / referral / group-unlock grants, none
+    # of which is the recipient acting in a session: NON_INTENT (classified
+    # in analytics_queries in this same commit) and written non-touching
+    # (touch_user=False). A renewal on an existing row never calls grant(),
+    # so this is the first grant per (user, product) plus manual and promo
+    # grants. Props, exactly: entitlement (pro | ad_free), source
+    # (entitlements.VALID_SOURCES), expires_at.
+    "entitlement_granted",
 })
 
 # ---------------------------------------------------------------------------
@@ -1248,14 +1403,38 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # is a user_events COLUMN derived server-side in analytics_ingest.py
     # (the NULL-`platform` incident), it is never a prop, and it must not
     # become one.
+    # REFERRAL LOOP v1 (2026-10-23; grant: analytics-lead, PR #350,
+    # docs/business/analytics/2026-10-15-referral-loop-events.md). The four
+    # rows below are WIDENED IN PLACE, in the emitters' commit (C7).
+    # Pre-edit contents, verbatim:
+    #     invite_shared        {"league_id", "surface", "not_joined",
+    #                           "total_mates", "platform"}
+    #     invite_link_opened   {"league_id", "has_ref", "format", "auth_state"}
+    #     invite_league_pinned {"league_id", "source", "ms_since_open"}
+    #     invite_pin_failed    {"league_id", "reason"}
+    # `invite_id` is the public share id `t` (C3): opaque, no PII, grants no
+    # access, never an auth credential. The parse rows send the well-formed
+    # `t` as received (^[A-Za-z0-9_-]{8,64}$), else omit it;
+    # `invite_shared` sends the id the mint returned, only on success.
+    # `mint_outcome` ∈ ok | failed | timeout | rate_limited | disabled |
+    # demo (disabled = growth.referral_ledger off, no call made). NO key
+    # here may contain "token" (C1): ingest drops such keys silently.
     "invite_shared":           frozenset({"league_id", "surface",
                                           "not_joined", "total_mates",
-                                          "platform"}),
+                                          "platform", "invite_id",
+                                          "mint_outcome"}),
     "invite_link_opened":      frozenset({"league_id", "has_ref", "format",
-                                          "auth_state"}),
+                                          "auth_state", "invite_id"}),
     "invite_league_pinned":    frozenset({"league_id", "source",
-                                          "ms_since_open"}),
-    "invite_pin_failed":       frozenset({"league_id", "reason"}),
+                                          "ms_since_open", "invite_id"}),
+    "invite_pin_failed":       frozenset({"league_id", "reason",
+                                          "invite_id"}),
+    # NEW (same grant). `kind` ∈ trade | package | ref_root (the link
+    # format, never a surface); `has_ref` is a boolean, never the username
+    # (C9); `auth_state` is the invite_link_opened enum above (a signed-in
+    # opener reports authed_non_member: these links carry no league).
+    # `utm_*` props wait for the UTM capture build.
+    "share_link_opened":       frozenset({"kind", "has_ref", "auth_state"}),
     # `unit` (account|device) is registered but NOT emitted today: the
     # client cannot derive it — GET /api/feature-flags returns the merged
     # experiments/configs maps without the unit_type that
@@ -1779,7 +1958,8 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # web/pro.html ships.
     #
     # `product_id` is the store SKU (ftf_pro_monthly | ftf_pro_annual |
-    # ftf_founder | ftf_season_pass_2026 — docs/cross-client-invariants.md),
+    # ftf_founder | ftf_season_pass_2026 | ftf_tip_199 | ftf_tip_499 |
+    # ftf_tip_999 — docs/cross-client-invariants.md),
     # a closed vocabulary. NO price, NO currency, NO transaction or receipt
     # identifier ever rides in props: the money is the ledger's
     # (subscription_events) and the receipt is Apple's.
@@ -1793,10 +1973,11 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #
     # paywall_viewed, #393 (analytics-lead's grant; registered with the M1
     # emitter, PaywallScreen.tsx): `source` is the CLOSED set
-    #   first_opinion | left_deck | gate | settings | preview_end | unknown
+    #   first_opinion | left_deck | gate | settings | preview_end | unknown | tip_jar
     # (first_opinion / left_deck = the offer trigger after the first opinion
     # or on leaving the deck; gate = a locked action's 402 or a pre-check;
-    # preview_end = the free page's end card; settings = Settings › See plans).
+    # preview_end = the free page's end card; settings = Settings › See plans;
+    # tip_jar = TipJarScreen, Settings › Subscription › Support Fleeced).
     # `gate` is the 402's reason, verbatim from the server's closed enum
     #   preview_used | trial_expired | lapsed | never_trialed
     # (verify_required never reaches the paywall: it opens the VerifySheet).
@@ -1833,6 +2014,59 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # no ids, no device platform (a user_events COLUMN, never a prop).
     "update_gate_shown":           frozenset({"min_version", "app_version_int"}),
     "update_gate_tapped":          frozenset({"min_version", "app_version_int"}),
+    # ── Sleeper app hand-off (2026-10-28; grant G1–G7, widened @ 8b63ef10) ─
+    # Every value set is CLOSED. This registry constrains keys only, so the
+    # enums ride here and in the addendum:
+    #   surface  ∈ free_agents | usage_trends | send_button | trade_queue
+    #   target   ∈ add | trade
+    #   rung     ∈ add | player | players_tab | league | bare | trade |
+    #              trades_tab — the rung actually opened (#351 PRD §4.1)
+    #   outcome  ∈ app | not_installed. not_installed means `openURL`
+    #              REJECTED; the client never calls canOpenURL (G4)
+    #   has_drop   bool, only on a target=add row on any surface but
+    #              send_button. ABSENT, never null, on send_button and every
+    #              target=trade row (G2)
+    # One row per hand-off: a Send All of N queued trades is one. No player
+    # id, name or league id (G5). No device `platform`: that is a
+    # user_events COLUMN, never a prop.
+    "sleeper_handoff_resolved":    frozenset({"surface", "target", "rung",
+                                              "outcome", "has_drop"}),
+    # ── D1 free-agent moves (2026-11-01, scope.md §1; addendum
+    # 2026-11-01-fa-move-events.md). Every row carries `league_platform` ∈
+    # sleeper | mfl | espn (P2, C1: always present, never null — the client
+    # emits only in `submit` mode, where it is set). NEVER a prop named
+    # `platform`: that is the device-platform column. Values are carried by
+    # this comment and the addendum (this registry constrains KEYS):
+    #   `surface` ∈ free_agents | usage_trends — the claim sheet's host.
+    #   connect_shown `reason` ∈ not_linked | expired | unverified |
+    #     other_account | unknown (`unknown` = a connect value outside the
+    #     closed set; the UI still shows the plain connect step).
+    #   consent_shown `reason` ∈ first | lapsed | version | withdrawn.
+    #   write_failed `error_code` is CLOSED, 21 values, platform-free (C2/C3):
+    #     feature_disabled | bad_request | verification_required |
+    #     not_linked | expired | unconfigured | consent_required |
+    #     roster_full_drop_required | asset_not_owned | player_unavailable |
+    #     waiver_bid_over_budget | waiver_claim_unsupported |
+    #     move_kind_changed | rejected | write_failed | outcome_unknown |
+    #     move_in_progress | internal_error | network | timeout | unknown.
+    #     "Couldn't confirm" = outcome_unknown | internal_error | timeout |
+    #     network, or unknown with status >= 500 or 200-299 (a 2xx the
+    #     client couldn't read); unknown with a 4xx stays out. "Repeat tap
+    #     blocked" = move_in_progress (C4, widened by analytics-lead in
+    #     round 3). `status` is the HTTP status, 0 for the client's timer and
+    #     for no answer at all.
+    #   write_failed `kind` ∈ network | roster_read, ONLY when the response
+    #     body carries one (C6): state 11 "not sent" vs 10f "refused".
+    # An offline tap sends nothing and records nothing, `attempted` included
+    # (no attempt_id is minted), so network/0 always means a request went out.
+    "fa_move_connect_shown":   frozenset({"surface", "reason", "league_platform"}),
+    "fa_move_consent_shown":   frozenset({"surface", "reason", "league_platform"}),
+    "fa_move_write_attempted": frozenset({"surface", "has_drop", "has_bid",
+                                          "consent_ticked", "attempt_id",
+                                          "league_platform"}),
+    "fa_move_write_failed":    frozenset({"surface", "error_code", "status",
+                                          "attempt_id", "league_platform",
+                                          "kind"}),
 }
 
 

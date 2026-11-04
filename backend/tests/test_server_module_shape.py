@@ -35,3 +35,24 @@ def test_server_py_defines_no_top_level_name_twice():
     duplicates = sorted(name for name, n in counts.items()
                         if n > 1 and name not in ALLOWED_REDEFINITIONS)
     assert not duplicates, f"defined more than once in server.py (a merge duplicate?): {duplicates}"
+
+
+def test_feedback_and_signin_keep_one_trusted_proxy_hop_constant():
+    """#430/main resync: the second constant would silently shadow policy."""
+    tree = ast.parse(Path(server.__file__).read_text())
+    definitions = [node for node in tree.body
+                   if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name)
+                           and target.id == "_SIGNIN_TRUSTED_PROXY_HOPS"
+                           for target in node.targets)]
+    assert len(definitions) == 1
+
+
+def test_feedback_and_signin_use_the_same_configured_proxy_hop(monkeypatch):
+    """Both public paths read the shared policy, ignoring a spoofed left hop."""
+    monkeypatch.setattr(server, "_SIGNIN_TRUSTED_PROXY_HOPS", 2)
+    with server.app.test_request_context(
+            headers={"X-Forwarded-For": "spoofed, client-at-proxy, nearest-proxy"},
+            environ_base={"REMOTE_ADDR": "socket-peer"}):
+        assert server._feedback_rate_key(None) == "ip:client-at-proxy"
+        assert server._signin_limit_keys("mfl", "subject")[0][0] == "ip:client-at-proxy"

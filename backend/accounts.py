@@ -36,7 +36,7 @@ from contextlib import contextmanager
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from sqlalchemy import delete, insert, or_, select, update
+from sqlalchemy import delete, func, insert, or_, select, update
 
 from . import database as db
 from . import user_data_lifecycle
@@ -56,6 +56,41 @@ GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
 GOOGLE_ISSUERS = ("https://accounts.google.com", "accounts.google.com")
 
 PROVIDERS = ("apple", "google")
+
+# Proof-based platform sign-in (2026-10-26, POST /api/entry/platform): an ESPN
+# cookie-pair proof or an MFL login anchors an account exactly like an Apple
+# `sub` does. Deliberately NOT in PROVIDERS, which keeps meaning "an
+# /api/auth/<provider> identity-token issuer" (Apple/Google). Subjects: the
+# canonical braced SWID upper-cased (espn) / the MFL username trimmed and
+# lower-cased (mfl) — always via platform_subject().
+PLATFORM_PROVIDERS = ("espn", "mfl")
+
+# The verified_via each platform sign-in writes. Defined once: the mint uses
+# these, and prepared_trade_cohort.VERIFIED must contain both (pinned by
+# test_prepared_trade_cohort.py — analytics-lead grant E1, 2026-10-26).
+VERIFIED_VIA_ESPN = "espn"
+VERIFIED_VIA_MFL = "mfl_login"
+
+
+def platform_subject(provider: str, raw: str | None) -> str:
+    """The ONE normaliser for a platform identity subject: espn → the braced,
+    upper-cased SWID (espn_service.swid_identity); mfl → the login username
+    trimmed + lower-cased. '' when empty.
+
+    OPEN (QA P2-3): lower-casing the MFL username is correct ONLY if MFL
+    logins are case-insensitive. If two MFL users can differ only by case,
+    they would share one Fleeced account (P1). Decision rule, settled by the
+    TestFlight step in docs/plans/platform-sign-in/scope.md: sign in to MFL
+    with the same username in a different case. MFL ACCEPTS it → keep
+    lower-casing. MFL REJECTS it → before ask 16, switch the `mfl` branch to
+    trim-only (case-preserving), and the D6 conflict comparison in
+    platform_identity_in_use with it."""
+    if provider == "espn":
+        from .espn_service import swid_identity
+        return swid_identity(raw)
+    if provider == "mfl":
+        return (raw or "").strip().lower()
+    raise ValueError(f"unknown platform provider {provider!r}")
 
 # Tombstone written into shared rows (trade_matches) when one side deletes
 # their account — keeps the counterparty's record intact without retaining
@@ -299,7 +334,9 @@ def find_or_create_account(provider: str, provider_subject: str,
 
     Returns {account_id, sleeper_user_id, created_at, created: bool}.
     """
-    if provider not in PROVIDERS:
+    if provider in PLATFORM_PROVIDERS:
+        provider_subject = platform_subject(provider, provider_subject)
+    elif provider not in PROVIDERS:
         raise ValueError(f"unknown provider {provider!r}")
     email = _normalize_email(email) if _email_capture_enabled() else None
     with db.engine.begin() as conn:
@@ -359,6 +396,54 @@ def find_or_create_account(provider: str, provider_subject: str,
         ))
         return {"account_id": account_id, "sleeper_user_id": None,
                 "created_at": now, "created": True}
+
+
+def get_account_by_identity(provider: str, provider_subject: str) -> dict | None:
+    """Read-only twin of find_or_create_account: the account owning
+    (provider, subject), or None. Creates and repairs nothing — platform
+    sign-in must run its D6 conflict check BEFORE anything is created.
+
+    Returns {account_id, sleeper_user_id, created_at, created: False}."""
+    if provider in PLATFORM_PROVIDERS:
+        provider_subject = platform_subject(provider, provider_subject)
+    ident = db.linked_identities_table
+    acct = db.accounts_table
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            select(acct.c.account_id, acct.c.sleeper_user_id, acct.c.created_at)
+            .select_from(ident.join(acct, acct.c.account_id == ident.c.account_id))
+            .where((ident.c.provider == provider)
+                   & (ident.c.provider_subject == provider_subject))
+        ).fetchone()
+    if row is None:
+        return None
+    return {"account_id": row.account_id, "sleeper_user_id": row.sleeper_user_id,
+            "created_at": row.created_at, "created": False}
+
+
+def platform_identity_in_use(provider: str, subject: str) -> bool:
+    """D6 takeover guard for platform sign-in: True when a proven ESPN SWID /
+    MFL username already sits in SOME user's imported-league credential
+    (espn_credentials.swid / mfl_credentials.mfl_username) — i.e. an account
+    that linked that platform account without ever making it a sign-in
+    method. Callers check this only when no linked_identities row exists.
+
+    Stored values are as typed/captured (espn_credentials.swid braced or
+    bare, any case — /api/espn/link stores the pair as received; mfl_username
+    in any case), so BOTH sides go through platform_subject(): SQL only
+    narrows the candidates, the comparison itself is normalized in Python."""
+    subject = platform_subject(provider, subject)
+    if not subject:
+        return False
+    if provider == "espn":
+        col = db.espn_credentials_table.c.swid
+        narrow = func.upper(col).contains(subject.strip("{}"), autoescape=True)
+    else:
+        col = db.mfl_credentials_table.c.mfl_username
+        narrow = func.lower(col).contains(subject, autoescape=True)
+    with db.engine.connect() as conn:
+        stored = conn.execute(select(col).where(narrow)).scalars().all()
+    return any(platform_subject(provider, v) == subject for v in stored)
 
 
 def bind_sleeper_user(account_id: str, sleeper_user_id: str) -> dict:
@@ -689,7 +774,11 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "rank_set_adoptions", "accuracy_scores", "mock_drafts", "receipts_grades",
     "trade_proposals", "trade_policy_shadow", "deck_diagnostic_snapshots",
     "grading_sessions", "grading_cards", "trade_page_store", "trade_deck_lineage",
+    "paywall_previews",
     "deck_card_withdrawals", "deck_evidence_packs",
+    # D1 free-agent moves: the R15.3 consent and move records, deleted with
+    # the account (R15.8 D12) and exported while it exists.
+    "platform_write_consents", "platform_write_moves",
 )
 
 # Tables that name a person and are neither deleted nor exported here, each
@@ -1246,8 +1335,12 @@ def _delete_user_data(sleeper_user_id: str,
         rows = conn.execute(select(referrals.c.id).where(
             referrals.c.referrer_user_id.in_(user_ids))).scalars().all()
         for rid in rows:
+            # Referral loop L7 (FR-23): the sender's public invite id dies
+            # with the account (as O8's share tokens do), so the link credits
+            # no one; the row, and the invitee's side of it, stay.
             conn.execute(update(referrals).where(referrals.c.id == rid).values(
-                referrer_user_id=f"{DELETED_USER_PLACEHOLDER}:{rid}"))
+                referrer_user_id=f"{DELETED_USER_PLACEHOLDER}:{rid}",
+                share_token=None))
         counts["referrals_referrer_anonymized"] = len(rows)
 
         _del("swipe_decisions", db.swipe_decisions_table)
@@ -1527,8 +1620,12 @@ def export_user_data(sleeper_user_id: str,
         for name, predicate, omit in (
             ("trade_matches", db.trade_matches_table.c.user_a_id.in_(user_ids)
              | db.trade_matches_table.c.user_b_id.in_(user_ids), ()),
+            # invite_token and (L7) share_token are bearer ids for a public
+            # link, omitted like O8's trade share token; surface and
+            # attribution_method are exported.
             ("referrals", db.referrals_table.c.referrer_user_id.in_(user_ids)
-             | db.referrals_table.c.referred_user_id.in_(user_ids), ("invite_token",)),
+             | db.referrals_table.c.referred_user_id.in_(user_ids),
+             ("invite_token", "share_token")),
             ("accounts", db.accounts_table.c.account_id.in_(acct_ids), ()),
             ("linked_identities", db.linked_identities_table.c.account_id.in_(acct_ids), ()),
             ("identity_links", db.identity_links_table.c.sleeper_user_id.in_(user_ids)

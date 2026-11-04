@@ -21,9 +21,9 @@ import type { Tier } from '../shared/types';
 
 // Share-as-image (DynastyDealer teardown 2026-07-26, polish item 5): render
 // a clean Chalkline share card of the trade — caption + both sides with
-// tiers (picks: values) + "Package value" (C2) + a "Dynasty Trade Finder"
-// wordmark AND the share URL — to a PNG (react-native-view-shot) and hand it
-// to the native share sheet.
+// tiers (picks: values) + "Package value" (C2) + a "Fleeced: Dynasty Trade Finder"
+// wordmark (m3.share.image_mark) AND the share URL — to a PNG
+// (react-native-view-shot) and hand it to the native share sheet.
 //
 // audit P1-1: the card used to carry no link at all, so a recipient of the
 // screenshot had nothing to type. Every artifact this component produces
@@ -254,7 +254,7 @@ export default function ShareTradeImage(props: Props) {
               (backend/og_image.py _draw_footer) so the two artifacts read
               as one product, and so a screenshot has somewhere to go. */}
           <View style={styles.footer}>
-            <Text style={styles.watermark}>Dynasty Trade Finder</Text>
+            <Text style={styles.watermark}>Fleeced: Dynasty Trade Finder</Text>
             <Text
               testID="share.card-url"
               style={styles.footerUrl}

@@ -372,7 +372,7 @@ def test_a_linked_league_keeps_its_platform(harness, league_id, platform):
 
 # Every database.py writer that takes the users-row lock. A writer added to
 # or dropped from this set fails the test until it's listed here.
-_GUARDED_WRITERS = {"upsert_user", "upsert_league", "record_event", "write_session_init_members",
+_GUARDED_WRITERS = {"first_init_transaction", "upsert_user", "upsert_league", "record_event", "write_session_init_members",
                     "upsert_roster_snapshots", "upsert_board_snapshots"}
 
 
@@ -485,9 +485,17 @@ def test_every_users_row_lock_opens_the_transaction_that_writes():
         for call in locks:
             w = opened_by.get(id(call))
             item = w.items[0] if w is not None and len(w.items) == 1 else None
+            context = item.context_expr if item is not None else None
+            if fn.name == "record_event" and isinstance(context, ast.IfExp):
+                # First-init's borrowed connection already owns its users lock.
+                # Pin that exact branch; the default path still must begin the
+                # transaction whose first statement is its own live-user lock.
+                assert ast.unparse(context.test) == "supplied_conn is not None"
+                assert ast.unparse(context.body) == "nullcontext(supplied_conn)"
+                context = context.orelse
             ok = (item is not None
-                  and isinstance(item.context_expr, ast.Call)
-                  and _called(item.context_expr.func) == "begin"
+                  and isinstance(context, ast.Call)
+                  and _called(context.func) == "begin"
                   and isinstance(item.optional_vars, ast.Name)
                   and isinstance(call.args[0], ast.Name)
                   and call.args[0].id == item.optional_vars.id

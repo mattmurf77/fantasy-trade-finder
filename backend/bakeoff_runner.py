@@ -71,7 +71,12 @@ Measurement hygiene (PLAN.md §3.4)
 Channel 1 — arms teaching the shared board. `elo_freeze_mult()` zeroes the
 trade-swipe K factors (`trade_k_like` / `trade_k_pass`) for the duration of the
 run, severing the arm → board → arm loop. Ranking votes (`elo_k`) are
-deliberately untouched.
+deliberately untouched. Since BL-001 the freeze has its own knob,
+`bakeoff_freeze_trade_k` (default 1 = frozen): setting it to 0 lets trade
+swipes learn again while `trade.bakeoff` stays on for arm attribution and the
+ghost infrastructure, so lifting the freeze no longer means turning the whole
+bake-off off. Forward-only: stored `swipe_decisions.k_factor` is never
+rewritten.
 
 The threshold a card was generated under is captured too — see
 `effective_fairness_threshold()`. `fairness_threshold` arrives per-request from
@@ -443,13 +448,26 @@ def lane_reallocate() -> bool:
 
 
 def elo_freeze_mult(fit_mult: float) -> float:
-    """§3.4 Channel 1 — zero the trade-swipe K factors while the bake-off runs.
+    """§3.4 Channel 1 — zero the trade-swipe K factors while the bake-off runs,
+    unless `bakeoff_freeze_trade_k` says otherwise (BL-001).
 
     Applied at the K multiplier both swipe paths already share (the in-memory
     `RankingService.record_trade_signal(fit_mult=…)` and the `swipe_decisions`
     row's stored `k_factor`), so the live board and the DB replay agree.
-    Flag off ⇒ returns `fit_mult` unchanged."""
-    return 0.0 if bakeoff_enabled() else fit_mult
+
+    Returns 0.0 only when `trade.bakeoff` is on AND `bakeoff_freeze_trade_k`
+    > 0 (default 1 = the freeze, byte-identical to before the knob). Any
+    positive value freezes, so a stray value stays conservative; 0 lets
+    trade-card likes and passes move the board again while the flag stays on
+    for arm attribution and the ghost infrastructure. Flag off ⇒ returns
+    `fit_mult` unchanged, whatever the knob.
+
+    Forward-only: the knob changes the K written from now on. Rows already
+    in `swipe_decisions` replay with their stored `k_factor`, so flipping it
+    either way never re-weights a past swipe."""
+    if bakeoff_enabled() and _cfg("bakeoff_freeze_trade_k", 1.0) > 0.0:
+        return 0.0
+    return fit_mult
 
 
 def bakeoff_active(league_id: str, pinned_give, pinned_receive,

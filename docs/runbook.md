@@ -84,6 +84,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
   - [Orphaned-overhaul sweep (legal R28.22 d2, 2026-10-29)](#orphaned-overhaul-sweep-legal-r2822-d2-2026-10-29)
 - [Migration DDL never blocks boot](#migration-ddl-never-blocks-boot)
 - [Feature flags](#feature-flags)
+- [Free-agent moves kill switch (`sleeper.send_add_drop`, D1)](#free-agent-moves-kill-switch-sleepersend_add_drop-d1)
 - [Trade engine flags + kill switch](#trade-engine-flags-kill-switch)
 - [Runtime tuning](#runtime-tuning)
 - [Presentment-rules tripwire (`trade.presentment_rules`, G6 2026-08-16)](#presentment-rules-tripwire-tradepresentment_rules-g6-2026-08-16)
@@ -105,6 +106,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [8-tier ladder + consensus seed recalibration (2026-07-12, feedback #117/#118)](#8-tier-ladder-consensus-seed-recalibration-2026-07-12-feedback-117118)
 - [ESPN league linking — API fragility monitoring (`espn.link`, 2026-07-12)](#espn-league-linking-api-fragility-monitoring-espnlink-2026-07-12)
 - [MFL + Fleaflicker league linking — monitoring (`mfl.link` / `fleaflicker.link`, 2026-07-18)](#mfl-fleaflicker-league-linking-monitoring-mfllink-fleaflickerlink-2026-07-18)
+- [ESPN/MFL sign-in temporarily refused (429 `too_many_attempts`) for one user (platform sign-in, 2026-10-27)](#espnmfl-sign-in-temporarily-refused-429-too_many_attempts-for-one-user-platform-sign-in-2026-10-27)
 - [Bare workflow: `app.json` iOS config is silently ignored (feedback #131, 2026-07-12)](#bare-workflow-appjson-ios-config-is-silently-ignored-feedback-131-2026-07-12)
 - [Universal Links AASA is CDN-cached by Apple (feedback #239, 2026-08-02)](#universal-links-aasa-is-cdn-cached-by-apple-feedback-239-2026-08-02)
 - [Render cold starts — keep-warm cron (onboarding item 3, 2026-07-17)](#render-cold-starts-keep-warm-cron-onboarding-item-3-2026-07-17)
@@ -119,6 +121,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)](#mfl-numeric-league-ids-wiped-draft-picks-on-session-init-200-2026-07-27)
 - [Sleeper-flake still wiped draft picks after the #200 fix (#220, 2026-08-01)](#sleeper-flake-still-wiped-draft-picks-after-the-200-fix-220-2026-08-01)
 - [Sleeper 429 / circuit open (S0, 2026-10-20)](#sleeper-429--circuit-open-s0-2026-10-20)
+- [Outlook result cache (2026-10-27)](#outlook-result-cache-2026-10-27)
 - [Player-cache refresh (rookie-draft M0, 2026-08-06)](#player-cache-refresh-rookie-draft-m0-2026-08-06)
 - [Rookie-scope board restore (rookie-draft M2, 2026-08-06)](#rookie-scope-board-restore-rookie-draft-m2-2026-08-06)
 - [Draft Room polling budget (rookie-draft M4, 2026-08-06)](#draft-room-polling-budget-rookie-draft-m4-2026-08-06)
@@ -472,6 +475,18 @@ How it works now (`backend/database.py`, `_SchemaSnapshot` / `_run_guarded_ddl`)
 
 ---
 
+## Free-agent moves kill switch (`sleeper.send_add_drop`, D1)
+
+The app makes Sleeper free-agent moves on the user's behalf only while `sleeper.send_add_drop` is on **and** the captured shapes are in the code (`sleeper_write.FA_MOVE_SHAPES_CAPTURED`). A move has no undo, so the lever is the env var, not the file:
+
+- **Kill it:** on Render, set `FTF_FLAGS` to include `"sleeper.send_add_drop": false` (merge with whatever `FTF_FLAGS` already holds; it is one JSON object) and let the service restart. `FTF_FLAGS` beats `config/features.json`, so no deploy and no build. `POST /api/feature-flags/reload` re-reads it without a restart.
+- **What users see:** `POST /api/league/free-agents/move` answers 404 `feature_disabled`; the next `GET /api/league/free-agents` says `move.mode: 'handoff'`, so the claim sheet offers "Open in Sleeper to claim" (state 1). A sheet already open falls to the hand-off on its next tap (the 404). Nothing in flight is cancelled: a move already sent stays in Sleeper.
+- **What it doesn't touch:** consent and move records stay (append-only, R15.3); grants keep their own 7-day clocks. `/api/platform-write-consent` never follows the flag, so Settings › Leagues › Stop roster moves still works while moves are off (it needs a verified session, like the move itself). Trade sends (`trade.send_in_sleeper`) are unaffected.
+- **The flip on** is the operator's, under D6 for launch (`docs/plans/sleeper-fa-write/scope.md` §5): `FTF_FLAGS` with `true`, then the scope's TestFlight checklist straight after, and back to `false` on any failure.
+- **Reading the records** (support, a disputed move): `platform_write_moves` by `attempt_id` (two rows: `sent`, then `result`; a `sent` row with no `result` or `result = 'unknown'` means the outcome was never confirmed, so check the user's Sleeper transactions), and `platform_write_consents` for the grant that covered it (`consent_id`). Neither holds a token.
+
+---
+
 ## Trade engine flags + kill switch
 
 The trade engine is selected by flags in `config/features.json` (reload via `POST /api/feature-flags/reload`, or override with `FTF_FLAGS`):
@@ -807,7 +822,7 @@ If these stop firing, queued pushes pile up in `notification_queue` and digests/
 - **Known limits:**
   - A hung step blocks the steps after it, and single-flight then blocks the next day's run too (the "already in flight" warning names its age). Every network call in the steps carries a timeout; restarting the worker clears it.
   - A worker restart mid-run (a deploy at 13:30, an OOM) loses the rest of that run. Each step is idempotent and the weekday gates are `>=`, so the next day retries.
-  - The run shares the free instance's CPU with request traffic while it runs; the CPU-heavy steps (7 once re-enabled, 8) run last.
+  - The run shares the web worker's CPU and GIL with request traffic while it runs (one gunicorn worker, `--threads 4` since #398, `standard` plan since #376); the CPU-heavy steps (7 once re-enabled, 8) run last.
 - **Until it is deployed,** the manual workarounds still apply. Usage Trends, weekly once Sleeper's state rolls over: `python3 scripts/refresh_usage_trends.py --remote`. Roster snapshots: `POST /api/cron/roster-snapshot`.
 
 **Sweep scope (2026-09-03).** Both league sweeps are now bounded: the hourly draft-status queue and the weekly roster-snapshot work-list only return leagues whose `leagues.updated_at` is inside `database.ACTIVE_LEAGUE_WINDOW_DAYS` (30 — stamped by `upsert_league` on every `session_init`), so a league nobody opens any more stops costing platform reads. `POST /api/cron/roster-snapshot` passes `active_within_days=None` and still sweeps everything; per-league forcing is `_refresh_league_draft_status(league_id, force=True)`, which skips the cheap-skip entirely.
@@ -967,6 +982,34 @@ Both read **official/sanctioned** APIs (far lower churn risk than ESPN), zero-au
 - **Kill switch (either):** flip the flag to `false` → all `/api/{platform}/*` routes 404 and the mobile link option disappears. Imported leagues stay inert; no cleanup.
 - **Future picks (MFL):** `futureDraftPicks` are stored raw in `leagues.platform_future_picks` (JSON), normalized into `draft_picks` by `_sync_mfl_owned_picks` (#158) and, since the #207/#228 parity fix, **re-fetched on the draft-status refresh cadence** (`_refresh_mfl_future_picks`) — one extra zero-auth export per refreshed MFL league, bounded by the same `_DRAFT_STATUS_SWEEP_BUDGET`. Symptom of an export regression: the log line `MFL futureDraftPicks unavailable for <id> — keeping the stored snapshot`. That is a *degradation*, not a fault: the stored snapshot is kept (never wiped — #220's lesson) and the verdict-gated current-season exclusion still hides a drafted season's picks on its own.
 - **Franchise name color/formatting markup (#282, reopens #258):** MFL lets owners style their franchise name; the raw name string can carry inline markup like `<font color = Green>...</font color>` (sometimes malformed — a closing tag with no matching open, or `</font color>` carrying the attribute). This is entity-encoded on the wire (`&lt;font...`), which is why it only becomes literal `<font...>` after entity-decoding. `mfl_service._clean_text` strips a fixed tag allowlist (`b`, `i`, `u`, `strong`, `em`, `font`) after unescaping — if a future report shows leftover markup, it's most likely a tag outside that allowlist; extend `_MARKUP_TAG` rather than switching to a blanket `<[^>]*>` strip (that would mangle a team name with a literal `<`/`>`). `database._backfill_mfl_name_entities()` re-cleans stored rows on every boot using the same function, so a cleaner improvement alone (no separate migration) fixes both new imports and previously-stored names.
+
+## ESPN/MFL sign-in temporarily refused (429 `too_many_attempts`) for one user (platform sign-in, 2026-10-27)
+
+Platform sign-in (`POST /api/entry/platform`, [scope](plans/platform-sign-in/scope.md)) and the Settings MFL sign-in (`POST /api/mfl/auth-link`) share one in-process limiter on CREDENTIAL failures. The counted failures are an MFL bad login, the ESPN sign-in cookie read being refused, and `espn_unproven_pair`. Since the lockout fix (2026-10-27, `feat/mfl-auth-link-throttle`) every attempt is checked against three windows:
+
+| Window | Key | Limit | `reason` when it refuses |
+|---|---|---|---|
+| Per client IP | the IP | 300 failures / 10 min (deliberately loose) | `ip_limit` |
+| Per (subject, client IP) | ESPN SWID or MFL username **plus** the IP | 5 failures / 15 min | `subject_limit` |
+| Per subject, any IP — **MFL only** | MFL username | 30 failures / hour | `subject_ceiling` |
+
+A proven sign-in or a good auth-link login clears that subject's bucket for **its** IP and the subject-wide counter. It never clears the IP window or another IP's bucket.
+
+- **Why the ceiling is MFL-only** (head-eng, 2026-10-27): an ESPN claim needs an `espn_s2` cookie, which can't be guessed, so for ESPN a ceiling guards nothing and only adds griefing surface. ESPN has just the first two windows.
+- **Trusted IPs:** an IP that had a proven MFL sign-in or a good auth-link login for that username in the last 30 days (`_SIGNIN_TRUSTED_IP_DAYS`) is **exempt from the ceiling**. It is never exempt from its own (subject, IP) bucket or the IP window. So while someone guesses from elsewhere, the owner can still sign in from their usual network.
+- **Trusted IPs reset on deploy.** The trusted-IP map is in-process ((username, IP) hash → last success, capped at `_SIGNIN_TRUSTED_IP_MAX_KEYS` = 50,000, oldest evicted) and is **cleared by every deploy or restart**. Right after a deploy, nobody is trusted until they sign in again: a user under a `subject_ceiling` lock right after a deploy is locked everywhere until the hour passes.
+
+- **Cause and residual:**
+  - **A single-IP griefer can no longer lock the victim out.** Before the fix, anyone who knew a person's SWID (visible to every leaguemate) or MFL username could spend that subject's 5 failed attempts and lock the person's ESPN/MFL sign-in, renewably. Now those 5 failures lock only the griefer's own (subject, IP) bucket. One IP can't reach the 30-per-hour subject-wide ceiling, because its own bucket caps it at 20 per hour.
+  - **What can still lock an MFL username** is 30 failures within an hour across **two or more** IPs (password guessing, or a griefer with several addresses). That answers `reason=subject_ceiling` and clears an hour after the oldest of those failures, or on the subject's next proven sign-in. It locks only IPs the owner hasn't signed in from in the last 30 days (since the last deploy). An ESPN SWID can't be locked this way.
+- **Impact:** a locked user can't sign in with ESPN/MFL from the locked IP (`subject_limit`), or with MFL from any IP they haven't recently signed in from (`subject_ceiling`), until the window clears. For MFL they also can't connect the MFL login in Settings: auth-link answers the same 429. An already-signed-in session is otherwise unaffected. **Don't steer them to Sign in with Apple as the fix.** Apple signs them into a **different, empty** account unless they set one up before.
+- **Support:** for `subject_limit`, the user can simply try from another network (for example, cellular instead of Wi-Fi), or wait 15 minutes. For `subject_ceiling` (MFL), the user can sign in from a network they used in the last 30 days (unless there was a deploy since); otherwise escalate to eng. There is **no manual reset**: the limiter state is in-process, so the only reset is a **service restart** (any deploy also clears it), and eng restarts if needed.
+- **Logs:**
+  - Sign-in attempts show as `PLATFORM-SIGNIN provider=… outcome=limited reason=subject_limit|subject_ceiling|ip_limit`; refused auth-link logins show as `MFL-AUTH-LINK outcome=limited reason=…`. No ids are logged.
+  - Many `subject_ceiling` lines for one provider point at distributed password guessing.
+  - `ip_limit` firing for many users at once suggests a wrong `_SIGNIN_TRUSTED_PROXY_HOPS`: compare it with the temporary `PLATFORM-SIGNIN-XFF hops=N cf=0|1 tci=0|1` lines (hop count and header presence only, never an IP).
+- **Known limit (post-launch item):** each limiter map (failures, in-flight, trusted IPs) is capped at 50,000 keys (`_SIGNIN_LIMITER_MAX_KEYS` / `_SIGNIN_TRUSTED_IP_MAX_KEYS`) and evicts the **oldest** key when full. A flood of counted failures on many distinct subjects could therefore evict a target's counters, or a trusted IP. head-eng accepted this at launch scale.
+- **ESPN sign-in kill switch:** set `espn.signin` to `false` in `config/features.json` (or `FTF_FLAGS`). The whole ESPN entry branch then 404s `feature_disabled`, while MFL sign-in and Settings ESPN linking (`espn.link`) keep working.
 
 ## Bare workflow: `app.json` iOS config is silently ignored (feedback #131, 2026-07-12)
 
@@ -1155,7 +1198,14 @@ The baseline consensus seeds are a **blend of DynastyProcess and KeepTradeCut** 
 - **Sourcing mechanism (fragile — unsanctioned):** KTC has no official API. The fetcher GETs `https://keeptradecut.com/dynasty-rankings` once per boot (24h in-memory TTL, browser headers to clear Cloudflare — same lesson as the Sleeper 1010 / ESPN UA fixes) and extracts the embedded `var playersArray = [...]` literal from the page HTML (`parse_ktc_players`). Each entry carries both formats plus TE-premium variants (`tep`/`tepp`/`teppp`); we read `oneQBValues.value` for `1qb_ppr` and `superflexValues.tep.value` for `sf_tep`. **Expect this to break without notice** — a page-markup change (variable renamed, array inlined differently, values moved behind XHR) or a Cloudflare block. It is a *scrape*, not a contract.
 - **Fail-soft (never blocks boot):** any KTC problem (fetch error, 403, `playersArray` not found, JSON change) is caught — `_ktc_consensus` logs `⚠️ KTC fetch failed …` and returns `{}`, and the blend then leaves the maps **DP-only**, exactly mirroring the DP CSV's own last-good/flat-Elo fallback. A failure is cached for the TTL so a broken endpoint isn't re-hammered by every pool rebuild in one process. Boot always succeeds.
 - **Kill switch (no code change, no redeploy needed for the value knob):** set `ktc_blend_weight = 0` via `PUT /api/admin/config/ktc_blend_weight` (with `tep_te_uplift = 1` for a full revert). Weight 0 makes the seed pipeline **byte-identical to the pre-#145 DP-only baseline** and short-circuits before KTC is ever fetched. **Takes effect on the next boot / pool rebuild** — the universal pool is built once per boot, so bounce the service (or wait for the next daily rebuild) after flipping it. This is the lever to pull if KTC starts serving bad/garbage values (as opposed to being merely down, which already fails soft).
-- **Symptoms of a silent KTC break:** the boot log shows `⚠️ KTC fetch failed` (down → DP-only, benign) OR — worse, if the markup changed but still parses — occupancy drift / weird top-of-board ordering with **no** warning. Guard: `backend/tests/test_ktc_blend.py` pins parse, blend-off byte identity, occupancy sanity, and the sf_tep TE≥1qb invariant against checked-in fixtures (network-free). To refresh after an intentional KTC data shift, re-dump `backend/tests/fixtures/ktc_rankings_snapshot_*.html` (trimmed page) and `ktc_blend_pipeline_*.json` (matched DP+KTC pool) and re-run the suite.
+- **Symptoms of a silent KTC break:** the boot log shows `⚠️ KTC fetch failed` (down → DP-only, benign) OR — worse, if the markup changed but still parses — occupancy drift / weird top-of-board ordering with **no** warning.
+- **The launch alert (S5, models-lead's launch plan):** every blend (once per format per pool rebuild, so at least daily with the 24 h KTC TTL) checks its own health and prints **one `🚨 KTC-BLEND-DEGRADED fmt=<format> reason=<…>` line** when it is off. A Render log alert on the text `KTC-BLEND-DEGRADED` is the alerting hook (release-lead owns the alert). The reasons:
+  - `unavailable`: KTC returned nothing, so that format's seeds are DP-only;
+  - `thin`: fewer than `KTC_MIN_MATCHED` (50) pool players matched, so a page change still parses but matches almost nothing. That format stays **DP-only**;
+  - `partial`: 50+ matched, but they cover less of the pool than `KTC_MIN_COVERAGE`, overall (0.59) or for a position (QB 0.63, RB 0.59, WR 0.63, TE 0.47), each about 85% of the last healthy fetch's coverage (2026-07-17: 0.697 overall). That format stays **DP-only**, and the line names the short floors (`short=…`). models-lead addendum R5: the rank-normalization maps the matched set onto the top of the whole pool's DP curve, which is only right when the matched set covers most of the pool;
+  - `disagrees`: KTC's ordering over the matched players has a Spearman rank correlation with DP's below `KTC_MIN_RANK_CORR` (0.7). On the real 2026-07-17 data it is 0.935 (1QB) and 0.959 (SF-TEP), so this flags garbage that still parses.
+
+  `unavailable`, `thin` and `partial` keep that format DP-only (the line says so). On `disagrees` the blend still runs, and the line says "blended anyway". The lever is the kill switch below. `data_loader.KTC_BLEND_STATUS` holds the last state per format (`state`, `matched`, `coverage`, `short`, `rank_corr`, `checked_at`). **While KTC's fetch is failing (since at least 2026-10-29), this fires `unavailable` on every pool build once merged,** unless `ktc_blend_weight` is pinned to 0: weight 0 skips the blend and records nothing. In hermetic test runs the line appears only from tests that stub KTC out or build a 2–3-player pool (6 lines across the 17 loader test files, 2026-10-27); a blend over a real-size pool with the fixture prints nothing. **On an alert:** check the KTC page by hand (hand probe below), then, if the values are wrong rather than merely down, set `ktc_blend_weight = 0` and bounce. That is a model change (DP-only seeds), so tell models-lead. Guard: `backend/tests/test_ktc_blend.py` pins parse, blend-off byte identity, occupancy sanity, and the sf_tep TE≥1qb invariant against checked-in fixtures (network-free). To refresh after an intentional KTC data shift, re-dump `backend/tests/fixtures/ktc_rankings_snapshot_*.html` (trimmed page) and `ktc_blend_pipeline_*.json` (matched DP+KTC pool) and re-run the suite.
 - **Value-history versioning — NO marker/rescale needed (unlike #117):** the daily `value-snapshot` cron writes whatever the current seed map holds, so post-#145 snapshots carry blended values while pre-#145 rows carry DP-only values. This is safe *without* a `value_history_seed_scale`-style migration because (a) both are on the **same 0–10k value scale and the same affine Elo map** — only the ordering/magnitude of individual players shifts slightly, not the scale — so the FB-61 30d-trend deltas stay meaningful (a player whose blended value rose reads as a riser, which is correct); and (b) the #117 rescale existed only because that change moved the *scale itself* (linear→affine), which is invertible; a blend is not a scale change and has no closed-form inverse. The 30d window self-heals as pre-blend rows age out. Accepted; revisit only if trend glyphs look wrong through mid-August 2026.
 - **Hand probe:** `python3 -c "import backend.data_loader as d; print(len(d._ktc_consensus()))"` (prints the matched-row count, or 0 if KTC is down). Matching uses the DP `db_playerids.csv` crosswalk (`ktc_id`/`mfl_id` → DP name, position-strict per #127) with a name fallback; on the 2026-07-17 data 441/464 KTC players matched the DP pool (unmatched KTC players are ignored — universe unchanged).
 
@@ -1344,6 +1394,25 @@ per consecutive 429, with jitter; soft cap 600 s, hard ceiling 3,600 s).
   through analytics-lead). A sustained ceiling (3,600 s windows) means Sleeper is throttling the IP, not one
   request: escalate to platforms-eng. Cloudflare 1010 is a separate failure (`blocked`, a 403); it doesn't open
   the circuit.
+
+## Outlook result cache (2026-10-27)
+
+`GET /api/league/outlook` keeps each computed sim result in process memory (`backend/outlook_result_cache.py`,
+[scope](plans/outlook-result-cache/scope.md)). The response contract is unchanged.
+
+- **It resets on every deploy or restart.** Nothing is persisted, and there's nothing to flush by hand. The key
+  hashes every input the engine reads, so a roster, record, schedule, value-board or `model_config` change is a new
+  entry, and old entries age out (6 h TTL, 256 entries).
+- **Cold sims are expected.** The first League tab open per league after a restart, and the first after any input
+  change (a week scores, a trade or waiver, a value refresh), runs the full sim: 0.3–3.5 s on an M1, likely more on
+  Render. It holds the GIL against the other 3 request threads while it runs. Other opens of the same league during
+  that run wait for it instead of starting their own.
+- **Hits vs misses:** every lookup writes a debug line from logger `backend.outlook_result_cache`, e.g.
+  `outlook result cache hit {'hits': 12, 'misses': 3, 'coalesced': 1, 'errors': 0}` (counts since process start).
+  The lines reach stdout and the Render logs because `server.py` sets the root logger to DEBUG. They are not in
+  `/api/debug/log`, whose ring buffer holds only the `trade_finder` logger, and never in an API response.
+- **A result that looks stale** can't come from the cache unless an input the engine reads is missing from the key
+  (the list is in the module docstring). Check that before restarting to clear it.
 
 ## Player-cache refresh (rookie-draft M0, 2026-08-06)
 

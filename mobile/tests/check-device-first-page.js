@@ -296,6 +296,11 @@ process.on('exit', () => {
     // A format switch discards too (an organic page refreshed during it may be the other format's).
     eq([D.discardsDevicePages('/api/scoring/switch'), D.discardsDevicePages('/api/rank3?x=1'),
       D.discardsDevicePages('/api/trades/swipe')], [true, true, false]);
+    // K-F5 (D1, §B10): a free-agent move discards too; the next search drops the player it dropped.
+    eq([D.discardsDevicePages('/api/league/free-agents/move'), D.discardsDevicePages('/api/league/free-agents')],
+      [true, false]);
+    // FA_MOVE_PATH lives in devicePage.ts and api/faMove.ts (an import would cycle through client.ts): one path.
+    ok(read('api/faMove.ts').includes(`'${D.FA_MOVE_PATH}'`), `api/faMove.ts doesn't post ${D.FA_MOVE_PATH}`);
   });
   await check('1l. every named write is a path the app really posts (drift guard)', () => {
     const api = ['api/rankings.ts', 'api/league.ts'].map(read).join('\n');

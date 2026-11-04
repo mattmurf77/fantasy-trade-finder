@@ -1,16 +1,17 @@
 """Sign-in timing fix (legal R28.17 condition 4).
 
-POST /api/extension/auth and the POST /api/entry/platform mint are
-UNVERIFIED sign-ins. They used to replay the user's swipe history and tier
-overrides while building the session, so the response time revealed whether
-a typed username had FTF history. They now build with `load_history=False`
+POST /api/extension/auth is an UNVERIFIED username sign-in. It used to
+replay the user's swipe history and tier overrides while building the session,
+so the response time revealed whether a typed username had FTF history.
+It now builds with `load_history=False`
 (session marked `_history_pending`), and the in-place verify routes
 (`sleeper_link` proven-live, `mfl_auth_link`) hydrate the history with
 `_hydrate_session_history` immediately BEFORE `verified` flips.
 
 head-eng's condition: a hydration failure refuses the verify with a
 retryable 503 `verify_retry` + Retry-After, leaving the session unverified
-and still pending, so a retry hydrates exactly once.
+and still pending, so a retry hydrates exactly once. Proof-based platform
+sign-in rejects claim-only requests and keeps proven bound-user history eager.
 
 Flask test client + in-memory SQLite. No network: the Sleeper user lookup,
 the token oracle, MFL login and the player pools are all stubbed.
@@ -213,26 +214,51 @@ def test_extension_auth_defers_history(world):
         assert svc._swipes == [] and svc._elo_overrides == {}
 
 
-def test_entry_mint_defers_history(world, monkeypatch):
+def test_platform_claim_without_proof_does_not_load_history(world):
     _seed_history(ENTRY_UID)
-    xwalk = es.load_crosswalk(XWALK_FIXTURE)
-    with open(MFL_FIXTURE) as f:
-        bundle = json.load(f)
-    monkeypatch.setattr(es, "get_crosswalk", lambda _opener=None: xwalk)
-    monkeypatch.setattr(mfl, "resolve_host",
-                        lambda *a, **kw: "www48.myfantasyleague.com")
-    monkeypatch.setattr(mfl, "fetch_league_bundle",
-                        lambda *a, **kw: copy.deepcopy(bundle))
     _reset_calls(world)
     r = world.client.post("/api/entry/platform", json={
         "platform": "mfl", "mfl_league_id": "10005", "year": 2026,
         "franchise_id": "0001"})
+    assert r.status_code == 403 and r.get_json()["error"] == "proof_required"
+    assert world.calls == {"swipes": 0, "overrides": 0, "stamps": 0, "replay": 0}
+
+
+def test_proven_platform_signin_restores_bound_history_eagerly(world, monkeypatch):
+    from backend import accounts
+    _seed_history(UID)
+    account = accounts.find_or_create_account("mfl", "history-login")
+    assert accounts.bind_sleeper_user(account["account_id"], UID)["conflict"] is False
+    xwalk = es.load_crosswalk(XWALK_FIXTURE)
+    with open(MFL_FIXTURE) as f:
+        bundle = json.load(f)
+    proof = []
+    monkeypatch.setattr(es, "get_crosswalk", lambda _opener=None: xwalk)
+    monkeypatch.setattr(mfl, "resolve_host", lambda *a, **kw: "www48.myfantasyleague.com")
+    monkeypatch.setattr(mfl, "fetch_league_bundle", lambda *a, **kw: copy.deepcopy(bundle))
+    def login(*a, **kw):
+        proof.append("login")
+        return {"cookie": "MFL_USER_ID=history-proof"}
+    def leagues(*a, **kw):
+        proof.append("ownership")
+        return [{"league_id": "10005", "franchise_id": "0001"}]
+    monkeypatch.setattr(mfl, "login", login)
+    monkeypatch.setattr(mfl, "fetch_my_leagues", leagues)
+    world.on_load = lambda: proof.append("history")
+    _reset_calls(world)
+    r = world.client.post("/api/entry/platform", json={
+        "platform": "mfl", "mfl_league_id": "10005", "year": 2026,
+        "franchise_id": "0001", "username": "history-login", "password": "fake"})
     assert r.status_code == 200, r.get_json()
     body = r.get_json()
-    assert body["user_id"] == ENTRY_UID
-    assert world.calls == {"swipes": 0, "overrides": 0, "stamps": 0, "replay": 0}
+    assert body["user_id"] == UID and body["verified"] is True
+    assert proof[:2] == ["login", "ownership"] and "history" in proof[2:]
     sess = _live(body["session_token"])
-    assert sess["_history_pending"] is True and not sess.get("verified")
+    assert "_history_pending" not in sess
+    assert world.calls["replay"] == len(FORMATS)
+    for fmt in FORMATS:
+        assert len(sess["services"][fmt]._swipes) == _stored_rank_rows(UID, fmt)
+    assert sess["services"]["1qb_ppr"]._elo_overrides == {"te_4": 1950.0}
 
 
 def test_extension_auth_work_is_identical_with_and_without_history(world):
@@ -501,3 +527,17 @@ def test_mfl_body_hydration_failure_refuses_verify(world):
     assert int(headers["Retry-After"]) > 0
     sess = _live(token)
     assert not sess.get("verified") and sess.get("_history_pending") is True
+
+
+def test_verified_mfl_link_skips_pending_history_and_keeps_first_marker(world):
+    _seed_history(UID)
+    token = _auth(world)
+    sess = _live(token)
+    sess.update(verified=True, verified_via="sleeper")
+    world.fail_format = FORMATS[0]  # a hydration attempt would fail this request
+    _reset_calls(world)
+    status, body, _ = _call_mfl_auth_link_body(token)
+    assert status == 200 and body["verified"] is True
+    assert sess["verified_via"] == "sleeper"
+    assert sess["_history_pending"] is True
+    assert world.calls == {"swipes": 0, "overrides": 0, "stamps": 0, "replay": 0}

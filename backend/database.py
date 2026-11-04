@@ -19,6 +19,7 @@ import os
 import threading
 import time
 import zlib
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 
 try:
@@ -490,6 +491,7 @@ users_table = Table("users", metadata,
                                           #   {"1qb_ppr": ["RB","WR"], "sf_tep": []}
     Column("tier_overrides",  Text),     # JSON — dual-format shape:
                                           #   {"1qb_ppr": {pid: elo}, "sf_tep": {pid: elo}}
+    Column("first_init_pending", Integer),  # 1 only on a fresh auth INSERT; legacy NULL is ineligible
     Column("invited_by",      String),   # sleeper username of referrer (null = direct)
     Column("unlocked_formats", Text),    # JSON list — which formats the user has
                                           # unlocked trade finder in, e.g. ["1qb_ppr"]
@@ -519,10 +521,12 @@ users_table = Table("users", metadata,
     Column("last_rank_local_date",  String),
     Column("last_rank_tz",          String),
     # ── Verified session persistence (account-auth plan P1/P2) ───────────
-    # verified_via: 'sleeper' | 'apple' | 'google' | 'mfl_login' — the source
-    # that proved control of this user record. NULL = never verified
-    # (username-only). 'mfl_login' = a successful MFL username/password login
-    # (POST /api/mfl/auth-link — operator decision 2026-08-11).
+    # verified_via: 'sleeper' | 'apple' | 'google' | 'mfl_login' | 'espn' —
+    # the source that proved control of this user record. NULL = never
+    # verified (username-only). 'mfl_login' = a successful MFL username/
+    # password login (POST /api/mfl/auth-link — operator decision 2026-08-11;
+    # also the MFL sign-in at POST /api/entry/platform). 'espn' = the ESPN
+    # cookie-pair proof at POST /api/entry/platform (platform sign-in).
     Column("verified_at",           String),
     Column("verified_via",          String),
     # ── Public-profile opt-in (teardown 06-04, flag profiles.user_toggle) ─
@@ -1918,7 +1922,7 @@ recorded_picks_table = Table("recorded_picks", metadata,
 #   sets, and web/js/app.js notifTypeIcon + clickNotif.
 #     trade_match · trade_accepted · trade_declined · referral_joined ·
 #     league_member_joined · league_member_unlocked_trades ·
-#     match_expiring · deck_replenished · counter_offer
+#     match_expiring · deck_replenished · counter_offer · referral_activated
 # metadata_json: JSON-encoded dict with context fields, e.g.:
 #   { "match_id": 42, "partner_username": "joe", "give": ["CeeDee Lamb"], "receive": ["Tyreek Hill"] }
 # is_read: 0 = unread, 1 = read
@@ -2425,10 +2429,10 @@ user_events_table = Table("user_events", metadata,
     Column("occurred_at",  String,  nullable=False),    # ISO UTC (server receive time)
     Column("league_id",    String),
     Column("session_id",   String),
-    Column("device_type",  String),                     # 'iphone' | 'ipad' | 'macos' | 'web' | 'extension'
+    Column("device_type",  String),                     # 'iphone' | 'ipad' | 'macos' | 'android' | 'web' | 'extension' · NULL = no X-Device header
     Column("os_version",   String),                     # '17.4' | '18.1' | etc.
     Column("app_version",  String),                     # '1.2.3'
-    Column("source",       String),                     # 'mobile' | 'web' | 'api' | 'cron'
+    Column("source",       String),                     # client: 'mobile' | 'web' | 'extension' (ingest) · server: 'api' | 'server' | 'calc_queue' | 'shop_send' · NULL = client unidentified (G-068)
     Column("props",        Text),                       # JSON — event-specific extras
     Column("event_id",     String),                     # client UUID — idempotent retries / dedup (unique index below)
     Column("device_id",    String),                     # stable per-install anon id ('dev_' + UUID)
@@ -2661,6 +2665,82 @@ sleeper_credentials_table = Table("sleeper_credentials", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# platform_write_consents / platform_write_moves — D1 free-agent moves
+# (docs/plans/sleeper-fa-write/; legal-lead R15.3; consent.md §4.3 with the
+# launch scope's §2 deltas). Approved by the operator 2026-11-01.
+# ---------------------------------------------------------------------------
+#
+# The evidence record for moves Fleeced makes in a user's platform league on
+# their behalf. BOTH TABLES ARE APPEND-ONLY: rows are inserted, never updated.
+#   * A consent grant is one row (kind 'grant'); ending it is a NEW row (kind
+#     'withdrawal') whose `refers_to` names the grant. Validity is computed at
+#     read time (`active_platform_write_grant`): the latest grant for (user,
+#     platform, platform_user_id), at the current copy version, with no
+#     withdrawal, inside its rolling 7 × 24 h window from the server's own
+#     consent timestamp.
+#   * A move is two rows under the client's `attempt_id`: phase 'sent',
+#     written BEFORE the platform call, then phase 'result'. Unique on
+#     (user_id, attempt_id, phase), so one tap can never send twice. The id
+#     is OPAQUE and per user (contract §3): the client may mint it from
+#     Math.random, so another user's identical id is a different move.
+# Neither table ever stores a token or credential. User-keyed: both join
+# account deletion and export through accounts._ADDITIONAL_PRIVATE_TABLES
+# (R15.8 D12: deleted with the account). New tables, so metadata.create_all
+# creates them, constraints and indexes included, on both dialects; no
+# _migrate_db rows.
+
+platform_write_consents_table = Table("platform_write_consents", metadata,
+    Column("consent_id",         String, primary_key=True),  # uuid4 hex
+    Column("kind",               String, nullable=False),    # grant | withdrawal
+    Column("refers_to",          String),                    # withdrawal: the grant's consent_id
+    Column("user_id",            String, nullable=False),    # FTF user id
+    Column("platform",           String, nullable=False),    # sleeper | mfl | espn
+    Column("platform_user_id",   String),                    # the platform account moves are made as
+    Column("league_scope",       String),                    # grants: 'all_linked' (R15.8 D11)
+    Column("copy_version",       String),                    # grants: the text shown (fa_move_copy)
+    Column("locale",             String),                    # grants: 'en-US'
+    Column("consented_at",       String),                    # grants: server UTC
+    Column("expires_at",         String),                    # grants: consented_at + 7 × 24 h
+    Column("client_platform",    String),                    # X-Device header
+    Column("app_version",        String),                    # X-App-Version header
+    Column("trigger_attempt_id", String),                    # grants: the move's attempt_id
+    Column("withdrawn_at",       String),                    # withdrawals: server UTC
+    Column("withdrawn_via",      String),                    # settings | disconnect |
+                                                             # credential_expired |
+                                                             # credential_rejected | relink
+    Column("recorded_at",        String, nullable=False),    # row insert time, server UTC
+    Index("ix_platform_write_consents_user", "user_id", "platform"),
+)
+
+platform_write_moves_table = Table("platform_write_moves", metadata,
+    Column("id",                      Integer, primary_key=True, autoincrement=True),
+    Column("attempt_id",              String, nullable=False),  # client id, one per tap; opaque
+    Column("phase",                   String, nullable=False),  # sent | result
+    Column("user_id",                 String, nullable=False),  # FTF user id
+    Column("platform",                String, nullable=False),  # sleeper | mfl | espn
+    Column("platform_user_id",        String),                  # the account the move was made as
+    Column("league_id",               String, nullable=False),
+    Column("consent_id",              String),                  # the grant that covered it
+    Column("move_kind",               String),                  # add | claim
+    Column("add_player_ids",          Text),                    # JSON list (FTF / Sleeper ids)
+    Column("drop_player_ids",         Text),                    # JSON list
+    Column("faab_bid",                Integer),                 # claims
+    Column("sent_at",                 String),                  # server UTC, before the platform call
+    Column("result",                  String),                  # result rows: accepted | rejected |
+                                                                # partial | error | unknown
+    Column("status",                  String),                  # result rows on 200: complete | pending
+    Column("platform_transaction_id", String),                  # when the platform returns one
+    Column("error_code",              String),                  # result rows on a refusal
+    Column("response_status",         Integer),                 # result rows: the HTTP status answered
+    Column("response_json",           Text),                    # result rows: the body answered, replayed
+                                                                # for a repeat of the same attempt_id
+    Column("recorded_at",             String, nullable=False),  # row insert time, server UTC
+    UniqueConstraint("user_id", "attempt_id", "phase",
+                     name="uq_platform_write_moves_user_attempt_phase"),
+    Index("ix_platform_write_moves_user_league", "user_id", "league_id"),
+)
+
+# ---------------------------------------------------------------------------
 # espn_credentials_table — encrypted ESPN session cookies (league linking #101)
 # ---------------------------------------------------------------------------
 #
@@ -2758,8 +2838,8 @@ accounts_table = Table("accounts", metadata,
 linked_identities_table = Table("linked_identities", metadata,
     Column("id",               Integer, primary_key=True, autoincrement=True),
     Column("account_id",       String,  nullable=False),
-    Column("provider",         String,  nullable=False),   # 'apple' | 'google'
-    Column("provider_subject", String,  nullable=False),   # provider's stable `sub`
+    Column("provider",         String,  nullable=False),   # 'apple' | 'google' | 'espn' | 'mfl'
+    Column("provider_subject", String,  nullable=False),   # provider's stable `sub` (espn: canonical SWID upper-cased; mfl: username trimmed + lower-cased)
     Column("email_hash",       String),                    # SHA-256 hex of email, nullable
     Column("linked_at",        String,  nullable=False),
     UniqueConstraint("provider", "provider_subject", name="uq_linked_identity"),
@@ -2783,7 +2863,7 @@ sessions_table = Table("sessions", metadata,
     Column("token_hash",   String, primary_key=True),   # SHA-256 hex of the bearer token
     Column("user_id",      String, nullable=False),     # sleeper id or acct_* working key
     Column("account_id",   String),                     # accounts.account_id when anchored
-    Column("verified_via", String),                     # 'sleeper' | 'apple' | 'google' | 'mfl_login'
+    Column("verified_via", String),                     # 'sleeper' | 'apple' | 'google' | 'mfl_login' | 'espn'
     Column("account_only", Integer),                    # 1 = acct_* session (no Sleeper source)
     Column("username",     String),                     # for session rebuild after restart
     Column("display_name", String),
@@ -2808,6 +2888,12 @@ shared_packages_table = Table("shared_packages", metadata,
     Column("give_ids",    Text,   nullable=False),      # JSON list[str] of player ids
     Column("receive_ids", Text,   nullable=False),      # JSON list[str] of player ids
     Column("created_at",  String, nullable=False),      # ISO UTC
+    # Share-time value snapshot (models-lead K-a2; docs/data-dictionary.md):
+    # JSON {v, favors, firsts, label, format, league_id, computed_at,
+    # second_in_firsts, pool{snapshot, version}}, written once at mint by
+    # server._share_value_snapshot. The og card draws its value bar ONLY from
+    # this. NULL = no bar (no scoring_format sent, K-a6, or a pre-snapshot row).
+    Column("value_snapshot", Text),
     Index("ix_shared_packages_user", "user_id"),
 )
 
@@ -2830,6 +2916,10 @@ trade_share_tokens_table = Table("trade_share_tokens", metadata,
     Column("created_by", String,  nullable=False),      # sharer's session user_id
     Column("created_at", String,  nullable=False),      # ISO UTC; rate-limit input
     Column("revoked_at", String),                       # ISO UTC; NULL = live
+    # Share-time value snapshot (models-lead K-a2), as on shared_packages:
+    # written once at mint, oriented to the sharer, never recomputed. NULL =
+    # no bar (K-a6, or a token minted before the column existed).
+    Column("value_snapshot", Text),
     Index("ix_trade_share_tokens_match", "match_id"),
     Index("ix_trade_share_tokens_creator", "created_by", "created_at"),
 )
@@ -2895,6 +2985,24 @@ subscription_events_table = Table("subscription_events", metadata,
     Index("ix_subscription_events_user", "user_id"),
 )
 
+# Paywall deck preview (backend/paywall_gate.py): one row per never-entitled
+# user once the first page of their first deck has been SERVED to them by
+# /api/trades/generate or /status. Warm-up and cron-built jobs never write it.
+# Created by metadata.create_all on both dialects; window_trade_ids (P3-1,
+# 2026-10-27) is additive, so it also has a migration_cols row.
+# Private: deleted and exported via accounts._ADDITIONAL_PRIVATE_TABLES.
+paywall_previews_table = Table("paywall_previews", metadata,
+    Column("user_id",         String,  primary_key=True),  # working key (sleeper id or acct_*),
+                                                            # as entitlements keys it
+    Column("deck_key",        String,  nullable=False),    # the trade job_id whose page(s) were served
+    Column("pages_served",    Integer, nullable=False),    # highest preview page served (1..paywall_preview_pages)
+    Column("first_served_at", String,  nullable=False),
+    Column("updated_at",      String,  nullable=False),
+    Column("window_trade_ids", Text),                      # JSON list: the window's trade ids at the last
+                                                            # serve; the swipe check's fallback once the job
+                                                            # is gone (P3-1). NULL on pre-P3-1 rows
+)
+
 # Give-get referral program (foundation §5). Fraud control is structural:
 # rewards only for verified co-members of the referrer's real Sleeper league,
 # one reward per unique referred user ever (uq below), activation-gated.
@@ -2902,7 +3010,7 @@ referrals_table = Table("referrals", metadata,
     Column("id",                    Integer, primary_key=True, autoincrement=True),
     Column("referrer_user_id",      String,  nullable=False),
     Column("referred_user_id",      String),                  # filled when invitee identified
-    Column("league_id",             String,  nullable=False), # the shared Sleeper league
+    Column("league_id",             String,  nullable=False), # the shared league, any platform
     Column("invite_token",          String,  nullable=False), # carried by share-card deep link
     Column("status",                String,  nullable=False, server_default="pending"),
                                                               # pending → joined → activated →
@@ -2913,11 +3021,25 @@ referrals_table = Table("referrals", metadata,
     Column("joined_at",             String),
     Column("activated_at",          String),
     Column("rewarded_at",           String),
+    # Referral loop D-1 (PRD FR-8, §9): the landing-open record, ISO UTC,
+    # written only by record_referral_landing_open().
+    Column("opened_at",             String),                  # first human landing open
+    Column("last_opened_at",        String),                  # latest human landing open
+    Column("open_count",            Integer, server_default="0"),  # human landing opens
+    Column("unfurled_at",           String),                  # first link-preview fetch
+    # Referral loop L7 (PRD §9): the ledger. share_token is the id in the
+    # link (`t`): = invite_token on a minted row, the parent's id on a
+    # group-chat sibling (§7.6); NULLed on the referrer's account deletion.
+    Column("share_token",           String),
+    Column("surface",               String),                  # InviteSurface at mint
+    Column("attribution_method",    String),                  # token | league_match; NULL while pending
     UniqueConstraint("invite_token", name="uq_referral_token"),
     UniqueConstraint("referrer_user_id", "referred_user_id",
                      name="uq_referral_pair"),
     Index("ix_referrals_referrer", "referrer_user_id"),
     Index("ix_referrals_referred", "referred_user_id"),
+    Index("ix_referrals_share_token", "share_token"),
+    Index("ix_referrals_league_status", "league_id", "status"),   # §7.5 candidates
 )
 
 # Outbound affiliate click ledger. subid joins partner payout reports back to
@@ -3263,7 +3385,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_k_pass",          4.0,    "K-factor for a trade 'Pass' swipe (~12% of elo_k)"),
     ("trade_k_accept",       20.0,    "K-factor when both parties accept a trade match"),
     ("trade_k_decline_correction", 20.0,
-                                     "K-factor for reversal when a user declines after 'Interested' swipe"),
+                                     "UNUSED since BL-004 (trade_k_decline_net); kept so existing rows stay readable"),
+    ("trade_k_decline_net",  12.0,
+                                     "Net K of a declined match: the decline applies this plus the K its like was stored with"),
     # ── Tier Engine ──────────────────────────────────────────────────────
     ("tier_engine_enabled",    1.0,    "Feature flag: 1=tier-based trio filtering, 0=legacy (full pool)"),
     ("smart_matchup_enabled",  1.0,    "Feature flag: 1=Claude-powered matchup selection, 0=algorithmic only"),
@@ -3517,6 +3641,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("bakeoff_include_baseline",    0.0, "bake-off roster bit: 1 = arm A (baseline) generates; 0 = out (default)"),
     ("bakeoff_include_challenger",  1.0, "bake-off roster bit: 1 = arm D (challenger) generates; 0 = out"),
     ("bakeoff_include_gen_v2",      1.0, "bake-off roster bit: 1 = arm C (gen_v2) generates; 0 = out"),
+    # BL-001 — MATCHES trade_service._DEFAULT_CFG and the inline fallback in
+    # bakeoff_runner.elo_freeze_mult (all three are 1.0; G-064).
+    ("bakeoff_freeze_trade_k",      1.0, "BL-001 bake-off Channel 1: 1 = trade-card like/pass K frozen to 0 while trade.bakeoff is on (default; any value > 0 freezes); 0 = swipes learn at trade_k_like/trade_k_pass x fit with the flag still on. Forward-only: stored k_factor is never rewritten, so setting 1 again stops future learning but does not revert boards"),
     # OPERATOR RULING 2026-08-21 (batch-wide): ghosts are ruled out
     # entirely, so the SEED default is 0 — a fresh DB must not start
     # ghosting. <=0 disables ghosting inside the flag.
@@ -3643,6 +3770,14 @@ _MODEL_CONFIG_DEFAULTS = [
     ("vc_standings_weight",       0.30, "value core windows: full weight of the points-for index; ramps linearly from week 0 to week 8"),
     ("vc_throwin_min_ratio",      2.0,  "value core: a piece too small for the junk rules may ride along only if its recipient's board values it at >= this x consensus market (and >= the asset floor)"),
     ("vc_testers_only",           1.0,  "value core rollout: 1 = serve only the tester allowlist while trade.value_core is on; 0 = everyone"),
+    # ── Referral loop L7 — deploy-free kill switch for the invite-id mint ──
+    # Read per request from the DB (server._referral_mint_enabled, the
+    # force_supersedes_running pattern), never cached: a flip lands on the
+    # next mint with no restart. Not a trade or ranking input.
+    ("referral_mint_enabled",     1.0,  "referral loop L7: exactly 1 = POST /api/invite/token mints while growth.referral_ledger is on; any other value = 404 not_found (clients fall back to the league-only link). Kill: scripts/set_knob.py referral_mint_enabled 0"),
+    ("paywall_enforce_enabled",   0.0,  "monetization kill knob: exactly 1 lets entitlements.check_pro enforce (402) when monetize.entitlements AND monetize.paywall are both on; 0 = observe only. Read live per request, so 0 stops enforcement without a deploy; a missing row reads as 0"),
+    ("paywall_web_enforce_enabled", 0.0, "web paywall knob: exactly 1 lets the global gate (paywall_gate.py) 402 web requests too, while entitlements.is_enforcing(); 0 = only the native app (X-Device iphone/ipad/macos/android) is gated. Read live per request; a missing row reads as 0"),
+    ("paywall_preview_pages",       1.0, "paywall deck preview: pages (trade_page_size cards each) of a never-entitled user's FIRST deck served free while enforcing; 0 = no preview (402 at the first deck request: never_trialed until a preview row exists, then preview_used). Read live per request; a missing row reads as 1"),
     # ── Minimum-version gate (B8, head-eng ruling 35) ────────────────────
     # Served as the top-level int `app_min_version` on GET /api/feature-flags
     # (server._app_min_version). Encoding major*10000 + minor*100 + patch
@@ -3656,6 +3791,10 @@ _MODEL_CONFIG_DEFAULTS = [
     # top-level int `app_store_live` on GET /api/feature-flags; anything but
     # exactly 0 or 1 serves -1.
     ("app_store_live",           -1,    "min-version gate Update target: 1 = App Store, 0 = TestFlight, -1 = unset (the app's compiled fallback, App Store from 2026-11-18T08:00:00Z). Served on GET /api/feature-flags; anything but 0/1 serves -1"),
+    # ── Tip jar (tip-jar plan §3 S1, docs/plans/tip-jar/plan.md) ─────────
+    # release-lead sets 1 once ftf_tip_199/499/999 exist in App Store
+    # Connect; 0 is the deploy-free kill switch. Seeded 0, insert-if-absent.
+    ("paywall_tips_enabled",      0.0,  "tip jar: exactly 1 serves the ftf_tip_199/499/999 list as `tips` on GET /api/paywall/config for platform=ios on a verified, non-demo session while monetize.paywall is on; anything else (0, a missing row, a failed read) serves []. Read live per request, so 0 hides the tips without a deploy. A tip grants nothing (entitlements.is_tip_product)"),
 ]
 
 
@@ -3885,6 +4024,7 @@ def _migrate_db() -> None:
         # League tile can show the league's true team count.
         ("leagues",            "total_rosters",         "INTEGER"),
         ("users",              "invited_by",            "VARCHAR"),
+        ("users",              "first_init_pending",     "INTEGER"),
         ("users",              "unlocked_formats",      "TEXT"),
         # #111 — per-user pick-value scale for the anchor wizard
         ("users",              "anchor_scale",          "TEXT"),
@@ -4040,8 +4180,32 @@ def _migrate_db() -> None:
         # ── team overhaul, all-platform sends (2026-09-07): MFL/ESPN cores
         # report a status word without a transaction id.
         ("overhaul_attempts",  "provider_status",           "VARCHAR"),
+        # ── referral loop D-1 (FR-8): landing-open stamps on the minted row.
+        # NULL until the first open / unfurl; open_count's DEFAULT matches the
+        # Table's server_default (the writer COALESCEs anyway).
+        ("referrals",          "opened_at",                 "VARCHAR"),
+        ("referrals",          "last_opened_at",            "VARCHAR"),
+        ("referrals",          "open_count",                "INTEGER DEFAULT 0"),
+        ("referrals",          "unfurled_at",               "VARCHAR"),
+        # ── referral loop L7 (§9): the ledger columns. All nullable: rows
+        # written before L7 have no share id, surface or method. Their two
+        # indexes are created explicitly below (create_all never adds an
+        # index to an existing table).
+        ("referrals",          "share_token",               "VARCHAR"),
+        ("referrals",          "surface",                   "VARCHAR"),
+        ("referrals",          "attribution_method",        "VARCHAR"),
+        # Paywall deck preview P3-1 (2026-10-27): the preview window's trade
+        # ids, so a swipe on a held page-1 card survives the job's 4 h
+        # retention and a deploy. NULL on earlier rows (no backfill: the swipe
+        # check reads the live job first, and NULL is an empty window).
+        ("paywall_previews",   "window_trade_ids",          "TEXT"),
         # ── G3-e (legal R28.22): an outcome's owner, for deletion and export.
         ("deck_outcomes",      "user_id",                   "VARCHAR"),
+        # ── Share card value bar (models-lead K-a2): the share-time value
+        # snapshot. NO DEFAULT and NO BACKFILL: every existing share reads
+        # NULL, which draws no bar (a pre-snapshot share has no stored value).
+        ("trade_share_tokens", "value_snapshot",            "TEXT"),
+        ("shared_packages",    "value_snapshot",            "TEXT"),
         # ── the deletion scrub, stage 3: the person's names per league (a
         # Calibration card names its partner by display name).
         ("deletion_scrub_jobs", "partner_names_json",       "TEXT"),
@@ -4244,6 +4408,18 @@ def _migrate_db() -> None:
         if not schema.has_index(tbl, idx_name):
             _create_index_guarded(
                 f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({cols})", idx_name)
+
+    # ── Referral loop L7 (PRD §9) — the ledger's two indexes on an existing
+    # `referrals` table. Declared on the Table too, so a fresh DB gets them
+    # from create_all; these run after the migration_cols ALTERs above, so
+    # share_token exists by now. Same pattern as the blocks above: only a
+    # genuinely missing index gets DDL, under the lock guard, so a migrated
+    # DB issues no CREATE INDEX at boot (test_migrate_ddl_lock_safety).
+    for idx_name, cols in (("ix_referrals_share_token",   "share_token"),
+                           ("ix_referrals_league_status", "league_id, status")):
+        if not schema.has_index("referrals", idx_name):
+            _create_index_guarded(
+                f"CREATE INDEX IF NOT EXISTS {idx_name} ON referrals ({cols})", idx_name)
 
     # ── trade_matches.status: 'active' → 'pending' (review P0) ─────────────
     # Earlier code wrote status='active' on insert; every cron reader filters
@@ -5015,18 +5191,25 @@ def record_event(
     source:      str | None = None,
     props:       dict | None = None,
     tz:          str | None = None,
+    platform:    str | None = None,
     touch_user:  bool = True,
     bind=None,
     require_user: bool = False,
+    conn=None,
 ) -> dict | None:
     """Append one row to user_events AND bump the matching users.last_*_at
     column (and device snapshot columns) in a single transaction.
 
-    `touch_user=False` appends the row only: no `users` update and no streak.
-    For server-fired system outcomes that fire on background polls (e.g.
-    `deck_i1_check`), which must not move `last_active_at` or `events_count`.
-    `bind`: the engine to write through, default this module's. A background
-    writer passes the one it captured on the request thread.
+    `platform` (e.g. 'server') is written to user_events.platform; omitted,
+    the INSERT names no platform column, exactly as before. `touch_user=False`
+    writes ONLY the event row — no users denorm UPDATE, no streak step — for
+    server-fired events whose owner did nothing: referral loop D-1's
+    invite_landing_* (an invitee's open must not make a dormant inviter look
+    active to the cron ticks), and system outcomes that fire on background
+    polls (e.g. `deck_i1_check`), which must not move `last_active_at` or
+    `events_count`. `bind`: the engine to write through, default this
+    module's. A background writer passes the one it captured on the request
+    thread. All three defaults keep today's behaviour.
     `require_user` (the session-init daemon): no row unless the users row
     exists, held under its lock (_lock_live_user) until the row commits;
     with no row it raises AccountGone, the one failure not swallowed.
@@ -5039,15 +5222,18 @@ def record_event(
     rank-class event (so callers don't need a follow-up SELECT). Returns
     None for non-rank events or when logging fails.
 
-    Failures are logged and swallowed — event logging must never break the
-    surrounding business logic.
+    Default failures are logged and swallowed. With an explicitly supplied
+    `conn`, the caller owns the transaction/live-user guard and errors propagate
+    so a first-init failure rolls back its marker, attribution and signup.
     """
+    supplied_conn = conn
     if not user_id or not event_type:
         return None
     now = _now()
     streak_result: dict | None = None
+    extra: dict = {"platform": platform} if platform is not None else {}
     try:
-        with (bind if bind is not None else engine).begin() as conn:
+        with (nullcontext(supplied_conn) if supplied_conn is not None else (bind if bind is not None else engine).begin()) as conn:
             if require_user:
                 _lock_live_user(conn, user_id)
             conn.execute(
@@ -5062,6 +5248,7 @@ def record_event(
                     app_version = app_version,
                     source      = source,
                     props       = json.dumps(props) if props else None,
+                    **extra,
                 )
             )
             if not touch_user:
@@ -5099,6 +5286,8 @@ def record_event(
     except AccountGone:
         raise   # only under require_user: the caller stops there
     except Exception as e:
+        if supplied_conn is not None:
+            raise
         print(f"[record_event] {user_id}/{event_type} failed: {e}")
         return None
     return streak_result
@@ -5777,6 +5966,32 @@ def _lock_live_user(conn, user_id: str) -> None:
         raise AccountGone()
 
 
+@contextmanager
+def first_init_transaction(user_id: str):
+    """Borrow (conn, first) under a live-user guard; rollback restores eligibility.
+
+    Only upsert_user's actual INSERT sets pending=1. Legacy NULL and consumed
+    0 are never inferred new from missing activity/history. Conditional UPDATE
+    serializes competing inits on both supported dialects.
+    """
+    with engine.begin() as conn:
+        _lock_live_user(conn, user_id)
+        first = conn.execute(update(users_table).where(
+            users_table.c.sleeper_user_id == user_id,
+            users_table.c.first_init_pending == 1,
+        ).values(first_init_pending=0)).rowcount == 1
+        yield conn, first
+
+
+def set_first_init_inviter(conn, user_id: str, invited_by: str | None) -> None:
+    """Called only by the winner in first_init_transaction; existing credit wins."""
+    if invited_by:
+        conn.execute(update(users_table).where(
+            users_table.c.sleeper_user_id == user_id,
+            users_table.c.invited_by.is_(None),
+        ).values(invited_by=invited_by))
+
+
 def upsert_user(
     sleeper_user_id: str,
     username: str = "",
@@ -5788,8 +6003,10 @@ def upsert_user(
 ) -> None:
     """Insert a new user or update their display fields if they already exist.
 
-    `invited_by` is only set on INSERT — repeat logins never overwrite the
-    original referrer, so referral attribution is immutable once recorded.
+    This helper sets `invited_by` only on INSERT. The claimed first-init
+    transaction may fill an empty inviter on that fresh row; repeat logins
+    never overwrite attribution. Only this helper's actual INSERT sets the
+    positive first_init_pending marker; updates leave legacy NULL/consumed 0.
 
     `require_user` (the session-init daemon): update only, under the row's
     lock; with no row it raises AccountGone and inserts nothing.
@@ -5816,6 +6033,7 @@ def upsert_user(
                 "display_name":    display_name,
                 "avatar":          avatar,
                 "created_at":      _now(),
+                "first_init_pending": 1,
             }
             if invited_by:
                 values["invited_by"] = invited_by
@@ -6662,8 +6880,19 @@ def save_trade_swipes(
     Elo AND persist the signal. Returns True only after both commit; a lost
     swipe write rolls back the claim so a contextful reason retry can repair.
     Ordinary callers retain their existing return/behavior.
+
+    A2 (docs/plans/generic-pick-signal-strip.md): a generic pick rung is never
+    persisted — same strip as record_trade_signal, so the replay keeps
+    mirroring the live board. The return value does NOT change: it keys off
+    the UNSTRIPPED pair, so a pair the strip empties still claims the reason
+    and returns True (it was handled; there was just nothing to write), and
+    `/api/trades/pass-reason`'s `elo_written` answers exactly as before.
     """
     now  = _now()
+    from .pick_values import strip_generic_pick_pair
+    had_pairs = any(w != l for w in winner_ids for l in loser_ids)
+    winner_ids, loser_ids = strip_generic_pick_pair(
+        winner_ids, loser_ids, site="save_trade_swipes")
     rows = []
     for wid in winner_ids:
         for lid in loser_ids:
@@ -6678,7 +6907,7 @@ def save_trade_swipes(
                 "created_at":       now,
                 "scoring_format":   scoring_format,
             })
-    if rows:
+    if rows or (had_pairs and pass_reason_key is not None):
         with engine.begin() as conn:
             if pass_reason_key is not None:
                 reason = conn.execute(select(trade_pass_reasons_table).where(and_(
@@ -6687,7 +6916,8 @@ def save_trade_swipes(
                 )).with_for_update()).first()
                 if reason is None or reason.elo_signal_at is not None:
                     return False
-            conn.execute(insert(swipe_decisions_table), rows)
+            if rows:
+                conn.execute(insert(swipe_decisions_table), rows)
             if pass_reason_key is not None:
                 conn.execute(update(trade_pass_reasons_table).where(
                     trade_pass_reasons_table.c.impression_id == pass_reason_key
@@ -9679,6 +9909,62 @@ def replace_user_taste_rows(
             ])
 
 
+def merge_user_taste_rows(
+    user_id: str,
+    rows: dict,
+    *,
+    seen: dict,
+    reward: float,
+    now_iso: str,
+    eps: float,
+) -> None:
+    """F5 — one outcome's taste write, safe against a concurrent outcome.
+
+    rows: {attr: (w_short, w_long)} computed from the rows read; seen:
+    {attr: updated_at} of those rows (an attr absent from it had none).
+    A row still as read takes its computed weights. Every other row (written,
+    created or deleted since the read, or never there) is upserted on the
+    primary key as `reward` on both vectors, added to the row's weights when
+    there is one: that row was written moments ago, so its decay is
+    negligible. Then rows left below `eps` on both vectors are deleted (GC on
+    update). One txn. Delete+insert (replace_user_taste_rows) lost the second
+    of two concurrent updates: it replaced the first, or failed on
+    user_taste_pkey (head-eng 2026-10-27)."""
+    if not rows:
+        return
+    t = user_taste_table
+    with engine.begin() as conn:
+        read = [a for a in sorted(rows) if a in seen]
+        matched = set()
+        if read:
+            matched = set(conn.execute(
+                update(t)
+                .where(t.c.user_id == user_id,
+                       or_(*(and_(t.c.attr == a, t.c.updated_at == seen[a]) for a in read)))
+                .values(w_short=case({a: float(rows[a][0]) for a in read}, value=t.c.attr),
+                        w_long=case({a: float(rows[a][1]) for a in read}, value=t.c.attr),
+                        updated_at=now_iso)
+                .returning(t.c.attr)).scalars())
+        rest = [a for a in sorted(rows) if a not in matched]
+        if rest:
+            if conn.dialect.name == "postgresql":
+                from sqlalchemy.dialects.postgresql import insert as dialect_insert
+            else:
+                from sqlalchemy.dialects.sqlite import insert as dialect_insert
+            stmt = dialect_insert(t).values([
+                {"user_id": user_id, "attr": a, "w_short": float(reward),
+                 "w_long": float(reward), "updated_at": now_iso} for a in rest])
+            conn.execute(stmt.on_conflict_do_update(
+                index_elements=[t.c.user_id, t.c.attr],
+                set_={"w_short": t.c.w_short + stmt.excluded.w_short,
+                      "w_long": t.c.w_long + stmt.excluded.w_long,
+                      "updated_at": stmt.excluded.updated_at}))
+        if rest or any(abs(ws) < eps and abs(wl) < eps for ws, wl in rows.values()):
+            conn.execute(delete(t).where(
+                t.c.user_id == user_id, t.c.attr.in_(list(rows)),
+                func.abs(t.c.w_short) < eps, func.abs(t.c.w_long) < eps))
+
+
 def replace_user_taste_prior(user_id: str, prior: dict, now_iso: str) -> None:
     """F5 — rewrite the user's board-derived prior wholesale (PRD amendment):
     every existing "prior:"-prefixed row is dropped, then one row per prior
@@ -11976,7 +12262,46 @@ def retract_awaiting_likes(
 # These local lambdas fall back to the hardcoded defaults if the table
 # isn't available yet (e.g. during the very first init_db() call).
 _K_ACCEPT             = lambda: get_config().get("trade_k_accept",             20.0)
-_K_DECLINE_CORRECTION = lambda: get_config().get("trade_k_decline_correction", 20.0)
+_K_DECLINE_NET        = lambda: get_config().get("trade_k_decline_net",        12.0)
+
+
+def _decline_signals(conn, user_id: str, give: list, receive: list,
+                     scoring_format: str | None = None) -> list[dict]:
+    """A decliner's correction, one signal per (give, receive) pair (BL-004):
+    winner=give, loser=receive at K = trade_k_decline_net + the K the user's
+    'Interested' swipe on that pair was stored with (swipe_decisions: winner
+    = the receive id, loser = the give id, decision_type 'trade'; the latest
+    such row, 0 when there is none). So a decline nets -trade_k_decline_net
+    in K at any like K: frozen (0), half K or full K, and whatever fit_mult
+    did. `scoring_format` (the board the decline is saved to; a legacy NULL
+    row reads as DEFAULT_SCORING) limits the like to that board; None reads
+    any. Only the latest like on a pair is netted: an earlier like on the
+    same pair, at a K since changed, keeps its own."""
+    sd = swipe_decisions_table
+    net = _K_DECLINE_NET()
+    signals = []
+    for give_id in give:
+        for receive_id in receive:
+            if give_id == receive_id:
+                continue
+            q = select(sd.c.k_factor).where(
+                sd.c.user_id == user_id,
+                sd.c.winner_player_id == receive_id,
+                sd.c.loser_player_id == give_id,
+                sd.c.decision_type == "trade",
+            )
+            if scoring_format is not None:
+                q = q.where(func.coalesce(sd.c.scoring_format, DEFAULT_SCORING) == scoring_format)
+            liked = conn.execute(
+                q.order_by(sd.c.created_at.desc(), sd.c.id.desc()).limit(1)).scalar()
+            signals.append({
+                "user_id":       user_id,
+                "winner_ids":    [give_id],
+                "loser_ids":     [receive_id],
+                "k_factor":      net + float(liked or 0.0),
+                "decision_type": "disposition",
+            })
+    return signals
 
 
 def dismiss_match(match_id: int, user_id: str) -> dict:
@@ -12021,6 +12346,7 @@ def record_match_disposition(
     match_id: int,
     user_id: str,
     decision: str,
+    scoring_format: str | None = None,
 ) -> dict:
     """
     Record a user's accept/decline decision on a trade match.
@@ -12046,8 +12372,11 @@ def record_match_disposition(
     ELO signal semantics
     ────────────────────
     Both accept   → for each user: winner=receive, loser=give, K=20
-    Any decline   → for each decliner: winner=give, loser=receive, K=20
-                    (net effect ≈ −12 after the original +8 like nudge)
+    Any decline   → for each decliner, per (give, receive) pair:
+                    winner=give, loser=receive, K = 12 + the K the like on
+                    that pair was stored with on `scoring_format`'s board
+                    (the board the caller saves the signals to), so the net
+                    is −12 in K at any like K (BL-004, _decline_signals)
     """
     now = _now()
 
@@ -12139,13 +12468,8 @@ def record_match_disposition(
                     "decision_type": "disposition",
                 })
             else:
-                elo_signals.append({
-                    "user_id":       row.user_a_id,
-                    "winner_ids":    a_give,
-                    "loser_ids":     a_receive,
-                    "k_factor":      _K_DECLINE_CORRECTION(),
-                    "decision_type": "disposition",
-                })
+                elo_signals.extend(_decline_signals(conn, row.user_a_id, a_give, a_receive,
+                                                    scoring_format))
 
             # Build ELO signal for user_b
             if b_dec == "accept":
@@ -12157,13 +12481,8 @@ def record_match_disposition(
                     "decision_type": "disposition",
                 })
             else:
-                elo_signals.append({
-                    "user_id":       row.user_b_id,
-                    "winner_ids":    b_give,
-                    "loser_ids":     b_receive,
-                    "k_factor":      _K_DECLINE_CORRECTION(),
-                    "decision_type": "disposition",
-                })
+                elo_signals.extend(_decline_signals(conn, row.user_b_id, b_give, b_receive,
+                                                    scoring_format))
 
     # F3 (deck.fatigue) — additive context for the decline-suppression hook:
     # the package from the CALLER's perspective plus the partner's current
@@ -13452,6 +13771,7 @@ def seed_pick_grid(
     scoring_format: str = "1qb_ppr",
     platform: str = "espn",
     reseed: bool = False,
+    first_season: int | None = None,
 ) -> dict:
     """Write the PRISTINE grid: every team owns its own picks, every season.
 
@@ -13468,6 +13788,17 @@ def seed_pick_grid(
     str(i+1)` off the passed member list; that silently re-points every
     `pick_id`'s "original team" the moment the roster changes, so this
     preserves the established mapping instead.)
+
+    `first_season` (C5) is the first class generated; `None` means
+    `current_season`, which is byte-identical to the behavior before it
+    existed. Prices stay relative to `current_season`, so a pick seeded one
+    class later is still priced by its real years out. Existing rows of the
+    skipped classes `[current_season, first_season)` are carried verbatim:
+    the grid only hides them, so they come back if the verdict flips. Two
+    saves still delete rows, because the carry box is bounded: lowering
+    `rounds` drops the higher rounds from the hidden classes too, and a
+    re-save after a flip back drops the class past the window (2030 once
+    `first_season` is 2026 again).
     """
     from . import draft_status
 
@@ -13513,7 +13844,8 @@ def seed_pick_grid(
         used.add(str(next_slot))
 
     now = _now()
-    seasons = list(range(int(current_season), int(current_season) + seasons_ahead + 1))
+    first = int(current_season) if first_season is None else int(first_season)
+    seasons = list(range(first, first + seasons_ahead + 1))
     rows: list[dict] = []
     seeded = reseeded_over = skipped = 0
     generated: set[str] = set()
@@ -13562,6 +13894,9 @@ def seed_pick_grid(
     # the season horizon is an explicit user action rather than a silent drop.
     carried = 0
     season_set = set(seasons)
+    # C5 — carry the skipped classes too, so the grid only hides them. The
+    # round bound below still applies to them.
+    season_set |= set(range(int(current_season), first))
     for pick_id, prior in existing.items():
         if pick_id in generated:
             continue
@@ -13575,6 +13910,10 @@ def seed_pick_grid(
         rows.append(prior)
         carried += 1
 
+    # Kept rows carry their surrogate `id` and generated rows have none, but
+    # one bulk INSERT needs one key set ("a value is required for bind
+    # parameter 'id'"). The DELETE frees every id, so drop it from all rows.
+    rows = [{k: v for k, v in r.items() if k != "id"} for r in rows]
     replace_draft_picks(league_id, rows, preserve_source=PICK_SOURCE_USER)
     _invalidate_contested(league_id)
     return {"seeded": seeded, "reseeded_over": reseeded_over,
@@ -13705,6 +14044,45 @@ def assign_draft_pick(league_id: str, pick_id: str, owner_user_id: str,
         if result.rowcount == 0:
             return ("stale", _read())           # re-read INSIDE the txn
         return ("ok", _read())
+
+
+def pick_slot_team_name(rows, user_id: str) -> str:
+    """The assignment writers' name for a nameless member (#497): `Team <slot>`.
+
+    The slot is the member's `original_roster_id` on any of `rows` they
+    originally own; `Unnamed team` when they own none (a member added after
+    the grid was seeded has no slot yet). Never the user id.
+    """
+    uid = str(user_id or "")
+    slot = next((str(r.get("original_roster_id") or "") for r in rows
+                 if str(r.get("original_user_id") or "") == uid
+                 and r.get("original_roster_id")), "")
+    return f"Team {slot}" if slot else "Unnamed team"
+
+
+def pick_team_name(row: dict, side: str, rows=()) -> str | None:
+    """`row["<side>_username"]` as a client may see it; `side` is `original`
+    or `owner` (#497 QA P2).
+
+    Asserted rows stored before #497 can hold `Team <that side's user id>`
+    ("Team espn:{1A2B…}") or a blank name, and nothing rewrites them: a PUT
+    rewrites only `owner_username`, and `original_username` changes only on a
+    reseed, which drops recorded reassignments. So every client-facing reader
+    heals here at read time; no stored row is written.
+
+    A user-source name is replaced when it is blank or equals
+    `Team <the row's <side>_user_id>`, by the writers' own fallback
+    (`pick_slot_team_name`): the original side's slot is the row's own, the
+    owner side's is read off `rows`, the league's asserted rows. Real names,
+    "Team Rocket", a correct `Team <slot>` and every platform row pass through.
+    """
+    stored = row.get(f"{side}_username")
+    if row.get("source") != PICK_SOURCE_USER:
+        return stored
+    uid = str(row.get(f"{side}_user_id") or "")
+    if str(stored or "").strip() and not (uid and stored == f"Team {uid}"):
+        return stored
+    return pick_slot_team_name([row] if side == "original" else rows, uid)
 
 
 # ---------------------------------------------------------------------------
@@ -13932,6 +14310,7 @@ def create_notification(
     title:    str,
     body:     str,
     metadata: dict | None = None,
+    conn=None,
 ) -> dict:
     """
     Insert a new notification for a user.
@@ -13949,6 +14328,7 @@ def create_notification(
     -------
     Dict with the inserted row data including the new id.
     """
+    supplied_conn = conn
     row = {
         "user_id":       user_id,
         "type":          type_,
@@ -13958,7 +14338,7 @@ def create_notification(
         "is_read":       0,
         "created_at":    _now(),
     }
-    with engine.begin() as conn:
+    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.begin()) as conn:
         result = conn.execute(insert(notifications_table).values(**row))
         row["id"] = result.inserted_primary_key[0]
     return row
@@ -14469,6 +14849,66 @@ def get_user_by_username(username: str) -> dict | None:
     return dict(row._mapping) if row else None
 
 
+
+def lock_referral_inviter(conn, user_id: str) -> bool:
+    """First-init credit locks user BEFORE referral rows, like deletion.
+
+    The owning first-init transaction already holds SQLite's write lock.
+    On PG, KEY SHARE waits for an in-progress deletion and then returns
+    false for its missing user; it protects a live inviter until commit.
+    """
+    return conn.execute(select(users_table.c.sleeper_user_id).where(
+        users_table.c.sleeper_user_id == user_id,
+    ).with_for_update(read=True, key_share=True)).first() is not None
+
+
+def get_referral_by_invite_token(invite_token: str, *, conn=None) -> dict | None:
+    """The `referrals` row for an invite id (`t`, = invite_token), plus the
+    referrer's users.display_name as `referrer_display_name` (None without a
+    users row). Read-only; None when no row matches. Referral loop D-1."""
+    supplied_conn = conn
+    if not invite_token:
+        return None
+    r, u = referrals_table, users_table
+    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
+        row = conn.execute(
+            select(r, u.c.display_name.label("referrer_display_name"))
+            .select_from(r.outerjoin(u, u.c.sleeper_user_id == r.c.referrer_user_id))
+            .where(r.c.invite_token == invite_token)
+        ).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def record_referral_landing_open(invite_token: str, kind: str) -> int:
+    """FR-8: stamp a join-landing visit on the row minted for `invite_token`.
+
+    kind 'open'   (human GET): opened_at first-wins, last_opened_at = now,
+                  open_count + 1.
+    kind 'unfurl' (link-preview fetch): unfurled_at first-wins, nothing else.
+
+    One atomic UPDATE keyed by uq_referral_token's column; an unknown id
+    matches 0 rows. Returns the row count. Failures are logged and swallowed
+    (0) — recording must never break the join path.
+    """
+    t, now = referrals_table, _now()
+    if kind == "open":
+        values = {"opened_at":      func.coalesce(t.c.opened_at, now),
+                  "last_opened_at": now,
+                  "open_count":     func.coalesce(t.c.open_count, 0) + 1}
+    elif kind == "unfurl":
+        values = {"unfurled_at": func.coalesce(t.c.unfurled_at, now)}
+    else:
+        raise ValueError(f"record_referral_landing_open: unknown kind {kind!r}")
+    try:
+        with engine.begin() as conn:
+            return conn.execute(
+                update(t).where(t.c.invite_token == invite_token).values(**values)
+            ).rowcount
+    except Exception as e:
+        print(f"[record_referral_landing_open] {kind} failed: {e}")
+        return 0
+
+
 def push_notification(
     user_id: str,
     type: str,
@@ -14500,6 +14940,246 @@ def load_notifications(user_id: str, unread_only: bool = False) -> list[dict]:
     if unread_only:
         rows = [r for r in rows if not r.get("is_read")]
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Referral loop L7 — the ledger's SQL (rules: backend/referral_ledger.py)
+# ---------------------------------------------------------------------------
+
+def league_has_member(league_id: str, user_id: str, *, conn=None) -> bool:
+    """True when `league_members` holds `user_id` for `league_id`: the DB
+    membership snapshot every session init writes and that platform leagues
+    are resolved from (session_input.resolve_session_input)."""
+    supplied_conn = conn
+    if not league_id or not user_id:
+        return False
+    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
+        row = conn.execute(
+            select(league_members_table.c.user_id)
+            .where(league_members_table.c.league_id == str(league_id))
+            .where(league_members_table.c.user_id == str(user_id))
+            .limit(1)
+        ).fetchone()
+    return row is not None
+
+
+def count_referral_mints_today(referrer_user_id: str, league_id: str) -> int:
+    """Invite ids this inviter minted for this league since UTC midnight
+    (FR-6). Minted rows only (invite_token = share_token): group-chat
+    siblings are joins, not mints."""
+    r = referrals_table
+    day_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0).isoformat()
+    with engine.connect() as conn:
+        return int(conn.execute(
+            select(func.count()).select_from(r)
+            .where(r.c.referrer_user_id == referrer_user_id)
+            .where(r.c.league_id == str(league_id))
+            .where(r.c.invite_token == r.c.share_token)
+            .where(r.c.created_at >= day_start)
+        ).scalar() or 0)
+
+
+def create_referral_invite(referrer_user_id: str, league_id: str,
+                           surface: str) -> dict:
+    """Mint one invite id (PRD §7.1, §8.1): secrets.token_urlsafe(9), 12
+    URL-safe chars, stored as invite_token AND share_token on one `pending`
+    row. Re-minted on a uq_referral_token collision. Returns
+    {invite_id, created_at}."""
+    import secrets
+    from sqlalchemy.exc import IntegrityError
+
+    for _ in range(4):   # a 72-bit collision is ~impossible; belt+braces
+        invite_id, now = secrets.token_urlsafe(9), _now()
+        try:
+            with engine.begin() as conn:
+                conn.execute(insert(referrals_table).values(
+                    referrer_user_id=referrer_user_id, league_id=str(league_id),
+                    invite_token=invite_id, share_token=invite_id,
+                    status="pending", surface=surface, created_at=now,
+                ))
+            return {"invite_id": invite_id, "created_at": now}
+        except IntegrityError:
+            continue
+    raise RuntimeError("could not mint a unique invite id")
+
+
+def get_referral_for_referred(user_id: str, status: str | None = None, *, conn=None) -> dict | None:
+    """The ledger row crediting `user_id` (a user is credited at most once
+    ever, §7.6), optionally only in `status`. Served by ix_referrals_referred."""
+    supplied_conn = conn
+    if not user_id:
+        return None
+    r = referrals_table
+    q = select(r).where(r.c.referred_user_id == user_id)
+    if status is not None:
+        q = q.where(r.c.status == status)
+    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
+        row = conn.execute(q.order_by(r.c.id).limit(1)).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def claim_referral(referral_id: int, referred_user_id: str, method: str, *, conn=None) -> bool:
+    """§7.4 step 4 / §7.5: credit a `pending`, unclaimed row to the invitee.
+    One conditional UPDATE, so two concurrent first sessions can't both
+    claim it. False when the row was already claimed (or isn't pending), or
+    when uq_referral_pair refuses a second row for this (referrer, referred)."""
+    supplied_conn = conn
+    from sqlalchemy.exc import IntegrityError
+    r = referrals_table
+    try:
+        with (nullcontext(supplied_conn) if supplied_conn is not None else engine.begin()) as conn:
+            with conn.begin_nested():
+                return conn.execute(
+                    update(r)
+                    .where(r.c.id == referral_id)
+                    .where(r.c.referred_user_id.is_(None))
+                    .where(r.c.status == "pending")
+                    .values(referred_user_id=referred_user_id, status="joined",
+                            joined_at=_now(), attribution_method=method)
+                ).rowcount == 1
+    except IntegrityError:
+        return False
+
+
+def insert_referral_sibling(parent: dict, referred_user_id: str, *, conn=None) -> int | None:
+    """§7.6: a further joiner through an already-claimed id gets its own
+    `joined` row — same referrer, league, surface and created_at (the link's
+    mint time), share_token = the parent's id, and a fresh unique
+    invite_token `<share_token>~<6 random>` that is never emitted or linked.
+    Returns the new id, or None when uq_referral_pair already holds this
+    (referrer, referred) pair."""
+    supplied_conn = conn
+    import secrets
+    from sqlalchemy.exc import IntegrityError
+    r = referrals_table
+    for _ in range(4):
+        values = dict(
+            referrer_user_id=parent["referrer_user_id"],
+            referred_user_id=referred_user_id,
+            league_id=parent["league_id"],
+            invite_token=f"{parent['share_token']}~{secrets.token_urlsafe(6)[:6]}",
+            share_token=parent["share_token"],
+            status="joined", surface=parent.get("surface"),
+            created_at=parent["created_at"], joined_at=_now(),
+            attribution_method="token",
+        )
+        try:
+            with (nullcontext(supplied_conn) if supplied_conn is not None else engine.begin()) as conn:
+                with conn.begin_nested():
+                    return conn.execute(insert(r).values(**values)).inserted_primary_key[0]
+        except IntegrityError:
+            with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
+                pair = conn.execute(
+                    select(r.c.id)
+                    .where(r.c.referrer_user_id == parent["referrer_user_id"])
+                    .where(r.c.referred_user_id == referred_user_id)
+                ).fetchone()
+            if pair is not None:
+                return None
+    return None
+
+
+def league_match_candidates(league_id: str, invitee_user_id: str, *,
+                            opened_since: str, created_since: str, conn=None) -> list[dict]:
+    """§7.5 candidates in the invitee's first-session league: minted rows
+    (share_token set), `pending`, unclaimed, opened since `opened_since`,
+    created since `created_since`, referrer ≠ invitee. Newest open first;
+    each carries the referrer's users.username as `referrer_username` (the
+    legacy invited_by tie-breaker). Served by ix_referrals_league_status."""
+    supplied_conn = conn
+    r, u = referrals_table, users_table
+    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
+        rows = conn.execute(
+            select(r, u.c.username.label("referrer_username"))
+            .select_from(r.outerjoin(u, u.c.sleeper_user_id == r.c.referrer_user_id))
+            .where(r.c.league_id == str(league_id))
+            .where(r.c.status == "pending")
+            .where(r.c.referred_user_id.is_(None))
+            .where(r.c.share_token.is_not(None))
+            .where(r.c.opened_at >= opened_since)
+            .where(r.c.created_at >= created_since)
+            .where(r.c.referrer_user_id != invitee_user_id)
+            .order_by(r.c.opened_at.desc(), r.c.id.desc())
+        ).fetchall()
+    return [dict(row._mapping) for row in rows]
+
+
+def activate_referral(referral_id: int, qualifying_event: str) -> bool:
+    """FR-17: joined → activated, stamping activated_at and the event's
+    name. One conditional UPDATE (WHERE status = 'joined'), so it stamps
+    once however many emitters race. True when this call stamped it."""
+    r = referrals_table
+    with engine.begin() as conn:
+        return conn.execute(
+            update(r)
+            .where(r.c.id == referral_id)
+            .where(r.c.status == "joined")
+            .values(status="activated", activated_at=_now(),
+                    qualifying_event=qualifying_event)
+        ).rowcount == 1
+
+
+def merge_into_unread_referral_join(user_id: str, referral_id: int, *,
+                                    title: str, body: str, meta: dict) -> bool:
+    """R-F7 (ux-lead): when the inviter's referral_joined row for this
+    referral is still UNREAD and live, rewrite it in place as the
+    referral_activated row (type, title, body, meta; created_at bumped like
+    the GD-8 coalescer), so one person gets one row. Conditional on
+    is_read = 0 and dismissed_at IS NULL, so a row read meanwhile is never
+    rewritten. False when there is no such row (the caller posts its own)."""
+    n = notifications_table
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(n.c.id, n.c.metadata_json)
+            .where(n.c.user_id == user_id)
+            .where(n.c.type == "referral_joined")
+            .where(n.c.is_read == 0)
+            .where(n.c.dismissed_at.is_(None))
+            .order_by(n.c.created_at.desc())
+            .limit(50)
+        ).fetchall()
+    for row in rows:
+        try:
+            if json.loads(row.metadata_json or "{}").get("referral_id") != referral_id:
+                continue
+        except (TypeError, ValueError):
+            continue
+        with engine.begin() as conn:
+            return conn.execute(
+                update(n)
+                .where(n.c.id == row.id)
+                .where(n.c.is_read == 0)
+                .where(n.c.dismissed_at.is_(None))
+                .values(type="referral_activated", title=title, body=body,
+                        metadata_json=json.dumps(meta), created_at=_now())
+            ).rowcount == 1
+    return False
+
+
+def get_user_names(user_id: str, *, conn=None) -> dict | None:
+    """{username, display_name} of a users row, or None without one."""
+    supplied_conn = conn
+    if not user_id:
+        return None
+    with (nullcontext(supplied_conn) if supplied_conn is not None else engine.connect()) as conn:
+        row = conn.execute(
+            select(users_table.c.username, users_table.c.display_name)
+            .where(users_table.c.sleeper_user_id == user_id)
+        ).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def get_league_platform(league_id: str, *, conn=None) -> str | None:
+    """The stored league's lowercase platform (NULL defaults to Sleeper),
+    or None when no row exists. Referral first-init can borrow its transaction;
+    free-agent capability preserves missing metadata as a distinct result."""
+    with (nullcontext(conn) if conn is not None else engine.connect()) as db_conn:
+        row = db_conn.execute(select(leagues_table.c.platform).where(
+            leagues_table.c.sleeper_league_id == str(league_id))).fetchone()
+    if not row:
+        return None
+    return str(row.platform or "sleeper").lower()
 
 
 # ---------------------------------------------------------------------------
@@ -15250,6 +15930,28 @@ def upsert_sleeper_credential(user_id: str, sleeper_user_id: str | None,
     """Insert or replace the Sleeper link for a user (one row per user_id)."""
     if not user_id or not token_encrypted:
         raise ValueError("user_id and token_encrypted are required")
+    with engine.begin() as conn:
+        _upsert_sleeper_credential(conn, user_id, sleeper_user_id, token_encrypted, expires_at)
+
+
+def relink_sleeper_credential(user_id: str, sleeper_user_id: str | None,
+                              token_encrypted: str, expires_at: str | None, *,
+                              withdraw: bool, now: datetime) -> int:
+    """D1 (legal R28.26 2f): store a (re-)linked Sleeper credential and, when
+    `withdraw`, end every open Sleeper roster-move grant as `relink`, in ONE
+    transaction: either both land or neither does. Returns the number of
+    withdrawal rows appended."""
+    if not user_id or not token_encrypted:
+        raise ValueError("user_id and token_encrypted are required")
+    with engine.begin() as conn:
+        withdrawn = (withdraw_platform_write_grants(user_id, "sleeper", "relink", now, conn=conn)
+                     if withdraw else 0)
+        _upsert_sleeper_credential(conn, user_id, sleeper_user_id, token_encrypted, expires_at)
+    return withdrawn
+
+
+def _upsert_sleeper_credential(conn, user_id: str, sleeper_user_id: str | None,
+                               token_encrypted: str, expires_at: str | None) -> None:
     now = _now()
     payload = {
         "user_id":         user_id,
@@ -15259,31 +15961,30 @@ def upsert_sleeper_credential(user_id: str, sleeper_user_id: str | None,
         "created_at":      now,
         "updated_at":      now,
     }
-    with engine.begin() as conn:
-        # keep created_at stable across re-links
-        existing = conn.execute(
-            select(sleeper_credentials_table.c.created_at)
-            .where(sleeper_credentials_table.c.user_id == user_id)
-        ).fetchone()
-        if existing and existing[0]:
-            payload["created_at"] = existing[0]
-        if DATABASE_URL.startswith("sqlite"):
-            conn.execute(text(
-                "INSERT OR REPLACE INTO sleeper_credentials "
-                "(user_id, sleeper_user_id, token_encrypted, expires_at, created_at, updated_at) "
-                "VALUES (:user_id, :sleeper_user_id, :token_encrypted, :expires_at, :created_at, :updated_at)"
-            ), payload)
-        else:
-            conn.execute(text(
-                "INSERT INTO sleeper_credentials "
-                "(user_id, sleeper_user_id, token_encrypted, expires_at, created_at, updated_at) "
-                "VALUES (:user_id, :sleeper_user_id, :token_encrypted, :expires_at, :created_at, :updated_at) "
-                "ON CONFLICT (user_id) DO UPDATE SET "
-                "sleeper_user_id = EXCLUDED.sleeper_user_id, "
-                "token_encrypted = EXCLUDED.token_encrypted, "
-                "expires_at = EXCLUDED.expires_at, "
-                "updated_at = EXCLUDED.updated_at"
-            ), payload)
+    # keep created_at stable across re-links
+    existing = conn.execute(
+        select(sleeper_credentials_table.c.created_at)
+        .where(sleeper_credentials_table.c.user_id == user_id)
+    ).fetchone()
+    if existing and existing[0]:
+        payload["created_at"] = existing[0]
+    if DATABASE_URL.startswith("sqlite"):
+        conn.execute(text(
+            "INSERT OR REPLACE INTO sleeper_credentials "
+            "(user_id, sleeper_user_id, token_encrypted, expires_at, created_at, updated_at) "
+            "VALUES (:user_id, :sleeper_user_id, :token_encrypted, :expires_at, :created_at, :updated_at)"
+        ), payload)
+    else:
+        conn.execute(text(
+            "INSERT INTO sleeper_credentials "
+            "(user_id, sleeper_user_id, token_encrypted, expires_at, created_at, updated_at) "
+            "VALUES (:user_id, :sleeper_user_id, :token_encrypted, :expires_at, :created_at, :updated_at) "
+            "ON CONFLICT (user_id) DO UPDATE SET "
+            "sleeper_user_id = EXCLUDED.sleeper_user_id, "
+            "token_encrypted = EXCLUDED.token_encrypted, "
+            "expires_at = EXCLUDED.expires_at, "
+            "updated_at = EXCLUDED.updated_at"
+        ), payload)
 
 
 def get_sleeper_credential(user_id: str) -> dict | None:
@@ -15312,15 +16013,269 @@ def get_sleeper_credential(user_id: str) -> dict | None:
     }
 
 
-def delete_sleeper_credential(user_id: str) -> None:
-    """Remove a user's stored Sleeper token (disconnect / dead-token cleanup)."""
+def delete_sleeper_credential(user_id: str, *, withdrawn_via: str) -> int:
+    """Remove a user's stored Sleeper token (disconnect / dead-token cleanup).
+
+    D1 (consent.md §4.4, R15.2.5): every deletion of the credential also ends
+    any open Sleeper roster-move consent, in the SAME transaction, so a
+    reconnect always means re-consent. `withdrawn_via` is required on purpose
+    (a new caller must say why): 'disconnect' | 'credential_expired' |
+    'credential_rejected'. Account deletion does not come through here: it
+    deletes the consent rows outright (R15.8 D12). Returns the number of
+    withdrawal rows appended (0 when no grant was open)."""
     if not user_id:
-        return
+        return 0
     with engine.begin() as conn:
         conn.execute(
             delete(sleeper_credentials_table)
             .where(sleeper_credentials_table.c.user_id == user_id)
         )
+        return withdraw_platform_write_grants(
+            user_id, "sleeper", withdrawn_via, datetime.now(timezone.utc), conn=conn)
+
+
+# ---------------------------------------------------------------------------
+# D1 free-agent moves — consent + move records (platform_write_consents /
+# platform_write_moves). Append-only: nothing here ever UPDATEs or DELETEs a
+# row of either table (account deletion is the only delete, in accounts.py).
+# Times are aware UTC datetimes in, ISO strings at rest; validity is computed
+# in Python from the (few) rows of one user and platform.
+# ---------------------------------------------------------------------------
+
+PLATFORM_WRITE_CONSENT_WINDOW = timedelta(days=7)   # R15.2.3: rolling 7 × 24 h
+
+
+def _parse_utc(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def platform_write_consent_rows(user_id: str, platform: str, *, conn=None) -> list[dict]:
+    """Every consent row (grants and withdrawals) of one user on one platform."""
+    t = platform_write_consents_table
+    stmt = select(t).where(t.c.user_id == str(user_id), t.c.platform == str(platform))
+    if conn is not None:
+        return [dict(r._mapping) for r in conn.execute(stmt)]
+    with engine.connect() as c:
+        return [dict(r._mapping) for r in c.execute(stmt)]
+
+
+def record_platform_write_grant(*, user_id: str, platform: str, platform_user_id: str,
+                                copy_version: str, locale: str, consented_at: datetime,
+                                client_platform: str | None, app_version: str | None,
+                                trigger_attempt_id: str | None) -> dict:
+    """Append a grant and COMMIT it before returning, so a caller can make the
+    platform call only after the grant exists (R15.8, "also required").
+    Returns the row as stored."""
+    import uuid as _uuid
+    row = {
+        "consent_id": _uuid.uuid4().hex,
+        "kind": "grant",
+        "refers_to": None,
+        "user_id": str(user_id),
+        "platform": str(platform),
+        "platform_user_id": str(platform_user_id),
+        "league_scope": "all_linked",
+        "copy_version": str(copy_version),
+        "locale": str(locale),
+        "consented_at": consented_at.isoformat(),
+        "expires_at": (consented_at + PLATFORM_WRITE_CONSENT_WINDOW).isoformat(),
+        "client_platform": client_platform,
+        "app_version": app_version,
+        "trigger_attempt_id": trigger_attempt_id,
+        "withdrawn_at": None,
+        "withdrawn_via": None,
+        "recorded_at": _now(),
+    }
+    with engine.begin() as conn:
+        conn.execute(insert(platform_write_consents_table).values(**row))
+    return row
+
+
+def _open_grants(rows: list[dict], now: datetime) -> list[dict]:
+    """Grants no withdrawal refers to and still inside their window."""
+    withdrawn = {r["refers_to"] for r in rows if r["kind"] == "withdrawal"}
+    out = []
+    for r in rows:
+        exp = _parse_utc(r.get("expires_at"))
+        if r["kind"] == "grant" and r["consent_id"] not in withdrawn and exp and now < exp:
+            out.append(r)
+    return out
+
+
+def active_platform_write_grant(user_id: str, platform: str, platform_user_id: str | None,
+                                copy_version: str | None, now: datetime) -> dict | None:
+    """The grant that authorizes a move right now, or None (consent.md §4.2.3).
+
+    Valid when ALL hold: it is the LATEST grant for (user, platform,
+    platform_user_id); its copy_version is the server's current one (a bump
+    invalidates every older grant); no withdrawal refers to it; and
+    now < expires_at (consented_at + 7 × 24 h). Moves never extend it."""
+    if not user_id or not platform_user_id or not copy_version:
+        return None
+    rows = platform_write_consent_rows(user_id, platform)
+    grants = [r for r in rows if r["kind"] == "grant"
+              and str(r.get("platform_user_id") or "") == str(platform_user_id)]
+    if not grants:
+        return None
+    latest = max(grants, key=lambda r: (_parse_utc(r["consented_at"]) or datetime.min.replace(
+        tzinfo=timezone.utc), r["recorded_at"]))
+    if latest.get("copy_version") != copy_version:
+        return None
+    open_ids = {g["consent_id"] for g in _open_grants(rows, now)}
+    return latest if latest["consent_id"] in open_ids else None
+
+
+def platform_write_consent_reason(user_id: str, platform: str, platform_user_id: str | None,
+                                  copy_version: str | None, now: datetime) -> str | None:
+    """Why consent must be asked now (contract §2 `reason`), from the records
+    of (user, platform, platform_user_id): 'first' (no grant for this account),
+    'withdrawn' (its latest grant was withdrawn), 'version' (made at another
+    copy_version), 'lapsed' (past its 7 days), in that order of precedence.
+    None when that grant is still valid, or when the account isn't known."""
+    if not user_id or not platform_user_id:
+        return None
+    rows = platform_write_consent_rows(user_id, platform)
+    grants = [r for r in rows if r["kind"] == "grant"
+              and str(r.get("platform_user_id") or "") == str(platform_user_id)]
+    if not grants:
+        return "first"
+    latest = max(grants, key=lambda r: (_parse_utc(r["consented_at"]) or datetime.min.replace(
+        tzinfo=timezone.utc), r["recorded_at"]))
+    if any(r["kind"] == "withdrawal" and r["refers_to"] == latest["consent_id"] for r in rows):
+        return "withdrawn"
+    if latest.get("copy_version") != copy_version:
+        return "version"
+    exp = _parse_utc(latest.get("expires_at"))
+    if exp is None or now >= exp:
+        return "lapsed"
+    return None
+
+
+def withdraw_platform_write_grants(user_id: str, platform: str, via: str, now: datetime,
+                                   *, conn=None) -> int:
+    """Append one withdrawal row for each open grant of (user, platform), any
+    platform account. Idempotent: a second call finds nothing open and appends
+    nothing. Returns the number of rows appended."""
+    import uuid as _uuid
+
+    def _run(c) -> int:
+        open_ = _open_grants(platform_write_consent_rows(user_id, platform, conn=c), now)
+        stamp = now.isoformat()
+        for g in open_:
+            c.execute(insert(platform_write_consents_table).values(
+                consent_id=_uuid.uuid4().hex, kind="withdrawal", refers_to=g["consent_id"],
+                user_id=str(user_id), platform=str(platform),
+                platform_user_id=g.get("platform_user_id"), league_scope=g.get("league_scope"),
+                withdrawn_at=stamp, withdrawn_via=str(via), recorded_at=_now()))
+        return len(open_)
+
+    if not user_id:
+        return 0
+    if conn is not None:
+        return _run(conn)
+    with engine.begin() as c:
+        return _run(c)
+
+
+def platform_write_move_rows(user_id: str, attempt_id: str) -> list[dict]:
+    """Both rows (or just 'sent', or none) of one user's attempt_id. Scoped per
+    user: an attempt_id is opaque and only unique within a user (contract §3)."""
+    t = platform_write_moves_table
+    with engine.connect() as conn:
+        return [dict(r._mapping) for r in conn.execute(
+            select(t).where(t.c.user_id == str(user_id), t.c.attempt_id == str(attempt_id)))]
+
+
+def recent_platform_write_moves(user_id: str, league_id: str, since: datetime, *,
+                                conn=None) -> list[dict]:
+    """Every move row of (user, league) whose attempt was sent at or after
+    `since`, both phases, for the double-move block (scope §B6). `conn`: read
+    inside the caller's transaction (the locked claim)."""
+    t = platform_write_moves_table
+    stmt = select(t).where(t.c.user_id == str(user_id), t.c.league_id == str(league_id))
+    if conn is not None:
+        rows = [dict(r._mapping) for r in conn.execute(stmt)]
+    else:
+        with engine.connect() as c:
+            rows = [dict(r._mapping) for r in c.execute(stmt)]
+    recent = {r["attempt_id"] for r in rows
+              if r["phase"] == "sent" and (_parse_utc(r.get("sent_at")) or since) >= since}
+    return [r for r in rows if r["attempt_id"] in recent]
+
+
+# Advisory-lock class for the D1 move claim (Postgres two-int form: this
+# constant + hashtext(user|league|add player)); its own key space, next to
+# the trade-share mint's 8008.
+_FA_MOVE_LOCK_CLASS = 8009
+
+
+def claim_platform_write_move(row: dict, blocked, *, since: datetime) -> tuple[int | None, str | None]:
+    """Check the double-move block and insert a move's `sent` row in ONE
+    transaction. On Postgres a transaction-level advisory lock keyed on
+    (user, league, add player) serialises racing taps for that player: the
+    later one waits until the earlier commits, then sees its row. SQLite
+    (local dev only) gets the plain transaction, as the trade-share mint does;
+    the caller's post-insert re-read covers it there.
+
+    `blocked(rows)` decides from that (user, league)'s move rows sent at or
+    after `since` (both phases) and returns a reason or None. Returns
+    (row id, None) when inserted, (None, reason) when blocked (nothing
+    written), (None, None) when this (user, attempt_id) already has a `sent`
+    row."""
+    from sqlalchemy.exc import IntegrityError
+    values = dict(row)
+    values.setdefault("recorded_at", _now())
+    add = (json.loads(values.get("add_player_ids") or "[]") or [""])[0]
+    key = f"{values['user_id']}|{values['league_id']}|{add}"
+    try:
+        with engine.begin() as conn:
+            if conn.dialect.name == "postgresql":
+                conn.execute(text(f"SELECT pg_advisory_xact_lock({_FA_MOVE_LOCK_CLASS}, "
+                                  "hashtext(:key))"), {"key": key})
+            reason = blocked(recent_platform_write_moves(
+                values["user_id"], values["league_id"], since, conn=conn))
+            if reason:
+                return None, reason
+            res = conn.execute(insert(platform_write_moves_table).values(**values))
+            return int(res.inserted_primary_key[0]), None
+    except IntegrityError:
+        return None, None
+
+
+def record_platform_write_move(row: dict) -> int | None:
+    """Append one move row ('sent' or 'result') and return its row id (ids
+    grow with insert order: the double-move race check compares them). None
+    when that (user_id, attempt_id, phase) already exists: for 'sent', a
+    concurrent duplicate of the same tap got there first and must not send."""
+    from sqlalchemy.exc import IntegrityError
+    values = dict(row)
+    values.setdefault("recorded_at", _now())
+    try:
+        with engine.begin() as conn:
+            res = conn.execute(insert(platform_write_moves_table).values(**values))
+            return int(res.inserted_primary_key[0])
+    except IntegrityError:
+        return None
+
+
+def set_league_member_roster(league_id: str, member_user_id: str, player_ids: list) -> bool:
+    """Replace ONE stored member's roster (D1 K-F5, scope §B10): after a
+    completed free-agent move the route saves the user's new roster before it
+    answers, so the next trade search no longer offers the dropped player.
+    UPDATE only: a league with no stored row for that member is left alone
+    (the next session-start refresh writes it). True when a row changed."""
+    t = league_members_table
+    with engine.begin() as conn:
+        res = conn.execute(update(t).where(
+            t.c.league_id == str(league_id), t.c.user_id == str(member_user_id)
+        ).values(roster_data=json.dumps([str(p) for p in player_ids]), updated_at=_now()))
+    return (res.rowcount or 0) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -16679,9 +17634,11 @@ def create_shared_package(
     user_id: str,
     give_ids: list[str],
     receive_ids: list[str],
+    value_snapshot: str | None = None,
 ) -> bool:
     """Insert one share snapshot. False on a short_id collision (caller
-    re-mints and retries)."""
+    re-mints and retries). `value_snapshot` is the share-time value JSON
+    (server._share_value_snapshot), or None for no value bar."""
     try:
         with engine.begin() as conn:
             conn.execute(insert(shared_packages_table).values(
@@ -16690,6 +17647,7 @@ def create_shared_package(
                 give_ids=json.dumps([str(x) for x in give_ids]),
                 receive_ids=json.dumps([str(x) for x in receive_ids]),
                 created_at=_now(),
+                value_snapshot=value_snapshot,
             ))
         return True
     except Exception:
@@ -16697,8 +17655,8 @@ def create_shared_package(
 
 
 def load_shared_package(short_id: str) -> dict | None:
-    """{short_id, user_id, give_ids: list, receive_ids: list, created_at}
-    or None."""
+    """{short_id, user_id, give_ids: list, receive_ids: list, created_at,
+    value_snapshot: JSON text | None} or None."""
     if not short_id:
         return None
     with engine.connect() as conn:
@@ -16742,18 +17700,23 @@ class TradeShareRateLimited(Exception):
 
 
 # Advisory-lock class id for the trade-share mint (Postgres two-int form:
-# this constant + hashtext(user_id)). Nothing else in the app takes advisory
-# locks; the constant keeps the key space its own if something ever does.
+# this constant + hashtext(user_id)). The only other advisory lock in the app
+# is the D1 move claim's, `_FA_MOVE_LOCK_CLASS` (8009). Each class keeps its
+# own key space; a new lock takes a new class.
 _TRADE_SHARE_LOCK_CLASS = 8008
 
 
 def create_trade_share_token(match_id: int, user_id: str, *,
-                             hourly_limit: int | None = None) -> str | None:
+                             hourly_limit: int | None = None,
+                             value_snapshot: str | None = None) -> str | None:
     """The caller's live share token for a match, minted on first share.
 
     Idempotent per (match, sharer): a live (non-revoked) token this user
     already holds for this match is returned as is, with no count and no
-    insert, so a re-share never counts against the limit. Otherwise a new
+    insert, so a re-share never counts against the limit. `value_snapshot`
+    (the share-time value JSON, server._share_value_snapshot) is written
+    only on a NEW token: a re-returned token keeps the snapshot it was minted
+    with, and one minted before the column existed stays NULL. Otherwise a new
     secrets.token_urlsafe(16) is minted (re-minted on a PK collision), after
     the hourly count: at or over `hourly_limit` new mints in the last hour it
     raises TradeShareRateLimited and writes nothing.
@@ -16807,6 +17770,7 @@ def create_trade_share_token(match_id: int, user_id: str, *,
                 conn.execute(insert(tst).values(
                     token=token, match_id=match_id,
                     created_by=user_id, created_at=_now(),
+                    value_snapshot=value_snapshot,
                 ))
             return token
         except IntegrityError:
@@ -16821,13 +17785,15 @@ def resolve_trade_share_token(token: str) -> dict | None:
     The row is oriented to the SHARER: when user_b minted the token,
     `user_a_give` and `user_a_receive` come back swapped, so YOU GIVE is
     always what the sharer gives. `shared_by` ('a' | 'b') says which party
-    that was. `created_by` itself stays server-side and is not returned."""
+    that was. `created_by` itself stays server-side and is not returned.
+    `value_snapshot` is the token's share-time value JSON (already oriented
+    to the sharer at mint), or None."""
     if not token:
         return None
     tm, tst = trade_matches_table, trade_share_tokens_table
     with engine.connect() as conn:
         row = conn.execute(
-            select(tm, tst.c.created_by)
+            select(tm, tst.c.created_by, tst.c.value_snapshot)
             .select_from(tst.join(tm, tm.c.id == tst.c.match_id))
             .where(and_(tst.c.token == token, tst.c.revoked_at.is_(None)))
         ).fetchone()
@@ -16842,6 +17808,20 @@ def resolve_trade_share_token(token: str) -> dict | None:
     else:
         out["shared_by"] = "a"
     return out
+
+
+def load_trade_match_sides(match_id: int) -> dict | None:
+    """{league_id, user_a_id, user_b_id, user_a_give, user_a_receive} for one
+    trade_matches row (the lists as stored JSON text), or None. The share
+    mint reads it to price the sharer's side BEFORE its own transaction."""
+    tm = trade_matches_table
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(tm.c.league_id, tm.c.user_a_id, tm.c.user_b_id,
+                   tm.c.user_a_give, tm.c.user_a_receive)
+            .where(tm.c.id == match_id)
+        ).fetchone()
+    return dict(row._mapping) if row is not None else None
 
 
 def _count_recent_trade_share_tokens(conn, user_id: str, *, hours: int = 1) -> int:

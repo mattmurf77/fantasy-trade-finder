@@ -220,6 +220,34 @@ def test_referral_counterparties_and_public_league_grids_are_preserved(engine):
     assert len(history) == 1 and history[0]["owner_user_id"] is None
 
 
+def test_referral_ledger_columns_on_deletion(engine):
+    """Referral loop L7 (FR-23): the deleted sender's public invite id
+    (share_token) dies on every alias's rows, so the link credits no one;
+    surface and attribution_method stay with the anonymized row; the
+    counterparty's own link (the user was only the invitee) is untouched."""
+    with engine.begin() as conn:
+        seed(conn, db.referrals_table, "sent", referrer_user_id=UID,
+             referred_user_id=OTHER, invite_token="tokSent00001", share_token="tokSent00001",
+             surface="league_home", attribution_method="token", status="joined")
+        seed(conn, db.referrals_table, "alias-sent", referrer_user_id=ALIAS,
+             invite_token="tokAlias0001", share_token="tokAlias0001",
+             surface="web_invite", status="pending")
+        seed(conn, db.referrals_table, "received", referrer_user_id=OTHER,
+             referred_user_id=UID, invite_token="tokRecv00001", share_token="tokRecv00001",
+             surface="trades_banner", attribution_method="league_match", status="joined")
+    accounts.delete_user_data(UID)
+    by_token = {r["invite_token"]: r for r in rows(engine, db.referrals_table)}
+    for tok, surface in (("tokSent00001", "league_home"), ("tokAlias0001", "web_invite")):
+        assert by_token[tok]["share_token"] is None
+        assert by_token[tok]["surface"] == surface
+        assert by_token[tok]["referrer_user_id"].startswith(accounts.DELETED_USER_PLACEHOLDER)
+    assert by_token["tokSent00001"]["attribution_method"] == "token"
+    received = by_token["tokRecv00001"]
+    assert received["share_token"] == "tokRecv00001" and received["referred_user_id"] is None
+    assert (received["surface"], received["attribution_method"]) == ("trades_banner", "league_match")
+    assert received["referrer_user_id"] == OTHER
+
+
 def test_trade_share_tokens_minted_by_the_user_are_deleted(engine):
     """Build O8: a share link dies with its sharer's account (every alias);
     the counterparty's own tokens for the same match survive."""
@@ -254,6 +282,63 @@ def test_route_evicts_bound_alias_and_account_sessions(engine, monkeypatch):
         with server._sessions_lock:
             for token in sessions:
                 server._sessions.pop(token, None)
+
+
+def _outlook_entry(basis, user_id):
+    """Store a GET /api/league/outlook result for this caller; returns its key."""
+    from backend import outlook_result_cache as orc
+    key = orc.make_key(league_id="synthetic-league", basis=basis, scoring_format="1qb_ppr",
+                       user_id=user_id, state={}, player_value={}, player_pos={},
+                       model_cfg={}, playoff_seed_type=None, strength_source="auto")
+    orc.OUTLOOK_RESULTS.get_or_compute(key, lambda: {"teams": []})
+    return key
+
+
+def _delete_as_owner(monkeypatch):
+    from backend import server
+    token = "synthetic-outlook-delete-token"
+    monkeypatch.setattr(server, "touch_user_activity", lambda *a, **kw: None)
+    monkeypatch.setattr(accounts, "apple_identity_subjects", lambda *a, **kw: set())
+    with server._sessions_lock:
+        server._sessions[token] = {"user_id": UID, "account_id": AID, "verified": True}
+    try:
+        return server.app.test_client().delete("/api/account", headers={"X-Session-Token": token})
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop(token, None)
+
+
+def test_route_purges_the_users_personal_outlook_results(engine, monkeypatch):
+    """Release-lead QA on #512: a personal outlook result is keyed on the
+    caller, so the user's and their alias's entries leave process memory with
+    the account; another caller's and the shared consensus entry stay."""
+    from backend import outlook_result_cache as orc
+    for who in (UID, ALIAS):
+        _outlook_entry("personal", who)
+    kept = [_outlook_entry("personal", OTHER), _outlook_entry("consensus", UID)]
+    response = _delete_as_owner(monkeypatch)
+    assert response.status_code == 200, response.get_json()
+    assert list(orc.OUTLOOK_RESULTS._entries) == kept
+
+
+def test_route_deletion_response_is_unchanged_when_the_outlook_purge_raises(
+        engine, monkeypatch, caplog):
+    from backend import outlook_result_cache as orc
+    real, counts = accounts.delete_user_data, []
+
+    def spy(*a, **kw):
+        counts.append(real(*a, **kw))
+        return counts[-1]
+
+    def boom(_user_ids):
+        raise RuntimeError("synthetic purge failure")
+
+    monkeypatch.setattr(accounts, "delete_user_data", spy)
+    monkeypatch.setattr(orc.OUTLOOK_RESULTS, "purge_callers", boom)
+    response = _delete_as_owner(monkeypatch)
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json() == {"ok": True, "deleted": counts[0], "apple_revoked": False}
+    assert "outlook result purge errored (continuing)" in caplog.text
 
 
 def test_export_includes_alias_private_rows_and_omits_credentials(engine):
@@ -920,3 +1005,35 @@ def test_a_wrong_shape_arms_blob_is_withheld_from_the_export(engine, raw):
              arms_json=raw, trade_json="{}")
     (row,) = accounts.export_user_data(UID)["tables"]["grading_cards"]
     assert row["arms_json"] is None
+
+def test_route_purges_both_outlook_caches_for_all_aliases(engine, monkeypatch):
+    from backend import server
+    from backend.outlook_result_cache import OUTLOOK_RESULTS
+    baseline = {}
+    for who in (UID, ALIAS, OTHER, None):
+        key = ("league", "personal" if who else "consensus", "1qb_ppr", who, 7)
+        baseline[key] = (0, key, object())
+    monkeypatch.setattr(server, "_OUTLOOK_IMPACT_CACHE", baseline)
+    for who in (UID, ALIAS, OTHER):
+        _outlook_entry("personal", who)
+    shared = _outlook_entry("consensus", UID)
+    response = _delete_as_owner(monkeypatch)
+    assert response.status_code == 200
+    assert {key[3] for key in baseline} == {OTHER, None}
+    assert {key[3] for key in OUTLOOK_RESULTS._entries} == {OTHER, ""}
+    assert shared in OUTLOOK_RESULTS._entries
+
+
+def test_failed_baseline_purge_still_purges_full_results(engine, monkeypatch, caplog):
+    from backend import server
+    from backend.outlook_result_cache import OUTLOOK_RESULTS
+    _outlook_entry("personal", UID)
+
+    def boom(_ids):
+        raise RuntimeError("synthetic baseline purge failure")
+
+    monkeypatch.setattr(server, "_purge_outlook_impact_callers", boom)
+    response = _delete_as_owner(monkeypatch)
+    assert response.status_code == 200
+    assert not any(key[3] == UID for key in OUTLOOK_RESULTS._entries)
+    assert "outlook baseline purge errored (continuing)" in caplog.text

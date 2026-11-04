@@ -29,12 +29,15 @@ import { chalk, ice, ink, radii, semantic, space, tier as tierColors, type } fro
 // Scale: the bar spans ±1 generic Mid 1st (the "base first"), so the fill
 // position IS gap.firsts — where it lands is literally the pick reading. The
 // inner ticks mark the ±2nd landmark, the ends are ±1st. The ±2nd tick sits at
-// the mid-2nd / mid-1st value ratio (≈0.57, from backend GENERIC_PICK_SEEDS) —
-// a static visual reference only; real magnitude always comes from gap.firsts.
+// the Mid 2nd / Mid 1st value ratio over backend GENERIC_PICK_SEEDS (the same
+// source the share card's bar uses, #564), pinned to it by
+// backend/tests/test_value_bar_scale.py so the two can't drift again: at 0.57
+// a fill reading "≈ a Late 1st" (0.6 firsts) ended on the "2nd" tick. A
+// static visual reference only; real magnitude always comes from gap.firsts.
 // Gaps beyond one first clamp to the end and the copy falls back to firsts
 // ("≈ 1.4 mid 1sts").
-const SECOND_IN_FIRSTS = 0.57;
-const SECOND_PCT = 50 - SECOND_IN_FIRSTS * 50; // ≈21.5% — the −2nd landmark
+const SECOND_IN_FIRSTS = 0.287;
+const SECOND_PCT = 50 - SECOND_IN_FIRSTS * 50; // ≈35.7% — the −2nd landmark
 
 export interface TradeValueBarProps {
   /** Consensus value of the side you send (give_value). */
@@ -66,6 +69,23 @@ function shortPick(label: string): string {
   return `${article} ${core}`;
 }
 
+/**
+ * The bar's Even state, the one predicate every reader shares (the bar, the
+ * deck card's VoiceOver summary): `favors` 'even' or absent, or the B2 rule
+ * (Product P112, 11-02; the share image does the same, #564): a null
+ * pick_equivalent under one first is the server's negligible floor (under half
+ * the smallest generic pick, 0.058 firsts today), so it reads Even, never
+ * "≈ 0.0 mid 1sts". Its body is plain JS: check-value-bar-b2.js executes it.
+ */
+export function valueBarIsEven(
+  favors: TradeValueBarProps['favors'] | undefined,
+  gap: CalcGap | null | undefined,
+): boolean {
+  const pick = gap ? gap.pick_equivalent : null;
+  const firsts = gap ? Math.abs(gap.firsts) : 0;
+  return favors === 'even' || favors == null || (!pick && firsts < 1);
+}
+
 export default function TradeValueBar({
   giveValue: _giveValue,
   receiveValue: _receiveValue,
@@ -77,15 +97,17 @@ export default function TradeValueBar({
   const [whyOpen, setWhyOpen] = useState(false);
   if (!gap) return null;
 
-  const even = favors === 'even' || favors == null;
-  const youWin = favors === 'receive';
   const firsts = Math.abs(gap.firsts);
+  const pick = gap.pick_equivalent;
+  // Every Even/lean reading below (headline, margin, fill, ends, Why?) comes
+  // from `even`, never raw `favors`; the B2 rule is inside the predicate.
+  const even = valueBarIsEven(favors, gap);
+  const youWin = favors === 'receive';
   const clamped = Math.min(1, firsts); // ±1 base-first half-scale
   const frac = even ? 0 : youWin ? clamped : -clamped; // + = toward "You win" (right)
 
   const winner = even ? null : youWin ? youLabel : themLabel;
   const fillColor = even ? ice.base : youWin ? semantic.pos : semantic.warn;
-  const pick = gap.pick_equivalent;
 
   // Fill geometry: center = even. Positive fraction grows right from the center;
   // negative grows left toward it. Even shows a small centered nub.

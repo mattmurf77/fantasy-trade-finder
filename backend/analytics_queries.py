@@ -362,8 +362,8 @@ NON_INTENT_EVENTS = frozenset({
     #   paywall_purchase_initiated / _completed / _failed — the purchase
     #     itself is a real decision, but it is NOT OURS TO COUNT: the
     #     authoritative row is the server-fired `entitlement_granted` the
-    #     RevenueCat webhook writes (INTENT, and it cannot be spoofed by a
-    #     client). These three are the UI echo used to reconcile against it
+    #     RevenueCat webhook writes (it cannot be spoofed by a client; NON_INTENT
+    #     since C8, below). These three are the UI echo used to reconcile against it
     #     — admitting them would double-count every purchaser's user-day
     #     and, worse, let a client mint one for a purchase that never
     #     cleared the store. `_failed` is a defect signal, not a decision.
@@ -380,6 +380,11 @@ NON_INTENT_EVENTS = frozenset({
     "paywall_purchase_completed",
     "paywall_purchase_failed",
     "paywall_restore",
+    # paywall_gate_hit (C8 §B, 2026-10-27, added in the SAME commit as its
+    # emitter): the server's 402 at a gated route, a system outcome of a
+    # request the user already made, never a choice. Props: gate,
+    # route_family, enforced.
+    "paywall_gate_hit",
     # Home hub (flag `nav.home_hub`, 2026-10-10), added in the SAME commit
     # that registered them (docs/plans/home-engagement/scope.md §1).
     #   home_tile_tapped — NAVIGATION, the `tab_selected` class. Home is the
@@ -399,6 +404,21 @@ NON_INTENT_EVENTS = frozenset({
     # Add / Re-rank) stays deliberately ABSENT and counts as INTENT.
     "usage_trends_availability_opened",
     "usage_trends_view_changed",
+    # ── Referral loop D-1, 2026-10-15 — added in the SAME commit that
+    # registered them in SERVER_FIRED_EVENTS, for the reason at the top of
+    # this block. Both are owned by the INVITER (or "system:invite") but
+    # caused by someone else: an invitee opening the join landing
+    # (invite_landing_opened) or tapping its CTA (invite_landing_cta). As
+    # intent they would mint a user-day for an inviter who did nothing —
+    # the `receipts_grade_run` class. Grant: analytics-lead C1–C9.
+    "invite_landing_opened",
+    "invite_landing_cta",
+    # ── Referral loop L7, 2026-10-24 — same class, same reason, same grant:
+    # owned by the REFERRER, caused by the invitee's first session (and, for
+    # referral_activated, the invitee's first trade opinion). Each added in
+    # the SAME commit as its emitter (backend/referral_ledger.py).
+    "referral_attributed",
+    "referral_activated",
     # ── Time to trade suggestion, 2026-10-23 — added in the SAME commit as
     # the emitters (docs/business/analytics/2026-10-20-time-to-suggestion-
     # events.md v2). R2/R2b are a system outcome echoing the R1 tap
@@ -420,6 +440,27 @@ NON_INTENT_EVENTS = frozenset({
     # its emitter): a server-fired outcome of each served page, on background
     # polls too. The serve's request already reflects the user's intent.
     "deck_i1_check",
+    # ── D1 free-agent moves, 2026-11-01 — added in the SAME commit as the
+    # emitters (mobile/src/api/faMove.ts; scope.md §1, granted with C1–C6).
+    # Both are EXPOSURES: a step the sheet showed, not a choice the user made.
+    # The decision is the named-CTA tap, `fa_move_write_attempted`, which
+    # stays INTENT with `fa_move_write_failed`.
+    "fa_move_connect_shown",
+    "fa_move_consent_shown",
+
+# ── D1 free-agent moves (2026-11-01, granted NON_INTENT by analytics-lead,
+    # consent.md §6) — added in the SAME commit as the server emitters. Both
+    # consent events are a ledger, not a decision: a grant always arrives in
+    # the same request as the INTENT fa_move_write_attempted, and withdrawals
+    # include system ones (an expired or rejected token). One name, one class.
+    # `fa_move_write_succeeded` is deliberately ABSENT and stays INTENT.
+    "fa_move_consent_recorded",
+    "fa_move_consent_withdrawn",
+    # entitlement_granted (C8, 2026-10-28, registered in the SAME commit):
+    # grant() also fires for manual, comp, bulk, Founders, referral and
+    # group-unlock grants, none of them the recipient acting. INTENT would
+    # mint a user-day for every recipient of a bulk grant.
+    "entitlement_granted",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

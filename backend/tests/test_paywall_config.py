@@ -11,27 +11,47 @@ Covers:
       the ids have to match the RevenueCat offering the client purchases)
   (d) session auth — no token → 401 (same layer as /api/me/entitlements)
   (e) ?platform=ios|web|extension accepted; unknown value degrades to ios
-  (f) tip jar — `tips: []` at launch (the SKUs are not submitted to App
-      Store Connect); the restorable list still holds only tip products
-  (g) fallback prices (#393, operator 2026-10-25): $4.99 / $24.99 before
-      _PAYWALL_PRICE_RISE_AT (2027-01-02 04:00 UTC, App Store Connect's
-      US start for a change scheduled for 2027-01-02: an instant, not a
-      date), $6.99 / $34.99 from it on,
-      through an injected clock; no `trial_days` key on either side (an
-      older client renders "N days free" only when trial_days > 0)
+  (f) tip jar (tip-jar plan §3 S1) — `tips` is the three ftf_tip_ SKUs
+      only while model_config `paywall_tips_enabled` is exactly 1 AND the
+      resolved platform is `ios` AND the session is verified and not demo
+      (an unverified or demo session gets []); `[]` at the seeded default 0, on web and
+      extension, and for any other knob value (2, NaN, garbage, a missing
+      row, a failed read); read live per request; flag off still serves
+      `{"enabled": false}` alone; the list holds only tip products
+  (g) the Founding GMs club (#393 scope §2 item 3, recommendation §(b)):
+      `club` open before closes_at and closed from it on, with the clock
+      frozen on both sides; founder vs standard `display_price`;
+      `trial_period` "1 month" and no `trial_days`; the truthful grid;
+      `dismissible` always true
+  (h) fallback prices (#393, operator 2026-10-25; #494, #522): $4.99 /
+      $24.99 before _PAYWALL_PRICE_RISE_AT (2027-01-02 04:00 UTC, App Store
+      Connect's US start for a change scheduled for 2027-01-02: an instant,
+      not a date), $6.99 / $34.99 from it on; a naive now raises;
+      _paywall_products is pure; no `trial_days` key on either side (an
+      older client renders "N days free" only when trial_days > 0);
+      per_month_equiv rounded up
+  (i) one instant (head-eng 2026-10-27): `club.closes_at` is the rise
+      instant, `club.open` and the prices flip at the same instant from one
+      clock read, and moving the constant moves both
 
 Flask client + injected session, flags forced via a patched
 server.is_enabled — the two harness patterns from backend/tests/CLAUDE.md.
-No DB rows are needed: the route is static config and touches no table.
+The route's one table read is the tip knob (model_config), so every test
+runs against an isolated in-memory DB (autouse `mem_engine`); an empty
+table falls back to the seed list, i.e. the knob's default 0.
 """
 
 import pathlib
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_CEILING, Decimal
+from unittest.mock import patch
 
 import pytest
+from sqlalchemy import create_engine, insert
 
+import backend.database as db_module
 import backend.server as server
+from backend.database import metadata, model_config_table
 
 TOKEN = "paywall-test-token"
 USER = "paywall_user_1"
@@ -46,6 +66,7 @@ ANNUAL = "ftf_pro_annual"
 UTC = timezone.utc
 # The rise is 2027-01-02 04:00 UTC (11 pm ET / 8 pm PT on Jan 1): App Store
 # Connect's US start time for a price change scheduled for 2027-01-02.
+CLOSES_AT = "2027-01-02T04:00:00Z"   # club.closes_at as served: the rise instant
 BEFORE = datetime(2027, 1, 2, 3, 59, 59, tzinfo=UTC)      # last second of old prices
 AT = datetime(2027, 1, 2, 4, 0, 0, tzinfo=UTC)            # the rise itself
 UTC_MIDNIGHT = datetime(2027, 1, 1, 0, 0, 0, tzinfo=UTC)  # still Dec 31 in the US
@@ -53,14 +74,34 @@ ASC_JAN_1 = datetime(2027, 1, 1, 4, 0, 0, tzinfo=UTC)     # a Jan-1 schedule's U
 LA_MIDNIGHT = datetime(2027, 1, 1, 8, 0, 0, tzinfo=UTC)   # the previous instant
 AFTER = datetime(2027, 6, 1, 12, 0, 0, tzinfo=UTC)
 TODAY = datetime(2026, 10, 27, 12, 0, 0, tzinfo=UTC)
+TICK = timedelta(microseconds=1)
+FOUNDER_PRICES = {MONTHLY: "$4.99", ANNUAL: "$24.99"}
+STANDARD_PRICES = {MONTHLY: "$6.99", ANNUAL: "$34.99"}
+# The undelivered kinds (5c) and the keys that name no gated feature.
+DROPPED_FEATURES = ("engine_knobs", "extension_overlays", "ad_free",
+                    "unlimited_leagues", "portfolio")
+
+
+@pytest.fixture(autouse=True)
+def mem_engine():
+    """Hermetic model_config: the route reads the tip knob live, and must
+    never read the local data/trade_finder.db."""
+    eng = create_engine("sqlite:///:memory:",
+                        connect_args={"check_same_thread": False})
+    metadata.create_all(eng)
+    with patch.object(db_module, "engine", eng):
+        yield eng
 
 
 @pytest.fixture()
 def client():
+    """A VERIFIED, non-demo session, so the tip tests isolate the knob and
+    the platform; the session leg has its own tests in (f)."""
     server.app.config["TESTING"] = True
     c = server.app.test_client()
     with server._sessions_lock:
-        server._sessions[TOKEN] = {"user_id": USER, "last_active": 0.0}
+        server._sessions[TOKEN] = {"user_id": USER, "last_active": 0.0,
+                                   "verified": True}
     try:
         yield c
     finally:
@@ -119,9 +160,9 @@ def test_flag_on_returns_full_shape(client, monkeypatch):
     # page 1 tells the client to reuse matches it already has — the route
     # never recomputes trades (LLD §3).
     assert body["pages"][0]["body_ref"] == "matches_preview"
-    assert body["pages"][1]["features"] == [
-        "unlimited_leagues", "portfolio", "engine_knobs",
-        "extension_overlays", "ad_free"]
+    assert body["pages"][1]["features"] == []
+    assert body["club"]["name"] == "Founding GMs"
+    assert body["tips"] == []
 
 
 def test_products_shape(client, monkeypatch):
@@ -132,18 +173,20 @@ def test_products_shape(client, monkeypatch):
 
     assert products[MONTHLY]["period"] == "monthly"
     assert products[MONTHLY]["display_price"] == "$4.99"
+    assert products[MONTHLY]["trial_period"] == "1 month"
     assert products[MONTHLY]["hero"] is False
     assert set(products[MONTHLY]) == {
-        "product_id", "period", "display_price", "hero"}
+        "product_id", "period", "display_price", "trial_period", "hero"}
 
     assert products[ANNUAL]["period"] == "annual"
     assert products[ANNUAL]["display_price"] == "$24.99"
     assert products[ANNUAL]["per_month_equiv"] == "$2.09"
+    assert products[ANNUAL]["trial_period"] == "1 month"
     assert products[ANNUAL]["hero"] is True
     assert products[ANNUAL]["badge"] == "best_value"
     assert set(products[ANNUAL]) == {
-        "product_id", "period", "display_price", "per_month_equiv", "hero",
-        "badge"}
+        "product_id", "period", "display_price", "per_month_equiv",
+        "trial_period", "hero", "badge"}
     # exactly one hero — two would give the client no default selection
     assert sum(1 for p in products.values() if p["hero"]) == 1
 
@@ -163,7 +206,8 @@ def test_paywall_enums_documented():
     """`kind`, `badge` and the feature keys are a client contract."""
     doc = (REPO / "docs" / "cross-client-invariants.md").read_text()
     for token in ("trades_found", "features", "purchase", "best_value",
-                  "unlimited_leagues", "engine_knobs", "matches_preview"):
+                  "matches_preview", "`trial_period`", "`club`",
+                  "`closes_at`", "Founding GMs"):
         assert token in doc, f"paywall enum {token!r} undocumented"
 
 
@@ -201,18 +245,142 @@ def test_unknown_platform_degrades_to_ios(client, monkeypatch):
 
 # ── (f) tip jar ────────────────────────────────────────────────────────────
 
-def test_tips_empty_at_launch(client, monkeypatch):
-    """The tip SKUs are not submitted to App Store Connect, so the config
-    serves `tips: []` (as #465 does) and no tip id or price leaks."""
+TIP_KNOB = "paywall_tips_enabled"
+TIPS = [
+    {"product_id": "ftf_tip_199", "display_price": "$1.99"},
+    {"product_id": "ftf_tip_499", "display_price": "$4.99"},
+    {"product_id": "ftf_tip_999", "display_price": "$9.99"},
+]
+
+
+def _set_tip_knob(eng, value):
+    """Write the knob row straight to the table (no reload_config), so a
+    changed answer proves the read is live. None deletes the row and leaves
+    another one, so get_config() serves DB rows rather than the seed list
+    and the missing key hits the helper's inline fallback (G-064)."""
+    with eng.begin() as conn:
+        conn.execute(model_config_table.delete()
+                     .where(model_config_table.c.key == TIP_KNOB))
+        if value is None:
+            conn.execute(model_config_table.delete()
+                         .where(model_config_table.c.key == "vet_age"))
+            conn.execute(insert(model_config_table).values(key="vet_age", value=27))
+        else:
+            conn.execute(insert(model_config_table).values(key=TIP_KNOB, value=value))
+
+
+@pytest.mark.parametrize("now", [BEFORE, AFTER])
+def test_tips_empty_at_launch(client, monkeypatch, now):
+    """At the seeded default (knob 0) the config serves `tips: []` and no
+    tip id or price leaks."""
     _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
     r = _get(client)
     assert r.get_json()["tips"] == []
     assert "ftf_tip" not in r.get_data(as_text=True)
 
 
+def test_tip_knob_seeded_zero():
+    assert [v for k, v, _ in db_module._MODEL_CONFIG_DEFAULTS
+            if k == TIP_KNOB] == [0]
+
+
+@pytest.mark.parametrize("query", ["?platform=ios", "", "?platform=nintendo"])
+def test_tips_served_on_ios_when_knob_is_1(client, monkeypatch, mem_engine, query):
+    """Knob 1 + the RESOLVED platform ios (explicit, the default, or an
+    unknown value degraded to ios) → exactly the three SKUs, in order."""
+    _flags(monkeypatch, "monetize.paywall")
+    _set_tip_knob(mem_engine, 1.0)
+    body = _get(client, query).get_json()
+    assert body["platform"] == "ios"
+    assert body["tips"] == TIPS
+
+
+@pytest.mark.parametrize("session, served", [
+    ({"verified": True}, True),
+    ({}, False),                                    # never verified
+    ({"verified": False}, False),
+    ({"verified": True, "is_demo": True}, False),   # demo, even if stamped
+    ({"is_demo": True}, False),
+])
+def test_tips_need_a_verified_non_demo_session(client, monkeypatch, mem_engine,
+                                               session, served):
+    """Defence in depth behind #495's verified-only Settings row: knob 1
+    + ios still serves [] to an unverified or demo session (the same
+    predicate as _session_verification)."""
+    _flags(monkeypatch, "monetize.paywall")
+    _set_tip_knob(mem_engine, 1.0)
+    with server._sessions_lock:
+        server._sessions[TOKEN] = {"user_id": USER, "last_active": 0.0,
+                                   **session}
+    r = _get(client, "?platform=ios")
+    assert r.status_code == 200
+    assert r.get_json()["tips"] == (TIPS if served else [])
+    if not served:
+        assert "ftf_tip" not in r.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("platform", ["web", "extension"])
+def test_no_tips_off_ios_even_when_knob_is_1(client, monkeypatch, mem_engine,
+                                             platform):
+    """Web and the extension have no in-app purchase (plan §1)."""
+    _flags(monkeypatch, "monetize.paywall")
+    _set_tip_knob(mem_engine, 1.0)
+    r = _get(client, f"?platform={platform}")
+    assert r.get_json()["tips"] == []
+    assert "ftf_tip" not in r.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("value", [0.0, 2.0, -1.0, 0.5, 1.0001, None])
+def test_no_tips_unless_knob_is_exactly_1(client, monkeypatch, mem_engine, value):
+    """0, 2, any other number and a missing row (None) all serve []."""
+    _flags(monkeypatch, "monetize.paywall")
+    _set_tip_knob(mem_engine, value)
+    assert _get(client, "?platform=ios").get_json()["tips"] == []
+
+
+@pytest.mark.parametrize("value", ["abc", "", None, float("nan"), float("inf")])
+def test_no_tips_for_a_garbage_knob(client, monkeypatch, value):
+    """Values the Float column can't hold, injected at the read."""
+    _flags(monkeypatch, "monetize.paywall")
+    monkeypatch.setattr(server, "get_config", lambda: {TIP_KNOB: value})
+    assert _get(client, "?platform=ios").get_json()["tips"] == []
+
+
+def test_no_tips_when_the_knob_read_fails(client, monkeypatch):
+    def boom():
+        raise RuntimeError("db down")
+    _flags(monkeypatch, "monetize.paywall")
+    monkeypatch.setattr(server, "get_config", boom)
+    r = _get(client, "?platform=ios")
+    assert r.status_code == 200
+    assert r.get_json()["tips"] == []
+
+
+def test_tip_knob_read_live_per_request(client, monkeypatch, mem_engine):
+    """No cache and no reload: flipping the stored row flips the next
+    response, so 0 is a deploy-free kill switch."""
+    _flags(monkeypatch, "monetize.paywall")
+    for value, expected in [(1.0, TIPS), (0.0, []), (1.0, TIPS), (2.0, [])]:
+        _set_tip_knob(mem_engine, value)
+        assert _get(client, "?platform=ios").get_json()["tips"] == expected
+
+
+@pytest.mark.parametrize("query", ["", "?platform=ios", "?platform=web",
+                                   "?platform=extension"])
+def test_flag_off_ignores_the_tip_knob(client, monkeypatch, mem_engine, query):
+    """`monetize.paywall` off → `{"enabled": false}` and nothing else, knob
+    or not."""
+    _flags(monkeypatch)
+    _set_tip_knob(mem_engine, 1.0)
+    r = _get(client, query)
+    assert r.get_json() == {"enabled": False}
+    assert "ftf_tip" not in r.get_data(as_text=True)
+
+
 def test_restorable_tip_skus_are_tip_products():
-    """`_PAYWALL_TIPS` is the list to restore if tips come back. Every SKU in
-    it must hit the projector's no-entitlement guard — a tip id drifting out
+    """`_PAYWALL_TIPS` is the list served behind the knob. Every SKU in it
+    must hit the projector's no-entitlement guard — a tip id drifting out
     of the ftf_tip_ prefix would grant Pro — and none claims entitlement
     fields: a tip buys nothing."""
     from backend import entitlements as entl
@@ -220,7 +388,7 @@ def test_restorable_tip_skus_are_tip_products():
         "ftf_tip_199", "ftf_tip_499", "ftf_tip_999"]
     for t in server._PAYWALL_TIPS:
         assert entl.is_tip_product(t["product_id"])
-        assert "trial_days" not in t and "period" not in t
+        assert not {"trial_days", "trial_period", "period"} & set(t)
 
 
 def test_flag_off_leaks_no_tips(client, monkeypatch):
@@ -228,7 +396,100 @@ def test_flag_off_leaks_no_tips(client, monkeypatch):
     assert "ftf_tip" not in _get(client).get_data(as_text=True)
 
 
-# ── (g) fallback prices: the rise instant, no trial_days ─────────────────
+# ── (g) the Founding GMs club ──────────────────────────────────────────────
+
+@pytest.mark.parametrize("now, is_open", [
+    (TODAY, True),
+    (BEFORE, True),
+    (AT, False),
+    (AFTER, False),
+])
+def test_club_open_around_closes_at(client, monkeypatch, now, is_open):
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
+    assert _get(client).get_json()["club"] == {
+        "name": "Founding GMs", "closes_at": CLOSES_AT, "open": is_open}
+
+
+@pytest.mark.parametrize("now, monthly, annual, per_month", [
+    (BEFORE, "$4.99", "$24.99", "$2.09"),     # founder prices while open
+    (AT, "$6.99", "$34.99", "$2.92"),         # standard from closes_at on
+    (AFTER, "$6.99", "$34.99", "$2.92"),
+])
+def test_display_price_founder_then_standard(client, monkeypatch, now, monthly,
+                                             annual, per_month):
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
+    products = {p["product_id"]: p for p in _get(client).get_json()["products"]}
+    assert products[MONTHLY]["display_price"] == monthly
+    assert products[ANNUAL]["display_price"] == annual
+    assert products[ANNUAL]["per_month_equiv"] == per_month
+
+
+def test_annual_founder_price_is_24_99(client, monkeypatch):
+    """D14 (2): the annual fallback said $34.99 while the club is open."""
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, BEFORE)
+    annual = [p for p in _get(client).get_json()["products"]
+              if p["product_id"] == ANNUAL]
+    assert annual[0]["display_price"] == "$24.99"
+
+
+@pytest.mark.parametrize("now, expected", [(BEFORE, "$2.09"), (AFTER, "$2.92")])
+def test_per_month_equiv_rounds_up_to_the_cent(client, monkeypatch, now, expected):
+    """Legal's approved copy says $2.09/month: the annual price / 12, rounded
+    UP (24.99 / 12 = 2.0825 → $2.09; 34.99 / 12 = 2.9158 → $2.92)."""
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
+    annual = [p for p in _get(client).get_json()["products"]
+              if p["product_id"] == ANNUAL][0]
+    ceil = (Decimal(annual["display_price"].lstrip("$")) / 12).quantize(
+        Decimal("0.01"), rounding=ROUND_CEILING)
+    assert annual["per_month_equiv"] == expected == f"${ceil}"
+
+
+@pytest.mark.parametrize("now", [BEFORE, AFTER])
+def test_trial_period_one_month_and_no_trial_days(client, monkeypatch, now):
+    """`trial_days` is gone: a 1.21.x client shows "N days free" only when
+    trial_days > 0, so absent means no wrong trial line."""
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
+    r = _get(client)
+    for p in r.get_json()["products"]:
+        assert p["trial_period"] == "1 month"
+        assert "trial_days" not in p
+    assert "trial_days" not in r.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("now", [BEFORE, AFTER])
+def test_feature_grid_is_truthful(client, monkeypatch, now):
+    """5c: the grid is empty at launch (1.21.x renders it only when the list
+    is non-empty), and no dropped or false key appears anywhere."""
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
+    r = _get(client)
+    grid = [p for p in r.get_json()["pages"] if p["kind"] == "features"]
+    assert len(grid) == 1 and grid[0]["id"] == "feature_grid"
+    assert grid[0]["features"] == []
+    for kind in DROPPED_FEATURES:
+        assert kind not in r.get_data(as_text=True), kind
+
+
+@pytest.mark.parametrize("now", [BEFORE, AT, AFTER])
+def test_dismissible_always_true(client, monkeypatch, now):
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
+    assert _get(client).get_json()["dismissible"] is True
+
+
+def test_flag_off_leaks_no_club(client, monkeypatch):
+    _flags(monkeypatch)
+    _freeze(monkeypatch, BEFORE)
+    payload = _get(client).get_data(as_text=True)
+    assert "club" not in payload and "Founding" not in payload
+
+
+# ── (h) fallback prices: the rise instant, no trial_days ─────────────────
 
 @pytest.mark.parametrize("now, monthly, annual, per_month", [
     (TODAY, "$4.99", "$24.99", "$2.09"),
@@ -347,3 +608,67 @@ def test_route_reads_the_real_clock_by_default():
     now = server._paywall_now()
     assert now.tzinfo is not None
     assert abs((now - datetime.now(timezone.utc)).total_seconds()) < 5
+
+
+# ── (i) one instant: the club closes at the price rise ─────────────────────
+
+def test_closes_at_is_the_rise_instant(client, monkeypatch):
+    """`club.closes_at` is _PAYWALL_PRICE_RISE_AT (App Store Connect's US
+    start for the Jan-2 change, 04:00 UTC), served as an ISO-8601 UTC string
+    with a Z suffix (the shape is unchanged)."""
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, TODAY)
+    closes_at = _get(client).get_json()["club"]["closes_at"]
+    assert closes_at == CLOSES_AT == server._paywall_club_closes_at()
+    assert datetime.fromisoformat(closes_at) == server._PAYWALL_PRICE_RISE_AT == AT
+
+
+@pytest.mark.parametrize("now", [TODAY, UTC_MIDNIGHT, BEFORE, AT - TICK, AT,
+                                 AT + TICK, AFTER])
+def test_club_open_flips_with_the_prices(client, monkeypatch, now):
+    """`club.open` and the price window flip at exactly the same instant:
+    open ⇔ founder prices, closed ⇔ standard prices, down to the
+    microsecond either side of the rise."""
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
+    body = _get(client).get_json()
+    prices = {p["product_id"]: p["display_price"] for p in body["products"]}
+    assert body["club"]["open"] is (now < AT)
+    assert prices == (FOUNDER_PRICES if body["club"]["open"] else STANDARD_PRICES)
+
+
+def test_one_clock_read_per_request(client, monkeypatch):
+    """The route reads _paywall_now() once. A second read here would land
+    past the rise, splitting `club.open` from the prices."""
+    _flags(monkeypatch, "monetize.paywall")
+    reads = iter([AT - TICK, AT])
+    calls = []
+
+    def clock():
+        calls.append(1)
+        return next(reads)
+
+    monkeypatch.setattr(server, "_paywall_now", clock)
+    body = _get(client).get_json()
+    assert len(calls) == 1
+    assert body["club"]["open"] is True
+    assert {p["product_id"]: p["display_price"]
+            for p in body["products"]} == FOUNDER_PRICES
+
+
+def test_moving_the_rise_moves_the_club_and_the_prices(client, monkeypatch):
+    """Nothing holds a second copy of the date: move the one constant and
+    `club.closes_at`, `club.open` and the prices all move with it (founder
+    on /api/me/entitlements is pinned the same way in
+    test_me_entitlements.py)."""
+    rise = server._PAYWALL_PRICE_RISE_AT
+    moved = rise - timedelta(days=32)          # a month earlier, same time of day
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, rise - timedelta(days=18))   # between the two
+    assert _get(client).get_json()["club"]["open"] is True
+    monkeypatch.setattr(server, "_PAYWALL_PRICE_RISE_AT", moved)
+    body = _get(client).get_json()
+    assert body["club"]["closes_at"] == moved.isoformat().replace("+00:00", "Z")
+    assert body["club"]["open"] is False
+    assert {p["product_id"]: p["display_price"]
+            for p in body["products"]} == STANDARD_PRICES

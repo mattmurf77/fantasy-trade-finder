@@ -32,6 +32,10 @@ export const ink = {
   // lineStrong when the `visual.chalkline_cleanup` flag is on; at flag
   // cleanup it becomes the only lineStrong value.
   lineStrongA11y: '#59647A',
+  // Interactive border on ink-2 raised surfaces (sheets, banners, menus)
+  // where no fill separates the control: 3.60:1 on ink-2, 3.18:1 over the
+  // ink-3 pressed fill (design-lead #364 F2). Same slate family.
+  lineStrongRaised: '#6B7587',
 } as const;
 
 export const chalk = {

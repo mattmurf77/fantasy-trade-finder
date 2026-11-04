@@ -5155,7 +5155,8 @@ html:has(#auth-screen:not(.hidden)), body:has(#auth-screen:not(.hidden)) { overf
   .lp-ui-graphic .lp-ui-win { font-size: 11px; }
 }
 
-/* Miniature of mobile TradeValueBar: ±1 mid first, second landmarks at 21.5/78.5%. */
+/* Miniature of mobile TradeValueBar: ±1 mid first, second landmarks at 35.65/64.35%
+   (SECOND_IN_FIRSTS 0.287 = Mid 2nd / Mid 1st, pinned by backend/tests/test_value_bar_scale.py). */
 .lp-market-verdict { margin-top: 12px; }
 .lp-market-head, .lp-market-ends { display: flex; justify-content: space-between; gap: 8px; font: 600 11px/1.4 var(--font-ui); }
 .lp-market-head { color: var(--chalk); margin-bottom: 12px; }
@@ -5165,15 +5166,15 @@ html:has(#auth-screen:not(.hidden)), body:has(#auth-screen:not(.hidden)) { overf
 .lp-market-rail { position: absolute; inset: 1px 0; background: var(--ink-3); border-radius: var(--r-xs); }
 .lp-market-fill { position: absolute; left: calc(50% - 3px); top: 1px; width: 6px; height: 14px; background: var(--ice); border-radius: var(--r-xs); }
 .lp-market-tick, .lp-market-center { position: absolute; top: -4px; height: 24px; width: 1px; background: var(--line); }
-.lp-market-minus { left: 21.5%; }
-.lp-market-plus { left: 78.5%; }
+.lp-market-minus { left: 35.65%; }
+.lp-market-plus { left: 64.35%; }
 .lp-market-center { left: 50%; margin-left: -1px; background: var(--line-strong); }
 .lp-market-scale { height: 16px; position: relative; margin-top: 8px; font: 500 11px/1.4 var(--font-data); color: var(--chalk-dim); }
 .lp-market-scale span { position: absolute; transform: translateX(-50%); }
 .lp-market-scale span:nth-child(1) { left: 0; transform: none; }
-.lp-market-scale span:nth-child(2) { left: 21.5%; }
+.lp-market-scale span:nth-child(2) { left: 35.65%; }
 .lp-market-scale span:nth-child(3) { left: 50%; }
-.lp-market-scale span:nth-child(4) { left: 78.5%; }
+.lp-market-scale span:nth-child(4) { left: 64.35%; }
 .lp-market-scale span:nth-child(5) { right: 0; transform: none; }
 .lp-market-ends { margin-top: 4px; color: var(--chalk-dim); }
 @media (max-width: 960px) {

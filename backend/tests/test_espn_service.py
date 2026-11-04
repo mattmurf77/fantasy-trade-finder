@@ -429,6 +429,72 @@ def test_parse_league_owner_falls_back_to_owners_list():
     assert t.owner_swid == "{X}"
 
 
+# owner_swids (2026-10-27, ESPN sign-in co-owners): every listed owner, in the
+# one SWID identity form; owner_swid unchanged for existing callers.
+
+def _one_team(**team):
+    return es.parse_league({
+        "id": 5, "seasonId": 2026, "settings": {"name": "x", "size": 1},
+        "members": [], "teams": [{"id": 1, "name": "T",
+                                  "roster": {"entries": []}, **team}],
+    })["teams"][0]
+
+
+def test_parse_league_owner_swids_fixture_is_the_primary_in_identity_form():
+    league = es.parse_league(_load_fixture())
+    assert [t.owner_swids for t in league["teams"]] == [
+        ("{A1111111-1111-1111-1111-111111111111}",),
+        ("{B2222222-2222-2222-2222-222222222222}",),
+        ("{C3333333-3333-3333-3333-333333333333}",)]
+
+
+def test_parse_league_owner_swids_lists_co_owners_primary_first():
+    t = _one_team(primaryOwner="{p-1}",
+                  owners=["{c-2}", "{P-1}", " c-3 ", "{C-2}"])
+    assert t.owner_swid == "{p-1}"                 # unchanged: as ESPN sent it
+    assert t.owner_swids == ("{P-1}", "{C-2}", "{C-3}")   # deduped, canonical
+    assert t.owner_swids == tuple(es.swid_identity(s) for s in
+                                  ("{p-1}", "{c-2}", "c-3"))
+
+
+def test_parse_league_owner_swids_without_a_primary_uses_owners():
+    t = _one_team(owners=["{x-1}", "{x-2}"])
+    assert t.owner_swid == "{x-1}"
+    assert t.owner_swids == ("{X-1}", "{X-2}")
+
+
+@pytest.mark.parametrize("team", [
+    {},                                         # owners missing
+    {"owners": []},                             # owners empty
+    {"owners": None},                           # owners null
+    {"primaryOwner": "", "owners": [""]},       # only empty strings
+    {"primaryOwner": None, "owners": ["  ", "{}"]},
+    {"owners": "{X}"},                          # not a list: ignored
+], ids=["missing", "empty", "null", "empty-strings", "blank-and-braces",
+        "not-a-list"])
+def test_parse_league_owner_swids_handles_missing_or_empty_owners(team):
+    t = _one_team(**team)
+    assert t.owner_swids == ()
+
+
+def test_parse_league_owner_swids_primary_plus_junk_owners():
+    t = _one_team(primaryOwner="{P}", owners=None)
+    assert t.owner_swid == "{P}" and t.owner_swids == ("{P}",)
+    # Non-string entries are skipped. (A team whose ONLY owner entry is a
+    # non-string already fails in owner_display's lookup, before this field —
+    # unchanged pre-existing behaviour.)
+    t = _one_team(primaryOwner="{P}", owners=["{p}", {"id": "{X}"}, 7, None,
+                                              "{Q}"])
+    assert t.owner_swid == "{P}" and t.owner_swids == ("{P}", "{Q}")
+
+
+def test_espn_team_built_without_owner_swids_derives_it_from_owner_swid():
+    t = es.EspnTeam(team_id=1, name="T", owner_swid="{ab-1}", owner_display="")
+    assert t.owner_swids == ("{AB-1}",)
+    assert es.EspnTeam(team_id=1, name="T", owner_swid="",
+                       owner_display="").owner_swids == ()
+
+
 # ---------------------------------------------------------------------------
 # 3. crosswalk
 # ---------------------------------------------------------------------------

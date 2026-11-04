@@ -136,6 +136,17 @@ def canonical_swid(value: str) -> str:
     return "{" + v.strip("{}") + "}"
 
 
+def swid_identity(value: str | None) -> str:
+    """The ONE canonical SWID *identity* form: braced, upper-case, trimmed
+    ('' for empty). Platform sign-in compares SWIDs only through this — the
+    claimed SWID, each team's owner_swid, linked_identities.provider_subject
+    and the stored espn_credentials.swid (stored as captured: braced or bare,
+    any case) — so formatting can never dodge an identity match. Not a wire
+    form: canonical_swid above stays the Cookie-header shape."""
+    bare = (value or "").strip().strip("{}").strip().upper()
+    return "{" + bare + "}" if bare else ""
+
+
 def fetch_league(
     league_id: str,
     season: int,
@@ -460,6 +471,30 @@ class EspnTeam:
     #: ladder, which FTF deliberately does not use (see
     #: `derive_espn_draft_order`).
     rank_calculated_final: int | None = None
+    #: EVERY listed owner of the team — `primaryOwner` first, then `owners`
+    #: in ESPN's order — each in the one SWID identity form (swid_identity:
+    #: braced, upper-cased), de-duplicated, empties dropped; () = ownerless.
+    #: ADDITIVE (2026-10-27, ESPN sign-in co-owners): the platform sign-in
+    #: accepts any listed owner. `owner_swid` (primary, else owners[0], as
+    #: ESPN sent it) is unchanged for every existing caller. A team built
+    #: without this field gets it from `owner_swid`.
+    owner_swids: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if (not self.owner_swids and isinstance(self.owner_swid, str)
+                and swid_identity(self.owner_swid)):
+            self.owner_swids = (swid_identity(self.owner_swid),)
+
+
+def _team_owner_swids(t: dict) -> tuple[str, ...]:
+    """A raw ESPN team's listed owners (primaryOwner, then `owners`) in the
+    SWID identity form, de-duplicated, empties and non-strings dropped. A
+    missing, null or non-list `owners` counts as no co-owners."""
+    owners = t.get("owners")
+    raw = [t.get("primaryOwner"), *(owners if isinstance(owners, list) else [])]
+    return tuple(dict.fromkeys(
+        swid_identity(s) for s in raw
+        if isinstance(s, str) and swid_identity(s)))
 
 
 def _int_or_none(v) -> int | None:
@@ -510,6 +545,7 @@ def parse_league(raw: dict) -> dict:
                             and not isinstance(pf, bool) else None),
                 playoff_seed=_int_or_none(t.get("playoffSeed")),
                 rank_calculated_final=_int_or_none(t.get("rankCalculatedFinal")),
+                owner_swids=_team_owner_swids(t),
             )
         )
     settings = raw.get("settings") or {}

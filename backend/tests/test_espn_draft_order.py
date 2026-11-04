@@ -545,7 +545,8 @@ def test_espn_being_down_leaves_the_board_working(client, flag_on, monkeypatch):
     assert resp.status_code == 200
     body = resp.get_json()
     assert "suggested_order" not in body
-    assert set(body) == {"league_id", "settings", "seasons", "progress", "seeded"}
+    assert set(body) == {"league_id", "settings", "seasons", "progress", "seeded",
+                         "current_season"}
 
 
 def test_a_pre_season_snapshot_falls_back_one_season(client, flag_on,
