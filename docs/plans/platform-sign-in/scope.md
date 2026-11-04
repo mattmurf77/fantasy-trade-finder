@@ -350,3 +350,8 @@ head-eng accepted "a co-owner who isn't the primary owner is refused `wrong_acco
     - primary-only in the shared rule → 5 red (all four new #321/sweep tests and the flipped sign-in test).
   - `test_espn_service.py` (+11 cases): the fixture, co-owners primary-first and de-duplicated, no primary, missing / empty / null / blank / non-list `owners` (×6), non-string entries, the hand-built `EspnTeam`.
 - **Docs:** `docs/integrations/espn.md` §2.5 + §3.2; the `docs/api-reference.md` rows for `/api/entry/platform` (the owner check, the control wording), `/api/espn/link` (the #321 membership and team-binding wording) and `/api/espn/import` (R3b). The design-note line is not this worker's. `living-memory/LLD.md` / `HLD.md` / `docs/architecture.md`: n/a.
+
+
+## Active launch batch integration (2026-11-04)
+
+The user-authorized merge run includes #430, the previously post-launch #477/#478 follow-ups, and client PRs #421/#570, retaining their original head ancestry on main `af57e59c`. `landing.platform_options` remains false, including the three release-derived fixtures; no rollout/production operation is bundled. #477's first-verification-only MFL behavior keeps main's feedback attachment when verification really occurs. #570 preserves #421's proof-only entry field hiding and identity forwarding. The backend 481-test pass and nine selected mobile structural suites are recorded in TEST_LEDGER. Privacy #518 is integrated separately: its strict hydration must remain before first in-place verification, while a successfully proven platform account keeps eager history loading. Final combined-head remote CI is required.
