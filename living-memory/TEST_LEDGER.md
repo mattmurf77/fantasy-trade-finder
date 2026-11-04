@@ -1,9 +1,25 @@
+## 2026-11-04 — #395 integration: classify current token-based sharing as free
+
+Integrated reviewed billing foundation `5d6e4cc4` and current main `af57e59c` into the global paywall gate. Both enforcement knobs remain 0; this is a dark merge, not an enforcement flip. Existing billing sandbox isolation and main's minimum-version defaults, current prices and extension privacy wording are retained.
+
+- **Integration failure found and corrected:** `test_paywall_gate_allowlist.py` initially failed two checks because #362 replaced the match-id sharing rules and added the token mint. `ROUTES` now explicitly classifies `POST /api/share/trade`, `GET /s/trade/<token>` and `GET /og/trade/<token>.png` as free, with no stale `<match_id>` entries. This preserves existing free sharing; the gate's fallback was already free. API reference documents the three rules and the updated 167-free-route count.
+- **Targeted validation:** paywall gate, complete route allowlist, entitlement resolution, billing safety and paywall config — **502 passed in 11.24s**, Python 3.14.4, production DB environment variables unset. `git diff --check` passes. Existing guards verify the dark early exit, live enforce predicate, unverified empty entitlements and sandbox isolation.
+- **Activation remains held:** the preview allowance and #473 unverified/history hardening must land, and the compatible client/minimum-version gate must be live before enforcement. No production reads/writes or full local suite were run; GitHub CI on this new head remains the full pre-merge gate.
+
 ## 2026-11-04 — #394 current-main integration: billing safety remains dark
 
 Merged main `fd5390ac` into the billing-safety branch (`671c68ca`) without changing its billing behavior. Resolved the adjacent `model_config` seed conflict by preserving both the off-by-default `paywall_enforce_enabled` knob and main's minimum-version defaults. API documentation keeps main's current prices and the extension's no-entitlement privacy contract, and records the shared enforcement predicate plus isolated sandbox billing lane. Existing ledger entries from both branches are retained.
 
 - **Targeted validation:** `python3 -m pytest backend/tests/test_entitlements_billing_safety.py backend/tests/test_entitlements.py backend/tests/test_paywall_config.py backend/tests/test_account_deletion_coverage.py backend/tests/test_universal_links.py -q` — **234 passed in 7.33s**, Python 3.14.4. Production DB environment variables were unset for the run; all tests used fixture databases. `git diff --check` passes.
 - No flags or production settings changed. The `paywall_enforce_enabled` seed remains 0, and all monetization flags remain false. No full local suite, simulator, purchase, App Store or production validation was run; GitHub CI on the integration commit remains the pre-merge full gate.
+## 2026-11-02 — `landing.platform_options` OFF (operator ask 12) until #430's verified sign-in; main matches prod
+
+Gates: full (`docs/plans/landing-platform-options/scope-ask12-off.md`; a feature-flag surface). No route, schema or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the suites below plus a code-walk.
+
+- **What:** `config/features.json` `landing.platform_options` is now false, with an updated `_comment_` and `docs/config-reference.md` row (off until #430 + #477/#478/#518 are deployed and the entry purge has run; then ask 16). The release-derived fixtures `release.json`, `onboarding-v2.json` and `profiles-on.json` are flipped with it, as their mirror tests require.
+- **Guard:** `check-landing-platform-options.js` §7 checks the flag is registered (true or false), not that it's true. Nothing else assumed true: `check-onboarding-flag-defaults` keeps it unbaked; `test_entry_platform_route.py` patches its own flags.
+- **Code-walk** (scope §3): with the flag off, `platformPickerShown` is false, so no chip or tile row renders and the plain username form shows; the entry sheets open only from that row; and `entry_platform` 404s on the flag first. Settings' ESPN/MFL link routes read only `espn.link` / `mfl.link` / `mfl.auth_link` (checked).
+- **Suites:** 938 passed across the 20 backend test files that read the flag fixtures, the entry route, the purge or `/api/feature-flags`. All 135 `check-*.js` pass, and web structure is 196/196.
 
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
