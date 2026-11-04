@@ -1,3 +1,12 @@
+## 2026-11-04 — #584 parser readiness candidate; production pin still PENDING
+
+**HOLD main merge/deployment until the user approves the production `ktc_blend_weight = 0` pin and its read-back is verified.** This is preparatory code integration only. No production setting, secret, live KTC page, platform API or running model was read or changed. The source default remains 0.5; no flag/knob default is changed here. Restoring blending later is a separate runtime decision.
+
+Fresh isolated candidate starts from actual main `1a40bd00`, includes final launch candidate `0eed62965c3797227d78c75d634384e7309b50a2` as an ancestor, then merges exact original #584 head `61e8248c8c7a1cc760279b49dee7da8180baa65b`. #467's thin/partial coverage gates and alert behavior remain intact. Only the additive ledger required manual resolution; parser/tests/runbook auto-merged without code conflict. Root #597 and main were not modified.
+
+- Targeted offline parser/KTC blend-health/DP consensus/QB-cap/universal-pool/subprocess-harness run: **121 passed in 16.42s** across seven files. Python network connections and urllib calls were blocked also in subprocesses; all data came from synthetic or committed fixtures. This includes malformed/empty/no-player element refusal and legacy fallback, exact element-id decoys/tag variants/preference, retained `value` fields, thin/partial DP-only gates and weight-zero no-fetch/byte-identity behavior.
+- `git diff --check` passes. Feature config/default flags and database knob seeds are byte-identical to the final launch candidate. No full local suite or deployment/device proof was run; full CI on a draft child PR may be prepared while the production approval/read-back remains pending.
+
 ## 2026-11-04 — Final combined launch candidate pre-CI verification
 
 Root integrated regression after the shared platform-helper correction:
