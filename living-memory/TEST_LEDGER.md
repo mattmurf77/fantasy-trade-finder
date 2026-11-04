@@ -1,3 +1,44 @@
+## 2026-11-04 — Privacy/Shop launch integration batch (local candidate)
+
+Base: main `af57e59c`. Preserved every actual GitHub PR head as an ancestor,
+without local squashing: #479 `ac4a7e8f`, #587 `26b874d9`, #518 `15332983`,
+#574 `ed2b314b`, #577 `3502a324`, #563 `c3861f8f`, #557 `485cef6e`,
+#559 `bf0df9d0`, #562 `11717110`. The model-reader protection (#563) precedes
+the scrub stack in this integration. Nothing is claimed merged or deployed.
+
+Integration resolutions retain both ledger histories, the shared #479 network
+guard and the scrub's deletion-state fixture, and all central server imports.
+Removed #587's duplicate local network fixture/import after #479 supplied the
+stronger shared fixture. The #562/#577 Shop target-token fix/regression is the
+separate patch originally prepared as `7b262b17`, reapplied here as `c34753bd`.
+All non-comment feature keys and values match base main; no runtime knob or
+production setting was changed.
+
+- Targeted integrated run (13 files): **338 passed, 28 skipped in 30.16 s**.
+  Files: session-init Sleeper-call budget, mid-daemon deletion and PG races;
+  verified-history deferral; Shop send Elo; scrub core, held writes, packs,
+  stage 3, Calibration and gated paths; eval partner redaction; account
+  deletion coverage. Skips were disposable-Postgres parameters plus the
+  generic-pick guard awaiting #389. No full local suite was run.
+- Additional real PostgreSQL validation: a fresh socket-only cluster under
+  `/private/tmp`, synthetic data, no network listener or production URL.
+  `test_session_init_deleted_pg.py` + `test_deletion_scrub_calibration.py`:
+  **44 passed, 1 skipped in 14.61 s**. The remaining skip is the SQLite-only
+  parameter of a Postgres SET LOCAL test. Initial sandbox socket restrictions
+  prevented connection; the permitted rerun above completed successfully.
+  The disposable test server was stopped afterward.
+- `node mobile/tests/check-shop-send.js`: **33 passed, 0 failed**.
+- Central Python modules parse; `git diff --check` passes. GitHub must still
+  run all four CI jobs on the final integrated head before merging.
+
+Known limits: the leaguemate private board-history deletion race remains a
+separate requested follow-up; wider private deck-feature export filtering is
+not proven complete by the grader-arm filter. Preserve strict history hydrate
+before MFL's first verification flip when adding #477, and keep #430's proven
+platform path eager. Generic-pick learning activation still needs #389 and
+the combined Shop signal check. No production probe, model gate or device
+check was performed.
+
 ## 2026-11-02 — `landing.platform_options` OFF (operator ask 12) until #430's verified sign-in; main matches prod
 
 Gates: full (`docs/plans/landing-platform-options/scope-ask12-off.md`; a feature-flag surface). No route, schema or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the suites below plus a code-walk.
@@ -229,7 +270,7 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
   - flags, proposals and `trade_impressions` (NULL);
   - the taste update;
   - `_redacted_held_row`.
-  
+
   Every pass re-runs the side-table scrub (`_repair_side_tables`, with an idempotent taste merge). `_deleted_partner_ids` is pruned after its window, with a last purge.
 - **Tests:**
   - `test_deletion_scrub_held_writes.py`, 13 tests (new): the lookup and cache; held swipe, queue and flag routes; proposals; the taste helper and the live outcome path; `trade_impressions`; the raced-write repair; the prune; held upgrade rows.
