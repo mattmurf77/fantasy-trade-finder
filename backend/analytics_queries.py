@@ -425,6 +425,15 @@ NON_INTENT_EVENTS = frozenset({
     # stays INTENT with `fa_move_write_failed`.
     "fa_move_connect_shown",
     "fa_move_consent_shown",
+
+# ── D1 free-agent moves (2026-11-01, granted NON_INTENT by analytics-lead,
+    # consent.md §6) — added in the SAME commit as the server emitters. Both
+    # consent events are a ledger, not a decision: a grant always arrives in
+    # the same request as the INTENT fa_move_write_attempted, and withdrawals
+    # include system ones (an expired or rejected token). One name, one class.
+    # `fa_move_write_succeeded` is deliberately ABSENT and stays INTENT.
+    "fa_move_consent_recorded",
+    "fa_move_consent_withdrawn",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS
