@@ -1570,7 +1570,7 @@ Append-only log of meaningful user actions. Hot reads use the denormalized `user
 | `league_id`, `session_id` | str | `session_id` is a 77-character domain-separated analytics digest; never a bearer token. |
 | `device_type` | str | `iphone` / `ipad` / `macos` / `web` / `extension` |
 | `os_version`, `app_version` | str | |
-| `source` | str | `mobile` / `web` / `api` / `cron` |
+| `source` | str, nullable | Which writer produced the row. **Client values** (only via `POST /api/events`): `mobile` / `web` / `extension` (`extension` is accepted and has 0 rows today). **Server values** (`record_event()`, never via `/api/events`): `api` / `server` / `calc_queue`. There is no `cron`. Ingest resolves it in order (`_resolve_event_source` in `backend/analytics_ingest.py`): an `X-Source` header in the client set, else body `source` in the client set, else body `platform` `web`/`extension`, else `mobile` when an `X-Device` header is present (only the mobile SDK sends one), else **NULL**. NULL means no client identified itself (from the G-068 fix, 2026-10-31, on), never another client's name. A claimed `api`/`server`/`calc_queue`/anything else, by header or body, falls through. **Pre-fix rows:** before the fix a missing header landed `mobile`, so web's `sendBeacon` page-hide flushes were filed under `mobile`. Read pre-fix rows with `platform='web'` as web whatever their `source`. No backfill was run. |
 | `props` | JSON text | event-specific extras |
 | `event_id` | str, unique (nullable) | client-generated UUID — idempotent retries / dedup ([tracking plan v2 §S1](business/analytics/2026-07-17-tracking-plan-v2.md)) |
 | `device_id` | str, indexed | stable per-install anon id (`dev_` + UUID) — pre-signin attribution |

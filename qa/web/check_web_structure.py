@@ -283,19 +283,40 @@ def run() -> int:
             "public bundle references the CRON-gated /api/debug/log")
     r.check("HYG-no-dead-log-drawer", "logDrawer" not in app_js,
             f"{app_js.count('logDrawer')}× logDrawer — its DOM targets do not exist in index.html")
-    # The `source` column defaults to "mobile" server-side (analytics_ingest.py),
-    # because mobile is the one client that declares nothing. A web SDK that
-    # omits X-Source therefore does not land NULL — it lands "mobile", and web
-    # traffic silently contaminates per-client splits. Body `platform` does NOT
-    # cover this: they are separate columns, and test_events_api pins both.
+    # The `source` column defaulted to "mobile" server-side until G-068's
+    # 2026-10-31 fix, so web rows without X-Source were filed under mobile.
+    # The ingest now never guesses another client's name, so web must say who
+    # it is. Body `platform` is a separate column; test_events_api and
+    # test_events_source pin both.
     events_js = (WEB / "js" / "events.js").read_text(encoding="utf-8")
     r.check("HYG-events-declare-source",
             re.search(r'["\']X-Source["\']\s*:\s*["\']web["\']', events_js) is not None,
-            'web/js/events.js does not send X-Source:"web" — every web row '
-            'would be stamped source:"mobile" by the ingest default')
+            'web/js/events.js does not send X-Source:"web" on its fetch — '
+            'those web rows would not be identified by header')
     r.check("HYG-events-declare-platform",
             re.search(r'platform\s*:\s*["\']web["\']', events_js) is not None,
             'web/js/events.js does not declare platform:"web" in the body')
+
+    # sendBeacon cannot set headers, so the page-hide flush never carries
+    # X-Source; that is how 25 of 53 prod web rows landed "mobile" (G-068).
+    # The beacon's BODY is its only declaration. Scoped to the text of each
+    # sendBeacon(...) call (balanced parens), so the fetch body can't pass it.
+    def call_text(src: str, start: int) -> str:
+        depth, i = 0, src.index("(", start)
+        for j in range(i, len(src)):
+            depth += {"(": 1, ")": -1}.get(src[j], 0)
+            if depth == 0:
+                return src[i:j + 1]
+        return src[i:]
+
+    beacons = [call_text(events_js, m.start())
+               for m in re.finditer(r"\bsendBeacon\s*\(", events_js)]
+    undeclared = [b for b in beacons
+                  if not re.search(r'\bsource\s*:\s*["\']web["\']', b)]
+    r.check("HYG-events-beacon-source", bool(beacons) and not undeclared,
+            'web/js/events.js has no sendBeacon( call' if not beacons else
+            f'{len(undeclared)} sendBeacon( body lacks source:"web" — a beacon '
+            'cannot send X-Source, so its body is the only place it can say it is web')
 
     # ── GATE: the web's ESPN/MFL chips stay off (head-eng 2026-10-27) ────
     # landing.platform_options now means the APP's proof-based ESPN/MFL
