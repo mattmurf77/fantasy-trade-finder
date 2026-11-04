@@ -23,7 +23,7 @@ import {
 import { getLeagueSummary } from '../api/league';
 import { track } from '../api/events';
 import { inviteSocialProof, INVITE_RATIONALE } from '../utils/inviteSocialProof';
-import { shareInvite } from './InviteLeaguematesBanner';
+import { shareInvite, useInviteBusy, INVITE_BUSY_LABEL } from './InviteLeaguematesBanner';
 import { relativeTime } from '../utils/relativeTime';
 // Circular at module-load (TopBar ← TabNav ← RootNav), but `navigationRef`
 // is a top-level const created at RootNav import time and only *read*
@@ -88,9 +88,15 @@ const ROW_GLYPHS: Record<string, { name: IconName; color: string }> = {
   // notif-inbox-growth, 2026-08-13. `referral_joined` and
   // `league_member_joined` share the `plus` glyph because they are the same
   // object — a person arrived. The COLOR carries the difference: flare is
-  // the informational highlight, reserved here for the one row that says
-  // the user's own invite worked. Everything else is ice.
+  // the informational highlight, reserved here for the rows that say the
+  // user's own invite worked (`referral_joined`, `referral_activated`).
+  // Everything else is ice.
   referral_joined:               { name: 'plus',  color: flare.base },
+  // Referral loop FR-19: that invitee weighed in on their first trade. Same
+  // rule as `league_member_unlocked_trades` below — the glyph names what
+  // happened (a trade opinion, and the tap opens Trades), so `trade`, not
+  // another person glyph; flare because it is the user's own invite working.
+  referral_activated:            { name: 'trade', color: flare.base },
   league_member_joined:          { name: 'plus',  color: ice.base },
   // They finished a board — a RANKED counterparty is what the matching
   // engine actually needs, so the rank glyph, not another person glyph.
@@ -284,11 +290,12 @@ export default function TopBar() {
   }, [open, items.length, summaryQuery.isFetching, totalMates, joinedMates,
       inviteOffered, platform]);
 
+  // ux-lead #364 change 1: the Invite button renders busy from shareInvite's guard.
+  const inviteBusy = useInviteBusy();
   const onInviteFromInbox = () => {
     setOpen(false);
     void shareInvite({
       leagueId:   league?.league_id || '',
-      leagueName: league?.league_name,
       username:   useSession.getState().user?.username,
       surface:    'notif_empty',
       notJoined:  totalMates !== null && joinedMates !== null
@@ -481,6 +488,8 @@ export default function TopBar() {
                     label="Invite leaguemates"
                     variant="primary"
                     onPress={onInviteFromInbox}
+                    loading={inviteBusy}
+                    accessibilityLabel={inviteBusy ? INVITE_BUSY_LABEL : undefined}
                   />
                 </>
               ) : null}
