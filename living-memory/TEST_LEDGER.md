@@ -5,6 +5,13 @@ Full gates. Scope: `docs/plans/app-store-launch/scope-n12-n4-icon-privacy.md`. R
 - **Automated, rerun on the integrated tree:** `node mobile/tests/check-app-icon.js` passes (Expo/native icons byte-identical, 1024×1024 RGB, no alpha or white corners); `node mobile/tests/check-privacy-manifest.js` passes (Resources membership, four required-reason categories, 13 collected types, tracking off); `plutil -lint mobile/ios/DTFDynastyTradeFinder/PrivacyInfo.xcprivacy` passes. `git diff --check` passes.
 - **Code-walk:** only the two icon PNGs, privacy manifest, their two guards and npm scripts change. The manifest stays in the existing native Resources phase; the guard checks that registration and that pod privacy aggregation is not disabled. Purchase History is declared with App Functionality and Analytics alongside the other 12 scoped types. No application flow, flag, API, schema or analytics emitter changes.
 - **Remaining ship evidence:** GitHub CI must pass on this integration head. The scope's next-build checklist (home-screen/Store icon and no ITMS-91053 processing email) remains owed; no device build or App Store processing was performed here.
+## 2026-11-04 — #580 launch integration: honest new-member price date
+
+Lean legal wording alignment, as scoped in the PR: no schema, API, flag, analytics or pricing behavior change. Independently reviewed PR head `dcb51f22`, then merged current main `af57e59c` without feature conflicts. The change remains limited to three display strings and their guard assertions.
+
+- **Automated, rerun on the integrated tree:** `node mobile/tests/check-paywall-gate.js` — **110 passed, 0 failed**. The checked-in guard used TypeScript from the existing `mobile-deps` dependency installation through `NODE_PATH`; no dependencies were changed. `git diff --check` passes.
+- **Code-walk:** `mon.pay.founder.new`, `mon.club.welcome_body.annual` and `.monthly` say "Starting in January 2027" instead of claiming the higher price applies from January 1. This matches the merged server's January 2, 2027 04:00 UTC price-rise instant without changing it. Founder eligibility still says "by December 31, 2026"; all amounts, SKU ids and purchase/enforcement behavior are unchanged. Guard 4p rejects day-specific January 1 copy in every MON string; 9d verifies both welcome bodies.
+- **Remaining ship evidence:** GitHub CI must pass on this integration head. The PR's post-build checklist (paywall wording plus annual/monthly sandbox-purchase welcome) remains owed. No device, purchase, App Store or production checks were performed here.
 
 ## 2026-11-02 — `landing.platform_options` OFF (operator ask 12) until #430's verified sign-in; main matches prod
 

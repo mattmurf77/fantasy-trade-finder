@@ -715,6 +715,18 @@ check('4o. D10 / scope §3.6: no countdown, days-left, ends-soon or trial-end da
     assert(!hit, `${f}: "${hit && hit[0]}"`);
   }
 });
+check('4p. legal R28.26 5c: the new-member price starts "in January 2027", never "January 1, 2027" (paywall and Founding GMs welcome)', () => {
+  // The US price switches 2027-01-02 04:00Z (11 pm ET on Jan 1, #522), so
+  // "From January 1" was untrue for most of that day. "By December 31, 2026"
+  // stays as the Founder guarantee.
+  eq(copy.MON['mon.pay.founder.new'],
+    'Starting in January 2027, new members pay $34.99 a year or $6.99 a month.',
+    'mon.pay.founder.new verbatim');
+  for (const [k, v] of Object.entries(copy.MON)) {
+    // Any spelling of the day: "January 1", "Jan 1", "Jan. 1", "January 1st".
+    assert(!/\bJan(?:uary)?\.?\s+1(?:st)?(?!\d)/i.test(String(v)), `${k} still names January 1: ${v}`);
+  }
+});
 
 // ═══ 5. api/purchases.ts — identity-ready gate + eligibility, executed ════
 const sdk = {
@@ -1559,8 +1571,8 @@ check('9d. D10 / design §4.1 [shape + executed]: only a SUCCESSFUL purchase ope
   assert(!/FounderWelcome|clubWindowOpen|claimFounderWelcome/.test(strip(rb.body.getText(rb.sf))), 'a Restore never welcomes');
   eq((strip(read(PAYWALL)).match(/'FounderWelcome'/g) || []).length, 1, 'one way in');
   eq(copy.MON['mon.club.welcome_title'], 'Welcome, Founding GM.', 'welcome_title');
-  eq(copy.welcomeBody('annual'), 'Your plan is at the Founder price: $24.99 a year. Keep this price on your plan while your subscription stays active. From January 1, 2027, new members pay $34.99 a year or $6.99 a month.', 'welcome_body (annual)');
-  eq(copy.welcomeBody('monthly'), 'Your plan is at the Founder price: $4.99 a month. Keep this price on your plan while your subscription stays active. From January 1, 2027, new members pay $34.99 a year or $6.99 a month.', 'welcome_body (monthly)');
+  eq(copy.welcomeBody('annual'), 'Your plan is at the Founder price: $24.99 a year. Keep this price on your plan while your subscription stays active. Starting in January 2027, new members pay $34.99 a year or $6.99 a month.', 'welcome_body (annual)');
+  eq(copy.welcomeBody('monthly'), 'Your plan is at the Founder price: $4.99 a month. Keep this price on your plan while your subscription stays active. Starting in January 2027, new members pay $34.99 a year or $6.99 a month.', 'welcome_body (monthly)');
   eq(copy.MON['mon.club.since'], 'Founding GM since {join date}', 'since');
   eq(copy.MON['mon.club.back'], 'Back to my trades', 'back');
   const w = strip(read(WELCOME));
