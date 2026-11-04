@@ -1,3 +1,4 @@
+import { track } from '../api/events';
 import { openPlatform, type ExternalSurface } from './openExternal';
 
 // Sleeper hand-off: the #351 PRD §3.2 API, built on openPlatform.
@@ -9,7 +10,9 @@ import { openPlatform, type ExternalSurface } from './openExternal';
 // Get Sleeper button (openExternal.ts).
 //
 // Every Sleeper hand-off calls openInSleeperApp; there is no second
-// implementation (PRD AC-2). Pinned by tests/check-sleeper-handoff.js.
+// implementation (PRD AC-2). It also emits the granted
+// `sleeper_handoff_resolved` (trackHandoff, below), so call sites don't.
+// Pinned by tests/check-sleeper-handoff.js.
 
 export type SleeperTarget = 'add' | 'trade' | 'league';
 
@@ -36,6 +39,7 @@ export const SLEEPER_RUNG_LADDER: Readonly<Record<SleeperTarget, readonly Sleepe
 // PASS row for it in docs/plans/sleeper-fa-deeplink/device-results.md;
 // check-sleeper-handoff.js S10 fails otherwise.
 export const SLEEPER_PROVEN_RUNGS: Readonly<Record<SleeperTarget, readonly SleeperRung[]>> = {
+  // ux-lead: if `player`/`add` is ever proven, the claim sheet's copy and disclosure become rung-conditional together.
   add: ['bare'],
   trade: ['bare'],
   league: ['bare'],
@@ -80,27 +84,66 @@ export function sleeperAppUrl(
   t: SleeperLink,
   proven: Readonly<Record<SleeperTarget, readonly SleeperRung[]>> = SLEEPER_PROVEN_RUNGS,
 ): string {
+  return resolveRung(t, proven).url;
+}
+
+function resolveRung(
+  t: SleeperLink,
+  proven: Readonly<Record<SleeperTarget, readonly SleeperRung[]>> = SLEEPER_PROVEN_RUNGS,
+): { rung: SleeperRung; url: string } {
   const L = t.leagueId && NUMERIC.test(t.leagueId) ? t.leagueId : undefined;
   const P = t.target === 'add' && t.playerId && PLAYER_ID.test(t.playerId) ? t.playerId : undefined;
   for (const rung of proven[t.target]) {
     if (!SLEEPER_RUNG_LADDER[t.target].includes(rung)) continue;
     const url = rungUrl(rung, L, P);
-    if (url) return url;
+    if (url) return { rung, url };
   }
-  return 'sleeper://';
+  return { rung: 'bare', url: 'sleeper://' };
 }
 
-// Copy (optional) → open the scheme → on rejection, the D2 alert.
-// 'not_installed' means the alert is showing; nothing failed silently.
+// Copy (optional) → open the scheme → sleeper_handoff_resolved → on
+// rejection, the D2 alert. 'not_installed' means the alert is showing;
+// nothing failed silently. `hasDrop` is the claim sheet's "picked a drop";
+// it reaches the event only on an add hand-off on any surface but send_button.
 export async function openInSleeperApp(
-  t: SleeperLink & { clipboardText?: string; surface?: ExternalSurface },
+  t: SleeperLink & { clipboardText?: string; surface?: ExternalSurface; hasDrop?: boolean },
 ): Promise<'app' | 'not_installed'> {
+  const { rung, url } = resolveRung(t);
+  const surface = t.surface ?? 'unspecified';
   const outcome = await openPlatform({
     platform: 'sleeper',
-    schemeUrl: sleeperAppUrl(t),
+    schemeUrl: url,
     clipboardText: t.clipboardText,
-    surface: t.surface ?? 'unspecified',
+    surface,
     appMissing: 'alert',
+    onSchemeSettled: (opened) => trackHandoff(t, surface, rung, opened),
   });
   return outcome === 'app' ? 'app' : 'not_installed';
+}
+
+// `sleeper_handoff_resolved`, INTENT (analytics-lead grant G1–G7, 2026-10-20,
+// widened @ 8b63ef10; addendum docs/business/analytics/2026-10-28-sleeper-
+// handoff-events.md). One per hand-off, fired synchronously from openPlatform's
+// settle seam before the D2 alert (G3). `not_installed` = openURL rejected; the
+// code never asks canOpenURL (G4). `has_drop` rides only on a target=add row
+// on any surface but send_button, and only when the caller passed it: an absent key, never
+// null (G2). No player id, name or league id (G5). A surface of 'unspecified'
+// emits nothing, and so does target 'league' (not in the granted `target` set).
+function trackHandoff(
+  t: SleeperLink & { hasDrop?: boolean },
+  surface: ExternalSurface,
+  rung: SleeperRung,
+  opened: boolean,
+): void {
+  if (surface === 'unspecified' || t.target === 'league') return;
+  const props: Record<string, unknown> = {
+    surface,
+    target: t.target,
+    rung,
+    outcome: opened ? 'app' : 'not_installed',
+  };
+  if (t.target === 'add' && surface !== 'send_button' && typeof t.hasDrop === 'boolean') {
+    props.has_drop = t.hasDrop;
+  }
+  track('sleeper_handoff_resolved', props);
 }
