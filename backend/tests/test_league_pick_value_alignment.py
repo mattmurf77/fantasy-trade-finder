@@ -52,14 +52,17 @@ _PRICING_SEAM = "_priced_pick_value"
 #: "which surfaces price owned picks", so adding to it is a deliberate act:
 #:
 #:   _roster_eveners      S4 — one-tap sweeteners on /api/trade/evaluate
-#:   _trade_evaluate_impl S1 — the manual calculator's owned-pick values
+#:   _consensus_pricing   S1 — the manual calculator's owned-pick values
+#:                        (/api/trade/evaluate) and the og share card's value
+#:                        bar: extracted from _trade_evaluate_impl so both
+#:                        price through one call (share-card-value-bar scope)
 #:   get_league_picks     S1 — GET /api/league/picks values + tier badges
 #:   _owned_pick_assets   S3 — the suggestion candidate pool (deck lane)
 #:   _power_picks_by_owner S2 — Power Rankings + the ADR-011 history snapshot
 #:   _build_trade_roster_context — all holdings in the final roster evaluator
 _SEAM_CALLERS = {
     "_roster_eveners",
-    "_trade_evaluate_impl",
+    "_consensus_pricing",
     "get_league_picks",
     "_owned_pick_assets",
     "_power_picks_by_owner",

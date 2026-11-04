@@ -127,10 +127,10 @@ class _StubRenderer:
     """Stand-in for backend.og_image — the header is the subject, not Pillow."""
     PNG = b"\x89PNG\r\n\x1a\nstub"
 
-    def render_package_card(self, *_a):
+    def render_package_card(self, *_a, **_kw):    # kwargs: the value bar
         return self.PNG, 200
 
-    def render_trade_card(self, *_a):
+    def render_trade_card(self, *_a, **_kw):
         return self.PNG, 200
 
     def render_tier_card(self, *_a):
