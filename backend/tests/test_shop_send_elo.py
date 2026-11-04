@@ -130,6 +130,34 @@ def test_a_shop_send_records_the_send_row_the_elo_and_one_event(world):
     assert props["target"] == OPP
 
 
+@pytest.mark.parametrize("partner_deleted", [False, True])
+def test_a_shop_send_maps_a_live_deleted_partner_to_its_token(world, partner_deleted):
+    """#562/#577 integration: a held Shop idea must not reintroduce a
+    deleted partner's identifier through the new trade_proposed emitter."""
+    from datetime import datetime, timezone
+
+    _client, engine, sess, *_ = world
+    token = "redacted:" + "c" * 32
+    db_module.clear_deletion_tokens_cache()
+    try:
+        if partner_deleted:
+            with engine.begin() as conn:
+                conn.execute(insert(db_module.deletion_scrub_jobs_table).values(
+                    job_id="d" * 32, token=token,
+                    partner_ids_json=json.dumps([OPP]),
+                    league_ids_json=json.dumps([LEAGUE]),
+                    deleted_at=datetime.now(timezone.utc).isoformat()))
+        _send(sess)
+        events = _proposed(server.record_event)
+        assert len(events) == 1
+        props = events[0].kwargs["props"]
+        assert props["target"] == (token if partner_deleted else OPP)
+        if partner_deleted:
+            assert OPP not in json.dumps(props)
+    finally:
+        db_module.clear_deletion_tokens_cache()
+
+
 def test_a_shop_send_moves_the_board_exactly_as_the_queue_does(monkeypatch):
     """Same package, two fresh worlds: one queued from the calculator, one
     sent from the Shop. The in-memory signals and the persisted swipes match

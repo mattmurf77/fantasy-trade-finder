@@ -22288,7 +22288,7 @@ def _record_shop_send_signal(sess, *, league_id, their_user_id, give_ids,
                     "trade_id": trade_id,
                     "give":     give_ids,
                     "receive":  receive_ids,
-                    "target":   opponent.user_id,
+                    "target":   live_deletion_token(opponent.user_id) or opponent.user_id,
                     # Propose-label spine — server-stamped from the propose
                     # body's validated `source`.
                     "source":   "shop",

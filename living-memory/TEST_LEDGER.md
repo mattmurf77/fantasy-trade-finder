@@ -110,6 +110,25 @@ Gates: head-eng's spec, from release-lead's QA of #479. Server only: no route, s
   - **Full suite at `a19aabfe`** (platforms-eng, Python 3.14.4): **10324 passed, 3 skipped**, 14:50.
   - **Not verified:** real Postgres row locking. The tests run on SQLite; on Postgres only the guard's compile to `FOR KEY SHARE` was checked. That's for QA on PG.
 
+## 2026-11-04 — #562/#577 integration: Shop target respects active deletion scrub
+
+The new Shop-send `trade_proposed` emitter now maps its partner through
+`live_deletion_token`, matching legal R28.26 #10 and the queue emitter. This
+is the existing cross-PR requirement, not a new event, field, schema or flag.
+Scope update: `docs/plans/trade-time-to-suggestion/scope-deletion-scrub.md`;
+API reference records the token behavior. Built on an isolated integration of
+#577 (`3502a324`) and scrub stage 3 (`11717110`); neither PR is claimed merged.
+
+- Regression: `test_a_shop_send_maps_a_live_deleted_partner_to_its_token`,
+  parameterized with and without a live scrub job. Before the fix, deleted
+  partner case fails (raw id emitted), no-deletion control passes.
+- After the one-line emitter fix: `test_shop_send_elo.py` plus
+  `test_deletion_scrub_held_writes.py`: **86 passed, 1 skipped**. The skip is
+  the pre-existing generic-pick guard awaiting #389; do not use it as learning
+  activation evidence. SQLite in-memory; no production data or provider calls.
+- Exact-head GitHub CI remains pending; patch must be integrated after both
+  parent code paths exist, then retested on the actual PR/main candidate.
+
 ## 2026-11-01 — Shop send keeps its Elo signal: a `decision = "send"` row anchors the queue's Elo half (#531 follow-up, stacked on #574, D-210)
 
 Gates: the scope block `docs/plans/shop-send-elo/scope.md`. Analytics: `trade_proposed` `props.decision` gains `send`, a closed set `like` | `send` (analytics-lead, 11-01). No schema change; `trade_decisions.decision` gains the value `send`. No new flags. D-056: `FTF_SKIP_SIM_GATE=1` posture; backend-only, so the evidence is pytest, sabotage and the reader audit.
