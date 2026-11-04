@@ -42,14 +42,21 @@ interface Props {
   /** Sessionless entry mode (landing platform options v2, D-164): the sheet
    *  is hosted by SignInScreen with NO session. Preview goes through the
    *  sessionless /api/entry/platform; picking a team MINTS the entry session
-   *  first (delivered via onEntrySession), then runs the canonical import
-   *  under the fresh token. Session-dependent niceties are suppressed: the
-   *  `espn.league_picker` my-leagues list reads STORED credentials, which an
-   *  entry user doesn't have yet. Default off — linked flow byte-identical. */
+   *  first (delivered via onEntrySession), then runs the canonical
+   *  /api/espn/link import under the fresh token. Session-dependent
+   *  niceties are suppressed: the `espn.league_picker` my-leagues list reads
+   *  STORED credentials, which an entry user doesn't have yet. Default off —
+   *  linked flow byte-identical. */
   entry?: boolean;
   /** Entry mode only: the minted session's user, delivered BEFORE the import
-   *  runs so the host can pin it into useSession. */
-  onEntrySession?: (user: { user_id: string; display_name: string }) => void;
+   *  runs so the host can pin it into useSession. `account_only` /
+   *  `username` are forwarded from the mint (absent from older servers). */
+  onEntrySession?: (user: {
+    user_id: string;
+    display_name: string;
+    account_only?: boolean;
+    username?: string;
+  }) => void;
 }
 
 // Copy for the backend's `espn_auth_required` 403. Two honest variants
@@ -357,9 +364,9 @@ export default function EspnLinkSheet({
     setBusyTeamId(teamId);
     setError(null);
     try {
-      // Entry mode: the claim MINTS the session first (deterministic
-      // entry:espn:… id; the api fn stores the token), hands the user to the
-      // host, then the canonical import below runs under the fresh token —
+      // Entry mode: the claim MINTS the session first (the cookie pair is the
+      // proof; the api fn stores the token), hands the user to the host,
+      // then the canonical /api/espn/link import below runs under it —
       // exactly the linked flow from here on.
       if (entry) {
         const minted = await entryPlatformMint({
@@ -373,6 +380,8 @@ export default function EspnLinkSheet({
         onEntrySession?.({
           user_id: minted.user_id,
           display_name: minted.display_name,
+          account_only: minted.account_only,
+          username: minted.username,
         });
       }
       const res = await linkEspnLeague({
