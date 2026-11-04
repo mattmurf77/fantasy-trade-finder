@@ -6,6 +6,20 @@ Gates: full (`docs/plans/landing-platform-options/scope-ask12-off.md`; a feature
 - **Guard:** `check-landing-platform-options.js` §7 checks the flag is registered (true or false), not that it's true. Nothing else assumed true: `check-onboarding-flag-defaults` keeps it unbaked; `test_entry_platform_route.py` patches its own flags.
 - **Code-walk** (scope §3): with the flag off, `platformPickerShown` is false, so no chip or tile row renders and the plain username form shows; the entry sheets open only from that row; and `entry_platform` 404s on the flag first. Settings' ESPN/MFL link routes read only `espn.link` / `mfl.link` / `mfl.auth_link` (checked).
 - **Suites:** 938 passed across the 20 backend test files that read the flag fixtures, the entry route, the purge or `/api/feature-flags`. All 135 `check-*.js` pass, and web structure is 196/196.
+## 2026-11-02 — #479 QA P3s: the no_real_network guard hardened; three daemon-running files opt in
+
+Gates: release-lead's independent QA of #479 @ `9b446c85` (GO-with-notes), P3-2 to P3-4. Tests and test docs only; no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is pytest.
+
+- **P3-2, the guard (`conftest.py`):**
+  - `_is_loopback` treats only `None`, `""`, `localhost`, `0.0.0.0` and loopback IP literals (`ipaddress`) as loopback, so a hostname like `127.evil.example` is blocked; bytes hosts are decoded first.
+  - It now also patches `gethostbyname`, `gethostbyname_ex`, `connect_ex` and UDP `sendto`.
+  - AF_UNIX paths pass through.
+  - New `test_no_real_network_guard.py` (10 tests): every blocked path raises and records; loopback names and IPs and AF_UNIX pass.
+- **P3-3:** `test_roster_refresh_state.py`, `test_trade_fingerprint_reads_unlocked.py` and `test_roster_fp_stamp.py` run the daemon inline, so they opt in.
+- **P3-4:** `backend/tests/CLAUDE.md` § Hermeticity documents the fixture.
+- **Sabotages:** the old `startswith("127.")` loopback check → red; `sendto` left unpatched → red; both restored.
+- **Runs:** the guard and the 7 opted-in files, 124 passed; the session-init / roster / fingerprint area (`-k`), 595 passed, 1 skipped.
+- **P3-1 not taken here:** the daemon's `upsert_league` re-creating a deleted row with platform NULL, which also leaves an account-deletion retention gap. It's pre-existing server behaviour, offered as its own follow-up.
 
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
@@ -129,6 +143,22 @@ Gates: eval code only (`backend/eval/{bdk_audit,flip_read}.py`) plus the runbook
   - G3-d without the limit;
   - the kill without the limit.
 - **Suites:** all `test_eval_*` plus `test_evidence_pack.py` and `test_deck_value_model.py`, on main @ `9370670e`: 481 passed.
+
+## 2026-10-27 — Session-init test isolation (no real Sleeper requests) + the daemon trusts the resolved platform (stacked on #460)
+
+Full gates, platforms-eng lead (follow-up to #460 QA). Server change is hardening only, no API or schema change; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/session-init-test-isolation`, stacked on `fix/trade-capture-platform-guard` (#460), because the six `_platform_linked` blocks and the harness it tests live there.
+
+- **(a) The gap:** `test_co_owner_rosters.py`'s five session-init tests run the daemon inline and mocked only `_sleeper_get`. The trade sweep (`fetch_week_transactions`, 18 legs on a first backfill) and the trade-block GraphQL read (`fetch_league_players`) bypass it, so each test made 19 real requests to `api.sleeper.app` and `sleeper.com` (95 in all; live wherever CI has network). Both are mocked in that fixture now.
+- **Survey:** the 33 test files that mention session init (875 tests), run under a socket-blocking plugin that logs every non-loopback attempt per test: 95 attempts, all in `test_co_owner_rosters.py`, none elsewhere. No other session-init file has the gap.
+- **The guard:** `no_real_network` in `backend/tests/conftest.py` (opt-in). It records any non-loopback lookup or connect and fails the test at teardown, because the daemon and fetchers swallow the raise. The four files that run the daemon inline opt in with `pytestmark`: `test_co_owner_rosters`, `test_session_init_sleeper_calls`, `test_players_refresh`, `test_account_only_harness`. Not made suite-wide: the other ~360 of the 403 test files were not surveyed.
+- **Harness fix:** `test_session_init_sleeper_calls.py`'s fake `_sleeper_get` raised `AssertionError` for any URL it did not know, and production code catches that, so a Sleeper read for another league id was invisible to `calls == {}`. It is now tallied as `unexpected GET <path>` before it raises.
+- **(b) Hardening (`backend/server.py`, session-init daemon):** `_platform_linked` is now `authoritative["platform"] != "sleeper" or is_linked_platform_league(league_id)`, so a `leagues` row that vanishes between the request and the daemon no longer flips the six `_platform_linked` blocks to Sleeper. Three Sleeper-bound steps did not use `_platform_linked` and relied on a second row read, so they got guards: the `_league_meta()` fetch, the trade-block sync, and `_refresh_league_draft_status` (still runs for a linked league whose row agrees). Behaviour for intact Sleeper and linked leagues is unchanged.
+- **Tests (`test_session_init_sleeper_calls.py`, 10):** new `test_vanished_leagues_row_still_makes_no_sleeper_calls` for MFL and ESPN (the row is deleted just before the daemon starts; asserts `calls == {}`, with the premise asserted inside the hook) and `test_linked_league_still_refreshes_draft_status` (the control).
+- **Sabotage, red then restored:**
+  - guard fixture: the two mocks removed from the `test_co_owner_rosters` fixture → 5 errors at teardown, `attempted real outbound network (19 attempts): {'lookup sleeper.com': 1, 'lookup api.sleeper.app': 18}`;
+  - each of the four hardening hunks reverted alone → both vanished-row tests red every time: the `_platform_linked` line (`rosters`, `graphql`, `transactions: 18`, unexpected `meta` and `traded_picks` GETs), the `_league_meta` short-circuit (`unexpected GET <id>`), the trade-block guard (`graphql`, `rosters`), the draft-status guard (`draft_status: 1`).
+- **Targeted:** the 33 session-init files plus `test_market_data_readiness`, `test_owned_picks`, `test_trade_block`, `test_block_boost`, `test_sleeper_backoff` → 978 passed, and zero non-loopback attempts logged by the blocking plugin.
+- **Not run:** the full suite (CI runs it).
 
 ## 2026-10-31 — #551's flags-on failures: two tests pin their flags, a stored-path twin for the paged withhold
 

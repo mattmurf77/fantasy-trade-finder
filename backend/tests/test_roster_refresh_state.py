@@ -28,6 +28,9 @@ import backend.suggestion_telemetry as sugg_tel
 import backend.trade_block_service as tb_service
 from backend.database import metadata
 
+# Runs the session-init daemon inline, so no real network (#479 QA P3-3).
+pytestmark = pytest.mark.usefixtures("no_real_network")
+
 LEAGUE_ID = "1338231586314780672"
 USER_ID = "460238423161040896"
 OPP_ID = "733459678624915456"

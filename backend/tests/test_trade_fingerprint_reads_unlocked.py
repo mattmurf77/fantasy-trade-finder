@@ -23,6 +23,9 @@ from backend.database import league_members_table, metadata
 from backend.ranking_service import Player, RankingService
 from backend.trade_service import League, LeagueMember, TradeService
 
+# Runs the session-init daemon inline, so no real network (#479 QA P3-3).
+pytestmark = pytest.mark.usefixtures("no_real_network")
+
 UID = "user_lock"
 OPP = "user_lock_opp"
 LEAGUE = "league_lock"
