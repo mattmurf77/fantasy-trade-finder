@@ -21,7 +21,6 @@ so no runner thread ever outlives them.
 import logging
 import re
 import threading
-import time
 from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
@@ -59,7 +58,7 @@ def client():
 
     flags_on: set = set()
     flag_fn = lambda k: k in flags_on   # noqa: E731
-    daily_tick.wait(10)                  # never inherit another test's run
+    daily_tick.wait(60)                  # never inherit another test's run
     assert not daily_tick._lock.locked()
     with patch.object(db_module, "engine", engine), \
          patch.object(server, "is_enabled", flag_fn), \
@@ -106,32 +105,71 @@ def _clock_at(fixed):
 # ---------------------------------------------------------------------------
 
 def test_post_returns_202_at_once_then_runs_all_nine_steps_in_order(client):
-    """Every step blocks until the test opens a gate AFTER the response is in
-    hand, so the 202 provably does not wait on any step (stronger than a
-    sleep, and costs no wall-clock time)."""
+    """Ordering, not wall-clock. Every step blocks on a gate the test opens
+    only AFTER the 202 is in hand. The POST runs on a helper thread, which
+    snapshots the run's state the moment its response arrives: run in flight
+    (single-flight lock held), gate still closed, no step finished. The runner
+    is then seen parked inside step 1, and only then does the test open the
+    gate and join the run. A handler that waits on any step (runs one inline,
+    or joins the run) cannot answer while the gate is closed, so the helper
+    never returns; its 30 s join is a hang guard, not the assertion.
+    What ordering cannot see: a hold that never touches the run (a bare sleep,
+    or slow I/O before `start()`), since at the 202 the run is live and blocked
+    whether the handler took 0 s or 3 s. Only a clock sees that, and a
+    wall-clock bound flakes on loaded runners (why #506 exists), so it is left
+    out on purpose. Sabotaged: `sleep(3)` stays green; an inline `wait()` or
+    an inline `run()` goes red."""
     c, _ = client
-    gate = threading.Event()
+    entered = threading.Event()    # step 1 has started
+    gate = threading.Event()       # opened by the test, only after the 202
+    finished = threading.Event()   # the last step has returned
     ran = []
+    at_response = {}
 
     def slow(key):
         def fn(now):
-            assert gate.wait(5), "gate never opened"
+            if key == STEP_KEYS[0]:
+                entered.set()
+            assert gate.wait(60), "gate never opened"
             ran.append((key, threading.current_thread().name, now))
+            if key == STEP_KEYS[-1]:
+                finished.set()
             return "ok"
         return fn
 
+    def post():
+        r = c.post(URL, headers=HDR)
+        at_response.update(r=r, in_flight=daily_tick._lock.locked(),
+                           gate_open=gate.is_set(), finished=finished.is_set(),
+                           ran=list(ran))
+
+    poster = threading.Thread(target=post, name="daily-tick-test-post",
+                              daemon=True)
     with _stub_steps({k: slow(k) for k in STEP_KEYS}), \
          patch.object(server, "datetime", _clock_at(NOW)):
-        t0 = time.monotonic()
-        r = c.post(URL, headers=HDR)
-        elapsed = time.monotonic() - t0
-        assert r.status_code == 202
-        assert r.get_json() == {"ok": True, "started": True}
-        assert elapsed < 1.0
-        assert ran == []                     # nothing finished before the 202
-        gate.set()
-        results = daily_tick.wait(30)
+        try:
+            poster.start()
+            poster.join(30)                  # hang guard only
+            assert not poster.is_alive(), \
+                "no response while the gate was closed: the handler waits on the run"
+            assert "r" in at_response, "the POST raised on the helper thread"
+            r = at_response["r"]
+            assert r.status_code == 202
+            assert r.get_json() == {"ok": True, "started": True}
+            # The moment the 202 arrived: run live, gate closed, nothing finished.
+            assert at_response["in_flight"]
+            assert not at_response["gate_open"]
+            assert not at_response["finished"]
+            assert at_response["ran"] == []
+            # Still blocked: the runner sits inside step 1 behind the closed gate.
+            assert entered.wait(30), "the runner never reached step 1"
+            assert not finished.is_set() and ran == []
+        finally:
+            gate.set()                       # release only after the 202 (or on failure)
+            poster.join(30)
+            results = daily_tick.wait(30)
 
+    assert finished.is_set()
     assert [res.key for res in results] == STEP_KEYS
     assert [res.outcome for res in results] == ["ok"] * 9
     assert [k for k, _, _ in ran] == STEP_KEYS
@@ -144,7 +182,7 @@ def test_second_post_while_a_run_is_in_flight_answers_started_false(client):
     gate = threading.Event()
 
     def blocking(now):
-        assert gate.wait(5)
+        assert gate.wait(60)
         return "ok"
 
     with _stub_steps({k: (blocking if k == "roster_snapshot" else _ok)
@@ -298,7 +336,7 @@ def test_usage_async_wrapper_still_runs_the_same_body(client):
         assert server._start_usage_refresh("cron_route", weeks=[3]) is True
         for t in [t for t in threading.enumerate()
                   if t.name == "usage-trends-refresh"]:
-            t.join(5)
+            t.join(30)
     assert seen == [("cron_route", {"weeks": [3]})]
     assert not server._usage_refresh_lock.locked()
 
