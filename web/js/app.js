@@ -1036,7 +1036,11 @@
     // ESPN/MFL sign-in, and the web has no proof-based sign-in until after
     // launch. A web build that adds one turns this on; never read the
     // landing flag here (qa/web/check_web_structure.py GATE-web-espn-mfl-off).
-    // Declared before _applyLandingFlags(), which runs the chip reveal at once.
+    // Declared before the immediate _applyLandingFlags() call below, so the
+    // constant is initialized when the reveal first runs. That first call can
+    // still end in a caught TDZ on `_entryPlatformSel` (declared further down;
+    // pre-existing and harmless: the chips are already set by then, and the
+    // reveal runs again on 'ftf:flags-ready').
     const WEB_PLATFORM_ENTRY = false;
 
     // Reveal flag-gated landing surfaces once the flag fetch completes.
@@ -5154,6 +5158,7 @@
       // clients is that a type is RECOGNISED, not that the two draw the
       // same path.
       if (type === 'referral_joined')               return ICON.plus;
+      if (type === 'referral_activated')            return ICON.trade;   // FR-19
       if (type === 'league_member_joined')          return ICON.plus;
       if (type === 'league_member_unlocked_trades') return ICON.rank;
       if (type === 'match_expiring')                return ICON.match;
@@ -5343,7 +5348,8 @@
       const LEAGUE_TYPES = ['referral_joined', 'league_member_joined',
                             'league_member_unlocked_trades',
                             'espn_reconnect'];   // ADR-011 sweep nudge
-      const TRADE_TYPES  = ['deck_replenished'];
+      const TRADE_TYPES  = ['deck_replenished',
+                            'referral_activated'];   // FR-19: Trades, not League
 
       if (MATCH_TYPES.indexOf(type) !== -1) {
         // FIXED 2026-08-13 (notif-inbox-growth): this branch used to call
@@ -5848,8 +5854,8 @@
 
     function buildInviteMessage() {
       const url = buildInviteUrl();
-      const leagueName = document.getElementById('league-summary-title')?.textContent || 'our league';
-      return `Join me on Dynasty Trade Finder to find trades in ${leagueName} → ${url}`;
+      // m3.app.invite_msg (copy file §6 D): no league name, every channel.
+      return `Join me on Fleeced to find trades we both like → ${url}`;
     }
 
     // ── OG share-card helpers (Agent 3) ──────────────────────────────
@@ -6090,11 +6096,11 @@
 
       switch (channel) {
         case 'sms':
-          body = `${leagueName} fantasy trade finder — join me: ${url}`;
+          body = `Join me on Fleeced to find trades we both like → ${url}`;   // m3.app.invite_sms
           break;
         case 'x':
         case 'twitter':
-          body = `Joined @FantasyTradeFinder to find trades in ${leagueName}. Come ruin the league with me: ${url}`;
+          body = `Finding dynasty trades in ${leagueName} on Fleeced. Join me → ${url}`;   // m3.app.invite_x
           break;
         case 'whatsapp':
           body = `Hey! Been using Fleeced for ${leagueName} — it finds trades both sides actually like. Join me: ${url}`;

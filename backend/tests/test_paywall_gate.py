@@ -531,3 +531,39 @@ def test_entitlement_read_failure_fails_open(eng, client, stubbed):
     with _enforcing(eng), patch.object(entl, "get_entitlements", boom):
         r = client.post("/api/trades/generate", headers={"X-Session-Token": TOKEN, **MOBILE})
     assert r.status_code == 200
+
+
+@pytest.mark.parametrize("headers", [MOBILE, {"X-Device": "web"}])
+@pytest.mark.parametrize("method,path,endpoint", [
+    ("POST", "/api/invite/token", "mint_invite_token"),
+    ("GET", "/app/league/join/league-1/go/web", "league_join_go"),
+])
+def test_referral_routes_pass_global_gate_while_enforcing(
+        eng, client, monkeypatch, headers, method, path, endpoint):
+    # Keep route-owned membership/flag checks separate; this specifically
+    # proves the global gate never asks a free referral route to subscribe.
+    monkeypatch.setitem(server.app.view_functions, endpoint, lambda **kw: ("free referral", 200))
+    with _enforcing(eng):
+        _set_config(eng, **{WEB_KNOB: 1.0})
+        response = client.open(path, method=method,
+                               headers={"X-Session-Token": TOKEN, **headers})
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "free referral"
+
+
+@pytest.mark.parametrize("path", ["/api/trades/propose", "/api/trades/propose-espn",
+                                  "/api/trades/propose-mfl"])
+@pytest.mark.parametrize("verified", [False, True])
+def test_integrated_account_shop_send_is_stopped_before_elo(eng, client, path, verified):
+    """Platform sign-in's account key uses the same gate before Shop signals."""
+    account_user = "acct_launch-boundary"
+    with eng.begin() as conn:
+        conn.execute(insert(users_table).values(sleeper_user_id=account_user))
+    with server._sessions_lock:
+        server._sessions[TOKEN].update(user_id=account_user, verified=verified)
+    with _enforcing(eng), patch.object(server, "_record_shop_send_signal") as signal:
+        response = client.post(path, json={"source": "shop"},
+                               headers={"X-Session-Token": TOKEN, **MOBILE})
+    assert response.status_code == 402, response.get_json()
+    assert response.get_json()["gate"] == ("never_trialed" if verified else "verify_required")
+    signal.assert_not_called()

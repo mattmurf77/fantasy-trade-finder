@@ -91,3 +91,22 @@ def test_pinned_prefixes_stay_non_gated():
             assert pg.ROUTES[key] != pg.GATED, key
         if key[1].startswith(NEVER_GATE_PREFIXES):
             assert pg.ROUTES[key] == pg.NEVER_GATE, key
+
+
+REFERRAL_FREE = {
+    ("POST", "/api/invite/token"),
+    ("GET", "/api/invite/impact"),
+    ("GET", "/api/league/invite-meta"),
+    ("GET", "/app/league/join/<league_id>"),
+    ("GET", "/app/league/join/<league_id>/go/<cta>"),
+    ("POST", "/api/share/trade"),
+    ("POST", "/api/share/package"),
+    ("GET", "/s/trade/<token>"),
+    ("GET", "/og/trade/<token>.png"),
+}
+
+
+def test_referral_and_share_rules_remain_free():
+    for key in REFERRAL_FREE:
+        assert key in _url_map_keys(), f"referral rule vanished: {key}"
+        assert pg.ROUTES[key] == pg.FREE, key

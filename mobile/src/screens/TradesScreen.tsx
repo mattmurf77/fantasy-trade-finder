@@ -8298,7 +8298,6 @@ export default function TradesScreen({ navigation, route }: any) {
         {!firstRun && showInviteBanner && leagueId ? (
           <InviteLeaguematesBanner
             leagueId={leagueId}
-            leagueName={league?.league_name}
             username={user?.username}
             total={coverage!.total}
           />

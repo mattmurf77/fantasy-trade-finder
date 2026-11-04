@@ -51,7 +51,7 @@ import {
   getLeagueSummary,
 } from '../api/league';
 import LeagueProgressModule from '../components/LeagueProgressModule';
-import { shareInvite } from '../components/InviteLeaguematesBanner';
+import { shareInvite, useInviteBusy, INVITE_BUSY_LABEL } from '../components/InviteLeaguematesBanner';
 import { inviteSocialProof, INVITE_RATIONALE } from '../utils/inviteSocialProof';
 import { useSession } from '../state/useSession';
 import { usePushPriming } from '../state/usePushPriming';
@@ -1285,10 +1285,11 @@ export default function MatchesScreen() {
   const invitePenetration = inviteTotalMates > 0 ? inviteJoinedMates / inviteTotalMates : 1;
   const inviteLeads = inviteProof !== null && invitePenetration < 0.5;
 
+  // ux-lead #364 change 1: the Invite button renders busy from shareInvite's guard.
+  const inviteBusy = useInviteBusy();
   const onInviteFromMatches = () =>
     shareInvite({
       leagueId:   activeLeagueId || '',
-      leagueName: matchesSummary?.league_name || activeLeague?.league_name,
       username:   user?.username,
       surface:    'matches_empty',
       notJoined:  inviteTotalMates - inviteJoinedMates,
@@ -1353,6 +1354,8 @@ export default function MatchesScreen() {
         label="Invite leaguemates"
         variant={inviteLeads ? 'primary' : 'secondary'}
         onPress={onInviteFromMatches}
+        loading={inviteBusy}
+        accessibilityLabel={inviteBusy ? INVITE_BUSY_LABEL : undefined}
       />
     </>
   );

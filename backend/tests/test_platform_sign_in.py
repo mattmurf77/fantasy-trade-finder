@@ -1854,8 +1854,21 @@ def test_c7_the_279_gate_is_byte_identical_and_still_on_the_link_routes(env):
     found = {}
     for node in ast.parse(src).body:
         if isinstance(node, ast.FunctionDef) and node.name in _GATE_PINS:
-            found[node.name] = hashlib.sha256(
-                ast.get_source_segment(src, node).encode()).hexdigest()
+            segment = ast.get_source_segment(src, node)
+            # Paywall integration adds only method metadata to the wrapper;
+            # preserve the original byte pin on all authorization behavior.
+            if node.name in ("_gate_unverified_write", "_gate_unverified_read"):
+                kind = "write" if node.name.endswith("write") else "read"
+                metadata = (f'    _wrapper._unverified_gates = getattr(fn, '
+                            f'"_unverified_gates", frozenset()) | {{"{kind}"}}\n')
+                assert segment.count(metadata) == 1
+                segment = segment.replace(metadata, "")
+                decorator = getattr(server, node.name)
+                def already_marked():
+                    pass
+                already_marked._unverified_gates = frozenset({"existing"})
+                assert decorator(already_marked)._unverified_gates == {"existing", kind}
+            found[node.name] = hashlib.sha256(segment.encode()).hexdigest()
     assert found == _GATE_PINS
     assert server._MUTATING_METHODS == ("POST", "PUT", "PATCH", "DELETE")
     gate_code = server._gate_unverified_write(lambda: None).__code__
@@ -2501,3 +2514,15 @@ def test_mfl_empty_year_is_the_default_season_on_claim_preview_and_action(
     2000, server._MFL_DEFAULT_YEAR, server._MFL_DEFAULT_YEAR + 1])
 def test_mfl_year_in_range_is_admitted(env, year):
     assert _mfl_claim(env, year=year).status_code == 200
+
+
+@pytest.mark.parametrize("platform", ["espn", "mfl"])
+def test_integrated_paywall_keeps_verified_platform_mint_free(env, platform):
+    import backend.entitlements as entitlements
+    import backend.paywall_gate as paywall_gate
+    from unittest.mock import patch
+    with patch.object(entitlements, "is_enforcing", return_value=True), \
+         patch.object(paywall_gate, "verdict", side_effect=AssertionError("sign-in was paywalled")):
+        response = _espn_claim(env) if platform == "espn" else _mfl_claim(env)
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["verified"] is True

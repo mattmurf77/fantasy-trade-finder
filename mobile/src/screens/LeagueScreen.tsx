@@ -61,7 +61,7 @@ import RookieDraftBoardSheet from '../components/RookieDraftBoardSheet';
 import LeagueProgressModule from '../components/LeagueProgressModule';
 import MarketPulseStrip from '../components/MarketPulseStrip';
 import TradeValueBar from '../components/TradeValueBar';
-import { shareInvite } from '../components/InviteLeaguematesBanner';
+import { shareInvite, useInviteBusy, INVITE_BUSY_LABEL } from '../components/InviteLeaguematesBanner';
 import InviteLeaguematesCard from '../components/InviteLeaguematesCard';
 import { inviteSocialProof } from '../utils/inviteSocialProof';
 
@@ -94,6 +94,9 @@ export default function LeagueScreen() {
   const leagueId = league?.league_id || null;
   // FB-38/42 — member-roster overlay, opened from the hero's joined chip.
   const [membersOpen, setMembersOpen] = useState(false);
+  // ux-lead #364 change 1: the overlay's Invite button renders busy from
+  // shareInvite's guard.
+  const inviteBusy = useInviteBusy();
   // S7 PRD-04 item 2 (flag league.rookie_board_entry) — the previously
   // orphaned RookieDraftBoardSheet mounts behind an Explore row.
   const showRookieBoard = useFlag('league.rookie_board_entry');
@@ -489,7 +492,6 @@ export default function LeagueScreen() {
     if (!leagueId) return;
     await shareInvite({
       leagueId,
-      leagueName: summary?.league_name || league?.league_name,
       username:   user?.username,
       surface:    'league_home',
       // null, not 0, while the summary has not landed — "unknown" and
@@ -1006,10 +1008,11 @@ export default function LeagueScreen() {
               label="Invite leaguemates"
               variant="secondary"
               style={styles.overlayInvite}
+              loading={inviteBusy}
+              accessibilityLabel={inviteBusy ? INVITE_BUSY_LABEL : undefined}
               onPress={() =>
                 shareInvite({
                   leagueId,
-                  leagueName: summary?.league_name || league?.league_name,
                   username:   user?.username,
                   surface:    'members_overlay',
                   notJoined:  totalMates - joinedMates,

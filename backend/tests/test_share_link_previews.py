@@ -120,7 +120,8 @@ def test_share_pages_are_noindex(client, page):
     assert r.status_code == 200
     assert _meta(r.get_data(as_text=True), "name", "robots") == "noindex"
     assert r.headers.get("X-Robots-Tag") == "noindex"
-    assert r.headers["Cache-Control"] == "public, max-age=300"
+    assert r.headers["Cache-Control"] == "private, max-age=300"
+    assert "User-Agent" in r.headers.get("Vary", "")
 
 
 class _StubRenderer:
