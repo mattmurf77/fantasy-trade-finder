@@ -1,3 +1,10 @@
+## 2026-11-04 — D1 harness accepts the real shared referral validator
+
+The completed launch integration added `../utils/inviteId` to `src/api/league.ts`, so `check-fa-move.js`'s strict import shim aborted before exercising D1. Its harness now transpiles/loads that pure module through the existing VM loader and admits exactly that import. No application code, assertion, expected payload or behavioral fixture changed.
+
+- `node mobile/tests/check-fa-move.js`: **115 passed, 0 failed** using a temporary `mobile/node_modules` symlink to the existing dependency tree, then removed in `finally`; no special resolver preload used for this final run. The existing real add/drop API, consent, request payload, attempt-id, query-cache and write-invalidation checks remain intact.
+- Related referral integration guards pass: session-init invite-id (single consume + body field), invite-links and signin-inviter. JavaScript syntax and `git diff --check` pass. This corrects a harness dependency graph failure; assertions were unchanged, so no new assertion sabotage was required. CI installs its normal dependencies with `npm ci`.
+
 ## 2026-11-04 — Root D1 / tip / share integration on reviewed launch stack
 
 Merged feature child `06daccb5` onto root `4b20948b`, retaining full histories

@@ -347,7 +347,13 @@ function harness() {
   };
   const client = load('src/api/client.ts', only(native), time, { fetch });
   client.setOnWriteRequest((p) => writes.push(p));
-  const league = load('src/api/league.ts', only({ './client': client }), time);
+  // Referral FR-11 shares the real, pure invite-id validator with league.ts.
+  // Keep strict import shims while executing the current API module unchanged.
+  const inviteId = load('src/utils/inviteId.ts', only({}), time);
+  const league = load('src/api/league.ts', only({
+    './client': client,
+    '../utils/inviteId': inviteId,
+  }), time);
   const faMove = load(FA_MOVE, only({
     './client': client,
     './league': league,
