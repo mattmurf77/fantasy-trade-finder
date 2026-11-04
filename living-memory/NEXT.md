@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on](#2026-11-02--web-landing-update-1-cut-the-espnmfl-panels-or-enter-a-league-id-and-no-extra-account-needed-before-web-entry-ever-turns-on)
 - [2026-11-01 — Shop send (#574 / #577): two Update 1 follow-ups](#2026-11-01--shop-send-574--577-two-update-1-follow-ups)
 
 - [2026-11-03 — Body-size guards: one shared helper for /api/events and /api/feedback (follow-up to #490)](#2026-11-03--body-size-guards-one-shared-helper-for-apievents-and-apifeedback-follow-up-to-490)
@@ -55,6 +56,10 @@
 
 ---
 
+## 2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on
+
+1. **Cut the clauses, removal only** (head-eng, 11-02, from release-lead's #570 QA P3-5): `web/index.html` `#espn-or` ("or enter a league ID"), the MFL explainer's "…or enter a league ID — no extra account needed." and the MFL sign-in block's "or enter a league ID" divider. Match the app's #570 wording: "ESPN dynasty leagues are supported. Sign in to ESPN." · "MyFantasyLeague dynasty leagues are supported. Sign in to MFL." *Why not now:* nobody can see them. `#entry-espn` / `#entry-mfl` open only through `selectEntryPlatform`, which returns early while `WEB_PLATFORM_ENTRY = false` (`web/js/app.js`, pinned by `GATE-web-espn-mfl-off`). Even with it true, an ESPN/MFL pick goes to the "use the app" step, never the panel. *Why before Update 1:* both claims are false under #430/#421 (an ID alone is refused; some MFL paths go to Apple), and web parity with the app's tiles is the operator's preference.
+2. **With it, the web tiles** (app parity with #570), and marketing's call on "We'll find your leagues" (`#espn-signin-hint`, and the app sheets' copy, pending via head-eng).
 ## 2026-11-01 — Shop send (#574 / #577): two Update 1 follow-ups
 
 Product logged both on 2026-11-01 as fine for launch (release-lead's #577 QA, P3-3). The context is in [`docs/plans/shop-send-elo/scope.md`](../docs/plans/shop-send-elo/scope.md) and D-210.

@@ -7,9 +7,11 @@ platforms-eng on branch `fix/signin-history-deferral`.
 **Operator sign-off on waivers:** waivers are listed below (§1 analytics, §3 structural guard, the HLD/LLD/ADR
 rows). They're surfaced with the PR.
 
-**What changes:** the two UNVERIFIED sign-ins stop loading the user's history at sign-in.
+**What changes:** the UNVERIFIED username sign-in stops loading the user's history at sign-in.
 
-- `POST /api/extension/auth` (username only) and the `POST /api/entry/platform` mint call
+**Launch integration, 2026-11-04:** #430 replaces the legacy claim-only platform mint with proof-based sign-in. A claim without proof is refused before history loads; a proven platform login restoring a bound user keeps history eager. #477 keeps MFL hydration inside the first-unverified guard, immediately before verification, without rewriting an already-verified caller's original marker.
+
+- `POST /api/extension/auth` (username only) calls
   `_extension_build_session(..., load_history=False)`. The session gets fresh ranking services with seed ratings
   only (no swipe replay, no tier-override restore) and is marked `_history_pending`, with a per-session lock.
 - The in-place verify routes load the history immediately **before** `verified` flips:
@@ -19,7 +21,7 @@ rows). They're surfaced with the PR.
   link-sleeper mint.
 
 **Why:** loading history made the response time of an unverified username sign-in reveal whether that username
-has FTF history (a timing oracle). After the change both sign-ins do the same work whether or not history exists.
+has FTF history (a timing oracle). After the change username sign-in does the same work whether or not history exists.
 
 **head-eng's condition:** if loading the history fails, the verify is refused with a retryable
 `503 {"error": "verify_retry", "message": "We couldn't finish signing you in. Try again in a moment."}` and
@@ -53,13 +55,13 @@ session with an empty board.
 - New/changed tables or columns: none.
 - New/changed feature flags: none. The change is unflagged by design: a flag-off path would keep the timing
   oracle.
-- New env vars / `model_config` keys: none. Rollback lever: revert the PR (two call-site kwargs).
+- New env vars / `model_config` keys: none. Rollback lever: revert the history-deferral change (preserving proof-based platform sign-in).
 
 ## 3. Evidence scope
 
 - [ ] **Structural guard:** WAIVED, backend-only. No mobile, web or extension code changes.
-- [x] **Unit tests:** `backend/tests/test_signin_history_deferral.py` (new, 15 tests): the unverified sign-ins
-      never call the loaders and mark the session pending (extension auth and a real MFL entry mint); loader calls
+- [x] **Unit tests:** `backend/tests/test_signin_history_deferral.py` (integrated with platform proof tests): the unverified username sign-in
+      never calls the loaders and marks the session pending; proofless platform claims load no history and proven bound-user restores remain eager; loader calls
       and SQL statement counts are identical at `/api/extension/auth` for a username with history and one
       without; `sleeper_link` and the `mfl_auth_link` body load history while `verified` is still false; a
       second link and a concurrent hydrate never replay twice; `/api/extension/rankings` after auth + link equals
@@ -69,7 +71,7 @@ session with an empty board.
       one replay. `backend/tests/test_entry_platform_route.py`: the fake builder accepts the new `load_history`
       kwarg (signature change only).
 - [x] **Code-walk proof** (line numbers at the branch head):
-  1. `backend/server.py:30794` and `:31059` — `extension_auth` and `entry_platform` pass `load_history=False`.
+  1. `backend/server.py:30794` and `:31059` — `extension_auth` passes `load_history=False`; platform sign-in remains eager after proof (#430 integration).
   2. `backend/server.py:30567` — `_extension_ranking_services` is the one per-format loop. With
      `load_history=False` it constructs services only; `_extension_build_session` then sets `_history_pending`
      and `_history_lock` (`:30723`).
@@ -78,8 +80,7 @@ session with an empty board.
      `/api/session/init` refuses unverified sessions (`backend/session_input.py:27`).
   4. `backend/server.py:24094` — `sleeper_link` calls `_hydrate_session_history(sess)` inside `if proven_live`,
      before `sess["verified"] = True`; on an exception it returns `_verify_retry_response()` (`:30643`).
-  5. `backend/server.py:36764` — `mfl_auth_link` does the same before its verify. It is defensive today:
-     `@_gate_unverified_write` (`:36656`) 403s every unverified session first.
+  5. `backend/server.py:36764` — `mfl_auth_link` does the same inside its first-unverified guard before its verify. Already-verified callers skip this block; the write gate permits only the synthetic demo exemption among real route calls today.
   6. `backend/server.py:30610` — `_hydrate_session_history`: takes the session's lock, re-checks
      `_history_pending` on the live dict (a `_RequestSession` view resolves to `_source`), builds fresh services
      with `strict=True`, then swaps `services`/`service` and clears the flag under `_sessions_lock`.

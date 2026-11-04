@@ -163,6 +163,30 @@ Lean legal wording alignment, as scoped in the PR: no schema, API, flag, analyti
 - **Code-walk:** `mon.pay.founder.new`, `mon.club.welcome_body.annual` and `.monthly` say "Starting in January 2027" instead of claiming the higher price applies from January 1. This matches the merged server's January 2, 2027 04:00 UTC price-rise instant without changing it. Founder eligibility still says "by December 31, 2026"; all amounts, SKU ids and purchase/enforcement behavior are unchanged. Guard 4p rejects day-specific January 1 copy in every MON string; 9d verifies both welcome bodies.
 - **Remaining ship evidence:** GitHub CI must pass on this integration head. The PR's post-build checklist (paywall wording plus annual/monthly sandbox-purchase welcome) remains owed. No device, purchase, App Store or production checks were performed here.
 
+
+## 2026-11-04 — Platform proof / privacy history cross-integration for #591 on #592
+
+Merged exact privacy parent `59daef9c` into platform batch `66128c92`, retaining original platform and privacy PR heads as ancestors. Shared #479 network guard and #587 fixture cleanup remain intact; both ledger histories are preserved. No activation or production action occurred, and `landing.platform_options` remains false in source config and release/profiles-on/onboarding-v2 fixtures.
+
+- **Ordering:** MFL's strict `_hydrate_session_history` runs inside #477's first-unverified guard immediately before `verified = True`, followed by `_attach_presession_feedback`. Failure refuses verification with retryable 503 and preserves pending/pristine services. Already-verified callers skip hydration and keep their first verification marker. #430's proven bound-user platform path remains eager; removed the superseded claim-only `entry:*` mint from the merge conflict.
+- **Regression update:** replaced #518's obsolete claim-only mint expectation with no-proof/no-history refusal and proof-before-eager-history restoration for a bound MFL identity. Added an already-verified MFL no-hydration/marker test. An isolated process forced proven sign-in deferred and removed hydration: both corresponding tests went RED; restored history file **17 passed in 1.40s**.
+- **Integrated backend target:** 20 sign-in, MFL proof/binding, history deferral, session-init/deletion, scrub, model redaction, account-data and shared network-guard files: **560 passed, 27 skipped in 37.56s**. Optional Postgres skips were exercised separately on a new disposable socket-only PostgreSQL18 cluster with synthetic data and outbound Python network calls blocked: session-init deletion races + scrub Calibration **44 passed, 1 skipped in 14.71s** (remaining skip is SQLite-only). Scratch server stopped after testing.
+- **Mobile:** TypeScript `tsc --noEmit -p mobile/tsconfig.json` passes using existing dependencies; all ten targeted guards pass: signin-tiles, mfl-entry-proof, landing-platform-options, entry-session-identity, espn-signin-flag, signin-apple-parity, onboarding-flag-defaults, espn-cookies, signin-identity-labels and shop-send.
+- `git diff --check` passes. No full local suite or device/platform/production check was run. Combined GitHub CI on #591 stacked on #592 remains authoritative before merge; this does not approve entry activation or the production purge.
+
+## 2026-11-04 — Platform sign-in batch: #430, #477, #478, #421, #570
+
+User-authorized active launch integration, based on main `af57e59c` (#582). Every original PR head remains an ancestor, via merge commits: #430 `7e52912d` (resolution `1704114f`), #477 `f3a5139c`, #478 `7a6ff481`, #421 `e02e6c9a`, #570 `5efe5c9f`. No force-rebase, branch deletion or production action.
+
+- **Conflict resolutions:** one trusted-proxy helper/constant remains shared by public feedback and sign-in; #477's first-verification-only MFL block is retained, with main's `_attach_presession_feedback` inside that block; the API row retains #478's co-owner proof plus #477's year/limiter rules; docs/ledgers retain both histories. #570 keeps #421's MFL `entrySignInOnly` field/Continue hiding and extended minted identity fields.
+- **Targeted backend:** platform sign-in, entry route, MFL auth-link, ESPN binding/service, module shape, public feedback/limits, account-deletion coverage and seed/flag mirrors: **481 passed in 23.19 s**. Scratch SQLite only; `socket.create_connection` and `urllib.request.urlopen` blocked before pytest import; no credentials or real platform calls.
+- **Selected mobile guards, 9/9 suites passed:** `check-signin-tiles`, `check-mfl-entry-proof`, `check-landing-platform-options`, `check-entry-session-identity`, `check-espn-signin-flag`, `check-signin-apple-parity`, `check-onboarding-flag-defaults`, `check-espn-cookies`, `check-signin-identity-labels`. Reused installed TypeScript through NODE_PATH; no dependency installation/change. No simulator or full local suite (D-056).
+- **Ships gated:** `landing.platform_options=false` in features.json and release/profiles-on/onboarding-v2 fixtures; #430's ESPN switch does not bypass it. No activation, purge, credentials or production settings were touched. R1/real-device checks remain runtime evidence, separate from merge authorization.
+- **Cross-batch integration required:** privacy #479/#587/#518/#563 is deliberately absent. After those changes combine, keep `_platform_sign_in`'s proven `_extension_build_session` call eager (`load_history=True` default), and keep strict `_hydrate_session_history` before the unverified MFL first-verification guard flips `verified`. Re-run platform/history-deferral/MFL-auth-link and shared-feedback tests on the final combined head, then full remote CI.
+
+## 2026-11-04 — #430 retains ask-12 flag-off state after #582
+
+Merged main `af57e59c` after #582. `landing.platform_options` remains false in features.json and the three updated fixture mirrors; #430's `espn.signin` flag does not bypass the landing/entry gate. Retested the platform/feedback integration plus `test_seed_ui_test_db` flag mirrors offline: **347 passed in 17.82 s** (same blocked-network harness and scratch SQLite as the first resync). No flag activation or production action was performed.
 ## 2026-11-04 — Privacy/Shop launch integration batch (local candidate)
 
 Base: main `af57e59c`. Preserved every actual GitHub PR head as an ancestor,
@@ -251,6 +275,25 @@ Gates: full (`docs/plans/landing-platform-options/scope-ask12-off.md`; a feature
 - **Guard:** `check-landing-platform-options.js` §7 checks the flag is registered (true or false), not that it's true. Nothing else assumed true: `check-onboarding-flag-defaults` keeps it unbaked; `test_entry_platform_route.py` patches its own flags.
 - **Code-walk** (scope §3): with the flag off, `platformPickerShown` is false, so no chip or tile row renders and the plain username form shows; the entry sheets open only from that row; and `entry_platform` 404s on the flag first. Settings' ESPN/MFL link routes read only `espn.link` / `mfl.link` / `mfl.auth_link` (checked).
 - **Suites:** 938 passed across the 20 backend test files that read the flag fixtures, the entry route, the purge or `/api/feature-flags`. All 135 `check-*.js` pass, and web structure is 196/196.
+## 2026-11-04 — #430 integration with main: one shared trusted-proxy policy
+
+Resolved #430 against main `fd5390ac` in an isolated clone. Kept both SQLAlchemy `func` and `or_` imports, both plans-index rows, and both TEST_LEDGER histories. Main's public-feedback helper and #430's helper silently duplicated `_SIGNIN_TRUSTED_PROXY_HOPS`, `_xff_hops` and `_client_ip`; retained one shared set so public feedback and sign-in use the same trusted-hop setting.
+
+- Targeted, offline: `test_platform_sign_in`, `test_entry_platform_route`, `test_server_module_shape`, `test_feedback_public`, `test_feedback_public_limits`, `test_account_deletion_coverage`: **271 passed** (system Python, 10.94 s). Both `urllib.request.urlopen` and `socket.create_connection` were blocked before importing pytest; SQLite pointed to this clone's scratch DB. No credentials or real platform APIs were used.
+- Two integration guards: a single trusted-hop constant; both public paths respect a configured second-from-right hop and ignore spoofed leading XFF. Sabotages each RED then restored: duplicate the constant; make sign-in bypass `_client_ip` and use the socket peer.
+- #518 compatibility: the proven `_platform_sign_in` path retains `_extension_build_session`'s default history load. If #518 lands first, preserve `load_history=True` there; unverified entry's deferred history must not be transplanted onto the proven path.
+- No full suite run locally. CI on the pushed final PR head remains required. Merge, feature activation, R1 pair-binding validation and production settings are owned by the coordinating release run.
+## 2026-11-03 — #421: the MFL entry sheet opens the sign-in by default, with an ice primary button
+
+Gates: head-eng's ask (head-product's call on design-lead's #570 render), folded into #421 for the 11-06 binary. **It's a visible design change, so it needs the operator's design yes before merge.** Client only; no route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is the structural suite.
+
+- **Change:** `PlatformLinkSheet.tsx`, entry mode only.
+  - `showMflAuth` starts as `!!entry` and resets to it, so the sign-in form is open by default (it's the only way forward there).
+  - The "Sign in & find my leagues" button is `variant={entry ? 'primary' : 'secondary'}`, the ice primary per `docs/design/components.md`.
+  - The Settings link sheet is unchanged (collapsed, secondary).
+- **Pins:** `check-mfl-entry-proof.js` (f): the state initializer, every non-toggle reset, and the button variant. 64 PASS.
+- **Sabotages:** the default back to `false` → (f) red; the variant back to `"secondary"` → (f) red; restored → exit 0.
+- **Gate:** `npx tsc --noEmit` 0; testid-lint OK; 136/136 `check-*.js`.
 ## 2026-11-02 — #479 QA P3s: the no_real_network guard hardened; three daemon-running files opt in
 
 Gates: release-lead's independent QA of #479 @ `9b446c85` (GO-with-notes), P3-2 to P3-4. Tests and test docs only; no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is pytest.
@@ -1327,6 +1370,37 @@ Gates: engagement-eng's report (release-lead's #488 QA found it). Test harness o
   - The cause: `apiRequest`'s catch now `return`s the async `_afterGateFailure(...)` instead of `throw err`. With the gate off, that adds microtask hops before the 409 retry schedules its backoff timer. The harness's `flush()` drains 80 ticks, so the timer is scheduled after `advance()` has moved the clock past it, and it never fires.
   - Deepening `flush` to 400 completes T3. Throwing synchronously when the gate is off (`if (opts.background || !_gateIsOn()) throw err;`) runs #488's own test file 39/39.
 - **Not touched (other teams' async suites, no guard; routed to head-eng):** `check-apple-revoke-on-delete`, `check-espn-cookies`, `check-league-picker-recovery`, `check-send-timeout`, `check-sleeper-ownership`, `check-vault-subsumes-legacy`.
+## 2026-11-01 — Sign-in landing: three platform tiles (operator 11-01; design-lead's spec)
+
+Gates: full (`docs/plans/prelaunch-onboarding/scope-signin-three-tiles.md`). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is the structural guard, sabotage, a code-walk and a TestFlight checklist.
+
+- **What:** the landing's Sleeper / ESPN / MFL chips are now equal tiles: ink-1, the a11y border, the name with a dim line under it, the ice border plus a 3×14 tick when selected. They form a radiogroup of radios. The flags, the selection and the entry flow are unchanged. A tile shows only for a live platform (never a dead one).
+- **Guard:** `check-signin-tiles.js`, 6 AST pins: the row and its gate; each tile's role, state, label, busy guard and single handler; `PLATFORM_TILE`; the spec's styles, with ice only on the selected border and the tick; the tick only on the selected tile; the door minting only through `POST /api/entry/platform`. **Sabotage 15/15 red** (14 on `SignInScreen.tsx`, 1 on `platformEntry.ts`).
+- **Kept green:** `check-landing-platform-options`, `check-espn-signin-flag`, `check-signin-apple-parity` (9), `check-guide-script`, `check-signin-identity-labels`, `tsc --noEmit`, `testid-lint`.
+- **Code-walk:** in the scope §3 (tile → `selectEntryPlatform` → panel → entry sheet → `entryPlatformMint` → `/api/entry/platform`; no tile under `landing.platform_options` OFF).
+- **TestFlight:** the 8-step SE checklist in the scope §3, for the 11-07 window, before ask 16.
+- **Final words (head-eng relay, 11-01; marketing-lead copy §6 addendum 16):** the dim lines are unchanged ("Username" / "Sign in" / "Sign in"). The VoiceOver labels are now "Sleeper, sign in with your username, no password needed" · "ESPN, sign in with your ESPN account or a league ID" · "MyFantasyLeague, sign in with your account or a league ID". Guard pin 3 now pins all nine strings exactly (the old starts-with-its-name rule doesn't fit MFL's label). Sabotage 5/5 red on the words; the structure set's 14 `SignInScreen.tsx` mutations are still red.
+- **Two fixes (head-eng relay, 11-01, from design-lead's as-built render):**
+  - The session-expired notice's `marginBottom` is `space.md - 5`, so the returning-user landing fits an SE (652 → 647pt).
+  - The ESPN explainer drops "and we'll find your leagues" and "— no extra account needed"; the MFL explainer drops "— no extra account needed".
+  - New pins 7 and 8. Sabotage 6/6 red: each clause put back, "no extra account" moved to another string, the margin back to `space.md`, and `space.sm` (only 4pt).
+  - Earlier sets: the 14 `SignInScreen.tsx` structure mutations and 5/5 words. tsc clean, all 136 check-*.js pass, testid-lint OK. **Total: 26 sabotages** (15 structure, 5 words, 6 fixes).
+- **release-lead QA at `cf636ae2`: GO-with-notes.** Taken here: P2-3 (`docs/design/components.md` now describes the app tiles and keeps the web chips until parity, with `espn.signin`); P2-4 (the checklist's preamble says which state is reachable before and after #430, who flips flags prod-wide with a relaunch, and how to produce step 7's expired-session state); the scope's prod-state line (`landing.platform_options` is TRUE today; ask 12 pending); and this entry's counts. Waiting: P2-1, the "or a league ID" wording (marketing, via head-eng), then P2-2, design-lead's re-render.
+- **P2-1 done: marketing addendum 16, revised 11-02** (head-bizops → head-eng, delivered by the coordinator): "or a league ID" is withdrawn. The labels are "ESPN, sign in with your ESPN account" · "MyFantasyLeague, sign in with your MFL account" (Sleeper's is unchanged). The explainers are "ESPN dynasty leagues are supported. Sign in to ESPN." · "MyFantasyLeague dynasty leagues are supported. Sign in to MFL.", replacing the 3e trim.
+  - The sheets' entry-only "or enter a league ID" clause (`EspnLinkSheet`, `PlatformLinkSheet`) is removed too. Entry mode refuses an ID alone under the verified sign-in; link mode never showed it. Removal only.
+  - Web (`web/index.html:211`, `:236`, `:243`) is left for the web-parity follow-up.
+  - Pins 3 and 7 updated, plus a new pin 9. Sabotage 7/7: each label, each explainer and each sheet clause put back. Total: 33. Still waiting on P2-2, design-lead's re-render.
+- **release-lead round-2 QA at `c8fa1db7`/`8d0a4eeb`: GO-with-notes.** P2-2 is done (design-lead's re-render, plus the A/B spacing image for the operator).
+  - Taken: P3-1, pin 9 now matches any "or … league ID" wording, not just one literal phrase (sabotage 2/2: "Or use a league ID" and "or paste your league ID"); P3-4, components.md's ESPN entry row notes the app dropped the divider; P3-6, the PR body's step count.
+  - Routed to owners: P3-2, the MFL entry sheet still shows the league-ID field right under sign-in (#421 / platforms-eng); P3-3, "We'll find your leagues" in both sheets (marketing, via head-eng); P3-5, web (the parity follow-up).
+- **head-eng Round 4b (11-03, from head-product's calls on design-lead's renders):**
+  - The ESPN entry sheet hides its league-ID field and Continue until ESPN cookies are known: `entryNeedsSignIn = entry && webviewCapture && !(espnS2 && swid)`, a contained conditional, so no "or" divider fallback is needed. Link mode is unchanged.
+  - The MFL sheet heading is "Link an MFL league".
+  - New pins 10 and 11. Sabotage 5/5 red: the gate ignoring cookies, the field ungated, Continue ungated, the gate applying in link mode, the typo back.
+  - The scope's checklist gains step 9.
+- **The ESPN sheet's input step scrolls** (release-lead, from design-lead's render at `0e5fd18c` + #421; the bug exists on main): `EspnLinkSheet` had no ScrollView, so with the private section open on an iPhone SE the SWID field and Continue ran ~156pt past the screen.
+  - The input step is now a `ScrollView` (`espn-link.input-scroll`, `flexGrow 0 / flexShrink 1`, taps handled) inside the 88% sheet. Cancel stays outside it. Settings' link sheet uses the same component, so it gets the fix too.
+  - Pin 12; sabotage 3/3 (the scroller removed, unable to shrink, taps not handled). tsc clean, 136/136 check-*.js, testid-lint OK.
 
 ## 2026-10-29 — G3-e: `deck_outcomes.user_id`; account deletion and export also match an outcome by its owner
 
@@ -2862,6 +2936,386 @@ Client half only, for the 11-06 binary; the server half (flag registered in `con
   5. Signed out, with a Sleeper-bound ESPN or MFL account (an identity linked to a Sleeper user): sign in through the ESPN or MFL chip. LeaguePicker lists that user's Sleeper leagues alongside the platform league. Then sign in with a platform account that has no Sleeper link: it still lands account-only and shows only the platform league, as before.
   6. Web (https site, signed out) with `espn.signin` off: the platform row shows no ESPN chip (MFL still shows if `mfl.link` is on). With it on, the ESPN chip shows and still only points to the mobile app. On the app with it off, paste an ESPN league URL into the Sleeper field: the message is the Settings-path line, not "choose ESPN above".
 - **Not covered:** the flag's presence in `config/features.json` and the route 404 (server PR); `docs/config-reference.md` rides with that PR.
+## 2026-10-27 — Ceiling ruling: the subject-wide ceiling is MFL-only, with trusted IPs exempt (`feat/mfl-auth-link-throttle`, #477)
+
+Full gates (D7 limit change). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture. head-eng passed #477 @ `8a3f5c91` on its security diff check, then ruled on the residual. Code-walk in the [scope addendum](../docs/plans/platform-sign-in/scope.md) (§ Post-launch follow-ups → Ceiling ruling).
+
+- **What changed:**
+  - The `sub:` ceiling now applies only to `_SIGNIN_CEILING_PROVIDERS = ("mfl",)`. ESPN keeps `ip:` + `subip:`.
+  - A (username, IP) pair with a proven MFL sign-in or a good auth-link login in the last `_SIGNIN_TRUSTED_IP_DAYS` = 30 skips `sub:`, never `subip:` / `ip:`. The trust map, `_signin_trusted_ips`, is in-process, bounded by `_SIGNIN_TRUSTED_IP_MAX_KEYS` with the oldest evicted, and cleared on deploy. It uses an injectable `_signin_trust_clock`.
+  - No table, no schema.
+- **New tests** (`test_platform_sign_in.py` +6):
+  - `test_espn_has_no_subject_ceiling`;
+  - `test_mfl_ceiling_exempts_an_ip_with_a_recent_proven_success`;
+  - `test_mfl_trusted_ip_still_has_its_own_pair_bucket`;
+  - `test_mfl_auth_link_success_also_trusts_the_ip`;
+  - `test_mfl_trusted_ip_exemption_expires_after_n_days` (injected clock);
+  - `test_mfl_trusted_ip_map_is_bounded_and_evicts_the_oldest`.
+
+  The MFL ceiling still locks fresh IPs (`test_lockout_subject_ceiling_locks_the_subject_on_every_ip`, `test_auth_link_lockout_subject_ceiling_spans_ips_and_routes`).
+- **Sabotage, each red then restored:**
+  - the ceiling applied to ESPN → 1 red (`test_espn_has_no_subject_ceiling`);
+  - the exemption applied to `subip:` too → 1 red (`test_mfl_trusted_ip_still_has_its_own_pair_bucket`);
+  - the exemption ignored → 4 red (exempts, auth-link trusts, expiry, eviction).
+- **Run:** the 15 branch-A suites: **535 passed, 0 failed** (529 + 6). The concurrency pair passes 3 of 3 loops. Full suite: **9127 passed, 2 skipped, 2 failed**. The two failures were outside the sign-in code and caused by machine load: the run took 3 h 22 min at load ~36, `test_fairness_gate_golden.py::test_one_for_one_gate_knife_edge` failed with "fixture broken: base 1-for-1 should surface", and `test_notif_teardown.py::test_honest_winback_resumes_after_user_returns` failed with "daily-tick run did not finish". Re-running both files in isolation on the same tree: **27 passed**.
+- **Post-launch item logged** (scope + runbook): the limiter maps evict their oldest key when full (`_SIGNIN_LIMITER_MAX_KEYS` 50,000), so a flood of failures on distinct subjects could evict a target's counters. head-eng accepted this at launch scale.
+
+## 2026-10-27 — Lockout fix: the 5-failure lock keyed on (subject, client IP) + a 30/hour subject-wide ceiling (`feat/mfl-auth-link-throttle`, #477; draft, not yet QA'd)
+
+Full gates (D7 limit changes). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture; code-walk in the [scope addendum](../docs/plans/platform-sign-in/scope.md) (§ Post-launch follow-ups → Lockout fix).
+
+- **What changed:** `_signin_limit_keys` now returns three windows for each attempt:
+  - `ip:` 300 / 10 min (unchanged);
+  - `subip:` (subject, client IP) 5 / 15 min;
+  - `sub:` subject across IPs 30 / hour (`_SIGNIN_SUBJECT_CEILING_*`, new).
+
+  A new `reason=subject_ceiling` joins `subject_limit` and `ip_limit`. A success clears its pair bucket and the subject-wide counter. In-flight admission and `Retry-After` are unchanged, and the sign-in and auth-link share the keys. head-eng's nit: the sign-in ESPN cookie-read warning logs the kind only.
+- **New tests:**
+  - `test_platform_sign_in.py` +6:
+    - `test_lockout_griefer_ip_cannot_lock_the_victims_ip`: MFL + ESPN, 3 renewal rounds; the victim's IP gets 200, the griefer's bucket stays locked;
+    - `test_lockout_subject_ceiling_locks_the_subject_on_every_ip`: 30 failures over 6 IPs → 429 on old and fresh IPs, `reason=subject_ceiling`, `Retry-After` ≤ 3600; other subjects are fine;
+    - `test_lockout_one_ip_cannot_reach_the_subject_ceiling`;
+    - `test_lockout_success_clears_its_pair_bucket_and_the_ceiling_only`;
+    - `test_d7_concurrent_bad_attempts_across_ips_never_exceed_the_ceiling` (ceiling patched to 6, 12 threads on distinct IPs → exactly 6 admitted);
+    - `test_espn_signin_cookie_read_warning_logs_only_the_kind`.
+  - `test_mfl_auth_link_route.py` +2: `test_auth_link_lockout_griefer_ip_cannot_lock_the_victims_ip` (also checks the sign-in from the griefer's IP is locked) and `test_auth_link_lockout_subject_ceiling_spans_ips_and_routes` (30 failures split across auth-link and the sign-in).
+  - **Updated, because they encoded the subject-only key** (each now locks and checks from ONE IP):
+    - `test_c7_too_many_attempts_subject_limit`, which also asserts another IP still gets 200;
+    - `test_espn_subject_limit_covers_the_claimed_swid`;
+    - `test_d7_unproven_pair_counts`;
+    - `test_d7_concurrent_bad_attempts_never_exceed_the_cap` (12 threads, one IP → exactly 5);
+    - `test_audit_log_marks_limited`;
+    - `test_s12_in_flight_saturation_answers_retry_after_5s`;
+    - `_lock_mfl_subject` (row 13);
+    - the two year-ordering tests;
+    - `test_auth_link_d7_sixth_attempt_…` and `test_auth_link_d7_shares_the_subject_window_…`.
+  - The concurrency pair is stable over 5 loops on a loaded machine.
+- **Sabotage, each red then restored:**
+  - the 5-failure lock keyed on the subject only → 7 red, incl. both griefer tests (`429 == 200`);
+  - the subject-wide key dropped → 5 red, incl. both ceiling tests (a fresh IP: `200 == 429`);
+  - the log line back to `: %s`, e → the log-kind test red.
+- **Run:** the 15 branch-A suites: **529 passed, 0 failed** (521 + 8); `check-landing-platform-options.js` passes. Full suite: **9123 passed, 2 skipped**, 0 failed (76 min on a machine at load ~36).
+
+## 2026-10-27 — MFL auth-link: D7 limiter on the password login; non-finite year 400 (`feat/mfl-auth-link-throttle`, stacked on #430 @ `d3248d35`)
+
+Full gates (a new 429 on an API route). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture; evidence is the tests below plus the code-walk in the [scope addendum](../docs/plans/platform-sign-in/scope.md) (§ Post-launch follow-ups).
+
+- **What changed:** `POST /api/mfl/auth-link`'s MFL login now goes through #430's D7 limiter (`_signin_limit_gate` / `_signin_release`, in-flight bound), with the same keys as the sign-in: subject = `accounts.platform_subject("mfl", username)`, plus the client IP. Only an MFL bad login counts; a good login clears the subject. The year range and admission run before the MFL call. Over the limit → 429 `too_many_attempts` + `Retry-After` + the row-13 constant. A JSON `Infinity` / `-Infinity` / `1e400` year on auth-link and auth-import → 400 `mfl_bad_year` (was a 500 `OverflowError`).
+- **Verify-block finding:** the `mfl_login` block is not dead. It re-stamps a verified session's `verified_via` (session + `users`) to `mfl_login` and runs for unverified synthetic demo sessions (#279 demo exemption). Behaviour kept; the comment is rewritten; two pins added.
+- **New tests** (`test_mfl_auth_link_route.py`, +12 cases):
+  - `test_auth_link_d7_sixth_attempt_after_five_bad_logins_is_429_no_mfl_call` (the right password on the 6th: 429, 5 MFL calls in all);
+  - `test_auth_link_d7_shares_the_subject_window_with_platform_sign_in`;
+  - `test_auth_link_d7_per_ip_window`;
+  - `test_auth_link_d7_good_login_clears_the_subject_not_the_ip`;
+  - `test_auth_link_d7_uncounted_outcomes_never_consume_the_budget`;
+  - `test_auth_link_d7_in_flight_slot_is_released_on_an_exception`;
+  - `test_auth_link_year_out_of_range_is_400_before_any_mfl_call`;
+  - `test_auth_link_and_auth_import_non_finite_year_is_400_not_500` (×3);
+  - `test_auth_link_verify_block_restamps_a_verified_sessions_verified_via`, `test_auth_link_verify_block_runs_for_an_unverified_demo_session`.
+  - The suite's fixture now resets the limiter before and after each test.
+- **Sabotage, each red then restored:**
+  - gate call removed → 4 red (6th-attempt, shared-window, per-IP, clear);
+  - the bad-login `_counted_failure` dropped → the same 4 red;
+  - `finally` release replaced by explicit releases on the normal paths → `…_in_flight_slot_is_released_on_an_exception` red;
+  - no `outcome = "proven"` on a good login → `…_good_login_clears_the_subject_not_the_ip` red;
+  - `OverflowError` dropped from auth-link's year parse → all 3 non-finite cases red (500 `internal_error`); dropped from auth-import's → all 3 red at the auth-import step.
+- **#430's gate pin:** `test_c7_the_279_gate_is_byte_identical_…` hashes only the four gate functions and checks the wrapper, so no hash changed (a comment names this branch). Still green.
+- **Run:** `test_platform_sign_in.py`, `test_entry_platform_route.py`, `test_mfl_auth_link_route.py`, `test_mfl_link_route.py`, `test_espn_link_route.py`, `test_espn_identity_binding.py`, `test_espn_service.py`, `test_mfl_service.py`, `test_espn_my_leagues_route.py`, `test_link_status_routes.py`, `test_mfl_propose_route.py`, `test_prepared_trade_cohort.py`, `test_mfl_write.py`, `test_mfl_trade_lifecycle.py`, `test_i2_mfl_ownership.py`: **510 passed, 0 failed**.
+- **Full suite** (first commit, `1272bb38`, on #430 @ `d3248d35`): **9104 passed, 2 skipped**, 0 failed (36 min, Python 3.14).
+- **Verify-block guard (follow-up commit; platforms-eng + onboarding-eng, which owns the accounts seam):**
+  - `mfl_auth_link`'s `mfl_login` marker block now runs only for a session that isn't verified yet. `verified_via` / `verified_at` record the FIRST verification. In practice only a synthetic demo session reaches it, and demo behaviour is unchanged.
+  - New tests: `test_auth_link_keeps_a_verified_sleeper_sessions_verified_via` (session, `users` verified_via + verified_at, and the durable session row unchanged; MFL credential stored) and `test_auth_link_keeps_a_verified_apple_account_sessions_verified_via` (an `acct_*` account-only Apple session, same assertions). The demo pin stays.
+  - Removed, because they pinned the old re-stamp: `test_auth_link_verify_block_restamps_a_verified_sessions_verified_via` and the 2026-08-11 tests `test_auth_link_verified_owner_persists_platform_marker` and `test_auth_link_verification_grants_long_expiry_durable_row` (its durable-row check now lives in the Sleeper test).
+  - Sabotage: only this guard removed → both new tests red (`'mfl_login' == 'sleeper'`, `'mfl_login' == 'apple'`). Restored.
+  - Run: the same 15 suites **521 passed, 0 failed** (522 − 3 removed + 2 new). Full suite on the final tree: **9115 passed, 2 skipped**, 0 failed (18 min).
+- **#430 round-3 P3s (separate commit, after merging #430's frozen head `7e52912d` into this branch):**
+  - `test_mfl_claim_and_preview_year_checks_run_before_the_limiter_gate` (×2: `1999`, `"abc"`): the gate spy is never called; no slot or count; a locked subject still gets the 400. Sabotage: the check moved below the claim's gate → both red (`['mfl'] == []`).
+  - `test_mfl_non_numeric_year_is_bad_year_on_claim_preview_and_action` (×5: `"NaN"`, JSON `NaN`, `"abc"`, `[2026]`, an object): 400 `mfl_bad_year` / "year must be numeric" on the claim, preview and `auth_leagues`; no MFL call; no limiter state. Before the fix, the claim and preview read `mfl_bad_league_id`. Sabotage: the old `ValueError → None` fall-through → 6 red (all 5 + the `"abc"` ordering case).
+  - `test_mfl_empty_year_is_the_default_season_on_claim_preview_and_action`: `""` = the default season everywhere, as `auth_leagues` always read it.
+  - Run on the merged tree: the same 15 suites **522 passed, 0 failed** (510 + `7e52912d`'s 4 + these 8); `test_platform_sign_in.py` + `test_entry_platform_route.py` alone **166 passed**; `check-landing-platform-options.js` passes. Full suite on the final tree: **9116 passed, 2 skipped**, 0 failed (27 min).
+## 2026-10-27 — ESPN sign-in co-owners: accept any listed team owner, not only the primary (`feat/espn-signin-coowners`, stacked on #430 @ `d3248d35`)
+
+Full gates. Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture; evidence is the tests below plus the code-walk in the [scope addendum](../docs/plans/platform-sign-in/scope.md) (§ Post-launch follow-ups).
+
+- **What changed:** `EspnTeam.owner_swids` (every listed owner, `swid_identity` form; `owner_swid` unchanged). D4 step 5 and row 7's named-team lookup use `owner_swids` membership. The step-4 control code is unchanged (a primary `owner_swid`, never the claimant's own). `/api/espn/link` and the #321 checks are unchanged (pinned).
+- **New tests:**
+  - `test_platform_sign_in.py` (+10): the co-owner is proven into its own account (after the primary imported the league; the same account on re-sign-in; the control is the team's primary); the primary is still proven; a non-owner is still `wrong_account`; row 7 names a co-owned team; the control never uses the claimant's SWID (×3 layouts); ownerless with `owners` missing; `test_coowner_signs_in_then_imports_the_league_at_espn_link` (was the known-gap pin, now flipped: the import succeeds, then `/api/espn/import` re-syncs); `test_non_owner_signed_in_elsewhere_still_cannot_import_a_co_owned_team`.
+  - `test_espn_service.py` (+11): the `owner_swids` parse, including missing, empty, null, blank, non-list and non-string `owners`, and a hand-built `EspnTeam`.
+- **Sabotage, each red then restored:**
+  - step 5 back to primary-only matching → 5 red (the co-owner test, row 7, all 3 control layouts);
+  - parse back to the primary only → 8 red (those 5 + 3 parse tests);
+  - control allowed to pick the claimant's own SWID → 43 red (incl. 2 of the 3 control layouts; the third places the claimant on no primary, so that sabotage can't reach it).
+- **Run:** `test_platform_sign_in.py`, `test_entry_platform_route.py`, `test_mfl_auth_link_route.py`, `test_mfl_link_route.py`, `test_espn_link_route.py`, `test_espn_identity_binding.py`, `test_espn_service.py`, `test_mfl_service.py`, `test_espn_my_leagues_route.py`, `test_link_status_routes.py`, `test_mfl_propose_route.py`, `test_prepared_trade_cohort.py`, `test_espn_draft_order.py`, `test_espn_propose_route.py`, `test_i2_espn_ownership.py`, `test_espn_write.py`: **562 passed, 0 failed**. `check-landing-platform-options.js` passes.
+- **Full suite** (first commit `69586563`; `backend/tests`, Python 3.14): **9112 passed, 2 skipped**, 0 failed (36 min).
+- **#321 extension (second commit):** co-owners at every #321 team-binding site, via one rule, `server._espn_binding_mismatch`.
+  - Sites changed: `/api/espn/link` R3 (its stale "co-owned … INCONCLUSIVE-ACCEPT" comment rewritten), `/api/espn/import` R3b, `_espn_verify_credential`'s R1 membership assertion, and the `_sweep_fetch_teams` R9 nudge.
+  - Left primary-only (not binding checks): `_espn_member_id`, `_espn_team_id_from_member_id` and the dark prepared-inventory cohort's identity check.
+  - New tests: `test_espn_identity_binding.py` +3 (`test_coowner_pair_binds_at_link_and_passes_the_store_time_membership`, `test_import_resync_accepts_a_coowner_swid`, `test_binding_mismatch_rule`); `test_roster_history.py` +1 (`test_sweep_coowner_swid_no_nudge_non_owner_still_nudged`); the sign-in pair above. Non-owners are still refused at R3, R1 and R3b, and still nudged at R9.
+  - Sabotage: primary-only at `/api/espn/link` → 2 red; primary-only in the shared rule → 5 red. Restored.
+  - Run: the ESPN link, #321, sweep, sign-in, entry, ESPN service/propose/write/draft-order, cohort and MFL link suites (17 files): **591 passed, 0 failed**; `check-landing-platform-options.js` passes. Full suite on the final tree: **9117 passed, 2 skipped**, 0 failed (17 min).
+
+## 2026-10-27 — Platform sign-in: head-eng diff-check fixes — C4 trusted-proxy hops, `espn.signin` kill switch (#430, dark)
+
+Full gates (`espn.signin` is a feature-flag surface). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture. This builds on the 2026-10-26 entry below.
+
+- **C4 (XFF):** `_client_ip()` now takes the hop `_SIGNIN_TRUSTED_PROXY_HOPS` (= 1) from the right, falling back to `remote_addr` when there are fewer hops. The per-IP ceiling is raised 30 → **300** failures per 10 min; the per-subject 5 per 15 min is unchanged. The TEMPORARY `PLATFORM-SIGNIN-XFF hops=N` line (count only) is logged on claims and the two actions, to be removed after release-lead confirms Render's layout.
+  - New tests: `test_c4_trusted_proxy_hops_pick_the_hop_counted_from_the_right` (×4), `test_c4_two_trusted_hops_key_the_ip_limit_on_the_client_hop`, `test_c4_ip_ceiling_is_300_failures_per_10_minutes`, `test_c4_xff_diagnostic_logs_only_the_hop_count` (caplog holds the count and none of the test IPs, incl. `remote_addr`).
+  - `test_c4_spoofed_leading_xff_…` and the other IP tests still pass at a test-local 30 ceiling.
+  - Sabotage: hard-coded rightmost → 4 red (hops 2/3, the fewer-hops fallback, the hops=2 limit test). Restored.
+- **`espn.signin` kill switch:** registered in `FLAG_KEYS`, `config/features.json` (`true`), `release.json` and the four release-derived profiles. When off, the whole ESPN entry branch returns 404 `feature_disabled` before any ESPN call or limiter accounting.
+  - `test_espn_signin_off_404s_the_whole_espn_entry_branch_with_zero_espn_calls`: five ESPN entry requests all get 404, with zero ESPN league/fan calls and no limiter state; MFL sign-in still 200; `/api/espn/link` still 200.
+  - Sabotage: drop the check → red (`500 == 404`, the action reached the fail-if-called fan stub). Restored.
+- **Runbook:** a new entry, "ESPN/MFL sign-in temporarily refused (429 `too_many_attempts`) for one user", for the accepted per-subject lockout residual.
+- **release-lead QA follow-ups (#430 GO-with-notes):**
+  - **D7 narrowed.** Only credential failures count: an MFL bad login, the ESPN sign-in cookie read refused for auth, and `espn_unproven_pair`. Public/ownerless/`wrong_account`/outages don't count.
+  - **A proven claim clears its subject's count** (not the IP window).
+  - **In-flight admission:** `failures + in_flight >= cap` refuses, and the slot is released in a `finally`.
+  - New tests: `test_d7_unproven_pair_counts`, `test_d7_uncounted_refusals_never_consume_the_budget`, `test_d7_a_proven_claim_clears_the_subject_count_not_the_ip`, `test_d7_concurrent_bad_attempts_never_exceed_the_cap` (12 threads, barrier, 0.2 s login; stable over 6 runs), `test_d7_in_flight_slot_is_released_on_an_exception`. `test_espn_subject_limit_covers_the_claimed_swid` now uses counted cookie-read refusals.
+  - **Sabotage:** admission ignoring in-flight → concurrency test red (`12 == 5`); no subject clear on success → clear test red. Both restored.
+  - **XFF line** gains `cf=0|1 tci=0|1` (presence only). Its test asserts six test IPs are absent from caplog.
+  - The runbook lockout entry is reworded: renewable lock, Apple gives a different empty account, restart is the only reset, escalate to eng.
+  - The MFL username-case decision rule (QA P2-3) is in `scope.md`, TestFlight step 6b and a code comment at `accounts.platform_subject`; no code change.
+  - Doc nits fixed (preview 500 comment, 300 per IP, case count 24).
+  - Run: `test_platform_sign_in.py` (116) + `test_entry_platform_route.py` (27) = **143 passed**.
+- **Second QA pass (#430 @ `6ffcfb65`):**
+  - **Flake fix:** the concurrency test stubs `api_observability._write_event`; the in-memory SQLite `SingletonThreadPool` segfaulted on Python 3.14. Loop: **20 of 20 passed** (separate processes).
+  - **New pins:** `test_s12_in_flight_saturation_answers_retry_after_5s` (`Retry-After: 5`) and `test_s16_actions_release_their_in_flight_slot`.
+  - **S16 sabotage:** `my_leagues` gated on a throwaway `{}` → red (`{'ip:…': 1, 'sub:…': 1} == {}`, the slot leaks).
+  - **Dead code:** `_signin_note_failure` / `_signin_retry_after` removed; the 300-ceiling test uses the live gate and release path.
+  - **MFL year range** (2000..season+1, 400 `mfl_bad_year` before any MFL call or limiter accounting): `test_mfl_year_out_of_range_is_400_before_any_mfl_call` ×6 (claim, preview and action each) and `test_mfl_year_in_range_is_admitted` ×3. Sabotage (check removed) → all 6 red.
+  - Run: **154 passed** (`test_platform_sign_in.py` 127 + `test_entry_platform_route.py` 27).
+- **Round-3 QA (#430 @ `d3248d35`, optional P3s):**
+  - **Year overflow:** JSON `Infinity` / `-Infinity` / `1e400` (int() raises OverflowError) now returns 400 `mfl_bad_year`, not 500, on the claim, the preview and `auth_leagues`, with no MFL call. Fixed in `_mfl_entry_year_refusal` and the entry route's own `auth_leagues` parse. The same gap is LEFT in code #430 doesn't own: `_mfl_resolve` (shared with the pinned `/api/mfl/link`), `/api/mfl/auth-link` and `/api/mfl/auth-import`.
+  - **Copy:** the range case reuses the existing `mfl_bad_year` message, "year must be numeric"; no new copy.
+  - **Tests:** the out-of-range test is parametrized on `_MFL_DEFAULT_YEAR + 2` and the in-range test on `+ 1`. New: `test_mfl_year_overflow_is_400_not_500` ×3 and `test_auth_leagues_year_check_runs_before_the_limiter_gate` (gate spy never called; no slot or count; a locked subject still gets the 400, not a 429).
+  - **Sabotage:** check moved after the gate → ordering test red (`['mfl'] == []`); OverflowError uncaught → all 3 overflow cases red (`500 == 400`). Both restored.
+  - Run: **158 passed** (131 + 27); with the link/cohort/accounts suites, **293 passed**.
+- **Refusal copy (follow-up commit):** marketing's final 14-row set (§6 addendum 8, C) is applied, with rows 7, 8 and 12 approved by legal R28.16, so the set is complete. Apostrophes are U+2019, except row 10, which stays byte-identical. Rows 8, 9 and 11 are sign-in-only constants; the link-route copy is unchanged.
+  - New: `test_signin_refusal_copy_is_the_final_set_verbatim` (21 cases, literal expected bodies on the real route) and `test_link_routes_and_previews_keep_their_own_copy`.
+  - Sabotage: row-13 constant reworded → `[row13-too-many]` red. Restored.
+  - `test_platform_sign_in.py` + `test_entry_platform_route.py`: **135 passed**.
+- **Row 6 at step 2 (follow-up commit):** the sign-in's own ESPN cookie read failing with a 5xx, parse error or timeout now returns 502 `espn_unavailable` with row 6's copy. A timeout there used to fall to 500 `internal_error`. The preview keeps the link-route copy.
+  - New cases: `[row6-step2-5xx]`, `[row6-step2-parse]` and `[row6-step2-timeout]`, plus a preview assertion in `test_link_routes_and_previews_keep_their_own_copy`.
+  - Sabotage: the step-2 branch disabled → `[row6-step2-5xx]` and `[row6-step2-parse]` red. Restored.
+  - Run: **138 passed**.
+- **Runs:**
+  - `test_platform_sign_in.py` (86) + `test_entry_platform_route.py` (27): **113 passed**.
+  - With the cohort test, the MFL auth-link and ESPN link suites, and the flag-registry/mirror suites (`test_seed_ui_test_db`, `test_blind_grading_routes`, `test_events_api`, `test_avoid_positions`, `test_invite_links`, `test_draft_extensions_w1`, `test_outlook_route_cache`, `test_packed_evidence`): **513 passed, 0 failed** on the final code. One earlier run showed 1 failure, from the audit-log test's `PLATFORM-SIGNIN` prefix also matching the new `PLATFORM-SIGNIN-XFF` lines; that filter is fixed.
+  - `check-landing-platform-options.js` passes.
+  - Full suite left to CI.
+
+## 2026-10-26 — Platform sign-in: proof-based ESPN/MFL team claim mints a verified `acct_*` session (dark; `feat/platform-sign-in`)
+
+Full gates. Server only (plus the R1 operator script); ships dark behind `landing.platform_options`. D-056: `FTF_SKIP_SIM_GATE=1` posture — no simulator; evidence is the tests below, a code-walk and the TestFlight checklist in [scope.md](../docs/plans/platform-sign-in/scope.md). Includes head-eng's security conditions 1–11 (review dated 2026-10-27) and analytics-lead's two grants.
+
+- **Backend:** the new `test_platform_sign_in.py` has 78 tests; `test_entry_platform_route.py` (27) was rewritten where it asserted claim-only `entry:*` mints; `test_prepared_trade_cohort.py` gains 1 pin. The condition-1 and condition-3 tests run the **real** `espn_service.fetch_league` / `mfl_service.login` / `fetch_my_leagues` over a fake urllib opener, so the real `obs.api_events` capture and error mapping are exercised. Related suites green (421 tests: accounts, account-first, Apple harness, deletion, data rights, ESPN/MFL link + auth-link, persistent sessions, verified reads/sessions, signout). `mobile/tests/check-landing-platform-options.js` updated and passing.
+- **Sabotage, each red then restored** (final code):
+  - skip the anonymous read → 12 red, incl. `test_c7_refusal_espn_public_league` (`'espn_unproven_pair' == 'espn_public_league'`);
+  - skip the pair-binding control read → 13 red, incl. `test_c7_refusal_espn_unproven_pair_leaguemate_attack` (the attacker signs in: `200 == 403`);
+  - skip the D6 `platform_identity_in_use` check → 5 red (both 409 tests, both condition-2 D6 cases, the condition-1 sweep);
+  - limiter disabled → 6 red (IP, spoofed-XFF, subject, ESPN subject, audit `limited`, condition-1 sweep);
+  - skip the MFL franchise match → 3 red (both MFL `wrong_account` tests, condition-1 sweep);
+  - **C1** unexpected exceptions fall through to the global handler → `test_c1_markers_never_leak_through_any_outcome` red (`('logs', 'S2MARKER')`);
+  - **C2** ESPN subject = raw `.strip()` instead of the normaliser → 6 red (all four condition-2 tests, the bare-lower 409 test, the ESPN subject-limit test);
+  - **C3** non-auth answers on steps 3/4 treated as auth → 19 red (all 18 `test_c3_…` cases + condition-1 sweep);
+  - **C4** leftmost XFF hop → `test_c4_spoofed_leading_xff_neither_resets_nor_splits_the_ip_count` red;
+  - **C5** script prints the Cookie header → both `test_c5_r1_script_env_only_…` red; script reads `secrets.local.env` → both red (`file access`);
+  - **C6** `delete_espn_credential` also drops identities → `test_c6_espn_disconnect_…` red; same on `delete_mfl_credential` → `test_c6_mfl_disconnect_…` red;
+  - **C7** an `entry` exemption added to `_verified_write_denial` → `test_c7_the_279_gate_is_byte_identical_and_still_on_the_link_routes` red (hash pinned to `origin/main` @ `732a6b7f`);
+  - **C8** ESPN `wrong_account` always generic → `test_c7_c8_refusal_espn_wrong_account_names_the_team_this_login_owns` red;
+  - **C9** `account_created` always true → 6 red (second sign-in, bound restore, race, condition-2 identity, both condition-6 tests);
+  - **C10** `linked_identities` dropped from the export → both `test_c10_…` red; credential secrets no longer omitted → both red;
+  - **C11** deletion skips `accounts` + `linked_identities` → `test_c7_c11_mint_import_delete_…` and `test_c11_mfl_deletion_releases_the_identity` red;
+  - **E1** cohort literal `espn` → `espn_login` → `test_platform_sign_in_verified_via_values_are_cohort_eligible` red.
+- **Suite:** `python -m pytest backend/tests -q` before head-eng's conditions: **8867 passed, 2 skipped** (25 min). After (final code): **8912 passed, 2 skipped, 0 failed** (12 min; +45 = the 44 new sign-in tests + the cohort pin). The known `test_ranking_service_threads` flake did not fire.
+- **Private MFL leagues (follow-up delta):** the MFL claim now logs in first and reads the league bundle with the login's cookie; `proof_required` makes zero MFL calls. New: `test_mfl_private_league_bundle_is_read_with_the_login_cookie`, `test_mfl_private_league_unreadable_by_this_login_is_wrong_account`, `test_mfl_bad_login_is_refused_before_any_bundle_fetch`, `test_c7_refusal_mfl_proof_required_makes_zero_mfl_calls` (MFL service + `urlopen` patched to fail if called). Sabotage: bundle fetched with `cookie=None` → both private-league tests red (`assert 403 == 200`), restored. Targeted run: `test_platform_sign_in` (78) + `test_entry_platform_route` (27) + cohort + MFL link/auth-link suites → **200 passed**; structural check passes (its route window widened 20000 → 30000 chars). Full suite not re-run for this delta (CI runs it). Caveat: before the route-test fixture gained its deny-by-default `mfl.login` patch, one run of `test_mfl_bad_franchise_400` reached the real `mfl.login` with the dummy credentials `matt` / `hunter2` (a 403 came back, so the POST likely reached MFL). Fixed; that path is now denied by default.
+- **Analytics:** no new events. Grant 1 → value-only addendum `docs/business/analytics/2026-10-27-signin-failed-error-codes.md` (closed `signin_failed.error_code` domain for espn/mfl). Grant 2 → `espn` in `prepared_trade_cohort.VERIFIED`, the value defined once as `accounts.VERIFIED_VIA_ESPN` and pinned (E1); `prepared_trade_inventory_enabled` untouched (E2).
+- **Not covered:** live ESPN/MFL behaviour. Open risk R1 (does ESPN bind `espn_s2` to the SWID?) is unobserved until head-eng reviews `scripts/espn_pair_check.py` and the operator runs it; the design fails closed either way. TestFlight checklist owed on the 11-06 binary.
+
+## 2026-11-01 — #421: entry mode drops the MFL league-ID path (#570 QA P3, via release-lead)
+
+Gates: release-lead's ask, folded into frozen #421 for a delta re-check. Client only; no route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is the structural suite.
+
+- **Change:** `PlatformLinkSheet.tsx`. In entry mode, when the MFL sign-in block is available (`entrySignInOnly = !!(entry && mflAuthBlock)`), the league-ID field, the season field and their Continue don't render. #430's proof-based mint refuses an ID on its own, so that path could only fail. The "or enter a league ID below" line goes too, the same edit #570 makes. With the sign-in block unavailable (`mfl.auth_link` off), the sheet is unchanged.
+- **Pins:** `check-mfl-entry-proof.js` (e): the `entrySignInOnly` initializer; `platform-link.input`, `.year` and `.continue` each render only inside a `!entrySignInOnly ? … : null` branch; no "or enter a league ID" text. 61 PASS.
+- **Sabotage:** `.continue` ungated → (e) red (exit 1); restored → exit 0.
+- **Gate:** `npx tsc --noEmit` 0; testid-lint OK; 118/118 `check-*.js`.
+
+## 2026-10-26 — MFL entry sign-in sends the login with the team-claim mint (proof-based sign-in, client half)
+
+Not express. Scope: platforms-eng's ESPN/MFL sign-in design §3 ("Client: the 11-06 binary"), onboarding-eng's review addition (forward `account_only` / `username`), the private-league follow-up (the entry sign-in path imports through the stored MFL cookie), and release-lead's QA notes on #421 @ `935eb2fd` (GO-with-notes: one P2, three P3s). Mobile only, draft PR #421 (`feat/mfl-signin-proof-client`). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Safe before the server half.** Today's mint ignores unknown body fields and omits the new response fields. On today's server the entry sign-in path still fails, now at `mflAuthLink` instead of at `/api/mfl/link`: both routes sit behind #279's unverified-write gate, and today's mint returns an unverified `entry:*` session. So this is no regression from main.
+- **Change:**
+  - `platformEntry.ts`: the `mfl` mint args gain optional `username` / `password`, spread into the body only when both are present (`:170-172`). The ESPN body is unchanged. `EntryMintResponse` gains optional `verified`, `verified_via`, `account_id`, `account_only`; `user_id`'s comment now says `acct_*` (or a bound Sleeper id), with legacy `entry:*` before the server change. `username` stays a required string because today's server already sends `''`.
+  - `PlatformLinkSheet.tsx`, `mflEntryPickLeague` (`:391`) does three steps, each skipped on a retry once it has succeeded:
+    1. the mint, with `mflUser.trim()` + `entryMflPassRef.current` as the proof (`:398-415`);
+    2. `mflAuthLink`, which stores the MFL cookie under the now-verified session (`:416-420`). This used to be best-effort; it is now required;
+    3. `mflAuthImport([lg.league_id], yr)` (`:421`), the same calls as the non-entry `mflImportSelected`. It replaces `linkPlatformLeague`, whose zero-auth read can't see a private league.
+  - The import's success goes to the existing `auth-done` step (`:429-430`). There, "Open league" runs `openAuthImported` (`:477`), which calls `reset()` and then `onLinked`.
+  - The league-ID path (`pickTeam`, `:267`) still mints with no login and still imports via `linkPlatformLeague`.
+  - Both sheets' `onEntrySession` prop type gains optional `account_only?` / `username?`, and every call forwards `minted.account_only` / `minted.username` (`PlatformLinkSheet.tsx:286,412`; `EspnLinkSheet.tsx:383`). `SignInScreen.tsx` is untouched; its `handleEntrySession` still takes `{user_id, display_name}` and type-checks against the wider prop.
+  - **release-lead P3s:**
+    - `mflEntryPickLeague`'s catch maps `isVerificationRequired` to `pickTeam`'s copy, "Verify your account to link a league." (`:437-439`), before the `e.message` fallback. A message-less 403 can no longer show a raw code.
+    - The stale import comments now name the real calls: the `platformEntry.ts` header, the `entryPlatformMint` doc, both sheets' `entry` prop docs, both `pickTeam` comments and the #177 block. ESPN goes to `/api/espn/link`. The MFL sign-in path goes to `/api/mfl/auth-link` and then `/api/mfl/auth-import`. The MFL league-ID path goes to `/api/mfl/link`, but the proof-based server refuses its mint.
+- **Retry safety:** two refs record how far a league tap got, `entryMflMintedRef` and `entryMflAuthLinkedRef` (`:125-126`). Each is set right after its step succeeds (`:408`, `:418`).
+  - A failed mint or a failed `mflAuthLink` keeps the password, so the next tap retries that step.
+  - A failed import, either thrown or a per-league `failed[]` entry in a 200 (`:422-427`, which returns before any step change), re-runs only the import.
+  - The refs are account-level: the session and the cookie serve any league the login can see.
+  - `clearEntryMflSignIn()` (`:127`) drops the password and both refs. It runs on `reset()` (`:160`), on a failed or empty sign-in (`:347`, `:369`), and on `mfl_auth_expired`, which goes back to input with "Your MFL sign-in expired — sign in again." (`:432-436`).
+- **Password lifetime (changed, still memory-only):**
+  - The typed password is in React state (`mflPass`) until the `auth_leagues` call returns (`:344`, or `:368` on failure).
+  - From there `entryMflPassRef` holds it: a ref, never rendered, never in `dirty`, never persisted.
+  - **On success it is cleared earlier than before:** right after `mflAuthLink` succeeds (`:419`), before the import. It used to be cleared after the import.
+  - **On failure paths it is now held until a retry:** a failed mint or `mflAuthLink` keeps it for the next tap, until that tap's `mflAuthLink` succeeds, `clearEntryMflSignIn()` runs, or the sheet unmounts.
+  - In entry mode SignIn unmounts the sheet on close (`entrySheet === 'mfl' ? <PlatformLinkSheet …/> : null`), so closing the sheet always drops it.
+- **No leak (release-lead P2): pin (c) now covers all three touched files** (`platformEntry.ts`, `PlatformLinkSheet.tsx`, `EspnLinkSheet.tsx`).
+  - It flags any `track(`, `console.*(`, `AsyncStorage.*(`, `SecureStore.*(`, `captureException(` or `Sentry.*(` call with an argument mentioning `password`, `mflPass`, `pass`, `entryMflPassRef`, `espnS2`, `espn_s2`, `swid` or `body`, or forwarding the mint `args` wholesale.
+  - **No allow-list is needed.** The only sink calls in those files are the three `signin_*` `track()` calls in `platformEntry.ts` (`:153,178,181`), which carry `method` / `error_code` only. POSTs are never retried (`client.ts:542-544`).
+  - **QA delta (after `fec5cb73`): the guard is textual, so it is hardened against getting around it.**
+    - **Sinks may only be called directly.** Any other use of `track`, `console`, `AsyncStorage`, `SecureStore`, `Sentry` or `captureException` fails: an alias (`= console.log`, `= console[…]`, `= track`, `= AsyncStorage`), destructuring (`const { log } = console`), `.bind`, `{ track }`, or a hand-off such as `setTimeout(console.log, …)`. Import specifiers, declaration names, property names and type positions are not uses.
+    - **No sink through the global object:** `globalThis` / `window` / `global` / `self` `.console` (or `['console']`, or another sink) fails.
+    - **New sensitive keywords:** `session_token`, `minted` and `res`.
+    - **Zero false positives:** the three `signin_*` `track()` calls and the `track` import stay green. One assertion per rule per file.
+  - **Second QA delta (after `cba58815`):**
+    - **Computed members are normalised before matching:** `console['log']`, `` console[`log`] `` and `console?.['log']` all read as `console.log`.
+    - **Log, storage and crash-report sinks are banned outright.** Variable indirection (`const c = entryMflPassRef.current; console.log(c)`) can't be followed syntactically. So `console`, `AsyncStorage`, `SecureStore`, `Sentry` and `captureException` may not be used at all in the three files; none are today.
+    - `track(` stays allowed, held to the argument rule. One more assertion per file.
+  - **Round-3 QA (2026-10-27, after `03a89ce2`):**
+    - **No storage or crash-report SDK.** `import`, `require`, `import()`, `import =` and re-export of `expo-secure-store`, `@react-native-async-storage/async-storage` or `@sentry/react-native` are banned, using the module names from `mobile/package.json`. None of the three files needs them.
+    - **`track` comes only from the events module, unrenamed.** It may only be an unrenamed named import from `src/api/events`, resolved from each file's own directory. No `track as x`, no `x as track`, no `track` from another module, and no default, namespace, `require` or `import()` of the events module. A positive pin checks that `platformEntry.ts` imports `track` from `./events`.
+    - **The global-object rule sees through wrappers:** `(…)`, `as`, `!`, `satisfies` and `<T>`.
+    - **Declared residual, unchanged:** `track(` with a variable that holds a secret.
+- **Guard `check-mfl-entry-proof.js`** (`npm run test:mfl-entry-proof`), **56 assertions**:
+  - (a) the `mfl` mint body spreads `{username, password}` only behind `args.username && args.password`, with no bare property, and the ESPN body has neither;
+  - (b) `mflEntryPickLeague` passes `username` from `mflUser` and `password` from `entryMflPassRef`, and `pickTeam` passes neither;
+  - (c) the three-file leak guard above: sink arguments, direct-call-only use, no global-object route, the outright log/storage/crash-report ban, no storage/crash SDK import, and `track` imports, one assertion each per file (18), plus the positive `./events` import pin;
+  - (d) both sheets type `onEntrySession` with the optional `account_only` / `username`, and every call forwards `minted.account_only` / `minted.username`;
+  - (e) the entry sign-in path:
+    - order: mint → `mflAuthLink` → `mflAuthImport([lg.league_id])`, each called once, and never `linkPlatformLeague`;
+    - `mflAuthLink` is awaited, with no try of its own;
+    - the only direct password clear comes right after `mflAuthLink`, in the same block;
+    - `clearEntryMflSignIn()` is called only in the `mfl_auth_expired` then-branch, and that branch goes to input with the expired copy;
+    - **new:** `isVerificationRequired` maps to the exact copy `pickTeam` uses, ahead of the `e.message` fallback;
+    - **new:** a 200 without the tapped league in `imported` shows `failed[].message` and returns, with no step change in that branch; `setAuthResult` / `auth-done` come only after that guard;
+    - the mint and `mflAuthLink` are gated on their progress refs and set them after succeeding, and the import is not gated;
+    - the helper drops all three refs, and `reset()` calls it.
+- **Sabotage, first commit (each red, then green on restore, byte-identical): 6/6.**
+  - (a) the guard weakened to `args.password` only;
+  - (b) the sign-in path's `password:` removed; a `password:` added to `pickTeam`'s mint;
+  - (c) `pw: (args as any).password` added to `signin_attempted`;
+  - (d) `account_only` dropped from the ESPN sheet's call; `username` dropped from the MFL `pickTeam` call.
+- **Sabotage, private-league follow-up: 12 new pins, each red, then green on restore.**
+  - **S1:** import through `linkPlatformLeague` → 5 red, plus 1 in `check-landing-platform-options`.
+  - **S2:** import moved before `mflAuthLink` → order red.
+  - **S3:** `mflAuthImport(undefined, yr)` → "exactly the tapped league" red, plus 2 in `check-landing-platform-options`.
+  - **S4:** `mflAuthLink` wrapped in `try { … } catch {}` → 2 red, plus 1 in `check-landing-platform-options`.
+  - **S5:** password cleared before `mflAuthLink` → red, plus 1 in `check-landing-platform-options`.
+  - **S6:** `clearEntryMflSignIn()` added to the generic-error branch.
+    - The first attempt landed in `pickTeam`, because its catch has the same text, so it proved nothing.
+    - Re-applied in `mflEntryPickLeague`, it stayed **green**: the pin accepted a call in the `else` branch, since that shares the nearest `if`.
+    - The pin now requires the then-branch, and the sabotage goes red.
+  - **S7:** `setStep('input')` dropped from the expired branch → red.
+  - **S8:** `entryMflMintedRef.current = true` removed → red.
+  - **S9:** `mflAuthLink` gated on `entryMflPassRef.current` instead → red.
+  - **S10:** the import gated behind a flag → red.
+  - **S11:** the helper stops resetting `entryMflAuthLinkedRef` → red.
+  - **S12:** `reset()` clears only the password → red.
+  - Pin (b) was re-run on the new code shape → red.
+- **Sabotage, release-lead notes: 10/10 red, then green on restore, byte-identical.**
+  - Leak guard, release-lead's four examples:
+    - **C1:** `console.log(entryMflPassRef.current)` in `PlatformLinkSheet` → red;
+    - **C2:** `track('mfl_entry_pick', { p: entryMflPassRef.current })` in the sheet → red;
+    - **C3:** `console.log('mint', body)` in `platformEntry` → red;
+    - **C4:** `AsyncStorage.setItem('mfl_pw', pass)` in `mflSignIn` → red.
+  - **C5 (extra):** `Sentry.captureException(…, { extra: { espnS2 } })` in `EspnLinkSheet` → red.
+  - **V1:** the `isVerificationRequired` branch removed → red. **V2:** its copy changed to `'verification_required'` → red.
+  - **P1:** the per-league failure's `return` removed, so it falls through to success → red.
+  - **P2:** `setAuthResult(res)` moved above the guard → red.
+  - **P3:** `failed?.message` replaced by fixed copy → red.
+  - C2's first run also turned 3 `check-landing-platform-options` pins red. The cause was that check's 2200-char `mflEntryPickLeague` window (the body is now 2188 chars), not the leak. The window is widened to 3200 with a comment, and C2 re-run shows only the leak pin red.
+- **Sabotage, QA delta on the leak guard: 11/11 red, then green on restore, byte-identical.**
+  - **A1:** `const l = console.log; l(pass)` in the sheet → red.
+  - **A2:** `const w = console['warn']` in `EspnLinkSheet` → red.
+  - **A3:** `const t = track` in `platformEntry` → red.
+  - **A4:** `const store = AsyncStorage` in the sheet → red.
+  - **A5:** `const { log } = console` in `platformEntry` → red.
+  - **G1:** `globalThis.console.log(pass)` in the sheet → red.
+  - **G2:** `window.console.error(teamId)` in `EspnLinkSheet` → red.
+  - **K1:** `console.log(res.session_token)` in `platformEntry` → red.
+  - **K2:** `console.info(minted)` in the sheet → red.
+  - **K3:** `track('signin_succeeded', { …, r: res.user_id })` → red, plus `check-landing-platform-options`' signin-funnel pin.
+  - **H1 (extra):** `setTimeout(console.log, 0, pass)` → red.
+- **Sabotage, second QA delta: 6/6 red, then green on restore, byte-identical.**
+  - **M1:** `console['log'](pass)` → red on both the argument rule and the ban.
+  - **M2:** `` console[`log`](pass) `` → red on both.
+  - **M3:** `console?.['log'](pass)` → red on both.
+  - **I1:** indirection, `const c = entryMflPassRef.current; console.log(c)` → red on the ban only. The argument rule can't see it, which is why the ban exists.
+  - **I2:** a benign `console.warn('mint failed')` → red, because the ban is unconditional.
+  - **I3:** `captureException(err)` → red.
+- **Sabotage, round-3 QA (2026-10-27): 11/11 red, then green on restore, byte-identical.** Each sabotage hit only its intended rule.
+  - **B1:** `import * as SecureStore from 'expo-secure-store'` (MFL sheet) → red.
+  - **B2:** `import AsyncStorage from '@react-native-async-storage/async-storage'` (ESPN sheet) → red.
+  - **B3:** `const Sentry = require('@sentry/react-native')` (`platformEntry`) → red.
+  - **T1:** `import { track as t } from './events'` → red.
+  - **T2:** `import ev from './events'` (default) → red.
+  - **T3:** `import * as ev from '../api/events'` (namespace, from `components/`) → red.
+  - **T4:** `import { track } from './client'` (wrong module) → red on the import rule and the positive pin.
+  - **U1:** `(globalThis as any).console.log('x')` → red.
+  - **U2:** `(window!).console.warn('x')` → red.
+  - **U3:** `((globalThis)).console.info('x')` → red.
+  - **U4:** `(globalThis satisfies object)['console']` → red.
+  - U1–U4 fail only the global-object rule, so the unwrapping is what catches them.
+- **Re-pinned in `check-landing-platform-options`:**
+  - V2's ESPN `pickTeam` window went from 900 to 1200 chars, because the forwarded fields lengthen the span (874 → 956).
+  - V2.1's three `mflEntryPickLeague` pins encoded the old contract. They said the import goes through `linkPlatformLeague`, that `mflAuthImport` is never used, and that the re-store is best-effort with the password dropped first. Per the follow-up, they now pin `mflAuthImport([lg.league_id], yr)` with no `linkPlatformLeague`, no default-ALL import, and a required `mflAuthLink` that drops the password only after it succeeds.
+  - The V2.1 `mflEntryPickLeague` extraction window went from 2200 to 3200 chars.
+- **Local runs:** `npx tsc --noEmit` exit 0; `testid-lint OK`; all 118 `check-*.js` pass.
+  - `mobile/node_modules` is symlinked from `/Users/teresadickens/ftf-worktrees/build-1.21.4-168-200ms/mobile/node_modules`, which has an identical `package-lock.json`.
+- **Code-walk (entry mode, `mfl.auth_link` on, proof-based server deployed):**
+  1. On the input step, tapping "Sign in & find my leagues" (`PlatformLinkSheet.tsx:547-551`) runs `mflSignIn` (`:325`). It copies the password (`:333`) and calls `entryMflAuthLeagues` (`:339`), which POSTs `action: 'auth_leagues'` with no session (`platformEntry.ts:120`).
+  2. When the call returns, `setMflPass('')` clears the state (`:344`), the ref takes the password (`:350`), and the step becomes `entry-pick` (`:351`).
+  3. Tapping a league row (`:793`) runs `mflEntryPickLeague` (`:391`). Since `entryMflMintedRef` is false, it calls `entryPlatformMint` with the franchise plus `username` / `password` (`:400-407`).
+  4. In `entryPlatformMint` (`platformEntry.ts:146`):
+     - `track('signin_attempted', {method})` fires (`:153`);
+     - the `mfl` body spreads the login, because both are present (`:170-172`);
+     - the POST goes to `/api/entry/platform` with `skipAuth` (`:174`);
+     - `setSessionToken` stores the minted, verified session (`:177`).
+  5. `entryMflMintedRef` becomes true (`:408`), and `onEntrySession` hands `user_id`, `display_name`, `account_only` and `username` to the host (`:409-414`).
+  6. `mflAuthLink` (`POST /api/mfl/auth-link`, `platformLink.ts:198`) logs in to MFL and stores the cookie under the verified session (`:417`). Then `entryMflAuthLinkedRef` becomes true and the password ref is cleared (`:418-419`).
+  7. `mflAuthImport([lg.league_id], yr)` (`POST /api/mfl/auth-import`, `platformLink.ts:209`) imports that one league with the stored cookie, so a private league works (`:421`). The franchise is auto-bound server-side.
+  8. If the league is in `imported`, `setAuthResult` runs and the step becomes `auth-done` (`:429-430`, render at `:884`). "Open league" (`platform-link.mfl-open`, `:918-920`) runs `openAuthImported`, which calls `reset()` (`:479`) and then `onLinked`; SignIn's `handleEntryLinked` routes to the league picker.
+  - **Refusals:**
+    - `mfl_auth_expired` goes back to input with the expired copy (`:432-436`).
+    - `verification_required` shows "Verify your account to link a league." (`:437-439`).
+    - Any other thrown error shows `e.message` (`:441`). That is the body's `message` (`client.ts:652`), so a mint `proof_required` / `mfl_bad_credentials` / `too_many_attempts` reads as text, and no session is stored when the mint fails.
+    - A per-league import failure in a 200 shows `failed[].message` (`:426`) and stays on the list.
+- **TestFlight checklist (operator, 11-06 binary, after the server half deploys with `landing.platform_options`, `mfl.link` and `mfl.auth_link` on; signed out).**
+  - **(h) Window: this checklist needs `landing.platform_options` ON.** Operator ask 12 keeps it off until the 11-07 checklist (design D10), so the run is a window planned on the operator's word: flip it on for the run, then back off until the go decision. With it off, the ESPN/MFL chips don't show and the route 404s.
+  1. **Correct login:** on Sign in, pick MFL, open "Sign in with MFL", enter a real MFL username and password, and tap "Sign in & find my leagues". Your leagues for the year are listed, each with its team ("2026 · <your franchise>").
+  2. Tap a **public** league whose team is detected. The sheet shows "Imported 1 of 1 league." with that league and "Open league". Tap it: the league opens and Home loads with no "Verify your account" banner.
+  3. **(f) Right team:** in the opened league, "my team" is the franchise the list row named in step 1, not another team in the league.
+  4. **Private league:** sign out and repeat with a login that has a **private** MFL league (one that `myfantasyleague.com` won't show you when logged out). Tapping it reaches "Imported 1 of 1 league." and the league opens with its rosters. On the old binary, this tap failed.
+  5. In Settings, the "Disconnect MFL sign-in" row is present. It only shows when `GET /api/mfl/auth-link` reports `connected`, which proves the cookie was stored before the import.
+  6. **(d) Retry after a failed tap, using Network Link Conditioner rather than racing airplane mode:** sign out and sign in with MFL. On the league list, turn on Settings → Developer → Network Link Conditioner → "100% Loss", then tap a league. Wait for the error above the list; you stay on it. Turn the conditioner off and tap the same league again: it imports and opens, with no "sign in again" prompt and no proof refusal.
+  7. **(b) Retry on a different league:** repeat step 6, but for the second tap pick a **different** league from the list. It imports and opens that league, with no new sign-in.
+  8. **(a) Back out after a failed tap:** repeat step 6 up to the error. Then close the sheet, force-quit and relaunch.
+     - If the failed tap had already minted (the error came after the mint, e.g. at the import), you land on the league picker, empty, signed in.
+     - If it failed at the mint, you land on Sign in.
+     - Either way, linking MFL from there works, and you end up in one account, not a duplicate: signing out and back in with the same MFL login shows the same leagues.
+  9. **(c) `ux.sheet_guard` on the league list (flag on):** on the league list, tap the backdrop. "Discard this league link?" appears.
+     - "Keep editing" keeps the list, and a tap still imports.
+     - "Discard" closes the sheet. Reopening MFL starts at the sign-in step: entry mode unmounts the sheet on close, so nothing, the password included, survives it.
+  10. **Wrong password:** signed out, enter your MFL username with a wrong password. "MFL didn't accept that username and password." shows on the input step, no league list appears, and you are not signed in.
+  11. **League-ID path:** signed out, pick MFL, type your league ID (no sign-in), tap "Continue", then tap your team. A readable refusal shows above the team list (`platform-link.error`, the server's placeholder copy, not "HTTP 403"), and you stay on Sign in.
+  12. **ESPN unchanged:** signed out, pick ESPN, sign in to ESPN, pick a private league and your team. You get the same screens as the previous binary. The result is either the import summary or the server's readable ESPN refusal; there is no new prompt and no crash.
+  13. **(e) No raw codes:** across every failure above (steps 6–11), the on-screen error is a sentence. Never a snake_case code such as `proof_required`, `mfl_bad_credentials`, `verification_required` or `too_many_attempts`, and never `HTTP 403`.
+  14. **(g) Engineering, after the run:** read the run window's sign-in events from prod `user_events`, for example `SELECT event_type, props FROM user_events WHERE event_type LIKE 'signin_%' AND occurred_at >= '<window start>'`. Every row with `props.method` = `mfl` or `espn` has props keys within `{method, error_code}`, and nothing credential-shaped appears.
+- **Not covered:**
+  - **Step 6 can't target a single step:** with "100% Loss" set before the tap, the mint fails first; its retry re-runs the mint with the kept password, which is still a valid retry. The step-precise cases (auth-link failed → retry the auth-link; import failed → retry only the import) are pinned structurally, not exercised at runtime.
+  - **A wrong password at the mint itself:** the password would have to change between the league list and the tap.
+  - **The server half:** its proof, limiter and tests.
+  - **The TOC** was not updated, following the other 10-26 entries.
 
 ## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
 
