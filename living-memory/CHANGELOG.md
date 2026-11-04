@@ -11,6 +11,12 @@
 
 ---
 
+## 2026-11-04 — Launch merge execution: quarantine and binary safety integration
+
+- Merged #582 as `af57e59c`: the legacy platform-entry flag defaults off while verified sign-in is integrated. Production overrides were not inspected.
+- Prepared a history-preserving integration of #365, #566, #580 and #588 after independent subagent review. Combined local guards pass: icon, 13-type privacy manifest, share text (109), paywall wording/gate (110), and all 14 EAS sensitive ignore patterns; plist lint passes. GitHub CI remains the pre-main gate.
+- Billing and platform conflict resolutions are under CI/review. #456 stays held until November 18 at the operator's explicit direction. No build, key rotation, paid-feature activation or store release was performed.
+
 ## 2026-10-21 — Usage Trends week 6 loaded by hand (daily tick still dead)
 
 - `scripts/refresh_usage_trends.py --remote` stored 2026 week 6: 28 teams and 554 players. The byes CIN/DET/MIA/MIN match nflverse. Week 5's correction re-check found no change, and the server log reads `planned [5, 6], stored [6]`. The stored week dropped the route's caches, so the app serves weeks 3–6 by default at once.

@@ -115,6 +115,8 @@ reference material), not the file's last-edit date.
 
 ## Flat plans
 
+[EAS build archive secret exclusions (O9)](eas-build-secret-exclusions.md): implemented locally, PR CI/merge pending (2026-11-04). No build or credential rotation performed.
+
 ### Active
 
 | Doc | Status | Notes |
