@@ -397,6 +397,15 @@ NON_INTENT_EVENTS = frozenset({
     # Add / Re-rank) stays deliberately ABSENT and counts as INTENT.
     "usage_trends_availability_opened",
     "usage_trends_view_changed",
+    # ── Referral loop D-1, 2026-10-15 — added in the SAME commit that
+    # registered them in SERVER_FIRED_EVENTS, for the reason at the top of
+    # this block. Both are owned by the INVITER (or "system:invite") but
+    # caused by someone else: an invitee opening the join landing
+    # (invite_landing_opened) or tapping its CTA (invite_landing_cta). As
+    # intent they would mint a user-day for an inviter who did nothing —
+    # the `receipts_grade_run` class. Grant: analytics-lead C1–C9.
+    "invite_landing_opened",
+    "invite_landing_cta",
     # ── Time to trade suggestion, 2026-10-23 — added in the SAME commit as
     # the emitters (docs/business/analytics/2026-10-20-time-to-suggestion-
     # events.md v2). R2/R2b are a system outcome echoing the R1 tap

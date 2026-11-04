@@ -1584,6 +1584,8 @@ Indexes: `(user_id, occurred_at)`, `(event_type, occurred_at)`, **full** unique 
 
 The envelope columns (`event_id` … `experiments`) are nullable and only populated by `POST /api/events` (client batches, `insert_client_events()`); server-fired `record_event()` rows leave them NULL. Pre-auth client events store `user_id = 'device:<device_id>'` — resolve through `identity_links`.
 
+**`platform = 'server'`** on server-fired rows whose emitter passes `record_event(..., platform="server")`. Since referral loop D-1 (2026-10-15) these are `invite_landing_opened` and `invite_landing_cta`; every other server-fired row still leaves `platform` NULL. The same two emitters pass `touch_user=False`, so their row is the only write: no `users` denorm bump (`last_active_at`, `events_count`, pointer columns) and no streak step. Their `user_id` is the referrer of the referrals row the invite id `t` names (any status); with no row, the user a legacy `ref` resolves to; else `'system:invite'`.
+
 **event_type taxonomy** (registry: `backend/analytics_taxonomy.py` — client and server namespaces are disjoint, asserted at import):
 - Session: `signup`, `login`, `logout`, `app_open`
 - Ranking: `trio_swipe`, `tier_save` (streak event since the P0 cutover; `props.via` ∈ `tiers`/`quickset`), `ranking_complete_first_time`, `ranking_method_changed`, `ranking_reorder` (streak event since #152), `anchor_answered` (streak event since #152), `quickset_completed` (`position, players_placed, duration_ms, skipped` — fires per `via:'quickset'`-tagged tier commit, NOT per completed position; dark until the 2026-08-24 mobile fix first sent the tag, and current clients pass neither `duration_ms` nor `skipped` → null; see the [2026-08-24 addendum](business/analytics/2026-08-24-quickset-via-gap.md)), `quickrank_completed` (`position, players_ranked, duration_ms, skipped`), `swipe` (cutover twin of the legacy wrapped writer: `count, scoring_format`). Streak-qualifying set = `_RANK_STREAK_EVENTS` in `backend/database.py`: `trio_swipe`, `tier_save`, `ranking_complete_first_time`, `anchor_answered`, `ranking_reorder` — also the event set the "Ranks" leaderboard counts.
@@ -1909,6 +1911,12 @@ Give-get program state (foundation §5). Fraud controls are structural: `uq_refe
 | `qualifying_event` | str | e.g. `'matchups_completed>=25'` |
 | `reward_entitlement_id` | int | → `entitlements.id` |
 | `created_at` / `joined_at` / `activated_at` / `rewarded_at` | str | Lifecycle timestamps |
+| `opened_at` | str | Referral loop D-1 (FR-8). ISO UTC of the **first** human open of the join landing carrying this row's `invite_token` as `t`. First write wins (`COALESCE`). NULL until then |
+| `last_opened_at` | str | ISO UTC of the latest human open of the join landing |
+| `open_count` | int, `server_default 0` | Human landing opens, `COALESCE(open_count, 0) + 1` per open |
+| `unfurled_at` | str | ISO UTC of the **first** link-preview fetch (iMessage, Slack, Discord, WhatsApp, …; an empty user agent counts). First write wins. Preview fetches never touch the three open columns |
+
+The four landing columns are written only by `record_referral_landing_open()`: one atomic `UPDATE … WHERE invite_token = :t` (served by `uq_referral_token`; no new index), from `GET /app/league/join/<id>` while `growth.referral_ledger` is on and `t` is well-formed, and only when the row's `league_id` is the path's league (`invite_status` valid or expired): a `t` pasted into another league's path never stamps the row, because the league-match fallback reads `opened_at`. A HEAD request writes nothing. Added through `_migrate_db`'s `migration_cols` as well as the table, so existing databases gain them on boot.
 
 ## `affiliate_clicks`
 

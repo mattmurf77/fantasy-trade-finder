@@ -393,6 +393,16 @@ FLAG_KEYS: tuple[str, ...] = (
     # validated live + >=24h CDN propagation + a post-deploy install proves a
     # tapped link opens the app (docs/runbook.md § AASA).
     "growth.invite_join_link",
+    # Referral loop D-1 (docs/plans/referral-loop/prd.md §11). Both default
+    # OFF; D-1 flips neither.
+    #   growth.join_landing — GET /app/league/join/<id> renders the
+    #     device-aware landing instead of the 302, /go/<cta> answers, and /s/*
+    #     gets FR-25's per-device CTA. Off: today's 302 and /s/* button.
+    #   growth.referral_ledger — in D-1 gates FR-8 landing-open recording,
+    #     invite_landing_cta and the 302's `t` forwarding; its mint /
+    #     attribution meaning lands with FR-1 / FR-13 under this same key.
+    "growth.join_landing",
+    "growth.referral_ledger",
     "account.data_export",       # 06-02: GET /api/account/export JSON archive
     "account.sleeper_disconnect",
     "account.settings_v2",
