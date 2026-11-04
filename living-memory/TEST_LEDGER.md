@@ -1,3 +1,19 @@
+## 2026-11-04 — Complete launch candidate client verification
+
+Candidate through `cd489abd`: complete mobile structural sweep ran **154**
+guards. Initial run passed152, found the real new inviteId-import harness
+integration failure, and found one missing temp-clone dependency symlink.
+After the surgical harness update and normal dependency resolution,
+`check-fa-move` **115/115** and handoff/epoch unit **14/14** passed; all154
+guards are covered. TypeScript `tsc --noEmit` passed. Web structural checks:
+**255/255 passed**. Temporary node_modules symlinks were removed, shared
+installed dependencies unchanged. No simulator/device/build evidence claimed.
+
+Live source-head ancestry audit: all intended open launch source heads are
+contained; held #443, #456 and #584 are absent; no unrelated open PR head
+is included. This is a local candidate, not a main merge. First-init referral
+repair and final exact-head four-job GitHub CI remain pending.
+
 ## 2026-11-04 — D1 harness accepts the real shared referral validator
 
 The completed launch integration added `../utils/inviteId` to `src/api/league.ts`, so `check-fa-move.js`'s strict import shim aborted before exercising D1. Its harness now transpiles/loads that pure module through the existing VM loader and admits exactly that import. No application code, assertion, expected payload or behavioral fixture changed.
