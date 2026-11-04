@@ -1,3 +1,18 @@
+## 2026-11-04 — Held parser child updated with final co-owner fixture prerequisite
+
+Merged exact revised launch parent `e7fb895ff9fbfc5d6acbeceaa4defc929a18c428` into held parser candidate `8048cfb7`, preserving original #584 head `61e8248c`. The only resolution is additive ledger history. Parent's co-owner fixture now persists real user rows before creating its verified sessions, so first-init's existing live-user/deletion guard runs normally; no runtime code or assertion was weakened.
+
+- Offline co-owner + parser/KTC blend-health/DP consensus/QB-cap/universal-pool/subprocess-harness target: **154 passed in 16.07s**, scratch SQLite with external Python network calls blocked also in child processes. `git diff --check` passes.
+- Config flags/defaults and database knob seeds remain byte-identical to revised parent `e7fb895f`; source KTC default stays 0.5. The production weight-zero approval/read-back remains pending. This child is still HOLD for main merge/deployment; no runtime write, production probe, push or change to root #597/main occurred.
+
+## 2026-11-04 — #584 parser readiness candidate; production pin still PENDING
+
+**HOLD main merge/deployment until the user approves the production `ktc_blend_weight = 0` pin and its read-back is verified.** This is preparatory code integration only. No production setting, secret, live KTC page, platform API or running model was read or changed. The source default remains 0.5; no flag/knob default is changed here. Restoring blending later is a separate runtime decision.
+
+Fresh isolated candidate starts from actual main `1a40bd00`, includes final launch candidate `0eed62965c3797227d78c75d634384e7309b50a2` as an ancestor, then merges exact original #584 head `61e8248c8c7a1cc760279b49dee7da8180baa65b`. #467's thin/partial coverage gates and alert behavior remain intact. Only the additive ledger required manual resolution; parser/tests/runbook auto-merged without code conflict. Root #597 and main were not modified.
+
+- Targeted offline parser/KTC blend-health/DP consensus/QB-cap/universal-pool/subprocess-harness run: **121 passed in 16.42s** across seven files. Python network connections and urllib calls were blocked also in subprocesses; all data came from synthetic or committed fixtures. This includes malformed/empty/no-player element refusal and legacy fallback, exact element-id decoys/tag variants/preference, retained `value` fields, thin/partial DP-only gates and weight-zero no-fetch/byte-identity behavior.
+- `git diff --check` passes. Feature config/default flags and database knob seeds are byte-identical to the final launch candidate. No full local suite or deployment/device proof was run; full CI on a draft child PR may be prepared while the production approval/read-back remains pending.
 ## 2026-11-04 — Full-CI co-owner fixture correction after first-init integration
 
 Full GitHub CI for PR #597 at `0eed6296`, run `41920497707`, **failed**:
@@ -1367,6 +1382,20 @@ Gates: the scope block `docs/plans/share-landing-generic-picks/scope.md`. Server
 - **Test:** `test_og_package_card_names_the_calculators_generic_picks`, through `/og/p`: two picks named, an unknown id still "Unknown player". It's red on main's code.
 - **Render:** `before-after.png`, from the real renderer.
 - **Runs:** `test_share_link_previews.py` passes.
+## 2026-11-03 — KTC scraper: the page's `ktc-players` JSON element (the 10-29 break)
+
+Gates: `backend/data_loader.py` (`parse_ktc_players`) plus the runbook. No route, schema, event, flag, knob or engine-hashed module (`data_loader.py` isn't in `_ENGINE_CODE_MODULES`). **Merge only once `ktc_blend_weight = 0` is pinned in prod** (models-lead addendum R2, on the operator's word in release-lead's session). Otherwise this switches the blend back on unannounced at the next pool build.
+
+- **The cause:** KTC moved its player list from the `var playersArray = [...]` literal into `<script type="application/json" id="ktc-players">`, which the page reads with `JSON.parse`. The literal regex found nothing.
+- **The fix:** read the element first, and the literal as a fallback. The live page on 2026-11-03 (one read-only GET, not committed) parses to 464 players (70 QB, 128 RB, 188 WR, 78 TE). The fields are the same: `oneQBValues.value`, `superflexValues.tep.value`, `playerID`, `mflid`, `position`.
+- **Tests:** `test_ktc_blend.py`, 24 (+11). The current page's skeleton is used verbatim around the legacy fixture's entries, so no new KTC data is committed:
+  - decoy JSON before and after, including a `data-id="ktc-players"` element;
+  - four tag spellings (both quotes, unquoted, uppercase with spaces);
+  - both shapes on one page (the element wins);
+  - unreadable, empty and no-player elements, which fail loudly alone and fall back to a literal;
+  - the real `_ktc_consensus` path (cache reset) with `blendValue`/`vftValue` decoys in every entry, matching the legacy rows.
+- **QA P3-4:** `test_test_support.py`'s children no longer make a live KTC GET; they get the fixture.
+- **Sabotage, each red then restored (9):** the literal only (main's code, which reproduces the break); any JSON script without the id check; no list check; literal first; prefer `blendValue`; `data-id` matching; no fallback on bad JSON; an empty list accepted; case-sensitive.
 
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 

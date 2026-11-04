@@ -15,8 +15,9 @@ Fixtures (no network):
     math is pinned end-to-end on live data.
 
 These tests pin:
-  1. parse_ktc_players extracts playersArray and drops rookie-draft-pick
-     (RDP) rows — universe unchanged.
+  1. parse_ktc_players extracts the player list and drops rookie-draft-pick
+     (RDP) rows — universe unchanged — from the current page's `ktc-players`
+     JSON element and from the legacy `var playersArray = [...]` literal.
   2. BLEND-OFF BYTE IDENTITY: ktc_blend_weight=0 + tep_te_uplift=1 (+ the
      #313 QB cap off — it is a later stage of the same function) returns
      the DP maps untouched (kill switch = the pre-#145 pipeline exactly).
@@ -93,6 +94,101 @@ def test_parse_ktc_players_extracts_and_drops_rdp():
 def test_parse_ktc_players_raises_without_array():
     with pytest.raises(Exception):
         parse_ktc_players("<html><body>no array here</body></html>")
+
+
+def _current_page(players_json: str) -> str:
+    """KTC's page structure since about 2026-10-29 (the skeleton verbatim
+    from the live page on 2026-11-03): the list in a `ktc-players` JSON
+    element that `var playersArray = JSON.parse(...)` reads, another JSON
+    element before it and another array (oneQBPlayers) after it. The
+    entries are the legacy fixture's, so no new KTC data is committed."""
+    return (
+        '<html><body>\n<script type="application/json" id="ktc-alerts">'
+        '[{"playerName": "Decoy Before", "position": "QB"}]</script>\n'
+        '<script type="application/json" data-id="ktc-players">'
+        '[{"playerName": "Decoy Data Id", "position": "QB"}]</script>\n'
+        '<script type="application/json" id="ktc-players">' + players_json + '</script>\n'
+        "<script>\n    var leagueType = 1;\n"
+        "    var playersArray = JSON.parse(document.getElementById('ktc-players').textContent);\n"
+        "    var oneQBSC = false;\n"
+        '    var oneQBPlayers = [{"playerName": "Decoy After", "position": "WR"}];\n'
+        "</script></body></html>")
+
+
+_LEGACY_LIST = dl._KTC_PLAYERS_LITERAL.search(_KTC_HTML).group(1)
+
+
+def _with_decoy_values(players_json: str) -> str:
+    """The legacy entries plus the fields KTC's current page also carries
+    (blendValue, vftValue), set to values nobody should read."""
+    players = json.loads(players_json)
+    for p in players:
+        for fmt in ("oneQBValues", "superflexValues"):
+            if isinstance(p.get(fmt), dict):
+                p[fmt] = {**p[fmt], "blendValue": 1, "vftValue": 2}
+                if isinstance(p[fmt].get("tep"), dict):
+                    p[fmt]["tep"] = {**p[fmt]["tep"], "blendValue": 3}
+    return json.dumps(players)
+
+
+def test_parse_ktc_players_reads_the_current_pages_json_element():
+    """The 10-29 break: KTC moved the list into a JSON element, so the
+    literal regex found nothing and every load fell to DP-only. The element
+    is read, and the decoys around it aren't."""
+    players = parse_ktc_players(_current_page(_LEGACY_LIST))
+    assert players == parse_ktc_players(_KTC_HTML)
+    assert {"Decoy Before", "Decoy After", "Decoy Data Id"}.isdisjoint(
+        p["playerName"] for p in players)
+
+
+@pytest.mark.parametrize("tag", [
+    '<script type="application/json" id="ktc-players">',
+    "<script type='application/json' id='ktc-players'>",
+    '<script type="application/json" id=ktc-players>',
+    '<SCRIPT TYPE="application/json" ID = "ktc-players">',
+], ids=["double_quotes", "single_quotes", "unquoted", "uppercase_spaced"])
+def test_the_element_is_found_however_its_tag_is_written(tag):
+    html = _current_page(_LEGACY_LIST).replace(
+        '<script type="application/json" id="ktc-players">', tag)
+    assert parse_ktc_players(html) == parse_ktc_players(_KTC_HTML)
+
+
+def test_with_both_shapes_on_the_page_the_element_wins():
+    """#584 QA: the order is pinned. The element holds the first 30 legacy
+    entries, the literal all of them."""
+    first_30 = json.dumps(json.loads(_LEGACY_LIST)[:30])
+    html = _current_page(first_30) + "<script>var playersArray = " + _LEGACY_LIST + ";</script>"
+    expected = [p for p in json.loads(first_30) if p["position"] in ("QB", "RB", "WR", "TE")]
+    assert parse_ktc_players(html) == expected
+
+
+@pytest.mark.parametrize("element", ['{"not": "json"', "[]", '[{"position": "RDP"}]'],
+                         ids=["unreadable", "empty", "no_players"])
+def test_an_element_without_players_falls_back_to_the_literal_or_fails_loudly(element):
+    """#584 QA: a malformed or empty element never blocks a valid literal,
+    and alone it's a failure (logged as KTC unavailable), never "Loaded 0"."""
+    html = _current_page(element)
+    with pytest.raises(ValueError, match="playersArray not found in KTC page"):
+        parse_ktc_players(html)
+    with_literal = html + "<script>var playersArray = " + _LEGACY_LIST + ";</script>"
+    assert parse_ktc_players(with_literal) == parse_ktc_players(_KTC_HTML)
+
+
+def test_parse_ktc_players_refuses_an_element_that_is_not_a_list():
+    with pytest.raises(ValueError):
+        parse_ktc_players(_current_page('{"players": []}'))
+
+
+def test_real_ktc_consensus_parses_the_current_page_structure(monkeypatch):
+    """The real _ktc_consensus path gives the same rows from the current
+    page structure as from the legacy one."""
+    monkeypatch.setattr(dl, "_crosswalk_id_maps", lambda: ({}, {}))
+    monkeypatch.setattr(dl, "_fetch_ktc_html", lambda timeout=15: _KTC_HTML)
+    legacy = dl._ktc_consensus()
+    monkeypatch.setattr(dl, "_ktc_cache", None)          # the 24 h cache would answer
+    monkeypatch.setattr(dl, "_fetch_ktc_html",
+                        lambda timeout=15: _current_page(_with_decoy_values(_LEGACY_LIST)))
+    assert legacy and dl._ktc_consensus() == legacy      # `value`, never blendValue/vftValue
 
 
 def test_real_ktc_consensus_parses_fixture_html(monkeypatch):

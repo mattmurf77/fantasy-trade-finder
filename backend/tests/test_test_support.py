@@ -302,6 +302,10 @@ def _run_child(code: str, env_extra: dict, tmp_path: Path) -> subprocess.Complet
               "DATABASE_URL"):
         env.pop(k, None)
     env["DATABASE_URL"] = f"sqlite:///{tmp_path / 'scratch.db'}"
+    # With FTF_DP_VALUES_FILE and FTF_TEST_MODE gone, KTC's seam would allow a
+    # live GET of KTC's page from the child; serve the fixture instead.
+    env.setdefault("FTF_KTC_VALUES_FILE",
+                   str(Path(__file__).parent / "fixtures" / "ktc_rankings_snapshot_2026-07-17.html"))
     env.update(env_extra)
     return subprocess.run([sys.executable, "-c", textwrap.dedent(code)],
                           capture_output=True, text=True, cwd=_REPO, env=env, timeout=180)
