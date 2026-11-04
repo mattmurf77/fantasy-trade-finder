@@ -531,3 +531,21 @@ def test_entitlement_read_failure_fails_open(eng, client, stubbed):
     with _enforcing(eng), patch.object(entl, "get_entitlements", boom):
         r = client.post("/api/trades/generate", headers={"X-Session-Token": TOKEN, **MOBILE})
     assert r.status_code == 200
+
+
+@pytest.mark.parametrize("headers", [MOBILE, {"X-Device": "web"}])
+@pytest.mark.parametrize("method,path,endpoint", [
+    ("POST", "/api/invite/token", "mint_invite_token"),
+    ("GET", "/app/league/join/league-1/go/web", "league_join_go"),
+])
+def test_referral_routes_pass_global_gate_while_enforcing(
+        eng, client, monkeypatch, headers, method, path, endpoint):
+    # Keep route-owned membership/flag checks separate; this specifically
+    # proves the global gate never asks a free referral route to subscribe.
+    monkeypatch.setitem(server.app.view_functions, endpoint, lambda **kw: ("free referral", 200))
+    with _enforcing(eng):
+        _set_config(eng, **{WEB_KNOB: 1.0})
+        response = client.open(path, method=method,
+                               headers={"X-Session-Token": TOKEN, **headers})
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "free referral"

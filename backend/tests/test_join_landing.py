@@ -1419,15 +1419,15 @@ def test_share_iphone_pair_follows_the_host(monkeypatch, env, value, cta, help_)
 
 def test_share_trade_pages_keep_their_chrome(monkeypatch, env):
     """GB-02: only the CTA element changed, on the O8 token hit and on its
-    expired page (which keeps its noindex)."""
+    expired page; both keep main's noindex and absolute preview metadata."""
     (_, hit), (_, miss) = [x for x in _share_paths(env) if x[0] == "trade"]
     html = _get(hit).get_data(as_text=True)
-    assert "<title>Trade Match · Fantasy Trade Finder</title>" in html
-    assert '<div class="brand">Fantasy Trade Finder</div>' in html
-    assert f'content="/og/trade/{hit.rsplit("/", 1)[1]}.png"' in html
-    assert 'name="robots"' not in html
+    assert "<title>Trade Match · Fleeced: Dynasty Trade Finder</title>" in html
+    assert '<div class="brand">Fleeced: Dynasty Trade Finder</div>' in html
+    assert f'content="http://localhost/og/trade/{hit.rsplit("/", 1)[1]}.png"' in html
+    assert '<meta name="robots" content="noindex">' in html
     html = _get(miss).get_data(as_text=True)
-    assert f"<title>{server._og_image.TRADE_LINK_EXPIRED_TITLE} · Fantasy Trade Finder</title>" in html
+    assert f"<title>{server._og_image.TRADE_LINK_EXPIRED_TITLE} · Fleeced: Dynasty Trade Finder</title>" in html
     assert '<meta name="robots" content="noindex">' in html
     assert '<a class="cta" href="/?share=trade">Find your next trade</a>' in html
 
