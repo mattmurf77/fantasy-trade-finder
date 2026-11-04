@@ -21,6 +21,95 @@ Gates: release-lead's independent QA of #479 @ `9b446c85` (GO-with-notes), P3-2 
 - **Runs:** the guard and the 7 opted-in files, 124 passed; the session-init / roster / fingerprint area (`-k`), 595 passed, 1 skipped.
 - **P3-1 not taken here:** the daemon's `upsert_league` re-creating a deleted row with platform NULL, which also leaves an account-deletion retention gap. It's pre-existing server behaviour, offered as its own follow-up.
 
+## 2026-11-03 — #587 round 3: release-lead's QA of `e3e7f9fe` (GO with notes, nothing blocking)
+
+Gates: release-lead's round-3 notes. Tests and wording only: no app code, route, schema, flag or event change (the daemon's only diff is a comment). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Reword (a P3 that predates #587; its fix is its own PR):**
+  - The daemon's roster-history comment and the round-2 note below both called a mid-snapshot-deleted leaguemate's leftover "public Sleeper roster". That's true for `league_roster_history` only.
+  - `league_board_history` is private (`accounts._ADDITIONAL_PRIVATE_TABLES`) and no sync removes it, so a leaguemate deleted between `snapshot_league_boards`' board read and the board write's commit can keep a row. The weekly sweep has the same race, with no lock.
+  - Both texts are corrected. Not fixed here.
+- **P4 pins, `test_session_init_deleted_mid_daemon.py` 35 → 37:**
+  - (a) `test_own_deletion_between_the_board_read_and_its_write`: seeds the caller's `member_rankings`, so `upsert_board_snapshots` reaches its lock, and deletes the caller right after `load_member_boards_for_league`. No `league_board_history` row is written, and nothing names the caller but Sleeper `draft_picks`.
+  - (b) New `test_the_lock_runs_on_the_transaction_it_is_handed`: `_lock_live_user` runs its `BEGIN IMMEDIATE` and `SELECT … FOR KEY SHARE` on the `conn` it's passed, never `engine`, `connect()` or `begin()`.
+  - (c) The structural test now also requires that, after the lock, the block's first use of `conn` is the write, or the upsert's read of the table that same block writes. That read is the existence check in `upsert_user` and the two snapshot upserts; the other three writers' first use is the write.
+- **Sabotages, round 3, 3/3 red on SQLite, then restored from `26b4a550`:**
+  - the boards write without `live_user`: (a) red;
+  - `_lock_live_user` on `engine.connect()`: (b) red;
+  - an unrelated `leagues` read between the lock and the members write: (c) red.
+  - Round 2's structural sabotages, re-run: lock after a write in `upsert_league` (9 red) and in `record_event` (2 red), and lock in its own transaction (1 red), are still red.
+  - The Postgres file wasn't re-run: its server was stopped after round 2, and nothing it covers changed.
+- **Suites:**
+  - the two D1-area files: 37 passed, 8 skipped (PG unset);
+  - the session-init `-k` selection: 781 passed, 9 skipped (779 + 2);
+  - `test_account_deletion_coverage.py`: 62 passed.
+  - Local Python 3.14.4; the full suite was not run (platforms-eng runs it).
+
+## 2026-11-03 — #587 round 2: release-lead's QA (Postgres 18.3, real threads; GO with notes)
+
+Gates: release-lead's #587 QA, P2 and P3-1..4. Server only, as round 1: no route, schema, flag or analytics event change (`upsert_roster_snapshots` / `upsert_board_snapshots` and the roster-history helpers gain an opt-in `live_user`; `record_event` now re-raises `AccountGone` under `require_user`). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P2, merge order with #562:** the every-column scan skips `deletion_scrub_jobs` by name (#562 keeps that row until its scrub finishes).
+  - Checked on the real merge: `git merge-tree` of this branch with `origin/feat/trades-deletion-scrub-3` at `11717110` (TEST_LEDGER the only conflict), extracted to the scratchpad. There: SQLite 35 passed, Postgres 8 passed, `test_account_deletion_coverage.py` 68 passed.
+  - Without the exclusion: 26 + 6 red.
+- **P3-1:** `write_session_init_members` takes the rows still there from its own `DELETE … RETURNING`, so a leaguemate's deletion that reached their row first is never undone (QA d2).
+  - The other order (QA d1) is a documented Postgres limit, in the docstring and pinned by a test: the re-inserted row is public Sleeper membership, and closing it needs a shared lock on every member's users row.
+- **P3-2:** the roster-history snapshot (`league_roster_history`, `league_board_history`) runs under the caller's users-row lock, and `AccountGone` ends it.
+  - The lock covers the caller only. A leaguemate deleted mid-snapshot still gets a `league_roster_history` row: public Sleeper data, which their next sync writes again.
+  - They can also keep a `league_board_history` row, which is private (`accounts._ADDITIONAL_PRIVATE_TABLES`) and which no sync removes, because their board is read before the write commits. The weekly sweep has the same race, unlocked. Corrected in round 3; the fix is its own PR.
+  - The owned-pick sync's Sleeper `draft_picks` naming the caller are public data the matrix keeps.
+- **P3-3:** `record_event` re-raises `AccountGone` (only under `require_user`), and the daemon's event blocks let it through. The first guarded write to find the account gone stops the daemon: users, leagues, either event, members or roster history.
+- **Tests, `test_session_init_deleted_mid_daemon.py` 31 → 35:**
+  - own deletion after the members write (2): nothing names the caller but Sleeper `draft_picks`;
+  - the first `AccountGone` stops the daemon (1): one `record_event` attempt, no members write, no roster history, no Sleeper call past the request's;
+  - **structural, runs in CI (1):** in the six guarded writers, `_lock_live_user(conn, …)` is the first statement (or the first statement of a leading `if`) inside the `with <engine>.begin() as conn:` block that makes the write, on that block's `conn`, with the write in the same block. The writer set is pinned too.
+- **New opt-in `backend/tests/test_session_init_deleted_pg.py`, 8**, skipped unless `FTF_SESSION_INIT_TEST_POSTGRES_URL` (socket-only `/private/tmp`, schema per test, like #578's). It ports QA's essentials on real threads:
+  - (a) ×3: a deletion waits on the daemon's lock mid-write, then the daemon stops;
+  - (b) ×2: a deletion that commits first stops the daemon at its first lock;
+  - d2: closed;
+  - d5: the update-only path against the importer's deletion;
+  - d1: the known limit, no deadlock.
+  - **Run once** against a disposable Postgres 18.3 (Postgres.app, socket `/private/tmp/sinitpg`, port 55492, `listen_addresses=''`), stopped and removed afterwards: **8 passed**.
+- **Sabotages, round 2, 7/7 red, then restored from `c2ba1298` with `git checkout`:**
+  - roster history without the caller's lock: 2 red (SQLite);
+  - `record_event` swallows `AccountGone` again: 1 red;
+  - the daemon's event blocks swallow it: 1 red;
+  - lock after a write in `upsert_league`: structural plus 8 more red on SQLite, and PG (a) ×2 red;
+  - lock in its own transaction in `upsert_league`: structural red, PG (a) ×3 red;
+  - lock after a write in `record_event`: structural plus the stop test red;
+  - `here` read before the DELETE (round 1's shape): PG d2 red (SQLite can't show it).
+- **Sabotages, round 1, re-run:** all 7 still red on SQLite. On Postgres, 4 of them are red as well.
+- **Suites:**
+  - the two new files: 35 passed, 8 skipped (PG unset);
+  - the session-init `-k` selection: 779 passed, 9 skipped (round 1's 775 + 4; the 8 skips are the opt-in file);
+  - `test_account_deletion_coverage.py`: 62 passed.
+  - **Full suite at `4863c4bb`** (platforms-eng, Python 3.14.4): **10328 passed, 11 skipped**, 12:49. The 8 new skips are the opt-in PG file.
+
+## 2026-11-03 — Session init: the daemon never re-creates rows an account deletion removed
+
+Gates: head-eng's spec, from release-lead's QA of #479. Server only: no route, schema, flag or analytics event change (`record_event` and `upsert_user` / `upsert_league` gain opt-in keywords; defaults unchanged). D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **New `backend/tests/test_session_init_deleted_mid_daemon.py`, 31.** It uses `test_session_init_sleeper_calls`'s harness (in-memory SQLite, every Sleeper call faked, the daemon inline) under a local `no_real_network` guard, a copy of #479's conftest fixture, which isn't on main yet. The deletion is injected by wrapping the daemon's own calls.
+  - **Own deletion, 20:** the caller's account is deleted at 5 points (as the daemon thread starts; after its start read, `upsert_user`, `upsert_league`, `league_synced`), on 4 leagues (Sleeper first init, Sleeper re-init, MFL, ESPN). It runs `accounts._delete_user_data`, the DB transaction alone: in one process the lifecycle lease already holds a deletion until the daemon ends, so this is another process's deletion (a rolling deploy). Afterwards there's no users, leagues or league_members row for the user or league, and a scan of every text column of every table finds nothing naming the user or the session's analytics key that wasn't there right after the deletion (there was nothing).
+  - **No users row, 1:** the daemon writes nothing, and inserts no users row.
+  - **The importer's deletion, 6:** the leaguemate who imported the league is deleted through the public `delete_user_data` (the lease is per account, so the caller's daemon isn't drained), before or after the daemon's start read, on MFL, ESPN and Sleeper. The `leagues` row and the importer's `league_members` row aren't re-created, so a linked league never comes back with a NULL platform, and for MFL/ESPN nothing names the importer. One exception, which the test pins: the Sleeper case whose rows were already gone when the daemon started is, to the daemon, a first init. It rebuilds both from Sleeper's public read, owned by the caller and with platform `'sleeper'`, as the deletion matrix says the next init would.
+  - **Normal inits, 4:** a first init creates the rows with platform `'sleeper'`; a re-init updates the name and rosters (importer, platform and `created_at` kept); MFL and ESPN keep their platform and have their rows updated.
+- **Sabotages, 7/7 red, then restored with `git checkout`:**
+  - `_lock_live_user` a no-op (insert again): 19 red;
+  - `upsert_league` insert-anyway (`only_if_exists=False`): 5 red;
+  - the members start-state filter dropped: 1 red (Sleeper importer);
+  - a platform league replaced, not update-only: 2 red;
+  - `record_event` without `require_user`: 4 red;
+  - `_platform_linked` from the DB only: 2 red;
+  - platform dropped on insert: 3 red.
+- **Existing harnesses:** `test_roster_refresh_state` (also used by `test_roster_fp_stamp` and `test_traded_picks_unavailable`) and `test_session_init_sleeper_calls` now seed the users row the session mint writes. `test_co_owner_rosters` and one `test_roster_refresh_state` test patch the renamed members writer, `write_session_init_members`.
+- **Suites:**
+  - `-k "session_init or roster or co_owner or players_refresh or account_only or fingerprint or deletion or delete"`: 775 passed, 1 skipped (baseline 744 + 31 new);
+  - `test_account_deletion_coverage.py`: 62 passed;
+  - the 20 other files that drive `/api/session/init` or the changed writers: 662 passed.
+  - **Full suite at `a19aabfe`** (platforms-eng, Python 3.14.4): **10324 passed, 3 skipped**, 14:50.
+  - **Not verified:** real Postgres row locking. The tests run on SQLite; on Postgres only the guard's compile to `FOR KEY SHARE` was checked. That's for QA on PG.
+
 ## 2026-10-31 — #555 QA P3s: the twin swaps the job's cards and checks a later cursor; the supersede guard pinned off
 
 Gates: release-lead's #555 QA (GO with notes, merged as `29ba8f26`), P3-1 and P3-2. Tests only: no app code, route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

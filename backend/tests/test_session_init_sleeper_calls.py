@@ -98,6 +98,8 @@ def harness(monkeypatch):
                            connect_args={"check_same_thread": False})
     metadata.create_all(engine)
     monkeypatch.setattr(db_module, "engine", engine)
+    # The session mint writes the users row; the daemon never inserts one.
+    db_module.upsert_user(USER_ID)
 
     calls = _Counter()
 
