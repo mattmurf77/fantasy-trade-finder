@@ -114,12 +114,15 @@ export interface PickAssignmentProgress {
 export interface PickAssignments {
   league_id: string;
   settings: PickAssignmentSettings;
-  /** Always current + 3, ascending. Not paginated — ~192 slots is one
+  /** Current + 3, ascending; starts at `current_season + 1` once the
+   *  league's rookie draft is past (C5). Not paginated — ~192 slots is one
    *  round trip, and four requests to render one screen is worse. */
   seasons: PickAssignmentSeason[];
   progress: PickAssignmentProgress;
   /** False before the pristine grid has been written. */
   seeded: boolean;
+  /** The league's season, even when `seasons[]` starts past it (C5). */
+  current_season?: number;
 
   // ── ESPN auto-derived round-1 order (draft-extensions, 2026-08-08) ────
   // A DEFAULT for the setup step's drag list, not state the server adopted:
