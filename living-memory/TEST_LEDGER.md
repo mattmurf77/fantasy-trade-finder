@@ -1,3 +1,11 @@
+## 2026-11-03 — The web calculator's "Favors you / them" label, the right way round (head-eng round 4; web only)
+
+Gates: `docs/plans/web-calc-favors-label/scope.md`. No schema, flag, route or analytics change. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change:** `web/calculator.html` maps `favors: 'receive'` → "Favors you" and `'give'` → "Favors them", as the app's value bar and the page's own gap line read it. It had been inverted since #263.
+- **Guard:** `mobile/tests/check-web-calc-favors.js`, 7 checks, executing the page's own expression. It fails 2 on main (`fd5390ac`).
+- **Browser:** not run (see the scope).
+
 ## 2026-11-03 — #490 QA P3s: the ingest cap's rationale and the "never a 4xx" claims corrected
 
 Gates: head-eng's relay of release-lead's QA of #490 @ `a703d624` (GO-with-notes), P3-1 to P3-4. Comments, docstrings and docs only; no behaviour change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is pytest.
