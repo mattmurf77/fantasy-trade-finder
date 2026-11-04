@@ -427,6 +427,186 @@ def test_c7_refusal_espn_proof_required(env):
     _assert_nothing_created(env)
 
 
+# ── ESPN co-owners (post-launch, feat/espn-signin-coowners) ─────────────────
+# D4 step 5 accepts ANY listed owner of the claimed team (EspnTeam.owner_swids:
+# primaryOwner + owners, in the one SWID identity form), not only the primary.
+# The identity stays the claimant's own SWID. D (an issued pair that owns no
+# team in the fixture) is made a co-owner below.
+
+def _co_own(env, team_id, *swids):
+    """Add `swids` to team `team_id`'s `owners` (primaryOwner unchanged)."""
+    for t in env.espn.payload["teams"]:
+        if t["id"] == team_id:
+            t["owners"] = list(t["owners"]) + list(swids)
+
+
+def _control_swids(env):
+    """The SWIDs of every cookie read after the step-2 read (the controls)."""
+    return [swid for kind, swid in env.espn.calls[1:] if kind == "cookie"]
+
+
+def test_espn_coowner_who_is_not_primary_is_proven_into_its_own_account(env):
+    _co_own(env, 1, SWID_D)                     # team 1: primary A, co-owner D
+    primary = _espn_claim(env, team_id=1).get_json()
+    assert primary["account_created"] is True
+    # A imports the league, so A's SWID now sits in espn_credentials — the
+    # co-owner's sign-in must not read that as D's identity being in use.
+    assert env.client.post(
+        "/api/espn/link",
+        json={"espn_league_id": ESPN_LEAGUE, "team_id": 1, "espn_s2": S2_A,
+              "swid": SWID_A},
+        headers={"X-Session-Token": primary["session_token"]}
+    ).status_code == 200
+    env.espn.calls.clear()
+
+    r = _espn_claim(env, team_id=1, s2=S2_D, swid=SWID_D)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["verified"] is True and body["verified_via"] == "espn"
+    assert body["account_created"] is True
+    assert body["account_id"] != primary["account_id"]   # its own account
+    assert body["team_id"] == 1 and body["display_name"] == "Chalk Dusters"
+    # Step 4's control is the claimed team's primary owner — a co-owner of
+    # the same team is fine as the control; the claimant's own SWID is not.
+    assert env.espn.calls == [("cookie", SWID_D), ("anon", None),
+                              ("cookie", SWID_A)]
+    idents = {(i.provider, i.provider_subject, i.account_id)
+              for i in _rows(env, db_module.linked_identities_table)}
+    assert idents == {("espn", SWID_A.upper(), primary["account_id"]),
+                      ("espn", SWID_D.upper(), body["account_id"])}
+    # Signing in again lands the co-owner in the same (own) account.
+    again = _espn_claim(env, team_id=1, s2=S2_D, swid=SWID_D).get_json()
+    assert again["account_created"] is False
+    assert again["account_id"] == body["account_id"]
+
+
+def test_coowner_signs_in_then_imports_the_league_at_espn_link(env):
+    """Was the known gap: the co-owner's sign-in succeeded but the client's
+    follow-on POST /api/espn/link was refused wrong_account, because #321's
+    team-binding check compared the pair to the PRIMARY owner_swid only. It
+    now accepts any listed owner (_espn_binding_mismatch), so the co-owner's
+    import binds team 1 to their own account, stores their pair, and a
+    re-sync (/api/espn/import, #321 R3b) passes too."""
+    _co_own(env, 1, SWID_D)
+    minted = _espn_claim(env, team_id=1, s2=S2_D, swid=SWID_D).get_json()
+    assert minted["verified"] is True
+    tok = {"X-Session-Token": minted["session_token"]}
+    r = env.client.post(
+        "/api/espn/link",
+        json={"espn_league_id": ESPN_LEAGUE, "team_id": 1, "espn_s2": S2_D,
+              "swid": SWID_D},
+        headers=tok)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["ok"] is True and body["my_team_id"] == 1
+    assert body["credential_stored"] is True
+    [lg] = _rows(env, db_module.leagues_table)
+    assert lg.user_id == minted["user_id"]
+    [cred] = _rows(env, db_module.espn_credentials_table)
+    assert cred.user_id == minted["user_id"]
+    assert es.swid_identity(cred.swid) == SWID_D.upper()
+    assert cred.verified_at
+    r = env.client.post("/api/espn/import", json={"league_id": ESPN_LEAGUE},
+                        headers=tok)
+    assert r.status_code == 200, r.get_data(as_text=True)
+
+
+def test_non_owner_signed_in_elsewhere_still_cannot_import_a_co_owned_team(
+        env):
+    """B (team 2's owner) signs in, then tries to import team 1 (A + co-owner
+    D) with B's own pair → the unchanged #321 refusal, nothing imported."""
+    _co_own(env, 1, SWID_D)
+    minted = _espn_claim(env, team_id=2, s2=S2_B, swid=SWID_B).get_json()
+    r = env.client.post(
+        "/api/espn/link",
+        json={"espn_league_id": ESPN_LEAGUE, "team_id": 1, "espn_s2": S2_B,
+              "swid": SWID_B},
+        headers={"X-Session-Token": minted["session_token"]})
+    assert r.status_code == 403
+    assert r.get_json() == {"error": "espn_bad_credentials",
+                            "reason": "wrong_account",
+                            "message": server._ESPN_WRONG_ACCOUNT_MSG}
+    assert _rows(env, db_module.leagues_table) == []
+    assert _rows(env, db_module.espn_credentials_table) == []
+
+
+def test_espn_primary_owner_is_still_proven_on_a_co_owned_team(env):
+    _co_own(env, 1, SWID_D)
+    r = _espn_claim(env, team_id=1)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["account_created"] is True and body["verified_via"] == "espn"
+    [ident] = _rows(env, db_module.linked_identities_table)
+    assert (ident.provider, ident.provider_subject) == ("espn", SWID_A.upper())
+    assert SWID_A not in _control_swids(env)
+
+
+def test_espn_non_owner_of_a_co_owned_team_is_still_wrong_account(env):
+    _co_own(env, 1, SWID_D)                     # team 1: A + D; B owns team 2
+    r = _espn_claim(env, team_id=1, s2=S2_B, swid=SWID_B)
+    assert r.status_code == 403
+    assert r.get_json() == {
+        "error": "espn_bad_credentials", "reason": "wrong_account",
+        "message": "This ESPN login owns Icy Veins in this league. Pick "
+                   "that team to continue."}
+    _assert_nothing_created(env)
+
+
+def test_c8_row7_names_the_team_this_login_co_owns(env):
+    """Row 7's lookup uses owner_swids membership: D co-owns Flare Guns
+    (primary C) and claims team 1 → the message names Flare Guns."""
+    _co_own(env, 3, SWID_D)
+    r = _espn_claim(env, team_id=1, s2=S2_D, swid=SWID_D)
+    assert r.status_code == 403
+    assert r.get_json() == {
+        "error": "espn_bad_credentials", "reason": "wrong_account",
+        "message": "This ESPN login owns Flare Guns in this league. Pick "
+                   "that team to continue."}
+    _assert_nothing_created(env)
+
+
+@pytest.mark.parametrize("layout", ["co_owner_of_claimed", "primary_elsewhere",
+                                    "listed_twice_any_format"])
+def test_espn_control_never_uses_the_claimants_own_swid(env, layout):
+    """D4 step 4 picks ANOTHER member's SWID. With co-owners in play the
+    claimant's own SWID can sit on several teams, in any format — none of
+    them may be the control."""
+    d_variants = (SWID_D.lower(), SWID_D.strip("{}"), f" {SWID_D} ")
+    teams = {t["id"]: t for t in env.espn.payload["teams"]}
+    if layout == "co_owner_of_claimed":         # D co-owns team 2 (primary B)
+        claim = 2
+        _co_own(env, 2, SWID_D)
+    elif layout == "primary_elsewhere":         # D is team 1's PRIMARY too
+        claim = 2
+        teams[1]["primaryOwner"] = d_variants[0]
+        teams[1]["owners"] = [d_variants[0], SWID_A]
+        _co_own(env, 2, d_variants[1])
+    else:                                       # D listed on teams 1 and 3
+        claim = 3
+        teams[1]["primaryOwner"] = d_variants[2]
+        teams[1]["owners"] = [d_variants[2]]
+        _co_own(env, 3, d_variants[1])
+    r = _espn_claim(env, team_id=claim, s2=S2_D, swid=SWID_D)
+    assert r.status_code == 200, (layout, r.get_data(as_text=True))
+    [control] = _control_swids(env)
+    assert control.upper() != SWID_D.upper()
+    assert es.swid_identity(control) != es.swid_identity(SWID_D)
+
+
+def test_espn_ownerless_team_is_still_ownerless_with_owners_missing(env):
+    """No primaryOwner and no `owners` key at all (not just an empty list)
+    → still espn_ownerless_team, uncounted."""
+    for t in env.espn.payload["teams"]:
+        if t["id"] == 1:
+            t.pop("primaryOwner", None)
+            t.pop("owners", None)
+    r = _espn_claim(env)
+    assert r.status_code == 403
+    assert r.get_json()["reason"] == "espn_ownerless_team"
+    assert server._signin_failures == {}
+    _assert_nothing_created(env)
+
+
 # ── MFL proof (D5) ──────────────────────────────────────────────────────────
 
 def test_mfl_login_proves_the_franchise_and_mints_acct_session(env):
