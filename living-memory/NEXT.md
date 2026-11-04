@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [Priority Queue](#priority-queue)
 - [2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on](#2026-11-02--web-landing-update-1-cut-the-espnmfl-panels-or-enter-a-league-id-and-no-extra-account-needed-before-web-entry-ever-turns-on)
 - [2026-11-01 — Shop send (#574 / #577): two Update 1 follow-ups](#2026-11-01--shop-send-574--577-two-update-1-follow-ups)
 
@@ -55,6 +56,19 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## Priority Queue
+
+Launch handoff 2026-11-04. These seven items are active; older dated sections below are preserved history requiring retriage, not an authorization to run them.
+
+1. Verify the launch integration PR/current main and exact-head CI before doing more merge work; avoid duplicate merges. [Ledger](TEST_LEDGER.md).
+2. Resolve #584's KTC zero-weight pin decision; parser restoration and later blend activation remain separate operations.
+3. Hold release-only #456 until 2026-11-18; supply/validate the store install destination at the intended release.
+4. Complete platform proof/legacy-entry cleanup and installed-build checks before changing the landing flag; [runbook](../docs/runbook.md).
+5. Complete store/provider/device and enforcement evidence before enabling subscriptions, referral, D1 or tips. Code presence is distinct from activation.
+6. Address the separate board-history deletion race and wider private deck export filtering; scrub/reader merges do not prove these complete.
+7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state.
+
 
 ## 2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on
 
