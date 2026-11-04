@@ -742,6 +742,15 @@ _DEFAULT_CFG: dict[str, float] = {
     # live and passing, so flipping this to 1 restores arm A as a first-class
     # arm (and its two groups) with no deploy.
     "bakeoff_include_baseline":    0.0,
+    # Channel 1 swipe freeze (BL-001). 1 = DEFAULT: while trade.bakeoff is
+    # on, trade-card like/pass K is zeroed (bakeoff_runner.elo_freeze_mult),
+    # exactly as before the knob existed. 0 = swipes move the board again at
+    # trade_k_like / trade_k_pass x fit while the flag stays on for
+    # attribution. Any positive value freezes. Forward-only: stored
+    # swipe_decisions.k_factor is never rewritten, so a rollback to 1 stops
+    # future learning but does not revert boards. Read only on the swipe
+    # routes, never during generation.
+    "bakeoff_freeze_trade_k":      1.0,
 
     # ------------------------------------------------------------------
     # trade_gen.v2 — divergence-driven staged pipeline (backend/

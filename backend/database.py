@@ -3283,7 +3283,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_k_pass",          4.0,    "K-factor for a trade 'Pass' swipe (~12% of elo_k)"),
     ("trade_k_accept",       20.0,    "K-factor when both parties accept a trade match"),
     ("trade_k_decline_correction", 20.0,
-                                     "K-factor for reversal when a user declines after 'Interested' swipe"),
+                                     "UNUSED since BL-004 (trade_k_decline_net); kept so existing rows stay readable"),
+    ("trade_k_decline_net",  12.0,
+                                     "Net K of a declined match: the decline applies this plus the K its like was stored with"),
     # ── Tier Engine ──────────────────────────────────────────────────────
     ("tier_engine_enabled",    1.0,    "Feature flag: 1=tier-based trio filtering, 0=legacy (full pool)"),
     ("smart_matchup_enabled",  1.0,    "Feature flag: 1=Claude-powered matchup selection, 0=algorithmic only"),
@@ -3537,6 +3539,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("bakeoff_include_baseline",    0.0, "bake-off roster bit: 1 = arm A (baseline) generates; 0 = out (default)"),
     ("bakeoff_include_challenger",  1.0, "bake-off roster bit: 1 = arm D (challenger) generates; 0 = out"),
     ("bakeoff_include_gen_v2",      1.0, "bake-off roster bit: 1 = arm C (gen_v2) generates; 0 = out"),
+    # BL-001 — MATCHES trade_service._DEFAULT_CFG and the inline fallback in
+    # bakeoff_runner.elo_freeze_mult (all three are 1.0; G-064).
+    ("bakeoff_freeze_trade_k",      1.0, "BL-001 bake-off Channel 1: 1 = trade-card like/pass K frozen to 0 while trade.bakeoff is on (default; any value > 0 freezes); 0 = swipes learn at trade_k_like/trade_k_pass x fit with the flag still on. Forward-only: stored k_factor is never rewritten, so setting 1 again stops future learning but does not revert boards"),
     # OPERATOR RULING 2026-08-21 (batch-wide): ghosts are ruled out
     # entirely, so the SEED default is 0 — a fresh DB must not start
     # ghosting. <=0 disables ghosting inside the flag.
@@ -6690,8 +6695,19 @@ def save_trade_swipes(
     Elo AND persist the signal. Returns True only after both commit; a lost
     swipe write rolls back the claim so a contextful reason retry can repair.
     Ordinary callers retain their existing return/behavior.
+
+    A2 (docs/plans/generic-pick-signal-strip.md): a generic pick rung is never
+    persisted — same strip as record_trade_signal, so the replay keeps
+    mirroring the live board. The return value does NOT change: it keys off
+    the UNSTRIPPED pair, so a pair the strip empties still claims the reason
+    and returns True (it was handled; there was just nothing to write), and
+    `/api/trades/pass-reason`'s `elo_written` answers exactly as before.
     """
     now  = _now()
+    from .pick_values import strip_generic_pick_pair
+    had_pairs = any(w != l for w in winner_ids for l in loser_ids)
+    winner_ids, loser_ids = strip_generic_pick_pair(
+        winner_ids, loser_ids, site="save_trade_swipes")
     rows = []
     for wid in winner_ids:
         for lid in loser_ids:
@@ -6706,7 +6722,7 @@ def save_trade_swipes(
                 "created_at":       now,
                 "scoring_format":   scoring_format,
             })
-    if rows:
+    if rows or (had_pairs and pass_reason_key is not None):
         with engine.begin() as conn:
             if pass_reason_key is not None:
                 reason = conn.execute(select(trade_pass_reasons_table).where(and_(
@@ -6715,7 +6731,8 @@ def save_trade_swipes(
                 )).with_for_update()).first()
                 if reason is None or reason.elo_signal_at is not None:
                     return False
-            conn.execute(insert(swipe_decisions_table), rows)
+            if rows:
+                conn.execute(insert(swipe_decisions_table), rows)
             if pass_reason_key is not None:
                 conn.execute(update(trade_pass_reasons_table).where(
                     trade_pass_reasons_table.c.impression_id == pass_reason_key
@@ -9707,6 +9724,62 @@ def replace_user_taste_rows(
             ])
 
 
+def merge_user_taste_rows(
+    user_id: str,
+    rows: dict,
+    *,
+    seen: dict,
+    reward: float,
+    now_iso: str,
+    eps: float,
+) -> None:
+    """F5 — one outcome's taste write, safe against a concurrent outcome.
+
+    rows: {attr: (w_short, w_long)} computed from the rows read; seen:
+    {attr: updated_at} of those rows (an attr absent from it had none).
+    A row still as read takes its computed weights. Every other row (written,
+    created or deleted since the read, or never there) is upserted on the
+    primary key as `reward` on both vectors, added to the row's weights when
+    there is one: that row was written moments ago, so its decay is
+    negligible. Then rows left below `eps` on both vectors are deleted (GC on
+    update). One txn. Delete+insert (replace_user_taste_rows) lost the second
+    of two concurrent updates: it replaced the first, or failed on
+    user_taste_pkey (head-eng 2026-10-27)."""
+    if not rows:
+        return
+    t = user_taste_table
+    with engine.begin() as conn:
+        read = [a for a in sorted(rows) if a in seen]
+        matched = set()
+        if read:
+            matched = set(conn.execute(
+                update(t)
+                .where(t.c.user_id == user_id,
+                       or_(*(and_(t.c.attr == a, t.c.updated_at == seen[a]) for a in read)))
+                .values(w_short=case({a: float(rows[a][0]) for a in read}, value=t.c.attr),
+                        w_long=case({a: float(rows[a][1]) for a in read}, value=t.c.attr),
+                        updated_at=now_iso)
+                .returning(t.c.attr)).scalars())
+        rest = [a for a in sorted(rows) if a not in matched]
+        if rest:
+            if conn.dialect.name == "postgresql":
+                from sqlalchemy.dialects.postgresql import insert as dialect_insert
+            else:
+                from sqlalchemy.dialects.sqlite import insert as dialect_insert
+            stmt = dialect_insert(t).values([
+                {"user_id": user_id, "attr": a, "w_short": float(reward),
+                 "w_long": float(reward), "updated_at": now_iso} for a in rest])
+            conn.execute(stmt.on_conflict_do_update(
+                index_elements=[t.c.user_id, t.c.attr],
+                set_={"w_short": t.c.w_short + stmt.excluded.w_short,
+                      "w_long": t.c.w_long + stmt.excluded.w_long,
+                      "updated_at": stmt.excluded.updated_at}))
+        if rest or any(abs(ws) < eps and abs(wl) < eps for ws, wl in rows.values()):
+            conn.execute(delete(t).where(
+                t.c.user_id == user_id, t.c.attr.in_(list(rows)),
+                func.abs(t.c.w_short) < eps, func.abs(t.c.w_long) < eps))
+
+
 def replace_user_taste_prior(user_id: str, prior: dict, now_iso: str) -> None:
     """F5 — rewrite the user's board-derived prior wholesale (PRD amendment):
     every existing "prior:"-prefixed row is dropped, then one row per prior
@@ -12004,7 +12077,46 @@ def retract_awaiting_likes(
 # These local lambdas fall back to the hardcoded defaults if the table
 # isn't available yet (e.g. during the very first init_db() call).
 _K_ACCEPT             = lambda: get_config().get("trade_k_accept",             20.0)
-_K_DECLINE_CORRECTION = lambda: get_config().get("trade_k_decline_correction", 20.0)
+_K_DECLINE_NET        = lambda: get_config().get("trade_k_decline_net",        12.0)
+
+
+def _decline_signals(conn, user_id: str, give: list, receive: list,
+                     scoring_format: str | None = None) -> list[dict]:
+    """A decliner's correction, one signal per (give, receive) pair (BL-004):
+    winner=give, loser=receive at K = trade_k_decline_net + the K the user's
+    'Interested' swipe on that pair was stored with (swipe_decisions: winner
+    = the receive id, loser = the give id, decision_type 'trade'; the latest
+    such row, 0 when there is none). So a decline nets -trade_k_decline_net
+    in K at any like K: frozen (0), half K or full K, and whatever fit_mult
+    did. `scoring_format` (the board the decline is saved to; a legacy NULL
+    row reads as DEFAULT_SCORING) limits the like to that board; None reads
+    any. Only the latest like on a pair is netted: an earlier like on the
+    same pair, at a K since changed, keeps its own."""
+    sd = swipe_decisions_table
+    net = _K_DECLINE_NET()
+    signals = []
+    for give_id in give:
+        for receive_id in receive:
+            if give_id == receive_id:
+                continue
+            q = select(sd.c.k_factor).where(
+                sd.c.user_id == user_id,
+                sd.c.winner_player_id == receive_id,
+                sd.c.loser_player_id == give_id,
+                sd.c.decision_type == "trade",
+            )
+            if scoring_format is not None:
+                q = q.where(func.coalesce(sd.c.scoring_format, DEFAULT_SCORING) == scoring_format)
+            liked = conn.execute(
+                q.order_by(sd.c.created_at.desc(), sd.c.id.desc()).limit(1)).scalar()
+            signals.append({
+                "user_id":       user_id,
+                "winner_ids":    [give_id],
+                "loser_ids":     [receive_id],
+                "k_factor":      net + float(liked or 0.0),
+                "decision_type": "disposition",
+            })
+    return signals
 
 
 def dismiss_match(match_id: int, user_id: str) -> dict:
@@ -12049,6 +12161,7 @@ def record_match_disposition(
     match_id: int,
     user_id: str,
     decision: str,
+    scoring_format: str | None = None,
 ) -> dict:
     """
     Record a user's accept/decline decision on a trade match.
@@ -12074,8 +12187,11 @@ def record_match_disposition(
     ELO signal semantics
     ────────────────────
     Both accept   → for each user: winner=receive, loser=give, K=20
-    Any decline   → for each decliner: winner=give, loser=receive, K=20
-                    (net effect ≈ −12 after the original +8 like nudge)
+    Any decline   → for each decliner, per (give, receive) pair:
+                    winner=give, loser=receive, K = 12 + the K the like on
+                    that pair was stored with on `scoring_format`'s board
+                    (the board the caller saves the signals to), so the net
+                    is −12 in K at any like K (BL-004, _decline_signals)
     """
     now = _now()
 
@@ -12167,13 +12283,8 @@ def record_match_disposition(
                     "decision_type": "disposition",
                 })
             else:
-                elo_signals.append({
-                    "user_id":       row.user_a_id,
-                    "winner_ids":    a_give,
-                    "loser_ids":     a_receive,
-                    "k_factor":      _K_DECLINE_CORRECTION(),
-                    "decision_type": "disposition",
-                })
+                elo_signals.extend(_decline_signals(conn, row.user_a_id, a_give, a_receive,
+                                                    scoring_format))
 
             # Build ELO signal for user_b
             if b_dec == "accept":
@@ -12185,13 +12296,8 @@ def record_match_disposition(
                     "decision_type": "disposition",
                 })
             else:
-                elo_signals.append({
-                    "user_id":       row.user_b_id,
-                    "winner_ids":    b_give,
-                    "loser_ids":     b_receive,
-                    "k_factor":      _K_DECLINE_CORRECTION(),
-                    "decision_type": "disposition",
-                })
+                elo_signals.extend(_decline_signals(conn, row.user_b_id, b_give, b_receive,
+                                                    scoring_format))
 
     # F3 (deck.fatigue) — additive context for the decline-suppression hook:
     # the package from the CALLER's perspective plus the partner's current

@@ -229,6 +229,9 @@ def test_cap_applies_after_the_ktc_blend(monkeypatch):
     DP curve. Compressing before the blend would let that lift land the QB
     back above the cap — so the cap must be the LAST step."""
     monkeypatch.setattr(dl, "_blend_config", lambda: (0.5, 1.0))
+    # A 2-player pool is below the thin floor (models-lead R5 keeps such a
+    # pool DP-only); this test is about the cap's order, so let it blend.
+    monkeypatch.setattr(dl, "KTC_MIN_MATCHED", 1)
     monkeypatch.setattr(dl, "_ktc_consensus", lambda: {
         "qb_boosted": {"pos": "QB", "values": {FMT: 9999.0}},
         "wr1":        {"pos": "WR", "values": {FMT: 5000.0}},

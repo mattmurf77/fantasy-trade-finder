@@ -187,6 +187,25 @@ User-authorized active launch integration, based on main `af57e59c` (#582). Ever
 ## 2026-11-04 — #430 retains ask-12 flag-off state after #582
 
 Merged main `af57e59c` after #582. `landing.platform_options` remains false in features.json and the three updated fixture mirrors; #430's `espn.signin` flag does not bypass the landing/entry gate. Retested the platform/feedback integration plus `test_seed_ui_test_db` flag mirrors offline: **347 passed in 17.82 s** (same blocked-network harness and scratch SQLite as the first resync). No flag activation or production action was performed.
+
+## 2026-11-04 — Model launch stack integration (local candidate)
+
+Retains exact source heads #389, #374, #462, #493, #472 and #467 on the
+privacy/Shop #592 foundation. No KTC parser #584, feature flag or production
+configuration change is included. Freeze seed/default remains 1. KTC remains
+operational at the existing production blend weight 0.5; this path is not dark.
+
+- Offline targeted integration: **247 passed, 5 skipped in 14.24s** across
+  generic-pick learning, model guardrails/replay, freeze golden behavior,
+  net decline, taste concurrency, evidence locks, KTC blend/cap, scrub held
+  writes, Shop signals and freeze defaults. External sockets were blocked.
+- Independent reviewer: **132 passed, 5 optional PostgreSQL skips**, then
+  **5/5 passed** on a disposable socket-only PostgreSQL synthetic cluster.
+  Confirmed deletion-token mapping, generic-pick stripping, immutable packed
+  evidence and evidence-write serialization remain intact.
+- No full local suite, production writes, provider requests or simulator run.
+  Full exact-head GitHub CI remains mandatory before main. D-056 posture.
+
 ## 2026-11-04 — Privacy/Shop launch integration batch (local candidate)
 
 Base: main `af57e59c`. Preserved every actual GitHub PR head as an ancestor,
@@ -944,6 +963,29 @@ Gates: the scope block `docs/plans/trade-time-to-suggestion/scope-deletion-scrub
   - `test_daily_tick_route.py`: ten steps.
   - `test_purge_entry_users.py`: `user_taste.attr`, the derived `partner:<id>` key, listed as not a user column.
 - **Suites:** every test touching deletion, export or the tick (17 files): 909 passed before those two updates, and both pass after them (68). **The full backend suite at `671dd526`** (main `fabfe92c` merged): 10,195 passed, 2 skipped, 0 failed.
+## 2026-11-02 — #472, the evidence lock-hold fix: release-lead's QA (GO-with-notes at 90098f89), addressed
+
+Gates: as in #472's PR body; post-flip and flag-on only. D-056: `FTF_SKIP_SIM_GATE=1` posture; backend only.
+
+- **P2-2:** main is merged in (`9b5fcbbf`, clean), so CI and the run below are on today's main, including #517 and #551.
+- **P3-1:** the flush's plan, the `served_at` loop and `_pack_candidate_set` run inside the `try` whose `finally` settles the covered ids and restores the held withdrawals. A test makes the plan raise.
+- **P3-2:** a test pins every `blob_input` and `plan_input` under `_deck_evidence_write_lock` (store and first delivery, packed and stage 1). Another pins a taken input against writers' changes, for both bytes and plan.
+- **Sabotage:** 4 new, all RED: the plan outside the `try`, the store's input outside the write lock, `diagnostics` by reference, `run_meta` by reference.
+- **Runs:** `test_evidence_lock_holds.py` 18 passed; the full backend suite 10,311 passed, 3 skipped.
+- **P2-1:** models-lead's R-G entry is in the group notes (`trades-eng-472-rg-entry.md`). Merge waits on it.
+## 2026-11-03 — #467: the KTC blend's thin floor and coverage gate (models-lead addendum R5)
+
+Gates: `backend/data_loader.py` (not engine-hashed), its tests and the runbook. No route, schema, event, flag or knob. A model change: models-lead's R5 asked for it, and it goes back for an R-G check.
+
+- **Thin:** below `KTC_MIN_MATCHED` (50) matched rows, the blend doesn't run, so the alert line's "DP-only" is now true (QA's P2).
+- **Partial:** a coverage gate, `KTC_MIN_COVERAGE`, overall 0.59 and QB 0.63, RB 0.59, WR 0.63, TE 0.47. That's about 85% of the 2026-07-17 healthy fetch (0.697 overall), rounded down. Below any floor the format stays DP-only, with alert reason `partial` (QA's P3).
+- **`disagrees` still blends,** as before.
+- **Tests:** `test_ktc_blend.py`, 22.
+  - The healthy 07-17 fetch blends and clears every floor even when each is raised 10%.
+  - Thin is DP-only.
+  - QA's WR-only, QB-only and random-half subsets each go `partial` and stay DP-only.
+  - `test_qb_1qb_cap.py`'s 2-player blend test lowers the thin floor for itself, since it tests the cap's order.
+- **Loader suites (47 files, in batches):** 1281 passed, 1 skipped.
 
 ## 2026-10-31 — C2, release-lead's #566 QA and re-QA (GO-with-notes): renders redrawn, checklist fixed, guard by meaning
 
@@ -1135,6 +1177,37 @@ Full gates, not express (platforms-eng; shape approved by head-eng 2026-10-27). 
 - **Targeted neighbours:** `test_entry_platform_route`, `test_verified_sessions`, `test_mfl_auth_link_route`, `test_persistent_sessions`, `test_account_first`, `test_accounts`, `test_private_session_ownership`, `test_feedback_attach_on_verify`, `test_user_data_lifecycle`, `test_deletion_session_races`, `test_link_status_routes`, `test_verified_reads`, `test_sleeper_write_route` → 231 passed, 5 failed (the fake's TypeError); after the fix `test_entry_platform_route` 25/25, and the full suite below covers all 13 files.
 - **Full suite** (`python3 -m pytest backend/tests -q -p no:cacheprovider`, no `-x`): **9,429 passed, 2 skipped, 0 failed** in 41:40. No wall-clock flake this run.
 - **Operator TestFlight check** after merge: the 5-step checklist in the scope's §3 (a username with history signs in verified and sees its own boards in both formats; a pin change survives a relaunch; a username without history signs in as before).
+## 2026-10-27 — Concurrent swipes no longer lose a taste update (user_taste upsert)
+
+Gates: head-eng's assigned bug fix (release-lead's prod log: `UniqueViolation` on `user_taste_pkey` at `taste_service.py:363`, 20:23:49Z). The scope block is waived: this is a bug fix that makes F5 store what it already claimed to store. There is no route, schema, event, flag or knob change, and the data dictionary and config reference each gain a line. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest on SQLite and on a local Postgres 18.
+
+- **The bug:**
+  - Two outcomes in flight each read the user's taste rows, then wrote them with delete + insert.
+  - On Postgres the second insert failed on the primary key and the update was dropped (logged non-fatal). On SQLite it silently replaced the first.
+  - Either way one swipe's reward was lost.
+- **The fix:** `database.merge_user_taste_rows`, called by `update_taste_from_outcome`, does one transaction:
+  - an `UPDATE … RETURNING` writes the computed weights to rows still as read (`updated_at` unchanged);
+  - every other row is upserted on the PK as the reward, added to whatever is there: a row written, created or deleted since the read, or one that was never there;
+  - rows left below `taste_epsilon` on both vectors are deleted (GC on update).
+- **Tests:** `test_taste_concurrent_writes.py`, 5 tests on SQLite, plus Postgres when `FTF_TEST_POSTGRES_URL` is set.
+  - Threads read before either writes:
+    - two first swipes;
+    - two swipes on 10-day-old rows;
+    - a pass that empties a row next to a like, in both write orders;
+    - and the one-swipe baseline.
+  - **On main's code:** 8 of 10 fail. The Postgres cases log the prod error verbatim; only the baseline passes.
+  - **With the fix:** 10/10 pass. The taste-adjacent suites (deck taste, frozen taste, exploration, account deletion, age pref, bake-off serving, evidence pack, nightly lean, scorer contract) all pass, 207 tests.
+  - **Full backend suite** at defdc65b (SQLite, no Postgres URL): 9336 passed, 7 skipped, 5 of them this file's Postgres cases.
+- **Sabotage, each red then restored (5):**
+  - the merge overwrites instead of adding (6 red);
+  - no "still as read" check (4);
+  - a non-matching row inserts its computed weights, not the reward (6);
+  - no GC after the write (2);
+  - GC only after a merge (2).
+- **Not covered (follow-ups):**
+  - the read-side GC in `load_taste_vectors` still deletes by what it read, so it can drop a reward written in between;
+  - `replace_user_taste_prior` is still delete + insert, so two concurrent board saves can hit the same primary-key error;
+  - CI has no Postgres, so the Postgres cases run only where the URL is set.
 
 ## 2026-10-27 — `POST /api/events` transport guard: a chunked body is capped before it is parsed, 413 (#360 pattern)
 

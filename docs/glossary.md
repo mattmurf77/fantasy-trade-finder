@@ -35,7 +35,7 @@ exceptions. See [configuration](config-reference.md#shared-recommendation-signif
 - Trade like: `trade_k_like = 8`
 - Trade pass: `trade_k_pass = 4`
 - Trade accept: `trade_k_accept = 20`
-- Trade decline correction: `trade_k_decline_correction = 20`
+- Trade decline correction: `trade_k_decline_net = 12`, plus the K the declined pair's like was stored with, per (give, receive) pair, so like + decline nets −12 at any like K (BL-004; the old fixed `trade_k_decline_correction = 20` is unused)
 
 The two *deck-swipe* K's above (like/pass) are additionally scaled by **fit-congruence** (below) before they are applied or persisted; the other three are not.
 
