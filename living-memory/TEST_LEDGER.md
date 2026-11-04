@@ -1,3 +1,18 @@
+## 2026-11-04 — Privacy/Shop resync with latest main `787b9fc4`
+
+Merged latest main as a parent, preserving both histories and every original
+privacy/Shop PR head. Only additive runbook/ledger/test-index documentation
+conflicts needed resolution; both histories and Shop/share guard entries remain.
+No runtime feature values differ from current main. No activation or remote write.
+
+- Targeted nine-file integrated rerun: **279 passed, 1 skipped in 22.42 s**;
+  covers sign-in budgets/history/deletion, Shop signals, held deletion writes,
+  packs/stage3, partner-redacted model reads and account deletion. The known
+  Shop generic-pick skip awaits #389 in the model batch.
+- Executed guards: Shop send **33/33**, share text **109/109**.
+- Diff whitespace check against current main passes. Full GitHub CI remains
+  required on the final pushed candidate; no full local suite was run.
+
 ## 2026-11-04 — O9 EAS build archive exclusions
 
 Integrated `985d767a` onto main `fd5390ac`, resolving only the package-script
