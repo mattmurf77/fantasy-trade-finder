@@ -30,12 +30,13 @@ import SendInSleeperButton from './SendInSleeperButton';
 import OutlookBiasReceipt, { outlookDisplayName } from './OutlookBiasReceipt';
 import TradeDnaSheet from './TradeDnaSheet';
 import LeagueSwitcherSheet from './LeagueSwitcherSheet';
-import ShareTradeImage, { type ShareAsset } from './ShareTradeImage';
+import ShareTradeImage, { SHARE_VALUE_LINE, type ShareAsset } from './ShareTradeImage';
 import { Badge, Button, Card, Icon, Text as ChalkText, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { navigationRef } from '../navigation/RootNav';
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { chalk, fonts, ice, ink, radii, semantic, space, type } from '../theme/chalkline';
 import { posColor, type Position } from '../theme/colors';
@@ -537,6 +538,14 @@ export default function InLeagueCalculator({
     return m;
   }, [picksQ.data, pickById]);
   const picksSupported = picksQ.data?.picks_supported ?? true;
+  // B5 item 3 (draft-eng's gates): the new note and its link only while both
+  // `picks.assign` (the grid) and `picks.assign_tradeable` are on. Then
+  // `picks_supported` is the server's DATA test (get_league_picks: false only
+  // for an ESPN league with no assigned picks), so "none set up" is never
+  // claimed after setup. Either flag off: today's line.
+  const picksAssign = useFlag('picks.assign');
+  const picksTradeable = useFlag('picks.assign_tradeable');   // both hooks, every render
+  const picksSetup = picksAssign && picksTradeable;
 
   const board = useMemo<Record<string, number>>(
     () => ({
@@ -1197,8 +1206,27 @@ export default function InLeagueCalculator({
       ) : null}
         </>
       ) : null}
-      {!picksSupported ? (
+      {!picksSupported && !picksSetup ? (
         <Text style={styles.note}>Draft picks aren't available for ESPN leagues.</Text>
+      ) : null}
+      {!picksSupported && picksSetup ? (
+        <View style={styles.picksNote}>
+          <Text style={styles.note}>No draft picks are set up for this ESPN league yet.</Text>
+          {leagueId ? (
+            <Pressable
+              testID="calc.picks-setup-link"
+              accessibilityRole="link"
+              hitSlop={6}
+              onPress={() => {
+                // The root stack, as MemberEnteredMarker's correction link:
+                // the calculator also renders inside Trades' canvas and card.
+                if (navigationRef.isReady()) navigationRef.navigate('PickAssignment', { leagueId });
+              }}
+            >
+              <Text style={styles.noteLink}>Set up picks →</Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
 
       {/* #384 — the two rosters stand as two vertical columns rather than
@@ -1543,7 +1571,7 @@ export default function InLeagueCalculator({
               renders above the verdict (see the D-303-1 comment there).
               Share + Clear deliberately stay here. */}
           {/* Share-as-image (DynastyDealer teardown 2026-07-26): render the
-              verdict to a PNG for the native share sheet; text fallback. */}
+              trade to a PNG for the native share sheet; text fallback. */}
           {bothSides && ev ? (
             <ShareTradeImage
               caption={`vs @${opponent?.username ?? 'them'} · ${FORMAT_LABEL[format]}`}
@@ -1551,9 +1579,7 @@ export default function InLeagueCalculator({
               receiveTitle="You receive"
               sendAssets={shareAssets(giveIds)}
               receiveAssets={shareAssets(receiveIds)}
-              sendTotal={ev.give_value}
-              receiveTotal={ev.receive_value}
-              verdictLine={shareVerdictLine(ev, opponent?.username ?? 'them')}
+              verdictLine={SHARE_VALUE_LINE}
               giveIds={giveIds}
               receiveIds={receiveIds}
               surface="calc_in_league"
@@ -1565,11 +1591,10 @@ export default function InLeagueCalculator({
                 (id) => playerById[id]?.pos === 'PICK',
               )}
               fallbackText={[
-                `Trade idea vs @${opponent?.username ?? 'them'} (Dynasty Trade Finder · ${FORMAT_LABEL[format]})`,
+                `Trade idea vs @${opponent?.username ?? 'them'} (Fleeced · ${FORMAT_LABEL[format]})`,
                 `I send: ${giveIds.map((id) => playerById[id]?.name ?? id).join(', ')}`,
                 `I get: ${receiveIds.map((id) => playerById[id]?.name ?? id).join(', ')}`,
-                `Consensus: ${Math.round(ev.give_value).toLocaleString()} vs ${Math.round(ev.receive_value).toLocaleString()}`,
-                shareVerdictLine(ev, opponent?.username ?? 'them'),
+                SHARE_VALUE_LINE,
               ].join('\n')}
             />
           ) : null}
@@ -1745,20 +1770,6 @@ export default function InLeagueCalculator({
       />
     </View>
   );
-}
-
-// One-line verdict for the share card / text fallback — mirrors the
-// LeagueVerdict headline's logic, compressed.
-function shareVerdictLine(ev: CalcEvaluationInLeague, oppName: string): string {
-  if (ev.basis === 'divergence') {
-    if (ev.mutual_gain) return 'Win–win by both boards';
-    if (ev.your_value_delta > 0 && ev.their_value_delta <= 0)
-      return `Wins by my board — @${oppName} likely disagrees`;
-    if (ev.your_value_delta <= 0 && ev.their_value_delta > 0)
-      return `@${oppName} wins this one by their board`;
-    return 'Roughly even by both boards';
-  }
-  return ev.verdict ? `Consensus verdict: ${ev.verdict}` : 'Consensus read';
 }
 
 // In-league verdict. #204: the shared pick-denominated TradeValueBar is the
@@ -2194,6 +2205,8 @@ const styles = StyleSheet.create({
     color: chalk.dim,
   },
   note: { ...type.bodySm },
+  picksNote: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: space.sm },
+  noteLink: { ...type.bodySm, color: ice.base },
   // #202 — collapsed partner row ("Trading with @x · Change").
   partnerCollapsed: {
     flexDirection: 'row',

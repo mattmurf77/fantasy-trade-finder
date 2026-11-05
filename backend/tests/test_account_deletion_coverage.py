@@ -1,9 +1,13 @@
 """Synthetic-only regression coverage for the current account-deletion schema."""
+import inspect
+import io
 import json
+import re
+import tokenize
 
 import pytest
 from cryptography.fernet import Fernet
-from sqlalchemy import Float, Integer, create_engine, event, insert, select
+from sqlalchemy import Float, Integer, LargeBinary, create_engine, event, insert, select
 
 from backend import accounts, database as db
 
@@ -35,7 +39,8 @@ def seed(conn, table, marker, **values):
             continue
         if col.primary_key and isinstance(col.type, Integer):
             continue
-        row[col.name] = 1 if isinstance(col.type, (Integer, Float)) else marker
+        row[col.name] = (1 if isinstance(col.type, (Integer, Float))
+                         else marker.encode() if isinstance(col.type, LargeBinary) else marker)
     row.update(values)
     conn.execute(insert(table).values(**row))
 
@@ -47,12 +52,16 @@ def rows(engine, table):
 
 @pytest.mark.parametrize("table_name", accounts._ADDITIONAL_PRIVATE_TABLES)
 def test_new_private_rows_and_aliases_removed_counterparty_kept(engine, table_name):
+    """The user's and alias's rows go; the counterparty's row stays exactly as
+    it was, column for column (#544 QA P2-1: an UPDATE of every user's rows
+    through the private-table loop kept the right user_ids and passed)."""
     table = getattr(db, table_name + "_table")
     with engine.begin() as conn:
         for uid in (UID, ALIAS, OTHER):
             seed(conn, table, uid, user_id=uid)
+    before = [dict(r) for r in rows(engine, table) if r["user_id"] == OTHER]
     accounts.delete_user_data(UID)
-    assert [r["user_id"] for r in rows(engine, table)] == [OTHER]
+    assert [dict(r) for r in rows(engine, table)] == before
 
 
 def test_encrypted_credentials_billing_and_all_sessions_removed(engine):
@@ -118,6 +127,21 @@ def test_shared_device_deletes_anonymous_history_preserves_other_identity(engine
     assert {r["user_id"] for r in rows(engine, db.user_events_table)} == {OTHER, "device:unrelated"}
     assert {r["unit_id"] for r in rows(engine, db.experiment_assignments_table)} == {OTHER, "device:unrelated"}
     assert [r["sleeper_user_id"] for r in rows(engine, db.identity_links_table)] == [OTHER]
+
+
+def test_an_outcome_on_a_deck_with_no_rows_and_no_pack_goes_by_its_owner(engine):
+    """G3-e (legal R28.23, condition 2): #535's shape, an outcome whose deck
+    has no row and no pack, is reached only through deck_outcomes.user_id. That
+    id is the verified session's user_id (_save_deck_outcome_safe), so it must
+    be one the alias resolution covers: the user's own id, an account alias, or
+    a working key a durable session recorded for the account."""
+    working = "synthetic-working-key"
+    with engine.begin() as conn:
+        seed(conn, db.sessions_table, "synthetic-session", user_id=working, account_id=AID)
+        for i, uid in enumerate((UID, ALIAS, working, OTHER)):
+            seed(conn, db.deck_outcomes_table, uid, impression_id=f"gone-job:{i}", user_id=uid)
+    accounts.delete_user_data(UID)
+    assert [r["user_id"] for r in rows(engine, db.deck_outcomes_table)] == [OTHER]
 
 
 def test_outcomes_follow_impressions_shared_trade_record_retained(engine):
@@ -196,6 +220,46 @@ def test_referral_counterparties_and_public_league_grids_are_preserved(engine):
     assert len(history) == 1 and history[0]["owner_user_id"] is None
 
 
+def test_referral_ledger_columns_on_deletion(engine):
+    """Referral loop L7 (FR-23): the deleted sender's public invite id
+    (share_token) dies on every alias's rows, so the link credits no one;
+    surface and attribution_method stay with the anonymized row; the
+    counterparty's own link (the user was only the invitee) is untouched."""
+    with engine.begin() as conn:
+        seed(conn, db.referrals_table, "sent", referrer_user_id=UID,
+             referred_user_id=OTHER, invite_token="tokSent00001", share_token="tokSent00001",
+             surface="league_home", attribution_method="token", status="joined")
+        seed(conn, db.referrals_table, "alias-sent", referrer_user_id=ALIAS,
+             invite_token="tokAlias0001", share_token="tokAlias0001",
+             surface="web_invite", status="pending")
+        seed(conn, db.referrals_table, "received", referrer_user_id=OTHER,
+             referred_user_id=UID, invite_token="tokRecv00001", share_token="tokRecv00001",
+             surface="trades_banner", attribution_method="league_match", status="joined")
+    accounts.delete_user_data(UID)
+    by_token = {r["invite_token"]: r for r in rows(engine, db.referrals_table)}
+    for tok, surface in (("tokSent00001", "league_home"), ("tokAlias0001", "web_invite")):
+        assert by_token[tok]["share_token"] is None
+        assert by_token[tok]["surface"] == surface
+        assert by_token[tok]["referrer_user_id"].startswith(accounts.DELETED_USER_PLACEHOLDER)
+    assert by_token["tokSent00001"]["attribution_method"] == "token"
+    received = by_token["tokRecv00001"]
+    assert received["share_token"] == "tokRecv00001" and received["referred_user_id"] is None
+    assert (received["surface"], received["attribution_method"]) == ("trades_banner", "league_match")
+    assert received["referrer_user_id"] == OTHER
+
+
+def test_trade_share_tokens_minted_by_the_user_are_deleted(engine):
+    """Build O8: a share link dies with its sharer's account (every alias);
+    the counterparty's own tokens for the same match survive."""
+    with engine.begin() as conn:
+        for uid in (UID, ALIAS, OTHER):
+            seed(conn, db.trade_share_tokens_table, uid,
+                 token="synthetic-token-" + uid, match_id=1, created_by=uid)
+    counts = accounts.delete_user_data(UID)
+    assert counts["trade_share_tokens_deleted"] == 2
+    assert [r["created_by"] for r in rows(engine, db.trade_share_tokens_table)] == [OTHER]
+
+
 def test_route_evicts_bound_alias_and_account_sessions(engine, monkeypatch):
     from backend import server
     sessions = {
@@ -205,7 +269,7 @@ def test_route_evicts_bound_alias_and_account_sessions(engine, monkeypatch):
         "synthetic-other-token": {"user_id": OTHER},
     }
     monkeypatch.setattr(server, "touch_user_activity", lambda *a, **kw: None)
-    monkeypatch.setattr(accounts, "has_apple_identity", lambda *a, **kw: False)
+    monkeypatch.setattr(accounts, "apple_identity_subjects", lambda *a, **kw: set())
     with server._sessions_lock:
         server._sessions.update(sessions)
     try:
@@ -218,6 +282,63 @@ def test_route_evicts_bound_alias_and_account_sessions(engine, monkeypatch):
         with server._sessions_lock:
             for token in sessions:
                 server._sessions.pop(token, None)
+
+
+def _outlook_entry(basis, user_id):
+    """Store a GET /api/league/outlook result for this caller; returns its key."""
+    from backend import outlook_result_cache as orc
+    key = orc.make_key(league_id="synthetic-league", basis=basis, scoring_format="1qb_ppr",
+                       user_id=user_id, state={}, player_value={}, player_pos={},
+                       model_cfg={}, playoff_seed_type=None, strength_source="auto")
+    orc.OUTLOOK_RESULTS.get_or_compute(key, lambda: {"teams": []})
+    return key
+
+
+def _delete_as_owner(monkeypatch):
+    from backend import server
+    token = "synthetic-outlook-delete-token"
+    monkeypatch.setattr(server, "touch_user_activity", lambda *a, **kw: None)
+    monkeypatch.setattr(accounts, "apple_identity_subjects", lambda *a, **kw: set())
+    with server._sessions_lock:
+        server._sessions[token] = {"user_id": UID, "account_id": AID, "verified": True}
+    try:
+        return server.app.test_client().delete("/api/account", headers={"X-Session-Token": token})
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop(token, None)
+
+
+def test_route_purges_the_users_personal_outlook_results(engine, monkeypatch):
+    """Release-lead QA on #512: a personal outlook result is keyed on the
+    caller, so the user's and their alias's entries leave process memory with
+    the account; another caller's and the shared consensus entry stay."""
+    from backend import outlook_result_cache as orc
+    for who in (UID, ALIAS):
+        _outlook_entry("personal", who)
+    kept = [_outlook_entry("personal", OTHER), _outlook_entry("consensus", UID)]
+    response = _delete_as_owner(monkeypatch)
+    assert response.status_code == 200, response.get_json()
+    assert list(orc.OUTLOOK_RESULTS._entries) == kept
+
+
+def test_route_deletion_response_is_unchanged_when_the_outlook_purge_raises(
+        engine, monkeypatch, caplog):
+    from backend import outlook_result_cache as orc
+    real, counts = accounts.delete_user_data, []
+
+    def spy(*a, **kw):
+        counts.append(real(*a, **kw))
+        return counts[-1]
+
+    def boom(_user_ids):
+        raise RuntimeError("synthetic purge failure")
+
+    monkeypatch.setattr(accounts, "delete_user_data", spy)
+    monkeypatch.setattr(orc.OUTLOOK_RESULTS, "purge_callers", boom)
+    response = _delete_as_owner(monkeypatch)
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json() == {"ok": True, "deleted": counts[0], "apple_revoked": False}
+    assert "outlook result purge errored (continuing)" in caplog.text
 
 
 def test_export_includes_alias_private_rows_and_omits_credentials(engine):
@@ -264,3 +385,655 @@ def test_win_now_private_data_exports_and_deletes_all_account_aliases(engine, na
     counts = accounts.delete_user_data(UID)
     assert counts[name + "_deleted"] == 2
     assert [row["user_id"] for row in rows(engine, table)] == [OTHER]
+
+
+def _pick(conn, pick_id, platform, owner, original, assigned_by=None):
+    seed(conn, db.draft_picks_table, pick_id, pick_id=pick_id, league_id=f"{platform}-league",
+         platform=platform, owner_user_id=owner, original_user_id=original,
+         owner_username="Team " + pick_id, original_username="Team " + pick_id,
+         assigned_by=assigned_by)
+
+
+def _picks(engine):
+    return {r["pick_id"]: r for r in rows(engine, db.draft_picks_table)}
+
+
+def test_platform_pick_grid_owner_ids_anonymized_sleeper_grid_untouched(engine):
+    """MFL/ESPN grids hold the importer's Fleeced id; Sleeper grids keep public ids."""
+    gone = accounts.DELETED_USER_PLACEHOLDER
+    with engine.begin() as conn:
+        _pick(conn, "mfl-own", "mfl", UID, UID)            # the importer's own pick
+        _pick(conn, "mfl-alias", "mfl", ALIAS, ALIAS)      # the bound acct_ alias
+        _pick(conn, "mfl-traded-in", "mfl", UID, OTHER)    # OTHER's pick, now UID's
+        _pick(conn, "mfl-traded-out", "mfl", OTHER, UID)   # UID's pick, now OTHER's
+        _pick(conn, "mfl-other", "mfl", OTHER, OTHER)      # another owner on the same grid
+        _pick(conn, "espn-own", "espn", UID, UID)
+        _pick(conn, "sleeper-own", "sleeper", UID, UID)    # public Sleeper ids: kept
+        _pick(conn, "legacy-own", None, UID, UID)          # pre-#158 row, no platform: kept
+    counts = accounts.delete_user_data(UID)
+    picks = _picks(engine)
+    owners = lambda pid: (picks[pid]["owner_user_id"], picks[pid]["original_user_id"])  # noqa: E731
+    assert owners("mfl-own") == (gone, gone)
+    assert owners("mfl-alias") == (gone, gone)
+    assert owners("mfl-traded-in") == (gone, OTHER)
+    assert owners("mfl-traded-out") == (OTHER, gone)
+    assert owners("mfl-other") == (OTHER, OTHER)
+    assert owners("espn-own") == (gone, gone)
+    assert owners("sleeper-own") == (UID, UID)
+    assert owners("legacy-own") == (UID, UID)
+    # Rows are kept (other members rely on the grid); only the ids change.
+    assert len(picks) == 8
+    assert counts["draft_picks_owner_anonymized"] == 5
+
+
+@pytest.mark.parametrize("deleted", ["acct_mfl-signin", "entry:mfl:61408.f0003"])
+def test_platform_only_users_pick_rows_anonymized_on_the_mfl_grid(engine, deleted):
+    """A proof-based MFL sign-in (acct_*) and an old entry user own picks by Fleeced id."""
+    gone = accounts.DELETED_USER_PLACEHOLDER
+    with engine.begin() as conn:
+        if deleted.startswith(accounts.ACCOUNT_USER_PREFIX):
+            conn.execute(insert(db.accounts_table).values(
+                account_id=deleted[len(accounts.ACCOUNT_USER_PREFIX):], created_at="2026-10-27"))
+        conn.execute(insert(db.users_table).values(sleeper_user_id=deleted))
+        _pick(conn, "mine", "mfl", deleted, deleted)
+        _pick(conn, "theirs", "mfl", OTHER, OTHER)
+        _pick(conn, "placeholder", "mfl", "mfl:61408.f0004", "mfl:61408.f0004")
+        _pick(conn, "sleeper", "sleeper", OTHER, OTHER)
+    counts = accounts.delete_user_data(deleted)
+    picks = _picks(engine)
+    assert (picks["mine"]["owner_user_id"], picks["mine"]["original_user_id"]) == (gone, gone)
+    assert (picks["theirs"]["owner_user_id"], picks["theirs"]["original_user_id"]) == (OTHER, OTHER)
+    assert picks["placeholder"]["owner_user_id"] == "mfl:61408.f0004"
+    assert picks["sleeper"]["owner_user_id"] == OTHER
+    assert counts["draft_picks_owner_anonymized"] == 1
+
+
+def test_platform_pick_grid_names_follow_the_anonymized_ids(engine):
+    """A kept platform row named the person too: each scrubbed side becomes "Team <slot>"."""
+    gone = accounts.DELETED_USER_PLACEHOLDER
+    with engine.begin() as conn:
+        def pick(pick_id, league, owner, original, slot, platform="mfl"):
+            seed(conn, db.draft_picks_table, pick_id, pick_id=pick_id, league_id=league,
+                 platform=platform, owner_user_id=owner, owner_username="Name of " + owner,
+                 original_user_id=original, original_username="Name of " + original,
+                 original_roster_id=slot)
+        pick("own", "L1", UID, UID, "0003")             # UID's own pick; UID's slot is 0003
+        pick("in", "L1", UID, OTHER, "0005")            # OTHER's pick, now UID's
+        pick("out", "L1", OTHER, UID, "0003")           # UID's pick, now OTHER's
+        pick("alias-in", "L1", ALIAS, OTHER, "0006")    # the bound alias is the same person
+        pick("orphan-in", "L2", UID, OTHER, "0001")     # no own pick in L2: slot unknown
+        pick("alias-own", "L3", ALIAS, ALIAS, "0009")   # the slot comes from the alias's pick
+        pick("in-L3", "L3", UID, OTHER, "0002")
+        pick("two-a", "L4", UID, UID, "0001")           # two slots in one league:
+        pick("two-b", "L4", ALIAS, ALIAS, "0002")       # a traded-in pick can't tell which,
+        pick("in-L4", "L4", UID, OTHER, "0003")         # but an own pick still can
+        pick("espn-own", "E1", UID, UID, "2", platform="espn")
+        pick("sleeper", "S1", UID, UID, "4", platform="sleeper")
+    accounts.delete_user_data(UID)
+    picks = _picks(engine)
+    names = lambda pid: (picks[pid]["owner_username"], picks[pid]["original_username"])  # noqa: E731
+    assert names("own") == ("Team 0003", "Team 0003")
+    assert names("in") == ("Team 0003", "Name of " + OTHER)
+    assert names("out") == ("Name of " + OTHER, "Team 0003")
+    assert names("alias-in") == ("Team 0003", "Name of " + OTHER)
+    assert names("orphan-in") == (gone, "Name of " + OTHER)
+    assert names("in-L3") == ("Team 0009", "Name of " + OTHER)
+    assert names("two-a") == ("Team 0001", "Team 0001")
+    assert names("two-b") == ("Team 0002", "Team 0002")
+    assert names("in-L4") == (gone, "Name of " + OTHER)
+    assert names("espn-own") == ("Team 2", "Team 2")
+    assert names("sleeper") == ("Name of " + UID, "Name of " + UID)    # public Sleeper data
+    for pid, r in picks.items():
+        if pid != "sleeper":
+            text = json.dumps(r, default=str)
+            assert UID not in text and ALIAS not in text, pid
+
+
+def test_export_of_draft_picks_is_unchanged_by_the_pick_grid_anonymization(engine):
+    """Export still keys draft_picks on assigned_by only, never on grid ownership."""
+    with engine.begin() as conn:
+        _pick(conn, "owned", "mfl", UID, UID)                       # owned, not assigned
+        _pick(conn, "assigned", "espn", OTHER, OTHER, assigned_by=UID)
+        _pick(conn, "alias-assigned", "mfl", OTHER, OTHER, assigned_by=ALIAS)
+    archive = accounts.export_user_data(UID)
+    assert {r["pick_id"] for r in archive["tables"]["draft_picks"]} == {"assigned", "alias-assigned"}
+
+
+# #452 D2: recorded_picks has no platform column, so picking_team_id is
+# anonymized only where it is a Fleeced-minted id (entry:*, acct_*).
+def _recorded(conn, overall, picking_team_id):
+    seed(conn, db.recorded_picks_table, f"rp{overall}", league_id="espn-league", season=2027,
+         round=1, slot=overall, overall=overall, picking_team_id=picking_team_id,
+         player_id=f"p{overall}", recorded_by=OTHER, recorded_at="2026-10-26T00:00:00Z")
+
+
+def _recorded_teams(engine):
+    return {r["overall"]: r["picking_team_id"] for r in rows(engine, db.recorded_picks_table)}
+
+
+@pytest.mark.parametrize("deleted", [
+    "entry:espn:{5EED0000-AAAA-BBBB-CCCC-DDDDEEEEFFFF}", "entry:mfl:61408.f0003", "acct_espn-signin"])
+def test_recorded_pick_team_ids_anonymized_where_fleeced_minted(engine, deleted):
+    with engine.begin() as conn:
+        if deleted.startswith(accounts.ACCOUNT_USER_PREFIX):
+            conn.execute(insert(db.accounts_table).values(
+                account_id=deleted[len(accounts.ACCOUNT_USER_PREFIX):], created_at="2026-10-26"))
+        conn.execute(insert(db.users_table).values(sleeper_user_id=deleted))
+        _recorded(conn, 1, deleted)
+        _recorded(conn, 2, OTHER)
+        _recorded(conn, 3, "espn:{SOMEONE-ELSE}")
+        _recorded(conn, 4, None)
+    counts = accounts.delete_user_data(deleted)
+    assert _recorded_teams(engine) == {
+        1: accounts.DELETED_USER_PLACEHOLDER, 2: OTHER, 3: "espn:{SOMEONE-ELSE}", 4: None}
+    assert counts["recorded_picks_picking_team_id_anonymized"] == 1
+
+
+def test_recorded_pick_sleeper_team_ids_stay_and_the_bound_alias_goes(engine):
+    with engine.begin() as conn:
+        _recorded(conn, 1, UID)       # a public Sleeper id: kept, as on Sleeper grids
+        _recorded(conn, 2, ALIAS)     # the bound acct_ alias: Fleeced-minted
+        _recorded(conn, 3, OTHER)
+    counts = accounts.delete_user_data(UID)
+    assert _recorded_teams(engine) == {1: UID, 2: accounts.DELETED_USER_PLACEHOLDER, 3: OTHER}
+    assert counts["recorded_picks_picking_team_id_anonymized"] == 1
+
+
+# #452 QA P2: OTHER users' pick_assignment_changed events (the pick grid's audit
+# trail) name owners and actors. A deleted Fleeced-minted id there becomes the
+# placeholder; public Sleeper ids stay, as on Sleeper grids.
+def _assignment_event(conn, marker, actor, old_owner, new_owner):
+    seed(conn, db.user_events_table, marker, user_id=actor, event_type="pick_assignment_changed",
+         league_id="espn-league", props=json.dumps({
+             "pick_id": marker, "actor": actor, "old_owner": old_owner, "new_owner": new_owner}))
+
+
+def _assignment_props(engine):
+    return {json.loads(r["props"])["pick_id"]: json.loads(r["props"])
+            for r in rows(engine, db.user_events_table) if r["event_type"] == "pick_assignment_changed"}
+
+
+@pytest.mark.parametrize("deleted", ["entry:espn:{5EED0000-AAAA-BBBB-CCCC-DDDDEEEEFFFF}",
+                                     "entry:mfl:61408.f0003", "acct_espn-signin"])
+def test_pick_assignment_events_anonymize_a_deleted_fleeced_minted_id(engine, deleted):
+    with engine.begin() as conn:
+        if deleted.startswith(accounts.ACCOUNT_USER_PREFIX):
+            conn.execute(insert(db.accounts_table).values(
+                account_id=deleted[len(accounts.ACCOUNT_USER_PREFIX):], created_at="2026-10-26"))
+        conn.execute(insert(db.users_table).values(sleeper_user_id=deleted))
+        _assignment_event(conn, "new", OTHER, OTHER, deleted)        # OTHER gave the pick to them
+        _assignment_event(conn, "old", OTHER, deleted, OTHER)        # and took it back
+        _assignment_event(conn, "none", OTHER, OTHER, "synthetic-third")
+    counts = accounts.delete_user_data(deleted)
+    props = _assignment_props(engine)
+    placeholder = accounts.DELETED_USER_PLACEHOLDER
+    assert (props["new"]["new_owner"], props["new"]["actor"]) == (placeholder, OTHER)
+    assert (props["old"]["old_owner"], props["old"]["new_owner"]) == (placeholder, OTHER)
+    assert props["none"] == {"pick_id": "none", "actor": OTHER, "old_owner": OTHER,
+                             "new_owner": "synthetic-third"}
+    assert counts["pick_assignment_events_anonymized"] == 2
+    assert deleted not in json.dumps(list(props.values()))
+
+
+def test_pick_assignment_events_keep_a_public_sleeper_id(engine):
+    with engine.begin() as conn:
+        _assignment_event(conn, "sleeper", OTHER, OTHER, UID)    # UID is a public Sleeper-style id
+        _assignment_event(conn, "alias", OTHER, OTHER, ALIAS)    # the bound acct_ alias is minted
+    counts = accounts.delete_user_data(UID)
+    props = _assignment_props(engine)
+    assert props["sleeper"]["new_owner"] == UID
+    assert props["alias"]["new_owner"] == accounts.DELETED_USER_PLACEHOLDER
+    assert counts["pick_assignment_events_anonymized"] == 1
+
+
+def test_pick_assignment_scrub_rewrites_an_actor_and_skips_other_event_types(engine):
+    deleted = "entry:mfl:61408.f0003"
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id=deleted))
+        # OTHER's event in which the deleted user is the recorded actor
+        seed(conn, db.user_events_table, "actor", user_id=OTHER, event_type="pick_assignment_changed",
+             props=json.dumps({"pick_id": "actor", "actor": deleted, "new_owner": OTHER}))
+        # another event type that happens to name them: not the audit trail, untouched
+        seed(conn, db.user_events_table, "other", user_id=OTHER, event_type="trade_proposed",
+             props=json.dumps({"new_owner": deleted}))
+        # a malformed audit row must not abort the deletion
+        seed(conn, db.user_events_table, "bad", user_id=OTHER, event_type="pick_assignment_changed",
+             props=json.dumps([deleted]))
+    counts = accounts.delete_user_data(deleted)
+    by_type = {}
+    for r in rows(engine, db.user_events_table):
+        by_type.setdefault(r["event_type"], []).append(json.loads(r["props"]))
+    assert {"pick_id": "actor", "actor": accounts.DELETED_USER_PLACEHOLDER,
+            "new_owner": OTHER} in by_type["pick_assignment_changed"]
+    assert [deleted] in by_type["pick_assignment_changed"]          # malformed: left alone
+    assert by_type["trade_proposed"] == [{"new_owner": deleted}]
+    assert counts["pick_assignment_events_anonymized"] == 1
+
+
+# #452 QA round 3: leagues.pick_assignment_settings.order lists every member,
+# including on a row ANOTHER user imported. A deleted Fleeced-minted id there
+# becomes the placeholder in place; public Sleeper ids stay.
+def _assignment_league(conn, league_id, importer, settings):
+    seed(conn, db.leagues_table, league_id, sleeper_league_id=league_id, user_id=importer,
+         pick_assignment_settings=json.dumps(settings) if not isinstance(settings, str) else settings)
+
+
+def _orders(engine):
+    return {r["sleeper_league_id"]: r["pick_assignment_settings"] for r in rows(engine, db.leagues_table)}
+
+
+def test_pick_assignment_order_on_another_importers_row_is_anonymized_in_place(engine):
+    deleted = "entry:espn:{5EED0000-AAAA-BBBB-CCCC-DDDDEEEEFFFF}"
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id=deleted))
+        _assignment_league(conn, "shared", OTHER, {"rounds": 4, "order": [OTHER, deleted, "third"]})
+        _assignment_league(conn, "sleeper", OTHER, {"order": [OTHER, UID]})
+        _assignment_league(conn, "list", OTHER, f'["{deleted}"]')            # not a dict
+        _assignment_league(conn, "noorder", OTHER, {"order": f"{deleted}"})  # order not a list
+    counts = accounts.delete_user_data(deleted)
+    orders = _orders(engine)
+    assert json.loads(orders["shared"]) == {
+        "rounds": 4, "order": [OTHER, accounts.DELETED_USER_PLACEHOLDER, "third"]}
+    assert json.loads(orders["sleeper"]) == {"order": [OTHER, UID]}
+    assert orders["list"] == f'["{deleted}"]' and json.loads(orders["noorder"]) == {"order": deleted}
+    assert counts["pick_assignment_order_anonymized"] == 1
+
+
+def test_pick_assignment_order_keeps_a_public_sleeper_id_and_anonymizes_the_alias(engine):
+    with engine.begin() as conn:
+        _assignment_league(conn, "lg", OTHER, {"order": [UID, ALIAS, OTHER]})
+    counts = accounts.delete_user_data(UID)
+    assert json.loads(_orders(engine)["lg"])["order"] == [UID, accounts.DELETED_USER_PLACEHOLDER, OTHER]
+    assert counts["pick_assignment_order_anonymized"] == 1
+
+
+# ── Team overhaul (keys the owner as account_user_id, the rest by overhaul_id) ──
+
+OVERHAUL_CHILDREN = (db.overhaul_offers_table, db.overhaul_roadmaps_table,
+                     db.overhaul_attempts_table, db.overhaul_reservations_table)
+OWNER_NAME = "owner-display-name"
+PLACEHOLDER = accounts.DELETED_USER_PLACEHOLDER
+
+
+def _overhaul(conn, overhaul_id, account_user_id, league_user_id):
+    seed(conn, db.overhauls_table, overhaul_id, overhaul_id=overhaul_id,
+         account_user_id=account_user_id, league_user_id=league_user_id)
+
+
+def _children(conn, overhaul_id, *, offer_id=None):
+    seed(conn, db.overhaul_offers_table, overhaul_id, overhaul_id=overhaul_id,
+         offer_id=offer_id or "of-" + overhaul_id, package_hash="h-" + overhaul_id)
+    seed(conn, db.overhaul_roadmaps_table, overhaul_id, overhaul_id=overhaul_id)
+    seed(conn, db.overhaul_attempts_table, overhaul_id, overhaul_id=overhaul_id,
+         attempt_id="at-" + overhaul_id, batch_id="b-" + overhaul_id)
+    seed(conn, db.overhaul_reservations_table, overhaul_id, overhaul_id=overhaul_id)
+
+
+def _named_offer(conn, offer_id, counterparty, decision, name=OWNER_NAME):
+    """An offer in OTHER's overhaul, built on the owner's private data."""
+    card = {"offer_id": offer_id, "target_user_id": counterparty, "target_username": name,
+            "give": [{"id": "p1"}], "receive": [{"id": "p2"}], "fairness_score": 0.9,
+            "mismatch_score": 7.0, "composite_score": 7.0,
+            "model_arm": "owner_v2_bilateral", "selection_coverage": "full", "basis": "divergence",
+            "reasons": ["Other manager’s preferences are unknown; fit uses market and team context."],
+            "likes_you": True,
+            "match_context": {"owner_benefits": ["outlook"], "counterparty_benefits": ["need"],
+                              "counterparty_preference_evidence": "known",
+                              "opponent_outlook": "rebuilder",
+                              "support_kind": "interpretable_support_not_probability"}}
+    evidence = {"viewer": {"benefits": ["outlook"]}, "counterparty": {"outgoing_personal": 1234},
+                "assets": [{"id": "p2", "counterparty_personal": 1500}], "preference_priority": 2}
+    seed(conn, db.overhaul_offers_table, offer_id, overhaul_id="ovh-other", offer_id=offer_id,
+         package_hash="sha1-" + offer_id, counterparty_user_id=counterparty,
+         counterparty_username=name, card_json=json.dumps(card),
+         evidence_json=json.dumps(evidence), decision=decision)
+
+
+def test_overhauls_deleted_and_offers_naming_the_owner_scrubbed(engine):
+    neighbour = UID + "-2"            # another person whose id starts with the owner's
+    with engine.begin() as conn:
+        _overhaul(conn, "ovh-own", UID, UID)
+        _overhaul(conn, "ovh-alias", ALIAS, ALIAS)    # a platform league: its own id (session_input.py:58)
+        _overhaul(conn, "ovh-other", OTHER, OTHER)
+        for oid in ("ovh-own", "ovh-alias"):
+            _children(conn, oid)
+        _children(conn, "ovh-other", offer_id="of-unrelated")
+        _named_offer(conn, "of-sleeper", UID, "pass")
+        _named_offer(conn, "of-alias", ALIAS, "undecided")
+        _named_offer(conn, "of-liked", UID, "like")
+        _named_offer(conn, "of-neighbour", neighbour, "undecided", name="neighbour-name")
+        seed(conn, db.overhaul_attempts_table, "sent", overhaul_id="ovh-other",
+             attempt_id="at-sent", batch_id="b-sent", offer_id="of-sleeper")
+        blocked = {"code": "counterparty_asset_not_owned", "offer_id": "of-sleeper", "assets": ["p2"],
+                   "message": f"Player Two is no longer on {OWNER_NAME}’s roster, so nothing was sent. "
+                              "Find a new trade."}
+        own_side = {"code": "asset_not_owned", "offer_id": "of-sleeper", "assets": ["p1"],
+                    "message": "Player One is no longer on your roster, so nothing was sent. Find a new trade."}
+        other_team = {"code": "counterparty_asset_not_owned", "offer_id": "of-unrelated", "assets": ["p9"],
+                      "message": "Player Nine is no longer on Another Team’s roster, so nothing was sent. "
+                                 "Find a new trade."}
+        conn.execute(db.overhaul_roadmaps_table.update().where(
+            db.overhaul_roadmaps_table.c.overhaul_id == "ovh-other").values(
+            summary_json=json.dumps({"counterparties": [UID, "unrelated", ALIAS, neighbour],
+                                     "score": 3}),
+            compat_json=json.dumps({"blockers": [blocked, own_side, other_team]})))
+    before = {r["offer_id"]: dict(r) for r in rows(engine, db.overhaul_offers_table)}
+    counts = accounts.delete_user_data(UID)
+
+    assert [r["overhaul_id"] for r in rows(engine, db.overhauls_table)] == ["ovh-other"]
+    for tbl in OVERHAUL_CHILDREN:
+        assert {r["overhaul_id"] for r in rows(engine, tbl)} == {"ovh-other"}, tbl.name
+    assert counts["overhauls_deleted"] == 2
+    assert counts["overhaul_offers_counterparty_anonymized"] == 3
+    offers = {r["offer_id"]: dict(r) for r in rows(engine, db.overhaul_offers_table)}
+    assert offers["of-unrelated"] == before["of-unrelated"]
+    assert offers["of-neighbour"] == before["of-neighbour"]       # exact ids, never a prefix
+    for oid in ("of-sleeper", "of-alias", "of-liked"):
+        offer = offers[oid]
+        assert offer["counterparty_user_id"] == PLACEHOLDER
+        assert offer["counterparty_username"] == PLACEHOLDER
+        assert offer["evidence_json"] is None
+        assert offer["decision"] == before[oid]["decision"]
+        assert json.loads(offer["card_json"]) == {
+            "offer_id": oid, "target_user_id": PLACEHOLDER, "target_username": PLACEHOLDER,
+            "give": [{"id": "p1"}], "receive": [{"id": "p2"}], "fairness_score": 0.9,
+            # legal's blended-scalar test: surplus_margin (mismatch_score) is
+            # nulled on every card of the partner, and composite_score, its
+            # copy on the owner arms, with it.
+            "mismatch_score": None, "composite_score": None,
+            "model_arm": "owner_v2_bilateral", "selection_coverage": "full", "basis": "divergence",
+            "match_context": {"owner_benefits": ["outlook"],
+                              "support_kind": "interpretable_support_not_probability"}}
+    # A passed offer keeps the hash that stops it coming back; an undecided one
+    # gets a fresh one, so regeneration can't revive the scrubbed row.
+    assert offers["of-sleeper"]["package_hash"] == "sha1-of-sleeper"
+    assert offers["of-liked"]["package_hash"] == "sha1-of-liked"
+    assert offers["of-alias"]["package_hash"].startswith("redacted_")
+    # A liked or undecided offer is retired the native way: stale is never sent
+    # (the placeholder resolves to no roster), and a refresh rebuilds it.
+    assert {oid: offers[oid]["availability"] for oid in ("of-sleeper", "of-alias", "of-liked")} == {
+        "of-sleeper": "fresh", "of-alias": "stale", "of-liked": "stale"}
+    assert {r["attempt_id"] for r in rows(engine, db.overhaul_attempts_table)} == {"at-ovh-other", "at-sent"}
+    roadmap = rows(engine, db.overhaul_roadmaps_table)[0]
+    assert json.loads(roadmap["summary_json"]) == {
+        "counterparties": [PLACEHOLDER, "unrelated", PLACEHOLDER, neighbour], "score": 3}
+    # The scrubbed offer's counterparty-side blocker no longer names the team
+    # (QA P2-1); its own-side blocker and another offer's are untouched.
+    assert json.loads(roadmap["compat_json"]) == {"blockers": [
+        dict(blocked, message="A player in this trade is no longer on the other manager’s roster, "
+                              "so nothing was sent. Find a new trade."),
+        own_side, other_team]}
+    assert counts["overhaul_roadmaps_counterparty_anonymized"] == 1
+    # Nothing that names the owner is left in any overhaul table (the
+    # neighbour's own id aside).
+    residue = json.dumps([dict(r) for t in (db.overhauls_table, *OVERHAUL_CHILDREN)
+                          for r in rows(engine, t) if r.get("offer_id") != "of-neighbour"], default=str)
+    for marker in (UID, ALIAS, OWNER_NAME, "sha1-of-alias", "1234", "1500"):
+        assert not re.search(re.escape(marker) + r"(?![-\w])", residue), marker
+
+
+def test_deleting_a_sleeper_coowner_leaves_the_primary_owners_offers_alone(engine):
+    """A Sleeper co-owner's overhaul carries the roster's PRIMARY owner as
+    league_user_id (session_input.py:99). Deleting the co-owner must not touch
+    offers naming that live person (release-lead #540 QA P1)."""
+    co, primary = "co-owner", "primary-owner"
+    with engine.begin() as conn:
+        for uid in (co, primary):
+            conn.execute(insert(db.users_table).values(sleeper_user_id=uid))
+        _overhaul(conn, "ovh-co", co, primary)
+        _children(conn, "ovh-co")
+        _overhaul(conn, "ovh-primary", primary, primary)
+        _children(conn, "ovh-primary")
+        _overhaul(conn, "ovh-other", OTHER, OTHER)
+        seed(conn, db.overhaul_offers_table, "to-primary", overhaul_id="ovh-other",
+             offer_id="to-primary", package_hash="h-to-primary", counterparty_user_id=primary,
+             counterparty_username="Primary's team", decision="undecided",
+             card_json=json.dumps({"target_user_id": primary, "mismatch_score": 3.0}))
+        seed(conn, db.overhaul_roadmaps_table, "rm-other", overhaul_id="ovh-other",
+             summary_json=json.dumps({"counterparties": [primary]}))
+    before = {t.name: [dict(r) for r in rows(engine, t)] for t in (db.overhauls_table, *OVERHAUL_CHILDREN)}
+    counts = accounts.delete_user_data(co)
+    after = {t.name: [dict(r) for r in rows(engine, t)] for t in (db.overhauls_table, *OVERHAUL_CHILDREN)}
+    assert counts["overhauls_deleted"] == 1
+    assert counts["overhaul_offers_counterparty_anonymized"] == 0
+    for name, rows_before in before.items():
+        assert [r for r in rows_before if r["overhaul_id"] != "ovh-co"] == after[name], name
+
+
+def test_a_minted_id_in_other_overhauls_snapshots_and_recovery_becomes_the_placeholder(engine):
+    """ESPN/MFL grids can key a snapshot's rosters, and name a recovery pick's
+    holder, by the importer's Fleeced-minted id: that names the person, so it
+    goes (as in draft_picks). Platform ids stay."""
+    deleted = "entry:espn:{5EED0000-AAAA-BBBB-CCCC-DDDDEEEEFFFF}"
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id=deleted))
+        _overhaul(conn, "ovh-espn", OTHER, OTHER)
+        _overhaul(conn, "ovh-sleeper", OTHER, OTHER)
+        ovh = db.overhauls_table
+        conn.execute(ovh.update().where(ovh.c.overhaul_id == "ovh-espn").values(
+            snapshot_json=json.dumps({"season": 2026, "my_roster_id": 3,
+                                      "rosters": {OTHER: ["p1"], deleted: ["p2", "pk_1"], UID: ["p3"],
+                                                  deleted + "-2": ["p4"]}}),   # a neighbouring entry id
+            recovery_json=json.dumps({"state": "missing_with_known_holder", "pick_id": "pk_1",
+                                      "holder_user_id": deleted, "holder_username": "Their Team"})))
+        conn.execute(ovh.update().where(ovh.c.overhaul_id == "ovh-sleeper").values(
+            snapshot_json=json.dumps({"rosters": {OTHER: ["p1"], UID: ["p3"]}}),
+            recovery_json=json.dumps({"holder_user_id": UID, "holder_username": "pub"})))
+    before = {r["overhaul_id"]: dict(r) for r in rows(engine, db.overhauls_table)}
+    counts = accounts.delete_user_data(deleted)
+    after = {r["overhaul_id"]: dict(r) for r in rows(engine, db.overhauls_table)}
+    assert json.loads(after["ovh-espn"]["snapshot_json"]) == {
+        "season": 2026, "my_roster_id": 3,
+        "rosters": {OTHER: ["p1"], UID: ["p3"], deleted + "-2": ["p4"], PLACEHOLDER: ["p2", "pk_1"]}}
+    assert json.loads(after["ovh-espn"]["recovery_json"]) == {
+        "state": "missing_with_known_holder", "pick_id": "pk_1",
+        "holder_user_id": PLACEHOLDER, "holder_username": PLACEHOLDER}
+    assert after["ovh-sleeper"] == before["ovh-sleeper"]
+    assert counts["overhaul_snapshots_anonymized"] == 1
+    # Deleting the Sleeper-keyed user leaves their public Sleeper id in others'
+    # snapshots (platform data, as on Sleeper pick grids).
+    assert accounts.delete_user_data(UID)["overhaul_snapshots_anonymized"] == 0
+    assert {r["overhaul_id"]: dict(r) for r in rows(engine, db.overhauls_table)}["ovh-sleeper"] \
+        == before["ovh-sleeper"]
+
+
+def test_export_carries_own_overhauls_without_private_evidence(engine):
+    with engine.begin() as conn:
+        _overhaul(conn, "ovh-own", UID, UID)
+        _overhaul(conn, "ovh-other", OTHER, OTHER)
+        _children(conn, "ovh-other")
+        _children(conn, "ovh-own")
+        conn.execute(db.overhaul_offers_table.update().where(
+            db.overhaul_offers_table.c.overhaul_id == "ovh-own").values(
+            counterparty_user_id=OTHER, evidence_json=json.dumps({"counterparty": {"x": 1}}),
+            card_json=json.dumps({"target_user_id": OTHER, "reasons": ["r"],
+                                  "match_context": {"owner_benefits": ["a"],
+                                                    "counterparty_benefits": ["b"]}})))
+    tables = accounts.export_user_data(UID)["tables"]
+    assert [r["overhaul_id"] for r in tables["overhauls"]] == ["ovh-own"]
+    for tbl in OVERHAUL_CHILDREN:
+        assert [r["overhaul_id"] for r in tables[tbl.name]] == ["ovh-own"], tbl.name
+    offer = tables["overhaul_offers"][0]
+    assert "evidence_json" not in offer
+    assert json.loads(offer["card_json"]) == {"target_user_id": OTHER,
+                                              "match_context": {"owner_benefits": ["a"]}}
+
+
+def _code_without_comments(source):
+    return " ".join(t.string for t in tokenize.generate_tokens(io.StringIO(source).readline)
+                    if t.type != tokenize.COMMENT)
+
+
+# A column that can name a person: a user id under any name, an owner, a
+# counterparty, holder, seller, recipient, partner, member or author, a
+# username, or a *_by (release-lead #540 QA P3: owner_id, counterparty and
+# holder escaped a *user_id*-only scan).
+_PERSON_COLUMN = re.compile(r"user_id|owner|counterparty|holder|seller|recipient|partner|member"
+                            r"|author|username|(^|_)by$")
+
+
+def test_every_table_with_a_user_id_column_is_handled_in_accounts():
+    """The overhaul gap: a table with a column that can name a person
+    (_PERSON_COLUMN) that accounts.py never names in code (comments stripped)
+    escapes deletion and export alike. Name it there: delete it, anonymize it,
+    or keep it with a reason."""
+    code = _code_without_comments(inspect.getsource(accounts))
+    unnamed = [t.name for t in db.metadata.sorted_tables
+               if any(_PERSON_COLUMN.search(c.name) for c in t.columns)
+               and not re.search(rf"\b{t.name}_table\b|[\"']{t.name}[\"']", code)]
+    assert unnamed == []
+
+
+# ── Legal R28.22 d2: overhauls whose owner account no longer exists ──────────
+
+def test_orphaned_overhauls_are_deleted_and_live_owners_kept(engine, caplog):
+    made = "2026-09-10T00:00:00+00:00"
+    with engine.begin() as conn:
+        def owned(oid, account, league, created_at="not-a-time"):
+            seed(conn, db.overhauls_table, oid, overhaul_id=oid, account_user_id=account,
+                 league_user_id=league, created_at=created_at)
+            _children(conn, oid)
+        # Gone: no users row, durable session or accounts row names the owner.
+        owned("ovh-orphan", "deleted-before-the-fix", "deleted-before-the-fix")
+        conn.execute(insert(db.users_table).values(sleeper_user_id="deleted-before-the-fix-2"))  # a prefix neighbour
+        owned("ovh-entry-orphan", "entry:mfl:61408.f0003", "entry:mfl:61408.f0003")
+        owned("ovh-coowner-orphan", "gone-coowner", UID)   # its league id is a live primary owner
+        # Gone too: a new account under a reused id, created long after the overhaul.
+        conn.execute(insert(db.users_table).values(sleeper_user_id="resigned",
+                                                   created_at="2026-10-20T00:00:00+00:00"))
+        owned("ovh-resigned", "resigned", "resigned", made)
+        # Live.
+        owned("ovh-live", UID, UID)                                    # a users row
+        owned("ovh-live-coowner", OTHER, "absent-primary")             # liveness is the owner's, not the league id's
+        owned("ovh-session-only", "session-only", "session-only")      # a durable session
+        seed(conn, db.sessions_table, "session-only", user_id="session-only")
+        conn.execute(insert(db.accounts_table).values(account_id="live-acct", created_at="2026-09-04"))
+        owned("ovh-acct", accounts.account_user_id("live-acct"), accounts.account_user_id("live-acct"))
+        conn.execute(insert(db.accounts_table).values(account_id="bound", sleeper_user_id="bound-sleeper",
+                                                      created_at="2026-09-04"))
+        owned("ovh-bound", "bound-sleeper", "bound-sleeper")           # moved by a bind, users row gone
+        conn.execute(insert(db.users_table).values(sleeper_user_id="fresh-user",
+                                                   created_at="2026-09-10T00:10:00+00:00"))
+        owned("ovh-fresh", "fresh-user", "fresh-user", made)           # the background users-row write
+        # Live although their users row landed late (its best-effort writes
+        # failed): an older durable session, or an older account (QA case 994).
+        late = "2026-10-20T00:00:00+00:00"
+        conn.execute(insert(db.users_table).values(sleeper_user_id="late-row", created_at=late))
+        seed(conn, db.sessions_table, "late-row", user_id="late-row", created_at="2026-09-01T00:00:00+00:00")
+        owned("ovh-late-session", "late-row", "late-row", made)
+        conn.execute(insert(db.accounts_table).values(account_id="early", created_at="2026-09-01"))
+        conn.execute(insert(db.users_table).values(sleeper_user_id=accounts.account_user_id("early"),
+                                                   created_at=late))
+        owned("ovh-late-acct", accounts.account_user_id("early"), accounts.account_user_id("early"), made)
+        # A newer session doesn't vouch for an old plan: a real re-signup.
+        conn.execute(insert(db.users_table).values(sleeper_user_id="resigned-2", created_at=late))
+        seed(conn, db.sessions_table, "resigned-2", user_id="resigned-2", created_at=late)
+        owned("ovh-resigned-2", "resigned-2", "resigned-2", made)
+        # Child rows whose overhaul is already gone.
+        _children(conn, "ovh-ghost")
+    kept = {"ovh-live", "ovh-live-coowner", "ovh-session-only", "ovh-acct", "ovh-bound", "ovh-fresh",
+            "ovh-late-session", "ovh-late-acct"}
+    with caplog.at_level("DEBUG"):
+        counts = accounts.delete_orphaned_overhauls()
+    assert counts == {"overhauls": 5, "child_rows": 5 * 4 + 4}
+    assert {r["overhaul_id"] for r in rows(engine, db.overhauls_table)} == kept
+    for tbl in OVERHAUL_CHILDREN:
+        assert {r["overhaul_id"] for r in rows(engine, tbl)} == kept, tbl.name
+    assert "ovh-" not in caplog.text                                   # counts only, never ids
+    assert accounts.delete_orphaned_overhauls() == {"overhauls": 0, "child_rows": 0}   # idempotent
+
+
+def test_the_orphan_sweep_runs_once_per_process_and_logs_only_a_count(monkeypatch, caplog):
+    from backend import server
+    calls = []
+    monkeypatch.setattr(server, "_orphaned_overhauls_swept", False)
+
+    def fail_then_count():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("[SQL: DELETE ...] [parameters: ('ovh_secret_1', 'ovh_secret_2')]")
+        return {"overhauls": 3, "child_rows": 7}
+    monkeypatch.setattr(accounts, "delete_orphaned_overhauls", fail_then_count)
+    with caplog.at_level("DEBUG"):
+        for _ in range(3):
+            server._sweep_orphaned_overhauls_once()
+    assert len(calls) == 2                       # a failure retries; a success ends it
+    assert "orphaned-overhaul sweep failed (RuntimeError)" in caplog.text
+    assert "ovh_secret" not in caplog.text       # a DB error's parameters never reach the log
+    assert ("Deleted 3 overhaul(s) whose owner account no longer exists, and 7 row(s) under them"
+            in caplog.text)
+
+
+def test_the_cleanup_loop_runs_the_orphan_sweep():
+    from backend import server
+    loop = _code_without_comments(inspect.getsource(server._cleanup_loop))
+    assert "_sweep_orphaned_overhauls_once ( )" in loop
+
+
+def test_the_graders_calibration_export_carries_no_partner_fields(engine):
+    """Legal R28.26 #9 (MUST): every arm loses `gain_partner` and `reasons`,
+    for every partner, live or deleted. The grader's grade, tags and
+    `gain_viewer` stay; an arms blob that doesn't parse is withheld."""
+    arms = {"value_core": {"gain_viewer": 0.4, "gain_partner": 1.4,
+                           "reasons": ["fits their rebuild"], "engine_version": "v"},
+            "fit_a": {"gain_partner": 0.2, "rank": 3}}
+    with engine.begin() as conn:
+        seed(conn, db.grading_cards_table, "c1", card_id="c1", user_id=UID,
+             arms_json=json.dumps(arms), trade_json="{}", grade=5,
+             tags_json=json.dumps(["value"]))
+        seed(conn, db.grading_cards_table, "c2", card_id="c2", user_id=UID,
+             arms_json="not json {gain_partner", trade_json="{}")
+    rows = {r["card_id"]: r for r in accounts.export_user_data(UID)["tables"]["grading_cards"]}
+    assert json.loads(rows["c1"]["arms_json"]) == {
+        "value_core": {"gain_viewer": 0.4, "engine_version": "v"}, "fit_a": {"rank": 3}}
+    assert rows["c1"]["grade"] == 5 and json.loads(rows["c1"]["tags_json"]) == ["value"]
+    assert rows["c2"]["arms_json"] is None
+    exported = json.dumps(accounts.export_user_data(UID))
+    assert "gain_partner" not in exported and "fits their rebuild" not in exported
+
+
+def test_the_export_strips_the_same_arm_keys_the_scrub_removes():
+    from backend import deletion_scrub
+    assert accounts._GRADING_ARM_PARTNER_KEYS == deletion_scrub._GRADING_ARM_KEYS_REMOVED
+
+
+@pytest.mark.parametrize("raw", ['["a", "b"]', '{"value_core": ["gain_partner"]}', '"s"', "null"])
+def test_a_wrong_shape_arms_blob_is_withheld_from_the_export(engine, raw):
+    """Gap E04: arms_json that parses but isn't {arm: {...}} is withheld."""
+    with engine.begin() as conn:
+        seed(conn, db.grading_cards_table, "c3", card_id="c3", user_id=UID,
+             arms_json=raw, trade_json="{}")
+    (row,) = accounts.export_user_data(UID)["tables"]["grading_cards"]
+    assert row["arms_json"] is None
+
+def test_route_purges_both_outlook_caches_for_all_aliases(engine, monkeypatch):
+    from backend import server
+    from backend.outlook_result_cache import OUTLOOK_RESULTS
+    baseline = {}
+    for who in (UID, ALIAS, OTHER, None):
+        key = ("league", "personal" if who else "consensus", "1qb_ppr", who, 7)
+        baseline[key] = (0, key, object())
+    monkeypatch.setattr(server, "_OUTLOOK_IMPACT_CACHE", baseline)
+    for who in (UID, ALIAS, OTHER):
+        _outlook_entry("personal", who)
+    shared = _outlook_entry("consensus", UID)
+    response = _delete_as_owner(monkeypatch)
+    assert response.status_code == 200
+    assert {key[3] for key in baseline} == {OTHER, None}
+    assert {key[3] for key in OUTLOOK_RESULTS._entries} == {OTHER, ""}
+    assert shared in OUTLOOK_RESULTS._entries
+
+
+def test_failed_baseline_purge_still_purges_full_results(engine, monkeypatch, caplog):
+    from backend import server
+    from backend.outlook_result_cache import OUTLOOK_RESULTS
+    _outlook_entry("personal", UID)
+
+    def boom(_ids):
+        raise RuntimeError("synthetic baseline purge failure")
+
+    monkeypatch.setattr(server, "_purge_outlook_impact_callers", boom)
+    response = _delete_as_owner(monkeypatch)
+    assert response.status_code == 200
+    assert not any(key[3] == UID for key in OUTLOOK_RESULTS._entries)
+    assert "outlook baseline purge errored (continuing)" in caplog.text

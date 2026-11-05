@@ -35,8 +35,8 @@ why). Base URL builder: `mfl_service.export_url(host, year, type_, league_id)`
 | 2 | Login (authenticated flow, #177) | `https://api.myfantasyleague.com/{year}/login` | POST | body `USERNAME`, `PASSWORD`, `XML=1` | `mfl_service.py:187` `login()`; called from `server.py:20095` (`mfl_auth_link`) |
 | 3 | List the signed-in user's leagues | `https://api.myfantasyleague.com/{year}/export?TYPE=myleagues&YEAR={year}&FRANCHISE_NAMES=1&JSON=1` | GET | `TYPE=myleagues`, `YEAR`, `FRANCHISE_NAMES=1`, `JSON=1` + `Cookie: MFL_USER_ID=…` | `mfl_service.py:227` `fetch_my_leagues()`; called from `server.py:20097` (`mfl_auth_link`), `server.py:20158` (`mfl_auth_import`) |
 | 4 | League metadata (franchises, starters/lineup config) | `https://{host}/{year}/export?TYPE=league&L={id}&JSON=1` | GET | `TYPE=league` | `mfl_service.fetch_league_bundle()` (part of the 5-export bundle) and `fetch_scoring_inputs()` — both call the shared `_fetch_one` |
-| 5 | Rosters | `https://{host}/{year}/export?TYPE=rosters&L={id}&JSON=1` | GET | `TYPE=rosters` | `fetch_league_bundle()` only |
-| 6 | Future draft picks (owned-pick ledger) | `https://{host}/{year}/export?TYPE=futureDraftPicks&L={id}&JSON=1` | GET | `TYPE=futureDraftPicks` | `fetch_league_bundle()` (link/import time) AND standalone `mfl_service.py:388` `fetch_future_draft_picks()` (refresh cadence, §5) |
+| 5 | Rosters | `https://{host}/{year}/export?TYPE=rosters&L={id}&JSON=1` | GET | `TYPE=rosters` | `fetch_league_bundle()`; standalone `fetch_rosters()` for `/api/trades/validate`'s MFL branch; and since I-2 (2026-10-26) **at send** in `server._mfl_propose_core` (`POST /api/trades/propose-mfl` + the team-overhaul send). That read is the player-ownership check: one read, only when the trade carries players, called with `raise_auth=True` so a dead cookie (401/403) → 409 `mfl_auth_expired` with the credential dropped. Any other failure (an MflError degraded to `{}`, a body without `rosters`, or a transport error such as timeout, reset, `IncompleteRead` or `BadStatusLine`) → 502 `mfl_unavailable` `kind:"network"`, nothing sent |
+| 6 | Future draft picks (owned-pick ledger) | `https://{host}/{year}/export?TYPE=futureDraftPicks&L={id}&JSON=1` | GET | `TYPE=futureDraftPicks` | `fetch_league_bundle()` (link/import time) AND standalone `mfl_service.py:388` `fetch_future_draft_picks()` (refresh cadence, §5); and since I-2 (2026-10-26) **at send** in `server._mfl_propose_core`. That read is the live pick-ownership check (the stored snapshot stays the existence check), made once and only when the trade carries FTF picks. Its failures map the same way as row 5: `raise_auth=True`, so 401/403 → 409 `mfl_auth_expired`; anything else → 502 `mfl_unavailable` |
 | 7 | Players DB (id → name/position) | `https://{host}/{year}/export?TYPE=players&L={id}&JSON=1` | GET | `TYPE=players` | `fetch_league_bundle()` only — best-effort (degrades to `{}`) |
 | 8 | League rules (scoring config, for format detection #201) | `https://{host}/{year}/export?TYPE=rules&L={id}&JSON=1` | GET | `TYPE=rules` | `fetch_league_bundle()` (best-effort) and `fetch_scoring_inputs()` (best-effort) |
 | 9 | Draft results (draft-completion signal, #207) | `https://{host}/{year}/export?TYPE=draftResults&L={id}&JSON=1` | GET | `TYPE=draftResults` | `mfl_service.py:357` `fetch_draft_results()`; called from `server.py:11793` (`_detect_league_draft_status`, MFL branch, function starts `server.py:11745`) and `draft_board_service.py:311` (`PlatformFetchers.mfl_draft_results`) |
@@ -103,6 +103,62 @@ security"), used for that single login call, and is deleted from the local
 variable immediately after (`del password` at `server.py:20096`). It is never
 persisted and never logged — no log line in the auth routes carries username
 or password.
+
+**Sign in with MFL — the password at the mint is transient too (2026-10-26).**
+The team-claim step of the sessionless `POST /api/entry/platform` now proves
+ownership with an MFL login (platform sign-in, design D5): the body carries
+`username` + `password` (missing → `proof_required` before any MFL call);
+the route pops the password out of the parsed body, calls `mfl_service.login`
+once **before reading the league** (the password is `del`-ed in a `finally`
+whether the login succeeds or not), reads the league bundle **with the
+returned cookie** — so a private league can be claimed; a good login that
+still can't read the league is refused as `wrong_account` — then calls
+`fetch_my_leagues` with the same cookie, and the claimed (`league_id`,
+`franchise_id`) must be one of that login's franchises. **The mint stores nothing** — not the password, not the
+`MFL_USER_ID` cookie. Since #421 the client follows the mint with
+`POST /api/mfl/auth-link` (stores the cookie as above), then
+`POST /api/mfl/auth-import` for that league, so private leagues import
+too. The identity kept is the username, trimmed and
+lower-cased, as a `linked_identities` row (provider `mfl`); first controller
+wins and the row never moves. Every failed login gets the one
+`mfl_bad_credentials` body; a login that doesn't own the franchise gets the
+same code plus `reason: "wrong_account"` (the message names the franchise
+that login owns in the same league, if any — only after the login
+succeeded). Disconnecting (`DELETE /api/mfl/auth-link`) removes the stored
+cookie but **keeps** the sign-in identity, so the next MFL sign-in lands in
+the same account; only `DELETE /api/account` releases it. Failed logins here and in the
+`auth_leagues` action count toward the sign-in failure limits (5 per
+username per client IP per 15 min, 30 per username across IPs per hour — an
+IP with a proven MFL success for that username in the last 30 days is exempt
+from this one — and 300 per IP per 10 min → 429 `too_many_attempts`); a `wrong_account` after a good
+login doesn't count, and a proven sign-in clears the username's bucket for
+its IP and the subject-wide counter. The audit line
+(`PLATFORM-SIGNIN`) never carries the username or password. Known limit: if
+MFL accepts an email address as the login, one person can end up with two
+identities (username and email).
+
+**`POST /api/mfl/auth-link` is rate-limited too (2026-10-27,
+`feat/mfl-auth-link-throttle`).** Before this, any verified session could
+call it with unlimited username/password guesses — an MFL password oracle.
+Its login now goes through the same D7 limiter as the sign-in, with the
+same keys and windows: per (username, client IP) 5 bad logins per 15 min,
+per username across IPs 30 per hour (a trusted IP — a proven MFL sign-in or
+good auth-link login for that username in the last 30 days, kept in-process
+and cleared on deploy — is exempt from this ceiling only), per client IP 300
+per 10 min (the username trimmed + lower-cased via
+`accounts.platform_subject("mfl", …)`), in-flight attempts counted at
+admission. The year range
+(2000..current season + 1) and the admission check run **before**
+`mfl_service.login`; over the limit the route answers 429
+`too_many_attempts` + `Retry-After` and makes no MFL call. Only an MFL bad
+login (`MflAuthError` from `login` or `fetch_my_leagues`) counts; MFL
+outages and input errors don't; a good login clears the username's
+bucket for its IP and the subject-wide counter (never the IP window). The
+sign-in and auth-link share the same buckets, so 5 bad guesses at either
+from one IP lock both for that username from that IP (the 2026-10-27
+lockout fix keys the 5-failure lock on the pair, so a griefer can't lock
+the real owner's IP). A JSON `Infinity` / `1e400`
+year on auth-link or auth-import is now a 400 `mfl_bad_year`, not a 500.
 
 **What IS persisted:** the `MFL_USER_ID` cookie only, in `mfl_credentials`
 (`backend/database.py:1339`) — Fernet-encrypted at rest using the same
@@ -484,12 +540,40 @@ scope block §"v1 limitations").
 
 ### Error modes
 
-`MflWriteError` (`kind`: `'auth' | 'network' | 'error' | 'input'`) +
-`MflWriteAuthError`. Route mapping (`POST /api/trades/propose-mfl`): full
-table in [docs/api-reference.md](../api-reference.md) § Send in MFL —
-notably 422 `mfl_asset_unmapped` (crosswalk hard block, `unmapped[]` listed),
-409 `mfl_auth_expired` (credential dropped), 502 `mfl_write_failed`
-(carries `kind`/`detail`; HTTP 429 throttling surfaces as `kind: "network"`).
+`MflWriteError` (`kind`: `'auth' | 'network' | 'error' | 'input' |
+'outcome_unknown'`) + `MflWriteAuthError`. Route mapping
+(`POST /api/trades/propose-mfl`): full table in
+[docs/api-reference.md](../api-reference.md) § Send in MFL — notably 422
+`mfl_asset_unmapped` (crosswalk hard block, `unmapped[]` listed), 409
+`mfl_auth_expired` (credential dropped), 502 `mfl_write_failed` (nothing sent;
+carries `kind`; HTTP 429 throttling surfaces as `kind: "network"`) and 502
+`mfl_outcome_unknown` (C10, below).
+
+**Before vs. after the send (C10, 2026-10-27; `backend/write_outcome.py`).**
+The import is a GET, and urllib wraps only the connect and the request write
+in `URLError`. A `URLError` whose reason is a DNS failure, a refused
+connection or no route is **not sent** → `kind: "network"` →
+`mfl_write_failed`. Anything raised after the request went out (read timeout,
+reset, `RemoteDisconnected`, `IncompleteRead`), any 5xx, a `URLError` timeout
+or reset (conservative: urllib can't say whether it was the connect or the
+write), or a 200 body that is empty or neither success nor `<error>` (the
+body shape is still TODO(live-verify)) is `kind: "outcome_unknown"` →
+`mfl_outcome_unknown`: the import may have landed, so the user is told to
+check MFL and nothing retries. `POST /api/trades/respond-mfl` shares the
+adapter and the same mapping (`mfl_write_failed` / `mfl_outcome_unknown`),
+with "this response … nothing changed" copy instead of "this trade … nothing
+was sent".
+
+**Logging (C10).** MFL's raw body (`MflWriteError.detail`, ≤500 chars) is
+written to ONE `WARNING` line on the `trade_finder` logger
+(`mfl propose|respond write-failed [<kind>] <message>: <body>` or
+`mfl propose|respond auth-rejected: <body>`) after `_provider_body_for_log` flattens
+whitespace, masks `MFL_USER_ID=` values, SWID-shaped GUIDs and long opaque
+blobs, and truncates to 300 characters. It is never a response field on the
+propose or respond route: `detail` and `message` are plain copy. This is the one place
+the §6 "no raw bodies in a persistent sink" caution is relaxed, deliberately:
+an error body is the only evidence of why MFL refused a send, and it is
+masked and capped first.
 
 ### Rate limits / hygiene
 

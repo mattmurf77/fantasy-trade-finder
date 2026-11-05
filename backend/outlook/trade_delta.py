@@ -264,8 +264,9 @@ def resim_baseline(
 
     Exists so a caller cannot accidentally difference a 10000-sim baseline
     (what `GET /api/league/outlook` serves) against a 2000-sim with-trade run.
-    Cache this per (league_id, basis, completed_weeks) and reuse it across
-    every card in the deck.
+    Cache this per league and every caller input it reads (format, board
+    owner, pool generation: see `_outlook_impact_baseline` in server.py) and
+    reuse it across every card in the deck.
     """
     return run_outlook(
         state,

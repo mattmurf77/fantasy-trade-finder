@@ -143,6 +143,7 @@ On mobile, Calibration is a **bottom tab in the Draft tab's third slot**. Its pr
 5. **`pipeline.run(snapshot, request, CoreConfig(), RankConfig())`** (`value_core/pipeline.py:15`). Keep the first 20 entries.
    - Fewer than 10 ⇒ 409 `value_core_too_few`.
    - Any exception ⇒ logged, then 503 `value_core_failed`.
+   - A run that hit the core's safety ceiling (a partial pool) ⇒ 503 `value_core_failed` too: the session fails with no cards, and the cause is in the ERROR log.
    - **Seat** = `_league_user_id(sess)`.
 
 ## 4. Blinding guarantees
@@ -223,6 +224,7 @@ Card ids are not trade ids, so a grading answer cannot reach `/api/trades/swipe`
 | Experiment engine off or erroring | `resolve_for_unit` returns `{}`, so the caller is treated as overlay-off ⇒ 404. Fail closed. |
 | No `player_value_history` rows (e.g. local dev) | Markets are 0 ⇒ 409 `value_core_too_few`. The runbook says to run `POST /api/cron/value-snapshot` first. |
 | Value core raises | `log.exception`, 503 `value_core_failed`. Nothing is written. |
+| Value core hits its safety ceiling (partial pool) | `log.error`, 503 `value_core_failed`. The session fails with no cards. |
 | Answer after completion / results before completion | 409 `session_completed` / 409 `session_incomplete` |
 | Double-tap Start | Resumes the open session (the single sync worker serialises requests) |
 | Tab still visible after a kill (pre-relaunch) | Every call 404s, and the screen shows the "isn't turned on" state |

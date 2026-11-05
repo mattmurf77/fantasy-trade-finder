@@ -1,4 +1,4 @@
-"""Session-wide hermeticity for the DynastyProcess **pick** curve.
+"""Session-wide hermeticity for the DynastyProcess **pick** and **player** curves.
 
 WHY THIS FILE EXISTS AT ALL. This repo had no conftest.py before 2026-08-21;
 every test brought its own monkeypatching and that was enough, because the two
@@ -32,15 +32,236 @@ The snapshot is `fixtures/dp_values_picks_2026-08-06.csv`, the same file
 those explicit pins are LEFT IN PLACE, because a test that depends on this
 data should say so at its own top rather than inherit it silently.
 
-This pins the PICK curve only. The player curve (`FTF_DP_VALUES_FILE`) is not
-set here: no unconditional code path reaches it, and pinning it would change
-what a large number of unrelated tests see.
+THE PLAYER CURVE TOO (2026-10-22). An earlier version of this file said no
+unconditional path reaches the player curve. One does: `import backend.server`
+calls `load_consensus_maps()` at module level (server.py, the Elo seed), so
+every pytest process that imports the server did a live GET of DP's
+`values-players.csv`, and on success went on to scrape KTC for the blend.
+`FTF_DP_VALUES_FILE` now points at `fixtures/outlook-hypotheses/
+dp-values-players-2026-08-09.csv` (a real DP export, same parse path).
+
+KTC is deliberately NOT pinned here. With the DP seam set and no
+`FTF_KTC_VALUES_FILE`, `data_loader._fetch_ktc_html` treats KTC as off by
+design ("never a live egress from a test run"). Pinning the KTC snapshot
+would turn the blend on, and its id matching calls
+`espn_service.get_crosswalk()`, a live GET of DP's `db_playerids.csv` with no
+env seam. `test_ktc_blend` pins its own KTC data explicitly.
 """
 
+import ipaddress
 import os
 import pathlib
+import socket
+import sys
 
-_PICK_SNAPSHOT = (pathlib.Path(__file__).resolve().parent
-                  / "fixtures" / "dp_values_picks_2026-08-06.csv")
+import pytest
+
+_FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
+_PICK_SNAPSHOT = _FIXTURES / "dp_values_picks_2026-08-06.csv"
+_PLAYER_SNAPSHOT = _FIXTURES / "outlook-hypotheses" / "dp-values-players-2026-08-09.csv"
 
 os.environ.setdefault("FTF_DP_PICK_VALUES_FILE", str(_PICK_SNAPSHOT))
+os.environ.setdefault("FTF_DP_VALUES_FILE", str(_PLAYER_SNAPSHOT))
+
+# `import backend.server` also starts `_cleanup_loop`, a daemon thread whose 300 s
+# sweep evicts sessions with last_active=0, the root cause of suite-wide
+# flakes on long runs. The server skips the thread when this is "1"; prod never
+# sets it.
+os.environ.setdefault("FTF_DISABLE_CLEANUP_LOOP", "1")
+# The deletion route kicks the scrub on a daemon thread, which would outlive a
+# route test's engine (#557 CI: "Set changed size during iteration" in the
+# pool's dispose). Tests drive deletion_scrub.run_pending directly; prod
+# never sets this.
+os.environ.setdefault("FTF_DISABLE_DELETION_SCRUB_KICK", "1")
+
+
+@pytest.fixture(autouse=True)
+def _reset_feedback_throttle():
+    """POST /api/feedback's throttle (#360 QA P2-2) is in-process state, and
+    every Flask test client posts from the same IP, so without a reset the
+    suite's feedback tests would share one 20-per-hour budget. Touches
+    backend.server only if a test already imported it."""
+    srv = sys.modules.get("backend.server")
+    if srv is not None and hasattr(srv, "_feedback_rate"):
+        with srv._feedback_rate_lock:
+            srv._feedback_rate.clear()
+            # The shared anonymous ceiling (release-lead delta QA B).
+            getattr(srv, "_feedback_anon_global", []).clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _u4_ledger_guard_state():
+    """Every test starts with the U4 ledger guard's rate-limit state clean (its
+    young-trim counts per ledger and its last warning), whatever an earlier
+    test left (the ledger thread-safety test trims thousands). The server is
+    only touched once a test module has imported it; nothing is imported here.
+    A plain reset, not `monkeypatch`: an autouse fixture that requested it
+    would move every test's monkeypatch undo after its other fixtures'
+    teardowns, and a fixture restoring by hand would then be overwritten."""
+    server = sys.modules.get("backend.server")
+    if server is not None and hasattr(server, "_ledger_guard_young"):
+        server._ledger_guard_young = {"held": 0, "evicted": 0}
+        server._ledger_guard_warned_at = float("-inf")
+    yield
+
+
+_LOOPBACK_NAMES = {None, "", "localhost", "0.0.0.0"}
+
+
+def _is_loopback(host) -> bool:
+    """True for loopback only: the names above, or an IP literal that is a
+    loopback address. A hostname that merely starts with "127." is NOT
+    loopback (#479 QA P3-2); bytes hosts are decoded first."""
+    if isinstance(host, (bytes, bytearray)):
+        host = bytes(host).decode("ascii", "replace")
+    if host in _LOOPBACK_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(str(host).split("%", 1)[0]).is_loopback
+    except ValueError:
+        return False
+
+
+@pytest.fixture()
+def no_real_network():
+    """Opt-in guard: the test FAILS if anything tries to reach a non-loopback host.
+
+    Why a failure at teardown and not just a raise at the call site: the
+    session-init daemon, the trade-capture sweep and the other Sleeper fetchers
+    wrap every upstream read in `except Exception` and carry on (a flake must
+    never break a user's init), so a raised connection error is swallowed and
+    the test would pass while still having hit the network. The attempt is
+    recorded here and asserted when the test ends. The raise stays, so the code
+    under test sees an ordinary connection failure instead of a live reply.
+
+    Patches `socket.getaddrinfo`, `gethostbyname` and `gethostbyname_ex` (every
+    hostname lookup: urllib, requests, http.client), and `socket.socket.connect`,
+    `connect_ex` and `sendto` (literal-IP URLs, UDP, and anything that skips the
+    lookup). AF_UNIX paths pass through. Loopback stays open, so Flask's test client and any
+    local fixture server are unaffected. Restored by hand rather than through
+    `monkeypatch`, like the ledger guard above, so it does not reorder the
+    test's own monkeypatch teardown.
+
+    Used via `pytestmark = pytest.mark.usefixtures("no_real_network")` in the
+    test files that run the session-init daemon inline. It returns the list of
+    attempts for a test that wants to assert on them.
+    """
+    attempts: list[str] = []
+    real_getaddrinfo = socket.getaddrinfo
+    real_gethostbyname = socket.gethostbyname
+    real_gethostbyname_ex = socket.gethostbyname_ex
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+    real_sendto = socket.socket.sendto
+
+    def _blocked_getaddrinfo(host, *args, **kwargs):
+        if _is_loopback(host):
+            return real_getaddrinfo(host, *args, **kwargs)
+        attempts.append(f"lookup {host}")
+        raise OSError(f"no_real_network: blocked lookup of {host!r}")
+
+    def _blocked_lookup(real):
+        def _lookup(host, *args, **kwargs):
+            if _is_loopback(host):
+                return real(host, *args, **kwargs)
+            attempts.append(f"lookup {host}")
+            raise OSError(f"no_real_network: blocked lookup of {host!r}")
+        return _lookup
+
+    def _inet_host(address):
+        # AF_UNIX addresses are paths (str / bytes), never the network: None.
+        return address[0] if isinstance(address, tuple) and address else None
+
+    def _blocked_connect(self, address):
+        host = _inet_host(address)
+        if host is None or _is_loopback(host):
+            return real_connect(self, address)
+        attempts.append(f"connect {address}")
+        raise OSError(f"no_real_network: blocked connect to {address!r}")
+
+    def _blocked_connect_ex(self, address):
+        host = _inet_host(address)
+        if host is None or _is_loopback(host):
+            return real_connect_ex(self, address)
+        attempts.append(f"connect {address}")
+        raise OSError(f"no_real_network: blocked connect_ex to {address!r}")
+
+    def _blocked_sendto(self, data, *args):
+        address = args[-1] if args else None
+        host = _inet_host(address)
+        if host is None or _is_loopback(host):
+            return real_sendto(self, data, *args)
+        attempts.append(f"sendto {address}")
+        raise OSError(f"no_real_network: blocked sendto {address!r}")
+
+    socket.getaddrinfo = _blocked_getaddrinfo
+    socket.gethostbyname = _blocked_lookup(real_gethostbyname)
+    socket.gethostbyname_ex = _blocked_lookup(real_gethostbyname_ex)
+    socket.socket.connect = _blocked_connect
+    socket.socket.connect_ex = _blocked_connect_ex
+    socket.socket.sendto = _blocked_sendto
+    try:
+        yield attempts
+    finally:
+        socket.getaddrinfo = real_getaddrinfo
+        socket.gethostbyname = real_gethostbyname
+        socket.gethostbyname_ex = real_gethostbyname_ex
+        socket.socket.connect = real_connect
+        socket.socket.connect_ex = real_connect_ex
+        socket.socket.sendto = real_sendto
+    if attempts:
+        counts = {a: attempts.count(a) for a in dict.fromkeys(attempts)}
+        pytest.fail(
+            "test attempted real outbound network (%d attempts): %s. Mock the "
+            "fetcher (e.g. trade_block_service.fetch_league_players, "
+            "sleeper_trades_service.fetch_week_transactions) instead."
+            % (len(attempts), counts), pytrace=False)
+
+@pytest.fixture(autouse=True)
+def _deleted_partner_ids_clear():
+    """Account deletion's in-process set of deleted ids (#559 re-QA P2-b), which
+    GET /api/trades filters on, starts empty in every test: a deletion test
+    would otherwise hide a later test's cards for the same id. Only once
+    `backend.server` is imported; no `monkeypatch`, as above."""
+    server = sys.modules.get("backend.server")
+    if server is not None and hasattr(server, "_deleted_partner_ids"):
+        server._deleted_partner_ids.clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _outlook_result_cache_clean():
+    """GET /api/league/outlook results are cached in-process, so without a
+    reset a test that spies on `run_outlook` through the route could be served
+    an earlier test's result. Only touched once something imported it."""
+    cache = sys.modules.get("backend.outlook_result_cache")
+    if cache is not None:
+        cache.OUTLOOK_RESULTS.clear()
+
+
+def _drain_deck_i1_checks():
+    server = sys.modules.get("backend.server")
+    if server is not None and hasattr(server, "_drain_deck_i1_checks"):
+        server._drain_deck_i1_checks(5.0)
+
+
+@pytest.hookimpl(hookwrapper=True, trylast=True)
+def pytest_runtest_call(item):
+    """A test's queued `deck_i1_check` writes finish as its call ends, inside
+    the call's output capture (#419 QA P3). They're written on a worker; left
+    to finish later they ran outside any capture window, often against an
+    in-memory DB whose tables the worker's connection can't see, and their
+    swallowed failures printed into the CI log. trylast: the innermost
+    wrapper, so this runs before pytest's capture of the call ends."""
+    yield
+    _drain_deck_i1_checks()
+
+
+@pytest.fixture(autouse=True)
+def _deck_i1_checks_drained():
+    """The same at teardown, for a write a fixture queued after the call. Only
+    once `backend.server` is imported; no `monkeypatch`, for the same
+    teardown-order reason as above."""
+    yield
+    _drain_deck_i1_checks()

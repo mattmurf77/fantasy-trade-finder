@@ -172,6 +172,7 @@ def add_fit_arms(*, session_id: str, server: ServerInputs, ros_points: Mapping[s
     answered = [c for c in existing if c["grade"] is not None or c["skipped"]]
     moving = [c["card_id"] for c in existing if not (c["grade"] is not None or c["skipped"])]
     inserts = [{"card_id": new_id(), "session_id": session_id, "user_id": row["user_id"],
+                "partner_user_id": m["partner_id"],
                 "arms_json": json.dumps(m["arms"], sort_keys=True),
                 "trade_json": json.dumps(neutral_trade(m["partner_id"], m["give"], m["receive"],
                                                        catalog), sort_keys=True),
@@ -254,7 +255,7 @@ def build_session(*, session_id: str, server: ServerInputs, engine: Callable | N
         vc, vc_meta = run_value_core(inputs, seat=seat, server=server, engine=engine)
         order = shuffle_cards(merge_cards([*current, *vc]), int(row["seed"]))
         cards = [{"card_id": new_id(), "session_id": session_id, "user_id": row["user_id"],
-                  "position": pos,
+                  "position": pos, "partner_user_id": m["partner_id"],
                   "arms_json": json.dumps(m["arms"], sort_keys=True),
                   "trade_json": json.dumps(neutral_trade(m["partner_id"], m["give"], m["receive"],
                                                          catalog), sort_keys=True),
@@ -488,7 +489,8 @@ def _league_inputs(league_id: str, league_user_id: str, now: datetime
         keys = ("pick_id", "season", "round", "owner_user_id", "pick_value", "pool_value",
                 "is_traded", "original_username")
         inputs["picks"] = sorted(
-            ({k: p.get(k) for k in keys}
+            ({**{k: p.get(k) for k in keys},
+              "original_username": db.pick_team_name(p, "original")}   # #497 QA P2
              for p in db.load_draft_picks(league_id, source=db.PICK_SOURCE_ANY)),
             key=lambda p: str(p["pick_id"]))
     seat = str(league_user_id)
@@ -553,7 +555,8 @@ def run_value_core(inputs: Mapping, *, seat: str, server: ServerInputs,
                    engine: Callable | None = None) -> tuple[list[ArmCard], dict]:
     """The value-core arm: the bench's league_record/snapshot_for_seat with the serving
     path's league facts from ServerInputs, run through pipeline.run with the default
-    CoreConfig/RankConfig (D8). Any exception ⇒ value_core_failed 503; fewer than
+    CoreConfig/RankConfig (D8). Any exception ⇒ value_core_failed 503; a run that hit the
+    core's safety ceiling (a partial pool) ⇒ value_core_failed 503 too; fewer than
     MIN_PER_ARM usable cards ⇒ value_core_too_few 409."""
     from backend.eval import value_core_bench as bench
     from backend.value_core import pipeline
@@ -577,6 +580,10 @@ def run_value_core(inputs: Mapping, *, seat: str, server: ServerInputs,
         log.exception("blind-grading: value core failed league=%s", inputs["league_row"]
                       .get("sleeper_league_id"))
         raise GradingError("value_core_failed", 503) from None
+    if result.core.safety_ceiling_hit:   # a partial pool never becomes a Calibration session
+        log.error("blind-grading: value core hit its safety ceiling league=%s; no session built",
+                  inputs["league_row"].get("sleeper_league_id"))
+        raise GradingError("value_core_failed", 503)
     if len(cards) < MIN_PER_ARM:
         raise GradingError("value_core_too_few", 409, usable=len(cards), min_cards=MIN_PER_ARM)
     meta = {"engine_version": ENGINE_VERSION,

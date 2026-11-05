@@ -15,8 +15,9 @@ Fixtures (no network):
     math is pinned end-to-end on live data.
 
 These tests pin:
-  1. parse_ktc_players extracts playersArray and drops rookie-draft-pick
-     (RDP) rows — universe unchanged.
+  1. parse_ktc_players extracts the player list and drops rookie-draft-pick
+     (RDP) rows — universe unchanged — from the current page's `ktc-players`
+     JSON element and from the legacy `var playersArray = [...]` literal.
   2. BLEND-OFF BYTE IDENTITY: ktc_blend_weight=0 + tep_te_uplift=1 (+ the
      #313 QB cap off — it is a later stage of the same function) returns
      the DP maps untouched (kill switch = the pre-#145 pipeline exactly).
@@ -30,6 +31,10 @@ These tests pin:
      player's 1qb seed value (a slight upgrade, not a downgrade).
   7. Copy-level (#124 value_rank remap): a 1QB→SF-TEP copy no longer
      demotes the top TEs below their 1QB tier.
+  8. S5 health: each blend records its state in KTC_BLEND_STATUS and prints
+     one KTC-BLEND-DEGRADED line when KTC is unavailable, thin, partial
+     (coverage below KTC_MIN_COVERAGE) or disagrees with DP's ordering. The
+     first three stay DP-only (models-lead addendum R5); disagrees blends.
 """
 import json
 from pathlib import Path
@@ -66,6 +71,7 @@ def _dp_maps(fmt):
 def _reset_ktc_cache(monkeypatch):
     monkeypatch.setattr(dl, "_ktc_cache", None)
     monkeypatch.setattr(dl, "_ktc_fetched_at", 0.0)
+    monkeypatch.setattr(dl, "KTC_BLEND_STATUS", {})
 
 
 def _use_fixture_ktc(monkeypatch):
@@ -88,6 +94,101 @@ def test_parse_ktc_players_extracts_and_drops_rdp():
 def test_parse_ktc_players_raises_without_array():
     with pytest.raises(Exception):
         parse_ktc_players("<html><body>no array here</body></html>")
+
+
+def _current_page(players_json: str) -> str:
+    """KTC's page structure since about 2026-10-29 (the skeleton verbatim
+    from the live page on 2026-11-03): the list in a `ktc-players` JSON
+    element that `var playersArray = JSON.parse(...)` reads, another JSON
+    element before it and another array (oneQBPlayers) after it. The
+    entries are the legacy fixture's, so no new KTC data is committed."""
+    return (
+        '<html><body>\n<script type="application/json" id="ktc-alerts">'
+        '[{"playerName": "Decoy Before", "position": "QB"}]</script>\n'
+        '<script type="application/json" data-id="ktc-players">'
+        '[{"playerName": "Decoy Data Id", "position": "QB"}]</script>\n'
+        '<script type="application/json" id="ktc-players">' + players_json + '</script>\n'
+        "<script>\n    var leagueType = 1;\n"
+        "    var playersArray = JSON.parse(document.getElementById('ktc-players').textContent);\n"
+        "    var oneQBSC = false;\n"
+        '    var oneQBPlayers = [{"playerName": "Decoy After", "position": "WR"}];\n'
+        "</script></body></html>")
+
+
+_LEGACY_LIST = dl._KTC_PLAYERS_LITERAL.search(_KTC_HTML).group(1)
+
+
+def _with_decoy_values(players_json: str) -> str:
+    """The legacy entries plus the fields KTC's current page also carries
+    (blendValue, vftValue), set to values nobody should read."""
+    players = json.loads(players_json)
+    for p in players:
+        for fmt in ("oneQBValues", "superflexValues"):
+            if isinstance(p.get(fmt), dict):
+                p[fmt] = {**p[fmt], "blendValue": 1, "vftValue": 2}
+                if isinstance(p[fmt].get("tep"), dict):
+                    p[fmt]["tep"] = {**p[fmt]["tep"], "blendValue": 3}
+    return json.dumps(players)
+
+
+def test_parse_ktc_players_reads_the_current_pages_json_element():
+    """The 10-29 break: KTC moved the list into a JSON element, so the
+    literal regex found nothing and every load fell to DP-only. The element
+    is read, and the decoys around it aren't."""
+    players = parse_ktc_players(_current_page(_LEGACY_LIST))
+    assert players == parse_ktc_players(_KTC_HTML)
+    assert {"Decoy Before", "Decoy After", "Decoy Data Id"}.isdisjoint(
+        p["playerName"] for p in players)
+
+
+@pytest.mark.parametrize("tag", [
+    '<script type="application/json" id="ktc-players">',
+    "<script type='application/json' id='ktc-players'>",
+    '<script type="application/json" id=ktc-players>',
+    '<SCRIPT TYPE="application/json" ID = "ktc-players">',
+], ids=["double_quotes", "single_quotes", "unquoted", "uppercase_spaced"])
+def test_the_element_is_found_however_its_tag_is_written(tag):
+    html = _current_page(_LEGACY_LIST).replace(
+        '<script type="application/json" id="ktc-players">', tag)
+    assert parse_ktc_players(html) == parse_ktc_players(_KTC_HTML)
+
+
+def test_with_both_shapes_on_the_page_the_element_wins():
+    """#584 QA: the order is pinned. The element holds the first 30 legacy
+    entries, the literal all of them."""
+    first_30 = json.dumps(json.loads(_LEGACY_LIST)[:30])
+    html = _current_page(first_30) + "<script>var playersArray = " + _LEGACY_LIST + ";</script>"
+    expected = [p for p in json.loads(first_30) if p["position"] in ("QB", "RB", "WR", "TE")]
+    assert parse_ktc_players(html) == expected
+
+
+@pytest.mark.parametrize("element", ['{"not": "json"', "[]", '[{"position": "RDP"}]'],
+                         ids=["unreadable", "empty", "no_players"])
+def test_an_element_without_players_falls_back_to_the_literal_or_fails_loudly(element):
+    """#584 QA: a malformed or empty element never blocks a valid literal,
+    and alone it's a failure (logged as KTC unavailable), never "Loaded 0"."""
+    html = _current_page(element)
+    with pytest.raises(ValueError, match="playersArray not found in KTC page"):
+        parse_ktc_players(html)
+    with_literal = html + "<script>var playersArray = " + _LEGACY_LIST + ";</script>"
+    assert parse_ktc_players(with_literal) == parse_ktc_players(_KTC_HTML)
+
+
+def test_parse_ktc_players_refuses_an_element_that_is_not_a_list():
+    with pytest.raises(ValueError):
+        parse_ktc_players(_current_page('{"players": []}'))
+
+
+def test_real_ktc_consensus_parses_the_current_page_structure(monkeypatch):
+    """The real _ktc_consensus path gives the same rows from the current
+    page structure as from the legacy one."""
+    monkeypatch.setattr(dl, "_crosswalk_id_maps", lambda: ({}, {}))
+    monkeypatch.setattr(dl, "_fetch_ktc_html", lambda timeout=15: _KTC_HTML)
+    legacy = dl._ktc_consensus()
+    monkeypatch.setattr(dl, "_ktc_cache", None)          # the 24 h cache would answer
+    monkeypatch.setattr(dl, "_fetch_ktc_html",
+                        lambda timeout=15: _current_page(_with_decoy_values(_LEGACY_LIST)))
+    assert legacy and dl._ktc_consensus() == legacy      # `value`, never blendValue/vftValue
 
 
 def test_real_ktc_consensus_parses_fixture_html(monkeypatch):
@@ -275,3 +376,108 @@ def test_copy_1qb_to_sf_tep_does_not_demote_top_te(monkeypatch):
     order = list(ORDERED_TIERS)
     assert order.index(tier_sf) <= order.index(tier_1qb), (
         f"top TE demoted on copy: 1qb {tier_1qb} -> sf_tep {tier_sf}")
+
+
+# ---------------------------------------------------------------------------
+# 8. S5: blend health (KTC_BLEND_STATUS + the KTC-BLEND-DEGRADED line)
+# ---------------------------------------------------------------------------
+
+def _blend_1qb(monkeypatch, ktc):
+    monkeypatch.setattr(dl, "_blend_config", lambda: (0.5, 1.0))
+    monkeypatch.setattr(dl, "_qb_cap_config", lambda: (0.0, 0.0))  # #313 off
+    monkeypatch.setattr(dl, "_ktc_consensus", lambda: ktc)
+    elo, val, pos = _dp_maps("1qb_ppr")
+    return dict(val), _apply_consensus_blend("1qb_ppr", elo, val, pos)[1]
+
+
+def test_a_healthy_blend_is_ok_and_silent(monkeypatch, capsys):
+    """The real 2026-07-17 data: 441 matched, KTC and DP orderings agree
+    (rank correlation 0.935, well above the 0.7 floor), and it clears every
+    coverage floor with margin: still clear with each floor raised 10%."""
+    before, after = _blend_1qb(monkeypatch, _KTC)
+    status = dl.KTC_BLEND_STATUS["1qb_ppr"]
+    assert (status["state"], status["matched"], status["short"]) == ("ok", 441, [])
+    assert status["rank_corr"] >= 0.9 > dl.KTC_MIN_RANK_CORR
+    assert after != before                                    # blended
+    assert "KTC-BLEND-DEGRADED" not in capsys.readouterr().out
+    elo, val, pos = _dp_maps("1qb_ppr")
+    matched = [(k, 0.0) for k in val if k in _KTC and _KTC[k]["pos"] == pos.get(k)]
+    monkeypatch.setattr(dl, "KTC_MIN_COVERAGE",
+                        {k: v * 1.1 for k, v in dl.KTC_MIN_COVERAGE.items()})
+    assert dl._coverage_short(matched, val, pos) == []
+
+
+def test_unavailable_ktc_is_flagged_and_dp_only(monkeypatch, capsys):
+    before, after = _blend_1qb(monkeypatch, {})
+    assert after == before
+    assert dl.KTC_BLEND_STATUS["1qb_ppr"]["state"] == "unavailable"
+    out = capsys.readouterr().out
+    assert "KTC-BLEND-DEGRADED fmt=1qb_ppr reason=unavailable matched=0/" in out
+    assert "consensus seeds are DP-only" in out and "ktc_blend_weight=0" in out
+
+
+def test_a_thin_match_is_flagged_and_dp_only(monkeypatch, capsys):
+    """A page change that still parses but matches few pool players: the
+    blend doesn't run (models-lead R5), so the line's "DP-only" is true."""
+    few = dict(list(_KTC.items())[:dl.KTC_MIN_MATCHED - 1])
+    before, after = _blend_1qb(monkeypatch, few)
+    assert after == before
+    status = dl.KTC_BLEND_STATUS["1qb_ppr"]
+    assert (status["state"], status["rank_corr"]) == ("thin", None)
+    assert status["matched"] < dl.KTC_MIN_MATCHED
+    out = capsys.readouterr().out
+    assert "reason=thin" in out and "consensus seeds are DP-only" in out
+
+
+def _half(ktc):
+    import random
+    keys = sorted(ktc)
+    return {k: ktc[k] for k in random.Random(0).sample(keys, len(keys) // 2)}
+
+
+@pytest.mark.parametrize("subset, short", [
+    (lambda k: {n: r for n, r in k.items() if r["pos"] == "WR"}, ["overall", "QB", "RB", "TE"]),
+    (lambda k: {n: r for n, r in k.items() if r["pos"] == "QB"}, ["overall", "RB", "WR", "TE"]),
+    (_half, None),
+], ids=["wr_only", "qb_only", "random_half"])
+def test_a_partial_match_is_flagged_and_dp_only(monkeypatch, capsys, subset, short):
+    """models-lead R5's coverage gate, on QA's three subsets: each has 50+
+    matches, but covers too little of the pool (or of a position) for the
+    rank-normalization onto the whole pool's curve to be right."""
+    before, after = _blend_1qb(monkeypatch, subset(_KTC))
+    status = dl.KTC_BLEND_STATUS["1qb_ppr"]
+    assert status["state"] == "partial" and status["matched"] >= dl.KTC_MIN_MATCHED
+    assert "overall" in status["short"] and (short is None or status["short"] == short)
+    assert after == before
+    out = capsys.readouterr().out
+    assert "reason=partial" in out and "consensus seeds are DP-only" in out
+
+
+def test_an_ordering_that_disagrees_with_dp_is_flagged_but_still_blended(monkeypatch, capsys):
+    """Garbage that still parses: KTC's values inverted. The blend runs as
+    before (S5 only reports); the line names the lever."""
+    hi = max(r["values"]["1qb_ppr"] for r in _KTC.values() if "1qb_ppr" in r["values"])
+    flipped = {k: {**r, "values": {f: hi + 1 - v for f, v in r["values"].items()}}
+               for k, r in _KTC.items()}
+    before, after = _blend_1qb(monkeypatch, flipped)
+    status = dl.KTC_BLEND_STATUS["1qb_ppr"]
+    assert status["state"] == "disagrees" and status["rank_corr"] < 0
+    assert after != before                                    # still blended
+    out = capsys.readouterr().out
+    assert "reason=disagrees" in out and "blended anyway" in out
+
+
+def test_blend_off_records_nothing(monkeypatch, capsys):
+    monkeypatch.setattr(dl, "_blend_config", lambda: (0.0, 1.0))
+    monkeypatch.setattr(dl, "_ktc_consensus", lambda: pytest.fail("fetched with the blend off"))
+    elo, val, pos = _dp_maps("1qb_ppr")
+    _apply_consensus_blend("1qb_ppr", elo, val, pos)
+    assert dl.KTC_BLEND_STATUS == {}
+    assert "KTC-BLEND-DEGRADED" not in capsys.readouterr().out
+
+
+def test_rank_corr():
+    assert dl._rank_corr([1, 2, 3, 4], [10, 20, 30, 40]) == pytest.approx(1.0)
+    assert dl._rank_corr([1, 2, 3, 4], [4, 3, 2, 1]) == pytest.approx(-1.0)
+    assert dl._rank_corr([1, 2, 2, 4], [1, 2, 3, 4]) == pytest.approx(0.9486833)   # ties averaged
+    assert dl._rank_corr([5, 5, 5], [1, 2, 3]) == 0.0

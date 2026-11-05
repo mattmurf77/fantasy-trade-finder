@@ -3,7 +3,11 @@ OG share card image generation (PNG, 1200×630) using Pillow.
 
 Exports:
     render_tier_card(username, pos, scoring_format) -> bytes
-    render_trade_card(match_id) -> bytes
+    render_trade_card(match_row, *, verdict, as_of, scoring_format,
+                      pick_labels) -> (bytes, status)
+    render_package_card(short_id, *, verdict, as_of, scoring_format,
+                        pick_labels) -> (bytes, status)
+    render_expired_trade_card() -> bytes
     render_placeholder_card(title, subtitle) -> bytes
 
 All renderers always return a valid PNG as bytes. They never write
@@ -14,9 +18,12 @@ placeholder card.
 
 from __future__ import annotations
 
+import functools
 import io
 import json
 import logging
+import re
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Iterable, Optional
 
 try:
@@ -47,11 +54,13 @@ TEXT_MUTED   = (160, 174, 200)
 ACCENT       = (110, 180, 255)
 DIVIDER      = (60,  72, 105)
 
+# Canonical position hexes: docs/cross-client-invariants.md § Position color
+# tokens. Chip labels on them are ink-0 (12, 14, 17); white fails contrast.
 POS_COLORS = {
-    "QB": (239, 83,  80),
-    "RB": (102, 187, 106),
-    "WR": (66,  165, 245),
-    "TE": (255, 167, 38),
+    "QB": (249, 115, 22),
+    "RB": (34,  197, 94),
+    "WR": (59,  130, 246),
+    "TE": (168, 85,  247),
 }
 
 # Matches ranking_service.ORDERED_TIERS ordering (best → worst) — the
@@ -168,7 +177,7 @@ def _new_canvas() -> "Image.Image":
 
 
 def _draw_footer(draw, font_small) -> None:
-    footer = "Fantasy Trade Finder · fantasy-trade-finder.onrender.com"
+    footer = "Fleeced: Dynasty Trade Finder · fantasy-trade-finder.onrender.com"
     draw.line([(60, CARD_H - 70), (CARD_W - 60, CARD_H - 70)], fill=DIVIDER, width=2)
     draw.text((60, CARD_H - 50), footer, font=font_small, fill=TEXT_MUTED)
 
@@ -183,9 +192,14 @@ def _to_png_bytes(img: "Image.Image") -> bytes:
 # Placeholder card (used for errors / empty states)
 # ---------------------------------------------------------------------------
 
-def render_placeholder_card(title: str, subtitle: str = "") -> bytes:
+def render_placeholder_card(title: str, subtitle: str = "", *,
+                            shrink_to_fit: bool = False) -> bytes:
     """Render a simple centered placeholder card — used for unknown users,
-    missing tiers, or bad match ids. Always returns a valid PNG."""
+    missing tiers, or bad match ids. Always returns a valid PNG.
+
+    `shrink_to_fit` steps the title font down (to 40px at the smallest)
+    before truncating, for a fixed sentence that must read in full whatever
+    font the host has (the expired-trade card)."""
     if _PIL_IMPORT_ERROR is not None:
         raise RuntimeError(
             "Pillow is not installed. Run: pip install Pillow>=10.0"
@@ -197,6 +211,11 @@ def render_placeholder_card(title: str, subtitle: str = "") -> bytes:
     font_mid = _load_font(34, bold=False)
     font_small = _load_font(22)
 
+    if shrink_to_fit:
+        size = 72
+        while size > 40 and _text_width(draw, title, font_big) > CARD_W - 120:
+            size -= 4
+            font_big = _load_font(size, bold=True)
     title = _truncate(draw, title, font_big, CARD_W - 120)
     tw = _text_width(draw, title, font_big)
     draw.text(((CARD_W - tw) // 2, 220), title, font=font_big, fill=TEXT_PRIMARY)
@@ -371,7 +390,7 @@ def _render_tier_card_filled(
     pos_w = _text_width(draw, pos, font_title)
     draw.text(
         (chip_x + (chip_w - pos_w) // 2, chip_y + 2),
-        pos, font=font_title, fill=(255, 255, 255),
+        pos, font=font_title, fill=(12, 14, 17),
     )
 
     title = f"My {pos} Tiers"
@@ -439,121 +458,91 @@ def _player_display_name(player: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Trade fairness card
+# Trade give/get card (no fairness number: models-lead I6, Product 2026-10-31)
 # ---------------------------------------------------------------------------
 
-def _compute_fairness(
-    give_ids: list[str],
-    receive_ids: list[str],
-    players_by_id: dict[str, dict],
-) -> int:
+def render_trade_card(match: dict, *, verdict: Optional[dict] = None,
+                      as_of: Optional[str] = None,
+                      scoring_format: Optional[str] = None,
+                      pick_labels: Optional[dict] = None) -> tuple[bytes, int]:
     """
-    Produce a 0–100 fairness score from the two sides' player data.
+    Render a trade give/get card for ONE resolved trade_matches row (a
+    dict; only user_a_give / user_a_receive are read).
 
-    We don't have persisted composite scores on the match record, so this
-    derives a rough fairness from search_rank symmetry: the closer the
-    sides' average search_rank, the higher the fairness score. This is
-    purely cosmetic for the share card — the authoritative fairness
-    stays inside trade_service.
-    """
-    def avg_rank(ids: list[str]) -> float:
-        ranks = []
-        for pid in ids:
-            p = players_by_id.get(str(pid))
-            if not p:
-                continue
-            r = p.get("search_rank")
-            if r is None:
-                continue
-            ranks.append(float(r))
-        if not ranks:
-            return 500.0
-        return sum(ranks) / len(ranks)
+    `verdict` ({favors, gap, second_in_firsts}), `as_of` ("Mon D, YYYY")
+    and `scoring_format` draw the value bar; the server reads all three from
+    the share's stored value snapshot (server._value_bar_from_snapshot).
+    With no verdict the card is the no-bar card, byte for byte.
+    `pick_labels` ({pick_id: label}) names draft picks, which aren't
+    players rows. The server computes all of them: og_image never imports
+    server.
 
-    a = avg_rank(give_ids)
-    b = avg_rank(receive_ids)
-    if a <= 0 and b <= 0:
-        return 50
-    denom = max(a, b) or 1.0
-    ratio = min(a, b) / denom  # 0..1 — closer to 1 means more even
-    # Map ratio 0..1 → 40..98 so trades always look like they're in range
-    score = 40 + ratio * 58
-    return int(round(max(0, min(100, score))))
+    The caller resolves the row through trade_share_tokens (build O8). This
+    function never looks a match up by a value taken from a URL: the old
+    int(match_id) lookup is what let anyone walk the sequential ids.
 
-
-def _fairness_color(score: int) -> tuple[int, int, int]:
-    if score >= 85:
-        return (76,  175, 80)     # green
-    if score >= 65:
-        return (255, 193, 7)      # amber
-    return (244, 67, 54)          # red
-
-
-def render_trade_card(match_id) -> tuple[bytes, int]:
-    """
-    Render a trade give/get card with fairness verdict for a single match.
-
-    Returns (png_bytes, http_status_code). 200 on success, 404 if the
-    match_id can't be resolved (still a valid placeholder PNG).
+    Returns (png_bytes, http_status_code): 200 on success, 500 when the
+    player lookup is unavailable (still a valid placeholder PNG).
     """
     if _PIL_IMPORT_ERROR is not None:
         raise RuntimeError(
             "Pillow is not installed. Run: pip install Pillow>=10.0"
         ) from _PIL_IMPORT_ERROR
 
-    # Load the match row directly (load_matches filters by user_id which
-    # we don't have at share time — the share page is public).
     try:
-        from .database import engine, trade_matches_table, load_players_by_ids
-        from sqlalchemy import select
+        from .database import load_players_by_ids
     except Exception as e:
         log.error("og_image: import failed: %s", e)
         return render_placeholder_card("Unavailable", "Data service offline"), 500
 
     try:
-        mid = int(match_id)
-    except (TypeError, ValueError):
-        return render_placeholder_card("Match not found", f"id={match_id!r}"), 404
-
-    try:
-        with engine.connect() as conn:
-            row = conn.execute(
-                select(trade_matches_table).where(
-                    trade_matches_table.c.id == mid
-                )
-            ).fetchone()
-    except Exception as e:
-        log.error("og_image: match lookup failed for %s: %s", mid, e)
-        return render_placeholder_card("Unavailable", "Data service offline"), 500
-
-    if row is None:
-        return render_placeholder_card("Match not found", f"id={mid}"), 404
-
-    try:
-        a_give    = json.loads(row.user_a_give)    if row.user_a_give    else []
-        a_receive = json.loads(row.user_a_receive) if row.user_a_receive else []
+        a_give    = json.loads(match.get("user_a_give"))    if match.get("user_a_give")    else []
+        a_receive = json.loads(match.get("user_a_receive")) if match.get("user_a_receive") else []
     except (json.JSONDecodeError, TypeError):
         a_give, a_receive = [], []
 
     all_ids = [str(x) for x in (a_give + a_receive)]
     players_by_id = load_players_by_ids(all_ids) if all_ids else {}
 
-    fairness = _compute_fairness(a_give, a_receive, players_by_id)
-
     return _render_trade_card_png(
         give_ids=a_give,
         receive_ids=a_receive,
         players_by_id=players_by_id,
-        fairness=fairness,
+        verdict=verdict, as_of=as_of, scoring_format=scoring_format,
+        pick_labels=pick_labels,
     ), 200
 
 
-def render_package_card(short_id) -> tuple[bytes, int]:
+# The ONE place the "expired trade link" words live — the /s/trade miss page
+# (server.share_trade_page) and the PNG below both read them. Proposed copy
+# (build O8); marketing-lead's wording replaces it here when it lands.
+TRADE_LINK_EXPIRED_TITLE = "This trade link has expired."
+TRADE_LINK_EXPIRED_BODY = "Open Fleeced to see your trades."
+
+
+@functools.lru_cache(maxsize=1)
+def render_expired_trade_card() -> bytes:
+    """The generic card every /og/trade miss returns (numeric id, unknown,
+    revoked or malformed token, orphaned match). Takes no input, so it
+    reveals nothing about the miss; cached once per process, so every miss
+    is byte-identical. lru_cache is thread-safe and never caches the
+    Pillow-unavailable RuntimeError, which still raises on every call."""
+    return render_placeholder_card(TRADE_LINK_EXPIRED_TITLE, TRADE_LINK_EXPIRED_BODY,
+                                   shrink_to_fit=True)
+
+
+def render_package_card(short_id, *, verdict: Optional[dict] = None,
+                        as_of: Optional[str] = None,
+                        scoring_format: Optional[str] = None,
+                        pick_labels: Optional[dict] = None) -> tuple[bytes, int]:
     """
     Render an arbitrary shared package (shared_packages row) as an OG card
     — the /s/p/<short_id> landing (teardown S7 PRD-01, flag
     `growth.share_landing`). Same layout as the trade-match card; sides
     come from the sharer's snapshot rather than a trade_matches row.
+    `verdict`, `as_of`, `scoring_format` and `pick_labels` are as for
+    render_trade_card (a package draws its bar only when it was shared
+    with a scoring format, so a value snapshot was stored).
 
     Returns (png_bytes, http_status_code): 200 on success, 404 for an
     unknown short_id (placeholder PNG body).
@@ -581,24 +570,64 @@ def render_package_card(short_id) -> tuple[bytes, int]:
     receive = [str(x) for x in pkg.get("receive_ids") or []]
     all_ids = give + receive
     players_by_id = load_players_by_ids(all_ids) if all_ids else {}
-    fairness = _compute_fairness(give, receive, players_by_id)
+    players_by_id.update(_generic_pick_records(i for i in all_ids if i not in players_by_id))
 
     return _render_trade_card_png(
         give_ids=give,
         receive_ids=receive,
         players_by_id=players_by_id,
-        fairness=fairness,
         title="Trade Package",
+        verdict=verdict, as_of=as_of, scoring_format=scoring_format,
+        pick_labels=pick_labels,
     ), 200
+
+
+# A draft pick's chip on the card: "PK" on chalk-dim, a neutral fill, never a
+# position hex (docs/cross-client-invariants.md § Position color tokens). The
+# same constants and look as #564 (league-eng's share-card value bar), so the
+# card changes once whichever lands first.
+PICK_CHIP_LABEL = "PK"
+PICK_CHIP_FILL = (151, 161, 174)    # chalk-dim
+
+
+def _generic_pick_records(ids: Iterable[str]) -> dict[str, dict]:
+    """The live calculator's 12 generic pick rungs (`generic_pick_<round>_
+    <early|mid|late>`, server.py's universal pool) aren't `players` rows, so a
+    shared package holding one drew "Unknown player" (release-lead, #566 QA
+    follow-up). Each gets the label the calculator shows ("Mid 1st Round
+    Pick", pick_values.generic_pick_label) and the PK chip; ids are parsed by
+    the shared pick_values.parse_generic_pick_id. Any other unknown id stays
+    unknown."""
+    from .pick_values import generic_pick_label, parse_generic_pick_id
+
+    out: dict[str, dict] = {}
+    for pid in ids:
+        parsed = parse_generic_pick_id(str(pid))
+        if parsed is not None:
+            out[str(pid)] = {"player_id": str(pid), "full_name": generic_pick_label(*parsed),
+                             "position": PICK_CHIP_LABEL}
+    return out
 
 
 def _render_trade_card_png(
     give_ids: list[str],
     receive_ids: list[str],
     players_by_id: dict[str, dict],
-    fairness: int,
     title: str = "Trade Match",
+    *,
+    verdict: Optional[dict] = None,
+    as_of: Optional[str] = None,
+    scoring_format: Optional[str] = None,
+    pick_labels: Optional[dict] = None,
 ) -> bytes:
+    pick_labels = pick_labels or {}
+    # The bar needs all four: the basis line names the format and the date
+    # (legal R28.24 #1), and the +/-2nd ticks need the snapshot's
+    # `second_in_firsts`. There is no default fraction: a verdict without a
+    # valid one draws no bar, never a tick from a stale constant.
+    second_in_firsts = (verdict or {}).get("second_in_firsts")
+    bar = (verdict is not None and bool(as_of) and bool(scoring_format)
+           and valid_second_in_firsts(second_in_firsts))
     img = _new_canvas()
     draw = ImageDraw.Draw(img)
 
@@ -606,18 +635,18 @@ def _render_trade_card_png(
     font_side    = _load_font(30, bold=True)
     font_player  = _load_font(28)
     font_pos     = _load_font(20, bold=True)
-    font_score   = _load_font(96, bold=True)
     font_small   = _load_font(22)
 
-    # Header
-    draw.text((60, 45), title, font=font_title, fill=TEXT_PRIMARY)
+    # Header. With the value bar the block moves up to free y 375-560
+    # (design-lead); without it the layout is the recentred #511 card.
+    draw.text((60, 45 if bar else 85), title, font=font_title, fill=TEXT_PRIMARY)
 
     # Two sides
     col_w = 470
     left_x = 60
     right_x = CARD_W - 60 - col_w
-    col_top = 135
-    col_bot = 415
+    col_top = 125 if bar else 175
+    col_bot = 375 if bar else 455
 
     # Column backgrounds
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
@@ -643,9 +672,17 @@ def _render_trade_card_png(
         if not ids:
             draw.text((x0 + 24, y0 + 80), "—", font=font_player, fill=TEXT_MUTED)
             return
-        for i, pid in enumerate(ids[:3]):
+        # Over 3 players: 2 names, then "+N more" in the third row's slot.
+        shown = ids if len(ids) <= 3 else ids[:2]
+        for i, pid in enumerate(shown):
             p = players_by_id.get(str(pid))
-            if p:
+            pick_label = pick_labels.get(str(pid))
+            if pick_label:
+                # A draft pick: a neutral "PK" chip, never a position hex
+                # (docs/cross-client-invariants.md § Position color tokens).
+                name = pick_label
+                pos = PICK_CHIP_LABEL
+            elif p:
                 name = _player_display_name(p)
                 pos = (p.get("position") or "").upper()
             else:
@@ -655,7 +692,8 @@ def _render_trade_card_png(
             # Position chip
             if pos:
                 chip_w, chip_h = 56, 32
-                color = POS_COLORS.get(pos, (120, 144, 156))
+                color = (PICK_CHIP_FILL if pos == PICK_CHIP_LABEL
+                         else POS_COLORS.get(pos, (120, 144, 156)))
                 draw.rounded_rectangle(
                     [x0 + 24, row_y + 4, x0 + 24 + chip_w, row_y + 4 + chip_h],
                     radius=8, fill=color,
@@ -663,7 +701,7 @@ def _render_trade_card_png(
                 cw = _text_width(draw, pos, font_pos)
                 draw.text(
                     (x0 + 24 + (chip_w - cw) // 2, row_y + 10),
-                    pos, font=font_pos, fill=(255, 255, 255),
+                    pos, font=font_pos, fill=(12, 14, 17),
                 )
                 text_x = x0 + 24 + chip_w + 14
             else:
@@ -671,50 +709,241 @@ def _render_trade_card_png(
             # Player name (truncated to column)
             name = _truncate(draw, name, font_player, (x0 + col_w - 20) - text_x)
             draw.text((text_x, row_y + 6), name, font=font_player, fill=TEXT_PRIMARY)
+        if len(ids) > 3:
+            draw.text((x0 + 24, y0 + 70 + 2 * 66 + 6), f"+{len(ids) - 2} more",
+                      font=font_player, fill=TEXT_MUTED)
 
     render_side(left_x, col_top, give_ids)
     render_side(right_x, col_top, receive_ids)
 
-    # Center swap arrow
-    center_y = (col_top + col_bot) // 2
-    arrow_cx = CARD_W // 2
-    draw.ellipse(
-        [arrow_cx - 40, center_y - 40, arrow_cx + 40, center_y + 40],
-        fill=(255, 255, 255, 255),
-        outline=ACCENT, width=3,
-    )
-    arrow = "⇄"
-    aw = _text_width(draw, arrow, font_side)
-    draw.text(
-        (arrow_cx - aw // 2, center_y - 24),
-        arrow, font=font_side, fill=(15, 19, 34),
-    )
-
-    # Fairness verdict
-    verdict_y = 445
-    label = f"{fairness}% fair"
-    lw = _text_width(draw, label, font_score)
-    color = _fairness_color(fairness)
-    draw.text(
-        ((CARD_W - lw) // 2, verdict_y),
-        label, font=font_score, fill=color,
-    )
-
-    # Progress bar
-    bar_x0 = 200
-    bar_x1 = CARD_W - 200
-    bar_y0 = CARD_H - 115
-    bar_y1 = bar_y0 + 14
-    draw.rounded_rectangle(
-        [bar_x0, bar_y0, bar_x1, bar_y1],
-        radius=7, fill=DIVIDER,
-    )
-    fill_x = bar_x0 + int((bar_x1 - bar_x0) * (max(0, min(100, fairness)) / 100.0))
-    if fill_x > bar_x0 + 1:
-        draw.rounded_rectangle(
-            [bar_x0, bar_y0, fill_x, bar_y1],
-            radius=7, fill=color,
-        )
+    if bar:
+        _draw_value_bar(draw, verdict, as_of, scoring_format, second_in_firsts)
 
     _draw_footer(draw, font_small)
     return _to_png_bytes(img)
+
+
+# ---------------------------------------------------------------------------
+# The value bar (docs/plans/share-card-value-bar/scope.md)
+#
+# The app's TradeValueBar (mobile/src/components/TradeValueBar.tsx) on the
+# public card: a diverging bar centred on even, half-scale = one generic Mid
+# 1st, so the fill length IS |gap.firsts| (clamped at the ends), with +/-2nd
+# landmark ticks where a Mid 2nd sits today (`second_in_firsts`, computed
+# by the server from the current generic-pick values). Geometry and colour:
+# design-lead's spec (v2, 2026-11-01). Words: marketing addendum 14 part B
+# (legal R28.24, models-lead K): they describe the trade's SIDES, never
+# people, and never say who comes out ahead; the lean points at the column
+# with more value. The fill takes the app's colours exactly (operator,
+# 2026-11-01: "Green and amber"): green toward YOU GET, amber toward YOU
+# GIVE, the ice nub when even. No "win", "You"/"They", value numbers,
+# "fair", percentages, heading or end labels.
+# ---------------------------------------------------------------------------
+
+PICK_CHIP_LABEL = "PK"
+PICK_CHIP_FILL = (151, 161, 174)    # chalk-dim: neutral, never a position hex
+
+VB_X0, VB_X1 = 60, CARD_W - 60      # track x 60-1140
+VB_MID = (VB_X0 + VB_X1) // 2       # 600: even
+VB_HALF = (VB_X1 - VB_X0) // 2      # 540: one Mid 1st
+VB_TRACK_Y0, VB_TRACK_Y1 = 452, 470
+VB_TICK_OVERHANG = 8                # ticks run 8px above and below the track
+VB_LABEL_Y = 398                    # the pick / "About even" label line
+VB_SCALE_Y = 488                    # 1st · 2nd · Even · 2nd · 1st
+VB_BASIS_Y = 518                    # the basis and date line, its own row
+VB_NUB_W = 12                       # the even nub
+
+VB_TRACK  = (35, 40, 51)            # ink-3
+# The fill: TradeValueBar.tsx:87 `fillColor = even ? ice.base : youWin ?
+# semantic.pos : semantic.warn` (youWin = favors 'receive', :81), with the
+# token values from mobile/src/theme/chalkline.ts. Named after the tokens so
+# the card and the app can't drift; test_share_card_value_bar pins both.
+SEMANTIC_POS  = (34, 197, 94)       # semantic.pos  '#22C55E', chalkline.ts:58
+SEMANTIC_WARN = (245, 158, 11)      # semantic.warn '#F59E0B', chalkline.ts:60
+ICE_BASE      = (86, 217, 236)      # ice.base      '#56D9EC', chalkline.ts:44
+VB_TICK   = (61, 70, 84)            # ink.lineStrong (raised from ink.line to read at card scale)
+VB_CENTER = (89, 100, 122)          # ink.lineStrongA11y
+VB_PICK   = (45, 212, 191)          # tier first_1, the app's pick-label colour
+VB_DIM    = (151, 161, 174)         # chalk-dim
+VB_CHALK  = (236, 239, 244)         # chalk
+
+VB_SCALE_LABELS = ("1st", "2nd", "Even", "2nd", "1st")   # no signs (B6)
+
+# B4 (MUST) and its SHOULD form; the long form is used when it fits on one
+# line at its size.
+VB_BASIS_LONG = ("Estimate from consensus dynasty values, not a guarantee"
+                 " · {format} · {date}")
+VB_BASIS = "Estimate from consensus dynasty values · {format} · {date}"
+
+
+def _short_pick(label: str) -> str:
+    """TradeValueBar.tsx's shortPick: "Mid 2nd Round Pick" -> "a Mid 2nd"
+    (article by first-letter vowel)."""
+    core = re.sub(r"\s*Round Pick$", "", label, flags=re.I).strip()
+    return ("an " if re.match(r"[AEIOU]", core, re.I) else "a ") + core
+
+
+def _to_fixed_1(x: float) -> str:
+    """JS `x.toFixed(1)` for non-negative x, as TradeValueBar.tsx prints its
+    firsts: half up on the float's EXACT binary value, so 2.25 -> "2.3"
+    (Python's f"{x:.1f}" rounds that tie to even, "2.2") and 1.15 -> "1.1"
+    (stored as 1.1499...). Decimal(x) is built from the float, not str(x)."""
+    return str(Decimal(x).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+
+
+# Which label line the bar shows: Product's final rule (legal R28.27).
+#   B1 "≈ a Mid 2nd in value"     a generic pick fits the gap, at any size
+#   B2 "≈ 1.4 Mid 1sts in value"  no pick fits and the gap is 1 first or more
+#   B3 "About even in value"      no pick fits and the gap is under 1 first,
+#                                 or `favors` is even with no pick
+# Legal's two conditions: "About even" never covers a gap a pick label fits
+# (1), and whenever "About even" shows the fill is the centre mark (2). The
+# label, the fill and the alt text all read value_bar_branch, so (2) holds by
+# construction.
+VB_B1 = "B1"
+VB_B2 = "B2"
+VB_B3 = "B3"
+# OPEN QUESTION, not decided here: `favors` even (point ratio >= 0.95; the
+# even band gets only the centre mark, models-lead M7) AND a pick label (a
+# big package where 5% of value is still worth, say, a Late 3rd). Condition 1
+# says B1, but M7 says centre mark only, and the snapshot stores no lean
+# direction for an even trade. Until Product, legal and models-lead settle
+# it, this branch keeps the behaviour from before the rule: "About even in
+# value" and the centre mark (test_share_card_b2_rule pins it as such).
+VB_OPEN_EVEN_BAND_WITH_PICK = "open:even-band-with-pick"
+
+
+def value_bar_branch(verdict: dict) -> str:
+    """The label branch for one verdict ({favors, gap: {firsts,
+    pick_equivalent}}): VB_B1, VB_B2, VB_B3 or VB_OPEN_EVEN_BAND_WITH_PICK."""
+    gap = verdict["gap"]
+    pick = gap.get("pick_equivalent")
+    even_band = verdict.get("favors") not in ("give", "receive")
+    if even_band and pick:
+        return VB_OPEN_EVEN_BAND_WITH_PICK
+    if even_band:
+        return VB_B3
+    if pick:
+        return VB_B1
+    if abs(float(gap["firsts"])) >= 1.0:
+        return VB_B2
+    return VB_B3
+
+
+def value_bar_is_even(verdict: dict) -> bool:
+    """True when the bar reads "About even in value" (B3, or the open
+    even-band-with-pick branch). The bar then draws the centred nub, never
+    a lean (legal condition 2)."""
+    return value_bar_branch(verdict) in (VB_B3, VB_OPEN_EVEN_BAND_WITH_PICK)
+
+
+def value_bar_label(verdict: dict) -> tuple[str, str, str]:
+    """(lead, emphasis, tail) of the label line, marketing addendum 14:
+    B1 "≈ a Mid 2nd in value", B2 "≈ 1.4 Mid 1sts in value",
+    B3 "About even in value"."""
+    branch = value_bar_branch(verdict)
+    gap = verdict["gap"]
+    if branch == VB_B1:
+        return "≈ ", _short_pick(gap["pick_equivalent"]["label"]), " in value"
+    if branch == VB_B2:
+        return "≈ ", f"{_to_fixed_1(abs(float(gap['firsts'])))} Mid 1sts", " in value"
+    return "", "About even", " in value"
+
+
+def value_bar_alt(verdict: Optional[dict], as_of: Optional[str] = None,
+                  scoring_format: Optional[str] = None) -> str:
+    """The card's alt text (B8), for the share page's og:image:alt."""
+    if verdict is None or not as_of or not scoring_format:
+        return "Trade card: the give/get breakdown."
+    tail = (" Estimate from consensus dynasty values, "
+            f"{FORMAT_LABELS.get(scoring_format, scoring_format)}, {as_of}.")
+    if value_bar_is_even(verdict):
+        return ("Trade card: the give/get breakdown and a value bar, "
+                "about even in value." + tail)
+    side = "get" if verdict["favors"] == "receive" else "give"
+    lead, emph, rest = value_bar_label(verdict)
+    return ("Trade card: the give/get breakdown and a value bar leaning to "
+            f"the {side} side, {lead}{emph}{rest}." + tail)
+
+
+def _draw_runs(draw, x: int, y: int, runs) -> int:
+    """Draw [(text, font, fill), ...] left to right; returns the end x."""
+    for text, font, fill in runs:
+        if text:
+            draw.text((x, y), text, font=font, fill=fill)
+            x += _text_width(draw, text, font)
+    return x
+
+
+def _basis_line(draw, font, scoring_format: str, as_of: str) -> str:
+    """B4-long when it fits within the track width (1080px) at the font
+    actually loaded, else B4."""
+    fmt_label = FORMAT_LABELS.get(scoring_format, scoring_format)
+    basis = VB_BASIS_LONG.format(format=fmt_label, date=as_of)
+    if _text_width(draw, basis, font) > VB_X1 - VB_X0:
+        basis = VB_BASIS.format(format=fmt_label, date=as_of)
+    return basis
+
+
+def valid_second_in_firsts(value) -> bool:
+    """A usable +/-2nd tick fraction: a real number with 0 < value < 1."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and 0 < value < 1)
+
+
+def _draw_value_bar(draw, verdict: dict, as_of: str, scoring_format: str,
+                    second_in_firsts: float) -> None:
+    """The bar in the band between the panels (bottom y=375 with the bar)
+    and the footer rule (y=560): label line y=398, track y 452-470, scale
+    labels y=488, basis and date line y=518. `second_in_firsts` (required,
+    from the snapshot) places the +/-2nd ticks."""
+    f_label = _load_font(30, bold=True)
+    f_basis = _load_font(20)
+    f_scale = _load_font(18)
+
+    even = value_bar_is_even(verdict)
+    leans_get = verdict.get("favors") == "receive"
+
+    # Label line (B1-B3), left: the pick phrase in the app's pick teal, the
+    # rest in chalk; "About even in value" all chalk.
+    lead, emph, tail = value_bar_label(verdict)
+    _draw_runs(draw, VB_X0, VB_LABEL_Y, [
+        (lead, f_label, VB_CHALK),
+        (emph, f_label, VB_CHALK if even else VB_PICK),
+        (tail, f_label, VB_CHALK),
+    ])
+
+    # The diverging bar: track, fill (or the even nub), ticks, centre line.
+    ty0, ty1 = VB_TRACK_Y0, VB_TRACK_Y1
+    draw.rounded_rectangle([VB_X0, ty0, VB_X1, ty1], radius=3, fill=VB_TRACK)
+    if even:
+        half_nub = VB_NUB_W // 2
+        draw.rounded_rectangle([VB_MID - half_nub, ty0, VB_MID + half_nub, ty1],
+                               radius=3, fill=ICE_BASE)
+    else:
+        # Clamped at one Mid 1st (the end of the track).
+        length = round(min(1.0, abs(float(verdict["gap"]["firsts"]))) * VB_HALF)
+        if leans_get:       # more value on the YOU GET side: lean right
+            box = [VB_MID, ty0, VB_MID + length, ty1]
+        else:               # more value on the YOU GIVE side: lean left
+            box = [VB_MID - length, ty0, VB_MID, ty1]
+        draw.rounded_rectangle(box, radius=3,
+                               fill=SEMANTIC_POS if leans_get else SEMANTIC_WARN)
+    sec = round(second_in_firsts * VB_HALF)
+    for tx in (VB_MID - sec, VB_MID + sec):
+        draw.rectangle([tx - 1, ty0 - VB_TICK_OVERHANG, tx, ty1 + VB_TICK_OVERHANG],
+                       fill=VB_TICK)
+    draw.rectangle([VB_MID - 1, ty0 - VB_TICK_OVERHANG, VB_MID, ty1 + VB_TICK_OVERHANG],
+                   fill=VB_CENTER)
+
+    # Landmark labels: 1st · 2nd · Even · 2nd · 1st
+    for text, cx, align in zip(VB_SCALE_LABELS,
+                               (VB_X0, VB_MID - sec, VB_MID, VB_MID + sec, VB_X1),
+                               ("l", "c", "c", "c", "r")):
+        w = _text_width(draw, text, f_scale)
+        tx = cx if align == "l" else (cx - w if align == "r" else cx - w // 2)
+        draw.text((tx, VB_SCALE_Y), text, font=f_scale, fill=VB_DIM)
+
+    # B4 / B4-long: basis, format and date, always on its own row.
+    draw.text((VB_X0, VB_BASIS_Y), _basis_line(draw, f_basis, scoring_format, as_of),
+              font=f_basis, fill=VB_DIM)

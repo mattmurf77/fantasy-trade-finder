@@ -104,7 +104,7 @@ backend/eval/ (new files, operator tooling, not wired to the server)
 | Standings fetch fails, or the platform is not Sleeper | Standings are empty, and the windows use age plus picks only; `pf_index = None` is recorded in the evidence. The job proceeds. |
 | Lineup slots unknown | Default template `["QB","RB","RB","WR","WR","TE","FLEX","FLEX"]` plus `SUPER_FLEX` for `sf_tep`. This mirrors `_league_lineup_slots`' platform default (`server.py:18023`). |
 | Roster limit unknown (non-Sleeper) | The size rule is skipped (`max_players = None`); the lineup rule still applies |
-| Core time budget (8 s) hit | Enumeration stops. The partial pool is ranked and served. `budget_exhausted` is logged in the job and the evidence. |
+| Core safety ceiling (30 s) hit | Pathology only: the core is count-bounded, never clock-bounded (G-065), so machine load cannot change a deck. Enumeration stops, `safety_ceiling_hit` and `budget_exhausted` are set and the core logs an ERROR. Both callers refuse the partial pool. The live job (`trade.value_core`, off) logs an ERROR and ends with error `value_core_failed`, with nothing registered, logged as an impression or served (head-eng ruling 15, #366). Calibration fails the session with `value_core_failed`. |
 | Exception while building the value-core deck | Logged; `_run_value_core_job` returns `False` before anything is served, and the same job is finished by the legacy engine (PRD Q1, operator 2026-10-01). A deck never mixes engines. |
 | Impression write fails | Warn. The deck is still published, without impression ids. This matches the legacy non-fatal behavior at `server.py:8725`. |
 | Job superseded or timed out mid-run | `_finish_trade_job` returns None, and no event is fired. This is the existing contract (`server.py:3060`). |
@@ -120,7 +120,7 @@ backend/eval/ (new files, operator tooling, not wired to the server)
 **Time.**
 - Scoring is O(pool) with two lineup fills per trade.
 - Assembly is a lazy greedy, O(pool · log pool).
-- Expected total 1–4 s. The hard stop is an 8 s time budget inside the core.
+- Expected total 1–4 s. The work is bounded by counts (the check and keep caps above), never by the clock. A 30 s safety ceiling inside the core marks pathology only.
 - For comparison, the legacy engine's median is 13.3 s and the worker median 61.1 s (`docs/plans/trade-search-latency/execution-20260921/infrastructure-and-precompute.md:23`).
 
 ## 7. Measuring stick (eval bench)

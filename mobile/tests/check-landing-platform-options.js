@@ -10,7 +10,8 @@
 //      `landing.platform_options` — losing either gate either strands the
 //      row on the P2.6 layout it was never designed for, or removes the
 //      deploy-free revert lever.
-//   2. The ESPN/MFL chips are individually gated on `espn.link` / `mfl.link`,
+//   2. The ESPN/MFL chips are individually gated on `espn.link` / `mfl.link`
+//      (ESPN additionally on `espn.signin` — see check-espn-signin-flag.js),
 //      and a de-flagged selection falls back to Sleeper — otherwise flipping
 //      a platform flag off strands the user on a chip that renders nothing.
 //   3. The Apple success branches forward `platformIntent` to BOTH
@@ -79,12 +80,12 @@ assert(
   'ESPN/MFL chips read espn.link / mfl.link',
 );
 assert(
-  /\.\.\.\(espnLinkOn \? \(\['espn'\] as const\) : \[\]\)/.test(signIn) &&
+  /\.\.\.\(espnLinkOn && espnSignInOn \? \(\['espn'\] as const\) : \[\]\)/.test(signIn) &&
     /\.\.\.\(mflLinkOn \? \(\['mfl'\] as const\) : \[\]\)/.test(signIn),
   'chip list conditions each platform on its flag',
 );
 assert(
-  /\(entryPlatform === 'espn' && !espnLinkOn\)[\s\S]{0,120}\(entryPlatform === 'mfl' && !mflLinkOn\)[\s\S]{0,80}setEntryPlatform\('sleeper'\)/.test(signIn),
+  /\(entryPlatform === 'espn' && !\(espnLinkOn && espnSignInOn\)\)[\s\S]{0,120}\(entryPlatform === 'mfl' && !mflLinkOn\)[\s\S]{0,80}setEntryPlatform\('sleeper'\)/.test(signIn),
   'de-flagged selection falls back to Sleeper',
 );
 
@@ -213,11 +214,11 @@ assert(
 // V2.2 — the host pins an account_only entry user, then routes to the
 // picker (whose platform-league merge + auto-skip finish the flow).
 const entrySessionFn = signIn.match(
-  /async function handleEntrySession[\s\S]{0,600}?\n  \}/,
+  /async function handleEntrySession[\s\S]{0,700}?\n  \}\n/,
 );
 assert(
-  !!entrySessionFn && /account_only: true/.test(entrySessionFn[0]),
-  'V2: handleEntrySession pins an account_only entry user',
+  !!entrySessionFn && /account_only: u\.account_only \?\? true/.test(entrySessionFn[0]),
+  'V2: handleEntrySession pins an account_only entry user (default; a Sleeper-bound mint overrides — see check-entry-session-identity.js)',
 );
 assert(
   /function handleEntryLinked\(\) \{\s*\n\s*setEntrySheet\(null\);\s*\n\s*\(onAccountSignedIn \?\? onSignedIn\)\(\);/.test(signIn),
@@ -230,7 +231,9 @@ assert(
 );
 
 // V2.3 — sheets: mint BEFORE the canonical import, inside pickTeam.
-const espnPick = espnSheet.match(/async function pickTeam[\s\S]{0,900}?await linkEspnLeague/);
+// 1200, not 900: the mint's onEntrySession call forwards account_only /
+// username since 2026-10-26 (check-mfl-entry-proof.js), which lengthens the span.
+const espnPick = espnSheet.match(/async function pickTeam[\s\S]{0,1200}?await linkEspnLeague/);
 assert(
   !!espnPick && /if \(entry\) \{[\s\S]{0,400}entryPlatformMint\(/.test(espnPick[0]),
   'V2: ESPN pickTeam mints the entry session before the canonical import',
@@ -266,7 +269,7 @@ assert(
 
 // V2.6 — backend route exists, sessionless, dual-gated, deterministic ids.
 const entryRoute = serverPy.match(
-  /@app\.route\("\/api\/entry\/platform", methods=\["POST"\]\)\s*\ndef entry_platform\(\):[\s\S]{0,20000}?\n@app\.route/,
+  /@app\.route\("\/api\/entry\/platform", methods=\["POST"\]\)\s*\ndef entry_platform\(\):[\s\S]{0,30000}?\n@app\.route/,
 );
 assert(!!entryRoute, 'V2: POST /api/entry/platform route exists');
 assert(
@@ -280,16 +283,18 @@ assert(
   !!entryRoute && !/_require_session\(\)/.test(entryRoute[0]),
   'V2: entry route is sessionless (no _require_session)',
 );
+// Platform sign-in (2026-10-26) superseded the deterministic entry: ids: a
+// team claim is PROVEN and signs into a verified acct_* account session.
 assert(
-  !!entryRoute &&
-    /entry:espn:\{_espn\.canonical_swid\(team\.owner_swid\)\}/.test(entryRoute[0]) &&
-    /entry:espn:\{league_id\}\.t\{team_id\}/.test(entryRoute[0]) &&
-    /f"entry:\{_mfl_member_id\(league_id, franchise_id\)\}"/.test(entryRoute[0]),
-  'V2: deterministic entry: ids, distinct from the espn:/mfl: placeholder class',
+  !!entryRoute && !/f"entry:/.test(entryRoute[0]),
+  'Platform sign-in: the mint never creates an entry:* id',
 );
 assert(
-  !!entryRoute && /_extension_build_session\(/.test(entryRoute[0]),
-  'V2: mint goes through the one reusable session builder',
+  !!entryRoute &&
+    /_espn_signin_proof\(/.test(entryRoute[0]) &&
+    /_mfl\.login\(username, password, year\)[\s\S]*_mfl\.fetch_league_bundle\(league_id, year, host, cookie=cookie\)[\s\S]*_mfl\.fetch_my_leagues\(cookie, year\)[\s\S]*_platform_sign_in\(audit, "mfl"/.test(entryRoute[0]) &&
+    /_platform_sign_in\(audit, "espn"/.test(entryRoute[0]),
+  'Platform sign-in: both claims prove ownership, then mint via _platform_sign_in',
 );
 
 // ── V2.1: "log in" as a first-class entry option ─────────────────────────
@@ -410,25 +415,32 @@ assert(
     /setStep\('entry-pick'\)/.test(mflSignInFn[0]),
   'V2.1: entry sign-in clears the password from state and opens the entry list',
 );
+// 3200, not 2200: the three-step retry-safe body is ~2190 chars (2026-10-26).
 const mflEntryPick = platformSheet.match(
-  /async function mflEntryPickLeague\([\s\S]{0,2200}?\n  \}/,
+  /async function mflEntryPickLeague\([\s\S]{0,3200}?\n  \}/,
 );
+// 2026-10-26 (proof-based sign-in, private MFL leagues): the minted session
+// is verified, so the tap stores the MFL cookie (mflAuthLink) and imports
+// with it (mflAuthImport), like the non-entry flow; the zero-auth
+// linkPlatformLeague can't read a private league. Full pins in
+// check-mfl-entry-proof.js.
 assert(
   !!mflEntryPick && /entryPlatformMint\(\{/.test(mflEntryPick[0]) &&
     /teamId: franchiseId/.test(mflEntryPick[0]) &&
     /onEntrySession\?\.\(/.test(mflEntryPick[0]) &&
-    /await linkPlatformLeague\(\{/.test(mflEntryPick[0]),
-  'V2.1: an entry league tap mints directly, then runs the canonical import',
+    /await mflAuthImport\(\[lg\.league_id\], yr\)/.test(mflEntryPick[0]) &&
+    !/linkPlatformLeague\(/.test(mflEntryPick[0]),
+  'V2.1: an entry league tap mints directly, then imports with the stored MFL cookie',
 );
 assert(
-  !!mflEntryPick && !/mflAuthImport/.test(mflEntryPick[0]),
-  'V2.1: the entry path never uses the session-scoped bulk auth-import',
+  !!mflEntryPick && !/mflAuthImport\(\s*(\)|undefined)/.test(mflEntryPick[0]),
+  'V2.1: the entry path imports exactly the tapped league, never the default-ALL bulk import',
 );
 assert(
   !!mflEntryPick &&
-    /entryMflPassRef\.current = '';[\s\S]{0,300}await mflAuthLink\(/.test(mflEntryPick[0]) &&
-    /catch \{/.test(mflEntryPick[0]),
-  'V2.1: the credential re-store is best-effort and drops the password first',
+    /await mflAuthLink\([^;]*\);\s*\n\s*entryMflAuthLinkedRef\.current = true;\s*\n\s*entryMflPassRef\.current = '';/.test(mflEntryPick[0]) &&
+    !/catch \{/.test(mflEntryPick[0]),
+  'V2.1: the credential store is required and drops the password only after it succeeds',
 );
 assert(
   !/useState.{0,40}entryMflPass/.test(platformSheet) &&
@@ -461,13 +473,14 @@ assert(
 );
 assert(
   !!actionBlock && !/upsert_/.test(actionBlock[0]) &&
-    !/_extension_build_session\(/.test(actionBlock[0]),
+    !/_extension_build_session\(/.test(actionBlock[0]) &&
+    !/_platform_sign_in\(/.test(actionBlock[0]),
   'V2.1: the action branches store nothing and mint nothing',
 );
 assert(
   !!entryRoute && !!actionBlock &&
     entryRoute[0].indexOf(actionBlock[0]) <
-      entryRoute[0].indexOf('_extension_build_session('),
+      entryRoute[0].indexOf('_platform_sign_in('),
   'V2.1: the action branches run BEFORE the mint',
 );
 assert(
@@ -478,8 +491,10 @@ assert(
 );
 
 // ── 7. flag registered on both sides ─────────────────────────────────────
+// Registered either way: it's OFF from 2026-11-02 (ask 12) until #430 is
+// live, then back ON (ask 16). The value is the operator's, not this guard's.
 assert(
-  /"landing\.platform_options": true/.test(features),
+  /"landing\.platform_options": (true|false),/.test(features),
   'config/features.json carries landing.platform_options',
 );
 assert(

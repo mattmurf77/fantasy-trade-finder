@@ -61,6 +61,7 @@ Design (mirrors backend/mfl_write.py / sleeper_write.py)
 
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -72,6 +73,7 @@ from dataclasses import dataclass, field
 # SAME espn_s2 + SWID pair, so the 2026-08-09 encoded/decoded lesson applies
 # identically (espn_service.canonical_espn_s2 / canonical_swid).
 from backend.espn_service import canonical_espn_s2, canonical_swid
+from backend.write_outcome import OUTCOME_UNKNOWN, request_never_sent
 
 #: lm-api-WRITES host (reads use lm-api-reads). `ffl` = football —
 #: live-verified 2026-08-11 (the football league's stored proposals live
@@ -113,9 +115,16 @@ _WRITE_HEADERS = {
 class EspnWriteError(Exception):
     """A write to ESPN failed. `kind` steers the caller's handling:
       'auth'    → cookies missing/expired/rejected → prompt reconnect (re-capture)
-      'network' → transport problem → retry / clipboard-fallback
+      'network' → transport problem BEFORE the request was sent (DNS, connect
+                  refused, no route) → nothing sent; retry / clipboard-fallback
       'input'   → caller-side validation failure (never sent)
-      'error'   → everything else → clipboard-fallback
+      'error'   → ESPN refused the write (a 4xx) → clipboard-fallback
+      'outcome_unknown' → the request may have reached ESPN with no definitive
+                  answer (read timeout, reset after send, 5xx, an unreadable
+                  2xx body). The trade may exist: check ESPN, never auto-retry
+                  (backend/write_outcome.py has the before/after-send rules)
+    `detail` is the raw provider body or transport text: for logs only, never
+    a response field (C10).
     """
 
     def __init__(self, message: str, *, kind: str = "error", detail: str | None = None):
@@ -378,15 +387,32 @@ def _post_transaction(espn_s2: str, swid: str, url: str, body: dict, *,
                 # than "these cookies expired" — same clean handling either way.
                 raise EspnWriteAuthError(
                     f"ESPN rejected the write (HTTP {e.code})", detail=raw[:500])
+            if e.code >= 500:
+                # C10: a 5xx (often a gateway timeout) came back after the
+                # request was sent; the write may have committed.
+                raise EspnWriteError(f"ESPN returned HTTP {e.code}",
+                                     kind=OUTCOME_UNKNOWN, detail=raw[:500])
             raise EspnWriteError(f"ESPN returned HTTP {e.code}", detail=raw[:500])
         except urllib.error.URLError as e:
-            raise EspnWriteError("network error contacting ESPN", kind="network",
+            if request_never_sent(e):
+                raise EspnWriteError("network error contacting ESPN", kind="network",
+                                     detail=str(e))
+            # C10: a timeout or reset urllib can't place before the send.
+            raise EspnWriteError("no definitive answer from ESPN", kind=OUTCOME_UNKNOWN,
                                  detail=str(e))
+        except (OSError, http.client.HTTPException, UnicodeDecodeError) as e:
+            # C10: raised by getresponse() / read(), so the whole request was
+            # sent (read timeout, reset, RemoteDisconnected, IncompleteRead, a
+            # body that isn't UTF-8). Outcome unknown.
+            raise EspnWriteError("no definitive answer from ESPN", kind=OUTCOME_UNKNOWN,
+                                 detail=f"{type(e).__name__}: {e}")
 
         try:
             parsed = json.loads(raw) if raw else {}
         except Exception:
-            raise EspnWriteError("non-JSON response from ESPN", detail=raw[:500])
+            # C10: a 2xx ESPN answered but FTF can't read. Not a refusal.
+            raise EspnWriteError("non-JSON response from ESPN", kind=OUTCOME_UNKNOWN,
+                                 detail=raw[:500])
 
         _ob.ok(status=status, response_bytes=len(raw))
         # A stored proposal reads back as {id, status:"PENDING", …} (capture
@@ -407,7 +433,8 @@ def propose_trade(espn_s2: str, swid: str, req: EspnTradeProposalRequest, *,
     Live use is gated on `espn.send` (OFF + absent from config/features.json
     until the auth probe clears — module docstring). Returns
     {transaction_id, status, raw}. Raises EspnWriteAuthError on 401/403,
-    EspnWriteError otherwise.
+    EspnWriteError otherwise (`kind` 'outcome_unknown' when ESPN may have the
+    proposal: see the class docstring).
     """
     return _post_transaction(
         espn_s2, swid,

@@ -1,5 +1,29 @@
 # Decisions — Fantasy Trade Finder
 
+## D-210 — A Shop send's Elo half is anchored by a `trade_decisions` row with `decision = "send"`, never a like
+
+**Date:** 2026-11-01 · **Who:** head-product (keep the Elo signal for Shop sends); head-eng (the anchor, and option A: the client tags the send); analytics-lead (one `trade_proposed` per recorded row, `props.source = "shop"`).
+**Context:** #574 swapped the Shop tile's "Show it to @name" (a calculator queue: a like row, a likes-you card and Elo) for the platform send router. head-product kept the Elo signal, without the deck card. A like row can't do that: every live like feeds the counterparty's likes-you deck, match detection and Awaiting. The server also couldn't tell a Shop send from any other send.
+**Decision:** The three routers send `source: "shop"` only from the Shop tile (#574). On that tag, the propose routes call `_record_shop_send_signal` before the platform call. It runs once per package: it skips a package that already has a send row or a live like (any `trade_id`). It writes a `decision = "send"` row with the queue's deterministic `calcq_` id, applies the queue's exact Elo path, and fires `trade_proposed` iff the row is written. Every like/pass reader filters `decision IN ('like', 'pass')`. The two that didn't (the analytics `traded` segment and the offline replay) now do. The deck's discovery keys count a send as decided like a like (7 days), as the pre-#574 Shop queue's like row was.
+**Consequences:**
+- No schema change; `decision` stays a plain string.
+- A later deck like or calculator queue of a package already sent still adds its own Elo, as a deck like plus a queue of one package already did. The deck won't re-serve the package for 7 days.
+- `props.decision` on the event is `"send"` (analytics-lead, 11-01: the event mirrors the row). `trade_proposed.decision` becomes `like` | `send`; WAT, first opinion and the opinions count read the event type and count it.
+
+## D-209 — The deletion scrub nulls a redacted card's `base_score`, `final_score` and `surplus_margin`; its job is a row in the deletion's own transaction
+
+**Date:** 2026-10-31 · **Who:** trades-eng, under legal R28.22 b (the blended-scalar test) and head-eng's routing; head-eng told the same day.
+**Context:** Legal R28.22 b says a value kept beside a removed partner field must not let anyone solve the removed one back. head-eng's routing expected `final_score` to stay, and `base_score` to be tested together with `fit.aggregate`.
+**Decision:** All three are nulled on every redacted card of the partner, in every store:
+- `base_score` = `fit.aggregate` = `you + them` on fit cards, so `them` solves back from the kept `fit.you`. On a liked card it is also the deck's max + 1.0, which encodes the removed like. So both go.
+- `final_score` is `base_score` times stored multipliers, so it recovers `base_score`.
+- `surplus_margin` was already ruled.
+- `basis` and `propensity` stay.
+- value_core's `scores.outlook` (`(viewer + partner) / 2`, with the viewer's side kept), and `priority` and `effective` built from it, are removed on a redacted card (stage 3).
+
+Separately, the scrub's job row is inserted in the deletion's own transaction, so a committed deletion always has its scrub.
+**Consequences:** Redacted cards have no scores for replay. Eval's exclusion of redacted decks (`partner_redacted`) is models-lead's addendum J1, built in models-eng's PR C. If Eng later wants a score kept, it goes to legal. Jobs were kept until every scrub stage was built (`COMPLETE`, true since stage 3), so later stages scrub earlier deletions. The 24 h alert fires for kept jobs meanwhile. Past 30 days an unfinished job is deleted anyway and logged as abandoned (`_abandon`, trades-eng's reading of (ix); legal to confirm).
+
 ## D-208 — Calibration asks Yes / No instead of 1–5 (app 1.21.3)
 
 **Date:** 2026-10-14 · **Who:** operator, after the per-grader analysis.
@@ -191,6 +215,7 @@ preserves historical evidence. [ADR-022](../docs/adr/adr-022-preference-led-bila
 **Decision:** `draft_status.sleeper_pick_window` anchors the tradable window (three classes) at the first undrafted season; any `complete` draft with season ≥ current excludes that season (shape-blind — a completed startup draft consumes the class too); the cached #207 verdict is consulted ONLY when `/drafts` returns `[]` (a positive `drafted` excludes the current season; anything else keeps the D-089 fail-safe). Propose and validate refuse out-of-window picks before any provider call (422 `sleeper_pick_untradable` with `picks`, `season_window`, `message == detail`; validate `pick_untradable`), fetching drafts/meta only on pick-bearing sends. The 502 body for a Sleeper GraphQL error now carries Sleeper's first message as `detail`. Unknown season abstains, never refuses.
 **Alternatives:** fold into `sleeper_pick_unmapped` (misleading copy on fielded builds); trust the cached verdict over the live read (wrong when the cache is stale); rookie-only exclusion (regresses first-year startup leagues — caught by both QA readers).
 **Consequences:** Q-037 closes (Sleeper's element is `{roster_id=original, previous_owner_id=from, owner_id=to}`; both captures were acquired-pick trades). Overhaul sends inherit the same core. Follow-up candidate: first-year startup leagues have no linked example to verify live.
+**Amended 2026-10-27 (#470 QA P3-2, sync only; #483 QA P3-1):** on an empty `/drafts` with no cached `drafted`, the owned-pick sync also keeps the current season excluded when the league's prior platform grid already excludes it (later seasons present, none for the current one). Before, a flake re-populated the season until the next good read, and each flip moved `rfp1`. A cached `not_drafted` does **not** override the grid (option (b), #483): a completed startup draft with a pending rookie draft reads `not_drafted`/high while the shape-blind live read excludes the season, and trusting the verdict brought the flip back for that common shape. A first sync, a grid that carries the season and a failed grid read keep the D-089 fail-safe; the live read and the cached-`drafted` path are unchanged; propose and validate still use `sleeper_pick_window` as above. Known costs: a commissioner reset (the draft back to `pre_draft`) followed only by `/drafts` flakes keeps an undrafted season hidden until the next non-empty `/drafts` read. **Accepted limitation (P3-3):** a league whose `/drafts` always reads empty keeps a previously excluded current season hidden after its verdict flips to not-drafted, until a non-empty `/drafts` read or season rollover.
 
 ---
 

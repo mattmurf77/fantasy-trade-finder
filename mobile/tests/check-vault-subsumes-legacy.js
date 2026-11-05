@@ -76,6 +76,17 @@ function load(store) {
 const USER = 'sleeper-user-123';
 const TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.PAYLOAD.SIG';
 
+// An await that never settles, or an early return, would let the event loop
+// drain and node exit 0 mid-run: an unfinished run fails instead
+// (the check-device-first-page pattern; mobile/tests/README.md § Writing one).
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-vault-subsumes-legacy did not finish (a check hung or returned early): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 (async () => {
   // 1. Happy path: legacy slot migrates, then is deleted; envelope carries token.
   {
@@ -133,6 +144,7 @@ const TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.PAYLOAD.SIG';
     else ok('mismatch: wrong user → null, envelope retained (OI-14)');
   }
 
+  finished = true;
   if (failures) {
     console.error(`\n${failures} check(s) failed.`);
     process.exit(1);

@@ -123,6 +123,14 @@ to that decision, not something shown to them unbidden (which is what makes
 unreachable without a filled canvas, so `calc_asset_added` has already counted
 the user that day.
 
+**2026-11-01 (#531 follow-up, granted by analytics-lead): Shop rows of
+`calc_trade_queued` stop at the 11-06 binary.** The ShopAsset tile's button
+became the platform send router (surface `shop` on the `sleeper_send_*`
+events), so `calc_trade_queued` with screen `ShopAsset` stops there, along with
+the queue emitter's server-side `trade_proposed` for Shop. From that binary the
+event comes from the calculator only. Read the seam as a break in any
+`calc_trade_queued` series that includes Shop.
+
 ## Deliberate omissions
 
 - **`FUNNEL_CRITICAL` is unchanged.** That set is the SDK's drop-**last**

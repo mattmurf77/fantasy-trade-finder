@@ -10,9 +10,10 @@ Implements docs/plans/monetization/00-platform-foundation.md §2–§4:
     the billing projector (manual-grant admin routes wrap these).
   * check_pro() — flag-aware gate used by server.py's @require_pro wrapper.
     monetize.entitlements OFF → allow (all users implicitly pro).
-    ON without monetize.paywall → OBSERVE mode: log `ENTITLE-OBSERVE …
+    ON without enforce → OBSERVE mode: log `ENTITLE-OBSERVE …
     would_block=…`, never block (foundation §2.4, mirrors the AUTH-GRACE
-    rollout). Both ON → enforce (caller returns 402).
+    rollout). Enforce = both flags ON and model_config
+    paywall_enforce_enabled == 1 (caller returns 402).
   * ingest_billing_event() — append-only subscription_events ledger with
     event_id idempotency, plus a minimal projector for the RevenueCat /
     Stripe event types the launch SKUs emit. Client receipts are never
@@ -30,6 +31,7 @@ everything stateful lives here so it is unit-testable without Flask.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import insert, or_, select, update
@@ -37,6 +39,8 @@ from sqlalchemy import insert, or_, select, update
 from . import database as db
 from .accounts import ACCOUNT_USER_PREFIX, is_account_user_id
 from .feature_flags import is_enabled
+
+log = logging.getLogger(__name__)
 
 # Entitlement values (docs/glossary.md). 'pro' unlocks the Pro gate list;
 # 'ad_free' is the lightweight ads-only value (ads plan HLD §4).
@@ -166,20 +170,23 @@ def resolve_rc_identity(app_user_id: str | None, aliases=None) -> str:
 
 
 def _rekey_billing_rows(conn, canonical: str, from_ids, product_id: str | None,
-                        *, active_only: bool = False) -> int:
+                        *, active_only: bool = False,
+                        sandbox: bool = False) -> int:
     """Move billing-source entitlements rows from `from_ids` onto `canonical`.
 
     Surgical on purpose — the same rule the projector's upsert already
-    follows: only `_BILLING_SOURCES` rows, and only this product_id when one
-    is known. Manual grants and promo rewards written under an old id are
-    never moved by billing traffic. Returns the number of rows moved.
+    follows: only `_BILLING_SOURCES` rows in the event's lane (see _lane),
+    and only this product_id when one is known. Manual grants and promo
+    rewards written under an old id are never moved by billing traffic.
+    Returns the number of rows moved.
     """
     stale = [i for i in from_ids if i and i != canonical]
     if not stale:
         return 0
     stmt = (update(db.entitlements_table)
             .where(db.entitlements_table.c.user_id.in_(stale))
-            .where(db.entitlements_table.c.source.in_(_BILLING_SOURCES)))
+            .where(db.entitlements_table.c.source.in_(_BILLING_SOURCES))
+            .where(_lane(sandbox)))
     if product_id is not None:
         stmt = stmt.where(db.entitlements_table.c.product_id == product_id)
     if active_only:
@@ -231,7 +238,51 @@ def get_entitlements(user_id: str) -> dict:
     """
     with db.engine.begin() as conn:
         rows = _active_rows(conn, user_id)
+    return _view(rows)
 
+
+def empty_entitlements() -> dict:
+    """The view of a user with no rows: every field blank/false. Served to an
+    unverified session, which may carry a subscriber's user_id. Built by the
+    same shaping as get_entitlements, so a new field is blank here too; plus
+    `founder`, which /api/me/entitlements adds for a verified session."""
+    return {**_view([]), "founder": False}
+
+
+def is_founder(user_id: str, closes_at: str) -> bool:
+    """`founder` on /api/me/entitlements (#393 scope §2 item 2): the user
+    holds pro through a subscription that started before `closes_at` (the
+    club's cut-off, an ISO-8601 UTC string). The start is the subscription's
+    INITIAL_PURCHASE in the subscription_events ledger, which RevenueCat
+    sends for a first purchase and an intro-trial start alike, under the
+    active pro row's user and product. Its time is the payload's
+    `purchased_at_ms`, else the row's occurred_at; an event whose time
+    can't be read is skipped. Not read by the gate."""
+    t = db.subscription_events_table
+    with db.engine.begin() as conn:
+        rows = [r for r in _active_rows(conn, user_id)
+                if r.entitlement == "pro" and r.product_id]
+        if not rows:
+            return False
+        events = conn.execute(
+            select(t.c.payload, t.c.occurred_at)
+            .where(t.c.event_type == "INITIAL_PURCHASE")
+            .where(t.c.user_id.in_({r.user_id for r in rows}))
+            .where(t.c.product_id.in_({r.product_id for r in rows}))
+        ).fetchall()
+    cut = datetime.fromisoformat(closes_at)
+    for payload, occurred_at in events:
+        try:
+            started = (_ms_to_iso((json.loads(payload) or {}).get("purchased_at_ms"))
+                       or occurred_at)
+            if datetime.fromisoformat(started) < cut:
+                return True
+        except (ValueError, TypeError, AttributeError, OverflowError, OSError):
+            continue
+    return False
+
+
+def _view(rows) -> dict:
     pro_rows = [r for r in rows if r.entitlement == "pro"]
     ad_free_rows = [r for r in rows if r.entitlement == "ad_free"]
     pro = bool(pro_rows)
@@ -248,16 +299,37 @@ def get_entitlements(user_id: str) -> dict:
     }
 
 
+def _enforce_knob_on() -> bool:
+    """model_config `paywall_enforce_enabled` == 1, read live on every call
+    through database.get_config() (no cache), so setting it to 0 stops
+    enforcement without a deploy. A missing row or a failed read is 0, not
+    enforcing (G-064: the inline fallback must match the seed)."""
+    try:
+        return float(db.get_config().get("paywall_enforce_enabled", 0.0)) == 1.0
+    except Exception:
+        return False
+
+
+def is_enforcing() -> bool:
+    """The one enforce rule, shared by check_pro and /api/me/entitlements'
+    `enforcing`: monetize.entitlements ∧ monetize.paywall ∧ model_config
+    paywall_enforce_enabled == 1. `monetize.pro` is retired and deliberately
+    not read (2026-10-24)."""
+    return (is_enabled("monetize.entitlements")
+            and is_enabled("monetize.paywall")
+            and _enforce_knob_on())
+
+
 def check_pro(user_id: str, route: str, logger=None) -> bool:
     """Flag-aware gate. Returns True when the request may proceed.
 
-    OFF → True. Observe (entitlements on, paywall off) → log + True.
-    Enforce (both on) → resolution result.
+    OFF → True. Enforce (is_enforcing()) → resolution result.
+    Entitlements on but enforce false (either reason) → observe: log + True.
     """
     if not is_enabled("monetize.entitlements"):
         return True
     has_pro = get_entitlements(user_id)["pro"]
-    if not is_enabled("monetize.paywall"):
+    if not is_enforcing():
         if logger is not None:
             logger.info("ENTITLE-OBSERVE user=%s route=%s would_block=%s",
                         user_id, route, not has_pro)
@@ -299,9 +371,12 @@ def grant(user_id: str, entitlement: str, *,
             created_at=now, updated_at=now,
         ))
         row_id = result.inserted_primary_key[0]
+    # NON_INTENT and non-touching (C8): most grants aren't the recipient
+    # acting, so this must not move last_active_at or events_count.
     db.record_event(user_id, "entitlement_granted",
                     props={"entitlement": entitlement, "source": source,
-                           "expires_at": expires_at})
+                           "expires_at": expires_at},
+                    touch_user=False)
     return {"id": row_id, "user_id": user_id, "account_id": account_id,
             "entitlement": entitlement, "source": source,
             "product_id": product_id, "status": "active",
@@ -387,6 +462,50 @@ def _ms_to_iso(ms) -> str | None:
     return datetime.fromtimestamp(float(ms) / 1000.0, tz=timezone.utc).isoformat()
 
 
+# RevenueCat SANDBOX events (App Review, TestFlight) arrive at this same
+# prod webhook. They still project, so a reviewer's purchase unlocks, but
+# never for longer than this and never perpetually (monetization-day1
+# feasibility §2 + addendum). Sandbox writes are tagged through granted_by
+# (`sandbox:<event_id>`), and that tag is also the row's LANE (see _lane).
+_SANDBOX_MAX_GRANT = timedelta(hours=24)
+SANDBOX_GRANT_PREFIX = "sandbox:"
+
+
+def _is_sandbox(source: str, payload: dict) -> bool:
+    """RevenueCat stamps every event `environment: SANDBOX | PRODUCTION`,
+    and the whole event object is the stored payload."""
+    return (source == "revenuecat"
+            and str((payload or {}).get("environment") or "").upper() == "SANDBOX")
+
+
+def _lane(sandbox: bool):
+    """WHERE clause confining a billing event to its own lane of rows.
+
+    A sandbox row is one whose granted_by starts with `sandbox:`; every
+    other billing row (granted_by a production/Stripe event id, or NULL) is
+    a production row. Sandbox events only ever create or update sandbox
+    rows, so they can never extend, shorten, deactivate, re-key or transfer
+    a production row. Production events likewise leave sandbox rows alone:
+    they are their own lane and lapse within 24 h. Each lane keeps its own
+    row per (user, product), so no schema or `source` change is needed, and
+    resolution (_active_rows) reads both lanes: an unexpired sandbox row
+    still grants pro.
+    """
+    granted_by = db.entitlements_table.c.granted_by
+    if sandbox:
+        return granted_by.startswith(SANDBOX_GRANT_PREFIX)
+    return or_(granted_by.is_(None), ~granted_by.startswith(SANDBOX_GRANT_PREFIX))
+
+
+def _sandbox_cap(expires_at: str | None) -> str:
+    """min(expires_at, now + 24 h). A missing expiry becomes now + 24 h, so a
+    sandbox grant is never perpetual."""
+    cap = datetime.now(timezone.utc) + _SANDBOX_MAX_GRANT
+    if expires_at is not None and datetime.fromisoformat(expires_at) < cap:
+        return expires_at
+    return cap.isoformat()
+
+
 def ingest_billing_event(source: str, event_id: str, event_type: str,
                          payload: dict, *,
                          user_id: str | None = None,
@@ -420,6 +539,15 @@ def ingest_billing_event(source: str, event_id: str, event_type: str,
             account_id=None, product_id=product_id, event_id=event_id,
             payload=json.dumps(payload), occurred_at=occurred_at or now,
         ))
+        unknown = (source == "revenuecat" and bool(user_id)
+                   and not _is_working_key(conn, user_id))
+    if unknown:
+        # Observability only (App Review purchase path): the event is still
+        # ledgered and projected exactly as before. Never the payload.
+        log.warning("BILLING-UNKNOWN-USER source=revenuecat event_id=%s type=%s "
+                    "env=%s user=%s", event_id, event_type,
+                    str((payload or {}).get("environment") or "UNKNOWN").upper(),
+                    user_id)
 
     projected, error = _project(source, event_id, event_type, payload,
                                 user_id=user_id, product_id=product_id,
@@ -434,7 +562,8 @@ def ingest_billing_event(source: str, event_id: str, event_type: str,
 
 
 def _project_transfer(event_id: str, payload: dict,
-                      product_id: str | None) -> tuple[bool, str | None]:
+                      product_id: str | None, *,
+                      sandbox: bool = False) -> tuple[bool, str | None]:
     """TRANSFER — the subscription MOVED to another subscriber.
 
     RevenueCat carries the two sides in `transferred_from` / `transferred_to`
@@ -458,13 +587,14 @@ def _project_transfer(event_id: str, payload: dict,
     canonical = resolve_rc_identity(to_ids[0], to_ids[1:])
     with db.engine.begin() as conn:
         moved = _rekey_billing_rows(conn, canonical, from_ids, product_id,
-                                    active_only=True)
+                                    active_only=True, sandbox=sandbox)
         if moved:
             conn.execute(
                 update(db.entitlements_table)
                 .where(db.entitlements_table.c.user_id == canonical)
                 .where(db.entitlements_table.c.source.in_(_BILLING_SOURCES))
                 .where(db.entitlements_table.c.status == "active")
+                .where(_lane(sandbox))
                 .values(granted_by=event_id, updated_at=_now())
             )
     if not moved:
@@ -473,17 +603,20 @@ def _project_transfer(event_id: str, payload: dict,
 
 
 def _project_grace(event_id: str, payload: dict, user_id: str,
-                   product_id: str) -> tuple[bool, str | None]:
+                   product_id: str, *, sandbox: bool = False) -> tuple[bool, str | None]:
     """BILLING_ISSUE — a renewal failed; the store may still be retrying.
 
     Access persists through the grace period (pro-subscription LLD §6: keep
     active until EXPIRATION), so the only thing to project is the new floor
     on `expires_at` when RevenueCat tells us one. Extends, never shortens,
     and never touches a perpetual row. No grace field → stored no-op.
+    A sandbox grace floor is capped at now + 24 h like every sandbox write.
     """
     grace = _ms_to_iso(payload.get("grace_period_expiration_at_ms"))
     if not grace:
         return False, None
+    if sandbox:
+        grace = _sandbox_cap(grace)
     with db.engine.begin() as conn:
         row = conn.execute(
             select(db.entitlements_table.c.id, db.entitlements_table.c.expires_at)
@@ -491,6 +624,7 @@ def _project_grace(event_id: str, payload: dict, user_id: str,
             .where(db.entitlements_table.c.product_id == product_id)
             .where(db.entitlements_table.c.source.in_(_BILLING_SOURCES))
             .where(db.entitlements_table.c.status == "active")
+            .where(_lane(sandbox))
         ).fetchone()
         if row is None:
             return False, "ignored: BILLING_ISSUE matched no active row"
@@ -508,12 +642,17 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
              user_id: str | None, product_id: str | None,
              candidates=None) -> tuple[bool, str | None]:
     """Apply one billing event to entitlements. Upserts by
-    (user_id, product_id) among billing-source rows only — promo and manual
-    rows are never touched by billing traffic."""
+    (user_id, product_id) among billing-source rows in the event's lane
+    only (_lane: sandbox events never touch production rows, and vice
+    versa) — promo and manual rows are never touched by billing traffic."""
+    sandbox = _is_sandbox(source, payload)
+    marked_by = f"{SANDBOX_GRANT_PREFIX}{event_id}" if sandbox else event_id
+
     # TRANSFER carries its identities in payload arrays rather than
     # app_user_id, so it is handled ahead of the user_id guard below.
     if event_type == "TRANSFER":
-        return _project_transfer(event_id, payload, product_id)
+        return _project_transfer(marked_by, payload, product_id,
+                                 sandbox=sandbox)
 
     if not user_id or not product_id:
         return False, "ignored: missing user_id/product_id"
@@ -529,32 +668,45 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
     # merge them onto the canonical key BEFORE the upsert looks for one.
     if candidates and len(candidates) > 1:
         with db.engine.begin() as conn:
-            _rekey_billing_rows(conn, user_id, candidates, product_id)
+            _rekey_billing_rows(conn, user_id, candidates, product_id,
+                                sandbox=sandbox)
 
     entitlement, mapped_source = _product_mapping(product_id)
     expires_at = _ms_to_iso(payload.get("expiration_at_ms"))
+    if sandbox:
+        expires_at = _sandbox_cap(expires_at)
 
     if event_type in _RC_ACTIVATING or event_type in (
             "checkout.session.completed", "customer.subscription.updated",
             "invoice.paid"):
         src = "stripe" if source == "stripe" else mapped_source
+        # Perpetual-grant guard: only the lifetime founder product may write
+        # a NULL expiry. Anything else without one (a non-renewing Season
+        # Pass carries no expiration_at_ms) is refused, not granted forever.
+        # Stripe is out of scope: its projector reads no expiry by design
+        # and ends access on customer.subscription.deleted.
+        if (expires_at is None and mapped_source != "founder_iap"
+                and source != "stripe"):
+            return False, (f"perpetual_grant_refused: {product_id} has no "
+                           f"expiry and is not a founder product")
         with db.engine.begin() as conn:
             existing = conn.execute(
                 select(db.entitlements_table.c.id)
                 .where(db.entitlements_table.c.user_id == user_id)
                 .where(db.entitlements_table.c.product_id == product_id)
                 .where(db.entitlements_table.c.source.in_(_BILLING_SOURCES))
+                .where(_lane(sandbox))
             ).fetchone()
             if existing is not None:
                 conn.execute(
                     update(db.entitlements_table)
                     .where(db.entitlements_table.c.id == existing.id)
                     .values(status="active", expires_at=expires_at,
-                            granted_by=event_id, updated_at=_now())
+                            granted_by=marked_by, updated_at=_now())
                 )
                 return True, None
         grant(user_id, entitlement, source=src, product_id=product_id,
-              expires_at=expires_at, granted_by=event_id)
+              expires_at=expires_at, granted_by=marked_by)
         return True, None
 
     deactivate_status = _RC_DEACTIVATING.get(event_type) or {
@@ -568,13 +720,15 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
                 .where(db.entitlements_table.c.user_id == user_id)
                 .where(db.entitlements_table.c.product_id == product_id)
                 .where(db.entitlements_table.c.source.in_(_BILLING_SOURCES))
-                .values(status=deactivate_status, granted_by=event_id,
+                .where(_lane(sandbox))
+                .values(status=deactivate_status, granted_by=marked_by,
                         updated_at=_now())
             )
         return True, None
 
     if event_type == "BILLING_ISSUE":
-        return _project_grace(event_id, payload, user_id, product_id)
+        return _project_grace(marked_by, payload, user_id, product_id,
+                              sandbox=sandbox)
 
     if event_type in _RC_NOOP:
         return False, None

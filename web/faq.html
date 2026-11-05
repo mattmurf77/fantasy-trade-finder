@@ -48,7 +48,7 @@
       margin-bottom: 16px;
       padding: 4px 2px;
     }
-    .back-link:hover { color: var(--accent); }
+    .back-link:hover { color: var(--text); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 2px; }
     h1 {
       font-family: var(--font-display);
       text-transform: uppercase;
@@ -118,6 +118,8 @@
       font-size: 0.85rem;
       text-align: center;
     }
+    .faq-footer a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+    .faq-footer a:hover { text-decoration-color: var(--accent); }
   </style>
 </head>
 <body>
@@ -147,7 +149,7 @@
     <details class="faq-item">
       <summary>Where can I use Fleeced?</summary>
       <div class="faq-body">
-        <p>On iPhone: the Fleeced app on the App Store (<a href="[APP STORE URL]">[APP STORE URL]</a>). Sign in with Apple, Sleeper, ESPN or MFL. You can also connect ESPN and MFL leagues after you sign in.</p>
+        <p>On iPhone: the Fleeced app on the App Store (<a href="https://apps.apple.com/us/app/id6771488431">https://apps.apple.com/us/app/id6771488431</a>). Sign in with Apple, Sleeper, ESPN or MFL. You can also connect ESPN and MFL leagues after you sign in.</p>
         <p>On a computer: the web app on this site, in Chrome or Edge with the Fleeced browser extension installed. The extension is installed by hand from a <a href="https://github.com/mattmurf77/fantasy-trade-finder/releases/tag/extension-v0.1.1" target="_blank" rel="noopener noreferrer">release download</a>; it isn't in the Chrome Web Store. The web app signs in with Sleeper only. ESPN and MFL leagues connect through the iPhone app.</p>
         <p>There's no Android app. Phone browsers can't run the extension, so on a phone, use the iPhone app.</p>
       </div>
@@ -289,10 +291,10 @@
     </details>
 
     <div class="faq-footer">
-      Still have questions? Email <a href="mailto:fleecedapp@gmail.com" style="color: var(--accent);">fleecedapp@gmail.com</a>.
+      Still have questions? Email <a href="mailto:fleecedapp@gmail.com">fleecedapp@gmail.com</a>.
       <br>
-      <a href="/privacy" style="color: var(--muted);">Privacy Policy</a> &middot;
-      <a href="/terms" style="color: var(--muted);">Terms of Use</a>
+      <a href="/privacy">Privacy Policy</a> &middot;
+      <a href="/terms">Terms of Use</a>
     </div>
   </div>
 </body>

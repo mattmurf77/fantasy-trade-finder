@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-11-04 — Launch integration with independent review
+
+- #582 merged as `af57e59c`; binary safety #589 merged as `787b9fc4` with four CI checks and main CI green. Privacy/Shop #592 merged as `1a40bd00` after its four exact-head CI checks. This includes #365/#566/#580 and EAS secret exclusions #588.
+- The history-preserving `codex/launch-reviewed-integration` candidate joins privacy/Shop, launch fixes/caches, paid server, proven platform sign-in, models, web/referrals and gated moves/tips/shares. Full exact-head GitHub CI is the merge gate; inspect the branch's PR state for delivery. No installed build or deployment is claimed.
+- Cross-stack repairs cover FREE route classification, deleted Shop targets, personal cache isolation/late-fill invalidation and durable atomic first-init referral attribution. Independent concurrency/deletion checks passed on SQLite/PostgreSQL; client verification covers 154 guards, TypeScript and 255 web checks. Details: [TEST_LEDGER](TEST_LEDGER.md).
+- #456 is held until 2026-11-18; #443 is superseded. #584 requires the separately approved/read-back KTC zero-weight pin (observed 0.5). No production config, build, feature activation or provider write was performed.
+
 ## 2026-10-21 — Usage Trends week 6 loaded by hand (daily tick still dead)
 
 - `scripts/refresh_usage_trends.py --remote` stored 2026 week 6: 28 teams and 554 players. The byes CIN/DET/MIA/MIN match nflverse. Week 5's correction re-check found no change, and the server log reads `planned [5, 6], stored [6]`. The stored week dropped the route's caches, so the app serves weeks 3–6 by default at once.

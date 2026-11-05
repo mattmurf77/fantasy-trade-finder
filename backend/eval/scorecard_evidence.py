@@ -2,7 +2,8 @@
 
 Only explicit local SQLite snapshots or exported JSON rows are accepted. This
 module never imports the application/database, reads environment credentials,
-or opens a writable database. Aggregate output is the default; private records
+or opens a writable database (its one backend import is the pure,
+standard-library evidence_pack codec, which unpacks packed candidate sets). Aggregate output is the default; private records
 require ``include_records=True``. No legacy event is promoted to a verified
 episode, fixed experimental cohort, acceptance probability, or completion.
 """
@@ -15,6 +16,8 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+
+from backend.eval import evidence_pack   # pure codec: standard library only
 
 
 VERSION = "scorecard-evidence-v1"
@@ -31,7 +34,7 @@ TABLE_COLUMNS = {
     "trade_proposals": "id proposal_event_id impression_id match_id user_id league_id target_user_id provider provider_transaction_id source give_asset_ids receive_asset_ids origin_trade_hash final_trade_hash edited_from_source valuation_json proposed_at".split(),
     "bakeoff_runs": "run_id deck_job_id user_id league_id arm_order served_arm deck_size total_ms arms_json agreement_json groups_json config_json created_at".split(),
     "deck_diagnostic_snapshots": "snapshot_id user_id deck_job_id created_at payload_json".split(),
-    "deck_candidate_sets": "candidate_set_id deck_job_id user_id league_id size set_hash candidates_json created_at".split(),
+    "deck_candidate_sets": "candidate_set_id deck_job_id user_id league_id size set_hash candidates_json created_at candidates_packed cand_pack_version".split(),
     "suggestion_trade_links": "id transaction_id league_id was_recommended matched_impression_id match_type overlap_score ghost_impression_id ghost_match_type ghost_overlap_score traded_at computed_at".split(),
     "sleeper_trades": "id transaction_id league_id week traded_at synced_at roster_ids adds drops draft_picks waiver_budget".split(),
 }
@@ -103,7 +106,8 @@ def load_sqlite_snapshot(path):
                 rows[table] = []
                 continue
             columns = ", ".join(f'"{column}"' for column in selected)
-            rows[table] = [dict(r) for r in conn.execute(f'SELECT {columns} FROM "{table}"')]
+            rows[table] = [_unpacked(table, dict(r))
+                           for r in conn.execute(f'SELECT {columns} FROM "{table}"')]
     finally:
         conn.close()
     return rows
@@ -131,9 +135,29 @@ def _select_rows(tables):
             continue
         if not isinstance(tables[table], list) or any(not isinstance(row, dict) for row in tables[table]):
             raise ValueError(f"{table} must contain a list of rows")
-        result[table] = [{key: deepcopy(row[key]) for key in allowed if key in row}
+        result[table] = [_unpacked(table, {key: deepcopy(row[key]) for key in allowed if key in row})
                          for row in tables[table]]
     return result
+
+
+def _unpacked(table, row):
+    """A packed deck_candidate_sets row (candidates_packed set) reads as the
+    JSON row its writer would have stored: candidates_json = json.dumps of
+    the unpacked members, byte for byte, and the two packed columns gone.
+    A row whose pack can't be read keeps candidates_json None and gains
+    candidates_pack_error. Other rows pass through."""
+    if table != "deck_candidate_sets" or ("candidates_packed" not in row
+                                          and "cand_pack_version" not in row):
+        return row
+    packed, version = row.pop("candidates_packed", None), row.pop("cand_pack_version", None)
+    if packed is None:
+        return row
+    try:
+        _run, members = evidence_pack.unpack_candidates(
+            evidence_pack.PackedCandidates(version, bytes(packed)))
+    except (evidence_pack.PackIntegrityError, TypeError) as e:
+        return {**row, "candidates_json": None, "candidates_pack_error": str(e)}
+    return {**row, "candidates_json": json.dumps(members)}
 
 
 def _ref(table, row):
@@ -320,6 +344,8 @@ def audit_rows(tables, *, include_records=False):
     counts["captured_completed_provider_transactions_unlinked_to_episodes"] = len(tables.get("sleeper_trades", []))
     counts["verified_exact_episode_completions"] = 0
     counts["pass_reason_rows_not_additional_actions"] = len(tables.get("trade_pass_reasons", []))
+    counts.update("candidate_set_pack_unreadable" for row in tables.get("deck_candidate_sets", [])
+                  if "candidates_pack_error" in row)
     manifest.update(counts=dict(sorted(counts.items())), occurrence_coverage=dict(sorted(coverage.items())),
                     integrity_issues=dict(sorted(issues_count.items())))
     if include_records:

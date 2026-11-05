@@ -356,7 +356,7 @@ def run_value_core(inputs: Mapping, *, seat: str, server: ServerInputs,
 7. **Cards.** For `e in result.entries[:PER_ARM]`, with `t = e.scored.trade`:
    - drop it if any id is not in the catalog (counted);
    - otherwise emit `ArmCard("value_core", t.partner_team_id, tuple(t.give), tuple(t.receive), {"deck_position": e.position, "reasons": list(e.reasons)})`.
-8. **Failure.** Steps 2–7 run inside `try`. Any exception ⇒ `log.exception("blind-grading: value core failed league=%s", …)`, then `raise GradingError("value_core_failed", 503)`.
+8. **Failure.** Steps 2–7 run inside `try`. Any exception ⇒ `log.exception("blind-grading: value core failed league=%s", …)`, then `raise GradingError("value_core_failed", 503)`. After the `try`, a run with `result.core.safety_ceiling_hit` (the core's safety ceiling fired, so the pool is partial) ⇒ `log.error("blind-grading: value core hit its safety ceiling league=%s; no session built", …)`, then `raise GradingError("value_core_failed", 503)`. That check comes before step 9, so `build_session` marks the session failed with no cards.
 9. **Too few.** `len(cards) < MIN_PER_ARM` ⇒ `GradingError("value_core_too_few", 409, usable=len(cards), min_cards=MIN_PER_ARM)`.
 10. **Meta:**
 

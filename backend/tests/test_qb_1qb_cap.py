@@ -229,6 +229,9 @@ def test_cap_applies_after_the_ktc_blend(monkeypatch):
     DP curve. Compressing before the blend would let that lift land the QB
     back above the cap — so the cap must be the LAST step."""
     monkeypatch.setattr(dl, "_blend_config", lambda: (0.5, 1.0))
+    # A 2-player pool is below the thin floor (models-lead R5 keeps such a
+    # pool DP-only); this test is about the cap's order, so let it blend.
+    monkeypatch.setattr(dl, "KTC_MIN_MATCHED", 1)
     monkeypatch.setattr(dl, "_ktc_consensus", lambda: {
         "qb_boosted": {"pos": "QB", "values": {FMT: 9999.0}},
         "wr1":        {"pos": "WR", "values": {FMT: 5000.0}},
@@ -260,6 +263,9 @@ def test_fetch_dynasty_process_serves_capped_1qb_qbs(monkeypatch):
     csv = ("player,pos,team,age,value_1qb,value_2qb\n"
            "Josh Allen,QB,BUF,30.1,7025,10208\n"
            "Bijan Robinson,RB,ATL,24.5,9580,8089\n")
+    # conftest pins FTF_DP_VALUES_FILE suite-wide; this test feeds the network
+    # parse path, so it needs the seam unset.
+    monkeypatch.delenv("FTF_DP_VALUES_FILE", raising=False)
     monkeypatch.setattr(
         dl.urllib.request, "urlopen",
         lambda req, timeout=10: io.BytesIO(csv.encode("utf-8")))

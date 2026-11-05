@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from . import database as db
 from . import win_now_service as service
 from . import win_now_store as store
+from .client_device import device_platform, event_device_type
 from .feature_flags import is_enabled
 
 
@@ -112,12 +113,12 @@ def install(app, *, require_session, read_denial, write_denial, active_format,
         if pending >= 2:
             return jsonify({"error": "too_many_jobs", "message": "A search is already running. Please wait for it to finish."}), 429
         job = store.create_job(who["user_id"], who["league_id"], {"actor": who, "params": params}, require_user=True)
-        device = request.headers.get("X-Device") or "web"
+        device = event_device_type(request.headers)
         db.record_event(who["user_id"], "win_now_objective_selected", source="api", league_id=who["league_id"],
                         device_type=device, os_version=request.headers.get("X-OS-Version"),
                         app_version=request.headers.get("X-App-Version"), tz=request.headers.get("X-User-TZ"),
                         props={**params, "protected_ids": None, "job_id": job["job_id"],
-                               "platform": "ios" if device in ("iphone", "ipad", "macos") else "android" if device == "android" else "web",
+                               "platform": device_platform(device),
                                "league_platform": who["platform"]})
         service.wake_worker(fetch_json)
         return jsonify({"job_id": job["job_id"], "status": "queued"}), 202

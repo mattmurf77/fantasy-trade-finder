@@ -30,7 +30,7 @@ What is pinned here
 7. The flag-on wall-clock rail `full_sweep_budget_s` (plan §3.5): it stops the
    sweep between opponents once the budget is spent, `<= 0` disables it, and
    with the flag OFF it never runs at all — the v3 pair path carries no
-   deadline of its own, so this is the only ceiling under the 60 s
+   deadline of its own, so this is the only ceiling under
    `_JOB_HARD_TIMEOUT`.
 
 The per-pair generators are stubbed, so these tests assert loop CONTROL FLOW

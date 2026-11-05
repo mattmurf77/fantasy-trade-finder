@@ -9,6 +9,7 @@ Each test pins a confirmed pre-launch finding so it can't silently regress:
   P2  test_user_fp_* login bypass disabled in production       (test_test_user_bypass_*)
   P2  engine-metrics / feature-flags-reload require auth       (test_engine_metrics_*, test_flags_reload_*)
   P2  Sleeper 5xx → 503 (not a "User not found" dead end)      (test_sleeper_user_*)
+  M10 Sleeper 429/403 → 503 on sign-in + rosters (2026-10-24)  (test_*_rate_limit_or_block_*)
 
 Routing/auth is exercised through Flask's test client; handler side-effects
 (DB, config writes, Sleeper calls) are mocked so each test stays on its target.
@@ -347,6 +348,55 @@ def test_rosters_sleeper_5xx_maps_to_503(client):
         resp = client.get("/api/sleeper/rosters/12345")
     assert resp.status_code == 503
     assert resp.get_json()["error"] == "sleeper_unavailable"
+
+
+# ===========================================================================
+# M10 — Sleeper 429 (rate limited) / 403 (blocked) → 503, not a 404 dead end
+# ===========================================================================
+
+_SLEEPER_UNAVAILABLE_MSG = "Sleeper is unavailable — try again shortly."
+
+
+@pytest.mark.parametrize("code", [429, 403])
+def test_sleeper_user_rate_limit_or_block_maps_to_503(client, code):
+    with patch.object(server, "_IS_PROD_ENV", False), \
+         patch.object(server, "_sleeper_get",
+                      MagicMock(side_effect=_http_error(code))):
+        resp = client.get("/api/sleeper/user/somebody")
+    assert resp.status_code == 503
+    body = resp.get_json()
+    assert body["error"] == "sleeper_unavailable"
+    assert body["message"] == _SLEEPER_UNAVAILABLE_MSG
+
+
+@pytest.mark.parametrize("code", [400, 401, 410])
+def test_sleeper_user_other_4xx_still_404(client, code):
+    with patch.object(server, "_IS_PROD_ENV", False), \
+         patch.object(server, "_sleeper_get",
+                      MagicMock(side_effect=_http_error(code))):
+        resp = client.get("/api/sleeper/user/nosuchuser")
+    assert resp.status_code == 404
+    assert resp.get_json()["error"] == "User not found"
+
+
+@pytest.mark.parametrize("code", [429, 403])
+def test_rosters_rate_limit_or_block_maps_to_503(client, code):
+    with patch.object(server, "_sleeper_get",
+                      MagicMock(side_effect=_http_error(code))):
+        resp = client.get("/api/sleeper/rosters/12345")
+    assert resp.status_code == 503
+    body = resp.get_json()
+    assert body["error"] == "sleeper_unavailable"
+    assert body["message"] == _SLEEPER_UNAVAILABLE_MSG
+
+
+@pytest.mark.parametrize("code", [400, 401, 410])
+def test_rosters_other_4xx_still_404(client, code):
+    with patch.object(server, "_sleeper_get",
+                      MagicMock(side_effect=_http_error(code))):
+        resp = client.get("/api/sleeper/rosters/12345")
+    assert resp.status_code == 404
+    assert resp.get_json()["error"] == "league_not_found"
 
 
 def test_notifications_read_non_list_ids_is_400(client):

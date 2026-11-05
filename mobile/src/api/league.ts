@@ -1,5 +1,7 @@
 import { api } from './client';
+import { isInviteId } from '../utils/inviteId';
 import type { PickSource } from './pickAssignment';
+import type { FaMoveCapability, MoveKind } from './faMove';
 import type {
   ScoringFormat,
   ActivityEvent,
@@ -725,8 +727,10 @@ export async function getPowerRankings(
 //
 // Every odds figure is a PROJECTION, not a settled fact. `meta.beta` /
 // `meta.is_preseason` mark the numbers provisional; the UI labels the whole
-// layer "Projected · preseason · beta" and NEVER shows a bare authoritative
-// percentage — `playoff_pct` renders as a three-band chip whose keys,
+// layer "Projected" ("Projected · preseason" before week 1; no "beta", App
+// Review 2.2), `meta.beta` still withholds win-loss records through week 5,
+// and the UI NEVER shows a bare authoritative percentage — `playoff_pct`
+// renders as a three-band chip whose keys,
 // thresholds and colors are a cross-client invariant (see
 // docs/cross-client-invariants.md § "Playoff outlook bands"). Percentages are
 // 0..1 fractions. Teams arrive pre-sorted by `odds.playoff_pct` descending —
@@ -873,6 +877,12 @@ export interface FreeAgentRow {
    *  `value` was priced from (backend RankingService.tier_for_elo). Never
    *  re-derive a tier from `value` client-side. Absent on old servers. */
   tier?: Tier | null;
+  /** D1 (api/faMove.ts, contract §1): what the CTA would name; null = the
+   *  server can't tell. Absent on today's server. */
+  move_kind?: MoveKind | null;
+  /** D1: 'handoff' holds this row in the hand-off; `move_line` says why. */
+  move_mode?: string;
+  move_line?: string;
 }
 // #179 — roster-capacity context for the claim sheet. Sleeper leagues
 // only (null for platform/demo leagues); all fields best-effort — null
@@ -925,6 +935,9 @@ export interface FreeAgentsResponse {
   waivers?: FreeAgentWaivers | null;
   /** Absent on pre-claim-sheet servers. Sleeper leagues only. */
   drop_candidates?: FreeAgentDropCandidates | null;
+  /** D1: the league's move capability (api/faMove.ts). Absent on today's
+   *  server, and then every Add routes exactly as before. */
+  move?: FaMoveCapability | null;
 }
 export async function getFreeAgents(
   leagueId: string,
@@ -948,9 +961,18 @@ export interface InviteMeta {
   league_id: string;
   league_name: string | null;
   platform: string | null;
+  /** FR-11 / PRD §8.3 — the inviter, resolved SERVER-side from `t`. Only
+   *  present when the call sent `t` and the server supports it; absent on an
+   *  older server, which must render exactly as before. */
+  inviter_display_name?: string | null;
+  /** FR-11 / PRD §8.3 — present with `t` (C1 name; never `token_status`). */
+  invite_status?: 'valid' | 'expired' | 'unknown' | 'league_mismatch' | null;
 }
 
-export async function fetchInviteMeta(leagueId: string): Promise<InviteMeta | null> {
+export async function fetchInviteMeta(
+  leagueId: string,
+  inviteId?: string | null,
+): Promise<InviteMeta | null> {
   if (!leagueId) return null;
   const ac = new AbortController();
   // 4s deadline, not the client default: a sign-in screen must never wait on
@@ -959,8 +981,11 @@ export async function fetchInviteMeta(leagueId: string): Promise<InviteMeta | nu
   try {
     // skipAuth: the caller is a SIGNED-OUT screen; a stale token would be
     // meaningless and would let the 401-expiry hook fire on a cosmetic call.
+    // FR-11 — `t` rides only when well-formed (utils/inviteId): a hand-edited
+    // id is never sent, and without one the request is exactly today's.
+    const tq = isInviteId(inviteId) ? `&t=${encodeURIComponent(inviteId)}` : '';
     return await api.get<InviteMeta>(
-      `/api/league/invite-meta?league_id=${encodeURIComponent(leagueId)}`,
+      `/api/league/invite-meta?league_id=${encodeURIComponent(leagueId)}${tq}`,
       { skipAuth: true, signal: ac.signal },
     );
   } catch {

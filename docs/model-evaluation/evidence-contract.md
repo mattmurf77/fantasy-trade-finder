@@ -10,9 +10,16 @@ ratification and release responsibilities.
 
 ## Implemented adapter
 
-`backend.eval.scorecard_evidence` uses the standard library only. It imports
-neither `backend.database` nor `backend.server`, accepts no SQL or database URL,
-reads no environment variables, and makes no provider/network calls.
+`backend.eval.scorecard_evidence` uses the standard library only, plus the
+pure standard-library codec `backend.eval.evidence_pack` to read packed
+candidate sets. It imports neither `backend.database` nor `backend.server`,
+accepts no SQL or database URL, reads no environment variables, and makes no
+provider/network calls. A packed `deck_candidate_sets` row
+(`candidates_packed`, `cand_pack_version`) reads exactly as the JSON row it
+replaces: `candidates_json` is rebuilt byte for byte and the packed columns are
+dropped, so every output is identical either way. A pack that can't be read
+leaves `candidates_json` empty, records `candidates_pack_error`, and is counted
+as `candidate_set_pack_unreadable`.
 
 | Function | Input | Result |
 |---|---|---|
@@ -155,3 +162,79 @@ Fixtures use only scratch SQLite/JSON and synthetic identities. They cover
 read-only connections, table allowlisting, source linkage, immutable original
 snapshots, diagnostic loss/scope, malformed data, view versus generation,
 send versus completion, and missing-cohort/independent-label discipline.
+
+## Frozen inputs: what a scorer or a fit may read
+
+**Inputs are frozen per card; configuration is pinned and recorded per run.**
+The rule (models-lead, `docs/plans/org-bringup/leads/models-lead-launch.md`
+§Reviews-4 R4.1, 2026-10-23, and §Reviews-5 R5.2 (a) and (b), 2026-10-24), for
+every registered scorer and every model fit:
+
+- **Every per-card value a registered scorer or a fit reads is frozen at serve
+  or build time,** or is a deterministic function of frozen inputs plus
+  pre-split training data.
+- **No fit or eval path reads mutable live state:** taste rows, current values
+  or boards, current rosters, flags.
+- **Configuration a fit or an eval reads is pinned and recorded per run.** The
+  run reads each value once, records the exact values used plus the SHA-256 of
+  the whole live `model_config`, and a refit or replay takes those recorded
+  values explicitly. When it is given them, it reads no live config.
+- **A fit and a read take an explicit `as_of`.** Nothing reads the wall clock.
+  A read sees only decks served at or before `as_of` and outcomes acted at or
+  before it. When labels must be complete, choose `as_of` with a settle lag
+  (at least 7 days after the window's last `served_at`). The lag is a parameter
+  of the read, never of the loader.
+
+How the code meets it today:
+
+- The frozen scorer inputs are `backend/eval/contract.py` `FROZEN_INPUT_KEYS`
+  (18 keys). They include the serve-time taste matches `taste_pref_long` and
+  `taste_pref_short`: the two prefMatch values `taste_service.taste_multipliers`
+  ordered the card by, float8, absent when the taste layer didn't run.
+- `value_model.ValueModel._inject` reads the frozen pair (absent = 0.0, the
+  no-signal anchor, identical in training and eval). Only live serving
+  (`value_model.serving_scores`) reads taste vectors; no fit or eval path
+  calls `taste_service.load_taste_vectors`, so an eval no longer garbage-collects
+  taste rows either.
+- `value_model.train_model(decks, as_of=...)` takes the clock explicitly, and
+  `trained_at` / `train_date` come from it. A re-fit at the same `as_of` on the
+  same evidence is bit-identical: coefficients, calibration tables and every
+  registered scorer's replay estimates. `backend/tests/test_value_model_frozen_taste.py`
+  checks it after the clock moves, new outcomes arrive, a board prior is
+  rewritten and taste rows are GC'd.
+- The writer's parity check: `backend/tests/support/taste_parity.py`
+  (`assert_frozen_prefs_match_multipliers`) passes only when each card's frozen
+  pair is, bit for bit, the pair its taste multiplier was built from.
+- **Pinned configuration (R5.2 (a)).** A record is `value_model.pin_config(keys)`:
+  `{"values": {key: value}, "model_config_sha256": <SHA-256 of the live
+  model_config dict, canonical JSON>}`.
+  - A fit pins `value_model.FIT_CONFIG` (`value_model_calib_frac`,
+    `value_model_l2`, `value_model_l2_cat`) and records it in the model's
+    `meta["config"]`, which is persisted in `models.jsonl`. `train_model(...,
+    config=meta["config"])` refits from it with no live read.
+  - An eval pins `value_model.SCORE_CONFIG`, the V-vector (`value_model_v_like`,
+    `value_model_v_propose`), on `EvalRun.config` and in its run record. A
+    scorer that reads no configuration records `config: null`.
+    `get_scorer("value_model", config=run.config)` builds the scorer with it
+    as a constructor argument, and `replay.evaluate` with that scorer replays
+    the run with no live read. The pin is never held in thread or global state.
+    The replay CLI and the nightly pin once and share that one pin across every
+    scorer in the run.
+  - Live serving still reads the V-vector live, by design (F6 PRD §2: strategy
+    changeable without retraining). It is pinned for evals only.
+  - Test: `test_config_is_pinned_and_recorded_and_replays_after_live_config_changes`.
+    After live `model_config` changes, the refit and the replay are bit-identical
+    given the recorded values.
+- **The read's clock (R5.2 (b)).** `eval.data.load_decks(as_of=...)` filters
+  `deck_outcomes.acted_at <= as_of` and `served_at <= as_of`.
+  `replay.settled_read(now=..., settle_lag_days=7)` picks the window
+  (`until` = now minus the lag) and `as_of` = its last `served_at` plus the
+  lag. The replay and nightly CLIs take `--settle-lag-days` (default 7); the
+  replay CLI also takes an explicit `--as-of`. The daily tick's
+  `nightly.run_all()` keeps `as_of` = now.
+
+**Known exceptions, not yet closed:**
+
+- Decks served before the freeze ships carry no frozen pair and score with the
+  0.0 anchor. models-lead recommends starting any D-016 gate window at the
+  freeze date.

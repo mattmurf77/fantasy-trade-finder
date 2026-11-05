@@ -106,6 +106,9 @@
       // Inject session token on every request
       opts.headers = opts.headers || {};
       if (sessionToken) opts.headers['X-Session-Token'] = sessionToken;
+      // G-068: the server no longer guesses "web" for a request with no
+      // X-Device, so the web declares itself (device_type / platform stamps).
+      opts.headers['X-Source'] = 'web';
 
       const method = (opts.method || 'GET').toUpperCase();
       let bodyPreview;
@@ -1028,6 +1031,18 @@
     //    • profiles.public_pages    — public /u/<username> page (profile.html)
     // ═══════════════════════════════════════════════════════════════
 
+    // The web's ESPN/MFL chips are OFF, whatever `landing.platform_options`
+    // says (head-eng 2026-10-27): that flag now means the APP's proof-based
+    // ESPN/MFL sign-in, and the web has no proof-based sign-in until after
+    // launch. A web build that adds one turns this on; never read the
+    // landing flag here (qa/web/check_web_structure.py GATE-web-espn-mfl-off).
+    // Declared before the immediate _applyLandingFlags() call below, so the
+    // constant is initialized when the reveal first runs. That first call can
+    // still end in a caught TDZ on `_entryPlatformSel` (declared further down;
+    // pre-existing and harmless: the chips are already set by then, and the
+    // reveal runs again on 'ftf:flags-ready').
+    const WEB_PLATFORM_ENTRY = false;
+
     // Reveal flag-gated landing surfaces once the flag fetch completes.
     // _loadFeatureFlags() is fired at module top; we poll once on DOMContentLoaded
     // so the initial paint doesn't flash the CTA if the flag is off.
@@ -1061,9 +1076,10 @@
     //  the form for that platform's panel:
     //    preview → POST /api/entry/platform (no team_id): the link route's
     //              choose_team shape; nothing persisted, no session yet
-    //    claim   → POST /api/entry/platform (team_id): mints a session for a
-    //              DETERMINISTIC entry:<platform>:… user id (re-claiming the
-    //              same team recovers the same boards)
+    //    claim   → POST /api/entry/platform (team_id): mints a session for
+    //              the proven identity — an acct_* account key, or the bound
+    //              Sleeper id when that identity is linked to a Sleeper user
+    //              (re-claiming the same team recovers the same boards)
     //    import  → the canonical POST /api/{espn,mfl}/link under the fresh
     //              token — no import logic is duplicated here
     //  Then the ordinary league flow takes over: showLeagueScreen lists the
@@ -1087,9 +1103,12 @@
     let _entryMflPass     = '';
     const _PLATFORM_LABEL = { sleeper: 'Sleeper', espn: 'ESPN', mfl: 'MyFantasyLeague' };
 
-    // Entry ids are minted as entry:<platform>:… (D-164). The prefix is how
-    // every Sleeper-only path in this file routes entry users to the
-    // platform snapshot instead.
+    // Legacy entry ids look like entry:<platform>:… (D-164). The proof-based
+    // mint now returns an acct_* key, or the bound Sleeper id, and this
+    // prefix test does NOT match either; the web mints none (_entryPost
+    // throws), so it only recognises a user saved by an older session. The
+    // prefix is how every Sleeper-only path in this file routes entry users
+    // to the platform snapshot instead.
     function _isEntryUser(u) {
       return !!(u && String(u.user_id || '').startsWith('entry:'));
     }
@@ -1104,7 +1123,7 @@
     // plain failure because the recovery is different: an entry user's
     // session CANNOT be rebuilt from localStorage — /api/{espn,mfl}/leagues
     // requires a session, and the only way to get one is to re-claim the
-    // team on the landing (deterministic `entry:` ids recover the same
+    // team on the landing (re-claiming the same team recovers the same
     // boards, D-164). Entry sessions are unverified, so they are never
     // server-persisted and die on every restart/deploy — this is the normal
     // end of one, not an edge case.
@@ -1201,16 +1220,18 @@
       } catch (_) { return null; }
     }
 
-    // Chip-row reveal — mirrors SignInScreen's platformPickerShown: the flag
+    // Chip-row reveal — mirrors SignInScreen's platformPickerShown: the gate
     // AND ≥2 live platforms (a one-chip "choice" is noise). Per-platform
-    // chips additionally need espn.link / mfl.link; the MFL sign-in block
-    // needs mfl.auth_link and the ESPN "find my leagues" link needs
-    // espn.league_picker (the v2.1 actions 404 without them).
+    // chips additionally need espn.link / mfl.link (ESPN's also needs
+    // espn.signin, the operator's off switch for ESPN sign-in alone; a flag
+    // the server doesn't send reads false, so the chip stays hidden); the MFL
+    // sign-in block needs mfl.auth_link and the ESPN "find my leagues" link
+    // needs espn.league_picker (the v2.1 actions 404 without them).
     function _applyPlatformOptionsFlag() {
       const row = document.getElementById('platform-row');
       if (!row || !window.FTF_FLAG) return;
-      const optionsOn = window.FTF_FLAG('landing.platform_options');
-      const espnOn = optionsOn && window.FTF_FLAG('espn.link');
+      const optionsOn = WEB_PLATFORM_ENTRY;
+      const espnOn = optionsOn && window.FTF_FLAG('espn.link') && window.FTF_FLAG('espn.signin');
       const mflOn  = optionsOn && window.FTF_FLAG('mfl.link');
       const espnChip = document.getElementById('platform-chip-espn');
       const mflChip  = document.getElementById('platform-chip-mfl');
@@ -1250,7 +1271,8 @@
 
     function selectEntryPlatform(p) {
       if (!['sleeper', 'espn', 'mfl'].includes(p)) return;
-      if (p !== 'sleeper' && (!window.FTF_FLAG('landing.platform_options') || !window.FTF_FLAG(`${p}.link`))) return;
+      if (p !== 'sleeper' && (!WEB_PLATFORM_ENTRY || !window.FTF_FLAG(`${p}.link`))) return;
+      if (p === 'espn' && !window.FTF_FLAG('espn.signin')) return;
       _entryPlatformSel = p;
       _entryPreview = null;
       for (const id of ['sleeper', 'espn', 'mfl']) {
@@ -5136,6 +5158,7 @@
       // clients is that a type is RECOGNISED, not that the two draw the
       // same path.
       if (type === 'referral_joined')               return ICON.plus;
+      if (type === 'referral_activated')            return ICON.trade;   // FR-19
       if (type === 'league_member_joined')          return ICON.plus;
       if (type === 'league_member_unlocked_trades') return ICON.rank;
       if (type === 'match_expiring')                return ICON.match;
@@ -5325,7 +5348,8 @@
       const LEAGUE_TYPES = ['referral_joined', 'league_member_joined',
                             'league_member_unlocked_trades',
                             'espn_reconnect'];   // ADR-011 sweep nudge
-      const TRADE_TYPES  = ['deck_replenished'];
+      const TRADE_TYPES  = ['deck_replenished',
+                            'referral_activated'];   // FR-19: Trades, not League
 
       if (MATCH_TYPES.indexOf(type) !== -1) {
         // FIXED 2026-08-13 (notif-inbox-growth): this branch used to call
@@ -5579,11 +5603,11 @@
           <div class="summary-card">
             <div class="summary-card-value">${(data.leaguemates_joined || 0) + 1} / ${(data.leaguemates_total || 0) + 1}</div>
             <div class="summary-card-label">Leaguemates Joined</div>
-            <div class="summary-card-sub">Have a Trade Finder account (including you)</div>
+            <div class="summary-card-sub">Have a Fleeced account (including you)</div>
           </div>
           <div class="summary-card">
             <div class="summary-card-value">${_leagueUnlockedCount(data)}</div>
-            <div class="summary-card-label">Unlocked Trade Finder</div>
+            <div class="summary-card-label">Ranked</div>
             <div class="summary-card-sub">Ready to match</div>
           </div>`;
       }
@@ -5830,8 +5854,8 @@
 
     function buildInviteMessage() {
       const url = buildInviteUrl();
-      const leagueName = document.getElementById('league-summary-title')?.textContent || 'our league';
-      return `Join me on Dynasty Trade Finder to find trades in ${leagueName} → ${url}`;
+      // m3.app.invite_msg (copy file §6 D): no league name, every channel.
+      return `Join me on Fleeced to find trades we both like → ${url}`;
     }
 
     // ── OG share-card helpers (Agent 3) ──────────────────────────────
@@ -5848,13 +5872,6 @@
       const fmt = (window._currentUser && _currentUser.scoring_format) || null;
       const qs = (fmt && fmt !== '1qb_ppr') ? `?fmt=${encodeURIComponent(fmt)}` : '';
       return `${origin}/s/tiers/${posSeg}/${u}${qs}`;
-    }
-
-    function buildTradeShareUrl(matchId) {
-      const origin = window.location.origin;
-      const mid = encodeURIComponent(String(matchId || '').trim());
-      if (!mid) return origin + '/';
-      return `${origin}/s/trade/${mid}`;
     }
 
     function openInviteModal() {
@@ -6079,11 +6096,11 @@
 
       switch (channel) {
         case 'sms':
-          body = `${leagueName} fantasy trade finder — join me: ${url}`;
+          body = `Join me on Fleeced to find trades we both like → ${url}`;   // m3.app.invite_sms
           break;
         case 'x':
         case 'twitter':
-          body = `Joined @FantasyTradeFinder to find trades in ${leagueName}. Come ruin the league with me: ${url}`;
+          body = `Finding dynasty trades in ${leagueName} on Fleeced. Join me → ${url}`;   // m3.app.invite_x
           break;
         case 'whatsapp':
           body = `Hey! Been using Fleeced for ${leagueName} — it finds trades both sides actually like. Join me: ${url}`;

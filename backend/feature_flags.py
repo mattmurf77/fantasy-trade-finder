@@ -139,6 +139,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # the `on_block` card serialization; off = payloads byte-identical to
     # pre-147. backend/trade_block_service.py
     "sleeper.trade_block",
+    # D1 free-agent moves (docs/plans/sleeper-fa-write/): the app submits a
+    # Sleeper add / add+drop (claims only under R15.8 D5) on the user's
+    # behalf. SERVER-ONLY kill switch: gates POST /api/league/free-agents/move
+    # (404 when off) and lets the free-agents capability answer move.mode
+    # 'submit' (else 'handoff'). The consent routes never follow it. Never
+    # in mobile LAUNCHED_FLAG_DEFAULTS; no client reads it. Supersedes the
+    # never-shipped `sleeper.fa_write`. MFL/ESPN get their own keys in Update 1.
+    "sleeper.send_add_drop",
     # FB-147 engine hook — SOFT, acquire-side trade-block boost. A card whose
     # ACQUIRE side holds a player the counterparty flagged "on the block" gets
     # a bounded composite bump (knob block_boost_weight). Applied AFTER all
@@ -189,6 +197,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # `feature_disabled` and the sheet's input step is byte-identical to
     # today (text field only).
     "espn.league_picker",
+    # ESPN sign-in kill switch (platform sign-in, head-eng 2026-10-27;
+    # docs/plans/platform-sign-in/scope.md). OFF ⇒ the WHOLE ESPN branch of
+    # the sessionless POST /api/entry/platform (my_leagues, preview, team
+    # claim) 404s `feature_disabled` before any ESPN call or rate-limit
+    # accounting. MFL sign-in and Settings ESPN linking (`espn.link`,
+    # /api/espn/*) are unaffected. Ships TRUE in config/features.json; the
+    # code default (False) fails closed if the config can't be read.
+    "espn.signin",
     # Multi-platform league linking Phase 1 — read-only import of MFL /
     # Fleaflicker leagues via their official public APIs
     # (docs/plans/multi-platform-linking-plan-2026-07-17.md). Each gates its
@@ -393,6 +409,16 @@ FLAG_KEYS: tuple[str, ...] = (
     # validated live + >=24h CDN propagation + a post-deploy install proves a
     # tapped link opens the app (docs/runbook.md § AASA).
     "growth.invite_join_link",
+    # Referral loop D-1 (docs/plans/referral-loop/prd.md §11). Both default
+    # OFF; D-1 flips neither.
+    #   growth.join_landing — GET /app/league/join/<id> renders the
+    #     device-aware landing instead of the 302, /go/<cta> answers, and /s/*
+    #     gets FR-25's per-device CTA. Off: today's 302 and /s/* button.
+    #   growth.referral_ledger — in D-1 gates FR-8 landing-open recording,
+    #     invite_landing_cta and the 302's `t` forwarding; its mint /
+    #     attribution meaning lands with FR-1 / FR-13 under this same key.
+    "growth.join_landing",
+    "growth.referral_ledger",
     "account.data_export",       # 06-02: GET /api/account/export JSON archive
     "account.sleeper_disconnect",
     "account.settings_v2",
@@ -439,6 +465,8 @@ FLAG_KEYS: tuple[str, ...] = (
     # so the flag being on never exposes the surface to real users.
     "testing.stage_users",   # POST/DELETE /api/test-users — synthetic stage-user
                              # spawner for onboarding QA (backend/test_users.py)
+    "testing.timing_readout",  # client-only: the Settings > Testing tap-to-card
+                               # readout (mobile TimingReadoutRow, ruling 11)
     # ── #158/#170/#171 — owned draft picks in calculator + suggestions ──
     # picks.owned_sync: revive sync_draft_picks on the league-sync path
     # (session_init daemon for Sleeper; link/import for MFL) + normalize MFL
@@ -996,6 +1024,8 @@ FLAG_KEYS: tuple[str, ...] = (
     # bakeoff_runs row, swipe K factors untouched — byte-identical serving.
     "trade.bakeoff",
     "trade.prepared_inventory",  # capability; default-dark audited numeric rollout
+    "trade.first_page_store",    # P1 200 ms path: server-held first pages (scope-eng-200ms §2); OFF = today
+    "trade.packed_evidence",     # ADR-025 stage 2: packed deck evidence (S8); turned on BEFORE the store (R2.4 §3)
     # ── Trade-suggestion presentation v2 (docs/plans/trade-presentation-v2/) ──
     # CLIENT-ONLY. No route reads this key; it is registered here so the
     # features-json-keys-known guard accepts it and so /api/flags serves it

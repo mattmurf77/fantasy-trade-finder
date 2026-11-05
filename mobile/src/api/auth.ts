@@ -163,12 +163,12 @@ export async function linkSleeperUsername(
 export interface AccountInfo {
   ok: boolean;
   sleeper_user_id: string;
-  verified_via: 'sleeper' | 'apple' | 'google' | null;
+  verified_via: 'sleeper' | 'apple' | 'google' | 'mfl_login' | 'espn' | null;
   account: {
     account_id: string;
     sleeper_user_id: string | null;
     created_at: string;
-    identities: Array<{ provider: 'apple' | 'google'; linked_at: string }>;
+    identities: Array<{ provider: 'apple' | 'google' | 'espn' | 'mfl'; linked_at: string }>;
   } | null;
   /** P2.6 — session is keyed to an account with no linked Sleeper source. */
   account_only?: boolean;
@@ -184,13 +184,27 @@ export async function getAccount(): Promise<AccountInfo> {
 // Always available (not flag-gated). Deletes the user's data per the
 // privacy policy; the backend also invalidates every session server-side,
 // so the caller must sign out locally on success.
+//
+// LEG-S6 (#354): `appleAuthorizationCode`, a fresh Sign in with Apple code,
+// goes up as `apple_authorization_code` so the server can revoke Sign in with
+// Apple (accounts.revoke_apple_tokens). Without a code this is the plain,
+// body-less DELETE, and the server deletes either way.
 export interface DeleteAccountResponse {
   ok: boolean;
   deleted: Record<string, number>;
+  /** True only when Apple confirmed the Sign in with Apple revocation. */
+  apple_revoked?: boolean;
 }
 
-export async function deleteAccount(): Promise<DeleteAccountResponse> {
-  return apiRequest<DeleteAccountResponse>('/api/account', { method: 'DELETE' });
+export async function deleteAccount(
+  opts: { appleAuthorizationCode?: string | null } = {},
+): Promise<DeleteAccountResponse> {
+  return apiRequest<DeleteAccountResponse>('/api/account', {
+    method: 'DELETE',
+    ...(opts.appleAuthorizationCode
+      ? { body: { apple_authorization_code: opts.appleAuthorizationCode } }
+      : {}),
+  });
 }
 
 // POST /api/session/init — full app session. Called after the user picks
@@ -210,6 +224,9 @@ export interface SessionInitBody {
     player_ids: string[];
   }>;
   invited_by?: string | null;
+  /** Referral FR-12 — the invite id `t`, from inviteIdField(). Omitted,
+   *  never null or '', when no id was captured. */
+  invite_id?: string;
   active_format?: '1qb_ppr' | 'sf_tep';
   trade_fairness_threshold?: number;
   /**
@@ -258,6 +275,14 @@ async function requireSameSession(token: string | null): Promise<void> {
   }
 }
 
+// Time to trade suggestion (R2 `launch_state`, T3): a search tapped before
+// this process's first session-init completed is a `cold_launch`. Process
+// lifetime, in memory; set once a /api/session/init response is accepted.
+let _sessionInitCompleted = false;
+export function sessionInitCompletedThisProcess(): boolean {
+  return _sessionInitCompleted;
+}
+
 export async function sessionInit(body: SessionInitBody, control: SessionInitControl): Promise<SessionInitResponse> {
   control.assertCurrent();
   const sessionToken = control.token;
@@ -280,6 +305,7 @@ export async function sessionInit(body: SessionInitBody, control: SessionInitCon
       deadlineAt: control.deadlineAt, beforeDispatch: () => { control.assertCurrent(); control.onDispatch(); }}));
   await requireSameSession(sessionToken);
   control.assertCurrent();
+  _sessionInitCompleted = true;
   // Mirror the server's verified-session state into the store so the
   // verify banner reacts to every init/revalidate. Loaded inline to avoid
   // a circular import (same pattern as consumeInvitedBy below).
@@ -354,8 +380,34 @@ export async function sessionInit(body: SessionInitBody, control: SessionInitCon
 }
 
 // GET /api/session/ping — session liveness check. 401 → token expired.
-export async function sessionPing(): Promise<{ ok: true }> {
+// Also carries `verification`, the same field session/init returns.
+export async function sessionPing(): Promise<{
+  ok: true;
+  user_id?: string;
+  verification?: SessionVerification;
+}> {
   return api.get('/api/session/ping');
+}
+
+/** Record the server's verification state for a session that never reaches
+ *  session/init: an account-only session (Apple-first, no league) pins the
+ *  NO_LEAGUE_ID sentinel, so revalidateSession and initLeagueSession skip it,
+ *  and `verification` would otherwise stay null for good (head-eng
+ *  2026-10-28; #495's Restore row reads it). The answer is recorded only if
+ *  the same user is still signed in when it lands. A failure (offline,
+ *  expired) keeps the current state, like revalidateSession. */
+export async function refreshVerification(): Promise<void> {
+  const { useSession } = require('../state/useSession');
+  const askedFor = useSession.getState().user?.user_id ?? null;
+  if (!askedFor) return;
+  try {
+    const res = await sessionPing();
+    if (!res?.verification || res.user_id !== askedFor) return;
+    if (useSession.getState().user?.user_id !== askedFor) return;
+    useSession.getState().setVerification(res.verification);
+  } catch {
+    // Offline or expired: keep the current state.
+  }
 }
 
 // ── Helper: initialize a session for a specific league ─────────────────
@@ -425,6 +477,29 @@ function buildSleeperRosterPayload(
   };
 }
 
+// Referral FR-12 (B3) — the ONE source of `invite_id` for a session-init
+// body. Consumes the id captured from the invite link
+// (useSession.consumeInviteId, B2) and returns `{ invite_id }` only when
+// there is one: no id means no key, never null or ''. Spread ONCE into every
+// body this file sends, at the point the body is composed: both Sleeper
+// bodies, and the ESPN / MFL / Fleaflicker builder results at their call
+// sites here (api/espn.ts and api/platformLink.ts stay untouched). The
+// platform branches return before the Sleeper body is built, so each path
+// consumes the id exactly once, and only after its builder succeeded. The
+// server ignores the field while the referral ledger is off (prd §8.4).
+// Loaded inline to avoid a circular import (useSession → auth.ts), the same
+// pattern as consumeInvitedBy. Pinned by tests/check-session-init-invite-id.js.
+function inviteIdField(): { invite_id?: string } {
+  let id: string | null = null;
+  try {
+    const { useSession } = require('../state/useSession');
+    id = useSession.getState().consumeInviteId();
+  } catch {
+    /* require may fail in test contexts; non-fatal */
+  }
+  return id ? { invite_id: id } : {};
+}
+
 // Resolves to a `SessionInitSeed` — the Sleeper reads it already made, so
 // the caller can seed the query cache. Additive: every existing caller
 // awaits this for its side effects and ignores the value.
@@ -440,18 +515,18 @@ export async function initLeagueSession(
   // /api/session/init call is identical from here on. Detection reads the
   // cached league list's `platform` field (hydrated from AsyncStorage).
   if (isEspnLeague(lg.league_id)) {
-    const espnBody = await buildEspnSessionInitBody(user, lg);
+    const espnBody = { ...(await buildEspnSessionInitBody(user, lg)), ...inviteIdField() };
     await submitSessionInit(espnBody, control);
     return {};
   }
   // MFL / Fleaflicker imports work the same way — rosters come from the
   // backend snapshot (api/platformLink.ts), not Sleeper proxies.
   if (isMflLeague(lg.league_id)) {
-    await submitSessionInit(await buildPlatformSessionInitBody('mfl', user, lg), control);
+    await submitSessionInit({ ...(await buildPlatformSessionInitBody('mfl', user, lg)), ...inviteIdField() }, control);
     return {};
   }
   if (isFleaflickerLeague(lg.league_id)) {
-    await submitSessionInit(await buildPlatformSessionInitBody('fleaflicker', user, lg), control);
+    await submitSessionInit({ ...(await buildPlatformSessionInitBody('fleaflicker', user, lg)), ...inviteIdField() }, control);
     return {};
   }
   // An account-only working key is not a Sleeper identity. Imported leagues
@@ -512,6 +587,7 @@ export async function initLeagueSession(
     user_player_ids:   myPlayerIds,
     opponent_rosters:  opponentRosters,
     invited_by:        invitedBy ?? undefined,
+    ...inviteIdField(),
     league_user_id:      leagueUserId,
     league_display_name: leagueDisplayName,
   };
@@ -561,15 +637,15 @@ export async function buildSessionInitBody(
   // Sleeper (see initLeagueSession's espn branch for the why).
   if (isEspnLeague(lg.league_id)) {
     await warmPlayerCache().catch(() => { /* best-effort */ });
-    return buildEspnSessionInitBody(user, lg);
+    return { ...(await buildEspnSessionInitBody(user, lg)), ...inviteIdField() };
   }
   if (isMflLeague(lg.league_id)) {
     await warmPlayerCache().catch(() => { /* best-effort */ });
-    return buildPlatformSessionInitBody('mfl', user, lg);
+    return { ...(await buildPlatformSessionInitBody('mfl', user, lg)), ...inviteIdField() };
   }
   if (isFleaflickerLeague(lg.league_id)) {
     await warmPlayerCache().catch(() => { /* best-effort */ });
-    return buildPlatformSessionInitBody('fleaflicker', user, lg);
+    return { ...(await buildPlatformSessionInitBody('fleaflicker', user, lg)), ...inviteIdField() };
   }
   const [rosters, leagueUsers] = await Promise.all([
     getLeagueRosters(lg.league_id),
@@ -605,6 +681,7 @@ export async function buildSessionInitBody(
     user_player_ids:  myPlayerIds,
     opponent_rosters: opponentRosters,
     invited_by:       invitedBy ?? undefined,
+    ...inviteIdField(),
     league_user_id:      leagueUserId,
     league_display_name: leagueDisplayName,
   };

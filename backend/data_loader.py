@@ -149,7 +149,10 @@ DP_PARAM_TO_FORMAT = {v: k for k, v in DP_SCORING_PARAM.items()}
 # KeepTradeCut consensus blend (#145) + sf_tep TE premium uplift (#148)
 # ---------------------------------------------------------------------------
 # KTC has no official API. The dynasty-rankings page embeds its full top-500
-# player list as a `var playersArray = [...]` literal in the HTML; each entry
+# player list in the HTML: since at least 2026-10-29 as a JSON element
+# (`<script type="application/json" id="ktc-players">[...]</script>`, which
+# the page reads with `var playersArray = JSON.parse(...)`), before that as a
+# `var playersArray = [...]` literal. parse_ktc_players reads both. Each entry
 # carries BOTH formats (oneQBValues / superflexValues) plus TE-premium
 # variants (tep/tepp/teppp), so ONE polite GET per boot (24h in-memory TTL)
 # serves both format builds. This is an unsanctioned surface — expect it to
@@ -214,6 +217,32 @@ _ktc_fetched_at: float = 0.0
 # are authoritative at runtime; these are the no-DB fallback).
 KTC_BLEND_WEIGHT_DEFAULT = 0.5
 TEP_TE_UPLIFT_DEFAULT = 1.18
+
+# S5 (models-lead launch plan): the blend fails soft, so a KTC page change
+# would silently move every user's values to DP-only, or blend in garbage
+# that still parses. Each blend checks its own health and prints one
+# `KTC-BLEND-DEGRADED` line when it's off (a Render log alert keys on it;
+# runbook § KTC consensus blend). The lever stays ktc_blend_weight = 0.
+#   unavailable — KTC returned nothing (fetch or parse failure): DP-only
+#   thin        — fewer than KTC_MIN_MATCHED pool players matched: DP-only
+#   partial     — the matched players cover less of the pool than
+#                 KTC_MIN_COVERAGE, overall or for a position: DP-only
+#   disagrees   — KTC's ordering vs DP's over the matched players has a
+#                 Spearman rank correlation below KTC_MIN_RANK_CORR: blended
+#                 anyway (the page parses; only the ordering looks wrong)
+# thin and partial keep the blend off (models-lead addendum R5): the
+# rank-normalization maps the matched set onto the top of the WHOLE pool's DP
+# curve, which is only right when the matched set covers most of the pool.
+KTC_MIN_MATCHED = 50
+KTC_MIN_RANK_CORR = 0.7
+# R5's floors, about 85% of the last healthy fetch's coverage, rounded down:
+# 2026-07-17 (the blend fixtures) matched 441/633 = 0.697 overall, QB 0.747,
+# RB 0.699, WR 0.748, TE 0.562, in both formats.
+KTC_MIN_COVERAGE = {"overall": 0.59, "QB": 0.63, "RB": 0.59, "WR": 0.63, "TE": 0.47}
+_KTC_BLENDS = ("ok", "disagrees")       # the states in which the blend runs
+# The last blend's health per format: {fmt: {"state", "matched", "rank_corr",
+# "checked_at"}}, state "ok" or one of the reasons above.
+KTC_BLEND_STATUS: dict[str, dict] = {}
 
 
 def _blend_config() -> tuple[float, float]:
@@ -296,18 +325,47 @@ def _compress_qb_1qb_values(
     return out
 
 
+# The page's player list: the `ktc-players` JSON element (current pages), else
+# the `var playersArray = [...]` literal (pages before ~2026-10-29). The id is
+# its own attribute (never `data-id`), quoted or not, any case.
+_KTC_PLAYERS_ELEMENT = re.compile(
+    r"<script\b[^>]*?\sid\s*=\s*(?:\"ktc-players\"|'ktc-players'|ktc-players(?=[\s>]))"
+    r"[^>]*>(.*?)</script>", re.S | re.I)
+_KTC_PLAYERS_LITERAL = re.compile(r"var\s+playersArray\s*=\s*(\[.*?\]);", re.S)
+
+
 def parse_ktc_players(html: str) -> list[dict]:
-    """Extract the embedded playersArray from KTC rankings-page HTML.
+    """Extract the embedded player list from KTC rankings-page HTML: the
+    `ktc-players` JSON element, else the legacy `var playersArray = [...]`
+    literal (module comment above). An element that doesn't read as a
+    non-empty player list falls through to the literal.
 
     Returns the raw player dicts filtered to real players (KTC also lists
     rookie draft picks under position "RDP" — excluded; the pool's generic
-    picks are seeded separately). Raises on parse failure (callers treat
-    any exception as "KTC unavailable")."""
-    m = re.search(r"var\s+playersArray\s*=\s*(\[.*?\]);", html, re.S)
-    if not m:
-        raise ValueError("playersArray not found in KTC page")
-    players = json.loads(m.group(1))
-    return [p for p in players if p.get("position") in VALID_POSITIONS]
+    picks are seeded separately). Raises when neither shape yields a player
+    (callers treat any exception as "KTC unavailable", and log it)."""
+    problems = []
+    for shape, pattern in (("ktc-players element", _KTC_PLAYERS_ELEMENT),
+                           ("playersArray literal", _KTC_PLAYERS_LITERAL)):
+        m = pattern.search(html)
+        if not m:
+            continue
+        try:
+            players = json.loads(m.group(1))
+        except ValueError:
+            problems.append(f"{shape} isn't JSON")
+            continue
+        if not isinstance(players, list):
+            problems.append(f"{shape} isn't a JSON array")
+            continue
+        kept = [p for p in players if isinstance(p, dict) and p.get("position") in VALID_POSITIONS]
+        if not kept:
+            problems.append(f"{shape} holds no players")
+            continue
+        return kept
+    raise ValueError("playersArray not found in KTC page ("
+                     + ("; ".join(problems) or "no ktc-players element, no playersArray literal")
+                     + ")")
 
 
 def _fetch_ktc_html(timeout: int = 15) -> str:
@@ -396,6 +454,76 @@ def _ktc_consensus() -> dict[str, dict]:
         return _ktc_cache
 
 
+def _rank_corr(xs: list[float], ys: list[float]) -> float:
+    """Spearman's rank correlation (average ranks on ties); 0.0 when either
+    side is constant."""
+    def ranks(v):
+        order = sorted(range(len(v)), key=v.__getitem__)
+        r = [0.0] * len(v)
+        i = 0
+        while i < len(order):
+            j = i
+            while j + 1 < len(order) and v[order[j + 1]] == v[order[i]]:
+                j += 1
+            for k in range(i, j + 1):
+                r[order[k]] = (i + j) / 2
+            i = j + 1
+        return r
+    rx, ry = ranks(xs), ranks(ys)
+    mx, my = sum(rx) / len(rx), sum(ry) / len(ry)
+    cov = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    vx = sum((a - mx) ** 2 for a in rx)
+    vy = sum((b - my) ** 2 for b in ry)
+    return cov / math.sqrt(vx * vy) if vx and vy else 0.0
+
+
+def _coverage_short(matched: list, value_map: dict, pos_map: dict) -> list[str]:
+    """The KTC_MIN_COVERAGE floors the matched players miss: "overall", and
+    each of QB, RB, WR, TE whose pool players are covered below its floor (a
+    position with no pool players is skipped)."""
+    keys = {k for k, _ in matched}
+    short = (["overall"] if len(keys) < KTC_MIN_COVERAGE["overall"] * len(value_map) else [])
+    for pos in ("QB", "RB", "WR", "TE"):
+        pool = [k for k in value_map if pos_map.get(k) == pos]
+        if pool and sum(1 for k in pool if k in keys) < KTC_MIN_COVERAGE[pos] * len(pool):
+            short.append(pos)
+    return short
+
+
+def _record_blend_health(fmt: str, n_ktc: int, matched: list, value_map: dict,
+                         pos_map: dict) -> str:
+    """S5: record this blend's health in KTC_BLEND_STATUS, print the
+    KTC-BLEND-DEGRADED line when it isn't ok, and return the state (the
+    blend runs only in _KTC_BLENDS; see KTC_MIN_MATCHED)."""
+    corr = (_rank_corr([v for _, v in matched], [value_map[k] for k, _ in matched])
+            if len(matched) >= KTC_MIN_MATCHED else None)
+    short = _coverage_short(matched, value_map, pos_map) if corr is not None else []
+    if not n_ktc:
+        state = "unavailable"
+    elif len(matched) < KTC_MIN_MATCHED:
+        state = "thin"
+    elif short:
+        state = "partial"
+    elif corr < KTC_MIN_RANK_CORR:
+        state = "disagrees"
+    else:
+        state = "ok"
+    KTC_BLEND_STATUS[fmt] = {"state": state, "matched": len(matched),
+                             "coverage": round(len(matched) / len(value_map), 3),
+                             "short": short,
+                             "rank_corr": None if corr is None else round(corr, 3),
+                             "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    if state != "ok":
+        print(f"🚨 KTC-BLEND-DEGRADED fmt={fmt} reason={state} "
+              f"matched={len(matched)}/{len(value_map)} ktc_rows={n_ktc} "
+              f"rank_corr={'n/a' if corr is None else f'{corr:.3f}'}"
+              + (f" short={','.join(short)}" if short else "") + ": "
+              + ("blended anyway; check KTC's page" if state in _KTC_BLENDS
+                 else "consensus seeds are DP-only for this format")
+              + "; kill switch ktc_blend_weight=0 (runbook § KTC consensus blend)")
+    return state
+
+
 def _apply_consensus_blend(
     fmt: str,
     elo_map: dict[str, float],
@@ -420,7 +548,7 @@ def _apply_consensus_blend(
             if k in ktc and ktc[k]["pos"] == pos_map.get(k)
             and fmt in ktc[k]["values"]
         ]
-        if matched:
+        if _record_blend_health(fmt, len(ktc), matched, value_map, pos_map) in _KTC_BLENDS:
             # Rank-normalize KTC onto the DP value curve, then weighted-avg.
             curve = sorted(value_map.values(), reverse=True)
             matched.sort(key=lambda t: (-t[1], -value_map[t[0]], t[0]))

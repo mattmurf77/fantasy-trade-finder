@@ -10,8 +10,8 @@ import { track } from '../api/events';
 // re-try when the slot frees (their trigger state persists, so they show at
 // the next free moment — "defer to the next mount" per the PRD).
 //
-// Priority (highest first): guide step > quickset prompt > coach mark >
-// apple banner > outlook banner. There is NO preemption — a visible surface
+// Priority (highest first): guide step > paywall offer > quickset prompt >
+// coach mark > apple banner > outlook banner. There is NO preemption — a visible surface
 // is never yanked mid-display; priority is realized by claim order (call
 // `useInterruptSlot` in priority order within a screen) plus the ordering
 // below for documentation and analytics.
@@ -56,6 +56,10 @@ import { track } from '../api/events';
 
 export type InterruptSurface =
   | 'guide_step'
+  // #393 M2 (D4; scope guard 5): the paywall offer after the first opinion
+  // or on leaving the deck. Directly after the guide, so it never presents
+  // over a guide bubble or during the tour hold, and outranks the rest.
+  | 'paywall_offer'
   | 'quickset_prompt'
   | 'coach_mark'
   | 'apple_banner'
@@ -64,10 +68,11 @@ export type InterruptSurface =
 /** Lower number = higher priority. Exported for documentation/tests. */
 export const SURFACE_PRIORITY: Record<InterruptSurface, number> = {
   guide_step: 0,
-  quickset_prompt: 1,
-  coach_mark: 2,
-  apple_banner: 3,
-  outlook_banner: 4,
+  paywall_offer: 1,
+  quickset_prompt: 2,
+  coach_mark: 3,
+  apple_banner: 4,
+  outlook_banner: 5,
 };
 
 interface CoordinatorState {

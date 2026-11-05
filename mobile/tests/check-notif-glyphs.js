@@ -51,6 +51,8 @@ const readRepo = (rel) => fs.readFileSync(path.join(__dirname, '..', '..', rel),
 const TYPES = [
   'trade_match', 'trade_accepted', 'trade_declined',
   'referral_joined',
+  // Referral loop FR-19: the activation row (inbox only), routed to Trades.
+  'referral_activated',
   'league_member_joined', 'league_member_unlocked_trades',
   'match_expiring', 'deck_replenished', 'counter_offer',
   // ADR-011 (roster-history P0): the weekly sweep's "reconnect ESPN"

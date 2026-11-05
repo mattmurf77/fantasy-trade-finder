@@ -228,11 +228,12 @@ def snapshot_league_rosters(
     picks_by_owner: dict[str, list[dict]] | None = None,
     pick_read_source: str = "platform",
     now: datetime | None = None,
+    live_user: str | None = None,
 ) -> dict:
     """Build + upsert one league's roster snapshot. Returns the upsert
     counters. Raises nothing to the caller beyond what upsert raises —
     trigger sites wrap with their own try/except (continuing) per the
-    house daemon pattern."""
+    house daemon pattern. `live_user`: see database.upsert_roster_snapshots."""
     if not teams:
         return {"inserted": 0, "updated": 0,
                 "skipped_precedence": 0, "skipped_unchanged": 0}
@@ -241,11 +242,12 @@ def snapshot_league_rosters(
         league_id, platform, scoring_format, teams, source,
         seed=seed, players_meta=players_meta, picks_by_owner=picks_by_owner,
         pick_fold=fold, now=now)
-    return upsert_roster_snapshots(rows)
+    return upsert_roster_snapshots(rows, live_user=live_user)
 
 
 def snapshot_league_boards(league_id: str, source: str,
-                           now: datetime | None = None) -> dict:
+                           now: datetime | None = None, *,
+                           live_user: str | None = None) -> dict:
     """C5/C6 — one complete-board snapshot per (member, format) for the
     period, from member_rankings (local read, no platform call, identical
     on every trigger). board_updated_at carries member_rankings.updated_at
@@ -265,4 +267,4 @@ def snapshot_league_boards(league_id: str, source: str,
         "board_updated_at": b.get("board_updated_at"),
         "source":           source,
     } for b in boards if b.get("elos")]
-    return upsert_board_snapshots(rows)
+    return upsert_board_snapshots(rows, live_user=live_user)

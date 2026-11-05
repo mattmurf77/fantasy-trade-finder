@@ -12,6 +12,7 @@ from backend import database as db, server, trade_service as ts, feature_flags a
 from backend import prepared_trade_runtime as runtime, prepared_trade_store as store, user_data_lifecycle
 from backend import prepared_trade_read_guard as read_guard
 from backend.prepared_trade_payload import PreparedEvidenceCapture
+from backend.tests.support.draft_replay import FakeClock
 from backend.tests.test_prepared_trade_capture import prepare
 from backend.tests.test_owner_generator_routes import harness, owner_harness, rows, ME, LEAGUE, TOKEN
 from backend.tests.test_owner_only_routes import exclusive, large_exclusive
@@ -188,17 +189,40 @@ def test_normalize_retest_never_hides_another_action():
     assert row["lifted_at"] == "undo" and row["retested_at"] == "served"
 
 
-def test_local_market_change_rejects_adopted_status_and_pending_without_erasing_evidence(prepared, monkeypatch):
+@pytest.fixture
+def pinned_server_clock(monkeypatch):
+    """Pin server.py's wall clock before `prepared` builds anything.
+
+    server._cleanup_loop, a daemon started at import, drops every in-memory session whose
+    last_active is more than 4 h behind time.time(), every 5 minutes. The harness session
+    has last_active=0.0, so a tick landing inside this long test evicted it and the GETs
+    got 401 session_expired. A FakeClock behind server's `time` (the module swap
+    test_trade_breaker uses) keeps that cutoff below 0.0. Only time() is pinned.
+    """
+    clock, real = FakeClock(), time   # 1,000 s: within 4 h of last_active=0.0
+
+    class PinnedTime:
+        def __getattr__(self, name):
+            return clock if name == "time" else getattr(real, name)
+
+    monkeypatch.setattr(server, "time", PinnedTime())
+    return clock
+
+
+def test_local_market_change_rejects_adopted_status_and_pending_without_erasing_evidence(
+        pinned_server_clock, prepared, monkeypatch):
     client, engine, _, service, _ = prepared[0]
     handled, job = adopt(prepared, monkeypatch)
     assert handled and job["status"] == "complete"
     assert server._trade_job_public_view(copy.deepcopy(job))["cards"]
     before = rows(engine, db.deck_impressions_table)
-    assert client.get("/api/trades", headers={"X-Session-Token": TOKEN}).json
+    pending = client.get("/api/trades", headers={"X-Session-Token": TOKEN})
+    assert pending.status_code == 200 and pending.json   # a 401 body is truthy too
     server.g_universal_by_format["1qb_ppr"]["seed"]["g"] += 1.
     assert not server._prepared_job_matches(job)
     assert not server._trade_job_public_view(copy.deepcopy(job))["cards"]
-    assert not client.get("/api/trades", headers={"X-Session-Token": TOKEN}).json
+    pending = client.get("/api/trades", headers={"X-Session-Token": TOKEN})
+    assert pending.status_code == 200 and not pending.json
     assert rows(engine, db.deck_impressions_table) == before
     assert service._trade_cards  # Hiding a stale read is not historical deletion.
 

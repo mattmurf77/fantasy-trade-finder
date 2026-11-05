@@ -8,12 +8,17 @@ import { Button, Icon } from '../components/chalkline';
 import { chalk, ice, ink, radii, semantic, space } from '../theme/chalkline';
 import { getPaywallConfig, type PaywallTip } from '../api/billing';
 import {
+  currentIdentityUserId,
   getTipProducts,
+  isPaymentPending,
   isUserCancelled,
+  PurchaseIdentityError,
   purchaseTip,
   type PurchasesStoreProduct,
 } from '../api/purchases';
 import { useFlag } from '../state/useFeatureFlags';
+import { useSession } from '../state/useSession';
+import { customerInfoApplies, subscriptionSessionState } from '../state/subscriptionSession';
 import { track } from '../api/events';
 
 // TIP JAR — "support the platform" consumables (operator request 2026-08-28).
@@ -48,15 +53,27 @@ interface TipOption {
 export default function TipJarScreen({ navigation, route }: any) {
   const source: string = route?.params?.source ?? 'unknown';
   const paywallOn = useFlag('monetize.paywall');
+  // Tips are a verified-only surface, like the Settings row that opens this
+  // screen: demo, unverified and unknown fetch nothing here and leave.
+  const verified = useSession((s) => subscriptionSessionState(s) === 'verified');
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [thanked, setThanked] = useState(false);
+  const [pending, setPending] = useState(false);
 
+  // Removes THIS route wherever it sits. A screen-level goBack() carries no
+  // target, so the stack pops whatever is on top: with SignIn pushed over
+  // this sheet on session expiry, a later drop would pop SignIn and leave a
+  // blank sheet. Already gone: nothing to do. The stack's root: go to Main.
+  const routeKey: string | undefined = route?.key;
   const dismiss = useCallback(() => {
-    if (navigation?.canGoBack?.()) navigation.goBack();
+    const st = navigation?.getState?.();
+    const at = st ? st.routes.findIndex((r: { key: string }) => r.key === routeKey) : -1;
+    if (at > 0) navigation.dispatch({ type: 'POP', payload: { count: 1 }, source: routeKey, target: st.key });
+    else if (at === -1 && st) return;
     else navigation?.navigate?.('Main');
-  }, [navigation]);
+  }, [navigation, routeKey]);
 
   // Self-guard, PaywallScreen convention: route registered unconditionally,
   // screen refuses while the flag is off.
@@ -64,10 +81,16 @@ export default function TipJarScreen({ navigation, route }: any) {
     if (!paywallOn) dismiss();
   }, [paywallOn, dismiss]);
 
+  // Same self-guard for the session: a direct navigate, or a session that
+  // stops being verified while the sheet is open (sign-out, a user change).
+  useEffect(() => {
+    if (paywallOn && !verified) dismiss();
+  }, [paywallOn, verified, dismiss]);
+
   const configQuery = useQuery({
     queryKey: ['paywall-config', 'ios'],
     queryFn: () => getPaywallConfig('ios'),
-    enabled: paywallOn,
+    enabled: paywallOn && verified,
     staleTime: 5 * 60_000,
   });
   const config = configQuery.data;
@@ -82,7 +105,7 @@ export default function TipJarScreen({ navigation, route }: any) {
   const productsQuery = useQuery({
     queryKey: ['tip-products', tips.map((t) => t.product_id).join(',')],
     queryFn: () => getTipProducts(tips.map((t) => t.product_id)),
-    enabled: paywallOn && tips.length > 0,
+    enabled: paywallOn && verified && tips.length > 0,
     staleTime: 5 * 60_000,
   });
 
@@ -103,26 +126,33 @@ export default function TipJarScreen({ navigation, route }: any) {
   );
 
   useEffect(() => {
-    if (!paywallOn) return;
+    if (!paywallOn || !verified) return;
     track('paywall_viewed', { source: 'tip_jar', platform: 'ios' });
-  }, [paywallOn]);
+  }, [paywallOn, verified]);
 
   const onTip = useCallback(
     async (option: TipOption) => {
       if (busy) return;
       const productId = option.tip.product_id;
       setError(null);
+      setPending(false);
       track('paywall_purchase_initiated', { product_id: productId, source });
       if (!option.product) {
-        setError('Tips aren’t available on this build yet. Thanks for the thought!');
+        setError('Couldn’t load tips right now. Try again later.');
         track('paywall_purchase_failed', { product_id: productId, user_cancelled: false });
         return;
       }
       setBusy(true);
       try {
+        // A tip is a purchase on RevenueCat's identity: only while this
+        // session is verified AND RevenueCat is its user (demo, unverified and
+        // unknown never). A refusal is the failure path below; nothing bought.
+        if (!customerInfoApplies(useSession.getState(), currentIdentityUserId())) {
+          throw new PurchaseIdentityError();
+        }
         const result = await purchaseTip(option.product);
         if (!result) {
-          setError('Tips aren’t available on this build yet. Thanks for the thought!');
+          setError('Couldn’t load tips right now. Try again later.');
           track('paywall_purchase_failed', { product_id: productId, user_cancelled: false });
           return;
         }
@@ -133,8 +163,11 @@ export default function TipJarScreen({ navigation, route }: any) {
       } catch (err) {
         const cancelled = isUserCancelled(err);
         track('paywall_purchase_failed', { product_id: productId, user_cancelled: cancelled });
-        if (!cancelled) {
-          setError('That didn’t go through. You haven’t been charged.');
+        if (isPaymentPending(err)) {
+          // Ask to Buy / a bank check: not an error, and no thank-you yet.
+          setPending(true);
+        } else if (!cancelled) {
+          setError('The App Store didn’t finish the tip. Check your connection and try again.');
         }
       } finally {
         setBusy(false);
@@ -143,7 +176,7 @@ export default function TipJarScreen({ navigation, route }: any) {
     [busy, source],
   );
 
-  if (!paywallOn) return null;
+  if (!paywallOn || !verified) return null;
 
   return (
     <SafeAreaView style={styles.root} testID="tipjar-screen" edges={['top', 'bottom']}>
@@ -171,17 +204,16 @@ export default function TipJarScreen({ navigation, route }: any) {
               Thank you.
             </ChalkText>
             <ChalkText variant="body" style={styles.thanksBody}>
-              Tips keep Fleeced independent — every one goes straight into
-              building the tool.
+              Your tip helps keep Fleeced going.
             </ChalkText>
             <Button testID="tipjar-done" label="Done" onPress={dismiss} style={styles.cta} />
           </View>
         ) : (
           <>
             <ChalkText variant="body" style={styles.lede}>
-              Fleeced is built by one person. If it’s earned a spot in your
-              league routine, a tip helps keep it going. A tip unlocks
-              nothing — it’s just a thank-you.
+              One person builds Fleeced. If the app has earned a spot in your
+              league routine, a tip helps keep it going. A tip unlocks nothing.
+              It’s just a thank-you.
             </ChalkText>
 
             {configQuery.isLoading ? (
@@ -215,6 +247,12 @@ export default function TipJarScreen({ navigation, route }: any) {
               <View style={styles.loading}>
                 <ActivityIndicator color={ice.base} />
               </View>
+            ) : null}
+
+            {pending ? (
+              <ChalkText variant="bodySm" style={styles.emptyNote}>
+                Waiting for approval. The tip goes through once it’s approved.
+              </ChalkText>
             ) : null}
 
             {error ? (

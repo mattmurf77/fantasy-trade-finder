@@ -40,7 +40,8 @@ def card_row(cid, sid, position, user_id=UID, arms=("current",), **over):
     row = {"card_id": cid, "session_id": sid, "user_id": user_id, "position": position,
            "arms_json": json.dumps({a: {} for a in arms}),
            "trade_json": json.dumps({"partner_name": "P", "give": [], "receive": []}),
-           "grade": None, "skipped": 0, "tags_json": "[]", "graded_at": None}
+           "grade": None, "skipped": 0, "tags_json": "[]", "graded_at": None,
+           "partner_user_id": "P"}
     row.update(over)
     return row
 
@@ -73,8 +74,9 @@ def test_tables_created_with_expected_columns(engine):
     assert {n for n, c in sessions.items() if c["nullable"]} == {"completed_at", "error_json"}
     cards = {c["name"]: c for c in insp.get_columns("grading_cards")}
     assert list(cards) == ["card_id", "session_id", "user_id", "position", "arms_json",
-                           "trade_json", "grade", "skipped", "tags_json", "graded_at"]
-    assert {n for n, c in cards.items() if c["nullable"]} == {"grade", "graded_at"}
+                           "trade_json", "grade", "skipped", "tags_json", "graded_at",
+                           "partner_user_id"]
+    assert {n for n, c in cards.items() if c["nullable"]} == {"grade", "graded_at", "partner_user_id"}
     assert cards["skipped"]["default"] == "'0'" and cards["tags_json"]["default"] == "'[]'"
     uniques = {u["name"]: u["column_names"] for u in insp.get_unique_constraints("grading_cards")}
     assert uniques["uq_grading_card_position"] == ["session_id", "position"]
@@ -126,6 +128,30 @@ def test_load_grading_legacy_deck_picks_newest_qualifying_job(engine):
     # ghost default: is_ghost NULL reads as 0 (COALESCE) — row 0/2 have NULL and qualified
     assert db.load_grading_legacy_deck(UID, "L9") == (None, None, [])
     assert db.load_grading_legacy_deck("nobody", "L1") == (None, None, [])
+
+
+def test_a_job_with_a_partial_run_row_never_qualifies(engine):
+    """ADR-025 ruling 25: Calibration's current arm skips a deck job with any
+    'partial_run' row (a run that ended partial), as replay does, for the
+    newest complete one; the candidate list skips it too."""
+    with engine.begin() as conn:
+        conn.execute(insert(db.deck_impressions_table), [
+            impression("A", 0, "2026-10-01T10:00:00+00:00", evidence_tier="first30"),
+            impression("A", 1, "2026-10-01T10:00:00+00:00", evidence_tier=None),
+            impression("B", 0, "2026-10-02T10:00:00+00:00", evidence_tier="first30"),
+            impression("B", 1, "2026-10-02T10:00:00+00:00", evidence_tier="partial_run"),
+            impression("C", 0, "2026-10-02T10:00:00+00:00", evidence_tier="partial_run",
+                       user_id=OTHER),
+        ])
+        conn.execute(insert(db.league_members_table), [
+            {"league_id": "L1", "user_id": UID}, {"league_id": "L1", "user_id": OTHER}])
+    job, served_at, got = db.load_grading_legacy_deck(UID, "L1")
+    assert (job, served_at) == ("A", "2026-10-01T10:00:00+00:00")
+    assert [r["card_index"] for r in got] == [0, 1]
+    assert db.load_grading_legacy_deck(OTHER, "L1") == (None, None, [])
+    assert [(c["user_id"], c["league_id"]) for c in db.list_grading_candidates("2026-10-02T00:00:00+00:00")] == []
+    assert [(c["user_id"], c["league_id"]) for c in db.list_grading_candidates("2026-09-01T00:00:00+00:00")] == [
+        (UID, "L1")]
 
 
 def test_insert_load_round_trip_and_next_card_never_returns_arms(engine):

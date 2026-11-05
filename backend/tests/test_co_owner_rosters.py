@@ -25,6 +25,8 @@ from unittest.mock import MagicMock
 import pytest
 
 import backend.server as server
+import backend.sleeper_trades_service as trades_service
+import backend.trade_block_service as tb_service
 from backend.draft_board_service import _order_from
 from backend.sleeper_roster import (
     canonical_owner_id,
@@ -33,6 +35,10 @@ from backend.sleeper_roster import (
     owns_roster,
 )
 
+
+# The inline session-init daemon below must never reach Sleeper for real; the
+# conftest guard fails any test that tries (the daemon swallows the error).
+pytestmark = pytest.mark.usefixtures("no_real_network")
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "sleeper" / "co-owned-league"
 
@@ -294,6 +300,19 @@ def init_client(monkeypatch, rosters):
                     for r in rosters]
         return {"name": "Bush League"}
     monkeypatch.setattr(server, "_sleeper_get", sleeper_get)
+    # The two Sleeper reads the daemon makes that do NOT go through
+    # `_sleeper_get`: the executed-trade sweep (a league with no captured rows
+    # backfills legs 1..18) and the trade-block GraphQL read. Unmocked, each
+    # init here made 18 + 1 real requests.
+    monkeypatch.setattr(trades_service, "fetch_week_transactions",
+                        lambda lid, week, *, _opener=None, timeout=15: [])
+    monkeypatch.setattr(tb_service, "fetch_league_players",
+                        lambda lid, *, _opener=None, timeout=15: [])
+    # Real auth minting persists a users row before handing out its token.
+    # Keep that prerequisite real: first-init's live-user/deletion guard must
+    # run normally before the daemon reaches the captured league-member write.
+    for uid in (CO_OWNER, SOLE_OWNER):
+        db.upsert_user(sleeper_user_id=uid)
     # Authentication is established before selecting a league. Each test
     # client chooses which proven identity to exercise via the header.
     sessions = {uid: {"user_id": uid, "verified": True, "verified_via": "sleeper"}
@@ -307,7 +326,9 @@ def init_client(monkeypatch, rosters):
         captured["league_id"] = league_id
         captured["members"] = members
 
-    monkeypatch.setattr(server, "upsert_league_members", _capture)
+    # The daemon's one league_members write (S0 replace for a Sleeper league).
+    monkeypatch.setattr(server, "write_session_init_members",
+                        lambda league_id, members, **kw: (_capture(league_id, members), True)[1])
     # Everything else the daemon touches is best-effort and already wrapped in
     # try/except upstream; neuter the writes so the test needs no live DB or
     # network. Anything NOT neutered here fails soft and is logged, exactly as

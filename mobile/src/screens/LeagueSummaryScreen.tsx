@@ -41,6 +41,7 @@ import {
 } from '../api/league';
 import { useSession } from '../state/useSession';
 import { useFinderTargets } from '../state/useFinderTargets';
+import { beginTradeSearch, handoffDeckMode } from '../state/tradeSearchTrace';
 import type { Player } from '../shared/types';
 import { useFlag } from '../state/useFeatureFlags';
 import { useOutlookStripExpanded } from '../state/outlookStrip';
@@ -1286,6 +1287,15 @@ export default function LeagueSummaryScreen() {
       // the counterparty — but it makes the "Trading with" UI truthful).
       // Same store contract as the pins above: route params stay dead.
       if (selected) {
+        // R1 (time to suggestion, addendum v2) — the hand-off tap starts the
+        // search: `league_offer` (Offer) / `league_target` (Target), at the
+        // tap, with the client search id the deck's request will carry.
+        beginTradeSearch({
+          source: verb === 'offer' ? 'league_offer' : 'league_target',
+          mode: handoffDeckMode(1),
+          searchType: 'pinned',
+          screen: route.name,
+        });
         store.setHandoff({
           opponent: {
             userId: selected.tc.team.user_id,
@@ -2757,13 +2767,14 @@ function sourceCaption(src: string): string {
   return STRENGTH_SOURCE_CAPTION[src] ?? 'Projected from team strength';
 }
 
-// The load-bearing honesty label. Weeks 0–5 this reads
-// "Projected · preseason · beta"; from week 6 `meta.beta` is false and the
-// ribbon shortens to "Projected" — never a bare authoritative percentage.
+// The load-bearing honesty label. Before week 1 this reads
+// "Projected · preseason"; otherwise it reads "Projected" — never a bare
+// authoritative percentage. `meta.beta` no longer touches the label: it still
+// hides win-loss records through week 5 (`showRecords`), and the word "beta"
+// is never shown (App Review 2.2).
 function betaRibbonLabel(meta: OutlookMeta): string {
   const parts = ['Projected'];
   if (meta.is_preseason) parts.push('preseason');
-  if (meta.beta) parts.push('beta');
   return parts.join(' · ');
 }
 

@@ -108,6 +108,7 @@ import {
 } from '../api/pickAssignment';
 import { getLeagueMembers } from '../api/league';
 import { relativeTime } from '../utils/relativeTime';
+import { assignmentSlots, teamLabel } from '../utils/teamLabel';
 import { haptics } from '../utils/haptics';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
@@ -342,9 +343,11 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
   );
 
   // ── Season selection ─────────────────────────────────────────────────
-  // Default to the CURRENT season (the payload's first, ascending) with
-  // the other three collapsed behind tabs. A correction deep link wins,
-  // because it names the exact slot the user came here to fix.
+  // Default to the payload's FIRST class (ascending): the current season,
+  // or season + 1 once the rookie draft reads drafted (C5), with the rest
+  // behind tabs. A correction deep link wins, because it names the exact
+  // slot the user came here to fix; one for a hidden class lands on the
+  // first tab.
   useEffect(() => {
     if (!data || data.seasons.length === 0) return;
     setActiveSeason((prev) => {
@@ -405,6 +408,28 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
     },
     [teams],
   );
+
+  /** The setup list's members, as leaguemates may see them: a real name,
+   *  else the grid's name (server-healed, #497), else `Team <slot>`. The
+   *  slot comes from the server's order and grid (`assignmentSlots`), so
+   *  two nameless members never read alike and a label never follows a
+   *  drag. Never the member id. */
+  const setupMembers: TeamRef[] | null = useMemo(() => {
+    const members = membersQuery.data?.members;
+    if (!members) return null;
+    const slots = assignmentSlots(
+      [...(data?.settings.order ?? []), ...members.map((m) => m.user_id)],
+      data?.seasons.flatMap((s) => s.slots) ?? [],
+    );
+    return members.map((m) => ({
+      user_id: m.user_id,
+      name: teamLabel(
+        [m.display_name, m.username, teamNameOf(m.user_id)],
+        m.user_id,
+        slots.get(m.user_id),
+      ),
+    }));
+  }, [membersQuery.data, data, teamNameOf]);
 
   /** Every deviation across ALL four seasons — the review summary. The
    *  cross-season scope is the point: a 2029 first that changed hands is
@@ -497,6 +522,8 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
       setPendingOwner(null);
       haptics.success();
       setToast({ msg: 'Pick updated', tone: 'success' });
+      // The calculator's picks (its ESPN note and pickers, #531) read this.
+      void queryClient.invalidateQueries({ queryKey: ['league-picks', leagueId] });
     },
     onError: (err, vars, context) => {
       // The CAS conflict is the ONE failure with a real choice behind it,
@@ -548,6 +575,7 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
       haptics.success();
       setToast({ msg: 'Board saved', tone: 'success' });
       void queryClient.invalidateQueries({ queryKey: assignmentsKey });
+      void queryClient.invalidateQueries({ queryKey: ['league-picks', leagueId] });
     },
     onError: (err) => {
       const code = pickAssignmentErrorCode(err);
@@ -633,12 +661,7 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
         // so passing them straight through can never overwrite a saved one.
         suggestedOrder={data.suggested_order}
         suggestedOrderSeason={data.suggested_order_season}
-        members={
-          membersQuery.data?.members?.map((m) => ({
-            user_id: m.user_id,
-            name: m.display_name || m.username || m.user_id,
-          })) ?? teams
-        }
+        members={setupMembers ?? teams}
         loadingMembers={membersQuery.isLoading}
         saving={seedMutation.isPending}
         onCancel={data.seeded ? () => setSetupOpen(false) : undefined}
@@ -655,11 +678,13 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
   const activeSeasonKey = season ? String(season.season) : '';
   const seasonConfirmedAt = confirmed[activeSeasonKey];
   const visibleTraded = showAllTraded ? tradedSlots : tradedSlots.slice(0, TRADED_SUMMARY_PREVIEW);
-  // #273 — `seasons` is always current+3 ascending (the payload's own
-  // contract; see `pickAssignment.ts`), so the FIRST season is current. A
-  // future tab has no real draft order: no drag-order/linear-snake control
-  // and no slot numbers, just "round + original team" to reassign.
-  const currentSeason = data.seasons[0]?.season ?? null;
+  // #273 — a future tab has no real draft order: no drag-order/linear-snake
+  // control and no slot numbers, just "round + original team" to reassign.
+  // C5 — the league season comes from the payload: once the league's rookie
+  // draft is past, the grid starts at current_season + 1, so every visible
+  // class is a future one and labels stay round ordinals, never positions.
+  // `seasons[0]` is the fallback for a server that predates the field.
+  const currentSeason = data.current_season ?? data.seasons[0]?.season ?? null;
   const isFutureSeasonTab = !!season && currentSeason != null && season.season > currentSeason;
 
   return (
@@ -692,15 +717,17 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
               {' — priced as unknown until someone settles them.'}
             </Text>
           ) : null}
-          {/* #273 — the order/rounds setter is ONE global setting for the
-              whole board (no season it can be scoped to), so its entry
-              point only appears on the current-season tab; offering it
-              from a future tab would read as "set THIS year's order" when
-              there is no such thing to set. */}
-          {!isFutureSeasonTab ? (
+          {/* #273 / C5 — the order/rounds setter is ONE global setting for
+              the whole board (no season it can be scoped to), so its entry
+              point sits on the FIRST VISIBLE tab only: the current season
+              before the rookie draft, the next class after it (C5). It is
+              also the only way back into setup once the board is seeded,
+              which is how a drafted grid seeds its 4th class. */}
+          {season?.season === data.seasons[0]?.season ? (
             <Pressable
               testID="pick-assignment.edit-order"
               onPress={() => setSetupOpen(true)}
+              hitSlop={{ top: 6, bottom: 6 }}
               accessibilityRole="button"
               accessibilityLabel="Edit draft order and rounds"
               style={({ pressed }) => [styles.inlineLink, pressed && { opacity: 0.6 }]}

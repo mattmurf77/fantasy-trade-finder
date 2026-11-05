@@ -14,8 +14,14 @@ class SessionInputError(ValueError):
         super().__init__(error)
 
 
-def resolve_session_input(sess, body, sleeper_get):
-    """Read membership from Sleeper or an already imported platform snapshot."""
+def resolve_session_input(sess, body, sleeper_get, raw=None):
+    """Read membership from Sleeper or an already imported platform snapshot.
+
+    S0: when `raw` is a dict, a successful Sleeper read fills it with the raw
+    `rosters` list, the `meta` dict and `fetch_started_at`, so the session-init
+    daemon reuses them instead of re-reading Sleeper (D-178). A failed Sleeper
+    read is recorded in `league_roster_state` (last good rows kept).
+    """
     if not sess:
         raise SessionInputError("session_expired", 401)
     if not sess.get("verified") or sess.get("is_demo"):
@@ -52,6 +58,8 @@ def resolve_session_input(sess, body, sleeper_get):
     else:
         if not lid.isdigit() or uid.startswith("acct_"):
             raise SessionInputError("league_membership_required", 403)
+        from .roster_refresh import fetch_started_at, record_failure
+        started = fetch_started_at()
         try:
             base = f"https://api.sleeper.app/v1/league/{lid}"
             rosters = sleeper_get(base + "/rosters")
@@ -69,14 +77,19 @@ def resolve_session_input(sess, body, sleeper_get):
                             username=(user_map.get(str(r["owner_id"]), {}).get("display_name")
                                       or user_map.get(str(r["owner_id"]), {}).get("username")
                                       or str(r["owner_id"])),
-                            player_ids=[str(p) for p in (r.get("players") or [])])
+                            # G-004: Sleeper can send null slots; never store "None".
+                            player_ids=[str(p) for p in (r.get("players") or [])
+                                        if p not in (None, "")])
                        for r in rosters if r.get("owner_id")]
             owner_id = str(mine_roster["owner_id"])
             mine = next(m for m in members if m["user_id"] == owner_id)
             name, platform = meta.get("name") or lid, "sleeper"
+            if raw is not None:
+                raw.update(rosters=rosters, meta=meta, fetch_started_at=started)
         except SessionInputError:
             raise
         except Exception as exc:
+            record_failure(lid, exc)
             raise SessionInputError("league_data_unavailable", 503) from exc
 
     def display(member):

@@ -541,3 +541,101 @@ def test_403_shape_additive(client):
     assert body["error"] == "espn_bad_credentials"
     assert "message" in body
     assert "reason" not in body
+
+
+# ---------------------------------------------------------------------------
+# Co-owners (2026-10-27, feat/espn-signin-coowners) — every #321 team-binding
+# site accepts ANY listed owner (EspnTeam.owner_swids: primaryOwner +
+# owners[]), not only the primary owner_swid; a non-owner is still refused.
+# Shared rule: server._espn_binding_mismatch.
+# ---------------------------------------------------------------------------
+
+COOWNER = "{C0C0C0C0-0000-0000-0000-00000000C0C0}"   # co-owns team 1
+
+
+def _co_owned_payload(league_id: str = LEAGUE_A):
+    p = _payload(league_id)
+    p["teams"][0]["owners"] = [OWNER1, COOWNER]      # primary stays OWNER1
+    return p
+
+
+def test_coowner_pair_binds_at_link_and_passes_the_store_time_membership(
+        client):
+    """R3 (link) and R1 (the store-time membership assertion) accept a
+    co-owner's own pair; a non-owner is still 403 wrong_account at both.
+
+    Sabotage SAB-primary-only: _espn_binding_mismatch compares the primary
+    owner_swid only — must flip RED.
+    """
+    c, token, engine = client
+    co = {LEAGUE_A: _co_owned_payload()}
+    with _league_read(payloads=co), _fan_probe():
+        # R3: a non-owner choosing the co-owned team is still refused ...
+        r = _link(c, token, team_id=1, espn_s2="s2", swid=WRONG_HUMAN)
+        _assert_wrong_account_403(r)
+        with engine.connect() as conn:
+            assert conn.execute(select(db_module.leagues_table)).fetchall() == []
+        # ... and the co-owner's own pair binds team 1.
+        r = _link(c, token, team_id=1, espn_s2="s2", swid=COOWNER)
+        assert r.status_code == 200, r.get_data(as_text=True)
+        assert r.get_json()["my_team_id"] == 1
+        # R1: with team 1 now bound, a credential-only store of the
+        # co-owner's pair passes the membership read ...
+        r = _store_pair(c, token, COOWNER)
+        assert r.status_code == 200, r.get_data(as_text=True)
+        rows = _cred_rows(engine)
+        assert len(rows) == 1 and rows[0]._mapping["verified_at"]
+        assert rows[0]._mapping["swid"] == COOWNER
+        # ... and a non-owner's pair is still refused, nothing replaced.
+        r = _store_pair(c, token, WRONG_HUMAN)
+    _assert_wrong_account_403(r)
+    assert _cred_rows(engine)[0]._mapping["swid"] == COOWNER
+
+
+def test_import_resync_accepts_a_coowner_swid(client):
+    """R3b — a cookie league bound to team 1 re-syncs with the co-owner's
+    stored SWID (200, stamp kept); a non-owner's stored SWID is still 403
+    wrong_account with the stamp nulled.
+
+    Sabotage SAB-primary-only (as above) — must flip RED.
+    """
+    c, token, engine = client
+    from backend.sleeper_write import encrypt_token
+    _link_league("cookie")
+    db_module.upsert_espn_credential(
+        USER, COOWNER, encrypt_token("s2"),
+        verified_at=datetime.now(timezone.utc).isoformat())
+    with _league_read(payloads={LEAGUE_A: _co_owned_payload()}):
+        r = c.post("/api/espn/import", headers=_h(token),
+                   data=json.dumps({"league_id": LEAGUE_A}))
+        assert r.status_code == 200, r.get_data(as_text=True)
+        assert _cred_rows(engine)[0]._mapping["verified_at"]
+        db_module.upsert_espn_credential(
+            USER, WRONG_HUMAN, encrypt_token("s2"),
+            verified_at=datetime.now(timezone.utc).isoformat())
+        r = c.post("/api/espn/import", headers=_h(token),
+                   data=json.dumps({"league_id": LEAGUE_A}))
+    _assert_wrong_account_403(r)
+    assert _cred_rows(engine)[0]._mapping["verified_at"] is None
+
+
+def test_binding_mismatch_rule():
+    """The shared rule directly: any listed owner matches in any SWID
+    format; a non-owner mismatches; no team / ownerless / empty SWID is
+    inconclusive (False); a stand-in without owner_swids uses owner_swid."""
+    from types import SimpleNamespace
+    team = es.EspnTeam(team_id=1, name="T", owner_swid=OWNER1,
+                       owner_display="", owner_swids=(OWNER1, COOWNER))
+    assert server._espn_binding_mismatch(team, OWNER1) is False
+    assert server._espn_binding_mismatch(team, COOWNER.lower()) is False
+    assert server._espn_binding_mismatch(team, COOWNER.strip("{}")) is False
+    assert server._espn_binding_mismatch(team, WRONG_HUMAN) is True
+    assert server._espn_binding_mismatch(None, WRONG_HUMAN) is False
+    ownerless = es.EspnTeam(team_id=2, name="O", owner_swid="",
+                            owner_display="")
+    assert server._espn_binding_mismatch(ownerless, WRONG_HUMAN) is False
+    assert server._espn_binding_mismatch(team, "") is False
+    assert server._espn_binding_mismatch(team, None) is False
+    stand_in = SimpleNamespace(team_id=3, owner_swid=OWNER2)
+    assert server._espn_binding_mismatch(stand_in, OWNER2.lower()) is False
+    assert server._espn_binding_mismatch(stand_in, OWNER1) is True

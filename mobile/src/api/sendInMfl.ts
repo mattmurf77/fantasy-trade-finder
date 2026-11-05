@@ -7,12 +7,15 @@
 //   mfl_not_linked | mfl_franchise_unknown → league needs (re-)linking
 //   mfl_asset_unmapped                     → hard block, nothing was sent
 //   verification_required | feature_disabled | mfl_write_failed | bad_request
+//   mfl_outcome_unknown, or our timeout / no answer → isSendOutcomeUnknown
+//                                          (api/sendOutcome.ts): check MFL, no retry
 //
 // Pre-flight validation reuses sendInSleeper's validateTradeSend — the shared
 // POST /api/trades/validate branches to a fresh MFL rosters export
 // server-side for MFL-linked leagues.
 
 import { api, apiRequest } from './client';
+import { PLATFORM_SEND_TIMEOUT_MS } from './sendOutcome';
 
 export interface MflLinkStatus {
   connected: boolean;
@@ -58,6 +61,8 @@ export interface ProposeMflTradePayload {
   comments?: string;
   // F1 signal spine (flag deck.signal_v2) — same contract as the Sleeper send.
   impression_id?: string;
+  // #531 — same contract as the Sleeper send: 'shop' only from the Shop tile.
+  source?: 'shop';
 }
 
 export interface ProposeMflTradeResult {
@@ -71,5 +76,8 @@ export interface ProposeMflTradeResult {
 export async function proposeTradeToMfl(
   payload: ProposeMflTradePayload,
 ): Promise<ProposeMflTradeResult> {
-  return api.post<ProposeMflTradeResult>('/api/trades/propose-mfl', payload);
+  // The server's worst case outlives the default 15 s timeout (api/sendOutcome.ts).
+  return api.post<ProposeMflTradeResult>('/api/trades/propose-mfl', payload, {
+    timeoutMs: PLATFORM_SEND_TIMEOUT_MS,
+  });
 }

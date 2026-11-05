@@ -15,6 +15,8 @@ import hashlib
 import itertools
 import uuid
 
+from . import ownership_copy
+
 # §2 — search bounds are module constants; no model_config keys, no env vars.
 OVERHAUL_BATCH_SIZE = 24
 OVERHAUL_MAX_SUBSETS = 40
@@ -580,6 +582,30 @@ def union_capacity_worst_case(my_player_count: int, packages_alternatives, *, is
     return int(my_player_count) + worst
 
 
+def _card_names(offer) -> dict:
+    """id -> display name from the offer's stored card. "Unknown" is the
+    card's no-name placeholder (`trade_card_to_dict`), so it counts as missing
+    and the shared copy falls back to a count rather than an id."""
+    out = {}
+    card = offer.get("card") if isinstance(offer.get("card"), dict) else {}
+    for side in ("give", "receive"):
+        for p in card.get(side) or []:
+            name = p.get("name") if isinstance(p, dict) else None
+            if name and name != "Unknown":
+                out[str(p.get("id"))] = str(name)
+    return out
+
+
+def _ownership_item(side, moved, names, team, package_id, offer_id):
+    """I-2 (R4): an ownership blocker in the shared send-time copy. `assets`
+    (the moved ids, as in the propose cores' 422 body) is what marks it as an
+    ownership blocker; "This package already completed." shares its code."""
+    code = "asset_not_owned" if side == "give" else "counterparty_asset_not_owned"
+    item = _item(code, ownership_copy.refusal_message(side, moved, names, team), package_id, offer_id)
+    item["assets"] = list(moved)
+    return item
+
+
 def _item(code, message, package_id=None, offer_id=None):
     item = {"code": code, "message": message}
     if package_id:
@@ -632,9 +658,15 @@ def validate_prepare(*, selected, packages, offers_by_id, my_roster_ids, my_pick
     give_owner, recv_owner = {}, {}
     for pkg_id, offer in chosen:
         give, recv = _ids(offer["give_ids"]), _ids(offer["receive_ids"])
+        # I-2 (R4): one ownership blocker per offer and side, in the shared
+        # send-time copy (named from the offer's card, never a raw id). It
+        # takes the slot the first moved asset's blocker used to take.
+        names = _card_names(offer)
+        moved, slot = [], None
         for a in give:
             if a not in owned:
-                blockers.append(_item("asset_not_owned", f"You no longer own {a}.", pkg_id, offer["offer_id"]))
+                moved.append(a)
+                slot = len(blockers) if slot is None else slot
             if a not in pool_set:
                 blockers.append(_item("pool_violation", f"{a} is outside your eligible pool.", pkg_id, offer["offer_id"]))
             if a in reserved:
@@ -645,20 +677,28 @@ def validate_prepare(*, selected, packages, offers_by_id, my_roster_ids, my_pick
             give_owner.setdefault(a, pkg_id)
             if a not in outgoing:
                 outgoing.append(a)
+        if moved:
+            blockers.insert(slot, _ownership_item("give", moved, names, None, pkg_id, offer["offer_id"]))
         cp = str(offer.get("counterparty_user_id") or "")
         cp_roster = rosters.get(cp) if isinstance(rosters, dict) else None
+        moved, slot = [], None
         for a in recv:
             if cp_roster is None:
                 if "counterparty_roster_unknown" not in unknowns:
                     unknowns.append("counterparty_roster_unknown")
             elif a not in set(_ids(cp_roster)):
-                blockers.append(_item("counterparty_asset_not_owned", f"{cp} no longer owns {a}.", pkg_id, offer["offer_id"]))
+                moved.append(a)
+                slot = len(blockers) if slot is None else slot
             prior = recv_owner.get(a)
             if prior is not None and prior != pkg_id:
                 blockers.append(_item("receive_overlap", f"{a} is requested by two packages.", pkg_id, offer["offer_id"]))
             recv_owner.setdefault(a, pkg_id)
             if a not in incoming:
                 incoming.append(a)
+        if moved:
+            blockers.insert(slot, _ownership_item("receive", moved, names,
+                                                  offer.get("counterparty_username") or None,
+                                                  pkg_id, offer["offer_id"]))
     for pkg_id, offers in by_package.items():
         seen = set()
         for o in offers:

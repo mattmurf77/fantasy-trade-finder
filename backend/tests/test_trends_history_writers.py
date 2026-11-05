@@ -15,6 +15,7 @@ Harness pattern follows test_analytics_p0.py: isolated SQLite engine
 patched into backend.database, Flask test client, flags forced off.
 """
 import json
+import threading
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -33,6 +34,8 @@ LEAGUE = "L_trends"
 class _FakeService:
     """Minimal RankingService stand-in: a mutable {pid: (elo, position)}
     map behind the few methods the tiers/anchor/reorder routes touch."""
+
+    _lock = threading.RLock()
 
     def __init__(self, elos):
         self._elos = dict(elos)

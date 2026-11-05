@@ -21,6 +21,7 @@ test_events_api.py; flags forced via patched is_enabled.
 """
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -184,6 +185,10 @@ def test_check_pro_observe_logs_never_blocks(eng):
 
 
 def test_check_pro_enforces_with_both_flags(eng):
+    # Enforce needs the paywall_enforce_enabled knob at 1 too (2026-10-24).
+    with eng.begin() as conn:
+        conn.execute(insert(db_module.model_config_table).values(
+            key="paywall_enforce_enabled", value=1.0))
     both = _flags("monetize.entitlements", "monetize.paywall")
     with patch.object(entl, "is_enabled", both):
         assert entl.check_pro(USER, "/api/x") is False
@@ -257,6 +262,24 @@ def test_founder_product_maps_perpetual_source(eng):
     assert rows[0]["source"] == "founder_iap" and rows[0]["expires_at"] is None
 
 
+def test_unknown_revenuecat_user_logs_once(eng, caplog):
+    """An app user id that matches no users/accounts row logs one
+    BILLING-UNKNOWN-USER line (a replay logs nothing more); the event is
+    still ledgered and projected as before. A known id logs nothing."""
+    caplog.set_level(logging.WARNING, logger="backend.entitlements")
+    ev = {**_rc_event("u1", "INITIAL_PURCHASE"), "app_user_id": "$RCAnonymousID:zz",
+          "environment": "SANDBOX"}
+    assert _ingest(ev)["projected"] is True
+    _ingest(ev)                                           # provider retry
+    lines = [r.getMessage() for r in caplog.records if "BILLING-UNKNOWN-USER" in r.getMessage()]
+    assert lines == ["BILLING-UNKNOWN-USER source=revenuecat event_id=u1 "
+                     "type=INITIAL_PURCHASE env=SANDBOX user=$RCAnonymousID:zz"]
+
+    caplog.clear()
+    _ingest(_rc_event("k1", "INITIAL_PURCHASE"))          # USER is a known sleeper id
+    assert not [r for r in caplog.records if "BILLING-UNKNOWN-USER" in r.getMessage()]
+
+
 # ── (f) routes ─────────────────────────────────────────────────────────────
 # Local dev (no CRON_SECRET) → admin routes open; that's the tested path,
 # matching the /api/feedback/admin convention.
@@ -299,6 +322,10 @@ def test_me_entitlements_route(client):
     assert body["pro"] is False and body["enforcing"] is False
     client.post("/api/admin/entitlements/grant", json={"user": USER,
                                                        "perpetual": True})
+    r = client.get("/api/me/entitlements", headers={"X-Session-Token": TOKEN})
+    assert r.get_json()["pro"] is False     # pro needs a verified session
+    with server._sessions_lock:
+        server._sessions[TOKEN]["verified"] = True
     r = client.get("/api/me/entitlements", headers={"X-Session-Token": TOKEN})
     assert r.get_json()["pro"] is True
 

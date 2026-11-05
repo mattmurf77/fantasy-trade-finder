@@ -206,7 +206,11 @@ _SEVEN_READ_SITES = frozenset({
     # three consumers. SAME site, same `_pick_read_source()`, same flag
     # reach — only the enclosing symbol this AST scan sees moved.
     "_job_draft_picks",
-    "_trade_evaluate_impl", "get_league_picks", "_owned_pick_assets",
+    # `_consensus_pricing` is `_trade_evaluate_impl`'s read, extracted
+    # verbatim (share-card-value-bar scope) so /api/trade/evaluate and the og
+    # share card's value bar price through one call: SAME read, same
+    # `_pick_read_source()`, only the enclosing symbol moved.
+    "_consensus_pricing", "get_league_picks", "_owned_pick_assets",
     "_power_picks_by_owner",
     # #365 / D-110, 2026-08-20 — the EIGHTH engine read site, DECIDED here
     # rather than silently added. `_first_round_ledgers` derives each member's
@@ -275,11 +279,23 @@ _SANCTIONED_SOURCE_CALLERS = frozenset({
     # moved with it — same call, same literal, one enclosing function.
     "_sleeper_propose_core",     # server.py  — POST /api/trades/propose pick encode (extracted core)
     "trades_validate",           # server.py  — POST /api/trades/validate pick advisories
+    # #470 QA P3-2 — the Sleeper owned-pick sync's corroboration on an empty
+    # `/drafts` read. A LITERAL platform read on purpose: it reads the rows
+    # that sync itself wrote and replaces (its own provenance), so it must
+    # never follow `picks.assign_tradeable`. It prices nothing; it reads
+    # `season` only (via `load_draft_pick_seasons`, a SELECT DISTINCT that
+    # refuses any non-platform source), to see whether a prior sync excluded
+    # the current season.
+    "_sleeper_prior_grid_excludes",  # server.py — owned-pick sync, prior-grid read
 })
 
 #: Everything allowed to name `source=` at all: the seven engine read sites
 #: plus the assignment surface. Nothing else.
 _SANCTIONED_SOURCE_OPT_INS = _SEVEN_READ_SITES | _SANCTIONED_SOURCE_CALLERS
+
+#: The provenance-scoped pick readers whose call sites the guard enumerates.
+#: `load_draft_pick_seasons` (#470 QA P3-2) is the season-only form.
+_PICK_READERS = ("load_draft_picks", "load_draft_pick_seasons")
 
 
 def test_w3_02_ast_only_sanctioned_call_sites_name_source():
@@ -294,9 +310,10 @@ def test_w3_02_ast_only_sanctioned_call_sites_name_source():
     """
     seen_default, seen_source = set(), set()
     for path in (SERVER_PATH, DATABASE_PATH, SERVER_PATH.with_name("win_now_service.py")):
-        for enclosing, kwargs in _calls_named(ast.parse(path.read_text()),
-                                              "load_draft_picks"):
-            (seen_source if "source" in kwargs else seen_default).add(enclosing)
+        tree = ast.parse(path.read_text())
+        for reader in _PICK_READERS:
+            for enclosing, kwargs in _calls_named(tree, reader):
+                (seen_source if "source" in kwargs else seen_default).add(enclosing)
 
     assert seen_source <= _SANCTIONED_SOURCE_OPT_INS, (
         "an unsanctioned call site opts into asserted picks: "
