@@ -101,6 +101,10 @@
     }
 
 
+    // The next explicit browser tap may follow a saved preference or league switch.
+    let webTradeChange;
+    function markWebTradeChange(scenario) { webTradeChange = { scenario, at: performance.now() }; }
+
     // ── Instrumented fetch wrapper ──────────────────────────────────
     async function apiFetch(url, opts = {}) {
       // Inject session token on every request
@@ -136,6 +140,9 @@
         }
       }
 
+      if (res.ok && tradeInputWrite && ['/api/league/preferences', '/api/league/asset-prefs'].includes(url)) {
+        markWebTradeChange('after_preferences_change');
+      }
       return res;
     }
 
@@ -532,6 +539,11 @@
       renderLeagueSwitcher();
       refreshCoverage();
       initFairnessSlider();
+      try {
+        const switchTarget = sessionStorage.getItem('ftf_trade_switch_pending');
+        sessionStorage.removeItem('ftf_trade_switch_pending');
+        if (switchTarget && switchTarget === JSON.stringify([currentUserId, currentLeagueId])) markWebTradeChange('after_league_switch');
+      } catch {}
       _startNotifPolling();
       // Agent 6 — show Portfolio subtab only for users with ≥2 synced leagues
       { const _ps = document.getElementById('portfolio-subtab'); if (_ps) _ps.classList.toggle('hidden', (_cachedLeagues || []).length < 2); }
@@ -3046,6 +3058,7 @@
       // initSession() fails after the reload and boot() drops the user on
       // the league picker.
       saveLeague({ league_id: lg.league_id, league_name: lg.name });
+      try { sessionStorage.setItem('ftf_trade_switch_pending', JSON.stringify([currentUserId, lg.league_id])); } catch {}
       _setSwitcherStatus('✓ Switched — reloading…');
       // Small delay so the status text is visible before the reload yanks
       // the page out from under the user.
@@ -3411,12 +3424,14 @@
       const lbl = document.getElementById('fairness-value');
       if (lbl) lbl.textContent = val + '%';
       _saveFairnessToStorage();
+      markWebTradeChange('after_preferences_change');
       scheduleWebTradeWarm();
     }
 
     function onFairnessEqualChk(checked) {
       _syncFairnessUI();
       _saveFairnessToStorage();
+      markWebTradeChange('after_preferences_change');
       scheduleWebTradeWarm();
     }
 
@@ -3813,7 +3828,9 @@
       webTradeSearch = search;
       if (tapped) {
         webTradeTapCount++;
-        window.FTFTrack?.('find_trades_tapped', { source: 'web_finder', mode: 'deck', search_id: searchId }, 'trades');
+        const change = webTradeChange ? { scenario: webTradeChange.scenario, input_age_ms: Math.max(0, Math.round(started - webTradeChange.at)) } : {};
+        webTradeChange = undefined;
+        window.FTFTrack?.('find_trades_tapped', { source: 'web_finder', mode: 'deck', search_id: searchId, ...change }, 'trades');
         timer = setTimeout(() => search.finish('timeout'), 10000);
       }
       return search;
@@ -3828,7 +3845,15 @@
           : response.status === 402 ? 'paywall' : 'error';
         throw Object.assign(new Error(page.message || page.error || 'Trade search failed'), { reason, code: page.error });
       }
+      if ((Array.isArray(page) ? page.length : page.cards?.length) && page.current_validated !== true) {
+        throw new Error('Trade suggestions could not be verified. Try again.');
+      }
       return page;
+    }
+
+    function publishableWebPage(page) {
+      return Array.isArray(page.cards) && !page.wait_reason && page.freshness_state !== 'updating'
+        && (page.status === 'complete' || (page.status === 'running' && page.ranked_prefix_ready === true && page.cards.length > 0));
     }
 
     async function findCompletedWebPage(search, payload) {
@@ -3845,7 +3870,7 @@
       const deadline = performance.now() + 90000;
       let delay = 200;
       let restarted = false;
-      while (page.status === 'running' && page.job_id && search.current() && performance.now() < deadline) {
+      while (page.status === 'running' && !publishableWebPage(page) && page.job_id && search.current() && performance.now() < deadline) {
         await new Promise(r => setTimeout(r, delay));
         if (!search.current()) return null;
         try {
@@ -3860,7 +3885,7 @@
       }
       if (!search.current()) return null;
       if (Array.isArray(page)) return { status: 'complete', cards: page };
-      if (page.status !== 'complete' || page.wait_reason || page.freshness_state === 'updating' || !Array.isArray(page.cards)) {
+      if (!publishableWebPage(page)) {
         throw new Error('Trade suggestions are still updating. Try again.');
       }
       return page;
@@ -3892,7 +3917,7 @@
     }
 
     function setNextWebTradePage(search, page) {
-      webTradeMore = Number.isInteger(page.cursor) && page.cursor < page.total_ready && page.job_id
+      webTradeMore = Number.isInteger(page.cursor) && (page.cursor < page.total_ready || page.status === 'running') && page.job_id
         ? { search, page } : null;
       document.getElementById('trade-more-btn').hidden = !webTradeMore;
     }
@@ -3903,12 +3928,19 @@
       if (!next || !next.search.current() || more.disabled) return;
       more.disabled = true;
       let page = next.page;
+      const deadline = performance.now() + 90000;
       try {
         do {
           const previous = page;
           page = await readWebTradePage('/api/trades/status?job_id=' + encodeURIComponent(previous.job_id) + '&cursor=' + previous.cursor);
           if (!next.search.current()) return;
-          if (page.status !== 'complete' || page.wait_reason || page.freshness_state === 'updating' || !Array.isArray(page.cards)) {
+          while (page.status === 'running' && !publishableWebPage(page) && performance.now() < deadline) {
+            await new Promise(resolve => setTimeout(resolve, 750));
+            if (!next.search.current()) return;
+            page = await readWebTradePage('/api/trades/status?job_id=' + encodeURIComponent(previous.job_id) + '&cursor=' + previous.cursor);
+            if (!next.search.current()) return;
+          }
+          if (!publishableWebPage(page)) {
             throw new Error('Trade suggestions have changed. Find a Trade to refresh.');
           }
           // Cumulative replies replace the deck. A raw cursor can advance

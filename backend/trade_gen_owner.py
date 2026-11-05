@@ -20,6 +20,7 @@ import math
 import uuid
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from functools import cached_property
 from itertools import combinations, zip_longest
 
 
@@ -61,6 +62,13 @@ class OwnerDecisionContext:
     def effective_floor(self):
         return self.as_dict().get("market", {}).get("effective_floor")
 
+    @cached_property
+    def _market_terms(self):
+        # These three immutable numbers are checked at each serving stage.
+        # Keep the full evidence JSON private and detached for as_dict callers.
+        market = self.as_dict()["market"]
+        return market["give"], market["receive"], market["ratio"]
+
     def matches(self, card):
         if not (self.eligible and self.league_id == card.league_id
                 and self.user_id == card.proposing_user_id
@@ -68,13 +76,10 @@ class OwnerDecisionContext:
                 and self.give_ids == tuple(card.give_player_ids)
                 and self.receive_ids == tuple(card.receive_player_ids)):
             return False
-        market = self.as_dict()["market"]
         return all(isinstance(actual, (int, float)) and not isinstance(actual, bool)
                    and math.isfinite(actual) and abs(actual - expected) <= _EPS
-                   for actual, expected in (
-                       (card.give_value, market["give"]),
-                       (card.receive_value, market["receive"]),
-                       (card.fairness_score, market["ratio"])))
+                   for actual, expected in zip((card.give_value, card.receive_value, card.fairness_score),
+                                               self._market_terms))
 
 
 @dataclass(frozen=True)

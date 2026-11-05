@@ -7,7 +7,7 @@ All fixtures are synthetic and use no provider or database reads/writes.
 """
 
 from copy import deepcopy
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 import json
 import time
 
@@ -247,6 +247,15 @@ def test_context_is_immutable_detached_and_exact_package_bound():
     detached = context.as_dict()
     detached["market"]["give"] = -1
     assert context.as_dict()["market"]["give"] > 0
+    # Rechecking prices still reads the card each time. New frozen evidence
+    # (a re-evaluation) must derive its own binding from its own JSON.
+    assert context.matches(card)
+    card.give_value += 1
+    assert not context.matches(card)
+    changed = context.as_dict()
+    changed["market"]["give"] = card.give_value
+    assert replace(context, snapshot_json=json.dumps(changed)).matches(card)
+    card.give_value -= 1
     card.receive_player_ids.append("extra")
     assert not context.matches(card)
 

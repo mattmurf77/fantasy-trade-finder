@@ -14,7 +14,7 @@ function harness(replies) {
   const card = { isConnected: true, querySelector: () => true };
   const context = {
     currentUserId: 'test', currentLeagueId: 'A', sessionToken: 'test',
-    currentOutlook: null, currentAcquirePositions: [], currentTradeAwayPositions: [],
+    webTradeChange: undefined, currentOutlook: null, currentAcquirePositions: [], currentTradeAwayPositions: [],
     _pinnedGivePlayers: new Set(), _pinnedReceivePlayers: new Set(), _allTradeCards: [], _lastRenderedTrades: [],
     getActiveFormat: () => '1qb_ppr', _targetingOn: () => false, getFairnessThreshold: () => 0.75,
     document: { getElementById: key => el.get(key), querySelectorAll: () => [card], addEventListener() {} },
@@ -35,7 +35,7 @@ function harness(replies) {
     visible(ratio) { clock = 137; observers.at(-1)([{ intersectionRatio: ratio, target: card }]); } };
 }
 function page(ids, cursor, total, extra = {}) {
-  return { job_id: 'job', status: 'complete', cards: ids.map(trade_id => ({ trade_id })), cursor,
+  return { job_id: 'job', status: 'complete', current_validated: true, cards: ids.map(trade_id => ({ trade_id })), cursor,
     total_ready: total, ...extra };
 }
 (async () => {
@@ -55,6 +55,12 @@ function page(ids, cursor, total, extra = {}) {
   await h.context.generateTrades(false); assert.deepEqual(h.rendered.at(-1),['visible']); assert.equal(h.events.length,0);
   h = harness([page(['old'],1,2),page(['new'],1,1,{replace:true})]);
   await h.context.generateTrades(); await h.context.loadMoreWebTrades(); assert.deepEqual(h.rendered.at(-1), ['new']);
+  h = harness([page(['unconfirmed'],1,1,{current_validated:false})]); await h.context.generateTrades();
+  assert.equal(h.rendered.length,0); assert.equal(h.events.at(-1)[1].reason,'error');
+  h = harness([page(['first'],1,1,{status:'running',ranked_prefix_ready:true}),page(['second'],2,2)]);
+  await h.context.generateTrades(); assert.deepEqual(h.rendered.at(-1),['first']);
+  assert.equal(h.requests.length,1); assert.equal(h.el.get('trade-more-btn').hidden,false);
+  await h.context.loadMoreWebTrades(); assert.deepEqual(h.rendered.at(-1),['first','second']);
   let fulfill; h = harness([new Promise(resolve => { fulfill = resolve; })]);
   const waiting = h.context.generateTrades();
   h.context.currentLeagueId = 'B'; fulfill(page(['wrong league'],1,1)); await waiting;
