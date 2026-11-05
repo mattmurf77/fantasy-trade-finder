@@ -418,11 +418,49 @@ Generate, status, current-card reads, final worker publication and replenishment
 
 `POST /api/trades/generate` and `GET /api/trades/status` retain their cumulative
 snapshot contract. Owner searches finish final ranking and required eligibility
-checks before publication, then expose the first 30 cards only after their exact
-impressions/evidence commit. Subsequent bounded commits grow the same ordered
+checks before publication. In live-evidence mode, the first 30 cards publish only
+after their exact impressions/evidence commit. Subsequent bounded commits grow the same ordered
 snapshot. A `running` snapshot can therefore contain actionable cards with durable
 `impression_id`s; `complete` still exposes the entire remaining eligible inventory,
-never just the first 30. There is no new pagination or client capability field.
+never just the first 30. Legacy response fields remain unchanged. Organic deferred
+evidence has a separate persistence boundary and cannot assert a durable prefix.
+
+### Opt-in current-input delivery (2026-11-05)
+
+`POST /api/trades/generate` and every `GET /api/trades/status` continuation accept
+`X-FTF-Current-Only: 1`. Authentication, verification, entitlements, preview limits
+and `X-FTF-Prewarm: 1` rules still run normally. The header adds no access grant.
+
+- A successful strict response carries `current_validated: true`. Nonempty live
+  and stored responses pass current roster/value fingerprints, captured request
+  configuration/preferences, policy/model, epoch and scope checks before delivery.
+  A no-card pending response can acknowledge the protocol while admission inputs
+  are unresolved; it does not provide a recommendation. A valid completed empty
+  result remains `complete` with an empty `cards` array.
+- An obsolete stored kickoff falls through to ordinary fresh/joined generation.
+  An obsolete continuation returns **409** `{error: "trade_snapshot_changed",
+  status: "error", cards: [], total_ready: 0}` before delivery or preview consumption.
+  The client discards the obsolete page and performs its bounded fresh-generate
+  recovery. Missing real/imported input proof cannot produce a strict recommendation.
+- A nonempty, strict `running` response adds `ranked_prefix_ready: true` only for
+  an exact current publication from the fully ranked, committed owner batch.
+  Clients may render that prefix immediately. Other running cards remain withheld
+  by strict clients without advancing their visible cursor. Deferred/preparation
+  captures do not qualify; later publication/completion/revocation invalidates the
+  private prefix authority. Full inventory and final ordering are preserved.
+- Clients require the explicit acknowledgement on nonempty responses; an older
+  server ignoring the header cannot bless a held page. Previous persisted device
+  pages without protocol proof are invalidated. Continue to pass `job_id` alongside
+  `deck` so the established job path still works when page storage is disabled.
+- The controlled `league_demo` synthetic flow keeps its existing no-provider-
+  roster behavior, including I-1 read-off mode, under auth/request/model guards.
+  Real/imported leagues with I-1 fingerprint reads disabled cannot satisfy strict
+  delivery; legacy callers preserve their configured behavior. Provider-age/floor
+  policy is unchanged; this contract compares current stored inputs.
+
+The publication change advances the append-only deck pipeline to **9**. Deployment
+invalidates prior pipeline pages once; no live feature flag or numeric knob is
+changed by this implementation. See [scope](plans/current-trade-delivery/scope.md).
 
 A later persistence failure produces a truthful terminal error and retains only
 previously committed cards; an invalidated/superseded job may not publish additional

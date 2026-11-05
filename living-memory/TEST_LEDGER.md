@@ -1,3 +1,40 @@
+## 2026-11-05 — Current-only backend delivery and committed ranked prefixes
+
+`X-FTF-Current-Only: 1` now requires current request/model/input proof before
+nonempty live/stored delivery; obsolete continuations return 409 without
+evidence delivery or preview consumption. Legacy response fields and provider-age
+policy remain. The controlled synthetic demo preserves its existing no-provider
+flow; real/linked missing inputs fail closed. Committed owner batches alone can
+acknowledge a current running `ranked_prefix_ready`; deferred evidence cannot.
+
+- **614 passed in 58.93 s**, seventeen related suites: new current-only,
+  prepared-adoption and ranked-prefix checks; deck pipeline; P1/P2/flag-off;
+  I1; unlocked fingerprint reads; force supersession; owner publication;
+  prepared runtime v1/v2/review; preview, paywall allowlist and unverified gate.
+  No full backend suite or live mutation was run.
+- **45 latest new regressions passed in 6.41 s**, including the additional
+  actual enforcing-preview refusal/legacy-consumption positive control. Real
+  HTTP coverage includes demo modes 0/1/2, ESPN/MFL current/missing cohorts,
+  Bilateral2 organic/give/receive/opponent/intent scopes, valid empty output,
+  store/paging disabled, missing auth, config/roster/value/expiry/policy changes,
+  participant epoch edits during projection, exact legacy/current card order,
+  published-list authority and deferred suppression.
+- Ready durable inventory adopted through strict HTTP without regeneration:
+  all 64+ cards retain original order and distinct committed impression IDs
+  across continuations. A known empty inventory completes without exposure.
+- Negative controls in isolated child processes (source bytes unchanged):
+  disabling strict validation fails the stale linked-page regression; bypassing
+  the deferred-mode durability check fails the ranked-prefix suppression test.
+- Pipeline guard initially failed as intended. Publication changes advance
+  append-only pipeline **9**, pin `28d212cdc5c6cb05`, preserving versions 1–8.
+  All eight pipeline tests pass. Parent model review and full exact-head CI
+  remain release gates; deployment invalidates old pipeline pages once.
+
+No preparation flag/knob, generation budget, quality threshold, schema, provider
+credential, runtime service or native build changed. This validates delivery of
+ready/current supply; it does not make a genuinely cold 33-second generation
+instant. See `docs/plans/current-trade-delivery/scope.md`.
+
 ## 2026-11-05 — Native organic first-card preparation
 
 Base `dd5058ba`; no runtime flags, deploy, push, purchase or live user write.

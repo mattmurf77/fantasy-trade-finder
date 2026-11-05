@@ -10,6 +10,25 @@ boards or suitability evidence. New-arm native compatibility begins with 1.17.4.
 
 ---
 
+## Current-only trade delivery protocol (2026-11-05)
+
+Backend `server.py`, web model kickoff/status consumers and mobile
+`api/trades.ts` share these exact names:
+
+| Wire name | Required meaning |
+|---|---|
+| `X-FTF-Current-Only: 1` | Opt into current-input validation; auth/entitlements still decide access. |
+| `current_validated: true` | Explicit protocol acknowledgement; required before adopting any nonempty model page. Empty pending responses can acknowledge the protocol without supplying recommendations. |
+| `ranked_prefix_ready: true` | A nonempty current `running` response is the exact durably published, fully ranked owner prefix. A current `complete` response needs no prefix marker. |
+| `409`, `error: trade_snapshot_changed` | Discard obsolete held supply and use the existing bounded fresh-generate recovery; never display the refused page. |
+
+Strict clients withhold other running cards and keep their next visible cursor at
+the first unseen card. Old servers ignoring the header cannot satisfy the explicit
+acknowledgement. Device blobs without the new protocol proof do not qualify. P2
+requests retain `job_id` with `deck` for established page-store-off fallback.
+Organic deferred evidence cannot claim a committed prefix. No recommendation cap,
+rank policy, owner data disclosure or price changes follow from these fields.
+
 ## Tier keys, labels & color tokens
 
 **Owner contracts (D-185, 2026-09-05):** trade/disposition feedback can reorder within a player's tier but cannot cross it, even cumulatively or after persisted replay. Ranking-service replay fixes the tier bounds after deliberate ranking actions and before the full indirect-feedback sequence. Explicit ranking workflows have equal authority; absent input is not an opinion. Personal tiers define requested Tier up / Same value direction; market value still prices package companions. None of this changes the tier enum, colors or API label vocabulary, and Elo remains internal. These contracts do not authorize new counterparty tier disclosure. Search continuity implementation scope is [owner-contracts](plans/owner-contracts/scope.md).
