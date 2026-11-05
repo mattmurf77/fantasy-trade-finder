@@ -155,7 +155,7 @@ def test_384_mints_no_duplicate_of_a_shipped_event():
     # R1 widening (time to suggestion, addendum v2; analytics-lead grant):
     # + `search_id`. `source` and `mode` keep their meanings.
     assert tax.CLIENT_EVENT_PROPS["find_trades_tapped"] == frozenset(
-        {"source", "mode", "search_id"})
+        {"source", "mode", "search_id", "scenario", "input_age_ms", "client_build"})
     # `prompt_deferred` is the twin of `prompt_shown`, not a replacement.
     assert tax.CLIENT_EVENT_PROPS["prompt_shown"] == frozenset({"surface"})
 

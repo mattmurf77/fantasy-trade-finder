@@ -1,3 +1,4 @@
+import { noteTradeInputChange } from '../utils/tradeInputChange';
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -429,6 +430,7 @@ export const useSession = create<SessionState>((set, get) => ({
   },
 
   setActiveFormat: (fmt, opts) => {
+    if (fmt && get().activeFormat && fmt !== get().activeFormat) noteTradeInputChange('after_format_switch');
     set({ activeFormat: fmt, formatExplicit: !!opts?.explicit });
   },
 
@@ -438,7 +440,10 @@ export const useSession = create<SessionState>((set, get) => ({
     // 200 ms path C — an account switch (a re-auth as someone else, with no
     // sign-out between) drops the previous account's device-held trade pages.
     const previous = get().user;
-    if (previous && previous.user_id !== u?.user_id) void clearDevicePages();
+    if (previous && previous.user_id !== u?.user_id) {
+      noteTradeInputChange('after_account_switch');
+      void clearDevicePages();
+    }
     // A different user_id (an expiry then someone else's sign-in, or the
     // link-Sleeper re-key) starts from unknown verification: the previous
     // user's answer never carries over. Every writer runs after this.
@@ -532,6 +537,7 @@ export const useSession = create<SessionState>((set, get) => ({
       context.assertCurrent();
       await get().setLeague(lg, context.assertCurrent);
       context.assertCurrent();
+      noteTradeInputChange('after_league_switch');
       // Invalidate league-agnostic caches whose CONTENTS change on a
       // league swap. `[leagueId]`-keyed queries auto-refetch on key
       // change, but stable keys don't — so portfolio, the cross-league

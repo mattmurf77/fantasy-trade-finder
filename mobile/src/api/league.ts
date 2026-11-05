@@ -1,3 +1,4 @@
+import { noteTradeInputChange } from '../utils/tradeInputChange';
 import { api } from './client';
 import { isInviteId } from '../utils/inviteId';
 import type { PickSource } from './pickAssignment';
@@ -68,10 +69,12 @@ export async function getLeaguePreferences(leagueId: string) {
 }
 
 export async function saveLeaguePreferences(leagueId: string, prefs: LeaguePreferences) {
-  return api.post<any>('/api/league/preferences', {
+  const result = await api.post<any>('/api/league/preferences', {
     league_id: leagueId,
     ...prefs,
   });
+  if (result?.ok !== false) noteTradeInputChange('after_preferences_change');
+  return result;
 }
 
 // ── Asset preferences (untouchables + targets + not-interested, #2/#163) ──
@@ -103,11 +106,13 @@ export async function setAssetPref(
   playerId: string,
   list: AssetPrefList,
 ) {
-  return api.post<{ ok: boolean } & AssetPrefs>('/api/league/asset-prefs', {
+  const result = await api.post<{ ok: boolean } & AssetPrefs>('/api/league/asset-prefs', {
     league_id: leagueId,
     player_id: playerId,
     list,
   });
+  if (result?.ok !== false) noteTradeInputChange('after_preferences_change');
+  return result;
 }
 
 export interface LeagueCoverage {
