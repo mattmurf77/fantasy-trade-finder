@@ -36,7 +36,7 @@ fixtures live in `backend/tests/fixtures/`.
 | `outlook_hypothesis_bench_depth.py` | Tests the bench-depth / injury-fragility hypothesis (1c) |
 | `outlook_idp_pricing_backtest.py` | Five-variant backtest of BUG-5 (IDP slots priced at 0.0), split by league |
 | `outlook_strength_source_compare.py` | Diagnostic: roster-value prior vs Sleeper projections as strength source. Needs `--players-cache`; **the projections source is never shipped** |
-| `deck_eval.py` | Offline deck-quality + latency eval — the onboarding-conversion ship gate. Reads the public Sleeper API (read-only); report in `docs/plans/onboarding-conversion/deck-eval-report.md` |
+| `deck_eval.py` | First-deck quality gate (MOD-M1, D-055): a brand-new user's first deck through the live routes, prod config via `--overrides`. Reads the public Sleeper API; writes only a temporary scratch SQLite; report in gitignored `feedback-workspace/deck-eval/` |
 
 ## Data jobs — network, write the app DB
 
