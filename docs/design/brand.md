@@ -39,9 +39,10 @@ These are the recognizable, ownable details. Use them; don't invent parallel one
 
 ## Logo / wordmark direction
 
-- Wordmark: `TRADE FINDER` in Barlow Condensed Bold caps, chalk, with an ice tick before the T. Short form `FTF` for the extension popup and favicons.
+- Wordmark: `FLEECED.` in Barlow Condensed Bold caps, chalk, with the period in ice. It is the logo of the app that ships as `Fleeced: Dynasty Trade Finder` ([D-057](../../living-memory/DECISIONS.md)). As shipped in the web landing header: `web/index.html` `.lp-wordmark`, styled in `web/css/styles.css` (700 weight, `--font-display`, `--chalk`; the period is a `--ice` span). Short form `FTF` for the extension popup and favicons.
+- The ice period belongs to the logotype. It never appears as a styled glyph anywhere else: not on trade-verdict cards, headings, badges or buttons.
 - No gradient, no glow, no icon-in-rounded-square app-store cliché for the web header.
-- Mascot: **the ram** — the character shipping as the app icon, splash, and notification icon ([D-155](../../living-memory/DECISIONS.md), closes Q-009; the earlier "fumbling RB / Tommy Tumble vs Ricky Rumble" concept is retired unbuilt). It is an **illustration asset, not UI chrome**: allowed in the guide bubble, Team Review, empty states, celebration moments, and the auth page. Never inline with data. The character is named **Fleeced**, after the product — the ram wears the fleece, and getting fleeced is what a bad trade feels like. *The Analyst* remains the guide's **role** name ("I model dynasty trades"); which copy uses the character name and which uses the role is settled at build time, and no sentence may leave "Fleeced" ambiguous between the app and the character.
+- Mascot: **the ram** — the character shipping as the app icon, splash, and notification icon ([D-155](../../living-memory/DECISIONS.md), closes Q-009; the earlier "fumbling RB / Tommy Tumble vs Ricky Rumble" concept is retired unbuilt). It is an **illustration asset, not UI chrome**: allowed in the guide bubble, Team Review, empty states, celebration moments, the auth page, and the invite OG link card (the static 1200×630 preview image for invite links), inside its own box there too (`growth-pm` chose OG variant (ii), wordmark + ram, on 2026-10-15: referral-loop PRD, PR #348; lab PR #343). Never inline with data. The character is named **Fleeced**, after the product — the ram wears the fleece, and getting fleeced is what a bad trade feels like. *The Analyst* remains the guide's **role** name ("I model dynasty trades"); which copy uses the character name and which uses the role is settled at build time, and no sentence may leave "Fleeced" ambiguous between the app and the character.
 - The mascot is the **only** exemption to "no gradient, no glow", and only **inside its own box**: painted shading, specular horns and glowing eyes are allowed on the mascot artwork itself. No glow bleeding onto surfaces, no gradient panel behind it, no halo on ink-1 cards. Everything else on this page still holds.
 
 ## Color philosophy
@@ -50,7 +51,7 @@ These are the recognizable, ownable details. Use them; don't invent parallel one
 - Chalk text carries hierarchy through weight and size, not color.
 - Ice is rationed: primary CTA, active states, focus, the tick. If a screen has ice in more than ~3 places, remove some.
 - Flare is rarer still: likes-you pill, rookie badge, streaks, unread markers. It marks information, never actions — if flare appears on something tappable-as-primary-affordance, that's a bug.
-- Position colors (QB orange, RB green, WR blue, TE purple) and tier colors (gold/green/blue/purple/gray) are **preserved cross-client invariants** — see [`docs/cross-client-invariants.md`](../cross-client-invariants.md). They are data encodings, not brand colors, and the neutral ink field is what keeps them legible.
+- Position colors (QB orange, RB green, WR blue, TE purple) and the 8-tier pick-value ladder colors are **preserved cross-client invariants** — see [`design-system.md`](design-system.md) § Preserved invariants and [`docs/cross-client-invariants.md`](../cross-client-invariants.md). They are data encodings, not brand colors, and the neutral ink field is what keeps them legible.
 
 ## Never list (brand level)
 
