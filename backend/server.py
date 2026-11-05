@@ -40396,6 +40396,10 @@ def _paywall_gate_hook():
         log.exception("paywall gate failed open: %s %s", request.method, rule)
         return None
     if isinstance(result, _paywall_gate.Preview):
+        # A passive device refresh must never spend the user's free page.
+        # The normal gate has already verified identity and authorization.
+        if rule in ("/api/trades/generate", "/api/trades/status") and request.headers.get("X-FTF-Prewarm") == "1":
+            return jsonify({"error": "prewarm_requires_tap"}), 409
         g.paywall_preview = result
         return None
     if result is None:
