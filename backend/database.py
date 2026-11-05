@@ -15398,7 +15398,9 @@ def upsert_board_snapshots(rows: list[dict], *, live_user: str | None = None) ->
     shape as upsert_roster_snapshots; precedence is simpler because every
     trigger reads the SAME local member_rankings rows — 'sync' and 'weekly'
     carry identical content, so either may refresh the period. 'backfill'
-    is insert-only. `live_user`: as upsert_roster_snapshots."""
+    is insert-only. Every actual owner is fenced and its captured board is
+    revalidated before writing, so a deleted or changed board is skipped.
+    `live_user`: as upsert_roster_snapshots."""
     stats = {"inserted": 0, "updated": 0, "skipped": 0}
     if not rows:
         return stats
@@ -15406,7 +15408,27 @@ def upsert_board_snapshots(rows: list[dict], *, live_user: str | None = None) ->
     with engine.begin() as conn:
         if live_user:
             _lock_live_user(conn, live_user)
+        if not live_user and conn.dialect.name == "sqlite":
+            conn.exec_driver_sql("BEGIN IMMEDIATE")
+        # These are private boards of the actual row owners, not only the
+        # caller. Deletion locks the same users in stable order. A missing
+        # owner is skipped; a writer that wins commits before deletion wipes it.
+        owners = set(conn.execute(select(users_table.c.sleeper_user_id).where(
+            users_table.c.sleeper_user_id.in_(sorted({r["user_id"] for r in rows})))
+            .order_by(users_table.c.sleeper_user_id)
+            .with_for_update(read=True, key_share=True)).scalars())
+        current = {(b["user_id"], league, b["scoring_format"]): b
+                   for league in sorted({r["league_id"] for r in rows})
+                   for b in load_member_boards_for_league(league, conn=conn)}
         for row in rows:
+            board = current.get((row["user_id"], row["league_id"], row["scoring_format"]))
+            # A deleted/re-created owner or a newer board cannot revive the
+            # held old values. Public roster history follows separate rules.
+            if (row["user_id"] not in owners or board is None
+                    or board["board_updated_at"] != row.get("board_updated_at")
+                    or board["elos"] != json.loads(row["elos"])):
+                stats["skipped"] += 1
+                continue
             existing = conn.execute(
                 select(t.c.id).where(
                     (t.c.user_id        == row["user_id"]) &
@@ -15426,16 +15448,17 @@ def upsert_board_snapshots(rows: list[dict], *, live_user: str | None = None) ->
     return stats
 
 
-def load_member_boards_for_league(league_id: str) -> list[dict]:
+def load_member_boards_for_league(league_id: str, *, conn=None) -> list[dict]:
     """Every member's full board for a league, grouped:
     [{user_id, scoring_format, elos: {pid: elo}, board_updated_at}].
     Legacy NULL scoring_format rows count as '1qb_ppr', mirroring
-    load_member_rankings."""
+    load_member_rankings. `conn` lets the history writer revalidate private
+    inputs inside its already owner-fenced transaction."""
     t = member_rankings_table
     grouped: dict[tuple, dict] = {}
     try:
-        with engine.connect() as conn:
-            rows = conn.execute(
+        with (nullcontext(conn) if conn is not None else engine.connect()) as db_conn:
+            rows = db_conn.execute(
                 select(t.c.user_id, t.c.scoring_format, t.c.player_id,
                        t.c.elo, t.c.updated_at)
                 .where(t.c.league_id == league_id)

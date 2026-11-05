@@ -29,6 +29,8 @@ Database storage incident **service recovered; storage fix validating 2026-09-15
 
 Launch roster-move/tip/share integration **local candidate; CI pending**: [scope and evidence](launch-d1-tip-share-integration.md). Requires privacy #592 and paywall #590 foundations; activation remains dark.
 
+Privacy export/history follow-ups **in progress**: [scope](privacy-export-board-history-followups/scope.md).
+
 ## Status legend
 
 | Status | Means |

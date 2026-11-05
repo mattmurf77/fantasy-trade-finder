@@ -1655,9 +1655,16 @@ Views (field-for-field with `mobile/src/api/overhaul.ts`): `OverhaulView {overha
 
 ### Account export: deck diagnostics (2026-09-15)
 
-The version-2 account export adds the private `deck_diagnostic_snapshots` table.
-The four diagnostic keys in `deck_impressions.features_json` may contain
-`$deck_diagnostic_v1` references; exported snapshot payloads resolve them during
-the retention window. Expired detail is not included. Core card features,
-valuations and outcomes retain their existing representation. Account deletion
-covers snapshots through the same resolved user/alias scope as impressions.
+The version-2 account export includes owned diagnostic/evidence **metadata**,
+not mixed-owner internal payloads. Raw diagnostic payloads, candidate lists,
+bakeoff JSON, packed evidence headers/cards, page-cache blobs and grading
+building sources are omitted, as prepared recovery payloads already are.
+Inline deck features omit hidden generation/fit/partner evidence; malformed
+private JSON is null. Deck and confirmed-proposal valuation JSON keeps the
+viewer's data and consensus values with partner-board/preference fields removed.
+A shared match's unoriented valuation is null. Blended private scores and
+source-like evidence links are withheld. Owned rows, trade packages, rankings,
+grades/tags and decision/outcome history remain; stored evidence is unchanged.
+Account deletion still removes all owned payloads through the alias-aware scope.
+The exact payload columns are declared in `accounts._EXPORT_INTERNAL_PAYLOADS`;
+see [privacy follow-up scope](plans/privacy-export-board-history-followups/scope.md).

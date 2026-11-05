@@ -1,3 +1,34 @@
+## 2026-11-04 — Privacy export and board-history owner follow-ups
+
+Fresh upstream main `065a1ee6`; queried 54 open PRs before implementation and
+found no duplicate fix. Scope/code-walk/checklist:
+`docs/plans/privacy-export-board-history-followups/`.
+
+- Account export omits mixed-owner raw internal generation/recovery payloads,
+  filters inline partner features/valuation, nulls malformed private JSON and
+  unoriented shared-match valuation. Owned metadata/history/actions remain;
+  stored evidence, auth gates, schema, flags and model knobs are unchanged.
+- Private board-history writes fence each actual owner and revalidate current
+  board timestamp/values in the same transaction, skipping deleted/stale held
+  input. Existing caller lock remains, including its AST protocol checks.
+- Eight-file targeted SQLite run: **237 passed, 2 PG-only skips in 22.87 s**.
+  Disposable socket-only PostgreSQL new suite: **10 passed in 2.61 s**; owner
+  deletion blocks until the history writer commits, then wipes its rows. Both
+  caller and no-caller/weekly cases run; deletion-before-write and re-signup
+  stale input are covered. Synthetic data only; cluster stopped afterward.
+- Negative controls: diagnostic payload pass-through (**1 failed**), inline
+  private JSON pass-through (**1 failed**), held-owner validation disabled
+  (**2 failed**); all restored. Privacy manifest and all 14 EAS exclusion
+  patterns pass. Feature JSON unchanged; whitespace check passes.
+- The older diagnostic-export test now pins metadata-only export; the roster
+  fixture creates real users before private member boards. No privacy guard
+  is bypassed. No full local suite, production mutation, provider call, build
+  or main merge. CI and independent review remain required on the PR.
+
+Adjacent checklist: documented pre-scrub stored-page window remains a separate
+product/legal policy item; historical cleanup, backup/native checks and dark
+feature activation require their existing operations/device evidence.
+
 ## 2026-11-04 — Held parser child updated with final co-owner fixture prerequisite
 
 Merged exact revised launch parent `e7fb895ff9fbfc5d6acbeceaa4defc929a18c428` into held parser candidate `8048cfb7`, preserving original #584 head `61e8248c`. The only resolution is additive ledger history. Parent's co-owner fixture now persists real user rows before creating its verified sessions, so first-init's existing live-user/deletion guard runs normally; no runtime code or assertion was weakened.

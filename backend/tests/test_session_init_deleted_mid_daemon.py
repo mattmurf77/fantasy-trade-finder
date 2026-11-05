@@ -454,9 +454,27 @@ def _first_after_lock_is_the_write(w, call, aliases):
         calls = _db_calls(statement, conn)
         if calls:
             first = calls[0]
+            # The no-caller weekly board writer takes SQLite's write lock
+            # before validating every actual owner. This is not an unrelated
+            # operation between the caller fence and its private write.
+            if (isinstance(statement, ast.If)
+                    and ast.unparse(statement.test) == "not live_user and conn.dialect.name == 'sqlite'"
+                    and _called(first.func) == "exec_driver_sql"
+                    and ast.literal_eval(first.args[0]) == "BEGIN IMMEDIATE"):
+                continue
             if _called(first.func) != "execute":
                 return False
             kind, tables = _kind(first.args[0], aliases)
+            if tables == {"users_table"} and "league_board_history_table" in written:
+                # Owner fencing and fresh source validation are in this same
+                # transaction, before its loop's private history INSERT.
+                code = ast.unparse(w)
+                assert ".order_by(users_table.c.sleeper_user_id).with_for_update(read=True, key_share=True)" in code
+                assert "load_member_boards_for_league(league, conn=conn)" in code
+                assert "row['user_id'] not in owners" in code
+                assert "board['board_updated_at'] != row.get('board_updated_at')" in code
+                assert "board['elos'] != json.loads(row['elos'])" in code
+                return True
             return kind == "write" or (kind == "read" and bool(tables) and tables <= written)
     return False
 

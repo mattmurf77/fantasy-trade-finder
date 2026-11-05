@@ -348,6 +348,9 @@ def test_sweep_kickoff_gates_and_env_lever():
 
 def _seed_member_rankings(eng, user_id, league_id, elos, updated_at, fmt="1qb_ppr"):
     with eng.begin() as conn:
+        if conn.execute(select(db_module.users_table.c.sleeper_user_id).where(
+                db_module.users_table.c.sleeper_user_id == user_id)).first() is None:
+            conn.execute(insert(db_module.users_table).values(sleeper_user_id=user_id))
         for pid, elo in elos.items():
             conn.execute(insert(db_module.member_rankings_table).values(
                 user_id=user_id, league_id=league_id, player_id=pid,

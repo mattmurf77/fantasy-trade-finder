@@ -116,8 +116,10 @@ def test_export_and_delete_include_scoped_snapshots(engine):
     exported = accounts.export_user_data('u')['tables']
     snaps = exported['deck_diagnostic_snapshots']
     assert snaps and all(s['user_id'] == 'u' for s in snaps)
-    mapping = {s['snapshot_id']:s['payload_json'] for s in snaps}
-    assert expand_features(json.loads(exported['deck_impressions'][0]['features_json']), mapping)['owner_request']['input']['assets'] == ['0']
+    # Diagnostic payloads mix all managers' private boards. Export owned
+    # metadata only, even while the internal resolver can read the snapshot.
+    assert all('payload_json' not in s for s in snaps)
+    assert 'owner_request' not in json.loads(exported['deck_impressions'][0]['features_json'])
     accounts.delete_user_data('u')
     with engine.connect() as c:
         users = set(c.execute(select(db.deck_diagnostic_snapshots_table.c.user_id)).scalars())

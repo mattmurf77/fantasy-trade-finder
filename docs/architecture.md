@@ -960,3 +960,19 @@ Native cold launch and foreground resume initialize the restored league without 
 - **Stage 2 adds packs and the page store.** Packs go through the codec, and the evidence writer's cached pack state reloads when the stored one was rewritten (`server._fresh_pack_state`). A redacted page card is withdrawn at serve.
 
 The job row is deleted when both are done. The traced stores are stage 3: `SCRUB_VERSION` re-runs kept jobs when a stage lands.
+
+
+### Private board-history writes and account export
+
+`roster_history.snapshot_league_boards` may capture every manager in a league.
+`database.upsert_board_snapshots` therefore fences every row's actual owner,
+in stable order, then re-reads current board inputs under the same transaction
+and rejects deleted/stale held inputs. A concurrent deletion either commits
+first (no write) or follows the writer and deletes its committed rows. Caller
+leases alone cannot authorize private writes for another manager.
+
+Account export retains owned metadata/actions but never publishes mixed-owner
+internal generation/recovery payloads. `accounts._EXPORT_INTERNAL_PAYLOADS`
+centralizes column omissions; inline feature/valuation filters preserve the
+viewer's record while withholding partner evidence and malformed private JSON.
+The filter operates on detached copies and does not rewrite stored evidence.
