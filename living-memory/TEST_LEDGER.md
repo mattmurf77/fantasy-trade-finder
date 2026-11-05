@@ -55,6 +55,21 @@ Adjacent checklist: documented pre-scrub stored-page window remains a separate
 product/legal policy item; historical cleanup, backup/native checks and dark
 feature activation require their existing operations/device evidence.
 
+
+## 2026-11-04 — held #456 refreshed on final main; confirmed future Store destination
+
+Merged main `065a1ee6` into the held F-152/release candidate, retaining both histories. Resolved metadata with main's selected colon title/non-free description plus held Store banner; ledger additive. Main's current legal, landing/auth/proof scripts are preserved. No runtime backend/mobile/config delta against main.
+
+- Authenticated ASC bundle lookup confirms app6771488431; future ID URL `https://apps.apple.com/us/app/id6771488431` replaces all3Store anchors (index2/FAQ1), banner uses sameID. Public lookup remains resultCount0: this is a held release destination, not a live listing. Actual Store availability, current build/platform sign-in, working subscription setup/activation and scheduled release authorization remain hard release prerequisites; see[F-152scope](../docs/plans/f152-pricing-faq.md).
+- Refreshed web structural **261/261**, offline browser/extension auth **23passed**, ranking-method **40passed**. Local all-install-link/main-prelaunch-state and byte-preservation audit passed. `git diff --check` clean. Prior renewal disclosure negative control remains red as expected. No browser/device/full-CI claim; no purchases/external account config or flags/knobs changed.
+- Coordinator explicitly authorized updating existing draft#456 only after validation. Never merge this held candidate to main before release prerequisites; real identifiers no longer act as an accidental merge blocker.
+
+## 2026-11-04 — F-152 approved pricing FAQ staged on held #456
+
+- Based on held release head `f1df1856`; no production publication or flag changes. Scope: [F-152](../docs/plans/f152-pricing-faq.md).
+- Added Q19 plus a structural guard retaining all five approved pricing/renewal/cancellation/deletion/free-surfaces paragraphs. Existing details/summary design retained.
+- Held baseline 240/242; changed branch 241/243. The same two intentional real-App-Store-placeholder checks remain red. Temporary synthetic App Store URL/id fixture: 243/243 green. Negative control altering automatic-renewal sentence: new guard red. All fixture mutations restored; no synthetic URL retained.
+- `git diff --check` clean. No full CI, browser, device, purchase or external account changes. Held branch must first absorb current main and real verified App Store identifiers before release.
 ## 2026-11-04 — Held parser child updated with final co-owner fixture prerequisite
 
 ## 2026-11-04 — Public Calibration: recover a failed read
@@ -4328,6 +4343,7 @@ Web only, on #373 (`feat/m7-p28-web-pages`).
   None of #373's `web/*.html` say "beta" or "hobby".
 - **Pin widened:** `POL-no-stale-claims` (no "Fantasy Trade Finder", "hobby" or "beta" in visible text) now runs on `faq.html` and `contact.html` as well as privacy and terms. Checker 241/241.
 - **Sabotage 8/8 red**, restored byte-identical: each of main's seven lines put back on its page, plus a "beta" line on contact. A "beta" only in an HTML comment correctly stays green.
+
 
 ## 2026-10-15 — #326 value core v4, #328 live-deck filters, #327 Calibration Yes/No
 
