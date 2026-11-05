@@ -29,6 +29,8 @@ Database storage incident **service recovered; storage fix validating 2026-09-15
 
 Launch roster-move/tip/share integration **local candidate; CI pending**: [scope and evidence](launch-d1-tip-share-integration.md). Requires privacy #592 and paywall #590 foundations; activation remains dark.
 
+Privacy export/history follow-ups **in progress**: [scope](privacy-export-board-history-followups/scope.md).
+
 ## Status legend
 
 | Status | Means |
@@ -135,6 +137,8 @@ reference material), not the file's last-edit date.
 [EAS build archive secret exclusions (O9)](eas-build-secret-exclusions.md): implemented locally, PR CI/merge pending (2026-11-04). No build or credential rotation performed.
 
 ### Active
+
+- [MOD-M1 evaluation preflight](mod-m1-evaluation-preflight.md) — **prepared, unmerged** · 2026-11-04. Exact #475/#476 tools on current main; synthetic first-deck and private audit-sheet evidence, with November10 frozen-run prerequisites still pending.
 
 | Doc | Status | Notes |
 |---|---|---|

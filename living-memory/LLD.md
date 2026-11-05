@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-11-04 — Export boundary and board-history owner fencing](#2026-11-04--export-boundary-and-board-history-owner-fencing)
 - [Authoritative References](#authoritative-references)
 - [Directory Layout](#directory-layout)
 - [Naming Conventions](#naming-conventions)
@@ -215,6 +216,7 @@ See [`FORMAT.md`](FORMAT.md) for the strict spec. Headline:
 ---
 
 ## Table of Contents
+- [2026-11-04 — Export boundary and board-history owner fencing](#2026-11-04--export-boundary-and-board-history-owner-fencing)
 - [Section 1](#section-1)
 - ...
 
@@ -999,3 +1001,13 @@ Code: the D1 block of `server.py` (`_fa_move_core`, `_fa_move_capability`, `plat
 - **A card whose partner is a redaction token never serves** (`_redacted_target`, in the page serve after S0's rules). It's recorded as a withdrawal.
 - **The model store is redacted only in the daily tick, before the refit,** and only for jobs whose DB pass is current. So the refit trains on scrubbed rows.
 - **A deck's rows carry its first delivery as `served_at`.** So "built before the deletion" is approximated by a grace (6 h): decks served up to then are scrubbed, later ones never.
+
+
+## 2026-11-04 — Export boundary and board-history owner fencing
+
+Private history writers validate and lock actual row owners, not only the
+requesting manager. Current board timestamps/values are revalidated under
+the write transaction so a held pre-deletion snapshot cannot be restored
+after re-signup. Export v2 omits mixed-owner internal debug/recovery payloads
+and filters inline partner evidence; own metadata/actions remain.
+[Scope](../docs/plans/privacy-export-board-history-followups/scope.md).

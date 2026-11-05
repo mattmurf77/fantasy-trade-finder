@@ -1,3 +1,61 @@
+## 2026-11-04 — #601 independent-review completion
+
+Expanded coverage enumerates every test suite referencing export_user_data or
+its export helpers, plus account-rights HTTP and candidate/packed evidence
+codecs. Corrected only obsolete raw-page/malformed-feature assertions; owned
+metadata, unchanged stored data and valid safe JSON's verbatim representation
+are now positive controls. Initial reproduction was 8 failing assertions /
+1 pass; the first 19-suite expanded run then passed 914 with 2 PG-only skips.
+
+- Final **23-file run: 997 passed, 5 PG-only skips in 125.82 s**. No full
+  backend suite was run. The exact caller list was generated from source;
+  candidate_pack, evidence_pack and packed_evidence suites are included.
+- Private columns are projected out in SQL before SQLAlchemy decompression.
+  The corrupt-page regression proves the decoder is never invoked, while
+  owned cache metadata remains JSON serializable. It failed before projection.
+- PostgreSQL alias regression reproduced **DeadlockDetected** with caller-first
+  locking. The caller and row owners are now locked together in stable order;
+  existing single-user guard behavior remains. The test models another worker
+  by invoking the actual DB deletion transaction without an in-process lease.
+- Final disposable socket-only PostgreSQL privacy + first-init files:
+  **26 passed, 1 SQLite-DDL-only skip in 11.26 s**. Includes all new owner/alias
+  races, current shared-connection paths and corrupt-cache projection case.
+  Synthetic schemas only; cluster stopped.
+- Whitespace check passes; no flags/knobs/production changes. Independent
+  review and exact-head GitHub CI remain required on the updated PR.
+
+## 2026-11-04 — Privacy export and board-history owner follow-ups
+
+Fresh upstream main `065a1ee6`; queried 54 open PRs before implementation and
+found no duplicate fix. Scope/code-walk/checklist:
+`docs/plans/privacy-export-board-history-followups/`.
+
+- Account export omits mixed-owner raw internal generation/recovery payloads,
+  filters inline partner features/valuation, nulls malformed private JSON and
+  unoriented shared-match valuation. Owned metadata/history/actions remain;
+  stored evidence, auth gates, schema, flags and model knobs are unchanged.
+- Private board-history writes fence each actual owner and revalidate current
+  board timestamp/values in the same transaction, skipping deleted/stale held
+  input. Existing caller lock remains, including its AST protocol checks.
+- Eight-file targeted SQLite run: **237 passed, 2 PG-only skips in 22.87 s**.
+  Disposable socket-only PostgreSQL new suite: **10 passed in 2.61 s**; owner
+  deletion blocks until the history writer commits, then wipes its rows. Both
+  caller and no-caller/weekly cases run; deletion-before-write and re-signup
+  stale input are covered. Synthetic data only; cluster stopped afterward.
+- Negative controls: diagnostic payload pass-through (**1 failed**), inline
+  private JSON pass-through (**1 failed**), held-owner validation disabled
+  (**2 failed**); all restored. Privacy manifest and all 14 EAS exclusion
+  patterns pass. Feature JSON unchanged; whitespace check passes.
+- The older diagnostic-export test now pins metadata-only export; the roster
+  fixture creates real users before private member boards. No privacy guard
+  is bypassed. No full local suite, production mutation, provider call, build
+  or main merge. CI and independent review remain required on the PR.
+
+Adjacent checklist: documented pre-scrub stored-page window remains a separate
+product/legal policy item; historical cleanup, backup/native checks and dark
+feature activation require their existing operations/device evidence.
+
+
 ## 2026-11-04 — held #456 refreshed on final main; confirmed future Store destination
 
 Merged main `065a1ee6` into the held F-152/release candidate, retaining both histories. Resolved metadata with main's selected colon title/non-free description plus held Store banner; ledger additive. Main's current legal, landing/auth/proof scripts are preserved. No runtime backend/mobile/config delta against main.
@@ -13,6 +71,10 @@ Merged main `065a1ee6` into the held F-152/release candidate, retaining both his
 - Held baseline 240/242; changed branch 241/243. The same two intentional real-App-Store-placeholder checks remain red. Temporary synthetic App Store URL/id fixture: 243/243 green. Negative control altering automatic-renewal sentence: new guard red. All fixture mutations restored; no synthetic URL retained.
 - `git diff --check` clean. No full CI, browser, device, purchase or external account changes. Held branch must first absorb current main and real verified App Store identifiers before release.
 ## 2026-11-04 — Held parser child updated with final co-owner fixture prerequisite
+
+## 2026-11-04 — Public Calibration: recover a failed read
+
+The launch audience stays public. Ran the blind-grading guard with an executable screen harness: a failed current-session read retries only that read; a failed next-card read retries the same session even if the cache still holds the previous card. Neither submits a grade. A 404 still shows Unavailable, and an initial pending read still shows Loading. Operator TestFlight check: disconnect mid-session before loading the next card, reconnect, tap Try again, and confirm the next ungraded card appears once.
 
 Merged exact revised launch parent `e7fb895ff9fbfc5d6acbeceaa4defc929a18c428` into held parser candidate `8048cfb7`, preserving original #584 head `61e8248c`. The only resolution is additive ledger history. Parent's co-owner fixture now persists real user rows before creating its verified sessions, so first-init's existing live-user/deletion guard runs normally; no runtime code or assertion was weakened.
 
@@ -9050,6 +9112,18 @@ deliberately decoupled for that reason.
 
 **Caveat (historical):** at the time this table was written there was no automated regression suite, so a change that broke one of these flows was detectable only by manual re-run. That gap is closed — see the pytest suite note above. [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) Q-002 (pytest adoption) is resolved.
 
+## 2026-11-04 — MOD-M1 evaluation tools integrated on current launch main
+
+Merged exact #475`5c512730` and #476`0f40d087` into isolated main`065a1ee6`, preserving original commits. No runtime server/database/client/flag changes. [Preflight](../docs/plans/mod-m1-evaluation-preflight.md) records actual November10 freeze/connected-league/privacy prerequisites and distinguishes remaining B-DK zero-violation evidence from the insult-rate tool.
+
+- Original combined baseline **38passed/1failed**: synthetic verified token lacked a minted users row, so the real first-init guard aborted connection persistence and SF/TEP was misreported as1QB. Scratch evaluator + plain live-flow fixture now seed the user as actual auth minting does, retaining guard. The card-for-card first30 assertion passes. Served response count and internal generated inventory are now distinct fields, retaining live-count and filter-effect assertions.
+- Final focused evaluator/insult-rule/audit-sheet/B-DK/deck-quality/bilateral-presentment/first-init run: **314passed,2PG-only skips in19.43s** before the final exact-engine-path guard refinement; final exact-path rerun **314 passed, 2 PostgreSQL-only skips in 16.67s**. No full local suite or production eval run.
+- Final real-payload follow-up: **315 passed, 2 PostgreSQL-only skips in 18.43s** across the same seven files. The fifth named negative control restores the PICK manager suffix and fails the intended blindness assertion, then source is restored.
+- Real-payload blind-sheet correction: actual `_owned_pick_label` can embed the original manager name; the audit display now omits the PICK-only `(from …)` suffix while preserving year/round/slot/value and private source data. Regression calls the real formatter with a nested identifying name.
+- Four named negative controls independently RED: shared-output-directory enforcement, report file0600, tracked-report-path rejection, inherited Sentry removal. Source restored. Existing first-run baseline and malformed/unknown-config/scratchDB/blindness/HOLD boundary checks remain.
+- Files use exclusive0600 creation in private0700 directories, tracked overrides rejected; exact canonical scratch path checked for all engines, including normal readonly URI versus similarly prefixed different filename. Synthetic/private artifacts only. No external provider call, production DB/copy, build, activation or model promotion.
+- Original PR ancestry retained; independent review and exact-head GitHub CI required before integration merge. November10 actual gate and November11 operator sheet are not claimed complete by this preparatory run.
+
 ## Custom-Skill Benchmarks
 
 | Skill | Benchmark | Result |
@@ -9085,3 +9159,5 @@ Rules of evidence for this ledger:
 ## 2026-09-20 — App-open trade preparation
 
 116 focused backend tests passed; 39 executable native session/lifecycle checks passed, including persisted startup fairness transport. Shared fairness, ownership guards, TypeScript and web 195/195 passed. Release/full-suite evidence: [app-open status](../docs/plans/app-open-trades/status.md). Device cold-open/foreground/league-switch checklist remains unrun. No three-second latency claim.
+
+2026-11-04 · Launch disk monitor: checked fresh live Render disk usage and capacity, 41.10%, with no database writes. The threshold and failure paths were exercised with 69%, 70%, 71%, zero capacity, missing series, mismatched timestamps and stale data. A success here does not establish scheduled alert delivery.

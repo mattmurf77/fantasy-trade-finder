@@ -71,12 +71,9 @@ const BUILD_POLL_CAP_MS = 60_000;
 const COPY = {
   introTitle: 'Calibration',
   intro: (league: string) =>
-    `Answer yes or no on trade ideas for ${league}, one at a time. Some come from ` +
-    "today's trade engine and some from newer ones, shuffled — you won't know which is which.",
+    `Would you send these trades in ${league}? Rate one idea at a time, or skip it.`,
   purpose:
-    'Why this exists: Calibration captures your honest reactions so we can improve the ' +
-    'trade model. Your answers are compared across the engines and used to tune which trade ' +
-    'ideas Fleeced suggests.',
+    'Your answers help improve the trades Fleeced suggests. Rating a trade never sends an offer.',
   start: 'Start',
   resume: (k: number, n: number) => `Resume (${k} of ${n} answered)`,
   noLeague: 'Pick a league first.',
@@ -88,8 +85,10 @@ const COPY = {
   startOver: 'Start over',
   building: 'Building your deck…',
   buildSlow: 'This is taking longer than usual. Try again.',
-  tooFew: 'The new engine found too few trades for this league right now. Try another league.',
+  tooFew: 'There aren’t enough trade ideas for this league right now. Try another league.',
   notSynced: 'This league isn’t loaded yet. Reopen it from the league picker and try again.',
+  sessionReadFailed: 'Couldn’t load your session.',
+  cardReadFailed: 'Couldn’t load the next trade idea.',
   startFailed: 'Something went wrong starting the session. Try again.',
   buildFailed: 'Something went wrong building the session. Start over to try again.',
   prompt: 'Would you send this?',
@@ -122,7 +121,7 @@ const startErrorCopy = (e: unknown): string => {
 type Phase =
   | 'no-league' | 'unavailable' | 'needs-deck' | 'error'
   | 'results' | 'grading' | 'failed' | 'building' | 'build-slow'
-  | 'loading' | 'intro';
+  | 'read-error' | 'loading' | 'intro';
 
 export default function CalibrationScreen() {
   const navigation = useNavigation<any>();
@@ -297,7 +296,9 @@ export default function CalibrationScreen() {
   else if (startM.error && errorCode(startM.error) === 'needs_fresh_deck') phase = 'needs-deck';
   else if (startM.error) phase = 'error';
   else if (completedId) phase = 'results';
+  else if (sessionId && nextQ.isError) phase = 'read-error';
   else if (sessionId) phase = 'grading';
+  else if (currentQ.isError) phase = 'read-error';
   else if (serverStatus === 'failed') phase = 'failed';
   else if (serverStatus === 'building') phase = buildSlow ? 'build-slow' : 'building';
   else if (currentQ.isPending || startM.isPending) phase = 'loading';
@@ -325,6 +326,20 @@ export default function CalibrationScreen() {
               label={COPY.openAcquire}
               variant="primary"
               onPress={handleOpenAcquire}
+            />
+          </View>
+        );
+
+      case 'read-error':
+        return (
+          <View style={styles.block}>
+            <Text variant="body">{sessionId ? COPY.cardReadFailed : COPY.sessionReadFailed}</Text>
+            <Button
+              testID="calibration.retry"
+              label={COPY.tryAgain}
+              variant="secondary"
+              disabled={sessionId ? nextQ.isFetching : currentQ.isFetching}
+              onPress={() => { void (sessionId ? nextQ : currentQ).refetch(); }}
             />
           </View>
         );
