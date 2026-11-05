@@ -21,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 import { onlineManager } from '@tanstack/react-query';
 import { setOnWriteRequest } from '../api/client';
+import { invalidateTradeSearchHandoffs } from './tradeSearchHandoff';
 import { generateTrades, getTradeStatus, type GenerateBody, type PagedTradeJobSnapshot } from '../api/trades';
 import {
   DEVICE_PAGE_KEY_PREFIX,
@@ -68,7 +69,7 @@ export function hydrateDevicePages(): Promise<void> {
       const startEpoch = epoch;
       try {
         const keys = (await AsyncStorage.getAllKeys())
-          .filter((k) => k.startsWith(DEVICE_PAGE_KEY_PREFIX));
+          .filter((k) => k.startsWith(DEVICE_PAGE_KEY_PREFIX) || k.startsWith('ftf_trade_device_page_v1:'));
         if (keys.length === 0) return;
         const rows = await AsyncStorage.multiGet(keys);
         if (epoch !== startEpoch) return; // discarded while reading
@@ -125,6 +126,7 @@ export function removeDeviceCard(key: string | null, cardKey: string) {
 /** Sign-out, account switch, account deletion: every device page goes,
  *  from memory and from disk. */
 export async function clearDevicePages(): Promise<void> {
+  invalidateTradeSearchHandoffs();
   epoch += 1;
   discardedAt = Math.max(discardedAt, Date.now());
   pages.clear();
@@ -134,7 +136,7 @@ export async function clearDevicePages(): Promise<void> {
   persistTimers.clear();
   try {
     const keys = (await AsyncStorage.getAllKeys())
-      .filter((k) => k.startsWith(DEVICE_PAGE_KEY_PREFIX));
+      .filter((k) => k.startsWith(DEVICE_PAGE_KEY_PREFIX) || k.startsWith('ftf_trade_device_page_v1:'));
     if (keys.length > 0) await AsyncStorage.multiRemove(keys);
   } catch { /* best effort; the keys are per user, and the bound ages them */ }
 }
@@ -154,7 +156,10 @@ function discardAllDevicePages() {
 // The client's own rankings / preference writes and format switches (sent,
 // and again settled).
 setOnWriteRequest((path) => {
-  if (discardsDevicePages(path)) discardAllDevicePages();
+  if (discardsDevicePages(path)) {
+    invalidateTradeSearchHandoffs();
+    discardAllDevicePages();
+  }
 });
 
 export interface DevicePageTarget {

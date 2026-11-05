@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // WHY THIS EXISTS (ux-lead "U1: the in-place reveal", design-lead "U1: the
 // first card, revealed in place", AC-L1/AC-L2): Find a trade must land on the
-// complete first card in its FIRST frame, with no animated push and no frame
+// complete validated held card in its FIRST frame; cold requests navigate immediately.
 // of idle card, "Looking for trades…", progress strip or skeleton in between.
 // Every one of those regressions is invisible to a type check and to a
 // passing UI test that only looks at the settled screen:
 //   - the TradeDeck route regains its default slide (AC-L2);
-//   - the landing pushes BEFORE page 1 is in hand, so the deck mounts empty;
+//   - a cold request is repeated after navigation instead of transferred once;
 //   - the pushed instance's mount effects (the league reset, the #330 choke
 //     point) wipe the page it was handed, one frame after showing it;
 //   - a wait state is ordered ahead of the card, or the progress strip stays
@@ -65,15 +65,13 @@ console.log('check-trade-inplace-reveal:');
       && /\.\.\.\(firstPage \? \{ firstPage \} : \{\}\)/.test(arm)
       && /pushWithFirstPage\(fork, pushDeck\);\s*return;/.test(arm));
   const helper = code.slice(code.indexOf('function pushWithFirstPage('), code.indexOf('function handleInlineFindATrade('));
-  check('2b. pushWithFirstPage requests page 1 (paged, client search id) and pushes from its result',
-    // (C stamps the page's validation time, for the device page it seeds.)
-    // (and the device page key the landing validated it under, P1-a).
-    /generateTrades\(request, \{ searchId: fork\.searchId \}\)\s*\.then\(\(snapshot\) => go\(adoptablePage\(snapshot\)\s*\? \{ request, snapshot, validatedAt: Date\.now\(\), deviceKey \}\s*: undefined\)\)/.test(helper));
-  check('2c. …with a bounded wait: past the deadline (or on failure) it pushes without the page',
-    /setTimeout\(\(\) => go\(\), FIRST_PAGE_PUSH_DEADLINE_MS\)/.test(helper) && /\.catch\(\(\) => go\(\)\)/.test(helper)
-      && /if \(pushed\) return;/.test(helper));
-  check('2d. a fair (anchored) search keeps its immediate push (no stored page to wait for)',
-    /if \(fork\.anchor \|\| !fairnessReady\) \{\s*pushDeck\(\);\s*return;\s*\}/.test(helper));
+  check('2b. the exact paged request transfers once, before immediate navigation',
+    /startTradeSearchHandoff\(fork\.searchId, 'model', request,\s*\(\) => generateTrades\(request, \{ searchId: fork\.searchId \}\)\);\s*pushDeck\(\);/.test(helper));
+  check('2c. no timer or await holds navigation; destination consumes the exact request',
+    !/setTimeout|FIRST_PAGE_PUSH_DEADLINE_MS|await/.test(helper)
+      && /takeTradeSearchHandoff<PagedTradeJobSnapshot>\(vars\.searchId, 'model', request\)/.test(code));
+  check('2d. fair anchored requests also start once and push immediately',
+    /startTradeSearchHandoff\(fork\.searchId, 'fair', request, \(\) => getFairPackages\(request\)\);\s*pushDeck\(\);/.test(helper));
 }
 
 // ── 3. EXECUTED: which pages the pushed deck adopts ───────────────────────
@@ -91,15 +89,15 @@ console.log('check-trade-inplace-reveal:');
   try {
     vm.runInNewContext(ts.transpileModule(src, { compilerOptions: {
       target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS } }).outputText,
-    { module, exports: module.exports, Set, Map, Math });
+    { module, exports: module.exports, Set, Map, Math, tradeSearchIdentity: () => 'ctx' });
     adopted = module.exports.adoptedFirstPage;
   } catch (e) { /* reported below */ }
   check('3a. adoptablePage + adoptedFirstPage lift and run', typeof adopted === 'function' && fns.length === 2);
   if (typeof adopted === 'function') {
-    const route = (snapshot) => ({ params: { resultsPush: { firstPage: { request: {}, snapshot } } } });
+    const route = (snapshot) => ({ params: { resultsPush: { firstPage: { request: {}, snapshot, identity: 'ctx' } } } });
     const c = [{ trade_id: 'a' }];
     check('3b. a paged page WITH cards is adopted (first frame = the card)',
-      !!adopted(route({ status: 'complete', cursor: 1, cards: c })));
+      !!adopted(route({ status: 'complete', cursor: 1, cards: c, current_validated: true })));
     check('3c. a paged page with no cards yet, job still building, is adopted (one job, honest wait)',
       !!adopted(route({ status: 'running', cursor: 0, cards: [] })));
     check('3d. never adopted: errored, finished-empty, legacy (no cursor), or no param',

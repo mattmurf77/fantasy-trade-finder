@@ -54,6 +54,7 @@ import type { Player } from '../shared/types';
 // is unchanged.
 export interface FinderHandoff {
   seq: number;
+  searchId?: string;
   opponent: { userId: string; name: string } | null;
   autoRun: true;
   origin?: 'calculator';
@@ -118,14 +119,18 @@ export const useFinderTargets = create<FinderTargetsState>((set) => ({
 // subscription so the reset happens even when no pin-owning screen is
 // mounted (e.g. switching leagues from the hub's league pill).
 let _prevLeagueId: string | null | undefined;
+let _prevUserId: string | null | undefined;
 useSession.subscribe((s) => {
   const id = s.league?.league_id ?? null;
+  const userId = s.user?.user_id ?? null;
   if (_prevLeagueId === undefined) {
     _prevLeagueId = id; // first observation — nothing to invalidate yet
+    _prevUserId = userId;
     return;
   }
-  if (id !== _prevLeagueId) {
+  if (id !== _prevLeagueId || userId !== _prevUserId) {
     _prevLeagueId = id;
+    _prevUserId = userId;
     useFinderTargets.getState().clear();
   }
 });

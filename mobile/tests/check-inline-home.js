@@ -125,7 +125,7 @@ console.log('check-inline-home:');
     'a default of false would silently delete the experiment variant\'s rail');
   assert(/\{showSuggestionRail && suggestions\.length > 0 \?/.test(canvas),
     '3b. the rail render is gated on it');
-  assert(/onFindATrade=\{\s*canvasHost === 'flag' \? handleInlineFindATrade : undefined\s*\}/.test(seg),
+  assert(/onFindATrade=\{\s*canvasHost === 'flag' && !switching \? handleInlineFindATrade : undefined\s*\}/.test(seg),
     '3c. the flag path wires Find a Trade; the experiment path does not');
   assert(/onLikeTrade=\{\s*canvasHost === 'flag' \? handleInlineLikeTrade : undefined\s*\}/.test(seg),
     '3d. …and the ✓ cell, same gate');
@@ -210,7 +210,7 @@ console.log('check-inline-home:');
   assert(at > -1, '7. the inline Find a Trade handler exists');
   // Window widened 1600 → 2800 on 2026-08-31: D-171 inserted the push fork
   // (and its comment) ahead of the in-place arm.
-  const seg = trades.slice(at, at + 2800);
+  const seg = trades.slice(at, trades.indexOf('async function handleInlineLikeTrade(', at));
   // RE-KEYED 2026-08-31 (D-171 rulings 1+2): the handler now FORKS — under
   // the push posture it navigates (navigation.push('TradeDeck', …) carrying
   // the D-153 verdict as the resultsPush param) and consumes nothing in

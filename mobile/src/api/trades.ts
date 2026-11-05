@@ -9,6 +9,10 @@ import type { CalcGap } from './calc';
 // does not page (today's main) never sends any of them, and a response
 // without `cursor` IS the cumulative snapshot, handled exactly as before.
 export interface TradePageFields {
+  current_validated?: true;
+  ranked_prefix_ready?: true;
+  /** Client adapter marker: strict status revoked the entire old snapshot. */
+  current_invalidated?: true;
   cursor?: number;          // raw index after the last card included
   total_ready?: number;     // raw cards the deck holds right now
   replace?: boolean;        // E2: `cards` is the deck's FULL current list
@@ -40,6 +44,21 @@ export type PagedTradeCard = TradeCard & {
   // cursor). TradesScreen keeps such a deck in server order (AC-9).
   from_page?: true;
 };
+
+export class TradeSnapshotValidationError extends Error {
+  readonly code = 'trade_snapshot_unvalidated';
+  constructor() { super('Trade snapshot has no current server validation'); }
+}
+
+function requireCurrentSnapshot(snapshot: PagedTradeJobSnapshot): PagedTradeJobSnapshot {
+  if (snapshot.cards.length > 0 && snapshot.current_validated !== true) throw new TradeSnapshotValidationError();
+  if (snapshot.status === 'running' && snapshot.cards.length > 0 && snapshot.ranked_prefix_ready !== true) {
+    // A growing engine buffer is not necessarily its ranked prefix. Keep
+    // polling this job from zero, so hidden provisional cards are not skipped.
+    return { ...snapshot, cards: [], ...(snapshot.cursor !== undefined ? { cursor: 0 } : {}) };
+  }
+  return snapshot;
+}
 
 export interface GenerateBody {
   league_id: string;
@@ -317,6 +336,9 @@ function normalizeJobSnapshot(raw: any): PagedTradeJobSnapshot {
       : undefined;
   return {
     job_id:          String(raw?.job_id ?? ''),
+    ...(raw?.current_validated === true ? { current_validated: true as const } : {}),
+    ...(raw?.ranked_prefix_ready === true ? { ranked_prefix_ready: true as const } : {}),
+    ...(raw?.current_invalidated === true ? { current_invalidated: true as const } : {}),
     status:          raw?.status === 'complete' ? 'complete'
                    : raw?.status === 'error'    ? 'error'
                    : 'running',
@@ -372,9 +394,9 @@ export async function generateTrades(
     paging
       ? { ...body, page: 1, ...(paging.searchId ? { search_id: paging.searchId } : {}) }
       : body,
-    request,
+    { ...request, headers: { ...request?.headers, 'X-FTF-Current-Only': '1' } },
   );
-  const snap = normalizeJobSnapshot(res);
+  const snap = requireCurrentSnapshot(normalizeJobSnapshot(res));
   // An old server doesn't echo the id; the search still owns it.
   return paging?.searchId && !snap.search_id ? { ...snap, search_id: paging.searchId } : snap;
 }
@@ -399,11 +421,21 @@ export async function getTradeStatus(
     ? `&deck=${encodeURIComponent(page.deck || jobId)}`
       + `&cursor=${Math.max(0, Math.floor(page.cursor))}`
     : '';
-  const res = await api.get<any>(
-    `/api/trades/status?job_id=${encodeURIComponent(jobId)}${paged}`,
-    request,
-  );
-  return normalizeJobSnapshot(res);
+  let res: any;
+  try {
+    res = await api.get<any>(
+      `/api/trades/status?job_id=${encodeURIComponent(jobId)}${paged}`,
+      { ...request, headers: { ...request?.headers, 'X-FTF-Current-Only': '1' } },
+    );
+  } catch (error) {
+    const e = error as { status?: number; body?: { error?: string } };
+    if (e.status !== 409 || e.body?.error !== 'trade_snapshot_changed') throw error;
+    // Existing one-shot inputs_changed recovery discards this job and asks
+    // for a fresh generation. Never append the obsolete job's cards.
+    res = { job_id: jobId, status: 'error', error: 'inputs_changed', cards: [], replace: true, current_invalidated: true,
+      ...(page ? { cursor: 0 } : {}) };
+  }
+  return requireCurrentSnapshot(normalizeJobSnapshot(res));
 }
 
 // ── Asset-centric trade ideas (#172/#189 follow-up, flag trade.asset_ideas) ──

@@ -77,7 +77,7 @@ const page1 = (over = {}) => ({
   job_id: 'j1', status: 'complete', error: null, opponents_done: 9, opponents_total: 9,
   cards: [card('a', 'ha'), card('b', 'hb'), card('c', 'hc')],
   cursor: 3, total_ready: 90, deck_id: 'j1', pool_exhausted: false, freshness_state: 'fresh',
-  serve_source: 'page', ...over,
+  serve_source: 'page', current_validated: true, ...over,
 });
 
 // A fresh store module per scenario, over shared stubs.
@@ -102,6 +102,7 @@ function loadStore(env) {
           env.calls.push({ body, paging, options });
           return env.respond(body, paging);
         } };
+        case './tradeSearchHandoff': return { invalidateTradeSearchHandoffs: () => {} };
         case '../utils/devicePage': return D;
         default: throw new Error(`devicePageStore.ts: unexpected import ${name}`);
       }
@@ -196,7 +197,7 @@ process.on('exit', () => {
 
   // ── 1. The rules (utils/devicePage.ts, executed) ────────────────────────
   await check('1a. stored per (user, league, format) under a versioned key; unknown parts store nothing', () => {
-    eq(D.devicePageKey('u1', 'L1', '1qb_ppr'), 'ftf_trade_device_page_v1:u1:L1:1qb_ppr');
+    eq(D.devicePageKey('u1', 'L1', '1qb_ppr'), 'ftf_trade_device_page_v2:u1:L1:1qb_ppr');
     ok(D.devicePageKey('u1', 'L2', '1qb_ppr') !== D.devicePageKey('u1', 'L1', '1qb_ppr'), 'a league switch is another key');
     ok(D.devicePageKey('u1', 'L1', 'sf_tep') !== D.devicePageKey('u1', 'L1', '1qb_ppr'), 'a format switch is another key');
     ok(D.devicePageKey('u2', 'L1', '1qb_ppr') !== D.devicePageKey('u1', 'L1', '1qb_ppr'), 'another account is another key');
@@ -235,7 +236,7 @@ process.on('exit', () => {
     const p = D.devicePageFrom(page1({ built_at: '2026-10-24T00:00:00Z', roster_fp: 'rfp1:x', values_snapshot_id: 'vsn1:y' }),
       { scope: S, validatedAt: T0 });
     eq([p.v, p.scope, ids(p.cards), p.job_id, p.deck_id, p.cursor, p.total_ready, p.pool_exhausted, p.validated_at],
-      [1, S, ['a', 'b', 'c'], 'j1', 'j1', 3, 90, false, T0]);
+      [2, S, ['a', 'b', 'c'], 'j1', 'j1', 3, 90, false, T0]);
     eq([p.built_at, p.roster_fp, p.vsn], ['2026-10-24T00:00:00Z', 'rfp1:x', 'vsn1:y'], 'fingerprints stored as sent');
     eq([D.devicePageFrom(page1(), { scope: S, validatedAt: T0 }).roster_fp], [null], 'absent fingerprints are null');
     const many = page1({ cards: Array.from({ length: 45 }, (_, i) => card(`c${i}`, `h${i}`)) });
@@ -290,7 +291,7 @@ process.on('exit', () => {
   await check('1j. storage round trip; anything malformed reads as no page', () => {
     const p = D.devicePageFrom(page1(), { scope: S, validatedAt: T0 });
     eq(D.parseDevicePage(JSON.stringify(p)), p);
-    const bad = [null, '', 'nope', '{}', JSON.stringify({ ...p, v: 2 }), JSON.stringify({ ...p, cards: [{}] }),
+    const bad = [null, '', 'nope', '{}', JSON.stringify({ ...p, v: 1 }), JSON.stringify({ ...p, cards: [{}] }),
       JSON.stringify({ ...p, validated_at: 'x' }), JSON.stringify({ ...p, deck_id: null })].map(D.parseDevicePage);
     eq(bad, [null, null, null, null, null, null, null, null]);
   });
@@ -503,6 +504,7 @@ process.on('exit', () => {
   await check('2h. clearDevicePages (sign-out / account switch) removes every device page and nothing else', async () => {
     const env = makeEnv();
     env.storage.m.set('ftf:trades:fairness_on', 'on');
+    env.storage.m.set('ftf_trade_device_page_v1:legacy:league:sf', '{old private cards}');
     const st = loadStore(env);
     await st.refreshDevicePage(target, T0);
     await st.refreshDevicePage({ ...target, key: KEY2 }, T0);
@@ -561,25 +563,19 @@ process.on('exit', () => {
   });
 
   // ── 3. The screen: no wait, background revalidation, "Updating" ─────────
-  await check('3a. the tap renders a held page with NO network wait (no request, timer or await before the push)', () => {
+  await check('3a. the tap renders a proved held page before starting a new request', () => {
     const push = fnBody(code, 'function pushWithFirstPage(');
-    const branch = between(push, 'const held = payEnforcing && !payEntitled ? null : readDevicePage(deviceKey);', 'let pushed = false;');
-    ok(/if \(devicePageUsable\(held, devicePageScope\(request\), Date\.now\(\)\)\) \{\s*pushDeck\(\{\s*request,\s*snapshot: devicePageSnapshot\(held, fork\.searchId\),\s*device: true,\s*validatedAt: held\.validated_at,\s*deviceKey,\s*\}\);\s*return;\s*\}/.test(branch),
-      'a usable device page is pushed at once, then return');
-    ok(!/generateTrades|await|setTimeout|\.then\(/.test(branch), 'nothing in the device / offline branches waits on anything');
-    ok(push.indexOf('const held = payEnforcing && !payEntitled ? null : readDevicePage(deviceKey);') < push.indexOf('generateTrades(request'),
-      'the device check runs before the network page 1');
+    const branch = between(push, 'const held = payEnforcing && !payEntitled ? null : readDevicePage(deviceKey);', "startTradeSearchHandoff(fork.searchId, 'model'");
+    ok(branch.includes('devicePageUsable(held, devicePageScope(request), Date.now())'), 'exact organic scope and TTL');
+    ok(branch.includes('snapshot: devicePageSnapshot(held, fork.searchId)') && branch.includes('device: true'), 'held page handed over');
+    ok(branch.includes('identity: tradeSearchIdentity()'), 'dispatch identity travels');
+    ok(!/generateTrades|await|setTimeout|\.then\(/.test(branch), 'no held-page wait');
   });
-  await check('3b. offline at the tap with no usable page: pushed at once, the Offline state in the card rect', () => {
+  await check('3b. offline tap pushes at once without starting a request; cold online taps have no navigation deadline', () => {
     const push = fnBody(code, 'function pushWithFirstPage(');
-    ok(/if \(!readOnline\(\)\) \{\s*pushDeck\(\);\s*return;\s*\}/.test(push), 'offline pushes at once');
-    ok(push.indexOf('if (!readOnline())') < push.indexOf('setTimeout(() => go(), FIRST_PAGE_PUSH_DEADLINE_MS)'),
-      'before the page-1 deadline is ever armed');
-    ok(/\) : !online && deck\.length === 0 && !deckFailure && generateMutation\.isPending \? \(\s*<DeckOfflineCard minHeight=\{topCardH\} onRetry=\{handleOfflineTapRetry\} \/>/.test(code),
-      'the paused search renders the Offline card, ahead of any wait card');
-    ok(code.indexOf('<DeckOfflineCard minHeight={topCardH} onRetry={handleOfflineTapRetry} />')
-      < code.indexOf(") : fairPending || generateMutation.isPending || job?.status === 'running' ? ("),
-      'Offline outranks the "Looking for trades…" wait card');
+    ok(/if \(!fairnessReady \|\| !readOnline\(\)\) \{\s*pushDeck\(\);\s*return;/.test(push), 'offline immediate');
+    ok(!/setTimeout|FIRST_PAGE_PUSH_DEADLINE_MS|await/.test(push), 'no timer or await before navigation');
+    ok(code.includes('<DeckOfflineCard minHeight={topCardH} onRetry={handleOfflineTapRetry} />'), 'honest offline card remains');
   });
   await check('3c. the pushed deck revalidates in the background, right after mount, with the tap\'s own request', () => {
     ok(/useState<'none' \| 'running' \| 'failed' \| 'done'>\(\s*\(\) => \(adopted\?\.device \? \(readOnline\(\) \? 'running' : 'failed'\) : 'none'\),\s*\)/.test(code),
@@ -718,9 +714,9 @@ process.on('exit', () => {
   });
   await check('3i. the key is bound where the deck is validated: adoption (from the landing\'s key) and a model answer (from ITS dispatch\'s onMutate context)', () => {
     ok(/const deckKeyRef = useRef<string \| null>\(adopted\?\.deviceKey \?\? null\);/.test(code), 'adoption');
-    ok(/onMutate: \(\) => \(\{ epoch: deckEpochRef\.current, deviceKey \}\),/.test(code), 'the dispatch stamps its key');
+    ok(/onMutate: \(\) => \(\{ epoch: deckEpochRef\.current, deviceKey, identity: tradeSearchIdentity\(\) \}\),/.test(code), 'the dispatch stamps its key');
     ok(!/lastModelKeyRef/.test(code), 'no shared key ref a later dispatch could overwrite');
-    ok(/\? \{ request, snapshot, validatedAt: Date\.now\(\), deviceKey \}/.test(code), 'the network first page carries the landing\'s key');
+    ok(code.includes("takeTradeSearchHandoff<PagedTradeJobSnapshot>(vars.searchId, 'model', request)"), 'the exact pending response is taken once');
     const eff = between(code, 'const scope = deckScopeRef.current;', 'job?.error, deck, rawTopCard?.trade_id, withdrawnIds]);');
     ok(/if \(!deviceKey \|\| deviceKey !== deckKeyRef\.current\) return;/.test(eff), 'the save effect\'s key check');
     ok(code.indexOf('deckFormatRef.current === activeFormat') < code.indexOf('const scope = deckScopeRef.current;'),
@@ -744,8 +740,8 @@ process.on('exit', () => {
       ts.forEachChild(n, visit);
     })(sf);
     ok(onMutate && onSuccess, 'the generate mutation\'s onMutate and onSuccess');
-    const mutateNames = ['deckEpochRef', 'deviceKey'];
-    const succNames = ['applyJobResult', 'deckEpochRef', 'setJob', 'setDeckFailure', 'deckScopeRef', 'lastModelRequestRef',
+    const mutateNames = ['deckEpochRef', 'deviceKey', 'tradeSearchIdentity'];
+    const succNames = ['tradeSearchIdentity', 'applyJobResult', 'deckEpochRef', 'setJob', 'setDeckFailure', 'deckScopeRef', 'lastModelRequestRef',
       'devicePageScope', 'deckKeyRef', 'validatedAtRef', 'deckSearchRef', 'noteFirstResponse', 'noteSearchCards',
       'failFirstCard', 'useFinderTargets', 'scopedOpponent', 'canvasResultsLive', 'setToast', 'modelZeroCopy',
       'deviceKey', 'autoResearchRef', 'autoResearchAfterAnswer'];
@@ -756,24 +752,25 @@ process.on('exit', () => {
     const deckEpochRef = { current: 7 }; // a format switch bumps no epoch
     const refs = { deckScopeRef: { current: null }, deckKeyRef: { current: null }, validatedAtRef: { current: null } };
     let job = null;
-    const succEnv = { ...refs, deckEpochRef, applyJobResult: (r, a, b) => (a === b ? r : null),
+    const succEnv = { ...refs, deckEpochRef, tradeSearchIdentity: () => 'Y', applyJobResult: (r, a, b) => (a === b ? r : null),
       setJob: (j) => { job = j; }, setDeckFailure: () => {}, lastModelRequestRef: { current: { league_id: 'L1', fairness_threshold: 0.5 } },
       devicePageScope: D.devicePageScope, deckSearchRef: { current: null }, noteFirstResponse: () => {}, noteSearchCards: () => {},
       failFirstCard: () => {}, useFinderTargets: { getState: () => ({ pinnedGive: [], pinnedReceive: [] }) }, scopedOpponent: null,
       canvasResultsLive: false, setToast: () => {}, modelZeroCopy: () => '',
       autoResearchRef: { current: 'idle' }, autoResearchAfterAnswer: (state, research) => (research ? state : 'idle'),
       deviceKey: KY }; // the screen's key when the answers land (after the switch)
-    const ctxX = mkMutate({ deckEpochRef, deviceKey: KX })();   // dispatch under format X
-    const ctxY = mkMutate({ deckEpochRef, deviceKey: KY })();   // the switch, then a dispatch under Y
+    const ctxX = mkMutate({ deckEpochRef, deviceKey: KX, tradeSearchIdentity: () => 'X' })();   // dispatch under format X
+    const ctxY = mkMutate({ deckEpochRef, deviceKey: KY, tradeSearchIdentity: () => 'Y' })();   // the switch, then a dispatch under Y
     const xCards = [card('x1', 'hx1'), card('x2', 'hx2')];
     mkSuccess(succEnv)(page1({ cards: xCards }), {}, ctxX);     // X's answer lands first
-    eq(refs.deckKeyRef.current, KX, 'X\'s cards are bound to X\'s key, not the newer dispatch\'s');
+    eq(refs.deckKeyRef.current, null, 'late X answer is rejected entirely after switching to Y');
+    eq(job, null, 'no old-format cards displayed');
     const env = makeEnv();
     const st = loadStore(env);
     const save = screenEffect('saveDevicePage(deviceKey', ['deckScopeRef', 'validatedAtRef', 'deckKeyRef', 'deviceKey',
       'job', 'isPagedEnvelope', 'deckMayWrite', 'readDevicePage', 'rawTopCard', 'deck', 'actedDeviceKeysRef',
       'withdrawnIds', 'deckCardKey', 'saveDevicePage', 'devicePageFrom']);
-    const runSave = (deviceKey) => save({ ...refs, deviceKey, job, deck: job.cards, rawTopCard: job.cards[0],
+    const runSave = (deviceKey) => save({ ...refs, deviceKey, job, deck: job?.cards ?? [], rawTopCard: job?.cards[0],
       actedDeviceKeysRef: { current: new Set() }, withdrawnIds: new Set(), isPagedEnvelope: P.isPagedEnvelope,
       deckCardKey: P.deckCardKey, deckMayWrite: D.deckMayWrite, devicePageFrom: D.devicePageFrom,
       readDevicePage: st.readDevicePage, saveDevicePage: st.saveDevicePage });
@@ -790,10 +787,10 @@ process.on('exit', () => {
   // ── 4. Discards outside the screen ─────────────────────────────────────
   await check('4a. api/client tells the store about every write, when sent and when settled', () => {
     const client = stripComments(read('api/client.ts'));
-    ok(/function _noteWrite\(path: string, method: string\): void \{\s*if \(method === 'GET' \|\| !_onWriteRequest\) return;\s*try \{ _onWriteRequest\(path\); \} catch \{\s*\}/.test(client), 'non-GET only; never throws');
+    ok(/function _noteWrite\(path: string, method: string, phase: 'start' \| 'settled'\): void \{\s*if \(method === 'GET' \|\| !_onWriteRequest\) return;\s*try \{ _onWriteRequest\(path, phase\); \} catch \{\s*\}/.test(client), 'non-GET only; never throws');
     const req = fnBody(client, 'export async function apiRequest<T = unknown>(');
-    ok(req.indexOf("_noteWrite(path, opts.method || 'GET');") < req.indexOf('runWithDeadline'), 'on send');
-    ok(/\} finally \{\s*_noteWrite\(path, opts\.method \|\| 'GET'\);\s*\}/.test(req), 'on settle');
+    ok(req.indexOf("_noteWrite(path, opts.method || 'GET', 'start');") < req.indexOf('runWithDeadline'), 'on send');
+    ok(/\} finally \{\s*_noteWrite\(path, opts\.method \|\| 'GET', 'settled'\);\s*\}/.test(req), 'on settle');
   });
   await check('4b. sign-out and account switch clear every device page (useSession)', () => {
     const sess = stripComments(read('state/useSession.ts'));
@@ -801,7 +798,7 @@ process.on('exit', () => {
     const signOut = between(sess, 'signOut: async () => {', '\n  },');
     ok(/await Promise\.all\(\[[\s\S]*clearDevicePages\(\),[\s\S]*\]\);/.test(signOut), 'signOut awaits it with the other per-account keys');
     const setUser = between(sess, 'setUser: async (u) => {', '\n  },');
-    ok(/const previous = get\(\)\.user;\s*if \(previous && previous\.user_id !== u\?\.user_id\) void clearDevicePages\(\);/.test(setUser), 'another account');
+    ok(/const previous = get\(\)\.user;\s*if \(previous && previous\.user_id !== u\?\.user_id\) \{\s*noteTradeInputChange\('after_account_switch'\);\s*void clearDevicePages\(\);\s*\}/.test(setUser), 'another account');
     // A demo bypasses setUser (onboarding-eng A1): it clears before it writes the demo user.
     const demo = between(sess, 'startDemoSession: async () => {', '\n  },');
     ok(/const previous = get\(\)\.user;\s*if \(previous && previous\.user_id !== demoUser\.user_id\) void clearDevicePages\(\);\s*set\(\{\s*user:\s*demoUser,/.test(demo), 'a demo over another account');

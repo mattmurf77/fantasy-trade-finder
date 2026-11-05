@@ -62,3 +62,15 @@ So a guard is live in CI the moment the file exists — dropping a `check-*.js` 
 - **An async guard must fail if it never finishes.** An `await` that never settles drains the event loop, and node exits with whatever exit code is set, usually 0: a silent pass after a handful of checks (`check-win-now-recovery.js` passed 7 of 39 this way on #488). Set `let finished = false`, register `process.on('exit', …)` that prints "<name> did not finish (a check hung): FAILED" and sets `process.exitCode = 1` while it's false, and set `finished = true` just before the summary line. `check-device-first-page.js` is the model.
 
 `check-trade-prewarm.js` executes early first-page preparation with delayed storage/session replies and replaced identities. Run with `npm run test:trade-prewarm`; no physical-device latency claim. See `docs/plans/find-trade-first-card-prewarm.md`.
+
+`check-instant-trade-handoff.js` executes one-tap exact request transfer for
+model and fair-sweep navigation, full filter/identity/input invalidation,
+strict current-server acknowledgement, ranked-prefix withholding, status
+revocation and v2 device-page proof. It is not a device timing benchmark.
+The destination takes the original promise once; scoped/pinned/intent requests
+never enter the organic disk cache. Deploy the Current-Only/current_validated
+server contract before distributing this native build; an older server's
+nonempty model response is refused. Status revocation empties the old deck
+before the existing bounded one-shot exact-request recovery. Cold engine,
+network, permission and empty-result waits remain honest; no under-200ms
+all-entry claim is made by structural/effect tests.

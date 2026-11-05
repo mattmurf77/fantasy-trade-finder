@@ -298,6 +298,7 @@ export default function UsageTrendsScreen() {
     store.setSide('give', []);
     store.setSide('receive', [{ id: p.player_id, name: p.name, position: p.position, team: p.team }]);
     store.setHandoff({
+      ...(searchId ? { searchId } : {}),
       opponent:
         ownerKey && !ownerKey.startsWith('roster:')
           ? { userId: ownerKey, name: lg?.owners[ownerKey] ?? ownerKey }

@@ -152,6 +152,7 @@
     "test:trade-pages": "node tests/check-trade-pages.js",
     "test:device-first-page": "node tests/check-device-first-page.js",
     "test:trade-prewarm": "node tests/check-trade-prewarm.js",
+    "test:instant-trade-handoff": "node tests/check-instant-trade-handoff.js",
     "test:gate-miss": "node tests/check-gate-miss.js",
     "test:trade-buffer": "node tests/check-trade-buffer.js",
     "test:trade-inplace-reveal": "node tests/check-trade-inplace-reveal.js",

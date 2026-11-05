@@ -26,10 +26,11 @@ export const DEVICE_PAGE_MAX_CARDS = 30;
  *  refresh-failed line shows (PRD §5.4 shared constraint 4). */
 export const DEVICE_REVALIDATE_MAX_MS = 10_000;
 /** Versioned AsyncStorage key prefix. A shape change bumps the version. */
-export const DEVICE_PAGE_KEY_PREFIX = 'ftf_trade_device_page_v1:';
+export const DEVICE_PAGE_KEY_PREFIX = 'ftf_trade_device_page_v2:';
 
 export interface DevicePage {
-  v: 1;
+  v: 2;
+  current_validated: true;
   /** The organic request scope the cards answer (devicePageScope). */
   scope: string;
   /** Next unseen cards of the last validated deck, server order, ≤ one page. */
@@ -49,7 +50,7 @@ export interface DevicePage {
   validated_at: number;
 }
 
-/** `ftf_trade_device_page_v1:<user>:<league>:<fmt>`, or null when any part is
+/** `ftf_trade_device_page_v2:<user>:<league>:<fmt>`, or null when any part is
  *  unknown. A league or format switch is a different key, so it never reads
  *  the other one's page. */
 export function devicePageKey(
@@ -88,7 +89,7 @@ export function devicePageScope(request: {
 
 type ServerPage = Pick<PagedTradeJobSnapshot,
   'job_id' | 'status' | 'error' | 'opponents_total' | 'deck_id' | 'cursor' | 'total_ready'
-  | 'pool_exhausted' | 'freshness_state'> & {
+  | 'pool_exhausted' | 'freshness_state' | 'current_validated'> & {
     cards: readonly PagedTradeCard[];
     built_at?: string;
     roster_fp?: string;
@@ -101,7 +102,7 @@ type ServerPage = Pick<PagedTradeJobSnapshot,
  *  deck (`deck_id`: `deck=` pages it across rebuilds and restarts, which a
  *  page held for minutes needs). */
 export function storableResponse(r: ServerPage): boolean {
-  return r.status === 'complete'
+  return r.current_validated === true && r.status === 'complete'
     && !r.error
     && r.freshness_state !== 'updating'
     && typeof r.deck_id === 'string' && r.deck_id.length > 0
@@ -119,7 +120,8 @@ export function devicePageFrom(
   const cards = (opts.cards ?? r.cards).slice(0, DEVICE_PAGE_MAX_CARDS);
   if (cards.length === 0) return null;
   return {
-    v: 1,
+    v: 2,
+    current_validated: true,
     scope: opts.scope,
     cards,
     job_id: r.job_id,
@@ -142,6 +144,7 @@ export function devicePageUsable(
   scope: string | null,
   now: number,
 ): page is DevicePage {
+  if (page?.v !== 2 || page.current_validated !== true) return false;
   if (!page || !scope || page.scope !== scope || page.cards.length === 0) return false;
   const age = now - page.validated_at;
   return age >= 0 && age <= DEVICE_PAGE_MAX_AGE_S * 1000;
@@ -189,6 +192,7 @@ export function mergeRevalidation<T extends DeckKeyed>(
 export function devicePageSnapshot(page: DevicePage, searchId: string): PagedTradeJobSnapshot {
   return {
     job_id: page.job_id,
+    current_validated: true,
     status: 'complete',
     cards: page.cards,
     opponents_done: page.opponents_total,
@@ -209,7 +213,7 @@ export function parseDevicePage(raw: string | null | undefined): DevicePage | nu
   if (!raw) return null;
   let p: any;
   try { p = JSON.parse(raw); } catch { return null; }
-  if (!p || p.v !== 1 || typeof p.scope !== 'string' || !Array.isArray(p.cards)
+  if (!p || p.v !== 2 || p.current_validated !== true || typeof p.scope !== 'string' || !Array.isArray(p.cards)
       || typeof p.job_id !== 'string' || typeof p.deck_id !== 'string'
       || !Number.isInteger(p.cursor) || typeof p.validated_at !== 'number'
       || !Number.isFinite(p.validated_at)
