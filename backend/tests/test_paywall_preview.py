@@ -153,6 +153,7 @@ def test_entitled_user_unaffected(gate):
     client, *_ = gate
     entl.grant(ME, "pro", source="manual_grant")
     assert len(ids(status(client))) == 12
+    assert ids(status(client, 0, headers={**MOBILE, "X-FTF-Prewarm": "1"})) == ids(status(client, 0))
     assert status(client, PAGE).status_code == 200
     assert generate(client).status_code == 200
     assert pg.preview_row(ME) is None
