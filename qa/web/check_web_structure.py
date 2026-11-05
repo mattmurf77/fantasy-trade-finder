@@ -729,6 +729,15 @@ def run() -> int:
             "; ".join(problems) if problems
             else "faq.q5/q6.release.signin: legal's sign-in sentences verbatim")
 
+    # Approved mon.sweep.faq19 pricing is staged only on the held release
+    # branch. Keep the renewal/cancellation and account-deletion disclosures
+    # beside the free-month claim; do not weaken the App Store URL blockers.
+    pricing_paras = [inline_text(p) for p in re.findall(
+        r"<p\b[^>]*>(.*?)</p>", faq_items.get("Does it cost anything?", ""), flags=re.S)]
+    expected_pricing = ["Ranking, Calibration, tiers, trends, league rosters and the Draft Room don't need a subscription. Finding and sending trades does. You can Like or Pass on your first page of trade cards without one. After that, a subscription starts with 1 month free, then $4.99/month or $24.99/year. Each Apple ID gets the free month once.", 'Founder price: $24.99 a year or $4.99 a month when you subscribe by December 31, 2026. Starting in January 2027, new members pay $34.99 a year or $6.99 a month. Keep this price on your plan while your subscription stays active. If you switch plans or your subscription ends, you may lose the Founder price.', 'The subscription renews automatically until cancelled. Cancel in your Apple ID settings at least 24 hours before the free month or the current period ends. Billing, cancellation and refunds are handled by Apple.', "Deleting your account doesn't cancel an active subscription. To stop future charges, cancel it in your Apple ID settings first.", 'Without a subscription, Settings stays open: your account, Download my data, Delete account, Sign out, Terms, Privacy and the contact address.']
+    r.check("RELFLIP-faq-subscription[faq.html]", pricing_paras == expected_pricing,
+            "approved pricing, renewal/cancellation, deletion or free-surfaces copy changed")
+
     # ── RELFLIP: the 11-18 web release flip (onboarding-eng) ─────────────
     # Copy: marketing-lead-copy.md §1 m3.web.mobile_cta, §6 addenda 7-8
     # m3.web.espn_mfl_cta (+ .link) and §2 faq.q3.release. The App Store URL

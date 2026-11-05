@@ -1,3 +1,10 @@
+## 2026-11-04 — F-152 approved pricing FAQ staged on held #456
+
+- Based on held release head `f1df1856`; no production publication or flag changes. Scope: [F-152](../docs/plans/f152-pricing-faq.md).
+- Added Q19 plus a structural guard retaining all five approved pricing/renewal/cancellation/deletion/free-surfaces paragraphs. Existing details/summary design retained.
+- Held baseline 240/242; changed branch 241/243. The same two intentional real-App-Store-placeholder checks remain red. Temporary synthetic App Store URL/id fixture: 243/243 green. Negative control altering automatic-renewal sentence: new guard red. All fixture mutations restored; no synthetic URL retained.
+- `git diff --check` clean. No full CI, browser, device, purchase or external account changes. Held branch must first absorb current main and real verified App Store identifiers before release.
+
 ## 2026-10-15 — #326 value core v4, #328 live-deck filters, #327 Calibration Yes/No
 
 - #326: CI 4/4 green on `fd805933`. Value-core, grading and fit suites 230 passed; the redundancy test gains the superflex third-QB and QB-for-QB cases.
