@@ -1,3 +1,60 @@
+## 2026-11-04 — #601 independent-review completion
+
+Expanded coverage enumerates every test suite referencing export_user_data or
+its export helpers, plus account-rights HTTP and candidate/packed evidence
+codecs. Corrected only obsolete raw-page/malformed-feature assertions; owned
+metadata, unchanged stored data and valid safe JSON's verbatim representation
+are now positive controls. Initial reproduction was 8 failing assertions /
+1 pass; the first 19-suite expanded run then passed 914 with 2 PG-only skips.
+
+- Final **23-file run: 997 passed, 5 PG-only skips in 125.82 s**. No full
+  backend suite was run. The exact caller list was generated from source;
+  candidate_pack, evidence_pack and packed_evidence suites are included.
+- Private columns are projected out in SQL before SQLAlchemy decompression.
+  The corrupt-page regression proves the decoder is never invoked, while
+  owned cache metadata remains JSON serializable. It failed before projection.
+- PostgreSQL alias regression reproduced **DeadlockDetected** with caller-first
+  locking. The caller and row owners are now locked together in stable order;
+  existing single-user guard behavior remains. The test models another worker
+  by invoking the actual DB deletion transaction without an in-process lease.
+- Final disposable socket-only PostgreSQL privacy + first-init files:
+  **26 passed, 1 SQLite-DDL-only skip in 11.26 s**. Includes all new owner/alias
+  races, current shared-connection paths and corrupt-cache projection case.
+  Synthetic schemas only; cluster stopped.
+- Whitespace check passes; no flags/knobs/production changes. Independent
+  review and exact-head GitHub CI remain required on the updated PR.
+
+## 2026-11-04 — Privacy export and board-history owner follow-ups
+
+Fresh upstream main `065a1ee6`; queried 54 open PRs before implementation and
+found no duplicate fix. Scope/code-walk/checklist:
+`docs/plans/privacy-export-board-history-followups/`.
+
+- Account export omits mixed-owner raw internal generation/recovery payloads,
+  filters inline partner features/valuation, nulls malformed private JSON and
+  unoriented shared-match valuation. Owned metadata/history/actions remain;
+  stored evidence, auth gates, schema, flags and model knobs are unchanged.
+- Private board-history writes fence each actual owner and revalidate current
+  board timestamp/values in the same transaction, skipping deleted/stale held
+  input. Existing caller lock remains, including its AST protocol checks.
+- Eight-file targeted SQLite run: **237 passed, 2 PG-only skips in 22.87 s**.
+  Disposable socket-only PostgreSQL new suite: **10 passed in 2.61 s**; owner
+  deletion blocks until the history writer commits, then wipes its rows. Both
+  caller and no-caller/weekly cases run; deletion-before-write and re-signup
+  stale input are covered. Synthetic data only; cluster stopped afterward.
+- Negative controls: diagnostic payload pass-through (**1 failed**), inline
+  private JSON pass-through (**1 failed**), held-owner validation disabled
+  (**2 failed**); all restored. Privacy manifest and all 14 EAS exclusion
+  patterns pass. Feature JSON unchanged; whitespace check passes.
+- The older diagnostic-export test now pins metadata-only export; the roster
+  fixture creates real users before private member boards. No privacy guard
+  is bypassed. No full local suite, production mutation, provider call, build
+  or main merge. CI and independent review remain required on the PR.
+
+Adjacent checklist: documented pre-scrub stored-page window remains a separate
+product/legal policy item; historical cleanup, backup/native checks and dark
+feature activation require their existing operations/device evidence.
+
 ## 2026-11-04 — Held parser child updated with final co-owner fixture prerequisite
 
 ## 2026-11-04 — Public Calibration: recover a failed read

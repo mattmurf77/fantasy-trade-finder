@@ -398,13 +398,26 @@ def test_export_strips_only_prepared_runtime_preserving_legacy_features_and_text
     assert rows(engine, db.deck_impressions_table) == original
 
 
-@pytest.mark.parametrize("raw", [None, "", "not-json", "null", "[]", "3", '"legacy"',
-                                '{ "legacy": true, "value": 1.0 }'])
-def test_export_without_prepared_runtime_preserves_original_features_verbatim(engine, raw):
+@pytest.mark.parametrize("raw", [None, "", "not-json", "null", "[]", "3", '"legacy"'])
+def test_export_withholds_malformed_private_features_but_keeps_owned_metadata(engine, raw):
     _insert_export_impression(engine, raw)
+    original = rows(engine, db.deck_impressions_table)
+    exported = accounts.export_user_data(OWNER)["tables"]["deck_impressions"][0]
+    assert exported["features_json"] is None
+    assert exported["impression_id"] == "export-impression"
+    assert exported["trade_hash"] == "own-terms" and exported["user_id"] == OWNER
+    assert rows(engine, db.deck_impressions_table) == original
+
+
+@pytest.mark.parametrize("raw", ['{ "legacy": true, "value": 1.0 }',
+                                '{ "shape": "1x1", "prepared_inventory_id": "own-inventory" }'])
+def test_export_preserves_safe_owned_features_verbatim_when_no_filter_is_needed(engine, raw):
+    _insert_export_impression(engine, raw)
+    original = rows(engine, db.deck_impressions_table)
     exported = accounts.export_user_data(OWNER)["tables"]["deck_impressions"][0]
     assert exported["features_json"] == raw
-    assert type(exported["features_json"]) is type(raw)
+    assert exported["impression_id"] == "export-impression" and exported["trade_hash"] == "own-terms"
+    assert rows(engine, db.deck_impressions_table) == original
 
 
 def adoption(inventory_id, now=NOW, **kwargs):

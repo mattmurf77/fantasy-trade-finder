@@ -1327,7 +1327,15 @@ def test_account_deletion_removes_page_rows_and_export_stays_json(file_db):
     db_module.save_trade_page({**_row(time.time(), "theirs"), "user_id": "someone_else"})
     archive = accounts.export_user_data(UID)
     assert [r["deck_job_id"] for r in archive["tables"]["trade_page_store"]] == ["mine"]
-    assert archive["tables"]["trade_page_store"][0]["pages_blob"]["cards"] == ["mine"]
+    own = archive["tables"]["trade_page_store"][0]
+    assert own["user_id"] == UID and own["state"] == "ready"
+    assert own["card_count"] > 0 and own["stored_bytes"] > 0
+    assert "pages_blob" not in own and "evidence_blob" not in own
+    # The export boundary omits mixed-owner payloads without changing the
+    # stored page needed by serving/evidence readers.
+    with file_db.connect() as conn:
+        assert conn.execute(select(db_module.trade_page_store_table.c.pages_blob).where(
+            db_module.trade_page_store_table.c.user_id == UID)).scalar_one()["cards"] == ["mine"]
     json.dumps(archive)                      # the export route jsonifies it
     accounts.delete_user_data(UID)
     with file_db.connect() as conn:

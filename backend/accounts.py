@@ -1514,34 +1514,22 @@ def _rows_as_dicts(rows, omit: tuple = ()) -> list[dict]:
     ]
 
 
-def _export_candidate_set(row: dict) -> None:
-    """A packed deck_candidate_sets row (S8, eng-evidence-contract §9) exports
-    the reader's unpacked JSON in candidates_json, not the bytes; a pack that
-    can't be read exports candidates_json None and its error."""
-    packed = row.pop("candidates_packed", None)
-    if packed is None:
-        return
-    from .eval import evidence_pack
-    try:
-        _run, members = evidence_pack.unpack_candidates(evidence_pack.PackedCandidates(
-            row.get("cand_pack_version"), bytes(packed)))
-    except evidence_pack.PackIntegrityError as e:
-        row.update(candidates_json=None, candidates_pack_error=str(e))
-    else:
-        row["candidates_json"] = json.dumps(members)
-
-
-def _export_evidence_pack(row: dict) -> None:
-    """A deck_evidence_packs row exports its unpacked run metadata and cards
-    (`run`, `cards`), not cards_blob; an unreadable pack exports its error."""
-    from .eval import evidence_pack
-    blob = row.pop("cards_blob", None)
-    try:
-        row["run"], row["cards"] = evidence_pack.unpack_run(evidence_pack.PackedRun(
-            row["pack_version"], row["header_json"], bytes(blob or b""), row["checksum"],
-            row["card_count"]))
-    except evidence_pack.PackIntegrityError as e:
-        row["pack_error"] = str(e)
+# Internal generation/recovery payloads mix the viewer's data with other
+# managers' private boards, preferences and inferred intent. Export the owned
+# row's metadata, not those payloads (the existing prepared-inventory rule).
+_EXPORT_INTERNAL_PAYLOADS = {
+    "deck_candidate_sets": ("candidates_json", "candidates_packed"),
+    "deck_diagnostic_snapshots": ("payload_json",),
+    "deck_evidence_packs": ("header_json", "cards_blob"),
+    "trade_page_store": ("pages_blob", "evidence_blob"),
+    "bakeoff_runs": ("config_json", "arms_json", "agreement_json", "groups_json"),
+    "grading_sessions": ("source_json", "error_json"),
+    "trade_impressions": ("mismatch_score", "composite_score", "likes_you"),
+    "trade_policy_shadow": ("reason", "eligible", "effective_floor", "policy_floor",
+                            "personal_opportunity", "trade_confidence"),
+}
+_EXPORT_TABLES = tuple((key, table, col, omit + _EXPORT_INTERNAL_PAYLOADS.get(key, ()))
+                       for key, table, col, omit in _EXPORT_TABLES)
 
 
 # Calibration (legal R28.26 #9, MUST): a grader's own cards are exported
@@ -1571,17 +1559,32 @@ def _export_grading_arms(raw):
 
 
 def _export_deck_features(raw):
-    """Remove only prepared recovery evidence; retain the existing text contract."""
-    if not isinstance(raw, str):
-        return raw
-    try:
-        features = json.loads(raw)
-    except (ValueError, TypeError):
-        return raw
-    if not isinstance(features, dict) or "prepared_runtime" not in features:
-        return raw
-    del features["prepared_runtime"]
-    return json.dumps(features)
+    """Retain card/package history without hidden partner/debug evidence.
+    Malformed private JSON is withheld rather than returned unfiltered."""
+    features = _loads_dict(raw) if isinstance(raw, str) else raw
+    if not isinstance(features, dict):
+        return None
+    original = features
+    omitted = {"prepared_runtime", "owner_request", "owner_experiment", "owner_generation",
+               "roster_evaluation", "fit", "fit_diag", "match_context", "breaker_shadow"}
+    features = _overhaul_card_without_partner_fields(features)
+    features = {k: v for k, v in features.items() if k not in omitted}
+    features.pop("standing_offer", None)
+    if "surplus_margin" in features:
+        features["surplus_margin"] = None
+    if isinstance(features.get("negmem"), dict):
+        features["negmem"] = {k: v for k, v in features["negmem"].items() if k != "exempt"}
+    return raw if isinstance(raw, str) and features == original else json.dumps(features)
+
+
+def _export_valuation(raw):
+    """An owned viewer's valuation, with every engine's partner evidence removed."""
+    from .deletion_scrub import redact_valuation
+    value = _loads_dict(raw) if isinstance(raw, str) else raw
+    if not isinstance(value, dict):
+        return None
+    filtered = redact_valuation(value)
+    return raw if isinstance(raw, str) and filtered == value else json.dumps(filtered)
 
 
 def export_user_data(sleeper_user_id: str,
@@ -1602,17 +1605,20 @@ def export_user_data(sleeper_user_id: str,
         user_ids, acct_ids = _user_data_scope(conn, uid, account_id)
         for key, tbl_attr, col, omit in _EXPORT_TABLES:
             tbl = getattr(db, tbl_attr)
+            # Project before SQLAlchemy reads/decodes omitted payloads. A
+            # corrupt or huge internal cache is not part of the user's export.
+            columns = [column for column in tbl.columns if column.name not in omit]
             tables[key] = _rows_as_dicts(conn.execute(
-                select(tbl).where(tbl.c[col].in_(user_ids))).fetchall(), omit)
+                select(*columns).where(tbl.c[col].in_(user_ids))).fetchall())
             if key == "deck_impressions":
                 for row in tables[key]:
                     row["features_json"] = _export_deck_features(row["features_json"])
-            elif key == "deck_candidate_sets":
+                    row["valuation_json"] = _export_valuation(row["valuation_json"])
+                    for col in ("base_score", "final_score", "source_like_impression_id"):
+                        row[col] = None
+            elif key == "trade_proposals":
                 for row in tables[key]:
-                    _export_candidate_set(row)
-            elif key == "deck_evidence_packs":
-                for row in tables[key]:
-                    _export_evidence_pack(row)
+                    row["valuation_json"] = _export_valuation(row["valuation_json"])
             elif key == "grading_cards":
                 for row in tables[key]:
                     row["arms_json"] = _export_grading_arms(row["arms_json"])
@@ -1633,6 +1639,11 @@ def export_user_data(sleeper_user_id: str,
         ):
             tbl = getattr(db, name + "_table")
             tables[name] = _rows_as_dicts(conn.execute(select(tbl).where(predicate)).fetchall(), omit)
+            if name == "trade_matches":
+                # A shared snapshot's viewer can be the other party; there is
+                # no proven export-owner orientation for its private boards.
+                for row in tables[name]:
+                    row["match_valuation_json"] = None
 
         for name, omit in (("sessions", ("token_hash",)), ("entitlements", ()),
                            ("subscription_events", ("payload", "process_error"))):
