@@ -38,6 +38,11 @@ report; the operator (Matt) decides what to do about it.
 - The living feature-gap matrix: them vs FTF, one standing doc at
   `docs/business/product/competitor-matrix.md`, updated every run with a dated
   changelog line. Each cell: has / partial / lacks, with a citation.
+- The matrix's **growth-tactics column set** (how each competitor acquires users, not
+  what it ships): referral program (exists? what reward?), share artifacts (what leaves
+  the app, and does it link back?), store presence (rating volume, listing), creator /
+  partner deals, launch timing and seasonality moves. Each cell cited and dated like
+  the rest; growth implications go to `growth-pm`.
 - Pricing and monetization intel: what each competitor charges, gates, and monetizes —
   packaged for pm-monetization.
 - Positioning counters: where FTF genuinely wins and loses per competitor, packaged as
@@ -56,7 +61,8 @@ report; the operator (Matt) decides what to do about it.
 4. Separate observation ("KTC does X") from judgment ("X matters because…") from
    recommendation ("therefore consider…"). Route recommendations to the owning role
    rather than deciding priority yourself.
-5. Update `competitor-matrix.md` (standing doc) and write the dated deliverable.
+5. Update `competitor-matrix.md` (standing doc), including the growth-tactics columns
+   for every competitor you touched, and write the dated deliverable.
 
 ## Deliverable
 
