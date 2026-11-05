@@ -1564,6 +1564,7 @@ def _export_deck_features(raw):
     features = _loads_dict(raw) if isinstance(raw, str) else raw
     if not isinstance(features, dict):
         return None
+    original = features
     omitted = {"prepared_runtime", "owner_request", "owner_experiment", "owner_generation",
                "roster_evaluation", "fit", "fit_diag", "match_context", "breaker_shadow"}
     features = _overhaul_card_without_partner_fields(features)
@@ -1573,14 +1574,17 @@ def _export_deck_features(raw):
         features["surplus_margin"] = None
     if isinstance(features.get("negmem"), dict):
         features["negmem"] = {k: v for k, v in features["negmem"].items() if k != "exempt"}
-    return json.dumps(features)
+    return raw if isinstance(raw, str) and features == original else json.dumps(features)
 
 
 def _export_valuation(raw):
     """An owned viewer's valuation, with every engine's partner evidence removed."""
     from .deletion_scrub import redact_valuation
     value = _loads_dict(raw) if isinstance(raw, str) else raw
-    return json.dumps(redact_valuation(value)) if isinstance(value, dict) else None
+    if not isinstance(value, dict):
+        return None
+    filtered = redact_valuation(value)
+    return raw if isinstance(raw, str) and filtered == value else json.dumps(filtered)
 
 
 def export_user_data(sleeper_user_id: str,
@@ -1601,8 +1605,11 @@ def export_user_data(sleeper_user_id: str,
         user_ids, acct_ids = _user_data_scope(conn, uid, account_id)
         for key, tbl_attr, col, omit in _EXPORT_TABLES:
             tbl = getattr(db, tbl_attr)
+            # Project before SQLAlchemy reads/decodes omitted payloads. A
+            # corrupt or huge internal cache is not part of the user's export.
+            columns = [column for column in tbl.columns if column.name not in omit]
             tables[key] = _rows_as_dicts(conn.execute(
-                select(tbl).where(tbl.c[col].in_(user_ids))).fetchall(), omit)
+                select(*columns).where(tbl.c[col].in_(user_ids))).fetchall())
             if key == "deck_impressions":
                 for row in tables[key]:
                     row["features_json"] = _export_deck_features(row["features_json"])

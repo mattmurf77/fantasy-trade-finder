@@ -965,14 +965,14 @@ The job row is deleted when both are done. The traced stores are stage 3: `SCRUB
 ### Private board-history writes and account export
 
 `roster_history.snapshot_league_boards` may capture every manager in a league.
-`database.upsert_board_snapshots` therefore fences every row's actual owner,
-in stable order, then re-reads current board inputs under the same transaction
+`database.upsert_board_snapshots` therefore fences the caller and every row's actual owner
+together in stable order, then re-reads current board inputs under the same transaction
 and rejects deleted/stale held inputs. A concurrent deletion either commits
 first (no write) or follows the writer and deletes its committed rows. Caller
 leases alone cannot authorize private writes for another manager.
 
 Account export retains owned metadata/actions but never publishes mixed-owner
 internal generation/recovery payloads. `accounts._EXPORT_INTERNAL_PAYLOADS`
-centralizes column omissions; inline feature/valuation filters preserve the
+centralizes SQL column projections before payload deserialization; inline feature/valuation filters preserve the
 viewer's record while withholding partner evidence and malformed private JSON.
 The filter operates on detached copies and does not rewrite stored evidence.

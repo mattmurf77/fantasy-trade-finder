@@ -47,12 +47,12 @@ separately, without treating old plans as current production evidence.
 
 - `backend/accounts.py:1520`: internal mixed-owner payload columns are omitted
   centrally before any row leaves export. `:1561` withholds malformed inline
-  JSON and hidden partner/debug fields; `:1579` reuses engine valuation
-  redaction; `:1639` removes unoriented shared-match valuation. Owner/alias
+  JSON and hidden partner/debug fields; `:1580` reuses engine valuation
+  redaction; `:1646` removes unoriented shared-match valuation. Owner/alias
   selection, credentials exclusions, packages/actions and stored data remain.
-- `backend/database.py:15396`: caller guard remains first; SQLite also fences
-  no-caller weekly writes. `:15416` locks actual owners in stable order;
-  `:15420` re-reads the captured board source through the same connection;
+- `backend/database.py:15404`: caller guard remains first; SQLite also fences
+  no-caller weekly writes. `:15424` locks actual owners in stable order;
+  `:15428` re-reads the captured board source through the same connection;
   mismatched timestamp/rounded Elo or missing owners skip before any write.
 - Final scoped SQLite run: **237 passed, 2 PG-only skips in 22.87 s**, across
   export/history, account rights/deletion, roster history, session-init
@@ -69,3 +69,26 @@ separately, without treating old plans as current production evidence.
 See [scoped release checklist](release-checklist.md) for adjacent policy and
 operator/device evidence items; the documented pre-scrub serving window is
 unchanged by agreement with the launch coordinator. CI/review remain pending.
+
+## Independent-review corrections
+
+- Export columns are projected before SQLAlchemy deserializes them; a corrupt
+  or huge omitted cache cannot force decoding. A corrupt-page regression
+  installs a decoder that raises if called: failed before the SQL projection,
+  passed afterward while preserving owned metadata and JSON serialization.
+- The caller and all private row owners are acquired together in stable user
+  order by the existing live-user guard. An actual cross-worker PostgreSQL
+  alias test reproduced `DeadlockDetected` with caller-first acquisition;
+  the corrected ordering completes both write and deletion and leaves no
+  private history. Default single-user guard behavior remains unchanged.
+- All export-user-data caller suites and candidate/packed evidence suites
+  are included in the final expanded run. Obsolete page-payload/malformed
+  JSON expectations now pin privacy withholding plus owned row metadata and
+  unchanged stored data. Valid safe JSON remains verbatim.
+
+Final review-completion evidence: **997 passed / 5 PostgreSQL-only skips** in
+23 targeted files (all export callers and packed/candidate codecs plus caller
+fencing/first-init/history/analytics safety). PostgreSQL privacy + first-init:
+**26 passed / 1 SQLite-DDL-only skip**. Corrupt-payload projection and alias
+ordering regressions were each reproduced failing before correction. No full
+backend suite; exact-head CI remains required.

@@ -194,3 +194,91 @@ def test_pg_board_owner_fence_spans_history_write_and_concurrent_deletion(engine
     finally:
         release.set()
         event.remove(engine, "before_cursor_execute", observe)
+
+
+def test_omitted_corrupt_page_payloads_are_never_deserialized_during_export(engine, monkeypatch):
+    table = db.trade_page_store_table
+    with engine.begin() as conn:
+        seed(conn, table, "corrupt-private-page", user_id=ME, deck_job_id="owned-corrupt-deck",
+             pages_blob=b"not-a-zlib-page", evidence_blob=b"not-a-zlib-evidence",
+             card_count=7, stored_bytes=123, state="ready")
+    decoded = []
+    def forbidden_decode(self, value, dialect):
+        decoded.append(value)
+        raise AssertionError("export must project out private payloads before decoding")
+    monkeypatch.setattr(db.CompressedJSON, "process_result_value", forbidden_decode)
+    archive = accounts.export_user_data(ME)
+    (row,) = archive["tables"]["trade_page_store"]
+    assert row["user_id"] == ME and row["deck_job_id"] == "owned-corrupt-deck"
+    assert row["card_count"] == 7 and row["stored_bytes"] == 123 and row["state"] == "ready"
+    assert "pages_blob" not in row and "evidence_blob" not in row
+    assert not decoded
+    json.dumps(archive)
+
+
+def test_pg_caller_and_board_aliases_lock_in_deletion_order(engine):
+    """The DB fence also works across workers: a lexically later caller
+    cannot lock ahead of the earlier owner in its deletion alias set."""
+    if engine.dialect.name != "postgresql":
+        pytest.skip("PG alias lock-order interleaving")
+    from sqlalchemy import event
+    early, account_id = "000-private-owner", "private-board-alias"
+    late = accounts.account_user_id(account_id)
+    assert early < late
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table), [{"sleeper_user_id": early}, {"sleeper_user_id": late}])
+        seed(conn, db.accounts_table, account_id, account_id=account_id, sleeper_user_id=early)
+    _board(engine, owner=early)
+    held = {**_held_board(), "user_id": early}
+    locked, release, deleting = threading.Event(), threading.Event(), threading.Event()
+    role = threading.local()
+    delete_pid = []
+
+    def after(conn, cursor, statement, parameters, context, executemany):
+        if (getattr(role, "value", None) == "write" and not locked.is_set()
+                and "users" in statement and "FOR KEY SHARE" in statement):
+            locked.set()
+            assert release.wait(10)
+
+    def before(conn, cursor, statement, parameters, context, executemany):
+        if getattr(role, "value", None) == "delete" and not delete_pid:
+            delete_pid.append(conn.connection.driver_connection.get_backend_pid())
+            deleting.set()
+
+    def write():
+        role.value = "write"
+        return db.upsert_board_snapshots([held], live_user=late)
+
+    def delete():
+        role.value = "delete"
+        # Deliberately bypass the in-process lease to model another worker;
+        # the production deletion transaction retains its actual alias locks.
+        return accounts._delete_user_data(early)
+
+    event.listen(engine, "after_cursor_execute", after)
+    event.listen(engine, "before_cursor_execute", before)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            writer = executor.submit(write)
+            assert locked.wait(10)
+            deletion = executor.submit(delete)
+            try:
+                assert deleting.wait(10)
+                waiting = False
+                for _ in range(500):
+                    with engine.connect() as conn:
+                        waiting = conn.execute(text("SELECT wait_event_type = 'Lock' FROM pg_stat_activity WHERE pid = :pid"),
+                                               {"pid": delete_pid[0]}).scalar()
+                    if waiting:
+                        break
+                    threading.Event().wait(0.01)
+                assert waiting
+            finally:
+                release.set()
+            assert writer.result(timeout=10)["inserted"] == 1
+            deletion.result(timeout=10)
+        assert not _history(engine)
+    finally:
+        release.set()
+        event.remove(engine, "after_cursor_execute", after)
+        event.remove(engine, "before_cursor_execute", before)

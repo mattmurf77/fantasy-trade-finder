@@ -5948,7 +5948,7 @@ class AccountGone(Exception):
     was deleted (or never written). Nothing was written."""
 
 
-def _lock_live_user(conn, user_id: str) -> None:
+def _lock_live_user(conn, user_id: str, *, related_user_ids=()) -> None:
     """Lock `user_id`'s users row for the rest of this transaction, or raise
     AccountGone. Must be the transaction's first statement.
 
@@ -5957,12 +5957,20 @@ def _lock_live_user(conn, user_id: str) -> None:
     commits first, and the deletion then removes it, or sees the row gone.
     FOR KEY SHARE doesn't block ordinary updates of the row (record_event's).
     SQLite takes its write lock first instead (win_now_store._lock_live_user).
+    `related_user_ids` lets private multi-owner writers acquire the caller and
+    owners together in deletion's stable order. Only a missing caller raises;
+    the writer separately skips missing related owners.
     """
     if conn.dialect.name == "sqlite":
         conn.exec_driver_sql("BEGIN IMMEDIATE")
-    if conn.execute(select(users_table.c.sleeper_user_id)
-                    .where(users_table.c.sleeper_user_id == user_id)
-                    .with_for_update(read=True, key_share=True)).first() is None:
+    # A private multi-owner writer must take the caller and owners together,
+    # in deletion's stable alias order, never caller-first then other aliases.
+    ids = sorted({user_id, *related_user_ids})
+    locked = set(conn.execute(select(users_table.c.sleeper_user_id)
+                    .where(users_table.c.sleeper_user_id.in_(ids))
+                    .order_by(users_table.c.sleeper_user_id)
+                    .with_for_update(read=True, key_share=True)).scalars())
+    if user_id not in locked:
         raise AccountGone()
 
 
@@ -15407,7 +15415,7 @@ def upsert_board_snapshots(rows: list[dict], *, live_user: str | None = None) ->
     t = league_board_history_table
     with engine.begin() as conn:
         if live_user:
-            _lock_live_user(conn, live_user)
+            _lock_live_user(conn, live_user, related_user_ids={r["user_id"] for r in rows})
         if not live_user and conn.dialect.name == "sqlite":
             conn.exec_driver_sql("BEGIN IMMEDIATE")
         # These are private boards of the actual row owners, not only the

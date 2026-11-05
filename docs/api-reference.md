@@ -1659,6 +1659,8 @@ The version-2 account export includes owned diagnostic/evidence **metadata**,
 not mixed-owner internal payloads. Raw diagnostic payloads, candidate lists,
 bakeoff JSON, packed evidence headers/cards, page-cache blobs and grading
 building sources are omitted, as prepared recovery payloads already are.
+Omitted columns are excluded in SQL, before payload decompression/deserialization.
+Safe inline JSON text stays byte-for-byte unchanged when no filtering is needed.
 Inline deck features omit hidden generation/fit/partner evidence; malformed
 private JSON is null. Deck and confirmed-proposal valuation JSON keeps the
 viewer's data and consensus values with partner-board/preference fields removed.

@@ -1515,7 +1515,7 @@ Weekly **complete** board snapshots per member (C5/C6, YR-3 — ADR-011). Delibe
 | `board_updated_at` | str, nullable | `member_rankings.updated_at` at capture — distinguishes "re-ranked this week" from "re-snapshotted an unchanged board"; "Your calls" is built on exactly that distinction |
 | `source` | str | `'sync'` \| `'weekly'` \| `'backfill'` |
 
-Constraint: `uq_board_snapshot` on `(user_id, league_id, scoring_format, period_key)`. Indexes: `ix_lbh_league_period`, `ix_lbh_user_period`. Each private snapshot write locks every actual owner in stable user-id order (not only the sync caller) and revalidates its `member_rankings` timestamp and rounded Elo values in the same transaction. Missing/deleted owners and stale inputs, including pre-deletion inputs held across re-signup, are skipped. SQLite takes `BEGIN IMMEDIATE`; PostgreSQL holds users-row KEY SHARE locks through commit. No platform/network read holds these locks.
+Constraint: `uq_board_snapshot` on `(user_id, league_id, scoring_format, period_key)`. Indexes: `ix_lbh_league_period`, `ix_lbh_user_period`. Each private snapshot write locks its caller and every actual owner together in stable user-id order and revalidates its `member_rankings` timestamp and rounded Elo values in the same transaction. Missing/deleted owners and stale inputs, including pre-deletion inputs held across re-signup, are skipped. SQLite takes `BEGIN IMMEDIATE`; PostgreSQL holds users-row KEY SHARE locks through commit. No platform/network read holds these locks.
 
 ---
 
@@ -2415,7 +2415,8 @@ Owned rows remain in export v2. Internal mixed-owner payload columns from
 `deck_candidate_sets`, `deck_diagnostic_snapshots`, `deck_evidence_packs`,
 `trade_page_store`, `bakeoff_runs` and `grading_sessions` are omitted by
 `accounts._EXPORT_INTERNAL_PAYLOADS`, along with private shadow-policy and
-blended impression fields. Inline feature/valuation partner evidence is
+blended impression fields. SQL projects only non-omitted columns, so hidden
+cache/evidence payloads are not fetched or decompressed by export. Inline feature/valuation partner evidence is
 filtered; malformed private JSON is null. Shared match valuation is null
 because its viewer may be the other party. Own rankings, row metadata, trade
 packages, grades/tags, actions and outcomes remain. This is an export boundary,

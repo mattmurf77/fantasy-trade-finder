@@ -1,3 +1,29 @@
+## 2026-11-04 — #601 independent-review completion
+
+Expanded coverage enumerates every test suite referencing export_user_data or
+its export helpers, plus account-rights HTTP and candidate/packed evidence
+codecs. Corrected only obsolete raw-page/malformed-feature assertions; owned
+metadata, unchanged stored data and valid safe JSON's verbatim representation
+are now positive controls. Initial reproduction was 8 failing assertions /
+1 pass; the first 19-suite expanded run then passed 914 with 2 PG-only skips.
+
+- Final **23-file run: 997 passed, 5 PG-only skips in 125.82 s**. No full
+  backend suite was run. The exact caller list was generated from source;
+  candidate_pack, evidence_pack and packed_evidence suites are included.
+- Private columns are projected out in SQL before SQLAlchemy decompression.
+  The corrupt-page regression proves the decoder is never invoked, while
+  owned cache metadata remains JSON serializable. It failed before projection.
+- PostgreSQL alias regression reproduced **DeadlockDetected** with caller-first
+  locking. The caller and row owners are now locked together in stable order;
+  existing single-user guard behavior remains. The test models another worker
+  by invoking the actual DB deletion transaction without an in-process lease.
+- Final disposable socket-only PostgreSQL privacy + first-init files:
+  **26 passed, 1 SQLite-DDL-only skip in 11.26 s**. Includes all new owner/alias
+  races, current shared-connection paths and corrupt-cache projection case.
+  Synthetic schemas only; cluster stopped.
+- Whitespace check passes; no flags/knobs/production changes. Independent
+  review and exact-head GitHub CI remain required on the updated PR.
+
 ## 2026-11-04 — Privacy export and board-history owner follow-ups
 
 Fresh upstream main `065a1ee6`; queried 54 open PRs before implementation and
