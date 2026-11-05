@@ -28,6 +28,8 @@ Modules:
   first_deck  — MOD-M1's first-deck gate: a brand-new user's first deck
                 through the live routes (driven by scripts/deck_eval.py)
   insult_rule — the D-055 insult rule, a pure function
+  first_deck_audit — MOD-M1's blind audit sheet of the insult rule (task 3):
+                build it from a deck_eval run, then score the operator's marks
 
 Read-only against product tables: this package never writes to
 deck_impressions/deck_outcomes or any other product table. Its only writes
