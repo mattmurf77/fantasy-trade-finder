@@ -9096,6 +9096,18 @@ deliberately decoupled for that reason.
 
 **Caveat (historical):** at the time this table was written there was no automated regression suite, so a change that broke one of these flows was detectable only by manual re-run. That gap is closed — see the pytest suite note above. [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) Q-002 (pytest adoption) is resolved.
 
+## 2026-11-04 — MOD-M1 evaluation tools integrated on current launch main
+
+Merged exact #475`5c512730` and #476`0f40d087` into isolated main`065a1ee6`, preserving original commits. No runtime server/database/client/flag changes. [Preflight](../docs/plans/mod-m1-evaluation-preflight.md) records actual November10 freeze/connected-league/privacy prerequisites and distinguishes remaining B-DK zero-violation evidence from the insult-rate tool.
+
+- Original combined baseline **38passed/1failed**: synthetic verified token lacked a minted users row, so the real first-init guard aborted connection persistence and SF/TEP was misreported as1QB. Scratch evaluator + plain live-flow fixture now seed the user as actual auth minting does, retaining guard. The card-for-card first30 assertion passes. Served response count and internal generated inventory are now distinct fields, retaining live-count and filter-effect assertions.
+- Final focused evaluator/insult-rule/audit-sheet/B-DK/deck-quality/bilateral-presentment/first-init run: **314passed,2PG-only skips in19.43s** before the final exact-engine-path guard refinement; final exact-path rerun **314 passed, 2 PostgreSQL-only skips in 16.67s**. No full local suite or production eval run.
+- Final real-payload follow-up: **315 passed, 2 PostgreSQL-only skips in 18.43s** across the same seven files. The fifth named negative control restores the PICK manager suffix and fails the intended blindness assertion, then source is restored.
+- Real-payload blind-sheet correction: actual `_owned_pick_label` can embed the original manager name; the audit display now omits the PICK-only `(from …)` suffix while preserving year/round/slot/value and private source data. Regression calls the real formatter with a nested identifying name.
+- Four named negative controls independently RED: shared-output-directory enforcement, report file0600, tracked-report-path rejection, inherited Sentry removal. Source restored. Existing first-run baseline and malformed/unknown-config/scratchDB/blindness/HOLD boundary checks remain.
+- Files use exclusive0600 creation in private0700 directories, tracked overrides rejected; exact canonical scratch path checked for all engines, including normal readonly URI versus similarly prefixed different filename. Synthetic/private artifacts only. No external provider call, production DB/copy, build, activation or model promotion.
+- Original PR ancestry retained; independent review and exact-head GitHub CI required before integration merge. November10 actual gate and November11 operator sheet are not claimed complete by this preparatory run.
+
 ## Custom-Skill Benchmarks
 
 | Skill | Benchmark | Result |
