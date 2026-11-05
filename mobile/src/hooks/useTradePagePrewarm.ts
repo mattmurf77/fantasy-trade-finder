@@ -52,11 +52,19 @@ export function useTradePagePrewarm(): void {
       }).catch(() => { /* background preparation never blocks navigation */ });
     };
     prepare(revision);
+    let lastEditWarm: number | undefined;
     const unsubscribe = onTradePageInputsSettled(() => {
       // Coalesce rapid edits; an older preference read can't win the race.
       const attempt = ++revision;
       clearTimeout(timer);
-      timer = setTimeout(() => { if (current()) prepare(attempt); }, 300);
+      // Ranking gestures may each commit a write. Let an explicit tap run
+      // immediately, but never start another speculative generation per swipe.
+      const delay = lastEditWarm === undefined ? 300 : Math.max(300, 30000 - (Date.now() - lastEditWarm));
+      timer = setTimeout(() => {
+        if (!current()) return;
+        lastEditWarm = Date.now();
+        prepare(attempt);
+      }, delay);
     });
     return () => { cancelled = true; clearTimeout(timer); unsubscribe(); };
   }, [enabled, active, hasToken, switching, isDemo, userId, leagueId, format]);
