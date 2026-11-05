@@ -1,3 +1,57 @@
+## 2026-11-05 — Native organic first-card preparation
+
+Base `dd5058ba`; no runtime flags, deploy, push, purchase or live user write.
+Home/Rank now prepare the active account/league/format organic page after
+session revalidation. Running pregen is followed with active-only adaptive
+polling (40 maximum, 90-second request window); only complete validated
+pages persist. Cancellation/scope replacement preserve the new attempt's
+throttle; ranking invalidation clears obsolete throttle. Passive requests
+carry `X-FTF-Prewarm: 1`, require the server companion before distribution,
+and discard held data on `409 prewarm_requires_tap`. Known enforcing free
+sessions do not use a held page as a preview grant.
+
+- Nine targeted mobile guards PASS: device-first-page (45 assertions),
+  trade-prewarm (19 executed effect cases), trade-first-card-events,
+  fairness-default, results-push, canvas-results, entry-session-identity,
+  paywall-gate (110 assertions), paywall (14 assertions).
+- `tsc --noEmit -p mobile/tsconfig.json` PASS using existing shared dependencies;
+  temporary node_modules symlink removed. `git diff --check` clean.
+- Four negative controls RED, restored: disable completion polling; remove
+  current-context checks; remove preview header; remove enforcing-free
+  held-page guard. Simulated 64.8s completion, wedged deadline, scope race,
+  ranking invalidation and canceled-foreground replacement covered.
+- No native/runtime timing or sub-200ms claim. Physical TestFlight first/repeat
+  timing remains pending; cold network, pinned/anchored searches and the
+  existing 600ms cold page-push fallback remain honest waits. No full backend
+  suite or simulator was run. See docs/plans/find-trade-first-card-prewarm.md.
+
+## 2026-11-05 — Find a Trade exact assignment reuse
+
+On base/deployed `dd5058ba`, counts-only production diagnostics confirmed a
+10,007 ms first-card timeout, a 64,812 ms / 92-card generation, 29,662 ms owner
+arm generation of 2,785 candidates, and first durable batch at 64,567 ms.
+No runtime flags, preparation, billing policy or production state were changed.
+
+- **279 passed in 17.69 s**, ten targeted files: assignment memo, roster,
+  roster wiring/floor kick, outlook utility, mutual benefit, owner publication,
+  bilateral routes/revision routes and owner-only routes. No full suite.
+- Eleven new regressions cover exact cached/uncached structural and outlook
+  output (including fresh/stale point data), input changes, independent lists,
+  private context separation, 128-entry eviction, real-card solver reuse and
+  scenario/cut equivalence. A missing-values cache-key negative control failed
+  its changed-value regression; restored source passed the final run.
+- Three unprofiled whole-worker runs per variant, same synthetic 432-card /
+  12-slot inputs/config: baseline 4.334/4.989/5.117 s, memo
+  2.659/2.977/3.097 s; medians 4.989 → 2.977 s. Assignment calls
+  8,768 → 2,727. All six exact roster-result and ordered offer-term hashes
+  agree. Memo retained 128 entries / 1,536 asset references / about 81,048
+  bytes of containers, not total process memory. No production-speed claim.
+- No schema, route, wire, event or knob changes; no deployment or native build.
+  Independent review and exact-head GitHub CI remain parent-owned gates.
+
+Scope and limits: `docs/plans/find-trade-assignment-memo/scope.md`. The 29.7 s
+owner-generation phase and cold first-tap readiness remain separate constraints.
+
 ## 2026-11-04 — #601 independent-review completion
 
 Expanded coverage enumerates every test suite referencing export_user_data or

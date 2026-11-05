@@ -40396,6 +40396,10 @@ def _paywall_gate_hook():
         log.exception("paywall gate failed open: %s %s", request.method, rule)
         return None
     if isinstance(result, _paywall_gate.Preview):
+        # A passive device refresh must never spend the user's free page.
+        # The normal gate has already verified identity and authorization.
+        if rule in ("/api/trades/generate", "/api/trades/status") and request.headers.get("X-FTF-Prewarm") == "1":
+            return jsonify({"error": "prewarm_requires_tap"}), 409
         g.paywall_preview = result
         return None
     if result is None:
@@ -40645,8 +40649,14 @@ def _paywall_products(now: datetime) -> list:
     raises). Pure: same `now`, same answer. At or after
     _PAYWALL_PRICE_RISE_AT → the new-subscriber prices."""
     risen = now >= _PAYWALL_PRICE_RISE_AT
-    return [{**p, **_PAYWALL_PRICES[p["product_id"]][1 if risen else 0]}
-            for p in _PAYWALL_PRODUCTS]
+    products = []
+    for product in _PAYWALL_PRODUCTS:
+        founder, standard = _PAYWALL_PRICES[product["product_id"]]
+        row = {**product, **(standard if risen else founder)}
+        if not risen:
+            row["scheduled_us_price"] = standard["display_price"]
+        products.append(row)
+    return products
 
 
 # Tip jar (operator request 2026-08-28): consumable "support the platform"

@@ -94,6 +94,22 @@ def test_first_page_passes_page_two_blocked(gate):
     assert status(client, 0).status_code == 200          # page 1 of the same deck re-serves
 
 
+def test_passive_deck_refresh_preserves_first_preview_for_the_tap(gate):
+    client, *_ = gate
+    headers = {**MOBILE, "X-FTF-Prewarm": "1"}
+    kickoff = client.post("/api/trades/generate", headers=headers,
+                          json={"league_id": LEAGUE, "fairness_threshold": .75})
+    passive_page = status(client, 0, headers=headers)
+    for response in (kickoff, passive_page):
+        assert response.status_code == 409
+        assert response.get_json() == {"error": "prewarm_requires_tap"}
+    assert pg.preview_row(ME) is None
+
+    assert len(ids(status(client, 0))) == PAGE
+    assert pg.preview_row(ME)["pages_served"] == 1
+    assert status(client, PAGE, headers=headers).status_code == 402
+
+
 def test_unpaged_body_capped_to_the_window(gate):
     client, *_ = gate
     r = status(client)
@@ -137,6 +153,7 @@ def test_entitled_user_unaffected(gate):
     client, *_ = gate
     entl.grant(ME, "pro", source="manual_grant")
     assert len(ids(status(client))) == 12
+    assert ids(status(client, 0, headers={**MOBILE, "X-FTF-Prewarm": "1"})) == ids(status(client, 0))
     assert status(client, PAGE).status_code == 200
     assert generate(client).status_code == 200
     assert pg.preview_row(ME) is None

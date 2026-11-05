@@ -70,6 +70,7 @@ import CalibrationScreen from '../screens/CalibrationScreen';
 import LeagueScreen from '../screens/LeagueScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import TopBar from '../components/TopBar';
+import { useTradePagePrewarm } from '../hooks/useTradePagePrewarm';
 
 // Tab definitions. The "Rank" tab fans out into 4 sub-screens — Trios swipe,
 // Tiers (drag-to-bin), Overall Ranks (the editable drag/tap board), and
@@ -686,6 +687,7 @@ const rankTabIcon = (name: IconName) =>
     );
 
 export default function TabNav() {
+  useTradePagePrewarm();
   const [rankMenuOpen, setRankMenuOpen] = useState(false);
   const queryClient = useQueryClient();
   // PRD 01-02: Rank tab is a real destination (navigate, no menu intercept).

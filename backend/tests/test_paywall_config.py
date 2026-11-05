@@ -176,7 +176,7 @@ def test_products_shape(client, monkeypatch):
     assert products[MONTHLY]["trial_period"] == "1 month"
     assert products[MONTHLY]["hero"] is False
     assert set(products[MONTHLY]) == {
-        "product_id", "period", "display_price", "trial_period", "hero"}
+        "product_id", "period", "display_price", "trial_period", "hero", "scheduled_us_price"}
 
     assert products[ANNUAL]["period"] == "annual"
     assert products[ANNUAL]["display_price"] == "$24.99"
@@ -186,7 +186,7 @@ def test_products_shape(client, monkeypatch):
     assert products[ANNUAL]["badge"] == "best_value"
     assert set(products[ANNUAL]) == {
         "product_id", "period", "display_price", "per_month_equiv",
-        "trial_period", "hero", "badge"}
+        "trial_period", "hero", "badge", "scheduled_us_price"}
     # exactly one hero — two would give the client no default selection
     assert sum(1 for p in products.values() if p["hero"]) == 1
 
@@ -578,6 +578,14 @@ def test_naive_now_raises():
     rather than silently pick a timezone."""
     with pytest.raises(TypeError):
         server._paywall_products(datetime(2027, 1, 1, 12, 0))
+
+
+def test_founder_comparison_expires_at_the_scheduled_price_change():
+    before = server._paywall_products(BEFORE)
+    after = server._paywall_products(server._PAYWALL_PRICE_RISE_AT)
+    assert {p["product_id"]: p["scheduled_us_price"] for p in before} == {
+        p["product_id"]: p["display_price"] for p in after}
+    assert all("scheduled_us_price" not in p for p in after)
 
 
 def test_paywall_products_is_pure():

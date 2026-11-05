@@ -673,6 +673,17 @@ check('4i. R28.8 #2: per-month rounds UP, savings rounds DOWN, from live StoreKi
   const s = strip(read('screens/PaywallScreen.tsx'));
   assert(/annualSubLine\(annual, monthly\)/.test(s) && /pkg\?\.product;/.test(s), '[shape] the sub line is fed StoreKit products only');
 });
+check('Founder comparison uses the selected StoreKit price and an actual higher scheduled US price', () => {
+  for (const [current, future] of [[4.99, '$6.99'], [24.99, '$34.99']]) {
+    const pkg = { price: current, currencyCode: 'USD' };
+    eq(copy.founderComparison(pkg, '$' + current, future), future, 'matching Founder package');
+    eq(copy.founderComparison(pkg, '$' + current, undefined), null, 'schedule closed or absent');
+    eq(copy.founderComparison(pkg, future, future), null, 'mismatched current price');
+    eq(copy.founderComparison(pkg, '$' + current, '$' + current), null, 'no discount');
+    eq(copy.founderComparison({ ...pkg, currencyCode: 'CAD' }, '$' + current, future), null, 'currency mismatch');
+    eq(copy.founderComparison(null, '$' + current, future), null, 'StoreKit unavailable');
+  }
+});
 check('4j. R28.8 #2 [shape]: "/year" is the largest price text; the per-month line is smaller; no SAVE badge', () => {
   const s = strip(read('screens/PaywallScreen.tsx'));
   assert(/\{sub \? <ChalkText variant="bodySm">\{sub\}<\/ChalkText> : null\}/.test(s), 'the per-month sub line is not body-sm');
@@ -710,7 +721,13 @@ check('4n. scope §3.4: no "days free", "30 days" or trial_days anywhere in mobi
 check('4o. D10 / scope §3.6: no countdown, days-left, ends-soon or trial-end date in the paywall sources', () => {
   const files = ['screens/PaywallScreen.tsx', 'copy/monetization.ts', 'components/VerifySheet.tsx', 'state/usePaywallGate.ts'];
   for (const f of files) {
-    const s = strip(read(f));
+    // The selected plan can name its scheduled price change. Keep the
+    // countdown/trial-end ban everywhere else, including other date reads.
+    const source = strip(read(f));
+    const s = f === 'screens/PaywallScreen.tsx' ? source
+      .replace('const closesAt = config?.club?.closes_at;', '')
+      .replace("new Date(closesAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })", '')
+      : source;
     const hit = s.match(/days? left|ends? soon|countdown|last chance|trial ends|ends on|expires on|closes_at|expires_at|toLocaleDateString/i);
     assert(!hit, `${f}: "${hit && hit[0]}"`);
   }
@@ -1022,11 +1039,11 @@ check('8a. D2 [executed]: api/trades — a PAGED status call (the P2 prefetch) a
 // The pinned background set: every `background: true` in mobile/src code is
 // here. A new background caller fails 8b until it is added (D2).
 const BACKGROUND_SET = [
-  ['api/trades.ts', /request: \{ background\?: boolean \} \| undefined = page \? \{ background: true \} : undefined,/,
+  ['api/trades.ts', /request: \{ background\?: boolean; headers\?: Record<string, string> \} \| undefined = page \? \{ background: true \} : undefined,/,
     "P2's next-page prefetch (TradesScreen.fetchNextPage's paged getTradeStatus)"],
   ['api/trades.ts', /request: \{ background\?: boolean \} \| undefined = surface === 'shop' \? \{ background: true \} : undefined,/,
     "the Shop's held-Undo pass (ShopOffersBody.commitDismiss)"],
-  ['state/devicePageStore.ts', /res = await generateTrades\(target\.request, \{\}, \{ background: true \}\);/, 'refreshDevicePage'],
+  ['state/devicePageStore.ts', /const PREWARM_REQUEST = \{ background: true, headers: \{ 'X-FTF-Prewarm': '1' \} \};/, 'preview-safe refreshDevicePage request'],
   ['hooks/usePresentationDeck.ts', /void run\(\{ background: true \}\);/, "usePresentationDeck's mount effect"],
   ['hooks/usePresentationDeck.ts', /await getTradeStatus\(job\.job_id, undefined, \{ background: true \}\)/, "usePresentationDeck's poll"],
   [TRADES, /if \(vars\.auto \|\| vars\.research\) \{\s*return generateTrades\(request, \{ searchId: vars\.searchId \}, \{ background: true \}\);\s*\}/,
@@ -1053,6 +1070,10 @@ check('8b. D2 [shape]: the pinned background set; nothing else in mobile/src is 
     eq(n, want[rel] || 0, `\`background: true\` in ${rel} (add a new background caller to BACKGROUND_SET)`);
   }
   const code = strip(read(TRADES));
+  const prewarm = strip(read('state/devicePageStore.ts'));
+  assert(/generateTrades\(target\.request, \{\}, PREWARM_REQUEST\)/.test(prewarm)
+    && /getTradeStatus\(res\.job_id, \{ deck: res\.deck_id \|\| res\.job_id, cursor: 0 \}, PREWARM_REQUEST\)/.test(prewarm),
+    'both passive paths must use the explicit server prewarm guard');
   assert(/await getTradeStatus\(snap\.job_id, \{ deck: snap\.deck_id, cursor: requested \}\)/.test(code),
     'the prefetch is a paged getTradeStatus call (the default makes it background)');
   assert(/return generateTrades\(request, \{ searchId: vars\.searchId \}\);/.test(code),

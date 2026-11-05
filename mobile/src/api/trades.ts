@@ -365,7 +365,7 @@ function normalizeJobSnapshot(raw: any): PagedTradeJobSnapshot {
 export async function generateTrades(
   body: GenerateBody,
   paging?: { searchId?: string },
-  request?: { background?: boolean },
+  request?: { background?: boolean; headers?: Record<string, string> },
 ): Promise<PagedTradeJobSnapshot> {
   const res = await api.post<any>(
     '/api/trades/generate',
@@ -393,7 +393,7 @@ export async function getTradeStatus(
   // #393 M2 (D2, trades-eng adj. 3): a PAGED call is P2's next-page
   // prefetch, so it is background by default (a 402 opens nothing; the deck
   // shows the preview end card). The legacy poll passes it explicitly.
-  request: { background?: boolean } | undefined = page ? { background: true } : undefined,
+  request: { background?: boolean; headers?: Record<string, string> } | undefined = page ? { background: true } : undefined,
 ): Promise<PagedTradeJobSnapshot> {
   const paged = page
     ? `&deck=${encodeURIComponent(page.deck || jobId)}`

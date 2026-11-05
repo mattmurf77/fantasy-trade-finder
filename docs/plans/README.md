@@ -17,6 +17,10 @@ Per-feedback-item fixes do **not** live here — they live in [`../feedback/item
 
 Trade-model activation follow-up: [scope](trade-model-activation/scope.md), [validation](trade-model-activation/validation.md). Items 2/3 built; collection rollout under validation; strict enforcement remains dark.
 
+Find a Trade roster assignment reuse **implemented locally, review/CI pending**:
+[scope and timing evidence](find-trade-assignment-memo/scope.md). Bounded context-local
+memo only; no model policy, runtime knob, client contract or production change.
+
 Preference-led bilateral owner replacement **implemented, release gates in progress**:
 [scope](owner-v2-bilateral/scope.md), [release evidence](owner-v2-bilateral/release.md),
 [decision](../adr/adr-022-preference-led-bilateral.md). No live status inferred from code.

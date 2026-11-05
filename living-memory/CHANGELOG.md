@@ -11,6 +11,13 @@
 
 ---
 
+
+## 2026-11-05 — Prepare native organic first card before Acquire focus
+
+- TabNav warms the exact active account/league/format organic page using persisted fairness after session revalidation. Adaptive active-only polling adopts a completed pregen instead of discarding its running answer for60seconds.
+- Passive requests carry the server prewarm marker; preview refusals discard held cards and a known enforcing free session takes its normal server gate. Server companion must deploy before this mobile build.
+- Nine targeted guards and typecheck pass; cancellation/scope/preview negative controls fail as expected. Device latency remains unmeasured; cold/pinned waits remain. [Evidence and device checklist](../docs/plans/find-trade-first-card-prewarm.md).
+
 ## 2026-11-04 — Launch integration with independent review
 
 - #582 merged as `af57e59c`; binary safety #589 merged as `787b9fc4` with four CI checks and main CI green. Privacy/Shop #592 merged as `1a40bd00` after its four exact-head CI checks. This includes #365/#566/#580 and EAS secret exclusions #588.

@@ -3888,7 +3888,9 @@ export default function TradesScreen({ navigation, route }: any) {
       opponent_user_id: (sheetTargetingOn ? fork.opponent?.userId : undefined) || undefined,
       trade_intent: tradeIntent ?? undefined,
     };
-    const held = readDevicePage(deviceKey);
+    // The cached page is never a free-preview grant. A known enforcing
+    // free session must make its tap's normal gated server request first.
+    const held = payEnforcing && !payEntitled ? null : readDevicePage(deviceKey);
     if (devicePageUsable(held, devicePageScope(request), Date.now())) {
       pushDeck({
         request,
