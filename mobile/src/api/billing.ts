@@ -38,6 +38,7 @@ export interface PaywallProduct {
   product_id: string;
   period: string;              // 'monthly' | 'annual' | 'lifetime' | 'season'
   display_price: string;
+  scheduled_us_price?: string; // US new-subscriber price when the Founder window closes
   per_month_equiv?: string;
   /** "1 month" (S1). Display context only: the free-month copy keys off
    *  StoreKit intro eligibility (purchases.checkIntroEligibility), never this

@@ -204,6 +204,23 @@ export function formatCents(cents: number, currencyCode: string): string {
   }
 }
 
+/** Show the scheduled US comparison only when Apple's current package matches
+ * the server's Founder price. Never present a fallback as a StoreKit discount. */
+export function founderComparison(
+  current: { price: number; currencyCode: string } | null | undefined,
+  founderPrice: string,
+  scheduledPrice: string | undefined,
+): string | null {
+  if (!current || current.currencyCode !== 'USD' || !scheduledPrice) return null;
+  const usd = /^\$(\d+\.\d{2})$/;
+  const founder = usd.exec(founderPrice);
+  const next = usd.exec(scheduledPrice);
+  if (!founder || !next || Number(founder[1]) !== current.price || Number(next[1]) <= current.price) {
+    return null;
+  }
+  return scheduledPrice;
+}
+
 /** `mon.pay.plan.annual`'s sub line: "$2.09/month, billed yearly. 58% less
  *  than 12 months at $4.99." Built ONLY from live StoreKit prices (both
  *  products from the same storefront); null without them, so a server

@@ -40649,8 +40649,14 @@ def _paywall_products(now: datetime) -> list:
     raises). Pure: same `now`, same answer. At or after
     _PAYWALL_PRICE_RISE_AT → the new-subscriber prices."""
     risen = now >= _PAYWALL_PRICE_RISE_AT
-    return [{**p, **_PAYWALL_PRICES[p["product_id"]][1 if risen else 0]}
-            for p in _PAYWALL_PRODUCTS]
+    products = []
+    for product in _PAYWALL_PRODUCTS:
+        founder, standard = _PAYWALL_PRICES[product["product_id"]]
+        row = {**product, **(standard if risen else founder)}
+        if not risen:
+            row["scheduled_us_price"] = standard["display_price"]
+        products.append(row)
+    return products
 
 
 # Tip jar (operator request 2026-08-28): consumable "support the platform"

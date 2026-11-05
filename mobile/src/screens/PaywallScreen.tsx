@@ -48,6 +48,7 @@ import {
   annualSubLine,
   ctaLabel,
   disclosure,
+  founderComparison,
   headlineFor,
   inviteeContext,
   offerBodyFor,
@@ -252,6 +253,21 @@ export default function PaywallScreen({ navigation, route }: any) {
   });
 
   const config: PaywallConfig | undefined = configQuery.data;
+  const closesAt = config?.club?.closes_at;
+  const [expiredCutoff, setExpiredCutoff] = useState<string>();
+  useEffect(() => {
+    if (!closesAt) return;
+    const cutoff = Date.parse(closesAt);
+    if (!Number.isFinite(cutoff)) return;
+    let timer: ReturnType<typeof setTimeout>;
+    function checkCutoff() {
+      const remaining = cutoff - Date.now();
+      if (remaining <= 0) setExpiredCutoff(closesAt);
+      else timer = setTimeout(checkCutoff, Math.min(remaining, 2_147_483_647));
+    }
+    checkCutoff();
+    return () => clearTimeout(timer);
+  }, [closesAt]);
 
   // The SERVER's flag beats this device's cached one. `{"enabled": false}` is
   // what /api/paywall/config answers while `monetize.paywall` is off, so a
@@ -455,7 +471,13 @@ export default function PaywallScreen({ navigation, route }: any) {
   // §9.6: invitees, on the trigger variant only.
   const trigger = source === 'first_opinion' || source === 'left_deck';
   const invitee = trigger ? inviteeContext(invitedBy, invitedLeagueName) : null;
-  const clubOpen = config?.club?.open === true;
+  const clubOpen = clubWindowOpen(config?.club, Date.now()) && expiredCutoff !== closesAt;
+  const nextPrice = clubOpen && selected
+    ? founderComparison(selected.pkg?.product, selected.product.display_price, selected.product.scheduled_us_price)
+    : null;
+  const nextDate = nextPrice && closesAt
+    ? new Date(closesAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+    : null;
   // Dynamic Type: past half the window, the block joins the scroll's end.
   const unanchored = blockHeight > 0 && blockHeight > windowHeight * 0.5;
 
@@ -527,7 +549,27 @@ export default function PaywallScreen({ navigation, route }: any) {
         <View style={styles.summary} testID="paywall-summary">
           {/* The selected price, at 22 pt against the button's 14 pt label:
               the prominence legal's CTA rule reads (R28.8 #3). */}
-          <ChalkText variant="dataLg">{pricePerPeriod(selected.period, selected.price)}</ChalkText>
+          {nextPrice && nextDate ? (
+            <View
+              style={styles.pricePair}
+              testID="paywall-founder-comparison"
+              accessible
+              accessibilityLabel={`Founder price: ${pricePerPeriod(selected.period, selected.price)}. New subscribers from ${nextDate}: ${pricePerPeriod(selected.period, nextPrice)}.`}
+            >
+              <View>
+                <ChalkText variant="bodySm">New subscribers from {nextDate}</ChalkText>
+                <ChalkText variant="bodySm" style={styles.scheduledPrice}>
+                  {pricePerPeriod(selected.period, nextPrice)}
+                </ChalkText>
+              </View>
+              <View>
+                <ChalkText variant="bodySm">Founder price</ChalkText>
+                <ChalkText variant="dataLg">{pricePerPeriod(selected.period, selected.price)}</ChalkText>
+              </View>
+            </View>
+          ) : (
+            <ChalkText variant="dataLg">{pricePerPeriod(selected.period, selected.price)}</ChalkText>
+          )}
           {eligible ? (
             <ChalkText variant="bodySm" style={styles.trialLine}>
               {trialLine(selected.period, selected.price)}
@@ -760,6 +802,8 @@ const styles = StyleSheet.create({
   planRowActive: { borderColor: ice.base },
   planLeft: { flex: 1, gap: 2 },
   summary: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: space.sm },
+  pricePair: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: space.md },
+  scheduledPrice: { color: chalk.dim, textDecorationLine: 'line-through' },
   trialLine: { color: chalk.base },
   disclosure: { color: chalk.dim },
   linkRow: {

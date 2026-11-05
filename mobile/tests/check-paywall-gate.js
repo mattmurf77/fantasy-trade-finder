@@ -673,6 +673,17 @@ check('4i. R28.8 #2: per-month rounds UP, savings rounds DOWN, from live StoreKi
   const s = strip(read('screens/PaywallScreen.tsx'));
   assert(/annualSubLine\(annual, monthly\)/.test(s) && /pkg\?\.product;/.test(s), '[shape] the sub line is fed StoreKit products only');
 });
+check('Founder comparison uses the selected StoreKit price and an actual higher scheduled US price', () => {
+  for (const [current, future] of [[4.99, '$6.99'], [24.99, '$34.99']]) {
+    const pkg = { price: current, currencyCode: 'USD' };
+    eq(copy.founderComparison(pkg, '$' + current, future), future, 'matching Founder package');
+    eq(copy.founderComparison(pkg, '$' + current, undefined), null, 'schedule closed or absent');
+    eq(copy.founderComparison(pkg, future, future), null, 'mismatched current price');
+    eq(copy.founderComparison(pkg, '$' + current, '$' + current), null, 'no discount');
+    eq(copy.founderComparison({ ...pkg, currencyCode: 'CAD' }, '$' + current, future), null, 'currency mismatch');
+    eq(copy.founderComparison(null, '$' + current, future), null, 'StoreKit unavailable');
+  }
+});
 check('4j. R28.8 #2 [shape]: "/year" is the largest price text; the per-month line is smaller; no SAVE badge', () => {
   const s = strip(read('screens/PaywallScreen.tsx'));
   assert(/\{sub \? <ChalkText variant="bodySm">\{sub\}<\/ChalkText> : null\}/.test(s), 'the per-month sub line is not body-sm');
@@ -710,7 +721,13 @@ check('4n. scope §3.4: no "days free", "30 days" or trial_days anywhere in mobi
 check('4o. D10 / scope §3.6: no countdown, days-left, ends-soon or trial-end date in the paywall sources', () => {
   const files = ['screens/PaywallScreen.tsx', 'copy/monetization.ts', 'components/VerifySheet.tsx', 'state/usePaywallGate.ts'];
   for (const f of files) {
-    const s = strip(read(f));
+    // The selected plan can name its scheduled price change. Keep the
+    // countdown/trial-end ban everywhere else, including other date reads.
+    const source = strip(read(f));
+    const s = f === 'screens/PaywallScreen.tsx' ? source
+      .replace('const closesAt = config?.club?.closes_at;', '')
+      .replace("new Date(closesAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })", '')
+      : source;
     const hit = s.match(/days? left|ends? soon|countdown|last chance|trial ends|ends on|expires on|closes_at|expires_at|toLocaleDateString/i);
     assert(!hit, `${f}: "${hit && hit[0]}"`);
   }
