@@ -136,6 +136,8 @@ reference material), not the file's last-edit date.
 
 ### Active
 
+- [MOD-M1 evaluation preflight](mod-m1-evaluation-preflight.md) — **prepared, unmerged** · 2026-11-04. Exact #475/#476 tools on current main; synthetic first-deck and private audit-sheet evidence, with November10 frozen-run prerequisites still pending.
+
 | Doc | Status | Notes |
 |---|---|---|
 | [launch-copy-b5-trades-2026-10-28.md](launch-copy-b5-trades-2026-10-28.md) | **active** | B5 launch copy, trades-eng's items 1, 3 and 4 (marketing-lead addendum 10): the Win Now "Uncalibrated estimate" label, the ESPN calculator picks note and its `Set up picks →` link, and the Shop button and queue toasts. Scope block with the TestFlight checklist. |

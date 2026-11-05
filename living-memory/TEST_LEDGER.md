@@ -1,3 +1,13 @@
+## 2026-11-04 — MOD-M1 evaluation tools integrated on current launch main
+
+Merged exact #475`5c512730` and #476`0f40d087` into isolated main`065a1ee6`, preserving original commits. No runtime server/database/client/flag changes. [Preflight](../docs/plans/mod-m1-evaluation-preflight.md) records actual November10 freeze/connected-league/privacy prerequisites and distinguishes remaining B-DK zero-violation evidence from the insult-rate tool.
+
+- Original combined baseline **38passed/1failed**: synthetic verified token lacked a minted users row, so the real first-init guard aborted connection persistence and SF/TEP was misreported as1QB. Scratch evaluator + plain live-flow fixture now seed the user as actual auth minting does, retaining guard. The card-for-card first30 assertion passes. Served response count and internal generated inventory are now distinct fields, retaining live-count and filter-effect assertions.
+- Final focused evaluator/insult-rule/audit-sheet/B-DK/deck-quality/bilateral-presentment/first-init run: **314passed,2PG-only skips in19.43s** before the final exact-engine-path guard refinement; final exact-path rerun **314 passed, 2 PostgreSQL-only skips in 16.67s**. No full local suite or production eval run.
+- Four named negative controls independently RED: shared-output-directory enforcement, report file0600, tracked-report-path rejection, inherited Sentry removal. Source restored. Existing first-run baseline and malformed/unknown-config/scratchDB/blindness/HOLD boundary checks remain.
+- Files use exclusive0600 creation in private0700 directories, tracked overrides rejected; exact canonical scratch path checked for all engines, including normal readonly URI versus similarly prefixed different filename. Synthetic/private artifacts only. No external provider call, production DB/copy, build, activation or model promotion.
+- Original PR ancestry retained; independent review and exact-head GitHub CI required before integration merge. November10 actual gate and November11 operator sheet are not claimed complete by this preparatory run.
+
 ## 2026-11-04 — Held parser child updated with final co-owner fixture prerequisite
 
 Merged exact revised launch parent `e7fb895ff9fbfc5d6acbeceaa4defc929a18c428` into held parser candidate `8048cfb7`, preserving original #584 head `61e8248c`. The only resolution is additive ledger history. Parent's co-owner fixture now persists real user rows before creating its verified sessions, so first-init's existing live-user/deletion guard runs normally; no runtime code or assertion was weakened.

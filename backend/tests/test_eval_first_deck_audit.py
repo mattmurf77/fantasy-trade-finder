@@ -196,3 +196,12 @@ def test_the_audit_bands_bracket_the_rules_thresholds():
     assert fa.DELTA_BAND == (300, 700) and fa.HAIRCUT_BAND == (0.12, 0.20)
     assert fa.DELTA_BAND[0] < MATERIALITY < fa.DELTA_BAND[1]
     assert fa.HAIRCUT_BAND[1] == LOWBALL_HAIRCUT
+
+
+def test_existing_shared_output_directory_is_refused_without_chmod(tmp_path):
+    out = tmp_path / "shared-output"
+    out.mkdir(mode=0o755)
+    with pytest.raises(SystemExit, match="not private"):
+        fa.private_dir(out)
+    assert stat.S_IMODE(out.stat().st_mode) == 0o755
+    assert not list(out.iterdir())

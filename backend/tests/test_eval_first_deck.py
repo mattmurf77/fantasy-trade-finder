@@ -183,6 +183,8 @@ def _live_first_page(user_id, connector):
             patch.object(server, "_start_trade_job_thread", lambda **kw: kicked.append(kw)), \
             fd.stable_rng_seed(SEED):
         for uid in (connector, user_id):
+            # Real verified-session minting creates the user before init.
+            db.upsert_user(uid, username=uid, display_name=uid)
             server._sessions[f"live-{uid}"] = {"user_id": uid, "verified": True}
             response = client.post("/api/session/init", headers={"X-Session-Token": f"live-{uid}"},
                                    json={"user_id": uid, "league_id": LEAGUE,
@@ -229,6 +231,7 @@ def test_deck_eval_reproduces_the_live_first_deck_card_for_card(world):
     assert {c["model_arm"] for c in live["cards"]} == {"owner_v2_bilateral"}
     assert _stable(seat["first_page"]) == _stable(live["cards"])
     assert seat["first_page_size"] == 30 and seat["deck_size"] == live["total_ready"]
+    assert seat["generated_deck_size"] >= seat["deck_size"]
     assert not unexpected
 
     # The scored first-5 records carry what the gate and the audit sheet need.
@@ -252,7 +255,9 @@ def test_overrides_change_what_deck_eval_produces(world):
     no_quality = {**LIVE, "flags": {**LIVE["flags"], "deck.quality_filters": False}}
     off = _deck_eval(scratch, "no-quality", no_quality, max_teams=1)["seats"][0]
     assert calls["quality"] == 0
-    assert off["deck_size"] > base["deck_size"]                  # nothing filtered out
+    # Visible totals cap to page windows; the generated inventory proves
+    # the filter's effect even when both responses expose the same 90 cards.
+    assert off["generated_deck_size"] > base["generated_deck_size"]
     assert _stable(off["first_page"]) != _stable(base["first_page"])
 
     page_of_3 = {**LIVE, "model_config": {**LIVE["model_config"], "trade_page_size": 3}}
@@ -303,7 +308,13 @@ def test_require_scratch_db_refuses_anything_else(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError):
         fd.require_scratch_db()
     monkeypatch.setattr(db, "ingest_engine", scratch_engine)
+    ro = create_engine(f"sqlite:///file:{tmp_path / 's.sqlite3'}?mode=ro&uri=true")
+    monkeypatch.setattr(db, "ro_engine", ro)
     assert fd.require_scratch_db(str(tmp_path / "s.sqlite3")).endswith("s.sqlite3")
+    other = create_engine(f"sqlite:///{tmp_path / 's.sqlite3.other'}")
+    monkeypatch.setattr(db, "ro_engine", other)
+    with pytest.raises(RuntimeError, match="second backend engine"):
+        fd.require_scratch_db()
 
 
 def test_the_cli_refuses_a_process_that_already_imported_the_backend(tmp_path):
@@ -332,3 +343,47 @@ def test_summary_rates_and_bars():
     assert s["pass"] == {"empty_deck": False, "insult": True}
     assert s["cells"] == {"SF / no TEP / 12 teams": {"leagues": 1, "seats": 20, "empty_decks": 1,
                                                      "first5_cards": 95, "insult_cards": 2}}
+
+
+def test_report_override_cannot_write_into_tracked_docs():
+    target = deck_eval.PROJECT_ROOT / "docs" / "deck-eval-private-probe" / "report.md"
+    with pytest.raises(SystemExit, match="not gitignored"):
+        deck_eval.output_paths("private-probe", target)
+    assert not target.parent.exists()
+
+
+def test_eval_report_is_private_and_never_overwrites(tmp_path):
+    import stat
+    summary = fd.summarize([])
+    summary.update(import_s=0, pool_build_ms=0)
+    run = {"summary": summary, "generated_at": "synthetic", "commit": "synthetic",
+           "iso_week": "2026-W45", "seed": 0, "overrides_applied": None,
+           "json_artifact": "synthetic.json", "leagues": []}
+    report = tmp_path / "private" / "report.md"
+    deck_eval.write_report(report, run)
+    assert stat.S_IMODE(report.stat().st_mode) == 0o600
+    assert stat.S_IMODE(report.parent.stat().st_mode) == 0o700
+    assert "Not a gate run" in report.read_text()
+    with pytest.raises(FileExistsError):
+        deck_eval.write_report(report, run)
+
+
+def test_fresh_cli_isolation_disables_inherited_external_reporting(tmp_path):
+    import os
+    code = """
+import os
+from pathlib import Path
+from scripts.deck_eval import _isolate
+_isolate(Path(os.environ['EVAL_SCRATCH_TEST']), None)
+assert os.environ['DATABASE_URL'].startswith('sqlite:///')
+assert 'SENTRY_DSN' not in os.environ
+assert 'ANTHROPIC_API_KEY' not in os.environ
+print('isolated')
+"""
+    env = {**os.environ, "EVAL_SCRATCH_TEST": str(tmp_path / "scratch.sqlite3"),
+           "SENTRY_DSN": "https://synthetic@example.invalid/1",
+           "ANTHROPIC_API_KEY": "synthetic", "DATABASE_URL": "postgresql://example.invalid/db"}
+    result = subprocess.run([__import__("sys").executable, "-c", code],
+                            cwd=deck_eval.PROJECT_ROOT, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "isolated"

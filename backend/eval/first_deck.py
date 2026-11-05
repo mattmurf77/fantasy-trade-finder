@@ -45,6 +45,7 @@ import time
 from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import unquote
 
 from backend import database as db, feature_flags as ff
 from backend import ranking_service as _ranking_service_mod
@@ -77,7 +78,13 @@ def require_scratch_db(expected: str | None = None) -> str:
     if expected is not None and os.path.realpath(path) != os.path.realpath(expected):
         raise RuntimeError(f"backend engine is {path}, expected the scratch file {expected}")
     for other in (db.ingest_engine, getattr(db, "ro_engine", None)):
-        if other is not None and other is not db.engine and path not in str(other.url):
+        if other is None or other is db.engine:
+            continue
+        other_path = other.url.database or ""
+        if other_path.startswith("file:"):
+            other_path = unquote(other_path[5:])
+        if (other.url.get_backend_name() != "sqlite" or not other_path
+                or os.path.realpath(other_path) != os.path.realpath(path)):
             raise RuntimeError(f"a second backend engine points elsewhere: {other.url!r}")
     return path
 
@@ -265,6 +272,9 @@ class FirstDeckEval:
         return out
 
     def _init(self, token, user_id, league_id):
+        # Real auth minting persists users before issuing a verified session.
+        # Model that prerequisite in scratch; never weaken init's deletion fence.
+        db.upsert_user(user_id, username=user_id, display_name=user_id)
         with srv._sessions_lock:
             srv._sessions[token] = {"user_id": user_id, "verified": True}
         return self.client.post("/api/session/init", headers={"X-Session-Token": token}, json={
@@ -332,7 +342,11 @@ class FirstDeckEval:
                 (sess.get("services") or {}).get(sess.get("active_format")), "_seed", None) or {}
             cards = list(page.get("cards") or [])
             seat.update(status=page.get("status"), error=page.get("error") or page.get("wait_reason"),
-                         outlook=job.get("outlook_value"), deck_size=len(job.get("cards") or []),
+                         outlook=job.get("outlook_value"),
+                         # Serve-time disposition/dedup cuts can hide stored
+                         # cards. Report the same visible count as the client.
+                         deck_size=page.get("total_ready", len(job.get("cards") or [])),
+                         generated_deck_size=len(job.get("cards") or []),
                          first_page_size=len(cards), first_page=cards,
                          cards=[card_record(c, n, seed_map, fmt)
                                 for n, c in enumerate(cards[:FIRST_FIVE], 1)])

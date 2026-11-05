@@ -34,6 +34,7 @@ Modules:
 Read-only against product tables: this package never writes to
 deck_impressions/deck_outcomes or any other product table. Its only writes
 are JSON files under the (already gitignored) data/eval_runs/ directory.
-The exception is first_deck, whose jobs write their own rows: it runs only
-on a scratch SQLite file and refuses any other engine (require_scratch_db).
+The exceptions are MOD-M1: first_deck jobs write only their isolated scratch
+SQLite (require_scratch_db refuses other engines), and deck_eval/first_deck_audit
+write private roster-bearing artifacts only outside tracked repository paths.
 """

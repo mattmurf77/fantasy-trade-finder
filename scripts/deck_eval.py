@@ -63,6 +63,9 @@ def _isolate(scratch: pathlib.Path, flags: dict | None) -> None:
     os.environ["DATABASE_URL"] = f"sqlite:///{scratch}"
     os.environ["FTF_DISABLE_CLEANUP_LOOP"] = "1"
     os.environ.pop("ANTHROPIC_API_KEY", None)
+    # Evaluation errors/league identifiers must not leave via a caller's
+    # inherited production crash-report configuration.
+    os.environ.pop("SENTRY_DSN", None)
     if flags:
         # Import-time readers see prod's flags too (apply_overrides covers the rest).
         os.environ["FTF_FLAGS"] = json.dumps(flags)
@@ -157,9 +160,9 @@ def main() -> None:
         shutil.rmtree(workdir, ignore_errors=True)
 
     json_path, report_path = output_paths(ts.strftime("%Y%m%dT%H%M%SZ"), args.report)
-    json_path.parent.mkdir(parents=True, exist_ok=True)
+    from backend.eval.first_deck_audit import _write_private
     run["json_artifact"] = _display(json_path)
-    json_path.write_text(json.dumps(run, indent=1))
+    _write_private(json_path, json.dumps(run, indent=1))
     write_report(report_path, run)
 
     s = summary
@@ -174,7 +177,11 @@ def main() -> None:
 def output_paths(stamp: str, report: pathlib.Path | None = None) -> tuple[pathlib.Path, pathlib.Path]:
     """(JSON, markdown) paths. Both default into the gitignored OUT_DIR: the
     report holds league rosters and never belongs in a tracked doc."""
-    return OUT_DIR / f"deck_eval_{stamp}.json", report or OUT_DIR / f"deck_eval_{stamp}.md"
+    from backend.eval.first_deck_audit import private_dir
+    paths = (OUT_DIR / f"deck_eval_{stamp}.json", report or OUT_DIR / f"deck_eval_{stamp}.md")
+    for path in paths:
+        private_dir(path.parent)
+    return paths
 
 
 def _git_head() -> str | None:
@@ -331,8 +338,9 @@ def write_report(path: pathlib.Path, run: dict) -> None:
     a("- Latency is this machine's, warm process; Render will differ.")
     a(f"- Effective flags and model_config: the JSON artifact (`{run['json_artifact']}`).")
     a("")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines))
+    from backend.eval.first_deck_audit import private_dir, _write_private
+    private_dir(path.parent)
+    _write_private(path, "\n".join(lines))
 
 
 if __name__ == "__main__":

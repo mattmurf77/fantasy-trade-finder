@@ -38,6 +38,7 @@ import io
 import json
 import os
 import random
+import stat
 import subprocess
 import sys
 from collections import Counter
@@ -247,6 +248,10 @@ def private_dir(path: Path) -> Path:
         if not ignored:
             raise SystemExit(f"refusing {path}: inside the repo and not gitignored")
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # mkdir(exist_ok=True) cannot make an existing shared directory private.
+    # Refuse it rather than chmod an operator-selected directory such as /tmp.
+    if stat.S_IMODE(path.stat().st_mode) & 0o077:
+        raise SystemExit(f"refusing {path}: existing output directory is not private (0700)")
     return path
 
 
