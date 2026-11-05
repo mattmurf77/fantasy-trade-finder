@@ -35,9 +35,18 @@ def owner_request(config):
     return request if all(isinstance(m, dict) for m in data["members"]) else None
 
 
-def coverage_summary(rows, *, fetched_count, max_runs, missing):
-    """Only aggregate evidence; an absent selected outlook is not inferred."""
+def coverage_summary(rows, *, fetched_count, max_runs, missing, not_sampled_shas=()):
+    """Only aggregate evidence; an absent selected outlook is not inferred.
+
+    ``not_sampled_shas`` holds the writer's ``input_sha256`` for each row left
+    out of the owner_request archive sample. One equal to the fingerprint of a
+    request captured in this window is replayable from that copy (frozen inputs
+    repeat), so ``not_sampled_covered_by_sampled`` is the honest effective coverage.
+    """
+    captured = {input_fingerprint(r["owner_request"]) for r in rows}
     return {"run_rows_scanned": min(fetched_count, max_runs), "unique_requests": len(rows),
+            "sampled": len(rows), "not_sampled": len(not_sampled_shas),
+            "not_sampled_covered_by_sampled": sum(sha in captured for sha in not_sampled_shas),
             "distinct_manager_leagues": len({(r["user_id"], r["league_id"]) for r in rows}),
             "leagues": len({r["league_id"] for r in rows}), "omitted": dict(missing),
             "query_truncated": fetched_count > max_runs,
@@ -46,7 +55,12 @@ def coverage_summary(rows, *, fetched_count, max_runs, missing):
 
 
 def input_fingerprint(request):
-    """A supplied request hash is not evidence of identical frozen inputs."""
+    """A supplied request hash is not evidence of identical frozen inputs.
+
+    This is the one fingerprint definition. The bake-off writer's
+    ``input_sha256`` must equal ``input_fingerprint({"input": <owner input>})``,
+    and trades-eng's writer imports this function rather than restating it.
+    """
     return hashlib.sha256(json.dumps(request["input"], sort_keys=True,
         separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
@@ -82,7 +96,7 @@ def capture(*, secrets, output, days=14, max_runs=100):
     config = read_api("/api/admin/config")
     flags = read_api("/api/feature-flags")
     engine = prod_analytics._connect_readonly(prod_analytics._load_prod_url(), 15000)
-    rows, missing, seen, byte_count = [], Counter(), set(), 0
+    rows, missing, seen, byte_count, not_sampled_shas = [], Counter(), set(), 0, []
     sql = """SELECT run_id, user_id, league_id, created_at, config_json
         FROM bakeoff_runs WHERE created_at >= :since
         AND config_json IS NOT NULL AND length(config_json) <= 3000000
@@ -104,6 +118,10 @@ def capture(*, secrets, output, days=14, max_runs=100):
                     missing["invalid_config_json"] += 1
                     continue
                 request = owner_request(raw)
+                if request is None and isinstance(raw, dict) and raw.get("owner_request_sampled") is False:
+                    missing["not_sampled"] += 1
+                    not_sampled_shas.append(raw.get("input_sha256"))
+                    continue
                 if request is None:
                     missing["full_owner_request_absent"] += 1
                     continue
@@ -118,7 +136,8 @@ def capture(*, secrets, output, days=14, max_runs=100):
                              "owner_request": request, "captured_run_config": raw})
     finally:
         engine.dispose()
-    summary = coverage_summary(rows, fetched_count=len(fetched), max_runs=max_runs, missing=missing)
+    summary = coverage_summary(rows, fetched_count=len(fetched), max_runs=max_runs, missing=missing,
+                               not_sampled_shas=not_sampled_shas)
     envelope = {"schema_version": 1, "captured_at": now.isoformat(), "read_only": True,
                 "selection": {"days": days, "max_runs": max_runs, "sql": sql},
                 "config": {"checked_at": now.isoformat(), "config": config, "flags": flags},
