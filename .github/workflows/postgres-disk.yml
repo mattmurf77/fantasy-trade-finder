@@ -1,0 +1,21 @@
+name: Postgres disk alert
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 * * * *"
+permissions:
+  contents: read
+jobs:
+  disk:
+    if: github.event_name == 'workflow_dispatch' || vars.FLEECED_DISK_ALERT_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check for missing metrics or 70% disk use
+        env:
+          RENDER_POSTGRES_ID: ${{ vars.FLEECED_POSTGRES_ID }}
+          RENDER_METRICS_TOKEN: ${{ secrets.FLEECED_RENDER_METRICS_READ }}
+        run: python3 scripts/check_render_disk.py
