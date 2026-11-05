@@ -263,7 +263,8 @@ class AggregateSQLTests(unittest.TestCase):
         self.conn.execute(text("CREATE TEMP TABLE user_events (user_id text,device_id text,event_type text,"
                                "occurred_at text,props text,source text,platform text,device_type text,app_version text)"))
         self.params = dict(start="2026-11-05T00:00:00Z", end="2026-11-05T00:05:00Z",
-                           outcome_end="2026-11-05T00:10:00Z", version="1.22.0", build="172", immediate_ms=5000)
+                           outcome_end="2026-11-05T00:10:00Z", version="1.22.0", build="172", immediate_ms=5000,
+                           web_revision=None)
 
     def add(self, sid, event="find_trades_tapped", user="fake_a", **props):
         body = dict(search_id=sid)
@@ -323,6 +324,22 @@ class AggregateSQLTests(unittest.TestCase):
         self.assertEqual(stats["taps"], 4)
         self.assertEqual(stats["eligible"], 3)
         self.assertEqual(stats["outcomes"], dict(duplicate_outcome=1, invalid_outcome=1, paywall=1, shown=1))
+
+    def test_web_revision_does_not_require_native_app_version_or_mix_old_web(self):
+        for sid, revision in (("new_web", "instant-trades-v1"), ("old_web", None)):
+            for event in ("find_trades_tapped", "trade_first_card_shown"):
+                props = dict(search_id=sid, source="web_finder", client_build=revision,
+                             ms_from_tap=125, search_type="pinned", network_type="wifi", launch_state="first_tap")
+                self.conn.execute(self.text("INSERT INTO user_events VALUES ('fake_web','fake_browser',:e,"
+                                            "'2026-11-05T00:00:01Z',:p,'web','web',NULL,NULL)"),
+                                  dict(e=event, p=json.dumps(props)))
+        self.assertEqual(self.query()["cohorts"], [])
+        self.params["web_revision"] = "instant-trades-v1"
+        rows = self.query()["cohorts"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["platform"], "web")
+        self.assertEqual(rows[0]["entry_point"], "web_finder")
+        self.assertEqual(R.summarize(rows, 200)["taps"], 1)
 
 
 if __name__ == "__main__":

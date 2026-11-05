@@ -23,7 +23,7 @@ SQLAlchemy and its Postgres driver. Never put credentials in argv or a report.
 
 ```sh
 python3 scripts/qa/instant_trade_report.py --production --app-version 1.22.0 \
-  --client-build 172 --hours 24 --profile all-entry
+  --client-build 172 --web-revision instant-trades-v1 --hours 24 --profile all-entry
 ```
 
 It opens a server-enforced read-only transaction, checks
@@ -38,6 +38,12 @@ Tester devices are included. Version is mandatory; exact R1 build filtering
 avoids combining a future candidate with build 171. A missing build tag is
 excluded from a requested exact-build sample, and the resulting missing
 cohorts fail.
+
+Browser events have no native app version. `--web-revision` independently
+selects their exact R1 `client_build` tag (`instant-trades-v1`), while
+`--client-build` remains a native-only filter. Historical unversioned browser
+events are not mixed into candidate proof. Without `--web-revision`, browser
+cohorts are intentionally absent and strict all-entry acceptance fails.
 
 The default **all-entry** profile requires first/repeat Wi-Fi/cellular organic
 cells, every listed search entry, scoped/fair searches, cold launch, genuinely
@@ -188,7 +194,7 @@ No raw identities were retrieved or exported. Private sanitized aggregate and
 full failing report: `/private/tmp/fleeced-instant-trade-baseline.json` and
 `/private/tmp/fleeced-instant-trade-baseline-report.json`.
 
-Reporter regression: **29 passed**, including two real PostgreSQL synthetic
+Reporter regression: **30 passed**, including three real PostgreSQL synthetic
 temporary-table tests for UUID collision across users, missing/untraced taps,
 late terminal grace, build exclusion, immediate age boundary, duplicate R1/
 terminal and malformed latency. Initial PostgreSQL attempts were blocked by
@@ -196,3 +202,60 @@ the process sandbox; authorized socket-only rerun passed. No production writes.
 Browser b8e9631: six controlled runtime scenarios and 255 structural checks
 passed independently. Physical-device improvement and strict all-entry
 performance remain **unproven**.
+
+## Bounded linked-league shadow canary: review conditions
+
+This is a proposed validation plan, **not an activation**. Global preparation
+and enforcement settings remain unchanged. Approve one dedicated test account
+and at most two of its already-linked leagues explicitly; no other customer's
+data is sampled or copied. Start with one format and exact organic fairness /
+preference scope, one background build at a time, with a bounded request queue,
+CPU-time, DB-write and byte budget. Measure those budgets before widening.
+Cancel superseded work instead of retrying indefinitely. The kill switch must
+stop admission and cancel pending adoption, with existing active-league work
+retaining priority. Shadow failures must not slow active searches.
+
+1. **Server-only shadow:** derive linked membership from the authenticated
+   account, including provider ownership proof. Use an immutable authorized
+   league/format context; never temporarily change the user's active session,
+   token or format to run the shadow. Retain the existing user-data lease,
+   live-user checks and deletion/input epochs through preparation/publication.
+   Publish only fully evaluated, correctly ordered pages under exact request,
+   model/config and input fingerprints. Prebuild is not user-visible delivery
+   and must write no delivered-card evidence or consume a free preview.
+2. **Phone transfer:** opt in only the same authenticated test phone, after
+   current validation of user/league/format/request and current gate permission
+   without a Preview grant. Enforcement OFF or a verified entitled session can
+   qualify. Enforcing non-Pro preview cannot be passively delivered under the
+   existing contract; retain server-side prep and test its actual tap normally.
+   Phone pages remain private, key scoped, TTL bounded and revocable on local
+   input change/sign-out/deletion. Include all known storage versions in clear.
+   No switch may use another league's, format's or input scope's page.
+3. **Already-linked switch proof:** verify the destination page reached that
+   phone before the switch, then test switch->immediate tap <=5s, both
+   directions, with cold/warm process, foreground/offline and invalidation.
+   Record R1 age, candidate native build/browser revision and R2 frame. Never
+   count an unprepared switch as a cache-hit success or discard its miss.
+4. **Novel league proof is separate:** first establish provider access and
+   verified ownership, sync roster/pool/picks, resolve scoring format and user
+   preferences, and complete model evaluation/current validation. A previously
+   unknown league cannot have a proven page on the phone before these inputs
+   exist. Measure immediate post-link taps as genuinely cold until the page is
+   actually delivered. A warmed linked-league result proves nothing about this
+   cohort; hiding Find until preparation finishes would move the requirement.
+5. **Changed hard exclusions/pins are separate:** require an exact request
+   signature containing every exclusion, give/receive/package pin, opponent,
+   threshold and intent, plus current user/league/format/input epochs. A warm
+   organic top-30 page is not evidence of complete or valid answers to a new
+   scope. Prepare a known pending scope before its tap, or make the complete
+   on-demand scoped solve fast. Arbitrary unseen combinations are not covered
+   by warming linked organic pages; a reusable candidate basis would need its
+   own proof of coverage, evaluation semantics and post-filter ordering.
+
+Before canary GO: explicit account/league scope, budget and rollback readback;
+no global enable; missing inputs fail closed; synthetic auth/deletion/preview /
+scope regressions pass; exact-build evidence collector ready. Before widening:
+all observed eligible taps <=200ms, minimum samples/devices met, no lost taps,
+current-input/quality invariants preserved, and no active-path latency/storage
+regression. Cold/new-league/new-scope misses remain visible. If any prerequisite
+fails, stop the canary and retain the honest failing report.

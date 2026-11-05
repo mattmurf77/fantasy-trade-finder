@@ -266,6 +266,7 @@ def report(payload, profile="all-entry", limit=200, min_samples=40, min_devices=
     return {"schema": 1, "profile": profile, "evidence_kind": payload["evidence_kind"],
             "window": payload.get("window"), "app_version": payload.get("app_version"),
             "client_build": payload.get("client_build"), "immediate_change_max_ms": payload.get("immediate_change_max_ms", 5000),
+            "web_revision": payload.get("web_revision"),
             "limit_ms": limit, "minimum_samples": min_samples, "minimum_devices": min_devices,
             "status": "FAIL" if global_reasons else ("PASS_NOT_ROBUST" if any(
                 c["status"] == "PASS_NOT_ROBUST" for c in checks) else "PASS"),
@@ -304,8 +305,16 @@ WITH tap_rows AS (
       WHEN source='mobile' OR platform='ios' OR device_type IN ('iphone','ipad','macos','android')
       THEN 'mobile' ELSE 'unknown' END platform
  FROM user_events WHERE event_type='find_trades_tapped'
- AND occurred_at >= :start AND occurred_at < :end AND app_version=:version
- AND (CAST(:build AS text) IS NULL OR props::jsonb->>'client_build'=CAST(:build AS text))
+ AND occurred_at >= :start AND occurred_at < :end
+ AND (
+   ((COALESCE(source,'')='web' OR COALESCE(platform,'')='web' OR COALESCE(device_type,'')='web')
+    AND CAST(:web_revision AS text) IS NOT NULL
+    AND props::jsonb->>'client_build'=CAST(:web_revision AS text))
+   OR
+   (NOT (COALESCE(source,'')='web' OR COALESCE(platform,'')='web' OR COALESCE(device_type,'')='web')
+    AND app_version=:version
+    AND (CAST(:build AS text) IS NULL OR props::jsonb->>'client_build'=CAST(:build AS text)))
+ )
 ), taps AS (
  SELECT user_id,sid,MIN(entry_point) entry_point,MIN(platform) platform,
  MIN(device_id) device_id,MIN(r1_scenario) r1_scenario,MIN(input_age_ms) input_age_ms,
@@ -322,7 +331,8 @@ WITH tap_rows AS (
  MIN(CASE WHEN props::jsonb->>'ms_from_tap' ~ '^[0-9]{1,12}$'
      THEN (props::jsonb->>'ms_from_tap')::bigint END) ms
  FROM user_events WHERE event_type IN ('trade_first_card_shown','trade_first_card_failed')
- AND occurred_at >= :start AND occurred_at < :outcome_end AND app_version=:version
+ AND occurred_at >= :start AND occurred_at < :outcome_end
+ AND (app_version=:version OR source='web' OR platform='web' OR device_type='web')
  GROUP BY user_id,props::jsonb->>'search_id'
 ), joined AS (
  SELECT t.*,COALESCE(o.search_type,'unknown') search_type,
@@ -366,7 +376,7 @@ SELECT jsonb_build_object('schema',1,'evidence_kind','measured','finalized',true
 """
 
 
-def production_snapshot(version, hours=24, settle_seconds=300, build=None, immediate_ms=5000):
+def production_snapshot(version, hours=24, settle_seconds=300, build=None, immediate_ms=5000, web_revision=None):
     if not version or hours <= 0 or settle_seconds < 60:
         raise ValueError("production requires one version, positive hours, settle >=60s")
     # SQLAlchemy is imported only for the explicit production mode.
@@ -381,7 +391,7 @@ def production_snapshot(version, hours=24, settle_seconds=300, build=None, immed
     start = end - timedelta(hours=hours)
     fmt = lambda dt: dt.isoformat().replace("+00:00", "Z")
     params = {"start": fmt(start), "end": fmt(end), "outcome_end": fmt(now), "version": version,
-              "build": build, "immediate_ms": immediate_ms}
+              "build": build, "immediate_ms": immediate_ms, "web_revision": web_revision}
     engine = create_engine(url, connect_args={"options":
         "-c default_transaction_read_only=on -c statement_timeout=15000"})
     try:
@@ -396,7 +406,8 @@ def production_snapshot(version, hours=24, settle_seconds=300, build=None, immed
         payload = json.loads(payload)
     payload.update(window={"start": params["start"], "end": params["end"],
                            "outcomes_through": params["outcome_end"], "settle_seconds": settle_seconds},
-                   app_version=version, client_build=build, immediate_change_max_ms=immediate_ms)
+                   app_version=version, client_build=build, immediate_change_max_ms=immediate_ms,
+                   web_revision=web_revision)
     return payload
 
 
@@ -407,6 +418,7 @@ def main(argv=None):
     source.add_argument("--production", action="store_true", help="read-only aggregate query; URL from env only")
     ap.add_argument("--app-version", help="required for production; avoids pooling binaries")
     ap.add_argument("--client-build", help="exact R1 native build filter (e.g. 172); missing build is excluded")
+    ap.add_argument("--web-revision", help="exact web R1 client_build tag; unversioned browser events are excluded")
     ap.add_argument("--immediate-change-ms", type=int, default=5000,
                     help="only change-to-tap ages at or below this qualify for immediate cohorts")
     ap.add_argument("--hours", type=float, default=24)
@@ -421,7 +433,8 @@ def main(argv=None):
         if args.min_samples < 1 or args.min_devices < 1 or not math.isfinite(args.limit_ms) or args.limit_ms < 0 or args.immediate_change_ms < 0:
             raise ValueError("positive samples/devices and finite nonnegative latency limit required")
         payload = production_snapshot(args.app_version, args.hours, args.settle_seconds,
-                                      args.client_build, args.immediate_change_ms) if args.production else json.loads(args.input.read_text())
+                                      args.client_build, args.immediate_change_ms,
+                                      args.web_revision) if args.production else json.loads(args.input.read_text())
         validate(payload)
         result = payload if args.snapshot_only else report(payload, args.profile, args.limit_ms, args.min_samples, args.min_devices)
     except Exception as error:
