@@ -586,7 +586,7 @@ process.on('exit', () => {
   });
   await check('3b. offline tap pushes at once without starting a request; cold online taps have no navigation deadline', () => {
     const push = fnBody(code, 'function pushWithFirstPage(');
-    ok(/if \(!fairnessReady \|\| !readOnline\(\)\) \{\s*pushDeck\(\);\s*return;/.test(push), 'offline immediate');
+    ok(/if \(!readOnline\(\)\) \{\s*pushDeck\(\);\s*return;/.test(push), 'offline immediate');
     ok(!/setTimeout|FIRST_PAGE_PUSH_DEADLINE_MS|await/.test(push), 'no timer or await before navigation');
     ok(code.includes('<DeckOfflineCard minHeight={topCardH} onRetry={handleOfflineTapRetry} />'), 'honest offline card remains');
   });

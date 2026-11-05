@@ -102,6 +102,24 @@ const page = (over = {}) => ({ job_id: 'j', status: 'complete', cursor: 1, deck_
     resolve(kind === 'model' ? page() : { ideas: [] }); await pending;
   });
 
+  for (const enforcingFree of [false, true]) await ok('actual offline tap retains proved organic page only with permitted cache access', () => {
+    reset(); const pushes = []; let requests = 0;
+    const held = device.devicePageFrom(page(), { scope: 'organic:f=0.50', validatedAt: now });
+    const context = { switching: false, leagueId: 'L', fairnessReady: true, effectiveFairness: 0.5,
+      sheetTargetingOn: true, targetingEnabled: true, tradeIntent: undefined, deviceKey: 'key',
+      payEnforcing: enforcingFree, payEntitled: false, resultsPushPendingRef: { current: false },
+      dropPendingSearch: () => {}, readOnline: () => false, readDevicePage: () => held,
+      devicePageScope: device.devicePageScope, devicePageUsable: device.devicePageUsable,
+      devicePageSnapshot: device.devicePageSnapshot, modelSelectionParams: selection.modelSelectionParams,
+      fairPackagesRequest: selection.fairPackagesRequest, useFinderTargets: { getState: () => ({ packageMode: true }) },
+      generateTrades: () => { requests++; }, getFairPackages: () => { requests++; }, ...handoff };
+    const run = compile('module.exports = env => { const {' + Object.keys(context).join(',') + '} = env; return ' + pushSource + '; };', { Date: { now: () => now } })(context);
+    run({ giveIds: [], receiveIds: [], opponent: null, anchor: null, searchId: 'offline' }, p => pushes.push(p));
+    assert.equal(pushes.length, 1); assert.equal(requests, 0);
+    assert.equal(!!pushes[0]?.device, !enforcingFree);
+    if (!enforcingFree) assert.equal(pushes[0].snapshot.cards[0].trade_id, 't');
+  });
+
   await ok('strict adapters preserve preview header and reject a non-acknowledging older server', async () => {
     let response = page(); const calls = [];
     const api = compile(read('api/trades.ts'), { require: () => ({ api: {

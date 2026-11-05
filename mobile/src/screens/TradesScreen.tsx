@@ -3885,12 +3885,16 @@ export default function TradesScreen({ navigation, route }: any) {
       dropPendingSearch(fork.searchId);
       return;
     }
-    if (!fairnessReady || !readOnline()) {
+    if (!fairnessReady) {
       pushDeck();
       return;
     }
     const opponentId = sheetTargetingOn ? fork.opponent?.userId : undefined;
     if (fork.anchor) {
+      if (!readOnline()) {
+        pushDeck();
+        return;
+      }
       const request = fairPackagesRequest(leagueId, {
         giveIds: fork.giveIds, receiveIds: fork.receiveIds,
       }, effectiveFairness, opponentId);
@@ -3914,6 +3918,10 @@ export default function TradesScreen({ navigation, route }: any) {
     if (devicePageUsable(held, devicePageScope(request), Date.now())) {
       pushDeck({ request, snapshot: devicePageSnapshot(held, fork.searchId),
         device: true, validatedAt: held.validated_at, deviceKey, identity: tradeSearchIdentity()! });
+      return;
+    }
+    if (!readOnline()) {
+      pushDeck();
       return;
     }
     // Start the exact user-tapped request before navigation, then transfer
