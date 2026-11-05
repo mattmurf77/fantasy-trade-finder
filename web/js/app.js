@@ -3878,7 +3878,9 @@
       if (!search.current()) return null;
       if (page.freshness_state === 'updating') page = await request({ ...payload, force: true });
       const deadline = performance.now() + 90000;
-      let delay = 200;
+      // A running job can have a ranked page ready immediately after kickoff.
+      // Probe once inside the tap budget, then back off on a real cold build.
+      let delay = 25;
       let restarted = false;
       while (page.status === 'running' && !publishableWebPage(page) && page.job_id && search.current() && performance.now() < deadline) {
         await new Promise(r => setTimeout(r, delay));
@@ -3891,7 +3893,7 @@
           restarted = true;
           page = await request(payload);
         }
-        delay = Math.min(1500, delay * 2);
+        delay = Math.min(1500, Math.max(200, delay * 2));
       }
       if (!search.current()) return null;
       if (Array.isArray(page)) return { status: 'complete', cards: page };
