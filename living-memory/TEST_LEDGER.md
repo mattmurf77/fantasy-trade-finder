@@ -9070,3 +9070,5 @@ Rules of evidence for this ledger:
 ## 2026-09-20 — App-open trade preparation
 
 116 focused backend tests passed; 39 executable native session/lifecycle checks passed, including persisted startup fairness transport. Shared fairness, ownership guards, TypeScript and web 195/195 passed. Release/full-suite evidence: [app-open status](../docs/plans/app-open-trades/status.md). Device cold-open/foreground/league-switch checklist remains unrun. No three-second latency claim.
+
+2026-11-04 · Launch disk monitor: checked fresh live Render disk usage and capacity, 41.10%, with no database writes. The threshold and failure paths were exercised with 69%, 70%, 71%, zero capacity, missing series, mismatched timestamps and stale data. A success here does not establish scheduled alert delivery.
