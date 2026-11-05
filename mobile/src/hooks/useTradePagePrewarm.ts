@@ -49,4 +49,3 @@ export function useTradePagePrewarm(): void {
     return () => { cancelled = true; };
   }, [enabled, active, hasToken, switching, isDemo, userId, leagueId, format]);
 }
-
