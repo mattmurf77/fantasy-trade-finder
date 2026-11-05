@@ -66,7 +66,7 @@ def evaluate_outlook_utility(*, before: Team, after: Team,
                              projections: Mapping[str, float] | None = None,
                              projection_basis: str | None = None,
                              projection_unit: str | None = None,
-                             projections_fresh: bool = False) -> dict:
+                             projections_fresh: bool = False, _assign=None) -> dict:
     """Compare complete rosters AFTER any caller-resolved cuts/inactive changes.
 
     Return a JSON-ready dict; attach it under a roster team's outlook_utility.
@@ -78,6 +78,7 @@ def evaluate_outlook_utility(*, before: Team, after: Team,
     This measures preference benefit, never eligibility. The caller must keep
     trade_roster's two-team blockers/unknowns and all existing policy gates.
     """
+    choose = _assign or assign
     outlook = resolve_outlook(explicit=explicit_outlook, inferred=inferred_outlook,
                               inference_fresh=inference_fresh)
     now_weight = _NOW_WEIGHT[outlook["value"]]
@@ -174,7 +175,7 @@ def evaluate_outlook_utility(*, before: Team, after: Team,
         lineups, scores = [], []
         for pool in pools:
             # Re-optimize the WHOLE lineup in real points, not dynasty value.
-            lineup = assign(rules.slots, [replace(a, value=float(projections[a.id])) for a in pool])
+            lineup = choose(rules.slots, [replace(a, value=float(projections[a.id])) for a in pool])
             lineups.append(lineup)
             scores.append(sum(float(projections[p]) for p in lineup if p is not None))
         if all(_finite(score) for score in scores):
@@ -187,7 +188,7 @@ def evaluate_outlook_utility(*, before: Team, after: Team,
 
     if valid_slots:
         if not use_points:
-            proxy_lineups = [assign(rules.slots, pool) for pool in pools]
+            proxy_lineups = [choose(rules.slots, pool) for pool in pools]
             proxy_totals = [sum(assets[p].value for p in lineup if p is not None)
                             for lineup in proxy_lineups]
             lineup_proxy.update(_component(*proxy_totals, "dynasty_value"))
@@ -198,7 +199,7 @@ def evaluate_outlook_utility(*, before: Team, after: Team,
         reserve_ids = []
         for pool in pools:
             usable = [a for a in pool if a.startable]
-            lineup = set(assign(rules.slots, usable))
+            lineup = set(choose(rules.slots, usable))
             reserve_ids.append(sorted(a.id for a in usable if a.id not in lineup))
         depth.update(_component(*(len(ids) for ids in reserve_ids), "usable_reserve_players"))
         depth.update({"reserve_ids": {"before": reserve_ids[0], "after": reserve_ids[1]},

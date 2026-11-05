@@ -25,6 +25,33 @@ sessions do not use a held page as a preview grant.
   existing 600ms cold page-push fallback remain honest waits. No full backend
   suite or simulator was run. See docs/plans/find-trade-first-card-prewarm.md.
 
+## 2026-11-05 — Find a Trade exact assignment reuse
+
+On base/deployed `dd5058ba`, counts-only production diagnostics confirmed a
+10,007 ms first-card timeout, a 64,812 ms / 92-card generation, 29,662 ms owner
+arm generation of 2,785 candidates, and first durable batch at 64,567 ms.
+No runtime flags, preparation, billing policy or production state were changed.
+
+- **279 passed in 17.69 s**, ten targeted files: assignment memo, roster,
+  roster wiring/floor kick, outlook utility, mutual benefit, owner publication,
+  bilateral routes/revision routes and owner-only routes. No full suite.
+- Eleven new regressions cover exact cached/uncached structural and outlook
+  output (including fresh/stale point data), input changes, independent lists,
+  private context separation, 128-entry eviction, real-card solver reuse and
+  scenario/cut equivalence. A missing-values cache-key negative control failed
+  its changed-value regression; restored source passed the final run.
+- Three unprofiled whole-worker runs per variant, same synthetic 432-card /
+  12-slot inputs/config: baseline 4.334/4.989/5.117 s, memo
+  2.659/2.977/3.097 s; medians 4.989 → 2.977 s. Assignment calls
+  8,768 → 2,727. All six exact roster-result and ordered offer-term hashes
+  agree. Memo retained 128 entries / 1,536 asset references / about 81,048
+  bytes of containers, not total process memory. No production-speed claim.
+- No schema, route, wire, event or knob changes; no deployment or native build.
+  Independent review and exact-head GitHub CI remain parent-owned gates.
+
+Scope and limits: `docs/plans/find-trade-assignment-memo/scope.md`. The 29.7 s
+owner-generation phase and cold first-tap readiness remain separate constraints.
+
 ## 2026-11-04 — #601 independent-review completion
 
 Expanded coverage enumerates every test suite referencing export_user_data or

@@ -5,6 +5,7 @@ stays unknown. Slots share one exact assignment, so FLEX cannot reuse a starter.
 See docs/plans/post-trade-roster-evaluation/scope.md for rollout boundaries.
 """
 from dataclasses import dataclass, field, replace
+from collections import OrderedDict
 from itertools import combinations
 import math
 from typing import Mapping
@@ -99,13 +100,14 @@ def assign(slots: tuple[str, ...], assets: list[Asset]) -> list[str | None]:
 
 
 def _health(team: Team, roster: set[str], assets: Mapping[str, Asset], rules: Rules,
-            absent: frozenset[str] = frozenset()) -> dict:
+            absent: frozenset[str] = frozenset(), *, _assign=None) -> dict:
+    choose = _assign or assign
     available = [assets[p] for p in sorted(roster) if p in assets
                  and not assets[p].is_pick and assets[p].available
                  and p not in team.inactive and p not in absent]
     usable = [a for a in available if a.startable]
-    assignment = assign(rules.slots, available)
-    quality_assignment = assign(rules.slots, usable)
+    assignment = choose(rules.slots, available)
+    quality_assignment = choose(rules.slots, usable)
     # Every union of slot-eligible positions is a Hall constraint. This
     # catches a lost FLEX body even when all dedicated counts still pass.
     deficits, legal_deficits, coverage = {}, {}, {}
@@ -141,7 +143,7 @@ def _health(team: Team, roster: set[str], assets: Mapping[str, Asset], rules: Ru
     }
 
 
-def _team_result(team, outgoing, incoming, assets, rules, cuts, scenarios):
+def _team_result(team, outgoing, incoming, assets, rules, cuts, scenarios, *, _assign=None):
     before_ids = set(team.roster)
     after_ids = (before_ids - set(outgoing)) | set(incoming)
     unknown, blockers = [], []
@@ -158,7 +160,8 @@ def _team_result(team, outgoing, incoming, assets, rules, cuts, scenarios):
     if not set(cuts) <= after_ids or set(cuts) & set(incoming):
         unknown.append("invalid_cut_plan")
     after_ids -= set(cuts)
-    before, after = _health(team, before_ids, assets, rules), _health(team, after_ids, assets, rules)
+    before = _health(team, before_ids, assets, rules, _assign=_assign)
+    after = _health(team, after_ids, assets, rules, _assign=_assign)
     for field_name in ("legal_deficits", "deficits"):
         for group, deficit in after[field_name].items():
             if deficit > before[field_name].get(group, 0):
@@ -178,8 +181,8 @@ def _team_result(team, outgoing, incoming, assets, rules, cuts, scenarios):
     else:
         unknown.append("capacity_unknown")
     for label, absent in scenarios.items():
-        b = _health(team, before_ids, assets, rules, frozenset(absent))
-        a = _health(team, after_ids, assets, rules, frozenset(absent))
+        b = _health(team, before_ids, assets, rules, frozenset(absent), _assign=_assign)
+        a = _health(team, after_ids, assets, rules, frozenset(absent), _assign=_assign)
         if any(a["deficits"][g] > b["deficits"][g] for g in a["deficits"]):
             blockers.append(f"availability_scenario:{label}")
     starter_delta = (after["starter_value"] - before["starter_value"]) / max(1, before["starter_value"])
@@ -208,7 +211,7 @@ def _team_result(team, outgoing, incoming, assets, rules, cuts, scenarios):
 def evaluate(*, viewer: Team, partner: Team, give: list[str], receive: list[str],
              assets: Mapping[str, Asset], rules: Rules,
              cuts: Mapping[str, list[str]] | None = None,
-             scenarios: Mapping[str, frozenset[str]] | None = None) -> dict:
+             scenarios: Mapping[str, frozenset[str]] | None = None, _assign=None) -> dict:
     """Evaluate a fully assembled exchange on both complete rosters.
 
     `safe` means only the declared checks passed; weekly schedule risk remains
@@ -234,7 +237,8 @@ def evaluate(*, viewer: Team, partner: Team, give: list[str], receive: list[str]
         return result
     for team, outgoing, incoming in ((viewer, give, receive), (partner, receive, give)):
         result["teams"][team.id] = _team_result(team, outgoing, incoming, assets, rules,
-                                               (cuts or {}).get(team.id, []), scenarios or {})
+                                               (cuts or {}).get(team.id, []), scenarios or {},
+                                               _assign=_assign)
     teams = list(result["teams"].values())
     blocked = any(t["blockers"] for t in teams)
     uncertain = bool(unknown) or any(t["unknowns"] for t in teams)
@@ -253,6 +257,23 @@ class Context:
     rules: Rules
     cache: dict = field(default_factory=dict)
     utility_inputs: Mapping[str, dict] = field(default_factory=dict)
+    # A bounded, context-local LRU: repeated pre-trade rosters stay hot while
+    # speculative after-rosters cannot grow retained assignment state unbounded.
+    # Full immutable assets include values, availability and eligibility, so a
+    # changed projection or player input can never reuse an old assignment.
+    _assignments: OrderedDict = field(default_factory=OrderedDict, repr=False)
+
+    def _assign(self, slots, assets):
+        key = (tuple(slots), tuple(sorted(assets, key=lambda a: a.id)))
+        if key not in self._assignments:
+            result = tuple(assign(slots, assets))
+            if len(self._assignments) >= 128:
+                self._assignments.popitem(last=False)
+            self._assignments[key] = result
+        else:
+            self._assignments.move_to_end(key)
+        # Callers receive an independent list, just as a direct assign call.
+        return list(self._assignments[key])
 
     def card(self, card) -> dict:
         key = (card.target_user_id, tuple(sorted(card.give_player_ids)),
@@ -264,7 +285,8 @@ class Context:
             else:
                 self.cache[key] = evaluate(viewer=self.teams[self.viewer_id],
                     partner=self.teams[card.target_user_id], give=card.give_player_ids,
-                    receive=card.receive_player_ids, assets=self.assets, rules=self.rules)
+                    receive=card.receive_player_ids, assets=self.assets, rules=self.rules,
+                    _assign=self._assign)
                 self._add_benefits(self.cache[key], card)
         return self.cache[key]
 
@@ -282,7 +304,7 @@ class Context:
                 (set(before.roster) - set(outgoing)) | set(incoming))))
             result['teams'][uid]['outlook_utility'] = evaluate_outlook_utility(
                 before=before, after=after, assets=self.assets, rules=self.rules,
-                **self.utility_inputs.get(uid, {}))
+                _assign=self._assign, **self.utility_inputs.get(uid, {}))
         benefits = [result['teams'].get(uid, {}).get('outlook_utility', {})
                     for uid in (self.viewer_id, card.target_user_id)]
         sources = [{'explicit': 'observed', 'inferred': 'estimated'}.get(

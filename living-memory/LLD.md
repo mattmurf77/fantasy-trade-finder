@@ -264,6 +264,13 @@ Required: H1 with project suffix, purpose blockquote, Table of Contents, ISO dat
 
 ### Roster checks and publication (2026-09-04)
 
+Exact lineup work is shared within one captured `Context` through a 128-entry
+LRU keyed by slots and complete immutable `Asset` tuples. Structural health
+and outlook utility use the same context solver; returned assignment lists
+are detached, input changes miss, and speculative rosters evict by recency.
+The default standalone evaluators still call the original exact solver.
+No context/global lifetime or private-data persistence is added.
+
 The final roster gate precedes market quotas. A mutation invalidates roster evidence; the context cache key includes both final asset lists and partner. Exact matching shares every slot. Constrained position-group coverage may not worsen, including an established single-absence buffer. Unknown inputs cannot pass; shadow failures preserve the legacy deck, enforcement failures publish an empty deck. `final_checks_pending` guards every provisional card write; flag-off jobs retain their original key shape. Card evidence is public only with protection; frozen impression evidence and capped `roster_check` rejection rows support shadow review. Safety-switch changes invalidate completed caches. See `docs/plans/post-trade-roster-evaluation/code-walk.md`.
 
 ## Guide beats: the GuideStep eligibility convention (2026-08-15, guide-v2)
