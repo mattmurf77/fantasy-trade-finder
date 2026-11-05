@@ -88,6 +88,34 @@ class AcceptanceReportTests(unittest.TestCase):
         p["cohorts"][0]["histogram"][0]["ms"] = 201
         self.assertEqual(R.report(p)["status"], "FAIL")
 
+    def test_one_slow_tap_cannot_hide_beneath_fast_p95_in_strict_profile(self):
+        p = complete()
+        p["cohorts"][0]["histogram"].append(dict(result="shown", ms=5000, count=1))
+        self.assertEqual(R.summarize(p["cohorts"], 200)["p95_ms"], 100)
+        out = R.report(p)
+        self.assertEqual(out["status"], "FAIL")
+        self.assertEqual(out["totals_including_cold_offline_preferences"]["max_shown_ms"], 5000)
+        self.assertEqual(out["totals_including_cold_offline_preferences"]["eligible_above_limit_or_missing"], 1)
+
+    def test_one_timeout_cannot_hide_beneath_fast_p95_in_strict_profile(self):
+        p = complete()
+        p["cohorts"][0]["histogram"].append(dict(result="timeout", ms=10000, count=1))
+        self.assertEqual(R.summarize(p["cohorts"], 200)["p95_ms"], 100)
+        self.assertEqual(R.report(p)["status"], "FAIL")
+
+    def test_legacy_profile_keeps_p95_rule(self):
+        p = complete("ac-l1")
+        p["cohorts"][0]["histogram"].append(dict(result="shown", ms=5000, count=1))
+        self.assertNotEqual(R.report(p, "ac-l1")["status"], "FAIL")
+
+    def test_known_no_solution_is_not_a_fast_card_but_unknown_empty_is_a_miss(self):
+        row = cohort(scenario="no_eligible_solution",
+                     histogram=[dict(result="no_solution", ms=120, count=80)])
+        stats = R.summarize([row], 200)
+        self.assertEqual(stats["eligible"], 0)
+        row["histogram"][0]["result"] = "empty"
+        self.assertEqual(R.summarize([row], 200)["eligible_above_limit_or_missing"], 80)
+
     def test_missing_or_ambiguous_events_fail_even_below_p95_fraction(self):
         for result in ("missing_outcome", "duplicate_outcome", "invalid_outcome"):
             p = complete()
@@ -164,6 +192,14 @@ class AcceptanceReportTests(unittest.TestCase):
         out = R.report(p, "ac-l1")
         self.assertEqual(out["checks"][0]["devices_lower_bound"], 1)
         self.assertEqual(out["status"], "FAIL")
+
+    def test_offline_negative_control_devices_do_not_supply_card_sample_devices(self):
+        performance = cohort(devices=1)
+        negative = cohort(scenario="offline_empty", devices=2,
+                          histogram=[dict(result="offline", ms=1, count=80)])
+        stats = R.summarize([performance, negative], 200)
+        self.assertEqual(stats["devices_lower_bound"], 1)
+        self.assertEqual(stats["devices_all_lower_bound"], 2)
 
     def test_new_web_source_is_required(self):
         p = complete()

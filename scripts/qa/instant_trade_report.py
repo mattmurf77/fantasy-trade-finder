@@ -19,7 +19,7 @@ import sys
 DIMENSIONS = ("platform", "entry_point", "search_type", "network_type", "launch_state", "scenario")
 GATES = {"paywall", "verify"}
 RESULTS = {"shown", "empty", "error", "abandoned", "timeout", "paywall", "verify",
-           "missing_outcome", "invalid_outcome", "duplicate_outcome", "offline"}
+           "missing_outcome", "invalid_outcome", "duplicate_outcome", "offline", "no_solution"}
 MOBILE_ENTRIES = ("deck", "calculator", "deck_error_retry", "prefs_changed_strip",
                   "deck_summary_unpin", "deck_search_all", "league_offer", "league_target",
                   "usage_trends", "deep_link", "end_card_adjust", "team_review")
@@ -29,18 +29,20 @@ SCENARIOS = ("warm", "genuinely_cold", "after_rank_change", "after_preferences_c
              "offline_cached", "free_preview")
 
 
-def nearest_rank(histogram, q):
-    """Weighted nearest-rank quantile; None represents +infinity, never zero."""
-    n = sum(count for _, count in histogram)
-    if not n:
-        return None
-    rank = math.ceil(q * n)
+def value_at_rank(histogram, rank):
+    """Weighted order statistic; null means +infinity, never zero."""
     seen = 0
     for value, count in sorted(histogram, key=lambda x: math.inf if x[0] is None else x[0]):
         seen += count
         if seen >= rank:
             return value
     raise AssertionError("histogram rank")
+
+
+def nearest_rank(histogram, q):
+    """Weighted nearest-rank quantile; None represents +infinity, never zero."""
+    n = sum(count for _, count in histogram)
+    return value_at_rank(histogram, math.ceil(q * n)) if n else None
 
 
 def binomial_quantile(n, p, probability):
@@ -66,8 +68,8 @@ def quantile_ci(histogram):
         return {"lower_ms": None, "upper_ms": None}
     lo = binomial_quantile(n, .95, .05)
     hi = binomial_quantile(n, .95, .95) + 1
-    return {"lower_ms": nearest_rank(histogram, lo / n) if lo else 0,
-            "upper_ms": nearest_rank(histogram, hi / n) if hi <= n else None}
+    return {"lower_ms": value_at_rank(histogram, lo) if lo else 0,
+            "upper_ms": value_at_rank(histogram, hi) if hi <= n else None}
 
 
 def validate(payload):
@@ -137,7 +139,11 @@ def summarize(rows, limit, legacy=False):
             continue
         # Each row has exact distinct eligible-device count. max is a safe
         # LOWER BOUND on the union, not a sum that double-counts devices.
-        devices = max(devices, row["devices"])
+        has_latency = any(p["result"] not in GATES and not (
+            (row["scenario"] == "offline_empty" and p["result"] == "offline") or
+            (row["scenario"] == "no_eligible_solution" and p["result"] == "no_solution")) for p in row["histogram"])
+        if has_latency:
+            devices = max(devices, row["devices"])
         devices_all = max(devices_all, row.get("devices_all", row["devices"]))
         for p in row["histogram"]:
             counts[p["result"]] += p["count"]
@@ -147,6 +153,8 @@ def summarize(rows, limit, legacy=False):
             # no network and no retained page. Its honest Offline state is
             # checked separately, never silently counted as a fast card.
             if row["scenario"] == "offline_empty" and p["result"] == "offline":
+                continue
+            if row["scenario"] == "no_eligible_solution" and p["result"] == "no_solution":
                 continue
             value = p["ms"] if p["result"] == "shown" else None
             # All failures are +infinity, including fast abandonment/empty.
@@ -163,6 +171,9 @@ def summarize(rows, limit, legacy=False):
             "p99_ms": nearest_rank(latency, .99),
             "within_limit": sum(n for ms, n in latency if ms is not None and ms <= limit),
             "within_limit_fraction": sum(n for ms, n in latency if ms is not None and ms <= limit) / eligible if eligible else None,
+            "eligible_above_limit_or_missing": sum(n for ms, n in latency if ms is None or ms > limit),
+            "max_shown_ms": max((ms for ms, _ in latency if ms is not None), default=None),
+            "max_eligible_ms": None if any(ms is None for ms, _ in latency) else max((ms for ms, _ in latency), default=None),
             "failed_or_missing": sum(n for ms, n in latency if ms is None)}
 
 
@@ -187,7 +198,8 @@ def requirements(profile):
             reqs.append((f"{platform}:scenario:{scenario}",
                          {"platform": platform, "scenario": scenario}, "latency"))
         for scenario, expected in (("offline_empty", "offline"),
-                                   ("preview_exhausted", "paywall"), ("unverified", "verify")):
+                                   ("preview_exhausted", "paywall"), ("unverified", "verify"),
+                                   ("no_eligible_solution", "no_solution")):
             reqs.append((f"{platform}:state:{scenario}",
                          {"platform": platform, "scenario": scenario}, expected))
     for entry in MOBILE_ENTRIES:
@@ -217,6 +229,8 @@ def report(payload, profile="all-entry", limit=200, min_samples=40, min_devices=
         if expected == "latency":
             if count and (stats["p95_ms"] is None or stats["p95_ms"] > limit):
                 reasons.append("p95_above_limit_or_unbounded")
+            if profile == "all-entry" and stats["eligible_above_limit_or_missing"]:
+                reasons.append("observed_eligible_tap_above_limit_or_missing")
         elif stats["outcomes"].get(expected, 0) != stats["taps"]:
             reasons.append(f"expected_only:{expected}")
         status = "FAIL" if reasons else "PASS"
@@ -243,6 +257,8 @@ def report(payload, profile="all-entry", limit=200, min_samples=40, min_devices=
     totals["uncorrelated_taps"] = untraced
     totals["correlated_unique_taps"] = totals["taps"] - untraced
     totals["raw_R1_events"] = totals["taps"] + sum(r.get("duplicate_taps", 0) for r in rows)
+    if profile == "all-entry" and totals["eligible_above_limit_or_missing"]:
+        global_reasons.append("observed_eligible_tap_above_limit_or_missing")
     if any(totals["outcomes"].get(k) for k in ("duplicate_outcome", "invalid_outcome", "missing_outcome")):
         global_reasons.append("incomplete_or_ambiguous_R1_terminal_join")
     if any(c["status"] == "FAIL" for c in checks):
@@ -274,7 +290,8 @@ WITH tap_rows AS (
  CASE WHEN props::jsonb->>'scenario' IN
  ('after_league_switch','after_preferences_change','after_format_switch','after_account_switch',
  'after_rank_change','warm','genuinely_cold','pinned_give','pinned_receive','targeted_opponent',
- 'shape_intent','fair_sweep','offline_cached','free_preview','offline_empty','preview_exhausted','unverified')
+ 'shape_intent','fair_sweep','offline_cached','free_preview','offline_empty','preview_exhausted','unverified',
+ 'no_eligible_solution')
  THEN props::jsonb->>'scenario' ELSE 'unclassified' END r1_scenario,
  CASE WHEN props::jsonb->>'input_age_ms' ~ '^[0-9]{1,12}$'
  THEN (props::jsonb->>'input_age_ms')::bigint END input_age_ms,

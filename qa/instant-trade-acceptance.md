@@ -43,6 +43,10 @@ The default **all-entry** profile requires first/repeat Wi-Fi/cellular organic
 cells, every listed search entry, scoped/fair searches, cold launch, genuinely
 cold engine, immediate changes, cached offline use and first free preview.
 No first/repeat, cold, preference, scoped or offline case is silently removed.
+**Every observed eligible tap must be <=200ms**, not merely p95: one 5-second
+success or timeout among hundreds of fast cards fails this strict profile.
+The report includes above-limit/missing counts and observed maximums alongside
+the inherited percentile statistics. No finite sample promises future taps.
 Offline with no retained page, exhausted preview and unverified sessions have
 separate required negative-control rows (`offline`, `paywall`, `verify`);
 they must show the proper state, not fabricated cards. Explicit product gates
@@ -101,7 +105,11 @@ copy raw production events, or claim that manually relabeling a cache hit
 establishes the scenario. Non-production acceptance runs may supply sanitized
 aggregates with known scenario context; timing must come from the real
 actionable/50%-visible frame. This reporter validates evidence completeness;
-it cannot establish roster correctness or safety from latency alone.
+it cannot establish roster correctness or safety from latency alone. A verified
+no-eligible-solution run has its own required `no_eligible_solution` scenario /
+`no_solution` outcome; it is neither a fast card nor a latency failure. This
+requires positive run evidence that no eligible solution exists. Production
+R2b `empty` is not enough to establish that condition and remains a miss.
 
 ## Entry inventory: search-starting controls
 
@@ -174,13 +182,13 @@ One aggregate-only production read (read-only transaction verified) covered
 18:09:42Z; app version 1.22.0, **all builds**, because historical R1s lack a
 build tag. Three correlated taps: one 123ms success and two ~10s timeouts.
 Each observed cell has evidence of one device. No untraced taps in this
-version-filtered window. Strict report: **FAIL**, all 56 requirements remain
+version-filtered window. Strict report: **FAIL**, all 58 requirements remain
 slow, missing or undersampled. This is a baseline, not a candidate comparison.
 No raw identities were retrieved or exported. Private sanitized aggregate and
 full failing report: `/private/tmp/fleeced-instant-trade-baseline.json` and
 `/private/tmp/fleeced-instant-trade-baseline-report.json`.
 
-Reporter regression: **24 passed**, including two real PostgreSQL synthetic
+Reporter regression: **29 passed**, including two real PostgreSQL synthetic
 temporary-table tests for UUID collision across users, missing/untraced taps,
 late terminal grace, build exclusion, immediate age boundary, duplicate R1/
 terminal and malformed latency. Initial PostgreSQL attempts were blocked by
