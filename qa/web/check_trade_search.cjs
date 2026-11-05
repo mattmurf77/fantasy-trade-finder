@@ -61,6 +61,9 @@ function page(ids, cursor, total, extra = {}) {
   await h.context.generateTrades(); assert.deepEqual(h.rendered.at(-1),['first']);
   assert.equal(h.requests.length,1); assert.equal(h.el.get('trade-more-btn').hidden,false);
   await h.context.loadMoreWebTrades(); assert.deepEqual(h.rendered.at(-1),['first','second']);
+  h = harness([page(['old'],1,2),{error:'trade_snapshot_changed'}]);
+  await h.context.generateTrades(); await h.context.loadMoreWebTrades();
+  assert.equal(h.rendered.at(-1).length,0); assert.equal(h.el.get('trade-more-btn').hidden,true);
   let fulfill; h = harness([new Promise(resolve => { fulfill = resolve; })]);
   const waiting = h.context.generateTrades();
   h.context.currentLeagueId = 'B'; fulfill(page(['wrong league'],1,1)); await waiting;

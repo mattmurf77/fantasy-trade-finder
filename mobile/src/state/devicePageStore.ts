@@ -85,7 +85,7 @@ export function hydrateDevicePages(): Promise<void> {
 
 /** The held page for a key (synchronous: the tap's read). */
 export function readDevicePage(key: string | null): DevicePage | null {
-  return key ? pages.get(key) ?? null : null;
+  return key && !pendingTradeWrites ? pages.get(key) ?? null : null;
 }
 
 /** Drop the key's page. `asOf` is the validation time the discard answers
@@ -103,6 +103,7 @@ export function discardDevicePage(key: string, asOf = Date.now()) {
  *  as in discardDevicePage). A page validated before the last discard of its
  *  key, or of every key, is refused: it predates what superseded it. */
 export function saveDevicePage(key: string, page: DevicePage | null, asOf?: number) {
+  if (page && pendingTradeWrites) return;
   if (!page) {
     discardDevicePage(key, asOf);
     return;
@@ -153,13 +154,23 @@ function discardAllDevicePages() {
   }
 }
 
-// The client's own rankings / preference writes and format switches (sent,
-// and again settled).
-setOnWriteRequest((path) => {
-  if (discardsDevicePages(path)) {
-    invalidateTradeSearchHandoffs();
-    discardAllDevicePages();
-  }
+// A fresh page may be prepared when all overlapping writes have settled.
+let pendingTradeWrites = 0;
+const settledListeners = new Set<() => void>();
+export function onTradePageInputsSettled(listener: () => void): () => void {
+  settledListeners.add(listener);
+  return () => { settledListeners.delete(listener); };
+}
+export function notifyTradePageInputsSettled(): void {
+  if (pendingTradeWrites === 0) settledListeners.forEach(listener => listener());
+}
+setOnWriteRequest((path, phase) => {
+  if (!discardsDevicePages(path)) return;
+  if (phase === 'start') pendingTradeWrites++;
+  if (phase === 'settled') pendingTradeWrites = Math.max(0, pendingTradeWrites - 1);
+  invalidateTradeSearchHandoffs();
+  discardAllDevicePages();
+  if (phase === 'settled') notifyTradePageInputsSettled();
 });
 
 export interface DevicePageTarget {
@@ -183,7 +194,7 @@ export async function refreshDevicePage(
   const attemptKey = JSON.stringify([target.key, target.scope]);
   const previous = inFlight.get(attemptKey);
   if (previous && !previous()) lastAttemptAt.delete(attemptKey);
-  if (!shouldContinue() || AppState.currentState !== 'active' || !onlineManager.isOnline()
+  if (pendingTradeWrites || !shouldContinue() || AppState.currentState !== 'active' || !onlineManager.isOnline()
       || (previous && previous())
       || !refreshDue(lastAttemptAt.get(attemptKey), now)) {
     return;

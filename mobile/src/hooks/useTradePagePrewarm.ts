@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FAIRNESS_PREF_KEY, fairnessOnFromPref, fairnessThresholdFor } from '../api/tradePregen';
-import { hydrateDevicePages, refreshDevicePage } from '../state/devicePageStore';
+import { hydrateDevicePages, refreshDevicePage, onTradePageInputsSettled } from '../state/devicePageStore';
 import { useSession } from '../state/useSession';
 import { useFlag, useFeatureFlags } from '../state/useFeatureFlags';
 import { devicePageKey, devicePageScope } from '../utils/devicePage';
@@ -33,19 +33,31 @@ export function useTradePagePrewarm(): void {
         && s.hasToken && !s.switching && !s.isDemo
         && devicePageKey(s.user?.user_id, s.league?.league_id, s.activeFormat) === key;
     };
-    void Promise.all([
-      hydrateDevicePages(),
-      AsyncStorage.getItem(FAIRNESS_PREF_KEY).catch(() => null),
-    ]).then(async ([, raw]) => {
-      if (!current()) return;
-      // Foreground work joins the session-init already started by App.tsx;
-      // never race its token/format replacement with a generation request.
-      await useSession.getState().revalidateSession();
-      if (!current()) return;
-      const request = { league_id: leagueId!, fairness_threshold: fairnessThresholdFor(fairnessOnFromPref(raw)) };
-      const scope = devicePageScope(request);
-      if (scope) return refreshDevicePage({ key, scope, request }, Date.now(), current);
-    }).catch(() => { /* background preparation never blocks navigation */ });
-    return () => { cancelled = true; };
+    let revision = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const prepare = (attempt: number) => {
+      const stillCurrent = () => attempt === revision && current();
+      void Promise.all([
+        hydrateDevicePages(),
+        AsyncStorage.getItem(FAIRNESS_PREF_KEY).catch(() => null),
+      ]).then(async ([, raw]) => {
+        if (!stillCurrent()) return;
+        // Foreground work joins the session-init already started by App.tsx;
+        // never race its token/format replacement with a generation request.
+        await useSession.getState().revalidateSession();
+        if (!stillCurrent()) return;
+        const request = { league_id: leagueId!, fairness_threshold: fairnessThresholdFor(fairnessOnFromPref(raw)) };
+        const scope = devicePageScope(request);
+        if (scope) return refreshDevicePage({ key, scope, request }, Date.now(), stillCurrent);
+      }).catch(() => { /* background preparation never blocks navigation */ });
+    };
+    prepare(revision);
+    const unsubscribe = onTradePageInputsSettled(() => {
+      // Coalesce rapid edits; an older preference read can't win the race.
+      const attempt = ++revision;
+      clearTimeout(timer);
+      timer = setTimeout(() => { if (current()) prepare(attempt); }, 300);
+    });
+    return () => { cancelled = true; clearTimeout(timer); unsubscribe(); };
   }, [enabled, active, hasToken, switching, isDemo, userId, leagueId, format]);
 }

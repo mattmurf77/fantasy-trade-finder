@@ -3344,7 +3344,7 @@
         refreshPlayerEloMap();  // populate ELO sort for player picker
         // Check ranking gate; only refresh trades if already unlocked
         checkTradesGate().then(unlocked => {
-          if (unlocked) { refreshTrades(); scheduleWebTradeWarm(); }
+          if (unlocked) refreshTrades();
         });
       }
       if (view === 'rankings') {
@@ -3755,7 +3755,17 @@
         }).catch(() => null);
         const warm = { context, pending };
         webWarmRequest = warm;
-        pending.finally(() => { if (webWarmRequest === warm) webWarmRequest = null; });
+        pending.then(page => {
+          // Restore a previously prepared deck on entry only when the same
+          // gate and freshness checks as an explicit search have approved it.
+          if (!page || webWarmRequest !== warm || webTradeSearch?.current() ||
+              webTradeContext() !== context || document.hidden ||
+              !document.getElementById('view-trades')?.classList.contains('active') ||
+              !page.cards?.length || !publishableWebPage(page)) return;
+          const restored = beginWebTradeSearch(payload, false);
+          renderTrades(page.cards);
+          setNextWebTradePage(restored, page);
+        }).catch(() => {}).finally(() => { if (webWarmRequest === warm) webWarmRequest = null; });
       }, 350);
     }
 
@@ -3830,7 +3840,7 @@
         webTradeTapCount++;
         const change = webTradeChange ? { scenario: webTradeChange.scenario, input_age_ms: Math.max(0, Math.round(started - webTradeChange.at)) } : {};
         webTradeChange = undefined;
-        window.FTFTrack?.('find_trades_tapped', { source: 'web_finder', mode: 'deck', search_id: searchId, ...change }, 'trades');
+        window.FTFTrack?.('find_trades_tapped', { source: 'web_finder', mode: 'deck', search_id: searchId, client_build: 'instant-trades-v1', ...change }, 'trades');
         timer = setTimeout(() => search.finish('timeout'), 10000);
       }
       return search;
@@ -3955,7 +3965,14 @@
         } while (!_allTradeCards.length && webTradeMore);
         if (!_allTradeCards.length) next.search.finish('empty');
       } catch (error) {
-        if (next.search.current()) { next.search.finish(error.reason || 'error'); showToast(error.message); }
+        if (next.search.current()) {
+          next.search.finish(error.reason || 'error');
+          if (error.code === 'trade_snapshot_changed' || error.reason === 'verify' || error.reason === 'paywall') {
+            stopWebTradeSearch();
+            renderTrades([]);
+          }
+          showToast(error.message);
+        }
       } finally { more.disabled = false; }
     }
 
@@ -3964,18 +3981,12 @@
     });
     window.addEventListener('pagehide', () => webTradeSearch?.finish('abandoned'));
 
-    async function refreshTrades() {
-      const context = webTradeContext();
-      const active = webTradeSearch;
-      if (active?.current()) return;
-      try {
-        const res = await apiFetch('/api/trades?league_id=' + encodeURIComponent(currentLeagueId || 'league_demo'));
-        const cards = await res.json();
-        if (context === webTradeContext() && active === webTradeSearch && Array.isArray(cards)) {
-          renderTrades(cards);
-          updateLikedBadge();
-        }
-      } catch {}
+    function refreshTrades() {
+      if (webTradeSearch?.current()) return;
+      stopWebTradeSearch();
+      renderTrades([]);
+      scheduleWebTradeWarm();
+      updateLikedBadge();
     }
 
     // FB-47 — partner-fit copy. `partner_fit` is a 0–1 scalar (exact depth

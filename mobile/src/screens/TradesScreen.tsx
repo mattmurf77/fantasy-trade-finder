@@ -242,6 +242,7 @@ import {
 } from '../utils/devicePage';
 import {
   hydrateDevicePages,
+  notifyTradePageInputsSettled,
   discardDevicePage,
   readDevicePage,
   refreshDevicePage,
@@ -1498,7 +1499,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setFairPending(false);
     setFairnessOn(next);
     // Fire-and-forget persistence; a write failure shouldn't block the UI.
-    AsyncStorage.setItem(FAIRNESS_PREF_KEY, next ? 'on' : 'off').catch(() => {});
+    AsyncStorage.setItem(FAIRNESS_PREF_KEY, next ? 'on' : 'off').then(notifyTradePageInputsSettled).catch(() => {});
     // Toggling the threshold invalidates the current deck — the next
     // Find-a-Trade tap should request a fresh set under the new mode.
     // Also avoids visual shuffle if streaming cards were still arriving.

@@ -367,6 +367,19 @@ process.on('exit', () => {
     eq(env.polls[0], { jobId: 'j1', page: { deck: 'j1', cursor: 0 }, options: { background: true, headers: { 'X-FTF-Prewarm': '1' } } });
     eq(ids(st.readDevicePage(KEY).cards), ['a', 'b', 'c']);
   });
+  await check('overlapping preference writes prevent reuse and refresh until the final response', async () => {
+    const env = makeEnv(); const st = loadStore(env);
+    let settled = 0;
+    const unsubscribe = st.onTradePageInputsSettled(() => settled++);
+    env.onWrite('/api/league/preferences', 'start');
+    env.onWrite('/api/league/asset-prefs', 'start');
+    env.onWrite('/api/league/preferences', 'settled');
+    await st.refreshDevicePage(target, T0);
+    eq(env.calls.length, 0); eq(settled, 0);
+    env.onWrite('/api/league/asset-prefs', 'settled');
+    eq(settled, 1); unsubscribe();
+    st.notifyTradePageInputsSettled(); eq(settled, 1);
+  });
   await check('2c2. a perpetually running job is bounded; provisional cards are never cached', async () => {
     const env = makeEnv({ respond: async () => page1({ status: 'running' }) });
     const st = loadStore(env);

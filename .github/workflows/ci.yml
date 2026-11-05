@@ -60,6 +60,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 qa/web/check_web_structure.py
+      - run: node qa/web/check_trade_search.cjs
+      - run: python3 -m unittest discover -s scripts/qa -p test_instant_trade_report.py
 
   maestro-testid-lint:
     runs-on: ubuntu-latest
