@@ -444,6 +444,8 @@ const REQUIRED_IDS = [
   else fail('package.json: test:blind-grading script', `got ${JSON.stringify(pkg.scripts && pkg.scripts['test:blind-grading'])}`);
 }
 
+require('./calibration-retry-cases');
+
 console.log(failures === 0
   ? '\nAll blind-grading checks passed.'
   : `\n${failures} check(s) failed.`);

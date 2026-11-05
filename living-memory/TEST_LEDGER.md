@@ -1,5 +1,9 @@
 ## 2026-11-04 — Held parser child updated with final co-owner fixture prerequisite
 
+## 2026-11-04 — Public Calibration: recover a failed read
+
+The launch audience stays public. Ran the blind-grading guard with an executable screen harness: a failed current-session read retries only that read; a failed next-card read retries the same session even if the cache still holds the previous card. Neither submits a grade. A 404 still shows Unavailable, and an initial pending read still shows Loading. Operator TestFlight check: disconnect mid-session before loading the next card, reconnect, tap Try again, and confirm the next ungraded card appears once.
+
 Merged exact revised launch parent `e7fb895ff9fbfc5d6acbeceaa4defc929a18c428` into held parser candidate `8048cfb7`, preserving original #584 head `61e8248c`. The only resolution is additive ledger history. Parent's co-owner fixture now persists real user rows before creating its verified sessions, so first-init's existing live-user/deletion guard runs normally; no runtime code or assertion was weakened.
 
 - Offline co-owner + parser/KTC blend-health/DP consensus/QB-cap/universal-pool/subprocess-harness target: **154 passed in 16.07s**, scratch SQLite with external Python network calls blocked also in child processes. `git diff --check` passes.
