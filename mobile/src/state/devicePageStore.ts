@@ -18,9 +18,10 @@
 // league or format switch reads a different key, and the deck on screen
 // writes only under the key it was validated for (TradesScreen deckKeyRef).
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppState } from 'react-native';
 import { onlineManager } from '@tanstack/react-query';
 import { setOnWriteRequest } from '../api/client';
-import { generateTrades, type GenerateBody, type PagedTradeJobSnapshot } from '../api/trades';
+import { generateTrades, getTradeStatus, type GenerateBody, type PagedTradeJobSnapshot } from '../api/trades';
 import {
   DEVICE_PAGE_KEY_PREFIX,
   devicePageFrom,
@@ -33,7 +34,9 @@ import {
 
 const pages = new Map<string, DevicePage>();
 const lastAttemptAt = new Map<string, number>();
-const inFlight = new Set<string>();
+const inFlight = new Map<string, () => boolean>();
+const activeScopes = new Map<string, string>();
+const PREWARM_REQUEST = { background: true, headers: { 'X-FTF-Prewarm': '1' } };
 const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const keyEpochs = new Map<string, number>();
 let epoch = 0;
@@ -126,6 +129,7 @@ export async function clearDevicePages(): Promise<void> {
   discardedAt = Math.max(discardedAt, Date.now());
   pages.clear();
   lastAttemptAt.clear();
+  activeScopes.clear();
   for (const t of persistTimers.values()) clearTimeout(t);
   persistTimers.clear();
   try {
@@ -137,6 +141,9 @@ export async function clearDevicePages(): Promise<void> {
 
 function discardAllDevicePages() {
   epoch += 1;
+  // A ranking/format/roster write invalidates the warmed request itself;
+  // its old throttle must not suppress preparation for the new inputs.
+  lastAttemptAt.clear();
   discardedAt = Math.max(discardedAt, Date.now());
   for (const key of [...pages.keys()]) {
     pages.delete(key);
@@ -157,32 +164,72 @@ export interface DevicePageTarget {
   request: GenerateBody;
 }
 
-/** Approach B's background refresh, for Trades focus and app foreground:
+/** Approach B's background refresh, for early tab mount, Trades focus and app foreground:
  *  E2's page 1 (P1 serves it from the page store, or it joins the running
  *  or pre-built job), under no search id. At most once per key per
- *  DEVICE_PAGE_REFRESH_MIN_S, one at a time, never offline. Keeps the page
+ *  DEVICE_PAGE_REFRESH_MIN_S per key/scope, one current attempt, never offline. Keeps the page
  *  only when devicePageFrom does; any other answer discards the key's page.
  *  A failed request keeps what is held (the max age bounds it). */
-export async function refreshDevicePage(target: DevicePageTarget, now = Date.now()): Promise<void> {
-  if (!onlineManager.isOnline() || inFlight.has(target.key)
-      || !refreshDue(lastAttemptAt.get(target.key), now)) {
+export async function refreshDevicePage(
+  target: DevicePageTarget,
+  now = Date.now(),
+  shouldContinue: () => boolean = () => true,
+): Promise<void> {
+  const attemptKey = JSON.stringify([target.key, target.scope]);
+  const previous = inFlight.get(attemptKey);
+  if (previous && !previous()) lastAttemptAt.delete(attemptKey);
+  if (!shouldContinue() || AppState.currentState !== 'active' || !onlineManager.isOnline()
+      || (previous && previous())
+      || !refreshDue(lastAttemptAt.get(attemptKey), now)) {
     return;
   }
-  lastAttemptAt.set(target.key, now);
-  inFlight.add(target.key);
+  lastAttemptAt.set(attemptKey, now);
+  activeScopes.set(target.key, target.scope);
   const startEpoch = epoch;
   const startKeyEpoch = keyEpochs.get(target.key) ?? 0;
+  const current = () => shouldContinue() && AppState.currentState === 'active' && onlineManager.isOnline()
+    && epoch === startEpoch && (keyEpochs.get(target.key) ?? 0) === startKeyEpoch
+    && activeScopes.get(target.key) === target.scope;
+  inFlight.set(attemptKey, current);
   let res: PagedTradeJobSnapshot;
   try {
     // #393 M2 (D2): a background refresh; its 402 opens nothing.
-    res = await generateTrades(target.request, {}, { background: true });
-  } catch {
+    res = await generateTrades(target.request, {}, PREWARM_REQUEST);
+    // Session-init can still be building this job. Previously its first
+    // running response was discarded and the 60-second throttle prevented
+    // adopting the completed page before the first calculator tap. Follow
+    // THAT job for at most 40 polls over a 90-second window; never start
+    // another generation or spend a paid preview. The server's prewarm
+    // header guard refuses preview delivery until an actual user tap.
+    // Provisional cards are never persisted. Every status response still passes the
+    // server's ownership/freshness checks and devicePageFrom below.
+    const pollUntil = Date.now() + 90_000;
+    for (let poll = 0; poll < 40 && Date.now() < pollUntil && res.status === 'running'
+        && typeof res.cursor === 'number'; poll += 1) {
+      if (!current()) return;
+      const delay = Math.min(3_000, 500 * 2 ** Math.floor(poll / 4));
+      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      if (!current()) return;
+      if (Date.now() >= pollUntil) break;
+      res = await getTradeStatus(res.job_id, { deck: res.deck_id || res.job_id, cursor: 0 }, PREWARM_REQUEST);
+    }
+  } catch (error) {
+    // A passive request cannot claim a free preview. Its server refusal
+    // revokes any previously held page too; the tap takes the normal gate.
+    const denied = error as { status?: number; body?: { error?: string } };
+    if (current() && denied.status === 409 && denied.body?.error === 'prewarm_requires_tap') {
+      discardDevicePage(target.key);
+    }
     return;
   } finally {
-    inFlight.delete(target.key);
+    const ownsAttempt = inFlight.get(attemptKey) === current;
+    if (ownsAttempt) inFlight.delete(attemptKey);
+    // Canceled or replaced work must not suppress a resumed foreground's
+    // new attempt for the next minute.
+    if (ownsAttempt && !current() && lastAttemptAt.get(attemptKey) === now) lastAttemptAt.delete(attemptKey);
   }
   // A discard happened while it was out: what it answered is superseded.
-  if (epoch !== startEpoch || (keyEpochs.get(target.key) ?? 0) !== startKeyEpoch) return;
+  if (!current()) return;
   const answeredAt = Date.now();
   saveDevicePage(target.key, devicePageFrom(res, { scope: target.scope, validatedAt: answeredAt }), answeredAt);
 }

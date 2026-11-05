@@ -1022,11 +1022,11 @@ check('8a. D2 [executed]: api/trades — a PAGED status call (the P2 prefetch) a
 // The pinned background set: every `background: true` in mobile/src code is
 // here. A new background caller fails 8b until it is added (D2).
 const BACKGROUND_SET = [
-  ['api/trades.ts', /request: \{ background\?: boolean \} \| undefined = page \? \{ background: true \} : undefined,/,
+  ['api/trades.ts', /request: \{ background\?: boolean; headers\?: Record<string, string> \} \| undefined = page \? \{ background: true \} : undefined,/,
     "P2's next-page prefetch (TradesScreen.fetchNextPage's paged getTradeStatus)"],
   ['api/trades.ts', /request: \{ background\?: boolean \} \| undefined = surface === 'shop' \? \{ background: true \} : undefined,/,
     "the Shop's held-Undo pass (ShopOffersBody.commitDismiss)"],
-  ['state/devicePageStore.ts', /res = await generateTrades\(target\.request, \{\}, \{ background: true \}\);/, 'refreshDevicePage'],
+  ['state/devicePageStore.ts', /const PREWARM_REQUEST = \{ background: true, headers: \{ 'X-FTF-Prewarm': '1' \} \};/, 'preview-safe refreshDevicePage request'],
   ['hooks/usePresentationDeck.ts', /void run\(\{ background: true \}\);/, "usePresentationDeck's mount effect"],
   ['hooks/usePresentationDeck.ts', /await getTradeStatus\(job\.job_id, undefined, \{ background: true \}\)/, "usePresentationDeck's poll"],
   [TRADES, /if \(vars\.auto \|\| vars\.research\) \{\s*return generateTrades\(request, \{ searchId: vars\.searchId \}, \{ background: true \}\);\s*\}/,
@@ -1053,6 +1053,10 @@ check('8b. D2 [shape]: the pinned background set; nothing else in mobile/src is 
     eq(n, want[rel] || 0, `\`background: true\` in ${rel} (add a new background caller to BACKGROUND_SET)`);
   }
   const code = strip(read(TRADES));
+  const prewarm = strip(read('state/devicePageStore.ts'));
+  assert(/generateTrades\(target\.request, \{\}, PREWARM_REQUEST\)/.test(prewarm)
+    && /getTradeStatus\(res\.job_id, \{ deck: res\.deck_id \|\| res\.job_id, cursor: 0 \}, PREWARM_REQUEST\)/.test(prewarm),
+    'both passive paths must use the explicit server prewarm guard');
   assert(/await getTradeStatus\(snap\.job_id, \{ deck: snap\.deck_id, cursor: requested \}\)/.test(code),
     'the prefetch is a paged getTradeStatus call (the default makes it background)');
   assert(/return generateTrades\(request, \{ searchId: vars\.searchId \}\);/.test(code),

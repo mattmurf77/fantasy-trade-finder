@@ -60,3 +60,5 @@ So a guard is live in CI the moment the file exists — dropping a `check-*.js` 
 - **Label honestly.** If the guard proves presence and not behavior, say so in the header, the way the G-035-labeled files do.
 - **Register an `npm run test:<name>` script** in `mobile/package.json`.
 - **An async guard must fail if it never finishes.** An `await` that never settles drains the event loop, and node exits with whatever exit code is set, usually 0: a silent pass after a handful of checks (`check-win-now-recovery.js` passed 7 of 39 this way on #488). Set `let finished = false`, register `process.on('exit', …)` that prints "<name> did not finish (a check hung): FAILED" and sets `process.exitCode = 1` while it's false, and set `finished = true` just before the summary line. `check-device-first-page.js` is the model.
+
+`check-trade-prewarm.js` executes early first-page preparation with delayed storage/session replies and replaced identities. Run with `npm run test:trade-prewarm`; no physical-device latency claim. See `docs/plans/find-trade-first-card-prewarm.md`.

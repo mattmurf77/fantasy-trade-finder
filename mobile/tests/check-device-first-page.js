@@ -84,15 +84,22 @@ const page1 = (over = {}) => ({
 function loadStore(env) {
   return compile(read('state/devicePageStore.ts'), {
     Date: { now: () => (env.clock ?? Date.now()) },
-    setTimeout: (fn) => { Promise.resolve().then(fn); return 0; },
+    setTimeout: (fn, ms) => { (env.delays ??= []).push(ms); Promise.resolve().then(() => {
+      if (env.advanceClock) env.clock += ms;
+      fn();
+    }); return 0; },
     clearTimeout: () => {},
     require: (name) => {
       switch (name) {
         case '@react-native-async-storage/async-storage': return { default: env.storage };
+        case 'react-native': return { AppState: { get currentState() { return env.appState ?? 'active'; } } };
         case '@tanstack/react-query': return { onlineManager: { isOnline: () => env.online } };
         case '../api/client': return { setOnWriteRequest: (fn) => { env.onWrite = fn; } };
-        case '../api/trades': return { generateTrades: (body, paging) => {
-          env.calls.push({ body, paging });
+        case '../api/trades': return { getTradeStatus: (jobId, page, options) => {
+          (env.polls ??= []).push({ jobId, page, options });
+          return (env.statusRespond ?? env.respond)(jobId, page);
+        }, generateTrades: (body, paging, options) => {
+          env.calls.push({ body, paging, options });
           return env.respond(body, paging);
         } };
         case '../utils/devicePage': return D;
@@ -323,6 +330,7 @@ process.on('exit', () => {
     await st.refreshDevicePage(target, T0);
     eq(env.calls.length, 1);
     eq([env.calls[0].body, env.calls[0].paging], [target.request, {}], 'organic body; paging with no searchId');
+    eq(env.calls[0].options, { background: true, headers: { 'X-FTF-Prewarm': '1' } });
     eq(ids(st.readDevicePage(KEY).cards), ['a', 'b', 'c']);
     await flush(); await flush();
     ok(env.storage.m.has(KEY), 'persisted under its key');
@@ -346,6 +354,93 @@ process.on('exit', () => {
     const env = makeEnv({ online: false });
     await loadStore(env).refreshDevicePage(target, T0);
     eq(env.calls.length, 0);
+  });
+  await check('2c1. running pregen is followed to its complete validated first page without a second generate', async () => {
+    let polls = 0;
+    const env = makeEnv({ respond: async () => page1({ status: 'running' }),
+      statusRespond: async () => page1({ status: ++polls === 2 ? 'complete' : 'running' }) });
+    const st = loadStore(env);
+    await st.refreshDevicePage(target, T0);
+    eq(env.calls.length, 1);
+    eq(env.polls.length, 2);
+    eq(env.polls[0], { jobId: 'j1', page: { deck: 'j1', cursor: 0 }, options: { background: true, headers: { 'X-FTF-Prewarm': '1' } } });
+    eq(ids(st.readDevicePage(KEY).cards), ['a', 'b', 'c']);
+  });
+  await check('2c2. a perpetually running job is bounded; provisional cards are never cached', async () => {
+    const env = makeEnv({ respond: async () => page1({ status: 'running' }) });
+    const st = loadStore(env);
+    await st.refreshDevicePage(target, T0);
+    eq(env.polls.length, 40);
+    eq(st.readDevicePage(KEY), null);
+  });
+  await check('2c3. background status never adopts after identity cancellation or a rankings discard', async () => {
+    for (const discard of [false, true]) {
+      let release, current = true;
+      const env = makeEnv({ respond: async () => page1({ status: 'running' }),
+        statusRespond: () => new Promise((r) => { release = () => r(page1()); }) });
+      const st = loadStore(env);
+      const pending = st.refreshDevicePage(target, T0, () => current);
+      await flush();
+      ok(release, 'status is in flight');
+      if (discard) env.onWrite('/api/rank3'); else current = false;
+      release(); await pending;
+      eq(st.readDevicePage(KEY), null);
+      eq(env.polls.length, 1);
+    }
+  });
+  await check('2c4. a 64.8-second job is adopted; polls back off, and a wedged job stops at the deadline', async () => {
+    const env = makeEnv({ clock: T0, advanceClock: true,
+      respond: async () => page1({ status: 'running' }) });
+    env.statusRespond = async () => page1({ status: env.clock >= T0 + 64_800 ? 'complete' : 'running' });
+    const st = loadStore(env); await st.refreshDevicePage(target, T0);
+    ok(st.readDevicePage(KEY), 'the observed 64.8s duration is inside the warming window');
+    ok(env.polls.length < 40 && env.delays.includes(500) && env.delays.includes(3000), 'adaptive rather than 500ms forever');
+    const stuck = makeEnv({ clock: T0, advanceClock: true, respond: async () => page1({ status: 'running' }) });
+    await loadStore(stuck).refreshDevicePage(target, T0);
+    ok(stuck.clock >= T0 + 90_000 && stuck.polls.length <= 40, 'bounded wall-clock window');
+  });
+  await check('2c5. canceled foreground can restart immediately; its late answer cannot erase replacement or throttle', async () => {
+    let release, oldCurrent = true;
+    const env = makeEnv({ respond: () => new Promise((r) => { release = () => r(page1({ deck_id: 'old' })); }) });
+    const st = loadStore(env);
+    const old = st.refreshDevicePage(target, T0, () => oldCurrent);
+    oldCurrent = false; env.respond = async () => page1({ deck_id: 'new' });
+    await st.refreshDevicePage(target, T0 + 1);
+    release(); await old;
+    eq(st.readDevicePage(KEY).deck_id, 'new');
+    await st.refreshDevicePage(target, T0 + 2);
+    eq(env.calls.length, 2, 'old finally preserved replacement throttle');
+  });
+  await check('2c6. fairness scopes dedupe separately; replaced scope cannot overwrite new cards', async () => {
+    let release;
+    const env = makeEnv({ respond: () => new Promise((r) => { release = () => r(page1({ deck_id: 'old' })); }) });
+    const st = loadStore(env); const old = st.refreshDevicePage(target, T0);
+    env.respond = async () => page1({ deck_id: 'balanced' });
+    const balanced = { ...target, scope: 'organic:f=0.75', request: { ...target.request, fairness_threshold: 0.75 } };
+    await st.refreshDevicePage(balanced, T0 + 1); release(); await old;
+    eq(st.readDevicePage(KEY).scope, 'organic:f=0.75'); eq(st.readDevicePage(KEY).deck_id, 'balanced');
+  });
+  await check('2c7. passive preview refusal discards a held page; inactive apps send no request', async () => {
+    const env = makeEnv(); const st = loadStore(env); await st.refreshDevicePage(target, T0);
+    env.respond = async () => { throw { status: 409, body: { error: 'prewarm_requires_tap' } }; };
+    await st.refreshDevicePage(target, T0 + 60_000); eq(st.readDevicePage(KEY), null);
+    const bg = makeEnv({ appState: 'background' }); await loadStore(bg).refreshDevicePage(target, T0);
+    eq(bg.calls.length, 0);
+    ok(code.includes('const held = payEnforcing && !payEntitled ? null : readDevicePage(deviceKey);'),
+      'known enforcing free session never treats a stored page as a preview grant');
+  });
+  await check('2c8. ranking writes reset old warm throttle and backgrounding stops polling until a new foreground', async () => {
+    const env = makeEnv(); const st = loadStore(env); await st.refreshDevicePage(target, T0);
+    env.onWrite('/api/rank3'); await st.refreshDevicePage(target, T0 + 1);
+    eq(env.calls.length, 2, 'changed inputs can prepare immediately');
+    const bg = makeEnv({ respond: async () => page1({ status: 'running' }) });
+    bg.statusRespond = async () => { bg.appState = 'background'; return page1({ status: 'running' }); };
+    const b = loadStore(bg); await b.refreshDevicePage(target, T0);
+    eq(bg.polls.length, 1); eq(b.readDevicePage(KEY), null);
+    bg.appState = 'active'; bg.respond = async () => page1();
+    await b.refreshDevicePage(target, T0 + 1);
+    eq(bg.calls.length, 2, 'foreground restart is not throttled by canceled work');
+    ok(b.readDevicePage(KEY));
   });
   await check('2d. a server answer that can\'t be kept discards the held page; a failed request keeps it', async () => {
     const env = makeEnv();
@@ -468,11 +563,11 @@ process.on('exit', () => {
   // ── 3. The screen: no wait, background revalidation, "Updating" ─────────
   await check('3a. the tap renders a held page with NO network wait (no request, timer or await before the push)', () => {
     const push = fnBody(code, 'function pushWithFirstPage(');
-    const branch = between(push, 'const held = readDevicePage(deviceKey);', 'let pushed = false;');
+    const branch = between(push, 'const held = payEnforcing && !payEntitled ? null : readDevicePage(deviceKey);', 'let pushed = false;');
     ok(/if \(devicePageUsable\(held, devicePageScope\(request\), Date\.now\(\)\)\) \{\s*pushDeck\(\{\s*request,\s*snapshot: devicePageSnapshot\(held, fork\.searchId\),\s*device: true,\s*validatedAt: held\.validated_at,\s*deviceKey,\s*\}\);\s*return;\s*\}/.test(branch),
       'a usable device page is pushed at once, then return');
     ok(!/generateTrades|await|setTimeout|\.then\(/.test(branch), 'nothing in the device / offline branches waits on anything');
-    ok(push.indexOf('const held = readDevicePage(deviceKey);') < push.indexOf('generateTrades(request'),
+    ok(push.indexOf('const held = payEnforcing && !payEntitled ? null : readDevicePage(deviceKey);') < push.indexOf('generateTrades(request'),
       'the device check runs before the network page 1');
   });
   await check('3b. offline at the tap with no usable page: pushed at once, the Offline state in the card rect', () => {

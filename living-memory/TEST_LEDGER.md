@@ -1,3 +1,30 @@
+## 2026-11-05 — Native organic first-card preparation
+
+Base `dd5058ba`; no runtime flags, deploy, push, purchase or live user write.
+Home/Rank now prepare the active account/league/format organic page after
+session revalidation. Running pregen is followed with active-only adaptive
+polling (40 maximum, 90-second request window); only complete validated
+pages persist. Cancellation/scope replacement preserve the new attempt's
+throttle; ranking invalidation clears obsolete throttle. Passive requests
+carry `X-FTF-Prewarm: 1`, require the server companion before distribution,
+and discard held data on `409 prewarm_requires_tap`. Known enforcing free
+sessions do not use a held page as a preview grant.
+
+- Nine targeted mobile guards PASS: device-first-page (45 assertions),
+  trade-prewarm (19 executed effect cases), trade-first-card-events,
+  fairness-default, results-push, canvas-results, entry-session-identity,
+  paywall-gate (110 assertions), paywall (14 assertions).
+- `tsc --noEmit -p mobile/tsconfig.json` PASS using existing shared dependencies;
+  temporary node_modules symlink removed. `git diff --check` clean.
+- Four negative controls RED, restored: disable completion polling; remove
+  current-context checks; remove preview header; remove enforcing-free
+  held-page guard. Simulated 64.8s completion, wedged deadline, scope race,
+  ranking invalidation and canceled-foreground replacement covered.
+- No native/runtime timing or sub-200ms claim. Physical TestFlight first/repeat
+  timing remains pending; cold network, pinned/anchored searches and the
+  existing 600ms cold page-push fallback remain honest waits. No full backend
+  suite or simulator was run. See docs/plans/find-trade-first-card-prewarm.md.
+
 ## 2026-11-04 — #601 independent-review completion
 
 Expanded coverage enumerates every test suite referencing export_user_data or
