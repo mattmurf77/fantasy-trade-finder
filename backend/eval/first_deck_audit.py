@@ -147,7 +147,12 @@ def _asset(a: dict) -> str:
     if a.get("age") is not None:
         bits.append(f"age {a['age']}")
     bits.append(f"{a['value']:,}")
-    return f"{a.get('name') or a['id']} ({', '.join(bits)})"
+    name = a.get("name") or a["id"]
+    if a.get("position") == "PICK":
+        # server._owned_pick_label appends the original manager's name.
+        # Keep year/round/slot, but never reveal that identity in a blind sheet.
+        name = name.split(" (from ", 1)[0]
+    return f"{name} ({', '.join(bits)})"
 
 
 def _format_label(fmt: dict) -> str:

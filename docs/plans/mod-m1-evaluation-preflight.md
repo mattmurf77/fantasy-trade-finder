@@ -15,6 +15,7 @@ The current page response exposes a served count after disposition/dedup/page-wi
 - Fresh CLI process, newly created scratch SQLite before backend import, every backend engine resolves to the exact same canonical file. A similarly prefixed filename is rejected; the normal same-file read-only SQLite URI is accepted. No production database or copy is used.
 - Remove inherited Anthropic key and Sentry DSN before backend import. Eval errors/league identifiers cannot leave through an inherited production crash-report integration. Public Sleeper GETs remain the only supported real-run network data source; this preflight uses mocked synthetic responses and refuses network connections.
 - JSON, markdown report, blind sheet, instructions and private key use exclusive creation, mode0600, in private mode0700 output directories. Tracked in-repo report paths are refused. Existing broad-permission directories are refused without chmod, avoiding accidental permissions changes to operator directories such as `/tmp`.
+- The real owned-pick formatter can produce `2027 2nd (from Jared)`. The blind sheet removes only the identifying `(from …)` suffix on PICK assets, preserving year/round/slot/value and the private source run; a regression uses the actual application formatter, including a nested name.
 - Default outputs are gitignored `feedback-workspace/deck-eval/`. No real roster, private board, production data, receipt or token was exported or committed. Test artifacts are synthetic.
 
 ## Required schedule and remaining evidence

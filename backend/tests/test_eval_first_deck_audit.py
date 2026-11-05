@@ -205,3 +205,18 @@ def test_existing_shared_output_directory_is_refused_without_chmod(tmp_path):
         fa.private_dir(out)
     assert stat.S_IMODE(out.stat().st_mode) == 0o755
     assert not list(out.iterdir())
+
+
+def test_real_owned_pick_label_does_not_reveal_original_manager():
+    from backend.server import _owned_pick_label
+    name = _owned_pick_label({"season": "2027", "round": 2,
+                              "is_traded": True, "original_username": "Jared (Secret League)"})
+    assert name == "2027 2nd (from Jared (Secret League))"
+    run = _run(cells=1, cards_per_cell=1)
+    asset = run["leagues"][0]["seats"][0]["cards"][0]["give"][0]
+    asset.update(name=name, position="PICK", age=0)
+    rows, _ = fa.build(run, n=1, per_cell=1)
+    display = rows[0]["you_give"]
+    assert "2027 2nd" in display and "PICK" in display
+    assert "Jared" not in display and "Secret League" not in display
+    assert asset["name"] == name  # source/private run stays unchanged
