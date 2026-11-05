@@ -43,3 +43,40 @@ git branch claude/lm-writeback-partner-summary 61169c87
 ```
 
 Reflog recovery expires ~90 days from **2026-08-27**.
+
+---
+
+## Correction — 2026-08-27, same day
+
+The table above records `claude/lm-writeback-partner-summary` at **`61169c87`**. That was its
+tip when the entry was written; the recovery-ledger commit itself then landed on the same
+branch, so the sha it was actually **deleted at is `aee848a5`**. Per this folder's append-only
+rule the original line stands and this corrects it.
+
+Nothing was lost — both commits are on `main` via the squash of PR
+[#222](https://github.com/mattmurf77/fantasy-trade-finder/pull/222) (`69dc0cae`), verified by
+content (`git diff --stat origin/main <branch> -- living-memory/CHANGELOG.md
+living-memory/HANDOFF.md docs/recovery/2026-08-27-partner-summary-branches.md` → empty) before
+deletion. But recovering from `61169c87` would restore the branch one commit short.
+
+**Corrected recovery:**
+
+```
+git branch claude/lm-writeback-partner-summary aee848a5
+```
+
+Both branches were deleted (local + `origin/`) on **2026-08-27** after the content
+verification above. `claude/calc-merged-partner-summary` at `4e051c12` is unchanged and
+correct as recorded.
+
+### Worktree still live
+
+`.claude/worktrees/goofy-perlman-490e49` was **not** removed — the session doing the cleanup
+was running inside it. Its branches are gone and its work is fully on `main`, so it holds
+nothing unrecovered. Sweep it from the main checkout with:
+
+```
+git worktree remove .claude/worktrees/goofy-perlman-490e49
+```
+
+A `--force` refusal means uncommitted files — inspect before discarding.
