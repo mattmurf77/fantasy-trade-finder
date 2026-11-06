@@ -12,11 +12,11 @@
 ---
 
 
-## 2026-11-06 — Merge strict trade delivery and start TestFlight 174
+## 2026-11-06 — Merge strict trade delivery and deliver TestFlight 174
 
 - PR #604 merged as `51599200` after all four exact-head CI jobs passed. Native/web handoffs preserve the tap and exact request; strict current-input validation rejects stale/mismatched pages; durable prepared prefixes can display before the suffix completes.
 - Immutable scalar projections preserve ordered frozen evaluation and public output parity. Full candidate ranking/evaluation remains; the 200 ms all-scenario target is still OPEN. Synthetic cold organic first publication remains about19seconds.
-- EAS1.22.0 build174 started from the merge SHA. Render deployment and Apple/TestFlight processing must be verified before claiming delivery. No paid-access, preparation or KTC activation.
+- EAS1.22.0 build174 completed from the merge SHA. Render live20:02:50Z; Apple VALID/IN_BETA_TESTING/internal assignment verified20:15Z; test notes verified20:16Z. No public release, paid-access enforcement, preparation or KTC activation.
 - Copy AIism, cross-surface model/rank-write, and Astra ultra dynasty-outlook audits requested independently. Findings are not automatic authorization to change outlook policy.
 
 ## 2026-11-05 — Prepare native organic first card before Acquire focus

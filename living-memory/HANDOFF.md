@@ -14,22 +14,30 @@ league/preferences/pin changes, with no quality downgrade. Requirement remains
 OPEN; no synthetic/prewarmed-only evidence may certify it.
 
 PR604 `fix/instant-trade-scopes`, recovered from `d79592f3` in
-`/private/tmp/fleeced-instant-trades`. Main last verified `60d861dd`. Native
+`/private/tmp/fleeced-instant-trades`. Historical starting main `60d861dd`. Native
 recovery+early probe+input save/paging fences+strict filters+prepared durable
 prefix and immutable scalar projection changes committed. See feature scope
 and TEST_LEDGER for evidence and known cold-path limitations. Latest code
 commit before this checkpoint: `ca839ec1`; mobile CI correction `f0123982`.
 PR604 merged as `51599200` after all4 exact-head CI checks passed. Build174
-(`6ca44372-0717-4109-86a7-024b8ee87976`,1.22.0) started from that merge;
-root is verifying Render deployment and will submit174 to internal TestFlight
-only after backend is live. No public release, no global preparation enabled.
+(`6ca44372-0717-4109-86a7-024b8ee87976`,1.22.0) completed from that merge.
+Render confirmed live at20:02:50Z. Apple174 is VALID/IN_BETA_TESTING, assigned
+to internal testers at20:15Z; en-US test notes written and verified20:16Z.
+No public release, no global preparation enabled. Release evidence is
+`readiness/pr604-release.json` in the existing fleeced-code-audit artifact folder.
 Next performance checkout: `/private/tmp/fleeced-cold-next`, branch
 `perf/exact-request-reuse` from freshly fetched mergedmain. Preserve the release
 checkout. Read-only profile shows small assignment LRUs do not help organic;
 16K+ entries are needed for substantial reuse and require memory proof.
-Three requested audits run independently: AI phrases/copy, surface model/rank
-write consistency, and Astra ultra dynasty outlook research. Their outputs live
-in the audit artifact directory; no model-policy changes made automatically.
+Copy audit complete:14reviewitems/16locations,196curated+1000empirical patterns;
+no wording edits. Surface audit complete:sixfindings including stale whole-board
+writes losing placements and cross-league Match writes using active format/K
+outside ordinary swipe freeze. Both pre-existing; not fixed by604. Astra ultra
+outlook audit finalizing:209synthetic requests/4173offers, birthday thresholds
+and eliteRB preference-as-longevity issues. Artifacts remain in audit directory;
+no model-policy changes made automatically. Next performance prototype explores
+compatible frozen-proof decoding; direct orjson is not stdlib-compatible for
+big integers/nonfinite/surrogates. No dependency or decoder switch shipped.
 
 Keep #456 held until November18/public installability; no public App Store
 submission/release without go/no-go. Calibration public, KTC blend0. User
