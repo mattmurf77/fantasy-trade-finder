@@ -19,10 +19,17 @@ recovery+early probe+input save/paging fences+strict filters+prepared durable
 prefix and immutable scalar projection changes committed. See feature scope
 and TEST_LEDGER for evidence and known cold-path limitations. Latest code
 commit before this checkpoint: `ca839ec1`; mobile CI correction `f0123982`.
-Next: push final checkpoint, verify all4 exact-head CI jobs, merge only green
-reviewed code. Render auto-deploy then TestFlight candidate requires a NEW
-mobile build; EAS173 finished from lost prior `eb33443` and lacks current fixes.
-No new candidate submitted, no global preparation enabled.
+PR604 merged as `51599200` after all4 exact-head CI checks passed. Build174
+(`6ca44372-0717-4109-86a7-024b8ee87976`,1.22.0) started from that merge;
+root is verifying Render deployment and will submit174 to internal TestFlight
+only after backend is live. No public release, no global preparation enabled.
+Next performance checkout: `/private/tmp/fleeced-cold-next`, branch
+`perf/exact-request-reuse` from freshly fetched mergedmain. Preserve the release
+checkout. Read-only profile shows small assignment LRUs do not help organic;
+16K+ entries are needed for substantial reuse and require memory proof.
+Three requested audits run independently: AI phrases/copy, surface model/rank
+write consistency, and Astra ultra dynasty outlook research. Their outputs live
+in the audit artifact directory; no model-policy changes made automatically.
 
 Keep #456 held until November18/public installability; no public App Store
 submission/release without go/no-go. Calibration public, KTC blend0. User
