@@ -21,7 +21,7 @@ import backend.analytics_taxonomy as tax
 
 
 R1_ROWS: dict[str, frozenset[str]] = {
-    "find_trades_tapped": frozenset({"source", "mode", "search_id"}),
+    "find_trades_tapped": frozenset({"source", "mode", "search_id", "scenario", "input_age_ms", "client_build"}),
     "calc_find_a_trade_tapped": frozenset(
         {"path", "give_count", "receive_count", "has_partner", "search_id"}),
 }

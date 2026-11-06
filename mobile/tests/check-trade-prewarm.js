@@ -21,14 +21,14 @@ const flush = async () => { for (let i = 0; i < 5; i++) await new Promise(setImm
 function boot(over = {}) {
   const env = { enabled: true, active: true, appState: 'active', calls: [], init: 0,
     user: 'a', league: 'league-a', format: 'sf', hasToken: true, switching: false, isDemo: false, ...over };
-  let releasePref, releaseInit, cleanup;
+  let releasePref, releaseInit, cleanup, settled, timer;
   const state = () => ({ user: { user_id: env.user }, league: { league_id: env.league },
     activeFormat: env.format, hasToken: env.hasToken, switching: env.switching, isDemo: env.isDemo,
     revalidateSession: () => { env.init++; return new Promise((r) => { releaseInit = r; }); } });
   const useSession = (selector) => selector(state());
   useSession.getState = state;
   const app = { get currentState() { return env.appState; } };
-  const hook = compile('hooks/useTradePagePrewarm.ts', { require: (name) => {
+  const hook = compile('hooks/useTradePagePrewarm.ts', { setTimeout: fn => { timer = fn; return 1; }, clearTimeout: () => { timer = undefined; }, require: (name) => {
     switch (name) {
       case 'react': return { useEffect: (fn) => { cleanup = fn(); } };
       case 'react-native': return { AppState: app };
@@ -37,6 +37,7 @@ function boot(over = {}) {
       } };
       case '../api/tradePregen': return pref;
       case '../state/devicePageStore': return { hydrateDevicePages: async () => {},
+        onTradePageInputsSettled: fn => { settled = fn; return () => { settled = null; }; },
         refreshDevicePage: (target, now, current) => { env.calls.push({ target, current }); } };
       case '../state/useSession': return { useSession };
       case '../state/useFeatureFlags': return { useFlag: () => env.enabled,
@@ -47,7 +48,7 @@ function boot(over = {}) {
     }
   } });
   hook.useTradePagePrewarm();
-  return { env, pref: async (raw = null) => { releasePref?.(raw); await flush(); },
+  return { env, settled: () => settled?.(), runDebounce: () => timer?.(), pref: async (raw = null) => { releasePref?.(raw); await flush(); },
     init: async () => { releaseInit?.(); await flush(); }, cleanup: () => cleanup?.() };
 }
 (async () => {
@@ -58,7 +59,7 @@ function boot(over = {}) {
     assert.equal(h.env.init, 1); await h.init();
     assert.equal(h.env.calls.length, 1);
     assert.deepEqual(JSON.parse(JSON.stringify(h.env.calls[0].target)), {
-      key: 'ftf_trade_device_page_v1:a:league-a:sf', scope: raw === 'on' ? 'organic:f=0.75' : 'organic:f=0.50',
+      key: 'ftf_trade_device_page_v2:a:league-a:sf', scope: raw === 'on' ? 'organic:f=0.75' : 'organic:f=0.50',
       request: { league_id: 'league-a', fairness_threshold: raw === 'on' ? 0.75 : 0.5 },
     });
     assert.equal(h.env.calls[0].current(), true);
@@ -76,6 +77,14 @@ function boot(over = {}) {
     const h = boot(); await h.pref(); change(h); await h.init();
     assert.equal(h.env.calls.length, 0, 'late session reply must not warm a replaced context'); count++;
   }
+  const edited = boot();
+  await edited.pref(); await edited.init();
+  edited.settled(); edited.settled(); edited.runDebounce();
+  await edited.pref('on'); await edited.init();
+  assert.equal(edited.env.calls.length, 2);
+  assert.equal(edited.env.calls[1].target.request.fairness_threshold, 0.75);
+  assert.equal(edited.env.calls[0].current(), false);
+  count++;
   const nav = fs.readFileSync(path.join(src, 'navigation/TabNav.tsx'), 'utf8');
   assert.match(nav, /export default function TabNav\(\) \{\s*useTradePagePrewarm\(\);/);
   console.log(`${count + 1} trade prewarm cases passed (executed effect; no device timing claim).`);

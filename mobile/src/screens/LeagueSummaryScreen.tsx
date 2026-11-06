@@ -1290,13 +1290,14 @@ export default function LeagueSummaryScreen() {
         // R1 (time to suggestion, addendum v2) — the hand-off tap starts the
         // search: `league_offer` (Offer) / `league_target` (Target), at the
         // tap, with the client search id the deck's request will carry.
-        beginTradeSearch({
+        const searchId = beginTradeSearch({
           source: verb === 'offer' ? 'league_offer' : 'league_target',
           mode: handoffDeckMode(1),
           searchType: 'pinned',
           screen: route.name,
         });
         store.setHandoff({
+          searchId,
           opponent: {
             userId: selected.tc.team.user_id,
             name:

@@ -1170,7 +1170,7 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # trades" hand-off, only when a partner is scoped; granted by
     # analytics-lead, Q-A — per Product it is OUT of the AC-L1 cells for
     # launch and reported separately). Still INTENT.
-    "find_trades_tapped":   frozenset({"source", "mode", "search_id"}),
+    "find_trades_tapped":   frozenset({"source", "mode", "search_id", "scenario", "input_age_ms", "client_build"}),
     # R2 — at T1, the first frame where a real card is >= 50% visible with
     # Like and Pass enabled; once per search_id. `ms_from_tap` is a MONOTONIC
     # client delta (performance.now()), int. `entry_point` = the tap's R1

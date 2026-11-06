@@ -116,6 +116,7 @@ function sessionHarness() {
   };
   const stubs = {
     zustand: {create},
+    '../utils/tradeInputChange': { noteTradeInputChange() {} },
     '@react-native-async-storage/async-storage': {default: {setItem: async (key, value) => storage.set(key, value), removeItem: async key => storage.delete(key), getItem: async key => storage.get(key)}},
     '../api/client': h.client, '../api/auth': auth, '../api/winNow': winNow,
     '../api/league': {connectLeague: (...args) => providers.connect(...args)},

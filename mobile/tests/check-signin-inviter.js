@@ -137,6 +137,7 @@ let server = null;                  // (path, opts) => Promise | value; set per 
 const apiCalls = [];
 const timers = [];
 const leagueMod = load('api/league.ts', {
+    '../utils/tradeInputChange': { noteTradeInputChange() {} },
   './client': { api: { get: (p, opts) => { apiCalls.push({ path: p, opts }); return server(p, opts); } } },
   '../utils/inviteId': inviteIdMod,
 }, {

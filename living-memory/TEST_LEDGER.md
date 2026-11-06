@@ -1,3 +1,89 @@
+## 2026-11-06 — Cold-path profile, exact proof parity, and CI guard repair
+
+- `ca839ec1`: immutable proof scalar projections removed 19,290 repeated JSON
+  decodes (135,612 to 116,322 in the profiled synthetic organic worker).
+  Full evaluator, ordering, candidate limits and solver remain unchanged.
+  453 affected backend regressions passed; pipeline 10 appended with pin
+  `cdabd9935a58d51d`, preserving every earlier pin.
+- Independent comparison verified identical ordered public semantic hashes
+  AND raw frozen evaluation hashes at generation and final validation for
+  organic (6,430 cards), opponent (701), and receive-pinned (82) scenarios.
+  Twelve established frozen-output fixtures also remain unchanged.
+- Single local before/after samples: organic first publication 20.260 to
+  19.099 s; opponent 2.171 to 1.891 s; receive-pinned 414 to 387 ms. These
+  are synthetic CPU measurements with fixture limitations, not robust speedup
+  estimates or phone/network evidence. All still miss 200 ms.
+- CI on `f51de7ed` passed backend/web/test-ID jobs; mobile failed an outdated
+  source-adjacency assertion after new cancellation guards. `f0123982`
+  replaces that assumption with real handler/error-classifier coverage:
+  20 gate/error and request-ownership cases, three negative controls caught.
+  All 158 mobile suites passed; paywall checks 112/112. No production
+  behavior was changed to make the assertion pass. Final-head CI pending.
+
+## 2026-11-06 — Instant-trade recovery and independent race review
+
+Continued draft PR #604 from recovered remote `d79592f3`; lost temporary
+checkout was not treated as available evidence. All restored changes reviewed.
+
+- Backend strict scope recovery: 351 targeted tests passed. Prepared-prefix
+  integration: 496 tests passed across 15 files on final rerun. Earlier mixed
+  fixture teardown failures are recorded in the feature scope; shared fixture
+  changes were reverted and isolation is confined to the new test module.
+- Native TypeScript passed. 157 structural/runtime suites passed before the
+  final malformed-input and first-poll follow-ups; those follow-ups separately
+  passed focused checks and TypeScript. New Usage lifecycle suite: 23 checks;
+  bounded first-poll suite: 21 checks. Native frame timing is not established.
+- Browser runtime regression and 255 structure checks passed. Independent
+  tests covered overlapping saves, delayed body parsing, obsolete pagination,
+  identity changes and original tap timing. Six negative controls failed as
+  intended, including an unfinished-promise false-pass guard.
+- Acceptance report: 63 required cohorts; 29 offline tests passed, three
+  optional PostgreSQL tests skipped in this run. No new production timing
+  acceptance sample was fabricated or inferred.
+- Prepared v2 synthetic first HTTP page ~1.11–1.12 s versus ~1.45–1.47 s
+  full completion. This is earlier publication with exact stored order and
+  durable evidence, **not** a sub-200 ms result. New scopes/cold generation
+  and real physical-device timing remain launch blockers.
+- EAS build 173 finished from prior `eb33443`; it does not contain these
+  latest recovered changes. No submission or production activation claimed.
+
+## 2026-11-05 — Current-only backend delivery and committed ranked prefixes
+
+`X-FTF-Current-Only: 1` now requires current request/model/input proof before
+nonempty live/stored delivery; obsolete continuations return 409 without
+evidence delivery or preview consumption. Legacy response fields and provider-age
+policy remain. The controlled synthetic demo preserves its existing no-provider
+flow; real/linked missing inputs fail closed. Committed owner batches alone can
+acknowledge a current running `ranked_prefix_ready`; deferred evidence cannot.
+
+- **614 passed in 58.93 s**, seventeen related suites: new current-only,
+  prepared-adoption and ranked-prefix checks; deck pipeline; P1/P2/flag-off;
+  I1; unlocked fingerprint reads; force supersession; owner publication;
+  prepared runtime v1/v2/review; preview, paywall allowlist and unverified gate.
+  No full backend suite or live mutation was run.
+- **45 latest new regressions passed in 6.41 s**, including the additional
+  actual enforcing-preview refusal/legacy-consumption positive control. Real
+  HTTP coverage includes demo modes 0/1/2, ESPN/MFL current/missing cohorts,
+  Bilateral2 organic/give/receive/opponent/intent scopes, valid empty output,
+  store/paging disabled, missing auth, config/roster/value/expiry/policy changes,
+  participant epoch edits during projection, exact legacy/current card order,
+  published-list authority and deferred suppression.
+- Ready durable inventory adopted through strict HTTP without regeneration:
+  all 64+ cards retain original order and distinct committed impression IDs
+  across continuations. A known empty inventory completes without exposure.
+- Negative controls in isolated child processes (source bytes unchanged):
+  disabling strict validation fails the stale linked-page regression; bypassing
+  the deferred-mode durability check fails the ranked-prefix suppression test.
+- Pipeline guard initially failed as intended. Publication changes advance
+  append-only pipeline **9**, pin `28d212cdc5c6cb05`, preserving versions 1–8.
+  All eight pipeline tests pass. Parent model review and full exact-head CI
+  remain release gates; deployment invalidates old pipeline pages once.
+
+No preparation flag/knob, generation budget, quality threshold, schema, provider
+credential, runtime service or native build changed. This validates delivery of
+ready/current supply; it does not make a genuinely cold 33-second generation
+instant. See `docs/plans/current-trade-delivery/scope.md`.
+
 ## 2026-11-05 — Native organic first-card preparation
 
 Base `dd5058ba`; no runtime flags, deploy, push, purchase or live user write.

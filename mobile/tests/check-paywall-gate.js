@@ -977,7 +977,8 @@ check('7a. generateTrades / getTradeStatus pass `background` through to the clie
   await trades.getTradeStatus('job2');
   eq(calls[0][2] && calls[0][2].background, true, 'generateTrades');
   eq(calls[1][2] && calls[1][2].background, true, 'getTradeStatus');
-  eq(calls[2][2], undefined, 'default stays user-initiated');
+  eq(calls[2][2]?.background, undefined, 'default stays user-initiated');
+  eq(calls[2][2].headers['X-FTF-Current-Only'], '1', 'strict snapshot header');
 });
 
 // ═══ 8. M2 — the deck (D2, D4, D5, D16, D19) ═════════════════════════════
@@ -1029,7 +1030,7 @@ check('8a. D2 [executed]: api/trades — a PAGED status call (the P2 prefetch) a
   await trades.swipeTrade(card, 'like', undefined, 'deck');
   await trades.swipeTrade(card, 'pass');
   eq(calls[0][2] && calls[0][2].background, true, 'a paged status call');
-  eq(calls[1][2], undefined, 'an unpaged status call');
+  eq(calls[1][2]?.background, undefined, 'an unpaged status call');
   eq(calls[2][2] && calls[2][2].background, false, 'an explicit flag wins');
   eq(calls[3][2] && calls[3][2].background, true, "a 'shop' pass");
   eq(calls[4][2], undefined, 'a deck swipe is user-initiated');
@@ -1076,7 +1077,7 @@ check('8b. D2 [shape]: the pinned background set; nothing else in mobile/src is 
     'both passive paths must use the explicit server prewarm guard');
   assert(/await getTradeStatus\(snap\.job_id, \{ deck: snap\.deck_id, cursor: requested \}\)/.test(code),
     'the prefetch is a paged getTradeStatus call (the default makes it background)');
-  assert(/return generateTrades\(request, \{ searchId: vars\.searchId \}\);/.test(code),
+  assert(/\?\? generateTrades\(request, \{ searchId: vars\.searchId \}\);/.test(code),
     "a tap's generate stays user-initiated");
   const shopCallers = walk(SRC).filter((f) => /swipeTrade\([^;]*'shop'\)/.test(strip(fs.readFileSync(f, 'utf8'))));
   eq(shopCallers.map((f) => path.basename(f)).join(','), 'ShopOffersBody.tsx', "the only 'shop' pass caller");
@@ -1227,18 +1228,13 @@ check('8f2. trades-eng follow-up 1 [shape]: a 402 end never shows P30 — the ga
   assert(/const showDeckEndCard = pagedWithCards && \(endLatched \|\| deckEnd === 'end'\);/.test(code), "trades-eng's showDeckEndCard (4f) is untouched");
 });
 
-check('8f3. trades-eng follow-up 2 [shape]: a gate answer at the landing never pushes the deck (a deck the deadline pushed is popped back); an empty pushed deck never sits behind the paywall; every other fork outcome unchanged', () => {
+check('8f3. immediate push transfers the exact request to the destination; a gated destination pops an empty deck', () => {
   const code = strip(read(TRADES));
   const fork = code.slice(code.indexOf('function pushWithFirstPage('), code.indexOf('function handleInlineFindATrade('));
-  assert(/generateTrades\(request, \{ searchId: fork\.searchId \}\)\s*\.then\(\(snapshot\) => go\(adoptablePage\(snapshot\)\s*\? \{ request, snapshot, validatedAt: Date\.now\(\), deviceKey \}\s*: undefined\)\)\s*\.catch\(\(e\) => \{\s*const gate = gateSignalFor\(e, '\/api\/trades\/generate'\);\s*if \(!gate \|\| gate\.action === 'verify_mismatch'\) throw e;[\s\S]*?\}\)\s*\.catch\(\(\) => go\(\)\);/.test(fork),
-    'the gate catch sits between .then and the verbatim .catch(() => go())');
-  const gateCatch = fork.slice(fork.indexOf(".catch((e) => {"), fork.indexOf('.catch(() => go());'));
-  assert(!/\bgo\(/.test(gateCatch) && !/pushDeck\(/.test(gateCatch), 'the gate path never pushes');
-  assert(/const deckPushed = pushed && resultsPushPendingRef\.current;[\s\S]*if \(deckPushed && mountedRef\.current\) popToLanding\(\);\s*pushed = true;/.test(gateCatch),
-    'a deck the deadline already pushed is popped back; then nothing else pushes');
-  assert(/failFirstCard\(fork\.searchId, gateFailureReason\(gate\)\);/.test(gateCatch), 'R2b paywall / verify from the gate signal');
-  // the pushed deck's own 402 (anchored, offline or deadline pushes) pops an empty deck back
-  eq((code.match(/if \(isResultsPushed && deckRef\.current\.length === 0\) popToLanding\(\);/g) || []).length, 2, 'generate and fair-sweep 402s on an empty pushed deck pop to the landing');
+  assert(/startTradeSearchHandoff\(fork\.searchId, 'model', request,\s*\(\) => generateTrades\(request, \{ searchId: fork\.searchId \}\)\);\s*pushDeck\(\);/.test(fork), 'the real tapped request transfers without a navigation wait');
+  assert(!/setTimeout|FIRST_PAGE_PUSH_DEADLINE_MS|await/.test(fork), 'no deadline, callback or second push after gate response');
+  assert(/takeTradeSearchHandoff<PagedTradeJobSnapshot>\(vars\.searchId, 'model', request\)/.test(code), 'destination consumes the same exact promise');
+  eq((code.match(/if \(isResultsPushed && deckRef\.current\.length === 0\) popToLanding\(\);/g) || []).length, 2, 'model and fair gate errors pop an empty deck');
 });
 
 check('8f4. trades-eng follow-up 3 [shape]: deck_buffer_empty does not fire at a gated preview\'s capped end; trades-eng\'s pinned guard line unchanged', () => {
@@ -1300,18 +1296,75 @@ check('8h. D19 [shape]: a 402 never reaches a deck error variant or the swipe to
   before(swipeErr, /if \(err instanceof ApiError && err\.isProRequired\) return;/, 'setToast(');
   assert(swipeErr.indexOf('return cur - 1') < swipeErr.search(/err\.isProRequired\) return;/), 'the existing swipe-failure recovery restores the card first');
   // the fair sweep
-  const fair = code.slice(code.indexOf('await getFairPackages('), code.indexOf('setFairDeck(false);\n    } finally'));
+  const fair = code.slice(code.indexOf('const res = await (takeTradeSearchHandoff<Awaited'), code.indexOf('setFairDeck(false);\n    } finally'));
   before(fair, /if \(e instanceof ApiError && e\.isProRequired\) \{\s*failDeckSearch\(gateFailureReason\(gateSignalFor\(e, '\/api\/trades\/fair-packages'\)\)\);\s*setFairDeck\(false\);[^}]*return;/, 'setDeckFailure(');
   // the legacy poll: no "Network hiccup" toast, no poll_abandoned card
   assert(/\} catch \(e\) \{\s*if \(cancelled\) return;\s*if \(e instanceof ApiError && e\.isProRequired\) \{\s*setJob\(null\);\s*return;\s*\}\s*failures \+= 1;/.test(code), 'the legacy poll');
   // the page path: the deck's terminal state, never MoreError
   const fetchNext = code.slice(code.indexOf('async function fetchNextPage('), code.indexOf('\n  }\n', code.indexOf('async function fetchNextPage(')));
   assert(/if \(deckGateEndRef\.current\) return;/.test(fetchNext), 'no page is asked after the end');
-  assert(/\} catch \(e\) \{\s*if \(!mountedRef\.current \|\| pageLoopRef\.current !== loop\) return;\s*if \(noteDeckGateEnd\(e\)\) \{\s*setPagePhase\('idle'\);\s*return;\s*\}\s*loop\.failures \+= 1;/.test(fetchNext),
-    'the page fetch: the end, before a failure is counted');
+  before(fetchNext, /if \(noteDeckGateEnd\(e\)\)/, 'loop.failures += 1;', "setPagePhase(loop.failures");
   // the device deck's revalidation: no refresh-failed line (trades-eng's handler stays verbatim behind it)
   assert(/\.catch\(\(e\) => \{\s*if \(mountedRef\.current && seq === deviceRevalidationRef\.current && noteDeckGateEnd\(e, true\)\) \{\s*setDevicePhase\('done'\);\s*return;\s*\}\s*throw e;\s*\}\)\s*\.catch\(\(\) => \{\s*if \(mountedRef\.current && seq === deviceRevalidationRef\.current\) setDevicePhase\('failed'\);/.test(code),
     'the revalidation');
+});
+
+check('8h2. D19 [executed]: actual page fetch handles 402/verify 403 before failure accounting; obsolete responses cannot end a new deck', async () => {
+  const rules = load('utils/tradePages.ts', {});
+  for (const [status, body, verify] of [
+    [402, { error: 'pro_required', gate: 'preview_used' }, false],
+    [402, { error: 'pro_required', gate: 'verify_required' }, true],
+    [403, { error: 'verification_required' }, true],
+    [500, { error: 'internal_error' }, null],
+  ]) {
+    for (const stale of [null, 'epoch', 'job', 'loop', 'unmounted']) {
+      const end = [], phases = [], timers = [];
+      const loop = { inFlight: false, timer: null, attempt: 0, failures: 0 };
+      const deps = {
+        ...rules,
+        jobRef: { current: { job_id: 'j', status: 'running', cursor: 0, total_ready: 0, cards: [] } },
+        deckRef: { current: [] }, pageLoopRef: { current: loop },
+        deckGateEndRef: { current: null }, deckEpochRef: { current: 1 }, mountedRef: { current: true },
+        MAX_SILENT_PAGE_FAILURES: 6,
+        setPagePhase: p => phases.push(typeof p === 'function' ? p('idle') : p),
+        setPageKick: () => { throw new Error('no timer is executed by this test'); },
+        setTimeout: (_, ms) => { timers.push(ms); return timers.length; },
+        applyPage: () => { throw new Error('an error response cannot become cards'); },
+        applyJobResult: () => { throw new Error('no successful response in this case'); },
+      };
+      deps.noteDeckGateEnd = extractFn(TRADES, 'noteDeckGateEnd', {
+        gateSignalFor: client.gateSignalFor,
+        setGateEnd: value => { end.push(value); deps.deckGateEndRef.current = value; },
+      });
+      deps.getTradeStatus = async () => {
+        if (stale === 'epoch') deps.deckEpochRef.current++;
+        if (stale === 'job') deps.jobRef.current = { ...deps.jobRef.current, job_id: 'new' };
+        if (stale === 'loop') deps.pageLoopRef.current = { ...loop };
+        if (stale === 'unmounted') deps.mountedRef.current = false;
+        throw new client.ApiError(status, body, body.error);
+      };
+      await extractFn(TRADES, 'fetchNextPage', deps)();
+      const label = `${status}/${body.error}/${stale ?? 'current'}`;
+      eq(loop.inFlight, false, label + ': releases in-flight state');
+      if (stale) {
+        eq(end.length, 0, label + ': no stale gate');
+        eq(loop.failures, 0, label + ': no stale failure');
+        eq(timers.length, 0, label + ': no stale retry');
+        eq(phases.join(','), 'loading', label + ': no late state write');
+      } else if (verify !== null) {
+        eq(end.length, 1, label + ': one terminal gate');
+        eq(end[0].verify, verify, label + ': correct gate kind');
+        eq(loop.failures, 0, label + ': gate is not a failure');
+        eq(loop.attempt, 0, label + ': no retry attempt');
+        eq(timers.length, 0, label + ': no scheduled retry');
+        eq(phases.join(','), 'loading,idle', label + ': no failed state');
+      } else {
+        eq(end.length, 0, label + ': ordinary error is not a gate');
+        eq(loop.failures, 1, label + ': counts ordinary error');
+        eq(timers.join(','), '500', label + ': retains ordinary backoff');
+      }
+    }
+  }
 });
 
 check('8i. D16 GRANTED [executed]: the Send pre-check — dark unless flag + enforcing; unverified → the VerifySheet only (whatever the account holds); verified, not entitled → the paywall {gate, send}; after a verify → re-read, then the paywall or the CONFIRM step, never a send', async () => {
@@ -2030,7 +2083,7 @@ check('8p. QA P1-1 [executed + shape]: flags off, the deck / landing / Win Now /
   const code = strip(read(TRADES));
   const fnText = (name) => { const at = code.indexOf(`function ${name}(`); return code.slice(at, code.indexOf('\n  }\n', at)); };
   assert(/const signal = gateSignalFor\(e, '\/api\/trades\/status'\);/.test(fnText('noteDeckGateEnd')), 'noteDeckGateEnd reads gateSignalFor');
-  assert(/\.catch\(\(e\) => \{\s*const gate = gateSignalFor\(e, '\/api\/trades\/generate'\);/.test(code), 'the landing fork reads gateSignalFor');
+  assert(/takeTradeSearchHandoff<PagedTradeJobSnapshot>/.test(code), 'landing request uses the destination gate handling');
   eq((code.match(/\.isVerificationRequired\b/g) || []).length, 1, 'TradesScreen: only main\'s swipe-toast copy reads isVerificationRequired');
   const win = strip(read('screens/WinNowScreen.tsx'));
   assert(!/isVerificationRequired|isProRequired/.test(win), 'WinNowScreen reads no gate field directly');
@@ -2216,6 +2269,7 @@ function rcHarness({ stored = null } = {}) {
     '../observability/sentry': { setUser: () => {} },
     './queryClient': { queryClient: { invalidateQueries() {} }, seedLeagueSessionCaches() {} },
     './devicePageStore': { clearDevicePages: async () => {} },
+    '../utils/tradeInputChange': { noteTradeInputChange: () => {} },
     '../api/rankings': { getActiveScoringFormat: async () => null },
   });
   const S = store.useSession;

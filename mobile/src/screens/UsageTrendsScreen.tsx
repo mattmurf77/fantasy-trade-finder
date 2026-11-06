@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -22,7 +22,7 @@ import UsageTrendCard from '../components/UsageTrendCard';
 import { UsageAvailabilitySheet, type UsageLeagueRow } from '../components/UsageLeagueList';
 import { UsageStatsHeader, UsageStatsRow, statsTableWidth } from '../components/UsageStatsTable';
 import { chalk, fonts, ice, ink, radii, scrim, shadowSheet, space, type } from '../theme/chalkline';
-import { ApiError } from '../api/client';
+import { ApiError, getSessionRevision } from '../api/client';
 import { track } from '../api/events';
 import { getFreeAgents } from '../api/league';
 import {
@@ -112,6 +112,22 @@ export default function UsageTrendsScreen() {
   const [units, setUnits] = useState<Record<UsageView, UsageUnit>>({ simple: 'share', stats: 'count' });
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sheetPlayer, setSheetPlayer] = useState<UsagePlayer | null>(null);
+  const [tradeSheetClosing, setTradeSheetClosing] = useState(false);
+  const sheetDismissal = useRef<{ promise: Promise<void>; resolve: () => void } | null>(null);
+  const tradeAction = useRef({ serial: 0, searchId: null as string | null });
+  // A departure cancels the pending handoff, including while the native
+  // sheet is dismissing. Keep the modal mounted until it confirms dismissal.
+  useEffect(() => {
+    const cancel = () => {
+      tradeAction.current.serial++;
+      if (tradeAction.current.searchId) dropPendingSearch(tradeAction.current.searchId);
+      tradeAction.current.searchId = null;
+      sheetDismissal.current?.resolve();
+      sheetDismissal.current = null;
+    };
+    const unsubscribe = navigation.addListener('blur', cancel);
+    return () => { unsubscribe(); cancel(); };
+  }, [navigation]);
   const [expanded, setExpanded] = useState<string | null>(null);
   // Version B only: the user's column sort (null = server order).
   const [statsSort, setStatsSort] = useState<StatsSort | null>(null);
@@ -250,18 +266,22 @@ export default function UsageTrendsScreen() {
   // Acting in a league other than the focused one switches to it first
   // (the MatchesScreen precedent). Pins are cleared by any league switch,
   // so every caller writes its pins AFTER this resolves.
-  const switchTo = async (lgId: string): Promise<boolean> => {
-    if (lgId === focusId) return true;
-    const target = (leagues ?? []).find((l) => l.league_id === lgId);
+  const switchTo = async (lgId: string, quiet = false): Promise<boolean> => {
+    const before = useSession.getState();
+    if (before.switching || !before.hasToken || !before.user) return false;
+    if (lgId === before.league?.league_id) return true;
+    const target = (before.leagues ?? []).find((l) => l.league_id === lgId);
     if (!target) {
-      Alert.alert("Couldn't open that league", 'Pick it from your league list, then try again.');
+      if (!quiet) Alert.alert("Couldn't open that league", 'Pick it from your league list, then try again.');
       return false;
     }
     try {
       await useSession.getState().switchLeague({ league_id: target.league_id, league_name: target.name });
-      return true;
+      const after = useSession.getState();
+      return !after.switching && after.hasToken && after.user?.user_id === before.user.user_id
+        && after.league?.league_id === lgId;
     } catch {
-      Alert.alert("Couldn't switch leagues", 'Try again in a moment.');
+      if (!quiet) Alert.alert("Couldn't switch leagues", 'Try again in a moment.');
       return false;
     }
   };
@@ -274,7 +294,30 @@ export default function UsageTrendsScreen() {
     await new Promise((r) => setTimeout(r, 450));
   };
 
+  const closeTradeSheet = (): Promise<void> => {
+    if (sheetDismissal.current) return sheetDismissal.current.promise;
+    if (!sheetPlayer) return Promise.resolve();
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    sheetDismissal.current = { promise, resolve };
+    setTradeSheetClosing(true);
+    return promise;
+  };
+  const onTradeSheetDismissed = () => {
+    const pending = sheetDismissal.current;
+    sheetDismissal.current = null;
+    setSheetPlayer(null);
+    setTradeSheetClosing(false);
+    pending?.resolve();
+  };
+
   const doTrade = async (p: UsagePlayer, lgId: string) => {
+    const before = useSession.getState();
+    if (!navigation.isFocused() || before.switching || !before.hasToken || !before.user) return;
+    const userId = before.user.user_id;
+    const serial = ++tradeAction.current.serial;
+    const revision = getSessionRevision();
+    if (tradeAction.current.searchId) dropPendingSearch(tradeAction.current.searchId);
     trackAction('trade', p, lgId);
     const lg = data?.leagues.find((l) => l.league_id === lgId);
     const ownerKey = lg?.rosters[p.player_id];
@@ -287,23 +330,35 @@ export default function UsageTrendsScreen() {
           mode: handoffDeckMode(1),
           searchType: 'pinned',
           screen: 'UsageTrends',
+          ...(lgId !== before.league?.league_id ? { scenario: 'cross_league_handoff' } : {}),
         })
       : null;
-    await closeSheetFirst();
-    if (!(await switchTo(lgId))) {
+    tradeAction.current.searchId = searchId;
+    // Dismissal and the authorized switch start together; neither adds an
+    // arbitrary timer to the original tap's clock. No pins before both finish.
+    const [, switched] = await Promise.all([closeTradeSheet(), switchTo(lgId, true)]);
+    const current = useSession.getState();
+    const stillCurrent = serial === tradeAction.current.serial && navigation.isFocused()
+      && revision === getSessionRevision() && current.hasToken
+      && current.user?.user_id === userId;
+    if (!stillCurrent || !switched || current.switching || current.league?.league_id !== lgId) {
       if (searchId) dropPendingSearch(searchId);
+      if (serial === tradeAction.current.serial) tradeAction.current.searchId = null;
+      if (stillCurrent && !switched) Alert.alert("Couldn't switch leagues", 'Try again in a moment.');
       return;
     }
     const store = useFinderTargets.getState();
     store.setSide('give', []);
     store.setSide('receive', [{ id: p.player_id, name: p.name, position: p.position, team: p.team }]);
     store.setHandoff({
+      ...(searchId ? { searchId } : {}),
       opponent:
         ownerKey && !ownerKey.startsWith('roster:')
           ? { userId: ownerKey, name: lg?.owners[ownerKey] ?? ownerKey }
           : null,
       autoRun: true,
     });
+    tradeAction.current.searchId = null;
     navigation.navigate('Main', { screen: 'Trades', params: { screen: 'TradesHome' } });
   };
 
@@ -723,6 +778,9 @@ export default function UsageTrendsScreen() {
         <UsageAvailabilitySheet
           player={sheetPlayer}
           rows={leagueRowsFor(sheetPlayer)}
+          visible={!tradeSheetClosing}
+          immediateDismiss={tradeSheetClosing}
+          onDismiss={onTradeSheetDismissed}
           onAdd={(lgId) => doAdd(sheetPlayer, lgId)}
           onTrade={(lgId) => doTrade(sheetPlayer, lgId)}
           onClose={() => setSheetPlayer(null)}

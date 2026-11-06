@@ -156,7 +156,7 @@ import { ideaToCard } from '../utils/ideaToCard';
 // so the two hosts of the same canvas can never diverge (see each file's
 // header).
 import { anchorSummary, forkCanvasSearch } from '../utils/canvasSearch';
-import { modelSelectionParams, type SearchSelection } from '../utils/tradeSearchRequest';
+import { modelSelectionParams, fairPackagesRequest, type SearchSelection } from '../utils/tradeSearchRequest';
 import { queueCalcTrade } from '../utils/queueCalcTrade';
 import { isExactOfferPackage, signalForExactTrialPackage } from '../utils/offerExposure';
 import { useSelectedOfferSignals } from '../hooks/useSelectedOfferSignals';
@@ -242,11 +242,14 @@ import {
 } from '../utils/devicePage';
 import {
   hydrateDevicePages,
+  notifyTradePageInputsSettled,
+  discardDevicePage,
   readDevicePage,
   refreshDevicePage,
   removeDeviceCard,
   saveDevicePage,
 } from '../state/devicePageStore';
+import { tradeSearchIdentity, startTradeSearchHandoff, takeTradeSearchHandoff } from '../state/tradeSearchHandoff';
 import CoachMark from '../components/CoachMark';
 import IdentityConfirmStrip from '../components/IdentityConfirmStrip';
 import QuickSetPromptCard from '../components/QuickSetPromptCard';
@@ -541,41 +544,33 @@ function tradePackageKey(c: TradeCard): string {
   ].join('|');
 }
 
-// ── 200 ms path, U1 (ux-lead "U1: the in-place reveal") ────────────────
-// The landing's canvas Find a Trade fetches page 1 BEFORE it pushes
-// `TradeDeck`, and hands it over on the `resultsPush` param. The pushed
-// instance reads it ONCE, in its useState initializers, so when the page
-// holds cards its first frame is the complete first card: no idle card, no
-// "Looking for trades…", no progress strip, no skeleton. A page that holds
-// none yet (a gate miss: the job is still building) is adopted too, so the
-// pushed deck pages the SAME job in its honest wait instead of starting a
-// second one. Errored or finished-empty pages are never adopted: the pushed
-// deck then dispatches its own search exactly as before.
-// C: `device` marks a page read from the DEVICE (no request behind it yet;
-// the pushed deck revalidates it), `validatedAt` when the server last
-// validated the cards (device clock), `deviceKey` the device page key the
-// landing validated them under (user, league, format): the pushed deck
-// writes its cards back under that key only.
+// A validated organic device page may be handed to the pushed deck's
+// initial frame. Every adoption is bound to the current account, league,
+// format, token revision and input generation. Network requests instead
+// cross navigation through tradeSearchHandoff: one exact user-tapped
+// request, consumed once by the destination without a builder delay.
 type FirstPageHandoff = {
   request: GenerateBody;
   snapshot: PagedTradeJobSnapshot;
   device?: true;
   validatedAt?: number;
   deviceKey?: string | null;
+  identity: string;
 };
 function adoptablePage(s: PagedTradeJobSnapshot): boolean {
-  return isPagedEnvelope(s) && s.status !== 'error'
+  return isPagedEnvelope(s) && Array.isArray(s.cards) && s.status !== 'error'
+    && (s.cards.length === 0 || s.current_validated === true)
     && (s.cards.length > 0 || s.status === 'running');
 }
 function adoptedFirstPage(route: any): FirstPageHandoff | null {
   const fp = route?.params?.resultsPush?.firstPage as FirstPageHandoff | undefined;
-  return fp && adoptablePage(fp.snapshot) ? fp : null;
+  return fp && typeof fp.identity === 'string' && fp.identity === tradeSearchIdentity() && adoptablePage(fp.snapshot) ? fp : null;
 }
 // How long the landing holds the tap for page 1 before pushing without it.
 // The 200 ms budget makes the page the tap's feedback (design-lead U1.3); past
 // three budgets a pushed deck in its honest wait state beats a frozen builder.
 // Tunable for trades-pm / ux-lead.
-const FIRST_PAGE_PUSH_DEADLINE_MS = 600;
+
 // Failed next-page requests retried silently before the loop rests (the
 // U3 3b error state's Try again restarts it).
 const MAX_SILENT_PAGE_FAILURES = 6;
@@ -751,6 +746,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // adoptedFirstPage). Snapshotted once; the initializers below and the two
   // mount-time resets (the league effect, the #330 choke point) read it.
   const [adopted] = useState(() => adoptedFirstPage(route));
+  const handoffSearchRef = useRef<string | null>(route?.params?.resultsPush?.searchId ?? null);
   const adoptedMountRef = useRef({ league: !!adopted, choke: !!adopted });
   // C — a deck adopted from the DEVICE page renders at once and revalidates
   // in the background: 'running' until that response lands ('done') or
@@ -1503,7 +1499,7 @@ export default function TradesScreen({ navigation, route }: any) {
     setFairPending(false);
     setFairnessOn(next);
     // Fire-and-forget persistence; a write failure shouldn't block the UI.
-    AsyncStorage.setItem(FAIRNESS_PREF_KEY, next ? 'on' : 'off').catch(() => {});
+    AsyncStorage.setItem(FAIRNESS_PREF_KEY, next ? 'on' : 'off').then(notifyTradePageInputsSettled).catch(() => {});
     // Toggling the threshold invalidates the current deck — the next
     // Find-a-Trade tap should request a fresh set under the new mode.
     // Also avoids visual shuffle if streaming cards were still arriving.
@@ -2318,17 +2314,19 @@ export default function TradesScreen({ navigation, route }: any) {
       if (vars.auto || vars.research) {
         return generateTrades(request, { searchId: vars.searchId }, { background: true });
       }
-      return generateTrades(request, { searchId: vars.searchId });
+      return takeTradeSearchHandoff<PagedTradeJobSnapshot>(vars.searchId, 'model', request)
+        ?? generateTrades(request, { searchId: vars.searchId });
     },
     // #330 R-10 — stamp the dispatch-time epoch; onSuccess/onError compare
     // it against the current one and drop stale results entirely.
     // C — and the dispatch-time device page key: a format switch bumps no
     // epoch, so an answer from before it must bind ITS key, not the newer
     // dispatch's (the save effect then writes nothing under the new key).
-    onMutate: () => ({ epoch: deckEpochRef.current, deviceKey }),
+    onMutate: () => ({ epoch: deckEpochRef.current, deviceKey, identity: tradeSearchIdentity() }),
     onSuccess: (snapshot, vars, ctx) => {
       if (
-        applyJobResult(snapshot, ctx?.epoch ?? deckEpochRef.current, deckEpochRef.current) === null
+        (ctx?.identity !== undefined && ctx.identity !== tradeSearchIdentity())
+        || applyJobResult(snapshot, ctx?.epoch ?? deckEpochRef.current, deckEpochRef.current) === null
       ) {
         return; // stale epoch — a reset intervened; nothing is applied
       }
@@ -2387,7 +2385,8 @@ export default function TradesScreen({ navigation, route }: any) {
       // #330 R-10 — a stale mutation's failure is as dead as its success:
       // no toast, no deckFailure, no auto-retry from a superseded dispatch.
       if (
-        applyJobResult(e, ctx?.epoch ?? deckEpochRef.current, deckEpochRef.current) === null
+        (ctx?.identity !== undefined && ctx.identity !== tradeSearchIdentity())
+        || applyJobResult(e, ctx?.epoch ?? deckEpochRef.current, deckEpochRef.current) === null
       ) {
         return;
       }
@@ -2500,7 +2499,11 @@ export default function TradesScreen({ navigation, route }: any) {
     // it carries its search's open trace id, else none. Every other dispatch
     // is a new search: its re-search budget starts again when its answer
     // lands (onSuccess), never here.
-    const claimed = research ? research.searchId : claimPendingSearch();
+    const claimed = research ? research.searchId : handoffSearchRef.current ?? claimPendingSearch();
+    if (!research) {
+      claimSearch(handoffSearchRef.current);
+      handoffSearchRef.current = null;
+    }
     deckSearchRef.current = claimed ? { id: claimed, keys: new Set() } : null;
     generateMutation.mutate(
       {
@@ -2680,6 +2683,13 @@ export default function TradesScreen({ navigation, route }: any) {
   // with a status flip from 'running' → 'complete', which is included.
   useEffect(() => {
     if (!job) return;
+    if (job.current_invalidated) {
+      lastDispositionedRef.current = null;
+      setDeck([]);
+      setDeckIdx(0);
+      if (deviceKey) discardDevicePage(deviceKey);
+      return;
+    }
     // 200 ms path — dedupe by `deckCardKey` (the server's `trade_hash`, else
     // `trade_id`, which is exactly today's key for a server without hashes).
     // Appends only: delivered cards are never reordered or replaced here.
@@ -3652,10 +3662,11 @@ export default function TradesScreen({ navigation, route }: any) {
           ? finderHandoff.fairAnchor
           : null;
       setSheetOpponent(finderHandoff.opponent);
-      navigation?.push?.('TradeDeck', {
+      const pushDeck = (firstPage?: FirstPageHandoff) => navigation?.push?.('TradeDeck', {
         mode: 'guided',
         resultsPush: {
           seq: finderHandoff.seq,
+          searchId: finderHandoff.searchId,
           opponent: finderHandoff.opponent,
           origin: fwdOrigin,
           fairAnchor: fwdFair,
@@ -3666,8 +3677,19 @@ export default function TradesScreen({ navigation, route }: any) {
           // label to build here (the calculator's own path labels via
           // anchorSummary at the push site).
           anchorLabel: null,
+          ...(firstPage ? { firstPage } : {}),
         },
       });
+      const searchId = finderHandoff.searchId;
+      if (searchId) {
+        const pins = useFinderTargets.getState();
+        pushWithFirstPage({
+          giveIds: finderHandoff.canvasSelection?.giveIds ?? pins.pinnedGive.map((p) => p.id),
+          receiveIds: finderHandoff.canvasSelection?.receiveIds ?? pins.pinnedReceive.map((p) => p.id),
+          canvas: !!finderHandoff.canvasSelection,
+          opponent: finderHandoff.opponent, anchor: fwdFair, searchId,
+        }, pushDeck);
+      } else pushDeck();
       return;
     }
     setSheetOpponent(finderHandoff.opponent);
@@ -3842,24 +3864,11 @@ export default function TradesScreen({ navigation, route }: any) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resultsPushParam?.seq]);
 
-  // ── U1 — the instant route (ux-lead "U1", canvas Find a Trade) ─────────
-  // The model search's page 1 is fetched HERE, before the push, so the
-  // pushed deck (route option `animation: 'none'`) mounts with the card in
-  // hand and its first frame is the complete first card. The tap's only
-  // feedback until then is the control's pressed state (design-lead U1.3).
-  // The request is the one the pushed instance's dispatch would build from
-  // the same resultsPush payload (canvas selection, scope, fairness,
-  // intent); it becomes that deck's saved request. Past
-  // FIRST_PAGE_PUSH_DEADLINE_MS, or on a failure or a card-less page, the
-  // deck is pushed without it and searches for itself (the honest wait).
-  // A fair (anchored) search has no stored page (ux-lead U1: pinned
-  // searches aren't pre-built), so it pushes at once, as before.
-  //
-  // C — the device page: an organic search whose page this phone holds,
-  // validated within DEVICE_PAGE_MAX_AGE_S, pushes it AT ONCE (no request,
-  // no wait; the pushed deck revalidates it). Offline with no such page, the
-  // deck is pushed at once too and shows the Offline state (PRD §5.x row 5):
-  // the tap never waits on a request that cannot be sent.
+  // Start the tapped model/fair request and push immediately. A proved,
+  // exact organic device page is the only synchronous card reuse. All
+  // other scopes transfer one pending request under its search id; the
+  // destination matches every filter and the full current identity before
+  // taking it. No result from another tap or approximate scope is reused.
   function pushWithFirstPage(
     fork: {
       giveIds: string[];
@@ -3867,81 +3876,60 @@ export default function TradesScreen({ navigation, route }: any) {
       opponent: { userId: string } | null;
       anchor: unknown;
       searchId: string;
+      canvas?: boolean;
     },
     pushDeck: (firstPage?: FirstPageHandoff) => void,
   ) {
-    // Before the fairness pref hydrates the pushed deck can't be told which
-    // threshold this page used; it searches for itself (rare, first ms).
-    if (fork.anchor || !fairnessReady) {
+    if (switching || !leagueId || !tradeSearchIdentity()) {
+      resultsPushPendingRef.current = false;
+      dropPendingSearch(fork.searchId);
+      return;
+    }
+    if (!fairnessReady) {
+      pushDeck();
+      return;
+    }
+    const opponentId = sheetTargetingOn ? fork.opponent?.userId : undefined;
+    if (fork.anchor) {
+      if (!readOnline()) {
+        pushDeck();
+        return;
+      }
+      const request = fairPackagesRequest(leagueId, {
+        giveIds: fork.giveIds, receiveIds: fork.receiveIds,
+      }, effectiveFairness, opponentId);
+      startTradeSearchHandoff(fork.searchId, 'fair', request, () => getFairPackages(request));
       pushDeck();
       return;
     }
     const request: GenerateBody = {
-      league_id: leagueId!,
+      league_id: leagueId,
       fairness_threshold: effectiveFairness,
       ...modelSelectionParams(
+        fork.canvas === false ? null : { giveIds: fork.giveIds, receiveIds: fork.receiveIds },
         { giveIds: fork.giveIds, receiveIds: fork.receiveIds },
-        { giveIds: [], receiveIds: [] },
         targetingEnabled,
-        false,
+        useFinderTargets.getState().packageMode,
       ),
-      opponent_user_id: (sheetTargetingOn ? fork.opponent?.userId : undefined) || undefined,
+      opponent_user_id: opponentId || undefined,
       trade_intent: tradeIntent ?? undefined,
     };
-    // The cached page is never a free-preview grant. A known enforcing
-    // free session must make its tap's normal gated server request first.
     const held = payEnforcing && !payEntitled ? null : readDevicePage(deviceKey);
     if (devicePageUsable(held, devicePageScope(request), Date.now())) {
-      pushDeck({
-        request,
-        snapshot: devicePageSnapshot(held, fork.searchId),
-        device: true,
-        validatedAt: held.validated_at,
-        deviceKey,
-      });
+      pushDeck({ request, snapshot: devicePageSnapshot(held, fork.searchId),
+        device: true, validatedAt: held.validated_at, deviceKey, identity: tradeSearchIdentity()! });
       return;
     }
     if (!readOnline()) {
       pushDeck();
       return;
     }
-    let pushed = false;
-    const go = (firstPage?: FirstPageHandoff) => {
-      if (pushed) return;
-      pushed = true;
-      clearTimeout(deadline);
-      // The user left the landing while page 1 was on its way: no push,
-      // and the tap's search will never run.
-      if (!mountedRef.current || navigation?.isFocused?.() === false) {
-        resultsPushPendingRef.current = false;
-        dropPendingSearch(fork.searchId);
-        return;
-      }
-      pushDeck(firstPage);
-    };
-    const deadline = setTimeout(() => go(), FIRST_PAGE_PUSH_DEADLINE_MS);
-    generateTrades(request, { searchId: fork.searchId })
-      .then((snapshot) => go(adoptablePage(snapshot)
-        ? { request, snapshot, validatedAt: Date.now(), deviceKey }
-        : undefined))
-      // #393 M2 (trades-eng's grant): a gate answer (a 402, or a verify 403
-      // the sheet didn't clear) never pushes the deck. api/client already
-      // opened the paywall or the sheet over the landing, which is where the
-      // user stays when it closes; a deck the deadline already pushed is
-      // popped back under it. Every other outcome falls through, unchanged.
-      .catch((e) => {
-        const gate = gateSignalFor(e, '/api/trades/generate');
-        if (!gate || gate.action === 'verify_mismatch') throw e;
-        // go() pushed (the deadline) iff it ran and the push is still pending.
-        const deckPushed = pushed && resultsPushPendingRef.current;
-        clearTimeout(deadline);
-        resultsPushPendingRef.current = false;
-        failFirstCard(fork.searchId, gateFailureReason(gate));
-        dropPendingSearch(fork.searchId);
-        if (deckPushed && mountedRef.current) popToLanding();
-        pushed = true;
-      })
-      .catch(() => go());
+    // Start the exact user-tapped request before navigation, then transfer
+    // it once. The destination adopts its pending/finished response; no
+    // 600ms builder pause and no second generation after a push deadline.
+    startTradeSearchHandoff(fork.searchId, 'model', request,
+      () => generateTrades(request, { searchId: fork.searchId }));
+    pushDeck();
   }
 
   // ── D-158 — the inline canvas's own Find a Trade (no navigation) ────────
@@ -3960,6 +3948,7 @@ export default function TradesScreen({ navigation, route }: any) {
     receive: CalcPlayer[];
     opponent: { userId: string; name: string } | null;
   }) {
+    if (switching || !leagueId || !tradeSearchIdentity()) return;
     if (resultsPushLive && resultsPushPendingRef.current) return;
     const fork = forkCanvasSearch(opts, 'Trades');
     // D-171 rulings 1+2 (2026-08-31) — under the push posture the landing
@@ -3978,6 +3967,7 @@ export default function TradesScreen({ navigation, route }: any) {
           mode: 'guided',
           resultsPush: {
             seq: Date.now(),
+            searchId: fork.searchId,
             opponent: fork.opponent,
             origin: 'calculator',
             fairAnchor: fork.anchor,
@@ -4326,6 +4316,7 @@ export default function TradesScreen({ navigation, route }: any) {
     source: R1Source = 'calculator',
   ) {
     if (!leagueId || fairPendingRef.current) return;
+    const identity = tradeSearchIdentity();
     const epoch = ++deckEpochRef.current;
     lastFairRequestRef.current = {
       anchor: { giveIds: [...anchor.giveIds], receiveIds: [...anchor.receiveIds] },
@@ -4344,26 +4335,22 @@ export default function TradesScreen({ navigation, route }: any) {
     // handleFindTrades); this claims it. A sweep with no tap behind it (the
     // dormant #402 browse retry) begins its own, with this source.
     autoResearchRef.current = 'idle';   // a new search: its own re-search budget
-    let claimedFair = claimPendingSearch();
+    let claimedFair = handoffSearchRef.current ?? claimPendingSearch();
+    claimSearch(handoffSearchRef.current);
+    handoffSearchRef.current = null;
     if (!claimedFair) {
       beginTradeSearch({ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' });
       claimedFair = claimPendingSearch();
     }
     deckSearchRef.current = claimedFair ? { id: claimedFair, keys: new Set() } : null;
     try {
-      const res = await getFairPackages({
-        league_id: leagueId,
-        fairness_threshold: effectiveFairness,
-        give_player_ids: anchor.giveIds,
-        ...(anchor.receiveIds.length
-          ? { receive_player_ids: anchor.receiveIds }
-          : {}),
-        ...(opponentId ? { opponent_user_id: opponentId } : {}),
-      });
+      const request = fairPackagesRequest(leagueId, anchor, effectiveFairness, opponentId);
+      const res = await (takeTradeSearchHandoff<Awaited<ReturnType<typeof getFairPackages>>>(claimedFair, 'fair', request)
+        ?? getFairPackages(request));
       // #330 R-10 — the same generation-epoch guard the model path uses: a
       // league switch or a newer search while this was in flight must not be
       // overwritten by a stale answer.
-      if (deckEpochRef.current !== epoch) return;
+      if (deckEpochRef.current !== epoch || identity !== tradeSearchIdentity()) return;
       // The deck rewinds to 0 below, so the double-fire guard has to be
       // re-armed — and here that is not a formality: `fairpk_` ids are
       // DETERMINISTIC, so re-running the same canvas serves cards with the
@@ -4380,7 +4367,7 @@ export default function TradesScreen({ navigation, route }: any) {
       setJob(null);
       setFairDeck(true);
     } catch (e: any) {
-      if (deckEpochRef.current !== epoch) return;
+      if (deckEpochRef.current !== epoch || identity !== tradeSearchIdentity()) return;
       // #393 M2 (D19): a 402 already opened the paywall or the VerifySheet
       // (api/client); no deck-failure card. R2b still records it.
       if (e instanceof ApiError && e.isProRequired) {
@@ -4794,6 +4781,18 @@ export default function TradesScreen({ navigation, route }: any) {
   // drops every paging field, so the deck leaves the page loop for the legacy
   // poller mid-deck (on the response's job: a device deck adopts it).
   function applyPage(next: PagedTradeJobSnapshot, opts?: { revalidation?: boolean }): number {
+    if (next.current_invalidated) {
+      // Strict status revoked this snapshot. No fronted/seen card can be
+      // retained as a fallback; the existing one-shot recovery starts from
+      // an empty deck and the original exact request.
+      deckRef.current = [];
+      lastDispositionedRef.current = null;
+      setDeck([]);
+      setDeckIdx(0);
+      setJob(next);
+      if (deviceKey) discardDevicePage(deviceKey);
+      return 0;
+    }
     const projection = deckProjectionRef.current;
     const front = projection.cards[projection.index];
     const frontKey = front ? deckCardKey(front) : null;
@@ -4835,6 +4834,7 @@ export default function TradesScreen({ navigation, route }: any) {
     loop.inFlight = true;
     setPagePhase((p) => (p === 'idle' ? 'loading' : p));
     let backoff = false;
+    let firstCardPending = false;
     try {
       // #393 M2 (D2, trades-eng adj. 3): background — a paged status call is
       // the prefetch, so api/trades.getTradeStatus sends it `background`; a
@@ -4848,9 +4848,11 @@ export default function TradesScreen({ navigation, route }: any) {
       // A legacy answer (the kill switch) ended paging: nothing to retry.
       backoff = isPagedEnvelope(next) && needsBackoff(next, requested);
       loop.attempt = nextRetryAttempt(loop.attempt, backoff, added);
+      firstCardPending = next.status === 'running' && deckRef.current.length === 0;
       setPagePhase(backoff ? 'retrying' : 'idle');
     } catch (e) {
-      if (!mountedRef.current || pageLoopRef.current !== loop) return;
+      if (!mountedRef.current || pageLoopRef.current !== loop
+          || deckEpochRef.current !== epoch || jobRef.current?.job_id !== forJob) return;
       // #393 M2 (D5, D19): a 402 (or the verify 403) is the deck's terminal
       // state, never an error: the end card shows past the last held card.
       if (noteDeckGateEnd(e)) {
@@ -4868,10 +4870,17 @@ export default function TradesScreen({ navigation, route }: any) {
     // request that keeps FAILING stops after a few silent tries (the error
     // state's Try again restarts it) rather than polling forever.
     if (backoff && pageLoopRef.current === loop && loop.failures < MAX_SILENT_PAGE_FAILURES) {
+      // A committed first prefix can land just after the initial status read.
+      // Probe once promptly; cold jobs and network errors keep the existing
+      // bounded ladder. The original tap clock continues through every wait.
+      const delay = firstCardPending && loop.attempt === 1
+        ? 25 : pageRetryDelayMs(loop.attempt - 1);
       loop.timer = setTimeout(() => {
         loop.timer = null;
+        if (!mountedRef.current || pageLoopRef.current !== loop
+            || deckEpochRef.current !== epoch || jobRef.current?.job_id !== forJob) return;
         setPageKick((k) => k + 1);
-      }, pageRetryDelayMs(loop.attempt - 1));
+      }, delay);
     }
   }
 
@@ -9268,7 +9277,7 @@ export default function TradesScreen({ navigation, route }: any) {
               suggestions={deck}
               showSuggestionRail={canvasHost === 'experiment'}
               onFindATrade={
-                canvasHost === 'flag' ? handleInlineFindATrade : undefined
+                canvasHost === 'flag' && !switching ? handleInlineFindATrade : undefined
               }
               onLikeTrade={
                 canvasHost === 'flag' ? handleInlineLikeTrade : undefined

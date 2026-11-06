@@ -352,13 +352,14 @@ export default function TeamReviewScreen() {
                 // the deck this lands on: the hand-off sets no pins, so it
                 // reads whatever pins the finder already holds.
                 const { pinnedGive, pinnedReceive } = useFinderTargets.getState();
-                beginTradeSearch({
+                const searchId = beginTradeSearch({
                   source: 'team_review',
                   mode: handoffDeckMode(pinnedGive.length + pinnedReceive.length),
                   searchType: 'pinned',
                   screen: 'TeamReview',
                 });
                 useFinderTargets.getState().setHandoff({
+                  searchId,
                   opponent: { userId: scoped.id, name: scoped.name },
                   autoRun: true,
                 });

@@ -74,6 +74,7 @@ const env = {
   lastModelRequestRef: modelRef, canvasSelectionRef: canvasRef,
   effectiveFairness: 0.9, leagueId: 'league', targetingEnabled: true,
   scopedOpponent: 'partner-B', tradeIntent: 'tier_up', modelSelectionParams,
+  takeTradeSearchHandoff: () => null,
   generateTrades: (request) => request,
 };
 const requestJs = ts.transpileModule(`module.exports = ${requestFn.getText(ast)};`, {
@@ -110,7 +111,7 @@ assert.match(rankReturn, /dispatchGenerate\(\s*\{ force: true, repeat: true \}/)
 const suppressionUndo = trades.slice(trades.indexOf('async function handleSuppressionUndo()'), trades.indexOf('// #190 — hand the top card'));
 assert.match(suppressionUndo, /if \(deckEpochRef.current !== epoch\) return;\s*resetDeckForNewTargets\(\);\s*lastModelRequestRef.current = request;\s*dispatchGenerate\(\{ force: true, repeat: true \}\)/);
 const fairFn = trades.slice(trades.indexOf('async function runFairPackages('), trades.indexOf('const pinCount ='));
-assert.match(fairFn, /fairness_threshold: effectiveFairness/);
+assert.match(fairFn, /fairPackagesRequest\(leagueId, anchor, effectiveFairness, opponentId\)/);
 assert.match(fairFn, /setFairPending\(true\)/);
 assert.match(fairFn, /finally[\s\S]*deckEpochRef.current === epoch[\s\S]*setFairPending\(false\)/);
 assert.match(trades, /!fairDeck &&\s*deck.length === 0/);

@@ -415,13 +415,13 @@ async function _afterGateFailure<T>(err: unknown, path: string, opts: RequestOpt
 // phone holds (state/devicePageStore.ts) before a tap can render it, and a
 // page refreshed while the write was in flight is dropped. Same
 // callback-not-import pattern as the two listeners above. Never throws.
-let _onWriteRequest: ((path: string) => void) | null = null;
-export function setOnWriteRequest(fn: ((path: string) => void) | null): void {
+let _onWriteRequest: ((path: string, phase: 'start' | 'settled') => void) | null = null;
+export function setOnWriteRequest(fn: ((path: string, phase: 'start' | 'settled') => void) | null): void {
   _onWriteRequest = fn;
 }
-function _noteWrite(path: string, method: string): void {
+function _noteWrite(path: string, method: string, phase: 'start' | 'settled'): void {
   if (method === 'GET' || !_onWriteRequest) return;
-  try { _onWriteRequest(path); } catch { /* a listener never breaks a request */ }
+  try { _onWriteRequest(path, phase); } catch { /* a listener never breaks a request */ }
 }
 
 // ── Request deadlines (INIT-12 Wave 1, FR-1/FR-2) ───────────────────────────
@@ -658,7 +658,7 @@ export async function apiRequest<T = unknown>(
   const startedAt = _clockMs();
   const foregroundEpoch = _leftForegroundCount;
   const deadlineAt = Math.min(opts.deadlineAt ?? Infinity, Date.now() + (opts.timeoutMs ?? timeoutForRequest(path, opts.method || 'GET')));
-  _noteWrite(path, opts.method || 'GET');
+  _noteWrite(path, opts.method || 'GET', 'start');
   try {
     return await runWithDeadline(signal => _apiRequestInner<T>(path, {...opts, signal, deadlineAt}), deadlineAt, opts.signal);
   } catch (err) {
@@ -671,7 +671,7 @@ export async function apiRequest<T = unknown>(
     if (opts.background || !_gateIsOn()) throw err;
     return _afterGateFailure<T>(err, path, opts);
   } finally {
-    _noteWrite(path, opts.method || 'GET');
+    _noteWrite(path, opts.method || 'GET', 'settled');
   }
 }
 

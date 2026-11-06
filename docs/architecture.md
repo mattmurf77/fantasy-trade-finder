@@ -792,6 +792,13 @@ Hot-read endpoints (inactivity scans, "last login" lookups) read the denormalize
 
 ### Full-roster evaluation (2026-09-04; dark)
 
+Current-only generate/status clients opt into request-local validation of stored
+roster/value stamps, request/model policy and input epochs before delivery. A
+separate acknowledgement permits an early running prefix only from the exact
+durably committed, fully ranked owner publication; ordinary deferred captures
+remain outside that acknowledgement. No new background service, global cache or
+data store is introduced ([contract](plans/current-trade-delivery/scope.md)).
+
 The captured `trade_roster.Context` shares exact lineup assignments between
 structural checks and outlook utility through a 128-entry context-local LRU.
 Keys contain slots and complete immutable assets; returned lists are detached.

@@ -106,6 +106,7 @@ def try_adopt(server, *, job_id, context, fairness, prefs):
                 job.update(copy.deepcopy(metadata["job_fields"]))
                 job.update(prepared_inventory_id=cached["inventory_id"],
                     prepared_expires_at=cached["expires_at"], prepared_guard=guard,
+                    prepared_evidence_job_id=metadata["codec"]["job_id"],
                     final_checks_pending=True)
 
             had_batch = False
@@ -152,6 +153,7 @@ def try_adopt(server, *, job_id, context, fairness, prefs):
                     # lock; replace its shallow container, never mutate it.
                     job["cards"] = [*job["cards"], *copy.deepcopy([
                         card for card in batch["public_cards"] if card["trade_id"] in visible_ids])]
+                    runtime.publish_durable_prefix(job)
                     job["final_checks_pending"] = False
                     job["prepared_progress_at"] = time.monotonic()
                 published = end["cards"]
@@ -201,7 +203,7 @@ def try_adopt(server, *, job_id, context, fairness, prefs):
         with server._trade_jobs_lock:
             job = server._trade_jobs.get(job_id)
             if job is not None:
-                for key in ("prepared_inventory_id", "prepared_expires_at", "prepared_guard", "first_deck",
+                for key in ("prepared_inventory_id", "prepared_expires_at", "prepared_guard", "prepared_evidence_job_id", "first_deck",
                             "board_refresh", "suppression_note"):
                     job.pop(key, None)
         return False

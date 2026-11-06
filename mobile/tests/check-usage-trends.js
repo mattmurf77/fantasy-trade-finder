@@ -251,10 +251,12 @@ const icons = strip(read('src/components/chalkline/Icon.tsx'));
   assert(/setSide\('receive', \[\{ id: p\.player_id/.test(screen) && /setHandoff\(\{/.test(screen)
     && /navigation\.navigate\('Main', \{ screen: 'Trades', params: \{ screen: 'TradesHome' \} \}\)/.test(screen),
     '2g. Trade = receive-side pin + opponent handoff + Find a Trade');
-  // The failed-switch branch may do cleanup before its return (R1 drops the
-  // tap's pending search there), but it must return before any pin write.
-  assert(/if \(!\(await switchTo\(lgId\)\)\) (?:return;|\{[^{}]*\breturn;\s*\})\s*const store = useFinderTargets\.getState\(\);/.test(screen),
-    '2h. pins are written AFTER any league switch (a switch clears them)');
+  // Trade starts switch and sheet dismissal together; every invalid/failed
+  // continuation returns before pin writes (runtime checks cover the races).
+  assert(/await Promise\.all\(\[closeTradeSheet\(\), switchTo\(lgId, true\)\]\)/.test(screen)
+    && /if \(!stillCurrent \|\| !switched/.test(screen)
+    && screen.indexOf('const [, switched]') < screen.indexOf("store.setSide('give'"),
+    '2h. pins are written AFTER dismissal and confirmed league switch');
   assert(/from '\.\.\/components\/ClaimSheet'/.test(screen) && /<ClaimSheet/.test(screen)
     && /resolveAddPlatform\(lgId, isDemo\)/.test(screen) && /explainNoAdd\(platform\)/.test(screen),
     '2i. Add reuses the shared claim sheet and the honest no-write-path explanation');

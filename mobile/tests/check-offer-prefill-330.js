@@ -342,7 +342,7 @@ assert(
 );
 assert(
   // (200 ms path C stamps the dispatch-time device page key beside it.)
-  /onMutate: \(\) => \(\{ epoch: deckEpochRef\.current(, deviceKey)? \}\)/.test(tradesCode),
+  /onMutate: \(\) => \(\{ epoch: deckEpochRef\.current, deviceKey, identity: tradeSearchIdentity\(\) \}\)/.test(tradesCode),
   'S-5 every dispatch stamps the current epoch into the mutation context',
 );
 assert(

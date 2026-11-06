@@ -844,6 +844,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
               // league-rankings one; `fairAnchor` is what forks it onto the
               // fairness sweep instead of the model auto-run.
               useFinderTargets.getState().setHandoff({
+                searchId: fork.searchId,
                 opponent: opponent ?? null,
                 autoRun: true,
                 origin: 'calculator',

@@ -29,6 +29,8 @@
 // store (zustand getState — no React) because the send gate lives client-side
 // by spec; it owns AsyncStorage/SecureStore persistence for the same reason.
 
+import Constants from 'expo-constants';
+import { takeTradeInputChange } from '../utils/tradeInputChange';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 import { getBaseUrl, getClientHeaders, getDeviceId, getSessionToken } from './client';
@@ -191,6 +193,13 @@ export function track(
   screen?: string,
 ): void {
   try {
+    if (eventType === 'find_trades_tapped') {
+      const build = Constants.platform?.ios?.buildNumber;
+      const change = takeTradeInputChange();
+      // An explicit scenario describes this tap (e.g. a cross-league handoff),
+      // so an earlier preference edit must not replace it or lend it an age.
+      props = { ...(props?.scenario ? {} : change), ...props, ...(build ? { client_build: build } : {}) };
+    }
     if (!flagEnabled()) return;
     const now = Date.now();
     if (now - lastActivityTs > SESSION_IDLE_MS) { sessionId = uuidv4(); seq = 0; }

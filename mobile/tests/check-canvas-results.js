@@ -720,8 +720,8 @@ console.log('check-canvas-results:');
       'order matters: kill before clear before dispatch');
   }
   // (e) INLINE-RESET CENSUS — every setDeck([]) accounted for.
-  assert(count(tradesCode, /setDeck\(\[\]\)/g) === 6,
-    '12e. exactly 6 setDeck([]) sites (fairness toggle, league switch, clear-pin, QuickSet regen, the reset fn, fair dispatch)',
+  assert(count(tradesCode, /setDeck\(\[\]\)/g) === 8,
+    '12e. exactly 8 setDeck([]) sites (six search resets plus strict legacy/paged snapshot revocation)',
     'a new inline reset shipped un-audited — add it to the census and audit its session lifetime');
   const fairDispatch = functionNamed(host, 'runFairPackages');
   assert(!!fairDispatch && /setFairPending\(true\);\s*setFairDeck\(true\);\s*setDeck\(\[\]\)/.test(fairDispatch.getText()),

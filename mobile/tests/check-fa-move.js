@@ -351,6 +351,7 @@ function harness() {
   // Keep strict import shims while executing the current API module unchanged.
   const inviteId = load('src/utils/inviteId.ts', only({}), time);
   const league = load('src/api/league.ts', only({
+    '../utils/tradeInputChange': { noteTradeInputChange() {} },
     './client': client,
     '../utils/inviteId': inviteId,
   }), time);

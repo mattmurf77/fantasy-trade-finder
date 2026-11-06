@@ -26,10 +26,11 @@ export const DEVICE_PAGE_MAX_CARDS = 30;
  *  refresh-failed line shows (PRD §5.4 shared constraint 4). */
 export const DEVICE_REVALIDATE_MAX_MS = 10_000;
 /** Versioned AsyncStorage key prefix. A shape change bumps the version. */
-export const DEVICE_PAGE_KEY_PREFIX = 'ftf_trade_device_page_v1:';
+export const DEVICE_PAGE_KEY_PREFIX = 'ftf_trade_device_page_v2:';
 
 export interface DevicePage {
-  v: 1;
+  v: 2;
+  current_validated: true;
   /** The organic request scope the cards answer (devicePageScope). */
   scope: string;
   /** Next unseen cards of the last validated deck, server order, ≤ one page. */
@@ -49,7 +50,7 @@ export interface DevicePage {
   validated_at: number;
 }
 
-/** `ftf_trade_device_page_v1:<user>:<league>:<fmt>`, or null when any part is
+/** `ftf_trade_device_page_v2:<user>:<league>:<fmt>`, or null when any part is
  *  unknown. A league or format switch is a different key, so it never reads
  *  the other one's page. */
 export function devicePageKey(
@@ -70,25 +71,45 @@ export function devicePageScope(request: {
   fairness_threshold?: number;
   pinned_give_players?: readonly string[];
   pinned_receive_players?: readonly string[];
+  pinned_give_mode?: 'any' | 'all';
   opponent_user_id?: string;
   trade_intent?: string;
   force?: boolean;
 }): string | null {
-  if (!request.league_id || request.league_id === 'league_demo' || request.league_id === 'no_league') {
+  // A new filter needs an explicit cache contract. An unknown request must
+  // reach the strict server instead of borrowing an organic device page.
+  const known = ['league_id', 'fairness_threshold', 'pinned_give_players',
+    'pinned_receive_players', 'pinned_give_mode', 'opponent_user_id', 'trade_intent', 'force'];
+  if (Object.keys(request).some((key) => !known.includes(key))) return null;
+  if (typeof request.league_id !== 'string' || !request.league_id
+      || request.league_id === 'league_demo' || request.league_id === 'no_league') {
     return null;
+  }
+  for (const pins of [request.pinned_give_players, request.pinned_receive_players]) {
+    if (pins !== undefined && (!Array.isArray(pins)
+        || pins.some((id) => typeof id !== 'string' || !id))) return null;
+  }
+  if (request.force !== undefined && typeof request.force !== 'boolean') return null;
+  // Omitted optional strings are organic. Malformed values must go through
+  // server validation, even when their falsy value resembles no filter.
+  for (const value of [request.opponent_user_id, request.trade_intent]) {
+    if (value !== undefined && (typeof value !== 'string' || !value)) return null;
   }
   if (request.force || request.opponent_user_id || request.trade_intent
       || request.pinned_give_players?.length || request.pinned_receive_players?.length) {
     return null;
   }
+  if (request.pinned_give_mode !== undefined && request.pinned_give_mode !== 'any') return null;
   const f = request.fairness_threshold;
-  if (typeof f !== 'number' || !Number.isFinite(f)) return null;
-  return `organic:f=${f.toFixed(2)}`;
+  if (typeof f !== 'number' || !Number.isFinite(f) || f < 0 || f > 1) return null;
+  const encoded = f.toFixed(2);
+  // Match the server's exact-hundredths identity: .746 is not .75.
+  return Number(encoded) === f ? `organic:f=${encoded}` : null;
 }
 
 type ServerPage = Pick<PagedTradeJobSnapshot,
   'job_id' | 'status' | 'error' | 'opponents_total' | 'deck_id' | 'cursor' | 'total_ready'
-  | 'pool_exhausted' | 'freshness_state'> & {
+  | 'pool_exhausted' | 'freshness_state' | 'current_validated'> & {
     cards: readonly PagedTradeCard[];
     built_at?: string;
     roster_fp?: string;
@@ -101,7 +122,7 @@ type ServerPage = Pick<PagedTradeJobSnapshot,
  *  deck (`deck_id`: `deck=` pages it across rebuilds and restarts, which a
  *  page held for minutes needs). */
 export function storableResponse(r: ServerPage): boolean {
-  return r.status === 'complete'
+  return r.current_validated === true && r.status === 'complete'
     && !r.error
     && r.freshness_state !== 'updating'
     && typeof r.deck_id === 'string' && r.deck_id.length > 0
@@ -119,7 +140,8 @@ export function devicePageFrom(
   const cards = (opts.cards ?? r.cards).slice(0, DEVICE_PAGE_MAX_CARDS);
   if (cards.length === 0) return null;
   return {
-    v: 1,
+    v: 2,
+    current_validated: true,
     scope: opts.scope,
     cards,
     job_id: r.job_id,
@@ -142,6 +164,7 @@ export function devicePageUsable(
   scope: string | null,
   now: number,
 ): page is DevicePage {
+  if (page?.v !== 2 || page.current_validated !== true) return false;
   if (!page || !scope || page.scope !== scope || page.cards.length === 0) return false;
   const age = now - page.validated_at;
   return age >= 0 && age <= DEVICE_PAGE_MAX_AGE_S * 1000;
@@ -189,6 +212,7 @@ export function mergeRevalidation<T extends DeckKeyed>(
 export function devicePageSnapshot(page: DevicePage, searchId: string): PagedTradeJobSnapshot {
   return {
     job_id: page.job_id,
+    current_validated: true,
     status: 'complete',
     cards: page.cards,
     opponents_done: page.opponents_total,
@@ -209,7 +233,7 @@ export function parseDevicePage(raw: string | null | undefined): DevicePage | nu
   if (!raw) return null;
   let p: any;
   try { p = JSON.parse(raw); } catch { return null; }
-  if (!p || p.v !== 1 || typeof p.scope !== 'string' || !Array.isArray(p.cards)
+  if (!p || p.v !== 2 || p.current_validated !== true || typeof p.scope !== 'string' || !Array.isArray(p.cards)
       || typeof p.job_id !== 'string' || typeof p.deck_id !== 'string'
       || !Number.isInteger(p.cursor) || typeof p.validated_at !== 'number'
       || !Number.isFinite(p.validated_at)

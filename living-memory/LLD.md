@@ -961,6 +961,17 @@ Flag `trade.first_page_store` (off). Schema and tiers: [data dictionary](../docs
 
 ## P1 page store: stamps, S0's serve rules, the deck pipeline guard (2026-10-26, trade.first_page_store)
 
+Opt-in current-only delivery (2026-11-05): `X-FTF-Current-Only: 1` adds a
+request-local, participant-epoch-fenced current-input read for live and stored
+generate/status views, checked again before evidence delivery. Old continuations
+return 409 `trade_snapshot_changed`; valid output acknowledges `current_validated`.
+The controlled demo retains its synthetic no-provider-roster path. A running
+nonempty `ranked_prefix_ready` acknowledgement additionally requires the exact
+published list identity from a committed owner batch; deferred evidence and
+preparation do not qualify. Revocation/finish clears authority; another publisher
+breaks identity. Pipeline 9 is append-only pinned. See
+`docs/plans/current-trade-delivery/scope.md`; provider-age policy is unchanged.
+
 Code: the P1 block of `server.py`; table `trade_page_store` ([data-dictionary](../docs/data-dictionary.md#trade_page_store)).
 - **On only with three switches:** `trade.first_page_store`, `trade.packed_evidence` (#370's) and the knob `first_page_store_enabled` (any finite value ≥ 1). Re-enable with the knob at its previous value + 1.
 - **A page serves only if every stamp still matches:** `roster_fp`, `values_snapshot_id`, `engine_version` (engine, policy, engine-module code hash including `tier_config.json`, `DECK_PIPELINE_VERSION`), `config_signature` and `experiment_digest` (read at job start on the worker, before the engine, and carried on the job; never on the request thread). A mismatch or a failed read falls through to the job path; it never serves an unchecked page.

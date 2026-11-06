@@ -2485,6 +2485,16 @@ def handle_session_not_initialized(e):
                                "try again in a moment."}), 409
 
 
+class _TradeSnapshotChanged(Exception):
+    pass
+
+
+@app.errorhandler(_TradeSnapshotChanged)
+def handle_trade_snapshot_changed(e):
+    return jsonify({"error": "trade_snapshot_changed", "status": "error",
+                    "cards": [], "total_ready": 0}), 409
+
+
 @app.errorhandler(Exception)
 def handle_unexpected_error(e):
     from werkzeug.exceptions import HTTPException
@@ -3577,6 +3587,7 @@ def _revoke_trade_job_locked(job, reason="inputs_changed"):
     job["superseded"] = True
     job["superseded_at"] = time.monotonic()
     job["cards"] = []
+    job.pop("_ranked_prefix_snapshot", None)
     if job.get("status") == "running":
         job.update(status="error", error=reason, finished_at=time.monotonic())
 
@@ -3596,6 +3607,7 @@ def _finish_trade_job(job_id, error=None):
         now = time.monotonic()
         job.update(status="error" if error is not None else "complete",
                    error=error, finished_at=now)
+        job.pop("_ranked_prefix_snapshot", None)
         if error is None:
             return int((now - job.get("started_at", now)) * 1000)
         return None
@@ -3726,7 +3738,8 @@ def _prepared_job_matches(job):
 
 
 def _trade_job_public_view(job: dict, *, page_start: int | None = None,
-                           prior_cards: list | None = None, snap=None) -> dict:
+                           prior_cards: list | None = None, snap=None,
+                           _ranked_prefix_source=None) -> dict:
     """Shape returned to the mobile app by /api/trades/generate + /status.
     Hides internal-only fields like the cache key. Call OUTSIDE the job lock
     with a copied snapshot: one current history projection owns every card.
@@ -3737,6 +3750,7 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None,
     `snap`: the caller's roster snapshot for S0's serve rules
     (_trade_current_snapshot's first part), so one read feeds its freshness
     check and this serve; None reads one."""
+    _trade_require_current_job(job)
     out = {
         "job_id":          job["job_id"],
         "status":          job["status"],
@@ -3796,7 +3810,9 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None,
     withdrawn = []                        # cards S0's I-1 drops at this serve (evidence, C-b)
     cut = []                              # cards the disposition projection cuts (models-lead B4)
     moves = {}                            # D3: cards displayed out of build order (evidence)
-    live_paged = job.get("evidence_mode") == "live" and bool(job.get("page_scope"))
+    evidence_job_id = job.get("prepared_evidence_job_id") or job["job_id"]
+    live_paged = job.get("evidence_mode") == "live" and bool(
+        job.get("page_scope") or job.get("prepared_inventory_id"))
     if out["cards"] and (job.get("evidence") is not None or live_paged):
         # C-b sticky drop: a card I-1 withdrew at an earlier serve of this deck
         # is never served again, whatever its roster says now.
@@ -3804,7 +3820,7 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None,
             with job["evidence"].lock:
                 sticky = set(job["evidence"].sticky)
         else:
-            sticky = _deck_sticky(job["job_id"], job["key"][0])
+            sticky = _deck_sticky(evidence_job_id, job["key"][0])
         if sticky:
             out["cards"] = [c for c in out["cards"] if c.get("impression_id") not in sticky]
     i1_report = {}                        # deck_i1_check props, when the check ran
@@ -3846,6 +3862,7 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None,
         out.update(cards=[], status="error", error="owner_model_changed")
     elif not _trade_significance_matches(job):
         out.update(cards=[], status="error", error="significance_policy_changed")
+    _trade_require_current_job(job)
     # ADR-025 stage 1: sending a deferred deck's cards is a delivery (paged and
     # legacy responses alike), counted after S0's serve rules. Only flag-on
     # organic jobs carry `evidence`. An errored job's published batches (ruling
@@ -3856,7 +3873,7 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None,
                                  cut=cut, league_id=job["key"][1],
                                  moves=moves if out["cards"] else None)
     elif live_paged and (out["cards"] or withdrawn or cut):   # #417 P2-1: rows written at build
-        _deck_evidence_live_delivered(job["job_id"], job["key"][0], job["key"][1],
+        _deck_evidence_live_delivered(evidence_job_id, job["key"][0], job["key"][1],
                                       out["cards"], withdrawn, cut)
     if kick_floor:
         _kick_roster_floor(kick_floor)        # after the response is built, no lock held
@@ -3866,6 +3883,21 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None,
     # is complete, and then only the cards no page counted.
     if i1_report and (page_start is not None or job.get("status") == "complete"):
         _emit_deck_i1_check(user_id, league_id, job["job_id"], i1_report)
+    if _trade_current_only():
+        out["current_validated"] = True
+        with _trade_jobs_lock:
+            retained = _trade_jobs.get(job["job_id"])
+            source = (_ranked_prefix_source if _ranked_prefix_source is not None
+                      else job.get("cards"))
+            if (out["cards"] and out["status"] == "running" and source
+                    and job.get("_ranked_prefix_snapshot") is source
+                    and retained is not None and not _trade_job_revoked(retained)
+                    and retained.get("status") == "running"
+                    and retained.get("cards") is source
+                    and retained.get("_ranked_prefix_snapshot") is source
+                    and retained.get("evidence") is None
+                    and retained.get("evidence_mode") != "deferred"):
+                out["ranked_prefix_ready"] = True
     return out
 
 
@@ -4401,7 +4433,8 @@ def _trade_page_size() -> int:
         return 30
 
 
-def _trade_job_page_view(job: dict, cursor: int, search_id=None, snap=None) -> dict:
+def _trade_job_page_view(job: dict, cursor: int, search_id=None, snap=None,
+                         *, _ranked_prefix_source=None) -> dict:
     """E2 opt-in paging: `page=1` on /generate (cursor 0), `cursor` on /status.
 
     `job` is a SHALLOW snapshot taken under the job lock; call outside it. The
@@ -4432,7 +4465,9 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None, snap=None) -> d
     end = len(raw) if replace else min(len(raw), cursor + _trade_page_size())
     served = [] if job.get("status") == "error" else raw[start:end]
     out = _trade_job_public_view({**job, "cards": copy.deepcopy(served)}, page_start=start,
-                                 prior_cards=raw[:start] if start else None, snap=snap)
+                                 prior_cards=raw[:start] if start else None, snap=snap,
+                                 _ranked_prefix_source=(_ranked_prefix_source
+                                     if _ranked_prefix_source is not None else raw))
     if out["status"] == "error" or "wait_reason" in out:     # S0 §3b withhold: cursor holds
         out.update(cards=[], cursor=cursor, total_ready=0, replace=False)
     else:
@@ -4479,7 +4514,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 8
+DECK_PIPELINE_VERSION = 10
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4610,6 +4645,8 @@ DECK_PIPELINE_PINS = {
     6: "d5176ae18c66d208",   # #492 QA P3-1: the record only for a deck with deferred evidence; repeat_head (models-eng #503) from the filter's counts; no shape change
     7: "facf9a9f34b7529a",   # #487 QA P3-3 (models-eng): one immediate retry inside the picks and draft-context memos; a transient failure no longer forfeits the owner arm
     8: "f7ed33e6ab94af03",   # #521 QA P3-3: a pool timeout isn't retried at once (_is_pool_timeout): it forfeits the owner arm, as before v7; other failures as v7
+    9: "28d212cdc5c6cb05",   # Current-only clients may use an authenticated, durably committed ranked owner prefix; no terms/order change.
+    10: "cdabd9935a58d51d",  # Immutable scalar proof projections avoid repeated JSON reads; no terms/order/evaluation change.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4821,9 +4858,20 @@ def _trade_prefetch_remaining() -> int:
     return _trade_page_knob("trade_prefetch_remaining", 50.0, 1, 200)   # ruling 19
 
 
-def _trade_page_scope(fairness_threshold) -> str:
-    """The canonical organic request scope: the fairness threshold, 2 decimals."""
-    return f"organic:f={float(fairness_threshold):.2f}"
+def _trade_page_scope(fairness_threshold) -> str | None:
+    """Only exactly representable hundredths may reuse the historic page key.
+
+    A more precise threshold remains a valid uncached request; rounding it
+    would return a deck evaluated under different eligibility constraints.
+    """
+    try:
+        threshold = float(fairness_threshold)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(threshold):
+        return None
+    encoded = f"{threshold:.2f}"
+    return f"organic:f={encoded}" if float(encoded) == threshold else None
 
 
 def _trade_page_request_scope(body: dict, league_id: str, fairness_threshold,
@@ -7325,6 +7373,103 @@ def _trade_current_snapshot(league_id: str, scoring_format: str):
     return snap, vsn
 
 
+def _trade_current_only() -> bool:
+    return has_request_context() and request.headers.get("X-FTF-Current-Only") == "1"
+
+
+def _trade_current_only_state(key, *, current=None):
+    """One authorized input read per strict request; epoch-fenced through delivery.
+
+    This checks current stored inputs, not an additional provider-age policy.
+    Legacy callers perform no extra reads. The request-local memo retains no
+    cross-request supply and never grants authorization or consumes a preview.
+    """
+    if not _trade_current_only():
+        return None
+    key = tuple(key)
+    states = g.setdefault("_current_trade_states", {})
+    if key not in states:
+        sess = _require_session()
+        league = sess.get("league")
+        if key != (sess.get("user_id"), getattr(league, "league_id", None), _active_format(sess)):
+            raise _TradeSnapshotChanged()
+        epochs = _capture_trade_input_epochs(key[0], key[1],
+            participant_ids=(m.user_id for m in getattr(league, "members", ())))
+        inputs = _trade_page_request_inputs(sess, key[1])
+        states[key] = {"inputs": inputs, "epochs": epochs,
+                       "current": current if current is not None else _trade_current_snapshot(key[1], key[2]),
+                       "session_read": sess.get("roster_fetch_started_at")}
+    state = states[key]
+    if (any(token.revoked for token in state["epochs"])
+            or any(token.revoked for token in state["inputs"]["input_epochs"])
+            or state["inputs"]["request_signature"] is None
+            or _trade_request_signature(state["inputs"]["prefs_preload"]) != state["inputs"]["request_signature"]):
+        raise _TradeSnapshotChanged()
+    return state
+
+
+def _trade_require_current_job(job):
+    if not _trade_current_only():
+        return
+    state = _trade_current_only_state(job.get("key") or ())
+    inputs, current = state["inputs"], state["current"]
+    with _trade_jobs_lock:
+        retained = _trade_jobs.get(job.get("job_id"))
+        revoked = _trade_job_revoked(job) or (retained is not None and _trade_job_revoked(retained))
+    key = job["key"]
+    safety = (_trade_safety_signature((False, False)) if key[1] == "league_demo"
+              else _trade_safety_signature())
+    previous_presentation = job.get("presentation_capture")
+    presentation = (previous_presentation[:2] if previous_presentation is not None
+                    else _simple_presentment.OFF)
+    if (revoked or not _prepared_job_matches(job) or not _trade_owner_model_matches(job)
+            or not _trade_significance_matches(job)
+            or presentation != inputs["presentation_capture"][:2]
+            or job.get("request_signature") != inputs["request_signature"]
+            or ("safety_policy" in job and job["safety_policy"] != safety)):
+        raise _TradeSnapshotChanged()
+    if key[1] == "league_demo" and _trade_i1_mode() == 0:
+        # The controlled synthetic demo already has no provider roster read.
+        # Keep that flow under its current request/model guards; never extend
+        # this exception to a real or imported league with missing inputs.
+        return
+    pending = job.get("status") == "running" and not job.get("cards")
+    if current is None or (current[0].status == "missing" and key[1] != "league_demo"):
+        if not pending:
+            raise _TradeSnapshotChanged()
+        return
+    fingerprints = (current[0].fp, current[1])
+    if pending and (not job.get("roster_fp") or not job.get("values_snapshot_id")):
+        return  # No recommendation is delivered while admission is unresolved.
+    if ((job.get("roster_fp"), job.get("values_snapshot_id")) != fingerprints
+            or not _trade_fingerprints_match(job, fingerprints, session_read=state["session_read"])):
+        raise _TradeSnapshotChanged()
+
+
+def _trade_require_current_page(row, *, current=None):
+    if not _trade_current_only():
+        return None
+    from .database import page_store_iso
+    key = (row["user_id"], row["league_id"], row["scoring_format"])
+    state = _trade_current_only_state(key, current=current)
+    inputs, current = state["inputs"], state["current"]
+    with _trade_jobs_lock:
+        retained = _trade_jobs.get(row["deck_job_id"])
+        revoked = retained is not None and _trade_job_revoked(retained)
+    engine = _trade_page_engine_version(
+        _trade_engine_name(_value_core_live(league_id=key[1], user_id=key[0],
+            league_user_id=_trade_page_viewer(_require_session(), key[1]), trade_intent=None, preparation=False)),
+        _trade_safety_signature(), inputs["presentation_capture"])
+    if (revoked or current is None or current[0].status == "missing"
+            or not current[1] or _trade_page_stale(row, current[0], current[1])
+            or row["expires_at"] <= page_store_iso(time.time())
+            or row["config_signature"] != inputs["request_signature"]
+            or row["engine_version"] != engine
+            or row["experiment_digest"] != _trade_experiment_digest(key[0])):
+        raise _TradeSnapshotChanged()
+    return state
+
+
 def _trade_page_read(user_id: str, league_id: str, scoring_format: str, scope: str):
     """The serve's reads, before the job lock: the page row (one unique-index
     read; a failed read is no row) and the current snapshot."""
@@ -7356,6 +7501,7 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
     cursor holds either way. The caller sets `freshness_state` and kicks the
     floor. Raises only when the stored pages don't decode.
     """
+    _trade_require_current_page(row)
     pages = row["pages_blob"]
     if not isinstance(pages, Mapping) or not isinstance(pages.get("cards"), list):
         raise ValueError("stored pages do not decode")
@@ -7377,6 +7523,7 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
         cards, moves = _served_cap_stored(row, cards, pages["cards"][:cursor], sticky,
                                           pages["cards"][cursor:end])
     cards = _with_trade_hash(cards)       # P2: the client's dedupe key
+    _trade_require_current_page(row)
     if cards or withdrawn or cut:         # ADR-025 stage 1: a delivery, after S0's rules
         _deck_evidence_delivered_stored(row, cards, withdrawn, cut, moves)
     opponents = pages.get("opponents_total") or 0
@@ -7390,6 +7537,8 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
         out.update(status="running", wait_reason="roster_check", cursor=cursor, total_ready=0)
     if search_id is not None:
         out["search_id"] = search_id
+    if _trade_current_only():
+        out["current_validated"] = True
     if i1_report:                         # off-thread, each card once per deck
         _emit_deck_i1_check(user_id, league_id, row["deck_job_id"], i1_report)
     return out, past_bound
@@ -7439,6 +7588,10 @@ def _serve_trade_page(row: dict, current, *, user_id: str, league_id: str, viewe
     """
     from . import database as _db
     started = time.perf_counter()
+    try:
+        _trade_require_current_page(row, current=current)
+    except _TradeSnapshotChanged:
+        return None  # /generate follows its ordinary fresh-job path.
     engine_now = _trade_page_engine_version(
         _trade_engine_name(_value_core_live(league_id=league_id, user_id=user_id,
                                             league_user_id=viewer_id, trade_intent=None,
@@ -7485,16 +7638,19 @@ def _trade_page_status_view(row: dict, cursor: int, sess: Mapping) -> dict:
     dispositions and S0's serve rules on a roster snapshot read now; the floor
     kick after the response. Never called at `trade_i1_mode` 0. (P2 extends
     this past the stored pages.)"""
+    strict = _trade_require_current_page(row)
     league_id = row["league_id"]
     snap = None
     try:
-        snap = _trade_roster_snapshot(league_id)
+        snap = strict["current"][0] if strict is not None else _trade_roster_snapshot(league_id)
     except Exception as err:         # S0's rules re-read, and handle a failure
         log.warning("trade-page %s: roster snapshot unavailable: %s", row["deck_job_id"], err)
     try:
         out, past_bound = _trade_page_view(row, cursor, user_id=sess["user_id"],
                                            viewer_id=_trade_page_viewer(sess, league_id),
                                            snap=snap)
+    except _TradeSnapshotChanged:
+        raise
     except Exception as err:
         log.warning("trade-page %s: stored pages unusable: %s", row["deck_job_id"], err)
         return _trade_page_past_stored(row, cursor)
@@ -7507,6 +7663,7 @@ def _trade_page_status_view(row: dict, cursor: int, sess: Mapping) -> dict:
 
 def _trade_page_past_stored(row: dict, cursor: int) -> dict:
     """No cards for a page-served deck at `cursor`, on the deck's own job id."""
+    _trade_require_current_page(row)
     pages = row["pages_blob"] if isinstance(row["pages_blob"], Mapping) else {}
     opponents = pages.get("opponents_total") or 0
     return {"job_id": row["deck_job_id"], "status": "complete", "opponents_done": opponents,
@@ -14005,6 +14162,10 @@ def _run_trade_job(
                 # A detached list prevents the next append from mutating a
                 # snapshot a polling request is already copying/serializing.
                 job["cards"] = list(owner_snapshot)
+                if not preparation and deck_evidence is None:
+                    job["_ranked_prefix_snapshot"] = job["cards"]
+                else:
+                    job.pop("_ranked_prefix_snapshot", None)
                 job["final_checks_pending"] = False
                 for card in batch_cards:
                     if getattr(card, "owner_evaluation", None) is not None:
@@ -20668,8 +20829,9 @@ def trade_card_to_dict(card, players: dict) -> dict:
         out["preserve_server_order"] = True
     if evidence is not None:
         # Only public identity. The two private boards stay in impressions.
-        out["model_arm"] = evidence.as_dict()["generator"]
-        out["generator_version"] = evidence.as_dict()["generator_version"]
+        identity = evidence.as_dict()
+        out["model_arm"] = identity["generator"]
+        out["generator_version"] = identity["generator_version"]
         out.update(_owner_public_selection(evidence))
     # Pick-denominated value verdict (feedback #157 value-bar) — the same
     # {give_value, receive_value, favors, gap} shape POST /api/trade/evaluate
@@ -20842,6 +21004,45 @@ def trade_card_to_dict(card, players: dict) -> dict:
     return out
 
 
+def _supported_current_trade_request(body) -> bool:
+    """Strict callers must never receive an answer to silently ignored filters."""
+    if not isinstance(body, dict) or set(body) - {
+        "league_id", "fairness_threshold", "pinned_give_players",
+        "pinned_receive_players", "pinned_give_mode", "opponent_user_id",
+        "trade_intent", "force", "refresh_fatigue", "page", "search_id",
+    }:
+        return False
+    for name in ("force", "refresh_fatigue"):
+        if name in body and type(body[name]) is not bool:
+            return False
+    if "fairness_threshold" in body:
+        value = body["fairness_threshold"]
+        if (type(value) not in (int, float) or not 0 <= value <= 1
+                or not math.isfinite(value)):
+            return False
+    for name in ("pinned_give_players", "pinned_receive_players"):
+        if name in body and (not isinstance(body[name], list)
+                or any(not isinstance(value, str) or not value for value in body[name])):
+            return False
+    for name in ("league_id", "opponent_user_id"):
+        if name in body and body[name] is not None and (
+                not isinstance(body[name], str) or not body[name]):
+            return False
+    if "pinned_give_mode" in body and body["pinned_give_mode"] not in ("any", "all"):
+        return False
+    if body.get("pinned_give_mode") == "all" and not body.get("pinned_give_players"):
+        return False
+    if body.get("pinned_receive_players") and not is_enabled("trade.finder_targeting"):
+        return False
+    intent = body.get("trade_intent")
+    if intent is not None and (intent not in ("consolidate", "tier_up", "tier_down")
+                              or not is_enabled("trades.intent_modes")):
+        return False
+    if body.get("refresh_fatigue") and not _deck_fatigue_enabled():
+        return False
+    return True
+
+
 @app.route("/api/trades/generate", methods=["POST"])
 @_gate_unverified_write
 def generate_trades():
@@ -20878,7 +21079,14 @@ def generate_trades():
     if not (g_user_id and g_league):
         return jsonify({"error": "session missing user/league"}), 400
 
-    body               = request.get_json(force=True) or {}
+    body               = request.get_json(force=True)
+    if _trade_current_only():
+        if not _supported_current_trade_request(body):
+            return jsonify({"error": "unsupported_trade_filter"}), 400
+        if body.get("league_id") not in (None, g_league.league_id):
+            return jsonify({"error": "trade_snapshot_changed", "status": "error",
+                            "cards": [], "total_ready": 0}), 409
+    body = body or {}
     # E2 — opt-in paged response. Validated before any side effect. Without
     # `page` the body is the legacy one and `search_id` is not read.
     paged              = "page" in body
@@ -21519,8 +21727,9 @@ def _owner_cards_valid(cards, context):
     """
     matched = [card for card in cards if getattr(card, "owner_evaluation", None) is not None
                and card.owner_evaluation.matches(card)
-               and card.owner_evaluation.as_dict().get("generator") == _bakeoff.owner_arm(context.get("config", {}))
-               and card.owner_evaluation.as_dict().get("generator_version") == _bakeoff.owner_version(context.get("config", {}))]
+               and card.owner_evaluation.model_identity == (
+                   _bakeoff.owner_arm(context.get("config", {})),
+                   _bakeoff.owner_version(context.get("config", {})))]
     finals = _bakeoff.owner_evaluator(context.get("config", {}))(matched, **context) if matched else []
     if len(finals) != len(matched):
         raise ValueError("owner final evaluation occurrence count mismatch")
@@ -21544,8 +21753,7 @@ def _owner_canonical(value):
 
 
 def _owner_public_selection(evidence):
-    selection = evidence.as_dict().get("selection") or {}
-    partial = selection.get("coverage") == "partial"
+    partial = evidence.selection_coverage == "partial"
     return {"selection_coverage": "partial" if partial else "full",
             **({"selection_notice": "Includes part of your selection; review the assets before continuing."}
                if partial else {})}
@@ -22140,8 +22348,7 @@ def _pending_owner_cards(cards, config, exemptions):
                  and not (selected_owner == _bakeoff.ARM_OWNER_BILATERAL
                           and _owner_enabled(card.league_id) and _bakeoff.serve_owner() and _bakeoff.owner_only()))
              or (getattr(card, "owner_evaluation", None) is not None
-                 and card.owner_evaluation.as_dict().get("generator") == selected_owner
-                 and card.owner_evaluation.as_dict().get("generator_version") == selected_version
+                 and card.owner_evaluation.model_identity == (selected_owner, selected_version)
                  and (selected_owner != _bakeoff.ARM_OWNER_BILATERAL
                       or (card.owner_evaluation.matches(card)
                           and getattr(card, "owner_published", False))))]
@@ -40516,14 +40723,19 @@ def _serve_trade_job(user_id: str, snapshot: dict, paged: bool, cursor: int = 0,
     jobs never consume it. Otherwise byte-identical to the views. `deck_named`
     (P2, #369): a paged organic /generate names its deck (`deck_id`)."""
     preview = g.get("paywall_preview")
+    # Retain the server-owned publication identity through preview slicing and
+    # serialization; the preview still caps both visible cards and consumption.
+    prefix_source = snapshot.get("cards")
     if preview is not None:
         snapshot = {**snapshot, "cards": (snapshot.get("cards") or [])[:preview.limit]}
     if paged:
-        out = _trade_job_page_view(snapshot, cursor, search_id)
+        out = _trade_job_page_view(snapshot, cursor, search_id,
+                                   _ranked_prefix_source=prefix_source)
         if deck_named:
             out = {**out, "deck_id": out["job_id"]}
     else:
-        out = _trade_job_public_view(copy.deepcopy(snapshot))
+        out = _trade_job_public_view({**snapshot, "cards": copy.deepcopy(snapshot.get("cards") or [])},
+                                     _ranked_prefix_source=prefix_source)
     if preview is not None and out.get("cards"):
         raw_end = out["cursor"] if paged else len(snapshot["cards"])
         window = {c.get("trade_id") for c in snapshot["cards"] if isinstance(c, dict)}

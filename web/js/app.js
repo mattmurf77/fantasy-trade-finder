@@ -101,6 +101,10 @@
     }
 
 
+    // The next explicit browser tap may follow a saved preference or league switch.
+    let webTradeChange;
+    function markWebTradeChange(scenario) { webTradeChange = { scenario, at: performance.now() }; }
+
     // ── Instrumented fetch wrapper ──────────────────────────────────
     async function apiFetch(url, opts = {}) {
       // Inject session token on every request
@@ -111,6 +115,11 @@
       opts.headers['X-Source'] = 'web';
 
       const method = (opts.method || 'GET').toUpperCase();
+      const tradeInputWrite = method !== 'GET' && ['/api/rank3', '/api/rankings/reorder', '/api/anchor/save',
+        '/api/tiers/save', '/api/tiers/copy-from-format', '/api/rankings/import-apply', '/api/league/preferences',
+        '/api/league/asset-prefs', '/api/league/free-agents/move', '/api/league/scoring', '/api/scoring/switch',
+        '/api/session/init'].includes(url.split('?')[0]);
+      if (tradeInputWrite) { webTradeWrites++; webTradeEpoch++; withdrawWebTradeResults(); }
       let bodyPreview;
       if (opts.body) {
         try { bodyPreview = JSON.parse(opts.body); } catch { bodyPreview = opts.body; }
@@ -118,8 +127,15 @@
       let res;
       try {
         res = await fetch(url, opts);
-      } catch (e) {
-        throw e;
+      } finally {
+        if (tradeInputWrite) {
+          webTradeWrites--;
+          webTradeEpoch++;
+          // A tap made during this write keeps its original clock, but cannot
+          // issue a search until every overlapping input write has settled.
+          if (!webTradeSearch?.waitingInputs) withdrawWebTradeResults();
+          if (!webTradeWrites) webTradeWriteWaiters.splice(0).forEach(resolve => resolve());
+        }
       }
       // Missing proof must return to sign-in, never retry session/init using
       // a public username or leave a cached private board visible.
@@ -131,6 +147,9 @@
         }
       }
 
+      if (res.ok && tradeInputWrite && ['/api/league/preferences', '/api/league/asset-prefs'].includes(url)) {
+        markWebTradeChange('after_preferences_change');
+      }
       return res;
     }
 
@@ -527,6 +546,11 @@
       renderLeagueSwitcher();
       refreshCoverage();
       initFairnessSlider();
+      try {
+        const switchTarget = sessionStorage.getItem('ftf_trade_switch_pending');
+        sessionStorage.removeItem('ftf_trade_switch_pending');
+        if (switchTarget && switchTarget === JSON.stringify([currentUserId, currentLeagueId])) markWebTradeChange('after_league_switch');
+      } catch {}
       _startNotifPolling();
       // Agent 6 — show Portfolio subtab only for users with ≥2 synced leagues
       { const _ps = document.getElementById('portfolio-subtab'); if (_ps) _ps.classList.toggle('hidden', (_cachedLeagues || []).length < 2); }
@@ -3041,6 +3065,7 @@
       // initSession() fails after the reload and boot() drops the user on
       // the league picker.
       saveLeague({ league_id: lg.league_id, league_name: lg.name });
+      try { sessionStorage.setItem('ftf_trade_switch_pending', JSON.stringify([currentUserId, lg.league_id])); } catch {}
       _setSwitcherStatus('✓ Switched — reloading…');
       // Small delay so the status text is visible before the reload yanks
       // the page out from under the user.
@@ -3303,6 +3328,7 @@
     }
 
     function switchView(view, btn) {
+      if (view !== 'trades') stopWebTradeSearch();
       window.FTFWinNow?.onView(view);
       // Analytics P4 (web SDK) — screen view. Fire-and-forget, no-op when the
       // analytics.client_events flag is off or the SDK didn't load.
@@ -3405,11 +3431,17 @@
       const lbl = document.getElementById('fairness-value');
       if (lbl) lbl.textContent = val + '%';
       _saveFairnessToStorage();
+      markWebTradeChange('after_preferences_change');
+      withdrawWebTradeResults();
+      scheduleWebTradeWarm();
     }
 
     function onFairnessEqualChk(checked) {
       _syncFairnessUI();
       _saveFairnessToStorage();
+      markWebTradeChange('after_preferences_change');
+      withdrawWebTradeResults();
+      scheduleWebTradeWarm();
     }
 
     // Call this whenever the active league changes so the slider reflects
@@ -3631,11 +3663,13 @@
       } else {
         set.add(playerId);
       }
+      withdrawWebTradeResults();
       renderPlayerPicker();
     }
 
     function clearPinnedPlayers() {
       _activeDirectionSet().clear();
+      withdrawWebTradeResults();
       renderPlayerPicker();
     }
 
@@ -3661,6 +3695,7 @@
       } else {
         visible.forEach(p => _pinnedGivePlayers.add(p.id));
       }
+      withdrawWebTradeResults();
       renderPlayerPicker();
     }
 
@@ -3705,150 +3740,304 @@
 
     // ── Trade generation ───────────────────────────────────────────────────
 
-    async function generateTrades() {
-      try { if (window.FTFTrack) window.FTFTrack('find_trades_tapped', null, 'trades'); } catch (e) {}
+    // The server owns the candidate order. Request a validated first page and
+    // leave the rest of the same deck available on demand.
+    let webTradeSearch = null;
+    let webTradeTapCount = 0;
+    let webTradeEpoch = 0;
+    let webTradeMore = null;
+    let webTradeLoading = null;
+    let webTradeWrites = 0;
+    const webTradeWriteWaiters = [];
+    let webWarmTimer, webWarmRequest, lastWebWarm;
+    function scheduleWebTradeWarm() {
+      clearTimeout(webWarmTimer);
+      if (webTradeWrites || !sessionToken || !currentLeagueId || !_rankingProgress?.unlocked ||
+          _rankingProgressLeague !== currentLeagueId || document.hidden ||
+          !document.getElementById('view-trades')?.classList.contains('active') ||
+          !window.FTF_FLAG?.('trade.first_page_store')) return;
+      const context = webTradeContext();
+      const payload = webTradePayload();
+      if (payload.pinned_give_players || payload.pinned_receive_players) return;
+      webWarmTimer = setTimeout(() => {
+        if (document.hidden || webTradeContext() !== context || webTradeSearch?.current() ||
+            !document.getElementById('view-trades')?.classList.contains('active') ||
+            (lastWebWarm?.context === context && performance.now() - lastWebWarm.at < 60000)) return;
+        lastWebWarm = { context, at: performance.now() };
+        const pending = readWebTradePage('/api/trades/generate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'X-FTF-Prewarm': '1' },
+          body: JSON.stringify({ ...payload, page: 1 }),
+        }).catch(() => null);
+        const warm = { context, pending };
+        webWarmRequest = warm;
+        pending.then(page => {
+          // Restore a previously prepared deck on entry only when the same
+          // gate and freshness checks as an explicit search have approved it.
+          if (!page || webWarmRequest !== warm || webTradeSearch?.current() ||
+              webTradeContext() !== context || document.hidden ||
+              !document.getElementById('view-trades')?.classList.contains('active') ||
+              !page.cards?.length || !publishableWebPage(page)) return;
+          const restored = beginWebTradeSearch(payload, false);
+          renderTrades(page.cards);
+          setNextWebTradePage(restored, page);
+        }).catch(() => {}).finally(() => { if (webWarmRequest === warm) webWarmRequest = null; });
+      }, 350);
+    }
+
+    function webTradePayload() {
+      const payload = { league_id: currentLeagueId || 'league_demo', fairness_threshold: getFairnessThreshold() };
+      if (_pinnedGivePlayers.size) payload.pinned_give_players = [..._pinnedGivePlayers].sort();
+      if (_targetingOn() && _leaguematePoolLeague === payload.league_id && _pinnedReceivePlayers.size) {
+        payload.pinned_receive_players = [..._pinnedReceivePlayers].sort();
+      }
+      return payload;
+    }
+
+    function webTradeContext() {
+      // Preferences are server-owned inputs, fenced by the write epoch. Their
+      // asynchronously loaded UI labels are not a different search request.
+      return JSON.stringify([currentUserId, sessionToken, getActiveFormat(), webTradeEpoch, webTradePayload()]);
+    }
+
+    function stopWebTradeSearch() {
+      webTradeSearch?.finish('abandoned');
+      webTradeSearch = null;
+      webTradeMore = null;
+      webTradeLoading = null;
+      const more = document.getElementById('trade-more-btn');
+      if (more) { more.hidden = true; more.disabled = false; }
+      const btn = document.getElementById('gen-btn');
+      if (btn) { btn.disabled = false; btn.textContent = 'Find a Trade'; }
+    }
+
+    // Changing eligibility withdraws actionable old cards immediately, even
+    // before the replacement request or preference write finishes.
+    function withdrawWebTradeResults() {
+      stopWebTradeSearch();
+      clearTimeout(webWarmTimer);
+      webWarmRequest = null;
+      renderTrades([]);
+    }
+
+    function beginWebTradeSearch(payload, tapped) {
+      stopWebTradeSearch();
+      let context = webTradeContext();
+      const identity = JSON.stringify([currentUserId, sessionToken, getActiveFormat(), payload]);
+      const started = performance.now();
+      const searchId = window.crypto?.randomUUID?.() || ('web-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+      const pinned = !!(payload.pinned_give_players || payload.pinned_receive_players);
+      const network = navigator.onLine === false ? 'offline' : navigator.connection?.type;
+      const facts = { search_id: searchId, entry_point: 'web_finder', search_type: pinned ? 'pinned' : 'organic',
+        launch_state: webTradeTapCount ? 'repeat_tap' : 'first_tap',
+        network_type: ['wifi', 'cellular', 'offline'].includes(network) ? network : 'unknown' };
+      let observer, timer;
+      let finished = !tapped;
+      const search = {
+        id: searchId,
+        tapped,
+        waitingInputs: webTradeWrites > 0,
+        current: () => webTradeSearch === search && webTradeContext() === context,
+        resumeAfterInputs() {
+          if (webTradeSearch !== search || identity !== JSON.stringify([
+              currentUserId, sessionToken, getActiveFormat(), webTradePayload()])) return false;
+          context = webTradeContext();
+          search.waitingInputs = false;
+          return true;
+        },
+        finish(reason, page, index) {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          observer?.disconnect();
+          const props = { ...facts, ms_from_tap: Math.round(performance.now() - started) };
+          if (reason) props.reason = reason;
+          else {
+            props.card_index = index;
+            props.freshness_state = page.freshness_state || 'fresh';
+            if (page.serve_source) props.serve_source = page.serve_source;
+          }
+          window.FTFTrack?.(reason ? 'trade_first_card_failed' : 'trade_first_card_shown', props, 'trades');
+        },
+        observe(page) {
+          if (finished || !window.IntersectionObserver) return;
+          observer?.disconnect();
+          const cards = [...document.querySelectorAll('#trades-list .trade-card')];
+          observer = new IntersectionObserver(entries => {
+            if (!search.current() || document.hidden) return;
+            const hit = entries.find(e => e.target.isConnected && e.intersectionRatio >= 0.5
+              && e.target.querySelector('.trade-like-btn:not(:disabled)') && e.target.querySelector('.trade-pass-btn:not(:disabled)'));
+            if (hit) search.finish(null, page, cards.indexOf(hit.target));
+          }, { threshold: 0.5 });
+          cards.forEach(c => observer.observe(c));
+        },
+      };
+      webTradeSearch = search;
+      if (tapped) {
+        webTradeTapCount++;
+        const change = webTradeChange ? { scenario: webTradeChange.scenario, input_age_ms: Math.max(0, Math.round(started - webTradeChange.at)) } : {};
+        webTradeChange = undefined;
+        window.FTFTrack?.('find_trades_tapped', { source: 'web_finder', mode: 'deck', search_id: searchId, client_build: 'instant-trades-v1', ...change }, 'trades');
+        timer = setTimeout(() => search.finish('timeout'), 10000);
+      }
+      return search;
+    }
+
+    async function readWebTradePage(url, options) {
+      const response = await apiFetch(url, { ...options, headers: { ...options?.headers, 'X-FTF-Current-Only': '1' } });
+      if (!response) throw Object.assign(new Error('Sign in to find trades'), { reason: 'verify' });
+      const page = await response.json();
+      if (!response.ok || page.error) {
+        const reason = page.gate === 'verify_required' || page.error === 'verification_required' ? 'verify'
+          : response.status === 402 ? 'paywall' : 'error';
+        throw Object.assign(new Error(page.message || page.error || 'Trade search failed'), { reason, code: page.error });
+      }
+      if ((Array.isArray(page) ? page.length : page.cards?.length) && page.current_validated !== true) {
+        throw new Error('Trade suggestions could not be verified. Try again.');
+      }
+      return page;
+    }
+
+    function publishableWebPage(page) {
+      return Array.isArray(page.cards) && !page.wait_reason && page.freshness_state !== 'updating'
+        && (page.status === 'complete' || (page.status === 'running' && page.ranked_prefix_ready === true && page.cards.length > 0));
+    }
+
+    async function findCompletedWebPage(search, payload) {
+      const request = body => readWebTradePage('/api/trades/generate', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, page: 1, search_id: search.id }) });
+      // A passive preview refusal can only be retried by this real tap. A
+      // completed background reply is never retained as access authority.
+      const warm = webWarmRequest;
+      let page = warm?.context === webTradeContext() ? await warm.pending : null;
+      if (!search.current()) return null;
+      if (!page) page = await request(payload);
+      if (!search.current()) return null;
+      if (page.freshness_state === 'updating') page = await request({ ...payload, force: true });
+      const deadline = performance.now() + 90000;
+      // A running job can have a ranked page ready immediately after kickoff.
+      // Probe once inside the tap budget, then back off on a real cold build.
+      let delay = 25;
+      let restarted = false;
+      while (page.status === 'running' && !publishableWebPage(page) && page.job_id && search.current() && performance.now() < deadline) {
+        await new Promise(r => setTimeout(r, delay));
+        if (!search.current()) return null;
+        try {
+          page = await readWebTradePage('/api/trades/status?cursor=0&job_id=' + encodeURIComponent(page.job_id));
+        } catch (error) {
+          if (!search.current()) return null;
+          if (restarted || error.code !== 'trade_snapshot_changed') throw error;
+          restarted = true;
+          page = await request(payload);
+        }
+        delay = Math.min(1500, Math.max(200, delay * 2));
+      }
+      if (!search.current()) return null;
+      if (Array.isArray(page)) return { status: 'complete', cards: page };
+      if (!publishableWebPage(page)) {
+        throw new Error('Trade suggestions are still updating. Try again.');
+      }
+      return page;
+    }
+
+    async function generateTrades(tapped = true) {
+      // Preference-save handlers auto-refresh after committing local UI state.
+      // Keep a real tap already waiting on that save instead of replacing its R1.
+      if (!tapped && webTradeSearch?.tapped &&
+          (webTradeSearch.waitingInputs || webTradeSearch.current())) return;
+      clearTimeout(webWarmTimer);
+      const payload = webTradePayload();
+      const search = beginWebTradeSearch(payload, tapped);
       const btn = document.getElementById('gen-btn');
       btn.disabled = true;
       btn.textContent = 'Generating…';
-
-      const leagueId         = currentLeagueId || 'league_demo';
-      const fairnessThreshold = getFairnessThreshold();
-      const pinnedGive       = [..._pinnedGivePlayers];
-      // FB-47 — acquire pins ride along when the flag is on and the pins
-      // belong to THIS league (the pool cache is league-keyed; a mismatch
-      // means stale pins from a previous league).
-      const pinnedReceive    = (_targetingOn() && _leaguematePoolLeague === leagueId)
-        ? [..._pinnedReceivePlayers]
-        : [];
-
+      document.getElementById('trades-list').replaceChildren();
+      _allTradeCards = []; _lastRenderedTrades = [];
       try {
-        const payload = { league_id: leagueId, fairness_threshold: fairnessThreshold };
-        if (pinnedGive.length > 0) {
-          payload.pinned_give_players = pinnedGive;
-        }
-        if (pinnedReceive.length > 0) {
-          payload.pinned_receive_players = pinnedReceive;
-        }
-        const res  = await apiFetch('/api/trades/generate', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify(payload),
-        });
-        const body = await res.json();
-
-        // The backend was refactored to return a streaming TradeJobSnapshot
-        // (`{job_id, status, cards, opponents_done, opponents_total}`) for
-        // the mobile app's progressive deck. The web client wasn't updated
-        // at the time, so it was reading `.length` off the snapshot object
-        // and rendering "Found undefined trade ideas." Handle both shapes:
-        // a bare array (legacy fallback) and a snapshot we may need to poll.
-        let cards;
-        if (Array.isArray(body)) {
-          cards = body;
-        } else if (body && typeof body === 'object' && body.job_id) {
-          if (body.status === 'error') {
-            showToast('' + (body.error || 'Trade generation failed'));
-            return;
+        if (search.waitingInputs) {
+          while (webTradeWrites && webTradeSearch === search) {
+            await new Promise(resolve => webTradeWriteWaiters.push(resolve));
           }
-          if (body.status === 'complete') {
-            cards = Array.isArray(body.cards) ? body.cards : [];
-          } else {
-            // Status === 'running' — poll until done. The button text
-            // doubles as the progress strip so the user sees movement.
-            cards = await _pollTradesJob(body, btn);
-            if (cards == null) return;          // user-visible error already toasted
-          }
-        } else if (body && body.error) {
-          showToast('' + body.error);
-          return;
-        } else {
-          showToast('Unexpected response from trade engine');
-          return;
+          if (!search.resumeAfterInputs()) return;
         }
-
-        const pinnedTotal = pinnedGive.length + pinnedReceive.length;
-        const pinnedLabel = pinnedTotal > 0 ? ` for ${pinnedTotal} pinned player(s)` : '';
-        showToast(`Found ${cards.length} trade ideas${pinnedLabel}`);
-        renderTrades(cards);
+        const page = await findCompletedWebPage(search, payload);
+        if (!page || !search.current()) return;
+        renderTrades(page.cards);
+        search.observe(page);
+        setNextWebTradePage(search, page);
+        if (!page.cards.length && webTradeMore) await loadMoreWebTrades();
+        else if (!page.cards.length) search.finish('empty');
         updateLikedBadge();
-      } catch {
-        showToast('Could not reach server');
+      } catch (error) {
+        if (search.current()) { search.finish(error.reason || 'error'); showToast(error.message || 'Could not reach server'); }
       } finally {
-        btn.disabled = false;
-        btn.textContent = 'Find a Trade';
+        if (webTradeSearch === search) { btn.disabled = false; btn.textContent = 'Find a Trade'; }
       }
     }
 
-    // Polls /api/trades/status until the snapshot's status flips off
-    // 'running'. Returns the final cards array on success, or null on
-    // user-visible error (already toasted). Updates the gen-btn label
-    // with progress so the user sees opponents-checked counter while we
-    // wait. Caps at MAX_POLLS * INTERVAL ≈ 60 seconds wall clock — which
-    // covers the worst-case generation time on Render's free tier.
-    async function _pollTradesJob(initialSnapshot, btn) {
-      const INTERVAL_MS = 1500;
-      const MAX_POLLS   = 40;
-      const MAX_FAILS   = 4;
-      let snap = initialSnapshot;
-      let fails = 0;
-
-      const updateBtnText = () => {
-        const done = snap.opponents_done || 0;
-        const tot  = snap.opponents_total || '?';
-        const n    = Array.isArray(snap.cards) ? snap.cards.length : 0;
-        btn.textContent = n > 0
-          ? `Searching… ${done}/${tot} · ${n} found`
-          : `Searching… ${done}/${tot}`;
-      };
-      updateBtnText();
-
-      for (let i = 0; i < MAX_POLLS; i++) {
-        await new Promise(r => setTimeout(r, INTERVAL_MS));
-        try {
-          const r = await apiFetch(
-            `/api/trades/status?job_id=${encodeURIComponent(snap.job_id)}`,
-          );
-          if (!r.ok) {
-            // 404 = job evicted. Treat as terminal failure.
-            if (r.status === 404) {
-              showToast('Trade job expired — try again');
-              return null;
-            }
-            throw new Error(`status ${r.status}`);
-          }
-          snap = await r.json();
-          fails = 0;
-        } catch {
-          fails++;
-          if (fails >= MAX_FAILS) {
-            showToast('Network hiccup — try Find a Trade again');
-            return null;
-          }
-          continue;       // try one more poll
-        }
-        updateBtnText();
-        if (snap.status === 'complete') {
-          return Array.isArray(snap.cards) ? snap.cards : [];
-        }
-        if (snap.status === 'error') {
-          showToast('' + (snap.error || 'Trade generation failed'));
-          return null;
-        }
-      }
-      // Timed out waiting. Return whatever cards have arrived so far —
-      // user can re-tap to keep waiting.
-      showToast('Still searching — tap again in a moment');
-      return Array.isArray(snap.cards) ? snap.cards : [];
+    function setNextWebTradePage(search, page) {
+      webTradeMore = Number.isInteger(page.cursor) && (page.cursor < page.total_ready || page.status === 'running') && page.job_id
+        ? { search, page } : null;
+      document.getElementById('trade-more-btn').hidden = !webTradeMore;
     }
 
-    async function refreshTrades() {
-      const leagueId = currentLeagueId || 'league_demo';
+    async function loadMoreWebTrades() {
+      const more = document.getElementById('trade-more-btn');
+      const next = webTradeMore;
+      if (!next || !next.search.current() || webTradeLoading?.search === next.search) return;
+      webTradeLoading = next;
+      more.disabled = true;
+      let page = next.page;
+      const deadline = performance.now() + 90000;
       try {
-        const res   = await apiFetch(`/api/trades?league_id=${leagueId}`);
-        const cards = await res.json();
-        if (!cards.error) renderTrades(cards);
-        updateLikedBadge();
-      } catch {}
+        do {
+          const previous = page;
+          page = await readWebTradePage('/api/trades/status?job_id=' + encodeURIComponent(previous.job_id) + '&cursor=' + previous.cursor);
+          if (!next.search.current()) return;
+          while (page.status === 'running' && !publishableWebPage(page) && performance.now() < deadline) {
+            await new Promise(resolve => setTimeout(resolve, 750));
+            if (!next.search.current()) return;
+            page = await readWebTradePage('/api/trades/status?job_id=' + encodeURIComponent(previous.job_id) + '&cursor=' + previous.cursor);
+            if (!next.search.current()) return;
+          }
+          if (!publishableWebPage(page)) {
+            throw new Error('Trade suggestions have changed. Find a Trade to refresh.');
+          }
+          // Cumulative replies replace the deck. A raw cursor can advance
+          // past a page whose every card was withdrawn.
+          const cumulative = page.replace || !Number.isInteger(page.cursor);
+          if (!cumulative && page.cursor <= previous.cursor && page.cursor < page.total_ready) throw new Error('Could not load more trades.');
+          if (cumulative || page.cards.length) {
+            renderTrades(cumulative ? page.cards : _allTradeCards.concat(page.cards));
+            next.search.observe(page);
+          }
+          setNextWebTradePage(next.search, page);
+        } while (!_allTradeCards.length && webTradeMore);
+        if (!_allTradeCards.length) next.search.finish('empty');
+      } catch (error) {
+        if (next.search.current()) {
+          next.search.finish(error.reason || 'error');
+          if (error.code === 'trade_snapshot_changed' || error.reason === 'verify' || error.reason === 'paywall') {
+            stopWebTradeSearch();
+            renderTrades([]);
+          }
+          showToast(error.message);
+        }
+      } finally {
+        if (webTradeLoading === next) { webTradeLoading = null; more.disabled = false; }
+      }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) webTradeSearch?.finish('abandoned');
+    });
+    window.addEventListener('pagehide', () => webTradeSearch?.finish('abandoned'));
+
+    function refreshTrades() {
+      if (webTradeSearch?.current()) return;
+      stopWebTradeSearch();
+      renderTrades([]);
+      scheduleWebTradeWarm();
+      updateLikedBadge();
     }
 
     // FB-47 — partner-fit copy. `partner_fit` is a 0–1 scalar (exact depth
@@ -4577,6 +4766,8 @@
         const card = await res.json();
         if (card.error) { showToast('' + card.error); return; }
 
+        const decidedCard = _allTradeCards.find(c => c.trade_id === tradeId);
+        if (decidedCard) decidedCard.decision = decision;
         const el = document.getElementById('tc-' + tradeId);
         if (el) {
           el.classList.remove('liked', 'passed');
@@ -5021,7 +5212,7 @@
         showToast('Preferences saved');
 
         // Auto-generate trades so the new prefs take effect immediately
-        generateTrades();
+        generateTrades(false);
       } catch {
         showToast('Failed to save preferences');
       } finally {
@@ -5056,7 +5247,7 @@
         const meta = OUTLOOK_META[_pendingOutlookValue] || { emoji: '', short: _pendingOutlookValue };
         showToast(`Outlook set: ${meta.label}`);
 
-        generateTrades();
+        generateTrades(false);
       } catch {
         showToast('Failed to save outlook');
       }

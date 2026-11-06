@@ -5,6 +5,16 @@ export interface SearchSelection {
   receiveIds: string[];
 }
 
+export function fairPackagesRequest(leagueId: string, anchor: SearchSelection, fairness: number, opponentId?: string) {
+  return {
+    league_id: leagueId,
+    fairness_threshold: fairness,
+    give_player_ids: [...anchor.giveIds],
+    ...(anchor.receiveIds.length ? { receive_player_ids: [...anchor.receiveIds] } : {}),
+    ...(opponentId ? { opponent_user_id: opponentId } : {}),
+  };
+}
+
 export interface CanvasScopeDraft {
   opponentId?: string;
   give: string[];

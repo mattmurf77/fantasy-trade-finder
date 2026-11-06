@@ -59,8 +59,8 @@ const api = compile(read('api/trades.ts'), {
   require: (name) => {
     if (name !== './client') throw new Error(`api/trades.ts must stay require-free beyond ./client (saw ${name})`);
     return { api: {
-      post: async (route, body) => { lastReq = { route, body }; return nextRes; },
-      get: async (route) => { lastReq = { route }; return nextRes; },
+      post: async (route, body) => { lastReq = { route, body }; return { current_validated: true, ...nextRes }; },
+      get: async (route) => { lastReq = { route }; return { current_validated: true, ...nextRes }; },
     } };
   },
 });
@@ -105,10 +105,10 @@ process.on('exit', () => {
     eq(lastReq.route, '/api/trades/status?job_id=j', 'legacy poll has no cursor');
   });
   await check('1d. a LEGACY response (no cursor) normalizes with no paging fields and no from_page', async () => {
-    nextRes = { job_id: 'j', status: 'running', opponents_done: 1, opponents_total: 4,
+    nextRes = { job_id: 'j', status: 'complete', opponents_done: 4, opponents_total: 4,
       cards: [{ trade_id: 'a', give: [], receive: [] }] };
     const snap = await api.getTradeStatus('j');
-    eq(Object.keys(snap).sort(), ['cards', 'error', 'job_id', 'opponents_done', 'opponents_total', 'status']);
+    eq(Object.keys(snap).sort(), ['cards', 'current_validated', 'error', 'job_id', 'opponents_done', 'opponents_total', 'status']);
     ok(!('from_page' in snap.cards[0]) && !('trade_hash' in snap.cards[0]), 'legacy card untouched');
   });
   await check('1e. a PAGED response types every envelope field and stamps its cards from_page; trade_hash kept', async () => {
@@ -221,9 +221,9 @@ process.on('exit', () => {
 
   // ── 5. The screen wires all of the above ───────────────────────────────
   await check('5a. every dispatch is a paged search; each but the automatic re-search has its own client search id', () => {
-    ok(/return generateTrades\(request, \{ searchId: vars\.searchId \}\);/.test(code),
+    ok(/\?\? generateTrades\(request, \{ searchId: vars\.searchId \}\);/.test(code),
       'mutationFn always pages (page 1), the dispatch search id when it has one (#525 QA P2-1)');
-    ok(/const claimed = research \? research\.searchId : claimPendingSearch\(\);[\s\S]{0,300}?generateMutation\.mutate\(\s*\{\s*\.\.\.vars,\s*searchId: research \? research\.searchId \?\? undefined : claimed \?\? uuidv4\(\),\s*research: !!research,\s*\},\s*mutateOpts\);/.test(code),
+    ok(/const claimed = research \? research\.searchId : handoffSearchRef\.current \?\? claimPendingSearch\(\);[\s\S]{0,500}?generateMutation\.mutate\(\s*\{\s*\.\.\.vars,\s*searchId: research \? research\.searchId \?\? undefined : claimed \?\? uuidv4\(\),\s*research: !!research,\s*\},\s*mutateOpts\);/.test(code),
       'dispatchGenerate carries the tap\'s search id (R1), else mints one (the automatic re-search: its open id or none)');
   });
   await check('5b. pages are fetched by deck + cursor, merged through mergeDeckPage at the fronted card', () => {
