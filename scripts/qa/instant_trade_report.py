@@ -202,6 +202,16 @@ def requirements(profile):
                                    ("no_eligible_solution", "no_solution")):
             reqs.append((f"{platform}:state:{scenario}",
                          {"platform": platform, "scenario": scenario}, expected))
+    # A warm Wi-Fi organic tap must not stand in for an immediate switch on
+    # cellular (the original reported failure), or vice versa.
+    for scenario in ("after_league_switch", "after_preferences_change"):
+        for network in ("wifi", "cellular"):
+            reqs.append((f"mobile:{scenario}:organic:{network}",
+                         {"platform": "mobile", "scenario": scenario,
+                          "search_type": "organic", "network_type": network}, "latency"))
+    reqs.append(("mobile:usage_trends:cross_league_handoff",
+                 {"platform": "mobile", "entry_point": "usage_trends",
+                  "scenario": "cross_league_handoff"}, "latency"))
     for entry in MOBILE_ENTRIES:
         reqs.append((f"mobile:entry:{entry}", {"platform": "mobile", "entry_point": entry}, "latency"))
     reqs.append(("web:entry:web_finder", {"platform": "web", "entry_point": "web_finder"}, "latency"))
@@ -292,7 +302,7 @@ WITH tap_rows AS (
  ('after_league_switch','after_preferences_change','after_format_switch','after_account_switch',
  'after_rank_change','warm','genuinely_cold','pinned_give','pinned_receive','targeted_opponent',
  'shape_intent','fair_sweep','offline_cached','free_preview','offline_empty','preview_exhausted','unverified',
- 'no_eligible_solution')
+ 'no_eligible_solution','cross_league_handoff')
  THEN props::jsonb->>'scenario' ELSE 'unclassified' END r1_scenario,
  CASE WHEN props::jsonb->>'input_age_ms' ~ '^[0-9]{1,12}$'
  THEN (props::jsonb->>'input_age_ms')::bigint END input_age_ms,

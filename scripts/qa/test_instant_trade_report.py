@@ -155,6 +155,28 @@ class AcceptanceReportTests(unittest.TestCase):
             p["cohorts"] = [r for r in p["cohorts"] if r[dimension] != value]
             self.assertEqual(R.report(p)["status"], "FAIL", (dimension, value))
 
+    def test_immediate_organic_changes_require_each_network(self):
+        for scenario in ("after_league_switch", "after_preferences_change"):
+            for network in ("wifi", "cellular"):
+                p = complete()
+                # Leave other networks and other scopes intact: neither can
+                # substitute for this specific observed immediate-change cell.
+                p["cohorts"] = [r for r in p["cohorts"] if not (
+                    r["platform"] == "mobile" and r["scenario"] == scenario
+                    and r["search_type"] == "organic" and r["network_type"] == network)]
+                p["cohorts"].append(cohort(scenario=scenario, search_type="pinned",
+                    network_type=network, input_age_ms_min=80, input_age_ms_max=80))
+                out = R.report(p)
+                check = next(c for c in out["checks"] if
+                    c["id"] == f"mobile:{scenario}:organic:{network}")
+                self.assertEqual(check["status"], "FAIL")
+
+    def test_usage_same_league_does_not_cover_cross_league_handoff(self):
+        p = complete()
+        p["cohorts"] = [r for r in p["cohorts"] if r["scenario"] != "cross_league_handoff"]
+        self.assertEqual(R.report(p)["status"], "FAIL")
+        self.assertIn("'cross_league_handoff'", R.PRODUCTION_SQL)
+
     def test_preferences_are_not_silently_excluded_by_legacy_t7(self):
         row = cohort(entry_point="prefs_changed_strip", scenario="after_preferences_change",
                      histogram=[dict(result="shown", ms=4000, count=80)])

@@ -45,6 +45,13 @@ selects their exact R1 `client_build` tag (`instant-trades-v1`), while
 events are not mixed into candidate proof. Without `--web-revision`, browser
 cohorts are intentionally absent and strict all-entry acceptance fails.
 
+The current strict matrix contains **63 required cohorts**. In addition to
+individual scenario coverage, immediate organic league and preference changes
+each need their own Wi-Fi and cellular samples. A pinned or warmed result
+cannot satisfy those intersections. Usage Trends has a separate
+`cross_league_handoff` cohort: its tap starts before dismissal and league
+initialization, so a same-league Usage tap cannot stand in for that work.
+
 The default **all-entry** profile requires first/repeat Wi-Fi/cellular organic
 cells, every listed search entry, scoped/fair searches, cold launch, genuinely
 cold engine, immediate changes, cached offline use and first free preview.
@@ -259,3 +266,62 @@ all observed eligible taps <=200ms, minimum samples/devices met, no lost taps,
 current-input/quality invariants preserved, and no active-path latency/storage
 regression. Cold/new-league/new-scope misses remain visible. If any prerequisite
 fails, stop the canary and retain the honest failing report.
+
+## Recovery review — 2026-11-06
+
+Recovered PR #604 head `d79592f`. Restored the five intersection/handoff
+requirements described above. Local stdlib reporter run: **29 passed, three
+optional PostgreSQL tests skipped** (no scratch database configured). These
+are synthetic reporter regressions; no new device observations or acceptance
+pass are claimed. Earlier device results and PostgreSQL runs above remain
+historical evidence and were not rerun here.
+
+### Cold-path architecture finding
+
+Current source establishes three different latency paths:
+
+1. An exact current page already held on the phone can render locally.
+   `useTradePagePrewarm` only prepares the active organic scope. It starts
+   after session revalidation and debounces settled preference edits by at
+   least 300ms (later bursts up to 30s). Thus an immediate post-edit tap is
+   inherently outside that completed-prewarm path.
+2. Prepared server inventory avoids generation, but
+   `prepared_trade_runtime_v2.try_adopt` still refreshes authorized source
+   membership, captures full dependency receipts, validates the complete
+   compact disposition index, restores the first bounded batch, commits its
+   evidence and publishes it. Metadata lookup time is not first-card time.
+   `still_current` repeats the active receipt around each batch; that receipt
+   reads many league tables, participant swipe history and serializes pool,
+   policy and availability inputs. Removing those checks would allow stale
+   trades; a replacement needs equivalent cross-process invalidation proof.
+3. A genuinely new scope calls `_generate_with_search`, evaluates the bounded
+   candidate universe, ranks all survivors, runs final policy/significance/
+   presentation and commits the first batch. With default pool size 16, the
+   small 1:1, 1:2, 2:1 shapes alone produce 4096 candidates per opponent
+   (16² + 2×16×120); eleven opponents can use 45056 evaluations before the
+   60000 total cap. This is a computation cap, not a card-count limit.
+
+A cached organic deck is not a complete candidate basis for different inputs.
+`_pool` depends on preferences; `candidates` inserts explicit pins ahead of
+stratification and can introduce larger shapes. Global ranking includes
+quality, companion efficiency and diversity. Filtering the old first 30 or
+showing the first evaluator survivor would change the intended search/order.
+
+The next measurable optimization should profile the real first durable batch
+separately from total completion, then remove repeated work without changing
+candidate enumeration, evaluation or ranking. An exact pre-rendered first-page
+artifact could move serialization/evidence preparation off the tap, but its
+transfer must retain current identity, source, policy and entitlement guards.
+For repeated scope reads, a compact durable input-revision vector is a possible
+replacement for full receipts only after every relevant writer—including
+roster/provider refreshes, other devices, account deletion and configuration
+updates—atomically invalidates it. This is additional architecture, not a
+verified implementation in PR #604.
+
+A universal 200ms promise cannot be established by server prewarming alone:
+new inputs may not exist before the tap, networks can be unavailable, and some
+filters have no solution. Achieving the bound for immediately changed scopes
+requires complete local inputs and equivalent bounded local evaluation, or
+another proven fast exact solve, with measured frame time. Neither exists in
+this candidate. Keep cold and unseen-scope misses in the release denominator;
+do not move the clock after preparation or weaken currentness/quality checks.
