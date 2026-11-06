@@ -518,6 +518,19 @@ def _guard_expiry(cached):
     return min(dates)
 
 
+def publish_durable_prefix(job):
+    """Under the job lock, transfer evidence ownership for a committed prefix.
+
+    Adoption calls this only after its evidence and checkpoint commit, current
+    input revalidation, and live-job check. The unused deferred generator sink
+    must not delay or duplicate this runtime's durable evidence. No ownership
+    transfer occurs on a miss or failed first commit.
+    """
+    job.pop("evidence", None)
+    job["evidence_mode"] = "live"
+    job["_ranked_prefix_snapshot"] = job["cards"]
+
+
 def try_adopt(server, *, job_id, context, fairness, prefs):
     """Worker-side cache admission. False means run ordinary generation.
 
@@ -535,6 +548,7 @@ def try_adopt(server, *, job_id, context, fairness, prefs):
                       context.scoring_format, fairness)
     claim = None
     published = 0
+    handled_evidence = False
     inventory = None
     try:
         cached = store.peek_inventory(scope, now=utcnow())
@@ -594,6 +608,7 @@ def try_adopt(server, *, job_id, context, fairness, prefs):
                 job.update(copy.deepcopy(cached["payload"]["job_fields"]))
                 job.update(prepared_inventory_id=cached["inventory_id"],
                     prepared_expires_at=cached["expires_at"], prepared_guard=guard,
+                    prepared_evidence_job_id=cached["payload"]["inventory"]["job_id"],
                     final_checks_pending=True)
             runtime_records = {r["runtime"]["trade_id"]: r
                                for r in cached["payload"]["inventory"]["cards"]}
@@ -609,6 +624,7 @@ def try_adopt(server, *, job_id, context, fairness, prefs):
                     row["features_json"]["deck_source"] = "prepared_adoption"
                 store.ensure_adoption_evidence(claim, candidate_set=batch["candidate_set"],
                                                rows=batch["impression_rows"], now=utcnow())
+                handled_evidence = True
                 next_prefix = published + len(batch["cards"])
                 # A recovered claim may already have this durable prefix. It
                 # must hydrate the same cards, not reserve new impression IDs.
@@ -633,6 +649,7 @@ def try_adopt(server, *, job_id, context, fairness, prefs):
                             server._significance_exemptions_for(context.trade_service)[
                                 server._significance_card_key(card)] = exemption
                     job["cards"] = [*job["cards"], *copy.deepcopy(batch["public_cards"])]
+                    publish_durable_prefix(job)
                     job["final_checks_pending"] = False
                 published = next_prefix
             if not inventory.cards:
@@ -640,6 +657,7 @@ def try_adopt(server, *, job_id, context, fairness, prefs):
                     raise ValueError("inputs_changed")
                 store.ensure_adoption_evidence(claim, candidate_set=inventory.candidate_set,
                                                rows=[], now=utcnow())
+                handled_evidence = True
                 store.checkpoint_adoption(claim, published_count=0,
                     expected_prefix=claim["published_count"], now=utcnow(), complete=True)
                 if not still_current():
@@ -665,13 +683,15 @@ def try_adopt(server, *, job_id, context, fairness, prefs):
                             context.trade_service._trade_cards.pop(card.trade_id, None)
                     server._revoke_trade_job_locked(job, "inputs_changed")
             return True
-        if published:
+        if published or handled_evidence:
+            # A committed first batch followed by a failed checkpoint is not
+            # a cache miss: never mix a fresh generation into its evidence.
             server._finish_trade_job(job_id, error="prepared_adoption_incomplete")
             return True
         with server._trade_jobs_lock:
             job = server._trade_jobs.get(job_id)
             if job is not None:
-                for key in ("prepared_inventory_id", "prepared_expires_at", "prepared_guard", "first_deck", "board_refresh",
+                for key in ("prepared_inventory_id", "prepared_expires_at", "prepared_guard", "prepared_evidence_job_id", "first_deck", "board_refresh",
                             "suppression_note"):
                     job.pop(key, None)
         return False

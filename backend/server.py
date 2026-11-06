@@ -3810,7 +3810,9 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None,
     withdrawn = []                        # cards S0's I-1 drops at this serve (evidence, C-b)
     cut = []                              # cards the disposition projection cuts (models-lead B4)
     moves = {}                            # D3: cards displayed out of build order (evidence)
-    live_paged = job.get("evidence_mode") == "live" and bool(job.get("page_scope"))
+    evidence_job_id = job.get("prepared_evidence_job_id") or job["job_id"]
+    live_paged = job.get("evidence_mode") == "live" and bool(
+        job.get("page_scope") or job.get("prepared_inventory_id"))
     if out["cards"] and (job.get("evidence") is not None or live_paged):
         # C-b sticky drop: a card I-1 withdrew at an earlier serve of this deck
         # is never served again, whatever its roster says now.
@@ -3818,7 +3820,7 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None,
             with job["evidence"].lock:
                 sticky = set(job["evidence"].sticky)
         else:
-            sticky = _deck_sticky(job["job_id"], job["key"][0])
+            sticky = _deck_sticky(evidence_job_id, job["key"][0])
         if sticky:
             out["cards"] = [c for c in out["cards"] if c.get("impression_id") not in sticky]
     i1_report = {}                        # deck_i1_check props, when the check ran
@@ -3871,7 +3873,7 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None,
                                  cut=cut, league_id=job["key"][1],
                                  moves=moves if out["cards"] else None)
     elif live_paged and (out["cards"] or withdrawn or cut):   # #417 P2-1: rows written at build
-        _deck_evidence_live_delivered(job["job_id"], job["key"][0], job["key"][1],
+        _deck_evidence_live_delivered(evidence_job_id, job["key"][0], job["key"][1],
                                       out["cards"], withdrawn, cut)
     if kick_floor:
         _kick_roster_floor(kick_floor)        # after the response is built, no lock held
@@ -4431,7 +4433,8 @@ def _trade_page_size() -> int:
         return 30
 
 
-def _trade_job_page_view(job: dict, cursor: int, search_id=None, snap=None) -> dict:
+def _trade_job_page_view(job: dict, cursor: int, search_id=None, snap=None,
+                         *, _ranked_prefix_source=None) -> dict:
     """E2 opt-in paging: `page=1` on /generate (cursor 0), `cursor` on /status.
 
     `job` is a SHALLOW snapshot taken under the job lock; call outside it. The
@@ -4463,7 +4466,8 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None, snap=None) -> d
     served = [] if job.get("status") == "error" else raw[start:end]
     out = _trade_job_public_view({**job, "cards": copy.deepcopy(served)}, page_start=start,
                                  prior_cards=raw[:start] if start else None, snap=snap,
-                                 _ranked_prefix_source=raw)
+                                 _ranked_prefix_source=(_ranked_prefix_source
+                                     if _ranked_prefix_source is not None else raw))
     if out["status"] == "error" or "wait_reason" in out:     # S0 §3b withhold: cursor holds
         out.update(cards=[], cursor=cursor, total_ready=0, replace=False)
     else:
@@ -40718,14 +40722,19 @@ def _serve_trade_job(user_id: str, snapshot: dict, paged: bool, cursor: int = 0,
     jobs never consume it. Otherwise byte-identical to the views. `deck_named`
     (P2, #369): a paged organic /generate names its deck (`deck_id`)."""
     preview = g.get("paywall_preview")
+    # Retain the server-owned publication identity through preview slicing and
+    # serialization; the preview still caps both visible cards and consumption.
+    prefix_source = snapshot.get("cards")
     if preview is not None:
         snapshot = {**snapshot, "cards": (snapshot.get("cards") or [])[:preview.limit]}
     if paged:
-        out = _trade_job_page_view(snapshot, cursor, search_id)
+        out = _trade_job_page_view(snapshot, cursor, search_id,
+                                   _ranked_prefix_source=prefix_source)
         if deck_named:
             out = {**out, "deck_id": out["job_id"]}
     else:
-        out = _trade_job_public_view(copy.deepcopy(snapshot))
+        out = _trade_job_public_view({**snapshot, "cards": copy.deepcopy(snapshot.get("cards") or [])},
+                                     _ranked_prefix_source=prefix_source)
     if preview is not None and out.get("cards"):
         raw_end = out["cursor"] if paged else len(snapshot["cards"])
         window = {c.get("trade_id") for c in snapshot["cards"] if isinstance(c, dict)}

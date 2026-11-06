@@ -31,7 +31,8 @@ fingerprint reads leaves real-league strict delivery unavailable, preserving the
 operator's kill switch and legacy behavior.
 
 `ranked_prefix_ready` is limited to live evidence actually committed by the
-fully ranked owner batch. Source-list identity, current job state and strict
+fully ranked owner batch or a prepared-adoption batch whose evidence and
+checkpoint have committed and whose inputs have been revalidated. Source-list identity, current job state and strict
 validation bind it; another publisher, revocation or completion ends authority.
 Deferred/preparation captures never qualify. This does not guarantee instant
 cold generation: full candidate generation/ranking still precedes publication.
@@ -85,3 +86,51 @@ drops the passive request reference. Late replies cannot restore that deck.
 The exact-scope replacement still uses strict server validation; clearing the
 screen is not a first-card success or a claim of 200 ms. Runtime regressions
 cover both visible-card withdrawal and a late response after withdrawal.
+
+
+## Prepared-prefix delivery follow-up — 2026-11-06
+
+The prepared runtime transfers the unused deferred-generator evidence sink to
+its own durable ownership atomically with first publication, under the job lock.
+Legacy and paged prepared adoption retain the complete sealed order and private
+valuation evidence. The publication marker references the current immutable
+list; completion, error or revocation clears it. Preview slicing retains that
+server-owned reference without extending the preview window or granting Pro.
+Delivered/withdrawn evidence uses the original preparation's private job identity;
+public polling and preview consumption keep the interactive job identity.
+
+A failed first evidence write may fall back to ordinary generation. Once any
+adoption evidence commits, a failed checkpoint or later write terminates that
+adoption instead of appending regenerated offers. Changed inputs revoke visible
+cards; existing historical evidence is retained. Local tests exercise real SQL
+commits and strict HTTP responses between batches, actual delivered_at stamps,
+preview bounds/passive refusal, and failure/revocation boundaries. These prove
+an earlier usable prefix, not a physical-device or universal 200ms result.
+Preparation activation and deployment remain the parent's separate release gate.
+
+
+### Local validation — 2026-11-06
+
+- **496 passed in 99.88s**: 15 selected backend files covering the new prepared
+  prefix boundaries, both prepared runtimes, runtime/chunk/graph/store review,
+  strict current delivery, P1/P2, paywall preview, fingerprint-lock safety,
+  pipeline digest, and fair packages. This is targeted local regression evidence,
+  not a claim that the entire backend suite or GitHub CI has passed.
+- The new `test_prepared_prefix_delivery.py` contributes **14 cases**. It runs
+  the real worker after kickoff's HTTP context exits and polls strict HTTP at
+  evidence batch boundaries. It checks real committed delivery timestamps,
+  source identity, deferred-sink transfer, first-preview consumption/passive
+  refusal, commit/checkpoint/suffix failures, and input changes before/after
+  visibility. Existing runtime tests retain full sealed-order/valuation parity.
+- A separate instrumented synthetic 64-card v2 run observed first usable HTTP
+  prefixes at **1123.1ms** (ordinary) and **1106.6ms** (first preview), versus
+  completion at **1471.9ms** and **1453.8ms**. These include test observation
+  overhead; they are not phone tap-to-frame timings or a production benchmark.
+  Both exceed 200ms. They demonstrate delivery before the remaining evidence
+  writes; arbitrary cold generation and unseen filter scopes remain unresolved.
+- Initial combined attempts exposed test-context/recorder teardown pollution.
+  The final tests run background work outside kickoff's request context and
+  restore only their own dynamic-harness recorder. The shared fair-package
+  fixture remains unchanged; the identical final regression selection passes.
+  No product guard, evaluation rule, pipeline pin, or preparation flag was
+  weakened to pass the tests.

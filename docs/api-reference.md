@@ -442,12 +442,26 @@ and `X-FTF-Prewarm: 1` rules still run normally. The header adds no access grant
   status: "error", cards: [], total_ready: 0}` before delivery or preview consumption.
   The client discards the obsolete page and performs its bounded fresh-generate
   recovery. Missing real/imported input proof cannot produce a strict recommendation.
+- Strict generate requests reject unknown fields, malformed types/ranges,
+  unavailable targeting/intent/fatigue filters, and unsupported pin modes with
+  **400** `{error: "unsupported_trade_filter"}`. A requested league differing
+  from the active authorized session returns the same **409** snapshot error
+  before generation. Legacy filter normalization is unchanged. Fairness values
+  with precision beyond hundredths remain valid, but cannot reuse a rounded
+  first-page store scope.
 - A nonempty, strict `running` response adds `ranked_prefix_ready: true` only for
   an exact current publication from the fully ranked, committed owner batch.
   Clients may render that prefix immediately. Other running cards remain withheld
   by strict clients without advancing their visible cursor. Deferred/preparation
   captures do not qualify; later publication/completion/revocation invalidates the
   private prefix authority. Full inventory and final ordering are preserved.
+  Prepared adoption also qualifies after its first evidence batch and checkpoint
+  commit and current-input revalidation. Its private evidence identity retains
+  the original preparation job; the public job/cursor and preview belong to the
+  interactive search. A failed commit exposes nothing; a checkpoint failure
+  after evidence commit ends the job rather than mixing in regenerated cards.
+  Preview slicing preserves prefix authority while enforcing its existing cap
+  and consumption rules. No preparation flag is enabled by this contract.
 - Clients require the explicit acknowledgement on nonempty responses; an older
   server ignoring the header cannot bless a held page. Previous persisted device
   pages without protocol proof are invalidated. Continue to pass `job_id` alongside
