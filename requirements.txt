@@ -7,3 +7,4 @@ Pillow>=10.0
 cryptography>=42.0.0   # Fernet encryption for Sleeper write tokens (trade.send_in_sleeper)
 sentry-sdk==2.72.0   # server error alerts (GNG-1), dark until SENTRY_DSN — see DEPENDENCIES.md 2026-10-31
 segno==1.6.6           # server-side inline-SVG QR on the join landing (referral loop D-1, FR-7/AC-7f); no QR service is ever called
+orjson==3.11.7          # optional fast decode of locally encoded owner proofs; standard JSON encoding/fallback unchanged

@@ -17,11 +17,17 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import uuid
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 from itertools import combinations, zip_longest
+
+try:
+    import orjson as _fast_json
+except ImportError:  # Older/local environments preserve the standard decoder.
+    _fast_json = None
 
 
 VERSION = "owner-v1"
@@ -37,6 +43,21 @@ _WINDOW_WEIGHT = {"championship": 1.0, "contender": .6,
 _EPS = 1e-9
 _LIMITS = {"owner_pool_size": 16, "owner_pair_budget": 4096,
            "owner_total_budget": 60000}
+
+
+# Local _dump emits compact standard JSON. Conservatively exclude every integer
+# token with 19+ digits: fast decoders can silently coerce out-of-range ints to
+# floats. Decimal/exponent tokens are finite standard-encoder float roundtrips.
+# Root primitives are covered too; a string containing this pattern can only
+# cause a harmless standard-decoder fallback.
+_LARGE_JSON_INTEGER = re.compile(r"[:,\[]-?[0-9]{19,}(?=[,}\]])")
+_LARGE_ROOT_INTEGER = re.compile(r"-?[0-9]{19,}")
+
+
+@dataclass(frozen=True, slots=True)
+class _LocalDecisionJSON:
+    raw: str
+    fast: bool
 
 
 @dataclass(frozen=True)
@@ -56,7 +77,21 @@ class OwnerDecisionContext:
     snapshot_json: str
 
     def as_dict(self):
+        local = getattr(self, "_local_json", None)
+        if (type(local) is _LocalDecisionJSON and local.raw is self.snapshot_json
+                and local.fast and _fast_json is not None):
+            try:
+                return _fast_json.loads(local.raw)
+            except _fast_json.JSONDecodeError:
+                # Standard JSON permits escaped lone surrogates. Preserve its
+                # result/exception for these and any decoder rejection.
+                pass
         return json.loads(self.snapshot_json)
+
+    def _with_data(self, data, **changes):
+        # Only explicit locally encoded replacements gain a new source binding.
+        # Ordinary dataclasses.replace clears this non-field marker and caches.
+        return _mark_local_decision(replace(self, snapshot_json=_dump(data), **changes))
 
     @cached_property
     def _effective_floor_scalar(self):
@@ -102,6 +137,16 @@ class OwnerDecisionContext:
                    and math.isfinite(actual) and abs(actual - expected) <= _EPS
                    for actual, expected in zip((card.give_value, card.receive_value, card.fairness_score),
                                                self._market_terms))
+
+
+def _mark_local_decision(proof):
+    """Bind only a just-created _dump result; never mark arbitrary stored JSON."""
+    if _fast_json is not None:
+        raw = proof.snapshot_json
+        object.__setattr__(proof, "_local_json", _LocalDecisionJSON(
+            raw, (_LARGE_ROOT_INTEGER.fullmatch(raw) is None
+                  and _LARGE_JSON_INTEGER.search(raw) is None)))
+    return proof
 
 
 @dataclass(frozen=True)
@@ -368,8 +413,9 @@ class _Search:
 
     def _freeze_decision(self, card, data, reason, eligible):
         """Final serialization boundary; normal evaluators retain full evidence."""
-        return OwnerDecisionContext(eligible, reason, self.league.league_id, self.user_id,
-            card.target_user_id, tuple(card.give_player_ids), tuple(card.receive_player_ids), _dump(data))
+        return _mark_local_decision(OwnerDecisionContext(
+            eligible, reason, self.league.league_id, self.user_id,
+            card.target_user_id, tuple(card.give_player_ids), tuple(card.receive_player_ids), _dump(data)))
 
     def evaluate(self, card, *, partial=False):
         give, receive = tuple(card.give_player_ids), tuple(card.receive_player_ids)
