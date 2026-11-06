@@ -331,3 +331,85 @@ insufficient. The independent reviewer will use isolated synthetic real-worker
 scheduling, preserving all outputs/checks and reporting peak/end RSS, active
 workers, CPU, first durable results and failures against actual instance limits.
 No admission or model-policy rewrite is included in the decoder change.
+
+
+## Compact in-call term records — 2026-11-06
+
+This separate `perf/compact-term-records` candidate changes only the private
+comparison records inside `trade_gen_bilateral_candidate.term_precedence`.
+Instead of retaining every full decoded proof tree, it keeps frozen/slotted
+records containing existing give/receive sets, the unchanged cost, avoidable
+companion IDs and two eight-field consideration profiles. Ordered list shapes
+become ordered tuples; numeric values are neither cast nor rounded. Full
+`proof.matches`, `term_evidence_valid` and explicit-selection gates still run
+before projection. The same family keys, stable ordering, 32 representatives,
+subset conditions, two-sided comparisons and epsilon remain.
+
+No proof snapshot, persisted evidence, score, candidate budget, model policy,
+solver or decoder gate changes. No projection is cached on a card, proof,
+request or global object. This is temporary per-call retention only. The fast
+JSON decoder remains default off under its existing activation gate.
+
+The actual worker used the existing deterministic 12-team/20-player fixture,
+seed 20261106 and hash seed 0, with real local SQLite evidence. The previously
+stated live-evidence/legacy-status, auxiliary-layer and no-provider/device
+limitations apply. Baseline source is `416e46b1`; candidate source was the
+independently reviewed uncommitted compact-record diff, now committed with this
+note. Runs were serial. The first OFF organic baseline may have overlapped a
+0.76-second reviewer self-check; it was repeated cleanly and only that clean
+organic baseline is used here. All raw samples remain available.
+
+| Decoder | Scope/cards | First durable publication before / after | Full worker before / after |
+| --- | --- | ---: | ---: |
+| Off (default) | Organic / 6,430 | 20.022 / 18.934 s | 26.076 / 25.018 s |
+| Off | Opponent / 701 | 1.834 / 1.829 s | 2.694 / 2.695 s |
+| Off | Receive-pinned / 82 | 399 / 404 ms | 467 / 474 ms |
+| Opt-in | Organic / 6,430 | 16.678 / 15.982 s | 21.394 / 20.655 s |
+| Opt-in | Opponent / 701 | 1.594 / 1.577 s | 2.344 / 2.298 s |
+| Opt-in | Receive-pinned / 82 | 380 / 364 ms | 440 / 422 ms |
+
+These are single local paired samples, not p95 or device guarantees. Small
+selected-scope variations do not establish a reliable speedup. Organic process
+CPU was 25.774 / 24.996 s with the decoder off, 21.205 / 20.599 s opted in.
+The universal 200 ms target remains unmet.
+
+All organic RSS phases are reported below in decimal MB. Current/end RSS does
+not monotonically decrease; whole-process residency is not an isolated retained
+object census. The peak moves from retained comparison/evaluation trees toward
+later evidence persistence.
+
+| Phase | Off before / after | Opt-in before / after |
+| --- | ---: | ---: |
+| Before worker | 147.0 / 147.1 | 146.8 / 147.4 |
+| Generation finished | 837.1 / 569.6 | 782.7 / 569.4 |
+| Final evaluator finished | 675.6 / 661.9 | 872.3 / 631.6 |
+| Evidence assembly/SQL finished | 637.3 / 804.7 | 823.7 / 770.9 |
+| Worker finished | 636.6 / 805.2 | 825.2 / 771.5 |
+| Final response finished | 715.7 / 805.7 | 826.9 / 771.9 |
+| Explicit GC, final cards retained | 804.2 / 786.2 | 820.8 / 771.9 |
+| Whole-process peak | 918.7 / 808.4 | 901.1 / 783.4 |
+
+Exact ordered raw frozen-JSON hashes match at generation and final evaluation
+for all six decoder/scope comparisons, as do all ordered public cards, counts and
+complete generator reports after removing elapsed time. The final hashes remain
+those recorded earlier for organic/opponent/receive. Independent comparison
+against the captured old function verifies exact precedence graphs and survivor
+ordering across randomized corpora, 32-representative ties, duplicate occurrences,
+unknown boards, protected/binding/selection cases, malformed fields and numeric
+exceptions. Weak-reference negative controls show the old implementation retains
+full trees through comparisons while the new implementation releases them;
+mutable decoded shapes cannot alter the frozen projection.
+
+Validation: **537 affected tests passed in 40.65 s** with the actual opt-in
+package. Before timed runs, the default-decoder candidate/presentment suites
+passed 193 cases; independent oracle/liveness checks passed 36 cases with each
+decoder. No runtime code changed after independent review. Overlapping-worker
+capacity remains the separate release gate; these single-worker measurements
+alone do not authorize enabling the optional decoder or prove safe concurrency.
+
+Reproduction/evidence are under `/private/tmp/fleeced-cold-next-profile`:
+`test_profile_decoder.py`, `compact-term-comparison.json`,
+`{organic,opponent,receive}-term-{baseline,compact}-{off,on}-wall.json`, and
+`organic-term-baseline-off-clean-wall.json`. Use `DECODER=native`,
+`MEMORY_OBSERVE=1`, `PYTHONHASHSEED=0`, the chosen startup decoder flag, and the
+isolated checkout on `PYTHONPATH`; no parser monkeypatch is used in these runs.
