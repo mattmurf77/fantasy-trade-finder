@@ -111,6 +111,7 @@ export function beginTradeSearch(o: {
   mode: 'single_pin' | 'deck';
   searchType: SearchType;
   screen: string;
+  scenario?: 'cross_league_handoff';
 }): string {
   pruneSettledTraces();
   // A newer tap supersedes every search still waiting for its first card.
@@ -135,7 +136,8 @@ export function beginTradeSearch(o: {
   pending = trace;
   trace.timer = setTimeout(() => failFirstCard(trace.searchId, 'timeout'), FIRST_CARD_TIMEOUT_MS);
   // `source` is absent for the deck's own Find a Trade (JSON drops undefined).
-  track('find_trades_tapped', { source: o.source, mode: o.mode, search_id: trace.searchId }, o.screen);
+  track('find_trades_tapped', { source: o.source, mode: o.mode, search_id: trace.searchId,
+    ...(o.scenario ? { scenario: o.scenario } : {}) }, o.screen);
   return trace.searchId;
 }
 

@@ -1,5 +1,5 @@
-import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import React, { useEffect } from 'react';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon, PositionBadge, Text, TickLabel } from './chalkline';
@@ -116,13 +116,24 @@ export function UsageAvailabilitySheet({
   onAdd,
   onTrade,
   onClose,
+  visible = true,
+  immediateDismiss = false,
+  onDismiss,
 }: {
   player: UsagePlayer;
   rows: UsageLeagueRow[];
   onAdd: (leagueId: string) => void;
   onTrade: (leagueId: string) => void;
   onClose: () => void;
+  visible?: boolean;
+  immediateDismiss?: boolean;
+  onDismiss?: () => void;
 }) {
+  // iOS reports the native completion. Android has no onDismiss event;
+  // with no closing animation, the committed hidden modal is sufficient.
+  useEffect(() => {
+    if (!visible && immediateDismiss && Platform.OS !== 'ios') onDismiss?.();
+  }, [visible, immediateDismiss, onDismiss]);
   const known = rows.filter((r) => r.status !== 'unknown').length;
   const fa = rows.filter((r) => r.status === 'free_agent').length;
   const summary =
@@ -134,7 +145,7 @@ export function UsageAvailabilitySheet({
           ? `Free agent in all ${known} of your leagues.`
           : `Free agent in ${fa} of your ${known} leagues.`;
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType={immediateDismiss ? 'none' : 'slide'} onRequestClose={onClose} onDismiss={onDismiss}>
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
       <View style={styles.sheet} testID="usage-trends.availability-sheet">
         <SafeAreaView edges={['bottom']}>

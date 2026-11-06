@@ -71,10 +71,16 @@ export function devicePageScope(request: {
   fairness_threshold?: number;
   pinned_give_players?: readonly string[];
   pinned_receive_players?: readonly string[];
+  pinned_give_mode?: 'any' | 'all';
   opponent_user_id?: string;
   trade_intent?: string;
   force?: boolean;
 }): string | null {
+  // A new filter needs an explicit cache contract. An unknown request must
+  // reach the strict server instead of borrowing an organic device page.
+  const known = ['league_id', 'fairness_threshold', 'pinned_give_players',
+    'pinned_receive_players', 'pinned_give_mode', 'opponent_user_id', 'trade_intent', 'force'];
+  if (Object.keys(request).some((key) => !known.includes(key))) return null;
   if (!request.league_id || request.league_id === 'league_demo' || request.league_id === 'no_league') {
     return null;
   }
@@ -82,9 +88,12 @@ export function devicePageScope(request: {
       || request.pinned_give_players?.length || request.pinned_receive_players?.length) {
     return null;
   }
+  if (request.pinned_give_mode !== undefined && request.pinned_give_mode !== 'any') return null;
   const f = request.fairness_threshold;
-  if (typeof f !== 'number' || !Number.isFinite(f)) return null;
-  return `organic:f=${f.toFixed(2)}`;
+  if (typeof f !== 'number' || !Number.isFinite(f) || f < 0 || f > 1) return null;
+  const encoded = f.toFixed(2);
+  // Match the server's exact-hundredths identity: .746 is not .75.
+  return Number(encoded) === f ? `organic:f=${encoded}` : null;
 }
 
 type ServerPage = Pick<PagedTradeJobSnapshot,

@@ -220,6 +220,20 @@ process.on('exit', () => {
     ok(D.devicePageScope({ league_id: 'L', fairness_threshold: 0.5, pinned_give_players: [] }) === S,
       'an empty pin list is still organic (the request omits it)');
   });
+  await check('1b2. precise thresholds and unknown filters cannot borrow a different organic page', () => {
+    const balanced = D.devicePageFrom(page1(), { scope: 'organic:f=0.75', validatedAt: T0 });
+    for (const fairness_threshold of [0.746, 0.749, 0.751, NaN, Infinity, -0.1, 1.1]) {
+      const scope = D.devicePageScope({ league_id: 'L', fairness_threshold });
+      eq(scope, null, String(fairness_threshold));
+      eq(D.devicePageUsable(balanced, scope, T0), false);
+    }
+    for (const extra of [{ future_filter: 'x' }, { refresh_fatigue: true }, { pinned_give_mode: 'all' }, { pinned_give_mode: 'invalid' }]) {
+      eq(D.devicePageScope({ league_id: 'L', fairness_threshold: 0.75, ...extra }), null);
+    }
+    for (const fairness_threshold of [0, 0.25, 0.5, 0.75, 1]) {
+      eq(D.devicePageScope({ league_id: 'L', fairness_threshold }), 'organic:f=' + fairness_threshold.toFixed(2));
+    }
+  });
   await check('1c. max age: fresh renders, stale / missing / another scope / empty / clock-back never do', () => {
     eq(D.DEVICE_PAGE_MAX_AGE_S, 300, 'the PRD §5.1 viewer-roster bound');
     const p = D.devicePageFrom(page1(), { scope: S, validatedAt: T0 });

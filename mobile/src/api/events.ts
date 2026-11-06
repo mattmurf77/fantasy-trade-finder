@@ -195,7 +195,10 @@ export function track(
   try {
     if (eventType === 'find_trades_tapped') {
       const build = Constants.platform?.ios?.buildNumber;
-      props = { ...props, ...takeTradeInputChange(), ...(build ? { client_build: build } : {}) };
+      const change = takeTradeInputChange();
+      // An explicit scenario describes this tap (e.g. a cross-league handoff),
+      // so an earlier preference edit must not replace it or lend it an age.
+      props = { ...(props?.scenario ? {} : change), ...props, ...(build ? { client_build: build } : {}) };
     }
     if (!flagEnabled()) return;
     const now = Date.now();

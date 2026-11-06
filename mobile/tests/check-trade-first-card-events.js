@@ -170,7 +170,7 @@ console.log('check-trade-first-card-events:');
   const doTrade = usage.slice(usage.indexOf('const doTrade = async'), usage.indexOf('const doAdd = async'));
   check('3e. Usage Trends Trade: usage_trends at the tap (before the sheet and league switch), only when the hand-off will search',
     /beginTradeSearch\(\{\s*source: 'usage_trends',/.test(doTrade)
-      && doTrade.indexOf('beginTradeSearch(') < doTrade.indexOf('await closeSheetFirst()')
+      && doTrade.indexOf('beginTradeSearch(') < doTrade.indexOf('await Promise.all(')
       && /ownerKey && !ownerKey\.startsWith\('roster:'\)\s*\?\s*beginTradeSearch/.test(doTrade)
       && /if \(searchId\) dropPendingSearch\(searchId\);/.test(doTrade));
   check('3f. no find_trades_tapped is emitted at dispatch anywhere in TradesScreen (one tap, one R1)',
