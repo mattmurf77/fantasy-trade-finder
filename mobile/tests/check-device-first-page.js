@@ -230,6 +230,16 @@ process.on('exit', () => {
     for (const extra of [{ future_filter: 'x' }, { refresh_fatigue: true }, { pinned_give_mode: 'all' }, { pinned_give_mode: 'invalid' }]) {
       eq(D.devicePageScope({ league_id: 'L', fairness_threshold: 0.75, ...extra }), null);
     }
+    for (const extra of [
+      { pinned_give_players: {} }, { pinned_give_players: 3 }, { pinned_give_players: null },
+      { pinned_receive_players: '' }, { pinned_receive_players: [3] }, { pinned_receive_players: [''] },
+      { force: null }, { force: 0 }, { opponent_user_id: null }, { opponent_user_id: '' },
+      { trade_intent: null }, { trade_intent: false }, { league_id: 12 },
+    ]) {
+      const scope = D.devicePageScope({ league_id: 'L', fairness_threshold: 0.75, ...extra });
+      eq(scope, null, JSON.stringify(extra));
+      eq(D.devicePageUsable(balanced, scope, T0), false);
+    }
     for (const fairness_threshold of [0, 0.25, 0.5, 0.75, 1]) {
       eq(D.devicePageScope({ league_id: 'L', fairness_threshold }), 'organic:f=' + fairness_threshold.toFixed(2));
     }

@@ -81,8 +81,19 @@ export function devicePageScope(request: {
   const known = ['league_id', 'fairness_threshold', 'pinned_give_players',
     'pinned_receive_players', 'pinned_give_mode', 'opponent_user_id', 'trade_intent', 'force'];
   if (Object.keys(request).some((key) => !known.includes(key))) return null;
-  if (!request.league_id || request.league_id === 'league_demo' || request.league_id === 'no_league') {
+  if (typeof request.league_id !== 'string' || !request.league_id
+      || request.league_id === 'league_demo' || request.league_id === 'no_league') {
     return null;
+  }
+  for (const pins of [request.pinned_give_players, request.pinned_receive_players]) {
+    if (pins !== undefined && (!Array.isArray(pins)
+        || pins.some((id) => typeof id !== 'string' || !id))) return null;
+  }
+  if (request.force !== undefined && typeof request.force !== 'boolean') return null;
+  // Omitted optional strings are organic. Malformed values must go through
+  // server validation, even when their falsy value resembles no filter.
+  for (const value of [request.opponent_user_id, request.trade_intent]) {
+    if (value !== undefined && (typeof value !== 'string' || !value)) return null;
   }
   if (request.force || request.opponent_user_id || request.trade_intent
       || request.pinned_give_players?.length || request.pinned_receive_players?.length) {

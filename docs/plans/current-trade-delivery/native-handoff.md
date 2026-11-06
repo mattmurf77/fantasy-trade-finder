@@ -45,7 +45,10 @@ native rendering or iOS dismissal behavior on a physical phone.
 The independent backend/native request review also found a local page alias:
 `devicePageScope` rounded .746 to .75. It now admits only finite 0–1 thresholds
 exactly representable at hundredths, matching the strict server. Unknown filters
-and malformed package modes cannot borrow an organic page. The executed device
+and malformed package modes cannot borrow an organic page. A follow-up runtime
+type check also declines malformed known fields (pin objects/non-string elements,
+non-boolean force, empty/non-string optional scope fields, non-string league ID),
+so untrusted parsed input cannot bypass the strict API through the local cache. The executed device
 page regression checks the alias, precision boundaries, range, and new filters;
 actual .50 and .75 callers remain unchanged.
 
