@@ -260,6 +260,68 @@ def test_context_is_immutable_detached_and_exact_package_bound():
     assert not context.matches(card)
 
 
+def test_scalar_projections_are_lazy_immutable_and_detached(monkeypatch):
+    context = generate_owner_trades(**favorable())[0][0].owner_evaluation
+    # Replacement clears every cached projection, including any warmed by generation.
+    context = replace(context)
+    calls = []
+    original = owner.OwnerDecisionContext.as_dict
+
+    def tracked(self):
+        if self is context:
+            calls.append(self.snapshot_json)
+        return original(self)
+
+    monkeypatch.setattr(owner.OwnerDecisionContext, "as_dict", tracked)
+    for _ in range(5):
+        assert context.model_identity == (owner.ARM, owner.VERSION)
+        assert context.selection_coverage == "full"
+        assert context.effective_floor == .75
+    assert len(calls) == 3
+    snapshot = context.snapshot_json
+    detached = context.as_dict()
+    detached["generator"] = "changed"
+    detached["selection"]["coverage"] = "partial"
+    detached["market"]["effective_floor"] = .8
+    assert context.snapshot_json == snapshot
+    for copy in (context, deepcopy(context)):
+        assert copy.model_identity == (owner.ARM, owner.VERSION)
+        assert copy.selection_coverage == "full"
+        assert copy.effective_floor == .75
+    new = replace(context, snapshot_json=json.dumps(detached))
+    assert new.model_identity == ("changed", owner.VERSION)
+    assert new.selection_coverage == "partial"
+    assert new.effective_floor == .8
+
+
+@pytest.mark.parametrize("floor", [[], {}])
+def test_malformed_effective_floor_never_exposes_shared_mutable_state(floor):
+    proof = generate_owner_trades(**favorable())[0][0].owner_evaluation
+    proof = replace(proof, snapshot_json=json.dumps({"market": {"effective_floor": floor}}))
+    detached = proof.effective_floor
+    if isinstance(detached, list):
+        detached.append("changed")
+    else:
+        detached["changed"] = True
+    assert proof.effective_floor == floor
+    assert deepcopy(proof).effective_floor == floor
+
+
+def test_scalar_projections_do_not_require_unrelated_fields():
+    card = generate_owner_trades(**favorable())[0][0]
+    proof = card.owner_evaluation
+    market_only = replace(proof, snapshot_json=json.dumps({"market": proof.as_dict()["market"]}))
+    assert market_only.matches(card)
+    assert market_only.effective_floor == proof.effective_floor
+    assert market_only.model_identity == (None, None)
+    assert market_only.selection_coverage == "full"
+    selection_only = replace(proof, snapshot_json='{"selection":{"coverage":"partial"}}')
+    assert selection_only.selection_coverage == "partial"
+    assert selection_only.effective_floor is None
+    malformed_identity = replace(proof, snapshot_json='{"generator":[],"generator_version":{}}')
+    assert malformed_identity.model_identity == (None, None)
+
+
 def test_budgets_round_robin_opponents_and_small_shapes_only():
     kwargs = favorable(config={"owner_total_budget": 3, "owner_pair_budget": 2})
     kwargs["league"].members = [ts.LeagueMember(f"o{i}", f"o{i}", ["r"],

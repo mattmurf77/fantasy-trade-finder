@@ -145,3 +145,68 @@ new empty-page search or clear its busy state. Runtime tests cover these races
 and fail if pending promises leave the suite unfinished. Independent review
 caught six deliberately broken variants. This improves correctness and removes
 accidental waits; it does not certify native or network latency.
+
+
+## Immutable scalar proof projections — 2026-11-06
+
+The cold-worker profile found repeated parsing of the same frozen private JSON
+for model identity, selection coverage and fairness floor. These reads now use
+lazy immutable scalar projections on `OwnerDecisionContext`; `as_dict()` still
+returns a new detached full snapshot. Replacing a decision derives fresh
+projections, deepcopy remains safe, and malformed list/dict floors still return
+detached values. Public serialization retains required model-key behavior while
+reading those two keys from one detached snapshot. All final owner evaluation,
+package matching, current-input validation, ranking and publication gates remain.
+No candidate limit, solver, cache freshness or production flag changed.
+
+The affected server AST requires append-only pipeline **10**,
+`cdabd9935a58d51d`; all earlier pins, including 9, are preserved.
+
+Local timing used the actual Bilateral2 worker and existing worker fixtures with
+12 synthetic teams of 20 players, deterministic boards, seed 20261106 and
+`PYTHONHASHSEED=0`. Baseline was `f51de7ed`; candidate changes only scalar reads.
+The harness uses live local SQLite evidence and disables auxiliary personalizing
+layers. It does not measure production's deferred worker, network or phone UI.
+The final HTTP page is the authenticated legacy path; the direct worker fixture
+does not carry the strict request stamps. First publication is recorded at the
+worker's first durable card callback, after its first evidence commit.
+
+| Cold scope | Cards, unchanged | First durable publication before / after | Worker completion before / after |
+| --- | ---: | ---: | ---: |
+| Organic | 6,430 | 20.260 / 19.099 s | 27.340 / 25.171 s |
+| Opponent selected | 701 | 2.171 / 1.891 s | 3.161 / 2.763 s |
+| Receive player selected | 82 | 414 / 387 ms | 492 / 457 ms |
+
+These are single unprofiled samples, not a statistical speedup claim or a
+200 ms result. Generation and solver work remain dominant. Organic public-card
+serialization measured 1.465 / 1.070 s across all 6,430 cards; SQL evidence time
+was 2.968 / 2.880 s. Those spans overlap the full worker and must not be summed.
+
+Exact ordered full frozen-decision JSON hashes match before/after both immediately
+after generation and after final revalidation in all three scopes. Final hashes:
+
+- Organic: `d1518f9cf831d0f0d1e9ee7f00cf765b019df225b29be41064031767bcc4d8c4`
+- Opponent: `4e679a2d211064e4889c53bdd4240315e8513e76fe66d0554ba3ef3ef5dbfe0f`
+- Receive: `863df2372fef1dd169d39e4ac4ffb5f9c724a8959725392980d5885e6bd23feb`
+
+Each proof's UTF-8 bytes are length-prefixed before hashing in card order; no
+private fields are omitted. Ordered public-semantic hashes and card counts also
+match. Reproducible local script, raw results and comparison are in
+`/private/tmp/fleeced-cold-profile/test_profile_cold.py`,
+`{organic,opponent,receive}-{before,after}-projection-wall.json` and
+`scalar-comparison.json`. Invocation:
+
+```sh
+PYTHONHASHSEED=0 PROFILE=0 PROFILE_CASES=organic,opponent,receive RUN_TAG=after-projection- python3 -m pytest -p backend.tests.conftest /private/tmp/fleeced-cold-profile/test_profile_cold.py -q -s
+```
+
+
+A separate cProfile pass counted 135,612 -> 116,322 full decision `as_dict()`
+reads for the organic fixture: exactly 19,290 fewer decodes (14.2%). Profiled
+full ordered frozen/public hashes also matched. Profiled durations include
+substantial instrumentation overhead and are not used as latency measurements.
+Affected regression gate: **453 passed in 40.18 s** across owner/pipeline pin,
+revision/owner-only/presentment/bilateral routes, contracts/overhaul, prepared
+prefix and current-only suites. Independent reviewer checked scalar immutability,
+malformed-floor detached fallback, replacement/deepcopy, required public model
+keys, unchanged final reevaluation and exact output parity.

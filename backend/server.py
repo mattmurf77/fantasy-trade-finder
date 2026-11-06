@@ -4514,7 +4514,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 9
+DECK_PIPELINE_VERSION = 10
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4646,6 +4646,7 @@ DECK_PIPELINE_PINS = {
     7: "facf9a9f34b7529a",   # #487 QA P3-3 (models-eng): one immediate retry inside the picks and draft-context memos; a transient failure no longer forfeits the owner arm
     8: "f7ed33e6ab94af03",   # #521 QA P3-3: a pool timeout isn't retried at once (_is_pool_timeout): it forfeits the owner arm, as before v7; other failures as v7
     9: "28d212cdc5c6cb05",   # Current-only clients may use an authenticated, durably committed ranked owner prefix; no terms/order change.
+    10: "cdabd9935a58d51d",  # Immutable scalar proof projections avoid repeated JSON reads; no terms/order/evaluation change.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -20828,8 +20829,9 @@ def trade_card_to_dict(card, players: dict) -> dict:
         out["preserve_server_order"] = True
     if evidence is not None:
         # Only public identity. The two private boards stay in impressions.
-        out["model_arm"] = evidence.as_dict()["generator"]
-        out["generator_version"] = evidence.as_dict()["generator_version"]
+        identity = evidence.as_dict()
+        out["model_arm"] = identity["generator"]
+        out["generator_version"] = identity["generator_version"]
         out.update(_owner_public_selection(evidence))
     # Pick-denominated value verdict (feedback #157 value-bar) — the same
     # {give_value, receive_value, favors, gap} shape POST /api/trade/evaluate
@@ -21725,8 +21727,9 @@ def _owner_cards_valid(cards, context):
     """
     matched = [card for card in cards if getattr(card, "owner_evaluation", None) is not None
                and card.owner_evaluation.matches(card)
-               and card.owner_evaluation.as_dict().get("generator") == _bakeoff.owner_arm(context.get("config", {}))
-               and card.owner_evaluation.as_dict().get("generator_version") == _bakeoff.owner_version(context.get("config", {}))]
+               and card.owner_evaluation.model_identity == (
+                   _bakeoff.owner_arm(context.get("config", {})),
+                   _bakeoff.owner_version(context.get("config", {})))]
     finals = _bakeoff.owner_evaluator(context.get("config", {}))(matched, **context) if matched else []
     if len(finals) != len(matched):
         raise ValueError("owner final evaluation occurrence count mismatch")
@@ -21750,8 +21753,7 @@ def _owner_canonical(value):
 
 
 def _owner_public_selection(evidence):
-    selection = evidence.as_dict().get("selection") or {}
-    partial = selection.get("coverage") == "partial"
+    partial = evidence.selection_coverage == "partial"
     return {"selection_coverage": "partial" if partial else "full",
             **({"selection_notice": "Includes part of your selection; review the assets before continuing."}
                if partial else {})}
@@ -22346,8 +22348,7 @@ def _pending_owner_cards(cards, config, exemptions):
                  and not (selected_owner == _bakeoff.ARM_OWNER_BILATERAL
                           and _owner_enabled(card.league_id) and _bakeoff.serve_owner() and _bakeoff.owner_only()))
              or (getattr(card, "owner_evaluation", None) is not None
-                 and card.owner_evaluation.as_dict().get("generator") == selected_owner
-                 and card.owner_evaluation.as_dict().get("generator_version") == selected_version
+                 and card.owner_evaluation.model_identity == (selected_owner, selected_version)
                  and (selected_owner != _bakeoff.ARM_OWNER_BILATERAL
                       or (card.owner_evaluation.matches(card)
                           and getattr(card, "owner_published", False))))]

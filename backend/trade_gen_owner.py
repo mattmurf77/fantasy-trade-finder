@@ -58,9 +58,31 @@ class OwnerDecisionContext:
     def as_dict(self):
         return json.loads(self.snapshot_json)
 
+    @cached_property
+    def _effective_floor_scalar(self):
+        value = self.as_dict().get("market", {}).get("effective_floor")
+        scalar = value is None or isinstance(value, (str, int, float, bool))
+        return scalar, value if scalar else None
+
     @property
     def effective_floor(self):
-        return self.as_dict().get("market", {}).get("effective_floor")
+        scalar, value = self._effective_floor_scalar
+        # Malformed legacy snapshots retain detached-read behavior; never cache
+        # a list/dict that could mutate the frozen decision's scalar projection.
+        return value if scalar else self.as_dict().get("market", {}).get("effective_floor")
+
+    @cached_property
+    def model_identity(self):
+        # Cache only immutable scalars, never the private mutable snapshot.
+        # Missing/malformed identities cannot match a selected model.
+        snapshot = self.as_dict()
+        return tuple(value if isinstance(value, str) else None for value in
+                     (snapshot.get("generator"), snapshot.get("generator_version")))
+
+    @cached_property
+    def selection_coverage(self):
+        selection = self.as_dict().get("selection") or {}
+        return "partial" if selection.get("coverage") == "partial" else "full"
 
     @cached_property
     def _market_terms(self):
