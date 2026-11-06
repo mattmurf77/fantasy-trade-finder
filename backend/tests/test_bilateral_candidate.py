@@ -319,3 +319,51 @@ def test_search_budgets_do_not_become_output_caps():
     assert budget.as_dict()["evaluated"] == 7
     assert budget.as_dict()["budget_exhausted"]
     assert len(limited) <= 7
+
+
+def test_compact_term_profile_detaches_ordered_shapes_without_numeric_coercion():
+    from dataclasses import FrozenInstanceError
+    data = proof(companion_world(), ["give", "extra"], ["target"]).as_dict()
+    raw = data["viewer"]["consideration_profile"]
+    raw["raw_outgoing_personal"] = 7  # An allowed int must not become a float.
+    raw["outgoing_positions"] = ["TE", "WR", "TE"]
+    raw["availability_shape"] = [[["TE", True], ["WR", False], ["TE", True]], [["RB", True]]]
+    view = candidate._TermProfile.from_data(raw)
+    assert type(view.raw_outgoing_personal) is int and view.raw_outgoing_personal == 7
+    assert view.outgoing_positions == ("TE", "WR", "TE")
+    assert view.availability_shape == ((("TE", True), ("WR", False), ("TE", True)), (("RB", True),))
+    raw["outgoing_positions"].reverse()
+    raw["outgoing_positions"][0] = "QB"
+    raw["availability_shape"][0][0][1] = False
+    assert view.outgoing_positions == ("TE", "WR", "TE")
+    assert view.availability_shape[0][0] == ("TE", True)
+    with pytest.raises(FrozenInstanceError):
+        view.known_personal = False
+    with pytest.raises(TypeError):
+        view.availability_shape[0][0][1] = False
+
+
+def test_term_comparisons_do_not_retain_full_decoded_proof_trees(monkeypatch):
+    import weakref
+    cards, _ = candidate.generate_bilateral_trades(**companion_world())
+    before = [card.owner_evaluation.snapshot_json for card in cards]
+    roots, compared = [], []
+    original_read = candidate.owner.OwnerDecisionContext.as_dict
+    original_compare = candidate._profile_no_worse
+    class TrackedRoot(dict):
+        pass
+    def read(context):
+        data = TrackedRoot(original_read(context))
+        roots.append(weakref.ref(data))
+        return data
+    def compare(earlier, later):
+        # The entire deck has been read before family comparisons. Retaining
+        # full trees in records would keep these roots alive until ranking ends.
+        assert roots and not any(root() is not None for root in roots)
+        compared.append(True)
+        return original_compare(earlier, later)
+    monkeypatch.setattr(candidate.owner.OwnerDecisionContext, "as_dict", read)
+    monkeypatch.setattr(candidate, "_profile_no_worse", compare)
+    assert candidate.term_precedence(cards)
+    assert compared
+    assert [card.owner_evaluation.snapshot_json for card in cards] == before

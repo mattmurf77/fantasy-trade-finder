@@ -223,16 +223,48 @@ def evaluate_bilateral_trade(card, **kwargs):
     return evaluate_bilateral_trades([card], **kwargs)[0]
 
 
+@dataclass(frozen=True, slots=True)
+class _TermProfile:
+    """Only immutable comparison fields, after term_evidence_valid succeeds."""
+    known_personal: bool
+    outgoing_positions: tuple[str, ...]
+    incoming_positions: tuple[str, ...]
+    availability_shape: tuple[tuple[tuple[str, bool], ...], ...]
+    raw_outgoing_personal: float
+    raw_incoming_personal: float
+    outgoing_plan_mean: float
+    incoming_plan_mean: float
+
+    @classmethod
+    def from_data(cls, profile):
+        # Preserve order, duplicates and numeric types; no sorting or coercion.
+        return cls(profile["known_personal"], tuple(profile["outgoing_positions"]),
+            tuple(profile["incoming_positions"]),
+            tuple(tuple(tuple(item) for item in shape) for shape in profile["availability_shape"]),
+            profile["raw_outgoing_personal"], profile["raw_incoming_personal"],
+            profile["outgoing_plan_mean"], profile["incoming_plan_mean"])
+
+
+@dataclass(frozen=True, slots=True)
+class _TermRecord:
+    give: frozenset[str]
+    receive: frozenset[str]
+    cost: tuple[float, int]
+    avoidable_companions: frozenset[str]
+    viewer: _TermProfile
+    counterparty: _TermProfile
+
+
 def _profile_no_worse(earlier, later):
     """Compare independent personal costs/benefits, not summed support."""
-    return (earlier["known_personal"] and later["known_personal"]
-        and earlier["outgoing_positions"] == later["outgoing_positions"]
-        and earlier["incoming_positions"] == later["incoming_positions"]
-        and earlier["availability_shape"] == later["availability_shape"]
-        and earlier["raw_outgoing_personal"] <= later["raw_outgoing_personal"] + owner._EPS
-        and earlier["raw_incoming_personal"] + owner._EPS >= later["raw_incoming_personal"]
-        and earlier["outgoing_plan_mean"] <= later["outgoing_plan_mean"] + owner._EPS
-        and earlier["incoming_plan_mean"] + owner._EPS >= later["incoming_plan_mean"])
+    return (earlier.known_personal and later.known_personal
+        and earlier.outgoing_positions == later.outgoing_positions
+        and earlier.incoming_positions == later.incoming_positions
+        and earlier.availability_shape == later.availability_shape
+        and earlier.raw_outgoing_personal <= later.raw_outgoing_personal + owner._EPS
+        and earlier.raw_incoming_personal + owner._EPS >= later.raw_incoming_personal
+        and earlier.outgoing_plan_mean <= later.outgoing_plan_mean + owner._EPS
+        and earlier.incoming_plan_mean + owner._EPS >= later.incoming_plan_mean)
 
 
 def term_evidence_valid(data, *, user_id, target_user_id):
@@ -296,25 +328,30 @@ def term_precedence(cards):
         terms = data["term_efficiency"]
         give, receive = frozenset(proof.give_ids), frozenset(proof.receive_ids)
         cost = terms["worst_adjusted_market_loss"], len(give) + len(receive)
-        records[index] = (data, give, receive, cost)
+        records[index] = _TermRecord(give, receive, cost,
+            frozenset(terms["avoidable_companions"]),
+            _TermProfile.from_data(data["viewer"]["consideration_profile"]),
+            _TermProfile.from_data(data["counterparty"]["consideration_profile"]))
+        # Ranking needs this projection, not thousands of full private trees.
+        del data, terms
         for direction, ids in (("give", give), ("receive", receive)):
             families[proof.user_id, proof.target_user_id, direction, ids].append(index)
     predecessors = defaultdict(set)
     for family in families.values():
-        family.sort(key=lambda index: (records[index][3], tuple(sorted(records[index][1])),
-                                       tuple(sorted(records[index][2]))))
+        family.sort(key=lambda index: (records[index].cost, tuple(sorted(records[index].give)),
+                                       tuple(sorted(records[index].receive))))
         representatives = family[:TERM_LOOKAHEAD]
         for later_index in family:
-            later, later_give, later_receive, later_cost = records[later_index]
+            later = records[later_index]
             for earlier_index in representatives:
-                earlier, earlier_give, earlier_receive, earlier_cost = records[earlier_index]
-                if earlier_cost >= later_cost:
+                earlier = records[earlier_index]
+                if earlier.cost >= later.cost:
                     continue
-                removed = (later_give - earlier_give) | (later_receive - earlier_receive)
-                needless = (bool(removed) and earlier_give <= later_give and earlier_receive <= later_receive
-                    and removed <= set(later["term_efficiency"]["avoidable_companions"]))
-                equivalent = all(_profile_no_worse(earlier[side]["consideration_profile"],
-                    later[side]["consideration_profile"]) for side in ("viewer", "counterparty"))
+                removed = (later.give - earlier.give) | (later.receive - earlier.receive)
+                needless = (bool(removed) and earlier.give <= later.give and earlier.receive <= later.receive
+                    and removed <= later.avoidable_companions)
+                equivalent = (_profile_no_worse(earlier.viewer, later.viewer)
+                    and _profile_no_worse(earlier.counterparty, later.counterparty))
                 if needless or equivalent:
                     predecessors[later_index].add(earlier_index)
     return dict(predecessors)

@@ -1,3 +1,26 @@
+## 2026-11-06 — Compact term comparison records candidate
+
+- Isolated branch `perf/compact-term-records` from `416e46b1`; no PR 605 source
+  mutation. Only temporary term-comparison records change; validators, package
+  binding, family/tie/lookahead rules, numeric conditions and full evaluations
+  remain. No eager proof cache or additional optimization is included.
+- **537 affected tests passed in 40.65 s** with the actual optional decoder
+  opted in. Default candidate/presentment tests passed 193 cases; independent
+  captured-baseline graph/order/malformed/exception/liveness oracle passed 36
+  cases with each decoder. The raw proof trees are released before comparisons,
+  and the compact ordered shapes remain immutable and detached.
+- Actual serial worker baselines/candidates preserve all ordered generation and
+  final raw-proof hashes, public output/counts and generator reports except time
+  for organic/opponent/receive with decoder off and on (six comparisons).
+- Clean organic default-off: first durable card 20.022→18.934 s, full worker
+  26.076→25.018 s, peak RSS 918.7→808.4 MB, generation RSS 837.1→569.6 MB.
+  Opt-in: first 16.678→15.982 s, full 21.394→20.655 s, peak 901.1→783.4 MB.
+  End RSS is not uniformly lower; all phase values, slight selected-scope timing
+  regressions and the repeated clean baseline are preserved in feature scope.
+- Single-worker samples do not establish p95, device latency or safe overlapping
+  capacity. Independent overlap validation follows. Decoder production opt-in
+  remains off; the universal 200 ms goal remains open.
+
 ## 2026-11-06 — Decoder activation separated from source rollout
 
 - `FTF_OWNER_PROOF_FAST_JSON` is read once at process start. Default/unset and
