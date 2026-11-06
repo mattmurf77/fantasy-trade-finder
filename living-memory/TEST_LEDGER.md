@@ -1,3 +1,25 @@
+## 2026-11-06 — Cold-path profile, exact proof parity, and CI guard repair
+
+- `ca839ec1`: immutable proof scalar projections removed 19,290 repeated JSON
+  decodes (135,612 to 116,322 in the profiled synthetic organic worker).
+  Full evaluator, ordering, candidate limits and solver remain unchanged.
+  453 affected backend regressions passed; pipeline 10 appended with pin
+  `cdabd9935a58d51d`, preserving every earlier pin.
+- Independent comparison verified identical ordered public semantic hashes
+  AND raw frozen evaluation hashes at generation and final validation for
+  organic (6,430 cards), opponent (701), and receive-pinned (82) scenarios.
+  Twelve established frozen-output fixtures also remain unchanged.
+- Single local before/after samples: organic first publication 20.260 to
+  19.099 s; opponent 2.171 to 1.891 s; receive-pinned 414 to 387 ms. These
+  are synthetic CPU measurements with fixture limitations, not robust speedup
+  estimates or phone/network evidence. All still miss 200 ms.
+- CI on `f51de7ed` passed backend/web/test-ID jobs; mobile failed an outdated
+  source-adjacency assertion after new cancellation guards. `f0123982`
+  replaces that assumption with real handler/error-classifier coverage:
+  20 gate/error and request-ownership cases, three negative controls caught.
+  All 158 mobile suites passed; paywall checks 112/112. No production
+  behavior was changed to make the assertion pass. Final-head CI pending.
+
 ## 2026-11-06 — Instant-trade recovery and independent race review
 
 Continued draft PR #604 from recovered remote `d79592f3`; lost temporary
