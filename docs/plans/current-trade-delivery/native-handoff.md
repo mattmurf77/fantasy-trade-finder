@@ -94,3 +94,21 @@ loop ownership, input epoch and job identity as successful responses.
 function: 21 checks cover the early retry, unchanged later/error/refill
 schedules, immediate committed-prefix application, terminal gates/errors,
 late success/failure and callbacks after each cancellation boundary.
+
+## Final CI guard recovery
+
+The first integrated CI run exposed a brittle adjacency assertion in paywall
+check 8h: it required exactly the old mounted/loop guard before the gate check.
+The new epoch/job guards intentionally add conditions there. The replacement
+retains the structural gate-before-error ordering and adds check 8h2 executing
+the actual `fetchNextPage`, `noteDeckGateEnd`, API error class and gate classifier.
+Twenty combinations cover preview 402, verify 402, verify 403 and ordinary 500,
+each in current/changed-epoch/changed-job/replaced-loop/unmounted states.
+Gates write one appropriate terminal end, count no failures and schedule no
+retry; ordinary errors keep their retry; stale responses write neither.
+
+Evidence on 2026-11-06: **all 158 mobile check suites passed** in 37.97 seconds;
+paywall suite **112 passed, 0 failed**. The targeted runtime case's positive
+control passed; removing the gate return, bypassing gate classification, or
+removing the rejected-response epoch guard each failed the executed case.
+No production code was changed to appease the outdated structural assertion.

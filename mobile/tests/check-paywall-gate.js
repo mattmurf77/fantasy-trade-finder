@@ -1303,11 +1303,68 @@ check('8h. D19 [shape]: a 402 never reaches a deck error variant or the swipe to
   // the page path: the deck's terminal state, never MoreError
   const fetchNext = code.slice(code.indexOf('async function fetchNextPage('), code.indexOf('\n  }\n', code.indexOf('async function fetchNextPage(')));
   assert(/if \(deckGateEndRef\.current\) return;/.test(fetchNext), 'no page is asked after the end');
-  assert(/\} catch \(e\) \{\s*if \(!mountedRef\.current \|\| pageLoopRef\.current !== loop\) return;\s*if \(noteDeckGateEnd\(e\)\) \{\s*setPagePhase\('idle'\);\s*return;\s*\}\s*loop\.failures \+= 1;/.test(fetchNext),
-    'the page fetch: the end, before a failure is counted');
+  before(fetchNext, /if \(noteDeckGateEnd\(e\)\)/, 'loop.failures += 1;', "setPagePhase(loop.failures");
   // the device deck's revalidation: no refresh-failed line (trades-eng's handler stays verbatim behind it)
   assert(/\.catch\(\(e\) => \{\s*if \(mountedRef\.current && seq === deviceRevalidationRef\.current && noteDeckGateEnd\(e, true\)\) \{\s*setDevicePhase\('done'\);\s*return;\s*\}\s*throw e;\s*\}\)\s*\.catch\(\(\) => \{\s*if \(mountedRef\.current && seq === deviceRevalidationRef\.current\) setDevicePhase\('failed'\);/.test(code),
     'the revalidation');
+});
+
+check('8h2. D19 [executed]: actual page fetch handles 402/verify 403 before failure accounting; obsolete responses cannot end a new deck', async () => {
+  const rules = load('utils/tradePages.ts', {});
+  for (const [status, body, verify] of [
+    [402, { error: 'pro_required', gate: 'preview_used' }, false],
+    [402, { error: 'pro_required', gate: 'verify_required' }, true],
+    [403, { error: 'verification_required' }, true],
+    [500, { error: 'internal_error' }, null],
+  ]) {
+    for (const stale of [null, 'epoch', 'job', 'loop', 'unmounted']) {
+      const end = [], phases = [], timers = [];
+      const loop = { inFlight: false, timer: null, attempt: 0, failures: 0 };
+      const deps = {
+        ...rules,
+        jobRef: { current: { job_id: 'j', status: 'running', cursor: 0, total_ready: 0, cards: [] } },
+        deckRef: { current: [] }, pageLoopRef: { current: loop },
+        deckGateEndRef: { current: null }, deckEpochRef: { current: 1 }, mountedRef: { current: true },
+        MAX_SILENT_PAGE_FAILURES: 6,
+        setPagePhase: p => phases.push(typeof p === 'function' ? p('idle') : p),
+        setPageKick: () => { throw new Error('no timer is executed by this test'); },
+        setTimeout: (_, ms) => { timers.push(ms); return timers.length; },
+        applyPage: () => { throw new Error('an error response cannot become cards'); },
+        applyJobResult: () => { throw new Error('no successful response in this case'); },
+      };
+      deps.noteDeckGateEnd = extractFn(TRADES, 'noteDeckGateEnd', {
+        gateSignalFor: client.gateSignalFor,
+        setGateEnd: value => { end.push(value); deps.deckGateEndRef.current = value; },
+      });
+      deps.getTradeStatus = async () => {
+        if (stale === 'epoch') deps.deckEpochRef.current++;
+        if (stale === 'job') deps.jobRef.current = { ...deps.jobRef.current, job_id: 'new' };
+        if (stale === 'loop') deps.pageLoopRef.current = { ...loop };
+        if (stale === 'unmounted') deps.mountedRef.current = false;
+        throw new client.ApiError(status, body, body.error);
+      };
+      await extractFn(TRADES, 'fetchNextPage', deps)();
+      const label = `${status}/${body.error}/${stale ?? 'current'}`;
+      eq(loop.inFlight, false, label + ': releases in-flight state');
+      if (stale) {
+        eq(end.length, 0, label + ': no stale gate');
+        eq(loop.failures, 0, label + ': no stale failure');
+        eq(timers.length, 0, label + ': no stale retry');
+        eq(phases.join(','), 'loading', label + ': no late state write');
+      } else if (verify !== null) {
+        eq(end.length, 1, label + ': one terminal gate');
+        eq(end[0].verify, verify, label + ': correct gate kind');
+        eq(loop.failures, 0, label + ': gate is not a failure');
+        eq(loop.attempt, 0, label + ': no retry attempt');
+        eq(timers.length, 0, label + ': no scheduled retry');
+        eq(phases.join(','), 'loading,idle', label + ': no failed state');
+      } else {
+        eq(end.length, 0, label + ': ordinary error is not a gate');
+        eq(loop.failures, 1, label + ': counts ordinary error');
+        eq(timers.join(','), '500', label + ': retains ordinary backoff');
+      }
+    }
+  }
 });
 
 check('8i. D16 GRANTED [executed]: the Send pre-check — dark unless flag + enforcing; unverified → the VerifySheet only (whatever the account holds); verified, not entitled → the paywall {gate, send}; after a verify → re-read, then the paywall or the CONFIRM step, never a send', async () => {
