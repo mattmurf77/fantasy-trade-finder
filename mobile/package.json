@@ -150,6 +150,7 @@
     "test:send-registry": "node tests/check-send-registry.js",
     "test:signin-identity-labels": "node tests/check-signin-identity-labels.js",
     "test:share-trade-token": "node tests/check-share-trade-token.js",
+    "test:initial-trade-poll": "node tests/check-initial-trade-poll.js",
     "test:trade-pages": "node tests/check-trade-pages.js",
     "test:device-first-page": "node tests/check-device-first-page.js",
     "test:trade-prewarm": "node tests/check-trade-prewarm.js",

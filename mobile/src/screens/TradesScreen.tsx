@@ -4834,6 +4834,7 @@ export default function TradesScreen({ navigation, route }: any) {
     loop.inFlight = true;
     setPagePhase((p) => (p === 'idle' ? 'loading' : p));
     let backoff = false;
+    let firstCardPending = false;
     try {
       // #393 M2 (D2, trades-eng adj. 3): background — a paged status call is
       // the prefetch, so api/trades.getTradeStatus sends it `background`; a
@@ -4847,9 +4848,11 @@ export default function TradesScreen({ navigation, route }: any) {
       // A legacy answer (the kill switch) ended paging: nothing to retry.
       backoff = isPagedEnvelope(next) && needsBackoff(next, requested);
       loop.attempt = nextRetryAttempt(loop.attempt, backoff, added);
+      firstCardPending = next.status === 'running' && deckRef.current.length === 0;
       setPagePhase(backoff ? 'retrying' : 'idle');
     } catch (e) {
-      if (!mountedRef.current || pageLoopRef.current !== loop) return;
+      if (!mountedRef.current || pageLoopRef.current !== loop
+          || deckEpochRef.current !== epoch || jobRef.current?.job_id !== forJob) return;
       // #393 M2 (D5, D19): a 402 (or the verify 403) is the deck's terminal
       // state, never an error: the end card shows past the last held card.
       if (noteDeckGateEnd(e)) {
@@ -4867,10 +4870,17 @@ export default function TradesScreen({ navigation, route }: any) {
     // request that keeps FAILING stops after a few silent tries (the error
     // state's Try again restarts it) rather than polling forever.
     if (backoff && pageLoopRef.current === loop && loop.failures < MAX_SILENT_PAGE_FAILURES) {
+      // A committed first prefix can land just after the initial status read.
+      // Probe once promptly; cold jobs and network errors keep the existing
+      // bounded ladder. The original tap clock continues through every wait.
+      const delay = firstCardPending && loop.attempt === 1
+        ? 25 : pageRetryDelayMs(loop.attempt - 1);
       loop.timer = setTimeout(() => {
         loop.timer = null;
+        if (!mountedRef.current || pageLoopRef.current !== loop
+            || deckEpochRef.current !== epoch || jobRef.current?.job_id !== forJob) return;
         setPageKick((k) => k + 1);
-      }, pageRetryDelayMs(loop.attempt - 1));
+      }, delay);
     }
   }
 

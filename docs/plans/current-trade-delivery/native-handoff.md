@@ -76,3 +76,21 @@ preferences invalidate its page, and passive refresh is debounced/bounded.
 Pinned players, opponents and fair packages require their exact current solve.
 Cross-league session initialization still depends on the network. Removing a
 450 ms UI floor does not make any of these paths a guaranteed 200 ms response.
+
+## Bounded first-page retry
+
+The paged deck already asks for status immediately after a running kickoff;
+a committed ranked prefix in kickoff is already eligible for immediate render.
+After the first successful empty status response only, the retry delay is now
+25 ms (previously 500 ms). Later empty replies retain 1000/2000/4000 ms,
+network errors retain 500/1000/2000/4000 ms and their existing failure limit, and
+refill after any card remains at its original cadence. This advances at most
+one status request per job; it does not create a new search, restart the tap
+clock, exclude time, change ranking, or promise a 200 ms native render.
+
+The retry callback and rejected responses check the same mounted screen,
+loop ownership, input epoch and job identity as successful responses.
+`mobile/tests/check-initial-trade-poll.js` executes the actual page-fetch
+function: 21 checks cover the early retry, unchanged later/error/refill
+schedules, immediate committed-prefix application, terminal gates/errors,
+late success/failure and callbacks after each cancellation boundary.

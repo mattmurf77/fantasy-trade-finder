@@ -52,6 +52,10 @@ function fixture() {
 }
 let count = 0;
 async function test(name, run) { await run(); count++; console.log('PASS ' + name); }
+let finished = false;
+process.on('exit', () => {
+  if (!finished) { console.error('Lifecycle suite did not complete.'); process.exitCode = 1; }
+});
 (async () => {
   await test('tap clock starts before parallel dismissal and switch; waits for both', async () => {
     const f = fixture(), work = f.run('b');
@@ -173,4 +177,5 @@ async function test(name, run) { await run(); count++; console.log('PASS ' + nam
     assert.equal(run({}).input_age_ms, 12);
   });
   console.log(`${count} lifecycle checks passed; physical-device latency remains unmeasured.`);
+  finished = true;
 })().catch(error => { console.error(error); process.exit(1); });
