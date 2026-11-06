@@ -849,8 +849,8 @@ The mobile app keeps the next unseen cards of the last validated organic deck on
 | Constant | Value | Must match |
 |---|---|---|
 | `DEVICE_PAGE_MAX_AGE_S` | **300** | PRD #339 §5.1's viewer-roster bound (≤ 5 min since last confirmed). A device page renders at the tap only if `now − validated_at ≤ 300 s` on the device clock (a clock that went backwards reads as stale). Change the bound and this constant together |
-| Request scope | `organic:f=<fairness_threshold, 2 dp>` | P1's page scope (#368): the organic default search only — no pins, no opponent, no intent, no `force`, never `league_demo` — keyed by the fairness threshold to 2 dp. Any other request never reads a device page |
-| Storage key | `ftf_trade_device_page_v1:<user_id>:<league_id>:<scoring_format>` | One page per key; a league or format switch reads another key. A shape change bumps `v1` |
+| Request scope | `organic:f=<fairness_threshold, 2 dp>` | P1's page scope (#368): the organic default search only — no pins, no opponent, no intent, no `force`, never `league_demo` — keyed only when a finite threshold in 0..1 is exactly representable at two decimal places; never round a more precise request into another scope. Unknown filters or malformed pin modes never read an organic device page. Any other request never reads a device page |
+| Storage key | `ftf_trade_device_page_v2:<user_id>:<league_id>:<scoring_format>` | One page per key; a league or format switch reads another key. Version 2 requires current-input acknowledgement; version 1 is not reused |
 | Refresh throttle | 60 s per key | Trades focus and app foreground only, never on the tap |
 | Revalidation "Updating" max | 10 s | Then the refresh-failed line (PRD §5.4 shared constraint 4) |
 

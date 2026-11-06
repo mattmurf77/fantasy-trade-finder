@@ -134,3 +134,14 @@ Preparation activation and deployment remain the parent's separate release gate.
   fixture remains unchanged; the identical final regression selection passes.
   No product guard, evaluation rule, pipeline pin, or preparation flag was
   weakened to pass the tests.
+
+## Browser save/pagination race follow-up — 2026-11-06
+
+A tap during overlapping input writes waits for all writes to settle without
+resetting its R1 clock. Context uses persisted-input epochs and exact payload;
+asynchronously applied preference labels cannot replace that manual search.
+Pagination ownership is per search, so an old continuation cannot disable a
+new empty-page search or clear its busy state. Runtime tests cover these races
+and fail if pending promises leave the suite unfinished. Independent review
+caught six deliberately broken variants. This improves correctness and removes
+accidental waits; it does not certify native or network latency.

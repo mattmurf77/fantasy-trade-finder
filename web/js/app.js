@@ -119,7 +119,7 @@
         '/api/tiers/save', '/api/tiers/copy-from-format', '/api/rankings/import-apply', '/api/league/preferences',
         '/api/league/asset-prefs', '/api/league/free-agents/move', '/api/league/scoring', '/api/scoring/switch',
         '/api/session/init'].includes(url.split('?')[0]);
-      if (tradeInputWrite) { webTradeEpoch++; withdrawWebTradeResults(); }
+      if (tradeInputWrite) { webTradeWrites++; webTradeEpoch++; withdrawWebTradeResults(); }
       let bodyPreview;
       if (opts.body) {
         try { bodyPreview = JSON.parse(opts.body); } catch { bodyPreview = opts.body; }
@@ -128,7 +128,14 @@
       try {
         res = await fetch(url, opts);
       } finally {
-        if (tradeInputWrite) { webTradeEpoch++; withdrawWebTradeResults(); }
+        if (tradeInputWrite) {
+          webTradeWrites--;
+          webTradeEpoch++;
+          // A tap made during this write keeps its original clock, but cannot
+          // issue a search until every overlapping input write has settled.
+          if (!webTradeSearch?.waitingInputs) withdrawWebTradeResults();
+          if (!webTradeWrites) webTradeWriteWaiters.splice(0).forEach(resolve => resolve());
+        }
       }
       // Missing proof must return to sign-in, never retry session/init using
       // a public username or leave a cached private board visible.
@@ -3739,10 +3746,13 @@
     let webTradeTapCount = 0;
     let webTradeEpoch = 0;
     let webTradeMore = null;
+    let webTradeLoading = null;
+    let webTradeWrites = 0;
+    const webTradeWriteWaiters = [];
     let webWarmTimer, webWarmRequest, lastWebWarm;
     function scheduleWebTradeWarm() {
       clearTimeout(webWarmTimer);
-      if (!sessionToken || !currentLeagueId || !_rankingProgress?.unlocked ||
+      if (webTradeWrites || !sessionToken || !currentLeagueId || !_rankingProgress?.unlocked ||
           _rankingProgressLeague !== currentLeagueId || document.hidden ||
           !document.getElementById('view-trades')?.classList.contains('active') ||
           !window.FTF_FLAG?.('trade.first_page_store')) return;
@@ -3784,16 +3794,18 @@
     }
 
     function webTradeContext() {
-      return JSON.stringify([currentUserId, sessionToken, getActiveFormat(), webTradeEpoch,
-        currentOutlook, currentAcquirePositions, currentTradeAwayPositions, webTradePayload()]);
+      // Preferences are server-owned inputs, fenced by the write epoch. Their
+      // asynchronously loaded UI labels are not a different search request.
+      return JSON.stringify([currentUserId, sessionToken, getActiveFormat(), webTradeEpoch, webTradePayload()]);
     }
 
     function stopWebTradeSearch() {
       webTradeSearch?.finish('abandoned');
       webTradeSearch = null;
       webTradeMore = null;
+      webTradeLoading = null;
       const more = document.getElementById('trade-more-btn');
-      if (more) more.hidden = true;
+      if (more) { more.hidden = true; more.disabled = false; }
       const btn = document.getElementById('gen-btn');
       if (btn) { btn.disabled = false; btn.textContent = 'Find a Trade'; }
     }
@@ -3809,7 +3821,8 @@
 
     function beginWebTradeSearch(payload, tapped) {
       stopWebTradeSearch();
-      const context = webTradeContext();
+      let context = webTradeContext();
+      const identity = JSON.stringify([currentUserId, sessionToken, getActiveFormat(), payload]);
       const started = performance.now();
       const searchId = window.crypto?.randomUUID?.() || ('web-' + Date.now() + '-' + Math.random().toString(36).slice(2));
       const pinned = !!(payload.pinned_give_players || payload.pinned_receive_players);
@@ -3821,7 +3834,16 @@
       let finished = !tapped;
       const search = {
         id: searchId,
+        tapped,
+        waitingInputs: webTradeWrites > 0,
         current: () => webTradeSearch === search && webTradeContext() === context,
+        resumeAfterInputs() {
+          if (webTradeSearch !== search || identity !== JSON.stringify([
+              currentUserId, sessionToken, getActiveFormat(), webTradePayload()])) return false;
+          context = webTradeContext();
+          search.waitingInputs = false;
+          return true;
+        },
         finish(reason, page, index) {
           if (finished) return;
           finished = true;
@@ -3918,6 +3940,10 @@
     }
 
     async function generateTrades(tapped = true) {
+      // Preference-save handlers auto-refresh after committing local UI state.
+      // Keep a real tap already waiting on that save instead of replacing its R1.
+      if (!tapped && webTradeSearch?.tapped &&
+          (webTradeSearch.waitingInputs || webTradeSearch.current())) return;
       clearTimeout(webWarmTimer);
       const payload = webTradePayload();
       const search = beginWebTradeSearch(payload, tapped);
@@ -3927,6 +3953,12 @@
       document.getElementById('trades-list').replaceChildren();
       _allTradeCards = []; _lastRenderedTrades = [];
       try {
+        if (search.waitingInputs) {
+          while (webTradeWrites && webTradeSearch === search) {
+            await new Promise(resolve => webTradeWriteWaiters.push(resolve));
+          }
+          if (!search.resumeAfterInputs()) return;
+        }
         const page = await findCompletedWebPage(search, payload);
         if (!page || !search.current()) return;
         renderTrades(page.cards);
@@ -3951,7 +3983,8 @@
     async function loadMoreWebTrades() {
       const more = document.getElementById('trade-more-btn');
       const next = webTradeMore;
-      if (!next || !next.search.current() || more.disabled) return;
+      if (!next || !next.search.current() || webTradeLoading?.search === next.search) return;
+      webTradeLoading = next;
       more.disabled = true;
       let page = next.page;
       const deadline = performance.now() + 90000;
@@ -3989,7 +4022,9 @@
           }
           showToast(error.message);
         }
-      } finally { more.disabled = false; }
+      } finally {
+        if (webTradeLoading === next) { webTradeLoading = null; more.disabled = false; }
+      }
     }
 
     document.addEventListener('visibilitychange', () => {

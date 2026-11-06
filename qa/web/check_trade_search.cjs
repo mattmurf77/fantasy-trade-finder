@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('web/js/app.js', 'utf8');
+let completed = false;
+process.on('exit', () => { if (!completed) { console.error('Web search suite did not finish'); process.exitCode = 1; } });
 const section = source.slice(source.indexOf('    let webTradeSearch ='), source.indexOf('    // FB-47 — partner-fit copy.'));
 function harness(replies) {
   const events = [], requests = [], rendered = [], observers = [], timers = new Map();
@@ -80,5 +82,49 @@ function page(ids, cursor, total, extra = {}) {
   h.context.withdrawWebTradeResults();
   fulfill(page(['obsolete'],1,1)); await edited;
   assert.equal(h.rendered.length, 1); assert.equal(h.rendered[0].length, 0);
+  // A continuation from the old deck must not block a new empty first page.
+  let oldMore;
+  h = harness([page(['old'],1,2), new Promise(resolve => { oldMore = resolve; }),
+    page([],1,2), page(['fresh'],2,2)]);
+  await h.context.generateTrades();
+  const obsoleteMore = h.context.loadMoreWebTrades();
+  h.context.withdrawWebTradeResults();
+  await h.context.generateTrades();
+  assert.equal(h.requests.length, 4);
+  assert.equal(h.rendered.at(-1)[0], 'fresh');
+  oldMore(page(['obsolete-more'],2,2)); await obsoleteMore;
+  assert.equal(h.rendered.at(-1)[0], 'fresh');
+
+  // Exercise the real fetch wrapper with two overlapping input mutations.
+  h = harness([]);
+  const apiStart = source.indexOf('    async function apiFetch(');
+  const apiEnd = source.indexOf('      return res;\n    }', apiStart) + '      return res;\n    }'.length;
+  const writeResolvers = []; let searchRequests = 0;
+  const response = body => ({ ok:true, status:200, json:async () => body });
+  h.context.markWebTradeChange = () => {};
+  h.context.fetch = url => {
+    if (url === '/api/league/preferences') return new Promise(resolve => writeResolvers.push(resolve));
+    searchRequests++; return Promise.resolve(response(page(['committed-inputs'],1,1)));
+  };
+  vm.runInContext(source.slice(apiStart, apiEnd), h.context);
+  const write1 = h.context.apiFetch('/api/league/preferences', {method:'POST',body:'{}'});
+  const write2 = h.context.apiFetch('/api/league/preferences', {method:'POST',body:'{}'});
+  const duringWrites = h.context.generateTrades();
+  await Promise.resolve(); assert.equal(searchRequests, 0);
+  const originalId = h.events.at(-1)[1].search_id;
+  writeResolvers[0](response({})); await write1;
+  await Promise.resolve(); assert.equal(searchRequests, 0);
+  // Automatic refresh cannot replace the tap's clock while its save settles.
+  await h.context.generateTrades(false);
+  writeResolvers[1](response({})); await write2;
+  await duringWrites;
+  assert.equal(searchRequests, 1);
+  assert.equal(h.rendered.at(-1)[0], 'committed-inputs');
+  assert.equal(h.events.filter(e => e[0] === 'find_trades_tapped').length, 1);
+  // A delayed preference body/UI update cannot replace that explicit tap.
+  h.context.currentOutlook = 'contender'; h.context.currentAcquirePositions = ['WR'];
+  await h.context.generateTrades(false); assert.equal(searchRequests, 1);
+  h.visible(0.5); assert.equal(h.events.at(-1)[1].search_id, originalId);
+  completed = true;
   console.log('Web search scenarios passed');
 })().catch(error => { console.error(error); process.exitCode=1; });

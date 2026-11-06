@@ -1,3 +1,30 @@
+## 2026-11-06 — Instant-trade recovery and independent race review
+
+Continued draft PR #604 from recovered remote `d79592f3`; lost temporary
+checkout was not treated as available evidence. All restored changes reviewed.
+
+- Backend strict scope recovery: 351 targeted tests passed. Prepared-prefix
+  integration: 496 tests passed across 15 files on final rerun. Earlier mixed
+  fixture teardown failures are recorded in the feature scope; shared fixture
+  changes were reverted and isolation is confined to the new test module.
+- Native TypeScript passed. 157 structural/runtime suites passed before the
+  final malformed-input and first-poll follow-ups; those follow-ups separately
+  passed focused checks and TypeScript. New Usage lifecycle suite: 23 checks;
+  bounded first-poll suite: 21 checks. Native frame timing is not established.
+- Browser runtime regression and 255 structure checks passed. Independent
+  tests covered overlapping saves, delayed body parsing, obsolete pagination,
+  identity changes and original tap timing. Six negative controls failed as
+  intended, including an unfinished-promise false-pass guard.
+- Acceptance report: 63 required cohorts; 29 offline tests passed, three
+  optional PostgreSQL tests skipped in this run. No new production timing
+  acceptance sample was fabricated or inferred.
+- Prepared v2 synthetic first HTTP page ~1.11–1.12 s versus ~1.45–1.47 s
+  full completion. This is earlier publication with exact stored order and
+  durable evidence, **not** a sub-200 ms result. New scopes/cold generation
+  and real physical-device timing remain launch blockers.
+- EAS build 173 finished from prior `eb33443`; it does not contain these
+  latest recovered changes. No submission or production activation claimed.
+
 ## 2026-11-05 — Current-only backend delivery and committed ranked prefixes
 
 `X-FTF-Current-Only: 1` now requires current request/model/input proof before
