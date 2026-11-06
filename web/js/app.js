@@ -119,7 +119,7 @@
         '/api/tiers/save', '/api/tiers/copy-from-format', '/api/rankings/import-apply', '/api/league/preferences',
         '/api/league/asset-prefs', '/api/league/free-agents/move', '/api/league/scoring', '/api/scoring/switch',
         '/api/session/init'].includes(url.split('?')[0]);
-      if (tradeInputWrite) webTradeEpoch++;
+      if (tradeInputWrite) { webTradeEpoch++; withdrawWebTradeResults(); }
       let bodyPreview;
       if (opts.body) {
         try { bodyPreview = JSON.parse(opts.body); } catch { bodyPreview = opts.body; }
@@ -128,7 +128,7 @@
       try {
         res = await fetch(url, opts);
       } finally {
-        if (tradeInputWrite) webTradeEpoch++;
+        if (tradeInputWrite) { webTradeEpoch++; withdrawWebTradeResults(); }
       }
       // Missing proof must return to sign-in, never retry session/init using
       // a public username or leave a cached private board visible.
@@ -3425,6 +3425,7 @@
       if (lbl) lbl.textContent = val + '%';
       _saveFairnessToStorage();
       markWebTradeChange('after_preferences_change');
+      withdrawWebTradeResults();
       scheduleWebTradeWarm();
     }
 
@@ -3432,6 +3433,7 @@
       _syncFairnessUI();
       _saveFairnessToStorage();
       markWebTradeChange('after_preferences_change');
+      withdrawWebTradeResults();
       scheduleWebTradeWarm();
     }
 
@@ -3654,11 +3656,13 @@
       } else {
         set.add(playerId);
       }
+      withdrawWebTradeResults();
       renderPlayerPicker();
     }
 
     function clearPinnedPlayers() {
       _activeDirectionSet().clear();
+      withdrawWebTradeResults();
       renderPlayerPicker();
     }
 
@@ -3684,6 +3688,7 @@
       } else {
         visible.forEach(p => _pinnedGivePlayers.add(p.id));
       }
+      withdrawWebTradeResults();
       renderPlayerPicker();
     }
 
@@ -3791,6 +3796,15 @@
       if (more) more.hidden = true;
       const btn = document.getElementById('gen-btn');
       if (btn) { btn.disabled = false; btn.textContent = 'Find a Trade'; }
+    }
+
+    // Changing eligibility withdraws actionable old cards immediately, even
+    // before the replacement request or preference write finishes.
+    function withdrawWebTradeResults() {
+      stopWebTradeSearch();
+      clearTimeout(webWarmTimer);
+      webWarmRequest = null;
+      renderTrades([]);
     }
 
     function beginWebTradeSearch(payload, tapped) {

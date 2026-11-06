@@ -76,3 +76,12 @@ proofs, reviews the pipeline change, and obtains full exact-head GitHub CI.
 No express-lane waiver, no activation or deployment in this scope. Ready durable
 supply is a demonstrated path when available; broad preparation rollout and cold
 generation cost remain separate work.
+
+## Browser input changes — 2026-11-06
+
+Changing fairness, player selections or writing league/ranking inputs now
+withdraws visible old cards immediately, cancels their pending page handle and
+drops the passive request reference. Late replies cannot restore that deck.
+The exact-scope replacement still uses strict server validation; clearing the
+screen is not a first-card success or a claim of 200 ms. Runtime regressions
+cover both visible-card withdrawal and a late response after withdrawal.

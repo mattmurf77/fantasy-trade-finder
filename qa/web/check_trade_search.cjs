@@ -68,5 +68,17 @@ function page(ids, cursor, total, extra = {}) {
   const waiting = h.context.generateTrades();
   h.context.currentLeagueId = 'B'; fulfill(page(['wrong league'],1,1)); await waiting;
   assert.equal(h.rendered.length,0);
+  h = harness([page(['old'],1,2)]);
+  await h.context.generateTrades();
+  h.context.withdrawWebTradeResults();
+  assert.equal(h.rendered.at(-1).length, 0);
+  assert.equal(h.el.get('trade-more-btn').hidden, true);
+  assert.equal(h.events.at(-1)[1].reason, 'abandoned');
+  // An in-flight response cannot restore cards after an input write withdraws them.
+  h = harness([new Promise(resolve => { fulfill = resolve; })]);
+  const edited = h.context.generateTrades();
+  h.context.withdrawWebTradeResults();
+  fulfill(page(['obsolete'],1,1)); await edited;
+  assert.equal(h.rendered.length, 1); assert.equal(h.rendered[0].length, 0);
   console.log('Web search scenarios passed');
 })().catch(error => { console.error(error); process.exitCode=1; });
