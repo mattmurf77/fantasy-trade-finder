@@ -236,3 +236,108 @@ def test_refused_stale_page_never_spends_the_real_free_preview(p1, monkeypatch):
     assert legacy.status_code == 200 and legacy.json['cards']
     with engine.connect() as conn:
         assert conn.execute(select(func.count()).select_from(db.paywall_previews_table)).scalar() == 1
+
+
+@pytest.mark.parametrize('extra', [
+    {'unknown_filter': 'WR'}, {'positions': ['WR']},
+    {'fairness_threshold': True}, {'fairness_threshold': '0.75'},
+    {'fairness_threshold': None}, {'fairness_threshold': float('nan')},
+    {'fairness_threshold': float('inf')}, {'fairness_threshold': -.01},
+    {'fairness_threshold': 1.01}, {'fairness_threshold': 10 ** 400},
+    {'force': 'false'}, {'refresh_fatigue': 1},
+    {'pinned_give_players': 'g2'}, {'pinned_receive_players': [123]},
+    {'pinned_give_players': [None]}, {'pinned_give_players': ['']},
+    {'pinned_give_mode': 'junk'}, {'pinned_give_mode': 'all'},
+    {'trade_intent': 'unknown'}, {'opponent_user_id': []},
+    {'league_id': 123},
+])
+def test_strict_invalid_filters_never_start_or_deliver(p1, spawned, monkeypatch, extra):
+    client, _, _ = p1
+    deliveries = []
+    monkeypatch.setattr(server, '_deck_evidence_delivered_stored',
+                        lambda *a, **k: deliveries.append(1))
+    response = client.post('/api/trades/generate', headers=HEADERS,
+        json={'league_id': LEAGUE, 'page': 1, **extra})
+    assert response.status_code == 400, response.json
+    assert response.json == {'error': 'unsupported_trade_filter'}
+    assert not spawned and not deliveries and not server._trade_jobs
+
+
+@pytest.mark.parametrize('payload, flag', [
+    ({'pinned_receive_players': ['r2']}, 'trade.finder_targeting'),
+    ({'trade_intent': 'tier_up'}, 'trades.intent_modes'),
+    ({'refresh_fatigue': True}, 'deck.fatigue'),
+])
+def test_strict_disabled_filters_are_not_silently_ignored(p1, spawned, monkeypatch, payload, flag):
+    from backend import feature_flags
+    client, _, _ = p1
+    monkeypatch.setitem(feature_flags._flags_cache, flag, False)
+    if flag == 'deck.fatigue':
+        monkeypatch.setattr(server, '_deck_fatigue_enabled', lambda: False)
+    response = client.post('/api/trades/generate', headers=HEADERS,
+                           json={'league_id': LEAGUE, 'page': 1, **payload})
+    assert response.status_code == 400 and not spawned
+    # Legacy feature-off normalization is deliberately unchanged.
+    legacy = client.post('/api/trades/generate', headers={'X-Session-Token': TOKEN},
+                         json={'league_id': LEAGUE, 'page': 1, **payload})
+    assert legacy.status_code == 200, legacy.json
+
+
+@pytest.mark.parametrize('payload', [[], ['filter'], 7, 'filter'])
+def test_strict_generate_requires_an_object(p1, spawned, payload):
+    client, _, _ = p1
+    response = client.post('/api/trades/generate', headers=HEADERS, json=payload)
+    assert response.status_code == 400 and not spawned
+
+
+def test_strict_league_mismatch_refuses_before_job_start(p1, spawned):
+    client, _, _ = p1
+    response = client.post('/api/trades/generate', headers=HEADERS,
+        json={'league_id': 'another-league', 'page': 1})
+    assert response.status_code == 409 and response.json['cards'] == []
+    assert not spawned and not server._trade_jobs
+
+
+def test_precise_fairness_cannot_reuse_rounded_stored_page(p1, spawned):
+    client, _, _ = p1
+    build_page()  # Stored scope 0.50.
+    response = client.post('/api/trades/generate', headers=HEADERS,
+        json={'league_id': LEAGUE, 'fairness_threshold': .496, 'page': 1})
+    assert response.status_code == 200, response.json
+    assert response.json['cards'] == [] and response.json['status'] == 'running'
+    job = server._trade_jobs[response.json['job_id']]
+    assert job['fairness_threshold'] == .496 and job.get('page_scope') is None
+    assert len(spawned) == 1
+
+
+@pytest.mark.parametrize('threshold, expected', [
+    (.75, 'organic:f=0.75'), (.5, 'organic:f=0.50'),
+    (.746, None), (.754, None), (float('nan'), None), (float('inf'), None),
+])
+def test_page_scope_does_not_alias_different_fairness(threshold, expected):
+    assert server._trade_page_scope(threshold) == expected
+
+
+@pytest.mark.parametrize('payload', [
+    {'fairness_threshold': 0}, {'fairness_threshold': 1},
+    {'pinned_give_players': ['g2'], 'pinned_give_mode': 'all'},
+    {'pinned_receive_players': ['r2']}, {'opponent_user_id': OPP},
+    {'trade_intent': 'consolidate'}, {'force': False}, {'refresh_fatigue': True},
+])
+def test_supported_strict_filters_keep_the_requested_job_scope(p1, spawned, monkeypatch, payload):
+    from backend import feature_flags
+    client, _, _ = p1
+    monkeypatch.setitem(feature_flags._flags_cache, 'trade.finder_targeting', True)
+    monkeypatch.setitem(feature_flags._flags_cache, 'trades.intent_modes', True)
+    monkeypatch.setattr(server, '_deck_fatigue_enabled', lambda: True)
+    response = client.post('/api/trades/generate', headers=HEADERS,
+        json={'league_id': LEAGUE, 'page': 1, **payload})
+    assert response.status_code == 200, response.json
+    assert response.json['current_validated'] is True and len(spawned) == 1
+    job = server._trade_jobs[response.json['job_id']]
+    if 'fairness_threshold' in payload:
+        assert job['fairness_threshold'] == payload['fairness_threshold']
+    if 'trade_intent' in payload:
+        assert job['trade_intent'] == payload['trade_intent']
+    if any(name in payload for name in ('pinned_give_players', 'pinned_receive_players', 'opponent_user_id')):
+        assert job['is_pinned'] and not job.get('page_scope')

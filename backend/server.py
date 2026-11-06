@@ -4853,9 +4853,20 @@ def _trade_prefetch_remaining() -> int:
     return _trade_page_knob("trade_prefetch_remaining", 50.0, 1, 200)   # ruling 19
 
 
-def _trade_page_scope(fairness_threshold) -> str:
-    """The canonical organic request scope: the fairness threshold, 2 decimals."""
-    return f"organic:f={float(fairness_threshold):.2f}"
+def _trade_page_scope(fairness_threshold) -> str | None:
+    """Only exactly representable hundredths may reuse the historic page key.
+
+    A more precise threshold remains a valid uncached request; rounding it
+    would return a deck evaluated under different eligibility constraints.
+    """
+    try:
+        threshold = float(fairness_threshold)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(threshold):
+        return None
+    encoded = f"{threshold:.2f}"
+    return f"organic:f={encoded}" if float(encoded) == threshold else None
 
 
 def _trade_page_request_scope(body: dict, league_id: str, fairness_threshold,
@@ -20987,6 +20998,45 @@ def trade_card_to_dict(card, players: dict) -> dict:
     return out
 
 
+def _supported_current_trade_request(body) -> bool:
+    """Strict callers must never receive an answer to silently ignored filters."""
+    if not isinstance(body, dict) or set(body) - {
+        "league_id", "fairness_threshold", "pinned_give_players",
+        "pinned_receive_players", "pinned_give_mode", "opponent_user_id",
+        "trade_intent", "force", "refresh_fatigue", "page", "search_id",
+    }:
+        return False
+    for name in ("force", "refresh_fatigue"):
+        if name in body and type(body[name]) is not bool:
+            return False
+    if "fairness_threshold" in body:
+        value = body["fairness_threshold"]
+        if (type(value) not in (int, float) or not 0 <= value <= 1
+                or not math.isfinite(value)):
+            return False
+    for name in ("pinned_give_players", "pinned_receive_players"):
+        if name in body and (not isinstance(body[name], list)
+                or any(not isinstance(value, str) or not value for value in body[name])):
+            return False
+    for name in ("league_id", "opponent_user_id"):
+        if name in body and body[name] is not None and (
+                not isinstance(body[name], str) or not body[name]):
+            return False
+    if "pinned_give_mode" in body and body["pinned_give_mode"] not in ("any", "all"):
+        return False
+    if body.get("pinned_give_mode") == "all" and not body.get("pinned_give_players"):
+        return False
+    if body.get("pinned_receive_players") and not is_enabled("trade.finder_targeting"):
+        return False
+    intent = body.get("trade_intent")
+    if intent is not None and (intent not in ("consolidate", "tier_up", "tier_down")
+                              or not is_enabled("trades.intent_modes")):
+        return False
+    if body.get("refresh_fatigue") and not _deck_fatigue_enabled():
+        return False
+    return True
+
+
 @app.route("/api/trades/generate", methods=["POST"])
 @_gate_unverified_write
 def generate_trades():
@@ -21023,7 +21073,14 @@ def generate_trades():
     if not (g_user_id and g_league):
         return jsonify({"error": "session missing user/league"}), 400
 
-    body               = request.get_json(force=True) or {}
+    body               = request.get_json(force=True)
+    if _trade_current_only():
+        if not _supported_current_trade_request(body):
+            return jsonify({"error": "unsupported_trade_filter"}), 400
+        if body.get("league_id") not in (None, g_league.league_id):
+            return jsonify({"error": "trade_snapshot_changed", "status": "error",
+                            "cards": [], "total_ready": 0}), 409
+    body = body or {}
     # E2 — opt-in paged response. Validated before any side effect. Without
     # `page` the body is the legacy one and `search_id` is not read.
     paged              = "page" in body
