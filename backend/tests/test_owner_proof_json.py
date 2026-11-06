@@ -1,5 +1,5 @@
 """Local owner-proof decoding preserves standard encoding and detached semantics."""
-import json, math, random, struct
+import json, math, os, random, struct
 from copy import deepcopy
 from dataclasses import replace
 import pytest
@@ -141,7 +141,8 @@ proof = owner.OwnerDecisionContext(False, 'test', 'L', 'U', 'O', (), (), '{}')._
 assert proof.as_dict() == {'n': 2**100}
 assert not hasattr(proof, '_local_json')
 """
-    subprocess.run([sys.executable, '-c', code], check=True, capture_output=True, text=True)
+    env = {**os.environ, 'FTF_OWNER_PROOF_FAST_JSON': '1'}
+    subprocess.run([sys.executable, '-c', code], env=env, check=True, capture_output=True, text=True)
 
 
 @pytest.mark.skipif(owner._fast_json is None, reason='optional decoder not installed')
@@ -169,3 +170,59 @@ def test_actual_fast_path_and_rejection_fallback(monkeypatch):
         raise real.JSONDecodeError('injected decode rejection', raw, 0)
     monkeypatch.setattr(owner, '_fast_json', SimpleNamespace(loads=failed, JSONDecodeError=real.JSONDecodeError))
     assert decode(local) == {'value': .746, 'nested': [1, 2]}
+
+
+@pytest.mark.parametrize('setting', [None, '', '0', 'true', 'yes', '1 '])
+def test_process_default_and_other_values_never_import_or_activate_fast_json(setting):
+    import subprocess, sys
+    code = """
+import builtins, os
+original = builtins.__import__
+def forbid_orjson(name, *args, **kwargs):
+    if name == 'orjson':
+        raise AssertionError('disabled decoder must not import orjson')
+    return original(name, *args, **kwargs)
+builtins.__import__ = forbid_orjson
+from backend import trade_gen_owner as owner
+assert owner._fast_json is None
+base = owner.OwnerDecisionContext(False, 'test', 'L', 'U', 'O', (), (), '{}')
+for setting in ('1', '0'):
+    os.environ['FTF_OWNER_PROOF_FAST_JSON'] = setting
+    proof = base._with_data({'n': 2**100, 'list': [1, 2]})
+    assert owner._fast_json is None
+    assert not hasattr(proof, '_local_json')
+    assert proof.as_dict() == {'n': 2**100, 'list': [1, 2]}
+"""
+    env = dict(os.environ)
+    if setting is None:
+        env.pop('FTF_OWNER_PROOF_FAST_JSON', None)
+    else:
+        env['FTF_OWNER_PROOF_FAST_JSON'] = setting
+    subprocess.run([sys.executable, '-c', code], env=env, check=True, capture_output=True, text=True)
+
+
+def test_exact_process_opt_in_uses_actual_package_and_is_startup_only():
+    import subprocess, sys
+    pytest.importorskip('orjson')
+    code = """
+import os
+from types import SimpleNamespace
+from backend import trade_gen_owner as owner
+import orjson
+assert owner._fast_json is orjson
+original = orjson.loads
+calls = []
+def counted(raw):
+    calls.append(raw)
+    return original(raw)
+owner._fast_json = SimpleNamespace(loads=counted, JSONDecodeError=orjson.JSONDecodeError)
+base = owner.OwnerDecisionContext(False, 'test', 'L', 'U', 'O', (), (), '{}')
+for setting in ('1', '0'):
+    os.environ['FTF_OWNER_PROOF_FAST_JSON'] = setting
+    proof = base._with_data({'n': .746, 'list': [1, 2]})
+    assert proof._local_json.raw is proof.snapshot_json
+    assert proof.as_dict() == {'n': .746, 'list': [1, 2]}
+assert len(calls) == 2
+"""
+    env = {**os.environ, 'FTF_OWNER_PROOF_FAST_JSON': '1'}
+    subprocess.run([sys.executable, '-c', code], env=env, check=True, capture_output=True, text=True)

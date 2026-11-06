@@ -273,7 +273,7 @@ Raw reproducible fixture and evidence:
 `/private/tmp/fleeced-cold-next-profile/test_profile_decoder.py`,
 `{organic,opponent,receive}-candidate-{control,final}-wall.json`, and
 `final-decoder-comparison.json`. Run with the pinned package on `PYTHONPATH`,
-`PYTHONHASHSEED=0 PROFILE=0 PROFILE_CASES=organic,opponent,receive DECODER=native`.
+`FTF_OWNER_PROOF_FAST_JSON=1 PYTHONHASHSEED=0 PROFILE=0 PROFILE_CASES=organic,opponent,receive DECODER=native`.
 The dependency note records the exact compatibility/upgrade contract. A Python
 3.12 manylinux x86_64 wheel was downloaded successfully; Python 3.12 runtime and
 full repository CI still belong to the parent release gate.
@@ -310,3 +310,24 @@ detached mutation, deepcopy, ordinary replacement cache clearing, canonical
 re-encoding and conflicting snapshot keywords. All three integrated generator
 reports are also identical after removing elapsed time (44,446 / 4,077 / 552
 candidates evaluated). No output count, solver budget or quality check changed.
+
+
+### Activation remains off pending overlap validation
+
+The implementation now requires exact process-start
+`FTF_OWNER_PROOF_FAST_JSON=1`; default/unset/other values neither import nor use
+the fast decoder. Installing the dependency or merging the source does not
+activate the measured optimization. Process environment changes after import do
+not toggle it; rollback requires a restart with the variable removed or `0`.
+No production environment was changed.
+
+The complete backend CI suite explicitly opts in; fresh-process tests prove the
+default-off and actual opt-in paths, missing-package fallback and startup-only
+behavior. The [runbook](../../runbook.md#owner-proof-decoder-activation) gates
+production activation on representative scheduling/overlap memory and load
+validation. Pinned/opponent/forced requests and superseded background work can
+overlap despite deduplication, so single-worker parity and timing evidence is
+insufficient. The independent reviewer will use isolated synthetic real-worker
+scheduling, preserving all outputs/checks and reporting peak/end RSS, active
+workers, CPU, first durable results and failures against actual instance limits.
+No admission or model-policy rewrite is included in the decoder change.

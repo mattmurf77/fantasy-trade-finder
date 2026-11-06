@@ -1,3 +1,22 @@
+## 2026-11-06 — Decoder activation separated from source rollout
+
+- `FTF_OWNER_PROOF_FAST_JSON` is read once at process start. Default/unset and
+  every value except exact `1` preserve standard decoding without importing
+  `orjson`; dependency installation no longer autoactivates the optimization.
+  No production environment change was performed.
+- **109 passed in 6.61 s** with the actual pinned package and explicit opt-in:
+  decoder, owner generator and pipeline-digest suites. Decoder-only default-off
+  run: **47 passed, one fast-path case skipped**. Fresh-process tests prove
+  unset/empty/0/true/yes/trailing-space refusal, actual opt-in, package absence
+  and unchanged behavior after environment edits in an already-running process.
+- Complete backend CI opts in so the optimized path stays under all integration
+  tests; subprocess negatives preserve default-off coverage. Runbook and config
+  reference gate production activation on representative real-worker overlap
+  memory/load validation, including pinned/opponent/forced and superseded jobs.
+- Independent capacity-review worker owns the isolated overlap benchmark next.
+  The previously measured latency improvement is not claimed deployed, and the
+  universal 200 ms target remains open.
+
 ## 2026-11-06 — Local owner-proof decoder candidate
 
 - Isolated `perf/exact-request-reuse`: optional pinned `orjson==3.11.7` only

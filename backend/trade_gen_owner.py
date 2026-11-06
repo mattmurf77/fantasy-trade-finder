@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import uuid
 from collections import Counter, defaultdict
@@ -24,10 +25,14 @@ from dataclasses import dataclass, replace
 from functools import cached_property
 from itertools import combinations, zip_longest
 
-try:
-    import orjson as _fast_json
-except ImportError:  # Older/local environments preserve the standard decoder.
-    _fast_json = None
+# Process-start opt-in only: installing the optional dependency does not
+# activate it. Restart after changing the environment; FTF_FLAGS cannot toggle it.
+_fast_json = None
+if os.environ.get("FTF_OWNER_PROOF_FAST_JSON") == "1":
+    try:
+        import orjson as _fast_json
+    except ImportError:  # Older/local environments preserve the standard decoder.
+        pass
 
 
 VERSION = "owner-v1"
