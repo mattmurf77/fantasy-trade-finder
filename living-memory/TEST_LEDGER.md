@@ -1,3 +1,53 @@
+## 2026-11-06 — Decoder activation separated from source rollout
+
+- `FTF_OWNER_PROOF_FAST_JSON` is read once at process start. Default/unset and
+  every value except exact `1` preserve standard decoding without importing
+  `orjson`; dependency installation no longer autoactivates the optimization.
+  No production environment change was performed.
+- **109 passed in 6.61 s** with the actual pinned package and explicit opt-in:
+  decoder, owner generator and pipeline-digest suites. Decoder-only default-off
+  run: **47 passed, one fast-path case skipped**. Fresh-process tests prove
+  unset/empty/0/true/yes/trailing-space refusal, actual opt-in, package absence
+  and unchanged behavior after environment edits in an already-running process.
+- Complete backend CI opts in so the optimized path stays under all integration
+  tests; subprocess negatives preserve default-off coverage. Runbook and config
+  reference gate production activation on representative real-worker overlap
+  memory/load validation, including pinned/opponent/forced and superseded jobs.
+- Independent capacity-review worker owns the isolated overlap benchmark next.
+  The previously measured latency improvement is not claimed deployed, and the
+  universal 200 ms target remains open.
+
+## 2026-11-06 — Local owner-proof decoder candidate
+
+- Isolated `perf/exact-request-reuse`: optional pinned `orjson==3.11.7` only
+  decodes exact locally standard-encoded owner proof strings. Integer-domain
+  guards and standard fallback preserve arbitrary manual snapshots, detached
+  dictionaries, replacement/deepcopy and encoding failures. No solver, limits,
+  model policy or final evaluator changed; this is not a production activation.
+- Actual package: **494 affected tests passed in 40.27 s**, including the new
+  41-case decoder module, owner, bilateral revision/routes/contracts/overhaul,
+  prepared-prefix/current-input guards and pipeline digest. Independent review
+  separately passed the decoder module with the package (41) and without it
+  (40 passed, one fast-path check skipped), 199,910 random finite float bit
+  comparisons and 112 root/nested adversarial cases.
+- Integrated actual worker preserves ordered full frozen decision hashes at
+  generation and final revalidation, public hashes, all card counts, and the
+  complete generator report except elapsed time for organic, opponent and
+  receive-pinned searches. Evaluated counts remain 44,446 / 4,077 / 552.
+- One matched local pair: first publication 20.072→16.714 s organic,
+  1.922→1.635 s opponent, 381→351 ms receive-pinned; organic full worker
+  26.655→21.488 s and process CPU 26.127→21.235 s. These synthetic timings
+  remain above 200 ms and are not device/network/p95 acceptance evidence.
+- Clean organic memory repeat: peak RSS 807.0→875.2 MB (+68.2 MB),
+  end-worker 454.4→497.7 MB; timing gain and full proof parity persist. The
+  earlier final pair was 765.7→868.0 MB. No memory-flat or concurrency-capacity
+  claim; parent reports a single 2 GB production instance and no load test.
+- Scope evidence records every memory sample, rejected memo/unguarded-decoder
+  prototypes, fixture limitations and repeat memory comparison. Marker objects
+  total 308,640 B for the 6,430-card organic deck with exact shared raw strings;
+  process peak memory is not claimed unchanged. Actual Python 3.12 runtime and
+  full repository CI remain parent integration gates; its Linux wheel downloaded.
+
 ## 2026-11-06 — Cold-path profile, exact proof parity, and CI guard repair
 
 - `ca839ec1`: immutable proof scalar projections removed 19,290 repeated JSON

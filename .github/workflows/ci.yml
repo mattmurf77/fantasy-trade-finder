@@ -25,6 +25,10 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: python -m pytest backend/tests -q
+        env:
+          # Exercise the optional path across the complete suite. Fresh-process
+          # decoder tests separately prove default-off and startup-only behavior.
+          FTF_OWNER_PROOF_FAST_JSON: '1'
 
   mobile-typecheck:
     runs-on: ubuntu-latest

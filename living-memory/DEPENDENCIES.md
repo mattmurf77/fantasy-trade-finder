@@ -10,6 +10,7 @@
 ---
 
 ## Table of Contents
+- [2026-11-06](#2026-11-06)
 - [2026-10-31](#2026-10-31)
 - [2026-10-26](#2026-10-26)
 - [2026-10-05](#2026-10-05)
@@ -21,6 +22,19 @@
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
 
 ---
+
+## 2026-11-06
+
+### Backend: bounded-domain owner-proof decoding (`orjson` 3.11.7 candidate)
+
+- `requirements.txt` pins `orjson==3.11.7` for the isolated `perf/exact-request-reuse` candidate. This is not a deployed dependency change. Local benchmark wheel: CPython 3.14, macOS arm64; CI/production use Python 3.12 and need their own runtime validation.
+- Justification: the existing scalar-read profile still parsed full private decision JSON 116,322 times per synthetic organic worker. An unguarded decoder swap is incompatible, so the candidate limits use to exact strings produced by the unchanged standard `_dump` encoder (`sort_keys=True`, compact separators, `allow_nan=False`). No global JSON loader/encoder or solver change.
+- Only internal proof construction and explicit `_with_data` re-encoding bind a private immutable marker to that exact string. Manual/unmarked snapshots and ordinary `dataclasses.replace` retain standard decoding; deepcopy preserves a valid binding. Fresh mutable dictionaries/lists are returned on every read.
+- A once-per-proof integer-token guard sends every 19+ digit integer, including root primitives, through the standard decoder. Otherwise `orjson` can silently turn an out-of-range integer into a float. Finite standard-encoded floats keep their types and bits in independent differential checks. A fast-decoder rejection falls back to `json.loads`, retaining escaped lone surrogates and standard exceptions. Nonfinite values remain rejected by the unchanged encoder before any marker is created.
+- Activation is separately off by default: only exact process-start `FTF_OWNER_PROOF_FAST_JSON=1` imports/uses the decoder. Installing requirements does not activate it. Production opt-in requires the overlapping-worker capacity gate in the [runbook](../docs/runbook.md#owner-proof-decoder-activation).
+- Import is optional: missing `orjson` retains all standard-decoder behavior. Installing requirements still requests the pinned wheel; the fallback is not an installation-success claim. No runtime download or provider access occurs.
+- Primary behavior documentation: [orjson deserialize](https://github.com/ijl/orjson#deserialize), [integers](https://github.com/ijl/orjson#int), [strings](https://github.com/ijl/orjson#str). The installed 3.11.7 wheel's `METADATA` was also read. Its immutable map-key interning is process-local; it does not retain private decoded dictionaries or trade decisions.
+- Bump gate: run `backend/tests/test_owner_proof_json.py` with the actual package and without it, plus owner/bilateral routing and full frozen-proof parity fixtures. Preserve standard encoded bytes and integer/float distinctions. The universal 200 ms target remains unmet; measured worker gains do not establish phone/network latency.
 
 ## 2026-10-31
 

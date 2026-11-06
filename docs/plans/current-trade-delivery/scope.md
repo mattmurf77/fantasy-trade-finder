@@ -210,3 +210,124 @@ revision/owner-only/presentment/bilateral routes, contracts/overhaul, prepared
 prefix and current-only suites. Independent reviewer checked scalar immutability,
 malformed-floor detached fallback, replacement/deepcopy, required public model
 keys, unchanged final reevaluation and exact output parity.
+
+
+## Local proof decoder candidate — 2026-11-06
+
+The isolated `perf/exact-request-reuse` candidate changes only decoding of
+immutable, locally standard-encoded owner proofs. `orjson==3.11.7` is optional
+at import and pinned for requirements installs. Standard `_dump` bytes, full
+final evaluations, candidate limits, solver, order and all input/serve guards
+remain unchanged. This is a backend candidate, not a production activation or
+a universal 200 ms result.
+
+A private immutable marker binds to the exact encoded string. New internal
+`_with_data` calls replace the two existing local re-encoding sites; ordinary
+`dataclasses.replace` never inherits the marker or scalar caches. Manual/stored
+JSON keeps standard decoding. Every 19+ digit integer token, including a root
+primitive, falls back to the standard decoder to avoid silent int-to-float
+conversion. Standard encoding rejects nonfinite values before marking. Decoder
+rejection (including escaped lone surrogates) falls back to the original decoder
+and its result/exception. No decoded mutable tree is cached or shared.
+
+A broad solver-memo prototype was rejected: 16,384 retained entries consumed
+11.09 MB including shared inputs and saved only about 0.7 seconds to first
+publication in the organic fixture. No solver memo is part of this change.
+A direct unguarded decoder replacement was also rejected: adversarial tests
+found nine behavior differences (out-of-range integers, nonfinite/overflow
+numbers and lone surrogates). Marking only the initial proof factory missed the
+Bilateral2 re-encoding site, so that intermediate prototype is not the final
+candidate. Splitting root integer fullmatch from nested integer search preserves
+the same domain guard and avoids scanning every character for a root anchor.
+
+The final integrated candidate ran the actual existing worker in the isolated
+checkout, with no decoder monkeypatch. Its control disabled the marker helper
+and used the standard decoder. Both use the same deterministic 12x20-player
+synthetic fixture and no network/customer data. The live-evidence, local-SQLite,
+legacy-status and disabled auxiliary-personalization limitations described above
+still apply. The matched wall samples were:
+
+| Scope | First durable publication, standard / candidate | Full worker, standard / candidate | Worker process CPU, standard / candidate |
+| --- | ---: | ---: | ---: |
+| Organic, 6,430 cards | 20.072 / 16.714 s | 26.655 / 21.488 s | 26.127 / 21.235 s |
+| Opponent, 701 cards | 1.922 / 1.635 s | 2.759 / 2.353 s | 2.756 / 2.346 s |
+| Receive-pinned, 82 cards | 381 / 351 ms | 451 / 409 ms | 450 / 408 ms |
+
+All three ordered full frozen-JSON hashes match at generation and after final
+revalidation, along with ordered public semantic hashes and complete card
+counts. Final frozen hashes are unchanged from the preceding scalar-projection
+section. These are local samples, not p95/device guarantees. The guarded
+prototype independently measured organic first 16.616 s versus its 20.210 s
+standard control; the final integrated candidate confirms the direction.
+
+Memory is not claimed flat. The organic final proof markers total 308,640 bytes
+(48 bytes each); their strings are the exact existing snapshot objects and the
+summed proof dictionary sizes remain 2,983,520 bytes in both variants. Process
+peak RSS was 765.7 MB standard versus 868.0 MB final candidate (an earlier
+candidate pass was 782.5 MB). This process-wide high-water figure includes the
+whole fixture, libraries, allocator and temporary evaluation objects. It is not
+an isolated retained-cache size; deployment memory headroom remains a review
+consideration. The change introduces no request/global decision-result cache.
+
+Raw reproducible fixture and evidence:
+`/private/tmp/fleeced-cold-next-profile/test_profile_decoder.py`,
+`{organic,opponent,receive}-candidate-{control,final}-wall.json`, and
+`final-decoder-comparison.json`. Run with the pinned package on `PYTHONPATH`,
+`FTF_OWNER_PROOF_FAST_JSON=1 PYTHONHASHSEED=0 PROFILE=0 PROFILE_CASES=organic,opponent,receive DECODER=native`.
+The dependency note records the exact compatibility/upgrade contract. A Python
+3.12 manylinux x86_64 wheel was downloaded successfully; Python 3.12 runtime and
+full repository CI still belong to the parent release gate.
+
+
+A second clean, sequential organic memory pair confirms a cost, not flat memory:
+standard/candidate peak RSS **807.0 / 875.2 MB**; before-worker RSS
+147.8 / 146.9 MB; end-worker RSS 454.4 / 497.7 MB. After explicit GC with final
+cards still retained, RSS was 630.5 / 662.3 MB (touching/scanning pages raised
+resident memory in both processes; this is not a retained-object census).
+Candidate current RSS peaked during final reevaluation, while its end-worker
+memory was substantially lower. Every measured sample is retained above and in
+`organic-memory-{standard,candidate}-wall.json`; none is selected as a formal
+maximum. This repeat preserved full hashes and measured first publication
+19.716 / 16.594 s, completion 25.798 / 21.887 s, process CPU 25.662 / 21.562 s.
+No concurrent CPU tests ran during the pair.
+
+Parent's read-only Render readback reports one Standard instance, limit
+2,147,483,600 bytes, with the latest deployment's observed 60-second memory
+peak 175,755,260 bytes. [Render compute plans](https://render.com/docs/compute-plans)
+identify legacy Standard as 1 CPU / 2 GB. Those observed production samples do
+not contain a demonstrated heavy-search load and do not bound concurrent cold
+requests or OOM spikes. The reproducible synthetic peak increase (68.2 MB in the
+repeat, 102.3 MB in the first final pair) is an explicit release-review tradeoff.
+No capacity, concurrency, provider or production-flag mutation is included.
+
+Validation: **494 affected tests passed in 40.27 s** with the actual pinned
+package. Independent reviewer ran the decoder module with it (41 passed) and
+without it (40 passed, one fast-path check skipped), 199,910 random finite
+floating-point bit comparisons and 112 root/nested adversarial cases. Tests
+cover missing import in a fresh process, marker identity/forgery rejection,
+root/nested big integers, nonfinite refusal, escaped Unicode/surrogates,
+detached mutation, deepcopy, ordinary replacement cache clearing, canonical
+re-encoding and conflicting snapshot keywords. All three integrated generator
+reports are also identical after removing elapsed time (44,446 / 4,077 / 552
+candidates evaluated). No output count, solver budget or quality check changed.
+
+
+### Activation remains off pending overlap validation
+
+The implementation now requires exact process-start
+`FTF_OWNER_PROOF_FAST_JSON=1`; default/unset/other values neither import nor use
+the fast decoder. Installing the dependency or merging the source does not
+activate the measured optimization. Process environment changes after import do
+not toggle it; rollback requires a restart with the variable removed or `0`.
+No production environment was changed.
+
+The complete backend CI suite explicitly opts in; fresh-process tests prove the
+default-off and actual opt-in paths, missing-package fallback and startup-only
+behavior. The [runbook](../../runbook.md#owner-proof-decoder-activation) gates
+production activation on representative scheduling/overlap memory and load
+validation. Pinned/opponent/forced requests and superseded background work can
+overlap despite deduplication, so single-worker parity and timing evidence is
+insufficient. The independent reviewer will use isolated synthetic real-worker
+scheduling, preserving all outputs/checks and reporting peak/end RSS, active
+workers, CPU, first durable results and failures against actual instance limits.
+No admission or model-policy rewrite is included in the decoder change.

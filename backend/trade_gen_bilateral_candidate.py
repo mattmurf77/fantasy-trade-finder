@@ -183,7 +183,7 @@ class _Search(incumbent._Search):
                 "thresholds": {"minimum_companion_value_share": _MIN_COMPANION_SHARE,
                                "minimum_bilateral_market_improvement": _MIN_TERM_IMPROVEMENT},
                 "policy": "rank_efficient_first_preserve_valid_inventory"}
-            result = replace(result, snapshot_json=owner._dump(data))
+            result = result._with_data(data)
         self._decisions[incumbent._identity(card)] = result
         return result
 

@@ -325,7 +325,7 @@ class _Search(owner._Search):
                     needless_cost = weak_gain < .025 and any(a < b - .015 for a, b in zip(supports, prior))
                     if dominated or needless_cost:
                         data.update(eligible=False, reason="unnecessary_compensation")
-                        result = replace(result, eligible=False, reason=data["reason"], snapshot_json=owner._dump(data))
+                        result = result._with_data(data, eligible=False, reason=data["reason"])
                         break
                 if not result.eligible:
                     break

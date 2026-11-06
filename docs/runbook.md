@@ -84,6 +84,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
   - [Orphaned-overhaul sweep (legal R28.22 d2, 2026-10-29)](#orphaned-overhaul-sweep-legal-r2822-d2-2026-10-29)
 - [Migration DDL never blocks boot](#migration-ddl-never-blocks-boot)
 - [Feature flags](#feature-flags)
+- [Owner-proof decoder activation](#owner-proof-decoder-activation)
 - [Free-agent moves kill switch (`sleeper.send_add_drop`, D1)](#free-agent-moves-kill-switch-sleepersend_add_drop-d1)
 - [Trade engine flags + kill switch](#trade-engine-flags-kill-switch)
 - [Runtime tuning](#runtime-tuning)
@@ -472,6 +473,46 @@ How it works now (`backend/database.py`, `_SchemaSnapshot` / `_run_guarded_ddl`)
 - `POST /api/feature-flags/reload` to re-read without restart, OR
 - Set `FTF_FLAGS` env var for process-level overrides.
 - Don't roll back `account.settings_hub` after the 11-06 build: the flat Settings fallback deletes without the LEG-S6 Apple code (#446).
+
+---
+
+## Owner-proof decoder activation
+
+`FTF_OWNER_PROOF_FAST_JSON` defaults **off**, even when the pinned `orjson`
+dependency is installed. Only the exact value `1` at process startup opts in.
+Unset, empty, `0` and other values use the standard decoder without importing
+`orjson`. This is not an `FTF_FLAGS`/hot-reload switch: enabling or disabling it
+requires restarting all backend processes. A missing optional package still
+falls back to standard decoding.
+
+**Keep production off until representative overlapping-worker load evidence is
+reviewed.** The single-worker decoder parity/latency tests do not establish
+capacity. Existing pinned/opponent/forced requests can overlap and superseded
+background workers can keep running; deduplication does not impose a global
+admission bound. Validation must exercise those actual scheduling paths with
+synthetic realistic large rosters, ordinary and selected searches, preference
+changes, and cancelled/superseded work. Compare default-off and opt-in on the
+same workload, preserving full ranked/frozen proof output and every validation.
+Measure peak and end memory for the whole service, simultaneous workers, CPU,
+first durable publication, errors/timeouts and remaining capacity under sustained
+repetition. Include the deployed worker/process count and the single-instance
+2 GB memory limit; do not extrapolate safe concurrency from the 60-second idle
+production samples. Independent review must assess that headroom before any
+activation.
+
+The local 6,430-card single-worker fixture gained seconds but showed a repeatable
+peak-memory increase (807.0 to 875.2 MB in one clean pair). This optimization
+alone does not meet the universal 200 ms first-card goal. Evidence and limitations
+are in [current trade delivery scope](plans/current-trade-delivery/scope.md#local-proof-decoder-candidate--2026-11-06).
+After the capacity gate, the authorized operator may set the startup variable to
+`1`, restart, and verify the actual process configuration and service metrics.
+Rollback is to remove it (or set `0`) and restart all backend processes; it needs
+no data purge or ranking/model-policy change. No production environment change
+is authorized or performed by the code/test rollout itself.
+
+CI opts the complete backend suite in, while fresh-process negative tests cover
+default-off, non-`1` values, package absence and the inability to toggle a running
+process by modifying its environment.
 
 ---
 
