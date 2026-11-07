@@ -20,8 +20,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 import { onlineManager } from '@tanstack/react-query';
-import { getSessionRevision, setOnWriteRequest } from '../api/client';
-import { invalidateTradeSearchHandoffs } from './tradeSearchHandoff';
+import { getSessionRevision, setOnWriteRequest, runWithDeadline } from '../api/client';
+import { invalidateTradeSearchHandoffs, tradeSearchContextIdentity, TradeSearchContextChangedError } from './tradeSearchHandoff';
 import { generateTrades, getTradeStatus, type GenerateBody, type PagedTradeJobSnapshot } from '../api/trades';
 import {
   DEVICE_PAGE_KEY_PREFIX,
@@ -174,6 +174,47 @@ function discardAllDevicePages() {
 
 // A fresh page may be prepared when all overlapping writes have settled.
 let pendingTradeWrites = 0;
+export class TradeInputReadinessError extends Error {}
+let lastInputSaveFailure: { context: string; at: number } | undefined;
+export function hasPendingTradePageInputs(): boolean { return pendingTradeWrites > 0; }
+
+function inputSaveFailedSince(tapAt: number): boolean {
+  return !!lastInputSaveFailure && lastInputSaveFailure.at >= tapAt
+    && lastInputSaveFailure.context === tradeSearchContextIdentity();
+}
+function inputSaveError(): TradeInputReadinessError {
+  return new TradeInputReadinessError('Your preference changes could not be saved. Try again.');
+}
+
+/** Synchronous admission check closes promise-continuation gaps. */
+export function assertTradePageInputsReady(tapAt: number): void {
+  if (hasPendingTradePageInputs()) throw new TradeSearchContextChangedError();
+  if (inputSaveFailedSince(tapAt)) throw inputSaveError();
+}
+
+/** Wait only within the original request deadline; no network or trace starts here. */
+export async function waitForTradePageInputs(
+  deadlineAt: number, current: () => boolean, tapAt: number,
+): Promise<void> {
+  await runWithDeadline(signal => new Promise<void>((resolve, reject) => {
+    let unsubscribe = () => {};
+    const finish = (error?: Error) => {
+      unsubscribe();
+      signal.removeEventListener('abort', aborted);
+      if (error) reject(error); else resolve();
+    };
+    const aborted = () => finish(new Error('Trade readiness was interrupted. Try again.'));
+    const check = () => {
+      if (!current()) return finish(new TradeSearchContextChangedError());
+      if (inputSaveFailedSince(tapAt)) return finish(inputSaveError());
+      if (!hasPendingTradePageInputs()) finish();
+    };
+    unsubscribe = onTradePageInputsSettled(check);
+    signal.addEventListener('abort', aborted, { once: true });
+    if (signal.aborted) aborted(); else check();
+  }), deadlineAt);
+  if (!current()) throw new TradeSearchContextChangedError();
+}
 const settledListeners = new Set<() => void>();
 export function onTradePageInputsSettled(listener: () => void): () => void {
   settledListeners.add(listener);
@@ -185,14 +226,19 @@ export function notifyTradePageInputsSettled(): void {
 
 /** Hold the existing write fence through a server write's local mirrors too.
  * API settlement alone is earlier than scoring-format persistence/commit. */
-export function beginTradePageInputTransition(): () => void {
+export function beginTradePageInputTransition(saveContext?: string | null): (succeeded?: boolean) => void {
   pendingTradeWrites++;
   invalidateTradeSearchHandoffs();
   discardAllDevicePages();
   let finished = false;
-  return () => {
+  return (succeeded = true) => {
     if (finished) return;
     finished = true;
+    if (!succeeded && saveContext && saveContext === tradeSearchContextIdentity()) {
+      // Navigation can finish after a failed save, before the destination
+      // begins waiting. Record it only for the account and league that saved.
+      lastInputSaveFailure = { context: saveContext, at: globalThis.performance.now() };
+    }
     pendingTradeWrites = Math.max(0, pendingTradeWrites - 1);
     invalidateTradeSearchHandoffs();
     discardAllDevicePages();

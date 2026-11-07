@@ -58,10 +58,11 @@ const canvas = read('components/TradeBuildCanvas.tsx');
 // consumed one-shot selection. The source guards below separately pin the
 // semantic-regeneration call sites to repeat:true.
 const ast = ts.createSourceFile('TradesScreen.tsx', trades, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-let requestFn;
+let requestFn, builderFn;
 function visit(node) {
   if (ts.isPropertyAssignment(node) && node.name.getText(ast) === 'mutationFn'
-      && node.initializer.getText(ast).includes('lastModelRequestRef')) requestFn = node.initializer;
+      && node.initializer.getText(ast).includes('takeTradeSearchHandoff')) requestFn = node.initializer;
+  if (ts.isFunctionDeclaration(node) && node.name?.text === 'modelRequest') builderFn = node;
   ts.forEachChild(node, visit);
 }
 visit(ast);
@@ -74,14 +75,22 @@ const env = {
   lastModelRequestRef: modelRef, canvasSelectionRef: canvasRef,
   effectiveFairness: 0.9, leagueId: 'league', targetingEnabled: true,
   scopedOpponent: 'partner-B', tradeIntent: 'tier_up', modelSelectionParams,
-  takeTradeSearchHandoff: () => null,
+  takeTradeSearchHandoff: () => null, modelAttemptCurrent: () => true, hasPendingTradePageInputs: () => false,
+  assertTradePageInputsReady: () => {}, tradeSearchIdentity: () => 'current',
   generateTrades: (request) => request,
 };
 const requestJs = ts.transpileModule(`module.exports = ${requestFn.getText(ast)};`, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText;
-const mutate = new Function('env', `const { ${Object.keys(env).join(', ')} } = env;
+const applyMutation = new Function('env', `const { ${Object.keys(env).join(', ')} } = env;
   const module = { exports: {} }; ${requestJs}; return module.exports;`)(env);
+const buildJs = ts.transpileModule(`module.exports = ${builderFn.getText(ast)};`, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+}).outputText;
+const build = new Function('env', `const { ${Object.keys(env).join(', ')} } = env;
+  const module = { exports: {} }; ${buildJs}; return module.exports;`)(env);
+const mutate = vars => { const request = build(vars); modelRef.current = request; canvasRef.current = null;
+  return applyMutation({ ...vars, request, context: { identity: 'current' }, deadlineAt: 30000, tapAt: 0 }); };
 const first = mutate({});
 assert.deepEqual(first.pinned_receive_players, ['selected-target']);
 assert.equal(first.pinned_give_players, undefined);
@@ -111,7 +120,7 @@ assert.match(rankReturn, /dispatchGenerate\(\s*\{ force: true, repeat: true \}/)
 const suppressionUndo = trades.slice(trades.indexOf('async function handleSuppressionUndo()'), trades.indexOf('// #190 — hand the top card'));
 assert.match(suppressionUndo, /if \(deckEpochRef.current !== epoch\) return;\s*resetDeckForNewTargets\(\);\s*lastModelRequestRef.current = request;\s*dispatchGenerate\(\{ force: true, repeat: true \}\)/);
 const fairFn = trades.slice(trades.indexOf('async function runFairPackages('), trades.indexOf('const pinCount ='));
-assert.match(fairFn, /fairPackagesRequest\(leagueId, anchor, effectiveFairness, opponentId\)/);
+assert.match(fairFn, /fairPackagesRequest\(leagueId,\s*\{ giveIds: \[\.\.\.anchor\.giveIds\], receiveIds: \[\.\.\.anchor\.receiveIds\] \}, effectiveFairness, opponentId\)/);
 assert.match(fairFn, /setFairPending\(true\)/);
 assert.match(fairFn, /finally[\s\S]*deckEpochRef.current === epoch[\s\S]*setFairPending\(false\)/);
 assert.match(trades, /!fairDeck &&\s*deck.length === 0/);

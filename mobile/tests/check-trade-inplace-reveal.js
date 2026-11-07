@@ -66,12 +66,12 @@ console.log('check-trade-inplace-reveal:');
       && /pushWithFirstPage\(fork, pushDeck\);\s*return;/.test(arm));
   const helper = code.slice(code.indexOf('function pushWithFirstPage('), code.indexOf('function handleInlineFindATrade('));
   check('2b. the exact paged request transfers once, before immediate navigation',
-    /startTradeSearchHandoff\(fork\.searchId, 'model', request,\s*\(\) => generateTrades\(request, \{ searchId: fork\.searchId \}\)\);\s*pushDeck\(\);/.test(helper));
+    /startTradeSearchHandoff\(fork\.searchId, 'model', request,\s*\(\) => generateTrades\(request, \{ searchId: fork\.searchId \},\s*\{ deadlineAt: [^}]+, beforeDispatch \}\)\);\s*pushDeck\(\);/.test(helper));
   check('2c. no timer or await holds navigation; destination consumes the exact request',
     !/setTimeout|FIRST_PAGE_PUSH_DEADLINE_MS|await/.test(helper)
       && /takeTradeSearchHandoff<PagedTradeJobSnapshot>\(vars\.searchId, 'model', request\)/.test(code));
   check('2d. fair anchored requests also start once and push immediately',
-    /startTradeSearchHandoff\(fork\.searchId, 'fair', request, \(\) => getFairPackages\(request\)\);\s*pushDeck\(\);/.test(helper));
+    /startTradeSearchHandoff\(fork\.searchId, 'fair', request, \(\) => getFairPackages\(request,\s*\{ deadlineAt: [^}]+, beforeDispatch \}\)\);\s*pushDeck\(\);/.test(helper));
 }
 
 // ── 3. EXECUTED: which pages the pushed deck adopts ───────────────────────

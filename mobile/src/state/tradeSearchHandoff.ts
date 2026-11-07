@@ -13,6 +13,13 @@ export class TradeSearchContextChangedError extends Error {
   constructor() { super('trade_search_context_changed'); }
 }
 
+/** Authority that cannot be rebound while an accepted tap waits for saves. */
+export function tradeSearchContextIdentity(): string | null {
+  const s = useSession.getState();
+  if (!s.hasToken || s.switching || !s.user?.user_id || !s.league?.league_id || !s.activeFormat) return null;
+  return JSON.stringify([getSessionRevision(), s.user.user_id, s.league.league_id, s.activeFormat]);
+}
+
 export function tradeSearchIdentity(): string | null {
   const s = useSession.getState();
   if (!s.hasToken || s.switching || !s.user?.user_id || !s.league?.league_id || !s.activeFormat) return null;

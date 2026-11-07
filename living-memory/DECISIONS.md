@@ -2121,3 +2121,5 @@ Latest source-use decision (2026-11-07): “Just use what we have in those cases
 
 
 2026-11-07: Select only status, worker_token and expires_at at projection cancellation checkpoints. Preserve exact run/user/league predicates and all existing publication/deletion fences; do not change simulation budgets or checkpoint frequency.
+
+2026-11-07: Mobile trade admission waits for pending preference saves before binding input identity, with immutable dispatch authority and the original shared deadline. Coalesced DNA writes use one logical transition. Retry retains the accepted selection after pre-POST admission failure; post-admission input changes cannot silently drop a still-current attempt. Scope and evidence: docs/plans/mobile-trade-input-readiness/.
