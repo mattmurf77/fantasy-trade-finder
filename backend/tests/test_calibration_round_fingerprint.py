@@ -38,3 +38,16 @@ def test_unranked_occupancy_metadata_changes_invalidate_before_exposure(roster, 
     before = adapter._input_identity('a', 'L')
     facts['p1'][field] = value
     assert adapter._input_identity('a', 'L') != before
+
+
+@pytest.mark.parametrize('field,value', [('position','WR'), ('fantasy_positions',['WR']),
+    ('player_id','different'), ('active',False), ('injury_status','IR')])
+def test_fresh_raw_only_holding_is_bound_even_before_member_sync(roster, monkeypatch, field, value):
+    facts = {'fresh-only': {'position':'RB', 'fantasy_positions':['RB'],
+             'player_id':'fresh-only', 'active':True, 'injury_status':None}}
+    monkeypatch.setattr(server, '_load_sleeper_cache', lambda: facts)
+    before = adapter._input_identity('a', 'L', ['fresh-only'])
+    unbound = adapter._input_identity('a', 'L')
+    facts['fresh-only'][field] = value
+    assert adapter._input_identity('a', 'L') == unbound
+    assert adapter._input_identity('a', 'L', ['fresh-only']) != before

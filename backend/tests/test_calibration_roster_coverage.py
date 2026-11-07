@@ -93,6 +93,7 @@ def test_full_pair_metadata_occupancy_never_changes_generator_pool(captured, mon
     monkeypatch.setattr(session_input, 'resolve_session_input', resolve)
     monkeypatch.setattr(server, '_load_sleeper_cache', lambda: metadata)
     result = adapter.capture(user_id=ME, league_user_id=ME, league_id=LEAGUE)
+    assert 'held' in result.source['captured_metadata_ids']
     assert 'held' not in result.owner_context['players']
     assert result.source['unpriced_occupancy']['held']['market_value'] is None
     assert result.catalog.assets['held']['value'] is None
