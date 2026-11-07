@@ -1,3 +1,10 @@
+## 2026-11-07 — Owned pricing-domain execution, unwired
+
+- Explicit immutable config/crown/market-mode/pick-mask policy now reaches actual owner generation and fresh final math through shared unchanged formulas. Default wrappers stay live. Request values are detached; no proof reuse, route wiring, budget/quality change or global swap. Tier/age/roster/source/currentness remain unbound; capture is non-atomic.
+- **599 passed in 9.44 s** across 13 affected suites. Independent **151 passed in 2.49 s**, including 800 randomized exact arithmetic comparisons; five runtime hashes stable. Reviewer found/fixed V3 companion policy forwarding, unknown-ID shortcuts and malformed-config admission; durable branch controls retained.
+- Actual synthetic 12×20 worker: six runs preserve all **7,213 ordered cards**, complete native/final/public/durable values across organic/opponent/pinned receive. Both generation and final evaluation consume the policy; original serving context and every gate remain. Organic first publication19.694→19.498 s, opponent1.937→1.962 s, receive.428→.458 s; mixed single-pair timing establishes no speedup or 200 ms result.
+- [Scope](../docs/plans/owner-pricing-inputs/scope.md), [contract](../docs/plans/owner-pricing-inputs/contract.md), [validation](../docs/plans/owner-pricing-inputs/validation.md). Python3.14/local isolated SQLite only, no production/customer inputs. Full CI pending. Keep unmerged: parent coordinates Calibration source-hash changes/unexposed regeneration. No simulator/Maestro.
+
 ## 2026-11-07 — Offline owner-input observation and differential oracle
 
 - New unwired `owner_evaluation_inputs` records owned typed inputs and declared ambient state or explicit unsupported reasons. No routes, selectors, evaluation budgets or quality gates change. Captures are non-atomic; ambient state is not injected; V2 provider provenance is observed but not rebound. Fingerprint equality never authorizes reuse.

@@ -29,7 +29,7 @@ AMBIENT_KEYS = ("effective_trade_config", "raw_owner_limits", "ranking_config",
 SOURCE_FILES = ("trade_gen_owner.py", "trade_gen_bilateral.py", "trade_gen_bilateral_candidate.py",
                 "trade_gen_outlook_evidence.py", "trade_service.py", "ranking_service.py",
                 "trade_roster.py", "pick_values.py", "trade_input_evidence.py", "feature_flags.py",
-                "owner_evaluation_inputs.py")
+                "owner_evaluation_inputs.py", "owner_pricing_execution.py")
 STATIC_KEYS = ("model_constants", "ordered_tiers", "tier_config", "roster_eligibility",
                "unavailable", "generic_pick_seeds", "age_now", "age_future", "outlook_alpha_keys",
                "optional_proof_decoder_enabled")

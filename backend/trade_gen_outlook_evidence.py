@@ -189,7 +189,8 @@ class _Search(previous._Search):
         simpler = tuple(p for p in incoming if p != pid)
         priced = self._package(outgoing, simpler, self.market)
         required = (priced is None or priced[0] < self.floor - owner._EPS
-                    or not self.ts.overpay_ok(outgoing, simpler, self.market.__getitem__))
+                    or not self.ts.overpay_ok(outgoing, simpler, self.market.__getitem__,
+                                             pricing_policy=self._pricing_policy))
         return "required_price_companion_to_independent_focal_thesis" if required else None
 
     def _window_evidence(self, team, pid):

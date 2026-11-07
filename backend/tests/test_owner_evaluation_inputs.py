@@ -32,7 +32,7 @@ def capture(context, *, module=candidate, ambient=None):
 
 
 def test_schema_covers_constructor_and_preserves_full_records_and_detached_reads():
-    expected = set(inspect.signature(owner._Search.__init__).parameters) - {'self'}
+    expected = set(inspect.signature(owner._Search.__init__).parameters) - {'self', '_pricing_policy'}
     assert inputs.CONTEXT_KEYS == expected | {'input_evidence'}
     args = companion_world()
     player = args['players']['give']

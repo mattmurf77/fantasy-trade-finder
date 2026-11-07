@@ -188,9 +188,16 @@ class _Search:
                  pinned_receive_players=None, exact_give=False,
                  opponent_user_id=None, trade_intent=None, swap_positions=None,
                  lateral_scope=None, past_decision_keys=None,
-                 exclusion_keys=None, max_cards=None, config=None):
+                 exclusion_keys=None, max_cards=None, config=None, _pricing_policy=None):
         from . import trade_service as ts
         self.ts = ts
+        self._pricing_policy = _pricing_policy
+        if _pricing_policy is not None:
+            from .owner_pricing_execution import PackagePricingPolicy
+            if type(_pricing_policy) is not PackagePricingPolicy:
+                raise TypeError("unsupported owner pricing policy")
+            if config != dict(_pricing_policy.config):
+                raise ValueError("owner pricing config mismatch")
         self.players, self.league, self.user_id = players, league, user_id
         self._positions = {}
         self._tiers = {}
@@ -358,7 +365,8 @@ class _Search:
         return result
 
     def _package(self, give, receive, values):
-        return self.ts.price_consensus_package(list(give), list(receive), value_of=values.__getitem__)
+        return self.ts.price_consensus_package(list(give), list(receive), value_of=values.__getitem__,
+                                               pricing_policy=self._pricing_policy)
 
     def _owner(self, team, give, receive):
         _, outgoing, incoming = self._package(give, receive, team["values"])
@@ -498,7 +506,7 @@ class _Search:
             "overpay_adjusted": self.config["overpay_adjusted"]}
         if ratio < self.floor - _EPS:
             return finish("market_floor")
-        if not self.ts.overpay_ok(give, receive, self.market.__getitem__):
+        if not self.ts.overpay_ok(give, receive, self.market.__getitem__, pricing_policy=self._pricing_policy):
             return finish("market_overpay")
         owner = self._owner(viewer, give, receive)
         other = self._owner(opponent, receive, give)
