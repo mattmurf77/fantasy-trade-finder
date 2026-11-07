@@ -199,6 +199,9 @@ class _Search:
         self.config.update(_LIMITS)
         self.config.update({key: ts._cfg.get(key, default) for key, default in _LIMITS.items()})
         self.config.update(config or {})
+        # A dark selector must not alter historic constructor report bytes.
+        if not self.config.get("owner_outlook_evidence_enabled"):
+            self.config.pop("owner_outlook_evidence_enabled", None)
         self.pool_size = self._limit("owner_pool_size", 4, 32)
         self.pair_budget = self._limit("owner_pair_budget", 1, 16384)
         self.total_budget = self._limit("owner_total_budget", 1, 120000)
@@ -221,7 +224,7 @@ class _Search:
             status = str(getattr(player, "injury_status", "") or "").upper()
             if pos in _POSITIONS and status not in UNAVAILABLE:
                 self._lineup_assets[pid] = Asset(pid, frozenset([pos]),
-                    value * ts.age_now_mult(pos, getattr(player, "age", None)))
+                    self._lineup_value(player, pos, value))
         self.give_pins = _ids(pinned_give_players)
         self.recv_pins = _ids(pinned_receive_players)
         self.exact_give = bool(exact_give)
@@ -257,6 +260,13 @@ class _Search:
             and m.roster and (not opponent_user_id or m.user_id == opponent_user_id)),
             key=lambda m: m.user_id)
         self.pools = {}
+
+    def _lineup_value(self, player, pos, value):
+        return value * self.ts.age_now_mult(pos, getattr(player, "age", None))
+
+    def _need_utility(self, team, deltas, denominator):
+        weight = 0.0 if team["outlook"] == "jets" else (.05 if team["outlook"] == "rebuilder" else .25)
+        return weight * sum(deltas.values()) / denominator
 
     def _limit(self, name, low, high):
         value = self.config.get(name)
@@ -356,8 +366,7 @@ class _Search:
         outlook_utility = .5 * window * raw_shift / denominator
         after = self._lineup((team["roster"] - set(give)) | set(receive), team)
         deltas = {pos: after[pos] - team["lineup_before"][pos] for pos in _POSITIONS}
-        need_weight = 0.0 if team["outlook"] == "jets" else (.05 if team["outlook"] == "rebuilder" else .25)
-        need_utility = need_weight * sum(deltas.values()) / denominator
+        need_utility = self._need_utility(team, deltas, denominator)
         utility = personal_gain + outlook_utility + need_utility
         benefit = []
         if personal_gain > _EPS:

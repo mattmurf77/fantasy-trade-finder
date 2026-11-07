@@ -1,3 +1,30 @@
+## 2026-11-06 — Evidence-bound outlook v3 candidate, activation withheld
+
+- Branch `feat/outlook-evidence-rules`, baseline `a1a3ac474bfa880635dc31319abc3233e657cdff`.
+  New default0 selector chooses immutable `owner-v2-bilateral-3`; no live knob,
+  prepared-inventory enablement, decoder opt-in, paid/public Calibration or client changes.
+- Final combined affected suite: **411 passed in 18.26 s**, covering owner generator, prior bilateral/presentment/routes/input provenance, new outlook candidate/routes, pipeline digest and arm-A golden.
+- **75 passed in 7.61 s**: new outlook evidence candidate/routes, prepared cross-version
+  refusal/same-version adoption, request identity/private projection, selected-route privacy,
+  deck pipeline digest and existing arm-A golden/config-manifest checks. **283 passed in
+  6.76 s** on prior bilateral candidate/presentment/revision routes and age provenance;
+  subsequent scoped run **186 passed in 9.01 s**. Python3.14 locally, not production3.12.
+- Independent evaluator reproduced all **326 old-version requests / 7,882 offers**, ordered
+  outputs and complete immutable proof bytes unchanged after shared hooks. Decompressed
+  proof stream SHA256 `db8d851259c654eb8c242a86d1e271809c5886c6fcdbde6fec46989b3284e866`.
+  New-version independent corpus review is pending; old-version parity is not a v3 quality verdict.
+- First v3 review found rebuild RB acquisitions supported only by price; retained as a failed
+  candidate observation. Corrected age-independent incoming RB thesis and meaningful/required
+  companion rule have counterexample/positive-control tests. Contender pick spending alone no
+  longer claims capital acquisition or production. Full final-roster gates remain required.
+- Root local checks: web structure255/255; web trade-search scenarios passed; instant trade
+  report unittest29 passed/3 skipped; test-ID lintOK; mobile TypeScript and all check-*.js
+  exited0. Client sources unchanged. These are local checks, not exact-head GitHub CI.
+- Living-memory delta audit preserved existing headers/TOC conventions in HLD/LLD; the pre-existing TEST_LEDGER header/TOC drift was not broadened into an unrelated cleanup.
+- Full CI and independent final output/representative performance review remain required;
+  activation is withheld. No simulator or Maestro. [Policy/data gaps/code walk](../docs/plans/outlook-evidence-rules/architecture.md),
+  [scope](../docs/plans/outlook-evidence-rules/scope.md), [decision](../docs/adr/adr-026-evidence-bound-outlook-candidate.md).
+
 ## 2026-11-06 — Compact term comparison records candidate
 
 - Isolated branch `perf/compact-term-records` from `416e46b1`; no PR 605 source

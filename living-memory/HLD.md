@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-11-06 — Evidence-bound outlook candidate](#2026-11-06--evidence-bound-outlook-candidate)
 - [What This Is](#what-this-is)
 - [Scope](#scope)
 - [Non-Goals](#non-goals)
@@ -23,6 +24,10 @@
 - [Win Now season pipeline](#win-now-season-pipeline)
 
 ---
+
+## 2026-11-06 — Evidence-bound outlook candidate
+
+A separately reversible bilateral v3 corrects unsupported age/production claims; actual qualified owner production forecasts remain absent. Existing forecast/usage subsystems are not connected by this change. No provider calls on search, no client or production activation. See [architecture](../docs/architecture.md#evidence-bound-dynasty-outlook-candidate).
 
 ## What This Is
 A dynasty fantasy football trade-finding app. Users log in via their Sleeper username, import their league rosters, rank players through a 3-player swipe interface (Elo-based), and then receive personalized trade card suggestions based on valuation mismatches between themselves and their leaguemates. Built for solo dynasty managers; the same engine supports both simulated and real-league trade matching.

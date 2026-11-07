@@ -619,3 +619,12 @@ A unique allocation of currently available players meeting the existing dynasty 
 ## Redaction token
 
 The random `redacted:<32 hex>` that stands in for a deleted user's partner id in OTHER users' deck records after an account deletion (legal R28.20 (ii)). There is one per deletion, the same in every store, and no mapping to the id is kept once the scrub's job row is gone. A card whose partner is a redaction token is a **redacted card**: it also loses every field taken from the deleted user's account, and its blended scores are null. Readers treat its partner as unknown, never as a person to identify (legal (viii)). The prefix is `eval.contract.REDACTED_PARTNER_PREFIX`. Code: `backend/deletion_scrub.py`.
+
+## Window evidence and dynasty roster proxy
+
+**Window evidence** records the selected/inferred outlook, provisional horizon and
+actual evidence available for future roster usefulness. In the default-dark
+outlook candidate, player production/job security stays Unknown; preference or
+price cannot prove longevity. **Dynasty roster proxy** is a legal-slot assignment
+of existing market prices, not projected points or championship probability.
+[Candidate contract](plans/outlook-evidence-rules/architecture.md).

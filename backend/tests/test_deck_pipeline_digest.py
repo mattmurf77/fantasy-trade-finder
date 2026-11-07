@@ -46,6 +46,7 @@ FROZEN_PINS = {
     8: "f7ed33e6ab94af03",
     9: "28d212cdc5c6cb05",
     10: "cdabd9935a58d51d",
+    11: "8a3fa8db29d87e39",  # Evidence-bound bilateral v3 and private input capture.
 }
 PINNED = server.DECK_PIPELINE_PINS.get(server.DECK_PIPELINE_VERSION)
 
