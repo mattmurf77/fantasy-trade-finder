@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -87,9 +87,10 @@ const COPY = {
   needsDeck: "Open Acquire for this league first so there's a fresh deck to compare against, then come back.",
   openAcquire: 'Open Acquire',
   tryAgain: 'Try again',
+  checkAgain: 'Check again',
   startOver: 'Start over',
   building: 'Building your deck…',
-  buildSlow: 'This is taking longer than usual. Try again.',
+  buildSlow: 'Your comparison is still being prepared. This can take several minutes. You can leave this screen and check again later.',
   tooFew: 'There aren’t enough trade ideas for this league right now. Try another league.',
   notSynced: 'This league isn’t loaded yet. Reopen it from the league picker and try again.',
   sessionReadFailed: 'Couldn’t load your session.',
@@ -139,10 +140,22 @@ type Phase =
 export default function CalibrationScreen() {
   const navigation = useNavigation<any>();
   const qc = useQueryClient();
+  const userId = useSession((s) => s.user?.user_id ?? null);
   const league = useSession((s) => s.league);
   const leagueId = league?.league_id ?? null;
   const hasLeague = !!leagueId && leagueId !== NO_LEAGUE_ID;
-  const currentKey = ['grading', 'current', leagueId] as const;
+  const currentKey = ['grading', 'current', leagueId, userId] as const;
+  const recoveryScope = useRef({ userId, leagueId });
+  if (recoveryScope.current.userId !== userId || recoveryScope.current.leagueId !== leagueId) {
+    recoveryScope.current = { userId, leagueId };
+  }
+  const screenScope = recoveryScope.current;
+  useEffect(() => {
+    // Restore the mount scope if React replays effect setup after cleanup.
+    recoveryScope.current = screenScope;
+    return () => { recoveryScope.current = { userId: null, leagueId: null }; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [completedId, setCompletedId] = useState<string | null>(null);
@@ -264,7 +277,27 @@ export default function CalibrationScreen() {
     setBuildSince(null);
     setBuildSlow(false);
     resetStart();
-  }, [leagueId, resetStart]);
+  }, [leagueId, userId, resetStart]);
+
+  // An unopened exercise can be retired between /current and /next. Retry
+  // discovers its replacement; retrying the retired ID can never succeed.
+  // Only this exact conflict changes sessions. Ordinary read errors retry the
+  // same endpoint, and recovery never enrolls or discards answered history.
+  const handleReadRetry = async () => {
+    if (recoveryScope.current !== screenScope) return;
+    if (!(sessionId && nextQ.error instanceof ApiError && nextQ.error.status === 409
+          && errorCode(nextQ.error) === 'comparison_not_ready')) {
+      void (sessionId ? nextQ : currentQ).refetch();
+      return;
+    }
+    const result = await currentQ.refetch();
+    if (recoveryScope.current !== screenScope || result.isError) return;
+    const replacement = result.data?.session;
+    setSessionId(replacement?.status === 'open' ? replacement.session_id : null);
+    setCompletedId(replacement?.status === 'completed' ? replacement.session_id : null);
+    setBuildSlow(false);
+    setBuildSince(replacement?.status === 'building' ? Date.now() : null);
+  };
 
   const handleDone = () => {
     setSessionId(null);
@@ -352,8 +385,8 @@ export default function CalibrationScreen() {
               testID="calibration.retry"
               label={COPY.tryAgain}
               variant="secondary"
-              disabled={sessionId ? nextQ.isFetching : currentQ.isFetching}
-              onPress={() => { void (sessionId ? nextQ : currentQ).refetch(); }}
+              disabled={nextQ.isFetching || currentQ.isFetching}
+              onPress={handleReadRetry}
             />
           </View>
         );
@@ -398,7 +431,7 @@ export default function CalibrationScreen() {
             <Text variant="body">{COPY.buildSlow}</Text>
             <Button
               testID="calibration.retry"
-              label={COPY.tryAgain}
+              label={COPY.checkAgain}
               variant="secondary"
               onPress={handleBuildRetry}
             />

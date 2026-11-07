@@ -63,3 +63,5 @@
 4. Mount `FeedbackFAB` if it is a root-stack push.
 5. Add a row to [CLAUDE.md](CLAUDE.md).
 6. Evidence per D-056 (2026-08-15): a `../../tests/check-*.js` guard for anything structural, a file:line code-walk for behavior, and a TestFlight checklist item for the operator. **No Maestro flow, no simulator capture** — `../../.maestro/` is retained history, not a workflow.
+
+Calibration recovery: exact `comparison_not_ready` conflicts rediscover the account/league current exercise; generic errors retry the same card. Long preparation offers Check again after bounded polling. See [scope](../../../docs/plans/calibration-session-recovery/scope.md).
