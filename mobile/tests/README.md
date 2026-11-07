@@ -74,3 +74,7 @@ nonempty model response is refused. Status revocation empties the old deck
 before the existing bounded one-shot exact-request recovery. Cold engine,
 network, permission and empty-result waits remain honest; no under-200ms
 all-entry claim is made by structural/effect tests.
+
+`check-trade-page-context.js` executes delayed hydration/persistence/clear, disk-only invalidation, same-key token replacement, captured format polling and overlapping scoring/write fences. `check-trade-prewarm.js` executes the shared preparation module and tab effect with readiness/preferences in parallel and unresolved hydration. Both fail if an asynchronous case never finishes. These are synthetic lifecycle checks, not device latency measurements.
+
+`check-trade-format-transition.js` executes the real scoring application wrapper through delayed local persistence and rejected writes. `check-trade-page-preparation.js` executes shared preparation plus the actual Trades focus/foreground effect bodies, including cleanup and reactivation.

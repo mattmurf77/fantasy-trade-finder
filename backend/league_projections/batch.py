@@ -95,7 +95,7 @@ def _bootstrap_connected(limit, *, user_id=None, league_id=None):
             added += 1
 
 
-def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=None):
+def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=None, foreground_busy=None):
     """Weekly dispatch, or explicit operator-only first baseline preparation.
 
     Initial preparation never refreshes a previously attempted baseline and
@@ -155,7 +155,7 @@ def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=N
             with db.engine.begin() as conn:
                 conn.execute(update(t).where(t.c.target_id == row["target_id"], t.c.lease_token == lease_token).values(lease_until=None, lease_token=None))
     from .service import wake
-    wake(fetch_json)
+    wake(fetch_json, foreground_busy=foreground_busy)
     return {"status": "dispatched", "queued": queued, "cadence": "weekly", "initial": initial, "schedule_timezone": options["schedule"]["timezone"]}
 
 

@@ -1,5 +1,11 @@
 # Native Find a Trade preparation
 
+2026-11-07 follow-up: [shared preparation lifecycle](mobile-context-preparation/scope.md)
+overrides the serial ordering below. Hydration runs independently; preferences and
+session readiness overlap. Every passive poll pins the captured valid format and
+session revision. Existing eviction, scope, preview and current-only gates remain.
+
+
 Base: `dd5058ba`. Scope: native empty-canvas organic calculator entry;
 no feature/config/production activation, UI copy or pinned-intent change.
 

@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-07 — Mobile passive preparation lifecycle candidate
+
+- Fresh organic preparation no longer waits for page hydration: request preferences and session readiness overlap, then every poll binds the captured format/session revision. Focus/foreground cleanup rejects obsolete responses. Selected model/fair handoffs and preview/current-only gates remain unchanged.
+- Serialized device writes/clear barriers and per-key hydration fences prevent old or disk-only pages from reviving after invalidation. Scoring input fencing now covers local mirror completion; format eviction remains.
+- Isolated from main `7e52047e`; no backend changes, production actions or 200 ms device claim. Independent review found no remaining blocker; exact-head CI and physical checks remain release work. [Scope and limits](../docs/plans/mobile-context-preparation/scope.md).
+
 ## 2026-11-07 — Calibration public round activated on PR616
 
 - Parent operator readback: PR616 CI42354107908 passed all four checks (**13,146 passed,42 skipped** backend); merged `974452ff`, exact tree matching `c9b930e`. Public activation live **2026-11-07T08:51:55Z** with round=true, prepare=false, blind=true.

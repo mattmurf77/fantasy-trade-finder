@@ -57,3 +57,7 @@ Persisted state is **user-scoped** (`<user_id>` in the key) so two accounts on o
    A module bus is only for two surfaces separated by a `Modal` boundary, where neither navigation params nor focus can reach across — `espnConnectBus`, `rankImportBus`, `onboardingBus`. Nothing else.
 4. Fetching goes in [`../api/`](../api/CLAUDE.md); pure math goes in [`../utils/`](../utils/CLAUDE.md). A store coordinates, it does not compute.
 5. Add a bullet to [CLAUDE.md](CLAUDE.md).
+
+### Passive trade-page preparation
+
+`tradePagePreparation.ts` coordinates tabs and Trades focus/foreground: independent disk hydration, parallel request preferences/session readiness, then revision-bound refresh. `devicePageStore.ts` pins the captured scoring-format header on every passive request, serializes disk writes and invalidation barriers, and rejects delayed hydration after key invalidation. `beginTradePageInputTransition` holds the existing input-write fence through scoring local mirrors. Scope and manual checks: [mobile-context-preparation](../../../docs/plans/mobile-context-preparation/scope.md).

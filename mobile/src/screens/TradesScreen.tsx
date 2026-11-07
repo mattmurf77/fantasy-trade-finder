@@ -241,14 +241,13 @@ import {
   mergeRevalidation,
 } from '../utils/devicePage';
 import {
-  hydrateDevicePages,
   notifyTradePageInputsSettled,
   discardDevicePage,
   readDevicePage,
-  refreshDevicePage,
   removeDeviceCard,
   saveDevicePage,
 } from '../state/devicePageStore';
+import { prepareTradePage } from '../state/tradePagePreparation';
 import { tradeSearchIdentity, startTradeSearchHandoff, takeTradeSearchHandoff } from '../state/tradeSearchHandoff';
 import CoachMark from '../components/CoachMark';
 import IdentityConfirmStrip from '../components/IdentityConfirmStrip';
@@ -3619,24 +3618,26 @@ export default function TradesScreen({ navigation, route }: any) {
   // tap sends, under no search id; the store throttles it to once per key
   // per 60 s and keeps only what devicePageFrom allows. Never on the tap.
   const devicePageTarget = useMemo(() => {
-    if (!deviceKey || !leagueId || !fairnessReady) return null;
+    if (!deviceKey || !leagueId || !fairnessReady || !activeFormat) return null;
     const request: GenerateBody = { league_id: leagueId, fairness_threshold: effectiveFairness };
     const scope = devicePageScope(request);
-    return scope ? { key: deviceKey, scope, request } : null;
-  }, [deviceKey, leagueId, fairnessReady, effectiveFairness]);
+    return scope ? { key: deviceKey, scope, format: activeFormat, request } : null;
+  }, [deviceKey, leagueId, fairnessReady, effectiveFairness, activeFormat]);
   useEffect(() => {
     if (isResultsPushed || !navFocused || !devicePageTarget) return;
-    void hydrateDevicePages().then(() => refreshDevicePage(devicePageTarget));
+    let cancelled = false;
+    void prepareTradePage(devicePageTarget.key, async () => devicePageTarget, () => !cancelled);
+    return () => { cancelled = true; };
   }, [isResultsPushed, navFocused, devicePageTarget]);
   useEffect(() => {
     if (isResultsPushed || !devicePageTarget) return;
+    let revision = 0;
     const sub = AppState.addEventListener('change', (st) => {
+      const attempt = ++revision;
       if (st !== 'active') return;
-      void useSession.getState().revalidateSession()
-        .then(() => hydrateDevicePages())
-        .then(() => refreshDevicePage(devicePageTarget));
+      void prepareTradePage(devicePageTarget.key, async () => devicePageTarget, () => attempt === revision);
     });
-    return () => sub.remove();
+    return () => { revision++; sub.remove(); };
   }, [isResultsPushed, devicePageTarget]);
   const finderHandoff = useFinderTargets((s) => s.handoff);
   const [autoRunSeq, setAutoRunSeq] = useState(0);

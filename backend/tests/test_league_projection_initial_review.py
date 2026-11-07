@@ -10,7 +10,7 @@ from backend.tests.test_outlook_calibration_persistence import engine
 @pytest.fixture
 def world(engine,monkeypatch):
     monkeypatch.setattr(batch,'is_enabled',lambda key:True)
-    monkeypatch.setattr(service,'wake',lambda *a:None)
+    monkeypatch.setattr(service,'wake',lambda *a, **kw:None)
     opts={**batch.settings(),'policy_approved':True}
     monkeypatch.setattr(batch,'settings',lambda:opts)
     pairs=[{'user_id':'account','league_user_id':'account','league_id':'123'}]

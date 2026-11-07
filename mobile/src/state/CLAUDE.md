@@ -4,6 +4,8 @@ Cross-screen state. **zustand**, not Context, for shared stores; the remaining m
 
 MAP, not a changelog — present behavior only. History: `git log -- <this file>` and `living-memory/CHANGELOG.md`.
 
+- `tradePagePreparation.ts` — shared passive page lifecycle for tabs and Trades focus/foreground. Hydration is independent; request preferences and session readiness join before revision-bound refresh. The store pins format on every poll and retains the existing write/preview/current-only gates. See [scope](../../../docs/plans/mobile-context-preparation/scope.md).
+
 - `leagueSession.ts` — the initialization lifecycle instantiated once by `useSession`. Captures account/league/token revision and selection generation, joins pending initialization, serializes acknowledged same-token writers, and latches ambiguous dispatched failures until a later deliberate action or replacement token. Readiness requires current accepted completion. Win Now's bounded read-only repair uses this same owner; no server cancellation or unconditional native storage ordering is promised.
 
 - `leagueSummaryIntent.ts` — Home hub's one-shot arrival intent for League rankings (D-202): `{kind:'split', leagueId, position, side:'buy'|'sell', seq}` or `{kind:'all', leagueId, seq}`. Home writes it (`requestLeagueSummarySplit` / `requestLeagueSummaryAll`), then switches tabs. LeagueSummaryScreen's TAB-ROOT registration consumes it on focus (`takeLeagueSummaryIntent`, which clears it always and discards it for another league). `seq` is a store-stamped nonce, so a repeat tap re-fires. A league switch clears it, and it is never persisted. Convention in `living-memory/LLD.md` (cross-tab arrival intents).
