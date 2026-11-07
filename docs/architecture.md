@@ -1,5 +1,7 @@
 # Architecture
 
+`calibration_provider_capture` supplies strict connected ESPN/MFL snapshots to the existing frozen comparison pipeline. It preserves native eligibility/inactive slots, verifies stored account/season/format bindings and same-source pick ownership, and refuses unknown configurations. It has no normal-serving or provider-write role. [Contract](plans/calibration-provider-capture/architecture.md).
+
 Calibration capture completes held-roster occupancy through `calibration_roster_coverage`, using fresh skill-position metadata for unranked players without adding model candidates or market prices. Missing metadata stays unknown; private evidence and roster sums explicitly identify unpriced occupancy. [Contract](plans/calibration-roster-coverage/scope.md).
 
 ## Persistent silent trade preparation

@@ -10,6 +10,8 @@
 
 Calibration coverage (2026-11-06): metadata-backed unranked holdings are safety occupancy only, with null market value, no generator candidate or usable replacement status. Fingerprints bind position/identity/active/injury facts; deploy requires unexposed re-preparation. [Contract](../docs/plans/calibration-roster-coverage/scope.md).
 
+Linked calibration capture (2026-11-06): strict ESPN/MFL normalization reuses stored consent/credentials and the full paired pipeline. Native mapping/settings and pick ownership must be represented exactly; unsupported inputs remain failures. Provider account/season/auth/format/credential revision joins semantic currentness. [Contract](../docs/plans/calibration-provider-capture/architecture.md).
+
 ## Table of Contents
 - [2026-11-06 — Evidence-bound outlook candidate](#2026-11-06--evidence-bound-outlook-candidate)
 - [What This Is](#what-this-is)
