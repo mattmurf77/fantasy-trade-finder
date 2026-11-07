@@ -28,3 +28,13 @@ def test_actual_roster_change_invalidates_unstarted_exercise(roster,engine):
         conn.execute(db.league_members_table.update().where(db.league_members_table.c.user_id=='b')
                      .values(roster_data='["p3"]'))
     assert adapter._input_identity('a','L')!=before
+
+@pytest.mark.parametrize('field,value', [('position','WR'), ('fantasy_positions',['WR']),
+    ('player_id','different'), ('active',False), ('injury_status','IR')])
+def test_unranked_occupancy_metadata_changes_invalidate_before_exposure(roster, monkeypatch, field, value):
+    facts = {'p1': {'position':'RB', 'fantasy_positions':['RB'], 'player_id':'p1',
+                    'active':True, 'injury_status':None}}
+    monkeypatch.setattr(server, '_load_sleeper_cache', lambda: facts)
+    before = adapter._input_identity('a', 'L')
+    facts['p1'][field] = value
+    assert adapter._input_identity('a', 'L') != before

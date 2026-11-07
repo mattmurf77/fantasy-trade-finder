@@ -1,3 +1,10 @@
+## 2026-11-06 — Calibration unranked held-roster coverage
+
+- Preparation canaries exposed held NFL skill players outside the ranked market pool. The calibration-only helper now preserves their known occupancy/availability without adding generator candidates, observed prices or usable replacement depth. Unknown metadata and unsupported positions still fail. Private proofs distinguish partial price sums; catalog prices are null for these holdings.
+- **97 passed in 7.71s**, network blocked and SQLite isolated: helper and actual two-engine inventory/proof checks, all consumed metadata fingerprint mutations, existing adapter/execution/provider identity, service/persistence/routes/cohorts including deletion fences. Independent evaluator also reports18 focused occupancy/actual-engine checks passed. Full CI remains required.
+- Normal serving/shared roster adapter/client trees unchanged; no new binary. Deploy changes calibration code identity, requiring unexposed snapshots to be prepared again. Existing exposed/answered sessions stay frozen. Parent owns review/CI/deploy; provider capture extension remains separate unfinished work.
+- [Scope and evidence contract](../docs/plans/calibration-roster-coverage/scope.md). No simulator/Maestro, customer records or production mutations by implementation.
+
 ## 2026-11-06 — Calibration CI fixture and deletion-fence guard follow-up
 
 - PR608 first full CI:12,930 passed/42 skipped, two contract failures. Release flags lacked the two default-false Calibration keys; the users-row-lock AST guard recognized only direct calls and misclassified the borrowed-connection grading helper.

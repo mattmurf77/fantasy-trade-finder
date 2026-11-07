@@ -66,7 +66,7 @@ def _input_identity(user_id, league_id):
     return _hash(dict(code_revision=code_revision(), format=fmt, members=member_facts,
         roster_state={k: state.get(k) for k in ("roster_fp", "status")},
         availability={p: {k: (metadata.get(p) or {}).get(k) for k in
-                          ("injury_status", "fantasy_positions")} for p in held | set(player_map)},
+                          ("injury_status", "fantasy_positions", "position", "player_id", "active")} for p in held | set(player_map)},
         slot_order=s._league_slot_order(league_id), provenance=provenance,
         prefs=s.load_league_preferences_bulk(ids, league_id),
         asset_prefs={u: s.load_asset_preferences(user_id=u, league_id=league_id) for u in ids},
@@ -170,6 +170,8 @@ class CapturedComparison:
             retained = {id(card) for card in cards}
             cards = [card for card in original if id(card) in retained]
             del original, retained
+            from .calibration_roster_coverage import annotate_coverage
+            annotate_coverage(cards, self.source.get("unpriced_occupancy") or {}, self.roster_context)
             roster_count = len(cards)
             cards, _, significance_diag = s._evaluate_trade_significance(
                 cards, capture=self.significance, players=context["players"],
@@ -321,6 +323,8 @@ def capture(*, user_id, league_user_id, league_id):
             if pid not in roster_ctx.assets:
                 roster_ctx.assets[pid] = Asset(pid, frozenset(),
                     float(s._priced_pick_value(pick, order, fmt)), is_pick=True)
+        from .calibration_roster_coverage import add_unranked_occupancy
+        unpriced_occupancy = add_unranked_occupancy(roster_ctx, metadata)
         for uid, team in roster_ctx.teams.items():
             roster_ctx.utility_inputs[uid] = {"explicit_outlook": prefs.get("team_outlook") if uid == seat else context["opponent_outlooks"].get(uid),
                 "inferred_outlook": prefs.get("inferred_outlook") if uid == seat else None,
@@ -332,7 +336,7 @@ def capture(*, user_id, league_user_id, league_id):
         "captured_at": datetime.now(timezone.utc).isoformat(),
         "input": assignment["input"], "input_evidence": assignment["input_evidence"],
         "roster_context": {k: v for k, v in asdict(roster_ctx).items() if k not in {"cache", "_assignments"}},
-        "flags": flags, "significance": significance,
+        "flags": flags, "significance": significance, "unpriced_occupancy": unpriced_occupancy,
         "code_revision": code_revision(), "provider_rules": _provider_rules(raw["meta"]),
         "registered_participants": sorted(registered), "registered_participant_revisions": registered,
         "suppression": _suppression_state(s, user_id, league_id) if flags["deck_fatigue"] else None,
@@ -355,7 +359,7 @@ def capture(*, user_id, league_user_id, league_id):
               "nfl_team": getattr(players.get(pid), "team", None),
               "age": (context["input_evidence"].get("age", {}).get(pid, {}).get("age")
                       if context["input_evidence"].get("age", {}).get(pid, {}).get("state") == "observed"
-                      else None), "value": round(asset.value)}
+                      else None), "value": None if pid in unpriced_occupancy else round(asset.value)}
               for pid, asset in roster_ctx.assets.items()}
     names = {str(m["user_id"]): m.get("username") or "League manager" for m in resolved["opponent_rosters"]}
     return CapturedComparison(context, Catalog(assets, names, holdings), source,
