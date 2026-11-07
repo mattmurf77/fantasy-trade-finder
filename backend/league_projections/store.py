@@ -77,6 +77,21 @@ def get(run_id, user_id, league_id):
     return dict(row) if row else None
 
 
+
+def public_rows(run_ids, user_id, league_id):
+    """Request-local view rows; exclude private snapshots and worker inputs."""
+    ids = tuple(dict.fromkeys(run_id for run_id in run_ids if run_id))
+    if not ids:
+        return {}
+    t = table()
+    columns = (t.c.run_id, t.c.status, t.c.created_at, t.c.updated_at,
+               t.c.input_hash, t.c.reason, t.c.details_json, t.c.result_json)
+    with db.engine.connect() as conn:
+        rows = conn.execute(select(*columns).where(
+            t.c.run_id.in_(ids), t.c.user_id == user_id, t.c.league_id == league_id)).mappings().all()
+    return {row["run_id"]: dict(row) for row in rows}
+
+
 def control(run_id, user_id, league_id):
     """Read only cancellation facts; never transfer the captured/result payload."""
     t = table()
