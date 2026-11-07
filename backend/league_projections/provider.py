@@ -188,7 +188,13 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
     settings = league.get("settings", {})
     if league.get("sport") != "nfl" or league.get("season_type") != "regular":
         raise Unavailable("unsupported_sport_or_season")
-    if any(settings.get(k, 0) for k in ("divisions", "league_average_match", "best_ball", "playoff_seed_type")) or league.get("bracket_overrides_id"):
+    # Native 0/1 selects fixed/reseeded matchups in later playoff rounds,
+    # not regular-season qualification or first-round byes. See the source
+    # mapping in docs/plans/league-projections/reseeding-admission.md.
+    playoff_seed_type = settings.get("playoff_seed_type", 0)
+    if type(playoff_seed_type) is not int or playoff_seed_type not in (0, 1):
+        raise Unavailable("unsupported_playoff_reseeding_policy")
+    if any(settings.get(k, 0) for k in ("divisions", "league_average_match", "best_ball")) or league.get("bracket_overrides_id"):
         raise Unavailable("unsupported_divisions_median_bestball_or_manual_seeding")
     if settings.get("start_week", 1) != 1:
         raise Unavailable("nonstandard_start_week")
@@ -488,7 +494,7 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
             "player_week_inputs": normalized_inputs, "slots": slots, "scoring": league["scoring_settings"], "scoring_hash": digest(league["scoring_settings"]),
             "teams": teams, "weeks": result_weeks, "pick_ownership": ownership, "captured_at": captured_at, "capture_completed_at": finished,
             "source": weekly["source"], "source_captured_at": weekly["captured_at"], "league_revision": revision,
-            "coverage": {**weekly.get("coverage", {}), "historical_maxpf_by_week": False, "live_weeks": False, "completed_game_actuals": best,
+            "coverage": {**weekly.get("coverage", {}), "native_playoff_seed_type": playoff_seed_type, "postseason_rounds_simulated": False, "historical_maxpf_by_week": False, "live_weeks": False, "completed_game_actuals": best,
                          "estimated": any(t["projection_coverage"]["estimated"] for week in result_weeks for t in week["teams"].values()),
                          "unpriced_player_weeks": sum(len(t["projection_coverage"]["unpriced_players"]) for week in result_weeks for t in week["teams"].values()),
                          "partial_player_weeks": sum(len(t["projection_coverage"]["partial_players"]) for week in result_weeks for t in week["teams"].values()),

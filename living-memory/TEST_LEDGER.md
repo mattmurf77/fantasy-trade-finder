@@ -1,3 +1,9 @@
+## 2026-11-07 — Documented playoff reseeding admission correction
+
+- Isolated from currentmainfb64639 after read-only production policy diagnosis. Official Sleeper application read/selector/write code confirms playoff_seed_type0/1 controls later-round bracket matchups, not regular-season qualification. Exact native integers0/1 admitted; malformed/unknown and other rule guards retained. Native setting and no-postseason-simulation coverage are explicit; no simulation/trade/ranking/flag change.
+- Focused projection/privacy/paywall suite: **349 passed9.69s**. Independent frozen review: **43 passed0.90s**, including8-team6-playoff2-bye qualification/record/owned-pick parity, immutable prior-main defaultcapture comparison, typed refusals and midcapture setting-change fencing. Twenty-one portable independent cases copied into repository; the git-history baseline test stays external.
+- Source proof and bounded scope: [reseeding admission](../docs/plans/league-projections/reseeding-admission.md). No production mutation, merge or deploy. Exact-head full CI and root-coordinated Calibration currentness/rebuild required before rollout.
+
 ## 2026-11-07 — Combined projections and cancellation release candidate
 
 - Integrated reviewed PR618 head4056e610 into PR611; runtime auto-merge preserved projection routes, cancellation and pipeline13. The sole conflict was additive TEST_LEDGER content, both retained.
