@@ -72,13 +72,16 @@ const COPY = {
   introTitle: 'Calibration',
   intro: (league: string) =>
     `Would you send these trades in ${league}? Rate one idea at a time, or skip it.`,
+  snapshot: (date: string) => `League snapshot from ${new Date(date).toLocaleDateString()}. Rate the idea using that snapshot.`,
   purpose:
     'Your answers help improve the trades Fleeced suggests. Rating a trade never sends an offer.',
   start: 'Start',
   resume: (k: number, n: number) => `Resume (${k} of ${n} answered)`,
   noLeague: 'Pick a league first.',
   unavailableTitle: 'Not available',
-  unavailable: "Calibration isn't turned on for this account.",
+  unavailable: "Calibration isn't available right now.",
+  unsupported: 'This exercise needs league roster details that aren’t available for this platform yet. Try a connected Sleeper league.',
+  interrupted: 'This deck was interrupted while building. Start over for a fresh comparison.',
   needsDeck: "Open Acquire for this league first so there's a fresh deck to compare against, then come back.",
   openAcquire: 'Open Acquire',
   tryAgain: 'Try again',
@@ -109,8 +112,14 @@ const errorCode = (e: unknown): string | null =>
 // Copy for a session the server flipped to `failed` (§3.3). The code's
 // prefix names the second engine, and this file is pinned never to spell it
 // (the blinding guard), so the match is on the suffix alone.
-const failedCopy = (session: GradingSession): string =>
-  session.error?.code?.endsWith('too_few') ? COPY.tooFew : COPY.buildFailed;
+const failedCopy = (session: GradingSession): string => {
+  const code = session.error?.code ?? '';
+  if (code.endsWith('too_few')) return COPY.tooFew;
+  if (['unsupported_platform', 'provider_roster_coverage_unavailable'].includes(code)) return COPY.unsupported;
+  if (['league_not_synced', 'league_not_connected', 'seat_changed', 'league_seat_changed', 'roster_unavailable', 'league_data_unavailable', 'league_rosters_unavailable', 'lineup_unavailable', 'pick_ownership_unavailable', 'player_availability_stale'].includes(code)) return COPY.notSynced;
+  if (code === 'comparison_interrupted') return COPY.interrupted;
+  return COPY.buildFailed;
+};
 
 const startErrorCopy = (e: unknown): string => {
   const code = errorCode(e);
@@ -163,6 +172,7 @@ export default function CalibrationScreen() {
       // is not spent re-reading what we were just told.
       qc.setQueryData(currentKey, { session: r.session });
       if (r.session.status === 'open') setSessionId(r.session.session_id);
+      if (r.session.status === 'completed') setCompletedId(r.session.session_id);
       // `building` ⇒ currentQ's refetchInterval takes over; the effect below
       // enters grading the moment the status flips to `open`.
     },
@@ -405,6 +415,7 @@ export default function CalibrationScreen() {
             <TickLabel>{COPY.introTitle}</TickLabel>
             <Text variant="body">{COPY.intro(league?.league_name ?? 'this league')}</Text>
             <Text variant="bodySm" testID="calibration.purpose">{COPY.purpose}</Text>
+            {serverSession?.captured_at ? <Text variant="bodySm">{COPY.snapshot(serverSession.captured_at)}</Text> : null}
             {open ? (
               <Button
                 testID="calibration.resume"
@@ -444,6 +455,7 @@ export default function CalibrationScreen() {
               </View>
             </View>
 
+            {serverSession?.captured_at ? <Text variant="bodySm">{COPY.snapshot(serverSession.captured_at)}</Text> : null}
             <View testID="calibration.card">
               <GradingCard trade={card.trade} />
             </View>

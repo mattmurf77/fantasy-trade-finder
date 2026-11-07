@@ -123,7 +123,7 @@ def add_fit_arms(*, session_id: str, server: ServerInputs, ros_points: Mapping[s
     from backend.value_core.types import ENGINE_VERSION as CORE_ENGINE_VERSION
 
     row = db.load_grading_session(session_id)
-    if row is None or row["status"] != "open":
+    if row is None or row["status"] != "open" or row.get("round_id") is not None:
         return {"status": "skipped", "reason": "not_open"}
     source = json.loads(row["source_json"])
     if any(arm in source for arm in FIT_ARMS):
@@ -300,6 +300,9 @@ def next_card(*, user_id: str, session_id: str) -> dict:
     row = db.load_grading_session(session_id, user_id)
     if row is None:
         raise GradingError("not_found", 404)
+    if row.get("round_id") is not None:
+        from .outlook_calibration import next_card as round_next_card
+        return round_next_card(user_id=user_id, row=row)
     progress = db.grading_progress(session_id)
     card = db.load_next_grading_card(session_id) if row["status"] == "open" else None
     if card is None:
@@ -320,7 +323,7 @@ def answer_card(*, user_id: str, card_id: str, body: object,
     if res is None:
         raise GradingError("not_found", 404)
     if res["rejected"]:
-        raise GradingError("session_completed", 409)
+        raise GradingError("answer_conflict" if res.get("conflict") else "session_completed", 409)
     return {"card_id": card_id, "session_id": res["session_id"],
             "session_status": res["status"],
             "progress": {"answered": res["answered"], "total": res["total"]}}
@@ -333,6 +336,9 @@ def results(*, user_id: str, session_id: str) -> dict:
         raise GradingError("not_found", 404)
     if row["status"] != "completed":
         raise GradingError("session_incomplete", 409, progress=db.grading_progress(session_id))
+    if row.get("round_id") is not None:
+        from .outlook_calibration import results as round_results
+        return round_results(row)
     cards = db.load_grading_cards(session_id)
     arms, shared = arm_summaries(cards)
     return {"session_id": session_id, "league_id": row["league_id"],
@@ -707,7 +713,9 @@ def session_view(row: Mapping) -> dict:
             "status": row["status"], "created_at": row["created_at"],
             "completed_at": row["completed_at"],
             "progress": db.grading_progress(row["session_id"]),
-            "error": json.loads(error) if error else None}
+            "error": json.loads(error) if error else None,
+            **({"captured_at": json.loads(row["source_json"]).get("snapshot", {}).get("captured_at")}
+               if row.get("round_id") is not None else {})}
 
 
 def summarize(graded: Sequence[tuple[int, Sequence[str]]]) -> dict:

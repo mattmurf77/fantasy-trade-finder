@@ -1407,6 +1407,8 @@ Shared by `backend/overhaul_service.py` and `mobile/src/api/overhaul.ts` (the on
 
 ## Calibration tags and scale
 
+New round `outlook-v2-v3-1` keeps the same neutral card/Yes-No/reason-tag wire contract. `current`/`value_core` are installed-client aliases for the exact owner versions named only in private attribution and completed results. SessionView may show `captured_at`; it never carries arm assignment. A shown exercise stays frozen even before its first answer. First-answer retries are idempotent; changed retries conflict. New binaries show as-of and limited-sample context and reopen completed results; older binaries retain first-run voting/immediate results but do not reopen completed results via Start. No client writes organic trade/rank events for Calibration.
+
 In-app blind grading — value-core Gate 2, flag `grading.blind` ([plans/blind-grading/](plans/blind-grading/)) — has one wire vocabulary shared by the service and the mobile client. **`backend/blind_grading.TAGS` and `mobile/src/api/grading.ts` `GRADING_TAGS` are the same seven strings in the same order**, and `blind_grading.validate_answer` rejects anything else with 400 `invalid_body`:
 
 | Key | Mobile label (`GRADING_TAG_LABELS`) |

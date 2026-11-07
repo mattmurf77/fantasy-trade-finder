@@ -47,6 +47,7 @@ FROZEN_PINS = {
     9: "28d212cdc5c6cb05",
     10: "cdabd9935a58d51d",
     11: "8a3fa8db29d87e39",  # Evidence-bound bilateral v3 and private input capture.
+    12: "3b5a7de53dd0081e",  # Frozen calibration suppression input seam; organic defaults preserved.
 }
 PINNED = server.DECK_PIPELINE_PINS.get(server.DECK_PIPELINE_VERSION)
 

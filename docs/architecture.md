@@ -370,6 +370,8 @@ Contracts: [API](api-reference.md#value-core-cards-flag-tradevalue_core),
 
 ## Calibration (blind grading)
 
+The default-off [outlook comparison round](plans/outlook-calibration-round/architecture.md) uses `outlook_calibration.py` for namespaced persistence, balanced selection and a leased serial queue, and `outlook_calibration_adapter.py` for one authorized provider/input capture and both exact owner versions through frozen final gates. Admin preparation and public exposure have separate switches. Native decks are released between arms; only up to20 selected full proofs per arm persist privately. Existing Calibration history/normal serving remain separate.
+
 `backend/blind_grading.py` (flag `grading.blind`, on for every app user in
 `config/features.json`; the code default stays off and the flag is the kill
 switch) is value-core **Gate 2** as an app feature: does the

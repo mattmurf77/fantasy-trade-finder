@@ -1,9 +1,8 @@
 import { api, getDeviceId } from './client';
 
-// Calibration — in-app blind grading, value-core Gate 2.
+// Calibration — versioned in-app blind comparisons.
 // Contract: docs/plans/blind-grading/specs.md §3.2. Every /api/grading/* call
-// 404s unless grading.blind resolves true for this caller AND the caller is on
-// the tester allowlist. X-Device-Id rides every call so the server can resolve a
+// 404s unless grading.blind resolves true for this caller; access is public. X-Device-Id rides every call so the server can resolve a
 // device-unit flag overlay exactly as /api/feature-flags does (api/flags.ts).
 
 export type GradingTag =
@@ -33,8 +32,9 @@ export interface GradingSession {
   status: 'building' | 'open' | 'completed' | 'failed';
   created_at: string;
   completed_at: string | null;
+  captured_at?: string | null;
   progress: GradingProgress;
-  error: { code: 'value_core_too_few' | 'value_core_failed'; [k: string]: unknown } | null;
+  error: { code: string; [k: string]: unknown } | null;
 }
 
 export interface GradingAsset {
@@ -89,6 +89,10 @@ export interface GradingResults {
   total: number;
   shared: number;
   target_mean: number;
+  round_id?: string;
+  sample_size_status?: 'limited' | 'descriptive_only';
+  model_versions?: { current: string; value_core: string };
+  arm_labels?: { current: string; value_core: string };
   arms: { current: GradingArmSummary; value_core: GradingArmSummary };
 }
 

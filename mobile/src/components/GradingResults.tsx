@@ -70,6 +70,13 @@ export default function GradingResults({ results }: { results: Results }) {
       {ARM_ORDER.map((arm) => (
         <ArmCard key={arm} label={ARM_LABEL[arm]} arm={results.arms[arm]} />
       ))}
+      {results.round_id ? (
+        <Text variant="bodySm" style={styles.footer}>
+          {results.sample_size_status === 'limited'
+            ? 'Small sample: these are your ratings of the available ideas, not a verdict on overall engine quality.'
+            : 'These ratings describe your sample, not overall engine quality.'}
+        </Text>
+      ) : null}
       <Text variant="bodySm" style={styles.footer}>
         {`${results.shared} trades were suggested by both engines and count for both.`}
       </Text>

@@ -37,6 +37,7 @@ import pathlib
 import pytest
 from sqlalchemy import String, or_, select
 
+import backend.outlook_calibration as outlook_calibration
 import backend.accounts as accounts
 import backend.database as db_module
 import backend.roster_history as roster_history
@@ -370,10 +371,11 @@ def test_a_linked_league_keeps_its_platform(harness, league_id, platform):
 # Where the lock sits (structural; the behavior tests above can't tell)
 # ---------------------------------------------------------------------------
 
-# Every database.py writer that takes the users-row lock. A writer added to
+# Every database.py or outlook_calibration.py writer taking this fence. A writer added to
 # or dropped from this set fails the test until it's listed here.
 _GUARDED_WRITERS = {"first_init_transaction", "upsert_user", "upsert_league", "record_event", "write_session_init_members",
-                    "upsert_roster_snapshots", "upsert_board_snapshots"}
+                    "upsert_roster_snapshots", "upsert_board_snapshots",
+                    "insert_grading_session", "finish_grading_session_build", "_save_build"}
 
 
 def _called(func):
@@ -381,13 +383,13 @@ def _called(func):
 
 
 def _opening_lock(with_node):
-    """The `_lock_live_user` call that opens this `with` block, directly or as
-    the first statement of a leading `if` (`if require_user:`), or None."""
+    """The direct or contract-checked grading fence opening this block,
+    including the first statement of a leading `if`, or None."""
     first = with_node.body[0]
     if isinstance(first, ast.If) and not first.orelse:
         first = first.body[0]
     if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Call)
-            and _called(first.value.func) == "_lock_live_user"):
+            and _called(first.value.func) in {"_lock_live_user", "_lock_grading_owner"}):
         return first.value
     return None
 
@@ -479,22 +481,55 @@ def _first_after_lock_is_the_write(w, call, aliases):
     return False
 
 
-def test_every_users_row_lock_opens_the_transaction_that_writes():
-    """`_lock_live_user(conn, …)` must be the first statement inside the
-    `with <engine>.begin() as conn:` block that also makes the write, and on
-    that block's own `conn`. After a write it locks too late; alone in its own
-    transaction it's released before the write. The block's next use of
-    `conn` must be the write (or the upsert's read of the table it writes),
-    so nothing unrelated runs under the lock first. On SQLite, run one at a
-    time, none of this shows (release-lead's #587 QA), so this reads the
-    source."""
-    tree = ast.parse(pathlib.Path(db_module.__file__).read_text())
+def _grading_fence_valid(fn):
+    """Pin the one borrowed-connection wrapper, not an exemption for locks.
+
+    Pure input decoding may precede its lock; its first database operation
+    must lock the supplied conn, followed only by participant/owner reads on
+    that conn. It may not own/release a transaction or write independently.
+    """
+    conn = fn.args.args[0].arg
+    calls = _db_calls(fn, conn)
+    if not calls or _called(calls[0].func) != "_lock_live_user":
+        return False
+    lock = calls[0]
+    if (not lock.args or not isinstance(lock.args[0], ast.Name)
+            or lock.args[0].id != conn
+            or sum(_called(c.func) == "_lock_live_user" for c in calls) != 1):
+        return False
+    allowed_calls = {"get", "set", "_lock_live_user", "execute", "select", "where",
+                     "in_", "mappings", "keys", "items", "any", "AccountGone"}
+    if any(isinstance(n, ast.Call) and _called(n.func) not in allowed_calls for n in ast.walk(fn)):
+        return False
+    if any(isinstance(n, ast.Call) and _called(n.func) == "execute"
+           and (not isinstance(n.func, ast.Attribute) or not isinstance(n.func.value, ast.Name)
+                or n.func.value.id != conn) for n in ast.walk(fn)):
+        return False
+    for call in calls[1:]:
+        if (not isinstance(call.func, ast.Attribute)
+                or not isinstance(call.func.value, ast.Name) or call.func.value.id != conn
+                or call.func.attr != "execute"
+                or _kind(call.args[0], {}) != ("read", {"users_table"})):
+            return False
+    code = ast.unparse(fn)
+    return all(required in code for required in (
+        "_lock_live_user(conn, user_id, related_user_ids=participants)",
+        "not rows[user_id]['verified_via']", "not participants <= rows.keys()",
+        "rows[uid]['created_at'] != revision for uid, revision in revisions.items()"))
+
+
+def _guarded_writer_findings(trees):
     guarded, bad = set(), []
-    for fn in ast.walk(tree):
+    for fn in (n for tree in trees for n in ast.walk(tree)):
         if not isinstance(fn, ast.FunctionDef) or fn.name == "_lock_live_user":
             continue
+        if fn.name == "_lock_grading_owner":
+            if not _grading_fence_valid(fn):
+                bad.append("_lock_grading_owner: invalid borrowed-connection fence")
+            continue
         locks = [n for n in ast.walk(fn)
-                 if isinstance(n, ast.Call) and _called(n.func) == "_lock_live_user"]
+                 if isinstance(n, ast.Call)
+                 and _called(n.func) in {"_lock_live_user", "_lock_grading_owner"}]
         if not locks:
             continue
         guarded.add(fn.name)
@@ -519,11 +554,57 @@ def test_every_users_row_lock_opens_the_transaction_that_writes():
                   and call.args[0].id == item.optional_vars.id
                   and len(w.body) > 1)                  # the write is in the same block
             if not ok:
-                bad.append(f"{fn.name} (database.py:{call.lineno}): not opening its write's block")
+                bad.append(f"{fn.name} (line {call.lineno}): not opening its write's block")
             elif not _first_after_lock_is_the_write(w, call, aliases):
-                bad.append(f"{fn.name} (database.py:{call.lineno}): its next statement isn't the write")
+                bad.append(f"{fn.name} (line {call.lineno}): its next statement isn't the write")
+    return guarded, bad
+
+
+def test_every_users_row_lock_opens_the_transaction_that_writes():
+    """`_lock_live_user(conn, …)` must be the first statement inside the
+    `with <engine>.begin() as conn:` block that also makes the write, and on
+    that block's own `conn`. After a write it locks too late; alone in its own
+    transaction it's released before the write. The block's next use of
+    `conn` must be the write (or the upsert's read of the table it writes),
+    so nothing unrelated runs under the lock first. On SQLite, run one at a
+    time, none of this shows (release-lead's #587 QA), so this reads the
+    source."""
+    trees = [ast.parse(pathlib.Path(module.__file__).read_text())
+             for module in (db_module, outlook_calibration)]
+    guarded, bad = _guarded_writer_findings(trees)
     assert not bad, f"users-row lock out of place: {bad}"
     assert guarded == _GUARDED_WRITERS
+
+
+def test_grading_fence_guard_rejects_a_read_before_the_lock_and_a_new_connection():
+    tree = ast.parse(pathlib.Path(db_module.__file__).read_text())
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_lock_grading_owner")
+    source = ast.unparse(fn)
+    assert _grading_fence_valid(fn)
+    lock = "_lock_live_user(conn, user_id, related_user_ids=participants)"
+    for changed in (
+        source.replace(lock, "conn.execute(select(users_table))\n    " + lock),
+        source.replace(lock, "other = engine.connect()\n    " + lock.replace("(conn,", "(other,")),
+        source.replace("rows[uid]['created_at'] != revision", "False"),
+        source.replace(lock, "load_private_board()\n    " + lock),
+    ):
+        assert not _grading_fence_valid(ast.parse(changed).body[0])
+
+
+def test_grading_writer_guard_rejects_late_separate_or_wrong_connection_fences():
+    valid = """def _save_build():
+    with engine.begin() as conn:
+        db._lock_grading_owner(conn, user_id, source)
+        conn.execute(update(grading_sessions_table).values(source_json=source))
+"""
+    assert _guarded_writer_findings([ast.parse(valid)]) == ({"_save_build"}, [])
+    variants = (
+        valid.replace("        db._lock_grading_owner", "        conn.execute(select(users_table))\n        db._lock_grading_owner"),
+        valid.replace("db._lock_grading_owner(conn,", "db._lock_grading_owner(other,"),
+        valid.replace("        conn.execute(update", "    with engine.begin() as conn:\n        conn.execute(update"),
+    )
+    for changed in variants:
+        assert _guarded_writer_findings([ast.parse(changed)])[1]
 
 
 def test_the_lock_runs_on_the_transaction_it_is_handed():

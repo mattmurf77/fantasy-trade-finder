@@ -1554,6 +1554,8 @@ def _export_grading_arms(raw):
         return None
     if not isinstance(arms, dict) or not all(isinstance(v, dict) for v in arms.values()):
         return None
+    if any(str(v.get("model_version", "")).startswith("owner-v2-bilateral-") for v in arms.values()):
+        return None  # private blinded round attribution; grades/trades still export
     return json.dumps({arm: {k: v for k, v in prov.items() if k not in _GRADING_ARM_PARTNER_KEYS}
                        for arm, prov in arms.items()}, sort_keys=True)
 
@@ -1619,6 +1621,11 @@ def export_user_data(sleeper_user_id: str,
             elif key == "trade_proposals":
                 for row in tables[key]:
                     row["valuation_json"] = _export_valuation(row["valuation_json"])
+            elif key == "grading_sessions":
+                for row in tables[key]:
+                    if row.get("round_id") is not None:
+                        row.pop("counts_json", None)  # private generation diagnostics
+                        row.pop("active_round_key", None)
             elif key == "grading_cards":
                 for row in tables[key]:
                     row["arms_json"] = _export_grading_arms(row["arms_json"])

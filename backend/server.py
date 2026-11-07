@@ -4514,7 +4514,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 11
+DECK_PIPELINE_VERSION = 12
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4648,6 +4648,7 @@ DECK_PIPELINE_PINS = {
     9: "28d212cdc5c6cb05",   # Current-only clients may use an authenticated, durably committed ranked owner prefix; no terms/order change.
     10: "cdabd9935a58d51d",  # Immutable scalar proof projections avoid repeated JSON reads; no terms/order/evaluation change.
     11: "8a3fa8db29d87e39",  # Evidence-bound bilateral v3 and private input capture.
+    12: "3b5a7de53dd0081e",  # Frozen calibration suppression input seam; organic defaults preserved.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -11459,6 +11460,7 @@ def _apply_deck_suppression(
     league_id: str,
     seed_map: dict,
     mutation_sink=None,
+    frozen_state=None,
 ) -> tuple[list, dict | None, set]:
     """Remove decline-window near-duplicates from a generated deck.
 
@@ -11475,22 +11477,29 @@ def _apply_deck_suppression(
     fewer than _DECK_MIN_CARDS when the input had that many — restored
     cards are logged, not silently dropped. likes_you cards are never
     suppressed (mirror interest outranks a stale decline)."""
-    rows = load_deck_suppressions(user_id, league_id)
+    if frozen_state is not None and mutation_sink is None:
+        raise ValueError("frozen suppression requires a private mutation sink")
+    rows = (copy.deepcopy(frozen_state["rows"]) if frozen_state is not None
+            else load_deck_suppressions(user_id, league_id))
     if not rows or not cards:
         return cards, None, set()
 
-    now      = datetime.now(timezone.utc)
+    now = (datetime.fromisoformat(frozen_state["now"]) if frozen_state is not None
+           else datetime.now(timezone.utc))
     now_iso  = now.isoformat()
-    band     = max(0.0, _deck_cfg("fatigue_decline_value_band", 0.10))
-    window_d = max(1, int(_deck_cfg("fatigue_decline_suppress_days", 30)))
+    band = max(0.0, frozen_state["band"] if frozen_state is not None
+               else _deck_cfg("fatigue_decline_value_band", 0.10))
+    window_d = max(1, int(frozen_state["window_days"] if frozen_state is not None
+                          else _deck_cfg("fatigue_decline_suppress_days", 30)))
 
     # Lazy re-suppress: retested + expired + passed-after-retest ⇒ new window.
     for r in rows:
         if (r.get("expires_at") and r["expires_at"] <= now_iso
                 and r.get("retested_at") and r.get("retest_trade_hash")):
             try:
-                passed_at = load_deck_pass_after(
-                    user_id, league_id, r["retest_trade_hash"], r["retested_at"])
+                passed_at = (frozen_state["passed_at"].get(str(r["id"]))
+                    if frozen_state is not None else load_deck_pass_after(
+                        user_id, league_id, r["retest_trade_hash"], r["retested_at"]))
             except Exception as e:
                 log.warning("deck fatigue: retest pass check failed: %s", e)
                 passed_at = None
@@ -35659,6 +35668,7 @@ def delete_test_user_route(user_id: str):
 # GradingError. They never touch trade_service, impressions or swipes.
 
 from . import blind_grading as _blind_grading
+from . import outlook_calibration as _outlook_calibration
 
 
 def _calibration_allowed(sess) -> bool:
@@ -35811,12 +35821,23 @@ def grading_create_session_route():
         # start_session resumes a building/open session itself (a failed one starts fresh)
         # and reports needs_build=True for a resumed 'building' row, so a build orphaned by
         # a restart or deploy is re-kicked here; a duplicate build writes nothing.
-        out = _blind_grading.start_session(
-            user_id=user_id, league_user_id=_league_user_id(sess), league_id=league_id)
+        prior_round = _blind_grading.db.load_open_grading_session(
+            user_id, league_id, statuses=("open",), round_id=_outlook_calibration.ROUND_ID)
+        if _outlook_calibration.enabled():
+            out = _outlook_calibration.start_session(
+                user_id=user_id, league_user_id=_league_user_id(sess), league_id=league_id)
+        elif prior_round is not None and (prior_round.get("first_exposed_at")
+                or _blind_grading.db.grading_progress(prior_round["session_id"])["answered"]):
+            out = {"session": _blind_grading.session_view(prior_round), "resumed": True, "needs_build": False}
+        else:
+            out = _blind_grading.start_session(
+                user_id=user_id, league_user_id=_league_user_id(sess), league_id=league_id)
     except _blind_grading.GradingError as err:
         return _grading_error(err)
     session_id = out["session"]["session_id"]
-    if out.get("needs_build"):
+    if out.get("needs_build") and _outlook_calibration.enabled():
+        _outlook_calibration.kick_worker()
+    elif out.get("needs_build"):
         # One synchronous gunicorn worker (render.yaml): a 2–12 s inline build
         # would stall every user's request, so the slow half runs here instead.
         threading.Thread(target=_build_grading_session, args=(dict(sess), league_id, session_id),
@@ -35834,8 +35855,20 @@ def grading_current_session_route():
     league_id = (request.args.get("league_id") or "").strip()
     if not league_id:
         return jsonify({"error": "invalid_body", "message": "league_id is required"}), 400
-    return jsonify(_blind_grading.current_session(user_id=str(sess["user_id"]),
-                                                  league_id=league_id))
+    if _outlook_calibration.enabled():
+        try:
+            out = _outlook_calibration.current_session(user_id=str(sess["user_id"]), league_id=league_id)
+        except _blind_grading.GradingError as err:
+            return _grading_error(err)
+        if out["session"] and out["session"]["status"] == "building":
+            _outlook_calibration.kick_worker()
+        return jsonify(out)
+    existing = _blind_grading.db.load_open_grading_session(
+        str(sess["user_id"]), league_id, statuses=("open",), round_id=_outlook_calibration.ROUND_ID)
+    if existing is not None and (existing.get("first_exposed_at")
+            or _blind_grading.db.grading_progress(existing["session_id"])["answered"]):
+        return jsonify({"session": _blind_grading.session_view(existing)})
+    return jsonify(_blind_grading.current_session(user_id=str(sess["user_id"]), league_id=league_id))
 
 
 @app.route("/api/grading/sessions/<session_id>/next")
@@ -35956,6 +35989,17 @@ def admin_grading_pregenerate_route():
     with "refresh_rosters": true, each Sleeper league's rosters are re-read from Sleeper first."""
     _require_cron_auth()
     body = request.get_json(silent=True)
+    if isinstance(body, dict) and body.get("round_id") not in (None, _outlook_calibration.ROUND_ID):
+        return jsonify({"error": "invalid_round"}), 400
+    if _outlook_calibration.build_enabled() or (isinstance(body, dict) and body.get("round_id") == _outlook_calibration.ROUND_ID):
+        body = body if isinstance(body, dict) else {}
+        try:
+            out = _outlook_calibration.pregenerate(offset=body.get("offset", 0),
+                limit=body.get("limit", _outlook_calibration.MAX_BATCH), targets=body.get("targets"))
+        except _blind_grading.GradingError as err:
+            return _grading_error(err)
+        _outlook_calibration.kick_worker()
+        return jsonify(out), 202
     if isinstance(body, dict) and "targets" in body:
         targets = body["targets"]
         pairs = [(str(t.get("user_id") or "").strip(), str(t.get("league_id") or "").strip())
@@ -36035,6 +36079,14 @@ def admin_grading_report_route():
     """Cron-secret only and deliberately NOT flag- or audience-gated (prd.md D4):
     results stay readable after calibration_rollout is stopped."""
     _require_cron_auth()
+    if request.args.get("round_id") not in {None, _outlook_calibration.ROUND_ID}:
+        return jsonify({"error": "invalid_round"}), 400
+    if request.args.get("round_id") == _outlook_calibration.ROUND_ID:
+        try:
+            return jsonify(_outlook_calibration.report(since=request.args.get("since") or None,
+                include_open=request.args.get("include_open") == "1"))
+        except _blind_grading.GradingError as err:
+            return _grading_error(err)
     try:
         return jsonify(_blind_grading.report(
             since=(request.args.get("since") or None),
