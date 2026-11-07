@@ -1,3 +1,9 @@
+## 2026-11-07 — Narrow saved projection reads
+
+- Public saved-run queries now select only eight serialized fields under exact run/account/league predicates. Latest success and attempt share one query and one decode when identical; public response bytes, scenario snapshots, weekly cadence and model behavior remain unchanged.
+- New SQL/payload/API parity controls: **17 passed in 1.59 seconds**. Full projection/account-deletion/privacy-export/paywall selection: **526 passed, 3 skipped in 20.00 seconds**. Independent review: **38 passed in 1.62 seconds**, including 11 retained adversarial cases. Named full-row-read sabotage correctly fails the payload boundary guard.
+- Synthetic 2 MiB snapshot fixture: same-ID latest view moves from two full-row reads (4,195,740 string-value bytes) to one public row (608 bytes). This is selected-value evidence only; no wire-byte, production memory, hosted timing or 200 ms claim. No production actions. [Scope](../docs/plans/projection-saved-reads/scope.md) · [Validation](../docs/plans/projection-saved-reads/validation.md).
+
 ## 2026-11-07 — Mobile passive preparation lifecycle
 
 - Executed shared helper/tab/focus/foreground checks prove preference/session readiness overlap, independence from unresolved hydration, post-readiness token binding and stale context rejection. Ten delayed-storage/context controls cover per-key and global disk-only invalidation, already-dispatched writes followed by clear/new page, header consistency and replacement attempt ownership. Three format-application controls cover HTTP/local-mirror gap and failure cleanup.

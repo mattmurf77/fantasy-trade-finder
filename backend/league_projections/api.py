@@ -44,10 +44,12 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
                 "reason": row.get("reason"), "details": json.loads(row.get("details_json") or "{}"),
                 "result": json.loads(row["result_json"]) if row.get("result_json") else None}
 
-    def load(sess, run_id):
+    def load(sess, run_id, *, with_snapshot=False):
         if len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id):
             return None
-        return store.get(run_id, *identity(sess))
+        if with_snapshot:
+            return store.get(run_id, *identity(sess))
+        return store.public_rows((run_id,), *identity(sess)).get(run_id)
 
     @app.route("/api/leagues/<league_id>/projection-runs", methods=["POST"])
     @guarded
@@ -72,7 +74,7 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
         if baseline_id is not None:
             if not isinstance(baseline_id, str):
                 raise ValueError("invalid_baseline_run")
-            baseline = load(sess, baseline_id)
+            baseline = load(sess, baseline_id, with_snapshot=True)
             if not baseline or baseline["status"] != "complete" or not baseline.get("snapshot_json"):
                 raise ValueError("baseline_unavailable")
             baseline_result = json.loads(baseline["result_json"])
@@ -96,8 +98,9 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
         result = batch.view(uid, league_id)
         if platform(sess) != "sleeper":
             result.update(state="unsupported_policy", reason="sleeper_only", run=None, attempt=None, next_attempt_not_before=None)
-        return jsonify({**result, "run": public(result["run"]) if result["run"] else None,
-                        "attempt": public(result["attempt"]) if result["attempt"] else None})
+        run = public(result["run"]) if result["run"] else None
+        attempt = run if result["attempt"] is result["run"] else (public(result["attempt"]) if result["attempt"] else None)
+        return jsonify({**result, "run": run, "attempt": attempt})
 
     @app.route("/api/projection-runs/<run_id>", methods=["GET"])
     @guarded

@@ -163,8 +163,10 @@ def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=N
 def view(user_id, league_id):
     """Read only. Stale means next weekly slot; no view-side provider checks."""
     options, item = settings(), target(user_id, league_id)
-    success = store.get(item["last_success_id"], user_id, league_id) if item and item.get("last_success_id") else None
-    attempt = store.get(item["last_attempt_id"], user_id, league_id) if item and item.get("last_attempt_id") else None
+    success_id = item.get("last_success_id") if item else None
+    attempt_id = item.get("last_attempt_id") if item else None
+    rows = store.public_rows((success_id, attempt_id), user_id, league_id)
+    success, attempt = rows.get(success_id), rows.get(attempt_id)
     state = "no_run"
     if success:
         due = datetime.fromisoformat(next_weekly_slot(datetime.fromisoformat(success["created_at"])))

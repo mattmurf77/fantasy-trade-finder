@@ -1736,6 +1736,8 @@ see [privacy follow-up scope](plans/privacy-export-board-history-followups/scope
 
 ### Scheduled league projection sidecar (default off)
 
+Saved reads, exports and cancellation lookups fetch only public run columns; latest success/attempt IDs are deduplicated in one authenticated query. Response keys and values are unchanged, including duplicated `run`/`attempt` payloads when they refer to the same completed run. Scenario creation with a baseline still reads its full owned snapshot; no GET starts work.
+
 Flag `league.projections` gates all user routes; existing initialized-session and verified read/write gates apply. IDs are viewer/current-league scoped. GETs read persisted evidence only, never enqueue/fetch/simulate.
 
 - `GET /api/leagues/{id}/projection-runs/latest`: weekly state, last successful `run`, last `attempt`, next eligibility time, schedule/timezone, proposed scenario defaults. States include `no_run`, `queued`, `running`, `current`, `stale`, `refresh_failed`, `incomplete_projections`, `unsupported_policy`, `failed`. Last success survives refresh failure.
