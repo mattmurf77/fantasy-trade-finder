@@ -14,7 +14,7 @@ Existing mobile Projected standings and League Summary switch to the stored resu
 
 States distinguish no run, queued, running, current weekly snapshot, stale after the next weekly due time, refresh failed, incomplete data and unsupported policy. Current official standings remain available separately. A forecast is explicitly as-of its weekly inputs; no promise of live scoring updates is made. Last successful baseline is retained through refresh failure, including the normal seven-day history boundary. Next due time is eligibility for an attempt, not a completion estimate. Missing forecast fields never become zero.
 
-Configuration is versioned in config/league_projections.json. Weekly cadence is confirmed; Tuesday time, variance proxy/correlation, reserve policy, exact tie policy, sample threshold and retention are still proposed operational/model choices. policy_approved is false pending review. The two new feature/provider flags are also false and do not govern existing provider integrations.
+Configuration is versioned in config/league_projections.json. Weekly cadence is confirmed; Tuesday time, variance proxy/correlation, reserve policy, exact tie policy, sample threshold and retention are still proposed operational/model choices. The initial candidate kept policy_approved false pending review; the later live-release instruction below approves that policy file. The two new feature/provider flags remain false in repository defaults and do not govern existing provider integrations.
 
 ## Latest source-use instruction (2026-11-07)
 
@@ -25,3 +25,7 @@ Engine v4 selects `sleeper_best_available_v1`: score known contributions using t
 Known completed-game actuals lock recorded starters and exclude played bench players from the actual lineup, while hindsight Max PF may use them. A fully completed official lineup total is observed, without historical mixing or score noise; an empty lineup is observed only when the entire validated NFL week is complete. Historical official records/aggregates and the remaining-week boundary prevent double counting. Live games without a safe remaining-points source remain unavailable.
 
 A complete feasible assignment of known actual points can establish a Max PF floor. If that observed fact contradicts the original 60/40 expectation, the model explicitly conditions its target. It records the original blend, observed bound, target adjustment and simulated mean. Future-only rows retain v3 results exactly. This is mathematical consistency with observed facts, not predictive calibration.
+
+## Live-release instruction — 2026-11-07
+
+The operator explicitly requested PR611 live, including best-available Sleeper estimates and preservation of Calibration through source-currentness rebuilds. The model policy file is approved; runtime flags still provide controlled activation. A secret-authenticated bounded initial batch may prepare never-attempted connected leagues immediately, then preserves weekly Tuesday scheduling. App views and ordinary league sync remain read-only/registration-only. See rollout.md for the concrete operational procedure and remaining runtime evidence.

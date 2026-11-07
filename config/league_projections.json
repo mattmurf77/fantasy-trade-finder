@@ -1,5 +1,5 @@
 {
-  "policy_approved": false,
+  "policy_approved": true,
   "batch_limit": 4,
   "retention_days": 7,
   "model": {

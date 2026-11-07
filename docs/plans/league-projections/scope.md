@@ -15,7 +15,7 @@ Viewer-owned `league_projection_runs` and `league_projection_targets` tables sto
 Pure engine tests cover Decimal scoring, exact assignment against exhaustive search, locks, negative points, narrowly scoped IDP bye replacements, shared-world playoff/draft invariants, deterministic seeds, missing policies and inputs. API/store tests cover authentication, queue bounds, cancellation, ownership and account deletion. A dependency-free mobile structural guard pins navigation/flag boundaries and shared API usage. Code walk and manual TestFlight checklist are in evidence.md; no simulator/Maestro.
 
 ## Documentation
-API reference: new run/read/cancel/export contracts. Data dictionary: run table. Architecture/HLD/LLD: immutable asynchronous advisory sidecar. Cross-client invariants: same run results, probabilities and explicit scenarios. Glossary: Max PF, conditional expected pick. Decision: fail closed for unsupported provider coverage/policies and default-off release. These are additive sections, preserving existing behavior.
+API reference: new run/read/cancel/export contracts. Data dictionary: run table. Architecture/HLD/LLD: immutable asynchronous advisory sidecar. Cross-client invariants: same run results, probabilities and explicit scenarios. Glossary: Max PF, conditional expected pick. Decision: use labeled best-available source contributions while refusing malformed identities and genuinely unsupported rules; runtime flags control release. These are additive sections, preserving existing behavior.
 
 ## Ship gates
 Backend tests, mobile typecheck, structural guards, test-ID lint, independent review and recorded TestFlight checks. Parent owns PR, CI, merge and deployment. No claims of provider accuracy, original prototype parity or device proof without evidence.
@@ -29,3 +29,7 @@ The later confirmed weekly-only scheduled delivery instruction supersedes manual
 The v3 mathematical correction preserves the specified expected Max PF mean while enforcing eligible dominance. It changes the joint distribution under a new policy/model version, leaves actual-score draws unchanged, and remains uncalibrated/default-off. Negative dominance gaps fail; old-model saved-input comparisons require a current weekly baseline.
 
 The v4 continuation implements the latest best-available-source instruction and completed-game conditioning. See steering-addendum.md and implementation.md for accepted incomplete-source behavior and unchanged weekly scheduling.
+
+## Live release and initial baseline preparation — 2026-11-07
+
+The operator requested actual activation. The model-policy file is approved while both runtime flags remain false in repository defaults. The existing authenticated isolated cron gains a bounded operator-only initial mode for currently connected targets with no prior baseline attempt. The select and claim enforce that condition, and durable enqueue atomically schedules the next weekly refresh. No new tables, analytics or account impersonation. A first baseline can therefore be prepared during rollout without turning views or ordinary new-league registration into computation triggers. API/config references, implementation/addendum, rollout instructions and lifecycle/auth regressions are updated.

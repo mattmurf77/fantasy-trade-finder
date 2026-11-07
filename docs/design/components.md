@@ -189,3 +189,7 @@ Unsupported/disabled, stale, empty and failed states use explanatory text plus m
 ### LeagueProjectionSection
 
 Shared scheduled-result section inside Projected standings and League Summary. Uses existing Chalkline primitives, a fixed-width horizontally scrollable probability grid, team-week details, explicit expected/modal records and current/last-valid/scheduled state copy. Check saved update performs a GET only.40/60/80 comparison buttons are explicit separately queued saved-input scenarios. Parent screens retain their existing feedback/navigation behavior. Native visual/accessibility verification remains a TestFlight checklist item.
+
+### Home playoff forecast banner
+
+Under `league.projections`, HomeHub displays the active roster’s saved weekly playoff estimate in a standard Chalkline card above its status rows. Snapshot date and partial-data coverage accompany the estimate. Existing outlook boundaries (at least65%, below35%, otherwise both) select optional buy/sell prompts; they never assign team strategy. A selected action reveals QB/RB/WR/TE buttons that use the existing Home position-list handoff. Unknown, expired, queued, failed and unreadable forecasts show a neutral state and Standings link. The component is keyed by user/league and never triggers simulation. See `docs/plans/league-projections/home-banner-scope.md`.

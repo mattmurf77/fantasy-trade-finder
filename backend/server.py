@@ -43751,7 +43751,13 @@ def reseed_experiment_layers_route():
 def cron_league_projections():
     _require_cron_auth()
     from .league_projections.batch import dispatch
-    return jsonify(dispatch(_sleeper_get))
+    data = request.get_json(silent=True) if request.content_length else {}
+    if not isinstance(data, dict) or set(data) - {"initial", "limit", "user_id", "league_id"}:
+        return jsonify(error="invalid_projection_dispatch"), 400
+    try:
+        return jsonify(dispatch(_sleeper_get, **data))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
 
 
 from .league_projections.api import install as _install_league_projections

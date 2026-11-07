@@ -1,3 +1,10 @@
+## 2026-11-07 — Projection live-release integration and initial batch
+
+- Merged current main974452ff into PR611 while preserving the Calibration releases; additive documentation/script conflicts only. Approved model-policy file under the operator’s live-release instruction; runtime flags remain off until operational activation.
+- Projection/initial-batch/privacy/paywall/flag regression run: **321 passed in8.45s**. Initial dispatch covers fresh connected-cohort scope, never-attempted-only CAS, crash idempotency, failed-attempt refusal, unchanged weekly due time, input bounds and cron authentication. GET-only behavior and account/worker lifecycle regressions remain included.
+- Twelve independent initial-batch controls were copied into durable tests and passed0.87s. Independent integration: **127 functional tests2.69s**, eight web assertions and Home harness passed with21runtime hashes stable. Mobile TypeScript, stored-read structural check and three saved-state web assertions passed locally. Root Home banner verification passed the executable component/boundary harness, Home hub/tab guards and test-ID lint; actual buyRB/sellWR, stale/error/logout/platform/switch paths use existing Home handlers. No device rendering claim.
+- Exact-head full CI and deployment/canary readback remain pending; no production action claimed. [Rollout](../docs/plans/league-projections/rollout.md).
+
 ## 2026-11-07 — Linked mapped availability uses full metadata
 
 - Bounded Calibration adapter fix: mapped linked offensive IDs absent from the ordinary skill-only cache now use the same full held observation/currentness contract. Native fixed IDs are excluded; provider positions/eligibility and explicit coupled-viewer refusal remain authoritative. No pricing/generation/policy/publicflag change.

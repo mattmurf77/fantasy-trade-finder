@@ -1,6 +1,6 @@
 # Implementation and remaining release gates
 
-This is a default-off implementation for review, not an activated forecast service. The specification preserves its substantive requirements with private reference identity redacted; the later weekly-cadence instruction is in steering-addendum.md.
+This is a feature-flagged release candidate. The operator has authorized activation using the best-available source policy; production activation is a separate recorded operational step. The specification preserves its substantive requirements with private reference identity redacted; the later weekly-cadence instruction is in steering-addendum.md.
 
 ## Implemented
 
@@ -34,7 +34,7 @@ A bounded authorized reference capture now normalizes a 12-team, six-week input 
 3. Collect contemporaneous forecasts/outcomes for prospective calibration. Existing probability outputs remain scenario estimates.
 4. Complete hosted weekly job/load checks and the TestFlight checklist before activation. Existing cron configuration does not prove this feature has run in production.
 
-Both new feature flags and `policy_approved` remain false as technical rollout gates. This agent has not deployed, activated, pushed or changed production. No outreach/source purchase is needed for the user-authorized current-data policy.
+The reviewed file now sets `policy_approved:true` under the explicit live-release instruction; both feature flags remain false in repository defaults until controlled operational activation. The authenticated projection-only route supports bounded initial preparation of never-attempted connected targets, followed by the unchanged weekly cadence. See [rollout procedure](rollout.md). No production deployment or activation is asserted by this change. No outreach/source purchase is needed for the user-authorized current-data policy.
 
 ## Scale and ownership boundaries
 

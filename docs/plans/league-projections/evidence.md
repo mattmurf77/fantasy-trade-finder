@@ -2,6 +2,15 @@
 
 Date: November 7, 2026 UTC (November 6 Eastern). Synthetic fixtures only in tests; no production mutations, outreach, database copy, simulator or Maestro.
 
+## Live-release integration evidence — 2026-11-07
+
+Current main974452ff is merged into the release candidate, preserving the Calibration repairs. The reviewed policy file is approved under the explicit live-release instruction; runtime flags remain false in repository defaults. Dedicated cron initial mode is bounded, secret-authenticated, currently connected-cohort scoped and limited to never-attempted baseline targets; ordinary weekly scheduling and read-only views are unchanged.
+
+- Repository projection/privacy/paywall/flag suite: **321 passed in8.45s**. Twelve additional independent initial lifecycle controls were copied into durable tests and passed in0.87s; counts overlap the independent review below.
+- Final independent integration review: **127 functional tests passed in2.69s**, eight actual web assertions and the Home banner harness passed; all21 evaluated runtime hashes stayed unchanged. Exact final commit binding is recorded separately after commit.
+- Mobile TypeScript, stored-read structural guard and three web saved-state assertions passed locally. No simulator/Maestro/device execution was performed. Root-owned Home banner evidence is recorded in home-banner-scope.md.
+- Full CI previously passed on226866e. The merged release candidate requires a fresh exact-head full CI run before integration. Hosted canary, deployed configuration and native TestFlight evidence must be recorded after actual operation, not inferred from these checks. See rollout.md.
+
 ## Current v4 best-available and completed-game evidence
 
 - Local focused projection/paywall-inventory/account-deletion/flag-mirror run: **310 passed in 11.45s**. TypeScript passed. Regression coverage includes absent vs real-zero values, negative penalties, IDP/kicker partial scoring, empty response vs transport failure, unknown teams, history-only team fallback, completed starter/bench locks, deterministic observed lineups, authoritative full-week empty lineups, current manual overrides, and historical boundary double-count prevention. Independent oracle values are frozen in repository tests without a new dependency.
