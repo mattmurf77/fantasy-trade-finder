@@ -2433,3 +2433,5 @@ filtered; malformed private JSON is null. Shared match valuation is null
 because its viewer may be the other party. Own rankings, row metadata, trade
 packages, grades/tags, actions and outcomes remain. This is an export boundary,
 not a storage, schema or evidence-retention change.
+
+Calibration native MFL range inputs add no tables. Frozen source/proof JSON records original native bounds, explicit partition totals, the representative-template-only role of slot arrays, account/native-franchise/canonical-seat provenance and unchanged fixed holdings. `calibration_native_lineup.py` joins `_ENGINE_CODE_MODULES` because both owner engines consume its optional exact assignment. Existing code-currentness and complete Calibration source hashes cover helper changes; no stored page is re-labeled current without matching source identity.

@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-07 — Implement exact MFL Calibration follow-up
+
+- Native min/max starter ranges use all legal offensive formations and explicit offense/IDP totals; both owner utilities and final safety/depth gates share exact constraints. Fine-grained defenders remain untradeable capacity-only holdings. No normal model policy or UI change.
+- Secondary accounts use only their own authenticated MFL credential to resolve one native franchise, then retain existing canonical roster/pick ownership and their own private rankings/preferences. No global binding rewrite or account impersonation.
+- Isolated synthetic tests and independent finite-assignment/account review required; exact results recorded in TEST_LEDGER. Parent owns full CI, merge, deploy and unexposed-cohort reprepare. [Scope](../docs/plans/calibration-mfl-ranges/scope.md).
+
 ## 2026-11-06 — Merge strict trade delivery and deliver TestFlight 174
 
 - PR #604 merged as `51599200` after all four exact-head CI jobs passed. Native/web handoffs preserve the tap and exact request; strict current-input validation rejects stale/mismatched pages; durable prepared prefixes can display before the suffix completes.

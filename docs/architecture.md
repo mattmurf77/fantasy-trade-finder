@@ -1013,3 +1013,7 @@ internal generation/recovery payloads. `accounts._EXPORT_INTERNAL_PAYLOADS`
 centralizes SQL column projections before payload deserialization; inline feature/valuation filters preserve the
 viewer's record while withholding partner evidence and malformed private JSON.
 The filter operates on detached copies and does not rewrite stored evidence.
+
+### Calibration-only native MFL range families (2026-11-07)
+
+`calibration_native_lineup.py` enumerates bounded native offensive count templates; `NativeRules` opts the paired owner models and final structural/outlook gate into exact family assignment. Subset deficits and backup protection derive from all native bounds and the explicit offensive total. Fine-grained defensive ranges remain a disjoint immutable block. An authenticated second MFL account resolves its own native franchise to the existing canonical roster/pick seat while retaining its own private boards. Normal contexts and provider writes are unchanged. [Contract and limits](plans/calibration-mfl-ranges/scope.md).

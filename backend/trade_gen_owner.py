@@ -315,6 +315,9 @@ class _Search:
                 "slots": slots, "lineup_source": prefs.get("lineup_source", "observed") if valid_slots else "estimated",
                 "unsupported_slots": unsupported, "capacity": capacity,
                 "inactive": frozenset(prefs.get("inactive_ids") or ())}
+        team["native_bounds"] = tuple(tuple(row) for row in prefs.get("calibration_native_bounds", ()))
+        if team["native_bounds"]:
+            team["starts"] = {p:lo for p,lo,_ in team["native_bounds"]}
         team["unresolved_roster_assets"] = sorted(p for p in roster if p not in self.market)
         team["lineup_before"] = self._lineup(team["roster"], team)
         team["asset_interest"] = {}
@@ -334,7 +337,12 @@ class _Search:
         from .trade_roster import ELIGIBILITY, assign
         usable = [self._lineup_assets[pid] for pid in roster
                   if pid in self._lineup_assets and pid not in team["inactive"]]
-        assignment = {pid for pid in assign(team["slots"], usable) if pid}
+        if team.get("native_bounds"):
+            from .calibration_native_lineup import choose, templates
+            selected = choose(team["native_bounds"], len(team["slots"]), usable)
+        else:
+            selected = assign(team["slots"], usable)
+        assignment = {pid for pid in selected if pid}
         result = {pos: 0.0 for pos in _POSITIONS}
         bench = defaultdict(list)
         for asset in usable:
@@ -344,7 +352,8 @@ class _Search:
             else:
                 bench[pos].append(asset.value)
         for pos, vals in bench.items():
-            if any(pos in ELIGIBILITY[s] for s in team["slots"]):
+            if (any(pos in template for template in templates(team["native_bounds"], len(team["slots"])))
+                    if team.get("native_bounds") else any(pos in ELIGIBILITY[s] for s in team["slots"])):
                 result[pos] += .15 * max(vals)
         return result
 
@@ -385,6 +394,9 @@ class _Search:
                 ("acquire_positions", "trade_away_positions", "untouchables", "targets", "not_interested")},
             "starter_requirements": team["starts"], "lineup_proxy": "market_usable_depth_v1",
             "starter_slots": team["slots"], "lineup_source": team["lineup_source"],
+            **({"native_lineup": {"policy":"native_position_range_family_v1",
+                 "bounds":team["native_bounds"], "total":len(team["slots"]),
+                 "starter_slots_role":"representative_template_only"}} if team["native_bounds"] else {}),
             "unsupported_slots": team["unsupported_slots"], "roster_capacity": team["capacity"],
             "unresolved_roster_assets": team["unresolved_roster_assets"],
             "legality": "separate_final_roster_check_required",

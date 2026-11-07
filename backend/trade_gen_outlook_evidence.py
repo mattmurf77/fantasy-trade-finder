@@ -108,7 +108,11 @@ class _Search(previous._Search):
         if key not in self._roster_cache:
             usable = [self._lineup_assets[p] for p in roster
                       if p in self._lineup_assets and p not in team["inactive"]]
-            assignment = tuple(assign(team["slots"], usable))
+            if team.get("native_bounds"):
+                from .calibration_native_lineup import choose, templates
+                assignment = choose(team["native_bounds"], len(team["slots"]), usable)
+            else:
+                assignment = tuple(assign(team["slots"], usable))
             starters = set(assignment)
             result = {pos: 0.0 for pos in owner._POSITIONS}
             bench = {pos: 0.0 for pos in owner._POSITIONS}
@@ -116,7 +120,8 @@ class _Search(previous._Search):
                 pos = self._position(asset.id)
                 if asset.id in starters:
                     result[pos] += asset.value
-                elif any(pos in ELIGIBILITY[s] for s in team["slots"]):
+                elif (any(pos in template for template in templates(team["native_bounds"], len(team["slots"])))
+                      if team.get("native_bounds") else any(pos in ELIGIBILITY[s] for s in team["slots"])):
                     bench[pos] = max(bench[pos], asset.value)
             for pos in result:
                 result[pos] += .15 * bench[pos]
@@ -134,16 +139,19 @@ class _Search(previous._Search):
         if baseline and team["uid"] in self._baseline_coverage_cache:
             return self._baseline_coverage_cache[team["uid"]]
         assignment, _ = self._roster_assignment(team, roster)
+        selected_slots = getattr(assignment, "slots", team["slots"])
+        from .calibration_native_lineup import max_positions
         result = {
             "roster_qb_ids": sorted(p for p in roster if self._position(p) == "QB"),
             "eligible_roster_qb_ids": sorted(p for p in roster if self._position(p) == "QB"
                 and p in self._lineup_assets and p not in team["inactive"]),
             "availability_basis": "captured_injury_labels_and_inactive_ids",
             "availability_freshness": "unknown",
-            "qb_eligible_slots": sum("QB" in ELIGIBILITY[s] for s in team["slots"]),
+            "qb_eligible_slots": (max_positions(team["native_bounds"], len(team["slots"])).get("QB", 0)
+                                  if team.get("native_bounds") else sum("QB" in ELIGIBILITY[s] for s in team["slots"])),
             "assignment": [{"slot": slot, "asset_id": pid,
                 "position": self._position(pid) if pid else None}
-                for slot, pid in zip(team["slots"], assignment) if "QB" in ELIGIBILITY[slot]],
+                for slot, pid in zip(selected_slots, assignment) if "QB" in ELIGIBILITY[slot]],
             "nfl_starting_jobs": "unknown", "future_availability": "unknown"}
         if baseline:
             self._baseline_coverage_cache[team["uid"]] = result
