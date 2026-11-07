@@ -23,7 +23,7 @@ A future forecasting adapter must bind dated source rows, player/season/game par
 ## Wiring and immutable evidence
 
 1. `server._owner_generation_context` resolves pool-object-bound source evidence before detaching inputs. Only v3 adds strict `input_evidence` kwargs, schema `owner-outlook-input-1`, with `used_in_model=True` and `age_use=diagnostic_only_not_production_fit`. The public/shared Player remains unchanged; all v3 age diagnostics read the validated sidecar, never raw `Player.age` fallback. Old -2 remains collection-only. Existing shared market price policy can still consume Player age; that policy was not changed and is not represented as longevity evidence.
-2. `trade_gen_outlook_evidence._Search` owns v3 plan, interest, roster proxy, RB-thesis and proof enrichment. Shared owner hooks preserve default old-model formulas. The current assignment and proxy share a bounded256-entry request-local cache, avoiding a duplicate solver for diagnostic capture.
+2. `trade_gen_outlook_evidence._Search` owns v3 plan, interest, roster proxy, RB-thesis and proof enrichment. Shared owner hooks preserve default old-model formulas. The current assignment and proxy share a bounded256-entry request-local cache, avoiding a duplicate solver for diagnostic capture. Per(team,player) window facts and baseline QB coverage per team are also shared read-only within that request; exact-offer JSON remains fully detached and byte-identical.
 3. `bakeoff_runner.owner_generator/owner_evaluator/owner_version` use the same selector. Constructor, re-evaluation, immutable proof and report agree on -3. Existing generation rejections retain their compact optimization; full eligible proof and full final quality checks remain.
 4. `_owner_selected_assignment` hashes evidence once alongside input. The durable record retains evidence outside `input`; replay joins that envelope back as strict `input_evidence` for v3. `_owner_request_snapshot` projects only offered age rows. Per-card records never duplicate the entire player pool.
 5. `trade_bilateral_presentment.present(...generator_version='owner-v2-bilateral-3')` applies `bilateral-survivors-4` using the same bounded term-precedence and bilateral quality/focal-direction contracts. Legacy default -2 remains `bilateral-survivors-3`. No proof is relabeled across versions.
@@ -42,9 +42,11 @@ Focused tests cover integer/fractional birthdays, missing/imputed/invalid ages, 
 | Captured evidence / request identity | `backend/server.py:21615`, `:21797` | Pool-bound detached evidence becomes explicit v3 kwargs and one canonical hash envelope |
 | Exact-offer projection | `backend/server.py:21770` | Only offered age rows are copied; full request remains once per run |
 | Model dispatch | `backend/bakeoff_runner.py:298`, `:305`, `:319`, `:333` | Same default-dark selector chooses generation, version and evaluator |
-| Neutral future fit / bounded proxy | `backend/trade_gen_outlook_evidence.py:57`, `:65`, `:70` | Policy is used during search and exact evaluation |
-| Legal assignment / QB context | `backend/trade_gen_outlook_evidence.py:104`, `:130` | One bounded shared assignment; actual QB-eligible slots and replacements |
-| RB acquisition thesis | `backend/trade_gen_outlook_evidence.py:144`, `:155`, `:225` | Both-side focal and companion checks, incoming-specific desire, no age/tier rule |
-| Unknown production / immutable proof | `backend/trade_gen_outlook_evidence.py:179`, `:195`, `:276` | Explicit unknown production/job/forecast evidence, exact terms and version |
+| Neutral future fit / bounded proxy | `backend/trade_gen_outlook_evidence.py:59`, `:65`, `:70` | Policy is used during search and exact evaluation |
+| Legal assignment / QB context | `backend/trade_gen_outlook_evidence.py:106`, `:130` | One bounded shared assignment; actual QB-eligible slots and replacements |
+| RB acquisition thesis | `backend/trade_gen_outlook_evidence.py:152`, `:155`, `:225` | Both-side focal and companion checks, incoming-specific desire, no age/tier rule |
+| Unknown production / immutable proof | `backend/trade_gen_outlook_evidence.py:187`, `:195`, `:276` | Explicit unknown production/job/forecast evidence, exact terms and version |
 | Survivor order | `backend/trade_bilateral_presentment.py:142` | Explicit v3 identity selects policy4; default policy3 remains unchanged |
 | Currentness | `backend/server.py:8197`, `:4517`; `backend/prepared_trade_payload.py:54` | -3 safety stamp, pipeline11, version-only prepared compatibility |
+
+[Local validation and measured cost](validation.md) retains the large isolated pipeline and complete proof-parity evidence.

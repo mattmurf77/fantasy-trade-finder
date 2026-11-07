@@ -1,3 +1,10 @@
+## 2026-11-06 — Outlook candidate memory follow-up and consumed-evidence hash contract
+
+- **537 passed in 23.42 s**: previous 411 affected areas plus complete page-store tests and new diagnostic-sharing full-proof/detached-reader regression. Consumed age-evidence module edits invalidate page hashes; unrelated Outlook-only modules remain excluded.
+- Candidate-only request-local window facts and baseline QB-coverage sharing preserve all 6,420 ordered native/final full proof fingerprints, public outputs, persisted valuation fingerprints and native reports except elapsed in the real large synthetic worker. No policy, limits, quality gate, proof field or model version change.
+- Initial bulk v2→v3:28.34→34.85 s,605.4→738.9 MB peak. Actual roster/significance/quality gates:26.86→31.05 s,634.7→731.8 MB,615→616 published cards; both 619 roster-safe. Compiled cache bulk v3:34.54 s / 714.1 MB, a 24.8 MB reduction with no speed claim. Full valuation storage remains +40–43% per offer; cache does not hide that cost.
+- Network blocked, isolated synthetic 12-team × 20-player SQLite worker; no live config/provider changes. Single local macOS/Python 3.14 samples, not capacity/latency distributions or 200 ms proof. First gated fixture attempt failed closed and remains in artifacts. [Methods, artifacts and limits](../docs/plans/outlook-evidence-rules/validation.md). Exact-head CI and independent final parity remain pending.
+
 ## 2026-11-06 — Evidence-bound outlook v3 candidate, activation withheld
 
 - Branch `feat/outlook-evidence-rules`, baseline `a1a3ac474bfa880635dc31319abc3233e657cdff`.

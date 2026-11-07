@@ -286,3 +286,32 @@ def test_existing_shared_age_price_policy_is_preserved_and_separate_from_fit():
     assert search._lineup_assets['give'].value==search.market['give']
     assert search._lineup_assets['target'].value==search.market['target']
     assert search._plan_asset(search.teams['viewer'],'give')==search._plan_asset(search.teams['viewer'],'target')==0
+
+
+def test_shared_request_diagnostics_preserve_complete_proofs_and_detach_readers():
+    class NoRetention(dict):
+        def __setitem__(self,key,value):
+            pass
+    args=qualified(world(own=('give','extra'),other=('target','other'),
+        viewer={'give':800,'extra':800,'target':1300,'other':1300},
+        partner={'give':1300,'extra':1300,'target':800,'other':800},outlook='rebuilder'))
+    cards,_=candidate.generate_bilateral_trades(**args)
+    assert len(cards)>1
+    cached=candidate._Search(**args)
+    uncached=candidate._Search(**args)
+    uncached._window_evidence_cache=NoRetention()
+    uncached._baseline_coverage_cache=NoRetention()
+    actual=[cached.evaluate(card).snapshot_json for card in cards]
+    expected=[uncached.evaluate(card).snapshot_json for card in cards]
+    assert actual==expected
+    team=cached.teams['viewer']
+    assert cached._window_evidence(team,'give') is cached._window_evidence(team,'give')
+    assert cached._coverage(team,team['roster']) is cached._coverage(team,team['roster'])
+    assert len(cached._window_evidence_cache)<=len(cached.teams)*len(cached.players)
+    assert len(cached._baseline_coverage_cache)<=len(cached.teams)
+    detached=cached.evaluate(cards[0]).as_dict()
+    detached['viewer']['qb_roster_context']['before']['assignment'].clear()
+    pid=next(iter(detached['viewer']['window_evidence']['assets']))
+    detached['viewer']['window_evidence']['assets'][pid]['production_fit']='fabricated'
+    assert [cached.evaluate(card).snapshot_json for card in cards]==actual
+    assert cached._window_evidence(team,pid)['production_fit']=='unknown'

@@ -26,6 +26,8 @@ class _Search(previous._Search):
         self.input_evidence = deepcopy(input_evidence) if isinstance(input_evidence, dict) else {}
         self._age_rows = {}
         self._roster_cache = OrderedDict()
+        self._window_evidence_cache = {}
+        self._baseline_coverage_cache = {}
         for pid, player in kwargs["players"].items():
             rows = self.input_evidence.get("age", {})
             row = rows.get(pid, {}) if isinstance(rows, dict) else {}
@@ -128,8 +130,11 @@ class _Search(previous._Search):
         return self._roster_assignment(team, roster)[1]
 
     def _coverage(self, team, roster):
+        baseline = roster is team["roster"]
+        if baseline and team["uid"] in self._baseline_coverage_cache:
+            return self._baseline_coverage_cache[team["uid"]]
         assignment, _ = self._roster_assignment(team, roster)
-        return {
+        result = {
             "roster_qb_ids": sorted(p for p in roster if self._position(p) == "QB"),
             "eligible_roster_qb_ids": sorted(p for p in roster if self._position(p) == "QB"
                 and p in self._lineup_assets and p not in team["inactive"]),
@@ -140,6 +145,9 @@ class _Search(previous._Search):
                 "position": self._position(pid) if pid else None}
                 for slot, pid in zip(team["slots"], assignment) if "QB" in ELIGIBILITY[slot]],
             "nfl_starting_jobs": "unknown", "future_availability": "unknown"}
+        if baseline:
+            self._baseline_coverage_cache[team["uid"]] = result
+        return result
 
     def _rb_acquisition_thesis(self, team, pid):
         pref = team["preferences"]
@@ -177,10 +185,13 @@ class _Search(previous._Search):
         return "required_price_companion_to_independent_focal_thesis" if required else None
 
     def _window_evidence(self, team, pid):
+        key = team["uid"], pid
+        if key in self._window_evidence_cache:
+            return self._window_evidence_cache[key]
         pos = self._position(pid)
         horizon = _HORIZONS.get(team["outlook"])
         age = self._age_rows[pid]
-        return {"position": pos, "age": age if pos != "PICK" else {"state": "not_applicable", "age": None},
+        result = {"position": pos, "age": age if pos != "PICK" else {"state": "not_applicable", "age": None},
             "age_at_window": [age["age"] + year for year in horizon]
                 if pos != "PICK" and age["age"] is not None and horizon else None,
             "production_fit": "not_applicable" if pos == "PICK" else "unknown",
@@ -191,6 +202,10 @@ class _Search(previous._Search):
                 "TE": "production_receiving_role_and_scoring_required",
                 "PICK": "future_capital_not_projected_production"}.get(pos, "unknown"),
             "age_used_as_fit_score": False, "career_length_used_as_fit_score": False}
+        # Request-local facts are read-only internally. Full JSON proof
+        # serialization still detaches every offered occurrence at its boundary.
+        self._window_evidence_cache[key] = result
+        return result
 
     def _owner(self, team, give, receive):
         result = super()._owner(team, give, receive)
