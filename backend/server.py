@@ -4514,7 +4514,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 10
+DECK_PIPELINE_VERSION = 11
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4647,6 +4647,7 @@ DECK_PIPELINE_PINS = {
     8: "f7ed33e6ab94af03",   # #521 QA P3-3: a pool timeout isn't retried at once (_is_pool_timeout): it forfeits the owner arm, as before v7; other failures as v7
     9: "28d212cdc5c6cb05",   # Current-only clients may use an authenticated, durably committed ranked owner prefix; no terms/order change.
     10: "cdabd9935a58d51d",  # Immutable scalar proof projections avoid repeated JSON reads; no terms/order/evaluation change.
+    11: "8a3fa8db29d87e39",  # Evidence-bound bilateral v3 and private input capture.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4666,7 +4667,7 @@ _ENGINE_CODE_MODULES = (
     "negmem.py", "trade_breaker.py", "deck_quality.py",
     # composition and order of the served deck
     "bakeoff_runner.py", "bakeoff_profiles.py", "taste_service.py", "value_model.py",
-    "suggestion_telemetry.py", "trade_bilateral_presentment.py",
+    "suggestion_telemetry.py", "trade_bilateral_presentment.py", "trade_input_evidence.py",
     "small_trade_presentment.py",
     # the card copy itself
     "trade_narrative.py",
@@ -4677,8 +4678,6 @@ _ENGINE_CODE_MODULES = (
 #   wrapper in pipeline.py -> get_league_state_provider(platform).load) come
 #   from league_state.py alone; hashing the rest would cold every page and
 #   trigger MOD-M1 on edits that can't change a deck.
-# - trade_input_evidence.py: provenance with its own VERSION, never a model
-#   input; a row-format change bumps that VERSION.
 _engine_code_hash_value: str | None = None
 
 # The experiments whose variant changes a deck (experiments.py keys). A stored
@@ -8218,7 +8217,7 @@ def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
     if owner_state[0]:
         signature.append("owner_model:" + (owner_model or _bakeoff.owner_arm()))
         version = owner_model_version or _bakeoff.owner_version()
-        if version == "owner-v2-bilateral-2":
+        if version in ("owner-v2-bilateral-2", "owner-v2-bilateral-3"):
             signature.append("owner_model_version:" + version)
     significance = (significance_capture if significance_capture is not None
                     else _capture_trade_significance())
@@ -13960,7 +13959,9 @@ def _run_trade_job(
             from . import trade_bilateral_presentment
             final_cards, owner_presentment = trade_bilateral_presentment.present(
                 final_cards, selected_give=pinned_give or (),
-                selected_receive=pinned_receive or (), opponent_user_id=opponent_user_id)
+                selected_receive=pinned_receive or (), opponent_user_id=opponent_user_id,
+                generator_version=(owner_model_version if owner_model_version == "owner-v2-bilateral-3"
+                                   else trade_bilateral_presentment.GENERATOR_VERSION))
             with _trade_jobs_lock:
                 job = _trade_jobs.get(job_id)
                 if _job_live(job):
@@ -21714,7 +21715,14 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
         evidence = pool.get("input_evidence")
         if not isinstance(evidence, PoolInputEvidence):
             evidence = PoolInputEvidence()
-        return detached_context(context, evidence)
+        detached = detached_context(context, evidence)
+        if _bakeoff.owner_outlook_evidence_enabled(config):
+            from .trade_input_evidence import request_evidence
+            from .trade_gen_outlook_evidence import INPUT_VERSION
+            detached["input_evidence"] = request_evidence(detached)
+            detached["input_evidence"].update(schema_version=INPUT_VERSION, used_in_model=True,
+                age_use="diagnostic_only_not_production_fit")
+        return detached
     return context
 
 
@@ -21792,7 +21800,7 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
     Do not hash capture time: identical repeated requests stay in the same arm.
     A genuinely changed board/market/outlook/roster is a new comparison unit.
     """
-    inputs = _owner_canonical({k: v for k, v in context.items() if k not in {"players", "league"}})
+    inputs = _owner_canonical({k: v for k, v in context.items() if k not in {"players", "league", "input_evidence"}})
     inputs["members"] = [{"id": m.user_id, "roster": list(m.roster),
                           "elo": m.elo_ratings,
                           "board_updated_at": getattr(m, "board_updated_at", None)}
@@ -21821,6 +21829,8 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
     if not canonical["config"].get("owner_bilateral_enabled"):
         # Adding a dark selector must not reshuffle established v1 request units.
         canonical["config"].pop("owner_bilateral_enabled", None)
+    if not canonical["config"].get("owner_outlook_evidence_enabled"):
+        canonical["config"].pop("owner_outlook_evidence_enabled", None)
     if not canonical["config"].get("owner_bilateral_revision_enabled"):
         canonical["config"].pop("owner_bilateral_revision_enabled", None)
     for key in ("user_roster", "pinned_give_players", "pinned_receive_players", "acquire_positions",

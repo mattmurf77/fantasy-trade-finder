@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-11-06 — Versioned outlook evidence contract](#2026-11-06--versioned-outlook-evidence-contract)
 - [2026-11-04 — Export boundary and board-history owner fencing](#2026-11-04--export-boundary-and-board-history-owner-fencing)
 - [Authoritative References](#authoritative-references)
 - [Directory Layout](#directory-layout)
@@ -61,6 +62,10 @@
 - [Deletion scrub: a work row in the deletion's transaction, two phases, one rule per field (2026-10-31, legal R28.20 (ii))](#deletion-scrub-a-work-row-in-the-deletions-transaction-two-phases-one-rule-per-field-2026-10-31-legal-r2820-ii)
 
 ---
+
+## 2026-11-06 — Versioned outlook evidence contract
+
+V3 uses strict input_evidence kwargs while its durable envelope is retained once outside input and projected to exact offered assets per card. Default-dark selector and proof identity are fenced through generation/evaluation/presentation/currentness; old proofs remain immutable. See [policy](../docs/plans/outlook-evidence-rules/architecture.md).
 
 ## Authoritative References
 

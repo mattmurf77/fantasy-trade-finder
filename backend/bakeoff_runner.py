@@ -295,7 +295,17 @@ def owner_revision_enabled(config=None) -> bool:
     return owner_arm(config) == ARM_OWNER_BILATERAL and value == 1.0
 
 
+def owner_outlook_evidence_enabled(config=None) -> bool:
+    """V3 is opt-in within revision serving; zero rolls back to immutable v2."""
+    value = (_cfg("owner_outlook_evidence_enabled", 0.0) if config is None
+             else config.get("owner_outlook_evidence_enabled", 0.0))
+    return owner_revision_enabled(config) and value == 1.0
+
+
 def owner_generator(config=None):
+    if owner_outlook_evidence_enabled(config):
+        from .trade_gen_outlook_evidence import generate_bilateral_trades
+        return generate_bilateral_trades
     if owner_revision_enabled(config):
         from .trade_gen_bilateral_candidate import generate_bilateral_trades
         return generate_bilateral_trades
@@ -307,6 +317,9 @@ def owner_generator(config=None):
 
 
 def owner_version(config=None) -> str:
+    if owner_outlook_evidence_enabled(config):
+        from .trade_gen_outlook_evidence import VERSION
+        return VERSION
     if owner_revision_enabled(config):
         from .trade_gen_bilateral_candidate import BILATERAL_GENERATOR_VERSION
         return BILATERAL_GENERATOR_VERSION
@@ -318,6 +331,9 @@ def owner_version(config=None) -> str:
 
 
 def owner_evaluator(config=None):
+    if owner_outlook_evidence_enabled(config):
+        from .trade_gen_outlook_evidence import evaluate_bilateral_trades
+        return evaluate_bilateral_trades
     if owner_revision_enabled(config):
         from .trade_gen_bilateral_candidate import evaluate_bilateral_trades
         return evaluate_bilateral_trades

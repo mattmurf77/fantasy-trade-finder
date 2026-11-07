@@ -41,6 +41,19 @@ from tested/deployed/live state; no three-second device claim is implied.
 
 ## Bilateral owner selector
 
+`owner_outlook_evidence_enabled` is a numeric **default0** candidate selector.
+Exactly1 requires both `owner_bilateral_enabled=1` and
+`owner_bilateral_revision_enabled=1`, selecting `owner-v2-bilateral-3` and private
+`bilateral-survivors-4` presentment. Zero restores revision2; the other selectors
+retain their behavior. It does not enable owner serving or prepared inventory.
+This candidate corrects unsupported age/production claims and requires an
+acquisition thesis for rebuilding RB headliners; it is not a forecast model.
+Activation remains withheld pending independent output review and full CI.
+Rollback through the existing audited knob workflow sets
+`owner_outlook_evidence_enabled` to0; currentness fences reject old undecided
+inventory without rewriting historical proof. See [policy and limits](plans/outlook-evidence-rules/architecture.md).
+
+
 `owner_bilateral_revision_enabled` is a separately default-dark numeric
 `model_config` knob (DB and runtime default **0**). Exactly **1**, and only while
 `owner_bilateral_enabled=1`, chooses `owner-v2-bilateral-2` within the SAME

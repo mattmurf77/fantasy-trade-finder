@@ -1,4 +1,4 @@
-"""Pure private input provenance. Collection only; never a model input.
+"""Pure private input provenance. V2 collection; explicit V3 diagnostic input.
 
 Bindings live with one pool entry, not in a global object-ID registry. They
 retain actual object references so recycled IDs or equal replacement Players
@@ -152,6 +152,10 @@ class OwnerInputContext(dict):
 
 
 def request_evidence(context):
+    # V3 carries explicit strict kwargs, so copies/replays preserve consumption.
+    # V2 retains its original collection-only object-bound sidecar semantics.
+    if "input_evidence" in context:
+        return copy.deepcopy(context["input_evidence"])
     captured = getattr(context, "_input_evidence", None)
     if isinstance(captured, CapturedInputEvidence):
         return captured.as_dict(context["players"])

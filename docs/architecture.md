@@ -123,6 +123,22 @@ candidate implementation, not an assertion of live activation or release fitness
 See [scope](plans/bilateral-model-revision/scope.md) and
 [status](plans/bilateral-model-revision/status.md).
 
+## Evidence-bound dynasty outlook candidate
+
+`trade_gen_outlook_evidence.py` adds default-dark `owner-v2-bilateral-3`, selected
+only within revision2 serving by `owner_outlook_evidence_enabled=1`. Shared old-model
+hooks retain their formulas. V3 separates neutral/unknown player future fit,
+preference-led RB acquisition thesis, future-pick capital and legal raw-market
+roster context; it removes age cliffs and the second lineup age multiplier.
+It is not a completed forecast model. Actual production/role/projection sources
+elsewhere are not qualified owner inputs, and no tap-time provider reads are added.
+
+The existing bound age capture becomes explicit strict v3 kwargs, hashed once and
+projected per offer. Private -3 proofs and `bilateral-survivors-4` presentation are
+version fenced through evaluator, admission, publication and prepared payload
+compatibility. Old -1/-2 proofs are never rewritten; the new selector defaults0.
+See [policy, source gaps and code walk](plans/outlook-evidence-rules/architecture.md).
+
 ## Independent model evaluation (offline foundation, 2026-09-22)
 
 `backend/eval/scorecard_dimensions.py` evaluates all six dimensions independently

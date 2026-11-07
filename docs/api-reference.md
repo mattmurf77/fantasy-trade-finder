@@ -34,7 +34,10 @@ See [runbook](plans/prepared-trade-inventory/runbook.md).
 
 Trade-card/selected-idea `model_arm` also admits `owner_v2_bilateral`, with
 `generator_version: owner-v2-bilateral-1` (incumbent) or
-`owner-v2-bilateral-2` when the separately controlled revision is selected. Preserve server recommendation order for
+`owner-v2-bilateral-2` when the separately controlled revision is selected, or
+`owner-v2-bilateral-3` when its additional default-dark outlook-evidence selector
+is enabled. V3 retains the public response shape; age provenance, window uncertainty,
+QB roster context and counterparty preferences remain private. Preserve server recommendation order for
 both owner models. There is no public probability, counterparty ranking/tier, or
 private support-component payload. Existing one-click disposition and impression
 IDs retain their contracts. Polling a pre-switch job can return empty cards with

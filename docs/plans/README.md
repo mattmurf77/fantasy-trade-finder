@@ -15,6 +15,10 @@ For **what's next**, [`living-memory/NEXT.md`](../../living-memory/NEXT.md). For
 cited below, [`living-memory/DECISIONS.md`](../../living-memory/DECISIONS.md).
 Per-feedback-item fixes do **not** live here — they live in [`../feedback/items/`](../feedback/items/).
 
+Evidence-bound dynasty outlook **candidate implemented locally, activation withheld**:
+[scope](outlook-evidence-rules/scope.md), [policy and data gaps](outlook-evidence-rules/architecture.md).
+Version3 removes unsupported age/production assertions; separate evaluation/full CI remain required.
+
 Trade-model activation follow-up: [scope](trade-model-activation/scope.md), [validation](trade-model-activation/validation.md). Items 2/3 built; collection rollout under validation; strict enforcement remains dark.
 
 Current-only first-card delivery **implemented locally, review/CI pending**:

@@ -73,7 +73,7 @@ def _within_focal_direction(candidate, baseline):
                for (actual_unknown, actual), (reference_unknown, reference) in zip(candidate, baseline))
 
 
-def _evidence(card):
+def _evidence(card, *, generator_version=GENERATOR_VERSION):
     """Unknown or incompatible metadata stays in its exact original slot."""
     if any(getattr(card, key, False) for key in _PROTECTED):
         return None
@@ -88,7 +88,7 @@ def _evidence(card):
         if not proof.matches(card):
             return None
         data = proof.as_dict()
-        if (data["generator"] != _ARM or data["generator_version"] != GENERATOR_VERSION
+        if (data["generator"] != _ARM or data["generator_version"] != generator_version
                 or data["eligible"] is not True or data["reason"] != "eligible"
                 or data["construction"]["explicit_selection"] is not False
                 or data["selection"]["exact_give"]
@@ -115,7 +115,7 @@ def _evidence(card):
                    ("partner", card.target_user_id),
                    ("concept", give, receive, card.target_user_id, purpose))
         from .trade_gen_bilateral_candidate import term_evidence_valid
-        if not term_evidence_valid(data, user_id=proof.user_id, target_user_id=proof.target_user_id):
+        if not term_evidence_valid(data, user_id=proof.user_id, target_user_id=proof.target_user_id, version=generator_version):
             return None
         term_ordering = data["term_efficiency"]["ordering_version"]
         return slot_class, support, novelty, term_ordering, _focal_directions(data, card)
@@ -128,18 +128,19 @@ def _within_quality(candidate, reference):
                for actual, baseline in zip(candidate, reference))
 
 
-def _term_precedence(cards, evidence):
+def _term_precedence(cards, evidence, *, generator_version=GENERATOR_VERSION):
     """Use the constructor's immutable same-focal comparison, once per deck."""
     if not any(record[3] for record in evidence.values()):
         return {}
     from .trade_gen_bilateral_candidate import term_precedence
     indices = list(evidence)
-    dependencies = term_precedence([cards[index] for index in indices])
+    dependencies = term_precedence([cards[index] for index in indices], version=generator_version)
     return {indices[later]: {indices[earlier] for earlier in before}
             for later, before in dependencies.items()}
 
 
-def present(cards, *, selected_give=(), selected_receive=(), opponent_user_id=None):
+def present(cards, *, selected_give=(), selected_receive=(), opponent_user_id=None,
+            generator_version=GENERATOR_VERSION):
     """Return exact card occurrences plus PRIVATE aggregate/order diagnostics.
 
     The native constructor order is the fixed baseline, including its efficient
@@ -162,7 +163,8 @@ def present(cards, *, selected_give=(), selected_receive=(), opponent_user_id=No
 """
     cards = list(cards)
     order = list(range(len(cards)))
-    diagnostics = {"version": VERSION, "generator_version": GENERATOR_VERSION,
+    diagnostics = {"version": "bilateral-survivors-4" if generator_version == "owner-v2-bilateral-3" else VERSION,
+        "generator_version": generator_version,
         "count": len(cards), "eligible_count": 0, "moved_count": 0,
         "quality_tolerance": QUALITY_TOLERANCE, "lookahead": LOOKAHEAD,
         "candidate_comparisons": 0, "term_precedence_edges": 0,
@@ -174,12 +176,13 @@ def present(cards, *, selected_give=(), selected_receive=(), opponent_user_id=No
 
     evidence, classes = {}, defaultdict(list)
     for index, item in enumerate(cards):
-        record = _evidence(item)
+        record = _evidence(item, generator_version=generator_version)
         if record is not None:
             evidence[index] = record
             classes[record[0]].append(index)
     diagnostics["eligible_count"] = len(evidence)
-    predecessors = _term_precedence(cards, evidence)
+    predecessors = (_term_precedence(cards, evidence) if generator_version == GENERATOR_VERSION else
+                    _term_precedence(cards, evidence, generator_version=generator_version))
     successors = defaultdict(set)
     for later, earlier in predecessors.items():
         for index in earlier:

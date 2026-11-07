@@ -267,11 +267,11 @@ def _profile_no_worse(earlier, later):
         and earlier.incoming_plan_mean + owner._EPS >= later.incoming_plan_mean)
 
 
-def term_evidence_valid(data, *, user_id, target_user_id):
+def term_evidence_valid(data, *, user_id, target_user_id, version=VERSION):
     """Fail closed on incomplete private metadata; useful to serving callers."""
     try:
         terms = data["term_efficiency"]
-        if (data["generator"] != ARM or data["generator_version"] != VERSION
+        if (data["generator"] != ARM or data["generator_version"] != version
                 or terms["ordering_version"] != TERM_ORDERING_VERSION
                 or data["eligible"] is not True or data["reason"] != "eligible"
                 or not owner._finite(terms["worst_adjusted_market_loss"])
@@ -303,7 +303,7 @@ def term_evidence_valid(data, *, user_id, target_user_id):
     return True
 
 
-def term_precedence(cards):
+def term_precedence(cards, *, version=VERSION):
     """Return index dependencies from immutable proofs, without changing cards.
 
     Only same-partner, same exact give OR receive alternatives are compared.
@@ -320,7 +320,7 @@ def term_precedence(cards):
             if not isinstance(proof, owner.OwnerDecisionContext) or not proof.matches(card):
                 continue
             data = proof.as_dict()
-            if (not term_evidence_valid(data, user_id=proof.user_id, target_user_id=proof.target_user_id)
+            if (not term_evidence_valid(data, user_id=proof.user_id, target_user_id=proof.target_user_id, version=version)
                     or data.get("construction", {}).get("explicit_selection")):
                 continue
         except (KeyError, TypeError, AttributeError, ValueError):
@@ -357,9 +357,9 @@ def term_precedence(cards):
     return dict(predecessors)
 
 
-def _rank(cards):
+def _rank(cards, *, version=VERSION):
     baseline = incumbent._rank(cards)
-    predecessors = term_precedence(baseline)
+    predecessors = term_precedence(baseline, version=version)
     successors = defaultdict(list)
     for later, earlier in predecessors.items():
         for index in earlier:

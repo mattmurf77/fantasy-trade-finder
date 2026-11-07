@@ -1,0 +1,52 @@
+# Evidence-bound outlook candidate — policy and implementation
+
+2026-11-06. `owner-v2-bilateral-3` is an opt-in correction, not a completed contender/rebuilder forecasting model. **Default off; production activation withheld.** Independent output review and full CI are required. The original -1/-2 constructors and immutable evidence remain available.
+
+## Available input audit and deliberate gaps
+
+`ranking_service.Player` carries age, years of experience, injury/depth-chart metadata and search/pick values. The owner adapter captures rankings/provenance, outlooks, roster IDs, cached slots/capacity and draft context. It has no qualified recent production seasons, observed NFL starting-job security, scoring-compatible future points, or future availability/cut evidence. A depth-chart integer without observation provenance is not a proven job. Experience is not penalized independently of age.
+
+Other subsystems do contain real data: `season_forecasts.py`, `win_now_service._forecast_batch` and `win_now_store` fetch/retain forecast snapshots; usage refresh stores weekly usage, with QB absent from its player-summary coverage. They are not qualified owner inputs on this path. No provider calls or extra database reads are added at trade-search time. September storage counts are historical evidence only.
+
+A future forecasting adapter must bind dated source rows, player/season/game participation, scoring/format, observed role and availability, a defensible as-of/horizon, roster/cut coverage and an immutable snapshot identity. It must qualify proven/developing/fragile QB evidence from actual production/role observations, never a caller boolean, market tier or personal preference. No such runtime branch is introduced here. All current QB quality classes and future-production fit remain Unknown, including named established stars. This is conservative uncertainty, not a claim those players are equivalent in reality.
+
+## Policy contract
+
+- Every player has neutral future-production score; old QB27, WR/TE25, RB24 and personal-elite RB logic is removed only in v3. No age-only sell signal or tier-derived longevity exception survives in candidate construction, support, composition or eligibility.
+- Rebuilding/tanking **RB-centered** acquisitions require incoming-specific manager desire: exact selected receive, declared exact target/acquire-RB position, or observed positive personal-vs-market preference (`direction >= .025`, existing preference threshold). Every incoming RB tied at the highest market value requires that thesis. Outgoing sell desire and market gain alone do not suffice. The proof calls this desire, never longevity. Each lower-priced RB companion needs its own incoming-specific desire, or an independent desired non-RB headliner / net-capital-gain pick headliner AND necessary price consideration (removing it fails the unchanged package floor or overpay rule). A token pick, tiny desired player, outgoing sell desire, or necessity alone cannot qualify. This is still manager-desire/price evidence, not a forecast pass. Organic packages allow at most one such companion; larger explicit-send packages can contain multiple individually necessary RB companions whose combined price exceeds the non-RB headliner. The rule proves a focal thesis and individual price necessity, not aggregate non-RB dominance; no unrequested RB receives a selection override from another asset’s pin.
+- Future picks score capital direction 1.0 for tanking and .6 for rebuilding, inherited provisional policy units. Contenders and unknown windows assign picks zero: spending a pick cannot establish a production gain. No pick-year/slot price change. Actual own-next-pick and expiry protections remain.
+- Existing outlook defaults are scenario labels: contender/all-in seasons0–1, rebuilding1–3, tanking2–4. They are not asserted manager-selected horizons. Age-at-window endpoints are arithmetic private diagnostics, not survival probabilities or risk scores. Missing outlook without captured inference remains unknown rather than deriving a window from imputed age. Explicit outlook wins for each manager.
+- Existing shared consensus/package pricing remains authoritative. For legal-slot lineup context, v3 removes the *additional* `age_now_mult`; this does not change global market-source blending, the pre-existing shared price accessor or stud convention. The proxy remains dynasty-price context, not points.
+- Current roster proxy: contenders retain `.25 * total assignment/depth delta / gross trade value`; rebuilders and tanking use `.05 * min(delta,0) / gross`, a small normative downside context. Candidate-interest counterparts are `.15 * clipped marginal delta / asset price` for contenders and `.025 * min(clipped delta,0)` for rebuilding. No positive RB-hole incentive. These weights are policies, not fitted forecasts. Veteran→pick gains can remain despite this small current-price opportunity cost.
+- Legal assignment uses actual supplied slots, including non-QB Superflex alternatives. Format labels do not force QB2 or manufacture TE premium. Estimated slots remain estimated. Every roster QB is inventory, not a verified NFL starter. Injury/reserve filtering has unknown freshness and does not predict future availability. Both managers receive before/after inventories and QB-eligible-slot assignments; bench QB depth does not count as another full starter.
+
+## Wiring and immutable evidence
+
+1. `server._owner_generation_context` resolves pool-object-bound source evidence before detaching inputs. Only v3 adds strict `input_evidence` kwargs, schema `owner-outlook-input-1`, with `used_in_model=True` and `age_use=diagnostic_only_not_production_fit`. The public/shared Player remains unchanged; all v3 age diagnostics read the validated sidecar, never raw `Player.age` fallback. Old -2 remains collection-only. Existing shared market price policy can still consume Player age; that policy was not changed and is not represented as longevity evidence.
+2. `trade_gen_outlook_evidence._Search` owns v3 plan, interest, roster proxy, RB-thesis and proof enrichment. Shared owner hooks preserve default old-model formulas. The current assignment and proxy share a bounded256-entry request-local cache, avoiding a duplicate solver for diagnostic capture. Per(team,player) window facts and baseline QB coverage per team are also shared read-only within that request; exact-offer JSON remains fully detached and byte-identical.
+3. `bakeoff_runner.owner_generator/owner_evaluator/owner_version` use the same selector. Constructor, re-evaluation, immutable proof and report agree on -3. Existing generation rejections retain their compact optimization; full eligible proof and full final quality checks remain.
+4. `_owner_selected_assignment` hashes evidence once alongside input. The durable record retains evidence outside `input`; replay joins that envelope back as strict `input_evidence` for v3. `_owner_request_snapshot` projects only offered age rows. Per-card records never duplicate the entire player pool.
+5. `trade_bilateral_presentment.present(...generator_version='owner-v2-bilateral-3')` applies `bilateral-survivors-4` using the same bounded term-precedence and bilateral quality/focal-direction contracts. Legacy default -2 remains `bilateral-survivors-3`. No proof is relabeled across versions.
+6. Safety signatures, admission/publication/currentness and prepared payload type validation recognize -3. Prepared changes are only version compatibility; existing global enablement and dependency checks are unchanged. Switching versions rejects undecided old inventory in both directions while retaining historical proof bytes. Pipeline version11 and code hashes invalidate stale pages.
+
+## Rollback and acceptance
+
+`owner_outlook_evidence_enabled` defaults0 and requires both prior bilateral and revision selectors. Exact1 selects -3; 0 restores -2. Disabling revision still restores -1. No selector was activated by this implementation, and no public release is claimed.
+
+Focused tests cover integer/fractional birthdays, missing/imputed/invalid ages, personal-tier RB counterexamples, unknown QB role/production, actual slots/depth/replacements, rebuilding RB-hole and RB→pick cases, incoming-specific RB thesis for both ages, selection/untouchable/own-pick/price safety, generated/re-evaluated proof equality, presentment/old-proof refusal, request hashes, compact exact-offer capture and prepared version transitions. Independent evaluation preserves empty/error requests and actual ordered proofs. Local synthetic passing results do not establish acceptance, championship improvement, production latency or a calibrated forecast.
+
+## Code-walk references on the implementation branch
+
+| Boundary | Source | Evidence |
+|---|---|---|
+| Captured evidence / request identity | `backend/server.py:21615`, `:21797` | Pool-bound detached evidence becomes explicit v3 kwargs and one canonical hash envelope |
+| Exact-offer projection | `backend/server.py:21770` | Only offered age rows are copied; full request remains once per run |
+| Model dispatch | `backend/bakeoff_runner.py:298`, `:305`, `:319`, `:333` | Same default-dark selector chooses generation, version and evaluator |
+| Neutral future fit / bounded proxy | `backend/trade_gen_outlook_evidence.py:59`, `:65`, `:70` | Policy is used during search and exact evaluation |
+| Legal assignment / QB context | `backend/trade_gen_outlook_evidence.py:106`, `:130` | One bounded shared assignment; actual QB-eligible slots and replacements |
+| RB acquisition thesis | `backend/trade_gen_outlook_evidence.py:152`, `:155`, `:225` | Both-side focal and companion checks, incoming-specific desire, no age/tier rule |
+| Unknown production / immutable proof | `backend/trade_gen_outlook_evidence.py:187`, `:195`, `:276` | Explicit unknown production/job/forecast evidence, exact terms and version |
+| Survivor order | `backend/trade_bilateral_presentment.py:142` | Explicit v3 identity selects policy4; default policy3 remains unchanged |
+| Currentness | `backend/server.py:8197`, `:4517`; `backend/prepared_trade_payload.py:54` | -3 safety stamp, pipeline11, version-only prepared compatibility |
+
+[Local validation and measured cost](validation.md) retains the large isolated pipeline and complete proof-parity evidence.
