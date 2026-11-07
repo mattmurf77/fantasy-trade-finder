@@ -31721,7 +31721,7 @@ def cron_realtime_tick():
     if is_enabled("league.projections"):
         try:
             from .league_projections.batch import dispatch as _projection_dispatch
-            _projection_dispatch(_sleeper_get)
+            _projection_dispatch(_sleeper_get, foreground_busy=_projection_foreground_busy)
         except Exception:
             log.exception("projection batch dispatch failed")
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
@@ -43773,6 +43773,14 @@ def reseed_experiment_layers_route():
     return jsonify(reseed_experiment_layers())
 
 
+def _projection_foreground_busy():
+    # Read the same conservative pressure signal used by prepared trades.
+    # No worker or database call runs while this registry lock is held.
+    with _trade_jobs_lock:
+        return any(_job_live(job) and job.get("source") != "prepared_inventory"
+                   for job in _trade_jobs.values())
+
+
 @app.route("/api/cron/league-projections", methods=["POST"])
 def cron_league_projections():
     _require_cron_auth()
@@ -43781,7 +43789,7 @@ def cron_league_projections():
     if not isinstance(data, dict) or set(data) - {"initial", "limit", "user_id", "league_id"}:
         return jsonify(error="invalid_projection_dispatch"), 400
     try:
-        return jsonify(dispatch(_sleeper_get, **data))
+        return jsonify(dispatch(_sleeper_get, foreground_busy=_projection_foreground_busy, **data))
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
 
