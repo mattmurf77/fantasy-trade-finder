@@ -2118,3 +2118,6 @@ Latest source-use decision (2026-11-07): “Just use what we have in those cases
 
 
 2026-11-07: After observed current-season revision churn, authorize one full projection recapture only for inputs_changed_during_capture. Preserve the revision fence, original deadline/lease, policy/model/authority checks and final-only persistence. No broad provider retries or cadence bypass; see docs/plans/league-projections/capture-retry.md.
+
+
+2026-11-07: Select only status, worker_token and expires_at at projection cancellation checkpoints. Preserve exact run/user/league predicates and all existing publication/deletion fences; do not change simulation budgets or checkpoint frequency.

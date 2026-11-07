@@ -1036,3 +1036,6 @@ The same full observation also supplies availability for linked mapped offensive
 
 
 Weekly projection workers may discard and fully repeat one capture after `inputs_changed_during_capture`, within the original job lease and budget and with renewed model/policy/authority checks. No partial snapshot reuse or new scheduled attempt is created; other source errors do not retry.
+
+
+Projection simulation cancellation checkpoints use a three-column scoped control read (status/token/expiry) instead of rereading potentially multi-megabyte snapshots. Baseline model validation still reads the owned baseline; query identity predicates and checkpoint frequency are unchanged.

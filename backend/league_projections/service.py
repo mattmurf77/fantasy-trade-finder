@@ -55,7 +55,7 @@ def _run(fetch_json):
                             or json.loads(baseline.get("result_json") or "{}").get("model_version") != VERSION):
                         raise Unavailable("comparison_requires_current_model_baseline", state="failed")
             def cancelled():
-                current = store.get(row["run_id"], row["user_id"], row["league_id"])
+                current = store.control(row["run_id"], row["user_id"], row["league_id"])
                 return (not current or current["status"] != "running" or current.get("worker_token") != row.get("worker_token")
                         or current["expires_at"] <= store.utc_now() or time.monotonic() - started > 540
                         or not is_enabled("league.projections") or not is_enabled("league.projections_provider_approved") or not batch.settings()["policy_approved"])

@@ -9,3 +9,7 @@ The retry belongs to the same durable run and weekly attempt. The two-capture li
 The original request deadline remains bounded at worker phase boundaries; this change does not interrupt an HTTP request already in flight. Provider request timeouts remain unchanged. Post-capture cancellation is checked before persistence; existing transactional write fences remain authoritative against deletion, lease replacement or expiration.
 
 No routes, schema, flags, UI, numerical model, scoring assumptions, ordinary trade behavior or cadence change. Existing failures preserve prior successful weekly results. No claim of eliminating all source churn. This follows PR619 in a separate branch/PR; deployment must coordinate Calibration source-revision rebuilding. No production action is included.
+
+## Bounded cancellation reads
+
+Each cancellation checkpoint selects only status, worker token and expiry using the same run/user/league predicates. It no longer transfers captured input, snapshot, result or failure-detail JSON. Baseline version validation retains the full owned baseline read. Checkpoint frequency, simulation budget, arithmetic, expiry semantics and publication fences are unchanged. Actual SQL projection and full-read decision equivalence are tested; no hosted latency improvement is claimed before deployment.

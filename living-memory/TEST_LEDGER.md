@@ -9507,3 +9507,8 @@ Best-available v4 continuation (2026-11-07):310 targeted backend/paywall/auth/pr
 2026-11-07 — Bounded projection capture retry:328 projection/paywall tests passed6.60s, including13 new service-level cases and15 existing recovery/version cases. Tests verify failed capture never persists, only second success publishes, same token/deadline, second stale terminal, no other-error retry, revoked flags/policy/identity/model, cancellation/replacement and original elapsed budget. Independent review and exact-head CI recorded separately when available; no production action.
 
 Independent capture-retry review:22 additional SQLite/provider cases passed0.95s; copied portable regressions passed separately. Tests include actual full-provider recapture windows and no persistence during failed capture, baseline revocation, authority/lease/deadline/deletion fences. The bound is per worker execution; existing one-time interrupted-worker recovery remains separate.
+
+
+Projection cancellation-query correction:353 projection/paywall tests passed6.62s;53 focused SQL/control/retry/recovery/version cases passed1.95s. Real executed SQL excludes every JSON payload column and retains all three identity predicates; scalar/full-get facts agree across live/terminal/expired/missing states. Worker checkpoints prohibit fullget; baseline version reads remain unchanged. No hosted performance claim or production mutation.
+
+Independent scalar-control review:43 additional cases passed, including PostgreSQL SQL compilation,36 full/scalar state comparisons, account deletion/recreation, post-check publication races and real1000-draw exact simulation equivalence with unchanged checkpoint count. Portable controls copied and rerun separately.
