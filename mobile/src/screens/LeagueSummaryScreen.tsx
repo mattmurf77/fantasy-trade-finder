@@ -1,3 +1,4 @@
+import LeagueProjectionSection from '../components/LeagueProjectionSection';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -549,6 +550,7 @@ export default function LeagueSummaryScreen() {
   // flag is absent from LAUNCHED_FLAG_DEFAULTS, so `useFlag` returns false
   // until a live map turns it on.
   const oddsEnabled = useFlag('outlook.odds');
+  const batchProjections = useFlag('league.projections');
   // Client-side platform gate (audit surface #12). `backend/outlook/
   // league_state.py` registers ESPN/MFL/Fleaflicker as NotImplemented stubs,
   // so an outlook request for one of them is a guaranteed 501 — and the League
@@ -570,7 +572,7 @@ export default function LeagueSummaryScreen() {
   const outlookQuery = useQuery({
     queryKey: ['league-outlook', leagueId, basis],
     queryFn: () => getOutlook(leagueId!, basis),
-    enabled: oddsEnabled && outlookSupported && !!leagueId,
+    enabled: !batchProjections && oddsEnabled && outlookSupported && !!leagueId,
     staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
@@ -1722,7 +1724,7 @@ export default function LeagueSummaryScreen() {
             section — and no request. Frame E: the layer mounts collapsed as a
             one-line strip; OutlookStripAndSection owns the strip/section
             switch so this mount site stays one expression. */}
-        {oddsEnabled ? (
+        {batchProjections ? <LeagueProjectionSection /> : oddsEnabled ? (
           outlookSupported ? (
             <OutlookStripAndSection query={outlookQuery} leagueId={leagueId} />
           ) : (

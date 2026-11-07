@@ -5753,6 +5753,7 @@
       // populated and reflects the active league every time the user lands
       // on the League Summary view. Cheap + idempotent.
       renderLeagueSummarySwitcher();
+      if (window.loadLeagueProjectionBatch) window.loadLeagueProjectionBatch();
       try {
         const res = await apiFetch('/api/league/summary?league_id=' + encodeURIComponent(currentLeagueId));
         if (!res.ok) return;

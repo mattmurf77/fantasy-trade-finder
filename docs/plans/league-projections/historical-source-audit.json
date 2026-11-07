@@ -1,0 +1,234 @@
+{
+  "purpose": "historical source timestamp admission audit, not forecast accuracy",
+  "raw_rows_persisted": false,
+  "weeks": {
+    "4": {
+      "rows": 9422,
+      "actual_rows": 2379,
+      "games": 16,
+      "counts": {
+        "gp1_rows": 1094,
+        "updated_at_at_or_after_kickoff": 1094,
+        "unpopulated_or_gp_not_1": 8328
+      },
+      "positions": {
+        "WR": 145,
+        "K": 32,
+        "DB": 182,
+        "DE": 77,
+        "LB": 176,
+        "RB": 91,
+        "DT": 90,
+        "DL": 77,
+        "QB": 32,
+        "CB": 75,
+        "TE": 78,
+        "NT": 3,
+        "DEF": 32,
+        "FB": 3,
+        "SS": 1
+      },
+      "projection_top_level_keys": [
+        "category",
+        "company",
+        "date",
+        "game_id",
+        "last_modified",
+        "opponent",
+        "player",
+        "player_id",
+        "season",
+        "season_type",
+        "sport",
+        "stats",
+        "status",
+        "team",
+        "updated_at",
+        "week",
+        "week_shard"
+      ],
+      "timestamp_keys": {
+        "date": 1094,
+        "updated_at": 1094
+      },
+      "update_minus_kickoff_seconds_min": 574206.7119998932,
+      "update_minus_kickoff_seconds_max": 919806.365999937,
+      "sources": [
+        {
+          "url": "https://api.sleeper.app/projections/nfl/2025/4?season_type=regular",
+          "captured_at": "2026-11-07T04:48:08.191463+00:00",
+          "sha256": "7148160bdb10ebf7b5a97d63f4f33aba7a5639c7bd645829701eb11e355fcd8f",
+          "http_last_modified": null,
+          "http_date": "Sat, 07 Nov 2026 04:48:07 GMT"
+        },
+        {
+          "url": "https://api.sleeper.app/stats/nfl/2025/4?season_type=regular",
+          "captured_at": "2026-11-07T04:48:08.088602+00:00",
+          "sha256": "c48488242bb29c2d1fefa652bbe5c3a89e59f8cfc89e391d1f342b0e23440b78",
+          "http_last_modified": null,
+          "http_date": "Sat, 07 Nov 2026 04:48:07 GMT"
+        },
+        {
+          "url": "https://api.sleeper.app/scores/nfl/regular/2025/4",
+          "captured_at": "2026-11-07T04:48:07.955901+00:00",
+          "sha256": "decd63bc692773e82058c02db47305241d23fbbe4b7d0b328bc6c507f205d727",
+          "http_last_modified": null,
+          "http_date": "Sat, 07 Nov 2026 04:48:08 GMT"
+        }
+      ]
+    },
+    "8": {
+      "rows": 9416,
+      "actual_rows": 1954,
+      "games": 13,
+      "counts": {
+        "gp1_rows": 890,
+        "updated_at_at_or_after_kickoff": 890,
+        "unpopulated_or_gp_not_1": 8526
+      },
+      "positions": {
+        "DB": 143,
+        "DE": 51,
+        "RB": 81,
+        "WR": 125,
+        "LB": 141,
+        "QB": 26,
+        "TE": 72,
+        "DT": 71,
+        "CB": 62,
+        "DEF": 26,
+        "DL": 61,
+        "K": 25,
+        "FB": 3,
+        "SS": 1,
+        "NT": 1,
+        "C": 1
+      },
+      "projection_top_level_keys": [
+        "category",
+        "company",
+        "date",
+        "game_id",
+        "last_modified",
+        "opponent",
+        "player",
+        "player_id",
+        "season",
+        "season_type",
+        "sport",
+        "stats",
+        "status",
+        "team",
+        "updated_at",
+        "week",
+        "week_shard"
+      ],
+      "timestamp_keys": {
+        "date": 890,
+        "updated_at": 890
+      },
+      "update_minus_kickoff_seconds_min": 13561.834000110626,
+      "update_minus_kickoff_seconds_max": 359161.5829999447,
+      "sources": [
+        {
+          "url": "https://api.sleeper.app/projections/nfl/2025/8?season_type=regular",
+          "captured_at": "2026-11-07T04:48:08.501772+00:00",
+          "sha256": "7e790901cae58bc0e754c7e1134e0d9b31589874335d675faf95ac6222772857",
+          "http_last_modified": null,
+          "http_date": "Sat, 07 Nov 2026 04:48:08 GMT"
+        },
+        {
+          "url": "https://api.sleeper.app/stats/nfl/2025/8?season_type=regular",
+          "captured_at": "2026-11-07T04:48:08.516224+00:00",
+          "sha256": "434fa9a8d278fc7eee4dc48c25d1c632b39c237bbec4bc3db30815bd0f1a22ae",
+          "http_last_modified": null,
+          "http_date": "Sat, 07 Nov 2026 04:48:08 GMT"
+        },
+        {
+          "url": "https://api.sleeper.app/scores/nfl/regular/2025/8",
+          "captured_at": "2026-11-07T04:48:08.410140+00:00",
+          "sha256": "c89ccd505a012b23db7c3cfa2945c78bd34f66c8f4ae672a38d5eebac93071e9",
+          "http_last_modified": null,
+          "http_date": "Sat, 07 Nov 2026 04:48:08 GMT"
+        }
+      ]
+    },
+    "12": {
+      "rows": 9418,
+      "actual_rows": 2122,
+      "games": 14,
+      "counts": {
+        "gp1_rows": 994,
+        "updated_at_at_or_after_kickoff": 994,
+        "unpopulated_or_gp_not_1": 8424
+      },
+      "positions": {
+        "DE": 72,
+        "RB": 81,
+        "QB": 28,
+        "TE": 78,
+        "LB": 157,
+        "DB": 168,
+        "DL": 66,
+        "CB": 65,
+        "WR": 135,
+        "DT": 77,
+        "DEF": 28,
+        "K": 29,
+        "NT": 3,
+        "FB": 4,
+        "SS": 2,
+        "C": 1
+      },
+      "projection_top_level_keys": [
+        "category",
+        "company",
+        "date",
+        "game_id",
+        "last_modified",
+        "opponent",
+        "player",
+        "player_id",
+        "season",
+        "season_type",
+        "sport",
+        "stats",
+        "status",
+        "team",
+        "updated_at",
+        "week",
+        "week_shard"
+      ],
+      "timestamp_keys": {
+        "date": 994,
+        "updated_at": 994
+      },
+      "update_minus_kickoff_seconds_min": 13537.148000001907,
+      "update_minus_kickoff_seconds_max": 359136.882999897,
+      "sources": [
+        {
+          "url": "https://api.sleeper.app/projections/nfl/2025/12?season_type=regular",
+          "captured_at": "2026-11-07T04:48:08.968191+00:00",
+          "sha256": "916aa608c9891987e575858a93184f7bf0275eb62282c848e2256422eb1e0c44",
+          "http_last_modified": null,
+          "http_date": "Sat, 07 Nov 2026 04:48:08 GMT"
+        },
+        {
+          "url": "https://api.sleeper.app/stats/nfl/2025/12?season_type=regular",
+          "captured_at": "2026-11-07T04:48:08.984176+00:00",
+          "sha256": "d0fd49d84d801b37cc10aa693294d438fcc8f07ca8f5938b5fd36e4830664d4b",
+          "http_last_modified": null,
+          "http_date": "Sat, 07 Nov 2026 04:48:08 GMT"
+        },
+        {
+          "url": "https://api.sleeper.app/scores/nfl/regular/2025/12",
+          "captured_at": "2026-11-07T04:48:08.658761+00:00",
+          "sha256": "960e79cd2d859dc4a6105a110a5275e201527329759f644d2b0617550ef29f3b",
+          "http_last_modified": null,
+          "http_date": "Sat, 07 Nov 2026 04:48:08 GMT"
+        }
+      ]
+    }
+  },
+  "captured_at": "2026-11-07T04:48:08.985324+00:00"
+}

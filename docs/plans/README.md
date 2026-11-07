@@ -233,3 +233,5 @@ runbook, cross-client-invariants) and write the dated entry in
 [D-047]: ../../living-memory/DECISIONS.md
 [D-056]: ../../living-memory/DECISIONS.md
 [D-058]: ../../living-memory/DECISIONS.md
+
+- [League projections](league-projections/implementation.md): default-off weekly standings + joint non-playoff Max PF capability; implementation under review, provider coverage and launch decisions unresolved. Original spec and confirmed cadence addendum retained.

@@ -1,0 +1,30 @@
+{
+  "policy_approved": true,
+  "batch_limit": 4,
+  "retention_days": 7,
+  "model": {
+    "iterations": 250000,
+    "historical_weight": 0.6,
+    "persistent_sd": 5,
+    "residual_correlation": 0,
+    "maxpf_variance": "actual_history_proxy",
+    "seeding": "record_pf_higher_pa_random",
+    "draft_tie": "random_exact_ties",
+    "ir_maxpf": "exclude",
+    "reserve_activation": "exclude_current_reserve",
+    "empty_slots": "fill_available",
+    "draft_round": 1,
+    "score_decimals": 2,
+    "min_pick_samples": 100,
+    "seed": 42,
+    "availability_scenario": "conditional_provider_forecast",
+    "scoring_contract": "sleeper_best_available_v1",
+    "maxpf_joint_policy": "mean_preserving_positive_gap_v1"
+  },
+  "schedule": {
+    "weekday": 1,
+    "hour": 9,
+    "minute": 30,
+    "timezone": "America/New_York"
+  }
+}

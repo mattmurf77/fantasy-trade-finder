@@ -200,6 +200,41 @@ prepared_trade_nodes_v2_table = Table("prepared_trade_nodes_v2", metadata,
     Column("proof_json", Text),
 )
 
+league_projection_targets_table = Table("league_projection_targets", metadata,
+    Column("target_id", String, primary_key=True),
+    Column("user_id", String, nullable=False, index=True),
+    Column("league_id", String, nullable=False),
+    Column("league_user_id", String, nullable=False),
+    Column("season", Integer, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("next_due_at", String, nullable=False, index=True),
+    Column("lease_until", String),
+    Column("lease_token", String),
+    Column("last_attempt_id", String),
+    Column("last_success_id", String),
+    UniqueConstraint("user_id", "league_id", name="uq_projection_target"),
+)
+
+# Joint projection sidecar: user-scoped immutable evidence and bounded jobs.
+league_projection_runs_table = Table("league_projection_runs", metadata,
+    Column("run_id", String, primary_key=True),
+    Column("user_id", String, nullable=False, index=True),
+    Column("league_id", String, nullable=False),
+    Column("status", String, nullable=False, index=True),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+    Column("expires_at", String, nullable=False),
+    Column("request_hash", String, nullable=False),
+    Column("worker_token", String),
+    Column("retry_count", Integer, nullable=False, default=0),
+    Column("input_hash", String, index=True),
+    Column("input_json", Text, nullable=False),
+    Column("snapshot_json", Text),
+    Column("result_json", Text),
+    Column("reason", String),
+    Column("details_json", Text),
+)
+
 # Win Now — immutable evidence and a durable, viewer-scoped work queue.
 # Whole normalized forecast batches are stored together so a simulation cannot
 # accidentally join player rows from different publication snapshots.

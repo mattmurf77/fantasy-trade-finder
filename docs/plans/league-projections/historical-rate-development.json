@@ -1,0 +1,81 @@
+{
+  "abstentions": {
+    "no_training_active_game": 131
+  },
+  "alpha": 8,
+  "as_of_backtest": false,
+  "captured_at": "2026-11-07T04:51:23.620914+00:00",
+  "denominator": "covered actual row with gms_active==1 OR gp==1; missing whole rows excluded",
+  "evaluation_weeks": [
+    6,
+    7,
+    8
+  ],
+  "events": {
+    "fum_rec_td": {
+      "actual_sum": 2.0,
+      "n": 6136,
+      "pooled_mse": 0.0003259452411994785,
+      "predicted_sum": 0.0,
+      "shrunk_mse": 0.0003259452411994785,
+      "zero_mse": 0.0003259452411994785
+    },
+    "idp_blk_kick": {
+      "actual_sum": 5.0,
+      "n": 6136,
+      "pooled_mse": 0.0008139732638407492,
+      "predicted_sum": 5.896470608623568,
+      "shrunk_mse": 0.000842068510932493,
+      "zero_mse": 0.0008148631029986962
+    },
+    "idp_def_td": {
+      "actual_sum": 2.0,
+      "n": 6136,
+      "pooled_mse": 0.00032653938193069235,
+      "predicted_sum": 5.741829965852207,
+      "shrunk_mse": 0.0003533165790632875,
+      "zero_mse": 0.0003259452411994785
+    },
+    "st_ff": {
+      "actual_sum": 6.0,
+      "n": 6136,
+      "pooled_mse": 0.0009765297302463591,
+      "predicted_sum": 8.52815589289443,
+      "shrunk_mse": 0.0009969360534027422,
+      "zero_mse": 0.0009778357235984355
+    },
+    "st_fum_rec": {
+      "actual_sum": 5.0,
+      "n": 6136,
+      "pooled_mse": 0.000814115811343577,
+      "predicted_sum": 6.859807519762411,
+      "shrunk_mse": 0.0008463832266647845,
+      "zero_mse": 0.0008148631029986962
+    },
+    "st_td": {
+      "actual_sum": 2.0,
+      "n": 6136,
+      "pooled_mse": 0.0003258764675175333,
+      "predicted_sum": 0.49311172888130134,
+      "shrunk_mse": 0.0003278355402356243,
+      "zero_mse": 0.0003259452411994785
+    }
+  },
+  "model": "rare_event_active_game_shrinkage_v1_research",
+  "reason": "Current revised actual stats and embedded player metadata; no frozen historical captures.",
+  "train_weeks": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "training_active_games": 11652,
+  "training_group_exposure": {
+    "defense": 5420,
+    "kicker": 176,
+    "offense": 3489,
+    "other": 2567
+  },
+  "training_players": 2621
+}

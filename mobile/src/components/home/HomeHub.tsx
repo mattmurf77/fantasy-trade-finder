@@ -29,6 +29,7 @@ import { outlookDisplayName } from '../OutlookBiasReceipt';
 import StatusRow from './StatusRow';
 import PositionTile from './PositionTile';
 import TaskTile from './TaskTile';
+import HomePlayoffBanner from './HomePlayoffBanner';
 
 // Home hub (flag `nav.home_hub`, Direction D; docs/plans/home-engagement/
 // scope.md §6.3, mockup mockups/home-engagement/index.html#dir-d). Mounted by
@@ -346,6 +347,11 @@ export default function HomeHub() {
 
       {hasLeague ? (
         <>
+          <HomePlayoffBanner key={`${user?.user_id}:${leagueId}`}
+            rosterId={findMyRoster(rostersQuery.data, user?.user_id ?? '')?.roster_id ?? null}
+            onBuy={splits ? position => onBuy(splits.find(s => s.position === position)!) : undefined}
+            onSell={splits ? position => onSell(splits.find(s => s.position === position)!) : undefined}
+            onDetails={onStandings} />
           <View style={styles.rows}>
             <StatusRow
               testID="home.status.outlook"

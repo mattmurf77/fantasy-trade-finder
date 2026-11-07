@@ -311,8 +311,8 @@ assert(/arrivalScrollRef\.current = intent\.side === 'sell' \? 'end' : 'list';/.
   const t = outlook ? flat(st, outlook) : '';
   assert(callsTo(st, 'getOutlook').length === 1 && /queryFn: \(\) => getOutlook\(leagueId!, 'consensus'\)/.test(t),
     "6a. one outlook query, on the shared ['league-outlook', leagueId, 'consensus'] key");
-  assert(/enabled: segment === 'projected' && oddsEnabled && isSleeper && !!leagueId,/.test(t),
-    "6b. enabled = segment === 'projected' && outlook.odds && Sleeper && league");
+  assert(/enabled: !batchProjections && segment === 'projected' && oddsEnabled && isSleeper && !!leagueId,/.test(t),
+    "6b. legacy compute enabled only outside stored batch mode, on Projected + odds + Sleeper + league");
   // (the printer normalises 60_000 to 60000)
   assert(/staleTime: 60_?000\b/.test(t), '6c. staleTime 60_000');
   const odds = declOf(st, 'oddsEnabled');

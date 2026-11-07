@@ -29745,6 +29745,14 @@ def session_init():
                     require_user     = True,
                     only_if_exists   = _league_existed or _platform_linked,
                 )
+                if authoritative["platform"] == "sleeper" and is_enabled("league.projections"):
+                    try:
+                        from .league_projections.batch import register as _register_projection_target
+                        _projection_season = (_s0_raw.get("meta") or {}).get("season")
+                        if str(_projection_season).isdigit():
+                            _register_projection_target(user_id, league_id, league_user_id, int(_projection_season))
+                    except Exception:
+                        log.exception("projection target registration failed; existing sync continues")
                 log.info("  ✅ user + league upserted in DB (bg)")
 
                 # Tracking plan v2 §S3 — league_synced into user_events.
@@ -31710,6 +31718,12 @@ def cron_realtime_tick():
     in _NOTIF_DEDUP_CAPS) ensures one push per match per user.
     """
     _require_cron_auth()
+    if is_enabled("league.projections"):
+        try:
+            from .league_projections.batch import dispatch as _projection_dispatch
+            _projection_dispatch(_sleeper_get)
+        except Exception:
+            log.exception("projection batch dispatch failed")
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
     rows = load_pending_matches_older_than(cutoff)
     sent = 0
@@ -43758,6 +43772,24 @@ def reseed_experiment_layers_route():
     from .database import reseed_experiment_layers
     return jsonify(reseed_experiment_layers())
 
+
+@app.route("/api/cron/league-projections", methods=["POST"])
+def cron_league_projections():
+    _require_cron_auth()
+    from .league_projections.batch import dispatch
+    data = request.get_json(silent=True) if request.content_length else {}
+    if not isinstance(data, dict) or set(data) - {"initial", "limit", "user_id", "league_id"}:
+        return jsonify(error="invalid_projection_dispatch"), 400
+    try:
+        return jsonify(dispatch(_sleeper_get, **data))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+
+
+from .league_projections.api import install as _install_league_projections
+_install_league_projections(app, require_session=_require_initialized_session,
+                            read_denial=_verified_read_denial, write_denial=_verified_write_denial,
+                            league_user_id=_league_user_id, fetch_json=_sleeper_get)
 
 from .win_now_api import install as _install_win_now
 _install_win_now(app, require_session=_require_initialized_session,

@@ -1043,6 +1043,17 @@ after re-signup. Export v2 omits mixed-owner internal debug/recovery payloads
 and filters inline partner evidence; own metadata/actions remain.
 [Scope](../docs/plans/privacy-export-board-history-followups/scope.md).
 
+### Projection batch lifecycle
+
+Targets have random generations and CAS lease tokens; jobs have separate worker tokens and one bounded recovery. Enqueue/publication take the existing live-user fence. A deleted/recreated account cannot revive an old target or job. Semantic reuse excludes ingestion clocks and redundant derived source hashes but retains provider revisions, kickoff, statuses and consumed facts. Exact raw snapshots remain immutable. Weekly local-zone slots preserve wall-clock time over DST. GETs perform only reads. New tables participate in deletion/export; retention preserves each target's last successful baseline through weekly failures. Both mobile projected consumers disable legacy compute reads when the new flag is on.
+
+The scoring contract is part of immutable config/source identity and saved-input scenario compatibility. API admission and workers both enforce policy approval, including revocation during simulation. Engine v3 prevents reuse of older joint-model results. Saved-input weight comparisons require a baseline produced by the current engine, while older stored baselines remain readable with their original version.
+
+Projection queue version fence: store admission pins server-owned expected engine and comparison-baseline versions in immutable input JSON; worker admission/recovery requires current engine plus the owned baseline actual version. Old/unversioned queued work fails without automatic rescheduling. FB/RB and DB/WR bonus aliases remain unknown when omitted; supplied alias values survive.
+
+### Weekly projection v4 continuation — 2026-11-07
+
+User-authorized best-available Sleeper scoring is the gated baseline. Unknown contributions remain visible, while known league-scored partial values and explicit completed-team fallback allow useful forecasts. Completed actual starters/bench semantics are preserved; observed team totals are deterministic. Feasible known Max PF bounds condition the mean explicitly through a positive-gap model, leaving future-only v3 output unchanged. Engine/version fences prevent older comparisons from silently changing models. See docs/plans/league-projections/implementation.md. No activation or existing trade-model change.
 ## 2026-11-07 — Calibration MFL native family follow-up
 
 The optional `NativeRules` subclass and `calibration_native_lineup` helper preserve exact native position ranges through paired owner utilities, roster/outlook evaluation, depth constraints and quality caps. Fixed DT/DE/LB/CB/S remain capacity-only, unchanged holdings. Own authenticated secondary MFL accounts resolve to existing canonical seats without importer credentials or private-board substitution. Defaults are unchanged; source identity includes the helper. [Scope](../docs/plans/calibration-mfl-ranges/scope.md). Release/reprepare remains parent-owned after exact-head CI.

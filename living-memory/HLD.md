@@ -230,3 +230,13 @@ All 17 patterns adopted on 2026-05-21. Cross-references existing [`../docs/`](..
 Implementation checkpoint 2026-09-04, D-184 / ADR-018: external weekly forecasts feed supported league scoring and legal lineups, then full-league paired season simulations and constrained search. Durable evidence/jobs and the mobile/web Win Now flow remain separate from dynasty generators and Elo feedback. The 2026-09-05 release configuration enables all three flags under explicit operator acceptance of exploratory evidence; parent review and final CI are complete; backend/web is live on `c28ec6d8` and iOS 1.17.0 (147) is uploaded for TestFlight. Calibration remains unproven. Authoritative [architecture](../docs/architecture.md#win-now-season-pipeline) and [build limits](../docs/plans/win-now/BUILD.md).
 
 Offline historical validation now has an outcome collector and a conditional archived-prediction evaluator. No serving model or data-store wiring changes. [Protocol and source limitations](../docs/plans/win-now/HISTORICAL-VALIDATION.md).
+
+### Weekly advisory standing projections
+
+New default-off `backend/league_projections` captures immutable native league/scoring inputs and simulates playoff membership and non-playoff Max PF picks jointly. Existing standings surfaces read stored weekly results; entering a screen cannot start generation. Scheduled targets, worker recovery and last-valid fallback are separate from trade models. Weekly cadence is confirmed; source/policy/accuracy activation gates remain unresolved. See `docs/plans/league-projections/steering-addendum.md` and `implementation.md`.
+
+Coverage follow-up: finite admitted common-offense decoder, explicit source/derived/model assumptions, and Max PF floor diagnostics are implemented locally under engine v3. Rare-event/kicker completeness and prospective accuracy remain open; no production activation.
+
+### Weekly projection v4 continuation — 2026-11-07
+
+User-authorized best-available Sleeper scoring is the gated baseline. Unknown contributions remain visible, while known league-scored partial values and explicit completed-team fallback allow useful forecasts. Completed actual starters/bench semantics are preserved; observed team totals are deterministic. Feasible known Max PF bounds condition the mean explicitly through a positive-gap model, leaving future-only v3 output unchanged. Engine/version fences prevent older comparisons from silently changing models. See docs/plans/league-projections/implementation.md. No activation or existing trade-model change.
