@@ -12,6 +12,8 @@ Calibration coverage (2026-11-06): metadata-backed unranked holdings are safety 
 
 Linked calibration capture (2026-11-06): strict ESPN/MFL normalization reuses stored consent/credentials and the full paired pipeline. Native mapping/settings and pick ownership must be represented exactly; unsupported inputs remain failures. Provider account/season/auth/format/credential revision joins semantic currentness. [Contract](../docs/plans/calibration-provider-capture/architecture.md).
 
+Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense matching is private evidence of unchanged holdings, not full-roster fit or priced value. All holdings still count toward active capacity. Only offensive/pick legs proceed through the unchanged shared gates; fixed legs/cut plans fail. Unsupported constraints and account failures retain specific errors and failed GET polling does not requeue. [Contract](../docs/plans/calibration-coverage-repair/validation.md).
+
 ## Table of Contents
 - [2026-11-06 — Versioned outlook evidence contract](#2026-11-06--versioned-outlook-evidence-contract)
 - [2026-11-04 — Export boundary and board-history owner fencing](#2026-11-04--export-boundary-and-board-history-owner-fencing)
@@ -1052,3 +1054,13 @@ Projection queue version fence: store admission pins server-owned expected engin
 ### Weekly projection v4 continuation — 2026-11-07
 
 User-authorized best-available Sleeper scoring is the gated baseline. Unknown contributions remain visible, while known league-scored partial values and explicit completed-team fallback allow useful forecasts. Completed actual starters/bench semantics are preserved; observed team totals are deterministic. Feasible known Max PF bounds condition the mean explicitly through a positive-gap model, leaving future-only v3 output unchanged. Engine/version fences prevent older comparisons from silently changing models. See docs/plans/league-projections/implementation.md. No activation or existing trade-model change.
+## 2026-11-07 — Calibration MFL native family follow-up
+
+The optional `NativeRules` subclass and `calibration_native_lineup` helper preserve exact native position ranges through paired owner utilities, roster/outlook evaluation, depth constraints and quality caps. Fixed DT/DE/LB/CB/S remain capacity-only, unchanged holdings. Own authenticated secondary MFL accounts resolve to existing canonical seats without importer credentials or private-board substitution. Defaults are unchanged; source identity includes the helper. [Scope](../docs/plans/calibration-mfl-ranges/scope.md). Release/reprepare remains parent-owned after exact-head CI.
+
+
+## 2026-11-07 — Calibration full held metadata and pair coverage
+
+Calibration uses a separate bounded public full-position metadata observation when the normal skill-player cache omits held assets. Only consumed held facts survive in private capture source; absent ephemeral cache after deployment preserves that frozen as-of state, while newer changes/removals invalidate unexposed inputs. Coupled opponents remain in full model budgets then their pairs are filtered before existing gates; coupled viewers remain explicitly unsupported. Both arms consume observed offensive slots and reserve/taxi exclusions. Normal serving and ranking pools are unchanged. [Evidence and limits](../docs/plans/calibration-full-metadata/scope.md).
+
+The same full observation also supplies availability for linked mapped offensive IDs missing from the skill cache; native fixed IDs are excluded and native provider eligibility remains authoritative. The final coupled-viewer refusal is preserved. See the Calibration full-metadata linked addendum.

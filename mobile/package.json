@@ -164,7 +164,8 @@
     "test:trade-first-card-events": "node tests/check-trade-first-card-events.js",
     "test:timing-readout": "node tests/check-timing-readout.js",
     "test:whats-new": "node tests/check-whats-new.js",
-    "test:league-projections": "node tests/check-league-projections.js"
+    "test:league-projections": "node tests/check-league-projections.js",
+    "test:calibration-failure-copy": "node tests/check-calibration-failure-copy.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",

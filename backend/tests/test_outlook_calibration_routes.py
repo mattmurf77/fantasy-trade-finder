@@ -156,3 +156,21 @@ def test_current_boot_pool_unavailable_preserves_ready_snapshot(route_client, mo
     assert response.status_code == 503
     assert response.json['error'] == 'comparison_inputs_unavailable'
     assert db.load_grading_session('ready') == before
+
+
+@pytest.mark.parametrize('code', ['provider_lineup_unsupported','league_membership_required',
+    'provider_account_binding_unavailable'])
+def test_failed_current_poll_is_read_only_and_never_requeues(route_client,monkeypatch,code):
+    client,_=route_client
+    row=session('failed-coverage',status='failed')
+    row['error_json']=json.dumps({'code':code})
+    db.insert_grading_session(row,[])
+    monkeypatch.setattr(oc,'kick_worker',lambda:pytest.fail('failed GET started worker'))
+    monkeypatch.setattr(oc,'start_session',lambda **kw:pytest.fail('failed GET requeued'))
+    before=db.load_grading_session('failed-coverage')
+    for _ in range(5):
+        response=client.get('/api/grading/sessions/current?league_id=league',headers=AUTH)
+        assert response.status_code==200
+        assert response.json['session']['status']=='failed'
+        assert response.json['session']['error']=={'code':code}
+    assert db.load_grading_session('failed-coverage')==before
