@@ -23,7 +23,7 @@ let fn;
 assert(fn);
 function page(over = {}) { return { job_id: 'j', status: 'running', cursor: 0, total_ready: 0, cards: [], ...over }; }
 function fixture(replies, held = []) {
-  const requests = [], timers = [], phases = [], applied = [];
+  const requests = [], timers = [], phases = [], applied = [], failures = [];
   const env = {
     ...rules,
     jobRef: { current: page() }, deckRef: { current: held },
@@ -31,6 +31,8 @@ function fixture(replies, held = []) {
     deckEpochRef: { current: 1 }, mountedRef: { current: true }, deckGateEndRef: { current: false },
     MAX_SILENT_PAGE_FAILURES: Number(screen.match(/const MAX_SILENT_PAGE_FAILURES = (\d+);/)[1]),
     setPagePhase: p => phases.push(p), setPageKick: () => env.kicks++, kicks: 0,
+    setJob: value => { env.jobRef.current = value; },
+    setDeckFailure: value => failures.push(value), DECK_FAIL_NETWORK: 'Network failure',
     getTradeStatus: async (...args) => { requests.push(args); const next = replies.shift(); if (next instanceof Error) throw next; return await next; },
     applyJobResult: (next, old, current) => old === current ? next : null,
     applyPage: next => { applied.push(next); const added = next.cards.length; env.deckRef.current = held.concat(next.cards); env.jobRef.current = next; return added; },
@@ -39,7 +41,7 @@ function fixture(replies, held = []) {
   };
   const run = compile(fn + '; module.exports = fetchNextPage;', env);
   // vm globals are copied into their own context; mutable counter lives in env via setter.
-  return { run, env, requests, timers, applied, phases };
+  return { run, env, requests, timers, applied, phases, failures };
 }
 let checks = 0;
 async function check(name, run) { await run(); checks++; console.log('PASS ' + name); }
@@ -59,6 +61,8 @@ process.on('exit', () => {
     for (let i = 0; i < 6; i++) await h.run();
     assert.deepEqual(h.timers.map(t => t.ms), [500, 1000, 2000, 4000, 4000]);
     assert.equal(h.env.pageLoopRef.current.failures, 6);
+    assert.equal(h.env.jobRef.current, null);
+    assert.equal(h.failures[0].kind, 'poll_abandoned');
   });
   await check('an early empty probe followed by error does not receive a second fast retry', async () => {
     const h = fixture([page(), new Error('network')]); await h.run(); await h.run();

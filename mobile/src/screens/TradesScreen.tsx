@@ -4864,6 +4864,13 @@ export default function TradesScreen({ navigation, route }: any) {
       loop.attempt += 1;
       backoff = true;
       setPagePhase(loop.failures >= 3 ? 'failed' : 'retrying');
+      if (loop.failures >= MAX_SILENT_PAGE_FAILURES && deckRef.current.length === 0) {
+        // No card exists for the paged end-state UI. Once polling stops,
+        // leave the running spinner and expose the existing explicit retry.
+        // The exact last request survives; the server job is not cancelled.
+        setJob(null);
+        setDeckFailure({ kind: 'poll_abandoned', message: DECK_FAIL_NETWORK });
+      }
     } finally {
       loop.inFlight = false;
     }

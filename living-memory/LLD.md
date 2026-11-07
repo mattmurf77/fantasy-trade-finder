@@ -1071,3 +1071,7 @@ Forecast simulation scheduling: both the realtime cron dispatcher and the projec
 ### Saved projection read boundary — 2026-11-07
 
 `league_projections.store.public_rows` selects exactly the eight serialized status/result fields under run-ID, account and league predicates. `batch.view` retrieves unique success/attempt IDs together and shares a same-ID row within one request; API serialization decodes that result once. Read/export/cancel routes use this narrow query; scenario baseline admission explicitly retains `store.get` for immutable snapshot inputs. No persistent cache, source/model change, new schema or wire-contract change. [Scope](../docs/plans/projection-saved-reads/scope.md).
+
+### First-card polling failure recovery — 2026-11-07
+
+After the existing paged status failure budget ends with no held cards, TradesScreen clears its local running job and routes to the existing poll-abandoned failure/explicit retry. This prevents an unscheduled loading spinner. The backend job, exact repeat request, held-card paging, identity/epoch gates and timeout budgets remain unchanged. [Scope](../docs/plans/mobile-first-page-failure/scope.md).

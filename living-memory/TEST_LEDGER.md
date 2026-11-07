@@ -1,3 +1,9 @@
+## 2026-11-07 — First-page polling failure recovery
+
+- Seven-line screen correction: at the existing final paged status failure, an empty deck leaves its running spinner and shows the existing explicit failure/retry. Held cards, job authority, backend work, exact repeat request and network budgets remain unchanged.
+- Actual function/render/retry suite: **12 checks passed**, independently executed and reviewed. Named baseline sabotage uses build 178 source and correctly fails the new error-state assertion. TypeScript and test-ID lint pass.
+- Full 166-script mobile CI glob: 165 initially passed; the initial-poll fixture needed the new failure-setter mocks. After that fixture-only correction, **21 initial-poll checks passed**, with every script having a passing executed outcome on unchanged final runtime. No simulator or production operations. The device incident's root cause and 200 ms target remain open. [Scope](../docs/plans/mobile-first-page-failure/scope.md) · [Validation](../docs/plans/mobile-first-page-failure/validation.md).
+
 ## 2026-11-07 — Narrow saved projection reads
 
 - Public saved-run queries now select only eight serialized fields under exact run/account/league predicates. Latest success and attempt share one query and one decode when identical; public response bytes, scenario snapshots, weekly cadence and model behavior remain unchanged.

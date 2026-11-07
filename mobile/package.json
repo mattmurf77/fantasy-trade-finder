@@ -169,7 +169,8 @@
     "test:whats-new": "node tests/check-whats-new.js",
     "test:league-projections": "node tests/check-league-projections.js",
     "test:calibration-failure-copy": "node tests/check-calibration-failure-copy.js",
-    "test:home-playoff-banner": "node tests/check-home-playoff-banner.js"
+    "test:home-playoff-banner": "node tests/check-home-playoff-banner.js",
+    "test:first-page-failure": "node tests/check-first-page-failure.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
