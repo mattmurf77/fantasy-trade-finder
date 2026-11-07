@@ -628,3 +628,5 @@ outlook candidate, player production/job security stays Unknown; preference or
 price cannot prove longevity. **Dynasty roster proxy** is a legal-slot assignment
 of existing market prices, not projected points or championship probability.
 [Candidate contract](plans/outlook-evidence-rules/architecture.md).
+
+**Calibration round** — a namespaced, frozen comparison exercise whose exact model versions, input snapshot, selected cards and first feedback remain attributable independently of earlier exercises. The outlook round collects descriptive opinions and does not validate future-production forecasts.

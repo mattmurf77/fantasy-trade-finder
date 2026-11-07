@@ -1226,6 +1226,8 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade.value_core",
     # docs/plans/blind-grading/ — Calibration tab + /api/grading/*; ships false, reaches testers only via the calibration_rollout overlay
     "grading.blind",
+    "grading.outlook_round",
+    "grading.outlook_prepare",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

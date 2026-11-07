@@ -3285,6 +3285,9 @@ grading_sessions_table = Table("grading_sessions", metadata,
     Column("user_id",      String,  nullable=False),    # account id
     Column("league_id",    String,  nullable=False),
     Column("status",       String,  nullable=False),    # 'building' | 'open' | 'completed' | 'failed'
+    Column("first_exposed_at", String),  # new round freezes once a card is shown
+    Column("round_id", String),  # NULL = original mixed-engine exercise
+    Column("active_round_key", String),  # unique for building/open/completed new cohort
     Column("seed",         String,  nullable=False),    # decimal of a 63-bit int (String: PG INTEGER is 32-bit)
     Column("created_at",   String,  nullable=False),    # ISO UTC
     Column("completed_at", String),                     # ISO UTC; NULL until completed
@@ -3292,6 +3295,13 @@ grading_sessions_table = Table("grading_sessions", metadata,
     Column("source_json",  Text,    nullable=False),    # hidden provenance (lld §6.5)
     Column("error_json",   Text),                       # failed only: {"code": ..., **detail}
     Index("ix_grading_sessions_user_league", "user_id", "league_id", "status"),
+    Index("uq_grading_active_round", "active_round_key", unique=True),
+)
+
+grading_build_leases_table = Table("grading_build_leases", metadata,
+    Column("lease_key", String, primary_key=True),
+    Column("token", String, nullable=False),
+    Column("expires_at", String, nullable=False),
 )
 
 grading_cards_table = Table("grading_cards", metadata,
@@ -4214,11 +4224,15 @@ def _migrate_db() -> None:
         ("deletion_scrub_jobs", "escalated_at",             "VARCHAR"),
         # ── #562 QA P1-2: a Calibration card's partner, for the scrub.
         ("grading_cards",      "partner_user_id",           "VARCHAR"),
+        ("grading_sessions", "round_id", "VARCHAR"),
+        ("grading_sessions", "first_exposed_at", "VARCHAR"),
+        ("grading_sessions", "active_round_key", "VARCHAR"),
     ]
     # Only missing columns get an ALTER, each in its own transaction so a
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
     # entire transaction as aborted on any error — even if Python catches it.
     _add_missing_columns(migration_cols)
+    next(i for i in grading_sessions_table.indexes if i.name == "uq_grading_active_round").create(engine, checkfirst=True)
 
     # Backfill: tag existing rows with '1qb_ppr' format since that was the only one
     _backfill_dual_format()
@@ -18452,25 +18466,50 @@ def list_grading_candidates(since_iso: str) -> list[dict]:
     return sorted(out, key=lambda r: (r["user_id"], r["league_id"]))
 
 
+def _lock_grading_owner(conn, user_id, source=None):
+    """New-round private writes share account deletion's stable user-row fence."""
+    snapshot = (source or {}).get("snapshot") or {}
+    participants = set(snapshot.get("registered_participants") or ())
+    revisions = snapshot.get("registered_participant_revisions") or {}
+    _lock_live_user(conn, user_id, related_user_ids=participants)
+    rows = {r["sleeper_user_id"]: r for r in conn.execute(select(
+        users_table.c.sleeper_user_id, users_table.c.verified_via, users_table.c.created_at
+    ).where(users_table.c.sleeper_user_id.in_({user_id, *participants}))).mappings()}
+    if not rows[user_id]["verified_via"] or not participants <= rows.keys():
+        raise AccountGone()
+    if any(rows[uid]["created_at"] != revision for uid, revision in revisions.items()):
+        raise AccountGone()
+
+
 def insert_grading_session(session: dict, cards: list[dict]) -> None:
     """One engine.begin(): insert the session row, then every card row (none while
     the session is still 'building' — specs §3.3)."""
     with engine.begin() as conn:
+        if session.get("round_id") is not None:
+            _lock_grading_owner(conn, session["user_id"], json.loads(session["source_json"]))
         conn.execute(grading_sessions_table.insert().values(**session))
         if cards:
             conn.execute(grading_cards_table.insert(), cards)
 
 
 def finish_grading_session_build(session_id: str, cards: list[dict], *,
-                                 counts_json: str, source_json: str) -> bool:
+                                 counts_json: str, source_json: str, lease_token: str | None = None) -> bool:
     """One engine.begin(): flip the 'building' session to 'open' with its final
     counts_json/source_json, then insert every card row. Returns False and writes
     nothing when the session is no longer 'building' (build_session's idempotency guard)."""
+    row = load_grading_session(session_id)
+    if row is None:
+        return False
     gs = grading_sessions_table
+    where = [gs.c.session_id == session_id, gs.c.status == "building"]
+    if lease_token is not None:
+        lease = grading_build_leases_table
+        where.append(select(lease.c.lease_key).where(lease.c.lease_key == gs.c.round_id,
+            lease.c.token == lease_token, lease.c.expires_at > _now()).exists())
     with engine.begin() as conn:
-        res = conn.execute(
-            update(gs)
-            .where(gs.c.session_id == session_id, gs.c.status == "building")
+        if row.get("round_id") is not None:
+            _lock_grading_owner(conn, row["user_id"], json.loads(source_json))
+        res = conn.execute(update(gs).where(*where)
             .values(status="open", counts_json=counts_json, source_json=source_json))
         if not res.rowcount:
             return False
@@ -18524,19 +18563,24 @@ def list_open_grading_sessions() -> list[dict]:
     """Every 'open' session row, oldest first (the fit-arms fold-in's work list)."""
     gs = grading_sessions_table
     with engine.connect() as conn:
-        rows = conn.execute(select(gs).where(gs.c.status == "open")
+        rows = conn.execute(select(gs).where(gs.c.status == "open", gs.c.round_id.is_(None))
                             .order_by(gs.c.created_at, gs.c.session_id)).mappings().all()
     return [dict(r) for r in rows]
 
 
-def fail_grading_session(session_id: str, error_json: str) -> bool:
+def fail_grading_session(session_id: str, error_json: str, *, lease_token: str | None = None) -> bool:
     """Flip a 'building' session to 'failed' with error_json. False when it was not 'building'."""
     gs = grading_sessions_table
+    where = [gs.c.session_id == session_id, gs.c.status == "building"]
+    if lease_token is not None:
+        lease = grading_build_leases_table
+        where.append(select(lease.c.lease_key).where(lease.c.lease_key == gs.c.round_id,
+            lease.c.token == lease_token, lease.c.expires_at > _now()).exists())
     with engine.begin() as conn:
         res = conn.execute(
             update(gs)
-            .where(gs.c.session_id == session_id, gs.c.status == "building")
-            .values(status="failed", error_json=error_json))
+            .where(*where)
+            .values(status="failed", error_json=error_json, active_round_key=None))
     return bool(res.rowcount)
 
 
@@ -18552,13 +18596,14 @@ def retire_grading_session(session_id: str, error_json: str) -> bool:
     with engine.begin() as conn:
         res = conn.execute(
             update(gs)
-            .where(gs.c.session_id == session_id, gs.c.status.in_(["building", "open"]), ~answered)
-            .values(status="failed", error_json=error_json))
+            .where(gs.c.session_id == session_id, gs.c.status.in_(["building", "open"]), ~answered,
+                   or_(gs.c.round_id.is_(None), gs.c.first_exposed_at.is_(None)))
+            .values(status="failed", error_json=error_json, active_round_key=None))
     return bool(res.rowcount)
 
 
 def load_open_grading_session(user_id: str, league_id: str,
-                              statuses: tuple = ("building", "open")) -> dict | None:
+                              statuses: tuple = ("building", "open"), *, round_id: str | None = None) -> dict | None:
     """Newest session for (user_id, league_id) whose status is in `statuses`, by created_at.
     Default: the resumable ones (specs §3.3). current_session passes every status and
     hides a completed one itself."""
@@ -18567,7 +18612,7 @@ def load_open_grading_session(user_id: str, league_id: str,
         row = conn.execute(
             select(gs)
             .where(gs.c.user_id == user_id, gs.c.league_id == league_id,
-                   gs.c.status.in_(list(statuses)))
+                   gs.c.status.in_(list(statuses)), gs.c.round_id == round_id)
             .order_by(gs.c.created_at.desc(), gs.c.session_id.desc())
             .limit(1)
         ).mappings().first()
@@ -18657,13 +18702,32 @@ def answer_grading_card(card_id: str, user_id: str, *, grade: int | None, skippe
             select(gs.c.status).where(gs.c.session_id == sid).with_for_update()).scalar()
         if status is None:
             return None
+        round_id = conn.execute(select(gs.c.round_id).where(gs.c.session_id == sid)).scalar()
+        if round_id is not None:
+            prior = conn.execute(select(gc).where(gc.c.card_id == card_id)).mappings().one()
+            if prior["graded_at"] is not None:
+                identical = (prior["grade"] == grade and bool(prior["skipped"]) == skipped
+                             and json.loads(prior["tags_json"]) == json.loads(tags_json))
+                total, remaining = _grading_counts(conn, sid)
+                return {"session_id": sid, "status": status, "rejected": not identical,
+                        "conflict": not identical, "answered": total - remaining, "total": total}
         if status != "open":
             total, remaining = _grading_counts(conn, sid)
             return {"session_id": sid, "status": status, "rejected": True,
                     "answered": total - remaining, "total": total}
-        conn.execute(update(gc).where(gc.c.card_id == card_id)
+        where = [gc.c.card_id == card_id]
+        if round_id is not None:
+            where.append(gc.c.graded_at.is_(None))
+        written = conn.execute(update(gc).where(*where)
                      .values(grade=grade, skipped=1 if skipped else 0,
                              tags_json=tags_json, graded_at=now))
+        if round_id is not None and not written.rowcount:
+            prior = conn.execute(select(gc).where(gc.c.card_id == card_id)).mappings().one()
+            identical = (prior["grade"] == grade and bool(prior["skipped"]) == skipped
+                         and json.loads(prior["tags_json"]) == json.loads(tags_json))
+            total, remaining = _grading_counts(conn, sid)
+            return {"session_id": sid, "status": status, "rejected": not identical,
+                    "conflict": not identical, "answered": total - remaining, "total": total}
         total, remaining = _grading_counts(conn, sid)
         if remaining == 0:
             conn.execute(update(gs)
@@ -18674,13 +18738,13 @@ def answer_grading_card(card_id: str, user_id: str, *, grade: int | None, skippe
             "answered": total - remaining, "total": total}
 
 
-def load_grading_report_rows(since: str | None, include_open: bool
+def load_grading_report_rows(since: str | None, include_open: bool, *, round_id: str | None = None
                              ) -> tuple[list[dict], list[dict]]:
     """(sessions, cards). Sessions: status = 'completed' (any status when include_open),
     created_at >= since when given, ORDER BY created_at. Cards: every card of those sessions
     (session_id IN (...), chunked by 500 like load_league_scoring_map)."""
     gs, gc = grading_sessions_table, grading_cards_table
-    q = select(gs)
+    q = select(gs).where(gs.c.round_id == round_id)
     if not include_open:
         q = q.where(gs.c.status == "completed")
     if since:

@@ -69,9 +69,9 @@ def test_tables_created_with_expected_columns(engine):
     assert "grading_sessions" in insp.get_table_names()
     assert "grading_cards" in insp.get_table_names()
     sessions = {c["name"]: c for c in insp.get_columns("grading_sessions")}
-    assert list(sessions) == ["session_id", "user_id", "league_id", "status", "seed", "created_at",
+    assert list(sessions) == ["session_id", "user_id", "league_id", "status", "first_exposed_at", "round_id", "active_round_key", "seed", "created_at",
                               "completed_at", "counts_json", "source_json", "error_json"]
-    assert {n for n, c in sessions.items() if c["nullable"]} == {"completed_at", "error_json"}
+    assert {n for n, c in sessions.items() if c["nullable"]} == {"completed_at", "error_json", "round_id", "active_round_key", "first_exposed_at"}
     cards = {c["name"]: c for c in insp.get_columns("grading_cards")}
     assert list(cards) == ["card_id", "session_id", "user_id", "position", "arms_json",
                            "trade_json", "grade", "skipped", "tags_json", "graded_at",

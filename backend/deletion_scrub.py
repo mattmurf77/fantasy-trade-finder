@@ -1173,6 +1173,16 @@ def _redact_grading_source(conn, session: dict, ctx: _GradingContext) -> None:
     source = _loads(session["source_json"])
     if isinstance(source, (dict, list)):
         new = _replace_ids(source, ctx.ids, ctx.token)
+        if (isinstance(source, dict) and source.get("version") == "outlook-v2-v3-1"
+                and new != source):
+            # Full paired snapshots contain other managers' private boards.
+            # Deletion overrides replay immutability: discard the snapshot and
+            # proofs, preserving round attribution and aggregate counts only.
+            new = {k: v for k, v in new.items() if k not in {"snapshot", "proofs"}}
+            new["replay_invalidated"] = "participant_deleted"
+            conn.execute(update(gs).where(gs.c.session_id == session["session_id"],
+                gs.c.status == "building").values(status="failed", active_round_key=None,
+                    error_json=json.dumps({"code": "comparison_interrupted"})))
         if new != source:
             conn.execute(update(gs).where(gs.c.session_id == session["session_id"])
                          .values(source_json=json.dumps(new, sort_keys=True)))

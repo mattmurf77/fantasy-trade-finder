@@ -444,6 +444,21 @@ const REQUIRED_IDS = [
   else fail('package.json: test:blind-grading script', `got ${JSON.stringify(pkg.scripts && pkg.scripts['test:blind-grading'])}`);
 }
 
+// New rounds reuse completed immutable cohorts and expose only snapshot time
+// before grading. Exact arm metadata remains confined to the reveal/API types.
+{
+  const screen = read('src/screens/CalibrationScreen.tsx');
+  if (screen.includes("r.session.status === 'completed') setCompletedId(r.session.session_id)"))
+    ok('completed start resumes results without generating repeat feedback');
+  else fail('completed round resume', 'missing completed response handling');
+  if (screen.includes('serverSession?.captured_at') && screen.includes('COPY.snapshot'))
+    ok('frozen exercise identifies its snapshot date');
+  else fail('snapshot date', 'missing as-of context');
+  if (screen.includes('provider_roster_coverage_unavailable') && screen.includes('COPY.unsupported'))
+    ok('unsupported provider shows an honest explanation');
+  else fail('unsupported provider', 'missing supported error handling');
+}
+
 require('./calibration-retry-cases');
 
 console.log(failures === 0
