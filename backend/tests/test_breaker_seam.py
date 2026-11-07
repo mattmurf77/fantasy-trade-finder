@@ -158,10 +158,10 @@ def _run(monkeypatch, *, breaker=False, narrative=False, signal_v2=True,
          stub=None, extra=()):
     """One full `_run_trade_job` with the breaker flags set as asked.
 
-    Returns (capture, job, engine, live_calls) — `live_calls` counts every
-    `_job_live` call, which is exactly one per publish ATTEMPT (streaming and
-    every mutation-layer republish alike), so "adds zero publishes" is a
-    number this harness can compare."""
+    Returns (capture, job, engine, live_calls) — `live_calls` counts liveness
+    checks, including execution checkpoints and publish attempts. The same
+    baseline checkpoints run in both arms, so the comparison still detects
+    extra mutation-layer republish attempts."""
     _flags(monkeypatch, **{"trade.breaker": breaker,
                            "trade.breaker_narrative": narrative})
     counter = {"n": 0}
@@ -348,11 +348,32 @@ def test_seam_republish_is_skipped_when_the_job_is_not_live(monkeypatch):
     every other publish site, so a job that dies mid-block publishes
     nothing."""
     stub = _Stub(narrate=2)
-    _cap, job, _eng, _n = _run(
+    original_stamp = stub.stamp
+
+    def revoke_after_stamp(cards, **kwargs):
+        result = original_stamp(cards, **kwargs)
+        with server._trade_jobs_lock:
+            server._revoke_trade_job_locked(server._trade_jobs[H.JOB_ID])
+        return result
+
+    monkeypatch.setattr(stub, "stamp", revoke_after_stamp)
+    capture, job, _eng, _n = _run(
+        monkeypatch, breaker=True, narrative=True, stub=stub)
+    assert stub.stamp_calls == stub.narr_calls == 1  # Dies inside the real seam.
+    assert job["status"] == "error" and job["error"] == "inputs_changed"
+    assert _payloads(job) == []
+    assert capture["impressions"] == []
+
+
+def test_nonlive_job_is_cancelled_before_breaker_stamping(monkeypatch):
+    """Early execution cancellation is distinct from the late publish fence."""
+    stub = _Stub(narrate=2)
+    capture, job, _eng, _n = _run(
         monkeypatch, breaker=True, narrative=True, stub=stub,
         extra=[patch.object(server, "_job_live", lambda j: False)])
-    assert stub.stamp_calls == 1               # the stamp still ran…
-    assert _payloads(job) == []                # …and nothing was published
+    assert stub.stamp_calls == stub.narr_calls == 0
+    assert job["status"] == "error"
+    assert _payloads(job) == [] and capture["impressions"] == []
 
 
 # ---------------------------------------------------------------------------

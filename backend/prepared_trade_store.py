@@ -532,6 +532,22 @@ def complete_target(claim: dict, *, status: str, reason: str | None = None,
         _complete(conn, claim, status, _iso(now), reason=reason, retry_at=retry_at, inventory_id=inventory_id)
 
 
+def defer_target_for_interactive(claim, *, now=None):
+    """Yield this matching live claim without spending its failure budget.
+
+    Pending + interactive_work is observable during sustained foreground load;
+    this makes no promise of background progress while the process stays busy.
+    """
+    now = _time(now)
+    with _work(claim["participants"], claim["work_started"]), db.engine.begin() as conn:
+        row, _ = _claimed(conn, claim, _iso(now))
+        targets = db.prepared_trade_targets_table
+        conn.execute(update(targets).where(targets.c.target_id == claim["target_id"])
+            .values(attempts=max(0, row["attempts"] - 1)))
+        _complete(conn, claim, "deferred", _iso(now), reason="interactive_work",
+                  retry_at=now + timedelta(seconds=30))
+
+
 def _card_count(payload):
     if type(payload) is dict and "inventory" in payload and "cards" not in payload:
         payload = payload["inventory"]
