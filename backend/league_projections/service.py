@@ -40,25 +40,47 @@ def _run(fetch_json):
             return
         started = time.monotonic()
         try:
-            if not is_enabled("league.projections_provider_approved"):
-                raise Unavailable("new_projection_provider_approval_pending")
-            if not batch.settings()["policy_approved"]:
-                raise Unavailable("projection_policy_approval_pending")
             inputs = json.loads(row["input_json"])
-            if inputs.get("expected_model_version") != VERSION:
-                raise Unavailable("queued_projection_model_changed", state="failed")
-            if inputs.get("baseline_run_id"):
-                baseline = store.get(inputs["baseline_run_id"], row["user_id"], row["league_id"])
-                if (inputs.get("expected_baseline_model_version") != VERSION or not baseline
-                        or baseline["status"] != "complete"
-                        or json.loads(baseline.get("result_json") or "{}").get("model_version") != VERSION):
-                    raise Unavailable("comparison_requires_current_model_baseline", state="failed")
-            snapshot = json.loads(row["snapshot_json"]) if row.get("snapshot_json") else provider.capture(row["league_id"], inputs["league_user_id"], inputs["config"], fetch_json, viewer_user_id=_viewer_identity(row["user_id"]))
-            prior = store.save_snapshot(row, snapshot, inputs["config"])
+            def admit():
+                if not is_enabled("league.projections_provider_approved"):
+                    raise Unavailable("new_projection_provider_approval_pending")
+                if not batch.settings()["policy_approved"]:
+                    raise Unavailable("projection_policy_approval_pending")
+                if inputs.get("expected_model_version") != VERSION:
+                    raise Unavailable("queued_projection_model_changed", state="failed")
+                if inputs.get("baseline_run_id"):
+                    baseline = store.get(inputs["baseline_run_id"], row["user_id"], row["league_id"])
+                    if (inputs.get("expected_baseline_model_version") != VERSION or not baseline
+                            or baseline["status"] != "complete"
+                            or json.loads(baseline.get("result_json") or "{}").get("model_version") != VERSION):
+                        raise Unavailable("comparison_requires_current_model_baseline", state="failed")
             def cancelled():
                 current = store.get(row["run_id"], row["user_id"], row["league_id"])
-                return (not current or current["status"] != "running" or current.get("worker_token") != row.get("worker_token") or time.monotonic() - started > 540
+                return (not current or current["status"] != "running" or current.get("worker_token") != row.get("worker_token")
+                        or current["expires_at"] <= store.utc_now() or time.monotonic() - started > 540
                         or not is_enabled("league.projections") or not is_enabled("league.projections_provider_approved") or not batch.settings()["policy_approved"])
+            admit()
+            if row.get("snapshot_json"):
+                snapshot = json.loads(row["snapshot_json"])
+            else:
+                for attempt in range(2):
+                    # A changed capture is discarded in full. The second attempt
+                    # shares this job's original lease/deadline and revalidates
+                    # authority, policy and model before any further source reads.
+                    if attempt:
+                        admit()
+                    if cancelled():
+                        raise Unavailable("cancelled", state="cancelled")
+                    try:
+                        snapshot = provider.capture(row["league_id"], inputs["league_user_id"], inputs["config"], fetch_json,
+                                                    viewer_user_id=_viewer_identity(row["user_id"]))
+                        break
+                    except Unavailable as exc:
+                        if attempt or exc.reason != "inputs_changed_during_capture":
+                            raise
+            if cancelled():
+                raise Unavailable("cancelled", state="cancelled")
+            prior = store.save_snapshot(row, snapshot, inputs["config"])
             if cancelled():
                 raise Unavailable("cancelled", state="cancelled")
             result = prior or simulate(snapshot, inputs["config"], cancelled=cancelled)

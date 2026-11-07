@@ -1,0 +1,11 @@
+# One retry for a changed source capture
+
+Date: 2026-11-07. Explicit operator instruction after two current-season captures ended with `inputs_changed_during_capture`, alongside a successful forecast. A separate read-only reproduction succeeded with identical start/end revisions; no false-staleness defect was established and the comparison remains unchanged.
+
+A worker may repeat the entire capture once, only for that exact reason. It discards all inputs from the failed capture. Only a successful, current capture is passed to snapshot persistence and simulation. A second change remains terminal `stale`. Unsupported policy, missing source, network/provider, membership, kickoff-crossing and other errors do not receive this retry.
+
+The retry belongs to the same durable run and weekly attempt. The two-capture limit is per worker execution. Existing one-time interrupted-worker recovery may start a new execution if a process dies before persisting a snapshot; this change does not claim a durable two-fetch lifetime limit across crashes. It does not enqueue another job, advance a target, reset the worker token, extend its lease, reset the 540-second worker budget, or consume the separate interrupted-worker recovery counter. Before recapture, model/baseline identity, feature flags, configured policy, live worker ownership, durable expiration and elapsed budget are rechecked. Viewer binding and league membership are resolved again by the normal capture path. An existing saved recovery snapshot is reused without another capture.
+
+The original request deadline remains bounded at worker phase boundaries; this change does not interrupt an HTTP request already in flight. Provider request timeouts remain unchanged. Post-capture cancellation is checked before persistence; existing transactional write fences remain authoritative against deletion, lease replacement or expiration.
+
+No routes, schema, flags, UI, numerical model, scoring assumptions, ordinary trade behavior or cadence change. Existing failures preserve prior successful weekly results. No claim of eliminating all source churn. This follows PR619 in a separate branch/PR; deployment must coordinate Calibration source-revision rebuilding. No production action is included.

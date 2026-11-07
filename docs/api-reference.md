@@ -1755,3 +1755,6 @@ Projection cron initial preparation: authenticated `POST /api/cron/league-projec
 Projection coverage additionally records `native_playoff_seed_type` (typed0/1) and `postseason_rounds_simulated:false`. Both documented later-round modes are accepted for regular-season estimates; unknown native values return `unsupported_playoff_reseeding_policy`. Divisions, median games, best-ball and explicit bracket overrides retain their existing refusal. No route/authentication change.
 
 Coverage also records `native_playoff_type` (exact integer0/1) and `nonplayoff_draft_order_basis:regular_season_maxpf_scenario`. Unknown lower-bracket values return `unsupported_playoff_lower_bracket_policy`; nondefault round policies still return `unsupported_playoff_bracket`. Both native lower brackets are accepted because postseason results are outside the calculation. The result warning distinguishes Max PF scenario picks from actual custom/consolation-based draft order and is displayed by both clients.
+
+
+Projection run `stale/inputs_changed_during_capture` now represents failure after at most one full in-job recapture. No new request or response fields: only successful captured inputs are persisted; the same run ID and weekly slot remain in force.

@@ -9502,3 +9502,8 @@ Best-available v4 continuation (2026-11-07):310 targeted backend/paywall/auth/pr
 
 
 2026-11-07 — Postseason setting admission follow-up: exact native seed/lower-bracket integers0/1 preserve regular-season qualification, byes and Max PF scenario picks. Final focused enum/parity/currentness suite61 passed; projection/paywall suite315 passed in5.27s. Independent lower-bracket extension24 cases passed plus actual web/mobile warning-render checks; earlier seed-only43-case evidence remains separately bound. Unknown types and genuine unsupported policies remain refused. Actual draft-order custom/consolation rules are explicitly outside this scenario. No production mutation, simulator or predictive-accuracy claim; exact-head CI pending.
+
+
+2026-11-07 — Bounded projection capture retry:328 projection/paywall tests passed6.60s, including13 new service-level cases and15 existing recovery/version cases. Tests verify failed capture never persists, only second success publishes, same token/deadline, second stale terminal, no other-error retry, revoked flags/policy/identity/model, cancellation/replacement and original elapsed budget. Independent review and exact-head CI recorded separately when available; no production action.
+
+Independent capture-retry review:22 additional SQLite/provider cases passed0.95s; copied portable regressions passed separately. Tests include actual full-provider recapture windows and no persistence during failed capture, baseline revocation, authority/lease/deadline/deletion fences. The bound is per worker execution; existing one-time interrupted-worker recovery remains separate.
