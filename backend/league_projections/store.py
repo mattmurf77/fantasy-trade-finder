@@ -77,6 +77,15 @@ def get(run_id, user_id, league_id):
     return dict(row) if row else None
 
 
+def control(run_id, user_id, league_id):
+    """Read only cancellation facts; never transfer the captured/result payload."""
+    t = table()
+    with db.engine.connect() as conn:
+        row = conn.execute(select(t.c.status, t.c.worker_token, t.c.expires_at).where(
+            t.c.run_id == run_id, t.c.user_id == user_id, t.c.league_id == league_id)).mappings().first()
+    return dict(row) if row else None
+
+
 def latest(user_id, league_id):
     t = table()
     with db.engine.connect() as conn:

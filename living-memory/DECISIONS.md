@@ -2115,3 +2115,9 @@ User confirmed that the new playoff/Max PF process feeds projected standings and
 The confirmed 60/40 Max PF blend is an expected mean, not merely a latent pre-floor value. Engine v3 therefore solves the latent positive-gap mean before sampling so eligible Max PF remains at least actual while preserving that expectation before rounding. Variance/correlation inputs are explicitly latent; realized moments are exposed. This corrects the mathematical contract and does not establish predictive calibration.
 
 Latest source-use decision (2026-11-07): “Just use what we have in those cases.” Engine v4 scores partial known Sleeper contributions, exposes missing data without confirmed-zero fabrication, and does not require another source purchase/permission decision. Existing completed history is the only no-usable-lineup fallback. Known completed matchup facts override projection uncertainty: observed totals are deterministic, and attained feasible Max PF bounds condition the original blend explicitly. This changes current-week conditional distributions, not the future-only v3 law. Accuracy remains uncalibrated.
+
+
+2026-11-07: After observed current-season revision churn, authorize one full projection recapture only for inputs_changed_during_capture. Preserve the revision fence, original deadline/lease, policy/model/authority checks and final-only persistence. No broad provider retries or cadence bypass; see docs/plans/league-projections/capture-retry.md.
+
+
+2026-11-07: Select only status, worker_token and expires_at at projection cancellation checkpoints. Preserve exact run/user/league predicates and all existing publication/deletion fences; do not change simulation budgets or checkpoint frequency.
