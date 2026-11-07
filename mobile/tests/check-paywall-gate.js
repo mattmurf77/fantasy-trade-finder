@@ -1047,7 +1047,7 @@ const BACKGROUND_SET = [
   ['state/devicePageStore.ts', /const PREWARM_REQUEST = \{ background: true, headers: \{ 'X-FTF-Prewarm': '1' \} \};/, 'preview-safe refreshDevicePage request'],
   ['hooks/usePresentationDeck.ts', /void run\(\{ background: true \}\);/, "usePresentationDeck's mount effect"],
   ['hooks/usePresentationDeck.ts', /await getTradeStatus\(job\.job_id, undefined, \{ background: true \}\)/, "usePresentationDeck's poll"],
-  [TRADES, /if \(vars\.auto \|\| vars\.research\) \{\s*return generateTrades\(request, \{ searchId: vars\.searchId \}, \{ background: true \}\);\s*\}/,
+  [TRADES, /if \(vars\.auto \|\| vars\.research\) \{\s*return generateTrades\(request, \{ searchId: vars\.searchId \}, \{ \.\.\.options, background: true \}\);\s*\}/,
     'the first-run auto-start, its silent retry and the automatic re-search (#525)'],
   [TRADES, /await getTradeStatus\(job\.job_id, undefined, \{ background: true \}\)/, "the deck's legacy status poll"],
   ['components/StandingOfferSheet.tsx', /\.\.\.\(sourceTradeId \? \{ source_trade_id: sourceTradeId \} : \{\}\),\s*\}, \{ background: true \}\);/,
@@ -1077,7 +1077,7 @@ check('8b. D2 [shape]: the pinned background set; nothing else in mobile/src is 
     'both passive paths must use the explicit server prewarm guard');
   assert(/await getTradeStatus\(snap\.job_id, \{ deck: snap\.deck_id, cursor: requested \}\)/.test(code),
     'the prefetch is a paged getTradeStatus call (the default makes it background)');
-  assert(/\?\? generateTrades\(request, \{ searchId: vars\.searchId \}\);/.test(code),
+  assert(/\?\? generateTrades\(request, \{ searchId: vars\.searchId \}, options\);/.test(code),
     "a tap's generate stays user-initiated");
   const shopCallers = walk(SRC).filter((f) => /swipeTrade\([^;]*'shop'\)/.test(strip(fs.readFileSync(f, 'utf8'))));
   eq(shopCallers.map((f) => path.basename(f)).join(','), 'ShopOffersBody.tsx', "the only 'shop' pass caller");
@@ -1231,7 +1231,7 @@ check('8f2. trades-eng follow-up 1 [shape]: a 402 end never shows P30 — the ga
 check('8f3. immediate push transfers the exact request to the destination; a gated destination pops an empty deck', () => {
   const code = strip(read(TRADES));
   const fork = code.slice(code.indexOf('function pushWithFirstPage('), code.indexOf('function handleInlineFindATrade('));
-  assert(/startTradeSearchHandoff\(fork\.searchId, 'model', request,\s*\(\) => generateTrades\(request, \{ searchId: fork\.searchId \}\)\);\s*pushDeck\(\);/.test(fork), 'the real tapped request transfers without a navigation wait');
+  assert(/startTradeSearchHandoff\(fork\.searchId, 'model', request,\s*\(\) => generateTrades\(request, \{ searchId: fork\.searchId \},\s*\{ deadlineAt: tradeRequestDeadline\(fork\.searchId, '\/api\/trades\/generate'\), beforeDispatch \}\)\);\s*pushDeck\(\);/.test(fork), 'the real tapped request transfers without a navigation wait');
   assert(!/setTimeout|FIRST_PAGE_PUSH_DEADLINE_MS|await/.test(fork), 'no deadline, callback or second push after gate response');
   assert(/takeTradeSearchHandoff<PagedTradeJobSnapshot>\(vars\.searchId, 'model', request\)/.test(code), 'destination consumes the same exact promise');
   eq((code.match(/if \(isResultsPushed && deckRef\.current\.length === 0\) popToLanding\(\);/g) || []).length, 2, 'model and fair gate errors pop an empty deck');

@@ -751,7 +751,7 @@ process.on('exit', () => {
   });
   await check('3i. the key is bound where the deck is validated: adoption (from the landing\'s key) and a model answer (from ITS dispatch\'s onMutate context)', () => {
     ok(/const deckKeyRef = useRef<string \| null>\(adopted\?\.deviceKey \?\? null\);/.test(code), 'adoption');
-    ok(/onMutate: \(\) => \(\{ epoch: deckEpochRef\.current, deviceKey, identity: tradeSearchIdentity\(\) \}\),/.test(code), 'the dispatch stamps its key');
+    ok(/const context: ModelAttempt = \{ epoch: deckEpochRef\.current, deviceKey,/.test(code) && /return vars.context;/.test(code), 'dispatch captures key before asynchronous admission');
     ok(!/lastModelKeyRef/.test(code), 'no shared key ref a later dispatch could overwrite');
     ok(code.includes("takeTradeSearchHandoff<PagedTradeJobSnapshot>(vars.searchId, 'model', request)"), 'the exact pending response is taken once');
     const eff = between(code, 'const scope = deckScopeRef.current;', 'job?.error, deck, rawTopCard?.trade_id, withdrawnIds]);');
@@ -777,8 +777,8 @@ process.on('exit', () => {
       ts.forEachChild(n, visit);
     })(sf);
     ok(onMutate && onSuccess, 'the generate mutation\'s onMutate and onSuccess');
-    const mutateNames = ['deckEpochRef', 'deviceKey', 'tradeSearchIdentity'];
-    const succNames = ['tradeSearchIdentity', 'applyJobResult', 'deckEpochRef', 'setJob', 'setDeckFailure', 'deckScopeRef', 'lastModelRequestRef',
+    const mutateNames = ['waitForTradePageInputs', 'hasPendingTradePageInputs', 'assertTradePageInputsReady', 'modelAttemptCurrent', 'tradeSearchIdentity'];
+    const succNames = ['modelAttemptCurrent', 'TRADE_INPUTS_CHANGED', 'tradeSearchIdentity', 'applyJobResult', 'deckEpochRef', 'setJob', 'setDeckFailure', 'deckScopeRef', 'lastModelRequestRef',
       'devicePageScope', 'deckKeyRef', 'validatedAtRef', 'deckSearchRef', 'noteFirstResponse', 'noteSearchCards',
       'failFirstCard', 'useFinderTargets', 'scopedOpponent', 'canvasResultsLive', 'setToast', 'modelZeroCopy',
       'deviceKey', 'autoResearchRef', 'autoResearchAfterAnswer'];
@@ -789,15 +789,19 @@ process.on('exit', () => {
     const deckEpochRef = { current: 7 }; // a format switch bumps no epoch
     const refs = { deckScopeRef: { current: null }, deckKeyRef: { current: null }, validatedAtRef: { current: null } };
     let job = null;
-    const succEnv = { ...refs, deckEpochRef, tradeSearchIdentity: () => 'Y', applyJobResult: (r, a, b) => (a === b ? r : null),
+    const succEnv = { ...refs, modelAttemptCurrent: ctx => ctx.contextIdentity === 'Y', TRADE_INPUTS_CHANGED: 'changed', deckEpochRef, tradeSearchIdentity: () => 'Y', applyJobResult: (r, a, b) => (a === b ? r : null),
       setJob: (j) => { job = j; }, setDeckFailure: () => {}, lastModelRequestRef: { current: { league_id: 'L1', fairness_threshold: 0.5 } },
       devicePageScope: D.devicePageScope, deckSearchRef: { current: null }, noteFirstResponse: () => {}, noteSearchCards: () => {},
       failFirstCard: () => {}, useFinderTargets: { getState: () => ({ pinnedGive: [], pinnedReceive: [] }) }, scopedOpponent: null,
       canvasResultsLive: false, setToast: () => {}, modelZeroCopy: () => '',
       autoResearchRef: { current: 'idle' }, autoResearchAfterAnswer: (state, research) => (research ? state : 'idle'),
       deviceKey: KY }; // the screen's key when the answers land (after the switch)
-    const ctxX = mkMutate({ deckEpochRef, deviceKey: KX, tradeSearchIdentity: () => 'X' })();   // dispatch under format X
-    const ctxY = mkMutate({ deckEpochRef, deviceKey: KY, tradeSearchIdentity: () => 'Y' })();   // the switch, then a dispatch under Y
+    const admit = (identity, key) => mkMutate({ waitForTradePageInputs: async () => {},
+      hasPendingTradePageInputs: () => false, assertTradePageInputsReady: () => {}, modelAttemptCurrent: () => true,
+      tradeSearchIdentity: () => identity })({ deadlineAt: 30000, tapAt: 0,
+        context: { epoch: 7, deviceKey: key, contextIdentity: identity, attempt: 1 } });
+    const ctxX = await admit('X', KX);
+    const ctxY = await admit('Y', KY);
     const xCards = [card('x1', 'hx1'), card('x2', 'hx2')];
     mkSuccess(succEnv)(page1({ cards: xCards }), {}, ctxX);     // X's answer lands first
     eq(refs.deckKeyRef.current, null, 'late X answer is rejected entirely after switching to Y');

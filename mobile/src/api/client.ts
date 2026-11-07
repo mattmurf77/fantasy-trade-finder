@@ -532,6 +532,8 @@ function timeoutForRequest(path: string, method: string): number {
   return DEFAULT_TIMEOUT_MS;
 }
 
+export { timeoutForRequest };
+
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: unknown;
