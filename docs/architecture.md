@@ -1017,3 +1017,8 @@ The filter operates on detached copies and does not rewrite stored evidence.
 ### Calibration-only native MFL range families (2026-11-07)
 
 `calibration_native_lineup.py` enumerates bounded native offensive count templates; `NativeRules` opts the paired owner models and final structural/outlook gate into exact family assignment. Subset deficits and backup protection derive from all native bounds and the explicit offensive total. Fine-grained defensive ranges remain a disjoint immutable block. An authenticated second MFL account resolves its own native franchise to the existing canonical roster/pick seat while retaining its own private boards. Normal contexts and provider writes are unchanged. [Contract and limits](plans/calibration-mfl-ranges/scope.md).
+
+
+### Calibration full held metadata and pair coverage (2026-11-07)
+
+Calibration uses a separate bounded public full-position metadata observation when the normal skill-player cache omits held assets. Only consumed held facts survive in private capture source; absent ephemeral cache after deployment preserves that frozen as-of state, while newer changes/removals invalidate unexposed inputs. Coupled opponents remain in full model budgets then their pairs are filtered before existing gates; coupled viewers remain explicitly unsupported. Both arms consume observed offensive slots and reserve/taxi exclusions. Normal serving and ranking pools are unchanged. [Evidence and limits](plans/calibration-full-metadata/scope.md).

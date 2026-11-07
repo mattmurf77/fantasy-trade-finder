@@ -116,6 +116,9 @@ class LinkedSnapshot:
                     or row.get('player_id') not in (None, pid)):
                 _fail('provider_player_availability_unavailable')
             result[pid] = {**row, 'position': pos, 'fantasy_positions': [pos]}
+            unsupported = (self.provenance.get('unsupported_native_eligibility') or {}).get(pid)
+            if unsupported:
+                result[pid]['calibration_unsupported_eligibility'] = unsupported
         return result
 
     def roster_context(self, **kwargs):
@@ -174,6 +177,8 @@ def parse_espn(raw, *, league_id, user_id, team_id, xwalk):
     rosters, positions, mapping, members, fixed_metadata = [], {}, {}, [], {}
     from .calibration_fixed_lineup import FIXED_ELIGIBILITY
     eligibility = {**ELIGIBILITY, **FIXED_ELIGIBILITY}
+    unsupported_native = {}
+    native_eligibility = {}
     for team in raw.get('teams') or []:
         tid = team.get('id')
         known = teams.get(tid)
@@ -212,11 +217,24 @@ def parse_espn(raw, *, league_id, user_id, team_id, xwalk):
                 _fail('provider_roster_slot_unknown')
             eligible = p.get('eligibleSlots')
             if (not isinstance(eligible, list)
-                    or any(isinstance(s, bool) or not isinstance(s, int) for s in eligible)
-                    or any(
-                    (native in eligible) != (position in eligibility[ESPN_SLOTS[native]])
-                    for native in ESPN_SLOTS if ESPN_SLOTS[native] in starters)):
+                    or any(isinstance(s, bool) or not isinstance(s, int) for s in eligible)):
                 _fail('provider_player_eligibility_unsupported')
+            declared = {native for native in ESPN_SLOTS if ESPN_SLOTS[native] in starters}
+            actual = set(eligible) & declared
+            expected = {native for native in declared if position in eligibility[ESPN_SLOTS[native]]}
+            native_eligibility[sid] = {'primary_position':position,
+                'original_native_eligible_slots':list(eligible),
+                'effective_configured_slots':sorted(actual),
+                'basis':'intersection_with_actual_declared_starting_slots'}
+            if actual != expected:
+                extra = actual - expected
+                cross = (not (expected - actual) and extra and position in POSITIONS
+                         and all(ESPN_SLOTS[native] in FIXED_ELIGIBILITY for native in extra))
+                if not cross:
+                    _fail('provider_player_eligibility_unsupported')
+                unsupported_native[sid] = {'reason':'provider_cross_domain_eligibility',
+                    'primary_position':position, 'native_eligible_slots':list(eligible),
+                    'declared_eligible_slots':sorted(actual), 'extra_fixed_slots':sorted(extra)}
             roster['players'].append(sid)
             if slot == 21:
                 roster['reserve'].append(sid)
@@ -230,7 +248,7 @@ def parse_espn(raw, *, league_id, user_id, team_id, xwalk):
         rosters, starters, capacity, positions,
         {'platform': 'espn', 'rules': roster_settings, 'native_player_map': mapping,
          'pick_policy': 'existing_asserted_assignments_only_if_enabled',
-         'fixed_holdings': fixed_metadata}, fixed_metadata=fixed_metadata)
+         'fixed_holdings': fixed_metadata, 'unsupported_native_eligibility':unsupported_native, 'native_eligibility':native_eligibility}, fixed_metadata=fixed_metadata)
 
 
 def _mfl_native_ranges(league):

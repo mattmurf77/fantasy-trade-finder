@@ -36,7 +36,26 @@ def _matching(slots, candidates):
     return [{'slot': slot, 'player_id': assigned.get(index)} for index, slot in enumerate(slots)]
 
 
-def prepare(context, metadata, *, fixed_bounds=()):
+def configured_metadata(metadata, slots, held_ids):
+    """Remove only provably unreachable eligibility, retaining original facts."""
+    declared = frozenset().union(*(ELIGIBILITY.get(s, FIXED_ELIGIBILITY.get(s, frozenset())) for s in slots))
+    result, proof = dict(metadata), {}
+    for pid in held_ids:
+        row = metadata.get(pid) or {}
+        positions = row.get('fantasy_positions') or []
+        if not isinstance(positions, list) or any(not isinstance(p, str) for p in positions):
+            continue
+        original = frozenset(positions)
+        effective = original & declared
+        if (original & POSITIONS and original - POSITIONS and original <= POSITIONS | FIXED_POSITIONS
+                and effective and effective <= POSITIONS):
+            result[pid] = {**row, 'fantasy_positions':sorted(effective)}
+            proof[pid] = {'original_positions':sorted(original),'effective_positions':sorted(effective),
+                          'basis':'removed_positions_have_no_eligible_configured_slot'}
+    return result, proof
+
+
+def prepare(context, metadata, *, fixed_bounds=(), isolate_unsupported=False):
     """Project only a proved-disjoint fixed block; leave unknown assets unresolved."""
     original = tuple(context.rules.slots)
     if not original:
@@ -48,17 +67,26 @@ def prepare(context, metadata, *, fixed_bounds=()):
         raise GradingError('provider_lineup_unsupported', 409)
     fixed_slots = tuple(slot for slot in original if slot in FIXED_ELIGIBILITY)
     facts = {}
+    coupled = {}
     held = {pid for team in context.teams.values() for pid in team.roster}
     for pid in sorted(held):
         if pid in context.assets and context.assets[pid].is_pick:
             continue
         row = metadata.get(pid) or {}
+        if row.get('calibration_unsupported_eligibility'):
+            if not isolate_unsupported:
+                raise GradingError('provider_cross_domain_eligibility', 409)
+            coupled[pid] = row['calibration_unsupported_eligibility']
+            continue
         positions = row.get('fantasy_positions') or [row.get('position')]
         if not isinstance(positions, list) or not positions or any(not isinstance(p, str) for p in positions):
             continue
         positions = frozenset(positions)
         if positions & POSITIONS and not positions <= POSITIONS:
-            raise GradingError('provider_cross_domain_eligibility', 409)
+            if not isolate_unsupported:
+                raise GradingError('provider_cross_domain_eligibility', 409)
+            coupled[pid] = sorted(positions)
+            continue
         if not positions <= FIXED_POSITIONS or not positions:
             continue
         if row.get('player_id') is not None and str(row['player_id']) != pid:
@@ -96,7 +124,9 @@ def prepare(context, metadata, *, fixed_bounds=()):
             'basis': 'unchanged_holdings_and_eligibility_not_full_lineup_fit'}
     context.rules = replace(context.rules, slots=offensive)
     return {'policy': POLICY, 'native_fixed_bounds':list(fixed_bounds),
-            'native_offensive_bounds':list(getattr(context.rules, 'native_bounds', ())), 'original_slots': list(original), 'fixed_slots': list(fixed_slots),
+            'native_offensive_bounds':list(getattr(context.rules, 'native_bounds', ())),
+            'unsupported_teams':{uid:{'reason':'provider_cross_domain_eligibility', 'holdings':{pid:coupled[pid] for pid in team.roster if pid in coupled}}
+                                 for uid,team in context.teams.items() if set(team.roster)&coupled.keys()}, 'original_slots': list(original), 'fixed_slots': list(fixed_slots),
             'offensive_slots': list(offensive), 'assets': facts, 'teams': teams}
 
 

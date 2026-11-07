@@ -1046,3 +1046,8 @@ and filters inline partner evidence; own metadata/actions remain.
 ## 2026-11-07 — Calibration MFL native family follow-up
 
 The optional `NativeRules` subclass and `calibration_native_lineup` helper preserve exact native position ranges through paired owner utilities, roster/outlook evaluation, depth constraints and quality caps. Fixed DT/DE/LB/CB/S remain capacity-only, unchanged holdings. Own authenticated secondary MFL accounts resolve to existing canonical seats without importer credentials or private-board substitution. Defaults are unchanged; source identity includes the helper. [Scope](../docs/plans/calibration-mfl-ranges/scope.md). Release/reprepare remains parent-owned after exact-head CI.
+
+
+## 2026-11-07 — Calibration full held metadata and pair coverage
+
+Calibration uses a separate bounded public full-position metadata observation when the normal skill-player cache omits held assets. Only consumed held facts survive in private capture source; absent ephemeral cache after deployment preserves that frozen as-of state, while newer changes/removals invalidate unexposed inputs. Coupled opponents remain in full model budgets then their pairs are filtered before existing gates; coupled viewers remain explicitly unsupported. Both arms consume observed offensive slots and reserve/taxi exclusions. Normal serving and ranking pools are unchanged. [Evidence and limits](../docs/plans/calibration-full-metadata/scope.md).

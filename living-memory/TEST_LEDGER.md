@@ -1,3 +1,10 @@
+## 2026-11-07 — Calibration full held metadata and pair-scoped coverage
+
+- Separate compact full-position public metadata fixes the actual skill-only cache boundary. Frozen held-only facts bind the consumed observation and survive ephemeral cache loss; newer changes/removals and capture races reject unexposed reuse. Exact offensive slots and native inactive IDs feed both arms. Normal ranking pools and serving remain unchanged.
+- **639 passed,19 skipped in28.55s**: all affected Calibration/legacy grading/common roster/session/deletion suites, synthetic transport and isolated SQLite. Independent final **45 passed5.11s**, all4 runtime hashes stable; copied independent cache/coalescing, source-binding/restart, both-arm pair-boundary and actual gate regressions. Pycompile/diff check pass. No mobile/simulator changes or timing claim.
+- Coupled opponents retain full generation budgets then their pairs are excluded before unchanged publication gates, with private unsupported participant/candidate counts. Normal repeat deferral can reorder final eligible cards. Coupled viewers explicitly remain unavailable. An inherited read-count race fixture was converted to mutate after the actual first fingerprint; no production guard was weakened.
+- Exact-head CI, deploy, unexposed reprepare/currentness and actual cohort readiness are parent-owned. Existing exposed/answered snapshots remain immutable. [Scope](../docs/plans/calibration-full-metadata/scope.md), [validation/limitations](../docs/plans/calibration-full-metadata/validation.md).
+
 ## 2026-11-07 — Exact MFL native-range and own-account Calibration follow-up
 
 - Isolated `fix/calibration-mfl-ranges` from `e0aa9e36`. Native range assignment, subset/depth protections and attainable-cap diagnostics run identically for both arms; immutable fixed DT/DE/LB/CB/S retain capacity. Fresh own-account MFL identity maps to the existing canonical roster/pick seat without importer credentials or private-board substitution.
