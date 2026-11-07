@@ -1040,3 +1040,9 @@ the write transaction so a held pre-deletion snapshot cannot be restored
 after re-signup. Export v2 omits mixed-owner internal debug/recovery payloads
 and filters inline partner evidence; own metadata/actions remain.
 [Scope](../docs/plans/privacy-export-board-history-followups/scope.md).
+
+### Projection batch lifecycle
+
+Targets have random generations and CAS lease tokens; jobs have separate worker tokens and one bounded recovery. Enqueue/publication take the existing live-user fence. A deleted/recreated account cannot revive an old target or job. Semantic reuse excludes ingestion clocks and redundant derived source hashes but retains provider revisions, kickoff, statuses and consumed facts. Exact raw snapshots remain immutable. Weekly local-zone slots preserve wall-clock time over DST. GETs perform only reads. New tables participate in deletion/export; retention preserves each target's last successful baseline through weekly failures. Both mobile projected consumers disable legacy compute reads when the new flag is on.
+
+The scoring contract is part of immutable config/source identity and saved-input scenario compatibility. API admission and workers both enforce policy approval, including revocation during simulation. Engine v2 prevents reuse of v1 results that lack floor diagnostics.

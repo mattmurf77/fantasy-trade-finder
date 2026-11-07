@@ -2433,3 +2433,7 @@ filtered; malformed private JSON is null. Shared match valuation is null
 because its viewer may be the other party. Own rankings, row metadata, trade
 packages, grades/tags, actions and outcomes remain. This is an export boundary,
 not a storage, schema or evidence-retention change.
+
+### league_projection_runs / league_projection_targets
+
+Default-off weekly advisory sidecar. `league_projection_runs` owns run_id,user_id,league_id,request/input hashes, immutable request/snapshot/result JSON, created/updated/expiry timestamps, state/reason/details, worker_token and retry_count. The worker token fences abandoned attempts; recovery reuses saved inputs once. `league_projection_targets` owns a random target generation, unique(user_id,league_id), canonical league seat, season, next weekly eligibility, dispatch lease/token and last-attempt/last-success references. Both tables join the account deletion/export registry; writes lock the live user. New tables use metadata.create_all. No trade/ranking data is rewritten. Ordinary history retention is configurable(default7days); the last successful target baseline is retained until replaced or account deletion. Raw unrelated user profiles are not stored.

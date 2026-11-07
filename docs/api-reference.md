@@ -1731,3 +1731,16 @@ grades/tags and decision/outcome history remain; stored evidence is unchanged.
 Account deletion still removes all owned payloads through the alias-aware scope.
 The exact payload columns are declared in `accounts._EXPORT_INTERNAL_PAYLOADS`;
 see [privacy follow-up scope](plans/privacy-export-board-history-followups/scope.md).
+
+### Scheduled league projection sidecar (default off)
+
+Flag `league.projections` gates all user routes; existing initialized-session and verified read/write gates apply. IDs are viewer/current-league scoped. GETs read persisted evidence only, never enqueue/fetch/simulate.
+
+- `GET /api/leagues/{id}/projection-runs/latest`: weekly state, last successful `run`, last `attempt`, next eligibility time, schedule/timezone, proposed scenario defaults. States include `no_run`, `queued`, `running`, `current`, `stale`, `refresh_failed`, `incomplete_projections`, `unsupported_policy`, `failed`. Last success survives refresh failure.
+- `POST /api/leagues/{id}/projection-runs`: explicit scenario request `{config, baseline_run_id?}`;202 queued. A supplied owned completed baseline freezes its inputs; eligibility-policy changes require fresh capture. This never replaces the weekly baseline or starts work on the request thread.
+- `GET /api/projection-runs/{run_id}`: owned status/result; `POST .../cancel`: cancel pending/running work, no partial publication.
+- `GET .../teams`, `GET .../draft`, `GET .../teams/{roster_id}/weeks`: complete metrics/explanations;409 until complete.
+- `GET .../export/csv`, `GET .../export/manifest`: numeric summary or provenance/configuration manifest. Probabilities are0–1, unavailable conditional metrics null, qualifying sample counts explicit.
+- `POST /api/cron/league-projections`: existing cron-secret authentication; isolated bounded dispatcher. Existing realtime cron also invokes it behind the flag. No notification work is invoked by the isolated route.
+
+Provider activation additionally requires `league.projections_provider_approved` and `config/league_projections.json` `policy_approved:true`. Explicit scenario admission and worker execution enforce both gates; revocation stops in-flight work. Saved-input comparisons cannot change scoring interpretation or eligibility policies. Weekly result details include Max PF pre-floor mean, realized mean, mean uplift and floor frequency. See `docs/plans/league-projections/implementation.md` for actual source gaps; endpoint existence does not establish forecast accuracy.

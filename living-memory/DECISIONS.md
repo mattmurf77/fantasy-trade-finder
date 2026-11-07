@@ -2107,3 +2107,7 @@ No historical 1100-pin repair — indistinguishable from anchor no-value.
 **Consequences:** Phase 3b/3c are out of scope and should not be picked up without a new decision. Web is permanently allowed to lag the app on features, which means "web doesn't have X" stops being a defect class. **D2 (remediate vs rewrite) and D3 (bundle+minify) remain OPEN** — both gate Phase 3, not the Phase 0-2 merge, so this branch does not wait on them. D3 is the largest item still on the table: 266 KB unminified `app.js` plus 133 KB CSS at `no-cache` is the biggest perf lever the site has.
 
 **Related:** [D-056](#d-056) (gates posture), [G-067](GOTCHAS.md) (the web-analytics race Phase 0 fixed).
+
+### Weekly projections: read-only scheduled sidecar (2026-11-07)
+
+User confirmed that the new playoff/Max PF process feeds projected standings and runs weekly, not on app entry. Tuesday09:30 Eastern is a configurable implementation default. Current trade/Win Now models stay unchanged. Unresolved custom-scoring fields and source permission keep the feature dark. The local candidate uses an explicitly versioned common-offense sparse model only on admitted rows; assumptions are exposed and whole missing rows remain unavailable. Historical forecasts updated after kickoff are not treated as pregame evidence. Explicit saved-input scenarios are separate from the retained weekly baseline. Original specification and subsequent steering are preserved in docs/plans/league-projections.

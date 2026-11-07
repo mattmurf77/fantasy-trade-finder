@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import Text from '../components/chalkline/Text';
 import { Badge, Button, TickLabel } from '../components/chalkline';
 import FeedbackFAB from '../components/FeedbackFAB';
+import LeagueProjectionSection from '../components/LeagueProjectionSection';
 import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { getLeagueRosters, getLeagueUsers, findMyRoster } from '../api/sleeper';
 import { getOutlook } from '../api/league';
@@ -50,6 +51,7 @@ export default function StandingsScreen() {
     useSession((s) => s.leagues.find((l) => l.league_id === leagueId)?.platform) ?? 'sleeper';
   const isSleeper = platform === 'sleeper';
   const oddsEnabled = useFlag('outlook.odds');
+  const batchProjections = useFlag('league.projections');
   const [segment, setSegment] = useState<Segment>('current');
 
   // Same keys, fetchers and staleTime as every other Sleeper-roster consumer
@@ -71,7 +73,7 @@ export default function StandingsScreen() {
   const outlookQuery = useQuery({
     queryKey: ['league-outlook', leagueId, 'consensus'],
     queryFn: () => getOutlook(leagueId!, 'consensus'),
-    enabled: segment === 'projected' && oddsEnabled && isSleeper && !!leagueId,
+    enabled: !batchProjections && segment === 'projected' && oddsEnabled && isSleeper && !!leagueId,
     staleTime: 60_000,
   });
 
@@ -189,7 +191,9 @@ export default function StandingsScreen() {
   }
 
   let projected: React.ReactNode;
-  if (!isSleeper) {
+  if (batchProjections) {
+    projected = <LeagueProjectionSection />;
+  } else if (!isSleeper) {
     projected = <OutlookUnsupportedRow />;
   } else {
     // SeasonOutlookSection draws its own loading shell and renders NOTHING

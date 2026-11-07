@@ -630,3 +630,7 @@ of existing market prices, not projected points or championship probability.
 [Candidate contract](plans/outlook-evidence-rules/architecture.md).
 
 **Calibration round** — a namespaced, frozen comparison exercise whose exact model versions, input snapshot, selected cards and first feedback remain attributable independently of earlier exercises. The outlook round collects descriptive opinions and does not validate future-production forecasts.
+
+- **Official Max PF:** provider aggregate hindsight-best eligible lineup points; distinct from actual PF and optimizing expected future points.
+- **Conditional expected non-playoff pick:** average pick position only across simulated worlds in which the original team misses playoffs; null below the configured sample threshold.
+- **Weekly as-of projection:** immutable forecast from a scheduled capture, not a live score update or a guarantee of calibration.

@@ -1,0 +1,32 @@
+{
+  "synthetic_only": true,
+  "python": "3.14.4",
+  "platform": "macOS-26.5.1-arm64-arm-64bit-Mach-O",
+  "iterations": 250000,
+  "teams": 12,
+  "future_games": 36,
+  "wall_seconds": 30.119,
+  "peak_rss_bytes": 154861568,
+  "source_sha256": {
+    "backend/league_projections/simulation.py": "d6edd08033d89d1205f46e9fcda936e34dc66fa3cf79852f0a43a42c9256aa12",
+    "backend/league_projections/store.py": "ad7d4dd57fdce65db72abe794da393f38d7c94e54317507f7f6e98e301b6bba7",
+    "backend/league_projections/service.py": "11e6bfaaebf5f5602914e1714ddeb3d0fa39dbca015a0475b7997d7d634d19ec",
+    "backend/league_projections/provider.py": "b3baae51eb6bb3ab3ef486d1712c0aa341edc2bacab2b4755be772431a43dfc5",
+    "backend/league_projections/scoring.py": "898c712afb655ee47744065d476341ac29a4978c38d3c18cc8737596c4538cbb",
+    "backend/league_projections/batch.py": "fede52219ab480d40178e6dc74a0aeade751d76320a77f6a632a8dbf4f487266",
+    "backend/league_projections/__init__.py": "268cbdf3730ce8db458acd81ffa8a24115583ec21c04f1d3cb2895ff30384bc8",
+    "backend/league_projections/core.py": "48a9c67b835331c27dcea17c008aef462dc2c50f577b12cd18793baecd1fbf33",
+    "backend/league_projections/api.py": "ef38c1e7a3e9a2701aa0d3823fdfa0f7fa8442c0f1ba3f89db2e7aef2e12ce78",
+    "backend/league_projections/timing.py": "67895781a67fc005768fb223602f66184541e2eca3e7b4f9bdd6b750b3d0dd56"
+  },
+  "snapshot_hash": "3ebcddd1f1551d4da0dc5d475027eacc39cb13c1b7b68ad574531894527906ed",
+  "playoff_sum": 6.0,
+  "pick_column_sums": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ]
+}

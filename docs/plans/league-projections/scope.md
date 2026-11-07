@@ -1,0 +1,27 @@
+# League projections: implementation scope
+
+Date: 2026-11-06. Entry: direct user handoff to Review Fantasy Trade Finder.
+Builder: projection capability agent. No waivers.
+
+The user requested a read-only app capability for playoff likelihood and non-playoff draft order. This is an advisory sidecar; existing trade models, outlooks, Win Now and provider behavior remain unchanged.
+
+## Analytics
+Existing `screen_view` records entry; existing API observability records requests. Durable run states and reasons describe completion/coverage without collecting new interaction events. No new analytics events.
+
+## Schema and flags
+Viewer-owned `league_projection_runs` and `league_projection_targets` tables store immutable normalized inputs, configuration, version/hash, status and results. Account deletion/export includes this table. Bounded queued work takes the existing live-user row fence. New flags `league.projections` and `league.projections_provider_approved` default false everywhere. The former controls entry/routes; the latter is specific to new provider ingestion and requires documented permission for the consumed feeds. It has no effect on existing Sleeper functionality. No new environment variables/model knobs.
+
+## Evidence
+Pure engine tests cover Decimal scoring, exact assignment against exhaustive search, locks, negative points, narrowly scoped IDP bye replacements, shared-world playoff/draft invariants, deterministic seeds, missing policies and inputs. API/store tests cover authentication, queue bounds, cancellation, ownership and account deletion. A dependency-free mobile structural guard pins navigation/flag boundaries and shared API usage. Code walk and manual TestFlight checklist are in evidence.md; no simulator/Maestro.
+
+## Documentation
+API reference: new run/read/cancel/export contracts. Data dictionary: run table. Architecture/HLD/LLD: immutable asynchronous advisory sidecar. Cross-client invariants: same run results, probabilities and explicit scenarios. Glossary: Max PF, conditional expected pick. Decision: fail closed for unsupported provider coverage/policies and default-off release. These are additive sections, preserving existing behavior.
+
+## Ship gates
+Backend tests, mobile typecheck, structural guards, test-ID lint, independent review and recorded TestFlight checks. Parent owns PR, CI, merge and deployment. No claims of provider accuracy, original prototype parity or device proof without evidence.
+
+## Confirmed vs proposed
+Confirmed: custom scoring including IDP, exact lineup eligibility, official historical Max PF, joint worlds, traded-pick ownership, expected and modal W-L-T, explicit coverage, readonly advisory behavior, 60% historical / 40% projection baseline and 40/60/80 comparison controls.
+Proposed and visible scenario inputs: 250000 full simulations, 100-sample conditional-pick threshold, 5-point persistent strength SD, same-week residual correlation, IR eligibility, reserve activation, empty slots, tie handling. Unsupported divisions/median/manual seeding and live remaining-projection coverage block numeric results. Provider permission, IR behavior and original November 6 fixtures are not established by the handoff.
+
+The later confirmed weekly-only scheduled delivery instruction supersedes manual baseline generation: see steering-addendum.md. New targets wait until the next configured weekly slot; stored GETs never dispatch work. Explicit comparison scenarios remain separate.

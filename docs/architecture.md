@@ -1011,3 +1011,7 @@ internal generation/recovery payloads. `accounts._EXPORT_INTERNAL_PAYLOADS`
 centralizes SQL column projections before payload deserialization; inline feature/valuation filters preserve the
 viewer's record while withholding partner evidence and malformed private JSON.
 The filter operates on detached copies and does not rewrite stored evidence.
+
+### Weekly standing projections
+
+`league_projections` is an independent advisory sidecar: authoritative league sync registers durable targets; authenticated scheduled dispatch claims due targets; one bounded worker captures immutable native inputs then runs a joint actual-score/Max PF model. Versioned results feed existing Projected standings and League Summary through read-only routes. Exact scoring/assignment and provider normalization are separate pure seams. Account/target/worker fences and atomic completion prevent stale/deleted work from being republished. Existing trade generation, outlook inference and Win Now inputs are unchanged. Provider/policy launch gates remain off. The versioned sparse-offense interpretation admits populated source-bound rows only after published-total reconciliation, records modeled omissions separately from direct/derived fields, and preserves unknown custom events. Engine `joint-season-scenario-v2` exposes the Max PF floor effect. Decoder identity checks do not establish predictive accuracy or full-league coverage. Details: `docs/plans/league-projections/implementation.md`.

@@ -2169,3 +2169,5 @@ push, Render redeploys. That covers the hub only — the sheet→page presentati
 - 2026-Q2 — 4 entries (2026-05-21 → 2026-06-11) — [archive/CHANGELOG-2026Q2.md](archive/CHANGELOG-2026Q2.md)
 
 Earlier project history (pre-changelog) lives at the bottom of [archive/CHANGELOG-2026Q2.md](archive/CHANGELOG-2026Q2.md). The "Outstanding / Known Gaps" list as it stood on 2026-08-08 was moved to the bottom of [archive/CHANGELOG-2026Q3.md](archive/CHANGELOG-2026Q3.md) — check [`NEXT.md`](NEXT.md) for the current state.
+
+2026-11-07 — Added default-off weekly projected standings sidecar: immutable source inputs, native exact lineup assignment including IDP, joint playoff/Max PF simulations, bounded durable batches, account-lifetime fences, stored mobile/web presentation and explicit scenario comparisons. No activation or trade-model change. Actual sparse projection support remains unresolved; see docs/plans/league-projections/implementation.md.

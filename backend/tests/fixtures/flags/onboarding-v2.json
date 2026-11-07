@@ -1,4 +1,6 @@
 {
+  "league.projections": false,
+  "league.projections_provider_approved": false,
   "trade.prepared_inventory": true,
   "trade.first_page_store": true,
   "trade.packed_evidence": true,
