@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-07 — Exact selected running-job joins candidate
+
+- Strict identical pinned/opponent searches share one live worker under exact ordered request, source, config/flag, epoch and lifetime checks. Force, completed/failed work, legacy requests and different selections retain full-generation behavior; intent-only keeps existing organic semantics.
+- The bounded index holds only job-ID pointers. Source references are private to running jobs and released on terminal/revocation paths. Normal current-only, access, preview and disposition checks still run for each caller. No search budget or quality change.
+- Isolated from main `57b8d7c3`; no production action, completed proof cache or 200 ms claim. Root owns full CI/release and Calibration refresh. [Scope and evidence](../docs/plans/selected-running-single-flight/scope.md) · [Code walk](../docs/plans/selected-running-single-flight/code-walk.md).
+
 ## 2026-11-07 — Mobile passive preparation lifecycle candidate
 
 - Fresh organic preparation no longer waits for page hydration: request preferences and session readiness overlap, then every poll binds the captured format/session revision. Focus/foreground cleanup rejects obsolete responses. Selected model/fair handoffs and preview/current-only gates remain unchanged.

@@ -1053,3 +1053,13 @@ pages; format changes still evict them through completion of the local mirrors.
 See [scope and remaining boundaries](plans/mobile-context-preparation/scope.md).
 
 Forecast simulation scheduling: both the realtime cron dispatcher and the projection-only cron inject the process-local live-trade predicate into the single projection worker. At each existing 500-draw cancellation checkpoint, active non-prepared trade work can defer the forecast by at most ten 100 ms sleeps. No trade-registry lock is held during those sleeps. Cancellation, worker token, feature/policy approval and the original deadline are checked before and after a pause; idle checkpoints keep the original single control read. The same simulation resumes with unchanged random state, draw count, result schema and weekly cadence. Continuous pressure permits an original chunk between bounded pauses and can still exhaust the original deadline; it never grants a lease extension or partial success. Other processes and Calibration work are not coordinated by this predicate. See `docs/plans/projection-foreground-yield/scope.md`.
+
+### Running selected-request single-flight
+
+Strict pinned/opponent generation has a separate bounded, pointer-only in-process
+index claimed under `_trade_jobs_lock`. It joins only matching live work after
+observed input/signature/source/lifetime checks; the same normal response pipeline
+still checks every delivery. Different selections and force remain independent;
+intent-only retains the organic index. Strong source identities are job-private
+and released on terminal/revocation paths. No completed proof reuse or global
+admission guarantee follows. [Contract and evidence](plans/selected-running-single-flight/scope.md).

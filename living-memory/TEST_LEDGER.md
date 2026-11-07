@@ -1,3 +1,10 @@
+## 2026-11-07 — Selected running-job join validation
+
+- Affected current-only, source-fingerprint, counterparty epoch, session, timeout/error, force, page-store, preview, lifecycle and pipeline suites: **598 passed in 36.32 seconds**. Final new focused suites: **83 passed in 10.90 seconds**, including 41 retained independent controls (counts overlap with the affected run).
+- Independent review: **41 passed in 8.49 seconds**, stable server hash, including real account DELETE/recreation, concurrency, missing authority, collisions, post-join edits and normal serve/paywall reentry. No outstanding reproduced blocker; exact commit binding follows freeze.
+- Actual strict route admission and full-worker comparison: **783 ordered cards** across opponent and receive-pinned scenarios; native/final proof, published public inventory, all strict served continuation pages and durable valuation hashes match main. Two identical taps admit two workers on main and one on candidate. Only the first baseline worker executes; the duplicate is counted, not timed. Both arms bind unchanged before/after server hashes. Public normalization excludes only trade ID, expiry and impression ID. The initial engine-only binding diagnostic is superseded.
+- No simulator, provider/production load or 200 ms acceptance. Full CI and root-coordinated backend release/Calibration refresh remain separate gates. [Scope](../docs/plans/selected-running-single-flight/scope.md).
+
 ## 2026-11-07 — Mobile passive preparation lifecycle
 
 - Executed shared helper/tab/focus/foreground checks prove preference/session readiness overlap, independence from unresolved hydration, post-readiness token binding and stale context rejection. Ten delayed-storage/context controls cover per-key and global disk-only invalidation, already-dispatched writes followed by clear/new page, header consistency and replacement attempt ownership. Three format-application controls cover HTTP/local-mirror gap and failure cleanup.

@@ -15,6 +15,11 @@ For **what's next**, [`living-memory/NEXT.md`](../../living-memory/NEXT.md). For
 cited below, [`living-memory/DECISIONS.md`](../../living-memory/DECISIONS.md).
 Per-feedback-item fixes do **not** live here — they live in [`../feedback/items/`](../feedback/items/).
 
+Selected running-request joins **implemented locally, review/CI pending**:
+[scope and full-proof evidence](selected-running-single-flight/scope.md).
+Strict identical pinned/opponent requests share one live worker; completed results,
+force and different selections retain full-generation behavior. No 200 ms claim.
+
 Mobile exact-context preparation **implemented locally, review/CI pending**:
 [scope, lifecycle and device checklist](mobile-context-preparation/scope.md).
 Removes disk hydration from fresh preparation, fences obsolete work/storage writes;

@@ -2454,6 +2454,10 @@ _player_sync_lock = threading.Lock()  # serialises concurrent player DB syncs
 #   }
 _trade_jobs: dict[str, dict] = {}                     # job_id → state
 _trade_jobs_by_key: dict[tuple, str] = {}             # (uid,lid,fmt) → job_id
+# Pointer-only, process-local selected running joins. Eviction never cancels work.
+_selected_trade_jobs: dict[str, str] = {}
+_SELECTED_TRADE_JOIN_LIMIT = 128
+_SELECTED_TRADE_SHAPE_BYTES = 32768
 _trade_jobs_lock = threading.Lock()
 # Tokens live only while an admission or retained job holds them. Weak indexing
 # prevents a permanent per-account epoch ledger in this process-local cache.
@@ -3248,6 +3252,8 @@ def _cleanup_loop() -> None:
                                           len(job.get("cards") or [])))
                         job["status"] = "error"
                         job["error"]  = "timeout"
+                        job.pop("_selected_source", None)
+                        job.pop("_selected_shape", None)
                         job["finished_at"] = now
                     if age > _JOB_RETENTION:
                         to_drop.append(jid)
@@ -3577,6 +3583,59 @@ def _capture_trade_input_epochs(user_id, league_id, *, participant_ids=()):
         return tuple(tokens)
 
 
+@dataclass(frozen=True)
+class _SelectedTradeSource:
+    """Strong identity refs only while the retained job is running.
+
+    This is not an owned input snapshot or a historical proof certificate.
+    Copying a job must not clone these identity authorities.
+    """
+    service: object
+    trade_service: object
+    league: object
+    players: tuple
+    roster: tuple
+    league_user_id: str
+    lifetime_state: object
+    lifetime_generation: int
+
+    def __deepcopy__(self, memo):
+        return self
+
+    def matches(self, other):
+        return (type(other) is _SelectedTradeSource
+                and self.service is other.service
+                and self.trade_service is other.trade_service
+                and self.league is other.league
+                and len(self.players) == len(other.players)
+                and all(a is b for a, b in zip(self.players, other.players))
+                and self.roster == other.roster
+                and self.league_user_id == other.league_user_id
+                and self.lifetime_state is other.lifetime_state
+                and self.lifetime_generation == other.lifetime_generation)
+
+
+def _selected_trade_join_key(shape):
+    """Bound metadata, never reject or truncate the underlying request."""
+    try:
+        encoded = json.dumps(shape, separators=(",", ":"), allow_nan=False).encode()
+    except (TypeError, ValueError):
+        return None
+    if len(encoded) > _SELECTED_TRADE_SHAPE_BYTES:
+        return None
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _prune_selected_trade_jobs_locked():
+    for key, job_id in tuple(_selected_trade_jobs.items()):
+        job = _trade_jobs.get(job_id)
+        if not _job_live(job) or _trade_job_stalled(job, time.monotonic()):
+            _selected_trade_jobs.pop(key, None)
+            if job is not None:
+                job.pop("_selected_source", None)
+                job.pop("_selected_shape", None)
+
+
 def _trade_job_revoked(job):
     """Read under the job lock, including when examining a copied snapshot."""
     return bool(job is None or job.get("superseded")
@@ -3585,6 +3644,8 @@ def _trade_job_revoked(job):
 
 def _revoke_trade_job_locked(job, reason="inputs_changed"):
     """Fence future publication without deleting durable offers or identities."""
+    job.pop("_selected_source", None)
+    job.pop("_selected_shape", None)
     job["superseded"] = True
     job["superseded_at"] = time.monotonic()
     job["cards"] = []
@@ -3609,6 +3670,8 @@ def _finish_trade_job(job_id, error=None):
         job.update(status="error" if error is not None else "complete",
                    error=error, finished_at=now)
         job.pop("_ranked_prefix_snapshot", None)
+        job.pop("_selected_source", None)
+        job.pop("_selected_shape", None)
         if error is None:
             return int((now - job.get("started_at", now)) * 1000)
         return None
@@ -14680,6 +14743,7 @@ def _kickoff_trade_job(
     force_fresh: bool = False,
     preserve_running: bool = False,
     input_epochs=None,
+    _selected_request=None,
 ) -> str:
     """Atomically claim/reuse a job, then start its worker outside all locks.
 
@@ -14758,6 +14822,9 @@ def _kickoff_trade_job(
     # pregen supplies the freshly built payload; headless cron resolves here.
     execution_context = None
     capture_error = None
+    selected_source = None
+    selected = bool(_selected_request is not None and _trade_current_only()
+                    and source is None and not synchronous)
     roster_read = None          # the Sleeper read the captured rosters came from
     read_rows = None            # the member rows session init writes from that read
     try:
@@ -14767,6 +14834,13 @@ def _kickoff_trade_job(
         roster_read = (base_session or {}).get("roster_fetch_started_at")
         read_rows = (base_session or {}).get("roster_read_rows")
         execution_context = _capture_trade_execution(base_session, user_id, league_id, scoring_format)
+        if selected:
+            selected_source = _SelectedTradeSource(
+                execution_context.service,
+                (base_session.get("trade_svcs") or {}).get(scoring_format) or base_session.get("trade_svc"),
+                base_session.get("league"), execution_context.players, execution_context.user_roster,
+                execution_context.league_user_id, _job_write_lease.state, _job_write_lease.generation)
+
         # The worker reads member rankings/outlooks for this captured league.
         # Keep original viewer epochs: recapturing after a racing viewer edit
         # must never replace its revoked token and revive stale preferences.
@@ -14809,6 +14883,20 @@ def _kickoff_trade_job(
     # Team) bypass the shared per-key cache — they answer a specific
     # question, not the league-wide deck.
     is_pinned = bool(pinned_give) or bool(pinned_receive) or bool(opponent_user_id)
+    selected_shape = selected_key = None
+    if (selected and capture_error is None and (is_pinned or trade_intent)
+            and selected_source.lifetime_generation >= 0
+            and selected_source.service is not None and selected_source.trade_service is not None
+            and type(request_signature) is str and bool(request_signature)
+            and type(fingerprints) is tuple and len(fingerprints) == 2
+            and all(type(value) is str and bool(value) for value in fingerprints)):
+        # Raw selectors distinguish any normalization/flag race; effective
+        # selectors and their order are the values actually sent to the worker.
+        selected_shape = (user_id, base_session.get("account_id"), league_id, scoring_format,
+            hashlib.sha256(sess_token.encode()).hexdigest(), _selected_request,
+            tuple(pinned_give), tuple(pinned_receive), pinned_give_mode,
+            opponent_user_id, trade_intent, fairness_threshold, presentation_exempt)
+        selected_key = _selected_trade_join_key(selected_shape)
     job = {
         "job_id":             job_id,
         "key":                _trade_job_key(user_id, league_id, scoring_format),
@@ -14889,13 +14977,30 @@ def _kickoff_trade_job(
     # the key's Trades job, and Trades never reuses it, so it is never shown in
     # Trades. (_replenish_deck_for reads the key itself first, to reuse a fresh
     # Trades deck for Calibration.)
-    shared = (not is_pinned and not (presentation_capture[0] and presentation_exempt)
+    shared = (not selected and not is_pinned and not (presentation_capture[0] and presentation_exempt)
               and source != "grading_refresh")
     with _trade_jobs_lock:
         if _trade_job_revoked(job):
             job.update(status="error", error="inputs_changed", finished_at=time.monotonic())
             _trade_jobs[job_id] = job
             return job_id
+        if selected_key is not None:
+            _prune_selected_trade_jobs_locked()
+            selected_job = _trade_jobs.get(_selected_trade_jobs.get(selected_key))
+            previous_source = (selected_job or {}).get("_selected_source")
+            if (not force_fresh and selected_job is not None
+                    and selected_job.get("_selected_shape") == selected_shape
+                    and type(previous_source) is _SelectedTradeSource
+                    and previous_source.matches(selected_source)
+                    and selected_job.get("request_signature") == request_signature
+                    and (selected_job.get("roster_fp"), selected_job.get("values_snapshot_id")) == fingerprints
+                    and selected_job.get("input_epochs") == input_epochs
+                    and _trade_running_matches(selected_job, fairness_threshold, outlook_value,
+                        trade_intent, presentation_capture, request_signature, fingerprints,
+                        session_read=roster_read)):
+                return selected_job["job_id"]
+            job["_selected_shape"] = selected_shape
+            job["_selected_source"] = selected_source
         existing = _trade_jobs.get(_trade_jobs_by_key.get(job["key"])) if shared else None
         if existing is not None:
             if (not force_fresh and request_signature is not None
@@ -14914,6 +15019,11 @@ def _kickoff_trade_job(
                     return existing["job_id"]
                 _revoke_trade_job_locked(existing, "superseded")
         _trade_jobs[job_id] = job
+        if selected_key is not None:
+            while (selected_key not in _selected_trade_jobs
+                   and len(_selected_trade_jobs) >= _SELECTED_TRADE_JOIN_LIMIT):
+                _selected_trade_jobs.pop(next(iter(_selected_trade_jobs)))
+            _selected_trade_jobs[selected_key] = job_id
         if shared:
             # Pin into the per-key index so future generate calls dedupe.
             _trade_jobs_by_key[job["key"]] = job_id
@@ -21106,7 +21216,8 @@ def generate_trades():
         is returned instantly with status='complete'.
       - In-flight jobs are shared across concurrent callers — second tap
         gets the same job_id and the current snapshot.
-      - Pinned-give jobs always create a fresh, uncached job.
+      - Strict selected requests can join an identical live request in this
+        session. Completed selected jobs and legacy selected requests are uncached.
     """
     sess = _require_initialized_session()
     sess["last_active"] = time.time()
@@ -21166,6 +21277,11 @@ def generate_trades():
     # question (like a pinned job), so it bypasses the shared per-key cache.
     opponent_user_id   = body.get("opponent_user_id") or None
     _any_pinned        = bool(pinned_give) or bool(pinned_receive) or bool(opponent_user_id)
+    selected_request = None
+    if _trade_current_only() and (_any_pinned or body.get("pinned_receive_players")):
+        selected_request = (tuple(body.get("pinned_give_players") or ()),
+            tuple(body.get("pinned_receive_players") or ()), body.get("pinned_give_mode"),
+            body.get("opponent_user_id"), body.get("trade_intent"))
     # Default to 50% when pinned players are selected (wide net), 75% otherwise
     default_fairness   = 0.50 if _any_pinned else 0.75
     fairness_threshold = float(body.get("fairness_threshold", default_fairness))
@@ -21260,7 +21376,7 @@ def generate_trades():
                                             page_row)
     with _trade_jobs_lock:
         existing_id = (_trade_jobs_by_key.get(key)
-                       if not _any_pinned and not presentation_uncached
+                       if not _any_pinned and selected_request is None and not presentation_uncached
                        and not any(token.revoked for token in input_epochs) else None)
         existing    = _trade_jobs.get(existing_id) if existing_id else None
 
@@ -21326,6 +21442,7 @@ def generate_trades():
         presentation_exempt = presentation_exempt,
         force_fresh        = force_fresh,
         input_epochs       = input_epochs,
+        _selected_request  = selected_request,
     )
     with _trade_jobs_lock:
         snapshot = dict(_trade_jobs[job_id])
