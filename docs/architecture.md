@@ -1,5 +1,7 @@
 # Architecture
 
+Calibration capture completes held-roster occupancy through `calibration_roster_coverage`, using fresh skill-position metadata for unranked players without adding model candidates or market prices. Missing metadata stays unknown; private evidence and roster sums explicitly identify unpriced occupancy. [Contract](plans/calibration-roster-coverage/scope.md).
+
 ## Persistent silent trade preparation
 
 `prepared_trade_cohort` resolves verified existing app users against fresh known

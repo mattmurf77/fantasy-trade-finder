@@ -8,6 +8,8 @@
 
 ---
 
+Calibration coverage (2026-11-06): metadata-backed unranked holdings are safety occupancy only, with null market value, no generator candidate or usable replacement status. Fingerprints bind position/identity/active/injury facts; deploy requires unexposed re-preparation. [Contract](../docs/plans/calibration-roster-coverage/scope.md).
+
 ## Table of Contents
 - [2026-11-06 — Versioned outlook evidence contract](#2026-11-06--versioned-outlook-evidence-contract)
 - [2026-11-04 — Export boundary and board-history owner fencing](#2026-11-04--export-boundary-and-board-history-owner-fencing)

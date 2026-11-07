@@ -40,7 +40,7 @@ def _hash(value):
                                      separators=(",", ":")).encode()).hexdigest()
 
 
-def _input_identity(user_id, league_id):
+def _input_identity(user_id, league_id, captured_metadata_ids=()):
     """Persisted/cache-only freshness check; never fetch a provider on an open."""
     from . import server as s, database as db, trade_service as ts
     fmt = db.get_league_scoring(league_id)
@@ -56,6 +56,7 @@ def _input_identity(user_id, league_id):
              for p in players]
     metadata = s._load_sleeper_cache() or {}
     held = {str(pid) for member in members for pid in member.get("player_ids", [])}
+    held.update(map(str, captured_metadata_ids))
     evidence = pool.get("input_evidence")
     player_map = {p.id: p for p in players}
     provenance = evidence.capture(player_map).as_dict(player_map) if evidence else None
@@ -66,7 +67,7 @@ def _input_identity(user_id, league_id):
     return _hash(dict(code_revision=code_revision(), format=fmt, members=member_facts,
         roster_state={k: state.get(k) for k in ("roster_fp", "status")},
         availability={p: {k: (metadata.get(p) or {}).get(k) for k in
-                          ("injury_status", "fantasy_positions")} for p in held | set(player_map)},
+                          ("injury_status", "fantasy_positions", "position", "player_id", "active")} for p in held | set(player_map)},
         slot_order=s._league_slot_order(league_id), provenance=provenance,
         prefs=s.load_league_preferences_bulk(ids, league_id),
         asset_prefs={u: s.load_asset_preferences(user_id=u, league_id=league_id) for u in ids},
@@ -112,7 +113,7 @@ def is_current(source, *, user_id, league_user_id, league_id):
         return (source["account_user_id"] == user_id
                 and source["league_user_id"] == league_user_id
                 and source["league_id"] == league_id
-                and source["input_identity"] == _input_identity(user_id, league_id))
+                and source["input_identity"] == _input_identity(user_id, league_id, source.get("captured_metadata_ids") or ()))
     except (KeyError, TypeError, ValueError):
         return False
 
@@ -170,6 +171,8 @@ class CapturedComparison:
             retained = {id(card) for card in cards}
             cards = [card for card in original if id(card) in retained]
             del original, retained
+            from .calibration_roster_coverage import annotate_coverage
+            annotate_coverage(cards, self.source.get("unpriced_occupancy") or {}, self.roster_context)
             roster_count = len(cards)
             cards, _, significance_diag = s._evaluate_trade_significance(
                 cards, capture=self.significance, players=context["players"],
@@ -246,7 +249,8 @@ def capture(*, user_id, league_user_id, league_id):
         if refreshed_picks is None:
             raise GradingError("pick_ownership_unavailable", 409)
     s._get_universal_pool(fmt)  # Warm before the consistency window.
-    identity_before = _input_identity(user_id, league_id)
+    captured_metadata_ids = sorted({str(pid) for row in raw["rosters"] for pid in row.get("players") or []})
+    identity_before = _input_identity(user_id, league_id, captured_metadata_ids)
     fmt = db.get_league_scoring(league_id)
     pool, seed = s._get_universal_pool(fmt)
     service = s._extension_ranking_services(user_id, strict=True)[fmt]
@@ -321,6 +325,8 @@ def capture(*, user_id, league_user_id, league_id):
             if pid not in roster_ctx.assets:
                 roster_ctx.assets[pid] = Asset(pid, frozenset(),
                     float(s._priced_pick_value(pick, order, fmt)), is_pick=True)
+        from .calibration_roster_coverage import add_unranked_occupancy
+        unpriced_occupancy = add_unranked_occupancy(roster_ctx, metadata)
         for uid, team in roster_ctx.teams.items():
             roster_ctx.utility_inputs[uid] = {"explicit_outlook": prefs.get("team_outlook") if uid == seat else context["opponent_outlooks"].get(uid),
                 "inferred_outlook": prefs.get("inferred_outlook") if uid == seat else None,
@@ -332,7 +338,8 @@ def capture(*, user_id, league_user_id, league_id):
         "captured_at": datetime.now(timezone.utc).isoformat(),
         "input": assignment["input"], "input_evidence": assignment["input_evidence"],
         "roster_context": {k: v for k, v in asdict(roster_ctx).items() if k not in {"cache", "_assignments"}},
-        "flags": flags, "significance": significance,
+        "flags": flags, "significance": significance, "unpriced_occupancy": unpriced_occupancy,
+        "captured_metadata_ids": captured_metadata_ids,
         "code_revision": code_revision(), "provider_rules": _provider_rules(raw["meta"]),
         "registered_participants": sorted(registered), "registered_participant_revisions": registered,
         "suppression": _suppression_state(s, user_id, league_id) if flags["deck_fatigue"] else None,
@@ -340,7 +347,7 @@ def capture(*, user_id, league_user_id, league_id):
         "roster_policy": "required_structural_safety_for_both_calibration_arms",
         "fairness_basis": "fixed_discovery_default_0.75"}
     source = _json(source)
-    identity_after = _input_identity(user_id, league_id)
+    identity_after = _input_identity(user_id, league_id, captured_metadata_ids)
     with db.engine.connect() as conn:
         registered_after = dict(conn.execute(db.select(db.users_table.c.sleeper_user_id,
             db.users_table.c.created_at).where(db.users_table.c.sleeper_user_id.in_(participant_ids))).tuples().all())
@@ -355,7 +362,7 @@ def capture(*, user_id, league_user_id, league_id):
               "nfl_team": getattr(players.get(pid), "team", None),
               "age": (context["input_evidence"].get("age", {}).get(pid, {}).get("age")
                       if context["input_evidence"].get("age", {}).get(pid, {}).get("state") == "observed"
-                      else None), "value": round(asset.value)}
+                      else None), "value": None if pid in unpriced_occupancy else round(asset.value)}
               for pid, asset in roster_ctx.assets.items()}
     names = {str(m["user_id"]): m.get("username") or "League manager" for m in resolved["opponent_rosters"]}
     return CapturedComparison(context, Catalog(assets, names, holdings), source,

@@ -16,6 +16,8 @@ The adapter captures players and market seeds, real personal boards and provenan
 
 Both full inventories pass the actual owner evaluator, captured suppression, strict full-roster structural safety, significance, exact-pass, versioned presentment and configured deck-quality rules. Unknown safety is rejected. No unfiltered fallback, quota-based relaxation or silent alternative arm. The required structural roster gate applies to both comparison arms even if an organic serving flag is off; this stricter comparison policy is recorded. Captured provider refresh may update existing owned-pick cache through the existing authorized path; feedback never updates trades, organic impressions, rankings or learning exposure.
 
+For held skill-position players outside the ranked pool, calibration alone retains metadata-backed occupancy with unknown market price and no usable replacement credit. They never enter generator candidates. Roster sums are labeled priced-assets-only; missing or inconsistent metadata stays unresolved. See [coverage contract](../calibration-roster-coverage/scope.md).
+
 Current complete provider roster coverage supports Sleeper. ESPN/MFL/Fleaflicker remain explicit `provider_roster_coverage_unavailable` cases. Missing lineups, stale availability, unavailable picks/rosters, changed ownership, and moving capture inputs fail honestly. There is no external league discovery and no invented evidence.
 
 ## Selection, memory and denominators
