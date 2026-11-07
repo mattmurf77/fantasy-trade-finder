@@ -157,6 +157,9 @@ class CapturedComparison:
         with ts._cfg_override(context["config"]):
             cards, report = bakeoff.owner_generator(context["config"])(**context)
             native = len(cards)
+            from .calibration_fixed_lineup import validate_legs, annotate as annotate_fixed
+            fixed_lineup = self.source.get("fixed_lineup") or {}
+            validate_legs(cards, fixed_lineup, self.roster_context)
             suppression = self.source.get("suppression")
             if suppression is not None:
                 cards, _, _ = s._apply_deck_suppression(cards,
@@ -175,6 +178,7 @@ class CapturedComparison:
             del original, retained
             from .calibration_roster_coverage import annotate_coverage
             annotate_coverage(cards, self.source.get("unpriced_occupancy") or {}, self.roster_context)
+            annotate_fixed(cards, fixed_lineup, self.roster_context.viewer_id)
             roster_count = len(cards)
             cards, _, significance_diag = s._evaluate_trade_significance(
                 cards, capture=self.significance, players=context["players"],
@@ -212,17 +216,20 @@ def capture(*, user_id, league_user_id, league_id):
     from .trade_roster import Asset
 
     raw = {}
-    try:
-        resolved = resolve_session_input({"user_id": user_id, "verified": True},
-            {"user_id": user_id, "league_id": league_id}, s._sleeper_get, raw=raw)
-    except SessionInputError as exc:
-        raise GradingError(exc.error, exc.status) from exc
     linked = None
-    if resolved["platform"] != "sleeper":
+    if db.is_linked_platform_league(league_id):
+        # An imported flat member cache can be stale. The linked reader first
+        # validates the account's persisted binding, then its fresh native seat.
         from .calibration_provider_capture import capture_linked
         linked = capture_linked(user_id=user_id, league_id=league_id)
         resolved = linked.resolved
         raw["rosters"] = linked.rosters
+    else:
+        try:
+            resolved = resolve_session_input({"user_id": user_id, "verified": True},
+                {"user_id": user_id, "league_id": league_id}, s._sleeper_get, raw=raw)
+        except SessionInputError as exc:
+            raise GradingError(exc.error, exc.status) from exc
     seat = str(resolved["league_user_id"])
     if league_user_id is not None and seat != str(league_user_id):
         raise GradingError("league_seat_changed", 409)
@@ -356,6 +363,9 @@ def capture(*, user_id, league_user_id, league_id):
                     float(s._priced_pick_value(pick, order, fmt)), is_pick=True)
         from .calibration_roster_coverage import add_unranked_occupancy
         unpriced_occupancy = add_unranked_occupancy(roster_ctx, metadata)
+        from .calibration_fixed_lineup import prepare as prepare_fixed_lineup
+        fixed_lineup = prepare_fixed_lineup(roster_ctx, metadata)
+        unpriced_occupancy.update(fixed_lineup["assets"])
         for uid, team in roster_ctx.teams.items():
             roster_ctx.utility_inputs[uid] = {"explicit_outlook": prefs.get("team_outlook") if uid == seat else context["opponent_outlooks"].get(uid),
                 "inferred_outlook": prefs.get("inferred_outlook") if uid == seat else None,
@@ -368,6 +378,7 @@ def capture(*, user_id, league_user_id, league_id):
         "input": assignment["input"], "input_evidence": assignment["input_evidence"],
         "roster_context": {k: v for k, v in asdict(roster_ctx).items() if k not in {"cache", "_assignments"}},
         "flags": flags, "significance": significance, "unpriced_occupancy": unpriced_occupancy,
+        "fixed_lineup": fixed_lineup,
         "captured_metadata_ids": captured_metadata_ids,
         "code_revision": code_revision(), "platform": resolved["platform"],
         "provider_rules": linked.provenance["rules"] if linked else _provider_rules(raw["meta"]),

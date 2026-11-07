@@ -12,6 +12,8 @@ Calibration coverage (2026-11-06): metadata-backed unranked holdings are safety 
 
 Linked calibration capture (2026-11-06): strict ESPN/MFL normalization reuses stored consent/credentials and the full paired pipeline. Native mapping/settings and pick ownership must be represented exactly; unsupported inputs remain failures. Provider account/season/auth/format/credential revision joins semantic currentness. [Contract](../docs/plans/calibration-provider-capture/architecture.md).
 
+Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense matching is private evidence of unchanged holdings, not full-roster fit or priced value. All holdings still count toward active capacity. Only offensive/pick legs proceed through the unchanged shared gates; fixed legs/cut plans fail. Unsupported constraints and account failures retain specific errors and failed GET polling does not requeue. [Contract](../docs/plans/calibration-coverage-repair/validation.md).
+
 ## Table of Contents
 - [2026-11-06 — Versioned outlook evidence contract](#2026-11-06--versioned-outlook-evidence-contract)
 - [2026-11-04 — Export boundary and board-history owner fencing](#2026-11-04--export-boundary-and-board-history-owner-fencing)

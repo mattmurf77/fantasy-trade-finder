@@ -4,7 +4,7 @@ Imports deliberately flatten rosters for discovery. These readers retain every
 asset and inactive slot, and refuse rules the common safety gate cannot express.
 No provider writes, account sessions, credential persistence or normal serving.
 """
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import re
 
 from .blind_grading import GradingError
@@ -12,7 +12,11 @@ from . import espn_service as espn, mfl_service as mfl
 from .trade_roster import ELIGIBILITY, POSITIONS
 
 ESPN_SLOTS = {0: 'QB', 2: 'RB', 3: 'WRRB_FLEX', 4: 'WR', 5: 'REC_FLEX',
-              6: 'TE', 7: 'SUPER_FLEX', 23: 'FLEX', 20: 'BN', 21: 'IR'}
+              6: 'TE', 7: 'SUPER_FLEX', 23: 'FLEX', 20: 'BN', 21: 'IR',
+              10: 'LB', 11: 'DL', 14: 'DB', 15: 'IDP_FLEX', 16: 'DEF', 17: 'K'}
+# Native fine-grained defensive positions are equivalent only for the
+# supported group slots. Individual DE/DT/CB/S slots still fail explicitly.
+ESPN_FIXED_POSITIONS = {5: 'K', 9: 'DL', 10: 'DL', 11: 'LB', 12: 'DB', 13: 'DB', 16: 'DEF'}
 BINDING_KEYS = ('platform', 'user_id', 'default_scoring', 'espn_my_team_id', 'espn_season', 'espn_auth',
                 'platform_my_team', 'platform_season', 'platform_host', 'platform_auth',
                 'draft_status', 'draft_status_confidence')
@@ -74,6 +78,7 @@ class LinkedSnapshot:
     positions: dict
     provenance: dict
     future_picks: list | None = None
+    fixed_metadata: dict = field(default_factory=dict)
 
     def validate_owned_picks(self, picks):
         """A concurrent cache refresh may not substitute a different observation."""
@@ -100,11 +105,11 @@ class LinkedSnapshot:
 
     def normalized_metadata(self, players, metadata):
         """Native eligibility controls both priced and unpriced roster assets."""
-        result = dict(metadata)
+        result = {**metadata, **self.fixed_metadata}
         for pid, pos in self.positions.items():
             if pid in players and players[pid].position != pos:
                 _fail('provider_player_position_conflict')
-            row = metadata.get(pid)
+            row = result.get(pid)
             if (not isinstance(row, dict) or not row
                     or row.get('player_id') not in (None, pid)):
                 _fail('provider_player_availability_unavailable')
@@ -161,7 +166,9 @@ def parse_espn(raw, *, league_id, user_id, team_id, xwalk):
     if team_id not in teams:
         _fail('league_seat_changed')
     from .server import _espn_member_id
-    rosters, positions, mapping, members = [], {}, {}, []
+    rosters, positions, mapping, members, fixed_metadata = [], {}, {}, [], {}
+    from .calibration_fixed_lineup import FIXED_ELIGIBILITY
+    eligibility = {**ELIGIBILITY, **FIXED_ELIGIBILITY}
     for team in raw.get('teams') or []:
         tid = team.get('id')
         known = teams.get(tid)
@@ -172,17 +179,38 @@ def parse_espn(raw, *, league_id, user_id, team_id, xwalk):
         roster = dict(owner_id=uid, players=[], reserve=[], taxi=[])
         for entry in entries:
             p = (entry.get('playerPoolEntry') or {}).get('player') or {}
-            pid, position = p.get('id'), espn.ESPN_POSITION_BY_ID.get(p.get('defaultPositionId'))
+            pid = p.get('id')
+            native_position = p.get('defaultPositionId')
+            if isinstance(native_position, bool) or not isinstance(native_position, int):
+                _fail('provider_roster_position_unsupported')
+            position = ESPN_FIXED_POSITIONS.get(native_position) or espn.ESPN_POSITION_BY_ID.get(native_position)
             if pid in (None, ''):
                 _fail('provider_roster_asset_unmapped')
-            sid = _map(pid, p.get('fullName') or '', position, xwalk, 'espn')
+            if position in ESPN_FIXED_POSITIONS.values():
+                if (isinstance(pid, bool) or not isinstance(pid, (str, int))
+                        or len(str(pid)) > 32 or not re.fullmatch(r'-?\d+', str(pid))):
+                    _fail('provider_roster_asset_unmapped')
+                pid = str(int(pid))
+                # Outside the trade universe: no crosswalk/price is asserted.
+                sid = f'espn-fixed:{league_id}:{pid}'
+                status = p.get('injuryStatus')
+                fixed_metadata[sid] = {'player_id': sid, 'position': position,
+                    'fantasy_positions': [position], 'injury_status': status,
+                    'active': None if status is None else status == 'ACTIVE',
+                    'native_position_id': p.get('defaultPositionId'),
+                    'native_eligible_slots': p.get('eligibleSlots')}
+            else:
+                sid = _map(pid, p.get('fullName') or '', position, xwalk, 'espn')
             slot = entry.get('lineupSlotId')
-            if slot not in ESPN_SLOTS or ESPN_SLOTS[slot] not in slots:
+            if (isinstance(slot, bool) or not isinstance(slot, int)
+                    or slot not in ESPN_SLOTS or ESPN_SLOTS[slot] not in slots):
                 _fail('provider_roster_slot_unknown')
             eligible = p.get('eligibleSlots')
-            if not isinstance(eligible, list) or any(
-                    (native in eligible) != (position in ELIGIBILITY[ESPN_SLOTS[native]])
-                    for native in ESPN_SLOTS if ESPN_SLOTS[native] in starters):
+            if (not isinstance(eligible, list)
+                    or any(isinstance(s, bool) or not isinstance(s, int) for s in eligible)
+                    or any(
+                    (native in eligible) != (position in eligibility[ESPN_SLOTS[native]])
+                    for native in ESPN_SLOTS if ESPN_SLOTS[native] in starters)):
                 _fail('provider_player_eligibility_unsupported')
             roster['players'].append(sid)
             if slot == 21:
@@ -196,7 +224,8 @@ def parse_espn(raw, *, league_id, user_id, team_id, xwalk):
         user_player_ids=mine['player_ids'], opponent_rosters=[m for m in members if m is not mine]),
         rosters, starters, capacity, positions,
         {'platform': 'espn', 'rules': roster_settings, 'native_player_map': mapping,
-         'pick_policy': 'existing_asserted_assignments_only_if_enabled'})
+         'pick_policy': 'existing_asserted_assignments_only_if_enabled',
+         'fixed_holdings': fixed_metadata}, fixed_metadata=fixed_metadata)
 
 
 def _mfl_slots(league):

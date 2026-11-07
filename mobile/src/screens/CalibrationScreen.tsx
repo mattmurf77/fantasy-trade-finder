@@ -80,7 +80,9 @@ const COPY = {
   noLeague: 'Pick a league first.',
   unavailableTitle: 'Not available',
   unavailable: "Calibration isn't available right now.",
-  unsupported: 'This exercise needs league roster details that aren’t available for this platform yet. Try a connected Sleeper league.',
+  unsupported: 'This league has roster rules or player eligibility that Calibration cannot verify yet. Try another connected league.',
+  accountLink: 'Calibration cannot yet verify this account’s team link in this league. Try another connected league.',
+  reconnect: 'Calibration could not verify your current team in this league. Reconnect your own league account, select your team, and try again.',
   interrupted: 'This deck was interrupted while building. Start over for a fresh comparison.',
   needsDeck: "Open Acquire for this league first so there's a fresh deck to compare against, then come back.",
   openAcquire: 'Open Acquire',
@@ -115,7 +117,9 @@ const errorCode = (e: unknown): string | null =>
 const failedCopy = (session: GradingSession): string => {
   const code = session.error?.code ?? '';
   if (code.endsWith('too_few')) return COPY.tooFew;
-  if (['unsupported_platform', 'provider_roster_coverage_unavailable'].includes(code)) return COPY.unsupported;
+  if (['unsupported_platform', 'provider_roster_coverage_unavailable', 'provider_lineup_unsupported', 'provider_cross_domain_eligibility', 'provider_player_eligibility_unsupported', 'provider_position_limits_unsupported', 'provider_roster_position_unsupported', 'provider_settings_unsupported'].includes(code)) return COPY.unsupported;
+  if (code === 'provider_account_binding_unavailable') return COPY.accountLink;
+  if (['league_membership_required', 'league_seat_changed', 'espn_auth_required', 'mfl_auth_required', 'espn_credentials_unavailable', 'mfl_credentials_unavailable'].includes(code)) return COPY.reconnect;
   if (['league_not_synced', 'league_not_connected', 'seat_changed', 'league_seat_changed', 'roster_unavailable', 'league_data_unavailable', 'league_rosters_unavailable', 'lineup_unavailable', 'pick_ownership_unavailable', 'player_availability_stale'].includes(code)) return COPY.notSynced;
   if (code === 'comparison_interrupted') return COPY.interrupted;
   return COPY.buildFailed;
