@@ -18,7 +18,7 @@ Both full inventories pass the actual owner evaluator, captured suppression, str
 
 For held skill-position players outside the ranked pool, calibration alone retains metadata-backed occupancy with unknown market price and no usable replacement credit. They never enter generator candidates. Roster sums are labeled priced-assets-only; missing or inconsistent metadata stays unresolved. See [coverage contract](../calibration-roster-coverage/scope.md).
 
-Current complete provider roster coverage supports Sleeper. ESPN/MFL/Fleaflicker remain explicit `provider_roster_coverage_unavailable` cases. Missing lineups, stale availability, unavailable picks/rosters, changed ownership, and moving capture inputs fail honestly. There is no external league discovery and no invented evidence.
+Complete provider roster coverage supports Sleeper plus the strict representable ESPN/MFL subset in the [linked-provider contract](../calibration-provider-capture/architecture.md). Unknown/custom settings, unsupported positions and credential gaps remain explicit outcomes; Fleaflicker remains `provider_roster_coverage_unavailable`. Missing lineups, stale availability, unavailable picks/rosters, changed ownership, and moving capture inputs fail honestly. There is no external league discovery and no invented evidence.
 
 ## Selection, memory and denominators
 

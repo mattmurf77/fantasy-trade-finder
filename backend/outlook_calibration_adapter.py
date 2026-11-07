@@ -64,7 +64,9 @@ def _input_identity(user_id, league_id, captured_metadata_ids=()):
     member_facts = sorted(({"user_id": str(m["user_id"]),
                            "roster": sorted(map(str, m.get("player_ids") or []))}
                           for m in members), key=lambda m: m["user_id"])
+    from .calibration_provider_capture import binding_identity
     return _hash(dict(code_revision=code_revision(), format=fmt, members=member_facts,
+        provider_binding=binding_identity(user_id, league_id),
         roster_state={k: state.get(k) for k in ("roster_fp", "status")},
         availability={p: {k: (metadata.get(p) or {}).get(k) for k in
                           ("injury_status", "fantasy_positions", "position", "player_id", "active")} for p in held | set(player_map)},
@@ -106,7 +108,7 @@ def is_current(source, *, user_id, league_user_id, league_id):
         # Compare a known observation to the actual captured rules, rather
         # than hashing whether a process happened to have warmed its cache.
         hit = s._FA_LEAGUE_META_CACHE.get(league_id)
-        if (hit and hit[0] > datetime.fromisoformat(source["captured_at"]).timestamp()
+        if (source.get("platform", "sleeper") == "sleeper" and hit and hit[0] > datetime.fromisoformat(source["captured_at"]).timestamp()
                 and source.get("provider_rules") is not None):
             if _provider_rules(hit[1]) != source["provider_rules"]:
                 return False
@@ -215,8 +217,12 @@ def capture(*, user_id, league_user_id, league_id):
             {"user_id": user_id, "league_id": league_id}, s._sleeper_get, raw=raw)
     except SessionInputError as exc:
         raise GradingError(exc.error, exc.status) from exc
+    linked = None
     if resolved["platform"] != "sleeper":
-        raise GradingError("provider_roster_coverage_unavailable", 409)
+        from .calibration_provider_capture import capture_linked
+        linked = capture_linked(user_id=user_id, league_id=league_id)
+        resolved = linked.resolved
+        raw["rosters"] = linked.rosters
     seat = str(resolved["league_user_id"])
     if league_user_id is not None and seat != str(league_user_id):
         raise GradingError("league_seat_changed", 409)
@@ -227,7 +233,7 @@ def capture(*, user_id, league_user_id, league_id):
     with db.engine.connect() as conn:
         registered = dict(conn.execute(db.select(db.users_table.c.sleeper_user_id,
             db.users_table.c.created_at).where(db.users_table.c.sleeper_user_id.in_(participant_ids))).tuples().all())
-    slots = raw["meta"].get("roster_positions") or []
+    slots = linked.slots if linked else raw["meta"].get("roster_positions") or []
     starters = [slot for slot in slots if slot not in ("BN", "IR", "TAXI")]
     if not starters:
         raise GradingError("lineup_unavailable", 409)
@@ -235,7 +241,14 @@ def capture(*, user_id, league_user_id, league_id):
     # Refresh pick ownership from the SAME provider roster snapshot. No
     # synthetic picks and no organic jobs/session tokens are created here.
     refreshed_picks = None
-    if s.FLAGS.trade_picks_in_pool:
+    include_picks = bool(s.FLAGS.trade_picks_in_pool)
+    if linked and linked.platform == "espn":
+        from types import SimpleNamespace
+        include_picks = s._owned_picks_available(league_id, SimpleNamespace(platform="espn"))
+    if include_picks and linked and linked.platform == "mfl":
+        refreshed_picks = s._sync_mfl_owned_picks(league_id, source_picks=linked.future_picks,
+            expected_binding=linked.provenance["binding"]["binding"])
+    if include_picks and not linked:
         names = {str(m["user_id"]): m.get("username") or "" for m in resolved["opponent_rosters"]}
         # A co-owner's display name must not overwrite the primary owner's.
         names.update({str(m["user_id"]): m.get("username") or m.get("display_name") or ""
@@ -259,7 +272,7 @@ def capture(*, user_id, league_user_id, league_id):
     user_elo = {r.player.id: r.elo for r in service.get_rankings(position=None).rankings}
     members = [ts.LeagueMember(user_id=str(m["user_id"]), username="",
                 roster=list(m["player_ids"]), elo_ratings={}) for m in resolved["opponent_rosters"]]
-    league = ts.League(league_id=league_id, name="", platform="sleeper", members=members)
+    league = ts.League(league_id=league_id, name="", platform=resolved["platform"], members=members)
     roster = list(resolved["user_player_ids"])
     if not roster or not members:
         raise GradingError("league_rosters_unavailable", 409)
@@ -268,10 +281,22 @@ def capture(*, user_id, league_user_id, league_id):
                owner_outlook_evidence_enabled=1.)
     # Read inside the checked window. A concurrent sync must not attach a
     # new revision to the earlier refresh return value.
-    picks = s.load_draft_picks(league_id=league_id, source=s._pick_read_source()) or []
+    pick_source = "platform" if linked and linked.platform == "mfl" else s._pick_read_source()
+    picks = (s.load_draft_picks(league_id=league_id, source=pick_source) or []) if (not linked or include_picks) else []
+    if not linked and include_picks:
+        from .calibration_provider_capture import pick_ownership
+        platform_rows = [p for p in picks if s._pick_provenance(p) == "platform"]
+        if pick_ownership(platform_rows) != pick_ownership(refreshed_picks):
+            raise GradingError("provider_pick_ownership_changed", 409)
+    if linked and linked.platform == "mfl" and include_picks:
+        # Compare actual ownership to the same raw provider bundle, even if
+        # a concurrent writer changed the cache before identity_before.
+        linked.validate_owned_picks(picks)
+    if linked and linked.platform == "espn":
+        picks = [p for p in picks if s._pick_provenance(p) == "user"]
     draft = s.get_league_draft_context(league_id) or {}
     with ts._cfg_override(cfg):
-        if flags["trade_picks_in_pool"]:
+        if include_picks:
             seed, roster, _ = s._inject_owned_picks(league_id=league_id, scoring_format=fmt,
                 trade_service=ts.TradeService(players=dict(players)), players_dict=players,
                 seed_map=seed, user_elo=user_elo, user_id=seat, user_roster=roster,
@@ -296,7 +321,7 @@ def capture(*, user_id, league_user_id, league_id):
         context["manager_preferences"][seat] = context["manager_preferences"].pop(user_id)
         if user_id in context["inferred_outlooks"]:
             context["inferred_outlooks"][seat] = context["inferred_outlooks"].pop(user_id)
-        capacity = sum(slot not in ("IR", "TAXI") for slot in slots)
+        capacity = linked.capacity if linked else sum(slot not in ("IR", "TAXI") for slot in slots)
         for uid, pref in context["manager_preferences"].items():
             pref.update(starter_slots=starters, lineup_source="observed", roster_capacity=capacity)
             year = pref.get("next_draft_year")
@@ -310,15 +335,19 @@ def capture(*, user_id, league_user_id, league_id):
         cache_age = s._players_cache_age_seconds()
         if cache_age is None or cache_age > 48 * 3600:
             raise GradingError("player_availability_stale", 409)
+        if linked:
+            metadata = linked.normalized_metadata(players, metadata)
         owned = {}
         for pick in picks:
             owned.setdefault(str(pick.get("owner_user_id")), []).append(str(pick["pick_id"]))
-        roster_ctx = build_context(viewer_id=seat, league=context["league"], players=context["players"],
+        roster_kwargs = dict(viewer_id=seat, league=context["league"], players=context["players"],
             consensus_value=ts.make_consensus_value_fn(seed, players),
-            startable=ts._startable_ok_fn(players, fmt), slots=starters, platform="sleeper",
-            raw_rosters=raw["rosters"], player_metadata=metadata,
+            startable=ts._startable_ok_fn(players, fmt), player_metadata=metadata,
             outlooks={**context["opponent_outlooks"], seat: prefs.get("team_outlook") or prefs.get("inferred_outlook") or "balanced"},
-            owned_picks=owned, capacity=capacity, viewer_roster=roster, availability_fresh=True)
+            owned_picks=owned, viewer_roster=roster, availability_fresh=True)
+        roster_ctx = (linked.roster_context(**roster_kwargs) if linked else
+            build_context(**roster_kwargs, slots=starters, platform="sleeper",
+                          raw_rosters=raw["rosters"], capacity=capacity))
         order = s._league_slot_order(league_id)
         for pick in picks:
             pid = str(pick["pick_id"])
@@ -340,7 +369,10 @@ def capture(*, user_id, league_user_id, league_id):
         "roster_context": {k: v for k, v in asdict(roster_ctx).items() if k not in {"cache", "_assignments"}},
         "flags": flags, "significance": significance, "unpriced_occupancy": unpriced_occupancy,
         "captured_metadata_ids": captured_metadata_ids,
-        "code_revision": code_revision(), "provider_rules": _provider_rules(raw["meta"]),
+        "code_revision": code_revision(), "platform": resolved["platform"],
+        "provider_rules": linked.provenance["rules"] if linked else _provider_rules(raw["meta"]),
+        "provider_provenance": linked.provenance if linked else None,
+        "picks_included": include_picks,
         "registered_participants": sorted(registered), "registered_participant_revisions": registered,
         "suppression": _suppression_state(s, user_id, league_id) if flags["deck_fatigue"] else None,
         "pass_keys": s._load_trade_disposition_keys(user_id, league_id)[1],
@@ -351,6 +383,9 @@ def capture(*, user_id, league_user_id, league_id):
     with db.engine.connect() as conn:
         registered_after = dict(conn.execute(db.select(db.users_table.c.sleeper_user_id,
             db.users_table.c.created_at).where(db.users_table.c.sleeper_user_id.in_(participant_ids))).tuples().all())
+    from .calibration_provider_capture import binding_identity
+    if linked and linked.provenance["binding"] != binding_identity(user_id, league_id):
+        raise GradingError("inputs_changed_during_capture", 409)
     if identity_before != identity_after or registered != registered_after:
         raise GradingError("inputs_changed_during_capture", 409)
     source["input_identity"] = identity_after
