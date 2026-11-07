@@ -40,7 +40,7 @@ def _hash(value):
                                      separators=(",", ":")).encode()).hexdigest()
 
 
-def _input_identity(user_id, league_id, captured_metadata_ids=()):
+def _input_identity(user_id, league_id, captured_metadata_ids=(), full_metadata_observation=None, captured_full_only=False):
     """Persisted/cache-only freshness check; never fetch a provider on an open."""
     from . import server as s, database as db, trade_service as ts
     fmt = db.get_league_scoring(league_id)
@@ -65,8 +65,10 @@ def _input_identity(user_id, league_id, captured_metadata_ids=()):
                            "roster": sorted(map(str, m.get("player_ids") or []))}
                           for m in members), key=lambda m: m["user_id"])
     from .calibration_provider_capture import binding_identity
+    from .calibration_roster_metadata import held_identity
     return _hash(dict(code_revision=code_revision(), format=fmt, members=member_facts,
         provider_binding=binding_identity(user_id, league_id),
+        **({"full_roster_metadata":held_identity(full_metadata_observation, captured_only=captured_full_only)} if full_metadata_observation else {}),
         roster_state={k: state.get(k) for k in ("roster_fp", "status")},
         availability={p: {k: (metadata.get(p) or {}).get(k) for k in
                           ("injury_status", "fantasy_positions", "position", "player_id", "active")} for p in held | set(player_map)},
@@ -112,10 +114,13 @@ def is_current(source, *, user_id, league_user_id, league_id):
                 and source.get("provider_rules") is not None):
             if _provider_rules(hit[1]) != source["provider_rules"]:
                 return False
+        identity_args = (user_id, league_id, source.get("captured_metadata_ids") or ())
+        if source.get("full_metadata_observation"):
+            identity_args += (source["full_metadata_observation"],)
         return (source["account_user_id"] == user_id
                 and source["league_user_id"] == league_user_id
                 and source["league_id"] == league_id
-                and source["input_identity"] == _input_identity(user_id, league_id, source.get("captured_metadata_ids") or ()))
+                and source["input_identity"] == _input_identity(*identity_args))
     except (KeyError, TypeError, ValueError):
         return False
 
@@ -157,6 +162,9 @@ class CapturedComparison:
         with ts._cfg_override(context["config"]):
             cards, report = bakeoff.owner_generator(context["config"])(**context)
             native = len(cards)
+            unsupported = set((self.source.get('fixed_lineup') or {}).get('unsupported_teams') or {})
+            cards = [card for card in cards if context['user_id'] not in unsupported and card.target_user_id not in unsupported]
+            unsupported_pair_count = native - len(cards)
             from .calibration_fixed_lineup import validate_legs, annotate as annotate_fixed
             fixed_lineup = self.source.get("fixed_lineup") or {}
             validate_legs(cards, fixed_lineup, self.roster_context)
@@ -203,6 +211,7 @@ class CapturedComparison:
                     native_caps=({p:n for p,n in max_positions(self.roster_context.rules.native_bounds, len(self.roster_context.rules.slots)).items() if p in ('QB','TE')}
                                  if getattr(self.roster_context.rules,'native_bounds',()) else None))
             return cards, {"model_version": version, "native_count": native,
+                "unsupported_participant_count":len(unsupported), "unsupported_pair_cards":unsupported_pair_count,
                 "post_suppression_count": suppressed, "validated_count": validated, "roster_count": roster_count,
                 "significant_count": significant, "final_count": len(cards),
                 "generator": report.as_dict(), "roster": roster_diag,
@@ -275,7 +284,21 @@ def capture(*, user_id, league_user_id, league_id):
             raise GradingError("pick_ownership_unavailable", 409)
     s._get_universal_pool(fmt)  # Warm before the consistency window.
     captured_metadata_ids = sorted({str(pid) for row in raw["rosters"] for pid in row.get("players") or []})
-    identity_before = _input_identity(user_id, league_id, captured_metadata_ids)
+    full_metadata_ids = []
+    full_metadata_snapshot = None
+    if not linked:
+        cached_metadata = s._load_sleeper_cache() or {}
+        if any(pid not in cached_metadata for pid in captured_metadata_ids):
+            from .calibration_roster_metadata import capture as capture_metadata
+            full_metadata_snapshot = capture_metadata(s._sleeper_get)
+            full_metadata_ids = captured_metadata_ids
+    identity_args = (user_id, league_id, captured_metadata_ids)
+    full_metadata_observation = None
+    if full_metadata_ids:
+        from .calibration_roster_metadata import observation
+        full_metadata_observation = observation(full_metadata_snapshot, full_metadata_ids)
+        identity_args += (full_metadata_observation,)
+    identity_before = _input_identity(*(identity_args + (True,) if full_metadata_observation else identity_args))
     fmt = db.get_league_scoring(league_id)
     pool, seed = s._get_universal_pool(fmt)
     service = s._extension_ranking_services(user_id, strict=True)[fmt]
@@ -350,11 +373,15 @@ def capture(*, user_id, league_user_id, league_id):
         context["input_evidence"].update(schema_version=INPUT_VERSION, used_in_model=True,
                                           age_use="diagnostic_only_not_production_fit")
         metadata = s._load_sleeper_cache() or {}
+        if full_metadata_snapshot:
+            metadata = {**metadata, **{pid:full_metadata_snapshot["rows"].get(pid, {}) for pid in full_metadata_ids}}
         cache_age = s._players_cache_age_seconds()
         if cache_age is None or cache_age > 48 * 3600:
             raise GradingError("player_availability_stale", 409)
         if linked:
             metadata = linked.normalized_metadata(players, metadata)
+        from .calibration_fixed_lineup import configured_metadata
+        metadata, configured_eligibility = configured_metadata(metadata, starters, captured_metadata_ids)
         owned = {}
         for pick in picks:
             owned.setdefault(str(pick.get("owner_user_id")), []).append(str(pick["pick_id"]))
@@ -375,7 +402,14 @@ def capture(*, user_id, league_user_id, league_id):
         from .calibration_roster_coverage import add_unranked_occupancy
         unpriced_occupancy = add_unranked_occupancy(roster_ctx, metadata)
         from .calibration_fixed_lineup import prepare as prepare_fixed_lineup
-        fixed_lineup = prepare_fixed_lineup(roster_ctx, metadata, fixed_bounds=linked.fixed_bounds if linked else ())
+        fixed_lineup = prepare_fixed_lineup(roster_ctx, metadata, fixed_bounds=linked.fixed_bounds if linked else (), isolate_unsupported=True)
+        if seat in fixed_lineup.get('unsupported_teams', {}):
+            raise GradingError('provider_cross_domain_eligibility', 409)
+        # The fixed block has separate evidence; both offensive model proxies
+        # must consume its actual offensive slots, not fall back on format defaults.
+        for uid, pref in context['manager_preferences'].items():
+            pref['starter_slots'] = list(roster_ctx.rules.slots)
+            pref['inactive_ids'] = sorted(roster_ctx.teams[uid].inactive)
         unpriced_occupancy.update(fixed_lineup["assets"])
         for uid, team in roster_ctx.teams.items():
             roster_ctx.utility_inputs[uid] = {"explicit_outlook": prefs.get("team_outlook") if uid == seat else context["opponent_outlooks"].get(uid),
@@ -389,7 +423,7 @@ def capture(*, user_id, league_user_id, league_id):
         "input": assignment["input"], "input_evidence": assignment["input_evidence"],
         "roster_context": {k: v for k, v in asdict(roster_ctx).items() if k not in {"cache", "_assignments"}},
         "flags": flags, "significance": significance, "unpriced_occupancy": unpriced_occupancy,
-        "fixed_lineup": fixed_lineup,
+        "fixed_lineup": fixed_lineup, "configured_eligibility": configured_eligibility,
         "captured_metadata_ids": captured_metadata_ids,
         "code_revision": code_revision(), "platform": resolved["platform"],
         "provider_rules": linked.provenance["rules"] if linked else _provider_rules(raw["meta"]),
@@ -400,8 +434,12 @@ def capture(*, user_id, league_user_id, league_id):
         "pass_keys": s._load_trade_disposition_keys(user_id, league_id)[1],
         "roster_policy": "required_structural_safety_for_both_calibration_arms",
         "fairness_basis": "fixed_discovery_default_0.75"}
+    if full_metadata_snapshot:
+        from .calibration_roster_metadata import manifest
+        source['full_metadata_observation'] = full_metadata_observation
+        source['full_roster_metadata'] = manifest(full_metadata_snapshot, full_metadata_ids)
     source = _json(source)
-    identity_after = _input_identity(user_id, league_id, captured_metadata_ids)
+    identity_after = _input_identity(*identity_args)
     with db.engine.connect() as conn:
         registered_after = dict(conn.execute(db.select(db.users_table.c.sleeper_user_id,
             db.users_table.c.created_at).where(db.users_table.c.sleeper_user_id.in_(participant_ids))).tuples().all())

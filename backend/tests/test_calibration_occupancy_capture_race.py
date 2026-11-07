@@ -17,11 +17,16 @@ def test_raw_only_unranked_metadata_change_during_capture_rejected(provider_worl
     reads=[]
     def cache():
         reads.append(1)
-        if len(reads)==2:metadata['raw-only-bench']['active']=False
         return metadata
     monkeypatch.setattr(server,'_sleeper_get',fresh_fetch)
     monkeypatch.setattr(server,'_load_sleeper_cache',cache)
-    monkeypatch.setattr(adapter,'_input_identity',REAL_IDENTITY)
+    identities=[]
+    def identity(*args):
+        result=REAL_IDENTITY(*args)
+        identities.append(result)
+        if len(identities)==1:metadata['raw-only-bench']['active']=False
+        return result
+    monkeypatch.setattr(adapter,'_input_identity',identity)
     with pytest.raises(GradingError) as error:
         adapter.capture(user_id=ME,league_user_id=state['owner'],league_id='12345')
     assert error.value.code=='inputs_changed_during_capture'

@@ -11,7 +11,7 @@ from backend.tests.test_owner_generator_routes import harness,owner_harness,ME
 from backend.tests.test_owner_only_routes import exclusive,large_exclusive
 LEAGUE='12345'
 
-@pytest.mark.parametrize('platform,picks_enabled,race,fixed_groups',[('espn',False,False,False),('espn',True,False,False),('mfl',False,False,False),('mfl',True,False,False),('mfl',True,True,False),('espn',False,False,True),('mfl',True,False,'native'),('mfl',True,False,'second-account')])
+@pytest.mark.parametrize('platform,picks_enabled,race,fixed_groups',[('espn',False,False,False),('espn',True,False,False),('mfl',False,False,False),('mfl',True,False,False),('mfl',True,True,False),('espn',False,False,True),('mfl',True,False,'native'),('mfl',True,False,'second-account'),('espn',False,False,'coupled-opponent'),('espn',False,False,'coupled-viewer')])
 def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,monkeypatch,platform,picks_enabled,race,fixed_groups):
     _,engine,sess,_,league=large_exclusive
     with engine.begin() as conn:
@@ -36,6 +36,9 @@ def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,
                     team['roster']['entries'].append({'lineupSlotId':20,'playerPoolEntry':{'player':{
                         'id':90000+team['id']*10+offset,'defaultPositionId':position,
                         'eligibleSlots':eligible+[20,21],'injuryStatus':'ACTIVE'}}})
+        if fixed_groups in ('coupled-opponent','coupled-viewer'):
+            team=raw['teams'][1 if fixed_groups=='coupled-opponent' else 0]
+            team['roster']['entries'][0]['playerPoolEntry']['player']['eligibleSlots'] += [14,15]
         monkeypatch.setattr(provider.espn,'fetch_league',lambda *a,**k:copy.deepcopy(raw))
         remap={m.user_id:f'espn:{LEAGUE}.t{i}' for i,m in teams if i!=1}
     else:
@@ -83,6 +86,10 @@ def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,
         with pytest.raises(adapter.GradingError):
             adapter.capture(user_id=ME,league_user_id=ME,league_id=LEAGUE)
         return
+    if fixed_groups=='coupled-viewer':
+        with pytest.raises(adapter.GradingError,match='provider_cross_domain_eligibility'):
+            adapter.capture(user_id=account,league_user_id=ME,league_id=LEAGUE)
+        return
     captured=adapter.capture(user_id=account,league_user_id=ME,league_id=LEAGUE)
     assert captured.source['platform']==platform
     assert set(captured.source['registered_participants'])=={ME,account,*remap.values()}
@@ -113,6 +120,11 @@ def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,
     for version in adapter.VERSIONS:
         cards,diag=captured.run_arm(version)
         assert diag['native_count']>0 and cards
+        if fixed_groups=='coupled-opponent':
+            assert diag['unsupported_participant_count']==1 and diag['unsupported_pair_cards']>0
+            assert all(c.target_user_id!='espn:'+LEAGUE+'.t2' for c in cards)
+            assert captured.source['fixed_lineup']['unsupported_teams']
+            assert captured.source['provider_provenance']['unsupported_native_eligibility']
         assert all(c.owner_evaluation.matches(c) and c.owner_evaluation.model_identity[1]==version for c in cards)
         assert all('raw-only-bench' not in c.give_player_ids+c.receive_player_ids for c in cards)
         assert all(c.roster_evaluation['eligible'] for c in cards)
