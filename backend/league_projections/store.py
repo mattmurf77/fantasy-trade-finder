@@ -31,6 +31,11 @@ def maintenance():
 
 def create(user_id, league_id, inputs, *, target_lease=None, snapshot=None):
     maintenance()
+    # Freeze server-owned execution identity at admission. Pre-version jobs are
+    # never silently migrated during recovery after a deployment.
+    inputs = {**inputs, "expected_model_version": VERSION}
+    if inputs.get("baseline_run_id"):
+        inputs["expected_baseline_model_version"] = VERSION
     t, stamp = table(), utc_now()
     request_hash = digest(inputs)
     with db.engine.begin() as conn:

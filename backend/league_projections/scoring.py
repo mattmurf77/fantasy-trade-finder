@@ -55,11 +55,15 @@ def normalize(raw, required_keys, supported_keys, *, policy, positions, primary_
     # this league happens not to consume one of the row's omitted offense keys.
     identities = _identity(raw, positions) if policy == CONTRACT and set(positions) & OFFENSE_POSITIONS else []
     stats, provenance, missing = {}, {}, []
+    def ambiguous_bonus(key):
+        # A source may credit an FB/DB through offensive fantasy eligibility.
+        # No verified rule lets us derive or contradict that alias premium.
+        return primary_position in {"FB", "DB"} and POSITION_BONUSES[key][0] in set(positions)
     for key in sorted(required_keys):
         basis, method, value = "missing", "unsupported_or_unsupplied", None
         if key in supplied and key in supported:
             value, basis, method = decimal(supplied[key]), "direct", "provider_expected_event"
-            if key in POSITION_BONUSES and primary_position in BONUS_PRIMARY_POSITIONS:
+            if key in POSITION_BONUSES and primary_position in BONUS_PRIMARY_POSITIONS and not ambiguous_bonus(key):
                 position, event = POSITION_BONUSES[key]
                 expected = decimal(0) if primary_position != position else decimal(supplied[event]) if event in supplied else None
                 if expected is not None and value != expected:
@@ -69,7 +73,7 @@ def normalize(raw, required_keys, supported_keys, *, policy, positions, primary_
             if value < 0:
                 raise Unavailable("inconsistent_kicker_projection", state="incomplete_projections")
             basis, method = "derived", "fga_minus_fgm"
-        elif policy == CONTRACT and key in POSITION_BONUSES and primary_position in BONUS_PRIMARY_POSITIONS:
+        elif policy == CONTRACT and key in POSITION_BONUSES and primary_position in BONUS_PRIMARY_POSITIONS and not ambiguous_bonus(key):
             position, event = POSITION_BONUSES[key]
             if primary_position != position:
                 value, basis, method = decimal(0), "inapplicable", "native_primary_position_bonus_v1"

@@ -113,3 +113,38 @@ def test_worker_rechecks_policy_before_provider_and_during_simulation(engine, mo
     monkeypatch.setattr(service, 'simulate', simulate)
     service._run(lambda *a: pytest.fail('frozen snapshot fetched provider'))
     assert store.get(second['run_id'],'account','123')['status'] == 'cancelled'
+
+
+@pytest.mark.parametrize('old_engine,missing_version,recovery',[(True,False,False),(False,True,False),(True,False,True)])
+def test_worker_never_migrates_queued_or_resumed_old_model(engine,monkeypatch,old_engine,missing_version,recovery):
+    from backend.league_projections.core import VERSION
+    monkeypatch.setattr(service,'is_enabled',lambda key:True)
+    monkeypatch.setattr(batch,'settings',lambda:{'policy_approved':True,'retention_days':7})
+    created=store.create('account','123',{'kind':'scenario','league_user_id':'account','config':{}},snapshot={'captured_at':'2026-11-01T00:00:00+00:00'})
+    inputs=json.loads(created['input_json'])
+    assert inputs['expected_model_version']==VERSION
+    if missing_version:inputs.pop('expected_model_version')
+    elif old_engine:inputs['expected_model_version']='joint-season-scenario-v2'
+    with engine.begin() as conn:
+        conn.execute(db.league_projection_runs_table.update().where(db.league_projection_runs_table.c.run_id==created['run_id']).values(input_json=json.dumps(inputs)))
+    if recovery:
+        claimed=store.claim();expire(engine,claimed['run_id']);store.maintenance()
+    monkeypatch.setattr(service,'simulate',lambda *a,**k:pytest.fail('old-version simulation'))
+    service._run(lambda *a:pytest.fail('old-version provider fetch'))
+    assert store.get(created['run_id'],'account','123')['reason']=='queued_projection_model_changed'
+
+
+def test_worker_rechecks_frozen_baseline_version_even_with_current_expected_engine(engine,monkeypatch):
+    from backend.league_projections.core import VERSION
+    monkeypatch.setattr(service,'is_enabled',lambda key:True)
+    monkeypatch.setattr(batch,'settings',lambda:{'policy_approved':True,'retention_days':7})
+    baseline='f'*32
+    with engine.begin() as conn:
+        conn.execute(db.league_projection_runs_table.insert().values(run_id=baseline,user_id='account',league_id='123',status='complete',
+            created_at=store.utc_now(),updated_at=store.utc_now(),expires_at=store.utc_now(),request_hash='old',input_json='{}',result_json=json.dumps({'model_version':'joint-season-scenario-v2'})))
+    created=store.create('account','123',{'kind':'scenario','league_user_id':'account','config':{},'baseline_run_id':baseline},snapshot={'captured_at':'2026-11-01T00:00:00+00:00'})
+    assert json.loads(created['input_json'])['expected_baseline_model_version']==VERSION
+    monkeypatch.setattr(service,'simulate',lambda *a,**k:pytest.fail('mismatched baseline simulation'))
+    service._run(lambda *a:pytest.fail('mismatched baseline provider fetch'))
+    assert store.get(created['run_id'],'account','123')['reason']=='comparison_requires_current_model_baseline'
+    assert store.get(baseline,'account','123')['status']=='complete'

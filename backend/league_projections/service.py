@@ -5,7 +5,7 @@ import time
 
 from ..feature_flags import is_enabled
 from . import provider, store, batch
-from .core import Unavailable
+from .core import Unavailable, VERSION
 from .simulation import simulate
 
 _lock = threading.Lock()
@@ -45,6 +45,14 @@ def _run(fetch_json):
             if not batch.settings()["policy_approved"]:
                 raise Unavailable("projection_policy_approval_pending")
             inputs = json.loads(row["input_json"])
+            if inputs.get("expected_model_version") != VERSION:
+                raise Unavailable("queued_projection_model_changed", state="failed")
+            if inputs.get("baseline_run_id"):
+                baseline = store.get(inputs["baseline_run_id"], row["user_id"], row["league_id"])
+                if (inputs.get("expected_baseline_model_version") != VERSION or not baseline
+                        or baseline["status"] != "complete"
+                        or json.loads(baseline.get("result_json") or "{}").get("model_version") != VERSION):
+                    raise Unavailable("comparison_requires_current_model_baseline", state="failed")
             snapshot = json.loads(row["snapshot_json"]) if row.get("snapshot_json") else provider.capture(row["league_id"], inputs["league_user_id"], inputs["config"], fetch_json, viewer_user_id=_viewer_identity(row["user_id"]))
             prior = store.save_snapshot(row, snapshot, inputs["config"])
             def cancelled():

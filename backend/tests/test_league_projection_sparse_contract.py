@@ -92,8 +92,18 @@ def test_advertised_missing_event_is_incomplete_but_unknown_bonus_unsupported():
     assert unknown.value.reason=='unsupported_scoring'
 
 
-@pytest.mark.parametrize('primary,eligible,bonus',[('FB',['RB'],'bonus_rec_rb'),('DB',['WR'],'bonus_rec_wr'),('FB',['RB'],'bonus_rec_te'),('DB',['WR'],'bonus_rec_te')])
+@pytest.mark.parametrize('primary,eligible,bonus',[('FB',['RB'],'bonus_rec_te'),('DB',['WR'],'bonus_rec_te')])
 def test_known_native_primary_does_not_inherit_fantasy_eligibility_premium(primary,eligible,bonus):
     result=normalize(row({'rec':3,'rec_yd':30}),{bonus},{bonus},policy=CONTRACT,positions=eligible,primary_position=primary)
     assert result['stats'][bonus]=='0'
     assert result['stat_provenance'][bonus]['basis']=='inapplicable'
+
+
+@pytest.mark.parametrize('primary,eligible,bonus',[('FB',['RB'],'bonus_rec_rb'),('DB',['WR'],'bonus_rec_wr')])
+def test_alias_bonus_missing_is_unknown_and_supplied_value_is_preserved(primary,eligible,bonus):
+    raw=row({'rec':3,'rec_yd':30})
+    result=normalize(raw,{bonus},{bonus},policy=CONTRACT,positions=eligible,primary_position=primary)
+    assert result['missing_keys']==[bonus]
+    raw['stats'][bonus]=3
+    result=normalize(raw,{bonus},{bonus},policy=CONTRACT,positions=eligible,primary_position=primary)
+    assert result['stats'][bonus]=='3' and result['stat_provenance'][bonus]['basis']=='direct'
