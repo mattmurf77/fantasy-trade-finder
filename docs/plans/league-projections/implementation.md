@@ -43,3 +43,5 @@ Snapshot/result reuse is currently viewer-scoped. Multiple viewers in one league
 ## Later-round reseeding admission correction
 
 Exact native `playoff_seed_type` integers0/1 both preserve regular-season qualification, byes and non-playoff draft probabilities. Value1 is the provider’s documented later-round reseeding option, not manual qualification. Unknown/malformed values and actual bracket overrides remain refused. Coverage records the native value and that postseason rounds are not simulated. See [primary source and scope](reseeding-admission.md). This follow-up is not a production deployment claim.
+
+The same bounded correction accepts exact native `playoff_type` integers0/1 (toilet bowl/consolation lower bracket). These postseason games are not simulated. Both clients display the explicit assumption that non-playoff pick estimates use regular-season Max PF; actual draft order may use custom rules or postseason results. Unknown lower-bracket values and nondefault round policies remain refused.
