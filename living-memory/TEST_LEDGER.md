@@ -1,3 +1,9 @@
+## 2026-11-07 — Documented playoff reseeding admission correction
+
+- Isolated from currentmainfb64639 after read-only production policy diagnosis. Official Sleeper application read/selector/write code confirms playoff_seed_type0/1 controls later-round bracket matchups, not regular-season qualification. Exact native integers0/1 admitted; malformed/unknown and other rule guards retained. Native setting and no-postseason-simulation coverage are explicit; no simulation/trade/ranking/flag change.
+- Focused projection/privacy/paywall suite: **349 passed9.69s**. Independent frozen review: **43 passed0.90s**, including8-team6-playoff2-bye qualification/record/owned-pick parity, immutable prior-main defaultcapture comparison, typed refusals and midcapture setting-change fencing. Twenty-one portable independent cases copied into repository; the git-history baseline test stays external.
+- Source proof and bounded scope: [reseeding admission](../docs/plans/league-projections/reseeding-admission.md). No production mutation, merge or deploy. Exact-head full CI and root-coordinated Calibration currentness/rebuild required before rollout.
+
 ## 2026-11-07 — Combined projections and cancellation release candidate
 
 - Integrated reviewed PR618 head4056e610 into PR611; runtime auto-merge preserved projection routes, cancellation and pipeline13. The sole conflict was additive TEST_LEDGER content, both retained.
@@ -9493,3 +9499,6 @@ Mean-contract correction (2026-11-07): engine v3/mean_preserving_positive_gap_v1
 Final queue/alias follow-up (2026-11-07):220 targeted tests passed (7.21s). Enqueue pins expected engine/baseline versions; worker admission and recovery reject old/unversioned jobs or mismatched owned baseline before provider/simulation. FB/RB and DB/WR omitted alias bonuses remain missing; supplied alias values are retained. Numerical v3 engine is unchanged; independent follow-up148 tests (1.54s) plus3 DOM checks passed with stable source hashes.
 
 Best-available v4 continuation (2026-11-07):310 targeted backend/paywall/auth/privacy/flag cases passed in11.45s; TypeScript passed. Independent150 functional +59 precision cases,8 DOM assertions and12 future-only exact parity scenarios passed with stable source hashes (overlapping sets). Real source capture normalized12teams/72futureteamweeks with2,131partial/168unpriced player-weeks, not a simulation/accuracy proof. Pure synthetic250k v4 benchmark46.974s/152518656-byte RSS with initial concurrent tests. No deployment, activation or simulator. See feature evidence for limits and source hashes.
+
+
+2026-11-07 — Postseason setting admission follow-up: exact native seed/lower-bracket integers0/1 preserve regular-season qualification, byes and Max PF scenario picks. Final focused enum/parity/currentness suite61 passed; projection/paywall suite315 passed in5.27s. Independent lower-bracket extension24 cases passed plus actual web/mobile warning-render checks; earlier seed-only43-case evidence remains separately bound. Unknown types and genuine unsupported policies remain refused. Actual draft-order custom/consolation rules are explicitly outside this scenario. No production mutation, simulator or predictive-accuracy claim; exact-head CI pending.

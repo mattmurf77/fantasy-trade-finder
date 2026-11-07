@@ -188,7 +188,13 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
     settings = league.get("settings", {})
     if league.get("sport") != "nfl" or league.get("season_type") != "regular":
         raise Unavailable("unsupported_sport_or_season")
-    if any(settings.get(k, 0) for k in ("divisions", "league_average_match", "best_ball", "playoff_seed_type")) or league.get("bracket_overrides_id"):
+    # Native 0/1 selects fixed/reseeded matchups in later playoff rounds,
+    # not regular-season qualification or first-round byes. See the source
+    # mapping in docs/plans/league-projections/reseeding-admission.md.
+    playoff_seed_type = settings.get("playoff_seed_type", 0)
+    if type(playoff_seed_type) is not int or playoff_seed_type not in (0, 1):
+        raise Unavailable("unsupported_playoff_reseeding_policy")
+    if any(settings.get(k, 0) for k in ("divisions", "league_average_match", "best_ball")) or league.get("bracket_overrides_id"):
         raise Unavailable("unsupported_divisions_median_bestball_or_manual_seeding")
     if settings.get("start_week", 1) != 1:
         raise Unavailable("nonstandard_start_week")
@@ -210,7 +216,10 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
     playoff = int(settings.get("playoff_teams", 0))
     # Standard single-elimination bracket: e.g. six teams need two first-round
     # byes. Nonstandard rounds are outside this capability's initial policy.
-    if settings.get("playoff_round_type", 0) or settings.get("playoff_type", 0):
+    playoff_type = settings.get("playoff_type", 0)
+    if type(playoff_type) is not int or playoff_type not in (0, 1):
+        raise Unavailable("unsupported_playoff_lower_bracket_policy")
+    if settings.get("playoff_round_type", 0):
         raise Unavailable("unsupported_playoff_bracket")
     byes = (1 << (playoff - 1).bit_length()) - playoff if playoff > 1 else 0
     history, actual_records, historical_pa = defaultdict(list), {rid: [0, 0, 0] for rid in ids}, defaultdict(lambda: decimal(0))
@@ -488,7 +497,8 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
             "player_week_inputs": normalized_inputs, "slots": slots, "scoring": league["scoring_settings"], "scoring_hash": digest(league["scoring_settings"]),
             "teams": teams, "weeks": result_weeks, "pick_ownership": ownership, "captured_at": captured_at, "capture_completed_at": finished,
             "source": weekly["source"], "source_captured_at": weekly["captured_at"], "league_revision": revision,
-            "coverage": {**weekly.get("coverage", {}), "historical_maxpf_by_week": False, "live_weeks": False, "completed_game_actuals": best,
+            "coverage": {**weekly.get("coverage", {}), "native_playoff_seed_type": playoff_seed_type, "native_playoff_type": playoff_type,
+                         "nonplayoff_draft_order_basis": "regular_season_maxpf_scenario", "postseason_rounds_simulated": False, "historical_maxpf_by_week": False, "live_weeks": False, "completed_game_actuals": best,
                          "estimated": any(t["projection_coverage"]["estimated"] for week in result_weeks for t in week["teams"].values()),
                          "unpriced_player_weeks": sum(len(t["projection_coverage"]["unpriced_players"]) for week in result_weeks for t in week["teams"].values()),
                          "partial_player_weeks": sum(len(t["projection_coverage"]["partial_players"]) for week in result_weeks for t in week["teams"].values()),
@@ -498,7 +508,8 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
                          "stat_provenance_counts": {k: dict(v) for k, v in sorted(provenance_counts.items())},
                          "model_assumed_zero_keys": sorted(k for k, v in provenance_counts.items() if v["model_assumed"]),
                          "model_assumed_player_fields": sum(p["basis"] == "model_assumed" for entry in normalized_inputs for p in entry["input"].get("stat_provenance", {}).values())},
-            "warnings": ["Provider forecasts are conditional scenarios; current injury labels do not establish future availability.",
+            "warnings": ["Non-playoff pick estimates assume regular-season Max PF draft order. Consolation and other postseason results are not modeled; your league’s actual draft order may use custom rules.",
+                         "Provider forecasts are conditional scenarios; current injury labels do not establish future availability.",
                          "IR eligibility and tie treatment are configured scenarios, not verified league policy.",
                          "Historical weekly Max PF is unavailable; official aggregate Max PF is preserved."] +
                         (["Missing common offense events are modeled as zero after aggregate reconciliation; rare events remain unknown and this is not predictive accuracy evidence."] if cfg.get("scoring_contract") == "sleeper_sparse_offense_v1" else []) +
