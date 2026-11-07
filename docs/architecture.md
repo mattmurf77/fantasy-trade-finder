@@ -1022,3 +1022,5 @@ The filter operates on detached copies and does not rewrite stored evidence.
 ### Calibration full held metadata and pair coverage (2026-11-07)
 
 Calibration uses a separate bounded public full-position metadata observation when the normal skill-player cache omits held assets. Only consumed held facts survive in private capture source; absent ephemeral cache after deployment preserves that frozen as-of state, while newer changes/removals invalidate unexposed inputs. Coupled opponents remain in full model budgets then their pairs are filtered before existing gates; coupled viewers remain explicitly unsupported. Both arms consume observed offensive slots and reserve/taxi exclusions. Normal serving and ranking pools are unchanged. [Evidence and limits](plans/calibration-full-metadata/scope.md).
+
+The same full observation also supplies availability for linked mapped offensive IDs missing from the skill cache; native fixed IDs are excluded and native provider eligibility remains authoritative. The final coupled-viewer refusal is preserved. See the Calibration full-metadata linked addendum.

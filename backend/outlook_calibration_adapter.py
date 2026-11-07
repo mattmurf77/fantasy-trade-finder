@@ -286,12 +286,17 @@ def capture(*, user_id, league_user_id, league_id):
     captured_metadata_ids = sorted({str(pid) for row in raw["rosters"] for pid in row.get("players") or []})
     full_metadata_ids = []
     full_metadata_snapshot = None
-    if not linked:
-        cached_metadata = s._load_sleeper_cache() or {}
-        if any(pid not in cached_metadata for pid in captured_metadata_ids):
-            from .calibration_roster_metadata import capture as capture_metadata
-            full_metadata_snapshot = capture_metadata(s._sleeper_get)
-            full_metadata_ids = captured_metadata_ids
+    # Linked native fixed assets already carry provider facts and have no
+    # Sleeper ID. Mapped offensive holdings can still be absent from the
+    # skill-only cache (e.g. ESPN WR / Sleeper DB); fetch their availability
+    # without changing the native eligibility enforced below.
+    required_metadata_ids = (sorted(set(linked.positions) - set(linked.fixed_metadata))
+                             if linked else captured_metadata_ids)
+    cached_metadata = s._load_sleeper_cache() or {}
+    if any(pid not in cached_metadata for pid in required_metadata_ids):
+        from .calibration_roster_metadata import capture as capture_metadata
+        full_metadata_snapshot = capture_metadata(s._sleeper_get)
+        full_metadata_ids = required_metadata_ids
     identity_args = (user_id, league_id, captured_metadata_ids)
     full_metadata_observation = None
     if full_metadata_ids:

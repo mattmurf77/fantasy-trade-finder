@@ -1,3 +1,9 @@
+## 2026-11-07 — Linked mapped availability uses full metadata
+
+- Bounded Calibration adapter fix: mapped linked offensive IDs absent from the ordinary skill-only cache now use the same full held observation/currentness contract. Native fixed IDs are excluded; provider positions/eligibility and explicit coupled-viewer refusal remain authoritative. No pricing/generation/policy/publicflag change.
+- **650 passed,19 skipped in30.40s** affected Calibration/legacy grading/roster/session/deletion; independent **7 passed1.12s** with4 runtime hashes stable, copied into permanent tests. Actual filtered-cache linked engine regressions distinguish supported offense-only, excluded coupled opponent, refused coupled viewer and genuinely absent full metadata. Race/restart/newer-removal tests pass. Pycompile/diff check pass.
+- Authorized aggregate-only fresh native readback passes raw parser and full normalizer, preserves native/fixed facts and identifies the intended coupled-viewer limitation. No customer payload copied to tests; no production mutations. Exact-headCI and parent deploy/reprepare/currentness remain required; existing exposed feedback unchanged. [Addendum](../docs/plans/calibration-full-metadata/linked-addendum.md).
+
 ## 2026-11-07 — Calibration full held metadata and pair-scoped coverage
 
 - Separate compact full-position public metadata fixes the actual skill-only cache boundary. Frozen held-only facts bind the consumed observation and survive ephemeral cache loss; newer changes/removals and capture races reject unexposed reuse. Exact offensive slots and native inactive IDs feed both arms. Normal ranking pools and serving remain unchanged.
