@@ -4,6 +4,12 @@
 - Actual function/render/retry suite: **12 checks passed**, independently executed and reviewed. Named baseline sabotage uses build 178 source and correctly fails the new error-state assertion. TypeScript and test-ID lint pass.
 - Full 166-script mobile CI glob: 165 initially passed; the initial-poll fixture needed the new failure-setter mocks. After that fixture-only correction, **21 initial-poll checks passed**, with every script having a passing executed outcome on unchanged final runtime. No simulator or production operations. The device incident's root cause and 200 ms target remain open. [Scope](../docs/plans/mobile-first-page-failure/scope.md) · [Validation](../docs/plans/mobile-first-page-failure/validation.md).
 
+## 2026-11-07 — Calibration retired-session recovery
+
+- Reproduced the installed-client loop with actual button execution and a network-blocked Flask route: a retired unopened exercise keeps returning `comparison_not_ready`, while `/current` identifies its replacement. No available device trace attributes this defect to the reported build178 symptom.
+- The repair rediscovers only that exact 409; ordinary read errors retain same-endpoint retry, no enrollment POST or grade write occurs, account/league/unmount response races refuse adoption, and queued builds retain bounded polling with Check again copy.
+- Actual transpiled-screen retry controls, blind-grading/blinding and failure-copy suites pass. Backend route suite: **13 passed in 2.74 seconds**. TypeScript and test-ID lint pass. All **165 mobile check scripts** pass, with the final screen controls rerun after its last scope guard. Independent peer review passed six additional boundary cases and the 13-route suite in 1.81 seconds; final screen bytes are frozen. No simulator or production action. [Scope](../docs/plans/calibration-session-recovery/scope.md).
+
 ## 2026-11-07 — Narrow saved projection reads
 
 - Public saved-run queries now select only eight serialized fields under exact run/account/league predicates. Latest success and attempt share one query and one decode when identical; public response bytes, scenario snapshots, weekly cadence and model behavior remain unchanged.

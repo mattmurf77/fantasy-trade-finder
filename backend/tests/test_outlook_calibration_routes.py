@@ -103,6 +103,16 @@ def test_direct_first_exposure_rechecks_stale_unopened_prepared_deck(route_clien
     assert response.status_code==409
     assert db.load_grading_session('s')['status']=='failed'
     assert db.load_grading_session('s')['first_exposed_at'] is None
+    # A client must rediscover /current; retrying this retired ID cannot
+    # resume the replacement and must never expose the old private deck.
+    current=client.get('/api/grading/sessions/current?league_id=league',headers=AUTH)
+    assert current.status_code==200
+    assert current.json['session']['session_id']!='s'
+    assert current.json['session']['status']=='building'
+    for _ in range(2):
+        repeated=client.get('/api/grading/sessions/s/next',headers=AUTH)
+        assert repeated.status_code==409
+        assert repeated.json['error']=='comparison_not_ready'
 
 def test_round_rollback_blocks_new_first_exposure_but_preserves_visible_cohort(route_client):
     client,_=route_client
