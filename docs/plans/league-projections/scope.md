@@ -25,3 +25,5 @@ Confirmed: custom scoring including IDP, exact lineup eligibility, official hist
 Proposed and visible scenario inputs: 250000 full simulations, 100-sample conditional-pick threshold, 5-point persistent strength SD, same-week residual correlation, IR eligibility, reserve activation, empty slots, tie handling. Unsupported divisions/median/manual seeding and live remaining-projection coverage block numeric results. Provider permission, IR behavior and original November 6 fixtures are not established by the handoff.
 
 The later confirmed weekly-only scheduled delivery instruction supersedes manual baseline generation: see steering-addendum.md. New targets wait until the next configured weekly slot; stored GETs never dispatch work. Explicit comparison scenarios remain separate.
+
+The v3 mathematical correction preserves the specified expected Max PF mean while enforcing eligible dominance. It changes the joint distribution under a new policy/model version, leaves actual-score draws unchanged, and remains uncalibrated/default-off. Negative dominance gaps fail; old-model saved-input comparisons require a current weekly baseline.

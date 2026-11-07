@@ -4,6 +4,7 @@ from flask import Flask
 import pytest
 from backend import database as db
 from backend.league_projections import api, simulation, store, service, batch
+from backend.league_projections.core import VERSION
 from backend.tests.test_outlook_calibration_persistence import engine
 from backend.tests.test_league_projection_simulation import config, snapshot
 
@@ -14,7 +15,7 @@ def test_explicit_comparison_freezes_owned_baseline_and_does_not_wake_worker(eng
     with engine.begin() as conn:
         conn.execute(db.league_projection_runs_table.insert().values(run_id=baseline,user_id='account',league_id='123',status='complete',
             created_at=store.utc_now(),updated_at=store.utc_now(),expires_at='2026-01-01T00:00:00+00:00',
-            request_hash='baseline',input_json='{}',snapshot_json=json.dumps(source),result_json=json.dumps({'config':cfg})))
+            request_hash='baseline',input_json='{}',snapshot_json=json.dumps(source),result_json=json.dumps({'config':cfg,'model_version':VERSION})))
     monkeypatch.setattr(api,'is_enabled',lambda k:True)
     monkeypatch.setattr(batch,'settings',lambda:{'policy_approved':True, 'retention_days':7})
     monkeypatch.setattr(service,'wake',lambda *a:pytest.fail('explicit POST queues; cron owns work'))
@@ -49,7 +50,7 @@ def test_scenario_cannot_relabel_strict_snapshot_as_sparse(engine, monkeypatch):
     with engine.begin() as conn:
         conn.execute(db.league_projection_runs_table.insert().values(run_id=baseline,user_id='account',league_id='123',status='complete',
             created_at=store.utc_now(),updated_at=store.utc_now(),expires_at=store.utc_now(),request_hash='strict',input_json='{}',
-            snapshot_json=json.dumps(snapshot()),result_json=json.dumps({'config':cfg})))
+            snapshot_json=json.dumps(snapshot()),result_json=json.dumps({'config':cfg,'model_version':VERSION})))
     monkeypatch.setattr(api, 'is_enabled', lambda key: True)
     monkeypatch.setattr(batch, 'settings', lambda: {'policy_approved': True, 'retention_days':7})
     app=Flask('projection-contract'); sess={'user_id':'account','league':SimpleNamespace(league_id='123')}
@@ -57,3 +58,19 @@ def test_scenario_cannot_relabel_strict_snapshot_as_sparse(engine, monkeypatch):
     response=app.test_client().post('/api/leagues/123/projection-runs',json={'baseline_run_id':baseline,'config':{**cfg,'scoring_contract':'sleeper_sparse_offense_v1'}})
     assert response.status_code==400
     assert response.json['error']=='scenario_requires_new_eligibility_snapshot'
+
+
+def test_weight_comparison_cannot_silently_upgrade_old_engine_baseline(engine,monkeypatch):
+    cfg=simulation.config(config()); baseline='d'*32
+    with engine.begin() as conn:
+        conn.execute(db.league_projection_runs_table.insert().values(run_id=baseline,user_id='account',league_id='123',status='complete',
+            created_at=store.utc_now(),updated_at=store.utc_now(),expires_at=store.utc_now(),request_hash='old-engine',input_json='{}',
+            snapshot_json=json.dumps(snapshot()),result_json=json.dumps({'config':cfg,'model_version':'joint-season-scenario-v2'})))
+    monkeypatch.setattr(api,'is_enabled',lambda key:True)
+    monkeypatch.setattr(batch,'settings',lambda:{'policy_approved':True,'retention_days':7})
+    monkeypatch.setattr(store,'create',lambda *a,**k:pytest.fail('must wait for current-model baseline'))
+    app=Flask('old-projection');sess={'user_id':'account','league':SimpleNamespace(league_id='123')}
+    api.install(app,require_session=lambda:sess,read_denial=lambda s:None,write_denial=lambda s:None,league_user_id=lambda s:'account',fetch_json=lambda *a:None)
+    response=app.test_client().post('/api/leagues/123/projection-runs',json={'baseline_run_id':baseline,'config':{**cfg,'historical_weight':.4}})
+    assert response.status_code==400 and response.json['error']=='comparison_requires_current_model_baseline'
+    assert store.get(baseline,'account','123')['status']=='complete'

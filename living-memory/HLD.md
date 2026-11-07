@@ -235,4 +235,4 @@ Offline historical validation now has an outcome collector and a conditional arc
 
 New default-off `backend/league_projections` captures immutable native league/scoring inputs and simulates playoff membership and non-playoff Max PF picks jointly. Existing standings surfaces read stored weekly results; entering a screen cannot start generation. Scheduled targets, worker recovery and last-valid fallback are separate from trade models. Weekly cadence is confirmed; source/policy/accuracy activation gates remain unresolved. See `docs/plans/league-projections/steering-addendum.md` and `implementation.md`.
 
-Coverage follow-up: finite admitted common-offense decoder, explicit source/derived/model assumptions, and Max PF floor diagnostics are implemented locally under engine v2. Rare-event/kicker completeness and prospective accuracy remain open; no production activation.
+Coverage follow-up: finite admitted common-offense decoder, explicit source/derived/model assumptions, and Max PF floor diagnostics are implemented locally under engine v3. Rare-event/kicker completeness and prospective accuracy remain open; no production activation.

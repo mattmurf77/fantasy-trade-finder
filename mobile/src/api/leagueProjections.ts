@@ -2,7 +2,7 @@ import { api } from './client';
 
 export interface ProjectionWeek {
   week: number; opponent_roster_id: number; win_probability: number; loss_probability: number;
-  maxpf_floor?: { input_mean: number; simulated_pre_floor_mean: number; simulated_mean: number; mean_uplift: number; frequency: number };
+  maxpf_floor?: { input_mean: number; simulated_pre_floor_mean: number | null; simulated_mean: number; mean_uplift: number; frequency: number; policy?: string; target_mean?: number; latent_maxpf_mean?: number | null; simulated_mean_standard_error?: number; rounding_mean_error_bound?: number; configured_latent_maxpf_variance?: number; analytic_realized_variance?: number; configured_residual_correlation?: number; simulated_correlation?: number | null };
   tie_probability: number; win_equivalent_probability: number; modeled_score_mean: number; modeled_score_sd: number;
   actual: {points: string; gaps: number[]; lineup: {slot: string; player: null | {name?: string; player_id: string; points: string; hypothetical?: boolean}}[]};
   maxpf: {points: string}; exclusions: {player_id: string; reason: string}[];

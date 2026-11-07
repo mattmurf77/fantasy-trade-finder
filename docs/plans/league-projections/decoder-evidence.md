@@ -28,9 +28,17 @@ The historical-source audit found all2,978 populated2025 projections in weeks4/8
 
 Native-primary position bonus review found16 FB/fantasy-RB and4 DB/fantasy-WR rows whose TE premium is inapplicable under the explicit primary-position rule. The final finite registry recognizes FB/DB without mapping their premiums to RB/WR. This deterministic bonus-policy amendment was made **after** inspection of the held-out data; it is not represented as an untouched holdout test of that new bonus policy. The original common-offense formula did not change. Four RB rows supplied a contradictory nonzero TE bonus and remain rejected; the model does not tune or absorb that residual.
 
-## Joint-model diagnostics
+## Mean-preserving joint policy — corrected engine v3
 
-Engine revision `joint-season-scenario-v2` reports each week's input Max PF mean, sampled pre-floor mean, sampled achieved mean, mean uplift and floor frequency. Enforcing Max PF≥actual scores can increase the marginal mean substantially; equal20-point independent normals with residual variance157.14 yield about7.07points/week uplift. The UI explains and quantifies this effect. Correlation was not tuned to hide it. Draft probabilities remain conditional model scenarios, not calibrated estimates. Model revision enters reuse hashes, so older result JSON cannot bypass new diagnostics.
+The initial v2 floor preserved dominance but raised the requested Max PF mean. Disclosure did not satisfy the specification's mean contract. It is superseded by `joint-season-scenario-v3` with `mean_preserving_positive_gap_v1`; old numeric results remain dated/attributed and are never reused as v3 output.
+
+Let actual mean be A, requested Max PF mean M, residual scales sa/sm and latent residual correlation rho. The shared persistent team strength cancels in the gap. Its residual scale is `s = hypot(sa-sm, sqrt(2*sa*sm*(1-rho)))`. For nonnegative target gap `delta=M-A`, solve `s*phi(g/s)+g*Phi(g/s)=delta` for the latent gap mean g, once per team/week. Shift the existing correlated latent Max PF draw by `g-delta`, then floor at actual. This preserves the **unrounded expected** Max PF mean M while retaining dominance. Actual Gaussian scores, random draw consumption, seed, matchups and playoff-membership calculation remain unchanged.
+
+A zero target gap requires Max PF=actual in every world; there is no finite latent normal mean for that singular case. A zero gap scale gives a deterministic positive gap. Any negative target gap is rejected when dominance is required. Hypothetical replacement cases that do not require dominance keep the original unconstrained correlated normal. No correlation tuning or forecast-source change is introduced.
+
+The floor transforms variance/correlation, so configured latent parameters are not labeled as realized parameters. Advanced diagnostics and the manifest expose target, latent and simulated means; latent parameters; analytic and sampled realized variance/correlation; uplift **relative to the shifted latent draw**; floor frequency; simulation-mean standard error; and rounding bound. Centered moment accumulation avoids high-location cancellation, and the analytic gap variance avoids subtracting large squared means. The zero-gap branch reports no latent mean rather than inventing one.
+
+With nearest score rounding, expected means can differ by at most half a scoring unit per week (0.005 at two decimals), plus Monte Carlo sampling error in a finite run. Exact sampled-mean equality is not claimed. This is a mathematical mean-contract correction, not predictive calibration or evidence that the selected uncertainty model is accurate. UI shows requested target versus simulated average and keeps technical diagnostics expandable. Saved-input weight comparisons require a baseline from the current engine, preventing a disguised simultaneous model change. Opening an old result does not enqueue a replacement.
 
 ## Primary-source boundary
 

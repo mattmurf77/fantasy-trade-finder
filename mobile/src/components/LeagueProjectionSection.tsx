@@ -104,13 +104,16 @@ function ProjectionTables({result, baselineRunId}: {result: ProjectionResult; ba
   </>;
 }
 function TeamDetail({team}: {team: ProjectionTeam}) {
+  const [advanced, setAdvanced] = useState(false);
   return <View style={styles.detail}>
     <Text variant="heading" style={styles.text}>{team.name}</Text>
     <Text variant="bodySm" style={styles.text}>Missed-playoff samples: {team.nonplayoff_samples}. {team.name}’s own franchise portfolio — expected non-playoff pick count: {number(team.owner_expected_nonplayoff_picks)}; chance of at least one: {pct(team.owner_probability_at_least_one)}.</Text>
     <Text variant="bodySm" style={styles.text}>Final record distribution: {team.final_record_distribution.map(r => `${r.record.join('–')}: ${pct(r.probability)}`).join('; ')}</Text>
+    <Button label={advanced ? "Hide model diagnostics" : "Show model diagnostics"} variant="secondary" compact onPress={() => setAdvanced(!advanced)} testID="league-projections.diagnostics" />
     {team.weeks.map(w => <View key={w.week} style={styles.detail}>
       <Text variant="bodySm" style={styles.text}>Week {w.week} vs Team {w.opponent_roster_id}: win {pct(w.win_probability)}, tie {pct(w.tie_probability)}, loss {pct(w.loss_probability)}. Modeled score {number(w.modeled_score_mean)}; standard deviation {number(w.modeled_score_sd)}.</Text>
-      {w.maxpf_floor && <Text variant="bodySm" style={styles.text}>Max PF before floor {number(w.maxpf_floor.input_mean)}; simulated mean {number(w.maxpf_floor.simulated_mean)}. Floor adds {number(w.maxpf_floor.mean_uplift)} points on average ({pct(w.maxpf_floor.frequency)} of scenarios).</Text>}
+      {w.maxpf_floor && <Text variant="bodySm" style={styles.text}>{w.maxpf_floor.policy ? `Max PF target ${number(w.maxpf_floor.target_mean ?? null)}; simulated mean ${number(w.maxpf_floor.simulated_mean)}. Simulation averages vary; predictive uncertainty is not calibrated.` : `Historical model: input Max PF ${number(w.maxpf_floor.input_mean)}; simulated mean ${number(w.maxpf_floor.simulated_mean)}.`}</Text>}
+      {advanced && w.maxpf_floor?.policy && <Text variant="bodySm" style={styles.text}>Latent mean {w.maxpf_floor.latent_maxpf_mean == null ? "not used for a zero target gap" : number(w.maxpf_floor.latent_maxpf_mean)}. Configured latent variance {number(w.maxpf_floor.configured_latent_maxpf_variance ?? null)}; realized model variance {number(w.maxpf_floor.analytic_realized_variance ?? null)}. Latent residual correlation {number(w.maxpf_floor.configured_residual_correlation ?? null)}; sampled total correlation {number(w.maxpf_floor.simulated_correlation ?? null)}. Simulation mean standard error {w.maxpf_floor.simulated_mean_standard_error?.toPrecision(3)}. Rounding mean bound ±{w.maxpf_floor.rounding_mean_error_bound} points. Floor adjustment relative to latent draws {number(w.maxpf_floor.mean_uplift)}; floor activation {pct(w.maxpf_floor.frequency)}.</Text>}
       {w.actual.lineup.map((r, i) => <Text key={i} variant="bodySm" style={styles.text}>{r.slot}: {r.player ? `${r.player.hypothetical ? 'Hypothetical bye replacement' : r.player.name || r.player.player_id} · ${r.player.points}` : 'Empty slot'}</Text>)}
       <Text variant="bodySm" style={styles.text}>Optimized lineup {w.actual.points}; Max PF eligible lineup {w.maxpf.points}. Historical blending can cushion an empty slot.</Text>
       {w.exclusions.map(p => <Text key={p.player_id} variant="bodySm" style={styles.text}>{p.player_id}: {p.reason.replace(/_/g, ' ')}</Text>)}

@@ -9,7 +9,7 @@ from flask import Response, jsonify, request
 from ..feature_flags import is_enabled
 from .. import database as db
 from . import batch, store
-from .core import Unavailable
+from .core import Unavailable, VERSION
 from .simulation import config
 
 
@@ -75,7 +75,10 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
             baseline = load(sess, baseline_id)
             if not baseline or baseline["status"] != "complete" or not baseline.get("snapshot_json"):
                 raise ValueError("baseline_unavailable")
-            original = json.loads(baseline["result_json"])["config"]
+            baseline_result = json.loads(baseline["result_json"])
+            if baseline_result.get("model_version") != VERSION:
+                raise ValueError("comparison_requires_current_model_baseline")
+            original = baseline_result["config"]
             for key in ("ir_maxpf", "reserve_activation", "empty_slots", "availability_scenario", "scoring_contract"):
                 if cfg[key] != config(original)[key]:
                     raise ValueError("scenario_requires_new_eligibility_snapshot")
@@ -139,6 +142,7 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
         result = json.loads(row["result_json"])
         if kind == "manifest":
             return jsonify({"run_id": run_id, "input_hash": row["input_hash"],
+                            "joint_model_diagnostics": [{"roster_id": t["roster_id"], "weeks": [{"week": w["week"], **w.get("maxpf_floor", {})} for w in t["weeks"]]} for t in result["teams"]],
                             **{key: result[key] for key in ("schema", "model_version", "config", "seed", "iterations", "snapshot_hash", "source", "captured_at", "coverage", "warnings")}})
         out = io.StringIO()
         writer = csv.writer(out)

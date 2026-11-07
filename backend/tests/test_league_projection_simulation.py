@@ -93,7 +93,7 @@ def test_draft_membership_uses_actual_playoffs_before_maxpf_ranking_and_exact_pi
     assert teams[3]['weeks'][0]['modeled_score_mean']==-10
 
 
-def test_floor_diagnostics_preserve_accounting_and_match_equal_mean_normal_oracle():
+def test_zero_gap_preserves_mean_and_actual_distribution_without_floor_uplift():
     source=snapshot();source['weeks']=source['weeks'][:1]
     for t in source['teams']:
         t.update(actual_history=['10','30'], points_for='40', points_against='40', maxpf='40')
@@ -101,13 +101,12 @@ def test_floor_diagnostics_preserve_accounting_and_match_equal_mean_normal_oracl
         detail['actual']['points']='20';detail['maxpf']['points']='20'
     cfg=config();cfg.update(iterations=30000,persistent_sd=0,residual_correlation=0,historical_weight=0)
     result=simulate(source,cfg)
-    # Same team/pool shrinkage as modeled variance; E[max(X,Y)]-mu=sigma/sqrt(pi).
-    variance=.5*200+.5*(800/7)
-    oracle=math.sqrt(variance/math.pi)
     for t in result['teams']:
         d=t['weeks'][0]['maxpf_floor']
-        assert d['input_mean']==20
-        assert abs(d['mean_uplift']-oracle)<.2
-        assert .48<d['frequency']<.52
-        assert math.isclose(d['simulated_mean']-d['simulated_pre_floor_mean'],d['mean_uplift'],abs_tol=1e-9)
+        assert d['construction']=='actual_equals_maxpf'
+        assert d['latent_maxpf_mean'] is None
+        assert d['simulated_mean']==d['simulated_actual_mean']
+        assert d['mean_uplift']==0 and d['frequency']==0
+        assert math.isclose(d['simulated_correlation'],1,abs_tol=1e-10)
+        assert abs(d['simulated_mean']-20)<6*d['simulated_mean_standard_error']
         assert math.isclose(t['maxpf_mean'],40+d['simulated_mean'],abs_tol=1e-9)

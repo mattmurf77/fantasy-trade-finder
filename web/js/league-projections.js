@@ -58,7 +58,15 @@
         detail.append(el('p', `Final record distribution: ${(team.final_record_distribution || []).map(r => `${r.record.join('–')}: ${pct(r.probability)}`).join('; ')}. Missed-playoff samples: ${team.nonplayoff_samples}. ${team.name} franchise portfolio expected picks: ${num(team.owner_expected_nonplayoff_picks)}; chance of at least one: ${pct(team.owner_probability_at_least_one)}.`));
         team.weeks.forEach(w => {
           detail.append(el('p', `Week ${w.week} vs Team ${w.opponent_roster_id}: win ${pct(w.win_probability)}, tie ${pct(w.tie_probability)}, loss ${pct(w.loss_probability)}. Score mean ${num(w.modeled_score_mean)}, standard deviation ${num(w.modeled_score_sd)}.`));
-          if (w.maxpf_floor) detail.append(el('p', `Max PF before floor ${num(w.maxpf_floor.input_mean)}; simulated mean ${num(w.maxpf_floor.simulated_mean)}. Floor adds ${num(w.maxpf_floor.mean_uplift)} points on average (${pct(w.maxpf_floor.frequency)} of scenarios).`));
+          if (w.maxpf_floor) {
+            const m = w.maxpf_floor;
+            detail.append(el('p', m.policy ? `Max PF target ${num(m.target_mean)}; simulated mean ${num(m.simulated_mean)}. Simulation averages vary; predictive uncertainty is not calibrated.` : `Historical model: input Max PF ${num(m.input_mean)}; simulated mean ${num(m.simulated_mean)}.`));
+            if (m.policy) {
+              const diagnostics=el('details'); diagnostics.append(el('summary','Model diagnostics'));
+              diagnostics.append(el('p', `Latent mean ${m.latent_maxpf_mean == null ? "not used for a zero target gap" : num(m.latent_maxpf_mean)}. Configured latent variance ${num(m.configured_latent_maxpf_variance)}; realized model variance ${num(m.analytic_realized_variance)}. Latent residual correlation ${num(m.configured_residual_correlation)}; sampled total correlation ${num(m.simulated_correlation)}. Simulation mean standard error ${m.simulated_mean_standard_error?.toPrecision(3)}. Rounding mean bound ±${m.rounding_mean_error_bound} points. Floor adjustment relative to latent draws ${num(m.mean_uplift)}; floor activation ${pct(m.frequency)}.`));
+              detail.append(diagnostics);
+            }
+          }
           w.actual.lineup.forEach(r => detail.append(el('p', `${r.slot}: ${r.player ? `${r.player.hypothetical ? 'Hypothetical bye replacement' : r.player.name || r.player.player_id} · ${r.player.points}` : 'Empty slot'}`)));
           detail.append(el('p', `Historical component ${num(w.historical_component)} plus projection component ${num(w.projection_component)}. Exclusions: ${w.exclusions.map(p => `${p.player_id} (${p.reason})`).join(', ') || 'None'}.`));
         }); host.append(detail);

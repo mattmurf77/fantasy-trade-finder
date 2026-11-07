@@ -18,7 +18,8 @@
     "min_pick_samples": 100,
     "seed": 42,
     "availability_scenario": "conditional_provider_forecast",
-    "scoring_contract": "sleeper_sparse_offense_v1"
+    "scoring_contract": "sleeper_sparse_offense_v1",
+    "maxpf_joint_policy": "mean_preserving_positive_gap_v1"
   },
   "schedule": {
     "weekday": 1,

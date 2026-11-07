@@ -7,8 +7,10 @@ import random
 import statistics
 
 from .core import Unavailable, VERSION, decimal, digest
+from . import joint
 
 POLICIES = {
+    "maxpf_joint_policy": {joint.POLICY},
     "seeding": {"record_pf_higher_pa_random"},
     "draft_tie": {"random_exact_ties"},
     "ir_maxpf": {"include", "exclude"},
@@ -29,6 +31,7 @@ def config(raw):
     result = dict(raw)
     result.setdefault("availability_scenario", "require_verified")
     result.setdefault("scoring_contract", "strict_supplied_v1")
+    result.setdefault("maxpf_joint_policy", joint.POLICY)
     for key, values in POLICIES.items():
         if result.get(key) not in values:
             raise Unavailable("policy_required", details={"policy": key, "options": sorted(values)})
@@ -61,6 +64,17 @@ def _variance(values):
 
 def _quantile(values, fraction):
     return values[min(len(values) - 1, int((len(values) - 1) * fraction))]
+
+
+def _realized_moments(values, count, actual_mean, maxpf_mean):
+    # Centered sums avoid cancellation for high-location, low-variance scoring.
+    actual_deviation, maxpf_deviation = values[4] / count, values[1] / count
+    av = max(0., values[5] / count - actual_deviation ** 2)
+    mv = max(0., values[6] / count - maxpf_deviation ** 2)
+    covariance = values[7] / count - actual_deviation * maxpf_deviation
+    return {"simulated_actual_mean": actual_mean + actual_deviation, "simulated_actual_variance": av,
+            "simulated_maxpf_variance": mv, "simulated_correlation": joint._correlation(covariance, av, mv),
+            "simulated_mean_standard_error": math.sqrt(mv / count)}
 
 
 def simulate(snapshot, raw_config, *, cancelled=lambda: False):
@@ -158,8 +172,12 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
     playoff_counts, bye_counts = [0] * n, [0] * n
     max_totals = [[] for _ in teams]
     weekly_outcomes = [[[0, 0, 0] for _ in teams] for _ in weeks]
-    # Streaming moments expose the uplift introduced by the joint-world floor.
-    maxpf_diagnostics = [[[0., 0., 0., 0] for _ in teams] for _ in weeks]
+    # Prepare the mean constraint once, outside the Monte Carlo loop.
+    joint_policies = [[joint.prepare(means[w][i], max_means[w][i], sd[i], max_sd[i], rho,
+                       cfg["persistent_sd"], bool(details[w][i].get("maxpf_dominates_actual")), cfg["score_decimals"])
+                       for i in range(n)] for w in range(len(weeks))]
+    # Centered pre-floor/final/actual sums, uplift, floor count, centered moments.
+    maxpf_diagnostics = [[[0.] * 8 for _ in teams] for _ in weeks]
     owner_for = {rid: rid for rid in ids}
     for pick in snapshot.get("pick_ownership", []):
         if pick["season"] == cfg["draft_season"] and pick["round"] == cfg["draft_round"]:
@@ -179,15 +197,26 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
             for i in range(n):
                 z = rng.gauss(0, 1)
                 actual = round(means[w][i] + strength[i] + sd[i] * z, precision)
-                maximum = round(max_means[w][i] + strength[i] + max_sd[i] * (rho * z + math.sqrt(1 - rho * rho) * rng.gauss(0, 1)), precision)
-                before_floor = maximum
-                if details[w][i].get("maxpf_dominates_actual"):
-                    maximum = max(maximum, actual)
+                # Always consume the second latent draw, including zero-gap and
+                # deterministic cases, so actual/playoff RNG paths are unchanged.
+                latent = max_means[w][i] + strength[i] + max_sd[i] * (rho * z + math.sqrt(1 - rho * rho) * rng.gauss(0, 1))
+                policy = joint_policies[w][i]
+                if policy["construction"] == "actual_equals_maxpf":
+                    maximum = before_floor = actual
+                else:
+                    before_floor = round(latent + policy["latent_mean_shift"], precision)
+                    maximum = max(before_floor, actual) if details[w][i].get("maxpf_dominates_actual") else before_floor
                 diagnostic = maxpf_diagnostics[w][i]
-                diagnostic[0] += before_floor
-                diagnostic[1] += maximum
+                before_center = policy["latent_maxpf_mean"] if policy["latent_maxpf_mean"] is not None else means[w][i]
+                actual_deviation, maxpf_deviation = actual - means[w][i], maximum - max_means[w][i]
+                diagnostic[0] += before_floor - before_center
+                diagnostic[1] += maxpf_deviation
                 diagnostic[2] += maximum - before_floor
                 diagnostic[3] += int(maximum > before_floor)
+                diagnostic[4] += actual_deviation
+                diagnostic[5] += actual_deviation * actual_deviation
+                diagnostic[6] += maxpf_deviation * maxpf_deviation
+                diagnostic[7] += actual_deviation * maxpf_deviation
                 scores.append(actual)
                 pf[i] += actual
                 maxpf[i] += maximum
@@ -243,11 +272,12 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
                        "owner_probability_at_least_one": owner_any[i] / iterations,
                        "owner_expected_picks_by_slot": [sum(pick_counts[j][k] for j in range(n) if owner_for[ids[j]] == ids[i]) / iterations for k in range(picks)],
                        "weeks": [{"week": week["week"], **details[w][i], "win_probability": weekly_outcomes[w][i][0] / iterations,
-                                  "maxpf_floor": {"input_mean": max_means[w][i],
-                                      "simulated_pre_floor_mean": maxpf_diagnostics[w][i][0] / iterations,
-                                      "simulated_mean": maxpf_diagnostics[w][i][1] / iterations,
+                                  "maxpf_floor": {**joint_policies[w][i], "input_mean": max_means[w][i],
+                                      "simulated_pre_floor_mean": joint_policies[w][i]["latent_maxpf_mean"] + maxpf_diagnostics[w][i][0] / iterations if joint_policies[w][i]["latent_maxpf_mean"] is not None else None,
+                                      "simulated_mean": max_means[w][i] + maxpf_diagnostics[w][i][1] / iterations,
                                       "mean_uplift": maxpf_diagnostics[w][i][2] / iterations,
-                                      "frequency": maxpf_diagnostics[w][i][3] / iterations},
+                                      "frequency": maxpf_diagnostics[w][i][3] / iterations,
+                                      **_realized_moments(maxpf_diagnostics[w][i], iterations, means[w][i], max_means[w][i])},
                                   "modeled_score_mean": means[w][i], "historical_component": weight * base_pf[i] / completed if completed else 0,
                                   "projection_component": (1 - weight) * float(decimal(details[w][i]["actual"]["points"])) if completed else means[w][i], "modeled_score_sd": math.sqrt(sd[i] ** 2 + cfg["persistent_sd"] ** 2),
                                   "score_distribution": "normal_scenario_rounded_to_league_precision",
@@ -264,7 +294,7 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
             "warnings": ["Scenario estimates; model accuracy has not been established.",
                          "Monte Carlo error excludes model and provider uncertainty.",
                          "Optimizing expected points understates the expected hindsight optimum.",
-                         "The joint model floors eligible Max PF at actual scores; this increases its mean and affects draft odds. Weekly diagnostics quantify this uncalibrated effect.",
+                         "Eligible Max PF uses a mean-preserving positive-gap model; realized variance and correlation differ from the latent parameters. This distribution is not accuracy-calibrated.",
                          "Playoff-team draft positions are not projected.",
                          "IDP bye replacements are hypothetical, not verified waiver availability."] +
                         (["Short history: fewer than four completed weeks."] if completed < 4 else []) +
