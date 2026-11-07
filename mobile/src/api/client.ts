@@ -395,16 +395,22 @@ async function _afterGateFailure<T>(err: unknown, path: string, opts: RequestOpt
   const signal = _classifyGate(err, path);
   const revision = (err as ApiError | null)?.requestRevision;
   if (!signal || !_onProRequired || revision !== getSessionRevision()) throw err;
+  const pathname = _pathname(path);
+  const tradeSearch = pathname === '/api/trades/generate' || pathname === '/api/trades/fair-packages';
   let outcome: Promise<GateOutcome> | void;
   try {
-    outcome = _onProRequired(signal, _pathname(path));
+    if (tradeSearch) opts.beforeDispatch?.('gate');
+    outcome = _onProRequired(signal, pathname);
   } catch {
-    throw err; // a listener never masks the API error
+    throw err; // stale authority or a listener failure preserves the API error
   }
   if (!outcome || _gateRetries.has(opts) || _neverAutoRetry(path)) throw err;
   const result = await outcome.catch((): GateOutcome => 'dismissed');
   if (result !== 'verified' || revision !== getSessionRevision() || opts.signal?.aborted) throw err;
   const retryOpts: RequestOptions = { ...opts };
+  // VerifySheet time is outside the search's first HTTP deadline. The
+  // accepted same-session re-send keeps its body and full dispatch fence.
+  if (tradeSearch) delete retryOpts.deadlineAt;
   _gateRetries.add(retryOpts);
   return apiRequest<T>(path, retryOpts);
 }
@@ -548,8 +554,9 @@ export interface RequestOptions {
   // call whose server worst case is longer (api/sendOutcome.ts). Omitted =
   // unchanged behaviour.
   timeoutMs?: number;
-  // State-owned identity fence. No store import belongs in this layer.
-  beforeDispatch?: () => void;
+  // State-owned identity fence. Trade gate callbacks can check authority
+  // without rechecking input readiness, which applies when sending.
+  beforeDispatch?: (phase?: 'gate') => void;
   // Statuses that are an expected answer for this call, not a failure: no
   // api_request_failed event for them. Opt-in per call; the rejection is
   // unchanged. (D1: Settings' consent read, whose 404 / 403 is routine.)
@@ -849,7 +856,7 @@ async function _apiRequestInner<T = unknown>(
                 // This callback runs BEFORE the caller receives its rejection.
                 // A later screen/store guard cannot undo a stale banner write.
                 if (sent && sent === current && requestRevision === getSessionRevision() && !timeoutController.signal.aborted && Date.now() < opts.deadlineAt!) {
-                  opts.beforeDispatch?.();
+                  opts.beforeDispatch?.('gate');
                   _onVerificationRequired();
                 }
               } catch {

@@ -206,7 +206,7 @@ console.log('check-trade-first-card-events:');
       && /claimSearch\(adopted\?\.snapshot\.search_id\);/.test(trades)
       && /dropPendingSearch\(fork\.searchId\);/.test(trades));
   check('4c. the fair sweep claims its tap\'s search; only an untapped sweep begins one',
-    /let claimedFair = handoffSearchRef\.current \?\? claimPendingSearch\(\);\s*claimSearch\(handoffSearchRef\.current\);\s*handoffSearchRef\.current = null;\s*if \(!claimedFair\) \{\s*beginTradeSearch\(\{ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' \}\);/.test(trades));
+    /let claimedFair = handoffSearchRef\.current \?\? claimPendingSearch\(\);\s*const eager = eagerHandoffRef\.current;\s*eagerHandoffRef\.current = false;\s*claimSearch\(handoffSearchRef\.current\);\s*handoffSearchRef\.current = null;\s*if \(!claimedFair\) \{\s*beginTradeSearch\(\{ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' \}\);/.test(trades));
 }
 
 // ── 5. EXECUTED: exactly one R2/R2b per search_id ─────────────────────────
@@ -718,7 +718,7 @@ async function gateScenarios() {
   check('10d. the router sends R2b FIRST in the gate listener, for a SEARCH route\'s find answer only, before it opens anything',
     /export function handleGateSignal\(signal: GateSignal, path\?: string\): Promise<GateOutcome> \| void \{\s*if \(!paywallGateOn\(\)\) return;\s*if \(signal\.action !== 'verify_mismatch' && signal\.kind === 'find' && !!path && SEARCH_PATHS\.has\(path\)\) \{\s*const open = openSearchId\(\);\s*if \(open\) failFirstCard\(open, gateFailureReason\(signal\)\);\s*\}\s*if \(signal\.action === 'paywall'\)/.test(gateSrc)
       && /const SEARCH_PATHS: ReadonlySet<string> = new Set\(\['\/api\/trades\/generate', '\/api\/trades\/fair-packages'\]\);/.test(gateSrc)
-      && /outcome = _onProRequired\(signal, _pathname\(path\)\);/.test(stripComments(read('api/client.ts'))));
+      && /outcome = _onProRequired\(signal, pathname\);/.test(stripComments(read('api/client.ts'))));
   const deckR2b = trades.match(/failDeckSearch\(gateFailureReason\(gateSignalFor\(e, '\/api\/trades\/(generate|fair-packages)'\)\)\);/g) || [];
   check('10e. the deck settles a gate error with the same mapping (generate and the fair sweep), never a bare error',
     deckR2b.length === 2 && /takeTradeSearchHandoff<PagedTradeJobSnapshot>/.test(trades));

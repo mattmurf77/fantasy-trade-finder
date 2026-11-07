@@ -61,17 +61,17 @@ console.log('check-trade-inplace-reveal:');
   const inline = code.slice(code.indexOf('function handleInlineFindATrade('), code.indexOf('async function handleInlineLikeTrade('));
   const arm = inline.slice(inline.indexOf('if (resultsPushLive) {'));
   check('2a. the canvas Find a Trade hands its push to pushWithFirstPage instead of pushing at once',
-    /const pushDeck = \(firstPage\?: FirstPageHandoff\) =>\s*navigation\?\.push\?\.\('TradeDeck'/.test(arm)
+    /const pushDeck = \(firstPage\?: FirstPageHandoff, eager\?: boolean\) =>\s*navigation\?\.push\?\.\('TradeDeck'/.test(arm)
       && /\.\.\.\(firstPage \? \{ firstPage \} : \{\}\)/.test(arm)
       && /pushWithFirstPage\(fork, pushDeck\);\s*return;/.test(arm));
   const helper = code.slice(code.indexOf('function pushWithFirstPage('), code.indexOf('function handleInlineFindATrade('));
   check('2b. the exact paged request transfers once, before immediate navigation',
-    /startTradeSearchHandoff\(fork\.searchId, 'model', request,\s*\(\) => generateTrades\(request, \{ searchId: fork\.searchId \},\s*\{ deadlineAt: [^}]+, beforeDispatch \}\)\);\s*pushDeck\(\);/.test(helper));
+    /startTradeSearchHandoff\(fork\.searchId, 'model', request,\s*\(\) => generateTrades\(request, \{ searchId: fork\.searchId \},\s*\{ deadlineAt: [^}]+, beforeDispatch \}\)\);\s*pushDeck\(undefined, eager\);/.test(helper));
   check('2c. no timer or await holds navigation; destination consumes the exact request',
     !/setTimeout|FIRST_PAGE_PUSH_DEADLINE_MS|await/.test(helper)
       && /takeTradeSearchHandoff<PagedTradeJobSnapshot>\(vars\.searchId, 'model', request\)/.test(code));
   check('2d. fair anchored requests also start once and push immediately',
-    /startTradeSearchHandoff\(fork\.searchId, 'fair', request, \(\) => getFairPackages\(request,\s*\{ deadlineAt: [^}]+, beforeDispatch \}\)\);\s*pushDeck\(\);/.test(helper));
+    /startTradeSearchHandoff\(fork\.searchId, 'fair', request, \(\) => getFairPackages\(request,\s*\{ deadlineAt: [^}]+, beforeDispatch \}\)\);\s*pushDeck\(undefined, eager\);/.test(helper));
 }
 
 // ── 3. EXECUTED: which pages the pushed deck adopts ───────────────────────

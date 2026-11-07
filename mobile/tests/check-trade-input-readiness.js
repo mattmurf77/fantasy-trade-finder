@@ -10,6 +10,8 @@ function tree(f){const ast=ts.createSourceFile(f,read(f),ts.ScriptTarget.Latest,
 const screen=tree('screens/TradesScreen.tsx');
 const fn=name=>screen.nodes.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text===name).getText(screen.ast);
 function bind(code,c){return compile('module.exports=function(c){with(c){return ('+code+');}}')(c);}
+const arrival=screen.nodes.find(n=>ts.isArrowFunction(n)&&n.getText(screen.ast).startsWith('() => {\n    const rp = resultsPushParam;')).getText(screen.ast);
+const choke=screen.nodes.find(n=>ts.isArrowFunction(n)&&n.getText(screen.ast).startsWith('() => {\n    if (!finderHubOn || !finderMode || !fairnessReady) return;')).getText(screen.ast);
 const mutation=screen.nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(screen.ast)==='generateMutation').initializer.arguments[0];
 const props=Object.fromEntries(mutation.properties.map(n=>[n.name?.getText(screen.ast),n.initializer?.getText(screen.ast)]));
 const api=tree('api/client.ts');
@@ -40,7 +42,7 @@ function world(){
  const begin=store.beginTradePageInputTransition;
  store.beginTradePageInputTransition=(context=handoff.tradeSearchContextIdentity())=>begin(context);
  const c={...handoff,...store,ApiError,traceFor:()=>null,monotonicNow:()=>performance.now(),gateFailureReason:()=> 'gate',TRADE_INPUTS_CHANGED:'Your trade inputs changed while searching. Try again.',TRADE_CONTEXT_NOT_READY:'Your league is still getting ready. Try again.',DECK_FAIL_GENERIC:'Could not load',
-  mountedRef:{current:true},deckEpochRef:{current:1},modelAttemptRef:{current:1},lastModelRequestRef:{current:null},canvasSelectionRef:{current:null},
+  eagerHandoffRef:{current:false},mountedRef:{current:true},deckEpochRef:{current:1},modelAttemptRef:{current:1},lastModelRequestRef:{current:null},canvasSelectionRef:{current:null},
   generateTrades:(request,paging,options)=>{e.calls.push({request,paging,options});return Promise.resolve({job_id:'j',search_id:'tap',status:'complete',cards:[{trade_id:'card'}]});},
   setJob:x=>e.effects.push(['job',x]),setDeckFailure:x=>e.effects.push(['failure',x]),setToast:x=>e.effects.push(['toast',x]),
   autoResearchRef:{current:'idle'},autoResearchAfterAnswer:()=> 'idle',deckScopeRef:{current:null},deckKeyRef:{current:null},validatedAtRef:{current:0},
@@ -71,6 +73,62 @@ function world(){
   assert.match(result.error.message,/trade_search_context_changed/);
   assert.equal(fetches,0);assert.deepEqual(w.e.effects,[]);
  });
+ for (const change of ['token', 'league', 'format']) await check('pushed route cannot rebind to a replaced '+change,()=>{
+  const w=world();
+  const contextIdentity=w.handoff.tradeSearchContextIdentity();
+  const refs={consumedResultsPushSeqRef:{current:null},handoffSearchRef:{current:null},handoffContextRef:{current:null},eagerHandoffRef:{current:false}};
+  Object.assign(w.c,refs,{resultsPushParam:{seq:1,searchId:'tap',contextIdentity},finderHubOn:true,isResultsPushed:true,
+    TRADE_CONTEXT_CHANGED:'Context changed',dropPendingSearch:id=>w.e.effects.push(['abandoned',id]),
+    setSheetOpponent:()=>{throw Error('stale handoff was armed');}});
+  w.c.rejectStaleHandoff=bind(fn('rejectStaleHandoff'),w.c);
+  if(change==='token')w.e.revision++;
+  if(change==='league')w.e.session.league={league_id:'B'};
+  if(change==='format')w.e.session.activeFormat='1qb';
+  bind(arrival,w.c)();
+  assert.equal(refs.handoffSearchRef.current,null);
+  assert(w.e.effects.some(x=>x[0]==='abandoned'&&x[1]==='tap'));
+  assert(w.e.effects.some(x=>x[0]==='failure'&&x[1].message==='Context changed'));
+ });
+ await check('normal pushed league-offer mount keeps pins for the exact eager handoff',async()=>{
+  const w=world();
+  const reset=screen.nodes.find(n=>ts.isArrowFunction(n)&&n.getText(screen.ast).includes('const keepAdoptedPage = adoptedMountRef.current.league')).getText(screen.ast);
+  const pin={id:'pinned-give'};
+  const resetGuard=reset.slice(reset.indexOf('const pushedContext'),reset.indexOf('setTargetPickerOpen(false)'));
+  let pins=[pin];
+  const route={params:{resultsPush:{contextIdentity:w.handoff.tradeSearchContextIdentity()}}};
+  bind('()=>{'+resetGuard+'}',{route,tradeSearchContextIdentity:w.handoff.tradeSearchContextIdentity,clearTargets:()=>{pins=[];}})();
+  const c={...w.c,leagueId:'L',effectiveFairness:.5,targetingEnabled:true,scopedOpponent:'O',tradeIntent:null,
+    useFinderTargets:{getState:()=>({pinnedGive:pins,pinnedReceive:[],packageMode:true})},
+    modelSelectionParams:compile(read('utils/tradeSearchRequest.ts')).modelSelectionParams};
+  const v=w.vars();v.request=bind(fn('modelRequest'),c)({});v.eager=true;
+  assert.deepEqual(json(v.request.pinned_give_players),[pin.id]);
+  w.handoff.startTradeSearchHandoff(v.searchId,'model',{league_id:'L',fairness_threshold:.5,
+    pinned_give_players:[pin.id],opponent_user_id:'O'},async()=>({job_id:'transferred',status:'running',cards:[]}));
+  assert.equal((await w.execute(v)).response.job_id,'transferred');
+  assert.equal(w.e.calls.length,0);
+ });
+ await check('a route accepted before fairness hydration cannot dispatch after its format changes',()=>{
+  const w=world();
+  const old=w.handoff.tradeSearchContextIdentity();
+  const refs={adoptedMountRef:{current:{choke:false}},fairAnchorRef:{current:null},autoRunPendingRef:{current:true},
+    autoRunOriginRef:{current:'calculator'},handoffContextRef:{current:old},handoffSearchRef:{current:'tap'}};
+  Object.assign(w.c,refs,{finderHubOn:true,finderMode:'guided',fairnessReady:true,isResultsPushed:true,resetDeckForNewTargets:()=>{},
+    TRADE_CONTEXT_CHANGED:'Context changed',dropPendingSearch:id=>w.e.effects.push(['abandoned',id]),setSheetOpponent:()=>{}});
+  w.c.rejectStaleHandoff=bind(fn('rejectStaleHandoff'),w.c);
+  w.e.session.activeFormat='1qb';
+  bind(choke,w.c)();
+  assert.equal(refs.handoffSearchRef.current,null);
+  assert.equal(refs.autoRunPendingRef.current,false);
+  assert(w.e.effects.some(x=>x[0]==='abandoned'&&x[1]==='tap'));
+ });
+ await check('invalidated eager model handoff requires explicit retry with no duplicate POST',async()=>{
+  const w=world(),v=w.vars();v.eager=true;
+  w.handoff.startTradeSearchHandoff(v.searchId,'model',v.request,async()=>({job_id:'stale'}));
+  w.store.beginTradePageInputTransition()();
+  const result=await w.execute(v);
+  assert.match(result.error.message,/inputs changed/);
+  assert.equal(w.e.calls.length,0);
+ });
  await check('pending preference write settles before POST and its valid card is applied',async()=>{
   const w=world();w.e.write('/api/league/preferences','start');const v=w.vars(),p=w.execute(v);await tick();assert.equal(w.e.calls.length,0);
   w.e.write('/api/league/preferences','settled');const result=await p;
@@ -86,7 +144,7 @@ function world(){
  await check('failed logical save releases barrier with actionable error and no generation',async()=>{
   const w=world(),finish=w.store.beginTradePageInputTransition();const p=w.execute();await tick();finish(false);const result=await p;
   assert.match(result.error.message,/could not be saved/);assert.equal(w.e.calls.length,0);assert.equal(w.store.hasPendingTradePageInputs(),false);
-  assert(w.e.effects.some(x=>x[0]==='failure'&&/saved/.test(x[1].message)));
+  assert(w.e.effects.some(x=>x[0]==='failure'&&/saved/.test(x[1]?.message)));
  });
  await check('save failure after original tap but before destination admission is not forgotten',async()=>{
   const w=world(),v=w.vars(),finish=w.store.beginTradePageInputTransition();finish(false);const result=await w.execute(v);
@@ -131,7 +189,7 @@ function world(){
  for(const outcome of ['success','error'])await check('post-admission input invalidation surfaces retry on '+outcome,async()=>{
   const w=world(),v=w.vars(),d=deferred();w.c.generateTrades=()=>d.promise;const p=w.execute(v);await tick();const finish=w.store.beginTradePageInputTransition();finish();
   outcome==='success'?d.resolve({job_id:'old',status:'complete',cards:[{}]}):d.reject(Error('network'));
-  await p;assert(!w.e.effects.some(x=>x[0]==='job'&&x[1]));assert(w.e.effects.some(x=>x[0]==='failure'&&/inputs changed/.test(x[1].message)));
+  await p;assert(!w.e.effects.some(x=>x[0]==='job'&&x[1]));assert(w.e.effects.some(x=>x[0]==='failure'&&/inputs changed/.test(x[1]?.message)));
  });
  await check('captured model terms detach selected arrays before waiting',()=>{
   const w=world(),pins=[{id:'g'}],receive=[{id:'r'}];Object.assign(w.c,{leagueId:'L',effectiveFairness:.5,scopedOpponent:'O',tradeIntent:'tier_up',targetingEnabled:true,
@@ -163,6 +221,16 @@ function world(){
   setFairPending:x=>w.e.effects.push(['pending',x]),setFairDeck:x=>w.e.effects.push(['fair',x]),setDeck:x=>w.e.effects.push(['deck',x]),setDeckIdx:()=>{},setScopedEmpty:()=>{},setSummaryDismissed:()=>{}});
   return {...w,run:bind(fn('runFairPackages'),c)};
  }
+ await check('invalidated eager fair handoff requires explicit retry with no duplicate POST',async()=>{
+  const w=fairWorld();w.c.eagerHandoffRef.current=true;
+  const anchor={giveIds:['g'],receiveIds:['r']};
+  const request=w.c.fairPackagesRequest('L',anchor,.5,'O');
+  w.handoff.startTradeSearchHandoff('tap','fair',request,async()=>({ideas:[]}));
+  w.store.beginTradePageInputTransition()();
+  await w.run(anchor,'O');
+  assert.equal(w.e.calls.length,0);
+  assert(w.e.effects.some(x=>x[0]==='failure'&&/inputs changed/.test(x[1]?.message)));
+ });
  await check('fair pending-write handoff preserves exact terms, original search and one request',async()=>{
   const w=fairWorld(),finish=w.store.beginTradePageInputTransition(),anchor={giveIds:['g'],receiveIds:['r']};const p=w.run(anchor,'O');anchor.giveIds.push('late');await tick();assert.equal(w.e.calls.length,0);finish();await p;
   assert.equal(w.e.calls.length,1);assert.deepEqual(json(w.e.calls[0].request.give_player_ids),['g']);assert.equal(w.c.deckSearchRef.current.id,'tap');assert(w.e.effects.some(x=>x[0]==='deck'&&x[1][0]?.trade_id==='fair'));assert.equal(w.c.fairPendingRef.current,false);

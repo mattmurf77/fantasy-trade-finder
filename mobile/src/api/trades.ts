@@ -387,7 +387,7 @@ function normalizeJobSnapshot(raw: any): PagedTradeJobSnapshot {
 export async function generateTrades(
   body: GenerateBody,
   paging?: { searchId?: string },
-  request?: { background?: boolean; headers?: Record<string, string>; deadlineAt?: number; beforeDispatch?: () => void },
+  request?: { background?: boolean; headers?: Record<string, string>; deadlineAt?: number; beforeDispatch?: (phase?: 'gate') => void },
 ): Promise<PagedTradeJobSnapshot> {
   const res = await api.post<any>(
     '/api/trades/generate',
@@ -635,7 +635,7 @@ export async function getFairPackages(body: {
   receive_player_ids?: string[];
   opponent_user_id?: string;
   fairness_threshold?: number;
-}, request?: { deadlineAt?: number; beforeDispatch?: () => void }): Promise<FairPackagesResult> {
+}, request?: { deadlineAt?: number; beforeDispatch?: (phase?: 'gate') => void }): Promise<FairPackagesResult> {
   const res = await api.post<any>('/api/trades/fair-packages', body, request);
   const anchor = res?.anchor ?? {};
   return {

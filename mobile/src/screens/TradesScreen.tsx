@@ -560,7 +560,7 @@ type ModelAttempt = {
 };
 type ModelGenerateVars = {
   auto?: boolean; force?: boolean; repeat?: boolean; searchId?: string; research?: boolean;
-  request: GenerateBody; deadlineAt: number; tapAt: number; context: ModelAttempt;
+  request: GenerateBody; deadlineAt: number; tapAt: number; context: ModelAttempt; eager?: boolean;
 };
 function tradeRequestDeadline(searchId: string | null | undefined, path: string): number {
   const trace = traceFor(searchId);
@@ -569,6 +569,7 @@ function tradeRequestDeadline(searchId: string | null | undefined, path: string)
 }
 const TRADE_INPUTS_CHANGED = 'Your trade inputs changed while searching. Try again.';
 const TRADE_CONTEXT_NOT_READY = 'Your league is still getting ready. Try again.';
+const TRADE_CONTEXT_CHANGED = 'Your league or scoring format changed. Start a new search.';
 
 type FirstPageHandoff = {
   request: GenerateBody;
@@ -767,7 +768,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // adoptedFirstPage). Snapshotted once; the initializers below and the two
   // mount-time resets (the league effect, the #330 choke point) read it.
   const [adopted] = useState(() => adoptedFirstPage(route));
-  const handoffSearchRef = useRef<string | null>(route?.params?.resultsPush?.searchId ?? null);
+  const handoffSearchRef = useRef<string | null>(null);
+  const handoffContextRef = useRef<string | null>(null);
+  const eagerHandoffRef = useRef(false);
   const adoptedMountRef = useRef({ league: !!adopted, choke: !!adopted });
   // C — a deck adopted from the DEVICE page renders at once and revalidates
   // in the background: 'running' until that response lands ('done') or
@@ -1123,6 +1126,7 @@ export default function TradesScreen({ navigation, route }: any) {
   } | null>(null);
   const lastModelRequestRef = useRef<Parameters<typeof generateTrades>[0] | null>(null);
   const resultsPushPendingRef = useRef(false);
+  const activeEagerSearchRef = useRef<string | null>(null);
   // D-158 — the anchored deck's FILTER RECEIPT. The operator's framing: an
   // anchored Find a Trade "becomes the same treatment as the existing filters
   // from the outlook tab", so the anchor is shown as a receipt above the
@@ -1197,6 +1201,9 @@ export default function TradesScreen({ navigation, route }: any) {
   const resultsPushParam = route?.params?.resultsPush as
     | {
         seq: number;
+        searchId?: string;
+        contextIdentity: string | null;
+        eager?: boolean;
         opponent: { userId: string; name: string } | null;
         origin: 'calculator' | null;
         fairAnchor: { giveIds: string[]; receiveIds: string[] } | null;
@@ -2330,10 +2337,10 @@ export default function TradesScreen({ navigation, route }: any) {
     // server's complete-fresh job cache — used by the post-Quick-Set
     // regeneration, whose board change doesn't alter the cache key.
     mutationFn: (vars: ModelGenerateVars) => {
-      const beforeDispatch = () => {
-        if (!modelAttemptCurrent(vars.context) || vars.context.identity !== tradeSearchIdentity()) {
-          throw new TradeSearchContextChangedError();
-        }
+      const beforeDispatch = (phase?: 'gate') => {
+        if (!modelAttemptCurrent(vars.context)) throw new TradeSearchContextChangedError();
+        if (phase === 'gate') return;
+        if (vars.context.identity !== tradeSearchIdentity()) throw new TradeSearchContextChangedError();
         assertTradePageInputsReady(vars.tapAt);
       };
       beforeDispatch();
@@ -2349,8 +2356,9 @@ export default function TradesScreen({ navigation, route }: any) {
       if (vars.auto || vars.research) {
         return generateTrades(request, { searchId: vars.searchId }, { ...options, background: true });
       }
-      return takeTradeSearchHandoff<PagedTradeJobSnapshot>(vars.searchId, 'model', request)
-        ?? generateTrades(request, { searchId: vars.searchId }, options);
+      const handoff = takeTradeSearchHandoff<PagedTradeJobSnapshot>(vars.searchId, 'model', request);
+      if (vars.eager && !handoff) throw new TradeInputReadinessError(TRADE_INPUTS_CHANGED);
+      return handoff ?? generateTrades(request, { searchId: vars.searchId }, options);
     },
     // #330 R-10 — stamp the dispatch-time epoch; onSuccess/onError compare
     // it against the current one and drop stale results entirely.
@@ -2546,7 +2554,9 @@ export default function TradesScreen({ navigation, route }: any) {
     // is a new search: its re-search budget starts again when its answer
     // lands (onSuccess), never here.
     const claimed = research ? research.searchId : handoffSearchRef.current ?? claimPendingSearch();
+    const eager = !research && eagerHandoffRef.current;
     if (!research) {
+      eagerHandoffRef.current = false;
       claimSearch(handoffSearchRef.current);
       handoffSearchRef.current = null;
     }
@@ -2568,7 +2578,7 @@ export default function TradesScreen({ navigation, route }: any) {
     canvasSelectionRef.current = null;
     generateMutation.mutate(
       {
-        ...vars, searchId, research: !!research, context,
+        ...vars, searchId, research: !!research, context, eager,
         request,
         deadlineAt: tradeRequestDeadline(searchId, '/api/trades/generate'),
         tapAt: traceFor(searchId)?.tapAt ?? monotonicNow(),
@@ -2834,7 +2844,10 @@ export default function TradesScreen({ navigation, route }: any) {
     // league's asset. rev-2 cleared its shop state here; rev-3 keeps the
     // chooser's clear.
     setShopChooserCard(null);
-    clearTargets(); // store also self-clears via its league subscription
+    // An accepted results push uses the landing's pins. Real league/account
+    // changes still clear them, including when the screen is unmounted.
+    const pushedContext = route?.params?.resultsPush?.contextIdentity;
+    if (!pushedContext || pushedContext !== tradeSearchContextIdentity()) clearTargets();
     setTargetPickerOpen(false);
     // Onboarding item 4 — reset the first-run auto-start lifecycle so a
     // league switch mid-first-run can auto-start against the new league.
@@ -3670,7 +3683,10 @@ export default function TradesScreen({ navigation, route }: any) {
   // the pin store, which is why nothing here writes pins any more.
   const navFocused = useIsFocused();
   useEffect(() => {
-    if (navFocused) resultsPushPendingRef.current = false;
+    if (navFocused) {
+      resultsPushPendingRef.current = false;
+      activeEagerSearchRef.current = null;
+    }
   }, [navFocused]);
 
   // ── C — the device page's background refresh (approach B) ──────────────
@@ -3707,9 +3723,16 @@ export default function TradesScreen({ navigation, route }: any) {
   const autoRunPendingRef = useRef(false);
   const autoRunOriginRef = useRef<'calculator' | null>(null);
   const fairAnchorRef = useRef<{ giveIds: string[]; receiveIds: string[] } | null>(null);
+  function rejectStaleHandoff(identity: string | null | undefined, searchId?: string | null): boolean {
+    if (identity && identity === tradeSearchContextIdentity()) return false;
+    if (searchId) dropPendingSearch(searchId);
+    if (isResultsPushed) setDeckFailure({ kind: 'generate', message: TRADE_CONTEXT_CHANGED });
+    return true;
+  }
   useEffect(() => {
     if (!navFocused || !finderHandoff) return;
     useFinderTargets.getState().setHandoff(null); // one-shot: consume first
+    if (rejectStaleHandoff(finderHandoff.contextIdentity, finderHandoff.searchId)) return;
     // D-171 (2026-08-31 ruling 1) — under the push posture the LANDING
     // renders no results, so an armed handoff (a league-rankings Offer, or
     // the flag-off calculator page's own Find a Trade) FORWARDS into the
@@ -3726,11 +3749,13 @@ export default function TradesScreen({ navigation, route }: any) {
           ? finderHandoff.fairAnchor
           : null;
       setSheetOpponent(finderHandoff.opponent);
-      const pushDeck = (firstPage?: FirstPageHandoff) => navigation?.push?.('TradeDeck', {
+      const pushDeck = (firstPage?: FirstPageHandoff, eager?: boolean) => navigation?.push?.('TradeDeck', {
         mode: 'guided',
         resultsPush: {
           seq: finderHandoff.seq,
           searchId: finderHandoff.searchId,
+          contextIdentity: finderHandoff.contextIdentity,
+          eager,
           opponent: finderHandoff.opponent,
           origin: fwdOrigin,
           fairAnchor: fwdFair,
@@ -3764,6 +3789,9 @@ export default function TradesScreen({ navigation, route }: any) {
       ? finderHandoff.fairAnchor
       : null;
     if (finderHubOn && finderMode) {
+      handoffSearchRef.current = finderHandoff.searchId ?? null;
+      handoffContextRef.current = finderHandoff.contextIdentity;
+      eagerHandoffRef.current = false;
       // The ref is read by the ONE choke point below, which is also the one
       // place a model dispatch happens — so arming the fair path and arming
       // the model path are mutually exclusive by construction rather than by
@@ -3804,6 +3832,18 @@ export default function TradesScreen({ navigation, route }: any) {
     const adoptedRun = adoptedMountRef.current.choke;
     adoptedMountRef.current.choke = false;
     if (!adoptedRun) resetDeckForNewTargets();
+    if ((fairAnchorRef.current || autoRunPendingRef.current)
+      && rejectStaleHandoff(handoffContextRef.current, handoffSearchRef.current)) {
+      fairAnchorRef.current = null;
+      autoRunPendingRef.current = false;
+      autoRunOriginRef.current = null;
+      handoffSearchRef.current = null;
+      handoffContextRef.current = null;
+      eagerHandoffRef.current = false;
+      canvasSelectionRef.current = null;
+      setSheetOpponent(null);
+      return;
+    }
     // D-171 ruling 1 (2026-08-31) — the LANDING dispatches nothing under the
     // push posture: Find a Trade and forwarded handoffs push `TradeDeck`
     // (whose own instance runs this same effect with canvasHost null and
@@ -3902,6 +3942,10 @@ export default function TradesScreen({ navigation, route }: any) {
       return;
     }
     consumedResultsPushSeqRef.current = rp.seq;
+    if (rejectStaleHandoff(rp.contextIdentity, rp.searchId)) return;
+    handoffSearchRef.current = adopted ? null : rp.searchId ?? null;
+    handoffContextRef.current = rp.contextIdentity;
+    eagerHandoffRef.current = rp.eager === true;
     setSheetOpponent(rp.opponent ?? null);
     canvasSelectionRef.current = rp.canvasSelection ?? null;
     if (rp.fairnessOn !== undefined) setFairnessOn(rp.fairnessOn);
@@ -3942,7 +3986,7 @@ export default function TradesScreen({ navigation, route }: any) {
       searchId: string;
       canvas?: boolean;
     },
-    pushDeck: (firstPage?: FirstPageHandoff) => void,
+    pushDeck: (firstPage?: FirstPageHandoff, eager?: boolean) => void,
   ) {
     if (switching || !leagueId || !tradeSearchIdentity()) {
       resultsPushPendingRef.current = false;
@@ -3953,9 +3997,16 @@ export default function TradesScreen({ navigation, route }: any) {
       pushDeck();
       return;
     }
+    const contextIdentity = tradeSearchContextIdentity();
     const identity = tradeSearchIdentity();
     const tapAt = traceFor(fork.searchId)?.tapAt ?? monotonicNow();
-    const beforeDispatch = () => {
+    activeEagerSearchRef.current = fork.searchId;
+    const beforeDispatch = (phase?: 'gate') => {
+      if (!mountedRef.current || activeEagerSearchRef.current !== fork.searchId
+        || !contextIdentity || contextIdentity !== tradeSearchContextIdentity()) {
+        throw new TradeSearchContextChangedError();
+      }
+      if (phase === 'gate') return;
       if (!identity || identity !== tradeSearchIdentity()) throw new TradeSearchContextChangedError();
       assertTradePageInputsReady(tapAt);
     };
@@ -3968,9 +4019,9 @@ export default function TradesScreen({ navigation, route }: any) {
       const request = fairPackagesRequest(leagueId, {
         giveIds: fork.giveIds, receiveIds: fork.receiveIds,
       }, effectiveFairness, opponentId);
-      startTradeSearchHandoff(fork.searchId, 'fair', request, () => getFairPackages(request,
+      const eager = startTradeSearchHandoff(fork.searchId, 'fair', request, () => getFairPackages(request,
         { deadlineAt: tradeRequestDeadline(fork.searchId, '/api/trades/fair-packages'), beforeDispatch }));
-      pushDeck();
+      pushDeck(undefined, eager);
       return;
     }
     const request: GenerateBody = {
@@ -3998,10 +4049,10 @@ export default function TradesScreen({ navigation, route }: any) {
     // Start the exact user-tapped request before navigation, then transfer
     // it once. The destination adopts its pending/finished response; no
     // 600ms builder pause and no second generation after a push deadline.
-    startTradeSearchHandoff(fork.searchId, 'model', request,
+    const eager = startTradeSearchHandoff(fork.searchId, 'model', request,
       () => generateTrades(request, { searchId: fork.searchId },
         { deadlineAt: tradeRequestDeadline(fork.searchId, '/api/trades/generate'), beforeDispatch }));
-    pushDeck();
+    pushDeck(undefined, eager);
   }
 
   // ── D-158 — the inline canvas's own Find a Trade (no navigation) ────────
@@ -4020,7 +4071,8 @@ export default function TradesScreen({ navigation, route }: any) {
     receive: CalcPlayer[];
     opponent: { userId: string; name: string } | null;
   }) {
-    if (switching || !leagueId || !tradeSearchIdentity()) return;
+    const contextIdentity = tradeSearchContextIdentity();
+    if (switching || !leagueId || !contextIdentity) return;
     if (resultsPushLive && resultsPushPendingRef.current) return;
     const fork = forkCanvasSearch(opts, 'Trades');
     // D-171 rulings 1+2 (2026-08-31) — under the push posture the landing
@@ -4034,12 +4086,14 @@ export default function TradesScreen({ navigation, route }: any) {
     if (resultsPushLive) {
       resultsPushPendingRef.current = true;
       const summary = anchorSummary(opts.give);
-      const pushDeck = (firstPage?: FirstPageHandoff) =>
+      const pushDeck = (firstPage?: FirstPageHandoff, eager?: boolean) =>
         navigation?.push?.('TradeDeck', {
           mode: 'guided',
           resultsPush: {
             seq: Date.now(),
             searchId: fork.searchId,
+            contextIdentity,
+            eager,
             opponent: fork.opponent,
             origin: 'calculator',
             fairAnchor: fork.anchor,
@@ -4068,6 +4122,9 @@ export default function TradesScreen({ navigation, route }: any) {
         ? { label: summary, giveIds: fork.anchor.giveIds, receiveIds: fork.anchor.receiveIds }
         : null,
     );
+    handoffSearchRef.current = fork.searchId;
+    handoffContextRef.current = contextIdentity;
+    eagerHandoffRef.current = false;
     fairAnchorRef.current = fork.anchor;
     autoRunPendingRef.current = !fork.anchor;
     autoRunOriginRef.current = 'calculator';
@@ -4409,6 +4466,8 @@ export default function TradesScreen({ navigation, route }: any) {
     // dormant #402 browse retry) begins its own, with this source.
     autoResearchRef.current = 'idle';   // a new search: its own re-search budget
     let claimedFair = handoffSearchRef.current ?? claimPendingSearch();
+    const eager = eagerHandoffRef.current;
+    eagerHandoffRef.current = false;
     claimSearch(handoffSearchRef.current);
     handoffSearchRef.current = null;
     if (!claimedFair) {
@@ -4428,14 +4487,17 @@ export default function TradesScreen({ navigation, route }: any) {
       } while (hasPendingTradePageInputs());
       assertTradePageInputsReady(tapAt);
       identity = tradeSearchIdentity();
-      const beforeDispatch = () => {
-        if (!mountedRef.current || deckEpochRef.current !== epoch || identity !== tradeSearchIdentity()) {
+      const beforeDispatch = (phase?: 'gate') => {
+        if (!mountedRef.current || deckEpochRef.current !== epoch || contextIdentity !== tradeSearchContextIdentity()) {
           throw new TradeSearchContextChangedError();
         }
+        if (phase === 'gate') return;
+        if (identity !== tradeSearchIdentity()) throw new TradeSearchContextChangedError();
         assertTradePageInputsReady(tapAt);
       };
-      const res = await (takeTradeSearchHandoff<Awaited<ReturnType<typeof getFairPackages>>>(claimedFair, 'fair', request)
-        ?? getFairPackages(request, { deadlineAt, beforeDispatch }));
+      const handoff = takeTradeSearchHandoff<Awaited<ReturnType<typeof getFairPackages>>>(claimedFair, 'fair', request);
+      if (eager && !handoff) throw new TradeInputReadinessError(TRADE_INPUTS_CHANGED);
+      const res = await (handoff ?? getFairPackages(request, { deadlineAt, beforeDispatch }));
       // #330 R-10 — the same generation-epoch guard the model path uses: a
       // league switch or a newer search while this was in flight must not be
       // overwritten by a stale answer.

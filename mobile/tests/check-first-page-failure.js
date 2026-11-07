@@ -116,7 +116,7 @@ function world({ held = false, failures = limit, emptyResponses = 0, afterReques
       searchTypeOf: value => value, isDeepLinkDeck: false, deckMode: 'guided', tradeIntent: 'tier_up', scopedOpponent: 'O',
       prefsChangedSinceGenerateRef: {}, setShowPrefsChangedStrip: () => {}, setPinIdeaResumed: () => {},
       setFairDeck: () => {}, pendingScrollToDeckRef: {}, canvasResultsLive: false,
-      handoffSearchRef: { current: null }, claimPendingSearch: () => { const p = pending; pending = null; return p; },
+      handoffSearchRef: { current: null }, eagerHandoffRef: { current: false }, claimPendingSearch: () => { const p = pending; pending = null; return p; },
       claimSearch: () => {}, deckSearchRef: {}, generateMutation: { mutate: args => mutations.push(args) },
       deckEpochRef: { current: 1 }, deviceKey: 'synthetic', modelAttemptRef: { current: 0 },
       tradeSearchContextIdentity: () => 'ready', tradeRequestDeadline: () => 30000,

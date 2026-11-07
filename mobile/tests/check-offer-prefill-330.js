@@ -52,7 +52,7 @@ const taxonomy = read('../backend/analytics_taxonomy.py');
 // ═══════════════════════════════════════════════════════════════════════
 
 assert(
-  /setHandoff: \(h\) =>\s*set\(\{ handoff: h \? \{ \.\.\.h, seq: \+\+_handoffSeq \} : null \}\)/.test(storeCode),
+  /setHandoff: \(h\) =>\s*set\(\{ handoff: h \? \{ \.\.\.h, seq: \+\+_handoffSeq, contextIdentity: tradeSearchContextIdentity\(\) \} : null \}\)/.test(storeCode),
   '#330 setHandoff stamps a store-internal monotonic seq',
   'sabotage detected: letting callers supply seq (or dropping it) — a same-team repeat Offer then changes no dep and never re-fires the choke point',
 );
@@ -62,7 +62,7 @@ assert(
   'sabotage detected: a handoff surviving clear() rides the league-switch GC into the WRONG league',
 );
 assert(
-  /setHandoff: \(h: Omit<FinderHandoff, 'seq'> \| null\) => void;/.test(storeCode),
+  /setHandoff: \(h: Omit<FinderHandoff, 'seq' \| 'contextIdentity'> \| null\) => void;/.test(storeCode),
   '#330 the setHandoff type forbids caller-supplied seq (Omit)',
 );
 
@@ -140,7 +140,7 @@ assert(
     return (
       body.includes('setAutoRunSeq(finderHandoff.seq);') &&
       body.every((l) =>
-        /^(fairAnchorRef\.current = fair;|autoRunPendingRef\.current = !fair;|autoRunOriginRef\.current = origin;|setAutoRunSeq\(finderHandoff\.seq\);)$/.test(l),
+        /^(handoffSearchRef\.current = finderHandoff\.searchId \?\? null;|handoffContextRef\.current = finderHandoff\.contextIdentity;|eagerHandoffRef\.current = false;|fairAnchorRef\.current = fair;|autoRunPendingRef\.current = !fair;|autoRunOriginRef\.current = origin;|setAutoRunSeq\(finderHandoff\.seq\);)$/.test(l),
       )
     );
   })(),

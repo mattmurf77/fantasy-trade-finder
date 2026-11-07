@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { useSession } from './useSession';
+import { tradeSearchContextIdentity } from './tradeSearchHandoff';
 import type { Player } from '../shared/types';
 
 // FB #156/#174 — finder target pins, lifted out of TradesScreen so the
@@ -54,6 +55,7 @@ import type { Player } from '../shared/types';
 // is unchanged.
 export interface FinderHandoff {
   seq: number;
+  contextIdentity: string | null;
   searchId?: string;
   opponent: { userId: string; name: string } | null;
   autoRun: true;
@@ -81,7 +83,7 @@ interface FinderTargetsState {
   setSide: (side: 'give' | 'receive', players: Player[]) => void;
   setPackageMode: (on: boolean) => void;
   /** Stamps `seq` internally — callers never supply it (#330). */
-  setHandoff: (h: Omit<FinderHandoff, 'seq'> | null) => void;
+  setHandoff: (h: Omit<FinderHandoff, 'seq' | 'contextIdentity'> | null) => void;
   clear: () => void;
 }
 
@@ -110,7 +112,7 @@ export const useFinderTargets = create<FinderTargetsState>((set) => ({
     set(side === 'give' ? { pinnedGive: players } : { pinnedReceive: players }),
   setPackageMode: (on) => set({ packageMode: on }),
   setHandoff: (h) =>
-    set({ handoff: h ? { ...h, seq: ++_handoffSeq } : null }),
+    set({ handoff: h ? { ...h, seq: ++_handoffSeq, contextIdentity: tradeSearchContextIdentity() } : null }),
   clear: () =>
     set({ pinnedGive: [], pinnedReceive: [], packageMode: true, handoff: null }),
 }));
