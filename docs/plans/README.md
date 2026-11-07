@@ -1,5 +1,7 @@
 # `docs/plans/` — initiative index
 
+- [Calibration cooperative yielding](calibration-cooperative-yield/scope.md): advisory bounded CPU pauses during full paired generation and final evaluation; candidate under review, no activation or quality reduction.
+
 Working docs for multi-step initiatives: plans, PRDs, HLDs/LLDs, feature scopes, research
 memos, reconciliation logs. **This is not a record of what shipped** — a plan folder can be
 years-dead or fully live and the files look identical. The status columns below are the only
