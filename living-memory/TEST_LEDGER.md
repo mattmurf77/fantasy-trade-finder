@@ -1,3 +1,15 @@
+## 2026-11-07 — Cooperative cancellation of obsolete owner work (unmerged)
+
+- Fresh-main `974452ff` candidate stops revoked owner generation/fresh final occurrences without partial/empty success or replacement-job cancellation. Prepared work yields to local foreground requests, aborts staging and refunds only the matching interactive-deferred attempt. Durable lease/account checks are throttled; check outages propagate explicitly. Full model budgets, order, fresh final math and quality/publication gates remain.
+- Final affected **1,302 passed,2 skipped in134.82s** across46 files. Independent **23 passed3.22s** (seven reviewer controls plus sixteen builder controls), ten runtime hashes stable. Actual worker control/final candidate preserves all **7,213 ordered native/final/public/durable proofs** (6,430 organic,701 opponent,82 receive); every durable valuation reread. No model-policy or private input data change.
+- Synthetic first publication19.164→19.454s organic,1.952→1.865s opponent,.385→.431s receive; mixed single-pair results establish no speedup or200ms claim. Cooperative gaps, process-local foreground detection, unbounded foreground admission and possible prepared starvation remain explicit. Keep unmerged during Calibration source freeze; exact-head fullCI required. [Scope and next slice](../docs/plans/owner-work-cancellation/README.md).
+
+## 2026-11-07 — Calibration public round activated on PR616
+
+- Parent operator readback: PR616 CI42354107908 passed all four checks (**13,146 passed,42 skipped** backend); merged `974452ff`, exact tree matching `c9b930e`. Public activation live **2026-11-07T08:51:55Z** with round=true, prepare=false, blind=true.
+- **11 current ready comparisons;5 truthful rules/access refusals.** After restart, admin currentness checked all11 without exposing cards. TestFlight176 VALID/internal assigned; test notes verified **08:52:41Z**. No identities or private card data retained here.
+- Normal model selectors and KTC unchanged. The 200ms requirement remains OPEN. Keep PR615/617 and the cancellation candidate unmerged until parent coordinates the next backend source-hash boundary; existing prepared comparisons must not be invalidated by an incidental rollout.
+
 ## 2026-11-07 — Linked mapped availability uses full metadata
 
 - Bounded Calibration adapter fix: mapped linked offensive IDs absent from the ordinary skill-only cache now use the same full held observation/currentness contract. Native fixed IDs are excluded; provider positions/eligibility and explicit coupled-viewer refusal remain authoritative. No pricing/generation/policy/publicflag change.

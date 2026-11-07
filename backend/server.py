@@ -271,6 +271,7 @@ from . import pick_slots                          # D-090 — real-slot pick lab
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
 from . import error_alerts as _error_alerts     # GNG-1 — Sentry error alerts, dark until SENTRY_DSN
 from . import sleeper_http as _sleeper_http   # S0 — per-process Sleeper 429 circuit
+from .trade_work_control import TradeWorkCancelled
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
 from . import referral_ledger as _referral_ledger   # referral loop L7 (growth.referral_ledger)
 from types import SimpleNamespace   # proposal-time policy shim (see
@@ -3687,10 +3688,10 @@ def _job_live(j: dict | None) -> bool:
     """May this job still publish snapshots or write impressions?
 
     A job is live while it is running AND has not been superseded by a forced
-    regeneration. There is no cancellation mechanism in the registry — a
-    superseded worker runs to completion — so this is what makes it finish
-    QUIETLY: no further snapshot publishes, and (checked separately at the
-    call site) no deck-impression rows for a deck no user will ever be served.
+    regeneration. Owner search/final evaluation cooperatively stop, while
+    source calls and other phases may finish before the next checkpoint.
+    These independent fences still prevent snapshot publication and, at each
+    durable call site, impressions for a deck no user will ever be served.
     Without it, forcing a fresh deck would silently corrupt the impression
     corpus with rows nobody saw.
     """
@@ -12668,6 +12669,7 @@ def _run_trade_job(
     presentation_exempt: bool = False,
     significance_capture=None,
     prepare_sink=None,
+    work_check=None,
 ):
     """Daemon-thread entry point with context captured before thread start.
     Direct internal callers may omit context and capture at entry. All exceptions caught — a thread death
@@ -12682,7 +12684,16 @@ def _run_trade_job(
     sides must land on the same value or every seeded league's cache check
     would miss). None = not supplied (pregen from session_init, the
     replenishment cron) ⇒ the worker loads them itself, exactly as before."""
+    def check_current():
+        with _trade_jobs_lock:
+            live = _job_live(_trade_jobs.get(job_id))
+        if not live:
+            raise TradeWorkCancelled("inputs_changed")
+        if work_check is not None:
+            work_check()
+
     try:
+        check_current()
         preparation = prepare_sink is not None
         prepared_mutations = [] if preparation else None
         if significance_capture is None:
@@ -13218,7 +13229,10 @@ def _run_trade_job(
         def _gen_owner(**_overrides):
             if owner_context is None:
                 raise ValueError("owner_context_unavailable")
-            cards, report = _bakeoff.owner_generator(owner_context["config"])(**owner_context)
+            check_current()
+            cards, report = _bakeoff.owner_generator(owner_context["config"])(
+                **owner_context, _check_current=check_current)
+            check_current()
             diagnostics = report.diagnostics()
             for card in cards:
                 card.owner_request_evidence = owner_request_evidence
@@ -13258,6 +13272,8 @@ def _run_trade_job(
             owner_error = None
             try:
                 proposed, owner_report = _gen_owner()
+            except TradeWorkCancelled:
+                raise
             except Exception:
                 log.exception("owner targeted generation unavailable")
                 proposed, owner_report, owner_error = [], None, "generation_unavailable"
@@ -13643,7 +13659,7 @@ def _run_trade_job(
         pre_owner_policy = list(final_cards)
         owner_cards = [c for c in final_cards if getattr(c, "owner_evaluation", None) is not None]
         if owner_cards:
-            owner_cards = _owner_cards_valid(owner_cards, owner_context) if owner_context else []
+            owner_cards = _owner_cards_valid(owner_cards, owner_context, check_current=check_current) if owner_context else []
             final_cards = [c for c in final_cards if getattr(c, "owner_evaluation", None) is None]
         roster_results = None
         if roster_live or roster_shadow:
@@ -14400,6 +14416,14 @@ def _run_trade_job(
         except Exception as ev_err:
             log.warning("record_event(trades_generated) failed: %s", ev_err)
 
+    except TradeWorkCancelled as exc:
+        with _trade_jobs_lock:
+            job = _trade_jobs.get(job_id)
+            if job is not None:
+                job["final_checks_pending"] = False
+                if prepare_sink is not None:
+                    job["prepared_failure"] = exc
+        _finish_trade_job(job_id, error=exc.reason)
     except Exception as e:
         if prepare_sink is not None:
             with _trade_jobs_lock:
@@ -21736,7 +21760,7 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
     return context
 
 
-def _owner_cards_valid(cards, context):
+def _owner_cards_valid(cards, context, *, check_current=None):
     """Fail closed on mutation; recheck owner eligibility against frozen input.
 
     Do not run the superseded legacy personal-gain or shape classifiers on an
@@ -21748,7 +21772,8 @@ def _owner_cards_valid(cards, context):
                and card.owner_evaluation.model_identity == (
                    _bakeoff.owner_arm(context.get("config", {})),
                    _bakeoff.owner_version(context.get("config", {})))]
-    finals = _bakeoff.owner_evaluator(context.get("config", {}))(matched, **context) if matched else []
+    control = {"_check_current": check_current} if check_current is not None else {}
+    finals = _bakeoff.owner_evaluator(context.get("config", {}))(matched, **context, **control) if matched else []
     if len(finals) != len(matched):
         raise ValueError("owner final evaluation occurrence count mismatch")
     accepted = []

@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-07 — Calibration public round activated on PR616
+
+- Parent operator readback: PR616 CI42354107908 passed all four checks (**13,146 passed,42 skipped** backend); merged `974452ff`, exact tree matching `c9b930e`. Public activation live **2026-11-07T08:51:55Z** with round=true, prepare=false, blind=true.
+- **11 current ready comparisons;5 truthful rules/access refusals.** After restart, admin currentness checked all11 without exposing cards. TestFlight176 VALID/internal assigned; test notes verified **08:52:41Z**. No identities or private card data retained here.
+- Normal model selectors and KTC unchanged. The 200ms requirement remains OPEN. Keep PR615/617 and the cancellation candidate unmerged until parent coordinates the next backend source-hash boundary; existing prepared comparisons must not be invalidated by an incidental rollout.
+
 ## 2026-11-07 — Implement exact MFL Calibration follow-up
 
 - Native min/max starter ranges use all legal offensive formations and explicit offense/IDP totals; both owner utilities and final safety/depth gates share exact constraints. Fine-grained defenders remain untradeable capacity-only holdings. No normal model policy or UI change.

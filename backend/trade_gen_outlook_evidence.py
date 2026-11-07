@@ -316,7 +316,7 @@ class _GenerationSearch(_Search):
 def evaluate_bilateral_trades(cards, **kwargs):
     search = _Search(**kwargs)
     with search.ts._cfg_override(search.config), search.ts.stud_tax_override("market"):
-        return [search.evaluate(c, partial=owner._authenticated_partial(c, search)) for c in cards]
+        return search.evaluate_occurrences(cards)
 
 
 def evaluate_bilateral_trade(card, **kwargs):
