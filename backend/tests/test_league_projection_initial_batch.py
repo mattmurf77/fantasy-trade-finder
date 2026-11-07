@@ -76,4 +76,4 @@ def test_initial_endpoint_requires_cron_auth_and_rejects_unknown_options(monkeyp
     headers = {'X-Cron-Secret': 'synthetic-secret'}
     assert client.post(path, json={'force': True}, headers=headers).status_code == 400
     assert client.post(path, json={'initial': True, 'limit': 1}, headers=headers).status_code == 200
-    assert called == [{'initial': True, 'limit': 1}]
+    assert called == [{'initial': True, 'limit': 1, 'foreground_busy': server._projection_foreground_busy}]

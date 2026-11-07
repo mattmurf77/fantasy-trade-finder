@@ -1039,3 +1039,6 @@ Weekly projection workers may discard and fully repeat one capture after `inputs
 
 
 Projection simulation cancellation checkpoints use a three-column scoped control read (status/token/expiry) instead of rereading potentially multi-megabyte snapshots. Baseline model validation still reads the owned baseline; query identity predicates and checkpoint frequency are unchanged.
+
+
+Forecast simulation scheduling: both the realtime cron dispatcher and the projection-only cron inject the process-local live-trade predicate into the single projection worker. At each existing 500-draw cancellation checkpoint, active non-prepared trade work can defer the forecast by at most ten 100 ms sleeps. No trade-registry lock is held during those sleeps. Cancellation, worker token, feature/policy approval and the original deadline are checked before and after a pause; idle checkpoints keep the original single control read. The same simulation resumes with unchanged random state, draw count, result schema and weekly cadence. Continuous pressure permits an original chunk between bounded pauses and can still exhaust the original deadline; it never grants a lease extension or partial success. Other processes and Calibration work are not coordinated by this predicate. See `docs/plans/projection-foreground-yield/scope.md`.

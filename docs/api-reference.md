@@ -1758,3 +1758,6 @@ Coverage also records `native_playoff_type` (exact integer0/1) and `nonplayoff_d
 
 
 Projection run `stale/inputs_changed_during_capture` now represents failure after at most one full in-job recapture. No new request or response fields: only successful captured inputs are persisted; the same run ID and weekly slot remain in force.
+
+
+Projection scheduling under trade load: the existing worker cooperatively yields at simulation checkpoints while live trade jobs are running in the same process. The run stays `running`; its original cancellation/lease/deadline and atomic-completion rules still apply. No route fields, queue limits, weekly schedule, result contents or GET behavior change.
