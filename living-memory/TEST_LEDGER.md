@@ -1,3 +1,10 @@
+## 2026-11-06 — Calibration CI fixture and deletion-fence guard follow-up
+
+- PR608 first full CI:12,930 passed/42 skipped, two contract failures. Release flags lacked the two default-false Calibration keys; the users-row-lock AST guard recognized only direct calls and misclassified the borrowed-connection grading helper.
+- Added only those two false keys to release/onboarding-v2/profiles-on fixtures. Existing onboarding and public-profile overrides remain unchanged. The guard now validates the helper's first database operation, same-connection ownership/participant-incarnation reads, and all three caller transactions (including private snapshot persistence). Planted late/read-first/separate/wrong-connection/removed-incarnation-check cases fail the guard; no lock exemption or runtime privacy change.
+- **307 passed / 19 skipped in23.02s**: complete seed-DB and session-deletion suites plus Calibration persistence/service/cohorts/routes/adapter, legacy grading routes, deletion scrub and account-deletion coverage. Network blocked, synthetic SQLite only. Both original CI failures pass; skips remain inherited opt-in integrations.
+- Runtime modules, production flags and mobile tree match13a507a1 exactly. Build175 remains source-compatible; no new mobile binary required for this follow-up. Diff check clean. Full exact-head CI restart remains parent-owned.
+
 ## 2026-11-06 — Frozen outlook Calibration round, private preparation before exposure
 
 - New separate round outlook-v2-v3-1 compares exact owner-v2-bilateral-2/-3 from one provider/input snapshot through shared full gates. Both new preparation/exposure flags default false; public grading.blind remains on. Normal model selector remains0. Parent confirmed prior model PR607 merged/deployed as d26621b491c572bf3a4b1c29abc79d3e3a625782, default off.
