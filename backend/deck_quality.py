@@ -82,11 +82,11 @@ def _redundant_side(roster, out, into, market, position, caps) -> bool:
 
 def filter_deck(cards: Sequence, *, viewer_id: str, market: Callable[[str], float | None],
                 position: Callable[[str], str | None], rosters: Mapping[str, Sequence[str]],
-                lineup_slots: Sequence[str] | None) -> tuple[list, dict]:
+                lineup_slots: Sequence[str] | None, native_caps: Mapping[str, int] | None = None) -> tuple[list, dict]:
     """(kept cards in served order, counts). Each card needs give_player_ids,
     receive_player_ids and target_user_id (the counterparty); rosters maps team id -> asset ids
     (the viewer's under viewer_id)."""
-    caps = position_caps(lineup_slots)
+    caps = dict(native_caps) if native_caps is not None else position_caps(lineup_slots)
     counts = {"breakup": 0, "filler": 0, "redundant": 0, "deferred": 0}
     kept = []
     for c in cards:

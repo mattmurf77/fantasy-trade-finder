@@ -1,3 +1,10 @@
+## 2026-11-07 — Exact MFL native-range and own-account Calibration follow-up
+
+- Isolated `fix/calibration-mfl-ranges` from `e0aa9e36`. Native range assignment, subset/depth protections and attainable-cap diagnostics run identically for both arms; immutable fixed DT/DE/LB/CB/S retain capacity. Fresh own-account MFL identity maps to the existing canonical roster/pick seat without importer credentials or private-board substitution.
+- Broad affected suite: **510 passed,19 skipped32.68s**. Final additional canonical-importer-presence guard followed by **61 passed5.66s** covering new MFL/credentials/currentness/real paired capture. No source policy mutation or quality relaxation. `git diff --check` passed.
+- Independent review: exact200-family/100-structural/60-default-context oracle iterations and both-arm/account integration; final source binding delivered separately. Original broad fixture-only proof-label failure was corrected by constructing the missing synthetic opponent, then rerun green. No production/customer fixture copies or performance claims. [Detailed validation](../docs/plans/calibration-mfl-ranges/validation.md).
+- Exact-head full CI and parent release/reprepare/readback remain outstanding. Existing exposed/answered snapshots remain immutable; fresh source hashes invalidate only eligible unexposed comparisons.
+
 ## 2026-11-07 — Calibration disjoint fixed-slot coverage repair
 
 - Branch `fix/calibration-coverage`, based on fresh `origin/main` `6e2868bf`. Calibration-only fixed K/DEF/grouped IDP proof retains every active holding/capacity cost and reserve/taxi exclusion, rejects cross-domain eligibility, duplicate fixed ownership, fixed/nonoffensive offers and cuts. No normal generator/scoring/quality policy change. ESPN native eligibility is verified against declared slots; private fixed IDs require canonical integer scalars, with negative DEF IDs allowed.

@@ -194,11 +194,14 @@ class CapturedComparison:
                 rosters = {m.user_id: list(m.roster) for m in context["league"].members}
                 rosters[context["user_id"]] = list(context["user_roster"])
                 seed, players = context["seed_elo"], context["players"]
+                from .calibration_native_lineup import max_positions
                 cards, quality_diag = deck_quality.filter_deck(cards,
                     viewer_id=context["user_id"],
                     market=lambda pid: ts.elo_to_value(seed[pid]) if pid in seed else None,
                     position=lambda pid: getattr(players.get(pid), "position", None),
-                    rosters=rosters, lineup_slots=list(self.roster_context.rules.slots))
+                    rosters=rosters, lineup_slots=list(self.roster_context.rules.slots),
+                    native_caps=({p:n for p,n in max_positions(self.roster_context.rules.native_bounds, len(self.roster_context.rules.slots)).items() if p in ('QB','TE')}
+                                 if getattr(self.roster_context.rules,'native_bounds',()) else None))
             return cards, {"model_version": version, "native_count": native,
                 "post_suppression_count": suppressed, "validated_count": validated, "roster_count": roster_count,
                 "significant_count": significant, "final_count": len(cards),
@@ -231,7 +234,9 @@ def capture(*, user_id, league_user_id, league_id):
         except SessionInputError as exc:
             raise GradingError(exc.error, exc.status) from exc
     seat = str(resolved["league_user_id"])
-    if league_user_id is not None and seat != str(league_user_id):
+    if (league_user_id is not None and seat != str(league_user_id)
+            and not (linked and linked.platform == 'mfl' and str(league_user_id) == str(user_id)
+                     and linked.provenance.get('ownership_basis') == 'current_provider_owner')):
         raise GradingError("league_seat_changed", 409)
     # Observe registered identities BEFORE any private board/preferences read.
     # Persistence locks these accounts and rejects deletion/re-creation; league
@@ -331,6 +336,12 @@ def capture(*, user_id, league_user_id, league_id):
         capacity = linked.capacity if linked else sum(slot not in ("IR", "TAXI") for slot in slots)
         for uid, pref in context["manager_preferences"].items():
             pref.update(starter_slots=starters, lineup_source="observed", roster_capacity=capacity)
+            if linked and linked.native_bounds:
+                from .calibration_native_lineup import templates
+                pref['starter_slots'] = list(templates(linked.native_bounds, sum(s in ('QB','RB','WR','TE') for s in starters))[0])
+                pref['calibration_native_bounds'] = linked.native_bounds
+                raw_team = next(r for r in linked.rosters if str(r['owner_id']) == str(uid))
+                pref['inactive_ids'] = sorted(set(raw_team.get('reserve',()) + raw_team.get('taxi',())))
             year = pref.get("next_draft_year")
             pref["own_next_draft_pick_ids"] = [str(p["pick_id"]) for p in picks
                 if year is not None and str(p.get("season")) == str(year)
@@ -364,7 +375,7 @@ def capture(*, user_id, league_user_id, league_id):
         from .calibration_roster_coverage import add_unranked_occupancy
         unpriced_occupancy = add_unranked_occupancy(roster_ctx, metadata)
         from .calibration_fixed_lineup import prepare as prepare_fixed_lineup
-        fixed_lineup = prepare_fixed_lineup(roster_ctx, metadata)
+        fixed_lineup = prepare_fixed_lineup(roster_ctx, metadata, fixed_bounds=linked.fixed_bounds if linked else ())
         unpriced_occupancy.update(fixed_lineup["assets"])
         for uid, team in roster_ctx.teams.items():
             roster_ctx.utility_inputs[uid] = {"explicit_outlook": prefs.get("team_outlook") if uid == seat else context["opponent_outlooks"].get(uid),

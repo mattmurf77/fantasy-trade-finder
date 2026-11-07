@@ -1042,3 +1042,7 @@ the write transaction so a held pre-deletion snapshot cannot be restored
 after re-signup. Export v2 omits mixed-owner internal debug/recovery payloads
 and filters inline partner evidence; own metadata/actions remain.
 [Scope](../docs/plans/privacy-export-board-history-followups/scope.md).
+
+## 2026-11-07 — Calibration MFL native family follow-up
+
+The optional `NativeRules` subclass and `calibration_native_lineup` helper preserve exact native position ranges through paired owner utilities, roster/outlook evaluation, depth constraints and quality caps. Fixed DT/DE/LB/CB/S remain capacity-only, unchanged holdings. Own authenticated secondary MFL accounts resolve to existing canonical seats without importer credentials or private-board substitution. Defaults are unchanged; source identity includes the helper. [Scope](../docs/plans/calibration-mfl-ranges/scope.md). Release/reprepare remains parent-owned after exact-head CI.

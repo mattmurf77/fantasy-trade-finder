@@ -79,6 +79,8 @@ class LinkedSnapshot:
     provenance: dict
     future_picks: list | None = None
     fixed_metadata: dict = field(default_factory=dict)
+    native_bounds: tuple = ()
+    fixed_bounds: tuple = ()
 
     def validate_owned_picks(self, picks):
         """A concurrent cache refresh may not substitute a different observation."""
@@ -127,6 +129,9 @@ class LinkedSnapshot:
             if pid in context.assets:
                 context.assets[pid] = replace(context.assets[pid], positions=frozenset({position}))
         context.rules = replace(context.rules, source='observed')
+        if self.native_bounds:
+            from .calibration_native_lineup import NativeRules
+            context.rules = NativeRules(**context.rules.__dict__, native_bounds=self.native_bounds)
         context.teams = {uid: replace(team, availability_known=True)
                          for uid, team in context.teams.items()}
         return context
@@ -228,8 +233,41 @@ def parse_espn(raw, *, league_id, user_id, team_id, xwalk):
          'fixed_holdings': fixed_metadata}, fixed_metadata=fixed_metadata)
 
 
+def _mfl_native_ranges(league):
+    """Separate counts are native facts, not inferred from a favored lineup."""
+    from .calibration_native_lineup import OFFENSE, DEFENSE, templates
+    settings = league.get('starters') or {}
+    if 'iop_starters' not in settings and 'idp_starters' not in settings:
+        return (), (), None
+    total = _int(settings.get('count'), positive=True)
+    offensive = _int(settings.get('iop_starters'), positive=True)
+    defensive = _int(settings.get('idp_starters'))
+    if total != offensive + defensive or total > 32:
+        _fail('provider_lineup_unsupported')
+    bounds = {}
+    for row in mfl._as_list(settings.get('position')):
+        if not isinstance(row, dict):_fail('provider_lineup_unsupported')
+        pos, limit = row.get('name'), mfl._txt(row.get('limit'))
+        if not re.fullmatch(r'\d+(?:-\d+)?', limit):_fail('provider_lineup_unsupported')
+        values = list(map(int, limit.split('-'))); lo, hi = values[0], values[-1]
+        if pos in bounds or hi < lo or hi > 32 or (pos not in OFFENSE | DEFENSE and hi):
+            _fail('provider_lineup_unsupported')
+        bounds[pos] = (lo, hi)
+    off = tuple((p,*bounds.get(p,(0,0))) for p in sorted(OFFENSE))
+    fixed = tuple((p,*bounds.get(p,(0,0))) for p in sorted(DEFENSE))
+    try:
+        off_templates = templates(off,offensive)
+        fixed_templates = templates(fixed,defensive) if defensive else ((),)
+        if not defensive and any(hi for _,_,hi in fixed):raise ValueError()
+    except ValueError:_fail('provider_lineup_unsupported')
+    return off, fixed if defensive else (), list(off_templates[0]+fixed_templates[0])
+
+
 def _mfl_slots(league):
     """Only min/max systems exactly equal to fixed slots plus one flex class."""
+    _, _, native_slots = _mfl_native_ranges(league)
+    if native_slots is not None:
+        return native_slots
     settings = league.get('starters') or {}
     total = _int(settings.get('count'), positive=True)
     if total > 16:
@@ -260,7 +298,7 @@ def _mfl_slots(league):
     return slots
 
 
-def parse_mfl(raw, *, league_id, user_id, franchise_id, xwalk):
+def parse_mfl(raw, *, league_id, user_id, franchise_id, xwalk, owner_map=None):
     league = (raw.get('league') or {}).get('league') or {}
     if str(league.get('id')) != league_id:
         _fail('provider_league_mismatch')
@@ -268,6 +306,7 @@ def parse_mfl(raw, *, league_id, user_id, franchise_id, xwalk):
             or not (raw.get('players') or {}).get('players')):
         _fail('provider_rules_or_players_unavailable')
     slots = _mfl_slots(league)
+    native_bounds, fixed_bounds, _ = _mfl_native_ranges(league)
     capacity = _int(league.get('rosterSize'), positive=True)
     if capacity < len(slots):
         _fail('provider_settings_unsupported')
@@ -295,6 +334,7 @@ def parse_mfl(raw, *, league_id, user_id, franchise_id, xwalk):
         _fail('league_seat_changed')
     from .server import _mfl_member_id
     rosters, positions, mapping, members = [], {}, {}, []
+    fixed_metadata = {}
     raw_teams = mfl._as_list((raw.get('rosters') or {}).get('rosters', {}).get('franchise'))
     if {r.get('id') for r in raw_teams} != set(teams):
         _fail('league_rosters_unavailable')
@@ -302,12 +342,19 @@ def parse_mfl(raw, *, league_id, user_id, franchise_id, xwalk):
         fid = team.get('id')
         known = teams[fid]
         details = {str(pid): (name, pos) for pid, name, pos in known['players']}
-        uid = user_id if fid == franchise_id else _mfl_member_id(league_id, fid)
+        uid = owner_map[fid] if owner_map is not None else (user_id if fid == franchise_id else _mfl_member_id(league_id, fid))
         roster = dict(owner_id=uid, players=[], reserve=[], taxi=[])
         for p in mfl._as_list(team.get('player')):
             pid, status = str(p.get('id') or ''), p.get('status')
             name, pos = details.get(pid, ('', None))
-            sid = _map(pid, name, pos, xwalk, 'mfl')
+            from .calibration_native_lineup import DEFENSE
+            if pos in DEFENSE and fixed_bounds:
+                if not re.fullmatch(r'[0-9]{1,20}', pid):_fail('provider_roster_identity_ambiguous')
+                sid = 'mfl-fixed:' + pid
+                fixed_metadata[sid] = {'player_id':sid, 'fantasy_positions':[pos],
+                    'position':pos, 'active':None, 'name':name, 'native_id':pid}
+            else:
+                sid = _map(pid, name, pos, xwalk, 'mfl')
             if status not in ('ROSTER', 'INJURED_RESERVE', 'TAXI_SQUAD'):
                 _fail('provider_roster_slot_unknown')
             if status != 'ROSTER':
@@ -315,11 +362,13 @@ def parse_mfl(raw, *, league_id, user_id, franchise_id, xwalk):
                 _int(league.get(field), positive=True)
                 roster['reserve' if status == 'INJURED_RESERVE' else 'taxi'].append(sid)
             roster['players'].append(sid)
-            positions[sid], mapping[pid] = pos, sid
+            if sid not in fixed_metadata:positions[sid] = pos
+            mapping[pid] = sid
         rosters.append(roster)
         members.append(dict(user_id=uid, username=known['name'], player_ids=roster['players']))
     _check_rosters(rosters)
-    mine = next(m for m in members if m['user_id'] == user_id)
+    seat = owner_map[franchise_id] if owner_map is not None else user_id
+    mine = next(m for m in members if m['user_id'] == seat)
     picks = parsed['future_picks']
     if any(str(p.get('franchise_id')) not in teams or str(p.get('original_owner')) not in teams
            or not re.fullmatch(r'[2-9]\d{3}', str(p.get('year')))
@@ -328,13 +377,14 @@ def parse_mfl(raw, *, league_id, user_id, franchise_id, xwalk):
     keys = [(str(p['year']), str(p['round']), str(p['original_owner'])) for p in picks]
     if len(keys) != len(set(keys)):
         _fail('pick_ownership_unavailable')
-    return LinkedSnapshot('mfl', dict(platform='mfl', league_user_id=user_id,
+    return LinkedSnapshot('mfl', dict(platform='mfl', league_user_id=seat,
         user_player_ids=mine['player_ids'], opponent_rosters=[m for m in members if m is not mine]),
         rosters, slots, capacity, positions,
         {'platform': 'mfl', 'rules': {k: league.get(k) for k in
          ('starters', 'rosterSize', 'injuredReserve', 'taxiSquad')},
          'native_player_map': mapping, 'pick_policy': 'provider_owned_future_draft_picks',
-         'scoring_rules': raw['rules']['rules'], 'future_owned_picks': picks}, picks)
+         'scoring_rules': raw['rules']['rules'], 'future_owned_picks': picks,
+         'native_bounds':native_bounds,'fixed_bounds':fixed_bounds}, picks, fixed_metadata, native_bounds, fixed_bounds)
 
 
 def pick_ownership(rows):
@@ -348,7 +398,7 @@ def capture_linked(*, user_id, league_id):
     if not before:
         _fail('provider_roster_coverage_unavailable')
     row = before['binding']
-    if str(row['user_id']) != user_id:
+    if str(row['user_id']) != user_id and row['platform'] != 'mfl':
         _fail('provider_account_binding_unavailable')
     platform = row['platform']
     try:
@@ -379,6 +429,8 @@ def capture_linked(*, user_id, league_id):
             snapshot.provenance.update(valuation_basis='stored_configured_format',
                 native_tep_verification='unknown', requested_season=row['espn_season'] or s._ESPN_DEFAULT_SEASON)
         else:
+            if not isinstance(row['user_id'], str) or not row['user_id'] or not row['platform_my_team']:
+                _fail('provider_account_binding_unavailable')
             year = row['platform_season'] or s._MFL_DEFAULT_YEAR
             cred = db.get_mfl_credential(user_id) or {}
             cookie = None
@@ -387,18 +439,30 @@ def capture_linked(*, user_id, league_id):
                     cookie = s._sleeper_write.decrypt_token(cred['cookie_encrypted'])
                 except Exception:
                     _fail('mfl_credentials_unavailable')
-            if row['platform_auth'] == 'cookie' and not cookie:
+            if (row['platform_auth'] == 'cookie' or str(row['user_id']) != user_id) and not cookie:
                 _fail('mfl_credentials_unavailable')
             fid = str(row['platform_my_team'] or '')
             if cookie:
                 own = [l for l in mfl.fetch_my_leagues(cookie, year)
                        if str(l['league_id']) == league_id]
-                if not any(str(l.get('franchise_id')) == fid for l in own):
+                seats = {str(l.get('franchise_id')) for l in own if l.get('franchise_id')}
+                if len(seats) != 1:
                     _fail('league_seat_changed')
+                observed_fid = next(iter(seats))
+                if str(row['user_id']) == user_id and observed_fid != fid:
+                    _fail('league_seat_changed')
+                fid = observed_fid
             host = row['platform_host'] or mfl.resolve_host(league_id, year)
             raw = mfl.fetch_league_bundle(league_id, year, host, cookie=cookie)
+            franchises = mfl._as_list((((raw.get('league') or {}).get('league') or {}).get('franchises') or {}).get('franchise'))
+            owner_map = {str(f['id']): (str(row['user_id']) if str(f['id']) == str(row['platform_my_team'])
+                         else s._mfl_member_id(league_id, str(f['id']))) for f in franchises}
+            if fid not in owner_map or str(row['platform_my_team']) not in owner_map:
+                _fail('league_seat_changed')
             snapshot = parse_mfl(raw, league_id=league_id, user_id=user_id,
-                                 franchise_id=fid, xwalk=s._shared_crosswalk())
+                                 franchise_id=fid, xwalk=s._shared_crosswalk(), owner_map=owner_map)
+            snapshot.provenance.update(account_user_id=user_id, native_franchise_id=fid,
+                canonical_seat=owner_map[fid], canonical_owner_map=owner_map)
             basis = 'current_provider_owner' if cookie else 'existing_public_import_binding'
             if mfl.detect_scoring_format(raw) != db.get_league_scoring(league_id):
                 _fail('provider_scoring_format_changed')

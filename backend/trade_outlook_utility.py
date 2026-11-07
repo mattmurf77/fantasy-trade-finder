@@ -144,6 +144,9 @@ def evaluate_outlook_utility(*, before: Team, after: Team,
     pools = []
     if valid_slots:
         eligible = frozenset().union(*(ELIGIBILITY[s] for s in rules.slots))
+        if getattr(rules, "native_bounds", ()):
+            from .calibration_native_lineup import max_positions
+            eligible = frozenset(p for p, hi in max_positions(rules.native_bounds, len(rules.slots)).items() if hi)
         for team, ids in ((before, before_ids), (after, after_ids)):
             pools.append([assets[p] for p in sorted(ids) if not assets[p].is_pick
                           and assets[p].available and p not in team.inactive

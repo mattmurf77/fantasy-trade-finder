@@ -9,6 +9,7 @@ from .blind_grading import GradingError
 from .trade_roster import Asset, ELIGIBILITY, POSITIONS, UNAVAILABLE
 
 FIXED_ELIGIBILITY = {
+    **{p:frozenset({p}) for p in ('DT','DE','CB','S')},
     'K': frozenset({'K'}), 'DEF': frozenset({'DEF'}),
     'DL': frozenset({'DL'}), 'LB': frozenset({'LB'}), 'DB': frozenset({'DB'}),
     'IDP_FLEX': frozenset({'DL', 'LB', 'DB'}),
@@ -35,7 +36,7 @@ def _matching(slots, candidates):
     return [{'slot': slot, 'player_id': assigned.get(index)} for index, slot in enumerate(slots)]
 
 
-def prepare(context, metadata):
+def prepare(context, metadata, *, fixed_bounds=()):
     """Project only a proved-disjoint fixed block; leave unknown assets unresolved."""
     original = tuple(context.rules.slots)
     if not original:
@@ -83,12 +84,19 @@ def prepare(context, metadata):
         assigned_owner.update(fixed)
         eligible = {pid: frozenset(facts[pid]['positions']) for pid in fixed
                     if pid not in team.inactive and facts[pid]['available']}
+        family = (fixed_slots,)
+        if fixed_bounds:
+            from .calibration_native_lineup import templates
+            family = templates(tuple(fixed_bounds), len(fixed_slots))
+        assignments = [_matching(template, eligible) for template in family]
+        best = max(assignments, key=lambda rows:sum(row['player_id'] is not None for row in rows))
         teams[uid] = {'fixed_ids': fixed, 'active_count': sum(pid not in team.inactive for pid in fixed),
-            'known_available_assignment': _matching(fixed_slots, eligible),
+            'known_available_assignment': best,
             'unknown_availability_ids': [pid for pid in fixed if not facts[pid]['availability_known']],
             'basis': 'unchanged_holdings_and_eligibility_not_full_lineup_fit'}
     context.rules = replace(context.rules, slots=offensive)
-    return {'policy': POLICY, 'original_slots': list(original), 'fixed_slots': list(fixed_slots),
+    return {'policy': POLICY, 'native_fixed_bounds':list(fixed_bounds),
+            'native_offensive_bounds':list(getattr(context.rules, 'native_bounds', ())), 'original_slots': list(original), 'fixed_slots': list(fixed_slots),
             'offensive_slots': list(offensive), 'assets': facts, 'teams': teams}
 
 
@@ -116,6 +124,11 @@ def annotate(cards, fixed, viewer_id):
     for card in cards:
         card.roster_evaluation['fixed_lineup'] = {
             'policy': POLICY, 'original_slots': fixed['original_slots'],
+            **({'native_family_policy':'native_position_range_family_v1',
+                'native_fixed_bounds':fixed['native_fixed_bounds'],
+                'native_offensive_bounds':fixed['native_offensive_bounds'],
+                'slots_role':'representative_templates_not_complete_native_rules'}
+               if fixed.get('native_fixed_bounds') or fixed.get('native_offensive_bounds') else {}),
             'fixed_slots': fixed['fixed_slots'], 'offensive_slots': fixed['offensive_slots'],
             'teams': {uid: fixed['teams'][uid] for uid in (viewer_id, card.target_user_id)},
             'legality_basis': 'offensive_checks_plus_unchanged_disjoint_block',

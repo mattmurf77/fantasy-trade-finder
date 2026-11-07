@@ -126,12 +126,21 @@ def _health(team: Team, roster: set[str], assets: Mapping[str, Asset], rules: Ru
                 coverage[key] = {"demand": demand, "supply": supply}
                 deficits[key] = max(0, demand - supply)
                 legal_deficits[key] = max(0, demand - sum(bool(a.positions & positions) for a in available))
+    native_bounds = getattr(rules, "native_bounds", ())
+    if native_bounds:
+        from .calibration_native_lineup import demands
+        deficits, legal_deficits, coverage = {}, {}, {}
+        for key, (positions, demand) in demands(native_bounds, len(rules.slots)).items():
+            supply = sum(bool(a.positions & positions) for a in usable)
+            coverage[key] = {"demand": demand, "supply": supply}
+            deficits[key] = max(0, demand - supply)
+            legal_deficits[key] = max(0, demand - sum(bool(a.positions & positions) for a in available))
     selected = {p for p in quality_assignment if p}
     depth = {pos: sum(pos in a.positions for a in usable if a.id not in selected)
              for pos in sorted(POSITIONS)}
     counts = {pos: sum(pos in a.positions for a in usable) for pos in sorted(POSITIONS)}
     return {
-        "lineup": [{"slot": s, "player_id": p} for s, p in zip(rules.slots, assignment)],
+        "lineup": [{"slot": s, "player_id": p} for s, p in zip(getattr(assignment, "slots", rules.slots), assignment)],
         "filled_slots": sum(p is not None for p in assignment),
         "usable_filled_slots": len(selected),
         "starter_value": round(sum(assets[p].value for p in assignment if p), 3),
@@ -264,6 +273,18 @@ class Context:
     _assignments: OrderedDict = field(default_factory=OrderedDict, repr=False)
 
     def _assign(self, slots, assets):
+        native_bounds = getattr(self.rules, "native_bounds", ())
+        if native_bounds:
+            from .calibration_native_lineup import choose, Assignment
+            key = (native_bounds, len(slots), tuple(sorted(assets, key=lambda a: a.id)))
+            if key not in self._assignments:
+                value = choose(native_bounds, len(slots), assets)
+                if len(self._assignments) >= 128:
+                    self._assignments.popitem(last=False)
+                self._assignments[key] = (tuple(value), value.slots)
+            self._assignments.move_to_end(key)
+            ids, selected_slots = self._assignments[key]
+            return Assignment(ids, selected_slots)
         key = (tuple(slots), tuple(sorted(assets, key=lambda a: a.id)))
         if key not in self._assignments:
             result = tuple(assign(slots, assets))

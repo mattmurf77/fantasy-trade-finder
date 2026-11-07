@@ -4665,6 +4665,7 @@ _ENGINE_CODE_MODULES = (
     # gates and filters on the candidate set
     "trade_policy.py", "trade_significance.py", "trade_mutual_benefit.py",
     "trade_roster.py", "trade_roster_adapter.py", "trade_outlook_utility.py",
+    "calibration_native_lineup.py",  # Optional exact range assignment consumed by both owner engines.
     "negmem.py", "trade_breaker.py", "deck_quality.py",
     # composition and order of the served deck
     "bakeoff_runner.py", "bakeoff_profiles.py", "taste_service.py", "value_model.py",

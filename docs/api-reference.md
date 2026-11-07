@@ -1733,3 +1733,5 @@ grades/tags and decision/outcome history remain; stored evidence is unchanged.
 Account deletion still removes all owned payloads through the alias-aware scope.
 The exact payload columns are declared in `accounts._EXPORT_INTERNAL_PAYLOADS`;
 see [privacy follow-up scope](plans/privacy-export-board-history-followups/scope.md).
+
+Calibration MFL capture additionally supports bounded native min/max position families when explicit offense/IDP totals prove a fixed partition. Existing `provider_lineup_unsupported`/settings errors still cover ambiguous/custom constraints. An MFL account other than the stored importer can prepare only with its own valid credential and exactly one freshly authenticated franchise; missing own credentials return `mfl_credentials_unavailable`, ambiguous/revoked ownership `league_seat_changed`. Canonical seat/pick ownership and caller private preferences remain separate; no new API or credential delegation is introduced. [Implementation contract](plans/calibration-mfl-ranges/scope.md).
