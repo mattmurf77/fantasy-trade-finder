@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 
-VERSION = "joint-season-scenario-v3"
+VERSION = "joint-season-scenario-v4"
 SLOTS = {
     "QB": {"QB"}, "RB": {"RB"}, "WR": {"WR"}, "TE": {"TE"}, "K": {"K"},
     "FLEX": {"RB", "WR", "TE"}, "SUPER_FLEX": {"QB", "RB", "WR", "TE"},
@@ -169,7 +169,7 @@ def optimize(slots, players, *, empty_policy, locked=None, locked_bench=(), hind
             "lineup": lineup, "gaps": [row["slot_index"] for row in lineup if row["player"] is None]}
 
 
-def idp_bye_fill(slots, healthy, bye_players, means, *, empty_policy):
+def idp_bye_fill(slots, healthy, bye_players, means, *, empty_policy, locked=None, locked_bench=()):
     """Lexicographic counterfactual: keep maximum real coverage, then fill byes.
 
     Slot reassignment is legal; replacing real coverage with a virtual upgrade
@@ -177,9 +177,9 @@ def idp_bye_fill(slots, healthy, bye_players, means, *, empty_policy):
     """
     if empty_policy not in {"allow", "fill_available"}:
         raise Unavailable("empty_slot_policy_required")
-    real = optimize(slots, healthy, empty_policy="fill_available")
+    real = optimize(slots, healthy, empty_policy="fill_available", locked=locked, locked_bench=locked_bench)
     if not bye_players or not any(slots[i] in IDP for i in real["gaps"]):
-        return optimize(slots, healthy, empty_policy=empty_policy)
+        return optimize(slots, healthy, empty_policy=empty_policy, locked=locked, locked_bench=locked_bench)
     # Eligibility alone identifies the position means that are actually needed.
     virtual = []
     for player in bye_players:
@@ -189,19 +189,19 @@ def idp_bye_fill(slots, healthy, bye_players, means, *, empty_policy):
                             "points": "0", "allowed_slots": allowed, "hypothetical": True,
                             "bye_player_id": str(player["player_id"])})
     if not virtual:
-        return optimize(slots, healthy, empty_policy=empty_policy)
+        return optimize(slots, healthy, empty_policy=empty_policy, locked=locked, locked_bench=locked_bench)
     candidates = [{**p, "real_priority": True} for p in healthy] + virtual
-    eligibility = optimize(slots, candidates, empty_policy="fill_available")
+    eligibility = optimize(slots, candidates, empty_policy="fill_available", locked=locked, locked_bench=locked_bench)
     used_slots = {r["slot"] for r in eligibility["lineup"] if r["player"] and r["player"].get("hypothetical")}
     if not used_slots:
-        return optimize(slots, healthy, empty_policy=empty_policy)
+        return optimize(slots, healthy, empty_policy=empty_policy, locked=locked, locked_bench=locked_bench)
     # A position with missing history is unknown, never a synthetic zero.
     possible_slots = {slot for p in virtual for slot in p["allowed_slots"]}
     if not possible_slots <= set(means):
         raise Unavailable("missing_idp_replacement_mean", state="incomplete_projections")
     for player in virtual:
         player["slot_points"] = {slot: str(decimal(means[slot])) for slot in player["allowed_slots"]}
-    result = optimize(slots, [{**p, "real_priority": True} for p in healthy] + virtual, empty_policy="fill_available")
+    result = optimize(slots, [{**p, "real_priority": True} for p in healthy] + virtual, empty_policy="fill_available", locked=locked, locked_bench=locked_bench)
     for row in result["lineup"]:
         if row["player"]:
             row["player"].pop("real_priority", None)

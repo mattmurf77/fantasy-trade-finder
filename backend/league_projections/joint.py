@@ -97,3 +97,31 @@ def prepare(actual_mean, maxpf_mean, actual_sd, latent_maxpf_sd, rho, strength_s
                   analytic_realized_variance=variance_m,
                   analytic_realized_correlation=_correlation(variance_a + covariance_actual_gap, variance_a, variance_m))
     return result
+
+
+def prepare_observed_floor(actual_mean, maxpf_mean, actual_sd, latent_maxpf_sd, rho,
+                           strength_sd, floor, dominance, score_decimals, *, actual_fixed=False, maxpf_fixed=False):
+    """B + D+, with B=max(X,floor) (or constant floor without dominance).
+
+    Linearity of expectation preserves the conditioned target even though B and
+    the normal gap share draws. Their transformed covariance is reported only
+    empirically; the unconditioned analytic variance formula does not apply.
+    """
+    sigma_actual = 0. if actual_fixed else math.hypot(actual_sd, strength_sd)
+    base_mean = floor + positive_normal_mean(actual_mean - floor, sigma_actual) if dominance else floor
+    target = max(maxpf_mean, base_mean)
+    if actual_fixed or not dominance:
+        gap_actual_sd, gap_max_sd = 0., 0. if maxpf_fixed else math.hypot(latent_maxpf_sd, strength_sd)
+        gap_rho, shared_sd = 0., 0.
+    else:
+        gap_actual_sd, gap_max_sd, gap_rho, shared_sd = actual_sd, latent_maxpf_sd, rho, strength_sd
+    result = prepare(base_mean, target, gap_actual_sd, gap_max_sd, gap_rho, shared_sd, True, score_decimals)
+    result.update(policy="mean_preserving_observed_floor_gap_v1", observed_floor=floor,
+                  observed_floor_base="max_actual" if dominance else "constant", base_mean=base_mean,
+                  unconditioned_target=maxpf_mean, target_adjustment=target-maxpf_mean,
+                  configured_actual_variance=sigma_actual ** 2,
+                  analytic_realized_variance=None, analytic_realized_correlation=None,
+                  actual_score_observed=actual_fixed, maxpf_score_observed=maxpf_fixed)
+    if result["latent_gap_mean"] is None:
+        result["construction"] = "observed_base_only"
+    return result

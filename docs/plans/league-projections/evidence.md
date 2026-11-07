@@ -2,13 +2,22 @@
 
 Date: November 7, 2026 UTC (November 6 Eastern). Synthetic fixtures only in tests; no production mutations, outreach, database copy, simulator or Maestro.
 
-## Current v3 mean-contract correction
+## Current v4 best-available and completed-game evidence
+
+- Local focused projection/paywall-inventory/account-deletion/flag-mirror run: **310 passed in 11.45s**. TypeScript passed. Regression coverage includes absent vs real-zero values, negative penalties, IDP/kicker partial scoring, empty response vs transport failure, unknown teams, history-only team fallback, completed starter/bench locks, deterministic observed lineups, authoritative full-week empty lineups, current manual overrides, and historical boundary double-count prevention. Independent oracle values are frozen in repository tests without a new dependency.
+- Independent frozen-source review: **150 functional cases**, **59 selected high-precision cases**, **8 actual DOM assertions**, and **12 exact future-only v3/v4 parity scenarios**. These overlap the repository cases and are not additive coverage totals. Source binding is maintained in the private audit artifact; no reproduced defect remained.
+- [Real source coverage capture](reference-coverage-v4.json):12 teams, eight completed weeks, six future weeks/72 team-weeks,2,131 partial and168 unpriced player-weeks, zero history fallback team-weeks. This is read-only normalization/capture evidence, not completed simulation, app-session authorization, or predictive accuracy. No private raw rows or identifiers are persisted.
+- [Source-bound v4 synthetic benchmark](benchmark-synthetic-result-v4.json):250,000 worlds,12 teams,six weeks/36games, **46.974s**, **152,518,656-byte peak RSS**. Local tests ran concurrently initially. This is local pure-simulation cost, not hosted p95, comparative throughput, or provider ingestion.
+
+Observed-floor conditioning uses the correct Gaussian truncated expectation and preserves its explicitly conditioned target before rounding. It reports original blend, achieved feasible bound, correction magnitude and sampled moments. Its analytic realized variance/correlation are unavailable rather than copied from the future-only law. Full future-only v3 numerical/RNG parity is preserved. Prospective accuracy, device usability and production batch execution remain unverified; technical flags remain off.
+
+## Historical v3 mean-contract correction
 
 Local projection/account-deletion/flag-mirror checks: **220 passed in7.21s**. TypeScript, stored-read structural guard,3 web DOM assertions and test-ID lint passed. Independent review: **148 tests plus3 actual DOM assertions**, with runtime source hashes unchanged before/after. These include90-digit root-oracle comparisons, zero/deterministic/negative-gap cases, mean/variance/correlation checks, extreme-location/gap numerical stability, subcent rounding, exact actual-outcome RNG parity and old-engine baseline comparison rejection. Follow-up regressions also reject old/unversioned queued or resumed jobs and preserve ambiguous FB/DB alias premium coverage. Test data is synthetic; no predictive calibration is inferred.
 
 [Source-bound v3 benchmark](benchmark-synthetic-result-v3.json):250000 scenarios,12 synthetic teams,six weeks/36games, **34.916seconds**, **156368896-byte peakRSS** on Python3.14.4/Mac. Core/simulation/joint helper hashes match the reviewed candidate. Local targeted tests were also running during the beginning of this measurement; this is an observed local wall-time/CPU-memory sample, not an isolated throughput comparison or hosted p95. The pure simulation does not measure provider ingestion.
 
-Engine v3 preserves the requested unrounded Max PF mean with a shifted positive-gap construction; latent dependence is distinct from realized dependence. Rounding adds at most half a scoring unit to the expectation and finite simulation averages have Monte Carlo error. Old v2 output remains historical. See [mathematical contract](decoder-evidence.md#mean-preserving-joint-policy--corrected-engine-v3). Source coverage, licensing, historical as-of calibration and device/runtime gates remain unresolved and disabled.
+Engine v3 preserves the requested unrounded Max PF mean with a shifted positive-gap construction; latent dependence is distinct from realized dependence. Rounding adds at most half a scoring unit to the expectation and finite simulation averages have Monte Carlo error. Old v2 output remains historical. See [mathematical contract](decoder-evidence.md#mean-preserving-joint-policy--corrected-engine-v3). At that historical stage source coverage, historical as-of calibration and device/runtime evidence remained unresolved. The later best-available source instruction supersedes whole-league source-coverage refusal.
 
 ## Coverage follow-up — historical v2 candidate
 
@@ -53,4 +62,4 @@ Use a staging/test backend with synthetic stored results; do not activate unrevi
 
 ## Unmet evidence
 
-Full-roster real-league coverage outside the admitted finite offense contract; complete reference custom-IDP/kicker forecasts; permission evidence for new feed use; original prototype parity; leakage-free historical calibration; actual deployed batch/DB-memory throughput; native device usability. These are explicit release gates, not hidden passes.
+Original prototype parity, leakage-free historical calibration, actual deployed batch/DB-memory throughput and native device usability remain unproven. Current source gaps are explicitly labeled partial estimates under the latest user instruction; no new source purchase/permission decision is required.

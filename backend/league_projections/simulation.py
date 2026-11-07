@@ -17,7 +17,7 @@ POLICIES = {
     "reserve_activation": {"exclude_current_reserve"},
     "empty_slots": {"allow", "fill_available"},
     "maxpf_variance": {"reconstructed_history", "actual_history_proxy"},
-    "scoring_contract": {"strict_supplied_v1", "sleeper_sparse_offense_v1"},
+    "scoring_contract": {"strict_supplied_v1", "sleeper_sparse_offense_v1", "sleeper_best_available_v1"},
     "availability_scenario": {"require_verified", "conditional_provider_forecast"},
 }
 
@@ -146,12 +146,18 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
         wm, mm, wd = [], [], []
         for i, team in enumerate(teams):
             detail = week["teams"][str(team["roster_id"])]
-            optimized, optimal = float(decimal(detail["actual"]["points"])), float(decimal(detail["maxpf"]["points"]))
+            optimized, optimal = float(decimal(detail.get("modeled_actual_projection", detail["actual"]["points"]))), float(decimal(detail.get("modeled_maxpf_projection", detail["maxpf"]["points"])))
             history = float(decimal(team["points_for"])) / completed if completed else optimized
             max_base = float(decimal(team["maxpf"])) / completed if completed else optimal
-            wm.append(weight * history + (1 - weight) * optimized)
-            mm.append(weight * max_base + (1 - weight) * optimal)
-            wd.append(detail)
+            actual_mean = optimized if detail.get("actual_score_observed") else weight * history + (1 - weight) * optimized
+            raw_max_mean = optimal if detail.get("maxpf_score_observed") else weight * max_base + (1 - weight) * optimal
+            observed_floor = float(decimal(detail["observed_maxpf_floor"])) if detail.get("observed_maxpf_floor") is not None else None
+            base_mean = (observed_floor + joint.positive_normal_mean(actual_mean - observed_floor, 0 if detail.get("actual_score_observed") else math.hypot(sd[i], cfg["persistent_sd"]))) if observed_floor is not None and detail.get("maxpf_dominates_actual") else observed_floor
+            maximum_mean = max(raw_max_mean, base_mean) if base_mean is not None else raw_max_mean
+            wm.append(actual_mean)
+            mm.append(maximum_mean)
+            wd.append({**detail, "observed_mean_conditioning": {"unconditioned_maxpf_mean": raw_max_mean,
+                       "known_maxpf_floor": observed_floor, "minimum_expected_base": base_mean, "conditioned_target": maximum_mean, "target_adjustment": maximum_mean - raw_max_mean}})
         games.append(matchups)
         means.append(wm)
         max_means.append(mm)
@@ -173,9 +179,24 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
     max_totals = [[] for _ in teams]
     weekly_outcomes = [[[0, 0, 0] for _ in teams] for _ in weeks]
     # Prepare the mean constraint once, outside the Monte Carlo loop.
-    joint_policies = [[joint.prepare(means[w][i], max_means[w][i], sd[i], max_sd[i], rho,
-                       cfg["persistent_sd"], bool(details[w][i].get("maxpf_dominates_actual")), cfg["score_decimals"])
-                       for i in range(n)] for w in range(len(weeks))]
+    joint_policies = []
+    for w in range(len(weeks)):
+        policies = []
+        for i in range(n):
+            detail = details[w][i]
+            fixed_actual, fixed_max = bool(detail.get("actual_score_observed")), bool(detail.get("maxpf_score_observed"))
+            anchor = detail["observed_mean_conditioning"]["known_maxpf_floor"]
+            if anchor is not None:
+                policy = joint.prepare_observed_floor(means[w][i], detail["observed_mean_conditioning"]["unconditioned_maxpf_mean"],
+                         sd[i], max_sd[i], rho, cfg["persistent_sd"], anchor,
+                         bool(detail.get("maxpf_dominates_actual")), cfg["score_decimals"],
+                         actual_fixed=fixed_actual, maxpf_fixed=fixed_max)
+            else:
+                policy = joint.prepare(means[w][i], max_means[w][i], sd[i], max_sd[i], rho,
+                         cfg["persistent_sd"], bool(detail.get("maxpf_dominates_actual")), cfg["score_decimals"])
+                policy.update(observed_floor=None, actual_score_observed=fixed_actual, maxpf_score_observed=fixed_max)
+            policies.append(policy)
+        joint_policies.append(policies)
     # Centered pre-floor/final/actual sums, uplift, floor count, centered moments.
     maxpf_diagnostics = [[[0.] * 8 for _ in teams] for _ in weeks]
     owner_for = {rid: rid for rid in ids}
@@ -196,18 +217,39 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
             scores = []
             for i in range(n):
                 z = rng.gauss(0, 1)
-                actual = round(means[w][i] + strength[i] + sd[i] * z, precision)
+                policy = joint_policies[w][i]
+                actual_raw = means[w][i] if policy["actual_score_observed"] else means[w][i] + strength[i] + sd[i] * z
+                actual = actual_raw if policy["actual_score_observed"] else round(actual_raw, precision)
                 # Always consume the second latent draw, including zero-gap and
                 # deterministic cases, so actual/playoff RNG paths are unchanged.
                 latent = max_means[w][i] + strength[i] + max_sd[i] * (rho * z + math.sqrt(1 - rho * rho) * rng.gauss(0, 1))
-                policy = joint_policies[w][i]
-                if policy["construction"] == "actual_equals_maxpf":
+                if policy["maxpf_score_observed"]:
+                    latent = max_means[w][i]
+                floor = policy["observed_floor"]
+                if floor is not None:
+                    base = max(actual_raw, floor) if policy["observed_floor_base"] == "max_actual" else floor
+                    gap_mean = policy["latent_gap_mean"]
+                    if gap_mean is None:
+                        maximum = before_floor = round(base, precision)
+                    else:
+                        gap_noise = latent - max_means[w][i]
+                        if policy["observed_floor_base"] == "max_actual":
+                            gap_noise -= actual_raw - means[w][i]
+                        gap = gap_mean + gap_noise
+                        before_floor = round(base + gap, precision)
+                        maximum = round(base + max(0., gap), precision)
+                    # Observed source totals can carry more precision than the
+                    # configured output; never round below an achieved floor.
+                    maximum = max(maximum, floor)
+                    if policy["observed_floor_base"] == "max_actual":
+                        maximum = max(maximum, actual)
+                elif policy["construction"] == "actual_equals_maxpf":
                     maximum = before_floor = actual
                 else:
                     before_floor = round(latent + policy["latent_mean_shift"], precision)
                     maximum = max(before_floor, actual) if details[w][i].get("maxpf_dominates_actual") else before_floor
                 diagnostic = maxpf_diagnostics[w][i]
-                before_center = policy["latent_maxpf_mean"] if policy["latent_maxpf_mean"] is not None else means[w][i]
+                before_center = policy["latent_maxpf_mean"] if policy["latent_maxpf_mean"] is not None else policy.get("base_mean", means[w][i])
                 actual_deviation, maxpf_deviation = actual - means[w][i], maximum - max_means[w][i]
                 diagnostic[0] += before_floor - before_center
                 diagnostic[1] += maxpf_deviation
@@ -278,9 +320,9 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
                                       "mean_uplift": maxpf_diagnostics[w][i][2] / iterations,
                                       "frequency": maxpf_diagnostics[w][i][3] / iterations,
                                       **_realized_moments(maxpf_diagnostics[w][i], iterations, means[w][i], max_means[w][i])},
-                                  "modeled_score_mean": means[w][i], "historical_component": weight * base_pf[i] / completed if completed else 0,
-                                  "projection_component": (1 - weight) * float(decimal(details[w][i]["actual"]["points"])) if completed else means[w][i], "modeled_score_sd": math.sqrt(sd[i] ** 2 + cfg["persistent_sd"] ** 2),
-                                  "score_distribution": "normal_scenario_rounded_to_league_precision",
+                                  "modeled_score_mean": means[w][i], "historical_component": weight * base_pf[i] / completed if completed and not details[w][i].get("actual_score_observed") else 0,
+                                  "projection_component": (1 - weight) * float(decimal(details[w][i].get("modeled_actual_projection", details[w][i]["actual"]["points"]))) if completed and not details[w][i].get("actual_score_observed") else means[w][i], "modeled_score_sd": 0 if details[w][i].get("actual_score_observed") else math.sqrt(sd[i] ** 2 + cfg["persistent_sd"] ** 2),
+                                  "score_distribution": "observed_completed_lineup" if details[w][i].get("actual_score_observed") else "normal_scenario_rounded_to_league_precision",
                                   "win_equivalent_probability": (weekly_outcomes[w][i][0] + .5 * weekly_outcomes[w][i][2]) / iterations,
                                   "loss_probability": weekly_outcomes[w][i][1] / iterations, "tie_probability": weekly_outcomes[w][i][2] / iterations,
                                   "opponent_roster_id": ids[next(b if a == i else a for a, b in games[w] if i in (a, b))]}

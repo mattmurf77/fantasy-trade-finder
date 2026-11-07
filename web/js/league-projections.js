@@ -34,6 +34,7 @@
       const result = data.run?.result;
       if (!result) {host.append(el('p', 'Official current standings remain available while projections are being prepared.')); return;}
       host.append(el('p', `Model estimate · ${result.iterations.toLocaleString()} simulations · Inputs ${new Date(result.captured_at).toLocaleString()} · ${result.model_version}`));
+      if (result.coverage?.estimated) host.append(el('p', `Estimated with partial Sleeper coverage: ${result.coverage.partial_player_weeks || 0} partial player-weeks; ${result.coverage.unpriced_player_weeks || 0} without a usable projection. Missing bonuses or penalties can raise or lower complete scores.`));
       const scroll = el('div'); scroll.className = 'league-projection-scroll';
       const table = el('table'); table.append(el('caption', 'Playoff likelihood, sorted by probability. Expected records are averages; modal records are the most frequent exact result.'));
       const head = el('tr'); ['Team', 'Current W–L–T', 'PF / PPG', 'Expected W–L–T', 'Modal W–L–T', 'Playoffs', 'Bye'].forEach(t => head.append(el('th', t))); table.append(head);
@@ -57,7 +58,7 @@
         const detail = el('details'); detail.append(el('summary', `${team.name}: weekly lineups and matchup odds`));
         detail.append(el('p', `Final record distribution: ${(team.final_record_distribution || []).map(r => `${r.record.join('–')}: ${pct(r.probability)}`).join('; ')}. Missed-playoff samples: ${team.nonplayoff_samples}. ${team.name} franchise portfolio expected picks: ${num(team.owner_expected_nonplayoff_picks)}; chance of at least one: ${pct(team.owner_probability_at_least_one)}.`));
         team.weeks.forEach(w => {
-          detail.append(el('p', `Week ${w.week} vs Team ${w.opponent_roster_id}: win ${pct(w.win_probability)}, tie ${pct(w.tie_probability)}, loss ${pct(w.loss_probability)}. Score mean ${num(w.modeled_score_mean)}, standard deviation ${num(w.modeled_score_sd)}.`));
+          detail.append(el('p', `Week ${w.week} vs Team ${w.opponent_roster_id}: win ${pct(w.win_probability)}, tie ${pct(w.tie_probability)}, loss ${pct(w.loss_probability)}. ${w.actual_score_observed ? `Recorded completed lineup score ${num(w.modeled_score_mean)}; no historical blend or score simulation.` : `Score mean ${num(w.modeled_score_mean)}, standard deviation ${num(w.modeled_score_sd)}.`}`));
           if (w.maxpf_floor) {
             const m = w.maxpf_floor;
             detail.append(el('p', m.policy ? `Max PF target ${num(m.target_mean)}; simulated mean ${num(m.simulated_mean)}. Simulation averages vary; predictive uncertainty is not calibrated.` : `Historical model: input Max PF ${num(m.input_mean)}; simulated mean ${num(m.simulated_mean)}.`));
@@ -67,7 +68,16 @@
               detail.append(diagnostics);
             }
           }
-          w.actual.lineup.forEach(r => detail.append(el('p', `${r.slot}: ${r.player ? `${r.player.hypothetical ? 'Hypothetical bye replacement' : r.player.name || r.player.player_id} · ${r.player.points}` : 'Empty slot'}`)));
+          if (w.observed_mean_conditioning?.known_maxpf_floor != null) detail.append(el('p', `An already completed eligible lineup establishes at least ${num(w.observed_mean_conditioning.known_maxpf_floor)} Max PF. ${w.maxpf_score_observed ? 'Max PF is fully observed for this roster.' : `Target adjustment from that known result: ${num(w.observed_mean_conditioning.target_adjustment)} points.`}`));
+          if (w.actual_score_observed) detail.append(el('p', `Recorded team total ${w.modeled_actual_projection} supplies the actual score; individual missing scores remain unavailable.`));
+          if (w.projection_coverage?.estimated) {
+            const c=w.projection_coverage;
+            detail.append(el('p', `Available projections: ${c.priced_actual_pool} actual-lineup players, ${c.priced_maxpf_pool} Max PF players. ${c.fallback ? `Completed team history supplies ${c.fallback_lanes.join(' and ')} projection: ${w.modeled_actual_projection} / ${w.modeled_maxpf_projection}.` : 'Unknown players and rules are not confirmed zeros.'}`));
+            c.unpriced_players.forEach(p => detail.append(el('p', `${p.name || p.player_id}: no usable estimate (${p.reason.replace(/_/g,' ')}).`)));
+            c.partial_players.forEach(p => detail.append(el('p', `${p.name || p.player_id}: partial contributions; missing ${p.missing_keys.map(k=>k.replace(/_/g,' ')).join(', ')}.`)));
+            if(c.idp_replacement_unavailable) detail.append(el('p','No hypothetical IDP bye replacement was added because its historical scoring average is unavailable.'));
+          }
+          w.actual.lineup.forEach(r => detail.append(el('p', `${r.slot}: ${r.player ? `${r.player.hypothetical ? 'Hypothetical bye replacement' : r.player.name || r.player.player_id} · ${r.player.points}` : r.unpriced_locked_player ? `Locked starter ${r.unpriced_locked_player.name || r.unpriced_locked_player.player_id}: actual score unavailable` : 'Empty slot'}`)));
           detail.append(el('p', `Historical component ${num(w.historical_component)} plus projection component ${num(w.projection_component)}. Exclusions: ${w.exclusions.map(p => `${p.player_id} (${p.reason})`).join(', ') || 'None'}.`));
         }); host.append(detail);
       });

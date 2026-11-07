@@ -1,0 +1,32 @@
+{
+  "captured_at": "2026-11-07T06:43:21.961448+00:00",
+  "scope": "Read-only explicitly authorized reference public provider capture. Diagnostic membership of an existing roster, no app session or credentials, no simulation or accuracy claim. Raw source and identifiers never persisted.",
+  "source_hashes": {
+    "backend/league_projections/__init__.py": "268cbdf3730ce8db458acd81ffa8a24115583ec21c04f1d3cb2895ff30384bc8",
+    "backend/league_projections/api.py": "41db2bce52caa9b43115902ec451c0028c0c2214cfb809385218cd4425476231",
+    "backend/league_projections/batch.py": "fede52219ab480d40178e6dc74a0aeade751d76320a77f6a632a8dbf4f487266",
+    "backend/league_projections/core.py": "6ece285ba015e48209f74c062e83a57a30f3d91a8dbd40162a578ed2eca6ff4b",
+    "backend/league_projections/joint.py": "704e6144cbc5e6a6001a43288efadab075c7bca58c874a6e8f7c34faf2737b98",
+    "backend/league_projections/provider.py": "e379db2798274f7b55a46b729d16043bb7618cf15978fad1161aeaeb1fe6401a",
+    "backend/league_projections/scoring.py": "52eb523b42a44dd7a4320207a5882382e7359dc17caf748dff4f9e8d3d713082",
+    "backend/league_projections/service.py": "90600626d30c1d91a0a1ade57225eeba558795a153263c9515180057eb29cd34",
+    "backend/league_projections/simulation.py": "56b90cfe6b788997cc609c6d56bee2cab59a39f1ebf24e516036ed3599872234",
+    "backend/league_projections/store.py": "09782e6e9afe586a6389d0e9d03a48d898830b55bc3d268c62ba87f4ae9ffa0a",
+    "backend/league_projections/timing.py": "67895781a67fc005768fb223602f66184541e2eca3e7b4f9bdd6b750b3d0dd56"
+  },
+  "status": "captured",
+  "teams": 12,
+  "completed_weeks": 8,
+  "future_weeks": 6,
+  "aggregate": {
+    "team_weeks": 72,
+    "partial_player_weeks": 2131,
+    "unpriced_player_weeks": 168,
+    "fallback_team_weeks": 0,
+    "observed_actual_team_weeks": 0,
+    "observed_maxpf_team_weeks": 0,
+    "known_maxpf_floor_team_weeks": 0
+  },
+  "source_unchanged": true,
+  "network_reads": 37
+}

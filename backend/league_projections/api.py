@@ -142,6 +142,7 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
         result = json.loads(row["result_json"])
         if kind == "manifest":
             return jsonify({"run_id": run_id, "input_hash": row["input_hash"],
+                            "projection_coverage": [{"roster_id": t["roster_id"], "weeks": [{"week": w["week"], **w.get("projection_coverage", {})} for w in t["weeks"]]} for t in result["teams"]],
                             "joint_model_diagnostics": [{"roster_id": t["roster_id"], "weeks": [{"week": w["week"], **w.get("maxpf_floor", {})} for w in t["weeks"]]} for t in result["teams"]],
                             **{key: result[key] for key in ("schema", "model_version", "config", "seed", "iterations", "snapshot_hash", "source", "captured_at", "coverage", "warnings")}})
         out = io.StringIO()

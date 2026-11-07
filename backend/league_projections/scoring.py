@@ -92,3 +92,61 @@ def normalize(raw, required_keys, supported_keys, *, policy, positions, primary_
             "missing_keys": missing, "scoring_contract": policy, "aggregate_identity": identities,
             "raw_stats_hash": digest(supplied),
             "assumption_note": "Omitted common offense events are modeled as zero; aggregate agreement does not establish predictive accuracy or a per-event error bound." if identities else None}
+
+
+BEST_AVAILABLE = "sleeper_best_available_v1"
+
+
+def best_available(raw, coefficients, supported_keys, *, positions, primary_position=None):
+    """Score available contributions; never relabel an unknown event as confirmed 0.
+
+    The validated sparse offense convention can still contribute explicit model
+    assumptions. Failed aggregate diagnostics do not discard usable direct stats.
+    Missing penalties mean this subtotal is not a lower bound on the full score.
+    """
+    supplied = dict((raw or {}).get("stats") or {})
+    required = {key for key, value in coefficients.items() if decimal(value)}
+    supported = set(supported_keys)
+    populated = bool(set(supplied) & (supported | ANCHORS | {"fga", "fgm"}))
+    prior, warnings = {}, []
+    try:
+        if populated:
+            prior = normalize(raw or {}, required, supported, policy=CONTRACT,
+                              positions=positions, primary_position=primary_position)
+    except Unavailable as exc:
+        warnings.append(exc.reason)
+    stats, provenance = {}, {}
+    for key in sorted(required):
+        value, basis, method = None, "missing", "event_not_available"
+        if key in supplied and key in supported:
+            value, basis, method = decimal(supplied[key]), "direct", "provider_expected_event"
+        elif key in prior.get("stats", {}):
+            value = decimal(prior["stats"][key])
+            basis, method = (prior["stat_provenance"][key][k] for k in ("basis", "method"))
+        elif key == "fgmiss" and "fga" in supplied and "fgm" in supplied:
+            derived = decimal(supplied["fga"]) - decimal(supplied["fgm"])
+            if derived >= 0:
+                value, basis, method = derived, "derived", "fga_minus_fgm"
+            else:
+                warnings.append("inconsistent_kicker_projection")
+        elif populated and key in POSITION_BONUSES and primary_position in BONUS_PRIMARY_POSITIONS:
+            position, event = POSITION_BONUSES[key]
+            ambiguous = primary_position in {"FB", "DB"} and position in set(positions)
+            if not ambiguous and primary_position != position:
+                value, basis, method = decimal(0), "inapplicable", "native_primary_position_bonus_v1"
+            elif not ambiguous and event in supplied:
+                value, basis, method = decimal(supplied[event]), "derived", "native_primary_position_bonus_v1:" + event
+        if value is not None:
+            stats[key] = str(value)
+        provenance[key] = {"value": None if value is None else str(value), "basis": basis, "method": method}
+    missing = sorted(required - stats.keys())
+    # A zero subtotal with explicit consumed fields is usable. No matched fields
+    # is absent coverage, even if some unrelated forecast stats exist.
+    subtotal = sum((decimal(coefficients[k]) * decimal(v) for k, v in stats.items()), decimal(0)) if stats or not required else None
+    return {"stats": stats, "supported_keys": sorted(supported | stats.keys()), "stat_provenance": provenance,
+            "missing_keys": missing, "missing_negative_keys": [k for k in missing if decimal(coefficients[k]) < 0],
+            "known_points_subtotal": None if subtotal is None else str(subtotal),
+            "projection_status": "unpriced" if subtotal is None else "partial" if missing else "available",
+            "scoring_contract": BEST_AVAILABLE, "aggregate_identity": prior.get("aggregate_identity", []),
+            "raw_stats_hash": digest(supplied), "coverage_warnings": sorted(set(warnings)),
+            "assumption_note": "Available contributions only; omitted events may raise or lower the full score." if missing else prior.get("assumption_note")}

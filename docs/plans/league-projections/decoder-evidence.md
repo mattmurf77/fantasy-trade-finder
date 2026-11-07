@@ -42,4 +42,8 @@ With nearest score rounding, expected means can differ by at most half a scoring
 
 ## Primary-source boundary
 
-Observed [projection response](https://api.sleeper.app/projections/nfl/2026/10?season_type=regular), [official scoring categories](https://support.sleeper.com/en/articles/3998131-what-scoring-options-are-available), and [official API documentation](https://docs.sleeper.com/), checked2026-11-07UTC. The projection endpoint/formula is undocumented; commercial permission evidence remains a new-capability activation gate. Existing Sleeper integrations are unaffected. No source fallback, production activation, outreach or private league payload publication occurred.
+Observed [projection response](https://api.sleeper.app/projections/nfl/2026/10?season_type=regular), [official scoring categories](https://support.sleeper.com/en/articles/3998131-what-scoring-options-are-available), and [official API documentation](https://docs.sleeper.com/), checked2026-11-07UTC. The projection endpoint/formula is undocumented; the later user instruction authorizes best-available current-source use without another purchase/permission decision. Existing Sleeper integrations are unaffected. No source fallback, production activation, outreach or private league payload publication occurred.
+
+## Best-available continuation — engine v4
+
+The finite common-offense identity evidence above remains historical evidence for that decoder, not validation of every partial custom score. The selected policy now uses known raw contributions and exposes incomplete rows/coefficients. Known completed actuals and feasible Max PF assignments condition current-week outputs explicitly; future-only v3 arithmetic and RNG paths are unchanged. See implementation.md and current evidence.md.

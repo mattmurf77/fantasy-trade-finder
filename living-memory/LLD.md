@@ -1048,3 +1048,7 @@ Targets have random generations and CAS lease tokens; jobs have separate worker 
 The scoring contract is part of immutable config/source identity and saved-input scenario compatibility. API admission and workers both enforce policy approval, including revocation during simulation. Engine v3 prevents reuse of older joint-model results. Saved-input weight comparisons require a baseline produced by the current engine, while older stored baselines remain readable with their original version.
 
 Projection queue version fence: store admission pins server-owned expected engine and comparison-baseline versions in immutable input JSON; worker admission/recovery requires current engine plus the owned baseline actual version. Old/unversioned queued work fails without automatic rescheduling. FB/RB and DB/WR bonus aliases remain unknown when omitted; supplied alias values survive.
+
+### Weekly projection v4 continuation — 2026-11-07
+
+User-authorized best-available Sleeper scoring is the gated baseline. Unknown contributions remain visible, while known league-scored partial values and explicit completed-team fallback allow useful forecasts. Completed actual starters/bench semantics are preserved; observed team totals are deterministic. Feasible known Max PF bounds condition the mean explicitly through a positive-gap model, leaving future-only v3 output unchanged. Engine/version fences prevent older comparisons from silently changing models. See docs/plans/league-projections/implementation.md. No activation or existing trade-model change.
