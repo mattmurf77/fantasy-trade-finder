@@ -374,6 +374,8 @@ Contracts: [API](api-reference.md#value-core-cards-flag-tradevalue_core),
 
 ## Calibration (blind grading)
 
+Calibration can isolate a finite disjoint kicker/defense block when every such holding remains non-traded. It retains all active capacity costs and reserve/taxi exclusions, checks exact fixed-slot matching, rejects cross-domain eligibility and duplicate ownership, and records unknown availability without claiming a filled lineup. Common offensive legality/depth checks and both model policies remain unchanged. Fixed holdings have null market values and cannot enter offers or cut plans. Native ESPN group slots are validated against each player's eligibleSlots; fine-grained or range rules without an exact representation remain unsupported. Linked capture checks the stored importing account and fresh provider seat directly, so a missing flat member-cache row does not establish or deny ownership. [Repair contract](plans/calibration-coverage-repair/validation.md).
+
 The default-off [outlook comparison round](plans/outlook-calibration-round/architecture.md) uses `outlook_calibration.py` for namespaced persistence, balanced selection and a leased serial queue, and `outlook_calibration_adapter.py` for one authorized provider/input capture and both exact owner versions through frozen final gates. Admin preparation and public exposure have separate switches. Native decks are released between arms; only up to20 selected full proofs per arm persist privately. Existing Calibration history/normal serving remain separate.
 
 `backend/blind_grading.py` (flag `grading.blind`, on for every app user in

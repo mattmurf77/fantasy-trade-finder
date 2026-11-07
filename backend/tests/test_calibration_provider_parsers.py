@@ -42,7 +42,7 @@ def test_unknown_native_assets_fail_instead_of_disappear(xwalk,provider):
     with pytest.raises(GradingError):
         (ep if provider=='espn' else mp)((espn_raw if provider=='espn' else mfl_raw)(),xwalk)
 
-@pytest.mark.parametrize('slot',[16,17,10,99])
+@pytest.mark.parametrize('slot',[8,9,12,13,99])
 def test_espn_unsupported_slots_fail(xwalk,slot):
     raw=espn_raw();raw['settings']['rosterSettings']['lineupSlotCounts'][str(slot)]=1
     with pytest.raises(GradingError):ep(raw,xwalk)
@@ -122,7 +122,7 @@ def test_unrepresented_roster_positions_not_dropped(xwalk, provider):
         raw['teams'][0]['roster']['entries'][0]['playerPoolEntry']['player']['defaultPositionId'] = 5
     else:
         raw['players']['players']['player'][0]['position'] = 'PK'
-    with pytest.raises(GradingError, match='provider_roster_position_unsupported'):
+    with pytest.raises(GradingError, match='provider_player_eligibility_unsupported' if provider == 'espn' else 'provider_roster_position_unsupported'):
         (ep if provider == 'espn' else mp)(raw, xwalk)
 
 
@@ -139,3 +139,55 @@ def test_mfl_invalid_pick_coordinates_never_reach_persistence(xwalk, field, valu
     raw['futureDraftPicks']['futureDraftPicks']['franchise'] = {'id':'0002', 'futureDraftPick':pick}
     with pytest.raises(GradingError, match='pick_ownership_unavailable'):
         mp(raw, xwalk)
+
+
+@pytest.mark.parametrize('native,position,eligible', [
+    (5,'K',[17]),(9,'DL',[11,15]),(10,'DL',[11,15]),
+    (11,'LB',[10,15]),(12,'DB',[14,15]),(13,'DB',[14,15]),(16,'DEF',[16])])
+def test_espn_fixed_group_holding_needs_no_priced_crosswalk(xwalk,native,position,eligible):
+    raw=espn_raw()
+    raw['settings']['rosterSettings']['lineupSlotCounts'].update({str(s):1 for s in [10,11,14,15,16,17]})
+    raw['settings']['rosterSettings']['positionLimits']={'5':3}
+    raw['teams'][0]['roster']['entries'].append({'lineupSlotId':20,
+        'playerPoolEntry':{'player':{'id':999,'defaultPositionId':native,
+          'eligibleSlots':eligible+[20,21],'injuryStatus':'ACTIVE'}}})
+    snapshot=ep(raw,xwalk)
+    pid='espn-fixed:123:999'
+    assert pid in snapshot.rosters[0]['players']
+    assert snapshot.positions[pid]==position
+    metadata=snapshot.normalized_metadata({}, {'a':{'active':True},'b':{'active':True}})
+    assert metadata[pid]['fantasy_positions']==[position]
+    assert snapshot.capacity==9
+
+
+def test_espn_defender_with_offense_eligibility_refuses_partition(xwalk):
+    raw=espn_raw()
+    raw['settings']['rosterSettings']['lineupSlotCounts']['14']=1
+    raw['teams'][0]['roster']['entries'].append({'lineupSlotId':20,
+        'playerPoolEntry':{'player':{'id':999,'defaultPositionId':12,'eligibleSlots':[4,14,20,21]}}})
+    with pytest.raises(GradingError,match='provider_player_eligibility_unsupported'):ep(raw,xwalk)
+
+
+@pytest.mark.parametrize('value',[True, [], {}, 1.5, float('nan'), float('inf'), 'NaN', '1.5'])
+def test_fixed_native_identity_requires_canonical_integer(xwalk,value):
+    raw=espn_raw();raw['settings']['rosterSettings']['lineupSlotCounts']['17']=1
+    raw['teams'][0]['roster']['entries'].append({'lineupSlotId':20,
+        'playerPoolEntry':{'player':{'id':value,'defaultPositionId':5,'eligibleSlots':[17,20,21]}}})
+    with pytest.raises(GradingError,match='provider_roster_asset_unmapped'):ep(raw,xwalk)
+
+
+def test_fixed_native_negative_def_identity_is_preserved(xwalk):
+    raw=espn_raw();raw['settings']['rosterSettings']['lineupSlotCounts']['16']=1
+    raw['teams'][0]['roster']['entries'].append({'lineupSlotId':20,
+        'playerPoolEntry':{'player':{'id':'-0123','defaultPositionId':16,'eligibleSlots':[16,20,21]}}})
+    assert 'espn-fixed:123:-123' in ep(raw,xwalk).rosters[0]['players']
+
+
+@pytest.mark.parametrize('field,value,code',[('defaultPositionId',True,'provider_roster_position_unsupported'),
+    ('defaultPositionId',5.0,'provider_roster_position_unsupported'),
+    ('eligibleSlots',[17,False,20],'provider_player_eligibility_unsupported')])
+def test_fixed_native_enums_cannot_use_boolean_numeric_aliases(xwalk,field,value,code):
+    raw=espn_raw();raw['settings']['rosterSettings']['lineupSlotCounts']['17']=1
+    player={'id':999,'defaultPositionId':5,'eligibleSlots':[17,20,21],field:value}
+    raw['teams'][0]['roster']['entries'].append({'lineupSlotId':20,'playerPoolEntry':{'player':player}})
+    with pytest.raises(GradingError,match=code):ep(raw,xwalk)

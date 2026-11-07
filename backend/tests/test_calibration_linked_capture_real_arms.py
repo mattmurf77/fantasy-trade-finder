@@ -11,13 +11,14 @@ from backend.tests.test_owner_generator_routes import harness,owner_harness,ME
 from backend.tests.test_owner_only_routes import exclusive,large_exclusive
 LEAGUE='12345'
 
-@pytest.mark.parametrize('platform,picks_enabled,race',[('espn',False,False),('espn',True,False),('mfl',False,False),('mfl',True,False),('mfl',True,True)])
-def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,monkeypatch,platform,picks_enabled,race):
+@pytest.mark.parametrize('platform,picks_enabled,race,fixed_groups',[('espn',False,False,False),('espn',True,False,False),('mfl',False,False,False),('mfl',True,False,False),('mfl',True,True,False),('espn',False,False,True)])
+def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,monkeypatch,platform,picks_enabled,race,fixed_groups):
     _,engine,sess,_,league=large_exclusive
     with engine.begin() as conn:
         conn.execute(db.leagues_table.insert().values(sleeper_league_id=LEAGUE,
             platform=platform,user_id=ME,espn_my_team_id=1,espn_auth='public',platform_my_team='0001',platform_auth='public',platform_host='www1'))
-        conn.execute(db.league_members_table.insert().values(league_id=LEAGUE,user_id=ME,roster_data=json.dumps(sess['user_roster'])))
+        # Own flat member row is deliberately absent: validated provider
+        # account binding and fresh native seat are authoritative here.
     native={p.id:str(i) for i,p in enumerate(sess['players'],1)}
     native['raw-only-bench']='9999'
     cross=Crosswalk(by_name_pos={},by_espn_id={v:k for k,v in native.items()},by_mfl_sleeper={v:k for k,v in native.items()})
@@ -27,6 +28,13 @@ def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,
         for i,m in teams:
             holdings=list(m.roster)+(['raw-only-bench'] if i==1 else [])
             raw['teams'].append({'id':i,'roster':{'entries':[{'lineupSlotId':20,'playerPoolEntry':{'player':{'id':int(native[p]),'fullName':p,'defaultPositionId':3,'eligibleSlots':[4,5,7,20,21,23]}}} for p in holdings]}})
+        if fixed_groups:
+            raw['settings']['rosterSettings']['lineupSlotCounts'].update({'10':2,'11':2,'14':2,'15':1,'17':1})
+            for team in raw['teams']:
+                for offset,(position,eligible) in enumerate([(5,[17]),(9,[11,15]),(10,[11,15]),(11,[10,15]),(12,[14,15]),(13,[14,15])]):
+                    team['roster']['entries'].append({'lineupSlotId':20,'playerPoolEntry':{'player':{
+                        'id':90000+team['id']*10+offset,'defaultPositionId':position,
+                        'eligibleSlots':eligible+[20,21],'injuryStatus':'ACTIVE'}}})
         monkeypatch.setattr(provider.espn,'fetch_league',lambda *a,**k:copy.deepcopy(raw))
         remap={m.user_id:f'espn:{LEAGUE}.t{i}' for i,m in teams if i!=1}
     else:
@@ -76,6 +84,10 @@ def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,
         assert rows[0]['original_user_id']==ME
         assert rows[0]['pick_id'] in captured.roster_context.teams[f'mfl:{LEAGUE}.f0002'].roster
         assert rows[0]['pick_id'] not in captured.roster_context.teams[ME].roster
+    if fixed_groups:
+        assert captured.source['fixed_lineup']['fixed_slots']==['LB','LB','DL','DL','DB','DB','IDP_FLEX','K']
+        assert captured.source['fixed_lineup']['assets']
+        assert not set(captured.source['fixed_lineup']['assets']) & captured.owner_context['players'].keys()
     before=copy.deepcopy(captured.source)
     for name in ('load_member_rankings','load_league_preferences_bulk','load_asset_preferences','load_draft_picks'):
         monkeypatch.setattr(server,name,lambda *a,**k:pytest.fail('read after capture'))
