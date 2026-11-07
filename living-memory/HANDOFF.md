@@ -1,31 +1,30 @@
 # HANDOFF — Fantasy Trade Finder
 
-> **Purpose:** cancellation CI repair and authorized release sequence.
+> **Purpose:** mobile passive preparation candidate and release handoff.
 > **Read at:** session start. **Write at:** checkpoint/session end.
-> Companion files: [TEST_LEDGER.md](TEST_LEDGER.md), [scope](../docs/plans/owner-work-cancellation/README.md).
+> Companion files: [TEST_LEDGER.md](TEST_LEDGER.md), [scope](../docs/plans/mobile-context-preparation/scope.md).
 
-## Current State — 2026-11-07
-
-**Where I stopped**
-- PR618, branch `perf/owner-work-cancellation`, base `974452ff`. Cancellation preserves current-job search and gates; aborts never return partial/empty success.
-- CI42357505270 failed four assertions: stale pipeline pin and breaker fixture dead before entry. Repair appends pipeline 13, digest1939e93dc5fd7de5; tests cover late revocation and early cancellation. 227 focused tests pass.
-- Prior affected suite: 1,302 pass/2 skip; independent 23 controls; 7,213 ordered native/final/public/durable cards exact. Only runtime CI repair is version/pin metadata.
-
-**In flight**
-- Matthew authorized PR611/618 through release. Root owns merge/deploy and Calibration rebuilding; old hold superseded. Final integrated-head CI required.
-- Pipeline 13 invalidates older normal stored pages. Calibration’s whole-backend hash requires rebuilding affected unexposed comparisons; exposed/answered history stays frozen.
-- PR617 all four CI checks green at `7c6dacad`; not required for 618. Future integration must keep private pricing/cancellation arguments and exclude callback from serialized inputs.
-
-**Blocked on**
-- The 200 ms target remains OPEN. Cold work still does full search; local foreground detection is not global admission/fairness.
-
-**Don't repeat**
-- No worker-side production mutation, proof reuse, decoder activation or budget reduction. No synthetic/server 200 ms claim.
+---
 
 ## Table of Contents
-- [Current State — 2026-11-07](#current-state--2026-11-07)
-- [Handoff Template (for future sessions)](#handoff-template-for-future-sessions)
 
-## Handoff Template (for future sessions)
+- [Current State 2026-11-07](#current-state-2026-11-07)
 
-Replace four capped buckets; keep below 2,000 bytes.
+---
+
+## Current State 2026-11-07
+
+**Where I stopped**
+- Branch `perf/mobile-exact-context-switches`, base `7e52047e`. Fresh passive preparation overlaps preference/session readiness and does not await disk hydration. Every poll binds captured format/revision; focus/foreground cleanup rejects obsolete responses.
+- Serialized disk barriers, per-key hydration fences and disk-only invalidation prevent discarded page revival. Format eviction remains; pending-write fence includes the local mirrors.
+- No backend changes: Calibration source revision, scheduled projections and all search/quality budgets stay intact. Exact selected-model/fair handoffs and preview gates are unchanged.
+
+**In flight**
+- Local TypeScript, all 165 mobile CI-glob scripts and test-ID lint pass. Independent review: 26 JS plus four external backend controls; no blocker. Root owns final-head CI, merge and TestFlight178; no production action by this worker.
+
+**Blocked on**
+- Physical tap-to-visible acceptance remains open. Node lifecycle tests cannot establish 200 ms. Fresh changed-input computation can still take seconds.
+- Existing scoring application queue is not account/league-generation bound; this patch protects passive pages, not all format request races.
+
+**Don't repeat**
+- No simulator/Maestro, stale-page speedups, selected-request filtering, preview bypass, proof reuse or fast-decoder activation.

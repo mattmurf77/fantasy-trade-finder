@@ -20,12 +20,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 import { onlineManager } from '@tanstack/react-query';
-import { setOnWriteRequest } from '../api/client';
+import { getSessionRevision, setOnWriteRequest } from '../api/client';
 import { invalidateTradeSearchHandoffs } from './tradeSearchHandoff';
 import { generateTrades, getTradeStatus, type GenerateBody, type PagedTradeJobSnapshot } from '../api/trades';
 import {
   DEVICE_PAGE_KEY_PREFIX,
   devicePageFrom,
+  devicePageScope,
   discardsDevicePages,
   parseDevicePage,
   refreshDue,
@@ -48,17 +49,25 @@ let discardedAt = 0;
 let hydration: Promise<void> | null = null;
 // A swipe rewrites the page; the disk copy trails it by this much.
 const PERSIST_DEBOUNCE_MS = 300;
+// A dispatched storage write cannot be canceled. Clear must run after it,
+// and a newer account/page write after that clear, in the same order.
+let storageTail: Promise<void> = Promise.resolve();
+function storageWrite(write: () => Promise<void>): Promise<void> {
+  const next = storageTail.then(write);
+  storageTail = next.catch(() => {});
+  return next;
+}
 
 function persist(key: string) {
   const t = persistTimers.get(key);
   if (t) clearTimeout(t);
   persistTimers.set(key, setTimeout(() => {
     persistTimers.delete(key);
-    const page = pages.get(key);
-    const write = page
-      ? AsyncStorage.setItem(key, JSON.stringify(page))
-      : AsyncStorage.removeItem(key);
-    write.catch(() => { /* memory still holds it; the bound ages it out */ });
+    void storageWrite(() => {
+      // Read at execution, not enqueue: queued obsolete snapshots never win.
+      const page = pages.get(key);
+      return page ? AsyncStorage.setItem(key, JSON.stringify(page)) : AsyncStorage.removeItem(key);
+    }).catch(() => { /* memory still holds it; the bound ages it out */ });
   }, PERSIST_DEBOUNCE_MS));
 }
 
@@ -67,6 +76,7 @@ export function hydrateDevicePages(): Promise<void> {
   if (!hydration) {
     hydration = (async () => {
       const startEpoch = epoch;
+      const startKeyEpochs = new Map(keyEpochs);
       try {
         const keys = (await AsyncStorage.getAllKeys())
           .filter((k) => k.startsWith(DEVICE_PAGE_KEY_PREFIX) || k.startsWith('ftf_trade_device_page_v1:'));
@@ -75,7 +85,9 @@ export function hydrateDevicePages(): Promise<void> {
         if (epoch !== startEpoch) return; // discarded while reading
         for (const [key, raw] of rows) {
           const page = parseDevicePage(raw);
-          if (page && !pages.has(key)) pages.set(key, page);
+          if (page && !pages.has(key)
+              && (keyEpochs.get(key) ?? 0) === (startKeyEpochs.get(key) ?? 0)
+              && page.validated_at >= Math.max(discardedAt, keyDiscardedAt.get(key) ?? 0)) pages.set(key, page);
         }
       } catch { /* no device page this launch */ }
     })();
@@ -94,8 +106,8 @@ export function readDevicePage(key: string | null): DevicePage | null {
 export function discardDevicePage(key: string, asOf = Date.now()) {
   keyEpochs.set(key, (keyEpochs.get(key) ?? 0) + 1);
   keyDiscardedAt.set(key, Math.max(keyDiscardedAt.get(key) ?? 0, asOf));
-  if (!pages.delete(key)) return;
-  persist(key);
+  pages.delete(key);
+  persist(key); // Also remove a disk-only page rejected during hydration.
 }
 
 /** Keep `page` for `key`, or discard the key's page when it is null (a
@@ -135,11 +147,11 @@ export async function clearDevicePages(): Promise<void> {
   activeScopes.clear();
   for (const t of persistTimers.values()) clearTimeout(t);
   persistTimers.clear();
-  try {
+  await storageWrite(async () => {
     const keys = (await AsyncStorage.getAllKeys())
       .filter((k) => k.startsWith(DEVICE_PAGE_KEY_PREFIX) || k.startsWith('ftf_trade_device_page_v1:'));
     if (keys.length > 0) await AsyncStorage.multiRemove(keys);
-  } catch { /* best effort; the keys are per user, and the bound ages them */ }
+  }).catch(() => { /* best effort; the keys are per user, and the bound ages them */ });
 }
 
 function discardAllDevicePages() {
@@ -148,10 +160,16 @@ function discardAllDevicePages() {
   // its old throttle must not suppress preparation for the new inputs.
   lastAttemptAt.clear();
   discardedAt = Math.max(discardedAt, Date.now());
-  for (const key of [...pages.keys()]) {
-    pages.delete(key);
-    persist(key);
-  }
+  pages.clear();
+  for (const t of persistTimers.values()) clearTimeout(t);
+  persistTimers.clear();
+  // Include pages not yet hydrated. Queue this barrier before later valid
+  // writes so a disk-only pre-mutation page cannot return on next launch.
+  void storageWrite(async () => {
+    const keys = (await AsyncStorage.getAllKeys())
+      .filter((k) => k.startsWith(DEVICE_PAGE_KEY_PREFIX) || k.startsWith('ftf_trade_device_page_v1:'));
+    if (keys.length > 0) await AsyncStorage.multiRemove(keys);
+  }).catch(() => { /* best effort; the existing age bound still applies */ });
 }
 
 // A fresh page may be prepared when all overlapping writes have settled.
@@ -163,6 +181,23 @@ export function onTradePageInputsSettled(listener: () => void): () => void {
 }
 export function notifyTradePageInputsSettled(): void {
   if (pendingTradeWrites === 0) settledListeners.forEach(listener => listener());
+}
+
+/** Hold the existing write fence through a server write's local mirrors too.
+ * API settlement alone is earlier than scoring-format persistence/commit. */
+export function beginTradePageInputTransition(): () => void {
+  pendingTradeWrites++;
+  invalidateTradeSearchHandoffs();
+  discardAllDevicePages();
+  let finished = false;
+  return () => {
+    if (finished) return;
+    finished = true;
+    pendingTradeWrites = Math.max(0, pendingTradeWrites - 1);
+    invalidateTradeSearchHandoffs();
+    discardAllDevicePages();
+    notifyTradePageInputsSettled();
+  };
 }
 setOnWriteRequest((path, phase) => {
   if (!discardsDevicePages(path)) return;
@@ -176,6 +211,7 @@ setOnWriteRequest((path, phase) => {
 export interface DevicePageTarget {
   key: string;
   scope: string;
+  format: '1qb_ppr' | 'sf_tep';
   /** The organic request, exactly as the tap sends it. */
   request: GenerateBody;
 }
@@ -191,7 +227,14 @@ export async function refreshDevicePage(
   now = Date.now(),
   shouldContinue: () => boolean = () => true,
 ): Promise<void> {
-  const attemptKey = JSON.stringify([target.key, target.scope]);
+  const { key, scope, format } = target;
+  if ((format !== '1qb_ppr' && format !== 'sf_tep')
+      || devicePageScope(target.request) !== scope) return;
+  const request = { ...target.request };
+  const requestOptions = { ...PREWARM_REQUEST,
+    headers: { ...PREWARM_REQUEST.headers, 'X-Scoring-Format': format } };
+  const startRevision = getSessionRevision();
+  const attemptKey = JSON.stringify([key, scope]);
   const previous = inFlight.get(attemptKey);
   if (previous && !previous()) lastAttemptAt.delete(attemptKey);
   if (pendingTradeWrites || !shouldContinue() || AppState.currentState !== 'active' || !onlineManager.isOnline()
@@ -200,17 +243,18 @@ export async function refreshDevicePage(
     return;
   }
   lastAttemptAt.set(attemptKey, now);
-  activeScopes.set(target.key, target.scope);
+  activeScopes.set(key, scope);
   const startEpoch = epoch;
-  const startKeyEpoch = keyEpochs.get(target.key) ?? 0;
+  const startKeyEpoch = keyEpochs.get(key) ?? 0;
   const current = () => shouldContinue() && AppState.currentState === 'active' && onlineManager.isOnline()
-    && epoch === startEpoch && (keyEpochs.get(target.key) ?? 0) === startKeyEpoch
-    && activeScopes.get(target.key) === target.scope;
+    && getSessionRevision() === startRevision
+    && epoch === startEpoch && (keyEpochs.get(key) ?? 0) === startKeyEpoch
+    && activeScopes.get(key) === scope;
   inFlight.set(attemptKey, current);
   let res: PagedTradeJobSnapshot;
   try {
     // #393 M2 (D2): a background refresh; its 402 opens nothing.
-    res = await generateTrades(target.request, {}, PREWARM_REQUEST);
+    res = await generateTrades(request, {}, requestOptions);
     // Session-init can still be building this job. Previously its first
     // running response was discarded and the 60-second throttle prevented
     // adopting the completed page before the first calculator tap. Follow
@@ -227,14 +271,14 @@ export async function refreshDevicePage(
       await new Promise<void>((resolve) => setTimeout(resolve, delay));
       if (!current()) return;
       if (Date.now() >= pollUntil) break;
-      res = await getTradeStatus(res.job_id, { deck: res.deck_id || res.job_id, cursor: 0 }, PREWARM_REQUEST);
+      res = await getTradeStatus(res.job_id, { deck: res.deck_id || res.job_id, cursor: 0 }, requestOptions);
     }
   } catch (error) {
     // A passive request cannot claim a free preview. Its server refusal
     // revokes any previously held page too; the tap takes the normal gate.
     const denied = error as { status?: number; body?: { error?: string } };
     if (current() && denied.status === 409 && denied.body?.error === 'prewarm_requires_tap') {
-      discardDevicePage(target.key);
+      discardDevicePage(key);
     }
     return;
   } finally {
@@ -247,5 +291,5 @@ export async function refreshDevicePage(
   // A discard happened while it was out: what it answered is superseded.
   if (!current()) return;
   const answeredAt = Date.now();
-  saveDevicePage(target.key, devicePageFrom(res, { scope: target.scope, validatedAt: answeredAt }), answeredAt);
+  saveDevicePage(key, devicePageFrom(res, { scope, validatedAt: answeredAt }), answeredAt);
 }

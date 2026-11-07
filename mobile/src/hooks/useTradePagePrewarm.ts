@@ -2,7 +2,8 @@ import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FAIRNESS_PREF_KEY, fairnessOnFromPref, fairnessThresholdFor } from '../api/tradePregen';
-import { hydrateDevicePages, refreshDevicePage, onTradePageInputsSettled } from '../state/devicePageStore';
+import { onTradePageInputsSettled } from '../state/devicePageStore';
+import { prepareTradePage } from '../state/tradePagePreparation';
 import { useSession } from '../state/useSession';
 import { useFlag, useFeatureFlags } from '../state/useFeatureFlags';
 import { devicePageKey, devicePageScope } from '../utils/devicePage';
@@ -37,19 +38,13 @@ export function useTradePagePrewarm(): void {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const prepare = (attempt: number) => {
       const stillCurrent = () => attempt === revision && current();
-      void Promise.all([
-        hydrateDevicePages(),
-        AsyncStorage.getItem(FAIRNESS_PREF_KEY).catch(() => null),
-      ]).then(async ([, raw]) => {
-        if (!stillCurrent()) return;
-        // Foreground work joins the session-init already started by App.tsx;
-        // never race its token/format replacement with a generation request.
-        await useSession.getState().revalidateSession();
-        if (!stillCurrent()) return;
+      void prepareTradePage(key, async () => {
+        const raw = await AsyncStorage.getItem(FAIRNESS_PREF_KEY).catch(() => null);
         const request = { league_id: leagueId!, fairness_threshold: fairnessThresholdFor(fairnessOnFromPref(raw)) };
         const scope = devicePageScope(request);
-        if (scope) return refreshDevicePage({ key, scope, request }, Date.now(), stillCurrent);
-      }).catch(() => { /* background preparation never blocks navigation */ });
+        return scope && (format === '1qb_ppr' || format === 'sf_tep')
+          ? { key, scope, format, request } : null;
+      }, stillCurrent);
     };
     prepare(revision);
     let lastEditWarm: number | undefined;

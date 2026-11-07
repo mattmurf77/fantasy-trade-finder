@@ -1,3 +1,8 @@
+## 2026-11-07 — Mobile passive preparation lifecycle
+
+- Executed shared helper/tab/focus/foreground checks prove preference/session readiness overlap, independence from unresolved hydration, post-readiness token binding and stale context rejection. Ten delayed-storage/context controls cover per-key and global disk-only invalidation, already-dispatched writes followed by clear/new page, header consistency and replacement attempt ownership. Three format-application controls cover HTTP/local-mirror gap and failure cleanup.
+- TypeScript, test-ID lint and all 165 mobile CI-glob scripts pass, including device-page, preview/paywall and 28 exact selected-model/fair-handoff cases. Results are recorded in [scope](../docs/plans/mobile-context-preparation/scope.md). Independent reviewer separately executed 26 JS and four backend route/capture controls; backend verification stayed external, with no backend source changes.
+- No simulator/Maestro (D-056), production load or device timing test. The universal 200 ms target remains open; stale queued format application across account changes remains outside this passive-page fix.
 ## 2026-11-07 — Bounded forecast yielding during trade generation
 
 - Candidate from main `7e52047e`: both projection cron paths inject a process-local live-trade signal; the existing simulator checkpoints yield at most ten 100 ms sleeps and preserve the original cancellation/deadline, weekly cadence, full draw count and atomic result publication. No trade math, budget or device-cache changes.

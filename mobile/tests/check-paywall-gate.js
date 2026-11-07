@@ -1072,8 +1072,8 @@ check('8b. D2 [shape]: the pinned background set; nothing else in mobile/src is 
   }
   const code = strip(read(TRADES));
   const prewarm = strip(read('state/devicePageStore.ts'));
-  assert(/generateTrades\(target\.request, \{\}, PREWARM_REQUEST\)/.test(prewarm)
-    && /getTradeStatus\(res\.job_id, \{ deck: res\.deck_id \|\| res\.job_id, cursor: 0 \}, PREWARM_REQUEST\)/.test(prewarm),
+  assert(/generateTrades\(request, \{\}, requestOptions\)/.test(prewarm)
+    && /getTradeStatus\(res\.job_id, \{ deck: res\.deck_id \|\| res\.job_id, cursor: 0 \}, requestOptions\)/.test(prewarm),
     'both passive paths must use the explicit server prewarm guard');
   assert(/await getTradeStatus\(snap\.job_id, \{ deck: snap\.deck_id, cursor: requested \}\)/.test(code),
     'the prefetch is a paged getTradeStatus call (the default makes it background)');
