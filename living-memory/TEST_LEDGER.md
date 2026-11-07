@@ -1,3 +1,9 @@
+## 2026-11-07 — PR618 CI lifecycle fixture and pipeline identity repair
+
+- CI42357505270 failed four assertions: three stale pipeline-digest checks and a breaker fixture that made work nonlive at entry while expecting stamping. No trade/proof parity failure was reported. Append-only pipeline13=`1939e93dc5fd7de5` preserves versions1–12; late-stamp revocation now tests the intended publication fence, with separate early cancellation coverage.
+- **227 passed in17.17s**: digest/breaker, normal stored-page behavior, admission/supersession and cancellation controls. Root independently ran all digest/breaker tests: **39 passed in4.45s**, confirming prior pins and publication fences remain intact. A fresh selected worker retained all82 ordered native/final/public/durable cards. Only runtime change after reviewedaf449645 is the pipeline version/pin metadata. Exact-head fullCI rerun remains required.
+- Explicit release authorization supersedes the old hold. Root coordinates611/618 integration, deployment, normal page regeneration and affected unexposed Calibration rebuild; frozen exposed/answered history stays intact. PR617 all4CIgreen, independent and unnecessary for618. [Updated scope](../docs/plans/owner-work-cancellation/README.md).
+
 ## 2026-11-07 — Cooperative cancellation of obsolete owner work (unmerged)
 
 - Fresh-main `974452ff` candidate stops revoked owner generation/fresh final occurrences without partial/empty success or replacement-job cancellation. Prepared work yields to local foreground requests, aborts staging and refunds only the matching interactive-deferred attempt. Durable lease/account checks are throttled; check outages propagate explicitly. Full model budgets, order, fresh final math and quality/publication gates remain.

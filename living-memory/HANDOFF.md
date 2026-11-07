@@ -1,25 +1,26 @@
 # HANDOFF — Fantasy Trade Finder
 
-> **Purpose:** current isolated cancellation work and release hold.
+> **Purpose:** cancellation CI repair and authorized release sequence.
 > **Read at:** session start. **Write at:** checkpoint/session end.
 > Companion files: [TEST_LEDGER.md](TEST_LEDGER.md), [scope](../docs/plans/owner-work-cancellation/README.md).
 
 ## Current State — 2026-11-07
 
 **Where I stopped**
-- Branch `perf/owner-work-cancellation`, fresh main `974452ff`. Owner search/fresh final evaluation cooperatively stop on revoked job/epochs. Prepared work yields to local interactive requests; matching claim deferral refunds only its own attempt.
-- Typed cancellation escapes bakeoff and selected-request error handlers. Claim-check outages cannot become empty successful inventories. Existing full budgets, ordering, math and publication gates remain.
-- Independent final 23 controls pass; ten runtime hashes stable. Large synthetic exact native/final/public/durable parity covers 7,213 cards. See TEST_LEDGER for final evidence.
+- PR618, branch `perf/owner-work-cancellation`, base `974452ff`. Cancellation preserves current-job search and gates; aborts never return partial/empty success.
+- CI42357505270 failed four assertions: stale pipeline pin and breaker fixture dead before entry. Repair appends pipeline 13, digest1939e93dc5fd7de5; tests cover late revocation and early cancellation. 227 focused tests pass.
+- Prior affected suite: 1,302 pass/2 skip; independent 23 controls; 7,213 ordered native/final/public/durable cards exact. Only runtime CI repair is version/pin metadata.
 
 **In flight**
-- Calibration activated on `974452ff`: 11 current ready,5 rules/access refusals. Keep this candidate and PR615/617 unmerged; parent owns source-hash sequencing.
-- Exact-head full CI remains required. This unit is independent of held envelope/pricing work; later combination must exclude private `_check_current` from user-input inventory.
+- Matthew authorized PR611/618 through release. Root owns merge/deploy and Calibration rebuilding; old hold superseded. Final integrated-head CI required.
+- Pipeline 13 invalidates older normal stored pages. Calibration’s whole-backend hash requires rebuilding affected unexposed comparisons; exposed/answered history stays frozen.
+- PR617 all four CI checks green at `7c6dacad`; not required for 618. Future integration must keep private pricing/cancellation arguments and exclude callback from serialized inputs.
 
 **Blocked on**
-- Universal tap-to-visible 200ms remains OPEN. Cold current work still performs full search. Process-local foreground detection is not global admission/fairness.
+- The 200 ms target remains OPEN. Cold work still does full search; local foreground detection is not global admission/fairness.
 
 **Don't repeat**
-- No production/flag change, proof reuse, fast decoder activation or candidate-budget reduction. No speed claim from synthetic/server evidence.
+- No worker-side production mutation, proof reuse, decoder activation or budget reduction. No synthetic/server 200 ms claim.
 
 ## Table of Contents
 - [Current State — 2026-11-07](#current-state--2026-11-07)
@@ -27,4 +28,4 @@
 
 ## Handoff Template (for future sessions)
 
-Replace the four capped buckets above; keep this file below 2,000 bytes.
+Replace four capped buckets; keep below 2,000 bytes.

@@ -1,6 +1,6 @@
 # Cooperative cancellation of obsolete owner work
 
-2026-11-07. Isolated from main `974452ff`. Review candidate only; keep unmerged during the Calibration release. This unit does not depend on PR615/617 or activate their unwired interfaces.
+2026-11-07. Isolated from main `974452ff`. Matthew authorized release after exact-head CI and coordinated Calibration rebuilding; root owns merge/deployment. This unit does not depend on PR615/617 or activate their unwired interfaces.
 
 ## Problem and bounded change
 
@@ -25,13 +25,19 @@ Interactive preemption first aborts staging, then atomically returns only the ma
 
 Verification covers all four owner model entrypoints, exact full-proof/report parity with an always-live callback, cancellation before construction and during final occurrences, actual superseded worker/replacement completion, real prepared interruption/cleanup/retry, repeated deferral without retry exhaustion, and stopped/reassigned token fencing. Large synthetic worker comparisons must retain all ordered native/final/public/durable proof digests and full inventories. Timings diagnose overhead only; they are not a speedup claim.
 
-Before merge, finish independent review, affected suites and exact-head CI. Keep this change unmerged until the parent coordinates the Calibration source-hash boundary: even behavior-preserving backend changes invalidate eligible unexposed comparison sources. No production operation is part of this unit. Rollback is a code revert; previously running threads are not reloaded in place. No data migration is introduced.
+Release requires independent review and passing exact-head CI, then root-coordinated integration/deployment and rebuilding affected Calibration comparisons. The earlier hold is superseded by Matthew’s explicit instruction to continue through release. `DECK_PIPELINE_VERSION` advances12→13 with append-only digest`1939e93dc5fd7de5`, so older normal stored trade pages become misses and regenerate. Calibration separately hashes the whole backend: eligible unexposed comparisons must be rebuilt against the final deployed source; exposed/answered history remains frozen. If PR611 integrates first, rerun exact-head checks on the combined release. This worker performs no production operation. Rollback is a code revert and a coordinated currentness/rebuild check; running threads are not reloaded in place. No data migration is introduced.
 
 ## Recorded evidence
 
 Final affected suite: **1,302 passed,2 skipped in134.82s** across46 files. Independent final verification: **23 passed3.22s**, including seven reviewer controls plus sixteen builder cases, with all ten runtime hashes stable. The reviewer reported no outstanding reproduced defect.
 
 Final actual-worker control/candidate comparison preserves **7,213 ordered cards** (6,430 organic,701 opponent,82 receive), complete native/final/public/durable proof digests and generation reports. Generated IDs/expiry and report elapsed time alone are excluded. Every persisted served valuation is reread from isolated SQLite. Synthetic first publication19.164→19.454s,1.952→1.865s,.385→.431s is mixed; no speedup/overhead bound or200ms claim follows from this one local diagnostic pair. Source hashes remained unchanged during the final sample.
+
+## CI repair and integration
+
+CI42357505270 found four failures: the required deck-pipeline pin was stale (three digest assertions), and a breaker test modeled “dies mid-block” by making the job dead at entry. The repair adds pipeline13 without editing historical pins; the test now revokes the real job during stamping and still requires zero visible cards/impressions. A separate early-cancellation test requires zero stamp/narration calls. **227 passed in17.17s** cover the failing files, stored-page behavior, job admission/supersession and all cancellation regressions. The only runtime delta from the already reviewed cancellation commit is the version/pin metadata; generation/math/gates remain unchanged. Root independently reviewed the exact diff and passed all39 digest/breaker tests in4.45s; no publication fence was weakened. A fresh selected worker again preserved82 ordered native/final/public/durable cards. Full exact-head CI is rerun after the repair.
+
+PR617 is independently green at`7c6dacad` and includes PR615’s copied input-envelope module/tests unchanged in commit`d7af9735`, before extending them. It is not a prerequisite for PR618. A read-only merge-tree identifies constructor and living-memory conflicts; eventual integration must keep both private pricing and cancellation parameters, exclude `_check_current` from serialized model inputs and deliberately forward execution control if that interface is routed. No such integration is included here.
 
 ## Next implementation slice
 

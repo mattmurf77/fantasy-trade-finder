@@ -4515,7 +4515,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 12
+DECK_PIPELINE_VERSION = 13
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4650,6 +4650,7 @@ DECK_PIPELINE_PINS = {
     10: "cdabd9935a58d51d",  # Immutable scalar proof projections avoid repeated JSON reads; no terms/order/evaluation change.
     11: "8a3fa8db29d87e39",  # Evidence-bound bilateral v3 and private input capture.
     12: "3b5a7de53dd0081e",  # Frozen calibration suppression input seam; organic defaults preserved.
+    13: "1939e93dc5fd7de5",  # Cooperative cancellation; current-job terms/order preserved.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
