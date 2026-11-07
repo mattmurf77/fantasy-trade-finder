@@ -118,14 +118,23 @@ function world({ held = false, failures = limit, emptyResponses = 0, afterReques
       setFairDeck: () => {}, pendingScrollToDeckRef: {}, canvasResultsLive: false,
       handoffSearchRef: { current: null }, claimPendingSearch: () => { const p = pending; pending = null; return p; },
       claimSearch: () => {}, deckSearchRef: {}, generateMutation: { mutate: args => mutations.push(args) },
+      deckEpochRef: { current: 1 }, deviceKey: 'synthetic', modelAttemptRef: { current: 0 },
+      tradeSearchContextIdentity: () => 'ready', tradeRequestDeadline: () => 30000,
+      canvasSelectionRef: { current: null }, traceFor: () => ({ tapAt: 10 }), monotonicNow: () => 10,
+      leagueId: 'L', effectiveFairness: 0.5,
       uuidv4: () => { throw Error('must use the explicit retry tap id'); },
     };
+    context.modelRequest = bind('modelRequest', context);
     context.dispatchGenerate = bind('dispatchGenerate', context);
     const handle = bind('handleFindTrades', context);
     find(w.view(false, handle), 'trades.deck-error.retry').props.onPress();
     assert.equal(events.length, 1); assert.equal(events[0].source, 'deck_error_retry');
     assert.equal(mutations.length, 1); assert.equal(mutations[0].repeat, true);
-    assert.equal(mutations[0].searchId, 'fresh-search'); assert.equal(context.lastModelRequestRef.current, saved);
+    assert.equal(mutations[0].searchId, 'fresh-search');
+    assert.deepEqual(Array.from(mutations[0].request.pinned_give_players), saved.pinned_give_players);
+    assert.equal(mutations[0].request.opponent_user_id, saved.opponent_user_id);
+    assert.equal(mutations[0].request.trade_intent, saved.trade_intent);
+    assert.equal(context.lastModelRequestRef.current, mutations[0].request);
   });
   console.log(`${passed} first-page failure checks passed`);
 })().catch(error => { console.error(error); process.exit(1); });
