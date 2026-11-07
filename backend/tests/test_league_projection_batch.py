@@ -9,7 +9,7 @@ def scheduled(engine,monkeypatch):
     monkeypatch.setattr(batch,'is_enabled',lambda key:True)
     options={**batch.settings(),'policy_approved':True,'model':config()}
     monkeypatch.setattr(batch,'settings',lambda:options)
-    monkeypatch.setattr(service,'wake',lambda *a:None)
+    monkeypatch.setattr(service,'wake',lambda *a, **kw:None)
     with engine.begin() as conn:
         conn.execute(db.leagues_table.insert().values(sleeper_league_id='123',user_id='account',platform='sleeper',season='2026'))
     batch.register('account','123','account',2026)

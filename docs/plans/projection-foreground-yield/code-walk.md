@@ -1,0 +1,12 @@
+# Scheduling and evidence trace
+
+- `backend/server.py:31724` injects `_projection_foreground_busy` from the realtime tick; the projection-only endpoint at `backend/server.py:43792` injects the same callable after cron authentication and existing payload validation. Callers cannot supply a predicate in JSON.
+- `backend/server.py:43776` reads live non-prepared trade jobs under `_trade_jobs_lock` and releases the lock on return. No source reads, database calls, waiting or simulation occur under that lock.
+- `backend/league_projections/batch.py:98` carries the optional internal predicate through unchanged cohort/target admission to `wake` at line 158. Weekly scheduling, one-time initial semantics, per-user queue limits and leases are unchanged.
+- `backend/league_projections/service.py:15` starts the existing single worker with that callable. The simulator still owns the same 500-draw checkpoint frequency; only its supplied cancellation callback delegates to `_checkpoint` before another chunk.
+- `_checkpoint` performs the original control check, then at most ten 100 ms sleeps while pressure persists. It checks pressure after each sleep and rechecks the original cancellation function after any pause. Idle work adds no sleeps or database reads. A failed scheduling signal gets bounded deference; it cannot alter outputs or wait indefinitely.
+- `_run` retains original `started`, lease expiry, worker token, provider approval, model and source checks. It persists only full successful results through the original guarded `store.finish`; no sample count, RNG state, result reuse identity, baseline or target schedule is changed.
+
+Executable tests cover exact deterministic simulation parity, checkpoint counts, idle/cancelled behavior, bounded pressure, pressure release, signal failure, policy revocation and original-deadline expiry during waiting, live-job classification and lock release. Existing capture/recovery/initial-queue tests cover account and source lifecycle. The mixed workload proof uses synthetic source fixtures and an actual simulator/trade worker; the activity Event is an experiment, not hosted admission or device evidence.
+
+TestFlight acceptance remains the existing all-entry checklist in `qa/instant-trade-acceptance.md`: include immediate league/preferences changes, first and repeated requests, both network types, failures and missing outcomes. No local benchmark qualifies as a 200 ms pass. The stored weekly forecasts should remain visible throughout background work; app entry must not start another forecast.
