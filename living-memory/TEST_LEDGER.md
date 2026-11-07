@@ -4,6 +4,23 @@
 - Projection/initial-batch/privacy/paywall/flag regression run: **321 passed in8.45s**. Initial dispatch covers fresh connected-cohort scope, never-attempted-only CAS, crash idempotency, failed-attempt refusal, unchanged weekly due time, input bounds and cron authentication. GET-only behavior and account/worker lifecycle regressions remain included.
 - Twelve independent initial-batch controls were copied into durable tests and passed0.87s. Independent integration: **127 functional tests2.69s**, eight web assertions and Home harness passed with21runtime hashes stable. Mobile TypeScript, stored-read structural check and three saved-state web assertions passed locally. Root Home banner verification passed the executable component/boundary harness, Home hub/tab guards and test-ID lint; actual buyRB/sellWR, stale/error/logout/platform/switch paths use existing Home handlers. No device rendering claim.
 - Exact-head full CI and deployment/canary readback remain pending; no production action claimed. [Rollout](../docs/plans/league-projections/rollout.md).
+## 2026-11-07 — PR618 CI lifecycle fixture and pipeline identity repair
+
+- CI42357505270 failed four assertions: three stale pipeline-digest checks and a breaker fixture that made work nonlive at entry while expecting stamping. No trade/proof parity failure was reported. Append-only pipeline13=`1939e93dc5fd7de5` preserves versions1–12; late-stamp revocation now tests the intended publication fence, with separate early cancellation coverage.
+- **227 passed in17.17s**: digest/breaker, normal stored-page behavior, admission/supersession and cancellation controls. Root independently ran all digest/breaker tests: **39 passed in4.45s**, confirming prior pins and publication fences remain intact. A fresh selected worker retained all82 ordered native/final/public/durable cards. Only runtime change after reviewedaf449645 is the pipeline version/pin metadata. Exact-head fullCI rerun remains required.
+- Explicit release authorization supersedes the old hold. Root coordinates611/618 integration, deployment, normal page regeneration and affected unexposed Calibration rebuild; frozen exposed/answered history stays intact. PR617 all4CIgreen, independent and unnecessary for618. [Updated scope](../docs/plans/owner-work-cancellation/README.md).
+
+## 2026-11-07 — Cooperative cancellation of obsolete owner work (unmerged)
+
+- Fresh-main `974452ff` candidate stops revoked owner generation/fresh final occurrences without partial/empty success or replacement-job cancellation. Prepared work yields to local foreground requests, aborts staging and refunds only the matching interactive-deferred attempt. Durable lease/account checks are throttled; check outages propagate explicitly. Full model budgets, order, fresh final math and quality/publication gates remain.
+- Final affected **1,302 passed,2 skipped in134.82s** across46 files. Independent **23 passed3.22s** (seven reviewer controls plus sixteen builder controls), ten runtime hashes stable. Actual worker control/final candidate preserves all **7,213 ordered native/final/public/durable proofs** (6,430 organic,701 opponent,82 receive); every durable valuation reread. No model-policy or private input data change.
+- Synthetic first publication19.164→19.454s organic,1.952→1.865s opponent,.385→.431s receive; mixed single-pair results establish no speedup or200ms claim. Cooperative gaps, process-local foreground detection, unbounded foreground admission and possible prepared starvation remain explicit. Keep unmerged during Calibration source freeze; exact-head fullCI required. [Scope and next slice](../docs/plans/owner-work-cancellation/README.md).
+
+## 2026-11-07 — Calibration public round activated on PR616
+
+- Parent operator readback: PR616 CI42354107908 passed all four checks (**13,146 passed,42 skipped** backend); merged `974452ff`, exact tree matching `c9b930e`. Public activation live **2026-11-07T08:51:55Z** with round=true, prepare=false, blind=true.
+- **11 current ready comparisons;5 truthful rules/access refusals.** After restart, admin currentness checked all11 without exposing cards. TestFlight176 VALID/internal assigned; test notes verified **08:52:41Z**. No identities or private card data retained here.
+- Normal model selectors and KTC unchanged. The 200ms requirement remains OPEN. Keep PR615/617 and the cancellation candidate unmerged until parent coordinates the next backend source-hash boundary; existing prepared comparisons must not be invalidated by an incidental rollout.
 
 ## 2026-11-07 — Linked mapped availability uses full metadata
 

@@ -55,6 +55,7 @@ class _Search(owner._Search):
         market_order = sorted(market_coordinates.values())
         members = {m.user_id: m for m in self.league.members}
         for uid, team in self.teams.items():
+            self.checkpoint()
             raw = kwargs["user_elo"] if uid == self.user_id else members[uid].elo_ratings
             sources = (kwargs.get("user_sources") if uid == self.user_id else
                        kwargs["opponent_sources"].get(uid) if kwargs.get("opponent_sources") is not None
@@ -406,7 +407,7 @@ def evaluate_bilateral_trades(cards, **kwargs):
     """Revalidate immutable exact occurrences against the captured new policy."""
     search = _Search(**kwargs)
     with search.ts._cfg_override(search.config), search.ts.stud_tax_override("market"):
-        return [search.evaluate(c, partial=owner._authenticated_partial(c, search)) for c in cards]
+        return search.evaluate_occurrences(cards)
 
 
 def evaluate_bilateral_trade(card, **kwargs):
@@ -471,6 +472,7 @@ def _generate_with_search(search, *, ranker, version):
             streams = {m.user_id: iter(search.candidates(m, partial=partial)) for m in search.members}
             while streams and report["evaluated"] < search.total_budget:
                 for uid in list(streams):
+                    search.checkpoint()
                     if counts[uid] >= search.pair_budget or report["evaluated"] >= search.total_budget:
                         streams.pop(uid)
                         report["budget_exhausted"] = True
@@ -510,7 +512,9 @@ def _generate_with_search(search, *, ranker, version):
                     survivors.append(card)
             if streams:
                 report["budget_exhausted"] = True
+        search.checkpoint()
         emitted = ranker(survivors)
+        search.checkpoint()
         for index, card in enumerate(emitted):
             # Presentation rank, not a probability. Detailed support lives in
             # immutable private evidence and survives final revalidation.
@@ -521,4 +525,5 @@ def _generate_with_search(search, *, ranker, version):
             "emitted": sum(c.target_user_id == m.user_id for c in emitted)} for m in search.members},
         config={k: v for k, v in search.config.items() if k.startswith(("owner_", "package_", "crown_", "elo_value_", "max_overpay_"))
                 or k in ("overpay_adjusted", "market_floor_absolute")})
+    search.checkpoint()
     return emitted, owner.OwnerGenerationReport(owner._dump(report))

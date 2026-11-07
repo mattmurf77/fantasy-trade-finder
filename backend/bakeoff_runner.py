@@ -96,6 +96,8 @@ bypass was chosen over per-arm pre-interleave application.
 
 from __future__ import annotations
 
+from .trade_work_control import TradeWorkCancelled
+
 import hashlib
 import json
 import logging
@@ -1707,6 +1709,8 @@ def run_bakeoff(
             else:
                 cfg_seen = snapshot_config()
                 cards = list(gen_v2(**quiet) or [])
+        except TradeWorkCancelled:
+            raise  # Obsolete work is neither a failed model arm nor zero supply.
         except Exception as e:                        # never fail the job
             log.warning("bake-off arm %s failed (recorded, not fatal): %s", arm, e)
             cards, err = [], repr(e)

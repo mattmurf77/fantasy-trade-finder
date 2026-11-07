@@ -188,9 +188,11 @@ class _Search:
                  pinned_receive_players=None, exact_give=False,
                  opponent_user_id=None, trade_intent=None, swap_positions=None,
                  lateral_scope=None, past_decision_keys=None,
-                 exclusion_keys=None, max_cards=None, config=None):
+                 exclusion_keys=None, max_cards=None, config=None, _check_current=None):
         from . import trade_service as ts
         self.ts = ts
+        self._check_current = _check_current
+        self.checkpoint()
         self.players, self.league, self.user_id = players, league, user_id
         self._positions = {}
         self._tiers = {}
@@ -443,6 +445,19 @@ class _Search:
             eligible, reason, self.league.league_id, self.user_id,
             card.target_user_id, tuple(card.give_player_ids), tuple(card.receive_player_ids), _dump(data)))
 
+    def checkpoint(self):
+        """Execution control only; it never enters model inputs or proof bytes."""
+        if self._check_current is not None:
+            self._check_current()
+
+    def evaluate_occurrences(self, cards):
+        proofs = []
+        for card in cards:
+            self.checkpoint()
+            proofs.append(self.evaluate(card, partial=_authenticated_partial(card, self)))
+        self.checkpoint()
+        return proofs
+
     def evaluate(self, card, *, partial=False):
         give, receive = tuple(card.give_player_ids), tuple(card.receive_player_ids)
         target = card.target_user_id
@@ -652,8 +667,7 @@ def evaluate_owner_trades(cards, **kwargs):
     """
     search = _Search(**kwargs)
     with search.ts._cfg_override(search.config), search.ts.stud_tax_override("market"):
-        return [search.evaluate(card, partial=_authenticated_partial(card, search))
-                for card in cards]
+        return search.evaluate_occurrences(cards)
 
 
 def evaluate_owner_trade(card, **kwargs):
@@ -688,6 +702,7 @@ def generate_owner_trades(**kwargs):
             streams = {m.user_id: iter(search.candidates(m, partial=partial)) for m in search.members}
             while streams and report["evaluated"] < search.total_budget:
                 for uid in list(streams):
+                    search.checkpoint()
                     if per_pair[uid] >= search.pair_budget or report["evaluated"] >= search.total_budget:
                         streams.pop(uid)
                         report["budget_exhausted"] = True
@@ -722,6 +737,7 @@ def generate_owner_trades(**kwargs):
                     survivors.append(card)
             if streams:
                 report["budget_exhausted"] = True
+        search.checkpoint()
         small = [c for c in survivors if c.owner_evaluation.as_dict()["construction"]["small"]]
         report["small_supply"] = len(small)
         if small:
@@ -759,4 +775,5 @@ def generate_owner_trades(**kwargs):
         "emitted": sum(c.target_user_id == m.user_id for c in emitted)} for m in search.members}
     report["emitted"] = len(emitted)
     report["shortage"] = not emitted
+    search.checkpoint()
     return emitted, OwnerGenerationReport(_dump(report))

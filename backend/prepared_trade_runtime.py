@@ -378,6 +378,7 @@ def _fairness(server, user_id, league_id):
 def prepare_target(server, claim):
     from . import prepared_trade_store_v2 as paged_store
     from .prepared_trade_payload_v2 import PagedPreparedEvidenceCapture
+    from .trade_work_control import TradeWorkCancelled
     scope = store.InventoryScope(**claim["scope"])
     if not supported(server, scope.league_id):
         raise ValueError("unsupported_policy_or_disabled")
@@ -401,8 +402,7 @@ def prepare_target(server, claim):
             store.complete_target(claim, status="reused", now=utcnow())
             return
         if _interactive_busy(server):
-            store.complete_target(claim, status="deferred", reason="interactive_work",
-                                  retry_at=utcnow() + timedelta(seconds=30), now=utcnow())
+            store.defer_target_for_interactive(claim, now=utcnow())
             return
         job_id = uuid.uuid4().hex
         prefs = server._trade_job_preferences(scope.user_id, scope.league_id, session, session["league"])
@@ -423,7 +423,28 @@ def prepare_target(server, claim):
             "final_checks_pending": True, "fairness_threshold": fairness}
         with server._trade_jobs_lock:
             server._trade_jobs[job_id] = job  # Never register a shared/user cache pointer.
-        stage, sealed = None, False
+        stage, sealed, deferred = None, False, False
+        next_claim_check = 0.0
+
+        def check_work():
+            nonlocal next_claim_check
+            if _interactive_busy(server):
+                raise TradeWorkCancelled("interactive_work")
+            if not enabled(server):
+                raise TradeWorkCancelled("preparation_disabled")
+            # No SQL per candidate. This is a cooperative poll interval, not a
+            # wall-time bound: one source/math/ranking call can run longer.
+            now = time.monotonic()
+            if now >= next_claim_check:
+                try:
+                    paged_store.check_generation_stage(stage, now=utcnow())
+                except store.StaleWork:
+                    raise TradeWorkCancelled("preparation_claim_changed") from None
+                except Exception as exc:
+                    # A check outage must escape bakeoff's ordinary arm-error
+                    # handling; recovery later cannot certify an empty search.
+                    raise TradeWorkCancelled("preparation_check_unavailable") from exc
+                next_claim_check = now + 1.0
         try:
             now = utcnow()
             with _artifact_phase("inventory_begin"):
@@ -434,11 +455,12 @@ def prepare_target(server, claim):
                                                 league_id=scope.league_id, job_id=job_id)
             with _artifact_phase("inventory_capture"):
                 server._run_trade_job(job_id, "", scope.league_id, fairness, [],
-                    prefs_preload=prefs, execution_context=context, prepare_sink=sink)
+                    prefs_preload=prefs, execution_context=context, prepare_sink=sink, work_check=check_work)
                 if job["status"] != "complete" or "prepared_bundle" not in job:
                     if isinstance(job.get("prepared_failure"), Exception):
                         raise job["prepared_failure"]
                     raise ValueError(job.get("error") or "preparation_incomplete")
+            check_work()
             fresh = refresh_target(server, scope)
             after_session = build_session(server, fresh)
             with _artifact_phase("receipt_after"):
@@ -455,10 +477,17 @@ def prepare_target(server, claim):
                     "outlook_value", "safety_policy", "owner_model", "owner_model_version") if k in job}}
             with _artifact_phase("inventory_save"):
                 paged_store.finish_metadata(stage, metadata=metadata, now=utcnow())
+            check_work()
             with _artifact_phase("inventory_seal"):
                 paged_store.seal_inventory(stage, completion=completion,
                     dependency_receipt=before, model_identity=identity)
             sealed = True
+        except TradeWorkCancelled as exc:
+            if exc.reason == "interactive_work":
+                deferred = True
+            elif exc.reason != "preparation_claim_changed":
+                raise
+            # A stopped/expired/reassigned claim owns no completion anymore.
         finally:
             if stage is not None and not sealed:
                 try:
@@ -467,6 +496,11 @@ def prepare_target(server, claim):
                     server.log.warning("prepared staging cleanup deferred to retention")
             with server._trade_jobs_lock:
                 server._trade_jobs.pop(job_id, None)
+        if deferred:
+            try:
+                store.defer_target_for_interactive(claim, now=utcnow())
+            except store.StaleWork:
+                pass  # Claim changed during cleanup: do not touch its successor.
 
 
 def sync_source_picks(server, target):
@@ -807,14 +841,16 @@ def start(server, *, idempotency_key, dry_run=False, user_id=None, league_id=Non
                         "model_changed", "source_or_binding_unavailable", "empty_roster_or_opponents",
                         "player_pool_unavailable", "unsupported_policy_or_disabled",
                         "source_pick_sync_unavailable", "source_pick_sync_disabled",
-                        "source_binding_changed"} else "preparation_failed"
+                        "source_binding_changed", "preparation_disabled",
+                        "preparation_check_unavailable"} else "preparation_failed"
                     if isinstance(exc, store.InvalidArtifact) or _artifact_failure_details(exc)["reason"] != "preparation_failed":
                         details = _artifact_failure_details(exc)
                         reason = details["reason"]
                         server.log.warning("prepared inventory artifact rejected: %s",
                                            json.dumps(details, sort_keys=True))
                     server.log.warning("prepared inventory target failed: %s (%s)", reason, type(exc).__name__)
-                    transient = reason in {"inputs_changed", "source_or_binding_unavailable", "source_pick_sync_unavailable"}
+                    transient = reason in {"inputs_changed", "source_or_binding_unavailable",
+                        "source_pick_sync_unavailable", "preparation_check_unavailable"}
                     store.complete_target(claim, status="stale" if reason == "inputs_changed" else "error",
                         reason=reason, retry_at=utcnow() + timedelta(seconds=30) if transient else None, now=utcnow())
             result = store.sweep_status(sweep_id)

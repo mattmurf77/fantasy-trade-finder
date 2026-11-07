@@ -446,6 +446,12 @@ def _stage_work(stage, now, allowed=("staging",)):
         yield conn, row
 
 
+def check_generation_stage(stage, *, now=None):
+    """Validate/renew the same live generation claim; never publish evidence."""
+    with _stage_work(stage, now):
+        pass
+
+
 def begin_inventory(claim, *, dependency_receipt, model_identity, participants,
                     created_at, expires_at, now=None):
     scope = v1._scope(claim["scope"])
