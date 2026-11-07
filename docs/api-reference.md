@@ -1763,3 +1763,15 @@ Projection run `stale/inputs_changed_during_capture` now represents failure afte
 
 
 Projection scheduling under trade load: the existing worker cooperatively yields at simulation checkpoints while live trade jobs are running in the same process. The run stays `running`; its original cancellation/lease/deadline and atomic-completion rules still apply. No route fields, queue limits, weekly schedule, result contents or GET behavior change.
+
+### Strict selected generation joins
+
+`POST /api/trades/generate` with `X-FTF-Current-Only: 1` can join an identical
+still-running pinned-player/opponent request in the same session. Ordered raw
+and effective selectors, combined intent, exact fairness, account/league/format,
+source identities, current fingerprints and input epochs must match. Each reply
+echoes its own `search_id` and retains normal authorization, preview, disposition
+and current-only checks. `force: true`, completed/failed/stale work, unknown inputs,
+legacy callers and distinct selections do not use this join. Intent-only requests
+retain existing organic reuse/supersession. This adds no completed selected cache,
+new field or latency guarantee. [Bounded scope](plans/selected-running-single-flight/scope.md).
