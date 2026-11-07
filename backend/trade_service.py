@@ -1689,7 +1689,7 @@ def value_to_elo(value: float) -> float:
 def package_value_v2(values: list[float], v_max: float,
                      n_other: int | None = None,
                      other_values: list[float] | None = None,
-                     exempt: list[bool] | None = None) -> float:
+                     exempt: list[bool] | None = None, *, pricing_policy=None) -> float:
     """
     KTC-style package value for the v2 engine (amendment A2).
 
@@ -1748,23 +1748,24 @@ def package_value_v2(values: list[float], v_max: float,
     and symmetric trades are byte-identical. Callers that omit ``n_other``
     (legacy/unmigrated) are likewise unaffected.
     """
+    read = pricing_policy.config.__getitem__ if pricing_policy is not None else _c
     if not values:
         return 0.0
-    mode = current_stud_tax_mode()
+    mode = pricing_policy.mode if pricing_policy is not None else current_stud_tax_mode()
     if mode == "off":
         return round(sum(values), 1)
     # #427 — resolve the exemption ONCE: no mask, an all-False mask, or the
     # knob at its kill value all collapse to `None`, and every branch below
     # is then the pre-#427 code path bit for bit.
     if exempt is not None and not (
-            any(exempt) and _c("stud_tax_exempt_first_round") > 0):
+            any(exempt) and read("stud_tax_exempt_first_round") > 0):
         exempt = None
     if mode == "market":
-        return _package_value_market(values, other_values, v_max, exempt)
+        return _package_value_market(values, other_values, v_max, exempt, pricing_policy=pricing_policy)
 
     # ── 'heavy' — pre-#214 legacy math, byte-identical ──────────────────
     v_max = max(v_max, 1e-9)
-    gamma = _c("package_adj_gamma")
+    gamma = read("package_adj_gamma")
     if exempt is None:
         total = sum(v * (0.15 + 0.85 * (v / v_max) ** gamma) for v in values)
     else:
@@ -1774,20 +1775,20 @@ def package_value_v2(values: list[float], v_max: float,
                  + sum(v * (0.15 + 0.85 * (v / v_max) ** gamma)
                        for v, e in zip(values, exempt) if not e))
 
-    if (FLAGS.trade_crown_asset and n_other is not None
+    if ((pricing_policy.crown_asset if pricing_policy is not None else FLAGS.trade_crown_asset) and n_other is not None
             and len(values) < n_other):
         side_sum = sum(values)
         if side_sum > 0:
             v_top = max(values)
             share = v_top / side_sum
-            floor = _c("crown_share_floor")
+            floor = read("crown_share_floor")
             if share > floor:
-                premium = _c("crown_rate") * (share - floor) / max(1.0 - floor, 1e-9)
+                premium = read("crown_rate") * (share - floor) / max(1.0 - floor, 1e-9)
                 # Interview 2026-07-17 ("depends on stud"): scale the
                 # premium by the crown asset's absolute value — a true
                 # tier-1 commands the full rate, a mid-tier headliner
                 # earns proportionally less.
-                elite_ref = _c("crown_elite_value")
+                elite_ref = read("crown_elite_value")
                 if elite_ref > 0:
                     premium *= min(1.0, v_top / elite_ref)
                 top_contrib = v_top * (0.15 + 0.85 * (v_top / v_max) ** gamma)
@@ -1798,7 +1799,7 @@ def package_value_v2(values: list[float], v_max: float,
 def _package_value_market(values: list[float],
                           other_values: list[float] | None,
                           v_max: float | None = None,
-                          exempt: list[bool] | None = None) -> float:
+                          exempt: list[bool] | None = None, *, pricing_policy=None) -> float:
     """#214 'market' stud-tax shapes (tuning-proposal.md §1–3), amended
     2026-08-21 by the cross-package benchmark fix (shape 1a below) and
     2026-09-08 by the #427 first-round exemption (shape 1b).
@@ -1840,18 +1841,19 @@ def _package_value_market(values: list[float],
        case). An already-lopsided trade earns no consolidation credit —
        KTC's observed shape.
     """
+    read = pricing_policy.config.__getitem__ if pricing_policy is not None else _c
     naive = sum(values)
     if naive <= 0:
         return round(naive, 1)
     own_max = max(values)
-    gamma = _c("package_adj_gamma_market")
-    floor = _c("package_floor_market")
+    gamma = read("package_adj_gamma_market")
+    floor = read("package_floor_market")
     bench = own_max
     if (len(values) > 1 and v_max is not None and v_max > own_max
-            and _c("package_bench_trade_wide") > 0):
+            and read("package_bench_trade_wide") > 0):
         bench = v_max
-        floor = _c("package_floor_cross")
-    cap = _c("package_discount_cap")
+        floor = read("package_floor_cross")
+    cap = read("package_discount_cap")
     if exempt is None:
         contrib = sum(v * (floor + (1.0 - floor) * (v / bench) ** gamma)
                       for v in values)
@@ -1863,17 +1865,17 @@ def _package_value_market(values: list[float],
                       for v in taxable)
         total = exempt_sum + max(contrib, sum(taxable) * (1.0 - cap))
 
-    if FLAGS.trade_crown_asset and other_values:
+    if (pricing_policy.crown_asset if pricing_policy is not None else FLAGS.trade_crown_asset) and other_values:
         other_naive = sum(other_values)
         denom = min(naive, other_naive)
         if denom > 0:
             skew = abs(naive - other_naive) / denom
-            phaseout = _c("skew_phaseout")
+            phaseout = read("skew_phaseout")
             phase = 1.0 if phaseout <= 0 else max(0.0, 1.0 - skew / phaseout)
             if phase > 0:
-                elite_ref = _c("crown_elite_value")
+                elite_ref = read("crown_elite_value")
                 if elite_ref > 0:
-                    rate = _c("crown_rate_market")
+                    rate = read("crown_rate_market")
                     total += sum(v for v in values if v >= elite_ref) * rate * phase
     return round(total, 1)
 
@@ -2278,6 +2280,7 @@ def price_consensus_package(
     recv_ids: list[str],
     *,
     value_of,
+    pricing_policy=None,
 ):
     """The PRICING half of `eval_consensus_package`, gate-free:
     `package_value_v2` on both sides in the shared value space, nothing
@@ -2291,15 +2294,19 @@ def price_consensus_package(
     surface instead of re-stating it. `eval_consensus_package` calls this
     first, so the two can never drift (the one-gate-function guard in
     test_fair_packages.py is the enforcement)."""
+    mask = pricing_policy.mask if pricing_policy is not None else first_round_pick_mask
+    if pricing_policy is not None:
+        mask(give_ids)
+        mask(recv_ids)
     gvals = [value_of(p) for p in give_ids]
     rvals = [value_of(p) for p in recv_ids]
     v_max = max(gvals + rvals)
     gv = package_value_v2(gvals, v_max, n_other=len(recv_ids),
                           other_values=rvals,
-                          exempt=first_round_pick_mask(give_ids))
+                          exempt=mask(give_ids), pricing_policy=pricing_policy)
     rv = package_value_v2(rvals, v_max, n_other=len(give_ids),
                           other_values=gvals,
-                          exempt=first_round_pick_mask(recv_ids))
+                          exempt=mask(recv_ids), pricing_policy=pricing_policy)
     if gv <= 0 or rv <= 0:
         return None
     return min(gv, rv) / max(gv, rv), gv, rv
@@ -2530,7 +2537,7 @@ def pick_swap_ok(give_ids: list[str], recv_ids: list[str],
 _PRESENTMENT_POSITIONS = ("QB", "RB", "WR", "TE")
 
 
-def overpay_ok(give_ids, recv_ids, seed_value) -> bool:
+def overpay_ok(give_ids, recv_ids, seed_value, *, pricing_policy=None) -> bool:
     """R1 #340 — absolute overpay ceiling, BOTH sides.
 
     KILL when gap >= max_overpay_min_value AND gap / max(g, r) >=
@@ -2553,10 +2560,15 @@ def overpay_ok(give_ids, recv_ids, seed_value) -> bool:
     under `package_value_v2` — so this knob can only move MULTI-asset
     packages. Knob 0 restores the raw-sum body, byte-identical.
     """
-    frac = _c("max_overpay_frac")
+    read = pricing_policy.config.__getitem__ if pricing_policy is not None else _c
+    mask = pricing_policy.mask if pricing_policy is not None else first_round_pick_mask
+    if pricing_policy is not None:
+        mask(give_ids)
+        mask(recv_ids)
+    frac = read("max_overpay_frac")
     if frac <= 0:
         return True
-    if _c("overpay_adjusted") >= 1.0:
+    if read("overpay_adjusted") >= 1.0:
         gvals = [seed_value(p) for p in give_ids]
         rvals = [seed_value(p) for p in recv_ids]
         both = gvals + rvals
@@ -2565,10 +2577,10 @@ def overpay_ok(give_ids, recv_ids, seed_value) -> bool:
         v_max = max(both)
         g = package_value_v2(gvals, v_max, n_other=len(recv_ids),
                              other_values=rvals,
-                             exempt=first_round_pick_mask(give_ids))
+                             exempt=mask(give_ids), pricing_policy=pricing_policy)
         r = package_value_v2(rvals, v_max, n_other=len(give_ids),
                              other_values=gvals,
-                             exempt=first_round_pick_mask(recv_ids))
+                             exempt=mask(recv_ids), pricing_policy=pricing_policy)
     else:
         g = sum(seed_value(p) for p in give_ids)
         r = sum(seed_value(p) for p in recv_ids)
@@ -2576,7 +2588,7 @@ def overpay_ok(give_ids, recv_ids, seed_value) -> bool:
     if big <= 0:
         return True
     gap = abs(g - r)
-    return not (gap >= _c("max_overpay_min_value") and gap / big >= frac)
+    return not (gap >= read("max_overpay_min_value") and gap / big >= frac)
 
 
 def pos_net_ok(give_ids, recv_ids, players, *, opp_ctx=None) -> bool:

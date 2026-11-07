@@ -4,6 +4,17 @@
 
 Calibration capture completes held-roster occupancy through `calibration_roster_coverage`, using fresh skill-position metadata for unranked players without adding model candidates or market prices. Missing metadata stays unknown; private evidence and roster sums explicitly identify unpriced occupancy. [Contract](plans/calibration-roster-coverage/scope.md).
 
+## Owned pricing execution experiment (unwired)
+
+`owner_pricing_execution` supplies a private immutable package-pricing policy to
+actual owner generation and fresh final owner evaluation, using detached request
+values from `owner_evaluation_inputs`. It owns resolved numerical config, crown
+flag, fixed market mode and sampled pick-exemption decisions. Shared pricing
+formulas accept this explicit policy; default serving calls retain live inputs.
+No route selects the experiment, and no proof or evaluation is reused. Tier, age,
+roster, source and currentness dependencies remain outside this bounded domain;
+capture is not atomic. [Contract and review boundary](plans/owner-pricing-inputs/contract.md).
+
 ## Persistent silent trade preparation
 
 `prepared_trade_cohort` resolves verified existing app users against fresh known
