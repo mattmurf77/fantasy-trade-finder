@@ -1,3 +1,9 @@
+## 2026-11-07 — Mobile passive preparation lifecycle
+
+- Executed shared helper/tab/focus/foreground checks prove preference/session readiness overlap, independence from unresolved hydration, post-readiness token binding and stale context rejection. Ten delayed-storage/context controls cover per-key and global disk-only invalidation, already-dispatched writes followed by clear/new page, header consistency and replacement attempt ownership. Three format-application controls cover HTTP/local-mirror gap and failure cleanup.
+- TypeScript, test-ID lint and all 165 mobile CI-glob scripts pass, including device-page, preview/paywall and 28 exact selected-model/fair-handoff cases. Results are recorded in [scope](../docs/plans/mobile-context-preparation/scope.md). Independent reviewer separately executed 26 JS and four backend route/capture controls; backend verification stayed external, with no backend source changes.
+- No simulator/Maestro (D-056), production load or device timing test. The universal 200 ms target remains open; stale queued format application across account changes remains outside this passive-page fix.
+
 ## 2026-11-07 — Documented playoff reseeding admission correction
 
 - Isolated from currentmainfb64639 after read-only production policy diagnosis. Official Sleeper application read/selector/write code confirms playoff_seed_type0/1 controls later-round bracket matchups, not regular-season qualification. Exact native integers0/1 admitted; malformed/unknown and other rule guards retained. Native setting and no-postseason-simulation coverage are explicit; no simulation/trade/ranking/flag change.

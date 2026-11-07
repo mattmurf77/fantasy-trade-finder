@@ -1039,3 +1039,15 @@ Weekly projection workers may discard and fully repeat one capture after `inputs
 
 
 Projection simulation cancellation checkpoints use a three-column scoped control read (status/token/expiry) instead of rereading potentially multi-megabyte snapshots. Baseline model validation still reads the owned baseline; query identity predicates and checkpoint frequency are unchanged.
+
+### Passive mobile trade-page preparation
+
+Tabs, Trades focus and foreground share `mobile/src/state/tradePagePreparation.ts`.
+Disk recovery is independent of fresh preparation; request preferences and session
+readiness join before a revision-bound refresh. `devicePageStore.ts` captures the
+organic request's format and sends it on generation and every status poll through
+the existing request-local scoring header. Pending input writes, context changes,
+preview gates and current-only validation remain authoritative. Ordered device
+storage barriers prevent earlier writes or hydration from reviving discarded
+pages; format changes still evict them through completion of the local mirrors.
+See [scope and remaining boundaries](plans/mobile-context-preparation/scope.md).

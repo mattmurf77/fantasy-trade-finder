@@ -94,7 +94,7 @@ function loadStore(env) {
         case '@react-native-async-storage/async-storage': return { default: env.storage };
         case 'react-native': return { AppState: { get currentState() { return env.appState ?? 'active'; } } };
         case '@tanstack/react-query': return { onlineManager: { isOnline: () => env.online } };
-        case '../api/client': return { setOnWriteRequest: (fn) => { env.onWrite = fn; } };
+        case '../api/client': return { getSessionRevision: () => env.revision ?? 1, setOnWriteRequest: (fn) => { env.onWrite = fn; } };
         case '../api/trades': return { getTradeStatus: (jobId, page, options) => {
           (env.polls ??= []).push({ jobId, page, options });
           return (env.statusRespond ?? env.respond)(jobId, page);
@@ -348,14 +348,14 @@ process.on('exit', () => {
   // ── 2. The store (state/devicePageStore.ts, executed) ───────────────────
   const KEY = D.devicePageKey('u1', 'L1', '1qb_ppr');
   const KEY2 = D.devicePageKey('u1', 'L2', '1qb_ppr');
-  const target = { key: KEY, scope: S, request: { league_id: 'L1', fairness_threshold: 0.5 } };
+  const target = { key: KEY, scope: S, format: '1qb_ppr', request: { league_id: 'L1', fairness_threshold: 0.5 } };
   await check('2a. a refresh asks for page 1 under NO search id, keeps a storable answer, and persists it', async () => {
     const env = makeEnv();
     const st = loadStore(env);
     await st.refreshDevicePage(target, T0);
     eq(env.calls.length, 1);
     eq([env.calls[0].body, env.calls[0].paging], [target.request, {}], 'organic body; paging with no searchId');
-    eq(env.calls[0].options, { background: true, headers: { 'X-FTF-Prewarm': '1' } });
+    eq(env.calls[0].options, { background: true, headers: { 'X-FTF-Prewarm': '1', 'X-Scoring-Format': '1qb_ppr' } });
     eq(ids(st.readDevicePage(KEY).cards), ['a', 'b', 'c']);
     await flush(); await flush();
     ok(env.storage.m.has(KEY), 'persisted under its key');
@@ -388,7 +388,7 @@ process.on('exit', () => {
     await st.refreshDevicePage(target, T0);
     eq(env.calls.length, 1);
     eq(env.polls.length, 2);
-    eq(env.polls[0], { jobId: 'j1', page: { deck: 'j1', cursor: 0 }, options: { background: true, headers: { 'X-FTF-Prewarm': '1' } } });
+    eq(env.polls[0], { jobId: 'j1', page: { deck: 'j1', cursor: 0 }, options: { background: true, headers: { 'X-FTF-Prewarm': '1', 'X-Scoring-Format': '1qb_ppr' } } });
     eq(ids(st.readDevicePage(KEY).cards), ['a', 'b', 'c']);
   });
   await check('overlapping preference writes prevent reuse and refresh until the final response', async () => {
@@ -659,12 +659,12 @@ process.on('exit', () => {
       'a stored envelope never ends the deck');
   });
   await check('3f. the background refresh: Trades landing focus and app foreground only, never the tap', () => {
-    ok(/if \(isResultsPushed \|\| !navFocused \|\| !devicePageTarget\) return;\s*void hydrateDevicePages\(\)\.then\(\(\) => refreshDevicePage\(devicePageTarget\)\);/.test(code), 'focus');
-    ok(/if \(st !== 'active'\) return;\s*void useSession\.getState\(\)\.revalidateSession\(\)\s*\.then\(\(\) => hydrateDevicePages\(\)\)\s*\.then\(\(\) => refreshDevicePage\(devicePageTarget\)\);/.test(code),
-      'foreground, after that foreground\'s session-init');
-    eq((code.match(/refreshDevicePage\(/g) || []).length, 2, 'exactly the two triggers');
+    ok(/if \(isResultsPushed \|\| !navFocused \|\| !devicePageTarget\) return;\s*let cancelled = false;/.test(code), 'focus guard');
+    ok(code.includes('() => !cancelled') && code.includes('return () => { cancelled = true; };'), 'focus cleanup revokes adoption');
+    ok(code.includes('() => attempt === revision') && code.includes('revision++; sub.remove();'), 'foreground cleanup and background revoke adoption');
+    eq((code.match(/prepareTradePage\(/g) || []).length, 2, 'exactly the two lifecycle triggers');
     for (const fn of ['function pushWithFirstPage(', 'function handleInlineFindATrade(', 'function handleFindTrades(']) {
-      ok(!fnBody(code, fn).includes('refreshDevicePage'), `${fn} never refreshes`);
+      ok(!fnBody(code, fn).includes('prepareTradePage'), `${fn} never refreshes`);
     }
     ok(/const request: GenerateBody = \{ league_id: leagueId, fairness_threshold: effectiveFairness \};/.test(code), 'the organic request the tap sends');
     ok(/const devicePageStoreOn = useFlag\('trade\.first_page_store'\);\s*const deviceKey = devicePageStoreOn && !isDemo\s*\? devicePageKey\(userId, leagueId, activeFormat\)\s*: null;/.test(code),

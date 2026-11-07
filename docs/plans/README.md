@@ -15,6 +15,11 @@ For **what's next**, [`living-memory/NEXT.md`](../../living-memory/NEXT.md). For
 cited below, [`living-memory/DECISIONS.md`](../../living-memory/DECISIONS.md).
 Per-feedback-item fixes do **not** live here — they live in [`../feedback/items/`](../feedback/items/).
 
+Mobile exact-context preparation **implemented locally, review/CI pending**:
+[scope, lifecycle and device checklist](mobile-context-preparation/scope.md).
+Removes disk hydration from fresh preparation, fences obsolete work/storage writes;
+format eviction and all server quality/access gates remain. No 200 ms device claim.
+
 Outlook Calibration round **implemented locally, default off, review/CI pending**:
 [scope](outlook-calibration-round/scope.md), [frozen paired flow and rollout](outlook-calibration-round/architecture.md).
 Admin preparation precedes exposure; normal trade serving remains current.

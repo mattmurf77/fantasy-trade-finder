@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useSession } from '../state/useSession';
+import { beginTradePageInputTransition } from '../state/devicePageStore';
 import { setActiveScoringFormat, switchScoringFormat } from '../api/rankings';
 import { getLeagueFormatStats } from '../api/league';
 import type { ScoringFormat } from '../shared/types';
@@ -45,7 +46,9 @@ function applyFormat(
 ): Promise<void> {
   const run = _applyChain.then(async () => {
     if (!explicit && useSession.getState().formatExplicit) return;
-    await doApplyFormat(qc, fmt, explicit);
+    const finish = beginTradePageInputTransition();
+    try { await doApplyFormat(qc, fmt, explicit); }
+    finally { finish(); }
   });
   // Keep the chain alive past failures; callers still see the rejection.
   _applyChain = run.catch(() => {});
