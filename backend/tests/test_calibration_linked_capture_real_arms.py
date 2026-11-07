@@ -11,8 +11,8 @@ from backend.tests.test_owner_generator_routes import harness,owner_harness,ME
 from backend.tests.test_owner_only_routes import exclusive,large_exclusive
 LEAGUE='12345'
 
-@pytest.mark.parametrize('platform,picks_enabled,race,fixed_groups',[('espn',False,False,False),('espn',True,False,False),('mfl',False,False,False),('mfl',True,False,False),('mfl',True,True,False),('espn',False,False,True),('mfl',True,False,'native'),('mfl',True,False,'second-account'),('espn',False,False,'coupled-opponent'),('espn',False,False,'coupled-viewer')])
-def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,monkeypatch,platform,picks_enabled,race,fixed_groups):
+@pytest.mark.parametrize('platform,picks_enabled,race,fixed_groups',[('espn',False,False,False),('espn',True,False,False),('mfl',False,False,False),('mfl',True,False,False),('mfl',True,True,False),('espn',False,False,True),('mfl',True,False,'native'),('mfl',True,False,'second-account'),('espn',False,False,'coupled-opponent'),('espn',False,False,'coupled-viewer'),('espn',False,False,'filtered-coupled-opponent'),('espn',False,False,'filtered-coupled-viewer'),('espn',False,False,'filtered-offense-only'),('espn',False,False,'filtered-absent')])
+def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,monkeypatch,platform,picks_enabled,race,fixed_groups,tmp_path):
     _,engine,sess,_,league=large_exclusive
     with engine.begin() as conn:
         conn.execute(db.leagues_table.insert().values(sleeper_league_id=LEAGUE,
@@ -29,15 +29,15 @@ def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,
         for i,m in teams:
             holdings=list(m.roster)+(['raw-only-bench'] if i==1 else [])
             raw['teams'].append({'id':i,'roster':{'entries':[{'lineupSlotId':20,'playerPoolEntry':{'player':{'id':int(native[p]),'fullName':p,'defaultPositionId':3,'eligibleSlots':[4,5,7,20,21,23]}}} for p in holdings]}})
-        if fixed_groups:
+        if fixed_groups and fixed_groups not in ('filtered-offense-only','filtered-absent'):
             raw['settings']['rosterSettings']['lineupSlotCounts'].update({'10':2,'11':2,'14':2,'15':1,'17':1})
             for team in raw['teams']:
                 for offset,(position,eligible) in enumerate([(5,[17]),(9,[11,15]),(10,[11,15]),(11,[10,15]),(12,[14,15]),(13,[14,15])]):
                     team['roster']['entries'].append({'lineupSlotId':20,'playerPoolEntry':{'player':{
                         'id':90000+team['id']*10+offset,'defaultPositionId':position,
                         'eligibleSlots':eligible+[20,21],'injuryStatus':'ACTIVE'}}})
-        if fixed_groups in ('coupled-opponent','coupled-viewer'):
-            team=raw['teams'][1 if fixed_groups=='coupled-opponent' else 0]
+        if fixed_groups in ('coupled-opponent','coupled-viewer','filtered-coupled-opponent','filtered-coupled-viewer','filtered-offense-only'):
+            team=raw['teams'][1 if str(fixed_groups).endswith('coupled-opponent') else 0]
             team['roster']['entries'][0]['playerPoolEntry']['player']['eligibleSlots'] += [14,15]
         monkeypatch.setattr(provider.espn,'fetch_league',lambda *a,**k:copy.deepcopy(raw))
         remap={m.user_id:f'espn:{LEAGUE}.t{i}' for i,m in teams if i!=1}
@@ -72,6 +72,19 @@ def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,
     monkeypatch.setattr(server,'_extension_ranking_services',lambda uid,**k:{'1qb_ppr':sess['service']} if uid==account else pytest.fail('wrong account board'))
     monkeypatch.setattr(server,'_get_universal_pool',lambda fmt:(sess['players'],sess['service']._seed))
     monkeypatch.setattr(server,'_load_sleeper_cache',lambda:{p:{'position':'WR','fantasy_positions':['WR'],'active':True} for p in native})
+    if str(fixed_groups).startswith('filtered-'):
+        from backend import calibration_roster_metadata as full_metadata
+        full={pid:{'player_id':pid,'position':'WR','fantasy_positions':['WR'],
+                   'full_name':'Synthetic '+pid,'active':True} for pid in native}
+        native_dual=raw['teams'][1 if str(fixed_groups).endswith('opponent') else 0]['roster']['entries'][0]['playerPoolEntry']['player']['id']
+        dual=next(pid for pid,native_id in native.items() if str(native_id)==str(native_dual))
+        full[dual].update(position='DB',fantasy_positions=['DB','WR'])
+        filtered=server._filter_bulk_players(full)
+        assert dual not in filtered
+        if fixed_groups=='filtered-absent':full.pop(dual)
+        monkeypatch.setattr(server,'_load_sleeper_cache',lambda:copy.deepcopy(filtered))
+        monkeypatch.setattr(full_metadata,'CACHE_PATH',tmp_path/'full.json')
+        monkeypatch.setattr(server,'_sleeper_get',lambda url:copy.deepcopy(full) if url==full_metadata.URL else pytest.fail('unexpected provider lookup'))
     monkeypatch.setattr(server,'_players_cache_age_seconds',lambda:0)
     monkeypatch.setattr(server,'_league_slot_order',lambda lid:{})
     ff._flags_cache.update({'trade.picks_in_pool':picks_enabled,'deck.quality_filters':True})
@@ -86,11 +99,24 @@ def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,
         with pytest.raises(adapter.GradingError):
             adapter.capture(user_id=ME,league_user_id=ME,league_id=LEAGUE)
         return
-    if fixed_groups=='coupled-viewer':
+    if fixed_groups=='filtered-absent':
+        with pytest.raises(adapter.GradingError,match='provider_player_availability_unavailable'):
+            adapter.capture(user_id=account,league_user_id=ME,league_id=LEAGUE)
+        return
+    if str(fixed_groups).endswith('coupled-viewer'):
         with pytest.raises(adapter.GradingError,match='provider_cross_domain_eligibility'):
             adapter.capture(user_id=account,league_user_id=ME,league_id=LEAGUE)
         return
     captured=adapter.capture(user_id=account,league_user_id=ME,league_id=LEAGUE)
+    if str(fixed_groups).startswith('filtered-'):
+        held=captured.source['full_metadata_observation']['held']
+        assert dual in held and held[dual]['position']=='DB'
+        assert not set(held)&set(captured.source['fixed_lineup']['assets'])
+        assert captured.roster_context.assets[dual].positions==frozenset({'WR'})
+        if fixed_groups=='filtered-offense-only':
+            assert not captured.source['fixed_lineup']['unsupported_teams']
+            assert captured.source['provider_provenance']['native_eligibility'][dual]['original_native_eligible_slots'][-2:]==[14,15]
+        else:assert captured.source['fixed_lineup']['unsupported_teams']
     assert captured.source['platform']==platform
     assert set(captured.source['registered_participants'])=={ME,account,*remap.values()}
     assert set(captured.source['registered_participant_revisions'])=={ME,account,*remap.values()}
@@ -120,7 +146,7 @@ def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,
     for version in adapter.VERSIONS:
         cards,diag=captured.run_arm(version)
         assert diag['native_count']>0 and cards
-        if fixed_groups=='coupled-opponent':
+        if str(fixed_groups).endswith('coupled-opponent'):
             assert diag['unsupported_participant_count']==1 and diag['unsupported_pair_cards']>0
             assert all(c.target_user_id!='espn:'+LEAGUE+'.t2' for c in cards)
             assert captured.source['fixed_lineup']['unsupported_teams']
