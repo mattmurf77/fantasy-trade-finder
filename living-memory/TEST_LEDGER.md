@@ -1,3 +1,9 @@
+## 2026-11-07 — Combined projections and cancellation release candidate
+
+- Integrated reviewed PR618 head4056e610 into PR611; runtime auto-merge preserved projection routes, cancellation and pipeline13. The sole conflict was additive TEST_LEDGER content, both retained.
+- Combined projection, initial lifecycle, cancellation, pipeline digest, breaker seam, paywall, privacy and release-flag controls: **395 passed in15.76s**. Projection/Home bytes remain identical to reviewed7ef05910; exact combined head full CI is required. Cancelled the superseded7ef CI run42375392883 to avoid treating it as final evidence.
+- No production mutation or merge. Root owns integration, one final-revision Calibration rebuild, projection canary and TestFlight delivery.
+
 ## 2026-11-07 — Projection live-release integration and initial batch
 
 - Merged current main974452ff into PR611 while preserving the Calibration releases; additive documentation/script conflicts only. Approved model-policy file under the operator’s live-release instruction; runtime flags remain off until operational activation.

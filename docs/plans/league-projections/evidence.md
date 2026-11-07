@@ -9,6 +9,7 @@ Current main974452ff is merged into the release candidate, preserving the Calibr
 - Repository projection/privacy/paywall/flag suite: **321 passed in8.45s**. Twelve additional independent initial lifecycle controls were copied into durable tests and passed in0.87s; counts overlap the independent review below.
 - Final independent integration review: **127 functional tests passed in2.69s**, eight actual web assertions and the Home banner harness passed; all21 evaluated runtime hashes stayed unchanged. Exact final commit binding is recorded separately after commit.
 - Mobile TypeScript, stored-read structural guard and three web saved-state assertions passed locally. No simulator/Maestro/device execution was performed. Root-owned Home banner evidence is recorded in home-banner-scope.md.
+- Reviewed cancellation PR618 head4056e610 is integrated into the release candidate (pipeline13, unchanged projection/Home runtime). The combined projection/cancellation/pipeline/breaker/privacy suite passed **395 tests in15.76s**.
 - Full CI previously passed on226866e. The merged release candidate requires a fresh exact-head full CI run before integration. Hosted canary, deployed configuration and native TestFlight evidence must be recorded after actual operation, not inferred from these checks. See rollout.md.
 
 ## Current v4 best-available and completed-game evidence
