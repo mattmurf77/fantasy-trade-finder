@@ -12,14 +12,14 @@ _lock = threading.Lock()
 _worker = None
 
 
-def wake(fetch_json):
+def wake(fetch_json, *, foreground_busy=None):
     global _worker
     if not is_enabled("league.projections"):
         return
     with _lock:
         if _worker is not None and _worker.is_alive():
             return
-        _worker = threading.Thread(target=_run, args=(fetch_json,), name="league-projection-worker", daemon=True)
+        _worker = threading.Thread(target=_run, args=(fetch_json, foreground_busy), name="league-projection-worker", daemon=True)
         _worker.start()
 
 
@@ -33,7 +33,30 @@ def _viewer_identity(user_id):
     return str(user_id)
 
 
-def _run(fetch_json):
+def _checkpoint(cancelled, foreground_busy):
+    """Yield bounded CPU time, preserving the original cancellation contract."""
+    if cancelled():
+        return True
+    if foreground_busy is None:
+        return False
+    waited = False
+    for _ in range(10):
+        try:
+            busy = foreground_busy()
+        except Exception:
+            # Scheduling is advisory. An unavailable signal gets bounded
+            # deference, never an unbounded wait or a changed simulation.
+            busy = True
+        if not busy:
+            break
+        time.sleep(.1)
+        waited = True
+    # The database control read is unchanged when idle. After a pause,
+    # recheck lease/flags/deadline before doing any more simulation work.
+    return cancelled() if waited else False
+
+
+def _run(fetch_json, foreground_busy=None):
     while is_enabled("league.projections"):
         row = store.claim()
         if not row:
@@ -83,7 +106,8 @@ def _run(fetch_json):
             prior = store.save_snapshot(row, snapshot, inputs["config"])
             if cancelled():
                 raise Unavailable("cancelled", state="cancelled")
-            result = prior or simulate(snapshot, inputs["config"], cancelled=cancelled)
+            result = prior or simulate(snapshot, inputs["config"],
+                                       cancelled=lambda: _checkpoint(cancelled, foreground_busy))
             result = {**result, "reused_compatible_result": bool(prior), "verified_at": snapshot["captured_at"]}
             store.finish(row, result)
         except Unavailable as exc:
