@@ -368,8 +368,11 @@ class AggregateSQLTests(unittest.TestCase):
         self.add("legacy")
         self.add("wrong_flag_type", physical_iphone="true")
         self.add("tablet", physical_iphone=True, device_type="ipad")
-        rows = self.query()["cohorts"]
-        stats = R.summarize(rows, 200)
+        payload = self.query()
+        self.assertEqual(payload["unclassified_iphone_taps"], 2)
+        report = R.report(dict(payload, physical_iphone_required=True, client_build="172"))
+        self.assertIn("iphone_labeled_taps_missing_capture_provenance", report["reasons"])
+        stats = report["totals_including_cold_offline_preferences"]
         self.assertEqual(stats["taps"], 7)
         self.assertEqual(stats["outcomes"], dict(shown=1, missing_outcome=5, timeout=1))
 

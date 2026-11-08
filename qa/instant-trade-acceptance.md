@@ -43,8 +43,10 @@ Use `--require-physical-iphone` with `--client-build` for device acceptance
 once the candidate records physical iPhone evidence. Both the tap and its
 terminal event must carry that marker and the exact native build; the
 terminal must match the tap's device. A proven tap without a matching
-terminal still counts as a miss. Older builds cannot satisfy this filter.
-Unfiltered reports remain useful for diagnosing regressions.
+terminal still counts as a miss. iPhone-labeled taps on that build with a
+missing or invalid capture marker are reported separately and block a
+verdict. Older builds cannot satisfy this filter. Unfiltered reports remain
+useful for diagnosing regressions.
 
 Browser events have no native app version. `--web-revision` independently
 selects their exact R1 `client_build` tag (`instant-trades-v1`), while

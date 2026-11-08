@@ -86,6 +86,8 @@ def validate(payload):
     rows = payload.get("cohorts")
     if not isinstance(rows, list):
         raise ValueError("cohorts must be an array")
+    if type(payload.get("unclassified_iphone_taps", 0)) is not int or payload.get("unclassified_iphone_taps", 0) < 0:
+        raise ValueError("unclassified_iphone_taps must be a nonnegative integer")
     if type(payload.get("untraced_taps", 0)) is not int or payload.get("untraced_taps", 0) < 0:
         raise ValueError("untraced_taps must be a nonnegative integer")
     if type(payload.get("immediate_change_max_ms", 5000)) is not int or payload.get("immediate_change_max_ms", 5000) < 0:
@@ -262,6 +264,8 @@ def report(payload, profile="all-entry", limit=200, min_samples=40, min_devices=
         global_reasons.append("unfinalized_observation_window")
     if payload.get("untraced_taps", 0):
         global_reasons.append("taps_without_search_id")
+    if payload.get("physical_iphone_required") and payload.get("unclassified_iphone_taps", 0):
+        global_reasons.append("iphone_labeled_taps_missing_capture_provenance")
     if sum(r.get("duplicate_taps", 0) for r in rows):
         global_reasons.append("duplicate_R1_search_ids")
     untraced = payload.get("untraced_taps", 0)
@@ -284,6 +288,7 @@ def report(payload, profile="all-entry", limit=200, min_samples=40, min_devices=
             "client_build": payload.get("client_build"), "immediate_change_max_ms": payload.get("immediate_change_max_ms", 5000),
             "web_revision": payload.get("web_revision"),
             "physical_iphone_required": payload.get("physical_iphone_required", False),
+            "unclassified_iphone_taps": payload.get("unclassified_iphone_taps", 0),
             "limit_ms": limit, "minimum_samples": min_samples, "minimum_devices": min_devices,
             "status": "FAIL" if global_reasons else ("PASS_NOT_ROBUST" if any(
                 c["status"] == "PASS_NOT_ROBUST" for c in checks) else "PASS"),
@@ -303,8 +308,8 @@ def report(payload, profile="all-entry", limit=200, min_samples=40, min_devices=
 # Group inside Postgres. No user_id/search_id/device_id or raw event props are
 # returned to Python. R1 is authoritative; companion calc_find... is NOT a tap.
 PRODUCTION_SQL = """
-WITH tap_rows AS (
- SELECT user_id, device_id, COALESCE(NULLIF(props::jsonb->>'search_id',''),'') sid,
+WITH versioned_taps AS (
+ SELECT user_id, device_id, device_type, props::jsonb->'physical_iphone' AS iphone_marker, COALESCE(NULLIF(props::jsonb->>'search_id',''),'') sid,
  CASE WHEN props::jsonb->>'scenario' IN
  ('after_league_switch','after_preferences_change','after_format_switch','after_account_switch',
  'after_rank_change','warm','genuinely_cold','pinned_give','pinned_receive','targeted_opponent',
@@ -330,11 +335,11 @@ WITH tap_rows AS (
    OR
    (NOT (COALESCE(source,'')='web' OR COALESCE(platform,'')='web' OR COALESCE(device_type,'')='web')
     AND app_version=:version
-    AND (CAST(:build AS text) IS NULL OR props::jsonb->>'client_build'=CAST(:build AS text))
-    AND (NOT :require_iphone OR (
-      device_type='iphone' AND props::jsonb @> jsonb_build_object('physical_iphone', true)
-    )))
+    AND (CAST(:build AS text) IS NULL OR props::jsonb->>'client_build'=CAST(:build AS text)))
  )
+), tap_rows AS (
+ SELECT * FROM versioned_taps
+ WHERE NOT :require_iphone OR platform='web' OR (device_type='iphone' AND iphone_marker='true'::jsonb)
 ), taps AS (
  SELECT user_id,sid,MIN(entry_point) entry_point,MIN(platform) platform,
  MIN(device_id) device_id,MIN(r1_scenario) r1_scenario,MIN(input_age_ms) input_age_ms,
@@ -399,6 +404,9 @@ WITH tap_rows AS (
 )
 SELECT jsonb_build_object('schema',1,'evidence_kind','measured','finalized',true,
  'untraced_taps',(SELECT COUNT(*) FROM tap_rows WHERE sid=''),
+ 'unclassified_iphone_taps',(SELECT COUNT(*) FROM versioned_taps
+    WHERE :require_iphone AND platform='mobile' AND device_type='iphone'
+      AND jsonb_typeof(iphone_marker) IS DISTINCT FROM 'boolean'),
  'cohorts',COALESCE((SELECT jsonb_agg(x.row) FROM (
  SELECT jsonb_build_object('platform',h.platform,'entry_point',h.entry_point,
  'search_type',h.search_type,'network_type',h.network_type,'launch_state',h.launch_state,
