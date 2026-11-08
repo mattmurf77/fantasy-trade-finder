@@ -107,6 +107,26 @@ def harness():
                 ingest._events_rate.clear()
 
 
+def test_trade_tap_and_terminal_keep_capture_build_and_phone_marker(harness):
+    client, engine = harness
+    build = "181"
+    search = "6f1c2d3e-4123-4456-8789-012345678901"
+    events = [_envelope(i, kind, props={"search_id": search, "client_build": build,
+                                       "physical_iphone": is_phone})
+              for i, (kind, is_phone) in enumerate([
+                  ("find_trades_tapped", True), ("trade_first_card_shown", True),
+                  ("trade_first_card_failed", False),
+              ])]
+    response = _post(client, events, token=TOKEN, headers={"X-Device": "iphone", "X-App-Version": "1.22.0"})
+    assert response.get_json()["accepted"] == len(events)
+    rows = [row for row in _rows(engine) if row.event_type in {event["event_type"] for event in events}]
+    assert len(rows) == len(events)
+    for row, event in zip(rows, events):
+        props = json.loads(row.props)
+        assert props["search_id"] == search and props["client_build"] == build
+        assert props["physical_iphone"] is event["props"]["physical_iphone"]
+
+
 # ── (a) flag off → disabled, queue retained (no 404) ───────────────────────
 
 def test_flag_off_disabled():
