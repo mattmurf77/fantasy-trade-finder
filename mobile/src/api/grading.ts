@@ -1,4 +1,4 @@
-import { api, getDeviceId } from './client';
+import { api, getDeviceId, type RequestOptions } from './client';
 
 // Calibration — versioned in-app blind comparisons.
 // Contract: docs/plans/blind-grading/specs.md §3.2. Every /api/grading/* call
@@ -104,39 +104,41 @@ async function deviceHeaders(): Promise<{ headers: Record<string, string> } | un
   }
 }
 
+type GradingRequestOptions = Pick<RequestOptions, 'signal' | 'beforeDispatch'>;
+
 export async function getCurrentGradingSession(
-  leagueId: string,
+  leagueId: string, options?: GradingRequestOptions,
 ): Promise<{ session: GradingSession | null }> {
   return api.get<{ session: GradingSession | null }>(
     `/api/grading/sessions/current?league_id=${encodeURIComponent(leagueId)}`,
-    await deviceHeaders(),
+    { ...await deviceHeaders(), ...options },
   );
 }
 
 export async function startGradingSession(
-  leagueId: string,
+  leagueId: string, options?: GradingRequestOptions,
 ): Promise<{ session: GradingSession; resumed: boolean }> {
   return api.post<{ session: GradingSession; resumed: boolean }>(
-    '/api/grading/sessions', { league_id: leagueId }, await deviceHeaders(),
+    '/api/grading/sessions', { league_id: leagueId }, { ...await deviceHeaders(), ...options },
   );
 }
 
-export async function getNextGradingCard(sessionId: string): Promise<GradingNext> {
+export async function getNextGradingCard(sessionId: string, options?: GradingRequestOptions): Promise<GradingNext> {
   return api.get<GradingNext>(
-    `/api/grading/sessions/${encodeURIComponent(sessionId)}/next`, await deviceHeaders(),
+    `/api/grading/sessions/${encodeURIComponent(sessionId)}/next`, { ...await deviceHeaders(), ...options },
   );
 }
 
 export async function answerGradingCard(
-  cardId: string, answer: GradingAnswer,
+  cardId: string, answer: GradingAnswer, options?: GradingRequestOptions,
 ): Promise<GradingAnswerResult> {
   return api.post<GradingAnswerResult>(
-    `/api/grading/cards/${encodeURIComponent(cardId)}`, answer, await deviceHeaders(),
+    `/api/grading/cards/${encodeURIComponent(cardId)}`, answer, { ...await deviceHeaders(), ...options },
   );
 }
 
-export async function getGradingResults(sessionId: string): Promise<GradingResults> {
+export async function getGradingResults(sessionId: string, options?: GradingRequestOptions): Promise<GradingResults> {
   return api.get<GradingResults>(
-    `/api/grading/sessions/${encodeURIComponent(sessionId)}/results`, await deviceHeaders(),
+    `/api/grading/sessions/${encodeURIComponent(sessionId)}/results`, { ...await deviceHeaders(), ...options },
   );
 }

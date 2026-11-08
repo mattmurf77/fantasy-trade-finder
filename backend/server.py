@@ -36014,10 +36014,7 @@ def grading_current_session_route():
     if not league_id:
         return jsonify({"error": "invalid_body", "message": "league_id is required"}), 400
     if _outlook_calibration.enabled():
-        try:
-            out = _outlook_calibration.current_session(user_id=str(sess["user_id"]), league_id=league_id)
-        except _blind_grading.GradingError as err:
-            return _grading_error(err)
+        out = _outlook_calibration.current_session(user_id=str(sess["user_id"]), league_id=league_id)
         if out["session"] and out["session"]["status"] == "building":
             _outlook_calibration.kick_worker()
         return jsonify(out)
