@@ -13282,7 +13282,8 @@ def _run_trade_job(
                         "untouchables": list(untouchable_ids), "targets": list(target_ids),
                         "not_interested": list(not_interested_ids), "avoid_positions": avoid_positions},
                     pinned_give_players=pinned_give, pinned_receive_players=pinned_receive,
-                    opponent_user_id=opponent_user_id, trade_intent=trade_intent)
+                    opponent_user_id=opponent_user_id, trade_intent=trade_intent,
+                    **({"require_all_give": True} if pinned_give and pinned_give_mode == "all" else {}))
                 owner_request_evidence = _owner_selected_assignment(
                     owner_context, "organic", serve=owner_exclusive, exclusive=owner_exclusive)
                 owner_request_evidence.update(model_arm=owner_model,
