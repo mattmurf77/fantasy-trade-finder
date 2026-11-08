@@ -9,7 +9,7 @@ import { Button, Meter, Text, TickLabel } from '../components/chalkline';
 import GradingCard from '../components/GradingCard';
 import GradingResults from '../components/GradingResults';
 import Toast from '../components/Toast';
-import { ApiError } from '../api/client';
+import { ApiError, getSessionRevision, requestAborted } from '../api/client';
 import {
   GRADING_TAG_LABELS,
   answerGradingCard,
@@ -41,6 +41,14 @@ import { NO_LEAGUE_ID, useSession } from '../state/useSession';
 // bug). mobile/tests/check-blind-grading.js pins that, the static testIDs,
 // and that no engine-identifying token appears in this file: the screen holds
 // a card's trade and nothing else about it.
+
+type CalibrationScope = { userId: string | null; leagueId: string | null; revision: number };
+type Selection = { id: string; phase: 'waiting' | 'grading' | 'results'; scope: CalibrationScope };
+type StartRequest = { leagueId: string; scope: CalibrationScope; beforeDispatch: () => void };
+type AnswerRequest = {
+  cardId: string; sessionId: string; answer: GradingAnswer;
+  scope: CalibrationScope; beforeDispatch: () => void;
+};
 
 type Grade = 1 | 5;   // the server's 1–5 scale, used as No / Yes
 
@@ -144,21 +152,37 @@ export default function CalibrationScreen() {
   const league = useSession((s) => s.league);
   const leagueId = league?.league_id ?? null;
   const hasLeague = !!leagueId && leagueId !== NO_LEAGUE_ID;
-  const currentKey = ['grading', 'current', leagueId, userId] as const;
-  const recoveryScope = useRef({ userId, leagueId });
-  if (recoveryScope.current.userId !== userId || recoveryScope.current.leagueId !== leagueId) {
-    recoveryScope.current = { userId, leagueId };
+  const revision = getSessionRevision();
+  const scopeKey = [leagueId, userId, revision] as const;
+  const currentKey = ['grading', 'current', ...scopeKey] as const;
+  const recoveryScope = useRef<CalibrationScope>({ userId, leagueId, revision });
+  if (recoveryScope.current.userId !== userId || recoveryScope.current.leagueId !== leagueId
+      || recoveryScope.current.revision !== revision) {
+    recoveryScope.current = { userId, leagueId, revision };
   }
   const screenScope = recoveryScope.current;
+  const mounted = useRef(true);
   useEffect(() => {
-    // Restore the mount scope if React replays effect setup after cleanup.
-    recoveryScope.current = screenScope;
-    return () => { recoveryScope.current = { userId: null, leagueId: null }; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    mounted.current = true;
+    return () => { mounted.current = false; };
   }, []);
 
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [completedId, setCompletedId] = useState<string | null>(null);
+  const inScope = () => {
+    const session = useSession.getState();
+    return mounted.current && recoveryScope.current === screenScope
+      && screenScope.revision === getSessionRevision()
+      && screenScope.userId === (session.user?.user_id ?? null)
+      && screenScope.leagueId === (session.league?.league_id ?? null);
+  };
+  const beforeDispatch = () => {
+    if (!inScope()) throw requestAborted();
+  };
+
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const selected = selection?.scope === screenScope ? selection : null;
+  const sessionId = selected?.phase === 'grading' ? selected.id : null;
+  const completedId = selected?.phase === 'results' ? selected.id : null;
+  const select = (id: string, phase: Selection['phase']) => setSelection({ id, phase, scope: screenScope });
   const [grade, setGrade] = useState<Grade | null>(null);
   const [tags, setTags] = useState<GradingTag[]>([]);
   // When we first saw the server session `building` (ms epoch); null otherwise.
@@ -172,8 +196,8 @@ export default function CalibrationScreen() {
   // server is the only resume source.
   const currentQ = useQuery({
     queryKey: currentKey,
-    queryFn: () => getCurrentGradingSession(leagueId as string),
-    enabled: hasLeague,
+    queryFn: ({ signal }) => getCurrentGradingSession(leagueId as string, { signal, beforeDispatch }),
+    enabled: hasLeague && !!userId,
     retry: false,
     staleTime: 0,
     refetchOnMount: 'always',
@@ -183,21 +207,23 @@ export default function CalibrationScreen() {
   const serverSession = currentQ.data?.session ?? null;
 
   const startM = useMutation({
-    mutationFn: () => startGradingSession(leagueId as string),
-    onSuccess: (r) => {
-      // Seed the poll with the POST's own SessionView so the first 1.5 s tick
-      // is not spent re-reading what we were just told.
-      qc.setQueryData(currentKey, { session: r.session });
-      if (r.session.status === 'open') setSessionId(r.session.session_id);
-      if (r.session.status === 'completed') setCompletedId(r.session.session_id);
-      // `building` ⇒ currentQ's refetchInterval takes over; the effect below
-      // enters grading the moment the status flips to `open`.
+    mutationFn: (request: StartRequest) =>
+      startGradingSession(request.leagueId, { beforeDispatch: request.beforeDispatch }),
+    onSuccess: (r, request) => {
+      if (request.scope !== screenScope || !inScope()) return;
+      const { session } = r;
+      qc.setQueryData(currentKey, { session });
+      if (session.status === 'open') select(session.session_id, 'grading');
+      if (session.status === 'completed') select(session.session_id, 'results');
+      if (session.status === 'building') select(session.session_id, 'waiting');
     },
   });
+  const handleStart = () => {
+    if (leagueId && inScope()) startM.mutate({ leagueId, scope: screenScope, beforeDispatch });
+  };
 
-  // §3.3 — track the build. Start the clock on the first `building` read;
-  // when the status leaves `building`, enter grading on `open` (the `failed`
-  // phase renders straight off serverSession) and clear the clock.
+  // A status poll can finish a build the user never asked to open. Only
+  // proceed for the same session they explicitly started or chose to resume.
   const serverStatus = serverSession?.status ?? null;
   const serverSessionId = serverSession?.session_id ?? null;
   useEffect(() => {
@@ -206,11 +232,14 @@ export default function CalibrationScreen() {
       return;
     }
     if (buildSince != null) {
-      if (serverStatus === 'open' && serverSessionId) setSessionId(serverSessionId);
       setBuildSince(null);
       setBuildSlow(false);
     }
-  }, [serverStatus, serverSessionId, buildSince]);
+    if (selected?.phase === 'waiting' && selected.id === serverSessionId
+        && serverStatus === 'open') {
+      setSelection({ ...selected, phase: 'grading' });
+    }
+  }, [serverStatus, serverSessionId, buildSince, selected]);
 
   // The 60 s cap: stop polling and offer Try again instead of spinning.
   useEffect(() => {
@@ -220,9 +249,10 @@ export default function CalibrationScreen() {
     return () => clearTimeout(t);
   }, [buildSince, buildSlow]);
 
+  const nextKey = ['grading', 'next', sessionId, ...scopeKey] as const;
   const nextQ = useQuery({
-    queryKey: ['grading', 'next', sessionId],
-    queryFn: () => getNextGradingCard(sessionId as string),
+    queryKey: nextKey,
+    queryFn: ({ signal }) => getNextGradingCard(sessionId as string, { signal, beforeDispatch }),
     enabled: !!sessionId && !completedId,
     retry: false,
   });
@@ -233,8 +263,8 @@ export default function CalibrationScreen() {
   // The server says every card is answered ⇒ results.
   const nextDone = nextQ.data?.done === true;
   useEffect(() => {
-    if (nextDone && sessionId) setCompletedId(sessionId);
-  }, [nextDone, sessionId]);
+    if (nextDone && selected?.phase === 'grading') setSelection({ ...selected, phase: 'results' });
+  }, [nextDone, selected]);
 
   // A new card starts with no grade and no tags.
   useEffect(() => {
@@ -243,16 +273,19 @@ export default function CalibrationScreen() {
   }, [cardId]);
 
   const answerM = useMutation({
-    mutationFn: (answer: GradingAnswer) => answerGradingCard(cardId as string, answer),
-    onSuccess: (r) => {
+    mutationFn: (request: AnswerRequest) =>
+      answerGradingCard(request.cardId, request.answer, { beforeDispatch: request.beforeDispatch }),
+    onSuccess: (r, request) => {
+      if (request.scope !== screenScope || !inScope()) return;
       setGrade(null);
       setTags([]);
-      if (r.session_status === 'completed') setCompletedId(r.session_id);
-      else void qc.invalidateQueries({ queryKey: ['grading', 'next', sessionId] });
+      if (r.session_status === 'completed') select(r.session_id, 'results');
+      else void qc.invalidateQueries({ queryKey: ['grading', 'next', request.sessionId, ...scopeKey] });
     },
-    onError: (e) => {
+    onError: (e, request) => {
+      if (request.scope !== screenScope || !inScope()) return;
       if (errorCode(e) === 'session_completed') {
-        setCompletedId(sessionId);
+        select(request.sessionId, 'results');
         return;
       }
       if (!is404(e)) setToast(COPY.saveFailed);   // keep the selection
@@ -260,8 +293,8 @@ export default function CalibrationScreen() {
   });
 
   const resultsQ = useQuery({
-    queryKey: ['grading', 'results', completedId],
-    queryFn: () => getGradingResults(completedId as string),
+    queryKey: ['grading', 'results', completedId, ...scopeKey],
+    queryFn: ({ signal }) => getGradingResults(completedId as string, { signal, beforeDispatch }),
     enabled: !!completedId,
     retry: false,
   });
@@ -269,39 +302,43 @@ export default function CalibrationScreen() {
   // A session belongs to one league: switching leagues drops everything.
   // (currentQ re-keys on leagueId by itself.)
   const resetStart = startM.reset;
+  const resetAnswer = answerM.reset;
   useEffect(() => {
-    setSessionId(null);
-    setCompletedId(null);
+    setSelection(null);
     setGrade(null);
     setTags([]);
     setBuildSince(null);
     setBuildSlow(false);
+    setToast(null);
     resetStart();
-  }, [leagueId, userId, resetStart]);
+    resetAnswer();
+  }, [screenScope, resetStart, resetAnswer]);
 
   // An unopened exercise can be retired between /current and /next. Retry
   // discovers its replacement; retrying the retired ID can never succeed.
   // Only this exact conflict changes sessions. Ordinary read errors retry the
   // same endpoint, and recovery never enrolls or discards answered history.
   const handleReadRetry = async () => {
-    if (recoveryScope.current !== screenScope) return;
+    if (!inScope()) return;
     if (!(sessionId && nextQ.error instanceof ApiError && nextQ.error.status === 409
           && errorCode(nextQ.error) === 'comparison_not_ready')) {
       void (sessionId ? nextQ : currentQ).refetch();
       return;
     }
     const result = await currentQ.refetch();
-    if (recoveryScope.current !== screenScope || result.isError) return;
+    if (!inScope() || result.isError) return;
     const replacement = result.data?.session;
-    setSessionId(replacement?.status === 'open' ? replacement.session_id : null);
-    setCompletedId(replacement?.status === 'completed' ? replacement.session_id : null);
+    if (replacement?.status === 'open') select(replacement.session_id, 'grading');
+    else if (replacement?.status === 'building') select(replacement.session_id, 'waiting');
+    else if (replacement?.status === 'completed') select(replacement.session_id, 'results');
+    else setSelection(null);
     setBuildSlow(false);
     setBuildSince(replacement?.status === 'building' ? Date.now() : null);
   };
 
   const handleDone = () => {
-    setSessionId(null);
-    setCompletedId(null);
+    if (!inScope()) return;
+    setSelection(null);
     startM.reset();
     void qc.invalidateQueries({ queryKey: currentKey });
   };
@@ -310,6 +347,7 @@ export default function CalibrationScreen() {
   // parent of a tab-stack screen is the Tab navigator. Clear the start error
   // too, so coming back lands on intro → Start instead of this message.
   const handleOpenAcquire = () => {
+    if (!inScope()) return;
     startM.reset();
     navigation.getParent()?.navigate('Trades');
   };
@@ -318,6 +356,7 @@ export default function CalibrationScreen() {
   // return the same `building` session (resume), so re-reading is the honest
   // action; a genuinely failed build arrives as `failed`.
   const handleBuildRetry = () => {
+    if (!inScope()) return;
     setBuildSlow(false);
     setBuildSince(Date.now());
     void currentQ.refetch();
@@ -326,14 +365,12 @@ export default function CalibrationScreen() {
   const toggleTag = (t: GradingTag) =>
     setTags((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
 
-  const submit = () => {
-    if (!grade || !cardId) return;
-    answerM.mutate({ grade, tags });
+  const save = (answer: GradingAnswer) => {
+    if (!cardId || !sessionId || !inScope()) return;
+    answerM.mutate({ cardId, sessionId, answer, scope: screenScope, beforeDispatch });
   };
-  const skip = () => {
-    if (!cardId) return;
-    answerM.mutate({ skip: true });
-  };
+  const submit = () => { if (grade) save({ grade, tags }); };
+  const skip = () => save({ skip: true });
 
   // Phase — derived in render, first match wins (lld §10.3 + §3.3).
   const errors = [currentQ.error, startM.error, nextQ.error, answerM.error, resultsQ.error];
@@ -399,7 +436,7 @@ export default function CalibrationScreen() {
               testID="calibration.retry"
               label={COPY.tryAgain}
               variant="secondary"
-              onPress={() => startM.mutate()}
+              onPress={handleStart}
             />
           </View>
         );
@@ -412,7 +449,7 @@ export default function CalibrationScreen() {
               testID="calibration.start"
               label={COPY.startOver}
               variant="primary"
-              onPress={() => startM.mutate()}
+              onPress={handleStart}
             />
           </View>
         );
@@ -458,14 +495,14 @@ export default function CalibrationScreen() {
                 testID="calibration.resume"
                 label={COPY.resume(open.progress.answered, open.progress.total)}
                 variant="primary"
-                onPress={() => setSessionId(open.session_id)}
+                onPress={() => { if (inScope()) select(open.session_id, 'grading'); }}
               />
             ) : (
               <Button
                 testID="calibration.start"
                 label={COPY.start}
                 variant="primary"
-                onPress={() => startM.mutate()}
+                onPress={handleStart}
               />
             )}
           </View>

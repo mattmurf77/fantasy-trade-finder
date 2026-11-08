@@ -82,12 +82,9 @@ def start_session(*, user_id, league_user_id, league_id, now=None, seed=None):
 
 
 def current_session(*, user_id, league_id):
+    """Return saved status. Start and first card access check input freshness."""
     row = db.load_open_grading_session(user_id, league_id,
         statuses=("building", "open", "completed", "failed"), round_id=ROUND_ID)
-    if row and row["status"] == "open" and not row.get("first_exposed_at") and not db.grading_progress(row["session_id"])["answered"]:
-        source = json.loads(row["source_json"])
-        return {"session": start_session(user_id=user_id, league_id=league_id,
-                                          league_user_id=source["seat"])["session"]}
     return {"session": grading.session_view(row) if row and row["status"] != "completed" else None}
 
 
@@ -96,10 +93,9 @@ def next_card(*, user_id, row):
     sid = row["session_id"]
     if row["status"] not in {"open", "completed"}:
         raise grading.GradingError("comparison_not_ready", 409)
-    if (row["status"] == "open" and not row.get("first_exposed_at")
-            and not db.grading_progress(sid)["answered"] and not enabled()):
-        raise grading.GradingError("round_paused", 409)
     if row["status"] == "open" and not row.get("first_exposed_at"):
+        if not enabled() and not db.grading_progress(sid)["answered"]:
+            raise grading.GradingError("round_paused", 409)
         from .outlook_calibration_adapter import is_current
         source = json.loads(row["source_json"])
         if not is_current(source.get("snapshot") or {}, user_id=user_id,

@@ -38,12 +38,16 @@ def test_actual_auth_foreign_ownership_and_unverified_fail_closed(route_client):
     client,sess=route_client
     db.insert_grading_session(session('s'),[card('c','s')])
     paths=['/api/grading/sessions/s/next','/api/grading/sessions/s/results']
-    for path in paths:assert client.get(path).status_code==404
+    current_path='/api/grading/sessions/current?league_id=league'
+    for path in [*paths,current_path]:assert client.get(path).status_code==404
     sess['user_id']='foreign'
     for path in paths:assert client.get(path,headers=AUTH).status_code==404
+    current=client.get(current_path,headers=AUTH)
+    assert current.status_code==200 and current.json=={'session':None}
     assert client.post('/api/grading/cards/c',json={'grade':5},headers=AUTH).status_code==404
     sess['user_id']='account';sess['verified']=False
     assert client.get(paths[0],headers=AUTH).status_code==403
+    assert client.get(current_path,headers=AUTH).status_code==403
 
 def test_rollout_off_preserves_owned_partial_answer_and_exact_results(route_client):
     client,sess=route_client
@@ -93,26 +97,62 @@ def test_first_exposure_freezes_unanswered_deck_across_later_input_changes(route
     repeated=client.get('/api/grading/sessions/s/next',headers=AUTH)
     assert repeated.status_code==200 and repeated.json==first.json
 
-def test_direct_first_exposure_rechecks_stale_unopened_prepared_deck(route_client,monkeypatch):
+def test_current_leaves_stale_ready_deck_for_first_card_to_recheck(route_client, monkeypatch):
     from backend import outlook_calibration_adapter as adapter
-    client,_=route_client
-    row=session('s');row['source_json']=json.dumps({'seat':'seat','snapshot':{}})
-    db.insert_grading_session(row,[card('c','s')])
-    monkeypatch.setattr(adapter,'is_current',lambda *a,**k:False)
-    response=client.get('/api/grading/sessions/s/next',headers=AUTH)
-    assert response.status_code==409
-    assert db.load_grading_session('s')['status']=='failed'
-    assert db.load_grading_session('s')['first_exposed_at'] is None
+    client, _ = route_client
+    snapshot = {'captured_at': '2026-11-06T12:00:00+00:00'}
+    row = session('s')
+    row['source_json'] = json.dumps({'seat': 'seat', 'snapshot': snapshot, 'proofs': {'private': True}})
+    db.insert_grading_session(row, [card('c', 's')])
+    before = db.load_grading_session('s')
+    cards = db.load_grading_cards('s')
+    checks, kicks = [], []
+
+    def stale(source, **scope):
+        checks.append((source, scope))
+        return False
+
+    monkeypatch.setattr(adapter, 'is_current', stale)
+    monkeypatch.setattr(oc, 'kick_worker', lambda: kicks.append(True))
+    current_path = '/api/grading/sessions/current?league_id=league'
+    for _ in range(2):
+        current = client.get(current_path, headers=AUTH)
+        assert current.status_code == 200
+        assert current.json == {'session': {
+            'session_id': 's', 'league_id': 'league', 'status': 'open',
+            'created_at': before['created_at'], 'completed_at': None,
+            'progress': {'answered': 0, 'total': 1}, 'error': None,
+            'captured_at': snapshot['captured_at'],
+        }}
+    assert checks == kicks == []
+    assert db.load_grading_session('s') == before
+    assert db.load_grading_cards('s') == cards
+
+    next_path = '/api/grading/sessions/s/next'
+    response = client.get(next_path, headers=AUTH)
+    assert response.status_code == 409
+    assert response.json == {'error': 'comparison_not_ready'}
+    assert checks == [(snapshot, {'user_id': 'account', 'league_user_id': 'seat', 'league_id': 'league'})]
+    assert len(kicks) == 1
+    retired = db.load_grading_session('s')
+    assert retired['status'] == 'failed'
+    assert json.loads(retired['error_json']) == {'code': 'comparison_stale'}
+    assert retired['first_exposed_at'] is None
+    assert db.load_grading_cards('s') == cards
+
     # A client must rediscover /current; retrying this retired ID cannot
     # resume the replacement and must never expose the old private deck.
-    current=client.get('/api/grading/sessions/current?league_id=league',headers=AUTH)
-    assert current.status_code==200
-    assert current.json['session']['session_id']!='s'
-    assert current.json['session']['status']=='building'
+    current = client.get(current_path, headers=AUTH)
+    assert current.status_code == 200
+    assert current.json['session']['session_id'] != 's'
+    assert current.json['session']['status'] == 'building'
+    assert len(kicks) == 2  # A saved building session can recover its worker.
     for _ in range(2):
-        repeated=client.get('/api/grading/sessions/s/next',headers=AUTH)
-        assert repeated.status_code==409
-        assert repeated.json['error']=='comparison_not_ready'
+        repeated = client.get(next_path, headers=AUTH)
+        assert repeated.status_code == 409
+        assert repeated.json == {'error': 'comparison_not_ready'}
+    assert len(checks) == 1
+    assert len(kicks) == 2
 
 def test_round_rollback_blocks_new_first_exposure_but_preserves_visible_cohort(route_client):
     client,_=route_client
@@ -152,20 +192,39 @@ def test_private_preparation_queues_without_public_first_exposure(route_client,e
     assert noauth.status_code==401
 
 
-def test_current_boot_pool_unavailable_preserves_ready_snapshot(route_client, monkeypatch):
+def test_transiently_unavailable_inputs_leave_ready_deck_intact(route_client, monkeypatch):
     from backend import outlook_calibration_adapter as adapter, blind_grading as bg
     client, _ = route_client
     row = session('ready')
     row['source_json'] = json.dumps({'seat': 'seat', 'snapshot': {}})
     db.insert_grading_session(row, [card('c', 'ready')])
     before = db.load_grading_session('ready')
+    cards = db.load_grading_cards('ready')
+
     def unavailable(*a, **kw):
         raise bg.GradingError('comparison_inputs_unavailable', 503)
+
     monkeypatch.setattr(adapter, 'is_current', unavailable)
-    response = client.get('/api/grading/sessions/current?league_id=league', headers=AUTH)
-    assert response.status_code == 503
-    assert response.json['error'] == 'comparison_inputs_unavailable'
+    monkeypatch.setattr(oc, 'kick_worker', lambda: pytest.fail('unavailable inputs started a build'))
+    current = client.get('/api/grading/sessions/current?league_id=league', headers=AUTH)
+    assert current.status_code == 200
+    assert current.json['session']['session_id'] == 'ready'
+    assert current.json['session']['status'] == 'open'
+
+    next_path = '/api/grading/sessions/ready/next'
+    first = client.get(next_path, headers=AUTH)
+    start = client.post('/api/grading/sessions', json={'league_id': 'league'}, headers=AUTH)
+    for response in (first, start):
+        assert response.status_code == 503
+        assert response.json == {'error': 'comparison_inputs_unavailable'}
     assert db.load_grading_session('ready') == before
+    assert db.load_grading_cards('ready') == cards
+
+    monkeypatch.setattr(adapter, 'is_current', lambda *a, **kw: True)
+    retry = client.get(next_path, headers=AUTH)
+    assert retry.status_code == 200
+    assert retry.json['card']['card_id'] == 'c'
+    assert db.load_grading_session('ready')['first_exposed_at'] is not None
 
 
 @pytest.mark.parametrize('code', ['provider_lineup_unsupported','league_membership_required',
