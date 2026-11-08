@@ -171,16 +171,16 @@ process.on('exit', () => {
     const block = events.slice(start, end);
     const deviceStart = events.indexOf('const PHYSICAL_IPHONE');
     const declaration = events.slice(deviceStart, events.indexOf(';', deviceStart) + 1);
-    const build = (os, physical, type) => compile(
+    const build = (os, physical, modelId) => compile(
       `${declaration} module.exports = (eventType, props) => { ${block}; return props; };`,
       {
         Constants: { platform: { ios: { buildNumber: 'candidate' } } },
         Platform: { OS: os },
-        Device: { isDevice: physical, deviceType: type, DeviceType: { PHONE: 1 } },
+        Device: { isDevice: physical, modelId, deviceType: 1, DeviceType: { PHONE: 1 } },
         takeTradeInputChange: () => ({ scenario: 'after_preferences_change', input_age_ms: 12 }),
       },
     );
-    const run = build('ios', true, 1);
+    const run = build('ios', true, 'iPhone17,1');
     assert.deepEqual(JSON.parse(JSON.stringify(run('find_trades_tapped', { scenario: 'cross_league_handoff' }))),
       { scenario: 'cross_league_handoff', client_build: 'candidate', physical_iphone: true });
     assert.equal(run('find_trades_tapped', {}).input_age_ms, 12);
@@ -188,9 +188,13 @@ process.on('exit', () => {
       assert.deepEqual(JSON.parse(JSON.stringify(run(eventType, { ms_from_tap: 100 }))),
         { ms_from_tap: 100, client_build: 'candidate', physical_iphone: true });
     }
-    for (const args of [['ios', false, 1], ['ios', true, 2], ['android', true, 1]]) {
+    for (const args of [['ios', false, 'iPhone17,1'], ['ios', true, 'iPad16,3'],
+                        ['ios', true, 'iPod9,1'], ['android', true, null]]) {
       assert.equal(build(...args)('trade_first_card_shown', {}).physical_iphone, false);
     }
+    const unknown = build('ios', true, null)('find_trades_tapped', {});
+    assert(!JSON.stringify(unknown).includes('physical_iphone'));
+    assert(!JSON.stringify(run('find_trades_tapped', {})).includes('iPhone17,1'));
   });
   console.log(`${count} lifecycle checks passed; physical-device latency remains unmeasured.`);
   finished = true;

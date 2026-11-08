@@ -46,7 +46,9 @@ terminal must match the tap's device. A proven tap without a matching
 terminal still counts as a miss. iPhone-labeled taps on that build with a
 missing or invalid capture marker are reported separately and block a
 verdict. Older builds cannot satisfy this filter. Unfiltered reports remain
-useful for diagnosing regressions.
+useful for diagnosing regressions. The app checks the native hardware class
+locally; it sends the boolean marker, never the hardware model string. An
+unknown hardware class does not earn a physical iPhone classification.
 
 
 ### Reader and app rollout

@@ -94,8 +94,10 @@ const uuidv4 = _sharedUuidv4;
 
 // ── Module state ────────────────────────────────────────────────────────
 const APP_OPEN_TS = Date.now();
-const PHYSICAL_IPHONE = Platform.OS === 'ios' && Device.isDevice
-  && Device.deviceType === Device.DeviceType.PHONE;
+// Expo's phone device type is an interface idiom. Check the hardware class
+// locally so an iPhone layout alone cannot qualify a timing sample.
+const PHYSICAL_IPHONE = Platform.OS !== 'ios' || !Device.isDevice ? false
+  : Device.modelId ? /^iPhone\d+,\d+$/.test(Device.modelId) : undefined;
 
 let queue: QueuedEvent[] = [];
 let sessionId = uuidv4();           // rotated on cold start (module load)
