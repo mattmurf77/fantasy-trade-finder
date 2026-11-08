@@ -5,7 +5,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { chalk, ice, ink, radii, space, type } from '../theme/chalkline';
-import { Button, Meter, Text, TickLabel } from '../components/chalkline';
+import { Button, Icon, Meter, Text } from '../components/chalkline';
 import GradingCard from '../components/GradingCard';
 import GradingResults from '../components/GradingResults';
 import Toast from '../components/Toast';
@@ -77,34 +77,31 @@ const BUILD_POLL_CAP_MS = 60_000;
 // Copy (lld.md §10.6 + §3.3). Kept as literals in one table so the JSX stays
 // free of raw apostrophes and the guard's token scan reads them as strings.
 const COPY = {
-  introTitle: 'Calibration',
-  intro: (league: string) =>
-    `Would you send these trades in ${league}? Rate one idea at a time, or skip it.`,
-  snapshot: (date: string) => `League snapshot from ${new Date(date).toLocaleDateString()}. Rate the idea using that snapshot.`,
-  purpose:
-    'Your answers help improve the trades Fleeced suggests. Rating a trade never sends an offer.',
+  intro: (league: string) => `Rate trades in ${league}`,
+  snapshot: (date: string) => `League as of ${new Date(date).toLocaleDateString()}`,
+  purpose: 'Your ratings help improve suggestions. No offers are sent.',
   start: 'Start',
   resume: (k: number, n: number) => `Resume (${k} of ${n} answered)`,
   noLeague: 'Pick a league first.',
   unavailableTitle: 'Not available',
-  unavailable: "Calibration isn't available right now.",
-  unsupported: 'This league has roster rules or player eligibility that Calibration cannot verify yet. Try another connected league.',
-  accountLink: 'Calibration cannot yet verify this account’s team link in this league. Try another connected league.',
-  reconnect: 'Calibration could not verify your current team in this league. Reconnect your own league account, select your team, and try again.',
-  interrupted: 'This deck was interrupted while building. Start over for a fresh comparison.',
-  needsDeck: "Open Acquire for this league first so there's a fresh deck to compare against, then come back.",
+  unavailable: 'Try Calibration again later.',
+  unsupported: 'This league’s roster rules aren’t supported yet. Try another league.',
+  accountLink: 'We couldn’t verify your linked team. Try another league.',
+  reconnect: 'Reconnect your league account and select your team to continue.',
+  interrupted: 'Trade prep was interrupted.',
+  needsDeck: 'Open Acquire for this league, then return here.',
   openAcquire: 'Open Acquire',
   tryAgain: 'Try again',
   checkAgain: 'Check again',
   startOver: 'Start over',
   building: 'Building your deck…',
-  buildSlow: 'Your comparison is still being prepared. This can take several minutes. You can leave this screen and check again later.',
-  tooFew: 'There aren’t enough trade ideas for this league right now. Try another league.',
-  notSynced: 'This league isn’t loaded yet. Reopen it from the league picker and try again.',
+  buildSlow: 'Still preparing trades. You can leave and check back.',
+  tooFew: 'Not enough trade ideas yet. Try another league.',
+  notSynced: 'Reopen this league from the league picker.',
   sessionReadFailed: 'Couldn’t load your session.',
   cardReadFailed: 'Couldn’t load the next trade idea.',
-  startFailed: 'Something went wrong starting the session. Try again.',
-  buildFailed: 'Something went wrong building the session. Start over to try again.',
+  startFailed: 'Couldn’t start Calibration.',
+  buildFailed: 'Couldn’t prepare these trades.',
   prompt: 'Would you send this?',
   whyLabel: 'Why? (optional)',
   next: 'Next',
@@ -185,6 +182,7 @@ export default function CalibrationScreen() {
   const select = (id: string, phase: Selection['phase']) => setSelection({ id, phase, scope: screenScope });
   const [grade, setGrade] = useState<Grade | null>(null);
   const [tags, setTags] = useState<GradingTag[]>([]);
+  const [reasonsCard, setReasonsCard] = useState<string | null>(null);
   // When we first saw the server session `building` (ms epoch); null otherwise.
   const [buildSince, setBuildSince] = useState<number | null>(null);
   const [buildSlow, setBuildSlow] = useState(false);
@@ -270,6 +268,7 @@ export default function CalibrationScreen() {
   useEffect(() => {
     setGrade(null);
     setTags([]);
+    setReasonsCard(null);
   }, [cardId]);
 
   const answerM = useMutation({
@@ -307,6 +306,7 @@ export default function CalibrationScreen() {
     setSelection(null);
     setGrade(null);
     setTags([]);
+    setReasonsCard(null);
     setBuildSince(null);
     setBuildSlow(false);
     setToast(null);
@@ -486,10 +486,7 @@ export default function CalibrationScreen() {
         const open = serverSession?.status === 'open' ? serverSession : null;
         return (
           <View style={styles.block}>
-            <TickLabel>{COPY.introTitle}</TickLabel>
-            <Text variant="body">{COPY.intro(league?.league_name ?? 'this league')}</Text>
-            <Text variant="bodySm" testID="calibration.purpose">{COPY.purpose}</Text>
-            {serverSession?.captured_at ? <Text variant="bodySm">{COPY.snapshot(serverSession.captured_at)}</Text> : null}
+            <Text variant="heading">{COPY.intro(league?.league_name ?? 'this league')}</Text>
             {open ? (
               <Button
                 testID="calibration.resume"
@@ -505,6 +502,7 @@ export default function CalibrationScreen() {
                 onPress={handleStart}
               />
             )}
+            <Text variant="bodySm" testID="calibration.purpose">{COPY.purpose}</Text>
           </View>
         );
       }
@@ -518,6 +516,7 @@ export default function CalibrationScreen() {
           );
         }
         const busy = answerM.isPending || nextQ.isFetching;
+        const reasonsOpen = reasonsCard === card.card_id;
         return (
           <View style={styles.block}>
             <View style={styles.progressRow}>
@@ -560,9 +559,19 @@ export default function CalibrationScreen() {
               })}
             </View>
 
-            <Text variant="label">{COPY.whyLabel}</Text>
+            <Pressable
+              accessibilityRole="button"
+              aria-expanded={reasonsOpen}
+              onPress={() => setReasonsCard(reasonsOpen ? null : card.card_id)}
+              style={styles.reasonsToggle}
+            >
+              <Text variant="bodySm" style={styles.reasonsLabel}>
+                {tags.length ? `Feedback (${tags.length} selected)` : COPY.whyLabel}
+              </Text>
+              <Icon name={reasonsOpen ? 'chevron-up' : 'chevron-down'} size={16} color={chalk.base} />
+            </Pressable>
 
-            <View style={styles.tagWrap}>
+            {reasonsOpen && <View style={styles.tagWrap}>
               {TAG_CHIPS.map((c) => {
                 const selected = tags.includes(c.tag);
                 return (
@@ -585,7 +594,7 @@ export default function CalibrationScreen() {
                   </Pressable>
                 );
               })}
-            </View>
+            </View>}
 
             <View style={styles.actions}>
               <Button
@@ -670,6 +679,8 @@ const styles = StyleSheet.create({
   },
   gradeBtnSelected: { backgroundColor: ink.ink3, borderColor: ice.base },
   gradeNumSelected: { color: ice.base },
+  reasonsToggle: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  reasonsLabel: { color: chalk.base, flexShrink: 1 },
   tagWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   // Badges & chips construction: radius 2, label type, 1px border; 32pt tall
   // with 6pt hitSlop for an effective 44pt target.
