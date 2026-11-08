@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { Button, Card, Text, TickLabel } from '../chalkline';
+import { Button, Card, Icon, Text } from '../chalkline';
 import { chalk, space } from '../../theme/chalkline';
 import { getLeagueProjectionBatch } from '../../api/leagueProjections';
 import { NO_LEAGUE_ID, useSession } from '../../state/useSession';
@@ -35,7 +35,13 @@ export default function HomePlayoffBanner({ rosterId, onBuy, onSell, onDetails }
   const [side, setSide] = useState<PlayoffTradeSide | null>(null);
   if (!available) return null;
   const view = homePlayoffBanner(query.data, rosterId, query.isError);
-  const choosing = side && view.sides.includes(side) ? side : null;
+  const availableSides = view.sides.filter(action => action === 'buy' ? onBuy : onSell);
+  const choosing = side && availableSides.includes(side) ? side : null;
+  const probability = view.probability != null ? `${(view.probability * 100).toFixed(1)}%` : null;
+  const asOf = view.capturedAt ? new Date(view.capturedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : null;
+  const status = query.isLoading ? 'Loading forecast…' : view.status;
+  const savedDate = asOf && !view.current && status !== 'Last saved' ? `Saved ${asOf}` : asOf;
+  const subtitle = [status, savedDate, asOf && view.partial ? 'Partial data' : null].filter(Boolean).join(' · ');
   const choose = (position: SplitPos) => {
     if (!choosing) return;
     const action = choosing === 'buy' ? onBuy : onSell;
@@ -43,29 +49,31 @@ export default function HomePlayoffBanner({ rosterId, onBuy, onSell, onDetails }
     action?.(position);
   };
   return <View testID="home.playoff.banner" style={styles.banner}>
-    <Card>
-      <TickLabel>{view.current ? 'Estimated playoff chance' : 'Playoff forecast'}</TickLabel>
-      {view.probability != null ? <Text variant="heading" style={styles.spacing}>
-        {(view.probability * 100).toFixed(1)}%{view.current ? '' : ' · last saved estimate'}
-      </Text> : null}
-      <Text variant="bodySm" style={styles.detail}>{query.isLoading ? 'Loading saved forecast…' : view.status}</Text>
-      {view.capturedAt ? <Text variant="bodySm" style={styles.detail}>As of {new Date(view.capturedAt).toLocaleDateString()}{view.partial ? ' · uses partial Sleeper data' : ''}</Text> : null}
-      {view.question ? <>
-        <Text style={styles.spacing}>{view.question}</Text>
-        <View style={styles.actions}>
-          {view.sides.map(action => <Button key={action} label={action === 'buy' ? 'Buy a player' : 'Sell a player'}
-            variant="secondary" testID={action === 'buy' ? 'home.playoff.buy' : 'home.playoff.sell'} disabled={action === 'buy' ? !onBuy : !onSell}
-            onPress={() => setSide(side === action ? null : action)} />)}
+    <Card padding={space.md}>
+      <Pressable testID="home.playoff.details" accessibilityRole="button"
+        accessibilityLabel={`Projected Season Finish. ${probability ? `${probability} ${view.current ? 'estimated playoff chance' : 'last saved estimate of playoff chance'}. ` : ''}${subtitle}. View standings.`}
+        onPress={onDetails} style={styles.summary}>
+        <View style={styles.heading}>
+          <Text variant="title" style={styles.title}>Projected Season Finish</Text>
+          <Text variant="bodySm">View</Text>
+          <Icon name="chevron-right" color={chalk.dim} size={16} />
         </View>
-        {(!onBuy || !onSell) ? <Text variant="bodySm" style={styles.detail}>Player choices appear when your league’s roster values are available.</Text> : null}
-      </> : null}
+        <View style={styles.estimate}>
+          {probability ? <Text variant="bodySm" style={styles.prompt}>{probability} playoff odds</Text> : null}
+          <Text variant="bodySm" style={styles.subtitle}>{subtitle}</Text>
+        </View>
+      </Pressable>
+      {availableSides.length > 0 ? <View style={styles.actions}>
+        {availableSides.map(action => <Button key={action} label={action === 'buy' ? 'Buy a player' : 'Sell a player'}
+          variant="secondary" testID={action === 'buy' ? 'home.playoff.buy' : 'home.playoff.sell'}
+          onPress={() => setSide(side === action ? null : action)} />)}
+      </View> : null}
       {choosing ? <View testID="home.playoff.positions" style={styles.spacing}>
-        <Text variant="bodySm">Which position would you like to {choosing}?</Text>
+        <Text variant="bodySm" style={styles.prompt}>{choosing === 'buy' ? 'Buy at which position?' : 'Sell at which position?'}</Text>
         <View style={styles.actions}>{SPLIT_POSITIONS.map(position => <Button key={position} label={position}
           variant="secondary" testID={POSITION_TEST_IDS[position]} accessibilityLabel={`${choosing === 'buy' ? 'Buy' : 'Sell'} a ${position}`}
           onPress={() => choose(position)} />)}</View>
       </View> : null}
-      <Button label="View standings" variant="ghost" onPress={onDetails} testID="home.playoff.details" />
     </Card>
   </View>;
 }
@@ -73,6 +81,11 @@ export default function HomePlayoffBanner({ rosterId, onBuy, onSell, onDetails }
 const styles = StyleSheet.create({
   banner: { marginBottom: space.lg },
   spacing: { marginTop: space.sm },
-  detail: { color: chalk.dim, marginTop: space.xs },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.sm },
+  summary: { minHeight: 44, justifyContent: 'center' },
+  heading: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  title: { flex: 1, minWidth: 0 },
+  estimate: { flexDirection: 'row', flexWrap: 'wrap', columnGap: space.sm, alignItems: 'baseline' },
+  subtitle: { flexShrink: 1 },
+  prompt: { color: chalk.base },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.xs },
 });

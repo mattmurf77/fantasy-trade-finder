@@ -61,7 +61,6 @@ assert(component.includes('if (!available) return null'));
 assert(component.includes("platform === 'sleeper'"));
 assert(!component.includes('placeholderData'));
 assert(!/queueLeague|projection-runs.*POST|getOutlook|generateTrade/.test(component));
-assert(component.includes('view.sides.includes(side)'));
 assert(component.includes('view.probability != null'));
 assert(component.includes('last saved estimate'));
 assert(hub.includes('key={`${user?.user_id}:${leagueId}`}'));
@@ -81,9 +80,9 @@ const presses = [];
 const React = { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) };
 const modules = {
   react: { __esModule: true, default: React, useState: () => [selected, value => { selected = value; }] },
-  'react-native': { StyleSheet: { create: value => value }, View: 'View' },
+  'react-native': { Pressable: 'Pressable', StyleSheet: { create: value => value }, View: 'View' },
   '@tanstack/react-query': { useQuery: value => { options = value; return { data: queryData, isError: queryError, isLoading: false }; } },
-  '../chalkline': Object.fromEntries(['Button', 'Card', 'Text', 'TickLabel'].map(k => [k, k])),
+  '../chalkline': Object.fromEntries(['Button', 'Card', 'Icon', 'Text'].map(k => [k, k])),
   '../../theme/chalkline': { chalk: { dim: 'dim' }, space: { xs: 4, sm: 8, lg: 16 } },
   '../../api/leagueProjections': { getLeagueProjectionBatch: () => { throw new Error('Render must not fetch directly'); } },
   '../../state/useSession': { NO_LEAGUE_ID: 'no_league', useSession: select => select(active) },
@@ -103,6 +102,8 @@ const nodes = node => Array.isArray(node) ? node.flatMap(nodes) : node && typeof
 const button = (tree, id) => nodes(tree).find(n => n.props?.testID === id);
 let tree = render();
 assert.deepEqual(Array.from(options.queryKey), ['league-projection-batch', 'viewer', 'league-a']);
+assert.match(button(tree, 'home.playoff.details').props.accessibilityLabel, /Projected Season Finish.*80\.0%.*Partial data.*View standings/);
+assert.equal(button(tree, 'home.playoff.positions'), undefined);
 button(tree, 'home.playoff.buy').props.onPress();
 tree = render(); button(tree, 'home.playoff.position.RB').props.onPress();
 assert.deepEqual(presses, ['buy:RB']); assert.equal(selected, null);
@@ -110,6 +111,7 @@ queryData = data(.1); tree = render(); button(tree, 'home.playoff.sell').props.o
 tree = render(); button(tree, 'home.playoff.position.WR').props.onPress();
 assert.deepEqual(presses, ['buy:RB', 'sell:WR']);
 selected = 'sell'; queryData = data(.1, 'stale'); tree = render();
+assert.match(button(tree, 'home.playoff.details').props.accessibilityLabel, /10\.0% last saved estimate/);
 assert.equal(button(tree, 'home.playoff.sell'), undefined);
 assert.equal(button(tree, 'home.playoff.positions'), undefined);
 button(tree, 'home.playoff.details').props.onPress(); assert.equal(presses.at(-1), 'details');

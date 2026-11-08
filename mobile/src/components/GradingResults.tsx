@@ -1,7 +1,7 @@
-import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { chalk, ink, space } from '../theme/chalkline';
-import { Card, Text, TickLabel } from './chalkline';
+import { Card, Icon, Text, TickLabel } from './chalkline';
 import {
   GRADING_TAG_LABELS,
   type GradingArmSummary,
@@ -42,7 +42,6 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 function ArmCard({ label, arm }: { label: string; arm: GradingArmSummary }) {
-  const reasons = topTags(arm.tag_counts);
   return (
     <Card>
       <View style={styles.cardBody}>
@@ -50,36 +49,48 @@ function ArmCard({ label, arm }: { label: string; arm: GradingArmSummary }) {
         {/* Yes/No since 2026-10-14: share_ge_4 is the Yes rate (an older 1–5
             session reads it as the share of 4s and 5s). The mean is no longer shown. */}
         <Row label="Would send" value={fmtShare(arm.share_ge_4)} />
-        <Row label="Cards" value={String(arm.cards)} />
-        <Row label="Answered" value={String(arm.n)} />
-        <Row label="Skipped" value={String(arm.skipped)} />
-        <View style={styles.reasons}>
-          <Text variant="label">Top reasons</Text>
-          <Text variant="bodySm" style={styles.reasonsText}>
-            {reasons.length ? reasons.join(' · ') : '—'}
-          </Text>
-        </View>
+        <Text variant="bodySm" style={styles.footer}>{`${arm.n} rated · ${arm.skipped} skipped`}</Text>
       </View>
     </Card>
   );
 }
 
 export default function GradingResults({ results }: { results: Results }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   return (
     <View style={styles.root}>
       {ARM_ORDER.map((arm) => (
         <ArmCard key={arm} label={ARM_LABEL[arm]} arm={results.arms[arm]} />
       ))}
-      {results.round_id ? (
-        <Text variant="bodySm" style={styles.footer}>
-          {results.sample_size_status === 'limited'
-            ? 'Small sample: these are your ratings of the available ideas, not a verdict on overall engine quality.'
-            : 'These ratings describe your sample, not overall engine quality.'}
-        </Text>
+      {results.round_id && results.sample_size_status === 'limited' ? (
+        <Text variant="bodySm" style={styles.footer}>Small sample. Compare with care.</Text>
       ) : null}
-      <Text variant="bodySm" style={styles.footer}>
-        {`${results.shared} trades were suggested by both engines and count for both.`}
-      </Text>
+      <Pressable
+        accessibilityRole="button"
+        aria-expanded={detailsOpen}
+        onPress={() => setDetailsOpen(open => !open)}
+        style={styles.detailsToggle}
+      >
+        <Text variant="bodySm" style={styles.detailsLabel}>Rating details</Text>
+        <Icon name={detailsOpen ? 'chevron-up' : 'chevron-down'} size={16} color={chalk.base} />
+      </Pressable>
+      {detailsOpen && <View style={styles.details}>
+        {ARM_ORDER.map(key => {
+          const arm = results.arms[key];
+          const reasons = topTags(arm.tag_counts);
+          return <View key={key} style={styles.details}>
+            <TickLabel>{ARM_LABEL[key]}</TickLabel>
+            <Text variant="bodySm" style={styles.footer}>{`${arm.cards} trades shown`}</Text>
+            {reasons.length > 0 && <Text variant="bodySm" style={styles.footer}>
+              {`Top reasons: ${reasons.join(' · ')}`}
+            </Text>}
+          </View>;
+        })}
+        {results.shared > 0 && <Text variant="bodySm" style={styles.footer}>
+          {results.shared === 1 ? '1 trade counted for both engines.' : `${results.shared} trades counted for both engines.`}
+        </Text>}
+        <Text variant="bodySm" style={styles.footer}>Results reflect only the trades you rated.</Text>
+      </View>}
     </View>
   );
 }
@@ -96,7 +107,8 @@ const styles = StyleSheet.create({
     paddingVertical: space.xs,
   },
   rowLabel: { color: chalk.dim },
-  reasons: { gap: space.xs, paddingTop: space.xs },
-  reasonsText: { color: chalk.base },
+  details: { gap: space.xs },
+  detailsToggle: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  detailsLabel: { color: chalk.base, flexShrink: 1 },
   footer: { color: chalk.dim },
 });

@@ -19,7 +19,7 @@ const keyOf = key => JSON.stringify(key);
 const same = (a,b) => a && b && a.length===b.length && a.every((value,i)=>Object.is(value,b[i]));
 
 function makeHarness(initial=null) {
-  let userId='u', leagueId='l', revision=1, mounted=true, cursor=0, dirty=true, output={}, current=initial;
+  let userId='u', leagueId='l', revision=1, mounted=true, cursor=0, dirty=true, output={}, disclosure, current=initial;
   const hooks=[], pendingEffects=[], scheduledQueries=[], queries=new Map(), calls=[], timers=new Map();
   let timerId=0;
   const responses={current:[],next:[],start:[],answer:[],results:[]}, beforeWire={};
@@ -129,9 +129,10 @@ function makeHarness(initial=null) {
   vm.runInNewContext(js,{exports:out,require:id=>{assert.ok(id in stubs,id);return stubs[id];},AbortController,
     setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id),console});
   function render(){
-    cursor=0;dirty=false;output={};
+    cursor=0;dirty=false;output={};disclosure=undefined;
     function visit(node){if(Array.isArray(node))return node.forEach(visit);if(node&&typeof node==='object'&&node.props){
       if(node.props.testID)output[node.props.testID]=node.props;
+      if(typeof node.props['aria-expanded']==='boolean') disclosure=node.props;
       visit(node.props.children);
     }}
     visit(out.default());
@@ -144,7 +145,7 @@ function makeHarness(initial=null) {
   }}
   function select({user=userId,league=leagueId,token=revision,rerender=true}={}){userId=user;leagueId=league;revision=token;if(rerender)dirty=true;}
   const byId=id=>output['calibration.'+id];
-  return {calls,responses,beforeWire,flush,select,byId,
+  return {calls,responses,beforeWire,flush,select,byId,disclosure:()=>disclosure,
     expireTimers(){for(const [id, fn] of [...timers]){timers.delete(id);fn();}},
     replayMount(){const mountedEffect=hooks.find(slot=>slot.fn && slot.deps.length===0);mountedEffect.cleanup();mountedEffect.cleanup=mountedEffect.fn();},
     unmount(){mounted=false;for(const slot of hooks)slot.cleanup?.();},
@@ -278,6 +279,21 @@ async function main(){
     void h.byId('skip').onPress();await h.flush();
     assert.deepEqual(h.calls,[['current','l'],['next','s'],['answer','c-s',{skip:true}],['next','s'],
       ['answer','c-s',{skip:true}],['results','s']]);
+  });
+  await check('optional feedback starts collapsed, survives closing, and resets for the next trade',async()=>{
+    const h=makeHarness(session('open'));await h.flush();h.byId('resume').onPress();await h.flush();
+    assert.equal(h.disclosure()['aria-expanded'],false);
+    assert.equal(h.byId('tag.overpay'),undefined);
+    h.disclosure().onPress();await h.flush();
+    h.byId('tag.overpay').onPress();h.byId('no').onPress();await h.flush();
+    h.disclosure().onPress();await h.flush();
+    assert.equal(h.byId('tag.overpay'),undefined);
+    const next=card('s');next.card.card_id='c-next';next.card.position=2;
+    h.responses.next.push(next);h.byId('submit').onPress();await h.flush();
+    assert.deepEqual(h.counts('answer'),[['answer','c-s',{grade:1,tags:['overpay']}]]);
+    assert.equal(h.disclosure()['aria-expanded'],false);
+    h.disclosure().onPress();await h.flush();
+    assert.equal(h.byId('tag.overpay').accessibilityState.selected,false);
   });
   await check('obsolete final answer cannot fetch results after account switch',async()=>{
     const h=makeHarness(session('open'));const d=deferred();h.responses.answer.push(d.promise);await h.flush();
