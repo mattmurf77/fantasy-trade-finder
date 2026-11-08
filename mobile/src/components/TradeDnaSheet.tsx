@@ -28,6 +28,8 @@ import {
 import { posColor } from '../theme/colors';
 import { Icon, Button } from './chalkline';
 import { useSession } from '../state/useSession';
+import { beginTradePageInputTransition } from '../state/devicePageStore';
+import { tradeSearchContextIdentity } from '../state/tradeSearchHandoff';
 import { useFlag } from '../state/useFeatureFlags';
 import { guideV2Active, recordGuideReceipt } from '../state/useGuide';
 import { GUIDE_RECEIPTS } from './analystScript';
@@ -455,6 +457,7 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
     avoid: string[];        // #360 R-13
   } | null>(null);
   const dnaInFlight = useRef(false);
+  const dnaTransition = useRef<((succeeded?: boolean) => void) | null>(null);
 
   const flushDnaSave = async () => {
     if (dnaInFlight.current) return;
@@ -462,8 +465,11 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
     if (!payload) return;
     dnaDesired.current = null;
     dnaInFlight.current = true;
+    if (!dnaTransition.current) dnaTransition.current = beginTradePageInputTransition(tradeSearchContextIdentity());
+    let succeeded = false;
     try {
       await saveOutlook.mutateAsync(payload);
+      succeeded = true;
     } catch (e: any) {
       // Quiet-but-honest failure: drop queued edits, revert the drafts to
       // the last-saved prefs, and surface the inline error line.
@@ -485,6 +491,11 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
     } finally {
       dnaInFlight.current = false;
       if (dnaDesired.current) void flushDnaSave();
+      else {
+        const finish = dnaTransition.current;
+        dnaTransition.current = null;
+        finish?.(succeeded);
+      }
     }
   };
 

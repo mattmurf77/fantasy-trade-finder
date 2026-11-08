@@ -86,7 +86,7 @@ const page = (over = {}) => ({ job_id: 'j', status: 'complete', cursor: 1, deck_
   for (const kind of ['model', 'fair']) await ok('actual ' + kind + ' tap starts once and pushes immediately before response', async () => {
     reset(); const calls = [], pushes = []; let resolve;
     const load = body => { calls.push(body); return new Promise(r => { resolve = r; }); };
-    const context = { switching: false, leagueId: 'L', fairnessReady: true, effectiveFairness: 0.5,
+    const context = { mountedRef: { current: true }, activeEagerSearchRef: { current: null }, hasPendingTradePageInputs: () => false, traceFor: () => null, monotonicNow: () => 0, tradeRequestDeadline: () => 31000, switching: false, leagueId: 'L', fairnessReady: true, effectiveFairness: 0.5,
       sheetTargetingOn: true, targetingEnabled: true, tradeIntent: undefined, deviceKey: null,
       payEnforcing: false, payEntitled: false, resultsPushPendingRef: { current: false },
       dropPendingSearch: () => {}, readOnline: () => true, readDevicePage: () => null,
@@ -105,7 +105,7 @@ const page = (over = {}) => ({ job_id: 'j', status: 'complete', cursor: 1, deck_
   for (const enforcingFree of [false, true]) await ok('actual offline tap retains proved organic page only with permitted cache access', () => {
     reset(); const pushes = []; let requests = 0;
     const held = device.devicePageFrom(page(), { scope: 'organic:f=0.50', validatedAt: now });
-    const context = { switching: false, leagueId: 'L', fairnessReady: true, effectiveFairness: 0.5,
+    const context = { mountedRef: { current: true }, activeEagerSearchRef: { current: null }, hasPendingTradePageInputs: () => false, traceFor: () => null, monotonicNow: () => 0, tradeRequestDeadline: () => 31000, switching: false, leagueId: 'L', fairnessReady: true, effectiveFairness: 0.5,
       sheetTargetingOn: true, targetingEnabled: true, tradeIntent: undefined, deviceKey: 'key',
       payEnforcing: enforcingFree, payEntitled: false, resultsPushPendingRef: { current: false },
       dropPendingSearch: () => {}, readOnline: () => false, readDevicePage: () => held,

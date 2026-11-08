@@ -19,6 +19,8 @@ This is the file:line-cited trace that replaces a simulator capture under D-056.
 
 ---
 
+Current recovery behavior is documented in [Calibration session recovery](../calibration-session-recovery/scope.md): a retired unopened exercise is rediscovered through the current-session read, while generic card failures retry the same card. Long queued builds offer bounded Check again polling.
+
 ## 1. Tab presence at launch
 
 **The read.** `mobile/src/navigation/TabNav.tsx:745-747`:

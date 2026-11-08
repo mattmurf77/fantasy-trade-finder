@@ -221,9 +221,9 @@ process.on('exit', () => {
 
   // ── 5. The screen wires all of the above ───────────────────────────────
   await check('5a. every dispatch is a paged search; each but the automatic re-search has its own client search id', () => {
-    ok(/\?\? generateTrades\(request, \{ searchId: vars\.searchId \}\);/.test(code),
+    ok(/\?\? generateTrades\(request, \{ searchId: vars\.searchId \}, options\);/.test(code),
       'mutationFn always pages (page 1), the dispatch search id when it has one (#525 QA P2-1)');
-    ok(/const claimed = research \? research\.searchId : handoffSearchRef\.current \?\? claimPendingSearch\(\);[\s\S]{0,500}?generateMutation\.mutate\(\s*\{\s*\.\.\.vars,\s*searchId: research \? research\.searchId \?\? undefined : claimed \?\? uuidv4\(\),\s*research: !!research,\s*\},\s*mutateOpts\);/.test(code),
+    ok(/const claimed = research \? research\.searchId : handoffSearchRef\.current \?\? claimPendingSearch\(\);[\s\S]+?const searchId = research \? research\.searchId \?\? undefined : claimed \?\? uuidv4\(\);[\s\S]+?generateMutation\.mutate\(\s*\{\s*\.\.\.vars, searchId, research: !!research, context,/.test(code),
       'dispatchGenerate carries the tap\'s search id (R1), else mints one (the automatic re-search: its open id or none)');
   });
   await check('5b. pages are fetched by deck + cursor, merged through mergeDeckPage at the fronted card', () => {

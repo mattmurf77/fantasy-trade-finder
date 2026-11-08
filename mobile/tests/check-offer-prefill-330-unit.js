@@ -78,6 +78,7 @@ function setSessionLeague(league) {
 const finderModule = load('src/state/useFinderTargets.ts', (name) => {
   if (name === 'zustand') return require(path.join(ROOT, 'node_modules', 'zustand'));
   if (name === './useSession') return { useSession: useSessionStub };
+  if (name === './tradeSearchHandoff') return { tradeSearchContextIdentity: () => 'synthetic-context' };
   throw new Error(
     `useFinderTargets.ts gained an unexpected runtime import ("${name}") — ` +
       'extend the shim deliberately, do not let it pass silently.',

@@ -1,0 +1,8 @@
+# First-page failure code walk
+
+- `mobile/src/screens/TradesScreen.tsx`, `fetchNextPage`: existing mounted-screen, loop, generation epoch, job identity and billing checks run first. The catch increments the existing failure counter. At the existing six-failure cap, only a zero-card deck clears its local job and sets the established `poll_abandoned` failure. The server job and exact last request remain intact; no further timer is scheduled at the cap.
+- Existing `trades.deck-error` / `trades.deck-error.retry` render branch: clearing the local running job prevents both ordinary loading and first-run skeleton branches from masking the failure. Existing Chalkline card, copy, button and test IDs are reused.
+- Existing `handleFindTrades` → `dispatchGenerate`: explicit retry records a new tap/search ID and sends `repeat:true`, retaining the last selected request. No automatic generation is added. The six existing status retries already handle transient failures without new generation or preview actions.
+- `mobile/tests/check-first-page-failure.js`: transpiles and executes the actual function, actual TSX conditional and actual retry handlers. Twelve controls cover empty/held decks, onboarding, retry, successful late delivery, running-empty responses, obsolete screen/job/epoch/loop, and billing gates.
+
+No simulator/device timing inference. This independently reproduced failure state is not established as the cause of the build 178 physical test: available telemetry showed two no-card attempts and sampled successful status requests, without captured trade HTTP errors. A separate preference-write/handoff race is reported to the release owner and is outside this narrow patch.

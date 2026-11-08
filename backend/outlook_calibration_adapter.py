@@ -150,17 +150,24 @@ class CapturedComparison:
     significance: tuple
     quality_enabled: bool
 
-    def run_arm(self, version):
+    def run_arm(self, version, *, check_current=None):
         from . import server as s, trade_service as ts, bakeoff_runner as bakeoff
         from . import trade_bilateral_presentment, deck_quality
         if version not in VERSIONS:
             raise ValueError("unsupported calibration version")
+        def checkpoint():
+            if check_current is not None:
+                check_current()
+
+        checkpoint()
         context = copy.deepcopy(self.owner_context)
         context["config"]["owner_outlook_evidence_enabled"] = float(version == VERSIONS[1])
         if version == VERSIONS[0]:
             context.pop("input_evidence", None)
         with ts._cfg_override(context["config"]):
-            cards, report = bakeoff.owner_generator(context["config"])(**context)
+            control = {"_check_current": check_current} if check_current is not None else {}
+            cards, report = bakeoff.owner_generator(context["config"])(**context, **control)
+            checkpoint()
             native = len(cards)
             unsupported = set((self.source.get('fixed_lineup') or {}).get('unsupported_teams') or {})
             cards = [card for card in cards if context['user_id'] not in unsupported and card.target_user_id not in unsupported]
@@ -174,7 +181,9 @@ class CapturedComparison:
                     user_id=self.source["account_user_id"], league_id=self.source["league_id"],
                     seed_map=context["seed_elo"], mutation_sink=[], frozen_state=suppression)
             suppressed = len(cards)
-            cards = s._owner_cards_valid(cards, context)
+            validation_control = {"check_current": check_current} if check_current is not None else {}
+            cards = s._owner_cards_valid(cards, context, **validation_control)
+            checkpoint()
             validated = len(cards)
             # The shared roster gate sorts; restore the native order before
             # owner presentment just as the production owner pipeline does.
@@ -188,16 +197,19 @@ class CapturedComparison:
             annotate_coverage(cards, self.source.get("unpriced_occupancy") or {}, self.roster_context)
             annotate_fixed(cards, fixed_lineup, self.roster_context.viewer_id)
             roster_count = len(cards)
+            checkpoint()
             cards, _, significance_diag = s._evaluate_trade_significance(
                 cards, capture=self.significance, players=context["players"],
                 user_elo=context["user_elo"], seed_elo=context["seed_elo"],
                 scoring_format=context["scoring_format"], user_sources=context["user_sources"])
             significant = len(cards)
+            checkpoint()
             pass_keys = {(frozenset(g), frozenset(r)) for g, r in self.source.get("pass_keys", [])}
             cards = [c for c in cards if (frozenset(c.give_player_ids),
                      frozenset(c.receive_player_ids)) not in pass_keys]
             cards, presentment = trade_bilateral_presentment.present(cards, generator_version=version)
             quality_diag = {}
+            checkpoint()
             if self.quality_enabled:
                 rosters = {m.user_id: list(m.roster) for m in context["league"].members}
                 rosters[context["user_id"]] = list(context["user_roster"])
@@ -210,6 +222,7 @@ class CapturedComparison:
                     rosters=rosters, lineup_slots=list(self.roster_context.rules.slots),
                     native_caps=({p:n for p,n in max_positions(self.roster_context.rules.native_bounds, len(self.roster_context.rules.slots)).items() if p in ('QB','TE')}
                                  if getattr(self.roster_context.rules,'native_bounds',()) else None))
+            checkpoint()
             return cards, {"model_version": version, "native_count": native,
                 "unsupported_participant_count":len(unsupported), "unsupported_pair_cards":unsupported_pair_count,
                 "post_suppression_count": suppressed, "validated_count": validated, "roster_count": roster_count,

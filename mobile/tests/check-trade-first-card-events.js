@@ -196,13 +196,17 @@ console.log('check-trade-first-card-events:');
 // ── 4. The request carries the tap's id ───────────────────────────────────
 {
   check('4a. dispatchGenerate sends the claimed tap id as /generate\'s search_id (else a fresh one for untapped dispatches; the automatic re-search its open id or none, section 11), and the deck now answers that search',
-    /const claimed = research \? research\.searchId : handoffSearchRef\.current \?\? claimPendingSearch\(\);\s*if \(!research\) \{\s*claimSearch\(handoffSearchRef\.current\);\s*handoffSearchRef\.current = null;\s*\}\s*deckSearchRef\.current = claimed \? \{ id: claimed, keys: new Set\(\) \} : null;\s*generateMutation\.mutate\(\s*\{\s*\.\.\.vars,\s*searchId: research \? research\.searchId \?\? undefined : claimed \?\? uuidv4\(\),\s*research: !!research,\s*\},\s*mutateOpts\);/.test(trades));
+    /const claimed = research \? research\.searchId : handoffSearchRef\.current \?\? claimPendingSearch\(\);/.test(trades)
+      && /claimSearch\(handoffSearchRef\.current\);\s*handoffSearchRef\.current = null;/.test(trades)
+      && /deckSearchRef\.current = claimed \? \{ id: claimed, keys: new Set\(\) \} : null;/.test(trades)
+      && /const searchId = research \? research\.searchId \?\? undefined : claimed \?\? uuidv4\(\);/.test(trades)
+      && /generateMutation\.mutate\(\s*\{\s*\.\.\.vars, searchId, research: !!research, context,/.test(trades));
   check('4b. the landing\'s page-1 request uses the canvas tap\'s id; the adopting deck claims it; a cancelled push drops it',
-    /generateTrades\(request, \{ searchId: fork\.searchId \}\)/.test(trades)
+    /generateTrades\(request, \{ searchId: fork\.searchId \},/.test(trades)
       && /claimSearch\(adopted\?\.snapshot\.search_id\);/.test(trades)
       && /dropPendingSearch\(fork\.searchId\);/.test(trades));
   check('4c. the fair sweep claims its tap\'s search; only an untapped sweep begins one',
-    /let claimedFair = handoffSearchRef\.current \?\? claimPendingSearch\(\);\s*claimSearch\(handoffSearchRef\.current\);\s*handoffSearchRef\.current = null;\s*if \(!claimedFair\) \{\s*beginTradeSearch\(\{ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' \}\);/.test(trades));
+    /let claimedFair = handoffSearchRef\.current \?\? claimPendingSearch\(\);\s*const eager = eagerHandoffRef\.current;\s*eagerHandoffRef\.current = false;\s*claimSearch\(handoffSearchRef\.current\);\s*handoffSearchRef\.current = null;\s*if \(!claimedFair\) \{\s*beginTradeSearch\(\{ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' \}\);/.test(trades));
 }
 
 // ── 5. EXECUTED: exactly one R2/R2b per search_id ─────────────────────────
@@ -525,9 +529,9 @@ function freshTraceWithTimers() {
       && /dispatchGenerate\(\{ repeat: true \}, undefined,\s*\{ searchId: autoResearchSearchId\(deckSearchRef\.current\?\.id, isSearchOpen\) \}\);/.test(auto)
       && !/beginTradeSearch|handleFindTrades|track\(/.test(auto));
   check('11i. dispatchGenerate mints no search_id for the re-search and never resets the budget itself; a new search\'s ANSWER does (onSuccess)',
-    /searchId: research \? research\.searchId \?\? undefined : claimed \?\? uuidv4\(\),\s*research: !!research,/.test(trades)
+    /const searchId = research \? research\.searchId \?\? undefined : claimed \?\? uuidv4\(\);/.test(trades)
       && !/if \(!research\) autoResearchRef\.current = 'idle';/.test(trades)
-      && /onSuccess: \(snapshot, vars, ctx\) => \{\s*if \(\s*\(ctx\?\.identity !== undefined && ctx\.identity !== tradeSearchIdentity\(\)\)\s*\|\| applyJobResult\(snapshot, [^)]*\) === null\s*\) \{\s*return;\s*\}\s*autoResearchRef\.current = autoResearchAfterAnswer\(autoResearchRef\.current, !!vars\.research\);/.test(trades)
+      && /onSuccess: \(snapshot, vars, ctx\) => \{\s*const context = ctx \?\? vars.context;\s*if \(!modelAttemptCurrent\(context\)\) return;\s*if \(context.identity !== tradeSearchIdentity\(\)\) \{[\s\S]{0,250}return;\s*\}\s*autoResearchRef\.current = autoResearchAfterAnswer\(autoResearchRef\.current, !!vars\.research\);/.test(trades)
       && /setJob\(null\);[\s\S]{0,600}autoResearchRef\.current = 'idle';\s*let claimedFair = handoffSearchRef\.current \?\? claimPendingSearch\(\);/.test(trades));   // the sweep clears the job as it resets
   check('11j. the deck end hides the error card only while the RE-SEARCH is in flight (decided at render); offline it shows the Offline card',
     /const deckEnd = deckEndRaw === 'error' && autoResearchHidesError\(\s*autoResearchRef\.current, job\?\.error,\s*generateMutation\.isPending && !!generateMutation\.variables\?\.research\)\s*\? \(online \? 'pending' : 'offline'\)\s*: deckEndRaw;/.test(trades));
@@ -714,7 +718,7 @@ async function gateScenarios() {
   check('10d. the router sends R2b FIRST in the gate listener, for a SEARCH route\'s find answer only, before it opens anything',
     /export function handleGateSignal\(signal: GateSignal, path\?: string\): Promise<GateOutcome> \| void \{\s*if \(!paywallGateOn\(\)\) return;\s*if \(signal\.action !== 'verify_mismatch' && signal\.kind === 'find' && !!path && SEARCH_PATHS\.has\(path\)\) \{\s*const open = openSearchId\(\);\s*if \(open\) failFirstCard\(open, gateFailureReason\(signal\)\);\s*\}\s*if \(signal\.action === 'paywall'\)/.test(gateSrc)
       && /const SEARCH_PATHS: ReadonlySet<string> = new Set\(\['\/api\/trades\/generate', '\/api\/trades\/fair-packages'\]\);/.test(gateSrc)
-      && /outcome = _onProRequired\(signal, _pathname\(path\)\);/.test(stripComments(read('api/client.ts'))));
+      && /outcome = _onProRequired\(signal, pathname\);/.test(stripComments(read('api/client.ts'))));
   const deckR2b = trades.match(/failDeckSearch\(gateFailureReason\(gateSignalFor\(e, '\/api\/trades\/(generate|fair-packages)'\)\)\);/g) || [];
   check('10e. the deck settles a gate error with the same mapping (generate and the fair sweep), never a bare error',
     deckR2b.length === 2 && /takeTradeSearchHandoff<PagedTradeJobSnapshot>/.test(trades));

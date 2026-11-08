@@ -168,7 +168,55 @@ def balanced_order(merged, seed):
     return order
 
 
-def build_session(*, session_id, capture=None, lease_token=None):
+class _CooperativeYield:
+    """Advisory CPU scheduling only; never cancellation or model admission.
+
+    Every pause is bounded. A work interval after it prevents a continuously
+    busy registry from sleeping again at every candidate checkpoint. Lease
+    heartbeat and final database fences keep their existing ownership semantics.
+    """
+    WORK_INTERVAL = .1
+    SLEEP_SLICE = .1
+    MAX_SLICES = 10
+
+    def __init__(self, pressure, *, clock=None, sleep=None):
+        self.pressure = pressure
+        self.clock = clock or time.monotonic
+        self.sleep = sleep or time.sleep
+        self.next_check = 0.
+        self.disabled = False
+
+    def __call__(self):
+        if self.disabled:
+            return
+        try:
+            if self.clock() < self.next_check:
+                return
+            for _ in range(self.MAX_SLICES):
+                try:
+                    busy = self.pressure()
+                except Exception:
+                    # An advisory signal failure gets bounded deference, never
+                    # an arm error, restart, or changed candidate budget.
+                    busy = True
+                if not busy:
+                    break
+                self.sleep(self.SLEEP_SLICE)
+            self.next_check = self.clock() + self.WORK_INTERVAL
+        except Exception:
+            # Clock/sleep failures disable advisory scheduling for this batch.
+            # Full comparison computation continues with all original gates.
+            self.disabled = True
+
+
+def _trade_pressure():
+    # Same conservative signal as projections: includes passive prewarm and
+    # old-league live jobs, not just an attended tap. No SQL under this lock.
+    from .server import _projection_foreground_busy
+    return _projection_foreground_busy()
+
+
+def build_session(*, session_id, capture=None, lease_token=None, work_check=None):
     """Called only under the durable serial worker lease; no fallback or recapture.
 
     A crash after capture leaves an immutable interrupted snapshot. A fresh
@@ -187,6 +235,8 @@ def build_session(*, session_id, capture=None, lease_token=None):
         source["build_stage"] = "capturing"
         if not _save_build(session_id, source, counts, lease_token):
             return
+        if work_check is not None:
+            work_check()
         frozen = capture(user_id=row["user_id"], league_user_id=source["seat"], league_id=row["league_id"])
         source.update(snapshot=frozen.source, build_stage="captured")
         source["seat"] = frozen.source.get("league_user_id") or source["seat"]
@@ -201,10 +251,13 @@ def build_session(*, session_id, capture=None, lease_token=None):
         for arm in arms:
             version = MODEL_VERSIONS[arm]
             try:
-                cards, diagnostics = frozen.run_arm(version)
+                control = {"check_current": work_check} if work_check is not None else {}
+                cards, diagnostics = frozen.run_arm(version, **control)
                 unique_keys, selected = set(), []
                 card = proof = None
                 for rank, card in enumerate(cards):
+                    if work_check is not None:
+                        work_check()
                     proof = card.owner_evaluation
                     if proof.model_identity[1] != version or not proof.matches(card):
                         raise ValueError("comparison proof identity mismatch")
@@ -314,6 +367,7 @@ def drain_queue(*, capture=None, max_jobs=MAX_BATCH):
         return {"busy": True}
     token, processed, started = secrets.token_hex(16), 0, time.monotonic()
     stop, lost = threading.Event(), threading.Event()
+    work_check = _CooperativeYield(_trade_pressure)
     try:
         if not _claim_lease(token, datetime.now(timezone.utc)):
             return {"busy": True}
@@ -327,7 +381,7 @@ def drain_queue(*, capture=None, max_jobs=MAX_BATCH):
                     gs.c.status == "building").order_by(gs.c.created_at, gs.c.session_id).limit(1)).scalar()
             if sid is None:
                 break
-            build_session(session_id=sid, capture=capture, lease_token=token)
+            build_session(session_id=sid, capture=capture, lease_token=token, work_check=work_check)
             processed += 1
         return {"processed": processed, **({"busy": True} if lost.is_set() else {})}
     finally:

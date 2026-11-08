@@ -52,7 +52,7 @@ const taxonomy = read('../backend/analytics_taxonomy.py');
 // ═══════════════════════════════════════════════════════════════════════
 
 assert(
-  /setHandoff: \(h\) =>\s*set\(\{ handoff: h \? \{ \.\.\.h, seq: \+\+_handoffSeq \} : null \}\)/.test(storeCode),
+  /setHandoff: \(h\) =>\s*set\(\{ handoff: h \? \{ \.\.\.h, seq: \+\+_handoffSeq, contextIdentity: tradeSearchContextIdentity\(\) \} : null \}\)/.test(storeCode),
   '#330 setHandoff stamps a store-internal monotonic seq',
   'sabotage detected: letting callers supply seq (or dropping it) — a same-team repeat Offer then changes no dep and never re-fires the choke point',
 );
@@ -62,7 +62,7 @@ assert(
   'sabotage detected: a handoff surviving clear() rides the league-switch GC into the WRONG league',
 );
 assert(
-  /setHandoff: \(h: Omit<FinderHandoff, 'seq'> \| null\) => void;/.test(storeCode),
+  /setHandoff: \(h: Omit<FinderHandoff, 'seq' \| 'contextIdentity'> \| null\) => void;/.test(storeCode),
   '#330 the setHandoff type forbids caller-supplied seq (Omit)',
 );
 
@@ -140,7 +140,7 @@ assert(
     return (
       body.includes('setAutoRunSeq(finderHandoff.seq);') &&
       body.every((l) =>
-        /^(fairAnchorRef\.current = fair;|autoRunPendingRef\.current = !fair;|autoRunOriginRef\.current = origin;|setAutoRunSeq\(finderHandoff\.seq\);)$/.test(l),
+        /^(handoffSearchRef\.current = finderHandoff\.searchId \?\? null;|handoffContextRef\.current = finderHandoff\.contextIdentity;|eagerHandoffRef\.current = false;|fairAnchorRef\.current = fair;|autoRunPendingRef\.current = !fair;|autoRunOriginRef\.current = origin;|setAutoRunSeq\(finderHandoff\.seq\);)$/.test(l),
       )
     );
   })(),
@@ -342,7 +342,7 @@ assert(
 );
 assert(
   // (200 ms path C stamps the dispatch-time device page key beside it.)
-  /onMutate: \(\) => \(\{ epoch: deckEpochRef\.current, deviceKey, identity: tradeSearchIdentity\(\) \}\)/.test(tradesCode),
+  /const context: ModelAttempt = \{ epoch: deckEpochRef\.current, deviceKey,/.test(tradesCode) && /return vars.context;/.test(tradesCode),
   'S-5 every dispatch stamps the current epoch into the mutation context',
 );
 assert(
@@ -350,9 +350,9 @@ assert(
   'S-5 result application goes through the pure R-10 helper',
 );
 assert(
-  countOf(tradesCode, 'applyJobResult(') >= 3,
-  'S-5 the helper guards onSuccess, onError, AND the polling attach',
-  `saw ${countOf(tradesCode, 'applyJobResult(')} call sites — expected at least 3`,
+  countOf(tradesCode, 'applyJobResult(') >= 1 && countOf(tradesCode, 'if (!modelAttemptCurrent(context)) return;') === 2,
+  'S-5 immutable attempt authority guards both mutation callbacks; epoch helper guards polling',
+  `saw ${countOf(tradesCode, 'applyJobResult(')} polling call sites — expected at least 1 plus both mutation guards`,
 );
 const pollGuard = /if \(applyJobResult\(next, tickEpoch, deckEpochRef\.current\) === null\) return;/.test(tradesCode);
 assert(

@@ -107,6 +107,8 @@ import { uuidv4 } from '../api/_queue';
 // dispatches the search claims the tap's search id.
 import {
   beginTradeSearch,
+  traceFor,
+  monotonicNow,
   claimPendingSearch,
   claimSearch,
   dropPendingSearch,
@@ -190,7 +192,7 @@ import {
 import SwapSuggestSheet from '../components/SwapSuggestSheet';
 import { getProgress } from '../api/rankings';
 import { track, msSinceOpen } from '../api/events';
-import { ApiError, gateSignalFor, getBaseUrl } from '../api/client';
+import { ApiError, gateSignalFor, getBaseUrl, timeoutForRequest } from '../api/client';
 import {
   resolveShareUrl,
   resolveTradeShareUrl,
@@ -243,12 +245,16 @@ import {
 import {
   notifyTradePageInputsSettled,
   discardDevicePage,
+  hasPendingTradePageInputs,
+  assertTradePageInputsReady,
+  TradeInputReadinessError,
+  waitForTradePageInputs,
   readDevicePage,
   removeDeviceCard,
   saveDevicePage,
 } from '../state/devicePageStore';
 import { prepareTradePage } from '../state/tradePagePreparation';
-import { tradeSearchIdentity, startTradeSearchHandoff, takeTradeSearchHandoff } from '../state/tradeSearchHandoff';
+import { tradeSearchIdentity, tradeSearchContextIdentity, TradeSearchContextChangedError, startTradeSearchHandoff, takeTradeSearchHandoff } from '../state/tradeSearchHandoff';
 import CoachMark from '../components/CoachMark';
 import IdentityConfirmStrip from '../components/IdentityConfirmStrip';
 import QuickSetPromptCard from '../components/QuickSetPromptCard';
@@ -548,6 +554,23 @@ function tradePackageKey(c: TradeCard): string {
 // format, token revision and input generation. Network requests instead
 // cross navigation through tradeSearchHandoff: one exact user-tapped
 // request, consumed once by the destination without a builder delay.
+type ModelAttempt = {
+  epoch: number; deviceKey: string | null; contextIdentity: string | null;
+  attempt: number; identity?: string | null;
+};
+type ModelGenerateVars = {
+  auto?: boolean; force?: boolean; repeat?: boolean; searchId?: string; research?: boolean;
+  request: GenerateBody; deadlineAt: number; tapAt: number; context: ModelAttempt; eager?: boolean;
+};
+function tradeRequestDeadline(searchId: string | null | undefined, path: string): number {
+  const trace = traceFor(searchId);
+  const elapsed = trace ? Math.max(0, monotonicNow() - trace.tapAt) : 0;
+  return Date.now() + Math.max(0, timeoutForRequest(path, 'POST') - elapsed);
+}
+const TRADE_INPUTS_CHANGED = 'Your trade inputs changed while searching. Try again.';
+const TRADE_CONTEXT_NOT_READY = 'Your league is still getting ready. Try again.';
+const TRADE_CONTEXT_CHANGED = 'Your league or scoring format changed. Start a new search.';
+
 type FirstPageHandoff = {
   request: GenerateBody;
   snapshot: PagedTradeJobSnapshot;
@@ -745,7 +768,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // adoptedFirstPage). Snapshotted once; the initializers below and the two
   // mount-time resets (the league effect, the #330 choke point) read it.
   const [adopted] = useState(() => adoptedFirstPage(route));
-  const handoffSearchRef = useRef<string | null>(route?.params?.resultsPush?.searchId ?? null);
+  const handoffSearchRef = useRef<string | null>(null);
+  const handoffContextRef = useRef<string | null>(null);
+  const eagerHandoffRef = useRef(false);
   const adoptedMountRef = useRef({ league: !!adopted, choke: !!adopted });
   // C — a deck adopted from the DEVICE page renders at once and revalidates
   // in the background: 'running' until that response lands ('done') or
@@ -1101,6 +1126,7 @@ export default function TradesScreen({ navigation, route }: any) {
   } | null>(null);
   const lastModelRequestRef = useRef<Parameters<typeof generateTrades>[0] | null>(null);
   const resultsPushPendingRef = useRef(false);
+  const activeEagerSearchRef = useRef<string | null>(null);
   // D-158 — the anchored deck's FILTER RECEIPT. The operator's framing: an
   // anchored Find a Trade "becomes the same treatment as the existing filters
   // from the outlook tab", so the anchor is shown as a receipt above the
@@ -1175,6 +1201,9 @@ export default function TradesScreen({ navigation, route }: any) {
   const resultsPushParam = route?.params?.resultsPush as
     | {
         seq: number;
+        searchId?: string;
+        contextIdentity: string | null;
+        eager?: boolean;
         opponent: { userId: string; name: string } | null;
         origin: 'calculator' | null;
         fairAnchor: { giveIds: string[]; receiveIds: string[] } | null;
@@ -2258,6 +2287,48 @@ export default function TradesScreen({ navigation, route }: any) {
     return mountedRef.current && currentPassContext(context) && context.deckEpoch === deckEpochRef.current;
   }
 
+  const modelAttemptRef = useRef(0);
+  function modelAttemptCurrent(context: ModelAttempt | undefined): boolean {
+    return !!context && mountedRef.current && context.contextIdentity !== null
+      && context.contextIdentity === tradeSearchContextIdentity()
+      && context.epoch === deckEpochRef.current && context.attempt === modelAttemptRef.current;
+  }
+  function modelRequest(vars: { force?: boolean; repeat?: boolean }): GenerateBody {
+    // Pins are read from the store (not the render closure) so a
+    // pin-then-generate in the same tick (#186 keep-side) always sends
+    // the fresh lists.
+    const {
+      pinnedGive: pins,
+      pinnedReceive: wants,
+      packageMode: pkg,
+    } = useFinderTargets.getState();
+    const request = vars.repeat && lastModelRequestRef.current
+      ? {
+          ...lastModelRequestRef.current,
+          fairness_threshold: effectiveFairness,
+          trade_intent: tradeIntent ?? undefined,
+          force: vars.force || undefined,
+        }
+      : {
+          league_id: leagueId!,
+          fairness_threshold: effectiveFairness,
+          force: vars.force || undefined,
+          // Omit empty sides; the helper also owns the existing package
+          // mode for multi-GIVE pins and the explicit canvas selection.
+          ...modelSelectionParams(canvasSelectionRef.current, {
+            giveIds: pins.map((p) => p.id),
+            receiveIds: wants.map((p) => p.id),
+          }, targetingEnabled, pkg),
+          // Omit absent scope/shape so untargeted payloads retain their
+          // historical API shape.
+          opponent_user_id: scopedOpponent || undefined,
+          trade_intent: tradeIntent ?? undefined,
+        };
+    return { ...request,
+      pinned_give_players: request.pinned_give_players?.slice(),
+      pinned_receive_players: request.pinned_receive_players?.slice() };
+  }
+
   const generateMutation = useMutation({
     // `auto` marks the onboarding first-run auto-start (item 4): its
     // failures stay silent (retry below) instead of toasting. `repeat`
@@ -2265,44 +2336,16 @@ export default function TradesScreen({ navigation, route }: any) {
     // `force` (item 7) skips the
     // server's complete-fresh job cache — used by the post-Quick-Set
     // regeneration, whose board change doesn't alter the cache key.
-    mutationFn: (vars: {
-      auto?: boolean; force?: boolean; repeat?: boolean; searchId?: string; research?: boolean;
-    }) => {
-      // Pins are read from the store (not the render closure) so a
-      // pin-then-generate in the same tick (#186 keep-side) always sends
-      // the fresh lists.
-      const {
-        pinnedGive: pins,
-        pinnedReceive: wants,
-        packageMode: pkg,
-      } = useFinderTargets.getState();
-      const request = vars.repeat && lastModelRequestRef.current
-        ? {
-            ...lastModelRequestRef.current,
-            fairness_threshold: effectiveFairness,
-            trade_intent: tradeIntent ?? undefined,
-            force: vars.force || undefined,
-          }
-        : {
-            league_id: leagueId!,
-            fairness_threshold: effectiveFairness,
-            force: vars.force || undefined,
-            // Omit empty sides; the helper also owns the existing package
-            // mode for multi-GIVE pins and the explicit canvas selection.
-            ...modelSelectionParams(canvasSelectionRef.current, {
-              giveIds: pins.map((p) => p.id),
-              receiveIds: wants.map((p) => p.id),
-            }, targetingEnabled, pkg),
-            // Omit absent scope/shape so untargeted payloads retain their
-            // historical API shape.
-            opponent_user_id: scopedOpponent || undefined,
-            trade_intent: tradeIntent ?? undefined,
-          };
-      lastModelRequestRef.current = request;
-      // A handoff supplies one explicit canvas request. Subsequent new
-      // targeting uses the pin store; Retry and regenerations use the saved
-      // request.
-      canvasSelectionRef.current = null;
+    mutationFn: (vars: ModelGenerateVars) => {
+      const beforeDispatch = (phase?: 'gate') => {
+        if (!modelAttemptCurrent(vars.context)) throw new TradeSearchContextChangedError();
+        if (phase === 'gate') return;
+        if (vars.context.identity !== tradeSearchIdentity()) throw new TradeSearchContextChangedError();
+        assertTradePageInputsReady(vars.tapAt);
+      };
+      beforeDispatch();
+      const request = vars.request;
+      const options = { deadlineAt: vars.deadlineAt, beforeDispatch };
       // 200 ms path (E2): page 1 under the dispatch's client search id
       // (minted in dispatchGenerate, never saved into the request above, so
       // a repeat is a new search). Always paged: the automatic re-search,
@@ -2311,23 +2354,34 @@ export default function TradesScreen({ navigation, route }: any) {
       // #393 M2 (D2): the first-run auto-start, its silent retry and the
       // automatic re-search (#525) are background: their 402 opens nothing.
       if (vars.auto || vars.research) {
-        return generateTrades(request, { searchId: vars.searchId }, { background: true });
+        return generateTrades(request, { searchId: vars.searchId }, { ...options, background: true });
       }
-      return takeTradeSearchHandoff<PagedTradeJobSnapshot>(vars.searchId, 'model', request)
-        ?? generateTrades(request, { searchId: vars.searchId });
+      const handoff = takeTradeSearchHandoff<PagedTradeJobSnapshot>(vars.searchId, 'model', request);
+      if (vars.eager && !handoff) throw new TradeInputReadinessError(TRADE_INPUTS_CHANGED);
+      return handoff ?? generateTrades(request, { searchId: vars.searchId }, options);
     },
     // #330 R-10 — stamp the dispatch-time epoch; onSuccess/onError compare
     // it against the current one and drop stale results entirely.
     // C — and the dispatch-time device page key: a format switch bumps no
     // epoch, so an answer from before it must bind ITS key, not the newer
     // dispatch's (the save effect then writes nothing under the new key).
-    onMutate: () => ({ epoch: deckEpochRef.current, deviceKey, identity: tradeSearchIdentity() }),
+    onMutate: async (vars: ModelGenerateVars) => {
+      // vars owns dispatch authority even if this async admission throws
+      // before React Query has a mutation context to pass to onError.
+      do {
+        await waitForTradePageInputs(vars.deadlineAt, () => modelAttemptCurrent(vars.context), vars.tapAt);
+      } while (hasPendingTradePageInputs());
+      assertTradePageInputsReady(vars.tapAt);
+      vars.context.identity = tradeSearchIdentity();
+      return vars.context;
+    },
     onSuccess: (snapshot, vars, ctx) => {
-      if (
-        (ctx?.identity !== undefined && ctx.identity !== tradeSearchIdentity())
-        || applyJobResult(snapshot, ctx?.epoch ?? deckEpochRef.current, deckEpochRef.current) === null
-      ) {
-        return; // stale epoch — a reset intervened; nothing is applied
+      const context = ctx ?? vars.context;
+      if (!modelAttemptCurrent(context)) return;
+      if (context.identity !== tradeSearchIdentity()) {
+        setJob(null);
+        setDeckFailure({ kind: 'generate', message: TRADE_INPUTS_CHANGED });
+        return;
       }
       // A new search's answer starts a new re-search budget (only the answer:
       // see autoResearchAfterAnswer).
@@ -2383,12 +2437,8 @@ export default function TradesScreen({ navigation, route }: any) {
     onError: (e: Error, vars, ctx) => {
       // #330 R-10 — a stale mutation's failure is as dead as its success:
       // no toast, no deckFailure, no auto-retry from a superseded dispatch.
-      if (
-        (ctx?.identity !== undefined && ctx.identity !== tradeSearchIdentity())
-        || applyJobResult(e, ctx?.epoch ?? deckEpochRef.current, deckEpochRef.current) === null
-      ) {
-        return;
-      }
+      const context = ctx ?? vars.context;
+      if (!modelAttemptCurrent(context)) return;
       // #393 M2 (D19): a 402 (the paywall's, or its verify_required) is never
       // a deck error or a toast. A user-initiated one already opened the
       // paywall or the VerifySheet (api/client); the background auto-start's
@@ -2417,6 +2467,11 @@ export default function TradesScreen({ navigation, route }: any) {
         if (isResultsPushed && deckRef.current.length === 0) popToLanding();
         return;
       }
+      if (context.identity !== undefined && context.identity !== tradeSearchIdentity()) {
+        setJob(null);
+        setDeckFailure({ kind: 'generate', message: TRADE_INPUTS_CHANGED });
+        return;
+      }
       if (vars?.auto) {
         // First-run auto-start failed — most likely the LeaguePicker
         // background session_init hasn't landed yet. Retry once, quietly;
@@ -2437,7 +2492,7 @@ export default function TradesScreen({ navigation, route }: any) {
         return;
       }
       setToast({ msg: e.message || 'Generate failed', tone: 'warn' });
-      setDeckFailure({ kind: 'generate', message: readErrorCopy(e, DECK_FAIL_GENERIC) });
+      setDeckFailure({ kind: 'generate', message: e instanceof TradeInputReadinessError ? e.message : readErrorCopy(e, DECK_FAIL_GENERIC) });
     },
   });
 
@@ -2499,16 +2554,34 @@ export default function TradesScreen({ navigation, route }: any) {
     // is a new search: its re-search budget starts again when its answer
     // lands (onSuccess), never here.
     const claimed = research ? research.searchId : handoffSearchRef.current ?? claimPendingSearch();
+    const eager = !research && eagerHandoffRef.current;
     if (!research) {
+      eagerHandoffRef.current = false;
       claimSearch(handoffSearchRef.current);
       handoffSearchRef.current = null;
     }
     deckSearchRef.current = claimed ? { id: claimed, keys: new Set() } : null;
+    const searchId = research ? research.searchId ?? undefined : claimed ?? uuidv4();
+    const context: ModelAttempt = { epoch: deckEpochRef.current, deviceKey,
+      contextIdentity: tradeSearchContextIdentity(), attempt: ++modelAttemptRef.current };
+    if (context.contextIdentity === null) {
+      setJob(null);
+      setDeckFailure({ kind: 'generate', message: TRADE_CONTEXT_NOT_READY });
+      failDeckSearch('error');
+      return;
+    }
+    const request = modelRequest(vars);
+    // Preserve the accepted selection even if admission fails before POST:
+    // Retry repeats this request, and a later edit cannot be cleared by
+    // the older mutation when its asynchronous readiness wait completes.
+    lastModelRequestRef.current = request;
+    canvasSelectionRef.current = null;
     generateMutation.mutate(
       {
-        ...vars,
-        searchId: research ? research.searchId ?? undefined : claimed ?? uuidv4(),
-        research: !!research,
+        ...vars, searchId, research: !!research, context, eager,
+        request,
+        deadlineAt: tradeRequestDeadline(searchId, '/api/trades/generate'),
+        tapAt: traceFor(searchId)?.tapAt ?? monotonicNow(),
       },
       mutateOpts);
   }
@@ -2771,7 +2844,10 @@ export default function TradesScreen({ navigation, route }: any) {
     // league's asset. rev-2 cleared its shop state here; rev-3 keeps the
     // chooser's clear.
     setShopChooserCard(null);
-    clearTargets(); // store also self-clears via its league subscription
+    // An accepted results push uses the landing's pins. Real league/account
+    // changes still clear them, including when the screen is unmounted.
+    const pushedContext = route?.params?.resultsPush?.contextIdentity;
+    if (!pushedContext || pushedContext !== tradeSearchContextIdentity()) clearTargets();
     setTargetPickerOpen(false);
     // Onboarding item 4 — reset the first-run auto-start lifecycle so a
     // league switch mid-first-run can auto-start against the new league.
@@ -3607,7 +3683,10 @@ export default function TradesScreen({ navigation, route }: any) {
   // the pin store, which is why nothing here writes pins any more.
   const navFocused = useIsFocused();
   useEffect(() => {
-    if (navFocused) resultsPushPendingRef.current = false;
+    if (navFocused) {
+      resultsPushPendingRef.current = false;
+      activeEagerSearchRef.current = null;
+    }
   }, [navFocused]);
 
   // ── C — the device page's background refresh (approach B) ──────────────
@@ -3644,9 +3723,16 @@ export default function TradesScreen({ navigation, route }: any) {
   const autoRunPendingRef = useRef(false);
   const autoRunOriginRef = useRef<'calculator' | null>(null);
   const fairAnchorRef = useRef<{ giveIds: string[]; receiveIds: string[] } | null>(null);
+  function rejectStaleHandoff(identity: string | null | undefined, searchId?: string | null): boolean {
+    if (identity && identity === tradeSearchContextIdentity()) return false;
+    if (searchId) dropPendingSearch(searchId);
+    if (isResultsPushed) setDeckFailure({ kind: 'generate', message: TRADE_CONTEXT_CHANGED });
+    return true;
+  }
   useEffect(() => {
     if (!navFocused || !finderHandoff) return;
     useFinderTargets.getState().setHandoff(null); // one-shot: consume first
+    if (rejectStaleHandoff(finderHandoff.contextIdentity, finderHandoff.searchId)) return;
     // D-171 (2026-08-31 ruling 1) — under the push posture the LANDING
     // renders no results, so an armed handoff (a league-rankings Offer, or
     // the flag-off calculator page's own Find a Trade) FORWARDS into the
@@ -3663,11 +3749,13 @@ export default function TradesScreen({ navigation, route }: any) {
           ? finderHandoff.fairAnchor
           : null;
       setSheetOpponent(finderHandoff.opponent);
-      const pushDeck = (firstPage?: FirstPageHandoff) => navigation?.push?.('TradeDeck', {
+      const pushDeck = (firstPage?: FirstPageHandoff, eager?: boolean) => navigation?.push?.('TradeDeck', {
         mode: 'guided',
         resultsPush: {
           seq: finderHandoff.seq,
           searchId: finderHandoff.searchId,
+          contextIdentity: finderHandoff.contextIdentity,
+          eager,
           opponent: finderHandoff.opponent,
           origin: fwdOrigin,
           fairAnchor: fwdFair,
@@ -3701,6 +3789,9 @@ export default function TradesScreen({ navigation, route }: any) {
       ? finderHandoff.fairAnchor
       : null;
     if (finderHubOn && finderMode) {
+      handoffSearchRef.current = finderHandoff.searchId ?? null;
+      handoffContextRef.current = finderHandoff.contextIdentity;
+      eagerHandoffRef.current = false;
       // The ref is read by the ONE choke point below, which is also the one
       // place a model dispatch happens — so arming the fair path and arming
       // the model path are mutually exclusive by construction rather than by
@@ -3741,6 +3832,18 @@ export default function TradesScreen({ navigation, route }: any) {
     const adoptedRun = adoptedMountRef.current.choke;
     adoptedMountRef.current.choke = false;
     if (!adoptedRun) resetDeckForNewTargets();
+    if ((fairAnchorRef.current || autoRunPendingRef.current)
+      && rejectStaleHandoff(handoffContextRef.current, handoffSearchRef.current)) {
+      fairAnchorRef.current = null;
+      autoRunPendingRef.current = false;
+      autoRunOriginRef.current = null;
+      handoffSearchRef.current = null;
+      handoffContextRef.current = null;
+      eagerHandoffRef.current = false;
+      canvasSelectionRef.current = null;
+      setSheetOpponent(null);
+      return;
+    }
     // D-171 ruling 1 (2026-08-31) — the LANDING dispatches nothing under the
     // push posture: Find a Trade and forwarded handoffs push `TradeDeck`
     // (whose own instance runs this same effect with canvasHost null and
@@ -3839,6 +3942,10 @@ export default function TradesScreen({ navigation, route }: any) {
       return;
     }
     consumedResultsPushSeqRef.current = rp.seq;
+    if (rejectStaleHandoff(rp.contextIdentity, rp.searchId)) return;
+    handoffSearchRef.current = adopted ? null : rp.searchId ?? null;
+    handoffContextRef.current = rp.contextIdentity;
+    eagerHandoffRef.current = rp.eager === true;
     setSheetOpponent(rp.opponent ?? null);
     canvasSelectionRef.current = rp.canvasSelection ?? null;
     if (rp.fairnessOn !== undefined) setFairnessOn(rp.fairnessOn);
@@ -3879,17 +3986,30 @@ export default function TradesScreen({ navigation, route }: any) {
       searchId: string;
       canvas?: boolean;
     },
-    pushDeck: (firstPage?: FirstPageHandoff) => void,
+    pushDeck: (firstPage?: FirstPageHandoff, eager?: boolean) => void,
   ) {
     if (switching || !leagueId || !tradeSearchIdentity()) {
       resultsPushPendingRef.current = false;
       dropPendingSearch(fork.searchId);
       return;
     }
-    if (!fairnessReady) {
+    if (!fairnessReady || hasPendingTradePageInputs()) {
       pushDeck();
       return;
     }
+    const contextIdentity = tradeSearchContextIdentity();
+    const identity = tradeSearchIdentity();
+    const tapAt = traceFor(fork.searchId)?.tapAt ?? monotonicNow();
+    activeEagerSearchRef.current = fork.searchId;
+    const beforeDispatch = (phase?: 'gate') => {
+      if (!mountedRef.current || activeEagerSearchRef.current !== fork.searchId
+        || !contextIdentity || contextIdentity !== tradeSearchContextIdentity()) {
+        throw new TradeSearchContextChangedError();
+      }
+      if (phase === 'gate') return;
+      if (!identity || identity !== tradeSearchIdentity()) throw new TradeSearchContextChangedError();
+      assertTradePageInputsReady(tapAt);
+    };
     const opponentId = sheetTargetingOn ? fork.opponent?.userId : undefined;
     if (fork.anchor) {
       if (!readOnline()) {
@@ -3899,8 +4019,9 @@ export default function TradesScreen({ navigation, route }: any) {
       const request = fairPackagesRequest(leagueId, {
         giveIds: fork.giveIds, receiveIds: fork.receiveIds,
       }, effectiveFairness, opponentId);
-      startTradeSearchHandoff(fork.searchId, 'fair', request, () => getFairPackages(request));
-      pushDeck();
+      const eager = startTradeSearchHandoff(fork.searchId, 'fair', request, () => getFairPackages(request,
+        { deadlineAt: tradeRequestDeadline(fork.searchId, '/api/trades/fair-packages'), beforeDispatch }));
+      pushDeck(undefined, eager);
       return;
     }
     const request: GenerateBody = {
@@ -3928,9 +4049,10 @@ export default function TradesScreen({ navigation, route }: any) {
     // Start the exact user-tapped request before navigation, then transfer
     // it once. The destination adopts its pending/finished response; no
     // 600ms builder pause and no second generation after a push deadline.
-    startTradeSearchHandoff(fork.searchId, 'model', request,
-      () => generateTrades(request, { searchId: fork.searchId }));
-    pushDeck();
+    const eager = startTradeSearchHandoff(fork.searchId, 'model', request,
+      () => generateTrades(request, { searchId: fork.searchId },
+        { deadlineAt: tradeRequestDeadline(fork.searchId, '/api/trades/generate'), beforeDispatch }));
+    pushDeck(undefined, eager);
   }
 
   // ── D-158 — the inline canvas's own Find a Trade (no navigation) ────────
@@ -3949,7 +4071,8 @@ export default function TradesScreen({ navigation, route }: any) {
     receive: CalcPlayer[];
     opponent: { userId: string; name: string } | null;
   }) {
-    if (switching || !leagueId || !tradeSearchIdentity()) return;
+    const contextIdentity = tradeSearchContextIdentity();
+    if (switching || !leagueId || !contextIdentity) return;
     if (resultsPushLive && resultsPushPendingRef.current) return;
     const fork = forkCanvasSearch(opts, 'Trades');
     // D-171 rulings 1+2 (2026-08-31) — under the push posture the landing
@@ -3963,12 +4086,14 @@ export default function TradesScreen({ navigation, route }: any) {
     if (resultsPushLive) {
       resultsPushPendingRef.current = true;
       const summary = anchorSummary(opts.give);
-      const pushDeck = (firstPage?: FirstPageHandoff) =>
+      const pushDeck = (firstPage?: FirstPageHandoff, eager?: boolean) =>
         navigation?.push?.('TradeDeck', {
           mode: 'guided',
           resultsPush: {
             seq: Date.now(),
             searchId: fork.searchId,
+            contextIdentity,
+            eager,
             opponent: fork.opponent,
             origin: 'calculator',
             fairAnchor: fork.anchor,
@@ -3997,6 +4122,9 @@ export default function TradesScreen({ navigation, route }: any) {
         ? { label: summary, giveIds: fork.anchor.giveIds, receiveIds: fork.anchor.receiveIds }
         : null,
     );
+    handoffSearchRef.current = fork.searchId;
+    handoffContextRef.current = contextIdentity;
+    eagerHandoffRef.current = false;
     fairAnchorRef.current = fork.anchor;
     autoRunPendingRef.current = !fork.anchor;
     autoRunOriginRef.current = 'calculator';
@@ -4317,7 +4445,8 @@ export default function TradesScreen({ navigation, route }: any) {
     source: R1Source = 'calculator',
   ) {
     if (!leagueId || fairPendingRef.current) return;
-    const identity = tradeSearchIdentity();
+    const contextIdentity = tradeSearchContextIdentity();
+    let identity: string | null | undefined;
     const epoch = ++deckEpochRef.current;
     lastFairRequestRef.current = {
       anchor: { giveIds: [...anchor.giveIds], receiveIds: [...anchor.receiveIds] },
@@ -4337,6 +4466,8 @@ export default function TradesScreen({ navigation, route }: any) {
     // dormant #402 browse retry) begins its own, with this source.
     autoResearchRef.current = 'idle';   // a new search: its own re-search budget
     let claimedFair = handoffSearchRef.current ?? claimPendingSearch();
+    const eager = eagerHandoffRef.current;
+    eagerHandoffRef.current = false;
     claimSearch(handoffSearchRef.current);
     handoffSearchRef.current = null;
     if (!claimedFair) {
@@ -4345,13 +4476,33 @@ export default function TradesScreen({ navigation, route }: any) {
     }
     deckSearchRef.current = claimedFair ? { id: claimedFair, keys: new Set() } : null;
     try {
-      const request = fairPackagesRequest(leagueId, anchor, effectiveFairness, opponentId);
-      const res = await (takeTradeSearchHandoff<Awaited<ReturnType<typeof getFairPackages>>>(claimedFair, 'fair', request)
-        ?? getFairPackages(request));
+      if (contextIdentity === null) throw new TradeInputReadinessError(TRADE_CONTEXT_NOT_READY);
+      const request = fairPackagesRequest(leagueId,
+        { giveIds: [...anchor.giveIds], receiveIds: [...anchor.receiveIds] }, effectiveFairness, opponentId);
+      const deadlineAt = tradeRequestDeadline(claimedFair, '/api/trades/fair-packages');
+      const tapAt = traceFor(claimedFair)?.tapAt ?? monotonicNow();
+      do {
+        await waitForTradePageInputs(deadlineAt, () => mountedRef.current && deckEpochRef.current === epoch
+          && contextIdentity !== null && contextIdentity === tradeSearchContextIdentity(), tapAt);
+      } while (hasPendingTradePageInputs());
+      assertTradePageInputsReady(tapAt);
+      identity = tradeSearchIdentity();
+      const beforeDispatch = (phase?: 'gate') => {
+        if (!mountedRef.current || deckEpochRef.current !== epoch || contextIdentity !== tradeSearchContextIdentity()) {
+          throw new TradeSearchContextChangedError();
+        }
+        if (phase === 'gate') return;
+        if (identity !== tradeSearchIdentity()) throw new TradeSearchContextChangedError();
+        assertTradePageInputsReady(tapAt);
+      };
+      const handoff = takeTradeSearchHandoff<Awaited<ReturnType<typeof getFairPackages>>>(claimedFair, 'fair', request);
+      if (eager && !handoff) throw new TradeInputReadinessError(TRADE_INPUTS_CHANGED);
+      const res = await (handoff ?? getFairPackages(request, { deadlineAt, beforeDispatch }));
       // #330 R-10 — the same generation-epoch guard the model path uses: a
       // league switch or a newer search while this was in flight must not be
       // overwritten by a stale answer.
-      if (deckEpochRef.current !== epoch || identity !== tradeSearchIdentity()) return;
+      if (!mountedRef.current || deckEpochRef.current !== epoch || contextIdentity !== tradeSearchContextIdentity()) return;
+      if (identity !== tradeSearchIdentity()) throw new TradeSearchContextChangedError();
       // The deck rewinds to 0 below, so the double-fire guard has to be
       // re-armed — and here that is not a formality: `fairpk_` ids are
       // DETERMINISTIC, so re-running the same canvas serves cards with the
@@ -4368,7 +4519,7 @@ export default function TradesScreen({ navigation, route }: any) {
       setJob(null);
       setFairDeck(true);
     } catch (e: any) {
-      if (deckEpochRef.current !== epoch || identity !== tradeSearchIdentity()) return;
+      if (!mountedRef.current || deckEpochRef.current !== epoch || contextIdentity !== tradeSearchContextIdentity()) return;
       // #393 M2 (D19): a 402 already opened the paywall or the VerifySheet
       // (api/client); no deck-failure card. R2b still records it.
       if (e instanceof ApiError && e.isProRequired) {
@@ -4378,11 +4529,16 @@ export default function TradesScreen({ navigation, route }: any) {
         if (isResultsPushed && deckRef.current.length === 0) popToLanding();
         return;
       }
+      if (identity !== undefined && identity !== tradeSearchIdentity()) {
+        setDeckFailure({ kind: 'generate', message: TRADE_INPUTS_CHANGED });
+        setFairDeck(false);
+        return;
+      }
       // The existing deck-failure copy, verbatim — a fair sweep that fails is
       // a failed search, and the P0-2 card is where the app says so.
       setDeckFailure({
         kind: 'generate',
-        message: readErrorCopy(e, DECK_FAIL_GENERIC),
+        message: e instanceof TradeInputReadinessError ? e.message : readErrorCopy(e, DECK_FAIL_GENERIC),
       });
       setFairDeck(false);
     } finally {
@@ -4864,6 +5020,13 @@ export default function TradesScreen({ navigation, route }: any) {
       loop.attempt += 1;
       backoff = true;
       setPagePhase(loop.failures >= 3 ? 'failed' : 'retrying');
+      if (loop.failures >= MAX_SILENT_PAGE_FAILURES && deckRef.current.length === 0) {
+        // No card exists for the paged end-state UI. Once polling stops,
+        // leave the running spinner and expose the existing explicit retry.
+        // The exact last request survives; the server job is not cancelled.
+        setJob(null);
+        setDeckFailure({ kind: 'poll_abandoned', message: DECK_FAIL_NETWORK });
+      }
     } finally {
       loop.inFlight = false;
     }

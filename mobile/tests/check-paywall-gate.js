@@ -339,6 +339,64 @@ check('1h. D18: after `verified` the original call is sent ONCE more and the cal
   eq(sent.length, 2, 'fetches');
   eq(JSON.stringify(out), JSON.stringify({ cards: [1] }), 'resolved with the retry');
 });
+const TRADE_SEARCH_ROUTES = ['/api/trades/generate', '/api/trades/fair-packages'];
+check('1h. trade verification beyond the first deadline sends one fenced retry with the original body', async () => {
+  for (const p of TRADE_SEARCH_ROUTES) {
+    reset();
+    let now = 1000;
+    const gated = load('api/client.ts', CLIENT_STUBS, { fetch: fakeFetch, Date: { now: () => now } });
+    gated.setPaywallGateOn(() => true);
+    let finishVerify;
+    const verify = new Promise((resolve) => { finishVerify = resolve; });
+    gated.setOnProRequired((signal) => { signals.push(signal); return verify; });
+    responses.push({ status: 402, body: { error: 'pro_required', gate: 'verify_required' } });
+    responses.push({ status: 200, body: { cards: [1] } });
+    const body = { league_id: 'l', search_id: 'original' };
+    const fences = [];
+    const call = gated.api.post(p, body, {
+      deadlineAt: 1100,
+      beforeDispatch: (phase) => fences.push(phase ?? 'dispatch'),
+    });
+    await tick();
+    eq(signals[0]?.action, 'verify', `${p}: verification started`);
+    eq(sent.length, 1, `${p}: only the original request is sent while verifying`);
+    now = 32_000;
+    finishVerify('verified');
+    eq(JSON.stringify(await call), JSON.stringify({ cards: [1] }), `${p}: retry result`);
+    eq(sent.length, 2, `${p}: exactly one verified retry`);
+    eq(sent[1].init.body, sent[0].init.body, `${p}: same search body`);
+    eq(fences.join(','), 'dispatch,gate,dispatch', `${p}: same dispatch fence on retry`);
+  }
+});
+check('1h. a stale same-token trade refusal preserves its 402 and never opens the gate', async () => {
+  for (const p of TRADE_SEARCH_ROUTES) {
+    reset();
+    let authority = 'accepted trade';
+    const revision = client.getSessionRevision();
+    responses.push({ status: 402, body: { error: 'pro_required', gate: 'preview_used' }, before: () => {
+      authority = 'replacement trade';
+    } });
+    const e = await rejects(client.api.post(p, {}, { beforeDispatch: () => {
+      if (authority !== 'accepted trade') throw new Error('trade_search_context_changed');
+    } }));
+    eq(client.getSessionRevision(), revision, `${p}: token revision did not change`);
+    assert(e.isProRequired && e.gate === 'preview_used', `${p}: original refusal survives`);
+    eq(signals.length, 0, `${p}: stale refusal must not open the gate or settle a newer trace`);
+    eq(sent.length, 1, `${p}: no retry`);
+  }
+});
+check('1h. losing trade authority during VerifySheet prevents the accepted retry from sending', async () => {
+  reset();
+  let current = true;
+  handlerReturn = async () => { current = false; return 'verified'; };
+  responses.push({ status: 402, body: { error: 'pro_required', gate: 'verify_required' } });
+  const e = await rejects(client.api.post('/api/trades/fair-packages', {}, {
+    beforeDispatch: () => { if (!current) throw new Error('trade_search_context_changed'); },
+  }));
+  eq(signals[0]?.action, 'verify', 'the original gate opened while the trade was current');
+  eq(e.message, 'trade_search_context_changed', 'the retry did not bypass the dispatch fence');
+  eq(sent.length, 1, 'the stale retry never sent');
+});
 check('1i. the retry lets the server decide: a 402 on the retry opens the paywall', async () => {
   reset();
   handlerReturn = (s) => (s.action === 'verify' ? Promise.resolve('verified') : undefined);
@@ -404,7 +462,7 @@ check('1n. [shape] the setOnVerificationRequired mirror is byte-identical (D17)'
     '                // This callback runs BEFORE the caller receives its rejection.',
     '                // A later screen/store guard cannot undo a stale banner write.',
     '                if (sent && sent === current && requestRevision === getSessionRevision() && !timeoutController.signal.aborted && Date.now() < opts.deadlineAt!) {',
-    '                  opts.beforeDispatch?.();',
+    "                  opts.beforeDispatch?.('gate');",
     '                  _onVerificationRequired();',
     '                }',
   ].join('\n');
@@ -1047,7 +1105,7 @@ const BACKGROUND_SET = [
   ['state/devicePageStore.ts', /const PREWARM_REQUEST = \{ background: true, headers: \{ 'X-FTF-Prewarm': '1' \} \};/, 'preview-safe refreshDevicePage request'],
   ['hooks/usePresentationDeck.ts', /void run\(\{ background: true \}\);/, "usePresentationDeck's mount effect"],
   ['hooks/usePresentationDeck.ts', /await getTradeStatus\(job\.job_id, undefined, \{ background: true \}\)/, "usePresentationDeck's poll"],
-  [TRADES, /if \(vars\.auto \|\| vars\.research\) \{\s*return generateTrades\(request, \{ searchId: vars\.searchId \}, \{ background: true \}\);\s*\}/,
+  [TRADES, /if \(vars\.auto \|\| vars\.research\) \{\s*return generateTrades\(request, \{ searchId: vars\.searchId \}, \{ \.\.\.options, background: true \}\);\s*\}/,
     'the first-run auto-start, its silent retry and the automatic re-search (#525)'],
   [TRADES, /await getTradeStatus\(job\.job_id, undefined, \{ background: true \}\)/, "the deck's legacy status poll"],
   ['components/StandingOfferSheet.tsx', /\.\.\.\(sourceTradeId \? \{ source_trade_id: sourceTradeId \} : \{\}\),\s*\}, \{ background: true \}\);/,
@@ -1077,7 +1135,7 @@ check('8b. D2 [shape]: the pinned background set; nothing else in mobile/src is 
     'both passive paths must use the explicit server prewarm guard');
   assert(/await getTradeStatus\(snap\.job_id, \{ deck: snap\.deck_id, cursor: requested \}\)/.test(code),
     'the prefetch is a paged getTradeStatus call (the default makes it background)');
-  assert(/\?\? generateTrades\(request, \{ searchId: vars\.searchId \}\);/.test(code),
+  assert(/\?\? generateTrades\(request, \{ searchId: vars\.searchId \}, options\);/.test(code),
     "a tap's generate stays user-initiated");
   const shopCallers = walk(SRC).filter((f) => /swipeTrade\([^;]*'shop'\)/.test(strip(fs.readFileSync(f, 'utf8'))));
   eq(shopCallers.map((f) => path.basename(f)).join(','), 'ShopOffersBody.tsx', "the only 'shop' pass caller");
@@ -1231,7 +1289,7 @@ check('8f2. trades-eng follow-up 1 [shape]: a 402 end never shows P30 — the ga
 check('8f3. immediate push transfers the exact request to the destination; a gated destination pops an empty deck', () => {
   const code = strip(read(TRADES));
   const fork = code.slice(code.indexOf('function pushWithFirstPage('), code.indexOf('function handleInlineFindATrade('));
-  assert(/startTradeSearchHandoff\(fork\.searchId, 'model', request,\s*\(\) => generateTrades\(request, \{ searchId: fork\.searchId \}\)\);\s*pushDeck\(\);/.test(fork), 'the real tapped request transfers without a navigation wait');
+  assert(/startTradeSearchHandoff\(fork\.searchId, 'model', request,\s*\(\) => generateTrades\(request, \{ searchId: fork\.searchId \},\s*\{ deadlineAt: tradeRequestDeadline\(fork\.searchId, '\/api\/trades\/generate'\), beforeDispatch \}\)\);\s*pushDeck\(undefined, eager\);/.test(fork), 'the real tapped request transfers without a navigation wait');
   assert(!/setTimeout|FIRST_PAGE_PUSH_DEADLINE_MS|await/.test(fork), 'no deadline, callback or second push after gate response');
   assert(/takeTradeSearchHandoff<PagedTradeJobSnapshot>\(vars\.searchId, 'model', request\)/.test(code), 'destination consumes the same exact promise');
   eq((code.match(/if \(isResultsPushed && deckRef\.current\.length === 0\) popToLanding\(\);/g) || []).length, 2, 'model and fair gate errors pop an empty deck');
@@ -1296,7 +1354,7 @@ check('8h. D19 [shape]: a 402 never reaches a deck error variant or the swipe to
   before(swipeErr, /if \(err instanceof ApiError && err\.isProRequired\) return;/, 'setToast(');
   assert(swipeErr.indexOf('return cur - 1') < swipeErr.search(/err\.isProRequired\) return;/), 'the existing swipe-failure recovery restores the card first');
   // the fair sweep
-  const fair = code.slice(code.indexOf('const res = await (takeTradeSearchHandoff<Awaited'), code.indexOf('setFairDeck(false);\n    } finally'));
+  const fair = code.slice(code.indexOf('const res = await (handoff ?? getFairPackages('), code.indexOf('setFairDeck(false);\n    } finally'));
   before(fair, /if \(e instanceof ApiError && e\.isProRequired\) \{\s*failDeckSearch\(gateFailureReason\(gateSignalFor\(e, '\/api\/trades\/fair-packages'\)\)\);\s*setFairDeck\(false\);[^}]*return;/, 'setDeckFailure(');
   // the legacy poll: no "Network hiccup" toast, no poll_abandoned card
   assert(/\} catch \(e\) \{\s*if \(cancelled\) return;\s*if \(e instanceof ApiError && e\.isProRequired\) \{\s*setJob\(null\);\s*return;\s*\}\s*failures \+= 1;/.test(code), 'the legacy poll');

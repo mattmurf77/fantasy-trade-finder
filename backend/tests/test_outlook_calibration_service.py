@@ -23,7 +23,9 @@ def frozen_factory(*,sizes=(12,12),shared=3,duplicate=False,fail=None,invalid=Fa
             for i in ['g']+[f'r{i}' for i in range(100)]}
     catalog=bg.Catalog(assets=assets,partner_names={'partner':'Partner'},
                        holdings={'seat':frozenset({'g'}),'partner':frozenset(assets)-{'g'}})
-    def run(version):
+    def run(version, *, check_current=None):
+        if check_current is not None:
+            check_current()
         calls.append(version)
         arm=list(oc.MODEL_VERSIONS.values()).index(version)
         if fail==arm: raise RuntimeError('SECRET DATA MUST NOT LEAK')
