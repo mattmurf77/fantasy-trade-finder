@@ -154,8 +154,9 @@ def test_384_mints_no_duplicate_of_a_shipped_event():
         assert shipped in tax.ALLOWED_CLIENT_EVENTS
     # R1 widening (time to suggestion, addendum v2; analytics-lead grant):
     # + `search_id`. `source` and `mode` keep their meanings.
+    # The native timing check also needs hardware provenance at capture time.
     assert tax.CLIENT_EVENT_PROPS["find_trades_tapped"] == frozenset(
-        {"source", "mode", "search_id", "scenario", "input_age_ms", "client_build"})
+        {"source", "mode", "search_id", "scenario", "input_age_ms", "client_build", "physical_iphone"})
     # `prompt_deferred` is the twin of `prompt_shown`, not a replacement.
     assert tax.CLIENT_EVENT_PROPS["prompt_shown"] == frozenset({"surface"})
 
