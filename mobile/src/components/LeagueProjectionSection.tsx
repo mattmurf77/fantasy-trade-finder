@@ -1,23 +1,36 @@
 import React, {useState} from 'react';
-import {View, ScrollView, Pressable, StyleSheet} from 'react-native';
+import {View, Pressable, StyleSheet} from 'react-native';
 import {useQuery} from '@tanstack/react-query';
-import {Button, Text} from './chalkline';
+import {Button, Icon, Text} from './chalkline';
 import {ink, chalk, ice, space, radii} from '../theme/chalkline';
 import {useSession} from '../state/useSession';
 import {useFlag} from '../state/useFeatureFlags';
-import {getLeagueProjectionBatch, getLeagueProjectionRun, queueLeagueProjectionScenario, type ProjectionResult, type ProjectionTeam} from '../api/leagueProjections';
+import {getLeagueProjectionBatch, getLeagueProjectionRun, queueLeagueProjectionScenario, type ProjectionResult, type ProjectionTeam, type ProjectionWeek} from '../api/leagueProjections';
 
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 const number = (n: number | null) => n == null ? 'Unavailable' : n.toFixed(1);
+const date = (iso: string) => new Date(iso).toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
 const statuses: Record<string, string> = {
-  no_run: 'Projections are being prepared for a scheduled batch. Current standings remain available.',
-  queued: 'This league is queued for a scheduled update.', running: 'This league’s scheduled update is running.',
-  current: 'Latest completed projection', stale: 'The next weekly update is due. This is the last completed forecast.',
-  refresh_failed: 'The latest update could not finish. The last completed projection is shown below.',
-  incomplete_projections: 'Some player or scoring inputs are missing. We cannot calculate a complete projection yet.',
-  unsupported_policy: 'Projections are not available for this league’s current data or rule coverage.',
-  failed: 'The scheduled update failed. Current standings remain available.',
+  no_run: 'Waiting for the first weekly forecast.',
+  queued: 'Weekly update queued.', running: 'Weekly update in progress.',
+  current: '', stale: 'Weekly update due.',
+  refresh_failed: 'Latest update failed.',
+  incomplete_projections: 'Missing player or scoring data.',
+  unsupported_policy: 'This league’s rules aren’t supported yet.',
+  failed: 'Weekly update failed.',
 };
+
+function Disclosure({label, children, testID}: {label: string; children: React.ReactNode; testID?: string}) {
+  const [open, setOpen] = useState(false);
+  return <View style={styles.disclosure}>
+    <Pressable accessibilityRole="button" aria-expanded={open} testID={testID}
+      onPress={() => setOpen(value => !value)} style={styles.toggle}>
+      <Text variant="bodySm" style={[styles.text, styles.toggleLabel]}>{label}</Text>
+      <Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} color={chalk.base} />
+    </Pressable>
+    {open ? <View style={styles.detail}>{children}</View> : null}
+  </View>;
+}
 
 /** Stored batch reads only. Opening standings never generates a forecast. */
 export default function LeagueProjectionSection() {
@@ -29,15 +42,42 @@ export default function LeagueProjectionSection() {
     queryFn: () => getLeagueProjectionBatch(leagueId!), enabled: enabled && platform === 'sleeper' && !!leagueId && !!userId,
     staleTime: 60_000});
   if (!enabled) return null;
-  if (platform !== 'sleeper') return <Text variant="bodySm" style={styles.text}>Standing projections currently support Sleeper leagues.</Text>;
+  if (platform !== 'sleeper') return <Text variant="bodySm">Projections are available for Sleeper leagues.</Text>;
   const data = query.data;
+  const result = data?.run?.result;
+  const state = data?.state || 'no_run';
+  const status = query.isLoading ? 'Loading projections…'
+    : query.isError ? 'Couldn’t check for an update.'
+    : statuses[state] ?? 'Projection unavailable.';
+  const lastSaved = !!result && (query.isError || state !== 'current');
+  const refresh = <Button label="Check for update" variant="secondary" onPress={() => query.refetch()}
+    loading={query.isFetching} testID="league-projections.check" />;
   return <View style={styles.section} testID="league-projections.section">
-    <Text variant="heading" style={styles.text}>Standings projections</Text>
-    <Text variant="bodySm" style={styles.text}>{query.isLoading ? 'Loading saved projections…' : statuses[data?.state || 'no_run'] || 'This projection is unavailable.'}</Text>
-    {query.isError ? <Text variant="bodySm" style={styles.text}>Could not read the latest batch. Saved results remain below when available.</Text> : null}
-    {data ? <Text variant="bodySm" style={styles.text}>Forecasts update weekly. {data.next_attempt_not_before ? `Next eligible attempt: ${new Date(data.next_attempt_not_before).toLocaleString()}.` : 'An attempt time has not been assigned yet.'} Completion time depends on available inputs.</Text> : null}
-    <Button label="Check saved update" variant="secondary" compact onPress={() => query.refetch()} loading={query.isFetching} testID="league-projections.check" />
-    {data?.run?.result ? <ProjectionTables key={data.run.run_id} result={data.run.result} baselineRunId={data.run.run_id} /> : <Text variant="bodySm" style={styles.text}>Use Current standings for official records and points while projections are unavailable.</Text>}
+    <Text variant="heading">Projected standings</Text>
+    {status ? <Text variant="bodySm">{status}</Text> : null}
+    {result && data?.run ? <>
+      <Text variant="bodySm">{[lastSaved ? `Last saved: ${date(result.captured_at)}` : 'Weekly estimate',
+        result.coverage?.estimated ? 'Partial Sleeper data' : null, result.provisional ? 'Provisional' : null].filter(Boolean).join(' · ')}</Text>
+      <ProjectionTables key={`${userId}:${leagueId}:${data.run.run_id}`} result={result} baselineRunId={data.run.run_id} />
+      <Disclosure label="Forecast details">
+        <Text variant="bodySm">Forecasts update weekly. {data.next_attempt_not_before ? `Next eligible attempt: ${new Date(data.next_attempt_not_before).toLocaleString()}.` : ''}</Text>
+        <Text variant="bodySm">{`${result.league_name} · ${result.completed_weeks} completed weeks · ${result.playoff_spots} playoff places · ${result.playoff_byes} byes`}</Text>
+        <Text variant="bodySm">{`${result.iterations.toLocaleString()} simulations · Inputs: ${new Date(result.captured_at).toLocaleString()} · Model ${result.model_version}`}</Text>
+        {result.coverage?.estimated && <Text variant="bodySm">Partial player-weeks: {result.coverage.partial_player_weeks ?? 0}. Without a usable projection: {result.coverage.unpriced_player_weeks ?? 0}. Missing scoring can move estimates up or down.</Text>}
+        {refresh}
+        <Disclosure label="Assumptions and scoring">
+          <Text variant="bodySm">Historical weight: {Number(result.config.historical_weight) * 100}%. IR in Max PF: {result.config.ir_maxpf === 'include' ? 'included' : 'excluded'}. Current reserves and taxi stay out of actual lineups; taxi remains eligible for Max PF. Draft ties are randomized. Residual correlation: {String(result.config.residual_correlation)}. Variance source: {result.config.maxpf_variance === 'actual_history_proxy' ? 'actual-score history proxy' : 'reconstructed Max PF history'}.</Text>
+          {result.warnings.map(w => <Text key={w} variant="bodySm">{w}</Text>)}
+          <Disclosure label="Scoring settings">
+            {Object.entries(result.scoring).filter(([,v]) => v !== 0).map(([k,v]) =>
+              <Text key={k} variant="bodySm">{`${k.replace(/_/g, ' ')}: ${v}`}</Text>)}
+          </Disclosure>
+        </Disclosure>
+      </Disclosure>
+    </> : !query.isLoading ? <>
+      <Text variant="bodySm">Current standings are still available.</Text>
+      {refresh}
+    </> : null}
   </View>;
 }
 
@@ -62,58 +102,101 @@ function ProjectionTables({result, baselineRunId}: {result: ProjectionResult; ba
   const [sort, setSort] = useState<'odds' | 'name' | 'record'>('odds');
   const [selected, setSelected] = useState<number | null>(null);
   const teams = [...result.teams].sort((a, b) => view === 'draft' ? a.maxpf_mean - b.maxpf_mean : sort === 'name' ? a.name.localeCompare(b.name) : sort === 'record' ? (b.current_record[0] + .5 * b.current_record[2]) - (a.current_record[0] + .5 * a.current_record[2]) : b.playoff_probability - a.playoff_probability);
-  const detail = teams.find(t => t.roster_id === selected);
+  const names = new Map(result.teams.map(t => [t.roster_id, t.name]));
+  const pickView = view === 'draft';
   return <>
-    <Text variant="bodySm" style={styles.text}>{result.league_name} · {result.completed_weeks} completed weeks · {result.playoff_spots} playoff places · {result.playoff_byes} byes</Text>
-    <Text variant="bodySm" style={styles.text}>Model estimate{result.provisional ? ' · provisional sample' : ''} · {result.iterations.toLocaleString()} simulations</Text>
-    {result.coverage?.estimated && <Text variant="bodySm" style={styles.text}>Estimated with partial Sleeper coverage: {result.coverage.partial_player_weeks ?? 0} partial player-weeks; {result.coverage.unpriced_player_weeks ?? 0} without a usable projection. Missing bonuses or penalties can raise or lower the final score.</Text>}
-    <Text variant="bodySm" style={styles.text}>Inputs: {new Date(result.captured_at).toLocaleString()} · Model {result.model_version}</Text>
-    <View style={styles.buttons}><Button label="Playoffs" compact variant="secondary" onPress={() => setView('playoff')} /><Button label="Non-playoff picks" compact variant="secondary" onPress={() => setView('draft')} /></View>
-    <Text variant="bodySm" style={styles.text}>{view === 'draft' ? `Sorted by projected Max PF, not final draft order. Ownership: ${result.config.draft_season}, round ${result.config.draft_round}. Pick odds include the chance of reaching the playoffs.` : `Sorted by ${sort === 'odds' ? 'playoff probability' : sort === 'record' ? 'current record' : 'team name'}. Expected records are averages; modal records are the most frequent exact result. Neither proves a clinch.`}</Text>
-    {view === 'playoff' ? <View style={styles.buttons}>
-      <Button label="Odds" variant="secondary" compact onPress={() => setSort('odds')} />
-      <Button label="Team" variant="secondary" compact onPress={() => setSort('name')} />
-      <Button label="Record" variant="secondary" compact onPress={() => setSort('record')} />
-    </View> : null}
-    <ScrollView horizontal testID="league-projections.grid">
-      <View>
-        <View style={styles.gridRow}>{(view === 'playoff'
-          ? ['Team', 'Current W–L–T', 'PF / PPG', 'Expected W–L–T', 'Modal W–L–T', 'Playoffs', 'Bye']
-          : ['Original team', 'Current owner', 'Max PF / week', 'Projected Max PF [10–90%]', 'Miss playoffs', ...Array.from({length: teams[0]?.pick_probabilities.length || 0}, (_, i) => `Pick ${i + 1}`,), 'Expected pick if missed']
-        ).map(label => <Text key={label} variant="label" style={[styles.tableHeader, styles.cell]}>{label}</Text>)}</View>
-        {teams.map(team => {
-          const cells = view === 'playoff'
-            ? [team.name, team.current_record.join('–'), `${number(team.current_points_for)} / ${number(team.current_ppg)}`, team.expected_record.map(n => n.toFixed(1)).join('–'), team.modal_record.join('–'), pct(team.playoff_probability), pct(team.bye_probability)]
-            : [team.name, result.teams.find(t => t.roster_id === team.pick_owner_roster_id)?.name || `Team ${team.pick_owner_roster_id}`, `${number(team.current_maxpf)} / ${number(team.maxpf_per_completed_week)}`, `${number(team.maxpf_mean)} [${number(team.maxpf_quantiles['0.1'])}–${number(team.maxpf_quantiles['0.9'])}]`, pct(team.nonplayoff_probability), ...team.pick_probabilities.map(pct), number(team.conditional_expected_pick)];
-          return <Pressable key={team.roster_id} accessibilityRole="button" accessibilityLabel={`Show projection detail for ${team.name}`} onPress={() => setSelected(selected === team.roster_id ? null : team.roster_id)} style={[styles.row, styles.gridRow]}>
-            {cells.map((value, i) => <Text key={i} variant="bodySm" style={[styles.text, styles.cell]}>{value}</Text>)}
-          </Pressable>;
-        })}
+    <View style={styles.buttons}>
+      <ProjectionToggle label="Playoffs" selected={!pickView} onPress={() => { setView('playoff'); setSelected(null); }} />
+      <ProjectionToggle label="Non-playoff picks" selected={pickView} onPress={() => { setView('draft'); setSelected(null); }} />
+    </View>
+    {pickView ? <Text variant="bodySm">Estimates assume regular-season Max PF draft order.</Text> : null}
+    <View testID="league-projections.grid">
+      <View style={styles.gridRow}>
+        <Text variant="bodySm" style={styles.teamCell}>Team</Text>
+        <Text variant="bodySm" style={styles.numberCell}>{pickView ? 'Miss playoffs' : 'Playoff odds'}</Text>
+        <Text variant="bodySm" style={styles.numberCell}>{pickView ? 'Proj. Max PF' : 'Avg. record'}</Text>
+        <View style={styles.chevronSpace} />
       </View>
-    </ScrollView>
-    {detail ? <TeamDetail team={detail} /> : null}
-    <Text variant="heading" style={styles.text}>Compare historical weighting</Text>
-    <Text variant="bodySm" style={styles.text}>An explicit comparison uses the same saved inputs and runs separately from the weekly baseline.</Text>
-    <View style={styles.buttons}>{[.4, .6, .8].map(weight => <Button key={weight} label={`${weight * 100}%`} compact variant="secondary" onPress={() => compare(weight)} />)}</View>
-    {scenarioMessage ? <Text variant="bodySm" style={styles.text}>{scenarioMessage}</Text> : null}
-    {scenario.data ? <Text variant="bodySm" style={styles.text}>Comparison status: {scenario.data.status.replace(/_/g, ' ')}</Text> : null}
-    {scenario.data?.result?.teams.map(t => <Text key={t.roster_id} variant="bodySm" style={styles.text}>{t.name}: baseline {pct(result.teams.find(b => b.roster_id === t.roster_id)!.playoff_probability)}, comparison {pct(t.playoff_probability)} playoffs; conditional expected pick {number(t.conditional_expected_pick)}.</Text>)}
-    <Text variant="heading" style={styles.text}>Assumptions and coverage</Text>
-    <Text variant="bodySm" style={styles.text}>Historical weight: {Number(result.config.historical_weight) * 100}%. IR in Max PF: {result.config.ir_maxpf === 'include' ? 'included' : 'excluded'}. Current reserves and taxi stay out of actual lineups; taxi remains eligible for Max PF. Draft ties use a randomized scenario. Residual correlation: {String(result.config.residual_correlation)}. Variance source: {result.config.maxpf_variance === 'actual_history_proxy' ? 'actual-score history proxy' : 'reconstructed Max PF history'}.</Text>
-    <Text variant="bodySm" style={styles.text}>Scoring: {Object.entries(result.scoring).filter(([,v]) => v !== 0).map(([k,v]) => `${k.replace(/_/g, ' ')} ${v}`).join('; ')}</Text>
-    {result.warnings.map(w => <Text key={w} variant="bodySm" style={styles.text}>{w}</Text>)}
+      {teams.map(team => {
+        const primary = pct(pickView ? team.nonplayoff_probability : team.playoff_probability);
+        const secondary = pickView ? number(team.maxpf_mean) : team.expected_record.map(n => n.toFixed(1)).join('–');
+        const open = selected === team.roster_id;
+        return <View key={team.roster_id} style={styles.row}>
+          <Pressable accessibilityRole="button" aria-expanded={open}
+            accessibilityLabel={`${team.name}. ${primary} ${pickView ? 'chance of missing playoffs' : 'playoff chance'}. ${pickView ? 'Projected Max PF' : 'Average final record'}: ${secondary}.`}
+            onPress={() => setSelected(open ? null : team.roster_id)} style={[styles.gridRow, styles.teamButton]}>
+            <Text variant="body" style={styles.teamCell}>{team.name}</Text>
+            <Text variant="bodySm" style={[styles.numberCell, styles.odds]}>{primary}</Text>
+            <Text variant="bodySm" style={[styles.numberCell, styles.text]}>{secondary}</Text>
+            <Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} color={chalk.dim} />
+          </Pressable>
+          {open && <TeamDetail team={team} pickView={pickView} names={names} result={result} />}
+        </View>;
+      })}
+      {teams.length === 0 ? <Text variant="bodySm">No team projections in this forecast.</Text> : null}
+    </View>
+    {!pickView && <Disclosure label="Sort teams">
+      <View style={styles.buttons}>
+        <ProjectionToggle label="Playoff odds" selected={sort === 'odds'} onPress={() => setSort('odds')} />
+        <ProjectionToggle label="Team name" selected={sort === 'name'} onPress={() => setSort('name')} />
+        <ProjectionToggle label="Current record" selected={sort === 'record'} onPress={() => setSort('record')} />
+      </View>
+      <Text variant="bodySm">Average records come from simulations. Odds don’t confirm a playoff spot.</Text>
+    </Disclosure>}
+    <Disclosure label="Compare history weights">
+      <Text variant="bodySm">Try a different weight for past scores. The weekly forecast stays the same.</Text>
+      <View style={styles.buttons}>{[.4, .6, .8].map(weight => <Button key={weight} label={`${weight * 100}%`} variant="secondary" onPress={() => compare(weight)} />)}</View>
+      {scenarioMessage ? <Text variant="bodySm">{scenarioMessage}</Text> : null}
+      {scenario.data ? <Text variant="bodySm">Comparison: {scenario.data.status.replace(/_/g, ' ')}</Text> : null}
+      {scenario.data?.result?.teams.map(t => {
+        const baseline = result.teams.find(b => b.roster_id === t.roster_id);
+        if (!baseline) return null;
+        return <Text key={t.roster_id} variant="bodySm" style={styles.text}>{t.name}: {pct(baseline.playoff_probability)} → {pct(t.playoff_probability)} playoff odds · Expected pick if missed: {number(t.conditional_expected_pick)}</Text>;
+      })}
+    </Disclosure>
   </>;
 }
-function TeamDetail({team}: {team: ProjectionTeam}) {
+
+function ProjectionToggle({label, selected, onPress}: {label: string; selected: boolean; onPress: () => void}) {
+  return <Pressable accessibilityRole="button" accessibilityState={{selected}} aria-pressed={selected}
+    onPress={onPress} style={[styles.option, selected && styles.activeOption]}>
+    <Text variant="bodySm" style={[styles.text, selected && styles.odds]}>{label}</Text>
+  </Pressable>;
+}
+
+function TeamDetail({team, pickView, names, result}: {team: ProjectionTeam; pickView: boolean; names: Map<number, string>; result: ProjectionResult}) {
+  return <View style={styles.detail}>
+    {pickView ? <>
+      <Text variant="bodySm">Pick owner: {names.get(team.pick_owner_roster_id) ?? `Team ${team.pick_owner_roster_id}`} · {result.config.draft_season} round {result.config.draft_round}</Text>
+      <Text variant="bodySm">Expected pick if this team misses: {number(team.conditional_expected_pick)}</Text>
+      <Disclosure label="Pick odds and range">
+        <Text variant="bodySm">Current Max PF: {number(team.current_maxpf)} · {number(team.maxpf_per_completed_week)} per week</Text>
+        <Text variant="bodySm">Projected Max PF, middle 80%: {number(team.maxpf_quantiles['0.1'])}–{number(team.maxpf_quantiles['0.9'])}</Text>
+        <Text variant="bodySm">Pick odds include the chance of making playoffs.</Text>
+        {team.pick_probabilities.map((p, i) => <Text key={i} variant="bodySm">Pick {i + 1}: {pct(p)}</Text>)}
+        <Text variant="bodySm">Missed-playoff simulations: {team.nonplayoff_samples}. This franchise is projected to own {number(team.owner_expected_nonplayoff_picks)} non-playoff picks, with a {pct(team.owner_probability_at_least_one)} chance of at least one.</Text>
+      </Disclosure>
+    </> : <>
+      <Text variant="bodySm">Current: {team.current_record.join('–')} · {number(team.current_points_for)} PF · {number(team.current_ppg)} PPG</Text>
+      <Text variant="bodySm">Most likely finish: {team.modal_record.join('–')}{result.playoff_byes > 0 ? ` · Bye odds: ${pct(team.bye_probability)}` : ''}</Text>
+      <Disclosure label="Final record odds">
+        {team.final_record_distribution.map(r => <Text key={r.record.join('–')} variant="bodySm">{r.record.join('–')}: {pct(r.probability)}</Text>)}
+      </Disclosure>
+    </>}
+    <Disclosure label="Weekly projections">
+      {team.weeks.map(w => <Disclosure key={w.week} label={`Week ${w.week} · ${pct(w.win_probability)} win`}>
+        <WeekDetail week={w} opponent={names.get(w.opponent_roster_id) ?? `Team ${w.opponent_roster_id}`} />
+      </Disclosure>)}
+    </Disclosure>
+  </View>;
+}
+
+function WeekDetail({week: w, opponent}: {week: ProjectionWeek; opponent: string}) {
   const [advanced, setAdvanced] = useState(false);
   return <View style={styles.detail}>
-    <Text variant="heading" style={styles.text}>{team.name}</Text>
-    <Text variant="bodySm" style={styles.text}>Missed-playoff samples: {team.nonplayoff_samples}. {team.name}’s own franchise portfolio — expected non-playoff pick count: {number(team.owner_expected_nonplayoff_picks)}; chance of at least one: {pct(team.owner_probability_at_least_one)}.</Text>
-    <Text variant="bodySm" style={styles.text}>Final record distribution: {team.final_record_distribution.map(r => `${r.record.join('–')}: ${pct(r.probability)}`).join('; ')}</Text>
-    <Button label={advanced ? "Hide model diagnostics" : "Show model diagnostics"} variant="secondary" compact onPress={() => setAdvanced(!advanced)} testID="league-projections.diagnostics" />
-    {team.weeks.map(w => <View key={w.week} style={styles.detail}>
-      <Text variant="bodySm" style={styles.text}>Week {w.week} vs Team {w.opponent_roster_id}: win {pct(w.win_probability)}, tie {pct(w.tie_probability)}, loss {pct(w.loss_probability)}. {w.actual_score_observed ? `Recorded completed lineup score ${number(w.modeled_score_mean)}; no historical blend or score simulation.` : `Modeled score ${number(w.modeled_score_mean)}; standard deviation ${number(w.modeled_score_sd)}.`}</Text>
+      <Text variant="bodySm" style={styles.text}>vs {opponent}: win {pct(w.win_probability)}, tie {pct(w.tie_probability)}, loss {pct(w.loss_probability)}. {w.actual_score_observed ? `Recorded completed lineup score ${number(w.modeled_score_mean)}; no historical blend or score simulation.` : `Modeled score ${number(w.modeled_score_mean)}; standard deviation ${number(w.modeled_score_sd)}.`}</Text>
       {w.maxpf_floor && <Text variant="bodySm" style={styles.text}>{w.maxpf_floor.policy ? `Max PF target ${number(w.maxpf_floor.target_mean ?? null)}; simulated mean ${number(w.maxpf_floor.simulated_mean)}. Simulation averages vary; predictive uncertainty is not calibrated.` : `Historical model: input Max PF ${number(w.maxpf_floor.input_mean)}; simulated mean ${number(w.maxpf_floor.simulated_mean)}.`}</Text>}
+      {w.maxpf_floor?.policy && <Button label={advanced ? 'Hide model diagnostics' : 'Show model diagnostics'} variant="secondary" onPress={() => setAdvanced(!advanced)} testID="league-projections.diagnostics" />}
       {advanced && w.maxpf_floor?.policy && <Text variant="bodySm" style={styles.text}>Latent mean {w.maxpf_floor.latent_maxpf_mean == null ? "not used for a zero target gap" : number(w.maxpf_floor.latent_maxpf_mean)}. Configured latent variance {number(w.maxpf_floor.configured_latent_maxpf_variance ?? null)}; realized model variance {number(w.maxpf_floor.analytic_realized_variance ?? null)}. Latent residual correlation {number(w.maxpf_floor.configured_residual_correlation ?? null)}; sampled total correlation {number(w.maxpf_floor.simulated_correlation ?? null)}. Simulation mean standard error {w.maxpf_floor.simulated_mean_standard_error?.toPrecision(3)}. Rounding mean bound ±{w.maxpf_floor.rounding_mean_error_bound} points. Floor adjustment relative to latent draws {number(w.maxpf_floor.mean_uplift)}; floor activation {pct(w.maxpf_floor.frequency)}.</Text>}
       {w.observed_mean_conditioning?.known_maxpf_floor != null && <Text variant="bodySm" style={styles.text}>An already completed eligible lineup establishes at least {number(w.observed_mean_conditioning.known_maxpf_floor)} Max PF. {w.maxpf_score_observed ? 'Max PF is fully observed for this roster.' : `The target adjustment from that known result is ${number(w.observed_mean_conditioning.target_adjustment)} points.`}</Text>}
       {w.projection_coverage?.estimated && <Text variant="bodySm" style={styles.text}>Available projections: {w.projection_coverage.priced_actual_pool} players for the actual lineup, {w.projection_coverage.priced_maxpf_pool} for Max PF. {w.projection_coverage.fallback ? `Completed team history supplies the ${w.projection_coverage.fallback_lanes.join(' and ')} projection because no usable pool remains.` : 'The lineup uses available contributions; unknown players and rules are not confirmed zeros.'}</Text>}
@@ -123,10 +206,23 @@ function TeamDetail({team}: {team: ProjectionTeam}) {
       {w.actual.lineup.map((r, i) => <Text key={i} variant="bodySm" style={styles.text}>{r.slot}: {r.player ? `${r.player.hypothetical ? 'Hypothetical bye replacement' : r.player.name || r.player.player_id} · ${r.player.points}` : r.unpriced_locked_player ? `Locked starter ${r.unpriced_locked_player.name || r.unpriced_locked_player.player_id}: actual score unavailable` : 'Empty slot'}</Text>)}
       <Text variant="bodySm" style={styles.text}>Available lineup contributions {w.actual.points}; Max PF eligible contributions {w.maxpf.points}. {w.actual_score_observed ? `Recorded team total ${w.modeled_actual_projection} supplies the actual score; individual missing scores remain unavailable.` : w.projection_coverage?.fallback ? `Historical fallback used in model: actual ${w.modeled_actual_projection}, Max PF ${w.modeled_maxpf_projection}.` : "Historical blending can cushion an empty slot."}</Text>
       {w.exclusions.map(p => <Text key={p.player_id} variant="bodySm" style={styles.text}>{p.player_id}: {p.reason.replace(/_/g, ' ')}</Text>)}
-    </View>)}
   </View>;
 }
-const styles = StyleSheet.create({section: {backgroundColor: ink.ink1, padding: space.md, gap: space.sm, borderRadius: radii.sm},
-  gridRow: {flexDirection: 'row'}, cell: {width: 140, paddingHorizontal: space.sm},
-  text: {color: chalk.base}, buttons: {flexDirection: 'row', gap: space.sm}, row: {minHeight: 44, justifyContent: 'center'},
-  tableHeader: {color: ice.base, paddingVertical: space.sm}, detail: {gap: space.sm, paddingVertical: space.sm}});
+const styles = StyleSheet.create({
+  section: {backgroundColor: ink.ink1, padding: space.md, gap: space.sm, borderRadius: radii.sm},
+  gridRow: {flexDirection: 'row', alignItems: 'center', gap: space.xs},
+  teamCell: {flex: 1, minWidth: 0},
+  numberCell: {flexBasis: '26%', flexShrink: 0, textAlign: 'right'},
+  chevronSpace: {width: 16},
+  row: {borderTopWidth: 1, borderColor: ink.line},
+  teamButton: {minHeight: 44, paddingVertical: space.sm},
+  text: {color: chalk.base},
+  odds: {color: ice.base},
+  buttons: {flexDirection: 'row', flexWrap: 'wrap', gap: space.sm},
+  option: {minHeight: 44, justifyContent: 'center', paddingHorizontal: space.sm, borderWidth: 1, borderColor: ink.lineStrongA11y, borderRadius: radii.sm},
+  activeOption: {borderColor: ice.base, backgroundColor: ink.ink3},
+  disclosure: {borderTopWidth: 1, borderTopColor: ink.line},
+  toggle: {minHeight: 44, flexDirection: 'row', gap: space.sm, justifyContent: 'space-between', alignItems: 'center'},
+  toggleLabel: {flexShrink: 1},
+  detail: {gap: space.sm, paddingBottom: space.sm},
+});

@@ -5190,6 +5190,20 @@ html:has(#auth-screen:not(.hidden)), body:has(#auth-screen:not(.hidden)) { overf
 
 /* Scheduled league projection tables share the app's existing tokens. */
 .league-projection-batch { padding: 16px; margin-block: 16px; border: 1px solid var(--line); border-radius: 4px; }
-.league-projection-scroll { overflow-x: auto; max-width: 100%; }
-.league-projection-scroll th, .league-projection-scroll td { padding: 8px; text-align: left; white-space: nowrap; }
-.league-projection-batch button { min-height: 44px; margin: 8px; }
+.league-projection-batch h2, .league-projection-batch p { margin: 0 0 8px; }
+.league-projection-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 8px; }
+.league-projection-batch button { min-height: 44px; margin-block: 4px; }
+.league-projection-controls button[aria-pressed="true"] { border-color: var(--ice); color: var(--ice); background: var(--ink-3); }
+.league-projection-table { width: 100%; table-layout: fixed; border-collapse: collapse; margin-block: 8px; }
+.league-projection-table th, .league-projection-table td { padding: 4px; text-align: right; overflow-wrap: anywhere; white-space: normal; }
+.league-projection-table th:first-child { width: 45%; }
+.league-projection-table th:nth-child(2) { width: 22%; }
+.league-projection-table th:first-child, .league-projection-table td:first-child { text-align: left; }
+.league-projection-table td { border-top: 1px solid var(--line); }
+.league-projection-table td:nth-child(2) { color: var(--ice); }
+.league-projection-batch .league-projection-team { width: 100%; padding-inline: 0; color: var(--chalk); background: transparent; border: 0; text-align: left; overflow-wrap: anywhere; white-space: normal; }
+.league-projection-team::after { content: " ▾"; }
+.league-projection-team[aria-expanded="true"]::after { content: " ▴"; }
+.league-projection-batch details { border-top: 1px solid var(--line); }
+.league-projection-batch summary { min-height: 44px; box-sizing: border-box; padding-block: 12px; cursor: pointer; color: var(--chalk); }
+.league-projection-batch details > details { margin-inline-start: 12px; }
