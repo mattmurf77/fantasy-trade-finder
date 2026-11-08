@@ -48,6 +48,26 @@ missing or invalid capture marker are reported separately and block a
 verdict. Older builds cannot satisfy this filter. Unfiltered reports remain
 useful for diagnosing regressions.
 
+
+### Reader and app rollout
+
+This telemetry change adds two capture properties to the existing three
+events and does not generate a new event or change a search. Verify the
+server event allowlist on the reviewed deployment before distributing the
+instrumented internal build. Old server code drops new properties; old apps
+don't record the terminal build or a physical marker. In either order the
+strict reporter treats missing or mismatched evidence as incomplete. A
+success from a different binary, a simulator, or an unidentified device
+cannot fill a physical iPhone cohort.
+
+Use the exact instrumented build number, confirm its real tap and outcome
+events with the aggregate reader, and wait for the report's settle window.
+Exercise Wi-Fi and cellular with cold and warm starts; include immediate
+league, format and preference changes, selected searches and each entry
+point. Record abandoned taps and timeouts alongside visible cards.
+Keep build 170's timeout and build 178's no-card attempts in the historical
+record. No render, schema test or server-only timing closes the device gate.
+
 Browser events have no native app version. `--web-revision` independently
 selects their exact R1 `client_build` tag (`instant-trades-v1`), while
 `--client-build` remains a native-only filter. Historical unversioned browser
