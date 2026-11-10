@@ -620,6 +620,14 @@ A unique allocation of currently available players meeting the existing dynasty 
 
 The random `redacted:<32 hex>` that stands in for a deleted user's partner id in OTHER users' deck records after an account deletion (legal R28.20 (ii)). There is one per deletion, the same in every store, and no mapping to the id is kept once the scrub's job row is gone. A card whose partner is a redaction token is a **redacted card**: it also loses every field taken from the deleted user's account, and its blended scores are null. Readers treat its partner as unknown, never as a person to identify (legal (viii)). The prefix is `eval.contract.REDACTED_PARTNER_PREFIX`. Code: `backend/deletion_scrub.py`.
 
+## Page-first search and admissible bound
+
+**Page-first search** (`backend/trade_first_page.py`) returns the first k trade cards without
+building the rest of the inventory: candidates are ordered by an **admissible bound**, a cheap
+score proven never to be lower than a candidate's true `weaker_support`, verified best-first by
+the unchanged evaluator, and the search stops once no remaining bound can reach the page. A
+library only; nothing is served from it. [ADR-028](adr/adr-028-page-first-trade-search.md).
+
 ## Window evidence and dynasty roster proxy
 
 **Window evidence** records the selected/inferred outlook, provisional horizon and

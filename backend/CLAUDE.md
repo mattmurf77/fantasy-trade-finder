@@ -106,6 +106,10 @@ concrete provider. Phase 2 (`strength.py`) is the swap seam, selected by
 (load the impression spine) → `scorers.py` (registry) → `replay.py` (IPS estimator + CLI) /
 `calibration.py` (reliability + ECE) / `nightly.py` (idempotent per UTC day) / `persistence.py`
 (append-only JSONL under `EVAL_RUNS_DIR`, default `data/eval_runs/`) / `synth.py` (synthetic logs).
+Also here: `synthetic_league.py` (a deterministic production-sized league for constructor
+benchmarks), `first_page_bench.py` and `first_page_load.py` (page-first search against the full
+solve, single-run and under load), and `acceptance_eval.py` (does the bilateral support score
+predict logged outcomes; `--production` is read-only and its report is aggregate-only).
 
 **`tools/`** — `gen_stats_golden.py` (regenerates the stats golden vectors offline; scipy is *not* a
 runtime dep, so never import it in shipped code) and `prod_analytics.py` (read-only reports against

@@ -168,6 +168,29 @@ is draft/unratified and never automatically approves release. See
 [comparison](plans/model-evaluation-framework/comparison-2026-09-22.md) and
 [remaining model/evidence work](plans/model-evaluation-framework/model-revision-plan.md).
 
+## Page-first trade search (library, not wired; 2026-11-10)
+
+`trade_first_page.first_page(k=…, **generator_kwargs)` returns the first k cards of an
+organic or opponent-scoped owner-bilateral search without constructing the inventory.
+It builds the constructor's own search object, gives each candidate an admissible upper
+bound on `weaker_support` (before pricing, after pricing, then exact support), verifies
+best-first with the unchanged `evaluate`, and stops once k + 31 eligible cards beat every
+remaining bound: the ranker's 32-item lookahead means its first k outputs depend only on
+that prefix. Proofs, gates and prices come from the constructor; the module adds no model
+version. Pinned and exact-give requests return `None`.
+
+`PageSearch(**kwargs).take(n)` is the resumable form: the first few proven cards, then more
+from the same search. The constructor's search runs as a private subclass so that only cards
+actually returned are serialised. Two bounded process-wide memos, keyed by the content the
+function reads and never by league or user, carry repeated work across searches: roster
+lineup assignments (`_LINEUP_MEMO`) and tier coordinates (`_COORDINATE_MEMO`).
+
+It is a leaf with no server, database, flag or provider access, and **no serving path
+imports it**: only `backend/eval/first_page_bench.py`, `first_page_load.py` and the tests.
+Publishing a page before the inventory exists would change the owner publication
+contract below and is not built. [ADR-028](adr/adr-028-page-first-trade-search.md) ·
+[scope and measurements](plans/realtime-trade-engine/scope.md).
+
 ## First-action trade job publication (2026-09-21)
 
 Ordinary trade requests atomically claim or join equivalent process-local jobs.

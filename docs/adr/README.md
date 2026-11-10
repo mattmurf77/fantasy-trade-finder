@@ -61,3 +61,4 @@ Don't bother for routine code changes, bug fixes, or anything self-evident from 
 - [ADR-023 Attested Prepared Inventories and Bounded Publication](adr-023-attested-prepared-inventories.md)
 - [ADR-024 Value-Core Trade Engine](adr-024-value-core-engine.md)
 - [ADR-025 Packed Evidence for Unseen Cards](adr-025-packed-unseen-evidence.md)
+- [ADR-028 Page-First Trade Search](adr-028-page-first-trade-search.md)
