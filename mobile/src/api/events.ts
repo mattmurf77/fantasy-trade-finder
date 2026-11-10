@@ -32,7 +32,8 @@
 import Constants from 'expo-constants';
 import { takeTradeInputChange } from '../utils/tradeInputChange';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AppState } from 'react-native';
+import * as Device from 'expo-device';
+import { AppState, Platform } from 'react-native';
 import { getBaseUrl, getClientHeaders, getDeviceId, getSessionToken } from './client';
 import { useFeatureFlags } from '../state/useFeatureFlags';
 // draft-extensions W3 M-D: uuidv4, the backoff ladder and the disposition-
@@ -93,6 +94,10 @@ const uuidv4 = _sharedUuidv4;
 
 // ── Module state ────────────────────────────────────────────────────────
 const APP_OPEN_TS = Date.now();
+// Expo's phone device type is an interface idiom. Check the hardware class
+// locally so an iPhone layout alone cannot qualify a timing sample.
+const PHYSICAL_IPHONE = Platform.OS !== 'ios' || !Device.isDevice ? false
+  : Device.modelId ? /^iPhone\d+,\d+$/.test(Device.modelId) : undefined;
 
 let queue: QueuedEvent[] = [];
 let sessionId = uuidv4();           // rotated on cold start (module load)
@@ -194,11 +199,15 @@ export function track(
 ): void {
   try {
     if (eventType === 'find_trades_tapped') {
-      const build = Constants.platform?.ios?.buildNumber;
       const change = takeTradeInputChange();
       // An explicit scenario describes this tap (e.g. a cross-league handoff),
       // so an earlier preference edit must not replace it or lend it an age.
-      props = { ...(props?.scenario ? {} : change), ...props, ...(build ? { client_build: build } : {}) };
+      props = { ...(props?.scenario ? {} : change), ...props };
+    }
+    if (eventType === 'find_trades_tapped' || eventType === 'trade_first_card_shown'
+        || eventType === 'trade_first_card_failed') {
+      const build = Constants.platform?.ios?.buildNumber;
+      props = { ...props, physical_iphone: PHYSICAL_IPHONE, client_build: build ?? undefined };
     }
     if (!flagEnabled()) return;
     const now = Date.now();

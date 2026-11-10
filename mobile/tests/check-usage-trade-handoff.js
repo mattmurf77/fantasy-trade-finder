@@ -169,12 +169,32 @@ process.on('exit', () => {
     const start = events.indexOf("if (eventType === 'find_trades_tapped')");
     const end = events.indexOf('if (!flagEnabled())', start);
     const block = events.slice(start, end);
-    const run = compile(`module.exports = props => { const eventType = 'find_trades_tapped'; ${block}; return props; };`, {
-      Constants: { platform: { ios: { buildNumber: 'candidate' } } },
-      takeTradeInputChange: () => ({ scenario: 'after_preferences_change', input_age_ms: 12 }),
-    });
-    assert.deepEqual(JSON.parse(JSON.stringify(run({ scenario: 'cross_league_handoff' }))), { scenario: 'cross_league_handoff', client_build: 'candidate' });
-    assert.equal(run({}).input_age_ms, 12);
+    const deviceStart = events.indexOf('const PHYSICAL_IPHONE');
+    const declaration = events.slice(deviceStart, events.indexOf(';', deviceStart) + 1);
+    const build = (os, physical, modelId) => compile(
+      `${declaration} module.exports = (eventType, props) => { ${block}; return props; };`,
+      {
+        Constants: { platform: { ios: { buildNumber: 'candidate' } } },
+        Platform: { OS: os },
+        Device: { isDevice: physical, modelId, deviceType: 1, DeviceType: { PHONE: 1 } },
+        takeTradeInputChange: () => ({ scenario: 'after_preferences_change', input_age_ms: 12 }),
+      },
+    );
+    const run = build('ios', true, 'iPhone17,1');
+    assert.deepEqual(JSON.parse(JSON.stringify(run('find_trades_tapped', { scenario: 'cross_league_handoff' }))),
+      { scenario: 'cross_league_handoff', client_build: 'candidate', physical_iphone: true });
+    assert.equal(run('find_trades_tapped', {}).input_age_ms, 12);
+    for (const eventType of ['trade_first_card_shown', 'trade_first_card_failed']) {
+      assert.deepEqual(JSON.parse(JSON.stringify(run(eventType, { ms_from_tap: 100 }))),
+        { ms_from_tap: 100, client_build: 'candidate', physical_iphone: true });
+    }
+    for (const args of [['ios', false, 'iPhone17,1'], ['ios', true, 'iPad16,3'],
+                        ['ios', true, 'iPod9,1'], ['android', true, null]]) {
+      assert.equal(build(...args)('trade_first_card_shown', {}).physical_iphone, false);
+    }
+    const unknown = build('ios', true, null)('find_trades_tapped', {});
+    assert(!JSON.stringify(unknown).includes('physical_iphone'));
+    assert(!JSON.stringify(run('find_trades_tapped', {})).includes('iPhone17,1'));
   });
   console.log(`${count} lifecycle checks passed; physical-device latency remains unmeasured.`);
   finished = true;

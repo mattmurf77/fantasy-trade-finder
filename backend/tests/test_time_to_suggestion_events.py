@@ -21,7 +21,7 @@ import backend.analytics_taxonomy as tax
 
 
 R1_ROWS: dict[str, frozenset[str]] = {
-    "find_trades_tapped": frozenset({"source", "mode", "search_id", "scenario", "input_age_ms", "client_build"}),
+    "find_trades_tapped": frozenset({"source", "mode", "search_id", "scenario", "input_age_ms", "client_build", "physical_iphone"}),
     "calc_find_a_trade_tapped": frozenset(
         {"path", "give_count", "receive_count", "has_partner", "search_id"}),
 }
@@ -74,10 +74,10 @@ R2_ROWS: dict[str, frozenset[str]] = {
     "trade_first_card_shown": frozenset({
         "search_id", "ms_from_tap", "entry_point", "search_type",
         "launch_state", "network_type", "serve_source", "freshness_state",
-        "job_id", "card_index"}),
+        "job_id", "card_index", "client_build", "physical_iphone"}),
     "trade_first_card_failed": frozenset({
         "search_id", "ms_from_tap", "reason", "entry_point", "search_type",
-        "launch_state", "network_type", "serve_source"}),
+        "launch_state", "network_type", "serve_source", "client_build", "physical_iphone"}),
     "deck_buffer_empty": frozenset({
         "search_id", "deck_id", "cards_seen", "ms_since_first_card",
         "network_type"}),

@@ -77,9 +77,17 @@ def validate(payload):
         raise ValueError("expected aggregate schema=1")
     if payload.get("evidence_kind") not in {"measured", "synthetic"}:
         raise ValueError("evidence_kind must be measured or synthetic")
+    if type(payload.get("physical_iphone_required", False)) is not bool:
+        raise ValueError("physical_iphone_required must be boolean")
+    if payload.get("physical_iphone_required") and (
+        not isinstance(payload.get("client_build"), str) or not payload["client_build"]
+    ):
+        raise ValueError("physical iPhone evidence requires an exact native build")
     rows = payload.get("cohorts")
     if not isinstance(rows, list):
         raise ValueError("cohorts must be an array")
+    if type(payload.get("unclassified_iphone_taps", 0)) is not int or payload.get("unclassified_iphone_taps", 0) < 0:
+        raise ValueError("unclassified_iphone_taps must be a nonnegative integer")
     if type(payload.get("untraced_taps", 0)) is not int or payload.get("untraced_taps", 0) < 0:
         raise ValueError("untraced_taps must be a nonnegative integer")
     if type(payload.get("immediate_change_max_ms", 5000)) is not int or payload.get("immediate_change_max_ms", 5000) < 0:
@@ -256,6 +264,8 @@ def report(payload, profile="all-entry", limit=200, min_samples=40, min_devices=
         global_reasons.append("unfinalized_observation_window")
     if payload.get("untraced_taps", 0):
         global_reasons.append("taps_without_search_id")
+    if payload.get("physical_iphone_required") and payload.get("unclassified_iphone_taps", 0):
+        global_reasons.append("iphone_labeled_taps_missing_capture_provenance")
     if sum(r.get("duplicate_taps", 0) for r in rows):
         global_reasons.append("duplicate_R1_search_ids")
     untraced = payload.get("untraced_taps", 0)
@@ -277,6 +287,8 @@ def report(payload, profile="all-entry", limit=200, min_samples=40, min_devices=
             "window": payload.get("window"), "app_version": payload.get("app_version"),
             "client_build": payload.get("client_build"), "immediate_change_max_ms": payload.get("immediate_change_max_ms", 5000),
             "web_revision": payload.get("web_revision"),
+            "physical_iphone_required": payload.get("physical_iphone_required", False),
+            "unclassified_iphone_taps": payload.get("unclassified_iphone_taps", 0),
             "limit_ms": limit, "minimum_samples": min_samples, "minimum_devices": min_devices,
             "status": "FAIL" if global_reasons else ("PASS_NOT_ROBUST" if any(
                 c["status"] == "PASS_NOT_ROBUST" for c in checks) else "PASS"),
@@ -296,8 +308,8 @@ def report(payload, profile="all-entry", limit=200, min_samples=40, min_devices=
 # Group inside Postgres. No user_id/search_id/device_id or raw event props are
 # returned to Python. R1 is authoritative; companion calc_find... is NOT a tap.
 PRODUCTION_SQL = """
-WITH tap_rows AS (
- SELECT user_id, device_id, COALESCE(NULLIF(props::jsonb->>'search_id',''),'') sid,
+WITH versioned_taps AS (
+ SELECT user_id, device_id, device_type, props::jsonb->'physical_iphone' AS iphone_marker, COALESCE(NULLIF(props::jsonb->>'search_id',''),'') sid,
  CASE WHEN props::jsonb->>'scenario' IN
  ('after_league_switch','after_preferences_change','after_format_switch','after_account_switch',
  'after_rank_change','warm','genuinely_cold','pinned_give','pinned_receive','targeted_opponent',
@@ -325,25 +337,41 @@ WITH tap_rows AS (
     AND app_version=:version
     AND (CAST(:build AS text) IS NULL OR props::jsonb->>'client_build'=CAST(:build AS text)))
  )
+), tap_rows AS (
+ SELECT * FROM versioned_taps
+ WHERE NOT :require_iphone OR platform='web' OR (device_type='iphone' AND iphone_marker='true'::jsonb)
 ), taps AS (
  SELECT user_id,sid,MIN(entry_point) entry_point,MIN(platform) platform,
  MIN(device_id) device_id,MIN(r1_scenario) r1_scenario,MIN(input_age_ms) input_age_ms,
  COUNT(*) tap_count FROM tap_rows WHERE sid<>'' GROUP BY user_id,sid
-), terminals AS (
- SELECT user_id,props::jsonb->>'search_id' sid,COUNT(*) terminal_count,
- MIN(event_type) event_type,MIN(props::jsonb->>'reason') reason,
- MIN(CASE WHEN props::jsonb->>'search_type' IN ('organic','pinned','fair_sweep')
-     THEN props::jsonb->>'search_type' ELSE 'unknown' END) search_type,
- MIN(CASE WHEN props::jsonb->>'network_type' IN ('wifi','cellular','offline')
-     THEN props::jsonb->>'network_type' ELSE 'unknown' END) network_type,
- MIN(CASE WHEN props::jsonb->>'launch_state' IN ('cold_launch','first_tap','repeat_tap')
-     THEN props::jsonb->>'launch_state' ELSE 'unknown' END) launch_state,
- MIN(CASE WHEN props::jsonb->>'ms_from_tap' ~ '^[0-9]{1,12}$'
-     THEN (props::jsonb->>'ms_from_tap')::bigint END) ms
+), terminal_rows AS (
+ SELECT user_id, device_id, device_type, event_type, props::jsonb AS props,
+   COALESCE(source,'')='web' OR COALESCE(platform,'')='web'
+     OR COALESCE(device_type,'')='web' AS is_web
  FROM user_events WHERE event_type IN ('trade_first_card_shown','trade_first_card_failed')
  AND occurred_at >= :start AND occurred_at < :outcome_end
  AND (app_version=:version OR source='web' OR platform='web' OR device_type='web')
- GROUP BY user_id,props::jsonb->>'search_id'
+), terminals AS (
+ SELECT user_id,props->>'search_id' sid,
+ CASE WHEN :require_iphone THEN CASE WHEN is_web THEN 'web' ELSE 'mobile' END END terminal_platform,
+ CASE WHEN :require_iphone AND NOT is_web THEN device_id END iphone_device,
+ COUNT(*) terminal_count,
+ MIN(event_type) event_type,MIN(props->>'reason') reason,
+ MIN(CASE WHEN props->>'search_type' IN ('organic','pinned','fair_sweep')
+     THEN props->>'search_type' ELSE 'unknown' END) search_type,
+ MIN(CASE WHEN props->>'network_type' IN ('wifi','cellular','offline')
+     THEN props->>'network_type' ELSE 'unknown' END) network_type,
+ MIN(CASE WHEN props->>'launch_state' IN ('cold_launch','first_tap','repeat_tap')
+     THEN props->>'launch_state' ELSE 'unknown' END) launch_state,
+ MIN(CASE WHEN props->>'ms_from_tap' ~ '^[0-9]{1,12}$'
+     THEN (props->>'ms_from_tap')::bigint END) ms
+ FROM terminal_rows
+ WHERE (NOT :require_iphone OR is_web OR (
+    device_type='iphone' AND NULLIF(device_id,'') IS NOT NULL
+    AND props @> jsonb_build_object('physical_iphone', true)
+    AND props->>'client_build'=CAST(:build AS text)
+ ))
+ GROUP BY 1,2,3,4
 ), joined AS (
  SELECT t.*,COALESCE(o.search_type,'unknown') search_type,
  COALESCE(o.network_type,'unknown') network_type,COALESCE(o.launch_state,'unknown') launch_state,
@@ -360,6 +388,9 @@ WITH tap_rows AS (
       WHEN o.reason IN ('empty','error','abandoned','timeout','paywall','verify') THEN o.reason
       ELSE 'invalid_outcome' END result, o.ms
  FROM taps t LEFT JOIN terminals o ON o.user_id=t.user_id AND o.sid=t.sid
+ AND (NOT :require_iphone OR (
+     o.terminal_platform=t.platform AND (t.platform='web' OR o.iphone_device=t.device_id)
+ ))
 ), histogram AS (
  SELECT platform,entry_point,search_type,network_type,launch_state,scenario,result,ms,COUNT(*) n
  FROM joined GROUP BY platform,entry_point,search_type,network_type,launch_state,scenario,result,ms
@@ -373,6 +404,9 @@ WITH tap_rows AS (
 )
 SELECT jsonb_build_object('schema',1,'evidence_kind','measured','finalized',true,
  'untraced_taps',(SELECT COUNT(*) FROM tap_rows WHERE sid=''),
+ 'unclassified_iphone_taps',(SELECT COUNT(*) FROM versioned_taps
+    WHERE :require_iphone AND platform='mobile' AND device_type='iphone'
+      AND jsonb_typeof(iphone_marker) IS DISTINCT FROM 'boolean'),
  'cohorts',COALESCE((SELECT jsonb_agg(x.row) FROM (
  SELECT jsonb_build_object('platform',h.platform,'entry_point',h.entry_point,
  'search_type',h.search_type,'network_type',h.network_type,'launch_state',h.launch_state,
@@ -386,9 +420,12 @@ SELECT jsonb_build_object('schema',1,'evidence_kind','measured','finalized',true
 """
 
 
-def production_snapshot(version, hours=24, settle_seconds=300, build=None, immediate_ms=5000, web_revision=None):
+def production_snapshot(version, hours=24, settle_seconds=300, build=None, immediate_ms=5000,
+                        web_revision=None, *, require_iphone=False):
     if not version or hours <= 0 or settle_seconds < 60:
         raise ValueError("production requires one version, positive hours, settle >=60s")
+    if require_iphone and not build:
+        raise ValueError("physical iPhone evidence requires an exact native build")
     # SQLAlchemy is imported only for the explicit production mode.
     from sqlalchemy import create_engine, text
     url = os.environ.get("DATABASE_URL_PROD", "")
@@ -401,7 +438,8 @@ def production_snapshot(version, hours=24, settle_seconds=300, build=None, immed
     start = end - timedelta(hours=hours)
     fmt = lambda dt: dt.isoformat().replace("+00:00", "Z")
     params = {"start": fmt(start), "end": fmt(end), "outcome_end": fmt(now), "version": version,
-              "build": build, "immediate_ms": immediate_ms, "web_revision": web_revision}
+              "build": build, "immediate_ms": immediate_ms, "web_revision": web_revision,
+              "require_iphone": require_iphone}
     engine = create_engine(url, connect_args={"options":
         "-c default_transaction_read_only=on -c statement_timeout=15000"})
     try:
@@ -417,7 +455,7 @@ def production_snapshot(version, hours=24, settle_seconds=300, build=None, immed
     payload.update(window={"start": params["start"], "end": params["end"],
                            "outcomes_through": params["outcome_end"], "settle_seconds": settle_seconds},
                    app_version=version, client_build=build, immediate_change_max_ms=immediate_ms,
-                   web_revision=web_revision)
+                   web_revision=web_revision, physical_iphone_required=require_iphone)
     return payload
 
 
@@ -429,6 +467,8 @@ def main(argv=None):
     ap.add_argument("--app-version", help="required for production; avoids pooling binaries")
     ap.add_argument("--client-build", help="exact R1 native build filter (e.g. 172); missing build is excluded")
     ap.add_argument("--web-revision", help="exact web R1 client_build tag; unversioned browser events are excluded")
+    ap.add_argument("--require-physical-iphone", action="store_true",
+                    help="production native evidence must be from a physical iPhone on the exact build")
     ap.add_argument("--immediate-change-ms", type=int, default=5000,
                     help="only change-to-tap ages at or below this qualify for immediate cohorts")
     ap.add_argument("--hours", type=float, default=24)
@@ -442,9 +482,12 @@ def main(argv=None):
     try:
         if args.min_samples < 1 or args.min_devices < 1 or not math.isfinite(args.limit_ms) or args.limit_ms < 0 or args.immediate_change_ms < 0:
             raise ValueError("positive samples/devices and finite nonnegative latency limit required")
+        if args.require_physical_iphone and not args.production:
+            raise ValueError("--require-physical-iphone is a production read filter")
         payload = production_snapshot(args.app_version, args.hours, args.settle_seconds,
-                                      args.client_build, args.immediate_change_ms,
-                                      args.web_revision) if args.production else json.loads(args.input.read_text())
+                                      args.client_build, args.immediate_change_ms, args.web_revision,
+                                      require_iphone=args.require_physical_iphone
+                                      ) if args.production else json.loads(args.input.read_text())
         validate(payload)
         result = payload if args.snapshot_only else report(payload, args.profile, args.limit_ms, args.min_samples, args.min_devices)
     except Exception as error:

@@ -1170,7 +1170,10 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # trades" hand-off, only when a partner is scoped; granted by
     # analytics-lead, Q-A — per Product it is OUT of the AC-L1 cells for
     # launch and reported separately). Still INTENT.
-    "find_trades_tapped":   frozenset({"source", "mode", "search_id", "scenario", "input_age_ms", "client_build"}),
+    # Native R1/R2/R2b also carry capture-time build and a boolean for a
+    # physical iPhone. Do not infer it from the label on a flushed batch.
+    "find_trades_tapped":   frozenset({"source", "mode", "search_id", "scenario", "input_age_ms",
+                                       "client_build", "physical_iphone"}),
     # R2 — at T1, the first frame where a real card is >= 50% visible with
     # Like and Pass enabled; once per search_id. `ms_from_tap` is a MONOTONIC
     # client delta (performance.now()), int. `entry_point` = the tap's R1
@@ -1183,7 +1186,7 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                           "search_type", "launch_state",
                                           "network_type", "serve_source",
                                           "freshness_state", "job_id",
-                                          "card_index"}),
+                                          "card_index", "client_build", "physical_iphone"}),
     # R2b — instead of R2. `reason` is the closed set empty | error |
     # abandoned (unmount, blur, or the app leaving `active` before a card,
     # T4) | timeout (10,000 ms from the tap) | paywall | verify. Every R2b
@@ -1195,7 +1198,7 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "trade_first_card_failed": frozenset({"search_id", "ms_from_tap", "reason",
                                           "entry_point", "search_type",
                                           "launch_state", "network_type",
-                                          "serve_source"}),
+                                          "serve_source", "client_build", "physical_iphone"}),
     # At most once per search_id. `deck_id` = the deck being paged (P2's, else
     # the job's id); `cards_seen` = cards fronted so far, the empty one
     # included; `ms_since_first_card` = monotonic ms since R2 (absent when R2

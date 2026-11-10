@@ -286,17 +286,18 @@ class AggregateSQLTests(unittest.TestCase):
                                "occurred_at text,props text,source text,platform text,device_type text,app_version text)"))
         self.params = dict(start="2026-11-05T00:00:00Z", end="2026-11-05T00:05:00Z",
                            outcome_end="2026-11-05T00:10:00Z", version="1.22.0", build="172", immediate_ms=5000,
-                           web_revision=None)
+                           web_revision=None, require_iphone=False)
 
-    def add(self, sid, event="find_trades_tapped", user="fake_a", **props):
+    def add(self, sid, event="find_trades_tapped", user="fake_a", *,
+            device="fake_device", device_type="iphone", source="mobile", platform="ios", **props):
         body = dict(search_id=sid)
         if event == "find_trades_tapped":
             body.update(source="calculator", client_build="172")
         else:
             body.update(search_type="organic", network_type="wifi", launch_state="first_tap", ms_from_tap=100)
         body.update(props)
-        self.conn.execute(self.text("INSERT INTO user_events VALUES (:u,'fake_device',:e,:at,:p,'mobile','ios','iphone','1.22.0')"),
-                          dict(u=user, e=event, at="2026-11-05T00:00:01Z" if event == "find_trades_tapped" else "2026-11-05T00:06:00Z",
+        self.conn.execute(self.text("INSERT INTO user_events VALUES (:u,:d,:e,:at,:p,:source,:platform,:dt,'1.22.0')"),
+                          dict(u=user, d=device, dt=device_type, source=source, platform=platform, e=event, at="2026-11-05T00:00:01Z" if event == "find_trades_tapped" else "2026-11-05T00:06:00Z",
                                p=json.dumps(body)))
 
     def query(self):
@@ -346,6 +347,34 @@ class AggregateSQLTests(unittest.TestCase):
         self.assertEqual(stats["taps"], 4)
         self.assertEqual(stats["eligible"], 3)
         self.assertEqual(stats["outcomes"], dict(duplicate_outcome=1, invalid_outcome=1, paywall=1, shown=1))
+
+    def test_iphone_capture_filter_counts_proven_taps_with_unproven_terminal_as_missing(self):
+        self.params["require_iphone"] = True
+        for sid in ("proven", "missing_flag", "wrong_build", "wrong_device", "timeout", "no_device", "web_outcome"):
+            self.add(sid, physical_iphone=True, device=None if sid == "no_device" else "fake_device")
+        for sid, flag, build, device in (
+            ("proven", True, "172", "fake_device"),
+            ("missing_flag", None, "172", "fake_device"),
+            ("wrong_build", True, "173", "fake_device"),
+            ("wrong_device", True, "172", "different_device"),
+            ("no_device", True, "172", None),
+        ):
+            self.add(sid, "trade_first_card_shown", physical_iphone=flag,
+                     client_build=build, device=device)
+        self.add("timeout", "trade_first_card_failed", physical_iphone=True, client_build="172",
+                 reason="timeout", ms_from_tap=10000)
+        self.add("web_outcome", "trade_first_card_shown", platform="web", client_build="171")
+        self.add("simulator", physical_iphone=False)
+        self.add("legacy")
+        self.add("wrong_flag_type", physical_iphone="true")
+        self.add("tablet", physical_iphone=True, device_type="ipad")
+        payload = self.query()
+        self.assertEqual(payload["unclassified_iphone_taps"], 2)
+        report = R.report(dict(payload, physical_iphone_required=True, client_build="172"))
+        self.assertIn("iphone_labeled_taps_missing_capture_provenance", report["reasons"])
+        stats = report["totals_including_cold_offline_preferences"]
+        self.assertEqual(stats["taps"], 7)
+        self.assertEqual(stats["outcomes"], dict(shown=1, missing_outcome=5, timeout=1))
 
     def test_web_revision_does_not_require_native_app_version_or_mix_old_web(self):
         for sid, revision in (("new_web", "instant-trades-v1"), ("old_web", None)):
