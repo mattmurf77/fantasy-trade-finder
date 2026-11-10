@@ -61,7 +61,7 @@
 
 Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1440b7b` live). These seven items are active; older dated sections below are preserved history requiring retriage, not an authorization to run them.
 
-1. **Ship the instrumented internal TestFlight build from `b1440b7b` and run the physical-iPhone timing matrix.** *Why now:* the 200 ms gate is the open launch blocker, and build 182 can't produce qualifying samples. Cover cold and warm starts, Wi-Fi and cellular, immediate taps after a change, and targeted searches, per [the acceptance doc](../qa/instant-trade-acceptance.md). `eas` must be logged in as mattmurf77.
+1. **Run the physical-iPhone timing matrix on TestFlight 1.22.0 (183)**, which is in internal testing as of 2026-11-10 and built from `b1440b7b` code. *Why now:* the 200 ms gate is the open launch blocker. `all-entry` needs at least 40 samples from at least 2 physical iPhones per cohort: cold and warm, Wi-Fi and cellular, immediate taps after league or preference changes, targeted and pinned searches, every entry point, and the offline/paywall/verify/no-solution states. Read it with `scripts/qa/instant_trade_report.py --production --app-version 1.22.0 --client-build 183 --require-physical-iphone`, per [the acceptance doc](../qa/instant-trade-acceptance.md).
 2. Resolve #584's KTC zero-weight pin decision; parser restoration and later blend activation remain separate operations.
 3. Hold release-only #456 until 2026-11-18; supply/validate the store install destination at the intended release.
 4. Complete platform proof/legacy-entry cleanup and installed-build checks before changing the landing flag; [runbook](../docs/runbook.md).

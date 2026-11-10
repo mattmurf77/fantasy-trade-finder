@@ -20,10 +20,10 @@
 - Work moved to a new MacBook with `gh` (mattmurf77), Python 3.12, Node 20 (via `~/.zprofile`) and `eas-cli`. `prototype/p1-reviewed-integration` (`447a9e27`) and `prototype/p1-atomic-ready` (`85a75ddb`) were recovered from zips; they stay offline by decision and are not on GitHub.
 
 **In flight**
-- The instrumented internal TestFlight build from `b1440b7b` hasn't started. `eas` must be logged in as mattmurf77; matthewkmurphy1 has no access to the project.
+- TestFlight 1.22.0 (183), built from `eaf3f6ae` (same code as `b1440b7b`), is in internal beta testing as of 2026-11-10T04:10Z. Physical-iPhone timing runs on it haven't started. `eas` is logged in as mattmurf77.
 
 **Blocked on**
-- The 200 ms gate needs real physical-iPhone samples from that build (`qa/instant-trade-acceptance.md`, `--require-physical-iphone --client-build <n>`).
+- The 200 ms gate needs build-183 samples from at least 2 physical iPhones, at least 40 per `all-entry` cohort (`qa/instant-trade-acceptance.md`, `--require-physical-iphone --client-build 183`).
 
 **Don't repeat**
 - No simulator or Maestro (D-056). Production runs a single worker: a Calibration rebuild takes about 4–5 min per pair and starves admin reads, so run them off-peak.
