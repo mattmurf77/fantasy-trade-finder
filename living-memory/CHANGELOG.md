@@ -12,6 +12,11 @@
 ---
 
 
+## 2026-11-09 — Instrumented TestFlight 1.22.0 (183) in internal testing
+
+- EAS build 183 (`b0a3fee0`) was built from `main` `eaf3f6ae`, the same code as the live `b1440b7b`, and auto-submitted (submission `6081ae2e`, finished). App Store Connect shows 1.22.0 (183) as internal "in beta testing" as of 2026-11-10T04:10Z. It is the first build that sends `client_build` + `physical_iphone` on the three Find a Trade timing events.
+- No device samples yet, so the 200 ms gate stays open. The `all-entry` profile needs at least 40 samples from at least 2 physical iPhones in every cohort ([acceptance doc](../qa/instant-trade-acceptance.md)). Builds now come from the new laptop with `eas` logged in as mattmurf77.
+
 ## 2026-11-09 — Release pair #629 + #628 live; Calibration rebuilt on the deployed revision
 
 - #629 (give-all selected packages, deck pipeline 13 → 14) merged as `678bbeca` at its reviewed head `c4ca57c2`, after a models-eng OK ([verdict](https://github.com/mattmurf77/fantasy-trade-finder/pull/629#issuecomment-6757117282)). #628 (`client_build` + `physical_iphone` on the three Find a Trade timing events) merged as `b1440b7b`. Render has been live on `b1440b7b` since 2026-11-10T02:53Z, before the Nov 10 freeze, so no MOD-M1 re-run is owed. Combined-tree evidence: [TEST_LEDGER](TEST_LEDGER.md#2026-11-09--release-pair-629--628-combined-tree-ci-and-models-eng-review).
