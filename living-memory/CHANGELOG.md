@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-09 — Release pair #629 + #628 live; Calibration rebuilt on the deployed revision
+
+- #629 (give-all selected packages, deck pipeline 13 → 14) merged as `678bbeca` at its reviewed head `c4ca57c2`, after a models-eng OK ([verdict](https://github.com/mattmurf77/fantasy-trade-finder/pull/629#issuecomment-6757117282)). #628 (`client_build` + `physical_iphone` on the three Find a Trade timing events) merged as `b1440b7b`. Render has been live on `b1440b7b` since 2026-11-10T02:53Z, before the Nov 10 freeze, so no MOD-M1 re-run is owed. Combined-tree evidence: [TEST_LEDGER](TEST_LEDGER.md#2026-11-09--release-pair-629--628-combined-tree-ci-and-models-eng-review).
+- Calibration `outlook-v2-v3-1` was rebuilt once against that revision: 10 ready (one new revision group), the 1 started session kept with its 3 answers, and the same 5 pairs failing on known provider limits. Calibration stays public; KTC, the serving model and paid enforcement are unchanged.
+- Chalkline is published as a private claude.ai Design System ("Fleeced — Chalkline"), built from main's tokens, docs and assets. No instrumented TestFlight build yet, so the 200 ms gate stays open.
+
 ## 2026-11-07 — Exact selected running-job joins candidate
 
 - Strict identical pinned/opponent searches share one live worker under exact ordered request, source, config/flag, epoch and lifetime checks. Force, completed/failed work, legacy requests and different selections retain full-generation behavior; intent-only keeps existing organic semantics.

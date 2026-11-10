@@ -1,29 +1,29 @@
 # HANDOFF — Fantasy Trade Finder
 
-> **Purpose:** selected running-job join candidate and release handoff.
+> **Purpose:** launch release handoff after the #629/#628 deploy.
 > **Read at:** session start. **Write at:** checkpoint/session end.
-> Companion files: [TEST_LEDGER.md](TEST_LEDGER.md), [scope](../docs/plans/selected-running-single-flight/scope.md).
+> Companion files: [CHANGELOG.md](CHANGELOG.md), [NEXT.md](NEXT.md), [TEST_LEDGER.md](TEST_LEDGER.md).
 
 ---
 
 ## Table of Contents
 
-- [Current State 2026-11-07](#current-state-2026-11-07)
+- [Current State 2026-11-09](#current-state-2026-11-09)
 
 ---
 
-## Current State 2026-11-07
+## Current State 2026-11-09
 
 **Where I stopped**
-- Branch `perf/selected-exact-request-reuse`, base `57b8d7c3`. Strict identical pin/opponent requests can join one live worker. Exact ordered selectors, original source identities, nonmissing signatures/fingerprints, participant epochs and account lifetime are required.
-- Force and different selections remain independent; intent-only keeps organic semantics. Completed/failed/stale work is never joined. Normal authorization, preview, currentness, disposition and full quality/publication gates remain.
-- Pointer index capped at 128; source refs cleared at terminal/revocation. This is neither a global admission bound nor a complete immutable-input certificate.
+- `main` and the live Render deploy are both `b1440b7b` (#629 give-all fix with pipeline 14, #628 iPhone timing tags), deployed 2026-11-10T02:53Z before the Nov 10 freeze. That SHA is the frozen candidate for the Nov 10 check.
+- Calibration `outlook-v2-v3-1` was rebuilt once on that revision: 10 ready, 1 started (its 3 answers kept), 5 known provider failures.
+- Work moved to a new MacBook with `gh` (mattmurf77), Python 3.12, Node 20 (via `~/.zprofile`) and `eas-cli`. `prototype/p1-reviewed-integration` (`447a9e27`) and `prototype/p1-atomic-ready` (`85a75ddb`) were recovered from zips; they stay offline by decision and are not on GitHub.
 
 **In flight**
-- 598 affected and 83 final focused tests pass (overlapping); independent 41 controls pass. Actual 783-card native/final/public/durable parity and duplicate admission counts retained externally. Root owns final-head CI, merge/deploy and Calibration refresh; no push/production action by this worker.
+- The instrumented internal TestFlight build from `b1440b7b` hasn't started. `eas` must be logged in as mattmurf77; matthewkmurphy1 has no access to the project.
 
 **Blocked on**
-- First cold computation and changed selectors still take seconds; no device or universal 200 ms result. Completed proof reuse needs broader input/currentness ownership beyond PR617 pricing.
+- The 200 ms gate needs real physical-iPhone samples from that build (`qa/instant-trade-acceptance.md`, `--require-physical-iphone --client-build <n>`).
 
 **Don't repeat**
-- No simulator/Maestro, selected-result filtering, preview bypass, quality/budget reduction or fast-decoder activation. Build 178/mobile and scheduled projections remain intact.
+- No simulator or Maestro (D-056). Production runs a single worker: a Calibration rebuild takes about 4–5 min per pair and starves admin reads, so run them off-peak.

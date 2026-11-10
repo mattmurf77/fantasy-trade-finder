@@ -59,15 +59,15 @@
 
 ## Priority Queue
 
-Launch handoff 2026-11-04. These seven items are active; older dated sections below are preserved history requiring retriage, not an authorization to run them.
+Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1440b7b` live). These seven items are active; older dated sections below are preserved history requiring retriage, not an authorization to run them.
 
-1. Verify the launch integration PR/current main and exact-head CI before doing more merge work; avoid duplicate merges. [Ledger](TEST_LEDGER.md).
+1. **Ship the instrumented internal TestFlight build from `b1440b7b` and run the physical-iPhone timing matrix.** *Why now:* the 200 ms gate is the open launch blocker, and build 182 can't produce qualifying samples. Cover cold and warm starts, Wi-Fi and cellular, immediate taps after a change, and targeted searches, per [the acceptance doc](../qa/instant-trade-acceptance.md). `eas` must be logged in as mattmurf77.
 2. Resolve #584's KTC zero-weight pin decision; parser restoration and later blend activation remain separate operations.
 3. Hold release-only #456 until 2026-11-18; supply/validate the store install destination at the intended release.
 4. Complete platform proof/legacy-entry cleanup and installed-build checks before changing the landing flag; [runbook](../docs/runbook.md).
-5. Complete store/provider/device and enforcement evidence before enabling subscriptions, referral, D1 or tips. Code presence is distinct from activation.
+5. Complete store/provider/device and enforcement evidence before enabling subscriptions, referral, D1 or tips. Code presence is distinct from activation. Purchase restore still needs verification.
 6. Address the separate board-history deletion race and wider private deck export filtering; scrub/reader merges do not prove these complete.
-7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state.
+7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state. Also confirm `trade.prepared_inventory` (on in production) is the intended narrow scope, since the launch decisions keep broad prepared inventory off.
 
 
 ## 2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on
