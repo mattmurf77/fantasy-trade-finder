@@ -1326,6 +1326,12 @@ def _delete_user_data(sleeper_user_id: str,
         res = conn.execute(update(history).where(history.c.owner_user_id.in_(user_ids))
                            .values(owner_user_id=None))
         counts["league_roster_history_anonymized"] = res.rowcount or 0
+        # A behavioral profile derived from public league history
+        # (docs/plans/manager-profiles/), keyed on the league identity. Deleted
+        # outright, not anonymized: a profile with no person is meaningless.
+        profiles = db.manager_profiles_table
+        res = conn.execute(delete(profiles).where(profiles.c.owner_id.in_(user_ids)))
+        counts["manager_profiles_deleted"] = res.rowcount or 0
         referrals = db.referrals_table
         # NULL the invitee first; per-row sender tombstones avoid collisions
         # in the unique sender/invitee index after several account deletions.
@@ -1490,6 +1496,7 @@ _EXPORT_TABLES: tuple = (
     ("recorded_picks", "recorded_picks_table", "recorded_by", ()),
     ("draft_picks", "draft_picks_table", "assigned_by", ()),
     ("league_roster_history", "league_roster_history_table", "owner_user_id", ()),
+    ("manager_profiles", "manager_profiles_table", "owner_id", ()),
     ("prepared_trade_inventories", "prepared_trade_inventories_table", "user_id",
      ("adoption_token", "payload_json")),
     ("prepared_trade_manifests_v2", "prepared_trade_manifests_v2_table", "user_id",

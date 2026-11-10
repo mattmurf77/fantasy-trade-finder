@@ -353,3 +353,42 @@ def test_owned_pick_sync_without_payloads_still_self_fetches(harness):
 
     assert calls.get("rosters") == 1, calls
     assert calls.get("meta") == 1, calls
+
+
+# ---------------------------------------------------------------------------
+# market.manager_profiles (docs/plans/manager-profiles/) — rides the same
+# `transactions` sweep; the flag gates the daemon wiring.
+# ---------------------------------------------------------------------------
+
+def _profile_rows():
+    return (len(db_module.load_manager_profiles(LEAGUE_ID)),
+            len(db_module.load_sleeper_waiver_moves(LEAGUE_ID)))
+
+
+def test_manager_profiles_off_adds_no_calls_and_no_rows(harness):
+    client, calls = harness
+    record_sleeper_trades([dict(CAPTURED_TRADE)])
+    assert not server.is_enabled("market.manager_profiles")   # ships dark
+    assert _init(client, LEAGUE_ID).status_code == 200
+    assert calls.get("transactions", 0) <= 2, calls
+    assert _profile_rows() == (0, 0)
+
+
+def test_manager_profiles_on_backfills_once_and_reuses_shared_reads(harness, monkeypatch):
+    client, calls = harness
+    record_sleeper_trades([dict(CAPTURED_TRADE)])
+    real = server.is_enabled
+    monkeypatch.setattr(server, "is_enabled",
+                        lambda k: True if k == "market.manager_profiles" else real(k))
+
+    assert _init(client, LEAGUE_ID).status_code == 200
+    # One-time season backfill for the profile capture; nothing else extra.
+    assert calls.get("transactions") == len(trades_service.WEEKS), calls
+    assert calls.get("rosters") == 1 and calls.get("meta") == 1, calls
+    # One profile per owned roster, keyed on the roster owner.
+    owners = {r["owner_id"] for r in db_module.load_manager_profiles(LEAGUE_ID)}
+    assert owners == {USER_ID, OPP_ID}
+
+    calls.clear()
+    assert _init(client, LEAGUE_ID).status_code == 200
+    assert calls.get("transactions", 0) <= 2, calls     # incremental again

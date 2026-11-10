@@ -1,3 +1,10 @@
+## 2026-11-10 — Manager profiles capture (built dark, branch `feat/manager-profiles`)
+
+- Local Python 3.12 venv, branch cut from `origin/main` d6fc338f. **Full suite: 13740 passed, 43 skipped, 0 failed** (12m14s). Required selection `-k "sleeper or roster or profile"`: **916 passed, 4 skipped**.
+- New `backend/tests/test_manager_profiles.py` (23, committed synthetic fixture `fixtures/sleeper/manager-profiles/`, `_opener` seam, no network) + 2 in `test_session_init_sleeper_calls.py` (flag off: no extra calls, no rows; flag on: one 18-leg backfill, one rosters + one meta read, then ≤2 legs).
+- Named sabotages, each red then reverted: **S1** owner-only attribution (co-owner claim dropped) → 3 red; **S2** `sweep_weeks` ignores the flag → 5 red incl. the existing init budget test; **S3** lossy backfill still writes profiles → 1 red.
+- Five flag fixtures needed the new key to keep the `test_seed_ui_test_db` mirror tests green. No simulator, no TestFlight (backend-only capture). [Scope](../docs/plans/manager-profiles/scope.md)
+
 ## 2026-11-07 — First-page polling failure recovery
 
 - Seven-line screen correction: at the existing final paged status failure, an empty deck leaves its running spinner and shows the existing explicit failure/retry. Held cards, job authority, backend work, exact repeat request and network budgets remain unchanged.

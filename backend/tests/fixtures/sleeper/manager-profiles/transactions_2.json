@@ -1,0 +1,32 @@
+[
+ {
+  "adds": {
+   "1003": 1
+  },
+  "consenter_ids": [
+   1
+  ],
+  "created": 1790099999000,
+  "creator": "9000000000000000001",
+  "draft_picks": [],
+  "drops": {
+   "1006": 1
+  },
+  "leg": 2,
+  "metadata": {
+   "notes": "Your waiver claim was processed successfully!"
+  },
+  "roster_ids": [
+   1
+  ],
+  "settings": {
+   "seq": 1,
+   "waiver_bid": 50
+  },
+  "status": "complete",
+  "status_updated": 1790100000000,
+  "transaction_id": "7000000000000000031",
+  "type": "waiver",
+  "waiver_budget": []
+ }
+]
