@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roster-first setup for Find a Trade — design lab</title>
+<style>
+  /* Chalkline tokens — mobile/src/theme/chalkline.ts + colors.ts (position/tier hexes are data encodings) */
+  :root{
+    --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+    --line:#262C35; --lineStrong:#3D4654; --lineA11y:#59647A;
+    --base:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+    --ice:#56D9EC; --iceOn:#071013; --flare:#F0508C;
+    --warn:#F59E0B;
+    --qb:#f97316; --rb:#22c55e; --wr:#3b82f6; --te:#a855f7;
+    --t4:#f87171; --t3:#e879f9; --t2:#fbbf24; --t1:#2dd4bf; --t2nd:#38bdf8; --t3rd:#f472b6; --t4th:#a3e635; --tw:#7a7f96;
+    --xs:4px; --sm:8px; --md:12px; --lg:16px; --xl:24px; --xxl:32px; --xxxl:48px;
+    --rxs:2px; --rsm:4px; --rmd:8px;
+    --display:"Barlow Condensed","Arial Narrow",sans-serif;
+    --ui:"Archivo","Helvetica Neue",Arial,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink0);color:var(--base);font-family:var(--ui);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1200px;margin:0 auto;padding:var(--xxl) var(--lg) 96px}
+  h1,h2,h3{font-family:var(--display);font-weight:700;letter-spacing:.02em;text-transform:uppercase;margin:0}
+  h1{font-size:40px} h2{font-size:26px;margin:var(--xxxl) 0 var(--sm)} h3{font-size:18px;margin:var(--lg) 0 var(--sm)}
+  p{margin:0 0 var(--md)} a{color:var(--ice)}
+  code{font-family:var(--mono);font-size:12px;background:var(--ink2);border:1px solid var(--line);border-radius:var(--rxs);padding:1px 5px}
+  .lede{color:var(--dim);max-width:78ch}
+  .tags{display:flex;flex-wrap:wrap;gap:var(--sm);margin:var(--lg) 0 var(--xl)}
+  .tag{font-size:11px;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--lineStrong);border-radius:var(--rxs);padding:3px 8px;color:var(--dim)}
+  .tag.ice{border-color:var(--ice);color:var(--ice)} .tag.warn{border-color:var(--warn);color:var(--warn)}
+  .note{border:1px solid var(--line);border-left:3px solid var(--warn);background:var(--ink1);border-radius:var(--rmd);padding:var(--lg);margin:var(--lg) 0}
+  .note.ice{border-left-color:var(--ice)}
+  .note h4{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:0 0 var(--sm)}
+  .note p:last-child{margin:0}
+  table{width:100%;border-collapse:collapse;margin:var(--lg) 0;font-size:13.5px}
+  th,td{text-align:left;padding:var(--sm) var(--md);border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);font-weight:600}
+
+  /* frames */
+  .frames{display:flex;flex-wrap:wrap;gap:var(--xl);margin:var(--lg) 0;align-items:flex-start}
+  .frame{width:340px}
+  .frame figcaption{font-size:12px;color:var(--dim);margin-top:var(--sm);line-height:1.45}
+  .frame figcaption b{color:var(--base)}
+  .label{display:inline-block;font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:2px 6px;border-radius:var(--rxs);margin-bottom:var(--sm);border:1px solid var(--lineStrong);color:var(--dim)}
+  .label.cap{border-color:var(--ice);color:var(--ice)}
+  .shot{width:340px;border:1px solid var(--line);border-radius:var(--rmd);display:block}
+  .phone{width:340px;height:700px;background:var(--ink0);border:1px solid var(--lineStrong);border-radius:var(--rmd);overflow:hidden;position:relative;display:flex;flex-direction:column}
+  .status{height:28px;flex:none}
+  .hdr{padding:0 var(--lg) var(--md);border-bottom:1px solid var(--line);flex:none}
+  .hdr .back{font-size:13px;color:var(--dim);margin-bottom:var(--sm)}
+  .hdr .tick{font-size:11px;letter-spacing:.088em;text-transform:uppercase;color:var(--dim);font-weight:600}
+  .hdr h3{margin:2px 0 4px;font-size:22px}
+  .hdr .sub{font-size:13px;color:var(--dim);line-height:1.4}
+  .counter{display:flex;gap:var(--md);font-family:var(--mono);font-size:12px;color:var(--dim);padding:var(--sm) var(--lg);border-bottom:1px solid var(--line);flex:none}
+  .counter b{color:var(--base);font-weight:600}
+  .guard{font-size:12px;color:var(--warn);padding:var(--sm) var(--lg);border-bottom:1px solid var(--line);flex:none}
+  .body{flex:1;overflow:auto;padding-bottom:var(--md)}
+  .sec{display:flex;align-items:center;gap:var(--sm);padding:var(--md) var(--lg) var(--xs);font-size:11px;letter-spacing:.088em;text-transform:uppercase;color:var(--dim);font-weight:600}
+  .sec .bar{width:3px;height:12px;border-radius:1px}
+  .sec .n{font-family:var(--mono);color:var(--faint);margin-left:auto;letter-spacing:0}
+  .row{display:flex;align-items:center;gap:var(--sm);padding:7px var(--lg);border-bottom:1px solid var(--line)}
+  .row .dot{width:8px;height:8px;border-radius:var(--rxs);flex:none}
+  .row .who{flex:1;min-width:0}
+  .row .nm{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .mt{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .row.inert .nm,.row.inert .mt{color:var(--faint)}
+  .row .inertnote{font-size:11px;color:var(--faint)}
+  .seg{display:flex;border:1px solid var(--lineStrong);border-radius:var(--rsm);overflow:hidden;flex:none}
+  .seg button{all:unset;cursor:pointer;display:flex;align-items:center;gap:3px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--dim);padding:6px 7px;min-width:20px;justify-content:center}
+  .seg button+button{border-left:1px solid var(--lineStrong)}
+  .seg button.on{background:var(--ink3);color:var(--base);box-shadow:inset 0 -2px 0 var(--base)}
+  .seg svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2}
+  .foot{flex:none;border-top:1px solid var(--line);padding:var(--md) var(--lg) var(--lg);background:var(--ink0);display:flex;flex-direction:column;gap:var(--sm)}
+  .btn{all:unset;cursor:pointer;text-align:center;background:var(--ice);color:var(--iceOn);font-weight:700;font-size:15px;border-radius:var(--rsm);padding:12px}
+  .btn.ghost{background:transparent;color:var(--dim);font-weight:600;font-size:13px;padding:4px}
+  .btn.sec2{background:transparent;color:var(--base);border:1px solid var(--lineStrong)}
+  /* rank */
+  .tabs{display:flex;gap:var(--xs);padding:var(--sm) var(--lg);border-bottom:1px solid var(--line);flex:none}
+  .tabs span{font-size:12px;font-weight:600;padding:5px 10px;border-radius:var(--rsm);color:var(--dim);border:1px solid var(--line)}
+  .tabs span.on{color:var(--base);border-color:var(--base)}
+  .tabs span.done{color:var(--faint)}
+  .tabs span.skip{color:var(--faint);text-decoration:line-through}
+  .hint{font-size:13px;color:var(--dim);padding:var(--md) var(--lg) var(--sm)}
+  .chips{display:grid;grid-template-columns:1fr 1fr;gap:var(--sm);padding:0 var(--lg)}
+  .chip{border:1px solid var(--lineStrong);border-radius:var(--rsm);padding:8px 10px;background:var(--ink1);position:relative;cursor:pointer}
+  .chip .nm{font-size:13px;font-weight:600}
+  .chip .mt{font-family:var(--mono);font-size:11px;color:var(--dim);display:flex;gap:6px;align-items:center}
+  .chip .tdot{width:7px;height:7px;border-radius:var(--rxs);display:inline-block}
+  .chip.on{border-color:var(--ice)}
+  .chip .num{position:absolute;top:6px;right:8px;font-family:var(--mono);font-weight:600;font-size:13px;color:var(--ice)}
+  .progress{font-family:var(--mono);font-size:11px;color:var(--dim);padding:var(--md) var(--lg) 0}
+  .row2{display:flex;gap:var(--sm)} .row2 .btn{flex:1}
+  /* done */
+  .done{padding:var(--xl) var(--lg);display:flex;flex-direction:column;gap:var(--lg)}
+  .stat{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:var(--rmd);background:var(--ink1)}
+  .stat div{padding:var(--md);text-align:center}
+  .stat div+div{border-left:1px solid var(--line)}
+  .stat b{display:block;font-family:var(--display);font-size:30px;line-height:1}
+  .stat span{font-size:11px;letter-spacing:.088em;text-transform:uppercase;color:var(--dim)}
+  .list{border:1px solid var(--line);border-radius:var(--rmd);background:var(--ink1)}
+  .list .li{padding:var(--sm) var(--md);font-size:13px;display:flex;justify-content:space-between;border-bottom:1px solid var(--line)}
+  .list .li:last-child{border-bottom:0}
+  .list .li span{color:var(--dim);font-family:var(--mono);font-size:11px}
+  .building{display:flex;align-items:center;gap:var(--sm);font-size:13px;color:var(--dim)}
+  .building i{width:8px;height:8px;border-radius:var(--rxs);background:var(--ice)}
+  /* cards */
+  .card{margin:var(--md) var(--lg);background:var(--ink2);border:1px solid var(--line);border-radius:var(--rmd);padding:var(--md) var(--lg)}
+  .card .tick{font-size:11px;letter-spacing:.088em;text-transform:uppercase;color:var(--dim);font-weight:600}
+  .card .t{font-size:16px;font-weight:600;margin:2px 0 4px}
+  .card .b{font-size:13px;color:var(--dim);margin-bottom:var(--md)}
+  .card .acts{display:flex;align-items:center;gap:var(--lg)}
+  .card .cta{color:var(--ice);font-weight:700;font-size:14px}
+  .card .nn{color:var(--dim);font-size:13px}
+  .ghostdeck{margin:var(--md) var(--lg);height:300px;border:1px dashed var(--line);border-radius:var(--rmd);display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:12px;text-align:center;padding:var(--lg)}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:var(--ink2);border-top:1px solid var(--lineStrong);border-radius:var(--rmd) var(--rmd) 0 0;padding:var(--lg)}
+  .sheet .grab{width:36px;height:4px;background:var(--lineStrong);border-radius:2px;margin:0 auto var(--md)}
+  .sheet .srow{display:flex;justify-content:space-between;align-items:center;padding:var(--md) 0;border-bottom:1px solid var(--line);font-size:14px}
+  .sheet .srow span{color:var(--dim);font-size:12px}
+  .sheet .srow.new{box-shadow:inset 3px 0 0 var(--flare);padding-left:var(--md)}
+  .scrim{position:absolute;inset:0;background:rgba(12,14,17,.72)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Roster-first setup</h1>
+<p class="lede">A lab for one question: <b>what does the first Find a Trade in a league look like when it starts from your own roster</b> (who you'd move, who you'd keep, and how you order your own players) instead of a market-value deck? Binding docs: <code>docs/plans/roster-first-trade-setup/</code> (<a href="../../docs/plans/roster-first-trade-setup/prd.md">prd.md</a>, <a href="../../docs/plans/roster-first-trade-setup/scope.md">scope.md</a>, <a href="../../docs/plans/roster-first-trade-setup/analytics.md">analytics.md</a>).</p>
+<div class="tags">
+  <span class="tag ice">in flight · awaiting operator review</span>
+  <span class="tag">flag trades.roster_setup (new, default off)</span>
+  <span class="tag">mobile only</span>
+  <span class="tag warn">frames 1–4 are reconstructions</span>
+</div>
+
+<div class="note">
+  <h4>Capture vs reconstruction (mockups/CLAUDE.md interim posture)</h4>
+  <p>The setup screen is new, so it has no capture. §0 embeds the two real captures it builds on, from the 2026-08-11 freeze. <code>quick-rank/step--clicked.png</code> is <b>still exact</b>: <code>QuickRankScreen.tsx</code> has 0 commits since the capture date. <code>trades/populated.png</code> is <b>stale</b>: <code>TradesScreen.tsx</code> has 55 commits since and <code>TradeDnaSheet.tsx</code> has 6, so TradesHome today differs from it. Every frame in §1–§4 is a <b>labelled reconstruction</b> drawn from the PRD, not from the running app. Player names are illustrative.</p>
+</div>
+
+<h2>0 · Today (real captures)</h2>
+<div class="frames">
+  <figure class="frame"><span class="label cap">capture · 2026-08-11 · stale</span>
+    <img class="shot" src="../../screens/mobile/trades/populated.png" alt="Trades deck, populated, capture 2026-08-11">
+    <figcaption><b>Trades, first deck.</b> Today a new user lands here: a deck priced at consensus for every asset they haven't ranked. Preferences live behind the Trade DNA sheet. The setup step goes <i>in front of</i> this deck, which keeps loading underneath.</figcaption></figure>
+  <figure class="frame"><span class="label cap">capture · 2026-08-11 · exact</span>
+    <img class="shot" src="../../screens/mobile/quick-rank/step--clicked.png" alt="Quick Rank step with clicked chips, capture 2026-08-11">
+    <figcaption><b>Quick Rank, the reused grammar.</b> Tap chips in order; the number stamps the rank and unclicked chips are appended. Step 2 below keeps this exactly but walks <i>positions</i> over your roster instead of <i>tiers</i> over the whole pool.</figcaption></figure>
+</div>
+
+<h2>1 · Step 1 — roster toggle view</h2>
+<p class="lede">Every rostered player and owned pick, grouped QB / RB / WR / TE / Picks. Each asset has three states. Each tap autosaves through the existing <code>POST /api/league/asset-prefs</code>. The control uses neutral fills with a glyph plus an underline for the selected state, never color alone (#360 R-15). Ice is reserved for the one primary action.</p>
+<div class="frames">
+  <figure class="frame"><span class="label">reconstruction</span>
+    <div class="phone" id="toggle">
+      <div class="status"></div>
+      <div class="hdr"><div class="tick">Find a Trade · Dynasty Degenerates</div><h3>Your roster</h3><div class="sub">Tell us who's available. We'll build trades around it.</div></div>
+      <div class="counter"><span><b id="cMove">0</b> MOVE</span><span><b id="cKeep">0</b> KEEP</span><span><b id="cOpen">0</b> OPEN</span></div>
+      <div class="body" id="rosterBody"></div>
+      <div class="foot"><button class="btn">Continue</button><button class="btn ghost">Skip for now</button></div>
+    </div>
+    <figcaption><b>A · First use.</b> Pre-filled from saved tags: an existing untouchable shows as Keep. The rows are clickable in this lab and the counter updates. The 2029 3rd sits beyond <code>picks_pool_cap</code>, so it is greyed with "not in trade search": it saves, but the engine never sees it (prd §4.2).</figcaption></figure>
+
+  <figure class="frame"><span class="label">reconstruction</span>
+    <div class="phone">
+      <div class="status"></div>
+      <div class="hdr"><div class="tick">Find a Trade · Dynasty Degenerates</div><h3>Your roster</h3><div class="sub">Tell us who's available. We'll build trades around it.</div></div>
+      <div class="counter"><span><b>2</b> MOVE</span><span><b>14</b> KEEP</span><span><b>11</b> OPEN</span></div>
+      <div class="guard">Keeping 14 of 27. Fewer trades will fit.</div>
+      <div class="body" id="guardBody"></div>
+      <div class="foot"><button class="btn">Continue</button><button class="btn ghost">Skip for now</button></div>
+    </div>
+    <figcaption><b>B · Keep guard.</b> Above 40% Keep (non-pick), an informational line appears in warn, the semantic for a caution. It never blocks Continue. Legacy arms hard-exclude untouchables, so this is the starvation warning (prd §11).</figcaption></figure>
+</div>
+
+<table>
+  <tr><th>State</th><th>Stored as</th><th>Engine reads it as</th></tr>
+  <tr><td>Move</td><td><code>asset_preferences.list_type='trade_block'</code> <b>(new value, Q1)</b></td><td>Give-side twin of <code>targets</code>: owner priority +outgoing, +0.1 interest when selling; bilateral +0.3 declared, joins the <code>declared_intent</code> path. Flag-gated.</td></tr>
+  <tr><td>Keep</td><td><code>list_type='untouchable'</code> (existing, Q2)</td><td>Unchanged. Owner-v1 releases him only for a same-position market upgrade; legacy paths hard-exclude him.</td></tr>
+  <tr><td>—</td><td>no row (<code>list:'none'</code>)</td><td>Nothing. The pre-existing behaviour.</td></tr>
+</table>
+
+<h2>2 · Step 2 — rank my roster</h2>
+<p class="lede">The same chip grammar as Quick Rank, but scoped to <b>your roster at one position</b>. A position with fewer than 2 players is skipped. <b>Save &amp; next</b> posts <code>/api/rankings/reorder {position, ordered_ids}</code> with only these IDs and no <code>via</code>. That permutes only these players' Elos, and each becomes an <code>explicit</code> source for the engine. About 21 taps plus 4 saves for a 28-player roster; Done ranking exits at any point.</p>
+<div class="frames">
+  <figure class="frame"><span class="label">reconstruction</span>
+    <div class="phone">
+      <div class="status"></div>
+      <div class="hdr"><div class="back">‹ Roster</div><div class="tick">Step 2 of 2 · optional</div><h3>Rank your RBs</h3><div class="sub">Tap in the order you value them. Untapped players keep their current order.</div></div>
+      <div class="tabs"><span class="done">QB ✓</span><span class="on">RB</span><span>WR</span><span>TE</span></div>
+      <div class="progress">3 OF 8 TAPPED</div>
+      <div class="hint">Your board today: consensus for 6 of 8.</div>
+      <div class="chips" id="chips"></div>
+      <div style="flex:1"></div>
+      <div class="foot"><div class="row2"><button class="btn sec2">Done ranking</button><button class="btn">Save &amp; next</button></div></div>
+    </div>
+    <figcaption><b>C · RB, mid-walk.</b> The tier dot is the player's current tier color (<code>tierForElo</code>). Tapping order may cross tiers; that is the point ("my RB4 is better than my RB2"). The "consensus for 6 of 8" line is the honest version of why this matters: unranked players are priced at market. The chips are clickable in this lab.</figcaption></figure>
+
+  <figure class="frame"><span class="label">reconstruction</span>
+    <div class="phone">
+      <div class="status"></div>
+      <div class="hdr"><div class="back">‹ Roster</div><div class="tick">Step 2 of 2 · optional</div><h3>Rank your TEs</h3><div class="sub">Tap in the order you value them.</div></div>
+      <div class="tabs"><span class="done">QB ✓</span><span class="done">RB ✓</span><span class="done">WR ✓</span><span class="on">TE</span></div>
+      <div class="progress">LAST POSITION</div>
+      <div class="chips" style="margin-top:var(--md)">
+        <div class="chip on"><span class="num">1</span><div class="nm">Brock Bowers</div><div class="mt"><i class="tdot" style="background:var(--t2)"></i>LV · 23</div></div>
+        <div class="chip on"><span class="num">2</span><div class="nm">Tucker Kraft</div><div class="mt"><i class="tdot" style="background:var(--t2nd)"></i>GB · 25</div></div>
+        <div class="chip"><div class="nm">Cade Otton</div><div class="mt"><i class="tdot" style="background:var(--tw)"></i>TB · 26</div></div>
+      </div>
+      <div style="flex:1"></div>
+      <div class="foot"><div class="row2"><button class="btn sec2">Done ranking</button><button class="btn">Save &amp; finish</button></div></div>
+    </div>
+    <figcaption><b>D · Last position.</b> 3 TEs: 2 taps fix the order, and the third is implied. The primary label changes to "Save &amp; finish". Picks are not in the walk in v1: owned picks are priced at consensus for every user (<code>server.py:20638</code>), so a personal pick order would have nowhere to land (Q5).</figcaption></figure>
+</div>
+
+<div class="note">
+  <h4>What this step can't capture (Q4)</h4>
+  <p>Reordering only <b>swaps</b> values among your own players. It can say "I like my RB4 more than the market does, relative to my RB2", but never "I value my whole roster above market", which is what the eval's "giving too much value" passes suggest. The v2 candidate is one tier question per position ("Where does your best RB sit?"), written through the Quick Set tier path.</p>
+</div>
+
+<h2>3 · Done — the deck regenerates once</h2>
+<div class="frames">
+  <figure class="frame"><span class="label">reconstruction</span>
+    <div class="phone">
+      <div class="status"></div>
+      <div class="hdr"><div class="tick">Find a Trade · Dynasty Degenerates</div><h3>You're set</h3></div>
+      <div class="done">
+        <div class="stat"><div><b>4</b><span>to move</span></div><div><b>6</b><span>to keep</span></div><div><b>21</b><span>ranked</span></div></div>
+        <div class="list">
+          <div class="li">Kenneth Walker III <span>MOVE</span></div>
+          <div class="li">Courtland Sutton <span>MOVE</span></div>
+          <div class="li">2027 2nd · via Bob <span>MOVE</span></div>
+          <div class="li">+1 more</div>
+        </div>
+        <div class="building"><i></i>Building trades from your roster.</div>
+        <div style="font-size:12px;color:var(--faint)">Change any of this later in Trade DNA › Your roster.</div>
+      </div>
+      <div style="flex:1"></div>
+      <div class="foot"><button class="btn">See trades</button></div>
+    </div>
+    <figcaption><b>E · Completed.</b> On exit the onboarding bus gets source <code>'roster_setup'</code>, and TradesHome's focus effect forces one fresh job and diffs it against the deck that loaded underneath. No changes means "Nothing changed. Your trades use consensus values." and no regeneration.</figcaption></figure>
+</div>
+
+<h2>4 · Return paths and re-prompt</h2>
+<div class="frames">
+  <figure class="frame"><span class="label">reconstruction</span>
+    <div class="phone">
+      <div class="status"></div>
+      <div class="hdr"><div class="tick">Trades</div><h3>Find a Trade</h3></div>
+      <div class="card"><div class="tick">Your roster</div><div class="t">These trades guess who you'd move.</div><div class="b">Mark who's available and who's staying. About a minute.</div><div class="acts"><span class="cta">Set up your roster →</span><span class="nn">Not now</span></div></div>
+      <div class="ghostdeck">deck renders below, unchanged<br>(not drawn — see the §0 capture)</div>
+    </div>
+    <figcaption><b>F · After a skip.</b> The <code>QuickSetPromptCard</code> card grammar with its snooze ladder: Not now → one re-offer in a later session → retired. Never dismissed forever. Impression via existing <code>prompt_shown {surface:'roster_setup_card'}</code>.</figcaption></figure>
+
+  <figure class="frame"><span class="label">reconstruction</span>
+    <div class="phone">
+      <div class="status"></div>
+      <div class="hdr"><div class="tick">Trades</div><h3>Find a Trade</h3></div>
+      <div class="card"><div class="tick">Roster changed</div><div class="t">3 new on your roster.</div><div class="b">Ja'Tavion Sanders, Luther Burden III, 2026 1.07 pick → set them.</div><div class="acts"><span class="cta">Set them →</span><span class="nn">Not now</span></div></div>
+      <div class="ghostdeck">deck renders below, unchanged</div>
+    </div>
+    <figcaption><b>G · Roster gained assets.</b> Compared with <code>seenAssetIds</code> in the device store. It opens Step 1 filtered to the new assets only. Losing assets never prompts: their tags go inert because the engine only meets IDs on a roster.</figcaption></figure>
+
+  <figure class="frame"><span class="label">reconstruction</span>
+    <div class="phone">
+      <div class="status"></div>
+      <div class="hdr"><div class="tick">Trades</div><h3>Find a Trade</h3></div>
+      <div class="ghostdeck">deck</div>
+      <div class="scrim"></div>
+      <div class="sheet"><div class="grab"></div>
+        <div class="tick" style="font-size:11px;letter-spacing:.088em;text-transform:uppercase;color:var(--dim);font-weight:600">Trade DNA</div>
+        <div class="srow"><div>Outlook</div><span>Contending</span></div>
+        <div class="srow"><div>Positions</div><span>Chasing WR · Shopping RB</span></div>
+        <div class="srow new"><div>Your roster</div><span>4 to move · 6 to keep · <b style="color:var(--ice)">Edit</b></span></div>
+        <div class="srow"><div>Off the table</div><span>Bijan Robinson +5</span></div>
+      </div>
+    </div>
+    <figcaption><b>H · Manual return.</b> One new row in the <code>full</code> Trade DNA sheet. The flare inset marks the row this lab adds; it is a highlight for review, not part of the shipped UI. "Off the table" stays because untouchables can also be set from cards.</figcaption></figure>
+</div>
+
+<h2>Decisions this lab does not make</h2>
+<p class="lede">Q1–Q6 in <a href="../../docs/plans/roster-first-trade-setup/prd.md">prd.md §0</a>: a new <code>trade_block</code> list vs mapping onto existing prefs; Keep = untouchable; nudging league-mates; ordering vs absolute tiers; pick ranking; device vs server completion state.</p>
+
+</div>
+<script>
+  const SVG = {
+    move:'<svg viewBox="0 0 12 12"><path d="M2 6h7M6.5 3l3 3-3 3"/></svg>',
+    open:'<svg viewBox="0 0 12 12"><path d="M3 6h6"/></svg>',
+    keep:'<svg viewBox="0 0 12 12"><rect x="2.5" y="5.5" width="7" height="5" rx="1"/><path d="M4 5.5V4a2 2 0 0 1 4 0v1.5"/></svg>'
+  };
+  const POS = {QB:'--qb',RB:'--rb',WR:'--wr',TE:'--te',Picks:'--t1'};
+  const R = [
+    ['QB','Jayden Daniels','WAS · 25','--t3','keep'],['QB','Baker Mayfield','TB · 31','--t2nd','open'],['QB','Tyler Shough','NO · 27','--tw','open'],
+    ['RB','Bijan Robinson','ATL · 24','--t4','keep'],['RB','Kenneth Walker III','SEA · 25','--t2nd','move'],['RB','Chuba Hubbard','CAR · 26','--t3rd','open'],['RB','Quinshon Judkins','CLE · 22','--t2','open'],
+    ['WR',"Ja'Marr Chase",'CIN · 26','--t4','keep'],['WR','Courtland Sutton','DEN · 30','--t3rd','move'],['WR','Rome Odunze','CHI · 23','--t2','open'],['WR','Jalen McMillan','TB · 24','--tw','open'],
+    ['TE','Brock Bowers','LV · 23','--t2','keep'],['TE','Cade Otton','TB · 26','--tw','open'],
+    ['Picks','2026 1st · own','1.07 · early','--t1','keep'],['Picks','2027 2nd · via Bob','mid','--t2nd','move'],['Picks','2029 3rd · own','beyond cap','--tw','open',true]
+  ];
+  function seg(state,id){return '<div class="seg" data-id="'+id+'">'+['move','open','keep'].map(s=>'<button data-s="'+s+'" class="'+(s===state?'on':'')+'" aria-label="'+s+'">'+SVG[s]+(s==='open'?'':s)+'</button>').join('')+'</div>';}
+  function render(el,rows,interactive){
+    let html='',cur=null;
+    rows.forEach((r,i)=>{
+      if(r[0]!==cur){cur=r[0];const n=rows.filter(x=>x[0]===cur).length;html+='<div class="sec"><i class="bar" style="background:var('+POS[cur]+')"></i>'+cur+'<span class="n">'+n+'</span></div>';}
+      html+='<div class="row'+(r[5]?' inert':'')+'"><i class="dot" style="background:var('+r[3]+')"></i><div class="who"><div class="nm">'+r[1]+'</div><div class="mt">'+r[2]+'</div>'+(r[5]?'<div class="inertnote">not in trade search</div>':'')+'</div>'+seg(r[4],i)+'</div>';
+    });
+    el.innerHTML=html;
+    if(!interactive)return;
+    el.querySelectorAll('.seg button').forEach(b=>b.addEventListener('click',()=>{const g=b.parentNode;R[+g.dataset.id][4]=b.dataset.s;g.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));count();}));
+  }
+  function count(){const c={move:0,keep:0,open:0};R.forEach(r=>c[r[4]]++);cMove.textContent=c.move;cKeep.textContent=c.keep;cOpen.textContent=c.open;}
+  render(document.getElementById('rosterBody'),R,true);count();
+  const G=R.map(r=>r.slice());G.forEach((r,i)=>{if(r[0]!=='Picks')r[4]=(i===4||i===8)?'move':'keep';});G[2][4]='open';G[12][4]='open';
+  render(document.getElementById('guardBody'),G,false);
+  // rank chips
+  const RB=[['Bijan Robinson','ATL · 24','--t4'],['Quinshon Judkins','CLE · 22','--t2'],['Kenneth Walker III','SEA · 25','--t2nd'],['Chuba Hubbard','CAR · 26','--t3rd'],['Bhayshul Tuten','JAX · 23','--t3rd'],['Rhamondre Stevenson','NE · 27','--t4th'],['Kendre Miller','NO · 23','--tw'],['Tyler Allgeier','ATL · 25','--tw']];
+  let order=[0,1,3];
+  function chips(){const el=document.getElementById('chips');el.innerHTML=RB.map((p,i)=>{const k=order.indexOf(i);return '<div class="chip'+(k>=0?' on':'')+'" data-i="'+i+'">'+(k>=0?'<span class="num">'+(k+1)+'</span>':'')+'<div class="nm">'+p[0]+'</div><div class="mt"><i class="tdot" style="background:var('+p[2]+')"></i>'+p[1]+'</div></div>';}).join('');
+    el.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>{const i=+c.dataset.i;const k=order.indexOf(i);if(k>=0)order.splice(k,1);else order.push(i);chips();document.querySelector('.progress').textContent=order.length+' OF 8 TAPPED';}));}
+  chips();
+</script>
+</body>
+</html>
