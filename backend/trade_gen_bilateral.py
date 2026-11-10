@@ -338,14 +338,15 @@ class _Search(owner._Search):
         give_pool = list(dict.fromkeys([p for p in self.give_pins if p in viewer["roster"]] + self._pool(viewer, other)))
         receive_pool = list(dict.fromkeys([p for p in self.recv_pins if p in other["roster"]] + self._pool(other, viewer)))
         self.pools[member.user_id] = {"give": give_pool, "receive": receive_pool}
-        def anchors(pool, pins, exact=False):
+        def anchors(pool, pins, exact=False, allow_partial=False):
             if exact:
                 return [pins] if pins else []
             if pins:
-                return [(p,) for p in pins if p in pool] if partial else [pins]
+                return [(p,) for p in pins if p in pool] if allow_partial else [pins]
             return [(p,) for p in pool]
-        focal = [(g, r) for g in anchors(give_pool, self.give_pins, self.exact_give)
-                 for r in anchors(receive_pool, self.recv_pins)]
+        focal = [(g, r) for g in anchors(give_pool, self.give_pins, self.exact_give,
+                                        partial and not self.require_all_give)
+                 for r in anchors(receive_pool, self.recv_pins, allow_partial=partial)]
         def appeal(pair):
             give, receive = pair
             if any(p not in self.market for p in give + receive):
@@ -466,7 +467,8 @@ def _generate_with_search(search, *, ranker, version):
     with search.ts._cfg_override(search.config), search.ts.stud_tax_override("market"):
         for partial in (False, True):
             if partial:
-                if survivors or not ((len(search.give_pins) > 1 and not search.exact_give) or len(search.recv_pins) > 1):
+                if survivors or not ((len(search.give_pins) > 1 and not search.exact_give and not search.require_all_give)
+                                     or len(search.recv_pins) > 1):
                     break
                 report["partial_search"] = True
             streams = {m.user_id: iter(search.candidates(m, partial=partial)) for m in search.members}

@@ -185,7 +185,7 @@ class _Search:
                  opponent_sources=None, manager_preferences=None,
                  acquire_positions=None, trade_away_positions=None,
                  avoid_positions=None, pinned_give_players=None,
-                 pinned_receive_players=None, exact_give=False,
+                 pinned_receive_players=None, exact_give=False, require_all_give=False,
                  opponent_user_id=None, trade_intent=None, swap_positions=None,
                  lateral_scope=None, past_decision_keys=None,
                  exclusion_keys=None, max_cards=None, config=None, _check_current=None):
@@ -230,6 +230,7 @@ class _Search:
         self.give_pins = _ids(pinned_give_players)
         self.recv_pins = _ids(pinned_receive_players)
         self.exact_give = bool(exact_give)
+        self.require_all_give = bool(require_all_give)
         self.opponent_id = opponent_user_id
         self.intent = trade_intent
         self.swap = frozenset(swap_positions or ())
@@ -432,6 +433,8 @@ class _Search:
                          "omitted": [p for p in wanted if p not in actual]}
         out["coverage"] = "partial" if any(out[s]["omitted"] for s in ("give", "receive")) else "full"
         out["exact_give"] = self.exact_give
+        if self.require_all_give:
+            out["require_all_give"] = True
         return out
 
     def _decision(self, card, data, reason, eligible=False):
@@ -481,8 +484,9 @@ class _Search:
             return finish("assets_not_owned")
         if self.exact_give and give != self.give_pins:
             return finish("exact_give_mismatch")
-        for pins, ids in ((self.give_pins, give), (self.recv_pins, receive)):
-            if pins and (not set(pins) & set(ids) if partial else not set(pins) <= set(ids)):
+        for pins, ids, allow_partial in ((self.give_pins, give, partial and not self.require_all_give),
+                                         (self.recv_pins, receive, partial)):
+            if pins and (not set(pins) & set(ids) if allow_partial else not set(pins) <= set(ids)):
                 return finish("selection_mismatch")
         if any(self._position(p) in self.avoid for p in receive):
             return finish("avoided_position")
@@ -630,7 +634,8 @@ class _Search:
         give_pool = list(dict.fromkeys([p for p in self.give_pins if p in viewer["roster"]] + give_pool))
         recv_pool = list(dict.fromkeys([p for p in self.recv_pins if p in opponent["roster"]] + recv_pool))
         self.pools[member.user_id] = {"give": give_pool, "receive": recv_pool}
-        gp = self._packages(give_pool, self.give_pins, exact=self.exact_give, partial=partial)
+        gp = self._packages(give_pool, self.give_pins, exact=self.exact_give,
+                            partial=partial and not self.require_all_give)
         rp = self._packages(recv_pool, self.recv_pins, partial=partial)
         # Small structures first; broad shapes only when multiple requested
         # assets require them. Round robin partners is performed by caller.
@@ -654,7 +659,8 @@ def _authenticated_partial(card, search):
         return (selection["coverage"] == "partial"
             and tuple(selection["give"]["requested"]) == search.give_pins
             and tuple(selection["receive"]["requested"]) == search.recv_pins
-            and selection["exact_give"] == search.exact_give)
+            and selection["exact_give"] == search.exact_give
+            and selection.get("require_all_give", False) == search.require_all_give)
     return False
 
 
@@ -695,7 +701,7 @@ def generate_owner_trades(**kwargs):
     with search.ts._cfg_override(search.config), search.ts.stud_tax_override("market"):
         for partial in (False, True):
             if partial:
-                if survivors or not ((len(search.give_pins) > 1 and not search.exact_give)
+                if survivors or not ((len(search.give_pins) > 1 and not search.exact_give and not search.require_all_give)
                                      or len(search.recv_pins) > 1):
                     break
                 report["partial_search"] = True

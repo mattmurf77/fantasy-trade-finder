@@ -4578,7 +4578,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 13
+DECK_PIPELINE_VERSION = 14
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4714,6 +4714,7 @@ DECK_PIPELINE_PINS = {
     11: "8a3fa8db29d87e39",  # Evidence-bound bilateral v3 and private input capture.
     12: "3b5a7de53dd0081e",  # Frozen calibration suppression input seam; organic defaults preserved.
     13: "1939e93dc5fd7de5",  # Cooperative cancellation; current-job terms/order preserved.
+    14: "c35ce67a4434a981",  # Owner searches enforce every explicit give-all pin.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -13282,7 +13283,8 @@ def _run_trade_job(
                         "untouchables": list(untouchable_ids), "targets": list(target_ids),
                         "not_interested": list(not_interested_ids), "avoid_positions": avoid_positions},
                     pinned_give_players=pinned_give, pinned_receive_players=pinned_receive,
-                    opponent_user_id=opponent_user_id, trade_intent=trade_intent)
+                    opponent_user_id=opponent_user_id, trade_intent=trade_intent,
+                    **({"require_all_give": True} if pinned_give and pinned_give_mode == "all" else {}))
                 owner_request_evidence = _owner_selected_assignment(
                     owner_context, "organic", serve=owner_exclusive, exclusive=owner_exclusive)
                 owner_request_evidence.update(model_arm=owner_model,
