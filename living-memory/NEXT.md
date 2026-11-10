@@ -67,7 +67,7 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 4. Complete platform proof/legacy-entry cleanup and installed-build checks before changing the landing flag; [runbook](../docs/runbook.md).
 5. Complete store/provider/device and enforcement evidence before enabling subscriptions, referral, D1 or tips. Code presence is distinct from activation. Purchase restore still needs verification.
 6. Address the separate board-history deletion race and wider private deck export filtering; scrub/reader merges do not prove these complete.
-7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state. Also confirm `trade.prepared_inventory` (on in production) is the intended narrow scope, since the launch decisions keep broad prepared inventory off.
+7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state.
 
 
 ## 2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on
