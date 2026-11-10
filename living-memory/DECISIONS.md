@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-211 — Docs-only pushes skip Render through a build filter, not a `[skip render]` marker
+
+**Date:** 2026-11-10 · **Who:** operator (asked to replace the marker with a build filter).
+**Context:** Docs-only merges skipped the deploy with `[skip render]` in the commit message, per the feedback skill's ship guidance (18 commits on `main` since September). The marker has to be remembered on every docs merge, and an inherited one silently skipped a code release (PR #283, 2026-09-06). Without it, every docs merge restarts the single web instance.
+**Decision:** The web service gets a Render build filter whose `ignoredPaths` cover only folders the server never reads at runtime: docs, living memory, mockups, screens, archive, qa, scripts, reference, extension, git hooks, `.github`, `.claude`, the mobile source folders and the root Markdown files. `backend/`, `config/`, `web/`, `mobile/app.json` (read at runtime by `backend/app_version_policy.py`) and the build files always deploy. It is set through the Render API, because this dashboard-created service doesn't take settings from `render.yaml` (G-018), and mirrored in `render.yaml`. The three cron services keep no filter; rebuilding them is harmless.
+**Consequences:**
+- Docs and mobile-source merges no longer restart production; no one adds `[skip render]`.
+- A path that is unlisted deploys, so a missed folder costs a restart, never a skipped release.
+- A folder the server starts reading at runtime must come off the list in the same change.
+- Render still honors `[skip render]`, so merge messages still need checking for inherited markers.
+
 ## D-210 — A Shop send's Elo half is anchored by a `trade_decisions` row with `decision = "send"`, never a like
 
 **Date:** 2026-11-01 · **Who:** head-product (keep the Elo signal for Shop sends); head-eng (the anchor, and option A: the client tags the send); analytics-lead (one `trade_proposed` per recorded row, `props.source = "shop"`).

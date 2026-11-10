@@ -103,7 +103,7 @@ See [docs/CLAUDE.md](docs/CLAUDE.md) for the full table of update triggers.
 
 ## Conventions
 
-- **Always branch from `origin/main`** (2026-08-08): every new piece of work — bug fixes, features, agent worktrees — starts from a freshly fetched `origin/main`, never from whatever branch this checkout happens to be sitting on. Multiple sessions run concurrently in this repo and the checked-out branch is often stale. Ship = merge/push to `main` (Render auto-deploys; EAS → TestFlight).
+- **Always branch from `origin/main`** (2026-08-08): every new piece of work — bug fixes, features, agent worktrees — starts from a freshly fetched `origin/main`, never from whatever branch this checkout happens to be sitting on. Multiple sessions run concurrently in this repo and the checked-out branch is often stale. Ship = merge/push to `main` (Render auto-deploys, except documentation and mobile-source changes, which its build filter skips, so never add `[skip render]`; EAS → TestFlight).
 - Read `context.md` for project orientation; `docs/` is the source of truth for details.
 - DB lives in `data/trade_finder.db` (the stale legacy root copy was archived to `data/archive/` on 2026-06-10).
 - `config/features.json` drives feature flags consumed by both backend and clients.

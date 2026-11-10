@@ -210,6 +210,26 @@ or the dashboard), then deploy and read the live command back. **Rollback:** the
 As of 2026-10-24 the service reports **`autoDeploy: yes`**: every merge to `main` deploys at once. That
 supersedes the 2026-09-20 note above.
 
+### Build filter (2026-11-10)
+
+Since 2026-11-10 the service has a build filter (D-211). A push deploys unless **every** changed file matches
+one of its `ignoredPaths`: `docs/`, `living-memory/`, `mockups/`, `screens/`, `archive/`, `qa/`, `scripts/`,
+`reference/`, `extension/`, `githooks/`, `.github/`, `.claude/`, the mobile folders `src/`, `tests/`,
+`.maestro/`, `ios/`, `android/`, `assets/`, `scripts/` and `patches/`, and the root `README.md`, `CLAUDE.md`,
+`context.md`, `FEATURES.md` and `TRADE_ENGINE_BALANCE_ENGINEERING_BRIEF.md`. Everything the server reads
+still deploys: `backend/`, `config/`, `web/`, `mobile/app.json` (read by `backend/app_version_policy.py`), the
+other mobile root files and the build files (`render.yaml`, `build.sh`, `requirements.txt`, `run.py`).
+
+So documentation and mobile-source merges no longer restart the server, and nobody adds `[skip render]`.
+Render still honors that marker anywhere in a commit message, so one inherited into a code release's merge
+message would silently skip that release, as it did for PR #283 on 2026-09-06; check the full message.
+Before adding a folder to the list, confirm the server never reads it at runtime.
+
+The filter lives in the service settings, set through the Render API, because this dashboard-created
+service doesn't take settings from `render.yaml` (G-018); `render.yaml` mirrors it. **Change:**
+`PATCH /v1/services/srv-d7g37ftckfvc73a32gvg` with `{"buildFilter": {"paths": [], "ignoredPaths": [...]}}`,
+update `render.yaml` to match, then read it back. **Rollback:** the same call with `"ignoredPaths": []`.
+
 ### First-action latency release (2026-09-21)
 
 This backend release changes job admission, diagnostic preparation and incremental

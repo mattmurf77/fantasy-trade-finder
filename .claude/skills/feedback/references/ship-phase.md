@@ -60,8 +60,9 @@ Inspect the **complete proposed squash message**, not just its subject,
 for inherited deployment-skip markers. If an authorized runtime release was
 skipped, first verify service settings and absence of a duplicate/active deploy;
 then use a single exact-commit deployment API call, preserving auto-deploy and
-cache settings, and verify that source reaches LIVE. Intentionally skip Render
-for documentation-only release bookkeeping.
+cache settings, and verify that source reaches LIVE. Documentation-only
+bookkeeping skips Render on its own through the service's build filter
+(`docs/runbook.md` § Build filter); don't add `[skip render]`.
 
 Publish the reviewed release branch, create its PR against current main, verify
 every required check on its exact head, then merge through the normal PR flow.

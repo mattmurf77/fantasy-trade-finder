@@ -14,6 +14,40 @@ services:
     plan: standard
     buildCommand: chmod +x build.sh && ./build.sh
     startCommand: gunicorn run:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    # Build filter (2026-11-10, D-211): a push whose changed files ALL match
+    # these paths doesn't deploy. Set on the live service through the Render
+    # API (this dashboard-created service doesn't take settings from this
+    # file, G-018) and mirrored here so the two stay in step. Everything the
+    # server reads stays outside it: backend/, config/, web/, mobile/app.json
+    # (backend/app_version_policy.py), the other mobile root files and the
+    # build files. See docs/runbook.md "Build filter".
+    buildFilter:
+      ignoredPaths:
+        - "docs/**"
+        - "living-memory/**"
+        - "mockups/**"
+        - "screens/**"
+        - "archive/**"
+        - "qa/**"
+        - "scripts/**"
+        - "reference/**"
+        - "extension/**"
+        - "githooks/**"
+        - ".github/**"
+        - ".claude/**"
+        - "mobile/src/**"
+        - "mobile/tests/**"
+        - "mobile/.maestro/**"
+        - "mobile/ios/**"
+        - "mobile/android/**"
+        - "mobile/assets/**"
+        - "mobile/scripts/**"
+        - "mobile/patches/**"
+        - "README.md"
+        - "CLAUDE.md"
+        - "context.md"
+        - "FEATURES.md"
+        - "TRADE_ENGINE_BALANCE_ENGINEERING_BRIEF.md"
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.3"
