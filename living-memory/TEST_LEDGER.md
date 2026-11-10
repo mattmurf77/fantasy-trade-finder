@@ -9559,3 +9559,13 @@ TypeScript, test-ID lint, Home forecast state/action tests, mobile projection in
 ## 2026-11-08 — Standalone selected give-package correctness
 
 On current main plus the small owner fix, the ordinary Flask Generate and Status routes preserve the “trade all” requirement. The four new route cases fail on unpatched main where a full offer is impossible (one per owner model), pass with the fix, and still show complete offers when eligible. The ordinary mode retains its labeled partial fallback. Owner and bilateral engines, exclusive routes and frozen replay/benchmark controls passed **205 tests** together. No prepared inventory, database schema or deployment change.
+
+## 2026-11-09 — Release pair #629 + #628: combined-tree CI and models-eng review
+
+- **Combined tree.** `main` `353ebc49` + #629 (`c4ca57c2`) + #628 (`f353c5c8`), recovered as `2d49da8e` (tree `494d86b0`, identical to merging the two heads). All four CI jobs were run locally from a clean checkout with Python 3.12.16 and Node 20.20.2, database and production variables cleared:
+  - `pytest backend/tests` with `FTF_OWNER_PROOF_FAST_JSON=1`: **13,716 passed, 42 skipped, 0 failed**.
+  - `tsc --noEmit` clean; all **167** `mobile/tests/check-*.js` pass; testid-lint OK.
+  - `check_web_structure.py` **260/260**; `check_trade_search.cjs` passed; `test_instant_trade_report.py` 33 OK. The 4 skips are the optional disposable-PostgreSQL cases, which CI also skips, including the strict physical-iPhone filter case.
+- **models-eng verdict on #629 `c4ca57c2`: OK** on all three behaviours: give-all honoured in owner v1 and bilateral v2/v3, labelled partial receive offers preserved, and pipeline 14 pin `c35ce67a4434a981` matching the digest with `_run_trade_job` as the only deck-shaping change. Full suite on that commit: 13,732 passed with 18 extra adversarial cases. [Verdict](https://github.com/mattmurf77/fantasy-trade-finder/pull/629#issuecomment-6757117282).
+- **MOD-M1:** #629 merged as `678bbeca` at 2026-11-10T02:22Z (Nov 9 ET), before the Nov 10 freeze, so the frozen candidate includes pipeline 14 and no re-run is owed.
+- **#628 is measurement only** (`client_build` + `physical_iphone` on the three Find a Trade events). Before the instrumented internal TestFlight build ships, check that the deployed allowlist keeps both props. Build 182 has no marker; the 200 ms physical-iPhone gate stays open. D-056 posture: no simulator.
