@@ -229,6 +229,8 @@ Source of truth: `config/features.json`. Every key defaults to **false** in `bac
 
 Every flag is documented below. The **`features.json`** column is the value actually shipped — read it, not the registered default: several of the older keys are **true** in production, and a reader who assumes "undocumented ⇒ dark" will be wrong about a live surface.
 
+**Production overrides (`FTF_FLAGS`, read 2026-11-10):** the Render service sets `FTF_FLAGS`, which wins over this file. It turns on `league.projections`, `league.projections_provider_approved`, `grading.outlook_round`, `monetize.paywall`, `trade.personal_market_policy_v1`, `trade.roster_evaluation` and `trade.valuation_telemetry`, so those seven are **true in production** although their rows below say false. It also pins `trade.roster_protection`, `trade.mutual_benefit_v1` and `grading.outlook_prepare` false. The operator confirmed on 2026-11-10 that the seven stay on. Live values: `GET /api/feature-flags`. See [G-076](../living-memory/GOTCHAS.md).
+
 ## Flags — 2026-04-19 sprint cohort (swipe, tiers, trades, league social, invite, mobile polish, landing, trade math)
 
 The keys under the first `_comment` block in `config/features.json` ("Feature flags for the 2026-04-19 sprint"), plus the trade-math batch. Documented 2026-08-18 — they were previously left to be read off `config/features.json` as "self-describing", which hid the four that ship **true**. Registered default for all of them is false (`backend/feature_flags.py` `DEFAULT_FLAGS`).

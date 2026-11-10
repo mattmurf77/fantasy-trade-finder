@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-076 | `config/features.json` on main says a flag is off, but production has it on (seven flags, via Render's `FTF_FLAGS`) | Backend / feature flags / deploy config |
 | G-075 | Server-built decks or Calibration sessions offer trades with players the partner no longer has, in leagues nobody has opened lately | Backend / league data |
 | G-074 | git reports `… is far too short to be a packfile`, `fatal: stash failed`, or fetches crawl in a clone under `~/Documents` | Tooling / git / iCloud |
 | G-073 | A Render deploy fails at boot with `ModuleNotFoundError: No module named 'psycopg'` although nothing about the database changed | Backend / deploy / dependencies |
@@ -92,6 +93,14 @@
 Full entries below — grep the ID. Read the entry before acting; this index is a lookup aid, not the content.
 
 ---
+
+## 2026-11-10
+
+### G-076 — Production runs seven flags that `config/features.json` on main says are off
+
+**Symptom:** main's `config/features.json`, and the flag rows in `docs/config-reference.md`, list `league.projections`, `league.projections_provider_approved`, `grading.outlook_round`, `monetize.paywall`, `trade.personal_market_policy_v1`, `trade.roster_evaluation` and `trade.valuation_telemetry` as false. Production's `GET /api/feature-flags` returned all seven true on 2026-11-10 (`b1440b7b` live).
+**Cause:** the Render service's `FTF_FLAGS` environment variable wins over the file (`backend/feature_flags.py`). It sets those seven true, and pins `trade.roster_protection`, `trade.mutual_benefit_v1` and `grading.outlook_prepare` false. Nothing in the repo recorded it.
+**Fix:** read live flags from `GET /api/feature-flags`, not the file. The operator confirmed on 2026-11-10 that the seven stay on. Removing or editing `FTF_FLAGS` turns them off at the next restart, including league projections, the Calibration v2/v3 round and the paywall screens. A flag can also be on while its feature stays dark: `trade.prepared_inventory` only registers the capability, and the knob `prepared_trade_inventory_enabled` (0 in production) is the real switch. Read knobs from `GET /api/admin/config` (`X-Cron-Secret`).
 
 ## 2026-10-09
 
