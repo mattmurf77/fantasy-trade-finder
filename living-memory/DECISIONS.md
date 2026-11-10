@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-212 — The first page of trades is found by bound-verify-stop, not by speeding up the full solve
+
+**Date:** 2026-11-10 · **Who:** operator (asked for near-real-time construction without pre-generation, then a 3× per-process gain); coordinating session with Opus subagents.
+**Context:** A cold owner-bilateral search evaluates about 45,000 candidates and ranks about 3,900 survivors before any card shows (3–4 s of construction locally). An exact, byte-identical fast kernel for that full solve was built first and measured 1.15–1.18× with about 75% more peak memory: the work left is unique per candidate.
+**Decision:** `backend/trade_first_page.py` orders candidates by an admissible upper bound on `weaker_support`, verifies best-first with the unchanged evaluator, and stops once k + 31 eligible cards beat every remaining bound (the ranker's lookahead). Repeated work is memoised by content, never by league or user, and only returned cards are serialised. The fast kernel was dropped. [ADR-028](../docs/adr/adr-028-page-first-trade-search.md).
+**Consequences:**
+- First 30 cards in 41–46 ms once a league has been seen (73–82 ms first time) on the synthetic league; about 20 searches a second per process.
+- A library only. Publishing a page before the inventory exists (recommendation R3) changes the owner publication contract and needs its own scope.
+- A change to `trade_service` market package pricing must re-run `test_trade_first_page.py`: the pre-pricing bound is proved from that code's current shape.
+- No NumPy: a measured 10% was not worth a new runtime dependency and a second copy of the bound arithmetic.
+
 ## D-211 — Docs-only pushes skip Render through a build filter, not a `[skip render]` marker
 
 **Date:** 2026-11-10 · **Who:** operator (asked to replace the marker with a build filter).

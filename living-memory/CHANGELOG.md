@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-10 — Page-first trade search built unwired; acceptance and offer evidence; scale test
+
+- `backend/trade_first_page.py` (ADR-028, D-212) returns the proven first k cards of an organic owner-bilateral search without building the inventory. Synthetic 12-team league: 41–46 ms once a league has been seen (73–82 ms first time) against 3–4 s for the full solve; one process completes ~20 searches/s under load (first version 6.3). **No serving path imports it**; no route, flag, config, schema or generator change.
+- An exact fast kernel for the full solve was built, measured 1.15–1.18× with ~75% more peak memory, and dropped.
+- Offline acceptance evaluation on production (read-only): neither acceptance head is estimable (2–3 responding users, fewer than 5 counterparty labels). 612 real offers from the operator's Sleeper inbox: market balance barely predicts acceptance (AUC 0.58); deals close through counters; managers hold their picks.
+- Branch `feat/trade-engine-rearch`, unmerged. [Recommendation](../docs/plans/realtime-trade-engine/recommendation.md) · [scope](../docs/plans/realtime-trade-engine/scope.md) · [scale](../docs/plans/realtime-trade-engine/scale.md).
+
 ## 2026-11-10 — Render build filter replaces the docs skip marker; flag overrides recorded
 
 - The web service now has a Render build filter (D-211). A push deploys unless every changed file is in a folder the server never reads: docs, living memory, mockups, screens, archive, qa, scripts, the mobile source folders, root Markdown and the like. `backend/`, `config/`, `web/`, `mobile/app.json` and the build files always deploy. It was set through the Render API (G-018) and mirrored in `render.yaml` by #633, whose merge deployed `c5f17c45` (live 2026-11-10T20:48Z, Calibration unchanged). Docs merges no longer carry a skip marker; [runbook](../docs/runbook.md#build-filter-2026-11-10).

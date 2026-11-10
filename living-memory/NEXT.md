@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [Priority Queue](#priority-queue)
+- [2026-11-10 — Page-first trade search: confirm on real requests, then scope early publication](#2026-11-10--page-first-trade-search-confirm-on-real-requests-then-scope-early-publication)
 - [2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on](#2026-11-02--web-landing-update-1-cut-the-espnmfl-panels-or-enter-a-league-id-and-no-extra-account-needed-before-web-entry-ever-turns-on)
 - [2026-11-01 — Shop send (#574 / #577): two Update 1 follow-ups](#2026-11-01--shop-send-574--577-two-update-1-follow-ups)
 
@@ -69,6 +70,17 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 6. Address the separate board-history deletion race and wider private deck export filtering; scrub/reader merges do not prove these complete.
 7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state.
 
+
+## 2026-11-10 — Page-first trade search: confirm on real requests, then scope early publication
+
+Not in the seven active items: nothing here is wired, so it does not move the 200 ms gate by itself. It is the construction half of that gate's cold path.
+
+1. **Run `python -m backend.eval.first_page_bench` on captured production requests** (`eval/capture_owner_benchmark.py`). *Why first:* every number so far is from a synthetic league with no FLEX slots.
+2. **Scope R3, publishing the page before the inventory**, with trades-eng against `_publish_owner_batch` and the evidence contract. *Why:* it is the step that turns 41–82 ms of construction into a faster card.
+3. **Record what happens to sent trades** (accepted, declined, countered) in-app. *Why:* the acceptance evaluation found fewer than 5 counterparty responses; nothing about acceptance can be fitted until this exists.
+4. Larger instance plus a worker-process pool if scale matters before launch ([scale.md](../docs/plans/realtime-trade-engine/scale.md)).
+
+Detail: [recommendation](../docs/plans/realtime-trade-engine/recommendation.md).
 
 ## 2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on
 

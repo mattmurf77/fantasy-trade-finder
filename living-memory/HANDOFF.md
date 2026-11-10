@@ -9,6 +9,7 @@
 ## Table of Contents
 
 - [Current State 2026-11-09](#current-state-2026-11-09)
+- [Unmerged 2026-11-10: page-first trade search](#unmerged-2026-11-10-page-first-trade-search)
 
 ---
 
@@ -27,3 +28,13 @@
 
 **Don't repeat**
 - No simulator or Maestro (D-056). Production runs a single worker: a Calibration rebuild takes about 4–5 min per pair and starves admin reads, so run them off-peak.
+
+## Unmerged 2026-11-10: page-first trade search
+
+- **Where:** branch `feat/trade-engine-rearch`, one commit on top of `main`, not pushed, no PR. Worktree `.claude/worktrees/trade-engine-rearch`.
+- **What:** `backend/trade_first_page.py` (ADR-028, D-212), eval tooling, and `docs/plans/realtime-trade-engine/`. A library: nothing serves from it.
+- **Done:** code review, 129 + 3 + 16 targeted tests, full backend suite green before the rebase over docs-only merges. CI has not run.
+- **Next:** push and open the PR on the operator's go; then the items in NEXT.md's 2026-11-10 section.
+- **Local only, never commit:** `data/sleeper-export/` in the main checkout holds the operator's Sleeper inbox export (private messages) and the offer-analysis scripts.
+- **Related sessions, separate branches:** `docs/roster-first-trade-setup` (design, six open questions) and `feat/manager-profiles` (capture built dark). Neither is reviewed here.
+
