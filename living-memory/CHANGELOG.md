@@ -12,6 +12,11 @@
 ---
 
 
+## 2026-11-10 — Render build filter replaces the docs skip marker; flag overrides recorded
+
+- The web service now has a Render build filter (D-211). A push deploys unless every changed file is in a folder the server never reads: docs, living memory, mockups, screens, archive, qa, scripts, the mobile source folders, root Markdown and the like. `backend/`, `config/`, `web/`, `mobile/app.json` and the build files always deploy. It was set through the Render API (G-018) and mirrored in `render.yaml` by #633, whose merge deployed `c5f17c45` (live 2026-11-10T20:48Z, Calibration unchanged). Docs merges no longer carry a skip marker; [runbook](../docs/runbook.md#build-filter-2026-11-10).
+- #632 recorded G-076: Render's `FTF_FLAGS` keeps seven flags on that main's `config/features.json` lists as off (league projections, the Calibration outlook round, the paywall screens, three trade-valuation flags). The operator confirmed they stay on. `trade.prepared_inventory` stays dark: its knob is 0.
+
 ## 2026-11-09 — Instrumented TestFlight 1.22.0 (183) in internal testing
 
 - EAS build 183 (`b0a3fee0`) was built from `main` `eaf3f6ae`, the same code as the live `b1440b7b`, and auto-submitted (submission `6081ae2e`, finished). App Store Connect shows 1.22.0 (183) as internal "in beta testing" as of 2026-11-10T04:10Z. It is the first build that sends `client_build` + `physical_iphone` on the three Find a Trade timing events.
