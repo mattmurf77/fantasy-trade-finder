@@ -90,12 +90,22 @@ def revision4_enabled():
     return is_enabled("grading.revision4_arm") and not r4_round_enabled()
 
 
+def _started(row):
+    """The round's own frozen-deck test (start_session, next_card, the routes, report):
+    first card shown (first_exposed_at) or any card answered."""
+    return bool(row.get("first_exposed_at") or db.grading_progress(row["session_id"])["answered"])
+
+
 def default_round(*, user_id, league_id, requested=None):
     """The revision-4 round a start/current call addresses, or None for today's path.
 
-    Flag off: always None, and any round_id is ignored exactly as before. Flag on:
-    an explicit id wins; with none, an account/league that completed ROUND_ID is
-    offered the revision-4 round, so installed clients find it after finishing.
+    Flag off: always None (no read), and any round_id is ignored exactly as before.
+    Flag on: an explicit id wins. With none:
+    1. a current-round deck part-way through (open and started) -> the current round;
+    2. else, revision-4 round not completed -> the revision-4 round (covers a completed,
+       unstarted, failed or missing current deck);
+    3. else (revision-4 completed) -> the current round, unless it is completed too, in
+       which case the revision-4 results.
     """
     if not r4_round_enabled():
         return None
@@ -105,6 +115,11 @@ def default_round(*, user_id, league_id, requested=None):
         return None
     if requested is not None:
         raise grading.GradingError("invalid_round", 400)
+    current = db.load_open_grading_session(user_id, league_id, statuses=("open",), round_id=ROUND_ID)
+    if current is not None and _started(current):
+        return None
+    if db.load_open_grading_session(user_id, league_id, statuses=("completed",), round_id=R4_ROUND_ID) is None:
+        return R4_ROUND_ID
     done = db.load_open_grading_session(user_id, league_id, statuses=("completed",), round_id=ROUND_ID)
     return R4_ROUND_ID if done is not None else None
 

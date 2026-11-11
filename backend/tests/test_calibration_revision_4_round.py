@@ -145,65 +145,132 @@ def test_session_and_card_payloads_stay_blind(client, flags):
 
 
 # -- the route sequence the installed app calls --------------------------------------------
+# Offer order with no round_id (default_round): a current deck part-way through first; then
+# the revision-4 deck until it is completed; then the current round's deck again.
 
-def test_app_route_sequence_offers_the_second_round_after_the_first(client, flags):
-    flags["grading.revision4_round"] = True
-    first, _ = build()
-    # CalibrationScreen: GET current -> open deck -> next -> answer each card -> results.
-    current = client.get("/api/grading/sessions/current?league_id=league", headers=AUTH)
-    assert current.json["session"]["session_id"] == first
+CURRENT = "/api/grading/sessions/current?league_id=league"
+
+
+def grade_through(client, sid, grade):
+    """CalibrationScreen: next -> answer each card until done. Returns the last session_status."""
     status = None
     while True:
-        nxt = client.get(f"/api/grading/sessions/{first}/next", headers=AUTH)
-        assert nxt.status_code == 200
+        nxt = client.get(f"/api/grading/sessions/{sid}/next", headers=AUTH)
+        assert nxt.status_code == 200, nxt.json
         if nxt.json["done"]:
-            break
-        status = client.post(f"/api/grading/cards/{nxt.json['card']['card_id']}", json={"grade": 4},
+            return status
+        status = client.post(f"/api/grading/cards/{nxt.json['card']['card_id']}", json={"grade": grade},
                              headers=AUTH).json["session_status"]
-    assert status == "completed"
-    results = client.get(f"/api/grading/sessions/{first}/results", headers=AUTH)
-    assert results.json["round_id"] == oc.ROUND_ID and results.json["model_versions"][
-        "value_core"] == V3
-    # Done -> handleDone re-reads GET current: no revision-4 deck yet, so Start.
-    assert client.get("/api/grading/sessions/current?league_id=league", headers=AUTH).json == {
-        "session": None}
+
+
+def start_and_build(client, round_id):
+    """Start (202 building), the worker builds, GET current shows it open. Returns its id."""
     start = client.post("/api/grading/sessions", json={"league_id": "league"}, headers=AUTH)
     assert start.status_code == 202 and start.json["session"]["status"] == "building"
-    second = start.json["session"]["session_id"]
-    assert second != first and db.load_grading_session(second)["round_id"] == R4
-    building = client.get("/api/grading/sessions/current?league_id=league", headers=AUTH)
-    assert building.json["session"]["session_id"] == second
+    sid = start.json["session"]["session_id"]
+    assert db.load_grading_session(sid)["round_id"] == round_id
+    assert client.get(CURRENT, headers=AUTH).json["session"]["session_id"] == sid
     frozen, calls = frozen_factory()
-    assert oc.drain_queue(capture=lambda **k: frozen, round_id=R4)["processed"] == 1
-    assert sorted(calls) == sorted([V2, V4])
-    opened = client.get("/api/grading/sessions/current?league_id=league", headers=AUTH).json["session"]
-    assert opened["session_id"] == second and opened["status"] == "open"
+    assert oc.drain_queue(capture=lambda **k: frozen,
+                          **({"round_id": round_id} if round_id != oc.ROUND_ID else {}))["processed"] == 1
+    assert sorted(calls) == sorted([V2, V4] if round_id == R4 else [V2, V3])
+    opened = client.get(CURRENT, headers=AUTH).json["session"]
+    assert opened["session_id"] == sid and opened["status"] == "open"
     assert opened["progress"] == {"answered": 0, "total": 21}
-    while True:
-        nxt = client.get(f"/api/grading/sessions/{second}/next", headers=AUTH)
-        if nxt.json["done"]:
-            break
-        client.post(f"/api/grading/cards/{nxt.json['card']['card_id']}", json={"grade": 5}, headers=AUTH)
+    return sid
+
+
+def test_in_progress_user_finishes_the_current_deck_first(client, flags):
+    flags["grading.revision4_round"] = True
+    first, _ = build()
+    expose(first)  # the user opened it earlier
+    current = client.get(CURRENT, headers=AUTH)
+    assert current.json["session"]["session_id"] == first
+    assert client.post("/api/grading/sessions", json={"league_id": "league"},
+                       headers=AUTH).json["session"]["session_id"] == first
+    assert grade_through(client, first, 4) == "completed"
+    results = client.get(f"/api/grading/sessions/{first}/results", headers=AUTH)
+    assert results.json["round_id"] == oc.ROUND_ID and results.json["model_versions"]["value_core"] == V3
+    # Done -> handleDone re-reads GET current: no revision-4 deck yet, so Start.
+    assert client.get(CURRENT, headers=AUTH).json == {"session": None}
+    second = start_and_build(client, R4)
+    assert grade_through(client, second, 5) == "completed"
     results = client.get(f"/api/grading/sessions/{second}/results", headers=AUTH).json
     assert results["round_id"] == R4 and results["model_versions"] == {"current": V2, "value_core": V4}
     assert results["arm_labels"] == {"current": "Today's engine", "value_core": "New engine"}
     assert results["arms"]["current"]["n"] == results["arms"]["value_core"]["n"] == 12
-    # The first round's results are unchanged by the second.
+    # Both done: Start shows the revision-4 results; the first round's results are unchanged.
+    assert client.get(CURRENT, headers=AUTH).json == {"session": None}
+    again = client.post("/api/grading/sessions", json={"league_id": "league"}, headers=AUTH)
+    assert again.status_code == 200 and again.json["session"]["session_id"] == second
     assert client.get(f"/api/grading/sessions/{first}/results", headers=AUTH).json["arms"]["current"]["mean"] == 4
 
 
-def test_a_pregenerated_deck_appears_as_resume_once_the_first_round_is_done(client, flags):
+def test_never_started_user_gets_revision_4_first_then_the_current_deck(client, flags):
     flags["grading.revision4_round"] = True
-    first, _ = build()
-    second, _ = build(round_id=R4)
-    # While the first round is not completed, the installed app still sees only it.
-    assert client.get("/api/grading/sessions/current?league_id=league",
-                      headers=AUTH).json["session"]["session_id"] == first
-    answer_all(first)
-    current = client.get("/api/grading/sessions/current?league_id=league", headers=AUTH).json["session"]
-    assert current["session_id"] == second and current["status"] == "open"
-    resumed = client.post("/api/grading/sessions", json={"league_id": "league"}, headers=AUTH)
-    assert resumed.status_code == 200 and resumed.json["session"]["session_id"] == second
+    assert client.get(CURRENT, headers=AUTH).json == {"session": None}
+    second = start_and_build(client, R4)
+    assert grade_through(client, second, 5) == "completed"
+    assert client.get(f"/api/grading/sessions/{second}/results", headers=AUTH).json["round_id"] == R4
+    # Done -> GET current: the current round now, still nothing built, so Start builds it.
+    assert client.get(CURRENT, headers=AUTH).json == {"session": None}
+    first = start_and_build(client, oc.ROUND_ID)
+    assert grade_through(client, first, 3) == "completed"
+    results = client.get(f"/api/grading/sessions/{first}/results", headers=AUTH).json
+    assert results["round_id"] == oc.ROUND_ID and results["model_versions"]["value_core"] == V3
+    # Both done: Start returns the revision-4 results, no third deck.
+    again = client.post("/api/grading/sessions", json={"league_id": "league"}, headers=AUTH)
+    assert again.status_code == 200 and again.json["session"]["session_id"] == second
+    assert round_ids() == [oc.ROUND_ID, R4]
+
+
+@pytest.mark.parametrize("stale", [False, True])
+def test_an_unstarted_current_deck_is_skipped_then_offered_again_unchanged(client, flags, monkeypatch, stale):
+    first, _ = build()  # pre-generated, never opened
+    before = current_round_rows()
+    flags["grading.revision4_round"] = True
+    assert client.get(CURRENT, headers=AUTH).json == {"session": None}  # revision-4 round, none yet
+    second = start_and_build(client, R4)
+    assert current_round_rows() == before  # skipped, not retired or rebuilt
+    assert grade_through(client, second, 5) == "completed"
+    assert current_round_rows() == before
+    # Revision 4 done: the same current-round deck is offered again (Resume 0 of 21).
+    current = client.get(CURRENT, headers=AUTH).json["session"]
+    assert current["session_id"] == first and current["status"] == "open"
+    assert current["progress"] == {"answered": 0, "total": 21}
+    assert current_round_rows() == before
+    if stale:
+        # The current round's own rule, unchanged: an unexposed deck whose inputs changed is
+        # retired on Start and rebuilt, exactly as it would be without the new round.
+        monkeypatch.setattr(adapter, "is_current", lambda *a, **k: False)
+        start = client.post("/api/grading/sessions", json={"league_id": "league"}, headers=AUTH)
+        assert start.status_code == 202 and start.json["session"]["session_id"] != first
+        assert json.loads(db.load_grading_session(first)["error_json"]) == {"code": "comparison_stale"}
+    else:
+        start = client.post("/api/grading/sessions", json={"league_id": "league"}, headers=AUTH)
+        assert start.status_code == 200 and start.json["session"]["session_id"] == first
+        assert current_round_rows() == before
+
+
+def test_a_failed_current_deck_moves_on_to_revision_4_which_fails_the_same_way(client, flags):
+    from backend.tests.test_outlook_calibration_persistence import session
+    row = session("failed-first", status="failed")
+    row["error_json"] = json.dumps({"code": "provider_lineup_unsupported"})
+    db.insert_grading_session(row, [])
+    before = current_round_rows()
+    flags["grading.revision4_round"] = True
+    start = client.post("/api/grading/sessions", json={"league_id": "league"}, headers=AUTH)
+    assert start.status_code == 202
+    second = start.json["session"]["session_id"]
+    assert db.load_grading_session(second)["round_id"] == R4
+
+    def unsupported(**scope):
+        raise bg.GradingError("provider_lineup_unsupported", 409)
+    oc.drain_queue(capture=unsupported, round_id=R4)
+    shown = client.get(CURRENT, headers=AUTH).json["session"]
+    assert shown["session_id"] == second and shown["status"] == "failed"
+    assert shown["error"] == {"code": "provider_lineup_unsupported"}
+    assert current_round_rows() == before
 
 
 def test_explicit_round_ids_address_each_round_and_unknown_is_refused(client, flags):
