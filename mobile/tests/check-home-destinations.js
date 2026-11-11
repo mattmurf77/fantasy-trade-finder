@@ -21,7 +21,9 @@
 //   5. Standings is a root-stack route registered unconditionally with
 //      HeaderBack, and the screen mounts exactly one FeedbackFAB
 //      aboveTabBar={false};
-//   6. the outlook query is enabled only on Projected;
+//   6. the outlook query is enabled only on Projected; the initial segment
+//      is Projected only for the route param `segment: 'projected'` (Home's
+//      playoff tile), Current otherwise, and the param fires no event;
 //   7. standings_segment_changed sits in a tap handler, never an effect;
 //   8. the deep link exists;
 //   9. the Season-outlook calibration rules hold where the renderer lives
@@ -292,7 +294,8 @@ assert(/arrivalScrollRef\.current = intent\.side === 'sell' \? 'end' : 'list';/.
       /<HeaderBack testID="standings\.back-btn"/.test(opts) &&
       /navigation\.canGoBack\(\) \? navigation\.goBack\(\) : navigation\.navigate\('Main'\)/.test(opts),
     '5d. FreeAgents-style options: explicit HeaderBack standings.back-btn, canGoBack ? goBack : Main');
-  assert(/Standings: undefined;/.test(read(NAV_REL)), '5e. RootStackParamList declares Standings (no params)');
+  assert(/Standings: \{ segment\?: 'projected' \} \| undefined;/.test(read(NAV_REL)),
+    "5e. RootStackParamList declares Standings with only the optional segment: 'projected' param");
   const fabs = findAll(st, (n) => isJsxEl(n) && tagOf(st, n) === 'FeedbackFAB');
   assert(fabs.length === 1 && attrText(st, fabs[0], 'activeScreen') === '"Standings"' &&
       attrText(st, fabs[0], 'aboveTabBar') === 'false',
@@ -317,7 +320,42 @@ assert(/arrivalScrollRef\.current = intent\.side === 'sell' \? 'end' : 'list';/.
   assert(/staleTime: 60_?000\b/.test(t), '6c. staleTime 60_000');
   const odds = declOf(st, 'oddsEnabled');
   assert(!!odds && flat(st, odds.initializer) === "useFlag('outlook.odds')", "6d. oddsEnabled = useFlag('outlook.odds')");
-  assert(/useState<Segment>\('current'\)/.test(stCode), '6e. Current is the default segment');
+  // 6e–6h: the initial segment. Sabotage caught: Standings ignoring the
+  // param (the playoff tile lands on Current again), or a param that opens
+  // Projected by default / for any value (the Standings row lands there).
+  const segDecl = findAll(st, (n) => ts.isVariableDeclaration(n) && ts.isArrayBindingPattern(n.name) &&
+    n.name.elements[0] && n.name.elements[0].getText(st) === 'segment')[0];
+  const init = segDecl && segDecl.initializer && isCallTo(segDecl.initializer, 'useState') ? segDecl.initializer : null;
+  const initText = init && init.arguments[0] ? flat(st, init.arguments[0]) : '';
+  assert(!!init && init.typeArguments && init.typeArguments[0].getText(st) === 'Segment' &&
+      /\broute\.params\b/.test(initText),
+    '6e. the segment state is seeded from route.params');
+  // Execute the seed against each way Standings can be opened.
+  let seed = null;
+  try {
+    // eslint-disable-next-line no-new-func
+    seed = new Function('route', `return (${initText});`);
+  } catch (e) { /* reported below */ }
+  const cases = [
+    [undefined, 'current', 'no params (Home Standings row, deep link)'],
+    [{}, 'current', 'empty params'],
+    [{ segment: 'current' }, 'current', "segment: 'current'"],
+    [{ segment: 'bogus' }, 'current', 'an unknown segment (e.g. a hand-typed deep-link query)'],
+    [{ segment: 'projected' }, 'projected', "segment: 'projected' (Home's playoff tile)"],
+  ];
+  const wrong = seed ? cases.filter(([params, want]) => seed({ params }) !== want) : cases;
+  assert(wrong.length === 0, '6f. initial segment: Projected only for { segment: \'projected\' }, Current otherwise',
+    wrong.map(([, want, label]) => `${label} should open ${want}`).join('; '));
+  const routeDecl = declOf(st, 'route');
+  assert(!!routeDecl && flat(st, routeDecl.initializer) === "useRoute<RouteProp<StandingsParams, 'Standings'>>()",
+    '6g. route comes from useRoute, typed to the Standings params');
+  // The param is not a user selection on this screen: it seeds state once and
+  // never routes through selectSegment, an effect or an event.
+  const effectsReadingRoute = findAll(st, (n) => (isCallTo(n, 'useEffect') || isCallTo(n, 'useFocusEffect') ||
+    isCallTo(n, 'useLayoutEffect')) && /route\.params/.test(flat(st, n)));
+  assert(effectsReadingRoute.length === 0 && count(stCode, 'route.params') === 1 &&
+      !/selectSegment\(route|track\([^)]*route/.test(stCode),
+    '6h. the param is read once, as the useState seed: no effect, no selectSegment, no event');
 }
 
 // ═══ 7. standings_segment_changed: a changing tap only ═════════════════════

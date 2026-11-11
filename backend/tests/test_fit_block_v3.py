@@ -355,11 +355,25 @@ def test_a_rank_that_holds_leads_and_the_moves_stay_in_the_rank_row():
     # (TE: y 1700, opp 1500, x 1200, viewer 800), 3rd to 1st at RB.
     out = block(["vte"], ["orb"])
     you, them = side(out, "you"), side(out, "them")
-    assert you["lead"] == {"code": "holds.you", "text": "Still TE 4th"}
+    assert you["lead"] == {"code": "holds.you", "text": "TE stays 4th"}
     assert you["ranks"] == [{"pos": "RB", "before": 3, "after": 1}]
     assert them["lead"] == {"code": "shifts.them", "text": "Up at TE, down at RB"}
     assert tn._fit_rank_fallback("them", [], [{"pos": "RB", "rank": 4}, {"pos": "WR", "rank": 9}],
-                                 True) == ("holds.them", {"ranks": "RB 4th, WR 9th"})
+                                 True) == ("holds.them", {"ranks": "RB stays 4th, WR stays 9th"})
+
+
+@pytest.mark.parametrize("held,text", [
+    ([("RB", 1)], "RB stays 1st"),
+    ([("RB", 5), ("WR", 10)], "RB stays 5th, WR stays 10th"),
+])
+def test_held_rank_wording(held, text):
+    # Every held rank says "stays", in the order given; the rendered lead
+    # is exactly that list, for both sides.
+    for side_ in ("you", "them"):
+        code, params = tn._fit_rank_fallback(
+            side_, [], [{"pos": p, "rank": r} for p, r in held], True)
+        assert code == f"holds.{side_}"
+        assert tn.FIT_TEMPLATES[code].format(**params) == text
 
 
 @pytest.mark.parametrize("moves,text", [
@@ -488,8 +502,8 @@ def test_template_table_tags_and_version_are_pinned():
         "plan_win_now.them":       "Win-now-leaning: adds {asset}",
         "need.you":                "Upgrades {pos}: adds {name}",
         "need.them":               "Upgrades {pos}: adds {name}",
-        "holds.you":               "Still {ranks}",
-        "holds.them":              "Still {ranks}",
+        "holds.you":               "{ranks}",
+        "holds.them":              "{ranks}",
         "shifts.you":              "{shift}",
         "shifts.them":             "{shift}",
         "flat.you":                "Little change in league rank",

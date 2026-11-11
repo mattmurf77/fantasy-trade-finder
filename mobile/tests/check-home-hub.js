@@ -14,7 +14,8 @@
 //   * the roster/user queries ride session init's seed only while they keep
 //     the 5-minute staleTime (check-session-seed.js S-2's rule, for Home).
 //
-// Sections 1–12 are the twelve items of §6.3, in order.
+// Sections 1–12 are the twelve items of §6.3, in order; 13 is the playoff
+// tile's Projected entry (TF 1.22.0 build 185).
 //
 // Dependency-free: text assertions over comment-stripped source.
 // Run: node tests/check-home-hub.js
@@ -237,8 +238,9 @@ const handler = (name) => {
 // ═══════════════════════════════════════════════════════════════════════
 // 6 — exactly one `track('home_tile_tapped'` per tile kind (`outlook` has
 //     two: the Team outlook row and the playoff tile's "Review outlook",
-//     which open the same selector), closed vocabulary, position/band only
-//     on buy/sell/position_ranking.
+//     which open the same selector; `standings` has two: the Standings row
+//     and the playoff tile's percentage / "View", which open the same page),
+//     closed vocabulary, position/band only on buy/sell/position_ranking.
 // ═══════════════════════════════════════════════════════════════════════
 {
   const VOCAB = ['outlook', 'standings', 'overall_rank', 'buy', 'sell', 'position_ranking',
@@ -255,11 +257,11 @@ const handler = (name) => {
   const tiles = calls.map((c) => (/^tile: '([a-z_]+)'/.exec(c.props) || [])[1]);
   const seen = {};
   for (const t of tiles) seen[t] = (seen[t] || 0) + 1;
-  const SITES = { outlook: 2 };
+  const SITES = { outlook: 2, standings: 2 };
   const missing = VOCAB.filter((v) => seen[v] !== (SITES[v] || 1));
   const extra = Object.keys(seen).filter((t) => !VOCAB.includes(t));
-  assert(missing.length === 0 && extra.length === 0 && calls.length === VOCAB.length + 1,
-    '6b. one call site per tile kind (two for outlook), and only the closed vocabulary',
+  assert(missing.length === 0 && extra.length === 0 && calls.length === VOCAB.length + 2,
+    '6b. one call site per tile kind (two for outlook and standings), and only the closed vocabulary',
     `not exactly once: ${missing.join(', ') || '—'}; outside the vocabulary: ${extra.join(', ') || '—'}`);
   const badProps = calls.filter((c, i) => {
     const keys = c.props.split(',').map((p) => p.trim().split(':')[0]);
@@ -376,6 +378,31 @@ const handler = (name) => {
     '12c. onReviewOutlook tracks the outlook tile, then opens the selector with suggestOutlook, and does nothing else');
   assert(!/saveLeaguePreferences|setAssetPref|useMutation/.test(homeAll),
     '12d. nothing under components/home writes a preference');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 13 — Standings opens on Current from the Standings row and on Projected
+//      from the playoff tile (TF 1.22.0 build 185 feedback: the tile is the
+//      way to the full projections, so it must not land on Current).
+// ═══════════════════════════════════════════════════════════════════════
+{
+  const body = (name) => handler(name).split('\n').slice(1).map((l) => l.trim());
+  const row = body('onStandings');
+  assert(row.length === 2
+    && row[0] === "track('home_tile_tapped', { tile: 'standings' }, 'Home');"
+    && row[1] === "navigation.navigate('Standings');",
+    '13a. onStandings tracks the standings tile, then opens Standings with NO params (Current)');
+  const proj = body('onProjections');
+  assert(proj.length === 2
+    && proj[0] === "track('home_tile_tapped', { tile: 'standings' }, 'Home');"
+    && proj[1] === "navigation.navigate('Standings', { segment: 'projected' });",
+    "13b. onProjections tracks the same tile, then opens Standings with { segment: 'projected' }");
+  const ready = (/<StatusRow\s+testID="home\.status\.standings"\s+label="Standings"\s+state="ready"[\s\S]*?\/>/.exec(hub) || [''])[0];
+  assert(/onPress=\{onStandings\}/.test(ready), '13c. the ready Standings row presses onStandings');
+  const banner = (/<HomePlayoffBanner[\s\S]*?\/>/.exec(hub) || [''])[0];
+  assert(/onDetails=\{onProjections\}/.test(banner), '13d. the playoff tile gets onProjections');
+  assert(count(hub, "navigation.navigate('Standings'") === 2,
+    '13e. Home opens Standings from exactly those two handlers');
 }
 
 {

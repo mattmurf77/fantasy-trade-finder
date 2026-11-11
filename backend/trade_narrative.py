@@ -420,12 +420,12 @@ FIT_TEMPLATES: dict[str, str] = {
     "need.them":               "Upgrades {pos}: adds {name}",
     # No supported gain: no praise and no restating the card. What the trade
     # does to the team's league rank at the positions it touches instead.
-    # `holds`: ranks that do not move ("Still RB 4th, WR 9th"); the moves
+    # `holds`: ranks that do not move ("RB stays 4th, WR stays 9th"); the moves
     # are the rank row beneath. `shifts`: every touched rank moves ("Up at
     # RB, down at WR"). `flat`: the value changes are under the noise bar.
     # `none`: no ranked position is touched (picks only).
-    "holds.you":               "Still {ranks}",
-    "holds.them":              "Still {ranks}",
+    "holds.you":               "{ranks}",
+    "holds.them":              "{ranks}",
     "shifts.you":              "{shift}",
     "shifts.them":             "{shift}",
     "flat.you":                "Little change in league rank",
@@ -629,7 +629,7 @@ def _fit_rank_fallback(side: str, moves: list, held: list,
     card's own player list."""
     if held:
         return f"holds.{side}", {"ranks": ", ".join(
-            f"{h['pos']} {_fit_ordinal(h['rank'])}" for h in held)}
+            f"{h['pos']} stays {_fit_ordinal(h['rank'])}" for h in held)}
     if moves:
         order = sorted(moves, key=lambda m: _FIT_DEPTH_POSITIONS.index(m["pos"]))
         parts = [f"{word} at {' and '.join(m['pos'] for m in group)}"

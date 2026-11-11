@@ -150,9 +150,10 @@ type AuthStack = {
   // filter (the Free Agents link opens it on 'free_agents').
   UsageTrends: { ownership?: 'all' | 'rostered' | 'free_agents' } | undefined;
   // Home hub (docs/plans/home-engagement/scope.md R5) — Current | Projected
-  // standings, pushed from Home's Standings row. No params: the screen reads
-  // the session league.
-  Standings: undefined;
+  // standings, pushed from Home's Standings row. The screen reads the
+  // session league; `segment: 'projected'` (Home's playoff tile) opens it on
+  // Projected, absent = Current.
+  Standings: { segment?: 'projected' } | undefined;
   // Receipts — the viewer's graded suggestion track record
   // (docs/plans/receipts/). No params: the screen scopes itself to the
   // session's league and the session's own user, because cross-user receipts

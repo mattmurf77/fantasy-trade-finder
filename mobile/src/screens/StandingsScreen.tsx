@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, ScrollView, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRoute, type RouteProp } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 
 import Text from '../components/chalkline/Text';
@@ -19,8 +20,9 @@ import { SeasonOutlookSection, OutlookUnsupportedRow } from './LeagueSummaryScre
 // Standings (Home hub, flag `nav.home_hub`; docs/plans/home-engagement/
 // scope.md §6.4, rulings R4/R5/R7). A ROOT-STACK push from Home's Standings
 // row: Back returns to Home, so it mounts its own FeedbackFAB and RootNav
-// gives it an explicit HeaderBack (RNS#3294). No params — it reads the
-// session league.
+// gives it an explicit HeaderBack (RNS#3294). It reads the session league;
+// the one param, `segment: 'projected'` (Home's playoff tile), picks the
+// initial segment and fires no event — it is not a tap on this screen.
 //
 // CURRENT (default) is the league's actual results, computed client-side
 // from the Sleeper rosters session init already seeded (utils/standings.ts):
@@ -31,9 +33,11 @@ import { SeasonOutlookSection, OutlookUnsupportedRow } from './LeagueSummaryScre
 // rather than re-drawn, so its calibration rules (bands not percentages, no
 // title odds, records only once `meta.beta` clears) live in one place. The
 // outlook query runs ONLY while Projected is selected — the 10,000-sim
-// request is a tap, never a page open.
+// request follows a Projected choice (a tap, or Home's playoff tile), never
+// a plain page open.
 
 type Segment = 'current' | 'projected';
+type StandingsParams = { Standings: { segment?: 'projected' } | undefined };
 
 // Display names for the non-Sleeper unavailable card.
 const PLATFORM_NAME: Record<string, string> = {
@@ -52,7 +56,10 @@ export default function StandingsScreen() {
   const isSleeper = platform === 'sleeper';
   const oddsEnabled = useFlag('outlook.odds');
   const batchProjections = useFlag('league.projections');
-  const [segment, setSegment] = useState<Segment>('current');
+  const route = useRoute<RouteProp<StandingsParams, 'Standings'>>();
+  const [segment, setSegment] = useState<Segment>(
+    route.params?.segment === 'projected' ? 'projected' : 'current',
+  );
 
   // Same keys, fetchers and staleTime as every other Sleeper-roster consumer
   // (check-session-seed.js S-2), so the session-init seed is what renders.
