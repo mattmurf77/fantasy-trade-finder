@@ -1,3 +1,13 @@
+## 2026-11-10 — Offer-learnings integration (branch `feat/offer-learnings`, PR #641, every new flag off)
+
+- **What was integrated:** the fast deck and page-first search (PR #638), WS1 revision 4, WS1b its Calibration round, WS2 sent-trade outcomes, WS2b the private Sleeper offers read, WS3 pass-reason cadence, WS4b fit block v3, WS5 next move, WS7 partner activity, WS8 revised-offer cards, WS6 definition doc, plus `main` through #640. Deck pipeline pinned once per merge, 15 → 21.
+- **Full backend suite on the final committed tree (Python 3.12.16, local):** **14,345 passed, 42 skipped, 0 failed** in 757 s. An earlier run showed 4 failures in source-reading tests (`test_fa_move_*`, `test_league_projection_foreground_review`) because `server.py` and `database.py` were being edited while it ran; they pass on the committed tree.
+- **Mobile on the integrated tree:** `npx tsc --noEmit` clean; all **172** `mobile/tests/check-*.js` suites pass; `testid-lint` OK. D-056: nothing ran on a device; each scope block in `docs/plans/offer-learnings/` carries its TestFlight checklist.
+- **Integration fixes, each with a test proven red against a named sabotage:** `revised-card-without-fit-context` (a revised-offer card now gets the job's fit context); `string-faab-ignored` (FAAB arrives from Sleeper's private read as an `"n,n,n"` string; such an offer is marked and kept out of revised-offer cards); `read-without-consent` (the consent switch covers every private Sleeper read). TradesScreen: roster-first setup's and the cadence's undo-hold condition combined into one `heldPass`; the cadence check and the revised-offer check follow the merged forms.
+- **Coordinator's speed check of the fit block (21 recorded production requests):** league step 0.9 ms median (2.3 max); 3.2 ms (7.3 max) added before the first 30 cards; 14.5 ms (33 max) for a 150-card deck.
+- **Live shape check of the private Sleeper read (operator's own signed-in session, read-only, shapes and counts only, no token read or stored):** statuses `proposed` / `complete` / `rejected` / `cancelled`; picks as `"n,n,n,n,n"` strings; `metadata` and `settings` as objects. [sleeper-offers-read.md](../docs/plans/offer-learnings/sleeper-offers-read.md).
+- **Not verified:** anything on Render or a device; the private read end to end from the server (fixtures only); Calibration pre-generation of the revision-4 round on production data.
+
 ## 2026-11-10 — Partner activity in revision 4 (WS7, `trade.partner_activity`, dark)
 
 - Branch `feat/partner-activity` from `feat/offer-learnings` 78a4aae0; not merged. [Scope](../docs/plans/offer-learnings/scope-partner-activity.md).

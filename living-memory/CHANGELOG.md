@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-10 — Offer learnings built and integrated dark (PR #641)
+
+- From the operator's review of 612 real Sleeper offers ([plan](../docs/plans/offer-learnings/plan.md)): engine revision 4 (pick premium by outlook, pay-picks tie-breaker, best-asset rule, partner activity; ADR-029) with a Calibration round of its own; the fit block on every card (league ranks before and after, outlook tags); a pass-reason prompt every few passes; outcomes of sent trades; the user's own Sleeper offers read with consent; revised-offer cards for declined offers; a next-move generator; a definition doc for sending on the platform.
+- Integrated with the fast deck (PR #638) on `feat/offer-learnings`. Every new flag ships off; deck pipeline 15 → 21. Decisions D-215 to D-226.
+- Full suite 14,345 passed; 172 app check suites, tsc and testid-lint pass. Nothing has run on a device.
+
 ## 2026-11-10 — Fast deck built behind flags (off); page-first search exact for revision 2; real-league replay
 
 - `trade_first_page.py` (ADR-028, D-215) returns the proven first k cards of an owner-bilateral search without building the inventory; now exact for revision 2 too. `trade_fast_deck.py` (D-216) wires it into `_run_trade_job`: `trade.fast_deck` serves the first 150 cards as an interactive cold build's deck; `trade.fast_deck_shadow` serves the full deck and logs a comparison. **Both ship off.** Deck pipeline 15 → 16.

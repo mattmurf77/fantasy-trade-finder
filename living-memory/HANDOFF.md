@@ -31,12 +31,11 @@
 
 ## Unmerged 2026-11-10: page-first trade search
 
-- **Where:** branch `feat/trade-engine-rearch` on top of `main`. Worktree `.claude/worktrees/trade-engine-rearch`.
-- **What:** `backend/trade_first_page.py` (ADR-028, D-215), the fast deck `backend/trade_fast_deck.py` with its hook in `_run_trade_job` (D-216, flags `trade.fast_deck` and `trade.fast_deck_shadow`, both off), eval tooling, and `docs/plans/realtime-trade-engine/`.
-- **Do not merge without the operator's word.** The backend changed (deck pipeline 15 → 16), so merging deploys to Render, rebuilds stored first pages once, replaces the frozen `b1440b7b` candidate the Nov 10 check and the iPhone timing runs are tied to, and is a MOD-M1 re-run trigger. models-eng review of the bump is owed.
-- **Done:** code review of the search and its revision-2 exactness; 172 + 27 + 3 + 16 targeted tests; replay of 247 recorded production requests (all match).
-- **Next:** after merge, shadow for a day, then the serve flag and the TestFlight checklist in the scope block; then NEXT.md's 2026-11-10 section.
-- **Numbering:** roster-first setup (#637) and manager profiles (#635) merged first and took D-212 to D-214 and pipeline 15, so this branch is D-215 (page-first search), D-216 (fast deck) and pipeline 16.
-- **Local only, never commit:** `data/sleeper-export/` (the operator's Sleeper inbox export and offer-analysis scripts) and `data/prod-requests/` (recorded production requests and replay results), both in the main checkout.
-- **Related sessions, separate branches:** roster-first setup (`feat/roster-setup-backend`, `feat/roster-setup-mobile`) and manager profiles (PR #635). Neither is reviewed here.
+- **Where:** branch `feat/offer-learnings`, PR #641 (contains PR #638). Worktree `.claude/worktrees/offer-learnings`. Every new flag is off in it.
+- **What:** the fast deck (ADR-028, D-215, D-216) and the offer-learnings programme (ADR-029, D-217 to D-226; specs in `docs/plans/offer-learnings/plan.md`).
+- **The operator's instruction (2026-11-10, then away):** finish the code, merge, ship a TestFlight build and turn it on. Plan: merge dark, confirm the deploy, turn features on in a second change, build 1.23.0, pre-generate the revision-4 Calibration round.
+- **Stays off until the operator acts:** `trade.sleeper_offer_import` (the Terms and Privacy wording is drafted, not published; revised-offer cards have nothing to show until it is on); revision 4's selector and `trade.partner_activity` (graded first).
+- **Owed:** models-eng review of the pipeline bump (15 → 21); the TestFlight checklists in each scope block.
+- **Local only, never commit:** `data/sleeper-export/` and `data/prod-requests/` in the main checkout.
+- **Builder worktrees** (`.claude/worktrees/agent-*`) and their branches are to be swept through `docs/recovery/` once their content is verified on `main`.
 
