@@ -171,6 +171,8 @@ counterparty board disclosure or client analytics event is added.
 - [`trade_decisions`](#trade_decisions)
 - [`trade_block`](#trade_block)
 - [`sleeper_trades`](#sleeper_trades)
+- [`sleeper_waiver_moves`](#sleeper_waiver_moves)
+- [`manager_profiles`](#manager_profiles)
 - [`trade_matches`](#trade_matches)
 - [`trade_impressions`](#trade_impressions)
 - [`deck_impressions`](#deck_impressions)
@@ -457,6 +459,55 @@ Market-data readiness (operator directive 2026-07-26; PRD #43 Phase-1 data found
 | `raw` | text | JSON: **full Sleeper transaction payload** — source of truth; normalized columns are a convenience projection |
 
 Constraint: `uq_sleeper_trade_txid` on `transaction_id`. Append-only: `record_sleeper_trades` skips already-stored ids (a completed trade never mutates; the first-captured raw payload is kept), so re-sweeps are free. Read via `load_sleeper_trades(league_id)` — the future read seam for League Trade History / observed-market derivation. Retention: keep forever (trades are the dataset).
+
+---
+
+## `sleeper_waiver_moves`
+
+Manager profiles ([`docs/plans/manager-profiles/`](plans/manager-profiles/design.md), flag `market.manager_profiles`, on in `config/features.json`) — the **waiver and free-agent rows** of the same `GET /league/<id>/transactions/<week>` payloads the `sleeper_trades` sweep already fetches (that sweep keeps `type=trade` only). Written by `sleeper_trades_service.sync_league_trades(profiles=True)` via `manager_profiles.parse_waiver_transactions` → `database.record_sleeper_waiver_moves`. Only terminal rows (`complete`, `failed`); pending claims are never stored, so the insert is skip-not-upsert like `sleeper_trades`. Sleeper numeric league ids only; current season only (no `previous_league_id` walk). Capture only — nothing in trade generation reads it.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `transaction_id` | str | Sleeper transaction id — idempotency key |
+| `league_id` | str | indexed (`ix_sleeper_waiver_moves_league`) |
+| `week` | int, nullable | Sleeper `leg` |
+| `type` | str | `waiver` \| `free_agent` |
+| `status` | str | `complete` \| `failed` |
+| `roster_id` | int, nullable | the claiming roster (`roster_ids[0]`) |
+| `creator` | str, nullable | Sleeper user id that submitted the move — the owner, a co-owner, or a commissioner |
+| `waiver_bid` | int, nullable | FAAB dollars from `settings.waiver_bid`; NULL on free-agent adds and on non-FAAB claims |
+| `adds` | text | JSON `{player_id: roster_id}` (a defense is a team abbreviation, e.g. `"TB"`) |
+| `drops` | text | JSON `{player_id: roster_id}` or `{}` |
+| `failure_note` | str, nullable | `metadata.notes` on a failed claim ("This player was claimed by another owner." = outbid); NULL otherwise |
+| `created_at` | str, nullable | ISO UTC from `created` (ms) — when the claim was placed |
+| `processed_at` | str, nullable | ISO UTC from `status_updated` (ms) — the waiver run |
+| `synced_at` | str | ISO UTC capture time |
+| `raw` | text | JSON: **full Sleeper transaction payload** — source of truth |
+
+Constraint: `uq_sleeper_waiver_move_txid` on `transaction_id`. Read via `load_sleeper_waiver_moves(league_id)` (oldest first). Not touched by account deletion: a public league transaction log, the same posture as `sleeper_trades.raw` (which also carries `creator`). Retention: keep forever.
+
+---
+
+## `manager_profiles`
+
+Manager profiles (flag `market.manager_profiles`, on in `config/features.json`) — **one row per owned roster per league**, a derived view rebuilt from `sleeper_trades` + `sleeper_waiver_moves` after each profiling sweep (`sleeper_trades_service.capture_manager_profiles` → `manager_profiles.build_league_profiles` → `database.replace_manager_profiles`, delete + insert per league in one transaction, under the session-init caller's users-row lock when called from the daemon; an empty build never wipes the previous rows). Keyed on the roster's Sleeper `owner_id`, the manager's **league identity** (`backend/CLAUDE.md` § Identity): a co-owner's moves land on the owner's row and never get a row of their own; an ownerless roster gets no row; a manager with no history gets a row of zeros. Rows are written only after a season sweep whose every leg was fetched, so their presence is the profile-backfill marker (`has_manager_profile_capture`). **No consumer:** nothing in trade generation, ordering or any response reads this table.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `league_id` | str | indexed (`ix_manager_profiles_league`) |
+| `owner_id` | str | roster `owner_id` (league identity) |
+| `roster_id` | int | the Sleeper roster the profile was attributed through |
+| `profile_version` | int | `manager_profiles.PROFILE_VERSION` (1) |
+| `computed_at` | str | ISO UTC |
+| `n_trades` | int | completed trades the roster was party to |
+| `last_trade_at` | str, nullable | ISO UTC; NULL = no trade observed |
+| `n_waiver_bids` | int | priced FAAB claims (won + lost) attributed to the manager |
+| `n_free_agent_adds` | int | completed free-agent adds attributed to the manager |
+| `profile` | text | JSON, sorted keys: `trade_activity`, `trade_style`, `trade_assets`, `waiver_bids` (each bid with dollars, `share_of_budget`, `share_of_remaining`, outcome, `clearing_bid`), `free_agents`, `rookie_draft` (`captured: false` in v1), `excluded.foreign_creator_moves`; each signal carries `usable` against the thinness floors in design.md §4 |
+
+Constraint: `uq_manager_profile` on `(league_id, owner_id)`. Read via `load_manager_profiles(league_id)` (no caller yet). Account deletion (`accounts.delete_user_data`) **deletes** a deleted account's rows (`owner_id`); account export includes them. A league-mate's next profiling sweep can rebuild a deleted manager's row from public data — open question 1 in the design.
 
 ---
 

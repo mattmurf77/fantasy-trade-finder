@@ -374,7 +374,7 @@ def test_a_linked_league_keeps_its_platform(harness, league_id, platform):
 # Every database.py or outlook_calibration.py writer taking this fence. A writer added to
 # or dropped from this set fails the test until it's listed here.
 _GUARDED_WRITERS = {"first_init_transaction", "upsert_user", "upsert_league", "record_event", "write_session_init_members",
-                    "upsert_roster_snapshots", "upsert_board_snapshots",
+                    "upsert_roster_snapshots", "upsert_board_snapshots", "replace_manager_profiles",
                     "insert_grading_session", "finish_grading_session_build", "_save_build"}
 
 

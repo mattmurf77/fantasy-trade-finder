@@ -1,0 +1,10 @@
+{
+ "league_id": "1000000000000000001",
+ "previous_league_id": null,
+ "season": "2026",
+ "settings": {
+  "waiver_budget": 100,
+  "waiver_type": 2
+ },
+ "total_rosters": 4
+}

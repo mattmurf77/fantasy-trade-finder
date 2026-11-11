@@ -172,7 +172,7 @@ is not a claim, so suppressing a need line for a declared-rebuilding team leaks 
 | `docs/cross-client-invariants.md` | n/a because web and extension ignore the key; the codes are not a client enum (the card never switches on `code`) |
 | `docs/glossary.md` | updated | "Fit line (fit-first copy)" |
 | `docs/config-reference.md` | updated | § Flags — Fit-first card copy |
-| ADR or `DECISIONS.md` entry | updated | `living-memory/DECISIONS.md` D-NEXT: the other team's line uses public facts only |
+| ADR or `DECISIONS.md` entry | updated | `living-memory/DECISIONS.md` D-219: the other team's line uses public facts only |
 
 ## 6. Ship gate declaration
 

@@ -767,6 +767,58 @@ sleeper_trades_table = Table("sleeper_trades", metadata,
 )
 Index("ix_sleeper_trades_league", sleeper_trades_table.c.league_id)
 
+# Manager revealed-preference profiles (docs/plans/manager-profiles/, flag
+# `market.manager_profiles`, default OFF). Capture only — nothing reads
+# these tables to generate, order or describe a trade.
+#
+# sleeper_waiver_moves: the waiver + free-agent rows of the SAME
+# /league/<id>/transactions/<week> payloads the trade sweep already fetches
+# (sleeper_trades keeps type=trade; this keeps the rest of what a profile
+# needs). Terminal rows only (`complete` / `failed`): a processed claim
+# never mutates, so the insert is idempotent on transaction_id exactly like
+# record_sleeper_trades. `raw` keeps the full payload.
+sleeper_waiver_moves_table = Table("sleeper_waiver_moves", metadata,
+    Column("id",             Integer, primary_key=True, autoincrement=True),
+    Column("transaction_id", String,  nullable=False),  # Sleeper transaction id
+    Column("league_id",      String,  nullable=False),
+    Column("week",           Integer),                  # Sleeper `leg`
+    Column("type",           String,  nullable=False),  # 'waiver' | 'free_agent'
+    Column("status",         String,  nullable=False),  # 'complete' | 'failed'
+    Column("roster_id",      Integer),                  # the claiming roster (roster_ids[0])
+    Column("creator",        String),                   # Sleeper user id that submitted it
+    Column("waiver_bid",     Integer),                  # settings.waiver_bid (FAAB $); NULL off-FAAB / free agents
+    Column("adds",           Text),                     # JSON: {player_id: roster_id}
+    Column("drops",          Text),                     # JSON: {player_id: roster_id} or {}
+    Column("failure_note",   String),                   # metadata.notes on a failed claim; NULL otherwise
+    Column("created_at",     String),                   # ISO UTC from `created` (ms) — when the claim was placed
+    Column("processed_at",   String),                   # ISO UTC from `status_updated` (ms)
+    Column("synced_at",      String,  nullable=False),  # ISO UTC capture time
+    Column("raw",            Text,    nullable=False),  # JSON: full Sleeper transaction payload
+    UniqueConstraint("transaction_id", name="uq_sleeper_waiver_move_txid"),
+)
+Index("ix_sleeper_waiver_moves_league", sleeper_waiver_moves_table.c.league_id)
+
+# manager_profiles: one row per (league, manager), REPLACED per league on
+# every profile sweep (delete + insert in one transaction) — a derived
+# view, recomputable at any time from sleeper_trades + sleeper_waiver_moves.
+# `owner_id` is the roster's Sleeper owner_id — the LEAGUE identity
+# (sleeper_roster.py): a co-owner never gets a row of their own.
+manager_profiles_table = Table("manager_profiles", metadata,
+    Column("id",                Integer, primary_key=True, autoincrement=True),
+    Column("league_id",         String,  nullable=False),
+    Column("owner_id",          String,  nullable=False),  # roster owner_id (league identity)
+    Column("roster_id",         Integer, nullable=False),
+    Column("profile_version",   Integer, nullable=False),  # manager_profiles.PROFILE_VERSION
+    Column("computed_at",       String,  nullable=False),  # ISO UTC
+    Column("n_trades",          Integer, nullable=False),  # completed trades this roster was party to
+    Column("last_trade_at",     String),                   # ISO UTC; NULL = no trade observed
+    Column("n_waiver_bids",     Integer, nullable=False),  # FAAB claims won + lost (attributed)
+    Column("n_free_agent_adds", Integer, nullable=False),
+    Column("profile",           Text,    nullable=False),  # JSON: the full profile (design.md §3)
+    UniqueConstraint("league_id", "owner_id", name="uq_manager_profile"),
+)
+Index("ix_manager_profiles_league", manager_profiles_table.c.league_id)
+
 # Latest ELO snapshot for each player as ranked by each user in each league.
 # Replaced atomically (delete + insert) every time a user submits their rankings.
 # This is what lets leaguemates see each other's actual valuations.
@@ -10827,6 +10879,95 @@ def has_sleeper_trades(league_id: str) -> bool:
             .where(sleeper_trades_table.c.league_id == league_id)
             .limit(1)
         ).fetchone() is not None
+
+
+def record_sleeper_waiver_moves(rows: list[dict]) -> int:
+    """Manager profiles — append captured waiver / free-agent transactions.
+
+    Same contract as record_sleeper_trades: idempotent on transaction_id
+    (only terminal rows are ever passed in, and those never mutate), so a
+    re-sweep inserts nothing. Returns the number of NEW rows inserted.
+    """
+    if not rows:
+        return 0
+    txids = [r["transaction_id"] for r in rows]
+    t = sleeper_waiver_moves_table
+    with engine.begin() as conn:
+        existing = {
+            r.transaction_id
+            for r in conn.execute(
+                select(t.c.transaction_id).where(t.c.transaction_id.in_(txids))
+            ).fetchall()
+        }
+        new_rows, seen = [], set(existing)
+        for r in rows:
+            if r["transaction_id"] not in seen:
+                seen.add(r["transaction_id"])
+                new_rows.append(r)
+        if new_rows:
+            conn.execute(t.insert(), new_rows)
+    return len(new_rows)
+
+
+def load_sleeper_waiver_moves(league_id: str) -> list[dict]:
+    """Every captured waiver / free-agent row for a league, oldest first."""
+    t = sleeper_waiver_moves_table
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(t).where(t.c.league_id == league_id)
+            .order_by(t.c.processed_at.asc(), t.c.transaction_id.asc())
+        ).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+def has_manager_profile_capture(league_id: str) -> bool:
+    """True once a league's profile capture has backfilled its season.
+
+    Read seam for `sleeper_trades_service.sweep_weeks(profiles=True)`. Only
+    manager_profiles rows count: the sweep writes them (one per owned
+    roster) only after a backfill whose every leg was fetched, so a
+    backfill that lost a leg leaves no marker and is retried whole on the
+    next sync (the inserts are idempotent). sleeper_waiver_moves rows alone
+    prove nothing about completeness.
+    """
+    col = manager_profiles_table.c.league_id
+    with engine.connect() as conn:
+        return conn.execute(
+            select(col).where(col == league_id).limit(1)
+        ).fetchone() is not None
+
+
+def replace_manager_profiles(league_id: str, rows: list[dict], *,
+                             live_user: str | None = None) -> int:
+    """Replace a league's manager_profiles rows with `rows` (one
+    transaction). An empty `rows` is a no-op, never a wipe — a sweep that
+    could not attribute anything must not erase the last good profiles.
+    Returns the number of rows written.
+
+    `live_user` (the session-init daemon): the write runs under that
+    account's users-row lock (_lock_live_user), AccountGone when it's gone,
+    so a deletion committed mid-daemon is never followed by a rebuild of
+    the caller's own profile."""
+    if not rows:
+        return 0
+    t = manager_profiles_table
+    with engine.begin() as conn:
+        if live_user:
+            _lock_live_user(conn, live_user)
+        conn.execute(delete(t).where(t.c.league_id == league_id))
+        conn.execute(t.insert(), rows)
+    return len(rows)
+
+
+def load_manager_profiles(league_id: str) -> list[dict]:
+    """A league's manager_profiles rows (future read seam; no caller yet)."""
+    t = manager_profiles_table
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(t).where(t.c.league_id == league_id)
+            .order_by(t.c.roster_id.asc())
+        ).fetchall()
+    return [dict(r._mapping) for r in rows]
 
 
 def set_league_scoring(league_id: str, scoring_format: str) -> None:

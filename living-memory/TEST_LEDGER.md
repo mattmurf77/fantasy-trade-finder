@@ -1,3 +1,11 @@
+## 2026-11-10 — Manager profiles capture (flag on in config, branch `feat/manager-profiles`)
+
+- Local Python 3.12 venv, branch cut from `origin/main` d6fc338f. **Full suite: 13740 passed, 43 skipped, 0 failed** (12m14s). Required selection `-k "sleeper or roster or profile"`: **916 passed, 4 skipped**.
+- New `backend/tests/test_manager_profiles.py` (23, committed synthetic fixture `fixtures/sleeper/manager-profiles/`, `_opener` seam, no network) + 2 in `test_session_init_sleeper_calls.py` (flag off: no extra calls, no rows; flag on: one 18-leg backfill, one rosters + one meta read, then ≤2 legs).
+- Named sabotages, each red then reverted: **S1** owner-only attribution (co-owner claim dropped) → 3 red; **S2** `sweep_weeks` ignores the flag → 5 red incl. the existing init budget test; **S3** lossy backfill still writes profiles → 1 red.
+- **Flag flipped on** (operator, 2026-11-10), rebased on `origin/main` c5f17c45: **full suite 13741 passed, 43 skipped, 0 failed** (17m12s). The flip turned up a bug: `test_session_init_deleted_mid_daemon::test_own_deletion_after_the_members_write` went red because the caller's own `manager_profiles` row was rebuilt after a mid-daemon deletion. Fixed with the users-row lock (`replace_manager_profiles(live_user=…)`), registered in `_GUARDED_WRITERS`; new `test_deleted_caller_writes_no_profile_and_trades_still_land`. **S4** lock removed → 3 red (that test + both deletion parametrizations), green on revert. The call-budget test now seeds the profile marker (steady state with the flag on); the flag-off test pins the flag off itself.
+- Five flag fixtures needed the new key to keep the `test_seed_ui_test_db` mirror tests green. No simulator, no TestFlight (backend-only capture). [Scope](../docs/plans/manager-profiles/scope.md)
+
 ## 2026-11-10 — Roster-first setup for Find a Trade (flag `trades.roster_setup`, dark)
 
 - Combined tree `feat/roster-first-trade-setup` (mobile `1489dc68` + backend `1583e346` merged on `origin/main` `29e7ad67`). Full `pytest backend/tests`: **13,742 passed, 43 skipped in 15:31**. `tsc --noEmit` clean, all **168** `mobile/tests/check-*.js` pass, testid-lint OK, web structure 260/260 + trade-search scenarios + instant-trade report OK.

@@ -525,6 +525,15 @@ FLAG_KEYS: tuple[str, ...] = (
     # routes with external references; this gates a write with none). The
     # env knob FTF_ROSTER_SNAPSHOT_WEEKDAY=7 kills only the sweep half.
     "market.roster_history",
+    # market.manager_profiles (docs/plans/manager-profiles/): per-manager
+    # revealed-preference profiles from public Sleeper league history. Rides
+    # the market.trade_capture sweep: keeps the waiver + free-agent rows of
+    # the SAME transactions payloads (sleeper_waiver_moves), then rebuilds
+    # manager_profiles for the league. Needs the daemon's shared rosters
+    # read; without it the step is skipped (no backfill, no rows). On ⇒ one
+    # extra 18-leg backfill per already-swept league, once. Capture ONLY —
+    # nothing reads the profiles yet. Off ⇒ no extra fetch, no rows.
+    "market.manager_profiles",
     # market.movers: GET /api/market/movers (#243 "Market pulse" strip) —
     # top risers/fallers by trailing-window % change of FTF community value
     # (player_value_history consensus_value snapshots, the data #57 /

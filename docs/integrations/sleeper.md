@@ -46,7 +46,7 @@ app/site) — neither is an API call and neither carries any FTF data.
 | 8 | `GET /draft/{draft_id}` | Single draft detail | `backend/draft_board_service.py:292-294` | feeds `/api/draft/board` |
 | 9 | `GET /draft/{draft_id}/picks` | Picks already made in a live/complete draft | `backend/draft_board_service.py:296-297` | feeds `/api/draft/board` |
 | 10 | `GET /league/{league_id}/matchups/{week}` | Weekly scores/pairings, one call per regular-season week — **cached per league+season+week** since 2026-08-09 (`_outlook_sleeper_fetch()`, `backend/server.py`; completed weeks never refetch — see §5.4) | `backend/outlook/league_state.py:218` via the injected fetch | feeds `/api/league/outlook` |
-| 11 | `GET /league/{league_id}/transactions/{week}` | Completed transactions for one leg/week; filtered to `type=trade, status=complete` | `backend/sleeper_trades_service.py:53-68` (`fetch_week_transactions`; the 1–18 sweep is the one-time backfill for a league with no captured rows, otherwise only the live leg and the one before it — see §5.2) | not directly routed — session-init background capture only |
+| 11 | `GET /league/{league_id}/transactions/{week}` | Completed transactions for one leg/week; filtered to `type=trade, status=complete` — and, with `market.manager_profiles` on, also `type=waiver\|free_agent, status=complete\|failed` from the **same** payload (shape in §3.2) | `backend/sleeper_trades_service.py:70-96` (`fetch_week_transactions`; the 1–18 sweep is the one-time backfill for a league with no captured rows — or, with profiles on, no `manager_profiles` rows — otherwise only the live leg and the one before it — see §5.2) | not directly routed — session-init background capture only |
 | 12 | `GET /players/nfl` | **Bulk player dump, ~5 MB raw / ~4.8 MB filtered.** All NFL players; FTF keeps only QB/RB/WR/TE with a `full_name` | `backend/server.py:1593,1672-1684` (`_PLAYERS_BULK_URL` / `_fetch_players_bulk`); called from `_ensure_sleeper_cache_populated` (`backend/server.py:13920-13969`) and the M0 refresh daemon (`backend/server.py:1795-1823`) | `/api/sleeper/players`, `/api/sleeper/players/warm` |
 | 13 | `GET /players/nfl/adp` | Average draft position — **undocumented**, best-effort | `backend/server.py:586-615` (`_fetch_sleeper_adp`) | not routed — feeds player-DB sync only |
 
@@ -226,6 +226,27 @@ degrades ESPN/MFL cookie storage too, not just Sleeper.
     verdict flips to not-drafted, until a non-empty `/drafts` read or the
     season rollover.
 
+- **Transactions** (`GET /league/{id}/transactions/{week}`, observed 2026-11-10): a list; every
+  row, whatever its type, carries `type`, `status`, `transaction_id`, `leg`, `roster_ids`,
+  `creator` (the Sleeper user who submitted it — owner, co-owner or commissioner),
+  `consenter_ids`, `adds` (`{player_id: roster_id}`), `drops`, `draft_picks`, `waiver_budget`,
+  `settings`, `metadata`, `created` and `status_updated` (epoch ms).
+  - `trade`: `draft_picks [{season, round, roster_id (original), previous_owner_id, owner_id}]`
+    (roster ids), `waiver_budget [{sender, receiver, amount}]` (FAAB moved in the trade).
+  - `waiver`: `roster_ids` is the one claiming roster; `settings {seq, waiver_bid}` — the FAAB
+    bid in dollars (absent outside FAAB leagues). `status` is `complete` or `failed`;
+    `metadata.notes` gives the reason: "This player was claimed by another owner." (outbid),
+    "…too many players after this transaction." or "…already started playing." Pending claims
+    did not appear in any sampled leg.
+  - `free_agent`: `adds`/`drops` only; `settings` and `metadata` null.
+  - A team defense appears in `adds`/`drops` as its abbreviation (`"TB"`), not a numeric id.
+  - The league's budget is `settings.waiver_budget` on `/league/{id}`, FAAB iff
+    `settings.waiver_type == 2`; each roster's spend so far is `settings.waiver_budget_used` on
+    `/rosters`.
+  Consumers: `parse_trade_transactions` (trades → `sleeper_trades`) and
+  `manager_profiles.parse_waiver_transactions` (waiver / free-agent → `sleeper_waiver_moves`).
+  Fixture: `backend/tests/fixtures/sleeper/manager-profiles/` (synthetic, same shape).
+
 ### 3.3 GraphQL shapes
 - `league_players` rows: `{player_id, settings:{otb: <roster_id>|null,
   otb_added_at: <epoch_ms>|absent}}` (`backend/trade_block_service.py:10-24`). A
@@ -375,6 +396,7 @@ else is a fresh live fetch with no shared cache. The outcome is recorded in
 | Trade-block import | `sleeper.trade_block` | 1× `league_players` GraphQL (rosters shared) | `sync_league_trade_block`, `backend/trade_block_service.py` |
 | Owned draft-pick sync | `picks.owned_sync` | 1× `traded_picks` + 1× `drafts` (rosters + meta shared); MFL leagues re-derive with no Sleeper reads. Since #428 an empty `drafts` answer costs one leagues-row read (the cached #207 verdict, D-189) and no extra upstream call; since #470 QA P3-2, when that verdict isn't `drafted`, also one `SELECT DISTINCT season` on the prior platform grid | `_sync_sleeper_owned_picks`, `backend/server.py` |
 | Trade-transaction capture | `market.trade_capture` | **≤2 calls** — `transactions/{week}` for the live leg and the one before it. The full `1..18` sweep runs ONCE, as the first-time backfill for a league with no captured rows; in the offseason an already-swept league fetches **1** (leg 1, where Sleeper books every offseason trade) | `sweep_weeks` / `sync_league_trades`, `backend/sleeper_trades_service.py` |
+| Manager profiles | `market.manager_profiles` (needs `market.trade_capture` + the shared rosters) | **0 in steady state** — keeps the waiver / free-agent rows of the trade capture's own `transactions/{week}` payloads; rosters + meta shared. **One** extra `1..18` backfill per league, once, when the flag first meets an already-swept league (marker: `manager_profiles` rows, written only after a backfill with no failed leg). No roster map ⇒ skipped, backfill included | `sync_league_trades(profiles=True)` / `capture_manager_profiles`, `backend/sleeper_trades_service.py` |
 | Executed-trade matcher | `suggestion.telemetry` | 0 — takes the shared rosters map | `match_league_trades(roster_map=…)`, `backend/suggestion_telemetry.py` |
 | Sent-offer outcome reconcile | `trade.outcome_tracking` | 0 — reads `sleeper_trades` just captured (DB-only) | `reconcile_league`, `backend/trade_outcomes.py` |
 | Rookie-draft status refresh | (unflagged) | 0 in steady state; up to 3 (`/league/{id}`, `drafts`, `rosters`) when the per-status TTL has expired — 12 h once a league reads `drafted` | `_refresh_league_draft_status`, `backend/server.py` |

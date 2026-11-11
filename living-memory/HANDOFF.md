@@ -36,7 +36,7 @@
 - **Do not merge without the operator's word.** The backend changed (deck pipeline 15 → 16), so merging deploys to Render, rebuilds stored first pages once, replaces the frozen `b1440b7b` candidate the Nov 10 check and the iPhone timing runs are tied to, and is a MOD-M1 re-run trigger. models-eng review of the bump is owed.
 - **Done:** code review of the search and its revision-2 exactness; 172 + 27 + 3 + 16 targeted tests; replay of 247 recorded production requests (all match).
 - **Next:** after merge, shadow for a day, then the serve flag and the TestFlight checklist in the scope block; then NEXT.md's 2026-11-10 section.
-- **Numbering:** roster-first setup (#637) merged first with D-212, D-213 and pipeline 15, so this branch is D-215, D-216 and pipeline 16. PR #635 (manager profiles) still uses D-212 and must renumber.
+- **Numbering:** roster-first setup (#637) and manager profiles (#635) merged first and took D-212 to D-214 and pipeline 15, so this branch is D-215 (page-first search), D-216 (fast deck) and pipeline 16.
 - **Local only, never commit:** `data/sleeper-export/` (the operator's Sleeper inbox export and offer-analysis scripts) and `data/prod-requests/` (recorded production requests and replay results), both in the main checkout.
 - **Related sessions, separate branches:** roster-first setup (`feat/roster-setup-backend`, `feat/roster-setup-mobile`) and manager profiles (PR #635). Neither is reviewed here.
 
