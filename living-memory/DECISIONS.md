@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-235 — Rules-first deck construction ships on with no shadow; the repeat cap is 5 of 30; liked trades stay an overlay evaluated after generation
+
+**Date:** 2026-11-11 · **Who:** the operator: build it ("Yes"), accept the order change ("Ok. Aligned."), relax the repeat rule ("I think we can relax it to 5/30"), no shadow week ("No. Roll out immediately."), and on likes: "Would it make more sense for the liked trades to get fetched after generation? ... presents them all blended together?" Scope limits, the Match strength stopgap and what is accepted as different from today are this session's calls. Design: `docs/plans/realtime-trade-engine/fast-deck-v2-design.md`; ADR-030.
+**Context:** The deck rules ran after generation and ranking and rejected about 93 to 97% of what the generator emitted, which is why a 150-card page left a 2-card deck (D-232) and why the full solve spent most of its time on cards nobody would see.
+**Decision:** Behind `deck.rules_first` (code default false, shipped true), the per-card rules decide which trades are built. The page-first search builds the whole admitted inventory; a rules-gated full solve is the fallback; any failure serves today's full solve. Organic owner-only decks only: pinned, opponent-scoped and intent requests and generators without a parity suite keep today's path. `trade.fast_deck` is retired. `REPEAT_CAP` is 5 on every path. A liked trade the generator did not build is proven on demand by the owner evaluator after generation and gets a full engine card; generation never depends on likes.
+**Consequences:**
+- The served set equals today's on the recorded requests (247 of 247); order changes for everyone. Known differences: leagues large enough for stream budgets to bind get a superset; a heavy-decline user at the five-card floor can get up to five recently declined near-duplicates restored; a fatigue-retest grant can go to a different card.
+- No shadow, so the evidence is the replay, the served-deck acceptance tests and an independent review. The kill switch is the flag; the safety signature keeps cached decks from crossing it.
+- "Match strength" was a deck position divided by 300. On rules-first decks it is a constant 300 (reads 100%), as nearly every card read under the full solve. A stopgap until the bar is replaced or given a real number; `surplus_margin` on these impressions carries no information.
+- The value core's own cap stays 3, so the repeat rule is no longer one shared definition; the per-card rules still are.
+
 ## D-234 — Forecast model v6: an empty starting slot takes the best projected free agent, or 0; "incomplete" now means only a played starter with no recorded score
 
 **Date:** 2026-11-11 · **Who:** the operator, on learning that four of the first six v5 forecasts were incomplete for one unprojected RB slot: "This should already be solved. Assume the user will source a player from FA and take the highest FA's projected points. If no FA's with projected points assume a 0 at that position." The IDP fallback order and the Max PF handling are this session's calls.

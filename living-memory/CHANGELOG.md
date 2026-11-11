@@ -12,6 +12,14 @@
 ---
 
 
+## 2026-11-11 — Rules-first deck construction is on (D-235, ADR-030); repeat cap 5 of 30
+
+- **What changed:** the deck rules now decide which trades are built, before ranking, and the whole eligible deck is built with the page-first search (about 0.35 s of CPU a search against 4.0 s on the recorded requests). No 150-card cap. `trade.fast_deck` is retired; the switch is `deck.rules_first`.
+- **Same cards, new order** on the recorded requests. Known differences from the full solve are listed in D-235.
+- **Liked trades** are evaluated after generation; one the generator did not build now gets a full engine card.
+- **Repeat rule:** no asset in more than 5 of the first 30 cards (was 3).
+- Kill switch, log lines and the replay tool: [`../docs/runbook.md`](../docs/runbook.md) § Rules-first deck.
+
 ## 2026-11-11 — Forecast model v6: empty slots take the best free agent (D-234)
 
 - An open starting slot in an unplayed week now takes the best projected free agent for that slot, or 0 if none is projected. A forecast is incomplete only when a played starter has no recorded score, so one unprojected player no longer withholds a league's outlook suggestion.
