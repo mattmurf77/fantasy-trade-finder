@@ -23,9 +23,19 @@ Covered (each proven red against the named sabotage, then green on revert):
 - test_unscored_not_sure_viewer_sees_revision_2s_card_on_the_whole_deck. Sabotages:
   suppress the Them win-now lead for unscored viewers; emit a labels-only block for
   Not sure.
-- test_unscored_rebuilding_viewer_sees_revision_2s_card_but_the_mirror_conflict,
-  test_unsaved_outlook_gets_no_season_block_and_todays_fit_block. Sabotage: the same
-  two.
+- test_rebuilding_and_tanking_copy_on_the_deck (amended 2026-11-11: these viewers are
+  season-scored in the shed direction): the line reads as for contenders; the shed lead
+  ("Rebuilding: -3.2 pts/wk, adds X") only when the card sheds >= 0.5 a week and X is
+  the most valuable incoming pick or projected rebuild piece / cornerstone; the points
+  conflict lead ("Away from Tanking: +2.1 pts/wk") only when the points rule fired; the
+  label conflict lead only when the label rule fired; otherwise today's You lead.
+  Sabotages: drop the -0.5 gate on the shed lead; read the conflict lead by plan, not
+  trigger (`conflict_plan.you` for every Rebuilding/Tanking conflict).
+- test_shed_lead_needs_its_facts (hand edits of a real proof): no shed lead under 0.5 a
+  week, without a future-labelled or pick asset, or for an "add" viewer. Sabotage:
+  name the most valuable incoming asset whatever its label.
+- test_unsaved_rebuilding_roster_is_scored_never_flagged. Sabotage: print the saved-plan
+  name ("Rebuilding") for a roster read.
 - test_scored_viewer_keeps_their_win_now_lead_only_for_a_labelled_asset. Sabotage:
   keep the Them lead for every asset.
 - test_without_usable_evidence_the_fit_block_is_revision_2s_and_no_season_block.
@@ -174,7 +184,7 @@ def test_label_printed_is_the_label_the_plan_fit_table_read(outlook):
                 assert shown[pid]["label"] == row["label"]
                 assert shown[pid]["text"] == tn.SEASON_LABELS[row["label"]]
                 assert shown[pid]["starts_for_you"] is (row["starts_for_viewer"] is True)
-            if signal["viewer"]["scored"] and row["starts_for_viewer"]:
+            if signal["viewer"].get("season_direction") == "add" and row["starts_for_viewer"]:
                 # The plan-fit table's read: full credit exactly for a labelled starter.
                 assert (row["plan_lean"] == r5.LEAN_STARTS_LABELLED) is (row["label"] in ("win_now", "cornerstone"))
     assert printed > 0
@@ -258,10 +268,17 @@ def test_conflict_sentence_per_plan_name(plan, name):
     proof["season_signal"]["conflict"]["plan"] = plan
     block = tn.season_block(proof, card, args["players"])
     assert block["conflict"]["text"] == f"You rank rb_kid above market, but this moves away from {name}"
-    lead = you(tn.fit_block(proof, card, args["players"], context(args)))["lead"]
     if plan in ("rebuilder", "jets"):
+        # The lead follows the rule that fired: the label rule, or the points rule.
+        proof["season_signal"]["conflict"]["trigger"] = "label"
+        lead = you(tn.fit_block(proof, card, args["players"], context(args)))["lead"]
         assert lead == {"code": "conflict_plan.you", "text": f"Away from {name}: adds a win-now piece"}
+        proof["season_signal"]["conflict"]["trigger"] = "points"
+        proof["season_signal"]["viewer"]["delta_pts_week"] = 2.14
+        lead = you(tn.fit_block(proof, card, args["players"], context(args)))["lead"]
+        assert lead == {"code": "conflict.you", "text": f"Away from {name}: +2.1 pts/wk"}
     else:
+        lead = you(tn.fit_block(proof, card, args["players"], context(args)))["lead"]
         delta = proof["season_signal"]["viewer"]["delta_pts_week"]
         assert lead == {"code": "conflict.you", "text": f"Away from {name}: {delta:+.1f} pts/wk"}
 
@@ -293,52 +310,131 @@ def test_unscored_not_sure_viewer_sees_revision_2s_card_on_the_whole_deck():
     assert them_win_now > 0  # teeth: the age-based Them lead is on this deck and kept
 
 
+def _stripped(proof):
+    return {k: v for k, v in proof.items() if k != "season_signal"}
+
+
 @pytest.mark.parametrize("outlook", ["rebuilder", "jets"])
-def test_unscored_rebuilding_viewer_sees_revision_2s_card_but_the_mirror_conflict(outlook):
-    """A saved Rebuilding / Tanking plan: the fit block is revision 2's except the You lead
-    of a card the mirror rule flagged; the season block has labels, no line."""
-    base, rows = composed(2, outlook), composed(5, outlook)
-    old = {gen.ident(c): b for c, _, b, _ in base}
-    shared = flagged = labelled = 0
-    for card, proof, block, season in rows:
-        assert season is None or "line" not in season
-        labelled += bool(season and season.get("labels"))
-        if gen.ident(card) not in old:
+def test_rebuilding_and_tanking_copy_on_the_deck(outlook):
+    """A saved Rebuilding / Tanking plan with usable evidence: scored in the shed direction.
+    Each You lead is the one its facts support; the season line reads as for contenders."""
+    args = gen.world(outlook)
+    ctx = context(args)
+    plan = tn.FIT_TAGS["declared"][outlook]
+    counts = {"shed": 0, "points": 0, "label": 0, "today": 0}
+    for card, proof, block, season in composed(5, outlook):
+        signal = proof["season_signal"]
+        viewer, conflict = signal["viewer"], signal["conflict"]
+        delta = viewer["delta_pts_week"]
+        assert viewer["season_direction"] == "shed"
+        assert season["line"].startswith("Season no change" if abs(delta) < .5 else f"Season {delta:+.1f} pts/wk")
+        lead = you(block)["lead"] if you(block) else None
+        assert lead is None or len(lead["text"]) <= tn.FIT_LEAD_MAX
+        rows = {a["id"]: a for a in signal["assets"]}
+        if conflict["fired"]:
+            if conflict["trigger"] == "points":
+                counts["points"] += 1
+                assert delta >= sv_threshold(outlook) - 1e-9
+                assert lead == {"code": "conflict.you", "text": f"Away from {plan}: {delta:+.1f} pts/wk"}
+            else:
+                counts["label"] += 1
+                assert lead == {"code": "conflict_plan.you", "text": f"Away from {plan}: adds a win-now piece"}
             continue
-        shared += 1
-        expected = old[gen.ident(card)]
-        if proof["season_signal"]["conflict"]["fired"]:
-            flagged += 1
-            assert you(block)["lead"]["code"] == "conflict_plan.you"
-            # Everything but the You lead is revision 2's. Where revision 2 had no
-            # block (no lead and no rank move for either team), the lead makes one and
-            # the other team shows its rank fact, as revision 2 composes it.
-            others = [t for t in block["teams"] if t["side"] != "you"]
-            if expected is None:
-                assert all(t["lead"]["code"].split(".")[0] in ("holds", "flat", "none") and not t["ranks"]
-                           for t in others)
-                continue
-            assert others == [t for t in expected["teams"] if t["side"] != "you"]
-            if you(expected):
-                assert {k: v for k, v in you(block).items() if k != "lead"} == {
-                    k: v for k, v in you(expected).items() if k != "lead"}
+        if lead and lead["code"] == "season_shed.you":
+            counts["shed"] += 1
+            assert delta <= -.5
+            future = [p for p in card.receive_player_ids if args["players"][p].position == "PICK"
+                      or (rows[p]["ppg"] is not None and rows[p]["label"] in ("rebuild", "cornerstone"))]
+            market = {a["id"]: a["market"] for a in proof["assets"]}
+            top = max(future, key=lambda p: (market[p], p))
+            name = args["players"][top].name
+            assert lead["text"].startswith(f"{plan}: {delta:+.1f} pts/wk, adds ")
+            assert lead["text"].removeprefix(f"{plan}: {delta:+.1f} pts/wk, adds ") in (
+                f"the {name}", name, tn._season_short(name))
             continue
-        assert json.dumps(block) == json.dumps(expected)
-    assert shared > 1000 and flagged > 0 and labelled > 0
+        counts["today"] += 1
+        stripped = tn.fit_block(_stripped(proof), card, args["players"], ctx)
+        if block is None and stripped is not None:
+            # Nothing supported on either side: the only lead revision 2 had was the Them
+            # side's age-based "Win-now-leaning" for an asset not labelled win-now (copy rule 1).
+            them = [t["lead"] for t in stripped["teams"] if t["side"] == "them"]
+            assert them and them[0]["code"] == "plan_win_now.them" and not any(t["ranks"] for t in stripped["teams"])
+            counts["them_dropped"] = counts.get("them_dropped", 0) + 1
+            continue
+        today = you(stripped or {})
+        assert (lead or None) == (today["lead"] if today else None)
+    assert counts["shed"] > 0 and counts["points"] > 0 and counts["today"] > 0, counts
 
 
-def test_unsaved_outlook_gets_no_season_block_and_todays_fit_block():
+def sv_threshold(outlook):
+    from backend import season_value as sv
+    return sv.CONFLICT_ADD[outlook]
+
+
+def _shed_proof():
+    """A real Tanking viewer's proof for the operator card (Adams out, rb_kid in)."""
+    args, ev, card, _ = operator()
+    args["outlook"] = "jets"
+    proof = evaluate(card, args, ev)
+    assert proof["eligible"] and proof["season_signal"]["viewer"]["season_direction"] == "shed"
+    return args, card, proof
+
+
+def test_shed_lead_needs_its_facts():
+    args, card, proof = _shed_proof()
+    signal = proof["season_signal"]
+    delta = signal["viewer"]["delta_pts_week"]
+    assert delta <= -.5 and not signal["conflict"]["fired"]
+    assert {a["id"]: a["label"] for a in signal["assets"]}["rb_kid"] == "rebuild"
+    ctx = context(args)
+    lead = you(tn.fit_block(proof, card, args["players"], ctx))["lead"]
+    assert lead == {"code": "season_shed.you", "text": f"Tanking: {delta:+.1f} pts/wk, adds rb_kid"}
+    today = you(tn.fit_block(_stripped(proof), card, args["players"], ctx))
+    for edit in ("small", "unlabelled", "add"):
+        changed = copy.deepcopy(proof)
+        sig = changed["season_signal"]
+        if edit == "small":
+            sig["viewer"]["delta_pts_week"] = -.49
+        elif edit == "unlabelled":
+            next(a for a in sig["assets"] if a["id"] == "rb_kid")["label"] = "depth"
+        else:
+            sig["viewer"]["season_direction"] = "add"
+        got = you(tn.fit_block(changed, card, args["players"], ctx))
+        assert not got or got["lead"]["code"] != "season_shed.you", edit
+        if edit != "add":
+            assert (got and got["lead"]) == (today and today["lead"]), edit
+    missing = copy.deepcopy(proof)
+    del missing["season_signal"]["viewer"]["season_direction"]
+    assert tn.fit_block(missing, card, args["players"], ctx) is None   # never inferred from the outlook
+    assert tn.season_block(missing, card, args["players"]) is None
+
+
+def test_unsaved_rebuilding_roster_is_scored_never_flagged():
     args, ev, card, _ = operator()
     args["outlook"] = None
     args["inferred_outlooks"] = {"me": "rebuilder"}
     proof = evaluate(card, args, ev)
+    viewer = proof["season_signal"]["viewer"]
+    assert viewer["scored"] is True and viewer["season_direction"] == "shed"
+    assert proof["season_signal"]["conflict"]["fired"] is False
+    block = tn.season_block(proof, card, args["players"])
+    assert block["line"].startswith(f"Season {viewer['delta_pts_week']:+.1f} pts/wk") and "conflict" not in block
+    lead = you(tn.fit_block(proof, card, args["players"], context(args)))["lead"]
+    assert lead == {"code": "season_shed.you",
+                    "text": f"Rebuild-leaning: {viewer['delta_pts_week']:+.1f} pts/wk, adds rb_kid"}
+
+
+def test_unsaved_not_sure_roster_gets_no_season_block_and_todays_fit_block():
+    args, ev, card, _ = operator()
+    args["outlook"] = None
+    args["inferred_outlooks"] = {"me": "not_sure"}
+    proof = evaluate(card, args, ev)
     assert proof["season_signal"]["viewer"]["scored"] is False
     assert proof["season_signal"]["evidence"]["state"] == "usable"
     assert tn.season_block(proof, card, args["players"]) is None
-    stripped = {k: v for k, v in proof.items() if k != "season_signal"}
     ctx = context(args)
     assert (tn.fit_block(proof, card, args["players"], ctx)
-            == tn.fit_block(stripped, card, args["players"], ctx))
+            == tn.fit_block(_stripped(proof), card, args["players"], ctx))
 
 
 @pytest.mark.parametrize("outlook", ["championship", "contender"])
@@ -370,9 +466,10 @@ def test_scored_viewer_keeps_their_win_now_lead_only_for_a_labelled_asset(outloo
 
 # ── without usable evidence: today's copy, byte for byte, and no season block ─
 
+@pytest.mark.parametrize("outlook", ["championship", "jets"])
 @pytest.mark.parametrize("season", ["absent", "unavailable"])
-def test_without_usable_evidence_the_fit_block_is_revision_2s_and_no_season_block(season):
-    base, rows = composed(2, "championship"), composed(5, "championship", season)
+def test_without_usable_evidence_the_fit_block_is_revision_2s_and_no_season_block(season, outlook):
+    base, rows = composed(2, outlook), composed(5, outlook, season)
     assert len(base) == len(rows) > 0
     for (card2, proof2, block2, season2), (card5, proof5, block5, season5) in zip(base, rows):
         assert gen.ident(card2) == gen.ident(card5)
@@ -421,7 +518,7 @@ def test_every_season_lead_fits_one_line():
     names = sorted({gen.POOL[p]["full_name"] for t in gen.LEAGUE["teams"] for p in t["players"]})
     for name in names:
         for label in ("win_now", "cornerstone"):
-            season = {"scored": True, "delta": 12.34, "conflict": None,
+            season = {"scored": True, "delta": 12.34, "direction": "add", "conflict": None,
                       "assets": {"x": {"ppg": 14.0, "label": label, "starts_for_viewer": True,
                                        "gain_for_viewer": 12.34}}}
             code, values = tn._season_lead(season, [{"id": "x", "name": name, "pos": "RB", "age": 25}],
@@ -435,8 +532,18 @@ def test_every_season_lead_fits_one_line():
         for text in (tn.SEASON_FIT_TEMPLATES["conflict.you"].format(plan=plan, pts="-12.3"),
                      tn.SEASON_FIT_TEMPLATES["conflict_plan.you"].format(plan=plan)):
             assert len(text) <= tn.FIT_LEAD_MAX, text
+    # The shed lead: every pool name, either plan word, or no lead (today's) when even
+    # the short name does not fit.
+    for name in names:
+        for outlook, declared in (("jets", True), ("rebuilder", True), ("rebuilder", False)):
+            season = {"scored": True, "delta": -12.34, "direction": "shed", "conflict": None,
+                      "outlook": outlook, "declared": declared,
+                      "assets": {"x": {"ppg": 4.0, "label": "rebuild"}}}
+            got = tn._season_lead(season, [{"id": "x", "name": name, "pos": "WR", "age": 22}], {"x": 900.0})
+            if got is not None:
+                assert len(tn.SEASON_FIT_TEMPLATES[got[0]].format(**got[1])) <= tn.FIT_LEAD_MAX
     # And on the generated decks.
-    for outlook in ("championship", "contender", "rebuilder"):
+    for outlook in ("championship", "contender", "rebuilder", "jets"):
         for *_, block, _ in composed(5, outlook):
             for lead in leads(block):
                 if lead["code"] in tn.SEASON_FIT_TEMPLATES:
@@ -462,7 +569,7 @@ def test_season_block_shape_and_unscored_viewer():
                 {"line", "season_pts_week", "dynasty_pct", "dynasty_dir"} if scored else set())
             assert {"v", "weeks", "as_of"} <= set(block) <= keys
             assert block["v"] == tn.SEASON_BLOCK_VERSION == "season-1"
-            assert scored is (outlook == "championship") and ("line" in block) is scored
+            assert scored is (outlook in ("championship", "rebuilder")) and ("line" in block) is scored
             assert block["weeks"] == len(proof["season_signal"]["evidence"]["weeks"])
 
 
@@ -488,6 +595,7 @@ def test_new_templates_are_pinned_and_pass_the_template_lint():
         "conflict_plan.you":  "Away from {plan}: adds a win-now piece",
         "season_win_now.you": "Win-now: {name} starts, +{pts}/wk",
         "season_starter.you": "Starts for you: {name}, +{pts}/wk",
+        "season_shed.you":    "{plan}: {pts} pts/wk, adds {asset}",
     }
     assert tn.SEASON_TEMPLATES == {
         "season":               "Season {pts} pts/wk",

@@ -11,6 +11,7 @@ league-projection snapshot and the engine's own market values.
 - `league_profile` computes the league's starter line per position and each
   rostered player's label (`win_now`, `cornerstone`, `rebuild`, `depth`, or None).
 - `plan_conflict` is the one conflict predicate (PRD §5.1). Nothing else decides one.
+  It returns the trigger that fired ("points" or "label") or False.
 
 Constants marked *starting value* are to be graded by the operator (PRD §4.6), not defended.
 """
@@ -37,6 +38,9 @@ FUTURE_FLOOR = 1500.0  # future value at or above which a startable player is a 
 MARGIN_MIN, MARGIN_SHARE = 0.5, 0.05  # starter-line band: max(0.5, 5% of the line) (starting values)
 # Lineup points a week a trade must cost before it works against a saved plan (PRD §5.1).
 CONFLICT_DROP = {"championship": 0.5, "contender": 1.0}
+# The mirror (amended 2026-11-11, operator direction): lineup points a week a trade must
+# ADD before it works against a saved Tanking / Rebuilding plan.
+CONFLICT_ADD = {"jets": 0.5, "rebuilder": 1.0}
 _MIRROR_PLANS = ("rebuilder", "jets")
 _EPS = 1e-9
 
@@ -208,20 +212,28 @@ def league_profile(evidence, *, rosters, position, market, age, slots=None, inac
 
 def plan_conflict(*, plan, declared, usable_evidence, pinned=False, delta_pts_week=None,
                   receive=(), give=(), profile=None, market=None):
-    """True when a card works against the viewer's saved plan (PRD §5.1).
+    """The trigger by which a card works against the viewer's saved plan (PRD §5.1), or False.
 
     plan: the engine's resolved outlook key (championship, contender, rebuilder, jets,
     not_sure). declared: the plan was saved (`outlook_source == "declared"`).
     pinned: the search pinned a player or partner. delta_pts_week: the viewer's season
     lineup after minus before. receive/give: asset ids. profile/market: for the
-    Rebuilding/Tanking mirror, which compares future value (an unprojected player's
+    Rebuilding/Tanking label rule, which compares future value (an unprojected player's
     future counts as his whole market value: nothing is explained by this season).
+
+    Returns "points" (All-in / Contending: the lineup falls by CONFLICT_DROP or more;
+    Tanking / Rebuilding: it rises by CONFLICT_ADD or more, checked first), "label"
+    (Tanking / Rebuilding: a win-now piece in for future value out), or False.
     """
     if not declared or not usable_evidence or pinned:
         return False
     if plan in CONFLICT_DROP:
-        return delta_pts_week is not None and delta_pts_week <= -CONFLICT_DROP[plan] + _EPS
-    if plan not in _MIRROR_PLANS or not receive or not give or profile is None:
+        return "points" if delta_pts_week is not None and delta_pts_week <= -CONFLICT_DROP[plan] + _EPS else False
+    if plan not in _MIRROR_PLANS:
+        return False
+    if delta_pts_week is not None and delta_pts_week >= CONFLICT_ADD[plan] - _EPS:
+        return "points"
+    if not receive or not give or profile is None:
         return False
     market, info = market or {}, profile["players"]
 
@@ -233,6 +245,7 @@ def plan_conflict(*, plan, declared, usable_evidence, pinned=False, delta_pts_we
         return float(market.get(pid) or 0.0) if value is None else value
 
     top = min(receive, key=lambda pid: (-float(market.get(pid) or 0.0), str(pid)))
-    return (label(top) == "win_now"
-            and any(label(pid) in ("rebuild", "cornerstone") for pid in give)
-            and sum(map(future, receive)) < sum(map(future, give)))
+    fired = (label(top) == "win_now"
+             and any(label(pid) in ("rebuild", "cornerstone") for pid in give)
+             and sum(map(future, receive)) < sum(map(future, give)))
+    return "label" if fired else False

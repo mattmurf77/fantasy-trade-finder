@@ -21,6 +21,10 @@ Covered (each proven red against the named sabotage):
 - test_conflict_predicate_*: All-in at -0.5, Contending at -1.0, the Rebuilding /
   Tanking mirror, never for Not sure, an unsaved plan, a pinned search or without
   usable evidence. Sabotage: use 0.5 for Contending.
+- test_conflict_predicate_rebuilding_and_tanking_points (amended 2026-11-11): Tanking
+  fires at +0.5, not +0.4; Rebuilding at +1.0, not +0.9; the trigger is named; the
+  label rule still fires on its own; never for an unsaved plan. Sabotage: swap the
+  two CONFLICT_ADD thresholds.
 - test_label_distribution_on_the_fixture: the per-label counts, pinned.
 - test_free_agent_level_reads_v6_rows: v6 free-agent rows set the empty-slot level
   and never enter `players`; a v5 snapshot gives zeros.
@@ -317,7 +321,7 @@ def conflict(**kwargs):
 
 
 def test_conflict_predicate_all_in_and_contending_thresholds():
-    assert conflict(delta_pts_week=-0.5) and conflict(delta_pts_week=-1.82)
+    assert conflict(delta_pts_week=-0.5) == "points" and conflict(delta_pts_week=-1.82) == "points"
     assert not conflict(delta_pts_week=-0.49) and not conflict(delta_pts_week=0.0)
     assert conflict(plan="contender", delta_pts_week=-1.0)
     assert not conflict(plan="contender", delta_pts_week=-0.6)
@@ -346,10 +350,25 @@ def test_conflict_predicate_rebuilding_mirror(prof, plan):
     assert not mirror([cmc], [jacobs])                # gives only a win-now piece
     assert not mirror([cmc, jefferson], [lemon])      # the most valuable incoming is a cornerstone
     assert not mirror([cmc], [mahomes])               # gives an unlabelled (borderline) player
-    assert mirror([cmc], [lemon], delta_pts_week=5.0)  # the points do not matter for the mirror
+    assert mirror([cmc], [lemon], delta_pts_week=0.0) == "label"  # the label rule on its own
+    assert mirror([cmc], [lemon], delta_pts_week=5.0) == "points"  # the points rule is checked first
     assert not mirror([cmc], [lemon], declared=False)
     # Less future must come back than goes out.
     rich = {**MARKET, cmc: 20000.0}
     rich_prof = sv.league_profile(evidence(), rosters=ROSTERS, position=POSITION, market=rich, age=AGE)
     assert rich_prof["players"][cmc]["label"] == "win_now"
     assert not conflict(plan=plan, receive=[cmc], give=[lemon], profile=rich_prof, market=rich)
+
+
+@pytest.mark.parametrize("plan, fires, quiet", [("jets", 0.5, 0.4), ("rebuilder", 1.0, 0.9)])
+def test_conflict_predicate_rebuilding_and_tanking_points(prof, plan, fires, quiet):
+    """The mirror in points (amended 2026-11-11): a trade that ADDS this much works against
+    a saved Tanking / Rebuilding plan, whatever the labels say."""
+    assert sv.CONFLICT_ADD == {"jets": 0.5, "rebuilder": 1.0}
+    lemon, jacobs = BY_NAME["Makai Lemon"], BY_NAME["Josh Jacobs"]
+    for kw in ({}, {"receive": [lemon], "give": [jacobs], "profile": prof, "market": MARKET}):
+        assert conflict(plan=plan, delta_pts_week=fires, **kw) == "points"
+        assert conflict(plan=plan, delta_pts_week=quiet, **kw) is False
+        assert conflict(plan=plan, delta_pts_week=-3.0, **kw) is False   # shedding never conflicts
+        assert conflict(plan=plan, delta_pts_week=fires, declared=False, **kw) is False
+        assert conflict(plan=plan, delta_pts_week=fires, pinned=True, **kw) is False

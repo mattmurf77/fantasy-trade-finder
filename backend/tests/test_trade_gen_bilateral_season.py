@@ -39,6 +39,23 @@ Covered (each proven red against the named sabotage, then green on revert):
   test_bilateral_revision_4, the dark keys dropped from search config). Sabotage: leave
   a season key in `search.config` when revision 5 is not selected.
 - test_proof_carries_plan_fit_and_lineup_gain_separately. Sabotage: store only `team_plan`.
+- Amended 2026-11-11 (operator direction: Rebuilding / Tanking are season-scored in the
+  shed direction, order only):
+  - I4 (restated) test_rebuilding_and_tanking_viewers_keep_inventory_and_terms: same
+    inventory and terms, the order differs. Sabotage: let the shed term qualify a card
+    (add it to `team_plan_gain` and `utility` in `_owner`).
+  - test_no_gate_changes_for_rebuilding_and_tanking: every candidate's verdict and reason
+    equal revision 2's, Tanking's two hard rules among them. Same sabotage.
+  - test_tanking_and_rebuilding_shed_lineup_points_in_the_first_30. Sabotages: sign not
+    reversed; equal weights (Rebuilding at 1.0).
+  - test_a_point_shed_by_tanking_weighs_what_a_point_gained_weighs_for_all_in.
+    Sabotage: a different scale (RATE / 2).
+  - test_shed_scored_viewer_proof. Sabotage: record `season_direction` "add".
+  - test_inferred_rebuilding_roster_is_scored_and_never_flagged. Sabotage: drop the
+    `declared` precondition of `plan_conflict`.
+- Stage 2, two win-now teams (Part B): test_stage_2_win_now_pair_trade_on_a_ranking_
+  discrepancy, test_stage_2_win_now_pair_trade_on_complementary_needs (what the code
+  as built does; no sabotage: they describe, they do not guard a change).
 - test_all_in_headline_direction_on_the_fixture (planner's headline, stated tolerance).
 - Also: selector composition and defaults, presentment version, revalidation, stage 2 runs.
 """
@@ -189,6 +206,7 @@ def test_not_sure_viewer_with_usable_evidence_is_revision_2():
 
 @pytest.mark.parametrize("outlook", ["rebuilder", "jets"])
 def test_rebuilding_and_tanking_viewers_keep_inventory_and_terms(outlook):
+    """I4 as amended 2026-11-11: same inventory and terms as revision 2; the order differs."""
     base, _ = deck(2, outlook)
     cards, _ = deck(5, outlook)
     assert sorted(terms(c) for c in cards) == sorted(terms(c) for c in base)
@@ -196,10 +214,134 @@ def test_rebuilding_and_tanking_viewers_keep_inventory_and_terms(outlook):
     assert flagged, "the mirror rule fires somewhere on the fixture"
     for card in flagged:
         conflict = proof(card)["season_signal"]["conflict"]
-        assert conflict["plan"] == outlook and conflict["threshold"] is None
-    # Penalty 0: only flagged cards could move, and with no penalty none does.
+        assert conflict["plan"] == outlook and conflict["threshold"] == sv.CONFLICT_ADD[outlook]
+        assert conflict["trigger"] in ("points", "label")
+    # Penalty 0: the same inventory again, and the shed term alone reorders it.
     still, _ = deck(5, outlook, demotion=0.0)
-    assert [terms(c) for c in still] == [terms(c) for c in base]
+    assert sorted(terms(c) for c in still) == sorted(terms(c) for c in base)
+    assert [terms(c) for c in still] != [terms(c) for c in base]
+
+
+def _candidates(outlook, args, per_member=120):
+    """Revision 2's own candidate stream (eligible or not) for the first four partners."""
+    search = r2._Search(**args)
+    out = []
+    with ts._cfg_override(search.config), ts.stud_tax_override("market"):
+        for member in search.members[:4]:
+            stream = search.candidates(member)
+            for _ in range(per_member):
+                card = next(stream, None)
+                if card is None:
+                    break
+                search.evaluate(card)
+                out.append(card)
+    return out
+
+
+@pytest.mark.parametrize("outlook", ["rebuilder", "jets"])
+def test_no_gate_changes_for_rebuilding_and_tanking(outlook):
+    """Every candidate gets revision 2's verdict and reason under revision 5, eligible or
+    rejected; Tanking's hard rules (own next-year pick, RB without a long-term case) still
+    reject what they rejected."""
+    args = world(outlook)
+    me = args["manager_preferences"]["me"]
+    picks = sorted(p for p in args["user_roster"] if args["players"][p].position == "PICK")
+    me["own_next_draft_pick_ids"] = picks[:2]
+    cards = _candidates(outlook, args)
+    old = r2.evaluate_bilateral_trades(cards, **args)
+    new = r5.evaluate_bilateral_trades(cards, **args, season_evidence=_evidence())
+    verdicts = [(o.eligible, o.reason) for o in old]
+    assert verdicts == [(n.eligible, n.reason) for n in new]
+    reasons = {reason for _, reason in verdicts}
+    assert sum(e for e, _ in verdicts) > 20 and len(reasons) > 3, reasons
+    if outlook == "jets":
+        assert {"tanking_own_next_draft_pick", "tanking_rb_without_long_term_exception"} <= reasons
+
+
+def _first_30_points(cards):
+    return statistics.mean(delta(c) for c in cards[:30])
+
+
+def test_tanking_and_rebuilding_shed_lineup_points_in_the_first_30():
+    """With usable evidence the first 30 of a Tanking or Rebuilding deck shed more lineup
+    points a week than revision 2's; for the same Rebuilding viewer the move at its own
+    weight (0.5) is smaller than at Tanking's (1.0). Measured at build (fixture): Tanking
+    -2.09 -> -2.83, Rebuilding -1.95 -> -2.95 (at weight 1.0: -3.22)."""
+    moves = {}
+    for outlook in ("jets", "rebuilder"):
+        base, _ = deck(2, outlook)
+        cards, _ = deck(5, outlook)
+        moves[outlook] = _first_30_points(cards) - _first_30_points(base)
+        assert moves[outlook] <= -.5, (outlook, moves[outlook])
+        assert sum(delta(c) <= -.5 for c in cards[:30]) > sum(delta(c) <= -.5 for c in base[:30])
+    full, _ = r5.generate_bilateral_trades(**world("rebuilder"), season_evidence=_evidence(),
+                                           config={"season_shed_weight_rebuilding": 1.0})
+    base, _ = deck(2, "rebuilder")
+    assert moves["rebuilder"] > _first_30_points(full) - _first_30_points(base) + .1
+
+
+def test_a_point_shed_by_tanking_weighs_what_a_point_gained_weighs_for_all_in():
+    """lineup_gain of a Tanking viewer is exactly minus the All-in viewer's for the same
+    card (RATE x points / gross market, clipped), Rebuilding's is half of that, and it is
+    positive when the trade sheds points."""
+    allin = probe()
+    me = allin.teams["me"]
+    for outlook, weight in (("jets", 1.0), ("rebuilder", .5)):
+        cards, _ = deck(5, outlook)
+        signs = set()
+        for card in cards[:300]:
+            give, receive = tuple(card.give_player_ids), tuple(card.receive_player_ids)
+            gross = sum(allin.market[p] for p in give + receive)
+            gained = r1._clip(allin._owner(me, give, receive)["need_utility"] * 4)
+            assert gained == pytest.approx(r1._clip(r5.RATE * delta(card) / gross), abs=1e-12)
+            shed = proof(card)["season_signal"]["components"]["lineup_gain"]
+            assert shed == pytest.approx(r1._clip(-weight * r5.RATE * delta(card) / gross), abs=1e-12)
+            if weight == 1.0:
+                assert shed == pytest.approx(-gained, abs=1e-12)
+            signs.add((delta(card) < 0, shed > 0))
+        assert (True, True) in signs and (False, True) not in signs
+
+
+@pytest.mark.parametrize("outlook", ["rebuilder", "jets"])
+def test_shed_scored_viewer_proof(outlook):
+    """The viewer's season facts as for a win-now viewer, the direction, the components and
+    the support moved by the team-plan weight times the re-scored team plan."""
+    cards, report = deck(5, outlook)
+    assert report.as_dict()["season_signal"]["viewer_scored"] is True
+    assert report.as_dict()["starter_evidence"] == "projected_points_viewer"
+    for card in cards[:200]:
+        data = proof(card)
+        signal = data["season_signal"]
+        viewer = signal["viewer"]
+        assert viewer["scored"] is True and viewer["season_direction"] == "shed"
+        assert viewer["delta_pts_week"] == pytest.approx(delta(card), abs=.01)
+        assert {"lineup_before", "lineup_after", "incoming_starters", "outgoing_starters",
+                "dynasty_cost_pct"} <= set(viewer)
+        parts = signal["components"]
+        combined = min(1, max(0, .5 + .5 * max(-1, min(1, parts["plan_fit"] + parts["lineup_gain"]))))
+        assert parts["team_plan"] == pytest.approx(combined, abs=1e-12)
+        support = data["viewer"]["support"]
+        assert support["components"]["team_plan"] == parts["team_plan"]
+        adjustments = support["season_adjustments"]
+        assert support["score"] == pytest.approx(min(1, max(0, support["season_unadjusted_score"]
+                                                            + sum(adjustments.values()))), abs=1e-12)
+        assert all(a["plan_lean"] is None for a in signal["assets"])  # the label table is not read
+        assert data["viewer"]["team_plan_gain"] == pytest.approx(  # the gates' figure: revision 2's
+            r1._clip(parts["plan_fit"] + r1._clip(data["viewer"]["need_utility"] * 4)), abs=1e-12)
+
+
+def test_inferred_rebuilding_roster_is_scored_and_never_flagged():
+    args = world("rebuilder")
+    args["outlook"] = None
+    args["inferred_outlooks"] = {"me": "rebuilder"}
+    base, _ = r2.generate_bilateral_trades(**args)
+    cards, _ = r5.generate_bilateral_trades(**args, season_evidence=_evidence())
+    assert sorted(terms(c) for c in cards) == sorted(terms(c) for c in base)
+    assert [terms(c) for c in cards] != [terms(c) for c in base]
+    for card in cards:
+        signal = proof(card)["season_signal"]
+        assert signal["viewer"]["outlook_source"] == "inferred" and signal["viewer"]["season_direction"] == "shed"
+        assert signal["conflict"]["fired"] is False
 
 
 # ── I5, I6: plan fit from the label table ────────────────────────────────────
@@ -290,7 +432,7 @@ def test_operators_card_is_flagged_kept_and_below_its_twin():
     signal = new[0]["season_signal"]
     assert signal["viewer"]["delta_pts_week"] <= -.5 and signal["viewer"]["outgoing_starters"] == [ADAMS]
     assert signal["conflict"] == {"fired": True, "plan": "championship", "kind": "board", "named": "rb_kid",
-                                  "threshold": .5, "demotion": .10}
+                                  "trigger": "points", "threshold": .5, "demotion": .10}
     assert new[0]["viewer"]["support"]["score"] == pytest.approx(
         new[0]["viewer"]["support"]["season_unadjusted_score"] - .10)
     labels = {a["id"]: a["label"] for a in signal["assets"]}
@@ -311,7 +453,8 @@ def test_target_list_card_is_flagged_not_demoted():
     data = r5.evaluate_bilateral_trade(card, **args, season_evidence=ev).as_dict()
     assert data["eligible"] and data["viewer"]["intent"]["path"] == "declared_intent"
     assert data["season_signal"]["conflict"] == {"fired": True, "plan": "championship", "kind": "target",
-                                                 "named": "rb_kid", "threshold": .5, "demotion": 0.0}
+                                                 "named": "rb_kid", "trigger": "points", "threshold": .5,
+                                                 "demotion": 0.0}
     assert "season_adjustments" not in data["viewer"]["support"]
 
 
@@ -331,7 +474,8 @@ def test_each_declared_kind_comes_from_its_own_input_flagged_not_demoted(kind):
     data = r5.evaluate_bilateral_trade(card, **args, season_evidence=ev).as_dict()
     assert data["eligible"] and data["viewer"]["intent"]["path"] == "declared_intent"
     assert data["season_signal"]["conflict"] == {"fired": True, "plan": "championship", "kind": kind,
-                                                 "named": named, "threshold": .5, "demotion": 0.0}
+                                                 "named": named, "trigger": "points", "threshold": .5,
+                                                 "demotion": 0.0}
     assert "season_adjustments" not in data["viewer"]["support"]
     assert kind not in r5.DEMOTED_KINDS and r5.DEMOTED_KINDS == {"board"}
 
@@ -425,6 +569,70 @@ def test_stage_2_generates():
     base, _ = deck(5, "championship")
     assert cards and report.as_dict()["season_signal"]["partner_matching"] is True
     assert {terms(c) for c in cards} != {terms(c) for c in base}
+
+
+_STAGE_2 = {"season_partner_matching": 1.0}
+
+
+def _card(args, partner, give, receive):
+    member = next(m for m in args["league"].members if m.user_id == partner)
+    return ts.TradeCard("", LEAGUE_ID, "me", partner, member.username, list(give), list(receive), 0, 0, 0)
+
+
+@pytest.mark.parametrize("partner, wanted, offered", [
+    ("u00", "Terry McLaurin", "Kenyon Sadiq"),          # a Contending partner
+    ("u03", "Tucker Kraft", "2027_r1_t01"),             # an All-in partner
+])
+def test_stage_2_win_now_pair_trade_on_a_ranking_discrepancy(partner, wanted, offered):
+    """Two win-now teams, stage 2 on: when the partner's own board rates the player the
+    viewer wants well below market (60%), the card is eligible for both. With the
+    partner's board at market the same card is not (the partner gains nothing): the
+    discrepancy is what makes it. Measured at build; Travis Etienne for the same pick
+    stays ineligible either way (counterparty_no_benefit)."""
+    verdicts = []
+    for share in (.6, 1.0):
+        args = world("championship", neutral_board=True)
+        member = next(m for m in args["league"].members if m.user_id == partner)
+        assert args["opponent_outlooks"][partner] in r5.SCORED_OUTLOOKS and member.has_rankings
+        member.elo_ratings.update({k: args["seed_elo"][k] for k in member.elo_ratings})
+        x = BY_NAME[wanted]
+        give = BY_NAME.get(offered, offered)
+        member.elo_ratings[x] = ts.value_to_elo(ts.elo_to_value(args["seed_elo"][x]) * share)
+        search = r5._Search(**args, season_evidence=_evidence(), config=_STAGE_2)
+        assert search.starts_for(search.teams["me"], x)                    # he starts for the viewer
+        data = r5.evaluate_bilateral_trade(_card(args, partner, [give], [x]), **args,
+                                           season_evidence=_evidence(), config=_STAGE_2).as_dict()
+        verdicts.append((data["eligible"], data["reason"]))
+        if share < 1:
+            assert data["counterparty"]["season"]["delta_pts_week"] < 0     # the partner gives a starter
+    assert verdicts == [(True, "eligible"), (False, "counterparty_no_benefit")]
+
+
+def test_stage_2_win_now_pair_trade_on_complementary_needs():
+    """Two win-now teams, stage 2 on, positional needs that complement: the viewer's QB is
+    out and the All-in partner has a spare QB on its bench; the viewer has a spare RB the
+    partner would start. Each gains lineup points at a different position, and the card is
+    eligible with stage 2 on (and off). The fixture league has no such 1-for-1 between
+    win-now teams as dealt (two FLEX slots absorb every surplus but QB), so the viewer's QB
+    injury and the spare RB are constructed."""
+    args = world("championship", neutral_board=True)
+    ev = evidence()
+    args["manager_preferences"]["me"]["inactive_ids"] = [BY_NAME["Joe Burrow"]]
+    args["players"]["rb_spare"] = Player("rb_spare", "rb_spare", "RB", "TST", 26)
+    args["seed_elo"]["rb_spare"] = args["user_elo"]["rb_spare"] = ts.value_to_elo(700.)
+    ev["players"]["rb_spare"] = {"ppg": 10.0, "games": 13}
+    args["user_roster"].append("rb_spare")
+    assert args["opponent_outlooks"]["u08"] == "championship"
+    card = _card(args, "u08", ["rb_spare"], [BY_NAME["Jared Goff"]])
+    for config in (_STAGE_2, {}):
+        data = r5.evaluate_bilateral_trade(card, **args, season_evidence=ev, config=config).as_dict()
+        assert data["eligible"], (config, data["reason"])
+        assert data["season_signal"]["viewer"]["delta_pts_week"] >= .5
+        assert data["season_signal"]["viewer"]["incoming_starters"] == [BY_NAME["Jared Goff"]]
+    on = r5.evaluate_bilateral_trade(card, **args, season_evidence=ev, config=_STAGE_2).as_dict()
+    partner = on["counterparty"]["season"]
+    assert partner["delta_pts_week"] >= .5 and partner["incoming_starters"] == ["rb_spare"]
+    assert partner["outgoing_starters"] == []                               # Goff sat on their bench
 
 
 # ── proof fields (lld §4) ─────────────────────────────────────────────────────
@@ -538,16 +746,20 @@ def test_selector_composition(cfg, expected):
 
 def test_knob_defaults_are_dark():
     defaults = {k: v for k, v, _ in db._MODEL_CONFIG_DEFAULTS}
-    for key, value in ((KEY, 0.), ("season_partner_matching", 0.), ("season_conflict_demotion", .10)):
+    for key, value in ((KEY, 0.), ("season_partner_matching", 0.), ("season_conflict_demotion", .10),
+                       ("season_shed_weight_tanking", 1.), ("season_shed_weight_rebuilding", .5)):
         assert ts._DEFAULT_CFG[key] == value and defaults[key] == value
     assert bo.owner_version() != r5.VERSION and bo.owner_presentment_version() == presentment.GENERATOR_VERSION
 
 
-_DARK = ("owner_bilateral_revision_5_enabled", "season_conflict_demotion", "season_partner_matching")
+_DARK = ("owner_bilateral_revision_5_enabled", "season_conflict_demotion", "season_partner_matching",
+         "season_shed_weight_tanking", "season_shed_weight_rebuilding")
 
 
-@pytest.mark.parametrize("extra", [{}, {KEY: 0., "season_conflict_demotion": .3, "season_partner_matching": 1.},
-                                   {KEY: 2., "season_partner_matching": 1.}], ids=["defaults", "zero", "two"])
+@pytest.mark.parametrize("extra", [{}, {KEY: 0., "season_conflict_demotion": .3, "season_partner_matching": 1.,
+                                         "season_shed_weight_tanking": 2., "season_shed_weight_rebuilding": 0.},
+                                   {KEY: 2., "season_partner_matching": 1., "season_shed_weight_rebuilding": 1.}],
+                         ids=["defaults", "zero", "two"])
 def test_other_revisions_unchanged_with_the_new_knobs_present(extra):
     from backend.tests import test_bilateral_revision_4 as golden
     ts._cfg.update(age_pref_mult_u23=1.0, age_pref_mult_30plus=1.0)  # the goldens' own setup

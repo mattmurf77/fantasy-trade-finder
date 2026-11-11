@@ -641,6 +641,10 @@ SEASON_FIT_TEMPLATES: dict[str, str] = {
     "conflict_plan.you":  "Away from {plan}: adds a win-now piece",
     "season_win_now.you": "Win-now: {name} starts, +{pts}/wk",
     "season_starter.you": "Starts for you: {name}, +{pts}/wk",
+    # A Rebuilding / Tanking viewer's card that sheds lineup points for future value
+    # (amended 2026-11-11). {plan}: the saved plan's name, or "Rebuild-leaning" for
+    # a roster read; {asset}: the most valuable incoming rebuild piece, cornerstone or pick.
+    "season_shed.you":    "{plan}: {pts} pts/wk, adds {asset}",
 }
 #: The season block's text (next app build).
 SEASON_BLOCK_VERSION = "season-1"
@@ -662,6 +666,10 @@ SEASON_LINE_SEPARATOR = " · "
 #: Printed label tags. `depth` and no label print nothing.
 SEASON_LABELS: dict[str, str] = {"win_now": "Win-now piece", "cornerstone": "Cornerstone",
                                  "rebuild": "Rebuild piece"}
+#: What the shed lead names: an incoming asset with one of these labels, or a pick.
+SEASON_FUTURE_LABELS = ("rebuild", "cornerstone")
+#: The shed lead's plan word for a Rebuilding roster read with no saved plan.
+SEASON_SHED_ROSTER = "Rebuild-leaning"
 #: For a season-scored viewer, the other team's "Win-now-leaning: adds X" lead
 #: is kept only when X carries one of these labels.
 SEASON_WIN_NOW_LABELS = ("win_now", "cornerstone")
@@ -688,9 +696,15 @@ def _season_view(proof: dict) -> Optional[dict]:
     delta = viewer["delta_pts_week"] if scored else None
     if scored and not _fit_finite(delta):
         raise ValueError("delta_pts_week")
+    # The direction the engine scored the viewer in, as the proof states it: never
+    # inferred from the outlook ("add": All-in / Contending; "shed": Rebuilding / Tanking).
+    direction = viewer.get("season_direction") if scored else None
+    if scored and direction not in ("add", "shed"):
+        raise ValueError("season_direction")
     rows = {row["id"]: row for row in signal["assets"]}
-    return {"scored": scored, "delta": delta, "assets": rows, "evidence": evidence,
-            "dynasty": viewer.get("dynasty_cost_pct"),
+    return {"scored": scored, "delta": delta, "direction": direction, "assets": rows, "evidence": evidence,
+            "dynasty": viewer.get("dynasty_cost_pct"), "outlook": viewer.get("outlook"),
+            "declared": viewer.get("outlook_source") == "declared",
             # A saved Rebuilding or Tanking plan: the one unscored viewer the
             # season copy speaks to (labels, the mirror conflict).
             "mirror": (not scored and viewer.get("outlook") in _FIT_REBUILD
@@ -714,12 +728,16 @@ def _season_lead(season: dict, incoming: list, market: dict) -> Optional[tuple[s
     conflict = season["conflict"]
     if conflict:
         plan = FIT_TAGS["declared"][conflict["plan"]]
-        if conflict["plan"] in _FIT_REBUILD:
+        if conflict["plan"] in _FIT_REBUILD and conflict.get("trigger") != "points":
             return "conflict_plan.you", {"plan": plan}
         if season["delta"] is None:
             raise ValueError("conflict without a season delta")
         return "conflict.you", {"plan": plan, "pts": f"{season['delta']:+.1f}"}
-    if not season["scored"] or season["delta"] < SEASON_MIN_PTS:
+    if not season["scored"]:
+        return None
+    if season["direction"] == "shed":
+        return _season_shed_lead(season, incoming, market)
+    if season["delta"] < SEASON_MIN_PTS:
         return None
     rows = season["assets"]
     starters = [a for a in incoming if a["pos"] in _FIT_DEPTH_POSITIONS
@@ -736,6 +754,29 @@ def _season_lead(season: dict, incoming: list, market: dict) -> Optional[tuple[s
                 values = {"name": name, "pts": pts}
                 if len(SEASON_FIT_TEMPLATES[code].format(**values)) <= FIT_LEAD_MAX:
                     return code, values
+    return None
+
+
+def _season_shed_lead(season: dict, incoming: list, market: dict) -> Optional[tuple[str, dict]]:
+    """A shed-scored viewer's lead for a card that gives up at least SEASON_MIN_PTS a week
+    of lineup points and brings back future value, or None for today's lead. Names the
+    most valuable incoming pick or projected rebuild piece / cornerstone, as labelled."""
+    if season["delta"] > -SEASON_MIN_PTS:
+        return None
+    rows = season["assets"]
+    future = [a for a in incoming if a["pos"] == "PICK" or (
+        a["pos"] in _FIT_DEPTH_POSITIONS and _season_projected(rows.get(a["id"]))
+        and rows[a["id"]].get("label") in SEASON_FUTURE_LABELS)]
+    if not future:
+        return None
+    top = max(future, key=lambda a: (market[a["id"]], a["id"]))
+    plan = (FIT_TAGS["declared"][season["outlook"]] if season["declared"] else SEASON_SHED_ROSTER)
+    names = ([f"the {top['name']}"] if top["pos"] == "PICK"
+             else [top["name"], _season_short(top["name"])])
+    for asset in names:
+        values = {"plan": plan, "pts": f"{season['delta']:+.1f}", "asset": asset}
+        if len(SEASON_FIT_TEMPLATES["season_shed.you"].format(**values)) <= FIT_LEAD_MAX:
+            return "season_shed.you", values
     return None
 
 
@@ -960,9 +1001,9 @@ def season_block(proof: dict, card, players: dict) -> Optional[dict]:
 
     None unless the proof's season evidence is usable, the viewer is
     season-scored or holds a saved Rebuilding / Tanking plan (never for Not
-    sure or an unsaved outlook), and there is something to show. `line`
-    (with `season_pts_week`, `dynasty_pct`, `dynasty_dir`) only for a
-    season-scored viewer (All-in, Contending); `labels` only for
+    sure), and there is something to show. `line` (with `season_pts_week`,
+    `dynasty_pct`, `dynasty_dir`) only for a season-scored viewer, in either
+    direction (All-in, Contending; Rebuilding, Tanking); `labels` only for
     projected players whose engine label prints; `conflict` only when the
     plan-conflict rule fired. Pure; raises nothing (malformed input: None).
     """

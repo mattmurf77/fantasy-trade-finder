@@ -16,6 +16,13 @@ record differ. Usable:
 - Candidate seats: the viewer's receive pools guarantee places to players who
   would start for the viewer; the give pools to the viewer's picks and
   non-starters.
+- A Rebuilding or Tanking team (the viewer, read or saved; every such team in
+  stage 2) is season-scored in the other direction (amended 2026-11-11, operator
+  direction): the lineup part of its team plan becomes the season lineup change
+  with the sign reversed, at `season_shed_weight_tanking` / `_rebuilding` of an
+  All-in team's strength, so points shed count for the trade. It is a ranking term
+  only: its lineup, plan fit, candidate pools, gates and inventory stay revision
+  2's, and the support moves after eligibility (`_season_signal`), as the demotion does.
 - Plan conflict (`season_value.plan_conflict`, the one predicate): a card that
   works against the viewer's saved plan is flagged; when it qualified through the
   viewer's own rankings, both support scores fall by `season_conflict_demotion`
@@ -56,6 +63,8 @@ MIRROR_LEAN = {"rebuild": .7, "cornerstone_young": .45, "cornerstone": .2,
                "win_now_rb": -.8, "win_now": -.45}
 MIRROR_SCALE = {"jets": 1.0, "rebuilder": .6}
 DEMOTION_KEY, MATCHING_KEY = "season_conflict_demotion", "season_partner_matching"
+# The shed term's strength per outlook (model_config knobs; Tanking mirrors All-in).
+SHED_KEYS = {"jets": "season_shed_weight_tanking", "rebuilder": "season_shed_weight_rebuilding"}
 # Conflict kinds: "board" (qualified through the viewer's own rankings) or the
 # viewer's declaration that matched, in this precedence (revision 2's own order):
 # the incoming player is on the target list, the outgoing player is on the trade
@@ -69,12 +78,15 @@ DEMOTED_KINDS = frozenset(("board",))
 POLICY = "price_efficient_bilateral_portfolio_season_signal"
 
 
-def _shift(side, delta, adjustments):
-    """A detached side with its support moved; the cached side is untouched."""
+def _shift(side, delta, adjustments, team_plan=None):
+    """A detached side with its support moved; the cached side is untouched.
+    `team_plan`: the side's re-scored team plan component, when the move is that."""
     support = dict(side["support"])
     support.update(score=incumbent._clip(support["score"] + delta, 0, 1),
                    range=[incumbent._clip(bound + delta, 0, 1) for bound in support["range"]],
                    season_unadjusted_score=support["score"], season_adjustments=adjustments)
+    if team_plan is not None:
+        support["components"] = {**support["components"], "team_plan": team_plan}
     return {**side, "support": support}
 
 
@@ -87,6 +99,7 @@ class SeasonLayer:
         # Read before the base constructor drops the dark knobs from its config.
         self.season_conflict_demotion = float(given.get(DEMOTION_KEY, ts._c(DEMOTION_KEY)))
         self.season_partner_matching = given.get(MATCHING_KEY, ts._c(MATCHING_KEY)) == 1.0
+        self.season_shed_weight = {outlook: float(given.get(key, ts._c(key))) for outlook, key in SHED_KEYS.items()}
         self.season_evidence = season_evidence
         self._season_on = sv.usable(season_evidence)
         self._season_ppg = {pid: item["ppg"] for pid, item in
@@ -111,9 +124,28 @@ class SeasonLayer:
     # --- which teams, and their season lineup (lld §3.1, §3.2) -----------------
 
     def _season_scored(self, team):
+        """Scored in the win-now direction: its lineup, plan fit and pools read the season."""
         return (self._season_on and team["outlook"] in SCORED_OUTLOOKS
                 and (team["uid"] == self.user_id or self.season_partner_matching)
                 and not team.get("native_bounds"))
+
+    def _season_shed(self, team):
+        """Scored in the shed direction (Rebuilding / Tanking): a ranking term only."""
+        return (self._season_on and team["outlook"] in MIRROR_OUTLOOKS
+                and (team["uid"] == self.user_id or self.season_partner_matching)
+                and not team.get("native_bounds"))
+
+    def _shed_parts(self, team, give, receive):
+        """(plan_fit, lineup_gain, team_plan) of a shed-scored side: the season lineup
+        change with the sign reversed, on the All-in mapping (RATE x points / gross market,
+        which is exactly `clip(4 x need_utility)` for an All-in team), times the outlook's
+        weight; combined with revision 2's plan fit exactly as `team_plan` combines them."""
+        before = self._season_total(team["roster"], team)[0]
+        after = self._season_total((team["roster"] - set(give)) | set(receive), team)[0]
+        gross = sum(self.market[p] for p in give + receive)
+        lineup_gain = incumbent._clip(-self.season_shed_weight[team["outlook"]] * RATE * (after - before) / gross)
+        plan_fit = self._plan_fit(team, give, receive)
+        return plan_fit, lineup_gain, incumbent._clip(.5 + .5 * incumbent._clip(plan_fit + lineup_gain), 0, 1)
 
     def _team(self, uid, roster, *args):
         if self._season_assets is None:
@@ -264,7 +296,7 @@ class SeasonLayer:
 
     def _owner(self, team, give, receive):
         result = super()._owner(team, give, receive)
-        if "season" in result or not self._season_scored(team):
+        if "season" in result or not (self._season_scored(team) or self._season_shed(team)):
             return result
         before, held, _ = self._season_total(team["roster"], team)
         after, starters, _ = self._season_total((team["roster"] - set(give)) | set(receive), team)
@@ -289,9 +321,10 @@ class SeasonLayer:
             return
         give, receive = tuple(card.give_player_ids), tuple(card.receive_player_ids)
         viewer, side = self.teams[self.user_id], data["viewer"]
-        scored, season = self._season_scored(viewer), side.get("season")
+        win_now, shed = self._season_scored(viewer), self._season_shed(viewer)
+        scored, season = win_now or shed, side.get("season")
         plan, intent = viewer["outlook"], side["intent"]
-        fired = sv.plan_conflict(plan=plan, declared=viewer["outlook_source"] == "declared",
+        trigger = sv.plan_conflict(plan=plan, declared=viewer["outlook_source"] == "declared",
             usable_evidence=True, pinned=bool(self.give_pins or self.recv_pins or self.opponent_id),
             delta_pts_week=season["delta_pts_week"] if season else None,
             receive=receive, give=give, profile=self._profile, market=self.market)
@@ -309,7 +342,7 @@ class SeasonLayer:
                 self._position(sell) in prefs.get("trade_away_positions", ()))) if matched), None)
         else:
             kind = None  # qualified by the plan itself, or otherwise: no conflict recorded
-        fired = fired and kind is not None
+        fired = bool(trigger) and kind is not None
         named = None
         if fired:
             if kind == "board":
@@ -322,8 +355,12 @@ class SeasonLayer:
                 named = sell if kind in ("trade_block", "trade_away") else buy
         demotion = (self.season_conflict_demotion
                     if fired and kind in DEMOTED_KINDS and self.season_conflict_demotion > 0 else 0.0)
-        plan_fit = self._plan_fit(viewer, give, receive)
-        lineup_gain = incumbent._clip(side["need_utility"] * 4)
+        if shed:
+            plan_fit, lineup_gain, team_plan = self._shed_parts(viewer, give, receive)
+        else:
+            plan_fit = self._plan_fit(viewer, give, receive)
+            lineup_gain = incumbent._clip(side["need_utility"] * 4)
+            team_plan = side["support"]["components"]["team_plan"]
         roster_total = round(sum(self.market.get(p, 0.0) for p in viewer["roster"]), 2)
         market = data["market"]
         assets = []
@@ -334,13 +371,14 @@ class SeasonLayer:
                 "future": info.get("future"),
                 "starts_for_viewer": self.starts_for(viewer, pid) if projected else None,
                 "gain_for_viewer": self.season_gain(viewer, pid) if projected else None,
-                "plan_lean": self._season_lean(viewer, pid) if scored else None})
+                "plan_lean": self._season_lean(viewer, pid) if win_now else None})
         data["season_signal"] = {"rules_version": RULES_VERSION, "label_rules_version": LABEL_RULES_VERSION,
             "evidence": {"state": evidence["state"], "reason": evidence["reason"], "digest": evidence["digest"],
                          "run_id": evidence.get("run_id"), "captured_at": evidence.get("captured_at"),
                          "weeks": list(evidence["weeks"])},
             "viewer": {"scored": scored, "outlook": plan, "outlook_source": viewer["outlook_source"],
-                       **({"delta_pts_week": season["delta_pts_week"], "lineup_before": season["before"],
+                       **({"season_direction": "shed" if shed else "add",
+                           "delta_pts_week": season["delta_pts_week"], "lineup_before": season["before"],
                            "lineup_after": season["after"], "incoming_starters": season["incoming_starters"],
                            "outgoing_starters": season["outgoing_starters"]} if season else {}),
                        "dynasty_cost_pct": round(100 * (market["give"] - market["receive"]) / roster_total, 2)
@@ -348,16 +386,30 @@ class SeasonLayer:
                        "roster_market_total": roster_total},
             "assets": assets,
             "conflict": {"fired": fired, "plan": plan, "kind": kind if fired else None, "named": named,
-                         "threshold": sv.CONFLICT_DROP.get(plan), "demotion": demotion},
-            "components": {"plan_fit": plan_fit, "lineup_gain": lineup_gain,
-                           "team_plan": side["support"]["components"]["team_plan"],
+                         "trigger": trigger if fired else None,
+                         "threshold": sv.CONFLICT_DROP.get(plan, sv.CONFLICT_ADD.get(plan)), "demotion": demotion},
+            "components": {"plan_fit": plan_fit, "lineup_gain": lineup_gain, "team_plan": team_plan,
                            "ranges": {"plan_fit": [-1, 1], "lineup_gain": [-1, 1], "team_plan": [0, 1]}}}
-        if demotion:
-            # Both sides, as revision 4 demotes: the weaker score falls by the full
-            # amount and presentment, which reads both, cannot undo it.
-            adjustment = {"plan_conflict_demotion": -demotion}
-            data["viewer"] = _shift(data["viewer"], -demotion, adjustment)
-            data["counterparty"] = _shift(data["counterparty"], -demotion, adjustment)
+        # Order only: every move below comes after utility and eligibility.
+        # A shed-scored side's team plan is re-scored (support moves by the team-plan
+        # weight times the change); the demotion then takes from both sides, as
+        # revision 4 demotes, so the weaker score falls by the full amount and
+        # presentment, which reads both, cannot undo it.
+        partner = self.teams[card.target_user_id]
+        for name, team, outgoing, incoming in (("viewer", viewer, give, receive),
+                                               ("counterparty", partner, receive, give)):
+            moved, adjustment, rescored = 0.0, {}, None
+            if self._season_shed(team):
+                old = data[name]["support"]["components"]["team_plan"]
+                rescored = team_plan if name == "viewer" else self._shed_parts(
+                    team, outgoing, incoming)[2]
+                moved = incumbent._WEIGHTS["team_plan"] * (rescored - old)
+                adjustment["season_lineup_shed"] = moved
+            if demotion:
+                moved -= demotion
+                adjustment["plan_conflict_demotion"] = -demotion
+            if adjustment:
+                data[name] = _shift(data[name], moved, adjustment, rescored)
 
     def _decision(self, card, data, reason, eligible=False):
         # Before bilateral-1 builds the weaker/total support block from the sides,
@@ -412,9 +464,11 @@ def generate_bilateral_trades(**kwargs):
         if conflict and conflict["fired"]:
             season["conflicts"] += 1
             season["conflict_kind:" + conflict["kind"]] += 1
+            season["conflict_trigger:" + conflict["trigger"]] += 1
             season["demoted"] += conflict["demotion"] > 0
     evidence = search.season_evidence
-    viewer_scored = search._season_scored(search.teams[search.user_id])
+    viewer_scored = (search._season_scored(search.teams[search.user_id])
+                     or search._season_shed(search.teams[search.user_id]))
     report.update(support_weights=previous._WEIGHTS, term_efficiency=dict(counts),
         term_ordering={"version": previous.TERM_ORDERING_VERSION,
                        "comparisons_per_family": previous.TERM_LOOKAHEAD,
@@ -425,6 +479,7 @@ def generate_bilateral_trades(**kwargs):
             "evidence_reason": None if evidence is None else evidence.get("reason"),
             "evidence_digest": evidence.get("digest") if search._season_on else None,
             "viewer_scored": viewer_scored, "partner_matching": search.season_partner_matching,
+            "shed_weights": dict(search.season_shed_weight),
             "conflict_demotion": search.season_conflict_demotion, **dict(season)},
         elapsed_seconds=round(perf_counter() - started, 6))
     return cards, owner.OwnerGenerationReport(owner._dump(report))

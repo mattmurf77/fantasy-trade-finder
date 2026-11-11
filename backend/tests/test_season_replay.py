@@ -15,6 +15,13 @@ Covered (each proven red against the named sabotage, then green on revert):
 - test_bars_on_a_constructed_result (and its edge cases). Sabotage: flip the All-in
   points comparison (`>=` to `<=`).
 - test_requests_without_evidence_report_no_evidence_and_fail_the_sample.
+- Amended 2026-11-11: test_rebuilding_tanking_bars (the first 30 fall, Tanking by more;
+  same set of cards, order free). Sabotage: compare Tanking with Rebuilding the wrong way
+  round. test_stage_2_bars_split_by_partner (win-now viewers on selling partners; the
+  win-now-partner share reported with no bar; selling viewers on a win-now piece sent to a
+  team it starts for). Sabotage: read the win-now viewer's bar from all partners.
+  test_deck_metrics_split_by_partner_on_the_fixture: the split's shares add up and every
+  partner is placed by its resolved plan.
 """
 from __future__ import annotations
 
@@ -83,10 +90,16 @@ def test_report_has_no_player_user_league_id_or_name():
 
 # ── the bars on a constructed result ─────────────────────────────────────────
 
-def _metrics(pts=0.0, starter=.4, cost=.3, matched=.1, support=.6, served=200):
+def _split(buy_selling=.1, cards_win_now=.4, sell=.1):
+    return {"cards": {"win_now": cards_win_now, "win_now|saved": cards_win_now},
+            "buy": {"selling": buy_selling, "selling|saved": buy_selling},
+            "sell": {"win_now": sell, "win_now|saved": sell}}
+
+
+def _metrics(pts=0.0, starter=.4, cost=.3, matched=.1, support=.6, served=200, by_partner=None):
     return {"n": 30, "served": served, "pts": pts, "starter": starter, "cost": cost, "starter_received": .9,
             "conflicts_in_view": 0.0, "matched": matched, "matched_partner_saved": 0,
-            "matched_partner_unsaved": 0, "support": support}
+            "matched_partner_unsaved": 0, "support": support, "by_partner": by_partner or _split()}
 
 
 def _row(saved, pair, *, gain=2.0, start=.3, cost=-.2, table=0.0, served=(200, 200), cpu=(3.0, 3.1),
@@ -95,19 +108,23 @@ def _row(saved, pair, *, gain=2.0, start=.3, cost=-.2, table=0.0, served=(200, 2
     new = _metrics(pts=gain, starter=base["starter"] + start, cost=base["cost"] + cost, served=served[1])
     if saved not in sr.SCORED:
         new = dict(base)
+    if saved in sr.MIRROR:
+        new = dict(base, pts=base["pts"] - (1.0 if saved == "jets" else .5))
     row = {"saved": saved, "pair": pair, "evidence": "usable", "usable": True, "pinned": False,
            "served_arm1": served[0], "served_arm2": served[1], "cpu_arm1": cpu[0], "cpu_arm2": cpu[1],
            "no_forecast_identical": True, "push_down_removes_nothing": True, "floor_unchanged": True,
            "below_floor": 0, "conflicts": 0, "conflict_kinds": {}, "clip": (1, 10),
            "metrics": {"arm1": base, "arm2": new, "arm3": dict(new), "arm4": dict(new, pts=new["pts"] - table),
-                       "stage2": dict(new, matched=new["matched"] + stage2_matched)},
+                       "stage2": dict(new, matched=new["matched"] + stage2_matched,
+                                      by_partner=_split(.1 + stage2_matched, .3, .1 + stage2_matched))},
            "flip": {"r2": dict.fromkeys(sr.OUTLOOKS, 0.0),
                     "r5": {"championship": 2.0, "contender": 1.5, "not_sure": 0.0, "rebuilder": 0.0, "jets": 0.0}}}
     if saved == "not_sure":
         row["not_sure_identical"] = True
         row["metrics"]["stage2"] = dict(base)
     if saved in sr.MIRROR:
-        row["mirror_same_terms"] = row["mirror_order_at_zero"] = True
+        row["mirror_same_terms"] = True
+    row["first30_overlap"] = .7
     return row
 
 
@@ -172,7 +189,7 @@ def test_flip_table_and_identity_bars():
     assert _status(sr.evaluate_bars(rows), "Label table") == "FAIL"
     rows = _passing_rows()
     rows[-3]["not_sure_identical"] = False
-    rows[-1]["mirror_order_at_zero"] = False
+    rows[-1]["mirror_same_terms"] = False
     rows[0]["no_forecast_identical"] = False
     bars = sr.evaluate_bars(rows)
     assert {_status(bars, k) for k in ("Not sure: identical", "Rebuilding/Tanking: same", "No forecast")} == {"FAIL"}
@@ -199,3 +216,51 @@ def test_requests_without_evidence_report_no_evidence_and_fail_the_sample():
     assert _status(bars, "sample") == "INSUFFICIENT"
     assert _status(bars, "All-in lineup points") == "INSUFFICIENT"
     assert not sr.passed(bars)
+
+
+def test_rebuilding_tanking_bars():
+    rows = _passing_rows()
+    assert _status(sr.evaluate_bars(rows), "Rebuilding/Tanking lineup points") == "PASS"
+    assert _status(sr.evaluate_bars(rows), "Tanking falls more") == "PASS"
+    rows[-1]["metrics"]["arm2"]["pts"] = rows[-1]["metrics"]["arm1"]["pts"] - .4   # Tanking -0.4, Rebuilding -0.5
+    assert _status(sr.evaluate_bars(rows), "Tanking falls more") == "FAIL"
+    for row in rows[-2:]:
+        row["metrics"]["arm2"]["pts"] = row["metrics"]["arm1"]["pts"] + .1
+    assert _status(sr.evaluate_bars(rows), "Rebuilding/Tanking lineup points") == "FAIL"
+    rows = _passing_rows()
+    rows[-1]["metrics"]["arm3"] = dict(rows[-1]["metrics"]["arm2"], pts=-9.0)   # order free: no bar reads arm 3
+    assert _status(sr.evaluate_bars(rows), "Rebuilding/Tanking: same cards") == "PASS"
+
+
+def test_stage_2_bars_split_by_partner():
+    rows = _passing_rows()
+    bars = sr.evaluate_bars(rows)
+    assert _status(bars, "win-now viewers: share buying a starter") == "PASS"
+    assert _status(bars, "with win-now partners (reported, no bar)") == "n/a"
+    assert _status(bars, "Rebuilding/Tanking viewers: share selling") == "PASS"
+    detail = next(d for _, c, _, d in bars if "with win-now partners" in c)
+    assert detail.startswith("mean change -0.100")          # it fell, and that is reported, not failed
+    for row in rows:
+        if row["saved"] in sr.SCORED:
+            # More starters bought, all from win-now partners, none more from a selling one: FAIL.
+            row["metrics"]["stage2"]["by_partner"]["buy"] = dict(row["metrics"]["arm2"]["by_partner"]["buy"],
+                                                                 win_now=.5)
+            row["metrics"]["stage2"]["by_partner"]["cards"] = _split(cards_win_now=.9)["cards"]
+    assert _status(sr.evaluate_bars(rows), "win-now viewers: share buying a starter") == "FAIL"
+
+
+def test_deck_metrics_split_by_partner_on_the_fixture():
+    row, cache, request = _replayed()
+    probe = sr._Probe(request)
+    served = cache[("t", "championship", "arm2")]["served"]
+    metrics = sr.deck_metrics(served, probe, viewer_saved="championship", partner_saved=request.partner_saved)
+    split = metrics["by_partner"]
+    assert sum(split["cards"].get(p, 0.0) for p in sr.PARTNERS) == pytest.approx(1.0)
+    for plan in sr.PARTNERS:
+        assert split["cards"].get(plan, 0.0) == pytest.approx(
+            split["cards"].get(f"{plan}|saved", 0.0) + split["cards"].get(f"{plan}|inferred", 0.0))
+    top = served[:sr.FIRST]
+    expected = sum(sr._buys_starter(c, probe) and probe.search.teams[c.target_user_id]["outlook"] in sr.MIRROR
+                   for c in top) / len(top)
+    assert split["buy"].get("selling", 0.0) == pytest.approx(expected)
+    assert 0 <= row["first30_overlap"] <= 1

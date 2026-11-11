@@ -16,6 +16,13 @@ Arms (validation §3.2), all run in one process on the same request:
 - no_evidence: revision 5 with no season evidence (guardrail "No forecast");
 - stage2: arm2 plus `season_partner_matching` (validation §7).
 
+Amended 2026-11-11 (operator direction): Rebuilding and Tanking viewers are season-scored in
+the shed direction (order only), so the report shows their before/after (points a week in
+the first 30, share shedding, share adding, deck size, first-30 overlap, set identity) beside
+All-in / Contending; and stage 2 is measured by who the partner is (win-now, selling, other;
+saved or read from the roster): a win-now viewer buying a starter from a selling team, a
+selling viewer sending a win-now piece to a team it would start for.
+
 Season evidence. Forward recorded requests carry it as `owner_request.season_evidence`
 (lld §6: the full object beside `input_evidence`). The existing recordings predate it and are
 reported as "no evidence": validation §3.1 offers only an optional early look from Sleeper's
@@ -52,6 +59,7 @@ GAIN = 0.5                       # points a week that "adds a starter" / "costs 
 PUSH_DOWN = 0.10
 SCORED = ("championship", "contender")
 MIRROR = ("rebuilder", "jets")
+PARTNERS = ("win_now", "selling", "other")       # a partner's plan, as the engine resolved it
 OUTLOOKS = ("championship", "contender", "not_sure", "rebuilder", "jets")
 NAMES = {"championship": "All-in", "contender": "Contending", "not_sure": "Not sure",
          "rebuilder": "Rebuilding", "jets": "Tanking", None: "nothing saved"}
@@ -212,8 +220,26 @@ class _Probe:
         return self.search._label(pid)
 
 
+def _partner_plan(probe, uid):
+    outlook = probe.search.teams[uid]["outlook"]
+    return "win_now" if outlook in SCORED else "selling" if outlook in MIRROR else "other"
+
+
+def _buys_starter(card, probe):
+    """The viewer receives a player who would start for the viewer."""
+    uid = probe.search.user_id
+    return any(probe.search._position(p) != "PICK" and probe.starts(uid, p) for p in card.receive_player_ids)
+
+
+def _sells_win_now(card, probe):
+    """The viewer sends a win-now piece to a team it would start for."""
+    return any(probe.label(p) == "win_now" and probe.starts(card.target_user_id, p) for p in card.give_player_ids)
+
+
 def deck_metrics(served, probe, *, viewer_saved=None, partner_saved=()):
-    """§1 metrics on the first 30 served cards, plus §7's matched share."""
+    """§1 metrics on the first 30 served cards, plus §7's matched share and its split by
+    partner (`by_partner[kind][plan|source]`: share of the first 30; kind "cards", "buy"
+    (`_buys_starter`) or "sell" (`_sells_win_now`); source "saved" or "inferred")."""
     top = served[:FIRST]
     deltas = [probe.delta(c) for c in top]
     received = [p for c in top for p in c.receive_player_ids if probe.search._position(p) != "PICK"]
@@ -229,7 +255,15 @@ def deck_metrics(served, probe, *, viewer_saved=None, partner_saved=()):
             matched += 1
             matched_saved += c.target_user_id in partner_saved
     n = len(top)
-    return {"n": n, "served": len(served),
+    by_partner = {kind: {} for kind in ("cards", "buy", "sell")}
+    for c in top:
+        plan = _partner_plan(probe, c.target_user_id)
+        source = "saved" if c.target_user_id in partner_saved else "inferred"
+        for kind, hit in (("cards", True), ("buy", _buys_starter(c, probe)), ("sell", _sells_win_now(c, probe))):
+            if hit:
+                for key in (plan, f"{plan}|{source}"):
+                    by_partner[kind][key] = by_partner[kind].get(key, 0) + 1 / n
+    return {"n": n, "served": len(served), "by_partner": by_partner,
             "pts": statistics.mean(deltas) if deltas else 0.0,
             "starter": sum(d >= GAIN - _EPS for d in deltas) / n if n else 0.0,
             "cost": sum(d <= -GAIN + _EPS for d in deltas) / n if n else 0.0,
@@ -293,9 +327,12 @@ def replay(request, *, flip=True, stage2=True, cache=None, key=None):
     row.update(served_arm2=len(a2["served"]), cpu_arm2=a2["cpu"])
     if own == "not_sure":
         row["not_sure_identical"] = same_order(a1, a2)
+    # First-30 overlap of the served decks, rev 2 against rev 5 (identities), every outlook.
+    row["first30_overlap"] = (len({_ident(c) for c in a1["served"][:FIRST]} & {_ident(c) for c in a2["served"][:FIRST]})
+                              / FIRST)
     if own in MIRROR:
+        # Amended 2026-11-11: same cards and terms as rev 2; the shed term reorders them.
         row["mirror_same_terms"] = sorted(map(_terms, a2["cards"])) == sorted(map(_terms, a1["cards"]))
-        row["mirror_order_at_zero"] = same_order(a1, a3)
     row["push_down_removes_nothing"] = {_ident(c) for c in a2["cards"]} == {_ident(c) for c in a3["cards"]}
     old = {_ident(c): c for c in a1["cards"]}
     shared = [c for c in a2["cards"] if _ident(c) in old]
@@ -303,13 +340,15 @@ def replay(request, *, flip=True, stage2=True, cache=None, key=None):
                                  and _proof(c)["market"] == _proof(old[_ident(c)])["market"] for c in shared)
     row["below_floor"] = sum(c.fairness_score < request.context.get("fairness_threshold", 0) - _EPS
                              for c in a2["cards"])
-    kinds, fired = {}, 0
+    kinds, triggers, fired = {}, {}, 0
     for c in a2["cards"]:
         conflict = _proof(c)["season_signal"].get("conflict") or {}
         if conflict.get("fired"):
             fired += 1
             kinds[conflict["kind"]] = kinds.get(conflict["kind"], 0) + 1
-    row.update(conflicts=fired, conflict_kinds=kinds)
+            key = f"{NAMES[conflict['plan']]}:{conflict['trigger']}"
+            triggers[key] = triggers.get(key, 0) + 1
+    row.update(conflicts=fired, conflict_kinds=kinds, conflict_triggers=triggers)
     signals = [_proof(c)["season_signal"] for c in a2["served"]]
     scored = [s for s in signals if s.get("viewer", {}).get("scored")]
     row["clip"] = (sum(abs(s["components"]["lineup_gain"]) >= 1 - _EPS for s in scored), len(scored))
@@ -523,6 +562,19 @@ def evaluate_bars(rows, *, synthetic=False):
         f"median arm2 - arm4 {_f(_median(table))}" + ("" if not table or _median(table) >= -.3 - _EPS else
                                                        "; on a miss the plan fit reads the number"),
         enough=bool(table))
+    # Rebuilding / Tanking, amended 2026-11-11: the first 30 shed lineup points, Tanking more.
+    tank_pts, rebuild_pts = diffs("jets", "pts"), diffs("rebuilder", "pts")
+    mirror_pts = tank_pts + rebuild_pts
+    bar("§3.4", "Rebuilding/Tanking lineup points, first 30: lower than rev 2 (mean)",
+        bool(mirror_pts) and statistics.mean(mirror_pts) < -_EPS,
+        f"Tanking mean {_f(statistics.mean(tank_pts) if tank_pts else None)} (n={len(tank_pts)}), "
+        f"Rebuilding mean {_f(statistics.mean(rebuild_pts) if rebuild_pts else None)} (n={len(rebuild_pts)})",
+        enough=bool(mirror_pts))
+    bar("§3.4", "Tanking falls more than Rebuilding (mean change)",
+        bool(tank_pts) and bool(rebuild_pts) and statistics.mean(tank_pts) <= statistics.mean(rebuild_pts) + _EPS,
+        f"Tanking {_f(statistics.mean(tank_pts) if tank_pts else None)}, "
+        f"Rebuilding {_f(statistics.mean(rebuild_pts) if rebuild_pts else None)}",
+        enough=bool(tank_pts) and bool(rebuild_pts))
     clipped, total = sum(r["clip"][0] for r in gate), sum(r["clip"][1] for r in gate)
     bar("§3.4", "Need term clipping: share of scored cards at +-1 not above half",
         total and clipped / total <= .5, f"{clipped} of {total} served scored cards", enough=bool(total))
@@ -542,10 +594,9 @@ def evaluate_bars(rows, *, synthetic=False):
     bar("§6", "Not sure: identical cards and order", all(not_sure),
         f"{sum(not_sure)} of {len(not_sure)} decks identical", enough=bool(not_sure))
     mirror = [r for r in gate if "mirror_same_terms" in r]
-    bar("§6", "Rebuilding/Tanking: same cards and terms; order identical at push-down 0",
-        all(r["mirror_same_terms"] and r["mirror_order_at_zero"] for r in mirror),
-        f"{sum(r['mirror_same_terms'] and r['mirror_order_at_zero'] for r in mirror)} of {len(mirror)}",
-        enough=bool(mirror))
+    bar("§6", "Rebuilding/Tanking: same cards and terms as rev 2 (the order differs by design)",
+        all(r["mirror_same_terms"] for r in mirror),
+        f"{sum(r['mirror_same_terms'] for r in mirror)} of {len(mirror)}", enough=bool(mirror))
     bar("§6", "No forecast: rev 5 without evidence identical to rev 2",
         all(r["no_forecast_identical"] for r in rows),
         f"{sum(r['no_forecast_identical'] for r in rows)} of {len(rows)} requests", enough=bool(rows))
@@ -562,12 +613,35 @@ def evaluate_bars(rows, *, synthetic=False):
     else:
         bars.append(("§6", "Pinned and partner-scoped searches: no conflict", "n/a", "no pinned request"))
     # §7 stage 2
+    # §7 as corrected 2026-11-11: measured by who the partner is. Two win-now teams share a
+    # priority, so their share MAY fall (reported, no bar).
     staged = [r for r in gate if "stage2" in r.get("metrics", {})]
-    for label, groups in (("Rebuilding/Tanking viewers", MIRROR), ("win-now viewers", SCORED)):
-        rs = [r for r in staged if r["saved"] in groups]
-        up = [r["metrics"]["stage2"]["matched"] - r["metrics"]["arm2"]["matched"] for r in rs]
-        bar("§7", f"Stage 2 matched share up, {label}", bool(up) and statistics.mean(up) > 0,
-            f"mean change {_f(statistics.mean(up) if up else None, 3)} (n={len(up)})", enough=bool(up))
+
+    def moved(rs, kind, key):
+        return [r["metrics"]["stage2"]["by_partner"][kind].get(key, 0.0)
+                - r["metrics"]["arm2"]["by_partner"][kind].get(key, 0.0) for r in rs]
+
+    def split(rs, kind, plans):
+        return ", ".join(f"{plan}|{source} {_f(statistics.mean(moved(rs, kind, f'{plan}|{source}')), 3)}"
+                         for plan in plans for source in ("saved", "inferred")) if rs else "n/a"
+
+    win_now = [r for r in staged if r["saved"] in SCORED]
+    up = moved(win_now, "buy", "selling")
+    bar("§7", "Stage 2, win-now viewers: share buying a starter from a Rebuilding/Tanking partner up",
+        bool(up) and statistics.mean(up) > 0,
+        f"mean change {_f(statistics.mean(up) if up else None, 3)} (n={len(up)}); {split(win_now, 'buy', ('selling',))}",
+        enough=bool(up))
+    same = moved(win_now, "cards", "win_now")
+    bars.append(("§7", "Stage 2, win-now viewers: share of cards with win-now partners (reported, no bar)", "n/a",
+                 f"mean change {_f(statistics.mean(same) if same else None, 3)} (n={len(same)}); "
+                 f"{split(win_now, 'cards', ('win_now',))}"))
+    selling = [r for r in staged if r["saved"] in MIRROR]
+    total = [a + b + c for a, b, c in zip(moved(selling, "sell", "win_now"), moved(selling, "sell", "selling"),
+                                          moved(selling, "sell", "other"))]
+    bar("§7", "Stage 2, Rebuilding/Tanking viewers: share selling a win-now piece to a team it starts for up",
+        bool(total) and statistics.mean(total) > 0,
+        f"mean change {_f(statistics.mean(total) if total else None, 3)} (n={len(total)}); by partner: "
+        f"{split(selling, 'sell', PARTNERS)}", enough=bool(total))
     ns = [r for r in staged if r["saved"] == "not_sure"]
     within = [abs(r["metrics"]["stage2"][m] - r["metrics"]["arm2"][m]) <= .02 * abs(r["metrics"]["arm2"][m]) + _EPS
               for r in ns for m in ("support", "served")]
@@ -606,12 +680,31 @@ def summarize(rows, *, failed=0, synthetic=False):
                              f"{_f(_median([m['starter'] for m in ms])):>5} | {_f(_median([m['cost'] for m in ms])):>5} | "
                              f"{_f(_median(received)):>5} | {_f(_median([m['conflicts_in_view'] for m in ms])):>5} | "
                              f"{_median([m['served'] for m in ms])} (n={len(ms)})")
-        kinds = {}
+        lines.append("")
+        lines.append("rev 2 -> rev 5 (arm 2), first 30 served (mean over requests): pts/week | shedding (<= -0.5) | "
+                     "adding (>= +0.5) | served size | first-30 overlap | same set as rev 2")
+        for group in OUTLOOKS:
+            rs = [r for r in gate if r["saved"] == group]
+            if not rs:
+                continue
+            def mean(arm, metric):
+                return statistics.mean(r["metrics"][arm][metric] for r in rs)
+            same = (f"{sum(r['mirror_same_terms'] for r in rs)} of {len(rs)}" if group in MIRROR else "n/a")
+            lines.append(f"  {NAMES[group]:<11} {_f(mean('arm1', 'pts')):>6} -> {_f(mean('arm2', 'pts')):>6} | "
+                         f"{_f(mean('arm1', 'cost'))} -> {_f(mean('arm2', 'cost'))} | "
+                         f"{_f(mean('arm1', 'starter'))} -> {_f(mean('arm2', 'starter'))} | "
+                         f"{_f(mean('arm1', 'served'), 0)} -> {_f(mean('arm2', 'served'), 0)} | "
+                         f"{_f(statistics.mean(r['first30_overlap'] for r in rs))} | {same} (n={len(rs)})")
+        kinds, triggers = {}, {}
         for r in gate:
             for kind, n in r["conflict_kinds"].items():
                 kinds[kind] = kinds.get(kind, 0) + n
+            for key, n in r.get("conflict_triggers", {}).items():
+                triggers[key] = triggers.get(key, 0) + n
         lines.append("conflicts (arm 2 inventory) by kind: " + (", ".join(f"{k} {v}" for k, v in sorted(kinds.items()))
                                                              or "none"))
+        lines.append("conflicts (arm 2 inventory) by plan and trigger: "
+                     + (", ".join(f"{k} {v}" for k, v in sorted(triggers.items())) or "none"))
         staged = [r["metrics"]["stage2"] for r in gate if "stage2" in r["metrics"]]
         if staged:
             lines.append(f"stage 2 matched cards in the first 30: partner outlook saved "

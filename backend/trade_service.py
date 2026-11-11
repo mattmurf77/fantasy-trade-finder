@@ -1192,6 +1192,10 @@ _DEFAULT_CFG: dict[str, float] = {
     "owner_bilateral_revision_5_enabled": 0.0,
     "season_conflict_demotion":   0.10,
     "season_partner_matching":    0.0,
+    # Rebuilding / Tanking viewers (amended 2026-11-11): the strength of the shed
+    # term, read by revision 5 only (order only, never inventory or terms).
+    "season_shed_weight_tanking":    1.0,
+    "season_shed_weight_rebuilding": 0.5,
     # Owner arm only, computational limits (not pricing permissions).
     "owner_pool_size":           16.0,
     "owner_pair_budget":         4096.0,
