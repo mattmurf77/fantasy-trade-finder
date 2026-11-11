@@ -63,3 +63,4 @@ Don't bother for routine code changes, bug fixes, or anything self-evident from 
 - [ADR-025 Packed Evidence for Unseen Cards](adr-025-packed-unseen-evidence.md)
 - [ADR-028 Page-First Trade Search](adr-028-page-first-trade-search.md)
 - [ADR-029 Bilateral Revision 4](adr-029-bilateral-revision-4.md)
+- [ADR-030 Rules-first deck construction (fast deck v2)](adr-030-rules-first-deck.md)

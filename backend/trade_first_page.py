@@ -866,15 +866,27 @@ class PageSearch:
     thread-safe). ``elapsed_ms`` is cumulative work: setup, pools and screen
     once, verify and rank summed over takes. Raises ``ValueError`` for
     requests ``first_page`` answers with None.
+
+    ``admit(target_user_id, give, receive) -> bool`` (rules-first construction,
+    ``deck_rules.DeckRules.admits``): the deck's per-card rules as an admission
+    predicate. Screened entries whose terms fail are dropped before pricing,
+    family completion skips failing members, and only admitted eligible proofs
+    are held, so bounds, the stop test and the ranker see only admitted cards.
+    Parents are still evaluated on demand for expansions, so the universe is
+    unchanged. The report adds ``rules_version`` and ``rules_rejected`` (screened
+    entries dropped) and ``rules_unheld`` (eligible proofs not held).
+    ``admit=None`` is byte-identical to the search without the hook.
     """
 
-    def __init__(self, *, generator=None, max_verifications=4000, **kwargs):
+    def __init__(self, *, generator=None, max_verifications=4000, admit=None, rules_version=None,
+                 **kwargs):
         if not _supported(kwargs):
             raise ValueError("unsupported page-first request")
         if generator is None:
             from . import trade_gen_bilateral_candidate as generator
         started = perf_counter()
         self.generator, self.max_verifications = generator, max_verifications
+        self.admit, self.rules_version = admit, rules_version
         self.timings = timings = {}
         search_class = getattr(generator, "_GenerationSearch", None) or generator._Search
         search = self.search = _private_search(search_class)(**kwargs)
@@ -895,8 +907,13 @@ class PageSearch:
             counts["bounded"] = len(heap)
             self.bind = (any(m.potential() > search.pair_budget for m in members)
                          or counts["universe"] > search.total_budget)
-            heapq.heapify(heap)
             self.tie = len(heap)
+            if admit is not None:
+                uids = [m.member.user_id for m in members]
+                kept = [e for e in heap if admit(uids[e[3]], *_screened_package(e))]
+                counts["rules_rejected"] = len(heap) - len(kept)
+                heap[:] = kept
+            heapq.heapify(heap)
             timings["screen"] = perf_counter() - mark
         timings["verify"] = timings["rank"] = 0.0
         self.proofs, self.done, self.capped = {}, set(), []
@@ -926,7 +943,10 @@ class PageSearch:
             card = _card(search, self.members[index].member, give, receive)
             proof = self.proofs[key] = search.evaluate(card)
             self.counts["verified"] += 1
-            if proof.eligible:
+            if proof.eligible and self.admit is not None and not self.admit(
+                    self.members[index].member.user_id, give, receive):
+                self.counts["rules_unheld"] += 1
+            elif proof.eligible:
                 data = proof.decoded()  # reused by quality, decorate and rank
                 weaker = data["bilateral"]["weaker_support"]
                 card.owner_evaluation = proof
@@ -1030,6 +1050,9 @@ class PageSearch:
                     known.append((1 - g_hi / r_lo if r_lo > g_hi > 0 else 1 - r_hi / g_lo if g_lo > r_hi > 0
                                   else 0.0, give, receive))
             known.sort()
+            if self.admit is not None:
+                uid = m.member.user_id
+                known = [entry for entry in known if self.admit(uid, entry[1], entry[2])]
             self.families[key] = known
         return known
 
@@ -1152,6 +1175,9 @@ class PageSearch:
                   "term_exact_prefix": self.exact if self.terms else None,
                   "families_completed": len(self.covered), "family_verified": counts["family_verified"],
                   "elapsed_ms": {name: round(value * 1000, 3) for name, value in timings.items()}}
+        if self.admit is not None:
+            report.update(rules_version=self.rules_version, rules_rejected=counts["rules_rejected"],
+                          rules_unheld=counts["rules_unheld"])
         return page, owner.OwnerGenerationReport(owner._dump(report))
 
 

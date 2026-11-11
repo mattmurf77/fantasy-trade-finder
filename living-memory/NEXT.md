@@ -92,7 +92,7 @@ Not in the seven active items. Live since 2026-11-11T05:28Z (`13865d73`, #641 + 
 4. **Read the revision 4 Calibration round** once testers grade (`GET /api/admin/grading/report?round_id=outlook-v2-v4-1&include_open=1`), then decide revision 4's selector and `trade.partner_activity`. models-eng review of pipeline 15 → 21 is still owed.
 5. **Make revision 2 cheaper without changing results** (recommendation R2b). *Why:* family completion is more than half the exact evaluations, and bilateral-1 on the same requests takes 71 ms.
 6. **Find the unordered iteration that makes the full engine vary between processes** (R0).
-7. **Fast deck is OFF since 2026-11-11 (D-232):** the filters behind the 150-card page left a 2-card deck. Before it goes back on, make the page fill a deck after the filters or fall back to the full solve when the filtered deck is thin; run it in shadow first. Also scope appending the inventory behind the page (R3); worker processes and CPUs if scale matters before launch ([real-leagues.md](../docs/plans/realtime-trade-engine/real-leagues.md)). Send-on-platform's nine open questions: [definition doc](../docs/plans/offer-learnings/send-on-platform.md).
+7. **Rules-first deck is on since 2026-11-11 (D-235):** read the first production jobs (`rules-first:` lines, fallbacks, guard warnings, the five-card floor), then decide the Match strength bar's future and whether opponent-scoped and intent requests should join. Throw-in muting (`docs/plans/filler-muting/design.md`) builds on this.
 
 Detail: [recommendation](../docs/plans/realtime-trade-engine/recommendation.md) · [offer-learnings plan](../docs/plans/offer-learnings/plan.md).
 
