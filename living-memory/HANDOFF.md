@@ -49,4 +49,5 @@
 - CI's backend job takes about 40 minutes on this tree.
 - Off on purpose: revision 4's selector and `trade.partner_activity` (graded first); `trade.fast_deck_shadow`.
 - Local only, never commit: `data/sleeper-export/` and `data/prod-requests/` in the main checkout.
-- Left for the next sweep: worktree `.claude/worktrees/offer-import-terms` (branches `docs/offer-learnings-release`, PR #644, and `feat/sleeper-read-app-sent`, the D-227 change). Every other worktree and branch of this programme is in [the ledger](../docs/recovery/2026-11-10-offer-learnings.md).
+- **After the release, 2026-11-11 (#645, `811341f8`, live 08:12Z):** the Sleeper read follows app-sent trades without the switch (D-227), and a fit-block team with no supported reason reads a league-rank fact, never the player list (D-228, the operator's feedback from build 184). Server-only; no new build. Check the new wording on a device.
+- Left for the next sweep: worktree `.claude/worktrees/fit-copy-fix` on `docs/d227-d228-shipped` (the PR carrying this note). The earlier leftovers are swept: see the 2026-11-11 addition to the ledger. Every other worktree and branch of this programme is in [the ledger](../docs/recovery/2026-11-10-offer-learnings.md).
