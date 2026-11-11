@@ -20,6 +20,11 @@
 - iOS 1.22.0 (184) built from `13865d73` with auto-submit; no version bump (What's New is keyed to 1.22.0). Revision 4 Calibration round built for the 16 connected pairs: 11 ready, 5 provider failures.
 - The turn-on's first full run failed 15 tests that assumed the flags ship off; fixed in the tests. [Release record](../docs/business/ops/2026-11-10-offer-learnings.md).
 
+## 2026-11-10 — Roster-first setup flag turned on (`trades.roster_setup`)
+
+- Operator call ("Turn it on"), the same day #637 merged dark. `config/features.json` and the three mirrored flag fixtures are flipped to true. The 8-step TestFlight checklist and the MOD-M1 call had **not** run first.
+- The engine half takes effect on deploy: owner-v1 and bilateral read `trade_block` on the give side. The UI half needs a TestFlight build that includes `9c252819`. Build 1.22.0 (183) predates it, so testers see nothing yet.
+- Rollback: set the flag false, then `POST /api/feature-flags/reload` (or via `FTF_FLAGS`).
 
 ## 2026-11-10 — Offer learnings built and integrated dark (PR #641)
 

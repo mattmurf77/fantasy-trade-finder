@@ -1,6 +1,6 @@
 # PRD — Roster-first setup for Find a Trade
 
-**Date:** 2026-11-10 · **Status:** design approved by the operator 2026-11-10 (all six recommendations accepted); built behind `trades.roster_setup` (off) · **Flag:** `trades.roster_setup` (new, default off)
+**Date:** 2026-11-10 · **Status:** design approved by the operator 2026-11-10 (all six recommendations accepted); built behind `trades.roster_setup`, turned on 2026-11-10 by the operator before the TestFlight checklist ran · **Flag:** `trades.roster_setup` (new, default off)
 **Companion files:** [scope.md](scope.md) · [analytics.md](analytics.md) · [reuse-map.md](reuse-map.md) · mockup [`mockups/roster-first-trade-setup/index.html`](../../../mockups/roster-first-trade-setup/index.html)
 
 ---

@@ -10,6 +10,11 @@
 - **Not verified:** anything on a device (D-056); the fast deck on Render (no shadow day, no search had run yet); the private Sleeper read end to end from the server. TestFlight checklists: [fast deck](../docs/plans/realtime-trade-engine/scope.md) §3 and each scope block in `docs/plans/offer-learnings/`.
 - FTF_SKIP_SIM_GATE=1 on every push (D-056); the evidence above stands in for the simulator marker.
 
+## 2026-11-10 — Roster-first setup flag flip (`trades.roster_setup` → true)
+
+- Flag-only change; the operator asked for it directly. The 8-step TestFlight checklist has not run (no build includes `9c252819` yet).
+- Local: the flag mirror tests plus the trade-block, deck-digest, blind-grading and rankings-import suites pass (204 passed). CI on the PR covers the rest. `FTF_SKIP_SIM_GATE=1` (D-056).
+
 ## 2026-11-10 — Offer-learnings integration (branch `feat/offer-learnings`, PR #641, every new flag off)
 
 - **What was integrated:** the fast deck and page-first search (PR #638), WS1 revision 4, WS1b its Calibration round, WS2 sent-trade outcomes, WS2b the private Sleeper offers read, WS3 pass-reason cadence, WS4b fit block v3, WS5 next move, WS7 partner activity, WS8 revised-offer cards, WS6 definition doc, plus `main` through #640. Deck pipeline pinned once per merge, 15 → 21.

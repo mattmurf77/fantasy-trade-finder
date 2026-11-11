@@ -32,7 +32,7 @@
 ## Shipped 2026-11-10: offer learnings and fast deck, on in production
 
 **Where I stopped**
-- `main` and Render are `13865d73` (#641 dark at `0baf6360`, then #643). On in production: `trade.fast_deck`, `trade.fit_first_copy`, `trade.pass_reason_cadence`, `trade.outcome_tracking`, `trade.next_move`, `grading.revision4_round`, `trade.sleeper_offer_import`. The Current State section above predates this.
+- This release is `13865d73` (#641 dark at `0baf6360`, then #643). `main` moved on to `38be9052` the same hour (#642, another session turning on `trades.roster_setup`); build 184 was cut from `13865d73` and already contains that feature's app code. On in production: `trade.fast_deck`, `trade.fit_first_copy`, `trade.pass_reason_cadence`, `trade.outcome_tracking`, `trade.next_move`, `grading.revision4_round`, `trade.sleeper_offer_import`. The Current State section above predates this.
 - The operator approved the Terms and Privacy wording; it is published (effective date November 10, 2026, consent version `offer-import-1`).
 - iOS 1.22.0 (184), EAS build `55914797-24b5-4035-a5cf-c894facbad57` from `13865d73`, auto-submit `f439db03-04e9-48b9-ae3f-0a8a05174932`. Build and submission both FINISHED (uploaded 05:35Z); Apple processing and tester availability not checked.
 - Revision 4 Calibration round `outlook-v2-v4-1` queued for all 16 connected pairs at 05:29Z. Result: 11 ready, 5 provider failures; 150 of 200 selected cards are shared between revision 2 and revision 4.
