@@ -27,7 +27,10 @@ docs/plans/offer-learnings/scope-fit-block-v3.md. Replaces WS4's `fit_lines`
   undeclared team), declared outlooks ignored; shared on copy;
 - prepared inventories accept the card and carry the block in its public
   record; the worker attaches the context once per job;
-- registration of the flag in all mirrors.
+- registration of the flag in all mirrors;
+- `positions` (2026-11-11, the app's before/after table): held plus moves in
+  QB, RB, WR, TE order, noise-level moves out, empty with no rank rows, and
+  `v`/`lead`/`ranks`/`tag` byte-identical to the pre-`positions` payload.
 """
 import ast
 import copy
@@ -525,6 +528,116 @@ def test_template_table_tags_and_version_are_pinned():
     assert not hasattr(tn, "fit_lines")       # fit-1 is retired, not left beside fit-2
 
 
+# ── positions: the app's before/after table (2026-11-11) ───────────────────
+
+def test_positions_are_held_and_moves_in_position_order_on_random_leagues():
+    # Independent of _fit_rank_rows' lists: from compute_power_rankings
+    # before and after, every touched position whose rank holds (before ==
+    # after) or moves past the noise bar, in QB, RB, WR, TE order.
+    rng = random.Random(23)
+    held_seen = moved_seen = noise_seen = 0
+    for league in range(40):
+        n = rng.randint(4, 12)
+        players, values, rosters = {}, {}, {}
+        for t in range(n):
+            uid = "me" if t == 0 else f"u{t}"
+            rosters[uid] = []
+            for i in range(rng.randint(6, 14)):
+                pid = f"{uid}_{i}"
+                players[pid] = Player(pid, pid, rng.choice(["QB", "RB", "WR", "WR", "TE"]),
+                                      "TST", 26)
+                values[pid] = rng.choice([100, 200, 300, 500, 800, 1200, 2000, 3000])
+                rosters[uid].append(pid)
+        ctx = context(rosters, values, players)
+        seed = {p: ts.value_to_elo(v) for p, v in values.items()}
+        members = lambda r: [{"user_id": u, "player_ids": ids} for u, ids in r.items()]
+        before = power_rankings.compute_power_rankings(members(rosters), seed, players)
+        medians = server._position_medians(before)
+        for _ in range(6):
+            other = rng.choice([u for u in rosters if u != "me"])
+            give = rng.sample(rosters["me"], rng.randint(1, 3))
+            receive = rng.sample(rosters[other], rng.randint(1, 3))
+            assets = {p: {"pos": players[p].position} for p in give + receive}
+            rows = tn._fit_rank_rows(ctx, other, give, receive, assets)
+            moved = {u: list(ids) for u, ids in rosters.items()}
+            moved["me"] = [p for p in moved["me"] if p not in give] + receive
+            moved[other] = [p for p in moved[other] if p not in receive] + give
+            after = power_rankings.compute_power_rankings(members(moved), seed, players)
+            touched = {players[p].position for p in give + receive}
+            for label, uid in (("you", "me"), ("them", other)):
+                expected = []
+                for pos in ("QB", "RB", "WR", "TE"):
+                    if pos not in touched:
+                        continue
+                    b, a = ref_rank(before, uid, pos), ref_rank(after, uid, pos)
+                    old = next(t for t in before if t["user_id"] == uid)["positions"][pos]["value"]
+                    new = next(t for t in after if t["user_id"] == uid)["positions"][pos]["value"]
+                    if b == a:
+                        expected.append({"pos": pos, "before": b, "after": b})
+                        held_seen += 1
+                    elif abs(new - old) >= tn.FIT_RANK_MIN_MOVE * medians[pos]["value"]:
+                        expected.append({"pos": pos, "before": b, "after": a})
+                        moved_seen += 1
+                    else:
+                        noise_seen += 1         # out of the table, as out of both lists
+                assert tn._fit_positions(rows[label]) == expected, (league, label)
+    assert held_seen > 50 and moved_seen > 50
+
+
+@pytest.mark.parametrize("sent,shown", [(147.5, True), (147.4, False)])
+def test_a_noise_level_move_is_not_in_positions(sent, shown):
+    # The noise-bar league above: under the bar WR's rank still differs, so
+    # it is neither a move nor held, and the table leaves it out.
+    players = {**{f"{u}w": Player(f"{u}w", f"{u} W", "WR", "TST", 26) for u in "mxyo"},
+               "mw2": Player("mw2", "Sent W", "WR", "TST", 26),
+               "pk": Player("pk", "2028 2nd", "PICK", "PICK", None)}
+    values = {"mw": 3000 - sent, "mw2": sent, "xw": 4000, "ow": 2900, "yw": 1000, "pk": 500}
+    rosters = {"me": ["mw", "mw2"], "x": ["xw"], "opp": ["ow", "pk"], "y": ["yw"]}
+    rows = tn._fit_rank_rows(context(rosters, values, players), "opp", ["mw2"], ["pk"],
+                             {"mw2": {"pos": "WR"}, "pk": {"pos": "PICK"}})
+    assert tn._fit_positions(rows["you"]) == (
+        [{"pos": "WR", "before": 2, "after": 3}] if shown else [])
+    assert tn._fit_positions(rows["them"]) == (
+        [{"pos": "WR", "before": 3, "after": 2}] if shown else [])
+
+
+# The block for block(["vte"], ["orb"]) as origin/main served it before
+# `positions` (2026-11-11), byte for byte. TestFlight builds 184/185 read only
+# these keys, so they must not move.
+FIT2_BEFORE_POSITIONS = (
+    '{"v": "fit-2", "teams": ['
+    '{"side": "them", "lead": {"code": "shifts.them", "text": "Up at TE, down at RB"}, '
+    '"ranks": [{"pos": "TE", "before": 2, "after": 1}, {"pos": "RB", "before": 2, "after": 4}]}, '
+    '{"side": "you", "lead": {"code": "holds.you", "text": "TE stays 4th"}, '
+    '"ranks": [{"pos": "RB", "before": 3, "after": 1}]}]}')
+
+
+def test_positions_are_additive_and_everything_else_is_byte_identical():
+    out = block(["vte"], ["orb"])
+    you, them = side(out, "you"), side(out, "them")
+    # The held TE (4th, 4th) and the RB move, in position order.
+    assert you["positions"] == [{"pos": "RB", "before": 3, "after": 1},
+                                {"pos": "TE", "before": 4, "after": 4}]
+    # `ranks` keeps its gains-first order; `positions` is position order.
+    assert them["positions"] == [{"pos": "RB", "before": 2, "after": 4},
+                                 {"pos": "TE", "before": 2, "after": 1}]
+    legacy = {"v": out["v"], "teams": [{k: v for k, v in t.items() if k != "positions"}
+                                       for t in out["teams"]]}
+    assert json.dumps(legacy) == FIT2_BEFORE_POSITIONS
+
+
+def test_a_team_with_no_rank_rows_has_an_empty_positions_list():
+    # No rank can be stated at all (two valued teams): present and empty.
+    small = {"me": ROSTERS["me"], "opp": ROSTERS["opp"], "x": [], "y": []}
+    out = tn.fit_block(proof(["vwr"], ["owr"], viewer=team("contender", benefits=["outlook"])),
+                       card(["vwr"], ["owr"]), P, context(small))
+    assert side(out, "you")["positions"] == []
+    # Rank rows exist but touch nothing (a pick for a pick): also empty.
+    out = block(["vpk"], ["opk"], viewer=team("rebuilder", benefits=["outlook"]))
+    assert [t["positions"] for t in out["teams"]] == [[], []]
+    assert tn._fit_positions(None) == []
+
+
 # ── the job context and serialization on real revision-2 cards ─────────────
 
 SPEC = {
@@ -652,7 +765,8 @@ def test_flag_on_cards_carry_the_composers_block_and_no_private_fields(monkeypat
         if "fit_block" in p:
             assert [t["side"] for t in p["fit_block"]["teams"]] == ["them", "you"]
             for t in p["fit_block"]["teams"]:
-                assert set(t) <= {"side", "tag", "lead", "ranks"} and t["lead"]["code"] in tn.FIT_TEMPLATES
+                assert set(t) <= {"side", "tag", "lead", "ranks", "positions"} and t["lead"]["code"] in tn.FIT_TEMPLATES
+                assert isinstance(t["positions"], list)
                 if "tag" in t and t["side"] == "them":
                     assert t["tag"]["source"] == "roster"
     blob = json.dumps(payloads)
