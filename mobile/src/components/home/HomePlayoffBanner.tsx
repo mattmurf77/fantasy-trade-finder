@@ -76,7 +76,7 @@ export default function HomePlayoffBanner({ rosterId, onDetails, onReviewOutlook
     {open ? <View testID="home.playoff.explanation" style={styles.explanation}>
       <Text style={styles.body}>Share of simulated seasons in which your team makes the playoffs, from projected weekly lineups. Updated weekly.</Text>
       {percent && !view.current && savedOn ? <Text style={styles.body}>{`Last saved ${savedOn}. ${view.status}.`}</Text> : null}
-      {view.incomplete ? <Text style={styles.body}>Incomplete: some lineup slots had no projection.</Text> : null}
+      {view.incomplete ? <Text style={styles.body}>Incomplete: a played starter's score is not recorded yet.</Text> : null}
       {suggestion ? <Text testID="home.playoff.suggestion" style={styles.body}>{suggestion}</Text> : null}
       {explanation ? <Text style={styles.body}>{explanation}</Text> : null}
     </View> : null}

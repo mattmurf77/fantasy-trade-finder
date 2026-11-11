@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 from ..sleeper_roster import owns_roster
-from .core import SLOTS, IDP, Unavailable, decimal, digest, idp_bye_fill, optimize, score, split_points, semantic_facts
+from .core import SLOTS, IDP, Unavailable, decimal, digest, free_agent_fill, idp_bye_fill, optimize, score, split_points, semantic_facts
 
 API = "https://api.sleeper.app/v1"
 # Finite adapter-owned expected-event contract. New provider fields do not
@@ -55,12 +55,43 @@ class SleeperExperimentalFeed:
     Sparse expected stats remain unknown unless the key is actually supplied.
     Actual-stat sparse-zero evidence does not license zero-filled forecasts.
     """
-    def __init__(self, fetch_json, *, metadata=None, captured_at=None, availability_scenario="require_verified", scoring=None, scoring_contract="strict_supplied_v1"):
+    def __init__(self, fetch_json, *, metadata=None, captured_at=None, availability_scenario="require_verified", scoring=None, scoring_contract="strict_supplied_v1",
+                 free_agent_positions=None):
         self.fetch, self.metadata = fetch_json, metadata or {}
         self.captured_at = captured_at or now()
         self.availability_scenario = availability_scenario
         self.scoring = scoring or {}
         self.scoring_contract = scoring_contract
+        # Positions any league slot accepts; set only for best-available capture.
+        self.free_agent_positions = set(free_agent_positions or ())
+
+    def _free_agents(self, payload, player_ids, present, schedule, games, season, week):
+        """Rows a free agent could start from: not rostered, slot-eligible, with
+        supplied stats, a pregame game for his current team and a usable
+        best-available projection. A bad row only drops that player."""
+        from .timing import CoverageError, classify_player_game
+        counts = Counter(str(raw.get("player_id")) for raw in payload)
+        rows = {}
+        for raw in payload:
+            pid, meta = str(raw.get("player_id")), self.metadata.get(str(raw.get("player_id"))) or {}
+            positions = meta.get("fantasy_positions") or []
+            if (pid in player_ids or counts[pid] > 1 or not raw.get("stats")
+                    or not self.free_agent_positions.intersection(positions)
+                    or not meta.get("team") or raw.get("team") != meta["team"]):
+                continue
+            try:
+                game = classify_player_game(raw, meta["team"], schedule, games, season, week)
+                if game["bye"] or game["phase"] != "pregame":
+                    continue
+                normalized = best_available(raw, self.scoring, present, positions=positions, primary_position=meta.get("position"))
+            except (CoverageError, Unavailable):
+                continue
+            if normalized["projection_status"] == "unpriced":
+                continue
+            rows[pid] = {**game, **normalized, "inapplicable_keys": [], "availability": 1, "free_agent": True,
+                         "availability_basis": "conditional_on_provider_forecast_not_verified_health",
+                         "provider_company": raw.get("company"), "source_updated_at": raw.get("updated_at")}
+        return rows
 
     def weeks(self, season, weeks, player_ids):
         from .timing import CoverageError, validate_season_schedule, normalize_week_games, classify_player_game
@@ -68,7 +99,7 @@ class SleeperExperimentalFeed:
             return {"source": "sleeper_weekly_experimental", "weeks": {}, "captured_at": self.captured_at, "coverage": {"future_weeks": 0}}
         try:
             schedule = validate_season_schedule(self.fetch(f"https://api.sleeper.app/schedule/nfl/regular/{season}"))
-            result, source_hashes, feed_states, finished_weeks = {}, [], {}, []
+            result, source_hashes, feed_states, finished_weeks, free_agents = {}, [], {}, [], {}
             best = self.scoring_contract == BEST_AVAILABLE
             for week in weeks:
                 score_rows = self.fetch(f"https://api.sleeper.app/scores/nfl/regular/{season}/{week}")
@@ -151,7 +182,10 @@ class SleeperExperimentalFeed:
                                  "current_injury_status": meta.get("injury_status"), "provider_company": (raw or {}).get("company"),
                                  "source_updated_at": (raw or {}).get("updated_at")}
                 result[str(week)] = rows
-            return {"source": "sleeper_weekly_experimental", "weeks": result, "captured_at": self.captured_at,
+                if best and self.free_agent_positions:
+                    free_agents[str(week)] = self._free_agents(payload, player_ids, globally_present & LINEAR_PROJECTED_EVENTS,
+                                                               schedule, games, season, week)
+            return {"source": "sleeper_weekly_experimental", "weeks": result, "captured_at": self.captured_at, "free_agents": free_agents,
                     "coverage": {"contract": "observed_native_timing_sparse_expected_events_v1", "source_hashes": source_hashes,
                                  "availability_scenario": self.availability_scenario, "scoring_contract": self.scoring_contract, "weekly_feed_states": feed_states, "fully_completed_nfl_weeks": finished_weeks, "schedule_hash": digest(schedule)}}
         except CoverageError as exc:
@@ -272,7 +306,8 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
     active_scoring = normalize_scoring_for_slots(league["scoring_settings"], slots)
     weekly = (feed or SleeperExperimentalFeed(fetch_json, metadata=metadata, captured_at=captured_at,
                 availability_scenario=cfg.get("availability_scenario", "require_verified"),
-                scoring=active_scoring, scoring_contract=cfg.get("scoring_contract", "strict_supplied_v1"))).weeks(season, future, player_ids)
+                scoring=active_scoring, scoring_contract=cfg.get("scoring_contract", "strict_supplied_v1"),
+                free_agent_positions=set().union(*(SLOTS[s] for s in slots)) if best else None)).weeks(season, future, player_ids)
     try:
         raw_users = fetch_json(f"{API}/league/{league_id}/users")
         names = {str(u.get("user_id")): (u.get("metadata") or {}).get("team_name") or u.get("display_name")
@@ -304,6 +339,32 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
         current_matchups = {row["roster_id"]: row for row in future_matchups[w]}
         week_finished = best and w in weekly.get("coverage", {}).get("fully_completed_nfl_weeks", [])
         week_teams = {}
+        # Free agents for this week: any feed row for a player on no roster in
+        # this league (players, taxi, reserve, or this week's matchup lists),
+        # scored by the same best-available contract as a rostered player.
+        rostered = {pid for t in teams for key in ("players", "taxi", "reserve") for pid in t["roster"][key]}
+        rostered |= {str(pid) for row in future_matchups[w] for key in ("players", "starters") for pid in (row.get(key) or [])}
+        free_agents = []
+        for pid, row in sorted((weekly.get("free_agents") or {}).get(str(w), {}).items()) if best else ():
+            meta = metadata.get(pid) or {}
+            if (pid in rostered or not meta.get("fantasy_positions") or row.get("bye") or row.get("phase") != "pregame"
+                    or row.get("availability") != 1 or timestamp(row.get("kickoff_at")) <= timestamp(captured_at)):
+                continue
+            covered = {k: v for k, v in active_scoring.items() if k in row.get("stats", {}) and k in row.get("supported_keys", [])}
+            if not covered and any(decimal(v) for v in active_scoring.values()):
+                continue
+            try:
+                points = score(row.get("stats", {}), covered, row.get("supported_keys", []))
+            except Unavailable:
+                continue
+            free_agents.append({"player_id": pid, "name": meta.get("full_name") or pid, "positions": meta["fantasy_positions"],
+                                "points": str(points), "availability_basis": row.get("availability_basis"),
+                                "estimate_status": "partial" if any(decimal(v) and k not in covered for k, v in active_scoring.items()) else "available",
+                                "_row": row})
+        fa_rows = {p["player_id"]: p.pop("_row") for p in free_agents}
+        fa_recorded = set()
+        week_projected = bool(free_agents)
+        absent_teams = []
         for team in teams:
             pool, bye, excluded, max_pool, unpriced = [], [], [], [], []
             partial_players = []
@@ -420,22 +481,44 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
                     excluded.append({"player_id": pid, "reason": "reserve" if pid in roster["reserve"] else "taxi"})
                 if played_starter or pid not in roster["reserve"] or cfg["ir_maxpf"] == "include":
                     max_pool.append(player)
-            replacement_unavailable = False
-            try:
-                actual = idp_bye_fill(slots, pool, bye, replacement, empty_policy=cfg["empty_slots"], locked=locks, locked_bench=locked_bench)
-            except Unavailable as exc:
-                if not best or exc.reason != "missing_idp_replacement_mean":
-                    raise
-                actual = optimize(slots, pool, empty_policy=cfg["empty_slots"], locked=locks, locked_bench=locked_bench)
-                replacement_unavailable = True
-            for item in missing_locks:
-                actual["lineup"][item["slot_index"]]["unpriced_locked_player"] = item
-            maximum = optimize(slots, max_pool, empty_policy=cfg["empty_slots"], hindsight=True)
             all_starters_completed = (bool(slots) and len(starters) == len(slots) and "0" not in starters
                 and len(set(starters)) == len(starters)
                 and all(weekly.get("weeks", {}).get(str(w), {}).get(pid, {}).get("phase") == "completed" for pid in starters))
             final_week_lineup = week_finished and len(starters) == len(slots) and len([pid for pid in starters if pid != "0"]) == len(set(pid for pid in starters if pid != "0"))
             actual_observed = (all_starters_completed or final_week_lineup) and current.get("points") is not None
+            week_projected = week_projected or any(not p.get("completed_game") for p in pool + max_pool)
+            replacement_unavailable = False
+            # Free-agent fill (model v6, best-available only): the lineup is
+            # built from the roster exactly as before; each open slot that is
+            # not a locked fact then takes the best projected free agent, or
+            # scores zero when none is projected for it. An observed lineup is
+            # a fact and is never filled.
+            fill = best and not actual_observed
+            real = optimize(slots, pool, empty_policy=cfg["empty_slots"], locked=locks, locked_bench=locked_bench)
+            with_fa = free_agent_fill(slots, real, free_agents, empty_policy=cfg["empty_slots"], skip=locks) if fill else real
+            fa_used = any(r["player"] and r["player"].get("free_agent") for r in with_fa["lineup"])
+            try:
+                # IDP: a slot still open after the free agents may take the
+                # league's replacement mean (unchanged rule, bye players only).
+                if fa_used:
+                    placed = [r["player"] for r in with_fa["lineup"] if r["player"]]
+                    actual = idp_bye_fill(slots, placed, bye, replacement, empty_policy=cfg["empty_slots"], locked=locks, locked_bench=locked_bench)
+                else:
+                    actual = idp_bye_fill(slots, pool, bye, replacement, empty_policy=cfg["empty_slots"], locked=locks, locked_bench=locked_bench)
+            except Unavailable as exc:
+                if not best or exc.reason != "missing_idp_replacement_mean":
+                    raise
+                actual = with_fa
+                replacement_unavailable = True
+            for item in missing_locks:
+                actual["lineup"][item["slot_index"]]["unpriced_locked_player"] = item
+            # Max PF: a played player with no recorded score could fill these
+            # slots for an unknown amount, so they are neither filled nor zero.
+            maximum = optimize(slots, max_pool, empty_policy=cfg["empty_slots"], hindsight=True)
+            unscored = {i for i in maximum["gaps"] if any(p["maxpf_eligible"] and p["reason"] == "missing_completed_actual"
+                        and SLOTS[slots[i]].intersection(p["positions"]) for p in unpriced)}
+            if best:
+                maximum = free_agent_fill(slots, maximum, free_agents, empty_policy=cfg["empty_slots"], skip=unscored)
             official_current_points = decimal(current["points"]) if actual_observed else None
             if actual_observed and not missing_locks and official_current_points != decimal(actual["points"]):
                 raise Unavailable("completed_lineup_points_mismatch", state="incomplete_projections")
@@ -458,11 +541,10 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
             absent_actual = not actual_observed and not actual_priced_count and any(p["actual_eligible"] for p in unpriced)
             absent_maxpf = not max_priced_count and any(p["maxpf_eligible"] for p in unpriced)
             if best and (absent_actual or absent_maxpf):
-                # No projected player at all for this team-week. Completed team
-                # scoring is never substituted for the missing projection: the
-                # run stops and the last successful forecast stays on record.
-                raise Unavailable("missing_weekly_projections", state="incomplete_projections",
-                                  details={"week": w, "lanes": [lane for lane, absent in (("actual", absent_actual), ("maxpf", absent_maxpf)) if absent]})
+                # No projected rostered player for this team-week. Decided after
+                # every team: a week whose feed has a projection somewhere is
+                # filled from free agents; a week with none at all stops.
+                absent_teams.append({"week": w, "lanes": [lane for lane, absent in (("actual", absent_actual), ("maxpf", absent_maxpf)) if absent]})
 
             def unprojected_slots(lineup, lane, skip=()):
                 """Empty slots that a rostered, eligible player with no projection
@@ -472,15 +554,38 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
                 return sorted(slots[i] for i in lineup["gaps"] if i not in skip and any(
                     p[lane] and p["positions"] and SLOTS[slots[i]].intersection(p["positions"])
                     and p["reason"] != "unknown_nfl_team" for p in unpriced))
-            # An IDP slot left empty for want of a replacement mean is unknown,
-            # never a synthetic zero (core.idp_bye_fill).
-            idp_unknown = {i for i in actual["gaps"] if slots[i] in IDP and i not in locks} if replacement_unavailable else set()
-            # A starter who already played but whose score the source has not
-            # supplied leaves that slot unknown too.
-            missing_actual_slots = [] if actual_observed else sorted(
-                unprojected_slots(actual, "actual_eligible", set(locks) | idp_unknown) + [slots[i] for i in idp_unknown]
-                + [slots[item["slot_index"]] for item in missing_locks])
-            missing_maxpf_slots = [] if maxpf_observed else unprojected_slots(maximum, "maxpf_eligible")
+
+            def fills(lineup, skip):
+                return ([{"slot_index": r["slot_index"], "slot": r["slot"], "player_id": r["player"]["player_id"], "name": r["player"].get("name"),
+                          "points": r["player"]["points"], "estimate_status": r["player"].get("estimate_status")}
+                         for r in lineup["lineup"] if r["player"] and r["player"].get("free_agent")],
+                        [r["slot"] for r in lineup["lineup"] if r["player"] is None and r["slot_index"] not in skip])
+            if best:
+                # After the fill only two things are unknown: a starter who
+                # already played with no recorded score (actual), and a slot such
+                # a player could fill (Max PF).
+                fa_actual, zero_actual = fills(actual, set(locks)) if fill else ([], [])
+                fa_maxpf, zero_maxpf = fills(maximum, unscored)
+                missing_actual_slots = [] if actual_observed else sorted(slots[item["slot_index"]] for item in missing_locks)
+                missing_maxpf_slots = [] if maxpf_observed else sorted(slots[i] for i in unscored)
+                for item in fa_actual + fa_maxpf:
+                    if item["player_id"] not in fa_recorded:
+                        fa_recorded.add(item["player_id"])
+                        row = fa_rows[item["player_id"]]
+                        normalized_inputs.append({"season": season, "week": w, "player_id": item["player_id"], "free_agent": True,
+                                                  "positions": metadata[item["player_id"]]["fantasy_positions"], "source_hash": digest(semantic_facts(row)),
+                                                  "input": {**row, "stats": {k: v for k, v in row.get("stats", {}).items() if k in league["scoring_settings"]}}})
+            else:
+                fa_actual = zero_actual = fa_maxpf = zero_maxpf = []
+                # An IDP slot left empty for want of a replacement mean is unknown,
+                # never a synthetic zero (core.idp_bye_fill).
+                idp_unknown = {i for i in actual["gaps"] if slots[i] in IDP and i not in locks} if replacement_unavailable else set()
+                # A starter who already played but whose score the source has not
+                # supplied leaves that slot unknown too.
+                missing_actual_slots = [] if actual_observed else sorted(
+                    unprojected_slots(actual, "actual_eligible", set(locks) | idp_unknown) + [slots[i] for i in idp_unknown]
+                    + [slots[item["slot_index"]] for item in missing_locks])
+                missing_maxpf_slots = [] if maxpf_observed else unprojected_slots(maximum, "maxpf_eligible")
             week_teams[str(team["roster_id"])] = {"actual": actual, "maxpf": maximum, "exclusions": excluded,
                                                 "maxpf_dominates_actual": not hypothetical,
                                                 "replacement_means": replacement,
@@ -493,7 +598,14 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
                                                     "priced_actual_slots": actual_priced_count, "priced_maxpf_slots": max_priced_count,
                                                     "actual_lineup_gaps": len(actual["gaps"]), "maxpf_lineup_gaps": len(maximum["gaps"]),
                                                     "completed_actual_players": sum(bool(p.get("completed_game")) for p in max_pool), "locked_starter_count": len(locks), "missing_locked_actuals": missing_locks,
-                                                    "idp_replacement_unavailable": replacement_unavailable}}
+                                                    "idp_replacement_unavailable": replacement_unavailable,
+                                                    "free_agent_fills": fa_actual, "zero_filled_slots": zero_actual,
+                                                    "maxpf_free_agent_fills": fa_maxpf, "maxpf_zero_filled_slots": zero_maxpf}}
+        if absent_teams and not week_projected:
+            # The feed has no usable projection for anyone this week (empty or
+            # unpublished): free-agent fill needs a real feed, so the run stops
+            # and the last successful forecast stays on record.
+            raise Unavailable("missing_weekly_projections", state="incomplete_projections", details=absent_teams[0])
         result_weeks.append({"week": w, "games": games, "teams": week_teams})
     picks = fetch_json(f"{API}/league/{league_id}/traded_picks")
     if not isinstance(picks, list):
@@ -527,6 +639,10 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
                          "maxpf_estimate_status": "incomplete" if any(t["projection_coverage"]["missing_maxpf_slots"] for week in result_weeks for t in week["teams"].values()) else "complete",
                          "incomplete_team_weeks": sum(bool(t["projection_coverage"]["missing_actual_slots"]) for week in result_weeks for t in week["teams"].values()),
                          "missing_lineup_slots": sum(len(t["projection_coverage"]["missing_actual_slots"]) for week in result_weeks for t in week["teams"].values()),
+                         "fa_filled_slots": sum(len(t["projection_coverage"]["free_agent_fills"]) for week in result_weeks for t in week["teams"].values()),
+                         "zero_filled_slots": sum(len(t["projection_coverage"]["zero_filled_slots"]) for week in result_weeks for t in week["teams"].values()),
+                         "maxpf_fa_filled_slots": sum(len(t["projection_coverage"]["maxpf_free_agent_fills"]) for week in result_weeks for t in week["teams"].values()),
+                         "maxpf_zero_filled_slots": sum(len(t["projection_coverage"]["maxpf_zero_filled_slots"]) for week in result_weeks for t in week["teams"].values()),
                          "incomplete_weeks": sorted({week["week"] for week in result_weeks for t in week["teams"].values() if t["projection_coverage"]["missing_actual_slots"]}),
                          "inactive_slot_coefficients": {k: v for k, v in league["scoring_settings"].items() if k not in active_scoring},
                          "scoring_contract": cfg.get("scoring_contract", "strict_supplied_v1"),
@@ -538,5 +654,5 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
                          "IR eligibility and tie treatment are configured scenarios, not verified league policy.",
                          "Historical weekly Max PF is unavailable; official aggregate Max PF is preserved."] +
                         (["Missing common offense events are modeled as zero after aggregate reconciliation; rare events remain unknown and this is not predictive accuracy evidence."] if cfg.get("scoring_contract") == "sleeper_sparse_offense_v1" else []) +
-                        (["Best-available estimates use known contributions; missing bonuses or penalties can raise or lower complete scores. Unpriced players are not confirmed zero. A lineup slot left empty because an eligible player has no projection marks the forecast incomplete; completed team scoring never stands in for a missing projection."] if best else []) +
+                        (["Best-available estimates use known contributions; missing bonuses or penalties can raise or lower complete scores. Unpriced players are not confirmed zero. An open starting slot takes the best projected free agent for it, or scores zero when none is projected; only a starter who has already played without a recorded score marks the forecast incomplete. Completed team scoring never stands in for a missing projection."] if best else []) +
                         (["Completed games use recorded player actuals and locked lineups. The weekly standard deviation is a full-week value, not a calibrated live remaining-game distribution."] if any(t["projection_coverage"]["completed_actual_players"] for week in result_weeks for t in week["teams"].values()) else [])}

@@ -6,7 +6,8 @@ import hashlib
 import json
 
 # v5: future means are projected lineup totals only; one app-wide weekly score SD.
-VERSION = "projected-lineup-universal-sd-v5"
+# v6: an open starting slot is filled by the best projected free agent, else 0.
+VERSION = "projected-lineup-universal-sd-v6"
 SLOTS = {
     "QB": {"QB"}, "RB": {"RB"}, "WR": {"WR"}, "TE": {"TE"}, "K": {"K"},
     "FLEX": {"RB", "WR", "TE"}, "SUPER_FLEX": {"QB", "RB", "WR", "TE"},
@@ -168,6 +169,49 @@ def optimize(slots, players, *, empty_policy, locked=None, locked_bench=(), hind
     lineup = [{"slot_index": i, "slot": slot, "player": chosen[i]} for i, slot in enumerate(slots)]
     return {"points": str(sum((decimal(row["player"]["points"]) for row in lineup if row["player"]), Decimal(0))),
             "lineup": lineup, "gaps": [row["slot_index"] for row in lineup if row["player"] is None]}
+
+
+def free_agent_fill(slots, built, free_agents, *, empty_policy, skip=()):
+    """Fill a built lineup's open slots from free agents; never displace a starter.
+
+    `built` is an `optimize`-shaped lineup from the roster. Rostered starters
+    keep their slots; only open slots not in `skip` (locked or unknown) are
+    assigned, by the same exact maximum-weight assignment, so two open slots
+    take two different free agents. Ties break by projection, then player id.
+    An open slot no free agent fills stays empty: a known zero.
+    """
+    open_slots = [row["slot_index"] for row in built["lineup"] if row["player"] is None and row["slot_index"] not in set(skip)]
+    if not open_slots or not free_agents:
+        return built
+    starters = {str(row["player"]["player_id"]) for row in built["lineup"] if row["player"]}
+    ranked = sorted((p for p in free_agents if str(p["player_id"]) not in starters),
+                    key=lambda p: (-decimal(p["points"]), str(p["player_id"])))
+    # The best k eligible per open slot type always contain an optimal
+    # assignment of k slots; nothing else needs to enter the optimizer.
+    k, keep = len(open_slots), {}
+    for slot in sorted({slots[i] for i in open_slots}):
+        for p in [p for p in ranked if SLOTS[slot].intersection(p["positions"])][:k]:
+            keep.setdefault(str(p["player_id"]), p)
+    candidates = sorted(keep.values(), key=lambda p: (-decimal(p["points"]), str(p["player_id"])))[:150]
+    if not candidates:
+        return built
+    filled = optimize([slots[i] for i in open_slots], candidates, empty_policy=empty_policy)
+    chosen = [row["player"] for row in filled["lineup"]]
+    # Equal projections: the lower player id, whatever the solver returned.
+    for n, index in enumerate(open_slots):
+        if chosen[n] is None:
+            continue
+        used = {str(p["player_id"]) for p in chosen if p}
+        first = next(p for p in candidates if SLOTS[slots[index]].intersection(p["positions"])
+                     and decimal(p["points"]) == decimal(chosen[n]["points"])
+                     and (str(p["player_id"]) not in used or str(p["player_id"]) == str(chosen[n]["player_id"])))
+        chosen[n] = {**first, "points": str(decimal(first["points"]))}
+    lineup = [dict(row) for row in built["lineup"]]
+    for index, player in zip(open_slots, chosen):
+        if player:
+            lineup[index]["player"] = {**player, "free_agent": True}
+    return {"points": str(sum((decimal(r["player"]["points"]) for r in lineup if r["player"]), Decimal(0))),
+            "lineup": lineup, "gaps": [r["slot_index"] for r in lineup if r["player"] is None]}
 
 
 def idp_bye_fill(slots, healthy, bye_players, means, *, empty_policy, locked=None, locked_bench=()):

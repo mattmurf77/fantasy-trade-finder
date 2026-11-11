@@ -213,6 +213,17 @@ def test_a_baseline_from_another_model_is_refreshed_once_by_the_next_scheduled_t
     assert batch.view('account', '123')['run']['run_id'] == 'a' * 32
 
 
+def test_a_saved_v5_result_is_old_model_and_made_due_once_by_the_batch(scheduled):
+    """Model v6 (free-agent fill) changes future means, so a saved v5 run reads
+    as an older model and the next scheduled tick refreshes the league once."""
+    v5 = saved(model_version='projected-lineup-universal-sd-v5')
+    assert VERSION != v5['model_version']
+    assert build('current', v5, 'rebuilder', CUTS)['reason'] == 'old_model'
+    seed(scheduled, v5)
+    assert batch.dispatch(lambda *a: pytest.fail('enqueue only'))['queued'] == 1
+    assert batch.dispatch(lambda *a: pytest.fail('enqueue only'))['queued'] == 0
+
+
 def test_a_current_model_baseline_waits_for_its_weekly_slot(scheduled):
     seed(scheduled, saved())
     assert batch.dispatch(lambda *a: pytest.fail('enqueue only'))['queued'] == 0
