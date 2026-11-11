@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-214 — Manager profiles: keyed on roster `owner_id`, current season only, one backfill is the only extra Sleeper cost, rookie drafts deferred
+
+**Date:** 2026-11-10 · **Who:** side session from the trade-quality evaluation (built dark; operator decides the open questions in the design).
+**Context:** ~80% of suggestions go to league-mates who never ranked, and testers like those far less. Public Sleeper league history (trades, FAAB waiver bids including lost ones) says what those managers actually do, but FAAB rows were discarded by the trade sweep and no per-manager profile existed. [Design](../docs/plans/manager-profiles/design.md).
+**Decision:** Capture behind `market.manager_profiles` (default off), riding the `market.trade_capture` sweep: keep the waiver / free-agent rows of the payloads already fetched (`sleeper_waiver_moves`) and rebuild one `manager_profiles` row per owned roster from everything stored. Key on the roster's `owner_id` (league identity, ADR-012); attribute moves by `roster_id`; exclude waiver/FA moves whose `creator` fails `owns_roster`. The only extra Sleeper traffic is an 18-leg backfill per league, once; its marker is the presence of profile rows, written only after a backfill with no failed leg. No roster map ⇒ skip entirely. Current season only; rookie-draft selections deferred (needs `/drafts` + `/draft/<id>/picks` reads and a draft-dated board — `dp_values_history` is research-only and has no May–August boards, `player_value_history` starts 2026-07-26).
+**Consequences:**
+- No consumer: trade generation, ordering and every response are unchanged; a consumer gets its own flag and scope block.
+- Trade signals are thin in one season (prod: median 2 trades per manager per season, 19% zero); prior seasons need one `/rosters` read per prior league to attribute (design open question 2).
+- `accounts.delete_user_data` deletes a deleted account's profile rows and export includes them, but a league-mate's next sweep can rebuild one from public data (design open question 1).
+- 2026-11-10: the operator turned the flag on in `config/features.json` ("flip it on") before answering open question 1; it takes effect when PR #635 merges. Production's `FTF_FLAGS` does not pin this key (G-076), so the file value applies. Turning it on exposed one bug, fixed in the same change: the caller's own profile was rebuilt when their account was deleted mid-daemon. `replace_manager_profiles` now takes the caller's users-row lock (`live_user`), like the roster-history writes; a league-mate's later sync can still rebuild a deleted account's profile (open question 1).
+
 ## D-213 — Roster setup's "Keep" is the existing `untouchable` tag, with a guard past 40% of the roster
 
 **Date:** 2026-11-10 · **Who:** operator, accepting the roster-first setup design ([prd.md §0 Q2](../docs/plans/roster-first-trade-setup/prd.md)).

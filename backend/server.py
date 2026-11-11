@@ -30194,7 +30194,17 @@ def session_init():
                         and str(league_id).isdigit()
                         and not _platform_linked):
                     from .sleeper_trades_service import sync_league_trades
-                    _n_tr = sync_league_trades(league_id)
+                    # market.manager_profiles (docs/plans/manager-profiles/):
+                    # keep the waiver/FA rows of the same payloads and rebuild
+                    # the league's profiles. Capture only — no reader. Needs
+                    # the shared rosters read; meta is the shared read too.
+                    _mp_on = (is_enabled("market.manager_profiles")
+                              and bool(_rh_roster_rows))
+                    _n_tr = sync_league_trades(
+                        league_id, profiles=_mp_on,
+                        rosters=_rh_roster_rows if _mp_on else None,
+                        league_meta=_league_meta() if _mp_on else None,
+                        live_user=user_id if _mp_on else None)
                     log.info("  ✅ league trades captured (%d new)", _n_tr)
                     # suggestion.telemetry — executed-trade tagging: link
                     # every not-yet-linked captured trade to its best-
