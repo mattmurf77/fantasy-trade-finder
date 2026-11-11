@@ -289,11 +289,39 @@ the open questions for the operator at the top.
 
 ### WS7 — Trade willingness, relative to the league (R8)
 
-**Starts after PR #635 (manager profiles) is on `main`.** Behind its own flag. Uses each
-manager's completed trades from public league history, compared within their league: a
-manager is down-weighted as a partner only when they trade clearly less than their
-league-mates, and nothing is applied in a league where everyone trades. Spec to be written
-against #635's schema when it lands.
+**Starts from the integrated tree, which now has manager profiles (PR #635).** Branch
+`feat/partner-activity`. Capability flag `trade.partner_activity` (off).
+
+The operator: "Yes, but controlled via a capability flag. And it should more so be a league
+specific threshold that's evaluated. If all managers are active in trading, it shouldn't get
+applied at all."
+
+**What.** A rule in engine revision 4 only (revisions 1–3 are immutable, and revision 4 is
+the one being graded), on when both revision 4 is selected and the flag is on:
+1. From the stored manager profiles (`backend/manager_profiles.py`, public completed trades
+   this league year), each manager's completed-trade count, compared within their league.
+2. A league-specific threshold decides who counts as a reluctant trader: a manager is flagged
+   only when they trade clearly less than their league-mates (starting rule: at or below a
+   third of the league median, and the league median is at least two trades). **If every
+   manager in the league is at or above the threshold, or the league has too little history
+   to tell, the rule applies to nobody.**
+3. Offers to a flagged manager are demoted in order, the same way revision 4's other rules
+   act: through the support scores, never eligibility, the market floor or the terms. They
+   stay in the inventory.
+4. The proof records the manager's count, the league median, the threshold and whether the
+   rule fired, so a graded card can be explained. With the flag on, revision 4's proofs carry
+   a later rules version so graded evidence is separable.
+
+**Constraints.** Flag off, or revision 4 not selected: byte-identical to today. The count
+uses completed trades only (public); it never reads the private offers read, another user's
+declines, or anything a league-mate did not make public. A manager with no profile is never
+flagged. Nothing is shown to users about a league-mate's willingness.
+
+**Acceptance.** Tests on constructed leagues: one clear non-trader is demoted; a league where
+everyone trades changes nothing; a league with thin history changes nothing; no profile, no
+flag. The inventory is revision 4's in every case. A report on the recorded production
+requests (aggregate only): how many leagues have any flagged manager, and how much of the
+first page moves.
 
 ### WS2b — Read the user's own Sleeper offers (R3 Part B, approved)
 
