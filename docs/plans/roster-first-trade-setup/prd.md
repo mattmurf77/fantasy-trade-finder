@@ -46,17 +46,19 @@ The 2026-11-10 acceptance eval (`docs/plans/realtime-trade-engine/acceptance-eva
 2. **Unknown boards.** Like rate is 0.17–0.23 against counterparties with no board and 0.46–0.65 against counterparties with one. 80% of cards are the unknown kind.
 3. **Sparse preference data.** Preference and pass-reason data comes from 2–3 people. Few users ever open the sheet.
 
-The step asks every new Find a Trade user, once per league, the two questions the engine most needs answered: which of your assets are you willing to move, and how do you order the players you own? It asks before the first deck renders.
+The step asks every new Find a Trade user, once per league, the two questions the engine most needs answered: which of your assets are you willing to move, and how do you order the players you own? It asks right after the user's first pass on a Find a Trade card, when the user has just seen a suggestion that misread their team (operator call, 2026-11-10).
 
 ## 2. The flow in one paragraph
 
-On the first Find a Trade in a league, before the deck, the user sees their whole roster grouped QB / RB / WR / TE / Picks. Every asset carries a three-state control: **Move · — · Keep**, defaulting to "—". Tapping writes immediately through the existing asset-prefs route. **Continue** opens an inline rank step: one position at a time, the user taps their own players in the order they value them, using Quick Rank's chip grammar. Each position saves through the existing subset-safe reorder route. The done state summarises what changed and hands back to the deck, which regenerates once with `force` through the existing onboarding regen bus. **Skip** is always one tap away and leaves the deck exactly as it would have been.
+On the first pass of a Find a Trade card in a league, the user sees their whole roster grouped QB / RB / WR / TE / Picks. Every asset carries a three-state control: **Move · — · Keep**, defaulting to "—". Tapping writes immediately through the existing asset-prefs route. **Continue** opens an inline rank step: one position at a time, the user taps their own players in the order they value them, using Quick Rank's chip grammar. Each position saves through the existing subset-safe reorder route. The done state summarises what changed and hands back to the deck, which regenerates once with `force` through the existing onboarding regen bus. **Skip** is always one tap away and leaves the deck exactly as it would have been.
 
 ## 3. Entry, return and re-prompt
 
-### 3.1 First use per league (the only automatic entry)
+### 3.1 First pass per league (the only automatic entry)
 
-Show the step when **all** of these hold:
+**Trigger (operator change, 2026-11-10):** the user's **first declined (passed) Find a Trade suggestion** in the league. It is not the Trades tab opening or the first deck request. The pass is recorded exactly as it is today. If a pass-reason sheet opens, the push waits until it closes, so reason capture is never interrupted. The setup then pushes on top of the deck, which keeps its position underneath. Why: a pass is the moment the user has seen a suggestion that misread their team, so the ask lands with context and never sits in front of the first deck.
+
+Show the step on that pass when **all** of these hold:
 
 - `trades.roster_setup` is on.
 - The league is not `league_demo`.
@@ -65,7 +67,7 @@ Show the step when **all** of these hold:
 
 Saved preferences do **not** suppress the step. A user with three untouchables still sees it, pre-filled with those three as Keep. The step is a superset of what they have, so there is nothing to lose, and suppressing it would exclude exactly the users with partial data.
 
-It renders as a **pushed screen in the Trades stack**, entered from TradesHome before the first deck request resolves. It is not a modal, so the deck request runs in the background and the skip path loses no time. It is a tab-stack screen, so it does **not** mount its own `FeedbackFAB` (#188 rule).
+It renders as a **pushed screen in the Trades stack**, pushed from the deck surface where the pass happened. It is not a modal, so the deck stays mounted underneath and Skip returns the user to the next card with no reload. It is a tab-stack screen, so it does **not** mount its own `FeedbackFAB` (#188 rule).
 
 ### 3.2 Returning to it later (manual entry)
 
@@ -171,7 +173,7 @@ Because a reorder is a pure permutation, the roster's total value does not move.
 
 ## 7. Skip behaviour
 
-- **Skip on Step 1:** writes nothing new (any taps already made are kept, since they autosaved). Store `{status:'skipped'}`. Return to TradesHome, where the deck request has kept running, so the skip costs no time. A collapsing **"Set up your roster"** entry card then appears on TradesHome (TeamReviewEntryCard pattern) with the snooze ladder from §3.3.
+- **Skip on Step 1:** writes nothing new (any taps already made are kept, since they autosaved). Store `{status:'skipped'}`. Return to the deck at the next card. It stayed mounted underneath, so the skip costs no time. A collapsing **"Set up your roster"** entry card then appears on TradesHome (TeamReviewEntryCard pattern) with the snooze ladder from §3.3.
 - **Skip on Step 2:** positions saved so far stay saved, and Step 3 runs normally. Skipping the rank step is not skipping the setup.
 - **Back gesture** = Skip at the current step.
 - The step never blocks the deck. If the asset-prefs or roster fetch fails, the screen shows the existing error grammar with "Skip to trades".
@@ -208,7 +210,7 @@ Flag **off**:
 - AC-0. Every existing path is byte-identical. No screen, entry card or DNA row renders, and the engine ignores any `trade_block` rows. The asset-prefs route still accepts and returns `trade_block` (persistence is never gated).
 
 Flag **on**:
-- AC-1. The first Find a Trade in a non-demo league with a roster pushes the setup screen before the first deck renders. The deck request is issued in parallel, not after.
+- AC-1. The first pass on a Find a Trade card in a non-demo league with a roster pushes the setup screen, after the pass is recorded and after any pass-reason sheet closes. Opening the Trades tab or loading the first deck never pushes it. The deck underneath keeps its position.
 - AC-2. Every rostered player and every owned pick appears exactly once, grouped QB/RB/WR/TE/Picks, with saved tags pre-filled (`untouchable` → Keep, `trade_block` → Move, anything else → —).
 - AC-3. Each tap issues exactly one `POST /api/league/asset-prefs` (coalesced while in flight). The final stored state equals the last tap. Reopening the screen shows the stored state.
 - AC-4. Picks beyond `picks_pool_cap` render greyed with "not in trade search". Their toggle still saves.
@@ -216,7 +218,7 @@ Flag **on**:
 - AC-6. After a position is saved, every posted player resolves to source `explicit` in the next owner job's `user_sources`.
 - AC-7. With a `trade_block` player and the flag on, the owner and bilateral constructors raise that player's give-side interest and count him as `declared` intent. With the flag off, card output is byte-identical (pytest, both arms).
 - AC-8. Exiting through Done forces exactly one deck regeneration. Exiting with no changes forces none.
-- AC-9. Skip at any point returns to TradesHome with no extra latency (the deck is already loading), stores `skipped`, and shows the entry card.
+- AC-9. Skip at any point returns to the deck at the next card with no reload, stores `skipped`, and shows the entry card on TradesHome.
 - AC-10. A roster that gains assets after completion shows the "N new on your roster" card. Opening it lists only the new assets. A roster that only lost assets shows nothing.
 - AC-11. The analytics events in analytics.md fire with exactly the specced props. They are registered in `analytics_taxonomy.py` and classified in `analytics_queries.NON_INTENT_EVENTS` **in the same commit as the emitters**.
 - AC-12. There is no `FeedbackFAB` mount in the new screen (tab stack), and the pinned footer reports its height.

@@ -15,7 +15,7 @@ Design: [prd.md](prd.md) · Analytics: [analytics.md](analytics.md) · Reuse evi
 
   | Event | Properties | Fires when | Client |
   |---|---|---|---|
-  | `roster_setup_shown` | `league_id, entry, roster_size, pick_count, prefilled_count` | Setup screen first renders for an entry | mobile |
+  | `roster_setup_shown` | `league_id, entry, roster_size, pick_count, prefilled_count` | Setup screen first renders for an entry (`entry` ∈ first_pass, roster_changed, manual_dna, entry_card) | mobile |
   | `roster_setup_toggles_done` | `league_id, entry, move_count, keep_count, open_count, pick_move_count, pick_keep_count, changed_count, duration_ms` | User leaves Step 1 by Continue | mobile |
   | `roster_setup_rank_saved` | `league_id, position, players_ranked, players_total` | One position's reorder POST succeeds | mobile |
   | `roster_setup_completed` | `league_id, entry, ranked_positions, changed, duration_ms` | Done state renders | mobile |
@@ -53,7 +53,7 @@ Design: [prd.md](prd.md) · Analytics: [analytics.md](analytics.md) · Reuse evi
   - entry condition → pushed screen → autosave writes → reorder → bus marker → TradesHome forced regen, each hop cited by file:line;
   - the flag-off path cited to show byte-identity.
 - [ ] **Manual TestFlight checklist** (runtime proof matters: this is a first-run interruption):
-  1. Fresh league → Trades. Setup appears and the deck is already loading underneath.
+  1. Fresh league → Trades. Opening the tab and loading the deck do not show the setup. Pass the first card (with and without a pass reason): the setup appears after the pass is recorded, and Skip returns you to the next card.
   2. Mark 2 Move, 2 Keep, 1 pick Keep. Kill the app, reopen the screen from the DNA row. The states persist.
   3. Rank RBs only, then Done ranking. RB order on the Tiers board matches; WR order is untouched.
   4. See trades. Exactly one regeneration, and at least one card gives away a Move player.

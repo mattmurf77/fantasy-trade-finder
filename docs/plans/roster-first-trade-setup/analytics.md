@@ -30,7 +30,7 @@ All of these are client-fired from mobile, through `track(name, props, 'RosterSe
 
 | Event | Properties (closed enums in brackets) | Fires when | Intent class |
 |---|---|---|---|
-| `roster_setup_shown` | `league_id`; `entry` [`first_use` \| `roster_changed` \| `manual_dna` \| `entry_card`]; `roster_size` (players); `pick_count`; `prefilled_count` (assets already tagged) | The screen's first render for one entry. Once per entry, not per re-render. | **NON_INTENT**: an impression the user did not ask for on `first_use` (the `team_review_beat_viewed` class) |
+| `roster_setup_shown` | `league_id`; `entry` [`first_pass` \| `roster_changed` \| `manual_dna` \| `entry_card`]; `roster_size` (players); `pick_count`; `prefilled_count` (assets already tagged) | The screen's first render for one entry. Once per entry, not per re-render. | **NON_INTENT**: an impression the user did not ask for on `first_pass` (the `team_review_beat_viewed` class) |
 | `roster_setup_toggles_done` | `league_id`; `entry`; `move_count`; `keep_count`; `open_count`; `pick_move_count`; `pick_keep_count`; `changed_count` (assets whose state differs from the prefill); `duration_ms` | The user leaves Step 1 through **Continue** | INTENT |
 | `roster_setup_rank_saved` | `league_id`; `position` [`QB` \| `RB` \| `WR` \| `TE`]; `players_ranked` (explicitly tapped); `players_total` (roster players at the position) | One position's `POST /api/rankings/reorder` returns 2xx. Not fired on failure. | INTENT |
 | `roster_setup_completed` | `league_id`; `entry`; `ranked_positions` (count 0–4); `changed` (bool: any tag or rank changed); `duration_ms` (screen open → done) | The done state renders | INTENT |
@@ -51,13 +51,13 @@ All of these are client-fired from mobile, through `track(name, props, 'RosterSe
 | Name collision with `ALLOWED_CLIENT_EVENTS` or `SERVER_FIRED_EVENTS` | None. `git grep -n "roster_setup" -- backend/` returns nothing. The module's import-time disjointness check (`analytics_taxonomy.py` header) passes because all six are client-only. |
 | Prefix convention | `<flow>_<verb>` like `quickset_*` and `team_review_*`. |
 | `FUNNEL_CRITICAL` | Not added. Only auth/first-open events are in it (`analytics_taxonomy.py:1094-1099`). |
-| NON_INTENT classification | `roster_setup_shown` and `roster_setup_skipped` go in `analytics_queries.NON_INTENT_EVENTS` (next to `team_review_beat_viewed` / `team_review_exited`, `analytics_queries.py:105-106`). INTENT is a deny-list, so without this a first-use impression would mint a user-day for every new Find a Trade user and step-change DAU on the ship date. |
+| NON_INTENT classification | `roster_setup_shown` and `roster_setup_skipped` go in `analytics_queries.NON_INTENT_EVENTS` (next to `team_review_beat_viewed` / `team_review_exited`, `analytics_queries.py:105-106`). INTENT is a deny-list. The automatic entry now follows a pass, which is already intent, so the impression would not mint a user-day there. It stays NON_INTENT because the user did not ask for it, and because the return-card entries can render it without any other intent; otherwise it would mint a user-day for every new Find a Trade user and step-change DAU on the ship date. |
 | Rank-class streak events (`_RANK_STREAK_EVENTS`) | Not touched. The server's `ranking_reorder` already counts for streaks. |
 | `board_started` funnel rung (`analytics_queries.py:475-476`) | Not changed in v1. Decide at build whether `roster_setup_rank_saved` should count as starting a board. Recommendation: no. `ranking_reorder` already reaches the user-level rollups, and adding it would change a historic funnel. |
 
 ## 4. Questions this answers
 
-1. **Adoption:** of users `shown` on `first_use`, what share reach `toggles_done`, `rank_saved` (any) and `completed`? What share `skipped`, and at which `stage`?
+1. **Adoption:** of users `shown` on `first_pass`, what share reach `toggles_done`, `rank_saved` (any) and `completed`? What share `skipped`, and at which `stage`?
 2. **Effort:** the `duration_ms` distribution, and `players_ranked / players_total` per position. Do users stop after RB?
 3. **Data yield:** the per-user `move_count` and `keep_count` distribution. This is the first per-player give-side preference the app has ever collected. Watch for `keep_count` near roster size, which is the starvation risk.
 4. **Outcome (the point):** deck like rate and the `value_giving` pass-reason share over 7 days after `completed`, against users who `skipped`. Join `user_events` on `user_id, league_id`. Read it as stratified, not causal: completers self-select. The acceptance eval's "≥10 distinct responding users" bar applies before any claim.
