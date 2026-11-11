@@ -156,8 +156,8 @@ Eligibility, terms, floor and overpay gates are revision 2's. Proofs carry a `re
 block; version fencing covers evaluation, page safety signature, presentment and prepared
 payloads. The module name keeps the fast deck on the full solve. Calibration grades it in a
 round of its own, `outlook-v2-v4-1` (`grading.revision4_round`): revision 2 next to revision 4
-on one frozen capture per deck, beside the v2/v3 round, offered to a pair once it has
-completed that round. `outlook_calibration.ROUNDS` lists the rounds; sessions, build leases and
+on one frozen capture per deck, beside the v2/v3 round. A pair is offered a v2/v3 deck it is
+part-way through first, then the revision-4 deck, then its v2/v3 deck again. `outlook_calibration.ROUNDS` lists the rounds; sessions, build leases and
 reports are keyed by round id, and one worker thread drains enabled rounds in order. The
 earlier additive arm (`grading.revision4_arm`) is superseded and inert while the round is on.
 See [scope](plans/offer-learnings/scope-revision-4.md) and

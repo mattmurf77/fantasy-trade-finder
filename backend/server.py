@@ -36137,7 +36137,7 @@ def grading_create_session_route():
     user_id = str(sess["user_id"])
     try:
         # Revision-4 round (grading.revision4_round): an explicit round_id, or the default
-        # once this account/league completed the current round. Off ⇒ None, today's path.
+        # offer order (outlook_calibration.default_round). Off ⇒ None, today's path.
         r4_round = _outlook_calibration.default_round(
             user_id=user_id, league_id=league_id, requested=body.get("round_id"))
         if r4_round is not None:
