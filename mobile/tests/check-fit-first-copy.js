@@ -19,8 +19,9 @@
 //      bar and the bottom reasons list.
 //   3. The other team's row comes before the viewer's row; both testIDs exist,
 //      and each renders its own team's tag, lead and ranks.
-//   4. Server text only: no `code` read anywhere in the card; the only literal
-//      copy in the block is the label row and the two team labels.
+//   4. Server text only: no `code` read anywhere in the card except
+//      fitLeadShown (check 13); the only literal copy in the block is the
+//      label row, the two team labels and the Before / After header.
 //   5. Two lines per team: the lead and the ranks are single-line
 //      (numberOfLines={1}); ranks in the mono face (type.data).
 //   6. No colour carries direction: the fit styles use neutral chalk/ink
@@ -31,6 +32,25 @@
 //      tag and ranks, adds the key only when a team passes, and never reads
 //      `fit_lines` (a stored fit-1 line is dropped).
 //  10. `npm run test:fit-first-copy` exists.
+//
+// The before/after table (operator, TestFlight 2026-11-11: "a simple
+// before/after table is a better fit for the positions involved"). The
+// server adds `positions` per team (held + moved, QB/RB/WR/TE order) and
+// keeps v/lead/ranks/tag as they were, so builds 184/185 are unchanged:
+//  11. A team with non-empty `positions` renders FitRankRows in place of
+//      the rank text; absent or empty falls back to fitRanksText(ranks)
+//      exactly as before. One Before / After header for the block, shown
+//      only when a team has a table.
+//  12. FitRankRows, transpiled and executed: one row per position (held and
+//      moved alike, none filtered), three cells (position, ordinal before,
+//      ordinal after) in the mono face with fixed widths, a templated testID
+//      `trade-card.fit-rank.<side>.<pos>` and a VoiceOver label
+//      "Them, RB, 5th before, 5th after"; no style depends on direction.
+//  13. fitLeadShown, executed: with a table, `holds.*` / `shifts.*` leads hide
+//      and `plan_*` / `need.*` (and anything else) stay; with `positions`
+//      missing or empty every lead shows (today's rendering).
+//  14. The normalizer validates `positions` like `ranks` (at most 4) and
+//      yields [] when the server sent none.
 //
 // Run: node tests/check-fit-first-copy.js   (or: npm run test:fit-first-copy)
 
@@ -134,9 +154,13 @@ const youRow = youAt >= 0 ? block.slice(youAt) : '';
   const name = '4. block renders server text only (no code read; only the label copy)';
   const literals = (block.match(/>\s*([A-Za-z][^<>{}]*?)\s*</g) || [])
     .map((m) => m.replace(/^>\s*|\s*<$/g, ''));
-  const allowed = ['League rank · position value', 'Them', 'You'];
+  const allowed = ['League rank · position value', 'Them', 'You', 'Before', 'After'];
   const extra = literals.filter((l) => !allowed.includes(l));
-  if (/\.code\b/.test(card)) fail(name, 'TradeCard must never read a fit `code`');
+  // The one exception: fitLeadShown hides a rank-fact lead the table restates.
+  const leadFn = card.indexOf('export function fitLeadShown(');
+  const leadEnd = leadFn < 0 ? -1 : card.indexOf('\n}\n', leadFn);
+  const outside = leadFn < 0 ? card : card.slice(0, leadFn) + card.slice(leadEnd);
+  if (/\.code\b/.test(outside)) fail(name, 'TradeCard must never read a fit `code` outside fitLeadShown');
   else if (extra.length) fail(name, `literal copy in the block: ${extra.join(' | ')}`);
   else if (allowed.some((a) => !literals.includes(a))) fail(name, `the block must carry the labels ${allowed.join(', ')}`);
   else ok(name);
@@ -159,7 +183,8 @@ const youRow = youAt >= 0 ? block.slice(youAt) : '';
 // 6. Neutral colours only.
 {
   const name = '6. fit styles are neutral tokens: no colour carries direction';
-  const names = ['fitBlock', 'fitTeam', 'fitWho', 'fitTag', 'fitBody', 'fitLead', 'fitRanks'];
+  const names = ['fitBlock', 'fitTeam', 'fitWho', 'fitTag', 'fitBody', 'fitLead', 'fitRanks',
+                 'fitRankRow', 'fitRankPos', 'fitRankCol', 'fitRankNum'];
   const bodies = names.map((n) => { const m = card.match(new RegExp(`\\b${n}:\\s*\\{[^}]*\\}`)); return m ? m[0] : null; });
   if (bodies.some((b) => b === null)) fail(name, `missing styles: ${names.filter((_, i) => !bodies[i]).join(', ')}`);
   else {
@@ -198,6 +223,139 @@ const youRow = youAt >= 0 ? block.slice(youAt) : '';
     else if (text !== 'WR 9th → 7th · RB 2nd → 4th') fail(name, `ranks text was "${text}"`);
     else ok(name);
   }
+}
+
+// The table helpers' source (comments kept out; JSX intact).
+function grabFn(src, header) {
+  const at = src.indexOf(header);
+  return at < 0 ? '' : src.slice(at, at + src.slice(at).indexOf('\n}\n') + 2);
+}
+const rowsSrc = grabFn(card, 'function FitRankRows(');
+
+// 11. Table in place of the rank text; one header.
+{
+  const name = '11. positions render as a table in place of the rank text; absent/empty falls back';
+  const branch = (who, side) => new RegExp(
+    `\\{fit${who}\\.positions\\?\\.length \\? \\(\\s*<FitRankRows side="${side}" who="${who}" positions=\\{fit${who}\\.positions\\} />\\s*\\)`
+    + ` : fit${who}\\.ranks\\.length \\? \\(\\s*<ChalklineText style=\\{styles\\.fitRanks\\} numberOfLines=\\{1\\}>`
+    + `\\{fitRanksText\\(fit${who}\\.ranks\\)\\}</ChalklineText>\\s*\\) : null\\}`);
+  const leadGate = (who) => new RegExp(`\\{fitLeadShown\\(fit${who}\\) \\? \\(\\s*<ChalklineText style=\\{styles\\.fitLead\\} numberOfLines=\\{1\\}>\\{fit${who}\\.lead\\.text\\}`);
+  const heads = (card.match(/>Before</g) || []).length + (card.match(/>After</g) || []).length;
+  const headAt = block.indexOf('testID="trade-card.fit-rank-head"');
+  if (!branch('Them', 'them').test(themRow) || !branch('You', 'you').test(youRow)) {
+    fail(name, 'each team must render `positions?.length ? <FitRankRows …/> : ranks.length ? fitRanksText(ranks) : null`');
+  } else if (!leadGate('Them').test(themRow) || !leadGate('You').test(youRow)) {
+    fail(name, 'each lead must be gated on fitLeadShown(team)');
+  } else if (heads !== 2 || headAt < 0 || headAt > themAt) {
+    fail(name, 'one Before and one After header, in trade-card.fit-rank-head, above the team rows');
+  } else if (!/const fitTable = !!\(fitThem\?\.positions\?\.length \|\| fitYou\?\.positions\?\.length\)/.test(card)
+             || !/\{fitTable \? \(\s*<View\s+style=\{styles\.fitTeam\}\s+testID="trade-card\.fit-rank-head"/.test(block)) {
+    fail(name, 'the header must render only when a team has a non-empty positions list (fitTable)');
+  } else ok(name);
+}
+
+// Transpile + run a TSX snippet against a tiny React stand-in.
+let ts = null;
+try { ts = require('typescript'); } catch (e) { /* reported below */ }
+function run(src, names, scope) {
+  const js = ts.transpileModule(src, {
+    compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.None },
+  }).outputText;
+  const keys = Object.keys(scope);
+  // eslint-disable-next-line no-new-func
+  return new Function(...keys, `${js}\nreturn [${names.join(', ')}];`)(...keys.map((k) => scope[k]));
+}
+const h = (type, props, ...children) => ({ type, props: props || {}, children: children.flat() });
+const React = { createElement: h, Fragment: 'Fragment' };
+const textOf = (n) => (n == null || typeof n === 'boolean' ? '' : typeof n !== 'object' ? String(n)
+  : n.children.map(textOf).join(''));
+const ordinalSrc = grabFn(read(CARD), 'export function fitRankOrdinal(').replace(/^export /, '');
+
+// 12. FitRankRows, executed.
+{
+  const name = '12. FitRankRows: one row per position (held and moved), ordinals, ids, VoiceOver label, mono, no direction colour';
+  if (!ts) fail(name, 'typescript is not installed (npm ci)');
+  else if (!rowsSrc) fail(name, 'no function FitRankRows in TradeCard.tsx');
+  else {
+    const styles = { fitRankRow: { r: 1 }, fitRankNum: { n: 1 }, fitRankPos: { p: 1 }, fitRankCol: { c: 1 } };
+    let FitRankRows;
+    try {
+      [FitRankRows] = run(`${ordinalSrc}\n${rowsSrc}`, ['FitRankRows'],
+        { React, View: 'View', ChalklineText: 'ChalklineText', styles });
+    } catch (e) { fail(name, `could not run FitRankRows: ${e.message}`); }
+    if (FitRankRows) {
+      const tree = FitRankRows({ side: 'them', who: 'Them', positions: [
+        { pos: 'RB', before: 5, after: 5 }, { pos: 'WR', before: 6, after: 12 }] });
+      const rows = tree.children.filter((c) => c && c.type === 'View');
+      const cells = rows.map((r) => r.children.filter((c) => c && c.type === 'ChalklineText').map(textOf));
+      const ids = rows.map((r) => r.props.testID);
+      const labels = rows.map((r) => r.props.accessibilityLabel);
+      const cellStyles = rows.flatMap((r) => r.children.filter((c) => c && c.type === 'ChalklineText')
+        .map((c) => JSON.stringify(c.props.style)));
+      if (JSON.stringify(cells) !== JSON.stringify([['RB', '5th', '5th'], ['WR', '6th', '12th']])) {
+        fail(name, `cells were ${JSON.stringify(cells)}`);
+      } else if (JSON.stringify(ids) !== JSON.stringify(['trade-card.fit-rank.them.RB', 'trade-card.fit-rank.them.WR'])) {
+        fail(name, `testIDs were ${JSON.stringify(ids)}`);
+      } else if (JSON.stringify(labels) !== JSON.stringify(
+        ['Them, RB, 5th before, 5th after', 'Them, WR, 6th before, 12th after'])
+        || !rows.every((r) => r.props.accessible === true)) {
+        fail(name, `each row must be one accessible element; labels were ${JSON.stringify(labels)}`);
+      } else if (new Set(cellStyles).size !== 2
+        || !cellStyles.every((st) => st.includes('"n":1'))
+        || rows.some((r) => JSON.stringify(r.props.style) !== '{"r":1}')) {
+        // Two fixed shapes only (position cell, rank cell), both the mono face,
+        // the same for a held and a moved row: nothing depends on direction.
+        fail(name, `cell styles must not vary by row: ${JSON.stringify(cellStyles)}`);
+      } else if (/before\s*[<>]|after\s*[<>]|semantic|ice|flare/.test(rowsSrc)) {
+        fail(name, 'FitRankRows must not compare ranks or use a coloured token');
+      } else {
+        const mono = card.match(/fitRankNum:\s*\{[^}]*\}/);
+        const pos = card.match(/fitRankPos:\s*\{\s*width:\s*(\d+)\s*\}/);
+        const col = card.match(/fitRankCol:\s*\{\s*width:\s*(\d+)\s*\}/);
+        // The widest occupant at the 1.35 dense cap: "12th" is 4 Plex Mono
+        // cells (0.6 em) at 13pt; the BEFORE header is ~46pt of Archivo 11pt
+        // caps plus tracking.
+        const widest = Math.ceil(Math.max(4 * 0.6 * 13, 46) * 1.35);
+        if (!mono || !/\.\.\.type\.data\b/.test(mono[0])) fail(name, 'fitRankNum must spread type.data');
+        else if (!pos || !col || Number(col[1]) < widest || Number(pos[1]) < Math.ceil(2 * 0.6 * 13)) {
+          fail(name, `fixed cell widths needed: rank cell >= ${widest}pt (BEFORE / "12th" at the 1.35 cap)`);
+        } else ok(name);
+      }
+    }
+  }
+}
+
+// 13. fitLeadShown, executed.
+{
+  const name = '13. fitLeadShown: rank-fact leads hide only when the table shows';
+  const src = grabFn(read(CARD), 'export function fitLeadShown(').replace(/^export /, '');
+  let shown;
+  try { [shown] = run(src, ['fitLeadShown'], {}); } catch (e) { fail(name, `could not run fitLeadShown: ${e.message}`); }
+  if (shown) {
+    const table = [{ pos: 'RB', before: 5, after: 5 }];
+    const t = (code, positions) => shown({ side: 'you', lead: { code, text: 'x' }, ranks: [], ...(positions === undefined ? {} : { positions }) });
+    const wrong = [];
+    for (const code of ['holds.you', 'holds.them', 'shifts.you', 'shifts.them']) if (t(code, table)) wrong.push(`${code} shown with a table`);
+    for (const code of ['plan_rebuild.you', 'plan_win_now.you_roster', 'plan_rebuild.them', 'need.you', 'need.them', 'flat.you', 'none.them']) {
+      if (!t(code, table)) wrong.push(`${code} hidden with a table`);
+    }
+    for (const code of ['holds.you', 'shifts.them', 'plan_rebuild.you', 'need.you', 'flat.you', 'none.them']) {
+      if (!t(code, undefined)) wrong.push(`${code} hidden with positions absent`);
+      if (!t(code, [])) wrong.push(`${code} hidden with positions empty`);
+    }
+    if (wrong.length) fail(name, wrong.join('; '));
+    else ok(name);
+  }
+}
+
+// 14. Normalizer: positions.
+{
+  const name = '14. normalizer validates positions like ranks (max 4) and defaults to []';
+  if (!/positions: Array\.isArray\(t\.positions\)\s*\? t\.positions\.filter\(\(r: any\) =>\s*\['QB', 'RB', 'WR', 'TE'\]\.includes\(r\?\.pos\)\s*&& Number\.isInteger\(r\?\.before\) && r\.before >= 1\s*&& Number\.isInteger\(r\?\.after\) && r\.after >= 1\)\s*\.map\(\(r: any\) => \(\{ pos: r\.pos, before: r\.before, after: r\.after \}\)\)\s*\.slice\(0, 4\)\s*: \[\]/.test(api)) {
+    fail(name, 'normalizeTradeCard must validate positions (pos, integer before/after >= 1), cap at 4, and default to []');
+  } else if (!/positions\?:\s*\{ pos: FitRankPos; before: number; after: number \}\[\];/.test(types)) {
+    fail(name, 'FitBlockTeam needs `positions?: { pos: FitRankPos; before: number; after: number }[]`');
+  } else ok(name);
 }
 
 // 8. Wire type.

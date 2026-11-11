@@ -128,3 +128,5 @@ presentation.confidence.*
 roster-setup.tiers.chip.*
 roster-setup.tiers.header.*
 roster-setup.tiers.move.*
+# TradeCard.tsx FitRankRows  testID={`trade-card.fit-rank.${side}.${p.pos}`}
+trade-card.fit-rank.*

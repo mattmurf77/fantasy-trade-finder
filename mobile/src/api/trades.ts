@@ -211,6 +211,17 @@ export function normalizeTradeCard(raw: any): PagedTradeCard {
                   && Number.isInteger(r?.after) && r.after >= 1)
                 .map((r: any) => ({ pos: r.pos, before: r.before, after: r.after }))
               : [],
+            // The before/after table; same validation as `ranks`, at most one
+            // row per position (4). Absent on an older server: the card falls
+            // back to lead + ranks.
+            positions: Array.isArray(t.positions)
+              ? t.positions.filter((r: any) =>
+                  ['QB', 'RB', 'WR', 'TE'].includes(r?.pos)
+                  && Number.isInteger(r?.before) && r.before >= 1
+                  && Number.isInteger(r?.after) && r.after >= 1)
+                .map((r: any) => ({ pos: r.pos, before: r.before, after: r.after }))
+                .slice(0, 4)
+              : [],
           }))
       : [];
   // WS8 revised-offer card (flag trade.next_move): validated so a malformed
