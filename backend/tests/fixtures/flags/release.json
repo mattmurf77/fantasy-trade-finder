@@ -259,5 +259,6 @@
   "trade.standing_offers": true,
   "outlook.season_projections": true,
   "trades.win_now": true,
-  "outlook.championship_probabilities": true
+  "outlook.championship_probabilities": true,
+  "trade.fit_first_copy": false
 }

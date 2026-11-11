@@ -916,6 +916,11 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                // re-rank never moves it
   "reasons":         [ "...", ... ],           // optional, flag trade_math.human_explanations
   "narrative":       "...",                    // optional templated rationale
+  "fit_lines":       [ { "side": "them"|"you", // OPTIONAL — flag trade.fit_first_copy; owner_v2_bilateral
+                         "code": "need.them",  // cards only, present only when a line fires. At most one
+                         "text": "..." } ],    // per side, "them" first. Server-composed
+                                               // (trade_narrative.fit_lines, FIT_TMPL_VERSION); clients
+                                               // render `text` verbatim and never switch on `code`
   "match_context":   { ... },                  // optional roster-fit context
   "lane":            "window" | "value",       // OPTIONAL — flag trade.lanes; absent when the
                                                // user has no declared/seeded window

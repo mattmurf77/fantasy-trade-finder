@@ -248,6 +248,11 @@ export interface TradeCard {
   // row; the UI reads `sentence` only and must never switch on `code`
   // (docs/plans/counterparty-breaker/LLD.md §1.5, §1.8).
   breaker?: { code: string; severity: number; sentence: string };
+  // WS4 fit-first copy (flag trade.fit_first_copy). Server-composed lines
+  // (backend/trade_narrative.py fit_lines), at most one per side, the other
+  // team's first. Serialized only when a line fires; absent otherwise. The
+  // card renders `text` only and never switches on `code`.
+  fit_lines?: { side: 'them' | 'you'; code: string; text: string }[];
   // Structured "why this match" context stamped on every v2 card
   // (server.py trade_card_to_dict → match_context). Only the fields the
   // client reads are typed; extend as needed.
