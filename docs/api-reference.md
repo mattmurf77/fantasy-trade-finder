@@ -939,7 +939,7 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                // at RB, down at WR"), flat.*, none.* (2026-11-11;
                                                // never the card's own player list)
                            "ranks": [ { "pos": "QB"|"RB"|"WR"|"TE",
-                                        "before": 9, "after": 7 } ] } ] },
+                                        "before": 9, "after": 7 } ],
                                                // league rank by consensus position value
                                                // (1 + teams strictly above), only positions
                                                // whose value moves ≥ 5% of the league median
@@ -947,6 +947,15 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                // than 3 valued teams, or none. Clients render
                                                // `text` and the numbers verbatim, never `code`
                                                // (docs/cross-client-invariants.md § Fit block)
+                           "positions": [ { "pos": "RB", "before": 5, "after": 5 },
+                                          { "pos": "WR", "before": 6, "after": 8 } ] } ] },
+                                               // (2026-11-11, additive; v stays "fit-2") the
+                                               // app's before/after table: every position the
+                                               // rank facts cover, held ranks (before == after,
+                                               // what holds.* states) plus `ranks`, in QB, RB,
+                                               // WR, TE order. A rank move under the noise bar is
+                                               // in neither. Always present on a team; [] when
+                                               // no rank can be stated. Older apps ignore it.
   "match_context":   { ... },                  // optional roster-fit context
   "lane":            "window" | "value",       // OPTIONAL — flag trade.lanes; absent when the
                                                // user has no declared/seeded window
