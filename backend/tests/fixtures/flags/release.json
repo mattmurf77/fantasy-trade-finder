@@ -258,6 +258,7 @@
   "grading.blind": true,
   "grading.outlook_round": false,
   "grading.outlook_prepare": false,
+  "grading.revision4_arm": false,
   "trade.avoid_positions": false,
   "trade.standing_offers": true,
   "outlook.season_projections": true,

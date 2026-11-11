@@ -163,7 +163,7 @@ def present(cards, *, selected_give=(), selected_receive=(), opponent_user_id=No
 """
     cards = list(cards)
     order = list(range(len(cards)))
-    diagnostics = {"version": "bilateral-survivors-4" if generator_version == "owner-v2-bilateral-3" else VERSION,
+    diagnostics = {"version": "bilateral-survivors-4" if generator_version != GENERATOR_VERSION else VERSION,
         "generator_version": generator_version,
         "count": len(cards), "eligible_count": 0, "moved_count": 0,
         "quality_tolerance": QUALITY_TOLERANCE, "lookahead": LOOKAHEAD,

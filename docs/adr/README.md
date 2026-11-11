@@ -62,3 +62,4 @@ Don't bother for routine code changes, bug fixes, or anything self-evident from 
 - [ADR-024 Value-Core Trade Engine](adr-024-value-core-engine.md)
 - [ADR-025 Packed Evidence for Unseen Cards](adr-025-packed-unseen-evidence.md)
 - [ADR-028 Page-First Trade Search](adr-028-page-first-trade-search.md)
+- [ADR-029 Bilateral Revision 4](adr-029-bilateral-revision-4.md)

@@ -1262,6 +1262,8 @@ FLAG_KEYS: tuple[str, ...] = (
     # proof supports a specific fit reason (trade_narrative.fit_lines), and the
     # mobile card leads with them. OFF (default) ⇒ no key, byte-identical.
     "trade.fit_first_copy",
+    # docs/plans/offer-learnings/ WS1: owner-v2-bilateral-4 as an additive arm in the round build
+    "grading.revision4_arm",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

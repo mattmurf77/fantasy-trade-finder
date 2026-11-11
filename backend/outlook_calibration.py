@@ -21,6 +21,9 @@ from . import blind_grading as grading, database as db
 
 ROUND_ID = "outlook-v2-v3-1"
 MODEL_VERSIONS = {"current": "owner-v2-bilateral-2", "value_core": "owner-v2-bilateral-3"}
+# Additive arms folded into a new build after the paired selection
+# (grading.revision4_arm). Never part of MODEL_VERSIONS' equal-quota pair.
+EXTRA_ARMS = {"revision_4": "owner-v2-bilateral-4"}
 PER_ARM = 20
 MIN_PER_ARM = 1
 MAX_BATCH = 100
@@ -44,6 +47,16 @@ def build_enabled():
     return enabled() or is_enabled("grading.outlook_prepare")
 
 
+def revision4_enabled():
+    from .feature_flags import is_enabled
+    return is_enabled("grading.revision4_arm")
+
+
+def _missing_requested_arm(source):
+    """An unexposed deck built before the additive arm was switched on."""
+    return revision4_enabled() and "revision_4" not in (source.get("extra_arms") or {})
+
+
 def start_session(*, user_id, league_user_id, league_id, now=None, seed=None):
     """One active/completed exercise per account/league/round; failures may retry."""
     existing = db.load_open_grading_session(user_id, league_id,
@@ -51,7 +64,7 @@ def start_session(*, user_id, league_user_id, league_id, now=None, seed=None):
     if existing and existing["status"] == "open" and not existing.get("first_exposed_at") and not db.grading_progress(existing["session_id"])["answered"]:
         from .outlook_calibration_adapter import is_current
         source = json.loads(existing["source_json"])
-        if not is_current(source.get("snapshot") or {}, user_id=user_id,
+        if _missing_requested_arm(source) or not is_current(source.get("snapshot") or {}, user_id=user_id,
                           league_user_id=league_user_id or source.get("seat"), league_id=league_id):
             if db.retire_grading_session(existing["session_id"], _json({"code": "comparison_stale"})):
                 existing = None
@@ -98,8 +111,9 @@ def next_card(*, user_id, row):
             raise grading.GradingError("round_paused", 409)
         from .outlook_calibration_adapter import is_current
         source = json.loads(row["source_json"])
-        if not is_current(source.get("snapshot") or {}, user_id=user_id,
-                          league_user_id=source.get("seat"), league_id=row["league_id"]):
+        if ((_missing_requested_arm(source) and not db.grading_progress(sid)["answered"])
+                or not is_current(source.get("snapshot") or {}, user_id=user_id,
+                                  league_user_id=source.get("seat"), league_id=row["league_id"])):
             if db.retire_grading_session(sid, _json({"code": "comparison_stale"})):
                 if enabled():
                     start_session(user_id=user_id, league_user_id=source.get("seat"), league_id=row["league_id"])
@@ -294,6 +308,9 @@ def build_session(*, session_id, capture=None, lease_token=None, work_check=None
             raise grading.GradingError("comparison_too_few", 409)
         selected = [c for a in MODEL_VERSIONS for c in inventories[a][:n]]
         order = balanced_order(grading.merge_cards(selected), int(row["seed"]))
+        pair_shared = sum(len(c["arms"]) == 2 for c in order)
+        if revision4_enabled():
+            order = _fold_revision_4(frozen, source, counts, order, n, int(row["seed"]), work_check)
         cards = []
         source["proofs"] = {}
         for i, c in enumerate(order, 1):
@@ -308,7 +325,7 @@ def build_session(*, session_id, capture=None, lease_token=None, work_check=None
                 "partner_user_id": c["partner_id"], "position": i, "arms_json": _json(attribution),
                 "trade_json": _json(grading.neutral_trade(c["partner_id"], c["give"], c["receive"], frozen.catalog)),
                 "grade": None, "skipped": 0, "tags_json": "[]", "graded_at": None})
-        counts.update(total=len(cards), shared=sum(len(c["arms"]) == 2 for c in order))
+        counts.update(total=len(cards), shared=pair_shared)
         for arm in MODEL_VERSIONS:
             counts["arms"][MODEL_VERSIONS[arm]]["selected"] = n
             counts["arms"][MODEL_VERSIONS[arm]]["selected_unique"] = n - counts["shared"]
@@ -320,6 +337,66 @@ def build_session(*, session_id, capture=None, lease_token=None, work_check=None
         db.fail_grading_session(session_id, _json({"code": err.code}), lease_token=lease_token)
     except Exception:
         db.fail_grading_session(session_id, _json({"code": "comparison_failed"}), lease_token=lease_token)
+
+
+def _fold_revision_4(frozen, source, counts, order, n, seed, work_check):
+    """Add revision 4's top-n unique trades to a new deck, never reordering the pair.
+
+    Same frozen capture, same gates (run_arm), same ownership/proof checks as
+    the paired arms. A trade either arm already holds gains a revision_4
+    credit; a new trade is inserted at a seeded random slot, so the paired
+    cards keep their exact relative order. A failure records an error and
+    leaves the paired deck exactly as it would have been.
+    """
+    alias, version = "revision_4", EXTRA_ARMS["revision_4"]
+    source["extra_arms"] = {alias: version}
+    source["execution_order"] = [*source["execution_order"], alias]
+    selected, unique_keys = [], set()
+    cards = card = proof = None
+    try:
+        control = {"check_current": work_check} if work_check is not None else {}
+        cards, diagnostics = frozen.run_arm(version, **control)
+        for rank, card in enumerate(cards):
+            if work_check is not None:
+                work_check()
+            proof = card.owner_evaluation
+            if proof.model_identity[1] != version or not proof.matches(card):
+                raise ValueError("comparison proof identity mismatch")
+            partner, give, receive = str(card.target_user_id), tuple(card.give_player_ids), tuple(card.receive_player_ids)
+            key = (partner, frozenset(give), frozenset(receive))
+            if not (set(give) <= frozen.catalog.holdings.get(source["seat"], frozenset())
+                    and set(receive) <= frozen.catalog.holdings.get(partner, frozenset())):
+                raise ValueError("comparison ownership mismatch")
+            if key not in unique_keys and len(selected) < n:
+                selected.append(grading.ArmCard(alias, partner, give, receive,
+                    {"model_version": version, "rank": rank, "proof": proof.as_dict(),
+                     "roster": getattr(card, "roster_evaluation", None)}))
+            unique_keys.add(key)
+        counts["arms"][version] = {"final_occurrences": len(cards), "unique_inventory": len(unique_keys),
+            "duplicate_occurrences": len(cards) - len(unique_keys), "selected": len(selected),
+            "diagnostics": diagnostics, "status": "complete", "role": "additive"}
+    except Exception as err:
+        counts["arms"][version] = {"status": "error", "error_type": type(err).__name__,
+                                   "selected": 0, "role": "additive"}
+        return order
+    finally:
+        cards = card = proof = None
+    by_key = {(c["partner_id"], frozenset(c["give"]), frozenset(c["receive"])): c for c in order}
+    fresh = []
+    for c in selected:
+        hit = by_key.get(c.key)
+        if hit is not None:
+            hit["arms"].setdefault(alias, dict(c.provenance))
+        else:
+            fresh.append({"partner_id": c.partner_id, "give": c.give, "receive": c.receive,
+                          "arms": {alias: dict(c.provenance)}})
+    rng = random.Random(seed ^ 0x4B4)
+    rng.shuffle(fresh)
+    order = list(order)
+    for c in fresh:
+        order.insert(rng.randrange(len(order) + 1), c)
+    counts["arms"][version].update(shared_with_pair=len(selected) - len(fresh), inserted=len(fresh))
+    return order
 
 
 def _claim_lease(token, now):
@@ -431,6 +508,8 @@ def results(row):
         "completed_at": row["completed_at"], "total": len(cards), "shared": shared,
         "target_mean": grading.TARGET_MEAN, "arms": arms, "round_id": ROUND_ID,
         "model_versions": MODEL_VERSIONS,
+        **({"extra_model_versions": {a: v for a, v in EXTRA_ARMS.items() if a in arms}}
+           if any(a in arms for a in EXTRA_ARMS) else {}),
         "sample_size_status": json.loads(row["counts_json"]).get("sample_size_status", "descriptive_only"),
         "arm_labels": {"current": "Today's engine", "value_core": "New engine"}}
 
@@ -479,7 +558,9 @@ def report(*, since=None, include_open=False):
             "distinct_leagues": len({s["league_id"] for s in relevant}),
             "selected_cards": len(rows), "shared": shared,
             "answered_observations": sum(c["graded_at"] is not None for c in rows),
-            "arms": {MODEL_VERSIONS[a]: arms[a] for a in MODEL_VERSIONS}}
+            "arms": {MODEL_VERSIONS[a]: arms[a] for a in MODEL_VERSIONS},
+            **({"additive_arms": {v: arms[a] for a, v in EXTRA_ARMS.items() if a in arms}}
+               if any(a in arms for a in EXTRA_ARMS) else {})}
     # No personal boards, names, or user identifiers in the aggregate admin report.
     return {"round_id": ROUND_ID, "model_versions": MODEL_VERSIONS,
         "status_counts": dict(statuses), "status_counts_scope": "historical_attempts_in_report_period",
@@ -496,7 +577,9 @@ def report(*, since=None, include_open=False):
         "arm_inventory_totals": {v: {k: sum(json.loads(s["counts_json"]).get("arms", {}).get(v, {}).get(k, 0)
                                           for s in sessions)
                                     for k in ("final_occurrences", "unique_inventory", "duplicate_occurrences", "selected", "selected_unique")}
-                                 for v in MODEL_VERSIONS.values()}}
+                                 for v in [*MODEL_VERSIONS.values(), *(
+                                     v for v in EXTRA_ARMS.values()
+                                     if any(v in json.loads(s["counts_json"]).get("arms", {}) for s in sessions))]}}
 
 
 def connected_targets():

@@ -37,6 +37,7 @@ import backend
 from backend import database as db, feature_flags as ff, server, trade_service as ts
 from backend import trade_fast_deck as fast, trade_first_page as fp
 from backend import trade_gen_bilateral as bilateral, trade_gen_bilateral_candidate as candidate
+from backend import trade_gen_bilateral_r4 as revision_4
 from backend import trade_gen_outlook_evidence as outlook_evidence, trade_gen_owner as owner
 from backend.eval import synthetic_league
 from backend.tests.test_owner_generator_routes import (  # noqa: F401  (fixtures)
@@ -109,6 +110,7 @@ def test_the_page_gets_the_fast_decks_own_work_limit(monkeypatch):
 @pytest.mark.parametrize("generate,extra", [
     (owner.generate_owner_trades, {}),
     (outlook_evidence.generate_bilateral_trades, {}),
+    (revision_4.generate_bilateral_trades, {}),  # no parity suite: revision 4 runs the full solve
     (candidate.generate_bilateral_trades, {"pinned_give_players": ["p00_00"]}),
     (candidate.generate_bilateral_trades, {"require_all_give": True}),
     (lambda **kwargs: ([], None), {}),

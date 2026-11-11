@@ -4578,7 +4578,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 17
+DECK_PIPELINE_VERSION = 18
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4718,6 +4718,7 @@ DECK_PIPELINE_PINS = {
     15: "1a34729ff2b291ac",  # D-212 trade_block: the job carries the viewer's list into viewer_preferences; owner context strips it when trades.roster_setup is off (flag-off terms/order byte-identical); assignment hash sorts it.
     16: "e155ed45d1a02a13",  # ADR-028: fast deck and shadow hooks in the owner generator call (flags trade.fast_deck*, default off); flags off: same call, terms and order unchanged.
     17: "a344340932da4f13",  # trade.fit_first_copy (default off): trade_card_to_dict adds fit_lines to bilateral cards whose proof supports a specific reason; flag off: no key, payload byte-identical.
+    18: "560661f3c6d76b8d",  # Bilateral revision 4 (selector owner_bilateral_revision_4_enabled, default 0): presentment takes its version; the dark key is dropped from the request hash unless exactly 1; selector off: terms and order unchanged.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -8289,7 +8290,7 @@ def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
     if owner_state[0]:
         signature.append("owner_model:" + (owner_model or _bakeoff.owner_arm()))
         version = owner_model_version or _bakeoff.owner_version()
-        if version in ("owner-v2-bilateral-2", "owner-v2-bilateral-3"):
+        if version in ("owner-v2-bilateral-2", "owner-v2-bilateral-3", "owner-v2-bilateral-4"):
             signature.append("owner_model_version:" + version)
     significance = (significance_capture if significance_capture is not None
                     else _capture_trade_significance())
@@ -14101,7 +14102,7 @@ def _run_trade_job(
             final_cards, owner_presentment = trade_bilateral_presentment.present(
                 final_cards, selected_give=pinned_give or (),
                 selected_receive=pinned_receive or (), opponent_user_id=opponent_user_id,
-                generator_version=(owner_model_version if owner_model_version == "owner-v2-bilateral-3"
+                generator_version=(owner_model_version if owner_model_version in ("owner-v2-bilateral-3", "owner-v2-bilateral-4")
                                    else trade_bilateral_presentment.GENERATOR_VERSION))
             with _trade_jobs_lock:
                 job = _trade_jobs.get(job_id)
@@ -22051,6 +22052,8 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
         canonical["config"].pop("owner_bilateral_enabled", None)
     if not canonical["config"].get("owner_outlook_evidence_enabled"):
         canonical["config"].pop("owner_outlook_evidence_enabled", None)
+    if canonical["config"].get("owner_bilateral_revision_4_enabled") != 1.0:
+        canonical["config"].pop("owner_bilateral_revision_4_enabled", None)
     if not canonical["config"].get("owner_bilateral_revision_enabled"):
         canonical["config"].pop("owner_bilateral_revision_enabled", None)
     for key in ("user_roster", "pinned_give_players", "pinned_receive_players", "acquire_positions",

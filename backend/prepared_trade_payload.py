@@ -54,7 +54,8 @@ PROOF_FIELDS = frozenset(f.name for f in fields(OwnerDecisionContext))
 _PROOF_VERSIONS = {("owner_v1", "owner-v1"),
                    ("owner_v2_bilateral", "owner-v2-bilateral-1"),
                    ("owner_v2_bilateral", "owner-v2-bilateral-2"),
-                   ("owner_v2_bilateral", "owner-v2-bilateral-3")}
+                   ("owner_v2_bilateral", "owner-v2-bilateral-3"),
+                   ("owner_v2_bilateral", "owner-v2-bilateral-4")}
 
 
 def _require(condition, reason):

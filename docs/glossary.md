@@ -652,6 +652,12 @@ price cannot prove longevity. **Dynasty roster proxy** is a legal-slot assignmen
 of existing market prices, not projected points or championship probability.
 [Candidate contract](plans/outlook-evidence-rules/architecture.md).
 
+**Owned-pick premium** — revision 4 (`owner-v2-bilateral-4`) values the picks another manager would give up above market in that manager's support score: 20% for a rebuilding or tanking team, 10% for "not sure", none for a contender or championship team. Changes order only, never the market floor or the fairness gate.
+
+**Best-asset rule** — revision 4 demotes (never deletes) an uneven offer in which the other manager gives up the trade's most valuable asset for several lesser ones, unless those are all picks going to a rebuilding or tanking team.
+
+**Additive Calibration arm** — an engine folded into a Calibration round's new decks after the paired selection (today `revision_4`), credited on shared cards and never reordering or reselecting the paired cards.
+
 **Calibration round** — a namespaced, frozen comparison exercise whose exact model versions, input snapshot, selected cards and first feedback remain attributable independently of earlier exercises. The outlook round collects descriptive opinions and does not validate future-production forecasts.
 
 - **Official Max PF:** provider aggregate hindsight-best eligible lineup points; distinct from actual PF and optimizing expected future points.

@@ -3748,6 +3748,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("owner_bilateral_enabled",     0.0, "Owner generator selector: 1 replaces owner_v1 with owner_v2_bilateral on every owner entrance; 0 restores owner_v1; include/serve/exclusive settings stay unchanged"),
     ("owner_bilateral_revision_enabled", 0.0, "Bilateral revision selector: exactly 1 selects owner-v2-bilateral-2 when bilateral is selected; 0 retains/restores owner-v2-bilateral-1; other arms and serving settings unchanged"),
     ("owner_outlook_evidence_enabled", 0.0, "Evidence-bound outlook candidate: exactly 1 selects owner-v2-bilateral-3 only when bilateral and revision selectors are both enabled; 0 restores revision 2; no automatic activation"),
+    ("owner_bilateral_revision_4_enabled", 0.0, "Bilateral revision 4 (owner-v2-bilateral-4, built on revision 2): exactly 1 selects it when bilateral and revision selectors are both enabled, and it wins over owner_outlook_evidence_enabled; any other value leaves the revision 2/3 selection unchanged; no automatic activation"),
     ("prepared_trade_inventory_enabled", 0.0, "Silent durable prepared trade inventory: exactly 1 enables preparation/adoption with the registered capability; default 0, no model or offer-limit changes"),
     ("owner_pool_size",            16.0, "owner_v1 bounded candidate pool per team; computational limit, not a value gate"),
     ("owner_pair_budget",        4096.0, "owner_v1 maximum candidate evaluations per opponent"),
