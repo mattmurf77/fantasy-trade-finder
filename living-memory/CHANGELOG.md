@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-10 — Roster-first setup flag turned on (`trades.roster_setup`)
+
+- Operator call ("Turn it on"), the same day #637 merged dark. `config/features.json` and the three mirrored flag fixtures are flipped to true. The 8-step TestFlight checklist and the MOD-M1 call had **not** run first.
+- The engine half takes effect on deploy: owner-v1 and bilateral read `trade_block` on the give side. The UI half needs a TestFlight build that includes `9c252819`. Build 1.22.0 (183) predates it, so testers see nothing yet.
+- Rollback: set the flag false, then `POST /api/feature-flags/reload` (or via `FTF_FLAGS`).
+
 ## 2026-11-10 — Offer learnings built and integrated dark (PR #641)
 
 - From the operator's review of 612 real Sleeper offers ([plan](../docs/plans/offer-learnings/plan.md)): engine revision 4 (pick premium by outlook, pay-picks tie-breaker, best-asset rule, partner activity; ADR-029) with a Calibration round of its own; the fit block on every card (league ranks before and after, outlook tags); a pass-reason prompt every few passes; outcomes of sent trades; the user's own Sleeper offers read with consent; revised-offer cards for declined offers; a next-move generator; a definition doc for sending on the platform.

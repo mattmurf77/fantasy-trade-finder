@@ -258,7 +258,7 @@
   "outlook.season_projections": true,
   "trades.win_now": true,
   "outlook.championship_probabilities": true,
-  "trades.roster_setup": false,
+  "trades.roster_setup": true,
   "trade.next_move": true,
   "trade.fit_first_copy": true,
   "trade.partner_activity": false,

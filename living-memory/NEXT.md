@@ -11,7 +11,7 @@
 ## Table of Contents
 - [Priority Queue](#priority-queue)
 - [2026-11-10 — Fast deck: shadow in production, then turn on; then cheaper revision 2](#2026-11-10--fast-deck-shadow-in-production-then-turn-on-then-cheaper-revision-2)
-- [2026-11-10 — Roster-first setup (#637, dark): MOD-M1 call, TestFlight checklist, then the flag flip](#2026-11-10--roster-first-setup-637-dark-mod-m1-call-testflight-checklist-then-the-flag-flip)
+- [2026-11-10 — Roster-first setup (#637, flag on): TestFlight build + checklist, MOD-M1 call](#2026-11-10--roster-first-setup-637-flag-on-testflight-build--checklist-mod-m1-call)
 - [2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on](#2026-11-02--web-landing-update-1-cut-the-espnmfl-panels-or-enter-a-league-id-and-no-extra-account-needed-before-web-entry-ever-turns-on)
 - [2026-11-01 — Shop send (#574 / #577): two Update 1 follow-ups](#2026-11-01--shop-send-574--577-two-update-1-follow-ups)
 
@@ -85,12 +85,11 @@ Not in the seven active items. With its flags off it moves nothing; on, it takes
 
 Detail: [recommendation](../docs/plans/realtime-trade-engine/recommendation.md).
 
-## 2026-11-10 — Roster-first setup (#637, dark): MOD-M1 call, TestFlight checklist, then the flag flip
+## 2026-11-10 — Roster-first setup (#637, flag on): TestFlight build + checklist, MOD-M1 call
 
-1. **MOD-M1:** pipeline 15 deployed after the Nov 10 freeze, so decide whether a re-run is owed or the frozen candidate `b1440b7b` stands (models-eng). The pipeline change is a no-op with the flag off.
-2. **TestFlight checklist** (8 steps, [scope §3](../docs/plans/roster-first-trade-setup/scope.md)) on the first build that includes `9c252819`, with the flag on for testers.
-3. **Flag flip** `trades.roster_setup` once the checklist passes. Graduation criterion is in scope §2; check the `FTF_FLAGS` overrides first (G-076).
-4. Follow-up candidates from the build review:
+1. **MOD-M1:** pipeline 15 deployed after the Nov 10 freeze, so decide whether a re-run is owed or the frozen candidate `b1440b7b` stands (models-eng). The flag is now on, so pipeline 15 changes trades for any user who tags a player Move.
+2. **TestFlight build + checklist:** cut a build that includes `9c252819` (1.22.0 (183) predates it, so no client shows the setup yet), then run the 8-step checklist in [scope §3](../docs/plans/roster-first-trade-setup/scope.md). The flag was turned on 2026-11-10 before the checklist ran (operator call); if a step fails, roll back with the flag.
+3. Follow-up candidates from the build review:
    - serve `picks_pool_cap` to the client (it is hard-coded to 6);
    - decide whether the first-pass push waits for an active guide-tour step;
    - add `trade_block` to the default-dark revision arms (`trade_gen_outlook_evidence.py`, `trade_gen_bilateral_candidate.py`);
