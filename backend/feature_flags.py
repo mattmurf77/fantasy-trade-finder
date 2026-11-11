@@ -1052,10 +1052,16 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade.prepared_inventory",  # capability; default-dark audited numeric rollout
     "trade.first_page_store",    # P1 200 ms path: server-held first pages (scope-eng-200ms §2); OFF = today
     "trade.packed_evidence",     # ADR-025 stage 2: packed deck evidence (S8); turned on BEFORE the store (R2.4 §3)
-    # ADR-028 (docs/plans/realtime-trade-engine/). Interactive owner-serve jobs only;
-    # prepared inventories, replenishment and Calibration keep the full solve.
-    "trade.fast_deck",           # serve the page-first search's proven first 150 cards; OFF = full inventory
-    "trade.fast_deck_shadow",    # run the same page beside the full solve and log agreement; serves nothing
+    # ADR-028's 150-card fast deck, RETIRED 2026-11-11 by ADR-030: read nowhere, kept
+    # only so existing config keys still parse. Turning them on does nothing.
+    "trade.fast_deck",
+    "trade.fast_deck_shadow",
+    # ADR-030 (fast deck v2, docs/plans/realtime-trade-engine/fast-deck-v2-design.md):
+    # organic owner-only bilateral decks are built rules-first. The deck's per-card rules
+    # (discovery significance; deck_quality breakup / filler / redundant) decide which
+    # cards exist before ranking; the whole admitted inventory is built by the page
+    # search, falling back to the gated full solve. OFF = today's full solve, then filters.
+    "deck.rules_first",
     # ── Trade-suggestion presentation v2 (docs/plans/trade-presentation-v2/) ──
     # CLIENT-ONLY. No route reads this key; it is registered here so the
     # features-json-keys-known guard accepts it and so /api/flags serves it

@@ -46,6 +46,10 @@ REPO = Path(__file__).resolve().parents[2]
 SINCE = "2026-10-23T00:00:00+00:00"
 AS_OF = _after(2)
 W, CAP = dq.REPEAT_WINDOW, dq.REPEAT_CAP
+# A short deck (fewer than W cards): X on the CAP cards the cap keeps, six
+# clean cards, then X on CAP more it defers to the end (12 cards when CAP is 3).
+SHORT_N = 2 * CAP + 6
+SHORT_X = (*range(CAP), *range(CAP + 6, SHORT_N))
 
 # Market values from deck_quality's own thresholds: a clean pair is HEAD for
 # HEAD; LOW breaks a HEAD piece up but is no filler; FILL is filler.
@@ -393,17 +397,17 @@ def test_a_repeat_breach_of_protected_cards_only_is_explained():
 
 def test_the_repeat_window_is_by_displayed_position():
     """A never-delivered withdrawal at index 2 moves card W up to displayed
-    position W - 1, inside the window: X there is a fourth appearance. (The
+    position W - 1, inside the window: X there is an over-cap appearance. (The
     deck has a card past it, so it isn't a short deck. Its rows are an S1b
     partial run, so G-b4 audits it from rows.)"""
     db = make_db()
-    special = {**{i: with_x("w", i) for i in (10, 11, 12)}, W: with_x("w", W)}
+    special = {**{i: with_x("w", i) for i in range(10, 10 + CAP)}, W: with_x("w", W)}
     deck(db, "w", W + 2, {i: {**special.get(i, row("w", i)), "evidence_tier": "partial_run"}
                           for i in range(W + 2) if i != 2}, skip={2})
     withdraw(db, "w", 2, 0, reason="disposition_cut")
     t = run(db).rules["repeat"]
     assert t["violations"] == 1 and t["audited"] == W
-    assert t["examples"][0]["card_indexes"] == [10, 11, 12, W]
+    assert t["examples"][0]["card_indexes"] == [*range(10, 10 + CAP), W]
     assert t["examples"][0]["withdrawn_removed"] == 1
 
 
@@ -417,7 +421,7 @@ def test_a_short_deck_served_as_the_filter_ordered_it_is_explained():
     land in the window. A 12-card deck with X in 6 cards, served in the
     order filter_deck gave it, is _repeat_cap's own fixed point: explained."""
     db = make_db()
-    _x_deck(db, "short", 12, (0, 1, 2, 9, 10, 11))      # 3 kept, 6 clean, 3 deferred after
+    _x_deck(db, "short", SHORT_N, SHORT_X)             # CAP kept, 6 clean, CAP deferred after
     r = run(db)
     t = r.rules["repeat"]
     assert (t["violations"], t["explained"], t["explained_short_deck"]) == (0, 1, 1)
@@ -426,14 +430,14 @@ def test_a_short_deck_served_as_the_filter_ordered_it_is_explained():
         ("short", "short_deck")]
     text = render(r)
     assert "0 (explained: 0 by protected cards, 1 by a short deck, 0 by a response boundary)" in text
-    assert "short asset X at card_index 0, 1, 2, 9, 10, 11 (short_deck, over-cap" in text
+    assert f"short asset X at card_index {', '.join(map(str, SHORT_X))} (short_deck, over-cap" in text
 
 
 def test_a_short_deck_out_of_the_filters_order_is_a_violation():
     """The same assets, but an over-cap card served ahead of cards the
     filter would have kept: re-running _repeat_cap moves it, so it's real."""
     db = make_db()
-    _x_deck(db, "bad", 12, (0, 1, 2, 3, 10, 11))
+    _x_deck(db, "bad", SHORT_N, (*range(CAP + 1), SHORT_N - 2, SHORT_N - 1))
     t = run(db).rules["repeat"]
     assert (t["violations"], t["explained_short_deck"]) == (1, 0)
 
@@ -446,11 +450,11 @@ def test_the_short_deck_check_reads_every_displayed_card(monkeypatch):
     have stopped after a 30-card batch, so it reads FAIL (the safe side). A
     displayed card with no full row can't be checked: a violation stands."""
     db = make_db()
-    x_at = (0, 1, 2, *range(28, 35))
+    x_at = (*range(CAP), *range(28, 35))
     for job in ("long", "packless"):
         _x_deck(db, job, 35, x_at)
     put_pack(db, "long", _deck_cards("long", 35), card_count=35, deliveries=[[34, SERVED]])
-    deck(db, "gap", 12, {**{i: with_x("gap", i) for i in (0, 1, 2, 9, 10, 11)},
+    deck(db, "gap", SHORT_N, {**{i: with_x("gap", i) for i in SHORT_X},
                          5: row("gap", 5, full=False)})       # displayed, no full row
     reads = []
     real = ba._full_rows
@@ -467,10 +471,10 @@ def test_the_short_deck_check_reads_every_displayed_card(monkeypatch):
 def test_a_pack_less_batch_with_a_never_delivered_withdrawal_is_not_a_short_deck():
     """#469 QA round 3: a pack-less deck stopped after its 30-card first batch,
     one of them a never-delivered withdrawal the loader drops, shows 29 cards.
-    W0s count toward the 30, so X's fourth copy at the tail stays a breach."""
+    W0s count toward the 30, so X's over-cap copy at the tail stays a breach."""
     db = make_db()
-    deck(db, "w0", W, {i: with_x("w0", i) for i in (0, 1, 2, W - 1)}, skip={5})
-    withdraw(db, "w0", 5, 0, reason="disposition_cut")
+    deck(db, "w0", W, {i: with_x("w0", i) for i in (*range(CAP), W - 1)}, skip={CAP + 2})
+    withdraw(db, "w0", CAP + 2, 0, reason="disposition_cut")
     (d,) = [d for d in eval_data.load_decks(engine=db.eng, since=SINCE, as_of=AS_OF)]
     assert (len(d.cards), d.withdrawn_removed) == (W - 1, 1)
     rows = ba._full_rows(db.eng.connect(), [c.impression_id for c in d.cards])
@@ -487,10 +491,10 @@ def test_a_pack_less_short_deck_in_flight_is_not_explained(monkeypatch):
     its first 30 and viewed rows, so even a short one stays a violation."""
     monkeypatch.setattr(eval_data, "PACK_REQUIRED_SINCE", SINCE)
     db = make_db()
-    deck(db, "nopack", 12, {i: {**(with_x("nopack", i) if i in (0, 1, 2, 9, 10, 11)
+    deck(db, "nopack", SHORT_N, {i: {**(with_x("nopack", i) if i in SHORT_X
                                    else row("nopack", i)),
                                 "evidence_tier": "first30", "delivered_at": SERVED}
-                            for i in range(12)})
+                            for i in range(SHORT_N)})
     assert [d.exclusion for d in eval_data.load_decks(engine=db.eng, since=SINCE,
                                                       as_of=AS_OF)] == ["in_flight"]
     t = run(db).rules["repeat"]
@@ -501,9 +505,9 @@ def test_a_packed_short_deck_in_flight_is_still_explained():
     """#469 QA P3-1: a pack holds every built card, so a packed deck that is
     only in_flight (its pack not retired yet) is complete: explained."""
     db = make_db()
-    _x_deck(db, "short", 12, (0, 1, 2, 9, 10, 11))
-    put_pack(db, "short", _deck_cards("short", 12), card_count=12,
-             deliveries=[[11, SERVED]], retired=False)
+    _x_deck(db, "short", SHORT_N, SHORT_X)
+    put_pack(db, "short", _deck_cards("short", SHORT_N), card_count=SHORT_N,
+             deliveries=[[SHORT_N - 1, SERVED]], retired=False)
     assert [d.exclusion for d in eval_data.load_decks(engine=db.eng, since=SINCE,
                                                       as_of=AS_OF)] == ["in_flight"]
     t = run(db).rules["repeat"]
@@ -519,12 +523,12 @@ def test_repeat_head_explains_a_short_cap_without_rows_past_the_window(head, why
     """release-lead's #492 QA: a packed deck whose cap ran short (473 deferred)
     read a false FAIL, since re-running _repeat_cap needs every displayed
     card's row and packed-only cards have none. With repeat_head (v6) the
-    record says which cards the cap kept: X's fourth appearance at 5 is on a
+    record says which cards the cap kept: X's over-cap appearance at 5 is on a
     deferred card, so the breach is explained."""
     db = make_db()
-    heads = {"deferred": [th(i) for i in range(5)], "kept": [th(i) for i in range(6)],
+    heads = {"deferred": [th(i) for i in range(CAP + 2)], "kept": [th(i) for i in range(CAP + 3)],
              None: None}
-    deck(db, "s", W + 10, {i: with_x("s", i) for i in (0, 1, 2, 5)}, skip=range(W, W + 10),
+    deck(db, "s", W + 10, {i: with_x("s", i) for i in (*range(CAP), CAP + 2)}, skip=range(W, W + 10),
          record={"repeat_head": heads[head]})
     t = run(db).rules["repeat"]
     assert (t["violations"], t["explained_short_deck"]) == (int(why is None), int(why is not None))
@@ -533,15 +537,15 @@ def test_repeat_head_explains_a_short_cap_without_rows_past_the_window(head, why
 
 def test_a_repeat_head_naming_the_over_cap_card_is_a_violation_even_where_a_re_run_explains():
     """A 4-card deck, X on all four: re-running _repeat_cap leaves it unchanged
-    (the fourth is deferred to the end it already sits at), so without the
+    (the over-cap one is deferred to the end it already sits at), so without the
     field it reads short_deck. A record saying the cap kept that card is the
     filter's own word: the over-cap appearance wasn't deferred, a violation."""
     db = make_db()
-    _x_deck(db, "k", 4, range(4))
+    _x_deck(db, "k", CAP + 1, range(CAP + 1))
     assert run(db).rules["repeat"]["explained_short_deck"] == 1
     db = make_db()
-    deck(db, "k", 4, {i: with_x("k", i) for i in range(4)},
-         record={"repeat_head": [th(i) for i in range(4)]})
+    deck(db, "k", CAP + 1, {i: with_x("k", i) for i in range(CAP + 1)},
+         record={"repeat_head": [th(i) for i in range(CAP + 1)]})
     t = run(db).rules["repeat"]
     assert (t["violations"], t["explained"]) == (1, 0)
 
@@ -550,14 +554,15 @@ def test_repeat_head_ignores_protected_over_cap_cards_it_kept():
     """A protected card holds its place in the cap's head; only the
     unprotected over-cap appearances need to have been deferred."""
     db = make_db()
-    deck(db, "s", W + 10, {i: with_x("s", i) for i in (0, 1, 2, 4, 5)}, skip=range(W, W + 10),
-         record={"repeat_head": [th(i) for i in range(5)], "protected": [th(4)]})
+    deck(db, "s", W + 10, {i: with_x("s", i) for i in (*range(CAP), CAP + 1, CAP + 2)},
+         skip=range(W, W + 10),
+         record={"repeat_head": [th(i) for i in range(CAP + 2)], "protected": [th(CAP + 1)]})
     t = run(db).rules["repeat"]
     assert (t["violations"], t["explained_short_deck"]) == (0, 1)
     assert t["explained_examples"][0]["over_cap_protected"] == [True, False]
 
 
-def _prefix_deck(db, job, tier, x_at=(0, 1, 2, W - 1)):
+def _prefix_deck(db, job, tier, x_at=(*range(CAP), W - 1)):
     """Only W rows (the first W cards of what would be a longer built deck;
     nothing past them is written), X at `x_at`: what the loader holds for a
     pack-less tiered deck (the first 30), a partial_run one (its delivered
@@ -576,7 +581,7 @@ def _prefix_deck(db, job, tier, x_at=(0, 1, 2, W - 1)):
 def test_a_deck_whose_cards_are_a_prefix_is_never_a_short_deck(monkeypatch, tier, hours,
                                                                 exclusion):
     """#469 QA P1-1: these decks' cards are a prefix of what was displayed,
-    so an over-cap card at the prefix's end would look deferred; X's fourth
+    so an over-cap card at the prefix's end would look deferred; X's over-cap
     copy at W - 1 is a real breach and must stay one."""
     monkeypatch.setattr(eval_data, "PACK_REQUIRED_SINCE", SINCE)
     db = make_db()
@@ -592,8 +597,8 @@ def test_a_short_deck_holding_a_redacted_card_is_still_explained():
     """Addendum J1: a partner_redacted deck is excluded from replay, not from
     the audit. It holds every card, so the short-deck proof still runs."""
     db = make_db()
-    redacted = row("short", 5, partner_user_id=f"{REDACTED_PARTNER_PREFIX}aa11")
-    deck(db, "short", 12, {**{i: with_x("short", i) for i in (0, 1, 2, 9, 10, 11)}, 5: redacted})
+    redacted = row("short", CAP + 2, partner_user_id=f"{REDACTED_PARTNER_PREFIX}aa11")
+    deck(db, "short", SHORT_N, {**{i: with_x("short", i) for i in SHORT_X}, CAP + 2: redacted})
     assert [d.exclusion for d in eval_data.load_decks(engine=db.eng, since=SINCE,
                                                       as_of=AS_OF)] == ["partner_redacted"]
     t = run(db).rules["repeat"]
@@ -604,9 +609,9 @@ def test_ghost_rows_are_not_part_of_the_displayed_order():
     """#469 QA P3-1: the fixed point is over displayed cards only. A ghost
     carrying X at index 3 would break it if it were counted."""
     db = make_db()
-    _x_deck(db, "short", 12, (0, 1, 2, 9, 10, 11))
-    ghost = {**row("short", 3, {"X": HEAD, "short-gh": HEAD}, {"short-rh": HEAD}),
-             "impression_id": card_impression_id("short", 3) + ":ghost", "is_ghost": 1,
+    _x_deck(db, "short", SHORT_N, SHORT_X)
+    ghost = {**row("short", CAP, {"X": HEAD, "short-gh": HEAD}, {"short-rh": HEAD}),
+             "impression_id": card_impression_id("short", CAP) + ":ghost", "is_ghost": 1,
              "served_at": SERVED}
     with db.eng.begin() as conn:
         conn.execute(insert(db.imp), [ghost])
@@ -747,15 +752,18 @@ def test_nothing_to_audit_is_not_a_pass_and_an_early_since_is_noted():
 
 def test_no_threshold_literal_appears_in_the_module():
     """Every threshold is imported from deck_quality. A numeric literal equal
-    to one is allowed only as an exit code (EXIT: 3 is INCOMPLETE, and
-    REPEAT_CAP is 3); none may appear in the text either."""
+    to one is allowed only as an exit code (EXIT: 3 is INCOMPLETE) or as
+    BOUNDARY_EXAMPLES (G-b2's example count, 5, which REPEAT_CAP equals since
+    2026-11-11); none may appear in the text either."""
     source = Path(ba.__file__).read_text()
     tree = ast.parse(source)
     thresholds = {dq.BREAKUP_MIN_RATIO, dq.FILLER_FLOOR, dq.FILLER_FRAC,
                   dq.REDUNDANT_MIN_RATIO, dq.REPEAT_WINDOW, dq.REPEAT_CAP}
     exit_map = next(n.value for n in ast.walk(tree) if isinstance(n, ast.Assign)
                     and any(getattr(t, "id", None) == "EXIT" for t in n.targets))
-    allowed = {id(n) for n in ast.walk(exit_map)}
+    examples = next(n.value for n in ast.walk(tree) if isinstance(n, ast.Assign)
+                    and any(getattr(t, "id", None) == "BOUNDARY_EXAMPLES" for t in n.targets))
+    allowed = {id(n) for n in (*ast.walk(exit_map), *ast.walk(examples))}
     restated = [(n.lineno, n.value) for n in ast.walk(tree)
                 if isinstance(n, ast.Constant) and type(n.value) in (int, float)
                 and n.value in thresholds and id(n) not in allowed]
@@ -1008,27 +1016,27 @@ def test_a_redacted_partner_s_cards_are_not_auditable_for_b_dk_4_to_6(record):
 
 
 def test_a_redacted_card_still_counts_toward_the_cap():
-    """models-lead H-a1, the defect: X on cards 0-3 and card 1 redacted. Card
-    3 is X's real fourth copy on a fully checkable card, so B-DK-7 FAILs."""
+    """models-lead H-a1, the defect: X on cards 0 to CAP and card 1 redacted. Card
+    CAP is X's real fourth copy on a fully checkable card, so B-DK-7 FAILs."""
     db = make_db()
-    deck(db, "r", W, {**{i: with_x("r", i) for i in (0, 2, 3)},
+    deck(db, "r", W, {**{i: with_x("r", i) for i in range(CAP + 1) if i != 1},
                       1: with_x("r", 1, partner_user_id=REDACTED)}, record={})
     t = run(db).rules["repeat"]
     assert (t["violations"], t["status"], t["not_auditable"]) == (1, FAIL, 0)
-    assert t["examples"][0]["card_indexes"] == [0, 1, 2, 3]
+    assert t["examples"][0]["card_indexes"] == list(range(CAP + 1))
 
 
 @pytest.mark.parametrize("protected_after", [False, True], ids=["alone", "beside_protected"])
 def test_a_redacted_over_cap_card_is_unknown_never_explained(protected_after):
     """H-a1: when X's only unprotected-or-unknown over-cap copy is the
-    redacted card 3, its verdict is unknown: not a violation, never explained
-    as protected (even beside a protected over-cap copy at 4), and its deck
+    redacted card CAP, its verdict is unknown: not a violation, never explained
+    as protected (even beside a protected over-cap copy at CAP + 1), and its deck
     incomplete for redaction (H-a2)."""
     db = make_db()
-    special = {**{i: with_x("r", i) for i in (0, 1, 2)},
-               3: with_x("r", 3, partner_user_id=REDACTED)}
+    special = {**{i: with_x("r", i) for i in range(CAP)},
+               CAP: with_x("r", CAP, partner_user_id=REDACTED)}
     if protected_after:
-        special[4] = with_x("r", 4, likes_you=True)
+        special[CAP + 1] = with_x("r", CAP + 1, likes_you=True)
     deck(db, "r", W, special)
     r = run(db)
     t = r.rules["repeat"]
@@ -1055,7 +1063,7 @@ def test_only_the_token_marks_a_redacted_partner():
 # F4's four buckets (G-b4); G-b5's fixture for each bucket and each outcome.
 # ---------------------------------------------------------------------------
 
-def _boundary_deck(db, job="b", *, cut=True, skip=(), x_at=(4, 5, 6, W), last=W):
+def _boundary_deck(db, job="b", *, cut=True, skip=(), x_at=(*range(4, 4 + CAP), W), last=W):
     """40 packed cards in three responses: 0..19, 20..`last`, `last`+1..39.
     X is on `x_at`; the filter deferred its fourth copy to card W, just past
     the window. With `cut`, a never-delivered withdrawal at card 2 pulls card
@@ -1077,7 +1085,7 @@ def test_g_b1_a_boundary_breach_is_explained_only_with_both_proofs():
     assert (t["violations"], t["explained_boundary"], t["boundary_decks"]) == (0, 1, 1)
     assert t["status"] == PASS and t["packed_decks"] == 1
     assert t["after_cut"]["audited_packed"] == 1
-    assert [e["card_indexes"] for e in t["boundary_examples"]] == [[4, 5, 6, W]]
+    assert [e["card_indexes"] for e in t["boundary_examples"]] == [[*range(4, 4 + CAP), W]]
     out = render(r)
     assert out.splitlines()[0].startswith(
         "B-DK-7 PASS with 1 breaches explained by a response boundary on 1 decks (100.0% of "
@@ -1087,11 +1095,11 @@ def test_g_b1_a_boundary_breach_is_explained_only_with_both_proofs():
 
 
 def test_g_b1_no_recorded_cut_is_a_violation():
-    """The no-cut outcome: X's fourth copy at card W - 1, at the end of its
+    """The no-cut outcome: X's over-cap copy at card W - 1, at the end of its
     response (20..W - 1, a fixed point), but nothing recorded pulled it in:
     the build order already broke the cap, a serve bug or a filter bug."""
     db = make_db()
-    _boundary_deck(db, cut=False, x_at=(4, 5, 6, W - 1), last=W - 1)
+    _boundary_deck(db, cut=False, x_at=(*range(4, 4 + CAP), W - 1), last=W - 1)
     t = run(db).rules["repeat"]
     assert (t["violations"], t["explained_boundary"], t["status"]) == (1, 0, FAIL)
 
@@ -1110,7 +1118,7 @@ def test_g_b1_a_response_with_a_clean_card_left_is_a_violation():
     """D3 should have moved the over-cap card behind a later clean card of its
     own response; served where it is, the re-run isn't a fixed point."""
     db = make_db()
-    _boundary_deck(db, x_at=(4, 5, 6, W - 1))      # card W, clean, still in response 2
+    _boundary_deck(db, x_at=(*range(4, 4 + CAP), W - 1))      # card W, clean, still in response 2
     t = run(db).rules["repeat"]
     assert (t["violations"], t["explained_boundary"]) == (1, 0)
 

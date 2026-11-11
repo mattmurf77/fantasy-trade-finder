@@ -1,8 +1,10 @@
 # ADR-028: Page-first trade search — bound, verify, stop
 
 Date: 2026-11-10
-Status: Accepted. The search is wired into the trade worker as the **fast deck**, behind two
-flags that ship off (`trade.fast_deck`, `trade.fast_deck_shadow`). Publishing a first page
+Status: Accepted; serving superseded by [ADR-030](adr-030-rules-first-deck.md) (2026-11-11):
+the 150-card fast deck and its flags (`trade.fast_deck`, `trade.fast_deck_shadow`) are retired,
+and the search now builds the whole rules-admitted inventory. Originally wired into the trade
+worker as the **fast deck**, behind two flags that shipped off. Publishing a first page
 and then appending the rest of the inventory is still a separate decision (recommendation R3).
 
 ## Context

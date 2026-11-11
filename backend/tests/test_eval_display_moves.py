@@ -145,12 +145,12 @@ def test_a_broken_move_record_comes_before_a_withdrawal_conflict():
 
 @pytest.mark.parametrize("moved, violations", [(False, 1), (True, 0)])
 def test_b_dk_7_reads_the_displayed_window_after_a_serve_time_move(moved, violations):
-    """D3's case: a disposition cut at 2 pulls card W (X's fourth, deferred
+    """D3's case: a disposition cut at 2 pulls card W (X's over-cap copy, deferred
     by the build-time cap) to displayed position W - 1. The server re-applies
     the cap and shows it after card W + 1, outside the window. Without the
     move record the audit sees a false breach."""
     db = make_db()
-    deck(db, "w", W + 2, {**{i: with_x("w", i) for i in (10, 11, 12)}, W: with_x("w", W)},
+    deck(db, "w", W + 2, {**{i: with_x("w", i) for i in range(10, 10 + dq.REPEAT_CAP)}, W: with_x("w", W)},
          skip={2})
     put_pack(db, "w", _deck_cards("w", W + 2), card_count=W + 2,
              deliveries=[[W + 1, SERVED]],

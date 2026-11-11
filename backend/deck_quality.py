@@ -28,7 +28,7 @@ FILLER_FLOOR = 450.0
 FILLER_FRAC = 0.25
 REDUNDANT_MIN_RATIO = 0.70
 REPEAT_WINDOW = 30
-REPEAT_CAP = 3
+REPEAT_CAP = 5   # operator 2026-11-11: relaxed from 3 ("5/30"); window unchanged
 PROTECTED_ATTRS = ("likes_you", "source_like_impression_id", "standing_offer_reason", "injected",
                    "wildcard", "fatigue_retest", "retest", "owner_published")
 
@@ -80,6 +80,26 @@ def _redundant_side(roster, out, into, market, position, caps) -> bool:
     return False
 
 
+def card_rule(give, receive, target, *, viewer_id: str, market: Callable[[str], float | None],
+              position: Callable[[str], str | None], rosters: Mapping[str, Sequence[str]],
+              caps: Mapping[str, int] | None) -> str | None:
+    """The first per-card rule a card's terms break ("breakup", "filler", "redundant"), or None.
+
+    The one definition of the per-card rules: ``filter_deck`` calls it for every unprotected
+    card, and rules-first construction (``deck_rules.DeckRules``) calls it before ranking.
+    ``target`` is the counterparty's team id, ``caps`` is ``position_caps(lineup_slots)``."""
+    give, receive = list(give), list(receive)
+    if _breakup(give, receive, market):
+        return "breakup"
+    if _filler(give, receive, market):
+        return "filler"
+    if caps is not None and (
+            _redundant_side(rosters.get(viewer_id, ()), give, receive, market, position, caps)
+            or _redundant_side(rosters.get(str(target), ()), receive, give, market, position, caps)):
+        return "redundant"
+    return None
+
+
 def filter_deck(cards: Sequence, *, viewer_id: str, market: Callable[[str], float | None],
                 position: Callable[[str], str | None], rosters: Mapping[str, Sequence[str]],
                 lineup_slots: Sequence[str] | None, native_caps: Mapping[str, int] | None = None) -> tuple[list, dict]:
@@ -93,18 +113,11 @@ def filter_deck(cards: Sequence, *, viewer_id: str, market: Callable[[str], floa
         if is_protected(c):
             kept.append(c)
             continue
-        give, receive = list(c.give_player_ids), list(c.receive_player_ids)
-        if _breakup(give, receive, market):
-            counts["breakup"] += 1
-            continue
-        if _filler(give, receive, market):
-            counts["filler"] += 1
-            continue
-        if caps is not None and (
-                _redundant_side(rosters.get(viewer_id, ()), give, receive, market, position, caps)
-                or _redundant_side(rosters.get(str(c.target_user_id), ()), receive, give,
-                                   market, position, caps)):
-            counts["redundant"] += 1
+        rule = card_rule(c.give_player_ids, c.receive_player_ids, c.target_user_id,
+                         viewer_id=viewer_id, market=market, position=position, rosters=rosters,
+                         caps=caps)
+        if rule is not None:
+            counts[rule] += 1
             continue
         kept.append(c)
     ordered, deferred = _repeat_cap(kept)
