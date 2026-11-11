@@ -173,6 +173,11 @@ get no revision-4 trades under this design. Options: (a) accept that; (b) a sepa
 `ROUND_ID`); (c) fold into exposed decks from a fresh capture, labelled as a different as-of
 date, which mixes inputs inside one exercise.
 
+**Worth the operator's eye before grading.** As specified, the best-asset rule matches most
+2-for-1 consolidations, and at a .10 demotion it nearly removes them from the first 30 (§8).
+That is the spec applied literally; a smaller demotion is a one-constant change if the graded
+cards show too few consolidations.
+
 ## 7. Code walk
 
 - Selector: `backend/bakeoff_runner.py:300` (`owner_revision_4_enabled`), `:315` (v3 yields to
@@ -192,4 +197,25 @@ date, which mixes inputs inside one exercise.
 
 ## 8. Report on recorded production requests
 
-See TEST_LEDGER 2026-11-10 "Engine revision 4" for the aggregate (40-request sample).
+40 of the recorded requests (every sixth by name), revision 2 and revision 4 run on the same
+deep-copied inputs in one process per request. Aggregates only.
+
+| Measure | Revision 4 (all rules) | Premium only | Demotion only | Tie-breaker only |
+|---|---|---|---|---|
+| Requests whose first 30 change | 40 / 40 | 22 | 38 | 36 |
+| First-30 cards not in revision 2's first 30 | 560 / 1,200 (median 14 per request) | 120 | 461 | 86 |
+| First-30 positions that differ | 1,105 / 1,200 | 411 | 1,009 | 597 |
+| Share of first-30 offers asking for the other manager's picks (r2 → r4) | 17.7% → 9.3% | 17.8% → 10.5% | 17.7% → 19.3% | 17.7% → 15.3% |
+| Share paying picks for a player (r2 → r4) | 17.7% → 16.2% | 17.8% → 18.3% | 17.5% → 14.0% | 17.4% → 19.2% |
+
+- The eligible inventory was identical to revision 2's in all 40 requests.
+- The best-asset rule matches about 460 of revision 2's 1,200 first-30 cards (most 2-for-1
+  consolidations); with the demotion on, 8 remain in the first 30. It is the main source of
+  churn. Most demoted 2-for-1s that pay picks go down with it, which is why the pays-picks
+  share falls slightly overall.
+- The premium applied to 18,598 eligible offers across the sample (26 in the final first 30);
+  the tie-breaker changed 3,908 choices; the rebuilder/tanker exception covered 507 offers.
+- First-30 counterparties: outlooks rebuilder 742, contender 336, not sure 77, championship
+  45; source declared 410, inferred 790.
+- Revision 2's own first 30 differ slightly between processes (hash seed), hence the small
+  spread in the "before" shares across runs.

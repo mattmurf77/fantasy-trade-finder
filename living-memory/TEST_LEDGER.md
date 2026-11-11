@@ -1,3 +1,10 @@
+## 2026-11-10 — Engine revision 4 and its additive Calibration arm (branch, not shipped)
+
+- Branch `feat/bilateral-revision-4` from `origin/main` `6017d64b`. New: `test_bilateral_revision_4.py` (71), `test_bilateral_revision_4_routes.py` (4), `test_calibration_revision_4.py` (10). Selector-off goldens for revisions 1 and 2 on three worlds were computed from `origin/main` and match with the knob absent, 0, 0.5, 2 and -1.
+- Full backend suite (Python 3.12 venv): **13,798 passed, 42 skipped, 3 failed in 12m48s**. The 3 failures are `test_deck_pipeline_digest` (pinned digest, cosmetic-edit, constant-change), red by design: `_run_trade_job` and `_owner_selected_assignment` changed; `DECK_PIPELINE_VERSION` not bumped (coordinator pins one bump).
+- Sabotages, each red then green on revert: premium-off, premium-contender, premium-on-viewer-picks, premium-moves-utility, tiebreak-off, tiebreak-ignores-tolerance, demotion-off, no-rebuilder-exception, exception-for-contender, organic-2x2, selector-truthy, v3-wins-over-v4, no-owner-report-pop, no-request-hash-pop, no-safety-signature, calib-reorders-pair, calib-uncapped, calib-error-fails-build, calib-never-stale, calib-no-arm-pin, calib-report-drops-v4, presentment-ignores-v4. One proposed sabotage (start_session skips the exposure guard) stays green because `retire_grading_session`'s database fence also refuses exposed/answered decks; not counted.
+- Recorded production requests, 40-request sample, r2 vs r4 in one process each: inventory identical in 40/40; 560 of 1,200 first-30 cards new (median 14); asks-for-their-picks share 17.7% → 9.3%. Per-rule ablation and caveats in [scope §8](../docs/plans/offer-learnings/scope-revision-4.md#8-report-on-recorded-production-requests). No simulator/Maestro; no production action.
+
 ## 2026-11-07 — First-page polling failure recovery
 
 - Seven-line screen correction: at the existing final paged status failure, an empty deck leaves its running spinner and shows the existing explicit failure/retry. Held cards, job authority, backend work, exact repeat request and network budgets remain unchanged.

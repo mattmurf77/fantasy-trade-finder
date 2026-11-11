@@ -12,6 +12,11 @@
 ---
 
 
+## 2026-11-10 — Engine revision 4 built dark, with an additive Calibration arm (not shipped)
+
+- `owner-v2-bilateral-4` (`backend/trade_gen_bilateral_r4.py`), on revision 2, behind `owner_bilateral_revision_4_enabled` (0): owned-pick premium by the other team's outlook, pay-picks tie-breaker, best-asset demotion. Order only; inventory equals revision 2's. `grading.revision4_arm` (off) folds it into new `outlook-v2-v3-1` builds without touching the paired cards.
+- On branch `feat/bilateral-revision-4` for the coordinator; deck-pipeline digest left red for one integrated bump. [Scope](../docs/plans/offer-learnings/scope-revision-4.md), [TEST_LEDGER](TEST_LEDGER.md#2026-11-10--engine-revision-4-and-its-additive-calibration-arm-branch-not-shipped).
+
 ## 2026-11-10 — Render build filter replaces the docs skip marker; flag overrides recorded
 
 - The web service now has a Render build filter (D-211). A push deploys unless every changed file is in a folder the server never reads: docs, living memory, mockups, screens, archive, qa, scripts, the mobile source folders, root Markdown and the like. `backend/`, `config/`, `web/`, `mobile/app.json` and the build files always deploy. It was set through the Render API (G-018) and mirrored in `render.yaml` by #633, whose merge deployed `c5f17c45` (live 2026-11-10T20:48Z, Calibration unchanged). Docs merges no longer carry a skip marker; [runbook](../docs/runbook.md#build-filter-2026-11-10).
