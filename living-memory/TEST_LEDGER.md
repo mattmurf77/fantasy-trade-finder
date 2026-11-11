@@ -1,3 +1,10 @@
+## 2026-11-11 — Operator option to re-run forecasts that stopped incomplete, branch `feat/projection-retry-incomplete`
+
+- **`test_league_projection_batch.py`: 22 pass (17 new).** `retry_incomplete` re-queues a current-model incomplete baseline once and reports `retried`; leaves complete, unsupported, failed, queued, running, stale and cancelled attempts on their weekly slot; leaves other-model attempts to the existing rule; skips leased targets; refuses initial mode and non-booleans; marks nothing when dispatch returns early; ordinary dispatch has no `retried` key; the route passes the key, the 15-minute tick never does.
+- **Sabotages, red then restored (10, Opus subagent; the first re-run in the main session):** retry every non-complete attempt; ignore the model version; ignore leases; allow with initial; accept a non-boolean; no-op; `retried` always present; mark before the flag gates; realtime tick passes retry; route drops the key.
+- **`-k "league_projection or cron"`: 580 passed, 0 failed** (local, Python 3.12). Full suite: CI on the PR head.
+- API surface change (one optional body key on a cron-gated route), confirmed by the operator ("Add the forecast rerun to your steps"). FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-11 — TestFlight 185 feedback: held-rank wording, Home link to projections, fast deck off (D-232), branch `fix/tf185-feedback`
 
 - **Fit block wording** (`test_fit_block_v3.py`, 68 pass): a held rank reads "RB stays 1st" / "RB stays 5th, WR stays 10th". New `test_held_rank_wording`. Sabotages, red then restored (3, Opus subagent): restore `Still {ranks}`; drop "stays" after the first position; put "Still" back on `holds.them` only.
