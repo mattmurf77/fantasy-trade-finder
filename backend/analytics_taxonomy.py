@@ -692,6 +692,19 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     #     were getting. NEVER the free text — that lives on the
     #     trade_pass_reasons row and nowhere else (SPEC §3.4).
     "trade_pass_overlay_opened", "trade_pass_overlay_dismissed",
+    # Pass-reason cadence (flag `trade.pass_reason_cadence`, offer-learnings
+    # WS3; scope docs/plans/offer-learnings/scope-pass-reason-cadence.md).
+    # The deck keeps the plain ✕ and asks only after N consecutive passes, on
+    # one card, with one row of chips + "Just pass". BOTH NON_INTENT and both
+    # in NON_INTENT_EVENTS in this same commit:
+    #   pass_reason_prompt_shown — an EXPOSURE (the chip row mounted). The
+    #     answer is the existing INTENT pair trade_pass_layer1/_layer2.
+    #   pass_reason_prompt_dismissed — a DISMISSAL ("Just pass"). The pass
+    #     itself still lands server-side as `match_swiped`.
+    # The #384 overlay pair is NOT reused: it measures that one surface (its
+    # `banked` prop is that surface's question), and a prop-less `opened`
+    # shared by two surfaces could not be split afterwards.
+    "pass_reason_prompt_shown", "pass_reason_prompt_dismissed",
     # `prompt_deferred` — REGISTRATION OF A LIVE EMITTER, not a new signal.
     # mobile/src/state/useInterruptCoordinator.ts:170/183 has fired it since
     # the prompt arbiter shipped (flag ux.prompt_arbiter) and every envelope
@@ -1751,7 +1764,12 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #   detail        ∈ value_giving | value_getting | value_other |
     #                   fit_outlook | fit_new_weakness | fit_duplicate |
     #                   fit_other | other_player_keep |
-    #                   other_player_avoid | other_text        (10 values)
+    #                   other_player_avoid | other_picks_keep |
+    #                   other_waiting | other_text             (12 values)
+    #                 `other_picks_keep` / `other_waiting` joined on
+    #                 2026-11-10 (WS3): written only by the cadence chips
+    #                 (flag trade.pass_reason_cadence), which fire BOTH
+    #                 layer events for one tap. No new prop.
     #                 The two `other_player_*` codes joined the enum on
     #                 2026-08-19 (SPEC §2 amendment, D-080) when the
     #                 "Neither" tile gained structured options. NO NEW EVENT
@@ -1933,6 +1951,12 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # the two disagree.
     "trade_pass_overlay_opened":    frozenset(),
     "trade_pass_overlay_dismissed": frozenset({"banked"}),
+    # Pass-reason cadence pair (WS3). `trade_id` names the card the chips sat
+    # on (the join to the trade_pass_layer* answer on the same card);
+    # `consecutive_passes` is the run length that triggered the ask, an int.
+    # No reason codes here — the answer is trade_pass_layer1/_layer2's job.
+    "pass_reason_prompt_shown":     frozenset({"trade_id", "consecutive_passes"}),
+    "pass_reason_prompt_dismissed": frozenset({"trade_id"}),
     # `prompt_deferred` — the row MIRRORS what the shipped emitter sends
     # today (useInterruptCoordinator.ts:170/183), the registration-only
     # discipline of the 2026-08-13 backlog sweep. `surface` is the

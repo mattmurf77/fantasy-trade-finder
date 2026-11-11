@@ -347,6 +347,10 @@ NON_INTENT_EVENTS = frozenset({
     "trade_pass_overlay_opened",
     "trade_pass_overlay_dismissed",
     "prompt_deferred",
+    # Pass-reason cadence (WS3): an exposure and a dismissal, the
+    # trade_pass_overlay_* class; the answer stays INTENT as trade_pass_layer*.
+    "pass_reason_prompt_shown",
+    "pass_reason_prompt_dismissed",
     # ── Paywall funnel (IAP enablement, 2026-08-28) — added in the SAME
     # commit that registered the five in ALLOWED_CLIENT_EVENTS, for the
     # reason stated at the top of this block. Scope:

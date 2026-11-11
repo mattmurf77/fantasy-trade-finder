@@ -3837,6 +3837,11 @@ _MODEL_CONFIG_DEFAULTS = [
     # top-level int `app_store_live` on GET /api/feature-flags; anything but
     # exactly 0 or 1 serves -1.
     ("app_store_live",           -1,    "min-version gate Update target: 1 = App Store, 0 = TestFlight, -1 = unset (the app's compiled fallback, App Store from 2026-11-18T08:00:00Z). Served on GET /api/feature-flags; anything but 0/1 serves -1"),
+    # ── Pass-reason cadence (flag trade.pass_reason_cadence, WS3) ────────
+    # Served as `pass_reason_cadence: {ask_after, quiet_for}` on
+    # GET /api/feature-flags while the flag is on (server._pass_reason_cadence_fields).
+    ("pass_reason_ask_after",     3,    "pass-reason cadence: the deck asks for a reason after this many consecutive passes (integer >= 1; anything else serves 3). Served on GET /api/feature-flags while trade.pass_reason_cadence is on"),
+    ("pass_reason_quiet_for",     5,    "pass-reason cadence: after the prompt is answered or dismissed, this many passes go unasked (integer >= 0; anything else serves 5). Served on GET /api/feature-flags while trade.pass_reason_cadence is on"),
     # ── Tip jar (tip-jar plan §3 S1, docs/plans/tip-jar/plan.md) ─────────
     # release-lead sets 1 once ftf_tip_199/499/999 exist in App Store
     # Connect; 0 is the deploy-free kill switch. Seeded 0, insert-if-absent.
@@ -8991,8 +8996,19 @@ PASS_REASON_LAYER1: tuple[str, ...] = ("value", "fit", "other")
 PASS_REASON_LAYER2: dict[str, tuple[str, ...]] = {
     "value": ("value_giving", "value_getting", "value_other"),
     "fit":   ("fit_outlook", "fit_new_weakness", "fit_duplicate", "fit_other"),
-    "other": ("other_player_keep", "other_player_avoid", "other_text"),
+    "other": ("other_player_keep", "other_player_avoid",
+              "other_picks_keep", "other_waiting", "other_text"),
 }
+
+#: The two codes only the cadence chips (flag `trade.pass_reason_cadence`,
+#: offer-learnings WS3) can write. The route refuses them while that flag is
+#: off, so a flag-off route accepts exactly the eight codes above it did before.
+#:   other_picks_keep "Keeping my picks" — attachment to one's own picks, the
+#:                    pick twin of other_player_keep; no claim about price.
+#:   other_waiting    "Waiting on something" — timing (news, the draft, other
+#:                    offers); no claim about price.
+#: Neither is in ranking_service.PASS_REASON_ELO_KEEP, so both suppress Elo.
+PASS_REASON_CADENCE_ONLY: frozenset[str] = frozenset({"other_picks_keep", "other_waiting"})
 
 #: The layer-2 code → layer-1 code inverse, so a layer-2 write that arrives
 #: without (or before) its layer-1 sibling can still name its own reason

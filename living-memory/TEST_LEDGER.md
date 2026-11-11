@@ -1,3 +1,12 @@
+## 2026-11-10 — Pass-reason cadence (offer-learnings WS3, flag `trade.pass_reason_cadence`, dark)
+
+- Branch `feat/pass-reason-cadence` off 6017d64b; not merged. [Scope](../docs/plans/offer-learnings/scope-pass-reason-cadence.md).
+- New `backend/tests/test_pass_reason_cadence.py`: **24 passed** (flag registration and seeds, `pass_reason_cadence` payload absent when off and clamped when on, route gate on either flag, the two new codes refused while off, the six chip writes with their Elo, analytics registration). `test_decline_reasons.py` taxonomy pin widened by the two codes; with it **128 passed**.
+- New `mobile/tests/check-pass-reason-cadence.js` (`npm run test:pass-reason-cadence`): **30 passed**, executing the real cadence module plus wiring pins. `check-decline-reasons.js` track-call count pin moved 3 → 4 (the chip's layer-2 event). All **168** `mobile/tests/check-*.js` pass; `npx tsc --noEmit` clean; `testid-lint.sh` OK.
+- Sabotages, each RED then GREEN on revert: S1-payload-ignores-flag, S2-no-knob-floor, S3-gate-ignores-cadence, S4-new-codes-ungated, S5-waiting-writes-elo, M1-like-does-not-reset, M2-no-quiet-period, M3-asks-with-flag-off, M4-advance-forgets-record, M5-chip-pass-enters-undo-hold, M6-quiet-card-keeps-reasons, M7-chip-defers-advance.
+- Full backend suite (py 3.12): run 1 had 3 `test_deck_pipeline_digest` failures that did not reproduce (the test passes alone, with full collection, and in the in-order 111-file prefix); run 2 **13740 passed, 42 skipped, 0 failed**. No deck-pipeline function or constant changed (probe over `DECK_PIPELINE_FUNCTIONS`).
+- No device run. The TestFlight checklist in the scope block is the runtime evidence still owed.
+
 ## 2026-11-07 — First-page polling failure recovery
 
 - Seven-line screen correction: at the existing final paged status failure, an empty deck leaves its running spinner and shows the existing explicit failure/retry. Held cards, job authority, backend work, exact repeat request and network budgets remain unchanged.

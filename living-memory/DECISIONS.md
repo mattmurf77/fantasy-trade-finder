@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-NEXT — The pass-reason cadence asks on the card, one tap, behind its own flag; its two new codes exist only while that flag is on
+
+**Date:** 2026-11-10 · **Who:** operator (R9: "present this once every few passes. Or upon a certain number of consecutive passes"); WS3 builder (the shape below).
+**Context:** `feedback.decline_reasons` put three tiles and a second layer on every pass; the operator turned it off on 2026-10-02 because it was tedious. Offer learnings still want the reasons. Two shapes were possible: a sheet after the Nth pass about the card just passed, or the chips on the card itself.
+**Decision:** The chips sit on the card, in place of the ✕, on the card after N consecutive passes (`pass_reason_ask_after`, 3), then the prompt is quiet for M passes (`pass_reason_quiet_for`, 5). A chip is the pass and the reason in one request; **Just pass** and the swipe gesture are the plain pass. The after-the-fact sheet was rejected: the plain swipe has already written the full pass Elo by then, so a reason could never suppress it, and the prompt would cover the next card. Flag `trade.pass_reason_cadence` opens the reason route on its own, so `feedback.decline_reasons` stays off. The two codes the operator's phrases needed, `other_picks_keep` and `other_waiting`, are refused while the cadence flag is off, so a flag-off server accepts exactly the old codes. Neither joins `PASS_REASON_ELO_KEEP`.
+**Consequences:**
+- Unasked passes keep today's behaviour exactly (one tap, undo window, full `trade_k_pass` Elo). Asked passes that pick a non-value chip write no Elo, as the tiles did.
+- A reasoned chip pass has no undo window: the reason write commits the pass server-side, so an Undo could not take it back.
+- "Don't rate what I'd get" is mapped to `other_player_avoid` (no Elo). If the operator reads it as a price claim, it would move to `value_giving`; that is a one-line change to the chip table.
+- The cadence state is per deck-screen mount, in memory.
+
 ## D-211 — Docs-only pushes skip Render through a build filter, not a `[skip render]` marker
 
 **Date:** 2026-11-10 · **Who:** operator (asked to replace the marker with a build filter).

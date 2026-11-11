@@ -39,6 +39,10 @@ export type Layer2Code =
   // The shared `other_player_` stem makes the axis selectable as a prefix.
   | 'other_player_keep'
   | 'other_player_avoid'
+  // Cadence-chip-only codes (flag `trade.pass_reason_cadence`, WS3); the
+  // server refuses them while that flag is off. No Elo.
+  | 'other_picks_keep'
+  | 'other_waiting'
   | 'other_text';
 
 /** Layer-2 codes that open the free-text box instead of committing outright. */
@@ -64,7 +68,8 @@ export interface DeclineReasonWrite {
   /** Layer 1 only — the prior layer-1 reason when the tester switched tiles,
    *  else 'none'. A switch is a refinement, not a reset (SPEC §3). */
   switchedFrom?: Layer1Code | 'none';
-  /** Layer 2 only. */
+  /** Layer 2 — or a cadence chip's one-tap layer-1 write, which carries its
+   *  detail in the same request (flag `trade.pass_reason_cadence`). */
   detail?: Layer2Code;
   /** Layer 2 only, on the free-text send. */
   freeText?: string;
