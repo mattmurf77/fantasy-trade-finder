@@ -119,3 +119,12 @@ presentation.row-ack.*
 presentation.featured.row.*
 # ConfidenceChip.tsx:29  testID={`presentation.confidence.${band}`}
 presentation.confidence.*
+# --- 2026-11-11 roster setup Step 2 as tier placement (trades.roster_tier_rank) ---
+# RosterTierBoard.tsx  testID={`roster-setup.tiers.chip.${id}`} (player id)
+#                      testID={`roster-setup.tiers.header.${t}`} (tier key)
+# TierTargetChips.tsx  testID={`${testIDPrefix}.${t}`} with prefix
+#                      roster-setup.tiers.move (RosterSetupScreen footer)
+# No roster-setup.tiers.picks: picks are not on the tier page (operator, 2026-11-11).
+roster-setup.tiers.chip.*
+roster-setup.tiers.header.*
+roster-setup.tiers.move.*

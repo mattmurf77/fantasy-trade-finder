@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-11 — Roster setup: one page of tier placement replaces the per-position rank step (D-233)
+
+- **App (flag `trades.roster_tier_rank`, on):** Step 2 of roster setup shows every rostered QB/RB/WR/TE under the eight pick-value tiers. Tap players, then a tier. A chip shows its market tier when that differs. Picks stay on Move / Keep only. Needs a TestFlight build; older builds keep the per-position step.
+- **Server:** `/api/tiers/save` accepts `scope: 'roster'`: the posted ids are the scope and nobody else moves. A moved player lands at the edge of the new tier.
+- **Why it matters:** a placement changes a player's value against market, which the old step could not do.
+- New event `roster_setup_tiers_saved`. Scope and checklist: [`../docs/plans/roster-first-trade-setup/scope-tier-rank.md`](../docs/plans/roster-first-trade-setup/scope-tier-rank.md).
+
 ## 2026-11-11 — The batch route can re-run forecasts that stopped incomplete
 
 - `POST /api/cron/league-projections {"retry_incomplete": true}` (cron-gated) makes due every target whose last attempt stopped `incomplete_projections` under the current model, then runs the normal weekly dispatch. The 15-minute tick never passes it.

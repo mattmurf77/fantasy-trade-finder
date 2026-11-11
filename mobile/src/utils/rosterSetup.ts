@@ -7,7 +7,7 @@
 // function.
 // The store (`state/rosterSetup.ts`) only remembers; the screen only renders.
 
-import type { Position } from '../shared/types';
+import type { Position, Tier } from '../shared/types';
 
 /** The three per-asset states (prd §4.2). `open` is the "—" segment. */
 export type AssetSetupState = 'move' | 'keep' | 'open';
@@ -153,6 +153,182 @@ export function orderedIdsForSave(
 ): string[] {
   const clickedSet = new Set(clicked);
   return [...clicked, ...currentOrder.filter((id) => !clickedSet.has(id))];
+}
+
+// ── Step 2 as one-page tier placement (flag `trades.roster_tier_rank`;
+// docs/plans/roster-first-trade-setup/scope-tier-rank.md §2) ────────────
+// The page is a `TierBoard`: every tier key → the ids in it, in PAGE order.
+// Only the caller's on-board roster players are ever on it — picks and
+// off-board players are rendered read-only by the screen and never enter a
+// board, so they can never reach a payload.
+
+/** The ladder, top → bottom. A local copy of `utils/tierBands.TIERS`
+ *  because this file has zero runtime imports (the check executes it). */
+export const TIER_LADDER: readonly Tier[] = [
+  'firsts_4plus', 'firsts_3', 'firsts_2', 'first_1', 'second', 'third', 'fourth', 'waivers',
+];
+
+export type TierBoard = Record<Tier, string[]>;
+
+export interface TierBoardPlayer {
+  id: string;
+  position: Position;
+  /** Board Elo — the within-tier sort key. */
+  elo: number;
+  /** The tier of that Elo (`tierForElo`), computed by the caller. */
+  tier: Tier;
+}
+
+function emptyBoard(): TierBoard {
+  const b = {} as TierBoard;
+  for (const t of TIER_LADDER) b[t] = [];
+  return b;
+}
+
+/** Pre-fill (scope §1.2): each player in the tier of his current board Elo;
+ *  inside a tier, board Elo descending across positions (the Tiers "All"
+ *  derivation), id as the tiebreak so the order is deterministic. */
+export function tierPrefill(players: readonly TierBoardPlayer[]): TierBoard {
+  const board = emptyBoard();
+  const sorted = players.slice().sort((a, b) => b.elo - a.elo || (a.id < b.id ? -1 : 1));
+  for (const p of sorted) board[p.tier].push(p.id);
+  return board;
+}
+
+/** id → tier for a board. */
+export function tierOfMap(board: TierBoard): Record<string, Tier> {
+  const out: Record<string, Tier> = {};
+  for (const t of TIER_LADDER) for (const id of board[t] ?? []) out[id] = t;
+  return out;
+}
+
+const ladderIdx = (t: Tier): number => TIER_LADDER.indexOf(t);
+
+/** Move `ids` into `target` and place them as the server's merged-band
+ *  writer will (scope §1.1, operator decision 6). Direction is judged
+ *  against the save BASELINE (`base`: the tier the server holds each player
+ *  in — the pre-fill until a save lands, then `tierRebase`d), because that
+ *  is what the server compares against: a player moved UP lands at the
+ *  BOTTOM of the new tier and a player moved DOWN at its TOP. A player moved
+ *  back to his baseline tier returns to his baseline slot among the players
+ *  who never left, because nothing will be posted for him; moved back to his
+ *  pre-fill tier after a save elsewhere, he is a real move and lands at the
+ *  edge. Each tier is therefore always
+ *    [moved down into it] + [not moved since the baseline, baseline order] + [moved up into it]
+ *  with the newest move outermost. Several ids moved at once keep their
+ *  page order. Ids not on the board (picks, off-board players) and ids
+ *  already in `target` are ignored. Pure: returns a new board. */
+export function applyTierMove(
+  board: TierBoard,
+  base: TierBoard,
+  ids: readonly string[],
+  target: Tier,
+): TierBoard {
+  const home = tierOfMap(base);
+  const want = new Set(ids);
+  // Page order of the movers.
+  const movers: string[] = [];
+  for (const t of TIER_LADDER) {
+    for (const id of board[t] ?? []) {
+      if (want.has(id) && t !== target && home[id] != null) movers.push(id);
+    }
+  }
+  if (movers.length === 0) return board;
+  const moving = new Set(movers);
+  const next = emptyBoard();
+  for (const t of TIER_LADDER) next[t] = (board[t] ?? []).filter((id) => !moving.has(id));
+
+  const dest = next[target];
+  const tIdx = ladderIdx(target);
+  const fromAbove = dest.filter((id) => ladderIdx(home[id]) < tIdx);
+  const fromBelow = dest.filter((id) => ladderIdx(home[id]) > tIdx);
+  const downNew = movers.filter((id) => ladderIdx(home[id]) < tIdx);
+  const upNew = movers.filter((id) => ladderIdx(home[id]) > tIdx);
+  const stayers = new Set([
+    ...dest.filter((id) => home[id] === target),
+    ...movers.filter((id) => home[id] === target),
+  ]);
+  const homers = (base[target] ?? []).filter((id) => stayers.has(id));
+  next[target] = [...downNew, ...fromAbove, ...homers, ...fromBelow, ...upNew];
+  return next;
+}
+
+export interface TierSavePayload {
+  position: Position;
+  /** tier key → moved ids, in page order. Only tiers with ids appear. */
+  tiers: Partial<Record<Tier, string[]>>;
+}
+
+/** What Save posts (scope §2.2): ONLY players whose tier differs from the
+ *  pre-fill, split by position (the route takes one position per call),
+ *  QB → TE, each tier's ids in page order. A move-then-move-back posts
+ *  nothing. `positionOf` holds the on-board players only, so an id without
+ *  a core position (a pick, anything off the board) is never posted. */
+export function tierSavePayloads(
+  board: TierBoard,
+  prefill: TierBoard,
+  positionOf: Readonly<Record<string, Position>>,
+): TierSavePayload[] {
+  const home = tierOfMap(prefill);
+  const byPos = new Map<Position, Partial<Record<Tier, string[]>>>();
+  for (const t of TIER_LADDER) {
+    for (const id of board[t] ?? []) {
+      const pos = positionOf[id];
+      if (!pos || !SETUP_POSITIONS.includes(pos) || home[id] == null || home[id] === t) continue;
+      const tiers = byPos.get(pos) ?? {};
+      (tiers[t] ??= []).push(id);
+      byPos.set(pos, tiers);
+    }
+  }
+  return SETUP_POSITIONS.filter((p) => byPos.has(p)).map((p) => ({ position: p, tiers: byPos.get(p)! }));
+}
+
+/** After one position's save succeeds, the server holds those ids in their
+ *  posted tiers: move them there in the save BASELINE so the next payload
+ *  (a Retry, or a later Save) never re-posts them, and so `applyTierMove`
+ *  judges a later move from the saved tier. Inside the new tier they sit
+ *  where the server put them: moved down ⇒ top, moved up ⇒ bottom, in
+ *  posted order (the same shape `applyTierMove` gives the page). The
+ *  pre-fill (`tierMoveCounts`) is a separate board and unchanged. */
+export function tierRebase(base: TierBoard, saved: TierSavePayload): TierBoard {
+  const was = tierOfMap(base);
+  const ids = new Set<string>();
+  for (const t of TIER_LADDER) for (const id of saved.tiers[t] ?? []) ids.add(id);
+  const next = emptyBoard();
+  for (const t of TIER_LADDER) next[t] = (base[t] ?? []).filter((id) => !ids.has(id));
+  for (const t of TIER_LADDER) {
+    const posted = saved.tiers[t] ?? [];
+    const down = posted.filter((id) => was[id] != null && ladderIdx(was[id]) < ladderIdx(t));
+    const up = posted.filter((id) => !down.includes(id));
+    next[t] = [...down, ...next[t], ...up];
+  }
+  return next;
+}
+
+/** Moved / up / down counts against the pre-fill (the tiers_saved props and
+ *  the done summary's "N re-tiered"). */
+export function tierMoveCounts(
+  board: TierBoard,
+  prefill: TierBoard,
+): { moved: number; up: number; down: number } {
+  const home = tierOfMap(prefill);
+  let up = 0;
+  let down = 0;
+  for (const t of TIER_LADDER) {
+    for (const id of board[t] ?? []) {
+      const h = home[id];
+      if (h == null || h === t) continue;
+      if (ladderIdx(t) < ladderIdx(h)) up += 1;
+      else down += 1;
+    }
+  }
+  return { moved: up + down, up, down };
+}
+
+/** Operator decision 5: the market micro-label shows only when the
+ *  consensus tier differs from the tier the player sits in on the page. */
+export function marketTierShown(current: Tier, market: Tier | null | undefined): Tier | null {
+  return market && market !== current ? market : null;
 }
 
 /** Assets on the roster now that the stored snapshot never saw (prd §3.3).

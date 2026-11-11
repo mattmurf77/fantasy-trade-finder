@@ -105,7 +105,8 @@ assert(
 // ── 4. The server half this pins against ───────────────────────────────────
 // The tiers-save via whitelist accepts the tag, and the FR-20 branch exists.
 assert(
-  /in\s*\(\s*"tiers",\s*"quickset",\s*"rookie_tiers",\s*\n?\s*"rookie_quickset",\s*"rookie_anchors"\s*\)/.test(
+  // 2026-11-11: the whitelist also gains "roster_setup" (scope-tier-rank.md §2.3).
+  /in\s*\(\s*"tiers",\s*"quickset",\s*"rookie_tiers",\s*\n?\s*"rookie_quickset",\s*"rookie_anchors"(?:,\s*\n?\s*"roster_setup")?\s*\)/.test(
     serverText,
   ),
   'server tiers-save via whitelist includes "quickset"',
@@ -116,7 +117,8 @@ assert(
   'server fires quickset_completed on the tagged branch',
 );
 assert(
-  /if scope != "rookie" and via in \("tiers", "quickset"\):/.test(serverText),
+  // 2026-11-11: a roster-scoped save (scope-tier-rank.md §2.3) is skipped too.
+  /if (?:scope != "rookie"|scope not in \("rookie", "roster"\)) and via in \("tiers", "quickset"\):/.test(serverText),
   "server notes ranking_method from via on unscoped saves",
   "P0-1's point-of-use ranking_method write is what the tag also feeds",
 );

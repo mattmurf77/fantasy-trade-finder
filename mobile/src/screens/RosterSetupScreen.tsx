@@ -7,6 +7,7 @@ import {
   ScrollView,
   ActivityIndicator,
   LayoutChangeEvent,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
@@ -24,12 +25,14 @@ import {
   type,
   fonts,
 } from '../theme/chalkline';
-import { Button, Icon } from '../components/chalkline';
+import { Button, Icon, Text as CText } from '../components/chalkline';
 import RankChipGrid from '../components/RankChipGrid';
+import RosterTierBoard, { type RosterTierChip } from '../components/RosterTierBoard';
+import TierTargetChips from '../components/TierTargetChips';
 import { LockGlyph } from '../components/PlayerContextMenu';
 import { setPinnedBottomBarHeight } from '../components/FeedbackFAB';
 import { getAssetPrefs, setAssetPref, type OwnedPick } from '../api/league';
-import { getRankings, reorderRankings, splitRankings } from '../api/rankings';
+import { getRankings, reorderRankings, saveTiers, splitRankings } from '../api/rankings';
 import { getTradeValues } from '../api/calc';
 import { track } from '../api/events';
 import { useSession } from '../state/useSession';
@@ -50,7 +53,15 @@ import {
   prefillStates,
   rankSteps,
   sortPicks,
+  applyTierMove,
+  tierMoveCounts,
+  tierPrefill,
+  tierRebase,
+  tierOfMap,
+  tierSavePayloads,
   type AssetSetupState,
+  type TierBoard,
+  type TierBoardPlayer,
 } from '../utils/rosterSetup';
 import type { Position, RankedPlayer, ScoringFormat, Tier } from '../shared/types';
 
@@ -77,7 +88,7 @@ import type { Position, RankedPlayer, ScoringFormat, Tier } from '../shared/type
 // blocks, cancels or waits on it, so Skip costs no time (prd §7).
 
 type Entry = 'first_pass' | 'roster_changed' | 'manual_dna' | 'entry_card';
-type Step = 'toggles' | 'rank' | 'done';
+type Step = 'toggles' | 'rank' | 'tiers' | 'done';
 
 interface SetupAsset {
   id: string;
@@ -93,6 +104,9 @@ interface SetupAsset {
   team?: string | null;
   age?: number | null;
 }
+
+// Tier encode colors for the "Move to" chips (data encodings).
+const tierAccent = (t: Tier): string => tierColors[t];
 
 const SECTIONS: (Position | 'PICK')[] = [...SETUP_POSITIONS, 'PICK'];
 const SECTION_LABEL: Record<Position | 'PICK', string> = {
@@ -432,13 +446,83 @@ export default function RosterSetupScreen() {
   const rankMembers = (rankPos ? rankableByPos[rankPos] : undefined) ?? [];
   const isLastRank = rankIdx >= rankPositions.length - 1;
 
+  // ── Tier step (flag `trades.roster_tier_rank`; scope-tier-rank.md §2) ─
+  // Step 2 forks on this flag at Continue. Off ⇒ the rank step above,
+  // untouched. On ⇒ one page: every rostered QB/RB/WR/TE under the eight
+  // pick-value tiers, tap players then a tier, Save posts only the moved
+  // players, one scoped save per position. Picks are not on this page
+  // (operator decision 3, 2026-11-11).
+  const tierRankOn = useFlag('trades.roster_tier_rank');
+  const tierPlayers = useMemo(() => {
+    const onBoard: TierBoardPlayer[] = [];
+    const offBoard: Partial<Record<Tier, string[]>> = {};
+    const chips: Record<string, RosterTierChip> = {};
+    const positionOf: Record<string, Position> = {};
+    for (const a of assets) {
+      if (a.isPick) continue;
+      if (filterIds && !filterIds.includes(a.id)) continue;
+      const position = a.section as Position;
+      chips[a.id] = { id: a.id, name: a.name, position, team: a.team };
+      if (a.elo != null && a.tier) {
+        onBoard.push({ id: a.id, position, elo: a.elo, tier: a.tier });
+        positionOf[a.id] = position;
+      } else {
+        // Not on the caller's board: read-only under the consensus tier
+        // (a save would drop him anyway, ranking_service.py:2000-2001).
+        (offBoard[a.tier ?? 'waivers'] ??= []).push(a.id);
+      }
+    }
+    return { onBoard, offBoard, chips, positionOf };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assets, filterIds?.join('|')]);
+  // Consensus tier per roster player, from the values query the screen
+  // already runs (operator decision 5's market label).
+  const marketTierById = useMemo(() => {
+    const out: Record<string, Tier | null> = {};
+    for (const v of valuesQuery.data?.players ?? []) {
+      const id = String(v.id);
+      if (tierPlayers.chips[id]) out[id] = v.tier ?? null;
+    }
+    return out;
+  }, [valuesQuery.data, tierPlayers.chips]);
+
+  // Seeded ONCE on entering the step, so a refetch after a partial save
+  // never re-seeds over the user's moves. `tierHome` = the pre-fill (the
+  // moved/up/down counts); `tierBase` = what the server holds now (the save
+  // baseline, advanced per saved position — the "was" marker and the edge
+  // placement are judged against it, as the server judges the move).
+  const [tierHome, setTierHome] = useState<TierBoard | null>(null);
+  const [tierBase, setTierBase] = useState<TierBoard | null>(null);
+  const [tierBoard, setTierBoard] = useState<TierBoard | null>(null);
+  const [tierSel, setTierSel] = useState<string[]>([]);
+  const [tierSaving, setTierSaving] = useState(false);
+  const [tierError, setTierError] = useState<string | null>(null);
+  const [tierFailed, setTierFailed] = useState<Position[]>([]);
+  const [reTiered, setReTiered] = useState(0);
+  const tierOpenedAt = useRef(0);
+  const tierSavedPositionsRef = useRef<Set<Position>>(new Set());
+  const pendingTierPayloads = useMemo(
+    () => (tierBoard && tierBase ? tierSavePayloads(tierBoard, tierBase, tierPlayers.positionOf) : []),
+    [tierBoard, tierBase, tierPlayers.positionOf],
+  );
+  const tierDirtyRef = useRef(false);
+  tierDirtyRef.current = pendingTierPayloads.length > 0;
+  // The "was <tier>" marker names the tier the SERVER holds the player in
+  // (the save baseline), so it marks exactly the unsaved moves.
+  const prefillTierById = useMemo(() => (tierBase ? tierOfMap(tierBase) : {}), [tierBase]);
+  // True from the first await of a Save/Retry until the sequence settles —
+  // a ref, so a second tap and a back gesture see it without a re-render.
+  const tierSavingRef = useRef(false);
+
   // ── Exits ───────────────────────────────────────────────────────────
   const exitHandledRef = useRef(false);
   const finalizedRef = useRef(false);
   const changedRef = useRef(false);
 
   const anyChange = useCallback(
-    () => changedCount(states, prefillRef.current ?? {}) > 0 || rankedRef.current.length > 0,
+    () => changedCount(states, prefillRef.current ?? {}) > 0
+      || rankedRef.current.length > 0
+      || tierSavedPositionsRef.current.size > 0,
     [states],
   );
 
@@ -451,7 +535,10 @@ export default function RosterSetupScreen() {
     writeRecord(leagueId, {
       status: 'done',
       seenAssetIds: union(prev?.seenAssetIds ?? [], allAssetIds),
-      rankedPositions: union(prev?.rankedPositions ?? [], rankedRef.current.map((r) => r.position)) as Position[],
+      rankedPositions: union(
+        prev?.rankedPositions ?? [],
+        [...rankedRef.current.map((r) => r.position), ...tierSavedPositionsRef.current],
+      ) as Position[],
       prompt: null,
     });
     // TradesHome's focus effect consumes this on the pop: snapshot the deck
@@ -474,7 +561,7 @@ export default function RosterSetupScreen() {
     });
   }, [leagueId, entry, allAssetIds, writeRecord]);
 
-  const trackSkipped = useCallback((stage: 'toggles' | 'rank') => {
+  const trackSkipped = useCallback((stage: 'toggles' | 'rank' | 'tiers') => {
     if (!leagueId) return;
     track('roster_setup_skipped', { league_id: leagueId, entry, stage }, 'RosterSetup');
   }, [leagueId, entry]);
@@ -489,9 +576,27 @@ export default function RosterSetupScreen() {
   // Bookkeeping only — the pop itself proceeds. On the rank step the setup
   // counts as done (toggles were confirmed with Continue) and the skip names
   // the stage; on the done step there is nothing left to record.
-  const implicitExitRef = useRef<() => void>(() => {});
-  implicitExitRef.current = () => {
+  // The tier step is the one exception that holds the pop: with unsaved
+  // moves it asks "Discard your tier changes?" first (scope §2.2).
+  const implicitExitRef = useRef<(e: any) => void>(() => {});
+  implicitExitRef.current = (e: any) => {
     if (exitHandledRef.current || !rosterSetupOn) return;
+    // A tier save in flight holds the pop with no prompt and no bookkeeping:
+    // the user stays until the sequence settles (Skip is disabled meanwhile).
+    if (stepRef.current === 'tiers' && tierSavingRef.current) {
+      e?.preventDefault?.();
+      return;
+    }
+    if (stepRef.current === 'tiers' && tierDirtyRef.current) {
+      e?.preventDefault?.();
+      confirmDiscardTiers(() => {
+        exitHandledRef.current = true;
+        finalizeDone();
+        trackSkipped('tiers');
+        navigation.dispatch(e.data.action);
+      });
+      return;
+    }
     exitHandledRef.current = true;
     const s = stepRef.current;
     if (s === 'toggles') {
@@ -500,10 +605,13 @@ export default function RosterSetupScreen() {
     } else if (s === 'rank') {
       finalizeDone();
       trackSkipped('rank');
+    } else if (s === 'tiers') {
+      finalizeDone();
+      trackSkipped('tiers');
     }
   };
   useEffect(
-    () => navigation.addListener('beforeRemove', () => implicitExitRef.current()),
+    () => navigation.addListener('beforeRemove', (e: any) => implicitExitRef.current(e)),
     [navigation],
   );
 
@@ -533,13 +641,26 @@ export default function RosterSetupScreen() {
       duration_ms: Date.now() - openedAt.current,
     }, 'RosterSetup');
     haptics.selection();
-    if (rankPositions.length === 0) goDone();
+    if (tierRankOn) {
+      // Step 2 = the one-page tier placement. Nothing on the caller's
+      // board to place ⇒ straight to done, as the rank walk does.
+      if (tierPlayers.onBoard.length === 0) goDone();
+      else {
+        const pre = tierPrefill(tierPlayers.onBoard);
+        setTierHome(pre);
+        setTierBase(pre);
+        setTierBoard(pre);
+        setTierSel([]);
+        tierOpenedAt.current = Date.now();
+        setStep('tiers');
+      }
+    } else if (rankPositions.length === 0) goDone();
     else {
       setRankIdx(0);
       setClicked([]);
       setStep('rank');
     }
-  }, [leagueId, entry, counts, states, rankPositions.length, goDone]);
+  }, [leagueId, entry, counts, states, rankPositions.length, goDone, tierRankOn, tierPlayers.onBoard]);
 
   const toggleChip = useCallback((pid: string) => {
     setClicked((prev) => (prev.includes(pid) ? prev.filter((id) => id !== pid) : [...prev, pid]));
@@ -586,6 +707,106 @@ export default function RosterSetupScreen() {
     }
   }, [rankPos, rankSaving, leagueId, clicked, rankMembers, isLastRank, goDone, queryClient, activeFormat]);
 
+  // ── Tier step handlers ─────────────────────────────────────────────
+  const onTierToggle = useCallback((id: string) => {
+    if (tierSaving) return;
+    setTierSel((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    haptics.selection();
+  }, [tierSaving]);
+
+  /** Move to a tier: the merged-band edge rule applied locally (moved up ⇒
+   *  bottom of the new tier, moved down ⇒ top), so the page shows what the
+   *  server will save. Clears the selection. */
+  const onTierMove = useCallback((ids: string[], t: Tier) => {
+    if (tierSaving || !tierBase) return;
+    setTierBoard((b) => (b ? applyTierMove(b, tierBase, ids, t) : b));
+    setTierSel([]);
+    setTierError(null);
+    haptics.selection();
+  }, [tierSaving, tierBase]);
+
+  function confirmDiscardTiers(onDiscard: () => void) {
+    Alert.alert('Discard your tier changes?', undefined, [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: onDiscard },
+    ]);
+  }
+
+  /** Save (or Retry with `only`): one scoped save per position that has a
+   *  move, sequentially. A position that saves stays saved; a failure keeps
+   *  its moves on the page and Retry re-posts only the failed positions.
+   *  Nothing moved ⇒ no POST, straight to done. */
+  const saveTierMoves = useCallback(async (only?: readonly Position[]) => {
+    if (!tierBoard || !tierBase || !tierHome || tierSaving || tierSavingRef.current || !leagueId) return;
+    const all = tierSavePayloads(tierBoard, tierBase, tierPlayers.positionOf);
+    const payloads = only ? all.filter((p) => only.includes(p.position)) : all;
+    setTierError(null);
+    setTierSel([]);
+    let base = tierBase;
+    let savedNow = false;
+    const failed: Position[] = [];
+    let lastErr: any = null;
+    if (payloads.length > 0) setTierSaving(true);
+    tierSavingRef.current = true;
+    try {
+      for (const p of payloads) {
+        try {
+          await saveTiers(p.position, p.tiers as Record<string, string[]>, [], { scope: 'roster', via: 'roster_setup' });
+          base = tierRebase(base, p);
+          tierSavedPositionsRef.current.add(p.position);
+          savedNow = true;
+        } catch (e: any) {
+          failed.push(p.position);
+          lastErr = e;
+        }
+      }
+    } finally {
+      tierSavingRef.current = false;
+    }
+    setTierBase(base);
+    setTierSaving(false);
+    if (savedNow) {
+      queryClient.invalidateQueries({ queryKey: ['rankings', activeFormat] });
+      queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
+      queryClient.invalidateQueries({ queryKey: ['progress'] });
+    }
+    if (failed.length > 0) {
+      setTierFailed(failed);
+      setTierError(lastErr?.message || "Couldn't save your tiers");
+      return;
+    }
+    setTierFailed([]);
+    // A Retry can succeed with newer moves still unsaved: stay on the page.
+    if (tierSavePayloads(tierBoard, base, tierPlayers.positionOf).length > 0) return;
+    if (tierSavedPositionsRef.current.size > 0) {
+      const c = tierMoveCounts(tierBoard, tierHome);
+      setReTiered(c.moved);
+      track('roster_setup_tiers_saved', {
+        league_id: leagueId,
+        entry,
+        moved_count: c.moved,
+        moved_up_count: c.up,
+        moved_down_count: c.down,
+        players_total: tierPlayers.onBoard.length,
+        positions_saved: tierSavedPositionsRef.current.size,
+        duration_ms: Date.now() - tierOpenedAt.current,
+      }, 'RosterSetup');
+      haptics.success();
+    }
+    goDone();
+  }, [tierBoard, tierBase, tierHome, tierSaving, leagueId, entry, tierPlayers, queryClient, activeFormat, goDone]);
+
+  const onTierSkip = useCallback(() => {
+    const go = () => {
+      exitHandledRef.current = true;
+      finalizeDone();
+      trackSkipped('tiers');
+      leave();
+    };
+    if (tierDirtyRef.current) confirmDiscardTiers(go);
+    else go();
+  }, [finalizeDone, trackSkipped, leave]);
+
   // Done state renders ⇒ the setup is complete: store, bus, event.
   const completedRef = useRef(false);
   useEffect(() => {
@@ -595,7 +816,7 @@ export default function RosterSetupScreen() {
     track('roster_setup_completed', {
       league_id: leagueId,
       entry,
-      ranked_positions: rankedRef.current.length,
+      ranked_positions: rankedRef.current.length + tierSavedPositionsRef.current.size,
       changed: changedRef.current,
       duration_ms: Date.now() - openedAt.current,
     }, 'RosterSetup');
@@ -799,6 +1020,87 @@ export default function RosterSetupScreen() {
         </View>
       </>
     );
+  } else if (step === 'tiers' && tierBoard) {
+    const dirty = pendingTierPayloads.length > 0;
+    body = (
+      <>
+        <RosterTierBoard
+          board={tierBoard}
+          players={tierPlayers.chips}
+          prefillTier={prefillTierById}
+          marketTier={marketTierById}
+          offBoard={tierPlayers.offBoard}
+          selected={tierSel}
+          onToggle={onTierToggle}
+          onMove={onTierMove}
+          bottomInset={footerH}
+          header={
+            <View style={styles.tierHeader}>
+              <CText style={styles.leagueName}>Step 2 of 2 · optional</CText>
+              <CText style={styles.heading} accessibilityRole="header">Place your players</CText>
+              <CText style={styles.lede}>
+                Tap players, then a tier. Everyone starts where your board has them.
+              </CText>
+            </View>
+          }
+        />
+        <View style={[styles.footer, styles.footerCol]} onLayout={onFooterLayout}>
+          {tierError ? <CText style={styles.tierError}>{tierError}</CText> : null}
+          {tierSel.length > 0 ? (
+            <>
+              <View style={styles.selRow}>
+                <CText style={styles.selCount}>{`${tierSel.length} SELECTED`}</CText>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setTierSel([])}
+                  hitSlop={8}
+                  style={styles.textBtn}
+                >
+                  <CText style={styles.textBtnLabel}>Clear</CText>
+                </Pressable>
+              </View>
+              <TierTargetChips
+                accentFor={tierAccent}
+                onPick={(t) => onTierMove(tierSel, t)}
+                testIDPrefix="roster-setup.tiers.move"
+              />
+            </>
+          ) : (
+            <View style={styles.footerRow}>
+              <Pressable
+                testID="roster-setup.tiers.skip"
+                accessibilityRole="button"
+                onPress={onTierSkip}
+                disabled={tierSaving}
+                hitSlop={8}
+                style={styles.textBtn}
+              >
+                <CText style={styles.textBtnLabel}>Skip</CText>
+              </Pressable>
+              {tierFailed.length > 0 ? (
+                <Button
+                  label="Retry"
+                  testID="roster-setup.tiers.retry"
+                  loading={tierSaving}
+                  disabled={tierSaving}
+                  onPress={() => void saveTierMoves(tierFailed)}
+                  style={styles.primaryBtn}
+                />
+              ) : (
+                <Button
+                  label={dirty ? 'Save tiers' : 'Done'}
+                  testID="roster-setup.tiers.save"
+                  loading={tierSaving}
+                  disabled={tierSaving}
+                  onPress={() => void saveTierMoves()}
+                  style={styles.primaryBtn}
+                />
+              )}
+            </View>
+          )}
+        </View>
+      </>
+    );
   } else {
     const moves = assets.filter((a) => states[a.id] === 'move');
     const rankedPlayers = ranked.reduce((n, r) => n + r.count, 0);
@@ -813,7 +1115,9 @@ export default function RosterSetupScreen() {
           {changed ? (
             <View style={styles.doneCard}>
               <Text style={styles.doneCounts}>
-                {`${counts.move} to move · ${counts.keep} to keep · ${rankedPlayers} ranked`}
+                {tierHome
+                  ? `${counts.move} to move · ${counts.keep} to keep · ${reTiered} re-tiered`
+                  : `${counts.move} to move · ${counts.keep} to keep · ${rankedPlayers} ranked`}
               </Text>
               {moves.slice(0, 3).map((a) => (
                 <View key={a.id} style={styles.doneRow}>
@@ -942,6 +1246,12 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
   primaryBtn: { flex: 1 },
+  footerCol: { flexDirection: 'column', alignItems: 'stretch', gap: space.xs },
+  footerRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  tierHeader: { gap: space.xs, paddingTop: space.sm, paddingBottom: space.xs },
+  tierError: { ...type.bodySm, color: semantic.neg },
+  selRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  selCount: { ...type.label, fontFamily: fonts.data },
   textBtn: { paddingHorizontal: space.md, paddingVertical: 10 },
   textBtnLabel: { ...type.bodySm, color: chalk.dim },
   centered: {

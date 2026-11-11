@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-233 — Roster setup's rank step becomes one page of tier placement; the posted players are the scope and nobody else moves
+
+**Date:** 2026-11-11 · **Who:** the operator, on TestFlight 185 ("I thought we would be ranking the entire team (on one page) using the draft pick tier ranker"), then six answers to the scope's questions: "Tap him then tap the tier. Yes drop per position tap order. No need to show picks (other than the keep, move screen). Yes to on/off switch. Show market. At the edge." Reading "the draft pick tier ranker" as the tier ladder, not the Pick Anchor wizard, is this session's call; the operator was asked and did not name one.
+**Context:** The shipped step (D-212/D-213, PRD Q4) ordered one position at a time and could only permute the user's own values, so it never told the engine a user values a player above market. That was the PRD's deferred v2.
+**Decision:** Behind `trades.roster_tier_rank` (on), Step 2 is one page: every rostered QB/RB/WR/TE under the eight pick-value tiers; tap players, then a tier. Only moved players are saved, per position, through `/api/tiers/save` with `scope: 'roster'`, which writes only the posted ids (`apply_tiers_subset`). A moved player lands at the edge of the new tier: bottom when moved up, top when moved down, including in a tier empty at his position (`empty_band_edge`, roster scope only). Picks are not on the page. The per-position step remains as the flag-off fallback. Scope: [`../docs/plans/roster-first-trade-setup/scope-tier-rank.md`](../docs/plans/roster-first-trade-setup/scope-tier-rank.md).
+**Consequences:**
+- A placement is absolute: lifting a player turns a fair-at-market card that gives him away into `viewer_no_benefit` (owner-v1; pinned by `test_roster_tier_save.py` test 8). Bilateral and legacy paths are not pinned by a test.
+- The server reads `scope: 'roster'` without a flag check, so a flag mismatch can never fall through to the whole-tier save.
+- Two or more players moved up into one occupied tier in a single save are spread through its lower part, not all at the very bottom (accepted).
+- Graduation: the checklist passes plus two weeks, then delete the old step and the flag.
+
 ## D-232 — The fast deck is off again: a 150-card page cannot be trusted to fill a deck after the filters that run behind it
 
 **Date:** 2026-11-11 · **Who:** this session, on the operator's report "I'm getting no trades found for FFv3". The operator was told and can reverse it.
