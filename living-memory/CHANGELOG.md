@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-11 — Playoff forecasts survive a player changing NFL teams (D-231)
+
+- **What broke:** after v5 shipped, every league that had a forecast the day before failed with `player_team_changed`. Five rostered players had changed teams and Sleeper's projection feed for weeks 11 to 14 still listed the old ones. The guard is from 2026-11-07, not from v5.
+- **Fix (`backend/league_projections/provider.py`):** the stale row is ignored; the player is unprojected for those weeks (reason `player_team_changed`) and timed by his current team. A slot only he could fill makes the league's estimate incomplete, which withholds the outlook suggestion.
+- **No way existed to re-run a baseline before its weekly slot.** Recovery steps: [`../docs/runbook.md`](../docs/runbook.md) § Playoff forecasts: a league's run stops, or needs re-running before its weekly slot.
+
 ## 2026-11-11 — Projected playoff model v5 and the outlook suggestion (D-229, D-230)
 
 - **Model:** each unplayed team-week is Normal(projected best-lineup total, 25.0), one SD for every team. The 60% history blend, per-team variance and persistent strength draw are gone, and team history no longer stands in for a missing projection (the run stops with `missing_weekly_projections`, or the forecast is marked incomplete). Version `projected-lineup-universal-sd-v5`; old runs read as stale and the weekly batch refreshes each league once.

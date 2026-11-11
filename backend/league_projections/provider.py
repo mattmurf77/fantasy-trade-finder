@@ -96,8 +96,14 @@ class SleeperExperimentalFeed:
                 for pid in sorted(player_ids):
                     meta, raw = self.metadata.get(pid, {}), by_id.get(pid)
                     team = meta.get("team")
-                    if raw and raw.get("team") and team and raw["team"] != team:
-                        raise Unavailable("player_team_changed", state="incomplete_projections")
+                    team_changed = bool(raw and raw.get("team") and team and raw["team"] != team)
+                    if team_changed:
+                        if not best:
+                            raise Unavailable("player_team_changed", state="incomplete_projections")
+                        # The row was written for the player's previous team, so
+                        # its stats, game and opponent are not this week's game.
+                        # Time the week by the current team and leave it unpriced.
+                        raw = None
                     try:
                         game = classify_player_game(raw, team, schedule, games, season, week)
                     except CoverageError as exc:
@@ -119,6 +125,10 @@ class SleeperExperimentalFeed:
                     if best and game["phase"] == "completed":
                         rows[pid] = {**game, "availability": 1, "stats": {}, "supported_keys": [],
                                      "projection_status": "completed_actual_required"}
+                        continue
+                    if team_changed and game["phase"] == "pregame":
+                        rows[pid] = {**game, "availability": None, "stats": {}, "supported_keys": [],
+                                     "projection_status": "unpriced", "coverage_reason": "player_team_changed"}
                         continue
                     if game["phase"] != "pregame":
                         raise Unavailable("live_or_unknown_game_not_supported", state="incomplete_projections", details={"week": week, "phase": game["phase"]})

@@ -1,3 +1,12 @@
+## 2026-11-11 — Team-changed players no longer stop a forecast (D-231), branch `fix/projection-team-changed`
+
+- **Projection tests (local, Python 3.12): 536 passed, 0 failed** (`-k league_projection`). Full suite: CI on the PR head.
+- **New, in `test_league_projection_best_available.py` (4):** the player is unprojected as `player_team_changed`, timed by the new team's game, and a 300-point stale row reaches no lineup; a slot only he could fill is unknown and the league reads incomplete; his new team's bye is a bye; strict scoring still refuses.
+- **Sabotages, all red then restored (7, by the Opus subagent; the first re-run in the main session):** restore the unconditional raise; score the stale row; drop the reason; mark unprojected before the bye check; strict mode tolerates the change; time the week by the old team; flag every player as changed.
+- **Dry run of the fixed code against Sleeper's live feeds (local, nothing written):** the six targets that failed in production all complete on `projected-lineup-universal-sd-v5`, SD 25.0, 12 teams each, playoff chances summing to 6.0. Four (one league) read incomplete: 2 lineup slots in weeks 11 and 14. Two read complete.
+- **Not verified:** anything on a device (D-056).
+- No scope block: a production fix under the operator's instruction "Just do the new forecasts manually now and push them live". FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-11 — Projection model v5 and the outlook suggestion (D-229, D-230), branch `feat/projection-model-v5`
 
 - **Full backend suite (local, Python 3.12): 14,453 passed, 42 skipped, 0 failed** in 716 s on the final tree.

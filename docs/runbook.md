@@ -136,6 +136,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)](#espn-identity-binding--one-time-cohort-re-sign-in-321-2026-08-16)
 - [Purge orphaned ESPN/MFL entry users (one-time, 2026-11)](#purge-orphaned-espnmfl-entry-users-one-time-2026-11)
 - [Deletion scrub: other users' decks after an account deletion (legal R28.20 (ii), 2026-10-31)](#deletion-scrub-other-users-decks-after-an-account-deletion-legal-r2820-ii-2026-10-31)
+- [Playoff forecasts: a league's run stops, or needs re-running before its weekly slot (2026-11-11)](#playoff-forecasts-a-leagues-run-stops-or-needs-re-running-before-its-weekly-slot-2026-11-11)
 
 ---
 
@@ -1972,3 +1973,20 @@ See [O9 scope and evidence](plans/eas-build-secret-exclusions.md).
 ### Launch disk alert (70%)
 
 Use a Render token limited to reading metrics for the Fleeced database. Set GitHub Actions secret `FLEECED_RENDER_METRICS_READ` and repository variable `FLEECED_POSTGRES_ID`. Manually dispatch **Postgres disk alert** and check the percentage against the Render dashboard. Then set `FLEECED_DISK_ALERT_ENABLED=true` and enable failed Actions workflow notifications for the on-call account. Confirm delivery before relying on it. The hourly check fails at or above 70% and also fails if it cannot get a fresh matching pair of usage and capacity samples. It does not resize or write to the database. Disable scheduled checks by setting the enable variable to false.
+
+## Playoff forecasts: a league's run stops, or needs re-running before its weekly slot (2026-11-11)
+
+**Symptom:** a league's saved forecast reads stale or "update failed" and no outlook suggestion shows. `league_projection_runs.reason` on the target's last attempt says why.
+
+| Reason | Meaning | Action |
+|---|---|---|
+| `player_team_changed` | Strict scoring only since D-231. In production (best-available scoring) a team-changed player is left unprojected instead. | None in production. If it appears, the scoring contract in `config/league_projections.json` has changed. |
+| `missing_weekly_projections` | A team has no projected player at all in an upcoming week. | Wait for the feed; the next weekly run retries. Past scoring is never substituted. |
+| `season_state_mismatch`, `unsupported_divisions_median_bestball_or_manual_seeding` | The league is outside what the model supports (another season; divisions, median games, best ball or manual seeding). | None. |
+| `league_membership_changed` | The account no longer owns a team in that league. | None. |
+
+**What happened on 2026-11-11:** five rostered players changed NFL teams the day model v5 shipped. Sleeper's projection rows for weeks 11 to 14 still carried the old teams, and a guard from 2026-11-07 stopped every affected league's run. All six targets that had a forecast the day before produced none. Fixed by D-231.
+
+**Re-running a baseline before its weekly slot.** There is no route for it: a target is attempted once per weekly slot, or once after a model-version change. To re-run, set `next_due_at` to the current UTC time on the chosen rows of `league_projection_targets`, then let the 15-minute tick pick them up or `POST /api/cron/league-projections` (header `X-Cron-Secret`, no body). The dispatcher resets `next_due_at` to the next weekly slot itself. It queues at most 4 targets a call and one pending run per account, so several calls may be needed.
+
+**Guardrail tests:** `backend/tests/test_league_projection_best_available.py::test_team_changed_player_is_unpriced_and_stale_row_scores_nothing`, `::test_team_changed_player_alone_for_a_slot_leaves_it_unknown`, `::test_team_changed_player_on_new_team_bye_is_a_bye`, `::test_strict_contract_still_refuses_a_team_changed_player`.
