@@ -12,6 +12,14 @@
 ---
 
 
+## 2026-11-10 — Offer learnings and the fast deck are live and on (#641, #643); iOS 1.22.0 (184)
+
+- #641 merged dark (`0baf6360`), then #643 (`13865d73`) turned on `trade.fast_deck`, `trade.fit_first_copy`, `trade.pass_reason_cadence`, `trade.outcome_tracking`, `trade.next_move`, `grading.revision4_round` and `trade.sleeper_offer_import`. Render deploy `dep-dbpvpfm7bikc738d3vng` live; flags read on in production.
+- The operator approved the Terms and Privacy wording for the Sleeper offers read ("New wording approved"); published in `web/terms.html` §6 and `web/privacy.html`, effective date November 10, 2026, consent version `offer-import-1`. The app reads nothing until the user turns the switch on.
+- Off on purpose: revision 4 as the serving engine, `trade.partner_activity`, `trade.fast_deck_shadow`, `grading.revision4_arm`.
+- iOS 1.22.0 (184) built from `13865d73` with auto-submit; no version bump (What's New is keyed to 1.22.0). Revision 4 Calibration round built for the 16 connected pairs: 11 ready, 5 provider failures.
+- The turn-on's first full run failed 15 tests that assumed the flags ship off; fixed in the tests. [Release record](../docs/business/ops/2026-11-10-offer-learnings.md).
+
 ## 2026-11-10 — Roster-first setup flag turned on (`trades.roster_setup`)
 
 - Operator call ("Turn it on"), the same day #637 merged dark. `config/features.json` and the three mirrored flag fixtures are flipped to true. The 8-step TestFlight checklist and the MOD-M1 call had **not** run first.

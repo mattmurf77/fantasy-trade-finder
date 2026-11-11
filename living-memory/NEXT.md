@@ -10,7 +10,7 @@
 
 ## Table of Contents
 - [Priority Queue](#priority-queue)
-- [2026-11-10 — Fast deck: shadow in production, then turn on; then cheaper revision 2](#2026-11-10--fast-deck-shadow-in-production-then-turn-on-then-cheaper-revision-2)
+- [2026-11-10 — Offer learnings and fast deck are on: device checklists, first production reads, then revision 4](#2026-11-10--offer-learnings-and-fast-deck-are-on-device-checklists-first-production-reads-then-revision-4)
 - [2026-11-10 — Roster-first setup (#637, flag on): TestFlight build + checklist, MOD-M1 call](#2026-11-10--roster-first-setup-637-flag-on-testflight-build--checklist-mod-m1-call)
 - [2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on](#2026-11-02--web-landing-update-1-cut-the-espnmfl-panels-or-enter-a-league-id-and-no-extra-account-needed-before-web-entry-ever-turns-on)
 - [2026-11-01 — Shop send (#574 / #577): two Update 1 follow-ups](#2026-11-01--shop-send-574--577-two-update-1-follow-ups)
@@ -72,23 +72,24 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state.
 
 
-## 2026-11-10 — Fast deck: shadow in production, then turn on; then cheaper revision 2
+## 2026-11-10 — Offer learnings and fast deck are on: device checklists, first production reads, then revision 4
 
-Not in the seven active items. With its flags off it moves nothing; on, it takes a cold build's construction from about 6 s to about half a second on real leagues, which is not the 200 ms gate.
+Not in the seven active items. Live since 2026-11-11T05:28Z (`13865d73`, #641 + #643); iOS 1.22.0 (184). [Release record](../docs/business/ops/2026-11-10-offer-learnings.md).
 
-1. **Merge on the operator's word, then turn on `trade.fast_deck_shadow` for a day.** *Why first:* every timing so far is from a laptop; the shadow line gives agreement and both timings on Render for real cold builds.
-2. **Turn on `trade.fast_deck`** if the shadow lines agree, and run the TestFlight checklist in the [scope block](../docs/plans/realtime-trade-engine/scope.md).
-3. **Make revision 2 cheaper without changing results** (recommendation R2b). *Why:* family completion is more than half the exact evaluations, and bilateral-1 on the same requests takes 71 ms.
-4. **Find the unordered iteration that makes the full engine vary between processes** (R0). *Why:* it undermines replay and any cross-process comparison of decks or proofs.
-5. **Record what happens to sent trades** (accepted, declined, countered) in-app. *Why:* the acceptance evaluation found fewer than 5 counterparty responses.
-6. Scope appending the inventory behind the page (R3); worker processes and CPUs if scale matters before launch ([real-leagues.md](../docs/plans/realtime-trade-engine/real-leagues.md)).
+1. **Run the TestFlight checklists on build 184**: fast deck ([scope §3](../docs/plans/realtime-trade-engine/scope.md)) and each scope block in [offer-learnings](../docs/plans/offer-learnings/). *Why first:* nothing in this release has run on a device.
+2. **Read the first production searches.** `fast deck: served cards=…` lines in Render's logs and `trades_generated.gen_ms` against the days before. *Why:* the fast deck went on without a shadow day; its agreement with the full engine is proven offline only.
+3. **Decide the Sleeper read's reach** (operator): the published Terms line covers reading offers for trades sent from the app; the app reads nothing until the Settings switch is on, so revised-offer cards reach only users who turn it on.
+4. **Read the revision 4 Calibration round** once testers grade (`GET /api/admin/grading/report?round_id=outlook-v2-v4-1&include_open=1`), then decide revision 4's selector and `trade.partner_activity`. models-eng review of pipeline 15 → 21 is still owed.
+5. **Make revision 2 cheaper without changing results** (recommendation R2b). *Why:* family completion is more than half the exact evaluations, and bilateral-1 on the same requests takes 71 ms.
+6. **Find the unordered iteration that makes the full engine vary between processes** (R0).
+7. Scope appending the inventory behind the page (R3: the fast deck ends at 150 cards); worker processes and CPUs if scale matters before launch ([real-leagues.md](../docs/plans/realtime-trade-engine/real-leagues.md)). Send-on-platform's nine open questions: [definition doc](../docs/plans/offer-learnings/send-on-platform.md).
 
-Detail: [recommendation](../docs/plans/realtime-trade-engine/recommendation.md).
+Detail: [recommendation](../docs/plans/realtime-trade-engine/recommendation.md) · [offer-learnings plan](../docs/plans/offer-learnings/plan.md).
 
 ## 2026-11-10 — Roster-first setup (#637, flag on): TestFlight build + checklist, MOD-M1 call
 
 1. **MOD-M1:** pipeline 15 deployed after the Nov 10 freeze, so decide whether a re-run is owed or the frozen candidate `b1440b7b` stands (models-eng). The flag is now on, so pipeline 15 changes trades for any user who tags a player Move.
-2. **TestFlight build + checklist:** cut a build that includes `9c252819` (1.22.0 (183) predates it, so no client shows the setup yet), then run the 8-step checklist in [scope §3](../docs/plans/roster-first-trade-setup/scope.md). The flag was turned on 2026-11-10 before the checklist ran (operator call); if a step fails, roll back with the flag.
+2. **TestFlight checklist:** 1.22.0 (184), uploaded 2026-11-11T05:35Z from `13865d73`, includes `9c252819` and so the setup screen (183 predates it). Run the 8-step checklist on 184 in [scope §3](../docs/plans/roster-first-trade-setup/scope.md). The flag was turned on 2026-11-10 before the checklist ran (operator call); if a step fails, roll back with the flag.
 3. Follow-up candidates from the build review:
    - serve `picks_pool_cap` to the client (it is hard-coded to 6);
    - decide whether the first-pass push waits for an active guide-tour step;
