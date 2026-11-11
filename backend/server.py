@@ -39167,9 +39167,30 @@ def league_team_review_route():
         # When the composite did not apply (flag off, or no lineup template to
         # read starters from) #371's behaviour is untouched.
         composite_applied = bool((my_signals.get("starters") or {}).get("applied"))
+        stored_prefs = load_league_preference(user_id=sess["user_id"],
+                                              league_id=league_id) or {}
+        # The saved weekly projection's outlook suggestion. A read of the
+        # stored run only: it queues nothing and writes no preference. When it
+        # is available it sets `window.inferred` ahead of the composite, the
+        # three-band odds and the roster heuristic; the saved outlook still
+        # wins over all of them.
+        window_projection = None
+        if (is_enabled("league.projection_outlook") and is_enabled("league.projections")
+                and platform == "sleeper"):
+            try:
+                from .league_projections import recommendation as _projection_outlook
+                window_projection = _projection_outlook.load(
+                    str(sess["user_id"]), str(league_id), stored_prefs.get("team_outlook"))
+            except Exception as exc:
+                # Never silently hand the verdict back: ship an unavailable
+                # block so the client can tell a failed read from "off".
+                log.warning("team-review projection outlook unavailable: %s", exc)
+                from .league_projections import recommendation as _projection_outlook
+                window_projection = _projection_outlook.unavailable(
+                    "read_failed", stored_prefs.get("team_outlook"))
         window_source, my_window = resolve_window_precedence(
             composite_applied, window_source,
-            (window_odds or {}).get("implied"), roster_window)
+            (window_odds or {}).get("implied"), roster_window, window_projection)
 
         payload = build_team_review(
             teams=teams,
@@ -39181,8 +39202,7 @@ def league_team_review_route():
             scoring_unavailable_reason=reason,
             inferred_outlook=my_window,
             outlook_signals=my_signals,
-            stored_prefs=(load_league_preference(user_id=sess["user_id"],
-                                                 league_id=league_id) or {}),
+            stored_prefs=stored_prefs,
             roster_profile=my_profile,
             member_profiles=member_profiles,
             member_windows=member_windows,
@@ -39208,6 +39228,7 @@ def league_team_review_route():
             window_roster_inferred=roster_window,
             window_odds=window_odds,
             window_odds_reason=window_odds_reason,
+            window_projection=window_projection,
         )
         if not payload:
             return jsonify({"error": "league_not_found"}), 404

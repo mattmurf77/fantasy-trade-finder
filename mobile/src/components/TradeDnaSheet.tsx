@@ -16,6 +16,7 @@ import {
   ink,
   chalk,
   ice,
+  flare,
   semantic,
   tier,
   space,
@@ -26,7 +27,7 @@ import {
   scrim,
 } from '../theme/chalkline';
 import { posColor } from '../theme/colors';
-import { Icon, Button } from './chalkline';
+import { Icon, Button, Badge } from './chalkline';
 import { useSession } from '../state/useSession';
 import { beginTradePageInputTransition } from '../state/devicePageStore';
 import { tradeSearchContextIdentity } from '../state/tradeSearchHandoff';
@@ -239,9 +240,14 @@ interface Props {
    *  prefs-changed strip, default `'sheet'` for every ordinary entry point.
    *  Inert unless `onboarding.guide_v2` is on. */
   openSource?: 'guide' | 'sheet' | 'strip';
+  /** The outlook the playoff forecast recommends, when the opener carries
+   *  one. It only MARKS that card: the saved selection stays selected and
+   *  nothing is written until the user taps a card. Absent ⇒ the sheet
+   *  renders exactly as before. */
+  suggestedOutlook?: 'jets' | 'rebuilder' | 'contender' | 'championship' | null;
 }
 
-export default function TradeDnaSheet({ visible, onClose, full, openSource }: Props) {
+export default function TradeDnaSheet({ visible, onClose, full, openSource, suggestedOutlook }: Props) {
   // Wave A (v2 note 13) — "the outlook sheet sits too tight to the bottom".
   // The sheet is `bottom: 0` with a uniform `space.lg` pad, so on a
   // home-indicator device the last control sat under the indicator and the
@@ -735,13 +741,16 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
           <View style={styles.outGrid}>
             {OUTLOOK_CARDS.map((o) => {
               const sel = draftOutlook === o.key;
+              const suggested = suggestedOutlook === o.key;
               return (
                 <Pressable
                   key={o.key}
                   testID={`dna.outlook.${o.key}`}
                   accessibilityRole="radio"
                   accessibilityState={{ selected: sel, checked: sel }}
-                  accessibilityLabel={o.title}
+                  accessibilityLabel={
+                    suggested ? `${o.title}, suggested from your playoff chance` : o.title
+                  }
                   accessibilityHint={o.bias}
                   onPress={() => pickOutlook(o.key)}
                   style={({ pressed }) => [
@@ -759,6 +768,11 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
                   >
                     {o.bias}
                   </Text>
+                  {suggested ? (
+                    <View testID="trade-dna.outlook.suggested" style={styles.outCardSuggested}>
+                      <Badge label="Suggested" color={flare.base} colorText />
+                    </View>
+                  ) : null}
                 </Pressable>
               );
             })}
@@ -1502,6 +1516,8 @@ const styles = StyleSheet.create({
     color: chalk.dim,
     marginTop: 1,
   },
+  // Flare = informational highlight: the tag marks a card, it is not a control.
+  outCardSuggested: { marginTop: space.xs },
   toggleRow: { flexDirection: 'row', gap: 6 },
   ptb: {
     flex: 1,

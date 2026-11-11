@@ -15,7 +15,8 @@ from .. import database as db
 from ..feature_flags import is_enabled
 from ..win_now_store import _lock_live_user, utc_now
 from . import store
-from .core import Unavailable, digest
+from .core import Unavailable, VERSION, digest
+from .recommendation import thresholds
 from .simulation import config
 
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "league_projections.json"
@@ -27,6 +28,10 @@ def settings():
     ZoneInfo(schedule["timezone"])
     if not 0 <= schedule["weekday"] <= 6 or not 0 <= schedule["hour"] <= 23 or not 0 <= schedule["minute"] <= 59 or not 1 <= values["batch_limit"] <= 8 or not 1 <= values["retention_days"] <= 30:
         raise ValueError("invalid_projection_batch_configuration")
+    # The app-wide score SD and the outlook cuts are configuration, never code
+    # defaults: a file without them is refused here, before any run or view.
+    config(values["model"])
+    thresholds(values)
     return values
 
 
@@ -62,6 +67,22 @@ def register(user_id, league_id, league_user_id, season, *, expected_user_create
         else:
             conn.execute(insert(t).values(target_id=key, user_id=str(user_id), league_id=str(league_id), league_user_id=str(league_user_id),
                                           season=int(season), created_at=utc_now(), next_due_at=next_weekly_slot()))
+
+
+def _expire_other_model_baselines(now):
+    """A baseline last attempted under another model version is due now.
+
+    Keyed on the last ATTEMPT, so each target is refreshed once per model
+    change: an attempt under the current version, failed or not, waits for its
+    weekly slot like any other.
+    """
+    t, r = db.league_projection_targets_table, db.league_projection_runs_table
+    with db.engine.begin() as conn:
+        rows = conn.execute(select(t.c.target_id, r.c.input_json).join(r, r.c.run_id == t.c.last_attempt_id)
+                            .where(t.c.next_due_at > now.isoformat())).all()
+        other = [target_id for target_id, raw in rows if json.loads(raw or "{}").get("expected_model_version") != VERSION]
+        if other:
+            conn.execute(update(t).where(t.c.target_id.in_(other)).values(next_due_at=now.isoformat()))
 
 
 def target(user_id, league_id):
@@ -120,6 +141,8 @@ def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=N
     if not is_enabled("league.projections_provider_approved") or not options["policy_approved"]:
         return {"status": "approval_pending", "queued": 0}
     t, now = db.league_projection_targets_table, datetime.now(timezone.utc)
+    if not initial:
+        _expire_other_model_baselines(now)
     eligibility = [t.c.last_attempt_id.is_(None)] if initial else [t.c.next_due_at <= now.isoformat()]
     if initial:
         from ..outlook_calibration import connected_targets

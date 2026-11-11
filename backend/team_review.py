@@ -116,6 +116,7 @@ def resolve_window_precedence(
     odds_source: str | None,
     odds_implied: str | None,
     roster_window: str,
+    projection: dict | None = None,
 ) -> tuple[str | None, str]:
     """#372 — decide which model owns `window.inferred` when BOTH
     `trade.outlook_composite` and `trades.window_from_odds` are lit.
@@ -138,6 +139,13 @@ def resolve_window_precedence(
     `resolve_window_from_odds` does: a precedence rule that only exists inside
     a Flask handler is a rule nothing can test.
     """
+    # The saved-projection suggestion outranks every roster-shape read: when
+    # it is available (current, complete, current model) neither the
+    # composite nor the three-band odds may replace it. The roster verdict
+    # still ships as `roster_inferred`, and a saved outlook still outranks
+    # this (`league_projections/recommendation.py` states the full order).
+    if projection and projection.get("status") == "available":
+        return "projection", projection["recommended_outlook"]
     if composite_applied:
         return "composite", roster_window
     if odds_source == "odds" and odds_implied:
@@ -216,7 +224,8 @@ def _window(inferred: str, signals: dict, declared: str | None,
             source: str | None = None,
             roster_inferred: str | None = None,
             odds: dict | None = None,
-            odds_reason: str | None = None) -> dict:
+            odds_reason: str | None = None,
+            projection: dict | None = None) -> dict:
     """The window beat.
 
     #371 — `source` is the FLAG'S FOOTPRINT and the shape switch in one. It is
@@ -281,6 +290,13 @@ def _window(inferred: str, signals: dict, declared: str | None,
         out["roster_inferred"] = roster_inferred or inferred
         out["odds"] = odds
         out["odds_reason"] = odds_reason
+    # The saved-projection suggestion block, present only while
+    # `league.projection_outlook` is on for a league that can have a forecast.
+    # It ships whether or not it is available, so the card can say why no
+    # suggestion is made; `source == "projection"` marks the case where it
+    # set `inferred`.
+    if projection is not None:
+        out["projection"] = projection
     return out
 
 
@@ -552,6 +568,7 @@ def build_team_review(
     window_roster_inferred: str | None = None,
     window_odds: dict | None = None,
     window_odds_reason: str | None = None,
+    window_projection: dict | None = None,
 ) -> dict[str, Any]:
     """Assemble the six beats. Returns the full payload including
     `meta.beats_skipped`, which is AUTHORITATIVE: the client renders
@@ -610,7 +627,8 @@ def build_team_review(
                           source=window_source,
                           roster_inferred=window_roster_inferred,
                           odds=window_odds,
-                          odds_reason=window_odds_reason),
+                          odds_reason=window_odds_reason,
+                          projection=window_projection),
         "depth": _depth(roster_profile or {}, weakest_slot,
                         prefs.get("acquire_positions") or [],
                         prefs.get("trade_away_positions") or []),

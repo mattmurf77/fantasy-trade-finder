@@ -1,12 +1,10 @@
 from copy import deepcopy
 import math
-import pytest
 from backend.league_projections.simulation import simulate
-from backend.league_projections.core import Unavailable
 
 
 def config(**extra):
-    return dict(seeding='record_pf_higher_pa_random',draft_tie='random_exact_ties',ir_maxpf='include',reserve_activation='exclude_current_reserve',empty_slots='fill_available',maxpf_variance='actual_history_proxy',iterations=1000,seed=730,historical_weight=.6,persistent_sd=5,residual_correlation=.5,**extra)
+    return dict(seeding='record_pf_higher_pa_random',draft_tie='random_exact_ties',ir_maxpf='include',reserve_activation='exclude_current_reserve',empty_slots='fill_available',iterations=1000,seed=730,score_sd=10,residual_correlation=.5,**extra)
 
 def snapshot():
     return {'playoff_spots':2,'playoff_byes':1,'completed_weeks':2,'source':'synthetic','captured_at':'2026-11-01T00:00:00+00:00',
@@ -48,23 +46,29 @@ def test_no_nonplayoff_teams_has_empty_pick_distribution():
     assert all(t['pick_probabilities']==[] and t['nonplayoff_probability']==0 and t['conditional_expected_pick'] is None for t in result['teams'])
 
 
-def test_missing_history_requires_explicit_variance_prior():
+def test_missing_history_needs_no_variance_prior_and_team_sd_keys_are_ignored():
     source=snapshot();source['completed_weeks']=0
     for t in source['teams']:
         t.update(wins=0,losses=0,ties=0,points_for='0',points_against='0',maxpf='0',actual_history=[])
-    with pytest.raises(Unavailable) as err:simulate(source,config())
-    assert err.value.reason=='short_history_variance_prior_required'
-    for t in source['teams']:t['projection_weekly_sd']=10
     result=simulate(source,config())
     assert result['status']=='complete' and all(t['current_ppg'] is None for t in result['teams'])
+    # One app-wide SD: no completed week is needed to set a spread, and every
+    # unplayed team-week carries exactly the configured value.
+    assert result['score_sd']==10
+    assert all(w['modeled_score_sd']==10 for t in result['teams'] for w in t['weeks'])
+    assert not any('short history' in w.lower() for w in result['warnings'])
+    # The old per-team priors are inert inputs now, never a second spread.
+    primed=deepcopy(source)
+    for t in primed['teams']:t.update(projection_weekly_sd=1,maxpf_weekly_sd=40)
+    assert simulate(primed,config())['teams']==result['teams']
 
 
 def test_reconstructed_maxpf_history_does_not_replace_authoritative_aggregate():
     source=snapshot()
     for t in source['teams']:t['maxpf_history']=['20','29']  # Known reconstruction discrepancy; aggregate50 authoritative.
-    cfg=config();cfg['maxpf_variance']='reconstructed_history'
-    result=simulate(source,cfg)
+    result=simulate(source,config())
     assert all(t['current_maxpf']==50 for t in result['teams'])
+    assert all(t['maxpf_history_minus_official']==-1 for t in result['teams'])
     assert any('reconstruct' in w.lower() for w in result['warnings'])
 
 
@@ -83,7 +87,7 @@ def test_draft_membership_uses_actual_playoffs_before_maxpf_ranking_and_exact_pi
         t.update(actual_history=['0','0'],points_for='0',points_against='0',maxpf='0')
     source['weeks']=[{'week':3,'games':[[1,3],[2,4]],'teams':{str(i):{'actual':{'points':str(a)},'maxpf':{'points':str(m)},'maxpf_dominates_actual':False} for i,a,m in [(1,100,1),(2,90,2),(3,-5,10),(4,-10,20)]}}]
     source['pick_ownership']=[{'season':2027,'round':1,'original_roster_id':3,'owner_roster_id':1},{'season':2028,'round':1,'original_roster_id':4,'owner_roster_id':1},{'season':2027,'round':2,'original_roster_id':4,'owner_roster_id':2}]
-    cfg=config();cfg.update(historical_weight=0,persistent_sd=0,iterations=100)
+    cfg=config();cfg.update(score_sd=0,iterations=100)
     teams=simulate(source,cfg)['teams']
     assert [t['playoff_probability'] for t in teams]==[1,1,0,0]
     assert [t['pick_probabilities'] for t in teams]==[[0,0],[0,0],[1,0],[0,1]]
@@ -99,7 +103,7 @@ def test_zero_gap_preserves_mean_and_actual_distribution_without_floor_uplift():
         t.update(actual_history=['10','30'], points_for='40', points_against='40', maxpf='40')
     for detail in source['weeks'][0]['teams'].values():
         detail['actual']['points']='20';detail['maxpf']['points']='20'
-    cfg=config();cfg.update(iterations=30000,persistent_sd=0,residual_correlation=0,historical_weight=0)
+    cfg=config();cfg.update(iterations=30000,residual_correlation=0)
     result=simulate(source,cfg)
     for t in result['teams']:
         d=t['weeks'][0]['maxpf_floor']

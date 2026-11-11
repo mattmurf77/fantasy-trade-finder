@@ -454,6 +454,29 @@ Three rules travel with the map and are part of the invariant:
 
 ---
 
+## Playoff chance → suggested outlook (flag `league.projection_outlook`, D-230)
+
+A separate encoding from the two sections above. It reads the saved weekly projection (`league_projections`, model v5), not the three-band `outlook.odds` simulator, and it can suggest all four outlooks.
+
+| Playoff chance (unrounded) | `recommended_outlook` |
+|---|---|
+| 0 up to and including 15% | `jets` (Tanking) |
+| over 15% up to and including 45% | `rebuilder` |
+| over 45% up to and including 75% | `contender` |
+| over 75% | `championship` (All-in) |
+
+- **The server classifies; a client never does.** The block is `outlook_recommendation` on `GET /api/leagues/{id}/projection-runs/latest` and `window.projection` on `GET /api/league/team-review`. Clients render `recommended_outlook`, `suggestion` and `explanation` as given and round only the number they display. Comparing a rounded percentage would move teams across the 45% line.
+- **45% is fixed; 15% and 75% are configuration** (`config/league_projections.json` → `outlook_recommendation`). Exactly 45% is Rebuilding; anything above it is Contender or All-in.
+- **A suggestion exists only for a current, complete, current-model forecast** (`status: "available"`). Otherwise `status: "unavailable"` with a `reason`, and a client shows no prompt.
+- **It suggests, it never sets.** A prompt appears only when `differs` is true, opens the existing outlook selector with the suggestion marked, and the saved outlook changes only when the user chooses. No client may write `team_outlook` from this block on its own.
+- **Precedence where an outlook is suggested:** the saved outlook, then this suggestion when available, then the roster-shape reads above. In Team Review an available suggestion sets `window.inferred` and `window.source = "projection"`; `window.roster_inferred` still carries the roster verdict.
+- **The number beside a suggestion is the saved projection's `playoff_probability`**, which Home and Projected standings already show as a percentage. The bands-only rule in § Playoff outlook bands governs `GET /api/league/outlook` and still holds everywhere, including Team Review's standing beat; the suggestion line on the window beat is the one place that screen shows a percentage (`check-team-review.js` 12e).
+- **Labels are each client's existing outlook names** (`OutlookBiasReceipt` on mobile, `OUTLOOK_META` on web). The server's sentences never name a band.
+
+**Locations to update together:** `backend/league_projections/recommendation.py` (`REBUILDING_MAX`, `classify`, `SUGGESTIONS`), `config/league_projections.json`, `backend/team_review.py` (`resolve_window_precedence`), `mobile/src/utils/homePlayoffBanner.ts`, `mobile/src/components/home/HomePlayoffBanner.tsx`, `mobile/src/screens/TeamReviewScreen.tsx`, `web/js/league-projections.js`.
+
+---
+
 ## Net first-round capital — `provenance` and `applied` (#365, flag `trade.outlook_net_firsts`, D-110)
 
 `window.signals.firsts` carries the net-first-round-pick signal. Two of its fields are cross-client contracts rather than data, because both encode *absence of knowledge*, and absence of knowledge is exactly what a client is most likely to render as a confident zero.

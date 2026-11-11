@@ -12,6 +12,14 @@
 ---
 
 
+## 2026-11-11 — Projected playoff model v5 and the outlook suggestion (D-229, D-230)
+
+- **Model:** each unplayed team-week is Normal(projected best-lineup total, 25.0), one SD for every team. The 60% history blend, per-team variance and persistent strength draw are gone, and team history no longer stands in for a missing projection (the run stops with `missing_weekly_projections`, or the forecast is marked incomplete). Version `projected-lineup-universal-sd-v5`; old runs read as stale and the weekly batch refreshes each league once.
+- **SD:** 25.0 is provisional, not calibrated. Backtest, limits and sensitivity: [`../docs/plans/league-projections/universal-sd/README.md`](../docs/plans/league-projections/universal-sd/README.md).
+- **Outlook suggestion** (flag `league.projection_outlook`, on): 0–15% Tanking, over 15–45% Rebuilding, over 45–75% Contender, over 75% All-in, on the unrounded number, only for a current, complete, current-model forecast. Shown on Home, Team Review and web only when it differs from the saved outlook; it marks the selector and saves nothing.
+- **UI:** "Compare history weights" and "Forecast details" removed; Home tile is one row with the percentage as the link.
+- **Needs a TestFlight build** for the app screens; backend and web ship on merge. Scope, decisions and checklist: [`../docs/plans/league-projections/v5-scope.md`](../docs/plans/league-projections/v5-scope.md).
+
 ## 2026-11-11 — Fit block: no more player lists in the lead (D-228)
 
 - Operator feedback from TestFlight 184: a team with no supported reason read "Gets X, gives Y", repeating the card. It now reads a league-rank fact: "Still RB 2nd" (ranks that hold), "Up at RB, down at WR" (every touched rank moves), "Little change in league rank" or "No league rank change".

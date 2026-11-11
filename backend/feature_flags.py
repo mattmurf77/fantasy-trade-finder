@@ -47,6 +47,10 @@ from typing import Any
 FLAG_KEYS: tuple[str, ...] = (
     "league.projections",
     "league.projections_provider_approved",
+    # Outlook suggestion from the saved playoff projection (Home, Team Review,
+    # web standings). Off = no `outlook_recommendation` block and no prompt;
+    # the projection surfaces and every saved outlook are untouched.
+    "league.projection_outlook",
     # Separate seasonal model / search / calibrated championship graduation.
     "outlook.season_projections",
     "trades.win_now",

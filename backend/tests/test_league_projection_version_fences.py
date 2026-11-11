@@ -1,4 +1,4 @@
-"""Current v4 cannot silently reuse pre-v4 saved inputs or queued requests."""
+"""The current model cannot silently reuse older-model saved inputs or queued requests."""
 import json
 import pytest
 from backend import database as db
@@ -7,14 +7,17 @@ from backend.league_projections.core import VERSION
 from backend.tests.test_outlook_calibration_persistence import engine
 from backend.tests.test_league_projection_simulation import snapshot, config
 from backend.tests.test_league_projection_routes import client
-def test_v3_saved_result_readable_but_not_weight_only_v4_baseline(client,engine):
+def test_v3_saved_result_readable_but_not_a_current_model_scenario_baseline(client,engine):
  http,_=client;run_id='c'*32
- result={'model_version':'joint-season-scenario-v3','config':config(),'historical_saved_result':True}
+ server_cfg=batch.settings()['model']
+ # A v3 run's saved configuration: the removed keys, and no app-wide score SD.
+ old_cfg={**{k:v for k,v in server_cfg.items() if k!='score_sd'},'historical_weight':.6,'persistent_sd':5,'maxpf_variance':'actual_history_proxy'}
+ result={'model_version':'joint-season-scenario-v3','config':old_cfg,'historical_saved_result':True}
  with engine.begin() as conn:
   conn.execute(db.league_projection_runs_table.insert().values(run_id=run_id,user_id='account',league_id='123',status='complete',created_at='2026-11-01T00:00:00+00:00',updated_at='2026-11-01T00:00:00+00:00',expires_at='2099-01-01T00:00:00+00:00',request_hash='old-version',input_json='{}',snapshot_json='{"source":"frozen-v2"}',result_json=json.dumps(result)))
   conn.execute(db.league_projection_targets_table.insert().values(target_id='old-target',user_id='account',league_id='123',league_user_id='account',season=2026,created_at='2026-11-01T00:00:00+00:00',next_due_at='2099-01-01T00:00:00+00:00',last_success_id=run_id,last_attempt_id=run_id))
  assert http.get('/api/leagues/123/projection-runs/latest').json['run']['result']==result
- response=http.post('/api/leagues/123/projection-runs',json={'config':{**config(),'historical_weight':.4},'baseline_run_id':run_id})
+ response=http.post('/api/leagues/123/projection-runs',json={'config':{**server_cfg,'seed':7},'baseline_run_id':run_id})
  assert response.status_code==400 and response.json['error']=='comparison_requires_current_model_baseline'
  assert http.get('/api/projection-runs/'+run_id).json['result']==result
  with engine.connect() as conn:assert len(conn.execute(db.select(db.league_projection_runs_table)).all())==1

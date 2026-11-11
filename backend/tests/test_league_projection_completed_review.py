@@ -16,10 +16,12 @@ def test_missing_player_actual_uses_known_completed_team_total_without_inventing
     assert detail['projection_coverage']['priced_actual_pool']==0
     assert detail['actual_score_observed'] is True
     assert Decimal(detail['modeled_actual_projection'])==5
-    assert detail['projection_coverage']['fallback'] is None
+    # The official team total is a recorded fact: the lane is not missing.
+    assert detail['projection_coverage']['complete'] and detail['projection_coverage']['missing_actual_slots']==[]
+    assert 'fallback' not in detail['projection_coverage']
 
 
-def test_played_bench_is_not_usable_partial_actual_fallback_pool():
+def test_played_bench_is_not_a_usable_actual_pool_and_history_never_fills_the_gap():
     source,cfg=completed_world()
     source[f'{provider.API}/league/123']['roster_positions']=['SUPER_FLEX','SUPER_FLEX']
     rows=source[f'{provider.API}/league/123/matchups/3']
@@ -27,12 +29,12 @@ def test_played_bench_is_not_usable_partial_actual_fallback_pool():
     rows[0]['players_points'].pop('p1')
     key='https://api.sleeper.app/projections/nfl/2026/3?season_type=regular'
     source[key]=[row for row in source[key] if row['player_id']!='p4']
-    detail=run(source,cfg)['weeks'][0]['teams']['1']
-    assert detail['projection_coverage']['priced_actual_pool']==0
-    assert detail['projection_coverage']['fallback']=='completed_team_history'
-    assert detail['projection_coverage']['fallback_lanes']==['actual']
-    assert Decimal(detail['modeled_actual_projection'])==Decimal('7.5')
-    assert Decimal(detail['modeled_maxpf_projection'])==50
+    # Bench p3's recorded 50 prices Max PF but cannot stand in for the two
+    # unknown starters, and the 7.5 completed average is no longer used: the
+    # run stops with only the actual lane missing.
+    with pytest.raises(provider.Unavailable) as error:run(source,cfg)
+    assert error.value.reason=='missing_weekly_projections' and error.value.state=='incomplete_projections'
+    assert error.value.details=={'week':3,'lanes':['actual']}
 
 
 def test_current_manual_override_is_not_silently_ignored():
@@ -71,7 +73,8 @@ def test_completed_week_is_added_once_and_has_no_random_actual_result():
     assert teams[1]['maxpf_mean']==70
     assert teams[1]['weeks'][0]['modeled_score_mean']==5
     assert teams[1]['weeks'][0]['modeled_score_sd']==0
-    assert teams[1]['weeks'][0]['historical_component']==0
+    assert teams[1]['weeks'][0]['score_distribution']=='observed_completed_lineup'
+    assert 'historical_component' not in teams[1]['weeks'][0] and 'projection_component' not in teams[1]['weeks'][0]
     assert teams[1]['weeks'][0]['maxpf_floor']['simulated_actual_variance']==0
 
 

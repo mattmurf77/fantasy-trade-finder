@@ -1,0 +1,569 @@
+{
+  "question": "one app-wide SD for weekly team scores about the projected best lineup",
+  "units": "fantasy points per team per week, in each league's own scoring",
+  "distribution": "normal, centred on the projected best-lineup total, independent by team and week",
+  "season": 2026,
+  "select_weeks": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "holdout_weeks": [
+    7,
+    8,
+    9
+  ],
+  "leagues_used": 9,
+  "leagues_skipped": {
+    "other_season_or_sport": 4,
+    "unsupported_lineup": 2
+  },
+  "selection": {
+    "team_weeks": 660,
+    "mean_error": -3.045960098060275,
+    "sd_about_mean": 24.365919091308832,
+    "rmse_about_projection": 24.53724401066663,
+    "median_error": -3.239599999999996,
+    "p10": -34.416399999999996,
+    "p90": 27.152000000000015
+  },
+  "selected_sd": 24.5,
+  "selection_rule": "root-mean-square error about the projection on the selection weeks, rounded to 0.5",
+  "holdout": {
+    "team_weeks": 330,
+    "mean_error": -9.108366769697612,
+    "sd_about_mean": 24.357724859958214,
+    "rmse_about_projection": 25.970429925848055,
+    "median_error": -9.598400000000005,
+    "p10": -40.31879999999998,
+    "p90": 18.584599999999995
+  },
+  "holdout_candidates": [
+    {
+      "sd": 15,
+      "interval_coverage": {
+        "0.5": 0.296969696969697,
+        "0.8": 0.5606060606060606,
+        "0.9": 0.6818181818181818
+      },
+      "games": 165,
+      "brier": 0.1616475406559008,
+      "log_loss": 0.5259863162843685,
+      "favourite_calibration": [
+        {
+          "predicted_range": [
+            0.5,
+            0.6
+          ],
+          "games": 19,
+          "favourite_won": 0.47368421052631576
+        },
+        {
+          "predicted_range": [
+            0.6,
+            0.7
+          ],
+          "games": 22,
+          "favourite_won": 0.45454545454545453
+        },
+        {
+          "predicted_range": [
+            0.7,
+            0.8
+          ],
+          "games": 30,
+          "favourite_won": 0.7
+        },
+        {
+          "predicted_range": [
+            0.8,
+            0.8999999999999999
+          ],
+          "games": 31,
+          "favourite_won": 0.8709677419354839
+        },
+        {
+          "predicted_range": [
+            0.9,
+            1.0
+          ],
+          "games": 63,
+          "favourite_won": 0.9047619047619048
+        }
+      ]
+    },
+    {
+      "sd": 20,
+      "interval_coverage": {
+        "0.5": 0.41515151515151516,
+        "0.8": 0.6909090909090909,
+        "0.9": 0.7909090909090909
+      },
+      "games": 165,
+      "brier": 0.15993402686965763,
+      "log_loss": 0.496779488637839,
+      "favourite_calibration": [
+        {
+          "predicted_range": [
+            0.5,
+            0.6
+          ],
+          "games": 27,
+          "favourite_won": 0.4444444444444444
+        },
+        {
+          "predicted_range": [
+            0.6,
+            0.7
+          ],
+          "games": 29,
+          "favourite_won": 0.6206896551724138
+        },
+        {
+          "predicted_range": [
+            0.7,
+            0.8
+          ],
+          "games": 36,
+          "favourite_won": 0.7777777777777778
+        },
+        {
+          "predicted_range": [
+            0.8,
+            0.8999999999999999
+          ],
+          "games": 31,
+          "favourite_won": 0.8709677419354839
+        },
+        {
+          "predicted_range": [
+            0.9,
+            1.0
+          ],
+          "games": 42,
+          "favourite_won": 0.9285714285714286
+        }
+      ]
+    },
+    {
+      "sd": 22.5,
+      "interval_coverage": {
+        "0.5": 0.4727272727272727,
+        "0.8": 0.7575757575757576,
+        "0.9": 0.8363636363636363
+      },
+      "games": 165,
+      "brier": 0.16051784988221604,
+      "log_loss": 0.4941514441443357,
+      "favourite_calibration": [
+        {
+          "predicted_range": [
+            0.5,
+            0.6
+          ],
+          "games": 31,
+          "favourite_won": 0.45161290322580644
+        },
+        {
+          "predicted_range": [
+            0.6,
+            0.7
+          ],
+          "games": 37,
+          "favourite_won": 0.6486486486486487
+        },
+        {
+          "predicted_range": [
+            0.7,
+            0.8
+          ],
+          "games": 34,
+          "favourite_won": 0.8529411764705882
+        },
+        {
+          "predicted_range": [
+            0.8,
+            0.8999999999999999
+          ],
+          "games": 28,
+          "favourite_won": 0.8928571428571429
+        },
+        {
+          "predicted_range": [
+            0.9,
+            1.0
+          ],
+          "games": 35,
+          "favourite_won": 0.9142857142857143
+        }
+      ]
+    },
+    {
+      "sd": 24.5,
+      "interval_coverage": {
+        "0.5": 0.5151515151515151,
+        "0.8": 0.7787878787878788,
+        "0.9": 0.8696969696969697
+      },
+      "games": 165,
+      "brier": 0.161382400071622,
+      "log_loss": 0.4947024591178682,
+      "favourite_calibration": [
+        {
+          "predicted_range": [
+            0.5,
+            0.6
+          ],
+          "games": 31,
+          "favourite_won": 0.45161290322580644
+        },
+        {
+          "predicted_range": [
+            0.6,
+            0.7
+          ],
+          "games": 44,
+          "favourite_won": 0.6818181818181818
+        },
+        {
+          "predicted_range": [
+            0.7,
+            0.8
+          ],
+          "games": 34,
+          "favourite_won": 0.8823529411764706
+        },
+        {
+          "predicted_range": [
+            0.8,
+            0.8999999999999999
+          ],
+          "games": 26,
+          "favourite_won": 0.8846153846153846
+        },
+        {
+          "predicted_range": [
+            0.9,
+            1.0
+          ],
+          "games": 30,
+          "favourite_won": 0.9
+        }
+      ]
+    },
+    {
+      "sd": 25,
+      "interval_coverage": {
+        "0.5": 0.5212121212121212,
+        "0.8": 0.7878787878787878,
+        "0.9": 0.8848484848484849
+      },
+      "games": 165,
+      "brier": 0.16164002809325764,
+      "log_loss": 0.4950922470003498,
+      "favourite_calibration": [
+        {
+          "predicted_range": [
+            0.5,
+            0.6
+          ],
+          "games": 33,
+          "favourite_won": 0.45454545454545453
+        },
+        {
+          "predicted_range": [
+            0.6,
+            0.7
+          ],
+          "games": 42,
+          "favourite_won": 0.6904761904761905
+        },
+        {
+          "predicted_range": [
+            0.7,
+            0.8
+          ],
+          "games": 35,
+          "favourite_won": 0.8857142857142857
+        },
+        {
+          "predicted_range": [
+            0.8,
+            0.8999999999999999
+          ],
+          "games": 26,
+          "favourite_won": 0.8846153846153846
+        },
+        {
+          "predicted_range": [
+            0.9,
+            1.0
+          ],
+          "games": 29,
+          "favourite_won": 0.896551724137931
+        }
+      ]
+    },
+    {
+      "sd": 27.5,
+      "interval_coverage": {
+        "0.5": 0.5515151515151515,
+        "0.8": 0.8212121212121212,
+        "0.9": 0.9151515151515152
+      },
+      "games": 165,
+      "brier": 0.16311591797424357,
+      "log_loss": 0.4980931360148695,
+      "favourite_calibration": [
+        {
+          "predicted_range": [
+            0.5,
+            0.6
+          ],
+          "games": 33,
+          "favourite_won": 0.45454545454545453
+        },
+        {
+          "predicted_range": [
+            0.6,
+            0.7
+          ],
+          "games": 51,
+          "favourite_won": 0.7058823529411765
+        },
+        {
+          "predicted_range": [
+            0.7,
+            0.8
+          ],
+          "games": 36,
+          "favourite_won": 0.9166666666666666
+        },
+        {
+          "predicted_range": [
+            0.8,
+            0.8999999999999999
+          ],
+          "games": 23,
+          "favourite_won": 0.8695652173913043
+        },
+        {
+          "predicted_range": [
+            0.9,
+            1.0
+          ],
+          "games": 22,
+          "favourite_won": 0.9090909090909091
+        }
+      ]
+    },
+    {
+      "sd": 30,
+      "interval_coverage": {
+        "0.5": 0.5848484848484848,
+        "0.8": 0.8515151515151516,
+        "0.9": 0.9393939393939394
+      },
+      "games": 165,
+      "brier": 0.16481969682486414,
+      "log_loss": 0.5022727816094588,
+      "favourite_calibration": [
+        {
+          "predicted_range": [
+            0.5,
+            0.6
+          ],
+          "games": 39,
+          "favourite_won": 0.4358974358974359
+        },
+        {
+          "predicted_range": [
+            0.6,
+            0.7
+          ],
+          "games": 49,
+          "favourite_won": 0.7551020408163265
+        },
+        {
+          "predicted_range": [
+            0.7,
+            0.8
+          ],
+          "games": 34,
+          "favourite_won": 0.8823529411764706
+        },
+        {
+          "predicted_range": [
+            0.8,
+            0.8999999999999999
+          ],
+          "games": 25,
+          "favourite_won": 0.92
+        },
+        {
+          "predicted_range": [
+            0.9,
+            1.0
+          ],
+          "games": 18,
+          "favourite_won": 0.9444444444444444
+        }
+      ]
+    },
+    {
+      "sd": 35,
+      "interval_coverage": {
+        "0.5": 0.6696969696969697,
+        "0.8": 0.9121212121212121,
+        "0.9": 0.9757575757575757
+      },
+      "games": 165,
+      "brier": 0.168587249838129,
+      "log_loss": 0.5122437852553633,
+      "favourite_calibration": [
+        {
+          "predicted_range": [
+            0.5,
+            0.6
+          ],
+          "games": 46,
+          "favourite_won": 0.4782608695652174
+        },
+        {
+          "predicted_range": [
+            0.6,
+            0.7
+          ],
+          "games": 50,
+          "favourite_won": 0.8
+        },
+        {
+          "predicted_range": [
+            0.7,
+            0.8
+          ],
+          "games": 38,
+          "favourite_won": 0.8947368421052632
+        },
+        {
+          "predicted_range": [
+            0.8,
+            0.8999999999999999
+          ],
+          "games": 18,
+          "favourite_won": 0.8333333333333334
+        },
+        {
+          "predicted_range": [
+            0.9,
+            1.0
+          ],
+          "games": 13,
+          "favourite_won": 1.0
+        }
+      ]
+    },
+    {
+      "sd": 40,
+      "interval_coverage": {
+        "0.5": 0.7151515151515152,
+        "0.8": 0.9484848484848485,
+        "0.9": 0.990909090909091
+      },
+      "games": 165,
+      "brier": 0.17250946261661554,
+      "log_loss": 0.5227417797121737,
+      "favourite_calibration": [
+        {
+          "predicted_range": [
+            0.5,
+            0.6
+          ],
+          "games": 55,
+          "favourite_won": 0.5272727272727272
+        },
+        {
+          "predicted_range": [
+            0.6,
+            0.7
+          ],
+          "games": 55,
+          "favourite_won": 0.8363636363636363
+        },
+        {
+          "predicted_range": [
+            0.7,
+            0.8
+          ],
+          "games": 30,
+          "favourite_won": 0.8666666666666667
+        },
+        {
+          "predicted_range": [
+            0.8,
+            0.8999999999999999
+          ],
+          "games": 16,
+          "favourite_won": 0.875
+        },
+        {
+          "predicted_range": [
+            0.9,
+            1.0
+          ],
+          "games": 9,
+          "favourite_won": 1.0
+        }
+      ]
+    }
+  ],
+  "by_starting_slots": {
+    "9": {
+      "team_weeks": 216,
+      "mean_error": -4.345397222222223,
+      "sd_about_mean": 23.06458532694239,
+      "rmse_about_projection": 23.417829225925907,
+      "median_error": -5.6817999999999955,
+      "p10": -33.321600000000004,
+      "p90": 23.35220000000001
+    },
+    "10": {
+      "team_weeks": 666,
+      "mean_error": -6.479343992072063,
+      "sd_about_mean": 25.247193110844194,
+      "rmse_about_projection": 26.0469877397688,
+      "median_error": -6.4953999999999965,
+      "p10": -40.06660091623664,
+      "p90": 23.0449997459352
+    },
+    "15": {
+      "team_weeks": 108,
+      "mean_error": 2.2014277777777767,
+      "sd_about_mean": 21.426214096824467,
+      "rmse_about_projection": 21.44010656459317,
+      "median_error": 4.126799999999989,
+      "p10": -26.160799999999995,
+      "p90": 28.689999999999984
+    }
+  },
+  "team_weeks_with_unfilled_slot": 23,
+  "projection_rows_median_update_date_by_week": {
+    "1": "2026-09-15",
+    "2": "2026-09-22",
+    "3": "2026-09-29",
+    "4": "2026-10-06",
+    "5": "2026-10-13",
+    "6": "2026-10-20",
+    "7": "2026-10-27",
+    "8": "2026-11-03",
+    "9": "2026-11-10"
+  },
+  "limits": [
+    "Projection rows are the provider's stored rows for past weeks. Their last-update stamps fall after the games, so they are not proven pregame snapshots.",
+    "Rosters are each week's recorded roster; the simulator projects the current roster forward.",
+    "IDP bye replacements are not modelled here."
+  ]
+}

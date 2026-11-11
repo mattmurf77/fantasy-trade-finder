@@ -235,8 +235,10 @@ const handler = (name) => {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// 6 — exactly one `track('home_tile_tapped'` per tile kind, closed
-//     vocabulary, position/band only on buy/sell/position_ranking.
+// 6 — exactly one `track('home_tile_tapped'` per tile kind (`outlook` has
+//     two: the Team outlook row and the playoff tile's "Review outlook",
+//     which open the same selector), closed vocabulary, position/band only
+//     on buy/sell/position_ranking.
 // ═══════════════════════════════════════════════════════════════════════
 {
   const VOCAB = ['outlook', 'standings', 'overall_rank', 'buy', 'sell', 'position_ranking',
@@ -253,10 +255,11 @@ const handler = (name) => {
   const tiles = calls.map((c) => (/^tile: '([a-z_]+)'/.exec(c.props) || [])[1]);
   const seen = {};
   for (const t of tiles) seen[t] = (seen[t] || 0) + 1;
-  const missing = VOCAB.filter((v) => seen[v] !== 1);
+  const SITES = { outlook: 2 };
+  const missing = VOCAB.filter((v) => seen[v] !== (SITES[v] || 1));
   const extra = Object.keys(seen).filter((t) => !VOCAB.includes(t));
-  assert(missing.length === 0 && extra.length === 0 && calls.length === VOCAB.length,
-    '6b. exactly one call site per tile kind, and only the closed vocabulary',
+  assert(missing.length === 0 && extra.length === 0 && calls.length === VOCAB.length + 1,
+    '6b. one call site per tile kind (two for outlook), and only the closed vocabulary',
     `not exactly once: ${missing.join(', ') || '—'}; outside the vocabulary: ${extra.join(', ') || '—'}`);
   const badProps = calls.filter((c, i) => {
     const keys = c.props.split(',').map((p) => p.trim().split(':')[0]);
@@ -364,6 +367,15 @@ const handler = (name) => {
     "12a. onOutlook navigates to TradesHome with { mode: 'guided', editDna: true }");
   const row = (/<StatusRow\s+testID="home\.status\.outlook"[\s\S]*?\/>/.exec(hub) || [''])[0];
   assert(/onPress=\{onOutlook\}/.test(row), '12b. the Team outlook row presses onOutlook');
+  // The playoff tile's "Review outlook" is the same event and destination
+  // plus the suggestion param — and nothing else: no write, no new event.
+  const review = handler('onReviewOutlook').split('\n').slice(1).map((l) => l.trim());
+  assert(review.length === 2
+    && review[0] === "track('home_tile_tapped', { tile: 'outlook' }, 'Home');"
+    && review[1] === "navigation.navigate('Trades', { screen: 'TradesHome', params: { mode: 'guided', editDna: true, suggestOutlook: recommended } });",
+    '12c. onReviewOutlook tracks the outlook tile, then opens the selector with suggestOutlook, and does nothing else');
+  assert(!/saveLeaguePreferences|setAssetPref|useMutation/.test(homeAll),
+    '12d. nothing under components/home writes a preference');
 }
 
 {

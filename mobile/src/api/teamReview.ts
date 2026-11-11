@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import type { OutlookRecommendation } from './leagueProjections';
 
 // #357 / #358 / #359 — Team Review, the six-beat guided read of your own team.
 // Backend: GET /api/league/team-review (flag `trades.team_review`; 404s while
@@ -104,8 +105,10 @@ export type PlayoffProvenance =
   | 'observed' | 'preseason' | 'odds_unavailable' | 'odds_disabled';
 
 export interface TeamReviewWindow {
-  /** Only ever contender | rebuilder | not_sure — inference never claims an
-   *  extreme. `options` still offers all five, because a user may DECLARE one.
+  /** From the roster models only ever contender | rebuilder | not_sure —
+   *  that inference never claims an extreme. When `source` is `'projection'`
+   *  it is `projection.recommended_outlook`, which may be `championship` or
+   *  `jets`. `options` still offers all five, because a user may DECLARE one.
    *  Under `trades.window_from_odds` this is the verdict the beat ACTS ON,
    *  which may have come from the playoff band rather than the roster — read
    *  `source` to know which, and `roster_inferred` for the heuristic's answer. */
@@ -209,7 +212,14 @@ export interface TeamReviewWindow {
    *  identical to what build 122 already parses.
    *  #372 — `'composite'` means the playoff band was SCORED AS A TERM rather
    *  than used to overwrite the verdict, so `inferred === roster_inferred`. */
-  source?: 'roster' | 'odds' | 'composite';
+  source?: 'roster' | 'odds' | 'composite' | 'projection';
+  /** The playoff forecast's outlook recommendation — the same block
+   *  `GET /api/leagues/<id>/projection-runs/latest` carries. Absent while flag
+   *  `league.projection_outlook` is off. When its `status` is `'available'` the
+   *  server sets `source: 'projection'` and `inferred` to its
+   *  `recommended_outlook`; `roster_inferred` keeps the roster verdict. Its
+   *  `suggestion` and `explanation` are server-written copy, rendered as given. */
+  projection?: OutlookRecommendation;
   /** The roster heuristic's own verdict, ALWAYS — even when the odds drove.
    *  Both definitions of "contender" ship together rather than one silently
    *  replacing the other. */

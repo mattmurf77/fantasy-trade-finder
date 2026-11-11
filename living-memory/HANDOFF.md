@@ -10,6 +10,7 @@
 
 - [Current State 2026-11-09](#current-state-2026-11-09)
 - [Shipped 2026-11-10: offer learnings and fast deck, on in production](#shipped-2026-11-10-offer-learnings-and-fast-deck-on-in-production)
+- [2026-11-11: projection model v5 and the outlook suggestion](#2026-11-11-projection-model-v5-and-the-outlook-suggestion)
 
 ---
 
@@ -51,3 +52,21 @@
 - Local only, never commit: `data/sleeper-export/` and `data/prod-requests/` in the main checkout.
 - **After the release, 2026-11-11 (#645, `811341f8`, live 08:12Z):** the Sleeper read follows app-sent trades without the switch (D-227), and a fit-block team with no supported reason reads a league-rank fact, never the player list (D-228, the operator's feedback from build 184). Server-only; no new build. Check the new wording on a device.
 - Left for the next sweep: worktree `.claude/worktrees/fit-copy-fix` on `docs/d227-d228-shipped` (the PR carrying this note). The earlier leftovers are swept: see the 2026-11-11 addition to the ledger. Every other worktree and branch of this programme is in [the ledger](../docs/recovery/2026-11-10-offer-learnings.md).
+
+## 2026-11-11: projection model v5 and the outlook suggestion
+
+**Where I stopped**
+- Branch `feat/projection-model-v5` (worktree `.claude/worktrees/projection-model`): model v5, the outlook suggestion, web and app screens, docs. See the CHANGELOG entry and `docs/plans/league-projections/v5-scope.md`. Merge state and CI are in TEST_LEDGER.
+- The operator's way of working for this build: Opus 5.5 subagents write the code; the main session reviews and merges.
+
+**In flight**
+- After merge every saved forecast reads as stale until the scheduled batch re-runs it (four leagues per 15-minute tick). No suggestion shows until then.
+- The app screens need a new TestFlight build. Build 184 keeps its old tile and shows "Historical weight: NaN%" inside a nested details panel.
+
+**Not verified**
+- Nothing on a device. No v5 run has completed in production yet. The SD is provisional.
+
+**Don't repeat**
+- `coverage.estimated` is true on every production run; it cannot gate anything. Use `coverage.estimate_status`.
+- Sleeper's stored projections for past weeks are stamped after the games. They are not pregame snapshots.
+- Team Review sends `team_outlook` whenever it saves positions. Any new value placed in `window.inferred` must not reach that backfill (`backfillOutlook`).

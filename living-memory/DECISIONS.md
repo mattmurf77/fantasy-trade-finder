@@ -1,5 +1,27 @@
 # Decisions — Fantasy Trade Finder
 
+## D-230 — The saved playoff chance suggests an outlook; it outranks the roster classifiers and never writes the saved outlook
+
+**Date:** 2026-11-11 · **Who:** the operator's spec ("updating the projected playoff teams"); the precedence and the meaning of "incomplete" are this session's calls.
+**Context:** Three things already read an outlook off a team: the roster heuristic (`infer_team_outlook`), its composite (#372) and the three-band odds map (#371). The spec adds a fourth, from the saved weekly projection, and says it must not be silently overridden by the old classifier or silently overwrite the user's choice.
+**Decision:** Bands on the unrounded probability: up to 15% Tanking, over 15 to 45% Rebuilding, over 45 to 75% Contender, over 75% All-in. 45% is fixed in code; 15% and 75% are configuration. One pure reader (`league_projections/recommendation.py`) builds the block for the latest-run route and for Team Review. Order wherever an outlook is suggested: the saved outlook, then this suggestion when the forecast is current, complete and from the current model, then the roster reads. In Team Review an available suggestion sets `window.inferred` with `source: "projection"`; `roster_inferred` keeps the old verdict. Clients show a prompt only when it differs from the saved outlook, open the existing selector with the suggestion marked, and save only on the user's tap. Flag `league.projection_outlook`.
+**Consequences:**
+- "Incomplete" means an empty starting slot that a rostered eligible player without a projection could fill. One such slot withholds the suggestion for the whole league. `coverage.estimated` could not be the test: it is true on every saved production run.
+- The trade engine's own fallback (`inferred_outlook` when nothing is saved) is untouched.
+- No event records a suggestion shown or declined; acceptance rate cannot be measured until one is specced.
+- The app's label is "Contending", the web's "Contender"; server sentences name no band.
+
+## D-229 — Projection model v5: projected lineup totals only, one app-wide score SD, no history in any future mean
+
+**Date:** 2026-11-11 · **Who:** the operator's spec; SD value and the missing-data rule chosen in this session.
+**Context:** v4 blended 60% of a team's scoring average into every future mean, gave each team its own variance from its history plus a persistent strength draw, and used team history when a lineup had no projection.
+**Decision:** Each unplayed team-week is Normal(projected best-lineup total, 25.0), the same SD for every team and for the latent Max PF draw; completed weeks are facts with no noise. The blend, the per-team variance, the persistent draw and the three options behind them are removed; a config that still carries them is refused. No projected player for a team-week stops the run (`missing_weekly_projections`); the last success stays, dated and stale. `core.VERSION` = `projected-lineup-universal-sd-v5`; old-model runs read as stale and the weekly batch refreshes each league once.
+**Consequences:**
+- The SD is provisional, not calibrated: Sleeper's stored projections for past weeks are stamped after the games, so the 990-team-week backtest (RMSE 24.5 on weeks 1–6, 26.0 on weeks 7–9) is not proven pregame. Inside 20–30 playoff chances move under 2 points on average. Record and the path to a real calibration: `docs/plans/league-projections/universal-sd/README.md`.
+- Projected best lineups run a few points above what teams score (−3 to −9 mean error). It is shared by every team, so it moves relative odds little, and it is not corrected.
+- Offensive bye weeks with no replacement on the roster now score an empty slot at zero with nothing cushioning it (v4's history term did).
+- Build 184 shows "Historical weight: NaN%" inside an already-nested details panel and its comparison buttons fail politely until the next build.
+
 ## D-228 — A fit-block team with no supported reason reads a league-rank fact, never the card's player list; the payload version stays `fit-2`
 
 **Date:** 2026-11-11 · **Who:** the operator, from TestFlight 1.22.0 (184): "This copy is bad. It's just listing the players. The card itself already does that."

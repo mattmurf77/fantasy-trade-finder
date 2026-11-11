@@ -1,91 +1,107 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { Button, Card, Icon, Text } from '../chalkline';
-import { chalk, space } from '../../theme/chalkline';
-import { getLeagueProjectionBatch } from '../../api/leagueProjections';
+import { Icon, Text } from '../chalkline';
+import { chalk, fonts, ice, ink, radii, space, type } from '../../theme/chalkline';
+import { getLeagueProjectionBatch, type ProjectionOutlook } from '../../api/leagueProjections';
 import { NO_LEAGUE_ID, useSession } from '../../state/useSession';
 import { useFlag } from '../../state/useFeatureFlags';
-import { homePlayoffBanner, type PlayoffTradeSide } from '../../utils/homePlayoffBanner';
-import { SPLIT_POSITIONS, type SplitPos } from '../../utils/positionSplit';
+import { homePlayoffBanner } from '../../utils/homePlayoffBanner';
+import { outlookDisplayName } from '../OutlookBiasReceipt';
 
 interface Props {
   rosterId: number | null;
-  onBuy?: (position: SplitPos) => void;
-  onSell?: (position: SplitPos) => void;
+  /** The percentage is the link to Standings. */
   onDetails: () => void;
+  /** Opens the outlook selector with the suggestion marked. Saves nothing. */
+  onReviewOutlook: (recommended: ProjectionOutlook) => void;
 }
 
-const POSITION_TEST_IDS: Record<SplitPos, string> = {
-  QB: 'home.playoff.position.QB', RB: 'home.playoff.position.RB',
-  WR: 'home.playoff.position.WR', TE: 'home.playoff.position.TE',
-};
+// The row is 40pt like StatusRow; these bring each control to a 44pt target.
+const LINK_SLOP = { top: 12, bottom: 12, left: 8, right: 8 };
+const INFO_SLOP = { top: 2, bottom: 2, left: 6, right: 6 };
 
 /** Same saved weekly result as Standings; no view-triggered calculation. */
-export default function HomePlayoffBanner({ rosterId, onBuy, onSell, onDetails }: Props) {
+export default function HomePlayoffBanner({ rosterId, onDetails, onReviewOutlook }: Props) {
   const leagueId = useSession(s => s.league?.league_id);
   const userId = useSession(s => s.user?.user_id);
   const hasToken = useSession(s => s.hasToken);
   const switching = useSession(s => s.switching);
   const platform = useSession(s => s.leagues.find(l => l.league_id === leagueId)?.platform ?? 'sleeper');
   const enabled = useFlag('league.projections');
+  const outlookOn = useFlag('league.projection_outlook');
   const available = enabled && hasToken && !switching && !!userId && !!leagueId && leagueId !== NO_LEAGUE_ID && platform === 'sleeper';
   const query = useQuery({ queryKey: ['league-projection-batch', userId, leagueId],
     queryFn: () => getLeagueProjectionBatch(leagueId!), enabled: available, staleTime: 60_000 });
-  const [side, setSide] = useState<PlayoffTradeSide | null>(null);
+  const [open, setOpen] = useState(false);
   if (!available) return null;
   const view = homePlayoffBanner(query.data, rosterId, query.isError);
-  const availableSides = view.sides.filter(action => action === 'buy' ? onBuy : onSell);
-  const choosing = side && availableSides.includes(side) ? side : null;
-  const probability = view.probability != null ? `${(view.probability * 100).toFixed(1)}%` : null;
-  const asOf = view.capturedAt ? new Date(view.capturedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : null;
+  const percent = view.probability != null ? `${(view.probability * 100).toFixed(1)}%` : null;
+  const savedOn = view.capturedAt ? new Date(view.capturedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : null;
   const status = query.isLoading ? 'Loading forecast…' : view.status;
-  const savedDate = asOf && !view.current && status !== 'Last saved' ? `Saved ${asOf}` : asOf;
-  const subtitle = [status, savedDate, asOf && view.partial ? 'Partial data' : null].filter(Boolean).join(' · ');
-  const choose = (position: SplitPos) => {
-    if (!choosing) return;
-    const action = choosing === 'buy' ? onBuy : onSell;
-    setSide(null);
-    action?.(position);
-  };
+  // The server classified the unrounded probability; this only names its pick.
+  const recommendation = outlookOn ? view.recommendation : null;
+  const consider = recommendation ? outlookDisplayName(recommendation.outlook) : null;
+  const explanation = outlookOn ? view.explanation : null;
+  // The server's suggestion sentence goes with the "Consider" prompt: same
+  // conditions, shown in the expanded explanation above `explanation`.
+  const suggestion = recommendation && consider ? recommendation.suggestion : null;
   return <View testID="home.playoff.banner" style={styles.banner}>
-    <Card padding={space.md}>
-      <Pressable testID="home.playoff.details" accessibilityRole="button"
-        accessibilityLabel={`Projected Season Finish. ${probability ? `${probability} ${view.current ? 'estimated playoff chance' : 'last saved estimate of playoff chance'}. ` : ''}${subtitle}. View standings.`}
-        onPress={onDetails} style={styles.summary}>
-        <View style={styles.heading}>
-          <Text variant="title" style={styles.title}>Projected Season Finish</Text>
-          <Text variant="bodySm">View</Text>
-          <Icon name="chevron-right" color={chalk.dim} size={16} />
-        </View>
-        <View style={styles.estimate}>
-          {probability ? <Text variant="bodySm" style={styles.prompt}>{probability} playoff odds</Text> : null}
-          <Text variant="bodySm" style={styles.subtitle}>{subtitle}</Text>
-        </View>
+    <View style={styles.row}>
+      <Text scale="dense" style={[type.label, styles.key]}>Playoff chance</Text>
+      <View style={styles.value}>
+        {percent ? <>
+          <Pressable testID="home.playoff.details" accessibilityRole="link" hitSlop={LINK_SLOP}
+            accessibilityLabel={`${percent} playoff chance${view.current ? '' : ', last saved'}. View standings.`}
+            onPress={onDetails}>
+            <Text style={styles.link}>{percent}</Text>
+          </Pressable>
+          {view.current ? null : <Text style={styles.note}>last saved</Text>}
+        </> : <Text testID="home.playoff.status" style={styles.status}>{status}</Text>}
+      </View>
+      <Pressable testID="home.playoff.explain" accessibilityRole="button" aria-expanded={open}
+        accessibilityLabel="About playoff chance" hitSlop={INFO_SLOP}
+        onPress={() => setOpen(value => !value)} style={styles.info}>
+        <Icon name="info" size={16} color={chalk.base} />
       </Pressable>
-      {availableSides.length > 0 ? <View style={styles.actions}>
-        {availableSides.map(action => <Button key={action} label={action === 'buy' ? 'Buy a player' : 'Sell a player'}
-          variant="secondary" testID={action === 'buy' ? 'home.playoff.buy' : 'home.playoff.sell'}
-          onPress={() => setSide(side === action ? null : action)} />)}
-      </View> : null}
-      {choosing ? <View testID="home.playoff.positions" style={styles.spacing}>
-        <Text variant="bodySm" style={styles.prompt}>{choosing === 'buy' ? 'Buy at which position?' : 'Sell at which position?'}</Text>
-        <View style={styles.actions}>{SPLIT_POSITIONS.map(position => <Button key={position} label={position}
-          variant="secondary" testID={POSITION_TEST_IDS[position]} accessibilityLabel={`${choosing === 'buy' ? 'Buy' : 'Sell'} a ${position}`}
-          onPress={() => choose(position)} />)}</View>
-      </View> : null}
-    </Card>
+    </View>
+    {open ? <View testID="home.playoff.explanation" style={styles.explanation}>
+      <Text style={styles.body}>Share of simulated seasons in which your team makes the playoffs, from projected weekly lineups. Updated weekly.</Text>
+      {percent && !view.current && savedOn ? <Text style={styles.body}>{`Last saved ${savedOn}. ${view.status}.`}</Text> : null}
+      {view.incomplete ? <Text style={styles.body}>Incomplete: some lineup slots had no projection.</Text> : null}
+      {suggestion ? <Text testID="home.playoff.suggestion" style={styles.body}>{suggestion}</Text> : null}
+      {explanation ? <Text style={styles.body}>{explanation}</Text> : null}
+    </View> : null}
+    {recommendation && consider ? <View testID="home.playoff.recommendation" style={[styles.row, styles.divider]}>
+      <Text style={styles.consider}>{`Consider ${consider}`}</Text>
+      <Pressable testID="home.playoff.review-outlook" accessibilityRole="button" hitSlop={LINK_SLOP}
+        accessibilityLabel={`${Math.round(recommendation.probability * 100)}% playoff chance. Consider ${consider}. Review outlook.`}
+        onPress={() => onReviewOutlook(recommendation.outlook)}>
+        <Text style={styles.action}>Review outlook</Text>
+      </Pressable>
+    </View> : null}
   </View>;
 }
 
 const styles = StyleSheet.create({
-  banner: { marginBottom: space.lg },
-  spacing: { marginTop: space.sm },
-  summary: { minHeight: 44, justifyContent: 'center' },
-  heading: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  title: { flex: 1, minWidth: 0 },
-  estimate: { flexDirection: 'row', flexWrap: 'wrap', columnGap: space.sm, alignItems: 'baseline' },
-  subtitle: { flexShrink: 1 },
-  prompt: { color: chalk.base },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.xs },
+  banner: {
+    marginBottom: space.sm,
+    backgroundColor: ink.ink1,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.md,
+    overflow: 'hidden',
+  },
+  row: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.md },
+  divider: { borderTopWidth: 1, borderTopColor: ink.line },
+  key: { width: 100 },
+  value: { flex: 1, minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm },
+  link: { fontFamily: fonts.dataSemi, fontSize: 14, lineHeight: 20, fontVariant: ['tabular-nums'], color: ice.base },
+  note: { fontFamily: fonts.ui, fontSize: 12, lineHeight: 16, color: chalk.base },
+  status: { fontFamily: fonts.uiSemi, fontSize: 14, lineHeight: 20, color: chalk.base },
+  info: { width: 32, height: 40, alignItems: 'center', justifyContent: 'center' },
+  explanation: { gap: space.xs, paddingHorizontal: space.md, paddingBottom: space.sm },
+  body: { ...type.bodySm, color: chalk.base },
+  consider: { flex: 1, minWidth: 0, fontFamily: fonts.uiSemi, fontSize: 14, lineHeight: 20, color: chalk.base },
+  action: { fontFamily: fonts.uiMedium, fontSize: 13, lineHeight: 18, color: ice.base },
 });

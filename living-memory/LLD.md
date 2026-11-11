@@ -1094,3 +1094,12 @@ Forecast simulation scheduling: both the realtime cron dispatcher and the projec
 ### First-card polling failure recovery — 2026-11-07
 
 After the existing paged status failure budget ends with no held cards, TradesScreen clears its local running job and routes to the existing poll-abandoned failure/explicit retry. This prevents an unscheduled loading spinner. The backend job, exact repeat request, held-card paging, identity/epoch gates and timeout budgets remain unchanged. [Scope](../docs/plans/mobile-first-page-failure/scope.md).
+
+## 2026-11-11 — Projection model v5: projection-only means, one SD, stale-model reads
+
+- `league_projections.core.VERSION` names the model. A change to how a mean or the SD is formed bumps it; `store.create` stamps it on every job, the worker refuses a job stamped with another version, and the latest-run route reports a saved run from another version as `stale` with `model_current: false`. Weekly `batch.dispatch` marks a target due once when its last attempt carries another version.
+- A future mean is `modeled_actual_projection` (score) or `modeled_maxpf_projection` (Max PF) and nothing else. `simulate` reads team history only to reconcile completed facts. Do not add a term that reads `points_for`, `maxpf` or `actual_history` into a mean or a spread.
+- `model.score_sd` is required configuration with no code default, the same for every team, and server-owned: the scenario route rejects a different value.
+- The provider never substitutes completed team scoring. No priced player for a team-week raises `missing_weekly_projections`; an empty slot that a rostered eligible unprojected player could fill sets `projection_coverage.complete = false` and `coverage.estimate_status = "incomplete"`.
+- `recommendation.build` is the only place a playoff chance becomes an outlook. It is pure, classifies the unrounded value, and returns `unavailable` unless the view state is `current`, the model is current and the estimate is complete. Nothing in `league_projections` writes `league_preferences`.
+

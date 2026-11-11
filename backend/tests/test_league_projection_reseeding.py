@@ -22,10 +22,6 @@ def test_native_bracket_and_reseed_modes_have_identical_regular_season_outputs()
         value.pop('league_revision')
         value['coverage'].pop('native_playoff_seed_type')
     assert a==b
-    # This tiny provider fixture has only one historical week; give both
-    # variants the same explicit synthetic variance prior.
-    for snapshot in (fixed,reseeded):
-        for team in snapshot['teams']:team['projection_weekly_sd']=1
     x,y=simulate(fixed,config()),simulate(reseeded,config())
     assert x['teams']==y['teams']
     assert x['playoff_spots']==y['playoff_spots']

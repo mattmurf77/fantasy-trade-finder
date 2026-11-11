@@ -5,7 +5,8 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 
-VERSION = "joint-season-scenario-v4"
+# v5: future means are projected lineup totals only; one app-wide weekly score SD.
+VERSION = "projected-lineup-universal-sd-v5"
 SLOTS = {
     "QB": {"QB"}, "RB": {"RB"}, "WR": {"WR"}, "TE": {"TE"}, "K": {"K"},
     "FLEX": {"RB", "WR", "TE"}, "SUPER_FLEX": {"QB", "RB", "WR", "TE"},

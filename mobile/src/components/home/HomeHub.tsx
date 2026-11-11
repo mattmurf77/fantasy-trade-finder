@@ -8,6 +8,7 @@ import { chalk, fonts, ink, radii, space, type } from '../../theme/chalkline';
 import { getLeaguePreferences, getLeagueSummary, getPowerRankings } from '../../api/league';
 import { findMyRoster, getLeagueRosters, getLeagueUsers } from '../../api/sleeper';
 import { getProgress } from '../../api/rankings';
+import type { ProjectionOutlook } from '../../api/leagueProjections';
 import { track } from '../../api/events';
 import { NO_LEAGUE_ID, useSession } from '../../state/useSession';
 import { useFlag } from '../../state/useFeatureFlags';
@@ -147,6 +148,13 @@ export default function HomeHub() {
   const onOutlook = () => {
     track('home_tile_tapped', { tile: 'outlook' }, 'Home');
     navigation.navigate('Trades', { screen: 'TradesHome', params: { mode: 'guided', editDna: true } });
+  };
+  // The playoff tile's "Review outlook": the same destination as the Team
+  // outlook row, with the server's suggestion marked in the selector. It
+  // saves nothing — the user's tap on an outlook card is the write.
+  const onReviewOutlook = (recommended: ProjectionOutlook) => {
+    track('home_tile_tapped', { tile: 'outlook' }, 'Home');
+    navigation.navigate('Trades', { screen: 'TradesHome', params: { mode: 'guided', editDna: true, suggestOutlook: recommended } });
   };
   const onStandings = () => {
     track('home_tile_tapped', { tile: 'standings' }, 'Home');
@@ -349,9 +357,8 @@ export default function HomeHub() {
         <>
           <HomePlayoffBanner key={`${user?.user_id}:${leagueId}`}
             rosterId={findMyRoster(rostersQuery.data, user?.user_id ?? '')?.roster_id ?? null}
-            onBuy={splits ? position => onBuy(splits.find(s => s.position === position)!) : undefined}
-            onSell={splits ? position => onSell(splits.find(s => s.position === position)!) : undefined}
-            onDetails={onStandings} />
+            onDetails={onStandings}
+            onReviewOutlook={onReviewOutlook} />
           <View style={styles.rows}>
             <StatusRow
               testID="home.status.outlook"

@@ -175,6 +175,7 @@
     "test:league-projections": "node tests/check-league-projections.js",
     "test:calibration-failure-copy": "node tests/check-calibration-failure-copy.js",
     "test:home-playoff-banner": "node tests/check-home-playoff-banner.js",
+    "test:outlook-suggestion": "node tests/check-outlook-suggestion.js",
     "test:first-page-failure": "node tests/check-first-page-failure.js",
     "test:trade-input-readiness": "node tests/check-trade-input-readiness.js"
   },

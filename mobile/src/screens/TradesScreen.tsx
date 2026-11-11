@@ -1285,6 +1285,14 @@ export default function TradesScreen({ navigation, route }: any) {
   // Who opened the DNA sheet — labels outlook_saved.source (TradeDnaSheet's
   // openSource prop). Reset to the default on close.
   const [dnaOpenSource, setDnaOpenSource] = useState<'guide' | 'sheet' | 'strip'>('sheet');
+  // The outlook Home's playoff tile asked the sheet to mark (`suggestOutlook`
+  // route param), held with the league it was made for so a league switch
+  // inside the sheet can never show it against another league. It only marks
+  // a card; the sheet writes nothing until the user taps one.
+  const [dnaSuggestion, setDnaSuggestion] = useState<{
+    leagueId: string | null;
+    outlook: 'jets' | 'rebuilder' | 'contender' | 'championship';
+  } | null>(null);
   // #257 — "Preferences changed" refresh strip. Fairness/lane/targeting
   // edits already reset or re-filter the deck themselves; the only stale-
   // deck case is a DNA edit (outlook/chasing/shopping/untouchables), which
@@ -1312,6 +1320,7 @@ export default function TradesScreen({ navigation, route }: any) {
   function handleEditSheetClose() {
     setDnaOpenSource('sheet');
     setDnaSheetOpen(false);
+    setDnaSuggestion(null);
     const endAdjust = endAdjustRef.current;
     endAdjustRef.current = null;
     if (endAdjust && (prefsChangedSinceGenerateRef.current || endAdjust.fairnessOn !== fairnessOn)) {
@@ -1332,8 +1341,16 @@ export default function TradesScreen({ navigation, route }: any) {
   }
   useEffect(() => {
     if (route?.params?.editDna) {
-      if (finderHubOn) setDnaSheetOpen(true);
-      navigation?.setParams?.({ editDna: undefined });
+      if (finderHubOn) {
+        const suggest = route?.params?.suggestOutlook;
+        setDnaSuggestion(
+          suggest === 'jets' || suggest === 'rebuilder' || suggest === 'contender' || suggest === 'championship'
+            ? { leagueId, outlook: suggest }
+            : null,
+        );
+        setDnaSheetOpen(true);
+      }
+      navigation?.setParams?.({ editDna: undefined, suggestOutlook: undefined });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route?.params?.editDna]);
@@ -8137,6 +8154,7 @@ export default function TradesScreen({ navigation, route }: any) {
         visible={dnaSheetOpen}
         openSource={dnaOpenSource}
         onClose={handleEditSheetClose}
+        suggestedOutlook={dnaSuggestion && dnaSuggestion.leagueId === leagueId ? dnaSuggestion.outlook : null}
         full={
           consolidateOn
             ? {
