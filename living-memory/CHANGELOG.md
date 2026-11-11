@@ -12,12 +12,12 @@
 ---
 
 
-## 2026-11-10 — Page-first trade search built unwired; acceptance and offer evidence; scale test
+## 2026-11-10 — Fast deck built behind flags (off); page-first search exact for revision 2; real-league replay
 
-- `backend/trade_first_page.py` (ADR-028, D-212) returns the proven first k cards of an organic owner-bilateral search without building the inventory. Synthetic 12-team league: 41–46 ms once a league has been seen (73–82 ms first time) against 3–4 s for the full solve; one process completes ~20 searches/s under load (first version 6.3). **No serving path imports it**; no route, flag, config, schema or generator change.
-- An exact fast kernel for the full solve was built, measured 1.15–1.18× with ~75% more peak memory, and dropped.
-- Offline acceptance evaluation on production (read-only): neither acceptance head is estimable (2–3 responding users, fewer than 5 counterparty labels). 612 real offers from the operator's Sleeper inbox: market balance barely predicts acceptance (AUC 0.58); deals close through counters; managers hold their picks.
-- Branch `feat/trade-engine-rearch`, unmerged. [Recommendation](../docs/plans/realtime-trade-engine/recommendation.md) · [scope](../docs/plans/realtime-trade-engine/scope.md) · [scale](../docs/plans/realtime-trade-engine/scale.md).
+- `trade_first_page.py` (ADR-028, D-212) returns the proven first k cards of an owner-bilateral search without building the inventory; now exact for revision 2 too. `trade_fast_deck.py` (D-213) wires it into `_run_trade_job`: `trade.fast_deck` serves the first 150 cards as an interactive cold build's deck; `trade.fast_deck_shadow` serves the full deck and logs a comparison. **Both ship off.** Deck pipeline 14 → 15.
+- Replay of all 247 recorded production requests (13 leagues): the fast deck matched the full solve on every one, at about 0.55 s against 5.9 s. Not 200 ms under revision 2. The full engine's own output varies between processes.
+- Also: acceptance evaluation (neither head estimable), 612 Sleeper offers analysed, fast kernel dropped (1.15–1.18×).
+- Branch `feat/trade-engine-rearch`, unmerged. [Scope](../docs/plans/realtime-trade-engine/scope.md) · [real leagues](../docs/plans/realtime-trade-engine/real-leagues.md).
 
 ## 2026-11-10 — Render build filter replaces the docs skip marker; flag overrides recorded
 

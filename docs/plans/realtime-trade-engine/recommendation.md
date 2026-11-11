@@ -112,12 +112,20 @@ The practices that transfer:
 the candidates; the unchanged evaluator verifies them best-first; the search stops when the
 page is proven complete. On the 12-team synthetic league the first 30 cards take about
 41–46 ms once the process has seen the league (73–82 ms the first time) against 3–4 s for
-the full solve, after exactly verifying 100–140 of 45,056 candidates, and they are the same
-30 cards in the same order with byte-identical proofs. The first 5 can be returned in about
-31–34 ms and the same search continued. One process completes about 20 searches a second
-under load. This is D1's answer for construction: the first page costs O(page). It is
-delivered as a library with a parity suite, a benchmark and a load test, **not wired into
-publication** (see R3).
+the full solve, after exactly verifying 100–140 of 45,056 candidates. Those figures were
+taken before revision 2 was made exact. Revision 2 delays a card behind cheaper alternatives
+found across the whole inventory, so an exact page also has to evaluate each page card's
+family members; with that, the synthetic first page takes 70–130 ms. On 247 recorded
+production requests the page is the full solve's on every one, and the cost is about 0.28 s
+for 30 cards and 0.55 s for 150 against 5.9 s: about ten times faster, and not yet 200 ms
+([real-leagues.md](real-leagues.md)). This is D1's answer for construction: the first page
+costs O(page).
+
+**The fast deck (the first serving step).** `backend/trade_fast_deck.py` puts R2 on the
+worker's generator call behind `trade.fast_deck` (default off): an interactive cold build
+gets the proven first 150 cards as its whole deck and runs the unchanged final checks on
+them. `trade.fast_deck_shadow` serves the full deck and logs a per-job comparison. This is
+narrower than R3 below: the deck ends at 150 cards and the tail is not built.
 
 **Offline acceptance evaluation (evidence for R5).** `backend/eval/acceptance_eval.py`, run
 read-only against production. Findings in [acceptance-eval.md](acceptance-eval.md).
@@ -142,13 +150,27 @@ building the tail before the page (R2). The kernel was removed from the branch.
 
 ### Recommended next, in order
 
-**R3 — Publish the first page before the inventory is finished.** Use R2 inside
-`_run_trade_job`: construct and verify the page, run the final checks on those cards only,
-commit their evidence, publish; then complete the full inventory in the background and append
-it behind the pinned page. This is the step that turns R2 into user-visible latency. It
-changes the owner publication contract (`_publish_owner_batch` asserts the published prefix
-equals the head of the finished inventory, and impression ordinals are global), so it needs
-its own scope block and the trades-eng evidence contract reviewed. Not attempted here.
+**R3 — Publish the first page, then append the inventory.** The fast deck serves a bounded
+deck in one pass. The full version publishes the page and then completes the inventory in the
+background behind it. It was not attempted because the worker's final checks are not safe to
+run twice in one job: they emit exposure events, consume suppression grants, and write one
+candidate set and one evidence seal per job, and `_publish_owner_batch` asserts the published
+prefix equals the head of the finished inventory. The existing deck paging (`deck_id` +
+cursor, with `rebased` moving a client to the scope's current deck and dropping cards it
+already holds) is the likely route: a fast deck first, a full deck built behind it, and the
+client rebased when it runs out. That needs its own scope block and the trades-eng evidence
+contract reviewed.
+
+**R2b — Make revision 2 cheap enough for 200 ms.** On real leagues more than half of the
+exact evaluations are family members, and each revision-2 evaluation audits every companion
+by evaluating the trade without it. Bilateral-1 on the same requests takes 71 ms for 30
+cards. Cheaper dismissal of family members, or sharing the companion audit's sub-evaluations
+with the search's own, is the direct route; both must keep results identical.
+
+**R0 — Make the full engine repeatable across processes.** The replay found that the same
+request yields different decks and proof bytes in different processes (hash-seed dependent
+iteration). That undermines replay, shadow comparison and the claim that a proof is frozen
+evidence. Find the unordered iteration and sort it.
 
 **R4 — A league snapshot instead of a prepared deck.** Hold one immutable in-process
 snapshot per league and format: market values, each manager's board-derived values and tier
@@ -204,26 +226,28 @@ diversity rules exist; the cross-user version does not.
 
 ## 5. Rollout for what is built
 
-Nothing on this branch changes serving: no route, flag, config key, schema or generator is
-touched, and nothing imports `trade_first_page` outside its tests and tools.
+With both flags off nothing changes in serving beyond a one-time rebuild of stored first
+pages (the deck pipeline version moved 14 → 15).
 
-1. Merge. The module is reachable only from `backend/eval/` tooling.
-2. Run `python -m backend.eval.first_page_bench` on requests captured from production
-   (`eval/capture_owner_benchmark.py`) to confirm the synthetic numbers on real leagues,
-   including whether the price envelope and the stop proof hold there.
-3. Scope R3 with trades-eng against the publication and evidence contract.
+1. Merge with both flags off. models-eng reviews the pipeline bump.
+2. Turn on `trade.fast_deck_shadow` for a day. Each cold build logs whether the 150-card page
+   equals the full solve's and how long each took on Render.
+3. If the shadow lines agree, turn on `trade.fast_deck` and run the TestFlight checklist in
+   [scope.md](scope.md) §3. Kill = flag off and reload.
+4. Scope R3 (append the inventory) and R2b (cheaper revision 2).
 
 ## 6. What this review did not do
 
 - It did not change which trades are served or their order. R5/R6 are model changes that need
   outcome data and the repo's blind-grade/shadow process; proposing a fourth unevaluated
   bilateral revision would add to the queue, not shorten it.
-- It did not rewire publication (R3) or add the league snapshot (R4). Both cross the evidence
-  and currentness contracts that trades-eng owns. Until R3 lands, no user sees a faster card.
-- It did not read production. Every number above marked "local" is from the synthetic league;
-  production figures are quoted from existing plan documents.
-- A universal 200 ms on a genuinely cold scope still needs R3 and R4 and a physical-device
-  measurement. This branch shows construction can fit inside that budget; it does not prove
-  the gate.
+- It did not build append-behind-the-page (R3) or the league snapshot (R4). Both cross the
+  evidence and currentness contracts that trades-eng owns. Until a flag is turned on, no user
+  sees a faster card.
+- It read production only to count, to capture recorded requests and for the acceptance
+  evaluation, all read-only. No timing here was taken on Render.
+- A universal 200 ms on a genuinely cold scope is not shown. On real leagues construction is
+  about 0.3–0.55 s under revision 2; it still needs R2b, R4 and a physical-device
+  measurement.
 - Page-first supports organic and opponent-scoped searches. Pinned and exact-give searches
   return `None` and fall back to the full solve.

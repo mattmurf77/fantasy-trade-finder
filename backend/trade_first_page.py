@@ -73,9 +73,28 @@ user, serve repeated work: ``_LINEUP_MEMO`` (lineup assignments) and
 keeps the state so the first few cards can be shown and the same search
 continued.
 
-Known difference for revision 2: its ``_rank`` adds ``term_precedence`` over
-the ranked list. Here it only sees the verified top-M prefix, so a predecessor
-outside that prefix cannot delay a page card as it can in the full generator.
+Revision 2 (``term_precedence``) is exact too, with ``complete`` true and the
+budgets not binding. Its ``_rank`` is the baseline (bilateral-1's) followed by
+a min-index topological merge: card c waits for every predecessor, a cheaper
+(``worst_adjusted_market_loss``, size) member among the 32 cheapest of c's own
+two families (same partner and exact give set, or exact receive set). With a
+horizon L >= k: prove the quality prefix of length L + 31, so the baseline's
+first L over any held superset are the true first L and every other held card
+has true baseline index >= L; then make every family of those L cards hold all
+eligible universe members cheaper than the card (``_complete``; members are
+enumerated like the screen, ``can_clear`` and a price-envelope floor on the
+market loss |rv - gv| / max(rv, gv) dismiss most, the exact loss comes from
+the very pricing call the proof's own loss uses, 1e-9 slack, and survivors are
+resolved through the admitted-parent rule), so each of the first L has its
+exact predecessor set, transitively. Rank the union with the unchanged
+revision-2 ranker; the outputs before the first one outside the first L are
+the full solve's: by induction the same cards are emitted, so cards in the
+first L are available in both merges or in neither, and any card outside can
+only be popped once none of them is. If that exact prefix is shorter than k,
+L grows (the search resumes). A cap hit while completing reports ``complete``
+false. The argument is a proof given the same universe and that cost is a pure
+function of a card's terms (both pinned against the full solve in
+``test_trade_first_page``).
 
 Leaf module: no server, database, flag reload, provider or network access.
 Scores are interpretable support, never acceptance probabilities.
@@ -96,12 +115,13 @@ from time import perf_counter
 from . import trade_gen_owner as owner
 
 
-PAGE_FIRST_VERSION = "page-first-3"
+PAGE_FIRST_VERSION = "page-first-4"
 BOUND_VERSION = "support_upper_bound_v1"
 _EPS = 1e-9
 _LOOKAHEAD = 31  # bilateral._rank: 32-item window => first k use a k + 31 prefix
 _FLOOR_SLACK = 1e-12  # pricing order may differ from the served order by ulps
 _REL = 1e-9  # outward relative slack on envelope arithmetic
+_COST_SLACK = 1e-9  # family members' market loss is recomputed from the viewer-side pricing call
 _ROUND = .05  # package_value_v2 rounds to one decimal
 _CURABLE = ("market_floor", "market_overpay", "viewer_no_benefit", "counterparty_no_benefit",
             "known_preference_harm", "tanking_rb_without_long_term_exception")
@@ -824,21 +844,20 @@ class PageSearch:
     Construction does the per-request work once (search setup, pools, the
     pre-pricing screen); each ``take`` continues the SAME best-first
     verification until n + 31 eligible cards beat every remaining bound, then
-    ranks that prefix. ``take(n)`` returns exactly what ``first_page(k=n)``
-    would: the verification order is deterministic and the stop test does not
-    change state, so the search passes through exactly the state a one-shot
-    call would stop in, and cards verified after it have weaker support below
-    its cut.
+    ranks that prefix (revision 2: a horizon L >= n, plus family completion).
+    ``take(n)`` returns exactly what ``first_page(k=n)`` would: for
+    bilateral-1 the verification order is deterministic and the stop test does
+    not change state, so the search passes through exactly the state a
+    one-shot call would stop in, and cards verified after it have weaker
+    support below its cut; for revision 2 both are the full solve's first n
+    (work counts may differ: family members verified early can let a later
+    proof stop sooner).
 
-    Prefix stability across takes: bilateral-1's ``_rank`` picks output i from a
-    32-item window of the quality-sorted list, so its first n outputs depend
-    only on the first n + 31 sorted cards; a later, larger take extends an
-    earlier one and never reorders it. Revision 2 adds ``term_precedence``,
-    where a cheaper same-focal alternative can delay a card it precedes; a
-    larger prefix can bring such an alternative into view, so a later take may
-    reorder an earlier one. Each take's report says so in
-    ``prefix_stable`` (whether every earlier take's cards are a prefix of this
-    one), never silently.
+    Prefix stability across takes: every complete take is the full solve's
+    first n, so a later, larger take extends an earlier one for both
+    generators. ``prefix_stable`` (whether every earlier take's cards are a
+    prefix of this one) still reports it, which can only fail after an
+    incomplete take. For revision 2 the horizon only grows across takes.
 
     Each eligible card is decorated once, so an offer keeps its ``trade_id``
     across takes; each take returns its own shallow card copies numbered for
@@ -884,6 +903,10 @@ class PageSearch:
         # signature -> (weaker, card, decoded proof); ascending weaker supports
         self.eligible, self.weakers = {}, []
         self.served = []
+        # Revision 2 (term_precedence): family members by key, families held up
+        # to a market loss, and the current horizon L.
+        self.terms = getattr(generator, "term_precedence", None) is not None
+        self.families, self.losses, self.covered, self.horizon, self.exact = {}, {}, {}, 0, None
 
     @contextmanager
     def _context(self):
@@ -952,24 +975,137 @@ class PageSearch:
                 counts["support_bounded"] += 1
                 heapq.heappush(heap, (-bounds.support(m.viewer, m.other, give, receive, *payload), self.tie,
                                       "support", index, give, receive, None))
-            elif focal:
-                if self._evaluate(index, give, receive) is not None:
-                    done.add(signature)
             else:
-                # Served in the best-sorting ordering whose focal parent is admitted.
-                for side, _, g, r in sorted(_orderings(give, receive),
-                                            key=lambda o: _expansion_key(search, m.member, *o)):
-                    parent = self._evaluate(index, *((g[:1], r) if side == "give" else (g, r[:1])))
-                    if parent is None:
-                        break
-                    if parent.eligible or parent.reason in _CURABLE:
-                        if self._evaluate(index, g, r) is not None:
-                            done.add(signature)
-                        break
-                else:
-                    done.add(signature)  # no admitted parent: outside the universe
+                self._resolve(index, give, receive)
             self.tie += 1
         return False
+
+    def _resolve(self, index, give, receive):
+        """Exactly evaluate one universe package; False if the cap stopped it.
+
+        An expansion is served in the best-sorting ordering whose focal parent
+        is admitted, and is outside the universe if neither parent is."""
+        if len(give) + len(receive) > 2:
+            member = self.members[index].member
+            for side, _, g, r in sorted(_orderings(give, receive),
+                                        key=lambda o: _expansion_key(self.search, member, *o)):
+                parent = self._evaluate(index, *((g[:1], r) if side == "give" else (g, r[:1])))
+                if parent is None:
+                    return False
+                if parent.eligible or parent.reason in _CURABLE:
+                    if self._evaluate(index, g, r) is None:
+                        return False
+                    break
+        elif self._evaluate(index, give, receive) is None:
+            return False
+        self.done.add((index, frozenset(give), frozenset(receive)))
+        return True
+
+    def _family(self, key):
+        """Every universe package of a ``term_precedence`` family that ``can_clear``
+        the floor, as ``(loss floor, give, receive)`` sorted: the loss floor
+        bounds the market loss |rv - gv| / max(rv, gv) from below with the
+        same price envelope (0 when it is off)."""
+        known = self.families.get(key)
+        if known is None:
+            index, side, ids = key
+            m, bounds, market = self.members[index], self.bounds, self.search.market
+            ids = tuple(sorted(ids))
+            if side == "give":
+                packages = [(ids, (r,)) for r in m.receive_pool]
+                if len(ids) == 1:  # plus every 1x2 with this give, once
+                    packages += [(g, r) for r0 in m.receive_pool for g, r in m.expansions(ids, (r0,), canonical=True)
+                                 if len(r) == 2]
+            else:
+                packages = [((g,), ids) for g in m.give_pool]
+                if len(ids) == 1:
+                    packages += [(g, r) for g0 in m.give_pool for g, r in m.expansions((g0,), ids, canonical=True)
+                                 if len(g) == 2]
+            known = []
+            for give, receive in packages:
+                gv, rv = [market[p] for p in give], [market[p] for p in receive]
+                g_lo, g_hi = bounds.side_price(gv, max(rv))
+                r_lo, r_hi = bounds.side_price(rv, max(gv))
+                if bounds.can_clear(g_lo, g_hi, r_lo, r_hi):
+                    known.append((1 - g_hi / r_lo if r_lo > g_hi > 0 else 1 - r_hi / g_lo if g_lo > r_hi > 0
+                                  else 0.0, give, receive))
+            known.sort()
+            self.families[key] = known
+        return known
+
+    def _loss(self, give, receive):
+        """The market loss |rv - gv| / max(rv, gv) of the pricing call the proof's
+        ``worst_adjusted_market_loss`` comes from (``bilateral._Search._owner``),
+        or None below the floor (never eligible)."""
+        key = give, receive
+        if key not in self.losses:
+            priced = self.search._package(give, receive, self.search.market)
+            self.losses[key] = (None if priced is None or priced[0] < self.bounds.floor
+                                else abs(priced[2] - priced[1]) / max(priced[2], priced[1]))
+        return self.losses[key]
+
+    def _complete(self, index, card, data):
+        """Hold every eligible member of ``card``'s two families that is cheaper
+        than it (all ``term_precedence`` can make its predecessor); False if capped."""
+        terms = data.get("term_efficiency") or {}
+        loss = terms.get("worst_adjusted_market_loss")
+        if not isinstance(loss, (int, float)) or not math.isfinite(loss):
+            return True  # not a term record: never in a family, never delayed
+        for key in ((index, "give", frozenset(card.give_player_ids)),
+                    (index, "receive", frozenset(card.receive_player_ids))):
+            if self.covered.get(key, -math.inf) >= loss:
+                continue
+            for floor, give, receive in self._family(key):
+                if floor > loss + _COST_SLACK:
+                    break  # strictly costlier, as is every later member
+                if (index, frozenset(give), frozenset(receive)) in self.done:
+                    continue
+                exact = self._loss(give, receive)
+                if exact is None or exact > loss + _COST_SLACK:
+                    continue  # ineligible, or strictly costlier: never a predecessor of this card
+                before = self.counts["verified"]
+                resolved = self._resolve(index, give, receive)
+                self.counts["family_verified"] += self.counts["verified"] - before
+                if not resolved:
+                    return False
+            self.covered[key] = loss
+        return True
+
+    def _exact_terms(self, k):
+        """Revision 2's first k: grow the horizon L until its exact prefix covers k.
+
+        Returns (complete, ranked cards); see the module docstring for the proof."""
+        from . import trade_gen_bilateral as bilateral
+        horizon = self.horizon = max(self.horizon, k)
+        while True:
+            if not self._verify(horizon + _LOOKAHEAD):
+                if not self.heap and not self.capped:  # the whole inventory is held
+                    held = [(card, data) for _, card, data in self.eligible.values()]
+                    ranked = _rank_decoded(self.generator._rank, held)
+                    self.exact = len(ranked)
+                    return True, ranked
+                return False, _rank_decoded(self.generator._rank, self.prefix(horizon))
+            held = self.prefix(horizon)
+            first = _rank_decoded(bilateral._rank, held)[:horizon]
+            index_of = {m.member.user_id: i for i, m in enumerate(self.members)}
+            data_of = {id(card): data for card, data in held}
+            complete = all(self._complete(index_of[card.target_user_id], card, data_of[id(card)])
+                           for card in first)
+            union = {signature: (card, data) for signature, (_, card, data) in self.eligible.items()
+                     if (signature[0], "give", signature[1]) in self.covered
+                     or (signature[0], "receive", signature[2]) in self.covered}
+            for card, data in held:
+                union[index_of[card.target_user_id], frozenset(card.give_player_ids),
+                      frozenset(card.receive_player_ids)] = card, data
+            ranked = _rank_decoded(self.generator._rank, list(union.values()))
+            if not complete:
+                return False, ranked
+            inside = {id(card) for card in first}
+            exact = next((i for i, card in enumerate(ranked) if id(card) not in inside), len(ranked))
+            self.exact = exact
+            if exact >= k:
+                return True, ranked
+            horizon = self.horizon = horizon + max(8, k // 8)
 
     def prefix(self, n):
         """The proven quality-sorted prefix of length n + 31 (after ``take(n)``)."""
@@ -982,13 +1118,18 @@ class PageSearch:
         timings, search = self.timings, self.search
         with self._context():
             mark = perf_counter()
-            proven = self._verify(k + _LOOKAHEAD)
-            complete = proven or (not self.heap and not self.capped)
+            if self.terms:
+                complete, ranked = self._exact_terms(k)
+            else:
+                proven = self._verify(k + _LOOKAHEAD)
+                complete = proven or (not self.heap and not self.capped)
             timings["verify"] += perf_counter() - mark
 
             mark = perf_counter()
             search.checkpoint()
-            page = [_hand_out(card) for card in _rank_decoded(self.generator, self.prefix(k))[:k]]
+            if not self.terms:
+                ranked = _rank_decoded(self.generator._rank, self.prefix(k))
+            page = [_hand_out(card) for card in ranked[:k]]
             for index, card in enumerate(page):
                 card.composite_score = card.mismatch_score = float(len(page) - index)
             search.checkpoint()
@@ -1007,6 +1148,9 @@ class PageSearch:
                   "complete": complete, "incumbent_budgets_bind": self.bind,
                   "price_envelope": self.bounds.envelope, "max_verifications": self.max_verifications,
                   "takes": len(self.served), "prefix_stable": stable,
+                  "term_horizon": self.horizon if self.terms else None,
+                  "term_exact_prefix": self.exact if self.terms else None,
+                  "families_completed": len(self.covered), "family_verified": counts["family_verified"],
                   "elapsed_ms": {name: round(value * 1000, 3) for name, value in timings.items()}}
         return page, owner.OwnerGenerationReport(owner._dump(report))
 
@@ -1023,8 +1167,8 @@ def first_page(*, k=30, generator=None, max_verifications=4000, **kwargs):
     return PageSearch(generator=generator, max_verifications=max_verifications, **kwargs).take(k)
 
 
-def _rank_decoded(generator, held):
-    """``generator._rank`` over ``held`` (card, decoded proof) pairs, no re-decoding.
+def _rank_decoded(rank, held):
+    """``rank`` (a generator's ``_rank``) over ``held`` (card, decoded proof) pairs, no re-decoding.
 
     The rankers call ``proof.as_dict()`` (bilateral-1 once per card, revision 2
     twice more in ``term_precedence``). They rank private twins instead: a
@@ -1041,7 +1185,7 @@ def _rank_decoded(generator, held):
         twin.owner_evaluation = card.owner_evaluation.twin()
         object.__setattr__(twin.owner_evaluation, "as_dict", (lambda data: lambda: data)(data))
         twins[id(twin)] = twin, card
-    return [twins[id(twin)][1] for twin in generator._rank([twin for twin, _ in twins.values()])]
+    return [twins[id(twin)][1] for twin in rank([twin for twin, _ in twins.values()])]
 
 
 def _quality(card, data=None):

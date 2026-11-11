@@ -168,7 +168,7 @@ is draft/unratified and never automatically approves release. See
 [comparison](plans/model-evaluation-framework/comparison-2026-09-22.md) and
 [remaining model/evidence work](plans/model-evaluation-framework/model-revision-plan.md).
 
-## Page-first trade search (library, not wired; 2026-11-10)
+## Page-first trade search and the fast deck (flagged off; 2026-11-10)
 
 `trade_first_page.first_page(k=…, **generator_kwargs)` returns the first k cards of an
 organic or opponent-scoped owner-bilateral search without constructing the inventory.
@@ -185,11 +185,22 @@ actually returned are serialised. Two bounded process-wide memos, keyed by the c
 function reads and never by league or user, carry repeated work across searches: roster
 lineup assignments (`_LINEUP_MEMO`) and tier coordinates (`_COORDINATE_MEMO`).
 
-It is a leaf with no server, database, flag or provider access, and **no serving path
-imports it**: only `backend/eval/first_page_bench.py`, `first_page_load.py` and the tests.
-Publishing a page before the inventory exists would change the owner publication
-contract below and is not built. [ADR-028](adr/adr-028-page-first-trade-search.md) ·
-[scope and measurements](plans/realtime-trade-engine/scope.md).
+For revision 2 the search also completes each page card's two term-precedence families up to
+that card's cost, so the page is the full generator's first k and not a re-rank of a prefix.
+
+It is a leaf with no server, database, flag or provider access. One serving path uses it:
+`trade_fast_deck.serve`, called from `_run_trade_job`'s owner-generator call when
+`trade.fast_deck` is on and the job is interactive (no `source`, not a preparation run). The
+worker then runs its unchanged final checks, evidence and publication on the proven first
+150 cards as the whole deck. `serve` returns `None`, and the full solve runs, for a generator
+without a parity suite, a pinned or exact-give request, an unproven page or a league whose
+stream budgets would bind; the worker also falls back on any error. `trade.fast_deck_shadow`
+serves the full solve and logs one comparison per job. With both flags off the module is
+never imported. Publishing a page and then appending the inventory would change the owner
+publication contract below and is not built.
+[ADR-028](adr/adr-028-page-first-trade-search.md) ·
+[scope and measurements](plans/realtime-trade-engine/scope.md) ·
+[flags](config-reference.md#flags--fast-deck-adr-028-2026-11-10-ships-off).
 
 ## First-action trade job publication (2026-09-21)
 

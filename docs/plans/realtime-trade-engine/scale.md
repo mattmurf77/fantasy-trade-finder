@@ -3,6 +3,12 @@
 **Date:** 2026-11-10 · **Tool:** `backend/eval/first_page_load.py` · **Stretch goal:** 1,000
 concurrent users with the first cards inside 200 ms, without pre-generating results.
 
+> **Read with [real-leagues.md](real-leagues.md).** Everything below was measured on the
+> synthetic league before revision 2 was made exact. On recorded production requests a
+> 150-card deck costs about 0.55 s, roughly ten times the per-search cost used here, and one
+> process saturates near 1.8 searches a second, not 20. The shape of the conclusions holds
+> (processes add capacity, threads do not; a burst needs a queue); the absolute rates do not.
+
 ## What was measured, and what was not
 
 - **Construction only.** Each "search" is one call to `trade_first_page.first_page(k=30)`

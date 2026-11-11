@@ -1,8 +1,13 @@
 """Page-first exact top-K retrieval (backend/trade_first_page.py).
 
 Covers: exact first-page identity against the full bilateral-1 generator
-(order, card fields, proof bytes) across requests, outlooks, floors and k;
-revision-2 proof identity and the documented top-M-prefix re-rank; bound
+(order, card fields, proof bytes) across requests, outlooks, floors and k; the
+same for revision 2 (term_precedence) on small worlds, three production-sized
+builds and, for BOTH generators, seeds 1-12 of a 4-team synthetic league plus
+outlook / floor / size / ranked-opponent variations at k in (5, 30, 60, 150)
+(identities, order, proof bytes; full solves cached per league); family
+members priced as their proofs (market loss and its envelope floor); a
+verification cap hit inside family completion reports incomplete; bound
 admissibility over exhaustively evaluated universes for both generators; the
 market-price envelope the pre-pricing bound relies on; work avoided on a
 production-sized synthetic league; unsupported requests, aborts, verification
@@ -13,8 +18,15 @@ every input it reads, hands out detached dicts, evicts at its cap and is safe
 across threads; the tier-coordinate memo equals the incumbent across formats
 and in-place band edits; every deferred proof is the full generator's
 (bytes, fields) and the dict used for ordering is its decode, exhaustively;
-``PageSearch.take`` equals the one-shot call and reports prefix instability;
-the verified prefix held at the stop is the full generator's top k + 31. Hermetic: synthetic worlds, pinned config/flags.
+``PageSearch.take`` equals the one-shot call and later takes extend earlier
+ones for both generators; the verified prefix held at the stop is the full
+generator's top k + 31. Hermetic: synthetic worlds, pinned config/flags.
+
+Sabotage proof (page-first-4, 2026-11-10): skip_family_completion
+(``_complete`` returns at once), give_side_only (receive family never
+completed), accept_beyond_horizon (exact prefix = whole ranked list) and
+cap_counts_as_complete (a cap inside completion ignored) each turned the
+revision-2 parity tests (the cap test for the last) red; green on revert.
 """
 
 import json
@@ -157,42 +169,109 @@ def test_stop_is_proven_before_the_universe_is_exhausted():
     assert report["verified"] < report["universe"] / 5
 
 
-def _revision_2_reference(full, k):
-    """Top-(k + 31) prefix by bilateral-1 quality, then revision 2's rank."""
-    prefix = sorted(full, key=fp._quality)[:k + fp._LOOKAHEAD]
-    return candidate._rank(prefix)[:k]
-
-
 @pytest.mark.parametrize("name", ["default", "seed_9_more_ranked", "viewer_jets", "viewer_rebuilder",
                                   "unranked_opponents", "loose_floor", "bigger"])
-def test_revision_2_proofs_match_and_page_is_the_reranked_top_m_prefix(name):
+def test_revision_2_first_page_is_exactly_the_full_generators_first_k(name):
     def kwargs():
         return small(**_VARIANTS[name])
     full, _ = candidate.generate_bilateral_trades(**kwargs())
-    by_signature = {signature(c): c for c in full}
-    for k in (5, 30):
+    for k in (1, 5, 30, len(full) + 7):
         page, report = run(k, candidate, kwargs)
-        assert report["complete"] and report["generator_version"] == candidate.VERSION
-        for card in page:
-            reference = by_signature[signature(card)]
-            assert identity(card) == identity(reference)
-            assert_same_card(card, reference)
-        # The one documented difference: term_precedence only sees the verified
-        # top-M prefix, so the page equals that prefix re-ranked, not
-        # necessarily the full generator's first k.
-        assert [identity(c) for c in page] == [identity(c) for c in _revision_2_reference(full, k)]
-        overlap = len({identity(c) for c in page} & {identity(c) for c in full[:k]})
-        assert overlap >= .8 * min(k, len(full))
+        assert report["complete"] and not report["incumbent_budgets_bind"]
+        assert report["generator_version"] == candidate.VERSION and report["returned"] == len(page)
+        assert [identity(c) for c in page] == [identity(c) for c in full[:k]]
+        for page_card, full_card in zip(page, full):
+            assert_same_card(page_card, full_card)
 
 
-def test_revision_2_production_sized_overlap():
-    def kwargs():
-        return synthetic_league.build(seed=7)
-    full = full_solve(candidate, 7)
-    page, report = run(30, candidate, kwargs)
+# Small production-shaped leagues (4-6 teams of 12-20): seeds 1-12 plus outlook,
+# floor, size and ranked-opponent variations. On every one of these the
+# page-first-3 re-rank of the top-(k + 31) prefix differed from the full
+# revision-2 solve for some k below.
+_PARITY_BUILDS = [{"seed": seed, "teams": 4} for seed in range(1, 13)] + [
+    {"seed": 2, "teams": 4, "viewer_outlook": "jets"}, {"seed": 13, "teams": 4, "viewer_outlook": "rebuilder"},
+    {"seed": 4, "teams": 4, "fairness_threshold": .65}, {"seed": 5, "teams": 4, "fairness_threshold": .9},
+    {"seed": 6, "teams": 6, "players_per_team": 12}, {"seed": 8, "teams": 4, "ranked_opponents": 0},
+    {"seed": 9, "teams": 5, "ranked_opponents": 2}]
+
+
+@lru_cache(maxsize=None)
+def _full_build(generator, build):
+    """The full generator on ``synthetic_league.build(**dict(build))``, default flags/config."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(ts, "_cfg", dict(ts._DEFAULT_CFG))
+        patch.setattr(feature_flags, "_flags_cache", dict(feature_flags.DEFAULT_FLAGS))
+        return generator.generate_bilateral_trades(**synthetic_league.build(**dict(build)))[0]
+
+
+def _assert_full_solve_prefix(page, report, full, k):
     assert report["complete"] and not report["incumbent_budgets_bind"]
-    assert [identity(c) for c in page] == [identity(c) for c in _revision_2_reference(full, 30)]
-    assert len({identity(c) for c in page} & {identity(c) for c in full[:30]}) >= 27
+    assert [identity(c) for c in page] == [identity(c) for c in full[:k]]
+    assert [c.owner_evaluation.snapshot_json for c in page] == [
+        c.owner_evaluation.snapshot_json for c in full[:k]]
+
+
+@pytest.mark.parametrize("generator", [bilateral, candidate])
+@pytest.mark.parametrize("build", _PARITY_BUILDS, ids=lambda b: "-".join(f"{k}={v}" for k, v in b.items()))
+def test_first_page_equals_the_full_solve_for_both_generators(generator, build):
+    # Identities, order and proof bytes for one-shot pages; for revision 2 also
+    # one PageSearch taking increasing k, which must extend (exact => stable).
+    full = _full_build(generator, tuple(build.items()))
+    resumable = fp.PageSearch(generator=generator, **synthetic_league.build(**build))
+    for k in (5, 30, 60, 150):
+        page, report = run(k, generator, lambda: synthetic_league.build(**build))
+        _assert_full_solve_prefix(page, report, full, k)
+        if generator is candidate:
+            assert report["term_horizon"] >= k and report["term_exact_prefix"] >= min(k, len(full))
+            page, report = resumable.take(k)
+            report = report.as_dict()
+            _assert_full_solve_prefix(page, report, full, k)
+            assert report["prefix_stable"] is True
+        else:
+            assert report["term_horizon"] is None and report["family_verified"] == 0
+
+
+@pytest.mark.parametrize("seed", [3, 7, 11])
+def test_revision_2_production_sized_first_page_is_exact(seed):
+    full = full_solve(candidate, seed)
+    for k in (5, 30, 60, 150):
+        page, report = run(k, candidate, lambda: synthetic_league.build(seed=seed))
+        _assert_full_solve_prefix(page, report, full, k)
+        assert report["families_completed"] > 0 and report["family_verified"] > 0
+    for page_card, full_card in zip(page, full):
+        assert_same_card(page_card, full_card)
+
+
+def test_family_members_are_priced_as_their_proofs():
+    # Family completion dismisses members by the market loss of their pricing
+    # call and by an envelope floor under it; both must agree with the proof's
+    # worst_adjusted_market_loss for every eligible package, in either id order.
+    for build in _AUDIT_BUILDS:
+        resumable = fp.PageSearch(generator=candidate, **small(**build))
+        with resumable._context():
+            page, report = resumable.take(100_000)
+            assert report.as_dict()["complete"]
+            for (index, give, receive), (_, card, data) in resumable.eligible.items():
+                loss = data["term_efficiency"]["worst_adjusted_market_loss"]
+                for g in {tuple(card.give_player_ids), tuple(sorted(give))}:
+                    for r in {tuple(card.receive_player_ids), tuple(sorted(receive))}:
+                        assert abs(resumable._loss(g, r) - loss) <= 1e-12
+                for key in ((index, "give", give), (index, "receive", receive)):
+                    floors = {(frozenset(g), frozenset(r)): f for f, g, r in resumable._family(key)}
+                    assert floors[give, receive] <= loss + 1e-12
+
+
+def test_a_cap_inside_family_completion_reports_incomplete():
+    # The cap lands after the quality prefix is proven, while a family is being
+    # completed: the page must say incomplete, never pass as exact.
+    kwargs = dict(seed=1, teams=4)
+    _, report = run(30, candidate, lambda: synthetic_league.build(**kwargs))
+    assert report["complete"] and report["term_horizon"] == 30 and report["family_verified"] > 2
+    cap = report["verified"] - report["family_verified"] + 1
+    page, capped = fp.first_page(k=30, generator=candidate, max_verifications=cap, **synthetic_league.build(**kwargs))
+    capped = capped.as_dict()
+    assert capped["verified"] == cap and capped["family_verified"] == 1
+    assert not capped["complete"] and len(page) <= 30
 
 
 _AUDIT_BUILDS = [
@@ -652,22 +731,18 @@ def test_each_take_equals_the_one_shot_call(generator, takes, name):
     assert report["takes"] == len(takes)
 
 
-def test_takes_extend_for_bilateral_1_and_report_reordering_for_revision_2():
-    # bilateral-1: the first n outputs depend only on the first n + 31 sorted
-    # cards, so a later take extends an earlier one. Revision 2's term
-    # precedence can reorder: seed 11 is a production build where it does.
-    resumable = fp.PageSearch(generator=bilateral, **synthetic_league.build(seed=11))
-    first, _ = resumable.take(5)
-    page, report = resumable.take(30)
-    assert [identity(c) for c in page[:5]] == [identity(c) for c in first]
-    assert report.as_dict()["prefix_stable"] is True
-    resumable = fp.PageSearch(generator=candidate, **synthetic_league.build(seed=11))
+@pytest.mark.parametrize("generator", [bilateral, candidate])
+def test_takes_extend_for_both_generators(generator):
+    # Every complete take is the full solve's first n, so a later take extends
+    # an earlier one. Seed 11 is a production build where page-first-3's
+    # revision-2 re-rank reordered take(5) under take(30).
+    resumable = fp.PageSearch(generator=generator, **synthetic_league.build(seed=11))
     first, report = resumable.take(5)
     assert report.as_dict()["prefix_stable"] is True
     page, report = resumable.take(30)
-    assert [identity(c) for c in page[:5]] != [identity(c) for c in first]
-    assert report.as_dict()["prefix_stable"] is False
-    one_shot, _ = fp.first_page(k=30, generator=candidate, **synthetic_league.build(seed=11))
+    assert [identity(c) for c in page[:5]] == [identity(c) for c in first]
+    assert report.as_dict()["prefix_stable"] is True and report.as_dict()["complete"]
+    one_shot, _ = fp.first_page(k=30, generator=generator, **synthetic_league.build(seed=11))
     assert [identity(c) for c in page] == [identity(c) for c in one_shot]
 
 

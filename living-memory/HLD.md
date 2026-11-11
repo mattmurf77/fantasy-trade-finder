@@ -187,6 +187,8 @@ Value-core Gate 2 inside the app: does the plain value core grade as well as tod
 
 ---
 
+**Cold trade build, flagged branch (2026-11-10, ADR-028).** With `trade.fast_deck` on, an interactive owner-serve job builds its deck from the page-first search's proven first 150 cards instead of the full inventory, then runs the same final checks, evidence and publication. Off by default; the full solve is the fallback for every case the search does not cover.
+
 ## Living-Memory Layer (this project)
 
 ```

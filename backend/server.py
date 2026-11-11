@@ -4578,7 +4578,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 14
+DECK_PIPELINE_VERSION = 15
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4715,6 +4715,7 @@ DECK_PIPELINE_PINS = {
     12: "3b5a7de53dd0081e",  # Frozen calibration suppression input seam; organic defaults preserved.
     13: "1939e93dc5fd7de5",  # Cooperative cancellation; current-job terms/order preserved.
     14: "c35ce67a4434a981",  # Owner searches enforce every explicit give-all pin.
+    15: "42bb54b864f08679",  # ADR-028: fast deck and shadow hooks in the owner generator call (flags trade.fast_deck*, default off); flags off: same call, terms and order unchanged.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4724,6 +4725,7 @@ DECK_PIPELINE_PINS = {
 _ENGINE_CODE_MODULES = (
     # the engines and their generators
     "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
+    "trade_first_page.py", "trade_fast_deck.py",  # ADR-028: the fast deck (flag trade.fast_deck)
     "power_rankings.py",          # value_core's lineup slots and optimal starters
     "outlook/league_state.py",    # value core's standings
     "ranking_service.py", "pick_values.py", "pick_slots.py",
@@ -13292,12 +13294,52 @@ def _run_trade_job(
                     assignment_probability=1.0 if owner_exclusive else None)
             except Exception:
                 log.exception("owner context capture unavailable")
+        # ADR-028 (flags trade.fast_deck / trade.fast_deck_shadow), read once
+        # per job. Interactive jobs only: a prepared inventory, the weekly
+        # replenishment and Calibration's refresh keep the full inventory.
+        # Both off (the default) ⇒ trade_fast_deck is never imported and the
+        # generator call below is the one it always was.
+        with _trade_jobs_lock:
+            _fast_deck_scope = (not preparation
+                                and not (_trade_jobs.get(job_id) or {}).get("source"))
+        fast_deck_serve = _fast_deck_scope and is_enabled("trade.fast_deck")
+        fast_deck_shadow = (_fast_deck_scope and not fast_deck_serve
+                            and is_enabled("trade.fast_deck_shadow"))
         def _gen_owner(**_overrides):
             if owner_context is None:
                 raise ValueError("owner_context_unavailable")
             check_current()
-            cards, report = _bakeoff.owner_generator(owner_context["config"])(
-                **owner_context, _check_current=check_current)
+            _generate = _bakeoff.owner_generator(owner_context["config"])
+            _fast = None
+            if fast_deck_serve:
+                # Any failure, an unsupported request or an unproven page runs
+                # the full solve: never a partial or unattributed deck.
+                try:
+                    from . import trade_fast_deck
+                    _fast = trade_fast_deck.serve(_generate, owner_context, check=check_current)
+                except TradeWorkCancelled:
+                    raise
+                except Exception:
+                    log.exception("trade-job %s: fast deck unavailable (full solve)", job_id)
+                log.info("trade-job %s fast deck: %s", job_id,
+                         "served cards=%d" % len(_fast[0]) if _fast else "full_solve")
+            if _fast is not None:
+                cards, report = _fast
+            else:
+                _full_started = time.monotonic()
+                cards, report = _generate(**owner_context, _check_current=check_current)
+                if fast_deck_shadow:
+                    _full_ms = int((time.monotonic() - _full_started) * 1000)
+                    try:
+                        from . import trade_fast_deck
+                        log.info("trade-job %s fast-deck shadow: full_ms=%d %s", job_id, _full_ms,
+                                 json.dumps(trade_fast_deck.shadow(
+                                     cards, _generate, owner_context, check=check_current),
+                                     sort_keys=True))
+                    except TradeWorkCancelled:
+                        raise
+                    except Exception:
+                        log.exception("trade-job %s: fast-deck shadow failed (ignored)", job_id)
             check_current()
             diagnostics = report.diagnostics()
             for card in cards:

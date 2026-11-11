@@ -625,8 +625,13 @@ The random `redacted:<32 hex>` that stands in for a deleted user's partner id in
 **Page-first search** (`backend/trade_first_page.py`) returns the first k trade cards without
 building the rest of the inventory: candidates are ordered by an **admissible bound**, a cheap
 score proven never to be lower than a candidate's true `weaker_support`, verified best-first by
-the unchanged evaluator, and the search stops once no remaining bound can reach the page. A
-library only; nothing is served from it. [ADR-028](adr/adr-028-page-first-trade-search.md).
+the unchanged evaluator, and the search stops once no remaining bound can reach the page.
+[ADR-028](adr/adr-028-page-first-trade-search.md).
+
+**Fast deck** (`backend/trade_fast_deck.py`, flag `trade.fast_deck`, ships off) is a deck
+built from the page-first search's proven first 150 cards instead of the full inventory. The
+cards, order and proofs are the full engine's; the deck is shorter. **Fast-deck shadow**
+(`trade.fast_deck_shadow`) serves the full deck and logs how far the fast one agrees.
 
 ## Window evidence and dynasty roster proxy
 
