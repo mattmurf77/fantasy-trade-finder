@@ -1,3 +1,11 @@
+## 2026-11-10 — Revision-4 Calibration round (WS1b, flag `grading.revision4_round`, branch, not shipped)
+
+- Branch `feat/revision-4-round` from `feat/offer-learnings` `4c20252f`. New `backend/tests/test_calibration_revision_4_round.py`: **14 passed**: the pair (v2 + v4 on one capture, never v3, no additive arm), blind payloads, the installed app's route sequence from a finished first round into the second (and a pre-built deck appearing as Resume), explicit/unknown `round_id`, both rounds open for one pair with no crosstalk, the admin report per round (readable after rollback), **current-round completed and in-progress decks byte-identical before and after `pregenerate round_id=outlook-v2-v4-1` + drain**, the arm inert under the round, flag off = today (no extra read, `round_id` ignored, pregenerate 400, worker drains only the current round), rollback pauses unopened decks, per-round worker/leases, participant deletion.
+- Sabotages, each red then green on revert (18): `pair-v3`, `arm-not-superseded`, `arm-folds-into-r4-round`, `no-default-advance`, `advance-before-done`, `flag-ignored`, `shared-lease`, `report-single-round`, `results-relabel`, `round-key-collides`, `scrub-v3-only`, `report-flag-gated`, `rollback-ignored`, `worker-current-round-only`, `invalid-round-accepted`, `leak-round-in-view`, `save-build-by-pair`, `pregenerate-current-round`.
+- Existing calibration suites unchanged and green (WS1's `test_calibration_revision_4.py`, `test_outlook_calibration_*`, `test_blind_grading_*`, deletion scrub, flag mirror).
+- Full backend suite (Python 3.12 venv): **14,159 passed, 42 skipped, 0 failed in 16m53s**. No deck-pipeline function touched; `test_deck_pipeline_digest` green.
+- No app change (D-056: no simulator); runtime proof is the operator's TestFlight checklist in [scope §3](../docs/plans/offer-learnings/scope-revision-4-round.md). Not run. No production action.
+
 ## 2026-11-10 — Roster-first setup for Find a Trade (flag `trades.roster_setup`, dark)
 
 - Combined tree `feat/roster-first-trade-setup` (mobile `1489dc68` + backend `1583e346` merged on `origin/main` `29e7ad67`). Full `pytest backend/tests`: **13,742 passed, 43 skipped in 15:31**. `tsc --noEmit` clean, all **168** `mobile/tests/check-*.js` pass, testid-lint OK, web structure 260/260 + trade-search scenarios + instant-trade report OK.

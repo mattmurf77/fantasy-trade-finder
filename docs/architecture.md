@@ -154,9 +154,14 @@ inside bilateral-1's existing comparable set, and a demotion of uneven offers th
 other manager's most valuable asset (except picks to a rebuilding or tanking team).
 Eligibility, terms, floor and overpay gates are revision 2's. Proofs carry a `revision_4`
 block; version fencing covers evaluation, page safety signature, presentment and prepared
-payloads. The module name keeps the fast deck on the full solve. Calibration can add it as an
-additive arm (`grading.revision4_arm`) to the frozen v2/v3 round. See
-[scope](plans/offer-learnings/scope-revision-4.md).
+payloads. The module name keeps the fast deck on the full solve. Calibration grades it in a
+round of its own, `outlook-v2-v4-1` (`grading.revision4_round`): revision 2 next to revision 4
+on one frozen capture per deck, beside the v2/v3 round, offered to a pair once it has
+completed that round. `outlook_calibration.ROUNDS` lists the rounds; sessions, build leases and
+reports are keyed by round id, and one worker thread drains enabled rounds in order. The
+earlier additive arm (`grading.revision4_arm`) is superseded and inert while the round is on.
+See [scope](plans/offer-learnings/scope-revision-4.md) and
+[round scope](plans/offer-learnings/scope-revision-4-round.md).
 
 ## Independent model evaluation (offline foundation, 2026-09-22)
 

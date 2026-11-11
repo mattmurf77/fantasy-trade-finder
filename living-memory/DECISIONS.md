@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-NEXT — Revision 4 gets a Calibration round of its own, offered after the current round; the additive arm is superseded
+
+**Date:** 2026-11-10 · **Who:** operator (chose a new round over leaving opened decks out); WS1b builder (the shape below).
+**Context:** WS1's additive arm can only reach decks nobody has opened, because a deck's capture is frozen and the code revision is part of its identity. The operator wants revision-4 trades for every user and linked league, additive to the current decks.
+**Decision:** A second round, `outlook-v2-v4-1`, behind its own default-off flag `grading.revision4_round`. It reuses `CapturedComparison` and the whole round build with a different pair: revision 2 (live) as `current`, revision 4 as `value_core`, on one fresh frozen capture per deck, so the grade answers "is 4 better than what is live". No sibling class: the pair is the only difference, and reusing the build keeps the same gates, proofs, ownership checks, quota and blind order. Sessions, leases and reports are keyed by round id. The installed app is not changed: with the flag on and no `round_id`, start/current answer from the revision-4 round once the account/league has completed `outlook-v2-v3-1`; until then they behave as today. The additive arm `grading.revision4_arm` is superseded: inert while the round is on, so turning the round on can never retire or extend a current-round deck.
+**Why:** the only way to give opened and finished pairs revision-4 trades without breaking the current round's frozen as-of contract. Offering the round after completion keeps a user's half-graded current deck in front of them and needs no app release.
+**Consequences:**
+- A pair whose current-round deck is open but never finished does not see the revision-4 deck in the app until it finishes; it still gets one pre-built (operator choice to revisit, scope §6).
+- After moving to the revision-4 round, the app no longer re-shows the current round's results for that league (they stay in the admin report).
+- The current round's results screen and the revision-4 round's say the same "Today's engine" / "New engine"; the report's `model_versions` names the versions.
+- WS1's arm code stays (dark, inert under the round); deleting it is a later clean-up if the operator agrees.
+
 ## D-220 — The pass-reason cadence asks on the card, one tap, behind its own flag; its two new codes exist only while that flag is on
 
 **Date:** 2026-11-10 · **Who:** operator (R9: "present this once every few passes. Or upon a certain number of consecutive passes"); WS3 builder (the shape below).

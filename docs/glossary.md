@@ -656,7 +656,9 @@ of existing market prices, not projected points or championship probability.
 
 **Best-asset rule** — revision 4 demotes (never deletes) an uneven offer in which the other manager gives up the trade's most valuable asset for several lesser ones, unless those are all picks going to a rebuilding or tanking team.
 
-**Additive Calibration arm** — an engine folded into a Calibration round's new decks after the paired selection (today `revision_4`), credited on shared cards and never reordering or reselecting the paired cards.
+**Additive Calibration arm** — an engine folded into a Calibration round's new decks after the paired selection (today `revision_4`), credited on shared cards and never reordering or reselecting the paired cards. Superseded for revision 4 by the **Revision-4 round**; inert while that round is on.
+
+**Revision-4 round** — the Calibration round `outlook-v2-v4-1` (flag `grading.revision4_round`): owner-v2-bilateral-2 (live) next to owner-v2-bilateral-4 on one frozen capture per deck, blind, with its own decks, answers and report beside `outlook-v2-v3-1`. Offered to an account/league once it has completed `outlook-v2-v3-1`.
 
 **Calibration round** — a namespaced, frozen comparison exercise whose exact model versions, input snapshot, selected cards and first feedback remain attributable independently of earlier exercises. The outlook round collects descriptive opinions and does not validate future-production forecasts.
 
