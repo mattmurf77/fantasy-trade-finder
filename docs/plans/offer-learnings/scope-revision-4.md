@@ -58,7 +58,7 @@ operator decision on Calibration coverage (§6).
 | `living-memory/HLD.md` | updated | 2026-11-10 entry |
 | `docs/cross-client-invariants.md` | n/a because no client constant changes; results keep their two wire aliases |
 | `docs/glossary.md` | updated | Owned-pick premium, Best-asset rule, Additive Calibration arm |
-| ADR or `DECISIONS.md` | updated | ADR-029 + `D-219` |
+| ADR or `DECISIONS.md` | updated | ADR-029 + `D-220` |
 | `docs/config-reference.md` | updated | selector paragraph + flag row |
 | `docs/data-dictionary.md` | updated | grading_sessions JSON note |
 

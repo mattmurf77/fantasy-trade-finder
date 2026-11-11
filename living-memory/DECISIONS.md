@@ -1,6 +1,6 @@
 # Decisions — Fantasy Trade Finder
 
-## D-220 — The pass-reason cadence asks on the card, one tap, behind its own flag; its two new codes exist only while that flag is on
+## D-221 — The pass-reason cadence asks on the card, one tap, behind its own flag; its two new codes exist only while that flag is on
 
 **Date:** 2026-11-10 · **Who:** operator (R9: "present this once every few passes. Or upon a certain number of consecutive passes"); WS3 builder (the shape below).
 **Context:** `feedback.decline_reasons` put three tiles and a second layer on every pass; the operator turned it off on 2026-10-02 because it was tedious. Offer learnings still want the reasons. Two shapes were possible: a sheet after the Nth pass about the card just passed, or the chips on the card itself.
@@ -11,14 +11,14 @@
 - "Don't rate what I'd get" is mapped to `other_player_avoid` (no Elo). If the operator reads it as a price claim, it would move to `value_giving`; that is a one-line change to the chip table.
 - The cadence state is per deck-screen mount, in memory.
 
-## D-219 — Engine revision 4 reorders only, through support scores; Calibration gets it as an additive arm
+## D-220 — Engine revision 4 reorders only, through support scores; Calibration gets it as an additive arm
 
 **Date:** 2026-11-10 · **Who:** WS1 builder, from the operator's offer-learnings comments (R1, R4, R5, R6).
 **Decision:** `owner-v2-bilateral-4` builds on revision 2 and wins over the v3 selector. Its owned-pick premium (by the other team's outlook: 20% rebuilder/tanking, 10% not sure, 0 contender), pay-picks tie-breaker and best-asset demotion act on support scores only, so eligibility and terms equal revision 2's. Calibration folds it into new `outlook-v2-v3-1` builds behind `grading.revision4_arm` without touching the paired v2/v3 cards.
 **Why:** grade before turning anything on, without disturbing the running v2/v3 comparison; a demotion presentment cannot undo.
 **Consequences:** exposed or completed Calibration decks get no revision-4 cards (open operator choice). [ADR-029](../docs/adr/adr-029-bilateral-revision-4.md), [scope](../docs/plans/offer-learnings/scope-revision-4.md).
 
-## D-218 — Fit-first card lines: the other team's line is built from public facts only
+## D-219 — Fit-first card lines: the other team's line is built from public facts only
 
 **Date:** 2026-11-10 · **Who:** WS4 builder, under the operator's "the fit evaluation and description needs to be solid" (offer-learnings plan §1, R11).
 **Context:** The bilateral proof holds both teams' plan, depth and benefit evidence. The counterparty's `benefits` (and in revision 2 their plan score) use their private board, and their outlook may be one they declared in the app, which no league-mate can see. A line built from those would advertise private data, the same reason the breaker keeps `other_player_keep` dark.
@@ -28,7 +28,7 @@
 - The engine's roster read can differ from Team Review's partners beat, which uses extra signals (pick share, firsts, odds); the line says "rebuild-leaning roster", a roster read, not a stated plan.
 - The thresholds are constants pinned by test, not knobs.
 
-## D-217 — The next move is one evaluator-proven revision, a pure function behind `trade.next_move`, with no route yet
+## D-218 — The next move is one evaluator-proven revision, a pure function behind `trade.next_move`, with no route yet
 
 **Date:** 2026-11-10 · **Who:** WS5 builder, under the operator's R2 ruling ("Mock it up, build it, control it via its own dedicated capability flag").
 **Context:** The offer history shows deals are negotiated (first offers accepted 8%, three-offer threads 39%; counters move about 20 points of the trade's value), and the operator fears a next move invites haggling. The plan asked for one bounded revision proven by the same evaluator as any card.
@@ -39,7 +39,7 @@
 - At the engine's package pricing a small filler is worth little, so a qualifying step is a real asset or a removed ask, not a throw-in.
 - The app UI, the trigger (decline vs 48 h silence, which needs WS2's outcome tracking) and the treatment are the operator's call from `mockups/next-move/`.
 
-## D-216 — Sent-trade outcomes record only what the public API shows; the Sleeper offer import stops at the missing read
+## D-217 — Sent-trade outcomes record only what the public API shows; the Sleeper offer import stops at the missing read
 
 **Date:** 2026-11-10 · **Who:** WS2 builder, under the operator's R3 decision ("Yes. Ideally pulling from the users' sleeper account as well (with explicit user permission and a line in the Ts & Cs).") and the WS2 rule "if Part B needs an endpoint or credential the app does not hold today, stop and report".
 **Context:** R3 asks for accepted / declined / countered / withdrawn / expired per sent trade, plus a consented import of the user's own Sleeper offers. The app sends through Sleeper's private `propose_trade` and keeps the returned `transaction_id`, but its only read of trade state is the public `transactions/{leg}` list, which shows completed trades only (`docs/plans/sleeper-pending-trades-feasibility-2026-08-12.md`). The private `league_transactions_filtered` read is known only from a public schema dump: never captured, not in `sleeper_write.py`, and its status words for rejected / withdrawn / expired are unknown.
@@ -50,7 +50,7 @@
 - Part B, and declined/withdrawn/expired for Part A, need the operator to accept a new read on the private GraphQL surface and a live capture of it. The consent model and Terms line are drafted in the scope block; `web/terms.html` is unchanged.
 - ESPN and MFL sends are not tracked; MFL's documented `pendingTrades` export is the obvious next seam.
 
-## D-215 — The fast deck is one pass over a bounded deck, not a page followed by the inventory
+## D-216 — The fast deck is one pass over a bounded deck, not a page followed by the inventory
 
 **Date:** 2026-11-10 · **Who:** operator ("make the necessary pushes and code changes to enable the fast trade suggestions"); coordinating session.
 **Context:** The worker's path from generation to publication is one long pass whose final checks have side effects: exposure events, suppression grants, one candidate set and one evidence seal per job, and a publication assert that the published prefix is the head of the finished inventory. Running it once for a page and again for the inventory is not safe without changing those contracts.
@@ -61,14 +61,14 @@
 - Appending the inventory behind the page is still open; the existing deck paging with `rebased` is the likely route.
 - Page and full solve are compared inside one process only: the full engine's output varies between processes.
 
-## D-214 — The first page of trades is found by bound-verify-stop, not by speeding up the full solve
+## D-215 — The first page of trades is found by bound-verify-stop, not by speeding up the full solve
 
 **Date:** 2026-11-10 · **Who:** operator (asked for near-real-time construction without pre-generation, then a 3× per-process gain); coordinating session with Opus subagents.
 **Context:** A cold owner-bilateral search evaluates about 45,000 candidates and ranks about 3,900 survivors before any card shows (3–4 s of construction locally). An exact, byte-identical fast kernel for that full solve was built first and measured 1.15–1.18× with about 75% more peak memory: the work left is unique per candidate.
 **Decision:** `backend/trade_first_page.py` orders candidates by an admissible upper bound on `weaker_support`, verifies best-first with the unchanged evaluator, and stops once k + 31 eligible cards beat every remaining bound (the ranker's lookahead). Repeated work is memoised by content, never by league or user, and only returned cards are serialised. The fast kernel was dropped. [ADR-028](../docs/adr/adr-028-page-first-trade-search.md).
 **Consequences:**
 - Synthetic league, bilateral-1: first 30 cards in 44–45 ms once a league has been seen. Revision 2 is exact only with family completion (each page card's cheaper same-family alternatives are evaluated too), which costs more: 70–130 ms synthetic, about 0.28 s on recorded production requests.
-- Served only through the fast deck (D-215). Publishing a page and then appending the inventory (recommendation R3) changes the owner publication contract and needs its own scope.
+- Served only through the fast deck (D-216). Publishing a page and then appending the inventory (recommendation R3) changes the owner publication contract and needs its own scope.
 - A change to `trade_service` market package pricing must re-run `test_trade_first_page.py`: the pre-pricing bound is proved from that code's current shape.
 - No NumPy: a measured 10% was not worth a new runtime dependency and a second copy of the bound arithmetic.
 

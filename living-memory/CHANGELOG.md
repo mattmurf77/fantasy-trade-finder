@@ -14,7 +14,7 @@
 
 ## 2026-11-10 — Fast deck built behind flags (off); page-first search exact for revision 2; real-league replay
 
-- `trade_first_page.py` (ADR-028, D-214) returns the proven first k cards of an owner-bilateral search without building the inventory; now exact for revision 2 too. `trade_fast_deck.py` (D-215) wires it into `_run_trade_job`: `trade.fast_deck` serves the first 150 cards as an interactive cold build's deck; `trade.fast_deck_shadow` serves the full deck and logs a comparison. **Both ship off.** Deck pipeline 15 → 16.
+- `trade_first_page.py` (ADR-028, D-215) returns the proven first k cards of an owner-bilateral search without building the inventory; now exact for revision 2 too. `trade_fast_deck.py` (D-216) wires it into `_run_trade_job`: `trade.fast_deck` serves the first 150 cards as an interactive cold build's deck; `trade.fast_deck_shadow` serves the full deck and logs a comparison. **Both ship off.** Deck pipeline 15 → 16.
 - Replay of all 247 recorded production requests (13 leagues): the fast deck matched the full solve on every one, at about 0.55 s against 5.9 s. Not 200 ms under revision 2. The full engine's own output varies between processes.
 - Also: acceptance evaluation (neither head estimable), 612 Sleeper offers analysed, fast kernel dropped (1.15–1.18×).
 - Branch `feat/trade-engine-rearch`, unmerged. [Scope](../docs/plans/realtime-trade-engine/scope.md) · [real leagues](../docs/plans/realtime-trade-engine/real-leagues.md).

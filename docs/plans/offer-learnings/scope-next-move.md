@@ -68,7 +68,7 @@ treatment from the mockup first.
 | `living-memory/HLD.md` | n/a | Same |
 | `docs/cross-client-invariants.md` | n/a | No value shared between clients |
 | `docs/glossary.md` | updated | "Next move" entry |
-| ADR or `DECISIONS.md` entry | updated | `D-217` — the revision rule and the no-route surface |
+| ADR or `DECISIONS.md` entry | updated | `D-218` — the revision rule and the no-route surface |
 | `docs/config-reference.md` | updated | `trade.next_move` row |
 | `mockups/CLAUDE.md` | updated | Index row for `next-move/` |
 

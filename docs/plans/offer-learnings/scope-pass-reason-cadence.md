@@ -140,7 +140,7 @@ to `PASS_REASON_ELO_KEEP`, so they suppress by construction.
 | `living-memory/HLD.md` | n/a because | no architectural shift |
 | `docs/cross-client-invariants.md` | updated | decline-reason codes (two added) |
 | `docs/glossary.md` | n/a because | "pass reason" / "decline reason" already defined; cadence is described in config-reference |
-| `DECISIONS.md` | updated | `D-220` — cadence as a prompt-on-the-card, not a post-pass sheet; new codes gated to the flag |
+| `DECISIONS.md` | updated | `D-221` — cadence as a prompt-on-the-card, not a post-pass sheet; new codes gated to the flag |
 
 ## 5. Ship gate declaration
 

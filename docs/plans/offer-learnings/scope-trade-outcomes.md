@@ -160,7 +160,7 @@ Part B.
 | `docs/data-dictionary.md` | updated | `trade_offer_outcomes` |
 | `docs/config-reference.md` | updated | `trade.outcome_tracking` |
 | `docs/integrations/sleeper.md` | updated | §5.2: the daily tick can now run the existing `transactions/{leg}` capture for leagues with open offers |
-| ADR or `DECISIONS.md` entry | `D-216` | record observed statuses only; Part B stopped |
+| ADR or `DECISIONS.md` entry | `D-217` | record observed statuses only; Part B stopped |
 
 ## 5. Ship gate declaration
 

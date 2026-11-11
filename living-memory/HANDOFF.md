@@ -32,11 +32,11 @@
 ## Unmerged 2026-11-10: page-first trade search
 
 - **Where:** branch `feat/trade-engine-rearch` on top of `main`. Worktree `.claude/worktrees/trade-engine-rearch`.
-- **What:** `backend/trade_first_page.py` (ADR-028, D-214), the fast deck `backend/trade_fast_deck.py` with its hook in `_run_trade_job` (D-215, flags `trade.fast_deck` and `trade.fast_deck_shadow`, both off), eval tooling, and `docs/plans/realtime-trade-engine/`.
+- **What:** `backend/trade_first_page.py` (ADR-028, D-215), the fast deck `backend/trade_fast_deck.py` with its hook in `_run_trade_job` (D-216, flags `trade.fast_deck` and `trade.fast_deck_shadow`, both off), eval tooling, and `docs/plans/realtime-trade-engine/`.
 - **Do not merge without the operator's word.** The backend changed (deck pipeline 15 → 16), so merging deploys to Render, rebuilds stored first pages once, replaces the frozen `b1440b7b` candidate the Nov 10 check and the iPhone timing runs are tied to, and is a MOD-M1 re-run trigger. models-eng review of the bump is owed.
 - **Done:** code review of the search and its revision-2 exactness; 172 + 27 + 3 + 16 targeted tests; replay of 247 recorded production requests (all match).
 - **Next:** after merge, shadow for a day, then the serve flag and the TestFlight checklist in the scope block; then NEXT.md's 2026-11-10 section.
-- **Numbering:** roster-first setup (#637) merged first with D-212, D-213 and pipeline 15, so this branch is D-214, D-215 and pipeline 16. PR #635 (manager profiles) still uses D-212 and must renumber.
+- **Numbering:** roster-first setup (#637) merged first with D-212, D-213 and pipeline 15, so this branch is D-215, D-216 and pipeline 16. PR #635 (manager profiles) still uses D-212 and must renumber.
 - **Local only, never commit:** `data/sleeper-export/` (the operator's Sleeper inbox export and offer-analysis scripts) and `data/prod-requests/` (recorded production requests and replay results), both in the main checkout.
 - **Related sessions, separate branches:** roster-first setup (`feat/roster-setup-backend`, `feat/roster-setup-mobile`) and manager profiles (PR #635). Neither is reviewed here.
 
