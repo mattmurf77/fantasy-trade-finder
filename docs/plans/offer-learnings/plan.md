@@ -22,7 +22,7 @@ evidence in TEST_LEDGER.
 | R11 Lead card copy with fit | "I'm aligned. But the fit evaluation and description needs to be solid." | Build. WS4 |
 | R9 Capture the decline reason | "Build it, but it breaks my goal of a quick and seamless UI. I think we present this once every few passes. Or upon a certain number of consecutive passes." | Build as a cadence on the existing pass-reason prompt. WS3 |
 | R3 Record outcomes of sent trades | "Yes. Ideally pulling from the users' sleeper account as well (with explicit user permission and a line in the Ts & Cs)." | Build both parts. WS2 |
-| R2 Show the next move | "Mock it up, build it, control it via its own dedicated capability flag (I'm skeptical with this one, I think it has the risk to just invite haggling and ruin the value prop)." | Mockup and backend now; app UI after the operator has seen the mockup. Own flag. WS5 |
+| R2 Show the next move | "Mock it up, build it, control it via its own dedicated capability flag (I'm skeptical with this one, I think it has the risk to just invite haggling and ruin the value prop)." | Mockup and backend now (WS5). **Operator chose treatment A on 2026-11-10, with a twist: WS8** |
 | R8 Score how willing each manager is to trade | "Yes, but controlled via a capability flag. And it should more so be a league specific threshold that's evaluated. If all managers are active in trading, it shouldn't get applied at all." | Build after manager profiles (PR #635) lands, relative to the league. WS7 |
 | R10 Nudge after silence | "Need more definition… the nudge should just be to send the trade on the platform… wondering if the initial offers should just push directly to Sleeper… or at least give users an easy 'summary' page to quickly decide which offers they liked get sent into Sleeper… all offers go to DMs by default with an invitation/copy to the app 'This trade was built in Fleeced'." | Definition document only. WS6 |
 | R10 Re-surface on events | "Not for now." | Not built |
@@ -225,6 +225,52 @@ manager is down-weighted as a partner only when they trade clearly less than the
 league-mates, and nothing is applied in a league where everyone trades. Spec to be written
 against #635's schema when it lands.
 
+### WS8 — Revised-offer cards for declined offers (R2, treatment A plus the operator's twist)
+
+**Starts after WS2 (outcomes) and WS5 (revision generator) are integrated.** Branch
+`feat/revised-offer-cards`. Behind `trade.next_move` (off).
+
+The operator, after seeing the WS5 mockup: "I like version A, with an added twist: We should
+absolutely factor in platform (Sleeper, ESPN) specific data / trade proposals. If we see they
+suggested a trade that was declined (where user is the sender), we should be generating a
+counter card with slightly more value and give content that explains that we saw this and
+have another idea. These cards should hold high in priority ranking for display too. It's
+acceptable if these cards need to be generated via a batch or a different mechanism (but
+that's not my ideal path, just a fallback depending on complexity)."
+
+**What.**
+1. **Trigger.** A trade the user sent that the platform shows as declined: sent through the
+   app (WS2 Part A) or, where the user has opted in, sent in Sleeper directly (WS2 Part B).
+   ESPN is included to the extent WS2 can observe a declined proposal there; if it cannot,
+   say so and ship Sleeper first. Nothing is shown for an offer that is still pending.
+2. **The card.** One revised offer per declined offer, from WS5's generator: it keeps the
+   offer's core assets and gives the other manager slightly more. Starting value for
+   "slightly": the low end of WS5's range, about 10% of the trade's market value. It is
+   proven by the same evaluator as any other card, or it is not shown.
+3. **The copy.** The card says plainly that the earlier offer was declined and what changed,
+   for example "Your offer for <player> was declined. Another idea: add <asset>." It states
+   only what the platform showed; it does not guess why the offer was declined.
+4. **Priority.** These cards lead the deck, ahead of ordinary suggestions, in the way
+   likes-you cards are placed today. Starting cap: three per deck, most recent decline first,
+   so they never crowd out the deck.
+5. **Mechanism.** Preferred: built with the deck when the user opens Find a Trade, so a card
+   appears as soon as a decline is known. Fallback, only if the inline path proves too
+   costly or fragile: a batch that prepares them after each outcome sync.
+
+**Constraints.**
+- A revised-offer card is shown once per declined offer. Passing it retires it; it is not
+  regenerated with a still-higher price (this is what keeps treatment A from inviting
+  haggling).
+- Only the sender sees it. The other manager's decline is never shown to anyone else.
+- An offer declined with a counter from the other manager is not answered with our own
+  revision; the counter is the next move.
+- Evidence and impressions follow the deck's existing contracts; the card is attributable as
+  a revised offer in its frozen features.
+
+**Acceptance.** Tests for each trigger source and for no card on pending, accepted, expired
+or countered offers; once-only after a pass; cap and ordering; flag off adds nothing to the
+deck or the payload; a TestFlight checklist.
+
 ## 4. R7, answered
 
 The comment: a better first offer contradicts the counter finding, and narrows the good
@@ -246,4 +292,4 @@ supports best, which is picks.
 2. WS4, WS3, WS2, WS1, WS5 as each passes review, rebased in that order; one deck-pipeline
    bump for the integrated tree; decision numbers assigned then.
 3. Full backend suite, mobile type-check and check suites, CI, then `main`.
-4. WS7 after PR #635.
+4. WS8 after WS2 and WS5 are integrated; WS7 after PR #635.
