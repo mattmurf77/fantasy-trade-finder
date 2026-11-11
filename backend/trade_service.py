@@ -1186,6 +1186,12 @@ _DEFAULT_CFG: dict[str, float] = {
     "owner_bilateral_revision_enabled": 0.0,
     "owner_outlook_evidence_enabled": 0.0,
     "owner_bilateral_revision_4_enabled": 0.0,
+    # Win-now season signal (docs/plans/win-now-season-signal/lld.md §6): exactly 1
+    # selects revision 5 (owner-v2-bilateral-5) inside revision serving; the
+    # demotion and stage-2 knobs are read by revision 5 only.
+    "owner_bilateral_revision_5_enabled": 0.0,
+    "season_conflict_demotion":   0.10,
+    "season_partner_matching":    0.0,
     # Owner arm only, computational limits (not pricing permissions).
     "owner_pool_size":           16.0,
     "owner_pair_budget":         4096.0,

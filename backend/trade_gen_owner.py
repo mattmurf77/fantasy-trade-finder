@@ -207,6 +207,11 @@ class _Search:
         # Only exactly 1 selects revision 4 (bakeoff_runner); any other value is today.
         if self.config.get("owner_bilateral_revision_4_enabled") != 1.0:
             self.config.pop("owner_bilateral_revision_4_enabled", None)
+        # Same for revision 5; its two season knobs travel only with it selected.
+        if self.config.get("owner_bilateral_revision_5_enabled") != 1.0:
+            for key in ("owner_bilateral_revision_5_enabled", "season_conflict_demotion",
+                        "season_partner_matching"):
+                self.config.pop(key, None)
         self.pool_size = self._limit("owner_pool_size", 4, 32)
         self.pair_budget = self._limit("owner_pair_budget", 1, 16384)
         self.total_budget = self._limit("owner_total_budget", 1, 120000)
