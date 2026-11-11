@@ -1,6 +1,6 @@
 # Manager revealed-preference profiles — design
 
-**Date:** 2026-11-10 · **Status:** built; flag `market.manager_profiles` on in `config/features.json` (operator, 2026-11-10), code default off; capture only, no consumer
+**Date:** 2026-11-10 · **Status:** shipped (#635, `9b14c47b`); flag `market.manager_profiles` on in `config/features.json` (operator, 2026-11-10), code default off; capture only, no consumer
 **Scope block:** [scope.md](scope.md)
 
 ## Open questions for the operator

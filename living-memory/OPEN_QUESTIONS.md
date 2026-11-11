@@ -7,6 +7,7 @@
 ---
 
 ## Table of Contents
+- [2026-11-10 — Open Items (manager profiles)](#2026-11-10--open-items-manager-profiles)
 - [2026-09-04 — Open Items (personal-market policy)](#2026-09-04--open-items-personal-market-policy)
 - [2026-09-02 — Open Items (#413 Sleeper pick send)](#2026-09-02--open-items-413-sleeper-pick-send)
 - [2026-09-01 — Open Items (trade-suggestion quality, dual-agent review)](#2026-09-01--open-items-trade-suggestion-quality-dual-agent-review)
@@ -28,6 +29,14 @@
 - [Conventions](#conventions)
 
 ---
+
+## 2026-11-10 — Open Items (manager profiles)
+
+### Q-040 — May we keep behavioral profiles of league-mates who never signed up, and should a deleted account's profile stay deleted?
+- **Why it matters:** `market.manager_profiles` is on in production since #635. Every Sleeper league sync rebuilds one `manager_profiles` row per roster owner (trade style, FAAB bids, position/age mix) from public league history, including people with no account. The privacy page does not say we derive these summaries. Account deletion removes the user's rows, and their own session can no longer rebuild them (users-row lock), but **any league-mate's next sync rebuilds a deleted account's profile** from public data.
+- **Options:** (a) accept and add a line to the privacy page; (b) also keep a deleted-account tombstone that `build_league_profiles` skips; (c) only profile managers who have an account.
+- **Action to unblock:** operator decision; the operator deferred it on 2026-11-10 when merging #635. Design open question 1 in [design.md](../docs/plans/manager-profiles/design.md).
+- **Owner:** operator · **Asked:** 2026-11-10 · **Related:** [D-214](DECISIONS.md)
 
 ## 2026-09-04 — Open Items (personal-market policy)
 

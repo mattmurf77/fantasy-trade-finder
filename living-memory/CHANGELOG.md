@@ -19,6 +19,12 @@
 - Also: acceptance evaluation (neither head estimable), 612 Sleeper offers analysed, fast kernel dropped (1.15–1.18×).
 - Branch `feat/trade-engine-rearch`, unmerged. [Scope](../docs/plans/realtime-trade-engine/scope.md) · [real leagues](../docs/plans/realtime-trade-engine/real-leagues.md).
 
+## 2026-11-10 — Manager profiles live in production (#635, flag on)
+
+- #635 merged as `9b14c47b`, all four CI checks green, full suite 13,741 passed. `market.manager_profiles` is **on** in `config/features.json` (operator's call; `FTF_FLAGS` does not pin it). Each Sleeper league's session-init sync now keeps waiver / free-agent rows (`sleeper_waiver_moves`) and rebuilds one `manager_profiles` row per roster owner. Cost: one 18-leg transactions backfill per league, once. No consumer reads a profile yet.
+- Turning the flag on exposed a bug, fixed before merge: the caller's own profile was rebuilt after a mid-daemon account deletion. The write now holds the caller's users-row lock (D-214).
+- Privacy question deferred by the operator: [Q-040](OPEN_QUESTIONS.md). [Design](../docs/plans/manager-profiles/design.md)
+
 ## 2026-11-10 — Roster-first setup for Find a Trade merged dark (#637, deck pipeline 15)
 
 - #637 merged as `9c252819` (2026-11-11T01:52Z), all four CI checks green. The flag `trades.roster_setup` is **false**. With it on: the first passed Find a Trade card in a league pushes a "Your roster" screen with Move / — / Keep per player and owned pick, an optional per-position ordering, and one deck regen. Move is the new `asset_preferences` list `trade_block` (D-212); Keep is `untouchable` (D-213). Owner-v1 and bilateral read `trade_block` on the give side, but only with the flag on.
