@@ -61,11 +61,11 @@ FLAG = "trade.sleeper_offer_import"
 PROVIDER = "sleeper"
 SOURCE_APP = "app"
 SOURCE_IMPORT = "sleeper_import"
-# The draft Terms line the switch shows (scope block §0). A new wording is a
-# new version, and a grant at an older version is not consent.
-TERMS_VERSION = "offer-import-draft-1"
-# Settings copy, served so the wording can change with the version (drafts
-# for the operator; web/terms.html is not changed).
+# The Terms wording the switch stands on (web/terms.html §6 "Trade outcomes",
+# approved by the operator 2026-11-10). A new wording is a new version, and a
+# grant at an older version is not consent.
+TERMS_VERSION = "offer-import-1"
+# Settings copy, served so the wording can change with the version.
 SWITCH_LABEL = "Use my Sleeper trade offers to improve suggestions"
 TERMS_LINE = ("We read the trade offers you send and receive on Sleeper in your linked "
               "leagues, and what happened to each. Never your messages or chats. Turn "

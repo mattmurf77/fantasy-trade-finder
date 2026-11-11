@@ -271,5 +271,5 @@
   "trade.next_move": true,
   "trade.fit_first_copy": true,
   "trade.partner_activity": false,
-  "trade.sleeper_offer_import": false
+  "trade.sleeper_offer_import": true
 }

@@ -124,13 +124,17 @@ another's offer.
    sent through the app as much as for the import. A user who has not opted in keeps WS2's
    public-data outcomes (accepted, completed on different terms) and gets no revised-offer cards.
 2. **Counter terms** are therefore stored only for consenting users.
-3. **The Terms line** (below) is a draft; `web/terms.html` is unchanged. The switch shows its own
-   short version, served by the backend (`sleeper_offer_read.TERMS_LINE`).
+3. **The Terms line** (below) was approved by the operator on 2026-11-10 ("New wording approved")
+   and is published verbatim in `web/terms.html` §6, with matching lines in `web/privacy.html`
+   (§1, §3, §4, §5, §6); both pages' effective date moved to November 10, 2026 and the consent
+   version became `offer-import-1`. The switch shows its own short version, served by the backend
+   (`sleeper_offer_read.TERMS_LINE`). The published line says the read also covers trades sent from
+   the app; the app is stricter than that and reads nothing until the switch is on (decision 1).
 4. **WS2's unique key changed** to include `user_id`. WS2 is not on `main`, so no production table
    has the old constraint; a local DB created from the integrated branch before this commit keeps the
    old one (re-create it, or two consenting managers of one league collide on import).
 
-### 0.7 Draft Terms line (for operator approval; NOT applied to `web/terms.html`)
+### 0.7 Terms line (approved 2026-11-10; published in `web/terms.html` §6)
 
 > **Trade outcomes.** When you send a trade from the app, we record what happens to it in your
 > league, for example whether it was accepted or declined, to improve the trades we suggest. To do
@@ -223,7 +227,7 @@ with this commit. Sign in, Settings › Leagues shows Send in Sleeper connected.
 | `living-memory/LLD.md` | n/a | no convention shift (same leaf-module + flag pattern as WS2) |
 | `living-memory/HLD.md` | n/a | no new client or major flow; one read behind existing triggers |
 | `docs/cross-client-invariants.md` | n/a | no client reads the status vocabulary |
-| `web/terms.html` | n/a on purpose | Terms line is a draft (§0.7) |
+| `web/terms.html`, `web/privacy.html` | updated | §0.7's line, approved 2026-11-10; privacy §1, §3, §4, §5, §6 |
 | `DECISIONS.md` | updated | `D-225` — the private read, its throttle and consent |
 
 ## 5. Ship gate declaration
