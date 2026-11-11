@@ -1273,6 +1273,12 @@ FLAG_KEYS: tuple[str, ...] = (
     # PERSISTENCE IS DELIBERATELY NOT GATED (the #360 rule): GET/POST
     # /api/league/asset-prefs always return and accept `trade_block`.
     "trades.roster_setup",
+    # Roster setup Step 2 as one-page tier placement — 2026-11-11
+    # (docs/plans/roster-first-trade-setup/scope-tier-rank.md). Read ONLY by
+    # mobile, inside the already-gated RosterSetupScreen: ON ⇒ Step 2 is the
+    # tier page; OFF ⇒ the per-position rank step. The server's
+    # `/api/tiers/save` scope:'roster' branch is deliberately UNGATED (§1.8).
+    "trades.roster_tier_rank",
     # docs/plans/blind-grading/ — Calibration tab + /api/grading/*; ships false, reaches testers only via the calibration_rollout overlay
     "grading.blind",
     "grading.outlook_round",

@@ -1931,8 +1931,19 @@ class RankingService:
         scope_pids: set[str],
         scoring_format: str = "1qb_ppr",
         cleared_pids: Optional[list[str]] = None,
+        empty_band_edge: bool = False,
     ) -> dict[str, list[str]]:
         """Scoped tier save — the merged-band rule (rookie-draft plan D2/D3).
+
+        `empty_band_edge` (roster setup only, scope-tier-rank.md operator
+        decision 6 "at the edge"): when a band has NO incumbents, the merged
+        list is `[moved down…] + [EDGE] + [moved up…]`, where EDGE is one
+        phantom slot that takes a value but is never written. "Moved down" =
+        current value above the band ceiling; everyone else counts as moved
+        up. Each group keeps its submitted order. So a lone up-mover lands on
+        the floor, a lone down-mover on the ceiling, and several stack from
+        that edge inward with the usual linear step. Off (every other
+        caller): unchanged — a lone pid in an empty band gets the ceiling.
 
         `apply_tiers` above is deliberately NOT modified: the unscoped lane
         stays byte-identical (D4), and this is the only lane that knows about
@@ -1990,6 +2001,7 @@ class RankingService:
 
         merged_orders: dict[str, list[str]] = {}
         _SLOT = ("SCOPED_SLOT",)
+        _EDGE = ("EMPTY_BAND_EDGE",)
 
         for tier_name, submitted in tiers.items():
             band = bands.get(tier_name)
@@ -2033,6 +2045,12 @@ class RankingService:
             it = iter(scoped)
             merged = [next(it) if s is _SLOT else s for s in merged]
 
+            # Roster scope, band empty at this position: anchor at the edge
+            # the player came in from (see `empty_band_edge` above).
+            if empty_band_edge and not incumbents:
+                merged = ([p for p in scoped if value_of(p) > hi] + [_EDGE]
+                          + [p for p in scoped if value_of(p) <= hi])
+
             # 5. SPREAD over the FULL merged list. `len(merged)`, NOT
             #    `len(scoped)` — see the naive-spread trap in the docstring.
             #    Arithmetic identical to apply_tiers.
@@ -2044,7 +2062,7 @@ class RankingService:
                 if pid in scope_pids:
                     self._pin(pid, v, now)
 
-            merged_orders[tier_name] = merged
+            merged_orders[tier_name] = [p for p in merged if p is not _EDGE]
 
         self._version += 1
         return merged_orders

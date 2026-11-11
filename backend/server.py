@@ -17672,10 +17672,15 @@ def save_tiers_route():
     # M2 — a SCOPED save writes only part of the board. Read behind the flag,
     # so an old-flag-off server ignores the key entirely.
     scope = body.get("scope") if is_enabled("ranks.rookie_subset") else None
+    # Roster setup Step 2 (D-233): the posted ids ARE the scope. Read UNGATED —
+    # a flag-off server falling through to apply_tiers would pin a lone moved
+    # player at the band ceiling (scope-tier-rank.md §1.8).
+    if body.get("scope") == "roster":
+        scope = "roster"
 
     try:
         with service._lock:
-            if scope == "rookie":
+            if scope in ("rookie", "roster"):
                 # `tier_overrides` is a wholesale-overwritten blob with no
                 # history, and this is the first feature that writes a PARTIAL
                 # board. Snapshot BEFORE any mutation — idempotent, so this costs
@@ -17690,9 +17695,13 @@ def save_tiers_route():
                 service.apply_tiers_subset(
                     position=position,
                     tiers=tiers,
-                    scope_pids=_rookie_scope_ids(sess),
+                    scope_pids=(_rookie_scope_ids(sess) if scope == "rookie" else
+                                {str(p) for ids in tiers.values()
+                                 if isinstance(ids, list) for p in ids}
+                                | set(cleared_pids)),
                     scoring_format=fmt,
                     cleared_pids=cleared_pids,
+                    empty_band_edge=(scope == "roster"),
                 )
             else:
                 # apply_tiers assigns ELOs inside each tier's band (see
@@ -17759,7 +17768,7 @@ def save_tiers_route():
         # position. One line, four downstream surfaces: LeagueScreen's ranked
         # count, quicksetProgress's cache, the web celebration, and #244
         # launch routing.
-        if scope == "rookie":
+        if scope in ("rookie", "roster"):
             saved = get_tiers_saved(g_user_id, scoring_format=fmt)   # READ only
         else:
             saved = save_tiers_position(g_user_id, position, scoring_format=fmt)
@@ -17777,7 +17786,8 @@ def save_tiers_route():
         # replaced — an unrecognised via still falls back to "tiers".
         via = (body.get("via")
                if body.get("via") in ("tiers", "quickset", "rookie_tiers",
-                                      "rookie_quickset", "rookie_anchors")
+                                      "rookie_quickset", "rookie_anchors",
+                                      "roster_setup")
                else "tiers")
 
         # P0-1: a COMPLETENESS-marking save is the one that should own the
@@ -17788,7 +17798,7 @@ def save_tiers_route():
         # upgrade (hld.md S-01): 'anchor' can never satisfy any unlock
         # branch, so letting it shadow a finished Quick Set board would be a
         # NEW failure created by this fix.
-        if scope != "rookie" and via in ("tiers", "quickset"):
+        if scope not in ("rookie", "roster") and via in ("tiers", "quickset"):
             _note_ranking_method(sess, via, allow_over=("anchor",))
 
         try:

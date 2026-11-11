@@ -451,6 +451,12 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     "roster_setup_shown", "roster_setup_toggles_done",
     "roster_setup_rank_saved", "roster_setup_completed",
     "roster_setup_skipped", "roster_setup_prompt_tapped",
+    # Step 2 as one-page tier placement (flag `trades.roster_tier_rank`,
+    # 2026-11-11, docs/plans/roster-first-trade-setup/scope-tier-rank.md §1.7).
+    # Fires once when every per-position save from one Save tap succeeded with
+    # >=1 moved player. INTENT (a deliberate board write), so it is NOT in
+    # analytics_queries.NON_INTENT_EVENTS.
+    "roster_setup_tiers_saved",
     # ── Team overhaul (flag `overhaul.enabled`, BUILD-CONTRACT §2) ────────
     # Registered in the SAME commit as the mobile emitters. All four are
     # deliberate user actions (start a plan, pick a roadmap, confirm a send
@@ -1762,7 +1768,8 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #   entry   ∈ first_pass | roster_changed | manual_dna | entry_card
     #             (first_pass = the automatic entry, pushed on the user's
     #             first declined Find a Trade suggestion in a league)
-    #   stage   ∈ toggles | rank
+    #   stage   ∈ toggles | rank | tiers   (`tiers` = the one-page tier
+    #             placement step, flag `trades.roster_tier_rank`, 2026-11-11)
     #   surface ∈ entry_card | roster_changed_card | dna_row
     # `position` on roster_setup_rank_saved is a CORE POSITION
     # (QB|RB|WR|TE) — the roster position being ranked, NOT a device
@@ -1779,6 +1786,12 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                              "changed", "duration_ms"}),
     "roster_setup_skipped":       frozenset({"league_id", "entry", "stage"}),
     "roster_setup_prompt_tapped": frozenset({"league_id", "surface", "new_asset_count"}),
+    # scope-tier-rank.md §4: counts only. moved_up/down are relative to the
+    # pre-fill tier; positions_saved = the number of per-position saves (0-4).
+    "roster_setup_tiers_saved":   frozenset({"league_id", "entry", "moved_count",
+                                             "moved_up_count", "moved_down_count",
+                                             "players_total", "positions_saved",
+                                             "duration_ms"}),
     # Team overhaul (BUILD-CONTRACT §2): ids, counts and enums only.
     "overhaul_started":            frozenset({"league_id", "outlook", "entry"}),
     "overhaul_roadmap_selected":   frozenset({"overhaul_id", "roadmap_id", "package_count"}),

@@ -113,7 +113,8 @@ NON_INTENT_EVENTS = frozenset({
     #     step-change DAU on the ship date.
     #   roster_setup_skipped — a dismissal/TERMINATOR, the quickset_abandoned
     #     / team_review_exited class.
-    # The other four roster_setup_* events are intent and deliberately ABSENT.
+    # The other four roster_setup_* events are intent and deliberately ABSENT,
+    # as is roster_setup_tiers_saved (2026-11-11, a deliberate board write).
     "roster_setup_shown",
     "roster_setup_skipped",
     # Team overhaul (flag `overhaul.enabled`), added in the SAME commit that

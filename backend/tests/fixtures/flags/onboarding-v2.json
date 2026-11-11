@@ -260,6 +260,7 @@
   "trades.win_now": true,
   "outlook.championship_probabilities": true,
   "trades.roster_setup": true,
+  "trades.roster_tier_rank": true,
   "trade.next_move": true,
   "trade.fit_first_copy": true,
   "trade.partner_activity": false,

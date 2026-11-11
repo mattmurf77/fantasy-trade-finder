@@ -339,9 +339,16 @@ export async function saveTiers(
   // reads were dark for every mobile Quick Set save. It rides the same
   // whitelist as the rookie tags; an old server ignores unknown values by
   // falling back to 'tiers', so this is safe against any deploy skew.
+  //
+  // `scope:'roster'` + `via:'roster_setup'` (2026-11-11, roster setup Step 2
+  // as tier placement, scope-tier-rank.md §2.3): the POSTED ids are the
+  // scope — the same merged-band writer, so a moved player lands at the
+  // edge of his new tier and nobody else is respread. The server reads this
+  // scope ungated. Save-only: `RankScopeParam` (the read-side scope) is
+  // deliberately not widened.
   opts?: {
-    scope?: RankScopeParam;
-    via?: 'quickset' | 'rookie_tiers' | 'rookie_quickset' | 'rookie_anchors';
+    scope?: RankScopeParam | 'roster';
+    via?: 'quickset' | 'rookie_tiers' | 'rookie_quickset' | 'rookie_anchors' | 'roster_setup';
   },
 ) {
   // HOLD contract (D-160, #346/#381 — supersedes #161): a save touches only

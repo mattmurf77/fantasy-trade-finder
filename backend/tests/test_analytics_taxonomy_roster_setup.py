@@ -7,7 +7,12 @@ default-deny behind a 200: an unregistered name is counted and dropped, and
 an unregistered prop is stripped while the response still reports
 dropped == 0. Same shape as test_analytics_taxonomy_home_hub.py.
 
-Two of the six are NON_INTENT on purpose (INTENT is derived by subtraction):
+2026-11-11: `roster_setup_tiers_saved` (flag `trades.roster_tier_rank`,
+docs/plans/roster-first-trade-setup/scope-tier-rank.md §1.7/§4) joins as an
+INTENT event, and `roster_setup_skipped.stage` widens with `tiers` (a value,
+not a prop, so the prop rows below are unchanged for it).
+
+Two of the seven are NON_INTENT on purpose (INTENT is derived by subtraction):
   * roster_setup_shown   — an impression the user did not ask for on the
                            first-pass entry;
   * roster_setup_skipped — a dismissal/terminator (quickset_abandoned class).
@@ -25,6 +30,9 @@ _PROPS: dict[str, set[str]] = {
                                "duration_ms"},
     "roster_setup_skipped": {"league_id", "entry", "stage"},
     "roster_setup_prompt_tapped": {"league_id", "surface", "new_asset_count"},
+    "roster_setup_tiers_saved": {"league_id", "entry", "moved_count",
+                                 "moved_up_count", "moved_down_count",
+                                 "players_total", "positions_saved", "duration_ms"},
 }
 
 _NON_INTENT = {"roster_setup_shown", "roster_setup_skipped"}
@@ -65,3 +73,19 @@ def test_roster_setup_reuses_prompt_shown_without_a_new_prop():
     (`roster_setup_card`); it adds no prop and no event."""
     import backend.analytics_taxonomy as tax
     assert tax.CLIENT_EVENT_PROPS["prompt_shown"] == frozenset({"surface"})
+
+
+def test_roster_setup_tiers_saved_is_intent():
+    """The tier page's save is a deliberate board write: INTENT, so it must be
+    absent from NON_INTENT_EVENTS and present in INTENT_EVENTS."""
+    import backend.analytics_queries as q
+    assert "roster_setup_tiers_saved" not in q.NON_INTENT_EVENTS
+    assert "roster_setup_tiers_saved" in q.INTENT_EVENTS
+
+
+def test_roster_setup_skipped_stage_enum_documents_tiers():
+    """`stage` is a closed enum documented beside the prop rows; the tier
+    page's skip sends stage:'tiers'."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "analytics_taxonomy.py").read_text()
+    assert "stage   ∈ toggles | rank | tiers" in src

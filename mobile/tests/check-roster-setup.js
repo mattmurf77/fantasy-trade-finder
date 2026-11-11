@@ -346,5 +346,297 @@ assert(
   "10i. the entry enum is first_pass (never first_use) in the screen, trigger, taxonomy and addendum",
 );
 
+// ── 11. Step 2 as one-page tier placement (flag `trades.roster_tier_rank`;
+// scope-tier-rank.md §6 structural guard 1-5 + the 2026-11-11 operator
+// decisions: no picks on the page, market label only when it differs, a
+// moved player at the edge of his new tier) ─────────────────────────────
+const BOARD = code(read('src/components/RosterTierBoard.tsx'));
+const CHIPS = code(read('src/components/TierTargetChips.tsx'));
+const RANK_API = code(read('src/api/rankings.ts'));
+
+// 11a (scope guard 1) — every saveTiers call is the roster-scoped save.
+const tierSaveCalls = SCREEN.match(/saveTiers\([\s\S]*?\);/g) || [];
+assert(tierSaveCalls.length === 1, '11a. exactly one saveTiers call site in the screen', `found ${tierSaveCalls.length}`);
+assert(
+  tierSaveCalls.every((c) => /\{\s*scope:\s*'roster',\s*via:\s*'roster_setup'\s*\}\s*\)/.test(c)),
+  "11a2. every saveTiers call passes { scope: 'roster', via: 'roster_setup' }",
+  tierSaveCalls.join(' | '),
+);
+assert(
+  /scope\?: RankScopeParam \| 'roster';/.test(RANK_API) && /\| 'roster_setup';/.test(RANK_API)
+    && /export type RankScopeParam = 'rookie';/.test(RANK_API),
+  "11a3. api saveTiers accepts scope 'roster' + via 'roster_setup'; the read-side RankScopeParam is not widened",
+);
+
+// 11b (scope guard 2) — the tier page renders only behind the new flag;
+// flag off = the old rank step (5e still pins its RankChipGrid).
+assert(
+  /const tierRankOn = useFlag\('trades\.roster_tier_rank'\);/.test(SCREEN),
+  "11b. the screen reads useFlag('trades.roster_tier_rank')",
+);
+const continueBody = (SCREEN.match(/const onContinue = useCallback\([\s\S]*?\n {2}\}, \[/) || [''])[0];
+assert(
+  /if \(tierRankOn\) \{[\s\S]*?setStep\('tiers'\);[\s\S]*?\} else if \(rankPositions\.length === 0\) goDone\(\);\s*else \{\s*setRankIdx\(0\);\s*setClicked\(\[\]\);\s*setStep\('rank'\);\s*\}/.test(continueBody)
+    && (SCREEN.match(/setStep\('tiers'\)/g) || []).length === 1,
+  "11b2. Continue forks on tierRankOn: on → setStep('tiers') (its only site), off → the unchanged rank walk",
+);
+assert(
+  (SCREEN.match(/<RosterTierBoard\b/g) || []).length === 1
+    && /\} else if \(step === 'tiers' && tierBoard\) \{[\s\S]*?<RosterTierBoard/.test(SCREEN),
+  "11b3. RosterTierBoard renders once, only in the step === 'tiers' branch",
+);
+assert(
+  /\} else if \(step === 'rank' && rankPos\) \{[\s\S]*?<RankChipGrid/.test(SCREEN) && /reorderRankings\(rankPos, ids\)/.test(SCREEN),
+  '11b4. the flag-off rank step still renders RankChipGrid and still saves with reorderRankings(rankPos, ids)',
+);
+
+// 11c (scope guard 4) — footer + FAB rules hold on the tier page too.
+const tierBranch = (SCREEN.match(/\} else if \(step === 'tiers' && tierBoard\) \{[\s\S]*?\n {2}\} else \{/) || [''])[0];
+assert(/onLayout=\{onFooterLayout\}/.test(tierBranch) && /bottomInset=\{footerH\}/.test(tierBranch),
+  "11c. the tier page's pinned footer reports its height and the board pads under it");
+assert(!/FeedbackFAB/.test(BOARD), '11c2. RosterTierBoard mounts no FeedbackFAB');
+
+// 11d (operator decision 3) — picks are NOT on the tier page.
+const tierMemo = (SCREEN.match(/const tierPlayers = useMemo\([\s\S]*?\n {2}\}, \[/) || [''])[0];
+assert(/for \(const a of assets\) \{\s*if \(a\.isPick\) continue;/.test(tierMemo),
+  '11d. the tier page model skips every pick');
+assert(
+  !/isPick|PICK|pick_id|OwnedPick|picks/i.test(BOARD.replace(/selected|onPick/g, '')),
+  '11d2. RosterTierBoard has no pick concept (no picks strip)',
+);
+assert(
+  !fs.readdirSync(path.join(MOBILE, 'src'), { recursive: true })
+    .filter((f) => /\.tsx?$/.test(String(f)))
+    .some((f) => fs.readFileSync(path.join(MOBILE, 'src', String(f)), 'utf8').includes('roster-setup.tiers.picks')),
+  '11d3. no roster-setup.tiers.picks testID anywhere in mobile/src',
+);
+
+// 11e — the board is prop-driven: no fetching, no api import.
+assert(!/useQuery|useQueries|from '\.\.\/api\//.test(BOARD), '11e. RosterTierBoard fetches nothing');
+
+// 11f (operator decisions 5) — the market micro-label goes through the
+// one tested rule; the "was" marker compares against the save baseline
+// (the tier the server holds the player in — the pre-fill until a save).
+assert(
+  /const mkt = marketTierShown\(current, marketTier\[id\]\);/.test(BOARD)
+    && /\{mkt \? \([\s\S]*?`mkt: \$\{TIER_LABEL\[mkt\]\}`/.test(BOARD),
+  '11f. the market label renders only through marketTierShown(current, market)',
+);
+assert(/prefillTier\[id\] !== current/.test(BOARD) && /`was \$\{TIER_LABEL\[was\]\}`/.test(BOARD),
+  '11f2. the "was <tier>" marker shows only for a chip off its baseline tier');
+assert(/const prefillTierById = useMemo\(\(\) => \(tierBase \? tierOfMap\(tierBase\) : \{\}\), \[tierBase\]\);/.test(SCREEN),
+  '11f3. the "was" reference is the save baseline (tierBase), not the original pre-fill');
+
+// 11g — interaction: tap players, then a tier (no drag), VoiceOver path.
+assert(!/DraggableFlatList|onLongPress|drag\(/.test(BOARD), '11g. no drag on the tier board (operator decision 1)');
+assert(
+  /accessibilityActions=\{TIERS\.filter\(\(t\) => t !== current\)\.map/.test(BOARD)
+    && /label: `Move to \$\{TIER_LABEL\[t\]\}`/.test(BOARD) && /onMove\(\[id\], t\)/.test(BOARD),
+  '11g2. every selectable chip carries VoiceOver "Move to <tier>" actions',
+);
+assert(
+  /setTierBoard\(\(b\) => \(b \? applyTierMove\(b, tierBase, ids, t\) : b\)\);/.test(SCREEN),
+  '11g3. a move applies the edge rule locally through applyTierMove, judged against the save baseline (decision 6)',
+);
+assert(
+  /testID=\{testIDPrefix \? `\$\{testIDPrefix\}\.\$\{t\}` : undefined\}/.test(CHIPS)
+    && /testIDPrefix="roster-setup\.tiers\.move"/.test(tierBranch),
+  '11g4. the footer reuses TierTargetChips with roster-setup.tiers.move.<tier> ids (Tiers mount passes none)',
+);
+
+// 11h — skip / discard / save semantics (scope §2.2).
+const tierSkipBody = (SCREEN.match(/const onTierSkip = useCallback\([\s\S]*?\n {2}\}, \[/) || [''])[0];
+assert(
+  /stage: 'toggles' \| 'rank' \| 'tiers'/.test(SCREEN)
+    && (SCREEN.match(/trackSkipped\('tiers'\)/g) || []).length === 3
+    && /finalizeDone\(\);\s*trackSkipped\('tiers'\);\s*leave\(\);/.test(tierSkipBody),
+  "11h. Skip, back, and back-after-Discard on the tier page all fire roster_setup_skipped {stage:'tiers'}",
+);
+assert(
+  /Alert\.alert\('Discard your tier changes\?', undefined, \[\s*\{ text: 'Keep editing', style: 'cancel' \},\s*\{ text: 'Discard', style: 'destructive', onPress: onDiscard \},/.test(SCREEN)
+    && /if \(stepRef\.current === 'tiers' && tierDirtyRef\.current\) \{\s*e\?\.preventDefault\?\.\(\);\s*confirmDiscardTiers\(/.test(SCREEN),
+  '11h2. back with unsaved moves holds the pop behind "Discard your tier changes?" (Discard / Keep editing)',
+);
+assert(
+  /const all = tierSavePayloads\(tierBoard, tierBase, tierPlayers\.positionOf\);\s*const payloads = only \? all\.filter\(\(p\) => only\.includes\(p\.position\)\) : all;/.test(SCREEN)
+    && /onPress=\{\(\) => void saveTierMoves\(tierFailed\)\}/.test(tierBranch)
+    && /base = tierRebase\(base, p\);/.test(SCREEN),
+  '11h3. Save posts tierSavePayloads; Retry re-posts only the failed positions; a saved position is rebased out',
+);
+assert(
+  /label=\{dirty \? 'Save tiers' : 'Done'\}/.test(tierBranch),
+  '11h4. the primary reads Save tiers, or Done when nothing has moved (no POST then)',
+);
+assert(/\$\{reTiered\} re-tiered/.test(SCREEN), '11h5. the done summary says "N re-tiered" on the tier path');
+assert(
+  /\|\| tierSavedPositionsRef\.current\.size > 0,/.test(SCREEN)
+    && /ranked_positions: rankedRef\.current\.length \+ tierSavedPositionsRef\.current\.size,/.test(SCREEN),
+  '11h6. only a SAVED tier move counts as a change (regen) and as a ranked position',
+);
+
+// 11h7 (review fix 1) — leaving while a save is in flight. The back
+// listener holds the pop with NO prompt and no bookkeeping, and it is the
+// FIRST tier branch (before the dirty "Discard?" branch, which would
+// otherwise finalize under the in-flight saves).
+const exitBody = (SCREEN.match(/implicitExitRef\.current = \(e: any\) => \{[\s\S]*?\n {2}\};/) || [''])[0];
+const inFlight = (exitBody.match(/if \(stepRef\.current === 'tiers' && tierSavingRef\.current\) \{([\s\S]*?)\}/) || [])[1];
+assert(
+  inFlight != null && /^\s*e\?\.preventDefault\?\.\(\);\s*return;\s*$/.test(inFlight)
+    && exitBody.indexOf('tierSavingRef.current') < exitBody.indexOf('tierDirtyRef.current'),
+  '11h7. a beforeRemove during an in-flight tier save is prevented with no prompt, no finalizeDone, no skipped event',
+  inFlight,
+);
+const saveBody = (SCREEN.match(/const saveTierMoves = useCallback\([\s\S]*?\n {2}\}, \[/) || [''])[0];
+assert(
+  /^\s*const saveTierMoves = useCallback\(async \(only\?: readonly Position\[\]\) => \{\s*if \([^\n]*\btierSavingRef\.current\b[^\n]*\) return;/.test(saveBody)
+    && /tierSavingRef\.current = true;\s*try \{\s*for \(const p of payloads\)/.test(saveBody)
+    && /\} finally \{\s*tierSavingRef\.current = false;\s*\}/.test(saveBody),
+  '11h8. Save/Retry is ref-guarded: a second tap while one is in flight is a no-op; the ref clears in a finally',
+);
+
+// 11i (scope guard 5) — roster_setup_tiers_saved registered, intent,
+// emitted with exactly the specced props.
+const TIERS_EVENT = 'roster_setup_tiers_saved';
+const TIER_PROPS = ['league_id', 'entry', 'moved_count', 'moved_up_count', 'moved_down_count',
+  'players_total', 'positions_saved', 'duration_ms'];
+assert(new RegExp(`"${TIERS_EVENT}"`).test(allowedBlock), `11i. ${TIERS_EVENT} is in ALLOWED_CLIENT_EVENTS`);
+const propsRow = (propsBlock.match(new RegExp(`"${TIERS_EVENT}":\\s*frozenset\\(\\{[\\s\\S]*?\\}\\)`)) || [''])[0];
+assert(TIER_PROPS.every((k) => propsRow.includes(`"${k}"`)), `11i2. ${TIERS_EVENT} CLIENT_EVENT_PROPS carries the §4 props`, propsRow);
+assert(!new RegExp(`"${TIERS_EVENT}"`).test(nonIntent), `11i3. ${TIERS_EVENT} is NOT in NON_INTENT_EVENTS (intent)`);
+const tierTrack = (SCREEN.match(new RegExp(`track\\('${TIERS_EVENT}', \\{[\\s\\S]*?\\}, 'RosterSetup'\\)`)) || [''])[0];
+const emitted = (tierTrack.match(/^\s*\w+(?=[:,])/gm) || []).map((k) => k.trim());
+assert(
+  tierTrack && emitted.slice().sort().join(',') === TIER_PROPS.slice().sort().join(','),
+  `11i4. the screen emits ${TIERS_EVENT} with exactly the §4 props`,
+  emitted.join(','),
+);
+assert(/"tiers"|\btiers\b/.test((TAX.match(/stage\s+∈[^\n]*/) || [''])[0]), "11i5. the taxonomy's stage enum names tiers");
+
+// 11j — the scope testIDs (picks id deliberately absent, decision 3).
+for (const [src, id] of [
+  [BOARD, 'testID="roster-setup.tiers.board"'],
+  [BOARD, 'testID={`roster-setup.tiers.chip.${id}`}'],
+  [BOARD, 'testID={`roster-setup.tiers.header.${t}`}'],
+  [SCREEN, 'testID="roster-setup.tiers.save"'],
+  [SCREEN, 'testID="roster-setup.tiers.retry"'],
+]) assert(src.includes(id), `11j. ${id}`);
+const ALLOW = read('scripts/testid-lint-allow.txt');
+assert(
+  ['roster-setup.tiers.chip.*', 'roster-setup.tiers.header.*', 'roster-setup.tiers.move.*'].every((g) => ALLOW.includes(g)),
+  '11j2. the templated tier ids are in testid-lint-allow.txt',
+);
+
+// ── 12. Execute the tier helpers ─────────────────────────────────────────
+const T = u.TIER_LADDER;
+assert(T.join(',') === 'firsts_4plus,firsts_3,firsts_2,first_1,second,third,fourth,waivers',
+  '12a. TIER_LADDER mirrors utils/tierBands TIERS');
+const P = [
+  { id: 'r1', position: 'RB', elo: 1700, tier: 'first_1' },
+  { id: 'w1', position: 'WR', elo: 1650, tier: 'first_1' },
+  { id: 'r2', position: 'RB', elo: 1600, tier: 'first_1' },
+  { id: 'w2', position: 'WR', elo: 1500, tier: 'second' },
+  { id: 'q1', position: 'QB', elo: 1450, tier: 'second' },
+  { id: 't1', position: 'TE', elo: 1300, tier: 'third' },
+];
+const pos = Object.fromEntries(P.map((p) => [p.id, p.position]));
+const pre0 = u.tierPrefill(P.slice().reverse());
+assert(
+  pre0.first_1.join(',') === 'r1,w1,r2' && pre0.second.join(',') === 'w2,q1' && pre0.third.join(',') === 't1'
+    && pre0.firsts_2.length === 0 && pre0.waivers.length === 0,
+  '12b. pre-fill: each player in his board tier, Elo descending across positions, empty tiers present',
+  JSON.stringify(pre0),
+);
+assert(u.tierSavePayloads(pre0, pre0, pos).length === 0, '12c. nothing moved ⇒ nothing posted (Done writes nothing)');
+// Up: q1 (second) → first_1 lands at the BOTTOM; down: r1 (first_1) → second lands at the TOP.
+let b = u.applyTierMove(pre0, pre0, ['q1'], 'first_1');
+assert(b.first_1.join(',') === 'r1,w1,r2,q1' && b.second.join(',') === 'w2',
+  '12d. moved UP ⇒ bottom of the new tier (operator decision 6)', JSON.stringify(b));
+b = u.applyTierMove(b, pre0, ['r1'], 'second');
+assert(b.second.join(',') === 'r1,w2' && b.first_1.join(',') === 'w1,r2,q1',
+  '12e. moved DOWN ⇒ top of the new tier', JSON.stringify(b));
+const pay = u.tierSavePayloads(b, pre0, pos);
+assert(
+  JSON.stringify(pay) === JSON.stringify([
+    { position: 'QB', tiers: { first_1: ['q1'] } },
+    { position: 'RB', tiers: { second: ['r1'] } },
+  ]),
+  '12f. payloads: moved players only, split by position QB→TE, nobody unmoved posted',
+  JSON.stringify(pay),
+);
+// Move back: r1 returns to first_1 in his pre-fill slot and posts nothing.
+const back = u.applyTierMove(b, pre0, ['r1'], 'first_1');
+assert(back.first_1.join(',') === 'r1,w1,r2,q1', '12g. moved back ⇒ his pre-fill slot again', JSON.stringify(back));
+assert(
+  JSON.stringify(u.tierSavePayloads(back, pre0, pos)) === JSON.stringify([{ position: 'QB', tiers: { first_1: ['q1'] } }]),
+  '12g2. move-then-move-back posts nothing for that player',
+);
+// Several at once keep page order; posted order = page order.
+const multi = u.applyTierMove(pre0, pre0, ['t1', 'w2', 'q1'], 'first_1');
+assert(multi.first_1.join(',') === 'r1,w1,r2,w2,q1,t1', '12h. a batched move keeps page order at the edge', multi.first_1.join(','));
+const multiPay = u.tierSavePayloads(multi, pre0, pos);
+assert(
+  JSON.stringify(multiPay.find((p) => p.position === 'WR')) === JSON.stringify({ position: 'WR', tiers: { first_1: ['w2'] } })
+    && multiPay.map((p) => p.position).join(',') === 'QB,WR,TE',
+  '12h2. batched move: one payload per position that moved',
+  JSON.stringify(multiPay),
+);
+const pageOrder = u.applyTierMove(
+  u.applyTierMove(pre0, pre0, ['w2'], 'first_1'), pre0, ['w1', 'r2'], 'second');
+const wrPay = u.tierSavePayloads(
+  u.applyTierMove(pre0, pre0, ['r1', 'r2'], 'third'), pre0, pos).find((p) => p.position === 'RB');
+assert(
+  pageOrder.second.join(',') === 'w1,r2,q1' && wrPay && wrPay.tiers.third.join(',') === 'r1,r2',
+  '12h3. within a tier the posted ids follow page order',
+  `${pageOrder.second.join(',')} | ${JSON.stringify(wrPay)}`,
+);
+// Picks and off-board players never reach a payload, even if one leaked onto a board.
+const leaked = { ...pre0, first_1: [...pre0.first_1, 'PICK_2027_1'], second: [...pre0.second, 'offboard9'] };
+assert(
+  u.applyTierMove(pre0, pre0, ['PICK_2027_1'], 'firsts_4plus') === pre0
+    && u.tierSavePayloads(leaked, pre0, pos).length === 0
+    && u.tierSavePayloads(leaked, { ...leaked }, { ...pos, PICK_2027_1: 'PICK' }).length === 0
+    // Even with a pre-fill that (wrongly) holds them, no core position ⇒ never posted.
+    && u.tierSavePayloads(leaked, { ...pre0, firsts_2: ['PICK_2027_1', 'offboard9'] }, pos).length === 0,
+  '12i. picks and off-board ids are never moved or posted',
+);
+// Rebase: a saved position is never re-posted; the rest still is.
+const reb = u.tierRebase(pre0, pay[0]);
+assert(
+  JSON.stringify(u.tierSavePayloads(b, reb, pos)) === JSON.stringify([{ position: 'RB', tiers: { second: ['r1'] } }]),
+  '12j. after QB saves, a Retry posts only RB',
+);
+// Review fix 2 — after a partial save, direction is judged against the
+// BASELINE (where the server has the player), not the original pre-fill.
+// t1 (TE, pre-fill third) was saved into first_1; the RB save failed.
+const teSaved = u.applyTierMove(pre0, pre0, ['t1'], 'first_1');
+const base1 = u.tierRebase(pre0, u.tierSavePayloads(teSaved, pre0, pos).find((p) => p.position === 'TE'));
+assert(base1.first_1.join(',') === 'r1,w1,r2,t1' && base1.third.length === 0,
+  '12m. rebase: a saved up-mover sits at the bottom of his saved tier in the baseline', JSON.stringify(base1));
+const down1 = u.applyTierMove(teSaved, base1, ['t1'], 'second');
+assert(down1.second.join(',') === 't1,w2,q1',
+  '12m2. saved first_1 → second is a DOWN move vs the baseline ⇒ TOP of second (the server\'s edge)', down1.second.join(','));
+const backToBase = u.applyTierMove(down1, base1, ['t1'], 'first_1');
+assert(backToBase.first_1.join(',') === 'r1,w1,r2,t1' && u.tierSavePayloads(backToBase, base1, pos).length === 0,
+  '12m3. moved back to his BASELINE tier ⇒ his baseline slot, nothing posted', JSON.stringify(backToBase.first_1));
+const backToPre = u.applyTierMove(teSaved, base1, ['t1'], 'third');
+assert(
+  backToPre.third.join(',') === 't1'
+    && JSON.stringify(u.tierSavePayloads(backToPre, base1, pos)) === JSON.stringify([{ position: 'TE', tiers: { third: ['t1'] } }])
+    && u.applyTierMove(u.applyTierMove(teSaved, base1, ['w2'], 'third'), base1, ['t1'], 'third').third.join(',') === 't1,w2',
+  '12m4. moved back to his PRE-FILL tier after a save elsewhere ⇒ a real move: posted, at the top edge (down from first_1)',
+  JSON.stringify(backToPre.third),
+);
+const rDown = u.applyTierMove(pre0, pre0, ['r1'], 'second');
+const base2 = u.tierRebase(pre0, u.tierSavePayloads(rDown, pre0, pos).find((p) => p.position === 'RB'));
+assert(base2.second.join(',') === 'r1,w2,q1',
+  '12m5. rebase: a saved down-mover sits at the top of his saved tier in the baseline', JSON.stringify(base2.second));
+const mc = u.tierMoveCounts(b, pre0);
+assert(mc.moved === 2 && mc.up === 1 && mc.down === 1, '12k. move counts: moved / up / down vs the pre-fill', JSON.stringify(mc));
+assert(
+  u.marketTierShown('second', 'second') === null && u.marketTierShown('second', 'first_1') === 'first_1'
+    && u.marketTierShown('second', null) === null && u.marketTierShown('second', undefined) === null,
+  '12l. market label only when the consensus tier differs from the page tier (operator decision 5)',
+);
+
 console.log(`\n${passes} passed, ${failures} failed`);
 process.exit(failures ? 1 : 0);

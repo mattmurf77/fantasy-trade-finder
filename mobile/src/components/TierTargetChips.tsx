@@ -23,11 +23,14 @@ export interface TierTargetChipsProps {
    *  screen's single `accentFor`/theme source. */
   accentFor: (tier: Tier) => string;
   onPick: (tier: Tier) => void;
+  /** Optional chip testID prefix: chip `t` gets `${testIDPrefix}.${t}`.
+   *  Absent ⇒ no testID (Tiers' mount is unchanged). */
+  testIDPrefix?: string;
 }
 
 const TOUCH_HIT_SLOP = { top: 4, bottom: 4, left: 4, right: 4 } as const;
 
-function TierTargetChips({ accentFor, onPick }: TierTargetChipsProps) {
+function TierTargetChips({ accentFor, onPick, testIDPrefix }: TierTargetChipsProps) {
   const cleanup = useFlag('visual.chalkline_cleanup');
   const touchPolish = useFlag('ux.touch_polish');
   const s = cleanup ? styles : legacyStyles;
@@ -42,6 +45,7 @@ function TierTargetChips({ accentFor, onPick }: TierTargetChipsProps) {
           return (
             <Pressable
               key={t}
+              testID={testIDPrefix ? `${testIDPrefix}.${t}` : undefined}
               onPress={() => onPick(t)}
               hitSlop={touchPolish ? TOUCH_HIT_SLOP : undefined}
               accessibilityRole="button"
