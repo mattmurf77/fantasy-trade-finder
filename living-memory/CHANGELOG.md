@@ -19,6 +19,11 @@
 - Also: acceptance evaluation (neither head estimable), 612 Sleeper offers analysed, fast kernel dropped (1.15–1.18×).
 - Branch `feat/trade-engine-rearch`, unmerged. [Scope](../docs/plans/realtime-trade-engine/scope.md) · [real leagues](../docs/plans/realtime-trade-engine/real-leagues.md).
 
+## 2026-11-10 — Roster-first setup for Find a Trade merged dark (#637, deck pipeline 15)
+
+- #637 merged as `9c252819` (2026-11-11T01:52Z), all four CI checks green. The flag `trades.roster_setup` is **false**. With it on: the first passed Find a Trade card in a league pushes a "Your roster" screen with Move / — / Keep per player and owned pick, an optional per-position ordering, and one deck regen. Move is the new `asset_preferences` list `trade_block` (D-212); Keep is `untouchable` (D-213). Owner-v1 and bilateral read `trade_block` on the give side, but only with the flag on.
+- Deck pipeline 14 → 15. Stored pages fall through once, and this is a MOD-M1 re-run trigger after the Nov 10 freeze. The operator chose to merge without a models-eng review. Render deploys `backend/` changes; I did not confirm the deploy. Evidence: [TEST_LEDGER](TEST_LEDGER.md#2026-11-10--roster-first-setup-for-find-a-trade-flag-trades_roster_setup-dark). Plan: [docs/plans/roster-first-trade-setup/](../docs/plans/roster-first-trade-setup/).
+
 ## 2026-11-10 — Render build filter replaces the docs skip marker; flag overrides recorded
 
 - The web service now has a Render build filter (D-211). A push deploys unless every changed file is in a folder the server never reads: docs, living memory, mockups, screens, archive, qa, scripts, the mobile source folders, root Markdown and the like. `backend/`, `config/`, `web/`, `mobile/app.json` and the build files always deploy. It was set through the Render API (G-018) and mirrored in `render.yaml` by #633, whose merge deployed `c5f17c45` (live 2026-11-10T20:48Z, Calibration unchanged). Docs merges no longer carry a skip marker; [runbook](../docs/runbook.md#build-filter-2026-11-10).
