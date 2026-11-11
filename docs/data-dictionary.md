@@ -188,6 +188,7 @@ counterparty board disclosure or client analytics event is added.
 - [`deck_replenish_log`](#deck_replenish_log)
 - [`bad_trade_flags`](#bad_trade_flags)
 - [`trade_proposals`](#trade_proposals)
+- [`trade_offer_outcomes`](#trade_offer_outcomes)
 - [`trade_policy_shadow`](#trade_policy_shadow)
 
 **Players / Drafts / Picks**
@@ -882,6 +883,32 @@ The durable record of a **confirmed provider send**. Scope block: `docs/plans/pe
 Only a confirmed success writes here — an attempted or failed send is not a proposal. A successful send whose *snapshot* failed still writes the row (with NULL `valuation_json`) and increments `trade_policy.HEALTH["snapshot_failures"]`; losing the row would understate the one metric that matters most.
 
 Indexes: `ix_trade_proposals_user_league` on `(user_id, league_id)`; `ix_trade_proposals_impression` on `impression_id`.
+
+---
+
+## `trade_offer_outcomes`
+
+What happened at the provider to a trade the user **sent through the app**. Scope block: `docs/plans/offer-learnings/scope-trade-outcomes.md`. Flag `trade.outcome_tracking` (off ⇒ never written or read). One row per confirmed Sleeper send that returned a transaction id, written by `trade_outcomes.record_sent` from `server._sleeper_propose_core` (so the deck, match, calculator, shop and overhaul sends all land here), then moved by `trade_outcomes.reconcile_league` against [`sleeper_trades`](#sleeper_trades) at session init and in the daily-tick step `trade_outcomes`. Separate from [`trade_proposals`](#trade_proposals), which is written only under `trade.valuation_telemetry` and holds no roster ids.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `user_id` | str | ACCOUNT id of the sender (`sess["user_id"]`). Deleted and exported with the account (`accounts._ADDITIONAL_PRIVATE_TABLES`). |
+| `league_id` | str | |
+| `provider` | str | `sleeper` (ESPN and MFL sends are not tracked yet) |
+| `provider_transaction_id` | str | Sleeper's id from `propose_trade`. UNIQUE with `provider`: a repeated send of the same id is a no-op and never resets an observed status. |
+| `proposal_event_id` | str, nullable | Joins `trade_proposals` when that row exists. |
+| `impression_id` | str, nullable | The originating card, validated by `server._owned_impression_id` (NULL unless `trade.valuation_telemetry` or the owner arm is on). |
+| `my_roster_id`, `their_roster_id` | int | League-scoped roster ids of sender and counterparty. The counterparty is never stored as a person id. |
+| `give_asset_ids`, `receive_asset_ids` | JSON text | The package as sent (players and FTF pick ids). |
+| `sent_at` | str | server UTC |
+| `status` | str | `sent` · `accepted` (the sent transaction id appears completed) · `completed_different_terms` (it did not, but the same two rosters completed a different two-team trade after `sent_at` — an observed later trade, not a confirmed counter; not terminal: `accepted` replaces it if the original later completes). **Declined, withdrawn, expired and unaccepted counters are never written**: they are visible only on Sleeper's private GraphQL, which the app does not read, and silence is never read as one of them. |
+| `status_at` | str, nullable | Sleeper's completion time (`sleeper_trades.traded_at`) of the trade behind `status`. |
+| `resolved_transaction_id` | str, nullable | That trade's id (= `provider_transaction_id` when `accepted`). |
+| `observed_terms_json` | text, nullable | `completed_different_terms` only: that trade from the sender's side — `{give_player_ids, receive_player_ids, give_picks, receive_picks, give_faab, receive_faab}`, picks as `{season, round, original_roster_id}`. |
+| `checked_at` | str, nullable | Last reconcile that read the row. "Not accepted by `checked_at`" is the only negative this table supports. |
+
+Indexes: `uq_trade_offer_outcome_provider_tx` UNIQUE `(provider, provider_transaction_id)`; `ix_trade_offer_outcomes_league_status` on `(league_id, status)`; `ix_trade_offer_outcomes_user` on `user_id`. A new table, so `metadata.create_all` creates it with its constraint on both dialects.
 
 ---
 

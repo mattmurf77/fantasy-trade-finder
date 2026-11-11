@@ -2212,7 +2212,7 @@ def _refresh_players_cache_async(force: bool = False) -> bool:
 
 
 def _daily_tick_players_guard(now: datetime):
-    """daily-tick step 5 — the M0 player-cache fallback guard, run INLINE on
+    """daily-tick step 6 — the M0 player-cache fallback guard, run INLINE on
     the daily-tick runner thread (never a request thread). The tick's own
     gate (deployed env, cache past TTL), then the guards and in-flight
     protocol of `_refresh_players_cache_async(force=False)` copied as they
@@ -26849,6 +26849,20 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         provider_transaction_id=result.get("transaction_id"),
         source=source,
     )
+    # offer-learnings WS2 — the 'sent' row whose provider outcome the
+    # reconciler fills from the public completed-trade capture. Its own row,
+    # NOT trade_proposals (that one is written only under
+    # trade.valuation_telemetry). Never raises.
+    if is_enabled("trade.outcome_tracking"):
+        from . import trade_outcomes as _trade_outcomes
+        _trade_outcomes.record_sent(
+            user_id=user_id, league_id=league_id,
+            transaction_id=result.get("transaction_id"),
+            my_roster_id=my_roster_id, their_roster_id=their_rid,
+            give_asset_ids=give, receive_asset_ids=receive,
+            proposal_event_id=_proposal_event_id,
+            impression_id=_owned_impression_id(impression_id, user_id, league_id=league_id),
+        )
     return {
         "status": result.get("status") or "proposed",
         "transaction_id": result.get("transaction_id"),
@@ -30179,6 +30193,16 @@ def session_init():
                     from .sleeper_trades_service import sync_league_trades
                     _n_tr = sync_league_trades(league_id)
                     log.info("  ✅ league trades captured (%d new)", _n_tr)
+                    # offer-learnings WS2 — sent offers of this league read
+                    # against the capture just refreshed. DB-only; its own
+                    # try so it can't be mistaken for a capture failure.
+                    try:
+                        if is_enabled("trade.outcome_tracking"):
+                            from . import trade_outcomes as _trade_outcomes
+                            _trade_outcomes.reconcile_league(league_id)
+                    except Exception as oc_err:
+                        log.warning("  trade outcome reconcile failed (continuing): %s",
+                                    oc_err)
                     # suggestion.telemetry — executed-trade tagging: link
                     # every not-yet-linked captured trade to its best-
                     # matching logged suggestion (was_recommended + ghost
@@ -32066,6 +32090,7 @@ def _daily_tick_steps() -> list:
         S("roster_snapshot",   _daily_tick_roster_snapshot),
         S("usage_trends",      _daily_tick_usage_trends),
         S("receipts_grade",    _daily_tick_receipts_grade),
+        S("trade_outcomes",    _daily_tick_trade_outcomes),
         S("rookie_monitor",    _daily_tick_rookie_monitor),
         S("players_guard",     _daily_tick_players_guard),
         S("reengagement",      _daily_tick_reengagement),
@@ -32078,6 +32103,21 @@ def _daily_tick_steps() -> list:
     ]
 
 
+def _daily_tick_trade_outcomes(now: datetime):
+    """daily-tick step 4 — offer-learnings WS2 (flag `trade.outcome_tracking`).
+    For leagues with an offer sent through the app in the watch window,
+    refresh the public completed-trade capture (only while
+    `market.trade_capture` is on: it owns `sleeper_trades`) and move each
+    offer to its observed outcome, so a league nobody opens still resolves."""
+    if not is_enabled("trade.outcome_tracking"):
+        return "skipped", "flag off"
+    from . import trade_outcomes as _trade_outcomes
+    sync = None
+    if is_enabled("market.trade_capture"):
+        from .sleeper_trades_service import sync_league_trades as sync
+    return "ok", _trade_outcomes.tick(now, sync=sync)
+
+
 def _daily_tick_deletion_scrub(now: datetime):
     """daily-tick step: the deletion scrub's due DB passes, the model store
     for every job whose DB pass is current, finished jobs deleted, and the
@@ -32087,7 +32127,7 @@ def _daily_tick_deletion_scrub(now: datetime):
 
 
 def _daily_tick_rookie_monitor(now: datetime):
-    """daily-tick step 4 — M0 rookie class-load monitor. The NEXT season's
+    """daily-tick step 5 — M0 rookie class-load monitor. The NEXT season's
     class does not exist in Sleeper's dump until ~late April. Its arrival is
     a one-shot, unobservable-in-advance event that the Draft Room's
     pre-class-load state depends on, so log it loudly the first time a row
@@ -32097,7 +32137,7 @@ def _daily_tick_rookie_monitor(now: datetime):
 
 
 def _daily_tick_reengagement(now: datetime):
-    """daily-tick step 6. Re-engagement pushes — winback variants,
+    """daily-tick step 7. Re-engagement pushes — winback variants,
     finish_ranking, and season_start. Frequency caps in `_NOTIF_FREQ_CAPS`
     enforce per-window limits (winback_matches: 1/7d, winback_dormant: 1/30d,
     finish_ranking: 1/30d, season_start: 1/365d). The cap check happens
@@ -32198,7 +32238,7 @@ def _daily_tick_reengagement(now: datetime):
 
 
 def _daily_tick_replenishment(now: datetime):
-    """daily-tick step 7 — F10 weekly deck pre-generation, DEFERRED: an
+    """daily-tick step 8 — F10 weekly deck pre-generation, DEFERRED: an
     unconditional hard skip (operator, 2026-10-23: ship S3 without it). It
     reads no flag and never calls `_run_weekly_replenishment`, so no deck
     builds, pushes, inbox rows or marker rows, whatever `deck.replenishment`
@@ -32219,7 +32259,7 @@ def _daily_tick_replenishment(now: datetime):
 
 
 def _daily_tick_eval_nightly(now: datetime):
-    """daily-tick step 8 — F8 offline eval nightly (operator tooling,
+    """daily-tick step 9 — F8 offline eval nightly (operator tooling,
     unflagged). Idempotent per (UTC day, scorer, window) via
     data/eval_runs/runs.jsonl, so daily-tick retries are free."""
     from .eval.nightly import run_all as _eval_run_all
@@ -32233,8 +32273,8 @@ def _daily_tick_eval_nightly(now: datetime):
 
 
 def _daily_tick_value_model_refit(now: datetime):
-    """daily-tick step 9 — F6 (flag deck.value_model — SHIPS DARK) nightly
-    refit. Runs AFTER step 8 so the eval pass grades yesterday's model
+    """daily-tick step 10 — F6 (flag deck.value_model — SHIPS DARK) nightly
+    refit. Runs AFTER step 9 so the eval pass grades yesterday's model
     before today's supersedes it. Flag read at run time (training AND
     serving are both dark until the F8 replay win); idempotent per UTC date
     via data/value_model/models.jsonl; `nightly_refit` never raises."""

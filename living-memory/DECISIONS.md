@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-NEXT — Sent-trade outcomes record only what the public API shows; the Sleeper offer import stops at the missing read
+
+**Date:** 2026-11-10 · **Who:** WS2 builder, under the operator's R3 decision ("Yes. Ideally pulling from the users' sleeper account as well (with explicit user permission and a line in the Ts & Cs).") and the WS2 rule "if Part B needs an endpoint or credential the app does not hold today, stop and report".
+**Context:** R3 asks for accepted / declined / countered / withdrawn / expired per sent trade, plus a consented import of the user's own Sleeper offers. The app sends through Sleeper's private `propose_trade` and keeps the returned `transaction_id`, but its only read of trade state is the public `transactions/{leg}` list, which shows completed trades only (`docs/plans/sleeper-pending-trades-feasibility-2026-08-12.md`). The private `league_transactions_filtered` read is known only from a public schema dump: never captured, not in `sleeper_write.py`, and its status words for rejected / withdrawn / expired are unknown.
+**Decision:** Part A (`trade.outcome_tracking`, off) writes a `trade_offer_outcomes` row per confirmed Sleeper send and moves it only to states the public capture proves: `accepted` (the sent id completed) and `completed_different_terms` (the same two rosters completed a different trade after the send, with its terms). Declined, withdrawn, expired and unaccepted counters are never inferred from silence. It reuses the existing capture at session init and one daily-tick step instead of a poller, and keeps its own table rather than `trade_proposals`, whose write is tied to `trade.valuation_telemetry` and holds no roster ids. Part B is not built: no consent table, no import, no `trade.sleeper_offer_import` flag.
+**Consequences:**
+- Acceptance labels exist for Sleeper sends from the day the flag is on; "not accepted by `checked_at`" is the only negative. A counterparty-acceptance model still has no declined label.
+- `completed_different_terms` is evidence of a counter that was accepted, not proof of one; readers must treat it that way.
+- Part B, and declined/withdrawn/expired for Part A, need the operator to accept a new read on the private GraphQL surface and a live capture of it. The consent model and Terms line are drafted in the scope block; `web/terms.html` is unchanged.
+- ESPN and MFL sends are not tracked; MFL's documented `pendingTrades` export is the obvious next seam.
+
 ## D-211 — Docs-only pushes skip Render through a build filter, not a `[skip render]` marker
 
 **Date:** 2026-11-10 · **Who:** operator (asked to replace the marker with a build filter).

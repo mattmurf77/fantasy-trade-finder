@@ -921,6 +921,48 @@ Index("ix_trade_proposals_user_league",
 Index("ix_trade_proposals_impression", trade_proposals_table.c.impression_id)
 
 # ---------------------------------------------------------------------------
+# trade_offer_outcomes — what happened at the provider to a trade sent through
+# the app (offer-learnings WS2 Part A, flag `trade.outcome_tracking`)
+# ---------------------------------------------------------------------------
+# Scope block: docs/plans/offer-learnings/scope-trade-outcomes.md
+#
+# One row per CONFIRMED provider send that returned a transaction id, written
+# at send time with status 'sent' and moved by backend/trade_outcomes.py from
+# the public completed-trade capture (`sleeper_trades`). Only OBSERVED states
+# are written: 'sent' | 'accepted' | 'completed_different_terms'. Declined,
+# withdrawn and expired are invisible on the public API, so they are never
+# inferred from silence. Separate from `trade_proposals` on purpose: that
+# table is written only under `trade.valuation_telemetry`.
+#
+# The counterparty is held only as a league-scoped roster id. A new table, so
+# metadata.create_all creates it (and its unique constraint) on both
+# dialects — no migration_cols row.
+trade_offer_outcomes_table = Table("trade_offer_outcomes", metadata,
+    Column("id",                      Integer, primary_key=True, autoincrement=True),
+    Column("user_id",                 String,  nullable=False),   # ACCOUNT id of the sender
+    Column("league_id",               String,  nullable=False),
+    Column("provider",                String,  nullable=False),   # sleeper
+    Column("provider_transaction_id", String,  nullable=False),
+    Column("proposal_event_id",       String),   # joins trade_proposals when written
+    Column("impression_id",           String),   # originating deck card, when any
+    Column("my_roster_id",            Integer),
+    Column("their_roster_id",         Integer),  # league-scoped; never a person id
+    Column("give_asset_ids",          Text,    nullable=False),   # JSON, as sent
+    Column("receive_asset_ids",       Text,    nullable=False),   # JSON, as sent
+    Column("sent_at",                 String,  nullable=False),   # server UTC
+    Column("status",                  String,  nullable=False),   # sent|accepted|completed_different_terms
+    Column("status_at",               String),   # provider's time of the observed state
+    Column("resolved_transaction_id", String),   # the completed trade behind the status
+    Column("observed_terms_json",     Text),     # completed_different_terms: that trade, user's side
+    Column("checked_at",              String),   # last reconcile that read this row
+    UniqueConstraint("provider", "provider_transaction_id",
+                     name="uq_trade_offer_outcome_provider_tx"),
+)
+Index("ix_trade_offer_outcomes_league_status",
+      trade_offer_outcomes_table.c.league_id, trade_offer_outcomes_table.c.status)
+Index("ix_trade_offer_outcomes_user", trade_offer_outcomes_table.c.user_id)
+
+# ---------------------------------------------------------------------------
 # trade_policy_shadow — candidates the TREATMENT policy rejected
 # ---------------------------------------------------------------------------
 # Without this table the treatment's discarded candidates vanish from the
@@ -8880,6 +8922,74 @@ def load_trade_proposals(user_id: str, league_id: str | None = None,
         rows = conn.execute(
             q.order_by(trade_proposals_table.c.id.desc()).limit(limit)
         ).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+# Statuses a reconcile may still move (`accepted` is terminal).
+TRADE_OFFER_OPEN_STATUSES = ("sent", "completed_different_terms")
+
+
+def save_trade_offer_outcome(row: dict) -> bool:
+    """Insert one sent-offer row (offer-learnings WS2). Idempotent on
+    (provider, provider_transaction_id): a repeat returns False and leaves the
+    stored row untouched, so a retried send never resets an observed status."""
+    t = trade_offer_outcomes_table
+    with engine.begin() as conn:
+        hit = conn.execute(select(t.c.id).where(and_(
+            t.c.provider == row["provider"],
+            t.c.provider_transaction_id == row["provider_transaction_id"],
+        )).limit(1)).fetchone()
+        if hit:
+            return False
+        conn.execute(insert(t).values(**row))
+        return True
+
+
+def load_open_trade_offer_outcomes(league_id: str, provider: str) -> list[dict]:
+    """Rows of one league a reconcile may still move, oldest first."""
+    t = trade_offer_outcomes_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(t).where(and_(
+            t.c.league_id == str(league_id), t.c.provider == provider,
+            t.c.status.in_(TRADE_OFFER_OPEN_STATUSES),
+        )).order_by(t.c.id)).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+def update_trade_offer_outcome(row_id: int, values: dict) -> None:
+    t = trade_offer_outcomes_table
+    with engine.begin() as conn:
+        conn.execute(update(t).where(t.c.id == row_id).values(**values))
+
+
+def load_trade_offer_outcome_leagues(provider: str, sent_since: str,
+                                     limit: int) -> list[str]:
+    """Leagues holding an open row sent at or after `sent_since`, the
+    least-recently checked first (never-checked rows lead), so a bounded
+    tick rotates through them rather than starving the tail."""
+    t = trade_offer_outcomes_table
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(t.c.league_id, func.min(func.coalesce(t.c.checked_at, "")).label("c"))
+            .where(and_(t.c.provider == provider,
+                        t.c.status.in_(TRADE_OFFER_OPEN_STATUSES),
+                        t.c.sent_at >= sent_since))
+            .group_by(t.c.league_id)
+            .order_by("c", t.c.league_id)
+            .limit(limit)
+        ).fetchall()
+    return [r.league_id for r in rows]
+
+
+def load_sleeper_trades_for_outcomes(league_id: str) -> list[dict]:
+    """Every captured completed trade of one league (no row cap: an offer's
+    completion must not fall off a newest-200 window)."""
+    t = sleeper_trades_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(
+            t.c.transaction_id, t.c.traded_at, t.c.roster_ids, t.c.adds,
+            t.c.drops, t.c.draft_picks, t.c.waiver_budget,
+        ).where(t.c.league_id == str(league_id))).fetchall()
     return [dict(r._mapping) for r in rows]
 
 

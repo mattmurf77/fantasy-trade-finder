@@ -779,6 +779,8 @@ _ADDITIONAL_PRIVATE_TABLES = (
     # D1 free-agent moves: the R15.3 consent and move records, deleted with
     # the account (R15.8 D12) and exported while it exists.
     "platform_write_consents", "platform_write_moves",
+    # offer-learnings WS2: the provider outcome of the user's own sends.
+    "trade_offer_outcomes",
 )
 
 # Tables that name a person and are neither deleted nor exported here, each
