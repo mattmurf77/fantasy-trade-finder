@@ -604,6 +604,20 @@ Canonical set: `championship`, `contender`, `rebuilder`, `jets`, `not_sure`.
 
 ---
 
+## Fit block ranks and outlook tags (WS4b, flag `trade.fit_first_copy`)
+
+The trade card's fit block (`fit_block`, template `fit-2`) shows numbers and words other screens also show, so the rules below must hold on every surface:
+
+- **League position rank.** A team's rank at QB/RB/WR/TE = 1 + the number of teams in the league whose summed **consensus** position value (`power_rankings.compute_power_rankings` → `teams[].positions[P].value`) is strictly greater. Tied teams share a rank. This is League rankings' drill-in chip (`LeagueSummaryScreen.tsx` `teamPosRank`). Home's position tiles (`utils/positionSplit.ts`) and Team Review (`team_review._pos_share`) rank the same values but break an exact tie by list order, so on an exact tie they can show one place lower; on every other input all four agree. Never the personal basis. Picks have no position rank.
+- **The block's extra rules.** A rank move is shown only when the position's value changes by at least `FIT_RANK_MIN_MOVE` (5%) of the league median there (`server._position_medians`) and the rank itself changes; no ranks at all with fewer than `FIT_RANK_MIN_TEAMS` (3) teams whose players carry value. The "after" rank re-ranks the two teams' moved values against everyone else's unchanged ones. Proven equal to `compute_power_rankings` on the post-trade rosters by `test_fit_block_v3.py::test_ranks_equal_power_rankings_before_and_after_on_random_leagues`.
+- **Rank text.** Ordinals, `"<POS> <before> → <after>"`, moves joined by `" · "`, in IBM Plex Mono. Direction is carried by the arrow and the numbers, never by colour. (`TradeCard.tsx` `fitRankOrdinal` / `fitRanksText`.)
+- **Outlook tag vocabulary.** `source: "declared"` (the viewer only): `championship` "All-in", `contender` "Contending", `rebuilder` "Rebuilding", `jets` "Tanking" — the app's declared-outlook names (`OutlookBiasReceipt.tsx` `OUTLOOK_DISPLAY_NAME`). `source: "roster"` (the other team always; the viewer when undeclared): `contender` "Looks contending", `rebuilder` "Looks rebuilding" — Team Review's league-mate words ("Contending teams" / "Rebuilding teams") with the deck receipt's "look" marker for an inferred outlook. `not_sure` and no read: no tag. A league-mate's declared outlook is never a tag.
+- Clients render the server's `text` and numbers verbatim and never switch on `code`.
+
+**Locations to update together:** `backend/trade_narrative.py` (`FIT_TAGS`, `FIT_RANK_MIN_MOVE`, `FIT_RANK_MIN_TEAMS`, `_fit_rank_rows`), `backend/server.py` (`_fit_league_context`, `_power_value_inputs`, `_position_medians`), `backend/power_rankings.py`, `mobile/src/components/TradeCard.tsx`, `mobile/src/components/OutlookBiasReceipt.tsx` (`OUTLOOK_DISPLAY_NAME`), `mobile/src/screens/LeagueSummaryScreen.tsx` (`teamPosRank`), `mobile/src/screens/TeamReviewScreen.tsx` (partners beat). Web and the extension do not render the block.
+
+---
+
 ## Owner trial metadata and ordering
 
 Owner trial metadata is additive to the existing card/idea shapes:

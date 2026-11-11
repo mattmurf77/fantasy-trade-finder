@@ -1,3 +1,12 @@
+## 2026-11-10 — Fit block v3 with outlook tags (WS4b, `trade.fit_first_copy`, dark, branch `feat/fit-block-v3`)
+
+- New `backend/tests/test_fit_block_v3.py`: **48 passed** (replaces `test_fit_first_copy.py`, removed with `fit_lines`). Rank parity with `compute_power_rankings` before and after on 60 random leagues (one-place ties common), ties, the 5% noise edge, picks, < 3 valued teams, context disagreement, rank order; every lead template and edge; tags; privacy (the other team's whole block byte-identical under their declared outlook, benefits, intent, preferences and personal-board fields); serialization on real revision-2 cards; the job context; the prepared codec; and on the real worker: one context and one league walk per deck, the composer once per published card, zero league work with the flag off; no serve path recomposes.
+- Sabotages, each red then green on revert: backend S1–S32 (named in the [scope block](../docs/plans/offer-learnings/scope-fit-block-v3.md) §5, incl. S30 per-card-context, S31 league-walk-per-card, S32 recompose-on-serve); mobile M1–M12 against the rewritten `mobile/tests/check-fit-first-copy.js` (**10 checks**).
+- Full backend suite (Python 3.12): **14045 passed, 42 skipped, 3 failed in 20m20s**. The 3 failures are `test_deck_pipeline_digest` only, red on purpose (`_run_trade_job` and `trade_card_to_dict` changed; three helpers classified). New digest `7d0b4c1e08a19ece`, for the coordinator's single `DECK_PIPELINE_VERSION` bump.
+- Mobile: `npx tsc --noEmit` clean, all **169** `mobile/tests/check-*.js` pass, testid-lint OK.
+- Speed, 20 recorded production requests (12-team, organic; aggregate only; machine under load): league step median 0.86 ms / max 1.88 ms; per-card serialization cost +24.7 µs / +63.9 µs; before the first batch of 30 ≤ 3.1 ms; 150-card deck ≤ 10.8 ms; full inventory (≤ 4,016 cards) ≤ 201 ms = ≤ 3.4% of the deck build (median 1.3%).
+- No simulator (D-056); the TestFlight checklist in scope §5 is owed before the flag is lit.
+
 ## 2026-11-10 — Roster-first setup for Find a Trade (flag `trades.roster_setup`, dark)
 
 - Combined tree `feat/roster-first-trade-setup` (mobile `1489dc68` + backend `1583e346` merged on `origin/main` `29e7ad67`). Full `pytest backend/tests`: **13,742 passed, 43 skipped in 15:31**. `tsc --noEmit` clean, all **168** `mobile/tests/check-*.js` pass, testid-lint OK, web structure 260/260 + trade-search scenarios + instant-trade report OK.

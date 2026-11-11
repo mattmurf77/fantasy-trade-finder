@@ -25,7 +25,7 @@ import { LockGlyph } from './PlayerContextMenu';
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { useFlag } from '../state/useFeatureFlags';
 import { consensusNote } from '../utils/consensusNote';
-import type { Player, TradeCard as TradeCardData } from '../shared/types';
+import type { Player, TradeCard as TradeCardData, FitBlockTeam } from '../shared/types';
 
 // #362 — chip copy helpers. Both derive entirely from the server-stamped
 // `standing_offer_mine` payload; neither invents a season the offer does
@@ -44,6 +44,20 @@ function seasonSpan(seasons: number[]): string {
   return contiguous
     ? `${short(sorted[0])}–${short(sorted[sorted.length - 1])}`
     : sorted.map(short).join(' ');
+}
+
+// WS4b fit block — a league rank as an ordinal ("1st", "12th", "21st"); the
+// format is a cross-client rule (docs/cross-client-invariants.md § Fit block).
+export function fitRankOrdinal(n: number): string {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 13) return `${n}th`;
+  return `${n}${({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'}`;
+}
+/** [{pos:'WR', before:9, after:7}, …] → "WR 9th → 7th · RB 2nd → 4th". */
+export function fitRanksText(ranks: FitBlockTeam['ranks']): string {
+  return ranks
+    .map((r) => `${r.pos} ${fitRankOrdinal(r.before)} → ${fitRankOrdinal(r.after)}`)
+    .join(' · ');
 }
 
 // #384 — the overlay presentation needs two host hooks the inline form has no
@@ -257,14 +271,15 @@ function TradeCardComp({
   // omits `reasons` when the flag is off, double-gating client-side keeps
   // the rendering predictable if flags drift (e.g. cached job snapshot).
   const reasonsEnabled = useFlag('trade_math.human_explanations');
-  // WS4 fit-first copy — the server sends `fit_lines` only when a specific
-  // reason fires; the client double-gates on the flag (as reasons do) so a
-  // flip back hides lines already stored on a page. An edited card's lines
-  // describe the original package, so they hide like Match strength does.
+  // WS4b fit block — the server sends `fit_block` only when a team has a
+  // reason or a rank move; the client double-gates on the flag (as reasons
+  // do) so a flip back hides blocks already stored on a page. An edited
+  // card's block describes the original package, so it hides like Match
+  // strength does.
   const fitFirstEnabled = useFlag('trade.fit_first_copy');
-  const fitLinesShown = fitFirstEnabled && !data.edited ? data.fit_lines : undefined;
-  const fitThem = fitLinesShown?.find((l) => l.side === 'them')?.text;
-  const fitYou = fitLinesShown?.find((l) => l.side === 'you')?.text;
+  const fitBlockShown = fitFirstEnabled && !data.edited ? data.fit_block : undefined;
+  const fitThem = fitBlockShown?.teams.find((t) => t.side === 'them');
+  const fitYou = fitBlockShown?.teams.find((t) => t.side === 'you');
   // #384 ruling 1 — in the merged calculator experience the ✕ stays ONE
   // button and the reasons arrive as an overlay over the page, instead of
   // three inline tiles replacing the ✕. `reasonsAsOverlay` is a PROP (see the
@@ -625,23 +640,47 @@ function TradeCardComp({
         )}
       </View>
 
-      {/* WS4 fit-first copy (flag trade.fit_first_copy) — the card leads
-          with why the offer suits the other team, then the viewer's team;
-          the value bar stays below. Server-composed sentences rendered
-          verbatim (backend/trade_narrative.py fit_lines); absent lines
-          render nothing, so flag-off and no-line cards are unchanged. */}
+      {/* WS4b fit block, version 3 (flag trade.fit_first_copy) — the card
+          leads with each team's fit, the other team first: an outlook tag,
+          one lead phrase, then the league rank at each position the trade
+          moves. Server text rendered verbatim (backend/trade_narrative.py
+          fit_block); ranks in the mono face with the arrow and numbers
+          carrying direction (no colour). Two lines per team at most: the
+          lead and the ranks each truncate rather than wrap. An absent block
+          renders nothing, so flag-off and no-block cards are unchanged. */}
       {fitThem || fitYou ? (
-        <View style={styles.fitLines} testID="trade-card.fit-lines">
+        <View style={styles.fitBlock} testID="trade-card.fit-block">
+          <ChalklineText style={type.label} numberOfLines={1}>League rank · position value</ChalklineText>
           {fitThem ? (
-            <View style={styles.fitRow} testID="trade-card.fit-line.them">
-              <View style={styles.fitDot} />
-              <ChalklineText style={[type.bodySm, styles.fitLineText]}>{fitThem}</ChalklineText>
+            <View style={styles.fitTeam} testID="trade-card.fit-team.them">
+              <View style={styles.fitWho}>
+                <ChalklineText style={type.label} numberOfLines={1}>Them</ChalklineText>
+                {fitThem.tag ? (
+                  <ChalklineText style={styles.fitTag} numberOfLines={1} testID="trade-card.fit-tag.them">{fitThem.tag.text}</ChalklineText>
+                ) : null}
+              </View>
+              <View style={styles.fitBody}>
+                <ChalklineText style={styles.fitLead} numberOfLines={1}>{fitThem.lead.text}</ChalklineText>
+                {fitThem.ranks.length ? (
+                  <ChalklineText style={styles.fitRanks} numberOfLines={1}>{fitRanksText(fitThem.ranks)}</ChalklineText>
+                ) : null}
+              </View>
             </View>
           ) : null}
           {fitYou ? (
-            <View style={styles.fitRow} testID="trade-card.fit-line.you">
-              <View style={styles.fitDot} />
-              <ChalklineText style={[type.bodySm, styles.fitLineText]}>{fitYou}</ChalklineText>
+            <View style={styles.fitTeam} testID="trade-card.fit-team.you">
+              <View style={styles.fitWho}>
+                <ChalklineText style={type.label} numberOfLines={1}>You</ChalklineText>
+                {fitYou.tag ? (
+                  <ChalklineText style={styles.fitTag} numberOfLines={1} testID="trade-card.fit-tag.you">{fitYou.tag.text}</ChalklineText>
+                ) : null}
+              </View>
+              <View style={styles.fitBody}>
+                <ChalklineText style={styles.fitLead} numberOfLines={1}>{fitYou.lead.text}</ChalklineText>
+                {fitYou.ranks.length ? (
+                  <ChalklineText style={styles.fitRanks} numberOfLines={1}>{fitRanksText(fitYou.ranks)}</ChalklineText>
+                ) : null}
+              </View>
             </View>
           ) : null}
         </View>
@@ -1159,9 +1198,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: chalk.dim,
   },
-  // WS4 fit-first lines: two fitRow rows stacked; the text wraps in the row.
-  fitLines: { gap: space.xs },
-  fitLineText: { flexShrink: 1 },
+  // WS4b fit block: a hairline-ruled band under the header (the mockup's
+  // version 3). Per team a fixed label column (THEM / YOU over the outlook
+  // tag) and a body of at most two single-line rows: the lead, then ranks in
+  // the mono face. Neutral colours only: direction is the arrow and numbers.
+  fitBlock: {
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: ink.line,
+    paddingVertical: space.sm,
+    gap: space.xs,
+  },
+  fitTeam: { flexDirection: 'row', gap: space.sm },
+  fitWho: { width: 88 },
+  fitTag: {
+    fontFamily: fonts.ui,
+    fontSize: 11,
+    lineHeight: 18,
+    color: chalk.dim,
+  },
+  fitBody: { flex: 1, minWidth: 0 },
+  fitLead: { ...type.bodySm, color: chalk.base },
+  fitRanks: { ...type.data, color: chalk.base },
   // Counterparty-breaker hesitation line: same hint-tier row construction as
   // fitRow, with the 6px square marker filled in flare — informational
   // highlight only (ADR-005); ice stays reserved for actions. Colors by token
