@@ -8,10 +8,11 @@ import { NO_LEAGUE_ID, useSession } from '../../state/useSession';
 import { useFlag } from '../../state/useFeatureFlags';
 import { homePlayoffBanner } from '../../utils/homePlayoffBanner';
 import { outlookDisplayName } from '../OutlookBiasReceipt';
+import { RowAction } from './StatusRow';
 
 interface Props {
   rosterId: number | null;
-  /** The percentage is the link to Standings. */
+  /** The percentage and the "View" link both open Standings on Projected. */
   onDetails: () => void;
   /** Opens the outlook selector with the suggestion marked. Saves nothing. */
   onReviewOutlook: (recommended: ProjectionOutlook) => void;
@@ -20,6 +21,9 @@ interface Props {
 // The row is 40pt like StatusRow; these bring each control to a 44pt target.
 const LINK_SLOP = { top: 12, bottom: 12, left: 8, right: 8 };
 const INFO_SLOP = { top: 2, bottom: 2, left: 6, right: 6 };
+// "View" sits after the info button: 2pt into the 8pt gap (the info's own
+// slop takes 6), the rest into the row's 12pt right padding.
+const VIEW_SLOP = { top: 2, bottom: 2, left: 2, right: 12 };
 
 /** Same saved weekly result as Standings; no view-triggered calculation. */
 export default function HomePlayoffBanner({ rosterId, onDetails, onReviewOutlook }: Props) {
@@ -52,7 +56,7 @@ export default function HomePlayoffBanner({ rosterId, onDetails, onReviewOutlook
       <View style={styles.value}>
         {percent ? <>
           <Pressable testID="home.playoff.details" accessibilityRole="link" hitSlop={LINK_SLOP}
-            accessibilityLabel={`${percent} playoff chance${view.current ? '' : ', last saved'}. View standings.`}
+            accessibilityLabel={`${percent} playoff chance${view.current ? '' : ', last saved'}. View projected standings.`}
             onPress={onDetails}>
             <Text style={styles.link}>{percent}</Text>
           </Pressable>
@@ -63,6 +67,10 @@ export default function HomePlayoffBanner({ rosterId, onDetails, onReviewOutlook
         accessibilityLabel="About playoff chance" hitSlop={INFO_SLOP}
         onPress={() => setOpen(value => !value)} style={styles.info}>
         <Icon name="info" size={16} color={chalk.base} />
+      </Pressable>
+      <Pressable testID="home.playoff.view" accessibilityRole="link" accessibilityLabel="View full projections"
+        hitSlop={VIEW_SLOP} onPress={onDetails} style={styles.view}>
+        <RowAction label="View" />
       </Pressable>
     </View>
     {open ? <View testID="home.playoff.explanation" style={styles.explanation}>
@@ -100,6 +108,8 @@ const styles = StyleSheet.create({
   note: { fontFamily: fonts.ui, fontSize: 12, lineHeight: 16, color: chalk.base },
   status: { fontFamily: fonts.uiSemi, fontSize: 14, lineHeight: 20, color: chalk.base },
   info: { width: 32, height: 40, alignItems: 'center', justifyContent: 'center' },
+  // Never shrinks: on a narrow row the value column ("last saved") wraps.
+  view: { minHeight: 40, flexShrink: 0, justifyContent: 'center' },
   explanation: { gap: space.xs, paddingHorizontal: space.md, paddingBottom: space.sm },
   body: { ...type.bodySm, color: chalk.base },
   consider: { flex: 1, minWidth: 0, fontFamily: fonts.uiSemi, fontSize: 14, lineHeight: 20, color: chalk.base },

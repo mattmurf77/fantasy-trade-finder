@@ -5,7 +5,8 @@
 //   B  incomplete estimates
 //   C  the outlook recommendation is the server's, shown only when it is
 //      available AND differs; the client never classifies a probability
-//   D  the compact row: the percentage is the link, no Buy / Sell
+//   D  the compact row: the percentage and a trailing "View" link (the
+//      status rows' own RowAction) both open the projections; no Buy / Sell
 //   E  the explanation toggle
 //   F  "Review outlook" calls the handler and writes nothing
 //   G  the server's suggestion sentence renders in the expanded explanation,
@@ -137,16 +138,25 @@ assert(component.includes("useFlag('league.projection_outlook')"));
 assert(!component.includes('placeholderData'));
 // Read-only: nothing here can start a forecast or write a preference.
 assert(!/queueLeague|projection-runs|api\.post|saveLeaguePreferences|setAssetPref|useMutation|getOutlook|generateTrade/.test(component));
-// D — no Buy / Sell, no "Weekly", no "Partial data", no "View" affordance.
+// D — no Buy / Sell, no "Weekly", no "Partial data".
 for (const gone of ['home.playoff.buy', 'home.playoff.sell', 'home.playoff.position', 'Buy a player', 'Sell a player',
-  'onBuy', 'onSell', 'PlayoffTradeSide', 'SPLIT_POSITIONS', 'Partial data', 'Projected Season Finish', '>View<', 'chevron-right']) {
+  'onBuy', 'onSell', 'PlayoffTradeSide', 'SPLIT_POSITIONS', 'Partial data', 'Projected Season Finish']) {
   assert(!component.includes(gone) && !utilSource.includes(gone), `${gone} is gone from the playoff tile`);
 }
 assert(!/\bWeekly\b/.test(component) && !/\bWeekly\b/.test(utilSource), 'the word "Weekly" is gone');
+// D — the "View" link is the status rows' own affordance, not a new look:
+// one shared RowAction, drawn by StatusRow's ready state and by this tile.
+const statusRow = read('src/components/home/StatusRow.tsx');
+assert(component.includes("import { RowAction } from './StatusRow';"), 'the tile draws "View" with StatusRow\'s RowAction');
+assert(/export function RowAction\(\{ label \}: \{ label: string \}\)/.test(statusRow)
+  && /<Text style=\{styles\.goText\}>\{label\}<\/Text>\s*<Icon name="chevron-right" size=\{14\} \/>/.test(statusRow)
+  && /state === 'unavailable' \? null : \(\s*<RowAction label=\{action\} \/>/.test(statusRow),
+  'StatusRow\'s ready-state "View ›" is that same RowAction');
+assert(!/chevron-right|goText/.test(component), 'the tile defines no View/chevron look of its own');
 assert(hub.includes('key={`${user?.user_id}:${leagueId}`}'));
 assert(hub.includes('findMyRoster(rostersQuery.data, user?.user_id'));
 const mount = (/<HomePlayoffBanner[\s\S]*?\/>/.exec(hub) || [''])[0];
-assert(mount.includes('onDetails={onStandings}') && mount.includes('onReviewOutlook={onReviewOutlook}'));
+assert(mount.includes('onDetails={onProjections}') && mount.includes('onReviewOutlook={onReviewOutlook}'));
 assert(!/onBuy=|onSell=/.test(mount));
 // F (hub half) — the handler tracks the existing event, navigates to the
 // existing selector with the suggestion, and does nothing else.
@@ -184,6 +194,7 @@ const modules = {
   '../../state/useFeatureFlags': { useFlag: name => { assert(name in flags, `Unexpected flag: ${name}`); return flags[name]; } },
   '../../utils/homePlayoffBanner': { homePlayoffBanner: (value, roster, failed) => model(value, roster, failed, now) },
   '../OutlookBiasReceipt': { outlookDisplayName: value => (value ? NAMES[value] ?? null : null) },
+  './StatusRow': { RowAction: 'RowAction' },
 };
 const componentExports = {};
 vm.runInNewContext(ts.transpileModule(component, { compilerOptions: {
@@ -197,6 +208,25 @@ const nodes = node => Array.isArray(node) ? node.flatMap(nodes) : node && typeof
 const byId = (tree, id) => nodes(tree).find(n => n.props?.testID === id);
 const words = node => Array.isArray(node) ? node.flatMap(words) : typeof node === 'string' ? [node]
   : node && typeof node === 'object' ? words(node.children) : [];
+// The "View" link: present in EVERY rendered state, last in the first row
+// (after the info button), the status rows' RowAction, a 44pt target, and
+// the very same callback as the percentage.
+function assertViewLink(tree) {
+  const viewLink = byId(tree, 'home.playoff.view');
+  assert(viewLink, 'the View link renders');
+  assert.equal(viewLink.type, 'Pressable');
+  assert.equal(viewLink.props.accessibilityRole, 'link');
+  assert.equal(viewLink.props.accessibilityLabel, 'View full projections');
+  assert.equal(viewLink.props.onPress, props.onDetails, 'View calls the same callback as the percentage');
+  const action = nodes(viewLink.children).filter(n => n.type === 'RowAction');
+  assert.equal(action.length, 1); assert.equal(action[0].props.label, 'View');
+  const firstRow = tree.children.find(n => n && n.type === 'View');
+  const rowIds = firstRow.children.flat().filter(n => n && typeof n === 'object').map(n => n.props.testID);
+  assert.deepEqual(rowIds.slice(-2), ['home.playoff.explain', 'home.playoff.view'], 'info, then View, end the row');
+  const slop = viewLink.props.hitSlop;
+  assert(viewLink.props.style.minHeight + slop.top + slop.bottom >= 44, 'the View link has a 44pt-tall hit area');
+  assert.equal(viewLink.props.style.flexShrink, 0, 'the View link never shrinks');
+}
 
 // D — current estimate: one compact row whose percentage is the link.
 let tree = render();
@@ -206,9 +236,11 @@ let link = byId(tree, 'home.playoff.details');
 assert.equal(link.type, 'Pressable');
 assert.equal(link.props.accessibilityRole, 'link');
 assert.deepEqual(words(link), ['80.0%']);
-assert.equal(link.props.accessibilityLabel, '80.0% playoff chance. View standings.');
+assert.equal(link.props.accessibilityLabel, '80.0% playoff chance. View projected standings.');
 assert(link.props.hitSlop.top + link.props.hitSlop.bottom + 20 >= 44, 'the link has a 44pt hit area');
 link.props.onPress(); assert.deepEqual(calls, ['details']);
+assertViewLink(tree);
+byId(tree, 'home.playoff.view').props.onPress(); assert.deepEqual(calls, ['details', 'details']);
 assert.equal(byId(tree, 'home.playoff.status'), undefined);
 assert(!words(tree).includes('last saved'));
 assert.equal(byId(tree, 'home.playoff.recommendation'), undefined); // No block in this payload.
@@ -218,7 +250,8 @@ for (const [state, failed, old] of [['stale', false, false], ['refresh_failed', 
   link = byId(tree, 'home.playoff.details');
   assert.deepEqual(words(link), ['10.0%']);
   assert.equal(link.props.accessibilityRole, 'link');
-  assert.equal(link.props.accessibilityLabel, '10.0% playoff chance, last saved. View standings.');
+  assert.equal(link.props.accessibilityLabel, '10.0% playoff chance, last saved. View projected standings.');
+  assertViewLink(tree);
   assert(words(tree).includes('last saved'));
   assert(!words(tree).some(word => /Nov|11\/|2026/.test(word)), 'the date stays behind the tap');
 }
@@ -230,11 +263,14 @@ for (const [value, state, text] of [[null, 'no_run', 'First forecast pending'], 
   assert.equal(byId(tree, 'home.playoff.details'), undefined);
   assert.deepEqual(words(byId(tree, 'home.playoff.status')), [text]);
   assert.equal(byId(tree, 'home.playoff.status').props.onPress, undefined);
+  assertViewLink(tree); // The projected page has its own states.
 }
 queryData = undefined; queryError = true; tree = render();
 assert.deepEqual(words(byId(tree, 'home.playoff.status')), ['Update unavailable']);
+assertViewLink(tree);
 queryError = false; queryLoading = true; tree = render();
 assert.deepEqual(words(byId(tree, 'home.playoff.status')), ['Loading forecast…']);
+assertViewLink(tree);
 queryLoading = false;
 
 // E — the explanation toggle.

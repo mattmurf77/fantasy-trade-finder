@@ -160,6 +160,12 @@ export default function HomeHub() {
     track('home_tile_tapped', { tile: 'standings' }, 'Home');
     navigation.navigate('Standings');
   };
+  // The playoff tile's percentage and "View": the same page, opened on its
+  // Projected segment (full projected standings + Max PF draft order).
+  const onProjections = () => {
+    track('home_tile_tapped', { tile: 'standings' }, 'Home');
+    navigation.navigate('Standings', { segment: 'projected' });
+  };
   const onOverallRank = () => {
     track('home_tile_tapped', { tile: 'overall_rank' }, 'Home');
     requestLeagueSummaryAll(leagueId!);
@@ -357,7 +363,7 @@ export default function HomeHub() {
         <>
           <HomePlayoffBanner key={`${user?.user_id}:${leagueId}`}
             rosterId={findMyRoster(rostersQuery.data, user?.user_id ?? '')?.roster_id ?? null}
-            onDetails={onStandings}
+            onDetails={onProjections}
             onReviewOutlook={onReviewOutlook} />
           <View style={styles.rows}>
             <StatusRow

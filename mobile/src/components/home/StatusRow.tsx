@@ -91,12 +91,21 @@ export default function StatusRow({
           <Text style={styles.goText}>Retry</Text>
         </View>
       ) : state === 'unavailable' ? null : (
-        <View style={styles.go}>
-          <Text style={styles.goText}>{action}</Text>
-          <Icon name="chevron-right" size={14} />
-        </View>
+        <RowAction label={action} />
       )}
     </Pressable>
+  );
+}
+
+/** The ready-state "View ›" affordance. Also HomePlayoffBanner's "View"
+ *  link, so the playoff tile's link reads exactly like these rows. Visual
+ *  only: the caller owns the press target. */
+export function RowAction({ label }: { label: string }) {
+  return (
+    <View style={styles.go}>
+      <Text style={styles.goText}>{label}</Text>
+      <Icon name="chevron-right" size={14} />
+    </View>
   );
 }
 
