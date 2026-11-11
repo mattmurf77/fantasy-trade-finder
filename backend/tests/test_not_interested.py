@@ -199,4 +199,5 @@ def test_route_accepts_not_interested_list_type():
     assert "not_interested" in ASSET_PREF_LISTS
     db.metadata.create_all(db.engine)
     out = db.load_asset_preferences("u_ni_shape", "L_ni_shape")
-    assert out == {"untouchables": [], "targets": [], "not_interested": []}
+    assert out == {"untouchables": [], "targets": [], "not_interested": [],
+                   "trade_block": []}

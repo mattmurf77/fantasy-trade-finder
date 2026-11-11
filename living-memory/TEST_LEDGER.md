@@ -1,3 +1,10 @@
+## 2026-11-10 — Roster-first setup for Find a Trade (flag `trades.roster_setup`, dark)
+
+- Combined tree `feat/roster-first-trade-setup` (mobile `1489dc68` + backend `1583e346` merged on `origin/main` `29e7ad67`). Full `pytest backend/tests`: **13,742 passed, 43 skipped in 15:31**. `tsc --noEmit` clean, all **168** `mobile/tests/check-*.js` pass, testid-lint OK, web structure 260/260 + trade-search scenarios + instant-trade report OK.
+- New suites: `check-roster-setup.js` (91 assertions; sabotaged with a FeedbackFAB mount, `via:'quickrank'`, a layer-1 trigger and an unconditional pass trigger — each fails), `test_asset_prefs_trade_block.py` (6), `test_owner_trade_block.py` (12; flag-off byte identity over request hash, report and every card for owner and bilateral; gate sabotage fails 3; live-job viewer carry fails on `12166a94`), `test_roster_reorder_subset.py` (3), `test_analytics_taxonomy_roster_setup.py` (5).
+- Review caught one real bug before merge: the live job dropped the viewer's own `trade_block` (fixed in `1583e346`). Deck pipeline 14 → 15 (pin `1a34729ff2b291ac`).
+- No simulator (D-056). Runtime proof is the operator's TestFlight checklist in [scope §3](../docs/plans/roster-first-trade-setup/scope.md); [code walk](../docs/plans/roster-first-trade-setup/build-evidence.md). Not run yet. `FTF_SKIP_SIM_GATE=1` for the push.
+
 ## 2026-11-07 — First-page polling failure recovery
 
 - Seven-line screen correction: at the existing final paged status failure, an empty deck leaves its running spinner and shows the existing explicit failure/retry. Held cards, job authority, backend work, exact repeat request and network budgets remain unchanged.

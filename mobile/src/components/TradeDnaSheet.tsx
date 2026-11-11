@@ -200,6 +200,13 @@ export interface TradeDnaSheetFullProps {
     onOpenPicker: () => void;
     onClear: () => void;
   };
+  /** Roster-first setup (flag `trades.roster_setup`) — the "Your roster:
+   * N to move, N to keep · Edit" row (prd §3.2). Absent entirely when the
+   * flag is off, which is what keeps the row from rendering. `onEdit` closes
+   * the sheet and pushes the setup screen (the host owns navigation). */
+  rosterSetup?: {
+    onEdit: () => void;
+  };
 }
 
 // #172 — trade intent modes ("I want to consolidate / tier up / tier
@@ -304,6 +311,9 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
   });
   const untouchableIds = assetPrefsQuery.data?.untouchables ?? [];
   const untouchableCount = untouchableIds.length;
+  // Roster-first setup's "Your roster" row counts (Move = trade_block,
+  // Keep = untouchable — the same two lists the setup step writes).
+  const tradeBlockCount = assetPrefsQuery.data?.trade_block?.length ?? 0;
 
   // Resolve untouchable ids to names for the management layer — the same
   // shared ['calc-values', …] cache the hub and the deck's swap sheet use.
@@ -1031,6 +1041,39 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource }: Pr
                   ]}
                 >
                   <Text style={styles.addBtnText}>+ Add someone to get</Text>
+                </Pressable>
+              </View>
+            </>
+          ) : null}
+
+          {/* Roster-first setup (prd §3.2) — "Your roster: N to move, N to
+              keep · Edit", next to the untouchables summary. Full sheet only,
+              and only when the host passed `rosterSetup` (flag on). */}
+          {full?.rosterSetup ? (
+            <>
+              <Text style={styles.dnaGroupHdr}>Your roster</Text>
+              <View style={styles.untLine}>
+                <Text style={styles.untProtected}>
+                  {`${tradeBlockCount} to move · ${untouchableCount} to keep`}
+                </Text>
+                <Pressable
+                  testID="dna.roster-setup"
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit your roster, ${tradeBlockCount} to move, ${untouchableCount} to keep`}
+                  onPress={() => {
+                    haptics.selection();
+                    full.rosterSetup?.onEdit();
+                  }}
+                  hitSlop={8}
+                  style={{ marginLeft: 'auto' }}
+                >
+                  {({ pressed }) => (
+                    <Text
+                      style={[styles.manageLink, pressed && { color: chalk.base }]}
+                    >
+                      Edit
+                    </Text>
+                  )}
                 </Pressable>
               </View>
             </>

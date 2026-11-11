@@ -50,6 +50,7 @@ FROZEN_PINS = {
     12: "3b5a7de53dd0081e",  # Frozen calibration suppression input seam; organic defaults preserved.
     13: "1939e93dc5fd7de5",  # Cooperative cancellation; current-job terms/order preserved.
     14: "c35ce67a4434a981",  # Owner searches enforce every explicit give-all pin.
+    15: "1a34729ff2b291ac",  # D-212 trade_block: viewer list carried by the job; owner-context flag gate.
 }
 PINNED = server.DECK_PIPELINE_PINS.get(server.DECK_PIPELINE_VERSION)
 
