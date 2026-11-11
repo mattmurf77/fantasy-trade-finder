@@ -19,7 +19,7 @@ evidence in TEST_LEDGER.
 | R5 Demote "several for their best asset" | "Yes. 'Several' for best asset should only work when it's a player for draft picks for a rebuilder/tanker." | Build with exactly that exception. WS1 |
 | R6 Keep first-page suggestions small | "Yes. Aligned." | Confirm and pin; organic offers are already at most three assets. WS1 |
 | Ranking changes, how to ship | "Dark, grade first, but add new calibration trades for all users and their linked leagues (additive to current calibration decks)." | New engine revision behind its own selector (off), plus an additive Calibration round. WS1 |
-| R11 Lead card copy with fit | "I'm aligned. But the fit evaluation and description needs to be solid." | First build done (WS4). The operator then asked for a line for both sides with league position ranks; three versions are being mocked up before the copy is finalised |
+| R11 Lead card copy with fit | "I'm aligned. But the fit evaluation and description needs to be solid." | First build done (WS4). The operator then asked for a line for both sides with league position ranks, saw three versions mocked up (`mockups/fit-copy/`) and chose **Version 3 with a team outlook tag for both teams: WS4b** |
 | R9 Capture the decline reason | "Build it, but it breaks my goal of a quick and seamless UI. I think we present this once every few passes. Or upon a certain number of consecutive passes." | Build as a cadence on the existing pass-reason prompt. WS3 |
 | R3 Record outcomes of sent trades | "Yes. Ideally pulling from the users' sleeper account as well (with explicit user permission and a line in the Ts & Cs)." | Part A built (WS2). Part B: the operator approved the private Sleeper read on 2026-11-10; **WS2b** |
 | R2 Show the next move | "Mock it up, build it, control it via its own dedicated capability flag (I'm skeptical with this one, I think it has the risk to just invite haggling and ruin the value prop)." | Mockup and backend now (WS5). **Operator chose treatment A on 2026-11-10, with a twist: WS8** |
@@ -180,6 +180,42 @@ what the app already shows.
 **Acceptance.** A table in the scope block of every template with the proof fields that
 trigger it; tests for each trigger and for the fallback; ten real-shaped examples in the
 report (from synthetic or recorded inputs, with names replaced).
+
+### WS4b — Fit block, version 3, with outlook tags (R11, the operator's choice)
+
+**Starts from the integrated tree.** Branch `feat/fit-block-v3`. Same flag as WS4,
+`trade.fit_first_copy` (off); the template version moves to `fit-2`.
+
+The operator, 2026-11-10, after `mockups/fit-copy/`: "I like version 3 with a team outlook
+tag for both teams as well." Version 3 is the mockup's combined treatment: for each team, one
+short lead phrase that names the strongest reason, and under it the league rank at every
+position the trade moves, gains and losses both. The other team's block comes first.
+
+**What.**
+1. **Rank movement.** For each team and each position the trade touches, the team's league
+   rank at that position before and after, as "WR 9th → 7th". Rank is by total consensus
+   position value, the number League rankings, Home and Team Review already show, so screens
+   never disagree. Tied teams share a rank. A move counts only if the position's value
+   changes by at least 5% of the league median at that position (a starting value); smaller
+   moves and unchanged positions are omitted. Picks have no position rank. No ranks when
+   fewer than three teams are valued. Ranks are computed when the deck is built, from the
+   same league data, and stored with the card.
+2. **Lead phrase.** One per team, from WS4's plan and need rules, shortened to the mockup's
+   form ("Rebuild-leaning: adds Eli Brandt, 23"). When a team has no gain, its block says
+   only what moves ("Gets …, gives …") with no praise, and shows its losses.
+3. **Outlook tag.** A small tag beside each team's name with its outlook. The viewer's tag is
+   the outlook they declared, or the app's read of their roster when they have not declared
+   one. The other team's tag is always the app's read of their roster, in the same words
+   Team Review uses for a league-mate: a league-mate's declared setting is still never shown.
+   No tag when there is no read.
+4. **Honesty rules from the mockup stand:** losses are shown as plainly as gains; direction
+   is carried by the arrow and the numbers, never by colour alone; at most two lines per
+   team; the block fits above the player rows on a 375 px screen.
+
+**Acceptance.** Rank maths tested against the power-rankings numbers the other screens use
+(same inputs give the same ranks), ties, the noise rule, picks, small leagues; every lead
+phrase and tag traced to proof or public roster data; the privacy tests extended to the tag;
+flag off byte-identical; a structural app check and a TestFlight checklist.
 
 ### WS5 — The next move (R2): mockup and backend
 
