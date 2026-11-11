@@ -1275,6 +1275,10 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade.fit_first_copy",
     # docs/plans/offer-learnings/ WS1: owner-v2-bilateral-4 as an additive arm in the round build
     "grading.revision4_arm",
+    # docs/plans/offer-learnings/ WS1b: a Calibration round of its own for revision 4
+    # (outlook_calibration.R4_ROUND_ID), offered after the current round. Supersedes
+    # grading.revision4_arm, which is inert while this is on. OFF => today's behaviour.
+    "grading.revision4_round",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

@@ -36136,6 +36136,18 @@ def grading_create_session_route():
         return jsonify({"error": "league_not_active"}), 400
     user_id = str(sess["user_id"])
     try:
+        # Revision-4 round (grading.revision4_round): an explicit round_id, or the default
+        # once this account/league completed the current round. Off ⇒ None, today's path.
+        r4_round = _outlook_calibration.default_round(
+            user_id=user_id, league_id=league_id, requested=body.get("round_id"))
+        if r4_round is not None:
+            out = _outlook_calibration.start_session(user_id=user_id, league_user_id=_league_user_id(sess),
+                                                     league_id=league_id, round_id=r4_round)
+            if out.get("needs_build"):
+                _outlook_calibration.kick_worker()
+            log.info("blind-grading: session %s league=%s round=%s resumed=%s",
+                     out["session"]["session_id"], league_id, r4_round, out["resumed"])
+            return jsonify({"session": out["session"], "resumed": out["resumed"]}), (200 if out["resumed"] else 202)
         # start_session resumes a building/open session itself (a failed one starts fresh)
         # and reports needs_build=True for a resumed 'building' row, so a build orphaned by
         # a restart or deploy is re-kicked here; a duplicate build writes nothing.
@@ -36173,6 +36185,17 @@ def grading_current_session_route():
     league_id = (request.args.get("league_id") or "").strip()
     if not league_id:
         return jsonify({"error": "invalid_body", "message": "league_id is required"}), 400
+    try:
+        r4_round = _outlook_calibration.default_round(
+            user_id=str(sess["user_id"]), league_id=league_id, requested=request.args.get("round_id"))
+    except _blind_grading.GradingError as err:
+        return _grading_error(err)
+    if r4_round is not None:
+        out = _outlook_calibration.current_session(user_id=str(sess["user_id"]), league_id=league_id,
+                                                   round_id=r4_round)
+        if out["session"] and out["session"]["status"] == "building":
+            _outlook_calibration.kick_worker()
+        return jsonify(out)
     if _outlook_calibration.enabled():
         out = _outlook_calibration.current_session(user_id=str(sess["user_id"]), league_id=league_id)
         if out["session"] and out["session"]["status"] == "building":
@@ -36304,6 +36327,18 @@ def admin_grading_pregenerate_route():
     with "refresh_rosters": true, each Sleeper league's rosters are re-read from Sleeper first."""
     _require_cron_auth()
     body = request.get_json(silent=True)
+    r4_round = _outlook_calibration.R4_ROUND_ID
+    # The revision-4 round is a known id only while grading.revision4_round is on.
+    if (isinstance(body, dict) and body.get("round_id") == r4_round
+            and _outlook_calibration.r4_round_enabled()):
+        try:
+            out = _outlook_calibration.pregenerate(offset=body.get("offset", 0),
+                limit=body.get("limit", _outlook_calibration.MAX_BATCH), targets=body.get("targets"),
+                round_id=r4_round)
+        except _blind_grading.GradingError as err:
+            return _grading_error(err)
+        _outlook_calibration.kick_worker()
+        return jsonify(out), 202
     if isinstance(body, dict) and body.get("round_id") not in (None, _outlook_calibration.ROUND_ID):
         return jsonify({"error": "invalid_round"}), 400
     if _outlook_calibration.build_enabled() or (isinstance(body, dict) and body.get("round_id") == _outlook_calibration.ROUND_ID):
@@ -36394,12 +36429,15 @@ def admin_grading_report_route():
     """Cron-secret only and deliberately NOT flag- or audience-gated (prd.md D4):
     results stay readable after calibration_rollout is stopped."""
     _require_cron_auth()
-    if request.args.get("round_id") not in {None, _outlook_calibration.ROUND_ID}:
+    # Each round's report stays readable whatever its flag, so results survive a rollback.
+    rounds = {_outlook_calibration.ROUND_ID, _outlook_calibration.R4_ROUND_ID}
+    if request.args.get("round_id") not in {None, *rounds}:
         return jsonify({"error": "invalid_round"}), 400
-    if request.args.get("round_id") == _outlook_calibration.ROUND_ID:
+    if request.args.get("round_id") in rounds:
         try:
             return jsonify(_outlook_calibration.report(since=request.args.get("since") or None,
-                include_open=request.args.get("include_open") == "1"))
+                include_open=request.args.get("include_open") == "1",
+                round_id=request.args.get("round_id")))
         except _blind_grading.GradingError as err:
             return _grading_error(err)
     try:

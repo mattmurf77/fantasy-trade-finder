@@ -21,6 +21,15 @@ from . import blind_grading as grading, database as db
 
 ROUND_ID = "outlook-v2-v3-1"
 MODEL_VERSIONS = {"current": "owner-v2-bilateral-2", "value_core": "owner-v2-bilateral-3"}
+# Revision-4 round (grading.revision4_round, offer-learnings WS1b): its own decks
+# beside ROUND_ID's. Same aliases, so installed clients read it unchanged: "current"
+# is revision 2 (live in production) and "value_core" revision 4, run on one capture.
+R4_ROUND_ID = "outlook-v2-v4-1"
+R4_MODEL_VERSIONS = {"current": "owner-v2-bilateral-2", "value_core": "owner-v2-bilateral-4"}
+# Round order is offer order: an account/league is offered the next round only once
+# it has completed the one before (default_round).
+ROUNDS = {ROUND_ID: {"flag": "grading.outlook_round", "model_versions": MODEL_VERSIONS},
+          R4_ROUND_ID: {"flag": "grading.revision4_round", "model_versions": R4_MODEL_VERSIONS}}
 # Additive arms folded into a new build after the paired selection
 # (grading.revision4_arm). Never part of MODEL_VERSIONS' equal-quota pair.
 EXTRA_ARMS = {"revision_4": "owner-v2-bilateral-4"}
@@ -37,6 +46,15 @@ def _json(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+def _round_id(round_id):
+    # Unknown ids keep today's single-round behaviour rather than raising.
+    return round_id if round_id in ROUNDS else ROUND_ID
+
+
+def _model_versions(round_id):
+    return ROUNDS[_round_id(round_id)]["model_versions"]
+
+
 def enabled():
     from .feature_flags import is_enabled
     return is_enabled("grading.outlook_round")
@@ -47,24 +65,64 @@ def build_enabled():
     return enabled() or is_enabled("grading.outlook_prepare")
 
 
-def revision4_enabled():
+def r4_round_enabled():
+    """The revision-4 round's one switch: exposure and builds (no separate prepare flag)."""
     from .feature_flags import is_enabled
-    return is_enabled("grading.revision4_arm")
+    return is_enabled(ROUNDS[R4_ROUND_ID]["flag"])
 
 
-def _missing_requested_arm(source):
+# Round-aware dispatch. The current round keeps its zero-argument calls exactly.
+def round_enabled(round_id):
+    return r4_round_enabled() if round_id == R4_ROUND_ID else enabled()
+
+
+def round_build_enabled(round_id):
+    return r4_round_enabled() if round_id == R4_ROUND_ID else build_enabled()
+
+
+def _build_rounds():
+    return [rid for rid in ROUNDS if round_build_enabled(rid)]
+
+
+def revision4_enabled():
+    """WS1's additive arm. Superseded by the revision-4 round: inert while it is on."""
+    from .feature_flags import is_enabled
+    return is_enabled("grading.revision4_arm") and not r4_round_enabled()
+
+
+def default_round(*, user_id, league_id, requested=None):
+    """The revision-4 round a start/current call addresses, or None for today's path.
+
+    Flag off: always None, and any round_id is ignored exactly as before. Flag on:
+    an explicit id wins; with none, an account/league that completed ROUND_ID is
+    offered the revision-4 round, so installed clients find it after finishing.
+    """
+    if not r4_round_enabled():
+        return None
+    if requested == R4_ROUND_ID:
+        return R4_ROUND_ID
+    if requested == ROUND_ID:
+        return None
+    if requested is not None:
+        raise grading.GradingError("invalid_round", 400)
+    done = db.load_open_grading_session(user_id, league_id, statuses=("completed",), round_id=ROUND_ID)
+    return R4_ROUND_ID if done is not None else None
+
+
+def _missing_requested_arm(source, round_id=ROUND_ID):
     """An unexposed deck built before the additive arm was switched on."""
-    return revision4_enabled() and "revision_4" not in (source.get("extra_arms") or {})
+    return (round_id == ROUND_ID and revision4_enabled()
+            and "revision_4" not in (source.get("extra_arms") or {}))
 
 
-def start_session(*, user_id, league_user_id, league_id, now=None, seed=None):
+def start_session(*, user_id, league_user_id, league_id, now=None, seed=None, round_id=ROUND_ID):
     """One active/completed exercise per account/league/round; failures may retry."""
     existing = db.load_open_grading_session(user_id, league_id,
-        statuses=("building", "open", "completed"), round_id=ROUND_ID)
+        statuses=("building", "open", "completed"), round_id=round_id)
     if existing and existing["status"] == "open" and not existing.get("first_exposed_at") and not db.grading_progress(existing["session_id"])["answered"]:
         from .outlook_calibration_adapter import is_current
         source = json.loads(existing["source_json"])
-        if _missing_requested_arm(source) or not is_current(source.get("snapshot") or {}, user_id=user_id,
+        if _missing_requested_arm(source, round_id) or not is_current(source.get("snapshot") or {}, user_id=user_id,
                           league_user_id=league_user_id or source.get("seat"), league_id=league_id):
             if db.retire_grading_session(existing["session_id"], _json({"code": "comparison_stale"})):
                 existing = None
@@ -73,12 +131,12 @@ def start_session(*, user_id, league_user_id, league_id, now=None, seed=None):
                 "needs_build": existing["status"] == "building"}
     now = now or datetime.now(timezone.utc)
     row = {"session_id": grading.new_id(), "user_id": user_id, "league_id": league_id,
-        "round_id": ROUND_ID, "active_round_key": hashlib.sha256(
-            _json([user_id, league_id, ROUND_ID]).encode()).hexdigest(),
+        "round_id": round_id, "active_round_key": hashlib.sha256(
+            _json([user_id, league_id, round_id]).encode()).hexdigest(),
         "status": "building", "seed": str(secrets.randbits(63) if seed is None else seed),
         "created_at": now.isoformat(), "completed_at": None, "counts_json": "{}",
-        "source_json": _json({"version": ROUND_ID, "seat": league_user_id,
-                              "model_versions": MODEL_VERSIONS, "build_stage": "queued"}),
+        "source_json": _json({"version": round_id, "seat": league_user_id,
+                              "model_versions": _model_versions(round_id), "build_stage": "queued"}),
         "error_json": None}
     try:
         db.insert_grading_session(row, [])
@@ -86,7 +144,7 @@ def start_session(*, user_id, league_user_id, league_id, now=None, seed=None):
         raise grading.GradingError("account_unavailable", 409) from None
     except IntegrityError:
         existing = db.load_open_grading_session(user_id, league_id,
-            statuses=("building", "open", "completed"), round_id=ROUND_ID)
+            statuses=("building", "open", "completed"), round_id=round_id)
         if existing is None:
             raise
         return {"session": grading.session_view(existing), "resumed": True,
@@ -94,29 +152,30 @@ def start_session(*, user_id, league_user_id, league_id, now=None, seed=None):
     return {"session": grading.session_view(row), "resumed": False, "needs_build": True}
 
 
-def current_session(*, user_id, league_id):
+def current_session(*, user_id, league_id, round_id=ROUND_ID):
     """Return saved status. Start and first card access check input freshness."""
     row = db.load_open_grading_session(user_id, league_id,
-        statuses=("building", "open", "completed", "failed"), round_id=ROUND_ID)
+        statuses=("building", "open", "completed", "failed"), round_id=round_id)
     return {"session": grading.session_view(row) if row and row["status"] != "completed" else None}
 
 
 def next_card(*, user_id, row):
     """Known changes may replace an unexposed deck, never a visible exercise."""
-    sid = row["session_id"]
+    sid, round_id = row["session_id"], _round_id(row.get("round_id"))
     if row["status"] not in {"open", "completed"}:
         raise grading.GradingError("comparison_not_ready", 409)
     if row["status"] == "open" and not row.get("first_exposed_at"):
-        if not enabled() and not db.grading_progress(sid)["answered"]:
+        if not round_enabled(round_id) and not db.grading_progress(sid)["answered"]:
             raise grading.GradingError("round_paused", 409)
         from .outlook_calibration_adapter import is_current
         source = json.loads(row["source_json"])
-        if ((_missing_requested_arm(source) and not db.grading_progress(sid)["answered"])
+        if ((_missing_requested_arm(source, round_id) and not db.grading_progress(sid)["answered"])
                 or not is_current(source.get("snapshot") or {}, user_id=user_id,
                                   league_user_id=source.get("seat"), league_id=row["league_id"])):
             if db.retire_grading_session(sid, _json({"code": "comparison_stale"})):
-                if enabled():
-                    start_session(user_id=user_id, league_user_id=source.get("seat"), league_id=row["league_id"])
+                if round_enabled(round_id):
+                    start_session(user_id=user_id, league_user_id=source.get("seat"), league_id=row["league_id"],
+                                  **({"round_id": round_id} if round_id != ROUND_ID else {}))
                     kick_worker()
                 raise grading.GradingError("comparison_not_ready", 409)
         gs = db.grading_sessions_table
@@ -140,11 +199,12 @@ def _save_build(session_id, source, counts, lease_token=None):
     row = db.load_grading_session(session_id)
     if row is None:
         return False
+    round_id = _round_id(row.get("round_id"))
     gs = db.grading_sessions_table
-    where = [gs.c.session_id == session_id, gs.c.status == "building", gs.c.round_id == ROUND_ID]
+    where = [gs.c.session_id == session_id, gs.c.status == "building", gs.c.round_id == round_id]
     if lease_token is not None:
         lease = db.grading_build_leases_table
-        where.append(select(lease.c.lease_key).where(lease.c.lease_key == ROUND_ID,
+        where.append(select(lease.c.lease_key).where(lease.c.lease_key == round_id,
             lease.c.token == lease_token, lease.c.expires_at > datetime.now(timezone.utc).isoformat()).exists())
     with db.engine.begin() as conn:
         db._lock_grading_owner(conn, row["user_id"], source)
@@ -233,8 +293,10 @@ def build_session(*, session_id, capture=None, lease_token=None, work_check=None
     exercise can then retry; it cannot silently bind old answers to new inputs.
     """
     row = db.load_grading_session(session_id)
-    if not row or row.get("round_id") != ROUND_ID or row["status"] != "building":
+    if not row or row.get("round_id") not in ROUNDS or row["status"] != "building":
         return
+    round_id = row["round_id"]
+    MODEL_VERSIONS = _model_versions(round_id)  # noqa: N806 (the round's pair, same aliases)
     source, counts = json.loads(row["source_json"]), json.loads(row["counts_json"])
     if source.get("build_stage") != "queued":
         db.fail_grading_session(session_id, _json({"code": "comparison_interrupted"}), lease_token=lease_token)
@@ -309,7 +371,7 @@ def build_session(*, session_id, capture=None, lease_token=None, work_check=None
         selected = [c for a in MODEL_VERSIONS for c in inventories[a][:n]]
         order = balanced_order(grading.merge_cards(selected), int(row["seed"]))
         pair_shared = sum(len(c["arms"]) == 2 for c in order)
-        if revision4_enabled():
+        if round_id == ROUND_ID and revision4_enabled():
             order = _fold_revision_4(frozen, source, counts, order, n, int(row["seed"]), work_check)
         cards = []
         source["proofs"] = {}
@@ -399,34 +461,35 @@ def _fold_revision_4(frozen, source, counts, order, n, seed, work_check):
     return order
 
 
-def _claim_lease(token, now):
+def _claim_lease(token, now, round_id=ROUND_ID):
+    # One lease per round: the database's finish/fail fences match lease_key to round_id.
     table = db.grading_build_leases_table
     expiry = (now + timedelta(seconds=LEASE_SECONDS)).isoformat()
     try:
         with db.engine.begin() as conn:
-            conn.execute(table.insert().values(lease_key=ROUND_ID, token=token, expires_at=expiry))
+            conn.execute(table.insert().values(lease_key=round_id, token=token, expires_at=expiry))
         return True
     except IntegrityError:
         with db.engine.begin() as conn:
-            res = conn.execute(update(table).where(table.c.lease_key == ROUND_ID,
+            res = conn.execute(update(table).where(table.c.lease_key == round_id,
                 table.c.expires_at <= now.isoformat()).values(token=token, expires_at=expiry))
         return bool(res.rowcount)
 
 
-def _renew_lease(token):
+def _renew_lease(token, round_id=ROUND_ID):
     table = db.grading_build_leases_table
     now = datetime.now(timezone.utc)
     with db.engine.begin() as conn:
-        result = conn.execute(update(table).where(table.c.lease_key == ROUND_ID,
+        result = conn.execute(update(table).where(table.c.lease_key == round_id,
             table.c.token == token, table.c.expires_at > now.isoformat()).values(
                 expires_at=(now + timedelta(seconds=LEASE_SECONDS)).isoformat()))
     return bool(result.rowcount)
 
 
-def _heartbeat(token, stop, lost):
+def _heartbeat(token, stop, lost, round_id=ROUND_ID):
     while not stop.wait(30):
         try:
-            if _renew_lease(token):
+            if _renew_lease(token, round_id):
                 continue
         except Exception:
             pass
@@ -434,23 +497,23 @@ def _heartbeat(token, stop, lost):
         return
 
 
-def drain_queue(*, capture=None, max_jobs=MAX_BATCH):
-    """At most one cross-process builder, bounded batch/time, durable pending rows."""
+def drain_queue(*, capture=None, max_jobs=MAX_BATCH, round_id=ROUND_ID):
+    """At most one cross-process builder per round, bounded batch/time, durable pending rows."""
     if not _worker_lock.acquire(blocking=False):
         return {"busy": True}
     token, processed, started = secrets.token_hex(16), 0, time.monotonic()
     stop, lost = threading.Event(), threading.Event()
     work_check = _CooperativeYield(_trade_pressure)
     try:
-        if not _claim_lease(token, datetime.now(timezone.utc)):
+        if not _claim_lease(token, datetime.now(timezone.utc), round_id):
             return {"busy": True}
-        threading.Thread(target=_heartbeat, args=(token, stop, lost),
+        threading.Thread(target=_heartbeat, args=(token, stop, lost, round_id),
                          name="calibration-lease", daemon=True).start()
         while (processed < min(max_jobs, MAX_BATCH) and time.monotonic() - started < 900
-               and build_enabled() and not lost.is_set()):
+               and round_build_enabled(round_id) and not lost.is_set()):
             gs = db.grading_sessions_table
             with db.engine.connect() as conn:
-                sid = conn.execute(select(gs.c.session_id).where(gs.c.round_id == ROUND_ID,
+                sid = conn.execute(select(gs.c.session_id).where(gs.c.round_id == round_id,
                     gs.c.status == "building").order_by(gs.c.created_at, gs.c.session_id).limit(1)).scalar()
             if sid is None:
                 break
@@ -462,30 +525,32 @@ def drain_queue(*, capture=None, max_jobs=MAX_BATCH):
         table = db.grading_build_leases_table
         try:
             with db.engine.begin() as conn:
-                conn.execute(table.delete().where(table.c.lease_key == ROUND_ID, table.c.token == token))
+                conn.execute(table.delete().where(table.c.lease_key == round_id, table.c.token == token))
         finally:
             _worker_lock.release()
 
 
-def _pending_work():
+def _pending_work(round_id=ROUND_ID):
     gs = db.grading_sessions_table
     with db.engine.connect() as conn:
-        return conn.execute(select(gs.c.session_id).where(gs.c.round_id == ROUND_ID,
+        return conn.execute(select(gs.c.session_id).where(gs.c.round_id == round_id,
             gs.c.status == "building").limit(1)).scalar() is not None
 
 
 def _worker_main():
     global _worker_thread
-    result = None
+    results = None
     try:
-        result = drain_queue()
+        # Rounds drain one after another on this one thread, in round order.
+        results = [drain_queue(**({"round_id": rid} if rid != ROUND_ID else {})) for rid in _build_rounds()]
     finally:
         # Recheck after dropping the old worker reference under the same lock
         # used by request kickoffs: an enqueue at the last empty read cannot
         # strand work. A lease owned elsewhere does not trigger a retry spin.
         with _kick_lock:
             _worker_thread = None
-            if result is not None and not result.get("busy") and build_enabled() and _pending_work():
+            if (results is not None and not any(r.get("busy") for r in results)
+                    and any(_pending_work(*((rid,) if rid != ROUND_ID else ())) for rid in _build_rounds())):
                 _launch_worker_locked()
 
 
@@ -497,31 +562,33 @@ def _launch_worker_locked():
 
 def kick_worker():
     with _kick_lock:
-        if build_enabled() and (_worker_thread is None or not _worker_thread.is_alive()):
+        if _build_rounds() and (_worker_thread is None or not _worker_thread.is_alive()):
             _launch_worker_locked()
 
 
 def results(row):
+    round_id = _round_id(row.get("round_id"))
     cards = db.load_grading_cards(row["session_id"])
     arms, shared = grading.arm_summaries(cards)
     return {"session_id": row["session_id"], "league_id": row["league_id"],
         "completed_at": row["completed_at"], "total": len(cards), "shared": shared,
-        "target_mean": grading.TARGET_MEAN, "arms": arms, "round_id": ROUND_ID,
-        "model_versions": MODEL_VERSIONS,
+        "target_mean": grading.TARGET_MEAN, "arms": arms, "round_id": round_id,
+        "model_versions": _model_versions(round_id),
         **({"extra_model_versions": {a: v for a, v in EXTRA_ARMS.items() if a in arms}}
            if any(a in arms for a in EXTRA_ARMS) else {}),
         "sample_size_status": json.loads(row["counts_json"]).get("sample_size_status", "descriptive_only"),
         "arm_labels": {"current": "Today's engine", "value_core": "New engine"}}
 
 
-def report(*, since=None, include_open=False):
+def report(*, since=None, include_open=False, round_id=ROUND_ID):
+    MODEL_VERSIONS = _model_versions(round_id)  # noqa: N806 (the round's pair, same aliases)
     if since is not None:
         from datetime import date
         try:
             date.fromisoformat(since)
         except (TypeError, ValueError):
             raise grading.GradingError("invalid_since", 400) from None
-    all_sessions, all_cards = db.load_grading_report_rows(None, True, round_id=ROUND_ID)
+    all_sessions, all_cards = db.load_grading_report_rows(None, True, round_id=round_id)
     sessions = [s for s in all_sessions if since is None or s["created_at"] >= since]
     selected_ids = {s["session_id"] for s in sessions}
     cards = [c for c in all_cards if c["session_id"] in selected_ids]
@@ -562,7 +629,7 @@ def report(*, since=None, include_open=False):
             **({"additive_arms": {v: arms[a] for a, v in EXTRA_ARMS.items() if a in arms}}
                if any(a in arms for a in EXTRA_ARMS) else {})}
     # No personal boards, names, or user identifiers in the aggregate admin report.
-    return {"round_id": ROUND_ID, "model_versions": MODEL_VERSIONS,
+    return {"round_id": round_id, "model_versions": MODEL_VERSIONS,
         "status_counts": dict(statuses), "status_counts_scope": "historical_attempts_in_report_period",
         "readiness_counts": dict(readiness), "readiness_scope": "latest_attempt_per_current_connected_pair_all_time",
         "coverage": coverage,
@@ -616,9 +683,9 @@ def connected_targets():
                      "connected_platform_pairs": dict(Counter(league_platforms[t["league_id"]] or "sleeper" for t in targets))}
 
 
-def pregenerate(*, offset=0, limit=MAX_BATCH, targets=None):
+def pregenerate(*, offset=0, limit=MAX_BATCH, targets=None, round_id=ROUND_ID):
     """Queue only authorized connected pairs. Generation runs sequentially elsewhere."""
-    if not build_enabled():
+    if not round_build_enabled(round_id):
         raise grading.GradingError("round_disabled", 409)
     if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
         raise grading.GradingError("invalid_body", 400)
@@ -637,11 +704,11 @@ def pregenerate(*, offset=0, limit=MAX_BATCH, targets=None):
     statuses, skipped = Counter(), Counter()
     for target in selected:
         try:
-            result = start_session(**target)
+            result = start_session(**target, **({"round_id": round_id} if round_id != ROUND_ID else {}))
             statuses[result["session"]["status"]] += 1
         except grading.GradingError as err:
             skipped[err.code] += 1
     next_offset = offset + len(selected)
-    return {"round_id": ROUND_ID, **coverage, "batch_pairs": len(selected),
+    return {"round_id": round_id, **coverage, "batch_pairs": len(selected),
         "batch_status_counts": dict(statuses), "skipped_reasons": dict(skipped), "next_offset": next_offset if next_offset < len(connected) else None,
         "remaining_pairs": max(0, len(connected) - next_offset)}
