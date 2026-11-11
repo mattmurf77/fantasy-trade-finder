@@ -995,6 +995,38 @@ offer_import_consents_table = Table("offer_import_consents", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# revised_offer_cards — the one card built for a declined offer (offer-learnings
+# WS8, flag `trade.next_move`)
+# ---------------------------------------------------------------------------
+# Scope block: docs/plans/offer-learnings/scope-revised-offer-cards.md
+# One row per (user, source offer), written the first time a deck looks at a
+# declined offer (or a declined counter): 'active' with the card's terms, or
+# 'none' when the evaluator proved no card. Never rebuilt, so the price never
+# climbs; an active card is retired ('acted' after a pass or like,
+# 'unavailable' once it no longer passes). Only the sender's own offers make a
+# row. User-keyed: deleted and exported with the account; a card built from an
+# imported offer is deleted with the import when the consent is withdrawn.
+# New table, so metadata.create_all creates it; no migration_cols row.
+revised_offer_cards_table = Table("revised_offer_cards", metadata,
+    Column("id",                Integer, primary_key=True, autoincrement=True),
+    Column("user_id",           String,  nullable=False),   # ACCOUNT id of the sender
+    Column("league_id",         String,  nullable=False),
+    Column("outcome_id",        Integer, nullable=False),   # trade_offer_outcomes.id
+    Column("kind",              String,  nullable=False),   # revision | middle_ground
+    Column("status",            String,  nullable=False),   # active | none | retired
+    Column("give_asset_ids",    Text),                      # JSON, the card (NULL for none)
+    Column("receive_asset_ids", Text),
+    Column("change_json",       Text),                      # trade_next_move's change dict
+    Column("step_fraction",     Float),                     # the other side's gain / market value
+    Column("version",           String,  nullable=False),   # trade_revised_offers.VERSION
+    Column("created_at",        String,  nullable=False),
+    Column("retired_at",        String),
+    Column("retired_reason",    String),                    # acted | unavailable
+    UniqueConstraint("user_id", "outcome_id", name="uq_revised_offer_card_user_outcome"),
+    Index("ix_revised_offer_cards_user_league", "user_id", "league_id"),
+)
+
+# ---------------------------------------------------------------------------
 # trade_policy_shadow — candidates the TREATMENT policy rejected
 # ---------------------------------------------------------------------------
 # Without this table the treatment's discarded candidates vanish from the
@@ -9132,9 +9164,46 @@ def withdraw_offer_import_consent(user_id: str, terms_version: str, at: str,
             conn.execute(insert(t).values(user_id=str(user_id), kind="withdrawal",
                                           terms_version=terms_version,
                                           recorded_at=at, via=via))
+        imported = select(o.c.id).where(and_(
+            o.c.user_id == str(user_id), o.c.source == "sleeper_import"))
+        # WS8: a card built from an imported offer goes with it.
+        conn.execute(delete(revised_offer_cards_table).where(and_(
+            revised_offer_cards_table.c.user_id == str(user_id),
+            revised_offer_cards_table.c.outcome_id.in_(imported))))
         deleted = conn.execute(delete(o).where(and_(
             o.c.user_id == str(user_id), o.c.source == "sleeper_import"))).rowcount or 0
     return wrote, int(deleted)
+
+
+def load_revised_offer_cards(user_id: str, league_id: str) -> list[dict]:
+    """Every revised-offer row of one user in one league (WS8)."""
+    t = revised_offer_cards_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(t).where(and_(
+            t.c.user_id == str(user_id), t.c.league_id == str(league_id)))
+            .order_by(t.c.id)).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+def save_revised_offer_card(row: dict) -> dict | None:
+    """Insert the one row for (user, outcome) and return it; if a row exists
+    already (a concurrent deck), return that one unchanged."""
+    t = revised_offer_cards_table
+    with engine.begin() as conn:
+        hit = conn.execute(select(t).where(and_(
+            t.c.user_id == row["user_id"], t.c.outcome_id == row["outcome_id"]))).fetchone()
+        if hit is None:
+            conn.execute(insert(t).values(**row))
+            hit = conn.execute(select(t).where(and_(
+                t.c.user_id == row["user_id"], t.c.outcome_id == row["outcome_id"]))).fetchone()
+    return dict(hit._mapping) if hit else None
+
+
+def retire_revised_offer_card(row_id: int, reason: str, at: str) -> None:
+    t = revised_offer_cards_table
+    with engine.begin() as conn:
+        conn.execute(update(t).where(and_(t.c.id == row_id, t.c.status == "active"))
+                     .values(status="retired", retired_reason=reason, retired_at=at))
 
 
 def load_sleeper_trades_for_outcomes(league_id: str) -> list[dict]:

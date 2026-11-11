@@ -1,5 +1,15 @@
 # Decisions — Fantasy Trade Finder
 
+## D-NEXT — Revised-offer cards are built inline with the deck, proven by the owner evaluator, once per declined offer
+
+**Date:** 2026-11-10 · **Who:** WS8 builder, under the operator's treatment A plus the twist (offer-learnings plan §3 WS8).
+**Context:** The operator wanted a card for each of the user's own declined offers, "slightly more value", leading the deck, inline if it can be made safe, a batch otherwise; and a middle ground after a declined counter.
+**Decision:** `trade_revised_offers.build` runs inside `_run_trade_job` for organic owner-served decks, just before the owner revalidation, so the cards pass every final gate an owner card passes and keep the first slots through the existing `injected` protections. A declined offer gets one swap (`trade_next_move` `swap_in_give`: same size, same ask, one offered piece up in value, 5–15%); a declined counter gets a middle ground (shared assets kept, 35–65% of the market-value gap, closest to half, at most one extra piece from the user's roster). One `revised_offer_cards` row per declined offer, never rebuilt; a pass or like retires it; no revision of a revision; three per deck, newest first. No batch.
+**Consequences:**
+- A decline learned at this open shows on the next deck build, not a cached one.
+- Under the bilateral revisions a counter that grows a 2-for-1 to four assets cannot be priced by the evaluator, so it gets no middle ground.
+- The deck pipeline digest moves (pin pending with the coordinator).
+
 ## D-NEXT — The private Sleeper offers read: one throttled read with the send credential; consent covers the import, not the app's own offers
 
 **Date:** 2026-11-10 · **Who:** WS2b builder, under the operator's approval of the private read (offer-learnings plan §3 WS2b).

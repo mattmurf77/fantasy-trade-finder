@@ -4601,6 +4601,7 @@ DECK_PIPELINE_FUNCTIONS = (
     "_run_trade_job", "_run_value_core_job",
     # the candidate pool and injected cards
     "_inject_owned_picks", "_inject_likes_you_cards", "_inject_likes_you_cards_impl",
+    "_inject_revised_offer_cards",   # WS8: revised-offer cards lead the deck
     "_likes_you_cfg", "_likes_you_gate_level", "_likes_you_min_user_delta",
     "_likes_you_min_user_gain", "_likes_you_user_delta", "_likes_you_seed_value",
     "_likes_you_package_delta", "_likes_you_presentment_ok",
@@ -7004,7 +7005,8 @@ def _deck_note_moves(ev: _DeckEvidence, moves, first) -> None:
 # Served-card keys that mark deck_quality's protected cards (PROTECTED_ATTRS as
 # trade_card_to_dict names them; fatigue_retest serializes as "retest").
 _SERVED_PROTECTED_KEYS = ("likes_you", "source_like_impression_id", "standing_offer_reason",
-                          "injected", "wildcard", "retest", "owner_published")
+                          "injected", "wildcard", "retest", "owner_published",
+                          "revised_offer")   # WS8: a revised-offer card holds its place
 
 
 def _display_key(index: int, moves: Mapping) -> tuple:
@@ -8834,6 +8836,40 @@ def _inject_likes_you_cards(cards: list, trade_service, user_id: str,
                                             *args, **kwargs)
 
 
+def _inject_revised_offer_cards(cards: list, *, owner_context: dict, owner_request_evidence,
+                                user_id: str, league_id: str, players_dict: dict,
+                                trade_service) -> list:
+    """WS8 — put the revised-offer cards for the user's own declined offers
+    first (`trade_revised_offers.build`: at most three, newest decline first,
+    each bound to the evaluator's proof). They carry the request's owner
+    evidence like any owner card, are registered for the swipe route, and an
+    organic card with the same package and partner is dropped so the deck
+    never holds it twice. Flag off ⇒ `build` returns [] before any read."""
+    from . import trade_revised_offers as _revised
+    labels: dict = {}
+
+    def name(pid):
+        player = players_dict.get(pid)
+        if player is not None and getattr(player, "position", None) != "PICK":
+            return getattr(player, "name", None) or str(pid)
+        if pid not in labels:
+            labels.update(_pick_labels_by_id([pid]))
+        return labels.get(pid) or getattr(player, "name", None) or str(pid)
+
+    revised = _revised.build(user_id=user_id, league_id=league_id, context=owner_context, name=name)
+    if not revised:
+        return cards
+    keys = set()
+    for card in revised:
+        card.owner_request_evidence = owner_request_evidence
+        trade_service._trade_cards[card.trade_id] = card
+        keys.add((frozenset(card.give_player_ids), frozenset(card.receive_player_ids),
+                  card.target_user_id))
+    rest = [c for c in cards if (frozenset(c.give_player_ids), frozenset(c.receive_player_ids),
+                                 c.target_user_id) not in keys]
+    return revised + rest
+
+
 def _mirror_skip_rows(trade_service, job_id: str, ctx) -> list:
     """Convert the injector's `_mirror_skips` notes into shadow rows.
 
@@ -10345,6 +10381,14 @@ def _log_deck_signal_impressions(
         # by test_bakeoff_serving's flag-off golden).
         if getattr(card, "standing_offer_reason", None):
             features["standing_offer"] = True
+        # WS8 — a revised-offer card is attributable in its frozen features:
+        # its kind, the outcome row it answers, its own row, the step and the
+        # builder version. Never the copy. Key only when set (flag off ⇒
+        # features_json unchanged).
+        _revised = getattr(card, "revised_offer", None)
+        if isinstance(_revised, dict):
+            features["revised_offer"] = {k: _revised.get(k) for k in (
+                "kind", "outcome_id", "card_id", "source", "step_fraction", "version")}
         # trade.negmem — the §3.4 stamp trichotomy. ON-condition is
         # `nm_map is not None` (flag ON *and* the league allowlisted), and it
         # is checked here, not per card, so the key exists on EVERY row this
@@ -13774,6 +13818,28 @@ def _run_trade_job(
         # or re-sorted under the superseded personal/needs policy. Revalidate
         # the exact package after all earlier mutation layers; legacy cards
         # continue through their unchanged gates below.
+        # offer-learnings WS8 (flag trade.next_move) — revised-offer cards for
+        # the user's own declined offers lead the deck. Inserted here, before
+        # the owner revalidation, so they pass the same final gates as every
+        # owner card (re-proof, roster, significance, dispositions) and keep
+        # their slot: `injected` protects them from the bilateral presentment
+        # and the quality filter, as it does other injected cards. Organic
+        # owner-served decks only; never a prepared inventory or a background
+        # (replenish / calibration) build.
+        if (owner_context is not None and owner_serve and not preparation
+                and league_id != "league_demo" and not pinned_give and not pinned_receive
+                and not opponent_user_id and not trade_intent):
+            with _trade_jobs_lock:
+                _ro_background = bool((_trade_jobs.get(job_id) or {}).get("source"))
+            if not _ro_background:
+                try:
+                    final_cards = _inject_revised_offer_cards(
+                        final_cards, owner_context=owner_context,
+                        owner_request_evidence=owner_request_evidence,
+                        user_id=g_user_id, league_id=league_id,
+                        players_dict=players_dict, trade_service=trade_service)
+                except Exception as ro_err:
+                    log.warning("revised-offer cards failed (non-fatal): %s", ro_err)
         pre_owner_policy = list(final_cards)
         owner_cards = [c for c in final_cards if getattr(c, "owner_evaluation", None) is not None]
         if owner_cards:
@@ -21060,6 +21126,12 @@ def trade_card_to_dict(card, players: dict) -> dict:
     # cards stay byte-identical to the pre-likes-you shape.
     if getattr(card, "likes_you", False):
         out["likes_you"] = True
+    # WS8 (flag trade.next_move) — a revised-offer card: its kind and the one
+    # deterministic line (trade_narrative.revised_offer_line). Only set on
+    # cards trade_revised_offers built, so flag-off payloads are unchanged.
+    _revised = getattr(card, "revised_offer", None)
+    if isinstance(_revised, dict) and _revised.get("line"):
+        out["revised_offer"] = {"kind": _revised["kind"], "line": _revised["line"]}
     # #362 — standing-offer provenance. Recipient-facing; composed
     # server-side and carries NO team ids and NO counts (R-19). Serialized
     # only when set, so flag-off payloads stay byte-identical.

@@ -549,6 +549,10 @@ The lane-2a import path (D-058): the user opens DLF/Dynasty Nerds in an in-app b
 
 **Linked counter** — The other manager's counter-offer (`settings.is_counter`) tied to the offer it answers by the same two rosters, the other side as creator and its creation within 10 minutes of the original closing (`sleeper_offer_read.link_counters`). Sleeper itself does not record the link.
 
+**Revised-offer card** — A card that leads the deck because Sleeper showed one of the user's own sent offers declined: the same trade with one offered piece swapped for a slightly more valuable one (5–15% of the trade), proven by the engine's evaluator, shown once per declined offer and retired when passed (WS8, flag `trade.next_move`). Its line says the offer was declined and what changed, never why.
+
+**Middle ground** — The revised-offer card for a counter the user declined: it keeps what the user's offer and the counter share and moves the other manager's side about half of the market-value gap toward the counter.
+
 **Policy variant** — `legacy`, `personal_market_v1` or `value_core`: which eligibility/ranking/deck policy governed a deck job. **Orthogonal to `model_arm`** (which generator produced the card), and recorded separately so a result can be read overall *and* per generator. A deck never mixes variants — composition is part of the treatment and has to be evaluated as a coherent experience.
 
 **Value core** — The deck engine in `backend/value_core/` (flag `trade.value_core`, default off; testers first via `vc_testers_only`). It splits trade suggestion into two jobs: a core that finds every trade fair on consensus market value (the **fair pool**), and a ranking layer that orders that pool by three scores (**value**, **outlook**, **rank**), dropping nothing except lower-priority versions of the same **trade idea**. When it serves a job, none of the legacy gate or ordering stack runs. See [architecture](architecture.md#value-core-trade-engine) and [ADR-024](adr/adr-024-value-core-engine.md).

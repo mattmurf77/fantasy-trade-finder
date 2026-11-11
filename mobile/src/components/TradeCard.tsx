@@ -265,6 +265,12 @@ function TradeCardComp({
   const fitLinesShown = fitFirstEnabled && !data.edited ? data.fit_lines : undefined;
   const fitThem = fitLinesShown?.find((l) => l.side === 'them')?.text;
   const fitYou = fitLinesShown?.find((l) => l.side === 'you')?.text;
+  // WS8 revised-offer card — the server's one sentence saying the user's
+  // earlier offer was declined and what changed. Double-gated on the flag
+  // like the fit lines; an edited card hides it (it describes the package
+  // the server built, not the edit).
+  const revisedOfferEnabled = useFlag('trade.next_move');
+  const revisedLine = revisedOfferEnabled && !data.edited ? data.revised_offer?.line : undefined;
   // #384 ruling 1 — in the merged calculator experience the ✕ stays ONE
   // button and the reasons arrive as an overlay over the page, instead of
   // three inline tiles replacing the ✕. `reasonsAsOverlay` is a PROP (see the
@@ -624,6 +630,18 @@ function TradeCardComp({
           </View>
         )}
       </View>
+
+      {/* WS8 revised-offer card (flag trade.next_move) — first under the
+          header: what Sleeper showed and what changed, verbatim from the
+          server (backend/trade_narrative.py revised_offer_line). The fit
+          lines below then say why the new trade suits both teams. */}
+      {revisedLine ? (
+        <View style={styles.revisedOffer} testID="trade-card.revised-offer">
+          <ChalklineText style={[type.bodySm, styles.fitLineText]} testID="trade-card.revised-offer.line">
+            {revisedLine}
+          </ChalklineText>
+        </View>
+      ) : null}
 
       {/* WS4 fit-first copy (flag trade.fit_first_copy) — the card leads
           with why the offer suits the other team, then the viewer's team;
@@ -1162,6 +1180,9 @@ const styles = StyleSheet.create({
   // WS4 fit-first lines: two fitRow rows stacked; the text wraps in the row.
   fitLines: { gap: space.xs },
   fitLineText: { flexShrink: 1 },
+  // WS8 revised-offer line: a flare left rule (informational highlight,
+  // ADR-005) on the sentence; no fill, no radius.
+  revisedOffer: { borderLeftWidth: 2, borderLeftColor: flare.base, paddingLeft: space.sm },
   // Counterparty-breaker hesitation line: same hint-tier row construction as
   // fitRow, with the 6px square marker filled in flare — informational
   // highlight only (ADR-005); ice stays reserved for actions. Colors by token

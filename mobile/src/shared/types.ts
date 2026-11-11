@@ -253,6 +253,12 @@ export interface TradeCard {
   // team's first. Serialized only when a line fires; absent otherwise. The
   // card renders `text` only and never switches on `code`.
   fit_lines?: { side: 'them' | 'you'; code: string; text: string }[];
+  // WS8 revised-offer card (flag trade.next_move): the server led the deck
+  // with this card because Sleeper showed the user's own offer declined
+  // (`revision`) or the user declined the other manager's counter
+  // (`middle_ground`). `line` is the server's sentence (trade_narrative
+  // revised_offer_line); the card renders it verbatim. Absent otherwise.
+  revised_offer?: { kind: 'revision' | 'middle_ground'; line: string };
   // Structured "why this match" context stamped on every v2 card
   // (server.py trade_card_to_dict → match_context). Only the fields the
   // client reads are typed; extend as needed.

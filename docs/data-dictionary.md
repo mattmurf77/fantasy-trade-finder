@@ -190,6 +190,7 @@ counterparty board disclosure or client analytics event is added.
 - [`trade_proposals`](#trade_proposals)
 - [`trade_offer_outcomes`](#trade_offer_outcomes)
 - [`offer_import_consents`](#offer_import_consents)
+- [`revised_offer_cards`](#revised_offer_cards)
 - [`trade_policy_shadow`](#trade_policy_shadow)
 
 **Players / Drafts / Picks**
@@ -934,6 +935,29 @@ The user's permission to import their own Sleeper trade offers (WS2b, flag `trad
 | `via` | str, nullable | `settings` |
 
 Index: `ix_offer_import_consents_user` on `(user_id, id)`. A new table; no `migration_cols` row.
+
+---
+
+## `revised_offer_cards`
+
+The one card built for the user's own declined offer (offer-learnings WS8, flag `trade.next_move`; scope block `docs/plans/offer-learnings/scope-revised-offer-cards.md`). Written by `trade_revised_offers.build` from the deck worker the first time a deck looks at a source offer: a `trade_offer_outcomes` row of the user with `direction = 'sent'` and `status = 'declined'` (a revision) or `status = 'countered'` with `counter_status = 'declined'` (a middle ground). **Once only:** never rebuilt, so the offered price never climbs; a source whose terms equal any built card's terms is never revised again. Deleted and exported with the account (`accounts._ADDITIONAL_PRIVATE_TABLES`); a card whose source is an imported offer is deleted with it when the import consent is withdrawn.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | the card's `trade_id` is `revised_<id>` |
+| `user_id` | str | ACCOUNT id of the sender |
+| `league_id` | str | |
+| `outcome_id` | int | `trade_offer_outcomes.id` of the source offer. UNIQUE with `user_id` |
+| `kind` | str | `revision` · `middle_ground` |
+| `status` | str | `active` (served until acted on) · `none` (the evaluator proved no card; never retried) · `retired` |
+| `give_asset_ids`, `receive_asset_ids` | JSON text, nullable | the card's package from the user's side (NULL for `none`); re-proven by the evaluator on every deck build |
+| `change_json` | text, nullable | `trade_next_move`'s change: `{kind: swap_in_give, asset_id, replaces}` or `{kind: middle_ground, gap_share, added_give, removed_give, added_receive, removed_receive}` |
+| `step_fraction` | float, nullable | the other manager's net market gain over the original, as a share of the trade's market value |
+| `version` | str | `trade_revised_offers.VERSION` (`revised-offer-1`) |
+| `created_at` | str | server UTC |
+| `retired_at`, `retired_reason` | str, nullable | `acted` (the user passed or liked it: the evaluator answered `previous_disposition`) · `unavailable` (it no longer passes, or the partner no longer holds the ask) |
+
+Indexes: `uq_revised_offer_card_user_outcome` UNIQUE `(user_id, outcome_id)`; `ix_revised_offer_cards_user_league` on `(user_id, league_id)`. A new table; no `migration_cols` row.
 
 ---
 

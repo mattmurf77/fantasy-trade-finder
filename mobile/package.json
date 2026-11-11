@@ -23,6 +23,7 @@
     "test:calc-merged-behavior": "node tests/check-calc-merged-behavior.js",
     "test:fit-first-copy": "node tests/check-fit-first-copy.js",
     "test:offer-import": "node tests/check-offer-import.js",
+    "test:revised-offer-card": "node tests/check-revised-offer-card.js",
     "test:calc-merged-layout": "node tests/check-calc-merged-layout.js",
     "test:calc-partner-labels": "node tests/check-calc-partner-labels.js",
     "test:calc-pick-tiers": "node tests/check-calc-pick-tiers.js",

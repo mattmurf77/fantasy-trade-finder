@@ -784,6 +784,9 @@ _ADDITIONAL_PRIVATE_TABLES = (
     # offer-learnings WS2b: the consent to import the user's Sleeper offers
     # (the imported offers themselves are trade_offer_outcomes rows).
     "offer_import_consents",
+    # offer-learnings WS8: the revised-offer card built for the user's own
+    # declined offer.
+    "revised_offer_cards",
 )
 
 # Tables that name a person and are neither deleted nor exported here, each
