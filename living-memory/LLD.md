@@ -80,6 +80,8 @@ Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense match
 
 A ranking-only rule writes to support scores (keeping `support.revision_2_score` and `revision_4_adjustments`) and never to `utility`, market gain or the package, so eligibility is unchanged and presentment sees the same order signal. A dark numeric selector is popped from constructor reports and the selected-request hash unless it is exactly 1. A Calibration arm outside a round's equal-quota pair is an *additive arm*: folded after the paired order is fixed, credited on shared cards, inserted without reordering, failure isolated, and reported under `additive_arms`. [Scope](../docs/plans/offer-learnings/scope-revision-4.md).
 
+Partner activity (WS7, flag `trade.partner_activity`) follows the same rule and adds one convention: **database-derived generator input enters only through the owner context, as a key present only when its flag (and the selected engine that accepts it) is on**, loaded once per job. Only revision 4 accepts `partner_activity`; other engines would reject the kwarg, which is why the context gate checks the selector too. A rule that changes a proof's contents bumps the proof's `rules_version` only while its input is present. [Scope](../docs/plans/offer-learnings/scope-partner-activity.md).
+
 ## 2026-11-06 — Versioned outlook evidence contract
 
 V3 uses strict input_evidence kwargs while its durable envelope is retained once outside input and projected to exact offered assets per card. Default-dark selector and proof identity are fenced through generation/evaluation/presentation/currentness; old proofs remain immutable. See [policy](../docs/plans/outlook-evidence-rules/architecture.md).

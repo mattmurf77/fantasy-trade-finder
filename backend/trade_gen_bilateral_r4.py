@@ -15,12 +15,18 @@ or the priced package. Size (organic 1x1/1x2/2x1) is unchanged and pinned.
 2. Pay-picks tie-breaker (R1). Inside the existing comparable set only.
 3. Best-asset rule (R5). The other manager giving up the trade's most valuable
    asset for several lesser ones is demoted, except picks to a rebuilder/tanker.
+4. Partner activity (R8, plan §3 WS7). Only when the worker passes
+   `partner_activity` (flag `trade.partner_activity`): offers to a manager who
+   completes clearly fewer trades than their league-mates are demoted. The
+   threshold is the league's own; a league where everyone trades, or with too
+   little history, demotes nobody. Absent input: WS1's bytes exactly.
 
 No database, server, provider or network access occurs in this module.
 """
 
 from collections import Counter, defaultdict
 import heapq
+import statistics
 from time import perf_counter
 
 from . import trade_gen_owner as owner
@@ -41,6 +47,49 @@ _PICK_WANTING = frozenset(("jets", "rebuilder"))
 # below one that is clearly worse on both managers' support.
 BEST_ASSET_DEMOTION = 4 * incumbent._QUALITY_TOLERANCE
 _PICK_CLASS = {"pays_picks": 0, "players_only": 1, "picks_both_ways": 1, "asks_picks": 2}
+# Partner activity (WS7). Input: {league manager id: completed trades this
+# league year} from the stored public manager profiles. Starting rule (plan
+# §3 WS7): flagged at or below a third of the league median, only when that
+# median is at least two and at least half the league's managers have a
+# profile. A manager with no profile is never flagged.
+RULES_VERSION_PARTNER_ACTIVITY = "offer-learnings-1+partner-activity-1"
+PARTNER_ACTIVITY_THRESHOLD_SHARE = 1 / 3
+PARTNER_ACTIVITY_MIN_MEDIAN = 2
+PARTNER_ACTIVITY_MIN_PROFILED_SHARE = .5
+# Half the best-asset demotion: a one-season count is a weaker, noisier signal
+# than an offer's own shape. Still past the comparable set (.025 weaker, .05
+# total), so it moves a flagged offer below near-equal ones, not below
+# clearly better ones.
+PARTNER_ACTIVITY_DEMOTION = 2 * incumbent._QUALITY_TOLERANCE
+
+
+def _league_activity(counts, team_ids):
+    """The league's threshold from completed-trade counts, computed once per search."""
+    counts = {str(uid): n for uid, n in (counts or {}).items()
+              if isinstance(n, int) and not isinstance(n, bool) and n >= 0}
+    profiled = sorted(counts[uid] for uid in team_ids if uid in counts)
+    managers = len(team_ids)
+    median = statistics.median(profiled) if profiled else None
+    if not profiled or len(profiled) < PARTNER_ACTIVITY_MIN_PROFILED_SHARE * managers:
+        reason = "league_history_thin"
+    elif median < PARTNER_ACTIVITY_MIN_MEDIAN:
+        reason = "league_median_below_minimum"
+    else:
+        reason = None
+    threshold = median * PARTNER_ACTIVITY_THRESHOLD_SHARE if reason is None else None
+    flagged = frozenset(uid for uid in team_ids if threshold is not None
+                        and uid in counts and counts[uid] <= threshold)
+    if reason is None and not flagged:
+        reason = "every_manager_active"
+    return {"counts": counts, "flagged": flagged, "summary": {
+        "managers": managers, "managers_with_profile": len(profiled),
+        "league_median": median, "threshold": threshold,
+        "flagged_managers": len(flagged), "applies": bool(flagged),
+        "reason_not_applied": reason,
+        "threshold_share": PARTNER_ACTIVITY_THRESHOLD_SHARE,
+        "min_league_median": PARTNER_ACTIVITY_MIN_MEDIAN,
+        "min_profiled_share": PARTNER_ACTIVITY_MIN_PROFILED_SHARE,
+        "demotion": PARTNER_ACTIVITY_DEMOTION}}
 
 
 def _shift(side, delta, adjustments):
@@ -53,6 +102,20 @@ def _shift(side, delta, adjustments):
 
 
 class _Search(previous._Search):
+    def __init__(self, *, partner_activity=None, **kwargs):
+        super().__init__(**kwargs)
+        self.partner_activity = (None if partner_activity is None
+                                 else _league_activity(partner_activity, sorted(self.teams)))
+
+    def _partner_activity(self, target):
+        league = self.partner_activity
+        fired = target in league["flagged"]
+        return {**league["summary"], "counterparty_trades": league["counts"].get(target),
+                "counterparty_has_profile": target in league["counts"], "fired": fired,
+                "demotion": PARTNER_ACTIVITY_DEMOTION if fired else 0.0,
+                "source": "public_completed_trades_this_league_year",
+                "scope": "both_support_scores_order_only_inventory_kept"}
+
     def _pick_direction(self, give, receive):
         pays = any(self._position(p) == "PICK" for p in give)
         asks = any(self._position(p) == "PICK" for p in receive)
@@ -101,10 +164,20 @@ class _Search(previous._Search):
             "tie_breaker": {"order": "pays_picks_before_players_before_asks_picks",
                 "scope": "inside_existing_quality_tolerance",
                 "quality_tolerance": incumbent._QUALITY_TOLERANCE}}
-        data["counterparty"] = _shift(data["counterparty"], premium_delta - demotion,
-            {"pick_premium": premium_delta, "best_asset_demotion": -demotion})
-        data["viewer"] = _shift(data["viewer"], -demotion,
-            {"pick_premium": 0.0, "best_asset_demotion": -demotion})
+        counterparty = {"pick_premium": premium_delta, "best_asset_demotion": -demotion}
+        viewer = {"pick_premium": 0.0, "best_asset_demotion": -demotion}
+        activity = 0.0
+        if self.partner_activity is not None:
+            rule = self._partner_activity(card.target_user_id)
+            activity = rule["demotion"]
+            data["revision_4"].update(rules_version=RULES_VERSION_PARTNER_ACTIVITY,
+                                      partner_activity=rule)
+            counterparty["partner_activity_demotion"] = viewer["partner_activity_demotion"] = -activity
+        # Both sides, as the best-asset rule: the weaker score falls by the
+        # full amount, and presentment, which reads both, cannot undo it.
+        data["counterparty"] = _shift(data["counterparty"], premium_delta - demotion - activity,
+                                      counterparty)
+        data["viewer"] = _shift(data["viewer"], -demotion - activity, viewer)
 
     def _decision(self, card, data, reason, eligible=False):
         # Before bilateral-1 builds the weaker/total support block from sides.
@@ -219,6 +292,8 @@ def generate_bilateral_trades(**kwargs):
         rules["best_asset_demoted"] += applied["best_asset_rule"]["fired"]
         rules["best_asset_excepted"] += applied["best_asset_rule"]["exception"] is not None
         rules["pick_direction:" + applied["pick_direction"]] += 1
+        if "partner_activity" in applied:
+            rules["partner_activity_demoted"] += applied["partner_activity"]["fired"]
     report.update(support_weights=previous._WEIGHTS, term_efficiency=dict(counts),
         term_ordering={"version": previous.TERM_ORDERING_VERSION,
                        "comparisons_per_family": previous.TERM_LOOKAHEAD,
@@ -226,6 +301,9 @@ def generate_bilateral_trades(**kwargs):
         starter_evidence="dynasty_proxy_only_no_projected_points",
         revision_4={"rules_version": RULES_VERSION, "pick_premium": PICK_PREMIUM,
                     "best_asset_demotion": BEST_ASSET_DEMOTION,
-                    "pay_picks_tie_breaks": stats["pay_picks_tie_breaks"], **dict(rules)},
+                    "pay_picks_tie_breaks": stats["pay_picks_tie_breaks"], **dict(rules),
+                    **({"rules_version": RULES_VERSION_PARTNER_ACTIVITY,
+                        "partner_activity": search.partner_activity["summary"]}
+                       if search.partner_activity is not None else {})},
         elapsed_seconds=round(perf_counter() - started, 6))
     return cards, owner.OwnerGenerationReport(owner._dump(report))

@@ -662,6 +662,8 @@ of existing market prices, not projected points or championship probability.
 
 **Best-asset rule** — revision 4 demotes (never deletes) an uneven offer in which the other manager gives up the trade's most valuable asset for several lesser ones, unless those are all picks going to a rebuilding or tanking team.
 
+**Partner activity rule** (flag `trade.partner_activity`) — revision 4's fourth rule: offers to a manager whose completed trades this league year (public, from their manager profile) are at or below a third of their league's median are demoted, never deleted. Nobody is flagged when the league median is below 2, fewer than half the managers have a profile, or every manager is above the threshold; a manager with no profile is never flagged. A **reluctant trader** is a manager the rule flags. Never shown to users.
+
 **Additive Calibration arm** — an engine folded into a Calibration round's new decks after the paired selection (today `revision_4`), credited on shared cards and never reordering or reselecting the paired cards.
 
 **Calibration round** — a namespaced, frozen comparison exercise whose exact model versions, input snapshot, selected cards and first feedback remain attributable independently of earlier exercises. The outlook round collects descriptive opinions and does not validate future-production forecasts.

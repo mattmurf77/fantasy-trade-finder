@@ -1,3 +1,11 @@
+## 2026-11-10 — Partner activity in revision 4 (WS7, `trade.partner_activity`, dark)
+
+- Branch `feat/partner-activity` from `feat/offer-learnings` 78a4aae0; not merged. [Scope](../docs/plans/offer-learnings/scope-partner-activity.md).
+- New `backend/tests/test_partner_activity.py`: **26 passed** (non-trader demoted not removed; terms/eligibility unchanged; everyone-trades and flat leagues unchanged; thin history, no profiles and median < 2 unchanged; no profile never flagged; demotion ≤ best-asset and > the comparable set; a clearly better offer keeps its lead; presentment cannot undo; revalidation reproduces proofs; rules version and id-free report; revision 4 without the input byte-identical to WS1 on five worlds (goldens from WS1's module); public card dict unchanged except order; worker context: flag off → no key and same request hash, flag on without revision 4 → no read, flag on with revision 4 → one read; the loader). WS1's `test_bilateral_revision_4*.py` (75) unchanged and green.
+- Full backend suite (Python 3.12 venv): **14,194 passed, 42 skipped, 3 failed in 20m21s**. The 3 failures are `test_deck_pipeline_digest` (pinned, cosmetic-edit, constant-change), red by design: `_owner_generation_context` changed; new digest `2eb43a7eb21b0009`; `DECK_PIPELINE_VERSION` not bumped (coordinator). Closure test green.
+- Sabotages, each RED then GREEN on revert: no-demotion, counterparty-only, threshold-is-median, no-min-history, no-median-floor, missing-profile-is-zero, demotion-larger-than-best-asset, demotion-inside-tolerance, rules-version-unchanged, ids-in-report, entry-without-input, load-without-flag, load-without-revision-4, proof-on-public-card.
+- Recorded production requests (aggregate; real counts for 3 leagues from the public export, constructed for the rest): inventory identical in all 163; where the rule applies most of the first 30 moves, and first-30 offers to flagged managers fall 1,392 → 292 (real). Details in scope §7. No simulator/Maestro; no production action.
+
 ## 2026-11-10 — Manager profiles capture (flag on in config, branch `feat/manager-profiles`)
 
 - Local Python 3.12 venv, branch cut from `origin/main` d6fc338f. **Full suite: 13740 passed, 43 skipped, 0 failed** (12m14s). Required selection `-k "sleeper or roster or profile"`: **916 passed, 4 skipped**.

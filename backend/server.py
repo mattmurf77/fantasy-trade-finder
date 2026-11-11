@@ -146,7 +146,7 @@ from .database import (
     record_match_disposition,
     dismiss_match,
     upsert_league_preference, load_league_preference,
-    load_league_preferences_bulk,
+    load_league_preferences_bulk, load_manager_trade_counts,
     load_asset_preferences, set_asset_preference, ASSET_PREF_LISTS,
     sync_players, needs_player_sync,
     load_players, load_player, load_players_by_ids,
@@ -4578,7 +4578,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 19
+DECK_PIPELINE_VERSION = 20
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4724,6 +4724,7 @@ DECK_PIPELINE_PINS = {
     17: "a344340932da4f13",  # trade.fit_first_copy (default off): trade_card_to_dict adds fit_lines to bilateral cards whose proof supports a specific reason; flag off: no key, payload byte-identical.
     18: "560661f3c6d76b8d",  # Bilateral revision 4 (selector owner_bilateral_revision_4_enabled, default 0): presentment takes its version; the dark key is dropped from the request hash unless exactly 1; selector off: terms and order unchanged.
     19: "41b3e46c2f4c2e68",  # Fit block v3 (trade.fit_first_copy, default off): one league-wide rank context per job, stamped on owner cards; trade_card_to_dict adds fit_block; flag off: no context, no key, payload byte-identical.
+    20: "4e8e4cbd886c9149",  # Partner activity (trade.partner_activity, default off; revision 4 only): the owner context carries the league's public completed-trade counts; flag off or revision 4 not selected: context, hash, terms and order unchanged.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -21995,6 +21996,11 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
         exclusion_keys=(_load_presentment_exclusions(user_id, league.league_id)
                         if FLAGS.trade_presentment_rules else set()),
         config=config, **selection)
+    if FLAGS.trade_partner_activity and _bakeoff.owner_revision_4_enabled(config):
+        # WS7: one read per job of the public completed-trade counts revision 4
+        # compares within the league. Only revision 4 accepts the key, and
+        # flag-off contexts, evidence and request hashes never carry it.
+        context["partner_activity"] = load_manager_trade_counts(league.league_id)
     if _bakeoff.owner_revision_enabled(config):
         from .trade_input_evidence import detached_context, PoolInputEvidence
         pool = (g_universal_by_format.get(scoring_format)

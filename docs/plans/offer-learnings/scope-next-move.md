@@ -48,7 +48,7 @@ treatment from the mockup first.
   does no work, and no production module imports the generator. Every behavioural test is
   proven red against a named sabotage, listed in TEST_LEDGER.
 - [x] **Code-walk proof:** the rule and its use of the evaluator are traced in the module
-  docstring and in the D-NEXT decision entry; the measurement on synthetic leagues built from
+  docstring and in the D-218 decision entry; the measurement on synthetic leagues built from
   the real player-pool fixture is `measure_next_move.py` in this folder.
 - **Measured:** on eight synthetic 12-team leagues built from the real player fixture, with the
   first ten deck cards of each treated as sent offers, a revision is found for 50/80 offers under
