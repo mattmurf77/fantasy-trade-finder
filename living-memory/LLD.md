@@ -15,6 +15,7 @@ Linked calibration capture (2026-11-06): strict ESPN/MFL normalization reuses st
 Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense matching is private evidence of unchanged holdings, not full-roster fit or priced value. All holdings still count toward active capacity. Only offensive/pick legs proceed through the unchanged shared gates; fixed legs/cut plans fail. Unsupported constraints and account failures retain specific errors and failed GET polling does not requeue. [Contract](../docs/plans/calibration-coverage-repair/validation.md).
 
 ## Table of Contents
+- [2026-11-10 — Asset-pref vocabulary is four types; single membership spans all four](#2026-11-10--asset-pref-vocabulary-is-four-types-single-membership-spans-all-four)
 - [2026-11-06 — Versioned outlook evidence contract](#2026-11-06--versioned-outlook-evidence-contract)
 - [2026-11-04 — Export boundary and board-history owner fencing](#2026-11-04--export-boundary-and-board-history-owner-fencing)
 - [Authoritative References](#authoritative-references)
@@ -68,6 +69,10 @@ Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense match
 - [Deletion scrub: a work row in the deletion's transaction, two phases, one rule per field (2026-10-31, legal R28.20 (ii))](#deletion-scrub-a-work-row-in-the-deletions-transaction-two-phases-one-rule-per-field-2026-10-31-legal-r2820-ii)
 
 ---
+
+## 2026-11-10 — Asset-pref vocabulary is four types; single membership spans all four
+
+`asset_preferences.list_type` (`ASSET_PREF_LISTS`) is now `untouchable` \| `target` \| `not_interested` \| `trade_block` (D-212, roster-first setup). Both loaders return all four plural/snake keys (`untouchables`, `targets`, `not_interested`, `trade_block`) for every user they return, in every flag state. Single membership is per (user, league, player) across **all four** — `set_asset_preference` deletes before it inserts — so a client toggling Move ↔ Keep ↔ none never reconciles locally. The convention for a new list type that the engine reads: **persistence ungated, engine read gated at the one context loader** (`server._owner_generation_context` pops the key when the flag is off), and any evidence/hash that names the key includes it only when present, so flag-off bytes are unchanged. `trade_block` is read by the owner-v1 and bilateral constructors only (give-side mirror of `targets`); legacy v2/v3 and likes-you do not read it. Strings: [cross-client invariants § Asset preference list types](../docs/cross-client-invariants.md#asset-preference-list-types).
 
 ## 2026-11-06 — Versioned outlook evidence contract
 
