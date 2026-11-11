@@ -1,5 +1,15 @@
 # Decisions — Fantasy Trade Finder
 
+## D-NEXT — The private Sleeper offers read: one throttled read with the send credential; consent covers the import, not the app's own offers
+
+**Date:** 2026-11-10 · **Who:** WS2b builder, under the operator's approval of the private read (offer-learnings plan §3 WS2b).
+**Context:** Declines, withdrawals and counters are invisible on Sleeper's public API (D-216). `league_transactions_filtered` returns the signed-in user's own offers with every status; the app already holds the Send-in-Sleeper credential that can call it.
+**Decision:** One read (`sleeper_write.league_trade_offers`, trades only, no `player_map`) through the propose path's transport, called only from `server._sleeper_offers_sync`, at most once per (user, league) per 30 min, from Find a Trade (background thread) and the daily tick. A failed or unauthorised read changes nothing (the credential is not dropped, unlike a failed send) and backs off 24 h (auth) or 6 h (other). App-sent offers move to `declined` / `withdrawn` / `lapsed` / `countered` without the import consent; importing the user's other Sleeper offers needs an append-only consent at the current terms version, and revoking deletes the imports in the same transaction. Counters are linked by roster pair, side and a −60 s / +10 min window around the original's close.
+**Consequences:**
+- The status of an offer sent through the app is read from the user's own account without a separate consent; the operator can make consent cover it with one condition (scope §0.6).
+- Counter links are inferred, not given by Sleeper; their error rate is unmeasured until the operator labels a sample.
+- `trade_offer_outcomes`' unique key includes `user_id`, so two consenting managers of one league each keep their own row.
+
 ## D-218 — Fit-first card lines: the other team's line is built from public facts only
 
 **Date:** 2026-11-10 · **Who:** WS4 builder, under the operator's "the fit evaluation and description needs to be solid" (offer-learnings plan §1, R11).

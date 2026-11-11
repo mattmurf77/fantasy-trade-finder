@@ -781,6 +781,9 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "platform_write_consents", "platform_write_moves",
     # offer-learnings WS2: the provider outcome of the user's own sends.
     "trade_offer_outcomes",
+    # offer-learnings WS2b: the consent to import the user's Sleeper offers
+    # (the imported offers themselves are trade_offer_outcomes rows).
+    "offer_import_consents",
 )
 
 # Tables that name a person and are neither deleted nor exported here, each

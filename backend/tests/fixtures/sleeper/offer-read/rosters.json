@@ -1,0 +1,20 @@
+[
+ {
+  "roster_id": 1,
+  "owner_id": "700000000000000001",
+  "co_owners": null,
+  "players": []
+ },
+ {
+  "roster_id": 2,
+  "owner_id": "700000000000000002",
+  "co_owners": null,
+  "players": []
+ },
+ {
+  "roster_id": 3,
+  "owner_id": "700000000000000003",
+  "co_owners": null,
+  "players": []
+ }
+]

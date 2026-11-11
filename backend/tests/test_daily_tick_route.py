@@ -40,6 +40,7 @@ from backend.database import metadata
 URL = "/api/cron/daily-tick"
 HDR = {"X-Cron-Secret": "x"}
 STEP_KEYS = ["roster_snapshot", "usage_trends", "receipts_grade", "trade_outcomes",
+             "sleeper_offers",
              "rookie_monitor", "players_guard", "reengagement",
              "replenishment", "eval_nightly", "deletion_scrub", "value_model_refit"]
 NOW = datetime(2026, 10, 22, 13, 30, tzinfo=timezone.utc)   # a Thursday

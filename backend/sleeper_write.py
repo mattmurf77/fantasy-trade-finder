@@ -339,6 +339,14 @@ def build_propose_trade_body(req: ProposeTradeRequest) -> dict:
 # ---------------------------------------------------------------------------
 
 def _post_graphql(op: str, token: str, body: dict, *, _opener=None) -> dict:
+    node = _post_graphql_data(op, token, body, _opener=_opener) or {}
+    return {"transaction_id": node.get("transaction_id"), "status": node.get("status"), "raw": node}
+
+
+def _post_graphql_data(op: str, token: str, body: dict, *, _opener=None):
+    """POST one GraphQL operation and return its `data[op]` value as Sleeper
+    sent it (an object for the mutations, a list for the offers read), with
+    the trade path's transport, auth classification and observability."""
     if not token:
         raise SleeperAuthError("no Sleeper token available")
 
@@ -401,8 +409,7 @@ def _post_graphql(op: str, token: str, body: dict, *, _opener=None) -> dict:
             raise SleeperWriteError("Sleeper GraphQL error", detail=detail)
 
         _ob.ok(status=200, response_bytes=len(raw))
-        node = ((parsed.get("data") or {}) if isinstance(parsed, dict) else {}).get(op) or {}
-        return {"transaction_id": node.get("transaction_id"), "status": node.get("status"), "raw": node}
+        return ((parsed.get("data") or {}) if isinstance(parsed, dict) else {}).get(op)
 
 
 def propose_trade(token: str, req: ProposeTradeRequest, *, _opener=None) -> dict:
@@ -426,6 +433,56 @@ def reject_trade(token: str, league_id, transaction_id, leg: int = 1, *, _opener
     )
     body = {"operationName": "reject_trade", "variables": {}, "query": query}
     return _post_graphql("reject_trade", token, body, _opener=_opener)
+
+
+# ---------------------------------------------------------------------------
+# The signed-in user's own trade offers — a READ (offer-learnings WS2b, flag
+# `trade.sleeper_offer_import`). Shape: docs/plans/offer-learnings/
+# sleeper-offers-read.md. Only `league_id`, `type_filters` and `limit` are
+# sent (the arguments the capture exercised); no status filter, so every
+# status comes back. The selection set is the trade fields the app reads and
+# nothing else: no `player_map`, no message or chat field exists on it.
+# `metadata` and `settings` are opaque JSON scalars; the caller reads only
+# `metadata.rejecter_id`, `settings.is_counter` and `settings.expires_at`
+# from them and never stores either object.
+# ---------------------------------------------------------------------------
+
+OFFERS_READ_OP = "league_transactions_filtered"
+OFFERS_READ_LIMIT = 200
+_OFFERS_READ_QUERY = (
+    "query league_transactions_filtered($league_id: String!, $type_filters: [String], "
+    "$limit: Int) {\n"
+    "        league_transactions_filtered(league_id: $league_id, type_filters: $type_filters, "
+    "limit: $limit) {\n"
+    "          transaction_id\n          type\n          status\n          created\n"
+    "          status_updated\n          creator\n          roster_ids\n          consenter_ids\n"
+    "          adds\n          drops\n          draft_picks\n          waiver_budget\n"
+    "          metadata\n          settings\n        }\n      }"
+)
+
+
+def build_trade_offers_body(league_id, *, limit: int = OFFERS_READ_LIMIT) -> dict:
+    lid = str(league_id)
+    if not lid.isdigit():
+        raise SleeperWriteError("league_id must be a numeric string", kind="error")
+    return {
+        "operationName": OFFERS_READ_OP,
+        "variables": {"league_id": lid, "type_filters": ["trade"], "limit": int(limit)},
+        "query": _OFFERS_READ_QUERY,
+    }
+
+
+def league_trade_offers(token: str, league_id, *, limit: int = OFFERS_READ_LIMIT,
+                        _opener=None) -> list:
+    """The signed-in user's trade transactions in one league (every status).
+    Same transport, auth classification and redaction as Send in Sleeper.
+    Raises SleeperAuthError / SleeperWriteError; an answer that is not a
+    list raises SleeperWriteError (nothing is read from it)."""
+    data = _post_graphql_data(OFFERS_READ_OP, token,
+                              build_trade_offers_body(league_id, limit=limit), _opener=_opener)
+    if not isinstance(data, list):
+        raise SleeperWriteError("unexpected offers answer from Sleeper", kind="error")
+    return [t for t in data if isinstance(t, dict)]
 
 
 # ---------------------------------------------------------------------------
