@@ -691,6 +691,18 @@ Plan: [docs/plans/three-model-bakeoff/PLAN.md](plans/three-model-bakeoff/PLAN.md
 
 ---
 
+## Flags — Roster-first setup (2026-11-10 — ships **dark**)
+
+Plan: [docs/plans/roster-first-trade-setup/](plans/roster-first-trade-setup/scope.md) (D-212, D-213). **No new `model_config` keys** — the give-side `trade_block` weights mirror the hard-coded `targets` weights.
+
+| Flag | Default | Gates |
+|---|---|---|
+| `trades.roster_setup` | **false** (dark) | (1) The mobile roster-setup screen, the Trades entry card and the Trade DNA "Your roster" row. (2) The ENGINE READ of `asset_preferences.list_type='trade_block'` in the owner-v1 (`trade_gen_owner`) and bilateral (`trade_gen_bilateral`) constructors: +1 `preference_priority` per outgoing trade-block asset, +0.1 owner `_asset_interest` / +0.3 bilateral declared interest when `direction < 0`, and a focal outgoing trade-block asset joins the bilateral `declared_intent` path. OFF ⇒ `server._owner_generation_context` strips `trade_block` from every member's prefs (including a passed `viewer_preferences`), so constructor inputs, evidence, request hashes and cards are byte-identical to a league with no trade-block rows (pinned by `backend/tests/test_owner_trade_block.py`). Legacy v2/v3 and likes-you never read it. Not read by the default-dark revision arms (`trade_gen_bilateral_candidate`, `trade_gen_outlook_evidence`) beyond what they inherit. |
+
+**Persistence is deliberately NOT gated** (the #360 rule): `GET`/`POST /api/league/asset-prefs` always accept and return `trade_block`, so a kill-switch flip never destroys user data. **Rollback:** flip the key to `false` via `POST /api/feature-flags/reload` or `FTF_FLAGS`. Lighting or flipping it means four files (G-062): `config/features.json` plus `backend/tests/fixtures/flags/{release,onboarding-v2,profiles-on}.json`. **Graduation:** on for internal testers for 2 weeks, then completion rate ≥ 40% among users shown the step and a 7-day post-completion deck like rate not below the matched no-setup cohort (check the production `FTF_FLAGS` override list first, G-076).
+
+---
+
 ## Flags — "Avoiding" positions (#360/#361, 2026-08-19 — ships **ON**)
 
 Feature docs: [docs/feedback/items/360-avoiding-positions/](feedback/items/360-avoiding-positions/). A third row in the Trade DNA sheet, under Chasing and Shopping. **No new `model_config` keys** — the dormant `pos_conflict_penalty` / `pos_acquire_bonus` / `pos_tradeaway_bonus` multipliers stay dormant (D-360-1), so there is no new tuning surface to look for and no knob-inventory golden to edit.

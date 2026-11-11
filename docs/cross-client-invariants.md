@@ -1019,9 +1019,10 @@ Sign-in requests may carry `device_id` (body) or `X-Device-Id` (header) on `/api
 - `untouchable` — never offer this player FROM the owner's roster in generated trades (feedback #95)
 - `target` — bias suggestions toward acquiring this player
 - `not_interested` — never offer this player TO the owner in generated trades (#163 — receive-side hard filter, all gen paths incl. v3 sweeteners and likes-you injections; the give side is untouched, so the owner can still trade the player away)
+- `trade_block` — the owner is willing to MOVE this player (D-212, roster-first setup's "Move" state; the give-side twin of `target`). A **soft** bonus, never an "only offer these" filter, read by the owner-v1 and bilateral constructors only, and only when `trades.roster_setup` is on; legacy v2/v3 and likes-you ignore it. Players and owned pick ids both carry it. The roster-setup screen writes only `trade_block` \| `untouchable` \| `none` (Move / Keep / no opinion)
 - `none` — POST-body-only sentinel meaning "remove the tag" (never stored)
 
-A player holds at most one tag per (user, league). If you add a list type, update `ASSET_PREF_LISTS`, the mobile union type, and this list.
+A player holds at most one tag per (user, league) — single membership spans all four stored types, so Move ↔ Keep ↔ none needs no client reconciliation. The GET/POST response keys are `untouchables`, `targets`, `not_interested`, `trade_block` (both loaders, both flag states; mobile `AssetPrefs` in `mobile/src/api/league.ts`). The `list_type` value also rides the server events `asset_pref_added`/`asset_pref_removed`. If you add a list type, update `ASSET_PREF_LISTS`, both loaders' key maps, the mobile union type, and this list.
 
 ---
 

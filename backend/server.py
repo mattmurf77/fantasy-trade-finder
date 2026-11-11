@@ -4578,7 +4578,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 14
+DECK_PIPELINE_VERSION = 15
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4715,6 +4715,7 @@ DECK_PIPELINE_PINS = {
     12: "3b5a7de53dd0081e",  # Frozen calibration suppression input seam; organic defaults preserved.
     13: "1939e93dc5fd7de5",  # Cooperative cancellation; current-job terms/order preserved.
     14: "c35ce67a4434a981",  # Owner searches enforce every explicit give-all pin.
+    15: "a1901555b630076a",  # D-212 trade_block: owner context strips it when trades.roster_setup is off (flag-off terms/order byte-identical); assignment hash sorts it.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -21810,6 +21811,13 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
                      else preferences.get(uid) or {})
         if FLAGS.trade_preference_lists and not (uid == user_id and viewer_preferences is not None):
             prefs.update(load_asset_preferences(user_id=uid, league_id=league.league_id))
+        if not FLAGS.trades_roster_setup:
+            # D-212: the engine reads `trade_block` only behind the flag.
+            # Strip it here, the single context entry for every owner arm, so
+            # flag-off constructor inputs, evidence and request hashes are
+            # byte-identical to before the list type existed. Persistence is
+            # never gated (the #360 kill-switch rule).
+            prefs.pop("trade_block", None)
         prefs["starter_slots"] = [s for s in roster_slots if s not in ("BN", "IR", "TAXI")]
         prefs["lineup_source"] = "observed" if roster_slots else "estimated"
         prefs["roster_capacity"] = sum(s not in ("IR", "TAXI") for s in roster_slots) if roster_slots else None
@@ -21997,8 +22005,8 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
         member["roster"] = sorted(member["roster"])
         member.pop("board_updated_at", None)
     for prefs in canonical["manager_preferences"].values():
-        for key in ("untouchables", "targets", "not_interested", "acquire_positions",
-                    "trade_away_positions", "avoid_positions"):
+        for key in ("untouchables", "targets", "not_interested", "trade_block",
+                    "acquire_positions", "trade_away_positions", "avoid_positions"):
             if isinstance(prefs.get(key), list):
                 prefs[key] = sorted(prefs[key])
     exclusive = bool(serve and exclusive)
@@ -28279,10 +28287,12 @@ def set_league_preferences():
 @_gate_unverified_read
 def get_asset_prefs():
     """GET /api/league/asset-prefs?league_id=... — the caller's untouchables +
-    targets + not-interested list for a league (backlog #2, #163).
+    targets + not-interested + trade-block lists for a league (backlog #2,
+    #163, D-212).
 
     Response: {"untouchables": [player_id, ...], "targets": [player_id, ...],
-               "not_interested": [player_id, ...]}
+               "not_interested": [player_id, ...], "trade_block": [player_id, ...]}
+    `trade_block` is returned in both states of `trades.roster_setup`.
     """
     sess = _require_initialized_session()
     sess["last_active"] = time.time()
@@ -28302,9 +28312,11 @@ def set_asset_prefs():
     """POST /api/league/asset-prefs — tag/untag one player for a league (#2, #163).
 
     Body: {"league_id": "...", "player_id": "4046",
-           "list": "untouchable" | "target" | "not_interested" | "none"}
+           "list": "untouchable" | "target" | "not_interested" | "trade_block" | "none"}
     "none" removes any tag. A player can hold only one tag per league (setting
-    a new one replaces the old). Returns the refreshed lists.
+    a new one replaces the old). Returns the refreshed lists. `trade_block`
+    is accepted in both states of `trades.roster_setup` (persistence is never
+    gated; the flag only decides whether the engine reads it).
     """
     sess = _require_initialized_session()
     sess["last_active"] = time.time()
