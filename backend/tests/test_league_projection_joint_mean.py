@@ -35,7 +35,7 @@ def fixture(actual=20,maximum=30):
         t.update(actual_history=['10','30'],points_for='40',points_against='40',maxpf='40')
     for detail in source['weeks'][0]['teams'].values():
         detail['actual']['points']=str(actual);detail['maxpf']['points']=str(maximum)
-    cfg=config();cfg.update(iterations=30000,persistent_sd=5,residual_correlation=0,historical_weight=0)
+    cfg=config();cfg.update(iterations=30000,residual_correlation=0)
     return source,cfg
 
 
@@ -52,8 +52,7 @@ def test_nonzero_gap_realized_mean_variance_and_correlation_match_analytic_model
 
 def test_rounding_bound_is_explicit_for_deterministic_subcent_means():
     source,cfg=fixture(20.003,20.006)
-    for t in source['teams']:t.update(actual_history=['0','0'],points_for='0',points_against='0',maxpf='0')
-    cfg.update(iterations=100,persistent_sd=0)
+    cfg.update(iterations=100,score_sd=0)
     result=simulation.simulate(source,cfg)
     for t in result['teams']:
         d=t['weeks'][0]['maxpf_floor']
@@ -83,9 +82,7 @@ def test_actual_outcomes_keep_identical_rng_path_to_unshifted_floor(monkeypatch,
 
 def test_diagnostic_variance_survives_large_location_small_variance():
     source,cfg=fixture(9e6,9e6+.5)
-    for t in source['teams']:
-        t.update(actual_history=['0','0.2'],points_for='0.2',points_against='0.2',maxpf='0.2')
-    cfg.update(iterations=10000,persistent_sd=0,score_decimals=3)
+    cfg.update(iterations=10000,score_sd=.125,score_decimals=3)  # variance .015625 at a 9e6 location
     result=simulation.simulate(source,cfg)
     for t in result['teams']:
         d=t['weeks'][0]['maxpf_floor']

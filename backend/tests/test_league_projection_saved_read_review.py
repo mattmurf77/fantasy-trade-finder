@@ -71,7 +71,7 @@ def test_scenario_still_loads_exact_full_snapshot_but_never_exposes_it(client,en
     monkeypatch.setattr(store,'create',create)
     monkeypatch.setattr(store,'public_rows',lambda *a,**k:pytest.fail('scenario used public row instead of saved full inputs'))
     with selected(engine) as statements:
-        r=http.post('/api/leagues/123/projection-runs',json={'baseline_run_id':rid,'config':{**cfg,'historical_weight':.4}})
+        r=http.post('/api/leagues/123/projection-runs',json={'baseline_run_id':rid,'config':{**cfg,'seed':cfg['seed']+1}})
     assert r.status_code==202 and saved[0][3]['snapshot']==snapshot
     assert saved[0][0:2]==('account','123')
     assert len(statements)==1 and 'snapshot_json' in {c.name for c in statements[0].selected_columns}

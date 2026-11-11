@@ -9,6 +9,7 @@ from sqlalchemy.dialects import postgresql
 
 from backend import database as db
 from backend.league_projections import api, batch, store
+from backend.league_projections.core import VERSION
 from backend.tests.test_league_projection_routes import client, engine
 
 PUBLIC_FIELDS = {'run_id', 'status', 'created_at', 'updated_at', 'input_hash', 'reason', 'details_json', 'result_json'}
@@ -21,7 +22,7 @@ def seed(engine, *, attempt='same', age=0):
     result = {'teams': [{'roster_id': 1, 'weeks': [{'week': 9, 'actual_mean': 100}],
                         'pick_owner_roster_id': 1, 'playoff_probability': .6, 'nonplayoff_probability': .4,
                         'maxpf_mean': 120, 'conditional_expected_pick': 1.5, 'nonplayoff_samples': 400}],
-              'schema': 'synthetic', 'model_version': 'synthetic', 'config': {}, 'seed': 1, 'iterations': 1000,
+              'schema': 'synthetic', 'model_version': VERSION, 'config': {}, 'seed': 1, 'iterations': 1000,
               'snapshot_hash': 'synthetic', 'source': 'synthetic', 'captured_at': now.isoformat(), 'coverage': {}, 'warnings': []}
     row = {'run_id': first, 'user_id': 'account', 'league_id': '123', 'status': 'complete',
            'created_at': (now-timedelta(days=age)).isoformat(), 'updated_at': now.isoformat(),

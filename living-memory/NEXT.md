@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [Priority Queue](#priority-queue)
+- [2026-11-11 — Projection model v5: TestFlight build and checklist, first v5 forecasts, then calibrate the SD](#2026-11-11--projection-model-v5-testflight-build-and-checklist-first-v5-forecasts-then-calibrate-the-sd)
 - [2026-11-10 — Offer learnings and fast deck are on: device checklists, first production reads, then revision 4](#2026-11-10--offer-learnings-and-fast-deck-are-on-device-checklists-first-production-reads-then-revision-4)
 - [2026-11-10 — Roster-first setup (#637, flag on): TestFlight build + checklist, MOD-M1 call](#2026-11-10--roster-first-setup-637-flag-on-testflight-build--checklist-mod-m1-call)
 - [2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on](#2026-11-02--web-landing-update-1-cut-the-espnmfl-panels-or-enter-a-league-id-and-no-extra-account-needed-before-web-entry-ever-turns-on)
@@ -71,6 +72,15 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 6. Address the separate board-history deletion race and wider private deck export filtering; scrub/reader merges do not prove these complete.
 7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state.
 
+
+## 2026-11-11 — Projection model v5: TestFlight build and checklist, first v5 forecasts, then calibrate the SD
+
+*Why now:* the backend and web are live on merge; the app screens are not in build 184, and the SD is a provisional number.
+
+1. Cut a TestFlight build and run the 10-step checklist in [`../docs/plans/league-projections/v5-scope.md`](../docs/plans/league-projections/v5-scope.md).
+2. Read the first v5 forecasts in production (aggregates): how many leagues come back complete, incomplete, or stopped with `missing_weekly_projections`. One incomplete slot withholds the suggestion for a whole league; loosen the rule if that is most leagues.
+3. Calibrate `model.score_sd` on real pregame snapshots once a few weeks of v5 runs exist (method in `docs/plans/league-projections/universal-sd/README.md`). Raise retention or copy the pairs out first: runs are kept 7 days.
+4. Operator calls: an event for "suggestion shown / taken" (none exists); whether a team with only unsigned or position-less players should stop a league's run (it does today).
 
 ## 2026-11-10 — Offer learnings and fast deck are on: device checklists, first production reads, then revision 4
 

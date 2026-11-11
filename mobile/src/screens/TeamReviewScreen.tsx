@@ -7,8 +7,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigation } from '@react-navigation/native';
 
 import ChalkText from '../components/chalkline/Text';
+import Badge from '../components/chalkline/Badge';
 import { AnalystAvatar } from '../components/analyst';
-import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
+import { ink, chalk, ice, flare, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { useFinderTargets } from '../state/useFinderTargets';
@@ -71,6 +72,19 @@ const OUTLOOK_LABEL: Record<OutlookOption, string> = {
   jets: 'Full teardown',
   not_sure: 'Not sure',
 };
+
+/** The outlook to send as `team_outlook` when the user is saving something
+ *  ELSE (positions) and has neither a saved outlook nor a pick this visit.
+ *  Under `source: 'projection'`, `inferred` is the playoff forecast's
+ *  SUGGESTION, which must never be saved without an explicit choice — so the
+ *  backfill is the roster verdict instead. Any other source: `inferred`, as
+ *  before. Explicit choices (Confirm on the window beat, a chip tap) do not
+ *  come through here. */
+function backfillOutlook(w: TeamReviewResponse['window'] | undefined): OutlookOption {
+  if (!w) return 'not_sure';
+  if (w.source === 'projection') return w.roster_inferred ?? 'not_sure';
+  return w.inferred ?? 'not_sure';
+}
 
 const BAND_LABEL: Record<PlayoffBand, string> = {
   likely: 'Likely', tossup: 'Toss-up', unlikely: 'Unlikely',
@@ -192,9 +206,10 @@ export default function TeamReviewScreen() {
       // beat could only ever show the window. Backfill the field here, in the
       // one place every beat writes through: session choice, then the stored
       // declaration, then the inference. An explicit value in `patch` still
-      // wins, because the spread comes second.
+      // wins, because the spread comes second. The inference leg goes through
+      // `backfillOutlook`, so a forecast suggestion is never saved here.
       const fallbackOutlook: OutlookOption =
-        outlook ?? data?.window.declared ?? data?.window.inferred ?? 'not_sure';
+        outlook ?? data?.window.declared ?? backfillOutlook(data?.window);
       await saveLeaguePreferences(
         leagueId, { team_outlook: fallbackOutlook, ...patch } as any,
       );
@@ -509,25 +524,62 @@ function Window({
   const starterScored = composite && typeof wStarter === 'number';
   const wPlayoff = m?.w_playoff_index;
   const playoffScored = composite && !!po && po.applied && typeof wPlayoff === 'number';
+  // The playoff forecast's recommendation. `projection` is absent while
+  // `league.projection_outlook` is off, and the beat then reads exactly as it
+  // did before. The SERVER classified the unrounded probability and wrote
+  // `suggestion` / `explanation`; this beat renders them and decides nothing.
+  // It marks a chip and never selects or saves one — Confirm is the write.
+  const pr = w.projection;
+  const recommended = w.source === 'projection' && pr?.status === 'available'
+    ? pr.recommended_outlook : null;
+  const fromProjection = !!pr && !!recommended;
   return (
     <View testID="team-review.beat.window">
       <Bubble pose="thinking">
-        {w.inferred === 'rebuilder'
-          ? "You're built for later, not for now."
-          : w.inferred === 'contender'
-            ? "You're built to win now — but check I've got that right."
-            : "I can't tell which way you're pointed. You can."}
+        {fromProjection && pr.explanation
+          ? pr.explanation
+          : w.inferred === 'rebuilder'
+            ? "You're built for later, not for now."
+            : w.inferred === 'contender'
+              ? "You're built to win now — but check I've got that right."
+              : "I can't tell which way you're pointed. You can."}
       </Bubble>
 
       <View style={styles.card}>
         <ChalkText style={styles.kicker}>
-          {fromOdds
-            ? 'Your window · from your playoff odds'
-            : composite
-              ? 'Your window · from your starters, your picks and your age'
-              : 'Your window · inferred from roster shape'}
+          {fromProjection
+            ? 'Your window · from your playoff chance'
+            : fromOdds
+              ? 'Your window · from your playoff odds'
+              : composite
+                ? 'Your window · from your starters, your picks and your age'
+                : 'Your window · inferred from roster shape'}
         </ChalkText>
         <ChalkText style={styles.headline}>{OUTLOOK_LABEL[w.inferred]}</ChalkText>
+        {/* Shown only when the recommendation is not the saved outlook. The
+            one decimal matches Home and Standings. */}
+        {fromProjection && pr.differs ? (
+          <View testID="team-review.window.projection">
+            <ChalkText style={styles.read}>
+              {typeof pr.playoff_probability === 'number'
+                ? `${(pr.playoff_probability * 100).toFixed(1)}% playoff chance · ` : ''}
+              {`Consider ${OUTLOOK_LABEL[recommended]}`}
+            </ChalkText>
+            {pr.suggestion ? (
+              <ChalkText style={styles.read}>{pr.suggestion}</ChalkText>
+            ) : null}
+          </View>
+        ) : null}
+        {/* The roster model's answer stays on screen, as context rather than
+            as the verdict. */}
+        {fromProjection && w.roster_inferred ? (
+          <ChalkText style={styles.dim}>
+            {`Roster shape reads as ${OUTLOOK_LABEL[w.roster_inferred]}.`}
+          </ChalkText>
+        ) : null}
+        {!fromProjection && pr?.status === 'unavailable' && pr.explanation ? (
+          <ChalkText style={styles.dim}>{pr.explanation}</ChalkText>
+        ) : null}
         {/* #371 — when the odds drove, the roster model's own answer stays on
             screen. Two models disagreeing is information; hiding one is not. */}
         {fromOdds && w.odds ? (
@@ -540,14 +592,14 @@ function Window({
         {/* #372 — under the composite these two lines would double up with the
             Playoff likelihood card below, which states the same refusal beside
             the band it applies to. One statement of a fact, not two. */}
-        {!composite && !fromOdds && w.odds_reason === 'preseason' && w.odds ? (
+        {!composite && !fromOdds && !fromProjection && w.odds_reason === 'preseason' && w.odds ? (
           <ChalkText style={styles.fine}>
             {`Your playoff odds read ${BAND_LABEL[w.odds.band].toLowerCase()}, but `}
             {'nobody has played a game yet, so we are not letting a preseason '}
             {'simulation set your window. Roster shape below.'}
           </ChalkText>
         ) : null}
-        {!composite && !fromOdds && w.odds_reason === 'odds_unavailable' ? (
+        {!composite && !fromOdds && !fromProjection && w.odds_reason === 'odds_unavailable' ? (
           <ChalkText style={styles.fine}>
             We do not have playoff odds for this league, so this is roster shape only.
           </ChalkText>
@@ -702,7 +754,9 @@ function Window({
 
       {m ? (
         <View style={styles.card} testID="team-review.window.inputs">
-          <ChalkText style={styles.kicker}>Every input behind that call</ChalkText>
+          <ChalkText style={styles.kicker}>
+            {fromProjection ? 'Behind the roster-shape read' : 'Every input behind that call'}
+          </ChalkText>
           <Row
             label={`Veteran share ${pct(w.signals.vet_share)} × ${m.w_vet_share}`}
             value={signed(m.w_vet_share * w.signals.vet_share)}
@@ -781,18 +835,29 @@ function Window({
 
       <ChalkText style={styles.dim}>Is that right? This steers every trade we show you.</ChalkText>
       <View style={styles.chips}>
-        {w.options.map((o) => (
-          <Pressable
-            key={o}
-            testID={`team-review.outlook.${o}`}
-            onPress={() => onSelect(o)}
-            style={[styles.chip, selected === o && styles.chipSel]}
-          >
-            <ChalkText style={[styles.chipText, selected === o && styles.chipTextSel]}>
-              {OUTLOOK_LABEL[o]}
-            </ChalkText>
-          </Pressable>
-        ))}
+        {w.options.map((o) => {
+          const suggested = fromProjection && recommended === o;
+          return (
+            <Pressable
+              key={o}
+              testID={`team-review.outlook.${o}`}
+              accessibilityLabel={
+                suggested ? `${OUTLOOK_LABEL[o]}, suggested from your playoff chance` : undefined
+              }
+              onPress={() => onSelect(o)}
+              style={[styles.chip, suggested && styles.chipSuggested, selected === o && styles.chipSel]}
+            >
+              <ChalkText style={[styles.chipText, selected === o && styles.chipTextSel]}>
+                {OUTLOOK_LABEL[o]}
+              </ChalkText>
+              {suggested ? (
+                <View testID="team-review.outlook.suggested">
+                  <Badge label="Suggested" color={flare.base} colorText />
+                </View>
+              ) : null}
+            </Pressable>
+          );
+        })}
       </View>
     </View>
   );
@@ -1114,7 +1179,9 @@ function Plan({
   useEffect(() => {
     if (!saved) return;
     setDraft({
-      outlook: saved.team_outlook ?? data.window.declared ?? data.window.inferred,
+      // A positions tap posts this as `team_outlook`, so with nothing saved it
+      // is the backfill, never the forecast suggestion.
+      outlook: saved.team_outlook ?? data.window.declared ?? backfillOutlook(data.window),
       acquire: saved.acquire_positions ?? [],
       shed: saved.trade_away_positions ?? [],
     });
@@ -1367,6 +1434,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: ink.lineStrongA11y, borderRadius: radii.sm,
     paddingHorizontal: 10, paddingVertical: 6,
   },
+  chipSuggested: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
   chipSel: { borderColor: ice.base, backgroundColor: 'rgba(86,217,236,0.08)' },
   chipText: { ...type.bodySm, color: chalk.dim },
   chipTextSel: { color: ice.base },

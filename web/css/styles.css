@@ -5207,3 +5207,7 @@ html:has(#auth-screen:not(.hidden)), body:has(#auth-screen:not(.hidden)) { overf
 .league-projection-batch details { border-top: 1px solid var(--line); }
 .league-projection-batch summary { min-height: 44px; box-sizing: border-box; padding-block: 12px; cursor: pointer; color: var(--chalk); }
 .league-projection-batch details > details { margin-inline-start: 12px; }
+/* Outlook suggestion from the saved forecast: flare marks information, the button stays a plain action. */
+.league-projection-outlook { padding: 8px 12px; margin-block: 8px; border: 1px solid var(--line); border-left: 2px solid var(--flare); border-radius: 4px; }
+.league-projection-outlook p:first-child { color: var(--chalk); font-weight: 700; }
+.outlook-suggested-tag.outlook-review-tag { color: var(--flare); }

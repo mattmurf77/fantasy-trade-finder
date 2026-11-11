@@ -8,9 +8,33 @@ from backend.league_projections.scoring import best_available, BEST_AVAILABLE
 from backend.tests.test_league_projection_native_capture import native_world, run
 
 
+FEED='https://api.sleeper.app/projections/nfl/2026/3?season_type=regular'
+
+
 def world():
     source,cfg=native_world();cfg['scoring_contract']=BEST_AVAILABLE
     return source,cfg
+
+
+def add_priced_teammate(source):
+    """Roster 2 gains p5, a WR projected for 4 points, beside its TE p2."""
+    source[f'{provider.API}/league/123/rosters'][1]['players'].append('p5')
+    source[f'{provider.API}/players/nfl']['p5']={'fantasy_positions':['WR'],'position':'WR','team':'T1'}
+    row=deepcopy(next(r for r in source[FEED] if r['player_id']=='p2'));row.update(player_id='p5')
+    row['stats']={'gp':1,'rec':2,'rec_yd':20,'pts_std':2,'pts_half_ppr':3,'pts_ppr':4}
+    source[FEED].append(row)
+
+
+def drop_projection(source,pid):
+    source[FEED]=[row for row in source[FEED] if row['player_id']!=pid]
+
+
+def assert_missing_weekly_projections(source,cfg,lanes):
+    """The run stops; completed team scoring never stands in for a projection."""
+    with pytest.raises(Unavailable) as error:run(source,cfg)
+    assert error.value.reason=='missing_weekly_projections'
+    assert error.value.state=='incomplete_projections'
+    assert error.value.details=={'week':3,'lanes':lanes}
 
 
 @pytest.mark.parametrize('raw',[None,{}, {'stats':{}},{'stats':{'gp':1}}])
@@ -37,15 +61,24 @@ def test_direct_idp_kicker_negative_contributions_use_custom_coefficients():
     assert result['missing_keys']==['idp_blk_kick']
 
 
-def test_missing_player_does_not_block_known_team_and_uses_known_history_for_unpriced_team():
-    source,cfg=world();source['https://api.sleeper.app/projections/nfl/2026/3?season_type=regular'].pop()
+def test_missing_player_does_not_block_known_team_and_wholly_unpriced_team_stops_the_run():
+    # A missing player beside a priced teammate: both teams keep a number.
+    source,cfg=world();add_priced_teammate(source);drop_projection(source,'p2')
     snapshot=run(source,cfg);teams=snapshot['weeks'][0]['teams']
     assert Decimal(teams['1']['modeled_actual_projection'])==8
-    assert Decimal(teams['2']['modeled_actual_projection'])==Decimal('7.5')
-    assert Decimal(teams['2']['modeled_maxpf_projection'])==10
-    assert teams['2']['actual']['lineup'][0]['player'] is None
-    assert teams['2']['projection_coverage']['fallback']=='completed_team_history'
+    assert Decimal(teams['2']['modeled_actual_projection'])==4  # p5 alone; not the 7.5 completed average.
+    assert Decimal(teams['2']['modeled_maxpf_projection'])==4
+    assert teams['2']['actual']['lineup'][0]['player']['player_id']=='p5'
+    coverage=teams['2']['projection_coverage']
+    assert [(p['player_id'],p['positions']) for p in coverage['unpriced_players']]==[('p2',['TE'])]
+    assert coverage['estimated'] and coverage['complete'] and coverage['missing_actual_slots']==[]
+    assert 'fallback' not in coverage and 'fallback_lanes' not in coverage
+    assert snapshot['coverage']['estimate_status']=='complete' and snapshot['coverage']['unpriced_player_weeks']==1
+    assert 'history_fallback_team_weeks' not in snapshot['coverage']
     assert simulation.simulate(snapshot,cfg)['status']=='complete'
+    # The same missing player as the team's only one: no projected lineup, no forecast.
+    source,cfg=world();drop_projection(source,'p2')
+    assert_missing_weekly_projections(source,cfg,['actual','maxpf'])
 
 
 def test_missing_custom_events_yield_partial_contributions_not_league_refusal():
@@ -60,17 +93,28 @@ def test_missing_custom_events_yield_partial_contributions_not_league_refusal():
 
 def test_unknown_nfl_team_is_unpriced_not_a_bye_or_confirmed_zero():
     source,cfg=world();source[f'{provider.API}/players/nfl']['p2']['team']=None
+    # Alone on the roster the player is unknown, so the run stops: a bye or a
+    # confirmed zero would have produced a zero-point lineup instead.
+    assert_missing_weekly_projections(source,cfg,['actual','maxpf'])
+    add_priced_teammate(source)
     snapshot=run(source,cfg);detail=snapshot['weeks'][0]['teams']['2']
     assert detail['projection_coverage']['unpriced_players'][0]['reason']=='unknown_nfl_team'
-    assert detail['projection_coverage']['fallback']=='completed_team_history'
+    assert detail['projection_coverage']['unpriced_players'][0]['positions']==['TE']
     assert not any(p['reason']=='bye' for p in detail['exclusions'])
+    assert [r['player']['player_id'] for r in detail['actual']['lineup']]==['p5']
+    assert Decimal(detail['modeled_actual_projection'])==4
 
 
-def test_empty_successful_feed_uses_labeled_history_and_transport_error_does_not():
+def test_empty_successful_feed_stops_the_run_without_a_history_number_and_transport_error_propagates(monkeypatch):
     source,cfg=world();key='https://api.sleeper.app/projections/nfl/2026/3?season_type=regular';source[key]=[]
-    snapshot=run(source,cfg)
-    assert snapshot['coverage']['weekly_feed_states']=={'3':'empty_response'}
-    assert snapshot['coverage']['history_fallback_team_weeks']==2
+    original=provider.SleeperExperimentalFeed.weeks;states=[]
+    def weeks(self,*args):
+        result=original(self,*args);states.append(result['coverage']['weekly_feed_states']);return result
+    monkeypatch.setattr(provider.SleeperExperimentalFeed,'weeks',weeks)
+    # The empty response is still told apart from an outage, but it no longer
+    # yields a forecast built from completed team scoring.
+    assert_missing_weekly_projections(source,cfg,['actual','maxpf'])
+    assert states==[{'3':'empty_response'}]
     def fetch(url):
         if url==key:raise TimeoutError('synthetic outage')
         return deepcopy(source[url])
@@ -81,9 +125,18 @@ def test_empty_successful_feed_uses_labeled_history_and_transport_error_does_not
 def test_missing_taxi_forecast_does_not_invent_actual_lineup_projection():
     source,cfg=world();rosters=source[f'{provider.API}/league/123/rosters']
     rosters[1]['taxi']=['p2'];source['https://api.sleeper.app/projections/nfl/2026/3?season_type=regular'].pop()
+    # Only the Max PF lane is missing: a taxi player is no part of the actual
+    # lineup, so the actual lane is neither reported missing nor invented.
+    assert_missing_weekly_projections(source,cfg,['maxpf'])
+    # With a priced active player, the unprojected taxi player changes nothing
+    # in the actual lineup and leaves no actual slot missing.
+    source,cfg=world();add_priced_teammate(source);drop_projection(source,'p5')
+    source[f'{provider.API}/league/123/rosters'][1]['taxi']=['p5']
     detail=run(source,cfg)['weeks'][0]['teams']['2']
-    assert detail['modeled_actual_projection']=='0'
-    assert detail['projection_coverage']['fallback_lanes']==['maxpf']
+    assert Decimal(detail['modeled_actual_projection'])==Decimal('7.5')
+    assert detail['projection_coverage']['complete'] and detail['projection_coverage']['missing_actual_slots']==[]
+    assert [p['player_id'] for p in detail['projection_coverage']['unpriced_players']]==['p5']
+    assert not detail['projection_coverage']['unpriced_players'][0]['actual_eligible']
 
 
 def test_malformed_source_identity_and_numeric_values_still_fail():
@@ -99,7 +152,8 @@ def test_available_zero_is_used_even_when_history_is_positive():
     source[key][1]['stats']={'gp':1,'rec':0,'rec_yd':0,'pts_std':0,'pts_half_ppr':0,'pts_ppr':0}
     detail=run(source,cfg)['weeks'][0]['teams']['2']
     assert detail['modeled_actual_projection']=='0.00'
-    assert detail['projection_coverage']['fallback'] is None
+    assert detail['projection_coverage']['complete'] and detail['projection_coverage']['missing_actual_slots']==[]
+    assert detail['projection_coverage']['unpriced_players']==[]
     assert detail['projection_coverage']['priced_actual_pool']==1
 
 
@@ -193,9 +247,13 @@ def test_observed_maxpf_floor_conditions_remaining_unknown_bench_distribution():
 
 
 def test_empty_or_unpriced_lineup_is_not_declared_fully_observed():
-    source,cfg=world();source['https://api.sleeper.app/projections/nfl/2026/3?season_type=regular']=[]
+    # Nothing priced at all: no snapshot, so nothing can be declared observed.
+    source,cfg=world();source[FEED]=[]
+    assert_missing_weekly_projections(source,cfg,['actual','maxpf'])
+    # One unpriced player beside a priced teammate: a projection, not an observation.
+    source,cfg=world();add_priced_teammate(source);drop_projection(source,'p2')
     snapshot=run(source,cfg)
-    assert all(not t['actual_score_observed'] for t in snapshot['weeks'][0]['teams'].values())
+    assert all(not t['actual_score_observed'] and not t['maxpf_score_observed'] for t in snapshot['weeks'][0]['teams'].values())
 
 
 def test_rollover_already_in_official_history_is_not_counted_again():
@@ -240,8 +298,14 @@ def test_full_week_completion_not_empty_lineup_alone_establishes_observed_zero()
         game['metadata'].update(has_started=True,is_over=True,status='complete')
     for row in source[f'{provider.API}/league/123/matchups/3']:
         row.update(starters=['0'],players_points={},points=0)
+    # The finished week fixes the actual score even with no player scores; only
+    # the unrecorded bench leaves the Max PF lane without a number.
+    assert_missing_weekly_projections(source,cfg,['maxpf'])
+    for row in source[f'{provider.API}/league/123/matchups/3']:
+        row['players_points']={f"p{row['roster_id']}":4}
     result=simulation.simulate(run(source,cfg),cfg)
     assert all(t['expected_record']==[1,1,1] for t in result['teams'])
+    assert all(t['maxpf_mean']==24 for t in result['teams'])  # Official 20 + the recorded bench 4.
     assert all(t['weeks'][0]['actual_score_observed'] and t['weeks'][0]['modeled_score_sd']==0 for t in result['teams'])
 
 

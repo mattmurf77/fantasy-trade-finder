@@ -1,0 +1,41 @@
+{
+  "leagues": 3,
+  "iterations": 40000,
+  "sd_values": [
+    20,
+    25,
+    30
+  ],
+  "by_sd": {
+    "20_vs_25": {
+      "teams": 36,
+      "mean_abs_change": 0.01,
+      "max_abs_change": 0.0407,
+      "teams_changing_band": 2
+    },
+    "30_vs_25": {
+      "teams": 36,
+      "mean_abs_change": 0.0087,
+      "max_abs_change": 0.0409,
+      "teams_changing_band": 1
+    },
+    "20_vs_30": {
+      "teams": 36,
+      "mean_abs_change": 0.0185,
+      "max_abs_change": 0.0738,
+      "teams_changing_band": 3
+    }
+  },
+  "v4_saved_vs_v5_at_25": {
+    "teams": 36,
+    "mean_abs_change": 0.0167,
+    "max_abs_change": 0.1112,
+    "teams_changing_band": 2
+  },
+  "band_counts_at_25": {
+    "championship": 13,
+    "jets": 12,
+    "contender": 6,
+    "rebuilder": 5
+  }
+}

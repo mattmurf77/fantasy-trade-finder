@@ -16,7 +16,6 @@ POLICIES = {
     "ir_maxpf": {"include", "exclude"},
     "reserve_activation": {"exclude_current_reserve"},
     "empty_slots": {"allow", "fill_available"},
-    "maxpf_variance": {"reconstructed_history", "actual_history_proxy"},
     "scoring_contract": {"strict_supplied_v1", "sleeper_sparse_offense_v1", "sleeper_best_available_v1"},
     "availability_scenario": {"require_verified", "conditional_provider_forecast"},
 }
@@ -25,7 +24,9 @@ POLICIES = {
 def config(raw):
     if not isinstance(raw, dict):
         raise ValueError("configuration_required")
-    allowed = set(POLICIES) | {"iterations", "seed", "historical_weight", "min_pick_samples", "persistent_sd", "residual_correlation", "score_decimals", "draft_season", "draft_round"}
+    # historical_weight, persistent_sd and maxpf_variance left with model v4:
+    # a configuration that still carries them is rejected, not reinterpreted.
+    allowed = set(POLICIES) | {"iterations", "seed", "score_sd", "min_pick_samples", "residual_correlation", "score_decimals", "draft_season", "draft_round"}
     if set(raw) - allowed:
         raise ValueError("unknown_configuration")
     result = dict(raw)
@@ -42,11 +43,14 @@ def config(raw):
         if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
             raise ValueError("invalid_" + key)
         result[key] = value
-    for key, default, low, high in (("historical_weight", .6, 0, 1), ("persistent_sd", 5, 0, 50)):
-        value = float(decimal(result.get(key, default)))
-        if not low <= value <= high:
-            raise ValueError("invalid_" + key)
-        result[key] = value
+    # One app-wide weekly score SD, in fantasy points, for every team and
+    # every unplayed week. It has no code default: the value is configuration.
+    if "score_sd" not in result:
+        raise ValueError("score_sd_required")
+    score_sd = float(decimal(result["score_sd"]))
+    if not 0 <= score_sd <= 100:
+        raise ValueError("invalid_score_sd")
+    result["score_sd"] = score_sd
     # No universal 0.818 correlation: caller must choose a visible scenario or
     # request a paired-history estimate with sufficient reconstructed weeks.
     rho = result.get("residual_correlation")
@@ -56,10 +60,6 @@ def config(raw):
         rho = float(decimal(rho))
     result["residual_correlation"] = rho
     return result
-
-
-def _variance(values):
-    return statistics.variance(values) if len(values) > 1 else None
 
 
 def _quantile(values, fraction):
@@ -92,7 +92,6 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
         raise Unavailable("invalid_horizon")
     index = {rid: i for i, rid in enumerate(ids)}
     games, means, max_means, details = [], [], [], []
-    weight = cfg["historical_weight"]
     actual_history = [[float(decimal(v)) for v in t["actual_history"]] for t in teams]
     max_history = [[float(decimal(v)) for v in t["maxpf_history"]] for t in teams]
     completed = snapshot["completed_weeks"]
@@ -100,31 +99,10 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
         raise Unavailable("missing_actual_history", state="incomplete_projections")
     if any(len(h) not in (0, completed) for h in max_history):
         raise Unavailable("partial_maxpf_history", state="incomplete_projections")
-    # With no/one observed week, explicit projection residual scales are required.
-    pooled = [v - statistics.mean(h) for h in actual_history if len(h) > 1 for v in h]
-    pool_var = _variance(pooled)
-    sd = []
-    max_sd = []
-    for i, team in enumerate(teams):
-        team_var = _variance(actual_history[i])
-        variance = .5 * team_var + .5 * pool_var if team_var is not None and pool_var is not None else None
-        if not weeks:
-            variance = 0
-        if variance is None:
-            if "projection_weekly_sd" not in team:
-                raise Unavailable("short_history_variance_prior_required", state="incomplete_projections")
-            variance = float(decimal(team["projection_weekly_sd"])) ** 2
-        sd.append(math.sqrt(max(0, variance)))
-        mv = _variance(max_history[i])
-        if not weeks:
-            mv = 0
-        if mv is None and cfg["maxpf_variance"] == "actual_history_proxy":
-            mv = variance
-        if mv is None:
-            if "maxpf_weekly_sd" not in team:
-                raise Unavailable("maxpf_variance_prior_required", state="incomplete_projections")
-            mv = float(decimal(team["maxpf_weekly_sd"])) ** 2
-        max_sd.append(math.sqrt(max(0, mv)))
+    # The same SD for every team, for the weekly score and for the latent Max
+    # PF draw. Completed results are facts above; they never set a future
+    # mean or a team's spread.
+    sd = cfg["score_sd"] if weeks else 0.
     rho = cfg["residual_correlation"]
     if rho == "estimate_history":
         paired = [(a - statistics.mean(ah), m - statistics.mean(mh))
@@ -147,17 +125,21 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
         for i, team in enumerate(teams):
             detail = week["teams"][str(team["roster_id"])]
             optimized, optimal = float(decimal(detail.get("modeled_actual_projection", detail["actual"]["points"]))), float(decimal(detail.get("modeled_maxpf_projection", detail["maxpf"]["points"])))
-            history = float(decimal(team["points_for"])) / completed if completed else optimized
-            max_base = float(decimal(team["maxpf"])) / completed if completed else optimal
-            actual_mean = optimized if detail.get("actual_score_observed") else weight * history + (1 - weight) * optimized
-            raw_max_mean = optimal if detail.get("maxpf_score_observed") else weight * max_base + (1 - weight) * optimal
+            # Projected lineup totals only: the starting lineup for the score,
+            # the eligible-roster optimum for Max PF. No history term.
+            actual_mean, raw_max_mean = optimized, optimal
+            # The projected lineup is itself a legal eligible assignment, so the
+            # Max PF mean is never below it (a forced negative fill can be).
+            if detail.get("maxpf_dominates_actual") and not detail.get("maxpf_score_observed"):
+                raw_max_mean = max(optimal, optimized)
             observed_floor = float(decimal(detail["observed_maxpf_floor"])) if detail.get("observed_maxpf_floor") is not None else None
-            base_mean = (observed_floor + joint.positive_normal_mean(actual_mean - observed_floor, 0 if detail.get("actual_score_observed") else math.hypot(sd[i], cfg["persistent_sd"]))) if observed_floor is not None and detail.get("maxpf_dominates_actual") else observed_floor
+            base_mean = (observed_floor + joint.positive_normal_mean(actual_mean - observed_floor, 0 if detail.get("actual_score_observed") else sd)) if observed_floor is not None and detail.get("maxpf_dominates_actual") else observed_floor
             maximum_mean = max(raw_max_mean, base_mean) if base_mean is not None else raw_max_mean
             wm.append(actual_mean)
             mm.append(maximum_mean)
             wd.append({**detail, "observed_mean_conditioning": {"unconditioned_maxpf_mean": raw_max_mean,
-                       "known_maxpf_floor": observed_floor, "minimum_expected_base": base_mean, "conditioned_target": maximum_mean, "target_adjustment": maximum_mean - raw_max_mean}})
+                       "known_maxpf_floor": observed_floor, "minimum_expected_base": base_mean, "conditioned_target": maximum_mean, "target_adjustment": maximum_mean - raw_max_mean,
+                       "projection_raised_to_lineup_total": raw_max_mean - optimal}})
         games.append(matchups)
         means.append(wm)
         max_means.append(mm)
@@ -188,12 +170,12 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
             anchor = detail["observed_mean_conditioning"]["known_maxpf_floor"]
             if anchor is not None:
                 policy = joint.prepare_observed_floor(means[w][i], detail["observed_mean_conditioning"]["unconditioned_maxpf_mean"],
-                         sd[i], max_sd[i], rho, cfg["persistent_sd"], anchor,
+                         sd, sd, rho, 0., anchor,
                          bool(detail.get("maxpf_dominates_actual")), cfg["score_decimals"],
                          actual_fixed=fixed_actual, maxpf_fixed=fixed_max)
             else:
-                policy = joint.prepare(means[w][i], max_means[w][i], sd[i], max_sd[i], rho,
-                         cfg["persistent_sd"], bool(detail.get("maxpf_dominates_actual")), cfg["score_decimals"])
+                policy = joint.prepare(means[w][i], max_means[w][i], sd, sd, rho,
+                         0., bool(detail.get("maxpf_dominates_actual")), cfg["score_decimals"])
                 policy.update(observed_floor=None, actual_score_observed=fixed_actual, maxpf_score_observed=fixed_max)
             policies.append(policy)
         joint_policies.append(policies)
@@ -212,17 +194,16 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
             raise Unavailable("cancelled", state="cancelled")
         records = [r[:] for r in base_records]
         pf, pa, maxpf = base_pf[:], base_pa[:], base_max[:]
-        strength = [rng.gauss(0, cfg["persistent_sd"]) for _ in teams]
         for w, matchups in enumerate(games):
             scores = []
             for i in range(n):
                 z = rng.gauss(0, 1)
                 policy = joint_policies[w][i]
-                actual_raw = means[w][i] if policy["actual_score_observed"] else means[w][i] + strength[i] + sd[i] * z
+                actual_raw = means[w][i] if policy["actual_score_observed"] else means[w][i] + sd * z
                 actual = actual_raw if policy["actual_score_observed"] else round(actual_raw, precision)
                 # Always consume the second latent draw, including zero-gap and
                 # deterministic cases, so actual/playoff RNG paths are unchanged.
-                latent = max_means[w][i] + strength[i] + max_sd[i] * (rho * z + math.sqrt(1 - rho * rho) * rng.gauss(0, 1))
+                latent = max_means[w][i] + sd * (rho * z + math.sqrt(1 - rho * rho) * rng.gauss(0, 1))
                 if policy["maxpf_score_observed"]:
                     latent = max_means[w][i]
                 floor = policy["observed_floor"]
@@ -320,8 +301,7 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
                                       "mean_uplift": maxpf_diagnostics[w][i][2] / iterations,
                                       "frequency": maxpf_diagnostics[w][i][3] / iterations,
                                       **_realized_moments(maxpf_diagnostics[w][i], iterations, means[w][i], max_means[w][i])},
-                                  "modeled_score_mean": means[w][i], "historical_component": weight * base_pf[i] / completed if completed and not details[w][i].get("actual_score_observed") else 0,
-                                  "projection_component": (1 - weight) * float(decimal(details[w][i].get("modeled_actual_projection", details[w][i]["actual"]["points"]))) if completed and not details[w][i].get("actual_score_observed") else means[w][i], "modeled_score_sd": 0 if details[w][i].get("actual_score_observed") else math.sqrt(sd[i] ** 2 + cfg["persistent_sd"] ** 2),
+                                  "modeled_score_mean": means[w][i], "modeled_score_sd": 0 if details[w][i].get("actual_score_observed") else sd,
                                   "score_distribution": "observed_completed_lineup" if details[w][i].get("actual_score_observed") else "normal_scenario_rounded_to_league_precision",
                                   "win_equivalent_probability": (weekly_outcomes[w][i][0] + .5 * weekly_outcomes[w][i][2]) / iterations,
                                   "loss_probability": weekly_outcomes[w][i][1] / iterations, "tie_probability": weekly_outcomes[w][i][2] / iterations,
@@ -330,14 +310,18 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
     return {"schema": 1, "league_name": snapshot.get("league_name", "League"), "season": snapshot.get("season"),
             "completed_weeks": completed, "playoff_spots": playoff, "playoff_byes": byes, "scoring": snapshot.get("scoring", {}),
             "model_version": VERSION, "status": "complete", "provisional": iterations < 250000,
+            "viewer_roster_id": snapshot.get("viewer_roster_id"), "score_sd": cfg["score_sd"],
+            "score_model": {"mean": "projected_lineup_total", "distribution": "normal", "sd": cfg["score_sd"],
+                            "sd_units": "fantasy_points_per_team_week", "sd_scope": "every_team_every_unplayed_week",
+                            "sd_status": "provisional_not_calibrated", "completed_weeks": "recorded_scores_no_noise"},
             "iterations": iterations, "seed": cfg["seed"], "config": cfg, "snapshot_hash": digest(snapshot),
             "source": snapshot["source"], "captured_at": snapshot["captured_at"], "coverage": snapshot.get("coverage", {}),
             "residual_correlation_used": rho, "teams": output, "draft_sort": "projected_maxpf_mean",
             "warnings": ["Scenario estimates; model accuracy has not been established.",
+                         "Weekly scores are drawn around each team's projected lineup total with one app-wide standard deviation. That value is provisional, not calibrated.",
                          "Monte Carlo error excludes model and provider uncertainty.",
                          "Optimizing expected points understates the expected hindsight optimum.",
                          "Eligible Max PF uses a mean-preserving positive-gap model; realized variance and correlation differ from the latent parameters. This distribution is not accuracy-calibrated.",
                          "Playoff-team draft positions are not projected.",
                          "IDP bye replacements are hypothetical, not verified waiver availability."] +
-                        (["Short history: fewer than four completed weeks."] if completed < 4 else []) +
-                        (["Reconstructed Max PF history differs from official totals; only its variance is used."] if any(d is not None and abs(d) > .001 for d in maxpf_discrepancy) else []) + snapshot.get("warnings", [])}
+                        (["Reconstructed Max PF history differs from official totals; the official totals are used."] if any(d is not None and abs(d) > .001 for d in maxpf_discrepancy) else []) + snapshot.get("warnings", [])}

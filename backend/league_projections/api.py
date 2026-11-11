@@ -8,7 +8,7 @@ from flask import Response, jsonify, request
 
 from ..feature_flags import is_enabled
 from .. import database as db
-from . import batch, store
+from . import batch, recommendation, store
 from .core import Unavailable, VERSION
 from .simulation import config
 
@@ -63,6 +63,9 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
         if not isinstance(data, dict) or ("config" not in data or set(data) - {"config", "baseline_run_id"}):
             raise ValueError("configuration_required")
         cfg = config(data["config"])
+        # One app-wide SD: a scenario may not bring its own.
+        if cfg["score_sd"] != config(batch.settings()["model"])["score_sd"]:
+            raise ValueError("score_sd_is_app_wide")
         if not is_enabled("league.projections_provider_approved"):
             raise Unavailable("new_projection_provider_approval_pending")
         if not batch.settings()["policy_approved"]:
@@ -100,6 +103,17 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
             result.update(state="unsupported_policy", reason="sleeper_only", run=None, attempt=None, next_attempt_not_before=None)
         run = public(result["run"]) if result["run"] else None
         attempt = run if result["attempt"] is result["run"] else (public(result["attempt"]) if result["attempt"] else None)
+        # A forecast from another model version stays on record as the last
+        # saved one, dated and stale. It is never shown as current.
+        saved = run["result"] if run else None
+        result["model_current"] = not saved or saved.get("model_version") == VERSION
+        if not result["model_current"] and result["state"] == "current":
+            result.update(state="stale", reason="projection_model_updated")
+        if is_enabled("league.projection_outlook"):
+            preferences = db.load_league_preference(user_id=uid, league_id=league_id) or {}
+            result["outlook_recommendation"] = recommendation.build(
+                result["state"], saved, preferences.get("team_outlook"), recommendation.thresholds(batch.settings()),
+                failure_reason=result["reason"])
         return jsonify({**result, "run": run, "attempt": attempt})
 
     @app.route("/api/projection-runs/<run_id>", methods=["GET"])

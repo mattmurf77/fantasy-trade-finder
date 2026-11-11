@@ -5119,7 +5119,11 @@
       return { acquire, away };
     }
 
-    function showOutlookModal(required) {
+    // reviewKey (optional): the outlook the saved playoff forecast suggests
+    // (league.projection_outlook). It is only tagged "Suggested" — never
+    // selected or saved; the saved outlook stays highlighted and the user
+    // picks and confirms as usual.
+    function showOutlookModal(required, reviewKey) {
       // Update title with current league name
       const leagueObj  = _cachedLeagues.find(l => l.league_id === currentLeagueId);
       const leagueName = leagueObj ? (leagueObj.name || 'this league') : 'this league';
@@ -5134,18 +5138,21 @@
       // no outlook is declared but the backend inferred one, preselect the
       // inferred option and tag it "Suggested" (highlight only — the user
       // still clicks through, flow unchanged).
-      const suggested = currentOutlook ? null : _inferredOutlook;
+      const suggested = (currentOutlook || reviewKey) ? null : _inferredOutlook;
       document.querySelectorAll('.outlook-option-btn').forEach(btn => {
         btn.classList.toggle('selected', btn.dataset.value === (currentOutlook || suggested));
         const oldTag = btn.querySelector('.outlook-suggested-tag');
         if (oldTag) oldTag.remove();
-        if (suggested && btn.dataset.value === suggested) {
+        const review = !!reviewKey && btn.dataset.value === reviewKey;
+        if (review || (suggested && btn.dataset.value === suggested)) {
           const nameEl = btn.querySelector('.outlook-option-name');
           if (nameEl) {
             const tag = document.createElement('span');
-            tag.className = 'consensus-tag outlook-suggested-tag';
+            tag.className = review ? 'consensus-tag outlook-suggested-tag outlook-review-tag'
+                                   : 'consensus-tag outlook-suggested-tag';
             tag.textContent = 'Suggested';
-            tag.title = _inferredSignals.length
+            tag.title = review ? 'Suggested from your projected playoff chance'
+              : _inferredSignals.length
               ? _inferredSignals.join(' · ')
               : 'Suggested from your roster and league standing';
             nameEl.appendChild(tag);
@@ -5163,7 +5170,12 @@
     function dismissOutlookModal() {
       document.getElementById('outlook-overlay').classList.add('hidden');
       _pendingOutlookValue = null;
+      document.querySelectorAll('.outlook-review-tag').forEach(tag => tag.remove());
     }
+
+    // Hooks for the Projected standings outlook prompt (league-projections.js).
+    window.FTFOutlookLabel  = key => OUTLOOK_META[key]?.label || null;
+    window.FTFReviewOutlook = key => showOutlookModal(false, OUTLOOK_META[key] ? key : null);
 
     // Step 1 selection — advances to step 2
     function selectOutlookStep1(value) {

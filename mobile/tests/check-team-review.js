@@ -29,6 +29,10 @@
 //  10. The single preference write always carries `team_outlook`, because the
 //      route 400s without it and the client swallows the throw.
 //  11. A scoped partner is handed to the #330 store and still consumed there.
+//  12. The playoff forecast's outlook suggestion marks a chip; it never writes.
+//  13. The `team_outlook` backfill on a non-outlook save (savePrefs, the plan
+//      beat's positions taps) goes through `backfillOutlook`, which under
+//      `source: 'projection'` returns the roster verdict, never the suggestion.
 //
 // Run: node tests/check-team-review.js   (or npm run test:team-review)
 // CI picks it up automatically via the tests/check-*.js glob.
@@ -254,6 +258,141 @@ const planBody = planStart === -1
       'TradesScreen no longer consumes the #330 handoff (setHandoff(null) is ' +
       'gone), so the plan beat now hands the scoped partner to nobody.');
   } else ok('11. the scoped partner is handed to the deck and consumed there');
+}
+
+// ── 12 — the playoff forecast's outlook suggestion marks, it never writes ──
+//
+// `window.projection` (flag `league.projection_outlook`) can name any of the
+// four outlooks, including the two extremes the roster models never claim. The
+// beat shows it, marks its chip, and stops: the saved outlook changes only
+// through Confirm / a chip tap, exactly as before. A suggestion that reached
+// `savePrefs` from an effect would rewrite a saved outlook because a forecast
+// moved. With no `projection` key none of this renders.
+{
+  const winStart = s.indexOf('function Window(');
+  const winBody = winStart === -1 ? '' : (() => {
+    const rest = s.slice(winStart + 1);
+    const end = rest.search(/\nfunction \w/);
+    return end === -1 ? rest : rest.slice(0, end);
+  })();
+  const outsideWin = winStart === -1 ? s : s.replace(winBody, '');
+  // `backfillOutlook` (§13) is the one place outside the beat allowed to name
+  // the 'projection' source — it exists to keep the suggestion OUT of writes.
+  const helperSrc = (/\nfunction backfillOutlook\([\s\S]*?\n\}\n/.exec(outsideWin) || [''])[0];
+  const outside = outsideWin.replace(helperSrc, '\n');
+  const count = (hay, needle) => hay.split(needle).length - 1;
+
+  if (!winBody) bad('12a. the Window beat exists', 'no `function Window(` in the screen');
+  else if (/savePrefs|saveLeaguePreferences|onSave|useEffect|useMutation|useQuery/.test(winBody)) {
+    bad('12a. the window beat holds no write, effect or query',
+      'function Window references savePrefs / saveLeaguePreferences / onSave / an effect / a query. ' +
+      'The beat only DISPLAYS the suggestion; the write is the footer Confirm.');
+  } else if (count(winBody, 'onSelect(') !== 1 || !winBody.includes('onPress={() => onSelect(o)}')) {
+    bad('12a. the only thing the window beat can do is select a chip, on a press',
+      `found ${count(winBody, 'onSelect(')} onSelect( call(s); expected exactly \`onPress={() => onSelect(o)}\``);
+  } else ok('12a. the window beat only selects a chip on a press — no write, effect or query');
+
+  if (/\bprojection\b|recommended_outlook|playoff_probability/.test(outside)) {
+    bad('12b. the projection block is read inside the window beat only',
+      'window.projection / recommended_outlook / playoff_probability is referenced outside function Window. ' +
+      'The screen\'s selection and write logic must not branch on the suggestion.');
+  } else if (!outside.includes('const declared = outlook ?? data.window.declared ?? data.window.inferred;')) {
+    bad('12b. the preselected chip is unchanged',
+      'expected `const declared = outlook ?? data.window.declared ?? data.window.inferred;` (saved outlook first, else the server\'s inferred — the chip the user sees and Confirms)');
+  } else ok('12b. the projection block is read inside the window beat (and backfillOutlook) only; the preselected chip is unchanged');
+
+  // ── 13 — a write that is NOT an outlook choice never saves the suggestion ──
+  // Under `source: 'projection'`, `window.inferred` IS the forecast's
+  // suggestion. `savePrefs` and the plan beat's positions taps must send a
+  // `team_outlook` (the route 400s without one); when nothing is saved and
+  // nothing was picked, that backfill is the ROSTER verdict, never the
+  // suggestion. Any other source: `inferred`, exactly as before.
+  if (!helperSrc) {
+    bad('13a. backfillOutlook exists', 'no module-level `function backfillOutlook(` in the screen');
+  } else {
+    const ts = require('typescript');
+    const lib = {};
+    new Function('exports', ts.transpileModule(`${helperSrc}\nexports.f = backfillOutlook;`, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    }).outputText)(lib);
+    const f = lib.f;
+    const cases = [
+      [{ source: 'projection', inferred: 'championship', roster_inferred: 'rebuilder' }, 'rebuilder'],
+      [{ source: 'projection', inferred: 'jets', roster_inferred: 'contender' }, 'contender'],
+      [{ source: 'projection', inferred: 'contender' }, 'not_sure'],
+      [{ source: 'odds', inferred: 'contender', roster_inferred: 'rebuilder' }, 'contender'],
+      [{ source: 'composite', inferred: 'rebuilder', roster_inferred: 'rebuilder' }, 'rebuilder'],
+      [{ source: 'roster', inferred: 'not_sure' }, 'not_sure'],
+      [{ inferred: 'contender' }, 'contender'],
+      [undefined, 'not_sure'],
+    ];
+    const wrong = cases.filter(([w, want]) => f(w) !== want);
+    if (wrong.length) {
+      bad('13a. backfillOutlook never returns the projection suggestion',
+        wrong.map(([w, want]) => `${JSON.stringify(w)} → ${JSON.stringify(f(w))}, expected ${want}`).join('; '));
+    } else ok('13a. backfillOutlook: projection → roster_inferred ?? not_sure; any other source → inferred (executed)');
+  }
+  if (!/const fallbackOutlook: OutlookOption =\s*outlook \?\? data\?\.window\.declared \?\? backfillOutlook\(data\?\.window\);/.test(outside)) {
+    bad('13b. savePrefs backfills through backfillOutlook',
+      'expected `outlook ?? data?.window.declared ?? backfillOutlook(data?.window)` — a positions save must not write the suggestion');
+  } else ok('13b. savePrefs backfills team_outlook through backfillOutlook');
+  if (!/outlook: saved\.team_outlook \?\? data\.window\.declared \?\? backfillOutlook\(data\.window\),/.test(planBody)) {
+    bad('13c. the plan beat\'s draft outlook backfills through backfillOutlook',
+      'expected `saved.team_outlook ?? data.window.declared ?? backfillOutlook(data.window)` — a positions tap posts it as team_outlook');
+  } else ok('13c. the plan beat\'s draft outlook (posted on a positions tap) backfills through backfillOutlook');
+  // Every other read of `window.inferred` outside the beat is display-only.
+  const reads = (outside.match(/[^\n]*window\??\.inferred[^\n]*/g) || []).map((l) => l.trim());
+  const allowed = [
+    'const declared = outlook ?? data.window.declared ?? data.window.inferred;',
+    'const mine = data.window.declared ?? data.window.inferred;',
+  ];
+  const stray = reads.filter((l) => !allowed.includes(l));
+  if (stray.length || reads.length !== allowed.length) {
+    bad('13d. no other path reads window.inferred outside the window beat',
+      `unexpected reads: ${JSON.stringify(stray)} (found ${reads.length}, expected the window-beat preselection + the partners heading)`);
+  } else ok('13d. window.inferred outside the beat: the visible preselection and the partners heading only');
+
+  const calls = [...outside.matchAll(/savePrefs\(/g)].length;
+  const pressed = [...outside.matchAll(/onPress=\{async \(\) => \{\s*await savePrefs\(/g)].length;
+  const effects = outside.match(/useEffect\(\(\) => \{[\s\S]*?\n  \}, \[[^\]]*\]\);/g) || [];
+  const writing = effects.filter((e) => /savePrefs|saveLeaguePreferences|onSave\(|commit\(/.test(e));
+  if (count(s, 'saveLeaguePreferences(') !== 1) {
+    bad('12c. one preferences write', `found ${count(s, 'saveLeaguePreferences(')} saveLeaguePreferences( calls; expected the one inside savePrefs`);
+  } else if (calls !== 2 || pressed !== 2) {
+    bad('12c. savePrefs runs only from a press',
+      `found ${calls} savePrefs( call(s), ${pressed} of them the first statement of an onPress handler; expected 2 and 2 ` +
+      '(the window Confirm and the depth Save & continue)');
+  } else if (!effects.length || writing.length) {
+    bad('12c. no effect writes a preference', `${writing.length} effect(s) reach savePrefs / onSave / commit`);
+  } else ok('12c. the preferences write runs only from a press (Confirm / Save & continue / the plan beat\'s chips)');
+
+  const gate = /const recommended = w\.source === 'projection' && pr\?\.status === 'available'\s*\? pr\.recommended_outlook : null;/.test(winBody)
+    && winBody.includes('const fromProjection = !!pr && !!recommended;');
+  const line = /\{fromProjection && pr\.differs \? \(\s*<View testID="team-review\.window\.projection">/.test(winBody);
+  const chip = /const suggested = fromProjection && recommended === o;/.test(winBody)
+    && /\{suggested \? \(\s*<View testID="team-review\.outlook\.suggested">\s*<Badge label="Suggested" color=\{flare\.base\} colorText \/>/.test(winBody);
+  const selected = winBody.includes('selected === o && styles.chipSel');
+  if (!gate) bad('12d. the suggestion needs source "projection" AND status "available"', 'the `recommended` / `fromProjection` gate is missing or changed');
+  else if (!line) bad('12d. the "Consider" line shows only when the recommendation differs', 'expected `{fromProjection && pr.differs ? (` around team-review.window.projection');
+  else if (!chip || !selected) bad('12d. the recommended chip is marked, not selected', 'expected the flare "Suggested" badge under `suggested`, with selection still `selected === o`');
+  else ok('12d. available + differs shows the line; the recommended chip is marked, never selected');
+
+  // 5b's rule (the band, never a percentage) has ONE sanctioned exception: the
+  // forecast's own probability, inside the projection line.
+  const block = (/<View testID="team-review\.window\.projection">[\s\S]*?<\/View>/.exec(winBody) || [''])[0];
+  if (count(s, 'playoff_probability') !== count(block, 'playoff_probability') || !count(block, 'playoff_probability')) {
+    bad('12e. the forecast percentage renders in the projection line only',
+      'playoff_probability is read outside the team-review.window.projection block');
+  } else if (!/\{pr\.suggestion \? \(\s*<ChalkText style=\{styles\.read\}>\{pr\.suggestion\}<\/ChalkText>/.test(block)
+    || !/\{!fromProjection && pr\?\.status === 'unavailable' && pr\.explanation \? \(\s*<ChalkText style=\{styles\.dim\}>\{pr\.explanation\}<\/ChalkText>/.test(winBody)) {
+    bad('12e. the server\'s sentences are rendered as given',
+      'expected {pr.suggestion} inside the projection line and {pr.explanation} as the dim note when unavailable');
+  } else ok('12e. the percentage lives in the projection line only; server copy is rendered as given');
+
+  if (!/source\?: 'roster' \| 'odds' \| 'composite' \| 'projection';/.test(api)
+    || !/projection\?: OutlookRecommendation;/.test(api)) {
+    bad('12f. the wire type carries the optional projection block', "expected `source?: … | 'projection'` and `projection?: OutlookRecommendation` on TeamReviewWindow");
+  } else ok('12f. TeamReviewWindow types the optional projection block');
 }
 
 console.log(`\ncheck-team-review: ${pass.length} passed, ${fail.length} failed`);
