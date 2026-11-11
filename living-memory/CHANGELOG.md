@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-10 — Roster-first setup flag turned on (`trades.roster_setup`)
+
+- Operator call ("Turn it on"), the same day #637 merged dark. `config/features.json` and the three mirrored flag fixtures are flipped to true. The 8-step TestFlight checklist and the MOD-M1 call had **not** run first.
+- The engine half takes effect on deploy: owner-v1 and bilateral read `trade_block` on the give side. The UI half needs a TestFlight build that includes `9c252819`. Build 1.22.0 (183) predates it, so testers see nothing yet.
+- Rollback: set the flag false, then `POST /api/feature-flags/reload` (or via `FTF_FLAGS`).
+
 ## 2026-11-10 — Manager profiles live in production (#635, flag on)
 
 - #635 merged as `9b14c47b`, all four CI checks green, full suite 13,741 passed. `market.manager_profiles` is **on** in `config/features.json` (operator's call; `FTF_FLAGS` does not pin it). Each Sleeper league's session-init sync now keeps waiver / free-agent rows (`sleeper_waiver_moves`) and rebuilds one `manager_profiles` row per roster owner. Cost: one 18-leg transactions backfill per league, once. No consumer reads a profile yet.

@@ -1,3 +1,8 @@
+## 2026-11-10 — Roster-first setup flag flip (`trades.roster_setup` → true)
+
+- Flag-only change; the operator asked for it directly. The 8-step TestFlight checklist has not run (no build includes `9c252819` yet).
+- Local: the flag mirror tests plus the trade-block, deck-digest, blind-grading and rankings-import suites pass (204 passed). CI on the PR covers the rest. `FTF_SKIP_SIM_GATE=1` (D-056).
+
 ## 2026-11-10 — Manager profiles capture (flag on in config, branch `feat/manager-profiles`)
 
 - Local Python 3.12 venv, branch cut from `origin/main` d6fc338f. **Full suite: 13740 passed, 43 skipped, 0 failed** (12m14s). Required selection `-k "sleeper or roster or profile"`: **916 passed, 4 skipped**.

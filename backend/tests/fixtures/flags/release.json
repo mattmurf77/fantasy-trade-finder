@@ -261,5 +261,5 @@
   "outlook.season_projections": true,
   "trades.win_now": true,
   "outlook.championship_probabilities": true,
-  "trades.roster_setup": false
+  "trades.roster_setup": true
 }
