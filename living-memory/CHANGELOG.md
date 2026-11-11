@@ -67,7 +67,7 @@
 ## 2026-11-10 — Roster-first setup flag turned on (`trades.roster_setup`)
 
 - Operator call ("Turn it on"), the same day #637 merged dark. `config/features.json` and the three mirrored flag fixtures are flipped to true. The 8-step TestFlight checklist and the MOD-M1 call had **not** run first.
-- The engine half takes effect on deploy: owner-v1 and bilateral read `trade_block` on the give side. The UI half needs a TestFlight build that includes `9c252819`. Build 1.22.0 (183) predates it, so testers see nothing yet.
+- The engine half takes effect on deploy: owner-v1 and bilateral read `trade_block` on the give side. The UI half ships in TestFlight 1.22.0 (184), uploaded 2026-11-11T05:35Z from `13865d73` (includes `9c252819`); 183 predates it.
 - Rollback: set the flag false, then `POST /api/feature-flags/reload` (or via `FTF_FLAGS`).
 
 ## 2026-11-10 — Offer learnings built and integrated dark (PR #641)
