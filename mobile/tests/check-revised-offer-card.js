@@ -71,9 +71,9 @@ const block = blockAt > 0 ? card.slice(blockAt, card.indexOf(') : null}', blockA
 check('4b renders the server line', /\{revisedLine\}/.test(block));
 check('4c no client copy in the block', !/>[^<{}]*[A-Za-z]{3,}[^<{}]*</.test(block.replace(/\{revisedLine\}/, '')));
 const header = card.indexOf('style={styles.header}');
-const fit = card.indexOf('testID="trade-card.fit-lines"');
+const fit = card.indexOf('testID="trade-card.fit-block"');   // WS4b: the version-3 fit block
 const value = card.indexOf('<TradeValueBar');
-check('5 under the header, before the fit lines and the value bar',
+check('5 under the header, before the fit block and the value bar',
   header > 0 && blockAt > header && fit > blockAt && value > blockAt);
 
 // 6. tokens and testIDs
