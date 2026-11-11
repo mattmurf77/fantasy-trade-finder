@@ -1,3 +1,12 @@
+## 2026-11-11 — TestFlight 185 feedback: held-rank wording, Home link to projections, fast deck off (D-232), branch `fix/tf185-feedback`
+
+- **Fit block wording** (`test_fit_block_v3.py`, 68 pass): a held rank reads "RB stays 1st" / "RB stays 5th, WR stays 10th". New `test_held_rank_wording`. Sabotages, red then restored (3, Opus subagent): restore `Still {ranks}`; drop "stays" after the first position; put "Still" back on `holds.them` only.
+- **Home playoff tile** (Opus subagent; re-run in the main session): `tsc --noEmit` clean, **173 of 173** check suites, testID lint OK. The tile has a "View" link; it and the percentage open Standings on Projected; the Standings row still opens Current; the route param fires no event. Sabotages, red then restored (14), among them: link without the segment param; Standings row also opens Projected; Standings ignores the param; any param opens Projected; param routed through `selectSegment`; View link removed, hidden without a percentage, or allowed to shrink.
+- **Fast deck off** (`test_trade_fast_deck.py::test_flags_default_off_in_code_and_in_config`, fixture mirror test): flag, deck, narrative, first-page and prepared subset **2,961 passed, 4 skipped**. Production evidence for the decision: `docs/runbook.md` § Fast deck.
+- **Full backend suite on the forecast fix below (`bdb741f8`), local: 14,457 passed, 42 skipped, 0 failed** in 811 s.
+- **Not verified:** anything on a device (D-056). Checklist for build 186: the tile reads "PLAYOFF CHANCE NN.N% (i) View ›" with View matching the rows beneath; View and the percentage both land on Projected with the Playoffs and Non-playoff picks tables; the Standings row lands on Current; on a 375pt phone nothing truncates and "last saved" wraps before View shrinks; (i) and View do not trigger each other; a trade card with a held rank reads "RB stays 1st"; Find a Trade in a league that showed 2 cards shows a full deck again.
+- No scope block: operator feedback from TestFlight, fixed on the operator's report. FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-11 — Team-changed players no longer stop a forecast (D-231), branch `fix/projection-team-changed`
 
 - **Projection tests (local, Python 3.12): 536 passed, 0 failed** (`-k league_projection`). Full suite: CI on the PR head.

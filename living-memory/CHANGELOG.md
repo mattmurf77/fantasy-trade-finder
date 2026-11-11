@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-11 — Fast deck off (D-232); held-rank wording; Home link to full projections
+
+- **Fast deck off.** With `trade.fast_deck` on (2026-11-10) the operator's deck in one league fell from 66–94 cards to 2, then "No trades found": the filters that run after the 150-card page removed 148 of them. Flag false; interactive jobs run the full solve again. [`../docs/runbook.md`](../docs/runbook.md) § Fast deck.
+- **Fit block:** "Still RB 5th, WR 10th" now reads "RB stays 5th, WR stays 10th" (server-only, payload stays `fit-2`).
+- **Home playoff tile:** a "View" link, like the rows beneath it; it and the percentage open Standings on the Projected segment (projected standings and the Max PF draft order). Needs a TestFlight build.
+
 ## 2026-11-11 — Playoff forecasts survive a player changing NFL teams (D-231)
 
 - **What broke:** after v5 shipped, every league that had a forecast the day before failed with `player_team_changed`. Five rostered players had changed teams and Sleeper's projection feed for weeks 11 to 14 still listed the old ones. The guard is from 2026-11-07, not from v5.
