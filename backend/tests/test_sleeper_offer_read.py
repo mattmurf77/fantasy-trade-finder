@@ -497,18 +497,39 @@ def test_a_read_moves_the_offer_and_then_is_not_due_for_thirty_minutes(wired, mo
     assert wired.call_count == 2
 
 
-def test_no_consent_makes_no_private_call_even_with_an_open_app_offer(client, monkeypatch):
-    # The operator's condition: the user's own Sleeper offers are read only
-    # with their explicit permission, for app-sent offers as much as the import.
+def test_no_reason_to_read_makes_no_call(client, monkeypatch):
+    # No app-sent offer Sleeper may still move, and the switch is off.
+    _link()
+    call = MagicMock(side_effect=AssertionError("read without a reason"))
+    monkeypatch.setattr(server._sleeper_write, "league_trade_offers", call)
+    assert server._sleeper_offers_sync(USER, LEAGUE, trigger="t") == "nothing_to_read"
+    _send(5)
+    _apply()                                   # accepted: final, no longer a reason
+    assert _by_tx()[tid(5)]["status"] == "accepted"
+    assert server._sleeper_offers_sync(USER, LEAGUE, trigger="t") == "nothing_to_read"
+
+
+def test_without_the_switch_an_app_sent_offer_is_read_and_nothing_is_imported(client, monkeypatch):
+    # Operator, 2026-11-11: trades sent from the app are followed without the
+    # Settings switch (web/terms.html §6). The switch adds the other offers.
     _link()
     _send(1)
-    call = MagicMock(side_effect=AssertionError("read without consent"))
+    call = MagicMock(return_value=TXS)
     monkeypatch.setattr(server._sleeper_write, "league_trade_offers", call)
-    assert server._sleeper_offers_sync(USER, LEAGUE, trigger="t") == "no_consent"
-    assert _by_tx()[tid(1)]["status"] == "sent"
-    db.record_offer_import_grant(USER, sor.TERMS_VERSION, NOW.isoformat())
     monkeypatch.setattr(server, "_fetch_league_rosters", MagicMock(return_value=ROSTERS))
-    call.side_effect, call.return_value = None, TXS
+    assert not sor.consented(USER)
+    assert server._sleeper_offers_sync(USER, LEAGUE, trigger="t") == "read"
+    call.assert_called_once()
+    rows = _rows()
+    assert [r["provider_transaction_id"] for r in rows] == [tid(1)]      # the app's row only
+    assert rows[0]["status"] == "declined" and rows[0]["source"] == "app"
+    # Its offer is final now, so there is nothing left to read for.
+    clock = time.time() + sor.READ_MIN_INTERVAL_S + 1
+    monkeypatch.setattr(server.time, "time", lambda: clock)
+    assert server._sleeper_offers_sync(USER, LEAGUE, trigger="t") == "nothing_to_read"
+    assert call.call_count == 1
+    # The switch on: the same read now also keeps the user's other offers.
+    db.record_offer_import_grant(USER, sor.TERMS_VERSION, NOW.isoformat())
     assert server._sleeper_offers_sync(USER, LEAGUE, trigger="t") == "read"
     assert any(r["source"] == "sleeper_import" for r in _rows())
 

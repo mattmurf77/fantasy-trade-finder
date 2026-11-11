@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-11 — Sleeper read follows app-sent trades without the switch (D-227)
+
+- The operator answered the release's open decision ("Yes to sleeper data"). `_sleeper_offers_sync` reads when the user has an offer sent through the app that Sleeper may still move, or the Settings switch is on; without the switch only the app's own rows change and nothing is imported.
+- Revised-offer and middle-ground cards now reach every Send in Sleeper user, not only those who turned the switch on. No app change, no new build; the published Terms and Privacy wording already said this.
+
+
 ## 2026-11-10 — Offer learnings and the fast deck are live and on (#641, #643); iOS 1.22.0 (184)
 
 - #641 merged dark (`0baf6360`), then #643 (`13865d73`) turned on `trade.fast_deck`, `trade.fit_first_copy`, `trade.pass_reason_cadence`, `trade.outcome_tracking`, `trade.next_move`, `grading.revision4_round` and `trade.sleeper_offer_import`. Render deploy `dep-dbpvpfm7bikc738d3vng` live; flags read on in production.

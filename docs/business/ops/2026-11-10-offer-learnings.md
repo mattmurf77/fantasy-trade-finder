@@ -73,9 +73,10 @@ from the [scope block](../../plans/offer-learnings/scope-sleeper-offer-read.md) 
 November 10, 2026, as the Terms promise for a material change. Consent version
 `offer-import-1`.
 
-The app is stricter than the published line: the line says the Sleeper sign-in is used to read
-offers for trades sent from the app, and the app reads nothing until the user turns on "Use my
-Sleeper trade offers". Revised-offer cards therefore reach only users who have turned it on.
+At release the app was stricter than the published line: it read nothing until the user turned
+on "Use my Sleeper trade offers". **Changed 2026-11-11** on the operator's answer ("Yes to
+sleeper data"): trades sent from the app are followed without the switch, as the line says, so
+revised-offer cards reach every Send in Sleeper user. The switch adds the user's other offers.
 
 ## Rollback
 
@@ -90,8 +91,8 @@ Sleeper trade offers". Revised-offer cards therefore reach only users who have t
 
 ## Decisions needed
 
-1. **App behaviour or wording for the Sleeper read.** Keep the app stricter than the Terms line
-   (today), or let it read offers for app-sent trades without the switch, as the line allows.
+1. ~~App behaviour or wording for the Sleeper read.~~ Answered 2026-11-11: the app follows trades
+   sent from it without the switch.
 2. **models-eng review of the deck pipeline bump** (15 → 21) is still owed.
 3. **The fast deck ends at 150 cards.** The deepest card acted on since September is index 65.
    Appending the rest of the inventory behind the page is unbuilt.

@@ -78,7 +78,7 @@ Not in the seven active items. Live since 2026-11-11T05:28Z (`13865d73`, #641 + 
 
 1. **Run the TestFlight checklists on build 184**: fast deck ([scope §3](../docs/plans/realtime-trade-engine/scope.md)) and each scope block in [offer-learnings](../docs/plans/offer-learnings/). *Why first:* nothing in this release has run on a device.
 2. **Read the first production searches.** `fast deck: served cards=…` lines in Render's logs and `trades_generated.gen_ms` against the days before. *Why:* the fast deck went on without a shadow day; its agreement with the full engine is proven offline only.
-3. **Decide the Sleeper read's reach** (operator): the published Terms line covers reading offers for trades sent from the app; the app reads nothing until the Settings switch is on, so revised-offer cards reach only users who turn it on.
+3. **Watch the first private Sleeper reads** (`sleeper offers read league=…` lines; auth failures back off 24 h). *Why:* since D-227 (2026-11-11) every Send in Sleeper user's app-sent trades are followed without the switch, and the read has only run against fixtures.
 4. **Read the revision 4 Calibration round** once testers grade (`GET /api/admin/grading/report?round_id=outlook-v2-v4-1&include_open=1`), then decide revision 4's selector and `trade.partner_activity`. models-eng review of pipeline 15 → 21 is still owed.
 5. **Make revision 2 cheaper without changing results** (recommendation R2b). *Why:* family completion is more than half the exact evaluations, and bilateral-1 on the same requests takes 71 ms.
 6. **Find the unordered iteration that makes the full engine vary between processes** (R0).

@@ -1,5 +1,14 @@
 # Decisions — Fantasy Trade Finder
 
+## D-227 — Trades sent from the app are followed on Sleeper without the import switch
+
+**Date:** 2026-11-11 · **Who:** the operator ("Yes to sleeper data"), answering the release record's open decision.
+**Context:** D-225 read the status of app-sent offers without a separate consent. At integration (2026-11-10, operator away) the coordinator made the Settings switch cover every private read, on the operator's earlier words "with explicit user permission"; revised-offer cards then reached only users who turned the switch on. The Terms line the operator approved that day says the Sleeper sign-in is used to follow trades sent from the app.
+**Decision:** Back to D-225. `_sleeper_offers_sync` reads when the user has an app-sent offer Sleeper may still move, or the switch is on; otherwise `nothing_to_read`. Without the switch only the app's own rows change. A counter to an app-sent offer, with its terms, is stored on that offer's row as part of what happened to it.
+**Consequences:**
+- Revised-offer and middle-ground cards reach every Send in Sleeper user.
+- The app and the published Terms line now say the same thing. The switch still governs every other offer the user sends or receives.
+
 ## D-226 — Revised-offer cards are built inline with the deck, proven by the owner evaluator, once per declined offer
 
 **Date:** 2026-11-10 · **Who:** WS8 builder, under the operator's treatment A plus the twist (offer-learnings plan §3 WS8).
