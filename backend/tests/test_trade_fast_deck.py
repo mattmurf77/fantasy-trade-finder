@@ -203,7 +203,7 @@ def published(job):
 
 def test_flags_default_off_in_code_and_in_config():
     # On from 2026-11-10, off again 2026-11-11: in production the deck quality
-    # filters removed 148 of a served 150-card page and the operator's deck fell
+    # filters left 2 cards of a served 150-card page and the operator's deck fell
     # from 66-94 cards to 2. Stays off until the page is deep enough to survive
     # the filters that run after it (docs/runbook.md, "Fast deck").
     shipped = json.loads((REPO / "config" / "features.json").read_text())

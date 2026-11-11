@@ -12,9 +12,14 @@
 ---
 
 
+## 2026-11-11 — The batch route can re-run forecasts that stopped incomplete
+
+- `POST /api/cron/league-projections {"retry_incomplete": true}` (cron-gated) makes due every target whose last attempt stopped `incomplete_projections` under the current model, then runs the normal weekly dispatch. The 15-minute tick never passes it.
+- **Why:** after D-231 six targets could not be re-run before their next weekly slot without editing `next_due_at` in the production database, which is not something to do by hand. Runbook updated.
+
 ## 2026-11-11 — Fast deck off (D-232); held-rank wording; Home link to full projections
 
-- **Fast deck off.** With `trade.fast_deck` on (2026-11-10) the operator's deck in one league fell from 66–94 cards to 2, then "No trades found": the filters that run after the 150-card page removed 148 of them. Flag false; interactive jobs run the full solve again. [`../docs/runbook.md`](../docs/runbook.md) § Fast deck.
+- **Fast deck off.** With `trade.fast_deck` on (2026-11-10) the operator's deck in one league fell from 66–94 cards to 2, then "No trades found": 2 cards of the 150-card page survived the steps that run after it (the quality filters dropped 127 of the 129 that reached them; they drop about 97% of the full solve's output too). Flag false; interactive jobs run the full solve again. [`../docs/runbook.md`](../docs/runbook.md) § Fast deck.
 - **Fit block:** "Still RB 5th, WR 10th" now reads "RB stays 5th, WR stays 10th" (server-only, payload stays `fit-2`).
 - **Home playoff tile:** a "View" link, like the rows beneath it; it and the percentage open Standings on the Projected segment (projected standings and the Max PF draft order). Needs a TestFlight build.
 

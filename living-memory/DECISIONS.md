@@ -3,7 +3,7 @@
 ## D-232 — The fast deck is off again: a 150-card page cannot be trusted to fill a deck after the filters that run behind it
 
 **Date:** 2026-11-11 · **Who:** this session, on the operator's report "I'm getting no trades found for FFv3". The operator was told and can reverse it.
-**Context:** `trade.fast_deck` went on 2026-11-10 (ADR-028) without a shadow period. It serves the proven first 150 cards in place of the full inventory. The deck quality filters and presentment rules run after that. One production job on 2026-11-11 logged 150 served cards, then 99 removed as filler, 23 as breakups, 5 as redundant and 9 by presentment, leaving 2. The same league had 66 to 94 cards from the full solve on 2026-11-05 to 2026-11-09. Both decks generated since the switch had 2 cards.
+**Context:** `trade.fast_deck` went on 2026-11-10 (ADR-028) without a shadow period. It serves the proven first 150 cards in place of the full inventory. The deck quality filters and presentment rules run after that. One production job on 2026-11-11 logged 150 served cards; about 129 reached the quality filters, which removed 99 as filler, 23 as breakups and 5 as redundant, leaving 2. The same filters removed 2,377 of the full solve's 2,444 cards on 2026-11-09 (about 97% in both modes). The same league had 66 to 94 cards from the full solve on 2026-11-05 to 2026-11-09. Both decks generated since the switch had 2 cards.
 **Decision:** `trade.fast_deck` false in `config/features.json` and the fixture mirrors. Interactive jobs run the full solve again (25 to 60 s for that league, against about 5 s).
 **Consequences:**
 - The parity tests still pass and were never wrong: they compare the page with the full solve's first 150 cards. Nothing compared the decks that survive the filters.
