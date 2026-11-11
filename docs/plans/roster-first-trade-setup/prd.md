@@ -1,6 +1,6 @@
 # PRD — Roster-first setup for Find a Trade
 
-**Date:** 2026-11-10 · **Status:** design only, awaiting operator review · **Flag:** `trades.roster_setup` (new, default off)
+**Date:** 2026-11-10 · **Status:** design approved by the operator 2026-11-10 (all six recommendations accepted); not built · **Flag:** `trades.roster_setup` (new, default off)
 **Companion files:** [scope.md](scope.md) · [analytics.md](analytics.md) · [reuse-map.md](reuse-map.md) · mockup [`mockups/roster-first-trade-setup/index.html`](../../../mockups/roster-first-trade-setup/index.html)
 
 ---
@@ -23,7 +23,7 @@
 
 ## 0. Open questions for the operator (answer before build)
 
-Each question has a recommendation. The build waits on Q1 and Q2; the rest can default to the recommendation.
+**Decided 2026-11-10:** the operator accepted every recommendation below, and the web waiver in [scope.md](scope.md). Q1 and Q2 are recorded as D-212 and D-213 in `living-memory/DECISIONS.md`. The table is kept as the reasoning.
 
 | # | Question | Recommendation | Why it matters |
 |---|---|---|---|

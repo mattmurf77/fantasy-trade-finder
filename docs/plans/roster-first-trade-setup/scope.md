@@ -3,7 +3,7 @@
 **Date:** 2026-11-10
 **Entry point:** direct ask (operator idea, relayed from the parent session); evidence: the 2026-11-10 acceptance eval (`docs/plans/realtime-trade-engine/acceptance-eval.md`, `trade-engine-rearch` worktree, uncommitted)
 **Builder:** not yet assigned. This session scoped and designed only.
-**Operator sign-off on waivers:** **needed.** See the §3 web waiver and the open questions in [prd.md §0](prd.md#0-open-questions-for-the-operator-answer-before-build).
+**Operator sign-off on waivers:** **given 2026-11-10.** The operator accepted the §3 web waiver and the recommended answers to the open questions in [prd.md §0](prd.md#0-open-questions-for-the-operator-answer-before-build).
 
 Design: [prd.md](prd.md) · Analytics: [analytics.md](analytics.md) · Reuse evidence: [reuse-map.md](reuse-map.md) · Mockup: [`mockups/roster-first-trade-setup/`](../../../mockups/roster-first-trade-setup/index.html)
 
@@ -61,7 +61,7 @@ Design: [prd.md](prd.md) · Analytics: [analytics.md](analytics.md) · Reuse evi
   6. Skip on a second league. The entry card shows, Not now snoozes it, and it is re-offered once in a later session.
   7. Make a trade on the platform that brings in a player. The "1 new on your roster" card appears and lists only him.
   8. Flag off: no screen, no card, no DNA row.
-- [ ] **WAIVED — web client:** v1 is mobile only. The web Trades page has no Trade DNA parity, so there is nowhere to host the step. **Needs operator sign-off.**
+- [ ] **WAIVED — web client:** v1 is mobile only. The web Trades page has no Trade DNA parity, so there is nowhere to host the step. **Signed off by the operator 2026-11-10.**
 - `testID`s to add (must pass `mobile/scripts/testid-lint.sh`):
   - `roster-setup.screen`, `roster-setup.counter`
   - `roster-setup.row.<asset_id>.move|open|keep`
@@ -81,7 +81,7 @@ Design: [prd.md](prd.md) · Analytics: [analytics.md](analytics.md) · Reuse evi
 | `living-memory/HLD.md` | n/a because | No new module, client or major flow. One mobile screen inside the existing Trades stack. |
 | `docs/cross-client-invariants.md` | at build | The `list_type` enum shared by backend, mobile `AssetPrefs` (`mobile/src/api/league.ts:89-94`) and analytics. |
 | `docs/glossary.md` | at build | **Trade block** (a per-player, per-league "willing to move" tag; give-side twin of *target*). **Roster setup**. |
-| ADR or `DECISIONS.md` entry | at build | Record the operator's answers to Q1 (new list vs mapping) and Q2 (Keep = untouchable) as D- entries. |
+| ADR or `DECISIONS.md` entry | updated | D-212 (Move = new `trade_block` list type) and D-213 (Keep = `untouchable`, with the 40% guard). |
 | `docs/data-dictionary.md` | at build | `asset_preferences.list_type` enum. |
 | `docs/config-reference.md` | at build | `trades.roster_setup` row. |
 

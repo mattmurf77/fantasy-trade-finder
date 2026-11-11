@@ -1,5 +1,18 @@
 # Decisions — Fantasy Trade Finder
 
+## D-213 — Roster setup's "Keep" is the existing `untouchable` tag, with a guard past 40% of the roster
+
+**Date:** 2026-11-10 · **Who:** operator, accepting the roster-first setup design ([prd.md §0 Q2](../docs/plans/roster-first-trade-setup/prd.md)).
+**Context:** The roster-first setup step gives every asset Move / — / Keep. Keep could reuse `untouchable` or become a softer new list.
+**Decision:** Keep writes `asset_preferences.list_type = 'untouchable'` through the existing `POST /api/league/asset-prefs`. The step shows a guard note once more than ~40% of the roster is marked Keep.
+**Consequences:** No new engine reads for Keep. Every arm already honours it, but differently: legacy and likes-you paths hard-exclude untouchables, and owner-v1 lets one go only at a market gain with a same-position player coming back. That is why the guard exists: heavy Keep use can empty a legacy deck. Users get one word for one thing.
+
+## D-212 — Roster setup's "Move" is a new `asset_preferences` list type, `trade_block`
+
+**Date:** 2026-11-10 · **Who:** operator, accepting the roster-first setup design ([prd.md §0 Q1](../docs/plans/roster-first-trade-setup/prd.md)).
+**Context:** Nothing stores "I would move this player". `trade_away_positions` is per position, so mapping one player onto it makes the whole position shoppable. `targets` is per player but is read only on the receive side.
+**Decision:** Add `trade_block` as a fourth `list_type` value in `asset_preferences` (the give-side twin of `target`). `list_type` is a plain string, so there is no migration. Persistence is ungated; the engine reads it only behind `trades.roster_setup`.
+**Consequences:** Single membership still holds (one tag per player per league). The value becomes part of the asset-prefs API contract, the mobile `AssetPrefs` type and `docs/cross-client-invariants.md` when built. The owner and bilateral constructors need new give-side reads (prd §4.3).
 ## D-211 — Docs-only pushes skip Render through a build filter, not a `[skip render]` marker
 
 **Date:** 2026-11-10 · **Who:** operator (asked to replace the marker with a build filter).
