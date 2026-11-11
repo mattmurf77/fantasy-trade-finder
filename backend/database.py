@@ -1008,12 +1008,76 @@ trade_offer_outcomes_table = Table("trade_offer_outcomes", metadata,
     Column("resolved_transaction_id", String),   # the completed trade behind the status
     Column("observed_terms_json",     Text),     # completed_different_terms: that trade, user's side
     Column("checked_at",              String),   # last reconcile that read this row
-    UniqueConstraint("provider", "provider_transaction_id",
-                     name="uq_trade_offer_outcome_provider_tx"),
+    # ── WS2b (flag trade.sleeper_offer_import): the private offers read ───
+    # NULL source = an app send written before WS2b ('app').
+    Column("source",                  String),   # app | sleeper_import
+    Column("direction",               String),   # sent | received (the user's view)
+    Column("counter_transaction_id",  String),   # the other manager's linked counter
+    Column("counter_status",          String),   # pending|accepted|declined|withdrawn|lapsed|countered
+    Column("counter_status_at",       String),   # Sleeper's status_updated of the counter
+    Column("counter_terms_json",      Text),     # the counter from the user's side (asset ids)
+    Column("extras_json",             Text),     # {give_faab, receive_faab, unparsed_picks, unparsed_faab} when any
+    # Per user: two consenting managers of one league each hold their own row
+    # for the same offer (one sent, one received).
+    UniqueConstraint("user_id", "provider", "provider_transaction_id",
+                     name="uq_trade_offer_outcome_user_provider_tx"),
 )
 Index("ix_trade_offer_outcomes_league_status",
       trade_offer_outcomes_table.c.league_id, trade_offer_outcomes_table.c.status)
 Index("ix_trade_offer_outcomes_user", trade_offer_outcomes_table.c.user_id)
+
+# ---------------------------------------------------------------------------
+# offer_import_consents — the user's permission to import their own Sleeper
+# trade offers (offer-learnings WS2b, flag `trade.sleeper_offer_import`)
+# ---------------------------------------------------------------------------
+# Scope block: docs/plans/offer-learnings/scope-sleeper-offer-read.md
+# Append-only: one row per grant or withdrawal, never updated. The latest row
+# decides: a 'grant' at the current terms version is consent. A withdrawal and
+# the deletion of every imported row (trade_offer_outcomes.source =
+# 'sleeper_import') commit in ONE transaction. Holds no token. User-keyed:
+# deleted and exported with the account (accounts._ADDITIONAL_PRIVATE_TABLES).
+# New table, so metadata.create_all creates it; no migration_cols row.
+offer_import_consents_table = Table("offer_import_consents", metadata,
+    Column("id",            Integer, primary_key=True, autoincrement=True),
+    Column("user_id",       String,  nullable=False),   # ACCOUNT id
+    Column("kind",          String,  nullable=False),   # grant | withdrawal
+    Column("terms_version", String,  nullable=False),   # the Terms line shown
+    Column("recorded_at",   String,  nullable=False),   # server UTC
+    Column("via",           String),                    # settings (the only source today)
+    Index("ix_offer_import_consents_user", "user_id", "id"),
+)
+
+# ---------------------------------------------------------------------------
+# revised_offer_cards — the one card built for a declined offer (offer-learnings
+# WS8, flag `trade.next_move`)
+# ---------------------------------------------------------------------------
+# Scope block: docs/plans/offer-learnings/scope-revised-offer-cards.md
+# One row per (user, source offer), written the first time a deck looks at a
+# declined offer (or a declined counter): 'active' with the card's terms, or
+# 'none' when the evaluator proved no card. Never rebuilt, so the price never
+# climbs; an active card is retired ('acted' after a pass or like,
+# 'unavailable' once it no longer passes). Only the sender's own offers make a
+# row. User-keyed: deleted and exported with the account; a card built from an
+# imported offer is deleted with the import when the consent is withdrawn.
+# New table, so metadata.create_all creates it; no migration_cols row.
+revised_offer_cards_table = Table("revised_offer_cards", metadata,
+    Column("id",                Integer, primary_key=True, autoincrement=True),
+    Column("user_id",           String,  nullable=False),   # ACCOUNT id of the sender
+    Column("league_id",         String,  nullable=False),
+    Column("outcome_id",        Integer, nullable=False),   # trade_offer_outcomes.id
+    Column("kind",              String,  nullable=False),   # revision | middle_ground
+    Column("status",            String,  nullable=False),   # active | none | retired
+    Column("give_asset_ids",    Text),                      # JSON, the card (NULL for none)
+    Column("receive_asset_ids", Text),
+    Column("change_json",       Text),                      # trade_next_move's change dict
+    Column("step_fraction",     Float),                     # the other side's gain / market value
+    Column("version",           String,  nullable=False),   # trade_revised_offers.VERSION
+    Column("created_at",        String,  nullable=False),
+    Column("retired_at",        String),
+    Column("retired_reason",    String),                    # acted | unavailable
+    UniqueConstraint("user_id", "outcome_id", name="uq_revised_offer_card_user_outcome"),
+    Index("ix_revised_offer_cards_user_league", "user_id", "league_id"),
+)
 
 # ---------------------------------------------------------------------------
 # trade_policy_shadow — candidates the TREATMENT policy rejected
@@ -4368,6 +4432,15 @@ def _migrate_db() -> None:
         ("grading_sessions", "round_id", "VARCHAR"),
         ("grading_sessions", "first_exposed_at", "VARCHAR"),
         ("grading_sessions", "active_round_key", "VARCHAR"),
+        # ── offer-learnings WS2b: the private offers read (a DB that created
+        # trade_offer_outcomes before these columns existed).
+        ("trade_offer_outcomes", "source",                 "VARCHAR"),
+        ("trade_offer_outcomes", "direction",              "VARCHAR"),
+        ("trade_offer_outcomes", "counter_transaction_id", "VARCHAR"),
+        ("trade_offer_outcomes", "counter_status",         "VARCHAR"),
+        ("trade_offer_outcomes", "counter_status_at",      "VARCHAR"),
+        ("trade_offer_outcomes", "counter_terms_json",     "TEXT"),
+        ("trade_offer_outcomes", "extras_json",            "TEXT"),
     ]
     # Only missing columns get an ALTER, each in its own transaction so a
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -8995,11 +9068,12 @@ TRADE_OFFER_OPEN_STATUSES = ("sent", "completed_different_terms")
 
 def save_trade_offer_outcome(row: dict) -> bool:
     """Insert one sent-offer row (offer-learnings WS2). Idempotent on
-    (provider, provider_transaction_id): a repeat returns False and leaves the
+    (user_id, provider, provider_transaction_id): a repeat returns False and leaves the
     stored row untouched, so a retried send never resets an observed status."""
     t = trade_offer_outcomes_table
     with engine.begin() as conn:
         hit = conn.execute(select(t.c.id).where(and_(
+            t.c.user_id == row["user_id"],
             t.c.provider == row["provider"],
             t.c.provider_transaction_id == row["provider_transaction_id"],
         )).limit(1)).fetchone()
@@ -9043,6 +9117,152 @@ def load_trade_offer_outcome_leagues(provider: str, sent_since: str,
             .limit(limit)
         ).fetchall()
     return [r.league_id for r in rows]
+
+
+def load_user_trade_offer_outcomes(user_id: str, league_id: str, provider: str) -> list[dict]:
+    """Every outcome row one user holds in one league (WS2b), oldest first."""
+    t = trade_offer_outcomes_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(t).where(and_(
+            t.c.user_id == str(user_id), t.c.league_id == str(league_id),
+            t.c.provider == provider,
+        )).order_by(t.c.id)).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+def has_open_app_offers(user_id: str, league_id: str, provider: str,
+                        statuses: tuple) -> bool:
+    """True when the user has an app-sent row in this league whose status is
+    one of `statuses` (WS2b: the only reason to read without import consent)."""
+    t = trade_offer_outcomes_table
+    with engine.connect() as conn:
+        return conn.execute(select(t.c.id).where(and_(
+            t.c.user_id == str(user_id), t.c.league_id == str(league_id),
+            t.c.provider == provider, t.c.status.in_(statuses),
+            or_(t.c.source.is_(None), t.c.source == "app"),
+        )).limit(1)).fetchone() is not None
+
+
+def load_offer_read_targets(provider: str, statuses: tuple, sent_since: str,
+                            limit: int) -> list[tuple[str, str]]:
+    """(user_id, league_id) pairs with an app-sent row in `statuses` sent at or
+    after `sent_since`, least-recently checked first (WS2b daily tick)."""
+    t = trade_offer_outcomes_table
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(t.c.user_id, t.c.league_id,
+                   func.min(func.coalesce(t.c.checked_at, "")).label("c"))
+            .where(and_(t.c.provider == provider, t.c.status.in_(statuses),
+                        t.c.sent_at >= sent_since,
+                        or_(t.c.source.is_(None), t.c.source == "app")))
+            .group_by(t.c.user_id, t.c.league_id)
+            .order_by("c", t.c.user_id, t.c.league_id)
+            .limit(limit)
+        ).fetchall()
+    return [(r.user_id, r.league_id) for r in rows]
+
+
+def load_member_sleeper_leagues(member_user_id: str, updated_since: str) -> list[str]:
+    """Sleeper leagues (platform NULL or 'sleeper') where `member_user_id` has a
+    league_members row and the league row was synced at or after
+    `updated_since` (the current season's leagues; a league id is per season)."""
+    m, lg = league_members_table, leagues_table
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(m.c.league_id).join(lg, lg.c.sleeper_league_id == m.c.league_id)
+            .where(and_(m.c.user_id == str(member_user_id),
+                        or_(lg.c.platform.is_(None), lg.c.platform == "sleeper"),
+                        lg.c.updated_at >= updated_since))
+            .order_by(m.c.league_id)).fetchall()
+    return [r.league_id for r in rows]
+
+
+def latest_offer_import_consent(user_id: str) -> dict | None:
+    """The user's most recent consent row (grant or withdrawal), or None."""
+    t = offer_import_consents_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t).where(t.c.user_id == str(user_id))
+                           .order_by(t.c.id.desc()).limit(1)).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def load_offer_import_consented_users(terms_version: str) -> list[str]:
+    """Users whose latest consent row is a grant at `terms_version`."""
+    t = offer_import_consents_table
+    latest = (select(t.c.user_id, func.max(t.c.id).label("mid"))
+              .group_by(t.c.user_id).subquery())
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(t.c.user_id).join(latest, t.c.id == latest.c.mid)
+            .where(and_(t.c.kind == "grant", t.c.terms_version == terms_version))
+            .order_by(t.c.user_id)).fetchall()
+    return [r.user_id for r in rows]
+
+
+def record_offer_import_grant(user_id: str, terms_version: str, at: str,
+                              via: str = "settings") -> None:
+    with engine.begin() as conn:
+        conn.execute(insert(offer_import_consents_table).values(
+            user_id=str(user_id), kind="grant", terms_version=terms_version,
+            recorded_at=at, via=via))
+
+
+def withdraw_offer_import_consent(user_id: str, terms_version: str, at: str,
+                                  via: str = "settings") -> tuple[bool, int]:
+    """Append a withdrawal (only when the latest row is a grant) and delete
+    every imported offer row of the user, in ONE transaction. Returns
+    (withdrawal_written, rows_deleted). Deletion runs even with no open grant,
+    so a repeat is safe and never leaves an import behind."""
+    t = offer_import_consents_table
+    o = trade_offer_outcomes_table
+    with engine.begin() as conn:
+        last = conn.execute(select(t.c.kind).where(t.c.user_id == str(user_id))
+                            .order_by(t.c.id.desc()).limit(1)).fetchone()
+        wrote = bool(last and last.kind == "grant")
+        if wrote:
+            conn.execute(insert(t).values(user_id=str(user_id), kind="withdrawal",
+                                          terms_version=terms_version,
+                                          recorded_at=at, via=via))
+        imported = select(o.c.id).where(and_(
+            o.c.user_id == str(user_id), o.c.source == "sleeper_import"))
+        # WS8: a card built from an imported offer goes with it.
+        conn.execute(delete(revised_offer_cards_table).where(and_(
+            revised_offer_cards_table.c.user_id == str(user_id),
+            revised_offer_cards_table.c.outcome_id.in_(imported))))
+        deleted = conn.execute(delete(o).where(and_(
+            o.c.user_id == str(user_id), o.c.source == "sleeper_import"))).rowcount or 0
+    return wrote, int(deleted)
+
+
+def load_revised_offer_cards(user_id: str, league_id: str) -> list[dict]:
+    """Every revised-offer row of one user in one league (WS8)."""
+    t = revised_offer_cards_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(t).where(and_(
+            t.c.user_id == str(user_id), t.c.league_id == str(league_id)))
+            .order_by(t.c.id)).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+def save_revised_offer_card(row: dict) -> dict | None:
+    """Insert the one row for (user, outcome) and return it; if a row exists
+    already (a concurrent deck), return that one unchanged."""
+    t = revised_offer_cards_table
+    with engine.begin() as conn:
+        hit = conn.execute(select(t).where(and_(
+            t.c.user_id == row["user_id"], t.c.outcome_id == row["outcome_id"]))).fetchone()
+        if hit is None:
+            conn.execute(insert(t).values(**row))
+            hit = conn.execute(select(t).where(and_(
+                t.c.user_id == row["user_id"], t.c.outcome_id == row["outcome_id"]))).fetchone()
+    return dict(hit._mapping) if hit else None
+
+
+def retire_revised_offer_card(row_id: int, reason: str, at: str) -> None:
+    t = revised_offer_cards_table
+    with engine.begin() as conn:
+        conn.execute(update(t).where(and_(t.c.id == row_id, t.c.status == "active"))
+                     .values(status="retired", retired_reason=reason, retired_at=at))
 
 
 def load_sleeper_trades_for_outcomes(league_id: str) -> list[dict]:

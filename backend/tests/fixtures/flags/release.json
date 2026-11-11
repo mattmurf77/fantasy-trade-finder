@@ -270,5 +270,6 @@
   "trades.roster_setup": false,
   "trade.next_move": false,
   "trade.fit_first_copy": false,
-  "trade.partner_activity": false
+  "trade.partner_activity": false,
+  "trade.sleeper_offer_import": false
 }

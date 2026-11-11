@@ -1,5 +1,25 @@
 # Decisions — Fantasy Trade Finder
 
+## D-226 — Revised-offer cards are built inline with the deck, proven by the owner evaluator, once per declined offer
+
+**Date:** 2026-11-10 · **Who:** WS8 builder, under the operator's treatment A plus the twist (offer-learnings plan §3 WS8).
+**Context:** The operator wanted a card for each of the user's own declined offers, "slightly more value", leading the deck, inline if it can be made safe, a batch otherwise; and a middle ground after a declined counter.
+**Decision:** `trade_revised_offers.build` runs inside `_run_trade_job` for organic owner-served decks, just before the owner revalidation, so the cards pass every final gate an owner card passes and keep the first slots through the existing `injected` protections. A declined offer gets one swap (`trade_next_move` `swap_in_give`: same size, same ask, one offered piece up in value, 5–15%); a declined counter gets a middle ground (shared assets kept, 35–65% of the market-value gap, closest to half, at most one extra piece from the user's roster). One `revised_offer_cards` row per declined offer, never rebuilt; a pass or like retires it; no revision of a revision; three per deck, newest first. No batch.
+**Consequences:**
+- A decline learned at this open shows on the next deck build, not a cached one.
+- Under the bilateral revisions a counter that grows a 2-for-1 to four assets cannot be priced by the evaluator, so it gets no middle ground.
+- The deck pipeline digest moves (pin pending with the coordinator).
+
+## D-225 — The private Sleeper offers read: one throttled read with the send credential; consent covers the import, not the app's own offers
+
+**Date:** 2026-11-10 · **Who:** WS2b builder, under the operator's approval of the private read (offer-learnings plan §3 WS2b).
+**Context:** Declines, withdrawals and counters are invisible on Sleeper's public API (D-216). `league_transactions_filtered` returns the signed-in user's own offers with every status; the app already holds the Send-in-Sleeper credential that can call it.
+**Decision:** One read (`sleeper_write.league_trade_offers`, trades only, no `player_map`) through the propose path's transport, called only from `server._sleeper_offers_sync`, at most once per (user, league) per 30 min, from Find a Trade (background thread) and the daily tick. A failed or unauthorised read changes nothing (the credential is not dropped, unlike a failed send) and backs off 24 h (auth) or 6 h (other). App-sent offers move to `declined` / `withdrawn` / `lapsed` / `countered` without the import consent; importing the user's other Sleeper offers needs an append-only consent at the current terms version, and revoking deletes the imports in the same transaction. Counters are linked by roster pair, side and a −60 s / +10 min window around the original's close.
+**Consequences:**
+- The status of an offer sent through the app is read from the user's own account without a separate consent; the operator can make consent cover it with one condition (scope §0.6).
+- Counter links are inferred, not given by Sleeper; their error rate is unmeasured until the operator labels a sample.
+- `trade_offer_outcomes`' unique key includes `user_id`, so two consenting managers of one league each keep their own row.
+
 ## D-224 — Revision 4 gets a Calibration round of its own, offered after the current round; the additive arm is superseded
 
 **Date:** 2026-11-10 · **Who:** operator (chose a new round over leaving opened decks out); WS1b builder (the shape below).

@@ -726,3 +726,46 @@ def fit_block(proof: dict, card, players: dict, context) -> Optional[dict]:
     except Exception:
         return None
 
+
+# ── WS8 revised-offer cards (flag trade.next_move) ──────────────────────────
+# One sentence on a card built because Sleeper showed the user's own offer
+# declined (a revision) or showed the user declining the other manager's
+# counter (a middle ground). It states what the platform showed and what
+# changed, never a reason for the decline. Assets are named by the caller's
+# `name(asset_id)` (player names, pick labels); the sentence sits above the
+# fit lines and reads on its own beside them.
+
+def _revised_names(ids, name) -> str:
+    labels = [str(name(i) or "an asset") for i in ids]
+    if len(labels) <= 1:
+        return labels[0] if labels else "that trade"
+    return ", ".join(labels[:-1]) + " and " + labels[-1]
+
+
+def revised_offer_line(kind: str, *, original_give, original_receive, give, receive,
+                       name) -> str:
+    """The card's first line, from the original offer and the card's terms.
+
+    revision      "Your offer for {asked} was declined. Another idea: {new}
+                   in place of {old}."
+    middle_ground "You turned down their counter to your offer for {asked}.
+                   A middle ground: {changes}."  changes, relative to the
+                   user's original offer: "add X", "keep X" (no longer
+                   offered), "also ask for X", "no longer ask for X".
+    """
+    asked = _revised_names(list(original_receive), name)
+    if kind == "revision":
+        old = [p for p in original_give if p not in give]
+        new = [p for p in give if p not in original_give]
+        return (f"Your offer for {asked} was declined. Another idea: "
+                f"{_revised_names(new, name)} in place of {_revised_names(old, name)}.")
+    parts = []
+    for verb, ids in (("add", [p for p in give if p not in original_give]),
+                      ("keep", [p for p in original_give if p not in give]),
+                      ("also ask for", [p for p in receive if p not in original_receive]),
+                      ("no longer ask for", [p for p in original_receive if p not in receive])):
+        if ids:
+            parts.append(f"{verb} {_revised_names(ids, name)}")
+    changes = (", ".join(parts[:-1]) + " and " + parts[-1]) if len(parts) > 1 else parts[0]
+    return (f"You turned down their counter to your offer for {asked}. "
+            f"A middle ground: {changes}.")

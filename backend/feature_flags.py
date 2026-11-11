@@ -1293,6 +1293,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # (outlook_calibration.R4_ROUND_ID), offered after the current round. Supersedes
     # grading.revision4_arm, which is inert while this is on. OFF => today's behaviour.
     "grading.revision4_round",
+    # docs/plans/offer-learnings/scope-sleeper-offer-read.md (WS2b). ON ⇒ one
+    # private read of the user's own Sleeper trade offers (the Send-in-Sleeper
+    # credential) when Find a Trade is opened and on the daily tick, at most
+    # once per (user, league) per 30 min: app-sent offers gain declined /
+    # withdrawn / lapsed / countered; with the user's consent their other
+    # Sleeper offers are imported. OFF (default) ⇒ no call, no row, GET/POST
+    # /api/sleeper/offer-import 404 (DELETE still withdraws).
+    "trade.sleeper_offer_import",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

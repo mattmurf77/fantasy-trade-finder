@@ -56,6 +56,7 @@ FROZEN_PINS = {
     18: "560661f3c6d76b8d",  # Bilateral revision 4 (selector owner_bilateral_revision_4_enabled, default 0): presentment takes its version; the dark key is dropped from the request hash unless exactly 1; selector off: terms and order unchanged.
     19: "41b3e46c2f4c2e68",  # Fit block v3 (trade.fit_first_copy, default off): one league-wide rank context per job, stamped on owner cards; trade_card_to_dict adds fit_block; flag off: no context, no key, payload byte-identical.
     20: "4e8e4cbd886c9149",  # Partner activity (trade.partner_activity, default off; revision 4 only): the owner context carries the league's public completed-trade counts; flag off or revision 4 not selected: context, hash, terms and order unchanged.
+    21: "6b0e0c0fe51fb2ef",  # Revised-offer cards (trade.next_move, default off): the user's declined Sleeper offers lead the organic owner deck, proven by the owner evaluator, and carry the job's fit context; flag off: no read, no card, terms and order unchanged.
 }
 PINNED = server.DECK_PIPELINE_PINS.get(server.DECK_PIPELINE_VERSION)
 

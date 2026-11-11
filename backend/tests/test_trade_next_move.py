@@ -192,11 +192,13 @@ def test_flag_is_registered_dark_everywhere():
 
 
 def test_no_production_module_reaches_the_generator():
-    """Flag off is byte-identical because nothing serves a revision yet:
-    no route, no deck wiring, no payload key. Wiring one changes this test."""
+    """Flag off is byte-identical because only one module serves a revision:
+    WS8's `trade_revised_offers` (the deck's revised-offer cards, itself
+    behind the same flag; its flag-off test is in test_revised_offer_cards).
+    Wiring another changes this test."""
     imports = re.compile(r"^\s*(from\s+\S*trade_next_move\s+import|from\s+\S+\s+import\s+[^#\n]*\btrade_next_move\b"
                          r"|import\s+[^#\n]*\btrade_next_move\b)|import_module\([^)]*trade_next_move", re.M)
     users = [p.relative_to(REPO).as_posix() for p in (REPO / "backend").rglob("*.py")
              if "tests" not in p.parts and p.name != "trade_next_move.py"
              and imports.search(p.read_text())]
-    assert users == []
+    assert users == ["backend/trade_revised_offers.py"]

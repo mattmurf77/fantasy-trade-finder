@@ -213,6 +213,13 @@ export function normalizeTradeCard(raw: any): PagedTradeCard {
               : [],
           }))
       : [];
+  // WS8 revised-offer card (flag trade.next_move): validated so a malformed
+  // payload degrades to an ordinary card.
+  const revisedOffer: { kind: 'revision' | 'middle_ground'; line: string } | undefined =
+    (raw?.revised_offer?.kind === 'revision' || raw?.revised_offer?.kind === 'middle_ground')
+    && typeof raw?.revised_offer?.line === 'string' && raw.revised_offer.line.length > 0
+      ? { kind: raw.revised_offer.kind, line: raw.revised_offer.line }
+      : undefined;
   // Phase-2 aggression variant — opaque string, passed through as-is.
   const aggressionVariant =
     typeof raw?.aggression_variant === 'string' ? raw.aggression_variant : undefined;
@@ -310,6 +317,8 @@ export function normalizeTradeCard(raw: any): PagedTradeCard {
     partner_fit:        partnerFit,
     // WS4b fit block — only well-formed teams pass; none ⇒ key absent.
     ...(fitTeams.length ? { fit_block: { v: 'fit-2' as const, teams: fitTeams } } : {}),
+    // WS8 — only a well-formed revised_offer passes; otherwise key absent.
+    ...(revisedOffer ? { revised_offer: revisedOffer } : {}),
     match_context:      matchContext,
     lane,
     fitPremium,

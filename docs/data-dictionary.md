@@ -191,6 +191,8 @@ counterparty board disclosure or client analytics event is added.
 - [`bad_trade_flags`](#bad_trade_flags)
 - [`trade_proposals`](#trade_proposals)
 - [`trade_offer_outcomes`](#trade_offer_outcomes)
+- [`offer_import_consents`](#offer_import_consents)
+- [`revised_offer_cards`](#revised_offer_cards)
 - [`trade_policy_shadow`](#trade_policy_shadow)
 
 **Players / Drafts / Picks**
@@ -939,7 +941,7 @@ Indexes: `ix_trade_proposals_user_league` on `(user_id, league_id)`; `ix_trade_p
 
 ## `trade_offer_outcomes`
 
-What happened at the provider to a trade the user **sent through the app**. Scope block: `docs/plans/offer-learnings/scope-trade-outcomes.md`. Flag `trade.outcome_tracking` (off ⇒ never written or read). One row per confirmed Sleeper send that returned a transaction id, written by `trade_outcomes.record_sent` from `server._sleeper_propose_core` (so the deck, match, calculator, shop and overhaul sends all land here), then moved by `trade_outcomes.reconcile_league` against [`sleeper_trades`](#sleeper_trades) at session init and in the daily-tick step `trade_outcomes`. Separate from [`trade_proposals`](#trade_proposals), which is written only under `trade.valuation_telemetry` and holds no roster ids.
+What happened at the provider to a trade the user **sent through the app** and, with the user's consent, to the other trade offers in their own Sleeper account. Scope blocks: `docs/plans/offer-learnings/scope-trade-outcomes.md` (WS2) and `docs/plans/offer-learnings/scope-sleeper-offer-read.md` (WS2b, flag `trade.sleeper_offer_import`: the private read writes `declined` / `withdrawn` / `lapsed` / `countered` and the counter columns, and imports rows with `source = 'sleeper_import'`). Flag `trade.outcome_tracking` (off ⇒ never written or read). One row per confirmed Sleeper send that returned a transaction id, written by `trade_outcomes.record_sent` from `server._sleeper_propose_core` (so the deck, match, calculator, shop and overhaul sends all land here), then moved by `trade_outcomes.reconcile_league` against [`sleeper_trades`](#sleeper_trades) at session init and in the daily-tick step `trade_outcomes`. Separate from [`trade_proposals`](#trade_proposals), which is written only under `trade.valuation_telemetry` and holds no roster ids.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -947,19 +949,66 @@ What happened at the provider to a trade the user **sent through the app**. Scop
 | `user_id` | str | ACCOUNT id of the sender (`sess["user_id"]`). Deleted and exported with the account (`accounts._ADDITIONAL_PRIVATE_TABLES`). |
 | `league_id` | str | |
 | `provider` | str | `sleeper` (ESPN and MFL sends are not tracked yet) |
-| `provider_transaction_id` | str | Sleeper's id from `propose_trade`. UNIQUE with `provider`: a repeated send of the same id is a no-op and never resets an observed status. |
+| `provider_transaction_id` | str | Sleeper's transaction id. UNIQUE with `user_id` and `provider`: a repeated send of the same id is a no-op and never resets an observed status; two consenting managers of one league each hold their own row for the same offer. |
 | `proposal_event_id` | str, nullable | Joins `trade_proposals` when that row exists. |
 | `impression_id` | str, nullable | The originating card, validated by `server._owned_impression_id` (NULL unless `trade.valuation_telemetry` or the owner arm is on). |
 | `my_roster_id`, `their_roster_id` | int | League-scoped roster ids of sender and counterparty. The counterparty is never stored as a person id. |
 | `give_asset_ids`, `receive_asset_ids` | JSON text | The package as sent (players and FTF pick ids). |
 | `sent_at` | str | server UTC |
-| `status` | str | `sent` · `accepted` (the sent transaction id appears completed) · `completed_different_terms` (it did not, but the same two rosters completed a different two-team trade after `sent_at` — an observed later trade, not a confirmed counter; not terminal: `accepted` replaces it if the original later completes). **Declined, withdrawn, expired and unaccepted counters are never written**: they are visible only on Sleeper's private GraphQL, which the app does not read, and silence is never read as one of them. |
+| `status` | str | `sent` (still pending) · `accepted` (the transaction completed) · `completed_different_terms` (public reconcile only: the offer did not complete, but the same two rosters completed a different two-team trade after `sent_at` — an observed later trade, not a confirmed counter; not terminal) · with flag `trade.sleeper_offer_import` and the private read (`backend/sleeper_offer_read.py`): `declined` (Sleeper `rejected`, by the other side), `withdrawn` (`rejected`/`cancelled` with the rejecter on the creator's side), `lapsed` (`cancelled`, no rejecter), `countered` (declined or lapsed and the other side's `is_counter` offer is linked; see the counter columns). `accepted`, `declined`, `withdrawn` and `lapsed` are final; silence is never read as any of them. On imported rows the words describe the offer from its creator's side, and `direction` says who that was. |
 | `status_at` | str, nullable | Sleeper's completion time (`sleeper_trades.traded_at`) of the trade behind `status`. |
 | `resolved_transaction_id` | str, nullable | That trade's id (= `provider_transaction_id` when `accepted`). |
 | `observed_terms_json` | text, nullable | `completed_different_terms` only: that trade from the sender's side — `{give_player_ids, receive_player_ids, give_picks, receive_picks, give_faab, receive_faab}`, picks as `{season, round, original_roster_id}`. |
-| `checked_at` | str, nullable | Last reconcile that read the row. "Not accepted by `checked_at`" is the only negative this table supports. |
+| `checked_at` | str, nullable | Last reconcile or private read that saw the row. Without the private read, "not accepted by `checked_at`" is the only negative this table supports. |
+| `source` | str, nullable | `app` (a send through the app; NULL on rows written before WS2b) · `sleeper_import` (WS2b, written only while the user's latest `offer_import_consents` row is a grant at the current terms version; deleted in the same transaction as a withdrawal). |
+| `direction` | str, nullable | `sent` · `received`, from the user's side (`app` rows are `sent`). |
+| `counter_transaction_id` | str, nullable | The other manager's `is_counter` transaction linked to this offer: same two rosters, created by the other side, `created` within [−60 s, +10 min] of this offer's `status_updated`; one counter answers one offer. |
+| `counter_status` | str, nullable | That counter's state from the user's side: `pending` · `accepted` · `declined` (the user declined it) · `withdrawn` · `lapsed` · `countered` (the user countered back). |
+| `counter_status_at` | str, nullable | Sleeper's `status_updated` of the counter. |
+| `counter_terms_json` | text, nullable | The counter from the user's side: `{give_asset_ids, receive_asset_ids}` (players and this league's pick ids) plus `give_faab` / `receive_faab` / `unparsed_picks` when present. |
+| `extras_json` | text, nullable | Imported rows: `{give_faab, receive_faab, unparsed_picks, unparsed_faab}` when any (FAAB is never an asset id; a pick in an unknown shape is counted, not guessed). |
 
-Indexes: `uq_trade_offer_outcome_provider_tx` UNIQUE `(provider, provider_transaction_id)`; `ix_trade_offer_outcomes_league_status` on `(league_id, status)`; `ix_trade_offer_outcomes_user` on `user_id`. A new table, so `metadata.create_all` creates it with its constraint on both dialects.
+Indexes: `uq_trade_offer_outcome_user_provider_tx` UNIQUE `(user_id, provider, provider_transaction_id)` (WS2's `(provider, provider_transaction_id)` constraint never shipped to production); `ix_trade_offer_outcomes_league_status` on `(league_id, status)`; `ix_trade_offer_outcomes_user` on `user_id`. A new table, so `metadata.create_all` creates it with its constraint on both dialects; the seven WS2b columns are also in `migration_cols` for a DB that created the table before them. Never stored from the private read: the token, `metadata`, `settings`, `player_map` (not requested) or any Sleeper user id.
+
+---
+
+## `offer_import_consents`
+
+The user's permission to import their own Sleeper trade offers (WS2b, flag `trade.sleeper_offer_import`; scope block `docs/plans/offer-learnings/scope-sleeper-offer-read.md`). **Append-only**: one row per grant or withdrawal, never updated. The latest row decides: a `grant` at `sleeper_offer_read.TERMS_VERSION` is consent; a grant at an older version is not. Written only by `POST` / `DELETE /api/sleeper/offer-import` (verified sessions). A withdrawal and the deletion of every `trade_offer_outcomes` row of the user with `source = 'sleeper_import'` commit in one transaction (`database.withdraw_offer_import_consent`). Holds no token. Deleted and exported with the account (`accounts._ADDITIONAL_PRIVATE_TABLES`).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | append order |
+| `user_id` | str | ACCOUNT id |
+| `kind` | str | `grant` · `withdrawal` |
+| `terms_version` | str | the Terms line the switch showed (`offer-import-draft-1` today) |
+| `recorded_at` | str | server UTC |
+| `via` | str, nullable | `settings` |
+
+Index: `ix_offer_import_consents_user` on `(user_id, id)`. A new table; no `migration_cols` row.
+
+---
+
+## `revised_offer_cards`
+
+The one card built for the user's own declined offer (offer-learnings WS8, flag `trade.next_move`; scope block `docs/plans/offer-learnings/scope-revised-offer-cards.md`). Written by `trade_revised_offers.build` from the deck worker the first time a deck looks at a source offer: a `trade_offer_outcomes` row of the user with `direction = 'sent'` and `status = 'declined'` (a revision) or `status = 'countered'` with `counter_status = 'declined'` (a middle ground). **Once only:** never rebuilt, so the offered price never climbs; a source whose terms equal any built card's terms is never revised again. Deleted and exported with the account (`accounts._ADDITIONAL_PRIVATE_TABLES`); a card whose source is an imported offer is deleted with it when the import consent is withdrawn.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | the card's `trade_id` is `revised_<id>` |
+| `user_id` | str | ACCOUNT id of the sender |
+| `league_id` | str | |
+| `outcome_id` | int | `trade_offer_outcomes.id` of the source offer. UNIQUE with `user_id` |
+| `kind` | str | `revision` · `middle_ground` |
+| `status` | str | `active` (served until acted on) · `none` (the evaluator proved no card; never retried) · `retired` |
+| `give_asset_ids`, `receive_asset_ids` | JSON text, nullable | the card's package from the user's side (NULL for `none`); re-proven by the evaluator on every deck build |
+| `change_json` | text, nullable | `trade_next_move`'s change: `{kind: swap_in_give, asset_id, replaces}` or `{kind: middle_ground, gap_share, added_give, removed_give, added_receive, removed_receive}` |
+| `step_fraction` | float, nullable | the other manager's net market gain over the original, as a share of the trade's market value |
+| `version` | str | `trade_revised_offers.VERSION` (`revised-offer-1`) |
+| `created_at` | str | server UTC |
+| `retired_at`, `retired_reason` | str, nullable | `acted` (the user passed or liked it: the evaluator answered `previous_disposition`) · `unavailable` (it no longer passes, or the partner no longer holds the ask) |
+
+Indexes: `uq_revised_offer_card_user_outcome` UNIQUE `(user_id, outcome_id)`; `ix_revised_offer_cards_user_league` on `(user_id, league_id)`. A new table; no `migration_cols` row.
 
 ---
 

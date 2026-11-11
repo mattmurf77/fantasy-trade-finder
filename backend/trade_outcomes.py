@@ -95,6 +95,8 @@ def record_sent(*, user_id: str, league_id: str, transaction_id, my_roster_id,
             "receive_asset_ids":       json.dumps([str(a) for a in receive_asset_ids or []]),
             "sent_at":                 _now().isoformat(),
             "status":                  "sent",
+            "source":                  "app",
+            "direction":               "sent",
         })
     except Exception as err:
         log.warning("trade outcome record failed (non-fatal): %s", err)

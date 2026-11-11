@@ -59,6 +59,18 @@ No transaction carried `declined`, `failed`, `expired`, `canceled`, `pending`, `
   on one.
 - A league id is per season, so one call covers the current league year.
 
+## Value shapes (checked live, same session, shapes only)
+
+| Field | Shape |
+|---|---|
+| `draft_picks` | A list of strings, every one `"n,n,n,n,n"` (234 of 234): the same form the propose call takes, original roster, season, round, from roster, to roster. `null` when the trade has no picks |
+| `waiver_budget` | A list of strings `"n,n,n"` (one seen); `null` otherwise. The order of its three numbers is not established, so the app only marks such an offer as carrying FAAB |
+| `adds`, `drops` | An object of player id to roster id (a number), or `null` for a picks-only side |
+| `metadata`, `settings` | An object or `null`, never a JSON string |
+| `roster_ids` | Numbers. `creator` is a string. `created` and `status_updated` are numbers (milliseconds) |
+
+No league came near the read's limit of 200 trades (29, 56 and 85).
+
 ## What this makes possible
 
 | Need | Source |
