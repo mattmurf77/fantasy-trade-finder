@@ -14,6 +14,13 @@
 - Mockup `mockups/next-move/index.html`: HTML parsed balanced; both embedded captures exist on disk and are in `screens/manifest.json`; no external references; only design-system hexes; radii ≤ 8px; no gradient, blur or shadow. The browser pane rendered it as a `data:` snapshot, so the two captures could not be shown loading there.
 - Full backend suite (Python 3.12, branch base 6017d64): **13732 passed, 42 skipped, 0 failed** in 17m51s. `test_deck_pipeline_digest` green (no deck pipeline change).
 
+## 2026-11-10 — Fit-first card copy (WS4, `trade.fit_first_copy`, dark)
+
+- New `backend/tests/test_fit_first_copy.py`: **35 passed**: each template's trigger and threshold edge, fallbacks, the other team's line unchanged under every private counterparty field, the pinned template table, and serialization on real revision-2 bilateral cards (flag off adds nothing and never calls the composer; flag on with no line is byte-identical). 19 named backend sabotages (S1–S19 in the [scope block](../docs/plans/offer-learnings/scope-fit-first-copy.md) §4) each red, then green on revert.
+- New `mobile/tests/check-fit-first-copy.js`: **8 checks**; 5 named sabotages (M1–M5) red, then green. `npx tsc --noEmit` clean, all mobile `check-*.js` pass, testid-lint OK.
+- Full backend suite (Python 3.12): **13748 passed, 42 skipped, 3 failed in 17m08s**. The 3 failures are `test_deck_pipeline_digest` only, red on purpose: `trade_card_to_dict` is a deck-pipeline function, and the coordinator pins one `DECK_PIPELINE_VERSION` bump for the integrated tree (new digest `d4dab1ecbc0dfc1b`). No simulator (D-056); TestFlight checklist in the scope block is owed before the flag is lit.
+- Synthetic league (3 partners, made-up names, 937 uncapped revision-2 cards over three viewer outlooks): the other team's line fires on 44% of cards, the viewer's on 77%, neither on 14%; first 30 cards per outlook: 63–73% and 67–90%.
+
 ## 2026-11-07 — First-page polling failure recovery
 
 ## 2026-11-10 — Outcomes of sent trades (offer-learnings WS2 Part A, branch `feat/trade-outcomes`)

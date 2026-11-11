@@ -264,5 +264,6 @@
   "trades.win_now": true,
   "outlook.championship_probabilities": true,
   "trades.roster_setup": false,
-  "trade.next_move": false
+  "trade.next_move": false,
+  "trade.fit_first_copy": false
 }

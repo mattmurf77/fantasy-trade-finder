@@ -187,6 +187,16 @@ export function normalizeTradeCard(raw: any): PagedTradeCard {
               : undefined,
         }
       : undefined;
+  // WS4 fit-first copy (flag trade.fit_first_copy): server-composed lines,
+  // validated so a malformed payload degrades to "no line".
+  const fitLines: { side: 'them' | 'you'; code: string; text: string }[] =
+    Array.isArray(raw?.fit_lines)
+      ? raw.fit_lines.filter((l: any) =>
+          (l?.side === 'them' || l?.side === 'you')
+          && typeof l?.code === 'string'
+          && typeof l?.text === 'string' && l.text.length > 0)
+        .map((l: any) => ({ side: l.side, code: l.code, text: l.text }))
+      : [];
   // Phase-2 aggression variant — opaque string, passed through as-is.
   const aggressionVariant =
     typeof raw?.aggression_variant === 'string' ? raw.aggression_variant : undefined;
@@ -282,6 +292,8 @@ export function normalizeTradeCard(raw: any): PagedTradeCard {
     wildcard:           raw?.wildcard === true ? true : undefined,
     sweetener,
     partner_fit:        partnerFit,
+    // WS4 fit-first copy — only well-formed lines pass; none ⇒ key absent.
+    ...(fitLines.length ? { fit_lines: fitLines } : {}),
     match_context:      matchContext,
     lane,
     fitPremium,

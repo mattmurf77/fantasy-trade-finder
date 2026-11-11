@@ -351,3 +351,246 @@ def hesitation_line(objection: dict, players: dict) -> Optional[str]:
         return HESITATION_TEMPLATES[key].format(**values)
     except Exception:
         return None
+
+
+# ─────────────────────── fit-first card copy (flag trade.fit_first_copy) ──────────
+# docs/plans/offer-learnings/scope-fit-first-copy.md. One line per side saying
+# why the offer suits that team, read from the bilateral generator's frozen
+# proof (`card.owner_evaluation.as_dict()`), never from a new proof field.
+# `build_narrative` and the hesitation surface above are untouched; nothing
+# here reads a flag or a knob (the flag lives at the server seam).
+#
+# Privacy: the other team's line uses only what the app already shows a viewer
+# about a league-mate: their roster, consensus values, ages and a roster-read
+# (inferred) window. It never reads the counterparty's personal board, their
+# benefits list, declared intent, untouchables, targets or a DECLARED outlook.
+# Absence of a line is not a claim, so a line may be withheld for any reason.
+
+#: Bump on ANY wording change (whitespace and punctuation included).
+FIT_TMPL_VERSION = "fit-1"
+
+#: Need: the receiving side's usable-depth proxy at the named position rises
+#: by at least this share of its value before the trade.
+FIT_NEED_MIN_LIFT = 0.10
+#: Need: the gain must also exceed the backup credit the proxy gives the named
+#: player (trade_gen_owner._lineup counts one backup per position at 15%), so a
+#: line is only written when he moves into the counted starters.
+_FIT_BACKUP_SHARE = 0.15
+#: Surplus: the giving side's usable-depth proxy at the named position falls
+#: by no more than this share of its value before the trade.
+FIT_SURPLUS_MAX_DROP = 0.02
+#: Win-now asset: `trade_service._now_lean(pos, age)` at least this.
+FIT_WIN_NOW_MIN_LEAN = 0.05
+#: Other team's plan: their market-weighted now-lean shift must reach this in
+#: the plan's direction (the same ±0.05 band as `_opponent_frame`).
+FIT_THEIR_PLAN_MIN_SHIFT = 0.05
+
+_FIT_REBUILD = ("rebuilder", "jets")
+_FIT_WIN_NOW = ("contender", "championship")
+_FIT_DEPTH_POSITIONS = ("QB", "RB", "WR", "TE")
+#: The viewer's plan benefit as each bilateral revision names it.
+_FIT_PLAN_BENEFITS = ("outlook", "future_pick_capital")
+_FIT_ARM = "owner_v2_bilateral"
+
+FIT_TEMPLATES: dict[str, str] = {
+    # `.you` = the viewer DECLARED this window; `.you_roster` = it is the
+    # engine's roster read, so the line says so instead of asserting a plan.
+    "plan_rebuild.you":        "Fits your rebuild: you add {asset}.",
+    "plan_rebuild.you_roster": "Fits your rebuild-leaning roster: you add {asset}.",
+    "plan_rebuild.them":       "Fits their rebuild-leaning roster: they add {asset}.",
+    "plan_win_now.you":        "Fits your win-now plan: you add {asset}.",
+    "plan_win_now.you_roster": "Fits your win-now roster: you add {asset}.",
+    "plan_win_now.them":       "Fits their win-now roster: they add {asset}.",
+    "need.you":          "Upgrades your {pos} group with {name}.",
+    "need.them":         "Upgrades their {pos} group with {name}.",
+    "surplus.you":       "Your {pos} group barely changes without {name}.",
+    "surplus.them":      "Their {pos} group barely changes without {name}.",
+}
+
+
+def _fit_finite(value) -> bool:
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and value == value and value not in (float("inf"), float("-inf")))
+
+
+def _fit_text(value) -> Optional[str]:
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _fit_asset(pid, players: dict) -> Optional[dict]:
+    """Public facts about one asset, or None when it cannot be described."""
+    from .trade_service import is_pick_asset   # lazy: avoids circular import
+    player = players.get(pid)
+    name = _fit_text(getattr(player, "name", None))
+    if player is None or name is None:
+        return None
+    if is_pick_asset(player):
+        return {"id": pid, "name": name, "pos": "PICK", "age": None}
+    pos, age = getattr(player, "position", None), getattr(player, "age", None)
+    return {"id": pid, "name": name, "pos": pos if isinstance(pos, str) else None,
+            "age": int(age) if _fit_finite(age) and age > 0 else None}
+
+
+def _fit_describe(asset: dict) -> Optional[str]:
+    if asset["pos"] == "PICK":
+        return f"draft pick {asset['name']}"
+    if asset["age"] is None or not asset["pos"]:
+        return None
+    return f"{asset['name']}, a {asset['age']}-year-old {asset['pos']}"
+
+
+def _fit_lean(asset: dict) -> Optional[float]:
+    from .trade_service import _now_lean   # lazy: avoids circular import
+    if asset["pos"] == "PICK":
+        return _now_lean("PICK", None)
+    if asset["age"] is None:
+        return None
+    return _now_lean(asset["pos"], asset["age"])
+
+
+def _fit_plan(side: str, team: dict, incoming: list, outgoing: list,
+              market: dict) -> Optional[tuple[str, dict]]:
+    outlook = team.get("outlook")
+    if outlook not in _FIT_REBUILD + _FIT_WIN_NOW:
+        return None
+    if side == "you":
+        benefits = team.get("benefits")
+        if not isinstance(benefits, list) or not set(benefits) & set(_FIT_PLAN_BENEFITS):
+            return None
+    else:
+        # A declared window is the other manager's private setting; only the
+        # roster read the app already shows (Team Review) may be named.
+        if team.get("outlook_source") != "inferred":
+            return None
+        shift = gross = 0.0
+        for sign, assets in ((1, incoming), (-1, outgoing)):
+            for asset in assets:
+                lean = _fit_lean(asset)
+                if lean is None:
+                    return None
+                shift += sign * market[asset["id"]] * lean
+                gross += market[asset["id"]]
+        shift /= gross
+        if (shift > -FIT_THEIR_PLAN_MIN_SHIFT if outlook in _FIT_REBUILD
+                else shift < FIT_THEIR_PLAN_MIN_SHIFT):
+            return None
+    from .trade_gen_bilateral import _YOUNG   # the generator's own youth bands
+    if outlook in _FIT_REBUILD:
+        # Picks, or young non-RB players: the assets the bilateral plan scores
+        # as clearly positive for a rebuild (a young RB scores near zero).
+        fits = [a for a in incoming if a["pos"] == "PICK" or (
+            a["pos"] in ("QB", "WR", "TE") and a["age"] is not None
+            and a["age"] <= _YOUNG[a["pos"]])]
+        key = "plan_rebuild"
+    else:
+        fits = [a for a in incoming if a["pos"] in _FIT_DEPTH_POSITIONS
+                and (_fit_lean(a) or 0.0) >= FIT_WIN_NOW_MIN_LEAN]
+        key = "plan_win_now"
+    variant = side
+    if side == "you" and team.get("outlook_source") != "declared":
+        variant = "you_roster"
+    for asset in sorted(fits, key=lambda a: (-market[a["id"]], a["id"])):
+        described = _fit_describe(asset)
+        if described:
+            return f"{key}.{variant}", {"asset": described}
+    return None
+
+
+def _fit_depth(team: dict) -> Optional[tuple[dict, dict]]:
+    before, delta = team.get("usable_depth_before"), team.get("usable_depth_delta")
+    if not isinstance(before, dict) or not isinstance(delta, dict):
+        return None
+    if not all(_fit_finite(before.get(p)) and _fit_finite(delta.get(p))
+               for p in _FIT_DEPTH_POSITIONS):
+        return None
+    return before, delta
+
+
+def _fit_need(side: str, team: dict, incoming: list,
+              market: dict) -> Optional[tuple[str, dict]]:
+    # A rebuilding or tanking team's lineup is not its goal (the generator
+    # weights roster need at 0.05 and 0 for them), so no need line for one.
+    depth = _fit_depth(team)
+    if depth is None or team.get("outlook") in _FIT_REBUILD:
+        return None
+    from .trade_service import age_now_mult   # lazy: avoids circular import
+    before, delta = depth
+    best = None
+    for pos in sorted({a["pos"] for a in incoming if a["pos"] in _FIT_DEPTH_POSITIONS}):
+        top = max((a for a in incoming if a["pos"] == pos),
+                  key=lambda a: (market[a["id"]], a["id"]))
+        if top["age"] is None:
+            continue
+        gain = delta[pos]
+        # More than a bench body: the proxy credits one backup at 15% of its
+        # lineup value, so a gain at or under that is a backup, not an upgrade.
+        backup = _FIT_BACKUP_SHARE * market[top["id"]] * age_now_mult(pos, top["age"])
+        if gain <= backup or (before[pos] > 0 and gain < FIT_NEED_MIN_LIFT * before[pos]):
+            continue
+        lift = gain / before[pos] if before[pos] > 0 else float("inf")
+        if best is None or lift > best[0]:
+            best = (lift, pos, top["name"])
+    if best is None:
+        return None
+    return f"need.{side}", {"pos": best[1], "name": best[2]}
+
+
+def _fit_surplus(side: str, team: dict, incoming: list, outgoing: list,
+                 market: dict) -> Optional[tuple[str, dict]]:
+    depth = _fit_depth(team)
+    if depth is None:
+        return None
+    before, delta = depth
+    replaced = {a["pos"] for a in incoming}
+    spare = [a for a in outgoing if a["pos"] in _FIT_DEPTH_POSITIONS
+             and a["pos"] not in replaced and before[a["pos"]] > 0
+             and delta[a["pos"]] <= 0
+             and -delta[a["pos"]] <= FIT_SURPLUS_MAX_DROP * before[a["pos"]]]
+    if not spare:
+        return None
+    asset = max(spare, key=lambda a: (market[a["id"]], a["id"]))
+    return f"surplus.{side}", {"pos": asset["pos"], "name": asset["name"]}
+
+
+def fit_lines(proof: dict, card, players: dict) -> list[dict]:
+    """The fit-first lines for one bilateral card: the other team's first,
+    then the viewer's, each present only when the proof supports a specific
+    reason. `[]` means "today's copy" (the caller adds nothing).
+
+    `proof` is `card.owner_evaluation.as_dict()`, already matched to `card`.
+    Per side the first template that fires wins: plan, then need, then
+    surplus. Pure; raises nothing (any malformed input yields no line).
+    """
+    try:
+        if (not isinstance(proof, dict) or proof.get("generator") != _FIT_ARM
+                or proof.get("eligible") is not True):
+            return []
+        give, receive = list(card.give_player_ids), list(card.receive_player_ids)
+        market = {}
+        for row in proof.get("assets") or ():
+            if isinstance(row, dict) and _fit_finite(row.get("market")) and row["market"] > 0:
+                market[row.get("id")] = row["market"]
+        if not give or not receive or set(market) != set(give + receive):
+            return []
+        assets = {pid: _fit_asset(pid, players if isinstance(players, dict) else {})
+                  for pid in give + receive}
+        if any(a is None for a in assets.values()):
+            return []
+        lines = []
+        for side, key, incoming, outgoing in (("them", "counterparty", give, receive),
+                                              ("you", "viewer", receive, give)):
+            team = proof.get(key)
+            if not isinstance(team, dict):
+                continue
+            inc = [assets[p] for p in incoming]
+            out = [assets[p] for p in outgoing]
+            chosen = (_fit_plan(side, team, inc, out, market)
+                      or _fit_need(side, team, inc, market)
+                      or _fit_surplus(side, team, inc, out, market))
+            if chosen:
+                code, values = chosen
+                lines.append({"side": side, "code": code,
+                              "text": FIT_TEMPLATES[code].format(**values)})
+        return lines
+    except Exception:
+        return []

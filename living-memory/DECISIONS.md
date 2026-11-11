@@ -1,5 +1,15 @@
 # Decisions — Fantasy Trade Finder
 
+## D-218 — Fit-first card lines: the other team's line is built from public facts only
+
+**Date:** 2026-11-10 · **Who:** WS4 builder, under the operator's "the fit evaluation and description needs to be solid" (offer-learnings plan §1, R11).
+**Context:** The bilateral proof holds both teams' plan, depth and benefit evidence. The counterparty's `benefits` (and in revision 2 their plan score) use their private board, and their outlook may be one they declared in the app, which no league-mate can see. A line built from those would advertise private data, the same reason the breaker keeps `other_player_keep` dark.
+**Decision:** `trade_narrative.fit_lines` writes the other team's line only from their roster, consensus values, ages, the proof's usable-depth proxy and the engine's roster read of their window (`outlook_source == "inferred"`). A declared counterparty outlook is never named; their plan line instead needs the trade's public now-lean shift (≥ 0.05) in the plan's direction. The viewer's own line may use the viewer's benefits and declared outlook, and says "roster" instead of "plan" when the window was inferred. Need lines are not written for a rebuilding or tanking side, and require a gain above the proxy's backup credit, so a bench body is never called an upgrade. Copy is built at serialization (`trade_card_to_dict`), not in the generators.
+**Consequences:**
+- A league-mate with a declared outlook gets no plan line, only a need or surplus line or nothing.
+- The engine's roster read can differ from Team Review's partners beat, which uses extra signals (pick share, firsts, odds); the line says "rebuild-leaning roster", a roster read, not a stated plan.
+- The thresholds are constants pinned by test, not knobs.
+
 ## D-217 — The next move is one evaluator-proven revision, a pure function behind `trade.next_move`, with no route yet
 
 **Date:** 2026-11-10 · **Who:** WS5 builder, under the operator's R2 ruling ("Mock it up, build it, control it via its own dedicated capability flag").

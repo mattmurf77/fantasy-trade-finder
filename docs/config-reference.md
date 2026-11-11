@@ -130,6 +130,7 @@ in its featured-offer ordering. See [release evidence](plans/owner-v2-bilateral/
 - [Flags — Referral loop D-1: install CTA (2026-10-15, ships **OFF**)](#flags--referral-loop-d-1-install-cta-2026-10-15-ships-off)
 - [Flags — Referral loop L7: the ledger (2026-10-24, ships **OFF**)](#flags--referral-loop-l7-the-ledger-2026-10-24-ships-off)
 - [Flags — Counterparty breaker (2026-08-21, ships **OFF**)](#flags-counterparty-breaker-2026-08-21-ships-off)
+- [Flags — Fit-first card copy (2026-11-10, ships **OFF**)](#flags--fit-first-card-copy-2026-11-10-ships-off)
 - [Flags — Negative-results memory (2026-08-22, ships **OFF**)](#flags-negative-results-memory-2026-08-22-ships-off)
   - [The allowlist is the OTHER half of the ON-condition](#the-allowlist-is-the-other-half-of-the-on-condition)
   - [Killing M2 — the GLOBAL knob, never an arm overlay](#killing-m2--the-global-knob-never-an-arm-overlay)
@@ -794,6 +795,16 @@ Plan + doc suite: [docs/plans/counterparty-breaker/](plans/counterparty-breaker/
 **Rollback ladder** (LLD §6), bluntest last: `trade.breaker_narrative` → false (hot reload) → `breaker_min_severity` = 1.1 or a per-class `breaker_narrate_*` switch to 0 (`scripts/set_knob.py`, logged in `model_config_changes`) → `trade.breaker` → false (compute gone, key gone) → revert commit. Nothing persisted needs cleanup: old `features_json.breaker` blobs are version-stamped inert serve-time facts — never re-stamped, never backfilled.
 
 **Product outcome 1 (filter/demote) is v2 and is NOT flagged here.** It changes deck composition and gets its own scope block if the operator elects it.
+
+---
+
+## Flags — Fit-first card copy (2026-11-10, ships **OFF**)
+
+Scope block: [offer-learnings/scope-fit-first-copy.md](plans/offer-learnings/scope-fit-first-copy.md) (WS4, recommendation R11).
+
+| Flag | Default | Gates |
+|---|---|---|
+| `trade.fit_first_copy` | **false** | ON ⇒ `server.trade_card_to_dict` adds `fit_lines` (`[{side: "them"\|"you", code, text}]`, the other team's line first, at most one per side) to `owner_v2_bilateral` cards whose frozen proof supports a specific fit reason, composed by `trade_narrative.fit_lines` from deterministic templates (`FIT_TEMPLATES`, version `FIT_TMPL_VERSION`). The key is present only when a line fires. The mobile card (`TradeCard.tsx`) renders the lines directly under its header, above the value bar, and double-gates on this flag, so turning it off hides lines already stored on a page at once. Nothing else reads it: no generator, proof, order or score changes. The other team's line reads only public facts (their roster, consensus values, ages, the engine's roster read of their window); never their board, benefits, declared intent or a declared outlook. OFF ⇒ no key, payloads byte-identical (pinned by `backend/tests/test_fit_first_copy.py`). Graduation: the operator's TestFlight checklist in the scope block. Thresholds are module constants, not knobs: need lift ≥ 10%, surplus drop ≤ 2%, win-now lean ≥ 0.05, the other team's plan shift ≥ 0.05. |
 
 ---
 

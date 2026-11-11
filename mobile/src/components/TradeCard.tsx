@@ -257,6 +257,14 @@ function TradeCardComp({
   // omits `reasons` when the flag is off, double-gating client-side keeps
   // the rendering predictable if flags drift (e.g. cached job snapshot).
   const reasonsEnabled = useFlag('trade_math.human_explanations');
+  // WS4 fit-first copy — the server sends `fit_lines` only when a specific
+  // reason fires; the client double-gates on the flag (as reasons do) so a
+  // flip back hides lines already stored on a page. An edited card's lines
+  // describe the original package, so they hide like Match strength does.
+  const fitFirstEnabled = useFlag('trade.fit_first_copy');
+  const fitLinesShown = fitFirstEnabled && !data.edited ? data.fit_lines : undefined;
+  const fitThem = fitLinesShown?.find((l) => l.side === 'them')?.text;
+  const fitYou = fitLinesShown?.find((l) => l.side === 'you')?.text;
   // #384 ruling 1 — in the merged calculator experience the ✕ stays ONE
   // button and the reasons arrive as an overlay over the page, instead of
   // three inline tiles replacing the ✕. `reasonsAsOverlay` is a PROP (see the
@@ -616,6 +624,28 @@ function TradeCardComp({
           </View>
         )}
       </View>
+
+      {/* WS4 fit-first copy (flag trade.fit_first_copy) — the card leads
+          with why the offer suits the other team, then the viewer's team;
+          the value bar stays below. Server-composed sentences rendered
+          verbatim (backend/trade_narrative.py fit_lines); absent lines
+          render nothing, so flag-off and no-line cards are unchanged. */}
+      {fitThem || fitYou ? (
+        <View style={styles.fitLines} testID="trade-card.fit-lines">
+          {fitThem ? (
+            <View style={styles.fitRow} testID="trade-card.fit-line.them">
+              <View style={styles.fitDot} />
+              <ChalklineText style={[type.bodySm, styles.fitLineText]}>{fitThem}</ChalklineText>
+            </View>
+          ) : null}
+          {fitYou ? (
+            <View style={styles.fitRow} testID="trade-card.fit-line.you">
+              <View style={styles.fitDot} />
+              <ChalklineText style={[type.bodySm, styles.fitLineText]}>{fitYou}</ChalklineText>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* #362 — "Why you're seeing this", when the card came from a
           league-mate's standing offer rather than an exact mirror. The
@@ -1129,6 +1159,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: chalk.dim,
   },
+  // WS4 fit-first lines: two fitRow rows stacked; the text wraps in the row.
+  fitLines: { gap: space.xs },
+  fitLineText: { flexShrink: 1 },
   // Counterparty-breaker hesitation line: same hint-tier row construction as
   // fitRow, with the 6px square marker filled in flare — informational
   // highlight only (ADR-005); ice stays reserved for actions. Colors by token

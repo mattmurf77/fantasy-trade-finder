@@ -1257,6 +1257,11 @@ FLAG_KEYS: tuple[str, ...] = (
     # pre-built revision of a sent offer (backend/trade_next_move.py). Ships
     # false; no caller yet. OFF => propose_revision returns None, no work.
     "trade.next_move",
+    # docs/plans/offer-learnings/scope-fit-first-copy.md (WS4). ON ⇒
+    # `trade_card_to_dict` adds `fit_lines` to bilateral cards whose frozen
+    # proof supports a specific fit reason (trade_narrative.fit_lines), and the
+    # mobile card leads with them. OFF (default) ⇒ no key, byte-identical.
+    "trade.fit_first_copy",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

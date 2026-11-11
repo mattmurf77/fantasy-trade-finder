@@ -21029,6 +21029,15 @@ def trade_card_to_dict(card, players: dict) -> dict:
         out["model_arm"] = identity["generator"]
         out["generator_version"] = identity["generator_version"]
         out.update(_owner_public_selection(evidence))
+        # WS4 fit-first copy (flag trade.fit_first_copy): one line per side
+        # read from the frozen bilateral proof. Serialized only when a line
+        # fires, so flag-off and no-line payloads stay byte-identical.
+        if (is_enabled("trade.fit_first_copy")
+                and callable(getattr(evidence, "matches", None)) and evidence.matches(card)):
+            from .trade_narrative import fit_lines as _fit_lines
+            fit = _fit_lines(identity, card, players)
+            if fit:
+                out["fit_lines"] = fit
     # Pick-denominated value verdict (feedback #157 value-bar) — the same
     # {give_value, receive_value, favors, gap} shape POST /api/trade/evaluate
     # returns, built here from the card's own consensus package values via the
