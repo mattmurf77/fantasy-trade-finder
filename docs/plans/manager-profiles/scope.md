@@ -3,7 +3,7 @@
 **Date:** 2026-11-10
 **Entry point:** direct ask (side session started from the trade-quality evaluation session, 2026-11-10)
 **Builder:** Claude Code session on branch `feat/manager-profiles`
-**Operator sign-off on waivers:** needed — §1 (c) and §3 (TestFlight) are waived; see the reasons. Privacy question in [design.md](design.md) "Open questions" 1 must be answered before the flag is turned on.
+**Operator sign-off on waivers:** needed — §1 (c) and §3 (TestFlight) are waived; see the reasons. The operator turned the flag on in `config/features.json` on 2026-11-10 ("flip it on") before answering the privacy question in [design.md](design.md) "Open questions" 1; that question stays open.
 
 Design: [design.md](design.md).
 
@@ -31,12 +31,13 @@ Design: [design.md](design.md).
   (`test_every_table_with_a_user_id_column_is_handled_in_accounts` enforces it).
   `sleeper_waiver_moves.creator` is kept like `sleeper_trades.raw`'s `creator`: public league
   transaction log.
-- New flag: **`market.manager_profiles`**, default **false** in `FLAG_KEYS`, `config/features.json`
-  and the five flag fixtures that mirror it. Requires `market.trade_capture` (on) and the daemon's
+- New flag: **`market.manager_profiles`**, default **false** in `FLAG_KEYS`; set **true** in
+  `config/features.json` and the five flag fixtures that mirror it (operator, 2026-11-10). Requires `market.trade_capture` (on) and the daemon's
   shared rosters read (on whenever `sleeper.trade_block`, `market.roster_history` or
   `picks.owned_sync` is on). Off ⇒ no extra fetch, no rows. → `docs/config-reference.md` updated.
-  **Graduation criterion:** the operator answers design.md open question 1 (privacy). Turning it
-  on is capture only; a *consumer* gets its own flag and scope block.
+  **Graduation:** the operator turned it on 2026-11-10 without first answering design.md open
+  question 1 (privacy), which stays open. Turning it on is capture only; a *consumer* gets its
+  own flag and scope block.
 - New env vars / `model_config` keys: none. The thinness floors are module constants in
   `backend/manager_profiles.py`; nothing reads them at serve time.
 

@@ -321,6 +321,21 @@ def test_profile_step_failure_never_breaks_trade_capture(engine, monkeypatch):
     assert _count(engine, db_module.sleeper_trades_table) == 1
 
 
+def test_deleted_caller_writes_no_profile_and_trades_still_land(engine):
+    """The daemon passes its caller as `live_user`: with that account's users
+    row gone (deleted mid-daemon), the profile write takes AccountGone and
+    writes nothing, while trade capture is unaffected. A live caller writes
+    the profiles under the lock as usual."""
+    assert _sync(_Opener(), live_user=U1) == 1     # U1 has no users row
+    assert _count(engine, manager_profiles_table) == 0
+    assert _count(engine, db_module.sleeper_trades_table) == 1
+
+    with engine.begin() as conn:
+        conn.execute(db_module.users_table.insert().values(sleeper_user_id=U1))
+    _sync(_Opener(), live_user=U1)
+    assert _count(engine, manager_profiles_table) == 3
+
+
 # ---------------------------------------------------------------------------
 # Flag off: no rows, no extra fetches
 # ---------------------------------------------------------------------------
@@ -364,15 +379,15 @@ def test_sweep_weeks_default_unchanged(engine):
     assert svc.sweep_weeks(LEAGUE, profiles=True) == list(svc.WEEKS)
 
 
-def test_flag_registered_dark():
+def test_flag_registered_and_on():
     from backend import feature_flags as ff
     assert "market.manager_profiles" in ff.FLAG_KEYS
     repo = Path(__file__).resolve().parents[2]
     features = json.loads((repo / "config/features.json").read_text())
     release = json.loads(
         (repo / "backend/tests/fixtures/flags/release.json").read_text())
-    assert features["market.manager_profiles"] is False
-    assert release["market.manager_profiles"] is False
+    assert features["market.manager_profiles"] is True
+    assert release["market.manager_profiles"] is True
 
 
 # ---------------------------------------------------------------------------

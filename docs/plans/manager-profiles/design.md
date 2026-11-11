@@ -1,6 +1,6 @@
 # Manager revealed-preference profiles — design
 
-**Date:** 2026-11-10 · **Status:** built dark (flag `market.manager_profiles`, default off), capture only, no consumer
+**Date:** 2026-11-10 · **Status:** built; flag `market.manager_profiles` on in `config/features.json` (operator, 2026-11-10), code default off; capture only, no consumer
 **Scope block:** [scope.md](scope.md)
 
 ## Open questions for the operator
@@ -10,8 +10,11 @@
    account with us. Does the privacy page cover "we derive behavioral summaries of league-mates
    from public league history", and should a deleted account's profile be blocked from being
    rebuilt (today any league-mate's next sync rebuilds it; `accounts.delete_user_data` deletes
-   it and `GET /api/account/export` includes it)? **The flag should stay off until this is
-   answered.**
+   it and `GET /api/account/export` includes it)? *The design recommended keeping the flag off
+   until this was answered; the operator turned it on in `config/features.json` on 2026-11-10.
+   The question itself is still open. Since then the profile write holds the daemon caller's
+   users-row lock, so a user's own session never rebuilds their profile after they delete their
+   account; a league-mate's sync still can.*
 2. **Prior seasons.** Trade signals are thin within one season (median 2 trades per manager).
    `scripts/backfill_sleeper_trades.py` already stores up to 3 prior seasons of trades in
    `sleeper_trades`, under the prior seasons' league ids. Reading them needs one `/rosters` read

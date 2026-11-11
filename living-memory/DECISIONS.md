@@ -8,7 +8,8 @@
 **Consequences:**
 - No consumer: trade generation, ordering and every response are unchanged; a consumer gets its own flag and scope block.
 - Trade signals are thin in one season (prod: median 2 trades per manager per season, 19% zero); prior seasons need one `/rosters` read per prior league to attribute (design open question 2).
-- `accounts.delete_user_data` deletes a deleted account's profile rows and export includes them, but a league-mate's next sweep can rebuild one from public data (design open question 1, which gates turning the flag on).
+- `accounts.delete_user_data` deletes a deleted account's profile rows and export includes them, but a league-mate's next sweep can rebuild one from public data (design open question 1).
+- 2026-11-10: the operator turned the flag on in `config/features.json` ("flip it on") before answering open question 1; it takes effect when PR #635 merges. Production's `FTF_FLAGS` does not pin this key (G-076), so the file value applies. Turning it on exposed one bug, fixed in the same change: the caller's own profile was rebuilt when their account was deleted mid-daemon. `replace_manager_profiles` now takes the caller's users-row lock (`live_user`), like the roster-history writes; a league-mate's later sync can still rebuild a deleted account's profile (open question 1).
 ## D-211 — Docs-only pushes skip Render through a build filter, not a `[skip render]` marker
 
 **Date:** 2026-11-10 · **Who:** operator (asked to replace the marker with a build filter).

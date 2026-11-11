@@ -190,7 +190,8 @@ def sync_league_trades(league_id: str, *, _opener=None,
                        profiles: bool = False,
                        rosters: list | None = None,
                        league_meta: dict | None = None,
-                       players_fn=None) -> int:
+                       players_fn=None,
+                       live_user: str | None = None) -> int:
     """Sweep this league's live legs (or backfill all 18 on the first pass),
     store completed trades. Returns the number of NEW trades captured (0 in
     steady state).
@@ -206,6 +207,8 @@ def sync_league_trades(league_id: str, *, _opener=None,
     them the profile step is skipped entirely, backfill included, so a
     missing roster map can never cost 18 calls per sync. The profile step
     is best-effort and can never fail or change the trade capture.
+    `live_user` (the daemon's caller) puts the profile write under that
+    account's users-row lock; a deleted account writes no profile.
     """
     profiles = bool(profiles and rosters)
     weeks = sweep_weeks(league_id, profiles=profiles)
@@ -235,7 +238,8 @@ def sync_league_trades(league_id: str, *, _opener=None,
             if not (failed_weeks and len(weeks) == len(WEEKS)):
                 capture_manager_profiles(league_id, rosters=rosters,
                                          league_meta=league_meta,
-                                         players_fn=players_fn)
+                                         players_fn=players_fn,
+                                         live_user=live_user)
         except Exception as e:
             log.warning("manager profiles: league %s capture failed: %s",
                         league_id, e)
@@ -244,7 +248,8 @@ def sync_league_trades(league_id: str, *, _opener=None,
 
 def capture_manager_profiles(league_id: str, *, rosters: list,
                              league_meta: dict | None,
-                             players_fn=None, now=None) -> int:
+                             players_fn=None, now=None,
+                             live_user: str | None = None) -> int:
     """Rebuild one league's manager_profiles from everything stored for it
     (sleeper_trades + sleeper_waiver_moves). No network: the rosters and
     league meta are the caller's already-fetched payloads, players come
@@ -265,4 +270,4 @@ def capture_manager_profiles(league_id: str, *, rosters: list,
     rows = build_league_profiles(
         league_id, trades=trades, moves=moves, rosters=rosters,
         players=players, league_meta=league_meta, now=now)
-    return replace_manager_profiles(league_id, rows)
+    return replace_manager_profiles(league_id, rows, live_user=live_user)

@@ -50,7 +50,7 @@
   "picks.rank_year_labels": true,
   "market.trade_capture": true,
   "market.roster_history": true,
-  "market.manager_profiles": false,
+  "market.manager_profiles": true,
   "market.movers": true,
   "trade.picks_in_pool": true,
   "trade.asset_ideas": true,

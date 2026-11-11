@@ -222,6 +222,7 @@ def _init(client, league_id, **extra):
 def test_daemon_makes_one_rosters_and_one_meta_call(harness):
     client, calls = harness
     record_sleeper_trades([dict(CAPTURED_TRADE)])
+    _seed_profile_capture()   # steady state for market.manager_profiles too
 
     assert _init(client, LEAGUE_ID).status_code == 200
 
@@ -360,15 +361,27 @@ def test_owned_pick_sync_without_payloads_still_self_fetches(harness):
 # `transactions` sweep; the flag gates the daemon wiring.
 # ---------------------------------------------------------------------------
 
+def _seed_profile_capture():
+    """A league whose manager-profile backfill already ran (the marker is the
+    presence of profile rows), so the flag's one-time 18-leg cost is spent."""
+    db_module.replace_manager_profiles(LEAGUE_ID, [{
+        "league_id": LEAGUE_ID, "owner_id": OPP_ID, "roster_id": 2,
+        "profile_version": 1, "computed_at": "2026-11-10T00:00:00+00:00",
+        "n_trades": 0, "n_waiver_bids": 0, "n_free_agent_adds": 0,
+        "profile": "{}"}])
+
+
 def _profile_rows():
     return (len(db_module.load_manager_profiles(LEAGUE_ID)),
             len(db_module.load_sleeper_waiver_moves(LEAGUE_ID)))
 
 
-def test_manager_profiles_off_adds_no_calls_and_no_rows(harness):
+def test_manager_profiles_off_adds_no_calls_and_no_rows(harness, monkeypatch):
     client, calls = harness
     record_sleeper_trades([dict(CAPTURED_TRADE)])
-    assert not server.is_enabled("market.manager_profiles")   # ships dark
+    real = server.is_enabled
+    monkeypatch.setattr(server, "is_enabled",
+                        lambda k: False if k == "market.manager_profiles" else real(k))
     assert _init(client, LEAGUE_ID).status_code == 200
     assert calls.get("transactions", 0) <= 2, calls
     assert _profile_rows() == (0, 0)

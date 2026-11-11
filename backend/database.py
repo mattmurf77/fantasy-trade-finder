@@ -10805,15 +10805,23 @@ def has_manager_profile_capture(league_id: str) -> bool:
         ).fetchone() is not None
 
 
-def replace_manager_profiles(league_id: str, rows: list[dict]) -> int:
+def replace_manager_profiles(league_id: str, rows: list[dict], *,
+                             live_user: str | None = None) -> int:
     """Replace a league's manager_profiles rows with `rows` (one
     transaction). An empty `rows` is a no-op, never a wipe — a sweep that
     could not attribute anything must not erase the last good profiles.
-    Returns the number of rows written."""
+    Returns the number of rows written.
+
+    `live_user` (the session-init daemon): the write runs under that
+    account's users-row lock (_lock_live_user), AccountGone when it's gone,
+    so a deletion committed mid-daemon is never followed by a rebuild of
+    the caller's own profile."""
     if not rows:
         return 0
     t = manager_profiles_table
     with engine.begin() as conn:
+        if live_user:
+            _lock_live_user(conn, live_user)
         conn.execute(delete(t).where(t.c.league_id == league_id))
         conn.execute(t.insert(), rows)
     return len(rows)
