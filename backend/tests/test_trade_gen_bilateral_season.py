@@ -28,6 +28,10 @@ Covered (each proven red against the named sabotage, then green on revert):
 - test_operators_card_is_flagged_kept_and_below_its_twin. Sabotage: skip the penalty
   for `personal_board`.
 - test_target_list_card_is_flagged_not_demoted. Sabotage: demote every flagged card.
+- test_each_declared_kind_comes_from_its_own_input_flagged_not_demoted (target,
+  trade_block, position, trade_away). Sabotages: file a trade-block match under
+  "position"; name the incoming asset for "trade_block"; demote "trade_block".
+- test_declared_kind_precedence. Sabotage: check acquire positions before the trade block.
 - test_candidate_seats_for_starters_and_for_future_value. Sabotage: leave `_pool` untouched.
 - test_stage_2_off_partners_plan_and_lineup_are_revision_2s. Sabotage: read the label
   table for partners unconditionally.
@@ -309,6 +313,40 @@ def test_target_list_card_is_flagged_not_demoted():
     assert data["season_signal"]["conflict"] == {"fired": True, "plan": "championship", "kind": "target",
                                                  "named": "rb_kid", "threshold": .5, "demotion": 0.0}
     assert "season_adjustments" not in data["viewer"]["support"]
+
+
+# Each declared preference on the operator's card (Adams, a WR, out; rb_kid, an RB, in).
+DECLARED = {"target": ({"targets": ["rb_kid"]}, "rb_kid"),
+            "trade_block": ({"trade_block": [ADAMS]}, ADAMS),
+            "position": ({"acquire_positions": ["RB"]}, "rb_kid"),
+            "trade_away": ({"trade_away_positions": ["WR"]}, ADAMS)}
+
+
+@pytest.mark.parametrize("kind", sorted(DECLARED))
+def test_each_declared_kind_comes_from_its_own_input_flagged_not_demoted(kind):
+    """The kind names what the viewer declared; `named` is the asset the declaration is
+    about; a declared conflict of any kind is flagged and never demoted."""
+    prefs, named = DECLARED[kind]
+    args, ev, (card, _) = _operator_world(lift=False, me=prefs)
+    data = r5.evaluate_bilateral_trade(card, **args, season_evidence=ev).as_dict()
+    assert data["eligible"] and data["viewer"]["intent"]["path"] == "declared_intent"
+    assert data["season_signal"]["conflict"] == {"fired": True, "plan": "championship", "kind": kind,
+                                                 "named": named, "threshold": .5, "demotion": 0.0}
+    assert "season_adjustments" not in data["viewer"]["support"]
+    assert kind not in r5.DEMOTED_KINDS and r5.DEMOTED_KINDS == {"board"}
+
+
+@pytest.mark.parametrize("kinds, expected", [
+    (("target", "trade_block", "position", "trade_away"), "target"),
+    (("trade_block", "position", "trade_away"), "trade_block"),
+    (("position", "trade_away"), "position"),
+])
+def test_declared_kind_precedence(kinds, expected):
+    """Several declarations match: target, then trade block, then position, then trade-away."""
+    prefs = {k: v for kind in kinds for k, v in DECLARED[kind][0].items()}
+    args, ev, (card, _) = _operator_world(lift=False, me=prefs)
+    conflict = r5.evaluate_bilateral_trade(card, **args, season_evidence=ev).as_dict()["season_signal"]["conflict"]
+    assert (conflict["kind"], conflict["named"]) == (expected, DECLARED[expected][1])
 
 
 def test_pinned_search_records_no_conflict():

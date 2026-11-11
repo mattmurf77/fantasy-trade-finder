@@ -56,9 +56,15 @@ MIRROR_LEAN = {"rebuild": .7, "cornerstone_young": .45, "cornerstone": .2,
                "win_now_rb": -.8, "win_now": -.45}
 MIRROR_SCALE = {"jets": 1.0, "rebuilder": .6}
 DEMOTION_KEY, MATCHING_KEY = "season_conflict_demotion", "season_partner_matching"
+# Conflict kinds: "board" (qualified through the viewer's own rankings) or the
+# viewer's declaration that matched, in this precedence (revision 2's own order):
+# the incoming player is on the target list, the outgoing player is on the trade
+# block, the incoming player's position is asked for, the outgoing player's
+# position is being shopped.
+DECLARED_KINDS = ("target", "trade_block", "position", "trade_away")
 # Which conflict kinds are pushed down (PRD §5.2): only a card that qualified
-# through the viewer's own rankings. A target-list or asked-for-position card is
-# flagged and stated, never demoted. The switch is this set.
+# through the viewer's own rankings. A card the viewer asked for (any declared
+# kind) is flagged and stated, never demoted. The switch is this set.
 DEMOTED_KINDS = frozenset(("board",))
 POLICY = "price_efficient_bilateral_portfolio_season_signal"
 
@@ -289,19 +295,31 @@ class SeasonLayer:
             usable_evidence=True, pinned=bool(self.give_pins or self.recv_pins or self.opponent_id),
             delta_pts_week=season["delta_pts_week"] if season else None,
             receive=receive, give=give, profile=self._profile, market=self.market)
+        buy, sell = intent["buy_target"], intent["sell_candidate"]
         if intent["path"] == "personal_board":
             kind = "board"
         elif intent["path"] == "declared_intent" and intent["declared_match"]:
-            kind = "target" if intent["buy_target"] in viewer["preferences"].get("targets", ()) else "position"
+            # The declaration that matched, in revision 2's own order
+            # (trade_gen_bilateral.py `declared`): DECLARED_KINDS.
+            prefs = viewer["preferences"]
+            kind = next((k for k, matched in zip(DECLARED_KINDS, (
+                buy in prefs.get("targets", ()),
+                sell in prefs.get("trade_block", ()),
+                self._position(buy) in prefs.get("acquire_positions", ()),
+                self._position(sell) in prefs.get("trade_away_positions", ()))) if matched), None)
         else:
             kind = None  # qualified by the plan itself, or otherwise: no conflict recorded
         fired = fired and kind is not None
         named = None
         if fired:
-            buy, sell = intent["buy_target"], intent["sell_candidate"]
-            lean_in = self._features[self.user_id, buy]["direction"] or 0
-            lean_out = self._features[self.user_id, sell]["direction"] or 0
-            named = buy if kind != "board" or lean_in >= -lean_out else sell
+            if kind == "board":
+                lean_in = self._features[self.user_id, buy]["direction"] or 0
+                lean_out = self._features[self.user_id, sell]["direction"] or 0
+                named = buy if lean_in >= -lean_out else sell
+            else:
+                # The asset the declaration is about: incoming for a target or an
+                # asked-for position, outgoing for the trade block or a shopped position.
+                named = sell if kind in ("trade_block", "trade_away") else buy
         demotion = (self.season_conflict_demotion
                     if fired and kind in DEMOTED_KINDS and self.season_conflict_demotion > 0 else 0.0)
         plan_fit = self._plan_fit(viewer, give, receive)

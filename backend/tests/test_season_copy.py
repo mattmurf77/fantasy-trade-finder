@@ -18,7 +18,16 @@ Covered (each proven red against the named sabotage, then green on revert):
   the label in the composer (from age).
 - test_conflict_sentence_per_kind, test_conflict_names_the_qualifying_asset_on_the_deck,
   test_conflict_sentence_per_plan_name. Sabotage: name the most valuable asset
-  instead of `conflict.named`.
+  instead of `conflict.named`. Per kind (board, target, position, trade_block,
+  trade_away) also: print the position sentence for a trade_away conflict.
+- test_unscored_not_sure_viewer_sees_revision_2s_card_on_the_whole_deck. Sabotages:
+  suppress the Them win-now lead for unscored viewers; emit a labels-only block for
+  Not sure.
+- test_unscored_rebuilding_viewer_sees_revision_2s_card_but_the_mirror_conflict,
+  test_unsaved_outlook_gets_no_season_block_and_todays_fit_block. Sabotage: the same
+  two.
+- test_scored_viewer_keeps_their_win_now_lead_only_for_a_labelled_asset. Sabotage:
+  keep the Them lead for every asset.
 - test_without_usable_evidence_the_fit_block_is_revision_2s_and_no_season_block.
   Sabotage: emit an empty season block (`{"v": "season-1"}`) without usable evidence.
 - test_no_figure_or_label_for_an_unprojected_asset. Sabotage: treat a missing ppg
@@ -26,8 +35,8 @@ Covered (each proven red against the named sabotage, then green on revert):
 - test_every_season_lead_fits_one_line (a length assertion, no sabotage): every name
   in the fixture pool, the longest (22 characters) shortened to "J. Croskey-Merritt".
 - test_fit_template_version_is_still_fit_2. Sabotage: bump FIT_TMPL_VERSION.
-- Also: the season line's wording at its bands, a trade-block "position" conflict
-  gets no false "You asked for" sentence, an unscored viewer gets no line, the
+- Also: the season line's wording at its bands, a conflict named on the wrong side
+  prints nothing, an unscored viewer gets no line, the
   template lint (extends test_fit_block_v3's to the new templates), the block's keys.
 """
 from __future__ import annotations
@@ -108,13 +117,16 @@ def test_win_now_only_under_copy_rule_1(outlook):
     for card, proof, block, _ in rows:
         signal = proof["season_signal"]
         assets = {a["id"]: a for a in signal["assets"]}
+        # The You side (the Them side: test_scored_viewer_keeps_their_win_now_lead_only_for_a_labelled_asset;
+        # an unscored viewer's Them side is revision 2's: test_unscored_viewer_*).
         for team in (block or {}).get("teams", ()):
             lead = team["lead"]
+            if team["side"] != "you":
+                continue
             assert not lead["code"].startswith("plan_win_now"), lead
             if "win-now" not in lead["text"].lower():
                 continue
             said += 1
-            assert team["side"] == "you"
             if lead["code"] == "season_win_now.you":
                 # The named player is a win-now piece, starts for the viewer, and the
                 # trade adds at least 0.5 a week to the viewer's lineup.
@@ -187,6 +199,10 @@ CASES = {
                "rb_kid is on your target list, but this moves away from All-in"),
     "position": (lambda: operator(lift=False, me={"acquire_positions": ["RB"]})[:3], "conflict.position",
                  "You asked for RBs, but this moves away from All-in"),
+    "trade_block": (lambda: operator(lift=False, me={"trade_block": [ADAMS]})[:3], "conflict.trade_block",
+                    "You marked Davante Adams to move, but this moves away from All-in"),
+    "trade_away": (lambda: operator(lift=False, me={"trade_away_positions": ["WR"]})[:3], "conflict.trade_away",
+                   "You are shopping WRs, but this moves away from All-in"),
 }
 
 
@@ -197,8 +213,12 @@ def test_conflict_sentence_per_kind(case):
     proof = evaluate(card, args, ev)
     conflict = proof["season_signal"]["conflict"]
     assert proof["eligible"] and conflict["fired"] and conflict["plan"] == "championship"
+    assert conflict["kind"] == case.split(".")[0]
     block = tn.season_block(proof, card, args["players"])
     assert block["conflict"] == {"code": code, "text": text}
+    # The sentence names `conflict.named` (or its position): the asset the kind is about.
+    named = args["players"][conflict["named"]]
+    assert (named.position + "s" if case in ("position", "trade_away") else named.name) in text
     delta = proof["season_signal"]["viewer"]["delta_pts_week"]
     lead = you(tn.fit_block(proof, card, args["players"], context(args)))["lead"]
     assert lead == {"code": "conflict.you", "text": f"Away from All-in: {delta:+.1f} pts/wk"}
@@ -246,16 +266,106 @@ def test_conflict_sentence_per_plan_name(plan, name):
         assert lead == {"code": "conflict.you", "text": f"Away from {name}: {delta:+.1f} pts/wk"}
 
 
-def test_a_trade_block_match_gets_no_false_asked_for_sentence():
-    """The engine files a trade-block match under kind "position" (named = the player
-    received). "You asked for RBs" would be false, so no sentence; the lead still says
-    the card moves away from the plan."""
+def test_a_conflict_named_on_the_wrong_side_prints_nothing():
+    """A declared kind whose `named` asset is not on the side the kind is about (a
+    corrupted proof): no sentence is composed, so the block is withheld."""
     args, ev, card, _ = operator(lift=False, me={"trade_block": [ADAMS]})
     proof = evaluate(card, args, ev)
-    assert proof["season_signal"]["conflict"]["kind"] == "position"
-    block = tn.season_block(proof, card, args["players"])
-    assert "conflict" not in block and block["line"]
-    assert you(tn.fit_block(proof, card, args["players"], context(args)))["lead"]["code"] == "conflict.you"
+    proof["season_signal"]["conflict"]["named"] = "rb_kid"
+    assert tn.season_block(proof, card, args["players"]) is None
+
+
+# ── a viewer the season does not score: today's fit block ─────────────────────
+
+def test_unscored_not_sure_viewer_sees_revision_2s_card_on_the_whole_deck():
+    """Not sure with usable evidence: every fit block is revision 2's byte for byte,
+    on both sides, and no card gets a season block."""
+    base, rows = composed(2, "not_sure"), composed(5, "not_sure")
+    assert len(base) == len(rows) > 0
+    them_win_now = 0
+    for (card2, _, block2, _), (card5, proof5, block5, season5) in zip(base, rows):
+        assert gen.ident(card2) == gen.ident(card5)
+        assert proof5["season_signal"]["evidence"]["state"] == "usable"
+        assert proof5["season_signal"]["viewer"]["scored"] is False
+        assert json.dumps(block5, sort_keys=False) == json.dumps(block2, sort_keys=False)
+        assert season5 is None
+        them_win_now += any(l["code"] == "plan_win_now.them" for l in leads(block5))
+    assert them_win_now > 0  # teeth: the age-based Them lead is on this deck and kept
+
+
+@pytest.mark.parametrize("outlook", ["rebuilder", "jets"])
+def test_unscored_rebuilding_viewer_sees_revision_2s_card_but_the_mirror_conflict(outlook):
+    """A saved Rebuilding / Tanking plan: the fit block is revision 2's except the You lead
+    of a card the mirror rule flagged; the season block has labels, no line."""
+    base, rows = composed(2, outlook), composed(5, outlook)
+    old = {gen.ident(c): b for c, _, b, _ in base}
+    shared = flagged = labelled = 0
+    for card, proof, block, season in rows:
+        assert season is None or "line" not in season
+        labelled += bool(season and season.get("labels"))
+        if gen.ident(card) not in old:
+            continue
+        shared += 1
+        expected = old[gen.ident(card)]
+        if proof["season_signal"]["conflict"]["fired"]:
+            flagged += 1
+            assert you(block)["lead"]["code"] == "conflict_plan.you"
+            # Everything but the You lead is revision 2's. Where revision 2 had no
+            # block (no lead and no rank move for either team), the lead makes one and
+            # the other team shows its rank fact, as revision 2 composes it.
+            others = [t for t in block["teams"] if t["side"] != "you"]
+            if expected is None:
+                assert all(t["lead"]["code"].split(".")[0] in ("holds", "flat", "none") and not t["ranks"]
+                           for t in others)
+                continue
+            assert others == [t for t in expected["teams"] if t["side"] != "you"]
+            if you(expected):
+                assert {k: v for k, v in you(block).items() if k != "lead"} == {
+                    k: v for k, v in you(expected).items() if k != "lead"}
+            continue
+        assert json.dumps(block) == json.dumps(expected)
+    assert shared > 1000 and flagged > 0 and labelled > 0
+
+
+def test_unsaved_outlook_gets_no_season_block_and_todays_fit_block():
+    args, ev, card, _ = operator()
+    args["outlook"] = None
+    args["inferred_outlooks"] = {"me": "rebuilder"}
+    proof = evaluate(card, args, ev)
+    assert proof["season_signal"]["viewer"]["scored"] is False
+    assert proof["season_signal"]["evidence"]["state"] == "usable"
+    assert tn.season_block(proof, card, args["players"]) is None
+    stripped = {k: v for k, v in proof.items() if k != "season_signal"}
+    ctx = context(args)
+    assert (tn.fit_block(proof, card, args["players"], ctx)
+            == tn.fit_block(stripped, card, args["players"], ctx))
+
+
+@pytest.mark.parametrize("outlook", ["championship", "contender"])
+def test_scored_viewer_keeps_their_win_now_lead_only_for_a_labelled_asset(outlook):
+    """The other team's "Win-now-leaning: adds X" stands for a season-scored viewer only
+    when the engine labelled X win-now or cornerstone; otherwise the need / rank-fact lead."""
+    args = gen.world(outlook)
+    ctx = context(args)
+    kept = dropped = 0
+    for card, proof, block, _ in composed(5, outlook):
+        stripped = {k: v for k, v in proof.items() if k != "season_signal"}
+        today = tn.fit_block(stripped, card, args["players"], ctx)
+        them_today = next((t for t in (today or {}).get("teams", ()) if t["side"] == "them"), None)
+        them = next((t for t in (block or {}).get("teams", ()) if t["side"] == "them"), None)
+        if not them_today or them_today["lead"]["code"] != "plan_win_now.them":
+            assert not them or them["lead"]["code"] != "plan_win_now.them"
+            continue
+        rows = {a["id"]: a for a in proof["season_signal"]["assets"]}
+        described = {tn._fit_describe(tn._fit_asset(p, args["players"])): p for p in card.give_player_ids}
+        named = described[them_today["lead"]["text"].removeprefix("Win-now-leaning: adds ")]
+        if rows[named]["label"] in ("win_now", "cornerstone"):
+            kept += 1
+            assert them["lead"] == them_today["lead"]
+        else:
+            dropped += 1
+            assert not them or them["lead"]["code"] != "plan_win_now.them"
+    assert kept > 0 and dropped > 0
 
 
 # ── without usable evidence: today's copy, byte for byte, and no season block ─
@@ -389,6 +499,8 @@ def test_new_templates_are_pinned_and_pass_the_template_lint():
         "conflict.board.below": "You rank {name} below market, but this moves away from {plan}",
         "conflict.target":      "{name} is on your target list, but this moves away from {plan}",
         "conflict.position":    "You asked for {pos}s, but this moves away from {plan}",
+        "conflict.trade_block": "You marked {name} to move, but this moves away from {plan}",
+        "conflict.trade_away":  "You are shopping {pos}s, but this moves away from {plan}",
     }
     assert tn.SEASON_LABELS == {"win_now": "Win-now piece", "cornerstone": "Cornerstone",
                                 "rebuild": "Rebuild piece"}

@@ -527,7 +527,8 @@ def _fit_lean(asset: dict) -> Optional[float]:
 
 
 def _fit_plan(side: str, team: dict, incoming: list, outgoing: list,
-              market: dict, season_usable: bool = False) -> Optional[tuple[str, dict]]:
+              market: dict, season_usable: bool = False,
+              season_rows: Optional[dict] = None) -> Optional[tuple[str, dict]]:
     outlook = team.get("outlook")
     if outlook not in _FIT_REBUILD + _FIT_WIN_NOW:
         return None
@@ -572,6 +573,11 @@ def _fit_plan(side: str, team: dict, incoming: list, outgoing: list,
     for asset in sorted(fits, key=lambda a: (-market[a["id"]], a["id"])):
         described = _fit_describe(asset)
         if described:
+            if (season_rows is not None and key == "plan_win_now"
+                    and (season_rows.get(asset["id"]) or {}).get("label") not in SEASON_WIN_NOW_LABELS):
+                # A season-scored viewer's card: the other team's win-now lead
+                # stands only for an asset the engine labelled win-now or cornerstone.
+                return None
             return f"{key}.{variant}", {"asset": described}
     return None
 
@@ -648,12 +654,17 @@ SEASON_TEMPLATES: dict[str, str] = {
     "conflict.board.below": "You rank {name} below market, but this moves away from {plan}",
     "conflict.target":      "{name} is on your target list, but this moves away from {plan}",
     "conflict.position":    "You asked for {pos}s, but this moves away from {plan}",
+    "conflict.trade_block": "You marked {name} to move, but this moves away from {plan}",
+    "conflict.trade_away":  "You are shopping {pos}s, but this moves away from {plan}",
 }
 #: Joins the season and dynasty halves of the line (PRD §3).
 SEASON_LINE_SEPARATOR = " · "
 #: Printed label tags. `depth` and no label print nothing.
 SEASON_LABELS: dict[str, str] = {"win_now": "Win-now piece", "cornerstone": "Cornerstone",
                                  "rebuild": "Rebuild piece"}
+#: For a season-scored viewer, the other team's "Win-now-leaning: adds X" lead
+#: is kept only when X carries one of these labels.
+SEASON_WIN_NOW_LABELS = ("win_now", "cornerstone")
 #: Inside this many points a week the season half reads "no change", and a
 #: season lead needs at least this gain (copy rule 1).
 SEASON_MIN_PTS = 0.5
@@ -680,6 +691,10 @@ def _season_view(proof: dict) -> Optional[dict]:
     rows = {row["id"]: row for row in signal["assets"]}
     return {"scored": scored, "delta": delta, "assets": rows, "evidence": evidence,
             "dynasty": viewer.get("dynasty_cost_pct"),
+            # A saved Rebuilding or Tanking plan: the one unscored viewer the
+            # season copy speaks to (labels, the mirror conflict).
+            "mirror": (not scored and viewer.get("outlook") in _FIT_REBUILD
+                       and viewer.get("outlook_source") == "declared"),
             "conflict": conflict if conflict.get("fired") is True else None}
 
 
@@ -875,16 +890,23 @@ def fit_block(proof: dict, card, players: dict, context) -> Optional[dict]:
                 view = view if isinstance(view, dict) else {}
                 tag = _fit_tag("declared" if view.get("outlook_source") == "declared"
                                else "roster", view.get("outlook"))
-            if season is None:
-                chosen = (_fit_plan(side, view, inc, out, market)
+            if season is None or not season["scored"]:
+                # A viewer the season does not score: today's copy on both sides.
+                # Only a saved Rebuilding / Tanking plan's fired mirror conflict
+                # takes the You lead ("Away from Rebuilding: adds a win-now piece").
+                mirror = (side == "you" and season is not None and season["mirror"]
+                          and season["conflict"] is not None)
+                chosen = ((_season_lead(season, inc, market) if mirror else None)
+                          or _fit_plan(side, view, inc, out, market)
                           or _fit_need(side, view, inc, market))
+            elif side == "you":
+                # A season-scored viewer: the season lead first, never the
+                # age-based win-now lead or the dynasty-value need phrase.
+                chosen = (_season_lead(season, inc, market)
+                          or _fit_plan(side, view, inc, out, market, season_usable=True))
             else:
-                # Usable forecast: the season lead first on the You side; a
-                # season-scored side never gets the dynasty-value need phrase.
-                scored = side == "you" and season["scored"]
-                chosen = ((_season_lead(season, inc, market) if side == "you" else None)
-                          or _fit_plan(side, view, inc, out, market, season_usable=True)
-                          or (None if scored else _fit_need(side, view, inc, market)))
+                chosen = (_fit_plan(side, view, inc, out, market, season_rows=season["assets"])
+                          or _fit_need(side, view, inc, market))
             row = ranks[side] if ranks else None
             if chosen:
                 shown = True
@@ -908,11 +930,12 @@ def fit_block(proof: dict, card, players: dict, context) -> Optional[dict]:
         return None
 
 
-def _season_conflict(conflict: dict, assets: dict, give: list, receive: list,
-                     asked: list) -> Optional[dict]:
-    """The conflict sentence (PRD §5.3), naming the asset whose ranking
-    qualified the card (`conflict.named`). `asked`: the viewer's own
-    acquire-positions setting. None when no PRD sentence is true of the card."""
+def _season_conflict(conflict: dict, assets: dict, give: list, receive: list) -> dict:
+    """The conflict sentence (PRD §5.3), naming `conflict.named`: the asset
+    whose ranking qualified the card (`board`), or the asset the viewer's
+    declaration is about (incoming for `target` / `position`, outgoing for
+    `trade_block` / `trade_away`). Raises when the named asset is not on the
+    side its kind requires."""
     plan = FIT_TAGS["declared"][conflict["plan"]]
     named = assets[conflict["named"]]
     name = f"the {named['name']}" if named["pos"] == "PICK" else named["name"]
@@ -920,14 +943,10 @@ def _season_conflict(conflict: dict, assets: dict, give: list, receive: list,
     if kind == "board":
         code = ("conflict.board.above" if named["id"] in receive
                 else "conflict.board.below" if named["id"] in give else None)
-    elif kind == "target":
-        code = "conflict.target"
-    elif kind == "position":
-        # The engine also files a trade-block or trade-away-position match
-        # under "position"; "You asked for RBs" is said only when it is true.
-        code = "conflict.position" if named["pos"] in asked and named["id"] in receive else None
-        if code is None:
-            return None
+    elif kind in ("target", "position"):
+        code = f"conflict.{kind}" if named["id"] in receive else None
+    elif kind in ("trade_block", "trade_away"):
+        code = f"conflict.{kind}" if named["id"] in give else None
     else:
         code = None
     if code is None:
@@ -939,9 +958,11 @@ def _season_conflict(conflict: dict, assets: dict, give: list, receive: list,
 def season_block(proof: dict, card, players: dict) -> Optional[dict]:
     """The season block for one revision 5 card (lld §5.2), or None.
 
-    None unless the proof's season evidence is usable and there is something
-    to show. `line` (with `season_pts_week`, `dynasty_pct`, `dynasty_dir`)
-    only for a season-scored viewer (All-in, Contending); `labels` only for
+    None unless the proof's season evidence is usable, the viewer is
+    season-scored or holds a saved Rebuilding / Tanking plan (never for Not
+    sure or an unsaved outlook), and there is something to show. `line`
+    (with `season_pts_week`, `dynasty_pct`, `dynasty_dir`) only for a
+    season-scored viewer (All-in, Contending); `labels` only for
     projected players whose engine label prints; `conflict` only when the
     plan-conflict rule fired. Pure; raises nothing (malformed input: None).
     """
@@ -959,6 +980,8 @@ def season_block(proof: dict, card, players: dict) -> Optional[dict]:
                   for pid in give + receive}
         if any(a is None for a in assets.values()):
             return None
+        if not (season["scored"] or season["mirror"]):
+            return None                  # Not sure, or no saved plan: today's card
         block = {"v": SEASON_BLOCK_VERSION}
         if season["scored"]:
             delta, cost = season["delta"], season["dynasty"]
@@ -992,13 +1015,7 @@ def season_block(proof: dict, card, players: dict) -> Optional[dict]:
         if labels:
             block["labels"] = labels
         if season["conflict"]:
-            viewer = proof.get("viewer") if isinstance(proof.get("viewer"), dict) else {}
-            prefs = viewer.get("preferences") if isinstance(viewer.get("preferences"), dict) else {}
-            asked = prefs.get("acquire_positions")
-            sentence = _season_conflict(season["conflict"], assets, give, receive,
-                                        asked if isinstance(asked, list) else [])
-            if sentence:
-                block["conflict"] = sentence
+            block["conflict"] = _season_conflict(season["conflict"], assets, give, receive)
         if not ({"line", "labels", "conflict"} & set(block)):
             return None
         return block
