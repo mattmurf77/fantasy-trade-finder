@@ -465,10 +465,11 @@ def test_consent_routes_need_a_verified_session(client, method):
 
 @pytest.fixture()
 def wired(client, monkeypatch):
-    """A linked user with one open app-sent offer; the private call and the
-    public rosters read are mocks."""
+    """A linked, CONSENTING user with one open app-sent offer; the private call
+    and the public rosters read are mocks."""
     _link()
     _send(1)
+    db.record_offer_import_grant(USER, sor.TERMS_VERSION, NOW.isoformat())
     call = MagicMock(return_value=TXS)
     monkeypatch.setattr(server._sleeper_write, "league_trade_offers", call)
     monkeypatch.setattr(server, "_fetch_league_rosters", MagicMock(return_value=ROSTERS))
@@ -496,11 +497,15 @@ def test_a_read_moves_the_offer_and_then_is_not_due_for_thirty_minutes(wired, mo
     assert wired.call_count == 2
 
 
-def test_no_reason_to_read_makes_no_call(client, monkeypatch):
+def test_no_consent_makes_no_private_call_even_with_an_open_app_offer(client, monkeypatch):
+    # The operator's condition: the user's own Sleeper offers are read only
+    # with their explicit permission, for app-sent offers as much as the import.
     _link()
-    call = MagicMock(side_effect=AssertionError("read without a reason"))
+    _send(1)
+    call = MagicMock(side_effect=AssertionError("read without consent"))
     monkeypatch.setattr(server._sleeper_write, "league_trade_offers", call)
-    assert server._sleeper_offers_sync(USER, LEAGUE, trigger="t") == "nothing_to_read"
+    assert server._sleeper_offers_sync(USER, LEAGUE, trigger="t") == "no_consent"
+    assert _by_tx()[tid(1)]["status"] == "sent"
     db.record_offer_import_grant(USER, sor.TERMS_VERSION, NOW.isoformat())
     monkeypatch.setattr(server, "_fetch_league_rosters", MagicMock(return_value=ROSTERS))
     call.side_effect, call.return_value = None, TXS
@@ -511,6 +516,7 @@ def test_no_reason_to_read_makes_no_call(client, monkeypatch):
 def test_no_credential_makes_no_call(engine, monkeypatch):
     monkeypatch.setattr(server, "is_enabled", _flags("trade.sleeper_offer_import"))
     _send(1)
+    db.record_offer_import_grant(USER, sor.TERMS_VERSION, NOW.isoformat())
     call = MagicMock(side_effect=AssertionError)
     monkeypatch.setattr(server._sleeper_write, "league_trade_offers", call)
     assert server._sleeper_offers_sync(USER, LEAGUE, trigger="t") == "no_credential"
@@ -554,6 +560,7 @@ def test_an_auth_failure_backs_off_every_league_of_the_user(wired):
 def test_an_expired_token_is_not_sent(client, monkeypatch):
     _link(expired=True)
     _send(1)
+    db.record_offer_import_grant(USER, sor.TERMS_VERSION, NOW.isoformat())
     call = MagicMock(return_value=TXS)
     monkeypatch.setattr(server._sleeper_write, "league_trade_offers", call)
     monkeypatch.setattr(server, "_fetch_league_rosters", MagicMock(return_value=ROSTERS))

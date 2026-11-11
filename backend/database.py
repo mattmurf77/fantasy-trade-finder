@@ -9130,19 +9130,6 @@ def load_user_trade_offer_outcomes(user_id: str, league_id: str, provider: str) 
     return [dict(r._mapping) for r in rows]
 
 
-def has_open_app_offers(user_id: str, league_id: str, provider: str,
-                        statuses: tuple) -> bool:
-    """True when the user has an app-sent row in this league whose status is
-    one of `statuses` (WS2b: the only reason to read without import consent)."""
-    t = trade_offer_outcomes_table
-    with engine.connect() as conn:
-        return conn.execute(select(t.c.id).where(and_(
-            t.c.user_id == str(user_id), t.c.league_id == str(league_id),
-            t.c.provider == provider, t.c.status.in_(statuses),
-            or_(t.c.source.is_(None), t.c.source == "app"),
-        )).limit(1)).fetchone() is not None
-
-
 def load_offer_read_targets(provider: str, statuses: tuple, sent_since: str,
                             limit: int) -> list[tuple[str, str]]:
     """(user_id, league_id) pairs with an app-sent row in `statuses` sent at or

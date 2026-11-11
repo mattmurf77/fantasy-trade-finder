@@ -118,12 +118,12 @@ another's offer.
 
 ### 0.6 Decisions for the operator
 
-1. **The read for offers sent through the app runs without the import consent** (the plan lists
-   it separately from the consented import). It reads the user's own account with their stored
-   credential. If the operator wants consent to cover it too, it is one condition in
-   `_sleeper_offers_sync` (`import_on` instead of `import_on or has_open_app_offers`).
-2. **Counter terms are stored on app-sent rows without the import consent** (they are the reply to
-   an offer sent through the app, and WS8's middle ground needs them).
+1. **Settled at integration (coordinator, operator away): consent covers every private read.** The
+   operator's condition was "with explicit user permission", so `_sleeper_offers_sync` returns
+   `no_consent` and makes no private call unless the user has turned the switch on, for offers
+   sent through the app as much as for the import. A user who has not opted in keeps WS2's
+   public-data outcomes (accepted, completed on different terms) and gets no revised-offer cards.
+2. **Counter terms** are therefore stored only for consenting users.
 3. **The Terms line** (below) is a draft; `web/terms.html` is unchanged. The switch shows its own
    short version, served by the backend (`sleeper_offer_read.TERMS_LINE`).
 4. **WS2's unique key changed** to include `user_id`. WS2 is not on `main`, so no production table

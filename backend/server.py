@@ -246,7 +246,7 @@ from .database import (
     # "Send in Sleeper" — encrypted Sleeper write-token storage (flagged beta)
     upsert_sleeper_credential, get_sleeper_credential, delete_sleeper_credential,
     # offer-learnings WS2b — the private offers read and its consent
-    has_open_app_offers, record_offer_import_grant, withdraw_offer_import_consent,
+    record_offer_import_grant, withdraw_offer_import_consent,
     load_offer_read_targets, load_offer_import_consented_users, load_member_sleeper_leagues,
     # Team overhaul all-platform sends (2026-09-07): link-state reads for
     # overhaul_api.auth_state, mirroring GET /api/mfl/auth-link and /api/espn/link
@@ -40340,7 +40340,7 @@ def _fa_move_date_label(iso: str | None) -> str:
 def _sleeper_offers_sync(user_id: str, league_id: str, *, trigger: str,
                          now: datetime | None = None) -> str:
     """At most one private offers read for (user, league). Returns what
-    happened: off | not_sleeper | nothing_to_read | no_credential | not_due |
+    happened: off | not_sleeper | no_consent | no_credential | not_due |
     no_roster | failed | read. Never raises. A failure changes nothing (the
     credential, the consent and the stored rows stay) and is logged once by
     the throttle's back-off."""
@@ -40351,10 +40351,13 @@ def _sleeper_offers_sync(user_id: str, league_id: str, *, trigger: str,
         league_id = str(league_id or "")
         if not league_id.isdigit() or is_linked_platform_league(league_id):
             return "not_sleeper"
+        # The operator's condition (2026-11-10): a user's own Sleeper offers are
+        # read only "with explicit user permission". The consent switch covers
+        # every private read, for offers sent through the app as much as for
+        # the import.
         import_on = _sor.consented(user_id)
-        if not import_on and not has_open_app_offers(
-                user_id, league_id, _sor.PROVIDER, _sor.APP_READ_STATUSES):
-            return "nothing_to_read"
+        if not import_on:
+            return "no_consent"
         cred = get_sleeper_credential(user_id)
         if not cred:
             return "no_credential"
