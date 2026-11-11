@@ -89,7 +89,7 @@ Detail: [recommendation](../docs/plans/realtime-trade-engine/recommendation.md) 
 ## 2026-11-10 — Roster-first setup (#637, flag on): TestFlight build + checklist, MOD-M1 call
 
 1. **MOD-M1:** pipeline 15 deployed after the Nov 10 freeze, so decide whether a re-run is owed or the frozen candidate `b1440b7b` stands (models-eng). The flag is now on, so pipeline 15 changes trades for any user who tags a player Move.
-2. **TestFlight build + checklist:** cut a build that includes `9c252819` (1.22.0 (183) predates it, so no client shows the setup yet), then run the 8-step checklist in [scope §3](../docs/plans/roster-first-trade-setup/scope.md). The flag was turned on 2026-11-10 before the checklist ran (operator call); if a step fails, roll back with the flag.
+2. **TestFlight checklist:** 1.22.0 (184), uploaded 2026-11-11T05:35Z from `13865d73`, includes `9c252819` and so the setup screen (183 predates it). Run the 8-step checklist on 184 in [scope §3](../docs/plans/roster-first-trade-setup/scope.md). The flag was turned on 2026-11-10 before the checklist ran (operator call); if a step fails, roll back with the flag.
 3. Follow-up candidates from the build review:
    - serve `picks_pool_cap` to the client (it is hard-coded to 6);
    - decide whether the first-pass push waits for an active guide-tour step;
