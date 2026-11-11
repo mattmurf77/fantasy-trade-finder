@@ -40,6 +40,7 @@ import TradesScreen from '../screens/TradesScreen';
 import PortfolioScreen from '../screens/PortfolioScreen';
 import TradeCalculatorScreen from '../screens/TradeCalculatorScreen';
 import TeamReviewScreen from '../screens/TeamReviewScreen';
+import RosterSetupScreen from '../screens/RosterSetupScreen';
 // Team overhaul (flag `overhaul.enabled`, docs/plans/team-overhaul/BUILD-CONTRACT.md §9).
 // All eight register UNCONDITIONALLY in the Trades stack — the flag gates the
 // entry card on TradesHome, never the navigator entry.
@@ -514,6 +515,19 @@ function TradesStackNav() {
         name="TeamReview"
         component={TeamReviewScreen}
         options={subScreenOptions('Team review', 'TradesHome')}
+      />
+      {/* Roster-first setup for Find a Trade (flag `trades.roster_setup`,
+          docs/plans/roster-first-trade-setup/prd.md). Registered
+          UNCONDITIONALLY like every flag-gated route — the screen carries the
+          flag — and pushed from TradesHome (first use per league, the return
+          card) or the Trade DNA sheet's "Your roster" row. Shared always-on
+          back control (native back is dead on iOS 26, RNS#3294); Back = Skip
+          at the current step (prd §7). Tab-stack screen: NO local
+          FeedbackFAB (#188 / #196 / #197). */}
+      <TradesStack.Screen
+        name="RosterSetup"
+        component={RosterSetupScreen}
+        options={subScreenOptions('Your roster', 'TradesHome')}
       />
       {/* Team overhaul (BUILD-CONTRACT §9) — the eight-step plan flow, entered
           from OverhaulEntryCard directly below Team Review on TradesHome.

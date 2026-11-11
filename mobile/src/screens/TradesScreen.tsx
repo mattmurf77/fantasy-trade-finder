@@ -212,6 +212,7 @@ import {
 } from '../state/usePaywallGate';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
 import TeamReviewEntryCard from '../components/TeamReviewEntryCard';
+import RosterSetupEntryCard from '../components/RosterSetupEntryCard';
 import OverhaulEntryCard from '../components/OverhaulEntryCard';
 import { getActiveOverhaul } from '../api/overhaul';
 import FormatGate, { formatLabel } from '../components/FormatGate';
@@ -1012,6 +1013,10 @@ export default function TradesScreen({ navigation, route }: any) {
   const standingOfferReady = standingOffersOn && likesYouOn && picksInPoolOn;
   // #357/#358/#359 — Team Review entry (dark until the operator flips it).
   const teamReviewOn = useFlag('trades.team_review');
+  // Roster-first setup (docs/plans/roster-first-trade-setup/prd.md; dark by
+  // default). Off ⇒ no auto-push, no TradesHome card, no DNA "Your roster"
+  // row: every surface below is mounted only behind this read (AC-0).
+  const rosterSetupOn = useFlag('trades.roster_setup');
   // Team overhaul entry (BUILD-CONTRACT §9 / D9). The active-overhaul probe
   // runs only while the flag is on: flag off ⇒ no request and no card.
   const overhaulOn = useFlag('overhaul.enabled');
@@ -8111,6 +8116,23 @@ export default function TradesScreen({ navigation, route }: any) {
                 onAnyChange: () => {
                   prefsChangedSinceGenerateRef.current = true;
                 },
+                // Roster-first setup — omitted entirely when the flag is off,
+                // which is what keeps the "Your roster" row from rendering.
+                rosterSetup: rosterSetupOn && leagueId && !isDemo
+                  ? {
+                      onEdit: () => {
+                        handleEditSheetClose();
+                        try {
+                          track('roster_setup_prompt_tapped', {
+                            league_id: leagueId,
+                            surface: 'dna_row',
+                            new_asset_count: 0,
+                          }, 'Trades');
+                        } catch { /* analytics must never block navigation */ }
+                        navigation.navigate('RosterSetup', { entry: 'manual_dna' });
+                      },
+                    }
+                  : undefined,
                 // #172 — omitted entirely when the flag is off, which is
                 // what keeps the chip row from rendering at all.
                 tradeIntent: intentModesOn ? tradeIntent : undefined,
@@ -8498,6 +8520,14 @@ export default function TradesScreen({ navigation, route }: any) {
               navigation.navigate('TeamReview' as never);
             }}
           />
+        ) : null}
+
+        {/* Roster-first setup (prd §3) — the first-use auto-push and the
+            post-skip / roster-changed return card. Landing only (never a
+            pushed TradeDeck), never demo, and mounted only with the flag
+            on: off ⇒ this component and its reads do not exist. */}
+        {rosterSetupOn && leagueId && !isDemo && route?.name === 'TradesHome' ? (
+          <RosterSetupEntryCard leagueId={leagueId} userId={userId} isDemo={isDemo} />
         ) : null}
 
         {/* #224 — classic (flag-off) Trades home page title. With the

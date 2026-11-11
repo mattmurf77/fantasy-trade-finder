@@ -43,6 +43,7 @@ ordering guarantee.
 | `outlookStrip` | `ftf_outlook_strip_<user_id>` (value = the league ids whose strip is EXPANDED; collapsing deletes the entry) |
 | `premiumImport` | `ftf.premium_import.v1` — device-local "imported N weeks ago" stamps; schema-free by design, so losing it degrades to "no prior import", never to a wrong board |
 | `teamReviewCompletion` | `ftf_team_review_completed` — device-local `{[leagueId]: true}` for leagues whose Team Review reached the `plan` beat (#423). **Not user-scoped**, on purpose: it reuses the key and sparse map `TeamReviewEntryCard` wrote before the store existed, so a device that completed a review under the old code hydrates as done with no migration |
+| `rosterSetup` | `ftf_roster_setup_v1` — device-local `{[leagueId]: {status:'done'\|'skipped', seenAssetIds, at, rankedPositions, prompt?}}` for roster-first setup (flag `trades.roster_setup`). Sync in-memory write, read-merge-write persist, idempotent hydrate (the `teamReviewCompletion` construction) |
 | `useWhatsNew` (in `../hooks/`) | `ftf_whats_new_seen_version` |
 | Session token / last username / device id | expo-secure-store, via `../api/client.ts` |
 | Query cache | AsyncStorage via `PersistQueryClientProvider`, allow-list `PERSIST_KEYS` in `App.tsx`, 30min `maxAge` |

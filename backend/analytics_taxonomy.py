@@ -438,6 +438,19 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     "team_review_opened", "team_review_beat_viewed",
     "team_review_exited", "team_review_action_taken",
     "awaiting_segment_viewed",
+    # ── Roster-first setup (flag `trades.roster_setup`) ──────────────────
+    # Spec: docs/plans/roster-first-trade-setup/analytics.md §2; addendum
+    # docs/business/analytics/2026-11-10-roster-setup-events.md. Registered
+    # in the SAME commit as the mobile emitters (the NULL-`platform` lesson).
+    # Mobile-only. `roster_setup_shown` (an impression the user did not ask
+    # for on first use) and `roster_setup_skipped` (the terminator for a
+    # non-completing entry) are classified in
+    # analytics_queries.NON_INTENT_EVENTS; the other four are intent. No
+    # per-tap client event: per-asset writes are already logged server-side
+    # by asset_pref_added / asset_pref_removed.
+    "roster_setup_shown", "roster_setup_toggles_done",
+    "roster_setup_rank_saved", "roster_setup_completed",
+    "roster_setup_skipped", "roster_setup_prompt_tapped",
     # ── Team overhaul (flag `overhaul.enabled`, BUILD-CONTRACT §2) ────────
     # Registered in the SAME commit as the mobile emitters. All four are
     # deliberate user actions (start a plan, pick a roadmap, confirm a send
@@ -1663,7 +1676,11 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # keys, no reconciliation renames (the addendum records call sites).
     # `surface` on prompt_shown is the InterruptSurface enum
     # (quickset_prompt | coach_mark | apple_banner | outlook_banner —
-    # mobile useInterruptCoordinator.ts, the values are carried there).
+    # mobile useInterruptCoordinator.ts, the values are carried there), plus
+    # `roster_setup_card` (roster-first setup's TradesHome return card,
+    # fired directly by RosterSetupEntryCard — it does not go through the
+    # interrupt coordinator, so InterruptSurface is unchanged). An enum
+    # widening, not a new prop.
     "prompt_shown":            frozenset({"surface"}),
     "apple_banner_dismissed":  frozenset(),
     # push_primer_shown.trigger ∈ session | want_it (usePushPriming.ts);
@@ -1728,6 +1745,25 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "team_review_beat_viewed": frozenset({"league_id", "beat", "index"}),
     "team_review_exited":      frozenset({"league_id", "beat", "index", "outcome"}),
     "team_review_action_taken": frozenset({"league_id", "beat", "action"}),
+    # Roster-first setup (analytics.md §2): ids, counts and closed enums only.
+    #   entry   ∈ first_use | roster_changed | manual_dna | entry_card
+    #   stage   ∈ toggles | rank
+    #   surface ∈ entry_card | roster_changed_card | dna_row
+    # `position` on roster_setup_rank_saved is a CORE POSITION
+    # (QB|RB|WR|TE) — the roster position being ranked, NOT a device
+    # platform (the NULL-`platform` incident).
+    "roster_setup_shown":         frozenset({"league_id", "entry", "roster_size",
+                                             "pick_count", "prefilled_count"}),
+    "roster_setup_toggles_done":  frozenset({"league_id", "entry", "move_count",
+                                             "keep_count", "open_count",
+                                             "pick_move_count", "pick_keep_count",
+                                             "changed_count", "duration_ms"}),
+    "roster_setup_rank_saved":    frozenset({"league_id", "position",
+                                             "players_ranked", "players_total"}),
+    "roster_setup_completed":     frozenset({"league_id", "entry", "ranked_positions",
+                                             "changed", "duration_ms"}),
+    "roster_setup_skipped":       frozenset({"league_id", "entry", "stage"}),
+    "roster_setup_prompt_tapped": frozenset({"league_id", "surface", "new_asset_count"}),
     # Team overhaul (BUILD-CONTRACT §2): ids, counts and enums only.
     "overhaul_started":            frozenset({"league_id", "outlook", "entry"}),
     "overhaul_roadmap_selected":   frozenset({"overhaul_id", "roadmap_id", "package_count"}),

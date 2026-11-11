@@ -19,7 +19,9 @@
 //                                          setPendingGuidedRegen('quickset').
 //   setPendingGuidedRegen(source, position?)
 //                                          Any guided rank surface completed:
-//                                          'quickset' | 'trios' | 'import'.
+//                                          'quickset' | 'trios' | 'import' |
+//                                          'roster_setup' (roster-first
+//                                          setup's done state, Trades stack).
 //   consumePendingQuicksetRegen()          Consume-once read (TradesScreen
 //                                          focus). Return shape UNCHANGED:
 //                                          `string | null`, truthy whenever a
@@ -31,14 +33,14 @@
 //
 // **Marker semantics.** For `'quickset'` the returned marker is the position
 // ('QB' | 'RB' | 'WR' | 'TE'), exactly as before. For sources that have no
-// position ('trios', 'import') the marker is the SOURCE NAME — truthy, so
-// every existing `if (!pos) return` guard keeps working, but it is not a
-// position. Any caller that forwards the marker as an analytics `position`
+// position ('trios', 'import', 'roster_setup') the marker is the SOURCE
+// NAME — truthy, so every existing `if (!pos) return` guard keeps working,
+// but it is not a position. Any caller that forwards the marker as an analytics `position`
 // prop (e.g. `deck_regenerated`, whose allowlist is `{position, new_trades}`)
 // must branch on `consumeGuidedRegenSource()` rather than assume a position.
 // `isRegenPosition()` is the cheap test.
 
-export type GuidedRegenSource = 'quickset' | 'trios' | 'import';
+export type GuidedRegenSource = 'quickset' | 'trios' | 'import' | 'roster_setup';
 
 const POSITIONS = ['QB', 'RB', 'WR', 'TE'];
 
