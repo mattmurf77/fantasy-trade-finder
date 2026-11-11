@@ -55,3 +55,27 @@ PRs #638, #641, #643.
 sessions.
 
 **Recover:** `git branch <name> <sha>`.
+
+## Addition, 2026-11-11 — the follow-up branches
+
+Deleted 2026-11-11 (reflog recovery expires about 2027-02-09).
+
+| tip sha | branch | worktree | remote |
+|---|---|---|---|
+| `c05cc7d2` | `docs/offer-learnings-release` (PR #644) | none (its worktree was reused) | `origin/docs/offer-learnings-release` deleted |
+| `907314a4` | `feat/sleeper-read-app-sent` (D-227; local only, contained in PR #645) | `.claude/worktrees/offer-import-terms`, clean, no `--force` | none |
+| `e9f98b4c` | `feat/fit-copy-fix` (PR #645) | none (its worktree was reused for the docs branch) | `origin/feat/fit-copy-fix` deleted |
+
+**Why it was safe:** #644 and #645 merged into `main` with merge commits (`d7717e99`, `811341f8`).
+`git merge-base --is-ancestor <tip> origin/main` is true for all three (checked against
+`origin/main` = `811341f8`). Evidence: [TEST_LEDGER](../../living-memory/TEST_LEDGER.md)
+2026-11-11 entry; PRs #644, #645.
+
+**Correction to the entry above:** nine of the eleven builder worktrees were locked by the
+session's own agent runner (`git worktree lock`, reason "claude agent …"). The agents had
+finished; each was unlocked and removed without `--force`.
+
+**Not in this sweep:** `docs/d227-d228-shipped` in `.claude/worktrees/fit-copy-fix` (the branch
+carrying this addition).
+
+**Recover:** `git branch <name> <sha>`.

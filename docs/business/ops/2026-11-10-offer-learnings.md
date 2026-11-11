@@ -78,6 +78,13 @@ on "Use my Sleeper trade offers". **Changed 2026-11-11** on the operator's answe
 sleeper data"): trades sent from the app are followed without the switch, as the line says, so
 revised-offer cards reach every Send in Sleeper user. The switch adds the user's other offers.
 
+## Follow-up, 2026-11-11 (#645, `811341f8`, live 08:12)
+
+Two server-only changes from the operator's first look at build 184; no new build.
+
+- **Fit block copy (D-228).** A team with no supported reason read "Gets X, gives Y", repeating the card. It now reads a league-rank fact ("Still RB 2nd", "Up at RB, down at WR"). On 21 recorded production requests about four leads in ten are this fallback; none names a player.
+- **Sleeper read (D-227).** Trades sent from the app are followed without the Settings switch.
+
 ## Rollback
 
 | Surface | Trigger | Step |
