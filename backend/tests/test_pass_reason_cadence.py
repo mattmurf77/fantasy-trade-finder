@@ -76,7 +76,9 @@ def _cadence_on(on: bool = True):
 # Registration
 # ---------------------------------------------------------------------------
 
-def test_flag_registered_default_off_everywhere():
+def test_flag_registered_everywhere_default_off_in_code_on_in_config():
+    # Turned on by the operator's instruction of 2026-11-10 ("turn it on"); the code
+    # default stays off, so a missing or unreadable config still means off.
     assert "trade.pass_reason_cadence" in ff.FLAG_KEYS
     assert ff.DEFAULT_FLAGS["trade.pass_reason_cadence"] is False
     import json
@@ -84,7 +86,7 @@ def test_flag_registered_default_off_everywhere():
               "backend/tests/fixtures/flags/release.json",
               "backend/tests/fixtures/flags/onboarding-v2.json",
               "backend/tests/fixtures/flags/profiles-on.json"):
-        assert json.loads((REPO / p).read_text())["trade.pass_reason_cadence"] is False, p
+        assert json.loads((REPO / p).read_text())["trade.pass_reason_cadence"] is True, p
 
 
 def test_knobs_seeded_with_the_starting_values():

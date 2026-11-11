@@ -655,11 +655,13 @@ def test_serving_a_stored_or_running_page_never_recomposes():
             assert forbidden not in source, (name, forbidden)
 
 
-def test_flag_registered_dark_everywhere():
+def test_flag_registered_everywhere_default_off_in_code_on_in_config():
+    # Turned on by the operator's instruction of 2026-11-10 ("turn it on"); the code
+    # default stays off, so a missing or unreadable config still means off.
     assert "trade.fit_first_copy" in feature_flags.FLAG_KEYS
     assert feature_flags.DEFAULT_FLAGS["trade.fit_first_copy"] is False
-    assert json.loads((REPO / "config/features.json").read_text())["trade.fit_first_copy"] is False
+    assert json.loads((REPO / "config/features.json").read_text())["trade.fit_first_copy"] is True
     for name in ("release", "profiles-on", "onboarding-v2"):
         fixture = json.loads((REPO / f"backend/tests/fixtures/flags/{name}.json").read_text())
-        assert fixture["trade.fit_first_copy"] is False, name
+        assert fixture["trade.fit_first_copy"] is True, name
     assert "`trade.fit_first_copy`" in (REPO / "docs/config-reference.md").read_text()
