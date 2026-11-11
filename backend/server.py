@@ -44464,7 +44464,7 @@ def cron_league_projections():
     _require_cron_auth()
     from .league_projections.batch import dispatch
     data = request.get_json(silent=True) if request.content_length else {}
-    if not isinstance(data, dict) or set(data) - {"initial", "limit", "user_id", "league_id"}:
+    if not isinstance(data, dict) or set(data) - {"initial", "limit", "user_id", "league_id", "retry_incomplete"}:
         return jsonify(error="invalid_projection_dispatch"), 400
     try:
         return jsonify(dispatch(_sleeper_get, foreground_busy=_projection_foreground_busy, **data))

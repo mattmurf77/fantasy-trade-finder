@@ -85,6 +85,20 @@ def _expire_other_model_baselines(now):
             conn.execute(update(t).where(t.c.target_id.in_(other)).values(next_due_at=now.isoformat()))
 
 
+def _retry_incomplete_baselines(now):
+    """Operator-only: a baseline whose last attempt stopped incomplete under the
+    current model, and is not leased, is due now. Returns how many were marked."""
+    t, r = db.league_projection_targets_table, db.league_projection_runs_table
+    with db.engine.begin() as conn:
+        rows = conn.execute(select(t.c.target_id, r.c.input_json).join(r, r.c.run_id == t.c.last_attempt_id)
+                            .where(r.c.status == "incomplete_projections", t.c.next_due_at > now.isoformat(),
+                                   or_(t.c.lease_until.is_(None), t.c.lease_until <= now.isoformat()))).all()
+        current = [target_id for target_id, raw in rows if json.loads(raw or "{}").get("expected_model_version") == VERSION]
+        if current:
+            conn.execute(update(t).where(t.c.target_id.in_(current)).values(next_due_at=now.isoformat()))
+    return len(current)
+
+
 def target(user_id, league_id):
     t = db.league_projection_targets_table
     with db.engine.connect() as conn:
@@ -116,14 +130,20 @@ def _bootstrap_connected(limit, *, user_id=None, league_id=None):
             added += 1
 
 
-def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=None, foreground_busy=None):
+def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=None, foreground_busy=None, retry_incomplete=False):
     """Weekly dispatch, or explicit operator-only first baseline preparation.
 
     Initial preparation never refreshes a previously attempted baseline and
     uses the same cohort, account locks, bounded queue and next weekly slot.
+    retry_incomplete (operator-only, weekly mode) first makes due every target
+    whose last attempt stopped incomplete under the current model.
     """
     if type(initial) is not bool:
         raise ValueError("invalid_initial_mode")
+    if type(retry_incomplete) is not bool:
+        raise ValueError("invalid_retry_incomplete")
+    if retry_incomplete and initial:
+        raise ValueError("retry_incomplete_requires_weekly_mode")
     if (user_id is None) != (league_id is None) or (user_id is not None and
             (not isinstance(user_id, str) or not isinstance(league_id, str) or
              not 1 <= len(user_id) <= 128 or not league_id.isdigit() or len(league_id) > 32)):
@@ -141,6 +161,7 @@ def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=N
     if not is_enabled("league.projections_provider_approved") or not options["policy_approved"]:
         return {"status": "approval_pending", "queued": 0}
     t, now = db.league_projection_targets_table, datetime.now(timezone.utc)
+    retried = _retry_incomplete_baselines(now) if retry_incomplete else None
     if not initial:
         _expire_other_model_baselines(now)
     eligibility = [t.c.last_attempt_id.is_(None)] if initial else [t.c.next_due_at <= now.isoformat()]
@@ -179,7 +200,10 @@ def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=N
                 conn.execute(update(t).where(t.c.target_id == row["target_id"], t.c.lease_token == lease_token).values(lease_until=None, lease_token=None))
     from .service import wake
     wake(fetch_json, foreground_busy=foreground_busy)
-    return {"status": "dispatched", "queued": queued, "cadence": "weekly", "initial": initial, "schedule_timezone": options["schedule"]["timezone"]}
+    result = {"status": "dispatched", "queued": queued, "cadence": "weekly", "initial": initial, "schedule_timezone": options["schedule"]["timezone"]}
+    if retry_incomplete:
+        result["retried"] = retried
+    return result
 
 
 

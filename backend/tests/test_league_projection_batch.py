@@ -1,3 +1,7 @@
+"""Weekly projection batch: one baseline per slot, crash and recreation fences,
+and the operator-only retry_incomplete option (a target whose last attempt
+stopped incomplete under the current model is made due now; nothing else is,
+scheduled ticks never pass it, and it is refused outside weekly mode)."""
 import pytest
 from backend import database as db,feature_flags as ff
 from backend.league_projections import batch,store,service
@@ -84,3 +88,96 @@ def test_finish_baseline_publishes_last_success_without_second_commit(scheduled)
     row=store.claim()
     assert store.finish(row,{'synthetic':'complete'})
     assert batch.target('account','123')['last_success_id']==row['run_id'], 'Worker death after finish must not hide a successfully persisted baseline'
+
+
+def stop_last_attempt(engine, status, model_version=None):
+    """Queue the weekly baseline, then rewrite that attempt's outcome; the target is left due next week."""
+    import json
+    assert batch.dispatch(lambda *a:pytest.fail('enqueue only'))['queued']==1
+    t,r=db.league_projection_targets_table,db.league_projection_runs_table
+    with engine.begin() as conn:
+        run_id=conn.execute(db.select(t.c.last_attempt_id)).scalar()
+        inputs=json.loads(conn.execute(db.select(r.c.input_json).where(r.c.run_id==run_id)).scalar())
+        if model_version is not None:
+            inputs['expected_model_version']=model_version
+        conn.execute(r.update().where(r.c.run_id==run_id).values(status=status,input_json=json.dumps(inputs)))
+    return batch.target('account','123')['next_due_at']
+
+
+def run_count(engine):
+    with engine.connect() as conn:
+        return len(conn.execute(db.select(db.league_projection_runs_table)).all())
+
+
+def test_retry_incomplete_requeues_a_current_model_incomplete_baseline_once(scheduled):
+    due=stop_last_attempt(scheduled,'incomplete_projections')
+    plain=batch.dispatch(lambda *a:pytest.fail('enqueue only'))
+    assert plain['queued']==0 and 'retried' not in plain, 'Ordinary ticks keep their shape and never retry'
+    result=batch.dispatch(lambda *a:pytest.fail('enqueue only'),retry_incomplete=True)
+    assert (result['queued'],result['retried'])==(1,1)
+    assert run_count(scheduled)==2
+    assert batch.target('account','123')['next_due_at']==batch.next_weekly_slot()>=due
+
+
+@pytest.mark.parametrize('status',['complete','unsupported_policy','failed','queued','running','stale','cancelled'])
+def test_retry_incomplete_leaves_other_outcomes_on_their_weekly_slot(scheduled,status):
+    due=stop_last_attempt(scheduled,status)
+    result=batch.dispatch(lambda *a:pytest.fail('enqueue only'),retry_incomplete=True)
+    assert (result['queued'],result['retried'])==(0,0)
+    assert batch.target('account','123')['next_due_at']==due and run_count(scheduled)==1
+
+
+def test_incomplete_under_another_model_stays_with_the_other_model_rule(scheduled):
+    stop_last_attempt(scheduled,'incomplete_projections',model_version='joint-season-scenario-v2')
+    result=batch.dispatch(lambda *a:pytest.fail('enqueue only'),retry_incomplete=True)
+    assert (result['queued'],result['retried'])==(1,0), 'The model-change rule refreshes it; retry must not count it'
+
+
+def test_other_model_rule_alone_is_unchanged(scheduled):
+    stop_last_attempt(scheduled,'incomplete_projections',model_version='joint-season-scenario-v2')
+    result=batch.dispatch(lambda *a:pytest.fail('enqueue only'))
+    assert result['queued']==1 and 'retried' not in result
+
+
+def test_retry_incomplete_skips_a_leased_target(scheduled):
+    from datetime import datetime,timezone,timedelta
+    due=stop_last_attempt(scheduled,'incomplete_projections')
+    with scheduled.begin() as conn:
+        conn.execute(db.league_projection_targets_table.update().values(lease_until=(datetime.now(timezone.utc)+timedelta(minutes=5)).isoformat()))
+    result=batch.dispatch(lambda *a:pytest.fail('enqueue only'),retry_incomplete=True)
+    assert (result['queued'],result['retried'])==(0,0)
+    assert batch.target('account','123')['next_due_at']==due
+
+
+@pytest.mark.parametrize('kwargs',[dict(retry_incomplete=True,initial=True),dict(retry_incomplete=1),dict(retry_incomplete='true')])
+def test_retry_incomplete_refuses_initial_mode_and_non_bool(scheduled,kwargs):
+    with pytest.raises(ValueError):
+        batch.dispatch(None,**kwargs)
+
+
+@pytest.mark.parametrize('off,expected',[('league.projections',{'status':'disabled','queued':0}),
+                                         ('league.projections_provider_approved',{'status':'approval_pending','queued':0})])
+def test_retry_incomplete_marks_nothing_when_dispatch_returns_early(scheduled,monkeypatch,off,expected):
+    due=stop_last_attempt(scheduled,'incomplete_projections')
+    monkeypatch.setattr(batch,'is_enabled',lambda key:key!=off)
+    assert batch.dispatch(lambda *a:pytest.fail('enqueue only'),retry_incomplete=True)==expected
+    assert batch.target('account','123')['next_due_at']==due
+
+
+def test_cron_route_passes_retry_incomplete_and_realtime_tick_never_does(monkeypatch):
+    from backend import server
+    monkeypatch.setattr(server,'_CRON_SECRET','synthetic-secret')
+    monkeypatch.setattr(server,'_IS_PROD_ENV',True)
+    called=[]
+    monkeypatch.setattr(batch,'dispatch',lambda fetch,**kw:called.append(kw) or {'queued':0})
+    client,path,headers=server.app.test_client(),'/api/cron/league-projections',{'X-Cron-Secret':'synthetic-secret'}
+    assert client.post(path,json={'retry_incomplete':True}).status_code==401
+    assert client.post(path,json={'retry_incomplete':True,'force':True},headers=headers).status_code==400
+    assert not called
+    assert client.post(path,json={'retry_incomplete':True},headers=headers).status_code==200
+    assert called==[{'retry_incomplete':True,'foreground_busy':server._projection_foreground_busy}]
+    called.clear()
+    monkeypatch.setattr(server,'is_enabled',lambda key:key=='league.projections')
+    monkeypatch.setattr(server,'load_pending_matches_older_than',lambda cutoff:[])
+    assert client.post('/api/cron/realtime-tick',headers=headers).status_code==200
+    assert called==[{'foreground_busy':server._projection_foreground_busy}], 'Scheduled ticks never retry on their own'
