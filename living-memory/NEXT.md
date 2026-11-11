@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [Priority Queue](#priority-queue)
+- [2026-11-10 — Roster-first setup (#637, dark): MOD-M1 call, TestFlight checklist, then the flag flip](#2026-11-10--roster-first-setup-637-dark-mod-m1-call-testflight-checklist-then-the-flag-flip)
 - [2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on](#2026-11-02--web-landing-update-1-cut-the-espnmfl-panels-or-enter-a-league-id-and-no-extra-account-needed-before-web-entry-ever-turns-on)
 - [2026-11-01 — Shop send (#574 / #577): two Update 1 follow-ups](#2026-11-01--shop-send-574--577-two-update-1-follow-ups)
 
@@ -69,6 +70,17 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 6. Address the separate board-history deletion race and wider private deck export filtering; scrub/reader merges do not prove these complete.
 7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state.
 
+
+## 2026-11-10 — Roster-first setup (#637, dark): MOD-M1 call, TestFlight checklist, then the flag flip
+
+1. **MOD-M1:** pipeline 15 deployed after the Nov 10 freeze, so decide whether a re-run is owed or the frozen candidate `b1440b7b` stands (models-eng). The pipeline change is a no-op with the flag off.
+2. **TestFlight checklist** (8 steps, [scope §3](../docs/plans/roster-first-trade-setup/scope.md)) on the first build that includes `9c252819`, with the flag on for testers.
+3. **Flag flip** `trades.roster_setup` once the checklist passes. Graduation criterion is in scope §2; check the `FTF_FLAGS` overrides first (G-076).
+4. Follow-up candidates from the build review:
+   - serve `picks_pool_cap` to the client (it is hard-coded to 6);
+   - decide whether the first-pass push waits for an active guide-tour step;
+   - add `trade_block` to the default-dark revision arms (`trade_gen_outlook_evidence.py`, `trade_gen_bilateral_candidate.py`);
+   - the shop window and presentation-v2 passes don't trigger the setup.
 
 ## 2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on
 
