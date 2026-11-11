@@ -137,6 +137,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Purge orphaned ESPN/MFL entry users (one-time, 2026-11)](#purge-orphaned-espnmfl-entry-users-one-time-2026-11)
 - [Deletion scrub: other users' decks after an account deletion (legal R28.20 (ii), 2026-10-31)](#deletion-scrub-other-users-decks-after-an-account-deletion-legal-r2820-ii-2026-10-31)
 - [Playoff forecasts: a league's run stops, or needs re-running before its weekly slot (2026-11-11)](#playoff-forecasts-a-leagues-run-stops-or-needs-re-running-before-its-weekly-slot-2026-11-11)
+- [Fast deck: a 150-card page can leave an almost empty deck (2026-11-11)](#fast-deck-a-150-card-page-can-leave-an-almost-empty-deck-2026-11-11)
 
 ---
 
@@ -1990,3 +1991,17 @@ Use a Render token limited to reading metrics for the Fleeced database. Set GitH
 **Re-running a baseline before its weekly slot.** There is no route for it: a target is attempted once per weekly slot, or once after a model-version change. To re-run, set `next_due_at` to the current UTC time on the chosen rows of `league_projection_targets`, then let the 15-minute tick pick them up or `POST /api/cron/league-projections` (header `X-Cron-Secret`, no body). The dispatcher resets `next_due_at` to the next weekly slot itself. It queues at most 4 targets a call and one pending run per account, so several calls may be needed.
 
 **Guardrail tests:** `backend/tests/test_league_projection_best_available.py::test_team_changed_player_is_unpriced_and_stale_row_scores_nothing`, `::test_team_changed_player_alone_for_a_slot_leaves_it_unknown`, `::test_team_changed_player_on_new_team_bye_is_a_bye`, `::test_strict_contract_still_refuses_a_team_changed_player`.
+
+## Fast deck: a 150-card page can leave an almost empty deck (2026-11-11)
+
+**Symptom:** Find a Trade shows 1–2 cards, then "No trades found" after any rebuild, in a league that used to show dozens. `trades_generated.count` is tiny and `gen_ms` is about 5 s instead of 25–60 s.
+
+**Cause:** with `trade.fast_deck` on, an interactive job builds only the proven first 150 cards (ADR-028). The deck quality filters and presentment rules run after that. On 2026-11-11 one production job logged `fast deck: served cards=150`, then `deck quality filters {'breakup': 23, 'filler': 99, 'redundant': 5, 'deferred': 0} served=2`. The same league got 66–94 cards from the full solve on 2026-11-05 to 2026-11-09. The page's parity tests compare it with the full solve's first 150 cards, not with the deck that survives the filters.
+
+**Confirm:** in the service logs, find the job's `fast deck: served cards=` line and the `deck quality filters … served=` line that follows it.
+
+**Fix applied:** `trade.fast_deck` set false in `config/features.json` (2026-11-11). Kill without a deploy: set it false in `FTF_FLAGS` and `POST /api/feature-flags/reload`.
+
+**Before turning it back on:** the page has to be deep enough to fill a deck after the filters, or the job has to fall back to the full solve when the filtered deck is thin. Neither exists yet.
+
+**Guardrail test:** `backend/tests/test_trade_fast_deck.py::test_flags_default_off_in_code_and_in_config`.

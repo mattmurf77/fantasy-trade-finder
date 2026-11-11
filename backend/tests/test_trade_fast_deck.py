@@ -201,14 +201,15 @@ def published(job):
     return [(c["trade_id"], c["impression_id"]) for c in job["cards"]]
 
 
-def test_flags_default_off_in_code_and_serve_is_on_in_config():
-    # Turned on by the operator's instruction of 2026-11-10 ("turn it on"); the code
-    # default stays off, so a missing or unreadable config still means off.
+def test_flags_default_off_in_code_and_in_config():
+    # On from 2026-11-10, off again 2026-11-11: in production the deck quality
+    # filters removed 148 of a served 150-card page and the operator's deck fell
+    # from 66-94 cards to 2. Stays off until the page is deep enough to survive
+    # the filters that run after it (docs/runbook.md, "Fast deck").
     shipped = json.loads((REPO / "config" / "features.json").read_text())
     for key in ("trade.fast_deck", "trade.fast_deck_shadow"):
         assert ff.DEFAULT_FLAGS[key] is False
-    # Serve is on; shadow stays off (it is ignored while serve is on).
-    assert shipped["trade.fast_deck"] is True and shipped["trade.fast_deck_shadow"] is False
+        assert shipped[key] is False
 
 
 def test_both_flags_off_never_import_the_module(revised, monkeypatch):
