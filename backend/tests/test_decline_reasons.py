@@ -1000,9 +1000,14 @@ def test_every_specced_code_is_accepted(harness):
         "value_giving", "value_getting", "value_other",
         "fit_outlook", "fit_new_weakness", "fit_duplicate", "fit_other",
         "other_player_keep", "other_player_avoid", "other_text",
+        # offer-learnings WS3: cadence-chip-only codes, refused while
+        # trade.pass_reason_cadence is off (test_pass_reason_cadence.py).
+        "other_picks_keep", "other_waiting",
     }
+    assert db_module.PASS_REASON_CADENCE_ONLY == {"other_picks_keep", "other_waiting"}
     client, _service, trade_svc, _eng = harness
-    for i, detail in enumerate(sorted(db_module.PASS_REASON_PARENT)):
+    for i, detail in enumerate(sorted(set(db_module.PASS_REASON_PARENT)
+                                      - db_module.PASS_REASON_CADENCE_ONLY)):
         tid = f"trade_{i}"
         trade_svc._trade_cards[tid] = TradeCard(
             trade_id=tid, league_id=LEAGUE, proposing_user_id=ME,

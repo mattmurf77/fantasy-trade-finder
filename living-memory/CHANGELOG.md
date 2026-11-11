@@ -12,6 +12,19 @@
 ---
 
 
+## 2026-11-10 — Offer learnings built and integrated dark (PR #641)
+
+- From the operator's review of 612 real Sleeper offers ([plan](../docs/plans/offer-learnings/plan.md)): engine revision 4 (pick premium by outlook, pay-picks tie-breaker, best-asset rule, partner activity; ADR-029) with a Calibration round of its own; the fit block on every card (league ranks before and after, outlook tags); a pass-reason prompt every few passes; outcomes of sent trades; the user's own Sleeper offers read with consent; revised-offer cards for declined offers; a next-move generator; a definition doc for sending on the platform.
+- Integrated with the fast deck (PR #638) on `feat/offer-learnings`. Every new flag ships off; deck pipeline 15 → 21. Decisions D-215 to D-226.
+- Full suite 14,345 passed; 172 app check suites, tsc and testid-lint pass. Nothing has run on a device.
+
+## 2026-11-10 — Fast deck built behind flags (off); page-first search exact for revision 2; real-league replay
+
+- `trade_first_page.py` (ADR-028, D-215) returns the proven first k cards of an owner-bilateral search without building the inventory; now exact for revision 2 too. `trade_fast_deck.py` (D-216) wires it into `_run_trade_job`: `trade.fast_deck` serves the first 150 cards as an interactive cold build's deck; `trade.fast_deck_shadow` serves the full deck and logs a comparison. **Both ship off.** Deck pipeline 15 → 16.
+- Replay of all 247 recorded production requests (13 leagues): the fast deck matched the full solve on every one, at about 0.55 s against 5.9 s. Not 200 ms under revision 2. The full engine's own output varies between processes.
+- Also: acceptance evaluation (neither head estimable), 612 Sleeper offers analysed, fast kernel dropped (1.15–1.18×).
+- Branch `feat/trade-engine-rearch`, unmerged. [Scope](../docs/plans/realtime-trade-engine/scope.md) · [real leagues](../docs/plans/realtime-trade-engine/real-leagues.md).
+
 ## 2026-11-10 — Manager profiles live in production (#635, flag on)
 
 - #635 merged as `9b14c47b`, all four CI checks green, full suite 13,741 passed. `market.manager_profiles` is **on** in `config/features.json` (operator's call; `FTF_FLAGS` does not pin it). Each Sleeper league's session-init sync now keeps waiver / free-agent rows (`sleeper_waiver_moves`) and rebuilds one `manager_profiles` row per roster owner. Cost: one 18-leg transactions backfill per league, once. No consumer reads a profile yet.
@@ -22,6 +35,11 @@
 
 - #637 merged as `9c252819` (2026-11-11T01:52Z), all four CI checks green. The flag `trades.roster_setup` is **false**. With it on: the first passed Find a Trade card in a league pushes a "Your roster" screen with Move / — / Keep per player and owned pick, an optional per-position ordering, and one deck regen. Move is the new `asset_preferences` list `trade_block` (D-212); Keep is `untouchable` (D-213). Owner-v1 and bilateral read `trade_block` on the give side, but only with the flag on.
 - Deck pipeline 14 → 15. Stored pages fall through once, and this is a MOD-M1 re-run trigger after the Nov 10 freeze. The operator chose to merge without a models-eng review. Render deploys `backend/` changes; I did not confirm the deploy. Evidence: [TEST_LEDGER](TEST_LEDGER.md#2026-11-10--roster-first-setup-for-find-a-trade-flag-trades_roster_setup-dark). Plan: [docs/plans/roster-first-trade-setup/](../docs/plans/roster-first-trade-setup/).
+
+## 2026-11-10 — Engine revision 4 built dark, with an additive Calibration arm (not shipped)
+
+- `owner-v2-bilateral-4` (`backend/trade_gen_bilateral_r4.py`), on revision 2, behind `owner_bilateral_revision_4_enabled` (0): owned-pick premium by the other team's outlook, pay-picks tie-breaker, best-asset demotion. Order only; inventory equals revision 2's. `grading.revision4_arm` (off) folds it into new `outlook-v2-v3-1` builds without touching the paired cards.
+- On branch `feat/bilateral-revision-4` for the coordinator; deck-pipeline digest left red for one integrated bump. [Scope](../docs/plans/offer-learnings/scope-revision-4.md), [TEST_LEDGER](TEST_LEDGER.md#2026-11-10--engine-revision-4-and-its-additive-calibration-arm-branch-not-shipped).
 
 ## 2026-11-10 — Render build filter replaces the docs skip marker; flag overrides recorded
 

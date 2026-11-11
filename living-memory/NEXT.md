@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [Priority Queue](#priority-queue)
+- [2026-11-10 — Fast deck: shadow in production, then turn on; then cheaper revision 2](#2026-11-10--fast-deck-shadow-in-production-then-turn-on-then-cheaper-revision-2)
 - [2026-11-10 — Roster-first setup (#637, dark): MOD-M1 call, TestFlight checklist, then the flag flip](#2026-11-10--roster-first-setup-637-dark-mod-m1-call-testflight-checklist-then-the-flag-flip)
 - [2026-11-02 — Web landing (Update 1): cut the ESPN/MFL panels' "or enter a league ID" and "no extra account needed" before web entry ever turns on](#2026-11-02--web-landing-update-1-cut-the-espnmfl-panels-or-enter-a-league-id-and-no-extra-account-needed-before-web-entry-ever-turns-on)
 - [2026-11-01 — Shop send (#574 / #577): two Update 1 follow-ups](#2026-11-01--shop-send-574--577-two-update-1-follow-ups)
@@ -70,6 +71,19 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 6. Address the separate board-history deletion race and wider private deck export filtering; scrub/reader merges do not prove these complete.
 7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state.
 
+
+## 2026-11-10 — Fast deck: shadow in production, then turn on; then cheaper revision 2
+
+Not in the seven active items. With its flags off it moves nothing; on, it takes a cold build's construction from about 6 s to about half a second on real leagues, which is not the 200 ms gate.
+
+1. **Merge on the operator's word, then turn on `trade.fast_deck_shadow` for a day.** *Why first:* every timing so far is from a laptop; the shadow line gives agreement and both timings on Render for real cold builds.
+2. **Turn on `trade.fast_deck`** if the shadow lines agree, and run the TestFlight checklist in the [scope block](../docs/plans/realtime-trade-engine/scope.md).
+3. **Make revision 2 cheaper without changing results** (recommendation R2b). *Why:* family completion is more than half the exact evaluations, and bilateral-1 on the same requests takes 71 ms.
+4. **Find the unordered iteration that makes the full engine vary between processes** (R0). *Why:* it undermines replay and any cross-process comparison of decks or proofs.
+5. **Record what happens to sent trades** (accepted, declined, countered) in-app. *Why:* the acceptance evaluation found fewer than 5 counterparty responses.
+6. Scope appending the inventory behind the page (R3); worker processes and CPUs if scale matters before launch ([real-leagues.md](../docs/plans/realtime-trade-engine/real-leagues.md)).
+
+Detail: [recommendation](../docs/plans/realtime-trade-engine/recommendation.md).
 
 ## 2026-11-10 — Roster-first setup (#637, dark): MOD-M1 call, TestFlight checklist, then the flag flip
 

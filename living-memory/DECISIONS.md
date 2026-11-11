@@ -1,5 +1,136 @@
 # Decisions — Fantasy Trade Finder
 
+## D-226 — Revised-offer cards are built inline with the deck, proven by the owner evaluator, once per declined offer
+
+**Date:** 2026-11-10 · **Who:** WS8 builder, under the operator's treatment A plus the twist (offer-learnings plan §3 WS8).
+**Context:** The operator wanted a card for each of the user's own declined offers, "slightly more value", leading the deck, inline if it can be made safe, a batch otherwise; and a middle ground after a declined counter.
+**Decision:** `trade_revised_offers.build` runs inside `_run_trade_job` for organic owner-served decks, just before the owner revalidation, so the cards pass every final gate an owner card passes and keep the first slots through the existing `injected` protections. A declined offer gets one swap (`trade_next_move` `swap_in_give`: same size, same ask, one offered piece up in value, 5–15%); a declined counter gets a middle ground (shared assets kept, 35–65% of the market-value gap, closest to half, at most one extra piece from the user's roster). One `revised_offer_cards` row per declined offer, never rebuilt; a pass or like retires it; no revision of a revision; three per deck, newest first. No batch.
+**Consequences:**
+- A decline learned at this open shows on the next deck build, not a cached one.
+- Under the bilateral revisions a counter that grows a 2-for-1 to four assets cannot be priced by the evaluator, so it gets no middle ground.
+- The deck pipeline digest moves (pin pending with the coordinator).
+
+## D-225 — The private Sleeper offers read: one throttled read with the send credential; consent covers the import, not the app's own offers
+
+**Date:** 2026-11-10 · **Who:** WS2b builder, under the operator's approval of the private read (offer-learnings plan §3 WS2b).
+**Context:** Declines, withdrawals and counters are invisible on Sleeper's public API (D-216). `league_transactions_filtered` returns the signed-in user's own offers with every status; the app already holds the Send-in-Sleeper credential that can call it.
+**Decision:** One read (`sleeper_write.league_trade_offers`, trades only, no `player_map`) through the propose path's transport, called only from `server._sleeper_offers_sync`, at most once per (user, league) per 30 min, from Find a Trade (background thread) and the daily tick. A failed or unauthorised read changes nothing (the credential is not dropped, unlike a failed send) and backs off 24 h (auth) or 6 h (other). App-sent offers move to `declined` / `withdrawn` / `lapsed` / `countered` without the import consent; importing the user's other Sleeper offers needs an append-only consent at the current terms version, and revoking deletes the imports in the same transaction. Counters are linked by roster pair, side and a −60 s / +10 min window around the original's close.
+**Consequences:**
+- The status of an offer sent through the app is read from the user's own account without a separate consent; the operator can make consent cover it with one condition (scope §0.6).
+- Counter links are inferred, not given by Sleeper; their error rate is unmeasured until the operator labels a sample.
+- `trade_offer_outcomes`' unique key includes `user_id`, so two consenting managers of one league each keep their own row.
+
+## D-224 — Revision 4 gets a Calibration round of its own, offered after the current round; the additive arm is superseded
+
+**Date:** 2026-11-10 · **Who:** operator (chose a new round over leaving opened decks out); WS1b builder (the shape below).
+**Context:** WS1's additive arm can only reach decks nobody has opened, because a deck's capture is frozen and the code revision is part of its identity. The operator wants revision-4 trades for every user and linked league, additive to the current decks.
+**Decision:** A second round, `outlook-v2-v4-1`, behind its own default-off flag `grading.revision4_round`. It reuses `CapturedComparison` and the whole round build with a different pair: revision 2 (live) as `current`, revision 4 as `value_core`, on one fresh frozen capture per deck, so the grade answers "is 4 better than what is live". No sibling class: the pair is the only difference, and reusing the build keeps the same gates, proofs, ownership checks, quota and blind order. Sessions, leases and reports are keyed by round id. The installed app is not changed: with the flag on and no `round_id`, start/current follow an offer order per account/league: (1) a current-round deck part-way through (open, `first_exposed_at` set or any card answered, the current round's own frozen-deck test) stays first; (2) otherwise the revision-4 deck until it is completed, whether the current deck is completed, unstarted, failed or missing; (3) then the current deck again, the same deck, or a new build if there is none; with both completed, the revision-4 results. The additive arm `grading.revision4_arm` is superseded: inert while the round is on, so turning the round on can never retire or extend a current-round deck.
+**Why:** the only way to give opened and finished pairs revision-4 trades without breaking the current round's frozen as-of contract. The order puts revision 4 in front of every user (the operator's "everyone gets fresh revision 4 trades alongside their existing decks"), never interrupts a deck someone is part-way through, keeps the existing deck reachable, and needs no app release. Set by the coordinator on 2026-11-10 with the operator away.
+**Consequences:**
+- A pair part-way through its current deck sees the revision-4 deck only after finishing it.
+- An unstarted current deck is skipped, untouched, and offered again after revision 4; if its inputs changed meanwhile, the current round's own staleness rule rebuilds it on Start, as it would have anyway.
+- A failed current deck moves the pair on to revision 4, which runs the same capture and fails the same way when the league is unsupported.
+- Once both are completed, the app's Start shows the revision-4 results, not the current round's (those stay in the admin report).
+- The current round's results screen and the revision-4 round's say the same "Today's engine" / "New engine"; the report's `model_versions` names the versions.
+- WS1's arm code stays (dark, inert under the round); deleting it is a later clean-up if the operator agrees.
+
+## D-223 — Partner activity is revision 4's fourth rule: a league-relative threshold on public completed trades, order only, behind `trade.partner_activity`
+
+**Date:** 2026-11-10 · **Who:** operator (R8: "Yes, but controlled via a capability flag. And it should more so be a league specific threshold that's evaluated. If all managers are active in trading, it shouldn't get applied at all."); WS7 builder (the shape below).
+**Context:** Manager profiles (#635) store each manager's completed public trades for the league year (`manager_profiles.n_trades`). Revision 4 is the engine being graded; revisions 1–3 are immutable. The generators are leaf modules with no database access.
+**Decision:** With the flag on and revision 4 selected, `server._owner_generation_context` adds `partner_activity` = `{owner_id: n_trades}` from one narrow read per job (`database.load_manager_trade_counts`); otherwise the key is absent, so flag-off contexts, request hashes, proofs and reports are WS1's bytes. Revision 4 computes the league's threshold once per search: flagged at or below a third of the median of the profiled managers' counts, only if that median is ≥ 2 and at least half the league's managers have a profile; a manager without a profile is never flagged; nobody below the threshold means nobody flagged. A flagged manager's offers drop `.05` on both support scores, half the best-asset demotion: a one-season count is a weaker, noisier signal than an offer's own shape, but `.05` still clears the ranker's comparable set (`.025` weaker, `.05` total), so it moves a flagged offer below near-equal ones and not below clearly better ones. Both sides move so the weaker score falls by the full amount and presentment, which reads both, cannot undo it (WS1's reason). The proof's `revision_4.partner_activity` records the count, median, threshold, managers with a profile and whether it fired; the rules version becomes `offer-learnings-1+partner-activity-1`.
+**Consequences:**
+- Calibration captures pin the revision-4 selector to 0, so the Calibration revision-4 arm carries no partner activity and grades WS1's rules only; adding it is an operator call (it changes the frozen capture).
+- A profile rebuild marks no stored first page stale. A completed trade changes rosters (`roster_fp`), so the page falls through then, but if the profile rebuild lands after that rebuild the page can carry the previous count until its next invalidation. Flipping the flag changes the job's request signature (it hashes all flags), so pages built under the other setting never serve.
+- ESPN/MFL leagues have no profiles: the rule applies to nobody there. Constants are module constants, not knobs, until graded. [Scope](../docs/plans/offer-learnings/scope-partner-activity.md), [ADR-029](../docs/adr/adr-029-bilateral-revision-4.md) decision 6.
+
+## D-222 — Fit block v3: consensus position ranks frozen per job, the other team read from its roster only
+
+**Date:** 2026-11-10 · **Who:** WS4b builder, under the operator's "I like version 3 with a team outlook tag for both teams as well" (`mockups/fit-copy/`, offer-learnings plan §3 WS4b) and the coordinator's speed addendum.
+**Context:** Version 3 shows, per team, a lead phrase and the team's league rank at each position the trade moves, before and after, plus an outlook tag for both teams. Ranks need league-wide values, which `trade_card_to_dict` does not have; the other team's outlook may be one they declared, which no league-mate can see; and the operator asked that the block not slow the cards.
+**Decision:**
+- Rank = the number League rankings already shows: 1 + teams with strictly more summed consensus value at the position (`compute_power_rankings`, League rankings' seed and metadata via the now-shared `_power_value_inputs`), ties sharing a rank. A move shows only when the value changes by ≥ 5% of the league median and the rank changes; no ranks for picks or with fewer than 3 valued teams. Never the personal basis.
+- One league-wide step per trade job (`server._fit_league_context`, before generation, flag-gated), stamped by reference on every owner card; each card's block is composed at serialization, per published batch, by a constant-size two-team update (binary search over the precomputed sorted values). The stored card dict is the frozen result; no serve path recomposes.
+- The other team's tag and lead use only the engine's roster read (`infer_team_outlook` as `trade_gen_owner._team` resolves an undeclared team) and the proof's usable-depth proxy, never the proof's outlook (their declared one when they have one), benefits, intent or preferences. Tags: declared words for the viewer (All-in / Contending / Rebuilding / Tanking), "Looks contending / rebuilding" for a roster read; none for not_sure.
+- `fit-2` replaces `fit-1` entirely: WS4's surplus template is dropped (v3 falls back plan → need → "Gets X, gives Y"); `fit_lines` is no longer emitted or read.
+**Consequences:**
+- Home and Team Review break exact ties by list order, so on an exact tie they can show one place lower than the card and League rankings (open in the mockup as question 5).
+- A dynasty-value rank can drop on a win-now trade (youth for production); the lead phrase and the label row carry the reason.
+- The roster read can disagree with Team Review's partners beat, which adds pick share, firsts and odds signals; the tag says "Looks", not a stated plan.
+- Prepared inventories now carry the block (`fit_block` allowlisted in the prepared codec); with WS4's `fit_lines` they failed to capture.
+- Measured on 20 recorded production requests: league step ≤ 1.9 ms, ≤ 3.1 ms before the first batch, ≤ 3.4% of the whole deck build.
+
+## D-221 — The pass-reason cadence asks on the card, one tap, behind its own flag; its two new codes exist only while that flag is on
+
+**Date:** 2026-11-10 · **Who:** operator (R9: "present this once every few passes. Or upon a certain number of consecutive passes"); WS3 builder (the shape below).
+**Context:** `feedback.decline_reasons` put three tiles and a second layer on every pass; the operator turned it off on 2026-10-02 because it was tedious. Offer learnings still want the reasons. Two shapes were possible: a sheet after the Nth pass about the card just passed, or the chips on the card itself.
+**Decision:** The chips sit on the card, in place of the ✕, on the card after N consecutive passes (`pass_reason_ask_after`, 3), then the prompt is quiet for M passes (`pass_reason_quiet_for`, 5). A chip is the pass and the reason in one request; **Just pass** and the swipe gesture are the plain pass. The after-the-fact sheet was rejected: the plain swipe has already written the full pass Elo by then, so a reason could never suppress it, and the prompt would cover the next card. Flag `trade.pass_reason_cadence` opens the reason route on its own, so `feedback.decline_reasons` stays off. The two codes the operator's phrases needed, `other_picks_keep` and `other_waiting`, are refused while the cadence flag is off, so a flag-off server accepts exactly the old codes. Neither joins `PASS_REASON_ELO_KEEP`.
+**Consequences:**
+- Unasked passes keep today's behaviour exactly (one tap, undo window, full `trade_k_pass` Elo). Asked passes that pick a non-value chip write no Elo, as the tiles did.
+- A reasoned chip pass has no undo window: the reason write commits the pass server-side, so an Undo could not take it back.
+- "Don't rate what I'd get" is mapped to `other_player_avoid` (no Elo). If the operator reads it as a price claim, it would move to `value_giving`; that is a one-line change to the chip table.
+- The cadence state is per deck-screen mount, in memory.
+
+## D-220 — Engine revision 4 reorders only, through support scores; Calibration gets it as an additive arm
+
+**Date:** 2026-11-10 · **Who:** WS1 builder, from the operator's offer-learnings comments (R1, R4, R5, R6).
+**Decision:** `owner-v2-bilateral-4` builds on revision 2 and wins over the v3 selector. Its owned-pick premium (by the other team's outlook: 20% rebuilder/tanking, 10% not sure, 0 contender), pay-picks tie-breaker and best-asset demotion act on support scores only, so eligibility and terms equal revision 2's. Calibration folds it into new `outlook-v2-v3-1` builds behind `grading.revision4_arm` without touching the paired v2/v3 cards.
+**Why:** grade before turning anything on, without disturbing the running v2/v3 comparison; a demotion presentment cannot undo.
+**Consequences:** exposed or completed Calibration decks get no revision-4 cards (open operator choice). [ADR-029](../docs/adr/adr-029-bilateral-revision-4.md), [scope](../docs/plans/offer-learnings/scope-revision-4.md).
+
+## D-219 — Fit-first card lines: the other team's line is built from public facts only
+
+**Date:** 2026-11-10 · **Who:** WS4 builder, under the operator's "the fit evaluation and description needs to be solid" (offer-learnings plan §1, R11).
+**Context:** The bilateral proof holds both teams' plan, depth and benefit evidence. The counterparty's `benefits` (and in revision 2 their plan score) use their private board, and their outlook may be one they declared in the app, which no league-mate can see. A line built from those would advertise private data, the same reason the breaker keeps `other_player_keep` dark.
+**Decision:** `trade_narrative.fit_lines` writes the other team's line only from their roster, consensus values, ages, the proof's usable-depth proxy and the engine's roster read of their window (`outlook_source == "inferred"`). A declared counterparty outlook is never named; their plan line instead needs the trade's public now-lean shift (≥ 0.05) in the plan's direction. The viewer's own line may use the viewer's benefits and declared outlook, and says "roster" instead of "plan" when the window was inferred. Need lines are not written for a rebuilding or tanking side, and require a gain above the proxy's backup credit, so a bench body is never called an upgrade. Copy is built at serialization (`trade_card_to_dict`), not in the generators.
+**Consequences:**
+- A league-mate with a declared outlook gets no plan line, only a need or surplus line or nothing.
+- The engine's roster read can differ from Team Review's partners beat, which uses extra signals (pick share, firsts, odds); the line says "rebuild-leaning roster", a roster read, not a stated plan.
+- The thresholds are constants pinned by test, not knobs.
+
+## D-218 — The next move is one evaluator-proven revision, a pure function behind `trade.next_move`, with no route yet
+
+**Date:** 2026-11-10 · **Who:** WS5 builder, under the operator's R2 ruling ("Mock it up, build it, control it via its own dedicated capability flag").
+**Context:** The offer history shows deals are negotiated (first offers accepted 8%, three-offer threads 39%; counters move about 20 points of the trade's value), and the operator fears a next move invites haggling. The plan asked for one bounded revision proven by the same evaluator as any card.
+**Decision:** `backend/trade_next_move.propose_revision(offer, context)` returns at most one revision. It keeps the focal asset on each side (highest consensus value), makes one change (add one non-untouchable asset from the viewer's roster, or remove one non-focal asked-for asset), and requires eligibility under `bakeoff_runner.owner_evaluator(config)` with organic gates, so selection pins in the context do not carry over. The other manager's net market gain must be 10–20% of the original's larger side, all at that evaluator's package pricing. The original is priced with dispositions ignored, because a sent offer is normally a liked card; revisions keep the dispositions. The smallest qualifying step wins, then a removal, then asset id. It is a leaf with no route and no deck wiring, and with the flag off it returns `None` before any work. The bounds are module constants, not `model_config` knobs, until there is a caller.
+**Consequences:**
+- No payload changes and `test_deck_pipeline_digest` is untouched. A structural test fails if any production module imports the generator, so wiring it is a deliberate act.
+- On synthetic leagues (real player values), about one sent offer in five gets a revision under the live engine revision (bilateral 2), mostly by removing an asked-for piece. Organic shape rules forbid adding a fourth asset to a 2-for-1.
+- At the engine's package pricing a small filler is worth little, so a qualifying step is a real asset or a removed ask, not a throw-in.
+- The app UI, the trigger (decline vs 48 h silence, which needs WS2's outcome tracking) and the treatment are the operator's call from `mockups/next-move/`.
+
+## D-217 — Sent-trade outcomes record only what the public API shows; the Sleeper offer import stops at the missing read
+
+**Date:** 2026-11-10 · **Who:** WS2 builder, under the operator's R3 decision ("Yes. Ideally pulling from the users' sleeper account as well (with explicit user permission and a line in the Ts & Cs).") and the WS2 rule "if Part B needs an endpoint or credential the app does not hold today, stop and report".
+**Context:** R3 asks for accepted / declined / countered / withdrawn / expired per sent trade, plus a consented import of the user's own Sleeper offers. The app sends through Sleeper's private `propose_trade` and keeps the returned `transaction_id`, but its only read of trade state is the public `transactions/{leg}` list, which shows completed trades only (`docs/plans/sleeper-pending-trades-feasibility-2026-08-12.md`). The private `league_transactions_filtered` read is known only from a public schema dump: never captured, not in `sleeper_write.py`, and its status words for rejected / withdrawn / expired are unknown.
+**Decision:** Part A (`trade.outcome_tracking`, off) writes a `trade_offer_outcomes` row per confirmed Sleeper send and moves it only to states the public capture proves: `accepted` (the sent id completed) and `completed_different_terms` (the same two rosters completed a different trade after the send, with its terms). Declined, withdrawn, expired and unaccepted counters are never inferred from silence. It reuses the existing capture at session init and one daily-tick step instead of a poller, and keeps its own table rather than `trade_proposals`, whose write is tied to `trade.valuation_telemetry` and holds no roster ids. Part B is not built: no consent table, no import, no `trade.sleeper_offer_import` flag.
+**Consequences:**
+- Acceptance labels exist for Sleeper sends from the day the flag is on; "not accepted by `checked_at`" is the only negative. A counterparty-acceptance model still has no declined label.
+- `completed_different_terms` is evidence of a counter that was accepted, not proof of one; readers must treat it that way.
+- Part B, and declined/withdrawn/expired for Part A, need the operator to accept a new read on the private GraphQL surface and a live capture of it. The consent model and Terms line are drafted in the scope block; `web/terms.html` is unchanged.
+- ESPN and MFL sends are not tracked; MFL's documented `pendingTrades` export is the obvious next seam.
+
+## D-216 — The fast deck is one pass over a bounded deck, not a page followed by the inventory
+
+**Date:** 2026-11-10 · **Who:** operator ("make the necessary pushes and code changes to enable the fast trade suggestions"); coordinating session.
+**Context:** The worker's path from generation to publication is one long pass whose final checks have side effects: exposure events, suppression grants, one candidate set and one evidence seal per job, and a publication assert that the published prefix is the head of the finished inventory. Running it once for a page and again for the inventory is not safe without changing those contracts.
+**Decision:** `trade.fast_deck` (default off) swaps the owner generator's result for the page-first search's proven first 150 cards and runs the unchanged pass once (`backend/trade_fast_deck.py`). Interactive jobs only; prepared inventories, replenishment and Calibration keep the full solve, as do unsupported generators, pinned requests, unproven or budget-bound pages and any error. `trade.fast_deck_shadow` serves the full deck and logs a per-job comparison. [ADR-028](../docs/adr/adr-028-page-first-trade-search.md).
+**Consequences:**
+- A fast deck ends at 150 cards. The deepest card acted on in production from 2026-09-01 to 2026-11-10 was index 65; decks today hold a median of 316 cards.
+- `_run_trade_job` changed, so the deck pipeline moved 15 → 16 (stored first pages rebuild once; models-eng review owed).
+- Appending the inventory behind the page is still open; the existing deck paging with `rebased` is the likely route.
+- Page and full solve are compared inside one process only: the full engine's output varies between processes.
+
+## D-215 — The first page of trades is found by bound-verify-stop, not by speeding up the full solve
+
+**Date:** 2026-11-10 · **Who:** operator (asked for near-real-time construction without pre-generation, then a 3× per-process gain); coordinating session with Opus subagents.
+**Context:** A cold owner-bilateral search evaluates about 45,000 candidates and ranks about 3,900 survivors before any card shows (3–4 s of construction locally). An exact, byte-identical fast kernel for that full solve was built first and measured 1.15–1.18× with about 75% more peak memory: the work left is unique per candidate.
+**Decision:** `backend/trade_first_page.py` orders candidates by an admissible upper bound on `weaker_support`, verifies best-first with the unchanged evaluator, and stops once k + 31 eligible cards beat every remaining bound (the ranker's lookahead). Repeated work is memoised by content, never by league or user, and only returned cards are serialised. The fast kernel was dropped. [ADR-028](../docs/adr/adr-028-page-first-trade-search.md).
+**Consequences:**
+- Synthetic league, bilateral-1: first 30 cards in 44–45 ms once a league has been seen. Revision 2 is exact only with family completion (each page card's cheaper same-family alternatives are evaluated too), which costs more: 70–130 ms synthetic, about 0.28 s on recorded production requests.
+- Served only through the fast deck (D-216). Publishing a page and then appending the inventory (recommendation R3) changes the owner publication contract and needs its own scope.
+- A change to `trade_service` market package pricing must re-run `test_trade_first_page.py`: the pre-pricing bound is proved from that code's current shape.
+- No NumPy: a measured 10% was not worth a new runtime dependency and a second copy of the bound arithmetic.
 ## D-214 — Manager profiles: keyed on roster `owner_id`, current season only, one backfill is the only extra Sleeper cost, rookie drafts deferred
 
 **Date:** 2026-11-10 · **Who:** side session from the trade-quality evaluation (built dark; operator decides the open questions in the design).

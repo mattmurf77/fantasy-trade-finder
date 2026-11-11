@@ -51,6 +51,8 @@ an old job during polling or refill an offer removed by #419's disposition check
 | `database.py` | 12.4k | 63 SQLAlchemy Core `Table` definitions + every query helper + `_migrate_db()` (idempotent try/except `ALTER TABLE`s — **no migration framework**) + `init_db()`. Three engines: `engine`, `ingest_engine`, `ro_engine`. |
 | `trade_service.py` | 5.0k | Trade-card generation: pair enumeration, package building, fairness gates, mutual-gain scoring. `_DEFAULT_CFG` + `reload_config()` read the `model_config` table. Routes to `trade_gen_v2` when `trade_gen.v2` is on. |
 | `trade_gen_v2.py` | 1.0k | **Divergence-driven, dual-board, staged generation** (flag `trade_gen.v2`, default OFF). Ships *alongside* the existing generator — when the flag is off this module is never imported and every legacy/v2/v3 path is byte-identical. |
+| `trade_first_page.py` | 1.2k | **Page-first exact top-K search** for the bilateral generators (ADR-028): admissible bounds order candidates, the unchanged evaluator verifies best-first, and the search stops once the page is proven. Exact for bilateral-1 and revision 2 (family completion). A leaf. A change to market package pricing or to either ranker must re-run `test_trade_first_page.py`. |
+| `trade_fast_deck.py` | 69 | **The fast deck** (flags `trade.fast_deck` / `trade.fast_deck_shadow`, default OFF): `serve` hands the worker the proven first 150 cards in place of the full inventory, or `None` for the full solve; `shadow` compares a page with a finished full solve. A leaf; `_run_trade_job` reads the flags and owns fallback and logging. Never imported with both flags off. |
 | `bakeoff_profiles.py` | 80 | **Three-model bake-off arm definitions.** `MODEL_A_PROFILE` — the pinned kill-value set that *is* arm A (the pre-2026-08-16 engine), golden-tested against SHA `92c31d5` — and `model_a()`, which applies it together with `trade_service.r4_bypass()`. Inert until a caller enters the context. |
 | `trade_policy.py` | 0.9k | **The ONE trade-policy evaluator** (2026-09-04, dark behind `trade.valuation_telemetry` / `trade.personal_market_policy_v1`). Consensus as a non-bypassable market floor, two-sided personal opportunity as the ordering signal, symmetric ranking confidence (D-180); `policy_variant` recorded orthogonally to `model_arm` (D-181). A **leaf** like `suggestion_telemetry.py` — never imports `server`, and imports `trade_service`/`trade_optimizer` lazily inside functions (both directions cycle). Called by v2, v3 and one choke point in `_run_trade_job` on the final deck. |
 | `trade_optimizer.py` | 864 | Trade engine **v3** — exact per-pair package optimizer, lineup feasibility, 3-team cycles, sweeteners (flag `trade_engine.v3`). |
@@ -106,6 +108,10 @@ concrete provider. Phase 2 (`strength.py`) is the swap seam, selected by
 (load the impression spine) → `scorers.py` (registry) → `replay.py` (IPS estimator + CLI) /
 `calibration.py` (reliability + ECE) / `nightly.py` (idempotent per UTC day) / `persistence.py`
 (append-only JSONL under `EVAL_RUNS_DIR`, default `data/eval_runs/`) / `synth.py` (synthetic logs).
+Also here: `synthetic_league.py` (a deterministic production-sized league for constructor
+benchmarks), `first_page_bench.py` and `first_page_load.py` (page-first search against the full
+solve, single-run and under load), and `acceptance_eval.py` (does the bilateral support score
+predict logged outcomes; `--production` is read-only and its report is aggregate-only).
 
 **`tools/`** — `gen_stats_golden.py` (regenerates the stats golden vectors offline; scipy is *not* a
 runtime dep, so never import it in shipped code) and `prod_analytics.py` (read-only reports against

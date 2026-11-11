@@ -1116,6 +1116,8 @@ const BACKGROUND_SET = [
     "D1: Settings' roster-moves consent read (readConsentStatus, every Leagues visit)"],
   ['api/faMove.ts', /`\/api\/league\/free-agents\?league_id=\$\{encodeURIComponent\(leagueId\)\}`,\s*\{ background: true \},/,
     "D1: the move-capability prefetch (readLeagueCapability, Usage Trends)"],
+  ['api/offerImport.ts', /quietStatuses: QUIET,\s*background: true,/,
+    "WS2b: Settings' Sleeper offer-import switch read (readOfferImport, every Leagues visit)"],
 ];
 check('8b. D2 [shape]: the pinned background set; nothing else in mobile/src is background; the callers the API defaults cover still match them', () => {
   const want = {};

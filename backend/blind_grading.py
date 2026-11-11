@@ -30,6 +30,9 @@ ARMS: tuple[str, ...] = ("current", "value_core")
 # Folded into open sessions after the build by add_fit_arms (operator, 2026-10-09). Not built by
 # build_session, so a session's base arms stay ARMS; summaries list them only when present.
 FIT_ARMS: tuple[str, ...] = ("fit_a", "fit_b")
+# Additive arm of the outlook Calibration round (outlook_calibration.EXTRA_ARMS); like the fit
+# arms, summaries list it only when a card carries it.
+ROUND_EXTRA_ARMS: tuple[str, ...] = ("revision_4",)
 TAGS: tuple[str, ...] = ("overpay", "they_wont_accept", "junk_filler", "too_small",
                          "wrong_for_my_window", "wrong_for_their_window", "same_guy_again")
 PER_ARM = 20            # cards taken from each arm
@@ -743,7 +746,7 @@ def arm_summaries(cards: Sequence[Mapping]) -> tuple[dict, int]:
         tags = json.loads(c["tags_json"]) if isinstance(c["tags_json"], str) else list(c["tags_json"] or [])
         for arm in arms:
             b = buckets.get(arm)
-            if b is None and arm in FIT_ARMS:
+            if b is None and arm in FIT_ARMS + ROUND_EXTRA_ARMS:
                 b = buckets[arm] = {"cards": 0, "skipped": 0, "graded": []}
             if b is None:
                 continue

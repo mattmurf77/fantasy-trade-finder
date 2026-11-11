@@ -16,6 +16,9 @@ Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense match
 
 ## Table of Contents
 - [2026-11-10 — Asset-pref vocabulary is four types; single membership spans all four](#2026-11-10--asset-pref-vocabulary-is-four-types-single-membership-spans-all-four)
+
+- [2026-11-10 — Calibration rounds side by side](#2026-11-10--calibration-rounds-side-by-side)
+- [2026-11-10 — Revision-4 proof and additive-arm conventions](#2026-11-10--revision-4-proof-and-additive-arm-conventions)
 - [2026-11-06 — Versioned outlook evidence contract](#2026-11-06--versioned-outlook-evidence-contract)
 - [2026-11-04 — Export boundary and board-history owner fencing](#2026-11-04--export-boundary-and-board-history-owner-fencing)
 - [Authoritative References](#authoritative-references)
@@ -73,6 +76,16 @@ Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense match
 ## 2026-11-10 — Asset-pref vocabulary is four types; single membership spans all four
 
 `asset_preferences.list_type` (`ASSET_PREF_LISTS`) is now `untouchable` \| `target` \| `not_interested` \| `trade_block` (D-212, roster-first setup). Both loaders return all four plural/snake keys (`untouchables`, `targets`, `not_interested`, `trade_block`) for every user they return, in every flag state. Single membership is per (user, league, player) across **all four** — `set_asset_preference` deletes before it inserts — so a client toggling Move ↔ Keep ↔ none never reconciles locally. The convention for a new list type that the engine reads: **persistence ungated, engine read gated at the one context loader** (`server._owner_generation_context` pops the key when the flag is off), and any evidence/hash that names the key includes it only when present, so flag-off bytes are unchanged. `trade_block` is read by the owner-v1 and bilateral constructors only (give-side mirror of `targets`); legacy v2/v3 and likes-you do not read it. Strings: [cross-client invariants § Asset preference list types](../docs/cross-client-invariants.md#asset-preference-list-types).
+
+## 2026-11-10 — Calibration rounds side by side
+
+A Calibration round is a row in `outlook_calibration.ROUNDS`: round id, its own flag, and a two-version pair under the fixed wire aliases `current`/`value_core` (so installed clients and `blind_grading.arm_summaries` read any round unchanged). Every session, lease and report is keyed by its round id: one building/open/completed session per account/league/round (`active_round_key`), one build lease per round (`lease_key` = round id, which the finish/fail fences already require), one serial worker thread draining enabled rounds in order. `next`/`cards`/`results` dispatch on the session row's own round. Start/current take an optional `round_id`; with none, `default_round` decides: a current-round deck part-way through (`first_exposed_at` or an answer, the round's own frozen test) wins, then the new round until completed, then the current round again, so a new round needs no app change and never interrupts or retires a deck. The current round keeps its zero-argument calls (`enabled()`, `build_enabled()`, `drain_queue()`, `_pending_work()`); a later round goes through `round_enabled(rid)` / `round_build_enabled(rid)`. A new round never touches another round's rows; an additive arm is not used once a round of its own exists. [Scope](../docs/plans/offer-learnings/scope-revision-4-round.md).
+
+## 2026-11-10 — Revision-4 proof and additive-arm conventions
+
+A ranking-only rule writes to support scores (keeping `support.revision_2_score` and `revision_4_adjustments`) and never to `utility`, market gain or the package, so eligibility is unchanged and presentment sees the same order signal. A dark numeric selector is popped from constructor reports and the selected-request hash unless it is exactly 1. A Calibration arm outside a round's equal-quota pair is an *additive arm*: folded after the paired order is fixed, credited on shared cards, inserted without reordering, failure isolated, and reported under `additive_arms`. [Scope](../docs/plans/offer-learnings/scope-revision-4.md).
+
+Partner activity (WS7, flag `trade.partner_activity`) follows the same rule and adds one convention: **database-derived generator input enters only through the owner context, as a key present only when its flag (and the selected engine that accepts it) is on**, loaded once per job. Only revision 4 accepts `partner_activity`; other engines would reject the kwarg, which is why the context gate checks the selector too. A rule that changes a proof's contents bumps the proof's `rules_version` only while its input is present. [Scope](../docs/plans/offer-learnings/scope-partner-activity.md).
 
 ## 2026-11-06 — Versioned outlook evidence contract
 
@@ -995,6 +1008,7 @@ Code: the P1 block of `server.py`; table `trade_page_store` ([data-dictionary](.
 - **A page serves only if every stamp still matches:** `roster_fp`, `values_snapshot_id`, `engine_version` (engine, policy, engine-module code hash including `tier_config.json`, `DECK_PIPELINE_VERSION`), `config_signature` and `experiment_digest` (read at job start on the worker, before the engine, and carried on the job; never on the request thread). A mismatch or a failed read falls through to the job path; it never serves an unchecked page.
 - **Every page serve goes through S0's `_roster_serve_rules`**, like the job views. A new serve path must too.
 - **The deck pipeline guard.** `server.py` isn't hashed into `engine_version`, so its deck-shaping functions (`DECK_PIPELINE_FUNCTIONS`) and the constants they read (`DECK_PIPELINE_CONSTANTS`, by value) carry a pinned digest (`DECK_PIPELINE_PINS[DECK_PIPELINE_VERSION]`: the functions' AST, docstrings stripped, in a Python-version-stable form). A logic or constant change fails `test_deck_pipeline_digest` until `DECK_PIPELINE_VERSION` is bumped and a new row pinned. The pins are append-only: the test holds a frozen copy of every row, so re-pinning an existing version in place (which would leave its stored pages stamped current) fails; models-eng reviews (a MOD-M1 re-run trigger after 11-10). A closure test keeps the list complete: any `server.py` function or literal constant a listed function references must be listed or in `DECK_PIPELINE_IGNORED` with a reason, so a new helper fails CI until it's classified.
+- **Pipeline 16 (2026-11-10): the fast-deck hook.** `_run_trade_job`'s owner-generator call reads `trade.fast_deck` and `trade.fast_deck_shadow` once per job, for interactive jobs only, and may take its cards from `trade_fast_deck.serve` (the page-first search's proven first 150) instead of the full solve. `trade_first_page.py` and `trade_fast_deck.py` are in `_ENGINE_CODE_MODULES`. Flags off: the same generator call. ADR-028, D-216.
 
 ## Packed evidence: the pack at first delivery, header-only updates, full row on view (2026-10-27, ADR-025 stage 2, S8)
 

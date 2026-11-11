@@ -13,6 +13,7 @@ Calibration coverage (2026-11-06): metadata-backed unranked holdings are safety 
 Linked calibration capture (2026-11-06): strict ESPN/MFL normalization reuses stored consent/credentials and the full paired pipeline. Native mapping/settings and pick ownership must be represented exactly; unsupported inputs remain failures. Provider account/season/auth/format/credential revision joins semantic currentness. [Contract](../docs/plans/calibration-provider-capture/architecture.md).
 
 ## Table of Contents
+- [2026-11-10 — Engine revision 4 and an additive Calibration arm](#2026-11-10--engine-revision-4-and-an-additive-calibration-arm)
 - [2026-11-06 — Evidence-bound outlook candidate](#2026-11-06--evidence-bound-outlook-candidate)
 - [What This Is](#what-this-is)
 - [Scope](#scope)
@@ -28,6 +29,10 @@ Linked calibration capture (2026-11-06): strict ESPN/MFL normalization reuses st
 - [Win Now season pipeline](#win-now-season-pipeline)
 
 ---
+
+## 2026-11-10 — Engine revision 4 and an additive Calibration arm
+
+A dark fourth bilateral revision (built on revision 2) reorders offers using the other team's outlook: their own picks priced above market for them, paying picks preferred over asking for them when quality ties, and "several for their best asset" demoted. Calibration can add it as a third, additive arm to new frozen round builds. No serving change. Superseded the same day by a Calibration round of its own (`outlook-v2-v4-1`, revision 2 vs 4), so pairs that opened or finished the v2/v3 round also grade revision 4; two rounds can be open per pair. See [architecture](../docs/architecture.md#bilateral-revision-4-offer-learnings).
 
 ## 2026-11-06 — Evidence-bound outlook candidate
 
@@ -186,6 +191,8 @@ Value-core Gate 2 inside the app: does the plain value core grade as well as tod
 `POST /api/mock-draft` resolves real order + traded-pick ownership per platform, all inside the create route (the engine `mock_draft_service.py` stays I/O-free): Sleeper via the Draft Room's cached board (`draft_board_service.build_board` — the one platform read, at creation only); ESPN via the pick-assignment grid the ESPN Draft Room renders (`_assignment_grid` → `assigned_board`, DB-only); MFL via the normalized `draft_picks` store (`_mock_owned_pick_overlay`, ownership anchored to the original owner's slot in the seeded shuffle — the order itself is never invented). Every mock is stamped `ownership_source` ∈ `platform`|`user`|`partial`|`none` so any fallback is labeled, never silent. Wiring detail: `../docs/architecture.md` (mock_draft_service row); contract: `../docs/api-reference.md` § Mock draft.
 
 ---
+
+**Cold trade build, flagged branch (2026-11-10, ADR-028).** With `trade.fast_deck` on, an interactive owner-serve job builds its deck from the page-first search's proven first 150 cards instead of the full inventory, then runs the same final checks, evidence and publication. Off by default; the full solve is the fallback for every case the search does not cover.
 
 ## Living-Memory Layer (this project)
 
