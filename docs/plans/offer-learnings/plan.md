@@ -163,7 +163,8 @@ as outcome evidence. Off until the user opts in; a line in the Terms says so in 
 - Sleeper access uses what the app already has for the user. If Part B needs an endpoint or
   credential the app does not hold today, stop and report instead of adding one.
 - The Terms line is a draft for the operator to approve: put it in the PR description and the
-  terms file behind the same flag, not live.
+  terms file behind the same flag, not live. (Approved and published 2026-11-10; see the
+  [scope block](scope-sleeper-offer-read.md) §0.6.)
 - Flags: one for Part A (`trade.outcome_tracking`), one for Part B
   (`trade.sleeper_offer_import`), both off.
 

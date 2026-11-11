@@ -628,14 +628,30 @@ def test_daily_step_reads_open_app_offers_and_consenting_users_leagues(wired, mo
     assert wired.call_count == 2
 
 
-def test_flag_is_registered_dark_everywhere():
+def test_flag_defaults_off_in_code_and_ships_on():
+    """On from 2026-11-10, once the operator approved the Terms wording. New
+    code still ships dark: the code default is off and the config turns it on."""
     from backend import feature_flags as ff
     repo = Path(__file__).resolve().parents[2]
     assert sor.FLAG in ff.FLAG_KEYS and ff.DEFAULT_FLAGS[sor.FLAG] is False
     for path in ("config/features.json", "backend/tests/fixtures/flags/release.json",
                  "backend/tests/fixtures/flags/onboarding-v2.json",
                  "backend/tests/fixtures/flags/profiles-on.json"):
-        assert json.loads((repo / path).read_text())[sor.FLAG] is False, path
+        assert json.loads((repo / path).read_text())[sor.FLAG] is True, path
+
+
+def test_the_published_terms_carry_the_wording_the_switch_stands_on():
+    """Consent is recorded against TERMS_VERSION; the page must say what the
+    switch does, in the words the switch itself uses for its name."""
+    repo = Path(__file__).resolve().parents[2]
+    terms = (repo / "web/terms.html").read_text()
+    privacy = (repo / "web/privacy.html").read_text()
+    assert "draft" not in sor.TERMS_VERSION
+    for page in (terms, privacy):
+        assert '"Use my Sleeper trade offers"' in page
+        assert "never your messages or chats" in page
+    assert sor.SWITCH_LABEL.startswith("Use my Sleeper trade offers")
+    assert "we delete the offers we imported" in terms
 
 
 def test_consent_and_imports_are_deleted_with_the_account():

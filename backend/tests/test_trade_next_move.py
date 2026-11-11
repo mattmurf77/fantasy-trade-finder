@@ -183,12 +183,14 @@ def test_flag_off_does_no_work(monkeypatch):
     assert nm.propose_revision(offer(), context()) is None
 
 
-def test_flag_is_registered_dark_everywhere():
+def test_flag_is_registered_everywhere_default_off_in_code_on_in_config():
+    # Turned on by the operator's instruction of 2026-11-10 ("turn it on"); the code
+    # default stays off, so a missing or unreadable config still means off.
     assert nm.FLAG in ff.FLAG_KEYS and ff.DEFAULT_FLAGS[nm.FLAG] is False
     for path in ("config/features.json", "backend/tests/fixtures/flags/release.json",
                  "backend/tests/fixtures/flags/onboarding-v2.json",
                  "backend/tests/fixtures/flags/profiles-on.json"):
-        assert json.loads((REPO / path).read_text())[nm.FLAG] is False, path
+        assert json.loads((REPO / path).read_text())[nm.FLAG] is True, path
 
 
 def test_no_production_module_reaches_the_generator():
