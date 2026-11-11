@@ -1,4 +1,17 @@
-"""Best-available estimates distinguish data absence from a real numeric zero."""
+"""Best-available estimates distinguish data absence from a real numeric zero.
+
+Player who changed NFL teams (Sleeper metadata has the new team; the weekly
+feed row still carries the old one):
+- test_team_changed_player_is_unpriced_and_stale_row_scores_nothing: capture
+  succeeds, the player is unpriced as `player_team_changed`, timed by the new
+  team's game, and the stale row's stats reach no lineup; a teammate whose
+  teams agree is priced as before.
+- test_team_changed_player_alone_for_a_slot_leaves_it_unknown: the slot only
+  he could fill is missing and the league estimate is incomplete.
+- test_team_changed_player_on_new_team_bye_is_a_bye: a verified bye, not
+  unpriced and not an error.
+- test_strict_contract_still_refuses_a_team_changed_player.
+"""
 from copy import deepcopy
 from decimal import Decimal
 import pytest
@@ -318,3 +331,69 @@ def test_observed_floor_expectation_accounts_for_actual_upper_tail():
     q=joint.prepare_observed_floor(40,80,20,15,.3,5,50,True,2)
     assert abs(q['analytic_unrounded_mean']-80)<1e-9
     assert q['target_adjustment']==0
+
+
+# ── A player who changed NFL teams: the stale feed row is not his projection ──
+
+def change_team(source,pid='p2',new='T2',stale_stats=None):
+    """Metadata moves `pid` to `new`; his feed row keeps the old team and game."""
+    source[f'{provider.API}/players/nfl'][pid]['team']=new
+    row=next(r for r in source[FEED] if r['player_id']==pid)
+    assert row['team']!=new
+    if stale_stats is not None:row['stats']=stale_stats
+
+
+HUGE={'gp':1,'rec':100,'rec_yd':1000,'pts_std':200,'pts_half_ppr':250,'pts_ppr':300}
+
+
+def test_team_changed_player_is_unpriced_and_stale_row_scores_nothing():
+    source,cfg=world();add_priced_teammate(source);change_team(source,stale_stats=HUGE)
+    snapshot=run(source,cfg);teams=snapshot['weeks'][0]['teams'];detail=teams['2']
+    assert [(p['player_id'],p['reason']) for p in detail['projection_coverage']['unpriced_players']]==[('p2','player_team_changed')]
+    # p5 (teams agree) starts; the stale 300-point row reaches neither lane.
+    assert [r['player']['player_id'] for r in detail['actual']['lineup']]==['p5']
+    assert Decimal(detail['modeled_actual_projection'])==Decimal(detail['modeled_maxpf_projection'])==4
+    assert detail['projection_coverage']['complete'] and detail['projection_coverage']['missing_actual_slots']==[]
+    assert snapshot['coverage']['estimate_status']=='complete'
+    # Timed by the new team's game, carrying none of the stale row.
+    p2=next(p['input'] for p in snapshot['player_week_inputs'] if p['player_id']=='p2')
+    assert p2['game_id']=='w3g1' and p2['stats']=={} and p2['projection_status']=='unpriced'
+    # Player whose teams agree is unaffected.
+    assert Decimal(teams['1']['modeled_actual_projection'])==8
+    assert teams['1']['projection_coverage']['unpriced_players']==[]
+
+
+def test_team_changed_player_alone_for_a_slot_leaves_it_unknown():
+    source,cfg=world();add_priced_teammate(source);change_team(source,stale_stats=HUGE)
+    source[f'{provider.API}/league/123']['roster_positions']=['SUPER_FLEX','TE']
+    snapshot=run(source,cfg);detail=snapshot['weeks'][0]['teams']['2']
+    assert detail['projection_coverage']['complete'] is False
+    assert detail['projection_coverage']['missing_actual_slots']==['TE']
+    assert Decimal(detail['modeled_actual_projection'])==4
+    assert snapshot['coverage']['estimate_status']=='incomplete'
+    assert snapshot['weeks'][0]['teams']['1']['projection_coverage']['complete'] is True
+
+
+def test_team_changed_player_on_new_team_bye_is_a_bye():
+    source,cfg=world();change_team(source,stale_stats=HUGE)
+    # T2 (and T3) do not play week 3: their game moves to week 18.
+    schedule=source['https://api.sleeper.app/schedule/nfl/regular/2026']
+    next(g for g in schedule if g['game_id']=='w3g1')['week']=18
+    scores=source['https://api.sleeper.app/scores/nfl/regular/2026/3']
+    scores[:]=[g for g in scores if g['game_id']!='w3g1']
+    snapshot=run(source,cfg);detail=snapshot['weeks'][0]['teams']['2']
+    assert {'player_id':'p2','reason':'bye'} in detail['exclusions']
+    assert detail['projection_coverage']['unpriced_players']==[]
+    assert Decimal(detail['modeled_actual_projection'])==0
+    assert detail['projection_coverage']['complete'] and snapshot['coverage']['estimate_status']=='complete'
+    # The stored row is an ordinary verified bye, not an unpriced row.
+    p2=next(p['input'] for p in snapshot['player_week_inputs'] if p['player_id']=='p2')
+    assert p2['availability']==0 and p2['availability_basis']=='verified_schedule_bye'
+    assert 'projection_status' not in p2 and 'coverage_reason' not in p2
+
+
+def test_strict_contract_still_refuses_a_team_changed_player():
+    source,cfg=native_world();change_team(source)
+    assert cfg['scoring_contract']!=BEST_AVAILABLE
+    with pytest.raises(Unavailable) as error:run(source,cfg)
+    assert error.value.reason=='player_team_changed'

@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-231 — A player whose NFL team changed is left unprojected for the weeks the feed still lists his old team; one such player no longer stops a league's forecast
+
+**Date:** 2026-11-11 · **Who:** this session's call, made while carrying out the operator's instruction "Just do the new forecasts manually now and push them live". Open to reversal.
+**Context:** On the day v5 shipped, five rostered players changed NFL teams. Sleeper's player data had the new team; its weekly projection feed for weeks 11 to 14 still carried rows for the old team. A guard from 2026-11-07 (`player_team_changed`) stopped the whole league's run on any such row, so all six targets that had a forecast the day before produced none.
+**Decision:** In best-available scoring (what production uses) the stale row is not used at all: not its stats, game or opponent. The week is timed by the player's current team, so a bye stays a bye and a finished game stays a recorded score; a game still to be played leaves the player unprojected with reason `player_team_changed`. Strict scoring still stops the run.
+**Alternative not taken:** score the player from the old-team row on the new team's schedule. It would keep more teams' estimates complete, but it presents a projection made for a game the player will not play.
+**Consequences:**
+- A team that has another projected player for the slot stays complete and starts that player, so its total is a little low until Sleeper refreshes the row.
+- A slot only that player could fill is unknown: the league's estimate reads incomplete and no outlook is suggested (D-230).
+- A team-week with no projected player at all still stops the run (`missing_weekly_projections`), as before.
+
 ## D-230 — The saved playoff chance suggests an outlook; it outranks the roster classifiers and never writes the saved outlook
 
 **Date:** 2026-11-11 · **Who:** the operator's spec ("updating the projected playoff teams"); the precedence and the meaning of "incomplete" are this session's calls.
