@@ -638,7 +638,29 @@ post-construction mutation invalidates eligibility. Raw values remain private.
 captured time and package-scoped inputs; `served_market` freezes the control's
 displayed totals too. Organic owner rows use `owner_request` (team-draft unit,
 no invented equal-arm probability). `owner_generation` contains budget, pool,
-shape, rejection and shortage diagnostics. The exact owner fairness floor is
+shape, rejection and shortage diagnostics: the generator's full-solve report. Its shape
+depends on how the owner deck was built (ADR-030, `deck.rules_first`):
+
+- **full solve** (flag off, or out of rules-first scope): `generator`, `generator_version`,
+  `score_kind`, `config`, `limits`, `pools`, `per_opponent`, `evaluated`, `emitted`,
+  `rejections`, `shortage`, `small_supply`, `budget_exhausted`, `partial_search`,
+  `max_cards_ignored`, `market_source_snapshot`, `elapsed_seconds`, and for revision 2
+  `support_weights`, `term_efficiency`, `term_ordering`, `starter_evidence`;
+- **rules-first, gated full solve** (the fallback): the same keys plus `construction`
+  (`"rules_first_gated_full"`) and `rules_version`; packages skipped by the rules count under
+  `rejections` as `deck_rules`;
+- **rules-first, page search** (the normal case): the page-first search's report instead.
+  Present: `generator`, `generator_version`, `score_kind`, `page_first_version`, `k`,
+  `returned`, `complete`, `takes`, `universe`, `bounded`, `bound`, `priced`,
+  `price_envelope`, `floor_pass`, `support_bounded`, `verified`, `eligible_verified`,
+  `max_verifications`, `incumbent_budgets_bind`, `prefix_stable`, `term_exact_prefix`,
+  `term_horizon`, `families_completed`, `family_verified`, `elapsed_ms` and the rules'
+  `rules_version`, `rules_rejected` (screened entries dropped), `rules_unheld` (eligible proofs
+  not held). **Absent:** `config`, `limits`, `pools`, `per_opponent`, `evaluated`, `emitted`,
+  `rejections`, `shortage`, `small_supply`, `budget_exhausted`, `partial_search`,
+  `max_cards_ignored`, `market_source_snapshot`, `elapsed_seconds`, `support_weights`,
+  `term_efficiency`, `term_ordering`, `starter_evidence`. A reader of those keys must treat
+  them as missing on page-built rows, never as zero. The exact owner fairness floor is
 recorded without applying the legacy divergence/relaxation discount.
 
 The once-per-run selected `bakeoff_runs.config_json` contains the full captured

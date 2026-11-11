@@ -1,3 +1,14 @@
+## 2026-11-11 — Rules-first deck construction (D-235, ADR-030), branch `feat/deck-rules-first`
+
+- **Replay of all 247 recorded requests (main session, before the review fixes):** served set equal 247 of 247; page deck equal to the gated full solve 247 of 247; 0 fallbacks; 0 downstream guard removals; deck size min 69, median 196, max 510 on both paths; CPU per search median 0.35 s against 4.0 s. First card the same 167 of 247; first 30 share a median of 25. Re-run on the final merged code: result in the PR.
+- **Builder's step 0** reproduced the design's claims before building (247 of 247 on both). **Synthetic leagues, 12 to 32 teams:** whole deck in 0.56 to 2.6 s; page path every time; at 32 teams 18 more cards than the budgeted solve reaches.
+- **Tests:** `test_rules_first_deck.py` (new) and `test_trade_fast_deck.py` (rewritten): page equals gated in order; rules-first equals today's set; no thin deck where the old 150-card page served 16 of 154; rule agreement card by card between `DeckRules`, `filter_deck`, significance and the eval tool; `admit=None` leaves the page search unchanged; fallback fires with one warning; flag off imports neither module; pinned, opponent-scoped and intent requests and unsupported generators keep today's path; a worker run with likes, fatigue, standing offers and telemetry on; a liked trade that fails a rule reaches the user as an engine card; the inventory and stored-page key do not depend on likes; Match strength constant; repeat cap 5. Full suite by the subagent after the last change: **14,513 passed, 42 skipped, 0 failed**.
+- **Sabotages (32, Opus subagents):** 30 red then restored. Two stayed green and are explained: family completion ignoring admission (those members are never held) and significance `user_elo` from the seed (does not vary in that harness).
+- **Independent review (Opus, read-only):** no path to a wrong, thin or empty deck; flag off identical apart from the repeat cap. Its findings fixed: liked trades, Match strength decay, opponent-scoped scope, the overstated served-set claim, missing worker-level tests.
+- **Cannot be replayed offline:** decline suppression and its floor, dispositions, likes-you and revised-offer injection in production, owner revalidation. No recorded request has pins, an opponent scope or an intent; league sizes are 11 to 13 teams.
+- **Not verified:** production timing; anything on a device. Watch after deploy: `rules-first:` lines (path, fallback, cards, ms), `rules-first guard` warnings (expect none), `suppression floor engaged` counts.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-11 — Forecast model v6: free-agent fill (D-234), branch `feat/projection-fa-fill`
 
 - **`-k league_projection`: 566 passed** (main session re-run; 553 before). Full suite by the subagent: **14,506 passed, 42 skipped, 0 failed** (940 s).

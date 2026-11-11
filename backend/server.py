@@ -4581,7 +4581,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 21
+DECK_PIPELINE_VERSION = 22
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4633,6 +4633,7 @@ DECK_PIPELINE_FUNCTIONS = (
     # the flag gates that switch layers on
     "_deck_diversity_enabled", "_deck_exploration_enabled", "_deck_fatigue_enabled",
     "_deck_first_session_enabled", "_deck_quality_filters_enabled", "_deck_signal_v2_enabled",
+    "_rules_first_deck_rules",   # ADR-030: the per-card deck rules applied before ranking
     "_deck_taste_enabled", "_deck_thompson_v2_enabled", "_deck_value_model_enabled",
     "_likes_you_enabled", "_owner_enabled", "_standing_offers_enabled",
     "_suggestion_telemetry_enabled", "_thompson_deck_enabled", "_value_core_enabled",
@@ -4730,6 +4731,7 @@ DECK_PIPELINE_PINS = {
     19: "41b3e46c2f4c2e68",  # Fit block v3 (trade.fit_first_copy, default off): one league-wide rank context per job, stamped on owner cards; trade_card_to_dict adds fit_block; flag off: no context, no key, payload byte-identical.
     20: "4e8e4cbd886c9149",  # Partner activity (trade.partner_activity, default off; revision 4 only): the owner context carries the league's public completed-trade counts; flag off or revision 4 not selected: context, hash, terms and order unchanged.
     21: "6b0e0c0fe51fb2ef",  # Revised-offer cards (trade.next_move, default off): the user's declined Sleeper offers lead the organic owner deck, proven by the owner evaluator, and carry the job's fit context; flag off: no read, no card, terms and order unchanged.
+    22: "6eb0e82ee1b62e47",  # ADR-030 rules-first construction (deck.rules_first, ships on): per-card deck rules decide admission before ranking for organic owner-only decks (no pins, opponent scope or intent); liked trades stay an overlay after generation, and on rules-first jobs a liked mirror or standing offer the generator did not build is proven by the job's owner evaluator (consensus card when not eligible); the downstream quality filter follows the rules' flag capture; the safety signature stamps it, guard counts logged; the retired trade.fast_deck hooks removed (both were off); flag off: same generator call and likes-you injection, terms and order unchanged.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4739,7 +4741,8 @@ DECK_PIPELINE_PINS = {
 _ENGINE_CODE_MODULES = (
     # the engines and their generators
     "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
-    "trade_first_page.py", "trade_fast_deck.py",  # ADR-028: the fast deck (flag trade.fast_deck)
+    "trade_first_page.py", "trade_fast_deck.py",  # ADR-030: rules-first construction (flag deck.rules_first)
+    "deck_rules.py",              # ADR-030: the per-card deck rules applied before ranking
     "power_rankings.py",          # value_core's lineup slots and optimal starters
     "outlook/league_state.py",    # value core's standings
     "ranking_service.py", "pick_values.py", "pick_slots.py",
@@ -8281,8 +8284,12 @@ def _load_trade_disposition_keys(user_id: str, league_id: str):
 
 def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
                             significance_capture=None, owner_model=None,
-                            owner_model_version=None):
-    """Stamp captured owner permission; freshness checks read live defaults."""
+                            owner_model_version=None, rules_first=None):
+    """Stamp captured owner permission; freshness checks read live defaults.
+    `rules_first`: the job's captured deck.rules_first (None reads it live). It
+    is stamped only on owner-only decks with the flag on, so flag off leaves
+    every signature as it was, and a kill switch never serves a cached
+    rules-first deck."""
     if owner_state is None:
         owner_include = _bakeoff.bakeoff_enabled() and any(
             arm in _bakeoff.OWNER_ARMS for arm in _bakeoff.arm_roster(exclusive=False))
@@ -8298,6 +8305,8 @@ def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
         ("owner_serve", owner_state[1]),
         ("owner_only", len(owner_state) > 2 and owner_state[2]),
         ("value_core", _value_core_enabled()),
+        ("rules_first", len(owner_state) > 2 and owner_state[2] and (
+            is_enabled("deck.rules_first") if rules_first is None else rules_first)),
     ) if enabled]
     if owner_state[0]:
         signature.append("owner_model:" + (owner_model or _bakeoff.owner_arm()))
@@ -8995,6 +9004,7 @@ def _inject_likes_you_cards_impl(
     avoid_positions: set | None = None,  # #360 — position twin of not_interested
     significance_inbound_keys: set | None = None,
     emit_exposure: bool = True,
+    prove=None,
 ) -> list:
     """Tier 2 work item 2.3a — surface trades the counterparty already liked.
 
@@ -9026,6 +9036,10 @@ def _inject_likes_you_cards_impl(
     Returns the deck re-sorted by composite_score descending. Synthesized
     cards are registered in trade_service._trade_cards so /api/trades/swipe
     can resolve them by trade_id.
+
+    `prove(card)` (ADR-030, rules-first jobs only; None = today): called on
+    each synthesized card before it is registered; it may attach the job's
+    owner proof (it never changes selection, flag, boost, cap or exposure).
     """
     likes = load_recent_league_likes(
         league_id=league_id, exclude_user_id=user_id, days=90,
@@ -9236,6 +9250,8 @@ def _inject_likes_you_cards_impl(
             receive_value      = round(_rv, 1),
             source_like_impression_id = like.get("impression_id"),
         )
+        if prove is not None:
+            prove(card)
         trade_service._trade_cards[card.trade_id] = card
         if significance_inbound_keys is not None:
             significance_inbound_keys.add(_significance_card_key(card))
@@ -9358,6 +9374,8 @@ def _inject_likes_you_cards_impl(
                     receive_value      = round(_rv2, 1),
                     standing_offer_reason = _reason,
                 )
+                if prove is not None:
+                    prove(card)
                 trade_service._trade_cards[card.trade_id] = card
                 if significance_inbound_keys is not None:
                     significance_inbound_keys.add(_significance_card_key(card))
@@ -9478,6 +9496,39 @@ def _deck_first_session_enabled() -> bool:
     board_refresh) and the features_json first_deck stamp; off ⇒
     byte-identical payloads, ordering, and DB writes."""
     return getattr(FLAGS, "deck_first_session", False)
+
+
+def _rules_first_deck_rules(*, viewer_team, league, user_roster, seed_map, players_dict,
+                            league_id, significance_capture, user_elo, scoring_format,
+                            user_sources):
+    """ADR-030: the job's per-card deck rules as one predicate (deck_rules.DeckRules), built
+    from exactly the inputs the downstream gates read: discovery significance through
+    _evaluate_trade_significance itself when it enforces, and deck_quality's per-card rules
+    with the quality filter block's market, positions, rosters and lineup slots when
+    deck.quality_filters is on. None when neither rule is live (nothing to move)."""
+    from . import deck_rules as _deck_rules
+    enforce = significance_capture[0] == 2
+    quality = _deck_quality_filters_enabled()
+    if not enforce and not quality:
+        return None
+    rosters = {str(m.user_id): list(m.roster or ()) for m in (league.members or ())}
+    rosters[viewer_team] = list(user_roster)
+    _e2v = _trade_service_mod.elo_to_value
+
+    def significant(target, give, receive):
+        card = SimpleNamespace(league_id=league_id, trade_id="", target_user_id=target,
+                                     give_player_ids=list(give), receive_player_ids=list(receive))
+        kept, _, _ = _evaluate_trade_significance(
+            [card], capture=significance_capture, players=players_dict, user_elo=user_elo,
+            seed_elo=seed_map, scoring_format=scoring_format, user_sources=user_sources)
+        return bool(kept)
+
+    return _deck_rules.DeckRules(
+        viewer_id=viewer_team, rosters=rosters,
+        market=lambda pid: _e2v(seed_map[pid]) if pid in seed_map else None,
+        position=lambda pid: getattr(players_dict.get(pid), "position", None),
+        lineup_slots=_league_lineup_slots(league_id) if quality else None,
+        quality=quality, significance=significant if enforce else None)
 
 
 def _deck_quality_filters_enabled() -> bool:
@@ -13123,6 +13174,7 @@ def _run_trade_job(
         owner_model_version = _bakeoff.owner_version(owner_config)
         owner_serve = owner_on and _bakeoff.serve_owner()
         owner_exclusive = owner_serve and _bakeoff.owner_only()
+        rules_first_on = is_enabled("deck.rules_first")   # ADR-030: read once per job
         significance_inbound_keys = set()
         if owner_exclusive:
             # Return every eligible owner offer, not a counterfactual holdout.
@@ -13143,7 +13195,7 @@ def _run_trade_job(
                     j["significance_capture"] = significance_capture
                 safety_signature = _trade_safety_signature(
                     (owner_on, owner_serve, owner_exclusive), significance_capture, owner_model,
-                    owner_model_version)
+                    owner_model_version, rules_first=rules_first_on)
                 if safety_signature:
                     j["safety_policy"] = safety_signature
 
@@ -13356,55 +13408,72 @@ def _run_trade_job(
                     assignment_probability=1.0 if owner_exclusive else None)
             except Exception:
                 log.exception("owner context capture unavailable")
-        # ADR-028 (flags trade.fast_deck / trade.fast_deck_shadow), read once
-        # per job. Interactive jobs only: a prepared inventory, the weekly
-        # replenishment and Calibration's refresh keep the full inventory.
-        # Both off (the default) ⇒ trade_fast_deck is never imported and the
-        # generator call below is the one it always was.
-        with _trade_jobs_lock:
-            _fast_deck_scope = (not preparation
-                                and not (_trade_jobs.get(job_id) or {}).get("source"))
-        fast_deck_serve = _fast_deck_scope and is_enabled("trade.fast_deck")
-        fast_deck_shadow = (_fast_deck_scope and not fast_deck_serve
-                            and is_enabled("trade.fast_deck_shadow"))
+        # deck.rules_first (ADR-030, fast deck v2), captured above with the
+        # safety signature. Organic owner-only decks: the per-card deck rules
+        # decide which cards exist before ranking, and the whole admitted
+        # inventory is built (page search, else the gated full solve). Any
+        # failure serves today's full solve; the downstream gates still run.
+        # Off ⇒ deck_rules / trade_fast_deck are never imported and the
+        # generator call below is the one it always was. Organic, unscoped
+        # requests only: pinned, opponent-scoped and intent requests keep
+        # today's full solve (no served-deck parity suite covers them).
+        deck_rules = None
+        rules_first_ids: set = set()   # trade_ids the rules-first build served (guard counts)
+        owner_diagnostics: list = []   # the owner generation's report diagnostics, once built
+        # Liked trades are an overlay evaluated AFTER generation, never an
+        # input to it (operator, 2026-11-11): see _prove_liked_card below.
+        rules_first_scope = (rules_first_on and owner_exclusive and owner_context is not None
+                             and not pinned_give and not pinned_receive
+                             and not opponent_user_id and not trade_intent)
+        if rules_first_scope:
+            try:
+                deck_rules = _rules_first_deck_rules(
+                    viewer_team=str(ctx.league_user_id or g_user_id), league=g_league,
+                    user_roster=g_user_roster, seed_map=seed_map, players_dict=players_dict,
+                    league_id=league_id, significance_capture=significance_capture,
+                    user_elo=elo_map_rt, scoring_format=active_format,
+                    user_sources=owner_context.get("user_sources"))
+            except Exception:
+                log.exception("trade-job %s: rules-first rules unavailable (full solve)", job_id)
         fit_context = _fit_league_context(owner_context, service)   # WS4b: once per job
         def _gen_owner(**_overrides):
             if owner_context is None:
                 raise ValueError("owner_context_unavailable")
             check_current()
             _generate = _bakeoff.owner_generator(owner_context["config"])
-            _fast = None
-            if fast_deck_serve:
-                # Any failure, an unsupported request or an unproven page runs
-                # the full solve: never a partial or unattributed deck.
-                try:
-                    from . import trade_fast_deck
-                    _fast = trade_fast_deck.serve(_generate, owner_context, check=check_current)
-                except TradeWorkCancelled:
-                    raise
-                except Exception:
-                    log.exception("trade-job %s: fast deck unavailable (full solve)", job_id)
-                log.info("trade-job %s fast deck: %s", job_id,
-                         "served cards=%d" % len(_fast[0]) if _fast else "full_solve")
-            if _fast is not None:
-                cards, report = _fast
-            else:
-                _full_started = time.monotonic()
-                cards, report = _generate(**owner_context, _check_current=check_current)
-                if fast_deck_shadow:
-                    _full_ms = int((time.monotonic() - _full_started) * 1000)
+            _built = None
+            if deck_rules is not None:
+                from . import trade_fast_deck
+                if not trade_fast_deck.supported(_generate):
+                    # Expected, not a fault: a generator without a parity suite
+                    # (revision 3 or 4) keeps today's full solve.
+                    log.info("trade-job %s rules-first: not built, generator %s has no "
+                             "rules-first construction (full solve)", job_id,
+                             getattr(_generate, "__module__", None))
+                else:
                     try:
-                        from . import trade_fast_deck
-                        log.info("trade-job %s fast-deck shadow: full_ms=%d %s", job_id, _full_ms,
-                                 json.dumps(trade_fast_deck.shadow(
-                                     cards, _generate, owner_context, check=check_current),
-                                     sort_keys=True))
+                        _built = trade_fast_deck.serve(_generate, owner_context, deck_rules,
+                                                       check=check_current)
                     except TradeWorkCancelled:
                         raise
                     except Exception:
-                        log.exception("trade-job %s: fast-deck shadow failed (ignored)", job_id)
+                        log.exception("trade-job %s: rules-first construction failed (full solve)",
+                                      job_id)
+                if _built is not None and _built[2]["fallback"]:
+                    log.warning("trade-job %s rules-first: page search not proven (%s), served "
+                                "the gated full solve %s", job_id, _built[2]["fallback"],
+                                json.dumps(_built[2], sort_keys=True))
+                elif _built is not None:
+                    log.info("trade-job %s rules-first: %s", job_id,
+                             json.dumps(_built[2], sort_keys=True))
+            if _built is not None:
+                cards, report = _built[0], _built[1]
+                rules_first_ids.update(card.trade_id for card in cards)
+            else:
+                cards, report = _generate(**owner_context, _check_current=check_current)
             check_current()
             diagnostics = report.diagnostics()
+            owner_diagnostics[:] = [diagnostics]
             for card in cards:
                 card.owner_request_evidence = owner_request_evidence
                 card.owner_generation_diagnostics = diagnostics
@@ -13519,6 +13588,55 @@ def _run_trade_job(
                     if _job_live(j) and not j.get("final_checks_pending"):
                         j["cards"] = snapshot
 
+        # ADR-030 (deck.rules_first): a liked mirror or standing offer the
+        # generator did not build is proven on demand by this job's own owner
+        # evaluator (the one owner revalidation runs), without the deck rules
+        # (likes-you cards are protected from them), so it carries a proof,
+        # fit block and evidence like any engine card. Not eligible, or any
+        # error: today's consensus card, unchanged. At most the likes-you cap
+        # of evaluations per job. Flag off: never passed, today's injection.
+        liked_proofs = {"proven": 0, "consensus": 0, "errors": 0, "ms": 0.0}
+
+        def _prove_liked_card(card):
+            started = time.monotonic()
+            try:
+                evaluate = _bakeoff.owner_evaluator(owner_context.get("config", {}))
+                probe = TradeCard("", card.league_id, owner_context["user_id"], card.target_user_id,
+                                  card.target_username, list(card.give_player_ids),
+                                  list(card.receive_player_ids), 0, 0, 0)
+                proof = evaluate([probe], **owner_context)[0]
+                if not proof.eligible:
+                    liked_proofs["consensus"] += 1
+                    return None
+                # The fields a generated card carries from its proof; the card is
+                # changed only once the proof is known to match it.
+                market = proof.as_dict()["market"]
+                fields = dict(proposing_user_id=probe.proposing_user_id, give_value=market["give"],
+                              receive_value=market["receive"], fairness_score=market["ratio"])
+                candidate = copy.copy(card)
+                for name, value in fields.items():
+                    setattr(candidate, name, value)
+                if not proof.matches(candidate):
+                    raise ValueError("liked card proof does not match its card")
+                from .trade_fast_deck import MATCH_SCALE
+                for name, value in fields.items():
+                    setattr(card, name, value)
+                card.owner_evaluation = proof
+                card.mismatch_score = MATCH_SCALE
+                card.owner_request_evidence = owner_request_evidence
+                card.owner_generation_diagnostics = (owner_diagnostics or [None])[0]
+                if fit_context is not None:
+                    card.fit_context = fit_context
+                liked_proofs["proven"] += 1
+                return proof
+            except Exception as prove_err:   # never fails the job: today's card
+                liked_proofs["errors"] += 1
+                log.warning("trade-job %s: liked card proof failed (consensus card): %s",
+                            job_id, type(prove_err).__name__)
+                return None
+            finally:
+                liked_proofs["ms"] += (time.monotonic() - started) * 1000
+
         # Tier 2 (2.3a) — likes-you queue. Inject/boost cards league-mates
         # already liked the mirror of, then republish the final snapshot so
         # the served deck includes them. Non-fatal: a failure here serves
@@ -13542,6 +13660,7 @@ def _run_trade_job(
                     exclusion_keys = exclusion_keys or None,   # G6 R4 #336
                     avoid_positions = set(avoid_positions) or None,   # #360
                     significance_inbound_keys = significance_inbound_keys,
+                    **({"prove": _prove_liked_card} if rules_first_scope else {}),
                     **({"emit_exposure": False} if preparation else {}),
                 )
                 # trade.bakeoff §3.4 Channel 2 — the injector returns the deck
@@ -13552,6 +13671,10 @@ def _run_trade_job(
                 if bakeoff_fixed_order:
                     final_cards = _bakeoff.restore_order(_pre_likes_you,
                                                          final_cards)
+                if liked_proofs["proven"] or liked_proofs["consensus"] or liked_proofs["errors"]:
+                    log.info("trade-job %s: liked cards proven=%d consensus=%d errors=%d ms=%.1f",
+                             job_id, liked_proofs["proven"], liked_proofs["consensus"],
+                             liked_proofs["errors"], liked_proofs["ms"])
                 snapshot = []
                 for c in _served_cards(final_cards, league_id, ghost_on):
                     d = trade_card_to_dict(c, players_dict)
@@ -14015,6 +14138,12 @@ def _run_trade_job(
             selected_give_ids=pinned_give or (), selected_receive_ids=pinned_receive or (),
             inbound_keys=significance_inbound_keys,
             user_sources=owner_context.get("user_sources") if owner_context else None)
+        if rules_first_ids:
+            _guard = (sum(c.trade_id in rules_first_ids for c in significance_candidates)
+                      - sum(c.trade_id in rules_first_ids for c in final_cards))
+            if _guard:   # ADR-030 invariant 3: the downstream copy removes no admitted card
+                log.warning("trade-job %s rules-first guard: significance removed %d admitted cards",
+                            job_id, _guard)
         if significance_diag and bakeoff_run is not None:
             per_arm = {}
             for card in significance_candidates:
@@ -14197,7 +14326,11 @@ def _run_trade_job(
         with _trade_jobs_lock:   # #492 QA P3-1: only a deck with deferred evidence keeps it
             _fi_job = _trade_jobs.get(job_id)
             _fi_record = _job_live(_fi_job) and _fi_job.get("evidence") is not None
-        if _deck_quality_filters_enabled() and final_cards:
+        # ADR-030: a rules-first deck applies the quality rules its construction
+        # captured, so a deck.quality_filters reload mid-job cannot drop or keep
+        # cards the construction decided otherwise.
+        if (deck_rules.quality if deck_rules is not None
+                else _deck_quality_filters_enabled()) and final_cards:
             # Operator, 2026-10-14 (Calibration grades of this engine): drop breakup / junk
             # filler / redundant TE-QB cards and cap repeats, before the served/ghost split so a
             # dropped card is never logged as served. Any error serves the deck unfiltered.
@@ -14233,6 +14366,12 @@ def _run_trade_job(
                         significance_diag, quality_filters=quality_counts)
                 log.info("trade-job %s: deck quality filters %s served=%d", job_id,
                          quality_counts, len(final_cards))
+                if rules_first_ids:
+                    _guard = (sum(c.trade_id in rules_first_ids for c in before_quality)
+                              - sum(c.trade_id in rules_first_ids for c in final_cards))
+                    if _guard:   # ADR-030 invariant 3: the downstream copy removes no admitted card
+                        log.warning("trade-job %s rules-first guard: quality filters removed %d "
+                                    "admitted cards", job_id, _guard)
             except Exception as quality_err:
                 log.warning("trade-job %s: deck quality filters failed (serving unfiltered): %s",
                             job_id, quality_err)

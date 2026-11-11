@@ -662,10 +662,14 @@ score proven never to be lower than a candidate's true `weaker_support`, verifie
 the unchanged evaluator, and the search stops once no remaining bound can reach the page.
 [ADR-028](adr/adr-028-page-first-trade-search.md).
 
-**Fast deck** (`backend/trade_fast_deck.py`, flag `trade.fast_deck`, ships off) is a deck
-built from the page-first search's proven first 150 cards instead of the full inventory. The
-cards, order and proofs are the full engine's; the deck is shorter. **Fast-deck shadow**
-(`trade.fast_deck_shadow`) serves the full deck and logs how far the fast one agrees.
+**Fast deck** (ADR-028, flag `trade.fast_deck`) was a deck built from the page-first search's
+proven first 150 cards; retired 2026-11-11 (the filters left 2 of them). Its successor is
+**rules-first construction** (ADR-030, flag `deck.rules_first`): the deck's per-card rules
+(significance, breakup, filler, redundant) decide which owner cards exist before ranking, and
+the whole **admitted inventory** (every card that passes them, ranked over admitted cards
+only) is built by the page search, or by the **gated full solve** (the generator's full
+search with failing packages skipped and failing survivors dropped before ranking) when the
+page cannot be proven. `backend/deck_rules.py`, `backend/trade_fast_deck.py`.
 
 ## Window evidence and dynasty roster proxy
 
