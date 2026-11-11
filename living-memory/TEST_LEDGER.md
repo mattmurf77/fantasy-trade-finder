@@ -1,3 +1,13 @@
+## 2026-11-11 — Forecast model v6: free-agent fill (D-234), branch `feat/projection-fa-fill`
+
+- **`-k league_projection`: 566 passed** (main session re-run; 553 before). Full suite by the subagent: **14,506 passed, 42 skipped, 0 failed** (940 s).
+- **New tests (13):** an empty RB slot takes the best projected free-agent RB and the suggestion is available; none projected scores 0 and stays complete; a free agent never displaces a starter; two open slots take the best assignment of two different free agents; no rostered, taxi or reserve player of any team is offered (feed and capture layers); bye and not-pregame free agents are out; Max PF fills the same way; a played starter with no score is not filled and stays incomplete; IDP free agent first, then the replacement mean, then 0; ties break by player id; a saved v5 result is old-model and made due once. Eight existing tests whose cases are now filled were renamed to say what is true; no unrelated assertion changed.
+- **Sabotages (19, Opus subagent):** 17 red then restored. Two stayed green and are explained: locks ignored only at the fill (re-applied by `idp_bye_fill`; red when ignored at both points) and the tie post-pass removed (the optimizer's own id order already gives it; reversing it is red).
+- **Dry run against Sleeper's live feeds (local, nothing written):** all six real forecasts complete on v6. In the IDP league, 12 slots are filled from free agents and 1 scores 0 over the remaining weeks; the other two leagues need none.
+- **Capture time, synthetic 12-team league:** +0.6 s with full rosters, +1.2 s with 672 forced fills.
+- **Not verified:** anything on a device (D-056); the client wording (below) until its checks run.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-11 — Roster setup tier page (D-233), branch `feat/roster-setup-tier-rank`
 
 - **Backend, `test_roster_tier_save.py` (15):** only posted ids change (whole-board diff); a lone up-move lands on the band floor and a lone down-move on the ceiling, also in a band empty at that position; several movers keep posted order with pinned values; incumbents keep byte-identical overrides; the scope is read with both flags off; `tiers_saved` is untouched; `tier_save` carries `via: roster_setup`; posted ids become `explicit`; a fair-at-market card giving player X is `eligible` before and `viewer_no_benefit` after X is lifted two tiers, and stays eligible when the same move goes through `/api/rankings/reorder`; ids not at the position are ignored; the rookie path's lone-player value is unchanged. `test_analytics_taxonomy_roster_setup.py` extended.

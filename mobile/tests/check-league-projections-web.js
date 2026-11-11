@@ -66,7 +66,9 @@ const projectedWeek={week:9,opponent_roster_id:1,win_probability:.6,tie_probabil
   // fallback / *_component are what an old-model result still carries: they must not be rendered.
   historical_component:99.9,projection_component:88.8,modeled_actual_projection:77.7,modeled_maxpf_projection:66.6,
   projection_coverage:{estimated:true,complete:false,missing_actual_slots:['FLEX','TE'],priced_actual_pool:8,priced_maxpf_pool:20,
-    unpriced_players:[],partial_players:[],fallback:true,fallback_lanes:['actual']}};
+    unpriced_players:[],partial_players:[],fallback:true,fallback_lanes:['actual'],
+    free_agent_fills:[{slot_index:1,slot:'WR',player_id:'9',name:'Free Guy',points:'11.2',estimate_status:'available'}]}};
+projectedWeek.actual.lineup=[{slot:'QB',player:{player_id:'4',name:'Own Guy',points:'20.0'}},{slot:'WR',player:{player_id:'9',name:'Free Guy',points:'11.2'}},{slot:'TE',player:null}];
 const observedWeek={week:8,opponent_roster_id:1,win_probability:1,tie_probability:0,loss_probability:0,actual_score_observed:true,
   modeled_score_mean:141.2,modeled_score_sd:0,modeled_actual_projection:141.2,actual:{lineup:[]},exclusions:[],
   // complete:true wins over a stray slot list: the flag, not the list, decides whether the sentence shows.
@@ -107,9 +109,15 @@ const noPrompt=label=>{
   assert.match(host.visibleText,/Most likely finish.*Bye odds: 75\.0%/);
   assert.match(host.allText,/Recorded completed lineup score 141\.2\. /,'observed week copy');
   assert.match(host.allText,/Projected lineup score 120\.5, standard deviation 24\.0\./,'projected week copy');
-  assert.match(host.allText,/No projection for an eligible player at: FLEX, TE\./,'missing-slot week copy');
-  assert.equal(count(host,'No projection for an eligible player at: FLEX, TE.'),1,'only the incomplete week names missing slots');
-  assert.doesNotMatch(host.allText,/eligible player at: K/,'a complete week shows no missing-slot sentence');
+  assert.match(host.allText,/Score not recorded yet at: FLEX, TE\./,'missing-slot week copy');
+  assert.equal(count(host,'Score not recorded yet at: FLEX, TE.'),1,'only the incomplete week names missing slots');
+  assert.doesNotMatch(host.allText,/recorded yet at: K/,'a complete week shows no missing-slot sentence');
+  assert.doesNotMatch(source,/No projection for an eligible player|had no projection for an eligible player/,'the v5 missing-projection wording is gone');
+  /* Team-week lineup: the free-agent fill is marked; the roster starter is not. */
+  assert.equal(count(host,'WR: Free Guy (free agent) · 11.2'),1,'free-agent starter is marked');
+  assert.equal(count(host,'QB: Own Guy · 20.0'),1,'roster starter carries no marker');
+  assert.equal(count(host,'TE: Empty slot'),1);
+  assert.doesNotMatch(host.allText,/Own Guy \(free agent\)/);
   assert.match(host.allText,/Max PF players\. Unknown players and rules are not confirmed zeros\./);
   assert.equal(count(host,'Exclusions: None.'),2,'exclusions stay as their own line on every week');
   assert.doesNotMatch(host.allText,/historical blend|Historical component|projection component|Completed team history|99\.9|88\.8|66\.6/i,'no history-blend or history-fallback wording');
@@ -183,7 +191,26 @@ const noPrompt=label=>{
 
   /* Incomplete estimate. */
   await load(withResult({estimate_status:'incomplete',missing_lineup_slots:3},{outlook_recommendation:undefined}));
-  assert.match(host.visibleText,/Weekly estimate · Partial Sleeper data · Incomplete\s+3 lineup slots had no projection for an eligible player, so these odds are incomplete\./,'incomplete estimate is labelled and explained');
+  assert.match(host.visibleText,/Weekly estimate · Partial Sleeper data · Incomplete\s+3 lineup slots had a starter whose score is not recorded yet, so these odds are incomplete\./,'incomplete estimate is labelled and explained (plural)');
+  await load(withResult({estimate_status:'incomplete',missing_lineup_slots:1},{outlook_recommendation:undefined}));
+  assert.match(host.visibleText,/Incomplete\s+1 lineup slot had a starter whose score is not recorded yet, so these odds are incomplete\./,'incomplete estimate (singular)');
+  await load(withResult({estimate_status:'incomplete',missing_lineup_slots:undefined},{outlook_recommendation:undefined}));
+  assert.match(host.visibleText,/Some lineup slots had a starter whose score is not recorded yet/,'incomplete estimate without a count');
+
+  /* League-level free-agent line: only when a count is above zero, pluralised, absent on older runs. */
+  const faLine=/open lineup slots? (use|uses|has|have) /;
+  await load(withResult({fa_filled_slots:12,zero_filled_slots:1},{outlook_recommendation:undefined}));
+  assert.equal(count(host,'12 open lineup slots use the best available free agent; 1 has none and counts as 0.'),1,'both clauses');
+  await load(withResult({fa_filled_slots:1,zero_filled_slots:0},{outlook_recommendation:undefined}));
+  assert.equal(count(host,'1 open lineup slot uses the best available free agent.'),1,'fill clause only, singular');
+  await load(withResult({fa_filled_slots:0,zero_filled_slots:3},{outlook_recommendation:undefined}));
+  assert.equal(count(host,'3 open lineup slots have no free agent available and count as 0.'),1,'zero clause only, plural');
+  await load(withResult({zero_filled_slots:1},{outlook_recommendation:undefined}));
+  assert.equal(count(host,'1 open lineup slot has no free agent available and counts as 0.'),1,'zero clause only, singular');
+  await load(withResult({fa_filled_slots:0,zero_filled_slots:0},{outlook_recommendation:undefined}));
+  assert.doesNotMatch(host.allText,faLine,'both counts zero: no line');
+  await load(withResult({},{outlook_recommendation:undefined}));
+  assert.doesNotMatch(host.allText,faLine,'older saved run without the keys: no line');
 
   /* Every request this section made was a read of the saved run. */
   assert.ok(calls.length>8);

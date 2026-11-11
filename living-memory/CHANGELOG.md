@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-11 — Forecast model v6: empty slots take the best free agent (D-234)
+
+- An open starting slot in an unplayed week now takes the best projected free agent for that slot, or 0 if none is projected. A forecast is incomplete only when a played starter has no recorded score, so one unprojected player no longer withholds a league's outlook suggestion.
+- The model version is v6: every forecast re-runs once after deploy, and saved v5 results read as an older model until then.
+- The result says which slots were filled from free agents and which scored 0.
+
 ## 2026-11-11 — Roster setup: one page of tier placement replaces the per-position rank step (D-233)
 
 - **App (flag `trades.roster_tier_rank`, on):** Step 2 of roster setup shows every rostered QB/RB/WR/TE under the eight pick-value tiers. Tap players, then a tier. A chip shows its market tier when that differs. Picks stay on Move / Keep only. Needs a TestFlight build; older builds keep the per-position step.

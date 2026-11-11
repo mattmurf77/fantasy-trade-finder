@@ -456,7 +456,7 @@ Three rules travel with the map and are part of the invariant:
 
 ## Playoff chance → suggested outlook (flag `league.projection_outlook`, D-230)
 
-A separate encoding from the two sections above. It reads the saved weekly projection (`league_projections`, model v5), not the three-band `outlook.odds` simulator, and it can suggest all four outlooks.
+A separate encoding from the two sections above. It reads the saved weekly projection (`league_projections`, model v6 since 2026-11-11: an open starting slot takes the best projected free agent or 0, so only a played starter with no recorded score makes a forecast incomplete), not the three-band `outlook.odds` simulator, and it can suggest all four outlooks.
 
 | Playoff chance (unrounded) | `recommended_outlook` |
 |---|---|
