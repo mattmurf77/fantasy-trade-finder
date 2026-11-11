@@ -163,6 +163,11 @@ export interface FitBlockTeam {
   tag?: { code: string; source: 'declared' | 'roster'; text: string };
   lead: { code: string; text: string };
   ranks: { pos: FitRankPos; before: number; after: number }[];
+  /** The before/after table (2026-11-11): every position the rank facts
+   *  cover, held (before === after) and moved, QB/RB/WR/TE order. Absent or
+   *  empty from an older server or with no rank facts: the card then renders
+   *  `lead` + `ranks` as before. */
+  positions?: { pos: FitRankPos; before: number; after: number }[];
 }
 export interface FitBlock {
   v: 'fit-2';

@@ -703,6 +703,19 @@ def _fit_rank_rows(context: FitLeagueContext, other_id, give: list, receive: lis
     return rows
 
 
+def _fit_positions(row: Optional[dict]) -> list:
+    """The app's before/after table for one team: every position the rank
+    facts cover (`held` with before == after, plus `moves`), in QB, RB, WR, TE
+    order. A rank move under the noise bar is in neither list, so not here
+    either. Empty when no rank can be stated (`row` is None)."""
+    if not row:
+        return []
+    items = ([{"pos": h["pos"], "before": h["rank"], "after": h["rank"]} for h in row["held"]]
+             + [{"pos": m["pos"], "before": m["before"], "after": m["after"]}
+                for m in row["moves"]])
+    return sorted(items, key=lambda p: _FIT_DEPTH_POSITIONS.index(p["pos"]))
+
+
 def fit_block(proof: dict, card, players: dict, context) -> Optional[dict]:
     """The version-3 fit block for one bilateral card, or None (today's card:
     the caller adds nothing).
@@ -765,7 +778,8 @@ def fit_block(proof: dict, card, players: dict, context) -> Optional[dict]:
             moves = row["moves"] if row else []
             entry = {"side": side, "lead": {"code": code,
                                             "text": FIT_TEMPLATES[code].format(**values)},
-                     "ranks": moves}
+                     "ranks": moves,
+                     "positions": _fit_positions(row)}
             if tag:
                 entry["tag"] = tag
             shown = shown or bool(moves)
