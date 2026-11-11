@@ -4,6 +4,16 @@
 - **Sabotages, red then restored (7, Opus subagent):** held-plus-moves only; held omitted; untouched positions listed; reversed order; `shown` driven by `positions`; `ranks` taking the `positions` list; the lead counting noise-level changes as moves.
 - Operator decision ("Yes. We should just show it"). Server-only. FTF_SKIP_SIM_GATE=1 on push (D-056).
 
+## 2026-11-11 — Forecast model v6: free-agent fill (D-234), branch `feat/projection-fa-fill`
+
+- **`-k league_projection`: 566 passed** (main session re-run; 553 before). Full suite by the subagent: **14,506 passed, 42 skipped, 0 failed** (940 s).
+- **New tests (13):** an empty RB slot takes the best projected free-agent RB and the suggestion is available; none projected scores 0 and stays complete; a free agent never displaces a starter; two open slots take the best assignment of two different free agents; no rostered, taxi or reserve player of any team is offered (feed and capture layers); bye and not-pregame free agents are out; Max PF fills the same way; a played starter with no score is not filled and stays incomplete; IDP free agent first, then the replacement mean, then 0; ties break by player id; a saved v5 result is old-model and made due once. Eight existing tests whose cases are now filled were renamed to say what is true; no unrelated assertion changed.
+- **Sabotages (19, Opus subagent):** 17 red then restored. Two stayed green and are explained: locks ignored only at the fill (re-applied by `idp_bye_fill`; red when ignored at both points) and the tie post-pass removed (the optimizer's own id order already gives it; reversing it is red).
+- **Dry run against Sleeper's live feeds (local, nothing written):** all six real forecasts complete on v6. In the IDP league, 12 slots are filled from free agents and 1 scores 0 over the remaining weeks; the other two leagues need none.
+- **Capture time, synthetic 12-team league:** +0.6 s with full rosters, +1.2 s with 672 forced fills.
+- **Not verified:** anything on a device (D-056); the client wording (below) until its checks run.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-11 — Fit block before/after rank table, branch `feat/fit-block-rank-table`
 
 - **`test_fit_block_v3.py`: 73 pass.** `positions` is held ranks plus moves in QB/RB/WR/TE order; a noise-level move is in neither list nor `positions`; `v`, `lead`, `ranks` and `tag` are byte-identical to before for pinned cases; a team with no rank rows has `[]`. Fit, narrative, deck-digest, fast-deck and revised-offer subset: **512 passed** (main session). Full suite by the subagent: 14,481 passed, 42 skipped.

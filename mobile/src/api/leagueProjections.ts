@@ -1,9 +1,12 @@
 import { api } from './client';
 
+export interface ProjectionFreeAgentFill {slot_index: number; slot: string; player_id: string; name: string; points: string; estimate_status: string}
 export interface ProjectionWeek {
   week: number; opponent_roster_id: number; win_probability: number; loss_probability: number;
   maxpf_floor?: { input_mean: number; simulated_pre_floor_mean: number | null; simulated_mean: number; mean_uplift: number; frequency: number; policy?: string; target_mean?: number; latent_maxpf_mean?: number | null; simulated_mean_standard_error?: number; rounding_mean_error_bound?: number; configured_latent_maxpf_variance?: number; analytic_realized_variance?: number | null; configured_residual_correlation?: number; simulated_correlation?: number | null };
-  projection_coverage?: {estimated: boolean; unpriced_players: {player_id: string; name?: string; reason: string}[]; partial_players: {player_id: string; name?: string; missing_keys: string[]; missing_negative_keys: string[]}[]; priced_actual_pool: number; priced_maxpf_pool: number; complete?: boolean; missing_actual_slots?: string[]; idp_replacement_unavailable: boolean; completed_actual_players?: number; locked_starter_count?: number; missing_locked_actuals?: {slot_index: number; player_id: string; name?: string; reason: string}[]};
+  projection_coverage?: {estimated: boolean; unpriced_players: {player_id: string; name?: string; reason: string}[]; partial_players: {player_id: string; name?: string; missing_keys: string[]; missing_negative_keys: string[]}[]; priced_actual_pool: number; priced_maxpf_pool: number; complete?: boolean; missing_actual_slots?: string[]; idp_replacement_unavailable: boolean;
+    /** Model v6: open slots filled by the best projected free agent, and open slots with none (scored 0). */
+    free_agent_fills?: ProjectionFreeAgentFill[]; maxpf_free_agent_fills?: ProjectionFreeAgentFill[]; zero_filled_slots?: string[]; maxpf_zero_filled_slots?: string[]; completed_actual_players?: number; locked_starter_count?: number; missing_locked_actuals?: {slot_index: number; player_id: string; name?: string; reason: string}[]};
   actual_score_observed?: boolean; actual_observation_basis?: string | null; maxpf_score_observed?: boolean;
   observed_mean_conditioning?: {unconditioned_maxpf_mean: number; known_maxpf_floor: number | null; target_adjustment: number};
   modeled_actual_projection?: string; modeled_maxpf_projection?: string;
@@ -23,7 +26,7 @@ export interface ProjectionTeam {
 export interface ProjectionResult {
   league_name: string; completed_weeks: number; playoff_spots: number; playoff_byes: number; scoring: Record<string, number>;
   model_version: string; captured_at: string; verified_at: string; source: string; iterations: number;
-  coverage?: {estimated?: boolean; unpriced_player_weeks?: number; partial_player_weeks?: number; estimate_status?: 'complete' | 'incomplete'; incomplete_team_weeks?: number; missing_lineup_slots?: number; weekly_feed_states?: Record<string, string>};
+  coverage?: {estimated?: boolean; unpriced_player_weeks?: number; partial_player_weeks?: number; estimate_status?: 'complete' | 'incomplete'; incomplete_team_weeks?: number; missing_lineup_slots?: number; fa_filled_slots?: number; zero_filled_slots?: number; maxpf_fa_filled_slots?: number; maxpf_zero_filled_slots?: number; weekly_feed_states?: Record<string, string>};
   viewer_roster_id?: number | null; score_sd?: number;
   provisional: boolean; config: Record<string, string | number>; warnings: string[]; teams: ProjectionTeam[];
 }

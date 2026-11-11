@@ -6,6 +6,7 @@ import {ink, chalk, ice, space, radii} from '../theme/chalkline';
 import {useSession} from '../state/useSession';
 import {useFlag} from '../state/useFeatureFlags';
 import {getLeagueProjectionBatch, type ProjectionResult, type ProjectionTeam, type ProjectionWeek} from '../api/leagueProjections';
+import {freeAgentFillSentence, incompleteSentence, lineupRowText} from '../utils/projectionCoverage';
 
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 const number = (n: number | null) => n == null ? 'Unavailable' : n.toFixed(1);
@@ -53,6 +54,7 @@ export default function LeagueProjectionSection() {
   const lastSaved = !!result && (query.isError || state !== 'current' || data?.model_current === false);
   const incomplete = result?.coverage?.estimate_status === 'incomplete';
   const missingSlots = result?.coverage?.missing_lineup_slots;
+  const freeAgentLine = freeAgentFillSentence(result?.coverage);
   return <View style={styles.section} testID="league-projections.section">
     <Text variant="heading">Projected standings</Text>
     {status ? <Text variant="bodySm">{status}</Text> : null}
@@ -60,7 +62,8 @@ export default function LeagueProjectionSection() {
       <Text variant="bodySm">{[lastSaved ? `Last saved: ${date(result.captured_at)}` : 'Weekly estimate',
         incomplete ? 'Incomplete' : null,
         result.coverage?.estimated ? 'Partial Sleeper data' : null, result.provisional ? 'Provisional' : null].filter(Boolean).join(' · ')}</Text>
-      {incomplete ? <Text variant="bodySm" style={styles.text} testID="league-projections.incomplete">{`${missingSlots === 1 ? '1 lineup slot' : `${missingSlots ?? 'Some'} lineup slots`} had no projection for an eligible player, so these odds are incomplete.`}</Text> : null}
+      {incomplete ? <Text variant="bodySm" style={styles.text} testID="league-projections.incomplete">{incompleteSentence(missingSlots)}</Text> : null}
+      {freeAgentLine ? <Text variant="bodySm" style={styles.text} testID="league-projections.free-agents">{freeAgentLine}</Text> : null}
       <ProjectionTables key={`${userId}:${leagueId}:${data.run.run_id}`} result={result} />
     </> : !query.isLoading ? <>
       <Text variant="bodySm">Current standings are still available.</Text>
@@ -162,11 +165,11 @@ function WeekDetail({week: w, opponent}: {week: ProjectionWeek; opponent: string
       {advanced && w.maxpf_floor?.policy && <Text variant="bodySm" style={styles.text}>Latent mean {w.maxpf_floor.latent_maxpf_mean == null ? "not used for a zero target gap" : number(w.maxpf_floor.latent_maxpf_mean)}. Configured latent variance {number(w.maxpf_floor.configured_latent_maxpf_variance ?? null)}; realized model variance {number(w.maxpf_floor.analytic_realized_variance ?? null)}. Latent residual correlation {number(w.maxpf_floor.configured_residual_correlation ?? null)}; sampled total correlation {number(w.maxpf_floor.simulated_correlation ?? null)}. Simulation mean standard error {w.maxpf_floor.simulated_mean_standard_error?.toPrecision(3)}. Rounding mean bound ±{w.maxpf_floor.rounding_mean_error_bound} points. Floor adjustment relative to latent draws {number(w.maxpf_floor.mean_uplift)}; floor activation {pct(w.maxpf_floor.frequency)}.</Text>}
       {w.observed_mean_conditioning?.known_maxpf_floor != null && <Text variant="bodySm" style={styles.text}>An already completed eligible lineup establishes at least {number(w.observed_mean_conditioning.known_maxpf_floor)} Max PF. {w.maxpf_score_observed ? 'Max PF is fully observed for this roster.' : `The target adjustment from that known result is ${number(w.observed_mean_conditioning.target_adjustment)} points.`}</Text>}
       {w.projection_coverage?.estimated && <Text variant="bodySm" style={styles.text}>Available projections: {w.projection_coverage.priced_actual_pool} players for the actual lineup, {w.projection_coverage.priced_maxpf_pool} for Max PF. The lineup uses available contributions; unknown players and rules are not confirmed zeros.</Text>}
-      {w.projection_coverage?.complete === false && (w.projection_coverage.missing_actual_slots?.length ?? 0) > 0 && <Text variant="bodySm" style={styles.text}>No projection for an eligible player at: {w.projection_coverage.missing_actual_slots!.join(', ')}.</Text>}
+      {w.projection_coverage?.complete === false && (w.projection_coverage.missing_actual_slots?.length ?? 0) > 0 && <Text variant="bodySm" style={styles.text}>Score not recorded yet at: {w.projection_coverage.missing_actual_slots!.join(', ')}.</Text>}
       {w.projection_coverage?.unpriced_players.map(p => <Text key={`unpriced-${p.player_id}`} variant="bodySm" style={styles.text}>{p.name || p.player_id}: no usable estimate ({p.reason.replace(/_/g, ' ')}).</Text>)}
       {w.projection_coverage?.partial_players.map(p => <Text key={`partial-${p.player_id}`} variant="bodySm" style={styles.text}>{p.name || p.player_id}: partial contributions; missing {p.missing_keys.map(k => k.replace(/_/g, ' ')).join(', ')}.</Text>)}
       {w.projection_coverage?.idp_replacement_unavailable && <Text variant="bodySm" style={styles.text}>No hypothetical IDP bye replacement was added because its historical scoring average is unavailable.</Text>}
-      {w.actual.lineup.map((r, i) => <Text key={i} variant="bodySm" style={styles.text}>{r.slot}: {r.player ? `${r.player.hypothetical ? 'Hypothetical bye replacement' : r.player.name || r.player.player_id} · ${r.player.points}` : r.unpriced_locked_player ? `Locked starter ${r.unpriced_locked_player.name || r.unpriced_locked_player.player_id}: actual score unavailable` : 'Empty slot'}</Text>)}
+      {w.actual.lineup.map((r, i) => <Text key={i} variant="bodySm" style={styles.text}>{lineupRowText(r, i, w.projection_coverage?.free_agent_fills)}</Text>)}
       <Text variant="bodySm" style={styles.text}>Available lineup contributions {w.actual.points}; Max PF eligible contributions {w.maxpf.points}.{w.actual_score_observed ? ` Recorded team total ${w.modeled_actual_projection} supplies the actual score; individual missing scores remain unavailable.` : ''}</Text>
       {w.exclusions.map(p => <Text key={p.player_id} variant="bodySm" style={styles.text}>{p.player_id}: {p.reason.replace(/_/g, ' ')}</Text>)}
   </View>;

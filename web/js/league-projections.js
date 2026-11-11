@@ -12,6 +12,15 @@
   const date = iso => new Date(iso).toLocaleDateString(undefined,{month:'short',day:'numeric'});
   const disclosure = label => {const d=el('details');d.append(el('summary',label));return d;};
   const button = (label,action) => {const b=el('button',label);b.type='button';b.onclick=action;return b;};
+  /* Model v6 coverage copy; mobile/src/utils/projectionCoverage.ts carries the same sentences. */
+  const incompleteSentence = n => `${n===1?'1 lineup slot':`${n ?? 'Some'} lineup slots`} had a starter whose score is not recorded yet, so these odds are incomplete.`;
+  const freeAgentFillSentence = c => {
+    const filled=c?.fa_filled_slots ?? 0, zero=c?.zero_filled_slots ?? 0;
+    if (filled>0 && zero>0) return `${filled} open lineup ${filled===1?'slot uses':'slots use'} the best available free agent; ${zero} ${zero===1?'has none and counts':'have none and count'} as 0.`;
+    if (filled>0) return `${filled} open lineup ${filled===1?'slot uses':'slots use'} the best available free agent.`;
+    if (zero>0) return `${zero} open lineup ${zero===1?'slot has':'slots have'} no free agent available and ${zero===1?'counts':'count'} as 0.`;
+    return null;
+  };
 
   function renderTeams(host, result) {
     const names = new Map(result.teams.map(t => [t.roster_id,t.name]));
@@ -84,7 +93,7 @@
       const detail = disclosure(`Week ${w.week} · ${pct(w.win_probability)} win`);
       weeks.append(detail);
       detail.append(el('p', `vs ${names.get(w.opponent_roster_id) || `Team ${w.opponent_roster_id}`}: win ${pct(w.win_probability)}, tie ${pct(w.tie_probability)}, loss ${pct(w.loss_probability)}. ${w.actual_score_observed ? `Recorded completed lineup score ${num(w.modeled_score_mean)}.` : `Projected lineup score ${num(w.modeled_score_mean)}, standard deviation ${num(w.modeled_score_sd ?? result.score_sd)}.`}`));
-      if (w.projection_coverage?.complete === false && w.projection_coverage.missing_actual_slots?.length) detail.append(el('p', `No projection for an eligible player at: ${w.projection_coverage.missing_actual_slots.join(', ')}.`));
+      if (w.projection_coverage?.complete === false && w.projection_coverage.missing_actual_slots?.length) detail.append(el('p', `Score not recorded yet at: ${w.projection_coverage.missing_actual_slots.join(', ')}.`));
       if (w.maxpf_floor) {
         const m = w.maxpf_floor;
         detail.append(el('p', m.policy ? `Max PF target ${num(m.target_mean)}; simulated mean ${num(m.simulated_mean)}. Simulation averages vary; predictive uncertainty is not calibrated.` : `Historical model: input Max PF ${num(m.input_mean)}; simulated mean ${num(m.simulated_mean)}.`));
@@ -103,7 +112,8 @@
         c.partial_players.forEach(p => detail.append(el('p', `${p.name || p.player_id}: partial contributions; missing ${p.missing_keys.map(k=>k.replace(/_/g,' ')).join(', ')}.`)));
         if(c.idp_replacement_unavailable) detail.append(el('p','No hypothetical IDP bye replacement was added because its historical scoring average is unavailable.'));
       }
-      w.actual.lineup.forEach(r => detail.append(el('p', `${r.slot}: ${r.player ? `${r.player.hypothetical ? 'Hypothetical bye replacement' : r.player.name || r.player.player_id} · ${r.player.points}` : r.unpriced_locked_player ? `Locked starter ${r.unpriced_locked_player.name || r.unpriced_locked_player.player_id}: actual score unavailable` : 'Empty slot'}`)));
+      const freeAgentSlots = new Set((w.projection_coverage?.free_agent_fills || []).map(f => f.slot_index));
+      w.actual.lineup.forEach((r,i) => detail.append(el('p', `${r.slot}: ${r.player ? `${r.player.hypothetical ? 'Hypothetical bye replacement' : r.player.name || r.player.player_id}${freeAgentSlots.has(i) ? ' (free agent)' : ''} · ${r.player.points}` : r.unpriced_locked_player ? `Locked starter ${r.unpriced_locked_player.name || r.unpriced_locked_player.player_id}: actual score unavailable` : 'Empty slot'}`)));
       detail.append(el('p', `Exclusions: ${w.exclusions.map(p => `${p.player_id} (${p.reason})`).join(', ') || 'None'}.`));
     });
   }
@@ -156,7 +166,9 @@
       const incomplete = result.coverage?.estimate_status === 'incomplete';
       host.append(el('p',[data.state==='current' && data.model_current!==false?'Weekly estimate':`Last saved: ${date(result.captured_at)}`,
         result.coverage?.estimated?'Partial Sleeper data':null,result.provisional?'Provisional':null,incomplete?'Incomplete':null].filter(Boolean).join(' · ')));
-      if (incomplete) { const n=result.coverage.missing_lineup_slots; host.append(el('p',`${n} lineup ${n===1?'slot':'slots'} had no projection for an eligible player, so these odds are incomplete.`)); }
+      if (incomplete) host.append(el('p',incompleteSentence(result.coverage.missing_lineup_slots)));
+      const freeAgentLine = freeAgentFillSentence(result.coverage);
+      if (freeAgentLine) host.append(el('p',freeAgentLine));
       renderOutlook(host,data);
       renderTeams(host,result);
     } catch (_) {

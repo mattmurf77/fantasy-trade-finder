@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-11 — Forecast model v6: empty slots take the best free agent (D-234)
+
+- An open starting slot in an unplayed week now takes the best projected free agent for that slot, or 0 if none is projected. A forecast is incomplete only when a played starter has no recorded score, so one unprojected player no longer withholds a league's outlook suggestion.
+- The model version is v6: every forecast re-runs once after deploy, and saved v5 results read as an older model until then.
+- The result says which slots were filled from free agents and which scored 0.
+
 ## 2026-11-11 — Trade card: league ranks as a before/after table
 
 - The fit block's rank facts are now a table, one row per position involved (position, rank before, rank after), under one Before / After header. The "RB stays 5th" and "Up at RB, down at WR" lines go away where the table states them; a reason line ("Win-now: adds …") stays.

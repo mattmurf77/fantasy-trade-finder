@@ -37,10 +37,10 @@ UNAVAILABLE = {
     "refresh_failed": "The latest forecast update failed. The last saved forecast is kept, but it is too old to suggest an outlook.",
     "stale": "The saved forecast is from an earlier week. An outlook suggestion returns after the next weekly update.",
     "old_model": "The saved forecast was made by an earlier version of the model. An outlook suggestion returns after the next update.",
-    "incomplete": "Some lineup slots had no projection for an eligible player, so this forecast is incomplete and no outlook is suggested.",
+    "incomplete": "A starter who has already played has no recorded score yet, so this forecast is incomplete and no outlook is suggested.",
     "team_not_found": "Your team could not be matched to the saved forecast, so no outlook is suggested.",
     "unsupported": "Playoff forecasts are not available for this league, so no outlook is suggested.",
-    "missing_projections": ("The projection source had no projections for at least one team in an upcoming week, "
+    "missing_projections": ("The projection source had no projections for an upcoming week, "
                             "so no new forecast was made. Past scoring is never used in their place."),
     "read_failed": "The saved forecast could not be read just now, so no outlook is suggested.",
 }
