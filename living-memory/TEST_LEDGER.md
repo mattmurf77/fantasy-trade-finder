@@ -28,6 +28,15 @@
 - Sabotages, each red then green on revert: premium-off, premium-contender, premium-on-viewer-picks, premium-moves-utility, tiebreak-off, tiebreak-ignores-tolerance, demotion-off, no-rebuilder-exception, exception-for-contender, organic-2x2, selector-truthy, v3-wins-over-v4, no-owner-report-pop, no-request-hash-pop, no-safety-signature, calib-reorders-pair, calib-uncapped, calib-error-fails-build, calib-never-stale, calib-no-arm-pin, calib-report-drops-v4, presentment-ignores-v4. One proposed sabotage (start_session skips the exposure guard) stays green because `retire_grading_session`'s database fence also refuses exposed/answered decks; not counted.
 - Recorded production requests, 40-request sample, r2 vs r4 in one process each: inventory identical in 40/40; 560 of 1,200 first-30 cards new (median 14); asks-for-their-picks share 17.7% → 9.3%. Per-rule ablation and caveats in [scope §8](../docs/plans/offer-learnings/scope-revision-4.md#8-report-on-recorded-production-requests). No simulator/Maestro; no production action.
 
+## 2026-11-10 — Pass-reason cadence (offer-learnings WS3, flag `trade.pass_reason_cadence`, dark)
+
+- Branch `feat/pass-reason-cadence` off 6017d64b; not merged. [Scope](../docs/plans/offer-learnings/scope-pass-reason-cadence.md).
+- New `backend/tests/test_pass_reason_cadence.py`: **24 passed** (flag registration and seeds, `pass_reason_cadence` payload absent when off and clamped when on, route gate on either flag, the two new codes refused while off, the six chip writes with their Elo, analytics registration). `test_decline_reasons.py` taxonomy pin widened by the two codes; with it **128 passed**.
+- New `mobile/tests/check-pass-reason-cadence.js` (`npm run test:pass-reason-cadence`): **30 passed**, executing the real cadence module plus wiring pins. `check-decline-reasons.js` track-call count pin moved 3 → 4 (the chip's layer-2 event). All **168** `mobile/tests/check-*.js` pass; `npx tsc --noEmit` clean; `testid-lint.sh` OK.
+- Sabotages, each RED then GREEN on revert: S1-payload-ignores-flag, S2-no-knob-floor, S3-gate-ignores-cadence, S4-new-codes-ungated, S5-waiting-writes-elo, M1-like-does-not-reset, M2-no-quiet-period, M3-asks-with-flag-off, M4-advance-forgets-record, M5-chip-pass-enters-undo-hold, M6-quiet-card-keeps-reasons, M7-chip-defers-advance.
+- Full backend suite (py 3.12): run 1 had 3 `test_deck_pipeline_digest` failures that did not reproduce (the test passes alone, with full collection, and in the in-order 111-file prefix); run 2 **13740 passed, 42 skipped, 0 failed**. No deck-pipeline function or constant changed (probe over `DECK_PIPELINE_FUNCTIONS`).
+- No device run. The TestFlight checklist in the scope block is the runtime evidence still owed.
+
 ## 2026-11-07 — First-page polling failure recovery
 
 ## 2026-11-10 — Outcomes of sent trades (offer-learnings WS2 Part A, branch `feat/trade-outcomes`)

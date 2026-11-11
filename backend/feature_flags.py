@@ -993,6 +993,17 @@ FLAG_KEYS: tuple[str, ...] = (
     # (pass_reason_elo_suppression), not this flag, so ranking math can be
     # reverted without taking the capture down with it.
     "feedback.decline_reasons",
+    # ── Pass-reason cadence (offer-learnings WS3, R9), default OFF ────────
+    # docs/plans/offer-learnings/scope-pass-reason-cadence.md. ON = the deck
+    # keeps the plain one-tap ✕ and asks for a reason only after
+    # `pass_reason_ask_after` consecutive passes, then stays quiet for
+    # `pass_reason_quiet_for` passes (model_config knobs, served on
+    # GET /api/feature-flags as `pass_reason_cadence`). Opens
+    # POST /api/trades/pass-reason independently of feedback.decline_reasons
+    # and admits the two cadence-only codes (other_picks_keep,
+    # other_waiting). OFF = the payload key is absent, the two codes 400,
+    # and every surface behaves byte-identically to before this flag.
+    "trade.pass_reason_cadence",
     # ── Three-model bake-off — docs/plans/three-model-bakeoff/PLAN.md ─────
     # Scope block: docs/plans/three-model-bakeoff/scope-phase3.md. ON = one
     # organic trade job fans out into THREE generations run sequentially on

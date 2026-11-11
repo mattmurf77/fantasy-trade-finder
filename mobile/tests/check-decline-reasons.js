@@ -193,10 +193,14 @@ const trackCalls = findAll(
     n.expression.getText() === 'track' &&
     /trade_pass_layer[12]/.test(n.arguments[0]?.getText() ?? ''),
 );
+// Four since offer-learnings WS3: a cadence chip (flag
+// `trade.pass_reason_cadence`) is a layer-1 AND layer-2 answer in one tap, so
+// handleReasonLayer1 also fires trade_pass_layer2 when it carries a detail —
+// otherwise every chip answer would read as "layer 1 without layer 2".
 assert(
-  trackCalls.length === 3,
-  'TradesScreen: exactly three decline-reason track() calls',
-  `SPEC §6 — one layer-1 emitter, two layer-2 emitters; found ${trackCalls.length}`,
+  trackCalls.length === 4,
+  'TradesScreen: exactly four decline-reason track() calls',
+  `SPEC §6 + WS3 — one layer-1 emitter, three layer-2 emitters (the third is the cadence chip's); found ${trackCalls.length}`,
 );
 for (const call of trackCalls) {
   const props = call.arguments[1]?.getText() ?? '';

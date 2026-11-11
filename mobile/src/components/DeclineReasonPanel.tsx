@@ -115,8 +115,10 @@ const NOTCH_SIZE = 10;
 const REVEAL_GAP = 12;
 
 export interface DeclineReasonPanelProps {
-  /** Layer-1 tile tap — commits the pass disposition AND the reason. */
-  onLayer1: (reason: Layer1Code, switchedFrom: Layer1Code | 'none') => void;
+  /** Layer-1 tile tap — commits the pass disposition AND the reason. The
+   *  panel never passes `detail`; a cadence chip (flag
+   *  `trade.pass_reason_cadence`) does, making the tap the whole answer. */
+  onLayer1: (reason: Layer1Code, switchedFrom: Layer1Code | 'none', detail?: Layer2Code) => void;
   /** Fixed layer-2 option — commits the detail and advances the deck. */
   onLayer2Select: (reason: Layer1Code, detail: Layer2Code) => void;
   /** "Other" tapped — banks the code BEFORE the text box opens. No advance. */

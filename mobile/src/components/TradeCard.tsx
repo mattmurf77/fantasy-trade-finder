@@ -21,6 +21,8 @@ import SendInSleeperButton from './SendInSleeperButton';
 import DeclineReasonPanel, {
   type DeclineReasonPanelProps,
 } from './DeclineReasonPanel';
+import PassReasonChips from './PassReasonChips';
+import type { PassReasonCadenceCard } from '../utils/passReasonCadence';
 import { LockGlyph } from './PlayerContextMenu';
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { useFlag } from '../state/useFeatureFlags';
@@ -57,6 +59,10 @@ export interface DispositionReasons extends DeclineReasonPanelProps {
    *  when a layer-1 tile had already committed the pass — the host must then
    *  commit the deferred deck advance, or the card is stranded (review #1). */
   onOverlayDismissed?: (banked: boolean) => void;
+  /** Flag `trade.pass_reason_cadence` (WS3). The host strips a 'quiet' card's
+   *  reasons entirely, so present here means the cadence is asking: the
+   *  one-tap PassReasonChips row replaces the ✕ and the tile panel. */
+  cadence?: PassReasonCadenceCard;
 }
 
 interface Props {
@@ -884,7 +890,17 @@ function TradeCardComp({
               )}
             </Pressable>
           </View>
-          {disposition.reasons && !reasonsAsOverlay ? (
+          {disposition.reasons?.cadence ? (
+            <PassReasonChips
+              onChip={(r, d) => disposition.reasons!.onLayer1(r, 'none', d)}
+              onSkip={() => {
+                disposition.reasons!.cadence!.onDismissed(data.trade_id);
+                disposition.onPass();
+              }}
+              onShown={() => disposition.reasons!.cadence!.onShown(data.trade_id)}
+              disabled={disposition.disabled}
+            />
+          ) : disposition.reasons && !reasonsAsOverlay ? (
             <DeclineReasonPanel {...disposition.reasons} />
           ) : null}
           {disposition.reasons && reasonsAsOverlay ? (

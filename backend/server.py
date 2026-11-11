@@ -108,7 +108,7 @@ from .database import (
     upsert_trade_pass_reason, claim_trade_pass_elo,
     ensure_reasoned_trade_pass, mark_reasoned_trade_pass_elo,
     PASS_REASON_LAYER1, PASS_REASON_LAYER2, PASS_REASON_PARENT,
-    PASS_REASON_TEXT_MAX,
+    PASS_REASON_TEXT_MAX, PASS_REASON_CADENCE_ONLY,
     # suggestion.telemetry — candidate-set persistence + ratio dashboard
     # (matcher logic lives in suggestion_telemetry.py)
     save_deck_candidate_set, suggestion_ratio_by_league, suggestion_link_day_span,
@@ -23537,7 +23537,48 @@ def _decline_reasons_enabled() -> bool:
     is the whole rollback lever, and flipping it is a config edit, not a
     deploy (`POST /api/feature-flags/reload`).
     """
-    return getattr(FLAGS, "feedback_decline_reasons", False)
+    return (getattr(FLAGS, "feedback_decline_reasons", False)
+            or _pass_reason_cadence_enabled())
+
+
+def _pass_reason_cadence_enabled() -> bool:
+    """`trade.pass_reason_cadence` (offer-learnings WS3). ON opens this route
+    on its own (the deck asks once every few passes instead of on every pass)
+    and admits the cadence-only codes. OFF leaves `_decline_reasons_enabled`
+    exactly `feedback.decline_reasons`, so the route is unchanged."""
+    return getattr(FLAGS, "trade_pass_reason_cadence", False)
+
+
+def _cadence_int(cfg: dict, key: str, default: int, floor: int) -> int:
+    """A cadence knob as an int >= floor; a missing, non-integral, NaN or
+    out-of-range value serves `default` (a bad row can never make the prompt
+    fire on every card by accident unless someone sets 1 on purpose)."""
+    try:
+        raw = float(cfg.get(key, default))
+    except Exception:
+        return default
+    if not math.isfinite(raw) or raw != int(raw) or raw < floor:
+        return default
+    return int(raw)
+
+
+def _pass_reason_cadence_fields() -> dict:
+    """The additive `pass_reason_cadence` key on GET /api/feature-flags.
+
+    Flag OFF ⇒ `{}`: the key is absent and the payload is byte-identical to
+    before the flag existed. ON ⇒ `{ask_after: N, quiet_for: M}` from the
+    `pass_reason_ask_after` / `pass_reason_quiet_for` knobs (3 / 5), read per
+    request so `scripts/set_knob.py` lands on the next app foreground."""
+    if not _pass_reason_cadence_enabled():
+        return {}
+    try:
+        cfg = get_config()
+    except Exception:
+        cfg = {}
+    return {"pass_reason_cadence": {
+        "ask_after": _cadence_int(cfg, "pass_reason_ask_after", 3, 1),
+        "quiet_for": _cadence_int(cfg, "pass_reason_quiet_for", 5, 0),
+    }}
 
 
 def _pass_reason_writes_elo(code) -> bool:
@@ -23724,6 +23765,10 @@ def trade_pass_reason():
         return jsonify({"error": "invalid_reason", "field": "reason"}), 400
     if detail is not None:
         if detail not in PASS_REASON_PARENT:
+            return jsonify({"error": "invalid_detail", "field": "detail"}), 400
+        if detail in PASS_REASON_CADENCE_ONLY and not _pass_reason_cadence_enabled():
+            # Cadence-chip codes exist only behind their flag: flag off, the
+            # route accepts exactly the codes it always did.
             return jsonify({"error": "invalid_detail", "field": "detail"}), 400
         if reason is not None and PASS_REASON_PARENT[detail] != reason:
             # e.g. reason='fit' with detail='value_giving' — one of the two
@@ -35227,6 +35272,7 @@ def feature_flags_route():
         "experiments": experiments,
         "configs":     configs,
         **_update_gate_fields(),
+        **_pass_reason_cadence_fields(),
     })
 
 
