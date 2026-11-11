@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-NEXT — The next move is one evaluator-proven revision, a pure function behind `trade.next_move`, with no route yet
+
+**Date:** 2026-11-10 · **Who:** WS5 builder, under the operator's R2 ruling ("Mock it up, build it, control it via its own dedicated capability flag").
+**Context:** The offer history shows deals are negotiated (first offers accepted 8%, three-offer threads 39%; counters move about 20 points of the trade's value), and the operator fears a next move invites haggling. The plan asked for one bounded revision proven by the same evaluator as any card.
+**Decision:** `backend/trade_next_move.propose_revision(offer, context)` returns at most one revision. It keeps the focal asset on each side (highest consensus value), makes one change (add one non-untouchable asset from the viewer's roster, or remove one non-focal asked-for asset), and requires eligibility under `bakeoff_runner.owner_evaluator(config)` with organic gates, so selection pins in the context do not carry over. The other manager's net market gain must be 10–20% of the original's larger side, all at that evaluator's package pricing. The original is priced with dispositions ignored, because a sent offer is normally a liked card; revisions keep the dispositions. The smallest qualifying step wins, then a removal, then asset id. It is a leaf with no route and no deck wiring, and with the flag off it returns `None` before any work. The bounds are module constants, not `model_config` knobs, until there is a caller.
+**Consequences:**
+- No payload changes and `test_deck_pipeline_digest` is untouched. A structural test fails if any production module imports the generator, so wiring it is a deliberate act.
+- On synthetic leagues (real player values), about one sent offer in five gets a revision under the live engine revision (bilateral 2), mostly by removing an asked-for piece. Organic shape rules forbid adding a fourth asset to a 2-for-1.
+- At the engine's package pricing a small filler is worth little, so a qualifying step is a real asset or a removed ask, not a throw-in.
+- The app UI, the trigger (decline vs 48 h silence, which needs WS2's outcome tracking) and the treatment are the operator's call from `mockups/next-move/`.
+
 ## D-211 — Docs-only pushes skip Render through a build filter, not a `[skip render]` marker
 
 **Date:** 2026-11-10 · **Who:** operator (asked to replace the marker with a build filter).

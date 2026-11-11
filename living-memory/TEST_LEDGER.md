@@ -1,3 +1,12 @@
+## 2026-11-10 — The next move (WS5, `trade.next_move`, branch `feat/next-move`)
+
+- New `backend/tests/test_trade_next_move.py`: **16 tests** (the core contract parametrized over owner-v1 and bilateral revisions 1, 2 and 3): valid under the evaluator in force and bound to its proof, one change, core kept, step inside 10–20%, smallest step chosen, none when every valid change is out of band or the offer can't be priced, never the focal asset, never a change that fails the viewer's own checks, never an untouchable, the sent offer priced despite its disposition while revisions honour theirs, a selection in the context doesn't carry over, inputs not mutated, flag off does no work, flag registered dark in all four files, no production module imports the generator.
+- Each sabotage was proven red, then green on revert (all 15): `flag-ignored`, `band-dropped`, `eligibility-ignored`, `fixed-v1-evaluator`, `largest-step-wins`, `focal-removable`, `focal-by-lowest-value`, `untouchables-allowed`, `baseline-honours-dispositions`, `revisions-ignore-dispositions`, `selection-carried-over`, `step-measured-on-viewer-side`, `mutates-context`, `server-imports-generator`, `flag-shipped-on`.
+- Flag mirror, digest and release tests (`-k "flag or mirror or digest or release"`): 678 passed.
+- Measurement (`docs/plans/offer-learnings/measure_next_move.py`, eight synthetic 12-team leagues from the 340-player fixture, first ten deck cards each as sent offers): revision found for 50/80 (owner-v1), 5/80 (bilateral 1), 17/80 (bilateral 2, live), 13/80 (bilateral 3). Median step 11.7–12.4%; 7–30 ms per offer.
+- Mockup `mockups/next-move/index.html`: HTML parsed balanced; both embedded captures exist on disk and are in `screens/manifest.json`; no external references; only design-system hexes; radii ≤ 8px; no gradient, blur or shadow. The browser pane rendered it as a `data:` snapshot, so the two captures could not be shown loading there.
+- Full backend suite (Python 3.12, branch base 6017d64): **13732 passed, 42 skipped, 0 failed** in 17m51s. `test_deck_pipeline_digest` green (no deck pipeline change).
+
 ## 2026-11-07 — First-page polling failure recovery
 
 - Seven-line screen correction: at the existing final paged status failure, an empty deck leaves its running spinner and shows the existing explicit failure/retry. Held cards, job authority, backend work, exact repeat request and network budgets remain unchanged.

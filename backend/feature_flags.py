@@ -1230,6 +1230,10 @@ FLAG_KEYS: tuple[str, ...] = (
     "grading.blind",
     "grading.outlook_round",
     "grading.outlook_prepare",
+    # docs/plans/offer-learnings/scope-next-move.md (WS5, R2) — at most one
+    # pre-built revision of a sent offer (backend/trade_next_move.py). Ships
+    # false; no caller yet. OFF => propose_revision returns None, no work.
+    "trade.next_move",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

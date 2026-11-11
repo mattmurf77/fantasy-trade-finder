@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The next move — three treatments (WS5 / R2)</title>
+<style>
+  :root {
+    --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+    --line:#262C35; --line-strong:#59647A;
+    --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --ice-on:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#f97316; --rb:#22c55e; --wr:#3b82f6; --te:#a855f7;
+    --display:'Barlow Condensed','Avenir Next Condensed','Arial Narrow',sans-serif;
+    --body:'Archivo','Avenir Next','Helvetica Neue',Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,Consolas,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { background:var(--ink0); color:var(--chalk); font-family:var(--body); font-size:15px; line-height:1.55; margin:0; }
+  a { color:var(--ice); text-decoration:none; }
+  code { font-family:var(--mono); font-size:.9em; background:var(--ink2); border-radius:2px; padding:1px 5px; }
+
+  .topbar { position:sticky; top:0; z-index:10; display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; padding:12px 24px; background:var(--ink0); border-bottom:1px solid var(--line); }
+  .topbar h1 { font-family:var(--display); text-transform:uppercase; letter-spacing:.04em; font-size:22px; margin:0; flex:1 1 auto; white-space:nowrap; }
+  .tick { font-weight:600; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+  .tick::before { content:""; display:inline-block; width:8px; height:2px; background:var(--ice); margin-right:6px; vertical-align:middle; }
+  .btn { font-family:var(--body); font-weight:600; font-size:13px; background:var(--ice); color:var(--ice-on); border:0; border-radius:4px; padding:8px 14px; cursor:pointer; }
+  .btn.ghost { background:transparent; color:var(--dim); border:1px solid var(--line-strong); }
+  .btn:focus-visible, textarea:focus-visible { outline:2px solid var(--ice); outline-offset:2px; }
+
+  main { max-width:1180px; margin:0 auto; padding:24px; }
+  .lede { max-width:74ch; color:var(--dim); }
+  .lede strong { color:var(--chalk); }
+  section.feature { background:var(--ink1); border:1px solid var(--line); border-radius:8px; padding:22px 24px; margin:22px 0; }
+  .fhead { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:14px; }
+  .fnum { font-family:var(--mono); font-size:12px; color:var(--dim); }
+  .fhead h2 { font-family:var(--display); text-transform:uppercase; letter-spacing:.03em; font-size:24px; margin:0; }
+  .chip { font-family:var(--mono); font-size:11px; border-radius:2px; padding:2px 7px; letter-spacing:.03em; border:1px solid var(--line-strong); color:var(--dim); }
+  .chip.rec { color:var(--flare); border-color:var(--flare); }
+  ol.q li, ul.plain li { margin:6px 0; max-width:78ch; }
+  .note { max-width:78ch; }
+  .note p { margin:.5em 0; }
+  .label { font-weight:600; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+  table.mini { border-collapse:collapse; font-size:13px; margin:10px 0; }
+  table.mini th, table.mini td { border:1px solid var(--line); padding:5px 10px; text-align:left; }
+  table.mini th { font-weight:600; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); }
+  table.mini td.n { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+
+  .row { display:flex; gap:20px; overflow-x:auto; padding:8px 2px 14px; align-items:flex-start; }
+  .frame { flex:0 0 auto; width:286px; }
+  .frame .cap { font-family:var(--mono); font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; margin:0 0 8px; }
+  .frame .cap.recon { color:var(--warn); }
+  .frame img { width:286px; display:block; border:1px solid var(--line-strong); border-radius:8px; }
+  .frame .sub { font-size:12.5px; color:var(--dim); margin-top:8px; }
+
+  /* Hand-drawn phone frames (reconstructions, labelled as such) */
+  .phone { width:286px; background:var(--ink0); border:1px solid var(--line-strong); border-radius:8px; padding:14px 12px 16px; font-size:12.5px; line-height:1.45; }
+  .p-top { display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:12px; }
+  .p-top .bar { width:3px; height:26px; background:var(--ice); }
+  .p-top .lg { font-size:10px; letter-spacing:.08em; color:var(--dim); text-transform:uppercase; }
+  .p-top .nm { font-weight:600; font-size:13px; }
+  .p-h1 { font-family:var(--display); font-size:24px; text-transform:uppercase; letter-spacing:.02em; margin:0 0 6px; }
+  .tabs { display:flex; border:1px solid var(--line); border-radius:4px; margin:6px 0 10px; }
+  .tabs div { flex:1; text-align:center; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); padding:7px 0; }
+  .tabs div.on { color:var(--chalk); background:var(--ink3); border-bottom:2px solid var(--ice); }
+  .status { display:flex; justify-content:space-between; color:var(--dim); font-size:12px; margin:4px 2px 6px; }
+  .card { background:var(--ink1); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .card + .card { margin-top:10px; }
+  .k { font-size:10.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+  .who { font-size:16px; font-weight:600; margin:2px 0 8px; }
+  .cols { display:grid; grid-template-columns:1fr 1px 1fr; gap:8px; margin-top:8px; }
+  .cols .rule { background:var(--line); }
+  .colh { font-size:10.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); border-left:2px solid var(--ice); padding-left:6px; margin-bottom:6px; }
+  .asset { border:1px solid var(--line); border-radius:4px; padding:6px 7px 6px 9px; margin-bottom:6px; position:relative; }
+  .asset::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:4px 0 0 4px; background:var(--rail, var(--faint)); }
+  .asset .pc { display:inline-block; font-size:10px; font-weight:600; letter-spacing:.06em; border:1px solid var(--rail, var(--line-strong)); border-radius:2px; padding:0 4px; color:var(--chalk); }
+  .asset .an { font-weight:600; font-size:12.5px; margin-top:3px; }
+  .asset .am { color:var(--dim); font-size:11px; }
+  .asset.added { border-color:var(--chalk); border-style:dashed; }
+  .asset.removed { opacity:.45; text-decoration:line-through; }
+  .wr { --rail:var(--wr); } .te { --rail:var(--te); } .rb { --rail:var(--rb); } .qb { --rail:var(--qb); }
+  .pick { --rail:var(--faint); }
+  .meter { height:6px; background:var(--ink3); border-radius:2px; position:relative; margin:10px 0 4px; }
+  .meter i { position:absolute; top:-3px; width:4px; height:12px; background:var(--ice); border-radius:2px; }
+  .mrow { display:flex; justify-content:space-between; font-family:var(--mono); font-size:10.5px; color:var(--dim); }
+  .p-btn { display:block; width:100%; text-align:center; font-weight:600; font-size:13px; border-radius:4px; padding:9px 0; margin-top:10px; }
+  .p-btn.primary { background:var(--ice); color:var(--ice-on); }
+  .p-btn.secondary { border:1px solid var(--line-strong); color:var(--chalk); }
+  .p-btn.ghost { color:var(--dim); padding:4px 0; margin-top:4px; }
+  .hint { display:flex; gap:7px; align-items:flex-start; color:var(--dim); font-size:12px; margin-top:8px; }
+  .hint .sq { flex:0 0 auto; width:6px; height:6px; border:1px solid var(--dim); margin-top:6px; }
+  .delta { background:var(--ink2); border:1px solid var(--line); border-radius:4px; padding:8px 9px; margin-top:8px; }
+  .delta .num { font-family:var(--mono); font-variant-numeric:tabular-nums; color:var(--chalk); }
+  .flare { color:var(--flare); }
+  .muted { color:var(--dim); }
+  .sheet { background:var(--ink2); border:1px solid var(--line-strong); border-radius:8px 8px 0 0; padding:12px; margin-top:12px; }
+  .grab { width:36px; height:4px; border-radius:2px; background:var(--line-strong); margin:0 auto 10px; }
+  svg.i { width:14px; height:14px; stroke:currentColor; stroke-width:1.75; fill:none; stroke-linecap:square; vertical-align:-2px; }
+
+  .two { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:18px; }
+  .cost { border-left:2px solid var(--line-strong); padding-left:12px; }
+  .cmt { border-top:1px dashed var(--line); padding-top:12px; margin-top:14px; }
+  .cmt label { display:block; font-weight:600; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin-bottom:6px; }
+  .cmt textarea { width:100%; min-height:72px; background:var(--ink2); border:1px solid var(--line-strong); border-radius:4px; color:var(--chalk); font-family:var(--body); font-size:14px; padding:10px; resize:vertical; }
+  .cmt .saved { font-family:var(--mono); font-size:11px; color:var(--dim); margin-top:4px; min-height:14px; }
+  .foot { color:var(--dim); font-size:12.5px; margin:32px 0 20px; max-width:78ch; }
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>The next move — three treatments</h1>
+  <span class="tick">WS5 / R2 · 2026-11-10 · flag trade.next_move (off)</span>
+  <button class="btn ghost" id="clearBtn" type="button">Clear comments</button>
+  <button class="btn" id="exportBtn" type="button">Export comments</button>
+</div>
+
+<main>
+  <p class="lede"><strong>What this is.</strong> After a manager sends an offer, the app could hold one pre-built revision: the same core players, with the other manager's side improved by a bounded step (10–20% of the trade's market value), and proven valid by the same engine evaluator as any card. The backend for that revision is built and dark behind <code>trade.next_move</code>. Nothing in the app is built. This page asks you to pick how, or whether, it appears.</p>
+  <p class="lede"><strong>Why it was raised.</strong> In the Sleeper offer history, a first offer was accepted 8% of the time, and three-offer threads closed 39% of the time. The median counter moved the deal about 20 points of the trade's value toward the counterer, and 84% of counters reused an asset from the offer they answered. <strong>Your concern:</strong> "it has the risk to just invite haggling and ruin the value prop." Each treatment below says how it limits haggling and what that costs.</p>
+
+  <!-- ===================== Open questions + recommendation ===================== -->
+  <section class="feature" id="s0">
+    <div class="fhead"><span class="fnum">00</span><h2>Recommendation and open questions</h2><span class="chip rec">Recommend A</span></div>
+    <div class="note">
+      <p><strong>Recommendation: A, restrained.</strong> It is the only treatment that leaves the suggestion card exactly as it is today, so the first offer still reads as the app's fair answer, not an opening bid. The revision appears only after the other manager has said no or gone quiet for 48 hours, which is when the offer history says a second offer helps. There is one revision per offer and never a revision of a revision, so the app cannot become a haggling ladder. I found no reason to prefer B or C given your concern. B tells the user on the card that the offer isn't final. C asks them to plan the concession before the first offer has been seen.</p>
+      <p class="label">Open questions for you</p>
+      <ol class="q">
+        <li><strong>Which treatment, or none?</strong> A, B, C, or keep the flag off and drop it.</li>
+        <li><strong>One revision per offer, ever?</strong> I recommend yes: once a revision is sent, that offer gets no further next move.</li>
+        <li><strong>The step: 10–20% of the trade's value, at the engine's own package pricing.</strong> At that pricing a small filler is worth little, sometimes less than nothing to the receiver (roster spot), so the step is usually a real piece or a removed ask, not a throw-in. Keep the band?</li>
+        <li><strong>The trigger for A and B:</strong> "declined" needs WS2's outcome tracking (<code>trade.outcome_tracking</code>). Until that is on, only "no reply in 48 hours since the app sent it" is knowable. Ship on silence alone first, or wait for WS2?</li>
+        <li><strong>Where it lives.</strong> The app has no sent-offers list today. The nearest surface is Matches → Awaiting them, so A is drawn there. Is that right, or should it wait for the summary page in WS6's send-on-platform definition?</li>
+        <li><strong>The original offer in Sleeper.</strong> A revision is a new proposal. The original stays pending in Sleeper unless the user withdraws it there; the app cannot withdraw it today. Acceptable for a first version?</li>
+        <li><strong>How we would know it is hurting.</strong> Before turning it on, agree the measures: revisions sent per thread, acceptance of revisions against originals, and whether first offers are sent less often once revisions exist.</li>
+      </ol>
+      <p class="label">What the backend finds (synthetic leagues, real player values)</p>
+      <table class="mini">
+        <tr><th>Engine revision</th><th>Sent offers with a valid revision</th><th>Kind</th><th>Median step</th></tr>
+        <tr><td>Owner v1</td><td class="n">50 / 80 (62%)</td><td>all add one asset (decks are 1-for-1)</td><td class="n">12.2%</td></tr>
+        <tr><td>Bilateral 1</td><td class="n">5 / 80 (6%)</td><td>remove an asked-for piece</td><td class="n">12.4%</td></tr>
+        <tr><td>Bilateral 2 (live)</td><td class="n">17 / 80 (21%)</td><td>12 remove, 5 add</td><td class="n">12.2%</td></tr>
+        <tr><td>Bilateral 3</td><td class="n">13 / 80 (16%)</td><td>6 remove, 7 add</td><td class="n">11.7%</td></tr>
+      </table>
+      <p class="muted">Eight 12-team leagues built from the 340-player fixture, the first ten deck cards each treated as sent. On the live revision most offers are already 2-for-1 or 1-for-2, and adding a fourth asset is not an organic shape, so about one sent offer in five would ever show a next move. Script: <code>docs/plans/offer-learnings/measure_next_move.py</code>.</p>
+    </div>
+    <div class="cmt"><label for="c-s0">Comments — recommendation and open questions</label><textarea id="c-s0" data-k="s0" placeholder="Answer any of the seven questions by number…"></textarea><div class="saved" data-for="s0"></div></div>
+  </section>
+
+  <!-- ===================== Before ===================== -->
+  <section class="feature" id="before">
+    <div class="fhead"><span class="fnum">01</span><h2>Before — today's surfaces</h2><span class="chip">real captures, 2026-08-10 build</span></div>
+    <div class="note">
+      <p>These are real captures from <code>screens/</code>: the suggestion card (<code>trades/populated</code>) and Matches → Awaiting them (<code>matches/populated--awaiting</code>). The screen library has been frozen since 2026-08-11 (D-056). Since then <code>TradesScreen.tsx</code> has had 55 commits and <code>MatchesScreen.tsx</code> 14 (the push-arrival scroll, the invite controls), so the captures show that build, not today's app. Every proposed frame below is a hand-drawn <strong>reconstruction</strong> in Chalkline tokens, labelled as one, with the captures' players kept.</p>
+    </div>
+    <div class="row">
+      <div class="frame"><p class="cap">Capture · suggestion card</p><img src="../../screens/mobile/trades/populated.png" alt="Real capture: the trade suggestion card, Tee Higgins for Tyler Warren"><p class="sub">The card every treatment starts from.</p></div>
+      <div class="frame"><p class="cap">Capture · Matches, awaiting them</p><img src="../../screens/mobile/matches/populated--awaiting.png" alt="Real capture: Matches, Awaiting them tab, a liked trade with Send in Sleeper"><p class="sub">The nearest surface to a sent-offers list.</p></div>
+    </div>
+  </section>
+
+  <!-- ===================== A ===================== -->
+  <section class="feature" id="sA">
+    <div class="fhead"><span class="fnum">A</span><h2>Restrained — after a no or 48 hours of silence</h2><span class="chip rec">Recommended</span></div>
+    <div class="row">
+      <div class="frame"><p class="cap recon">Reconstruction · suggestion card</p>
+        <div class="phone">
+          <div class="p-top"><span class="bar"></span><div><div class="lg">League</div><div class="nm">QA Standard League</div></div></div>
+          <div class="card">
+            <div class="k">Trade with</div><div class="who">@qa_l1_member_05</div>
+            <div class="cols">
+              <div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Tee Higgins</div><div class="am">CIN · 27 yo</div></div></div>
+              <div class="rule"></div>
+              <div><div class="colh">You get</div><div class="asset te"><span class="pc">TE</span><div class="an">Tyler Warren</div><div class="am">IND · 23 yo</div></div></div>
+            </div>
+            <div class="meter"><i style="left:49%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div>
+          </div>
+          <p class="sub muted" style="margin-top:10px">No change. Nothing on the card mentions a next move.</p>
+        </div>
+      </div>
+      <div class="frame"><p class="cap recon">Reconstruction · awaiting, 48 h quiet</p>
+        <div class="phone">
+          <div class="p-h1">Matches</div>
+          <div class="tabs"><div>Mutual matches</div><div class="on">Awaiting them</div></div>
+          <div class="status"><span>No reply from @qa_l1_member_05</span><span>2d ago</span></div>
+          <div class="card">
+            <div class="cols">
+              <div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Tee Higgins</div></div><div class="asset pick added"><span class="pc">PICK</span><div class="an">2026 2nd (yours)</div><div class="am">Added</div></div></div>
+              <div class="rule"></div>
+              <div><div class="colh">You get</div><div class="asset te"><span class="pc">TE</span><div class="an">Tyler Warren</div></div></div>
+            </div>
+            <div class="delta"><div class="k">What changed</div>You add your 2026 2nd. They gain about <span class="num">12%</span> of the trade's value. Same core players.</div>
+            <span class="p-btn primary">Send a revised offer</span>
+            <span class="p-btn ghost">Not now</span>
+          </div>
+        </div>
+      </div>
+      <div class="frame"><p class="cap recon">Reconstruction · after sending</p>
+        <div class="phone">
+          <div class="p-h1">Matches</div>
+          <div class="tabs"><div>Mutual matches</div><div class="on">Awaiting them</div></div>
+          <div class="status"><span>Revised offer sent</span><span>just now</span></div>
+          <div class="card">
+            <div class="cols">
+              <div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Tee Higgins</div></div><div class="asset pick"><span class="pc">PICK</span><div class="an">2026 2nd (yours)</div></div></div>
+              <div class="rule"></div>
+              <div><div class="colh">You get</div><div class="asset te"><span class="pc">TE</span><div class="an">Tyler Warren</div></div></div>
+            </div>
+            <div class="hint"><span class="sq"></span><span>This is the one revision for this trade. Your original offer is still open in Sleeper.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="two">
+      <div class="note"><p class="label">How it limits haggling</p><p>The user never sees a concession before the other manager has answered, so the first offer stays the app's fair, complete suggestion. The revision appears only after a no or two days of silence. It is one pre-built revision with no editing and no second round, and it says exactly what changed.</p></div>
+      <div class="note cost"><p class="label">What it costs</p><p>It is slow by design: two days, or a recorded decline (which needs WS2). Few users will see it. On the live engine about one sent offer in five has a valid revision. It needs a home on the Awaiting them tab, which today only lists liked trades. And the original stays pending in Sleeper beside the revision.</p></div>
+    </div>
+    <div class="cmt"><label for="c-sA">Comments — A, restrained</label><textarea id="c-sA" data-k="sA" placeholder="Trigger, placement, copy, the one-revision limit…"></textarea><div class="saved" data-for="sA"></div></div>
+  </section>
+
+  <!-- ===================== B ===================== -->
+  <section class="feature" id="sB">
+    <div class="fhead"><span class="fnum">B</span><h2>Visible but passive — an "If they pass" line</h2></div>
+    <div class="row">
+      <div class="frame"><p class="cap recon">Reconstruction · suggestion card</p>
+        <div class="phone">
+          <div class="p-top"><span class="bar"></span><div><div class="lg">League</div><div class="nm">QA Standard League</div></div></div>
+          <div class="card">
+            <div class="k">Trade with</div><div class="who">@qa_l1_member_05</div>
+            <div class="cols">
+              <div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Tee Higgins</div><div class="am">CIN · 27 yo</div></div></div>
+              <div class="rule"></div>
+              <div><div class="colh">You get</div><div class="asset te"><span class="pc">TE</span><div class="an">Tyler Warren</div><div class="am">IND · 23 yo</div></div></div>
+            </div>
+            <div class="hint"><span class="sq"></span><span>If they pass: add your 2026 2nd.</span></div>
+            <div class="meter"><i style="left:49%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div>
+          </div>
+          <p class="sub muted" style="margin-top:10px">One quiet line, no control. It only names the asset.</p>
+        </div>
+      </div>
+      <div class="frame"><p class="cap recon">Reconstruction · awaiting, after a pass</p>
+        <div class="phone">
+          <div class="p-h1">Matches</div>
+          <div class="tabs"><div>Mutual matches</div><div class="on">Awaiting them</div></div>
+          <div class="status"><span>@qa_l1_member_05 declined</span><span>5h ago</span></div>
+          <div class="card">
+            <div class="cols">
+              <div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Tee Higgins</div></div><div class="asset pick added"><span class="pc">PICK</span><div class="an">2026 2nd (yours)</div><div class="am">Added</div></div></div>
+              <div class="rule"></div>
+              <div><div class="colh">You get</div><div class="asset te"><span class="pc">TE</span><div class="an">Tyler Warren</div></div></div>
+            </div>
+            <div class="delta"><div class="k">The move you saw</div>You add your 2026 2nd. They gain about <span class="num">12%</span> of the trade's value.</div>
+            <span class="p-btn primary">Send a revised offer</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="two">
+      <div class="note"><p class="label">How it limits haggling</p><p>It shows one named asset with no control, so the line can't be acted on early. The action appears only once the offer is answered, and as in A there is one revision and no editing.</p></div>
+      <div class="note cost"><p class="label">What it costs</p><p>It says on the card that the offer isn't final, which is the value-prop risk you named. A user who reads "if they pass, add a 2nd" may start to see every suggestion as an opening bid, or send the bigger version first. The engine has to evaluate a revision for every card before the deck is shown, at about 30 ms per card on the live revision. Most cards would show no line, so the presence or absence of the line becomes a signal of its own.</p></div>
+    </div>
+    <div class="cmt"><label for="c-sB">Comments — B, visible but passive</label><textarea id="c-sB" data-k="sB" placeholder="Is the line worth the signal it sends?"></textarea><div class="saved" data-for="sB"></div></div>
+  </section>
+
+  <!-- ===================== C ===================== -->
+  <section class="feature" id="sC">
+    <div class="fhead"><span class="fnum">C</span><h2>Full — the next move as a second tap before sending</h2></div>
+    <div class="row">
+      <div class="frame"><p class="cap recon">Reconstruction · sending from the card</p>
+        <div class="phone">
+          <div class="card">
+            <div class="k">Trade with</div><div class="who">@qa_l1_member_05</div>
+            <div class="cols">
+              <div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Tee Higgins</div></div></div>
+              <div class="rule"></div>
+              <div><div class="colh">You get</div><div class="asset te"><span class="pc">TE</span><div class="an">Tyler Warren</div></div></div>
+            </div>
+          </div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div class="k">Plan your next move</div>
+            <p style="margin:6px 0">If they pass, follow up with:</p>
+            <div class="asset pick added"><span class="pc">PICK</span><div class="an"><svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg> 2026 2nd (yours)</div><div class="am">They gain about 12% of the trade's value</div></div>
+            <span class="p-btn primary">Send, and keep this ready</span>
+            <span class="p-btn secondary">Send without a next move</span>
+          </div>
+        </div>
+      </div>
+      <div class="frame"><p class="cap recon">Reconstruction · awaiting, after a pass</p>
+        <div class="phone">
+          <div class="p-h1">Matches</div>
+          <div class="tabs"><div>Mutual matches</div><div class="on">Awaiting them</div></div>
+          <div class="status"><span>@qa_l1_member_05 declined</span><span>5h ago</span></div>
+          <div class="card">
+            <div class="hint" style="margin-top:0"><span class="sq"></span><span>Your next move is ready.</span></div>
+            <div class="cols">
+              <div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Tee Higgins</div></div><div class="asset pick added"><span class="pc">PICK</span><div class="an">2026 2nd (yours)</div></div></div>
+              <div class="rule"></div>
+              <div><div class="colh">You get</div><div class="asset te"><span class="pc">TE</span><div class="an">Tyler Warren</div></div></div>
+            </div>
+            <span class="p-btn primary">Send the next move</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="two">
+      <div class="note"><p class="label">How it limits haggling</p><p>Barely. The revision is still one pre-built step with no editing, and it is still bounded by the engine. Everything else is open: the concession is planned before the first offer is seen.</p></div>
+      <div class="note cost"><p class="label">What it costs</p><p>Every send becomes two decisions, which slows the flow you want quick. It frames each suggestion as round one of a negotiation, which is the haggling risk at its strongest. It is also the easiest way to send the bigger offer first. It adds a sheet to a send path that is already platform-specific across Sleeper, ESPN and MFL.</p></div>
+    </div>
+    <div class="cmt"><label for="c-sC">Comments — C, full</label><textarea id="c-sC" data-k="sC" placeholder="Anything here worth keeping even if C is out?"></textarea><div class="saved" data-for="sC"></div></div>
+  </section>
+
+  <section class="feature" id="sR">
+    <div class="fhead"><span class="fnum">02</span><h2>The rule behind every frame</h2><span class="chip">backend built, dark</span></div>
+    <ul class="plain">
+      <li><strong>Core kept.</strong> The most valuable asset on each side never leaves the offer.</li>
+      <li><strong>One change.</strong> Either add one asset from your roster (never one of your untouchables), or remove one of the extra pieces you asked for.</li>
+      <li><strong>A valid trade or nothing.</strong> The revision passes the same engine checks as any card for the engine in force: the market floor and overpay ceiling, both managers' benefit (yours included), untouchables, earlier passes and the trade-size rules.</li>
+      <li><strong>Bounded.</strong> The other manager gains 10–20% of the trade's value at the engine's own pricing. The smallest step that qualifies is chosen.</li>
+      <li><strong>At most one.</strong> No revision is offered when none qualifies.</li>
+    </ul>
+    <div class="cmt"><label for="c-sR">Comments — the rule</label><textarea id="c-sR" data-k="sR" placeholder="Anything the revision should never do?"></textarea><div class="saved" data-for="sR"></div></div>
+  </section>
+
+  <p class="foot">Comments live only in this browser's localStorage until you export. Export produces a Markdown file (and copies it to the clipboard). Proposed frames are reconstructions, not captures; the asset added in them (a 2026 2nd) is illustrative, not a computed revision for these two players.</p>
+</main>
+
+<script>
+(function () {
+  var KEY = 'ftf-next-move-review-v1:';
+  var areas = document.querySelectorAll('textarea[data-k]');
+  areas.forEach(function (ta) {
+    var k = ta.getAttribute('data-k');
+    var savedEl = document.querySelector('.saved[data-for="' + k + '"]');
+    try { var v = localStorage.getItem(KEY + k); if (v) { ta.value = v; savedEl.textContent = 'saved'; } } catch (e) {}
+    var t;
+    ta.addEventListener('input', function () {
+      clearTimeout(t);
+      savedEl.textContent = '…';
+      t = setTimeout(function () {
+        try { localStorage.setItem(KEY + k, ta.value); savedEl.textContent = ta.value ? 'saved' : ''; } catch (e) { savedEl.textContent = 'could not save'; }
+      }, 400);
+    });
+  });
+
+  document.getElementById('exportBtn').addEventListener('click', function () {
+    var lines = ['# The next move (WS5 / R2) — review comments', '', '_Exported ' + new Date().toISOString() + '_', ''];
+    document.querySelectorAll('section.feature').forEach(function (sec) {
+      var ta = sec.querySelector('textarea[data-k]');
+      if (!ta) return;
+      var title = sec.querySelector('h2').textContent;
+      var num = sec.querySelector('.fnum').textContent;
+      var val = (ta.value || '').trim();
+      lines.push('## ' + num + ' — ' + title);
+      lines.push(val ? val : '_(no comment)_');
+      lines.push('');
+    });
+    var md = lines.join('\n');
+    try { navigator.clipboard && navigator.clipboard.writeText(md); } catch (e) {}
+    var blob = new Blob([md], { type: 'text/markdown' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'next-move-review-comments.md';
+    document.body.appendChild(a); a.click(); a.remove();
+    var btn = document.getElementById('exportBtn');
+    var old = btn.textContent; btn.textContent = 'Exported';
+    setTimeout(function () { btn.textContent = old; }, 2000);
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', function () {
+    if (!confirm('Clear all saved comments on this page?')) return;
+    areas.forEach(function (ta) {
+      try { localStorage.removeItem(KEY + ta.getAttribute('data-k')); } catch (e) {}
+      ta.value = '';
+      var savedEl = document.querySelector('.saved[data-for="' + ta.getAttribute('data-k') + '"]');
+      if (savedEl) savedEl.textContent = '';
+    });
+  });
+})();
+</script>
+</body>
+</html>
