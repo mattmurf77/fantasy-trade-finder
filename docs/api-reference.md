@@ -916,11 +916,31 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                // re-rank never moves it
   "reasons":         [ "...", ... ],           // optional, flag trade_math.human_explanations
   "narrative":       "...",                    // optional templated rationale
-  "fit_lines":       [ { "side": "them"|"you", // OPTIONAL — flag trade.fit_first_copy; owner_v2_bilateral
-                         "code": "need.them",  // cards only, present only when a line fires. At most one
-                         "text": "..." } ],    // per side, "them" first. Server-composed
-                                               // (trade_narrative.fit_lines, FIT_TMPL_VERSION); clients
-                                               // render `text` verbatim and never switch on `code`
+  "fit_block":       {                         // OPTIONAL — flag trade.fit_first_copy (WS4b, version 3);
+                                               // owner_v2_bilateral cards built by a trade job with the
+                                               // flag on, present only when a team has a supported lead
+                                               // or a rank move. Replaces WS4's `fit_lines` (fit-1),
+                                               // which is no longer emitted or read.
+                       "v": "fit-2",           // trade_narrative.FIT_TMPL_VERSION; clients accept only
+                                               // versions they know and drop the block otherwise
+                       "teams": [              // always both teams, "them" first
+                         { "side": "them"|"you",
+                           "tag":  { "code": "rebuilder", "source": "declared"|"roster",
+                                     "text": "Looks rebuilding" },   // OPTIONAL — absent when there is
+                                               // no directional read; "them" is always "roster"
+                           "lead": { "code": "plan_rebuild.them",
+                                     "text": "Rebuild-leaning: adds Eli Brandt, 23" },
+                                               // codes: plan_rebuild.*, plan_win_now.*, need.*,
+                                               // moves.* ("Gets …, gives …": no supported gain)
+                           "ranks": [ { "pos": "QB"|"RB"|"WR"|"TE",
+                                        "before": 9, "after": 7 } ] } ] },
+                                               // league rank by consensus position value
+                                               // (1 + teams strictly above), only positions
+                                               // whose value moves ≥ 5% of the league median
+                                               // and whose rank changes; [] for picks, fewer
+                                               // than 3 valued teams, or none. Clients render
+                                               // `text` and the numbers verbatim, never `code`
+                                               // (docs/cross-client-invariants.md § Fit block)
   "match_context":   { ... },                  // optional roster-fit context
   "lane":            "window" | "value",       // OPTIONAL — flag trade.lanes; absent when the
                                                // user has no declared/seeded window

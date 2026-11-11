@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { TradeCard, TradeJobSnapshot, TradeMatch, AwaitingTrade, Player } from '../shared/types';
+import type { TradeCard, TradeJobSnapshot, TradeMatch, AwaitingTrade, Player, FitBlockTeam } from '../shared/types';
 import type { CalcGap } from './calc';
 
 // ── Paged deck responses (200 ms path: E2, P1, P2) ───────────────────
@@ -187,15 +187,31 @@ export function normalizeTradeCard(raw: any): PagedTradeCard {
               : undefined,
         }
       : undefined;
-  // WS4 fit-first copy (flag trade.fit_first_copy): server-composed lines,
-  // validated so a malformed payload degrades to "no line".
-  const fitLines: { side: 'them' | 'you'; code: string; text: string }[] =
-    Array.isArray(raw?.fit_lines)
-      ? raw.fit_lines.filter((l: any) =>
-          (l?.side === 'them' || l?.side === 'you')
-          && typeof l?.code === 'string'
-          && typeof l?.text === 'string' && l.text.length > 0)
-        .map((l: any) => ({ side: l.side, code: l.code, text: l.text }))
+  // WS4b fit block (flag trade.fit_first_copy, template fit-2): validated so
+  // a malformed or unknown-version payload degrades to "no block". A stored
+  // page's older `fit_lines` (fit-1) is not read: it is simply dropped.
+  const fitTeams: FitBlockTeam[] =
+    raw?.fit_block?.v === 'fit-2' && Array.isArray(raw.fit_block.teams)
+      ? raw.fit_block.teams
+          .filter((t: any) =>
+            (t?.side === 'them' || t?.side === 'you')
+            && typeof t?.lead?.code === 'string'
+            && typeof t?.lead?.text === 'string' && t.lead.text.length > 0)
+          .map((t: any): FitBlockTeam => ({
+            side: t.side,
+            lead: { code: t.lead.code, text: t.lead.text },
+            ...(typeof t.tag?.text === 'string' && t.tag.text.length > 0
+                && (t.tag.source === 'declared' || t.tag.source === 'roster')
+              ? { tag: { code: String(t.tag.code), source: t.tag.source, text: t.tag.text } }
+              : {}),
+            ranks: Array.isArray(t.ranks)
+              ? t.ranks.filter((r: any) =>
+                  ['QB', 'RB', 'WR', 'TE'].includes(r?.pos)
+                  && Number.isInteger(r?.before) && r.before >= 1
+                  && Number.isInteger(r?.after) && r.after >= 1)
+                .map((r: any) => ({ pos: r.pos, before: r.before, after: r.after }))
+              : [],
+          }))
       : [];
   // Phase-2 aggression variant — opaque string, passed through as-is.
   const aggressionVariant =
@@ -292,8 +308,8 @@ export function normalizeTradeCard(raw: any): PagedTradeCard {
     wildcard:           raw?.wildcard === true ? true : undefined,
     sweetener,
     partner_fit:        partnerFit,
-    // WS4 fit-first copy — only well-formed lines pass; none ⇒ key absent.
-    ...(fitLines.length ? { fit_lines: fitLines } : {}),
+    // WS4b fit block — only well-formed teams pass; none ⇒ key absent.
+    ...(fitTeams.length ? { fit_block: { v: 'fit-2' as const, teams: fitTeams } } : {}),
     match_context:      matchContext,
     lane,
     fitPremium,

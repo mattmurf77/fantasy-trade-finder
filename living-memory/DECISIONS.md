@@ -1,5 +1,21 @@
 # Decisions — Fantasy Trade Finder
 
+## D-222 — Fit block v3: consensus position ranks frozen per job, the other team read from its roster only
+
+**Date:** 2026-11-10 · **Who:** WS4b builder, under the operator's "I like version 3 with a team outlook tag for both teams as well" (`mockups/fit-copy/`, offer-learnings plan §3 WS4b) and the coordinator's speed addendum.
+**Context:** Version 3 shows, per team, a lead phrase and the team's league rank at each position the trade moves, before and after, plus an outlook tag for both teams. Ranks need league-wide values, which `trade_card_to_dict` does not have; the other team's outlook may be one they declared, which no league-mate can see; and the operator asked that the block not slow the cards.
+**Decision:**
+- Rank = the number League rankings already shows: 1 + teams with strictly more summed consensus value at the position (`compute_power_rankings`, League rankings' seed and metadata via the now-shared `_power_value_inputs`), ties sharing a rank. A move shows only when the value changes by ≥ 5% of the league median and the rank changes; no ranks for picks or with fewer than 3 valued teams. Never the personal basis.
+- One league-wide step per trade job (`server._fit_league_context`, before generation, flag-gated), stamped by reference on every owner card; each card's block is composed at serialization, per published batch, by a constant-size two-team update (binary search over the precomputed sorted values). The stored card dict is the frozen result; no serve path recomposes.
+- The other team's tag and lead use only the engine's roster read (`infer_team_outlook` as `trade_gen_owner._team` resolves an undeclared team) and the proof's usable-depth proxy, never the proof's outlook (their declared one when they have one), benefits, intent or preferences. Tags: declared words for the viewer (All-in / Contending / Rebuilding / Tanking), "Looks contending / rebuilding" for a roster read; none for not_sure.
+- `fit-2` replaces `fit-1` entirely: WS4's surplus template is dropped (v3 falls back plan → need → "Gets X, gives Y"); `fit_lines` is no longer emitted or read.
+**Consequences:**
+- Home and Team Review break exact ties by list order, so on an exact tie they can show one place lower than the card and League rankings (open in the mockup as question 5).
+- A dynasty-value rank can drop on a win-now trade (youth for production); the lead phrase and the label row carry the reason.
+- The roster read can disagree with Team Review's partners beat, which adds pick share, firsts and odds signals; the tag says "Looks", not a stated plan.
+- Prepared inventories now carry the block (`fit_block` allowlisted in the prepared codec); with WS4's `fit_lines` they failed to capture.
+- Measured on 20 recorded production requests: league step ≤ 1.9 ms, ≤ 3.1 ms before the first batch, ≤ 3.4% of the whole deck build.
+
 ## D-221 — The pass-reason cadence asks on the card, one tap, behind its own flag; its two new codes exist only while that flag is on
 
 **Date:** 2026-11-10 · **Who:** operator (R9: "present this once every few passes. Or upon a certain number of consecutive passes"); WS3 builder (the shape below).

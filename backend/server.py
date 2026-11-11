@@ -4578,7 +4578,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 18
+DECK_PIPELINE_VERSION = 19
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4636,6 +4636,8 @@ DECK_PIPELINE_FUNCTIONS = (
     # the stored card's content
     "_stamp_own_standing_offers", "trade_card_to_dict", "_value_verdict_payload",
     "_owner_public_selection", "player_to_dict",
+    # WS4b fit block: the league-wide ranks and roster reads stored with each card
+    "_fit_league_context", "_power_value_inputs", "_position_medians",
 )
 DECK_PIPELINE_CONSTANTS = (
     "_DECK_MIN_CARDS", "_EXPLORATION_BASE_PER_OPP", "_EXPLORATION_SLOT_MIN",
@@ -4695,6 +4697,8 @@ DECK_PIPELINE_IGNORED = {
     "_owned_pick_label": "label copy only",
     "_pick_labels_by_id": "label copy only",
     "_seasons_phrase": "label copy only",
+    "_aggregate_pick_label": "label copy only (the medians' value_label; the fit block reads only value)",
+    "_get_universal_pool": "the universal pool read and cache (a data fetch)",
 }
 # DECK_PIPELINE_VERSION -> its digest. Append-only: a bump adds a row and no
 # row is ever re-pinned in place (a re-pinned version would leave the pages
@@ -4719,6 +4723,7 @@ DECK_PIPELINE_PINS = {
     16: "e155ed45d1a02a13",  # ADR-028: fast deck and shadow hooks in the owner generator call (flags trade.fast_deck*, default off); flags off: same call, terms and order unchanged.
     17: "a344340932da4f13",  # trade.fit_first_copy (default off): trade_card_to_dict adds fit_lines to bilateral cards whose proof supports a specific reason; flag off: no key, payload byte-identical.
     18: "560661f3c6d76b8d",  # Bilateral revision 4 (selector owner_bilateral_revision_4_enabled, default 0): presentment takes its version; the dark key is dropped from the request hash unless exactly 1; selector off: terms and order unchanged.
+    19: "41b3e46c2f4c2e68",  # Fit block v3 (trade.fit_first_copy, default off): one league-wide rank context per job, stamped on owner cards; trade_card_to_dict adds fit_block; flag off: no context, no key, payload byte-identical.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -13313,6 +13318,7 @@ def _run_trade_job(
         fast_deck_serve = _fast_deck_scope and is_enabled("trade.fast_deck")
         fast_deck_shadow = (_fast_deck_scope and not fast_deck_serve
                             and is_enabled("trade.fast_deck_shadow"))
+        fit_context = _fit_league_context(owner_context, service)   # WS4b: once per job
         def _gen_owner(**_overrides):
             if owner_context is None:
                 raise ValueError("owner_context_unavailable")
@@ -13353,6 +13359,8 @@ def _run_trade_job(
             for card in cards:
                 card.owner_request_evidence = owner_request_evidence
                 card.owner_generation_diagnostics = diagnostics
+                if fit_context is not None:
+                    card.fit_context = fit_context
                 trade_service._trade_cards[card.trade_id] = card
             return cards, report
         if bakeoff_on:
@@ -20995,6 +21003,62 @@ def _invalidate_trade_block_cache(league_id: str) -> None:
         _trade_block_cache.pop(league_id, None)
 
 
+def _fit_league_context(owner_context, service):
+    """WS4b (flag trade.fit_first_copy): the league-wide inputs of the card's
+    fit block, computed ONCE per trade job and shared by every card it builds
+    (trade_card_to_dict reads them from `card.fit_context`). None when the
+    flag is off or there is no owner context, and on any failure: the cards
+    then simply carry no block.
+
+    Position values: compute_power_rankings on the consensus basis over the
+    job's own rosters (the ones its cards were built from; picks are not
+    roster players there, as in league_members), with League rankings' seed
+    and metadata (_power_value_inputs). Roster reads: the engine's own read of
+    each window, exactly as trade_gen_owner._team resolves an undeclared team
+    (a stored inferred outlook, else infer_team_outlook over the roster under
+    the job's config). A DECLARED outlook is never read here.
+    """
+    if owner_context is None or not is_enabled("trade.fit_first_copy"):
+        return None
+    try:
+        from .power_rankings import compute_power_rankings
+        from .trade_narrative import FitLeagueContext
+        ts = _trade_service_mod
+        viewer = owner_context["user_id"]
+        players = owner_context["players"]
+        league = owner_context["league"]
+        rosters = {viewer: list(owner_context["user_roster"])}
+        for member in league.members:
+            if member.user_id != viewer:
+                rosters[member.user_id] = list(member.roster)
+        seed, meta = _power_value_inputs(owner_context["scoring_format"], service,
+                                         players.values())
+        player_ids = {uid: [pid for pid in roster
+                            if not ts.is_pick_asset(players.get(pid) or meta.get(pid))]
+                      for uid, roster in rosters.items()}
+        teams = compute_power_rankings(
+            [{"user_id": uid, "player_ids": ids} for uid, ids in player_ids.items()],
+            seed, meta)
+        prefs = owner_context.get("manager_preferences") or {}
+        inferred = owner_context.get("inferred_outlooks") or {}
+        reads = {}
+        with ts._cfg_override(owner_context["config"]):
+            for uid, roster in rosters.items():
+                read = inferred.get(uid)
+                if read is None:
+                    read = (prefs.get(uid) or {}).get("inferred_outlook")
+                if read is None:
+                    read = ts.infer_team_outlook(list(roster), players,
+                                                 num_teams=len(rosters))[0]
+                reads[uid] = read
+        return FitLeagueContext(viewer_id=viewer, teams=teams,
+                                medians=_position_medians(teams),
+                                rosters=player_ids, reads=reads)
+    except Exception:
+        log.exception("fit block: league context unavailable (cards carry no block)")
+        return None
+
+
 def trade_card_to_dict(card, players: dict) -> dict:
     def p(pid):
         pl = players.get(pid)
@@ -21031,15 +21095,18 @@ def trade_card_to_dict(card, players: dict) -> dict:
         out["model_arm"] = identity["generator"]
         out["generator_version"] = identity["generator_version"]
         out.update(_owner_public_selection(evidence))
-        # WS4 fit-first copy (flag trade.fit_first_copy): one line per side
-        # read from the frozen bilateral proof. Serialized only when a line
-        # fires, so flag-off and no-line payloads stay byte-identical.
+        # WS4b fit block (flag trade.fit_first_copy): per team a tag, a lead
+        # and league rank moves, from the frozen bilateral proof and the job's
+        # league-wide context (_fit_league_context). Serialized only when a
+        # team has something to show, so flag-off, no-context and empty
+        # payloads stay byte-identical.
         if (is_enabled("trade.fit_first_copy")
+                and getattr(card, "fit_context", None) is not None
                 and callable(getattr(evidence, "matches", None)) and evidence.matches(card)):
-            from .trade_narrative import fit_lines as _fit_lines
-            fit = _fit_lines(identity, card, players)
+            from .trade_narrative import fit_block as _fit_block
+            fit = _fit_block(identity, card, players, card.fit_context)
             if fit:
-                out["fit_lines"] = fit
+                out["fit_block"] = fit
     # Pick-denominated value verdict (feedback #157 value-bar) — the same
     # {give_value, receive_value, favors, gap} shape POST /api/trade/evaluate
     # returns, built here from the card's own consensus package values via the
@@ -38114,21 +38181,29 @@ def _power_ranking_inputs(sess: dict, league_id: str):
     if not members:
         return None, {}, {}, fmt
 
+    seed, players_meta = _power_value_inputs(fmt, sess.get("service"), sess.get("players"))
+    return members, seed, players_meta, fmt
+
+
+def _power_value_inputs(fmt: str, service, session_players) -> tuple[dict, dict]:
+    """(seed, players_meta) for compute_power_rankings' consensus basis.
+    Shared by League rankings (_power_ranking_inputs) and the trade card's
+    fit block (_fit_league_context), so both rank from the same values."""
     pool_players, seed = _get_universal_pool(fmt)
     # Demo-style sessions rank a synthetic player pool whose ids never
     # appear in the universal pool; their consensus lives in the session
     # service's seed ratings. Merge those in as a FALLBACK (pool seed
     # wins) so demo consensus totals aren't all-zero. Real leagues are
     # unaffected — their session ranking pool is the universal pool.
-    svc_seed = getattr(sess.get("service"), "_seed", None) or {}
+    svc_seed = getattr(service, "_seed", None) or {}
     if svc_seed:
         seed = {**svc_seed, **seed}
     # Metadata: universal pool first, session players filling any gaps
     # (league roster players outside the pool still need name/position).
     players_meta = {p.id: p for p in pool_players}
-    for p in (sess.get("players") or []):
+    for p in (session_players or []):
         players_meta.setdefault(p.id, p)
-    return members, seed, players_meta, fmt
+    return seed, players_meta
 
 
 def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:

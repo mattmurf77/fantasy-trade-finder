@@ -34,14 +34,18 @@ fit fit_diag breaker breaker_shadow roster_evaluation negmem_stamp""".split())
 # evidence bundle. Copying full request boards per runtime card is both unsafe
 # for memory and unnecessary for decisions/pending-card consumers.
 CAPTURE_ONLY_FIELDS = frozenset(("owner_request_evidence", "owner_generation_diagnostics",
-                                 "owner_route_experiment"))
+                                 "owner_route_experiment",
+                                 # WS4b: the job's shared league context; its
+                                 # output is already in the public `fit_block`.
+                                 "fit_context"))
 PUBLIC_FIELDS = frozenset("""trade_id league_id target_user_id target_username give
 receive mismatch_score fairness_score composite_score basis decision expires_at
 preserve_server_order model_arm generator_version selection_coverage selection_notice
 give_value receive_value favors gap likes_you standing_offer_reason standing_offer_mine
 sweetener gap_sweetener retest wildcard relaxed relaxed_reason roster_evaluation
 partner_fit need_fit fit breaker lane fit_premium aggression_variant reasons rationale
-meso_variants tier narrative match_context real_opponent outlook impression_id""".split())
+meso_variants tier narrative match_context real_opponent outlook impression_id
+fit_block""".split())
 PLAYER_FIELDS = frozenset("""id name position team age years_experience depth_chart_position
 depth_chart_order injury_status injury_body_part birth_date height weight college
 search_rank adp pick_value on_block""".split())
