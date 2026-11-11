@@ -47,7 +47,7 @@ evidence in TEST_LEDGER.
 - A change to `_run_trade_job` or another function in `server.DECK_PIPELINE_FUNCTIONS` trips
   `test_deck_pipeline_digest`. Do not bump `DECK_PIPELINE_VERSION` yourself: leave that test
   red, say so in the report, and the coordinator pins one bump for the integrated tree.
-- Do not number a DECISIONS entry. Write it with the heading `D-NEXT` and the coordinator
+- Do not number a DECISIONS entry. Write it with the heading `D-216` and the coordinator
   assigns numbers at integration.
 - Private data (`data/sleeper-export/`, `data/prod-requests/` in the main checkout) is
   local only. Reports and docs carry aggregates, never names, ids or message text.

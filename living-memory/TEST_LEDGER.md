@@ -7,6 +7,13 @@
 
 ## 2026-11-07 — First-page polling failure recovery
 
+## 2026-11-10 — Outcomes of sent trades (offer-learnings WS2 Part A, branch `feat/trade-outcomes`)
+
+- New `backend/tests/test_trade_outcomes.py`: **20 passed**. Sleeper payloads come from `fixtures/sleeper/trade-outcomes/transactions_leg1.json` through the real capture parser; the GraphQL send is a mock; `no_real_network` on. Covers the send seam (flag on writes the row; flag off writes nothing and the response is identical), sent→accepted, sent→completed_different_terms with terms, completed_different_terms→accepted, five stays-`sent` cases, idempotent re-sync, repeated send, the session-init seam and the daily-tick step (flag, capture flag, watch window, per-league isolation).
+- Sabotages, each RED then GREEN on revert (fresh `PYTHONPYCACHEPREFIX` per run, G-060): `accepted-never-matches`, `no-roster-pair-check`, `no-after-send-check`, `terms-perspective-flipped`, `different-terms-terminal`, `resend-resets-status`, `send-hook-ignores-flag`, `send-hook-removed`, `session-init-hook-ignores-flag`, `session-init-hook-removed`, `daily-step-ignores-flag`, `daily-step-ignores-capture-flag`, `watch-window-ignored`, `tick-stops-on-error`.
+- Deletion/export coverage extends through `accounts._ADDITIONAL_PRIVATE_TABLES` (parametrized `test_account_deletion_coverage.py`); `test_daily_tick_route.py` STEP_KEYS gains `trade_outcomes`.
+- Full backend suite (Python 3.12): **13737 passed, 42 skipped, 0 failed** in 16m44s. `test_deck_pipeline_digest` green: no deck-pipeline function touched. Part B (Sleeper offer import) not built; see the scope block.
+
 - Seven-line screen correction: at the existing final paged status failure, an empty deck leaves its running spinner and shows the existing explicit failure/retry. Held cards, job authority, backend work, exact repeat request and network budgets remain unchanged.
 - Actual function/render/retry suite: **12 checks passed**, independently executed and reviewed. Named baseline sabotage uses build 178 source and correctly fails the new error-state assertion. TypeScript and test-ID lint pass.
 - Full 166-script mobile CI glob: 165 initially passed; the initial-poll fixture needed the new failure-setter mocks. After that fixture-only correction, **21 initial-poll checks passed**, with every script having a passing executed outcome on unchanged final runtime. No simulator or production operations. The device incident's root cause and 200 ms target remain open. [Scope](../docs/plans/mobile-first-page-failure/scope.md) · [Validation](../docs/plans/mobile-first-page-failure/validation.md).

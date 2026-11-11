@@ -376,7 +376,14 @@ else is a fresh live fetch with no shared cache. The outcome is recorded in
 | Owned draft-pick sync | `picks.owned_sync` | 1× `traded_picks` + 1× `drafts` (rosters + meta shared); MFL leagues re-derive with no Sleeper reads. Since #428 an empty `drafts` answer costs one leagues-row read (the cached #207 verdict, D-189) and no extra upstream call; since #470 QA P3-2, when that verdict isn't `drafted`, also one `SELECT DISTINCT season` on the prior platform grid | `_sync_sleeper_owned_picks`, `backend/server.py` |
 | Trade-transaction capture | `market.trade_capture` | **≤2 calls** — `transactions/{week}` for the live leg and the one before it. The full `1..18` sweep runs ONCE, as the first-time backfill for a league with no captured rows; in the offseason an already-swept league fetches **1** (leg 1, where Sleeper books every offseason trade) | `sweep_weeks` / `sync_league_trades`, `backend/sleeper_trades_service.py` |
 | Executed-trade matcher | `suggestion.telemetry` | 0 — takes the shared rosters map | `match_league_trades(roster_map=…)`, `backend/suggestion_telemetry.py` |
+| Sent-offer outcome reconcile | `trade.outcome_tracking` | 0 — reads `sleeper_trades` just captured (DB-only) | `reconcile_league`, `backend/trade_outcomes.py` |
 | Rookie-draft status refresh | (unflagged) | 0 in steady state; up to 3 (`/league/{id}`, `drafts`, `rosters`) when the per-status TTL has expired — 12 h once a league reads `drafted` | `_refresh_league_draft_status`, `backend/server.py` |
+
+**Outside session init (flag `trade.outcome_tracking`):** the daily-tick step `trade_outcomes`
+re-runs the same `sync_league_trades` capture (≤2 `transactions/{week}` reads per league in
+steady state, behind the shared 429 circuit) for at most 50 leagues a day that hold an offer
+sent through the app in the last 30 days, and only while `market.trade_capture` is on. Public
+reads only; no GraphQL. See `backend/trade_outcomes.py`.
 
 **Per-init upstream budget for a Sleeper league** (steady state, all flags ON,
 draft-status TTL warm): **≤ 8 calls in season, ≤ 7 in the offseason**. On the request

@@ -1229,6 +1229,11 @@ FLAG_KEYS: tuple[str, ...] = (
     # Whole-team meaningful benefit for both managers; implies final market
     # and roster gates. Remains dark until point coverage and intent qualify.
     "trade.mutual_benefit_v1",
+    # docs/plans/offer-learnings/scope-trade-outcomes.md (WS2 Part A) — ON ⇒ a
+    # confirmed Sleeper send writes a trade_offer_outcomes row and
+    # backend/trade_outcomes.py moves it to its observed outcome (session init
+    # + daily-tick step `trade_outcomes`). OFF (default) ⇒ none of it runs.
+    "trade.outcome_tracking",
     "trade.value_core",
     # ── Roster-first setup for Find a Trade — 2026-11-10, ships DARK ──────
     # docs/plans/roster-first-trade-setup/ (D-212, D-213). ON ⇒ the mobile
